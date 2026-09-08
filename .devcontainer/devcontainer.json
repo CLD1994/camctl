@@ -1,0 +1,43 @@
+{
+  "name": "camctl",
+  "image": "hexchip/devcontainer:claude_code-codex",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "esbenp.prettier-vscode",
+        "shd101wyy.markdown-preview-enhanced"
+      ],
+      "settings": {
+        "http.useLocalProxyConfiguration": false,
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "configureZshAsDefaultShell": false,
+      "username": "${localEnv:USER}",
+      "userUid": "1000",
+      "userGid": "1000"
+    }
+  },
+  "containerUser": "${localEnv:USER}",
+  "mounts": [
+    "source=/mnt/wslg,target=/mnt/wslg,type=bind",
+    "source=devcontainer-shared-data,target=/opt/devcontainer/shared-data,type=volume",
+    "source=camctl-command_history-${devcontainerId},target=/opt/devcontainer/commandhistory,type=volume",
+    "source=camctl-claude_config-${devcontainerId},target=/opt/devcontainer/.claude,type=volume",
+    "source=camctl-codex_config-${devcontainerId},target=/opt/devcontainer/.codex,type=volume",
+    "source=camctl-extensions,target=/opt/devcontainer/vscode-extensions,type=volume"
+  ],
+  "containerEnv": {
+    "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
+  },
+  "postCreateCommand": "bash .devcontainer/post_create.sh"
+}
