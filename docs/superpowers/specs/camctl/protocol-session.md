@@ -576,7 +576,7 @@ target_not_found
 
 以下是支撑本专题行为的逻辑记录建议；表划分和内部接口不构成已确认的实现约束。
 
-请求/计划记录：`request_id`、`plan_instance_id`、`plan_seq`、首次成功受理的计划正文、`created_at`、`name`、计划状态。请求与实例的历史关联永久保留。
+请求/计划记录：`request_id`、`plan_instance_id`、`plan_seq`、首次成功受理的计划正文、`created_at`、`name`、计划状态。数据保留遵守[全局规则](../2026-09-08-camctl-cli-design.md#持久化与配置基础)，计划退役后仍保留请求、计划、动作及其历史关联。
 
 受理序列计数器提供 `latest_plan_seq`。待驱动工作依据对应业务记录和报告处理事实判定，实际接纳资格由本专题的内核锁协议表达。
 
