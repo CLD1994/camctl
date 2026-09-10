@@ -539,9 +539,11 @@ wall_time_trusted = false
 
 以下是支撑本专题行为的逻辑记录建议；表划分和内部接口不构成已确认的实现约束。
 
-动作记录：动作实例、所属计划、类型、设备、group、`scheduled_at`、参数、固化 policy（执行策略）、状态、尝试次数、`first_window_observed_at`、`expiration_reason`、结果/错误，以及关联业务变化的 `change_seq`。
+动作投影包含：动作实例、所属计划、类型、设备、group、`scheduled_at`、参数、固化 policy（执行策略）、状态、尝试次数、`first_window_observed_at`、`expiration_reason`、结果/错误，以及关联业务变化的 `change_seq`。
 
 效果记录承载持续设备效果及其补偿流程；设备事实记录承载动作终态后仍需保留的未确认设备状态。`change_seq` 规则见[状态报告与累计确认](status-reports.md)。
+
+上述投影依据不可变历史同步更新，遵守[持久化与配置基础](../2026-09-08-camctl-cli-design.md#持久化与配置基础)。状态转换、尝试结果、窗口观察、可信时间下界的推进和固化策略均保存当时的事实。回放使用已记录的值，不用当前时钟重新判定历史动作，也不执行重试或补偿；实际恢复由调度器在重新取得执行资格并完成必要对账后驱动。
 
 ## 验收要求
 
