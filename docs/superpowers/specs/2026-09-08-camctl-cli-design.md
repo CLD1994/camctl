@@ -128,7 +128,7 @@ running
     = 新的执行意图
 ```
 
-同一 `request_id` 的重复提交不得创建新的 plan/action 实例，也不得重新执行已经执行过的设备动作。
+同一 `request_id` 永远以首次成功受理的内容为准，后续正文直接忽略。重复提交复用原计划及执行进度，ACK 独立处理；具体分区见[请求受理与会话](camctl/protocol-session.md#request_id)。
 
 ### 不同请求独立执行
 
