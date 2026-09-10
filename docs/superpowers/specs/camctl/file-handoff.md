@@ -71,6 +71,8 @@ ready → processing
 
 多个文件不要求整体原子发布。
 
+状态报告文件从 SQLite 中已提交的完整 JSON 内容生成，登记与文件生成的先后关系见[报告内容的权威副本](status-reports.md#报告内容的权威副本)。文件交接对账以该持久化内容为依据，同时遵守目录所有权和报告补投规则。
+
 ## 配置归属
 
 `paths.staging`、`paths.ready`、`paths.processing` 指定三个交接目录，部署时须满足本专题的原子移动要求。
