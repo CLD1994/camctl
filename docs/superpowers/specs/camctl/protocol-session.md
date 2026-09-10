@@ -372,6 +372,8 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
 
 ### 基本结构
 
+动作的 `scheduled_at` 必填性及省略后的执行含义见[调度与时间语义](scheduling-execution.md#scheduled_at)。
+
 示例：
 
 ```json
