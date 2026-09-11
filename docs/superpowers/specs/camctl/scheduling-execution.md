@@ -537,7 +537,7 @@ wall_time_trusted = false
 | 配置或策略 | 当前约束 |
 | --- | --- |
 | `session.plan_poll_interval_ms` | 首版目标值 500；控制新计划周期检查间隔 |
-| `devices.<id>.kind`、`driver` | 设备种类与驱动选择；示例种类为 `camera`、`mcu` |
+| `devices.<id>.kind`、`driver` | 设备种类与驱动选择；第一版接入相机，MCU 遵守[接口预留边界](mcu-actions.md#第一版范围) |
 | `devices.<id>.connection.prepare_lead_s` | 驱动默认值，本地设备配置可覆盖，计划不可覆盖 |
 | `clock.min_plausible_date` | 当前建议值 `2025-01-01` |
 | `clock.lower_bound_tolerance_s` | 当前建议值 5 秒 |
