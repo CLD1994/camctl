@@ -135,11 +135,7 @@ mono_target =
 
 ### 时效动作
 
-时效动作具有：
-
-```text
-max_delay_ms
-```
+时效动作通过 `policy.max_delay_ms` 指定允许延后启动的范围。第一版 `camera_record` 必须显式提供该字段，无缺省值；输入要求与错误处理见[录像参数](camera-recording.md#参数)。
 
 允许执行区间：
 
@@ -590,7 +586,7 @@ wall_time_trusted = false
 | `clock.lower_bound_tolerance_s` | 当前建议值 5 秒 |
 | `clock.recheck_delay_s` | 当前建议值 5 秒 |
 | `clock.recheck_count` | 当前建议值 1 |
-| action `policy.max_delay_ms` | 时效动作的启动宽限；取值及省略默认值在参数表中细化 |
+| action `policy.max_delay_ms` | `camera_record` 必填的非负整数，单位毫秒，无缺省值；定义启动宽限 |
 | 本地设备通信配置 | 提供各操作的尝试上限、`timeout_ms` 和重试间隔；计划不提供覆盖 |
 | `camera_record` 的启动与停止次数 | 上限默认各 3 次，包含第一次，允许分别配置并在受理时固化；分别计数，入口共享及恢复规则见[启动与停止的尝试上限](camera-recording.md#启动与停止的尝试上限) |
 

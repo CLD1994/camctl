@@ -435,7 +435,7 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
 
 ### 基本结构
 
-动作的 `scheduled_at` 必填性及省略后的执行含义见[调度与时间语义](scheduling-execution.md#scheduled_at)。
+动作的 `scheduled_at` 必填性及省略后的执行含义见[调度与时间语义](scheduling-execution.md#scheduled_at)。 `camera_record` 还必须提供 `policy.max_delay_ms`，具体要求见[录像参数](camera-recording.md#参数)。
 
 执行计划提供业务要求；通信尝试次数、超时和重试间隔来自主机本地设备配置。动作 `policy` 的字段边界及错误处理见[计划要求与本地通信配置](scheduling-execution.md#计划要求与本地通信配置)。
 
