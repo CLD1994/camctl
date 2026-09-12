@@ -4,6 +4,8 @@
 
 本专题定义状态快照、报告身份、累计 ACK 和报告补投。`last_report_id` 通过[请求受理与会话](protocol-session.md)的计划入口提交；报告文件的所有权与基本发布规则见[文件交接](file-handoff.md)。
 
+普通产物的交付记录包含实际文件名 `file_name` 和完整可读名称 `display_name`，并显式关联 delivery、output 及来源动作；字段语义与客户端匹配规则见[报告负责机器映射](outputs.md#报告负责机器映射)。
+
 ## 状态报告与 ACK
 
 ### report_id
