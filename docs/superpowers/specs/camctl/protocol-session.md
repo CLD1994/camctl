@@ -390,7 +390,7 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
 
 可执行动作由本版已实现能力确定；MCU 预留动作的受理规则见[计划中的 MCU 动作](mcu-actions.md#计划中的-mcu-动作)。
 
-已实现的拍摄动作还须按目标驱动校验能力、模式与模式参数。动作类型已实现但目标设备不支持该能力，或模式与参数不适用时，仅该动作失败；分区见[计划字段与参数校验](camera-recording.md#计划字段与参数校验)。
+已实现的拍摄动作还须按目标驱动校验能力、参数类型与参数值。动作类型已实现但目标设备不支持该能力，或参数类型或参数值不适用时，仅该动作失败；分区见[计划字段与参数校验](camera-recording.md#计划字段与参数校验)。
 
 所有已支持动作采用相同的自身参数校验规则，包括必填字段、字段类型、取值范围和组合，以及动作自身的设备、时间、策略与所属组字段。具体合法条件由相应动作契约定义；违反条件时该动作在受理事务中直接登记为 `failed`，保存失败阶段、具体字段及原因，执行尝试次数为零，不等待计划时间，也不补造执行开始事实。
 
@@ -437,11 +437,11 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
 
 ### 基本结构
 
-动作的 `scheduled_at` 必填性及省略后的执行含义见[调度与时间语义](scheduling-execution.md#scheduled_at)。当前 ADB 相机的 `camera_record` 使用 `mode: "timed"`，还必须提供 `policy.max_delay_ms`，具体要求见[录像参数](camera-recording.md#参数)。其他拍摄模式按目标驱动的参数契约校验。
+动作的 `scheduled_at` 必填性及省略后的执行含义见[调度与时间语义](scheduling-execution.md#scheduled_at)。当前 ADB 相机的 `camera_record` 使用 `params.type: "timed"`，还必须提供 `policy.max_delay_ms`，具体要求见[录像参数](camera-recording.md#参数)。其他拍摄参数类型按目标驱动的参数契约校验。
 
 执行计划提供业务要求；通信尝试次数、超时和重试间隔来自主机本地设备配置。动作 `policy` 的字段边界及错误处理见[计划要求与本地通信配置](scheduling-execution.md#计划要求与本地通信配置)。
 
-下面是一份使用当前 ADB 相机 `timed` 模式的正常采集计划：先录制 60 秒，再取回该动作的全部正式产物。它不携带报告 ACK；客户端已有可累计确认的报告时，才在输入中提供 `last_report_id`。若用户在客户端选择预设，客户端先展开为示例中的能力、模式及具体参数再提交。
+下面是一份使用当前 ADB 相机 `timed` 参数类型的正常采集计划：先录制 60 秒，再取回该动作的全部正式产物。它不携带报告 ACK；客户端已有可累计确认的报告时，才在输入中提供 `last_report_id`。若用户在客户端选择预设，客户端先展开为示例中的能力、参数类型及具体参数再提交。
 
 ```json
 {
@@ -453,9 +453,9 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
       "name": "主录像",
       "type": "camera_record",
       "device_id": "cam0",
-      "mode": "timed",
       "scheduled_at": "2026-09-10 16:00:00",
       "params": {
+        "type": "timed",
         "duration_s": 60
       },
       "policy": {
