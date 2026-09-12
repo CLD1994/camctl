@@ -575,6 +575,7 @@ wall_time_trusted = false
 | `scheduled_at`、拍摄 `params`（含 `type`）、动作来源及目标 | 执行计划，按对应动作及目标驱动的参数类型定义校验 |
 | 适用于时效动作的 `policy.max_delay_ms` | 执行计划中的业务要求，表示允许延后启动的窗口 |
 | 启动、停止及残留收场的尝试上限 | 本地设备配置，各自计数；默认值和预算归属由相机专题定义 |
+| `devices.<id>.copy.max_read_attempts` | 本地设备配置，按每份文件累计；默认值、恢复计数及失败语义见[按文件累计读取尝试](outputs.md#按文件累计读取尝试) |
 | `timeout_ms`、重试间隔及退避参数 | 本地设备配置，具体字段与默认值在配置格式中细化 |
 | 计划在动作 `policy` 中携带通信策略字段，包括 `max_attempts`、`timeout_ms`、`backoff_base_ms` 或 `backoff_max_ms` | 该动作自身参数错误，首次受理登记为 `failed`；不执行该动作，其他动作继续受理 |
 
