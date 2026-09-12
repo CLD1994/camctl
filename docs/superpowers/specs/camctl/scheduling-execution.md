@@ -570,6 +570,7 @@ wall_time_trusted = false
 | `clock.recheck_delay_s` | 当前建议值 5 秒 |
 | `clock.recheck_count` | 当前建议值 1 |
 | action `policy` | `max_delay_ms`、`max_attempts`、`backoff_base_ms`、`backoff_max_ms`、`timeout_ms`；适用范围、默认值和覆盖规则待细化 |
+| `camera_record` 的启动与停止次数 | 上限默认各 3 次，包含第一次，允许分别配置并在受理时固化；分别计数，入口共享及恢复规则见[启动与停止的尝试上限](camera-recording.md#启动与停止的尝试上限) |
 
 录像特有的 `clock.recovery_wait_cap_s` 由[相机录像](camera-recording.md)定义。
 
