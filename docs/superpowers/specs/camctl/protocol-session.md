@@ -437,20 +437,18 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
 
 动作的 `scheduled_at` 必填性及省略后的执行含义见[调度与时间语义](scheduling-execution.md#scheduled_at)。
 
-示例：
+下面是一份正常采集计划：先录制 60 秒，再取回该动作的全部正式产物。它不携带报告 ACK；客户端已有可累计确认的报告时，才在输入中提供 `last_report_id`。
 
 ```json
 {
   "request_id": "req-20260910-001",
   "created_at": "2026-09-10 15:00:00",
   "name": "夜间采集-01",
-  "last_report_id": 42,
   "actions": [
     {
       "name": "主录像",
       "type": "camera_record",
       "device_id": "cam0",
-      "group": "采样-1",
       "scheduled_at": "2026-09-10 16:00:00",
       "params": {
         "duration_s": 60,
@@ -459,10 +457,24 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
       "policy": {
         "max_delay_ms": 5000
       }
+    },
+    {
+      "name": "取回主录像",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-10 16:02:00",
+      "params": {
+        "source": {
+          "action_name": "主录像"
+        }
+      }
     }
   ]
 }
 ```
+
+主程序将输入文件路径交给 `camctl run <plan-path>`；已有运行会话时使用 `camctl submit <plan-path>`，并按 `needs_run` 处理接管。首次受理一次保存计划、动作及本计划内的来源关联；相同请求重送复用这些记录。
+
+这里的取回时间表示开始处理时间。若录像届时仍未结束，取回等待其正式产物；录像和取回均结束后计划进入 `completed`。计划受理及动作结果通过状态报告给客户端，主程序只消费会话结果。
 
 ### `request_id`
 
@@ -646,7 +658,9 @@ target_not_found
 
 ## 新计划受理序列
 
-首次成功受理新计划时分配单调递增的 `plan_seq`。同一 `request_id` 的幂等重试不推进该序列。状态库提供轻量读取的 `latest_plan_seq`。这两个名称为候选，见 U8。序列推进须与新计划成功受理保持一致。
+名称固定为：`plan_seq` 表示每份新计划的受理序列，`latest_plan_seq` 表示库中最新受理序列，`last_seen_plan_seq` 表示当前 `run` 已吸收的序列。后者是可重建的会话内存状态；计划受理顺序以持久化的 `plan_seq` 为准。
+
+首次成功受理新计划时分配单调递增的 `plan_seq`。同一 `request_id` 的幂等重试不推进该序列。状态库提供轻量读取的 `latest_plan_seq`。序列推进须与新计划成功受理保持一致。
 
 该序列定义受理顺序；[调度与设备执行](scheduling-execution.md)据此发现新计划。业务变化报告使用的 `change_seq` 由[状态报告与累计确认](status-reports.md)定义。
 
@@ -773,25 +787,9 @@ target_not_found
 - group 取消只影响成员，不自动取消引用该组的取回动作；
 - group 不影响调度。
 
-## 待确认与待细化
+## 实现时细化
 
-本节不构成已确认的行为选择。涉及其结果的实现须先补齐契约。
-
-### U8. 新计划受理序列的最终命名
-
-当前调度设计需要一个与 `change_seq` 独立的单调序列，只在首次成功受理新 plan 时推进，用于轻量判断是否存在尚未被当前 `run` 吸收的新计划。
-
-当前草案暂用：
-
-```text
-plan_seq
-latest_plan_seq
-last_seen_plan_seq
-```
-
-该命名是当前优先候选，但尚未单独完成最终命名确认。
-
-### 后续契约完善
+正文定义第一版的业务规则。本节列出接口、配置和联调中需要落实的细节；先按正常流程推进，涉及正文尚未确定的业务结果时，再明确对应选择。
 
 补齐其余计划公共字段的必填性、合法范围、时间字面量，以及动作类型入口与各专题的引用。统一定义各会话级错误的 `reason`、对应 `details` 字段和处理规则，以及主程序对显式错误和非预期进程终止的后续启动责任。
 
