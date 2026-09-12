@@ -437,6 +437,8 @@ SQLite 同时只允许一个写事务。协议使用 `BEGIN IMMEDIATE` 在检查
 
 动作的 `scheduled_at` 必填性及省略后的执行含义见[调度与时间语义](scheduling-execution.md#scheduled_at)。
 
+执行计划提供业务要求；通信尝试次数、超时和重试间隔来自主机本地设备配置。动作 `policy` 的字段边界及错误处理见[计划要求与本地通信配置](scheduling-execution.md#计划要求与本地通信配置)。
+
 下面是一份正常采集计划：先录制 60 秒，再取回该动作的全部正式产物。它不携带报告 ACK；客户端已有可累计确认的报告时，才在输入中提供 `last_report_id`。
 
 ```json
