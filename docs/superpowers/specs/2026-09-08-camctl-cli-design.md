@@ -345,6 +345,7 @@ flowchart LR
 | 事项 | 第一版约定 | 权威位置 |
 | --- | --- | --- |
 | 异常恢复等待 | 默认 60 秒，可配置；等待 `min(duration_s, recovery_wait_cap_s)` | [相机配置](camctl/camera-recording.md#配置归属) |
+| 异常多录余量 | 本地配置 `devices.<id>.recording.repair_margin_s`；严格超过目标时长与余量之和才触发修复 | [相机配置](camctl/camera-recording.md#配置归属) |
 | 调度提前唤醒 | `session.wakeup_margin_ms` 默认 50ms，可配置；0 关闭，不提前执行动作 | [唤醒决策](camctl/scheduling-execution.md#唤醒后的统一重新决策) |
 | 新计划发现 | `plan_seq`、`latest_plan_seq`、`last_seen_plan_seq` | [受理序列](camctl/protocol-session.md#新计划受理序列) |
 | 当前相机接入 | 使用已确认的 ADB/Linux 能力；厂商命令映射和正常响应作为真实驱动联调输入 | [驱动接入契约](camctl/camera-recording.md#第一版驱动接入契约) |
