@@ -102,6 +102,8 @@ compensation_failed
 
 ### `scheduled_at`
 
+字段采用[执行计划输入契约中的 UTC 时间字面量](plan-input.md#时间字面量)。格式校验与本节的到期、过期判断分别进行。
+
 `scheduled_at` 表示：
 
 > 主机希望开始处理该动作的绝对 UTC 时间。
