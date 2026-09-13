@@ -1,0 +1,238 @@
+{
+  "report_id": 1,
+  "from_wm": 0,
+  "to_wm": 100,
+  "plans": [
+    {
+      "plan_instance_id": "p-004",
+      "request_id": "req-004",
+      "plan_seq": 1,
+      "created_at": "2026-09-13 08:00:00",
+      "name": "组内录像无产物",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-301",
+          "name": "第一段录像",
+          "type": "camera_record",
+          "device_id": "cam0",
+          "scheduled_at": "2026-09-13 09:00:00",
+          "group": "早间采集",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "input_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "effective_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "status": "failed",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "recording": {
+              "start": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "failed",
+                    "error": {
+                      "code": "camera_start_rejected",
+                      "stage": "device_start",
+                      "details": {
+                        "recording_started": false
+                      }
+                    }
+                  },
+                  {
+                    "attempt_no": 2,
+                    "status": "failed",
+                    "error": {
+                      "code": "camera_start_rejected",
+                      "stage": "device_start",
+                      "details": {
+                        "recording_started": false
+                      }
+                    }
+                  },
+                  {
+                    "attempt_no": 3,
+                    "status": "failed",
+                    "error": {
+                      "code": "camera_start_rejected",
+                      "stage": "device_start",
+                      "details": {
+                        "recording_started": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "stop": {
+                "max_attempts": 3,
+                "attempts": []
+              }
+            },
+            "repair": {
+              "status": "not_needed"
+            }
+          },
+          "outputs": [],
+          "error": {
+            "code": "start_attempts_exhausted",
+            "stage": "device_start",
+            "details": {
+              "max_attempts": 3,
+              "attempts_used": 3
+            }
+          }
+        },
+        {
+          "action_instance_id": "a-302",
+          "name": "第二段录像",
+          "type": "camera_record",
+          "device_id": "cam0",
+          "scheduled_at": "2026-09-13 09:02:00",
+          "group": "早间采集",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "input_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "effective_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "recording": {
+              "start": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "stop": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "control_elapsed_s": 60,
+              "effect": {
+                "status": "compensated"
+              }
+            },
+            "repair": {
+              "status": "not_needed"
+            }
+          },
+          "outputs": [
+            {
+              "output_id": "o-302",
+              "source_action_instance_id": "a-302",
+              "kind": "original",
+              "original_name": "VID_0302.mp4",
+              "media_type": "video/mp4",
+              "size": 8388608,
+              "availability": "available",
+              "cleanup": {
+                "status": "not_requested"
+              },
+              "checksum": {
+                "status": "available",
+                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "media": {
+                "check_status": "not_performed",
+                "duration": {
+                  "status": "unknown"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "action_instance_id": "a-303",
+          "name": "取回整组",
+          "type": "obtain_action_outputs",
+          "scheduled_at": "2026-09-13 09:04:00",
+          "input_params": {
+            "source": {
+              "group": "早间采集"
+            }
+          },
+          "status": "failed",
+          "execution": {
+            "started": true
+          },
+          "error": {
+            "code": "obtain_items_failed",
+            "stage": "execution",
+            "details": {}
+          },
+          "deliveries": [
+            {
+              "delivery_id": "d-302",
+              "output_id": "o-302",
+              "source_action_instance_id": "a-302",
+              "file_name": "d-302.mp4",
+              "display_name": "VID_0302-组内录像无产物-第二段录像.mp4",
+              "size": 8388608,
+              "status": "published",
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+              "copy": {
+                "max_read_attempts": 3,
+                "read_idle_timeout_s": 10,
+                "max_recopies": 1,
+                "recopies_used": 0,
+                "round": 1,
+                "committed_bytes": 8388608,
+                "read_attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ],
+                "verification": {
+                  "status": "matched"
+                },
+                "work_file_cleanup": {
+                  "status": "not_needed"
+                }
+              }
+            }
+          ],
+          "result": {
+            "failures": [
+              {
+                "source_action_instance_id": "a-301",
+                "error": {
+                  "code": "no_outputs",
+                  "stage": "output_selection",
+                  "details": {}
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

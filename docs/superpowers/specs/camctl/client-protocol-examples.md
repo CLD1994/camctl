@@ -2,25 +2,26 @@
 
 [返回设计总览](../2026-09-08-camctl-cli-design.md) · [请求受理与会话](protocol-session.md) · [状态报告与累计确认](status-reports.md)
 
-本专题提供三组完整、可单独解析的执行计划和状态报告 JSON，以及客户端应得到的业务结果。报告按[按计划嵌套与客户端合并](status-reports.md#按计划嵌套与客户端合并)组织；业务规则由各责任专题定义，本文集中说明样例使用的机器字段及关联方式。
+本专题提供四组完整、可单独解析的执行计划和状态报告 JSON，以及客户端应得到的业务结果。报告按[按计划嵌套与客户端合并](status-reports.md#按计划嵌套与客户端合并)组织；业务规则由各责任专题定义，本文集中说明样例使用的机器字段及关联方式。
 
 ## 阅读与使用范围
 
-三组样例分别代表三份独立的单主机数据库历史，不能将不同组的报告混合接收到同一个客户端状态库中。各组从尚无客户端业务状态、样例业务水位为 0 开始；相同数字的 `report_id` 在不同组中没有关联。ID、业务水位、文件大小、录像计时及设备结果均为演示数据，序号间距不表示只发生了对应数量的设备调用，也不规定正式 ID 的生成算法或范围。
+四组样例分别代表三份独立的单主机数据库历史，不能将不同组的报告混合接收到同一个客户端状态库中。各组从尚无客户端业务状态、样例业务水位为 0 开始；相同数字的 `report_id` 在不同组中没有关联。ID、业务水位、文件大小、录像计时及设备结果均为演示数据，序号间距不表示只发生了对应数量的设备调用，也不规定正式 ID 的生成算法或范围。
 
-所有样例时间均按 UTC 解释，沿用计划示例的秒级时间字面量。相机采用当前 ADB 驱动的 `timed` 参数类型，正常完成 60 秒录像；控制过程计时与未检查的实际媒体时长分别表达。样例不包含真实视频，视频的大小及重复字符组成的 SHA-256 是演示值，不能作为真实设备或视频核验的证据。
+所有样例时间均按 UTC 解释，沿用计划示例的秒级时间字面量。相机采用当前 ADB 驱动的 `timed` 参数类型，正常完成的录像采用 60 秒目标时长；控制过程计时与未检查的实际媒体时长分别表达。样例不包含真实视频，视频的大小及重复字符组成的 SHA-256 是演示值，不能作为真实设备或视频核验的证据。
 
 状态报告文件则使用实际 JSON 字节计算 SHA-256，并将完整摘要放入文件名。这些文件采用 UTF-8、两空格缩进和末尾一个换行，可以直接用于报告摘要校验练习。这里固定的是所提供样例的字节，不替代全部报告的最终编码、字段范围和排序规范。
 
-三组均假定状态库、本地文件交接和会话收尾成功；动作失败不表示 camctl 会话失败。第三方主程序只中转文件，不解析下面的业务字段。样例只展示指定的报告机会；实际运行中的其他报告机会及 `ready` 替换继续遵守[报告生成点](status-reports.md#报告生成点)。
+四组均假定状态库、本地文件交接和会话收尾成功；动作失败不表示 camctl 会话失败。第三方主程序只中转文件，不解析下面的业务字段。样例只展示指定的报告机会；实际运行中的其他报告机会及 `ready` 替换继续遵守[报告生成点](status-reports.md#报告生成点)。
 
 ## 文件入口
 
 | 场景 | 客户端输入 | camctl 状态报告 | 后续客户端文件 |
 | --- | --- | --- | --- |
-| 录像与取回成功 | [执行计划](examples/client-protocol/01-success/plan.json) | [完成报告](examples/client-protocol/01-success/status-report-1-22a381aea05a70e568bce63fa82767a7de26d23903fc177d5fb375705c69c82f.json) | [携带累计 ACK 的原请求重送](examples/client-protocol/01-success/ack-plan.json) |
+| 录像与取回成功 | [执行计划](examples/client-protocol/01-success/plan.json) | [完成报告](examples/client-protocol/01-success/status-report-1-6823c03f7a0cd92ca55f0669f329eb1a27031e45ff97247296d3489ae9518441.json) | [携带累计 ACK 的原请求重送](examples/client-protocol/01-success/ack-plan.json) |
 | 单个动作参数错误 | [执行计划](examples/client-protocol/02-action-invalid/plan.json) | [受理后的报告](examples/client-protocol/02-action-invalid/status-report-1-51f95d6145546dead701a5ac80b9b26f5c7f1403db91925bdf4888db4327d059.json)、[完成后的增量报告](examples/client-protocol/02-action-invalid/status-report-2-1b8c3518727aeaaa7b90079c36a9fc99c5d03d701986e9b9021a8e125a79852a.json) | [两份报告之间的 ACK 输入](examples/client-protocol/02-action-invalid/ack-plan.json)、[合并后的计划记录](examples/client-protocol/02-action-invalid/client-merged-plan.json) |
-| 组取回部分失败 | [执行计划](examples/client-protocol/03-obtain-partial/plan.json) | [完成报告](examples/client-protocol/03-obtain-partial/status-report-1-73d2204ff658da7c2a281879a520cda8f482ea75089fe1ce340798073b6ccf08.json) | [补取失败原片的执行计划](examples/client-protocol/03-obtain-partial/retry-plan.json) |
+| 组取回部分失败 | [执行计划](examples/client-protocol/03-obtain-partial/plan.json) | [完成报告](examples/client-protocol/03-obtain-partial/status-report-1-289511e228f994b7ec11f8775702bf1fe4a74c391dddfcb62bbc9f89fedc5fc6.json) | [补取失败原片的执行计划](examples/client-protocol/03-obtain-partial/retry-plan.json) |
+| 组内一个录像没有产物 | [执行计划](examples/client-protocol/04-source-no-output/plan.json) | [完成报告](examples/client-protocol/04-source-no-output/status-report-1-3e7a27c2c1979ef475ab8d63aca12e14506fb21b689f20f3d9c48d320bc77001.json) | 按来源动作解释无产物失败，保留另一份成功交付 |
 
 输入与输出均提供全部文件内容，没有省略标记。`client-merged-plan.json` 是客户端合并结果，既不是 camctl 输入，也不是待 ACK 的报告文件。
 
@@ -135,6 +136,36 @@ p-003：completed
 
 新取回使用新的 delivery；不重置或继续已经终态的 `d-202`，也无须重复请求已经成功的 `o-201`。新请求在相机端实际执行读取后，仍按当时取得的结果报告，不因这份补取计划已经生成就宣告文件收到。
 
+## 样例四：组内一个录像没有产物
+
+输入请求 `req-004` 的两个录像动作属于“早间采集”组；取回动作仍通过 `params.source.group` 选择它们。计划公共结构和所有动作参数均合法，本组初始受理没有参数错误。
+
+本次历史包括以下事实：
+
+1. “第一段录像”`a-301` 开始执行，三次启动尝试均被设备明确拒绝，并可靠确认每次均未开始录像。本例假定三次尝试在允许的启动窗口内耗尽，因此动作为 `failed`，没有正式产物，也没有需要停止的持续录像效果。
+2. “第二段录像”`a-302` 在自身计划时间正常执行，登记原片 `o-302` 并成功结束。
+3. “取回整组”`a-303` 确认 `a-301` 已结束且没有正式产物，保存无产物失败项；不为它建立 output 或 delivery。
+4. 对 `o-302` 创建 `d-302`，首次读取、完整落盘和摘要比较成功。两个来源均已完成产物判定，全部准备结果确定后，发布 `d-302.mp4`。
+5. 取回因存在无产物失败项而以 `failed` 结束，计划为 `completed`。会话收尾报告覆盖 `(0, 100]`，本组此前没有已吸收的累计 ACK。
+
+```text
+p-004：completed
+├─ a-301 第一段录像：failed，未产生正式产物
+├─ a-302 第二段录像：succeeded
+│  └─ o-302 原片：available
+└─ a-303 取回整组：failed
+   ├─ result.failures：来源 a-301，没有可取回产物
+   └─ deliveries：d-302 已发布，引用 o-302
+```
+
+`a-303.result.failures` 中只有一项：包含 `source_action_instance_id = a-301` 和 `no_outputs` 错误，不包含 `output_id` 或 `delivery_id`。取回动作的错误说明它没有可取回的产物；来源录像动作自己的错误及启动尝试记录进一步说明为什么没有产物。客户端通过来源动作 ID 关联这两层原因，不把录像设备错误复制成取回动作的设备执行错误。
+
+客户端应显示“第一段录像启动失败，没有可取回文件；第二段录像成功，文件已交给主程序”。它仍可接收并核验 `d-302.mp4`，不需要等待一个不存在的失败交付文件。
+
+本组 `a-301.execution.started` 为 `true`，与样例二受理校验失败的 `false` 不同。它的停止尝试列表为空，控制计时和持续效果字段没有补造值；无产物也不以一个大小为 0 的虚假视频表示。
+
+重新提交取回请求不会生成从未录制的第一段视频。客户端若仍需要该段内容，应根据业务需要安排新的录像计划；这与样例三针对仍然存在的原片重新取回不同。
+
 ## 样例字段说明
 
 下面定义本组样例采用的字段表达。表中出现的状态值用于解释所提供场景，不构成所有动作、设备、清理和恢复状态的完整枚举。完整的输入类型范围、其他失败场景及接口格式继续在对应责任专题细化；样例不能代替这些未覆盖状态的契约。
@@ -154,6 +185,7 @@ p-003：completed
 | 拍摄动作 `effective_params` | 合法受理时确定的参数类型及生效参数；从冻结历史读取 |
 | 动作 `execution.started` | 是否曾持久化进入 `running`；受理校验失败为 `false`，运行后失败仍为 `true` |
 | 动作 `result` | 已取得的执行结果，作为动作自身字段整体更新 |
+| 取回 `result.failures` | 已确定的逐项最终失败，按[取回失败项的报告表达](outputs.md#取回失败项的报告表达)计算；为空表示尚无此类失败，不能单独据此判断动作已成功 |
 | 动作 `error` | 该动作当前快照中的错误；合法可选字段缺席时，不保留旧快照同字段的值 |
 | 动作 `outputs`、`deliveries` | 按各自 ID 合并的实体子集合；普通参数、结果和尝试数组则随所属对象的自身字段整体更新 |
 
@@ -191,16 +223,19 @@ p-003：completed
 
 ### 错误表达
 
-错误使用 `code`、`stage`、`details` 三部分。`code` 和结构化 `details` 供客户端判断，客户端根据其中的实际字段、对象和原因生成适合用户阅读的文案。输入字段路径始终针对首次提交的计划结构，取回文件失败则通过所属 delivery 关联对象。
+错误使用 `code`、`stage`、`details` 三部分。`code` 和结构化 `details` 供客户端判断，客户端根据其中的实际字段、对象和原因生成适合用户阅读的文案。输入字段路径始终针对首次提交的计划结构，取回逐项失败通过 `result.failures` 中已确认的来源动作、产物及交付身份关联对象。存在 delivery 时，其最终错误与对应失败项表达同一失败事实；各次读取尝试仍保存自己的原因，不能按尝试次数重复计算失败项。
 
 | 本组错误码 | 阶段 | 结构化信息 | 客户端可表达的事实 |
 | --- | --- | --- | --- |
 | `source_action_not_found` | `admission` | `field`、`value` | 本计划不存在被引用的动作，只有该取回动作校验失败 |
 | `read_idle_timeout` | `source_read` | `timeout_s`、`committed_bytes` | 该次文件读取连续无数据达到阈值，保留可靠进度 |
 | `read_attempts_exhausted` | `source_read` | `max_read_attempts`、`attempts_used` | 该文件的读取尝试耗尽，文件处理最终失败 |
-| `obtain_items_failed` | `execution` | `failed_delivery_ids` | 本次取回存在失败项；其他文件结果由对应 delivery 分别表达 |
+| `obtain_items_failed` | `execution` | 空对象；逐项原因见 `result.failures` | 本次取回因逐项最终失败而结束，已发布文件继续有效 |
+| `no_outputs` | `output_selection` | 空对象；来源见同一失败项的 `source_action_instance_id` | 来源动作已结束，可靠确认没有正式产物 |
+| `camera_start_rejected` | `device_start` | `recording_started: false` | 本次启动明确被拒绝，并可靠确认未开始录像 |
+| `start_attempts_exhausted` | `device_start` | `max_attempts`、`attempts_used` | 录像启动尝试耗尽，没有成功启动 |
 
-本组错误属于动作、交付或读取尝试，不放入“整份计划拒绝”记录。输入读取失败、整份计划拒绝及 ACK 校验错误仍须有计划集合之外的独立表达，由[报告内容](status-reports.md#报告内容)及其待细化机器结构规定。
+本组错误属于动作、取回失败项、交付或设备与读取尝试，不放入“整份计划拒绝”记录。输入读取失败、整份计划拒绝及 ACK 校验错误仍须有计划集合之外的独立表达，由[报告内容](status-reports.md#报告内容)及其待细化机器结构规定。
 
 ## 客户端接收与核对
 
@@ -217,8 +252,9 @@ p-003：completed
 | 样例一的 ACK 输入 | 除 ACK 外保留原请求及正文，指向本组已登记报告；不创建新计划或 delivery |
 | 样例二的增量合并 | 第二份报告仅含合法录像动作，合并后仍保留失败取回动作及其错误 |
 | 样例二的覆盖区间 | 第二份报告的下界只在第一份报告 ACK 已被吸收的前提下成立 |
-| 样例三的逐项结果 | 两个录像动作成功，交付一项发布、一项失败，取回失败但计划完成 |
+| 样例三的逐项结果 | 两个录像动作成功，交付一项发布、一项失败，取回失败但计划完成；失败项完整关联来源、产物和交付 |
+| 样例四的无产物失败 | 失败项仅关联来源动作，没有虚构产物或 delivery；另一来源的交付正常发布 |
 | 失败文件的计数与清理 | 三次读取失败、额外重拷为 0；半成品清理完成不删除原片或释放交付文件名 |
-| 所有样例的媒体信息 | 正常录像未执行媒体检查，不伪造实际视频时长或整段解码保证 |
+| 所有样例的媒体信息 | 已登记正常原片未执行媒体检查，不伪造实际视频时长或整段解码保证；没有原片时不构造媒体信息 |
 
 本文提供协议样例与预期结果，未调用生产实现或真实设备。生产代码、客户端实现和设备适配仍须分别验证对应契约。

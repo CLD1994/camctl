@@ -179,11 +179,7 @@
           "error": {
             "code": "obtain_items_failed",
             "stage": "execution",
-            "details": {
-              "failed_delivery_ids": [
-                "d-202"
-              ]
-            }
+            "details": {}
           },
           "deliveries": [
             {
@@ -285,7 +281,24 @@
                 }
               }
             }
-          ]
+          ],
+          "result": {
+            "failures": [
+              {
+                "source_action_instance_id": "a-202",
+                "output_id": "o-202",
+                "delivery_id": "d-202",
+                "error": {
+                  "code": "read_attempts_exhausted",
+                  "stage": "source_read",
+                  "details": {
+                    "max_read_attempts": 3,
+                    "attempts_used": 3
+                  }
+                }
+              }
+            ]
+          }
         }
       ]
     }
