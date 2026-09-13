@@ -1,0 +1,91 @@
+{
+  "report_id": 2,
+  "from_wm": 10,
+  "to_wm": 30,
+  "plans": [
+    {
+      "plan_instance_id": "p-002",
+      "request_id": "req-002",
+      "plan_seq": 1,
+      "created_at": "2026-09-13 08:00:00",
+      "name": "单动作参数错误",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-101",
+          "name": "主录像",
+          "type": "camera_record",
+          "device_id": "cam0",
+          "scheduled_at": "2026-09-13 09:00:00",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "input_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "effective_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "recording": {
+              "start": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "stop": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "control_elapsed_s": 60,
+              "effect": {
+                "status": "compensated"
+              }
+            },
+            "repair": {
+              "status": "not_needed"
+            }
+          },
+          "outputs": [
+            {
+              "output_id": "o-101",
+              "source_action_instance_id": "a-101",
+              "kind": "original",
+              "original_name": "VID_0101.mp4",
+              "media_type": "video/mp4",
+              "size": 8388608,
+              "availability": "available",
+              "cleanup": {
+                "status": "not_requested"
+              },
+              "checksum": {
+                "status": "not_obtained"
+              },
+              "media": {
+                "check_status": "not_performed",
+                "duration": {
+                  "status": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
