@@ -1,0 +1,75 @@
+{
+  "devices": [
+    {
+      "device_id": "demo_cam0",
+      "driver_id": "demo_camera",
+      "actions": [
+        {
+          "type": "camera_record",
+          "parameter_types": [
+            {
+              "type": "demo_adjustable",
+              "name": "演示：可调整画质的录像任务",
+              "description": "仅用于格式演示，不代表真实相机能力。固定录像 60 秒；可选择 4K / 30、1080p / 30 或 1080p / 60。",
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "demo_adjustable"
+                  },
+                  "resolution": {
+                    "title": "分辨率",
+                    "description": "4K 只允许搭配每秒 30 帧。",
+                    "type": "string",
+                    "enum": ["4K", "1080p"]
+                  },
+                  "frame_rate_fps": {
+                    "title": "帧率",
+                    "description": "单位为帧/秒。",
+                    "$ref": "#/$defs/frame_rate"
+                  }
+                },
+                "required": ["type", "resolution", "frame_rate_fps"],
+                "additionalProperties": false,
+                "if": {
+                  "properties": {
+                    "resolution": {"const": "4K"}
+                  },
+                  "required": ["resolution"]
+                },
+                "then": {
+                  "properties": {
+                    "frame_rate_fps": {"const": 30}
+                  }
+                },
+                "$defs": {
+                  "frame_rate": {
+                    "type": "integer",
+                    "enum": [30, 60]
+                  }
+                }
+              }
+            },
+            {
+              "type": "demo_fixed",
+              "name": "演示：固定画质的录像任务",
+              "description": "仅用于格式演示，不代表真实相机能力。固定录像 60 秒、1080p、每秒 30 帧，无可调参数。",
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "demo_fixed"
+                  }
+                },
+                "required": ["type"],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

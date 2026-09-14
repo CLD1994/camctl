@@ -65,7 +65,7 @@ camctl describe > device-capabilities.json
 
 该入口只读取本地定义，不连接设备、不启动调度、不打开或修改业务状态库，也不取得 `run` 的会话锁或接纳锁。导出不要求相机在线、墙钟可信或已有业务历史，不创建计划、动作、报告或待传文件。部署人员负责把成功导出的文件交给客户端，主程序的日常调用协议保持由 `run` / `submit` 承担。
 
-`describe` 的 stdout 是能力说明本身，采用 UTF-8 JSON 对象并以换行结束；各参数类型的 JSON Schema 及必要引用定义包含在这同一份文档中。日志及诊断写入 stderr。它不使用下文 `run` / `submit` 的会话结果封装，也不提供 `needs_run`。全部说明生成、校验及序列化完成后，才开始写入 stdout。
+`describe` 的 stdout 是能力说明本身，采用 UTF-8 JSON 对象并以换行结束；各参数类型的 JSON Schema 及必要引用定义包含在这同一份文档中。字段和对应关系遵守[能力说明格式](capabilities.md)，空设备配置输出 `{"devices": []}`。日志及诊断写入 stderr。它不使用下文 `run` / `submit` 的会话结果封装，也不提供 `needs_run`。全部说明生成、校验及序列化完成后，才开始写入 stdout。
 
 | 条件 | stdout 与退出结果 | 部署方处理 |
 | --- | --- | --- |

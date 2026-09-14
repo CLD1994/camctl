@@ -225,6 +225,7 @@ depends_on
 | [运行日志](camctl/logging.md) | 普通日志用途、配置、按大小轮换及文件保留上限 | 会话诊断、永久保留的业务历史 |
 | [调度与设备执行](camctl/scheduling-execution.md) | 动作状态、时间窗口、通信准备、设备兼容性、公共补偿、取消分派、时钟资格 | 受理序列、动作特有证据 |
 | [相机拍摄](camctl/camera-recording.md) | 拍摄能力、驱动参数类型；当前 ADB 相机录像的启动、时长、停止、恢复、修复与取消 | 公共执行、正式产物 |
+| [能力说明格式](camctl/capabilities.md) | 设备、拍摄动作、参数类型及 Schema 的导出字段与对应关系 | 驱动定义、能力说明交接与整份加载 |
 | [MCU 接口预留](camctl/mcu-actions.md) | 第一版扩展边界、未实现动作的受理结果、后续接入依据 | 公共执行、正式产物 |
 | [正式产物与取回清理](camctl/outputs.md) | output、普通 delivery、选择、取回、相机视频断点续传、文件名、清理、保留和重取 | 设备文件能力、文件交接 |
 | [文件交接](camctl/file-handoff.md) | 目录所有权、原子发布、领取、撤回竞争及恢复 | 主程序协作 |
@@ -387,7 +388,7 @@ flowchart LR
 
 首次部署、更换相机或调整设备绑定、修改驱动参数契约时，由部署流程将对应的能力及参数说明同步给客户端。说明从实际驱动定义和主机设备配置生成，客户端成功加载后用于生成计划；内容与责任见[部署时向客户端提供说明](camctl/camera-recording.md#部署时向客户端提供说明)。
 
-部署人员使用 [`camctl describe`](camctl/protocol-session.md#describe) 导出一份内含 JSON Schema 的完整 JSON 说明。该入口只读取本地配置及驱动定义，不要求相机在线或已有业务状态库；成功后由用户手工复制到客户端指定目录并覆盖文件。客户端[完整校验后启用](camctl/camera-recording.md#客户端加载能力说明)，整体更新用于生成新计划的能力目录。
+部署人员使用 [`camctl describe`](camctl/protocol-session.md#describe) 导出一份内含 JSON Schema 的完整 JSON 说明，字段按[设备、拍摄动作、参数类型](camctl/capabilities.md)组织。该入口只读取本地配置及驱动定义，不要求相机在线或已有业务状态库；成功后由用户手工复制到客户端指定目录并覆盖文件。客户端[完整校验后启用](camctl/camera-recording.md#客户端加载能力说明)，整体更新用于生成新计划的能力目录。
 
 拍摄参数的静态约束使用 [JSON Schema](camctl/camera-recording.md#拍摄参数的-json-schema) 表达，camctl 受理校验与客户端校验使用同源规则；设备状态及执行资格由运行时判断。
 
