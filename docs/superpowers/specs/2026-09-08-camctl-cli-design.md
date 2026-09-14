@@ -58,6 +58,8 @@ camctl CLI
 
 固定的计划、报告和接口结构通过共享的 TypeScript 类型及相关代码保持一致。设备专属拍摄参数按部署时导入的 JSON Schema 在运行时校验；具体字段由驱动定义，遵守[拍摄参数的 JSON Schema](camctl/camera-recording.md#拍摄参数的-json-schema)。
 
+拍摄参数以根据 Schema 生成的表单作为主要编辑入口，保留 JSON 编辑以处理复杂参数。两种编辑方式共用当前动作的完整参数和校验规则；正常流程、视图切换及导出前校验见[客户端计划编辑](camctl/client-editing.md)。
+
 应用部署包包含后端、前端网页资源及所需运行时依赖。客户端的草稿、原请求、预设、已保存的报告状态和确认进度由本地后端管理，持久化数据与容器生命周期分开；重新创建或更新应用容器时继续使用原有数据。Docker 数据卷可提供独立于容器生命周期的存储，机制见[持久化数据卷](https://docs.docker.com/engine/storage/volumes/)。
 
 客户端 Docker 应用运行在用户个人电脑上；下文的主程序和 camctl 运行在嵌入式 Linux 主机上，两者通过既定的人工交接和消息传输流程交换计划与报告。
@@ -226,6 +228,7 @@ depends_on
 | [调度与设备执行](camctl/scheduling-execution.md) | 动作状态、时间窗口、通信准备、设备兼容性、公共补偿、取消分派、时钟资格 | 受理序列、动作特有证据 |
 | [相机拍摄](camctl/camera-recording.md) | 拍摄能力、驱动参数类型；当前 ADB 相机录像的启动、时长、停止、恢复、修复与取消 | 公共执行、正式产物 |
 | [能力说明格式](camctl/capabilities.md) | 设备、拍摄动作、参数类型及 Schema 的导出字段与对应关系 | 驱动定义、能力说明交接与整份加载 |
+| [客户端计划编辑](camctl/client-editing.md) | 拍摄参数表单、JSON 编辑、参数保留及导出前校验 | 能力说明、计划输入、人工交接 |
 | [MCU 接口预留](camctl/mcu-actions.md) | 第一版扩展边界、未实现动作的受理结果、后续接入依据 | 公共执行、正式产物 |
 | [正式产物与取回清理](camctl/outputs.md) | output、普通 delivery、选择、取回、相机视频断点续传、文件名、清理、保留和重取 | 设备文件能力、文件交接 |
 | [文件交接](camctl/file-handoff.md) | 目录所有权、原子发布、领取、撤回竞争及恢复 | 主程序协作 |
