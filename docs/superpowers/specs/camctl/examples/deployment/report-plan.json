@@ -1,0 +1,11 @@
+{
+  "request_id": "req-deployment-check-001",
+  "created_at": "2026-09-14 09:00:00",
+  "name": "部署报告检查",
+  "actions": [
+    {
+      "name": "生成状态报告",
+      "type": "report_status"
+    }
+  ]
+}
