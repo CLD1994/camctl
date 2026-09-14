@@ -337,9 +337,9 @@ flowchart LR
 
 第一版主机部署使用 Python 3.11、`adb`、`ffmpeg` 和 `ffprobe`。其中 `adb` 是当前相机驱动的通信依赖；相机端不增加依赖，工具及文件处理边界见[通信方式与查询能力](camctl/camera-recording.md#通信方式与查询能力)。未来驱动按实际设备协议声明所需依赖，框架不要求所有相机提供 ADB 或 shell。MCU 仅预留接口，本版不要求 `pyserial` 等 MCU 通信依赖。视频修复采用无重新编码处理。设备独立供电，camctl 的控制范围是通信和业务操作；通信尝试耗尽后按对应动作结果处理。
 
-首次部署、更换相机或调整设备绑定、修改驱动参数契约时，由部署流程将对应的能力及参数说明同步给客户端。说明从实际驱动定义和主机设备配置生成，客户端导入后用于生成计划；内容与责任见[部署时向客户端提供说明](camctl/camera-recording.md#部署时向客户端提供说明)。
+首次部署、更换相机或调整设备绑定、修改驱动参数契约时，由部署流程将对应的能力及参数说明同步给客户端。说明从实际驱动定义和主机设备配置生成，客户端成功加载后用于生成计划；内容与责任见[部署时向客户端提供说明](camctl/camera-recording.md#部署时向客户端提供说明)。
 
-部署人员使用 [`camctl describe`](camctl/protocol-session.md#describe) 导出完整 JSON 说明。该入口只读取本地配置及驱动定义，不要求相机在线或已有业务状态库；命令成功后再将文件交给客户端。
+部署人员使用 [`camctl describe`](camctl/protocol-session.md#describe) 导出一份内含 JSON Schema 的完整 JSON 说明。该入口只读取本地配置及驱动定义，不要求相机在线或已有业务状态库；成功后由用户手工复制到客户端指定目录并覆盖文件。客户端[完整校验后启用](camctl/camera-recording.md#客户端加载能力说明)，整体更新用于生成新计划的能力目录。
 
 拍摄参数的静态约束使用 [JSON Schema](camctl/camera-recording.md#拍摄参数的-json-schema) 表达，camctl 受理校验与客户端校验使用同源规则；设备状态及执行资格由运行时判断。
 
