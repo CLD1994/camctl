@@ -17,6 +17,8 @@ camctl describe [--config <path>]
 camctl --version
 ```
 
+`run`、`submit`、`describe` 的本地配置均采用[默认值与文件覆盖规则](scheduling-execution.md#本地配置的加载与更新)。默认文件为 `$HOME/.camctl/config.toml`；`--config` 选择另一份覆盖文件，所选文件不存在时使用内置默认值。
+
 #### `run`
 
 完整执行会话。
@@ -54,7 +56,7 @@ camctl run
 camctl describe > device-capabilities.json
 ```
 
-`describe` 使用与其他入口相同的本地配置选择方式，可通过 `--config <path>` 指定配置。每次启动读取所需配置及对应驱动定义，根据配置中的设备绑定生成完整说明；内容及同步责任见[部署时向客户端提供说明](camera-recording.md#部署时向客户端提供说明)。
+`describe` 使用与其他入口相同的本地配置选择方式，可通过 `--config <path>` 指定覆盖文件。每次启动根据默认值及文件覆盖取得生效配置，并结合对应驱动定义生成完整说明。默认空设备目录是合法配置，可以导出空目录；内容及同步责任见[部署时向客户端提供说明](camera-recording.md#部署时向客户端提供说明)。
 
 该入口只读取本地定义，不连接设备、不启动调度、不打开或修改业务状态库，也不取得 `run` 的会话锁或接纳锁。导出不要求相机在线、墙钟可信或已有业务历史，不创建计划、动作、报告或待传文件。部署人员负责把成功导出的文件交给客户端，主程序的日常调用协议保持由 `run` / `submit` 承担。
 

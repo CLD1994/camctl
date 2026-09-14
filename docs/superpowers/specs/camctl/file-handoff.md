@@ -110,7 +110,15 @@ camctl 按以下顺序发布状态报告：
 
 ## 配置归属
 
-`paths.staging`、`paths.ready`、`paths.processing` 指定三个交接目录，部署时须满足本专题的原子移动要求。
+交接目录使用以下用户级默认值，允许本地配置逐项覆盖；`$HOME` 的含义及文件覆盖规则见[本地配置的加载与更新](scheduling-execution.md#本地配置的加载与更新)。
+
+| 字段 | 默认值 |
+| --- | --- |
+| `paths.staging` | `$HOME/.camctl/staging` |
+| `paths.ready` | `$HOME/.camctl/ready` |
+| `paths.processing` | `$HOME/.camctl/processing` |
+
+`derived` 位于实际 `staging` 目录之下。部署时须保证主程序使用相同的实际 `ready` / `processing` 路径及所需访问权限，并满足本专题的原子移动要求；覆盖路径不改变目录所有权和发布规则。
 
 ## 验收要求
 
