@@ -4,6 +4,8 @@
 
 本专题提供四组完整、可单独解析的执行计划和状态报告 JSON，以及客户端应得到的业务结果。报告按[按计划嵌套与客户端合并](status-reports.md#按计划嵌套与客户端合并)组织；业务规则由各责任专题定义，本文集中说明样例使用的机器字段及关联方式。
 
+[计划文件诊断样例](#计划文件诊断样例)另行展示文件无法解析、无法打开、ACK 校验失败和同次输入多个错误的 JSON 片段，以及重复输入和动作自身错误的区别。
+
 ## 阅读与使用范围
 
 四组样例分别代表四份独立的单主机数据库历史，不能将不同组的报告混合接收到同一个客户端状态库中。各组从尚无客户端业务状态、样例业务水位为 0 开始；相同数字的 `report_id` 在不同组中没有关联。ID、业务水位、文件大小、录像计时及设备结果均为演示数据，序号间距不表示只发生了对应数量的设备调用，也不规定正式 ID 的生成算法。公共输入类型和范围见[执行计划输入契约](plan-input.md)。
@@ -177,6 +179,7 @@ p-004：completed
 | 报告 `report_id` | 逻辑报告身份，与文件名中的 ID 相同 |
 | 报告 `from_wm`、`to_wm` | 本份报告覆盖的业务区间，不是时间戳；ACK 按已登记报告的上界解释 |
 | 报告 `plans` | 需要更新的计划及承载变化后代的计划集合；按 `plan_instance_id` 合并 |
+| 报告 `plan_file_diagnostics` | 覆盖区间内的计划文件诊断；按 `diagnostic_id` 合并，字段与生命周期见[计划文件诊断](status-reports.md#计划文件诊断) |
 | 计划 `request_id`、`plan_seq`、`created_at`、`name` | 已受理请求关联、首次受理顺序及原计划字段；计划存在即可证明该请求已受理 |
 | 计划 `status` | 按所属全部动作的历史计算，不仅根据本份报告出现的动作子集计算 |
 | 计划 `actions` | 本份报告携带的动作子集合，按 `action_instance_id` 合并 |
@@ -235,12 +238,177 @@ p-004：completed
 | `camera_start_rejected` | `device_start` | `recording_started: false` | 本次启动明确被拒绝，并可靠确认未开始录像 |
 | `start_attempts_exhausted` | `device_start` | `max_attempts`、`attempts_used` | 录像启动尝试耗尽，没有成功启动 |
 
-本组错误属于动作、取回失败项、交付或设备与读取尝试，不放入“整份计划拒绝”记录。输入读取失败、整份计划拒绝及 ACK 校验错误仍须有计划集合之外的独立表达，由[报告内容](status-reports.md#报告内容)及其待细化机器结构规定。
+本组错误属于动作、取回失败项、交付或设备与读取尝试。输入读取失败、整份计划拒绝及 ACK 校验错误通过顶层 `plan_file_diagnostics` 表达，具体结构和归属见[计划文件诊断](status-reports.md#计划文件诊断)。动作自身错误不在该集合重复列出。
+
+## 计划文件诊断样例
+
+以下场景分别说明输入文件与相应诊断。输出 JSON 只截取完整报告的 `plan_file_diagnostics` 字段；其他报告字段和业务对象按既有规则生成。片段不是单独发布或 ACK 的报告，不提供报告文件名摘要。除明确说明的重复输入场景外，各例独立；`diagnostic_id` 为演示身份，错误码及细节按本节表格解释。
+
+### 文件无法解析
+
+主程序传入 `/data/incoming/夜间采集-20260914.json`，文件原始内容如下：
+
+```text
+{"request_id":"req-101","actions":[
+```
+
+本次不能取得合法的完整 JSON，诊断附带实际文件名，不从残缺正文或文件名提取 `request_id`：
+
+```json
+{
+  "plan_file_diagnostics": [
+    {
+      "diagnostic_id": "diag-001",
+      "file_name": "夜间采集-20260914.json",
+      "errors": [
+        {
+          "code": "invalid_json",
+          "stage": "input_parse",
+          "details": {"reason": "unexpected_end"}
+        }
+      ]
+    }
+  ]
+}
+```
+
+客户端可以显示具体文件无法解析，并利用它已知的文件对应关系辅助定位。本条诊断不能证明 `req-101` 被拒绝或没有受理，尚未获确认的请求仍按既有重送规则处理。
+
+### 文件无法打开
+
+主程序传入 `/data/incoming/plan-102.json`，打开时文件已经不存在。诊断中的文件名来自调用参数，取得它不要求文件仍存在：
+
+```json
+{
+  "plan_file_diagnostics": [
+    {
+      "diagnostic_id": "diag-002",
+      "file_name": "plan-102.json",
+      "errors": [
+        {
+          "code": "plan_file_read_failed",
+          "stage": "input_read",
+          "details": {"operation": "open", "reason": "not_found"}
+        }
+      ]
+    }
+  ]
+}
+```
+
+完整路径和实际系统错误继续保存在本地诊断中。本次没有读取正文，不填请求 ID，也不把文件不存在解释为某个历史计划不存在。
+
+### 计划受理而 ACK 校验失败
+
+输入文件 `查询状态-103.json` 内容如下；假定数据库中没有报告 9999：
+
+```json
+{
+  "request_id": "req-103",
+  "created_at": "2026-09-14 08:00:00",
+  "name": "查询状态",
+  "last_report_id": 9999,
+  "actions": [
+    {"name": "生成报告", "type": "report_status"}
+  ]
+}
+```
+
+计划正常受理并由 `plans` 表达其状态；ACK 校验失败单独形成文件诊断：
+
+```json
+{
+  "plan_file_diagnostics": [
+    {
+      "diagnostic_id": "diag-003",
+      "file_name": "查询状态-103.json",
+      "request_id": "req-103",
+      "errors": [
+        {
+          "code": "unknown_report_id",
+          "stage": "ack",
+          "details": {"field": "last_report_id", "value": 9999}
+        }
+      ]
+    }
+  ]
+}
+```
+
+客户端可显示计划已受理，同时提示报告 9999 不存在。存在文件诊断不意味着计划拒绝，也不改变该报告动作的正常执行资格。
+
+### 同次输入包含多个错误
+
+输入文件 `查询状态-104.json` 内容如下；仍假定报告 9999 不存在：
+
+```json
+{
+  "request_id": "req-104",
+  "created_at": "明天早上",
+  "name": "查询状态",
+  "last_report_id": 9999,
+  "actions": [
+    {"name": "生成报告", "type": "report_status"}
+  ]
+}
+```
+
+计划公共字段非法，整份拒绝；ACK 也非法。两项错误属于同一次输入，放在一条记录中：
+
+```json
+{
+  "plan_file_diagnostics": [
+    {
+      "diagnostic_id": "diag-004",
+      "file_name": "查询状态-104.json",
+      "request_id": "req-104",
+      "errors": [
+        {
+          "code": "invalid_field_value",
+          "stage": "admission",
+          "details": {
+            "field": "created_at",
+            "value": "明天早上",
+            "expected": "utc_datetime"
+          }
+        },
+        {
+          "code": "unknown_report_id",
+          "stage": "ack",
+          "details": {"field": "last_report_id", "value": 9999}
+        }
+      ]
+    }
+  ]
+}
+```
+
+如果 ACK 合法，则仍吸收 ACK，只保留计划字段错误。若客户端修正尚未成功受理的 `req-104` 后再次提交并被接受，历史 `diag-004` 保留；客户端依据新计划中的请求关联确认受理，不让这条历史拒绝覆盖当前受理状态。
+
+### 重复输入与动作错误的区别
+
+再次通过命令入口提交 `查询状态-103.json`，原计划幂等复用，ACK 再次校验失败时形成新诊断，例如 `diag-005`。同一报告覆盖两次诊断时可同时携带 `diag-003` 与 `diag-005`；它们的文件名、请求 ID 和错误内容可以相同。客户端保留两次输入处理的事实，可以在界面汇总发生次数。
+
+重新接收到含 `diag-003` 的报告只更新或确认该条记录，不增加第三次输入。报告补投和数据库恢复也不重新分配诊断 ID。集合缺席或为空时，客户端保留已经收到的诊断。
+
+本专题“单个动作参数错误”的完整文件样例仍适用：只有取回动作的来源引用错误时，计划受理，错误在该动作下面，不产生文件诊断。如果同次输入另有 ACK 错误，则文件诊断只列 ACK 问题，动作错误仍由动作记录表达。
+
+### 诊断样例中的错误表达
+
+| `code` | `stage` | 本节使用的 `details` 与含义 |
+| --- | --- | --- |
+| `invalid_json` | `input_parse` | `reason: unexpected_end` 表示 JSON 在完整值结束前终止；其他解析原因须按实际失败表达 |
+| `plan_file_read_failed` | `input_read` | `operation: open` 与 `reason: not_found` 表示打开目标文件时不存在；读取中途失败不得写成打开失败 |
+| `unknown_report_id` | `ack` | `field: last_report_id` 与实际 `value`；值的格式合法，但找不到对应已登记报告 |
+| `invalid_field_value` | `admission` | `field`、实际 `value` 和期望类型；本节 `expected: utc_datetime` 指[公共时间字面量](plan-input.md#时间字面量) |
+
+本表定义所展示错误分支的机器表达，不代替全部输入校验分支的错误码契约。诊断记录使用的阶段、错误归属及缺省语义以报告专题为准。
 
 ## 客户端接收与核对
 
 1. 按文件名取得报告 ID 与摘要，对收到的原始字节计算 SHA-256；匹配后再解析 JSON、检查结构、身份与覆盖区间。
 2. 对可以应用的报告，按 ID 更新对象自身字段并合并实体子集合；同一份报告的计划及后代使用同一历史边界，客户端不能根据部分动作自行改写计划状态。
+   顶层计划文件诊断按 `diagnostic_id` 保存整条记录；文件名用于定位，不作为去重键或计划身份。没有请求 ID 的记录仍能展示，历史拒绝不覆盖已有的受理证据。
 3. 可靠保存合并结果及累计覆盖位置后，再在后续输入携带对应 `last_report_id`。重复报告不重复创建对象，迟到旧报告不回退已应用状态，覆盖缺口不能凭较大的报告 ID 跳过。
 4. 产物文件与报告独立接收。文件先到时保留其完整文件名及字节，等报告给出映射后核验；报告先到时记录交付事实，实际收齐并核验文件后才显示客户端已收到。
 
