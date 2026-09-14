@@ -692,6 +692,7 @@ log_level = "INFO"
 | --- | --- |
 | `session.plan_poll_interval_ms` | 默认 500；控制新计划周期检查间隔 |
 | `session.wakeup_margin_ms` | 默认 50；非负整数，0 表示关闭提前唤醒；不提前执行业务动作 |
+| `paths.log_file`、`session.log_level`、`session.log_max_bytes`、`session.log_file_count` | 日志路径、级别及轮换配置；默认值和保留语义见[运行日志](logging.md#配置与默认值) |
 | `devices` | 默认空设备目录；设备声明及驱动专属配置由部署覆盖 |
 | `devices.<id>.kind`、`driver` | 已声明设备的种类与驱动选择；具体默认设置由设备接入契约定义；第一版接入相机，MCU 遵守[接口预留边界](mcu-actions.md#第一版范围) |
 | `devices.<id>.connection.prepare_lead_s` | 驱动默认值，本地设备配置可覆盖，计划不可覆盖 |
