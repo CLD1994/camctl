@@ -341,6 +341,8 @@ flowchart LR
 
 部署人员使用 [`camctl describe`](camctl/protocol-session.md#describe) 导出完整 JSON 说明。该入口只读取本地配置及驱动定义，不要求相机在线或已有业务状态库；命令成功后再将文件交给客户端。
 
+拍摄参数的静态约束使用 [JSON Schema](camctl/camera-recording.md#拍摄参数的-json-schema) 表达，camctl 受理校验与客户端校验使用同源规则；设备状态及执行资格由运行时判断。
+
 ## 阅读与完善顺序
 
 1. 主程序和调用方协议：阅读请求受理与会话、文件交接、状态报告与累计确认。
