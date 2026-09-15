@@ -1,1 +1,9 @@
+node_modules/
 tmp
+dist/
+data/
+.local/
+.superpowers/
+test-results/
+playwright-report/
+*.tsbuildinfo

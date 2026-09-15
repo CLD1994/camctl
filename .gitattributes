@@ -1,0 +1,2 @@
+# 报告文件名绑定原始字节 SHA-256，检出与提交均保持 LF。
+**/status-report-*.json text eol=lf
