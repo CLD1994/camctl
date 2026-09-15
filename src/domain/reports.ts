@@ -339,6 +339,53 @@ function associations(index: Index) {
       }
   }
 }
+// 父 result 是该边界的完整结果；交付子实体可以缺席，保留其实际观察水位。
+function failureLinks(
+  results: Index,
+  resultWm: number,
+  deliveries: Index,
+  deliveryWm: number,
+) {
+  for (const { value: action } of results.actions.values()) {
+    if (action.type !== "obtain_action_outputs") continue;
+    const failures =
+      (action.result as ObtainResult | undefined)?.failures ?? [];
+    for (const failure of failures) {
+      if (failure.delivery_id === undefined) continue;
+      const delivery = deliveries.deliveries.get(failure.delivery_id)?.value;
+      if (!delivery) continue;
+      if (delivery.status === "failed") {
+        requireFact(
+          isDeepStrictEqual(failure.error, delivery.error),
+          `交付 ${delivery.delivery_id} 的最终错误不一致`,
+        );
+      } else {
+        const unfinished =
+          delivery.status === "pending" ||
+          delivery.status === "preparing" ||
+          delivery.status === "prepared" ||
+          delivery.status === "publishing";
+        requireFact(
+          unfinished && deliveryWm < resultWm,
+          `交付 ${delivery.delivery_id} 与已确定最终失败状态矛盾`,
+        );
+      }
+    }
+    for (const { parent, value: delivery } of deliveries.deliveries.values()) {
+      if (
+        parent === action.action_instance_id &&
+        delivery.status === "failed" &&
+        resultWm >= deliveryWm
+      )
+        requireFact(
+          failures.some(
+            (failure) => failure.delivery_id === delivery.delivery_id,
+          ),
+          `取回 ${parent} 缺少交付 ${delivery.delivery_id} 的最终失败项`,
+        );
+    }
+  }
+}
 function ownFacts(report: StatusReport) {
   requireFact(report.from_wm <= report.to_wm, "报告水位顺序不合法");
   const index = indexReport(report);
@@ -527,6 +574,7 @@ function ownFacts(report: StatusReport) {
     }
   }
   associations(index);
+  failureLinks(index, report.to_wm, index, report.to_wm);
 }
 export function validateReport(value: unknown): asserts value is StatusReport {
   if (!validate(value))
@@ -1034,6 +1082,8 @@ export function validateReportAgainstHistory(
   });
   associations(combined(old, next));
   associations(combined(next, old));
+  failureLinks(old, current.to_wm, next, incoming.to_wm);
+  failureLinks(next, incoming.to_wm, old, current.to_wm);
 }
 export function reportDecision(
   coverage: number,

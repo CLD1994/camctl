@@ -1355,3 +1355,277 @@ describe("历史观察边界终结收场", () => {
     },
   );
 });
+
+function failureReport(status: Delivery["status"] = "failed"): StatusReport {
+  const r = report();
+  r.plans![0].status = "running";
+  const action = obtain();
+  action.status = "running";
+  action.result = {
+    failures:
+      status === "failed"
+        ? [
+            {
+              source_action_instance_id: "a1",
+              output_id: "o1",
+              delivery_id: "d1",
+              error,
+            },
+          ]
+        : [],
+  };
+  action.deliveries![0].status = status;
+  if (status === "failed") action.deliveries![0].error = error;
+  r.plans![0].actions = [action];
+  return r;
+}
+describe("交付最终失败关联", () => {
+  it("同一最终错误允许未知码且不等于其他层次错误", () => {
+    const r = failureReport();
+    const action = r.plans![0].actions![0];
+    action.status = "failed";
+    action.error = { ...error, code: "obtain_items_failed" };
+    r.plans![0].status = "completed";
+    action.deliveries![0].copy.read_attempts = [
+      {
+        attempt_no: 1,
+        status: "failed",
+        error: { ...error, code: "attempt-failure" },
+      },
+    ];
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  it.each(["code", "stage", "details"] as const)(
+    "同边界最终错误的 %s 不同拒绝",
+    (field) => {
+      const r = failureReport();
+      const failures = (
+        r.plans![0].actions![0].result as {
+          failures: Array<{ error: Record<string, unknown> }>;
+        }
+      ).failures;
+      failures[0].error = {
+        ...error,
+        [field]: field === "details" ? { reason: "different" } : "different",
+      };
+      expect(() => validateReport(r)).toThrow();
+    },
+  );
+  it.each([
+    "pending",
+    "preparing",
+    "prepared",
+    "publishing",
+    "published",
+    "withdrawn",
+    "canceled",
+  ] as const)("最终 failure 不能同时对应 %s", (status) => {
+    const r = failureReport();
+    r.plans![0].actions![0].deliveries![0].status = status;
+    expect(() => validateReport(r)).toThrow();
+  });
+  it("failed delivery 需要所属完整 result 的对应 failure", () => {
+    const r = failureReport();
+    r.plans![0].actions![0].result = { failures: [] };
+    expect(() => validateReport(r)).toThrow();
+  });
+  it("来源级失败不能代替已知 failed delivery 的失败项", () => {
+    const r = failureReport();
+    r.plans![0].actions![0].result = {
+      failures: [{ source_action_instance_id: "a1", error }],
+    };
+    expect(() => validateReport(r)).toThrow();
+  });
+  it("failure 的 delivery 缺席时保留待关联", () => {
+    const r = failureReport();
+    delete r.plans![0].actions![0].deliveries;
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  it.each([undefined, "o1"])(
+    "未带delivery ID的失败不推断属于同产物交付 %#",
+    (outputId) => {
+      const r = failureReport("preparing");
+      r.plans![0].actions![0].result = {
+        failures: [
+          {
+            source_action_instance_id: "a1",
+            ...(outputId ? { output_id: outputId } : {}),
+            error,
+          },
+        ],
+      };
+      expect(() => validateReport(r)).not.toThrow();
+    },
+  );
+  it("错误对象键序不影响相等", () => {
+    const r = failureReport();
+    r.plans![0].actions![0].deliveries![0].error = {
+      details: {},
+      stage: "execution",
+      code: "future_code",
+    };
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  it.each(["missing", "null", "array-order"] as const)(
+    "错误details保留值区别 %s",
+    (change) => {
+      const r = failureReport();
+      const a = r.plans![0].actions![0];
+      const first =
+        change === "array-order"
+          ? { list: [1, 2] }
+          : change === "missing"
+            ? {}
+            : { value: null };
+      const second =
+        change === "array-order" ? { list: [2, 1] } : { value: "null" };
+      a.deliveries![0].error = { ...error, details: first };
+      a.result = {
+        failures: [
+          {
+            source_action_instance_id: "a1",
+            output_id: "o1",
+            delivery_id: "d1",
+            error: { ...error, details: second },
+          },
+        ],
+      };
+      expect(() => validateReport(r)).toThrow();
+    },
+  );
+});
+
+function failureOnly(): StatusReport {
+  const r = failureReport();
+  delete r.plans![0].actions![0].deliveries;
+  return r;
+}
+describe("交付最终失败关联的历史水位", () => {
+  it.each(
+    (
+      [
+        "pending",
+        "preparing",
+        "prepared",
+        "publishing",
+        "published",
+        "withdrawn",
+        "canceled",
+      ] as const
+    ).flatMap((status) =>
+      (["earlier", "same", "later"] as const).map((direction) => ({
+        status,
+        direction,
+      })),
+    ),
+  )("旧 $status 与较晚 failure，输入 $direction", ({ status, direction }) =>
+    historyPair(
+      failureReport(status),
+      failureOnly(),
+      direction,
+      direction !== "same" &&
+        !["published", "withdrawn", "canceled"].includes(status),
+    ),
+  );
+  it.each(
+    (
+      [
+        "pending",
+        "preparing",
+        "prepared",
+        "publishing",
+        "published",
+        "withdrawn",
+        "canceled",
+      ] as const
+    ).flatMap((status) =>
+      (["earlier", "same", "later"] as const).map((direction) => ({
+        status,
+        direction,
+      })),
+    ),
+  )(
+    "较早 failure 不能恢复为 $status，输入 $direction",
+    ({ status, direction }) =>
+      historyPair(failureOnly(), failureReport(status), direction, false),
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "两个最终错误不等不能由时间差解释 %s",
+    (direction) => {
+      const a = failureReport();
+      const b = failureOnly();
+      b.plans![0].actions![0].result = {
+        failures: [
+          {
+            source_action_instance_id: "a1",
+            output_id: "o1",
+            delivery_id: "d1",
+            error: { ...error, code: "changed" },
+          },
+        ],
+      };
+      historyPair(a, b, direction, false);
+    },
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "同一最终错误保持且delivery缺席合法 %s",
+    (direction) => historyPair(failureReport(), failureOnly(), direction, true),
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "已知failed delivery不能在较晚完整父结果中漏项 %s",
+    (direction) => {
+      const a = failureReport();
+      const b = failureOnly();
+      b.plans![0].actions![0].result = { failures: [] };
+      historyPair(a, b, direction, false);
+    },
+  );
+  it.each(["earlier", "later"] as const)(
+    "较早无failure与较晚failed delivery相容 %s",
+    (direction) => {
+      const a = failureOnly();
+      a.plans![0].actions![0].result = { failures: [] };
+      historyPair(a, failureReport(), direction, true);
+    },
+  );
+  it.each(["apply", "gap"] as const)(
+    "历史允许较早准备，%s 依据真实覆盖分类",
+    (mode) => {
+      const current = failureReport("preparing");
+      current.to_wm = 10;
+      const incoming = failureOnly();
+      incoming.report_id = 2;
+      incoming.to_wm = 30;
+      incoming.from_wm = mode === "apply" ? 10 : 20;
+      const saved = structuredClone(current);
+      expect(() =>
+        validateReportAgainstHistory(current, incoming),
+      ).not.toThrow();
+      if (mode === "apply")
+        expect(() => mergeReport(current, incoming)).toThrow(/状态矛盾/);
+      else
+        expect(
+          reportDecision(current.to_wm, incoming.from_wm, incoming.to_wm),
+        ).toBe("gap");
+      expect(current).toEqual(saved);
+    },
+  );
+  it("连续报告同时给出failed交付和同源错误可以应用", () => {
+    const current = failureReport("preparing");
+    current.to_wm = 10;
+    const incoming = failureReport();
+    incoming.to_wm = 30;
+    incoming.from_wm = 10;
+    incoming.report_id = 2;
+    expect(mergeReport(current, incoming).to_wm).toBe(30);
+  });
+  it("来自其他取回动作的同output交付不能认领failure", () => {
+    const r = failureOnly();
+    const other = obtain();
+    other.action_instance_id = "other";
+    other.name = "另一取回";
+    other.status = "running";
+    r.plans![0].actions!.push(other);
+    expect(() => validateReport(r)).toThrow();
+  });
+});

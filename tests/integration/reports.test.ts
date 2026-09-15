@@ -8,6 +8,8 @@ import { Files } from "../../src/server/files";
 import type { ImportFile } from "../../src/server/models";
 import { DataError } from "../../src/server/database";
 import { reportInput, mappedReport } from "./fixtures";
+import { validateReport } from "../../src/domain/reports";
+import type { Delivery } from "../../src/shared/types";
 const clean: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const c of clean.splice(0)) await c();
@@ -24,6 +26,126 @@ function setup() {
   });
   return { app, files };
 }
+function deliveryFailureHistory(
+  status: Delivery["status"] = "failed",
+  code = "final-copy-error",
+) {
+  const r = mappedReport(Buffer.from("video"));
+  r.to_wm = 10;
+  const plan = r.plans![0];
+  plan.status = "running";
+  const action = plan.actions![1];
+  action.status = "running";
+  const delivery = action.deliveries![0];
+  delivery.status = status;
+  const error = {
+    code,
+    stage: "delivery",
+    details: { reason: "source read failed" },
+  };
+  if (status === "failed") delivery.error = error;
+  action.result = {
+    failures:
+      status === "failed"
+        ? [
+            {
+              source_action_instance_id: delivery.source_action_instance_id,
+              output_id: delivery.output_id,
+              delivery_id: delivery.delivery_id,
+              error,
+            },
+          ]
+        : [],
+  };
+  plan.actions = [action];
+  validateReport(r);
+  return r;
+}
+it.each(["earlier", "same", "later", "gap"] as const)(
+  "交付错误关联：%s 的不同最终错误不改变已保存事实",
+  (kind) => {
+    const { app } = setup();
+    const initial = reportInput(deliveryFailureHistory());
+    app.applyReports([initial]);
+    expect(app.store.get<ImportFile>("imports", initial.file.id)?.status).toBe(
+      "accepted",
+    );
+    const incoming = deliveryFailureHistory("failed", "different-final-error");
+    incoming.report_id = 2;
+    incoming.to_wm = kind === "earlier" ? 5 : kind === "same" ? 10 : 30;
+    incoming.from_wm = kind === "gap" ? 20 : 0;
+    if (kind === "gap") delete incoming.plans![0].actions![0].deliveries;
+    validateReport(incoming);
+    const input = reportInput(incoming);
+    const before = app.snapshot();
+    app.applyReports([input]);
+    expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
+      "failed",
+    );
+    expect(app.store.report(2)).toBeUndefined();
+    expect(app.store.reports()).toHaveLength(1);
+    expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(initial.bytes);
+    expect(app.snapshot()).toEqual(before);
+    expect(app.state()).toMatchObject({
+      coverage: 10,
+      gapTarget: null,
+      ackId: 1,
+    });
+  },
+);
+it.each(["apply", "gap"] as const)(
+  "交付错误关联：遗漏交付更新的 %s 使用实际覆盖边界",
+  (mode) => {
+    const { app } = setup();
+    const initial = reportInput(deliveryFailureHistory("preparing"));
+    app.applyReports([initial]);
+    expect(app.coverage()).toBe(10);
+    const incoming = deliveryFailureHistory();
+    incoming.report_id = 2;
+    incoming.to_wm = 30;
+    incoming.from_wm = mode === "apply" ? 10 : 20;
+    delete incoming.plans![0].actions![0].deliveries;
+    validateReport(incoming);
+    const input = reportInput(incoming);
+    const before = app.snapshot();
+    app.applyReports([input]);
+    expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
+      mode === "apply" ? "failed" : "gap",
+    );
+    expect(app.store.report(2)).toBeUndefined();
+    expect(app.store.reports()).toHaveLength(1);
+    expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(initial.bytes);
+    expect(app.snapshot()).toEqual(before);
+    expect(app.state()).toMatchObject({
+      coverage: 10,
+      gapTarget: mode === "gap" ? 30 : null,
+      ackId: 1,
+    });
+  },
+);
+it.each(["apply", "gap"] as const)(
+  "交付错误关联：同时携带匹配失败交付的 %s",
+  (mode) => {
+    const { app } = setup();
+    app.applyReports([reportInput(deliveryFailureHistory("preparing"))]);
+    const incoming = deliveryFailureHistory();
+    incoming.report_id = 2;
+    incoming.to_wm = 30;
+    incoming.from_wm = mode === "apply" ? 10 : 20;
+    const input = reportInput(incoming);
+    app.applyReports([input]);
+    expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
+      mode === "apply" ? "accepted" : "gap",
+    );
+    expect(app.state()).toMatchObject({
+      coverage: mode === "apply" ? 30 : 10,
+      gapTarget: mode === "gap" ? 30 : null,
+    });
+    if (mode === "apply")
+      expect(Buffer.from(app.store.report(2)!.bytes)).toEqual(input.bytes);
+    else expect(app.store.report(2)).toBeUndefined();
+  },
+);
 function report(n: number) {
   const dir = "docs/superpowers/specs/camctl/examples/status-sync";
   const fileName = readdirSync(dir).find((f) =>
