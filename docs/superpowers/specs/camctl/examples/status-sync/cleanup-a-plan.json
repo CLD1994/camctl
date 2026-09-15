@@ -1,0 +1,18 @@
+{
+  "request_id": "req-sync-003",
+  "created_at": "2026-09-15 08:00:00",
+  "name": "清理录像 A 的相机原片",
+  "actions": [
+    {
+      "name": "清理原片 A",
+      "type": "delete_action_outputs",
+      "scheduled_at": "2026-09-15 09:00:00",
+      "params": {
+        "output_ids": [
+          "o-sync-001"
+        ]
+      }
+    }
+  ],
+  "last_report_id": 2
+}

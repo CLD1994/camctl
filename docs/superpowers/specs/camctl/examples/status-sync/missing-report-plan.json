@@ -1,0 +1,16 @@
+{
+  "request_id": "req-sync-006",
+  "created_at": "2026-09-15 13:00:00",
+  "name": "同步起点引用错误的附例",
+  "actions": [
+    {
+      "name": "补齐指定报告之后的状态",
+      "type": "report_status",
+      "params": {
+        "scope": "since",
+        "after_report_id": 999
+      }
+    }
+  ],
+  "last_report_id": 6
+}

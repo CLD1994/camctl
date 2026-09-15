@@ -1,0 +1,31 @@
+{
+  "request_id": "req-sync-002",
+  "created_at": "2026-09-14 08:00:00",
+  "name": "第2天采集",
+  "actions": [
+    {
+      "name": "录像 B",
+      "type": "camera_record",
+      "device_id": "cam0",
+      "scheduled_at": "2026-09-14 09:00:00",
+      "params": {
+        "type": "timed",
+        "duration_s": 60
+      },
+      "policy": {
+        "max_delay_ms": 5000
+      }
+    },
+    {
+      "name": "取回录像 B",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-14 09:02:00",
+      "params": {
+        "source": {
+          "action_name": "录像 B"
+        }
+      }
+    }
+  ],
+  "last_report_id": 1
+}

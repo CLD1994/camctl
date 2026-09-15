@@ -20,7 +20,7 @@
 | 3 | 主程序怎样把输入交给 camctl，怎样知道进程结束？ | [CLI 命令](cli-commands.md)、[会话接管](protocol-session.md) |
 | 4 | 动作什么时候执行，相机怎样开始和结束录像？ | [调度与设备执行](scheduling-execution.md)、[相机拍摄](camera-recording.md)、[当前相机录像参数](camera-parameters.md) |
 | 5 | 视频怎样成为正式产物，怎样被取回和交给传输方？ | [正式产物与交付](outputs.md)、[取回](obtaining-outputs.md)、[文件拷贝](file-copy.md)、[文件交接](file-handoff.md) |
-| 6 | 客户端怎样知道结果，怎样合并多份报告并确认收到？ | [状态报告](status-reports.md)、[字段契约](report-format.md)、[完整同步](status-sync.md)、[协议样例](client-protocol-examples.md) |
+| 6 | 客户端怎样知道结果，怎样合并多份报告并确认收到？ | [状态报告](status-reports.md)、[字段契约](report-format.md)、[状态同步](status-sync.md)、[协议样例](client-protocol-examples.md) |
 | 7 | 用户怎样取消任务和清理文件？ | [取消计划与动作](task-cancellation.md)、[清理正式产物](output-cleanup.md) |
 | 8 | 断电、时间异常或处理失败后，如何恢复并解释结果？ | [共同原则与持久化](system-foundations.md)、[时间检查](clock-recovery.md)、[录像恢复](camera-recovery.md)、[报告发布与补投](report-publication.md)、[会话错误](session-errors.md) |
 | 9 | 如何准备运行环境并验证完整流程？ | [本地配置](configuration.md)、[初始化](initialization.md)、[部署联调样例](deployment-example.md)、[运行日志](logging.md) |
@@ -33,7 +33,7 @@
 | 读者 | 优先关心的文档 |
 | --- | --- |
 | 计划使用者与业务评审者 | 总览、概念、正常协议样例、计划编辑、取回、取消和清理 |
-| 客户端开发者 | 客户端部署与编辑、能力说明、计划输入与受理、报告字段与合并、完整同步 |
+| 客户端开发者 | 客户端部署与编辑、能力说明、计划输入与受理、报告字段与合并、完整及局部同步 |
 | 第三方主程序对接人员 | 运行环境、CLI 命令、文件交接、会话错误、部署联调样例 |
 | camctl 与驱动开发者 | 全部行为规格，重点核对持久化、会话接管、调度、设备证据和文件恢复之间的衔接 |
 
@@ -59,7 +59,7 @@
 | [文件交接](file-handoff.md) | 目录所有权、原子发布、领取、撤回竞争及恢复 | 主程序协作 |
 | [状态报告与累计确认](status-reports.md) | 业务变化水位、不可变快照、ACK、报告替换和补投 | 业务状态、请求入口、文件交接 |
 | [状态报告字段契约](report-format.md) | 报告 JSON Schema、完整自身字段、实体子集合、结果表达和语义校验 | 冻结历史、动作结果、产物与交付、累计覆盖 |
-| [客户端完整状态同步](status-sync.md) | 完整同步入口、持久化责任、合格 ACK、恢复后的增量衔接 | 单客户端累计 ACK、报告覆盖与文件交接 |
+| [客户端状态同步](status-sync.md) | 完整与局部同步入口、报告覆盖、完成确认、取消及重启后的继续处理 | 单客户端累计 ACK、报告覆盖与文件交接 |
 
 每项契约只在责任专题中完整定义。其他专题说明如何提供输入、如何使用结果，并链接到完整规则；配置字段、持久化记录、验收要求和未决事项随责任专题维护。上表按业务范围提供入口；其中较长范围的详细分工如下。相机、产物、会话、调度和报告的联合验收仍保留在各自入口页。
 

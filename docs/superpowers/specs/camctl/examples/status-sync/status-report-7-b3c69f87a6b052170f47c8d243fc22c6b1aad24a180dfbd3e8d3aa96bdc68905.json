@@ -1,0 +1,37 @@
+{
+  "report_id": 7,
+  "from_wm": 53,
+  "to_wm": 56,
+  "plans": [
+    {
+      "plan_instance_id": "p-sync-006",
+      "request_id": "req-sync-006",
+      "plan_seq": 6,
+      "created_at": "2026-09-15 13:00:00",
+      "name": "同步起点引用错误的附例",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-sync-601",
+          "name": "补齐指定报告之后的状态",
+          "type": "report_status",
+          "input_params": {
+            "scope": "since",
+            "after_report_id": 999
+          },
+          "status": "failed",
+          "execution": {
+            "started": true
+          },
+          "error": {
+            "code": "sync_report_not_found",
+            "stage": "execution",
+            "details": {
+              "after_report_id": 999
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

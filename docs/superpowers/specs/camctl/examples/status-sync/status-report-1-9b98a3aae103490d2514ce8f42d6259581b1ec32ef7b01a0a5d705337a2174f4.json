@@ -1,0 +1,142 @@
+{
+  "report_id": 1,
+  "from_wm": 0,
+  "to_wm": 20,
+  "plans": [
+    {
+      "plan_instance_id": "p-sync-001",
+      "request_id": "req-sync-001",
+      "plan_seq": 1,
+      "created_at": "2026-09-13 08:00:00",
+      "name": "第1天采集",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-sync-101",
+          "name": "录像 A",
+          "type": "camera_record",
+          "device_id": "cam0",
+          "scheduled_at": "2026-09-13 09:00:00",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "input_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "effective_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "recording": {
+              "start": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "stop": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "control_elapsed_s": 60,
+              "effect": {
+                "status": "compensated"
+              }
+            },
+            "repair": {
+              "status": "not_needed"
+            }
+          },
+          "outputs": [
+            {
+              "output_id": "o-sync-001",
+              "source_action_instance_id": "a-sync-101",
+              "kind": "original",
+              "original_name": "VID_0001.mp4",
+              "media_type": "video/mp4",
+              "size": 8388608,
+              "availability": "available",
+              "cleanup": {
+                "status": "not_requested"
+              },
+              "checksum": {
+                "status": "available",
+                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "media": {
+                "check_status": "not_performed",
+                "duration": {
+                  "status": "unknown"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "action_instance_id": "a-sync-102",
+          "name": "取回录像 A",
+          "type": "obtain_action_outputs",
+          "scheduled_at": "2026-09-13 09:02:00",
+          "input_params": {
+            "source": {
+              "action_name": "录像 A"
+            }
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "deliveries": [
+            {
+              "delivery_id": "d-sync-001",
+              "output_id": "o-sync-001",
+              "source_action_instance_id": "a-sync-101",
+              "file_name": "d-sync-001.mp4",
+              "display_name": "VID_0001-第1天采集-录像 A.mp4",
+              "size": 8388608,
+              "status": "published",
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+              "copy": {
+                "max_read_attempts": 3,
+                "read_idle_timeout_s": 10,
+                "max_recopies": 1,
+                "recopies_used": 0,
+                "round": 1,
+                "committed_bytes": 8388608,
+                "read_attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ],
+                "verification": {
+                  "status": "matched"
+                },
+                "work_file_cleanup": {
+                  "status": "not_needed"
+                }
+              }
+            }
+          ],
+          "result": {
+            "failures": []
+          }
+        }
+      ]
+    }
+  ]
+}
