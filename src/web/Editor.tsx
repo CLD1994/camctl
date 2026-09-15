@@ -8,6 +8,8 @@ import { parseJson } from "../shared/json";
 import {
   parseDraft,
   setValue,
+  pendingBlocks,
+  editPlanText,
   editValue,
   removeAction,
   appendDraftAction,
@@ -20,7 +22,7 @@ import {
   type EditObject,
 } from "./editing";
 import { DraftSession } from "./session";
-import { actionNames, Issues, ErrorBox } from "./common";
+import { actionLabel, Issues, ErrorBox } from "./common";
 
 interface Props {
   session: DraftSession;
@@ -30,6 +32,7 @@ interface Props {
   coverage: number;
   busy: boolean;
   onExport: () => void;
+  checkExport: () => void;
   savePreset: (input: {
     id?: string;
     name: string;
@@ -119,13 +122,35 @@ export function Editor(props: Props) {
                 ? "已保存"
                 : "等待保存…"}
         </span>
-        {session.error && (
+        {session.error && session.editable && (
           <button onClick={() => void session.flush().catch(() => {})}>
             重试保存
           </button>
         )}
       </div>
-      <fieldset disabled={busy || !!session.exportedRequestId}>
+      {session.exportState === "unknown" && (
+        <div className="notice warning">
+          <p>
+            导出结果尚未确认，输入已保留。请先核实原草稿，暂不能编辑、保存或追加。
+          </p>
+          <button disabled={busy} onClick={props.checkExport}>
+            重新核实导出结果
+          </button>
+        </div>
+      )}
+      {session.conflict && (
+        <details>
+          <summary>查看后端冲突记录</summary>
+          <pre>{JSON.stringify(session.conflict, null, 2)}</pre>
+        </details>
+      )}
+      {session.appendLocked && (
+        <p className="notice">
+          此草稿正在核实一次后续追加；请从上方返回核实，当前内容暂为只读。
+        </p>
+      )}
+      <fieldset disabled={busy || !session.editable}>
+        <PendingInputs content={content} change={change} />
         {json ? (
           <>
             <label className="field">
@@ -134,14 +159,15 @@ export function Editor(props: Props) {
                 className="code-input"
                 data-testid="draft-json-input"
                 spellCheck={false}
+                readOnly={Object.keys(content.pending ?? {}).length > 0}
                 value={content.text}
-                onChange={(e) => change({ text: e.target.value, pending: {} })}
+                onChange={(e) => change(editPlanText(content, e.target.value))}
               />
             </label>
             {Object.keys(content.pending ?? {}).length > 0 && (
               <p className="notice">
-                表单仍有未完成输入，见下方诊断。修改整份 JSON
-                会以该文本替换这些表单输入。
+                请先在“未完成输入”中修正或明确省略各路径。整份 JSON
+                暂为只读，保留原值与输入。
               </p>
             )}
           </>
@@ -201,13 +227,96 @@ export function Editor(props: Props) {
         <button
           className="primary"
           data-testid="export-button"
-          disabled={busy || !!session.exportedRequestId}
+          disabled={busy || !session.editable}
           onClick={props.onExport}
         >
           {busy ? "正在处理…" : "校验并导出 JSON"}
         </button>
       </div>
     </section>
+  );
+}
+function PendingInputs({
+  content,
+  change,
+}: {
+  content: DraftContent;
+  change: (content: DraftContent) => void;
+}) {
+  const entries = Object.entries(content.pending ?? {});
+  if (!entries.length) return null;
+  return (
+    <section className="notice warning">
+      <h3>未完成输入</h3>
+      <p>
+        以下原文随草稿保留。每项均可修正或明确省略，包括当前 Schema
+        没有对应控件的字段。
+      </p>
+      {entries.map(([key, value]) => (
+        <PendingInput
+          key={key}
+          path={key}
+          value={value}
+          content={content}
+          change={change}
+        />
+      ))}
+    </section>
+  );
+}
+function PendingInput({
+  path,
+  value,
+  content,
+  change,
+}: {
+  path: string;
+  value: { kind: "number" | "json"; text: string };
+  content: DraftContent;
+  change: (content: DraftContent) => void;
+}) {
+  const [error, setError] = useState("");
+  const parts = path
+    .slice(1)
+    .split("/")
+    .map((p) => p.replace(/~1/g, "/").replace(/~0/g, "~"));
+  const apply = (omit: boolean) => {
+    try {
+      change(
+        omit
+          ? setValue(content, parts, undefined, true)
+          : editValue(content, parts, value.text, value.kind),
+      );
+      setError("");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <div className="field">
+      <label>
+        {path}
+        <textarea
+          aria-label={`未完成输入 ${path}`}
+          value={value.text}
+          onChange={(e) =>
+            change({
+              ...content,
+              pending: {
+                ...content.pending,
+                [path]: { ...value, text: e.target.value },
+              },
+            })
+          }
+        />
+      </label>
+      <small>原文随草稿保存，点击应用修正后写入对应字段。</small>
+      <div className="button-row">
+        <button onClick={() => apply(false)}>应用修正 {path}</button>
+        <button onClick={() => apply(true)}>明确省略 {path}</button>
+      </div>
+      <ErrorBox error={error} />
+    </div>
   );
 }
 function ActionEditor(
@@ -320,7 +429,7 @@ function ActionEditor(
             )}
             {ACTION_TYPES.map((type) => (
               <option key={type} value={type}>
-                {actionNames[type]} · {type}
+                {actionLabel(type)} · {type}
               </option>
             ))}
           </select>
@@ -511,7 +620,15 @@ function ActionEditor(
                   disabled={!selected}
                   onClick={() => {
                     if (selected) {
-                      put("params", structuredClone(selected.params));
+                      change(
+                        setValue(
+                          content,
+                          [...base, "params"],
+                          structuredClone(selected.params),
+                          false,
+                          true,
+                        ),
+                      );
                       setNotice("预设参数已复制到当前动作");
                     }
                   }}
@@ -676,6 +793,7 @@ function JsonField({
         aria-label={label}
         className="code-input compact"
         spellCheck={false}
+        readOnly={pendingBlocks(content, path)}
         value={
           pending?.text ??
           text ??
@@ -689,6 +807,11 @@ function JsonField({
       {pending && (
         <small className="danger-text">
           JSON 尚未完成或存在重复键，原文将随草稿保存。
+        </small>
+      )}
+      {pendingBlocks(content, path) && (
+        <small>
+          此 JSON 中有未完成字段，请在上方“未完成输入”中修正或明确省略。
         </small>
       )}
     </label>
@@ -733,6 +856,7 @@ function Field({
         {enumeration ? (
           <select
             aria-label={label}
+            disabled={pendingBlocks(content, path)}
             value={
               value === undefined
                 ? ""
@@ -761,6 +885,7 @@ function Field({
         ) : type === "boolean" ? (
           <select
             aria-label={label}
+            disabled={pendingBlocks(content, path)}
             value={
               value === undefined
                 ? ""
@@ -786,12 +911,14 @@ function Field({
         ) : type === "string" ? (
           <input
             aria-label={label}
+            readOnly={pendingBlocks(content, path)}
             value={typeof value === "string" ? value : ""}
             onChange={(e) => set(e.target.value)}
           />
         ) : type === "number" || type === "integer" ? (
           <input
             aria-label={label}
+            readOnly={pendingBlocks(content, path)}
             inputMode="decimal"
             value={pending?.text ?? (value === undefined ? "" : String(value))}
             onChange={(e) =>
@@ -801,6 +928,7 @@ function Field({
         ) : (
           <textarea
             aria-label={label}
+            readOnly={pendingBlocks(content, path)}
             value={
               pending?.text ??
               (value === undefined ? "" : JSON.stringify(value, null, 2))
@@ -833,7 +961,11 @@ function Field({
           </button>
         )}
         {nullable && value !== null && (
-          <button className="inline" onClick={() => set(null)}>
+          <button
+            className="inline"
+            disabled={pendingBlocks(content, path)}
+            onClick={() => set(null)}
+          >
             设为 null
           </button>
         )}

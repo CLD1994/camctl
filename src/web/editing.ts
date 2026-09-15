@@ -14,12 +14,29 @@ export function parseDraft(
   return value as EditObject & { actions: EditObject[] };
 }
 export function pointer(path: Path): string {
+  if (!path.length) return "";
   return (
     "/" +
     path
       .map((p) => String(p).replace(/~/g, "~0").replace(/\//g, "~1"))
       .join("/")
   );
+}
+export function pendingBlocks(content: DraftContent, path: Path): boolean {
+  const current = pointer(path);
+  return Object.keys(content.pending ?? {}).some(
+    (key) =>
+      key !== current &&
+      (key.startsWith(current + "/") || current.startsWith(key + "/")),
+  );
+}
+export function editPlanText(
+  content: DraftContent,
+  text: string,
+): DraftContent {
+  if (Object.keys(content.pending ?? {}).length)
+    throw new Error("请先修正或明确省略未完成输入，再编辑整份 JSON");
+  return { text, pending: {} };
 }
 export function valueAt(value: unknown, path: Path): unknown {
   return path.reduce<unknown>(
@@ -35,7 +52,10 @@ export function setValue(
   path: Path,
   value: unknown,
   omit = false,
+  replace = false,
 ): DraftContent {
+  if (!omit && !replace && pendingBlocks(content, path))
+    throw new Error("此路径存在尚未解决的输入，请先逐项修正或明确省略");
   const root = parseDraft(content);
   let target: EditObject = root;
   for (const part of path.slice(0, -1)) {
@@ -74,6 +94,8 @@ export function editValue(
   text: string,
   kind: "number" | "json",
 ): DraftContent {
+  if (pendingBlocks(content, path))
+    throw new Error("父级 JSON 无法表示未完成的子字段，请先修正具体路径");
   let value: unknown;
   try {
     value = parseJson(text);

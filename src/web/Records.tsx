@@ -9,7 +9,7 @@ import type { Video } from "../server/models";
 import type { ClientState } from "./api";
 import { download } from "./api";
 import type { PlanRecord } from "./editing";
-import { Badge, Facts, actionNames, Empty } from "./common";
+import { Badge, Facts, actionLabel, Empty } from "./common";
 export type Followup = {
   action: Record<string, unknown>;
   summary: string;
@@ -208,7 +208,7 @@ function ActionResult({
         <div>
           <h3>{action.name}</h3>
           <small>
-            {actionNames[action.type]} · {action.action_instance_id}
+            {actionLabel(action.type)} · {action.action_instance_id}
           </small>
         </div>
         <Badge value={action.status} />
@@ -243,7 +243,12 @@ function ActionResult({
       {action.waiting && (
         <div className="notice">
           <h4>等待条件</h4>
-          <Facts value={action.waiting} />
+          {action.waiting.map((waiting, index) => (
+            <div key={index}>
+              <Badge value={waiting.code} />
+              <Facts value={waiting.details} />
+            </div>
+          ))}
         </div>
       )}
       {action.expiration_reason && <p>过期原因：{action.expiration_reason}</p>}
@@ -255,7 +260,7 @@ function ActionResult({
       {action.result && (
         <section>
           <h4>动作结果</h4>
-          <Facts value={action.result} />
+          <Facts value={action.result} business />
           {JSON.stringify(action.result).includes("sync_report_not_found") && (
             <button
               onClick={() =>
@@ -334,7 +339,7 @@ function ActionResult({
             )}
             <details>
               <summary>复制进度与核验</summary>
-              <Facts value={delivery.copy} />
+              <Facts value={delivery.copy} business />
             </details>
             <VideoPanel
               video={videos.find((v) => v.fileName === delivery.file_name)}
@@ -372,12 +377,13 @@ function OutputCard({
       </div>
       <p className="identifier">{output.output_id}</p>
       <Facts
+        business
         value={{
           类型: output.kind,
           字节数: output.size,
-          清理: output.cleanup,
-          摘要: output.checksum,
-          媒体: output.media,
+          cleanup: output.cleanup,
+          checksum: output.checksum,
+          media: output.media,
           ...(output.error ? { 错误: output.error } : {}),
         }}
       />

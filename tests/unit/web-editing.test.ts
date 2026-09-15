@@ -76,7 +76,7 @@ it("删除动作后待完成输入仍属于原来的后续动作", () => {
   });
   expect(parseDraft(next).actions[0].name).toBe("B");
 });
-it("参数JSON修改type立即成为真实参数且清除其旧控件输入", () => {
+it("修正未完成控件后参数JSON修改type保持真实类型", () => {
   const c = editValue(
     content(),
     ["actions", 0, "params", "count"],
@@ -84,7 +84,7 @@ it("参数JSON修改type立即成为真实参数且清除其旧控件输入", ()
     "number",
   );
   const next = editValue(
-    c,
+    editValue(c, ["actions", 0, "params", "count"], "30", "number"),
     ["actions", 0, "params"],
     '{"type":"unknown","count":"30"}',
     "json",

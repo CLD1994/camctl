@@ -5,14 +5,23 @@ import type {
   ExportedRequest,
   ImportFile,
 } from "../server/models";
-import { api, readDraft, download, upload, type ClientState } from "./api";
-import { DraftSession } from "./session";
+import {
+  api,
+  readDraft,
+  download,
+  upload,
+  HttpError,
+  type ClientState,
+} from "./api";
+import { DraftSession, sameContent } from "./session";
+import { FollowOperation } from "./followup";
 import { recordsFor, parseDraft } from "./editing";
 import { Editor } from "./Editor";
 import { RecordDetail, type Followup } from "./Records";
 import { Badge, Empty, ErrorBox, Facts } from "./common";
 
 type Page = "plans" | "import" | "devices";
+type PendingFollow = { operation: FollowOperation; follow: Followup };
 export function App() {
   const [state, setState] = useState<ClientState>(),
     [connection, setConnection] = useState(""),
@@ -23,7 +32,13 @@ export function App() {
     [selected, setSelected] = useState(""),
     [recordId, setRecordId] = useState(""),
     [busy, setBusy] = useState(false),
-    [follow, setFollow] = useState<Followup>();
+    [follow, setFollow] = useState<Followup>(),
+    [activeFollow, setActiveFollow] = useState<PendingFollow>(),
+    [followOperations, setFollowOperations] = useState<PendingFollow[]>([]);
+  const startFollow = (input: Followup) => {
+    setActiveFollow(undefined);
+    setFollow(input);
+  };
   const [, render] = useReducer((n) => n + 1, 0),
     sessions = useRef(new Map<string, DraftSession>()),
     mounted = useRef(true),
@@ -32,9 +47,19 @@ export function App() {
     [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
   const refresh = async () => {
     if (refreshing.current) return refreshing.current;
+    const exportTokens = new Map(
+      [...sessions.current].map(([id, session]) => [
+        id,
+        session.exportState === "unknown" ? session.exportToken : undefined,
+      ]),
+    );
     const request = api<ClientState>("/state")
       .then((value) => {
         if (mounted.current) {
+          for (const draft of value.drafts ?? [])
+            sessions.current
+              .get(draft.id)
+              ?.observe(draft, exportTokens.get(draft.id));
           setState(value);
           setConnection("");
         }
@@ -112,19 +137,32 @@ export function App() {
     setTab("records");
   };
   const current = sessions.current.get(selected);
+  useEffect(() => {
+    if (current?.exportedRequestId) {
+      setRecordId(current.exportedRequestId);
+      setPage("plans");
+      setTab("records");
+    }
+  }, [current?.exportedRequestId]);
   const exportDraft = () =>
     run(async () => {
       if (!current) return;
       let record: ExportedRequest;
+      await current.flush();
+      current.beginExport();
       try {
-        await current.flush();
         record = await api<ExportedRequest>(
           `/drafts/${current.draft.id}/export`,
           "POST",
           { revision: current.revision, content: current.content },
         );
       } catch (e) {
-        const actual = await readDraft(current.draft.id);
+        if (e instanceof HttpError && e.status >= 400 && e.status < 500) {
+          current.exportFailed();
+          throw e;
+        }
+        current.exportUnknown();
+        const actual = await current.checkExport();
         if (!actual.exportedRequestId) throw e;
         const latest = await api<ClientState>("/state");
         const existing = latest.requests?.find(
@@ -135,7 +173,7 @@ export function App() {
         record = existing;
         setState(latest);
       }
-      current.exportedRequestId = record.id;
+      current.confirmExport(record.id);
       setState((old) =>
         old?.requests
           ? {
@@ -206,49 +244,46 @@ export function App() {
   };
   const addFollow = (destination: string, action: Record<string, unknown>) =>
     run(async () => {
-      let draft: Draft;
-      if (destination === "new")
-        draft = await api<Draft>("/drafts", "POST", {});
-      else draft = await readDraft(destination);
-      const session = getSession(draft);
-      await session.flush();
-      const before = structuredClone(session.content),
-        revision = session.revision;
-      let updated: Draft;
-      try {
-        updated = await api<Draft>(`/drafts/${draft.id}/actions`, "POST", {
-          revision,
-          action,
-        });
-      } catch (e) {
-        const actual = await readDraft(draft.id),
-          oldPlan = parseDraft(before),
-          newPlan = parseDraft(actual.content);
-        const last = newPlan.actions.at(-1),
-          { name: requestedName, ...requested } = action;
-        const { name: actualName, ...appended } = last ?? {};
-        // 后端拥有去重后的动作名称；核实原计划完整保留、只增加了所请求的动作及一次 revision。
-        const samePrefix =
-          JSON.stringify({
-            ...newPlan,
-            actions: newPlan.actions.slice(0, -1),
-          }) === JSON.stringify(oldPlan);
-        if (
-          actual.revision !== revision + 1 ||
-          newPlan.actions.length !== oldPlan.actions.length + 1 ||
-          !samePrefix ||
-          typeof actualName !== "string" ||
-          JSON.stringify(appended) !== JSON.stringify(requested) ||
-          JSON.stringify(actual.content.pending ?? {}) !==
-            JSON.stringify(before.pending ?? {})
-        )
-          throw e;
-        updated = actual;
+      const pending = activeFollow ?? {
+        follow: follow!,
+        operation: new FollowOperation(destination, action, {
+          create: () => api<Draft>("/drafts", "POST", {}),
+          prepare: async (id) => {
+            const initial = await readDraft(id),
+              session = getSession(initial);
+            session.observe(initial);
+            await session.flush();
+            const actual = await readDraft(id);
+            session.observe(actual);
+            if (
+              !session.editable ||
+              actual.revision !== session.revision ||
+              !sameContent(actual.content, session.content)
+            )
+              throw Error("目标草稿与当前保存基线不一致，请先核对目标内容");
+            session.lockAppend();
+            return actual;
+          },
+          append: (id, revision, action) =>
+            api<Draft>(`/drafts/${id}/actions`, "POST", { revision, action }),
+          read: readDraft,
+        }),
+      };
+      if (!activeFollow) {
+        setActiveFollow(pending);
+        setFollowOperations((old) => [...old, pending]);
       }
-      session.accept(updated);
-      openDraft(updated);
-      setFollow(undefined);
-      setNotice("后续动作已加入草稿，请检查引用并填写执行时间");
+      await pending.operation.advance();
+      if (pending.operation.result) {
+        const updated = pending.operation.result,
+          session = getSession(updated);
+        session.unlockAppend();
+        session.accept(updated);
+        openDraft(updated);
+        setFollow(undefined);
+        setActiveFollow(undefined);
+        setNotice("后续动作已加入草稿，请检查引用并填写执行时间");
+      }
       await refresh();
     });
   const importFiles = async (files: File[]) => {
@@ -409,6 +444,28 @@ export function App() {
         </div>
       </aside>
       <main className="workspace">
+        {followOperations
+          .filter((item) => item.operation.phase !== "done")
+          .map((item, index) => (
+            <section className="notice" key={index}>
+              <strong>{item.follow.summary}</strong>
+              <p>{item.operation.error || "后续操作尚未结束"}</p>
+              {item.operation.targetId && (
+                <code>目标草稿：{item.operation.targetId}</code>
+              )}
+              <div className="button-row">
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setActiveFollow(item);
+                    setFollow(item.follow);
+                  }}
+                >
+                  返回核实后续操作
+                </button>
+              </div>
+            </section>
+          ))}
         <header className="page-header">
           <div>
             <p className="eyebrow">CAMCTL / 本地计划与文件</p>
@@ -444,6 +501,39 @@ export function App() {
             {notice}
           </p>
         )}
+        {[...sessions.current.values()]
+          .filter((session) => session.recoveryContent)
+          .map((session) => (
+            <section className="panel" key={session.draft.id}>
+              <h2>保留的额外编辑内容</h2>
+              <p>
+                原草稿 {session.draft.id}{" "}
+                已导出，以下本地输入未写入固定原请求，可明确保存为新草稿。
+              </p>
+              <textarea
+                className="code-input"
+                aria-label="保留的额外编辑内容"
+                readOnly
+                value={session.recoveryContent!.text}
+              />
+              <Facts value={session.recoveryContent!.pending} />
+              <button
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    const draft = await api<Draft>("/drafts", "POST", {
+                      content: session.recoveryContent,
+                    });
+                    session.completeRecovery();
+                    openDraft(draft);
+                    await refresh();
+                  })
+                }
+              >
+                将保留内容保存为新草稿
+              </button>
+            </section>
+          ))}
         {state.workerError && (
           <ErrorBox error={`文件后台处理：${state.workerError}`} />
         )}
@@ -456,7 +546,7 @@ export function App() {
             </p>
             <button
               onClick={() =>
-                setFollow({
+                startFollow({
                   action: { name: "状态同步", type: "report_status" },
                   summary: "补齐主机状态",
                   sync: true,
@@ -490,7 +580,7 @@ export function App() {
               <button
                 disabled={busy}
                 onClick={() =>
-                  setFollow({
+                  startFollow({
                     action: { name: "状态同步", type: "report_status" },
                     summary: "准备主机状态同步",
                     sync: true,
@@ -568,6 +658,12 @@ export function App() {
                     coverage={state.coverage ?? 0}
                     busy={busy}
                     onExport={exportDraft}
+                    checkExport={() =>
+                      run(async () => {
+                        await current.checkExport();
+                        await refresh();
+                      })
+                    }
                     savePreset={savePreset}
                   />
                 ) : (
@@ -587,7 +683,7 @@ export function App() {
                   run={run}
                   copy={copy}
                   handoff={handoff}
-                  follow={setFollow}
+                  follow={startFollow}
                   open={openRecord}
                 />
               ) : (
@@ -692,6 +788,19 @@ export function App() {
           busy={busy}
           close={() => setFollow(undefined)}
           submit={addFollow}
+          operation={activeFollow?.operation}
+          viewTarget={() =>
+            run(async () => {
+              if (activeFollow?.operation.targetId) {
+                openDraft(await readDraft(activeFollow.operation.targetId));
+              } else {
+                setPage("plans");
+                setTab("drafts");
+                await refresh();
+              }
+              setFollow(undefined);
+            })
+          }
         />
       )}
     </div>
@@ -736,12 +845,16 @@ function FollowupDialog({
   busy,
   close,
   submit,
+  operation,
+  viewTarget,
 }: {
   follow: Followup;
   drafts: Draft[];
   busy: boolean;
   close: () => void;
   submit: (id: string, action: Record<string, unknown>) => void;
+  operation?: FollowOperation;
+  viewTarget: () => void;
 }) {
   const [target, setTarget] = useState("new"),
     [name, setName] = useState(String(follow.action.name)),
@@ -776,68 +889,119 @@ function FollowupDialog({
       >
         <h2 id="follow-title">将后续动作加入草稿</h2>
         <p>{follow.summary}</p>
-        <fieldset disabled={busy}>
-          <label className="field">
-            动作名称
-            <input value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          {follow.sync && (
-            <>
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={full}
-                  onChange={(e) => setFull(e.target.checked)}
-                />
-                重新获取完整状态
-              </label>
-              {params ? (
-                <p className="notice">
-                  {params.scope === "full"
-                    ? "将获取完整状态；没有可用起点或已主动选择完整同步。"
-                    : `将从已完整保存的报告 ${params.after_report_id} 之后补齐。`}
-                </p>
-              ) : (
-                <p>正在取得可靠同步起点…</p>
+        {operation ? (
+          <>
+            <ErrorBox error={operation.error} />
+            {operation.targetId && (
+              <p className="identifier">固定目标：{operation.targetId}</p>
+            )}
+            <details>
+              <summary>查看本次固定动作与追加基线</summary>
+              <pre>
+                {JSON.stringify(
+                  { action: operation.action, baseline: operation.baseline },
+                  null,
+                  2,
+                )}
+              </pre>
+            </details>
+            {operation.actual && operation.phase === "conflict" && (
+              <details>
+                <summary>查看实际草稿记录</summary>
+                <pre>{JSON.stringify(operation.actual, null, 2)}</pre>
+              </details>
+            )}
+            <div className="button-row end">
+              <button disabled={busy} onClick={close}>
+                返回
+              </button>
+              <button disabled={busy} onClick={viewTarget}>
+                {operation.targetId ? "查看目标草稿" : "查看实际草稿列表"}
+              </button>
+              {operation.phase !== "creation_unknown" && (
+                <button
+                  className="primary"
+                  disabled={busy || operation.inProgress}
+                  onClick={() =>
+                    submit(operation.targetId ?? "new", operation.action)
+                  }
+                >
+                  {operation.phase === "unknown" ||
+                  operation.phase === "conflict"
+                    ? "重新核实追加结果"
+                    : operation.phase === "not_appended"
+                      ? "重试同一目标追加"
+                      : operation.phase === "target"
+                        ? "重试准备目标草稿"
+                        : "重新创建并追加"}
+                </button>
               )}
-              <ErrorBox error={error} />
-            </>
-          )}
-          <label className="field">
-            目标草稿
-            <select
-              aria-label="目标草稿"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-            >
-              <option value="new">新建一份草稿</option>
-              {drafts.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {draftName(d.content.text)} · {d.id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="muted">
-            保留已有动作；执行时间由你在草稿中明确填写。源对象的状态继续以主机报告为准。
-          </p>
-          <div className="button-row end">
-            <button onClick={close}>返回</button>
-            <button
-              className="primary"
-              disabled={!name || !!error || (follow.sync && !params)}
-              onClick={() =>
-                submit(target, {
-                  ...follow.action,
-                  name,
-                  ...(follow.sync ? { params } : {}),
-                })
-              }
-            >
-              加入草稿
-            </button>
-          </div>
-        </fieldset>
+            </div>
+          </>
+        ) : (
+          <fieldset disabled={busy}>
+            <label className="field">
+              动作名称
+              <input value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+            {follow.sync && (
+              <>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={full}
+                    onChange={(e) => setFull(e.target.checked)}
+                  />
+                  重新获取完整状态
+                </label>
+                {params ? (
+                  <p className="notice">
+                    {params.scope === "full"
+                      ? "将获取完整状态；没有可用起点或已主动选择完整同步。"
+                      : `将从已完整保存的报告 ${params.after_report_id} 之后补齐。`}
+                  </p>
+                ) : (
+                  <p>正在取得可靠同步起点…</p>
+                )}
+                <ErrorBox error={error} />
+              </>
+            )}
+            <label className="field">
+              目标草稿
+              <select
+                aria-label="目标草稿"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+              >
+                <option value="new">新建一份草稿</option>
+                {drafts.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {draftName(d.content.text)} · {d.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="muted">
+              保留已有动作；执行时间由你在草稿中明确填写。源对象的状态继续以主机报告为准。
+            </p>
+            <div className="button-row end">
+              <button onClick={close}>返回</button>
+              <button
+                className="primary"
+                disabled={!name || !!error || (follow.sync && !params)}
+                onClick={() =>
+                  submit(target, {
+                    ...follow.action,
+                    name,
+                    ...(follow.sync ? { params } : {}),
+                  })
+                }
+              >
+                加入草稿
+              </button>
+            </div>
+          </fieldset>
+        )}
       </section>
     </div>
   );
@@ -915,6 +1079,9 @@ function ImportPage({
                 ? (progress[file.id] ?? file.bytesReceived)
                 : file.bytesReceived;
             const requestIds = new Set<string>();
+            const accepted = state.reports?.find(
+              (r) => r.report_id === file.reportId,
+            );
             if (file.videoId)
               for (const plan of state.snapshot?.plans ?? [])
                 for (const action of plan.actions ?? [])
@@ -960,23 +1127,25 @@ function ImportPage({
                   </p>
                 )}
                 <div className="button-row">
-                  {file.reportId !== undefined &&
-                    state.reports?.some(
-                      (r) => r.report_id === file.reportId,
-                    ) && (
+                  {accepted && (
+                    <>
+                      {accepted.file_name !== file.fileName && (
+                        <small>下载已接受版本：{accepted.file_name}</small>
+                      )}
                       <button
                         onClick={() =>
                           run(() =>
                             download(
-                              `/reports/${file.reportId}/download`,
-                              file.fileName,
+                              `/reports/${accepted.report_id}/download`,
+                              accepted.file_name,
                             ),
                           )
                         }
                       >
                         下载已接受报告原文
                       </button>
-                    )}
+                    </>
+                  )}
                   {[...requestIds].map((id) => (
                     <button
                       className="inline"

@@ -58,9 +58,12 @@ const labels: Record<string, string> = {
   clock_untrusted: "主机时钟不可信",
   report_publication: "等待报告发布",
 };
+const own = (dictionary: Record<string, string>, key: string) =>
+  Object.hasOwn(dictionary, key) ? dictionary[key] : undefined;
+export const actionLabel = (value: string) => own(actionNames, value) ?? value;
 export const label = (value: unknown) =>
   typeof value === "string"
-    ? (labels[value] ?? actionNames[value] ?? value)
+    ? (own(labels, value) ?? own(actionNames, value) ?? value)
     : String(value);
 export function Badge({ value }: { value: unknown }) {
   return (
@@ -106,10 +109,10 @@ export function Issues({ issues }: { issues: Issue[] }) {
             {issues.map((issue, i) => (
               <li key={i}>
                 <code>{issue.path || "计划"}</code> ·{" "}
-                {issueHints[issue.code] ?? issue.message}
+                {own(issueHints, issue.code) ?? issue.message}
                 <small>
                   {issue.code}
-                  {issueHints[issue.code] ? ` · ${issue.message}` : ""}
+                  {own(issueHints, issue.code) ? ` · ${issue.message}` : ""}
                 </small>
               </li>
             ))}
@@ -121,44 +124,72 @@ export function Issues({ issues }: { issues: Issue[] }) {
     </div>
   );
 }
-export function Facts({ value }: { value: unknown }) {
+const statusFields = new Set([
+  "status",
+  "availability",
+  "outcome",
+  "check_status",
+]);
+const resultContainers = new Set([
+  "recording",
+  "start",
+  "stop",
+  "repair",
+  "check",
+  "source_copy",
+  "cleanup",
+  "checksum",
+  "media",
+  "duration",
+  "verification",
+  "work_file_cleanup",
+  "attempts",
+  "read_attempts",
+  "failures",
+  "items",
+  "result",
+]);
+export function Facts({
+  value,
+  business = false,
+}: {
+  value: unknown;
+  business?: boolean;
+}) {
   if (value === null) return <span>null</span>;
   if (Array.isArray(value))
     return value.length ? (
       <ol className="facts-array">
         {value.map((v, i) => (
           <li key={i}>
-            <Facts value={v} />
+            <Facts value={v} business={business} />
           </li>
         ))}
       </ol>
     ) : (
-      <span>无</span>
+      <span>[]</span>
     );
   if (typeof value === "object" && value)
     return (
       <dl className="facts">
         {Object.entries(value).map(([k, v]) => (
           <div key={k}>
-            <dt>{fieldNames[k] ?? k}</dt>
+            <dt>{own(fieldNames, k) ?? k}</dt>
             <dd>
-              <Facts value={v} />
+              {business && statusFields.has(k) && typeof v === "string" ? (
+                <span>{label(v)}</span>
+              ) : (
+                <Facts
+                  value={v}
+                  business={business && resultContainers.has(k)}
+                />
+              )}
             </dd>
           </div>
         ))}
       </dl>
     );
-  return (
-    <span>
-      {typeof value === "boolean"
-        ? value
-          ? "是"
-          : "否"
-        : value === undefined
-          ? "未提供"
-          : label(value)}
-    </span>
-  );
+  return <span>{value === undefined ? "未提供" : String(value)}</span>;
 }
 const fieldNames: Record<string, string> = {
   status: "状态",
