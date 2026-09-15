@@ -1,7 +1,7 @@
 {
   "report_id": 2,
-  "from_wm": 100,
-  "to_wm": 160,
+  "from_wm": 20,
+  "to_wm": 29,
   "plans": [
     {
       "plan_instance_id": "p-005",
