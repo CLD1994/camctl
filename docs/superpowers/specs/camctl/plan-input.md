@@ -1,12 +1,16 @@
 # 执行计划输入契约
 
-[返回设计总览](../2026-09-08-camctl-cli-design.md) · [请求受理与会话](protocol-session.md) · [客户端协议样例](client-protocol-examples.md)
+[返回设计总览](../2026-09-08-camctl-cli-design.md) · [请求受理与会话](protocol-session.md) · [客户端协议样例](client-protocol-examples.md) · [阅读路线](reading-guide.md)
 
-本专题定义客户端执行计划的公共字段、基本值类型、额外字段和校验顺序。`run <plan-path>` 与 `submit <plan-path>` 使用同一输入契约；受理事务、幂等和会话接管由[请求受理与会话](protocol-session.md#整份校验与原子受理)定义。拍摄参数的字段、范围和组合由目标驱动的参数类型契约定义，公共输入校验不调用设备。
+本专题定义客户端执行计划的公共字段、基本值类型、额外字段和校验顺序。`run <plan-path>` 与 `submit <plan-path>` 使用同一输入契约；受理事务、幂等和会话接管由[请求受理与会话](plan-acceptance.md#整份校验与原子受理)定义。拍摄参数的字段、范围和组合由目标驱动的参数类型契约定义，公共输入校验不调用设备。
+
+**阅读提示：** 先看[计划的作用与受理含义](concepts.md#为什么要区分计划产物和交付)，再按顶层字段、动作公共字段和校验顺序查阅。JSON 样例见[正常录像与取回](client-protocol-examples.md#样例一录像与取回成功)。
+
+本页使用的 UTF-8 是文本编码方式；ASCII 表示相应字符集，其中英文字母、数字和这里列出的符号用于机器标识。可读名称允许中文等 Unicode 字符，长度按 Unicode 码点计数，不按文件字节数计数。UTC 是协调世界时，计划时间统一按它解释。
 
 ## 输入文件与基本值类型
 
-输入文件采用 UTF-8，包含一个完整 JSON 值；根值必须是对象。JSON 前后允许空白，不能包含注释、尾随逗号、额外 JSON 值或非 JSON 数值常量。文件无法完整读取或不能解码、解析时，不从片段识别请求或 ACK，按[输入计划文件读取失败](protocol-session.md#输入计划文件读取失败)及输入解析失败规则处理。
+输入文件采用 UTF-8，包含一个完整 JSON 值；根值必须是对象。JSON 前后允许空白，不能包含注释、尾随逗号、额外 JSON 值或非 JSON 数值常量。文件无法完整读取或不能解码、解析时，不从片段识别请求或 ACK，按[输入计划文件读取失败](cli-commands.md#输入计划文件读取失败)及输入解析失败规则处理。
 
 对象成员名必须唯一，包括转义还原后同名的成员。出现重复成员名时，输入不能被无歧义地解释，按输入解析失败处理；不采用“保留第一项”或“保留最后一项”的解析结果继续受理。完整读取及这种无歧义解析在幂等查询之前完成。
 
@@ -46,7 +50,7 @@
 
 首次受理的顶层对象只允许上述字段。额外字段属于计划公共结构错误，拒绝整份计划；能独立处理的合法 ACK 仍按其规则处理。例如 `lastReportId` 不能替代 `last_report_id`，也不能因为拼写相似而自动更正。
 
-已受理 ID 的重送仅需具备可以无歧义提取的合法 `request_id`；本次正文的缺省、变化或额外字段均不参与重新校验。`last_report_id` 每次仍独立校验和处理。客户端正常重送应继续保留原计划内容，示例见[客户端确认与重送](protocol-session.md#客户端确认与重送)。
+已受理 ID 的重送仅需具备可以无歧义提取的合法 `request_id`；本次正文的缺省、变化或额外字段均不参与重新校验。`last_report_id` 每次仍独立校验和处理。客户端正常重送应继续保留原计划内容，示例见[客户端确认与重送](plan-acceptance.md#客户端确认与重送)。
 
 ## 动作公共字段
 
@@ -73,10 +77,10 @@
 
 | 动作 | `device_id` | `scheduled_at` | `params` | `policy` |
 | --- | --- | --- | --- | --- |
-| `camera_record` | 必填，且目标设备支持该能力 | 必填 | 必填；按[拍摄参数契约](camera-recording.md#计划字段与参数校验)校验 `type` 及其参数 | 必填，包含非负整数 `max_delay_ms` |
-| `obtain_action_outputs` | 省略；设备由来源决定 | 必填 | 必填；包含 `source`，可选 `output_ids`，见[取回参数](outputs.md#参数) | 可省略或为空对象 |
-| `delete_action_outputs` | 省略；设备或主机位置由产物决定 | 必填 | 必填，包含非空 `output_ids` 数组，见[清理参数](outputs.md#清理参数) | 可省略或为空对象 |
-| `cancel_task` | 省略；由取消目标决定 | 可省略 | 必填，包含目标对象 `target`，见[取消参数](protocol-session.md#取消参数) | 可省略或为空对象 |
+| `camera_record` | 必填，且目标设备支持该能力 | 必填 | 必填；按[拍摄参数契约](camera-capabilities.md#计划字段与参数校验)校验 `type` 及其参数 | 必填，包含非负整数 `max_delay_ms` |
+| `obtain_action_outputs` | 省略；设备由来源决定 | 必填 | 必填；包含 `source`，可选 `output_ids`，见[取回参数](obtaining-outputs.md#参数) | 可省略或为空对象 |
+| `delete_action_outputs` | 省略；设备或主机位置由产物决定 | 必填 | 必填，包含非空 `output_ids` 数组，见[清理参数](output-cleanup.md#清理参数) | 可省略或为空对象 |
+| `cancel_task` | 省略；由取消目标决定 | 可省略 | 必填，包含目标对象 `target`，见[取消参数](task-cancellation.md#取消参数) | 可省略或为空对象 |
 | `report_status` | 省略 | 可省略 | 可省略或为空对象；可提供 `scope: "full"`，见[完整同步入口](status-sync.md#请求入口) | 可省略或为空对象 |
 
 本表中要求省略的字段，即使提供合法类型的值，也属于该动作自身参数错误。例如给取回动作提供 `device_id` 不会改变产物实际来源，也不静默忽略该值。`report_status` 按报告与 ACK 规则确定覆盖区间，调用方可以请求完整同步，不接受任意指定历史水位。
