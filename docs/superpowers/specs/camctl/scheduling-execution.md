@@ -463,6 +463,8 @@ prepare_at
 
 但 `obtain_action_outputs` 的可撤回 delivery 属于独立交付生命周期，仍可按[正式产物与取回清理](outputs.md)的“取消取回”处理。
 
+发起取消的 `cancel_task` 等待本次适用的有限处理结束后再给出最终结果，具体汇总和恢复规则见[取消动作的完成时机](protocol-session.md#取消动作的完成时机)。目标已保存取消标记、目标动作已经终态与本次取消处理完成分别判断。
+
 ## 时钟防御
 
 ### submit

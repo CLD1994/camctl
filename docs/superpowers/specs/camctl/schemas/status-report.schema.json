@@ -1,0 +1,2603 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "camctl 第一版状态报告",
+  "description": "定义报告字段与局部结构约束；跨字段、跨实体、历史及累计覆盖检查见 report-format.md。输入原值与错误 details 的内容按各自契约解释。",
+  "type": "object",
+  "properties": {
+    "report_id": {
+      "$ref": "#/$defs/positive_integer"
+    },
+    "from_wm": {
+      "$ref": "#/$defs/uint"
+    },
+    "to_wm": {
+      "$ref": "#/$defs/uint"
+    },
+    "plans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/plan"
+      }
+    },
+    "plan_file_diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    }
+  },
+  "required": [
+    "report_id",
+    "from_wm",
+    "to_wm"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$(?![\\s\\S])"
+    },
+    "uint": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positive_integer": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "nonnegative_number": {
+      "type": "number",
+      "minimum": 0
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$(?![\\s\\S])",
+      "description": "首尾 Unicode 空白按输入契约另作语义校验，不依赖不同正则引擎对空白的不同解释。"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?$(?![\\s\\S])",
+      "description": "UTC 时间字面量；日期和时间的实际有效性另按语义校验。"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$(?![\\s\\S])"
+    },
+    "action_type": {
+      "enum": [
+        "camera_record",
+        "obtain_action_outputs",
+        "delete_action_outputs",
+        "cancel_task",
+        "report_status"
+      ]
+    },
+    "action_status": {
+      "enum": [
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "expired",
+        "canceled"
+      ]
+    },
+    "plan_status": {
+      "enum": [
+        "pending",
+        "running",
+        "completed"
+      ]
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/text"
+        },
+        "stage": {
+          "$ref": "#/$defs/text"
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "stage",
+        "details"
+      ],
+      "additionalProperties": false,
+      "description": "错误码及阶段为生产者登记的标识；驱动可提供具体原因。未知码保留展示，不改变实体状态或合并规则。details 按对应错误契约解释。"
+    },
+    "waiting": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "scheduled_time",
+            "device_busy",
+            "device_reserved",
+            "retry_delay",
+            "source_actions",
+            "copy_slot",
+            "readers",
+            "clock_untrusted",
+            "report_publication"
+          ]
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "attempt": {
+      "type": "object",
+      "properties": {
+        "attempt_no": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "succeeded",
+            "failed",
+            "unknown"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "attempt_no",
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "error"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "attempts": {
+      "type": "object",
+      "properties": {
+        "max_attempts": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attempt"
+          }
+        }
+      },
+      "required": [
+        "max_attempts",
+        "attempts"
+      ],
+      "additionalProperties": false
+    },
+    "effect": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "registered",
+            "compensating",
+            "compensated",
+            "compensation_failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "compensation_failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "residual": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "possibly_recording",
+            "stopped"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "emergency_stop": {
+      "type": "object",
+      "properties": {
+        "flow_id": {
+          "$ref": "#/$defs/id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "max_attempts": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "attempts_used": {
+          "$ref": "#/$defs/uint"
+        },
+        "outcome": {
+          "enum": [
+            "stopped",
+            "unconfirmed",
+            "not_attempted"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "flow_id",
+        "session_id",
+        "attempts_used",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "not_attempted"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "attempts_used": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "attempts_used": {
+                "minimum": 1
+              }
+            },
+            "required": [
+              "attempts_used"
+            ]
+          },
+          "then": {
+            "required": [
+              "max_attempts"
+            ]
+          }
+        }
+      ]
+    },
+    "followup_stop": {
+      "type": "object",
+      "properties": {
+        "flow_id": {
+          "$ref": "#/$defs/id"
+        },
+        "trigger_action_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "max_attempts": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attempt"
+          }
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "stopped",
+            "failed",
+            "canceled",
+            "expired"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "flow_id",
+        "trigger_action_instance_id",
+        "max_attempts",
+        "attempts",
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "canceled",
+                  "expired"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "attempts": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "recording": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/attempts"
+        },
+        "stop": {
+          "$ref": "#/$defs/attempts"
+        },
+        "control_elapsed_s": {
+          "$ref": "#/$defs/nonnegative_number"
+        },
+        "effect": {
+          "$ref": "#/$defs/effect"
+        },
+        "residual": {
+          "$ref": "#/$defs/residual"
+        },
+        "emergency_stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/emergency_stop"
+          }
+        },
+        "followup_stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/followup_stop"
+          }
+        }
+      },
+      "required": [
+        "start",
+        "stop"
+      ],
+      "additionalProperties": false
+    },
+    "repair": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "undetermined",
+            "not_needed",
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+            "canceled"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "media_duration": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "available"
+              ]
+            },
+            "seconds": {
+              "$ref": "#/$defs/nonnegative_number"
+            }
+          },
+          "required": [
+            "status",
+            "seconds"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "media": {
+      "type": "object",
+      "properties": {
+        "check_status": {
+          "enum": [
+            "not_performed",
+            "running",
+            "completed",
+            "failed",
+            "unconfirmed"
+          ]
+        },
+        "duration": {
+          "$ref": "#/$defs/media_duration"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/error"
+          }
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "check_status",
+        "duration"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "check_status": {
+                "const": "not_performed"
+              }
+            },
+            "required": [
+              "check_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "duration": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "unknown"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "issues"
+                  ]
+                },
+                {
+                  "required": [
+                    "error"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "check_status": {
+                "enum": [
+                  "failed",
+                  "unconfirmed"
+                ]
+              }
+            },
+            "required": [
+              "check_status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "camera_result": {
+      "type": "object",
+      "properties": {
+        "recording": {
+          "$ref": "#/$defs/recording"
+        },
+        "check": {
+          "$ref": "#/$defs/media"
+        },
+        "repair": {
+          "$ref": "#/$defs/repair"
+        },
+        "source_copy": {
+          "$ref": "#/$defs/copy"
+        },
+        "discard_cleanup": {
+          "$ref": "#/$defs/work_file_cleanup"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "obtain_failure": {
+      "type": "object",
+      "properties": {
+        "source_action_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/id"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "source_action_instance_id",
+        "error"
+      ],
+      "additionalProperties": false,
+      "dependentRequired": {
+        "delivery_id": [
+          "output_id"
+        ]
+      }
+    },
+    "obtain_result": {
+      "type": "object",
+      "properties": {
+        "failures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/obtain_failure"
+          }
+        }
+      },
+      "required": [
+        "failures"
+      ],
+      "additionalProperties": false
+    },
+    "delete_item": {
+      "type": "object",
+      "properties": {
+        "output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+            "canceled"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "deleted",
+            "already_cleaned",
+            "absence_confirmed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "output_id",
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "outcome"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "succeeded"
+                }
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "outcome"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "delete_result": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/delete_item"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "withdrawal": {
+      "type": "object",
+      "properties": {
+        "delivery_id": {
+          "$ref": "#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "withdrawn",
+            "not_retractable",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "cancel_item": {
+      "type": "object",
+      "properties": {
+        "action_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "canceled",
+            "already_terminal"
+          ]
+        },
+        "withdrawals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/withdrawal"
+          }
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "action_instance_id",
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "outcome"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "succeeded"
+                }
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "outcome"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "cancel_result": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cancel_item"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "report_result": {
+      "type": "object",
+      "properties": {
+        "report_id": {
+          "$ref": "#/$defs/positive_integer"
+        }
+      },
+      "required": [
+        "report_id"
+      ],
+      "additionalProperties": false
+    },
+    "checksum": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not_obtained"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "available"
+              ]
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "status",
+            "sha256"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "cleanup": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "not_requested",
+            "pending",
+            "running",
+            "completed",
+            "incomplete",
+            "canceled"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "incomplete"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_action_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "original",
+            "repaired"
+          ]
+        },
+        "original_name": {
+          "$ref": "#/$defs/text"
+        },
+        "media_type": {
+          "$ref": "#/$defs/text"
+        },
+        "size": {
+          "$ref": "#/$defs/uint"
+        },
+        "derived_from_output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "availability": {
+          "enum": [
+            "available",
+            "restricted",
+            "cleaned",
+            "missing",
+            "unknown"
+          ]
+        },
+        "cleanup": {
+          "$ref": "#/$defs/cleanup"
+        },
+        "checksum": {
+          "$ref": "#/$defs/checksum"
+        },
+        "media": {
+          "$ref": "#/$defs/media"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "output_id",
+        "source_action_instance_id",
+        "kind",
+        "availability",
+        "cleanup",
+        "checksum",
+        "media"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "repaired"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "derived_from_output_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "original"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "derived_from_output_id"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "enum": [
+                  "missing",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "availability"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "const": "cleaned"
+              }
+            },
+            "required": [
+              "availability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "cleanup": {
+                "properties": {
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "cleanup": {
+                "properties": {
+                  "status": {
+                    "const": "completed"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            },
+            "required": [
+              "cleanup"
+            ]
+          },
+          "then": {
+            "properties": {
+              "availability": {
+                "const": "cleaned"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "work_file_cleanup": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "not_needed",
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "unknown"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "failed",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "not_performed",
+            "running",
+            "matched",
+            "mismatched",
+            "source_checksum_unavailable",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "copy": {
+      "type": "object",
+      "properties": {
+        "max_read_attempts": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "read_idle_timeout_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_recopies": {
+          "$ref": "#/$defs/uint"
+        },
+        "recopies_used": {
+          "$ref": "#/$defs/uint"
+        },
+        "round": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "committed_bytes": {
+          "$ref": "#/$defs/uint"
+        },
+        "source_size": {
+          "$ref": "#/$defs/uint"
+        },
+        "read_attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attempt"
+          }
+        },
+        "verification": {
+          "$ref": "#/$defs/verification"
+        },
+        "work_file_cleanup": {
+          "$ref": "#/$defs/work_file_cleanup"
+        }
+      },
+      "required": [
+        "max_read_attempts",
+        "read_idle_timeout_s",
+        "max_recopies",
+        "recopies_used",
+        "round",
+        "committed_bytes",
+        "read_attempts",
+        "verification",
+        "work_file_cleanup"
+      ],
+      "additionalProperties": false
+    },
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "delivery_id": {
+          "$ref": "#/$defs/id"
+        },
+        "output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_action_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "file_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*\\.[A-Za-z0-9]+$(?![\\s\\S])"
+        },
+        "display_name": {
+          "$ref": "#/$defs/text"
+        },
+        "size": {
+          "$ref": "#/$defs/uint"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "preparing",
+            "prepared",
+            "publishing",
+            "published",
+            "failed",
+            "canceled",
+            "withdrawn"
+          ]
+        },
+        "copy": {
+          "$ref": "#/$defs/copy"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "delivery_id",
+        "output_id",
+        "source_action_instance_id",
+        "file_name",
+        "display_name",
+        "status",
+        "copy"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "prepared",
+                  "publishing",
+                  "published",
+                  "withdrawn"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "size",
+              "sha256"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "prepared",
+                  "publishing",
+                  "published",
+                  "withdrawn"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "copy": {
+                "properties": {
+                  "verification": {
+                    "properties": {
+                      "status": {
+                        "enum": [
+                          "matched",
+                          "source_checksum_unavailable"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "action_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "type": {
+          "$ref": "#/$defs/action_type"
+        },
+        "device_id": true,
+        "scheduled_at": true,
+        "group": true,
+        "policy": true,
+        "input_params": true,
+        "extra_input_fields": {
+          "type": "object",
+          "minProperties": 1
+        },
+        "effective_params": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "$ref": "#/$defs/text"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/action_status"
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "started": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "started"
+          ],
+          "additionalProperties": false
+        },
+        "expiration_reason": {
+          "enum": [
+            "window_missed",
+            "window_exhausted"
+          ]
+        },
+        "waiting": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/waiting"
+          },
+          "minItems": 1
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        },
+        "result": {
+          "type": "object"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/output"
+          }
+        },
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/delivery"
+          }
+        }
+      },
+      "required": [
+        "action_instance_id",
+        "name",
+        "type",
+        "status",
+        "execution"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "pending"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "error"
+                  ]
+                },
+                {
+                  "required": [
+                    "expiration_reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "result"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                },
+                {
+                  "required": [
+                    "deliveries"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "running",
+                  "succeeded"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "error"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              },
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            "required": [
+              "status",
+              "execution"
+            ]
+          },
+          "then": {
+            "properties": {
+              "error": {
+                "properties": {
+                  "stage": {
+                    "const": "admission"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "error": {
+                "properties": {
+                  "stage": {
+                    "const": "admission"
+                  }
+                },
+                "required": [
+                  "stage"
+                ]
+              }
+            },
+            "required": [
+              "error"
+            ]
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              },
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "expired"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "const": "camera_record"
+              }
+            },
+            "required": [
+              "expiration_reason"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "expired"
+                }
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "expiration_reason"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "expired",
+                  "canceled"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "waiting"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              },
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": false
+                  }
+                }
+              },
+              "error": {
+                "properties": {
+                  "stage": {
+                    "const": "admission"
+                  }
+                },
+                "required": [
+                  "stage"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "execution",
+              "error"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "effective_params"
+                  ]
+                },
+                {
+                  "required": [
+                    "result"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                },
+                {
+                  "required": [
+                    "deliveries"
+                  ]
+                },
+                {
+                  "required": [
+                    "waiting"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "camera_record"
+                }
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "effective_params"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "obtain_action_outputs"
+                }
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "deliveries"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "camera_record"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "expired",
+                  "canceled"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outputs": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "status": {
+                  "const": "failed"
+                },
+                "execution": {
+                  "properties": {
+                    "started": {
+                      "const": false
+                    }
+                  }
+                },
+                "error": {
+                  "properties": {
+                    "stage": {
+                      "const": "admission"
+                    }
+                  },
+                  "required": [
+                    "stage"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "execution",
+                "error"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "device_id": {
+                "$ref": "#/$defs/id"
+              },
+              "scheduled_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "group": {
+                "$ref": "#/$defs/name"
+              },
+              "policy": {
+                "type": "object"
+              },
+              "input_params": {
+                "type": "object"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "extra_input_fields"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "properties": {
+                  "type": {
+                    "not": {
+                      "const": "camera_record"
+                    }
+                  }
+                }
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "const": "failed"
+                    },
+                    "execution": {
+                      "properties": {
+                        "started": {
+                          "const": false
+                        }
+                      }
+                    },
+                    "error": {
+                      "properties": {
+                        "stage": {
+                          "const": "admission"
+                        }
+                      },
+                      "required": [
+                        "stage"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "execution",
+                    "error"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "device_id"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "policy": {
+                "maxProperties": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "properties": {
+                  "type": {
+                    "const": "obtain_action_outputs"
+                  }
+                }
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "const": "failed"
+                    },
+                    "execution": {
+                      "properties": {
+                        "started": {
+                          "const": false
+                        }
+                      }
+                    },
+                    "error": {
+                      "properties": {
+                        "stage": {
+                          "const": "admission"
+                        }
+                      },
+                      "required": [
+                        "stage"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "execution",
+                    "error"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "group"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "obtain_action_outputs",
+                      "delete_action_outputs"
+                    ]
+                  }
+                }
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "const": "failed"
+                    },
+                    "execution": {
+                      "properties": {
+                        "started": {
+                          "const": false
+                        }
+                      }
+                    },
+                    "error": {
+                      "properties": {
+                        "stage": {
+                          "const": "admission"
+                        }
+                      },
+                      "required": [
+                        "stage"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "execution",
+                    "error"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "scheduled_at",
+              "input_params"
+            ]
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "properties": {
+                  "type": {
+                    "const": "cancel_task"
+                  }
+                }
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "const": "failed"
+                    },
+                    "execution": {
+                      "properties": {
+                        "started": {
+                          "const": false
+                        }
+                      }
+                    },
+                    "error": {
+                      "properties": {
+                        "stage": {
+                          "const": "admission"
+                        }
+                      },
+                      "required": [
+                        "stage"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "execution",
+                    "error"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "input_params"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "camera_record"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/camera_result"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "obtain_action_outputs"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/obtain_result"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "delete_action_outputs"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/delete_result"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cancel_task"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/cancel_result"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "report_status"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/report_result"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "properties": {
+                  "type": {
+                    "const": "camera_record"
+                  }
+                }
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "const": "failed"
+                    },
+                    "execution": {
+                      "properties": {
+                        "started": {
+                          "const": false
+                        }
+                      }
+                    },
+                    "error": {
+                      "properties": {
+                        "stage": {
+                          "const": "admission"
+                        }
+                      },
+                      "required": [
+                        "stage"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "execution",
+                    "error"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "device_id",
+              "scheduled_at",
+              "input_params",
+              "effective_params",
+              "policy"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "obtain_action_outputs",
+                  "delete_action_outputs",
+                  "cancel_task"
+                ]
+              },
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "execution"
+            ]
+          },
+          "then": {
+            "required": [
+              "result"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "report_status"
+              },
+              "status": {
+                "const": "succeeded"
+              }
+            },
+            "required": [
+              "type",
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "result"
+            ]
+          }
+        }
+      ]
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "plan_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "request_id": {
+          "$ref": "#/$defs/id"
+        },
+        "plan_seq": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "status": {
+          "$ref": "#/$defs/plan_status"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        }
+      },
+      "required": [
+        "plan_instance_id",
+        "request_id",
+        "plan_seq",
+        "created_at",
+        "name",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "properties": {
+        "diagnostic_id": {
+          "$ref": "#/$defs/id"
+        },
+        "file_name": {
+          "$ref": "#/$defs/text"
+        },
+        "request_id": {
+          "$ref": "#/$defs/id"
+        },
+        "errors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/error"
+              },
+              {
+                "properties": {
+                  "stage": {
+                    "enum": [
+                      "input_read",
+                      "input_parse",
+                      "admission",
+                      "ack"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "diagnostic_id",
+        "file_name",
+        "errors"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "errors": {
+                "contains": {
+                  "properties": {
+                    "stage": {
+                      "enum": [
+                        "input_read",
+                        "input_parse"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "stage"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "errors"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "request_id"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

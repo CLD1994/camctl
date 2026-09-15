@@ -56,7 +56,7 @@ camctl CLI
 | 客户端持久化 | SQLite；由后端保存客户端数据，并统一处理报告合并和累计确认进度 |
 | 应用部署 | Docker Compose 管理单个应用容器；前端网页资源和后端随同一应用版本交付 |
 
-固定的计划、报告和接口结构通过共享的 TypeScript 类型及相关代码保持一致。设备专属拍摄参数按部署时导入的 JSON Schema 在运行时校验；具体字段由驱动定义，遵守[拍摄参数的 JSON Schema](camctl/camera-recording.md#拍摄参数的-json-schema)。
+固定的计划和接口结构通过共享的 TypeScript 类型及相关代码保持一致；报告公共类型与结构校验从[状态报告字段契约](camctl/report-format.md)的 Schema 读取或生成。设备专属拍摄参数按部署时导入的 JSON Schema 在运行时校验；具体字段由驱动定义，遵守[拍摄参数的 JSON Schema](camctl/camera-recording.md#拍摄参数的-json-schema)。
 
 拍摄参数以根据 Schema 生成的表单作为主要编辑入口，保留 JSON 编辑以处理复杂参数。两种编辑方式共用当前动作的完整参数和校验规则；正常流程、视图切换及导出前校验见[客户端计划编辑](camctl/client-editing.md)。
 
@@ -235,11 +235,12 @@ depends_on
 | [正式产物与取回清理](camctl/outputs.md) | output、普通 delivery、选择、取回、相机视频断点续传、文件名、清理、保留和重取 | 设备文件能力、文件交接 |
 | [文件交接](camctl/file-handoff.md) | 目录所有权、原子发布、领取、撤回竞争及恢复 | 主程序协作 |
 | [状态报告与累计确认](camctl/status-reports.md) | 业务变化水位、不可变快照、ACK、报告替换和补投 | 业务状态、请求入口、文件交接 |
+| [状态报告字段契约](camctl/report-format.md) | 报告 JSON Schema、完整自身字段、实体子集合、结果表达和语义校验 | 冻结历史、动作结果、产物与交付、累计覆盖 |
 | [客户端完整状态同步](camctl/status-sync.md) | 完整同步入口、持久化责任、合格 ACK、恢复后的增量衔接 | 单客户端累计 ACK、报告覆盖与文件交接 |
 
 每项契约只在责任专题中完整定义。其他专题说明输入、消费方式和链接；配置字段、持久化记录、验收要求和未决事项随责任专题维护。
 
-客户端对接可结合[客户端协议样例](camctl/client-protocol-examples.md)阅读：样例提供正常成功、单动作参数错误、组取回部分失败和来源无产物的完整 JSON，以及 ACK 输入和增量合并结果。
+客户端对接可结合[客户端协议样例](camctl/client-protocol-examples.md)阅读：样例提供正常成功、单动作参数错误、组取回部分失败、来源无产物、取消与清理的完整 JSON，以及 ACK 输入和增量合并结果。
 
 部署对接可结合[首次部署与联调样例](camctl/deployment-example.md)阅读：样例提供通用配置覆盖和无设备报告检查计划，串联初始化、能力说明的手工交接、主程序调用及客户端报告确认。
 

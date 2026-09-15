@@ -1,0 +1,223 @@
+{
+  "report_id": 3,
+  "from_wm": 100,
+  "to_wm": 200,
+  "plans": [
+    {
+      "plan_instance_id": "p-001",
+      "request_id": "req-001",
+      "plan_seq": 1,
+      "created_at": "2026-09-13 08:00:00",
+      "name": "正常采集",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-001",
+          "name": "主录像",
+          "type": "camera_record",
+          "device_id": "cam0",
+          "scheduled_at": "2026-09-13 09:00:00",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "input_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "effective_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "recording": {
+              "start": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "stop": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "control_elapsed_s": 60,
+              "effect": {
+                "status": "compensated"
+              }
+            },
+            "repair": {
+              "status": "not_needed"
+            }
+          },
+          "outputs": [
+            {
+              "output_id": "o-001",
+              "source_action_instance_id": "a-001",
+              "kind": "original",
+              "original_name": "VID_0001.mp4",
+              "media_type": "video/mp4",
+              "size": 8388608,
+              "availability": "cleaned",
+              "cleanup": {
+                "status": "completed"
+              },
+              "checksum": {
+                "status": "available",
+                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "media": {
+                "check_status": "not_performed",
+                "duration": {
+                  "status": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "plan_instance_id": "p-005",
+      "request_id": "req-005",
+      "plan_seq": 2,
+      "created_at": "2026-09-15 09:00:00",
+      "name": "取消演练",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-501",
+          "name": "待取消录像",
+          "type": "camera_record",
+          "device_id": "cam0",
+          "scheduled_at": "2026-09-15 10:00:00",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "input_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "effective_params": {
+            "type": "timed",
+            "duration_s": 60
+          },
+          "status": "canceled",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "recording": {
+              "start": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "stop": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "effect": {
+                "status": "compensated"
+              }
+            },
+            "discard_cleanup": {
+              "status": "completed"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "plan_instance_id": "p-006",
+      "request_id": "req-006",
+      "plan_seq": 3,
+      "created_at": "2026-09-15 09:01:00",
+      "name": "取消与清理",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-601",
+          "name": "取消录像",
+          "type": "cancel_task",
+          "scheduled_at": "2026-09-15 10:00:10",
+          "input_params": {
+            "target": {
+              "request_id": "req-005"
+            }
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "items": [
+              {
+                "action_instance_id": "a-501",
+                "status": "succeeded",
+                "outcome": "canceled"
+              }
+            ]
+          }
+        },
+        {
+          "action_instance_id": "a-602",
+          "name": "清理原有录像",
+          "type": "delete_action_outputs",
+          "scheduled_at": "2026-09-15 10:00:15",
+          "input_params": {
+            "output_ids": [
+              "o-001"
+            ]
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "items": [
+              {
+                "output_id": "o-001",
+                "status": "succeeded",
+                "outcome": "deleted"
+              }
+            ]
+          }
+        },
+        {
+          "action_instance_id": "a-603",
+          "name": "报告进度",
+          "type": "report_status",
+          "scheduled_at": "2026-09-15 10:00:10",
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "report_id": 2
+          }
+        }
+      ]
+    }
+  ]
+}

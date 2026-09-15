@@ -1,0 +1,21 @@
+{
+  "request_id": "req-005",
+  "created_at": "2026-09-15 09:00:00",
+  "name": "取消演练",
+  "actions": [
+    {
+      "name": "待取消录像",
+      "type": "camera_record",
+      "device_id": "cam0",
+      "scheduled_at": "2026-09-15 10:00:00",
+      "policy": {
+        "max_delay_ms": 5000
+      },
+      "params": {
+        "type": "timed",
+        "duration_s": 60
+      }
+    }
+  ],
+  "last_report_id": 1
+}
