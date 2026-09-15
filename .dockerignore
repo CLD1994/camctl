@@ -1,0 +1,9 @@
+.git
+.superpowers
+.local
+node_modules
+data
+dist
+test-results
+playwright-report
+tmp

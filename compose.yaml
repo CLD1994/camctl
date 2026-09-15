@@ -1,0 +1,12 @@
+services:
+  client:
+    build: .
+    ports:
+      - "127.0.0.1:4310:4310"
+    volumes:
+      - type: bind
+        source: ./data
+        target: /app/data
+        bind:
+          create_host_path: false
+    restart: unless-stopped

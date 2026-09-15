@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Application } from '../../src/server/application';
@@ -15,4 +15,7 @@ it('未完成控件输入阻止导出旧合法对象',()=>{const app=setup();con
 it('非法导出保留可编辑草稿',()=>{const app=setup();const d=app.createDraft({text:'[]'});expect(()=>app.exportDraft(d.id,1,d.content)).toThrow();expect(app.draft(d.id).exportedRequestId).toBeUndefined();});
 it('重复人工标记保持首次时间',()=>{const app=setup();const d=app.createDraft(content);const r=app.exportDraft(d.id,1,content);const mark=app.markHandoff(r.id,true);expect(app.markHandoff(r.id,true).handedAt).toBe(mark.handedAt);expect(app.markHandoff(r.id,false).handedAt).toBeNull();expect(app.request(r.id).body).toEqual(r.body);});
 it('复制原请求生成独立草稿和新请求',()=>{const app=setup();const d=app.createDraft(content);const r=app.exportDraft(d.id,1,content);const copy=app.copyRequest(r.id);const next=app.exportDraft(copy.id,copy.revision,copy.content);expect(next.id).not.toBe(r.id);expect(next.body.name).toBe(r.body.name);});
+it('说明重载失败保留此前完整有效目录',()=>{const app=setup();const path=join(app.store.directory,'device-capabilities.json');writeFileSync(path,readFileSync('docs/superpowers/specs/camctl/examples/capabilities/demo-device.json'));const loaded=app.reloadCapabilities();expect(loaded.active?.devices).toHaveLength(1);writeFileSync(path,'bad JSON');const failed=app.reloadCapabilities();expect(failed.error).not.toBeNull();expect(failed.active).toEqual(loaded.active);});
+it('有效空能力目录替换旧目录',()=>{const app=setup();writeFileSync(join(app.store.directory,'device-capabilities.json'),'{"devices":[]}');expect(app.reloadCapabilities()).toMatchObject({active:{devices:[]},error:null});});
+it('非法预设更新保留原合法参数',()=>{const app=setup();writeFileSync(join(app.store.directory,'device-capabilities.json'),readFileSync('docs/superpowers/specs/camctl/examples/capabilities/demo-device.json'));app.reloadCapabilities();const first=app.savePreset({name:'常用',deviceId:'demo_cam0',actionType:'camera_record',params:{type:'demo_adjustable',resolution:'4K',frame_rate_fps:30}});expect(()=>app.savePreset({...first,params:{type:'demo_adjustable',resolution:'4K',frame_rate_fps:60}})).toThrow();expect(app.store.get('presets',first.id)).toEqual(first);});
 });
