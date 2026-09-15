@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
+import { Readable } from "node:stream";
 import { Application } from "../../src/server/application";
 import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
@@ -11,6 +12,73 @@ const clean: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const c of clean.splice(0)) await c();
 });
+
+it.each(["play", "download", "range"] as const)(
+  "资格在等待中失效时 HTTP %s 不发送视频",
+  async (mode) => {
+    const dir = mkdtempSync(join(tmpdir(), "camctl-http-gate-"));
+    const app = new Application(dir);
+    app.store.initialize();
+    const initial = new Files(app);
+    const bytes = Buffer.from("video");
+    app.applyReports([reportInput(mappedReport(bytes))]);
+    const file = initial.createBatch([
+      { fileName: "d-001.mp4", size: bytes.length, kind: "video" },
+    ]).files[0];
+    await initial.upload(file.id, Readable.from([bytes]));
+    await initial.idle();
+    let entered!: () => void;
+    let release!: () => void;
+    let calls = 0;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const worker = new Files(app, {
+      async fingerprint() {
+        throw Error("此检查不应重新核验摘要");
+      },
+      async remove() {
+        throw Error("此检查不应清理文件");
+      },
+      async readable() {
+        if (++calls === 1) {
+          entered();
+          await gate;
+        } else throw Error("无法读取");
+      },
+    });
+    const server = await new Promise<Server>((resolve) => {
+      const s = createHttpApp(app, worker).listen(0, "127.0.0.1", () =>
+        resolve(s),
+      );
+    });
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    clean.push(async () => {
+      release();
+      await worker.idle();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      app.store.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    const pending = fetch(
+      `${base}/api/videos/${file.id}/content${mode === "download" ? "?download=true" : ""}`,
+      { headers: mode === "range" ? { Range: "bytes=0-1" } : {} },
+    );
+    await started;
+    await expect(worker.openVideo(file.id)).rejects.toThrow();
+    release();
+    const response = await pending;
+    expect(response.status).toBe(409);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect((await response.json()).code).toBe("video_not_verified");
+    expect(worker.videos()[0].status).toBe("unavailable");
+  },
+);
 async function setup() {
   const dir = mkdtempSync(join(tmpdir(), "camctl-http-"));
   const app = new Application(dir);

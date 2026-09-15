@@ -592,9 +592,7 @@ export class Files {
       .all<Video>("videos")
       .map((v) => ({ ...v, path: join(this.store.directory, v.path) }));
   }
-  async openVideo(id: string): Promise<Video> {
-    const video = this.videos().find((v) => v.id === id);
-    if (!video) throw new AppError("not_found", "视频不存在", 404);
+  private requirePlayable(video: Video): void {
     if (video.status !== "verified" || !video.verifiedAgainst)
       throw new AppError(
         "video_not_verified",
@@ -608,6 +606,11 @@ export class Files {
         "当前报告映射不满足已保存核验结果",
         409,
       );
+  }
+  async openVideo(id: string): Promise<Video> {
+    const video = this.videos().find((v) => v.id === id);
+    if (!video) throw new AppError("not_found", "视频不存在", 404);
+    this.requirePlayable(video);
     try {
       await this.io.readable(video.path, video.size);
     } catch (error) {
@@ -617,6 +620,7 @@ export class Files {
     const current = this.current(video.fileName);
     if (current?.id !== id)
       throw new AppError("not_found", "当前视频副本已变更", 404);
+    this.requirePlayable(current);
     return current;
   }
   async recover() {

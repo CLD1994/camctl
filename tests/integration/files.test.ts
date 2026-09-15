@@ -575,3 +575,99 @@ it("已有核验依据与实际内容矛盾时不替换为任意副本", async (
       ?.processed,
   ).toBe(false);
 });
+
+it("同一副本被并发检查标为不可用后，先前请求不能继续开放", async () => {
+  const { app, files } = setup();
+  const bytes = Buffer.from("video");
+  const name = mapping(app, bytes);
+  await upload(files, name, bytes);
+  const id = files.videos()[0].id;
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const worker = new Files(app, {
+    ...realEffects,
+    async readable() {
+      if (++calls === 1) {
+        entered();
+        await gate;
+      } else throw new Error("文件不可读");
+    },
+  });
+  const earlier = worker.openVideo(id);
+  await started;
+  await expect(worker.openVideo(id)).rejects.toThrow();
+  expect(worker.videos()[0].status).toBe("unavailable");
+  release();
+  await expect(earlier).rejects.toMatchObject({ code: "video_not_verified" });
+  expect(app.store.get<ImportFile>("imports", id)?.status).toBe("unavailable");
+});
+
+it.each([
+  "waiting_report",
+  "verifying",
+  "mismatch",
+  "unavailable",
+  "missing_basis",
+  "missing_mapping",
+  "changed_mapping",
+  "data_fault",
+  "verified",
+] as const)("异步读取后的最终下载资格：%s", async (condition) => {
+  const { app, files } = setup();
+  const bytes = Buffer.from("video");
+  const name = mapping(app, bytes);
+  await upload(files, name, bytes);
+  const prior = files.videos()[0];
+  let restore = () => {};
+  const worker = new Files(app, {
+    ...realEffects,
+    async readable() {
+      if (condition === "data_fault") {
+        const spy = vi.spyOn(app, "snapshot").mockImplementation(() => {
+          throw new DataError("映射无法读取");
+        });
+        restore = () => spy.mockRestore();
+      } else if (condition === "missing_mapping") {
+        const spy = vi
+          .spyOn(app, "snapshot")
+          .mockReturnValue({ report_id: 1, from_wm: 0, to_wm: 20 });
+        restore = () => spy.mockRestore();
+      } else if (condition !== "verified") {
+        const row = app.store.get<Video>("videos", name)!;
+        const next =
+          condition === "missing_basis"
+            ? { ...row, verifiedAgainst: undefined }
+            : condition === "changed_mapping"
+              ? {
+                  ...row,
+                  verifiedAgainst: { size: 999, sha256: "a".repeat(64) },
+                }
+              : { ...row, status: condition };
+        app.store.set("videos", name, next);
+      }
+    },
+  });
+  try {
+    if (condition === "verified")
+      expect((await worker.openVideo(prior.id)).status).toBe("verified");
+    else await expect(worker.openVideo(prior.id)).rejects.toBeInstanceOf(Error);
+  } finally {
+    restore();
+  }
+  const after = files.videos()[0];
+  expect(after.id).toBe(prior.id);
+  expect(after.verification).toEqual(prior.verification);
+  if (
+    ["waiting_report", "verifying", "mismatch", "unavailable"].includes(
+      condition,
+    )
+  )
+    expect(after.status).toBe(condition);
+});
