@@ -165,3 +165,176 @@ it("快照读取故障停止后续报告而不把故障当作缺口", () => {
   app.applyReports(inputs);
   expect(app.coverage()).toBe(45);
 });
+
+function cleanupHistory(watermark = 20) {
+  const report = mappedReport(Buffer.from("unused"));
+  report.to_wm = watermark;
+  report.plans![0].actions = [
+    {
+      action_instance_id: "cleanup",
+      name: "清理",
+      type: "delete_action_outputs",
+      scheduled_at: "2026-01-01 00:00:00",
+      input_params: { output_ids: ["out-1", "out-2"] },
+      status: "failed",
+      execution: { started: true },
+      error: { code: "delete_items_failed", stage: "execution", details: {} },
+      result: {
+        items: [
+          {
+            output_id: "out-1",
+            status: "failed",
+            error: {
+              code: "output_not_found",
+              stage: "output_selection",
+              details: {},
+            },
+          },
+        ],
+      },
+    },
+  ];
+  return report;
+}
+it.each(["earlier-terminal", "same-own", "later-item", "gap-item"] as const)(
+  "历史修复：%s 不产生原文接收或确认资格",
+  (kind) => {
+    const { app } = setup();
+    const initial = reportInput(cleanupHistory());
+    app.applyReports([initial]);
+    const knownGap = cleanupHistory(50);
+    knownGap.report_id = 50;
+    knownGap.from_wm = 40;
+    app.applyReports([reportInput(knownGap)]);
+    const incoming = cleanupHistory();
+    incoming.report_id = 99;
+    const action = incoming.plans![0].actions![0];
+    if (kind === "earlier-terminal") {
+      incoming.to_wm = 10;
+      action.status = "succeeded";
+      delete action.error;
+      action.result = {
+        items: [
+          {
+            output_id: "out-1",
+            status: "succeeded",
+            outcome: "absence_confirmed",
+          },
+          {
+            output_id: "out-2",
+            status: "succeeded",
+            outcome: "absence_confirmed",
+          },
+        ],
+      };
+    }
+    if (kind === "same-own")
+      action.error = {
+        code: "different_final_error",
+        stage: "execution",
+        details: {},
+      };
+    if (kind === "later-item") {
+      incoming.from_wm = 20;
+      incoming.to_wm = 30;
+      action.result = { items: [] };
+    }
+    if (kind === "gap-item") {
+      incoming.from_wm = 80;
+      incoming.to_wm = 90;
+      action.result = { items: [] };
+    }
+    const file = reportInput(incoming);
+    const before = app.snapshot();
+    app.applyReports([file]);
+    const imported = app.store.get<ImportFile>("imports", file.file.id)!;
+    expect(imported.status).toBe("failed");
+    expect(imported.message).toBeTruthy();
+    expect(app.store.report(99)).toBeUndefined();
+    expect(app.store.reports()).toHaveLength(1);
+    expect(app.snapshot()).toEqual(before);
+    expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(initial.bytes);
+    expect(app.state()).toMatchObject({
+      coverage: 20,
+      gapTarget: 50,
+      ackId: 1,
+    });
+    expect(app.syncParams()).toEqual({ scope: "since", after_report_id: 1 });
+  },
+);
+it("历史修复：合法较早与同水位报告保存精确原文而保持投影", () => {
+  const { app } = setup();
+  const initial = reportInput(cleanupHistory());
+  app.applyReports([initial]);
+  const snapshot = app.snapshot();
+  const earlier = cleanupHistory(10);
+  earlier.report_id = 91;
+  earlier.plans![0].status = "pending";
+  const action = earlier.plans![0].actions![0];
+  action.status = "pending";
+  action.execution = { started: false };
+  delete action.error;
+  delete action.result;
+  const same = cleanupHistory();
+  same.report_id = 92;
+  same.from_wm = 10;
+  for (const report of [earlier, same]) {
+    const input = reportInput(report);
+    app.applyReports([input]);
+    expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
+      "covered",
+    );
+    expect(Buffer.from(app.store.report(report.report_id)!.bytes)).toEqual(
+      input.bytes,
+    );
+    expect(app.store.report(report.report_id)!.file_name).toBe(
+      input.file.fileName,
+    );
+    expect(app.snapshot()).toEqual(snapshot);
+  }
+  expect(app.coverage()).toBe(20);
+  expect(app.ackId()).toBe(1);
+});
+it("历史修复：同批错误文件不撤销成功且合法后续条目可推进", () => {
+  const { app } = setup();
+  const initial = cleanupHistory();
+  initial.plans![0].status = "running";
+  initial.plans![0].actions![0].status = "running";
+  delete initial.plans![0].actions![0].error;
+  const bad = structuredClone(initial);
+  bad.report_id = 2;
+  bad.from_wm = 20;
+  bad.to_wm = 25;
+  bad.plans![0].actions![0].result = { items: [] };
+  const next = cleanupHistory(30);
+  next.report_id = 3;
+  next.from_wm = 20;
+  next.plans![0].actions![0].result = {
+    items: [
+      {
+        output_id: "out-1",
+        status: "failed",
+        error: {
+          code: "output_not_found",
+          stage: "output_selection",
+          details: {},
+        },
+      },
+      { output_id: "out-2", status: "succeeded", outcome: "deleted" },
+    ],
+  };
+  const inputs = [reportInput(initial), reportInput(bad), reportInput(next)];
+  app.applyReports(inputs);
+  expect(
+    inputs.map(
+      (input) => app.store.get<ImportFile>("imports", input.file.id)?.status,
+    ),
+  ).toEqual(["accepted", "failed", "accepted"]);
+  expect(app.coverage()).toBe(30);
+  expect(app.ackId()).toBe(3);
+  expect(app.store.reports().map((r) => r.report_id)).toEqual([1, 3]);
+  expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(inputs[0].bytes);
+  expect(app.snapshot().plans![0].actions![0].result).toEqual(
+    next.plans![0].actions![0].result,
+  );
+});

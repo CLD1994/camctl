@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import {
   parseReport,
+  validateReport,
+  validateReportAgainstHistory,
   mergeReport,
   reportDecision,
   selectSyncReport,
@@ -772,4 +774,584 @@ it("后续收场已知触发动作必须属于同一相机", () => {
   expect(() => parse(r)).toThrow();
   trigger.device_id = "cam0";
   expect(parse(r).report_id).toBe(1);
+});
+
+function statusReport(
+  status: ReportAction["status"] = "running",
+): StatusReport {
+  const r = report();
+  r.plans![0].status =
+    status === "pending"
+      ? "pending"
+      : status === "running"
+        ? "running"
+        : "completed";
+  r.plans![0].actions = [
+    {
+      action_instance_id: "sync",
+      name: "同步",
+      type: "report_status",
+      input_params: { scope: "full" },
+      status,
+      execution: { started: status !== "pending" },
+      ...(status === "succeeded" ? { result: { report_id: 1 } } : {}),
+      ...(["failed", "expired"].includes(status) ? { error } : {}),
+    },
+  ];
+  return r;
+}
+function historyPair(
+  early: StatusReport,
+  late: StatusReport,
+  direction: "earlier" | "same" | "later",
+  valid: boolean,
+) {
+  early.to_wm = direction === "same" ? 20 : 10;
+  late.to_wm = 20;
+  early.report_id = 91;
+  late.report_id = 2;
+  validateReport(early);
+  validateReport(late);
+  const before = [structuredClone(early), structuredClone(late)];
+  const check = () =>
+    direction === "earlier"
+      ? validateReportAgainstHistory(late, early)
+      : validateReportAgainstHistory(early, late);
+  if (valid) expect(check).not.toThrow();
+  else expect(check).toThrow();
+  expect([early, late]).toEqual(before);
+}
+describe("历史观察边界", () => {
+  it.each(["earlier", "later"] as const)(
+    "主动作合法前进与不可逆事实 %s",
+    (direction) => {
+      for (const [early, late, valid] of [
+        ["pending", "succeeded", true],
+        ["running", "succeeded", true],
+        ["failed", "succeeded", false],
+        ["succeeded", "running", false],
+        ["running", "pending", false],
+      ] as const)
+        historyPair(statusReport(early), statusReport(late), direction, valid);
+    },
+  );
+  it.each(["pending", "failed"] as const)(
+    "同水位 succeeded 不能变成 %s",
+    (status) =>
+      historyPair(
+        statusReport("succeeded"),
+        statusReport(status),
+        "same",
+        false,
+      ),
+  );
+  it.each(["waiting", "error", "result", "media", "cleanup", "copy"] as const)(
+    "同水位自身字段差异 %s",
+    (field) => {
+      const a =
+        field === "waiting"
+          ? statusReport()
+          : field === "error"
+            ? statusReport("failed")
+            : field === "result"
+              ? statusReport("succeeded")
+              : report();
+      const b = structuredClone(a);
+      if (field === "waiting")
+        b.plans![0].actions![0].waiting = [
+          { code: "report_publication", details: {} },
+        ];
+      if (field === "error")
+        b.plans![0].actions![0].error = { ...error, code: "another" };
+      if (field === "result") b.plans![0].actions![0].result = { report_id: 5 };
+      if (field === "media")
+        b.plans![0].actions![0].outputs![0].media.check_status = "running";
+      if (field === "cleanup")
+        b.plans![0].actions![0].outputs![0].cleanup = { status: "canceled" };
+      if (field === "copy")
+        b.plans![0].actions![1].deliveries![0].copy.work_file_cleanup = {
+          status: "completed",
+        };
+      historyPair(a, b, "same", false);
+    },
+  );
+  it.each(["omit", "empty", "order"] as const)(
+    "同水位集合%s不属于自身差异",
+    (kind) => {
+      const a = report();
+      const b = structuredClone(a);
+      if (kind === "order") b.plans![0].actions!.reverse();
+      else if (kind === "omit") delete b.plans![0].actions;
+      else b.plans![0].actions = [];
+      historyPair(a, b, "same", true);
+    },
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "计划运行不能倒退 %s",
+    (direction) => {
+      const a = statusReport("pending");
+      a.plans![0].status = "running";
+      const b = statusReport("pending");
+      historyPair(a, b, direction, false);
+    },
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "交付阶段倒退 %s",
+    (direction) => {
+      for (const [early, late] of [
+        ["prepared", "pending"],
+        ["publishing", "preparing"],
+      ] as const) {
+        const a = report();
+        const b = report();
+        a.plans![0].actions![1].deliveries![0].status = early;
+        b.plans![0].actions![1].deliveries![0].status = late;
+        historyPair(a, b, direction, false);
+      }
+    },
+  );
+  it.each(["earlier", "later"] as const)(
+    "允许交付跨阶段及撤回 %s",
+    (direction) => {
+      for (const [early, late] of [
+        ["pending", "published"],
+        ["prepared", "publishing"],
+        ["published", "withdrawn"],
+      ] as const) {
+        const a = report();
+        const b = report();
+        a.plans![0].actions![1].deliveries![0].status = early;
+        b.plans![0].actions![1].deliveries![0].status = late;
+        historyPair(a, b, direction, true);
+      }
+    },
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "已知内容大小与摘要不能矛盾 %s",
+    (direction) => {
+      const a = report();
+      const b = report();
+      for (const [r, size, hash] of [
+        [a, 100, "a"],
+        [b, 200, "b"],
+      ] as const) {
+        const o = r.plans![0].actions![0].outputs![0];
+        o.size = size;
+        o.checksum = { status: "available", sha256: hash.repeat(64) };
+        const d = r.plans![0].actions![1].deliveries![0];
+        d.size = size;
+        d.sha256 = hash.repeat(64);
+        d.copy.committed_bytes = size;
+        d.copy.source_size = size;
+      }
+      historyPair(a, b, direction, false);
+    },
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "已有尝试不能在较晚边界消失 %s",
+    (direction) => {
+      const a = flowReport();
+      const b = structuredClone(a);
+      (
+        b.plans![0].actions![0].result as CameraResult
+      ).recording!.followup_stops![0].attempts = [];
+      historyPair(a, b, direction, false);
+    },
+  );
+  it.each(["earlier", "later"] as const)(
+    "较少尝试可以补充而非倒置拒绝 %s",
+    (direction) => {
+      const a = flowReport();
+      const b = structuredClone(a);
+      (
+        a.plans![0].actions![0].result as CameraResult
+      ).recording!.followup_stops![0].attempts = [];
+      historyPair(a, b, direction, true);
+    },
+  );
+});
+
+type ResultKind = "obtain" | "delete" | "cancel" | "withdrawal";
+function resultReport(
+  kind: ResultKind,
+  result: Record<string, unknown>,
+  status: ReportAction["status"] = "running",
+): StatusReport {
+  const r = statusReport(status);
+  r.plans![0].actions = [
+    {
+      action_instance_id: "work",
+      name: "处理",
+      type:
+        kind === "obtain"
+          ? "obtain_action_outputs"
+          : kind === "delete"
+            ? "delete_action_outputs"
+            : "cancel_task",
+      scheduled_at: "2026-01-01 00:00:00",
+      input_params:
+        kind === "obtain"
+          ? { source: { action_instance_id: "source" } }
+          : kind === "delete"
+            ? { output_ids: ["o1", "o2"] }
+            : { target: { plan_instance_id: "target" } },
+      status,
+      execution: { started: true },
+      result,
+      ...(status === "failed" ? { error } : {}),
+    },
+  ];
+  return r;
+}
+function finalResult(kind: ResultKind): Record<string, unknown> {
+  if (kind === "obtain")
+    return {
+      failures: [
+        { source_action_instance_id: "source", output_id: "o1", error },
+      ],
+    };
+  if (kind === "delete")
+    return { items: [{ output_id: "o1", status: "failed", error }] };
+  return {
+    items: [
+      {
+        action_instance_id: "target-action",
+        status: "failed",
+        error,
+        ...(kind === "withdrawal"
+          ? {
+              withdrawals: [
+                { delivery_id: "target-delivery", status: "failed", error },
+              ],
+            }
+          : {}),
+      },
+    ],
+  };
+}
+function resultEntries(
+  result: Record<string, unknown>,
+  kind: ResultKind,
+): Array<Record<string, unknown>> {
+  if (kind === "obtain")
+    return result.failures as Array<Record<string, unknown>>;
+  const items = result.items as Array<Record<string, unknown>>;
+  return kind === "withdrawal"
+    ? (items[0].withdrawals as Array<Record<string, unknown>>)
+    : items;
+}
+describe("最终条目历史", () => {
+  const kinds: ResultKind[] = ["obtain", "delete", "cancel", "withdrawal"];
+  const directions = ["earlier", "same", "later"] as const;
+  it.each(
+    kinds.flatMap((kind) =>
+      directions.flatMap((direction) =>
+        ["missing", "identity", "error", "status"]
+          .filter(
+            (change) =>
+              (kind !== "obtain" || change !== "status") &&
+              (kind !== "delete" || change !== "identity"),
+          )
+          .map((change) => ({ kind, direction, change })),
+      ),
+    ),
+  )("拒绝 $kind 的 $change，边界 $direction", ({ kind, direction, change }) => {
+    const before = finalResult(kind);
+    const after = structuredClone(before);
+    const items = resultEntries(after, kind);
+    if (change === "missing") items.length = 0;
+    if (change === "error") items[0].error = { ...error, code: "changed" };
+    if (change === "identity") {
+      const key =
+        kind === "obtain" || kind === "delete"
+          ? "output_id"
+          : kind === "cancel"
+            ? "action_instance_id"
+            : "delivery_id";
+      items[0][key] = kind === "delete" ? "o2" : "changed";
+    }
+    if (change === "status") {
+      items[0].status = kind === "withdrawal" ? "withdrawn" : "succeeded";
+      delete items[0].error;
+      if (kind !== "withdrawal")
+        items[0].outcome = kind === "delete" ? "deleted" : "already_terminal";
+    }
+    historyPair(
+      resultReport(kind, before, "failed"),
+      resultReport(kind, after, "failed"),
+      direction,
+      false,
+    );
+  });
+  it.each(["delete", "cancel", "withdrawal"] as const)(
+    "缺少已登记未完成 $0 项不能解释为空集合",
+    (kind) => {
+      const before = finalResult(kind);
+      const entries = resultEntries(before, kind);
+      entries[0].status = "pending";
+      delete entries[0].error;
+      if (kind === "withdrawal") {
+        const item = (before.items as Array<Record<string, unknown>>)[0];
+        item.status = "running";
+        delete item.error;
+      }
+      const after = structuredClone(before);
+      resultEntries(after, kind).length = 0;
+      historyPair(
+        resultReport(kind, before),
+        resultReport(kind, after),
+        "later",
+        false,
+      );
+    },
+  );
+  it.each(
+    kinds.flatMap((kind) =>
+      directions.map((direction) => ({ kind, direction })),
+    ),
+  )("允许 $kind 新独立条目按时间增加：$direction", ({ kind, direction }) => {
+    const before = finalResult(kind);
+    if (kind === "withdrawal") {
+      const item = (before.items as Array<Record<string, unknown>>)[0];
+      item.status = "running";
+      delete item.error;
+    }
+    const after = structuredClone(before);
+    const entry = structuredClone(resultEntries(after, kind)[0]);
+    if (kind === "obtain" || kind === "delete") entry.output_id = "o2";
+    else if (kind === "cancel") entry.action_instance_id = "another";
+    else entry.delivery_id = "another";
+    resultEntries(after, kind).push(entry);
+    historyPair(
+      resultReport(kind, before),
+      resultReport(kind, after),
+      direction,
+      direction !== "same",
+    );
+  });
+  it.each(
+    ["delete", "cancel", "withdrawal"].flatMap((kind) =>
+      directions.map((direction) => ({ kind: kind as ResultKind, direction })),
+    ),
+  )("允许 $kind 未完成项取得最终结果：$direction", ({ kind, direction }) => {
+    const after = finalResult(kind);
+    const before = structuredClone(after);
+    const item = resultEntries(before, kind)[0];
+    item.status = "pending";
+    delete item.error;
+    if (kind === "withdrawal")
+      for (const result of [before, after]) {
+        const parent = (result.items as Array<Record<string, unknown>>)[0];
+        parent.status = "running";
+        delete parent.error;
+      }
+    historyPair(
+      resultReport(kind, before),
+      resultReport(kind, after),
+      direction,
+      direction !== "same",
+    );
+  });
+  it.each(["delete", "cancel"] as const)("最终 $0 outcome 不可改写", (kind) => {
+    const before = finalResult(kind);
+    const first = resultEntries(before, kind)[0];
+    first.status = "succeeded";
+    delete first.error;
+    first.outcome = kind === "delete" ? "deleted" : "canceled";
+    const after = structuredClone(before);
+    resultEntries(after, kind)[0].outcome =
+      kind === "delete" ? "absence_confirmed" : "already_terminal";
+    historyPair(
+      resultReport(kind, before),
+      resultReport(kind, after),
+      "later",
+      false,
+    );
+  });
+  it("较早尚无最终失败可以由较晚补充", () =>
+    historyPair(
+      resultReport("obtain", { failures: [] }),
+      resultReport("obtain", finalResult("obtain")),
+      "earlier",
+      true,
+    ));
+});
+
+describe("最终条目历史状态覆盖", () => {
+  it.each([
+    ["delete", "succeeded"],
+    ["delete", "failed"],
+    ["delete", "canceled"],
+    ["cancel", "succeeded"],
+    ["cancel", "failed"],
+    ["withdrawal", "withdrawn"],
+    ["withdrawal", "not_retractable"],
+    ["withdrawal", "failed"],
+  ] as const)("%s 的最终 %s 条目必须保留", (kind, status) => {
+    const before = finalResult(kind);
+    const item = resultEntries(before, kind)[0];
+    item.status = status;
+    if (status !== "failed") delete item.error;
+    if (status === "succeeded")
+      item.outcome = kind === "delete" ? "deleted" : "canceled";
+    const after = structuredClone(before);
+    resultEntries(after, kind).length = 0;
+    historyPair(
+      resultReport(kind, before, "failed"),
+      resultReport(kind, after, "failed"),
+      "later",
+      false,
+    );
+  });
+  it.each(["delete", "cancel"] as const)(
+    "%s 的 running 条目不得退回 pending",
+    (kind) => {
+      const before = finalResult(kind);
+      const first = resultEntries(before, kind)[0];
+      first.status = "running";
+      delete first.error;
+      const after = structuredClone(before);
+      resultEntries(after, kind)[0].status = "pending";
+      historyPair(
+        resultReport(kind, before),
+        resultReport(kind, after),
+        "later",
+        false,
+      );
+    },
+  );
+  it.each(["source", "output", "delivery"] as const)(
+    "取回最终失败的 %s 身份层级完整保留",
+    (level) => {
+      const failure = {
+        source_action_instance_id: "source",
+        ...(level !== "source" ? { output_id: "o1" } : {}),
+        ...(level === "delivery" ? { delivery_id: "d1" } : {}),
+        error,
+      };
+      const a = resultReport("obtain", { failures: [failure] });
+      const b = resultReport("obtain", { failures: [] });
+      historyPair(a, b, "earlier", false);
+    },
+  );
+  it("动作本身没有出现在较晚增量中时保留整个动作", () => {
+    const old = resultReport("delete", finalResult("delete"), "failed");
+    const next = structuredClone(old);
+    next.report_id = 2;
+    next.from_wm = 20;
+    next.to_wm = 30;
+    next.plans![0].actions = [];
+    expect(mergeReport(old, next).plans![0].actions).toEqual(
+      old.plans![0].actions,
+    );
+  });
+});
+describe("历史观察边界公共流程覆盖", () => {
+  function withAttempts(
+    kind: "start" | "stop" | "followup" | "source_copy" | "delivery",
+  ) {
+    const r = flowReport();
+    r.plans![0].actions!.push(obtain());
+    const cameraResult = r.plans![0].actions![0].result as CameraResult;
+    if (kind === "start" || kind === "stop")
+      cameraResult.recording![kind].attempts = [
+        { attempt_no: 1, status: "failed", error },
+      ];
+    if (kind === "source_copy")
+      cameraResult.source_copy = structuredClone(delivery().copy);
+    const list =
+      kind === "delivery"
+        ? r.plans![0].actions![1].deliveries![0].copy.read_attempts
+        : kind === "source_copy"
+          ? cameraResult.source_copy!.read_attempts
+          : kind === "followup"
+            ? cameraResult.recording!.followup_stops![0].attempts
+            : cameraResult.recording![kind].attempts;
+    return { r, list };
+  }
+  it.each(
+    (["start", "stop", "followup", "source_copy", "delivery"] as const).flatMap(
+      (kind) =>
+        (["earlier", "same", "later"] as const).map((direction) => ({
+          kind,
+          direction,
+        })),
+    ),
+  )("$kind 已登记尝试不得消失：$direction", ({ kind, direction }) => {
+    const a = withAttempts(kind);
+    const b = withAttempts(kind);
+    b.list.length = 0;
+    historyPair(a.r, b.r, direction, false);
+  });
+  it.each(["earlier", "same", "later"] as const)(
+    "同轮拷贝字节不能回退：%s",
+    (direction) => {
+      const a = report();
+      const b = report();
+      for (const r of [a, b])
+        r.plans![0].actions![1].deliveries![0].status = "preparing";
+      b.plans![0].actions![1].deliveries![0].copy.committed_bytes = 90;
+      historyPair(a, b, direction, false);
+    },
+  );
+  it.each(["earlier", "later"] as const)(
+    "新的重拷轮次允许从较小字节重新开始：%s",
+    (direction) => {
+      const a = report();
+      const b = report();
+      for (const r of [a, b])
+        r.plans![0].actions![1].deliveries![0].status = "preparing";
+      const copy = b.plans![0].actions![1].deliveries![0].copy;
+      copy.round = 2;
+      copy.recopies_used = 1;
+      copy.committed_bytes = 0;
+      historyPair(a, b, direction, true);
+    },
+  );
+  it("同水位对象键序、根身份和from_wm不是业务变化", () => {
+    const a = report();
+    const n = structuredClone(a);
+    n.plans![0] = Object.fromEntries(
+      Object.entries(n.plans![0]).reverse(),
+    ) as NonNullable<StatusReport["plans"]>[number];
+    n.from_wm = 10;
+    n.plans![0].actions![0].execution = { started: true };
+    historyPair(a, n, "same", true);
+  });
+});
+
+describe("历史观察边界终结收场", () => {
+  it.each(["earlier", "same", "later"] as const)(
+    "终结 followup 错误不改写：%s",
+    (direction) => {
+      const a = flowReport();
+      const flow = (a.plans![0].actions![0].result as CameraResult).recording!
+        .followup_stops![0];
+      flow.status = "failed";
+      flow.error = error;
+      const b = structuredClone(a);
+      (
+        b.plans![0].actions![0].result as CameraResult
+      ).recording!.followup_stops![0].error = { ...error, code: "changed" };
+      historyPair(a, b, direction, false);
+    },
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "终结 flow 保留原错误而 unknown 尝试可由证据补充：%s",
+    (direction) => {
+      const a = flowReport();
+      const flow = (a.plans![0].actions![0].result as CameraResult).recording!
+        .followup_stops![0];
+      flow.status = "failed";
+      flow.error = error;
+      flow.attempts = [{ attempt_no: 1, status: "unknown", error }];
+      const b = structuredClone(a);
+      (
+        b.plans![0].actions![0].result as CameraResult
+      ).recording!.followup_stops![0].attempts = [
+        { attempt_no: 1, status: "succeeded" },
+      ];
+      historyPair(a, b, direction, direction !== "same");
+    },
+  );
 });

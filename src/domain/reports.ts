@@ -594,6 +594,112 @@ function copyHistory(old: Copy, next: Copy) {
   if (old.source_size !== undefined)
     requireFact(next.source_size === old.source_size, "已知源长度不可改变");
 }
+function sameOwnFields(old: Index, next: Index) {
+  const own = (value: object, children: string[]) =>
+    Object.fromEntries(
+      Object.entries(value).filter(([key]) => !children.includes(key)),
+    );
+  for (const [id, plan] of next.plans) {
+    const before = old.plans.get(id);
+    if (before)
+      requireFact(
+        isDeepStrictEqual(own(before, ["actions"]), own(plan, ["actions"])),
+        "同水位计划自身快照不一致",
+      );
+  }
+  for (const [id, action] of next.actions) {
+    const before = old.actions.get(id);
+    if (before)
+      requireFact(
+        isDeepStrictEqual(
+          own(before.value, ["outputs", "deliveries"]),
+          own(action.value, ["outputs", "deliveries"]),
+        ),
+        "同水位动作自身快照不一致",
+      );
+  }
+  for (const [id, output] of next.outputs) {
+    const before = old.outputs.get(id);
+    if (before)
+      requireFact(
+        isDeepStrictEqual(before.value, output.value),
+        "同水位产物快照不一致",
+      );
+  }
+  for (const [id, delivery] of next.deliveries) {
+    const before = old.deliveries.get(id);
+    if (before)
+      requireFact(
+        isDeepStrictEqual(before.value, delivery.value),
+        "同水位交付快照不一致",
+      );
+  }
+}
+function itemHistory<T extends { status: string }>(
+  old: T[],
+  next: T[],
+  id: (item: T) => string,
+  label: string,
+  nested?: (before: T, after: T) => void,
+) {
+  const known = new Map(next.map((item) => [id(item), item]));
+  for (const before of old) {
+    const after = known.get(id(before));
+    requireFact(after, `${label} ${id(before)} 的已登记条目不能消失`);
+    if (before.status !== "pending" && before.status !== "running")
+      requireFact(
+        isDeepStrictEqual(before, after),
+        `${label} ${id(before)} 的最终结果不可改变`,
+      );
+    else {
+      requireFact(
+        before.status !== "running" || after.status !== "pending",
+        `${label} ${id(before)} 的运行进度不能回退`,
+      );
+      nested?.(before, after);
+    }
+  }
+}
+function actionResultHistory(before: ReportAction, after: ReportAction) {
+  if (before.type === "obtain_action_outputs") {
+    const old = (before.result as ObtainResult | undefined)?.failures ?? [];
+    const next = (after.result as ObtainResult | undefined)?.failures ?? [];
+    const key = (item: ObtainResult["failures"][number]) =>
+      JSON.stringify([
+        item.source_action_instance_id,
+        item.output_id ?? null,
+        item.delivery_id ?? null,
+      ]);
+    const known = new Map(next.map((item) => [key(item), item]));
+    for (const failure of old)
+      requireFact(
+        isDeepStrictEqual(failure, known.get(key(failure))),
+        `取回最终失败 ${key(failure)} 不可消失或改写`,
+      );
+  } else if (before.type === "delete_action_outputs") {
+    itemHistory(
+      (before.result as DeleteResult | undefined)?.items ?? [],
+      (after.result as DeleteResult | undefined)?.items ?? [],
+      (item) => item.output_id,
+      "清理",
+    );
+  } else if (before.type === "cancel_task") {
+    itemHistory(
+      (before.result as CancelResult | undefined)?.items ?? [],
+      (after.result as CancelResult | undefined)?.items ?? [],
+      (item) => item.action_instance_id,
+      "取消",
+      (old, next) => {
+        itemHistory(
+          old.withdrawals ?? [],
+          next.withdrawals ?? [],
+          (item) => item.delivery_id,
+          "撤回",
+        );
+      },
+    );
+  }
+}
 function historicalIdentity(old: Index, next: Index, advancing: boolean) {
   for (const [id, flow] of next.flows) {
     const before = old.flows.get(id);
@@ -620,10 +726,7 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
       const incoming = flow.value as FollowupStop;
       attemptHistory(prior.attempts, incoming.attempts);
       if (!["pending", "running"].includes(prior.status))
-        requireFact(
-          prior.status === incoming.status,
-          "后续收场终结结果不可改变",
-        );
+        unchanged(prior, incoming, ["status", "error"], "后续收场终结结果");
     }
   }
   for (const [id, plan] of next.plans) {
@@ -637,8 +740,11 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
       );
       if (advancing)
         requireFact(
-          before.status !== "completed" || plan.status === "completed",
-          "计划完成状态不能回退",
+          before.status === "pending" ||
+            (before.status === "running"
+              ? plan.status !== "pending"
+              : plan.status === "completed"),
+          "计划执行阶段不能回退",
         );
     }
     for (const existing of old.plans.values())
@@ -689,10 +795,15 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
         );
     }
     if (advancing) {
+      actionResultHistory(before.value, action.value);
       requireFact(
         !terminal(before.value.status) ||
           before.value.status === action.value.status,
         "动作终态不可改变",
+      );
+      requireFact(
+        before.value.status !== "running" || action.value.status !== "pending",
+        "动作运行阶段不能回退",
       );
       requireFact(
         !before.value.execution.started || action.value.execution.started,
@@ -787,6 +898,18 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
       if (advancing) {
         copyHistory(before.value.copy, delivery.value.copy);
         const status = before.value.status;
+        const stages: readonly Delivery["status"][] = [
+          "pending",
+          "preparing",
+          "prepared",
+          "publishing",
+          "published",
+          "withdrawn",
+        ];
+        const from = stages.indexOf(status),
+          to = stages.indexOf(delivery.value.status);
+        if (from >= 0 && to >= 0)
+          requireFact(to >= from, "交付执行阶段不能回退");
         if (["failed", "canceled", "withdrawn"].includes(status))
           requireFact(status === delivery.value.status, "已结束交付不能恢复");
         if (status === "published")
@@ -881,7 +1004,17 @@ export function validateReportAgainstHistory(
   validateReport(incoming);
   const old = indexReport(current);
   const next = indexReport(incoming);
-  historicalIdentity(old, next, incoming.to_wm > current.to_wm);
+  const boundary: "earlier" | "same" | "later" =
+    incoming.to_wm < current.to_wm
+      ? "earlier"
+      : incoming.to_wm === current.to_wm
+        ? "same"
+        : "later";
+  if (boundary === "earlier") historicalIdentity(next, old, true);
+  else {
+    historicalIdentity(old, next, boundary === "later");
+    if (boundary === "same") sameOwnFields(old, next);
+  }
   for (const diagnostic of incoming.plan_file_diagnostics ?? []) {
     const before = current.plan_file_diagnostics?.find(
       (d) => d.diagnostic_id === diagnostic.diagnostic_id,
