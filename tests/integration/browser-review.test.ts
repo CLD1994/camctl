@@ -61,6 +61,261 @@ async function setup() {
 }
 const text = (name: string) =>
   JSON.stringify({ name, actions: [{ name: "同步", type: "report_status" }] });
+const cameraPlan = () => ({
+  name: "缓存修正",
+  actions: [
+    {
+      name: "录像",
+      type: "camera_record",
+      device_id: "demo_cam0",
+      params: { type: "demo_fixed" },
+      policy: { max_delay_ms: 0 },
+      scheduled_at: "2026-09-17 00:00:00",
+    },
+  ],
+});
+it("通用入口修正回原合法参数后JSON显示、保存和导出同源", async () => {
+  const { app, page } = await setup(),
+    draft = app.createDraft({ text: JSON.stringify(cameraPlan()) });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  const widget = page.getByLabel("参数 JSON 文本"),
+    pending = page.getByLabel("未完成输入 /actions/0/params");
+  await widget.fill("{");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  expect(app.draft(draft.id).content.pending?.["/actions/0/params"].text).toBe(
+    "{",
+  );
+  await pending.fill('{"type":');
+  await check(widget).toHaveValue('{"type":');
+  await page
+    .getByRole("button", { name: "应用修正 /actions/0/params", exact: true })
+    .click();
+  await check(widget).toHaveValue('{"type":');
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  expect(app.draft(draft.id).content.pending?.["/actions/0/params"].text).toBe(
+    '{"type":',
+  );
+  await pending.fill('{"type":"demo_fixed"}');
+  await check(widget).toHaveValue('{"type":"demo_fixed"}');
+  await page
+    .getByRole("button", { name: "应用修正 /actions/0/params", exact: true })
+    .click();
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  expect(app.draft(draft.id).content.pending).toEqual({});
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+  ).toEqual({ type: "demo_fixed" });
+  await check(widget).toHaveValue(
+    JSON.stringify({ type: "demo_fixed" }, null, 2),
+  );
+  await page.getByTestId("export-button").click();
+  await check(page.getByTestId("download-request-button")).toBeVisible();
+  expect(
+    app.store.all<{ body: { actions: Array<{ params: unknown }> } }>(
+      "requests",
+    )[0].body.actions[0].params,
+  ).toEqual({ type: "demo_fixed" });
+}, 20000);
+it.each([
+  '{"name":"未完成","actions":[',
+  "[]",
+  '{"name":"未完成"}',
+  '{"name":"未完成","actions":{}}',
+])(
+  "追加结构不满足时保留可编辑原文且不发送追加：%s",
+  async (original) => {
+    const { app, page } = await setup(),
+      draft = app.createDraft({ text: original });
+    await page.reload();
+    let appends = 0;
+    await page.route("**/api/drafts/*/actions", async (route) => {
+      appends++;
+      await route.continue();
+    });
+    await page
+      .getByRole("button", { name: "准备状态同步", exact: true })
+      .click();
+    await page.getByLabel("目标草稿").selectOption(draft.id);
+    await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+    await page
+      .getByRole("button", { name: "查看目标草稿", exact: true })
+      .click();
+    await page.getByTestId("draft-json-toggle").click();
+    await check(page.getByTestId("draft-json-input")).toBeEnabled();
+    await check(page.getByTestId("draft-json-input")).toHaveValue(original);
+    expect(appends).toBe(0);
+    expect(app.draft(draft.id).revision).toBe(1);
+    expect(app.store.all("drafts")).toHaveLength(1);
+  },
+  20000,
+);
+it.each(["different", "omit", "preset_same", "preset_different"] as const)(
+  "JSON展示跟随明确修正或替换且保留其他pending：%s",
+  async (mode) => {
+    const { app, page } = await setup(),
+      plan = cameraPlan();
+    const others = {
+      "/actions/0/policy/max_delay_ms": { kind: "number" as const, text: "-" },
+      "/actions/1/params": { kind: "json" as const, text: "[" },
+    };
+    const draft = app.createDraft({
+      text: JSON.stringify({
+        ...plan,
+        actions: [...plan.actions, { name: "另一动作", type: "report_status" }],
+      }),
+      pending: others,
+    });
+    const want =
+      mode === "preset_same"
+        ? { type: "demo_fixed" }
+        : mode === "preset_different"
+          ? { type: "demo_adjustable", resolution: "1080p", frame_rate_fps: 30 }
+          : mode === "different"
+            ? { type: 30, flag: false, optional: null, list: [1, "1"] }
+            : undefined;
+    const preset = mode.startsWith("preset")
+      ? app.savePreset({
+          name: "恢复预设",
+          deviceId: "demo_cam0",
+          actionType: "camera_record",
+          params: want,
+        })
+      : undefined;
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+    const widget = page.getByLabel("参数 JSON 文本");
+    await widget.fill("{");
+    if (preset) {
+      await page.getByLabel("已有预设").selectOption(preset.id);
+      await page.getByRole("button", { name: "应用预设", exact: true }).click();
+    } else if (mode === "omit")
+      await page
+        .getByRole("button", {
+          name: "明确省略 /actions/0/params",
+          exact: true,
+        })
+        .click();
+    else {
+      await page
+        .getByLabel("未完成输入 /actions/0/params")
+        .fill(JSON.stringify(want));
+      await page
+        .getByRole("button", {
+          name: "应用修正 /actions/0/params",
+          exact: true,
+        })
+        .click();
+    }
+    await check(widget).toHaveValue(
+      want === undefined ? "" : JSON.stringify(want, null, 2),
+    );
+    await check(page.getByTestId("save-status")).toContainText("已保存");
+    const saved = app.draft(draft.id).content;
+    expect(saved.pending).toEqual(others);
+    expect(JSON.parse(saved.text).actions[0].params).toEqual(want);
+    expect(JSON.parse(saved.text).actions[0].policy).toEqual({
+      max_delay_ms: 0,
+    });
+  },
+  20000,
+);
+it.each(["policy", "action_params"] as const)(
+  "共享JSON控件同值修正后展示合法值：%s",
+  async (mode) => {
+    const { app, page } = await setup(),
+      isPolicy = mode === "policy",
+      original = isPolicy ? { max_delay_ms: 0 } : { scope: "full" },
+      path = isPolicy ? "/actions/0/policy" : "/actions/0/params";
+    const draft = app.createDraft({
+      text: JSON.stringify(
+        isPolicy
+          ? cameraPlan()
+          : {
+              name: "同步",
+              actions: [
+                { name: "报告", type: "report_status", params: original },
+              ],
+            },
+      ),
+    });
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    if (isPolicy)
+      await page.getByText("完整业务策略 JSON", { exact: true }).click();
+    const widget = page.getByLabel(
+      isPolicy ? "业务策略 JSON" : "动作参数 JSON",
+    );
+    await widget.fill("{");
+    await page.getByLabel(`未完成输入 ${path}`).fill(JSON.stringify(original));
+    await page
+      .getByRole("button", { name: `应用修正 ${path}`, exact: true })
+      .click();
+    await check(widget).toHaveValue(JSON.stringify(original, null, 2));
+    await check(page.getByTestId("save-status")).toContainText("已保存");
+    expect(app.draft(draft.id).content.pending).toEqual({});
+    expect(
+      JSON.parse(app.draft(draft.id).content.text).actions[0][
+        isPolicy ? "policy" : "params"
+      ],
+    ).toEqual(original);
+  },
+  20000,
+);
+it("结构修正后在同页同目标重新准备，按新revision保留未完成内容追加一次", async () => {
+  const { app, page } = await setup(),
+    draft = app.createDraft({ text: '{"name":"未完成","actions":[' });
+  await page.reload();
+  const revisions: number[] = [];
+  await page.route("**/api/drafts/*/actions", async (route) => {
+    revisions.push(route.request().postDataJSON().revision);
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
+  await page.getByLabel("目标草稿").selectOption(draft.id);
+  await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+  await check(
+    page.getByRole("button", { name: "重试准备目标草稿", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "查看目标草稿", exact: true }).click();
+  await page.getByTestId("draft-json-toggle").click();
+  await page
+    .getByTestId("draft-json-input")
+    .fill(
+      JSON.stringify({
+        name: "修正结构",
+        actions: [{ name: "原录像", type: "camera_record" }],
+      }),
+    );
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  await page.getByTestId("draft-json-toggle").click();
+  await page.getByLabel("参数 JSON 文本").fill("{");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  const baseline = app.draft(draft.id);
+  expect(revisions).toEqual([]);
+  await page
+    .getByRole("button", { name: "返回核实后续操作", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "重试准备目标草稿", exact: true })
+    .click();
+  await check(page.getByRole("dialog")).toHaveCount(0);
+  expect(app.store.all("drafts")).toHaveLength(1);
+  const saved = app.draft(draft.id);
+  expect(revisions).toEqual([baseline.revision]);
+  expect(saved.revision).toBe(baseline.revision + 1);
+  expect(saved.content.pending).toEqual(baseline.content.pending);
+  const actions = JSON.parse(saved.content.text).actions;
+  expect(actions[0]).toEqual({ name: "原录像", type: "camera_record" });
+  expect(actions[1]).toEqual({
+    name: "状态同步",
+    type: "report_status",
+    params: { scope: "full" },
+  });
+  await check(page.getByLabel("动作名称").first()).toBeEnabled();
+}, 20000);
 it("数值未完成时兄弟字段编辑保留原文，修正后导出准确新值", async () => {
   const { app, page } = await setup();
   const parameter =

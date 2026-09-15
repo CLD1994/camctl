@@ -261,6 +261,7 @@ export function App() {
               !sameContent(actual.content, session.content)
             )
               throw Error("目标草稿与当前保存基线不一致，请先核对目标内容");
+            parseDraft(actual.content);
             session.lockAppend();
             return actual;
           },

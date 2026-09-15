@@ -778,14 +778,6 @@ function JsonField({
 }) {
   const value = valueAt(parseDraft(content), path),
     pending = content.pending?.[pointer(path)];
-  const [text, setText] = useState<string | null>(null);
-  const [base, setBase] = useState<unknown>(value);
-  // 当前外部值变化（类型选择、应用预设）时，以新的权威值展示；无效文本始终来自持久化 pending。
-  const serialized = JSON.stringify(value);
-  if (JSON.stringify(base) !== serialized) {
-    setBase(value);
-    setText(null);
-  }
   return (
     <label className="field">
       {label}
@@ -796,11 +788,9 @@ function JsonField({
         readOnly={pendingBlocks(content, path)}
         value={
           pending?.text ??
-          text ??
           (value === undefined ? "" : JSON.stringify(value, null, 2))
         }
         onChange={(e) => {
-          setText(e.target.value);
           change(editValue(content, path, e.target.value, "json"));
         }}
       />
