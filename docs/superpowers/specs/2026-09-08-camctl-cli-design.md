@@ -227,6 +227,7 @@ depends_on
 | [运行日志](camctl/logging.md) | 普通日志用途、配置、按大小轮换及文件保留上限 | 会话诊断、永久保留的业务历史 |
 | [调度与设备执行](camctl/scheduling-execution.md) | 动作状态、时间窗口、通信准备、设备兼容性、公共补偿、取消分派、时钟资格 | 受理序列、动作特有证据 |
 | [相机拍摄](camctl/camera-recording.md) | 拍摄能力、驱动参数类型；当前 ADB 相机录像的启动、时长、停止、恢复、修复与取消 | 公共执行、正式产物 |
+| [当前相机录像参数](camctl/camera-parameters.md) | 普通录像参数组织、曝光分支及设备参数定义 | 驱动能力、同源 Schema、录像执行 |
 | [能力说明格式](camctl/capabilities.md) | 设备、拍摄动作、参数类型及 Schema 的导出字段与对应关系 | 驱动定义、能力说明交接与整份加载 |
 | [客户端计划编辑](camctl/client-editing.md) | 拍摄参数表单、JSON 编辑、参数保留及导出前校验 | 能力说明、计划输入、人工交接 |
 | [客户端部署与能力说明加载](camctl/client-deployment.md) | 客户端目录、Docker 持久化、启动与手动加载及结果分区 | 能力说明格式、整份加载、客户端数据 |
