@@ -24,6 +24,7 @@ import { DraftSession } from "./session";
 import { actionLabel, Issues, ErrorBox } from "./common";
 import { Field, JsonField } from "./Fields";
 import { BuiltinFields } from "./BuiltinFields";
+import { deviceOptions } from "./device-options";
 import {
   parameterOptions,
   compatibleValues,
@@ -106,9 +107,6 @@ export function Editor(props: Props) {
       change(
         appendDraftAction(content, {
           name: `动作 ${plan.actions.length + 1}`,
-          type: "camera_record",
-          params: {},
-          policy: {},
         }),
       );
     }
@@ -405,6 +403,9 @@ function ActionEditor(
   const parameter = types.find(
     (p) => isObject(action.params) && p.type === action.params.type,
   );
+  const options = deviceOptions(capabilities, action.device_id, action.type);
+  const unselected = action.type === undefined || action.type === "";
+  const showDevice = unselected || action.type === "camera_record";
   const compatible = presets.filter(
     (p) => p.deviceId === action.device_id && p.actionType === action.type,
   );
@@ -460,7 +461,7 @@ function ActionEditor(
             {typeof action.name === "string" ? action.name : "未命名动作"}
           </h3>
           <p className="muted">
-            {actionLabel(action.type)} ·{" "}
+            {unselected ? "尚未选择动作类型" : actionLabel(action.type)} ·{" "}
             {typeof action.scheduled_at === "string"
               ? `${action.scheduled_at} UTC`
               : "尚未设置执行时间"}
@@ -494,19 +495,51 @@ function ActionEditor(
               onChange={(e) => put("name", e.target.value)}
             />
           </label>
+          {showDevice && (
+            <label className="field">
+              目标设备
+              <select
+                aria-label="目标设备"
+                value={action.device_id ?? ""}
+                onChange={(e) =>
+                  put("device_id", e.target.value, e.target.value === "")
+                }
+              >
+                <option value="">请选择设备</option>
+                {action.device_id &&
+                  !options.devices.some(
+                    (d) => d.device_id === action.device_id,
+                  ) && (
+                    <option disabled value={action.device_id}>
+                      {action.device_id}（当前不可用）
+                    </option>
+                  )}
+                {options.devices.map((d) => (
+                  <option key={d.device_id} value={d.device_id}>
+                    {d.device_id} · {d.driver_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="field">
             动作类型
             <select
               aria-label="动作类型"
               value={typeof action.type === "string" ? action.type : ""}
-              onChange={(e) => put("type", e.target.value)}
+              onChange={(e) =>
+                put("type", e.target.value, e.target.value === "")
+              }
             >
-              {!ACTION_TYPES.includes(action.type) && (
-                <option value={String(action.type ?? "")}>
-                  {String(action.type ?? "尚未选择")}（不支持）
-                </option>
-              )}
-              {ACTION_TYPES.map((type) => (
+              <option value="">请选择动作类型</option>
+              {action.type !== undefined &&
+                action.type !== "" &&
+                !options.actions.includes(action.type) && (
+                  <option disabled value={String(action.type)}>
+                    {String(action.type)}（当前不可用）
+                  </option>
+                )}
+              {options.actions.map((type) => (
                 <option key={type} value={type}>
                   {actionLabel(type)} · {type}
                 </option>
@@ -522,6 +555,8 @@ function ActionEditor(
                 "delete_action_outputs",
               ].includes(action.type) ? (
                 <span className="required">必填</span>
+              ) : unselected ? (
+                <small>选择动作类型后确定时间要求</small>
               ) : (
                 <small>可选，省略时尽快处理</small>
               )}
@@ -577,28 +612,6 @@ function ActionEditor(
           <>
             <div className="form-grid">
               <label className="field">
-                目标设备
-                <select
-                  aria-label="目标设备"
-                  value={action.device_id ?? ""}
-                  onChange={(e) =>
-                    put("device_id", e.target.value, e.target.value === "")
-                  }
-                >
-                  <option value="">请选择设备</option>
-                  {action.device_id && !device && (
-                    <option value={action.device_id}>
-                      {action.device_id}（当前不可用）
-                    </option>
-                  )}
-                  {capabilities?.devices.map((d) => (
-                    <option key={d.device_id} value={d.device_id}>
-                      {d.device_id} · {d.driver_id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
                 参数类型
                 <select
                   aria-label="参数类型"
@@ -624,7 +637,7 @@ function ActionEditor(
                   {isObject(action.params) &&
                     typeof action.params.type === "string" &&
                     !parameter && (
-                      <option value={action.params.type}>
+                      <option disabled value={action.params.type}>
                         {action.params.type}（当前不可用）
                       </option>
                     )}
@@ -792,7 +805,7 @@ function ActionEditor(
                   </button>
                 </div>
               )}
-            {Object.hasOwn(action, "device_id") && (
+            {!showDevice && Object.hasOwn(action, "device_id") && (
               <p className="notice">
                 此动作不使用设备字段。当前值：{String(action.device_id)}{" "}
                 <button onClick={() => put("device_id", undefined, true)}>
@@ -810,6 +823,10 @@ function ActionEditor(
                 reports={props.reports}
                 coverage={props.coverage}
               />
+            ) : unselected &&
+              !Object.hasOwn(action, "params") &&
+              !hasPending ? (
+              <p className="notice">请选择动作类型，再填写对应参数。</p>
             ) : (
               <JsonField
                 content={content}

@@ -2,6 +2,7 @@ import type { Capabilities, ParameterType } from "../shared/types";
 import { isObject } from "../shared/validation";
 import { resolveField } from "./editing";
 import { optionLabel, parameterOptions } from "./parameter-options";
+import { actionLabel } from "./common";
 
 export function DeviceGuide({
   capabilities,
@@ -14,7 +15,7 @@ export function DeviceGuide({
         <p className="eyebrow">拍摄前，先了解设备</p>
         <h2>选择适合这次拍摄的任务</h2>
         <p>
-          查看设备提供的录像任务、可调整的画质与搭配限制，然后到计划中安排拍摄。
+          查看每台设备支持的拍摄能力、任务设置与使用条件，然后到计划中安排拍摄。
         </p>
         <ol className="guide-steps">
           <li>
@@ -75,6 +76,7 @@ export function DeviceGuide({
                 action.parameter_types.map((parameter) => (
                   <TaskGuide
                     key={`${action.type}/${parameter.type}`}
+                    actionType={action.type}
                     parameter={parameter}
                   />
                 )),
@@ -94,7 +96,13 @@ export function DeviceGuide({
   );
 }
 
-function TaskGuide({ parameter }: { parameter: ParameterType }) {
+function TaskGuide({
+  parameter,
+  actionType,
+}: {
+  parameter: ParameterType;
+  actionType: string;
+}) {
   const catalog = parameterOptions(parameter);
   const fields = Object.entries(
     isObject(parameter.schema.properties) ? parameter.schema.properties : {},
@@ -109,6 +117,7 @@ function TaskGuide({ parameter }: { parameter: ParameterType }) {
   return (
     <article className="guide-task">
       <div className="guide-task-title">
+        <span className="guide-tag">{actionLabel(actionType)}</span>
         <span className="guide-tag">{fixed ? "固定设置" : "参数设置"}</span>
         <h3>{parameter.name}</h3>
       </div>
