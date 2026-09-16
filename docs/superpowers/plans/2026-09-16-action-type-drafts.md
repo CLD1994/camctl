@@ -30,7 +30,7 @@
 - [x] `apps/client/src/web/session.ts` 的 `sameContent` 比较全部编辑资料；`apps/client/src/server/application.ts` 检查资料结构，复用现有原子保存。
 - [x] 单元验证保存比较包含资料；集成验证重开数据库能恢复、结构非法拒绝、未选类型 pending 不阻止当前报告导出且导出无元数据。
 
-验收示例：录像中输入 `max_delay_ms` 为 `1e`，切换报告后正文为 `{name,type:"report_status",scheduled_at?}`，可合法导出；切回录像恢复 `1e` 且禁止录像导出。
+验收示例：录像中输入 `max_delay_ms` 为 `1e`，切换报告后明确选择完整同步，正文为 `{name,type:"report_status",scheduled_at?,params:{scope:"full"}}`，可合法导出；切回录像恢复 `1e` 且禁止录像导出。
 
 ### 2. 表单接入
 

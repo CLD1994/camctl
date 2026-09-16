@@ -58,7 +58,7 @@ export function BuiltinFields({
   const basis = reports.filter((r) => isSyncBasis(r, coverage));
   const reportMode =
     value === undefined || (params && Object.keys(params).length === 0)
-      ? "normal"
+      ? ""
       : params?.scope === "full" || params?.scope === "since"
         ? params.scope
         : "invalid";
@@ -82,7 +82,7 @@ export function BuiltinFields({
             content={content}
             path={path}
             label="动作参数 JSON"
-            required={type !== "report_status"}
+            required
             change={change}
           />
           {structural && (
@@ -270,24 +270,17 @@ export function BuiltinFields({
           {type === "report_status" && (
             <>
               <p className="muted">
-                切换报告范围会替换原报告参数。普通报告不额外发起同步。
+                业务状态变化后由主机自动维护报告。需要补齐状态时，请选择同步范围；切换范围会替换原报告参数。
               </p>
               <label className="field">
-                报告范围
+                <span>
+                  报告范围 <span className="required">必填</span>
+                </span>
                 <select
                   aria-label="报告范围"
                   value={reportMode}
                   onChange={(e) =>
-                    change(
-                      setValue(
-                        content,
-                        path,
-                        e.target.value === "normal"
-                          ? undefined
-                          : { scope: e.target.value },
-                        e.target.value === "normal",
-                      ),
-                    )
+                    change(setValue(content, path, { scope: e.target.value }))
                   }
                 >
                   {reportMode === "invalid" && (
@@ -295,13 +288,20 @@ export function BuiltinFields({
                       原参数待修正
                     </option>
                   )}
-                  <option value="normal">普通报告</option>
+                  <option value="" disabled>
+                    请选择同步范围
+                  </option>
                   <option value="full">完整同步</option>
                   <option value="since" disabled={!basis.length}>
                     从已保存报告之后补齐
                   </option>
                 </select>
               </label>
+              {reportMode === "" && (
+                <p className="notice warning">
+                  请选择完整或增量同步并补齐必填项，填写完成后才能导出。
+                </p>
+              )}
               {reportMode === "since" && (
                 <label className="field">
                   <span>

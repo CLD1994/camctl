@@ -60,7 +60,12 @@ async function setup() {
   return { app, page };
 }
 const text = (name: string) =>
-  JSON.stringify({ name, actions: [{ name: "同步", type: "report_status" }] });
+  JSON.stringify({
+    name,
+    actions: [
+      { name: "同步", type: "report_status", params: { scope: "full" } },
+    ],
+  });
 const cameraPlan = () => ({
   name: "缓存修正",
   actions: [
@@ -740,8 +745,7 @@ it("创建响应丢失只提供实际草稿核对，不自动再次创建", asyn
 }, 20000);
 it("报告详情逐项失败来源ID和原输入保持报告字面值", async () => {
   const { app, page } = await setup(),
-    directory =
-      "../../protocol/examples/client-protocol/03-obtain-partial";
+    directory = "../../protocol/examples/client-protocol/03-obtain-partial";
   const report = JSON.parse(
     readFileSync(
       join(

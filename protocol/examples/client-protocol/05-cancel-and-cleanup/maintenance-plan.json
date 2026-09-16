@@ -26,7 +26,11 @@
     {
       "name": "报告进度",
       "type": "report_status",
-      "scheduled_at": "2026-09-15 10:00:10"
+      "scheduled_at": "2026-09-15 10:00:10",
+      "params": {
+        "scope": "since",
+        "after_report_id": 1
+      }
     }
   ],
   "last_report_id": 1

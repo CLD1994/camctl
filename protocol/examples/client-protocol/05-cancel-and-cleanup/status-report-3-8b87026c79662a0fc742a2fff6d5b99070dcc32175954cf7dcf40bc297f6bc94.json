@@ -215,6 +215,10 @@
           },
           "result": {
             "report_id": 2
+          },
+          "input_params": {
+            "scope": "since",
+            "after_report_id": 1
           }
         }
       ]

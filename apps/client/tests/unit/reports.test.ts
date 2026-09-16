@@ -340,6 +340,7 @@ describe("mergeReport", () => {
         action_instance_id: "a3",
         name: "报告",
         type: "report_status",
+        input_params: { scope: "full" },
         status: "running",
         execution: { started: true },
         waiting: [{ code: "report_publication", details: {} }],
@@ -800,6 +801,23 @@ function statusReport(
   ];
   return r;
 }
+
+it.each([undefined, {}])("已受理的报告动作必须有明确同步范围 %j", (params) => {
+  const r = statusReport();
+  if (params === undefined) delete r.plans![0].actions![0].input_params;
+  else r.plans![0].actions![0].input_params = params;
+  expect(() => validateReport(r)).toThrow();
+});
+
+it.each([undefined, {}])("报告动作受理失败时保留不完整参数 %j", (params) => {
+  const r = statusReport("failed");
+  const action = r.plans![0].actions![0];
+  action.execution = { started: false };
+  action.error = { code: "invalid_params", stage: "admission", details: {} };
+  if (params === undefined) delete action.input_params;
+  else action.input_params = params;
+  expect(parse(r)).toEqual(r);
+});
 function historyPair(
   early: StatusReport,
   late: StatusReport,

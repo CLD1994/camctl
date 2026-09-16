@@ -233,9 +233,9 @@ p-004：completed
 | 文件 | 用途 |
 | --- | --- |
 | [capture-plan.json](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json) | 新增录像 `a-501`；参数继续使用本文样例驱动，不能当作真实相机参数类型 |
-| [maintenance-plan.json](../../protocol/examples/client-protocol/05-cancel-and-cleanup/maintenance-plan.json) | 通过原请求 `req-005` 取消该录像、显式清理原有 `o-001`，并请求进度报告 |
-| [报告 2](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-2-72a36df883b680e4371fff8b58f780eb13bfc30614308bcfbc5e2e7ddd2c1d28.json) | 覆盖 `(20, 29]`；取消标记已经保存，停止调用仍在执行，取消动作保持 `running` |
-| [报告 3](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-3-5e4b5cae65cac3a3dcb035a7b558233f2436e4ca8f20492e9ec276e9dec625d0.json) | 覆盖 `(20, 40]`；停止与适用废弃内容清理已完成，取消成功，原有 `o-001` 的独立清理也已完成 |
+| [maintenance-plan.json](../../protocol/examples/client-protocol/05-cancel-and-cleanup/maintenance-plan.json) | 通过原请求 `req-005` 取消该录像、显式清理原有 `o-001`，并请求从报告 1 之后局部同步 |
+| [报告 2](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-2-2347140a37b9151e9ba3a89cfd1686184b97cd03342e7d6297d818e308b4d9da.json) | 覆盖 `(20, 29]`；取消标记已经保存，停止调用仍在执行，取消动作保持 `running` |
+| [报告 3](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-3-8b87026c79662a0fc742a2fff6d5b99070dcc32175954cf7dcf40bc297f6bc94.json) | 覆盖 `(20, 40]`；停止与适用废弃内容清理已完成，取消成功，原有 `o-001` 的独立清理也已完成 |
 
 编号从样例一的 20 继续，详见[样例五的逐项编号](../../protocol/examples/client-protocol/history.md#样例五接续样例一从-20-到-40)。报告 2 在第 29 条后冻结，报告 3 在第 40 条后冻结；本例尚未吸收报告 2 的 ACK，因此报告 3 仍从 20 开始，包含两份报告之间重叠的变化。
 
@@ -398,7 +398,7 @@ p-004：completed
   "name": "查询状态",
   "last_report_id": 9999,
   "actions": [
-    {"name": "生成报告", "type": "report_status"}
+    {"name": "同步完整状态", "type": "report_status", "params": {"scope": "full"}}
   ]
 }
 ```
@@ -437,7 +437,7 @@ p-004：completed
   "name": "查询状态",
   "last_report_id": 9999,
   "actions": [
-    {"name": "生成报告", "type": "report_status"}
+    {"name": "同步完整状态", "type": "report_status", "params": {"scope": "full"}}
   ]
 }
 ```

@@ -211,13 +211,14 @@ it.each([
     await check(type).toHaveValue("");
     await check(type.locator('option[value="camera_record"]')).toHaveCount(0);
     await type.selectOption("report_status");
+    await page.getByLabel("报告范围").selectOption("full");
     await page.getByTestId("export-button").click();
     await check
       .poll(() => app.store.all<ExportedRequest>("requests").length)
       .toBe(1);
     const request = app.store.all<ExportedRequest>("requests")[0];
     expect(request.body.actions).toEqual([
-      { name: "动作 1", type: "report_status" },
+      { name: "动作 1", type: "report_status", params: { scope: "full" } },
     ]);
   },
   20000,
@@ -445,7 +446,47 @@ it("取消目标四种模式互斥且手工跨计划 ID 不因本地未知被拒
   await check.poll(() => app.store.all("requests").length).toBe(1);
 }, 20000);
 
-it("报告表单保留缺省与非法原值，完整同步不携带旧起点", async () => {
+it.each([undefined, {}])(
+  "报告范围待选时保留草稿并阻止导出 %j",
+  async (params) => {
+    const { page, app } = await setup();
+    const action = {
+      name: "报告",
+      type: "report_status",
+      ...(params === undefined ? {} : { params }),
+    };
+    const draft = app.createDraft({
+      text: JSON.stringify({ name: "报告", actions: [action] }),
+    });
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await check(page.getByLabel("报告范围")).toHaveValue("");
+    await check(page.getByTestId("validation-issues")).toContainText(
+      "invalid_params",
+    );
+    const rejected = page.waitForResponse((response) =>
+      response.url().endsWith(`/drafts/${draft.id}/export`),
+    );
+    await page.getByTestId("export-button").click();
+    expect((await rejected).status()).toBe(400);
+    await check(page.getByTestId("download-request-button")).toHaveCount(0);
+    expect(app.store.all("requests")).toEqual([]);
+    expect(JSON.parse(app.draft(draft.id).content.text).actions[0]).toEqual(
+      action,
+    );
+    await page.getByLabel("报告范围").selectOption("full");
+    await page.getByTestId("export-button").click();
+    await check
+      .poll(() => app.store.all<ExportedRequest>("requests").length)
+      .toBe(1);
+    expect(app.store.all<ExportedRequest>("requests")[0].body.actions).toEqual([
+      { name: "报告", type: "report_status", params: { scope: "full" } },
+    ]);
+  },
+  20000,
+);
+
+it("报告表单保留非法原值，完整同步不携带旧起点", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
@@ -471,13 +512,6 @@ it("报告表单保留缺省与非法原值，完整同步不携带旧起点", a
           ?.params,
     )
     .toEqual({ scope: "full" });
-  await page.getByLabel("报告范围").selectOption("normal");
-  await check
-    .poll(
-      () =>
-        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0],
-    )
-    .toEqual({ name: "报告", type: "report_status" });
   await page.getByTestId("export-button").click();
   await check.poll(() => app.store.all("requests").length).toBe(1);
 }, 20000);
@@ -506,7 +540,7 @@ it("动作类型独立保存设备策略且共用无效时间仍需修正", asyn
   await page
     .getByRole("button", { name: "不指定执行时间", exact: true })
     .click();
-  await page.getByLabel("报告范围").selectOption("normal");
+  await page.getByLabel("报告范围").selectOption("full");
   await page.getByTestId("export-button").click();
   await check.poll(() => app.store.all("requests").length).toBe(1);
 }, 20000);
@@ -1013,7 +1047,9 @@ it("导出回执丢失后仍打开已保存的同一原请求", async () => {
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "回执核实",
-      actions: [{ name: "同步", type: "report_status" }],
+      actions: [
+        { name: "同步", type: "report_status", params: { scope: "full" } },
+      ],
     }),
   );
   await page.route("**/api/drafts/*/export", async (route) => {
@@ -1085,7 +1121,9 @@ it("人工标记清除只更正交接记录并保留固定正文", async () => {
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "人工交接",
-      actions: [{ name: "同步", type: "report_status" }],
+      actions: [
+        { name: "同步", type: "report_status", params: { scope: "full" } },
+      ],
     }),
   );
   await page.getByTestId("export-button").click();

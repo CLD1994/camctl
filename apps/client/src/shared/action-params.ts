@@ -127,7 +127,14 @@ export function validateBuiltinParams(
         "引用值不合法",
       );
   };
-  if (type === "report_status" && !present) return issues;
+  if (type === "report_status" && !present)
+    return [
+      {
+        path: "params",
+        code: "invalid_params",
+        message: "请选择完整或增量同步并填写报告参数",
+      },
+    ];
   if (!isObject(params))
     return [
       { path: "params", code: "invalid_params", message: "参数必须是对象" },
@@ -136,15 +143,14 @@ export function validateBuiltinParams(
     case "report_status": {
       const keys = Object.keys(params);
       check(
-        !keys.length ||
-          (keys.length === 1 && params.scope === "full") ||
+        (keys.length === 1 && params.scope === "full") ||
           (keys.length === 2 &&
             keys.includes("scope") &&
             keys.includes("after_report_id") &&
             params.scope === "since" &&
             isPositive(params.after_report_id)),
         "params",
-        "报告范围参数组合不合法",
+        "请选择完整或增量同步；完整同步仅填写 scope，增量同步还须填写 after_report_id",
       );
       break;
     }

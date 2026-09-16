@@ -114,6 +114,10 @@
           "status": "running",
           "execution": {
             "started": true
+          },
+          "input_params": {
+            "scope": "since",
+            "after_report_id": 1
           }
         }
       ]

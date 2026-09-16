@@ -7,6 +7,29 @@ const apps:Application[]=[]; const dirs:string[]=[];
 function setup() {const dir=mkdtempSync(join(tmpdir(),'camctl-app-'));dirs.push(dir);const app=new Application(dir);apps.push(app);app.store.initialize();return app;}
 afterEach(()=>{apps.splice(0).forEach(a=>a.store.close());dirs.splice(0).forEach(d=>rmSync(d,{recursive:true,force:true}));});
 const content={text:JSON.stringify({name:'同步',actions:[{name:'完整同步',type:'report_status',params:{scope:'full'}}]})};
+it.each([undefined, {}])("同步范围未填写的草稿可恢复但不能导出 %j", (params) => {
+  const app = setup();
+  const value = {
+    text: JSON.stringify({
+      name: "同步",
+      actions: [{
+        name: "同步",
+        type: "report_status",
+        ...(params === undefined ? {} : { params }),
+      }],
+    }),
+  };
+  const draft = app.createDraft(value);
+  app.store.close();
+  const reopened = new Application(app.store.directory);
+  apps.push(reopened);
+  expect(reopened.draft(draft.id).content).toEqual(value);
+  expect(() => reopened.exportDraft(draft.id, draft.revision, value)).toThrowError(
+    expect.objectContaining({ code: "invalid_plan" }),
+  );
+  expect(reopened.draft(draft.id).content).toEqual(value);
+  expect(reopened.store.all("requests")).toEqual([]);
+});
 it("草稿其他类型内容持久化，未完成输入不进入当前请求", () => {
   const app = setup();
   const value = {

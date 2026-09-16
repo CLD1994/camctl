@@ -180,7 +180,7 @@
 
 `report_status` 成功时的 `result.report_id` 指向完成本次本地发布责任的报告。它可以早于包含该结果的报告：报告 R 发布后动作才能保存成功，随后报告 S 再携带该成功结果。不能强制要求 `result.report_id` 等于当前根 `report_id`。
 
-普通报告、完整同步和局部同步的参数与起点解析由[同步入口](status-sync.md#请求入口)定义。`input_params` 保留实际输入；参数自身错误按受理失败表达，执行时无法找到起点报告按[起点解析错误](status-sync.md#camctl-何时开始同步)表达，不能补造成功的 `result.report_id`。
+完整同步和局部同步的参数与起点解析由[同步入口](status-sync.md#请求入口)定义。`input_params` 保留实际输入；参数自身错误按受理失败表达，执行时无法找到起点报告按[起点解析错误](status-sync.md#camctl-何时开始同步)表达，不能补造成功的 `result.report_id`。
 
 等待客户端累计确认的同步责任由[客户端状态同步](status-sync.md)维护；不把远端尚未 ACK 表达成报告动作执行失败，也不将报告内部管理状态作为新增业务字段不断触发下一份报告。
 

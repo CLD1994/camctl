@@ -89,7 +89,7 @@ camctl describe > device-capabilities.json
 
 客户端在空设备目录下也可以生成 `report_status` 动作。用户在网页中准备与本例 [report-plan.json](../../protocol/examples/deployment/report-plan.json) 对应的计划，导出 JSON 文本并手工递交给负责消息传输的部门。该部门将计划送达主程序所在主机，由主程序保存文件并按上表调用 CLI；具体传输方式由该部门安排。样例文件内容完整有效，不依赖具体相机参数。
 
-样例请求 ID 为 `req-deployment-check-001`，计划名为“部署报告检查”，只有一个未填写 `scheduled_at` 的 `report_status` 动作。它按立即动作规则执行；`created_at` 是样例 UTC 时间，不用于判断主机时钟是否可信。真实生成计划时由客户端填写生成时间和请求 ID。
+样例请求 ID 为 `req-deployment-check-001`，计划名为“部署报告检查”，只有一个未填写 `scheduled_at`、`params` 为 `{"scope":"full"}` 的 `report_status` 动作。它按立即动作规则执行；`created_at` 是样例 UTC 时间，不用于判断主机时钟是否可信。真实生成计划时由客户端填写生成时间和请求 ID。
 
 这一步要求主机时间满足现有可信性规则，状态库与报告目录可用。若在启用主程序前先手工检查 CLI，可执行等价的本地调用：
 

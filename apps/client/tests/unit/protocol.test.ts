@@ -275,7 +275,19 @@ describe("validatePlan", () => {
       validatePlan(plan([{ name: "动作", type }]), null).length,
     ).toBeGreaterThan(0),
   );
-  it.each([{}, { scope: "full" }])("无需能力说明的报告通过 %#", (params) =>
+  it("报告参数缺省时必须补齐", () => {
+    expect(
+      validatePlan(plan([{ name: "报告", type: "report_status" }]), null),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "actions[0].params",
+          code: "invalid_params",
+        }),
+      ]),
+    );
+  });
+  it.each([{ scope: "full" }])("无需能力说明的报告通过 %#", (params) =>
     expect(
       validatePlan(
         plan([{ name: "报告", type: "report_status", params }]),
@@ -284,6 +296,8 @@ describe("validatePlan", () => {
     ).toEqual([]),
   );
   it.each([
+    undefined,
+    {},
     null,
     { scope: "since" },
     { after_report_id: 1 },

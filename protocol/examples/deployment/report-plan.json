@@ -5,7 +5,8 @@
   "actions": [
     {
       "name": "生成状态报告",
-      "type": "report_status"
+      "type": "report_status",
+      "params": {"scope": "full"}
     }
   ]
 }
