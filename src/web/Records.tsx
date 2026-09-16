@@ -9,6 +9,7 @@ import type { Video } from "../server/models";
 import type { ClientState } from "./api";
 import { download } from "./api";
 import type { PlanRecord } from "./editing";
+import { utcToLocal } from "./editing";
 import { Badge, Facts, actionLabel, Empty } from "./common";
 export type Followup = {
   action: Record<string, unknown>;
@@ -53,7 +54,9 @@ export function RecordDetail({
         <div>
           <small>本地导出</small>
           <strong>{request ? "已保存原请求" : "没有本地原请求"}</strong>
-          {request && <span>{request.exportedAt} UTC</span>}
+          {request && (
+            <span>{utcToLocal(request.exportedAt).replace("T", " ")}</span>
+          )}
         </div>
         <div>
           <small>人工递交记录</small>
@@ -64,7 +67,11 @@ export function RecordDetail({
                 : "未标记递交"
               : "无本地记录"}
           </strong>
-          {request?.handedAt && <span>标记时间：{request.handedAt} UTC</span>}
+          {request?.handedAt && (
+            <span>
+              标记时间：{utcToLocal(request.handedAt).replace("T", " ")}
+            </span>
+          )}
         </div>
         <div>
           <small>主机报告</small>
@@ -219,7 +226,8 @@ function ActionResult({
         </span>
         {action.scheduled_at !== undefined && (
           <span className="muted">
-            计划时间：{String(action.scheduled_at)} UTC
+            计划时间：
+            {utcToLocal(action.scheduled_at).replace("T", " ") || "时间无效"}
           </span>
         )}
         <button

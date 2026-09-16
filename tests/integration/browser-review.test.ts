@@ -197,6 +197,7 @@ it.each(["different", "omit", "preset_same", "preset_different"] as const)(
     const widget = page.getByLabel("参数 JSON 文本");
     await widget.fill("{");
     if (preset) {
+      await page.getByText("拍摄参数预设", { exact: true }).first().click();
       await page.getByLabel("已有预设").selectOption(preset.id);
       await page.getByRole("button", { name: "应用预设", exact: true }).click();
     } else if (mode === "omit")
@@ -301,6 +302,7 @@ it("结构修正后在同页同目标重新准备，按新revision保留未完�
   );
   await check(page.getByTestId("save-status")).toContainText("已保存");
   await page.getByTestId("draft-json-toggle").click();
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
   await page.getByLabel("参数 JSON 文本").fill("{");
   await check(page.getByTestId("save-status")).toContainText("已保存");
   const baseline = app.draft(draft.id);

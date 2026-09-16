@@ -195,6 +195,11 @@ export class Store {
       )
       .run(namespace, id, JSON.stringify(value));
   }
+  remove(namespace: string, id: string): void {
+    this.db()
+      .prepare("DELETE FROM records WHERE namespace=? AND id=?")
+      .run(namespace, id);
+  }
   transaction<T>(operation: () => T): T {
     const db = this.db();
     db.exec("BEGIN IMMEDIATE");

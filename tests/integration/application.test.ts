@@ -19,3 +19,41 @@ it('说明重载失败保留此前完整有效目录',()=>{const app=setup();con
 it('有效空能力目录替换旧目录',()=>{const app=setup();writeFileSync(join(app.store.directory,'device-capabilities.json'),'{"devices":[]}');expect(app.reloadCapabilities()).toMatchObject({active:{devices:[]},error:null});});
 it('非法预设更新保留原合法参数',()=>{const app=setup();writeFileSync(join(app.store.directory,'device-capabilities.json'),readFileSync('docs/superpowers/specs/camctl/examples/capabilities/demo-device.json'));app.reloadCapabilities();const first=app.savePreset({name:'常用',deviceId:'demo_cam0',actionType:'camera_record',params:{type:'demo_adjustable',resolution:'4K',frame_rate_fps:30}});expect(()=>app.savePreset({...first,params:{type:'demo_adjustable',resolution:'4K',frame_rate_fps:60}})).toThrow();expect(app.store.get('presets',first.id)).toEqual(first);});
 });
+
+it("删除未导出草稿持久化且晚到写入不能重建", () => {
+  const app = setup(),
+    d = app.createDraft({ text: "{" }),
+    other = app.createDraft(content);
+  app.deleteDraft(d.id, d.revision);
+  app.deleteDraft(d.id, d.revision);
+  expect(() => app.saveDraft(d.id, d.revision, content)).toThrowError(
+    expect.objectContaining({ code: "not_found" }),
+  );
+  expect(() => app.exportDraft(d.id, d.revision, content)).toThrowError(
+    expect.objectContaining({ code: "not_found" }),
+  );
+  expect(app.draft(other.id)).toEqual(other);
+  app.store.close();
+  const reopened = new Application(app.store.directory);
+  apps.push(reopened);
+  expect(reopened.state().drafts).toEqual([other]);
+});
+it("删除拒绝过期版本并保留更新内容", () => {
+  const app = setup(),
+    d = app.createDraft(content);
+  const saved = app.saveDraft(d.id, 1, { text: "{" });
+  expect(() => app.deleteDraft(d.id, 1)).toThrowError(
+    expect.objectContaining({ code: "revision_conflict" }),
+  );
+  expect(app.draft(d.id)).toEqual(saved);
+});
+it("删除已导出草稿被拒绝并保留固定请求", () => {
+  const app = setup(),
+    d = app.createDraft(content),
+    r = app.exportDraft(d.id, 1, content);
+  expect(() => app.deleteDraft(d.id, 2)).toThrowError(
+    expect.objectContaining({ code: "already_exported" }),
+  );
+  expect(app.request(r.id)).toEqual(r);
+  expect(app.draft(d.id).exportedRequestId).toBe(r.id);
+});

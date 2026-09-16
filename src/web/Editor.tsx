@@ -39,6 +39,8 @@ interface Props {
   coverage: number;
   busy: boolean;
   onExport: () => void;
+  onDelete: () => void;
+  checkDeletion: () => void;
   checkExport: () => void;
   savePreset: (input: {
     id?: string;
@@ -129,19 +131,35 @@ export function Editor(props: Props) {
           <p className="eyebrow">准备新的执行请求</p>
           <h2>编辑草稿</h2>
         </div>
-        <button data-testid="draft-json-toggle" onClick={() => setJson(!json)}>
-          {json ? "使用表单" : "整份计划 JSON"}
-        </button>
+        <div className="button-row">
+          <button
+            className="quiet danger-text"
+            disabled={busy || !session.editable}
+            onClick={props.onDelete}
+          >
+            删除草稿
+          </button>
+          <button
+            data-testid="draft-json-toggle"
+            onClick={() => setJson(!json)}
+          >
+            {json ? "使用表单" : "整份计划 JSON"}
+          </button>
+        </div>
       </div>
       <div className="save-line">
         <span data-testid="save-status" role="status">
-          {session.error
-            ? `保存失败或未确认：${session.error}`
-            : session.saving
-              ? "保存中…"
-              : session.saved
-                ? "已保存"
-                : "等待保存…"}
+          {session.deletionState === "deleting"
+            ? "正在删除草稿…"
+            : session.deletionState === "unknown"
+              ? "删除结果尚未确认"
+              : session.error
+                ? `保存失败或未确认：${session.error}`
+                : session.saving
+                  ? "保存中…"
+                  : session.saved
+                    ? "已保存"
+                    : "等待保存…"}
         </span>
         {session.error && session.editable && (
           <button onClick={() => void session.flush().catch(() => {})}>
@@ -149,6 +167,14 @@ export function Editor(props: Props) {
           </button>
         )}
       </div>
+      {session.deletionState === "unknown" && (
+        <div className="notice warning">
+          <p>删除结果尚未确认，当前输入已保留。</p>
+          <button disabled={busy} onClick={props.checkDeletion}>
+            重新核实删除结果
+          </button>
+        </div>
+      )}
       {session.exportState === "unknown" && (
         <div className="notice warning">
           <p>
@@ -462,8 +488,9 @@ function ActionEditor(
           </h3>
           <p className="muted">
             {unselected ? "尚未选择动作类型" : actionLabel(action.type)} ·{" "}
-            {typeof action.scheduled_at === "string"
-              ? `${action.scheduled_at} UTC`
+            {Object.hasOwn(action, "scheduled_at")
+              ? utcToLocal(action.scheduled_at).replace("T", " ") ||
+                "执行时间待修正"
               : "尚未设置执行时间"}
             {props.issueCount > 0 && (
               <span className="action-problems">
@@ -561,27 +588,24 @@ function ActionEditor(
                 <small>可选，省略时尽快处理</small>
               )}
             </span>
-            <small>
-              {Intl.DateTimeFormat().resolvedOptions().timeZone}，保存为 UTC
-            </small>
             <input
               aria-label="执行时间"
               type="datetime-local"
               step="1"
               value={utcToLocal(action.scheduled_at)}
+              onClick={(e) => e.currentTarget.showPicker?.()}
               onChange={(e) => {
                 const value = localToUtc(e.target.value);
                 put("scheduled_at", value, value === undefined);
               }}
             />
-            {action.scheduled_at !== undefined && (
-              <small>
-                UTC 原值：
-                {typeof action.scheduled_at === "string"
-                  ? action.scheduled_at
-                  : JSON.stringify(action.scheduled_at)}
-              </small>
-            )}
+            {Object.hasOwn(action, "scheduled_at") &&
+              !utcToLocal(action.scheduled_at) && (
+                <small>
+                  执行时间无效，请重新选择或通过整份计划 JSON
+                  修正；原输入已保留。
+                </small>
+              )}
             {(action.type === "cancel_task" ||
               action.type === "report_status") &&
               Object.hasOwn(action, "scheduled_at") && (
@@ -674,7 +698,9 @@ function ActionEditor(
                 {json ? "参数表单" : "参数 JSON"}
               </button>
             </div>
-            {json || pending || !isObject(action.params) ? (
+            {json ||
+            pending ||
+            (Object.hasOwn(action, "params") && !isObject(action.params)) ? (
               <JsonField
                 content={content}
                 path={[...base, "params"]}
@@ -699,8 +725,8 @@ function ActionEditor(
                 参数 JSON 尚未完成，请在上方修正后继续使用表单。
               </p>
             )}
-            <div className="preset-box">
-              <h4>拍摄参数预设</h4>
+            <details className="preset-box">
+              <summary>拍摄参数预设</summary>
               <p className="muted">
                 预设仅保存当前设备的拍摄参数。动作名称、时间与策略独立保留。
               </p>
@@ -790,7 +816,7 @@ function ActionEditor(
                   {notice}
                 </p>
               )}
-            </div>
+            </details>
           </>
         ) : (
           <>

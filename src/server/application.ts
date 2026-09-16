@@ -129,6 +129,25 @@ export class Application {
       return updated;
     });
   }
+  deleteDraft(id: string, revision: number): void {
+    this.store.transaction(() => {
+      const draft = this.store.get<Draft>("drafts", id);
+      if (!draft) return;
+      if (draft.exportedRequestId)
+        throw new AppError(
+          "already_exported",
+          "草稿已经导出，请打开计划记录",
+          409,
+        );
+      if (draft.revision !== revision)
+        throw new AppError(
+          "revision_conflict",
+          "草稿已发生变化，请重新打开并核对后删除",
+          409,
+        );
+      this.store.remove("drafts", id);
+    });
+  }
   coverage(): number {
     return this.store.businessState().coverage;
   }

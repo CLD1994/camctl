@@ -101,6 +101,10 @@ export function createHttpApp(
       ),
     ),
   );
+  app.delete("/api/drafts/:id", (req, res) => {
+    application.deleteDraft(String(req.params.id), req.body?.revision);
+    res.json({ deleted: true });
+  });
   app.post("/api/drafts/:id/validate", (req, res) => {
     application.validateContent(req.body.content);
     res.json({ valid: true });

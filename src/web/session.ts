@@ -26,12 +26,14 @@ export class DraftSession {
   recoveryContent?: DraftContent;
   conflict?: Draft;
   appendLocked = false;
+  deletionState: "idle" | "deleting" | "unknown" | "deleted" = "idle";
   private baseline: DraftContent;
   private pendingWrite?: PendingWrite;
   private recoveredVersion?: number;
   private exportSnapshot?: { revision: number; content: DraftContent };
   private running?: Promise<void>;
   private timer?: ReturnType<typeof setTimeout>;
+  private deletionFailure = "";
   constructor(
     readonly draft: Draft,
     private transport: DraftTransport,
@@ -44,7 +46,55 @@ export class DraftSession {
     if (draft.exportedRequestId) this.exportState = "exported";
   }
   get editable() {
-    return this.exportState === "editable" && !this.appendLocked;
+    return (
+      this.exportState === "editable" &&
+      !this.appendLocked &&
+      this.deletionState === "idle"
+    );
+  }
+  async delete(
+    remove: (revision: number) => Promise<void>,
+    read: () => Promise<Draft | undefined>,
+  ) {
+    await this.flush();
+    if (!this.editable || !this.saved) throw new Error("请先核实草稿保存状态");
+    this.deletionState = "deleting";
+    clearTimeout(this.timer);
+    this.changed();
+    try {
+      await remove(this.revision);
+      this.deletionState = "deleted";
+      this.changed();
+    } catch (error) {
+      this.deletionFailure =
+        error instanceof Error ? error.message : String(error);
+      this.deletionState = "unknown";
+      await this.checkDeletion(read);
+    }
+  }
+  async checkDeletion(read: () => Promise<Draft | undefined>) {
+    if (this.deletionState !== "unknown")
+      throw new Error("没有待核实的删除操作");
+    let actual: Draft | undefined;
+    try {
+      actual = await read();
+    } catch {
+      this.error = "删除结果尚未确认，请恢复连接后重新核实。";
+      this.changed();
+      throw new Error(this.error);
+    }
+    this.deletionState = actual ? "idle" : "deleted";
+    this.error = "";
+    if (actual) {
+      this.observe(actual);
+      if (!actual.exportedRequestId && actual.revision !== this.revision)
+        this.conflict = structuredClone(actual);
+      this.changed();
+      throw new Error(
+        `草稿仍存在，删除未完成；请刷新页面核对后重试。${this.deletionFailure}`,
+      );
+    }
+    this.changed();
   }
   lockAppend() {
     clearTimeout(this.timer);

@@ -15,7 +15,7 @@ import {
 } from "./api";
 import { DraftSession, sameContent } from "./session";
 import { FollowOperation } from "./followup";
-import { recordsFor, parseDraft } from "./editing";
+import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
 import { DeviceGuide } from "./DeviceGuide";
 import { RecordDetail, type Followup } from "./Records";
@@ -42,6 +42,7 @@ export function App() {
   };
   const [, render] = useReducer((n) => n + 1, 0),
     sessions = useRef(new Map<string, DraftSession>()),
+    deletedDrafts = useRef(new Set<string>()),
     mounted = useRef(true),
     refreshing = useRef<Promise<ClientState> | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}),
@@ -56,6 +57,13 @@ export function App() {
     );
     const request = api<ClientState>("/state")
       .then((value) => {
+        if (value.drafts)
+          value = {
+            ...value,
+            drafts: value.drafts.filter(
+              (d) => !deletedDrafts.current.has(d.id),
+            ),
+          };
         if (mounted.current) {
           for (const draft of value.drafts ?? [])
             sessions.current
@@ -138,6 +146,43 @@ export function App() {
     setTab("records");
   };
   const current = sessions.current.get(selected);
+  const removeDraft = (session: DraftSession, verify = false) => {
+    if (
+      !verify &&
+      !window.confirm(
+        `删除草稿“${draftName(session.content.text)}”？删除后无法恢复。`,
+      )
+    )
+      return;
+    run(async () => {
+      const id = session.draft.id;
+      const read = async () => {
+        const latest = await api<ClientState>("/state");
+        if (latest.startup.state !== "ready" || !Array.isArray(latest.drafts))
+          throw new Error("无法可靠读取草稿列表");
+        return latest.drafts.find((d) => d.id === id);
+      };
+      if (verify) await session.checkDeletion(read);
+      else
+        await session.delete(async (revision) => {
+          const result = await api<{ deleted: boolean }>(
+            `/drafts/${id}`,
+            "DELETE",
+            { revision },
+          );
+          if (result.deleted !== true) throw new Error("删除回执无效");
+        }, read);
+      deletedDrafts.current.add(id);
+      sessions.current.delete(id);
+      setSelected((value) => (value === id ? "" : value));
+      setState((old) =>
+        old?.drafts
+          ? { ...old, drafts: old.drafts.filter((d) => d.id !== id) }
+          : old,
+      );
+      setNotice("草稿已删除");
+    });
+  };
   useEffect(() => {
     if (current?.exportedRequestId) {
       setRecordId(current.exportedRequestId);
@@ -622,7 +667,9 @@ export function App() {
                               d.content.text,
                           )}
                         </strong>
-                        <span>更新于 {d.updatedAt} UTC</span>
+                        <span>
+                          更新于 {utcToLocal(d.updatedAt).replace("T", " ")}
+                        </span>
                       </button>
                     ))
                   ) : (
@@ -660,6 +707,8 @@ export function App() {
                     coverage={state.coverage ?? 0}
                     busy={busy}
                     onExport={exportDraft}
+                    onDelete={() => removeDraft(current)}
+                    checkDeletion={() => removeDraft(current, true)}
                     checkExport={() =>
                       run(async () => {
                         await current.checkExport();

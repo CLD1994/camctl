@@ -482,6 +482,7 @@ it("Schema普通控件支持本地引用，合法预设不依赖整份计划完�
   ).toHaveText(["请选择", "30"]);
   await page.getByLabel("分辨率 (resolution)").selectOption("1");
   await page.getByLabel("帧率 (frame_rate_fps)").selectOption("1");
+  await page.getByText("拍摄参数预设", { exact: true }).click();
   await page.getByLabel("预设名称").fill("巡检");
   await page.getByRole("button", { name: "保存为新预设" }).click();
   await check.poll(() => app.store.all<Preset>("presets").length).toBe(1);
@@ -983,6 +984,7 @@ it("预设创建回执丢失时展示未确认并读取实际记录，不重复�
     .selectOption("camera_record");
   await page.getByLabel("目标设备").selectOption("demo_cam0");
   await page.getByLabel("参数类型").selectOption("demo_fixed");
+  await page.getByText("拍摄参数预设", { exact: true }).click();
   await page.getByLabel("预设名称").fill("回执待核实");
   await page.route("**/api/presets", async (route) => {
     await route.fetch();
@@ -993,3 +995,157 @@ it("预设创建回执丢失时展示未确认并读取实际记录，不重复�
   expect(app.store.all("presets")).toHaveLength(1);
   await check(page.getByLabel("已有预设").locator("option")).toHaveCount(2);
 }, 20000);
+
+it("新录像参数缺省时引导选择并默认折叠预设", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  await page
+    .getByLabel("动作类型", { exact: true })
+    .selectOption("camera_record");
+  await check(page.getByLabel("参数 JSON 文本", { exact: true })).toHaveCount(
+    0,
+  );
+  await check(page.getByLabel("已有预设")).not.toBeVisible();
+  await page.getByLabel("目标设备", { exact: true }).selectOption("demo_cam0");
+  await page.getByLabel("参数类型", { exact: true }).selectOption("demo_fixed");
+  await check(page.getByLabel("参数 JSON 文本", { exact: true })).toHaveCount(
+    0,
+  );
+  await page.getByText("拍摄参数预设", { exact: true }).click();
+  await check(page.getByLabel("已有预设")).toBeVisible();
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
+          ?.params,
+    )
+    .toEqual({ type: "demo_fixed" });
+});
+it("执行时间按本地显示并可点击文本区打开选择器", async () => {
+  const { page, app } = await setup();
+  app.createDraft({
+    text: JSON.stringify({
+      name: "时间计划",
+      actions: [
+        {
+          name: "同步",
+          type: "report_status",
+          scheduled_at: "2026-09-16 04:30:00",
+        },
+      ],
+    }),
+  });
+  await page.getByTestId("draft-open-button").click();
+  const input = page.getByLabel("执行时间", { exact: true });
+  await check(input).toHaveValue("2026-09-16T12:30");
+  await check(page.locator(".action-summary")).toContainText(
+    "2026-09-16 12:30:00",
+  );
+  await check(page.locator(".editor")).not.toContainText("UTC");
+  await input.evaluate((el) => {
+    (window as any).pickerCalls = 0;
+    (el as HTMLInputElement).showPicker = () => {
+      (window as any).pickerCalls++;
+    };
+  });
+  await input.click({ position: { x: 20, y: 12 } });
+  expect(await page.evaluate(() => (window as any).pickerCalls)).toBe(1);
+  await input.fill("2026-09-17T09:10");
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
+          .scheduled_at,
+    )
+    .toBe("2026-09-17 01:10:00");
+});
+it("确认删除草稿后刷新不恢复且取消时保留输入", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByLabel("计划名称", { exact: true }).fill("待删除的草稿");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "删除草稿", exact: true }).click();
+  await check(page.getByLabel("计划名称", { exact: true })).toHaveValue(
+    "待删除的草稿",
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除草稿", exact: true }).click();
+  await check(page.getByTestId("draft-open-button")).toHaveCount(0);
+  expect(app.store.all("drafts")).toEqual([]);
+  await page.reload();
+  await check(page.getByTestId("new-draft-button")).toBeVisible();
+  await check(page.getByTestId("draft-open-button")).toHaveCount(0);
+});
+
+it.each([true, false])(
+  "删除响应丢失时可靠核实实际结果：已提交 %s",
+  async (committed) => {
+    const { page, app } = await setup();
+    await page.getByTestId("new-draft-button").click();
+    await page.getByLabel("计划名称", { exact: true }).fill("删除核实");
+    await page.route("**/api/drafts/*", async (route) => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      if (committed) await route.fetch();
+      await route.abort();
+    });
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "删除草稿", exact: true }).click();
+    if (committed) {
+      await check(page.getByTestId("draft-open-button")).toHaveCount(0);
+      expect(app.store.all("drafts")).toEqual([]);
+    } else {
+      await check(page.getByRole("alert")).toBeVisible();
+      await check(page.getByLabel("计划名称", { exact: true })).toBeEnabled();
+      expect(app.store.all<Draft>("drafts")).toHaveLength(1);
+      await check(page.getByLabel("计划名称", { exact: true })).toHaveValue(
+        "删除核实",
+      );
+    }
+  },
+);
+it.each(["network", "fault"] as const)(
+  "删除核实不可用保持输入与锁定：%s",
+  async (failure) => {
+    const { page, app } = await setup();
+    await page.getByTestId("new-draft-button").click();
+    await page.getByLabel("计划名称", { exact: true }).fill("待核实删除");
+    let uncertain = false;
+    await page.route("**/api/state", async (route) => {
+      if (!uncertain) return route.continue();
+      if (failure === "network") return route.abort();
+      const actual = app.state();
+      await route.fulfill({
+        json: {
+          startup: { ...actual.startup, state: "fault" },
+          capabilities: actual.capabilities,
+        },
+      });
+    });
+    await page.route("**/api/drafts/*", async (route) => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      await route.fetch();
+      uncertain = true;
+      await route.abort();
+    });
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "删除草稿", exact: true }).click();
+    // 自动轮询可能显示故障页；恢复读取后会话仍必须保持未确认锁定。
+    await check.poll(() => uncertain).toBe(true);
+    uncertain = false;
+    await page.unroute("**/api/state");
+    await check(
+      page.getByRole("button", { name: "重新核实删除结果" }),
+    ).toBeVisible();
+    await check(page.getByLabel("计划名称", { exact: true })).toHaveValue(
+      "待核实删除",
+    );
+    await check(page.getByLabel("计划名称", { exact: true })).toBeDisabled();
+    await check(page.getByTestId("export-button")).toBeDisabled();
+    await page.getByRole("button", { name: "重新核实删除结果" }).click();
+    await check(page.getByTestId("draft-open-button")).toHaveCount(0);
+    await check(
+      page.getByRole("heading", { name: "编辑草稿", exact: true }),
+    ).toHaveCount(0);
+  },
+);
