@@ -616,7 +616,6 @@ fieldset {
   }
 }
 .field input,
-.field select,
 .field textarea {
   display: block;
   width: 100%;
@@ -631,9 +630,115 @@ fieldset {
   min-height: 90px;
   resize: vertical;
 }
-.field input:disabled,
-.field select:disabled {
+.field input:disabled {
   background: #f1f3ef;
+}
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  max-width: 100%;
+  padding: 8px 11px;
+  border: 1px solid #bdcec3;
+  border-radius: 8px;
+  background: #fff;
+  color: #233c36;
+  font-weight: 400;
+  text-align: left;
+}
+.field .select-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+}
+.select-trigger:hover:not(:disabled),
+.select-trigger[data-popup-open] {
+  border-color: #50816b;
+  background: #f7faf7;
+}
+.select-trigger:focus-visible {
+  outline: 3px solid #adc7a5;
+  outline-offset: 2px;
+}
+.select-trigger[data-empty] {
+  color: #697c72;
+}
+.select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+  color: #7d8982;
+  border-color: #d8e0d9;
+  background: #f1f3ef;
+}
+.select-trigger[aria-invalid="true"] {
+  border-color: #ae5148;
+}
+.select-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.select-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: #587567;
+}
+.select-positioner {
+  z-index: 20;
+  max-width: calc(100vw - 24px);
+}
+.select-content {
+  min-width: var(--anchor-width);
+  max-width: min(36rem, calc(100vw - 24px));
+  border: 1px solid #c6d5cb;
+  border-radius: 10px;
+  background: #fff;
+  color: #233c36;
+  box-shadow: 0 8px 28px #233c3626;
+  overflow: hidden;
+}
+.select-list {
+  max-height: min(320px, var(--available-height));
+  padding: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  outline: none;
+}
+.select-item {
+  position: relative;
+  padding: 9px 32px 9px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  overflow-wrap: anywhere;
+  user-select: none;
+}
+.select-item[data-selected] {
+  color: #205a47;
+  font-weight: 600;
+  background: #f0f6ef;
+}
+.select-item[data-highlighted] {
+  background: #e4efdf;
+  color: #173e30;
+}
+.select-item[data-disabled] {
+  color: #89928c;
+  cursor: not-allowed;
+  font-weight: 400;
+  background: transparent;
+}
+.select-indicator {
+  position: absolute;
+  right: 11px;
+  top: 9px;
+}
+.select-scroll {
+  text-align: center;
+  background: #fff;
+  color: #587567;
+  font-size: 12px;
 }
 .field small {
   font-weight: 400;

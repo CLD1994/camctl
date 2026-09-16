@@ -1,3 +1,4 @@
+import { Select, SelectItem } from "./Select";
 import { useEffect, useRef, useState } from "react";
 import type { Product } from "./result-model";
 import type { Followup } from "./Records";
@@ -148,7 +149,10 @@ function ProductGroup({
   function close() {
     setCurrent(undefined);
     if (trigger.current?.isConnected) trigger.current.focus();
-    else groupRef.current?.querySelector("select")?.focus();
+    else
+      groupRef.current
+        ?.querySelector<HTMLElement>('[role="combobox"]')
+        ?.focus();
   }
   function navigate(offset: number) {
     const i = images.findIndex((p) => p.id === current);
@@ -162,19 +166,19 @@ function ProductGroup({
         </h4>
         <label>
           筛选{" "}
-          <select
+          <Select
             aria-label={`${name}筛选`}
             value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value);
+            onValueChange={(selectedValue) => {
+              setFilter(selectedValue);
               setPage(1);
             }}
           >
-            <option value="all">全部</option>
-            <option value="ready">可查看</option>
-            <option value="waiting">未收到可查看文件</option>
-            <option value="attention">需处理</option>
-          </select>
+            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="ready">可查看</SelectItem>
+            <SelectItem value="waiting">未收到可查看文件</SelectItem>
+            <SelectItem value="attention">需处理</SelectItem>
+          </Select>
         </label>
       </div>
       <div className="button-row pagination">

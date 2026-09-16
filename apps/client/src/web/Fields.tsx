@@ -1,3 +1,4 @@
+import { Select, SelectItem } from "./Select";
 import type { DraftContent } from "../server/models";
 import {
   parseDraft,
@@ -132,7 +133,7 @@ export function Field({
               }
             />
           ) : enumeration ? (
-            <select
+            <Select
               aria-label={label}
               disabled={choicesBlocked || pendingBlocks(content, path)}
               value={
@@ -142,29 +143,29 @@ export function Field({
                     ? String(matched)
                     : "invalid"
               }
-              onChange={(e) =>
-                e.target.value === ""
+              onValueChange={(selectedValue) =>
+                selectedValue === ""
                   ? set(undefined, true)
-                  : set(enumeration[Number(e.target.value)])
+                  : set(enumeration[Number(selectedValue)])
               }
             >
-              <option value="">请选择</option>
+              <SelectItem value="">请选择</SelectItem>
               {value !== undefined && matched === -1 && (
-                <option value="invalid" disabled>
+                <SelectItem value="invalid" disabled>
                   {optionLabel(value)}（待修正）
-                </option>
+                </SelectItem>
               )}
               {enumeration.map(
                 (v, i) =>
                   (!allowed || allowed.some((a) => sameValue(a, v))) && (
-                    <option key={i} value={i}>
+                    <SelectItem key={i} value={i}>
                       {optionLabel(v)}
-                    </option>
+                    </SelectItem>
                   ),
               )}
-            </select>
+            </Select>
           ) : type === "boolean" ? (
-            <select
+            <Select
               aria-label={label}
               disabled={pendingBlocks(content, path)}
               value={
@@ -176,21 +177,21 @@ export function Field({
                       ? "false"
                       : "invalid"
               }
-              onChange={(e) =>
-                e.target.value === ""
+              onValueChange={(selectedValue) =>
+                selectedValue === ""
                   ? set(undefined, true)
-                  : set(e.target.value === "true")
+                  : set(selectedValue === "true")
               }
             >
-              <option value="">请选择</option>
-              <option value="true">是 · true</option>
-              <option value="false">否 · false</option>
+              <SelectItem value="">请选择</SelectItem>
+              <SelectItem value="true">是 · true</SelectItem>
+              <SelectItem value="false">否 · false</SelectItem>
               {value !== undefined && typeof value !== "boolean" && (
-                <option value="invalid" disabled>
+                <SelectItem value="invalid" disabled>
                   {optionLabel(value)}（待修正）
-                </option>
+                </SelectItem>
               )}
-            </select>
+            </Select>
           ) : type === "string" ? (
             <input
               aria-label={label}

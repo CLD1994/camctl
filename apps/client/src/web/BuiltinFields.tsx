@@ -1,3 +1,4 @@
+import { Select, SelectItem } from "./Select";
 import { isCameraAction } from "../shared/actions";
 import type { CameraActionType } from "../shared/actions";
 import { useId, useState } from "react";
@@ -128,13 +129,13 @@ export function BuiltinFields({
                   {type === "obtain_action_outputs" ? "取回来源" : "取消目标"}{" "}
                   <span className="required">必填</span>
                 </span>
-                <select
+                <Select
                   aria-label={
                     type === "obtain_action_outputs" ? "取回来源" : "取消目标"
                   }
                   value={mode?.id ?? ""}
-                  onChange={(e) => {
-                    const selected = modes.find((m) => m.id === e.target.value);
+                  onValueChange={(selectedValue) => {
+                    const selected = modes.find((m) => m.id === selectedValue);
                     if (!selected) return;
                     let next = setValue(
                       content,
@@ -156,15 +157,15 @@ export function BuiltinFields({
                     change(next);
                   }}
                 >
-                  <option value="" disabled>
+                  <SelectItem value="" disabled>
                     请选择
-                  </option>
+                  </SelectItem>
                   {modes.map((m) => (
-                    <option key={m.id} value={m.id}>
+                    <SelectItem key={m.id} value={m.id}>
                       {m.label}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
+                </Select>
               </label>
               {reference !== undefined && !mode && (
                 <div className="notice warning">
@@ -276,26 +277,26 @@ export function BuiltinFields({
                 <span>
                   报告范围 <span className="required">必填</span>
                 </span>
-                <select
+                <Select
                   aria-label="报告范围"
                   value={reportMode}
-                  onChange={(e) =>
-                    change(setValue(content, path, { scope: e.target.value }))
+                  onValueChange={(selectedValue) =>
+                    change(setValue(content, path, { scope: selectedValue }))
                   }
                 >
                   {reportMode === "invalid" && (
-                    <option value="invalid" disabled>
+                    <SelectItem value="invalid" disabled>
                       原参数待修正
-                    </option>
+                    </SelectItem>
                   )}
-                  <option value="" disabled>
+                  <SelectItem value="" disabled>
                     请选择同步范围
-                  </option>
-                  <option value="full">完整同步</option>
-                  <option value="since" disabled={!basis.length}>
+                  </SelectItem>
+                  <SelectItem value="full">完整同步</SelectItem>
+                  <SelectItem value="since" disabled={!basis.length}>
                     从已保存报告之后补齐
-                  </option>
-                </select>
+                  </SelectItem>
+                </Select>
               </label>
               {reportMode === "" && (
                 <p className="notice warning">
@@ -307,7 +308,7 @@ export function BuiltinFields({
                   <span>
                     同步起点报告 <span className="required">必填</span>
                   </span>
-                  <select
+                  <Select
                     aria-label="同步起点报告"
                     value={
                       params?.after_report_id === undefined
@@ -318,29 +319,29 @@ export function BuiltinFields({
                           ? String(params.after_report_id)
                           : "invalid"
                     }
-                    onChange={(e) =>
+                    onValueChange={(selectedValue) =>
                       put(
                         "after_report_id",
-                        Number(e.target.value),
-                        e.target.value === "",
+                        Number(selectedValue),
+                        selectedValue === "",
                       )
                     }
                   >
-                    <option value="">请选择</option>
+                    <SelectItem value="">请选择</SelectItem>
                     {params?.after_report_id !== undefined &&
                       !basis.some(
                         (r) => r.report_id === params.after_report_id,
                       ) && (
-                        <option value="invalid" disabled>
+                        <SelectItem value="invalid" disabled>
                           {JSON.stringify(params.after_report_id)}（无可靠依据）
-                        </option>
+                        </SelectItem>
                       )}
                     {basis.map((r) => (
-                      <option key={r.report_id} value={r.report_id}>
+                      <SelectItem key={r.report_id} value={r.report_id}>
                         报告 {r.report_id} · 已完整保存至 {r.to_wm}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
+                  </Select>
                 </label>
               )}
               {!basis.length && (

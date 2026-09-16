@@ -1,3 +1,4 @@
+import { choose } from "./select-support";
 import { beforeAll, afterAll, afterEach, expect, it } from "vitest";
 import {
   chromium,
@@ -147,7 +148,7 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
       .getByRole("button", { name: button, exact: true })
       .first()
       .click();
-    await page.getByLabel("目标草稿").selectOption(draft.id);
+    await choose(page.getByLabel("目标草稿"), draft.id);
     await page.getByRole("button", { name: "加入草稿", exact: true }).click();
     await browserExpect(page.getByRole("dialog")).toHaveCount(0);
   };

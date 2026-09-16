@@ -1,3 +1,4 @@
+import { choose } from "./select-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
 import {
@@ -102,11 +103,9 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
   await page.reload();
   await page.getByRole("tab", { name: /计划记录/ }).click();
   await page.getByTestId("record-open-button").first().click();
-  const card = page
-    .locator(".result-card")
-    .filter({
-      has: page.getByRole("heading", { name: "延时摄影", exact: true }),
-    });
+  const card = page.locator(".result-card").filter({
+    has: page.getByRole("heading", { name: "延时摄影", exact: true }),
+  });
   await check(
     card.getByRole("button", { name: "展开动作 延时摄影" }),
   ).toBeVisible();
@@ -133,11 +132,13 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
   await check(page.getByRole("dialog")).toContainText("图片11.png");
   await page.keyboard.press("Escape");
   await check(page.getByRole("dialog")).toHaveCount(0);
-  await card.getByLabel("图片筛选").selectOption("ready");
+  await choose(card.getByLabel("图片筛选"), "ready");
   await check(card.locator("img[data-thumbnail]")).toHaveCount(12);
   await page.setViewportSize({ width: 390, height: 844 });
-  await card.getByRole('button',{name:'底部图片下一页',exact:true}).click();
-  await check(card.locator('img[data-thumbnail]')).toHaveCount(2);
+  await card
+    .getByRole("button", { name: "底部图片下一页", exact: true })
+    .click();
+  await check(card.locator("img[data-thumbnail]")).toHaveCount(2);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -169,22 +170,31 @@ it("照片与延时表单按能力显示，切换保留参数并导出当前类�
   });
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await check(page.getByLabel("照片尺寸 (resolution)")).toHaveValue("0");
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("camera_timelapse");
-  await page.getByLabel("目标设备", { exact: true }).selectOption("demo_cam0");
-  await page.getByLabel("参数类型", { exact: true }).selectOption("demo_count");
+  await check(page.getByLabel("照片尺寸 (resolution)")).toHaveAttribute(
+    "data-value",
+    "0",
+  );
+  await choose(
+    page.getByLabel("动作类型", { exact: true }),
+    "camera_timelapse",
+  );
+  await choose(page.getByLabel("目标设备", { exact: true }), "demo_cam0");
+  await choose(page.getByLabel("参数类型", { exact: true }), "demo_count");
   await page.getByLabel("拍摄张数 (count)").fill("100");
   await page.getByLabel("间隔（秒） (interval_s)").fill("5");
   await page.getByLabel("最大允许延迟 (max_delay_ms)").fill("0");
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("camera_take_photo");
-  await check(page.getByLabel("照片尺寸 (resolution)")).toHaveValue("0");
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("camera_timelapse");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }),
+    "camera_take_photo",
+  );
+  await check(page.getByLabel("照片尺寸 (resolution)")).toHaveAttribute(
+    "data-value",
+    "0",
+  );
+  await choose(
+    page.getByLabel("动作类型", { exact: true }),
+    "camera_timelapse",
+  );
   await check(page.getByLabel("拍摄张数 (count)")).toHaveValue("100");
   await page.getByTestId("export-button").click();
   await check.poll(() => app.store.all("requests").length).toBe(1);

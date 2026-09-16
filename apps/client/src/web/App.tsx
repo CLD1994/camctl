@@ -1,3 +1,4 @@
+import { Select, SelectItem, SelectFieldset } from "./Select";
 import { useEffect, useRef, useState, useReducer } from "react";
 import type {
   Draft,
@@ -969,7 +970,7 @@ function FollowupDialog({
             </div>
           </>
         ) : (
-          <fieldset disabled={busy}>
+          <SelectFieldset disabled={busy}>
             <label className="field">
               动作名称
               <input value={name} onChange={(e) => setName(e.target.value)} />
@@ -998,18 +999,18 @@ function FollowupDialog({
             )}
             <label className="field">
               目标草稿
-              <select
+              <Select
                 aria-label="目标草稿"
                 value={target}
-                onChange={(e) => setTarget(e.target.value)}
+                onValueChange={(selectedValue) => setTarget(selectedValue)}
               >
-                <option value="new">新建一份草稿</option>
+                <SelectItem value="new">新建一份草稿</SelectItem>
                 {drafts.map((d) => (
-                  <option key={d.id} value={d.id}>
+                  <SelectItem key={d.id} value={d.id}>
                     {draftName(d.content.text)} · {d.id.slice(0, 8)}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
+              </Select>
             </label>
             <p className="muted">
               保留已有动作；执行时间由你在草稿中明确填写。源对象的状态继续以主机报告为准。
@@ -1030,7 +1031,7 @@ function FollowupDialog({
                 加入草稿
               </button>
             </div>
-          </fieldset>
+          </SelectFieldset>
         )}
       </section>
     </div>

@@ -1,3 +1,4 @@
+import { choose, readOptions } from "./select-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
 import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from "node:fs";
@@ -38,6 +39,7 @@ async function setup(capabilityText?: string) {
     acceptDownloads: true,
   });
   const page = await context.newPage();
+  page.setDefaultTimeout(5000);
   const stop = createStop(
     () => new Promise<void>((r, j) => server.close((e) => (e ? j(e) : r()))),
     requests,
@@ -59,23 +61,100 @@ async function setup(capabilityText?: string) {
   await page.getByTestId("initialize-button").click();
   return { page, app, directory };
 }
+it("报告范围支持点击展开、键盘选择并保存恢复", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  const type = page.getByLabel("动作类型", { exact: true });
+  // 先通过键盘进入状态报告，避免依赖原生 select 的专用选值接口。
+  await type.focus();
+  await type.press("ArrowDown");
+  await check(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  const scope = page.getByRole("combobox", { name: "报告范围", exact: true });
+  await scope.click();
+  await check(page.getByRole("listbox")).toBeVisible();
+  await check(
+    page.getByRole("option", { name: "从已保存报告之后补齐" }),
+  ).toBeDisabled();
+  await page.getByRole("option", { name: "完整同步", exact: true }).click();
+  await check(scope).toContainText("完整同步");
+  await check(scope).toBeFocused();
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
+          ?.params,
+    )
+    .toEqual({ scope: "full" });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(scope).toContainText("完整同步");
+  await scope.focus();
+  await scope.press("ArrowDown");
+  await check(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await check(scope).toBeFocused();
+});
+it("报告范围在导出结果未确认时禁用，核实后恢复选择", async () => {
+  const { page, app } = await setup();
+  const draft = app.createDraft({
+    text: JSON.stringify({
+      name: "同步",
+      actions: [
+        { name: "同步", type: "report_status", params: { scope: "full" } },
+      ],
+    }),
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  let offline = false;
+  await page.route("**/api/state", (route) =>
+    offline ? route.abort() : route.continue(),
+  );
+  await page.route("**/api/drafts/*/export", async (route) => {
+    offline = true;
+    await route.abort();
+  });
+  await page.getByTestId("export-button").click();
+  const verify = page.getByRole("button", {
+    name: "重新核实导出结果",
+    exact: true,
+  });
+  await check(verify).toBeVisible();
+  const scope = page.getByRole("combobox", { name: "报告范围", exact: true });
+  await check(scope).toBeDisabled();
+  await check(page.getByRole("listbox")).toHaveCount(0);
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+  ).toEqual({ scope: "full" });
+  offline = false;
+  await verify.click();
+  await check(scope).toBeEnabled();
+  await scope.click();
+  await check(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await check(scope).toBeFocused();
+});
 it("取回来源只为指定动作实例展示附加产物筛选", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("obtain_action_outputs");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }),
+    "obtain_action_outputs",
+  );
   const source = page.getByLabel("取回来源", { exact: true });
   for (const mode of ["action_name", "group", "plan_group"]) {
-    await source.selectOption(mode);
+    await choose(source, mode);
     await check(page.getByLabel("指定产物筛选")).toHaveCount(0);
   }
-  await source.selectOption("action_instance_id");
+  await choose(source, "action_instance_id");
   await page.getByLabel("指定产物筛选").check();
   await page.getByRole("button", { name: "添加产物 ID", exact: true }).click();
   await page.getByLabel("产物 ID 1", { exact: true }).fill("o-1");
-  await source.selectOption("action_name");
+  await choose(source, "action_name");
   await check(page.getByLabel("指定产物筛选")).toHaveCount(0);
   await check
     .poll(
@@ -90,34 +169,38 @@ it("类型独立编辑在刷新后恢复，不要求移除另一类型参数", a
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
   const type = page.getByLabel("动作类型", { exact: true });
-  await type.selectOption("camera_record");
-  await page.getByLabel("目标设备", { exact: true }).selectOption("demo_cam0");
-  await page.getByLabel("参数类型", { exact: true }).selectOption("demo_fixed");
+  await choose(type, "camera_record");
+  await choose(page.getByLabel("目标设备", { exact: true }), "demo_cam0");
+  await choose(page.getByLabel("参数类型", { exact: true }), "demo_fixed");
   await page
     .getByLabel("最大允许延迟 (max_delay_ms)", { exact: true })
     .fill("1e");
-  await type.selectOption("obtain_action_outputs");
+  await choose(type, "obtain_action_outputs");
   await check(
     page.getByRole("button", { name: /移除不适用|省略设备/ }),
   ).toHaveCount(0);
-  await page.getByLabel("取回来源").selectOption("action_instance_id");
+  await choose(page.getByLabel("取回来源"), "action_instance_id");
   await page.getByLabel("来源动作实例 ID").fill("a-1");
-  await type.selectOption("report_status");
-  await page.getByLabel("报告范围").selectOption("full");
+  await choose(type, "report_status");
+  await choose(page.getByLabel("报告范围"), "full");
   await check(page.getByTestId("save-status")).toContainText("已保存");
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await type.selectOption("camera_record");
+  await choose(type, "camera_record");
   await check(
     page.getByLabel("最大允许延迟 (max_delay_ms)", { exact: true }),
   ).toHaveValue("1e");
-  await check(page.getByLabel("目标设备", { exact: true })).toHaveValue(
+  await check(page.getByLabel("目标设备", { exact: true })).toHaveAttribute(
+    "data-value",
     "demo_cam0",
   );
-  await type.selectOption("obtain_action_outputs");
+  await choose(type, "obtain_action_outputs");
   await check(page.getByLabel("来源动作实例 ID")).toHaveValue("a-1");
-  await type.selectOption("report_status");
-  await check(page.getByLabel("报告范围")).toHaveValue("full");
+  await choose(type, "report_status");
+  await check(page.getByLabel("报告范围")).toHaveAttribute(
+    "data-value",
+    "full",
+  );
   await page.getByTestId("export-button").click();
   await check(page.getByTestId("save-status")).toHaveCount(0);
 }, 20000);
@@ -125,9 +208,7 @@ it("必填标签覆盖公共字段，普通选填直接显示且可清空", asyn
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("camera_record");
+  await choose(page.getByLabel("动作类型", { exact: true }), "camera_record");
   for (const label of [
     "计划名称",
     "动作名称",
@@ -208,10 +289,12 @@ it.each([
     await page.getByTestId("new-draft-button").click();
     await page.getByRole("button", { name: "添加动作", exact: true }).click();
     const type = page.getByLabel("动作类型", { exact: true });
-    await check(type).toHaveValue("");
-    await check(type.locator('option[value="camera_record"]')).toHaveCount(0);
-    await type.selectOption("report_status");
-    await page.getByLabel("报告范围").selectOption("full");
+    await check(type).toHaveAttribute("data-value", "");
+    expect(
+      (await readOptions(type)).filter((o) => o.value === "camera_record"),
+    ).toHaveLength(0);
+    await choose(type, "report_status");
+    await choose(page.getByLabel("报告范围"), "full");
     await page.getByTestId("export-button").click();
     await check
       .poll(() => app.store.all<ExportedRequest>("requests").length)
@@ -244,17 +327,16 @@ it("设备能力联动保留失效草稿并阻止导出", async () => {
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
   const action = page.locator(".action-card").first();
-  await check(action.getByLabel("动作类型", { exact: true })).toHaveValue("");
+  await check(action.getByLabel("动作类型", { exact: true })).toHaveAttribute(
+    "data-value",
+    "",
+  );
   await check(action.getByLabel("动作参数 JSON", { exact: true })).toHaveCount(
     0,
   );
   await check(action.getByLabel("目标设备", { exact: true })).toHaveCount(0);
-  await action
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("camera_record");
-  await action
-    .getByLabel("目标设备", { exact: true })
-    .selectOption("demo_cam0");
+  await choose(action.getByLabel("动作类型", { exact: true }), "camera_record");
+  await choose(action.getByLabel("目标设备", { exact: true }), "demo_cam0");
   for (const type of [
     "report_status",
     "cancel_task",
@@ -262,23 +344,20 @@ it("设备能力联动保留失效草稿并阻止导出", async () => {
     "obtain_action_outputs",
     "",
   ]) {
-    await action.getByLabel("动作类型", { exact: true }).selectOption(type);
+    await choose(action.getByLabel("动作类型", { exact: true }), type);
     await check(action.getByLabel("目标设备", { exact: true })).toHaveCount(0);
   }
-  await action
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("camera_record");
-  await check(action.getByLabel("目标设备", { exact: true })).toHaveValue(
+  await choose(action.getByLabel("动作类型", { exact: true }), "camera_record");
+  await check(action.getByLabel("目标设备", { exact: true })).toHaveAttribute(
+    "data-value",
     "demo_cam0",
   );
-  await check(
-    action
-      .getByLabel("目标设备", { exact: true })
-      .locator('option[value="no-record"]'),
-  ).toHaveCount(0);
-  await action
-    .getByLabel("参数类型", { exact: true })
-    .selectOption("demo_fixed");
+  expect(
+    (await readOptions(action.getByLabel("目标设备", { exact: true }))).filter(
+      (o) => o.value === "no-record",
+    ),
+  ).toHaveLength(0);
+  await choose(action.getByLabel("参数类型", { exact: true }), "demo_fixed");
   await action.getByLabel("执行时间", { exact: true }).fill("2026-09-16T12:00");
   await action
     .getByLabel("最大允许延迟 (max_delay_ms)", { exact: true })
@@ -304,21 +383,28 @@ it("设备能力联动保留失效草稿并阻止导出", async () => {
     .getByRole("button", { name: "重新加载能力说明", exact: true })
     .click();
   await page.getByTestId("nav-plans").click();
-  await check(
-    action.getByLabel("动作类型", { exact: true }).locator("option:checked"),
-  ).toHaveJSProperty("disabled", true);
-  await check(
-    action.getByLabel("目标设备", { exact: true }).locator("option:checked"),
-  ).toHaveJSProperty("disabled", true);
-  await check(
-    action.getByLabel("参数类型", { exact: true }).locator("option:checked"),
-  ).toHaveJSProperty("disabled", true);
+  expect(
+    (await readOptions(action.getByLabel("动作类型", { exact: true })))
+      .filter((o) => o.selected)
+      .map((o) => o.disabled),
+  ).toEqual([true]);
+  expect(
+    (await readOptions(action.getByLabel("目标设备", { exact: true })))
+      .filter((o) => o.selected)
+      .map((o) => o.disabled),
+  ).toEqual([true]);
+  expect(
+    (await readOptions(action.getByLabel("参数类型", { exact: true })))
+      .filter((o) => o.selected)
+      .map((o) => o.disabled),
+  ).toEqual([true]);
   expect(saved()).toEqual(before);
   await page.getByTestId("export-button").click();
   expect(app.store.all("requests")).toHaveLength(0);
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await check(action.getByLabel("目标设备", { exact: true })).toHaveValue(
+  await check(action.getByLabel("目标设备", { exact: true })).toHaveAttribute(
+    "data-value",
     "demo_cam0",
   );
   expect(saved()).toEqual(before);
@@ -349,12 +435,12 @@ it("内置取回表单区分所属组与来源组并保存四种引用", async (
   await action.getByRole("button", { name: "移除不适用的动作组" }).click();
   await check(action.getByLabel("来源动作名称")).toHaveValue("录像");
   await check(action.getByLabel("指定产物筛选")).toHaveCount(0);
-  await action.getByLabel("取回来源").selectOption("action_instance_id");
+  await choose(action.getByLabel("取回来源"), "action_instance_id");
   await action.getByLabel("来源动作实例 ID").fill("a-1");
   await action.getByLabel("指定产物筛选").check();
   await action.getByRole("button", { name: "添加产物 ID" }).click();
   await action.getByLabel("产物 ID 1", { exact: true }).fill("out-1");
-  await action.getByLabel("取回来源").selectOption("group");
+  await choose(action.getByLabel("取回来源"), "group");
   await action.getByLabel("来源组").fill("早班");
   await check(action.getByLabel("指定产物筛选")).toHaveCount(0);
   const saved = () =>
@@ -364,12 +450,12 @@ it("内置取回表单区分所属组与来源组并保存四种引用", async (
     type: "obtain_action_outputs",
     params: { source: { group: "早班" } },
   });
-  await action.getByLabel("取回来源").selectOption("action_instance_id");
+  await choose(action.getByLabel("取回来源"), "action_instance_id");
   await action.getByLabel("来源动作实例 ID").fill("remote-action");
   await check
     .poll(() => saved().params)
     .toEqual({ source: { action_instance_id: "remote-action" } });
-  await action.getByLabel("取回来源").selectOption("plan_group");
+  await choose(action.getByLabel("取回来源"), "plan_group");
   await action.getByLabel("来源计划实例 ID").fill("remote-plan");
   await action.getByLabel("来源组").fill("夜班");
   await check
@@ -429,7 +515,7 @@ it("取消目标四种模式互斥且手工跨计划 ID 不因本地未知被拒
     ["plan_instance_id", "目标计划实例 ID", "plan_instance_id"],
     ["action_instance_id", "目标动作实例 ID", "action_instance_id"],
   ]) {
-    await page.getByLabel("取消目标").selectOption(mode);
+    await choose(page.getByLabel("取消目标"), mode);
     await page.getByLabel(label, { exact: true }).fill("remote-1");
     await check
       .poll(
@@ -439,7 +525,7 @@ it("取消目标四种模式互斥且手工跨计划 ID 不因本地未知被拒
       )
       .toEqual({ target: { [key]: "remote-1" } });
   }
-  await page.getByLabel("取消目标").selectOption("plan_group");
+  await choose(page.getByLabel("取消目标"), "plan_group");
   await page.getByLabel("目标计划实例 ID").fill("p-1");
   await page.getByLabel("目标组").fill("A");
   await page.getByTestId("export-button").click();
@@ -460,7 +546,7 @@ it.each([undefined, {}])(
     });
     await page.reload();
     await page.getByTestId("draft-open-button").click();
-    await check(page.getByLabel("报告范围")).toHaveValue("");
+    await check(page.getByLabel("报告范围")).toHaveAttribute("data-value", "");
     await check(page.getByTestId("validation-issues")).toContainText(
       "invalid_params",
     );
@@ -474,7 +560,7 @@ it.each([undefined, {}])(
     expect(JSON.parse(app.draft(draft.id).content.text).actions[0]).toEqual(
       action,
     );
-    await page.getByLabel("报告范围").selectOption("full");
+    await choose(page.getByLabel("报告范围"), "full");
     await page.getByTestId("export-button").click();
     await check
       .poll(() => app.store.all<ExportedRequest>("requests").length)
@@ -503,8 +589,11 @@ it("报告表单保留非法原值，完整同步不携带旧起点", async () =
     }),
   );
   await page.getByTestId("draft-json-toggle").click();
-  await check(page.getByLabel("同步起点报告")).toHaveValue("invalid");
-  await page.getByLabel("报告范围").selectOption("full");
+  await check(page.getByLabel("同步起点报告")).toHaveAttribute(
+    "data-value",
+    "invalid",
+  );
+  await choose(page.getByLabel("报告范围"), "full");
   await check
     .poll(
       () =>
@@ -530,7 +619,7 @@ it("动作类型独立保存设备策略且共用无效时间仍需修正", asyn
   });
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await page.getByLabel("动作类型").selectOption("report_status");
+  await choose(page.getByLabel("动作类型"), "report_status");
   await check
     .poll(() => JSON.parse(app.draft(draft.id).content.text).actions[0])
     .toEqual({ name: "录像", type: "report_status", scheduled_at: null });
@@ -540,7 +629,7 @@ it("动作类型独立保存设备策略且共用无效时间仍需修正", asyn
   await page
     .getByRole("button", { name: "不指定执行时间", exact: true })
     .click();
-  await page.getByLabel("报告范围").selectOption("full");
+  await choose(page.getByLabel("报告范围"), "full");
   await page.getByTestId("export-button").click();
   await check.poll(() => app.store.all("requests").length).toBe(1);
 }, 20000);
@@ -565,7 +654,7 @@ it("内置参数的非法组合与类型原样保留且未完成输入不能被�
   ).toEqual(params);
   await page.getByRole("button", { name: "移除不适用的产物筛选" }).click();
   await page.getByRole("button", { name: "移除不适用参数字段" }).click();
-  await page.getByLabel("取回来源").selectOption("action_instance_id");
+  await choose(page.getByLabel("取回来源"), "action_instance_id");
   await page.getByLabel("来源动作实例 ID").fill("a-1");
   await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
   await page.getByLabel("动作参数 JSON").fill('{"source":');
@@ -602,9 +691,12 @@ it("报告表单仅提供可靠覆盖的报告起点且导出保持数值类型"
   expect(
     JSON.parse(app.draft(draft.id).content.text).actions[0].params,
   ).toEqual({});
-  await page.getByLabel("报告范围").selectOption("since");
-  await check(page.getByLabel("同步起点报告")).toHaveValue("");
-  await page.getByLabel("同步起点报告").selectOption(String(report.report_id));
+  await choose(page.getByLabel("报告范围"), "since");
+  await check(page.getByLabel("同步起点报告")).toHaveAttribute(
+    "data-value",
+    "",
+  );
+  await choose(page.getByLabel("同步起点报告"), String(report.report_id));
   await page.getByTestId("export-button").click();
   await check
     .poll(() => app.store.all<ExportedRequest>("requests").length)
@@ -631,7 +723,7 @@ it.each([null, [], "text", false])(
       JSON.parse(app.draft(draft.id).content.text).actions[0].params,
     ).toEqual(params);
     await page.getByRole("button", { name: "清空参数并重新填写" }).click();
-    await page.getByLabel("取消目标").selectOption("request_id");
+    await choose(page.getByLabel("取消目标"), "request_id");
     await page.getByLabel("目标请求 ID").fill("req-1");
     await page.getByTestId("export-button").click();
     await check.poll(() => app.store.all("requests").length).toBe(1);
@@ -643,18 +735,20 @@ it("Schema普通控件支持本地引用，合法预设不依赖整份计划完�
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
-  await page.getByLabel("目标设备").selectOption("demo_cam0");
-  await page.getByLabel("参数类型").selectOption("demo_adjustable");
-  await page.getByLabel("分辨率 (resolution)").selectOption("0");
-  await check(
-    page.getByLabel("帧率 (frame_rate_fps)").locator("option"),
-  ).toHaveText(["请选择", "30"]);
-  await page.getByLabel("分辨率 (resolution)").selectOption("1");
-  await page.getByLabel("帧率 (frame_rate_fps)").selectOption("1");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
+  await choose(page.getByLabel("目标设备"), "demo_cam0");
+  await choose(page.getByLabel("参数类型"), "demo_adjustable");
+  await choose(page.getByLabel("分辨率 (resolution)"), "0");
+  expect(
+    (await readOptions(page.getByLabel("帧率 (frame_rate_fps)"))).map(
+      (o) => o.text,
+    ),
+  ).toEqual(["请选择", "30"]);
+  await choose(page.getByLabel("分辨率 (resolution)"), "1");
+  await choose(page.getByLabel("帧率 (frame_rate_fps)"), "1");
   await page.getByText("拍摄参数预设", { exact: true }).click();
   await page.getByLabel("预设名称").fill("巡检");
   await page.getByRole("button", { name: "保存为新预设" }).click();
@@ -669,18 +763,21 @@ it("Schema普通控件支持本地引用，合法预设不依赖整份计划完�
     JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
       .scheduled_at,
   ).toBeUndefined();
-  await page.getByLabel("帧率 (frame_rate_fps)").selectOption("0");
+  await choose(page.getByLabel("帧率 (frame_rate_fps)"), "0");
   await page.getByRole("button", { name: "应用预设", exact: true }).click();
-  await check(page.getByLabel("帧率 (frame_rate_fps)")).toHaveValue("1");
+  await check(page.getByLabel("帧率 (frame_rate_fps)")).toHaveAttribute(
+    "data-value",
+    "1",
+  );
 }, 20000);
 it("普通字段没有重复值和省略，必填缺失阻止导出，字符串选项按原文显示", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
   await page.getByLabel("最大允许延迟 (max_delay_ms)").fill("0");
   const field = page
     .locator(".field")
@@ -693,11 +790,13 @@ it("普通字段没有重复值和省略，必填缺失阻止导出，字符串�
   await check(
     page.getByRole("button", { name: "省略策略字段", exact: true }),
   ).toHaveCount(0);
-  await page.getByLabel("目标设备").selectOption("demo_cam0");
-  await page.getByLabel("参数类型").selectOption("demo_adjustable");
-  await check(
-    page.getByLabel("分辨率 (resolution)").locator("option"),
-  ).toHaveText(["请选择", "4K", "1080p"]);
+  await choose(page.getByLabel("目标设备"), "demo_cam0");
+  await choose(page.getByLabel("参数类型"), "demo_adjustable");
+  expect(
+    (await readOptions(page.getByLabel("分辨率 (resolution)"))).map(
+      (o) => o.text,
+    ),
+  ).toEqual(["请选择", "4K", "1080p"]);
   await page.getByLabel("最大允许延迟 (max_delay_ms)").fill("");
   await page.getByTestId("export-button").click();
   expect(app.store.all("requests")).toHaveLength(0);
@@ -706,47 +805,55 @@ it("JSON带入非法组合保留原值并通过联动修正", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
-  await page.getByLabel("目标设备").selectOption("demo_cam0");
-  await page.getByLabel("参数类型").selectOption("demo_adjustable");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
+  await choose(page.getByLabel("目标设备"), "demo_cam0");
+  await choose(page.getByLabel("参数类型"), "demo_adjustable");
   await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
   await page
     .getByLabel("参数 JSON 文本")
     .fill('{"type":"demo_adjustable","resolution":"4K","frame_rate_fps":60}');
   await page.getByRole("button", { name: "参数表单", exact: true }).click();
-  await check(
-    page.getByLabel("帧率 (frame_rate_fps)").locator('option[value="invalid"]'),
-  ).toHaveJSProperty("disabled", true);
-  await check(page.getByLabel("帧率 (frame_rate_fps)")).toHaveValue("invalid");
+  expect(
+    (await readOptions(page.getByLabel("帧率 (frame_rate_fps)")))
+      .filter((o) => o.value === "invalid")
+      .map((o) => o.disabled),
+  ).toEqual([true]);
+  await check(page.getByLabel("帧率 (frame_rate_fps)")).toHaveAttribute(
+    "data-value",
+    "invalid",
+  );
   await check(page.getByTestId("save-status")).toContainText("已保存");
   expect(
     JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0].params
       .frame_rate_fps,
   ).toBe(60);
-  await page.getByLabel("帧率 (frame_rate_fps)").selectOption("0");
-  await check(page.getByLabel("分辨率 (resolution)")).toHaveValue("0");
+  await choose(page.getByLabel("帧率 (frame_rate_fps)"), "0");
+  await check(page.getByLabel("分辨率 (resolution)")).toHaveAttribute(
+    "data-value",
+    "0",
+  );
 }, 20000);
 it("动作折叠保留未完成输入和问题提示，删除后保持对应关系", async () => {
   const { page } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
   await page.getByLabel("动作名称", { exact: true }).fill("第一段");
   await page.getByLabel("最大允许延迟 (max_delay_ms)").fill("1e");
   await page.getByRole("button", { name: "收起动作", exact: true }).click();
   await check(page.getByLabel("最大允许延迟 (max_delay_ms)")).toBeHidden();
   await check(page.locator(".action-summary")).toContainText("待修正");
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
   await check(
     page.getByLabel("动作名称", { exact: true }).last(),
   ).toBeVisible();
@@ -830,10 +937,15 @@ it("能力重载同时更新联动与指南，原草稿不被改写", async () =
   await check(first.getByRole("cell")).toHaveText(["4K", "60"]);
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("draft-open-button").click();
-  await check(page.getByLabel("帧率 (frame_rate_fps)")).toHaveValue("invalid");
-  await check(
-    page.getByLabel("帧率 (frame_rate_fps)").locator("option:not([disabled])"),
-  ).toHaveText(["请选择", "60"]);
+  await check(page.getByLabel("帧率 (frame_rate_fps)")).toHaveAttribute(
+    "data-value",
+    "invalid",
+  );
+  expect(
+    (await readOptions(page.getByLabel("帧率 (frame_rate_fps)")))
+      .filter((o) => !o.disabled)
+      .map((o) => o.text),
+  ).toEqual(["请选择", "60"]);
   expect(app.draft(draft.id).content).toEqual(before);
 }, 20000);
 it("设备指南区分空目录、没有拍摄能力与加载失败后保留旧说明", async () => {
@@ -884,12 +996,12 @@ it.each(["open", "empty"])(
     await page.reload();
     await page.getByTestId("new-draft-button").click();
     await page.getByRole("button", { name: "添加动作", exact: true }).click();
-    await page
-      .getByLabel("动作类型", { exact: true })
-      .last()
-      .selectOption("camera_record");
-    await page.getByLabel("目标设备").selectOption("demo_cam0");
-    await page.getByLabel("参数类型").selectOption("demo_fixed");
+    await choose(
+      page.getByLabel("动作类型", { exact: true }).last(),
+      "camera_record",
+    );
+    await choose(page.getByLabel("目标设备"), "demo_cam0");
+    await choose(page.getByLabel("参数类型"), "demo_fixed");
     await check(page.locator(".action-card")).not.toContainText(
       "该任务使用固定设置，无需填写其他参数",
     );
@@ -903,12 +1015,12 @@ it("未完成参数JSON切换视图和刷新后仍可修正", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
-  await page.getByLabel("目标设备").selectOption("demo_cam0");
-  await page.getByLabel("参数类型").selectOption("demo_fixed");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
+  await choose(page.getByLabel("目标设备"), "demo_cam0");
+  await choose(page.getByLabel("参数类型"), "demo_fixed");
   await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
   await page.getByLabel("参数 JSON 文本").fill('{"type":');
   await page.getByRole("button", { name: "参数表单", exact: true }).click();
@@ -973,7 +1085,7 @@ it("准备同步追加到所选已有草稿并保留动作与未完成输入", a
   });
   await page.reload();
   await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
-  await page.getByLabel("目标草稿").selectOption(draft.id);
+  await choose(page.getByLabel("目标草稿"), draft.id);
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
   await check
     .poll(() => JSON.parse(app.draft(draft.id).content.text).actions.length)
@@ -992,17 +1104,17 @@ it("添加动作保留已有动作的未完成参数并继续阻止导出", asyn
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
   await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
   await page.getByLabel("参数 JSON 文本").fill("{");
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
   await check(page.getByTestId("save-status")).toContainText("已保存");
   const content = app.store.all<Draft>("drafts")[0].content;
   expect(content.pending?.["/actions/0/params"]).toEqual({
@@ -1034,7 +1146,7 @@ it("后续动作响应丢失后依据草稿内容确认追加成功", async () =
     } else await route.continue();
   });
   await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
-  await page.getByLabel("目标草稿").selectOption(draft.id);
+  await choose(page.getByLabel("目标草稿"), draft.id);
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
   await check(page.getByRole("dialog")).toHaveCount(0);
   expect(JSON.parse(app.draft(draft.id).content.text).actions).toHaveLength(2);
@@ -1085,12 +1197,12 @@ it("普通字段保留缺省和显式空值，重载说明不写入Schema默认�
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
-  await page.getByLabel("目标设备").selectOption("demo_cam0");
-  await page.getByLabel("参数类型").selectOption("demo_fixed");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
+  await choose(page.getByLabel("目标设备"), "demo_cam0");
+  await choose(page.getByLabel("参数类型"), "demo_fixed");
   await check(
     page.getByRole("checkbox", { name: "填写次数 (count)", exact: true }),
   ).toHaveCount(0);
@@ -1143,12 +1255,12 @@ it("预设创建回执丢失时展示未确认并读取实际记录，不重复�
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .last()
-    .selectOption("camera_record");
-  await page.getByLabel("目标设备").selectOption("demo_cam0");
-  await page.getByLabel("参数类型").selectOption("demo_fixed");
+  await choose(
+    page.getByLabel("动作类型", { exact: true }).last(),
+    "camera_record",
+  );
+  await choose(page.getByLabel("目标设备"), "demo_cam0");
+  await choose(page.getByLabel("参数类型"), "demo_fixed");
   await page.getByText("拍摄参数预设", { exact: true }).click();
   await page.getByLabel("预设名称").fill("回执待核实");
   await page.route("**/api/presets", async (route) => {
@@ -1158,22 +1270,20 @@ it("预设创建回执丢失时展示未确认并读取实际记录，不重复�
   await page.getByRole("button", { name: "保存为新预设" }).click();
   await check(page.locator(".preset-box")).toContainText("尚未确认");
   expect(app.store.all("presets")).toHaveLength(1);
-  await check(page.getByLabel("已有预设").locator("option")).toHaveCount(2);
+  expect(await readOptions(page.getByLabel("已有预设"))).toHaveLength(2);
 }, 20000);
 
 it("新录像参数缺省时引导选择并默认折叠预设", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByRole("button", { name: "添加动作", exact: true }).click();
-  await page
-    .getByLabel("动作类型", { exact: true })
-    .selectOption("camera_record");
+  await choose(page.getByLabel("动作类型", { exact: true }), "camera_record");
   await check(page.getByLabel("参数 JSON 文本", { exact: true })).toHaveCount(
     0,
   );
   await check(page.getByLabel("已有预设")).not.toBeVisible();
-  await page.getByLabel("目标设备", { exact: true }).selectOption("demo_cam0");
-  await page.getByLabel("参数类型", { exact: true }).selectOption("demo_fixed");
+  await choose(page.getByLabel("目标设备", { exact: true }), "demo_cam0");
+  await choose(page.getByLabel("参数类型", { exact: true }), "demo_fixed");
   await check(page.getByLabel("参数 JSON 文本", { exact: true })).toHaveCount(
     0,
   );

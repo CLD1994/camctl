@@ -1,3 +1,4 @@
+import { choose } from "./select-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
 import {
@@ -146,7 +147,7 @@ it.each([
     await page
       .getByRole("button", { name: "准备状态同步", exact: true })
       .click();
-    await page.getByLabel("目标草稿").selectOption(draft.id);
+    await choose(page.getByLabel("目标草稿"), draft.id);
     await page.getByRole("button", { name: "加入草稿", exact: true }).click();
     await page
       .getByRole("button", { name: "查看目标草稿", exact: true })
@@ -203,7 +204,7 @@ it.each(["different", "omit", "preset_same", "preset_different"] as const)(
     await widget.fill("{");
     if (preset) {
       await page.getByText("拍摄参数预设", { exact: true }).first().click();
-      await page.getByLabel("已有预设").selectOption(preset.id);
+      await choose(page.getByLabel("已有预设"), preset.id);
       await page.getByRole("button", { name: "应用预设", exact: true }).click();
     } else if (mode === "omit")
       await page
@@ -292,7 +293,7 @@ it("结构修正后在同页同目标重新准备，按新revision保留未完�
     await route.continue();
   });
   await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
-  await page.getByLabel("目标草稿").selectOption(draft.id);
+  await choose(page.getByLabel("目标草稿"), draft.id);
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
   await check(
     page.getByRole("button", { name: "重试准备目标草稿", exact: true }),
@@ -670,7 +671,7 @@ it("已有目标追加未知恢复保留原动作和pending", async () => {
     await r.abort();
   });
   await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
-  await page.getByLabel("目标草稿").selectOption(target.id);
+  await choose(page.getByLabel("目标草稿"), target.id);
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
   await check(
     page.getByRole("button", { name: "重新核实追加结果", exact: true }),

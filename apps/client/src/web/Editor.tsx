@@ -1,3 +1,4 @@
+import { Select, SelectItem, SelectFieldset } from "./Select";
 import { isCameraAction } from "../shared/actions";
 import { useState } from "react";
 import { useFeedback } from "./feedback";
@@ -199,7 +200,7 @@ export function Editor(props: Props) {
           此草稿正在核实一次后续追加；请从上方返回核实，当前内容暂为只读。
         </p>
       )}
-      <fieldset disabled={busy || !session.editable}>
+      <SelectFieldset disabled={busy || !session.editable}>
         <PendingInputs content={content} change={change} />
         {json ? (
           <>
@@ -315,7 +316,7 @@ export function Editor(props: Props) {
             <p>原始输入已保留。请切换到整份计划 JSON 继续编辑。</p>
           </>
         )}
-      </fieldset>
+      </SelectFieldset>
       <Issues issues={issues} />
       <div className="editor-footer">
         <p>导出生成固定请求。下载后，请手工交给负责传输的部门。</p>
@@ -538,61 +539,61 @@ function ActionEditor(
             <span>
               动作类型 <span className="required">必填</span>
             </span>
-            <select
+            <Select
               aria-label="动作类型"
               value={typeof action.type === "string" ? action.type : ""}
               disabled={!canSwitchActionType(content, index)}
-              onChange={(e) => {
+              onValueChange={(selectedValue) => {
                 change(
-                  switchActionType(content, index, e.target.value || undefined),
+                  switchActionType(content, index, selectedValue || undefined),
                 );
                 setJson(false);
                 setError("");
                 setNotice("");
               }}
             >
-              <option value="">请选择动作类型</option>
+              <SelectItem value="">请选择动作类型</SelectItem>
               {action.type !== undefined &&
                 action.type !== "" &&
                 !options.actions.includes(action.type) && (
-                  <option disabled value={String(action.type)}>
+                  <SelectItem disabled value={String(action.type)}>
                     {String(action.type)}（当前不可用）
-                  </option>
+                  </SelectItem>
                 )}
               {options.actions.map((type) => (
-                <option key={type} value={type}>
+                <SelectItem key={type} value={type}>
                   {actionLabel(type)} · {type}
-                </option>
+                </SelectItem>
               ))}
-            </select>
+            </Select>
           </label>
           {showDevice && (
             <label className="field">
               <span>
                 目标设备 <span className="required">必填</span>
               </span>
-              <select
+              <Select
                 aria-label="目标设备"
                 value={action.device_id ?? ""}
-                onChange={(e) =>
-                  put("device_id", e.target.value, e.target.value === "")
+                onValueChange={(selectedValue) =>
+                  put("device_id", selectedValue, selectedValue === "")
                 }
               >
-                <option value="">请选择设备</option>
+                <SelectItem value="">请选择设备</SelectItem>
                 {action.device_id &&
                   !options.devices.some(
                     (d) => d.device_id === action.device_id,
                   ) && (
-                    <option disabled value={action.device_id}>
+                    <SelectItem disabled value={action.device_id}>
                       {action.device_id}（当前不可用）
-                    </option>
+                    </SelectItem>
                   )}
                 {options.devices.map((d) => (
-                  <option key={d.device_id} value={d.device_id}>
+                  <SelectItem key={d.device_id} value={d.device_id}>
                     {d.device_id} · {d.driver_id}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
           <label className="field">
@@ -660,7 +661,7 @@ function ActionEditor(
                 <span>
                   参数类型 <span className="required">必填</span>
                 </span>
-                <select
+                <Select
                   aria-label="参数类型"
                   value={
                     isObject(action.params) &&
@@ -669,31 +670,31 @@ function ActionEditor(
                       : ""
                   }
                   disabled={!!pending}
-                  onChange={(e) =>
+                  onValueChange={(selectedValue) =>
                     change(
                       setValue(
                         content,
                         [...base, "params", "type"],
-                        e.target.value,
-                        e.target.value === "",
+                        selectedValue,
+                        selectedValue === "",
                       ),
                     )
                   }
                 >
-                  <option value="">请选择参数类型</option>
+                  <SelectItem value="">请选择参数类型</SelectItem>
                   {isObject(action.params) &&
                     typeof action.params.type === "string" &&
                     !parameter && (
-                      <option disabled value={action.params.type}>
+                      <SelectItem disabled value={action.params.type}>
                         {action.params.type}（当前不可用）
-                      </option>
+                      </SelectItem>
                     )}
                   {types.map((p) => (
-                    <option key={p.type} value={p.type}>
+                    <SelectItem key={p.type} value={p.type}>
                       {p.name}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
+                </Select>
               </label>
             </div>
             <Field
@@ -757,14 +758,16 @@ function ActionEditor(
               <div className="form-grid">
                 <label className="field">
                   已有预设
-                  <select
+                  <Select
                     aria-label="已有预设"
                     value={selected?.id ?? ""}
-                    onChange={(e) => setPresetId(e.target.value)}
+                    onValueChange={(selectedValue) =>
+                      setPresetId(selectedValue)
+                    }
                   >
-                    <option value="">选择当前设备的预设</option>
+                    <SelectItem value="">选择当前设备的预设</SelectItem>
                     {compatible.map((p) => (
-                      <option key={p.id} value={p.id}>
+                      <SelectItem key={p.id} value={p.id}>
                         {p.name}
                         {validateParams(
                           p.deviceId,
@@ -774,9 +777,9 @@ function ActionEditor(
                         ).length
                           ? "（需修正）"
                           : ""}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
+                  </Select>
                 </label>
                 <div className="button-row">
                   <button
