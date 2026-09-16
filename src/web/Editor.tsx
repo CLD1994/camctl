@@ -23,6 +23,13 @@ import {
 } from "./editing";
 import { DraftSession } from "./session";
 import { actionLabel, Issues, ErrorBox } from "./common";
+import {
+  parameterOptions,
+  compatibleValues,
+  optionLabel,
+  sameValue,
+  parameterRequired,
+} from "./parameter-options";
 
 interface Props {
   session: DraftSession;
@@ -44,6 +51,7 @@ interface Props {
 export function Editor(props: Props) {
   const { session, capabilities, busy } = props;
   const [json, setJson] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const content = session.content;
   const change = (next: DraftContent) => {
     session.edit(next);
@@ -91,7 +99,11 @@ export function Editor(props: Props) {
     });
   }
   const add = () => {
-    if (plan)
+    if (plan) {
+      setCollapsed(
+        (current) =>
+          new Set([...current].filter((i) => i !== plan.actions.length)),
+      );
       change(
         appendDraftAction(content, {
           name: `动作 ${plan.actions.length + 1}`,
@@ -100,6 +112,18 @@ export function Editor(props: Props) {
           policy: {},
         }),
       );
+    }
+  };
+  const remove = (index: number) => {
+    setCollapsed(
+      (current) =>
+        new Set(
+          [...current]
+            .filter((i) => i !== index)
+            .map((i) => (i > index ? i - 1 : i)),
+        ),
+    );
+    change(removeAction(content, index));
   };
   return (
     <section className="panel editor">
@@ -166,7 +190,7 @@ export function Editor(props: Props) {
             </label>
             {Object.keys(content.pending ?? {}).length > 0 && (
               <p className="notice">
-                请先在“未完成输入”中修正或明确省略各路径。整份 JSON
+                请先在“未完成输入”中修正或放弃各路径的输入。整份 JSON
                 暂为只读，保留原值与输入。
               </p>
             )}
@@ -187,7 +211,23 @@ export function Editor(props: Props) {
               <h3>
                 动作 <span className="muted">{plan.actions.length}</span>
               </h3>
-              <button onClick={add}>添加动作</button>
+              <div className="button-row">
+                {!!plan.actions.length && (
+                  <>
+                    <button onClick={() => setCollapsed(new Set())}>
+                      全部展开
+                    </button>
+                    <button
+                      onClick={() =>
+                        setCollapsed(new Set(plan.actions.map((_, i) => i)))
+                      }
+                    >
+                      全部收起
+                    </button>
+                  </>
+                )}
+                <button onClick={add}>添加动作</button>
+              </div>
             </div>
             {!plan.actions.length && (
               <p className="empty">
@@ -203,13 +243,29 @@ export function Editor(props: Props) {
                   index={index}
                   action={action}
                   change={change}
+                  collapsed={collapsed.has(index)}
+                  toggle={() =>
+                    setCollapsed((current) => {
+                      const next = new Set(current);
+                      if (next.has(index)) next.delete(index);
+                      else next.add(index);
+                      return next;
+                    })
+                  }
+                  remove={() => remove(index)}
+                  issueCount={
+                    issues.filter(
+                      (issue) =>
+                        issue.path === `actions[${index}]` ||
+                        issue.path.startsWith(`actions[${index}].`) ||
+                        issue.path.startsWith(`/actions/${index}/`),
+                    ).length
+                  }
                 />
               ) : (
                 <div className="notice error" key={index}>
                   动作 {index + 1} 不是对象，请在整份 JSON 中修正。
-                  <button onClick={() => change(removeAction(content, index))}>
-                    删除此动作
-                  </button>
+                  <button onClick={() => remove(index)}>删除此动作</button>
                 </div>
               ),
             )}
@@ -249,8 +305,8 @@ function PendingInputs({
     <section className="notice warning">
       <h3>未完成输入</h3>
       <p>
-        以下原文随草稿保留。每项均可修正或明确省略，包括当前 Schema
-        没有对应控件的字段。
+        以下原文随草稿保留。每项均可修正或放弃，包括当前没有对应控件的字段。
+        放弃会清除该字段；必填字段仍需重新填写才能导出。
       </p>
       {entries.map(([key, value]) => (
         <PendingInput
@@ -313,7 +369,7 @@ function PendingInput({
       <small>原文随草稿保存，点击应用修正后写入对应字段。</small>
       <div className="button-row">
         <button onClick={() => apply(false)}>应用修正 {path}</button>
-        <button onClick={() => apply(true)}>明确省略 {path}</button>
+        <button onClick={() => apply(true)}>放弃输入 {path}</button>
       </div>
       <ErrorBox error={error} />
     </div>
@@ -325,6 +381,10 @@ function ActionEditor(
     index: number;
     action: EditObject;
     change: (c: DraftContent) => void;
+    collapsed: boolean;
+    toggle: () => void;
+    remove: () => void;
+    issueCount: number;
   },
 ) {
   const { index, action, content, change, capabilities, presets } = props;
@@ -394,340 +454,351 @@ function ActionEditor(
   };
   return (
     <article className="action-card">
-      <div className="section-head">
-        <h3>
-          <span className="step">{index + 1}</span>
-          {typeof action.name === "string" ? action.name : "未命名动作"}
-        </h3>
-        <button
-          className="quiet danger-text"
-          onClick={() => change(removeAction(content, index))}
-        >
-          删除动作
-        </button>
-      </div>
-      <div className="form-grid">
-        <label className="field">
-          动作名称
-          <input
-            aria-label="动作名称"
-            value={typeof action.name === "string" ? action.name : ""}
-            onChange={(e) => put("name", e.target.value)}
-          />
-        </label>
-        <label className="field">
-          动作类型
-          <select
-            aria-label="动作类型"
-            value={typeof action.type === "string" ? action.type : ""}
-            onChange={(e) => put("type", e.target.value)}
-          >
-            {!ACTION_TYPES.includes(action.type) && (
-              <option value={String(action.type ?? "")}>
-                {String(action.type ?? "尚未选择")}（不支持）
-              </option>
+      <div className="section-head action-summary">
+        <div>
+          <h3>
+            <span className="step">{index + 1}</span>
+            {typeof action.name === "string" ? action.name : "未命名动作"}
+          </h3>
+          <p className="muted">
+            {actionLabel(action.type)} ·{" "}
+            {typeof action.scheduled_at === "string"
+              ? `${action.scheduled_at} UTC`
+              : "尚未设置执行时间"}
+            {props.issueCount > 0 && (
+              <span className="action-problems">
+                {props.issueCount} 项待修正
+              </span>
             )}
-            {ACTION_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {actionLabel(type)} · {type}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          执行时间{" "}
-          <small>
-            {Intl.DateTimeFormat().resolvedOptions().timeZone}，保存为 UTC
-          </small>
-          <input
-            aria-label="执行时间"
-            type="datetime-local"
-            step="1"
-            value={utcToLocal(action.scheduled_at)}
-            onChange={(e) => {
-              const value = localToUtc(e.target.value);
-              put("scheduled_at", value, value === undefined);
-            }}
-          />
-          {action.scheduled_at !== undefined && (
-            <small>UTC 原值：{String(action.scheduled_at)}</small>
-          )}
-        </label>
-        <label className="field">
-          动作组（可选）
-          <input
-            aria-label="动作组"
-            value={typeof action.group === "string" ? action.group : ""}
-            onChange={(e) => put("group", e.target.value)}
-          />
-          <small>
-            {Object.hasOwn(action, "group") ? "已明确填写" : "未提供"}
-          </small>
-          {Object.hasOwn(action, "group") && (
-            <button
-              className="inline"
-              onClick={() => put("group", undefined, true)}
-            >
-              省略动作组
-            </button>
-          )}
-        </label>
+          </p>
+        </div>
+        <div className="button-row">
+          <button
+            aria-label={props.collapsed ? "展开动作" : "收起动作"}
+            aria-expanded={!props.collapsed}
+            onClick={props.toggle}
+          >
+            {props.collapsed ? "展开" : "收起"}
+          </button>
+          <button className="quiet danger-text" onClick={props.remove}>
+            删除动作
+          </button>
+        </div>
       </div>
-      {action.type === "camera_record" ? (
-        <>
-          <div className="form-grid">
-            <label className="field">
-              目标设备
-              <select
-                aria-label="目标设备"
-                value={action.device_id ?? ""}
-                onChange={(e) =>
-                  put("device_id", e.target.value, e.target.value === "")
-                }
-              >
-                <option value="">请选择设备</option>
-                {action.device_id && !device && (
-                  <option value={action.device_id}>
-                    {action.device_id}（当前不可用）
-                  </option>
-                )}
-                {capabilities?.devices.map((d) => (
-                  <option key={d.device_id} value={d.device_id}>
-                    {d.device_id} · {d.driver_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              参数类型
-              <select
-                aria-label="参数类型"
-                value={
-                  isObject(action.params) &&
-                  typeof action.params.type === "string"
-                    ? action.params.type
-                    : ""
-                }
-                disabled={!!pending}
-                onChange={(e) =>
-                  change(
-                    setValue(
-                      content,
-                      [...base, "params", "type"],
-                      e.target.value,
-                      e.target.value === "",
-                    ),
-                  )
-                }
-              >
-                <option value="">请选择参数类型</option>
-                {isObject(action.params) &&
-                  typeof action.params.type === "string" &&
-                  !parameter && (
-                    <option value={action.params.type}>
-                      {action.params.type}（当前不可用）
-                    </option>
-                  )}
-                {types.map((p) => (
-                  <option key={p.type} value={p.type}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+      <div hidden={props.collapsed}>
+        <div className="form-grid">
+          <label className="field">
+            动作名称
+            <input
+              aria-label="动作名称"
+              value={typeof action.name === "string" ? action.name : ""}
+              onChange={(e) => put("name", e.target.value)}
+            />
+          </label>
+          <label className="field">
+            动作类型
+            <select
+              aria-label="动作类型"
+              value={typeof action.type === "string" ? action.type : ""}
+              onChange={(e) => put("type", e.target.value)}
+            >
+              {!ACTION_TYPES.includes(action.type) && (
+                <option value={String(action.type ?? "")}>
+                  {String(action.type ?? "尚未选择")}（不支持）
+                </option>
+              )}
+              {ACTION_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {actionLabel(type)} · {type}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            执行时间{" "}
+            <small>
+              {Intl.DateTimeFormat().resolvedOptions().timeZone}，保存为 UTC
+            </small>
+            <input
+              aria-label="执行时间"
+              type="datetime-local"
+              step="1"
+              value={utcToLocal(action.scheduled_at)}
+              onChange={(e) => {
+                const value = localToUtc(e.target.value);
+                put("scheduled_at", value, value === undefined);
+              }}
+            />
+            {action.scheduled_at !== undefined && (
+              <small>UTC 原值：{String(action.scheduled_at)}</small>
+            )}
+          </label>
           <Field
             content={content}
-            path={[...base, "policy", "max_delay_ms"]}
-            schema={{
-              type: "integer",
-              minimum: 0,
-              title: "最大允许延迟",
-              description: "单位为毫秒；必须明确填写，0 表示不允许延迟。",
-            }}
-            name="max_delay_ms"
-            required
+            path={[...base, "group"]}
+            schema={{ type: "string", title: "动作组" }}
+            name="group"
+            required={false}
             change={change}
           />
-          {parameter && (
-            <div className="parameter-intro">
-              <strong>{parameter.name}</strong>
-              <p>{parameter.description}</p>
-            </div>
-          )}
-          <div className="section-head">
-            <h4>拍摄参数</h4>
-            <button onClick={() => setJson(!json)}>
-              {json ? "参数表单" : "参数 JSON"}
-            </button>
-          </div>
-          {json || pending || !isObject(action.params) ? (
-            <JsonField
-              content={content}
-              path={[...base, "params"]}
-              label="参数 JSON 文本"
-              change={change}
-            />
-          ) : parameter ? (
-            <SchemaFields
-              parameter={parameter}
-              content={content}
-              path={[...base, "params"]}
-              change={change}
-            />
-          ) : (
-            <p className="notice">
-              请选择可用的设备和参数类型；已有参数原值保留，可通过参数 JSON
-              修正。
-            </p>
-          )}
-          {pending && !json && (
-            <p className="notice">
-              参数 JSON 尚未完成，请在上方修正后继续使用表单。
-            </p>
-          )}
-          <div className="preset-box">
-            <h4>拍摄参数预设</h4>
-            <p className="muted">
-              预设仅保存当前设备的拍摄参数。动作名称、时间与策略独立保留。
-            </p>
+        </div>
+        {action.type === "camera_record" ? (
+          <>
             <div className="form-grid">
               <label className="field">
-                已有预设
+                目标设备
                 <select
-                  aria-label="已有预设"
-                  value={selected?.id ?? ""}
-                  onChange={(e) => setPresetId(e.target.value)}
+                  aria-label="目标设备"
+                  value={action.device_id ?? ""}
+                  onChange={(e) =>
+                    put("device_id", e.target.value, e.target.value === "")
+                  }
                 >
-                  <option value="">选择当前设备的预设</option>
-                  {compatible.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {validateParams(
-                        p.deviceId,
-                        p.actionType,
-                        p.params,
-                        capabilities,
-                      ).length
-                        ? "（需修正）"
-                        : ""}
+                  <option value="">请选择设备</option>
+                  {action.device_id && !device && (
+                    <option value={action.device_id}>
+                      {action.device_id}（当前不可用）
+                    </option>
+                  )}
+                  {capabilities?.devices.map((d) => (
+                    <option key={d.device_id} value={d.device_id}>
+                      {d.device_id} · {d.driver_id}
                     </option>
                   ))}
                 </select>
               </label>
-              <div className="button-row">
-                <button
-                  disabled={!selected}
-                  onClick={() => {
-                    if (selected) {
-                      change(
-                        setValue(
-                          content,
-                          [...base, "params"],
-                          structuredClone(selected.params),
-                          false,
-                          true,
-                        ),
-                      );
-                      setNotice("预设参数已复制到当前动作");
-                    }
-                  }}
-                >
-                  应用预设
-                </button>
-                <button
-                  disabled={
-                    !selected ||
-                    savingPreset ||
-                    hasPending ||
-                    currentParamsIssues.length > 0
-                  }
-                  onClick={() => void save(true)}
-                >
-                  更新所选预设
-                </button>
-              </div>
-            </div>
-            <div className="form-grid">
               <label className="field">
-                预设名称
-                <input
-                  aria-label="预设名称"
-                  value={presetName}
-                  onChange={(e) => setPresetName(e.target.value)}
-                />
-              </label>
-              <div className="button-row">
-                <button
-                  disabled={
-                    savingPreset ||
-                    hasPending ||
-                    currentParamsIssues.length > 0 ||
-                    !presetName.trim()
+                参数类型
+                <select
+                  aria-label="参数类型"
+                  value={
+                    isObject(action.params) &&
+                    typeof action.params.type === "string"
+                      ? action.params.type
+                      : ""
                   }
-                  onClick={() => void save(false)}
+                  disabled={!!pending}
+                  onChange={(e) =>
+                    change(
+                      setValue(
+                        content,
+                        [...base, "params", "type"],
+                        e.target.value,
+                        e.target.value === "",
+                      ),
+                    )
+                  }
                 >
-                  保存为新预设
-                </button>
-              </div>
+                  <option value="">请选择参数类型</option>
+                  {isObject(action.params) &&
+                    typeof action.params.type === "string" &&
+                    !parameter && (
+                      <option value={action.params.type}>
+                        {action.params.type}（当前不可用）
+                      </option>
+                    )}
+                  {types.map((p) => (
+                    <option key={p.type} value={p.type}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-            <ErrorBox error={error} />
-            {notice && (
-              <p role="status" className="success-text">
-                {notice}
+            <Field
+              content={content}
+              path={[...base, "policy", "max_delay_ms"]}
+              schema={{
+                type: "integer",
+                minimum: 0,
+                title: "最大允许延迟",
+                description: "单位为毫秒；必须明确填写，0 表示不允许延迟。",
+              }}
+              name="max_delay_ms"
+              required
+              change={change}
+            />
+            {parameter && (
+              <div className="parameter-intro">
+                <strong>{parameter.name}</strong>
+                <p>{parameter.description}</p>
+              </div>
+            )}
+            <div className="section-head">
+              <h4>拍摄参数</h4>
+              <button onClick={() => setJson(!json)}>
+                {json ? "参数表单" : "参数 JSON"}
+              </button>
+            </div>
+            {json || pending || !isObject(action.params) ? (
+              <JsonField
+                content={content}
+                path={[...base, "params"]}
+                label="参数 JSON 文本"
+                change={change}
+              />
+            ) : parameter ? (
+              <SchemaFields
+                parameter={parameter}
+                content={content}
+                path={[...base, "params"]}
+                change={change}
+              />
+            ) : (
+              <p className="notice">
+                请选择可用的设备和参数类型；已有参数原值保留，可通过参数 JSON
+                修正。
               </p>
             )}
-          </div>
-        </>
-      ) : (
-        <>
-          {Object.hasOwn(action, "device_id") && (
-            <p className="notice">
-              此动作不使用设备字段。当前值：{String(action.device_id)}{" "}
-              <button onClick={() => put("device_id", undefined, true)}>
-                省略设备字段
-              </button>
+            {pending && !json && (
+              <p className="notice">
+                参数 JSON 尚未完成，请在上方修正后继续使用表单。
+              </p>
+            )}
+            <div className="preset-box">
+              <h4>拍摄参数预设</h4>
+              <p className="muted">
+                预设仅保存当前设备的拍摄参数。动作名称、时间与策略独立保留。
+              </p>
+              <div className="form-grid">
+                <label className="field">
+                  已有预设
+                  <select
+                    aria-label="已有预设"
+                    value={selected?.id ?? ""}
+                    onChange={(e) => setPresetId(e.target.value)}
+                  >
+                    <option value="">选择当前设备的预设</option>
+                    {compatible.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                        {validateParams(
+                          p.deviceId,
+                          p.actionType,
+                          p.params,
+                          capabilities,
+                        ).length
+                          ? "（需修正）"
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="button-row">
+                  <button
+                    disabled={!selected}
+                    onClick={() => {
+                      if (selected) {
+                        change(
+                          setValue(
+                            content,
+                            [...base, "params"],
+                            structuredClone(selected.params),
+                            false,
+                            true,
+                          ),
+                        );
+                        setNotice("预设参数已复制到当前动作");
+                      }
+                    }}
+                  >
+                    应用预设
+                  </button>
+                  <button
+                    disabled={
+                      !selected ||
+                      savingPreset ||
+                      hasPending ||
+                      currentParamsIssues.length > 0
+                    }
+                    onClick={() => void save(true)}
+                  >
+                    更新所选预设
+                  </button>
+                </div>
+              </div>
+              <div className="form-grid">
+                <label className="field">
+                  预设名称
+                  <input
+                    aria-label="预设名称"
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                  />
+                </label>
+                <div className="button-row">
+                  <button
+                    disabled={
+                      savingPreset ||
+                      hasPending ||
+                      currentParamsIssues.length > 0 ||
+                      !presetName.trim()
+                    }
+                    onClick={() => void save(false)}
+                  >
+                    保存为新预设
+                  </button>
+                </div>
+              </div>
+              <ErrorBox error={error} />
+              {notice && (
+                <p role="status" className="success-text">
+                  {notice}
+                </p>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {Object.hasOwn(action, "device_id") && (
+              <p className="notice">
+                此动作不使用设备字段。当前值：{String(action.device_id)}{" "}
+                <button onClick={() => put("device_id", undefined, true)}>
+                  省略设备字段
+                </button>
+              </p>
+            )}
+            <JsonField
+              content={content}
+              path={[...base, "params"]}
+              label="动作参数 JSON"
+              change={change}
+            />
+            <p className="muted">
+              {action.type === "obtain_action_outputs"
+                ? "使用 source 指定来源；按需填写 output_ids。"
+                : action.type === "delete_action_outputs"
+                  ? "使用 output_ids 指定正式产物 ID。"
+                  : action.type === "cancel_task"
+                    ? "使用 target 指定动作、计划或请求身份。"
+                    : "可省略参数准备普通报告，或通过“准备状态同步”取得同步参数。"}
             </p>
-          )}
+            {Object.hasOwn(action, "params") && (
+              <button
+                className="inline"
+                onClick={() => put("params", undefined, true)}
+              >
+                省略参数字段
+              </button>
+            )}
+          </>
+        )}
+        <details className="advanced">
+          <summary>完整业务策略 JSON</summary>
           <JsonField
             content={content}
-            path={[...base, "params"]}
-            label="动作参数 JSON"
+            path={[...base, "policy"]}
+            label="业务策略 JSON"
             change={change}
           />
-          <p className="muted">
-            {action.type === "obtain_action_outputs"
-              ? "使用 source 指定来源；按需填写 output_ids。"
-              : action.type === "delete_action_outputs"
-                ? "使用 output_ids 指定正式产物 ID。"
-                : action.type === "cancel_task"
-                  ? "使用 target 指定动作、计划或请求身份。"
-                  : "可省略参数准备普通报告，或通过“准备状态同步”取得同步参数。"}
-          </p>
-          {Object.hasOwn(action, "params") && (
-            <button
-              className="inline"
-              onClick={() => put("params", undefined, true)}
-            >
-              省略参数字段
-            </button>
-          )}
-        </>
-      )}
-      <details className="advanced">
-        <summary>完整业务策略 JSON</summary>
-        <JsonField
-          content={content}
-          path={[...base, "policy"]}
-          label="业务策略 JSON"
-          change={change}
-        />
-        {Object.hasOwn(action, "policy") && (
-          <button onClick={() => put("policy", undefined, true)}>
-            省略策略字段
-          </button>
-        )}
-      </details>
+          {action.type !== "camera_record" &&
+            Object.hasOwn(action, "policy") && (
+              <button onClick={() => put("policy", undefined, true)}>
+                省略策略字段
+              </button>
+            )}
+        </details>
+      </div>
     </article>
   );
 }
@@ -745,22 +816,61 @@ function SchemaFields({
   const schema = parameter.schema,
     properties = isObject(schema.properties) ? schema.properties : {};
   const fields = Object.entries(properties).filter(([name]) => name !== "type");
+  const catalog = parameterOptions(parameter);
+  const params = valueAt(parseDraft(content), path);
+  const hasPending = Object.keys(content.pending ?? {}).some(
+    (key) => key === pointer(path) || key.startsWith(pointer(path) + "/"),
+  );
   return fields.length ? (
-    <div className="form-grid">
-      {fields.map(([name, field]) => (
-        <Field
-          key={name}
-          name={name}
-          schema={resolveField(field, schema)}
-          required={
-            Array.isArray(schema.required) && schema.required.includes(name)
-          }
-          content={content}
-          path={[...path, name]}
-          change={change}
-        />
-      ))}
-    </div>
+    <>
+      {catalog.kind === "unavailable" && (
+        <p className="notice">
+          这些参数包含无法完整推导的组合规则，选项字段请通过 JSON
+          填写；填写后将检查全部规则。
+        </p>
+      )}
+      {hasPending && (
+        <p className="notice">请先修正上方未完成输入，再选择关联参数。</p>
+      )}
+      <div className="form-grid">
+        {fields.map(([name, field]) => (
+          <Field
+            key={name}
+            name={name}
+            schema={resolveField(field, schema)}
+            required={
+              catalog.kind === "finite" && isObject(params)
+                ? parameterRequired(catalog, params, name)
+                : Array.isArray(schema.required) &&
+                  schema.required.includes(name)
+            }
+            content={content}
+            path={[...path, name]}
+            change={change}
+            choices={
+              catalog.kind === "finite"
+                ? catalog.fields.find((f) => f.name === name)?.values
+                : undefined
+            }
+            allowed={
+              catalog.kind === "finite" && isObject(params)
+                ? compatibleValues(catalog, params, name)
+                : undefined
+            }
+            choicesBlocked={hasPending}
+            jsonChoices={catalog.kind === "unavailable"}
+          />
+        ))}
+      </div>
+    </>
+  ) : catalog.kind === "unavailable" ? (
+    <p className="notice">
+      此任务的完整参数无法用普通字段表达，请通过参数 JSON 设置并检查。
+    </p>
+  ) : catalog.rows.length === 0 ? (
+    <p className="notice warning">
+      当前规则没有允许的参数组合，请联系提供设备说明的人员。
+    </p>
   ) : (
     <p className="muted">该任务使用固定设置，无需填写其他参数。</p>
   );
@@ -801,7 +911,7 @@ function JsonField({
       )}
       {pendingBlocks(content, path) && (
         <small>
-          此 JSON 中有未完成字段，请在上方“未完成输入”中修正或明确省略。
+          此 JSON 中有未完成字段，请在上方“未完成输入”中修正或放弃输入。
         </small>
       )}
     </label>
@@ -814,6 +924,10 @@ function Field({
   content,
   path,
   change,
+  choices,
+  allowed,
+  choicesBlocked = false,
+  jsonChoices = false,
 }: {
   schema: Record<string, unknown>;
   name: string;
@@ -821,6 +935,10 @@ function Field({
   content: DraftContent;
   path: Path;
   change: (c: DraftContent) => void;
+  choices?: unknown[];
+  allowed?: unknown[];
+  choicesBlocked?: boolean;
+  jsonChoices?: boolean;
 }) {
   const root = parseDraft(content),
     value = valueAt(root, path),
@@ -828,7 +946,11 @@ function Field({
     label = `${typeof schema.title === "string" ? schema.title : name} (${name})`;
   const set = (v: unknown, omit = false) =>
     change(setValue(content, path, v, omit));
-  const enumeration = Array.isArray(schema.enum) ? schema.enum : undefined;
+  const [enabled, setEnabled] = useState(false);
+  const active = required || enabled || value !== undefined || !!pending;
+  const declared =
+    choices ?? (Array.isArray(schema.enum) ? schema.enum : undefined);
+  const enumeration = jsonChoices ? undefined : declared;
   const type = Array.isArray(schema.type)
     ? schema.type.filter((t) => t !== "null").length === 1
       ? schema.type.find((t) => t !== "null")
@@ -836,130 +958,190 @@ function Field({
     : schema.type;
   const nullable = Array.isArray(schema.type) && schema.type.includes("null");
   const matched = enumeration?.findIndex(
-    (v) => JSON.stringify(v) === JSON.stringify(value),
+    (v) =>
+      sameValue(v, value) && (!allowed || allowed.some((a) => sameValue(a, v))),
   );
+  const unsupportedChoice =
+    jsonChoices &&
+    (!!declared || type === "boolean" || Object.hasOwn(schema, "const"));
+  const showRaw =
+    !pending &&
+    value !== undefined &&
+    !enumeration &&
+    !unsupportedChoice &&
+    (type === "string"
+      ? typeof value !== "string"
+      : type === "number" || type === "integer"
+        ? typeof value !== "number"
+        : false);
   return (
     <div className="field">
-      <label>
-        {label}
-        {required && <span className="required"> *</span>}
-        {enumeration ? (
-          <select
-            aria-label={label}
-            disabled={pendingBlocks(content, path)}
-            value={
-              value === undefined
-                ? ""
-                : matched !== undefined && matched >= 0
-                  ? String(matched)
-                  : "invalid"
-            }
-            onChange={(e) =>
-              e.target.value === ""
-                ? set(undefined, true)
-                : set(enumeration[Number(e.target.value)])
-            }
-          >
-            <option value="">未提供</option>
-            {value !== undefined && matched === -1 && (
-              <option value="invalid">
-                当前值：{JSON.stringify(value)}（不符合选项）
-              </option>
-            )}
-            {enumeration.map((v, i) => (
-              <option key={i} value={i}>
-                {JSON.stringify(v)}
-              </option>
-            ))}
-          </select>
-        ) : type === "boolean" ? (
-          <select
-            aria-label={label}
-            disabled={pendingBlocks(content, path)}
-            value={
-              value === undefined
-                ? ""
-                : value === true
-                  ? "true"
-                  : value === false
-                    ? "false"
-                    : "invalid"
-            }
-            onChange={(e) =>
-              e.target.value === ""
-                ? set(undefined, true)
-                : set(e.target.value === "true")
-            }
-          >
-            <option value="">未提供</option>
-            <option value="true">是 · true</option>
-            <option value="false">否 · false</option>
-            {value !== undefined && typeof value !== "boolean" && (
-              <option value="invalid">当前值：{JSON.stringify(value)}</option>
-            )}
-          </select>
-        ) : type === "string" ? (
+      {!required && (
+        <label className="optional-field">
           <input
-            aria-label={label}
-            readOnly={pendingBlocks(content, path)}
-            value={typeof value === "string" ? value : ""}
-            onChange={(e) => set(e.target.value)}
+            type="checkbox"
+            aria-label={`填写${label}`}
+            checked={active}
+            onChange={(e) => {
+              setEnabled(e.target.checked);
+              if (!e.target.checked) set(undefined, true);
+            }}
           />
-        ) : type === "number" || type === "integer" ? (
-          <input
-            aria-label={label}
-            readOnly={pendingBlocks(content, path)}
-            inputMode="decimal"
-            value={pending?.text ?? (value === undefined ? "" : String(value))}
-            onChange={(e) =>
-              change(editValue(content, path, e.target.value, "number"))
-            }
-          />
-        ) : (
-          <textarea
-            aria-label={label}
-            readOnly={pendingBlocks(content, path)}
-            value={
-              pending?.text ??
-              (value === undefined ? "" : JSON.stringify(value, null, 2))
-            }
-            onChange={(e) =>
-              change(editValue(content, path, e.target.value, "json"))
-            }
-          />
-        )}
-      </label>
-      <small>
-        {String(schema.description ?? "")}
-        {schema.default !== undefined
-          ? ` 默认值说明：${JSON.stringify(schema.default)}。`
-          : ""}
-        {schema.minimum !== undefined ? ` 最小值 ${schema.minimum}。` : ""}
-        {schema.maximum !== undefined ? ` 最大值 ${schema.maximum}。` : ""}
-      </small>
-      <div className="field-state">
-        <small>
-          {pending
-            ? "输入尚未完成"
-            : value === undefined
-              ? "未提供"
-              : `当前值：${JSON.stringify(value)}`}
-        </small>
-        {(value !== undefined || pending) && (
-          <button className="inline" onClick={() => set(undefined, true)}>
-            省略
-          </button>
-        )}
-        {nullable && value !== null && (
-          <button
-            className="inline"
-            disabled={pendingBlocks(content, path)}
-            onClick={() => set(null)}
-          >
-            设为 null
-          </button>
-        )}
-      </div>
+          <span>
+            填写{typeof schema.title === "string" ? schema.title : name}
+          </span>
+          <small>可选</small>
+        </label>
+      )}
+      {active && (
+        <>
+          <label>
+            <span>
+              {typeof schema.title === "string" ? schema.title : name}{" "}
+              {required && <span className="required">必填</span>}{" "}
+              <small className="field-key">{name}</small>
+            </span>
+            {unsupportedChoice ? (
+              <textarea
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                value={
+                  pending?.text ??
+                  (value === undefined ? "" : JSON.stringify(value, null, 2))
+                }
+                onChange={(e) =>
+                  change(editValue(content, path, e.target.value, "json"))
+                }
+              />
+            ) : enumeration ? (
+              <select
+                aria-label={label}
+                disabled={choicesBlocked || pendingBlocks(content, path)}
+                value={
+                  value === undefined
+                    ? ""
+                    : matched !== undefined && matched >= 0
+                      ? String(matched)
+                      : "invalid"
+                }
+                onChange={(e) =>
+                  e.target.value === ""
+                    ? set(undefined, true)
+                    : set(enumeration[Number(e.target.value)])
+                }
+              >
+                <option value="">请选择</option>
+                {value !== undefined && matched === -1 && (
+                  <option value="invalid" disabled>
+                    {optionLabel(value)}（待修正）
+                  </option>
+                )}
+                {enumeration.map(
+                  (v, i) =>
+                    (!allowed || allowed.some((a) => sameValue(a, v))) && (
+                      <option key={i} value={i}>
+                        {optionLabel(v)}
+                      </option>
+                    ),
+                )}
+              </select>
+            ) : type === "boolean" ? (
+              <select
+                aria-label={label}
+                disabled={pendingBlocks(content, path)}
+                value={
+                  value === undefined
+                    ? ""
+                    : value === true
+                      ? "true"
+                      : value === false
+                        ? "false"
+                        : "invalid"
+                }
+                onChange={(e) =>
+                  e.target.value === ""
+                    ? set(undefined, true)
+                    : set(e.target.value === "true")
+                }
+              >
+                <option value="">请选择</option>
+                <option value="true">是 · true</option>
+                <option value="false">否 · false</option>
+                {value !== undefined && typeof value !== "boolean" && (
+                  <option value="invalid" disabled>
+                    {optionLabel(value)}（待修正）
+                  </option>
+                )}
+              </select>
+            ) : type === "string" ? (
+              <input
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                value={typeof value === "string" ? value : ""}
+                onChange={(e) => set(e.target.value)}
+              />
+            ) : type === "number" || type === "integer" ? (
+              <input
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                inputMode="decimal"
+                value={
+                  pending?.text ?? (value === undefined ? "" : String(value))
+                }
+                onChange={(e) =>
+                  change(editValue(content, path, e.target.value, "number"))
+                }
+              />
+            ) : (
+              <textarea
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                value={
+                  pending?.text ??
+                  (value === undefined ? "" : JSON.stringify(value, null, 2))
+                }
+                onChange={(e) =>
+                  change(editValue(content, path, e.target.value, "json"))
+                }
+              />
+            )}
+          </label>
+          {showRaw && (
+            <small className="danger-text">
+              原值 {JSON.stringify(value)} 无法用此控件表示，请重新填写或在 JSON
+              中修正。
+            </small>
+          )}
+          {enumeration && allowed?.length === 0 && !choicesBlocked && (
+            <small className="danger-text">
+              没有兼容选项，请先清空冲突字段或在参数 JSON 中修正。
+            </small>
+          )}
+          {enumeration && value !== undefined && matched === -1 && (
+            <small className="danger-text">
+              此值与当前参数不兼容，原值已保留；请选择兼容值或清空后重新选择。
+            </small>
+          )}
+          <small>
+            {String(schema.description ?? "")}
+            {schema.default !== undefined
+              ? ` 默认值说明：${optionLabel(schema.default)}。`
+              : ""}
+            {schema.minimum !== undefined ? ` 最小值 ${schema.minimum}。` : ""}
+            {schema.maximum !== undefined ? ` 最大值 ${schema.maximum}。` : ""}
+          </small>
+          {pending && <small className="danger-text">输入尚未完成</small>}
+          {nullable && !enumeration && value !== null && (
+            <button
+              className="inline"
+              disabled={pendingBlocks(content, path)}
+              onClick={() => set(null)}
+            >
+              设为 null
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -194,7 +194,7 @@ it.each(["different", "omit", "preset_same", "preset_different"] as const)(
     } else if (mode === "omit")
       await page
         .getByRole("button", {
-          name: "明确省略 /actions/0/params",
+          name: "放弃输入 /actions/0/params",
           exact: true,
         })
         .click();
@@ -281,14 +281,12 @@ it("结构修正后在同页同目标重新准备，按新revision保留未完�
   ).toBeVisible();
   await page.getByRole("button", { name: "查看目标草稿", exact: true }).click();
   await page.getByTestId("draft-json-toggle").click();
-  await page
-    .getByTestId("draft-json-input")
-    .fill(
-      JSON.stringify({
-        name: "修正结构",
-        actions: [{ name: "原录像", type: "camera_record" }],
-      }),
-    );
+  await page.getByTestId("draft-json-input").fill(
+    JSON.stringify({
+      name: "修正结构",
+      actions: [{ name: "原录像", type: "camera_record" }],
+    }),
+  );
   await check(page.getByTestId("save-status")).toContainText("已保存");
   await page.getByTestId("draft-json-toggle").click();
   await page.getByLabel("参数 JSON 文本").fill("{");

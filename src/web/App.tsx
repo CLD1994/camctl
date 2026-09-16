@@ -17,6 +17,7 @@ import { DraftSession, sameContent } from "./session";
 import { FollowOperation } from "./followup";
 import { recordsFor, parseDraft } from "./editing";
 import { Editor } from "./Editor";
+import { DeviceGuide } from "./DeviceGuide";
 import { RecordDetail, type Followup } from "./Records";
 import { Badge, Empty, ErrorBox, Facts } from "./common";
 
@@ -707,10 +708,18 @@ export function App() {
           />
         )}
         {page === "devices" && (
-          <section className="panel">
-            <div className="section-head">
+          <section className="panel device-page">
+            <CapabilitiesError
+              error={state.capabilities.error}
+              directory={state.startup.directory}
+            />
+            {state.capabilities.error && state.capabilities.active && (
+              <p className="notice">继续使用此前成功启用的说明。</p>
+            )}
+            <DeviceGuide capabilities={state.capabilities.active} />
+            <div className="section-head guide-management">
               <div>
-                <h2>当前启用的能力说明</h2>
+                <h2>设备说明管理</h2>
                 <p>手工替换说明文件后，重新加载以检查并启用。</p>
               </div>
               <button
@@ -734,47 +743,6 @@ export function App() {
                 重新加载能力说明
               </button>
             </div>
-            <CapabilitiesError
-              error={state.capabilities.error}
-              directory={state.startup.directory}
-            />
-            {state.capabilities.error && state.capabilities.active && (
-              <p className="notice">继续使用此前成功启用的说明。</p>
-            )}
-            {state.capabilities.active ? (
-              <>
-                <p className="muted">
-                  启用版本 {state.capabilities.generation} ·{" "}
-                  {state.capabilities.active.devices.length} 台设备
-                </p>
-                {state.capabilities.active.devices.map((device) => (
-                  <article className="action-card" key={device.device_id}>
-                    <h3>{device.device_id}</h3>
-                    <p className="muted">驱动：{device.driver_id}</p>
-                    {device.actions.map((action) => (
-                      <section key={action.type}>
-                        <h4>{action.type}</h4>
-                        {action.parameter_types.map((parameter) => (
-                          <div className="parameter-intro" key={parameter.type}>
-                            <h4>{parameter.name}</h4>
-                            <code>{parameter.type}</code>
-                            <p>{parameter.description}</p>
-                            <details>
-                              <summary>查看参数字段与完整 Schema</summary>
-                              <Facts value={parameter.schema} />
-                            </details>
-                          </div>
-                        ))}
-                      </section>
-                    ))}
-                  </article>
-                ))}
-              </>
-            ) : (
-              <Empty>
-                当前没有可用的设备说明。仍可准备状态报告、导入文件和查看已有结果。
-              </Empty>
-            )}
           </section>
         )}
         <footer className="workspace-footer">
