@@ -18,6 +18,7 @@ import { FollowOperation } from "./followup";
 import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
 import { DeviceGuide } from "./DeviceGuide";
+import { useFeedback } from "./feedback";
 import { RecordDetail, type Followup } from "./Records";
 import { Badge, Empty, ErrorBox, Facts } from "./common";
 
@@ -26,8 +27,6 @@ type PendingFollow = { operation: FollowOperation; follow: Followup };
 export function App() {
   const [state, setState] = useState<ClientState>(),
     [connection, setConnection] = useState(""),
-    [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
     [page, setPage] = useState<Page>("plans"),
     [tab, setTab] = useState<"drafts" | "records">("drafts"),
     [selected, setSelected] = useState(""),
@@ -36,6 +35,8 @@ export function App() {
     [follow, setFollow] = useState<Followup>(),
     [activeFollow, setActiveFollow] = useState<PendingFollow>(),
     [followOperations, setFollowOperations] = useState<PendingFollow[]>([]);
+  const [error, setError] = useFeedback(page);
+  const [notice, setNotice] = useFeedback(page, 3000);
   const startFollow = (input: Followup) => {
     setActiveFollow(undefined);
     setFollow(input);
@@ -491,28 +492,29 @@ export function App() {
         </div>
       </aside>
       <main className="workspace">
-        {followOperations
-          .filter((item) => item.operation.phase !== "done")
-          .map((item, index) => (
-            <section className="notice" key={index}>
-              <strong>{item.follow.summary}</strong>
-              <p>{item.operation.error || "后续操作尚未结束"}</p>
-              {item.operation.targetId && (
-                <code>目标草稿：{item.operation.targetId}</code>
-              )}
-              <div className="button-row">
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    setActiveFollow(item);
-                    setFollow(item.follow);
-                  }}
-                >
-                  返回核实后续操作
-                </button>
-              </div>
-            </section>
-          ))}
+        {page === "plans" &&
+          followOperations
+            .filter((item) => item.operation.phase !== "done")
+            .map((item, index) => (
+              <section className="notice" key={index}>
+                <strong>{item.follow.summary}</strong>
+                <p>{item.operation.error || "后续操作尚未结束"}</p>
+                {item.operation.targetId && (
+                  <code>目标草稿：{item.operation.targetId}</code>
+                )}
+                <div className="button-row">
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      setActiveFollow(item);
+                      setFollow(item.follow);
+                    }}
+                  >
+                    返回核实后续操作
+                  </button>
+                </div>
+              </section>
+            ))}
         <header className="page-header">
           <div>
             <p className="eyebrow">CAMCTL / 本地计划与文件</p>
@@ -548,46 +550,47 @@ export function App() {
             {notice}
           </p>
         )}
-        {[...sessions.current.values()]
-          .filter((session) => session.recoveryContent)
-          .map((session) => (
-            <section className="panel" key={session.draft.id}>
-              <h2>保留的额外编辑内容</h2>
-              <p>
-                原草稿 {session.draft.id}{" "}
-                已导出，以下本地输入未写入固定原请求，可明确保存为新草稿。
-              </p>
-              <textarea
-                className="code-input"
-                aria-label="保留的额外编辑内容"
-                readOnly
-                value={session.recoveryContent!.text}
-              />
-              <Facts value={session.recoveryContent!.pending} />
-              {Object.keys(session.recoveryContent!.actionVariants ?? {})
-                .length > 0 && (
+        {page === "plans" &&
+          [...sessions.current.values()]
+            .filter((session) => session.recoveryContent)
+            .map((session) => (
+              <section className="panel" key={session.draft.id}>
+                <h2>保留的额外编辑内容</h2>
                 <p>
-                  同时保留了其他动作类型的编辑内容，保存为新草稿后可切换查看。
+                  原草稿 {session.draft.id}{" "}
+                  已导出，以下本地输入未写入固定原请求，可明确保存为新草稿。
                 </p>
-              )}
-              <button
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    const draft = await api<Draft>("/drafts", "POST", {
-                      content: session.recoveryContent,
-                    });
-                    session.completeRecovery();
-                    openDraft(draft);
-                    await refresh();
-                  })
-                }
-              >
-                将保留内容保存为新草稿
-              </button>
-            </section>
-          ))}
-        {state.workerError && (
+                <textarea
+                  className="code-input"
+                  aria-label="保留的额外编辑内容"
+                  readOnly
+                  value={session.recoveryContent!.text}
+                />
+                <Facts value={session.recoveryContent!.pending} />
+                {Object.keys(session.recoveryContent!.actionVariants ?? {})
+                  .length > 0 && (
+                  <p>
+                    同时保留了其他动作类型的编辑内容，保存为新草稿后可切换查看。
+                  </p>
+                )}
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      const draft = await api<Draft>("/drafts", "POST", {
+                        content: session.recoveryContent,
+                      });
+                      session.completeRecovery();
+                      openDraft(draft);
+                      await refresh();
+                    })
+                  }
+                >
+                  将保留内容保存为新草稿
+                </button>
+              </section>
+            ))}
+        {page === "import" && state.workerError && (
           <ErrorBox error={`文件后台处理：${state.workerError}`} />
         )}
         {state.historyMissing && (
@@ -734,6 +737,7 @@ export function App() {
                 )
               ) : record ? (
                 <RecordDetail
+                  key={record.id}
                   record={record}
                   state={state}
                   busy={busy}
@@ -1046,8 +1050,17 @@ function ImportPage({
   open: (id: string) => void;
 }) {
   const [drag, setDrag] = useState(false);
+  const [pageNumber, setPageNumber] = useState(1);
+  const allFiles = [...(state.imports ?? [])].reverse();
+  const pageCount = Math.max(1, Math.ceil(allFiles.length / 10));
+  const currentPage = Math.min(pageNumber, pageCount);
+  const visibleFiles = allFiles.slice((currentPage - 1) * 10, currentPage * 10);
+  const selectFiles = (files: File[]) => {
+    if (files.length) setPageNumber(1);
+    onFiles(files);
+  };
   const batches = new Map<string, ImportFile[]>();
-  for (const file of state.imports ?? [])
+  for (const file of visibleFiles)
     batches.set(file.batchId, [...(batches.get(file.batchId) ?? []), file]);
   return (
     <>
@@ -1061,7 +1074,7 @@ function ImportPage({
         onDrop={(e) => {
           e.preventDefault();
           setDrag(false);
-          onFiles([...e.dataTransfer.files]);
+          selectFiles([...e.dataTransfer.files]);
         }}
       >
         <span className="upload-symbol">↥</span>
@@ -1075,7 +1088,7 @@ function ImportPage({
             data-testid="import-files"
             aria-label="选择报告和视频文件"
             onChange={(e) => {
-              onFiles([...(e.target.files ?? [])]);
+              selectFiles([...(e.target.files ?? [])]);
               e.target.value = "";
             }}
           />
@@ -1089,13 +1102,32 @@ function ImportPage({
           </Empty>
         </section>
       )}
-      {[...batches.entries()].reverse().map(([id, files]) => (
+      {allFiles.length > 0 && (
+        <nav className="pagination button-row" aria-label="导入记录分页">
+          <span>
+            共 {allFiles.length} 个文件 · 第 {currentPage} / {pageCount} 页
+          </span>
+          <button
+            disabled={currentPage === 1}
+            onClick={() => setPageNumber(currentPage - 1)}
+          >
+            上一页
+          </button>
+          <button
+            disabled={currentPage === pageCount}
+            onClick={() => setPageNumber(currentPage + 1)}
+          >
+            下一页
+          </button>
+        </nav>
+      )}
+      {[...batches.entries()].map(([id, files]) => (
         <section className="panel import-batch" key={id}>
           <div className="section-head">
             <h2>
               导入批次 <small>{id.slice(0, 8)}</small>
             </h2>
-            <span>{files.length} 个文件</span>
+            <span>本页 {files.length} 个文件</span>
           </div>
           {files.map((file) => {
             const bytes =

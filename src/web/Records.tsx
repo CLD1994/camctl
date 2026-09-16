@@ -37,6 +37,7 @@ export function RecordDetail({
   open,
 }: Props) {
   const { request, plan } = record;
+  const [expanded, setExpanded] = useState(true);
   const allPlans = state.snapshot?.plans ?? [];
   const diagnostics =
     state.snapshot?.plan_file_diagnostics?.filter(
@@ -48,133 +49,140 @@ export function RecordDetail({
       <div className="section-head">
         <h2>{plan?.name ?? String(request?.body.name ?? record.id)}</h2>
         {plan && <Badge value={plan.status} />}
+        <button aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          {expanded ? "折叠计划" : "展开计划"}
+        </button>
       </div>
-      <p className="identifier">请求 ID · {record.id}</p>
-      <div className="evidence-grid">
-        <div>
-          <small>本地导出</small>
-          <strong>{request ? "已保存原请求" : "没有本地原请求"}</strong>
-          {request && (
-            <span>{utcToLocal(request.exportedAt).replace("T", " ")}</span>
-          )}
+      <div hidden={!expanded}>
+        <p className="identifier">请求 ID · {record.id}</p>
+        <div className="evidence-grid">
+          <div>
+            <small>本地导出</small>
+            <strong>{request ? "已保存原请求" : "没有本地原请求"}</strong>
+            {request && (
+              <span>{utcToLocal(request.exportedAt).replace("T", " ")}</span>
+            )}
+          </div>
+          <div>
+            <small>人工递交记录</small>
+            <strong>
+              {request
+                ? request.handedAt
+                  ? "已标记递交"
+                  : "未标记递交"
+                : "无本地记录"}
+            </strong>
+            {request?.handedAt && (
+              <span>
+                标记时间：{utcToLocal(request.handedAt).replace("T", " ")}
+              </span>
+            )}
+          </div>
+          <div>
+            <small>主机报告</small>
+            <strong>
+              {plan ? "已取得受理与执行依据" : "尚无计划执行依据"}
+            </strong>
+            {plan && <span>{plan.plan_instance_id}</span>}
+          </div>
         </div>
-        <div>
-          <small>人工递交记录</small>
-          <strong>
-            {request
-              ? request.handedAt
-                ? "已标记递交"
-                : "未标记递交"
-              : "无本地记录"}
-          </strong>
-          {request?.handedAt && (
-            <span>
-              标记时间：{utcToLocal(request.handedAt).replace("T", " ")}
-            </span>
-          )}
-        </div>
-        <div>
-          <small>主机报告</small>
-          <strong>{plan ? "已取得受理与执行依据" : "尚无计划执行依据"}</strong>
-          {plan && <span>{plan.plan_instance_id}</span>}
-        </div>
-      </div>
-      {request && (
-        <div className="button-row">
-          <button
-            data-testid="download-request-button"
-            disabled={busy}
-            onClick={() =>
-              run(() =>
-                download(
-                  `/requests/${record.id}/download`,
-                  `plan-${record.id}.json`,
-                ),
-              )
-            }
-          >
-            再次下载原请求
-          </button>
-          <button
-            data-testid="copy-request-button"
-            disabled={busy}
-            onClick={() => copy(record.id)}
-          >
-            复制为新草稿
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => handoff(record.id, !request.handedAt)}
-          >
-            {request.handedAt ? "清除递交标记" : "标记已递交"}
-          </button>
-        </div>
-      )}
-      <p className="muted">
-        人工标记说明记录交接的时间。主机是否受理、动作是否成功，依据已应用报告分别展示。
-      </p>
-      {diagnostics.map((d) => (
-        <section key={d.diagnostic_id} className="notice error">
-          <h3>主机输入诊断 · {d.file_name}</h3>
-          <Facts value={d.errors} />
-        </section>
-      ))}
-      {plan ? (
-        <>
-          <div className="section-head">
-            <h3>执行与结果</h3>
+        {request && (
+          <div className="button-row">
             <button
+              data-testid="download-request-button"
               disabled={busy}
               onClick={() =>
-                follow({
-                  action: {
-                    name: `取消 ${plan.name}`,
-                    type: "cancel_task",
-                    params: {
-                      target: { plan_instance_id: plan.plan_instance_id },
-                    },
-                  },
-                  summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
-                })
+                run(() =>
+                  download(
+                    `/requests/${record.id}/download`,
+                    `plan-${record.id}.json`,
+                  ),
+                )
               }
             >
-              准备取消计划
+              再次下载原请求
+            </button>
+            <button
+              data-testid="copy-request-button"
+              disabled={busy}
+              onClick={() => copy(record.id)}
+            >
+              复制为新草稿
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => handoff(record.id, !request.handedAt)}
+            >
+              {request.handedAt ? "清除递交标记" : "标记已递交"}
             </button>
           </div>
-          {plan.status === "completed" && (
-            <p className="notice">
-              计划已结束，各动作可能成功、失败、取消或过期，请分别查看。
-            </p>
-          )}
-          {plan.actions?.map((action) => (
-            <ActionResult
-              key={action.action_instance_id}
-              action={action}
-              plan={plan}
-              allPlans={allPlans}
-              videos={state.videos ?? []}
-              follow={follow}
-              run={run}
-              open={open}
-            />
-          ))}
-          {!plan.actions?.length && <Empty>报告尚未提供动作明细。</Empty>}
-        </>
-      ) : (
-        <Empty>等待状态报告。导出和人工递交标记不表示主机已开始执行。</Empty>
-      )}
-      {request && (
-        <details className="advanced">
-          <summary>查看固定原请求 JSON</summary>
-          <pre>{JSON.stringify(request.body, null, 2)}</pre>
-        </details>
-      )}
-      {plan && (
-        <details className="advanced">
-          <summary>查看合并后的报告计划 JSON</summary>
-          <pre>{JSON.stringify(plan, null, 2)}</pre>
-        </details>
-      )}
+        )}
+        <p className="muted">
+          人工标记说明记录交接的时间。主机是否受理、动作是否成功，依据已应用报告分别展示。
+        </p>
+        {diagnostics.map((d) => (
+          <section key={d.diagnostic_id} className="notice error">
+            <h3>主机输入诊断 · {d.file_name}</h3>
+            <Facts value={d.errors} />
+          </section>
+        ))}
+        {plan ? (
+          <>
+            <div className="section-head">
+              <h3>执行与结果</h3>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  follow({
+                    action: {
+                      name: `取消 ${plan.name}`,
+                      type: "cancel_task",
+                      params: {
+                        target: { plan_instance_id: plan.plan_instance_id },
+                      },
+                    },
+                    summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
+                  })
+                }
+              >
+                准备取消计划
+              </button>
+            </div>
+            {plan.status === "completed" && (
+              <p className="notice">
+                计划已结束，各动作可能成功、失败、取消或过期，请分别查看。
+              </p>
+            )}
+            {plan.actions?.map((action) => (
+              <ActionResult
+                key={action.action_instance_id}
+                action={action}
+                plan={plan}
+                allPlans={allPlans}
+                videos={state.videos ?? []}
+                follow={follow}
+                run={run}
+                open={open}
+              />
+            ))}
+            {!plan.actions?.length && <Empty>报告尚未提供动作明细。</Empty>}
+          </>
+        ) : (
+          <Empty>等待状态报告。导出和人工递交标记不表示主机已开始执行。</Empty>
+        )}
+        {request && (
+          <details className="advanced">
+            <summary>查看固定原请求 JSON</summary>
+            <pre>{JSON.stringify(request.body, null, 2)}</pre>
+          </details>
+        )}
+        {plan && (
+          <details className="advanced">
+            <summary>查看合并后的报告计划 JSON</summary>
+            <pre>{JSON.stringify(plan, null, 2)}</pre>
+          </details>
+        )}
+      </div>
     </section>
   );
 }
@@ -196,6 +204,7 @@ function ActionResult({
   open: (id: string) => void;
 }) {
   const outputIds = new Set(action.outputs?.map((o) => o.output_id));
+  const [expanded, setExpanded] = useState(true);
   const deliveries = new Map<
     string,
     { delivery: Delivery; owner: ReportPlan }
@@ -219,154 +228,171 @@ function ActionResult({
           </small>
         </div>
         <Badge value={action.status} />
+        <button
+          aria-label={`${expanded ? "折叠" : "展开"}动作 ${action.name}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "折叠" : "展开"}
+        </button>
       </div>
-      <div className="button-row">
-        <span className="muted">
-          {action.execution.started ? "执行已开始" : "执行尚未开始"}
-        </span>
-        {action.scheduled_at !== undefined && (
+      <div hidden={!expanded}>
+        <div className="button-row">
           <span className="muted">
-            计划时间：
-            {utcToLocal(action.scheduled_at).replace("T", " ") || "时间无效"}
+            {action.execution.started ? "执行已开始" : "执行尚未开始"}
           </span>
-        )}
-        <button
-          className="inline"
-          onClick={() =>
-            follow({
-              action: {
-                name: `取消 ${action.name}`,
-                type: "cancel_task",
-                params: {
-                  target: { action_instance_id: action.action_instance_id },
-                },
-              },
-              summary: `取消动作 ${action.name} · ${action.action_instance_id}`,
-            })
-          }
-        >
-          准备取消动作
-        </button>
-      </div>
-      {action.waiting && (
-        <div className="notice">
-          <h4>等待条件</h4>
-          {action.waiting.map((waiting, index) => (
-            <div key={index}>
-              <Badge value={waiting.code} />
-              <Facts value={waiting.details} />
-            </div>
-          ))}
-        </div>
-      )}
-      {action.expiration_reason && <p>过期原因：{action.expiration_reason}</p>}
-      {action.error && (
-        <div className="notice error">
-          <Facts value={action.error} />
-        </div>
-      )}
-      {action.result && (
-        <section>
-          <h4>动作结果</h4>
-          <Facts value={action.result} business />
-          {JSON.stringify(action.result).includes("sync_report_not_found") && (
-            <button
-              onClick={() =>
-                follow({
-                  action: {
-                    name: "完整状态同步",
-                    type: "report_status",
-                    params: { scope: "full" },
-                  },
-                  summary: "重新获取完整状态",
-                  sync: true,
-                })
-              }
-            >
-              准备完整状态同步
-            </button>
+          {action.scheduled_at !== undefined && (
+            <span className="muted">
+              计划时间：
+              {utcToLocal(action.scheduled_at).replace("T", " ") || "时间无效"}
+            </span>
           )}
-        </section>
-      )}
-      {action.error?.code === "sync_report_not_found" && (
-        <button
-          onClick={() =>
-            follow({
-              action: {
-                name: "完整状态同步",
-                type: "report_status",
-                params: { scope: "full" },
-              },
-              summary: "重新获取完整状态",
-              sync: true,
-            })
-          }
-        >
-          准备完整状态同步
-        </button>
-      )}
-      {action.outputs?.map((output) => (
-        <OutputCard key={output.output_id} output={output} follow={follow} />
-      ))}
-      {[...deliveries.values()].map(({ delivery, owner }) => {
-        const source = allPlans.find((p) =>
-          p.actions?.some(
-            (a) => a.action_instance_id === delivery.source_action_instance_id,
-          ),
-        );
-        return (
-          <section className="delivery" key={delivery.delivery_id}>
-            <div className="section-head">
-              <h4>{delivery.display_name}</h4>
-              <Badge value={delivery.status} />
-            </div>
-            <p className="identifier">
-              {delivery.file_name} · 交付 {delivery.delivery_id}
-            </p>
-            <p className="muted">
-              产物 {delivery.output_id} · 来源动作{" "}
-              {delivery.source_action_instance_id}
-            </p>
-            {source && source.request_id !== plan.request_id && (
-              <button
-                className="inline"
-                onClick={() => open(source.request_id)}
-              >
-                查看来源计划：{source.name}
-              </button>
-            )}
-            {owner.request_id !== plan.request_id && (
-              <button className="inline" onClick={() => open(owner.request_id)}>
-                查看取回计划：{owner.name}
-              </button>
-            )}
-            {delivery.error && (
-              <div className="notice error">
-                <Facts value={delivery.error} />
+          <button
+            className="inline"
+            onClick={() =>
+              follow({
+                action: {
+                  name: `取消 ${action.name}`,
+                  type: "cancel_task",
+                  params: {
+                    target: { action_instance_id: action.action_instance_id },
+                  },
+                },
+                summary: `取消动作 ${action.name} · ${action.action_instance_id}`,
+              })
+            }
+          >
+            准备取消动作
+          </button>
+        </div>
+        {action.waiting && (
+          <div className="notice">
+            <h4>等待条件</h4>
+            {action.waiting.map((waiting, index) => (
+              <div key={index}>
+                <Badge value={waiting.code} />
+                <Facts value={waiting.details} />
               </div>
+            ))}
+          </div>
+        )}
+        {action.expiration_reason && (
+          <p>过期原因：{action.expiration_reason}</p>
+        )}
+        {action.error && (
+          <div className="notice error">
+            <Facts value={action.error} />
+          </div>
+        )}
+        {action.result && (
+          <section>
+            <h4>动作结果</h4>
+            <Facts value={action.result} business />
+            {JSON.stringify(action.result).includes(
+              "sync_report_not_found",
+            ) && (
+              <button
+                onClick={() =>
+                  follow({
+                    action: {
+                      name: "完整状态同步",
+                      type: "report_status",
+                      params: { scope: "full" },
+                    },
+                    summary: "重新获取完整状态",
+                    sync: true,
+                  })
+                }
+              >
+                准备完整状态同步
+              </button>
             )}
-            <details>
-              <summary>复制进度与核验</summary>
-              <Facts value={delivery.copy} business />
-            </details>
-            <VideoPanel
-              video={videos.find((v) => v.fileName === delivery.file_name)}
-              published={delivery.status === "published"}
-              run={run}
-            />
           </section>
-        );
-      })}
-      <details>
-        <summary>输入与生效参数</summary>
-        <Facts
-          value={{
-            输入参数: action.input_params,
-            生效参数: action.effective_params,
-            业务策略: action.policy,
-          }}
-        />
-      </details>
+        )}
+        {action.error?.code === "sync_report_not_found" && (
+          <button
+            onClick={() =>
+              follow({
+                action: {
+                  name: "完整状态同步",
+                  type: "report_status",
+                  params: { scope: "full" },
+                },
+                summary: "重新获取完整状态",
+                sync: true,
+              })
+            }
+          >
+            准备完整状态同步
+          </button>
+        )}
+        {action.outputs?.map((output) => (
+          <OutputCard key={output.output_id} output={output} follow={follow} />
+        ))}
+        {[...deliveries.values()].map(({ delivery, owner }) => {
+          const source = allPlans.find((p) =>
+            p.actions?.some(
+              (a) =>
+                a.action_instance_id === delivery.source_action_instance_id,
+            ),
+          );
+          return (
+            <section className="delivery" key={delivery.delivery_id}>
+              <div className="section-head">
+                <h4>{delivery.display_name}</h4>
+                <Badge value={delivery.status} />
+              </div>
+              <p className="identifier">
+                {delivery.file_name} · 交付 {delivery.delivery_id}
+              </p>
+              <p className="muted">
+                产物 {delivery.output_id} · 来源动作{" "}
+                {delivery.source_action_instance_id}
+              </p>
+              {source && source.request_id !== plan.request_id && (
+                <button
+                  className="inline"
+                  onClick={() => open(source.request_id)}
+                >
+                  查看来源计划：{source.name}
+                </button>
+              )}
+              {owner.request_id !== plan.request_id && (
+                <button
+                  className="inline"
+                  onClick={() => open(owner.request_id)}
+                >
+                  查看取回计划：{owner.name}
+                </button>
+              )}
+              {delivery.error && (
+                <div className="notice error">
+                  <Facts value={delivery.error} />
+                </div>
+              )}
+              <details>
+                <summary>复制进度与核验</summary>
+                <Facts value={delivery.copy} business />
+              </details>
+              <VideoPanel
+                video={videos.find((v) => v.fileName === delivery.file_name)}
+                published={delivery.status === "published"}
+                run={run}
+              />
+            </section>
+          );
+        })}
+        <details>
+          <summary>输入与生效参数</summary>
+          <Facts
+            value={{
+              输入参数: action.input_params,
+              生效参数: action.effective_params,
+              业务策略: action.policy,
+            }}
+          />
+        </details>
+      </div>
     </article>
   );
 }

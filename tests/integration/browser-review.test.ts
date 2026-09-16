@@ -516,6 +516,8 @@ it("观察已导出后保留额外输入，跨页面明确另存后不重复恢�
   await page.getByTestId("draft-json-input").fill(text("保留B"));
   await check(page.getByLabel("保留的额外编辑内容")).toHaveValue(text("保留B"));
   await page.getByTestId("nav-devices").click();
+  await check(page.getByLabel("保留的额外编辑内容")).toHaveCount(0);
+  await page.getByTestId("nav-plans").click();
   await check(page.getByLabel("保留的额外编辑内容")).toHaveValue(text("保留B"));
   await page
     .getByRole("button", { name: "将保留内容保存为新草稿", exact: true })
@@ -771,3 +773,103 @@ it("报告详情逐项失败来源ID和原输入保持报告字面值", async ()
   await check(card.getByText("running", { exact: true }).first()).toBeVisible();
   await check(card.getByText("failed", { exact: true })).toBeVisible();
 }, 20000);
+
+it("页面反馈只在所属页面显示并在三秒后消失", async () => {
+  const { page } = await setup();
+  await page.getByTestId("nav-devices").click();
+  await page.getByRole("button", { name: "重新加载能力说明" }).click();
+  const feedback = page.locator(".notice.success");
+  await check(feedback).toBeVisible();
+  await page.getByTestId("nav-import").click();
+  await check(feedback).toHaveCount(0);
+  await page.getByTestId("nav-devices").click();
+  await check(feedback).toBeVisible();
+  await check(feedback).toHaveCount(0, { timeout: 4000 });
+});
+it("计划和动作独立折叠且轮询保留选择", async () => {
+  const { app, page } = await setup();
+  app.applyReports([reportInput(mappedReport(Buffer.from("video")))]);
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").first().click();
+  await page
+    .getByRole("button", { name: "折叠动作 主录像", exact: true })
+    .click();
+  await check(
+    page.getByRole("button", { name: "展开动作 主录像", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "折叠计划", exact: true }).click();
+  for (const card of await page.locator(".result-card").all())
+    await check(card).toBeHidden();
+  await page.getByRole("button", { name: "展开计划", exact: true }).click();
+  await page.waitForResponse((response) =>
+    response.url().endsWith("/api/state"),
+  );
+  await check(
+    page.getByRole("button", { name: "展开动作 主录像", exact: true }),
+  ).toBeVisible();
+});
+it("导入按文件分页，大批次不突破每页上限", async () => {
+  const { app, page } = await setup();
+  for (let i = 0; i < 23; i++)
+    app.store.set("imports", `file-${i}`, {
+      id: `file-${i}`,
+      batchId: "one-batch",
+      fileName: `clip-${i}.mp4`,
+      kind: "video",
+      expectedSize: 1,
+      bytesReceived: 1,
+      status: "waiting_report",
+      createdAt: `2026-09-16 00:00:${String(i).padStart(2, "0")}`,
+    });
+  await page.getByTestId("nav-import").click();
+  await check(page.locator(".import-row")).toHaveCount(10);
+  await page.getByRole("button", { name: "下一页", exact: true }).click();
+  await check(page.locator(".import-row")).toHaveCount(10);
+  await page.waitForResponse((response) =>
+    response.url().endsWith("/api/state"),
+  );
+  await check(page.locator(".import-row").first()).toContainText("clip-12.mp4");
+  await page.getByRole("button", { name: "下一页", exact: true }).click();
+  await check(page.locator(".import-row")).toHaveCount(3);
+  await check(
+    page.getByRole("button", { name: "下一页", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "上一页", exact: true }).click();
+  await check(page.locator(".import-row")).toHaveCount(10);
+});
+
+it("同文案的新提示独立计时，旧计时不会提前清除", async () => {
+  const { page } = await setup();
+  await page.clock.install();
+  await page.getByTestId("nav-devices").click();
+  await page.getByRole("button", { name: "重新加载能力说明" }).click();
+  await check(page.locator(".notice.success")).toBeVisible();
+  await page.clock.fastForward(2000);
+  await page.getByRole("button", { name: "重新加载能力说明" }).click();
+  await check(page.locator(".notice.success")).toBeVisible();
+  await page.clock.fastForward(1100);
+  await check(page.locator(".notice.success")).toBeVisible();
+  await page.clock.fastForward(2000);
+  await check(page.locator(".notice.success")).toHaveCount(0);
+});
+it("异步操作完成时提示仍属于发起页面", async () => {
+  const { page } = await setup();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/capabilities/reload", async (route) => {
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  await page.getByTestId("nav-devices").click();
+  await page.getByRole("button", { name: "重新加载能力说明" }).click();
+  await page.getByTestId("nav-import").click();
+  const finished = page.waitForResponse("**/api/capabilities/reload");
+  release();
+  await finished;
+  await check(page.locator(".notice.success")).toHaveCount(0);
+  await page.getByTestId("nav-devices").click();
+  await check(page.locator(".notice.success")).toBeVisible();
+});

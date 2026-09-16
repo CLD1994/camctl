@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useFeedback } from "./feedback";
 import type { DraftContent, Preset } from "../server/models";
 import type { Capabilities, Issue, ParameterType } from "../shared/types";
 import { ACTION_TYPES, validatePlan } from "../shared/plan";
@@ -429,7 +430,7 @@ function ActionEditor(
   const [json, setJson] = useState(false),
     [presetId, setPresetId] = useState(""),
     [presetName, setPresetName] = useState(""),
-    [notice, setNotice] = useState(""),
+    [notice, setNotice] = useFeedback("action", 3000),
     [error, setError] = useState(""),
     [savingPreset, setSavingPreset] = useState(false);
   const put = (key: string, value: unknown, omit = false) =>
