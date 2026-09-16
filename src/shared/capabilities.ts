@@ -1,3 +1,4 @@
+import { isCameraAction } from './actions';
 import type { ValidateFunction } from "ajv";
 import type { Capabilities, Issue, ParameterType } from "./types";
 import { createValidator, DIALECT, isObject, schemaIssues } from "./validation";
@@ -104,7 +105,7 @@ export function loadCapabilities(value: unknown): Capabilities {
       exact(action, ["type", "parameter_types"], "拍摄动作");
       nonempty(action.type, "动作 type");
       unique(actions, action.type, "动作");
-      if (action.type !== "camera_record")
+      if (!isCameraAction(action.type))
         throw new Error(`本版不支持拍摄动作 ${action.type}`);
       if (
         !Array.isArray(action.parameter_types) ||

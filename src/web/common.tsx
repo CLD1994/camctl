@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { Issue } from "../shared/types";
 export const actionNames: Record<string, string> = {
+  camera_take_photo: "单张拍摄",
+  camera_timelapse: "延时摄影",
   camera_record: "录像",
   obtain_action_outputs: "取回产物",
   delete_action_outputs: "清理源产物",

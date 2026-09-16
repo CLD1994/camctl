@@ -1,3 +1,5 @@
+import { isCameraAction } from '../shared/actions';
+import type { CameraActionType } from '../shared/actions';
 import { useId, useState } from "react";
 import type { DraftContent } from "../server/models";
 import { isObject, isName } from "../shared/validation";
@@ -22,7 +24,7 @@ export function BuiltinFields({
 }: {
   content: DraftContent;
   path: Path;
-  type: Exclude<ActionType, "camera_record">;
+  type: Exclude<ActionType, CameraActionType>;
   change: (next: DraftContent) => void;
   reports: Array<{ report_id: number; to_wm: number }>;
   coverage: number;
@@ -64,7 +66,7 @@ export function BuiltinFields({
     ? Object.keys(params).filter((k) => !builtinFields[type].includes(k))
     : [];
   const cameraActions = root.actions.filter(
-    (a) => isObject(a) && a.type === "camera_record",
+    (a) => isObject(a) && isCameraAction(a.type),
   );
   return (
     <section className="builtin-parameters">

@@ -1,3 +1,4 @@
+import { isCameraAction } from '../shared/actions';
 import { useState } from "react";
 import { useFeedback } from "./feedback";
 import type { DraftContent, Preset } from "../server/models";
@@ -457,7 +458,7 @@ function ActionEditor(
     (key) => key === pendingPath || key.startsWith(pendingPath + "/"),
   );
   const currentParamsIssues =
-    action.type === "camera_record"
+    isCameraAction(action.type)
       ? validateParams(
           action.device_id,
           action.type,
@@ -603,11 +604,10 @@ function ActionEditor(
           <label className="field">
             <span>
               执行时间{" "}
-              {[
-                "camera_record",
+              {(isCameraAction(action.type) || [
                 "obtain_action_outputs",
                 "delete_action_outputs",
-              ].includes(action.type) ? (
+              ].includes(action.type)) ? (
                 <span className="required">必填</span>
               ) : unselected ? (
                 <small>选择动作类型后确定时间要求</small>
@@ -659,7 +659,7 @@ function ActionEditor(
             </div>
           ) : null}
         </div>
-        {action.type === "camera_record" ? (
+        {isCameraAction(action.type) ? (
           <>
             <div className="form-grid">
               <label className="field">
@@ -904,10 +904,10 @@ function ActionEditor(
             content={content}
             path={[...base, "policy"]}
             label="业务策略 JSON"
-            required={action.type === "camera_record"}
+            required={isCameraAction(action.type)}
             change={change}
           />
-          {action.type !== "camera_record" &&
+          {!isCameraAction(action.type) &&
             Object.hasOwn(action, "policy") && (
               <button onClick={() => put("policy", undefined, true)}>
                 省略策略字段

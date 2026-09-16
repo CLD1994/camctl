@@ -1,8 +1,9 @@
+import type { CameraActionType } from './actions';
 import type { ActionType, Issue } from "./types";
 import { isId, isName, isObject, isPositive, isUint } from "./validation";
 
 export const builtinFields: Record<
-  Exclude<ActionType, "camera_record">,
+  Exclude<ActionType, CameraActionType>,
   readonly string[]
 > = {
   obtain_action_outputs: ["source", "output_ids"],
@@ -67,7 +68,7 @@ export const targets: Mode[] = [
 
 /** 非拍摄动作的静态参数契约；引用存在性由调用方已有完整资料判断。 */
 export function validateBuiltinParams(
-  type: Exclude<ActionType, "camera_record">,
+  type: Exclude<ActionType, CameraActionType>,
   params: unknown,
   present: boolean,
 ): Issue[] {

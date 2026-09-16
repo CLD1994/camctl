@@ -1,3 +1,4 @@
+import { isCameraAction } from '../shared/actions';
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import schema from "../../docs/superpowers/specs/camctl/schemas/status-report.schema.json";
@@ -24,6 +25,7 @@ import type {
   Attempt,
   Copy,
   CameraResult,
+  CaptureResult,
   ObtainResult,
   DeleteResult,
   CancelResult,
@@ -175,7 +177,7 @@ function associations(index: Index) {
       const camera = index.actions.get(flow.parent)?.value;
       if (trigger)
         requireFact(
-          trigger.type === "camera_record" &&
+          isCameraAction(trigger.type) &&
             trigger.device_id === camera?.device_id,
           "后续收场触发动作须属于目标相机",
         );
@@ -198,7 +200,7 @@ function associations(index: Index) {
       );
     const known = index.actions.get(sourceId);
     if (known) {
-      requireFact(known.value.type === "camera_record", "取回来源不能产生产物");
+      requireFact(isCameraAction(known.value.type), "取回来源不能产生产物");
       if (typeof source.action_name === "string")
         requireFact(
           known.parent === owner.parent &&
@@ -244,7 +246,7 @@ function associations(index: Index) {
     selected(owner, delivery.source_action_instance_id, delivery.output_id);
     const source = index.actions.get(delivery.source_action_instance_id)?.value;
     if (source)
-      requireFact(source.type === "camera_record", "交付来源动作不产生产物");
+      requireFact(isCameraAction(source.type), "交付来源动作不产生产物");
     const output = index.outputs.get(delivery.output_id)?.value;
     if (output) {
       requireFact(
@@ -408,20 +410,20 @@ function ownFacts(report: StatusReport) {
           );
         if (action.group !== undefined)
           requireFact(isName(action.group), "动作组名称不合法");
-        if (action.type === "camera_record") {
+        if (isCameraAction(action.type)) {
           requireFact(
             isObject(action.input_params) &&
               typeof action.input_params.type === "string" &&
               action.input_params.type.length > 0 &&
               action.input_params.type === action.effective_params?.type,
-            "录像原参数与生效类型不一致",
+            "拍摄原参数与生效类型不一致",
           );
           requireFact(
             isId(action.device_id) &&
               isObject(action.policy) &&
               isUint(action.policy.max_delay_ms) &&
               Object.keys(action.policy).length === 1,
-            "录像公共输入不合法",
+            "拍摄公共输入不合法",
           );
         } else {
           requireFact(
@@ -449,6 +451,10 @@ function ownFacts(report: StatusReport) {
         requireFact(!action.execution.started, "错过启动窗口不应已有执行事实");
       if (action.expiration_reason === "window_exhausted")
         requireFact(action.execution.started, "启动窗口耗尽须已有执行事实");
+      if ((action.type === 'camera_take_photo' || action.type === 'camera_timelapse') && action.result) {
+        const result = action.result as CaptureResult;
+        for (const key of ['start', 'stop'] as const) if (result[key]) attempts(result[key].attempts, result[key].max_attempts, '拍摄' + key);
+      }
       if (action.type === "camera_record" && action.result) {
         const result = action.result as CameraResult;
         if (result.recording) {
@@ -709,6 +715,21 @@ function itemHistory<T extends { status: string }>(
   }
 }
 function actionResultHistory(before: ReportAction, after: ReportAction) {
+  if (before.type === 'camera_take_photo' || before.type === 'camera_timelapse') {
+    const old = before.result as CaptureResult | undefined;
+    const next = after.result as CaptureResult | undefined;
+    if (old) {
+      requireFact(next, '已保存拍摄结果不能消失');
+      if (terminal(before.status)) requireFact(isDeepStrictEqual(old, next), '拍摄终态结果不可改写');
+      for (const key of ['captured_count','elapsed_s'] as const) if (old.capture[key] !== undefined)
+        requireFact(next.capture[key] !== undefined && next.capture[key]! >= old.capture[key]!, '可靠采集进度不能回退或消失');
+      for (const key of ['start','stop'] as const) if (old[key]) {
+        requireFact(next[key] && next[key].max_attempts === old[key].max_attempts, '拍摄尝试预算不可改变');
+        attemptHistory(old[key].attempts, next[key].attempts);
+      }
+    }
+  }
+
   if (before.type === "obtain_action_outputs") {
     const old = (before.result as ObtainResult | undefined)?.failures ?? [];
     const next = (after.result as ObtainResult | undefined)?.failures ?? [];

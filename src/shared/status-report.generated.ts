@@ -75,7 +75,12 @@ export type Action = {
  * via the `definition` "action_type".
  */
 export type ActionType =
-  "camera_record" | "obtain_action_outputs" | "delete_action_outputs" | "cancel_task" | "report_status";
+  CameraActionType | ("obtain_action_outputs" | "delete_action_outputs" | "cancel_task" | "report_status");
+/**
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "camera_action_type".
+ */
+export type CameraActionType = "camera_take_photo" | "camera_record" | "camera_timelapse";
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
  * via the `definition` "text".
@@ -289,6 +294,16 @@ export type CancelItem = {
   withdrawals?: Withdrawal[];
   error?: Error;
 };
+/**
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "capture".
+ */
+export type Capture = {
+  status: "running" | "completed" | "failed" | "canceled" | "unconfirmed";
+  captured_count?: Uint;
+  elapsed_s?: NonnegativeNumber;
+  error?: Error;
+};
 
 /**
  * 定义报告字段与局部结构约束；跨字段、跨实体、历史及累计覆盖检查见 report-format.md。输入原值与错误 details 的内容按各自契约解释。
@@ -440,4 +455,13 @@ export interface CancelResult {
  */
 export interface ReportResult {
   report_id: PositiveInteger;
+}
+/**
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "capture_result".
+ */
+export interface CaptureResult {
+  capture: Capture;
+  start?: Attempts;
+  stop?: Attempts;
 }

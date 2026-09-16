@@ -1,10 +1,10 @@
-import schema from '../../docs/superpowers/specs/camctl/schemas/status-report.schema.json';
+import { ACTION_TYPES, isCameraAction } from './actions';
+export { ACTION_TYPES } from './actions';
 import type { ActionType, Capabilities, Issue, ValidationContext } from './types';
 import { validateParams } from './capabilities';
 import { validateBuiltinParams, isSyncBasis } from './action-params';
 import { isId, isName, isObject, isPositive, isTimestamp, isUint } from './validation';
 
-export const ACTION_TYPES: readonly ActionType[] = schema.$defs.action_type.enum as ActionType[];
 export function validatePlan(plan: unknown, capabilities: Capabilities | null, context: ValidationContext = {}): Issue[] {
   const issues: Issue[] = [];
   const issue = (path: string, code: string, message: string) => { issues.push({ path, code, message }); };
@@ -27,12 +27,12 @@ export function validatePlan(plan: unknown, capabilities: Capabilities | null, c
     if (typeof action.name === 'string') { check(!names.has(action.name), `${path}.name`, '动作名称重复', 'duplicate_name'); names.add(action.name); }
     if (!ACTION_TYPES.includes(action.type as ActionType)) { issue(`${path}.type`, 'unsupported_action', '本版不支持此动作类型'); return; }
     const type = action.type as ActionType;
-    const requiresTime = ['camera_record', 'obtain_action_outputs', 'delete_action_outputs'].includes(type);
+    const requiresTime = isCameraAction(type) || ['obtain_action_outputs', 'delete_action_outputs'].includes(type);
     if (requiresTime || Object.hasOwn(action, 'scheduled_at')) check(isTimestamp(action.scheduled_at), `${path}.scheduled_at`, '执行时间必须是真实 UTC 时间');
     if (Object.hasOwn(action, 'group')) check(type !== 'obtain_action_outputs' && isName(action.group), `${path}.group`, '动作所属组不合法');
-    if (type === 'camera_record') {
+    if (isCameraAction(type)) {
       check(isId(action.device_id), `${path}.device_id`, '设备 ID 不合法');
-      if (!isObject(action.policy)) issue(`${path}.policy`, 'invalid_policy', '录像必须提供策略');
+      if (!isObject(action.policy)) issue(`${path}.policy`, 'invalid_policy', '拍摄必须提供策略');
       else { fields(action.policy, ['max_delay_ms'], `${path}.policy`); check(isUint(action.policy.max_delay_ms), `${path}.policy.max_delay_ms`, '最大延迟必须是非负安全整数'); }
       issues.push(...validateParams(typeof action.device_id === 'string' ? action.device_id : '', type, action.params, capabilities).map(i => ({ ...i, path: `${path}.${i.path}` })));
       return;
@@ -49,8 +49,8 @@ export function validatePlan(plan: unknown, capabilities: Capabilities | null, c
     } else if (type === 'obtain_action_outputs') {
       if (isObject(params.source)) {
         const source = params.source;
-        if (Object.hasOwn(source, 'action_name')) check(actions.some(a => isObject(a) && a.name === source.action_name && a.type === 'camera_record'), `${p}.source.action_name`, '本计划内没有该名称的产物来源', 'source_not_found');
-        if (Object.hasOwn(source, 'group') && !Object.hasOwn(source, 'plan_instance_id')) check(actions.some(a => isObject(a) && a.group === source.group && isName(a.group) && a.type === 'camera_record'), `${p}.source.group`, '本计划组中没有产物来源', 'source_not_found');
+        if (Object.hasOwn(source, 'action_name')) check(actions.some(a => isObject(a) && a.name === source.action_name && isCameraAction(a.type)), `${p}.source.action_name`, '本计划内没有该名称的产物来源', 'source_not_found');
+        if (Object.hasOwn(source, 'group') && !Object.hasOwn(source, 'plan_instance_id')) check(actions.some(a => isObject(a) && a.group === source.group && isName(a.group) && isCameraAction(a.type)), `${p}.source.group`, '本计划组中没有产物来源', 'source_not_found');
       }
     }
   });
