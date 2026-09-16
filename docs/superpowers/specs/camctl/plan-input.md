@@ -77,6 +77,7 @@
 
 | 动作 | `device_id` | `scheduled_at` | `params` | `policy` |
 | --- | --- | --- | --- | --- |
+| `camera_take_photo`、`camera_timelapse` | 必填，且目标设备支持该能力 | 必填 | 必填；按[单张拍摄与延时摄影](camera-capture.md)及设备参数契约校验 | 必填，包含非负整数 `max_delay_ms` |
 | `camera_record` | 必填，且目标设备支持该能力 | 必填 | 必填；按[拍摄参数契约](camera-capabilities.md#计划字段与参数校验)校验 `type` 及其参数 | 必填，包含非负整数 `max_delay_ms` |
 | `obtain_action_outputs` | 省略；设备由来源决定 | 必填 | 必填；包含 `source`，可选 `output_ids`，见[取回参数](obtaining-outputs.md#参数) | 可省略或为空对象 |
 | `delete_action_outputs` | 省略；设备或主机位置由产物决定 | 必填 | 必填，包含非空 `output_ids` 数组，见[清理参数](output-cleanup.md#清理参数) | 可省略或为空对象 |

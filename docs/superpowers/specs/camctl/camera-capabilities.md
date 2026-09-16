@@ -12,7 +12,7 @@
 
 拍摄能力表达要做什么；驱动定义的拍摄参数类型表达目标相机接受哪一种参数结构及其约束，正文简称“参数类型”。驱动根据选定的参数类型和参数值执行对应设备操作。当前已知能力为拍摄单张照片、录像和延时摄影，分别使用动作类型 `camera_take_photo`、`camera_record`、`camera_timelapse` 表达。每台相机可以支持其中任意一种或多种，后续可以新增拍摄能力及动作类型。
 
-第一版接入当前 ADB 相机的 `camera_record`。本页确定参数类型的扩展机制，已确认的录像行为由[相机拍摄](camera-recording.md)及[异常恢复](camera-recovery.md)定义；实际相机的参数组织与设备定义在[当前相机录像参数](camera-parameters.md)中逐项完善。单张照片、延时摄影及其他相机能力属于接入扩展范围，列出能力名称不表示本版已支持执行；其受理结果遵守[整份校验与原子受理](plan-acceptance.md#整份校验与原子受理)。
+第一版支持 `camera_take_photo`、`camera_record` 和 `camera_timelapse`，每台设备只导出其实际支持的能力。单张拍摄与延时摄影遵守[单张拍摄与延时摄影](camera-capture.md)，录像行为遵守[相机录像](camera-recording.md)及[异常恢复](camera-recovery.md)。实际设备的参数及命令由驱动定义；支持某个动作类别不表示所有相机都支持该类别。
 
 | 层级 | 定义者与职责 |
 | --- | --- |

@@ -66,7 +66,7 @@
 
 动作公共结构中的额外输入字段放在 `extra_input_fields` 对象中，键和值原样保留。例如原动作多写了 `schedule_at`，该字段出现在 `extra_input_fields.schedule_at`，错误位置仍指向原计划的 `actions[i].schedule_at`。这样既保存诊断依据，也不让任意输入键变成报告公共字段。
 
-合法 `camera_record` 另有必填 `effective_params`，包含已固化的 `type` 及具体生效参数。它来自原受理事实，不从 `input_params` 或当前配置临时推算。其他动作不提供该字段。非法 `group` 原值只用于诊断；有效组成员关系仍按[动作公共字段](plan-input.md#动作公共字段)判断，取回动作不因此成为组成员。
+合法拍摄动作（`camera_take_photo`、`camera_record`、`camera_timelapse`）另有必填 `effective_params`，包含已固化的 `type` 及具体生效参数。它来自原受理事实，不从 `input_params` 或当前配置临时推算。其他动作不提供该字段。非法 `group` 原值只用于诊断；有效组成员关系仍按[动作公共字段](plan-input.md#动作公共字段)判断，取回动作不因此成为组成员。
 
 | 动作事实 | 必须表达 | 不能表达 |
 | --- | --- | --- |
@@ -184,11 +184,15 @@
 
 等待客户端累计确认的同步责任由[客户端状态同步](status-sync.md)维护；不把远端尚未 ACK 表达成报告动作执行失败，也不将报告内部管理状态作为新增业务字段不断触发下一份报告。
 
+### 单张拍摄与延时摄影结果
+
+`camera_take_photo`、`camera_timelapse` 的 `result` 使用 `capture_result`，详见[拍摄结果报告](camera-capture.md#拍摄结果报告)。原始输入和生效参数各自保留，既有设备说明变化不重解释历史结果。
+
 ## 正式产物
 
 每项必填 `output_id`、`source_action_instance_id`、`kind`、`availability`、`cleanup`、`checksum`、`media`。归属关系必须与所在拍摄动作一致。已知时提供原始文件名 `original_name`、内容类型 `media_type` 和完整大小 `size`；无法可靠取得时省略，而非填写空名称或零长度。
 
-第一版 `original` 是原片，`repaired` 是正式修复成品；后者必须有 `derived_from_output_id` 指向其来源原片。两者各有独立身份，清理不级联。正常修复成品尚未正式登记时，不分配一个可供客户端取回的虚构 output。
+第一版 `original` 是设备生成的原始产物，包括图片和视频，`media_type` 按实际已知的 MIME 内容类型填写；未知时省略。文件类别不能由动作名称或 `kind` 推断。`original` 不要求必须是视频；`repaired` 仍仅用于录像修复。`repaired` 是正式修复成品；后者必须有 `derived_from_output_id` 指向其来源原片。两者各有独立身份，清理不级联。正常修复成品尚未正式登记时，不分配一个可供客户端取回的虚构 output。
 
 `availability` 表达该正式产物的保留和取回资格，不表达视频是否正常播放或相机此刻是否在线：
 

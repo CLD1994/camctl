@@ -72,12 +72,18 @@
       "pattern": "^[0-9a-f]{64}$(?![\\s\\S])"
     },
     "action_type": {
-      "enum": [
-        "camera_record",
-        "obtain_action_outputs",
-        "delete_action_outputs",
-        "cancel_task",
-        "report_status"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/camera_action_type"
+        },
+        {
+          "enum": [
+            "obtain_action_outputs",
+            "delete_action_outputs",
+            "cancel_task",
+            "report_status"
+          ]
+        }
       ]
     },
     "action_status": {
@@ -1793,7 +1799,7 @@
           "then": {
             "properties": {
               "type": {
-                "const": "camera_record"
+                "$ref": "#/$defs/camera_action_type"
               }
             },
             "required": [
@@ -1921,7 +1927,7 @@
             "properties": {
               "type": {
                 "not": {
-                  "const": "camera_record"
+                  "$ref": "#/$defs/camera_action_type"
                 }
               }
             },
@@ -2066,7 +2072,7 @@
                 "properties": {
                   "type": {
                     "not": {
-                      "const": "camera_record"
+                      "$ref": "#/$defs/camera_action_type"
                     }
                   }
                 }
@@ -2379,7 +2385,7 @@
               {
                 "properties": {
                   "type": {
-                    "const": "camera_record"
+                    "$ref": "#/$defs/camera_action_type"
                   }
                 }
               },
@@ -2476,6 +2482,149 @@
           "then": {
             "required": [
               "result"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "camera_take_photo",
+                  "camera_timelapse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/capture_result"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "execution": {
+                      "properties": {
+                        "started": {
+                          "const": true
+                        }
+                      }
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "result"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "running",
+                        "expired"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "outputs": {
+                      "maxItems": 0
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "succeeded"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "result": {
+                      "properties": {
+                        "capture": {
+                          "properties": {
+                            "status": {
+                              "const": "completed"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "succeeded",
+                        "failed",
+                        "expired",
+                        "canceled"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "result": {
+                      "properties": {
+                        "capture": {
+                          "properties": {
+                            "status": {
+                              "not": {
+                                "const": "running"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "canceled"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "result": {
+                      "properties": {
+                        "capture": {
+                          "properties": {
+                            "status": {
+                              "enum": [
+                                "canceled",
+                                "unconfirmed"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             ]
           }
         }
@@ -2598,6 +2747,87 @@
           }
         }
       ]
+    },
+    "camera_action_type": {
+      "enum": [
+        "camera_take_photo",
+        "camera_record",
+        "camera_timelapse"
+      ]
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "running",
+            "completed",
+            "failed",
+            "canceled",
+            "unconfirmed"
+          ]
+        },
+        "captured_count": {
+          "$ref": "#/$defs/uint"
+        },
+        "elapsed_s": {
+          "$ref": "#/$defs/nonnegative_number"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "failed",
+                  "unconfirmed"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "error"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "error"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "capture_result": {
+      "type": "object",
+      "properties": {
+        "capture": {
+          "$ref": "#/$defs/capture"
+        },
+        "start": {
+          "$ref": "#/$defs/attempts"
+        },
+        "stop": {
+          "$ref": "#/$defs/attempts"
+        }
+      },
+      "required": [
+        "capture"
+      ],
+      "additionalProperties": false
     }
   }
 }
