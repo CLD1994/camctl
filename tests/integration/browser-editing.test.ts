@@ -112,20 +112,29 @@ it("设备能力联动保留失效草稿并阻止导出", async () => {
   await check(action.getByLabel("动作参数 JSON", { exact: true })).toHaveCount(
     0,
   );
-  await action
-    .getByLabel("目标设备", { exact: true })
-    .selectOption("no-record");
-  await check(
-    action
-      .getByLabel("动作类型", { exact: true })
-      .locator('option[value="camera_record"]'),
-  ).toHaveCount(0);
-  await action
-    .getByLabel("目标设备", { exact: true })
-    .selectOption("demo_cam0");
+  await check(action.getByLabel("目标设备", { exact: true })).toHaveCount(0);
   await action
     .getByLabel("动作类型", { exact: true })
     .selectOption("camera_record");
+  await action
+    .getByLabel("目标设备", { exact: true })
+    .selectOption("demo_cam0");
+  for (const type of [
+    "report_status",
+    "cancel_task",
+    "delete_action_outputs",
+    "obtain_action_outputs",
+    "",
+  ]) {
+    await action.getByLabel("动作类型", { exact: true }).selectOption(type);
+    await check(action.getByLabel("目标设备", { exact: true })).toHaveCount(0);
+  }
+  await action
+    .getByLabel("动作类型", { exact: true })
+    .selectOption("camera_record");
+  await check(action.getByLabel("目标设备", { exact: true })).toHaveValue(
+    "demo_cam0",
+  );
   await check(
     action
       .getByLabel("目标设备", { exact: true })

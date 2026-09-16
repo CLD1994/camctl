@@ -21,22 +21,22 @@ export function DeviceGuide({
           <li>
             <span>1</span>
             <div>
-              <strong>选设备</strong>
-              <small>确认本次使用哪台设备</small>
+              <strong>了解设备能力</strong>
+              <small>查看各设备支持的拍摄功能</small>
             </div>
           </li>
           <li>
             <span>2</span>
             <div>
-              <strong>选任务与参数</strong>
-              <small>了解固定设置和允许组合</small>
+              <strong>选择动作与设备</strong>
+              <small>在计划中先选动作，再选目标设备</small>
             </div>
           </li>
           <li>
             <span>3</span>
             <div>
-              <strong>在计划中安排执行</strong>
-              <small>填写时间，检查并导出</small>
+              <strong>设置参数与执行时间</strong>
+              <small>核对任务设置，检查并导出</small>
             </div>
           </li>
         </ol>

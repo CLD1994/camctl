@@ -403,9 +403,9 @@ function ActionEditor(
   const parameter = types.find(
     (p) => isObject(action.params) && p.type === action.params.type,
   );
-  const options = deviceOptions(capabilities, action.device_id, action.type);
+  const options = deviceOptions(capabilities, action.type);
   const unselected = action.type === undefined || action.type === "";
-  const showDevice = unselected || action.type === "camera_record";
+  const showDevice = options.requiresDevice;
   const compatible = presets.filter(
     (p) => p.deviceId === action.device_id && p.actionType === action.type,
   );
@@ -495,6 +495,30 @@ function ActionEditor(
               onChange={(e) => put("name", e.target.value)}
             />
           </label>
+          <label className="field">
+            动作类型
+            <select
+              aria-label="动作类型"
+              value={typeof action.type === "string" ? action.type : ""}
+              onChange={(e) =>
+                put("type", e.target.value, e.target.value === "")
+              }
+            >
+              <option value="">请选择动作类型</option>
+              {action.type !== undefined &&
+                action.type !== "" &&
+                !options.actions.includes(action.type) && (
+                  <option disabled value={String(action.type)}>
+                    {String(action.type)}（当前不可用）
+                  </option>
+                )}
+              {options.actions.map((type) => (
+                <option key={type} value={type}>
+                  {actionLabel(type)} · {type}
+                </option>
+              ))}
+            </select>
+          </label>
           {showDevice && (
             <label className="field">
               目标设备
@@ -522,30 +546,6 @@ function ActionEditor(
               </select>
             </label>
           )}
-          <label className="field">
-            动作类型
-            <select
-              aria-label="动作类型"
-              value={typeof action.type === "string" ? action.type : ""}
-              onChange={(e) =>
-                put("type", e.target.value, e.target.value === "")
-              }
-            >
-              <option value="">请选择动作类型</option>
-              {action.type !== undefined &&
-                action.type !== "" &&
-                !options.actions.includes(action.type) && (
-                  <option disabled value={String(action.type)}>
-                    {String(action.type)}（当前不可用）
-                  </option>
-                )}
-              {options.actions.map((type) => (
-                <option key={type} value={type}>
-                  {actionLabel(type)} · {type}
-                </option>
-              ))}
-            </select>
-          </label>
           <label className="field">
             <span>
               执行时间{" "}
@@ -807,7 +807,10 @@ function ActionEditor(
               )}
             {!showDevice && Object.hasOwn(action, "device_id") && (
               <p className="notice">
-                此动作不使用设备字段。当前值：{String(action.device_id)}{" "}
+                {ACTION_TYPES.includes(action.type)
+                  ? "此动作不使用设备字段。当前值："
+                  : "尚未确定设备字段是否适用。原值："}
+                {String(action.device_id)}{" "}
                 <button onClick={() => put("device_id", undefined, true)}>
                   省略设备字段
                 </button>
