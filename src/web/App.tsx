@@ -346,7 +346,7 @@ export function App() {
           kind:
             f.name.startsWith("status-report-") || /\.json$/i.test(f.name)
               ? "report"
-              : "video",
+              : "media",
         })),
       });
     } catch (e) {
@@ -390,7 +390,7 @@ export function App() {
     // 先启动全部报告上传；视频任务独立推进，批次不会等待大视频才取得报告。
     const ordered = [
       ...jobs.filter((j) => j.item.kind === "report"),
-      ...jobs.filter((j) => j.item.kind === "video"),
+      ...jobs.filter((j) => j.item.kind === "media"),
     ];
     void Promise.allSettled(ordered.map(transfer));
     void refresh().catch(() => {});
@@ -425,7 +425,9 @@ export function App() {
               ? "创建客户端数据"
               : "客户端数据无法使用"}
           </h1>
-          <p>使用当前个人电脑上的数据目录保存草稿、原请求、报告和视频。</p>
+          <p>
+            使用当前个人电脑上的数据目录保存草稿、原请求、报告、图片和视频。
+          </p>
           <p className="directory">{state.startup.directory}</p>
           <ErrorBox error={state.startup.message ?? error ?? connection} />
           {state.startup.state === "uninitialized" ? (
@@ -529,7 +531,7 @@ export function App() {
               {page === "plans"
                 ? "准备执行请求，查看主机结果与已接收文件。"
                 : page === "import"
-                  ? "导入收到的状态报告与视频，查看保存、关联和核验结果。"
+                  ? "导入收到的状态报告、图片与视频，查看保存、关联和核验结果。"
                   : "查看当前启用的设备和参数规则，准备符合能力的拍摄计划。"}
             </p>
           </div>
@@ -1078,15 +1080,15 @@ function ImportPage({
         }}
       >
         <span className="upload-symbol">↥</span>
-        <h2>将报告和视频拖到这里</h2>
-        <p>支持一次混合选择。报告按覆盖关系处理，视频独立保存与核验。</p>
+        <h2>将报告、图片和视频拖到这里</h2>
+        <p>支持一次混合选择。报告按覆盖关系处理，媒体文件独立保存与核验。</p>
         <label className="file-button">
           选择文件
           <input
             type="file"
             multiple
             data-testid="import-files"
-            aria-label="选择报告和视频文件"
+            aria-label="选择报告、图片和视频文件"
             onChange={(e) => {
               selectFiles([...(e.target.files ?? [])]);
               e.target.value = "";
@@ -1153,7 +1155,7 @@ function ImportPage({
                   <div>
                     <strong>{file.fileName}</strong>
                     <small>
-                      {file.kind === "report" ? "状态报告" : "视频"} ·{" "}
+                      {file.kind === "report" ? "状态报告" : "媒体文件"} ·{" "}
                       {file.expectedSize.toLocaleString()} 字节
                     </small>
                   </div>

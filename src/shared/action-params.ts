@@ -1,4 +1,4 @@
-import type { CameraActionType } from './actions';
+import type { CameraActionType } from "./actions";
 import type { ActionType, Issue } from "./types";
 import { isId, isName, isObject, isPositive, isUint } from "./validation";
 

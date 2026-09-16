@@ -100,6 +100,19 @@ it("核验通过但媒体不能解码时保留原视频下载和核验结果", a
   await page.reload();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
+  await page
+    .getByRole("button", { name: /^展开动作 / })
+    .first()
+    .waitFor();
+  while (await page.getByRole("button", { name: /^展开动作 / }).count())
+    await page
+      .getByRole("button", { name: /^展开动作 / })
+      .first()
+      .click();
+  for (const summary of await page
+    .getByText("更多操作与交付记录", { exact: true })
+    .all())
+    await summary.click();
   await browserExpect(
     page.getByRole("alert").filter({ hasText: "无法在浏览器播放" }).first(),
   ).toBeVisible();

@@ -762,11 +762,26 @@ it("报告详情逐项失败来源ID和原输入保持报告字面值", async ()
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
   const card = page.locator(".result-card").first();
+  await page
+    .getByRole("button", { name: /^展开动作 / })
+    .first()
+    .waitFor();
+  while (await page.getByRole("button", { name: /^展开动作 / }).count())
+    await page
+      .getByRole("button", { name: /^展开动作 / })
+      .first()
+      .click();
+  await page
+    .locator(".result-card")
+    .last()
+    .getByText("执行技术详情", { exact: true })
+    .click();
   await check(
     page
       .locator(".result-card")
       .last()
-      .locator(".facts")
+      .locator("details")
+      .filter({ has: page.getByText("执行技术详情", { exact: true }) })
       .getByText("pending", { exact: true }),
   ).toBeVisible();
   await card.getByText("输入与生效参数", { exact: true }).click();
@@ -791,6 +806,9 @@ it("计划和动作独立折叠且轮询保留选择", async () => {
   app.applyReports([reportInput(mappedReport(Buffer.from("video")))]);
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
+  await page
+    .getByRole("button", { name: "展开动作 主录像", exact: true })
+    .click();
   await page
     .getByRole("button", { name: "折叠动作 主录像", exact: true })
     .click();

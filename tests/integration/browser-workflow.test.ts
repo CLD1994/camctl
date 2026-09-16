@@ -51,6 +51,7 @@ async function setup() {
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const context = await browser.newContext({ acceptDownloads: true });
   const page = await context.newPage();
+  page.setDefaultTimeout(5000);
   const stop = createStop(
     () =>
       new Promise<void>((resolve, reject) =>
@@ -97,6 +98,19 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
+  await page
+    .getByRole("button", { name: /^展开动作 / })
+    .first()
+    .waitFor();
+  while (await page.getByRole("button", { name: /^展开动作 / }).count())
+    await page
+      .getByRole("button", { name: /^展开动作 / })
+      .first()
+      .click();
+  for (const summary of await page
+    .getByText("更多操作与交付记录", { exact: true })
+    .all())
+    await summary.click();
   await browserExpect(page.getByTestId("download-request-button")).toHaveCount(
     0,
   );
@@ -116,6 +130,19 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
   const append = async (button: string) => {
     await page.getByTestId("tab-records").click();
     await page.getByTestId("record-open-button").first().click();
+    await page
+      .getByRole("button", { name: /^展开动作 / })
+      .first()
+      .waitFor();
+    while (await page.getByRole("button", { name: /^展开动作 / }).count())
+      await page
+        .getByRole("button", { name: /^展开动作 / })
+        .first()
+        .click();
+    for (const summary of await page
+      .getByText("更多操作与交付记录", { exact: true })
+      .all())
+      await summary.click();
     await page
       .getByRole("button", { name: button, exact: true })
       .first()
@@ -151,7 +178,7 @@ it("视频上传仍被挂起时报告可以应用并查看结果", async () => {
     const item = application.store
       .all<{ id: string; kind: string }>("imports")
       .find((f) => f.id === id);
-    if (item?.kind === "video") await hold;
+    if (item?.kind !== "report") await hold;
     await route.continue();
   });
   try {
@@ -184,6 +211,19 @@ it("未发布交付没有本地文件时不暗示文件等待送达", async () =
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
+  await page
+    .getByRole("button", { name: /^展开动作 / })
+    .first()
+    .waitFor();
+  while (await page.getByRole("button", { name: /^展开动作 / }).count())
+    await page
+      .getByRole("button", { name: /^展开动作 / })
+      .first()
+      .click();
+  for (const summary of await page
+    .getByText("更多操作与交付记录", { exact: true })
+    .all())
+    await summary.click();
   const failed = page
     .locator(".delivery")
     .filter({ hasText: "d-202.mp4" })
@@ -201,20 +241,18 @@ it("网页导出与再次下载保持同一请求，复制后产生新请求", a
   await page.getByTestId("initialize-button").click();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
-  await page
-    .getByTestId("draft-json-input")
-    .fill(
-      JSON.stringify({
-        name: "网页同步",
-        actions: [
-          {
-            name: "完整同步",
-            type: "report_status",
-            params: { scope: "full" },
-          },
-        ],
-      }),
-    );
+  await page.getByTestId("draft-json-input").fill(
+    JSON.stringify({
+      name: "网页同步",
+      actions: [
+        {
+          name: "完整同步",
+          type: "report_status",
+          params: { scope: "full" },
+        },
+      ],
+    }),
+  );
   const firstEvent = page.waitForEvent("download");
   await page.getByTestId("export-button").click();
   const first = JSON.parse(
@@ -246,6 +284,19 @@ it("网页混合导入真实报告与视频，核验后播放并按范围下载"
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
+  await page
+    .getByRole("button", { name: /^展开动作 / })
+    .first()
+    .waitFor();
+  while (await page.getByRole("button", { name: /^展开动作 / }).count())
+    await page
+      .getByRole("button", { name: /^展开动作 / })
+      .first()
+      .click();
+  for (const summary of await page
+    .getByText("更多操作与交付记录", { exact: true })
+    .all())
+    await summary.click();
   const video = page.locator("video").first();
   await browserExpect(video).toBeVisible();
   await browserExpect

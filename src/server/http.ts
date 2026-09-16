@@ -1,3 +1,4 @@
+import { fileMediaType, previewKind } from "../shared/media";
 import express from "express";
 import { createReadStream } from "node:fs";
 import { resolve } from "node:path";
@@ -45,12 +46,10 @@ export function createHttpApp(
           origin !== `https://${host}`) ||
         req.headers["sec-fetch-site"] === "cross-site"
       )
-        return res
-          .status(403)
-          .json({
-            code: "origin_rejected",
-            message: "不允许其他网站修改客户端数据",
-          });
+        return res.status(403).json({
+          code: "origin_rejected",
+          message: "不允许其他网站修改客户端数据",
+        });
     }
     next();
   });
@@ -188,23 +187,21 @@ export function createHttpApp(
     res.type("application/json").send(Buffer.from(report.bytes));
   });
   app.get(
-    "/api/videos/:id/content",
+    ["/api/videos/:id/content", "/api/media/:id/content"],
     tracked(async (req, res) => {
       const video = await files.openVideo(String(req.params.id));
       res.setHeader("Accept-Ranges", "bytes");
       res.setHeader("Cache-Control", "private, no-store");
-      if (req.query.download === "true")
+      const mediaType = fileMediaType(application.snapshot(), video.fileName);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      if (req.query.download === "true" || !previewKind(mediaType))
         res.setHeader(
           "Content-Disposition",
           `attachment; filename*=UTF-8''${encodeURIComponent(video.fileName)}`,
         );
       else res.setHeader("Content-Disposition", "inline");
       res.type(
-        video.fileName.endsWith(".webm")
-          ? "video/webm"
-          : video.fileName.endsWith(".mov")
-            ? "video/quicktime"
-            : "video/mp4",
+        previewKind(mediaType) ? mediaType! : "application/octet-stream",
       );
       let range: { start: number; end: number } | undefined;
       if (req.headers.range) {
@@ -245,13 +242,11 @@ export function createHttpApp(
         return;
       }
       if (error instanceof AppError)
-        res
-          .status(error.status)
-          .json({
-            code: error.code,
-            message: error.message,
-            issues: error.issues,
-          });
+        res.status(error.status).json({
+          code: error.code,
+          message: error.message,
+          issues: error.issues,
+        });
       else if (error instanceof DataError)
         res.status(503).json({ code: error.code, message: error.message });
       else

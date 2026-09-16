@@ -55,7 +55,7 @@ export interface ImportFile {
   id: string;
   batchId: string;
   fileName: string;
-  kind: "report" | "video";
+  kind: "report" | "video" | "media";
   expectedSize: number;
   status: ImportStatus;
   message?: string;

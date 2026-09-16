@@ -178,7 +178,7 @@ export class Files {
     });
   }
   createBatch(
-    input: Array<{ fileName: string; size: number; kind: "report" | "video" }>,
+    input: Array<{ fileName: string; size: number; kind: ImportFile["kind"] }>,
   ) {
     if (!Array.isArray(input) || !input.length)
       throw new AppError("invalid_batch", "请选择文件");
@@ -190,7 +190,7 @@ export class Files {
         /[\x00-\x1f/\\]/.test(f.fileName) ||
         !Number.isSafeInteger(f.size) ||
         f.size < 0 ||
-        !["report", "video"].includes(f.kind)
+        !["report", "video", "media"].includes(f.kind)
       )
         throw new AppError("invalid_file", "文件名、类型或大小无效");
     }
@@ -289,7 +289,7 @@ export class Files {
         }),
         this.importChange(id, { status: "received", bytesReceived: size }),
       ]);
-      if (file.kind === "video") this.enqueue(() => this.processVideo(id));
+      if (file.kind !== "report") this.enqueue(() => this.processVideo(id));
       else this.enqueueReport(() => this.processBatch(file.batchId));
     } finally {
       this.activeUploads.delete(id);
@@ -392,7 +392,7 @@ export class Files {
   async processVideo(id: string) {
     const file = this.file(id);
     const complete = this.complete(id);
-    if (!complete) throw new DataError("缺少完整视频保存记录");
+    if (!complete) throw new DataError("缺少完整媒体文件保存记录");
     if (complete.processed) return;
     let newHash: Mapping;
     try {
@@ -596,7 +596,7 @@ export class Files {
     if (video.status !== "verified" || !video.verifiedAgainst)
       throw new AppError(
         "video_not_verified",
-        "视频尚未满足播放和下载条件",
+        "媒体文件尚未满足播放和下载条件",
         409,
       );
     const mapping = this.mapping(video.fileName);
@@ -609,17 +609,21 @@ export class Files {
   }
   async openVideo(id: string): Promise<Video> {
     const video = this.videos().find((v) => v.id === id);
-    if (!video) throw new AppError("not_found", "视频不存在", 404);
+    if (!video) throw new AppError("not_found", "媒体文件不存在", 404);
     this.requirePlayable(video);
     try {
       await this.io.readable(video.path, video.size);
     } catch (error) {
       this.unavailable(video, error);
-      throw new AppError("video_unavailable", "已保存的视频当前不可读取", 409);
+      throw new AppError(
+        "video_unavailable",
+        "已保存的媒体文件当前不可读取",
+        409,
+      );
     }
     const current = this.current(video.fileName);
     if (current?.id !== id)
-      throw new AppError("not_found", "当前视频副本已变更", 404);
+      throw new AppError("not_found", "当前媒体文件副本已变更", 404);
     this.requirePlayable(current);
     return current;
   }
@@ -637,7 +641,7 @@ export class Files {
         });
         continue;
       }
-      if (file.kind === "video" && complete && !complete.processed)
+      if (file.kind !== "report" && complete && !complete.processed)
         this.enqueue(() => this.processVideo(file.id));
       else if (file.status === "uploading")
         this.update(file.id, {

@@ -1,4 +1,4 @@
-import { isCameraAction } from '../shared/actions';
+import { isCameraAction } from "../shared/actions";
 import { useState } from "react";
 import { useFeedback } from "./feedback";
 import type { DraftContent, Preset } from "../server/models";
@@ -457,15 +457,9 @@ function ActionEditor(
   const hasPending = Object.keys(content.pending ?? {}).some(
     (key) => key === pendingPath || key.startsWith(pendingPath + "/"),
   );
-  const currentParamsIssues =
-    isCameraAction(action.type)
-      ? validateParams(
-          action.device_id,
-          action.type,
-          action.params,
-          capabilities,
-        )
-      : [];
+  const currentParamsIssues = isCameraAction(action.type)
+    ? validateParams(action.device_id, action.type, action.params, capabilities)
+    : [];
   const save = async (update: boolean) => {
     if (hasPending) {
       setError("参数尚未完成，请先修正当前输入");
@@ -604,10 +598,10 @@ function ActionEditor(
           <label className="field">
             <span>
               执行时间{" "}
-              {(isCameraAction(action.type) || [
-                "obtain_action_outputs",
-                "delete_action_outputs",
-              ].includes(action.type)) ? (
+              {isCameraAction(action.type) ||
+              ["obtain_action_outputs", "delete_action_outputs"].includes(
+                action.type,
+              ) ? (
                 <span className="required">必填</span>
               ) : unselected ? (
                 <small>选择动作类型后确定时间要求</small>
@@ -907,12 +901,11 @@ function ActionEditor(
             required={isCameraAction(action.type)}
             change={change}
           />
-          {!isCameraAction(action.type) &&
-            Object.hasOwn(action, "policy") && (
-              <button onClick={() => put("policy", undefined, true)}>
-                省略策略字段
-              </button>
-            )}
+          {!isCameraAction(action.type) && Object.hasOwn(action, "policy") && (
+            <button onClick={() => put("policy", undefined, true)}>
+              省略策略字段
+            </button>
+          )}
         </details>
       </div>
     </article>

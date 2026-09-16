@@ -1,4 +1,4 @@
-import { isCameraAction } from './actions';
+import { isCameraAction } from "./actions";
 import type { ValidateFunction } from "ajv";
 import type { Capabilities, Issue, ParameterType } from "./types";
 import { createValidator, DIALECT, isObject, schemaIssues } from "./validation";

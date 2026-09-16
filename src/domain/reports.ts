@@ -1,4 +1,4 @@
-import { isCameraAction } from '../shared/actions';
+import { isCameraAction } from "../shared/actions";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import schema from "../../docs/superpowers/specs/camctl/schemas/status-report.schema.json";
@@ -451,9 +451,19 @@ function ownFacts(report: StatusReport) {
         requireFact(!action.execution.started, "错过启动窗口不应已有执行事实");
       if (action.expiration_reason === "window_exhausted")
         requireFact(action.execution.started, "启动窗口耗尽须已有执行事实");
-      if ((action.type === 'camera_take_photo' || action.type === 'camera_timelapse') && action.result) {
-        const result = action.result as CaptureResult;
-        for (const key of ['start', 'stop'] as const) if (result[key]) attempts(result[key].attempts, result[key].max_attempts, '拍摄' + key);
+      if (
+        (action.type === "camera_take_photo" ||
+          action.type === "camera_timelapse") &&
+        action.result
+      ) {
+        const result = action.result as unknown as CaptureResult;
+        for (const key of ["start", "stop"] as const)
+          if (result[key])
+            attempts(
+              result[key].attempts,
+              result[key].max_attempts,
+              "拍摄" + key,
+            );
       }
       if (action.type === "camera_record" && action.result) {
         const result = action.result as CameraResult;
@@ -715,18 +725,31 @@ function itemHistory<T extends { status: string }>(
   }
 }
 function actionResultHistory(before: ReportAction, after: ReportAction) {
-  if (before.type === 'camera_take_photo' || before.type === 'camera_timelapse') {
+  if (
+    before.type === "camera_take_photo" ||
+    before.type === "camera_timelapse"
+  ) {
     const old = before.result as CaptureResult | undefined;
     const next = after.result as CaptureResult | undefined;
     if (old) {
-      requireFact(next, '已保存拍摄结果不能消失');
-      if (terminal(before.status)) requireFact(isDeepStrictEqual(old, next), '拍摄终态结果不可改写');
-      for (const key of ['captured_count','elapsed_s'] as const) if (old.capture[key] !== undefined)
-        requireFact(next.capture[key] !== undefined && next.capture[key]! >= old.capture[key]!, '可靠采集进度不能回退或消失');
-      for (const key of ['start','stop'] as const) if (old[key]) {
-        requireFact(next[key] && next[key].max_attempts === old[key].max_attempts, '拍摄尝试预算不可改变');
-        attemptHistory(old[key].attempts, next[key].attempts);
-      }
+      requireFact(next, "已保存拍摄结果不能消失");
+      if (terminal(before.status))
+        requireFact(isDeepStrictEqual(old, next), "拍摄终态结果不可改写");
+      for (const key of ["captured_count", "elapsed_s"] as const)
+        if (old.capture[key] !== undefined)
+          requireFact(
+            next.capture[key] !== undefined &&
+              next.capture[key]! >= old.capture[key]!,
+            "可靠采集进度不能回退或消失",
+          );
+      for (const key of ["start", "stop"] as const)
+        if (old[key]) {
+          requireFact(
+            next[key] && next[key].max_attempts === old[key].max_attempts,
+            "拍摄尝试预算不可改变",
+          );
+          attemptHistory(old[key].attempts, next[key].attempts);
+        }
     }
   }
 

@@ -1,5 +1,5 @@
-import { isCameraAction } from '../shared/actions';
-import type { CameraActionType } from '../shared/actions';
+import { isCameraAction } from "../shared/actions";
+import type { CameraActionType } from "../shared/actions";
 import { useId, useState } from "react";
 import type { DraftContent } from "../server/models";
 import { isObject, isName } from "../shared/validation";
