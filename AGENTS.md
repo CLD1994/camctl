@@ -77,9 +77,11 @@
 
 ## 架构设计规范
 
+- 仓库按独立运行组件组织：客户端位于 `apps/client`，Python CLI 位于 `apps/camctl`，C 主程序调用示例位于 `apps/host-demo`。公共机器协议仅在根 `protocol` 维护；组件内部共享代码不作为跨组件协议来源。组件测试放在各自目录，跨组件集成测试放在根 `tests/integration`。目录与数据边界遵守[仓库结构](docs/architecture/repository-layout.md)。
+
 - 当前处于第一版开发，持久化、历史回放和报告重建以第一版的数据格式与规则为范围。
 
-- 嵌入式主机上 camctl 的状态数据库以不可变历史为权威来源，历史按具有独立含义的事实记录，在同一事务中同步更新当前状态投影；历史回放只重建状态，不执行外部副作用。该数据库数据永久保留，当前不设计数据库数据删除机制；具体边界遵守[设计总览](docs/superpowers/specs/2026-09-08-camctl-cli-design.md#持久化与配置基础)。客户端草稿、预设与原请求的保存遵守[客户端数据规则](docs/superpowers/specs/camctl-client/storage-and-recovery.md#草稿预设与原请求的保存)。
+- 嵌入式主机上 camctl 的状态数据库以不可变历史为权威来源，历史按具有独立含义的事实记录，在同一事务中同步更新当前状态投影；历史回放只重建状态，不执行外部副作用。该数据库数据永久保留，当前不设计数据库数据删除机制；具体边界遵守[设计总览](docs/architecture/README.md#持久化与配置基础)。客户端草稿、预设与原请求的保存遵守[客户端数据规则](docs/client/storage-and-recovery.md#草稿预设与原请求的保存)。
 
 - camctl 状态库只在显式部署初始化时创建；日常执行与提交入口不得将缺失或无效的状态库重建为空库。
 

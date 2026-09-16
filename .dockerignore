@@ -2,8 +2,12 @@
 .superpowers
 .local
 node_modules
+**/node_modules
 data
 dist
+**/dist
+**/test-results
+**/playwright-report
 test-results
 playwright-report
 tmp

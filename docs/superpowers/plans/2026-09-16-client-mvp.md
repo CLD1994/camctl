@@ -4,7 +4,7 @@
 
 ## 目标与依据
 
-实现可在 Windows 本机启动的 React / TypeScript 网页与 Node.js 后端，贯通客户端六组 MVP 验收。业务依据为 [客户端规格](../specs/camctl-client/README.md)、其六个专题及引用的公共协议。用户已确认技术方向；容器部署与容器验证由用户亲自执行。
+实现可在 Windows 本机启动的 React / TypeScript 网页与 Node.js 后端，贯通客户端六组 MVP 验收。业务依据为 [客户端规格](../../client/README.md)、其六个专题及引用的公共协议。用户已确认技术方向；容器部署与容器验证由用户亲自执行。
 
 ## 全局约束
 
@@ -15,13 +15,13 @@
 - 报告原文件名和字节、成功身份、实体投影和覆盖进度在同一次事务提交。
 - 已保存视频由后台继续核验；只有完整可读取、有效映射且核验成功的文件可播放下载。
 - 单元测试隔离真实外部边界；真实 SQLite、文件、HTTP 和浏览器测试归集成测试。
-- 在 Windows 本地验证；交付 Dockerfile 与 Compose，容器结果不得声称已经验证。
+- 在 Windows 本地验证；交付 apps/client/Dockerfile 与 Compose，容器结果不得声称已经验证。
 
 ## 实现设计（内部结构为建议）
 
 ### 责任与接口
 
-`src/shared/` 提供严格 JSON、能力说明和计划校验、编辑类型；`src/domain/reports.ts` 提供报告验证、覆盖判定与实体合并。`src/server/` 负责 SQLite、文件工作队列、HTTP；`src/web/` 负责 React 界面。测试按 `tests/unit/`、`tests/integration/` 分开。
+`src/shared/` 提供严格 JSON、能力说明和计划校验、编辑类型；`apps/client/src/domain/reports.ts` 提供报告验证、覆盖判定与实体合并。`src/server/` 负责 SQLite、文件工作队列、HTTP；`src/web/` 负责 React 界面。测试按 `tests/unit/`、`tests/integration/` 分开。
 
 关键共享接口：`parseJson(text): unknown`；`loadCapabilities(value): Capabilities`；`validatePlan(plan, capabilities, context?): Issue[]`；`validateParams(deviceId, actionType, params, capabilities): Issue[]`。`Issue` 包含 `path`、`code`、`message`。报告接口在任务 1 的交接报告明确导出签名，后端依照实际类型接入，不能另写一份协议清单。
 
@@ -56,7 +56,7 @@
 
 ## 任务 1：协议与共享校验
 
-建议文件：`src/shared/{json,capabilities,plan,types}.ts`、`src/domain/reports.ts`、对应单元测试。
+建议文件：`src/shared/{json,capabilities,plan,types}.ts`、`apps/client/src/domain/reports.ts`、对应单元测试。
 
 - [x] 阅读 plan-input、capabilities、camera-capabilities、取回/取消/清理、report-format、status-reports、status-sync 及公共 Schema。
 - [x] 先写失败测试：重复转义键、非法日期、缺省与 null、未知字段、参数 Schema 不转换值、本计划后向引用、五种动作、覆盖/合并与不变身份。
@@ -73,7 +73,7 @@ expect(validatePlan({name:'计划',actions:[]}, null).length).toBeGreaterThan(0)
 
 ## 任务 2：数据与关键操作
 
-建议文件：`src/server/{database,application}.ts`、`tests/integration/application.test.ts`。依赖任务 1 的实际接口。
+建议文件：`src/server/{database,application}.ts`、`apps/client/tests/integration/application.test.ts`。依赖任务 1 的实际接口。
 
 - [x] 在临时目录写真实初始化、原请求固定、版本冲突、递交重复标记和事务回滚测试并观察失败。
 - [x] 实现显式初始化与可靠读取；数据库连接只对已存在正常库开放日常写入。
@@ -105,7 +105,7 @@ expect(validatePlan({name:'计划',actions:[]}, null).length).toBeGreaterThan(0)
 
 ## 任务 5：交付与最终验收
 
-- [x] 提供 Dockerfile、compose.yaml、环境配置示例与中文 Windows 本地启动/停机备份/恢复说明。
+- [x] 提供 apps/client/Dockerfile、apps/client/compose.yaml、环境配置示例与中文 Windows 本地启动/停机备份/恢复说明。
 - [x] 根 README 更新为实际应用入口，相关 AGENTS 约束如受影响同步更新。
 - [x] 运行类型检查、构建、单元与集成测试，浏览器操作完整六组场景。
 - [x] 独立评审实际改动与跨层不变量，修复后运行受影响测试。

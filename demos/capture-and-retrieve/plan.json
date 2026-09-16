@@ -1,0 +1,31 @@
+{
+  "name": "客户演示：双录像与定向取回",
+  "actions": [
+    {
+      "name": "固定参数录像",
+      "type": "camera_record",
+      "device_id": "demo_cam0",
+      "scheduled_at": "2026-09-16 08:00:00",
+      "params": { "type": "demo_fixed" },
+      "policy": { "max_delay_ms": 30000 }
+    },
+    {
+      "name": "可调整参数录像",
+      "type": "camera_record",
+      "device_id": "demo_cam0",
+      "scheduled_at": "2026-09-16 08:02:00",
+      "params": {
+        "type": "demo_adjustable",
+        "resolution": "1080p",
+        "frame_rate_fps": 30
+      },
+      "policy": { "max_delay_ms": 30000 }
+    },
+    {
+      "name": "取回固定参数录像",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-16 08:04:00",
+      "params": { "source": { "action_name": "固定参数录像" } }
+    }
+  ]
+}

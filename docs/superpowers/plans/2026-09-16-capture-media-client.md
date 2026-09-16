@@ -8,7 +8,7 @@
 
 **技术：** TypeScript、React、Node.js、SQLite、Ajv、Vitest、Playwright。
 
-**规格：** [全局拍摄](../specs/camctl/camera-capture.md)、[报告](../specs/camctl/report-format.md)、[客户端浏览](../specs/camctl-client/result-browsing.md)。
+**规格：** [全局拍摄](../../architecture/camera-capture.md)、[报告](../../architecture/report-format.md)、[客户端浏览](../../client/result-browsing.md)。
 
 ## 已确认约束
 
@@ -21,29 +21,29 @@
 
 ## 任务一：公共协议与编辑能力
 
-建议修改 `src/shared/plan.ts`、`action-params.ts`、生成报告类型、`src/domain/reports.ts`、`src/web/Editor.tsx`、`BuiltinFields.tsx`；审计所有 `camera_record` 分支，区分录像专属规则与通用拍摄规则。
+建议修改 `apps/client/src/shared/plan.ts`、`action-params.ts`、生成报告类型、`apps/client/src/domain/reports.ts`、`apps/client/src/web/Editor.tsx`、`BuiltinFields.tsx`；审计所有 `camera_record` 分支，区分录像专属规则与通用拍摄规则。
 
 输入：全局 Schema 和启用能力目录。输出建议接口 `isCameraAction(value: unknown): value is CameraActionType`，由 Schema 的拍摄枚举派生。`ACTION_TYPES` 同样从 Schema 派生；不能复制完整清单。
 
-- [x] 写 `tests/unit/capture.test.ts`：三种拍摄的设备/策略/时间规则、照片和延时来源取回；取消保留的报告通过，未开始携带产物和非法成功组合拒绝。
+- [x] 写 `apps/client/tests/unit/capture.test.ts`：三种拍摄的设备/策略/时间规则、照片和延时来源取回；取消保留的报告通过，未开始携带产物和非法成功组合拒绝。
 
 ```ts
 expect(validatePlan(planWithPhotoAndObtain, photoCapabilities)).toEqual([]);
 expect(() => validateReport(canceledCaptureWithOutputs)).not.toThrow();
 ```
 
-- [x] 执行 `npx vitest run tests/unit/capture.test.ts`，确认当前硬编码仅录像导致失败。
-- [x] 运行 `node --import tsx src/domain/generate-report-types.ts`，更新分类、计划校验、报告语义、设备选择、参数表单、时间/策略必填及取回来源选择。新动作的有限尝试使用已有预算校验，历史只接受合法状态转换。
+- [x] 执行 `npx vitest run apps/client/tests/unit/capture.test.ts`，确认当前硬编码仅录像导致失败。
+- [x] 运行 `node --import tsx apps/client/src/domain/generate-report-types.ts`，更新分类、计划校验、报告语义、设备选择、参数表单、时间/策略必填及取回来源选择。新动作的有限尝试使用已有预算校验，历史只接受合法状态转换。
 - [x] 重跑本文件及 `npm run test:unit`；对旧测试中“本版不支持照片”的前提按新契约更新，保留未知动作拒绝测试。
 - [x] 检查后提交此任务。
 
 ## 任务二：媒体文件接收与读取
 
-建议在 `src/shared/media.ts` 集中定义可内联的图片/视频 MIME 类型；`src/server/files.ts`、`http.ts`、`models.ts` 和前端导入入口使用已有文件流程。内部已有视频存储命名可以保留以保证现存数据可读，不复制数据库和核验状态机。
+建议在 `apps/client/src/shared/media.ts` 集中定义可内联的图片/视频 MIME 类型；`apps/client/src/server/files.ts`、`http.ts`、`models.ts` 和前端导入入口使用已有文件流程。内部已有视频存储命名可以保留以保证现存数据可读，不复制数据库和核验状态机。
 
 输入：完整交付文件名、字节、有效报告。输出：核验状态、读取接口的正确内容类型与原始字节；增加媒体路由时保留原视频路由。未知或不支持内联的类型只能下载，图片也不得跳过 `openVideo` 当前的保存、映射及可读性检查。
 
-- [x] 增加 `tests/integration/media.test.ts`，用 PNG 字节和合法图片报告验证先文件后报告、先报告后文件、错误副本补发、重启读取与响应类型。
+- [x] 增加 `apps/client/tests/integration/media.test.ts`，用 PNG 字节和合法图片报告验证先文件后报告、先报告后文件、错误副本补发、重启读取与响应类型。
 
 ```ts
 expect(response.headers.get('content-type')).toContain('image/png');
@@ -57,7 +57,7 @@ expect(Buffer.from(await response.arrayBuffer())).toEqual(pngBytes);
 
 ## 任务三：动作摘要、分页与图片查看
 
-建议拆出 `src/web/result-model.ts` 派生业务视图和 `MediaResults.tsx` 管理分页与预览；`Records.tsx` 保留动作与计划入口。
+建议拆出 `apps/client/src/web/result-model.ts` 派生业务视图和 `MediaResults.tsx` 管理分页与预览；`Records.tsx` 保留动作与计划入口。
 
 建议纯函数输入为动作、全部计划、本地文件，输出按 `output_id` 聚合的文件与每次交付；取回动作仅聚合自身 deliveries，拍摄动作关联全部有效交付。类型由报告决定，未知归其他文件。摘要计数按产物去重，异常交付不因已有好副本而消失。
 
@@ -84,4 +84,4 @@ await expect(page.locator('img[data-thumbnail]')).toHaveCount(12);
 
 2026-09-16：任务一已提交；任务二、三共同交付。文件错误副本补发通过共用文件流程的既有集成测试验证，新增图片测试补充两种到达顺序、恢复、内容类型与原始字节。实现时按实际组件数据流拆分，没有改变已确认的行为契约。
 
-最终 `npm test`：14 个单元测试文件共 515 项通过，14 个集成测试文件共 217 项通过；类型检查与生产构建通过。桌面与 390px 窄屏的隔离数据验收完成。日常服务已重启并验证数据保留，完整范围见[客户端验证](../../client-verification.md)。
+最终 `npm test`：14 个单元测试文件共 515 项通过，14 个集成测试文件共 217 项通过；类型检查与生产构建通过。桌面与 390px 窄屏的隔离数据验收完成。日常服务已重启并验证数据保留，完整范围见[客户端验证](../../client/verification.md)。

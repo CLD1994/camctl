@@ -1,25 +1,37 @@
 # camctl
 
-camctl 是面向嵌入式 Linux 主机的设备控制 CLI（命令行程序）。用户提交执行计划，由它调度相机录像、管理产物取回和清理，并通过状态报告交回结果。客户端采用个人电脑上的本地网页。
+camctl 项目包含个人电脑客户端、嵌入式 Linux 上的设备控制 CLI（命令行程序）及主程序调用示例。客户端导出计划，主程序交给 camctl 调度设备，再通过文件交接报告与拍摄产物。
 
-仓库包含客户端 MVP（最小可行版本）的本地网页、Node.js 后端及第一版协议规格。客户端通过 JSON 文件交接计划，通过报告与视频导入展示执行结果。真实设备接入另行联调。
+## 组件入口
 
-## 运行客户端
+| 组件 | 技术与责任 | 当前状态 |
+| --- | --- | --- |
+| [客户端](apps/client/README.md) | TypeScript、React、Node.js；计划编辑、报告与媒体导入 | 已实现 MVP |
+| [camctl CLI](apps/camctl/README.md) | Python；调度、设备通信、持久化、产物与报告 | 已定义设计，待实现 |
+| [主程序 demo](apps/host-demo/README.md) | C；供对接方参考的 Linux 进程调用与文件交接示例 | 已定义职责，待实现 |
 
-使用 Node.js 24.16，在仓库根目录执行：
+## 启动客户端
+
+需要 Node.js 24.16。在仓库根目录的 PowerShell 执行：
 
 ```powershell
+New-Item -ItemType Directory -Force data
+$env:CAMCTL_DATA_DIR = (Resolve-Path data).Path
+Set-Location apps/client
 npm ci
 npm run build
-New-Item -ItemType Directory -Force data
 npm start
 ```
 
-打开 [本地客户端](http://localhost:4310)，核对数据目录后显式创建客户端数据。运行、Docker Compose、停机备份与恢复见[客户端操作说明](docs/client-running.md)。
+打开 [本地客户端](http://localhost:4310)。首次使用时核对数据目录，再显式创建客户端数据。已有数据继续使用原目录。Docker、备份与恢复见[客户端运行说明](docs/client/running.md)。
 
-## 设计资料
+## 资料与开发
 
-- 第一次了解项目：从[设计总览](docs/superpowers/specs/2026-09-08-camctl-cli-design.md)开始。
-- 需要完整阅读或评审：[阅读路线与专题索引](docs/superpowers/specs/camctl/reading-guide.md)。
-- 查看计划和报告 JSON：[客户端协议样例](docs/superpowers/specs/camctl/client-protocol-examples.md)。
-- 核对厂商交接依据：[相机交接资料整理](docs/hardware/camera-control-handoff.md)。
+- [全局设计](docs/architecture/README.md)与[阅读路线](docs/architecture/reading-guide.md)。
+- [目录与组件边界](docs/architecture/repository-layout.md)。
+- [公共协议](protocol/README.md)：Schema 与标准样例。
+- [客户端设计](docs/client/README.md)、[CLI 设计入口](docs/camctl/README.md)、[主程序 demo 对接入口](docs/host-demo/README.md)。
+- [完整演示](demos/README.md)、[硬件交接资料](docs/hardware/camera-control-handoff.md)。
+- [跨组件测试](tests/integration/README.md)与[仓库检查脚本](scripts/README.md)。
+
+各组件独立管理依赖与构建。客户端测试在 `apps/client` 执行 `npm test`；根目录不承担 npm 应用入口。日常数据 `data/`、本地验收 `.local/` 和临时资料 `tmp/` 不提交。

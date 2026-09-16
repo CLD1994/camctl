@@ -4,7 +4,7 @@
 
 **执行方式：** 当前 Agent 在现有分支逐项实施，不派遣 subagent。
 
-**规格：** [编辑规则](../specs/camctl/client-editing.md)、[草稿保存与删除](../specs/camctl-client/storage-and-recovery.md)。规格中的状态分类、原值保留和失败语义是硬性契约；下述模块位置与接口是基于当前代码的实施建议，可按实际责任边界调整。
+**规格：** [编辑规则](../../architecture/client-editing.md)、[草稿保存与删除](../../client/storage-and-recovery.md)。规格中的状态分类、原值保留和失败语义是硬性契约；下述模块位置与接口是基于当前代码的实施建议，可按实际责任边界调整。
 
 ## 1. 删除持久化与会话
 

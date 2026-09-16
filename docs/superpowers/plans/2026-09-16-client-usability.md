@@ -8,7 +8,7 @@
 
 **技术：** TypeScript、React、Ajv、Vitest、Playwright。
 
-**规格：** [公共编辑规则](../specs/camctl/client-editing.md)、[设备使用说明](../specs/camctl-client/device-guide.md)。
+**规格：** [公共编辑规则](../../architecture/client-editing.md)、[设备使用说明](../../client/device-guide.md)。
 
 ## 已确认约束
 
@@ -21,10 +21,10 @@
 
 ## 任务一：同源组合推导
 
-建议新增 `src/web/parameter-options.ts`，公开 `parameterOptions(parameter)` 返回可枚举的字段与合法行，或带原因的不可枚举状态；`compatibleValues(catalog, params, field)` 返回与其他已填字段兼容的候选值。
+建议新增 `apps/client/src/web/parameter-options.ts`，公开 `parameterOptions(parameter)` 返回可枚举的字段与合法行，或带原因的不可枚举状态；`compatibleValues(catalog, params, field)` 返回与其他已填字段兼容的候选值。
 
-- [x] 写 `tests/unit/parameter-options.test.ts`：空选择、双向限制、非法组合单字段修正、缺省与 null/false/0、引用与条件、不可枚举及上限。
-- [x] 运行 `npx vitest run tests/unit/parameter-options.test.ts` 确认新行为缺失。
+- [x] 写 `apps/client/tests/unit/parameter-options.test.ts`：空选择、双向限制、非法组合单字段修正、缺省与 null/false/0、引用与条件、不可枚举及上限。
+- [x] 运行 `npx vitest run apps/client/tests/unit/parameter-options.test.ts` 确认新行为缺失。
 - [x] 实现完整候选枚举并使用现有 Ajv 配置校验整个对象；按参数对象缓存结果；不以忽略错误关键词代替完整校验。
 - [x] 同命令验证通过，审计无输入写入、无相机专属规则、无未知到空集合的折叠。
 
@@ -37,7 +37,7 @@ expect(compatibleValues(catalog, {type: "demo", fps: 60}, "resolution")).toEqual
 
 ## 任务二：表单和折叠
 
-建议修改 `src/web/Editor.tsx` 和 `src/web/style.css`，在字段组件统一处理必填、可选、值标签与非法值保留。动作容器统一处理折叠；新增动作展开，删除同步调整显示状态。
+建议修改 `apps/client/src/web/Editor.tsx` 和 `apps/client/src/web/style.css`，在字段组件统一处理必填、可选、值标签与非法值保留。动作容器统一处理折叠；新增动作展开，删除同步调整显示状态。
 
 - [x] 更新已有“通过表单选择非法组合”的集成场景为选项联动契约；新增 JSON 非法输入保留与修正场景。
 - [x] 新增折叠保留未完成内容、删除后折叠对应、必填无省略和字符串选项显示的浏览器断言；运行定向集成测试观察失败。
@@ -51,7 +51,7 @@ await check(page.getByLabel("帧率 (frame_rate_fps)").locator("option")).toHave
 
 ## 任务三：设备指南与整体交付
 
-建议新增 `src/web/DeviceGuide.tsx`，接收当前已启用能力说明；App 保留重新加载和失败处理，展示交给指南组件。复用任务一的目录，不在说明页另写规则。
+建议新增 `apps/client/src/web/DeviceGuide.tsx`，接收当前已启用能力说明；App 保留重新加载和失败处理，展示交给指南组件。复用任务一的目录，不在说明页另写规则。
 
 - [x] 新增浏览器场景验证任务卡片、合法组合表、折叠技术详情与空状态；观察旧页面不满足契约。
 - [x] 实现指南布局与响应式样式，使用说明原有名称和描述，不编造真实设备能力。
