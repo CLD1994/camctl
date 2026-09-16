@@ -46,8 +46,10 @@ export function classifyAppend(
       JSON.stringify({ ...after, actions: after.actions.slice(0, -1) }) ===
         JSON.stringify(before) &&
       JSON.stringify(appended) === JSON.stringify(requested) &&
-      JSON.stringify(actual.content.pending ?? {}) ===
-        JSON.stringify(baseline.content.pending ?? {})
+      sameContent(
+        { ...actual.content, text: baseline.content.text },
+        baseline.content,
+      )
     )
       return "appended";
   } catch {

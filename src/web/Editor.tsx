@@ -25,6 +25,7 @@ import { actionLabel, Issues, ErrorBox } from "./common";
 import { Field, JsonField } from "./Fields";
 import { BuiltinFields } from "./BuiltinFields";
 import { deviceOptions } from "./device-options";
+import { canSwitchActionType, switchActionType } from "./action-drafts";
 import {
   parameterOptions,
   compatibleValues,
@@ -201,14 +202,25 @@ export function Editor(props: Props) {
         {json ? (
           <>
             <label className="field">
-              计划 JSON 文本
+              <span>
+                计划 JSON 文本 <span className="required">必填</span>
+              </span>
               <textarea
                 className="code-input"
                 data-testid="draft-json-input"
                 spellCheck={false}
                 readOnly={Object.keys(content.pending ?? {}).length > 0}
                 value={content.text}
-                onChange={(e) => change(editPlanText(content, e.target.value))}
+                onChange={(e) => {
+                  if (
+                    Object.keys(content.actionVariants ?? {}).length &&
+                    !window.confirm(
+                      "修改整份计划 JSON 将以当前计划替换编辑结构，并清除其他动作类型暂存的内容。是否继续？",
+                    )
+                  )
+                    return;
+                  change(editPlanText(content, e.target.value, true));
+                }}
               />
             </label>
             {Object.keys(content.pending ?? {}).length > 0 && (
@@ -221,7 +233,9 @@ export function Editor(props: Props) {
         ) : plan ? (
           <>
             <label className="field">
-              计划名称
+              <span>
+                计划名称 <span className="required">必填</span>
+              </span>
               <input
                 aria-label="计划名称"
                 value={typeof plan.name === "string" ? plan.name : ""}
@@ -515,7 +529,9 @@ function ActionEditor(
       <div hidden={props.collapsed}>
         <div className="form-grid">
           <label className="field">
-            动作名称
+            <span>
+              动作名称 <span className="required">必填</span>
+            </span>
             <input
               aria-label="动作名称"
               value={typeof action.name === "string" ? action.name : ""}
@@ -523,13 +539,21 @@ function ActionEditor(
             />
           </label>
           <label className="field">
-            动作类型
+            <span>
+              动作类型 <span className="required">必填</span>
+            </span>
             <select
               aria-label="动作类型"
               value={typeof action.type === "string" ? action.type : ""}
-              onChange={(e) =>
-                put("type", e.target.value, e.target.value === "")
-              }
+              disabled={!canSwitchActionType(content, index)}
+              onChange={(e) => {
+                change(
+                  switchActionType(content, index, e.target.value || undefined),
+                );
+                setJson(false);
+                setError("");
+                setNotice("");
+              }}
             >
               <option value="">请选择动作类型</option>
               {action.type !== undefined &&
@@ -548,7 +572,9 @@ function ActionEditor(
           </label>
           {showDevice && (
             <label className="field">
-              目标设备
+              <span>
+                目标设备 <span className="required">必填</span>
+              </span>
               <select
                 aria-label="目标设备"
                 value={action.device_id ?? ""}
@@ -636,7 +662,9 @@ function ActionEditor(
           <>
             <div className="form-grid">
               <label className="field">
-                参数类型
+                <span>
+                  参数类型 <span className="required">必填</span>
+                </span>
                 <select
                   aria-label="参数类型"
                   value={
@@ -705,6 +733,7 @@ function ActionEditor(
                 content={content}
                 path={[...base, "params"]}
                 label="参数 JSON 文本"
+                required
                 change={change}
               />
             ) : parameter ? (
@@ -789,7 +818,9 @@ function ActionEditor(
               </div>
               <div className="form-grid">
                 <label className="field">
-                  预设名称
+                  <span>
+                    预设名称 <span className="required">必填</span>
+                  </span>
                   <input
                     aria-label="预设名称"
                     value={presetName}
@@ -872,6 +903,7 @@ function ActionEditor(
             content={content}
             path={[...base, "policy"]}
             label="业务策略 JSON"
+            required={action.type === "camera_record"}
             change={change}
           />
           {action.type !== "camera_record" &&

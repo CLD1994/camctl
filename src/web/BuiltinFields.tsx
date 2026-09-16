@@ -52,6 +52,7 @@ export function BuiltinFields({
       )
     : undefined;
   const group = isObject(reference) && Object.hasOwn(reference, "group");
+  const outputFilter = mode?.id === "action_instance_id";
   const basis = reports.filter((r) => isSyncBasis(r, coverage));
   const reportMode =
     value === undefined || (params && Object.keys(params).length === 0)
@@ -79,6 +80,7 @@ export function BuiltinFields({
             content={content}
             path={path}
             label="动作参数 JSON"
+            required={type !== "report_status"}
             change={change}
           />
           {structural && (
@@ -117,7 +119,7 @@ export function BuiltinFields({
                 切换{type === "obtain_action_outputs" ? "来源" : "目标"}
                 会清空原引用，需重新填写。
                 {type === "obtain_action_outputs" &&
-                  "改为组来源时会同时清除指定产物筛选。"}
+                  "只有指定动作实例可选择产物筛选，切换到其他来源时会清除筛选。"}
               </p>
               <label className="field">
                 <span>
@@ -141,7 +143,7 @@ export function BuiltinFields({
                     );
                     if (
                       type === "obtain_action_outputs" &&
-                      Object.hasOwn(selected.fields, "group")
+                      selected.id !== "action_instance_id"
                     )
                       next = setValue(
                         next,
@@ -207,7 +209,7 @@ export function BuiltinFields({
                       取回来源组的正式产物，不支持按产物 ID 筛选。
                     </p>
                   ) : (
-                    mode && (
+                    outputFilter && (
                       <label className="optional-field">
                         <input
                           type="checkbox"
@@ -224,24 +226,29 @@ export function BuiltinFields({
                       </label>
                     )
                   )}
-                  {group && params && Object.hasOwn(params, "output_ids") && (
-                    <div className="notice warning">
-                      组来源不能指定产物筛选，原值：
-                      <pre>{JSON.stringify(params.output_ids, null, 2)}</pre>
-                      <button
-                        onClick={() => put("output_ids", undefined, true)}
-                      >
-                        移除不适用的产物筛选
-                      </button>
-                    </div>
-                  )}
-                  {!group && params && Object.hasOwn(params, "output_ids") && (
-                    <OutputIds
-                      content={content}
-                      path={[...path, "output_ids"]}
-                      change={change}
-                    />
-                  )}
+                  {!outputFilter &&
+                    params &&
+                    Object.hasOwn(params, "output_ids") && (
+                      <div className="notice warning">
+                        此来源不提供产物筛选表单；已有输入保留，可通过参数 JSON
+                        核对或移除。原值：
+                        <pre>{JSON.stringify(params.output_ids, null, 2)}</pre>
+                        <button
+                          onClick={() => put("output_ids", undefined, true)}
+                        >
+                          移除不适用的产物筛选
+                        </button>
+                      </div>
+                    )}
+                  {outputFilter &&
+                    params &&
+                    Object.hasOwn(params, "output_ids") && (
+                      <OutputIds
+                        content={content}
+                        path={[...path, "output_ids"]}
+                        change={change}
+                      />
+                    )}
                 </>
               )}
             </>
@@ -411,6 +418,7 @@ function OutputIds({
           content={content}
           path={path}
           label="产物列表 JSON"
+          required
           change={change}
         />
         <button onClick={() => change(setValue(content, path, []))}>
@@ -421,6 +429,9 @@ function OutputIds({
   const ids = value ?? [];
   return (
     <div className="output-id-list">
+      <p>
+        产物 ID <span className="required">必填</span>
+      </p>
       {ids.map((id, index) => (
         <div className="form-grid" key={index}>
           <ReferenceField

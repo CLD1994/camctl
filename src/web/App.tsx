@@ -564,6 +564,12 @@ export function App() {
                 value={session.recoveryContent!.text}
               />
               <Facts value={session.recoveryContent!.pending} />
+              {Object.keys(session.recoveryContent!.actionVariants ?? {})
+                .length > 0 && (
+                <p>
+                  同时保留了其他动作类型的编辑内容，保存为新草稿后可切换查看。
+                </p>
+              )}
               <button
                 disabled={busy}
                 onClick={() =>

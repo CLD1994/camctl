@@ -1,5 +1,9 @@
 import { expect, it, vi } from "vitest";
-import { DraftSession, type DraftTransport } from "../../src/web/session";
+import {
+  DraftSession,
+  sameContent,
+  type DraftTransport,
+} from "../../src/web/session";
 import type { Draft, DraftContent } from "../../src/server/models";
 const draft = (): Draft => ({
   id: "d1",
@@ -8,6 +12,57 @@ const draft = (): Draft => ({
   createdAt: "2026-01-01 00:00:00",
   updatedAt: "2026-01-01 00:00:00",
 });
+it("当前文本相同时其他类型内容的变化仍需保存", () => {
+  const first: DraftContent = {
+    text: "{}",
+    actionVariants: {
+      "0": [{ type: "camera_record", fields: { device_id: "a" }, pending: {} }],
+    },
+  };
+  const next = structuredClone(first);
+  next.actionVariants!["0"][0].fields.device_id = "b";
+  expect(sameContent(first, next)).toBe(false);
+  expect(sameContent(first, structuredClone(first))).toBe(true);
+});
+it.each([true, false])(
+  "保存响应丢失时核实类型内容是否完整：%s",
+  async (complete) => {
+    const content: DraftContent = {
+      text: "{}",
+      actionVariants: {
+        "0": [
+          {
+            type: "camera_record",
+            fields: { device_id: "cam" },
+            pending: { "/params": { kind: "json", text: "{" } },
+          },
+        ],
+      },
+    };
+    let actual = draft();
+    const session = new DraftSession(
+      draft(),
+      {
+        save: async (_id, revision, value) => {
+          actual = {
+            ...draft(),
+            revision: revision + 1,
+            content: complete ? structuredClone(value) : { text: value.text },
+          };
+          throw new Error("响应丢失");
+        },
+        read: async () => actual,
+      },
+      () => {},
+    );
+    session.edit(content);
+    if (complete) await session.flush();
+    else await expect(session.flush()).rejects.toThrow();
+    expect(session.saved).toBe(complete);
+    expect(session.content).toEqual(content);
+    if (!complete) expect(session.conflict).toEqual(actual);
+  },
+);
 function deferred<T>() {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => (resolve = r));

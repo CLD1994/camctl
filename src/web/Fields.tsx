@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { DraftContent } from "../server/models";
 import {
   parseDraft,
@@ -15,17 +14,21 @@ export function JsonField({
   path,
   label,
   change,
+  required = false,
 }: {
   content: DraftContent;
   path: Path;
   label: string;
   change: (c: DraftContent) => void;
+  required?: boolean;
 }) {
   const value = valueAt(parseDraft(content), path),
     pending = content.pending?.[pointer(path)];
   return (
     <label className="field">
-      {label}
+      <span>
+        {label} {required && <span className="required">必填</span>}
+      </span>
       <textarea
         aria-label={label}
         className="code-input compact"
@@ -81,8 +84,6 @@ export function Field({
     label = `${typeof schema.title === "string" ? schema.title : name} (${name})`;
   const set = (v: unknown, omit = false) =>
     change(setValue(content, path, v, omit));
-  const [enabled, setEnabled] = useState(false);
-  const active = required || enabled || value !== undefined || !!pending;
   const declared =
     choices ?? (Array.isArray(schema.enum) ? schema.enum : undefined);
   const enumeration = jsonChoices ? undefined : declared;
@@ -111,172 +112,162 @@ export function Field({
         : false);
   return (
     <div className="field">
-      {!required && (
-        <label className="optional-field">
-          <input
-            type="checkbox"
-            aria-label={`填写${label}`}
-            checked={active}
-            onChange={(e) => {
-              setEnabled(e.target.checked);
-              if (!e.target.checked) set(undefined, true);
-            }}
-          />
+      <>
+        <label>
           <span>
-            填写{typeof schema.title === "string" ? schema.title : name}
+            {typeof schema.title === "string" ? schema.title : name}{" "}
+            {required && <span className="required">必填</span>}{" "}
+            <small className="field-key">{name}</small>
           </span>
-          <small>可选</small>
-        </label>
-      )}
-      {active && (
-        <>
-          <label>
-            <span>
-              {typeof schema.title === "string" ? schema.title : name}{" "}
-              {required && <span className="required">必填</span>}{" "}
-              <small className="field-key">{name}</small>
-            </span>
-            {unsupportedChoice ? (
-              <textarea
-                aria-label={label}
-                readOnly={pendingBlocks(content, path)}
-                value={
-                  pending?.text ??
-                  (value === undefined ? "" : JSON.stringify(value, null, 2))
-                }
-                onChange={(e) =>
-                  change(editValue(content, path, e.target.value, "json"))
-                }
-              />
-            ) : enumeration ? (
-              <select
-                aria-label={label}
-                disabled={choicesBlocked || pendingBlocks(content, path)}
-                value={
-                  value === undefined
-                    ? ""
-                    : matched !== undefined && matched >= 0
-                      ? String(matched)
-                      : "invalid"
-                }
-                onChange={(e) =>
-                  e.target.value === ""
-                    ? set(undefined, true)
-                    : set(enumeration[Number(e.target.value)])
-                }
-              >
-                <option value="">请选择</option>
-                {value !== undefined && matched === -1 && (
-                  <option value="invalid" disabled>
-                    {optionLabel(value)}（待修正）
-                  </option>
-                )}
-                {enumeration.map(
-                  (v, i) =>
-                    (!allowed || allowed.some((a) => sameValue(a, v))) && (
-                      <option key={i} value={i}>
-                        {optionLabel(v)}
-                      </option>
-                    ),
-                )}
-              </select>
-            ) : type === "boolean" ? (
-              <select
-                aria-label={label}
-                disabled={pendingBlocks(content, path)}
-                value={
-                  value === undefined
-                    ? ""
-                    : value === true
-                      ? "true"
-                      : value === false
-                        ? "false"
-                        : "invalid"
-                }
-                onChange={(e) =>
-                  e.target.value === ""
-                    ? set(undefined, true)
-                    : set(e.target.value === "true")
-                }
-              >
-                <option value="">请选择</option>
-                <option value="true">是 · true</option>
-                <option value="false">否 · false</option>
-                {value !== undefined && typeof value !== "boolean" && (
-                  <option value="invalid" disabled>
-                    {optionLabel(value)}（待修正）
-                  </option>
-                )}
-              </select>
-            ) : type === "string" ? (
-              <input
-                aria-label={label}
-                readOnly={pendingBlocks(content, path)}
-                value={typeof value === "string" ? value : ""}
-                onChange={(e) => set(e.target.value)}
-              />
-            ) : type === "number" || type === "integer" ? (
-              <input
-                aria-label={label}
-                readOnly={pendingBlocks(content, path)}
-                inputMode="decimal"
-                value={
-                  pending?.text ?? (value === undefined ? "" : String(value))
-                }
-                onChange={(e) =>
-                  change(editValue(content, path, e.target.value, "number"))
-                }
-              />
-            ) : (
-              <textarea
-                aria-label={label}
-                readOnly={pendingBlocks(content, path)}
-                value={
-                  pending?.text ??
-                  (value === undefined ? "" : JSON.stringify(value, null, 2))
-                }
-                onChange={(e) =>
-                  change(editValue(content, path, e.target.value, "json"))
-                }
-              />
-            )}
-          </label>
-          {showRaw && (
-            <small className="danger-text">
-              原值 {JSON.stringify(value)} 无法用此控件表示，请重新填写或在 JSON
-              中修正。
-            </small>
-          )}
-          {enumeration && allowed?.length === 0 && !choicesBlocked && (
-            <small className="danger-text">
-              没有兼容选项，请先清空冲突字段或在参数 JSON 中修正。
-            </small>
-          )}
-          {enumeration && value !== undefined && matched === -1 && (
-            <small className="danger-text">
-              此值与当前参数不兼容，原值已保留；请选择兼容值或清空后重新选择。
-            </small>
-          )}
-          <small>
-            {String(schema.description ?? "")}
-            {schema.default !== undefined
-              ? ` 默认值说明：${optionLabel(schema.default)}。`
-              : ""}
-            {schema.minimum !== undefined ? ` 最小值 ${schema.minimum}。` : ""}
-            {schema.maximum !== undefined ? ` 最大值 ${schema.maximum}。` : ""}
-          </small>
-          {pending && <small className="danger-text">输入尚未完成</small>}
-          {nullable && !enumeration && value !== null && (
-            <button
-              className="inline"
-              disabled={pendingBlocks(content, path)}
-              onClick={() => set(null)}
+          {unsupportedChoice ? (
+            <textarea
+              aria-label={label}
+              readOnly={pendingBlocks(content, path)}
+              value={
+                pending?.text ??
+                (value === undefined ? "" : JSON.stringify(value, null, 2))
+              }
+              onChange={(e) =>
+                change(editValue(content, path, e.target.value, "json"))
+              }
+            />
+          ) : enumeration ? (
+            <select
+              aria-label={label}
+              disabled={choicesBlocked || pendingBlocks(content, path)}
+              value={
+                value === undefined
+                  ? ""
+                  : matched !== undefined && matched >= 0
+                    ? String(matched)
+                    : "invalid"
+              }
+              onChange={(e) =>
+                e.target.value === ""
+                  ? set(undefined, true)
+                  : set(enumeration[Number(e.target.value)])
+              }
             >
-              设为 null
-            </button>
+              <option value="">请选择</option>
+              {value !== undefined && matched === -1 && (
+                <option value="invalid" disabled>
+                  {optionLabel(value)}（待修正）
+                </option>
+              )}
+              {enumeration.map(
+                (v, i) =>
+                  (!allowed || allowed.some((a) => sameValue(a, v))) && (
+                    <option key={i} value={i}>
+                      {optionLabel(v)}
+                    </option>
+                  ),
+              )}
+            </select>
+          ) : type === "boolean" ? (
+            <select
+              aria-label={label}
+              disabled={pendingBlocks(content, path)}
+              value={
+                value === undefined
+                  ? ""
+                  : value === true
+                    ? "true"
+                    : value === false
+                      ? "false"
+                      : "invalid"
+              }
+              onChange={(e) =>
+                e.target.value === ""
+                  ? set(undefined, true)
+                  : set(e.target.value === "true")
+              }
+            >
+              <option value="">请选择</option>
+              <option value="true">是 · true</option>
+              <option value="false">否 · false</option>
+              {value !== undefined && typeof value !== "boolean" && (
+                <option value="invalid" disabled>
+                  {optionLabel(value)}（待修正）
+                </option>
+              )}
+            </select>
+          ) : type === "string" ? (
+            <input
+              aria-label={label}
+              readOnly={pendingBlocks(content, path)}
+              value={typeof value === "string" ? value : ""}
+              onChange={(e) => set(e.target.value)}
+            />
+          ) : type === "number" || type === "integer" ? (
+            <input
+              aria-label={label}
+              readOnly={pendingBlocks(content, path)}
+              inputMode="decimal"
+              value={
+                pending?.text ?? (value === undefined ? "" : String(value))
+              }
+              onChange={(e) =>
+                change(editValue(content, path, e.target.value, "number"))
+              }
+            />
+          ) : (
+            <textarea
+              aria-label={label}
+              readOnly={pendingBlocks(content, path)}
+              value={
+                pending?.text ??
+                (value === undefined ? "" : JSON.stringify(value, null, 2))
+              }
+              onChange={(e) =>
+                change(editValue(content, path, e.target.value, "json"))
+              }
+            />
           )}
-        </>
-      )}
+        </label>
+        {showRaw && (
+          <small className="danger-text">
+            原值 {JSON.stringify(value)} 无法用此控件表示，请重新填写或在 JSON
+            中修正。
+          </small>
+        )}
+        {enumeration && allowed?.length === 0 && !choicesBlocked && (
+          <small className="danger-text">
+            没有兼容选项，请先清空冲突字段或在参数 JSON 中修正。
+          </small>
+        )}
+        {enumeration && value !== undefined && matched === -1 && (
+          <small className="danger-text">
+            此值与当前参数不兼容，原值已保留；请选择兼容值或清空后重新选择。
+          </small>
+        )}
+        <small>
+          {String(schema.description ?? "")}
+          {schema.default !== undefined
+            ? ` 默认值说明：${optionLabel(schema.default)}。`
+            : ""}
+          {schema.minimum !== undefined ? ` 最小值 ${schema.minimum}。` : ""}
+          {schema.maximum !== undefined ? ` 最大值 ${schema.maximum}。` : ""}
+        </small>
+        {pending && <small className="danger-text">输入尚未完成</small>}
+        {!required && (value !== undefined || pending) && (
+          <button
+            className="inline"
+            aria-label={`清空${label}`}
+            onClick={() => set(undefined, true)}
+          >
+            清空（不填写）
+          </button>
+        )}
+        {nullable && !enumeration && value !== null && (
+          <button
+            className="inline"
+            disabled={pendingBlocks(content, path)}
+            onClick={() => set(null)}
+          >
+            设为 null
+          </button>
+        )}
+      </>
     </div>
   );
 }

@@ -59,6 +59,141 @@ async function setup(capabilityText?: string) {
   await page.getByTestId("initialize-button").click();
   return { page, app, directory };
 }
+it("取回来源只为指定动作实例展示附加产物筛选", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  await page
+    .getByLabel("动作类型", { exact: true })
+    .selectOption("obtain_action_outputs");
+  const source = page.getByLabel("取回来源", { exact: true });
+  for (const mode of ["action_name", "group", "plan_group"]) {
+    await source.selectOption(mode);
+    await check(page.getByLabel("指定产物筛选")).toHaveCount(0);
+  }
+  await source.selectOption("action_instance_id");
+  await page.getByLabel("指定产物筛选").check();
+  await page.getByRole("button", { name: "添加产物 ID", exact: true }).click();
+  await page.getByLabel("产物 ID 1", { exact: true }).fill("o-1");
+  await source.selectOption("action_name");
+  await check(page.getByLabel("指定产物筛选")).toHaveCount(0);
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
+          ?.params,
+    )
+    .toEqual({ source: { action_name: "" } });
+}, 20000);
+it("类型独立编辑在刷新后恢复，不要求移除另一类型参数", async () => {
+  const { page } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  const type = page.getByLabel("动作类型", { exact: true });
+  await type.selectOption("camera_record");
+  await page.getByLabel("目标设备", { exact: true }).selectOption("demo_cam0");
+  await page.getByLabel("参数类型", { exact: true }).selectOption("demo_fixed");
+  await page
+    .getByLabel("最大允许延迟 (max_delay_ms)", { exact: true })
+    .fill("1e");
+  await type.selectOption("obtain_action_outputs");
+  await check(
+    page.getByRole("button", { name: /移除不适用|省略设备/ }),
+  ).toHaveCount(0);
+  await page.getByLabel("取回来源").selectOption("action_instance_id");
+  await page.getByLabel("来源动作实例 ID").fill("a-1");
+  await type.selectOption("report_status");
+  await page.getByLabel("报告范围").selectOption("full");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await type.selectOption("camera_record");
+  await check(
+    page.getByLabel("最大允许延迟 (max_delay_ms)", { exact: true }),
+  ).toHaveValue("1e");
+  await check(page.getByLabel("目标设备", { exact: true })).toHaveValue(
+    "demo_cam0",
+  );
+  await type.selectOption("obtain_action_outputs");
+  await check(page.getByLabel("来源动作实例 ID")).toHaveValue("a-1");
+  await type.selectOption("report_status");
+  await check(page.getByLabel("报告范围")).toHaveValue("full");
+  await page.getByTestId("export-button").click();
+  await check(page.getByTestId("save-status")).toHaveCount(0);
+}, 20000);
+it("必填标签覆盖公共字段，普通选填直接显示且可清空", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  await page
+    .getByLabel("动作类型", { exact: true })
+    .selectOption("camera_record");
+  for (const label of [
+    "计划名称",
+    "动作名称",
+    "动作类型",
+    "目标设备",
+    "参数类型",
+    "执行时间",
+  ]) {
+    await check(
+      page
+        .getByLabel(label, { exact: true })
+        .locator("xpath=ancestor::label[1]")
+        .locator(".required"),
+    ).toHaveCount(1);
+  }
+  const group = page.getByLabel("动作组 (group)", { exact: true });
+  await check(group).toBeVisible();
+  await check(page.getByRole("checkbox", { name: /^填写/ })).toHaveCount(0);
+  await group.fill("G");
+  await page
+    .getByRole("button", { name: "清空动作组 (group)", exact: true })
+    .click();
+  await check(group).toBeVisible();
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0],
+    )
+    .toEqual({ name: "动作 1", type: "camera_record" });
+}, 20000);
+it("查看整份 JSON 保留类型内容，替换时确认且取消不丢失", async () => {
+  const { page, app } = await setup();
+  const content = {
+    text: JSON.stringify({
+      name: "计划",
+      actions: [{ name: "报告", type: "report_status" }],
+    }),
+    actionVariants: {
+      "0": [
+        {
+          type: "camera_record",
+          fields: { params: { type: "demo_fixed" } },
+          pending: {},
+        },
+      ],
+    },
+  };
+  const draft = app.createDraft(content);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await page.getByTestId("draft-json-toggle").click();
+  expect(app.draft(draft.id).content).toEqual(content);
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page
+    .getByTestId("draft-json-input")
+    .fill('{"name":"替换","actions":[]}');
+  await check(page.getByTestId("draft-json-input")).toHaveValue(content.text);
+  expect(app.draft(draft.id).content).toEqual(content);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByTestId("draft-json-input")
+    .fill('{"name":"替换","actions":[]}');
+  await check
+    .poll(() => app.draft(draft.id).content)
+    .toEqual({ text: '{"name":"替换","actions":[]}', pending: {} });
+}, 20000);
 it.each([
   ["空设备目录", '{"devices":[]}'],
   [
@@ -207,9 +342,14 @@ it("内置取回表单区分所属组与来源组并保存四种引用", async (
   );
   await page.getByTestId("draft-json-toggle").click();
   const action = page.locator(".action-card").nth(1);
-  await check(action.getByLabel("填写动作组 (group)")).toHaveCount(0);
+  await check(action.getByLabel("动作组 (group)", { exact: true })).toHaveCount(
+    0,
+  );
   await action.getByRole("button", { name: "移除不适用的动作组" }).click();
   await check(action.getByLabel("来源动作名称")).toHaveValue("录像");
+  await check(action.getByLabel("指定产物筛选")).toHaveCount(0);
+  await action.getByLabel("取回来源").selectOption("action_instance_id");
+  await action.getByLabel("来源动作实例 ID").fill("a-1");
   await action.getByLabel("指定产物筛选").check();
   await action.getByRole("button", { name: "添加产物 ID" }).click();
   await action.getByLabel("产物 ID 1", { exact: true }).fill("out-1");
@@ -341,7 +481,7 @@ it("报告表单保留缺省与非法原值，完整同步不携带旧起点", a
   await page.getByTestId("export-button").click();
   await check.poll(() => app.store.all("requests").length).toBe(1);
 }, 20000);
-it("动作类型切换保留原输入并可在表单清除不适用设备策略和时间", async () => {
+it("动作类型独立保存设备策略且共用无效时间仍需修正", async () => {
   const { page, app } = await setup();
   const original = {
     name: "录像",
@@ -359,11 +499,10 @@ it("动作类型切换保留原输入并可在表单清除不适用设备策略�
   await page.getByLabel("动作类型").selectOption("report_status");
   await check
     .poll(() => JSON.parse(app.draft(draft.id).content.text).actions[0])
-    .toEqual({ ...original, type: "report_status" });
-  await page.getByRole("button", { name: "省略设备字段", exact: true }).click();
-  await page
-    .getByRole("button", { name: "移除不适用的业务策略", exact: true })
-    .click();
+    .toEqual({ name: "录像", type: "report_status", scheduled_at: null });
+  await check(
+    page.getByRole("button", { name: /省略设备字段|移除不适用的业务策略/ }),
+  ).toHaveCount(0);
   await page
     .getByRole("button", { name: "不指定执行时间", exact: true })
     .click();
@@ -918,23 +1057,11 @@ it("普通字段保留缺省和显式空值，重载说明不写入Schema默认�
   await page.getByLabel("参数类型").selectOption("demo_fixed");
   await check(
     page.getByRole("checkbox", { name: "填写次数 (count)", exact: true }),
-  ).not.toBeChecked();
-  await page
-    .getByRole("checkbox", { name: "填写次数 (count)", exact: true })
-    .check();
+  ).toHaveCount(0);
   await check(page.getByLabel("次数 (count)", { exact: true })).toHaveValue("");
-  await page
-    .getByRole("checkbox", { name: "填写启用 (enabled)", exact: true })
-    .check();
   await page.getByLabel("启用 (enabled)", { exact: true }).fill("false");
   await page.getByLabel("次数 (count)", { exact: true }).fill("0");
-  await page
-    .getByRole("checkbox", { name: "填写备注 (note)", exact: true })
-    .check();
   await page.getByRole("button", { name: "设为 null", exact: true }).click();
-  await page
-    .getByRole("checkbox", { name: "填写选项 (choice)", exact: true })
-    .check();
   await page.getByLabel("选项 (choice)", { exact: true }).fill('""');
   await check(page.getByTestId("save-status")).toContainText("已保存");
   const draft = app.store.all<Draft>("drafts")[0];

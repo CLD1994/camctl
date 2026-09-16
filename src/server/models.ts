@@ -1,7 +1,16 @@
+export const DRAFT_COMMON_ACTION_FIELDS = ["name", "scheduled_at"] as const;
 export interface DraftContent {
   text: string;
   /** 尚不能形成 JSON 值的输入，随草稿保存，存在时禁止导出。 */
   pending?: Record<string, { kind: "number" | "json"; text: string }>;
+  /** 非当前动作类型的编辑内容；键为动作下标，不进入执行协议。 */
+  actionVariants?: Record<string, ActionVariant[]>;
+}
+export interface ActionVariant {
+  type?: unknown;
+  fields: Record<string, unknown>;
+  /** 相对于动作对象的 JSON Pointer。 */
+  pending: NonNullable<DraftContent["pending"]>;
 }
 export interface Draft {
   id: string;

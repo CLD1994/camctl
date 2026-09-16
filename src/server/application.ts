@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Store } from "./database";
 import {
   AppError,
+  DRAFT_COMMON_ACTION_FIELDS,
   errorMessage,
   type Draft,
   type DraftContent,
@@ -85,6 +86,45 @@ export class Application {
         ))
     )
       throw new AppError("invalid_content", "未完成输入格式不正确");
+    if (content.actionVariants !== undefined) {
+      const fail = () => {
+        throw new AppError("invalid_content", "动作类型编辑资料格式不正确");
+      };
+      if (!object(content.actionVariants)) fail();
+      for (const [index, variants] of Object.entries(content.actionVariants)) {
+        if (
+          !/^(0|[1-9]\d*)$/.test(index) ||
+          !Number.isSafeInteger(Number(index)) ||
+          !Array.isArray(variants)
+        )
+          fail();
+        for (const variant of variants) {
+          if (
+            !object(variant) ||
+            !object(variant.fields) ||
+            !object(variant.pending) ||
+            Object.keys(variant).some(
+              (key) => !["type", "fields", "pending"].includes(key),
+            ) ||
+            Object.keys(variant.fields).some((key) =>
+              [...DRAFT_COMMON_ACTION_FIELDS, "type"].includes(key),
+            ) ||
+            Object.entries(variant.pending).some(
+              ([key, value]) =>
+                !/^\/(?:[^~]|~[01])*$/.test(key) ||
+                DRAFT_COMMON_ACTION_FIELDS.some(
+                  (field) =>
+                    key === `/${field}` || key.startsWith(`/${field}/`),
+                ) ||
+                !object(value) ||
+                !["number", "json"].includes(String(value.kind)) ||
+                typeof value.text !== "string",
+            )
+          )
+            fail();
+        }
+      }
+    }
   }
   createDraft(
     content: DraftContent = {

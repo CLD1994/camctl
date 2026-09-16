@@ -7,7 +7,11 @@ import {
   localToUtc,
   recordsFor,
   valueAt,
+  setValue,
+  editPlanText,
+  appendDraftAction,
 } from "../../src/web/editing";
+import { switchActionType } from "../../src/web/action-drafts";
 import type { DraftContent, ExportedRequest } from "../../src/server/models";
 const content = (): DraftContent => ({
   text: JSON.stringify({
@@ -20,6 +24,94 @@ const content = (): DraftContent => ({
       { name: "B", params: { type: "fixed" } },
     ],
   }),
+});
+it("类型切换隔离字段并恢复未完成输入，共用名称和时间", () => {
+  const initial: DraftContent = {
+    text: JSON.stringify({
+      name: "计划",
+      actions: [
+        {
+          name: "A",
+          type: "camera_record",
+          scheduled_at: "2026-09-16 04:00:00",
+          device_id: "cam",
+          group: "G",
+          params: { type: "fixed" },
+          policy: { max_delay_ms: 0 },
+          extra: null,
+        },
+      ],
+    }),
+    pending: {
+      "/actions/0/policy/max_delay_ms": { kind: "number", text: "1e" },
+    },
+  };
+  let next = switchActionType(initial, 0, "report_status");
+  expect(parseDraft(next).actions[0]).toEqual({
+    name: "A",
+    type: "report_status",
+    scheduled_at: "2026-09-16 04:00:00",
+  });
+  expect(next.pending).toEqual({});
+  next = setValue(next, ["actions", 0, "name"], "改名");
+  next = setValue(next, ["actions", 0, "params"], { scope: "full" });
+  next = switchActionType(next, 0, "camera_record");
+  expect(parseDraft(next).actions[0]).toEqual({
+    ...parseDraft(initial).actions[0],
+    name: "改名",
+  });
+  expect(next.pending).toEqual(initial.pending);
+  expect(
+    parseDraft(switchActionType(next, 0, "report_status")).actions[0].params,
+  ).toEqual({ scope: "full" });
+});
+it.each([undefined, "future", null, 42, { kind: "unknown" }])(
+  "保留未选择或未知类型 %j 的独立输入",
+  (type) => {
+    const initial: DraftContent = {
+      text: JSON.stringify({
+        name: "P",
+        actions: [
+          { name: "A", ...(type === undefined ? {} : { type }), params: false },
+        ],
+      }),
+    };
+    const next = switchActionType(initial, 0, "report_status");
+    expect(parseDraft(switchActionType(next, 0, type)).actions).toEqual(
+      parseDraft(initial).actions,
+    );
+  },
+);
+it("选择当前类型不修改草稿", () => {
+  const initial = content();
+  expect(switchActionType(initial, 0, undefined)).toEqual(initial);
+});
+it("整个动作未完成时拒绝切换而不丢弃原文", () => {
+  const initial = editValue(content(), ["actions", 0], "{", "json");
+  expect(() => switchActionType(initial, 0, "report_status")).toThrow(
+    /整个动作/,
+  );
+  expect(initial.pending?.["/actions/0"]?.text).toBe("{");
+});
+it("删除前项和追加新动作不使类型内容串位", () => {
+  let next = switchActionType(content(), 1, "report_status");
+  next = removeAction(next, 0);
+  next = appendDraftAction(next, { name: "新动作" });
+  expect(parseDraft(switchActionType(next, 0, undefined)).actions[0]).toEqual({
+    name: "B",
+    params: { type: "fixed" },
+  });
+  expect(
+    parseDraft(switchActionType(next, 1, "report_status")).actions[1],
+  ).toEqual({ name: "新动作", type: "report_status" });
+});
+it("整份 JSON 替换必须明确允许清除其他类型内容", () => {
+  const initial = switchActionType(content(), 0, "report_status");
+  expect(() => editPlanText(initial, '{"name":"替换","actions":[]}')).toThrow();
+  expect(editPlanText(initial, '{"name":"替换","actions":[]}', true)).toEqual({
+    text: '{"name":"替换","actions":[]}',
+    pending: {},
+  });
 });
 it("未完成数字保留原始文本并阻止旧值冒充当前输入", () => {
   const next = editValue(

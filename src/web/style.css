@@ -383,7 +383,9 @@ fieldset {
   font-weight: 400;
   overflow-wrap: anywhere;
 }
-.field .required {
+.required {
+  display: inline-block;
+  white-space: nowrap;
   font-size: 11px;
   padding: 2px 5px;
   border-radius: 4px;
@@ -681,9 +683,6 @@ fieldset {
   font-size: 12px;
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-.required {
-  color: #b4725e;
 }
 .code-input {
   font-family: "Cascadia Code", Consolas, monospace;

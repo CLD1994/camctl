@@ -33,9 +33,12 @@ export function pendingBlocks(content: DraftContent, path: Path): boolean {
 export function editPlanText(
   content: DraftContent,
   text: string,
+  replaceVariants = false,
 ): DraftContent {
   if (Object.keys(content.pending ?? {}).length)
     throw new Error("请先修正或明确省略未完成输入，再编辑整份 JSON");
+  if (Object.keys(content.actionVariants ?? {}).length && !replaceVariants)
+    throw new Error("整份计划替换需要确认清除其他动作类型的编辑内容");
   return { text, pending: {} };
 }
 export function valueAt(value: unknown, path: Path): unknown {
@@ -86,7 +89,7 @@ export function setValue(
       ([key]) => key !== p && !key.startsWith(p + "/"),
     ),
   );
-  return { text: JSON.stringify(root, null, 2), pending };
+  return { ...content, text: JSON.stringify(root, null, 2), pending };
 }
 export function editValue(
   content: DraftContent,
@@ -129,7 +132,20 @@ export function removeAction(
     if (n === index) continue;
     pending[`/actions/${n > index ? n - 1 : n}${match[2] ?? ""}`] = value;
   }
-  return { text: JSON.stringify(root, null, 2), pending };
+  const actionVariants = Object.fromEntries(
+    Object.entries(content.actionVariants ?? {})
+      .filter(([key]) => Number(key) !== index)
+      .map(([key, value]) => [
+        String(Number(key) > index ? Number(key) - 1 : Number(key)),
+        value,
+      ]),
+  );
+  return {
+    ...content,
+    text: JSON.stringify(root, null, 2),
+    pending,
+    ...(content.actionVariants ? { actionVariants } : {}),
+  };
 }
 export function appendDraftAction(
   content: DraftContent,

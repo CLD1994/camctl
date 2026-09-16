@@ -44,11 +44,17 @@ it.each(["appended", "baseline", "conflict"] as const)(
     expect(classifyAppend(baseline(), action, actual)).toBe(kind);
   },
 );
-it.each(["pending", "prefix", "action", "id", "exported"])(
+it.each(["pending", "variants", "prefix", "action", "id", "exported"])(
   "追加结果不接受不同%s",
   (difference) => {
     const actual = appended();
     if (difference === "pending") actual.content.pending = {};
+    if (difference === "variants")
+      actual.content.actionVariants = {
+        "0": [
+          { type: "camera_record", fields: { device_id: "cam" }, pending: {} },
+        ],
+      };
     if (difference === "prefix")
       actual.content.text = JSON.stringify({
         name: "different",

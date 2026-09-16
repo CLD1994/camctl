@@ -5,7 +5,9 @@ export interface DraftTransport {
 }
 export const sameContent = (a: DraftContent, b: DraftContent) =>
   a.text === b.text &&
-  JSON.stringify(a.pending ?? {}) === JSON.stringify(b.pending ?? {});
+  JSON.stringify(a.pending ?? {}) === JSON.stringify(b.pending ?? {}) &&
+  JSON.stringify(a.actionVariants ?? {}) ===
+    JSON.stringify(b.actionVariants ?? {});
 type ExportState = "editable" | "exporting" | "unknown" | "exported";
 interface PendingWrite {
   revision: number;
