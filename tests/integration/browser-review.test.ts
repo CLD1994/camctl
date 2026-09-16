@@ -79,7 +79,11 @@ it("通用入口修正回原合法参数后JSON显示、保存和导出同源", 
     draft = app.createDraft({ text: JSON.stringify(cameraPlan()) });
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await page
+    .locator(".action-card")
+    .first()
+    .getByRole("button", { name: "参数 JSON", exact: true })
+    .click();
   const widget = page.getByLabel("参数 JSON 文本"),
     pending = page.getByLabel("未完成输入 /actions/0/params");
   await widget.fill("{");
@@ -185,7 +189,11 @@ it.each(["different", "omit", "preset_same", "preset_different"] as const)(
       : undefined;
     await page.reload();
     await page.getByTestId("draft-open-button").click();
-    await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+    await page
+      .locator(".action-card")
+      .first()
+      .getByRole("button", { name: "参数 JSON", exact: true })
+      .click();
     const widget = page.getByLabel("参数 JSON 文本");
     await widget.fill("{");
     if (preset) {
@@ -245,6 +253,10 @@ it.each(["policy", "action_params"] as const)(
     await page.getByTestId("draft-open-button").click();
     if (isPolicy)
       await page.getByText("完整业务策略 JSON", { exact: true }).click();
+    else
+      await page
+        .getByRole("button", { name: "参数 JSON", exact: true })
+        .click();
     const widget = page.getByLabel(
       isPolicy ? "业务策略 JSON" : "动作参数 JSON",
     );
@@ -351,7 +363,11 @@ it("数值未完成时兄弟字段编辑保留原文，修正后导出准确新�
   await page.getByTestId("draft-open-button").click();
   await page.getByLabel("count (count)", { exact: true }).fill("1e");
   await page.getByLabel("note (note)", { exact: true }).fill("changed");
-  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await page
+    .locator(".action-card")
+    .first()
+    .getByRole("button", { name: "参数 JSON", exact: true })
+    .click();
   await check(page.getByLabel("参数 JSON 文本")).toHaveAttribute(
     "readonly",
     "",
@@ -404,7 +420,11 @@ it("父JSON只读保留未完成路径，Schema没有控件时仍能明确修正
   });
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await page
+    .locator(".action-card")
+    .first()
+    .getByRole("button", { name: "参数 JSON", exact: true })
+    .click();
   await check(page.getByLabel("参数 JSON 文本")).toHaveAttribute(
     "readonly",
     "",

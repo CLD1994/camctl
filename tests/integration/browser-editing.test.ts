@@ -8,6 +8,7 @@ import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import type { Draft, Preset, ExportedRequest } from "../../src/server/models";
+import { mappedReport, reportInput } from "./fixtures";
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
@@ -56,6 +57,293 @@ async function setup() {
   await page.getByTestId("initialize-button").click();
   return { page, app };
 }
+it("内置取回表单区分所属组与来源组并保存四种引用", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByTestId("draft-json-toggle").click();
+  await page.getByTestId("draft-json-input").fill(
+    JSON.stringify({
+      name: "取回",
+      actions: [
+        { name: "录像", type: "camera_record", group: "早班" },
+        {
+          name: "取回",
+          type: "obtain_action_outputs",
+          group: "错误所属组",
+          params: { source: { action_name: "录像" } },
+        },
+      ],
+    }),
+  );
+  await page.getByTestId("draft-json-toggle").click();
+  const action = page.locator(".action-card").nth(1);
+  await check(action.getByLabel("填写动作组 (group)")).toHaveCount(0);
+  await action.getByRole("button", { name: "移除不适用的动作组" }).click();
+  await check(action.getByLabel("来源动作名称")).toHaveValue("录像");
+  await action.getByLabel("指定产物筛选").check();
+  await action.getByRole("button", { name: "添加产物 ID" }).click();
+  await action.getByLabel("产物 ID 1", { exact: true }).fill("out-1");
+  await action.getByLabel("取回来源").selectOption("group");
+  await action.getByLabel("来源组").fill("早班");
+  await check(action.getByLabel("指定产物筛选")).toHaveCount(0);
+  const saved = () =>
+    JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[1];
+  await check
+    .poll(saved)
+    .toEqual({
+      name: "取回",
+      type: "obtain_action_outputs",
+      params: { source: { group: "早班" } },
+    });
+  await action.getByLabel("取回来源").selectOption("action_instance_id");
+  await action.getByLabel("来源动作实例 ID").fill("remote-action");
+  await check
+    .poll(() => saved().params)
+    .toEqual({ source: { action_instance_id: "remote-action" } });
+  await action.getByLabel("取回来源").selectOption("plan_group");
+  await action.getByLabel("来源计划实例 ID").fill("remote-plan");
+  await action.getByLabel("来源组").fill("夜班");
+  await check
+    .poll(() => saved().params)
+    .toEqual({ source: { plan_instance_id: "remote-plan", group: "夜班" } });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(
+    page.locator(".action-card").nth(1).getByLabel("来源组"),
+  ).toHaveValue("夜班");
+}, 20000);
+
+it("删除产物通过列表编辑并由后端拒绝重复或空列表", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByTestId("draft-json-toggle").click();
+  await page
+    .getByTestId("draft-json-input")
+    .fill(
+      JSON.stringify({
+        name: "清理",
+        actions: [
+          {
+            name: "清理",
+            type: "delete_action_outputs",
+            scheduled_at: "2026-09-16 01:00:00",
+            params: { output_ids: [] },
+          },
+        ],
+      }),
+    );
+  await page.getByTestId("draft-json-toggle").click();
+  await page.getByRole("button", { name: "添加产物 ID" }).click();
+  await page.getByLabel("产物 ID 1", { exact: true }).fill("o-1");
+  await page.getByRole("button", { name: "添加产物 ID" }).click();
+  await page.getByLabel("产物 ID 2", { exact: true }).fill("o-1");
+  await page.getByTestId("export-button").click();
+  expect(app.store.all("requests")).toHaveLength(0);
+  await page.getByRole("button", { name: "移除产物 2", exact: true }).click();
+  await page.getByTestId("export-button").click();
+  await check
+    .poll(() => app.store.all<ExportedRequest>("requests").length)
+    .toBe(1);
+}, 20000);
+
+it("取消目标四种模式互斥且手工跨计划 ID 不因本地未知被拒绝", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByTestId("draft-json-toggle").click();
+  await page
+    .getByTestId("draft-json-input")
+    .fill(
+      JSON.stringify({
+        name: "取消",
+        actions: [{ name: "取消", type: "cancel_task", params: {} }],
+      }),
+    );
+  await page.getByTestId("draft-json-toggle").click();
+  for (const [mode, label, key] of [
+    ["request_id", "目标请求 ID", "request_id"],
+    ["plan_instance_id", "目标计划实例 ID", "plan_instance_id"],
+    ["action_instance_id", "目标动作实例 ID", "action_instance_id"],
+  ]) {
+    await page.getByLabel("取消目标").selectOption(mode);
+    await page.getByLabel(label, { exact: true }).fill("remote-1");
+    await check
+      .poll(
+        () =>
+          JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
+            ?.params,
+      )
+      .toEqual({ target: { [key]: "remote-1" } });
+  }
+  await page.getByLabel("取消目标").selectOption("plan_group");
+  await page.getByLabel("目标计划实例 ID").fill("p-1");
+  await page.getByLabel("目标组").fill("A");
+  await page.getByTestId("export-button").click();
+  await check.poll(() => app.store.all("requests").length).toBe(1);
+}, 20000);
+
+it("报告表单保留缺省与非法原值，完整同步不携带旧起点", async () => {
+  const { page, app } = await setup();
+  await page.getByTestId("new-draft-button").click();
+  await page.getByTestId("draft-json-toggle").click();
+  await page
+    .getByTestId("draft-json-input")
+    .fill(
+      JSON.stringify({
+        name: "报告",
+        actions: [
+          {
+            name: "报告",
+            type: "report_status",
+            params: { scope: "since", after_report_id: 99 },
+          },
+        ],
+      }),
+    );
+  await page.getByTestId("draft-json-toggle").click();
+  await check(page.getByLabel("同步起点报告")).toHaveValue("invalid");
+  await page.getByLabel("报告范围").selectOption("full");
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
+          ?.params,
+    )
+    .toEqual({ scope: "full" });
+  await page.getByLabel("报告范围").selectOption("normal");
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0],
+    )
+    .toEqual({ name: "报告", type: "report_status" });
+  await page.getByTestId("export-button").click();
+  await check.poll(() => app.store.all("requests").length).toBe(1);
+}, 20000);
+it("动作类型切换保留原输入并可在表单清除不适用设备策略和时间", async () => {
+  const { page, app } = await setup();
+  const original = {
+    name: "录像",
+    type: "camera_record",
+    device_id: "demo_cam0",
+    scheduled_at: null,
+    params: { type: "demo_fixed" },
+    policy: { max_delay_ms: 0 },
+  };
+  const draft = app.createDraft({
+    text: JSON.stringify({ name: "切换", actions: [original] }),
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await page.getByLabel("动作类型").selectOption("report_status");
+  await check
+    .poll(() => JSON.parse(app.draft(draft.id).content.text).actions[0])
+    .toEqual({ ...original, type: "report_status" });
+  await page.getByRole("button", { name: "省略设备字段", exact: true }).click();
+  await page
+    .getByRole("button", { name: "移除不适用的业务策略", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "不指定执行时间", exact: true })
+    .click();
+  await page.getByLabel("报告范围").selectOption("normal");
+  await page.getByTestId("export-button").click();
+  await check.poll(() => app.store.all("requests").length).toBe(1);
+}, 20000);
+
+it("内置参数的非法组合与类型原样保留且未完成输入不能被表单覆盖", async () => {
+  const { page, app } = await setup();
+  const params = {
+    source: { group: "G" },
+    output_ids: [null, "o-1", "o-1"],
+    extra: false,
+  };
+  const draft = app.createDraft({
+    text: JSON.stringify({
+      name: "取回",
+      actions: [{ name: "取回", type: "obtain_action_outputs", params }],
+    }),
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+  ).toEqual(params);
+  await page.getByRole("button", { name: "移除不适用的产物筛选" }).click();
+  await page.getByRole("button", { name: "移除不适用参数字段" }).click();
+  await page.getByLabel("取回来源").selectOption("action_instance_id");
+  await page.getByLabel("来源动作实例 ID").fill("a-1");
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await page.getByLabel("动作参数 JSON").fill('{"source":');
+  await page.getByRole("button", { name: "参数表单", exact: true }).click();
+  await check(page.getByLabel("取回来源")).toHaveCount(0);
+  await check(page.getByLabel("动作参数 JSON")).toHaveValue('{"source":');
+  await check
+    .poll(
+      () => app.draft(draft.id).content.pending?.["/actions/0/params"]?.text,
+    )
+    .toBe('{"source":');
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(page.getByLabel("动作参数 JSON")).toHaveValue('{"source":');
+  await page
+    .getByLabel("动作参数 JSON")
+    .fill('{"source":{"action_instance_id":"a-2"}}');
+  await check(page.getByLabel("来源动作实例 ID")).toHaveValue("a-2");
+}, 20000);
+
+it("报告表单仅提供可靠覆盖的报告起点且导出保持数值类型", async () => {
+  const { page, app } = await setup();
+  const report = mappedReport(Buffer.from("video"));
+  app.applyReports([reportInput(report)]);
+  expect(app.coverage()).toBe(report.to_wm);
+  const draft = app.createDraft({
+    text: JSON.stringify({
+      name: "同步",
+      actions: [{ name: "同步", type: "report_status", params: {} }],
+    }),
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+  ).toEqual({});
+  await page.getByLabel("报告范围").selectOption("since");
+  await check(page.getByLabel("同步起点报告")).toHaveValue("");
+  await page.getByLabel("同步起点报告").selectOption(String(report.report_id));
+  await page.getByTestId("export-button").click();
+  await check
+    .poll(() => app.store.all<ExportedRequest>("requests").length)
+    .toBe(1);
+  expect(
+    (app.store.all<ExportedRequest>("requests")[0].body.actions as any[])[0]
+      .params,
+  ).toEqual({ scope: "since", after_report_id: report.report_id });
+}, 20000);
+
+it.each([null, [], "text", false])(
+  "非法内置参数无需手写JSON即可明确重新填写：%j",
+  async (params) => {
+    const { page, app } = await setup();
+    const draft = app.createDraft({
+      text: JSON.stringify({
+        name: "取消",
+        actions: [{ name: "取消", type: "cancel_task", params }],
+      }),
+    });
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    expect(
+      JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+    ).toEqual(params);
+    await page.getByRole("button", { name: "清空参数并重新填写" }).click();
+    await page.getByLabel("取消目标").selectOption("request_id");
+    await page.getByLabel("目标请求 ID").fill("req-1");
+    await page.getByTestId("export-button").click();
+    await check.poll(() => app.store.all("requests").length).toBe(1);
+  },
+  20000,
+);
+
 it("Schema普通控件支持本地引用，合法预设不依赖整份计划完成", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
@@ -487,7 +775,7 @@ it("普通字段保留缺省和显式空值，重载说明不写入Schema默认�
   await page.getByLabel("选项 (choice)", { exact: true }).fill('""');
   await check(page.getByTestId("save-status")).toContainText("已保存");
   const draft = app.store.all<Draft>("drafts")[0];
-  expect(JSON.parse(draft.content.text).actions[0].params).toEqual({
+  expect(JSON.parse(draft.content.text).actions[0]?.params).toEqual({
     type: "demo_fixed",
     enabled: false,
     count: 0,

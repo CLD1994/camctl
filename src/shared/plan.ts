@@ -1,7 +1,7 @@
 import schema from '../../docs/superpowers/specs/camctl/schemas/status-report.schema.json';
 import type { ActionType, Capabilities, Issue, ValidationContext } from './types';
 import { validateParams } from './capabilities';
-import { validateBuiltinParams } from './action-params';
+import { validateBuiltinParams, isSyncBasis } from './action-params';
 import { isId, isName, isObject, isPositive, isTimestamp, isUint } from './validation';
 
 export const ACTION_TYPES: readonly ActionType[] = schema.$defs.action_type.enum as ActionType[];
@@ -45,7 +45,7 @@ export function validatePlan(plan: unknown, capabilities: Capabilities | null, c
     const params = action.params;
     const p = `${path}.params`;
     if (type === 'report_status') {
-      if (params.scope === 'since') check(isUint(context.coverage) && !!context.reports?.some(r => r.report_id === params.after_report_id && isUint(r.to_wm) && r.to_wm <= context.coverage!), `${p}.after_report_id`, '同步起点没有已保存且完整覆盖的报告依据', 'sync_basis_unavailable');
+      if (params.scope === 'since') check(!!context.reports?.some(r => r.report_id === params.after_report_id && isSyncBasis(r, context.coverage)), `${p}.after_report_id`, '同步起点没有已保存且完整覆盖的报告依据', 'sync_basis_unavailable');
     } else if (type === 'obtain_action_outputs') {
       if (isObject(params.source)) {
         const source = params.source;

@@ -357,10 +357,24 @@ fieldset {
   flex-direction: row;
   align-items: center;
 }
-.field .optional-field input {
+.field .optional-field input,
+.builtin-parameters .optional-field input {
   width: auto;
   flex: 0 0 auto;
   accent-color: #205a47;
+}
+.builtin-parameters > .optional-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0;
+}
+.output-id-list > .form-grid {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+.output-id-list > .form-grid > button {
+  margin-bottom: 14px;
 }
 .optional-field small {
   white-space: nowrap;
