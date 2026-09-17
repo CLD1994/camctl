@@ -4,7 +4,7 @@
 
 首先阅读[设计规格](design.md)：模块异步管理 camctl 进程，接收已保存的计划路径，并在主程序显式调用时同步将 `ready` 文件逐个移动到 `processing`。第三方负责实际传输和后续文件处理。
 
-[实现设计](implementation-design.md)整理 arm64 Ubuntu 18.04 的技术选型、公开 C 接口、人工部署参数、串行提交、日志、资源上限，以及源码和静态库交付方式。行为规格已通过审阅，实现设计尚待整篇审阅。
+[实现设计](implementation.md)整理 arm64 Ubuntu 18.04 的技术选型、公开 C 接口、人工部署参数、串行提交、日志、资源上限，以及源码和静态库交付方式。行为规格已通过审阅，实现设计尚待整篇审阅。
 
 - [角色与职责](../architecture/system-context.md#主程序的集成边界)
 - [命令、启动及进程结果](../architecture/cli-commands.md)

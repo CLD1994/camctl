@@ -34,7 +34,7 @@
 | --- | --- |
 | 计划使用者与业务评审者 | 总览、概念、正常协议样例、计划编辑、取回、取消和清理 |
 | 客户端开发者 | 客户端部署与编辑、能力说明、计划输入与受理、报告字段与合并、完整及局部同步 |
-| 第三方主程序对接人员 | [C 接入模块规格](../host-demo/design.md)、[实现设计](../host-demo/implementation-design.md)、运行环境、CLI 命令、文件交接、会话错误、部署联调样例 |
+| 第三方主程序对接人员 | [C 接入模块规格](../host-demo/design.md)、[实现设计](../host-demo/implementation.md)、运行环境、CLI 命令、文件交接、会话错误、部署联调样例 |
 | camctl 与驱动开发者 | 全部行为规格，重点核对持久化、会话接管、调度、设备证据和文件恢复之间的衔接 |
 
 报告 [JSON Schema](../../protocol/schemas/status-report.schema.json) 供机器校验和类型生成使用；人类先读[字段契约](report-format.md)，需要核对精确字段时再查 Schema。协议 JSON 样例说明具体场景，不代替一般规则。硬件交接整理帮助定位待核对的厂商信息，[原文转录](../hardware/camera-control-source.md)保留资料原貌，不应把会议中的参考数值当成已确认的参数契约。

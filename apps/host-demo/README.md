@@ -2,4 +2,4 @@
 
 本组件使用 C，面向 Linux，提供可供第三方主程序直接调用的接入模块，以及使用同一模块的独立终端演示程序。模块负责管理 camctl 进程、递交计划文件路径、有限自动重试和同步领取文件；实际传输由第三方主程序负责。
 
-目前已有通过审阅的[行为规格](../../docs/host-demo/design.md)和待整篇审阅的[实现设计](../../docs/host-demo/implementation-design.md)，尚无可运行实现。目标环境为 arm64 Ubuntu 18.04，交付以源码为基础，默认构建静态库。后续源码、构建配置及分类测试放在本目录；公共协议入口见[主程序对接资料](../../docs/host-demo/README.md)。
+目前已有通过审阅的[行为规格](../../docs/host-demo/design.md)和待整篇审阅的[实现设计](../../docs/host-demo/implementation.md)，尚无可运行实现。目标环境为 arm64 Ubuntu 18.04，交付以源码为基础，默认构建静态库。后续源码、构建配置及分类测试放在本目录；公共协议入口见[主程序对接资料](../../docs/host-demo/README.md)。
