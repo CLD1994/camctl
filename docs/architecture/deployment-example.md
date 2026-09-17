@@ -83,7 +83,7 @@ camctl describe > device-capabilities.json
 | 主机上电，本次发现执行计划 | `camctl run <plan-path>` | 输入路径交给 CLI，等待会话结束；计划文件之后由主程序自行清理 |
 | 后续收到新的计划输入 | `camctl submit <plan-path>` | 成功时读取 `needs_run`，按接管规则决定后续启动 |
 
-`submit` 成功且 `needs_run = true` 时，接入模块记录待启动要求；已有 `run` 尚未退出则等其实际结束，再启动一次 `run`。多个待启动要求可以合并。`needs_run = false` 时不因此追加启动。会话交接按[接管协议](protocol-session.md#会话接管协议)处理，首次调用尚未成功启动时保留[首次输入责任](../host-demo/design.md#首次输入与执行启动目标)，已有会话之后的执行启动使用裸 `run`。
+`submit` 成功且 `needs_run = true` 时，接入模块记录还需要启动一次 `run`；已有 `run` 尚未退出则等其实际结束，再启动下一个。多个启动要求可以合并。`needs_run = false` 时不因此追加启动。会话交接按[接管协议](protocol-session.md#会话接管协议)处理。这次启动是否仍需附带首次计划路径，由模块按[首次计划处理规则](../host-demo/design.md#首次启动时如何处理计划文件)判断。
 
 主程序按进程结果处理调用，不据此判断录像是否成功或计划是否受理。一次 `run` 正常退出且没有待启动要求时，不无条件再次启动；状态库错误也不触发主程序自动执行 `init`。
 
