@@ -77,7 +77,7 @@
 
 ## 架构设计规范
 
-- 仓库按独立运行组件组织：客户端位于 `apps/client`，Python CLI 位于 `apps/camctl`，C 主程序调用示例位于 `apps/host-demo`。公共机器协议仅在根 `protocol` 维护；组件内部共享代码不作为跨组件协议来源。组件测试放在各自目录，跨组件集成测试放在根 `tests/integration`。目录与数据边界遵守[仓库结构](docs/architecture/repository-layout.md)。
+- 仓库按独立运行组件组织：客户端位于 `apps/client`，Python CLI 位于 `apps/camctl`，C 接入模块与终端演示位于 `apps/host-demo`。公共机器协议仅在根 `protocol` 维护；组件内部共享代码不作为跨组件协议来源。组件测试放在各自目录，跨组件集成测试放在根 `tests/integration`。目录与数据边界遵守[仓库结构](docs/architecture/repository-layout.md)。
 
 - 当前处于第一版开发，持久化、历史回放和报告重建以第一版的数据格式与规则为范围。
 
