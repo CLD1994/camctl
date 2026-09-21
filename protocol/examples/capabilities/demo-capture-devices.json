@@ -65,7 +65,8 @@
                     ]
                   }
                 }
-              }
+              },
+              "preview_supported": false
             },
             {
               "type": "demo_fixed",
@@ -83,7 +84,8 @@
                   "type"
                 ],
                 "additionalProperties": false
-              }
+              },
+              "preview_supported": false
             }
           ]
         },
@@ -115,7 +117,8 @@
                   "resolution"
                 ],
                 "additionalProperties": false
-              }
+              },
+              "preview_supported": false
             }
           ]
         },
@@ -152,7 +155,8 @@
                   "interval_s"
                 ],
                 "additionalProperties": false
-              }
+              },
+              "preview_supported": false
             },
             {
               "type": "demo_duration",
@@ -184,7 +188,8 @@
                   "interval_s"
                 ],
                 "additionalProperties": false
-              }
+              },
+              "preview_supported": false
             }
           ]
         }

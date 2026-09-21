@@ -1,0 +1,53 @@
+{
+  "request_id": "req-preview",
+  "created_at": "2026-09-22 08:00:00",
+  "name": "预览与范围选择示例",
+  "actions": [
+    {
+      "name": "拍摄",
+      "type": "camera_record",
+      "device_id": "demo_cam0",
+      "scheduled_at": "2026-09-22 09:00:00",
+      "params": {
+        "type": "demo_adjustable",
+        "resolution": "1080p",
+        "frame_rate_fps": 30
+      },
+      "policy": {
+        "max_delay_ms": 5000
+      }
+    },
+    {
+      "name": "自动预览",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-22 09:00:00",
+      "params": {
+        "source": {
+          "action_name": "拍摄"
+        },
+        "filter": "preview",
+        "purpose": "auto_preview"
+      }
+    },
+    {
+      "name": "取回全部",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-22 10:00:00",
+      "params": {
+        "source": {
+          "current_plan": true
+        }
+      }
+    },
+    {
+      "name": "清理本计划",
+      "type": "delete_action_outputs",
+      "scheduled_at": "2026-09-22 11:00:00",
+      "params": {
+        "source": {
+          "current_plan": true
+        }
+      }
+    }
+  ]
+}

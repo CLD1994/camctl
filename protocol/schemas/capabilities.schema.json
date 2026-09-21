@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "camctl 设备能力说明",
+  "description": "参数 Schema 的版本、引用、有效性及与外层 type 的关联仍须单独校验。",
+  "type": "object",
+  "properties": {
+    "devices": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/device"
+      }
+    }
+  },
+  "required": [
+    "devices"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "device": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "$ref": "status-report.schema.json#/$defs/id"
+        },
+        "driver_id": {
+          "$ref": "status-report.schema.json#/$defs/text"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/camera_action"
+          }
+        }
+      },
+      "required": [
+        "device_id",
+        "driver_id",
+        "actions"
+      ],
+      "additionalProperties": false
+    },
+    "camera_action": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "status-report.schema.json#/$defs/camera_action_type"
+        },
+        "parameter_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/parameter_type"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "type",
+        "parameter_types"
+      ],
+      "additionalProperties": false
+    },
+    "parameter_type": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "status-report.schema.json#/$defs/text"
+        },
+        "name": {
+          "$ref": "status-report.schema.json#/$defs/text"
+        },
+        "description": {
+          "$ref": "status-report.schema.json#/$defs/text"
+        },
+        "preview_supported": {
+          "type": "boolean"
+        },
+        "schema": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "name",
+        "description",
+        "preview_supported",
+        "schema"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

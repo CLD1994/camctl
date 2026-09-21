@@ -1,23 +1,22 @@
 {
-  "report_id": 1,
-  "from_wm": 0,
-  "to_wm": 39,
+  "report_id": 5,
+  "from_wm": 20,
+  "to_wm": 48,
   "plans": [
     {
-      "plan_instance_id": "p-003",
-      "request_id": "req-003",
+      "plan_instance_id": "p-sync-001",
+      "request_id": "req-sync-001",
       "plan_seq": 1,
       "created_at": "2026-09-13 08:00:00",
-      "name": "组取回部分失败",
+      "name": "第1天采集",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-201",
-          "name": "第一段录像",
+          "action_instance_id": "a-sync-101",
+          "name": "录像 A",
           "type": "camera_record",
           "device_id": "cam0",
           "scheduled_at": "2026-09-13 09:00:00",
-          "group": "早间采集",
           "policy": {
             "max_delay_ms": 5000
           },
@@ -64,15 +63,15 @@
           },
           "outputs": [
             {
-              "output_id": "o-201",
-              "source_action_instance_id": "a-201",
+              "output_id": "o-sync-001",
+              "source_action_instance_id": "a-sync-101",
               "kind": "original",
-              "original_name": "VID_0201.mp4",
+              "original_name": "VID_0001.mp4",
               "media_type": "video/mp4",
               "size": 8388608,
-              "availability": "available",
+              "availability": "cleaned",
               "cleanup": {
-                "status": "not_requested"
+                "status": "completed"
               },
               "checksum": {
                 "status": "available",
@@ -86,14 +85,23 @@
               }
             }
           ]
-        },
+        }
+      ]
+    },
+    {
+      "plan_instance_id": "p-sync-002",
+      "request_id": "req-sync-002",
+      "plan_seq": 2,
+      "created_at": "2026-09-14 08:00:00",
+      "name": "第2天采集",
+      "status": "completed",
+      "actions": [
         {
-          "action_instance_id": "a-202",
-          "name": "第二段录像",
+          "action_instance_id": "a-sync-201",
+          "name": "录像 B",
           "type": "camera_record",
           "device_id": "cam0",
-          "scheduled_at": "2026-09-13 09:02:00",
-          "group": "早间采集",
+          "scheduled_at": "2026-09-14 09:00:00",
           "policy": {
             "max_delay_ms": 5000
           },
@@ -140,18 +148,19 @@
           },
           "outputs": [
             {
-              "output_id": "o-202",
-              "source_action_instance_id": "a-202",
+              "output_id": "o-sync-002",
+              "source_action_instance_id": "a-sync-201",
               "kind": "original",
-              "original_name": "VID_0202.mp4",
+              "original_name": "VID_0002.mp4",
               "media_type": "video/mp4",
-              "size": 12582912,
+              "size": 8388608,
               "availability": "available",
               "cleanup": {
                 "status": "not_requested"
               },
               "checksum": {
-                "status": "not_obtained"
+                "status": "available",
+                "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
               },
               "media": {
                 "check_status": "not_performed",
@@ -163,34 +172,29 @@
           ]
         },
         {
-          "action_instance_id": "a-203",
-          "name": "取回整组",
+          "action_instance_id": "a-sync-202",
+          "name": "取回录像 B",
           "type": "obtain_action_outputs",
-          "scheduled_at": "2026-09-13 09:04:00",
+          "scheduled_at": "2026-09-14 09:02:00",
           "input_params": {
             "source": {
-              "group": "早间采集"
+              "action_name": "录像 B"
             }
           },
-          "status": "failed",
+          "status": "succeeded",
           "execution": {
             "started": true
           },
-          "error": {
-            "code": "obtain_items_failed",
-            "stage": "execution",
-            "details": {}
-          },
           "deliveries": [
             {
-              "delivery_id": "d-201",
-              "output_id": "o-201",
-              "source_action_instance_id": "a-201",
-              "file_name": "d-201.mp4",
-              "display_name": "VID_0201-组取回部分失败-第一段录像.mp4",
+              "delivery_id": "d-sync-002",
+              "output_id": "o-sync-002",
+              "source_action_instance_id": "a-sync-201",
+              "file_name": "d-sync-002.mp4",
+              "display_name": "VID_0002-第2天采集-录像 B.mp4",
               "size": 8388608,
               "status": "published",
-              "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+              "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
               "copy": {
                 "max_read_attempts": 3,
                 "read_idle_timeout_s": 10,
@@ -211,93 +215,100 @@
                   "status": "not_needed"
                 }
               }
-            },
-            {
-              "delivery_id": "d-202",
-              "output_id": "o-202",
-              "source_action_instance_id": "a-202",
-              "file_name": "d-202.mp4",
-              "display_name": "VID_0202-组取回部分失败-第二段录像.mp4",
-              "size": 12582912,
-              "status": "failed",
-              "error": {
-                "code": "read_attempts_exhausted",
-                "stage": "source_read",
-                "details": {
-                  "max_read_attempts": 3,
-                  "attempts_used": 3
-                }
-              },
-              "copy": {
-                "max_read_attempts": 3,
-                "read_idle_timeout_s": 10,
-                "max_recopies": 1,
-                "recopies_used": 0,
-                "round": 1,
-                "committed_bytes": 1048576,
-                "read_attempts": [
-                  {
-                    "attempt_no": 1,
-                    "status": "failed",
-                    "error": {
-                      "code": "read_idle_timeout",
-                      "stage": "source_read",
-                      "details": {
-                        "timeout_s": 10,
-                        "committed_bytes": 1048576
-                      }
-                    }
-                  },
-                  {
-                    "attempt_no": 2,
-                    "status": "failed",
-                    "error": {
-                      "code": "read_idle_timeout",
-                      "stage": "source_read",
-                      "details": {
-                        "timeout_s": 10,
-                        "committed_bytes": 1048576
-                      }
-                    }
-                  },
-                  {
-                    "attempt_no": 3,
-                    "status": "failed",
-                    "error": {
-                      "code": "read_idle_timeout",
-                      "stage": "source_read",
-                      "details": {
-                        "timeout_s": 10,
-                        "committed_bytes": 1048576
-                      }
-                    }
-                  }
-                ],
-                "verification": {
-                  "status": "not_performed"
-                },
-                "work_file_cleanup": {
-                  "status": "completed"
-                }
-              }
             }
           ],
           "result": {
-            "failures": [
+            "failures": []
+          },
+          "obtaining": {
+            "source": {
+              "status": "fixed",
+              "plan_instance_id": "p-sync-002",
+              "action_instance_ids": [
+                "a-sync-201"
+              ]
+            },
+            "filter": "default",
+            "selections": [
               {
-                "source_action_instance_id": "a-202",
-                "output_id": "o-202",
-                "delivery_id": "d-202",
-                "error": {
-                  "code": "read_attempts_exhausted",
-                  "stage": "source_read",
-                  "details": {
-                    "max_read_attempts": 3,
-                    "attempts_used": 3
+                "source_action_instance_id": "a-sync-201",
+                "status": "fixed",
+                "items": [
+                  {
+                    "output_id": "o-sync-002",
+                    "reason": "original"
                   }
-                }
+                ]
               }
             ]
+          }
+        }
+      ]
+    },
+    {
+      "plan_instance_id": "p-sync-003",
+      "request_id": "req-sync-003",
+      "plan_seq": 3,
+      "created_at": "2026-09-15 08:00:00",
+      "name": "清理录像 A 的相机原片",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-sync-301",
+          "name": "清理原片 A",
+          "type": "delete_action_outputs",
+          "scheduled_at": "2026-09-15 09:00:00",
+          "input_params": {
+            "output_ids": [
+              "o-sync-001"
+            ]
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "items": [
+              {
+                "output_id": "o-sync-001",
+                "status": "succeeded",
+                "outcome": "deleted"
+              }
+            ]
+          },
+          "cleaning": {
+            "selection": {
+              "status": "fixed",
+              "output_ids": [
+                "o-sync-001"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "plan_instance_id": "p-sync-004",
+      "request_id": "req-sync-004",
+      "plan_seq": 4,
+      "created_at": "2026-09-15 10:00:00",
+      "name": "恢复旧备份后的状态同步",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-sync-401",
+          "name": "补齐报告 1 之后的状态",
+          "type": "report_status",
+          "input_params": {
+            "scope": "since",
+            "after_report_id": 1
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "report_id": 4
           }
         }
       ]

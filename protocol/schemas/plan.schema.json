@@ -1,0 +1,695 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "camctl 第一版执行计划",
+  "description": "根定义校验完整合法计划，供编辑及样例校验。主机受理必须分阶段使用 plan_structure 与 action，ACK、幂等及语义另判，不能因根校验失败而一律拒绝整份计划。",
+  "type": "object",
+  "properties": {
+    "request_id": {
+      "$ref": "status-report.schema.json#/$defs/id"
+    },
+    "created_at": {
+      "$ref": "status-report.schema.json#/$defs/timestamp"
+    },
+    "name": {
+      "$ref": "status-report.schema.json#/$defs/name"
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      },
+      "minItems": 1
+    },
+    "last_report_id": {
+      "$ref": "status-report.schema.json#/$defs/positive_integer"
+    }
+  },
+  "required": [
+    "request_id",
+    "created_at",
+    "name",
+    "actions"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action_name": {
+              "$ref": "status-report.schema.json#/$defs/name"
+            }
+          },
+          "required": [
+            "action_name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action_instance_id": {
+              "$ref": "status-report.schema.json#/$defs/id"
+            }
+          },
+          "required": [
+            "action_instance_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "group": {
+              "$ref": "status-report.schema.json#/$defs/name"
+            }
+          },
+          "required": [
+            "group"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "plan_instance_id": {
+              "$ref": "status-report.schema.json#/$defs/id"
+            },
+            "group": {
+              "$ref": "status-report.schema.json#/$defs/name"
+            }
+          },
+          "required": [
+            "plan_instance_id",
+            "group"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "current_plan": {
+              "const": true
+            }
+          },
+          "required": [
+            "current_plan"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "plan_instance_id": {
+              "$ref": "status-report.schema.json#/$defs/id"
+            }
+          },
+          "required": [
+            "plan_instance_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "action_source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action_name": {
+              "$ref": "status-report.schema.json#/$defs/name"
+            }
+          },
+          "required": [
+            "action_name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action_instance_id": {
+              "$ref": "status-report.schema.json#/$defs/id"
+            }
+          },
+          "required": [
+            "action_instance_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "obtain_params": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/source"
+            },
+            "filter": {
+              "enum": [
+                "default",
+                "preview"
+              ]
+            },
+            "purpose": {
+              "const": "manual"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/action_source"
+            },
+            "output_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "status-report.schema.json#/$defs/id"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "purpose": {
+              "const": "manual"
+            }
+          },
+          "required": [
+            "source",
+            "output_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "object",
+              "properties": {
+                "action_name": {
+                  "$ref": "status-report.schema.json#/$defs/name"
+                }
+              },
+              "required": [
+                "action_name"
+              ],
+              "additionalProperties": false
+            },
+            "filter": {
+              "const": "preview"
+            },
+            "purpose": {
+              "const": "auto_preview"
+            }
+          },
+          "required": [
+            "source",
+            "filter",
+            "purpose"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "delete_params": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "output_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "status-report.schema.json#/$defs/id"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "output_ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "action_name": {
+                      "$ref": "status-report.schema.json#/$defs/name"
+                    }
+                  },
+                  "required": [
+                    "action_name"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "action_instance_id": {
+                      "$ref": "status-report.schema.json#/$defs/id"
+                    }
+                  },
+                  "required": [
+                    "action_instance_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "current_plan": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "current_plan"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "plan_instance_id": {
+                      "$ref": "status-report.schema.json#/$defs/id"
+                    }
+                  },
+                  "required": [
+                    "plan_instance_id"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "cancel_params": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "request_id": {
+                  "$ref": "status-report.schema.json#/$defs/id"
+                }
+              },
+              "required": [
+                "request_id"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "plan_instance_id": {
+                  "$ref": "status-report.schema.json#/$defs/id"
+                }
+              },
+              "required": [
+                "plan_instance_id"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action_instance_id": {
+                  "$ref": "status-report.schema.json#/$defs/id"
+                }
+              },
+              "required": [
+                "action_instance_id"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "plan_instance_id": {
+                  "$ref": "status-report.schema.json#/$defs/id"
+                },
+                "group": {
+                  "$ref": "status-report.schema.json#/$defs/name"
+                }
+              },
+              "required": [
+                "plan_instance_id",
+                "group"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "report_params": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "full"
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "const": "since"
+            },
+            "after_report_id": {
+              "$ref": "status-report.schema.json#/$defs/positive_integer"
+            }
+          },
+          "required": [
+            "scope",
+            "after_report_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "camera_policy": {
+      "type": "object",
+      "properties": {
+        "max_delay_ms": {
+          "$ref": "status-report.schema.json#/$defs/uint"
+        }
+      },
+      "required": [
+        "max_delay_ms"
+      ],
+      "additionalProperties": false
+    },
+    "camera_params": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "status-report.schema.json#/$defs/text"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "description": "完整参数由所选设备参数类型的 Schema 校验；公共协议不复制驱动参数清单。"
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "status-report.schema.json#/$defs/name"
+        },
+        "type": {
+          "$ref": "status-report.schema.json#/$defs/action_type"
+        },
+        "device_id": {
+          "$ref": "status-report.schema.json#/$defs/id"
+        },
+        "scheduled_at": {
+          "$ref": "status-report.schema.json#/$defs/timestamp"
+        },
+        "group": {
+          "$ref": "status-report.schema.json#/$defs/name"
+        },
+        "params": {
+          "type": "object"
+        },
+        "policy": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "$ref": "status-report.schema.json#/$defs/camera_action_type"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/camera_params"
+              },
+              "policy": {
+                "$ref": "#/$defs/camera_policy"
+              }
+            },
+            "required": [
+              "device_id",
+              "scheduled_at",
+              "params",
+              "policy"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "obtain_action_outputs"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/obtain_params"
+              },
+              "policy": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "params",
+              "scheduled_at"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "device_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "group"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "delete_action_outputs"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/delete_params"
+              },
+              "policy": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "params",
+              "scheduled_at"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "device_id"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cancel_task"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/cancel_params"
+              },
+              "policy": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "params"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "device_id"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "report_status"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/report_params"
+              },
+              "policy": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "params"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "device_id"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "plan_structure": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "status-report.schema.json#/$defs/id"
+        },
+        "created_at": {
+          "$ref": "status-report.schema.json#/$defs/timestamp"
+        },
+        "name": {
+          "$ref": "status-report.schema.json#/$defs/name"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "$ref": "status-report.schema.json#/$defs/name"
+              },
+              "type": {
+                "$ref": "status-report.schema.json#/$defs/action_type"
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ]
+          },
+          "minItems": 1
+        },
+        "last_report_id": true
+      },
+      "required": [
+        "request_id",
+        "created_at",
+        "name",
+        "actions"
+      ],
+      "additionalProperties": false
+    },
+    "resubmission": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "status-report.schema.json#/$defs/id"
+        },
+        "last_report_id": true
+      },
+      "required": [
+        "request_id"
+      ],
+      "description": "仅在已无歧义解析且数据库确认 request_id 已受理后使用；ACK 仍独立校验。"
+    }
+  }
+}

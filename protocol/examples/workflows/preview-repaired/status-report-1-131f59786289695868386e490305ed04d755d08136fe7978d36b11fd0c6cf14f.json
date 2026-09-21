@@ -1,0 +1,229 @@
+{
+  "report_id": 1,
+  "from_wm": 0,
+  "to_wm": 20,
+  "plans": [
+    {
+      "plan_instance_id": "p-001",
+      "request_id": "req-001",
+      "plan_seq": 1,
+      "created_at": "2026-09-13 08:00:00",
+      "name": "自动预览选择较小修复成品",
+      "status": "completed",
+      "actions": [
+        {
+          "action_instance_id": "a-001",
+          "name": "主录像",
+          "type": "camera_record",
+          "device_id": "demo_cam0",
+          "scheduled_at": "2026-09-13 09:00:00",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "input_params": {
+            "type": "demo_adjustable",
+            "resolution": "1080p",
+            "frame_rate_fps": 30
+          },
+          "effective_params": {
+            "type": "demo_adjustable",
+            "resolution": "1080p",
+            "frame_rate_fps": 30
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "result": {
+            "recording": {
+              "start": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "stop": {
+                "max_attempts": 3,
+                "attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ]
+              },
+              "control_elapsed_s": 60,
+              "effect": {
+                "status": "compensated"
+              }
+            },
+            "repair": {
+              "status": "succeeded"
+            }
+          },
+          "outputs": [
+            {
+              "output_id": "o-001",
+              "source_action_instance_id": "a-001",
+              "kind": "original",
+              "original_name": "VID_0001.mp4",
+              "media_type": "video/mp4",
+              "size": 8388608,
+              "availability": "available",
+              "cleanup": {
+                "status": "not_requested"
+              },
+              "checksum": {
+                "status": "available",
+                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "media": {
+                "check_status": "not_performed",
+                "duration": {
+                  "status": "unknown"
+                }
+              }
+            },
+            {
+              "output_id": "o-preview",
+              "source_action_instance_id": "a-001",
+              "kind": "preview",
+              "original_name": "VID_0001.mp4",
+              "media_type": "video/mp4",
+              "size": 2097152,
+              "availability": "available",
+              "cleanup": {
+                "status": "not_requested"
+              },
+              "checksum": {
+                "status": "available",
+                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "media": {
+                "check_status": "not_performed",
+                "duration": {
+                  "status": "unknown"
+                }
+              },
+              "preview_of_output_id": "o-001"
+            },
+            {
+              "output_id": "o-repaired",
+              "source_action_instance_id": "a-001",
+              "kind": "repaired",
+              "original_name": "VID_0001.mp4",
+              "media_type": "video/mp4",
+              "size": 1048576,
+              "availability": "available",
+              "cleanup": {
+                "status": "not_requested"
+              },
+              "checksum": {
+                "status": "available",
+                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "media": {
+                "check_status": "not_performed",
+                "duration": {
+                  "status": "unknown"
+                }
+              },
+              "derived_from_output_id": "o-001"
+            }
+          ]
+        },
+        {
+          "action_instance_id": "a-002",
+          "name": "自动预览",
+          "type": "obtain_action_outputs",
+          "scheduled_at": "2026-09-13 09:00:00",
+          "input_params": {
+            "source": {
+              "action_name": "主录像"
+            },
+            "filter": "preview",
+            "purpose": "auto_preview"
+          },
+          "status": "succeeded",
+          "execution": {
+            "started": true
+          },
+          "deliveries": [
+            {
+              "delivery_id": "d-001",
+              "output_id": "o-repaired",
+              "source_action_instance_id": "a-001",
+              "file_name": "d-001.mp4",
+              "display_name": "VID_0001-正常采集-主录像.mp4",
+              "size": 1048576,
+              "status": "published",
+              "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+              "copy": {
+                "max_read_attempts": 3,
+                "read_idle_timeout_s": 10,
+                "max_recopies": 1,
+                "recopies_used": 0,
+                "round": 1,
+                "committed_bytes": 1048576,
+                "read_attempts": [
+                  {
+                    "attempt_no": 1,
+                    "status": "succeeded"
+                  }
+                ],
+                "verification": {
+                  "status": "matched"
+                },
+                "work_file_cleanup": {
+                  "status": "not_needed"
+                },
+                "source_size": 1048576
+              }
+            }
+          ],
+          "result": {
+            "failures": []
+          },
+          "obtaining": {
+            "source": {
+              "status": "fixed",
+              "plan_instance_id": "p-001",
+              "action_instance_ids": [
+                "a-001"
+              ]
+            },
+            "filter": "preview",
+            "selections": [
+              {
+                "source_action_instance_id": "a-001",
+                "status": "fixed",
+                "items": [
+                  {
+                    "output_id": "o-repaired",
+                    "reason": "repaired_not_larger",
+                    "original_output_id": "o-001",
+                    "preview_output_id": "o-preview",
+                    "preview_size": 2097152,
+                    "repaired_size": 1048576
+                  }
+                ]
+              }
+            ]
+          },
+          "automation": {
+            "purpose": "auto_preview",
+            "source_action_instance_id": "a-001",
+            "capability": {
+              "device_id": "demo_cam0",
+              "action_type": "camera_record",
+              "parameter_type": "demo_adjustable",
+              "preview_supported": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

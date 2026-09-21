@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "camctl 第一版状态报告",
-  "description": "定义报告字段与局部结构约束；跨字段、跨实体、历史及累计覆盖检查见 report-format.md。输入原值与错误 details 的内容按各自契约解释。",
+  "description": "定义报告字段与局部结构约束；跨字段、跨实体、历史及累计覆盖检查见 report-format.md。输入原值与错误 details 的内容按各自契约解释。预览、来源选择及取消的跨实体与受理语义见对应专题。",
   "type": "object",
   "properties": {
     "report_id": {
@@ -148,7 +148,241 @@
         "code",
         "details"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "scheduled_time"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "device_busy"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "action_instance_id": {
+                    "$ref": "#/$defs/id"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "device_reserved"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "action_instance_id": {
+                    "$ref": "#/$defs/id"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "action_instance_id"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "retry_delay"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "remaining_s": {
+                    "$ref": "#/$defs/nonnegative_number"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "source_actions"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "action_instance_ids": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "action_instance_ids"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "copy_slot"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "action_instance_id": {
+                    "$ref": "#/$defs/id"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "readers"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {
+                  "output_ids": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "output_ids"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "clock_untrusted"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "report_publication"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "details": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      ]
     },
     "attempt": {
       "type": "object",
@@ -884,7 +1118,8 @@
             "pending",
             "running",
             "succeeded",
-            "failed"
+            "failed",
+            "canceled"
           ]
         },
         "outcome": {
@@ -901,6 +1136,13 @@
         },
         "error": {
           "$ref": "#/$defs/error"
+        },
+        "cancellation_effect": {
+          "enum": [
+            "not_applied",
+            "applied",
+            "not_required"
+          ]
         }
       },
       "required": [
@@ -966,6 +1208,23 @@
                 }
               ]
             }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "canceled"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "cancellation_effect"
+            ]
           }
         }
       ]
@@ -1086,7 +1345,8 @@
         "kind": {
           "enum": [
             "original",
-            "repaired"
+            "repaired",
+            "preview"
           ]
         },
         "original_name": {
@@ -1121,6 +1381,9 @@
         },
         "error": {
           "$ref": "#/$defs/error"
+        },
+        "preview_of_output_id": {
+          "$ref": "#/$defs/id"
         }
       },
       "required": [
@@ -1240,6 +1503,35 @@
               "availability": {
                 "const": "cleaned"
               }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "preview"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "preview_of_output_id"
+            ],
+            "not": {
+              "required": [
+                "derived_from_output_id"
+              ]
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "preview_of_output_id"
+              ]
             }
           }
         }
@@ -1592,6 +1884,28 @@
           "items": {
             "$ref": "#/$defs/delivery"
           }
+        },
+        "automation": {
+          "$ref": "#/$defs/automation"
+        },
+        "obtaining": {
+          "$ref": "#/$defs/obtaining"
+        },
+        "cleaning": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/source_resolution"
+            },
+            "selection": {
+              "$ref": "#/$defs/cleanup_selection"
+            }
+          },
+          "required": [
+            "selection"
+          ],
+          "additionalProperties": false,
+          "description": "精确 ID 模式省略 source，selection 固定输入集合；范围模式始终提供 source，等待全部来源完成前 selection 为 pending。"
         }
       },
       "required": [
@@ -2627,6 +2941,166 @@
               }
             ]
           }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "automation"
+                ]
+              },
+              {
+                "required": [
+                  "obtaining"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "const": "obtain_action_outputs"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "cleaning"
+            ]
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "const": "delete_action_outputs"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "obtain_action_outputs"
+              },
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "execution"
+            ]
+          },
+          "then": {
+            "required": [
+              "obtaining"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "delete_action_outputs"
+              },
+              "execution": {
+                "properties": {
+                  "started": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "execution"
+            ]
+          },
+          "then": {
+            "required": [
+              "cleaning"
+            ]
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "properties": {
+                  "type": {
+                    "const": "obtain_action_outputs"
+                  },
+                  "input_params": {
+                    "type": "object",
+                    "properties": {
+                      "purpose": {
+                        "const": "auto_preview"
+                      }
+                    },
+                    "required": [
+                      "purpose"
+                    ]
+                  }
+                },
+                "required": [
+                  "type",
+                  "input_params"
+                ]
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "const": "failed"
+                    },
+                    "execution": {
+                      "properties": {
+                        "started": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "started"
+                      ]
+                    },
+                    "error": {
+                      "properties": {
+                        "stage": {
+                          "const": "admission"
+                        }
+                      },
+                      "required": [
+                        "stage"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "execution",
+                    "error"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "required": [
+              "automation"
+            ]
+          }
         }
       ]
     },
@@ -2828,6 +3302,360 @@
         "capture"
       ],
       "additionalProperties": false
+    },
+    "source_resolution": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "unresolved"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "fixed"
+            },
+            "plan_instance_id": {
+              "$ref": "#/$defs/id"
+            },
+            "action_instance_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "status",
+            "plan_instance_id",
+            "action_instance_ids"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "selection_item": {
+      "type": "object",
+      "properties": {
+        "output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "reason": {
+          "enum": [
+            "original",
+            "repaired",
+            "explicit",
+            "preview",
+            "repaired_not_larger"
+          ]
+        },
+        "original_output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "preview_output_id": {
+          "$ref": "#/$defs/id"
+        },
+        "preview_size": {
+          "$ref": "#/$defs/uint"
+        },
+        "repaired_size": {
+          "$ref": "#/$defs/uint"
+        }
+      },
+      "required": [
+        "output_id",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "enum": [
+                  "preview",
+                  "repaired_not_larger"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "original_output_id",
+              "preview_output_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "repaired"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "original_output_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "repaired_not_larger"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "preview_size",
+              "repaired_size"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "enum": [
+                  "original",
+                  "repaired",
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "preview_output_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "preview_size"
+                  ]
+                },
+                {
+                  "required": [
+                    "repaired_size"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "dependentRequired": {
+        "preview_size": [
+          "repaired_size"
+        ],
+        "repaired_size": [
+          "preview_size"
+        ]
+      }
+    },
+    "source_selection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source_action_instance_id": {
+              "$ref": "#/$defs/id"
+            },
+            "status": {
+              "const": "pending"
+            }
+          },
+          "required": [
+            "source_action_instance_id",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source_action_instance_id": {
+              "$ref": "#/$defs/id"
+            },
+            "status": {
+              "const": "fixed"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/selection_item"
+              }
+            }
+          },
+          "required": [
+            "source_action_instance_id",
+            "status",
+            "items"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "obtaining": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source_resolution"
+        },
+        "filter": {
+          "enum": [
+            "default",
+            "preview",
+            "explicit"
+          ]
+        },
+        "selections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source_selection"
+          }
+        }
+      },
+      "required": [
+        "source",
+        "filter",
+        "selections"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "status": {
+                    "const": "unresolved"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "properties": {
+              "selections": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "description": "首次执行即提供；source 未固定时明确 unresolved。每个固定来源对应一个选择记录，pending 与 fixed 空集合区分，跨字段关系见报告契约。"
+    },
+    "automation": {
+      "type": "object",
+      "properties": {
+        "purpose": {
+          "const": "auto_preview"
+        },
+        "source_action_instance_id": {
+          "$ref": "#/$defs/id"
+        },
+        "capability": {
+          "type": "object",
+          "properties": {
+            "device_id": {
+              "$ref": "#/$defs/id"
+            },
+            "action_type": {
+              "$ref": "#/$defs/camera_action_type"
+            },
+            "parameter_type": {
+              "$ref": "#/$defs/text"
+            },
+            "preview_supported": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "device_id",
+            "action_type",
+            "parameter_type",
+            "preview_supported"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "purpose",
+        "source_action_instance_id",
+        "capability"
+      ],
+      "additionalProperties": false,
+      "description": "自动预览声明的已解析来源及受理时能力依据；受理失败也可保留，但该字段本身不证明动作已通过校验。"
+    },
+    "cleanup_selection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "pending"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "fixed"
+            },
+            "output_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "status",
+            "output_ids"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

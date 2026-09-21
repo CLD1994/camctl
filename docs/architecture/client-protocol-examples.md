@@ -48,10 +48,10 @@
 
 | 场景 | 客户端输入 | camctl 状态报告 | 后续客户端文件 |
 | --- | --- | --- | --- |
-| 录像与取回成功 | [执行计划](../../protocol/examples/client-protocol/01-success/plan.json) | [完成报告](../../protocol/examples/client-protocol/01-success/status-report-1-6a2d8346b79be33790f613d183707116fb16ec40908850b7e9963195bf4f9b62.json) | 日常接续：[附带确认的新录像计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json)；可选演示：[原请求附带确认](../../protocol/examples/client-protocol/01-success/ack-plan.json) |
+| 录像与取回成功 | [执行计划](../../protocol/examples/client-protocol/01-success/plan.json) | [完成报告](../../protocol/examples/client-protocol/01-success/status-report-1-82ee37930ec8d8a7b49e12be30490c99ed5175aa4b5b6c1dd98985d8aeb3dcf4.json) | 日常接续：[附带确认的新录像计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json)；可选演示：[原请求附带确认](../../protocol/examples/client-protocol/01-success/ack-plan.json) |
 | 单个动作参数错误 | [执行计划](../../protocol/examples/client-protocol/02-action-invalid/plan.json) | [受理后的报告](../../protocol/examples/client-protocol/02-action-invalid/status-report-1-d0933c64a020b032a36877c2bc57522d4f55c7d622cf23783cbdd18105686d41.json)、[完成后的增量报告](../../protocol/examples/client-protocol/02-action-invalid/status-report-2-86475d9a26792e9853786f1ad0bba5829839e9e60986bee9a5626622d79ff3fb.json) | [两份报告之间的 ACK 输入](../../protocol/examples/client-protocol/02-action-invalid/ack-plan.json)、[合并后的计划记录](../../protocol/examples/client-protocol/02-action-invalid/client-merged-plan.json) |
-| 组取回部分失败 | [执行计划](../../protocol/examples/client-protocol/03-obtain-partial/plan.json) | [完成报告](../../protocol/examples/client-protocol/03-obtain-partial/status-report-1-7b785ee3d38af0ea04a1b546cc21204ae119eccff83757e297d7b8b2d28b0b2c.json) | [补取失败原片的执行计划](../../protocol/examples/client-protocol/03-obtain-partial/retry-plan.json) |
-| 组内一个录像没有产物 | [执行计划](../../protocol/examples/client-protocol/04-source-no-output/plan.json) | [完成报告](../../protocol/examples/client-protocol/04-source-no-output/status-report-1-50dc75db690178403a722a0c6334879d71e6f6cc4d0da5afaef642b499bd64ab.json) | 按来源动作解释无产物失败，保留另一份成功交付 |
+| 组取回部分失败 | [执行计划](../../protocol/examples/client-protocol/03-obtain-partial/plan.json) | [完成报告](../../protocol/examples/client-protocol/03-obtain-partial/status-report-1-a5b8ae94f242ed6d2a2ff979f062fde6bed0f7f794e9fbc7b679e99a66c2ee61.json) | [补取失败原片的执行计划](../../protocol/examples/client-protocol/03-obtain-partial/retry-plan.json) |
+| 组内一个录像没有产物 | [执行计划](../../protocol/examples/client-protocol/04-source-no-output/plan.json) | [完成报告](../../protocol/examples/client-protocol/04-source-no-output/status-report-1-9fba97269ee4ccbab6a4b7e7813f558045ba45291a1f581dc9ae13eb4e38c6ae.json) | 按来源动作解释无产物失败，保留另一份成功交付 |
 | 取消完成后清理已有产物 | [录像计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json)、[维护计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/maintenance-plan.json) | [进度与完成报告](#样例五取消完成后清理已有产物) | 接续样例一，保留此前未变化的取回与交付 |
 | 取消已生效但停止未确认 | [场景前提](#样例六取消已生效但停止没有确认) | [取消停止失败报告](../../protocol/examples/client-protocol/06-cancel-stop-failed/status-report-1-0554c3821f33f591f38853c398d7e1566cb49de6656811c583670b8ded71fa4d.json) | 独立历史；同时展示任务已取消与停止未确认 |
 
@@ -235,7 +235,7 @@ p-004：completed
 | [capture-plan.json](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json) | 新增录像 `a-501`；参数继续使用本文样例驱动，不能当作真实相机参数类型 |
 | [maintenance-plan.json](../../protocol/examples/client-protocol/05-cancel-and-cleanup/maintenance-plan.json) | 通过原请求 `req-005` 取消该录像、显式清理原有 `o-001`，并请求从报告 1 之后局部同步 |
 | [报告 2](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-2-2347140a37b9151e9ba3a89cfd1686184b97cd03342e7d6297d818e308b4d9da.json) | 覆盖 `(20, 29]`；取消标记已经保存，停止调用仍在执行，取消动作保持 `running` |
-| [报告 3](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-3-8b87026c79662a0fc742a2fff6d5b99070dcc32175954cf7dcf40bc297f6bc94.json) | 覆盖 `(20, 40]`；停止与适用废弃内容清理已完成，取消成功，原有 `o-001` 的独立清理也已完成 |
+| [报告 3](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-3-a33bbf45aa2413dbe6af84944cc5c5e62261a1f3b6f7469c1495e711744033e9.json) | 覆盖 `(20, 40]`；停止与适用废弃内容清理已完成，取消成功，原有 `o-001` 的独立清理也已完成 |
 
 编号从样例一的 20 继续，详见[样例五的逐项编号](../../protocol/examples/client-protocol/history.md#样例五接续样例一从-20-到-40)。报告 2 在第 29 条后冻结，报告 3 在第 40 条后冻结；本例尚未吸收报告 2 的 ACK，因此报告 3 仍从 20 开始，包含两份报告之间重叠的变化。
 

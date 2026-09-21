@@ -1,0 +1,117 @@
+{
+  "report_id": 1,
+  "from_wm": 0,
+  "to_wm": 4,
+  "plans": [
+    {
+      "plan_instance_id": "p-duplicate",
+      "request_id": "req-duplicate",
+      "plan_seq": 1,
+      "created_at": "2026-09-22 08:00:00",
+      "name": "预览与范围选择示例",
+      "status": "pending",
+      "actions": [
+        {
+          "name": "拍摄",
+          "type": "camera_record",
+          "device_id": "demo_cam0",
+          "scheduled_at": "2026-09-22 09:00:00",
+          "policy": {
+            "max_delay_ms": 5000
+          },
+          "action_instance_id": "a-duplicate-0",
+          "input_params": {
+            "type": "demo_adjustable",
+            "resolution": "1080p",
+            "frame_rate_fps": 30
+          },
+          "status": "pending",
+          "execution": {
+            "started": false
+          },
+          "effective_params": {
+            "type": "demo_adjustable",
+            "resolution": "1080p",
+            "frame_rate_fps": 30
+          }
+        },
+        {
+          "name": "自动预览",
+          "type": "obtain_action_outputs",
+          "scheduled_at": "2026-09-22 09:00:00",
+          "action_instance_id": "a-duplicate-1",
+          "input_params": {
+            "source": {
+              "action_name": "拍摄"
+            },
+            "filter": "preview",
+            "purpose": "auto_preview"
+          },
+          "status": "failed",
+          "execution": {
+            "started": false
+          },
+          "error": {
+            "code": "duplicate_auto_preview",
+            "stage": "admission",
+            "details": {
+              "source_action_name": "拍摄",
+              "obtain_action_names": [
+                "自动预览",
+                "第二个自动预览"
+              ]
+            }
+          },
+          "automation": {
+            "purpose": "auto_preview",
+            "source_action_instance_id": "a-duplicate-0",
+            "capability": {
+              "device_id": "demo_cam0",
+              "action_type": "camera_record",
+              "parameter_type": "demo_adjustable",
+              "preview_supported": true
+            }
+          }
+        },
+        {
+          "name": "第二个自动预览",
+          "type": "obtain_action_outputs",
+          "scheduled_at": "2026-09-22 09:00:00",
+          "action_instance_id": "a-duplicate-2",
+          "input_params": {
+            "source": {
+              "action_name": "拍摄"
+            },
+            "filter": "preview",
+            "purpose": "auto_preview"
+          },
+          "status": "failed",
+          "execution": {
+            "started": false
+          },
+          "error": {
+            "code": "duplicate_auto_preview",
+            "stage": "admission",
+            "details": {
+              "source_action_name": "拍摄",
+              "obtain_action_names": [
+                "自动预览",
+                "第二个自动预览"
+              ]
+            }
+          },
+          "automation": {
+            "purpose": "auto_preview",
+            "source_action_instance_id": "a-duplicate-0",
+            "capability": {
+              "device_id": "demo_cam0",
+              "action_type": "camera_record",
+              "parameter_type": "demo_adjustable",
+              "preview_supported": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

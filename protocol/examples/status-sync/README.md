@@ -36,12 +36,12 @@
 
 | 报告 | 覆盖范围 | 完整文件 | 用户可以得知的结果 |
 | --- | --- | --- | --- |
-| 1 | `(0, 20]` | [报告 1](status-report-1-9b98a3aae103490d2514ce8f42d6259581b1ec32ef7b01a0a5d705337a2174f4.json) | A 录像和取回完成 |
-| 2 | `(20, 40]` | [报告 2](status-report-2-2e504f8c23837bae31f00eeba7f1e336a0be56714f44256fd9d3b4d6b221373e.json) | B 录像和取回完成 |
-| 3 | `(40, 45]` | [报告 3](status-report-3-54a0cec7bb287134646f4f4c0b7062970ea121de72239d6beae93deda6ab8ba5.json) | A 的相机原片清理完成 |
-| 4 | `(20, 47]` | [报告 4](status-report-4-508254cf5833e6fba62afb6f6d3efde26752d126849dbe6ab5d745c1f8737dfd.json) | 缺失状态已覆盖，同步动作仍在运行 |
-| 5 | `(20, 48]` | [报告 5](status-report-5-1d9d260588868b20461fbb2f7cbd1a9e6581f84dbc8dede2516abcaa50e293ac.json) | 缺失状态已覆盖，同步动作已成功 |
-| 6 | `(48, 53]` | [报告 6](status-report-6-e09040fb6b24a7f6b9510ef2718b1442bf8cd58448576635151f6eb4ea0381ea.json) | B 的相机原片清理完成，恢复普通增量 |
+| 1 | `(0, 20]` | [报告 1](status-report-1-7a09e5a875dc27ed3036fa69a6b45bca091f59410c1f7bcb338ef096355dafec.json) | A 录像和取回完成 |
+| 2 | `(20, 40]` | [报告 2](status-report-2-0f2d2386c9684f30e41ca811ec083fe47a745f0eed547dd73dacb1a95d74cf44.json) | B 录像和取回完成 |
+| 3 | `(40, 45]` | [报告 3](status-report-3-2aba7773176984b7b0431a63544414f8901929bb97d8c26be3a7cf55f001cf43.json) | A 的相机原片清理完成 |
+| 4 | `(20, 47]` | [报告 4](status-report-4-812d6303572a00fb6578c8d14973c9cb24462031081dd66bffd51f16b740d465.json) | 缺失状态已覆盖，同步动作仍在运行 |
+| 5 | `(20, 48]` | [报告 5](status-report-5-24d10bd3abd5868abc64a05ca01c71f19b461365eccc11431d3ba067f9c15b8d.json) | 缺失状态已覆盖，同步动作已成功 |
+| 6 | `(48, 53]` | [报告 6](status-report-6-1eff97820d35a1208c962aaeed8870039c7aebe56f6d322cafe17a7302ac00ba.json) | B 的相机原片清理完成，恢复普通增量 |
 
 录像、拷贝和清理假定成功，报告选取表中所列的生成时点。编号来自[业务变化编号](history.md)中的具体事实；自动报告登记及有效确认不会增加业务水位。实际运行中的其他报告机会、文件替换和领取按全局规则处理，本例不规定生产报告的编号或数量。
 

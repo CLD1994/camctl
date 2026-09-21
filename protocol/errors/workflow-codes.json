@@ -1,0 +1,192 @@
+{
+  "description": "预览、产物选择、交付及取消相关错误登记；其他错误由各责任专题定义，驱动错误保持开放。详情 Schema 为对应 details 的权威结构。",
+  "codes": {
+    "duplicate_auto_preview": {
+      "stage": "admission",
+      "description": "同一来源拍摄关联多个自动预览取回，全部冲突项受理失败。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "source_action_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "obtain_action_names": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 2,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "source_action_name",
+          "obtain_action_names"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "preview_not_supported": {
+      "stage": "admission",
+      "description": "自动预览关联的参数类型明确不支持预览。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "source_action_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parameter_type": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source_action_name",
+          "parameter_type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "preview_missing": {
+      "stage": "output_selection",
+      "description": "来源最终产物已确定，但某份原文件没有对应预览。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "source_action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          },
+          "original_output_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          }
+        },
+        "required": [
+          "source_action_instance_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output_not_found": {
+      "stage": "output_selection",
+      "description": "显式取回所请求产物 ID 可靠确认不存在。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "requested_output_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          }
+        },
+        "required": [
+          "requested_output_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output_source_mismatch": {
+      "stage": "output_selection",
+      "description": "显式取回所请求产物不属于指定来源；不建立虚假的产物关联。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "requested_output_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          }
+        },
+        "required": [
+          "requested_output_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output_unavailable": {
+      "stage": "output_selection",
+      "description": "已选择产物可靠确认不可取回，不改选其他文件。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          },
+          "availability": {
+            "enum": [
+              "cleaned",
+              "missing"
+            ]
+          }
+        },
+        "required": [
+          "output_id",
+          "availability"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "output_cleanup_started": {
+      "stage": "output_selection",
+      "description": "本次取回尚无读取资格，产物已有有效删除限制。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          }
+        },
+        "required": [
+          "output_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "delivery_handoff_unconfirmed": {
+      "stage": "publication",
+      "description": "中断恢复确认三个交接位置均无副本，没有可靠完成事实且交接结果无法确认；交付失败且不自动重投。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "delivery_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          }
+        },
+        "required": [
+          "delivery_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "cancel_self_target": {
+      "stage": "execution",
+      "description": "完整取消目标集合包含发起动作自身，尚未向任何目标施加取消。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          }
+        },
+        "required": [
+          "action_instance_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "work_file_delete_failed": {
+      "stage": "cleanup",
+      "description": "本次取回工作副本删除明确失败；清理责任保留，不改变取回取消结果。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "delivery_id": {
+            "$ref": "status-report.schema.json#/$defs/id"
+          }
+        },
+        "required": [
+          "delivery_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -134,6 +134,28 @@
           ],
           "result": {
             "failures": []
+          },
+          "obtaining": {
+            "source": {
+              "status": "fixed",
+              "plan_instance_id": "p-sync-001",
+              "action_instance_ids": [
+                "a-sync-101"
+              ]
+            },
+            "filter": "default",
+            "selections": [
+              {
+                "source_action_instance_id": "a-sync-101",
+                "status": "fixed",
+                "items": [
+                  {
+                    "output_id": "o-sync-001",
+                    "reason": "original"
+                  }
+                ]
+              }
+            ]
           }
         }
       ]

@@ -22,7 +22,10 @@
                     "title": "分辨率",
                     "description": "4K 只允许搭配每秒 30 帧。",
                     "type": "string",
-                    "enum": ["4K", "1080p"]
+                    "enum": [
+                      "4K",
+                      "1080p"
+                    ]
                   },
                   "frame_rate_fps": {
                     "title": "帧率",
@@ -30,26 +33,40 @@
                     "$ref": "#/$defs/frame_rate"
                   }
                 },
-                "required": ["type", "resolution", "frame_rate_fps"],
+                "required": [
+                  "type",
+                  "resolution",
+                  "frame_rate_fps"
+                ],
                 "additionalProperties": false,
                 "if": {
                   "properties": {
-                    "resolution": {"const": "4K"}
+                    "resolution": {
+                      "const": "4K"
+                    }
                   },
-                  "required": ["resolution"]
+                  "required": [
+                    "resolution"
+                  ]
                 },
                 "then": {
                   "properties": {
-                    "frame_rate_fps": {"const": 30}
+                    "frame_rate_fps": {
+                      "const": 30
+                    }
                   }
                 },
                 "$defs": {
                   "frame_rate": {
                     "type": "integer",
-                    "enum": [30, 60]
+                    "enum": [
+                      30,
+                      60
+                    ]
                   }
                 }
-              }
+              },
+              "preview_supported": false
             },
             {
               "type": "demo_fixed",
@@ -63,9 +80,12 @@
                     "const": "demo_fixed"
                   }
                 },
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "additionalProperties": false
-              }
+              },
+              "preview_supported": false
             }
           ]
         }

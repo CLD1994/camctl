@@ -230,6 +230,34 @@
                 }
               }
             ]
+          },
+          "obtaining": {
+            "source": {
+              "status": "fixed",
+              "plan_instance_id": "p-004",
+              "action_instance_ids": [
+                "a-301",
+                "a-302"
+              ]
+            },
+            "filter": "default",
+            "selections": [
+              {
+                "source_action_instance_id": "a-301",
+                "status": "fixed",
+                "items": []
+              },
+              {
+                "source_action_instance_id": "a-302",
+                "status": "fixed",
+                "items": [
+                  {
+                    "output_id": "o-302",
+                    "reason": "original"
+                  }
+                ]
+              }
+            ]
           }
         }
       ]

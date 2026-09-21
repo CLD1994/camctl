@@ -219,6 +219,28 @@
           ],
           "result": {
             "failures": []
+          },
+          "obtaining": {
+            "source": {
+              "status": "fixed",
+              "plan_instance_id": "p-sync-002",
+              "action_instance_ids": [
+                "a-sync-201"
+              ]
+            },
+            "filter": "default",
+            "selections": [
+              {
+                "source_action_instance_id": "a-sync-201",
+                "status": "fixed",
+                "items": [
+                  {
+                    "output_id": "o-sync-002",
+                    "reason": "original"
+                  }
+                ]
+              }
+            ]
           }
         }
       ]
@@ -253,6 +275,14 @@
                 "outcome": "deleted"
               }
             ]
+          },
+          "cleaning": {
+            "selection": {
+              "status": "fixed",
+              "output_ids": [
+                "o-sync-001"
+              ]
+            }
           }
         }
       ]
