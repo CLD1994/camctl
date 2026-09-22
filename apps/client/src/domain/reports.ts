@@ -487,7 +487,7 @@ function ownFacts(report: StatusReport) {
                 "停止流程身份重复",
               );
         }
-        if (result.source_copy) copyFacts(result.source_copy, "原片工作副本");
+        if (result.source_copy) copyFacts(result.source_copy, "原片输入副本");
         if (action.status === "succeeded" && result.repair)
           requireFact(
             !["undetermined", "pending", "running"].includes(

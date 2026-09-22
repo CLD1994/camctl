@@ -99,9 +99,9 @@ SQLite 自动检查点使用本次会话的 `database.wal_autocheckpoint_pages`�
 
 相机文件拷贝使用本次会话的 `copy.segment_size` 组织可靠进度的保存粒度，取回、异常原片检查及修复输入共用。默认值、合法范围、最后一段和跨会话调整规则由[进度保存的分段大小](file-copy.md#进度保存的分段大小)定义。该处理配置不固化到动作；读取尝试、重拷次数及通信时限仍使用各自已固化的设备配置。
 
-正式产物清理使用 `cleanup.max_delete_attempts` 和 `cleanup.max_query_attempts`，在清理动作首次受理时固化。每份目标文件独立计数，跨运行、重送及配置更新不重置；默认值、合法范围及额度耗尽时的处理由[删除与查询的独立尝试预算](output-cleanup.md#删除与查询的独立尝试预算)定义。内部工作文件的清理采用所属生命周期规则，不共用这两组预算。
+正式产物清理使用 `cleanup.max_delete_attempts` 和 `cleanup.max_query_attempts`，在清理动作首次受理时固化。每份目标文件独立计数，跨运行、重送及配置更新不重置；默认值、合法范围及额度耗尽时的处理由[删除与查询的独立尝试预算](output-cleanup.md#删除与查询的独立尝试预算)定义。内部中间文件的清理采用所属生命周期规则，不共用这两组预算。
 
-取回及录像内部工作文件的历史清理使用本次正常运行的 `cleanup.work_file_batch_size` 和 `cleanup.work_file_limit_per_run`，不固化到原动作。默认值、检查计数、跨运行续查及新产生文件的首次清理由[工作文件清理的运行预算](file-handoff.md#工作文件清理的运行预算)统一定义。
+取回及录像内部中间文件的历史清理使用本次正常运行的 `cleanup.work_file_batch_size` 和 `cleanup.work_file_limit_per_run`，不固化到原动作。默认值、检查计数、跨运行续查及新产生文件的首次清理由[中间文件清理的运行预算](file-handoff.md#中间文件清理的运行预算)统一定义。
 
 ### 历史查询与快照
 

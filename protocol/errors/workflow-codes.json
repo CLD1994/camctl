@@ -174,7 +174,7 @@
     },
     "work_file_delete_failed": {
       "stage": "cleanup",
-      "description": "本次取回工作副本删除明确失败；清理责任保留，不改变取回取消结果。",
+      "description": "本次取回中间文件删除明确失败；清理责任保留，不改变取回取消结果。",
       "details_schema": {
         "type": "object",
         "properties": {

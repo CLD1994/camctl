@@ -78,7 +78,7 @@
 | 执行成功或运行后失败 | `execution.started: true`，成功结果或最终错误 | 把运行失败写成受理校验失败 |
 | 过期或取消 | 保留是否曾开始执行的实际值；过期附 `expiration_reason` | 重置尝试记录或把未执行写成执行成功 |
 
-三种拍摄动作（`camera_take_photo`、`camera_record`、`camera_timelapse`）均采用启动窗口。`expiration_reason` 为 `window_missed` 或 `window_exhausted` 的成立条件遵守[公共过期规则](scheduling-execution.md#过期原因)。取回、清理、取消和报告动作不采用该窗口。终态动作不再提供自身 `waiting`；尚存设备效果和清理责任通过各自结果表达，不能据此重开历史动作。
+三种拍摄动作（`camera_take_photo`、`camera_record`、`camera_timelapse`）均采用启动窗口。`expiration_reason` 为 `window_missed` 或 `window_exhausted` 的成立条件遵守[公共过期规则](scheduling-execution.md#过期原因)。取回、清理、取消和报告动作不采用该窗口。终态动作不再提供自身 `waiting`；尚未结束的设备活动和文件清理责任通过各自结果表达，不能据此重开历史动作。
 
 合法动作的公共输入字段须满足[第一版动作入口](plan-input.md#第一版动作入口)，例如取回与清理必须有 `scheduled_at`，非相机动作不接受 `device_id`。报告不会替原始输入修错；初始失败分支对这些字段保留任意 JSON 值，其他分支遵守已通过的输入契约。
 
@@ -145,11 +145,11 @@
 | 字段 | 出现条件与含义 |
 | --- | --- |
 | `recording.control_elapsed_s` | 已可靠取得的控制计时；未知时省略，不能填媒体时长或目标时长 |
-| `recording.effect` | 已登记的持续设备效果；按[效果登记与补偿](scheduling-execution.md#效果登记与补偿)表达收场进度和错误 |
+| `recording.effect` | 已登记设备活动的停止处理；按[设备活动登记与停止处理](scheduling-execution.md#设备活动登记与停止处理)表达收场进度和错误 |
 | `recording.residual` | 已记录的遗留录像事实；`possibly_recording` 表达仍可能录像，后续确认停止可更新为 `stopped`，不改写原动作终态 |
 | `recording.emergency_stops` | 已成功补记的[会话应急停止](session-errors.md#正在录像时的应急停止)事实；包含流程、会话、已用次数与结果，不能报告尚未落盘的内存结果 |
 | `recording.followup_stops` | [后续动作触发的残留收场](camera-recovery.md#后续动作触发的残留收场)；每项包含原流程 ID、触发动作、独立预算、尝试和结果 |
-| `result.source_copy` | 主机检查或修复实际使用的原片工作副本的读取进度；使用下文的公共拷贝字段，不创建取回 delivery |
+| `result.source_copy` | 主机检查或修复实际使用的原片输入副本的读取进度；使用下文的公共拷贝字段，不创建取回 delivery |
 | `result.check` | 正式产物登记前已经开始或取得的原片检查；登记后相应媒体事实还由正式产物表达 |
 | `result.repair` | 修复决定与处理结果；未决定为 `undetermined`，已确认不需要为 `not_needed`，其余按实际待处理、执行及终结事实表达 |
 | `result.discard_cleanup` | 取消录像后的废弃内容清理结果；适用文件与权限按[录像取消](camera-recording.md#camera_record-取消)判断 |
@@ -176,7 +176,7 @@
 
 `completed` 只表示适用检查已经结束。是否查出时长不足或媒体错误由实际值及 `issues` 表达，不表示整段视频通过逐帧解码。后来发现的媒体问题可以更新产物事实，但不改写原录像终态。
 
-源产物 `checksum` 为 `not_obtained`，或为 `available` 并带 64 位小写十六进制 `sha256`。没有源端摘要不等于源文件损坏。交付文件自己的摘要通过交付的 `sha256` 表达，不能把不完整工作文件的摘要填作最终交付摘要。
+源产物 `checksum` 为 `not_obtained`，或为 `available` 并带 64 位小写十六进制 `sha256`。没有源端摘要不等于源文件损坏。交付文件自己的摘要通过交付的 `sha256` 表达，不能把不完整中间文件的摘要填作最终交付摘要。
 
 ### 取回
 
@@ -218,7 +218,7 @@
 
 取消动作自身被取消时，尚未完成的 `result.items` 可用 `status: "canceled"` 表示本次处理或等待已停止，同时必填 `cancellation_effect`：`not_applied` 表示尚未施加目标取消，`applied` 表示目标取消已生效且其必要收场独立继续，`not_required` 表示目标已有终态等无需再施加动作取消的情形。它不表示目标设备已经停止，也不撤销已启动的文件撤回等独立责任。已完成的成功或失败项保持原结果；不能为了匹配动作自身 `canceled` 改写全部条目。
 
-后一个取消动作只取消前一个动作时，其成功项仅关联前一个动作。未直接选中的录像不递归加入其 `items`。取消自身目标的错误与交接结果未知等错误，使用[统一登记](../../protocol/errors/workflow-codes.json)；报告公共 `error` 仍接受未识别驱动错误。工作副本继续用 `copy.work_file_cleanup`，不因完整或半成品增加另一套状态。
+后一个取消动作只取消前一个动作时，其成功项仅关联前一个动作。未直接选中的录像不递归加入其 `items`。取消自身目标的错误与交接结果未知等错误，使用[统一登记](../../protocol/errors/workflow-codes.json)；报告公共 `error` 仍接受未识别驱动错误。中间文件继续用 `copy.work_file_cleanup`，不因完整或半成品增加另一套状态。
 
 ### 显式报告
 
@@ -276,7 +276,7 @@
 | `publishing` | 已进入发布处理，尚未可靠保存发布完成事实 |
 | `published` | 已可靠保存本地发布事实；主程序随后移动或删除文件不改变这项历史事实 |
 | `failed` | 本次交付最终失败，必须提供错误 |
-| `canceled` | 尚未可靠发布的本次交付被取消，适用工作文件清理单独表达 |
+| `canceled` | 尚未可靠发布的本次交付被取消，适用中间文件清理单独表达 |
 | `withdrawn` | 已发布交付的可撤回文件已确认撤回；原取回动作终态保持 |
 
 正常路径为 `pending → preparing → prepared → publishing → published`。未发布阶段按取消或最终失败结束；已发布后只有可靠撤回才能转为 `withdrawn`。发布结果尚在核实时保持 `publishing`，不能猜测为未发布再发一份，也不能猜测成功。中断恢复按[普通交付恢复规则](file-handoff.md#普通交付的保存顺序与中断恢复)确认三个位置均无副本、没有可靠完成事实且结果无法确认时，交付结束为 `failed`，错误明确保留本地交接结果未知的原因，不自动重投。已终结交付不因新的取回请求复活。
@@ -295,13 +295,13 @@
 | `source_size` | 已可靠确认的完整源长度，已知时提供；进度不能超过它 |
 | `read_attempts` | 整个文件跨轮次累计的读取尝试，编号连续且不超过上限；成功分段、续传、重拷、重启均不清零 |
 | `verification` | 当前完整副本的校验进度或结论；摘要获取失败与摘要不一致分别表达 |
-| `work_file_cleanup` | 此次工作副本的清理进度或结果，与正式源产物的清理独立 |
+| `work_file_cleanup` | 此次中间文件的清理进度或结果，与正式源产物的清理独立 |
 
 `verification` 的 `not_performed`、`running` 分别表示未进行与进行中；`matched`、`mismatched` 表示实际比较结果；`source_checksum_unavailable` 只用于驱动明确不提供源摘要、且已按既定可靠读取契约完成主机文件校验的降级路径。摘要命令失败或结果未知不能冒充该能力分支，使用 `failed` 并提供错误。
 
 准备完成的副本须已满足[文件一致性与校验](file-copy.md#读取正确性与文件校验)：当前校验为 `matched` 或上述允许的降级结果，`committed_bytes` 等于完整文件长度，存在最终目标摘要。媒体错误不等于拷贝字节不一致；源摘要已知时必须与完整交付摘要一致。
 
-`work_file_cleanup` 的 `not_needed` 表示当前没有工作文件清理责任；待处理、执行中、完成、明确失败和结果未知分别保存。失败或未知必须有错误。取回的失败、取消与文件清理遵守[取回工作副本的保留与清理](obtaining-outputs.md#取回工作副本的保留与清理)，不能因为动作终态就省略未完成清理事实，也不能误删其他请求的文件。
+`work_file_cleanup` 的 `not_needed` 表示当前没有中间文件清理责任；待处理、执行中、完成、明确失败和结果未知分别保存。失败或未知必须有错误。取回的失败、取消与文件清理遵守[取回中间文件的保留与清理](obtaining-outputs.md#取回中间文件的保留与清理)，不能因为动作终态就省略未完成清理事实，也不能误删其他请求的文件。
 
 取消后的完整交付副本与半成品共用 `work_file_cleanup`，不另建一套完整副本清理结果。副本清理失败不恢复取回，清理后来完成也不把取回的 `canceled` 改为成功。发起取消的动作按其本次适用处理结果报告，不能将清理失败与会话允许正常结束混为一谈。
 

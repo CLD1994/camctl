@@ -213,7 +213,7 @@ const fieldNames: Record<string, string> = {
   seconds: "秒",
   sha256: "SHA-256",
   verification: "复制核验",
-  work_file_cleanup: "工作文件清理",
+  work_file_cleanup: "中间文件清理",
   committed_bytes: "已提交字节",
   attempts: "尝试记录",
   read_attempts: "读取尝试",

@@ -290,7 +290,7 @@ p-004：completed
 | `result.recording.start`、`stop` | 启动、停止各自已固化的上限及尝试记录，分别计数 |
 | `attempts[].attempt_no`、`status` | 本流程内已开始的尝试序号及结果；不是动作被客户端重送的次数 |
 | `result.recording.control_elapsed_s` | 已可靠取得的控制过程计时，不是从视频文件测出的媒体时长 |
-| `result.recording.effect.status` | 本动作持续录像效果的收场状态；`compensated` 表示该效果已完成收场，不代表相机今后始终空闲 |
+| `result.recording.effect.status` | 本动作所启动录像的收场状态；`compensated` 表示这段录像已完成收场，不代表相机今后始终空闲 |
 | `result.repair.status` | 样例中正常录像不需要修复，取值为 `not_needed` |
 | 产物 `kind`、`original_name`、`media_type`、`size` | 原片类型、原始文件名、内容类型及可靠确认的完整字节长度 |
 | 产物 `availability`、`cleanup.status` | 文件可用状态与清理状态；样例原片为 `available`，未请求清理为 `not_requested` |

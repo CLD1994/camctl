@@ -72,7 +72,7 @@ running
 flowchart LR
     R[request_id：逻辑请求] --> P[plan_instance_id：计划实例]
     P --> A[action_instance_id：动作实例]
-    A --> E[effect：持续设备效果]
+    A --> E[设备活动]
     A --> F[device_fact：设备事实]
     A --> O[output_id：正式产物]
     O --> D[delivery_id：一次普通交付]
