@@ -1,12 +1,44 @@
-# CLI 设计与运行资料
+# camctl 设计与实现资料
 
-- [全局设计](../architecture/README.md)
-- [实现规格](implementation.md)：技术选型、模块与接口契约，以及实施前须细化的事项
-- [规格收口检查](specification-closure-review.md)：端到端检查结果、需要确认的行为缺口及实现准备事项
-- [历史状态查询与报告重建](historical-state-query.md)：事件与两种序号的通俗解释，当前投影、历史快照、正反向恢复及一致读取，以及索引和性能验收的待细化事项
-- [CLI 命令与主程序调用](../architecture/cli-commands.md)
-- [配置](../architecture/configuration.md)与[初始化](../architecture/initialization.md)
-- [部署示例](../architecture/deployment-example.md)
-- [请求与会话](../architecture/protocol-session.md)
+camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设备控制、状态保存及文件交接，生产代码位于 `apps/camctl`。本目录说明这些职责如何在进程、线程、数据库和文件接口中实现；全局业务行为在 `docs/architecture` 定义，公共机器协议只在根目录 `protocol` 维护。
 
-生产代码归属 `apps/camctl`，使用 Python。全局业务语义与跨组件协议集中在 `docs/architecture`，这里提供 CLI 使用与实现入口。
+## 第一次阅读
+
+1. 先读[设计总览](../architecture/README.md)与[概念](../architecture/concepts.md)，了解计划、动作、正式产物、交付和报告之间的关系。
+2. 按[全局阅读路线](../architecture/reading-guide.md)了解受理、执行、文件交接和报告的正常流程及失败规则。
+3. 阅读[实现总览](implementation.md)，理解运行环境、线程与进程分工、模块协作和接口完成含义。
+4. 按下表进入自己负责的实现专题，最后检查[实施准备](implementation-readiness.md)和[软件验证](verification.md)。
+
+设计中的行为契约、不变量和失败语义必须保持。标为“建议”的内部命名、物理表和接口组织可以根据实际数据流调整。库能力核验、测试通过与真实设备联调是不同层次的证据，不能互相代替。
+
+## 按实现职责查阅
+
+| 要回答的问题 | 文档及范围 |
+| --- | --- |
+| 系统如何分工，工作在哪里执行？ | [实现总览](implementation.md)：目标环境、技术选型、协程／线程／进程、模块和调度接口 |
+| 怎样解析和校验输入，保持数值精确？ | [输入类型与数字适配](data-types.md)：分阶段校验、内部类型、JSON 与配置数字、编码适配 |
+| 数据库调用何时算完成，取消后怎样处理？ | [数据库执行、事务与缓存](persistence-runtime.md)：格式检查、队列、连接、事务、物理结构和缓存 |
+| 历史记录怎样表达事实与顺序？ | [历史存储](history-storage.md)：事件、两类序号、事务边界、查询目录、格式及 SQLite 运行设置 |
+| 怎样恢复某个历史位置并重建报告？ | [历史状态查询](historical-state-query.md)：正反向路径、一致读取、分页、分批编码和性能边界 |
+| 历史快照何时生成，是否影响会话退出？ | [快照维护](history-snapshots.md)：对象范围、累计次数、候选发现、分批处理和退出 |
+| 驱动返回什么证据，文件如何分段处理？ | [设备驱动与文件执行](file-runtime.md)：结果分类、线程池、流式传输、取消和文件所有权 |
+| 日志满载时怎么办，怎样安全写同一文件？ | [日志执行与适配](logging-runtime.md)：入口、队列水位、采样、取消、多进程轮换及持锁复制 |
+| 报告进程如何启动、复用、停止和回收？ | [报告进程与通信](report-runtime.md)：任务身份、结果确认、超时、管道和工作锁 |
+| 如何证明上述软件模块能共同工作？ | [软件验证与实施顺序](verification.md)：单元测试、集成测试、契约验证和阶段方向 |
+
+## 实施准备与证据
+
+| 文档 | 用途 |
+| --- | --- |
+| [实施准备与端到端契约检查](implementation-readiness.md) | 关键协作场景、实施设计交付物、计划交接条件及待决策状态 |
+| [依赖与接入核验](integration-readiness.md) | 库能力核验范围、组件协议接入任务、设备联调证据与尚未完成的技术工作 |
+
+各专题的验收要求共同约束实现。[真实设备联调](integration-readiness.md#设备证据与联调输入)、目标主机部署及硬件性能测量单独安排，不作为第一版软件集成测试的运行前提或通过门槛。
+
+## 运行与主程序对接
+
+- [CLI 命令与主程序调用](../architecture/cli-commands.md)：命令、输入路径、进程结果与退出。
+- [请求与会话](../architecture/protocol-session.md)：接纳、会话接管和退出检查。
+- [本地配置](../architecture/configuration.md)与[初始化](../architecture/initialization.md)：默认值、生效范围和显式建库。
+- [部署联调样例](../architecture/deployment-example.md)：串联配置、初始化、能力说明、输入和报告确认。
+- [C 接入模块](../host-demo/design.md)：主程序管理 CLI 进程及领取文件的责任。
