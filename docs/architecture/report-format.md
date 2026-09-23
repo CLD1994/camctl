@@ -60,7 +60,7 @@
 
 动作的必填自身字段为 `action_instance_id`、`name`、`type`、`status`、`execution`。`execution.started` 表示是否曾可靠保存进入 `running` 的事实，不表示厂商已成功开始录像。状态迁移以[动作状态模型](scheduling-execution.md#动作状态模型)为准。
 
-状态的数据库整数编号与报告文本值按[运行状态定义](../camctl/database-schema.md#计划与动作的运行状态)转换，`execution.started` 来自冻结历史边界处的 `actions.execution_started`。目标取消已生效但仍在必要收场时，动作状态为 `running`；内部 `cancel_requested` 由执行控制使用，报告继续通过既有动作状态、取消明细及设备或文件进度表达相应事实。
+状态的数据库整数编号与报告文本值按[运行状态定义](../camctl/database/plans-actions.md#计划与动作的运行状态)转换，`execution.started` 来自冻结历史边界处的 `actions.execution_started`。目标取消已生效但仍在必要收场时，动作状态为 `running`；内部 `cancel_requested` 由执行控制使用，报告继续通过既有动作状态、取消明细及设备或文件进度表达相应事实。
 
 客户端关注动作是否按照原请求的 `scheduled_at` 及适用调度规则执行，以及当前进度和最终结果。报告通过原始时间意图、动作状态、等待原因、过期原因、错误及结果表达这些信息。实际执行资格和时间窗口由 camctl 判定；主机事件时间及其可信性由 camctl 内部用于调度、恢复和诊断。`created_at` 继续表达客户端创建计划的时间，`scheduled_at` 继续表达请求的执行时间。
 
@@ -68,13 +68,13 @@
 
 `device_id`、`scheduled_at`、`group`、`policy` 表达首次提交的对应公共字段；合法时间从保存的整数值按固定秒级格式还原，其他输入保留原值；`input_params` 表达首次提交的 `params`。原输入省略的字段仍省略，原输入明确提供的 `null`、错误类型或非法值在初始失败报告中保留，不能改造成合法默认值。
 
-合法的设备、时间和组字段分别从 `actions.device_id`、`actions.scheduled_at` 和 `actions.group_name` 取得；非法值从 `actions.input_fields_json` 中的原字段取得。普通列为空时仍须区分输入省略与输入非法，不能一律省略报告字段。保存与重建的完整分类见[计划与动作的输入存储](../camctl/database-schema.md#计划与动作的输入存储)。
+合法的设备、时间和组字段分别从 `actions.device_id`、`actions.scheduled_at` 和 `actions.group_name` 取得；非法值从 `actions.input_fields_json` 中的原字段取得。普通列为空时仍须区分输入省略与输入非法，不能一律省略报告字段。保存与重建的完整分类见[计划与动作的输入存储](../camctl/database/plans-actions.md#计划与动作的输入存储)。
 
 动作公共结构中的额外输入字段放在 `extra_input_fields` 对象中，键和值原样保留。例如原动作多写了 `schedule_at`，该字段出现在 `extra_input_fields.schedule_at`，错误位置仍指向原计划的 `actions[i].schedule_at`。这样既保存诊断依据，也不让任意输入键变成报告公共字段。
 
 合法拍摄动作（`camera_take_photo`、`camera_record`、`camera_timelapse`）另有必填 `effective_params`，包含已固化的 `type` 及具体生效参数。它来自原受理事实，不从 `input_params` 或当前配置临时推算。其他动作不提供该字段。非法 `group` 原值只用于诊断；有效组成员关系仍按[动作公共字段](plan-input.md#动作公共字段)判断，取回动作不因此成为组成员。
 
-`effective_params` 从报告历史边界对应的 `actions.effective_params_json` 解码为 JSON 对象，不输出数据库中的 JSON 文本字符串。首次受理失败的动作省略该字段；合法受理后过期、取消或执行失败的拍摄动作仍提供首次保存的完整值。`policy` 始终取自 `actions.input_fields_json` 中的原始输入，不能用供调度读取的 `actions.max_delay_ms` 补造或替换。两个存储字段的有效组合遵守[生效拍摄参数与启动延迟](../camctl/database-schema.md#生效拍摄参数与启动延迟)。
+`effective_params` 从报告历史边界对应的 `actions.effective_params_json` 解码为 JSON 对象，不输出数据库中的 JSON 文本字符串。首次受理失败的动作省略该字段；合法受理后过期、取消或执行失败的拍摄动作仍提供首次保存的完整值。`policy` 始终取自 `actions.input_fields_json` 中的原始输入，不能用供调度读取的 `actions.max_delay_ms` 补造或替换。两个存储字段的有效组合遵守[生效拍摄参数与启动延迟](../camctl/database/plans-actions.md#生效拍摄参数与启动延迟)。
 
 | 动作事实 | 必须表达 | 不能表达 |
 | --- | --- | --- |
@@ -94,9 +94,9 @@
 
 错误码与阶段由产生该错误的公共边界或驱动登记，遵守[错误表达](client-protocol-examples.md#错误表达)及各责任专题。报告 Schema 不再抄录完整错误码清单。客户端对识别的码提供具体中文说明，对未识别的码保留并展示码、阶段及细节；状态合并与 ACK 资格不能依赖客户端是否认识某个错误码。
 
-动作最终错误由 camctl 根据业务结束条件确定，其整数存储码通过固定定义映射为公共 `code`，该定义同时给出唯一的 `stage`。报告仍完整输出 `code`、`stage` 和 `details`；数据库表示遵守[整数枚举规则](../camctl/database-schema.md#状态与类型的整数枚举)。驱动原始错误由对应操作尝试或业务处理结果表达，保留原始码、发生步骤及详情；动作最终错误按自身契约引用相关事实。一次驱动调用失败不自动成为动作最终错误，后续成功也不抹去此前尝试的错误，具体分工遵守[动作最终错误与驱动错误](../camctl/database-schema.md#动作最终错误与驱动错误)。逐项处理、操作尝试、文件诊断和会话错误分别保留所属契约要求的阶段，不从动作最终阶段反推这些记录的实际发生步骤。
+动作最终错误由 camctl 根据业务结束条件确定，其整数存储码通过固定定义映射为公共 `code`，该定义同时给出唯一的 `stage`。报告仍完整输出 `code`、`stage` 和 `details`；数据库表示遵守[整数枚举规则](../camctl/database/common.md#状态与类型的整数枚举)。驱动原始错误由对应操作尝试或业务处理结果表达，保留原始码、发生步骤及详情；动作最终错误按自身契约引用相关事实。一次驱动调用失败不自动成为动作最终错误，后续成功也不抹去此前尝试的错误，具体分工遵守[动作最终错误与驱动错误](../camctl/database/operations-devices.md#动作最终错误与驱动错误)。逐项处理、操作尝试、文件诊断和会话错误分别保留所属契约要求的阶段，不从动作最终阶段反推这些记录的实际发生步骤。
 
-动作最终错误的 `details` 来自 `actions.error_details_json` 中的 JSON 对象。没有最终错误时，错误码与详情列同时为 SQL `NULL`，报告省略动作的 `error`；有最终错误且没有额外详情时，详情列保存 `{}`，报告输出对象 `details: {}`。不能将详情文本直接输出为 JSON 字符串。合法组合与保存规则见[动作最终错误字段](../camctl/database-schema.md#动作最终错误字段)。
+动作最终错误的 `details` 来自 `actions.error_details_json` 中的 JSON 对象。没有最终错误时，错误码与详情列同时为 SQL `NULL`，报告省略动作的 `error`；有最终错误且没有额外详情时，详情列保存 `{}`，报告输出对象 `details: {}`。不能将详情文本直接输出为 JSON 字符串。合法组合与保存规则见[动作最终错误字段](../camctl/database/plans-actions.md#动作最终错误字段)。
 
 `waiting` 是当前仍成立的等待原因数组；没有等待原因时省略，不能用空原因表示未知错误。多个独立条件可同时出现，终态不保留旧等待。具体含义如下，`details` 中只放已知的对象关联或等待事实：
 
