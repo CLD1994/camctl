@@ -1,5 +1,5 @@
 {
-  "request_id": "req-sync-004",
+  "request_id": "1020",
   "created_at": "2026-09-15 10:00:00",
   "name": "恢复旧备份后的状态同步",
   "actions": [
@@ -8,9 +8,9 @@
       "type": "report_status",
       "params": {
         "scope": "since",
-        "after_report_id": 1
+        "after_report_id": "1"
       }
     }
   ],
-  "last_report_id": 1
+  "last_report_id": "1"
 }

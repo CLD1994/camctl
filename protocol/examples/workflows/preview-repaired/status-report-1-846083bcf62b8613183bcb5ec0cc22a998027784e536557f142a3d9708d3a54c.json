@@ -1,18 +1,17 @@
 {
-  "report_id": 1,
+  "report_id": "1",
   "from_wm": 0,
   "to_wm": 20,
   "plans": [
     {
-      "plan_instance_id": "p-001",
-      "request_id": "req-001",
-      "plan_seq": 1,
+      "plan_instance_id": "1",
+      "request_id": "1001",
       "created_at": "2026-09-13 08:00:00",
       "name": "自动预览选择较小修复成品",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-001",
+          "action_instance_id": "1",
           "name": "主录像",
           "type": "camera_record",
           "device_id": "demo_cam0",
@@ -65,8 +64,8 @@
           },
           "outputs": [
             {
-              "output_id": "o-001",
-              "source_action_instance_id": "a-001",
+              "output_id": "4",
+              "source_action_instance_id": "1",
               "kind": "original",
               "original_name": "VID_0001.mp4",
               "media_type": "video/mp4",
@@ -87,8 +86,8 @@
               }
             },
             {
-              "output_id": "o-preview",
-              "source_action_instance_id": "a-001",
+              "output_id": "12",
+              "source_action_instance_id": "1",
               "kind": "preview",
               "original_name": "VID_0001.mp4",
               "media_type": "video/mp4",
@@ -107,11 +106,11 @@
                   "status": "unknown"
                 }
               },
-              "preview_of_output_id": "o-001"
+              "preview_of_output_id": "4"
             },
             {
-              "output_id": "o-repaired",
-              "source_action_instance_id": "a-001",
+              "output_id": "13",
+              "source_action_instance_id": "1",
               "kind": "repaired",
               "original_name": "VID_0001.mp4",
               "media_type": "video/mp4",
@@ -130,12 +129,12 @@
                   "status": "unknown"
                 }
               },
-              "derived_from_output_id": "o-001"
+              "derived_from_output_id": "4"
             }
           ]
         },
         {
-          "action_instance_id": "a-002",
+          "action_instance_id": "2",
           "name": "自动预览",
           "type": "obtain_action_outputs",
           "scheduled_at": "2026-09-13 09:00:00",
@@ -152,10 +151,10 @@
           },
           "deliveries": [
             {
-              "delivery_id": "d-001",
-              "output_id": "o-repaired",
-              "source_action_instance_id": "a-001",
-              "file_name": "d-001.mp4",
+              "delivery_id": "1",
+              "output_id": "13",
+              "source_action_instance_id": "1",
+              "file_name": "1.mp4",
               "display_name": "VID_0001-正常采集-主录像.mp4",
               "size": 1048576,
               "status": "published",
@@ -189,22 +188,22 @@
           "obtaining": {
             "source": {
               "status": "fixed",
-              "plan_instance_id": "p-001",
+              "plan_instance_id": "1",
               "action_instance_ids": [
-                "a-001"
+                "1"
               ]
             },
             "filter": "preview",
             "selections": [
               {
-                "source_action_instance_id": "a-001",
+                "source_action_instance_id": "1",
                 "status": "fixed",
                 "items": [
                   {
-                    "output_id": "o-repaired",
+                    "output_id": "13",
                     "reason": "repaired_not_larger",
-                    "original_output_id": "o-001",
-                    "preview_output_id": "o-preview",
+                    "original_output_id": "4",
+                    "preview_output_id": "12",
                     "preview_size": 2097152,
                     "repaired_size": 1048576
                   }
@@ -214,7 +213,7 @@
           },
           "automation": {
             "purpose": "auto_preview",
-            "source_action_instance_id": "a-001",
+            "source_action_instance_id": "1",
             "capability": {
               "device_id": "demo_cam0",
               "action_type": "camera_record",

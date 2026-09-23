@@ -57,10 +57,10 @@
         "type": "object",
         "properties": {
           "source_action_instance_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           },
           "original_output_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           }
         },
         "required": [
@@ -76,7 +76,7 @@
         "type": "object",
         "properties": {
           "requested_output_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           }
         },
         "required": [
@@ -92,7 +92,7 @@
         "type": "object",
         "properties": {
           "requested_output_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           }
         },
         "required": [
@@ -108,7 +108,7 @@
         "type": "object",
         "properties": {
           "output_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           },
           "availability": {
             "enum": [
@@ -131,7 +131,7 @@
         "type": "object",
         "properties": {
           "output_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           }
         },
         "required": [
@@ -147,7 +147,7 @@
         "type": "object",
         "properties": {
           "delivery_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           }
         },
         "required": [
@@ -163,7 +163,7 @@
         "type": "object",
         "properties": {
           "action_instance_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           }
         },
         "required": [
@@ -179,7 +179,7 @@
         "type": "object",
         "properties": {
           "delivery_id": {
-            "$ref": "status-report.schema.json#/$defs/id"
+            "$ref": "status-report.schema.json#/$defs/entity_id"
           }
         },
         "required": [

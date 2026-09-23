@@ -8,12 +8,12 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| [missing-report-plan.json](missing-report-plan.json) | 新请求 `req-sync-006`，参数为 `scope: "since"` 和 `after_report_id: 999`，同时携带有效 ACK 6 |
-| [报告 7](status-report-7-b3c69f87a6b052170f47c8d243fc22c6b1aad24a180dfbd3e8d3aa96bdc68905.json) | 覆盖 `(53,56]`，表达同步动作的运行失败 |
+| [missing-report-plan.json](missing-report-plan.json) | 新请求 `1022`，参数为 `scope: "since"` 和 `after_report_id: "999"`，同时携带有效 ACK 6 |
+| [报告 7](status-report-7-3696f4cece9db6a673a26748c96e538d5a6a3d702b117295849a25581669655e.json) | 覆盖 `(53,56]`，表达同步动作的运行失败 |
 
 | 业务编号 | 已保存的事实 |
 | --- | --- |
-| 54 | 受理计划 `p-sync-006`，动作 `a-sync-601` 为 `pending`；同次 ACK 6 使累计位置推进到 53 |
+| 54 | 受理计划 `14`，动作 `31` 为 `pending`；同次 ACK 6 使累计位置推进到 53 |
 | 55 | 同步动作开始执行 |
 | 56 | 查询可靠确认报告 999 不存在，动作失败，计划完成 |
 
@@ -25,7 +25,7 @@
 {
   "code": "sync_report_not_found",
   "stage": "execution",
-  "details": {"after_report_id": 999}
+  "details": {"after_report_id": "999"}
 }
 ```
 

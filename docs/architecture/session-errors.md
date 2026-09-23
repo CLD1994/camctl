@@ -54,6 +54,8 @@ SQLite 操作按[内置忙等待规则](../camctl/history-storage.md#sqlite-内�
 
 本地配置文件不存在是合法缺省情况，使用内置默认值，不属于 `configuration_error`。文件读取故障、格式或覆盖值错误仍按[配置加载规则](configuration.md#本地配置的加载与更新)处理；空设备目录不等于配置加载失败，新计划的设备适用性由动作受理校验判断。
 
+本次配置已成功加载，但已有工作依赖的设备配置缺失或驱动绑定不一致时，按[设备绑定异常的影响范围](configuration.md#设备绑定异常的影响范围)将无法执行的动作或处理项判为业务失败，已有取消及终态按各自规则处理。该情况不触发整个会话立即错误退出，也不对其他设备发起应急停止；普通接纳、其他设备及报告维护仍按各自条件继续。失败结果、适用收场及必要报告可靠处理后，没有其他工作时正常返回 `succeeded`。不能把这类业务绑定问题与配置文件自身无法加载混为一类。
+
 状态库由部署人员通过 [`camctl init`](initialization.md) 显式建立；日常入口不会自动创建。尚未完成首次部署时应先初始化，已投入使用的数据库缺失时则应核实路径并恢复原数据，不能由主程序在收到 `state_db_error` 后自动执行初始化。
 
 合法日志路径对应的文件无法操作，属于辅助日志通道故障；仅供日志轮换使用的协调失败也按日志规则处理。它们不归入这里的 `configuration_error`、`lock_error` 或 `internal_error`。状态库、会话锁和必要报告职责发生的实际错误仍按本表分类，不能因同时存在日志故障而被忽略。
@@ -153,12 +155,12 @@ SQLite 操作按[内置忙等待规则](../camctl/history-storage.md#sqlite-内�
 | 停止确认 | 当前执行条件与额度 | 处理 |
 | --- | --- | --- |
 | 已取得驱动定义的成功确认 | 任意 | 结束该录像的应急停止，不继续补发剩余次数 |
-| 尚未确认停止 | 执行条件仍成立，且还有额度 | 按已固化的命令超时及重试间隔有限尝试 |
+| 尚未确认停止 | 执行条件仍成立，且还有额度 | 按本次运行的命令超时及重试间隔有限尝试 |
 | 尚未确认停止 | 额度耗尽，或执行条件已失效、未知 | 结束本次有限收场，如实保留停止未确认，不继续无限等待或补发 |
 
 本表中的可靠归属可以来自本次进程已确认的控制结果及仍可信的内存信息；状态库写入失败不自动抹去这些事实。内存信息缺失或不可信时不能借本规则扩大停止范围。尚在途的设备控制按驱动既有协议协调，不为了收场并行发出相互冲突的指令。
 
-应急停止采用本动作已固化的停止尝试上限作为本次会话的应急限额，默认 3 次、可通过对应本地停止配置调整。它是错误退出流程的独立有限预算，与[普通启动与停止预算](camera-recording.md#启动与停止的尝试上限)分别记录；不会重置原动作已经消耗的普通停止次数。无论原错误后又出现多少其他错误，同一会话对同一录像只建立一个应急停止流程，不重新获得额度。
+应急停止采用本次运行中对应设备的停止尝试上限作为本次会话的应急限额，默认 3 次、可通过对应本地停止配置调整。它是错误退出流程的独立有限预算，与[普通启动与停止预算](camera-recording.md#启动与停止的尝试上限)分别记录；不会重置原动作已经消耗的普通停止次数。无论原错误后又出现多少其他错误，同一会话对同一录像只建立一个应急停止流程，不重新获得额度。
 
 每次实际发出应急停止前先在内存中占用一次额度；明确失败、超时或结果未知均不退还该次额度。状态库可写时保存对应应急事实，无法写入时也允许上述有限停止，不因保存失败反复创建新流程。这是会话错误退出期间针对已确认录像的收场规则，不授予启动录像、取回、修复或删除文件的执行资格；`submit` 不执行该流程。
 
@@ -211,7 +213,7 @@ SQLite 操作按[内置忙等待规则](../camctl/history-storage.md#sqlite-内�
 报告文件移动成功，但目录同步失败：
 
 ```json
-{"kind":"error","body":{"reason":"report_error","details":{"stage":"reporting","report_id":27,"path":"/var/lib/camctl/ready","errno":5,"publication_status":"moved"}}}
+{"kind":"error","body":{"reason":"report_error","details":{"stage":"reporting","report_id":"27","path":"/var/lib/camctl/ready","errno":5,"publication_status":"moved"}}}
 ```
 
 文件可能已经被主程序领取，后续恢复结合报告登记和实际文件处理，不能据此撤回 `processing` 中的文件。
@@ -219,7 +221,7 @@ SQLite 操作按[内置忙等待规则](../camctl/history-storage.md#sqlite-内�
 发布文件及目录同步已经成功，但保存发布记录的事务结果未知：
 
 ```json
-{"kind":"error","body":{"reason":"state_db_error","details":{"stage":"reporting","report_id":27,"publication_status":"published","transaction_status":"unknown"}}}
+{"kind":"error","body":{"reason":"state_db_error","details":{"stage":"reporting","report_id":"27","publication_status":"published","transaction_status":"unknown"}}}
 ```
 
 这里保留已确认的本地发布事实，后续核实数据库记录；不要求文件一直留在 `ready` 才能保存正确结果。
@@ -227,7 +229,7 @@ SQLite 操作按[内置忙等待规则](../camctl/history-storage.md#sqlite-内�
 录像期间的状态事务已确认未提交，随后一次应急停止成功，但该停止结果尚未保存：
 
 ```json
-{"kind":"error","body":{"reason":"state_db_error","details":{"stage":"execution","transaction_status":"not_committed","emergency_stops":[{"action_instance_id":"a-001","device_id":"cam0","max_attempts":3,"attempts_used":1,"outcome":"stopped","record_status":"not_recorded"}]}}}
+{"kind":"error","body":{"reason":"state_db_error","details":{"stage":"execution","transaction_status":"not_committed","emergency_stops":[{"action_instance_id":"1","device_id":"cam0","max_attempts":3,"attempts_used":1,"outcome":"stopped","record_status":"not_recorded"}]}}}
 ```
 
 该消息同时表达会话失败、设备停止已确认及停止事实未落库。主程序不据此修改动作结果；后续 camctl 仍以实际可取得的历史和设备证据恢复，不能把应急停止成功直接解释为已录满目标时长。

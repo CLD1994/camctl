@@ -62,7 +62,7 @@
 | [能力说明格式](capabilities.md) | 设备、拍摄动作、参数类型及 Schema 的导出字段与对应关系 | 驱动定义、能力说明交接与整份加载 |
 | [客户端计划编辑](client-editing.md) | 拍摄参数表单、JSON 编辑、参数保留及导出前校验 | 能力说明、计划输入、人工交接 |
 | [客户端部署与能力说明加载](client-deployment.md) | 客户端目录、Docker 持久化、启动与手动加载及结果分区 | 能力说明格式、整份加载、客户端数据 |
-| [单张拍摄与延时摄影](camera-capture.md) | 自动结束、取消保留、有限恢复及结果报告 | 拍摄能力、正式产物 |
+| [单张拍摄与延时摄影](camera-capture.md) | 驱动分工、结束控制、取消保留、有限恢复及结果报告 | 拍摄能力、正式产物 |
 | [MCU 接口预留](mcu-actions.md) | 第一版扩展边界、未实现动作的受理结果、后续接入依据 | 公共执行、正式产物 |
 | [正式产物与取回清理](outputs.md) | output、普通 delivery、选择、取回、相机视频断点续传、文件名、清理、保留和重取 | 设备文件能力、文件交接 |
 | [文件交接](file-handoff.md) | 目录所有权、原子发布、领取、撤回竞争及恢复 | 主程序协作 |
@@ -131,7 +131,7 @@
 | 异常恢复等待 | 默认 60 秒，可配置；等待 `min(duration_s, recovery_wait_cap_s)` | [相机配置](camera-recording.md#配置归属) |
 | 异常多录余量 | 本地配置 `devices.<id>.recording.repair_margin_s`；严格超过目标时长与余量之和才触发修复 | [相机配置](camera-recording.md#配置归属) |
 | 调度提前唤醒 | `session.wakeup_margin_ms` 默认 50ms，可配置；0 关闭，不提前执行动作 | [唤醒决策](scheduling-execution.md#唤醒后的统一重新决策) |
-| 新计划发现 | `plan_seq`、`latest_plan_seq`、`last_seen_plan_seq` | [受理序列](protocol-session.md#新计划受理序列) |
+| 新计划发现 | `plans.id`、`latest_plan_id`、`last_seen_plan_id` | [受理序列](protocol-session.md#新计划受理序列) |
 | 当前相机接入 | 使用已确认的 ADB/Linux 能力；厂商命令映射和正常响应作为真实驱动联调输入 | [驱动接入契约](camera-recording.md#第一版驱动接入契约) |
 
 各专题的实现细节在对应流程落地时细化。项目测试规范统一见根目录 [AGENTS.md](../../AGENTS.md)；先完成第一版正常流程及其必要失败处理，再验证既有断电与恢复契约。真实设备命令映射和联调仍是设备验收的前提。

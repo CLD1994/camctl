@@ -5,7 +5,7 @@
   "type": "object",
   "properties": {
     "report_id": {
-      "$ref": "#/$defs/positive_integer"
+      "$ref": "#/$defs/entity_id"
     },
     "from_wm": {
       "$ref": "#/$defs/uint"
@@ -64,8 +64,8 @@
     },
     "timestamp": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?$(?![\\s\\S])",
-      "description": "UTC 时间字面量；日期和时间的实际有效性另按语义校验。"
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$(?![\\s\\S])",
+      "description": "固定到秒的 UTC 时间字面量 YYYY-MM-DD HH:mm:ss；不接受小数秒，日期和时间的实际有效性另按语义校验。"
     },
     "sha256": {
       "type": "string",
@@ -188,7 +188,7 @@
                 "type": "object",
                 "properties": {
                   "action_instance_id": {
-                    "$ref": "#/$defs/id"
+                    "$ref": "#/$defs/entity_id"
                   }
                 },
                 "additionalProperties": false
@@ -213,7 +213,7 @@
                 "type": "object",
                 "properties": {
                   "action_instance_id": {
-                    "$ref": "#/$defs/id"
+                    "$ref": "#/$defs/entity_id"
                   }
                 },
                 "additionalProperties": false,
@@ -268,7 +268,7 @@
                   "action_instance_ids": {
                     "type": "array",
                     "items": {
-                      "$ref": "#/$defs/id"
+                      "$ref": "#/$defs/entity_id"
                     },
                     "minItems": 1,
                     "uniqueItems": true
@@ -299,7 +299,7 @@
                 "type": "object",
                 "properties": {
                   "action_instance_id": {
-                    "$ref": "#/$defs/id"
+                    "$ref": "#/$defs/entity_id"
                   }
                 },
                 "additionalProperties": false
@@ -326,7 +326,7 @@
                   "output_ids": {
                     "type": "array",
                     "items": {
-                      "$ref": "#/$defs/id"
+                      "$ref": "#/$defs/entity_id"
                     },
                     "minItems": 1,
                     "uniqueItems": true
@@ -605,7 +605,7 @@
           "$ref": "#/$defs/id"
         },
         "trigger_action_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "max_attempts": {
           "$ref": "#/$defs/positive_integer"
@@ -918,13 +918,13 @@
       "type": "object",
       "properties": {
         "source_action_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "delivery_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "error": {
           "$ref": "#/$defs/error"
@@ -960,7 +960,7 @@
       "type": "object",
       "properties": {
         "output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "status": {
           "enum": [
@@ -1068,7 +1068,7 @@
       "type": "object",
       "properties": {
         "delivery_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "status": {
           "enum": [
@@ -1111,7 +1111,7 @@
       "type": "object",
       "properties": {
         "action_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "status": {
           "enum": [
@@ -1248,7 +1248,7 @@
       "type": "object",
       "properties": {
         "report_id": {
-          "$ref": "#/$defs/positive_integer"
+          "$ref": "#/$defs/entity_id"
         }
       },
       "required": [
@@ -1337,10 +1337,10 @@
       "type": "object",
       "properties": {
         "output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "source_action_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "kind": {
           "enum": [
@@ -1359,7 +1359,7 @@
           "$ref": "#/$defs/uint"
         },
         "derived_from_output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "availability": {
           "enum": [
@@ -1383,7 +1383,7 @@
           "$ref": "#/$defs/error"
         },
         "preview_of_output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         }
       },
       "required": [
@@ -1677,13 +1677,13 @@
       "type": "object",
       "properties": {
         "delivery_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "source_action_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "file_name": {
           "type": "string",
@@ -1811,7 +1811,7 @@
       "type": "object",
       "properties": {
         "action_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "name": {
           "$ref": "#/$defs/name"
@@ -3108,13 +3108,10 @@
       "type": "object",
       "properties": {
         "plan_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "request_id": {
-          "$ref": "#/$defs/id"
-        },
-        "plan_seq": {
-          "$ref": "#/$defs/positive_integer"
+          "$ref": "#/$defs/request_id"
         },
         "created_at": {
           "$ref": "#/$defs/timestamp"
@@ -3135,7 +3132,6 @@
       "required": [
         "plan_instance_id",
         "request_id",
-        "plan_seq",
         "created_at",
         "name",
         "status"
@@ -3146,13 +3142,13 @@
       "type": "object",
       "properties": {
         "diagnostic_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "file_name": {
           "$ref": "#/$defs/text"
         },
         "request_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/request_id"
         },
         "errors": {
           "type": "array",
@@ -3324,12 +3320,12 @@
               "const": "fixed"
             },
             "plan_instance_id": {
-              "$ref": "#/$defs/id"
+              "$ref": "#/$defs/entity_id"
             },
             "action_instance_ids": {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/id"
+                "$ref": "#/$defs/entity_id"
               },
               "uniqueItems": true
             }
@@ -3347,7 +3343,7 @@
       "type": "object",
       "properties": {
         "output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "reason": {
           "enum": [
@@ -3359,10 +3355,10 @@
           ]
         },
         "original_output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "preview_output_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "preview_size": {
           "$ref": "#/$defs/uint"
@@ -3486,7 +3482,7 @@
           "type": "object",
           "properties": {
             "source_action_instance_id": {
-              "$ref": "#/$defs/id"
+              "$ref": "#/$defs/entity_id"
             },
             "status": {
               "const": "pending"
@@ -3502,7 +3498,7 @@
           "type": "object",
           "properties": {
             "source_action_instance_id": {
-              "$ref": "#/$defs/id"
+              "$ref": "#/$defs/entity_id"
             },
             "status": {
               "const": "fixed"
@@ -3586,7 +3582,7 @@
           "const": "auto_preview"
         },
         "source_action_instance_id": {
-          "$ref": "#/$defs/id"
+          "$ref": "#/$defs/entity_id"
         },
         "capability": {
           "type": "object",
@@ -3644,7 +3640,7 @@
             "output_ids": {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/id"
+                "$ref": "#/$defs/entity_id"
               },
               "uniqueItems": true
             }
@@ -3656,6 +3652,23 @@
           "additionalProperties": false
         }
       ]
+    },
+    "entity_id": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,18}$(?![\\s\\S])",
+      "description": "数据库对象 ID 的规范十进制字符串，整数范围为 1～9223372036854775807；19 位值另按上界约束校验。",
+      "anyOf": [
+        {
+          "maxLength": 18
+        },
+        {
+          "pattern": "^(?:[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$(?![\\s\\S])"
+        }
+      ]
+    },
+    "request_id": {
+      "$ref": "#/$defs/entity_id",
+      "description": "调用方提供的正整数请求身份，使用规范十进制字符串，范围 1～9223372036854775807；用于幂等关联，不是主机分配的计划 ID。"
     }
   }
 }

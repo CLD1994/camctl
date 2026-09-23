@@ -1,22 +1,21 @@
 {
-  "report_id": 3,
-  "from_wm": 40,
-  "to_wm": 45,
+  "report_id": "6",
+  "from_wm": 48,
+  "to_wm": 53,
   "plans": [
     {
-      "plan_instance_id": "p-sync-001",
-      "request_id": "req-sync-001",
-      "plan_seq": 1,
-      "created_at": "2026-09-13 08:00:00",
-      "name": "第1天采集",
+      "plan_instance_id": "10",
+      "request_id": "1018",
+      "created_at": "2026-09-14 08:00:00",
+      "name": "第2天采集",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-sync-101",
-          "name": "录像 A",
+          "action_instance_id": "26",
+          "name": "录像 B",
           "type": "camera_record",
           "device_id": "cam0",
-          "scheduled_at": "2026-09-13 09:00:00",
+          "scheduled_at": "2026-09-14 09:00:00",
           "policy": {
             "max_delay_ms": 5000
           },
@@ -63,10 +62,10 @@
           },
           "outputs": [
             {
-              "output_id": "o-sync-001",
-              "source_action_instance_id": "a-sync-101",
+              "output_id": "15",
+              "source_action_instance_id": "26",
               "kind": "original",
-              "original_name": "VID_0001.mp4",
+              "original_name": "VID_0002.mp4",
               "media_type": "video/mp4",
               "size": 8388608,
               "availability": "cleaned",
@@ -75,7 +74,7 @@
               },
               "checksum": {
                 "status": "available",
-                "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+                "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
               },
               "media": {
                 "check_status": "not_performed",
@@ -89,21 +88,20 @@
       ]
     },
     {
-      "plan_instance_id": "p-sync-003",
-      "request_id": "req-sync-003",
-      "plan_seq": 3,
-      "created_at": "2026-09-15 08:00:00",
-      "name": "清理录像 A 的相机原片",
+      "plan_instance_id": "13",
+      "request_id": "1021",
+      "created_at": "2026-09-15 11:00:00",
+      "name": "清理录像 B 的相机原片",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-sync-301",
-          "name": "清理原片 A",
+          "action_instance_id": "30",
+          "name": "清理原片 B",
           "type": "delete_action_outputs",
-          "scheduled_at": "2026-09-15 09:00:00",
+          "scheduled_at": "2026-09-15 12:00:00",
           "input_params": {
             "output_ids": [
-              "o-sync-001"
+              "15"
             ]
           },
           "status": "succeeded",
@@ -113,7 +111,7 @@
           "result": {
             "items": [
               {
-                "output_id": "o-sync-001",
+                "output_id": "15",
                 "status": "succeeded",
                 "outcome": "deleted"
               }
@@ -123,7 +121,7 @@
             "selection": {
               "status": "fixed",
               "output_ids": [
-                "o-sync-001"
+                "15"
               ]
             }
           }

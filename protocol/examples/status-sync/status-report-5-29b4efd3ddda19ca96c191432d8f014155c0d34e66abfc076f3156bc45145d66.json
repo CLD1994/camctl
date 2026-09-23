@@ -1,18 +1,17 @@
 {
-  "report_id": 5,
+  "report_id": "5",
   "from_wm": 20,
   "to_wm": 48,
   "plans": [
     {
-      "plan_instance_id": "p-sync-001",
-      "request_id": "req-sync-001",
-      "plan_seq": 1,
+      "plan_instance_id": "9",
+      "request_id": "1017",
       "created_at": "2026-09-13 08:00:00",
       "name": "第1天采集",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-sync-101",
+          "action_instance_id": "24",
           "name": "录像 A",
           "type": "camera_record",
           "device_id": "cam0",
@@ -63,8 +62,8 @@
           },
           "outputs": [
             {
-              "output_id": "o-sync-001",
-              "source_action_instance_id": "a-sync-101",
+              "output_id": "14",
+              "source_action_instance_id": "24",
               "kind": "original",
               "original_name": "VID_0001.mp4",
               "media_type": "video/mp4",
@@ -89,15 +88,14 @@
       ]
     },
     {
-      "plan_instance_id": "p-sync-002",
-      "request_id": "req-sync-002",
-      "plan_seq": 2,
+      "plan_instance_id": "10",
+      "request_id": "1018",
       "created_at": "2026-09-14 08:00:00",
       "name": "第2天采集",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-sync-201",
+          "action_instance_id": "26",
           "name": "录像 B",
           "type": "camera_record",
           "device_id": "cam0",
@@ -148,8 +146,8 @@
           },
           "outputs": [
             {
-              "output_id": "o-sync-002",
-              "source_action_instance_id": "a-sync-201",
+              "output_id": "15",
+              "source_action_instance_id": "26",
               "kind": "original",
               "original_name": "VID_0002.mp4",
               "media_type": "video/mp4",
@@ -172,7 +170,7 @@
           ]
         },
         {
-          "action_instance_id": "a-sync-202",
+          "action_instance_id": "27",
           "name": "取回录像 B",
           "type": "obtain_action_outputs",
           "scheduled_at": "2026-09-14 09:02:00",
@@ -187,10 +185,10 @@
           },
           "deliveries": [
             {
-              "delivery_id": "d-sync-002",
-              "output_id": "o-sync-002",
-              "source_action_instance_id": "a-sync-201",
-              "file_name": "d-sync-002.mp4",
+              "delivery_id": "6",
+              "output_id": "15",
+              "source_action_instance_id": "26",
+              "file_name": "6.mp4",
               "display_name": "VID_0002-第2天采集-录像 B.mp4",
               "size": 8388608,
               "status": "published",
@@ -223,19 +221,19 @@
           "obtaining": {
             "source": {
               "status": "fixed",
-              "plan_instance_id": "p-sync-002",
+              "plan_instance_id": "10",
               "action_instance_ids": [
-                "a-sync-201"
+                "26"
               ]
             },
             "filter": "default",
             "selections": [
               {
-                "source_action_instance_id": "a-sync-201",
+                "source_action_instance_id": "26",
                 "status": "fixed",
                 "items": [
                   {
-                    "output_id": "o-sync-002",
+                    "output_id": "15",
                     "reason": "original"
                   }
                 ]
@@ -246,21 +244,20 @@
       ]
     },
     {
-      "plan_instance_id": "p-sync-003",
-      "request_id": "req-sync-003",
-      "plan_seq": 3,
+      "plan_instance_id": "11",
+      "request_id": "1019",
       "created_at": "2026-09-15 08:00:00",
       "name": "清理录像 A 的相机原片",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-sync-301",
+          "action_instance_id": "28",
           "name": "清理原片 A",
           "type": "delete_action_outputs",
           "scheduled_at": "2026-09-15 09:00:00",
           "input_params": {
             "output_ids": [
-              "o-sync-001"
+              "14"
             ]
           },
           "status": "succeeded",
@@ -270,7 +267,7 @@
           "result": {
             "items": [
               {
-                "output_id": "o-sync-001",
+                "output_id": "14",
                 "status": "succeeded",
                 "outcome": "deleted"
               }
@@ -280,7 +277,7 @@
             "selection": {
               "status": "fixed",
               "output_ids": [
-                "o-sync-001"
+                "14"
               ]
             }
           }
@@ -288,27 +285,26 @@
       ]
     },
     {
-      "plan_instance_id": "p-sync-004",
-      "request_id": "req-sync-004",
-      "plan_seq": 4,
+      "plan_instance_id": "12",
+      "request_id": "1020",
       "created_at": "2026-09-15 10:00:00",
       "name": "恢复旧备份后的状态同步",
       "status": "completed",
       "actions": [
         {
-          "action_instance_id": "a-sync-401",
+          "action_instance_id": "29",
           "name": "补齐报告 1 之后的状态",
           "type": "report_status",
           "input_params": {
             "scope": "since",
-            "after_report_id": 1
+            "after_report_id": "1"
           },
           "status": "succeeded",
           "execution": {
             "started": true
           },
           "result": {
-            "report_id": 4
+            "report_id": "4"
           }
         }
       ]

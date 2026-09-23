@@ -1,18 +1,17 @@
 {
-  "report_id": 1,
+  "report_id": "1",
   "from_wm": 0,
   "to_wm": 20,
   "plans": [
     {
-      "plan_instance_id": "p-001",
-      "request_id": "req-001",
-      "plan_seq": 1,
+      "plan_instance_id": "1",
+      "request_id": "1001",
       "created_at": "2026-09-13 08:00:00",
       "name": "等待来源不等于空集合",
       "status": "running",
       "actions": [
         {
-          "action_instance_id": "a-001",
+          "action_instance_id": "1",
           "name": "主录像",
           "type": "camera_record",
           "device_id": "cam0",
@@ -54,7 +53,7 @@
           }
         },
         {
-          "action_instance_id": "a-002",
+          "action_instance_id": "2",
           "name": "取回主录像",
           "type": "obtain_action_outputs",
           "scheduled_at": "2026-09-13 09:02:00",
@@ -73,15 +72,15 @@
           "obtaining": {
             "source": {
               "status": "fixed",
-              "plan_instance_id": "p-001",
+              "plan_instance_id": "1",
               "action_instance_ids": [
-                "a-001"
+                "1"
               ]
             },
             "filter": "default",
             "selections": [
               {
-                "source_action_instance_id": "a-001",
+                "source_action_instance_id": "1",
                 "status": "pending"
               }
             ]
@@ -91,7 +90,7 @@
               "code": "source_actions",
               "details": {
                 "action_instance_ids": [
-                  "a-001"
+                  "1"
                 ]
               }
             }

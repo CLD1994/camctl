@@ -1,12 +1,11 @@
 {
-  "report_id": 1,
+  "report_id": "1",
   "from_wm": 0,
   "to_wm": 4,
   "plans": [
     {
-      "plan_instance_id": "p-duplicate",
-      "request_id": "req-duplicate",
-      "plan_seq": 1,
+      "plan_instance_id": "8",
+      "request_id": "1013",
       "created_at": "2026-09-22 08:00:00",
       "name": "预览与范围选择示例",
       "status": "pending",
@@ -19,7 +18,7 @@
           "policy": {
             "max_delay_ms": 5000
           },
-          "action_instance_id": "a-duplicate-0",
+          "action_instance_id": "20",
           "input_params": {
             "type": "demo_adjustable",
             "resolution": "1080p",
@@ -39,7 +38,7 @@
           "name": "自动预览",
           "type": "obtain_action_outputs",
           "scheduled_at": "2026-09-22 09:00:00",
-          "action_instance_id": "a-duplicate-1",
+          "action_instance_id": "21",
           "input_params": {
             "source": {
               "action_name": "拍摄"
@@ -64,7 +63,7 @@
           },
           "automation": {
             "purpose": "auto_preview",
-            "source_action_instance_id": "a-duplicate-0",
+            "source_action_instance_id": "20",
             "capability": {
               "device_id": "demo_cam0",
               "action_type": "camera_record",
@@ -77,7 +76,7 @@
           "name": "第二个自动预览",
           "type": "obtain_action_outputs",
           "scheduled_at": "2026-09-22 09:00:00",
-          "action_instance_id": "a-duplicate-2",
+          "action_instance_id": "22",
           "input_params": {
             "source": {
               "action_name": "拍摄"
@@ -102,7 +101,7 @@
           },
           "automation": {
             "purpose": "auto_preview",
-            "source_action_instance_id": "a-duplicate-0",
+            "source_action_instance_id": "20",
             "capability": {
               "device_id": "demo_cam0",
               "action_type": "camera_record",

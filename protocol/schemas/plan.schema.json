@@ -5,7 +5,7 @@
   "type": "object",
   "properties": {
     "request_id": {
-      "$ref": "status-report.schema.json#/$defs/id"
+      "$ref": "status-report.schema.json#/$defs/request_id"
     },
     "created_at": {
       "$ref": "status-report.schema.json#/$defs/timestamp"
@@ -21,7 +21,7 @@
       "minItems": 1
     },
     "last_report_id": {
-      "$ref": "status-report.schema.json#/$defs/positive_integer"
+      "$ref": "status-report.schema.json#/$defs/entity_id"
     }
   },
   "required": [
@@ -50,7 +50,7 @@
           "type": "object",
           "properties": {
             "action_instance_id": {
-              "$ref": "status-report.schema.json#/$defs/id"
+              "$ref": "status-report.schema.json#/$defs/entity_id"
             }
           },
           "required": [
@@ -74,7 +74,7 @@
           "type": "object",
           "properties": {
             "plan_instance_id": {
-              "$ref": "status-report.schema.json#/$defs/id"
+              "$ref": "status-report.schema.json#/$defs/entity_id"
             },
             "group": {
               "$ref": "status-report.schema.json#/$defs/name"
@@ -102,7 +102,7 @@
           "type": "object",
           "properties": {
             "plan_instance_id": {
-              "$ref": "status-report.schema.json#/$defs/id"
+              "$ref": "status-report.schema.json#/$defs/entity_id"
             }
           },
           "required": [
@@ -130,7 +130,7 @@
           "type": "object",
           "properties": {
             "action_instance_id": {
-              "$ref": "status-report.schema.json#/$defs/id"
+              "$ref": "status-report.schema.json#/$defs/entity_id"
             }
           },
           "required": [
@@ -172,7 +172,7 @@
             "output_ids": {
               "type": "array",
               "items": {
-                "$ref": "status-report.schema.json#/$defs/id"
+                "$ref": "status-report.schema.json#/$defs/entity_id"
               },
               "minItems": 1,
               "uniqueItems": true
@@ -226,7 +226,7 @@
             "output_ids": {
               "type": "array",
               "items": {
-                "$ref": "status-report.schema.json#/$defs/id"
+                "$ref": "status-report.schema.json#/$defs/entity_id"
               },
               "minItems": 1,
               "uniqueItems": true
@@ -258,7 +258,7 @@
                   "type": "object",
                   "properties": {
                     "action_instance_id": {
-                      "$ref": "status-report.schema.json#/$defs/id"
+                      "$ref": "status-report.schema.json#/$defs/entity_id"
                     }
                   },
                   "required": [
@@ -282,7 +282,7 @@
                   "type": "object",
                   "properties": {
                     "plan_instance_id": {
-                      "$ref": "status-report.schema.json#/$defs/id"
+                      "$ref": "status-report.schema.json#/$defs/entity_id"
                     }
                   },
                   "required": [
@@ -309,7 +309,7 @@
               "type": "object",
               "properties": {
                 "request_id": {
-                  "$ref": "status-report.schema.json#/$defs/id"
+                  "$ref": "status-report.schema.json#/$defs/request_id"
                 }
               },
               "required": [
@@ -321,7 +321,7 @@
               "type": "object",
               "properties": {
                 "plan_instance_id": {
-                  "$ref": "status-report.schema.json#/$defs/id"
+                  "$ref": "status-report.schema.json#/$defs/entity_id"
                 }
               },
               "required": [
@@ -333,7 +333,7 @@
               "type": "object",
               "properties": {
                 "action_instance_id": {
-                  "$ref": "status-report.schema.json#/$defs/id"
+                  "$ref": "status-report.schema.json#/$defs/entity_id"
                 }
               },
               "required": [
@@ -345,7 +345,7 @@
               "type": "object",
               "properties": {
                 "plan_instance_id": {
-                  "$ref": "status-report.schema.json#/$defs/id"
+                  "$ref": "status-report.schema.json#/$defs/entity_id"
                 },
                 "group": {
                   "$ref": "status-report.schema.json#/$defs/name"
@@ -386,7 +386,7 @@
               "const": "since"
             },
             "after_report_id": {
-              "$ref": "status-report.schema.json#/$defs/positive_integer"
+              "$ref": "status-report.schema.json#/$defs/entity_id"
             }
           },
           "required": [
@@ -641,7 +641,7 @@
       "type": "object",
       "properties": {
         "request_id": {
-          "$ref": "status-report.schema.json#/$defs/id"
+          "$ref": "status-report.schema.json#/$defs/request_id"
         },
         "created_at": {
           "$ref": "status-report.schema.json#/$defs/timestamp"
@@ -682,7 +682,7 @@
       "type": "object",
       "properties": {
         "request_id": {
-          "$ref": "status-report.schema.json#/$defs/id"
+          "$ref": "status-report.schema.json#/$defs/request_id"
         },
         "last_report_id": true
       },

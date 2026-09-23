@@ -11,7 +11,7 @@
     "name": "跨计划动作",
     "schema": "plan.schema.json#/$defs/source",
     "value": {
-      "action_instance_id": "a-1"
+      "action_instance_id": "3"
     },
     "valid": true
   },
@@ -27,7 +27,7 @@
     "name": "指定计划组",
     "schema": "plan.schema.json#/$defs/source",
     "value": {
-      "plan_instance_id": "p-1",
+      "plan_instance_id": "7",
       "group": "上午"
     },
     "valid": true
@@ -44,7 +44,7 @@
     "name": "指定计划",
     "schema": "plan.schema.json#/$defs/source",
     "value": {
-      "plan_instance_id": "p-1"
+      "plan_instance_id": "7"
     },
     "valid": true
   },
@@ -67,7 +67,7 @@
     "schema": "plan.schema.json#/$defs/source",
     "value": {
       "current_plan": true,
-      "plan_instance_id": "p-1"
+      "plan_instance_id": "7"
     },
     "valid": false
   },
@@ -76,7 +76,7 @@
     "schema": "plan.schema.json#/$defs/source",
     "value": {
       "action_name": "拍摄",
-      "action_instance_id": "a-1"
+      "action_instance_id": "3"
     },
     "valid": false
   },
@@ -103,7 +103,7 @@
     "schema": "plan.schema.json#/$defs/obtain_params",
     "value": {
       "source": {
-        "plan_instance_id": "p-1"
+        "plan_instance_id": "7"
       },
       "filter": "preview"
     },
@@ -126,7 +126,7 @@
     "schema": "plan.schema.json#/$defs/obtain_params",
     "value": {
       "source": {
-        "action_instance_id": "a-1"
+        "action_instance_id": "3"
       },
       "filter": "preview",
       "purpose": "auto_preview"
@@ -152,7 +152,7 @@
         "action_name": "拍摄"
       },
       "output_ids": [
-        "o-1"
+        "6"
       ]
     },
     "valid": true
@@ -165,7 +165,7 @@
         "action_name": "拍摄"
       },
       "output_ids": [
-        "o-1"
+        "6"
       ],
       "filter": "preview"
     },
@@ -179,7 +179,7 @@
         "group": "上午"
       },
       "output_ids": [
-        "o-1"
+        "6"
       ]
     },
     "valid": false
@@ -203,8 +203,8 @@
         "action_name": "拍摄"
       },
       "output_ids": [
-        "o-1",
-        "o-1"
+        "6",
+        "6"
       ]
     },
     "valid": false
@@ -224,7 +224,7 @@
     "schema": "plan.schema.json#/$defs/delete_params",
     "value": {
       "source": {
-        "action_instance_id": "a-1"
+        "action_instance_id": "3"
       }
     },
     "valid": true
@@ -234,7 +234,7 @@
     "schema": "plan.schema.json#/$defs/delete_params",
     "value": {
       "output_ids": [
-        "o-1"
+        "6"
       ]
     },
     "valid": true
@@ -257,7 +257,7 @@
         "current_plan": true
       },
       "output_ids": [
-        "o-1"
+        "6"
       ]
     },
     "valid": false
@@ -324,7 +324,7 @@
     "name": "单动作错误和坏ACK不拒绝公共结构",
     "schema": "plan.schema.json#/$defs/plan_structure",
     "value": {
-      "request_id": "req-1",
+      "request_id": "1007",
       "created_at": "2026-09-22 08:00:00",
       "name": "计划",
       "actions": [
@@ -343,7 +343,7 @@
     "name": "完整合法计划拒绝坏动作",
     "schema": "plan.schema.json",
     "value": {
-      "request_id": "req-1",
+      "request_id": "1007",
       "created_at": "2026-09-22 08:00:00",
       "name": "计划",
       "actions": [
@@ -373,7 +373,7 @@
     "name": "未知动作是整份结构错误",
     "schema": "plan.schema.json#/$defs/plan_structure",
     "value": {
-      "request_id": "req-1",
+      "request_id": "1007",
       "created_at": "2026-09-22 08:00:00",
       "name": "计划",
       "actions": [
@@ -390,7 +390,7 @@
     "name": "已受理重送仅需请求身份",
     "schema": "plan.schema.json#/$defs/resubmission",
     "value": {
-      "request_id": "req-1",
+      "request_id": "1007",
       "arbitrary": true,
       "last_report_id": false
     },
@@ -401,7 +401,7 @@
     "schema": "plan.schema.json#/$defs/cancel_params",
     "value": {
       "target": {
-        "plan_instance_id": "p-1"
+        "plan_instance_id": "7"
       }
     },
     "valid": true
@@ -419,7 +419,7 @@
     "schema": "plan.schema.json#/$defs/report_params",
     "value": {
       "scope": "since",
-      "after_report_id": 1
+      "after_report_id": "1"
     },
     "valid": true
   },
@@ -428,7 +428,7 @@
     "schema": "plan.schema.json#/$defs/report_params",
     "value": {
       "scope": "full",
-      "after_report_id": 1
+      "after_report_id": "1"
     },
     "valid": false
   },
@@ -454,7 +454,7 @@
     "schema": "status-report.schema.json#/$defs/source_resolution",
     "value": {
       "status": "fixed",
-      "plan_instance_id": "p-1",
+      "plan_instance_id": "7",
       "action_instance_ids": []
     },
     "valid": true
@@ -463,7 +463,7 @@
     "name": "等待选择无结果",
     "schema": "status-report.schema.json#/$defs/source_selection",
     "value": {
-      "source_action_instance_id": "a-1",
+      "source_action_instance_id": "3",
       "status": "pending"
     },
     "valid": true
@@ -472,7 +472,7 @@
     "name": "等待不能冒充空选择",
     "schema": "status-report.schema.json#/$defs/source_selection",
     "value": {
-      "source_action_instance_id": "a-1",
+      "source_action_instance_id": "3",
       "status": "pending",
       "items": []
     },
@@ -482,7 +482,7 @@
     "name": "可靠空选择",
     "schema": "status-report.schema.json#/$defs/source_selection",
     "value": {
-      "source_action_instance_id": "a-1",
+      "source_action_instance_id": "3",
       "status": "fixed",
       "items": []
     },
@@ -492,7 +492,7 @@
     "name": "停止取消等待保留效果",
     "schema": "status-report.schema.json#/$defs/cancel_item",
     "value": {
-      "action_instance_id": "a-1",
+      "action_instance_id": "3",
       "status": "canceled",
       "cancellation_effect": "applied"
     },
@@ -502,7 +502,7 @@
     "name": "停止等待必须表达效果",
     "schema": "status-report.schema.json#/$defs/cancel_item",
     "value": {
-      "action_instance_id": "a-1",
+      "action_instance_id": "3",
       "status": "canceled"
     },
     "valid": false
@@ -531,10 +531,10 @@
     "name": "预览有原文件关联",
     "schema": "status-report.schema.json#/$defs/output",
     "value": {
-      "output_id": "o-p",
-      "source_action_instance_id": "a-1",
+      "output_id": "11",
+      "source_action_instance_id": "3",
       "kind": "preview",
-      "preview_of_output_id": "o-1",
+      "preview_of_output_id": "6",
       "availability": "available",
       "cleanup": {
         "status": "not_requested"
@@ -555,8 +555,8 @@
     "name": "预览不能缺原文件关联",
     "schema": "status-report.schema.json#/$defs/output",
     "value": {
-      "output_id": "o-p",
-      "source_action_instance_id": "a-1",
+      "output_id": "11",
+      "source_action_instance_id": "3",
       "kind": "preview",
       "availability": "available",
       "cleanup": {
@@ -578,10 +578,10 @@
     "name": "原片不能冒充预览关联",
     "schema": "status-report.schema.json#/$defs/output",
     "value": {
-      "output_id": "o-p",
-      "source_action_instance_id": "a-1",
+      "output_id": "11",
+      "source_action_instance_id": "3",
       "kind": "original",
-      "preview_of_output_id": "o-1",
+      "preview_of_output_id": "6",
       "availability": "available",
       "cleanup": {
         "status": "not_requested"
@@ -792,6 +792,614 @@
         }
       },
       "preview_supported": "true"
+    },
+    "valid": false
+  },
+  {
+    "name": "对象 ID 合法值 1",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "1",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 2",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "2",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 10",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "10",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 9007199254740992",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "9007199254740992",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 1000000000000000000",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "1000000000000000000",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 8999999999999999999",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "8999999999999999999",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 9000000000000000000",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "9000000000000000000",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 9223372036854775806",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "9223372036854775806",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 合法值 9223372036854775807",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "9223372036854775807",
+    "valid": true
+  },
+  {
+    "name": "对象 ID 拒绝空串",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝零",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "0",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝负数",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "-1",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝正号",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "+1",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝前导零",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "01",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝小数写法",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "1.0",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝指数写法",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "1e0",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝前空白",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": " 1",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝后空白",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "1 ",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝末尾换行",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "1\n",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝全角数字",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "１",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝字母前缀",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "p-1",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝最大值加一",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "9223372036854775808",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝19 位越界",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "9999999999999999999",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝20 位越界",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": "10000000000000000000",
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝JSON 数字",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": 1,
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝JSON 小数",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": 1.5,
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝布尔值",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": true,
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝null",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": null,
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝数组",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": [],
+    "valid": false
+  },
+  {
+    "name": "对象 ID 拒绝对象",
+    "schema": "status-report.schema.json#/$defs/entity_id",
+    "value": {},
+    "valid": false
+  },
+  {
+    "name": "报告身份 '9223372036854775807'",
+    "schema": "status-report.schema.json",
+    "value": {
+      "report_id": "9223372036854775807",
+      "from_wm": 0,
+      "to_wm": 0
+    },
+    "valid": true
+  },
+  {
+    "name": "局部同步身份 '9223372036854775807'",
+    "schema": "plan.schema.json#/$defs/report_params",
+    "value": {
+      "scope": "since",
+      "after_report_id": "9223372036854775807"
+    },
+    "valid": true
+  },
+  {
+    "name": "ACK 身份 '9223372036854775807'",
+    "schema": "plan.schema.json",
+    "value": {
+      "request_id": "1015",
+      "created_at": "2026-09-23 00:00:00",
+      "name": "身份边界",
+      "actions": [
+        {
+          "name": "报告",
+          "type": "report_status",
+          "params": {
+            "scope": "full"
+          }
+        }
+      ],
+      "last_report_id": "9223372036854775807"
+    },
+    "valid": true
+  },
+  {
+    "name": "报告身份 '9223372036854775808'",
+    "schema": "status-report.schema.json",
+    "value": {
+      "report_id": "9223372036854775808",
+      "from_wm": 0,
+      "to_wm": 0
+    },
+    "valid": false
+  },
+  {
+    "name": "局部同步身份 '9223372036854775808'",
+    "schema": "plan.schema.json#/$defs/report_params",
+    "value": {
+      "scope": "since",
+      "after_report_id": "9223372036854775808"
+    },
+    "valid": false
+  },
+  {
+    "name": "ACK 身份 '9223372036854775808'",
+    "schema": "plan.schema.json",
+    "value": {
+      "request_id": "1015",
+      "created_at": "2026-09-23 00:00:00",
+      "name": "身份边界",
+      "actions": [
+        {
+          "name": "报告",
+          "type": "report_status",
+          "params": {
+            "scope": "full"
+          }
+        }
+      ],
+      "last_report_id": "9223372036854775808"
+    },
+    "valid": false
+  },
+  {
+    "name": "报告身份 1",
+    "schema": "status-report.schema.json",
+    "value": {
+      "report_id": 1,
+      "from_wm": 0,
+      "to_wm": 0
+    },
+    "valid": false
+  },
+  {
+    "name": "局部同步身份 1",
+    "schema": "plan.schema.json#/$defs/report_params",
+    "value": {
+      "scope": "since",
+      "after_report_id": 1
+    },
+    "valid": false
+  },
+  {
+    "name": "ACK 身份 1",
+    "schema": "plan.schema.json",
+    "value": {
+      "request_id": "1015",
+      "created_at": "2026-09-23 00:00:00",
+      "name": "身份边界",
+      "actions": [
+        {
+          "name": "报告",
+          "type": "report_status",
+          "params": {
+            "scope": "full"
+          }
+        }
+      ],
+      "last_report_id": 1
+    },
+    "valid": false
+  },
+  {
+    "name": "报告身份 '01'",
+    "schema": "status-report.schema.json",
+    "value": {
+      "report_id": "01",
+      "from_wm": 0,
+      "to_wm": 0
+    },
+    "valid": false
+  },
+  {
+    "name": "局部同步身份 '01'",
+    "schema": "plan.schema.json#/$defs/report_params",
+    "value": {
+      "scope": "since",
+      "after_report_id": "01"
+    },
+    "valid": false
+  },
+  {
+    "name": "ACK 身份 '01'",
+    "schema": "plan.schema.json",
+    "value": {
+      "request_id": "1015",
+      "created_at": "2026-09-23 00:00:00",
+      "name": "身份边界",
+      "actions": [
+        {
+          "name": "报告",
+          "type": "report_status",
+          "params": {
+            "scope": "full"
+          }
+        }
+      ],
+      "last_report_id": "01"
+    },
+    "valid": false
+  },
+  {
+    "name": "非法 ACK 仍可通过公共结构",
+    "schema": "plan.schema.json#/$defs/plan_structure",
+    "value": {
+      "request_id": "1015",
+      "created_at": "2026-09-23 00:00:00",
+      "name": "独立 ACK 校验",
+      "actions": [
+        {
+          "name": "报告",
+          "type": "report_status",
+          "params": {
+            "scope": "full"
+          }
+        }
+      ],
+      "last_report_id": 1
+    },
+    "valid": true
+  },
+  {
+    "name": "请求整数身份合法：1",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "1",
+    "valid": true
+  },
+  {
+    "name": "请求整数身份合法：9007199254740992",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "9007199254740992",
+    "valid": true
+  },
+  {
+    "name": "请求整数身份合法：9223372036854775807",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "9223372036854775807",
+    "valid": true
+  },
+  {
+    "name": "请求整数身份拒绝：零",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "0",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：前导零",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "01",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：负数",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "-1",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：正号",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "+1",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：空白",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": " 1",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：小数",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "1.0",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：指数",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "1e2",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：字母",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "request-a",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：全角",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "１",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：越界",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "9223372036854775808",
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：数字",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": 1,
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：布尔",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": true,
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：空值",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": null,
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：数组",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": [],
+    "valid": false
+  },
+  {
+    "name": "请求整数身份拒绝：空串",
+    "schema": "status-report.schema.json#/$defs/request_id",
+    "value": "",
+    "valid": false
+  },
+  {
+    "name": "固定秒级时间格式：2026-09-23 12:34:56",
+    "schema": "status-report.schema.json#/$defs/timestamp",
+    "value": "2026-09-23 12:34:56",
+    "valid": true
+  },
+  {
+    "name": "固定秒级时间格式：0001-01-01 00:00:00",
+    "schema": "status-report.schema.json#/$defs/timestamp",
+    "value": "0001-01-01 00:00:00",
+    "valid": true
+  },
+  {
+    "name": "固定秒级时间格式：9999-12-31 23:59:59",
+    "schema": "status-report.schema.json#/$defs/timestamp",
+    "value": "9999-12-31 23:59:59",
+    "valid": true
+  },
+  {
+    "name": "固定秒级时间格式：2026-09-23 12:34:56.000",
+    "schema": "status-report.schema.json#/$defs/timestamp",
+    "value": "2026-09-23 12:34:56.000",
+    "valid": false
+  },
+  {
+    "name": "固定秒级时间格式：2026-09-23 12:34:56.250000",
+    "schema": "status-report.schema.json#/$defs/timestamp",
+    "value": "2026-09-23 12:34:56.250000",
+    "valid": false
+  },
+  {
+    "name": "固定秒级时间格式：2026-09-23T12:34:56Z",
+    "schema": "status-report.schema.json#/$defs/timestamp",
+    "value": "2026-09-23T12:34:56Z",
+    "valid": false
+  },
+  {
+    "name": "固定秒级时间格式：2026-09-23 12:34:56 ",
+    "schema": "status-report.schema.json#/$defs/timestamp",
+    "value": "2026-09-23 12:34:56 ",
+    "valid": false
+  },
+  {
+    "name": "重送请求身份边界：'9223372036854775807'",
+    "schema": "plan.schema.json#/$defs/resubmission",
+    "value": {
+      "request_id": "9223372036854775807"
+    },
+    "valid": true
+  },
+  {
+    "name": "重送请求身份边界：'request-a'",
+    "schema": "plan.schema.json#/$defs/resubmission",
+    "value": {
+      "request_id": "request-a"
+    },
+    "valid": false
+  },
+  {
+    "name": "重送请求身份边界：1",
+    "schema": "plan.schema.json#/$defs/resubmission",
+    "value": {
+      "request_id": 1
+    },
+    "valid": false
+  },
+  {
+    "name": "计划报告使用计划 ID 与整数请求身份",
+    "schema": "status-report.schema.json#/$defs/plan",
+    "value": {
+      "plan_instance_id": "10",
+      "request_id": "9223372036854775807",
+      "created_at": "2026-09-23 12:34:56",
+      "name": "整数请求",
+      "status": "pending"
+    },
+    "valid": true
+  },
+  {
+    "name": "计划报告拒绝非整数请求身份",
+    "schema": "status-report.schema.json#/$defs/plan",
+    "value": {
+      "plan_instance_id": "10",
+      "request_id": "request-a",
+      "created_at": "2026-09-23 12:34:56",
+      "name": "整数请求",
+      "status": "pending"
+    },
+    "valid": false
+  },
+  {
+    "name": "计划报告拒绝小数秒",
+    "schema": "status-report.schema.json#/$defs/plan",
+    "value": {
+      "plan_instance_id": "10",
+      "request_id": "9223372036854775807",
+      "created_at": "2026-09-23 12:34:56.000",
+      "name": "整数请求",
+      "status": "pending"
+    },
+    "valid": false
+  },
+  {
+    "name": "取消请求身份：'9223372036854775807'",
+    "schema": "plan.schema.json#/$defs/action",
+    "value": {
+      "name": "取消",
+      "type": "cancel_task",
+      "params": {
+        "target": {
+          "request_id": "9223372036854775807"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "取消请求身份：'request-a'",
+    "schema": "plan.schema.json#/$defs/action",
+    "value": {
+      "name": "取消",
+      "type": "cancel_task",
+      "params": {
+        "target": {
+          "request_id": "request-a"
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "取消请求身份：1",
+    "schema": "plan.schema.json#/$defs/action",
+    "value": {
+      "name": "取消",
+      "type": "cancel_task",
+      "params": {
+        "target": {
+          "request_id": 1
+        }
+      }
     },
     "valid": false
   }

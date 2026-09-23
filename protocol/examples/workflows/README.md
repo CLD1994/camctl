@@ -14,20 +14,20 @@
 
 | 场景 | 应观察到的事实 |
 | --- | --- |
-| [自动预览选择修复成品](preview-repaired/status-report-1-131f59786289695868386e490305ed04d755d08136fe7978d36b11fd0c6cf14f.json) | 预览为 2 MiB，修复成品为 1 MiB；实际 delivery 引用修复成品，原片、预览和修复成品各有身份。 |
-| [交接结果无法确认](handoff-unconfirmed/status-report-1-29710911b7c5cd6c6558751d95a961b6bbcf8102f7746cbc5949ced9dc47ca58.json) | 交付为 failed，原因保留未知；取回整体失败，不声称客户端未收到。 |
-| [取消动作自身被取消](cancel-controller/status-report-1-d44c184a6486f7fcf71b895db30a76161672edd0a26ac7a57ef10908cee10115.json) | C1 为 canceled，条目说明目标取消已生效；C2 仅取消 C1 并成功，录像的停止仍在继续。 |
-| [完整副本清理失败](canceled-complete-copy/status-report-1-1195986d411fd30d40dd8afedb70fa07d7e6858c7ee121df773f154fe815a7e9.json) | 取回与交付保持 canceled，副本清理单独失败；发起取消的动作按本次清理失败汇总。 |
-| [按当前计划选择](range-selection/status-report-1-2c519f7915ef10584a124c980a1687c97fc0b446409ba7ed9ff2d5b053db75d9.json) | 取回固定来源和选择，清理固定同一来源及完整产物集合。 |
-| [范围清理可靠空集合](empty-cleanup/status-report-1-ae5e20edd53a32babfbfa710dd04ac399bc01a0cf72241b934a0d585afa332de.json) | 来源已固定且无产物，selection 为 fixed 空数组；清理可以成功。 |
-| [显式 ID 部分失败](explicit-invalid-ids/status-report-1-4faee709ab32820aa74b1880091c78320e488e9f521a9062995fe888350ba5ce.json) | 一个有效产物正常交付，两个不存在 ID 与一个错归属 ID 分别保留请求标识，不伪造实体关联。 |
-| [取消目标包含自身](cancel-self/status-report-1-278dc1b6fbf6975b24d6766df518b4b958b741330e1c0e8e992d37e0f86b9a45.json) | 取消动作执行失败，目标取消尚未施加，items 为空。 |
-| [来源仍在录像](waiting-source/status-report-1-23a82246ded7c645a79b34e5a256835436b1dacd23e4ca4d69b66893af50328d.json) | 取回已固定来源但选择为 pending，不提供伪造的空结果；等待关联明确。 |
-| [重复自动预览关联](duplicate-auto/status-report-1-588865f14de87af5850fb558895799a9d1b86a1304b25e9683f23d3dd2c414b9.json) | 两项自动预览均受理失败，来源拍摄保持 pending；报告保留关联与冲突列表，不创建交付。 |
+| [自动预览选择修复成品](preview-repaired/status-report-1-846083bcf62b8613183bcb5ec0cc22a998027784e536557f142a3d9708d3a54c.json) | 预览为 2 MiB，修复成品为 1 MiB；实际 delivery 引用修复成品，原片、预览和修复成品各有身份。 |
+| [交接结果无法确认](handoff-unconfirmed/status-report-1-530ac5bc60a05eda6b71a17f6b1ce48c436851e86bc4a7c4dfa1255f424a9f07.json) | 交付为 failed，原因保留未知；取回整体失败，不声称客户端未收到。 |
+| [取消动作自身被取消](cancel-controller/status-report-1-84ad54ec04aeae887c965ccddd7c778005598647a90da2a5bae546c23d5fecd1.json) | C1 为 canceled，条目说明目标取消已生效；C2 仅取消 C1 并成功，录像的停止仍在继续。 |
+| [完整副本清理失败](canceled-complete-copy/status-report-1-d64597f07cda267b3d7c55d8e94c4e8b6709ce2689d005fd0a2c0bb3851d1423.json) | 取回与交付保持 canceled，副本清理单独失败；发起取消的动作按本次清理失败汇总。 |
+| [按当前计划选择](range-selection/status-report-1-28143bf7dc2107b1573a6661d5eeba3cbf7933683b927044c2b0e000c1e25964.json) | 取回固定来源和选择，清理固定同一来源及完整产物集合。 |
+| [范围清理可靠空集合](empty-cleanup/status-report-1-ebb7af4413491ee95c590dbe45002d8dcb20d3671b6d45669b952d6d40e95459.json) | 来源已固定且无产物，selection 为 fixed 空数组；清理可以成功。 |
+| [显式 ID 部分失败](explicit-invalid-ids/status-report-1-ed11d5ed507a22ac404e63d807d78abe6f8d37718fddac19f1ca6d79523dad66.json) | 一个有效产物正常交付，两个不存在 ID 与一个错归属 ID 分别保留请求标识，不伪造实体关联。 |
+| [取消目标包含自身](cancel-self/status-report-1-21f17c7ef9e96f888e931bbbec014d047be5c2730f65e93f4416a5dfddc0d4a5.json) | 取消动作执行失败，目标取消尚未施加，items 为空。 |
+| [来源仍在录像](waiting-source/status-report-1-9397ceb8fb06bd1d594d1d645b1db2ba57135f0a722326a9a244914a0d6d4b24.json) | 取回已固定来源但选择为 pending，不提供伪造的空结果；等待关联明确。 |
+| [重复自动预览关联](duplicate-auto/status-report-1-15d0db4150fe66472b31e4820581b93c85fbc7731462191e8419021068b42cc7.json) | 两项自动预览均受理失败，来源拍摄保持 pending；报告保留关联与冲突列表，不创建交付。 |
 
 ## 校验边界与反例
 
-[结构正反例](schema-cases.json)包含合法与非法来源组合、默认与预览筛选、精确 ID 排他、自动用途约束、清理范围、受理分层、明确与未知集合、取消效果、预览关联和能力声明。每项明确指定所用 Schema、数据和预期结构结果。文件读取及校验属于规格验证，不是生产函数的单元测试。
+[结构正反例](schema-cases.json)包含对象 ID 的类型、规范写法、64 位范围、ACK 与同步引用边界，以及合法与非法来源组合、默认与预览筛选、精确 ID 排他、自动用途约束、清理范围、受理分层、明确与未知集合、取消效果、预览关联和能力声明。每项明确指定所用 Schema、数据和预期结构结果。文件读取及校验属于规格验证，不是生产函数的单元测试。
 
 在仓库根运行 `node scripts/check-protocol.mjs`，检查所有公共样例、报告摘要、已登记错误详情与本目录结构反例。脚本不会执行设备动作或尝试代替主机的完整受理状态机。
 
