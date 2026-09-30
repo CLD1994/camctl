@@ -92,11 +92,11 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 **接口与依赖：** 提供 `build_capture_definition(action: CaptureInput, capability: ParameterDefinition) -> CaptureDefinition`、`capture_handler(action_type: ActionType) -> ActionHandler`；CaptureInput 由本模块拥有，包含已校验的动作参数，A3 调用定义构造器。前置交付：D1/D2、K1/K2；定义先提供给 A3，运行处理器随后接入。
 
-- [ ] 编写失败用例。在 `test_capability_routes_own_completion` 中三种动作及各完成声明路由到对应流程，`assert chosen_mode == declared_mode`；未支持类型不能默认录像。target_duration_ms 精确且 stop_supported/必要余量组合完整，受理失败定义不得保存。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_definitions.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按动作自身定义拆分类型和处理器，全部定义由首次受理事实恢复；驱动默认值变化不影响旧动作。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 公共管理模型设备无关，专属参数仅相应模块解释。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 受理、执行和恢复是否重新计算固定定义；记录门禁证据，建议以“feat: 定义拍摄执行与能力路由”形成独立提交。
+- [x] 编写失败用例。在 `test_capability_routes_own_completion` 中三种动作及各完成声明路由到对应流程，`assert chosen_mode == declared_mode`；未支持类型不能默认录像。target_duration_ms 精确且 stop_supported/必要余量组合完整，受理失败定义不得保存。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_definitions.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按动作自身定义拆分类型和处理器，全部定义由首次受理事实恢复；驱动默认值变化不影响旧动作。
+- [x] 再运行上述命令，要求全部 PASS，并核对 公共管理模型设备无关，专属参数仅相应模块解释。
+- [x] 审阅实际接口、状态分区及失败路径，检查 受理、执行和恢复是否重新计算固定定义；记录门禁证据，建议以“feat: 定义拍摄执行与能力路由”形成独立提交。
 
 ### C2 录像启动及计时锚点
 
