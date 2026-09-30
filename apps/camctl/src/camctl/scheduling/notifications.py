@@ -50,6 +50,7 @@ class WorkNotifier:
         # 可重入：wait_changed 在持锁分支内读取快照。
         self._lock = threading.RLock()
         self._event: asyncio.Event | None = None
+        self._event_loop: asyncio.AbstractEventLoop | None = None
 
     def mark_changed(self, reason: WakeReason) -> WakeToken:
         """登记一次变化并唤醒等待方；原因合并不覆盖。"""
@@ -60,8 +61,16 @@ class WorkNotifier:
             reasons = frozenset(self._reasons)
             event = self._event
         if event is not None:
-            event.set()
+            # 唤醒必须线程安全：外部线程不得直接触碰事件循环对象。
+            self._wake(event)
         return WakeToken(version=version, reasons=reasons)
+
+    def _wake(self, event: asyncio.Event) -> None:
+        loop = self._event_loop
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(event.set)
+        else:  # pragma: no cover - 无等待方登记时无需唤醒
+            pass
 
     def snapshot(self) -> WakeToken:
         with self._lock:
@@ -86,6 +95,7 @@ class WorkNotifier:
             if observed.version < current.version:
                 return current
             self._event = event
+            self._event_loop = loop
         try:
             if deadline is None:
                 await event.wait()
@@ -101,5 +111,6 @@ class WorkNotifier:
             with self._lock:
                 if self._event is event:
                     self._event = None
+                    self._event_loop = None
                 else:
-                    event.set()
+                    self._wake(event)
