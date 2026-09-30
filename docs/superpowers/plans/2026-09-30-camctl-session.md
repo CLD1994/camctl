@@ -99,13 +99,13 @@ S1、S2、S4 的端口先固定，允许受理首阶段组合；S3、S5、S6 实
 
 **接口与依赖：** 提供 `acquire_session() -> SessionLease`、`probe_admission() -> AdmissionProbe`、`release_admission(lease: AdmissionLease) -> None`；SessionLease/AdmissionLease 表达真实持有句柄。前置交付：B2 的定位配置；系统调用端口替身。
 
-- [ ] 编写失败用例。建立 `test_lock_error_is_not_free`，非冲突 errno 抛锁错误，`assert probe.is_free is False`；取得探测锁后释放失败不产生成功判断。锁文件已存在但无人持锁仍能取得，子进程不能继承句柄。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_locks.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。集中适配 flock 与非继承句柄，保持文件稳定；run/init 使用会话锁，submit 只在事务内探测接纳锁。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 只有真正冲突代表已有接纳者。
+- [x] 编写失败用例。建立 `test_lock_error_is_not_free`，非冲突 errno 抛锁错误，`assert probe.is_free is False`；取得探测锁后释放失败不产生成功判断。锁文件已存在但无人持锁仍能取得，子进程不能继承句柄。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_locks.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。集中适配 flock 与非继承句柄，保持文件稳定；run/init 使用会话锁，submit 只在事务内探测接纳锁。
+- [x] 再运行上述命令，要求全部 PASS，并核对 只有真正冲突代表已有接纳者。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/session/test_locks.py -q`，真实多进程 flock 验证互斥、释放、异常退出及句柄隔离。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部锁路径、文件清理及 finally 是否删除锁文件或误释放他人资格；记录门禁证据，建议以“feat: 实现稳定会话与接纳锁”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部锁路径、文件清理及 finally 是否删除锁文件或误释放他人资格；记录门禁证据，建议以“feat: 实现稳定会话与接纳锁”形成独立提交。
 
 ### S3 受理后时钟资格与受限执行
 
