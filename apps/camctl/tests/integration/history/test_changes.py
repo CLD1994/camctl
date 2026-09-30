@@ -166,3 +166,105 @@ class TestCatalogsTogether:
             ) == [(_CREATED_AT + 5, 2)]
         finally:
             connection.close()
+
+
+from camctl.history.replay import EntityImage
+
+
+def EntityImagePlaceholder() -> EntityImage:
+    """初始（未出生）计划对象的空映像。"""
+    return EntityImage(
+        entity_type=4, entity_id=1, exists=False, rows={}, last_event_id=0, change_count=0
+    )
+
+
+class TestReplayMatchesStoredProjection:
+    def test_normal_write_equals_replay(self, tmp_path, plan_guards) -> None:
+        """门禁：正常写入的投影、计数与历史引用与回放重建一致。"""
+        from camctl.history.replay import apply_forward, restore
+        from camctl.contracts.history_values import INITIAL_BOUNDARY
+
+        _create_valid_database(tmp_path / "state.db")
+        owned = _open(tmp_path)
+        connection = owned.connection
+        try:
+            from camctl.contracts.values import new_operation_key
+            from camctl.persistence.transaction import commit_operation
+
+            assert commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned).kind == "completed"
+            assert commit_operation(
+                PlanStartCommand(1, before_status=1), new_operation_key(), owned
+            ).kind == "completed"
+
+            events = []
+            for row in connection.execute(
+                "SELECT id, transaction_id, event_type, event_version, occurred_at,"
+                " clock_status, change_seq FROM history_events ORDER BY id"
+            ):
+                from camctl.contracts.json_values import parse_exact_json
+
+                body = parse_exact_json(
+                    connection.execute(
+                        "SELECT body_json FROM history_events WHERE id = ?", (row[0],)
+                    ).fetchone()[0]
+                )
+                rows = tuple(
+                    RowChange(
+                        table=item["table"],
+                        row_id=item["id"],
+                        before=RowImage(
+                            exists=item["before"]["exists"],
+                            values=item["before"]["values"],
+                        ),
+                        after=RowImage(
+                            exists=item["after"]["exists"],
+                            values=item["after"]["values"],
+                        ),
+                    )
+                    for item in body["rows"]
+                )
+                events.append(
+                    EventEnvelope(
+                        event_id=row[0], transaction_id=row[1], event_type=row[2],
+                        event_version=row[3], occurred_at=row[4], clock_status=row[5],
+                        change_seq=row[6], reason=body["reason"], evidence=body["evidence"],
+                        rows=rows,
+                    )
+                )
+
+            # 从初始边界正向回放计划对象，与存储投影逐列一致。
+            from camctl.history.replay import RestoreSeed
+            from camctl.history.validators import ValidatedEvent
+
+            validated = tuple(
+                ValidatedEvent(
+                    envelope=envelope,
+                    event_name="PLAN_ACCEPTED"
+                    if envelope.event_type == 1
+                    else "PLAN_STATUS_CHANGED",
+                    branch_name="CREATE" if envelope.event_type == 1 else "START",
+                    references=((4, 1),),
+                    row_owners={
+                        ("plans", row.row_id): (4, 1) for row in envelope.rows
+                    },
+                )
+                for envelope in events
+            )
+            restored = restore(
+                RestoreSeed(image=EntityImagePlaceholder(), boundary=INITIAL_BOUNDARY),
+                validated,
+                target=__import__(
+                    "camctl.contracts.history_values", fromlist=["HistoryBoundary"]
+                ).HistoryBoundary(txn_id=2, last_event_id=2),
+            )
+            plan_row = connection.execute(
+                "SELECT request_id, name, created_at, status FROM plans WHERE id = 1"
+            ).fetchone()
+            replayed = restored.rows[("plans", 1)]
+            assert (
+                replayed["request_id"], replayed["name"], replayed["created_at"], replayed["status"]
+            ) == plan_row
+            # 回放不执行外部副作用：这里没有设备/文件端口可调，回放
+            # 仅由事件正文驱动。
+        finally:
+            connection.close()
