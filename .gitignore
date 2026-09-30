@@ -1,3 +1,9 @@
+# camctl 组件：包资源在构建与集成测试前由 scripts/sync_resources.py 生成。
+apps/camctl/src/camctl/_resources/
+
+__pycache__/
+*.pyc
+
 node_modules/
 tmp
 dist/

@@ -87,11 +87,11 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 **接口与依赖：** 提供 `resource_bytes(name: ResourceName) -> bytes`；ResourceName 从构建资源目录生成，不能由用户任意路径访问。前置交付：现有仓库结构与权威资源。
 
-- [ ] 编写失败用例。在 `test_wheel_contains_authoritative_resources` 中构建并在临时环境安装包，断言 CLI 入口存在且包资源与本次权威输入的摘要相同；`assert installed_schema == source_schema`。生产运行时从包资源读取，测试不把仓库存在当作安装资源证明。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_package.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。建立 `apps/camctl/pyproject.toml`、`uv.lock`、`src/camctl`、unit/integration 目录和 test 依赖组；用明确的构建步骤复制或生成 protocol、规格 SQL 及内部登记资源。选择能满足 Python 3.11 和所需包数据的成熟构建后端，说明实际包数据规则，不自行编写安装器。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 独立包可以导入和定位资源，生产与测试依赖分开。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 是否另行手工维护 Schema、依赖、枚举或事件全清单；记录门禁证据，建议以“build: 建立 camctl 包与权威资源构建”形成独立提交。
+- [x] 编写失败用例。在 `test_wheel_contains_authoritative_resources` 中构建并在临时环境安装包，断言 CLI 入口存在且包资源与本次权威输入的摘要相同；`assert installed_schema == source_schema`。生产运行时从包资源读取，测试不把仓库存在当作安装资源证明。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_package.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。建立 `apps/camctl/pyproject.toml`、`uv.lock`、`src/camctl`、unit/integration 目录和 test 依赖组；用明确的构建步骤复制或生成 protocol、规格 SQL 及内部登记资源。选择能满足 Python 3.11 和所需包数据的成熟构建后端，说明实际包数据规则，不自行编写安装器。
+- [x] 再运行上述命令，要求全部 PASS，并核对 独立包可以导入和定位资源，生产与测试依赖分开。
+- [x] 审阅实际接口、状态分区及失败路径，检查 是否另行手工维护 Schema、依赖、枚举或事件全清单；记录门禁证据，建议以“build: 建立 camctl 包与权威资源构建”形成独立提交。
 
 ### B2 本地配置的精确覆盖与冻结
 

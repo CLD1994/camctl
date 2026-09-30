@@ -1,0 +1,27 @@
+[project]
+name = "camctl"
+version = "0.1.0"
+description = "嵌入式主机上的计划受理、设备控制、状态保存与文件交接 CLI"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+camctl = "camctl.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# sdist 内包含构建钩子与同步脚本，使 wheel 可以直接从 sdist 构建。
+force-include = { "hatch_build.py" = "hatch_build.py", "scripts/sync_resources.py" = "scripts/sync_resources.py" }
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
+[dependency-groups]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-mock>=3.14",
+]
