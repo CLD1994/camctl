@@ -108,13 +108,13 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供 `decide_report(opportunity: ReportOpportunity) -> ReportDecision`、异步 `freeze_report(command: FreezeReport, key: OperationKey) -> DbOutcome[FrozenReport]`；FreezeReport 只指定机会，冻结依据在事务内取得。前置交付：R1、P3/P4、S1；同步事实来自可靠仓储。
 
-- [ ] 编写失败用例。建立 `test_frozen_report_excludes_later_changes`，冻结 H 后新提交，`assert later_entity not in original_report_scope`；完整同步从 0、局部同步与普通 ACK 合并、已有宽报告可满足、报告 ID 更大但覆盖不足各独立判定。冻结不取当前事务的部分事件。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_freeze.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。事务内重新取得全部范围及原完整 H，保存不可变逻辑报告；保留/替换/补投按内容责任及文件证据，不按名字或编号决定。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 没有把业务水位当历史边界，生成期间新变化交下一轮。
+- [x] 编写失败用例。建立 `test_frozen_report_excludes_later_changes`，冻结 H 后新提交，`assert later_entity not in original_report_scope`；完整同步从 0、局部同步与普通 ACK 合并、已有宽报告可满足、报告 ID 更大但覆盖不足各独立判定。冻结不取当前事务的部分事件。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_freeze.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。事务内重新取得全部范围及原完整 H，保存不可变逻辑报告；保留/替换/补投按内容责任及文件证据，不按名字或编号决定。
+- [x] 再运行上述命令，要求全部 PASS，并核对 没有把业务水位当历史边界，生成期间新变化交下一轮。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_freeze.py -q`，真实 SQLite 冻结与并发受理/ACK/同步变化，核对完整事务及旧内容不变。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有正常/受限/显式同步机会的冻结及覆盖来源；记录门禁证据，建议以“feat: 实现报告机会与可靠冻结”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有正常/受限/显式同步机会的冻结及覆盖来源；记录门禁证据，建议以“feat: 实现报告机会与可靠冻结”形成独立提交。
 
 ### R3 确定性流式编码
 
