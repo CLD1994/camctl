@@ -153,13 +153,13 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 **接口与依赖：** 提供 `build_runtime(command: Command, config: ConfigSnapshot) -> RuntimeDeps`、`execute_command(command: Command, deps: RuntimeDeps) -> CommandResult`、`close_runtime(deps: RuntimeDeps) -> None`；CommandResult 是各命令结果联合类型。前置交付：A4、S2—S5、L2/L6；每阶段所需实际模块。
 
-- [ ] 编写失败用例。在 `test_submit_never_dispatches_device` 中执行 submit，`assert device_calls == []`；初始化中途失败只关闭已创建资源，重复关闭不重复处理。取消主等待后断言未完成 DB、文件或报告责任由 S5 接手，不能直接关闭它仍使用的资源。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_composition.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按命令和阶段创建协作者，流程只依赖端口；关闭次序为停止新工作、接手实际结果、完成必要收场、关闭报告通信和数据库、结束日志生产并关闭日志，最后输出及释放会话句柄。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 没有全局数据库、驱动或配置单例，锁与连接不泄漏到工具子进程。
+- [x] 编写失败用例。在 `test_submit_never_dispatches_device` 中执行 submit，`assert device_calls == []`；初始化中途失败只关闭已创建资源，重复关闭不重复处理。取消主等待后断言未完成 DB、文件或报告责任由 S5 接手，不能直接关闭它仍使用的资源。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_composition.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按命令和阶段创建协作者，流程只依赖端口；关闭次序为停止新工作、接手实际结果、完成必要收场、关闭报告通信和数据库、结束日志生产并关闭日志，最后输出及释放会话句柄。
+- [x] 再运行上述命令，要求全部 PASS，并核对 没有全局数据库、驱动或配置单例，锁与连接不泄漏到工具子进程。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_composition.py -q`，组合真实装配执行 init/describe/submit/run，注入每种资源初始化及关闭失败并核对实际结果。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有初始化失败和 finally 分支是否仍可能丢弃实际任务；记录门禁证据，建议以“feat: 组装 CLI 用例与运行资源”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有初始化失败和 finally 分支是否仍可能丢弃实际任务；记录门禁证据，建议以“feat: 组装 CLI 用例与运行资源”形成独立提交。
 
 ### B7 发行物与部署检查
 

@@ -135,13 +135,13 @@ A1—A3 先用接口约束的静态目录与仓储替身测试。A4 必须组合
 
 **接口与依赖：** 提供 `derive_plan_state(actions: Sequence[ActionManagement]) -> PlanState`；提交后的 `notify_acceptance(result: AcceptanceResult, notifier: WorkNotifier) -> None` 使用 Q3 端口。前置交付：A4、Q3；ActionManagement 含状态及是否实际开始。
 
-- [ ] 编写失败用例。在 `test_plan_state_uses_started_fact` 中部分动作未经执行取消、剩余 pending，`assert state is PlanState.PENDING`；曾执行过且其他未来动作 pending 仍 RUNNING，全部终态 COMPLETED。取消受理等待后实际提交成功，`assert notifications == 1`；回滚不得发成功通知。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_parent_notification.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。依据持久化执行开始事实派生父状态；接手方消费完整提交结果后通知，退出前通知丢失由新会话的持久化发现接续。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 全部四种状态维度组合成立，通知不依赖原等待者仍存在。
+- [x] 编写失败用例。在 `test_plan_state_uses_started_fact` 中部分动作未经执行取消、剩余 pending，`assert state is PlanState.PENDING`；曾执行过且其他未来动作 pending 仍 RUNNING，全部终态 COMPLETED。取消受理等待后实际提交成功，`assert notifications == 1`；回滚不得发成功通知。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_parent_notification.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。依据持久化执行开始事实派生父状态；接手方消费完整提交结果后通知，退出前通知丢失由新会话的持久化发现接续。
+- [x] 再运行上述命令，要求全部 PASS，并核对 全部四种状态维度组合成立，通知不依赖原等待者仍存在。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/acceptance/test_parent_notification.py -q`，真实并发 submit、事件回放和调度发现组合，覆盖提交后通知前进程退出。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 后续动作结果仓储是否同事务派生父状态而非单独修改；记录门禁证据，建议以“feat: 派生计划状态并交接受理结果”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 后续动作结果仓储是否同事务派生父状态而非单独修改；记录门禁证据，建议以“feat: 派生计划状态并交接受理结果”形成独立提交。
 
 ### A6 两个入口及原输入恢复组合
 
@@ -149,11 +149,11 @@ A1—A3 先用接口约束的静态目录与仓储替身测试。A4 必须组合
 
 **接口与依赖：** 使用 B6 的真实 run/submit 与 A4，不新增旁路受理入口。前置交付：S3/S4/S6、R7、B6；先验收无设备范围，新增处理器后继续复验。
 
-- [ ] 编写失败用例。在 `test_bad_new_input_preserves_existing_work` 中已有待执行任务配坏新文件，`assert old_action_progressed is True` 且新增诊断进入报告；删除主程序原输入后重启仍按持久化状态恢复。有效 ACK、无效 ACK、状态库错误与坏正文各组合验证实际 CLI 结果。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/acceptance/test_entrypoints.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。补齐输入→完整事务→调度通知→报告→再次输入有效 ACK 的组件集成，保存业务与会话结果的独立预期；真实客户端确认由 I4 验证。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 原请求永久保存且恢复不依赖输入文件，所有受理验收有测试归属。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部读取、复用、拒绝和 ACK 分支的同类风险；记录门禁证据，建议以“test: 验证真实入口的输入受理闭环”形成独立提交。
+- [x] 编写失败用例。在 `test_bad_new_input_preserves_existing_work` 中已有待执行任务配坏新文件，`assert old_action_progressed is True` 且新增诊断进入报告；删除主程序原输入后重启仍按持久化状态恢复。有效 ACK、无效 ACK、状态库错误与坏正文各组合验证实际 CLI 结果。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/acceptance/test_entrypoints.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。补齐输入→完整事务→调度通知→报告→再次输入有效 ACK 的组件集成，保存业务与会话结果的独立预期；真实客户端确认由 I4 验证。
+- [x] 再运行上述命令，要求全部 PASS，并核对 原请求永久保存且恢复不依赖输入文件，所有受理验收有测试归属。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部读取、复用、拒绝和 ACK 分支的同类风险；记录门禁证据，建议以“test: 验证真实入口的输入受理闭环”形成独立提交。
 
 ## 模块完成门禁
 
