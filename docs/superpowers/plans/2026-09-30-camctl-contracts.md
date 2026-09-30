@@ -110,11 +110,11 @@ K1、K2、K3 完成基础值后，受理和持久化可以实施。K4 先为首�
 
 **接口与依赖：** 提供遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)的 Page；建议提供 `validate_boundary(boundary: HistoryBoundary, transaction: TransactionRange) -> None` 和 `validate_page(page: Page[T], scope: ReadScope) -> None`。TransactionRange 含事务 ID、首尾事件，ReadScope 含固定上界、排序及上次游标；具体游标结构由所属查询接口定义。前置交付：K1；历史格式规定的初始边界。
 
-- [ ] 编写失败用例。建立 `test_empty_page_can_continue`，仅用空 items 和合法后续候选游标构造 Page，`assert page.exhausted is False`。分别建立 `test_nonempty_page_can_continue`、`test_last_page_keeps_items`、`test_empty_page_is_exhausted`，覆盖其余三种成功状态，结束时仍保留本批数据；结束属性不可独立传入或赋值。事务中间位置、错误事务 ID、倒退或未推进游标、跨范围游标分别拒绝。初始化零事件边界另按规格验证。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_boundaries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。把 H、C、S 统一为完整边界类型；Page 只保存本批数据和继续位置，以只读属性推导结束，范围及位置校验与具体查询配合。批量上限和确认末尾由读取方保证。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 恢复位置与业务变化序号不能互相替代。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有批次构造方、测试替身及消费者是否遵守两字段构造与只读结束属性，是否在处理最后一批数据后才结束；空 items 不推定结束。记录门禁证据，建议以“feat: 定义完整边界与分页契约”形成独立提交。
+- [x] 编写失败用例。建立 `test_empty_page_can_continue`，仅用空 items 和合法后续候选游标构造 Page，`assert page.exhausted is False`。分别建立 `test_nonempty_page_can_continue`、`test_last_page_keeps_items`、`test_empty_page_is_exhausted`，覆盖其余三种成功状态，结束时仍保留本批数据；结束属性不可独立传入或赋值。事务中间位置、错误事务 ID、倒退或未推进游标、跨范围游标分别拒绝。初始化零事件边界另按规格验证。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_boundaries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。把 H、C、S 统一为完整边界类型；Page 只保存本批数据和继续位置，以只读属性推导结束，范围及位置校验与具体查询配合。批量上限和确认末尾由读取方保证。
+- [x] 再运行上述命令，要求全部 PASS，并核对 恢复位置与业务变化序号不能互相替代。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有批次构造方、测试替身及消费者是否遵守两字段构造与只读结束属性，是否在处理最后一批数据后才结束；空 items 不推定结束。记录门禁证据，建议以“feat: 定义完整边界与分页契约”形成独立提交。
 
 ### K4 公开字段计算与变化比较
 
