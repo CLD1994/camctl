@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "嵌入式主机上的计划受理、设备控制、状态保存与文件交接 CLI"
 requires-python = ">=3.11"
 dependencies = [
+    "concurrent-log-handler>=0.9.29",
+    "janus>=2.0.0",
     "jsonschema>=4.26.0",
 ]
 
