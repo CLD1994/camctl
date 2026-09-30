@@ -49,12 +49,17 @@ class EventContext:
 
 @dataclass(frozen=True)
 class ValidatedEvent:
-    """通过全部校验的事件及其解析出的对象引用。"""
+    """通过全部校验的事件及其解析出的对象引用。
+
+    row_owners 保存逐行归属 (表名, 行 ID) -> (历史对象编号, 对象 ID)，
+    供回放按对象应用事件时使用。
+    """
 
     envelope: EventEnvelope
     event_name: str
     branch_name: str
     references: tuple[tuple[int, int], ...]
+    row_owners: Mapping[tuple[str, int], tuple[int, int]]
 
 
 #: 具名守卫注册表；装配期由所属业务模块注册，重复注册覆盖同名校验。
@@ -305,9 +310,11 @@ def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEven
     objects = _history_objects()
     references: list[tuple[int, int]] = []
     referenced: set[tuple[int, int]] = set()
+    row_owners: dict[tuple[str, int], tuple[int, int]] = {}
     for row in event.rows:
         entity_name, entity_id = _resolve_owner(event, context, row)
         entry = (objects[entity_name]["id"], entity_id)
+        row_owners[(row.table, row.row_id)] = entry
         if entry not in referenced:
             referenced.add(entry)
             references.append(entry)
@@ -316,4 +323,5 @@ def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEven
         event_name=event_name,
         branch_name=branch_name,
         references=tuple(references),
+        row_owners=row_owners,
     )

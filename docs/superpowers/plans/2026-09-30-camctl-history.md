@@ -115,11 +115,11 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **接口与依赖：** 提供 `apply_forward(image: EntityImage, event: ValidatedEvent) -> EntityImage`、`apply_reverse(image: EntityImage, event: ValidatedEvent) -> EntityImage`、`restore(seed: RestoreSeed, events: Iterable[ValidatedEvent], target: HistoryBoundary) -> EntityImage`。前置交付：H1/H2、K3。
 
-- [ ] 编写失败用例。建立 `test_reverse_stops_at_complete_boundary`，一笔事务多个成员变化，`assert restored == independent_image_at_h`；覆盖创建、修改、成员存在性、精确数值、引用与同事务反向顺序。缺少中间事件拒绝；外部端口替身断言没有设备或文件调用。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_replay.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。正向按原事件顺序应用，逆向按相反顺序恢复前值；核对前后存在性和完整范围，只使用原事实，不重新执行预算、时钟或副作用判断。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 初始回放、快照正向和投影逆向分别符合独立预期。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 每种新增事件是否只有正向消费者，逆向是否遗漏自身子记录；记录门禁证据，建议以“feat: 实现可逆历史状态恢复”形成独立提交。
+- [x] 编写失败用例。建立 `test_reverse_stops_at_complete_boundary`，一笔事务多个成员变化，`assert restored == independent_image_at_h`；覆盖创建、修改、成员存在性、精确数值、引用与同事务反向顺序。缺少中间事件拒绝；外部端口替身断言没有设备或文件调用。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_replay.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。正向按原事件顺序应用，逆向按相反顺序恢复前值；核对前后存在性和完整范围，只使用原事实，不重新执行预算、时钟或副作用判断。
+- [x] 再运行上述命令，要求全部 PASS，并核对 初始回放、快照正向和投影逆向分别符合独立预期。
+- [x] 审阅实际接口、状态分区及失败路径，检查 每种新增事件是否只有正向消费者，逆向是否遗漏自身子记录；记录门禁证据，建议以“feat: 实现可逆历史状态恢复”形成独立提交。
 
 ### H4 短读事务与固定 H 分批查询
 
