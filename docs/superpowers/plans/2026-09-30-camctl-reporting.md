@@ -150,13 +150,13 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供异步 `generate(job: GenerationJob) -> GenerationResult`、`stop_worker(reason: WorkerStopReason) -> WorkerSettlement`；Linux 适配 `install_parent_guard(expected_parent_pid: int) -> None` 与独立工作锁由子进程取得。前置交付：R3/R4、P1、S5、F1。
 
-- [ ] 编写失败用例。建立 `test_exit_checks_delivered_result`，结果已到达而退出先处理，`assert generation.is_success is True`；仅残留文件无成功消息不得发布。父保护设置前后原父退出、保护失败、旧 worker 持锁、SQLite 启动能力失败、停止/超时/成功两种先后及迟到状态库错误均覆盖。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_worker.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。由在整个 worker 生命周期内存活的主线程启动 spawn；子进程先建立 PR_SET_PDEATHSIG=SIGKILL 并核对原父，再取得独立 flock、检查实际运行库，才 ready。每任务独立只读连接，短事务读取、完成写入/摘要/同步且无活动读事务后才成功。只复用成功健康 worker，失败后确认实际退出再清理。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 没有信号即结束或锁文件存在即占用的错误判定。
+- [x] 编写失败用例。建立 `test_exit_checks_delivered_result`，结果已到达而退出先处理，`assert generation.is_success is True`；仅残留文件无成功消息不得发布。父保护设置前后原父退出、保护失败、旧 worker 持锁、SQLite 启动能力失败、停止/超时/成功两种先后及迟到状态库错误均覆盖。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_worker.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。由在整个 worker 生命周期内存活的主线程启动 spawn；子进程先建立 PR_SET_PDEATHSIG=SIGKILL 并核对原父，再取得独立 flock、检查实际运行库，才 ready。每任务独立只读连接，短事务读取、完成写入/摘要/同步且无活动读事务后才成功。只复用成功健康 worker，失败后确认实际退出再清理。
+- [x] 再运行上述命令，要求全部 PASS，并核对 没有信号即结束或锁文件存在即占用的错误判定。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_worker.py -q`，真实 Linux spawn/Pipe/父死亡/工作锁组合；未取得锁或未确认停止前禁止临时文件清理及复用。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 父线程寿命、句柄继承、结果与退出及全部工具资源；记录门禁证据，建议以“feat: 实现报告生成进程生命周期”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 父线程寿命、句柄继承、结果与退出及全部工具资源；记录门禁证据，建议以“feat: 实现报告生成进程生命周期”形成独立提交。
 
 ### R6 累计 ACK 及同步动作
 
