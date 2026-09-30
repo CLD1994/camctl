@@ -186,6 +186,7 @@ class ClockSection:
 
 @dataclass(frozen=True)
 class PathsSection:
+    state_db: str
     log_file: str
     staging: str
     ready: str
@@ -212,10 +213,11 @@ class ConfigSnapshot:
 class ConfigDefaults:
     """完整内置默认值；含环境因素的路径默认由装配适配器提供。"""
 
+    state_db: str = "$HOME/.camctl/state.db"
     log_file: str = "$HOME/.camctl/camctl.log"
-    staging: str = "/srv/camctl/staging"
-    ready: str = "/srv/camctl/ready"
-    processing: str = "/srv/camctl/processing"
+    staging: str = "$HOME/.camctl/staging"
+    ready: str = "$HOME/.camctl/ready"
+    processing: str = "$HOME/.camctl/processing"
     log_level: str = "WARNING"
     log_max_size: str = "10 MiB"
     log_file_count: int = 3
@@ -370,8 +372,9 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         recovery_wait_cap_s=_seconds_field(clock, "recovery_wait_cap_s", defaults.recovery_wait_cap_s, allow_zero=True),
     )
 
-    paths = _take(root.get("paths", {}), "paths", ("log_file", "staging", "ready", "processing"))
+    paths = _take(root.get("paths", {}), "paths", ("state_db", "log_file", "staging", "ready", "processing"))
     paths_section = PathsSection(
+        state_db=_require_nonempty_str(paths.get("state_db", defaults.state_db), "paths.state_db"),
         log_file=_require_nonempty_str(paths.get("log_file", defaults.log_file), "paths.log_file"),
         staging=_require_nonempty_str(paths.get("staging", defaults.staging), "paths.staging"),
         ready=_require_nonempty_str(paths.get("ready", defaults.ready), "paths.ready"),
