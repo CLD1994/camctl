@@ -86,11 +86,11 @@ K1、K2、K3 完成基础值后，受理和持久化可以实施。K4 先为首�
 
 **接口与依赖：** 提供 `parse_object_id(raw: JsonValue) -> ObjectId`、`make_object_id(value: int) -> ObjectId`、`to_utc_micros(raw: str) -> UtcMicros`、`seconds_to_duration_ms(seconds: int | Decimal) -> DurationMillis`；ClockPort 继承 MonotonicClock，分别提供 utc_micros 与 monotonic_ns，实际适配由 B6 装配；枚举映射读取权威登记。前置交付：B1；相关协议与整数登记。
 
-- [ ] 编写失败用例。建立 `test_bool_is_not_object_id`，输入 True 断言身份类型错误；公共 ID 只接受规范十进制字符串，JSON 数字、前导零、正负号和越界分别拒绝，最大合法值精确返回。make_object_id 验证内部整数且拒绝 bool。建立 `test_exact_duration_conversion`，输入 Decimal('1.5') 秒，`assert result == 1500`；Decimal('1.0005') 不能精确表示。日期覆盖起点两侧、合法最早最晚值、闰日、小数秒非法及不同本地时区；枚举覆盖未知编号、跨枚举混用及公共文本编码。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_values.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。实现精确整数与单位适配；日期采用整数运算，枚举只从登记加载或生成，不复制完整编号清单。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 合法值往返相等，非法值没有默认替代，生成映射与权威资源一致。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部身份、时间和枚举转换入口是否绕过统一适配；记录门禁证据，建议以“feat: 实现身份时间与枚举适配”形成独立提交。
+- [x] 编写失败用例。建立 `test_bool_is_not_object_id`，输入 True 断言身份类型错误；公共 ID 只接受规范十进制字符串，JSON 数字、前导零、正负号和越界分别拒绝，最大合法值精确返回。make_object_id 验证内部整数且拒绝 bool。建立 `test_exact_duration_conversion`，输入 Decimal('1.5') 秒，`assert result == 1500`；Decimal('1.0005') 不能精确表示。日期覆盖起点两侧、合法最早最晚值、闰日、小数秒非法及不同本地时区；枚举覆盖未知编号、跨枚举混用及公共文本编码。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_values.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。实现精确整数与单位适配；日期采用整数运算，枚举只从登记加载或生成，不复制完整编号清单。
+- [x] 再运行上述命令，要求全部 PASS，并核对 合法值往返相等，非法值没有默认替代，生成映射与权威资源一致。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部身份、时间和枚举转换入口是否绕过统一适配；记录门禁证据，建议以“feat: 实现身份时间与枚举适配”形成独立提交。
 
 ### K2 精确 JSON 解析与数值判断
 
