@@ -22,6 +22,7 @@ from camctl.contracts.enums import (
 from camctl.contracts.values import (
     DurationMillis,
     ObjectId,
+    OperationKey,
     UtcMicros,
     ValueFormatError,
     ValueRangeError,
@@ -29,6 +30,7 @@ from camctl.contracts.values import (
     format_object_id,
     format_utc_micros,
     make_object_id,
+    new_operation_key,
     parse_object_id,
     seconds_to_duration_ms,
     to_utc_micros,
@@ -258,3 +260,36 @@ class TestRegistryEnums:
             codes = list(definition["members"].values())
             assert all(isinstance(code, int) and not isinstance(code, bool) and code > 0 for code in codes)
             assert len(codes) == len(set(codes)), column
+
+
+class TestOperationKey:
+    def test_valid_key_round_trips(self) -> None:
+        raw = "0123456789abcdef0123456789abcdef"
+        key = OperationKey(raw)
+        assert key == raw
+        assert isinstance(key, str)
+
+    def test_uppercase_hex_rejected(self) -> None:
+        with pytest.raises(ValueFormatError):
+            OperationKey("0123456789ABCDEF0123456789ABCDEF")
+
+    def test_wrong_length_rejected(self) -> None:
+        with pytest.raises(ValueFormatError):
+            OperationKey("0123")
+        with pytest.raises(ValueFormatError):
+            OperationKey("0" * 33)
+
+    def test_non_hex_characters_rejected(self) -> None:
+        with pytest.raises(ValueFormatError):
+            OperationKey("g" * 32)
+
+    def test_non_string_input_rejected(self) -> None:
+        for bad in (16, None, True, b"0" * 32, 1.5):
+            with pytest.raises(ValueFormatError):
+                OperationKey(bad)  # type: ignore[arg-type]
+
+    def test_new_operation_key_format_and_distinct(self) -> None:
+        first = new_operation_key()
+        second = new_operation_key()
+        assert OperationKey(first) == first
+        assert first != second

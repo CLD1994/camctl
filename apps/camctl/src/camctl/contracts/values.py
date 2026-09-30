@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -71,6 +72,26 @@ class DurationMillis(int):
         if value < 0:
             raise ValueRangeError(f"毫秒时长不能为负: {value}")
         return super().__new__(cls, value)
+
+
+#: 操作身份固定为 32 位小写十六进制，与历史事务表的登记约束一致。
+_OPERATION_KEY = re.compile(r"\A[0-9a-f]{32}\Z")
+
+
+class OperationKey(str):
+    """一次完整数据库业务操作的稳定身份。"""
+
+    __slots__ = ()
+
+    def __new__(cls, raw: str) -> "OperationKey":
+        if not isinstance(raw, str) or _OPERATION_KEY.match(raw) is None:
+            raise ValueFormatError(f"操作身份必须是 32 位小写十六进制: {raw!r}")
+        return super().__new__(cls, raw)
+
+
+def new_operation_key() -> OperationKey:
+    """生成新的操作身份；其输入、阶段和目标含义由发起方赋予。"""
+    return OperationKey(secrets.token_hex(16))
 
 
 def parse_object_id(raw: Any) -> ObjectId:
