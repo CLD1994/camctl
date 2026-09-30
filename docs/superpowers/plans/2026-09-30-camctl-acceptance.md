@@ -85,13 +85,13 @@ A1—A3 先用接口约束的静态目录与仓储替身测试。A4 必须组合
 
 **接口与依赖：** 提供 `parse_input(read: InputRead) -> ParsedInput | InputDiagnostic`；异步 `read_input(path: Path, files: InputFileReader) -> InputRead` 只组织一次打开及完整读取。前置交付：K2、F1 的输入文件读取端口；可以先用端口替身。
 
-- [ ] 编写失败用例。建立 `test_partial_read_has_no_identity`，前段含 request_id 和 ACK、后段读取错误，`assert diagnostic.request_id is None` 且 ACK 未处理；打开错误、编码错误、重复键、非法 Unicode 及非 JSON 常量分别分类。读中断 `assert open_count == 1`，不重读。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_input.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。保留路径、打开/读取/解析阶段及实际错误；完整解析成功才交给字段提取；诊断中的不可编码输入用转义表示。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 读取错误不注册计划、不推进 latest_plan_id、不改变 ACK。
+- [x] 编写失败用例。建立 `test_partial_read_has_no_identity`，前段含 request_id 和 ACK、后段读取错误，`assert diagnostic.request_id is None` 且 ACK 未处理；打开错误、编码错误、重复键、非法 Unicode 及非 JSON 常量分别分类。读中断 `assert open_count == 1`，不重读。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_input.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。保留路径、打开/读取/解析阶段及实际错误；完整解析成功才交给字段提取；诊断中的不可编码输入用转义表示。
+- [x] 再运行上述命令，要求全部 PASS，并核对 读取错误不注册计划、不推进 latest_plan_id、不改变 ACK。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/acceptance/test_input.py -q`，真实文件、CLI 和诊断事务组合，验证不存在文件及解析失败仍可驱动已有任务。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 run 与 submit 两个入口是否依据片段或异常默认取得身份；记录门禁证据，建议以“feat: 实现完整输入读取与诊断”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 run 与 submit 两个入口是否依据片段或异常默认取得身份；记录门禁证据，建议以“feat: 实现完整输入读取与诊断”形成独立提交。
 
 ### A2 精确 Schema 及分层校验
 
@@ -123,11 +123,11 @@ A1—A3 先用接口约束的静态目录与仓储替身测试。A4 必须组合
 
 **接口与依赖：** 提供异步 `accept_input(input: ParsedInput | InputDiagnostic, context: AcceptanceContext, key: OperationKey) -> AcceptanceResult`；内部仓储 `process_input(command: ProcessInput, key: OperationKey) -> DbOutcome[AcceptanceResult]` 完成唯一事务。前置交付：P3/P4、H1/H2、A1—A3、S4/R6 的纯规则及端口。
 
-- [ ] 编写失败用例。建立 `test_retry_skips_body_validation`，已受理 ID 改正文为缺失/非数组 actions，`assert plan_id_after == original_id` 且无新动作；建立 `test_rejection_does_not_block_ack`，非法正文配真实有效报告 ACK，`assert ack_watermark_after == report.coverage_end`。按六分区及并发同 ID、提交未知、全失败动作原子注册验证。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/acceptance/test_acceptance.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。事务内权威查请求，已存在立即复用并跳过正文；首次依完整规则注册或拒绝，ACK 独立判定及同步结束共同保存。submit 在同事务中执行 S4 的工作/锁判断；不能在第二次事务补交接。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 计划、全部成员、诊断、ACK 与必要交接没有部分保存。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 run/submit 是否各自维护一套受理或 ACK 逻辑，错误是否包装为业务拒绝；记录门禁证据，建议以“feat: 实现请求复用与原子输入处理”形成独立提交。
+- [x] 编写失败用例。建立 `test_retry_skips_body_validation`，已受理 ID 改正文为缺失/非数组 actions，`assert plan_id_after == original_id` 且无新动作；建立 `test_rejection_does_not_block_ack`，非法正文配真实有效报告 ACK，`assert ack_watermark_after == report.coverage_end`。按六分区及并发同 ID、提交未知、全失败动作原子注册验证。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/acceptance/test_acceptance.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。事务内权威查请求，已存在立即复用并跳过正文；首次依完整规则注册或拒绝，ACK 独立判定及同步结束共同保存。submit 在同事务中执行 S4 的工作/锁判断；不能在第二次事务补交接。
+- [x] 再运行上述命令，要求全部 PASS，并核对 计划、全部成员、诊断、ACK 与必要交接没有部分保存。
+- [x] 审阅实际接口、状态分区及失败路径，检查 run/submit 是否各自维护一套受理或 ACK 逻辑，错误是否包装为业务拒绝；记录门禁证据，建议以“feat: 实现请求复用与原子输入处理”形成独立提交。
 
 ### A5 父计划状态及提交通知
 
