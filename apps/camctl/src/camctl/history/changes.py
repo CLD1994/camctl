@@ -408,9 +408,12 @@ def derive_changes(
     }
     progress_updates = tuple(
         sorted(
-            ProgressUpdate(entity_type, entity_id, counts[(entity_type, entity_id)])
-            for entity_type, entity_id in touched
-            if entity_type in snapshot_types
+            (
+                ProgressUpdate(entity_type, entity_id, counts[(entity_type, entity_id)])
+                for entity_type, entity_id in touched
+                if entity_type in snapshot_types
+            ),
+            key=lambda update: (update.entity_type, update.entity_id),
         )
     )
     return ChangeSet(
