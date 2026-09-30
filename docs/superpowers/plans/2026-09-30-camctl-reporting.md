@@ -192,13 +192,13 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供异步 `maintain_reports(context: ReportMaintenanceContext) -> ReportMaintenanceResult`；context 含本次机会、时限、仓储、worker、发布及独立日志副本端口。前置交付：R2/R5/R7、S1/S5、L5；S6 随后消费报告错误和实际收场结果。
 
-- [ ] 编写失败用例。建立 `test_failure_waits_for_new_trigger`，文件/worker 失败后时间经过或重扫，`assert new_generation_calls == 0`；新业务/同步/后续正常 run 才重试。普通业务继续，状态库或历史错误则停止可靠执行；受限会话只处理一次。启动/生成总期限/停止宽限分别测试，进度不续期。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_maintenance.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。建议工程初值为启动 10 秒、整次生成 300 秒、停止等待 5 秒，各为有限正秒数且运行内固定；在消费代码前集中落到配置定义并同步责任文档，联调再校准。超时先失效任务、请求终止、宽限后强制终止并确认退出；停止未确认不复用文件。规定报告首次失败触发 L5，副本失败不递归。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 失败责任保留且不自建重试循环，报告失败与状态库失败严格区分。
+- [x] 编写失败用例。建立 `test_failure_waits_for_new_trigger`，文件/worker 失败后时间经过或重扫，`assert new_generation_calls == 0`；新业务/同步/后续正常 run 才重试。普通业务继续，状态库或历史错误则停止可靠执行；受限会话只处理一次。启动/生成总期限/停止宽限分别测试，进度不续期。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_maintenance.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。建议工程初值为启动 10 秒、整次生成 300 秒、停止等待 5 秒，各为有限正秒数且运行内固定；在消费代码前集中落到配置定义并同步责任文档，联调再校准。超时先失效任务、请求终止、宽限后强制终止并确认退出；停止未确认不复用文件。规定报告首次失败触发 L5，副本失败不递归。
+- [x] 再运行上述命令，要求全部 PASS，并核对 失败责任保留且不自建重试循环，报告失败与状态库失败严格区分。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_maintenance.py -q`，真实进程、文件、数据库和日志副本组合各失败边界，其他必要设备收场并行推进。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有超时、停止、迟到错误、无新触发及会话关闭分支；记录门禁证据，建议以“feat: 实现报告失败维护与时限”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有超时、停止、迟到错误、无新触发及会话关闭分支；记录门禁证据，建议以“feat: 实现报告失败维护与时限”形成独立提交。
 
 ### R9 完整报告与消费者验收
 
@@ -206,11 +206,11 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 使用完整业务历史、真实报告子进程、C 领取、客户端导入与 A4 ACK。前置交付：R1—R8、C1—C8、X1—X11、N1—N5、H1—H6 及 I1—I4 的实际消费者与测试驱动；H7 提供共同审阅的独立预期。
 
-- [ ] 编写失败用例。在 `test_same_report_rebuilds_identical_bytes` 中全部动作、文件、取消与清理结果冻结后继续变化，`assert rebuilt_bytes == original_bytes` 且客户端可校验保存。不同批次/缓存/路径、同步 scope、跨计划父补齐及报告失败恢复逐项独立预期。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_report_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。逐项映射 report-acceptance、history 查询和字段依赖条件，每种公开结果绑定正式机器 Schema 与实际客户端消费者；资源测量同时计主和报告进程。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 报告全部字段、范围和失败恢复有真实组合证据，不以样例摘要代替生产生成。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部字段遗漏、内部事实误公开、父子关联及确定性风险；记录门禁证据，建议以“test: 验证完整状态报告闭环”形成独立提交。
+- [x] 编写失败用例。在 `test_same_report_rebuilds_identical_bytes` 中全部动作、文件、取消与清理结果冻结后继续变化，`assert rebuilt_bytes == original_bytes` 且客户端可校验保存。不同批次/缓存/路径、同步 scope、跨计划父补齐及报告失败恢复逐项独立预期。
+- [x] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_report_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。逐项映射 report-acceptance、history 查询和字段依赖条件，每种公开结果绑定正式机器 Schema 与实际客户端消费者；资源测量同时计主和报告进程。
+- [x] 再运行上述命令，要求全部 PASS，并核对 报告全部字段、范围和失败恢复有真实组合证据，不以样例摘要代替生产生成。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部字段遗漏、内部事实误公开、父子关联及确定性风险；记录门禁证据，建议以“test: 验证完整状态报告闭环”形成独立提交。
 
 ## 模块完成门禁
 
