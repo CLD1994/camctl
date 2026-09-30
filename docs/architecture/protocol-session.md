@@ -295,7 +295,7 @@ camctl 已合法返回 `error` 时，继续按[主程序处理边界](session-er
 - 所有需要驱动的计划工作完成后 `run` 可以主动正常退出；
 - 未来 `pending` action 阻止 `run` 因“当前无立即工作”而提前退出；
 - 运行中的 `run` 持续吸收后续 `submit` 成功受理的新计划；
-- 只剩 `possibly_recording` 等残留 `device_fact` 时允许正常退出。
+- 只剩已结束动作的设备执行未确认事实，且没有必要主动收场或未完成报告责任时，允许正常退出。
 
 #### group
 

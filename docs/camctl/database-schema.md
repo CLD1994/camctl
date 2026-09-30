@@ -6,8 +6,17 @@
 
 ## 按问题查阅
 
+等待条件的事实归属与事务见[等待专题](database/waiting.md)，清理接手见[清理协调](database/cleanup-coordination.md)，汇总见[产物清理状态](database/output-cleanup-state.md)，历史报告字段影响见[报告目录](database/report-changes.md)。联合验证见[一致性验收](database/consistency-verification.md)。
+
 | 要回答的问题 | 定义位置 |
 | --- | --- |
+| 怎样检查结构、事件规则、报告依赖及公共格式？ | [检查命令与覆盖范围](../../scripts/README.md) |
+| 完整建表语句和索引在哪里？ | [结构定义](database/schema/README.md) |
+| 保存事件时允许修改哪些字段，怎样验证状态转换？ | [事件转换规则](database/event-transitions.md) |
+| 报告字段依赖哪些历史事实，哪些变化需要报告？ | [字段依赖说明](database/report-dependencies.md)与[报告变化目录](database/report-changes.md) |
+| 部署使用哪个 SQLite 运行库，怎样检查其能力？ | [运行库与部署要求](sqlite-runtime.md) |
+| 哪些生产工作尚未完成，如何验收？ | [实施清单](implementation-readiness.md#数据库规格同步清单)与[一致性验收](database/consistency-verification.md) |
+| 哪些事实必须共同提交，提交未知时如何恢复？ | [事务接口](database/transactions.md) |
 | 各表如何表示身份、时间、空值和枚举？怎样选择列、子表或 JSON？ | [公共存储规则](database/common.md) |
 | 计划和动作如何保存原输入、受理依据、运行状态及最终错误？ | [计划与动作](database/plans-actions.md) |
 | 各类动作的固定执行定义包含哪些 JSON 字段？ | [动作执行定义](database/execution-definitions.md) |
@@ -20,15 +29,17 @@
 
 首次阅读先了解[公共存储规则](database/common.md)，再按负责的业务进入对应表专题。查询历史状态时，结合[历史状态查询](historical-state-query.md)；设计写事务时，结合[数据库执行与事务](persistence-runtime.md)。
 
+保存与恢复事件时，结合[事件转换规则](database/event-transitions.md)和[历史格式](database/history-formats.md)；生成报告时，结合[公共字段契约](../architecture/report-format.md)和[字段依赖说明](database/report-dependencies.md)。这些专题定义有效规则，实施状态由实施清单统一跟踪。
+
 ## 主要业务对象与主表边界
 
-计划、动作、正式产物、普通交付、输入文件诊断和状态报告分别建立主表。产物之间的来源关联由 `output_origins` 表保存，自动预览取回与来源拍摄的关联由 `auto_preview_links` 表保存，取回和范围清理的来源成员由 `action_output_sources` 表保存。取回的逐来源选择与逐目标处理分别由 `obtain_source_selections`、`obtain_items` 保存，清理的逐目标处理由 `cleanup_items` 保存。公共操作流程及其尝试分别由 `operation_runs`、`operation_attempts` 保存，文件拷贝专属状态由 `file_copies` 保存。
+计划、动作、正式产物、普通交付、输入文件诊断和状态报告分别建立主表。产物之间的来源关联由 `output_origins` 表保存，自动预览取回与来源拍摄的关联由 `auto_preview_links` 表保存，取回和范围清理的来源成员由 `action_dependencies` 表保存。取回的逐来源选择与逐目标处理分别由 `obtain_source_selections`、`obtain_items` 保存，清理的逐目标处理由 `cleanup_items` 保存。公共操作流程及其尝试分别由 `operation_runs`、`operation_attempts` 保存，文件拷贝专属状态由 `file_copies` 保存。
 
 设备文件的身份、定位信息、业务归属及可靠取得的文件事实由 `device_files` 保存；主机中间文件的归属、用途及清理状态由 `intermediate_files` 保存。取消动作的逐目标处理由 `cancel_items` 保存，针对目标取回中各份交付的处理由 `cancel_delivery_items` 保存。录像内部检查与修复的决定、进度和结果由 `recording_processing` 保存，动作在设备上启动的持续活动及其已知状态由 `device_activities` 保存。
 
-显式状态同步的固定起点、开始依据和责任结束情况由 `state_syncs` 保存，客户端累计确认位置、可信历史时间下界及中间文件清理继续位置由 `runtime_state` 保存。业务投影由二十三张表组成：六张主表、三张关联表、两张取回明细表、一张清理明细表、两张取消明细表、两张公共操作表，以及设备文件、文件拷贝、中间文件、录像处理、设备活动、状态同步和全局运行状态各一张表。
+显式状态同步的固定起点、开始依据和责任结束情况由 `state_syncs` 保存，客户端累计确认位置、可信历史时间下界及中间文件清理继续位置由 `runtime_state` 保存。业务投影按下表职责组织；表目录与结构同步状态分别维护。
 
-历史事实及提交分组分别由 `history_events`、`history_transactions` 保存，对象与事件的关联由 `entity_event_links` 保存。对象快照及其维护进度分别由 `entity_snapshots`、`entity_snapshot_progress` 保存，数据库元信息由 `database_metadata` 保存，与业务投影共同构成二十九张表。表清单的覆盖范围与跨流程职责见[数据库表职责核对](database-boundary-review.md)。
+历史事实及提交分组分别由 `history_events`、`history_transactions` 保存，对象自身历史关联由 `entity_event_links` 保存，报告选择目录由 `report_entity_changes` 保存。对象快照及其维护进度分别由 `entity_snapshots`、`entity_snapshot_progress` 保存，数据库元信息由 `database_metadata` 保存。表清单的覆盖范围与跨流程职责见[数据库表职责核对](database-boundary-review.md)。
 
 | 主表 | 一条记录表示什么 | 归属与生命周期 |
 | --- | --- | --- |
@@ -43,13 +54,13 @@
 
 ## 关联表、处理记录与基础表目录
 
-下表与上面的六张主表共同构成完整表目录。表的物理拆分不增加独立业务对象或扩大快照范围。
+下表与上面的六张主表共同构成完整表目录。历史对象与快照范围按业务责任明确划分，见[对象归属](database/history-formats.md#对象目录与归属)。
 
 | 表 | 记录职责与定义位置 |
 | --- | --- |
 | `output_origins` | [预览或修复成品与原产物的关系](database/outputs-files.md#产物来源关系) |
 | `auto_preview_links` | [自动取回与来源拍摄的关联及能力依据](database/sources-obtaining.md#自动预览取回关联) |
-| `action_output_sources` | [取回或范围清理的固定来源成员](database/sources-obtaining.md#取回与范围清理的来源成员) |
+| `action_dependencies` | [取回或范围清理的固定来源成员](database/sources-obtaining.md#取回与范围清理的来源成员) |
 | `obtain_source_selections` | [取回的逐来源选择进度](database/sources-obtaining.md#取回的来源选择与目标明细) |
 | `obtain_items` | [取回的逐目标处理、读取资格及依赖](database/sources-obtaining.md#取回的来源选择与目标明细) |
 | `cleanup_items` | [清理的逐目标处理及删除限制](database/cleanup-cancellation.md#清理目标明细) |
@@ -67,12 +78,13 @@
 | `history_events` | [权威历史事件](database/history.md#历史事件与事务分组) |
 | `history_transactions` | [历史事件的完整提交分组](database/history.md#历史事件与事务分组) |
 | `entity_event_links` | [实际变化对象的事件关联及计数](database/history.md#对象与事件关联) |
+| `report_entity_changes` | [按事件公开影响登记的报告对象目录](database/report-changes.md) |
 | `entity_snapshots` | [完整历史边界处的对象快照](database/history.md#对象快照与维护进度) |
 | `entity_snapshot_progress` | [对象尚未被快照包含的变化次数](database/history.md#对象快照与维护进度) |
-| `database_metadata` | [数据库标识、实例身份与格式版本](database/reports-runtime.md#数据库元信息) |
+| `database_metadata` | [数据库标识、实例身份、格式及目录绑定](database/reports-runtime.md#数据库元信息) |
 
-## 规格维护与设计进度
+## 规格维护与实施边界
 
 字段和约束在所属专题维护；各表共用的表示与事务原则只在[公共存储规则](database/common.md)定义。字段验证要求随所属定义保存，跨流程协作检查见[数据库表职责核对](database-boundary-review.md)。新增字段按职责加入对应专题，不在本入口扩展详细定义。
 
-未完成的字段、错误登记和接口设计集中记录在[字段设计任务](database-boundary-review.md#待完成的字段与结构设计)与[实施准备](implementation-readiness.md)。表职责、字段规格、生产实现和设备验证分别判断；表目录完整不表示全部字段已经定义或实现。
+目标字段、状态组合及跨表契约由对应专题定义；[六份 SQL](database/schema/README.md)及验证脚本的同步状态见[数据库规格同步清单](implementation-readiness.md#数据库规格同步清单)。覆盖关系见[字段与结构设计覆盖](database-boundary-review.md#字段与结构设计覆盖)，实现和验证任务见[事务接口](database/transactions.md#实现与验证门槛)与[实施准备](implementation-readiness.md)。规格检查不代替生产持久化实现、软件集成或设备验证。

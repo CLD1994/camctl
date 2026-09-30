@@ -99,7 +99,7 @@ camctl 为每份报告保存了编号、覆盖范围、采用的历史记录范�
 
 例如，报告 1 的文件早已被主程序传走并从主机删除，数据库仍记得它的终点是 20。客户端请求 `after_report_id: "1"` 时，camctl 直接使用这条记录，不需要找回原报告文件。
 
-确认起点报告不存在时，错误为 `code: "sync_report_not_found"`、`stage: "execution"`，`details.after_report_id` 原样保存请求的合法报告 ID，例如 `{"after_report_id":"1"}`。动作保留开始和失败记录，`execution.started` 为 true，没有成功的 `result.report_id`。之后即使出现这个报告编号，也不重新执行已经失败的动作；再次同步需要新请求。
+确认起点报告不存在时，错误为 `code: "sync_report_not_found"`、`stage: "execution"`，`details.after_report_id` 原样保存请求的合法报告 ID，例如 `{"after_report_id":"1"}`。动作内部保留开始和失败记录，报告表达 `failed` 及上述执行错误，不提供成功的 `result.report_id`。之后即使出现这个报告编号，也不重新执行已经失败的动作；再次同步需要新请求。
 
 为了在重启后继续处理，camctl 会记住“这次同步从哪里开始，以及是否还需要等待确认”。本页将这项尚需完成的工作称为**同步责任**：报告动作可以先完成本地工作，但这项责任通常要等客户端确认后才结束。其保存方式见[数据库需要保存哪些信息](#数据库需要保存哪些信息)。
 

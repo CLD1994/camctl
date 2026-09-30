@@ -1,0 +1,683 @@
+{
+  "format_version": 1,
+  "description": "数据库第一版内部整数编号的统一定义。enums 定义普通列，json_enums 定义框架 JSON 中的整数分类；外部编号只引用其权威来源。布尔列和固定值分别列明。字段组合、转换及关联由 contract 指向的正式规格规定。",
+  "enums": {
+    "actions.expiration_reason": {
+      "contract": "plans-actions.md",
+      "members": {
+        "WINDOW_MISSED": 1,
+        "WINDOW_EXHAUSTED": 2
+      }
+    },
+    "actions.source_resolution_state": {
+      "contract": "plans-actions.md",
+      "members": {
+        "PENDING": 1,
+        "FIXED": 2,
+        "FAILED": 3
+      }
+    },
+    "actions.status": {
+      "contract": "plans-actions.md",
+      "members": {
+        "PENDING": 1,
+        "RUNNING": 2,
+        "SUCCEEDED": 3,
+        "FAILED": 4,
+        "EXPIRED": 5,
+        "CANCELED": 6
+      }
+    },
+    "actions.target_selection_state": {
+      "contract": "plans-actions.md",
+      "members": {
+        "PENDING": 1,
+        "FIXED": 2,
+        "FAILED": 3
+      }
+    },
+    "actions.type": {
+      "contract": "plans-actions.md",
+      "members": {
+        "CAMERA_TAKE_PHOTO": 1,
+        "CAMERA_RECORD": 2,
+        "CAMERA_TIMELAPSE": 3,
+        "OBTAIN_ACTION_OUTPUTS": 4,
+        "DELETE_ACTION_OUTPUTS": 5,
+        "CANCEL_TASK": 6,
+        "REPORT_STATUS": 7
+      }
+    },
+    "cancel_delivery_items.status": {
+      "contract": "workflow-fields.md#取消目标与交付项",
+      "members": {
+        "PENDING": 1,
+        "WITHDRAWN": 2,
+        "NOT_RETRACTABLE": 3,
+        "FAILED": 4
+      }
+    },
+    "cancel_items.cancellation_effect": {
+      "contract": "workflow-fields.md#取消目标与交付项",
+      "members": {
+        "NOT_APPLIED": 1,
+        "APPLIED": 2,
+        "NOT_REQUIRED": 3
+      }
+    },
+    "cancel_items.outcome": {
+      "contract": "workflow-fields.md#取消目标与交付项",
+      "members": {
+        "CANCELED": 1,
+        "ALREADY_TERMINAL": 2
+      }
+    },
+    "cancel_items.selection_basis": {
+      "contract": "workflow-fields.md#取消目标与交付项",
+      "members": {
+        "DIRECT": 1,
+        "AUTO_PREVIEW": 2,
+        "BOTH": 3
+      }
+    },
+    "cancel_items.status": {
+      "contract": "workflow-fields.md#取消目标与交付项",
+      "members": {
+        "PENDING": 1,
+        "RUNNING": 2,
+        "SUCCEEDED": 3,
+        "FAILED": 4,
+        "CANCELED": 5
+      }
+    },
+    "cleanup_items.outcome": {
+      "contract": "workflow-fields.md#清理目标字段",
+      "members": {
+        "DELETED": 1,
+        "ALREADY_CLEANED": 2,
+        "ABSENCE_CONFIRMED": 3
+      }
+    },
+    "cleanup_items.restriction_state": {
+      "contract": "workflow-fields.md#清理目标字段",
+      "members": {
+        "NOT_ESTABLISHED": 1,
+        "ACTIVE": 2,
+        "RELEASED": 3,
+        "IRREVERSIBLE": 4
+      }
+    },
+    "cleanup_items.status": {
+      "contract": "workflow-fields.md#清理目标字段",
+      "members": {
+        "UNRESOLVED": 1,
+        "PENDING_DELETE": 2,
+        "DELETING": 3,
+        "SUCCEEDED": 4,
+        "FAILED": 5,
+        "CANCELED": 6
+      }
+    },
+    "deliveries.status": {
+      "contract": "file-fields.md#普通交付",
+      "members": {
+        "PENDING": 1,
+        "PREPARING": 2,
+        "PREPARED": 3,
+        "PUBLISHING": 4,
+        "PUBLISHED": 5,
+        "FAILED": 6,
+        "CANCELED": 7,
+        "WITHDRAWN": 8
+      }
+    },
+    "deliveries.withdrawal_state": {
+      "contract": "file-fields.md#普通交付",
+      "members": {
+        "NOT_REQUESTED": 1,
+        "PENDING": 2,
+        "WITHDRAWN": 3,
+        "NOT_RETRACTABLE": 4,
+        "FAILED": 5,
+        "UNKNOWN": 6
+      }
+    },
+    "device_activities.activity_state": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "UNKNOWN": 1,
+        "ACTIVE": 2,
+        "ENDED": 3
+      }
+    },
+    "device_activities.baseline_state": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "NOT_REQUIRED": 1,
+        "COLLECTING": 2,
+        "FIXED": 3
+      }
+    },
+    "device_activities.completion_basis": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "UNDETERMINED": 1,
+        "DEVICE_EVIDENCE": 2,
+        "TIME_AND_OUTPUTS": 3,
+        "KNOWN_FAILURE": 4
+      }
+    },
+    "device_activities.completion_mode": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "DEVICE_EVIDENCE": 1,
+        "TIME_AND_OUTPUTS": 2
+      }
+    },
+    "device_activities.dispatch_state": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "NOT_DISPATCHED": 1,
+        "MAY_HAVE_DISPATCHED": 2,
+        "SUCCESS_RETURNED": 3,
+        "REJECTED_WITHOUT_EFFECT": 4
+      }
+    },
+    "device_activities.occupancy_state": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "HELD": 1,
+        "RELEASED": 2
+      }
+    },
+    "device_activities.ownership_mode": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "TASK_SCOPE": 1,
+        "BASELINE_COMPARISON": 2
+      }
+    },
+    "device_activities.result_set_state": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "UNEXAMINED": 1,
+        "CHECKING": 2,
+        "COMPLETE": 3,
+        "UNCONFIRMED": 4
+      }
+    },
+    "device_activities.start_return_meaning": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "SENT": 1,
+        "STARTED": 2,
+        "COMPLETED": 3
+      }
+    },
+    "device_files.checksum_support": {
+      "contract": "file-fields.md#设备文件",
+      "members": {
+        "UNDETERMINED": 1,
+        "SUPPORTED": 2,
+        "UNSUPPORTED": 3
+      }
+    },
+    "device_files.completion_state": {
+      "contract": "file-fields.md#设备文件",
+      "members": {
+        "UNKNOWN": 1,
+        "WRITING": 2,
+        "COMPLETE": 3,
+        "UNCONFIRMED": 4
+      }
+    },
+    "device_files.presence_state": {
+      "contract": "file-fields.md#设备文件",
+      "members": {
+        "UNKNOWN": 1,
+        "PRESENT": 2,
+        "ABSENT": 3
+      }
+    },
+    "device_files.role": {
+      "contract": "file-fields.md#设备文件",
+      "members": {
+        "UNDETERMINED": 1,
+        "ORIGINAL": 2,
+        "PREVIEW": 3
+      }
+    },
+    "file_copies.reset_state": {
+      "contract": "file-fields.md#文件拷贝",
+      "members": {
+        "READY": 1,
+        "RESET_PENDING": 2
+      }
+    },
+    "file_copies.verification_state": {
+      "contract": "file-fields.md#文件拷贝",
+      "members": {
+        "NOT_PERFORMED": 1,
+        "RUNNING": 2,
+        "MATCHED": 3,
+        "MISMATCHED": 4,
+        "SOURCE_CHECKSUM_UNAVAILABLE": 5,
+        "FAILED": 6
+      }
+    },
+    "history_events.clock_status": {
+      "contract": "history-formats.md#历史事务与事件字段",
+      "members": {
+        "UNCHECKED": 1,
+        "TRUSTED": 2,
+        "INVALID": 3
+      }
+    },
+    "intermediate_files.cleanup_state": {
+      "contract": "file-fields.md#中间文件",
+      "members": {
+        "NOT_NEEDED": 1,
+        "PENDING": 2,
+        "RUNNING": 3,
+        "COMPLETED": 4,
+        "FAILED": 5,
+        "UNKNOWN": 6
+      }
+    },
+    "intermediate_files.purpose": {
+      "contract": "file-fields.md#中间文件",
+      "members": {
+        "DELIVERY_COPY": 1,
+        "RECORDING_INPUT": 2,
+        "PROCESSING_TEMP": 3,
+        "REPAIR_OUTPUT": 4
+      }
+    },
+    "intermediate_files.retention_state": {
+      "contract": "file-fields.md#中间文件",
+      "members": {
+        "REQUIRED": 1,
+        "RELEASABLE": 2,
+        "PROMOTED": 3,
+        "HANDED_OFF": 4
+      }
+    },
+    "obtain_items.basis": {
+      "contract": "workflow-fields.md#取回目标字段",
+      "members": {
+        "ORIGINAL": 1,
+        "REPAIRED": 2,
+        "PREVIEW": 3,
+        "REPAIRED_NOT_LARGER": 4,
+        "EXPLICIT": 5
+      }
+    },
+    "obtain_items.status": {
+      "contract": "workflow-fields.md#取回目标字段",
+      "members": {
+        "UNRESOLVED": 1,
+        "SELECTED": 2,
+        "DELIVERY_CREATED": 3,
+        "FAILED": 4,
+        "CANCELED": 5
+      }
+    },
+    "obtain_source_selections.status": {
+      "contract": "workflow-fields.md#每个来源的文件选择",
+      "members": {
+        "PENDING": 1,
+        "FIXED": 2
+      }
+    },
+    "operation_attempts.effect_state": {
+      "contract": "operation-fields.md#尝试字段与结果",
+      "members": {
+        "UNKNOWN": 1,
+        "NO_EFFECT": 2,
+        "CONFIRMED": 3
+      }
+    },
+    "operation_attempts.status": {
+      "contract": "operation-fields.md#尝试字段与结果",
+      "members": {
+        "RUNNING": 1,
+        "SUCCEEDED": 2,
+        "FAILED": 3,
+        "UNKNOWN": 4
+      }
+    },
+    "operation_runs.kind": {
+      "contract": "operation-fields.md#操作流程的身份与参数",
+      "members": {
+        "START": 1,
+        "STOP": 2,
+        "READ_FILE": 3,
+        "DELETE_FILE": 4,
+        "CHECK_FILE_EXISTS": 5,
+        "QUERY_ACTIVITY": 6,
+        "CHECK_CAPTURE_RESULTS": 7,
+        "STOP_RESIDUAL": 8,
+        "EMERGENCY_STOP": 9
+      }
+    },
+    "operation_runs.query_purpose": {
+      "contract": "operation-fields.md#操作流程的身份与参数",
+      "members": {
+        "BEFORE_EXECUTION": 1,
+        "START_CONFIRMATION": 2,
+        "ACTIVITY_OBSERVATION": 3,
+        "STOP_CONFIRMATION": 4,
+        "RESIDUAL_STOP_CONFIRMATION": 5
+      }
+    },
+    "operation_runs.status": {
+      "contract": "operation-fields.md#操作流程的身份与参数",
+      "members": {
+        "PENDING": 1,
+        "ACTIVE": 2,
+        "SUCCEEDED": 3,
+        "FAILED": 4,
+        "CANCELED": 5,
+        "UNCONFIRMED": 6,
+        "EXPIRED": 7
+      }
+    },
+    "outputs.availability": {
+      "contract": "file-fields.md#正式产物与来源",
+      "members": {
+        "AVAILABLE": 1,
+        "RESTRICTED": 2,
+        "CLEANED": 3,
+        "MISSING": 4,
+        "UNKNOWN": 5
+      }
+    },
+    "outputs.cleanup_status": {
+      "contract": "file-fields.md#正式产物与来源",
+      "members": {
+        "NOT_REQUESTED": 1,
+        "PENDING": 2,
+        "RUNNING": 3,
+        "COMPLETED": 4,
+        "INCOMPLETE": 5,
+        "CANCELED": 6
+      }
+    },
+    "outputs.kind": {
+      "contract": "file-fields.md#正式产物与来源",
+      "members": {
+        "ORIGINAL": 1,
+        "REPAIRED": 2,
+        "PREVIEW": 3
+      }
+    },
+    "plans.status": {
+      "contract": "plans-actions.md#计划与动作的运行状态",
+      "members": {
+        "PENDING": 1,
+        "RUNNING": 2,
+        "COMPLETED": 3
+      }
+    },
+    "recording_processing.check_decision": {
+      "contract": "operation-fields.md#录像内部处理",
+      "members": {
+        "UNDETERMINED": 1,
+        "NOT_NEEDED": 2,
+        "REQUIRED": 3
+      }
+    },
+    "recording_processing.check_state": {
+      "contract": "operation-fields.md#录像内部处理",
+      "members": {
+        "NOT_PERFORMED": 1,
+        "RUNNING": 2,
+        "COMPLETED": 3,
+        "FAILED": 4,
+        "UNCONFIRMED": 5
+      }
+    },
+    "recording_processing.discard_state": {
+      "contract": "operation-fields.md#录像内部处理",
+      "members": {
+        "NOT_NEEDED": 1,
+        "PENDING": 2,
+        "RUNNING": 3,
+        "COMPLETED": 4,
+        "FAILED": 5,
+        "UNKNOWN": 6
+      }
+    },
+    "recording_processing.repair_state": {
+      "contract": "operation-fields.md#录像内部处理",
+      "members": {
+        "UNDETERMINED": 1,
+        "NOT_NEEDED": 2,
+        "PENDING": 3,
+        "RUNNING": 4,
+        "SUCCEEDED": 5,
+        "FAILED": 6,
+        "CANCELED": 7
+      }
+    },
+    "reports.status": {
+      "contract": "reports-runtime.md#报告字段",
+      "members": {
+        "REGISTERED": 1,
+        "PREPARED": 2,
+        "PUBLISHING": 3,
+        "PUBLISHED": 4,
+        "FAILED": 5
+      }
+    },
+    "state_syncs.mode": {
+      "contract": "reports-runtime.md#同步字段",
+      "members": {
+        "FULL": 1,
+        "INCREMENTAL": 2
+      }
+    },
+    "state_syncs.status": {
+      "contract": "reports-runtime.md#同步字段",
+      "members": {
+        "OUTSTANDING": 1,
+        "ACKNOWLEDGED": 2,
+        "CANCELED": 3
+      }
+    }
+  },
+  "history_objects": {
+    "action": {
+      "id": 1,
+      "table": "actions",
+      "report_target": true,
+      "snapshot": true
+    },
+    "delivery": {
+      "id": 2,
+      "table": "deliveries",
+      "report_target": true,
+      "snapshot": true
+    },
+    "output": {
+      "id": 3,
+      "table": "outputs",
+      "report_target": true,
+      "snapshot": true
+    },
+    "plan": {
+      "id": 4,
+      "table": "plans",
+      "report_target": true,
+      "snapshot": true
+    },
+    "diagnostic": {
+      "id": 5,
+      "table": "plan_file_diagnostics",
+      "report_target": true,
+      "snapshot": false
+    },
+    "report": {
+      "id": 6,
+      "table": "reports",
+      "report_target": false,
+      "snapshot": false
+    },
+    "state_sync": {
+      "id": 7,
+      "table": "state_syncs",
+      "report_target": false,
+      "snapshot": false
+    },
+    "runtime_state": {
+      "id": 8,
+      "table": "runtime_state",
+      "report_target": false,
+      "snapshot": false
+    },
+    "device_file": {
+      "id": 9,
+      "table": "device_files",
+      "report_target": false,
+      "snapshot": true
+    },
+    "intermediate_file": {
+      "id": 10,
+      "table": "intermediate_files",
+      "report_target": false,
+      "snapshot": true
+    }
+  },
+  "json_enums": {
+    "device_files.ownership_evidence_json.method": {
+      "contract": "file-fields.md#设备文件",
+      "members": {
+        "TASK_SCOPE": 1,
+        "BASELINE_DIFFERENCE": 2,
+        "DRIVER_TASK_ASSOCIATION": 3
+      }
+    },
+    "device_files.completion_evidence_json.basis": {
+      "contract": "file-fields.md#设备文件",
+      "members": {
+        "DEVICE_GUARANTEE": 1,
+        "TIME_AND_OUTPUTS": 2
+      }
+    },
+    "device_files.pairing_evidence_json.method": {
+      "contract": "file-fields.md#设备文件",
+      "members": {
+        "DRIVER_PAIRING": 1
+      }
+    },
+    "device_activities.result_check_json.outcome": {
+      "contract": "operation-fields.md#设备活动字段",
+      "members": {
+        "SATISFIED": 1,
+        "NOT_SATISFIED": 2,
+        "UNCONFIRMED": 3
+      }
+    },
+    "recording_processing.check_basis_json.reason": {
+      "contract": "operation-fields.md#录像内部处理",
+      "members": {
+        "CONTINUOUS_CONTROL_COMPLETE": 1,
+        "INSUFFICIENT_TIMING": 2,
+        "EXCESS_DURATION_CHECK": 3
+      }
+    },
+    "recording_processing.repair_basis_json.reason": {
+      "contract": "operation-fields.md#录像内部处理",
+      "members": {
+        "BELOW_THRESHOLD": 1,
+        "THRESHOLD_REACHED": 2,
+        "NO_USABLE_INPUT": 3,
+        "CANCELED": 4
+      }
+    }
+  },
+  "boolean_columns": [
+    "actions.execution_started",
+    "actions.cancel_requested",
+    "operation_runs.retry_wait_required",
+    "device_activities.state_query_supported",
+    "device_activities.stop_supported",
+    "device_activities.safe_repeat_stop",
+    "auto_preview_links.preview_support",
+    "auto_preview_links.is_valid",
+    "obtain_items.source_dependency"
+  ],
+  "external_columns": {
+    "actions.error_code": {
+      "source": "public_errors",
+      "key": "action_error_id"
+    },
+    "obtain_source_selections.error_code": {
+      "source": "public_errors",
+      "key": "item_error_ids.obtain_source_selections"
+    },
+    "obtain_items.error_code": {
+      "source": "public_errors",
+      "key": "item_error_ids.obtain_items"
+    },
+    "cleanup_items.error_code": {
+      "source": "public_errors",
+      "key": "item_error_ids.cleanup_items"
+    },
+    "cancel_items.error_code": {
+      "source": "public_errors",
+      "key": "item_error_ids.cancel_items"
+    },
+    "cancel_delivery_items.error_code": {
+      "source": "public_errors",
+      "key": "item_error_ids.cancel_delivery_items"
+    },
+    "history_events.event_type": {
+      "source": "events"
+    },
+    "entity_event_links.entity_type": {
+      "source": "history_objects"
+    },
+    "report_entity_changes.entity_type": {
+      "source": "history_objects",
+      "qualification": "report_target"
+    },
+    "entity_snapshots.entity_type": {
+      "source": "history_objects",
+      "qualification": "snapshot"
+    },
+    "entity_snapshot_progress.entity_type": {
+      "source": "history_objects",
+      "qualification": "snapshot"
+    },
+    "history_events.event_version": {
+      "source": "event_versions"
+    }
+  },
+  "fixed_columns": {
+    "entity_snapshots.format_version": {
+      "value": 1,
+      "contract": "history-formats.md#正向逆向与快照格式"
+    },
+    "reports.format_version": {
+      "value": 1,
+      "contract": "reports-runtime.md#报告字段"
+    },
+    "database_metadata.format_version": {
+      "value": 1,
+      "contract": "reports-runtime.md#单份状态字段"
+    },
+    "database_metadata.id": {
+      "value": 1,
+      "contract": "reports-runtime.md#单份状态字段"
+    },
+    "runtime_state.id": {
+      "value": 1,
+      "contract": "reports-runtime.md#单份状态字段"
+    }
+  },
+  "sources": {
+    "public_errors": "../../../protocol/errors/workflow-codes.json",
+    "events": "event-transitions.json"
+  }
+}

@@ -1,12 +1,14 @@
 {
-  "preview": "preview-repaired/status-report-1-846083bcf62b8613183bcb5ec0cc22a998027784e536557f142a3d9708d3a54c.json",
-  "handoff": "handoff-unconfirmed/status-report-1-530ac5bc60a05eda6b71a17f6b1ce48c436851e86bc4a7c4dfa1255f424a9f07.json",
-  "cancellation": "cancel-controller/status-report-1-84ad54ec04aeae887c965ccddd7c778005598647a90da2a5bae546c23d5fecd1.json",
-  "cleanup": "canceled-complete-copy/status-report-1-d64597f07cda267b3d7c55d8e94c4e8b6709ce2689d005fd0a2c0bb3851d1423.json",
-  "range": "range-selection/status-report-1-28143bf7dc2107b1573a6661d5eeba3cbf7933683b927044c2b0e000c1e25964.json",
-  "empty": "empty-cleanup/status-report-1-ebb7af4413491ee95c590dbe45002d8dcb20d3671b6d45669b952d6d40e95459.json",
-  "explicit": "explicit-invalid-ids/status-report-1-ed11d5ed507a22ac404e63d807d78abe6f8d37718fddac19f1ca6d79523dad66.json",
-  "self": "cancel-self/status-report-1-21f17c7ef9e96f888e931bbbec014d047be5c2730f65e93f4416a5dfddc0d4a5.json",
-  "wait": "waiting-source/status-report-1-9397ceb8fb06bd1d594d1d645b1db2ba57135f0a722326a9a244914a0d6d4b24.json",
-  "duplicate": "duplicate-auto/status-report-1-15d0db4150fe66472b31e4820581b93c85fbc7731462191e8419021068b42cc7.json"
+  "preview": "preview-repaired/status-report-1-1ddd9af9225a8a8a1d6a9418438cd88ccf81a3a08c9de43e5fd19e63e5b4c649.json",
+  "handoff": "handoff-unconfirmed/status-report-1-28ace100d059cea36f1d7ca7292e36d5ead1c197e3972e968007d62aab5abd98.json",
+  "cancellation": "cancel-controller/status-report-1-da253023d20300ba3dca6365595d6529ec915444fd6359c73ac9375c88871343.json",
+  "cleanup": "canceled-complete-copy/status-report-1-1e0484d32c4cb0123f31b0eccf1cd13617bf913486ac2ed8931ba28149c8e020.json",
+  "range": "range-selection/status-report-1-c4f487575cdda8dbfa75242182fe23d153965625385e42aa78a5b7f206cda643.json",
+  "empty": "empty-cleanup/status-report-1-4241dd4999185178eb77aaa16f09d505fbff929055d50189420637b965988b81.json",
+  "explicit": "explicit-invalid-ids/status-report-1-84b7a70ffc2d6de03c29eec510a1a5ee889e8f844afadd3931044b5ee00e1790.json",
+  "self": "cancel-self/status-report-1-495e676f1828eabcf9dff12979619119bb609bc7e6ad586b2cf806b53fc2fe7d.json",
+  "wait": "waiting-source/status-report-1-c0f393c1534f4d2e05b2a3ea323df1eb1bdf9a500b53860310156c4c8cbb7d63.json",
+  "duplicate": "duplicate-auto/status-report-1-79f0640fd9ecb7c6bb168a2628da90b1e9d05b004f719a8311b772e872e9026d.json",
+  "deviceExecutionActive": "device-execution/status-report-1-1fe974f8f413e09fed91be0ca749cca10bc38590e3be491340dbf64d1ba879da.json",
+  "deviceExecutionEnded": "device-execution/status-report-2-07a80c89f0f9ce374a5361087f072322e5955c44c3f599ca4545f863393c5092.json"
 }

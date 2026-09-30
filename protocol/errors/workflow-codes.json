@@ -1,5 +1,5 @@
 {
-  "description": "预览、产物选择、交付及取消相关错误登记；其他错误由各责任专题定义，驱动错误保持开放。详情 Schema 为对应 details 的权威结构。",
+  "description": "camctl 第一版业务错误登记。公共 code、唯一 stage 和 details_schema 在此定义；action_error_id 定义动作最终错误的固定数据库整数编号，item_error_ids 按明细表名定义其 error_code 编号。驱动原始错误保持开放。",
   "codes": {
     "duplicate_auto_preview": {
       "stage": "admission",
@@ -26,7 +26,8 @@
           "obtain_action_names"
         ],
         "additionalProperties": false
-      }
+      },
+      "action_error_id": 3
     },
     "preview_not_supported": {
       "stage": "admission",
@@ -48,7 +49,8 @@
           "parameter_type"
         ],
         "additionalProperties": false
-      }
+      },
+      "action_error_id": 4
     },
     "preview_missing": {
       "stage": "output_selection",
@@ -67,6 +69,10 @@
           "source_action_instance_id"
         ],
         "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_source_selections": 2,
+        "obtain_items": 8
       }
     },
     "output_not_found": {
@@ -83,6 +89,10 @@
           "requested_output_id"
         ],
         "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_items": 1,
+        "cleanup_items": 1
       }
     },
     "output_source_mismatch": {
@@ -99,6 +109,9 @@
           "requested_output_id"
         ],
         "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_items": 2
       }
     },
     "output_unavailable": {
@@ -122,6 +135,9 @@
           "availability"
         ],
         "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_items": 3
       }
     },
     "output_cleanup_started": {
@@ -138,6 +154,9 @@
           "output_id"
         ],
         "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_items": 4
       }
     },
     "delivery_handoff_unconfirmed": {
@@ -170,7 +189,8 @@
           "action_instance_id"
         ],
         "additionalProperties": false
-      }
+      },
+      "action_error_id": 24
     },
     "work_file_delete_failed": {
       "stage": "cleanup",
@@ -186,6 +206,657 @@
           "delivery_id"
         ],
         "additionalProperties": false
+      }
+    },
+    "action_validation_failed": {
+      "stage": "admission",
+      "description": "动作自身字段校验失败；issues 保存全部已确定错误，省略字段不补 value。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "issues": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reason": {
+                  "enum": [
+                    "required",
+                    "type",
+                    "range",
+                    "unsupported",
+                    "combination",
+                    "reference",
+                    "conflict"
+                  ]
+                },
+                "value": {},
+                "context": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "field",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "issues"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 1
+    },
+    "source_action_not_found": {
+      "stage": "admission",
+      "description": "本计划名称引用可靠确认不存在。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "field",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 2
+    },
+    "start_attempts_exhausted": {
+      "stage": "device_start",
+      "description": "在仍有启动时间资格时累计启动尝试已经耗尽。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempts_used": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_attempts",
+          "attempts_used"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 10
+    },
+    "device_start_failed": {
+      "stage": "execution",
+      "description": "驱动可靠确认本次启动被拒绝且该原因不允许重试。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "operation_run_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "action_error_id": 11
+    },
+    "capture_result_unconfirmed": {
+      "stage": "execution",
+      "description": "有限核实结束，仍不能确认原任务或完整产物结果。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "reason": {
+            "enum": [
+              "start_unknown",
+              "completion_unknown",
+              "outputs_unknown"
+            ]
+          }
+        },
+        "required": [
+          "activity_id",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 12
+    },
+    "capture_failed": {
+      "stage": "execution",
+      "description": "存在明确的采集失败或结果不满足任务契约的证据。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "reason": {
+            "enum": [
+              "device_failed",
+              "ended_early",
+              "no_outputs",
+              "invalid_outputs"
+            ]
+          }
+        },
+        "required": [
+          "activity_id",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 13
+    },
+    "recording_stop_failed": {
+      "stage": "device_stop",
+      "description": "普通停止处理结束仍未确认停止，实际设备状态独立保留。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "operation_run_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "activity_id",
+          "operation_run_id"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 14
+    },
+    "recording_too_short": {
+      "stage": "execution",
+      "description": "可靠媒体或连续控制证据表明实际时长不足。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "processing_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "activity_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "processing_id"
+            ]
+          },
+          {
+            "required": [
+              "activity_id"
+            ]
+          }
+        ]
+      },
+      "action_error_id": 15
+    },
+    "recording_processing_failed": {
+      "stage": "execution",
+      "description": "必要检查结束后无法证明录像满足成功条件。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "processing_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "reason": {
+            "enum": [
+              "check_failed",
+              "duration_unconfirmed",
+              "invalid_media",
+              "source_unavailable"
+            ]
+          }
+        },
+        "required": [
+          "processing_id",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 16
+    },
+    "device_binding_unavailable": {
+      "stage": "execution",
+      "description": "本次配置缺少原设备或驱动绑定与原记录不一致。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expected_driver_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actual_driver_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "enum": [
+              "missing",
+              "mismatch"
+            ]
+          }
+        },
+        "required": [
+          "device_id",
+          "expected_driver_id",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reason": {
+                  "const": "mismatch"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            },
+            "then": {
+              "required": [
+                "actual_driver_id"
+              ]
+            }
+          }
+        ]
+      },
+      "action_error_id": 17,
+      "item_error_ids": {
+        "obtain_items": 5,
+        "cleanup_items": 5,
+        "cancel_items": 4
+      }
+    },
+    "device_activity_unresolved": {
+      "stage": "execution",
+      "description": "相关历史设备活动或输出范围的占用仍未解决，不能发起冲突操作。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "activity_id",
+          "device_id"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 18
+    },
+    "source_resolution_failed": {
+      "stage": "execution",
+      "description": "实例引用或范围在执行时确认无效。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "enum": [
+              "action_not_found",
+              "plan_not_found",
+              "group_not_found",
+              "not_output_source"
+            ]
+          },
+          "source": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "reason",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 20
+    },
+    "obtain_items_failed": {
+      "stage": "execution",
+      "description": "取回存在逐来源、逐目标或交付最终失败；结果数组给出各项事实。",
+      "details_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "action_error_id": 21
+    },
+    "cleanup_items_failed": {
+      "stage": "execution",
+      "description": "清理存在逐目标最终失败；结果数组保留全部目标结果。",
+      "details_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "action_error_id": 22
+    },
+    "cancel_items_failed": {
+      "stage": "execution",
+      "description": "取消存在逐目标或逐交付最终失败，已生效取消保持。",
+      "details_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "action_error_id": 23
+    },
+    "cancel_target_not_found": {
+      "stage": "execution",
+      "description": "执行时可靠确认取消寻址目标不存在。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 25
+    },
+    "sync_report_not_found": {
+      "stage": "execution",
+      "description": "局部同步请求的起点报告可靠确认不存在。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "after_report_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "after_report_id"
+        ],
+        "additionalProperties": false
+      },
+      "action_error_id": 26
+    },
+    "no_outputs": {
+      "stage": "output_selection",
+      "description": "来源已经结束且没有可选正式产物。",
+      "details_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_source_selections": 1
+      }
+    },
+    "source_file_unconfirmed": {
+      "stage": "source_read",
+      "description": "实际文件身份、完整长度或完成依据无法可靠确认。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "output_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_items": 6
+      }
+    },
+    "delete_attempts_exhausted": {
+      "stage": "cleanup",
+      "description": "删除预算耗尽。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempts_used": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "output_id",
+          "max_attempts",
+          "attempts_used"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cleanup_items": 2
+      }
+    },
+    "file_query_attempts_exhausted": {
+      "stage": "cleanup",
+      "description": "文件存在性查询预算耗尽。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempts_used": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "output_id",
+          "max_attempts",
+          "attempts_used"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cleanup_items": 3
+      }
+    },
+    "delete_unconfirmed": {
+      "stage": "cleanup",
+      "description": "有限处理后删除结果仍不能确认。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "output_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cleanup_items": 4
+      }
+    },
+    "file_delete_failed": {
+      "stage": "cleanup",
+      "description": "文件删除明确失败且不能继续。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "output_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "output_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cleanup_items": 6
+      }
+    },
+    "task_cancel_unsupported": {
+      "stage": "execution",
+      "description": "目标任务已启动或可能启动，缺少停止能力。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "action_instance_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cancel_items": 1
+      }
+    },
+    "target_cleanup_failed": {
+      "stage": "execution",
+      "description": "目标取消已经生效，但本次必要收场未成功。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "action_instance_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cancel_items": 2
+      }
+    },
+    "cancel_result_unconfirmed": {
+      "stage": "execution",
+      "description": "本次取消处理结果仍不能确认。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "action_instance_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cancel_items": 5
+      }
+    },
+    "delivery_withdrawal_failed": {
+      "stage": "publication",
+      "description": "交付文件撤回明确失败。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "delivery_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "delivery_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cancel_delivery_items": 1
+      }
+    },
+    "delivery_position_unconfirmed": {
+      "stage": "publication",
+      "description": "交付文件的实际位置或撤回结果无法确认。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "delivery_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "delivery_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cancel_delivery_items": 2
+      }
+    },
+    "cancel_withdrawal_failed": {
+      "stage": "execution",
+      "description": "取消目标的逐交付撤回存在最终失败，具体交付结果由 withdrawals 表达。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "action_instance_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "cancel_items": 3
       }
     }
   }

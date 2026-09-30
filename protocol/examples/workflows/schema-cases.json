@@ -433,58 +433,122 @@
     "valid": false
   },
   {
-    "name": "来源未确定",
-    "schema": "status-report.schema.json#/$defs/source_resolution",
+    "name": "取回未结束时允许尚无结果明细",
+    "schema": "status-report.schema.json#/$defs/action",
     "value": {
-      "status": "unresolved"
+      "action_instance_id": "7",
+      "name": "取回",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "input_params": {
+        "source": {
+          "plan_ref": "current"
+        }
+      },
+      "status": "running",
+      "result": {
+        "failures": []
+      }
     },
     "valid": true
   },
   {
-    "name": "来源未知不能携带猜测空集合",
-    "schema": "status-report.schema.json#/$defs/source_resolution",
+    "name": "取回尚未开始不能提供执行结果",
+    "schema": "status-report.schema.json#/$defs/action",
     "value": {
-      "status": "unresolved",
-      "action_instance_ids": []
-    },
-    "valid": false
-  },
-  {
-    "name": "可靠固定的空来源",
-    "schema": "status-report.schema.json#/$defs/source_resolution",
-    "value": {
-      "status": "fixed",
-      "plan_instance_id": "7",
-      "action_instance_ids": []
-    },
-    "valid": true
-  },
-  {
-    "name": "等待选择无结果",
-    "schema": "status-report.schema.json#/$defs/source_selection",
-    "value": {
-      "source_action_instance_id": "3",
-      "status": "pending"
-    },
-    "valid": true
-  },
-  {
-    "name": "等待不能冒充空选择",
-    "schema": "status-report.schema.json#/$defs/source_selection",
-    "value": {
-      "source_action_instance_id": "3",
+      "action_instance_id": "7",
+      "name": "取回",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "input_params": {
+        "source": {
+          "plan_ref": "current"
+        }
+      },
       "status": "pending",
-      "items": []
+      "result": {
+        "failures": []
+      }
     },
     "valid": false
   },
   {
-    "name": "可靠空选择",
-    "schema": "status-report.schema.json#/$defs/source_selection",
+    "name": "取回成功可以没有选中产物",
+    "schema": "status-report.schema.json#/$defs/action",
     "value": {
-      "source_action_instance_id": "3",
-      "status": "fixed",
-      "items": []
+      "action_instance_id": "7",
+      "name": "取回",
+      "type": "obtain_action_outputs",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "input_params": {
+        "source": {
+          "plan_ref": "current"
+        }
+      },
+      "status": "succeeded",
+      "result": {
+        "failures": []
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "清理未结束时允许尚无逐项结果",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "8",
+      "name": "清理",
+      "type": "delete_action_outputs",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "input_params": {
+        "source": {
+          "plan_ref": "current"
+        }
+      },
+      "status": "running",
+      "result": {
+        "items": []
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "清理尚未开始不能提供执行结果",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "8",
+      "name": "清理",
+      "type": "delete_action_outputs",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "input_params": {
+        "source": {
+          "plan_ref": "current"
+        }
+      },
+      "status": "pending",
+      "result": {
+        "items": []
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "清理成功可以没有目标",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "8",
+      "name": "清理",
+      "type": "delete_action_outputs",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "input_params": {
+        "source": {
+          "plan_ref": "current"
+        }
+      },
+      "status": "succeeded",
+      "result": {
+        "items": []
+      }
     },
     "valid": true
   },
@@ -508,8 +572,8 @@
     "valid": false
   },
   {
-    "name": "副本清理失败须保留错误",
-    "schema": "status-report.schema.json#/$defs/work_file_cleanup",
+    "name": "取消内容处理失败须保留错误",
+    "schema": "status-report.schema.json#/$defs/discard_cleanup",
     "value": {
       "status": "failed"
     },
@@ -1400,6 +1464,670 @@
           "request_id": 1
         }
       }
+    },
+    "valid": false
+  },
+  {
+    "name": "动作直接表达取消结果",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled"
+    },
+    "valid": true
+  },
+  {
+    "name": "设备执行结束未确认",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "device_execution": {
+        "status": "end_unconfirmed"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "失败动作保留仍在执行的设备事实",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "failed",
+      "error": {
+        "code": "stop_unconfirmed",
+        "stage": "device_stop",
+        "details": {}
+      },
+      "device_execution": {
+        "status": "still_running"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "动作错误和设备观察错误分别保留",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "failed",
+      "error": {
+        "code": "stop_unconfirmed",
+        "stage": "device_stop",
+        "details": {}
+      },
+      "device_execution": {
+        "status": "end_unconfirmed",
+        "error": {
+          "code": "query_failed",
+          "stage": "query",
+          "details": {}
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "执行中不能带动作结束后的设备提示",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "running",
+      "device_execution": {
+        "status": "end_unconfirmed"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "设备执行情况拒绝未知状态",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "device_execution": {
+        "status": "other"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "设备执行情况必须有状态",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "device_execution": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "设备执行情况不能以null代替省略",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "device_execution": null
+    },
+    "valid": false
+  },
+  {
+    "name": "设备执行情况拒绝未定义成员",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "device_execution": {
+        "status": "still_running",
+        "extra": true
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "受理失败保留非法输入",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "2",
+      "name": "参数错误",
+      "type": "camera_record",
+      "status": "failed",
+      "input_params": null,
+      "device_id": 17,
+      "error": {
+        "code": "action_validation_failed",
+        "stage": "admission",
+        "details": {
+          "issues": [
+            {
+              "field": "params",
+              "reason": "invalid"
+            }
+          ]
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "受理失败不能出现设备执行事实",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "2",
+      "name": "参数错误",
+      "type": "camera_record",
+      "status": "failed",
+      "input_params": null,
+      "device_id": 17,
+      "error": {
+        "code": "action_validation_failed",
+        "stage": "admission",
+        "details": {
+          "issues": [
+            {
+              "field": "params",
+              "reason": "invalid"
+            }
+          ]
+        }
+      },
+      "device_execution": {
+        "status": "end_unconfirmed"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "受理失败不能伪造生效参数",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "2",
+      "name": "参数错误",
+      "type": "camera_record",
+      "status": "failed",
+      "input_params": null,
+      "device_id": 17,
+      "error": {
+        "code": "action_validation_failed",
+        "stage": "admission",
+        "details": {
+          "issues": [
+            {
+              "field": "params",
+              "reason": "invalid"
+            }
+          ]
+        }
+      },
+      "effective_params": {
+        "type": "video"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "失败动作必须提供原因",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "failed"
+    },
+    "valid": false
+  },
+  {
+    "name": "尚未开始的动作不能有结果",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "pending",
+      "result": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "拍照只报告动作状态和产物",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_take_photo",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "succeeded"
+    },
+    "valid": true
+  },
+  {
+    "name": "拍照不提供录像检查结果",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_take_photo",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "succeeded",
+      "result": {
+        "check": {
+          "check_status": "completed",
+          "duration": {
+            "status": "unknown"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "动作拒绝内部过程成员 execution",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "execution": {
+        "started": true
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "动作拒绝内部过程成员 waiting",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "waiting": [
+        {
+          "code": "scheduled_time",
+          "details": {}
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "name": "动作拒绝内部过程成员 obtaining",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "obtaining": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "动作拒绝内部过程成员 cleaning",
+    "schema": "status-report.schema.json#/$defs/action",
+    "value": {
+      "action_instance_id": "1",
+      "name": "录像",
+      "type": "camera_record",
+      "device_id": "camera",
+      "scheduled_at": "2026-09-30 10:00:00",
+      "policy": {
+        "max_delay_ms": 1000
+      },
+      "input_params": {
+        "type": "video"
+      },
+      "effective_params": {
+        "type": "video"
+      },
+      "status": "canceled",
+      "cleaning": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "录像修复结论",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "repair": {
+        "status": "not_needed"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "录像最终检查结论",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "check": {
+        "check_status": "completed",
+        "duration": {
+          "status": "unknown"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "录像不公开检查进度",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "check": {
+        "check_status": "running",
+        "duration": {
+          "status": "unknown"
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "录像不公开修复过程 undetermined",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "repair": {
+        "status": "undetermined"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "录像不公开修复过程 pending",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "repair": {
+        "status": "pending"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "录像不公开修复过程 running",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "repair": {
+        "status": "running"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "录像结果拒绝内部过程 recording",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "recording": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "录像结果拒绝内部过程 source_copy",
+    "schema": "status-report.schema.json#/$defs/camera_result",
+    "value": {
+      "source_copy": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "交付仅提供文件接收所需结果",
+    "schema": "status-report.schema.json#/$defs/delivery",
+    "value": {
+      "delivery_id": "1",
+      "output_id": "2",
+      "source_action_instance_id": "3",
+      "file_name": "1.mp4",
+      "display_name": "录像.mp4",
+      "status": "published",
+      "size": 512,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "valid": true
+  },
+  {
+    "name": "已发布文件必须有完整摘要",
+    "schema": "status-report.schema.json#/$defs/delivery",
+    "value": {
+      "delivery_id": "1",
+      "output_id": "2",
+      "source_action_instance_id": "3",
+      "file_name": "1.mp4",
+      "display_name": "录像.mp4",
+      "status": "published",
+      "size": 512
+    },
+    "valid": false
+  },
+  {
+    "name": "交付不公开拷贝过程",
+    "schema": "status-report.schema.json#/$defs/delivery",
+    "value": {
+      "delivery_id": "1",
+      "output_id": "2",
+      "source_action_instance_id": "3",
+      "file_name": "1.mp4",
+      "display_name": "录像.mp4",
+      "status": "published",
+      "size": 512,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "copy": {}
+    },
+    "valid": false
+  },
+  {
+    "name": "自动预览仅提供展示关系",
+    "schema": "status-report.schema.json#/$defs/automation",
+    "value": {
+      "purpose": "auto_preview",
+      "source_action_instance_id": "3"
+    },
+    "valid": true
+  },
+  {
+    "name": "自动预览允许来源尚未可靠确认",
+    "schema": "status-report.schema.json#/$defs/automation",
+    "value": {
+      "purpose": "auto_preview"
+    },
+    "valid": true
+  },
+  {
+    "name": "自动预览拒绝受理能力过程",
+    "schema": "status-report.schema.json#/$defs/automation",
+    "value": {
+      "purpose": "auto_preview",
+      "capability": {}
     },
     "valid": false
   }

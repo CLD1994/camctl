@@ -1,6 +1,6 @@
 # 依赖与接入核验
 
-[实现总览](implementation.md) · [实施准备](implementation-readiness.md) · [待决策事项](implementation-readiness.md#待决策事项)
+[实现总览](implementation.md) · [实施准备](implementation-readiness.md) · [决策状态与后续工作](implementation-readiness.md#决策状态与后续工作)
 
 核验日期：2026-09-22。本文区分资料和源码核验、开发环境能力验证、生产实现验收及真实设备联调。前三者中的任何一项都不能代替后一项。设备部分只记录抽象后的接口要求和证据缺口，不复制设备交接材料的命令、来源标识或测量数据。
 
@@ -35,7 +35,7 @@
 
 元数据依据为各包的官方 PyPI 项目 JSON：[janus](https://pypi.org/pypi/janus/2.0.0/json)、[concurrent-log-handler](https://pypi.org/pypi/concurrent-log-handler/0.9.29/json)、[portalocker](https://pypi.org/pypi/portalocker/4.4.0/json)、[jsonschema](https://pypi.org/pypi/jsonschema/4.26.0/json)、[pytest](https://pypi.org/pypi/pytest/9.1.1/json)、[pytest-asyncio](https://pypi.org/pypi/pytest-asyncio/1.4.0/json)、[pytest-mock](https://pypi.org/pypi/pytest-mock/3.15.1/json)。升级时重新核验，不把该表当作与生产锁文件并行维护的第二份依赖清单；正式版本清单由组件锁文件接管。
 
-SQLite 按 Python 的 `sqlite3.sqlite_version` 核验实际运行库，不以系统 `sqlite3` 命令版本替代。版本必须包含规格要求的 WAL 修复；修复分支见[SQLite 官方说明](https://www.sqlite.org/wal.html#walreset)。不为了保留系统旧库而降低 FULL 同步或取消 WAL。
+SQLite 的允许版本、必要能力和入口检查采用统一的[运行库与部署要求](sqlite-runtime.md)。现有设计检查取得 Python 实际链接的运行库，验证版本条件及临时库能力；生产发行物仍须在目标 Python 3.11 / ARM64 环境固定具体构建，并完成 V-01—V-04 及完整业务集成验收。开发容器通过不代替目标部署通过。
 
 ### 队列与监听线程核验
 
@@ -81,13 +81,13 @@ Janus 负责等待机制，项目只适配接纳规则、来源路由、结果�
 | --- | --- | --- |
 | [能力加载](../../apps/client/src/shared/capabilities.ts)及[共享类型](../../apps/client/src/shared/types.ts) | 参数类型外层白名单未包含 `preview_supported`；须同步类型、严格校验、编辑能力及导出依据 | 明确 true、false、缺失、null 和错误类型分别验证；共享能力样例真实加载 |
 | [报告生成类型](../../apps/client/src/domain/generate-report-types.ts)及其生成物 | 生成物尚未表达公共扩展；从根 Schema 重新生成，不能手改另一份字段清单 | 生成结果可重复，类型检查通过；所有共享报告可以进入后续语义校验 |
-| [报告语义校验](../../apps/client/src/domain/reports.ts) | 同份报告的失败项去重和跨报告失败保持性都只使用来源、产物、交付三项身份 | 两个不同 `requested_output_id` 的失败均保留；真正重复项拒绝；新报告不能抹去既有失败 |
-| 报告引用与合并 | 预览身份、固定来源、逐来源选择、自动关联和取消效果须逐一接入；不能只让 Schema 接受新字段 | 缺关联的增量先保留引用；关联到达后核验；新旧报告按冻结水位合并 |
+| [报告语义校验](../../apps/client/src/domain/reports.ts) | 失败项身份仍只使用来源、产物、交付三项信息；须纳入显式请求的产物 ID，并按当前报告契约区分自身字段与实体子集合 | 两个不同 `requested_output_id` 的失败均保留；真正重复项拒绝；较新动作快照完整替换 `result`，不把失败数组作为实体子集合拼接 |
+| 报告引用与合并 | 按公共字段接入预览原文件关系、自动关联、取消结果及设备执行提示；内部固定来源和逐来源选择继续由主机保存 | 缺关联的增量先保留引用；关联到达后核验；新旧报告按冻结水位合并，较新动作快照缺席的设备执行提示须清除 |
 | 客户端自动预览编辑与导出 | 使用公共自动用途和来源字段，保持拍摄与派生动作关联 | 重复关联、开关三种状态、复制、能力变化及错误输入；外部导入和整份替换遵守[开关恢复规则](../client/automatic-previews.md#外部导入与整份-json-替换) |
 | camctl `run` / `submit` | 共用分阶段受理；根计划 Schema 不能直接作为整份拒绝条件 | 重送请求、非法单动作、独立 ACK、重复自动关联与错误登记一致 |
-| camctl 报告生成 | 从冻结历史生成上述字段；引用缺席不伪造实体，未知不变为空集合 | 同一报告重建为相同字节；跨请求、取消和中间文件清理组合 |
+| camctl 报告生成 | 从同一冻结历史生成公开字段；引用缺席不伪造实体，未知不变为空集合 | 同一报告重建为相同字节；覆盖跨请求、取消和清理结果，内部中间文件维护变化不单独触发报告 |
 
-失败项的统一身份函数须同时供同份去重和跨报告比较使用，包含能区分显式请求 ID 的信息；不能只修复其中一个入口。产物历史不变量检查还须纳入预览的原片关联，已固定来源和选择记录须保持不变。运行时校验与类型生成是两项独立职责，类型通过不代替语义检查。
+失败项身份须包含能区分显式请求产物 ID 的信息，相关校验共用同一规则；跨报告合并按[自身字段与实体子集合](../architecture/report-format.md#自身字段与实体子集合)处理。客户端核验产物已提供的预览原片关联；主机历史恢复核验已固定来源和选择记录保持不变。运行时校验与类型生成是两项独立职责，类型通过不代替语义检查。客户端具体适配按[后续实施计划](../superpowers/plans/2026-09-30-report-client-adaptation.md)推进。
 
 接入依赖顺序为：根协议及共享样例 → 生成类型和能力加载 → 客户端语义校验与编辑导出、camctl 受理与报告实现 → 跨组件集成验收。既有普通场景与扩展场景共同回归。涉及业务状态机的实施任务须另写具体计划；本清单不是直接修改生产代码的逐步执行计划。
 
@@ -115,4 +115,4 @@ Janus 负责等待机制，项目只适配接纳规则、来源路由、结果�
 
 ## 尚未完成的技术工作
 
-生产锁文件、完整事件类型登记、全部 SQL 查询与索引、完整数字编码器、CLH 多进程适配、报告通信状态机及组件协议接入仍是实施工作。它们依据[内部设计](implementation.md)及责任专题推进；新增的业务选择集中记录在[待决策事项](implementation-readiness.md#待决策事项)，明确契约后再实施。真实设备、目标系统安装和存储持久性验收依赖外部环境，不由开发容器验证替代。
+生产锁文件、[事件转换规则](database/event-transitions.md)的生产消费者、生产查询、完整数字编码器、CLH 多进程适配、报告通信状态机及组件协议接入仍是实施工作。它们依据[内部设计](implementation.md)及责任专题推进，具体状态见[决策状态与后续工作](implementation-readiness.md#决策状态与后续工作)；实施中出现新的业务选择时，先明确契约再继续。真实设备、目标系统安装和存储持久性验收依赖外部环境，不由开发容器验证替代。

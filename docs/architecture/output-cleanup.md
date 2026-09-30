@@ -22,6 +22,8 @@
 
 ## 产物清理
 
+逐请求的待删除责任、源依赖检查、处理归属和接手事务见[清理协调](../camctl/database/cleanup-coordination.md)；产物对外汇总及错误优先级见[产物清理汇总](../camctl/database/output-cleanup-state.md)。这些状态和相关事实共同保存，不能根据当前请求列表重新解释旧报告。
+
 正式产物的清理动作：
 
 ```text

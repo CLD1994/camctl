@@ -13,7 +13,7 @@
 | [执行计划 Schema](schemas/plan.schema.json) | 完整合法计划、分阶段受理用的公共结构、各动作参数及来源组合 |
 | [能力说明 Schema](schemas/capabilities.schema.json) | 设备、拍摄动作及参数类型结构，明确的预览支持声明 |
 | [对象 ID 定义](schemas/status-report.schema.json#/$defs/entity_id) | 数据库对象整数身份的规范十进制字符串，范围 1～9223372036854775807；单项、数组、报告 ACK 及同步起点共用 |
-| [状态报告 Schema](schemas/status-report.schema.json) | 报告身份与覆盖水位、计划及动作、产物与交付、输入诊断，以及预览关联、固定来源与选择依据、取消动作停止等待及中间文件清理 |
+| [状态报告 Schema](schemas/status-report.schema.json) | 报告身份与覆盖水位、计划及动作结果、产物与交付、输入诊断、预览展示关联、逐项取消结果及动作结束后的设备执行情况 |
 | [工作流程错误登记](errors/workflow-codes.json) | 预览、产物选择、交付及取消相关错误码、阶段和详情 Schema；未知驱动错误仍按公共错误结构保留 |
 | [共享样例与校验边界](examples/workflows/README.md) | 正常、失败、等待及取消场景，以及 Schema 校验和业务语义检查的区别 |
 
@@ -22,3 +22,7 @@
 执行计划根 Schema 用于校验完整合法计划，不能直接充当主机的整份拒绝条件。主机先无歧义解析，再查询幂等关联；新请求使用 `plan_structure` 校验公共结构，逐动作使用 `action` 校验，ACK 独立处理。名称唯一性、实际日期、引用归属、重复自动关联、能力匹配和取消目标包含自身等业务判断，仍按语义契约完成。
 
 运行 `node scripts/check-protocol.mjs` 校验 Schema、共享样例、报告摘要及已登记错误详情。脚本使用客户端已锁定的 Ajv；文件检查属于规格验证，不代替真实软件组件的集成测试。软件集成测试使用受接口契约约束的设备替身，真实设备联调另行安排。
+
+## 组件适配状态
+
+报告 Schema、协议样例和字段说明定义第一版的目标格式。客户端生成类型、导入校验、合并和展示尚待按[客户端适配计划](../docs/superpowers/plans/2026-09-30-report-client-adaptation.md)实施；当前客户端直接读取公共 Schema，不能据协议规格检查通过判断客户端已兼容。camctl 的字段依赖登记、历史生成和跨组件一致性仍按[实施准备](../docs/camctl/implementation-readiness.md#历史与报告的实施准备)落实。

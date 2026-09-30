@@ -64,7 +64,7 @@
 | `camera_record` | 录像目标时长 `target_duration_ms` | 启动、停止、实际计时、检查和修复进度按各自执行记录保存 |
 | `camera_timelapse` | 从生效参数和任务契约取得处理模块需要的固定执行依据；按持续时间采集时，两种结束方式都保存 `target_duration_ms` | 完整设备要求由 `effective_params_json` 保存；设备任务关联、实际采集进度、尝试和文件事实另行保存 |
 | `obtain_action_outputs` | 首次受理确定的 [selection_mode](#取回执行定义的选择方式)，区分默认取回、预览取回和精确 ID 取回 | 原输入保留来源描述及显式 ID；来源关联、实际文件选择和处理结果由来源表及取回明细保存；自动预览用途、关联和能力依据由 `auto_preview_links` 保存 |
-| `delete_action_outputs` | `{}`；来源范围或精确 ID 已由输入明确指定 | 原输入保留选择条件；范围来源由 `action_output_sources` 保存；实际目标和处理结果由 `cleanup_items` 保存 |
+| `delete_action_outputs` | `{}`；来源范围或精确 ID 已由输入明确指定 | 原输入保留选择条件；范围来源由 `action_dependencies` 保存；实际目标和处理结果由 `cleanup_items` 保存 |
 | `cancel_task` | `{}`；原输入已经完整表达取消目标描述 | 执行时解析并固定的实际目标和处理结果由取消明细保存 |
 | `report_status` | `{}`；原输入已经明确指定完整或局部同步要求 | 执行时确定的固定起点、开始依据和同步责任由 `state_syncs` 保存 |
 
@@ -284,7 +284,7 @@ JSON 整数按数学值判断，沿用[精确数字规则](../data-types.md#精�
 | 全部校验通过，动作级来源提供合法的非空、无重复 `output_ids`，且未提供 `filter` | 保存 `selection_mode: 3` |
 | 动作受理失败，包括空 ID 列表、非法 ID、同时提供 `output_ids` 与 `filter`、不允许的来源或用途组合 | 整个 `execution_spec_json` 保存 SQL `NULL`，不保留局部选择方式 |
 
-合法预览取回的执行定义为 `{"selection_mode":2}`。自动用途、来源关联及能力依据继续由 `auto_preview_links` 保存，不另设自动预览选择枚举，也不在执行定义中重复保存用途。原参数保留调用方实际填写的来源、ID 列表及字段存在性；实际来源成员由 `action_output_sources` 保存，逐来源选择进度由 `obtain_source_selections` 保存，实际产物或显式请求目标由 `obtain_items` 保存，交付结果使用相应交付记录。
+合法预览取回的执行定义为 `{"selection_mode":2}`。自动用途、来源关联及能力依据继续由 `auto_preview_links` 保存，不另设自动预览选择枚举，也不在执行定义中重复保存用途。原参数保留调用方实际填写的来源、ID 列表及字段存在性；实际来源成员由 `action_dependencies` 保存，逐来源选择进度由 `obtain_source_selections` 保存，实际产物或显式请求目标由 `obtain_items` 保存，交付结果使用相应交付记录。
 
 选择规则沿用[默认及精确取回](../../architecture/obtaining-outputs.md#产物选择)和[预览产物选择](../../architecture/preview-obtaining.md#产物选择与失败)。预览不存在时，不因有修复成品而自动选择该成品；有效预览与修复成品比较完整大小，相等时选修复成品。默认选择的修复成品不可用时不退回原片，精确 ID 可以指定原片、预览或修复成品。选择结果可靠保存后，重试及恢复不因文件不可用而改选其他文件。
 

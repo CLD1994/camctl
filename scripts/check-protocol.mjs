@@ -20,8 +20,27 @@ const validate = (schema, value, label) => {
   assert(check(value), `${label}: ${ajv.errorsText(check.errors, { separator: '\n' })}`);
 };
 const registry = await json(join(root, 'protocol/errors/workflow-codes.json'));
+const actionErrorIds = new Set();
+for (const [code, rule] of Object.entries(registry.codes)) {
+  if (rule.action_error_id === undefined) continue;
+  assert(Number.isSafeInteger(rule.action_error_id) && rule.action_error_id > 0, `${code}: 动作错误编号必须为正整数`);
+  assert(!actionErrorIds.has(rule.action_error_id), `${code}: 动作错误编号重复`);
+  assert(['admission', 'device_start', 'device_stop', 'execution'].includes(rule.stage), `${code}: 动作错误阶段无效`);
+  actionErrorIds.add(rule.action_error_id);
+}
 const errorChecks = new Map(Object.entries(registry.codes).map(([code, rule]) =>
   [code, { stage: rule.stage, check: ajv.compile(rule.details_schema) }]));
+for (const [code, value, valid] of [
+  ['recording_too_short', {}, false],
+  ['recording_too_short', { activity_id: '1' }, true],
+  ['device_binding_unavailable', { device_id: 'camera', expected_driver_id: 'driver', reason: 'mismatch' }, false],
+  ['device_binding_unavailable', { device_id: 'camera', expected_driver_id: 'driver', actual_driver_id: 'other', reason: 'mismatch' }, true],
+  ['action_validation_failed', { issues: [] }, false],
+  ['action_validation_failed', { issues: [{ field: 'params', reason: 'required' }] }, true],
+]) {
+  const { check } = errorChecks.get(code);
+  assert.equal(Boolean(check(value)), valid, `${code}: 错误详情结构：${ajv.errorsText(check.errors)}`);
+}
 function checkErrors(value, label) {
   if (!value || typeof value !== 'object') return;
   if (typeof value.code === 'string' && errorChecks.has(value.code)) {
@@ -91,5 +110,5 @@ for (const entry of cases) {
 }
 const reportFiles = await json(join(workflows, 'reports.json'));
 for (const file of Object.values(reportFiles)) await readFile(resolve(workflows, file));
-console.log(`协议规格校验通过：${schemaFiles.length} 份 Schema，${reports} 份报告及摘要，${plans} 份计划，${capabilities} 份能力说明，${cases.length} 个结构正反例；已登记错误详情通过。`);
+console.log(`协议规格校验通过：${schemaFiles.length} 份 Schema，${reports} 份报告及摘要，${plans} 份计划，${capabilities} 份能力说明，${cases.length} 个结构正反例；${actionErrorIds.size} 个动作错误编号及已登记错误详情通过。`);
 console.log('边界：未运行生产受理、客户端合并或设备联调；跨实体语义仍按样例说明及行为规格验收。');

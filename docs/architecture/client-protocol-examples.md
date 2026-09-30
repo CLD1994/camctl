@@ -34,13 +34,13 @@
 
 **业务水位表示业务变化记录到了哪里。** 一个录像动作从受理到完成，会经历开始执行、启动确认、停止确认、产物登记等多次变化，所以两个动作并不意味着水位只能到 2。报告按这些变化选择需要更新的对象，再提供它们在截止位置的状态；它不会为每条变化重复放一个动作对象。
 
-本文水位由明确列出的示例历史推导，逐项编号见[业务变化编号附页](../../protocol/examples/client-protocol/history.md)；样例二也在正文直接展开。它们用于演练协议，不是生产运行测得的数值，也不要求正式实现采用相同的事件拆分。`report_id` 则数的是逻辑报告：例如报告 1 可以覆盖到业务水位 20。保存有效 ACK 和报告自身的生成、发布记录都不增加业务水位。
+本文为演练合并与 ACK 设定报告覆盖边界，见[报告覆盖边界附页](../../protocol/examples/client-protocol/history.md)。这些边界不是生产运行测得的数值，样例不枚举完整业务事件历史；实际水位只由改变公开业务事实的事件推进。`report_id` 则数的是逻辑报告：例如报告 1 可以覆盖到业务水位 20。保存有效 ACK 和报告自身的生成、发布记录都不增加业务水位。
 
 所有样例时间均按 UTC 解释，使用[时间字面量](plan-input.md#时间字面量)中的秒级格式。协议演练使用样例驱动的 `timed` 参数类型，以 `duration_s` 字段指定 60 秒目标时长；这组类型名称和字段仅服务于样例输入、报告和合并练习。实际相机的正式参数类型依据设备能力另行设计，真实输入和 `camctl describe` 使用其正式定义。样例驱动的定义可供协议测试替身使用，不能据这些 JSON 宣称实际设备已支持对应参数。
 
-样例分别表达控制过程计时与未检查的实际媒体时长。样例不包含真实视频，视频的大小及重复字符组成的 SHA-256 是演示值，不能作为真实设备或视频核验的证据。
+正常录像场景以可靠控制计时为成功依据，报告中的实际媒体时长仍为未检查。样例不包含真实视频，视频的大小及重复字符组成的 SHA-256 是演示值，不能作为真实设备或视频核验的证据。
 
-状态报告文件则使用实际 JSON 字节计算 SHA-256，并将完整摘要放入文件名。这些文件采用 UTF-8、两空格缩进和末尾一个换行，可以直接用于报告摘要校验练习。这里固定的是所提供样例的字节。camctl 首次生成和重建报告时遵守[确定字节编码](report-encoding.md)；字段范围、出现条件和实体排序遵守[字段契约](report-format.md)。
+状态报告文件则使用实际 JSON 字节计算 SHA-256，并将完整摘要放入文件名。这些文件采用 UTF-8、紧凑 JSON 和末尾一个换行，可以直接用于报告摘要校验练习。camctl 首次生成和重建报告时遵守[确定字节编码](report-encoding.md)；字段范围、出现条件和实体排序遵守[字段契约](report-format.md)。
 
 以上场景均假定状态库、本地文件交接和会话收尾成功；动作失败不表示 camctl 会话失败。第三方主程序只中转文件，不解析下面的业务字段。样例只展示指定的报告机会；实际运行中的其他报告机会及 `ready` 替换继续遵守[报告生成点](report-maintenance.md#报告生成点)。
 
@@ -48,12 +48,12 @@
 
 | 场景 | 客户端输入 | camctl 状态报告 | 后续客户端文件 |
 | --- | --- | --- | --- |
-| 录像与取回成功 | [执行计划](../../protocol/examples/client-protocol/01-success/plan.json) | [完成报告](../../protocol/examples/client-protocol/01-success/status-report-1-07fa694d0c7a4557395d51c3e60d14d8a20d25eb061c1cdc0f73732f0dffa6fe.json) | 日常接续：[附带确认的新录像计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json)；可选演示：[原请求附带确认](../../protocol/examples/client-protocol/01-success/ack-plan.json) |
-| 单个动作参数错误 | [执行计划](../../protocol/examples/client-protocol/02-action-invalid/plan.json) | [受理后的报告](../../protocol/examples/client-protocol/02-action-invalid/status-report-1-50d2732db44ec5bd3102fee0dfdd6a28e7664ea47339fc3acfd00e9990780be6.json)、[完成后的增量报告](../../protocol/examples/client-protocol/02-action-invalid/status-report-2-f2324c31cae373331b6e97670cbe0f2b316d427b122cdca85a4b9c9411be24c5.json) | [两份报告之间的 ACK 输入](../../protocol/examples/client-protocol/02-action-invalid/ack-plan.json)、[合并后的计划记录](../../protocol/examples/client-protocol/02-action-invalid/client-merged-plan.json) |
-| 组取回部分失败 | [执行计划](../../protocol/examples/client-protocol/03-obtain-partial/plan.json) | [完成报告](../../protocol/examples/client-protocol/03-obtain-partial/status-report-1-8f9e3da0f672852ef509e7ff85f3cc8358cdf8a5ee273b54626b28803d0c58e3.json) | [补取失败原片的执行计划](../../protocol/examples/client-protocol/03-obtain-partial/retry-plan.json) |
-| 组内一个录像没有产物 | [执行计划](../../protocol/examples/client-protocol/04-source-no-output/plan.json) | [完成报告](../../protocol/examples/client-protocol/04-source-no-output/status-report-1-5719c338523e348e22520b47f8986ed43fc35c7cf32655b40e82099de8e8596f.json) | 按来源动作解释无产物失败，保留另一份成功交付 |
+| 录像与取回成功 | [执行计划](../../protocol/examples/client-protocol/01-success/plan.json) | [完成报告](../../protocol/examples/client-protocol/01-success/status-report-1-006a1681cd1f0dff673730514d34f08c64407f7a4fe3854c31f7d0dfb868ab89.json) | 日常接续：[附带确认的新录像计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json)；可选演示：[原请求附带确认](../../protocol/examples/client-protocol/01-success/ack-plan.json) |
+| 单个动作参数错误 | [执行计划](../../protocol/examples/client-protocol/02-action-invalid/plan.json) | [受理后的报告](../../protocol/examples/client-protocol/02-action-invalid/status-report-1-aaa34f00e10b1c724ef8b2bf6f14ca05be93bff0e71dfdf2ee15d76dd57ddd2a.json)、[完成后的增量报告](../../protocol/examples/client-protocol/02-action-invalid/status-report-2-270ad7c47c90ec91cfe61c55d1b456626455eba35d1f086b5876b50ebec7767d.json) | [两份报告之间的 ACK 输入](../../protocol/examples/client-protocol/02-action-invalid/ack-plan.json)、[合并后的计划记录](../../protocol/examples/client-protocol/02-action-invalid/client-merged-plan.json) |
+| 组取回部分失败 | [执行计划](../../protocol/examples/client-protocol/03-obtain-partial/plan.json) | [完成报告](../../protocol/examples/client-protocol/03-obtain-partial/status-report-1-4064c5fd0d7745b9935b18b6fd0993565c1ac7e8cd6eef407e0ea2ca8f14da34.json) | [补取失败原片的执行计划](../../protocol/examples/client-protocol/03-obtain-partial/retry-plan.json) |
+| 组内一个录像没有产物 | [执行计划](../../protocol/examples/client-protocol/04-source-no-output/plan.json) | [完成报告](../../protocol/examples/client-protocol/04-source-no-output/status-report-1-2e4b937c17c591f488216b08dbc49931749f1e32d0d30e1fa01017166aa71852.json) | 按来源动作解释无产物失败，保留另一份成功交付 |
 | 取消完成后清理已有产物 | [录像计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json)、[维护计划](../../protocol/examples/client-protocol/05-cancel-and-cleanup/maintenance-plan.json) | [进度与完成报告](#样例五取消完成后清理已有产物) | 接续样例一，保留此前未变化的取回与交付 |
-| 取消已生效但停止未确认 | [场景前提](#样例六取消已生效但停止没有确认) | [取消停止失败报告](../../protocol/examples/client-protocol/06-cancel-stop-failed/status-report-1-ea0d418149545ed653664b263f8105e749e4f2b317c38b6ba2ceb1ba85a9360c.json) | 独立历史；同时展示任务已取消与停止未确认 |
+| 取消已生效但停止未确认 | [场景前提](#样例六取消已生效但停止没有确认) | [取消停止失败报告](../../protocol/examples/client-protocol/06-cancel-stop-failed/status-report-1-5c5fb66b2aa58c3321bb618d2034bae4254b094b292579bd1ece6ea9cc6e1115.json) | 独立历史；同时展示任务已取消与停止未确认 |
 
 输入与输出均提供全部文件内容，没有省略标记。`client-merged-plan.json` 是客户端合并结果，既不是 camctl 输入，也不是待 ACK 的报告文件。
 
@@ -67,7 +67,7 @@
 2. 录像启动和停止均在首次尝试成功，确认本次控制计时达到 60 秒、对应文件已写完；同一终态事务登记原片 `4` 和录像成功。
 3. 取回到达计划时间后复制原片，可靠保存全部字节，主机摘要与相机源端摘要一致。样例记录此时已经取得的产物摘要。
 4. 交付 `1` 的文件 `1.mp4` 完成发布，取回动作成功；计划全部动作进入终态，状态为 `completed`。
-5. 会话收尾报告覆盖 `(0, 20]`。本场景假定此前报告尚未被客户端累计确认，因此这份报告包含本次完整业务变化的最终快照。具体编号见[样例一的 20 条业务变化](../../protocol/examples/client-protocol/history.md#样例一从-0-到-20)。
+5. 会话收尾报告覆盖 `(0, 20]`。本场景假定此前报告尚未被客户端累计确认，因此这份报告包含本次完整业务变化的最终快照。覆盖依据见[样例一的报告边界](../../protocol/examples/client-protocol/history.md#样例一从-0-到-20)。
 
 报告中的所属与引用关系为：
 
@@ -108,20 +108,14 @@
 
 为了明确第一份报告的生成机会，本组假定主程序已通过 `submit` 受理计划，之后在 09:00 之前实际启动裸 `run`；恢复/对账后的报告包含已保存的受理事实，随后会话继续等待合法录像动作的执行时间。该场景不要求主程序解析动作错误。
 
-本例明确采用以下业务变化编号。每行是一条保存的业务事实，不是一次设备调用，也不是一个动作：
+本例设定两个报告边界：
 
-| 业务变化编号 | 保存的事实 |
+| 业务水位 | 截至该边界已保存的业务事实 |
 | --- | --- |
-| 1 | 受理计划 `2`：保存请求关联及全部动作的初始状态，`4` 为 `pending`，`5` 为 `failed` |
-| 2 | 合法录像 `4` 开始执行，进入 `running`；计划随之为 `running` |
-| 3 | 登记第 1 次启动尝试，随后调用相机 |
-| 4 | 确认启动成功，保存计时起点及本次录像关联 |
-| 5 | 可靠控制计时达到 60 秒，登记第 1 次停止尝试 |
-| 6 | 确认停止成功，持续录像效果已停止，文件已写完 |
-| 7 | 登记正式原片 `7` 的身份、来源、文件大小及可用状态 |
-| 8 | `4` 以 `succeeded` 结束，保存不需要修复的结果；全部动作已终态，计划为 `completed` |
+| 1 | 计划已受理：录像动作 `4` 为 `pending`，取回动作 `5` 因来源错误为 `failed`。 |
+| 8 | 合法录像已成功结束，并登记正式原片 `7`；全部动作已终态，计划为 `completed`。 |
 
-第 1 条受理事实完整包含两个动作，不能只受理其中一个。第 7、8 条在同一个录像终态事务中提交，不能生成只看到原片、却看不到录像完成的中间报告。计划状态从动作历史计算，不在本例中另占一个编号。
+受理事实完整包含两个动作。原片登记与录像终态在同一个事务中提交，不能生成只看到原片、却看不到录像完成的中间报告。设备尝试和内部计时按历史规则保存，仅当公开业务事实改变时推进业务水位。
 
 第一份报告在第 1 条提交后冻结，覆盖 `(0, 1]`：
 
@@ -139,7 +133,7 @@
 
 09:00 合法录像按原参数执行并完成，登记原片 `7`。没有合法取回动作读取该原片，因此报告中的媒体检查为未执行，摘要为尚未取得，原片仍可供后续新请求取回。
 
-第二份报告在第 8 条提交后冻结，覆盖 `(1, 8]`，即第 2 至第 8 条变化。它只包含发生变化的 `4` 及承载它的计划，提供的是录像完成时的状态：
+第二份报告在录像完成的事务提交后冻结，示例上界设为 8，覆盖 `(1, 8]`。它只包含发生变化的 `4` 及承载它的计划，提供的是录像完成时的状态：
 
 ```text
 2：completed
@@ -173,9 +167,9 @@
 
 本场景使用已确认的默认读取上限、无数据超时和独立重拷额度，具体约束见[按文件累计读取尝试](file-copy.md#按文件累计读取尝试)、[文件读取的无数据超时](file-copy.md#文件读取的无数据超时)和[摘要不一致后的有限重拷](file-copy.md#摘要不一致后的有限重拷)。读取重试之间先确认旧读取已经停止，并在等待期间保留该相机的拷贝机会；重试间隔来自本次运行的本地配置，遵守[通信重试间隔](configuration.md#通信重试间隔)。
 
-交付 `3` 的 `copy.committed_bytes` 为 1048576，是最后可靠保存的进度，不是整个视频长度。本场景尚未完成全片读取及摘要校验，`verification.status` 为 `not_performed`，额外重拷使用数为 0。失败文件的读取和重试已停止，半成品已清理；历史进度及文件名占用继续保留，相机上的正式原片不删除。
+交付 `3` 尚未完成全片读取及摘要校验，因此报告失败和实际原因，不提供虚构的最终交付摘要。失败文件的读取已经停止，内部历史及文件名占用继续保留，相机上的正式原片不删除。
 
-两个来源均已结束、全部产物准备结果均已确定后，成功文件才按组取回开始发布的条件发布。待 `2` 的本地交接完成，取回动作 `8` 以 `failed` 结束。按[样例三的逐项编号](../../protocol/examples/client-protocol/history.md#样例三从-0-到-39)，最终报告覆盖 `(0, 39]`：
+两个来源均已结束、全部产物准备结果均已确定后，成功文件才按组取回开始发布的条件发布。待 `2` 的本地交接完成，取回动作 `8` 以 `failed` 结束。按[样例三的报告边界](../../protocol/examples/client-protocol/history.md#样例三从-0-到-39)，最终报告覆盖 `(0, 39]`：
 
 ```text
 3：completed
@@ -198,7 +192,7 @@
 
 输入请求 `1004` 的两个录像动作属于“早间采集”组；取回动作仍通过 `params.source.group` 选择它们。计划公共结构和所有动作参数均合法，本组初始受理没有参数错误。
 
-本场景的本地相机启动重试间隔设为 1 秒，每次拒绝及调用结束确认耗时不超过 0.1 秒，首次尝试在计划时间开始，因此三次拒绝可在 5 秒启动窗口内完成。这是本例采用的配置，默认重试间隔仍为 3 秒；时间与业务编号的完整依据见[样例四的逐项编号](../../protocol/examples/client-protocol/history.md#样例四从-0-到-29)。
+本场景的本地相机启动重试间隔设为 1 秒，每次拒绝及调用结束确认耗时不超过 0.1 秒，首次尝试在计划时间开始，因此三次拒绝可在 5 秒启动窗口内完成。这是本例采用的配置，默认重试间隔仍为 3 秒；场景及报告边界见[样例四的说明](../../protocol/examples/client-protocol/history.md#样例四从-0-到-29)。
 
 本次历史包括以下事实：
 
@@ -218,11 +212,11 @@
    └─ deliveries：4 已发布，引用 10
 ```
 
-动作 `11` 的 `result.failures` 中只有一项：包含 `source_action_instance_id = 9` 和 `no_outputs` 错误，不包含 `output_id` 或 `delivery_id`。取回动作的错误说明它没有可取回的产物；来源录像动作自己的错误及启动尝试记录进一步说明为什么没有产物。客户端通过来源动作 ID 关联这两层原因，不把录像设备错误复制成取回动作的设备执行错误。
+动作 `11` 的 `result.failures` 中只有一项：包含 `source_action_instance_id = 9` 和 `no_outputs` 错误，不包含 `output_id` 或 `delivery_id`。取回动作的错误说明它没有可取回的产物；来源录像动作的最终错误进一步说明为什么没有产物。客户端通过来源动作 ID 关联这两层原因，不把录像设备错误复制成取回动作的设备执行错误。
 
 客户端应显示“第一段录像启动失败，没有可取回文件；第二段录像成功，文件已交给主程序”。它仍可接收并核验 `4.mp4`，不需要等待一个不存在的失败交付文件。
 
-本组 动作 `9` 的 `execution.started` 为 `true`，与样例二受理校验失败的 `false` 不同。它的停止尝试列表为空，控制计时和持续效果字段没有补造值；无产物也不以一个大小为 0 的虚假视频表示。
+本组动作 `9` 在执行时启动失败，错误阶段与样例二的受理失败不同。报告保留失败原因，没有产物时不创建大小为 0 的虚假视频。
 
 重新提交取回请求不会生成从未录制的第一段视频。客户端若仍需要该段内容，应根据业务需要安排新的录像计划；这与样例三针对仍然存在的原片重新取回不同。
 
@@ -234,10 +228,10 @@
 | --- | --- |
 | [capture-plan.json](../../protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json) | 新增录像 `12`；参数继续使用本文样例驱动，不能当作真实相机参数类型 |
 | [maintenance-plan.json](../../protocol/examples/client-protocol/05-cancel-and-cleanup/maintenance-plan.json) | 通过原请求 `1005` 取消该录像、显式清理原有 `4`，并请求从报告 1 之后局部同步 |
-| [报告 2](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-2-5c12fa90fd52dea1d8f710a09e693c4d7a8e7bcb737902300b5538229c4dd87f.json) | 覆盖 `(20, 29]`；取消标记已经保存，停止调用仍在执行，取消动作保持 `running` |
-| [报告 3](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-3-832b05da99c2ffd333daf96bce13e41758789cb646bc36e0faf1a1465843108a.json) | 覆盖 `(20, 40]`；停止与适用废弃内容清理已完成，取消成功，原有 `4` 的独立清理也已完成 |
+| [报告 2](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-2-09ac642ba5815628f619eae595e492f6758c179c65c1c3a45c7a9c45ad987c02.json) | 覆盖 `(20, 29]`；取消标记已经保存，停止调用仍在执行，取消动作保持 `running` |
+| [报告 3](../../protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-3-e7e6561fcf93e68e3d9756608d0c61af09faa8946dd535aacdaf4ef812a88a00.json) | 覆盖 `(20, 40]`；停止与适用废弃内容清理已完成，取消成功，原有 `4` 的独立清理也已完成 |
 
-编号从样例一的 20 继续，详见[样例五的逐项编号](../../protocol/examples/client-protocol/history.md#样例五接续样例一从-20-到-40)。报告 2 在第 29 条后冻结，报告 3 在第 40 条后冻结；本例尚未吸收报告 2 的 ACK，因此报告 3 仍从 20 开始，包含两份报告之间重叠的变化。
+业务水位从样例一的 20 继续，详见[样例五的报告边界](../../protocol/examples/client-protocol/history.md#样例五接续样例一从-20-到-40)。报告 2 在第 29 条后冻结，报告 3 在第 40 条后冻结；本例尚未吸收报告 2 的 ACK，因此报告 3 仍从 20 开始，包含两份报告之间重叠的变化。
 
 客户端在生成取消计划时只需要自己分配的 `1005`，不预先知道 `12`；实际关联由 camctl 执行取消时确定并报告。本例停止在清理动作到达计划时间前已确认完成，不要求相机一边录像一边删除文件。录像 `12` 最终为 `canceled`，没有登记正式产物；取消动作 `13` 为 `succeeded`，逐项结果指向 `12`。清理动作 `14` 只处理显式指定的旧产物 `4`，不改变其来源录像的成功终态，也不删除此前交付的独立副本。
 
@@ -247,11 +241,11 @@
 
 ## 样例六：取消已生效，但停止没有确认
 
-[取消停止失败报告](../../protocol/examples/client-protocol/06-cancel-stop-failed/status-report-1-ea0d418149545ed653664b263f8105e749e4f2b317c38b6ba2ceb1ba85a9360c.json) 是独立数据库场景的完整快照，与其他组的报告 ID 不共享历史。相机已开始录像，取消到达后，三次有限停止尝试均失败；不再继续普通录像或重试启动，目标录像按取消规则结束。
+[取消停止失败报告](../../protocol/examples/client-protocol/06-cancel-stop-failed/status-report-1-5c5fb66b2aa58c3321bb618d2034bae4254b094b292579bd1ece6ea9cc6e1115.json) 是独立数据库场景的完整快照，与其他组的报告 ID 不共享历史。相机已开始录像，取消到达后，三次有限停止尝试均失败；不再继续普通录像或重试启动，目标录像按取消规则结束。
 
-报告覆盖 `(0, 17]`：两份计划的受理、录像启动、取消及三次停止尝试的结果按[样例六的逐项编号](../../protocol/examples/client-protocol/history.md#样例六独立历史从-0-到-17)保存，最终截止于取消动作失败。
+报告覆盖 `(0, 17]`：两份计划的受理、录像及取消的业务结果按[样例六的报告边界](../../protocol/examples/client-protocol/history.md#样例六独立历史从-0-到-17)保存，最终截止于取消动作失败。
 
-此时 动作 `12` 的 `status = canceled`，但其持续效果为 `compensation_failed`，设备事实仍为 `possibly_recording`。取消动作 动作 `13` 的 `status = failed`，逐项结果保留停止次数耗尽的原因；废弃内容不能在录像状态未确认时被当作已经清理。
+此时动作 `12` 的 `status = canceled`，`device_execution.status = end_unconfirmed` 表达录像结束尚未确认。取消动作 `13` 的 `status = failed`，逐项结果保留停止次数耗尽的原因；废弃内容不能在录像状态未确认时被当作已经清理。
 
 客户端应同时显示“录像任务已取消”和“停止相机未确认”。不能把取消任务失败理解为录像计划重新生效，也不能把目标 `canceled` 理解为设备已经停止。本例不创建正式产物或交付，不假定相机已停止，也不因停止预算耗尽重置次数。
 
@@ -275,22 +269,19 @@
 | 动作 `name`、`type`、`device_id`、`scheduled_at`、`group`、`policy` | 首次受理时保存的动作公共字段；没有提供或不适用的可选字段不补造值 |
 | 动作 `input_params` | 原始结构化参数，包含导致校验失败的实际输入 |
 | 拍摄动作 `effective_params` | 合法受理时确定的参数类型及生效参数；从冻结历史读取 |
-| 动作 `execution.started` | 是否曾持久化进入 `running`；受理校验失败为 `false`，运行后失败仍为 `true` |
 | 动作 `result` | 已取得的执行结果，作为动作自身字段整体更新 |
 | 取回 `result.failures` | 已确定的逐项最终失败，按[取回失败项的报告表达](obtaining-outputs.md#取回失败项的报告表达)计算；为空表示尚无此类失败，不能单独据此判断动作已成功 |
 | 动作 `error` | 该动作当前快照中的错误；合法可选字段缺席时，不保留旧快照同字段的值 |
-| 动作 `outputs`、`deliveries` | 按各自 ID 合并的实体子集合；普通参数、结果和尝试数组则随所属对象的自身字段整体更新 |
+| 动作 `outputs`、`deliveries` | 按各自 ID 合并的实体子集合；普通参数和结果数组则随所属对象的自身字段整体更新 |
 
 父对象的 ID 与所在嵌套路径确定所属关系；正式产物和交付仍保留要求的显式来源字段。跨计划取回的 D 放在发起取回的动作下，通过 `output_id`、`source_action_instance_id` 引用来源，不复制到来源计划下。
 
 ### 录像结果与正式产物
 
+`device_execution` 表达动作结束后设备仍在执行或尚未确认结束的情况；原动作结果保持，后续可靠结束时清除提示。
+
 | 位置或字段 | 含义与处理 |
 | --- | --- |
-| `result.recording.start`、`stop` | 启动、停止各自在报告历史边界内最后采用的上限及累计尝试记录，分别计数 |
-| `attempts[].attempt_no`、`status` | 本流程内已开始的尝试序号及结果；不是动作被客户端重送的次数 |
-| `result.recording.control_elapsed_s` | 已可靠取得的控制过程计时，不是从视频文件测出的媒体时长 |
-| `result.recording.effect.status` | 本动作所启动录像的收场状态；`compensated` 表示这段录像已完成收场，不代表相机今后始终空闲 |
 | `result.repair.status` | 样例中正常录像不需要修复，取值为 `not_needed` |
 | 产物 `kind`、`original_name`、`media_type`、`size` | 原片类型、原始文件名、内容类型及可靠确认的完整字节长度 |
 | 产物 `availability`、`cleanup.status` | 文件可用状态与清理状态；样例原片为 `available`，未请求清理为 `not_requested` |
@@ -306,12 +297,6 @@
 | 交付 `size` | 本场景已知源文件的完整大小，不是失败时的部分进度 |
 | 交付 `sha256` | 完成读取及校验后可供客户端核验的完整文件摘要；未取得时不补造值 |
 | 交付 `status` | `published` 为已完成本地交接；本组 `failed` 为文件处理最终失败、未发布；完整生命周期由产物与文件交接专题细化 |
-| `copy.max_read_attempts`、`read_idle_timeout_s`、`max_recopies` | 本文件在报告历史边界内最后可靠保存的相关执行依据；后续配置不改写旧报告 |
-| `copy.read_attempts` | 已开始的文件读取尝试列表；本组已用次数等于列表条目数，各次失败保留自己的错误 |
-| `copy.round`、`recopies_used` | 当前整片拷贝轮次及已使用的额外重拷数；初始轮次为 1，未额外重拷为 0 |
-| `copy.committed_bytes` | 最后可靠保存的连续进度；半成品后来清理也不改写这个历史事实 |
-| `copy.verification.status` | `matched` 表示本次完整副本的主机摘要与源端摘要一致；`not_performed` 表示尚未执行该比较 |
-| `copy.work_file_cleanup.status` | 失败半成品已清理为 `completed`；成功发布且没有半成品待清理为 `not_needed`，不表示正式源文件被删除 |
 
 ### 错误表达
 
@@ -320,14 +305,12 @@
 | 本组错误码 | 阶段 | 结构化信息 | 客户端可表达的事实 |
 | --- | --- | --- | --- |
 | `source_action_not_found` | `admission` | `field`、`value` | 本计划不存在被引用的动作，只有该取回动作校验失败 |
-| `read_idle_timeout` | `source_read` | `timeout_s`、`committed_bytes` | 该次文件读取连续无数据达到阈值，保留可靠进度 |
 | `read_attempts_exhausted` | `source_read` | `max_read_attempts`、`attempts_used` | 该文件的读取尝试耗尽，文件处理最终失败 |
 | `obtain_items_failed` | `execution` | 空对象；逐项原因见 `result.failures` | 本次取回因逐项最终失败而结束，已发布文件继续有效 |
 | `no_outputs` | `output_selection` | 空对象；来源见同一失败项的 `source_action_instance_id` | 来源动作已结束，可靠确认没有正式产物 |
-| `camera_start_rejected` | `device_start` | `recording_started: false` | 本次启动明确被拒绝，并可靠确认未开始录像 |
 | `start_attempts_exhausted` | `device_start` | `max_attempts`、`attempts_used` | 录像启动尝试耗尽，没有成功启动 |
 
-本组错误属于动作、取回失败项、交付或设备与读取尝试。输入读取失败、整份计划拒绝及 ACK 校验错误通过顶层 `plan_file_diagnostics` 表达，具体结构和归属见[计划文件诊断](report-diagnostics.md#计划文件诊断)。动作自身错误不在该集合重复列出。
+本组报告错误属于动作、取回失败项或交付；设备与读取尝试的原始错误按内部历史保存。输入读取失败、整份计划拒绝及 ACK 校验错误通过顶层 `plan_file_diagnostics` 表达，具体结构和归属见[计划文件诊断](report-diagnostics.md#计划文件诊断)。动作自身错误不在该集合重复列出。
 
 ## 计划文件诊断样例
 
@@ -506,7 +489,7 @@
 | 核对对象 | 必须成立的结果 |
 | --- | --- |
 | 每份状态报告 | 文件名摘要等于文件实际字节的 SHA-256，文件名 ID 等于正文 ID |
-| 每份报告的覆盖区间 | 上界对应样例历史的完整事务截止位置，下界对应已吸收的累计确认；可按业务变化编号逐项核对 |
+| 每份报告的覆盖区间 | 上界对应样例历史的完整事务截止位置，下界对应已吸收的累计确认；按边界处的业务结果核对合并行为 |
 | 样例一的日常确认 | 导入后保存确认进度，下一份真实业务输入附带有效 `last_report_id`；没有新任务时不要求专门递交确认 |
 | 样例一可选的原请求 ACK 演示 | 除 ACK 外保留原请求及正文，指向本组已登记报告；不创建新计划或 delivery |
 | 样例二的增量合并 | 第二份报告仅含合法录像动作，合并后仍保留失败取回动作及其错误 |

@@ -1,6 +1,6 @@
 # 从旧备份补齐录像与交付状态
 
-[客户端状态同步](../../../docs/architecture/status-sync.md) · [其他客户端协议样例](../../../docs/architecture/client-protocol-examples.md) · [业务变化编号](history.md)
+[客户端状态同步](../../../docs/architecture/status-sync.md) · [其他客户端协议样例](../../../docs/architecture/client-protocol-examples.md) · [报告覆盖边界](history.md)
 
 用户连续两天用相机拍摄录像 A、B，并把视频取回到个人电脑。随后，用户提交计划，清理已经保存到电脑的录像 A 的相机原片。此时客户端数据库需要恢复，用户使用了一份只保存到第一天的旧备份。
 
@@ -36,14 +36,14 @@
 
 | 报告 | 覆盖范围 | 完整文件 | 用户可以得知的结果 |
 | --- | --- | --- | --- |
-| 1 | `(0, 20]` | [报告 1](status-report-1-1daae534bf8c6ff037211cbc98615d1a778c6da4d2b331f43b50898838a216b6.json) | A 录像和取回完成 |
-| 2 | `(20, 40]` | [报告 2](status-report-2-a0c6dbd12f70f03fd2a1f5af45a833494e094fbb306e9fda5f502e1251afecb7.json) | B 录像和取回完成 |
-| 3 | `(40, 45]` | [报告 3](status-report-3-7b235613d47cc9b75b541f2c2bed7b163fd30a989840e6c824575429fc122adf.json) | A 的相机原片清理完成 |
-| 4 | `(20, 47]` | [报告 4](status-report-4-2f8ab767c527a14ca06985ae7215d6200ecc9403514088d4939de9c27aa04078.json) | 缺失状态已覆盖，同步动作仍在运行 |
-| 5 | `(20, 48]` | [报告 5](status-report-5-29b4efd3ddda19ca96c191432d8f014155c0d34e66abfc076f3156bc45145d66.json) | 缺失状态已覆盖，同步动作已成功 |
-| 6 | `(48, 53]` | [报告 6](status-report-6-7c40cf4dbc8a45bd35f091462fef55a9c7fda6dbe226cf9d939e00dc6d2b47d8.json) | B 的相机原片清理完成，恢复普通增量 |
+| 1 | `(0, 20]` | [报告 1](status-report-1-bf1e057beb01b4b6f73b7f15d0f86d27fef2d749bd59903292cf95c38da90d62.json) | A 录像和取回完成 |
+| 2 | `(20, 40]` | [报告 2](status-report-2-40d86a3a13521411124db9c8ea7c635e44db8ba3a016331d4e36f6378f3215ef.json) | B 录像和取回完成 |
+| 3 | `(40, 45]` | [报告 3](status-report-3-374d22eb3a5e4f47499cfd82d4815a4db6e5bf89a25357981939c795accb6588.json) | A 的相机原片清理完成 |
+| 4 | `(20, 47]` | [报告 4](status-report-4-32b4eec29fba24034ee721a8a8253f317187c478a3377459cef5e33e2ca112ea.json) | 缺失状态已覆盖，同步动作仍在运行 |
+| 5 | `(20, 48]` | [报告 5](status-report-5-cb06d32fa03cc48c68715396f20e6febe0d39b04a1527442c14e6653b0513729.json) | 缺失状态已覆盖，同步动作已成功 |
+| 6 | `(48, 53]` | [报告 6](status-report-6-a5623b0288af3e054a448e2ab8c69ed77aa32a112b286e1fa19a0a6eadc8fb69.json) | B 的相机原片清理完成，恢复普通增量 |
 
-录像、拷贝和清理假定成功，报告选取表中所列的生成时点。编号来自[业务变化编号](history.md)中的具体事实；自动报告登记及有效确认不会增加业务水位。实际运行中的其他报告机会、文件替换和领取按全局规则处理，本例不规定生产报告的编号或数量。
+录像、拷贝和清理假定成功，报告选取表中所列的生成时点。测试边界及对应业务结果见[报告覆盖边界](history.md)；自动报告登记及有效确认不会增加业务水位。实际运行中的其他报告机会、文件替换和领取按全局规则处理，本例不规定生产报告的编号或数量。
 
 相机参数沿用[协议样例驱动](../../../docs/architecture/client-protocol-examples.md#阅读与使用范围)的 `timed` 类型，60 秒仅为本次演练任务时长。这些 JSON 用于解释协议，真实相机应使用其正式能力说明。视频大小和视频摘要是演示数据；报告文件名中的 SHA-256 则根据所提供 JSON 的真实字节计算。
 

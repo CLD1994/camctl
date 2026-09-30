@@ -1,0 +1,2463 @@
+{
+  "format_version": 1,
+  "public_schema": "../../../protocol/schemas/status-report.schema.json",
+  "enum_registry": "enum-registry.json",
+  "error_registry": "../../../protocol/errors/workflow-codes.json",
+  "contract": "report-dependencies.md",
+  "boundary": {
+    "history": "same_frozen_h",
+    "impact": "event_before_and_after",
+    "missing_required": "state_database_error",
+    "compare": "public_value_and_presence",
+    "internal_only": "no_report_target",
+    "parent_fill": "no_additional_change_seq"
+  },
+  "entities": {
+    "report": {
+      "table": "reports",
+      "identity": "id",
+      "target": false
+    },
+    "plan": {
+      "table": "plans",
+      "identity": "id",
+      "target": true
+    },
+    "action": {
+      "table": "actions",
+      "identity": "id",
+      "target": true,
+      "parent": {
+        "entity": "plan",
+        "foreign_key": "plan_id"
+      }
+    },
+    "output": {
+      "table": "outputs",
+      "identity": "id",
+      "target": true,
+      "parent": {
+        "entity": "action",
+        "foreign_key": "source_action_id"
+      }
+    },
+    "delivery": {
+      "table": "deliveries",
+      "identity": "id",
+      "target": true,
+      "parent": {
+        "entity": "action",
+        "foreign_key": "action_id"
+      }
+    },
+    "diagnostic": {
+      "table": "plan_file_diagnostics",
+      "identity": "id",
+      "target": true
+    }
+  },
+  "relations": {
+    "plan_actions": {
+      "from": "plans.id",
+      "to": "actions.plan_id",
+      "cardinality": "many"
+    },
+    "action_outputs": {
+      "from": "actions.id",
+      "to": "outputs.source_action_id",
+      "cardinality": "many"
+    },
+    "action_deliveries": {
+      "from": "actions.id",
+      "to": "deliveries.action_id",
+      "cardinality": "many"
+    },
+    "action_activity": {
+      "from": "actions.id",
+      "to": "device_activities.action_id",
+      "cardinality": "optional_one"
+    },
+    "action_processing": {
+      "from": "actions.id",
+      "to": "recording_processing.action_id",
+      "cardinality": "optional_one"
+    },
+    "action_automation": {
+      "from": "actions.id",
+      "to": "auto_preview_links.obtain_action_id",
+      "cardinality": "optional_one"
+    },
+    "action_sync": {
+      "from": "actions.id",
+      "to": "state_syncs.action_id",
+      "cardinality": "optional_one"
+    },
+    "action_dependencies": {
+      "from": "actions.id",
+      "to": "action_dependencies.action_id",
+      "cardinality": "many"
+    },
+    "dependency_selection": {
+      "from": "action_dependencies.id",
+      "to": "obtain_source_selections.dependency_id",
+      "cardinality": "optional_one"
+    },
+    "selection_items": {
+      "from": "obtain_source_selections.id",
+      "to": "obtain_items.selection_id",
+      "cardinality": "many"
+    },
+    "item_delivery": {
+      "from": "obtain_items.delivery_id",
+      "to": "deliveries.id",
+      "cardinality": "optional_one"
+    },
+    "action_cleanup_items": {
+      "from": "actions.id",
+      "to": "cleanup_items.action_id",
+      "cardinality": "many"
+    },
+    "action_cancel_items": {
+      "from": "actions.id",
+      "to": "cancel_items.action_id",
+      "cardinality": "many"
+    },
+    "cancel_withdrawals": {
+      "from": "cancel_items.id",
+      "to": "cancel_delivery_items.cancel_item_id",
+      "cardinality": "many"
+    },
+    "cancel_target": {
+      "from": "cancel_items.target_action_id",
+      "to": "actions.id",
+      "cardinality": "one"
+    },
+    "output_origin": {
+      "from": "outputs.id",
+      "to": "output_origins.output_id",
+      "cardinality": "optional_one"
+    },
+    "output_device_file": {
+      "from": "outputs.device_file_id",
+      "to": "device_files.id",
+      "cardinality": "optional_one"
+    },
+    "output_host_file": {
+      "from": "outputs.intermediate_file_id",
+      "to": "intermediate_files.id",
+      "cardinality": "optional_one"
+    },
+    "delivery_output": {
+      "from": "deliveries.output_id",
+      "to": "outputs.id",
+      "cardinality": "one"
+    },
+    "delivery_copy": {
+      "from": "deliveries.id",
+      "to": "file_copies.delivery_id",
+      "cardinality": "one"
+    },
+    "copy_target": {
+      "from": "file_copies.target_file_id",
+      "to": "intermediate_files.id",
+      "cardinality": "one"
+    }
+  },
+  "projections": {
+    "report": {
+      "schema": "#",
+      "root_table": "reports",
+      "entity": "report",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "report_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "reports.id",
+            "encoding": "id"
+          }
+        },
+        "from_wm": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "reports.from_wm",
+            "encoding": "identity"
+          }
+        },
+        "to_wm": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "reports.to_wm",
+            "encoding": "identity"
+          }
+        },
+        "plans": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "entities",
+            "entity": "plan",
+            "selection": "report_targets_and_parents",
+            "order_by": "plans.id",
+            "empty": "omit"
+          }
+        },
+        "plan_file_diagnostics": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "entities",
+            "entity": "diagnostic",
+            "selection": "report_targets_and_parents",
+            "order_by": "plan_file_diagnostics.id",
+            "empty": "omit"
+          }
+        }
+      }
+    },
+    "plan": {
+      "schema": "#/$defs/plan",
+      "root_table": "plans",
+      "entity": "plan",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "plan_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "plans.id",
+            "encoding": "id"
+          }
+        },
+        "request_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "plans.request_id",
+            "encoding": "id"
+          }
+        },
+        "created_at": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "plans.created_at",
+            "encoding": "utc_seconds"
+          }
+        },
+        "name": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "plans.name",
+            "encoding": "identity"
+          }
+        },
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "plans.status",
+            "map": {
+              "PENDING": "pending",
+              "RUNNING": "running",
+              "COMPLETED": "completed"
+            }
+          }
+        },
+        "actions": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "entities",
+            "entity": "action",
+            "selection": "report_targets_and_parents",
+            "order_by": "actions.id",
+            "empty": "omit"
+          }
+        }
+      }
+    },
+    "action": {
+      "schema": "#/$defs/action",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "action_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "actions.id",
+            "encoding": "id"
+          }
+        },
+        "name": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "actions.name",
+            "encoding": "identity"
+          }
+        },
+        "type": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "actions.type",
+            "map": {
+              "CAMERA_TAKE_PHOTO": "camera_take_photo",
+              "CAMERA_RECORD": "camera_record",
+              "CAMERA_TIMELAPSE": "camera_timelapse",
+              "OBTAIN_ACTION_OUTPUTS": "obtain_action_outputs",
+              "DELETE_ACTION_OUTPUTS": "delete_action_outputs",
+              "CANCEL_TASK": "cancel_task",
+              "REPORT_STATUS": "report_status"
+            }
+          }
+        },
+        "device_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "not_null",
+                  "column": "actions.device_id"
+                },
+                "value": {
+                  "op": "read",
+                  "column": "actions.device_id",
+                  "encoding": "identity"
+                }
+              },
+              {
+                "when": {
+                  "op": "json_has",
+                  "column": "actions.input_fields_json",
+                  "pointer": "/device_id"
+                },
+                "value": {
+                  "op": "json_member",
+                  "column": "actions.input_fields_json",
+                  "pointer": "/device_id"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "omit"
+            }
+          }
+        },
+        "scheduled_at": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "not_null",
+                  "column": "actions.scheduled_at"
+                },
+                "value": {
+                  "op": "read",
+                  "column": "actions.scheduled_at",
+                  "encoding": "utc_seconds"
+                }
+              },
+              {
+                "when": {
+                  "op": "json_has",
+                  "column": "actions.input_fields_json",
+                  "pointer": "/scheduled_at"
+                },
+                "value": {
+                  "op": "json_member",
+                  "column": "actions.input_fields_json",
+                  "pointer": "/scheduled_at"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "omit"
+            }
+          }
+        },
+        "group": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "not_null",
+                  "column": "actions.group_name"
+                },
+                "value": {
+                  "op": "read",
+                  "column": "actions.group_name",
+                  "encoding": "identity"
+                }
+              },
+              {
+                "when": {
+                  "op": "json_has",
+                  "column": "actions.input_fields_json",
+                  "pointer": "/group"
+                },
+                "value": {
+                  "op": "json_member",
+                  "column": "actions.input_fields_json",
+                  "pointer": "/group"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "omit"
+            }
+          }
+        },
+        "policy": {
+          "when": {
+            "op": "json_has",
+            "column": "actions.input_fields_json",
+            "pointer": "/policy"
+          },
+          "value": {
+            "op": "json_member",
+            "column": "actions.input_fields_json",
+            "pointer": "/policy"
+          }
+        },
+        "input_params": {
+          "when": {
+            "op": "json_has",
+            "column": "actions.input_fields_json",
+            "pointer": "/params"
+          },
+          "value": {
+            "op": "json_member",
+            "column": "actions.input_fields_json",
+            "pointer": "/params"
+          }
+        },
+        "extra_input_fields": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "extra_input",
+            "column": "actions.input_fields_json",
+            "exclude_schema": "../../../protocol/schemas/plan.schema.json#/$defs/action/properties",
+            "empty": "omit"
+          }
+        },
+        "effective_params": {
+          "when": {
+            "op": "not_null",
+            "column": "actions.effective_params_json"
+          },
+          "value": {
+            "op": "read",
+            "column": "actions.effective_params_json",
+            "encoding": "json",
+            "schema": "#/$defs/action/properties/effective_params"
+          }
+        },
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "actions.status",
+            "map": {
+              "PENDING": "pending",
+              "RUNNING": "running",
+              "SUCCEEDED": "succeeded",
+              "FAILED": "failed",
+              "EXPIRED": "expired",
+              "CANCELED": "canceled"
+            }
+          }
+        },
+        "expiration_reason": {
+          "when": {
+            "op": "enum_is",
+            "column": "actions.status",
+            "members": [
+              "EXPIRED"
+            ]
+          },
+          "value": {
+            "op": "enum",
+            "column": "actions.expiration_reason",
+            "map": {
+              "WINDOW_MISSED": "window_missed",
+              "WINDOW_EXHAUSTED": "window_exhausted"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "actions.error_code"
+          },
+          "value": {
+            "op": "registered_error",
+            "code_column": "actions.error_code",
+            "details_column": "actions.error_details_json",
+            "registry_key": "action_error_id",
+            "schema": "#/$defs/error"
+          }
+        },
+        "result": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "enum_is",
+                  "column": "actions.type",
+                  "members": [
+                    "CAMERA_RECORD"
+                  ]
+                },
+                "value": {
+                  "op": "project",
+                  "projection": "camera_result"
+                }
+              },
+              {
+                "when": {
+                  "op": "all",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "left": {
+                        "op": "read",
+                        "column": "actions.execution_started",
+                        "encoding": "identity"
+                      },
+                      "right": {
+                        "op": "literal",
+                        "value": 1
+                      }
+                    },
+                    {
+                      "op": "enum_is",
+                      "column": "actions.type",
+                      "members": [
+                        "OBTAIN_ACTION_OUTPUTS"
+                      ]
+                    }
+                  ]
+                },
+                "value": {
+                  "op": "project",
+                  "projection": "obtain_result"
+                }
+              },
+              {
+                "when": {
+                  "op": "all",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "left": {
+                        "op": "read",
+                        "column": "actions.execution_started",
+                        "encoding": "identity"
+                      },
+                      "right": {
+                        "op": "literal",
+                        "value": 1
+                      }
+                    },
+                    {
+                      "op": "enum_is",
+                      "column": "actions.type",
+                      "members": [
+                        "DELETE_ACTION_OUTPUTS"
+                      ]
+                    }
+                  ]
+                },
+                "value": {
+                  "op": "project",
+                  "projection": "delete_result"
+                }
+              },
+              {
+                "when": {
+                  "op": "all",
+                  "args": [
+                    {
+                      "op": "eq",
+                      "left": {
+                        "op": "read",
+                        "column": "actions.execution_started",
+                        "encoding": "identity"
+                      },
+                      "right": {
+                        "op": "literal",
+                        "value": 1
+                      }
+                    },
+                    {
+                      "op": "enum_is",
+                      "column": "actions.type",
+                      "members": [
+                        "CANCEL_TASK"
+                      ]
+                    }
+                  ]
+                },
+                "value": {
+                  "op": "project",
+                  "projection": "cancel_result"
+                }
+              },
+              {
+                "when": {
+                  "op": "all",
+                  "args": [
+                    {
+                      "op": "enum_is",
+                      "column": "actions.type",
+                      "members": [
+                        "REPORT_STATUS"
+                      ]
+                    },
+                    {
+                      "op": "enum_is",
+                      "column": "actions.status",
+                      "members": [
+                        "SUCCEEDED"
+                      ]
+                    }
+                  ]
+                },
+                "value": {
+                  "op": "project",
+                  "projection": "report_result"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "omit"
+            }
+          }
+        },
+        "outputs": {
+          "when": {
+            "op": "enum_is",
+            "column": "actions.type",
+            "members": [
+              "CAMERA_TAKE_PHOTO",
+              "CAMERA_RECORD",
+              "CAMERA_TIMELAPSE"
+            ]
+          },
+          "value": {
+            "op": "entities",
+            "entity": "output",
+            "selection": "report_targets_and_parents",
+            "order_by": "outputs.id",
+            "empty": "omit"
+          }
+        },
+        "deliveries": {
+          "when": {
+            "op": "enum_is",
+            "column": "actions.type",
+            "members": [
+              "OBTAIN_ACTION_OUTPUTS"
+            ]
+          },
+          "value": {
+            "op": "entities",
+            "entity": "delivery",
+            "selection": "report_targets_and_parents",
+            "order_by": "deliveries.id",
+            "empty": "omit"
+          }
+        },
+        "automation": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "project",
+            "projection": "automation"
+          }
+        },
+        "device_execution": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "project",
+            "projection": "device_execution"
+          }
+        }
+      },
+      "assertions": [
+        "original_input_unique_source",
+        "action_saved_state_combinations"
+      ]
+    },
+    "automation": {
+      "schema": "#/$defs/automation",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [
+        "action_automation"
+      ],
+      "when": {
+        "op": "exists",
+        "table": "auto_preview_links"
+      },
+      "fields": {
+        "purpose": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "literal",
+            "value": "auto_preview"
+          }
+        },
+        "source_action_instance_id": {
+          "when": {
+            "op": "not_null",
+            "column": "auto_preview_links.source_action_id"
+          },
+          "value": {
+            "op": "read",
+            "column": "auto_preview_links.source_action_id",
+            "encoding": "id"
+          }
+        }
+      }
+    },
+    "device_execution": {
+      "schema": "#/$defs/device_execution",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [
+        "action_activity"
+      ],
+      "when": {
+        "op": "all",
+        "args": [
+          {
+            "op": "enum_is",
+            "column": "actions.type",
+            "members": [
+              "CAMERA_TAKE_PHOTO",
+              "CAMERA_RECORD",
+              "CAMERA_TIMELAPSE"
+            ]
+          },
+          {
+            "op": "enum_is",
+            "column": "actions.status",
+            "members": [
+              "SUCCEEDED",
+              "FAILED",
+              "EXPIRED",
+              "CANCELED"
+            ]
+          },
+          {
+            "op": "exists",
+            "table": "device_activities"
+          },
+          {
+            "op": "enum_is",
+            "column": "device_activities.dispatch_state",
+            "members": [
+              "MAY_HAVE_DISPATCHED",
+              "SUCCESS_RETURNED"
+            ]
+          },
+          {
+            "op": "enum_is",
+            "column": "device_activities.activity_state",
+            "members": [
+              "UNKNOWN",
+              "ACTIVE"
+            ]
+          },
+          {
+            "op": "not",
+            "arg": {
+              "op": "enum_is",
+              "column": "device_activities.completion_basis",
+              "members": [
+                "DEVICE_EVIDENCE",
+                "TIME_AND_OUTPUTS"
+              ]
+            }
+          }
+        ]
+      },
+      "fields": {
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "enum_is",
+                  "column": "device_activities.activity_state",
+                  "members": [
+                    "ACTIVE"
+                  ]
+                },
+                "value": {
+                  "op": "literal",
+                  "value": "still_running"
+                }
+              },
+              {
+                "when": {
+                  "op": "enum_is",
+                  "column": "device_activities.activity_state",
+                  "members": [
+                    "UNKNOWN"
+                  ]
+                },
+                "value": {
+                  "op": "literal",
+                  "value": "end_unconfirmed"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "error",
+              "code": "state_database_error"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "device_activities.last_error_json"
+          },
+          "value": {
+            "op": "read",
+            "column": "device_activities.last_error_json",
+            "encoding": "json",
+            "schema": "#/$defs/error"
+          }
+        }
+      },
+      "assertions": [
+        "device_completion_consistency"
+      ]
+    },
+    "camera_result": {
+      "schema": "#/$defs/camera_result",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [
+        "action_processing"
+      ],
+      "when": {
+        "op": "exists",
+        "table": "recording_processing"
+      },
+      "fields": {
+        "check": {
+          "when": {
+            "op": "enum_is",
+            "column": "recording_processing.check_state",
+            "members": [
+              "COMPLETED",
+              "FAILED",
+              "UNCONFIRMED"
+            ]
+          },
+          "value": {
+            "op": "read",
+            "column": "recording_processing.media_json",
+            "encoding": "json",
+            "schema": "#/$defs/media"
+          }
+        },
+        "repair": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "project",
+            "projection": "repair"
+          }
+        },
+        "discard_cleanup": {
+          "when": {
+            "op": "eq",
+            "left": {
+              "op": "read",
+              "column": "actions.cancel_requested",
+              "encoding": "identity"
+            },
+            "right": {
+              "op": "literal",
+              "value": 1
+            }
+          },
+          "value": {
+            "op": "project",
+            "projection": "discard_cleanup"
+          }
+        }
+      },
+      "empty": "omit"
+    },
+    "repair": {
+      "schema": "#/$defs/repair",
+      "root_table": "recording_processing",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "enum_is",
+        "column": "recording_processing.repair_state",
+        "members": [
+          "NOT_NEEDED",
+          "SUCCEEDED",
+          "FAILED",
+          "CANCELED"
+        ]
+      },
+      "fields": {
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "recording_processing.repair_state",
+            "map": {
+              "NOT_NEEDED": "not_needed",
+              "SUCCEEDED": "succeeded",
+              "FAILED": "failed",
+              "CANCELED": "canceled"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "recording_processing.repair_error_json"
+          },
+          "value": {
+            "op": "read",
+            "column": "recording_processing.repair_error_json",
+            "encoding": "json",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "discard_cleanup": {
+      "schema": "#/$defs/discard_cleanup",
+      "root_table": "recording_processing",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "recording_processing.discard_state",
+            "map": {
+              "NOT_NEEDED": "not_needed",
+              "PENDING": "pending",
+              "RUNNING": "running",
+              "COMPLETED": "completed",
+              "FAILED": "failed",
+              "UNKNOWN": "unknown"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "recording_processing.discard_error_json"
+          },
+          "value": {
+            "op": "read",
+            "column": "recording_processing.discard_error_json",
+            "encoding": "json",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "obtain_result": {
+      "schema": "#/$defs/obtain_result",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [
+        "action_dependencies",
+        "dependency_selection"
+      ],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "failures": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "failure_union",
+            "branches": [
+              {
+                "projection": "source_failure",
+                "relations": [
+                  "action_dependencies",
+                  "dependency_selection"
+                ],
+                "identity": "obtain_source_selections.id"
+              },
+              {
+                "projection": "item_failure",
+                "relations": [
+                  "action_dependencies",
+                  "dependency_selection",
+                  "selection_items"
+                ],
+                "identity": "obtain_items.id"
+              },
+              {
+                "projection": "delivery_failure",
+                "relations": [
+                  "action_dependencies",
+                  "dependency_selection",
+                  "selection_items",
+                  "item_delivery"
+                ],
+                "identity": "deliveries.id"
+              }
+            ],
+            "order_by": [
+              "action_dependencies.id",
+              "branch_index",
+              "branch_identity"
+            ],
+            "duplicate": "state_database_error",
+            "empty": "array"
+          }
+        }
+      },
+      "assertions": [
+        "executing_obtain_has_selections"
+      ]
+    },
+    "source_failure": {
+      "schema": "#/$defs/obtain_failure",
+      "root_table": "obtain_source_selections",
+      "entity": "action",
+      "relations": [
+        "dependency_selection"
+      ],
+      "when": {
+        "op": "not_null",
+        "column": "obtain_source_selections.error_code"
+      },
+      "fields": {
+        "source_action_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "action_dependencies.depends_on_action_id",
+            "encoding": "id"
+          }
+        },
+        "output_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "omit"
+          }
+        },
+        "delivery_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "omit"
+          }
+        },
+        "error": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "registered_error",
+            "code_column": "obtain_source_selections.error_code",
+            "details_column": "obtain_source_selections.error_details_json",
+            "registry_key": "item_error_ids.obtain_source_selections",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "item_failure": {
+      "schema": "#/$defs/obtain_failure",
+      "root_table": "obtain_items",
+      "entity": "action",
+      "relations": [
+        "selection_items",
+        "dependency_selection"
+      ],
+      "when": {
+        "op": "enum_is",
+        "column": "obtain_items.status",
+        "members": [
+          "FAILED"
+        ]
+      },
+      "fields": {
+        "source_action_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "action_dependencies.depends_on_action_id",
+            "encoding": "id"
+          }
+        },
+        "output_id": {
+          "when": {
+            "op": "not_null",
+            "column": "obtain_items.output_id"
+          },
+          "value": {
+            "op": "read",
+            "column": "obtain_items.output_id",
+            "encoding": "id"
+          }
+        },
+        "delivery_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "omit"
+          }
+        },
+        "error": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "registered_error",
+            "code_column": "obtain_items.error_code",
+            "details_column": "obtain_items.error_details_json",
+            "registry_key": "item_error_ids.obtain_items",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "delivery_failure": {
+      "schema": "#/$defs/obtain_failure",
+      "root_table": "deliveries",
+      "entity": "delivery",
+      "relations": [
+        "delivery_output"
+      ],
+      "when": {
+        "op": "enum_is",
+        "column": "deliveries.status",
+        "members": [
+          "FAILED"
+        ]
+      },
+      "fields": {
+        "source_action_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.source_action_id",
+            "encoding": "id"
+          }
+        },
+        "output_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.output_id",
+            "encoding": "id"
+          }
+        },
+        "delivery_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.id",
+            "encoding": "id"
+          }
+        },
+        "error": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.error_json",
+            "encoding": "json",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "delete_result": {
+      "schema": "#/$defs/delete_result",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "items": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "rows",
+            "projection": "delete_item",
+            "relations": [
+              "action_cleanup_items"
+            ],
+            "order_by": [
+              "cleanup_items.id"
+            ]
+          }
+        }
+      }
+    },
+    "delete_item": {
+      "schema": "#/$defs/delete_item",
+      "root_table": "cleanup_items",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "output_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "cleanup_items.requested_output_id",
+            "encoding": "id"
+          }
+        },
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "cleanup_items.status",
+            "map": {
+              "UNRESOLVED": "pending",
+              "PENDING_DELETE": "pending",
+              "DELETING": "running",
+              "SUCCEEDED": "succeeded",
+              "FAILED": "failed",
+              "CANCELED": "canceled"
+            }
+          }
+        },
+        "outcome": {
+          "when": {
+            "op": "enum_is",
+            "column": "cleanup_items.status",
+            "members": [
+              "SUCCEEDED"
+            ]
+          },
+          "value": {
+            "op": "enum",
+            "column": "cleanup_items.outcome",
+            "map": {
+              "DELETED": "deleted",
+              "ALREADY_CLEANED": "already_cleaned",
+              "ABSENCE_CONFIRMED": "absence_confirmed"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "cleanup_items.error_code"
+          },
+          "value": {
+            "op": "registered_error",
+            "code_column": "cleanup_items.error_code",
+            "details_column": "cleanup_items.error_details_json",
+            "registry_key": "item_error_ids.cleanup_items",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "cancel_result": {
+      "schema": "#/$defs/cancel_result",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "items": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "rows",
+            "projection": "cancel_item",
+            "relations": [
+              "action_cancel_items"
+            ],
+            "order_by": [
+              "cancel_items.id"
+            ]
+          }
+        }
+      }
+    },
+    "cancel_item": {
+      "schema": "#/$defs/cancel_item",
+      "root_table": "cancel_items",
+      "entity": "action",
+      "relations": [
+        "cancel_target"
+      ],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "action_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "cancel_items.target_action_id",
+            "encoding": "id"
+          }
+        },
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "cancel_items.status",
+            "map": {
+              "PENDING": "pending",
+              "RUNNING": "running",
+              "SUCCEEDED": "succeeded",
+              "FAILED": "failed",
+              "CANCELED": "canceled"
+            }
+          }
+        },
+        "outcome": {
+          "when": {
+            "op": "enum_is",
+            "column": "cancel_items.status",
+            "members": [
+              "SUCCEEDED"
+            ]
+          },
+          "value": {
+            "op": "enum",
+            "column": "cancel_items.outcome",
+            "map": {
+              "CANCELED": "canceled",
+              "ALREADY_TERMINAL": "already_terminal"
+            }
+          }
+        },
+        "withdrawals": {
+          "when": {
+            "op": "enum_is",
+            "column": "actions.type",
+            "members": [
+              "OBTAIN_ACTION_OUTPUTS"
+            ]
+          },
+          "value": {
+            "op": "rows",
+            "projection": "withdrawal",
+            "relations": [
+              "cancel_withdrawals"
+            ],
+            "order_by": [
+              "cancel_delivery_items.id"
+            ]
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "cancel_items.error_code"
+          },
+          "value": {
+            "op": "registered_error",
+            "code_column": "cancel_items.error_code",
+            "details_column": "cancel_items.error_details_json",
+            "registry_key": "item_error_ids.cancel_items",
+            "schema": "#/$defs/error"
+          }
+        },
+        "cancellation_effect": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "cancel_items.cancellation_effect",
+            "map": {
+              "NOT_APPLIED": "not_applied",
+              "APPLIED": "applied",
+              "NOT_REQUIRED": "not_required"
+            }
+          }
+        }
+      }
+    },
+    "withdrawal": {
+      "schema": "#/$defs/withdrawal",
+      "root_table": "cancel_delivery_items",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "delivery_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "cancel_delivery_items.delivery_id",
+            "encoding": "id"
+          }
+        },
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "cancel_delivery_items.status",
+            "map": {
+              "PENDING": "pending",
+              "WITHDRAWN": "withdrawn",
+              "NOT_RETRACTABLE": "not_retractable",
+              "FAILED": "failed"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "cancel_delivery_items.error_code"
+          },
+          "value": {
+            "op": "registered_error",
+            "code_column": "cancel_delivery_items.error_code",
+            "details_column": "cancel_delivery_items.error_details_json",
+            "registry_key": "item_error_ids.cancel_delivery_items",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "report_result": {
+      "schema": "#/$defs/report_result",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [
+        "action_sync"
+      ],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "report_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "state_syncs.local_report_id",
+            "encoding": "id"
+          }
+        }
+      },
+      "assertions": [
+        "successful_report_has_local_report"
+      ]
+    },
+    "output": {
+      "schema": "#/$defs/output",
+      "root_table": "outputs",
+      "entity": "output",
+      "relations": [
+        "output_origin",
+        "output_device_file",
+        "output_host_file"
+      ],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "output_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.id",
+            "encoding": "id"
+          }
+        },
+        "source_action_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.source_action_id",
+            "encoding": "id"
+          }
+        },
+        "kind": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "outputs.kind",
+            "map": {
+              "ORIGINAL": "original",
+              "REPAIRED": "repaired",
+              "PREVIEW": "preview"
+            }
+          }
+        },
+        "original_name": {
+          "when": {
+            "op": "not_null",
+            "column": "outputs.original_name"
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.original_name",
+            "encoding": "identity"
+          }
+        },
+        "media_type": {
+          "when": {
+            "op": "not_null",
+            "column": "outputs.media_type"
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.media_type",
+            "encoding": "identity"
+          }
+        },
+        "size": {
+          "when": {
+            "op": "any",
+            "args": [
+              {
+                "op": "all",
+                "args": [
+                  {
+                    "op": "not_null",
+                    "column": "outputs.device_file_id"
+                  },
+                  {
+                    "op": "not_null",
+                    "column": "device_files.size_bytes"
+                  }
+                ]
+              },
+              {
+                "op": "all",
+                "args": [
+                  {
+                    "op": "not_null",
+                    "column": "outputs.intermediate_file_id"
+                  },
+                  {
+                    "op": "not_null",
+                    "column": "intermediate_files.size_bytes"
+                  }
+                ]
+              }
+            ]
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "not_null",
+                  "column": "outputs.device_file_id"
+                },
+                "value": {
+                  "op": "read",
+                  "column": "device_files.size_bytes",
+                  "encoding": "identity"
+                }
+              },
+              {
+                "when": {
+                  "op": "not_null",
+                  "column": "outputs.intermediate_file_id"
+                },
+                "value": {
+                  "op": "read",
+                  "column": "intermediate_files.size_bytes",
+                  "encoding": "identity"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "error",
+              "code": "state_database_error"
+            }
+          }
+        },
+        "derived_from_output_id": {
+          "when": {
+            "op": "enum_is",
+            "column": "outputs.kind",
+            "members": [
+              "REPAIRED"
+            ]
+          },
+          "value": {
+            "op": "read",
+            "column": "output_origins.original_output_id",
+            "encoding": "id"
+          }
+        },
+        "availability": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "outputs.availability",
+            "map": {
+              "AVAILABLE": "available",
+              "RESTRICTED": "restricted",
+              "CLEANED": "cleaned",
+              "MISSING": "missing",
+              "UNKNOWN": "unknown"
+            }
+          }
+        },
+        "cleanup": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "project",
+            "projection": "cleanup"
+          }
+        },
+        "checksum": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "project",
+            "projection": "checksum"
+          }
+        },
+        "media": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.media_json",
+            "encoding": "json",
+            "schema": "#/$defs/media"
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "outputs.error_json"
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.error_json",
+            "encoding": "json",
+            "schema": "#/$defs/error"
+          }
+        },
+        "preview_of_output_id": {
+          "when": {
+            "op": "enum_is",
+            "column": "outputs.kind",
+            "members": [
+              "PREVIEW"
+            ]
+          },
+          "value": {
+            "op": "read",
+            "column": "output_origins.original_output_id",
+            "encoding": "id"
+          }
+        }
+      },
+      "assertions": [
+        "output_file_and_origin_consistency"
+      ]
+    },
+    "cleanup": {
+      "schema": "#/$defs/cleanup",
+      "root_table": "outputs",
+      "entity": "output",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "outputs.cleanup_status",
+            "map": {
+              "NOT_REQUESTED": "not_requested",
+              "PENDING": "pending",
+              "RUNNING": "running",
+              "COMPLETED": "completed",
+              "INCOMPLETE": "incomplete",
+              "CANCELED": "canceled"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "outputs.cleanup_error_json"
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.cleanup_error_json",
+            "encoding": "json",
+            "schema": "#/$defs/error"
+          }
+        }
+      }
+    },
+    "checksum": {
+      "schema": "#/$defs/checksum",
+      "root_table": "outputs",
+      "entity": "output",
+      "relations": [
+        "output_device_file",
+        "output_host_file"
+      ],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "any",
+                  "args": [
+                    {
+                      "op": "all",
+                      "args": [
+                        {
+                          "op": "not_null",
+                          "column": "outputs.device_file_id"
+                        },
+                        {
+                          "op": "not_null",
+                          "column": "device_files.sha256"
+                        }
+                      ]
+                    },
+                    {
+                      "op": "all",
+                      "args": [
+                        {
+                          "op": "not_null",
+                          "column": "outputs.intermediate_file_id"
+                        },
+                        {
+                          "op": "not_null",
+                          "column": "intermediate_files.sha256"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "value": {
+                  "op": "literal",
+                  "value": "available"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "literal",
+              "value": "not_obtained"
+            }
+          }
+        },
+        "sha256": {
+          "when": {
+            "op": "any",
+            "args": [
+              {
+                "op": "all",
+                "args": [
+                  {
+                    "op": "not_null",
+                    "column": "outputs.device_file_id"
+                  },
+                  {
+                    "op": "not_null",
+                    "column": "device_files.sha256"
+                  }
+                ]
+              },
+              {
+                "op": "all",
+                "args": [
+                  {
+                    "op": "not_null",
+                    "column": "outputs.intermediate_file_id"
+                  },
+                  {
+                    "op": "not_null",
+                    "column": "intermediate_files.sha256"
+                  }
+                ]
+              }
+            ]
+          },
+          "value": {
+            "op": "cases",
+            "branches": [
+              {
+                "when": {
+                  "op": "not_null",
+                  "column": "outputs.device_file_id"
+                },
+                "value": {
+                  "op": "read",
+                  "column": "device_files.sha256",
+                  "encoding": "identity"
+                }
+              },
+              {
+                "when": {
+                  "op": "not_null",
+                  "column": "outputs.intermediate_file_id"
+                },
+                "value": {
+                  "op": "read",
+                  "column": "intermediate_files.sha256",
+                  "encoding": "identity"
+                }
+              }
+            ],
+            "otherwise": {
+              "op": "error",
+              "code": "state_database_error"
+            }
+          }
+        }
+      }
+    },
+    "delivery": {
+      "schema": "#/$defs/delivery",
+      "root_table": "deliveries",
+      "entity": "delivery",
+      "relations": [
+        "delivery_output",
+        "delivery_copy",
+        "copy_target"
+      ],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "delivery_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.id",
+            "encoding": "id"
+          }
+        },
+        "output_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.output_id",
+            "encoding": "id"
+          }
+        },
+        "source_action_instance_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "outputs.source_action_id",
+            "encoding": "id"
+          }
+        },
+        "file_name": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.file_name",
+            "encoding": "identity"
+          }
+        },
+        "display_name": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.display_name",
+            "encoding": "identity"
+          }
+        },
+        "size": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "file_copies.source_size",
+            "encoding": "identity"
+          }
+        },
+        "sha256": {
+          "when": {
+            "op": "not_null",
+            "column": "file_copies.target_sha256"
+          },
+          "value": {
+            "op": "read",
+            "column": "file_copies.target_sha256",
+            "encoding": "identity"
+          }
+        },
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "enum",
+            "column": "deliveries.status",
+            "map": {
+              "PENDING": "pending",
+              "PREPARING": "preparing",
+              "PREPARED": "prepared",
+              "PUBLISHING": "publishing",
+              "PUBLISHED": "published",
+              "FAILED": "failed",
+              "CANCELED": "canceled",
+              "WITHDRAWN": "withdrawn"
+            }
+          }
+        },
+        "error": {
+          "when": {
+            "op": "not_null",
+            "column": "deliveries.error_json"
+          },
+          "value": {
+            "op": "read",
+            "column": "deliveries.error_json",
+            "encoding": "json",
+            "schema": "#/$defs/error"
+          }
+        }
+      },
+      "assertions": [
+        "delivery_complete_file_consistency"
+      ]
+    },
+    "diagnostic": {
+      "schema": "#/$defs/diagnostic",
+      "root_table": "plan_file_diagnostics",
+      "entity": "diagnostic",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "diagnostic_id": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "plan_file_diagnostics.id",
+            "encoding": "id"
+          }
+        },
+        "file_name": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "plan_file_diagnostics.input_path",
+            "encoding": "identity"
+          }
+        },
+        "request_id": {
+          "when": {
+            "op": "not_null",
+            "column": "plan_file_diagnostics.request_id"
+          },
+          "value": {
+            "op": "read",
+            "column": "plan_file_diagnostics.request_id",
+            "encoding": "id"
+          }
+        },
+        "errors": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "read",
+            "column": "plan_file_diagnostics.errors_json",
+            "encoding": "json",
+            "schema": "#/$defs/diagnostic/properties/errors"
+          }
+        }
+      }
+    }
+  },
+  "sql_pending": {},
+  "assertions": {
+    "original_input_unique_source": {
+      "columns": [
+        "actions.device_id",
+        "actions.scheduled_at",
+        "actions.group_name",
+        "actions.input_fields_json"
+      ],
+      "contract": "plans-actions.md#计划与动作的输入存储"
+    },
+    "action_saved_state_combinations": {
+      "columns": [
+        "actions.type",
+        "actions.status",
+        "actions.execution_started",
+        "actions.cancel_requested",
+        "actions.error_code",
+        "actions.effective_params_json"
+      ],
+      "contract": "plans-actions.md#计划与动作的运行状态"
+    },
+    "device_completion_consistency": {
+      "columns": [
+        "actions.type",
+        "device_activities.action_id",
+        "device_activities.dispatch_state",
+        "device_activities.activity_state",
+        "device_activities.completion_mode",
+        "device_activities.completion_basis",
+        "device_activities.completion_evidence_json",
+        "device_activities.sent_at",
+        "device_activities.result_wait_margin_ms",
+        "device_activities.extra_wait_ms_used",
+        "device_activities.expected_check_at",
+        "device_activities.wait_completed_event_id",
+        "device_activities.result_set_state",
+        "device_activities.result_check_json"
+      ],
+      "contract": "operation-fields.md#设备活动占用的释放条件"
+    },
+    "successful_report_has_local_report": {
+      "columns": [
+        "actions.status",
+        "state_syncs.action_id",
+        "state_syncs.local_report_id"
+      ],
+      "contract": "reports-runtime.md#同步字段"
+    },
+    "output_file_and_origin_consistency": {
+      "columns": [
+        "outputs.source_action_id",
+        "outputs.kind",
+        "outputs.device_file_id",
+        "outputs.intermediate_file_id",
+        "output_origins.original_output_id"
+      ],
+      "contract": "file-fields.md#正式产物与来源"
+    },
+    "delivery_complete_file_consistency": {
+      "columns": [
+        "deliveries.status",
+        "file_copies.source_size",
+        "file_copies.committed_bytes",
+        "file_copies.target_sha256",
+        "file_copies.verification_state",
+        "file_copies.reset_state",
+        "intermediate_files.size_bytes",
+        "intermediate_files.sha256"
+      ],
+      "contract": "file-fields.md#文件拷贝"
+    },
+    "executing_obtain_has_selections": {
+      "columns": [
+        "actions.type",
+        "actions.execution_started",
+        "actions.source_resolution_state",
+        "action_dependencies.action_id",
+        "action_dependencies.depends_on_action_id",
+        "obtain_source_selections.dependency_id",
+        "obtain_source_selections.status"
+      ],
+      "contract": "waiting.md#来源等待的记录与转换"
+    }
+  },
+  "routes": {
+    "reports": {
+      "entity": "report",
+      "identity": "reports.id",
+      "mode": "frozen_metadata"
+    },
+    "plans": {
+      "entity": "plan",
+      "identity": "plans.id",
+      "mode": "public_change"
+    },
+    "actions": {
+      "entity": "action",
+      "identity": "actions.id",
+      "mode": "public_change"
+    },
+    "outputs": {
+      "entity": "output",
+      "identity": "outputs.id",
+      "mode": "public_change"
+    },
+    "deliveries": {
+      "entity": "delivery",
+      "identity": "deliveries.id",
+      "mode": "public_change"
+    },
+    "plan_file_diagnostics": {
+      "entity": "diagnostic",
+      "identity": "plan_file_diagnostics.id",
+      "mode": "public_change"
+    },
+    "device_activities": {
+      "entity": "action",
+      "identity": "device_activities.action_id",
+      "mode": "public_change"
+    },
+    "recording_processing": {
+      "entity": "action",
+      "identity": "recording_processing.action_id",
+      "mode": "public_change"
+    },
+    "auto_preview_links": {
+      "entity": "action",
+      "identity": "auto_preview_links.obtain_action_id",
+      "mode": "public_change"
+    },
+    "state_syncs": {
+      "entity": "action",
+      "identity": "state_syncs.action_id",
+      "mode": "public_change"
+    },
+    "action_dependencies": {
+      "entity": "action",
+      "identity": "action_dependencies.action_id",
+      "mode": "public_change"
+    },
+    "obtain_source_selections": {
+      "entity": "action",
+      "identity": "action_dependencies.action_id",
+      "relations": [
+        "dependency_selection"
+      ],
+      "mode": "public_change"
+    },
+    "obtain_items": {
+      "entity": "action",
+      "identity": "action_dependencies.action_id",
+      "relations": [
+        "selection_items",
+        "dependency_selection"
+      ],
+      "mode": "public_change"
+    },
+    "cleanup_items": {
+      "entity": "action",
+      "identity": "cleanup_items.action_id",
+      "mode": "public_change"
+    },
+    "cancel_items": {
+      "entity": "action",
+      "identity": "cancel_items.action_id",
+      "mode": "public_change"
+    },
+    "cancel_delivery_items": {
+      "entity": "action",
+      "identity": "cancel_items.action_id",
+      "relations": [
+        "cancel_withdrawals"
+      ],
+      "mode": "public_change"
+    },
+    "output_origins": {
+      "entity": "output",
+      "identity": "output_origins.output_id",
+      "mode": "public_change"
+    },
+    "file_copies": {
+      "entity": "delivery",
+      "identity": "file_copies.delivery_id",
+      "mode": "public_change",
+      "when": {
+        "op": "not_null",
+        "column": "file_copies.delivery_id"
+      }
+    },
+    "device_files": {
+      "entity": "output",
+      "identity": "outputs.id",
+      "relations": [
+        "output_device_file"
+      ],
+      "mode": "public_change"
+    },
+    "intermediate_files": {
+      "mode": "per_relation",
+      "targets": [
+        {
+          "entity": "output",
+          "identity": "outputs.id",
+          "relations": [
+            "output_host_file"
+          ]
+        },
+        {
+          "entity": "delivery",
+          "identity": "file_copies.delivery_id",
+          "relations": [
+            "copy_target",
+            "delivery_copy"
+          ],
+          "when": {
+            "op": "not_null",
+            "column": "file_copies.delivery_id"
+          }
+        }
+      ]
+    }
+  },
+  "notes": {
+    "failure_union": "来源错误、尚未建立交付的条目错误、已有交付的最终失败互斥；后者从该取回在 H 的全部交付取得，不限于本次增量选中的交付。",
+    "result_order": "来源按固定依赖 ID；同一来源先来源错误，再取回项错误，最后交付错误，各分支按自身身份排序。清理与取消按首次固定成员时分配的明细 ID；精确清理须按请求顺序分配 ID。",
+    "direct_derivatives": "产物可用性和清理汇总读取 outputs 已共同保存的派生列。文件观察错误、内部维护和停止尝试不直接替换这些字段。",
+    "routes": "路由仅产生需比较字段的候选；读取变化涉及的值与条件后比较公开值及存在性。交付导致取回失败列表改变时只登记交付，随父对象补齐重建取回完整自身字段。",
+    "source_catalog": "SQL 尚未同步的目标字段只在 sql_pending 显式登记。其他列由实际 SQL 核验；同步后须删除对应待办，不允许通配豁免。"
+  }
+}
