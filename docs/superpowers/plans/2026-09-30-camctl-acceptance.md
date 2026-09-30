@@ -99,11 +99,11 @@ A1—A3 先用接口约束的静态目录与仓储替身测试。A4 必须组合
 
 **接口与依赖：** 提供 `validate_new_body(raw: JsonValue, catalog: CapabilityCatalog) -> BodyDecision`、`validate_capture_params(raw: JsonValue, definition: ParameterDefinition) -> ActionValidation`。前置交付：K1/K2、D1。
 
-- [ ] 编写失败用例。建立 `test_invalid_schema_is_rule_error`，无效 Schema 或缺本地引用抛规则错误；1.0 和 1e0 满足整数，接近整数的长小数不满足。未知动作、MCU 未支持动作、名称重复与本动作参数错误混合，`assert decision.is_whole_rejection is True`；改变数组顺序结果范围不变。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_validation.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。先检查公共结构与完整动作名称，再对支持动作校验自身字段；精确类型适配覆盖 integer、multipleOf、范围、const/enum/uniqueItems。默认值由 D1 单一定义应用，原值保持。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 整份拒绝与本动作失败没有相互误分类，Schema 处理不会联网。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 各动作的时间、policy、group、设备及参数是否遗漏自身校验；记录门禁证据，建议以“feat: 实现分层受理与精确参数校验”形成独立提交。
+- [x] 编写失败用例。建立 `test_invalid_schema_is_rule_error`，无效 Schema 或缺本地引用抛规则错误；1.0 和 1e0 满足整数，接近整数的长小数不满足。未知动作、MCU 未支持动作、名称重复与本动作参数错误混合，`assert decision.is_whole_rejection is True`；改变数组顺序结果范围不变。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_validation.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。先检查公共结构与完整动作名称，再对支持动作校验自身字段；精确类型适配覆盖 integer、multipleOf、范围、const/enum/uniqueItems。默认值由 D1 单一定义应用，原值保持。
+- [x] 再运行上述命令，要求全部 PASS，并核对 整份拒绝与本动作失败没有相互误分类，Schema 处理不会联网。
+- [x] 审阅实际接口、状态分区及失败路径，检查 各动作的时间、policy、group、设备及参数是否遗漏自身校验；记录门禁证据，建议以“feat: 实现分层受理与精确参数校验”形成独立提交。
 
 ### A3 完整本计划关联与执行定义
 
@@ -111,11 +111,11 @@ A1—A3 先用接口约束的静态目录与仓储替身测试。A4 必须组合
 
 **接口与依赖：** 提供 `prepare_plan(decision: BodyDecision, allocated: PlanIdentities) -> PreparedPlan`；PlanIdentities 含本次计划和全部动作身份，PreparedPlan 含完整成员、定义及关联。前置交付：A2、K1；C1/X2 拥有的执行定义类型。
 
-- [ ] 编写失败用例。建立 `test_all_duplicate_previews_fail`，同拍摄被多个自动取回引用，`assert failed_auto_ids == all_conflicting_ids`；手动取回和拍摄不受该冲突影响。引用后置动作合法、组中失败拍摄仍按类型作为来源、取回填写公共 group 失败且不成为成员。跨计划来源不在受理时查询。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_links.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按完整输入建立名称及组索引，保留失败动作及原字段；生成只读执行定义，可靠局部来源和自动关联随整笔受理保存。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 没有按数组顺序漏引用，没有把非法输入修正成合法执行定义。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部来源形式及自动预览冲突是否只影响定义范围；记录门禁证据，建议以“feat: 准备完整动作定义与来源关联”形成独立提交。
+- [x] 编写失败用例。建立 `test_all_duplicate_previews_fail`，同拍摄被多个自动取回引用，`assert failed_auto_ids == all_conflicting_ids`；手动取回和拍摄不受该冲突影响。引用后置动作合法、组中失败拍摄仍按类型作为来源、取回填写公共 group 失败且不成为成员。跨计划来源不在受理时查询。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/acceptance/test_links.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按完整输入建立名称及组索引，保留失败动作及原字段；生成只读执行定义，可靠局部来源和自动关联随整笔受理保存。
+- [x] 再运行上述命令，要求全部 PASS，并核对 没有按数组顺序漏引用，没有把非法输入修正成合法执行定义。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部来源形式及自动预览冲突是否只影响定义范围；记录门禁证据，建议以“feat: 准备完整动作定义与来源关联”形成独立提交。
 
 ### A4 请求复用、独立 ACK 与原子提交
 

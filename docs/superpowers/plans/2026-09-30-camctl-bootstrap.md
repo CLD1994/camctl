@@ -113,13 +113,13 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 **接口与依赖：** 提供 `parse_command(argv: Sequence[str]) -> Command`、`encode_session_result(message: SessionMessage) -> bytes`。前置交付：B1、K2；session 拥有的 SessionOutcome 契约。
 
-- [ ] 编写失败用例。建立 `test_result_channel_is_single_json`，编码 succeeded 和 error，`assert output.endswith(b'\n')`，`assert output.count(b'\n') == 1`；特殊字符按 JSON 转义。submit 成功缺少 needs_run 必须拒绝。参数错误断言退出契约为 1，而非默认 2；日志输出使用独立替身。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_command_output.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。适配 argparse 的错误行为；业务输入拒绝与命令语法错误分开。所有正常路径只调用一次最终结果输出，设备 stdout 由受管调用捕获。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 机器字段、退出码及输出边界符合每个命令的契约。
+- [x] 编写失败用例。建立 `test_result_channel_is_single_json`，编码 succeeded 和 error，`assert output.endswith(b'\n')`，`assert output.count(b'\n') == 1`；特殊字符按 JSON 转义。submit 成功缺少 needs_run 必须拒绝。参数错误断言退出契约为 1，而非默认 2；日志输出使用独立替身。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_command_output.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。适配 argparse 的错误行为；业务输入拒绝与命令语法错误分开。所有正常路径只调用一次最终结果输出，设备 stdout 由受管调用捕获。
+- [x] 再运行上述命令，要求全部 PASS，并核对 机器字段、退出码及输出边界符合每个命令的契约。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_command_output.py -q`，用真实 CLI 管道验证分段读取、stderr、输出错误及异常终止，消息到达后仍等待实际退出。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 错误处理是否把诊断追加到 stdout，是否重复输出结果；记录门禁证据，建议以“feat: 实现 CLI 解析与结果通道”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 错误处理是否把诊断追加到 stdout，是否重复输出结果；记录门禁证据，建议以“feat: 实现 CLI 解析与结果通道”形成独立提交。
 
 ### B4 显式初始化与既有库验证
 
@@ -139,13 +139,13 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 **接口与依赖：** 提供 `describe(config: ConfigSnapshot, catalog: CapabilityCatalog) -> DescribeDocument`，完整校验并序列化后交给 stdout。前置交付：D1、K2、B2、B3。
 
-- [ ] 编写失败用例。建立 `test_describe_without_database`，设备目录空且 DB、锁和设备连接替身全部拒绝调用，`assert document == {'devices': []}`；配置及驱动定义无效不能导出部分说明。序列化前失败断言 stdout 尚未写入。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_describe.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。只装配静态能力目录，共用 D1 的参数 Schema、默认值与引用定义；避免创建仓储、会话或调度器。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 完整能力文档通过公共 Schema，错误没有变成空设备目录。
+- [x] 编写失败用例。建立 `test_describe_without_database`，设备目录空且 DB、锁和设备连接替身全部拒绝调用，`assert document == {'devices': []}`；配置及驱动定义无效不能导出部分说明。序列化前失败断言 stdout 尚未写入。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_describe.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。只装配静态能力目录，共用 D1 的参数 Schema、默认值与引用定义；避免创建仓储、会话或调度器。
+- [x] 再运行上述命令，要求全部 PASS，并核对 完整能力文档通过公共 Schema，错误没有变成空设备目录。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_describe.py -q`，在无状态库、无真实设备的独立进程导出，检查退出 0、完整 JSON、换行及没有创建业务文件。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 describe 的资源装配是否隐式打开数据库或日志副本交付；记录门禁证据，建议以“feat: 实现静态设备能力导出”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 describe 的资源装配是否隐式打开数据库或日志副本交付；记录门禁证据，建议以“feat: 实现静态设备能力导出”形成独立提交。
 
 ### B6 按命令装配与资源关闭
 
