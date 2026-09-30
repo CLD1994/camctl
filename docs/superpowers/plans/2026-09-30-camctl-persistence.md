@@ -88,11 +88,11 @@ P1、P2 在首阶段完成；P3 与 H1/H2 联合建立首批事件事务；P4 �
 
 **接口与依赖：** 提供 `open_existing(path: Path, mode: DbOpenMode, config: DbConfig) -> OwnedConnection`，只能在所属线程调用；DbOpenMode 只有既有读写与既有只读。前置交付：B1、K1、K2，权威运行库资源。
 
-- [ ] 编写失败用例。建立 `test_missing_database_is_not_created`，不存在的路径打开失败，`assert not path.exists()`；覆盖目录类型、无效格式、不同库版本、特殊 URI 路径、只读写入拒绝、WAL/FULL 及 busy_timeout 的实际值。用权威运行条件的允许和拒绝分区检查运行库，而不复制完整版本清单。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_runtime.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。检查实际 sqlite3 链接库能力，再以正确 URI 打开既有库；验证整体格式和元信息，不隐式升级、修复 journal_mode 或创建运行状态。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 日常入口与报告子进程都使用同一运行条件检查。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有连接创建是否绕过 mode、格式、忙等待或线程所有权；记录门禁证据，建议以“feat: 实现既有状态库打开与校验”形成独立提交。
+- [x] 编写失败用例。建立 `test_missing_database_is_not_created`，不存在的路径打开失败，`assert not path.exists()`；覆盖目录类型、无效格式、不同库版本、特殊 URI 路径、只读写入拒绝、WAL/FULL 及 busy_timeout 的实际值。用权威运行条件的允许和拒绝分区检查运行库，而不复制完整版本清单。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_runtime.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。检查实际 sqlite3 链接库能力，再以正确 URI 打开既有库；验证整体格式和元信息，不隐式升级、修复 journal_mode 或创建运行状态。
+- [x] 再运行上述命令，要求全部 PASS，并核对 日常入口与报告子进程都使用同一运行条件检查。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有连接创建是否绕过 mode、格式、忙等待或线程所有权；记录门禁证据，建议以“feat: 实现既有状态库打开与校验”形成独立提交。
 
 ### P2 有界队列、优先派发及结果接手
 
