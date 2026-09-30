@@ -65,12 +65,16 @@ class CommandPlan:
     change_seq 保持为空，由内核按实际报告目标分配。owners 提供逐
     行历史归属，state_rows 提供事务开始时与报告关联解析相关的行
     事实。result 是提交成功后交回调用方的业务结果。
+
+    read_only 为真的命令不产生权威事件（如已受理请求的重送且无
+    需保存的新事实）：内核回滚只读事务并按已完成返回。
     """
 
     events: tuple[EventEnvelope, ...]
     owners: Mapping[tuple[str, int], tuple[str, int]]
     state_rows: Mapping[str, Mapping[int, Mapping[str, Any]]]
     result: Any = None
+    read_only: bool = False
 
 
 class TransactionScope:
@@ -371,13 +375,16 @@ def commit_operation(
             _scalar(connection, "SELECT MAX(id) FROM history_events"),
         )
         plan = command.plan(scope)
+        events = plan.events
+        if len(events) == 0:
+            if not plan.read_only:
+                raise TransactionError("写事务没有权威事件")
+            connection.execute("ROLLBACK")
+            return WriteReceipt(kind="completed", result=plan.result)
         allocation = scope.allocation
         if allocation is None:
             raise TransactionError("命令没有分配编号范围")
-        events = plan.events
         count = len(events)
-        if count == 0:
-            raise TransactionError("写事务没有权威事件")
         if (
             allocation.txn_id != scope.max_txn_id + 1
             or allocation.first_event_id != scope.max_event_id + 1

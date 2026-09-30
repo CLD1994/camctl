@@ -1,0 +1,362 @@
+"""A4 请求复用、独立 ACK 与原子提交的组件集成测试。
+
+真实 SQLite 与 P3 事务内核组合：六分区决策表、重送跳过正文校验、
+拒绝不阻断 ACK、全失败动作原子注册。正式业务守卫在导入时注册。
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+from camctl.acceptance.input import parse_input, read_input
+from camctl.acceptance.service import (
+    AcceptanceContext,
+    AckDisposition,
+    CommandMode,
+    PlanDisposition,
+    accept_input,
+)
+from camctl.acceptance.ports import ParameterDefinition
+from camctl.contracts.values import new_operation_key
+from camctl.persistence.repositories.acceptance import (
+    AcceptanceRepository,
+    register_acceptance_guards,
+)
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+from ..persistence.test_runtime import _create_valid_database
+
+register_acceptance_guards()
+
+pytestmark = pytest.mark.asyncio
+
+_NOW = 1_750_000_000_000_000
+
+CAMERA_DEFINITION = {
+    "type": "object",
+    "properties": {
+        "type": {"const": "single_shot"},
+        "shots": {"type": "integer", "minimum": 1, "maximum": 10},
+    },
+    "required": ["type"],
+    "additionalProperties": False,
+}
+
+
+class Catalog:
+    """受静态目录端口约束的替身。"""
+
+    def action_types(self):
+        return frozenset(
+            {"camera_take_photo", "camera_record", "camera_timelapse", "obtain_action_outputs"}
+        )
+
+    def device_exists(self, device_id):
+        return device_id == "cam-1"
+
+    def driver_id(self, device_id):
+        return "camctl-adb" if device_id == "cam-1" else None
+
+    def parameter_definition(self, device_id, action_type):
+        if device_id == "cam-1" and action_type.startswith("camera_"):
+            return ParameterDefinition(
+                schema=CAMERA_DEFINITION, defaults={"shots": 1}
+            )
+        return None
+
+
+class RealFileReader:
+    def read(self, path: str) -> bytes:
+        with open(path, "rb") as handle:
+            return handle.read()
+
+
+@pytest.fixture()
+def environment(tmp_path: Path):
+    _create_valid_database(tmp_path / "state.db")
+    owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    context = AcceptanceContext(
+        mode=CommandMode.SUBMIT,
+        catalog=Catalog(),
+        repository=AcceptanceRepository(),
+        clock=type("Clock", (), {"utc_micros": staticmethod(lambda: _NOW)})(),
+    )
+    yield owned.connection, context
+    owned.connection.close()
+
+
+def _write_input(tmp_path: Path, body: dict) -> Path:
+    import json
+
+    target = tmp_path / "plan.json"
+    target.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    return target
+
+
+def _plan_body(*, request_id: str = "42", ack: str | None = None, actions=None) -> dict:
+    body = {
+        "request_id": request_id,
+        "created_at": "2026-01-15 08:00:00",
+        "name": "plan",
+        "actions": actions
+        if actions is not None
+        else [
+            {
+                "name": "shoot",
+                "type": "camera_take_photo",
+                "device_id": "cam-1",
+                "scheduled_at": "2026-01-15 09:00:00",
+                "params": {"type": "single_shot"},
+                "policy": {"max_delay_ms": 1000},
+            }
+        ],
+    }
+    if ack is not None:
+        body["last_report_id"] = ack
+    return body
+
+
+async def _accept(environment, tmp_path: Path, body: dict):
+    connection, context = environment
+    path = _write_input(tmp_path, body)
+    read = await read_input(str(path), RealFileReader())
+    return await accept_input(parse_input(read), context, new_operation_key(), _owned(environment))
+
+
+def _owned(environment):
+    from camctl.persistence.runtime import OwnedConnection
+
+    connection, _ = environment
+    return OwnedConnection(connection=connection, metadata=None)
+
+
+async def _seed_report(environment, tmp_path: Path, report_id: int, to_wm: int) -> None:
+    """登记一份报告：先提交一次填充受理，提供冻结与创建的事件依据。"""
+    connection, _ = environment
+    previous = connection.execute(
+        "SELECT last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    frozen = int(previous[0]) if previous is not None else 0
+    await _accept(environment, tmp_path, _plan_body(request_id=str(900 + report_id)))
+    created = int(
+        connection.execute(
+            "SELECT last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
+    )
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        "INSERT INTO reports (id, frozen_event_id, from_wm, to_wm, format_version, status,"
+        " publication_count, created_event_id, last_event_id)"
+        " VALUES (?, ?, 0, ?, 1, 1, 0, ?, ?)",
+        (report_id, frozen, to_wm, created, created),
+    )
+    connection.execute("COMMIT")
+
+
+class TestFirstAcceptance:
+    async def test_register_plan_actions_links_and_catalogs(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        body = _plan_body(
+            actions=[
+                {
+                    "name": "shoot",
+                    "type": "camera_take_photo",
+                    "device_id": "cam-1",
+                    "scheduled_at": "2026-01-15 09:00:00",
+                    "params": {"type": "single_shot", "shots": 2},
+                    "policy": {"max_delay_ms": 1500},
+                },
+                {
+                    "name": "fetch",
+                    "type": "obtain_action_outputs",
+                    "scheduled_at": "2026-01-15 10:00:00",
+                    "params": {
+                        "source": {"action_name": "shoot"},
+                        "purpose": "manual",
+                    },
+                },
+            ]
+        )
+        result = await _accept(environment, tmp_path, body)
+        assert result.plan_disposition is PlanDisposition.REGISTERED
+        assert result.plan_id == 1
+        assert result.ack_disposition is AckDisposition.NOT_PROVIDED
+
+        plan = connection.execute(
+            "SELECT request_id, status, change_count FROM plans"
+        ).fetchone()
+        assert plan == (42, 1, 1)
+        actions = connection.execute(
+            "SELECT id, name, status, source_resolution_state, resolved_source_plan_id"
+            " FROM actions ORDER BY id"
+        ).fetchall()
+        assert actions == [(1, "shoot", 1, None, None), (2, "fetch", 1, 2, 1)]
+        dep = connection.execute(
+            "SELECT action_id, depends_on_action_id FROM action_dependencies"
+        ).fetchone()
+        assert dep == (2, 1)
+        links = connection.execute(
+            "SELECT entity_type, entity_id, change_count FROM entity_event_links ORDER BY id"
+        ).fetchall()
+        # J-04：成员事件与接纳事件分别推进取回动作的自身计数。
+        assert links == [(1, 1, 1), (1, 2, 1), (1, 2, 2), (4, 1, 1)]
+        # 事件顺序：动作、来源成员、计划。
+        events = connection.execute(
+            "SELECT id, event_type FROM history_events ORDER BY id"
+        ).fetchall()
+        assert events == [(1, 2), (2, 2), (3, 3), (4, 1)]
+        assert connection.execute(
+            "SELECT COUNT(*) FROM report_entity_changes"
+        ).fetchone()[0] == 4
+
+    async def test_all_failed_actions_register_atomically(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        body = _plan_body(
+            actions=[
+                {
+                    "name": "bad-1",
+                    "type": "camera_take_photo",
+                    "device_id": "cam-1",
+                    "scheduled_at": "2026-01-15 09:00:00",
+                    "params": {"type": "single_shot", "shots": 99},
+                    "policy": {"max_delay_ms": 1000},
+                },
+                {
+                    "name": "bad-2",
+                    "type": "camera_take_photo",
+                    "device_id": "cam-x",
+                    "scheduled_at": "2026-01-15 09:00:00",
+                    "params": {"type": "single_shot"},
+                    "policy": {"max_delay_ms": 1000},
+                },
+            ]
+        )
+        result = await _accept(environment, tmp_path, body)
+        assert result.plan_disposition is PlanDisposition.REGISTERED
+        assert connection.execute("SELECT status FROM plans").fetchone()[0] == 3
+        statuses = connection.execute("SELECT status, error_code FROM actions ORDER BY id").fetchall()
+        assert statuses == [(4, 1), (4, 1)]
+
+    async def test_whole_rejection_saves_diagnostic_only(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        body = _plan_body(actions=[])
+        result = await _accept(environment, tmp_path, body)
+        assert result.plan_disposition is PlanDisposition.REJECTED
+        assert result.diagnostic_id == 1
+        assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 0
+        errors = connection.execute("SELECT errors_json FROM plan_file_diagnostics").fetchone()[0]
+        assert "plan_body_rejected" in errors
+
+    async def test_register_with_absorbing_ack_saves_both(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        await _accept(environment, tmp_path, _plan_body(request_id="1"))
+        await _seed_report(environment, tmp_path, 9, to_wm=300)
+        result = await _accept(
+            environment, tmp_path, _plan_body(request_id="88", ack="9")
+        )
+        assert result.plan_disposition is PlanDisposition.REGISTERED
+        # _seed_report 的填充受理也占用一个计划身份。
+        assert result.plan_id == 3
+        assert result.ack_disposition is AckDisposition.ABSORBED
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 300
+        assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 3
+
+    async def test_register_with_invalid_ack_saves_plan_and_diagnostic(
+        self, environment, tmp_path
+    ) -> None:
+        connection, _ = environment
+        result = await _accept(
+            environment, tmp_path, _plan_body(request_id="89", ack="404")
+        )
+        assert result.plan_disposition is PlanDisposition.REGISTERED
+        assert result.ack_disposition is AckDisposition.INVALID
+        assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 1
+        errors = connection.execute(
+            "SELECT errors_json FROM plan_file_diagnostics"
+        ).fetchone()[0]
+        assert "invalid_ack" in errors
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 0
+
+
+class TestRequestReuse:
+    async def test_retry_skips_body_validation(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        first = await _accept(environment, tmp_path, _plan_body())
+        assert first.plan_disposition is PlanDisposition.REGISTERED
+        original_actions = connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
+
+        # 同一 request_id 重送：正文缺失 actions 也不参与校验。
+        again = await _accept(environment, tmp_path, _plan_body(request_id="42"))
+        assert again.plan_disposition is PlanDisposition.REUSED
+        assert again.plan_id == first.plan_id
+        assert connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0] == original_actions
+        assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 1
+        # 只读路径不产生新历史事件。
+        assert connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0] == 2
+
+    async def test_reuse_with_advancing_ack_saves_watermark(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        await _accept(environment, tmp_path, _plan_body())
+        await _seed_report(environment, tmp_path, 11, to_wm=500)
+        again = await _accept(environment, tmp_path, _plan_body(request_id="42", ack="11"))
+        assert again.plan_disposition is PlanDisposition.REUSED
+        assert again.ack_disposition is AckDisposition.ABSORBED
+        assert again.ack_watermark == 500
+        assert connection.execute(
+            "SELECT acknowledged_wm, acknowledged_report_id FROM runtime_state"
+        ).fetchone() == (500, 11)
+
+
+class TestAckIndependence:
+    async def test_rejection_does_not_block_ack(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        # 先建立已提交历史，为报告登记提供冻结与创建依据。
+        await _accept(environment, tmp_path, _plan_body(request_id="1"))
+        await _seed_report(environment, tmp_path, 3, to_wm=800)
+        body = _plan_body(request_id="77", ack="3", actions=[])
+        result = await _accept(environment, tmp_path, body)
+        assert result.plan_disposition is PlanDisposition.REJECTED
+        assert result.ack_disposition is AckDisposition.ABSORBED
+        assert result.ack_watermark == 800
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 800
+
+    async def test_invalid_ack_saved_as_diagnostic(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        body = _plan_body(request_id="78", ack="404", actions=[])
+        result = await _accept(environment, tmp_path, body)
+        assert result.ack_disposition is AckDisposition.INVALID
+        assert result.ack_watermark == 0
+        errors = connection.execute("SELECT errors_json FROM plan_file_diagnostics").fetchone()[0]
+        assert "invalid_ack" in errors
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 0
+
+    async def test_valid_ack_not_advancing_keeps_watermark(self, environment, tmp_path) -> None:
+        connection, _ = environment
+        await _seed_report(environment, tmp_path, 5, to_wm=100)
+        body = _plan_body(request_id="79", ack="5")
+        await _accept(environment, tmp_path, body)
+        await _seed_report(environment, tmp_path, 6, to_wm=100)
+        again = await _accept(environment, tmp_path, _plan_body(request_id="79", ack="6"))
+        assert again.plan_disposition is PlanDisposition.REUSED
+        assert again.ack_disposition is AckDisposition.VALID_NOT_ADVANCING
+        assert again.ack_watermark == 100
+        assert connection.execute(
+            "SELECT acknowledged_report_id FROM runtime_state"
+        ).fetchone()[0] == 5
+
+    async def test_parse_failure_saves_diagnostic_without_ack(self, environment, tmp_path) -> None:
+        connection, context = environment
+        target = tmp_path / "broken.json"
+        target.write_bytes(b'{"request_id": "42", "last_report_id": "9"')
+        read = await read_input(str(target), RealFileReader())
+        parsed = parse_input(read)
+        result = await accept_input(parsed, context, new_operation_key(), _owned(environment))
+        assert result.plan_disposition is PlanDisposition.REJECTED
+        assert result.ack_disposition is AckDisposition.NOT_PROVIDED
+        assert result.ack_watermark == 0
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 0

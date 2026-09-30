@@ -39,6 +39,9 @@ class StubCatalog:
     def device_exists(self, device_id: str) -> bool:
         return device_id in self.devices
 
+    def driver_id(self, device_id: str) -> str | None:
+        return "camctl-adb" if device_id in self.devices else None
+
     def parameter_definition(self, device_id: str, action_type: str):
         if device_id not in self.devices or not action_type.startswith("camera_"):
             return None

@@ -33,6 +33,10 @@ class StaticActionCatalog(Protocol):
 
     def device_exists(self, device_id: str) -> bool: ...
 
+    def driver_id(self, device_id: str) -> str | None:
+        """设备选择的驱动身份；设备不存在时为 None。"""
+        ...
+
     def parameter_definition(
         self, device_id: str, action_type: str
     ) -> ParameterDefinition | None: ...

@@ -17,6 +17,8 @@ from camctl.contracts.values import to_utc_micros
 __all__ = ["PlanIdentities", "PreparedAction", "PreparedPlan", "prepare_plan"]
 
 _CAMERA_TYPES = frozenset({"camera_take_photo", "camera_record", "camera_timelapse"})
+#: 公共 Schema 要求携带 scheduled_at 的动作类型（取消与报告不需要）。
+_SCHEDULED_TYPES = _CAMERA_TYPES | {"obtain_action_outputs", "delete_action_outputs"}
 _OBTAIN_TYPE = "obtain_action_outputs"
 
 
@@ -122,8 +124,9 @@ def _prepare_action(
 
     if action_type in _CAMERA_TYPES:
         group_name = raw.get("group")
+    if action_type in _SCHEDULED_TYPES:
         scheduled_micros = to_utc_micros(raw["scheduled_at"])
-    elif action_type == _OBTAIN_TYPE:
+    if action_type == _OBTAIN_TYPE:
         # 非拍摄动作携带 group 已由公共 Schema 整份拒绝（A2 层）。
         outcome = _resolve_obtain_sources(raw, by_name, conflicts)
         ok = ok and outcome.ok

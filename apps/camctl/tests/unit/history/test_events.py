@@ -86,39 +86,45 @@ class TestRegistryDrivenValidation:
     def test_unimplemented_validator_rejects_write(self) -> None:
         from camctl.history import validators
 
-        assert "admission" not in validators.NAMED_GUARDS or True
-        # SOURCE_RESOLVED 的守卫包含尚未实现的 source_members。
+        # 文件事件的守卫包含尚未实现的 device_file（F 系列接入）。
+        assert "device_file" not in validators.NAMED_GUARDS
         event = EventEnvelope(
             event_id=101,
             transaction_id=7,
-            event_type=3,
+            event_type=17,
             event_version=1,
             occurred_at=1,
             clock_status=1,
             change_seq=None,
-            reason=1,
+            reason=3,
             evidence={},
             rows=(
                 RowChange(
-                    table="actions",
-                    row_id=8,
+                    table="device_files",
+                    row_id=3,
                     before=RowImage(
                         exists=True,
-                        values={"source_resolution_state": 1, "resolved_source_plan_id": None},
+                        values={"completion_state": 1, "completion_evidence_json": None,
+                                "size_bytes": None, "locator_json": None,
+                                "original_name": None, "media_type": None,
+                                "last_error_json": None},
                     ),
                     after=RowImage(
                         exists=True,
-                        values={"source_resolution_state": 2, "resolved_source_plan_id": 3},
+                        values={"completion_state": 2, "completion_evidence_json": {},
+                                "size_bytes": 10, "locator_json": {},
+                                "original_name": "a.mp4", "media_type": "video/mp4",
+                                "last_error_json": None},
                     ),
                 ),
             ),
         )
         context = EventContext(
             transaction=TXN,
-            owners={("actions", 8): ("action", 8)},
-            state_rows={"actions": {}},
+            owners={("device_files", 3): ("device_file", 3)},
+            state_rows={"device_files": {3: {"action_id": 8}}, "outputs": {}},
         )
-        with pytest.raises(EventValidationError, match="source_members"):
+        with pytest.raises(EventValidationError, match="具名校验未接入"):
             validate_event(event, context)
 
     def test_unknown_event_type_rejected(self, admission_guards) -> None:
