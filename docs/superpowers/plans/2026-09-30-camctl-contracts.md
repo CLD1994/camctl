@@ -98,11 +98,11 @@ K1、K2、K3 完成基础值后，受理和持久化可以实施。K4 先为首�
 
 **接口与依赖：** 提供 `parse_exact_json(text: str) -> JsonValue`、`is_json_integer(value: JsonValue) -> bool`、`is_multiple(value: int | Decimal, divisor: int | Decimal) -> bool`。前置交付：K1 的字段错误类型。
 
-- [ ] 编写失败用例。建立 `test_decimal_context_does_not_change_value`，在不同 Decimal 精度下解析 1.0000000000000001，`assert value == Decimal('1.0000000000000001')`；`assert is_json_integer(Decimal('1e0')) is True`，`assert is_json_integer(True) is False`。建立 `test_missing_is_distinct_from_null`，断言原对象保留缺省及 None。重复成员、NaN、Infinity、未配对代理码点分别拒绝；multipleOf 用独立有理数预期。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_json_values.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按原文直接构造 Decimal，检查全部键和字符串 Unicode；用 Fraction 处理整数和倍数，不通过 float 或受上下文舍入的 normalize。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 原结构化输入保留事实，错误定位可安全编码。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 解析、比较及倍数路径是否遗漏 bool 与数值相等的区分；记录门禁证据，建议以“feat: 实现精确 JSON 数字与存在性”形成独立提交。
+- [x] 编写失败用例。建立 `test_decimal_context_does_not_change_value`，在不同 Decimal 精度下解析 1.0000000000000001，`assert value == Decimal('1.0000000000000001')`；`assert is_json_integer(Decimal('1e0')) is True`，`assert is_json_integer(True) is False`。建立 `test_missing_is_distinct_from_null`，断言原对象保留缺省及 None。重复成员、NaN、Infinity、未配对代理码点分别拒绝；multipleOf 用独立有理数预期。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_json_values.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按原文直接构造 Decimal，检查全部键和字符串 Unicode；用 Fraction 处理整数和倍数，不通过 float 或受上下文舍入的 normalize。
+- [x] 再运行上述命令，要求全部 PASS，并核对 原结构化输入保留事实，错误定位可安全编码。
+- [x] 审阅实际接口、状态分区及失败路径，检查 解析、比较及倍数路径是否遗漏 bool 与数值相等的区分；记录门禁证据，建议以“feat: 实现精确 JSON 数字与存在性”形成独立提交。
 
 ### K3 完整历史边界与分页结果
 
