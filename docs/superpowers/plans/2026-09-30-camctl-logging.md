@@ -86,11 +86,11 @@ L1—L4 和 L6 随首阶段日志基础实施；L5 随首条报告失败链完�
 
 **接口与依赖：** 提供 `decide_admission(input: AdmissionInput) -> AdmissionDecision`、`record_drop(counters: DropCounters, decision: AdmissionDecision) -> DropCounters`；input 含级别、来源、q/C/L/H、过滤结果和一次 u。前置交付：B2、K1。
 
-- [ ] 编写失败用例。建立 `test_info_sampling_uses_supplied_value`，中间区 u<p/u=p/u>p 及 p=0/1 分区，`assert decision.kind == expected_kind`；L-1/L/H-1/H/C-1/C、所有级别及双方来源各有独立预期。过滤与通道故障不记接纳丢弃，`assert drop_count == expected_once_count`。纯函数消费已有 u，不调用随机源。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/logging_runtime/test_admission.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。用一次独立随机采样事实参与决定，纯规则不访问队列；按级别保存计数，不保存被丢消息内容或逐条产生新日志。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 完整表和边界均有独立预期，不使用真实随机条数作验收。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有来源及过滤分支是否重复计数或重新抽样；记录门禁证据，建议以“feat: 实现日志水位及采样规则”形成独立提交。
+- [x] 编写失败用例。建立 `test_info_sampling_uses_supplied_value`，中间区 u<p/u=p/u>p 及 p=0/1 分区，`assert decision.kind == expected_kind`；L-1/L/H-1/H/C-1/C、所有级别及双方来源各有独立预期。过滤与通道故障不记接纳丢弃，`assert drop_count == expected_once_count`。纯函数消费已有 u，不调用随机源。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/logging_runtime/test_admission.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。用一次独立随机采样事实参与决定，纯规则不访问队列；按级别保存计数，不保存被丢消息内容或逐条产生新日志。
+- [x] 再运行上述命令，要求全部 PASS，并核对 完整表和边界均有独立预期，不使用真实随机条数作验收。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有来源及过滤分支是否重复计数或重新抽样；记录门禁证据，建议以“feat: 实现日志水位及采样规则”形成独立提交。
 
 ### L2 Janus 原子接纳与监听线程
 

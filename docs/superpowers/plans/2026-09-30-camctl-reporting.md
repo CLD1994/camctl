@@ -164,13 +164,13 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供 `decide_ack(ack: AckInput, facts: AckFacts) -> AckDecision`、`qualifies_sync(report: FrozenReport, sync: SyncResponsibility) -> bool`、`decide_sync_cancel(facts: SyncFacts) -> SyncChanges`；ACK 写入由 A4 同事务消费。前置交付：R1/R2、P3；先实现纯 ACK 与同步规则，A4 随后在完整输入事务内消费。
 
-- [ ] 编写失败用例。建立 `test_equal_watermark_ack_can_end_sync`，有效 ACK 水位等当前但满足完整/局部同步，`assert sync_ended is True`；较旧报告 ID 不代表旧水位，未知报告与读取失败分别分类。未执行、运行和成功后的报告动作取消，既有待确认同步按正式规则保持/结束。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_ack_sync.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。单调累计业务水位，逐个判断报告范围是否满足同步；有效 ACK 无新报告循环。报告动作成功与同步等待确认是不同责任，发布结果按 R7 完成适用动作。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 ACK 与输入原子、同水位也可结束责任，同步取消不停止共享生成。
+- [x] 编写失败用例。建立 `test_equal_watermark_ack_can_end_sync`，有效 ACK 水位等当前但满足完整/局部同步，`assert sync_ended is True`；较旧报告 ID 不代表旧水位，未知报告与读取失败分别分类。未执行、运行和成功后的报告动作取消，既有待确认同步按正式规则保持/结束。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_ack_sync.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。单调累计业务水位，逐个判断报告范围是否满足同步；有效 ACK 无新报告循环。报告动作成功与同步等待确认是不同责任，发布结果按 R7 完成适用动作。
+- [x] 再运行上述命令，要求全部 PASS，并核对 ACK 与输入原子、同水位也可结束责任，同步取消不停止共享生成。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_ack_sync.py -q`，A4/R7 实施后组合真实受理、同步、发布和 ACK 事务，核对同一事务及取消；该消费者验证归阶段 2 门禁。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部 ACK、重复输入、显式同步及取消入口；记录门禁证据，建议以“feat: 实现累计确认与同步规则”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部 ACK、重复输入、显式同步及取消入口；记录门禁证据，建议以“feat: 实现累计确认与同步规则”形成独立提交。
 
 ### R7 发布、替换与同报告补投
 

@@ -89,13 +89,13 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **接口与依赖：** 提供 `resolve_file(ref: FileRef, roots: BoundDirectories) -> HostPath`、异步 `inspect_file(ref: FileRef) -> FileObservation`；BoundDirectories 来自已验证目录绑定，HostPath 是本地定位值。前置交付：K1、B2。
 
-- [ ] 编写失败用例。建立 `test_permission_error_is_not_missing`，目录权限检查失败，`assert observation.kind is FileObservationKind.ERROR`；真实缺失另为 MISSING。设备定位、用户名称、用途与根目录不匹配、目标类型错误及非法相对路径分别拒绝。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_paths.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。只按正式用途和保存路径定位，实际文件访问在执行适配器；返回实际错误及阶段，纯路径规则不访问真实文件。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 F-01—F-08 的路径与类型分类覆盖。
+- [x] 编写失败用例。建立 `test_permission_error_is_not_missing`，目录权限检查失败，`assert observation.kind is FileObservationKind.ERROR`；真实缺失另为 MISSING。设备定位、用户名称、用途与根目录不匹配、目标类型错误及非法相对路径分别拒绝。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_paths.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。只按正式用途和保存路径定位，实际文件访问在执行适配器；返回实际错误及阶段，纯路径规则不访问真实文件。
+- [x] 再运行上述命令，要求全部 PASS，并核对 F-01—F-08 的路径与类型分类覆盖。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_paths.py -q`，临时真实目录覆盖缺失、目录对象、不可访问和移动后的定位，不修改用户全局路径。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 输入、普通交付、内部处理、报告和日志各文件入口是否混用定位；记录门禁证据，建议以“feat: 实现主机文件定位与观察”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 输入、普通交付、内部处理、报告和日志各文件入口是否混用定位；记录门禁证据，建议以“feat: 实现主机文件定位与观察”形成独立提交。
 
 ### F2 默认线程池任务与唯一修改权
 
