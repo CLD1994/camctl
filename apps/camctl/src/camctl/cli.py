@@ -169,12 +169,64 @@ def main(
         return _run_describe(command, out, err)
     if command.kind is CommandKind.INIT:
         return _run_init(command, out, err)
-    print(
-        f"camctl: 命令 {command.kind.value} 的会话装配尚未接入"
-        "（受理与会话模块实施后可用）",
-        file=err,
-    )
+    if command.kind in (CommandKind.RUN, CommandKind.SUBMIT):
+        return _run_session_command(command, out, err)
+    print(f"camctl: 未知的命令 {command.kind}", file=err)
     return 1
+
+
+def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
+    import asyncio
+
+    from camctl.acceptance.input import parse_input, read_input
+    from camctl.acceptance.service import CommandMode
+    from camctl.bootstrap.application import ConfigAdapter
+    from camctl.bootstrap.config import ConfigError
+    from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+
+    class _StdioReader:
+        def read(self, path: str) -> bytes:
+            with open(path, "rb") as handle:
+                return handle.read()
+
+    try:
+        adapter = ConfigAdapter(home=Path.home())
+        config = adapter.load(_config_arg(command))
+    except (ConfigError, OSError) as error:
+        print(f"camctl {command.kind.value}: {error}", file=err)
+        return 1
+
+    source = None
+    if command.plan_path is not None:
+        read = asyncio.run(read_input(command.plan_path, _StdioReader()))
+        source = parse_input(read)
+
+    try:
+        deps = build_runtime(
+            CommandMode.SUBMIT if command.kind is CommandKind.SUBMIT else CommandMode.RUN,
+            config,
+        )
+    except (FileNotFoundError, OSError) as error:
+        print(f"camctl {command.kind.value}: {error}", file=err)
+        return 1
+
+    try:
+        outcome = asyncio.run(execute_command(deps, source))
+    except Exception as error:  # 会话装配外溢的异常按会话错误收口。
+        close_runtime(deps)
+        print(f"camctl {command.kind.value}: 会话错误: {error}", file=err)
+        return 1
+    close_runtime(deps)
+    try:
+        payload = encode_session_result(
+            outcome,
+            requires_needs_run=command.kind is CommandKind.SUBMIT,
+        ).decode("utf-8")
+    except ResultChannelError as error:
+        print(f"camctl {command.kind.value}: 结果不符合命令契约: {error}", file=err)
+        return 1
+    out.write(payload)
+    return 0 if outcome.succeeded else 1
 
 
 def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:

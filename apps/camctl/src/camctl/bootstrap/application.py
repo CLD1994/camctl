@@ -80,3 +80,72 @@ def describe(config: ConfigSnapshot, catalog: CapabilityCatalog) -> Mapping[str,
             "设备目录的驱动定义尚未接入（D1），不能导出部分能力说明"
         )
     return dict(catalog.document())
+
+def query_work_facts(connection) -> "WorkFacts":
+    """阶段 1 的工作事实查询：未完成动作与业务水位缺口。
+
+    设备收场、报告失败等待等维度随所属模块接入后补充查询；未知
+    维度尚未产生（False 表示没有该类责任，与无法判断区分）。
+    """
+    from camctl.session.work import WorkFacts
+
+    unfinished = int(
+        connection.execute("SELECT COUNT(*) FROM actions WHERE status IN (1, 2)").fetchone()[0]
+    )
+    acknowledged = int(
+        connection.execute("SELECT acknowledged_wm FROM runtime_state WHERE id = 1").fetchone()[0]
+    )
+    pending_report_row = connection.execute(
+        "SELECT EXISTS(SELECT 1 FROM report_entity_changes WHERE change_seq > ?)",
+        (acknowledged,),
+    ).fetchone()
+    return WorkFacts(
+        unfinished_actions=unfinished,
+        required_settlements=0,
+        pending_report_changes=bool(pending_report_row[0]),
+        report_failed_no_new_changes=False,
+        residual_device_facts=False,
+        deferred_work_cleanup=False,
+        waiting_acknowledgement=acknowledged > 0,
+        snapshot_backlog=False,
+    )
+
+class ConfigCapabilityCatalog:
+    """按本地设备声明构建的静态目录（D1 真实驱动定义落地前的如实占位）。
+
+    声明的设备即受支持；拍摄参数规则使用开放对象 Schema，不发明
+    驱动约束；驱动身份取自声明的 driver 字段。
+    """
+
+    _OPEN_SCHEMA = {"type": "object"}
+    _CAMERA_TYPES = frozenset(
+        {"camera_take_photo", "camera_record", "camera_timelapse"}
+    ) | {
+        "obtain_action_outputs",
+        "delete_action_outputs",
+        "cancel_task",
+        "report_status",
+    }
+
+    def __init__(self, devices: Mapping[str, Any]) -> None:
+        self._devices = devices
+
+    def action_types(self) -> frozenset[str]:
+        return frozenset(self._CAMERA_TYPES)
+
+    def device_exists(self, device_id: str) -> bool:
+        return device_id in self._devices
+
+    def driver_id(self, device_id: str) -> str | None:
+        declaration = self._devices.get(device_id)
+        if not isinstance(declaration, Mapping):
+            return None
+        return declaration.get("driver")
+
+    def parameter_definition(self, device_id: str, action_type: str):
+        if not self.device_exists(device_id) or not action_type.startswith("camera_"):
+            return None
+        from camctl.acceptance.ports import ParameterDefinition
+
+        return ParameterDefinition(schema=dict(self._OPEN_SCHEMA), defaults={})
+
