@@ -87,11 +87,11 @@ S1、S2、S4 的端口先固定，允许受理首阶段组合；S3、S5、S6 实
 
 **接口与依赖：** 提供 `classify_work(facts: WorkFacts) -> WorkDecision`。前置交付：K1；已有责任与报告机会契约。
 
-- [ ] 编写失败用例。建立 `test_future_pending_is_work`，未来 pending 仍 `assert decision.needs_driver is True`；分别仅剩快照、ACK 等待、可延后清理及无主动收场残留时为 False。新诊断报告与残留并存仍有责任，未知事实必须错误；报告失败但存在新变化要再次处理。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_work.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。把各责任维度显式建模并按存在任意必要工作判断；不依据内存队列为空或 latest_plan_id 未变决定。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 submit 和退出消费者使用同一分类及例外语义。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 终态动作下的独立调用、设备、交付和报告是否漏纳入；记录门禁证据，建议以“feat: 定义会话待处理责任”形成独立提交。
+- [x] 编写失败用例。建立 `test_future_pending_is_work`，未来 pending 仍 `assert decision.needs_driver is True`；分别仅剩快照、ACK 等待、可延后清理及无主动收场残留时为 False。新诊断报告与残留并存仍有责任，未知事实必须错误；报告失败但存在新变化要再次处理。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_work.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。把各责任维度显式建模并按存在任意必要工作判断；不依据内存队列为空或 latest_plan_id 未变决定。
+- [x] 再运行上述命令，要求全部 PASS，并核对 submit 和退出消费者使用同一分类及例外语义。
+- [x] 审阅实际接口、状态分区及失败路径，检查 终态动作下的独立调用、设备、交付和报告是否漏纳入；记录门禁证据，建议以“feat: 定义会话待处理责任”形成独立提交。
 
 ### S2 稳定锁与启动前提
 
@@ -113,13 +113,13 @@ S1、S2、S4 的端口先固定，允许受理首阶段组合；S3、S5、S6 实
 
 **接口与依赖：** 提供 `check_clock(input: ClockCheckInput, clock: ClockPort) -> ClockCheck`、异步 `enter_execution(check: ClockCheck, context: SessionContext) -> ExecutionMode`；输入含可靠历史下界及已有时间策略。前置交付：A4、P3；ClockPort 同时提供精确 UTC 与单调读数。
 
-- [ ] 编写失败用例。建立 `test_clock_failure_preserves_acceptance`，输入已提交而复检仍失败，`assert accepted_plan_unchanged`，普通设备启动次数为 0；未定时取消、必要停止和一次报告按受限规则可进行。可信下界每会话最多更新一次，受理前不可信读数不得推进。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_clock.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。遵守启动顺序：验证库、受理、查下界、检查/有限复检、正常时可靠保存下界，再取得接纳；失败则只执行规定范围并返回 clock_invalid。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 等待复检不占写事务，受限会话不持普通接纳资格。
+- [x] 编写失败用例。建立 `test_clock_failure_preserves_acceptance`，输入已提交而复检仍失败，`assert accepted_plan_unchanged`，普通设备启动次数为 0；未定时取消、必要停止和一次报告按受限规则可进行。可信下界每会话最多更新一次，受理前不可信读数不得推进。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_clock.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。遵守启动顺序：验证库、受理、查下界、检查/有限复检、正常时可靠保存下界，再取得接纳；失败则只执行规定范围并返回 clock_invalid。
+- [x] 再运行上述命令，要求全部 PASS，并核对 等待复检不占写事务，受限会话不持普通接纳资格。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/session/test_clock.py -q`，真实 SQLite 与时钟替身覆盖受理、下界提交、复检、报告及重启，结合 C7 验证录像安全收场。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 普通执行和受限执行的全部入口是否绕过时钟资格；记录门禁证据，建议以“feat: 实现时钟资格与受限会话”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 普通执行和受限执行的全部入口是否绕过时钟资格；记录门禁证据，建议以“feat: 实现时钟资格与受限会话”形成独立提交。
 
 ### S4 事务内接管与接纳关闭
 
@@ -127,13 +127,13 @@ S1、S2、S4 的端口先固定，允许受理首阶段组合；S3、S5、S6 实
 
 **接口与依赖：** 提供纯 `decide_handoff(facts: WorkFacts, probe: AdmissionProbe) -> HandoffDecision`；仓储 `close_admission(command: CloseAdmission, key: OperationKey) -> DbOutcome[CloseDecision]`；submit 的同一规则嵌入 A4。前置交付：S1/S2、P3/P4；输入结果及接管命令类型先固定，A4 随后消费。
 
-- [ ] 编写失败用例。建立 `test_submit_races_admission_close`，用同步点固定两种事务先后，`assert current_handles_work or response.needs_run`；多个 submit 探测互不误认。报告失败后新变化先提交则继续，关闭先结束后新提交则请求后续 run。锁释放后提交错误保持接纳关闭。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/session/test_handoff.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。BEGIN IMMEDIATE 中查最新工作再进行非阻塞锁操作；设备、文件和报告生成不得放入交接事务。只在可靠提交后返回成功 needs_run。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 输入与探测同事务，关闭前没有遗漏已接纳工作。
+- [x] 编写失败用例。建立 `test_submit_races_admission_close`，用同步点固定两种事务先后，`assert current_handles_work or response.needs_run`；多个 submit 探测互不误认。报告失败后新变化先提交则继续，关闭先结束后新提交则请求后续 run。锁释放后提交错误保持接纳关闭。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/session/test_handoff.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。BEGIN IMMEDIATE 中查最新工作再进行非阻塞锁操作；设备、文件和报告生成不得放入交接事务。只在可靠提交后返回成功 needs_run。
+- [x] 再运行上述命令，要求全部 PASS，并核对 输入与探测同事务，关闭前没有遗漏已接纳工作。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/session/test_handoff.py -q`，A4 实施后组合真实受理、锁及关闭事务，交错最后一次检查与并发提交；该消费者验证归阶段 1/2 门禁。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 正常退出、报告失败退出、时钟受限和致命退出的资格区别；记录门禁证据，建议以“feat: 实现原子会话接管与关闭”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 正常退出、报告失败退出、时钟受限和致命退出的资格区别；记录门禁证据，建议以“feat: 实现原子会话接管与关闭”形成独立提交。
 
 ### S5 实际任务监督与取消接手
 
