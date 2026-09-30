@@ -122,13 +122,13 @@ K1、K2、K3 完成基础值后，受理和持久化可以实施。K4 先为首�
 
 **接口与依赖：** 提供 `project_public(facts: ProjectionInput) -> PublicFragment`、`public_changed(before: ProjectionInput, after: ProjectionInput) -> bool`。前置交付：K1—K3、H1 的事实结构及公共 report-dependencies 登记；不依赖报告协调器。
 
-- [ ] 编写失败用例。建立 `test_internal_change_is_not_public_change`，只改变内部尝试依据且公开结果不变，`assert public_changed(before, after) is False`；改变交付最终结果则断言为 True。按 report-dependencies 的条件覆盖字段省略、失败、未知、父对象补齐及关联文件变化；缺少必要事实必须报错。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_public_projection.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。读取统一字段依赖，把公开投影放在无 IO 的同步函数中；一次处理单对象和有界字段，子集合留给分页编码。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 事件消费者与编码器读取同一字段计算，原始错误输入没有被有效参数覆盖。
+- [x] 编写失败用例。建立 `test_internal_change_is_not_public_change`，只改变内部尝试依据且公开结果不变，`assert public_changed(before, after) is False`；改变交付最终结果则断言为 True。按 report-dependencies 的条件覆盖字段省略、失败、未知、父对象补齐及关联文件变化；缺少必要事实必须报错。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_public_projection.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。读取统一字段依赖，把公开投影放在无 IO 的同步函数中；一次处理单对象和有界字段，子集合留给分页编码。
+- [x] 再运行上述命令，要求全部 PASS，并核对 事件消费者与编码器读取同一字段计算，原始错误输入没有被有效参数覆盖。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/contracts/test_public_projection.py -q`，组合 H2 与 R3，验证同一事实的目录变化和实际报告字段一致。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 依赖是否经过报告协调器回调数据库或设备；记录门禁证据，建议以“feat: 实现纯公开投影与变化比较”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 依赖是否经过报告协调器回调数据库或设备；记录门禁证据，建议以“feat: 实现纯公开投影与变化比较”形成独立提交。
 
 ### K5 实际模块依赖验证
 

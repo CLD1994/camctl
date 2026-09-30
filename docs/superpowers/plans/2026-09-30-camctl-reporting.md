@@ -96,11 +96,11 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供 `validate_frozen_report(report: FrozenReport) -> None`；报告字段直接消费 K4.project_public，不为简单转发函数增加独立契约。前置交付：K3/K4、H1 的事实接口。
 
-- [ ] 编写失败用例。建立 `test_frozen_report_requires_complete_basis`，缺少完整 H、固定范围或必要生成元数据时，`assert validation_rejected is True`；合法初始边界、空变更范围及原始非法输入分别核对。公开字段与目录一致性的真实消费者验证由 K4/R3 承担，不重复一套字段计算测试。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_projection.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。建立不可变冻结类型及其完整性验证；实体字段复用 K4 的公开投影，子实体分页编码，不复制整棵计划。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 公开字段有用户用途及正式依据，错误输入保留原事实。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 事件变化比较与报告内容是否各写一份完整投影；记录门禁证据，建议以“feat: 定义报告字段与冻结模型”形成独立提交。
+- [x] 编写失败用例。建立 `test_frozen_report_requires_complete_basis`，缺少完整 H、固定范围或必要生成元数据时，`assert validation_rejected is True`；合法初始边界、空变更范围及原始非法输入分别核对。公开字段与目录一致性的真实消费者验证由 K4/R3 承担，不重复一套字段计算测试。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_projection.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。建立不可变冻结类型及其完整性验证；实体字段复用 K4 的公开投影，子实体分页编码，不复制整棵计划。
+- [x] 再运行上述命令，要求全部 PASS，并核对 公开字段有用户用途及正式依据，错误输入保留原事实。
+- [x] 审阅实际接口、状态分区及失败路径，检查 事件变化比较与报告内容是否各写一份完整投影；记录门禁证据，建议以“feat: 定义报告字段与冻结模型”形成独立提交。
 
 ### R2 报告资格、覆盖与原子冻结
 
