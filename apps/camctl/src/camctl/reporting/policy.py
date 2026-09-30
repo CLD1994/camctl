@@ -213,3 +213,185 @@ def _report_guard(event, context) -> None:
 
 def register_report_guards() -> None:
     register_guard("report", _report_guard)
+    register_sync_guard()
+
+
+class _PublishCommand:
+    """可靠发布：INTENT（2→3）与 PUBLISH（3→4）同一事务完成。"""
+
+    def __init__(self, report_id: int, occurred_at: int) -> None:
+        self._report_id = report_id
+        self._occurred_at = occurred_at
+
+    def plan(self, scope) -> CommandPlan:
+        from camctl.history.events import EventEnvelope, RowChange, RowImage
+        from camctl.persistence.transaction import TransactionError
+
+        connection = scope.connection
+        row = connection.execute(
+            "SELECT status, size_bytes, sha256, publication_count,"
+            " last_published_event_id, last_error_json FROM reports WHERE id = ?",
+            (self._report_id,),
+        ).fetchone()
+        if row is None:
+            raise TransactionError(f"报告 {self._report_id} 不存在")
+        status, size_bytes, sha256, publication_count, last_pub, _err = row
+        if size_bytes is None or sha256 is None:
+            raise TransactionError("报告尚无确定字节，不能发布")
+
+        allocation = scope.allocate(2)
+        intent = EventEnvelope(
+            event_id=allocation.first_event_id,
+            transaction_id=allocation.txn_id,
+            event_type=28, event_version=1, occurred_at=self._occurred_at,
+            clock_status=2, change_seq=None, reason=3, evidence={},
+            rows=(
+                RowChange(
+                    table="reports", row_id=self._report_id,
+                    before=RowImage(exists=True, values={"status": status, "last_error_json": None}),
+                    after=RowImage(exists=True, values={"status": 3, "last_error_json": None}),
+                ),
+            ),
+        )
+        publish = EventEnvelope(
+            event_id=allocation.last_event_id,
+            transaction_id=allocation.txn_id,
+            event_type=28, event_version=1, occurred_at=self._occurred_at,
+            clock_status=2, change_seq=None, reason=4, evidence={},
+            rows=(
+                RowChange(
+                    table="reports", row_id=self._report_id,
+                    before=RowImage(
+                        exists=True,
+                        values={"status": 3, "publication_count": publication_count,
+                                "last_published_event_id": last_pub, "last_error_json": None},
+                    ),
+                    after=RowImage(
+                        exists=True,
+                        values={"status": 4, "publication_count": publication_count + 1,
+                                "last_published_event_id": allocation.last_event_id,
+                                "last_error_json": None},
+                    ),
+                ),
+            ),
+        )
+        return CommandPlan(
+            events=(intent, publish),
+            owners={("reports", self._report_id): ("report", self._report_id)},
+            state_rows={"reports": {}},
+            result={"report_id": self._report_id, "publication_count": publication_count + 1},
+        )
+
+
+def publish_report(
+    repository_key: OperationKey,
+    owned: OwnedConnection,
+    report_id: int,
+    *,
+    occurred_at: int = 0,
+) -> DbOutcome:
+    """记录一次可靠发布（字节与文件证据在事务外已就绪）。"""
+    receipt = commit_operation(
+        _PublishCommand(report_id, occurred_at), repository_key, owned
+    )
+    if receipt.kind == "completed":
+        return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+    if receipt.kind == "rolled_back":
+        return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+    return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
+def record_report_bytes(
+    key: OperationKey,
+    owned: OwnedConnection,
+    report_id: int,
+    payload: bytes,
+    *,
+    occurred_at: int = 0,
+) -> DbOutcome:
+    """保存报告确定字节（REPORT_CHANGED.BYTES：size 与 sha256）。"""
+    import hashlib
+
+    from camctl.history.events import EventEnvelope, RowChange, RowImage
+
+    digest = hashlib.sha256(payload).hexdigest()
+
+    class _BytesCommand:
+        def plan(self, scope) -> CommandPlan:
+            connection = scope.connection
+            row = connection.execute(
+                "SELECT status, size_bytes, sha256, publication_count FROM reports WHERE id = ?",
+                (report_id,),
+            ).fetchone()
+            if row is None:
+                from camctl.persistence.transaction import TransactionError
+
+                raise TransactionError(f"报告 {report_id} 不存在")
+            status, size_bytes, sha256, _count = row
+            allocation = scope.allocate(1)
+            change = RowChange(
+                table="reports",
+                row_id=report_id,
+                before=RowImage(
+                    exists=True,
+                    values={
+                        "status": status,
+                        "size_bytes": size_bytes,
+                        "sha256": sha256,
+                        "last_error_json": None,
+                    },
+                ),
+                after=RowImage(
+                    exists=True,
+                    values={
+                        "status": 2,
+                        "size_bytes": len(payload),
+                        "sha256": digest,
+                        "last_error_json": None,
+                    },
+                ),
+            )
+            event = EventEnvelope(
+                event_id=allocation.first_event_id,
+                transaction_id=allocation.txn_id,
+                event_type=28,
+                event_version=1,
+                occurred_at=occurred_at,
+                clock_status=2,
+                change_seq=None,
+                reason=2,
+                evidence={},
+                rows=(change,),
+            )
+            return CommandPlan(
+                events=(event,),
+                owners={("reports", report_id): ("report", report_id)},
+                state_rows={"reports": {}},
+                result={"report_id": report_id, "size_bytes": len(payload), "sha256": digest},
+            )
+
+    receipt = commit_operation(_BytesCommand(), key, owned)
+    if receipt.kind == "completed":
+        return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+    if receipt.kind == "rolled_back":
+        return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+    return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
+def _sync_guard(event, context) -> None:
+    """PUBLISH/INTENT 的同步守卫：本地满足的同步责任共同结束。
+
+    第一版：发布事实与满足的本地报告责任共同保存；同步责任的具
+    体结束判定由 R6.qualifies_sync 驱动（消费方传入），守卫只核
+    对事件本身不改写未完成同步的既有事实。
+    """
+    for row in event.rows:
+        if row.table != "state_syncs" or row.before.exists is False:
+            continue
+        after_status = row.after.values.get("status")
+        if after_status == 4 and row.before.values.get("status") != 3:
+            raise EventValidationError("同步结束必须来自已结束等待的状态")
+
+
+def register_sync_guard() -> None:
+    register_guard("sync", _sync_guard)
