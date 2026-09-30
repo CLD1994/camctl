@@ -54,6 +54,7 @@ def _acceptance_context() -> EventContext:
     return EventContext(
         transaction=TXN,
         owners={("plans", 1): ("plan", 1)},
+        state_rows={"plans": {}},
     )
 
 
@@ -115,6 +116,7 @@ class TestRegistryDrivenValidation:
         context = EventContext(
             transaction=TXN,
             owners={("actions", 8): ("action", 8)},
+            state_rows={"actions": {}},
         )
         with pytest.raises(EventValidationError, match="source_members"):
             validate_event(event, context)
@@ -188,7 +190,7 @@ class TestRegistryDrivenValidation:
         )
         # source_members 未实现即可先命中列校验之前？列校验先于守卫执行。
         with pytest.raises(EventValidationError, match="name"):
-            validate_event(event, EventContext(transaction=TXN, owners={}))
+            validate_event(event, EventContext(transaction=TXN, owners={}, state_rows={}))
 
     def test_row_not_matching_any_declared_spec_rejected(self, admission_guards) -> None:
         envelope = _plan_accepted_envelope()
@@ -241,17 +243,17 @@ class TestRegistryDrivenValidation:
             ),
         )
         with pytest.raises(EventValidationError):
-            validate_event(event, EventContext(transaction=TXN, owners={}))
+            validate_event(event, EventContext(transaction=TXN, owners={}, state_rows={}))
 
 
 class TestOwnershipAndReportImpact:
     def test_missing_owner_fact_rejected(self, admission_guards) -> None:
-        context = EventContext(transaction=TXN, owners={})
+        context = EventContext(transaction=TXN, owners={}, state_rows={})
         with pytest.raises(EventValidationError, match="归属"):
             validate_event(_plan_accepted_envelope(), context)
 
     def test_wrong_owner_entity_rejected(self, admission_guards) -> None:
-        context = EventContext(transaction=TXN, owners={("plans", 1): ("action", 1)})
+        context = EventContext(transaction=TXN, owners={("plans", 1): ("action", 1)}, state_rows={})
         with pytest.raises(EventValidationError, match="归属"):
             validate_event(_plan_accepted_envelope(), context)
 
@@ -287,7 +289,7 @@ class TestOwnershipAndReportImpact:
                     ),
                 ),
             )
-            context = EventContext(transaction=TXN, owners={("actions", 8): ("action", 8)})
+            context = EventContext(transaction=TXN, owners={("actions", 8): ("action", 8)}, state_rows={})
             with pytest.raises(EventValidationError, match="change_seq"):
                 validate_event(event, context)
         finally:
@@ -296,6 +298,80 @@ class TestOwnershipAndReportImpact:
                     validators.NAMED_GUARDS.pop(name, None)
                 else:
                     validators.NAMED_GUARDS[name] = guard
+
+
+def _file_checksum_envelope(change_seq: int | None = 9) -> EventEnvelope:
+    return EventEnvelope(
+        event_id=102,
+        transaction_id=7,
+        event_type=17,
+        event_version=1,
+        occurred_at=1,
+        clock_status=2,
+        change_seq=change_seq,
+        reason=4,
+        evidence={},
+        rows=(
+            RowChange(
+                table="device_files",
+                row_id=3,
+                before=RowImage(
+                    exists=True,
+                    values={"checksum_support": 1, "sha256": None, "last_error_json": None},
+                ),
+                after=RowImage(
+                    exists=True,
+                    values={"checksum_support": 2, "sha256": "b" * 64, "last_error_json": None},
+                ),
+            ),
+        ),
+    )
+
+
+def _file_context(state_rows) -> EventContext:
+    rows = {"device_files": {3: {"checksum_support": 1, "sha256": None}}}
+    rows.update(state_rows)
+    return EventContext(
+        transaction=TXN,
+        owners={("device_files", 3): ("device_file", 3)},
+        state_rows=rows,
+    )
+
+
+@pytest.fixture()
+def device_file_guard():
+    """注册设备文件守卫；测试后恢复原状。"""
+    from camctl.history import validators
+
+    saved = validators.NAMED_GUARDS.get("device_file")
+    register_guard("device_file", lambda event, context: None)
+    yield
+    if saved is None:
+        validators.NAMED_GUARDS.pop("device_file", None)
+    else:
+        validators.NAMED_GUARDS["device_file"] = saved
+
+
+class TestFileRouteReportImpact:
+    def test_file_change_with_referring_output_accepts_change_seq(self, device_file_guard) -> None:
+        state_rows = {"outputs": {7: {"source_action_id": 1, "device_file_id": 3}}}
+        validated = validate_event(_file_checksum_envelope(change_seq=9), _file_context(state_rows))
+        assert validated.event_name == "DEVICE_FILE_OBSERVED"
+
+    def test_file_change_with_referring_output_requires_change_seq(self, device_file_guard) -> None:
+        state_rows = {"outputs": {7: {"source_action_id": 1, "device_file_id": 3}}}
+        with pytest.raises(EventValidationError, match="change_seq"):
+            validate_event(_file_checksum_envelope(change_seq=None), _file_context(state_rows))
+
+    def test_file_change_without_referrer_rejects_change_seq(self, device_file_guard) -> None:
+        state_rows = {"outputs": {}}
+        with pytest.raises(EventValidationError, match="change_seq"):
+            validate_event(_file_checksum_envelope(change_seq=9), _file_context(state_rows))
+
+    def test_file_change_without_referrer_accepts_null_change_seq(self, device_file_guard) -> None:
+        state_rows = {"outputs": {}}
+        validated = validate_event(_file_checksum_envelope(change_seq=None), _file_context(state_rows))
+        assert validated.branch_name == "CHECKSUM"
 
     def test_clock_status_validated(self, admission_guards) -> None:
         envelope = _plan_accepted_envelope()

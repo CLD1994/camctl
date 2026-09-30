@@ -7,14 +7,13 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Mapping
 
-from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import TransactionRange
+from camctl.history.changes import ChangeDerivationError, event_report_targets
 from camctl.history.events import (
     EventEnvelope,
     HistoryEventError,
@@ -25,8 +24,6 @@ from camctl.history.events import (
     event_type_name,
     load_event_registry,
 )
-
-_REPORT_DEPENDENCIES_RESOURCE = "registry/report-dependencies.json"
 
 Guard = Callable[[EventEnvelope, "EventContext"], None]
 
@@ -40,11 +37,14 @@ class EventContext:
     """校验一条事件所需的事务范围与已解析归属事实。
 
     owners 由调用方按事件发生时的实际关系解析：
-    (表名, 行 ID) -> (历史对象名, 对象 ID)。
+    (表名, 行 ID) -> (历史对象名, 对象 ID)。state_rows 是该事件发
+    生时（本事务先前事件已应用）的业务行事实，报告影响守卫用它
+    沿登记关联解析应报告对象。
     """
 
     transaction: TransactionRange
     owners: Mapping[tuple[str, int], tuple[str, int]]
+    state_rows: Mapping[str, Mapping[int, Mapping[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -73,31 +73,6 @@ def register_guard(name: str, guard: Guard) -> None:
 @lru_cache(maxsize=1)
 def _history_objects() -> dict[str, dict[str, Any]]:
     return load_enum_registry()["history_objects"]
-
-
-@lru_cache(maxsize=1)
-def _public_columns() -> dict[str, frozenset[str]]:
-    """从报告字段依赖登记收集各表进入公开投影的列。"""
-    try:
-        dependencies = json.loads(resource_bytes(_REPORT_DEPENDENCIES_RESOURCE))
-    except (OSError, ValueError) as error:
-        raise EventValidationError("报告字段依赖登记不可用") from error
-    collected: dict[str, set[str]] = {}
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            column = node.get("column")
-            if isinstance(column, str) and "." in column:
-                table, _, name = column.rpartition(".")
-                collected.setdefault(table, set()).add(name)
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for value in node:
-                walk(value)
-
-    walk(dependencies.get("projections", {}))
-    return {table: frozenset(names) for table, names in collected.items()}
 
 
 def _fail(message: str) -> None:
@@ -232,23 +207,13 @@ def _resolve_owner(event: EventEnvelope, context: EventContext, row: RowChange) 
 
 
 def _report_impact_guard(event: EventEnvelope, context: EventContext) -> None:
-    objects = _history_objects()
-    public = _public_columns()
-    has_public_change = False
-    for row in event.rows:
-        entity_name, _ = _resolve_owner(event, context, row)
-        target = objects.get(entity_name, {}).get("report_target", False)
-        if not target:
-            continue
-        if not row.before.exists:
-            has_public_change = True
-            continue
-        changed = set(row.after.values)
-        if changed & public.get(row.table, frozenset()):
-            has_public_change = True
-    if has_public_change and event.change_seq is None:
+    try:
+        targets = event_report_targets(event, context.state_rows)
+    except ChangeDerivationError as error:
+        _fail(str(error))
+    if targets and event.change_seq is None:
         _fail(f"事件 {event.event_id} 引起公开报告变化，必须分配 change_seq")
-    if not has_public_change and event.change_seq is not None:
+    if not targets and event.change_seq is not None:
         _fail(f"事件 {event.event_id} 未引起公开报告变化，change_seq 必须为空")
 
 
