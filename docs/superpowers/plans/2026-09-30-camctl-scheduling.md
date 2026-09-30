@@ -138,10 +138,10 @@ Q1—Q3 可用受约束替身先实施。Q4 与 O2、C2 联合建立首个启动
 
 **接口与依赖：** 提供 `register_handler(action_type: ActionType, handler: ActionHandler) -> None`、异步 `drive_ready(context: SchedulerContext) -> DriveResult`；目录由 B6 装配。前置交付：Q1—Q3、S5 及 ActionHandler 端口；Q4/C1 随设备处理器接入。
 
-- [ ] 编写失败用例。建立 `test_blocked_actions_have_no_executor`，大量未来、来源未完及占用阻塞动作，`assert running_executor_ids == ready_responsibility_ids`；准备按需创建自己的责任，不创建整个动作等待协程。错误类型不默认路由录像。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/scheduling/test_executors.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。只为已具备推进步骤的动作或独立责任创建协程，结束后释放；相机专属定义交给处理器，资源限制由统一协调端口核验。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 无单个总控制器承载所有业务分支，模块不直接创建驱动或连接。
+编写失败用例。建立 `test_blocked_actions_have_no_executor`，大量未来、来源未完及占用阻塞动作，`assert running_executor_ids == ready_responsibility_ids`；准备按需创建自己的责任，不创建整个动作等待协程。错误类型不默认路由录像。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/scheduling/test_executors.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。只为已具备推进步骤的动作或独立责任创建协程，结束后释放；相机专属定义交给处理器，资源限制由统一协调端口核验。
+- [x] 再运行上述命令，要求全部 PASS，并核对 无单个总控制器承载所有业务分支，模块不直接创建驱动或连接。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_executors.py -q`，先组合真实调度、仓储和 report_status 处理器；录像/取回实施后再验证不同设备工作推进，阶段 3—6 收齐证据。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 处理器目录、未来动作及恢复责任是否重复创建执行者；记录门禁证据，建议以“feat: 接入按需动作执行器”形成独立提交。
