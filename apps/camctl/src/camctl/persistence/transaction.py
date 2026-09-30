@@ -374,7 +374,11 @@ def commit_operation(
             _scalar(connection, "SELECT MAX(id) FROM history_transactions"),
             _scalar(connection, "SELECT MAX(id) FROM history_events"),
         )
-        plan = command.plan(scope)
+        try:
+            plan = command.plan(scope)
+        except Exception as error:
+            # 命令执行期意外失败：整组不提交，按回滚或未知分类。
+            return _rollback_or_unknown(connection, True, error)
         events = plan.events
         if len(events) == 0:
             if not plan.read_only:
