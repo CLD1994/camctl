@@ -137,9 +137,18 @@ def encode_session_result(
 
 
 def encode_describe_document(document: Mapping[str, Any]) -> bytes:
-    """校验并编码完整能力说明；序列化前失败不产生任何 stdout 输出。"""
+    """校验并编码完整能力说明；序列化前失败不产生任何 stdout 输出。
+
+    能力说明中的参数规则可包含精确 Decimal（倍数、默认值），编码
+    使用精确数值写法，不经过 float。
+    """
+    from camctl.persistence.transaction import encode_json_value
+
     validate_document(_CAPABILITIES_SCHEMA, document)
-    return _encode_json_line(document)
+    encoded = encode_json_value(document)
+    if "\n" in encoded:  # pragma: no cover - 精确编码器不产生裸换行
+        raise ResultChannelError("结果消息包含换行符")
+    return (encoded + "\n").encode("utf-8")
 
 
 def _encode_json_line(message: Mapping[str, Any]) -> bytes:
@@ -238,9 +247,12 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.config import ConfigError
 
     try:
+        from camctl.devices.catalog import build_catalog, default_driver_definitions
+
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        document = describe(config, EmptyCapabilityCatalog())
+        catalog = build_catalog(config, default_driver_definitions())
+        document = describe(config, catalog)
         payload = encode_describe_document(document).decode("utf-8")
     except (ConfigError, SchemaValidationError, OSError) as error:
         print(f"camctl describe: {error}", file=err)

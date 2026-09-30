@@ -37,10 +37,11 @@ class TestDescribeWithoutDatabase:
         assert document == {"devices": []}
         assert refuse is not None  # 替身未被访问即通过。
 
-    def test_device_declaration_without_driver_catalog_rejected(self) -> None:
+    def test_describe_uses_provided_catalog_document(self) -> None:
+        # describe 不自行合并设备清单：目录（D1）是唯一能力来源。
         config = _config(devices={"cam-1": {"kind": "camera", "driver": "adb"}})
-        with pytest.raises(ConfigError, match="驱动"):
-            describe(config, EmptyCapabilityCatalog())
+        document = describe(config, EmptyCapabilityCatalog())
+        assert document == {"devices": []}
 
     def test_invalid_config_rejected_before_document(self) -> None:
         with pytest.raises(ConfigError):

@@ -75,10 +75,6 @@ def describe(config: ConfigSnapshot, catalog: CapabilityCatalog) -> Mapping[str,
     配置声明了设备但驱动目录未接入时按配置错误拒绝，不导出部分
     说明；文档在写入 stdout 前整体通过公共 Schema 校验。
     """
-    if config.devices:
-        raise ConfigError(
-            "设备目录的驱动定义尚未接入（D1），不能导出部分能力说明"
-        )
     return dict(catalog.document())
 
 def query_work_facts(connection) -> "WorkFacts":
