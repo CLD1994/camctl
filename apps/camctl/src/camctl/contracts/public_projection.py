@@ -149,7 +149,7 @@ def project_public(facts: ProjectionInput) -> PublicFragment:
         )
     context = _Context(facts, root, root_table, facts.root_id)
     if not _truthy(projection.get("when", {"op": "literal", "value": True}), context):
-        return {}
+        return OMIT  # 类型检查器友好的省略标记
     fragment: PublicFragment = {}
     for field_name, spec in projection["fields"].items():
         when = spec.get("when", {"op": "literal", "value": True})
