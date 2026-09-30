@@ -100,13 +100,13 @@ P1、P2 在首阶段完成；P3 与 H1/H2 联合建立首批事件事务；P4 �
 
 **接口与依赖：** 提供 `DbExecutor.submit_write(job: DbJob[T]) -> DbOutcome[T]`、`submit_read(job: DbJob[T]) -> ReadReceipt[T]`、`withdraw(job_id: OperationKey) -> WithdrawalResult`、`close() -> None`；均为异步入口，WithdrawalResult 表达撤回确认或仍在执行。前置交付：K3、S5 的接手端口契约；连接执行替身。
 
-- [ ] 编写失败用例。建立 `test_admitted_job_has_no_queue_timeout`，已入队等待超过 9 秒仍只执行一次；建立 `test_started_job_survives_waiter_cancel`，取消后结果交给责任拥有者，`assert deliveries == 1`。容量 1、恰好满载、业务与维护竞争、空位与截止竞争、撤回与派发竞争逐项验证。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/persistence/test_executor.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。在同一短临界区决定入队截止、派发或撤回，队列取出时释放容量，实际结束时才完成结果；业务优先，不持锁等待，线程以事件循环安全通知交回独立结果。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 没有超时后迟到入队、双执行、双释放或结果丢失。
+- [x] 编写失败用例。建立 `test_admitted_job_has_no_queue_timeout`，已入队等待超过 9 秒仍只执行一次；建立 `test_started_job_survives_waiter_cancel`，取消后结果交给责任拥有者，`assert deliveries == 1`。容量 1、恰好满载、业务与维护竞争、空位与截止竞争、撤回与派发竞争逐项验证。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/persistence/test_executor.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。在同一短临界区决定入队截止、派发或撤回，队列取出时释放容量，实际结束时才完成结果；业务优先，不持锁等待，线程以事件循环安全通知交回独立结果。
+- [x] 再运行上述命令，要求全部 PASS，并核对 没有超时后迟到入队、双执行、双释放或结果丢失。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_executor.py -q`，真实专用线程与 SQLite 组合，并保持事件循环能推进；关闭等待已开始任务实际结束。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 入队、排队和实际执行三种等待是否被同一个 timeout 混合；记录门禁证据，建议以“feat: 实现数据库队列与取消接手”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 入队、排队和实际执行三种等待是否被同一个 timeout 混合；记录门禁证据，建议以“feat: 实现数据库队列与取消接手”形成独立提交。
 
 ### P3 完整事件事务与编号范围
 
@@ -114,11 +114,11 @@ P1、P2 在首阶段完成；P3 与 H1/H2 联合建立首批事件事务；P4 �
 
 **接口与依赖：** 提供私有 `commit_operation(command: AtomicCommand, key: OperationKey, rules: WriteRules) -> WriteReceipt`；AtomicCommand/WriteRules 由所属仓储的具体类型实现，不对业务暴露表操作。前置交付：H1/H2、K3、P1/P2。
 
-- [ ] 编写失败用例。建立 `test_write_uses_current_transaction_state`，并发 ACK 与动作结果提交，`assert ack_after >= ack_before` 且动作事实保留；逐个中断事件、投影、两类目录和进度保存，断言整组回滚。最终事件数变化时核对引用 L 及首尾，事务内中间边界不得冻结报告。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_transactions.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。显式 BEGIN IMMEDIATE；重新读取可靠旧状态，确定完整事件数量和最终 F～L，再校验并保存全部关联。数量改变须重新形成受影响引用或整笔回滚，不能继续使用旧 L。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 事务、编号、各对象历史和公开变化对应同一最终范围。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有仓储是否用旧缓存整行覆盖或自行拆分提交；记录门禁证据，建议以“feat: 实现完整历史与投影事务”形成独立提交。
+- [x] 编写失败用例。建立 `test_write_uses_current_transaction_state`，并发 ACK 与动作结果提交，`assert ack_after >= ack_before` 且动作事实保留；逐个中断事件、投影、两类目录和进度保存，断言整组回滚。最终事件数变化时核对引用 L 及首尾，事务内中间边界不得冻结报告。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_transactions.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。显式 BEGIN IMMEDIATE；重新读取可靠旧状态，确定完整事件数量和最终 F～L，再校验并保存全部关联。数量改变须重新形成受影响引用或整笔回滚，不能继续使用旧 L。
+- [x] 再运行上述命令，要求全部 PASS，并核对 事务、编号、各对象历史和公开变化对应同一最终范围。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有仓储是否用旧缓存整行覆盖或自行拆分提交；记录门禁证据，建议以“feat: 实现完整历史与投影事务”形成独立提交。
 
 ### P4 提交未知的身份核实
 
@@ -126,13 +126,13 @@ P1、P2 在首阶段完成；P3 与 H1/H2 联合建立首批事件事务；P4 �
 
 **接口与依赖：** 提供 `resolve_commit(key: OperationKey, expected: OperationIdentity, lookup: CommitLookup[T]) -> RecoveryDecision[T]`；OperationIdentity 含输入、阶段和目标，RecoveryDecision 为复用、原资格下可重做、等待或错误。前置交付：P3 的完整操作记录。
 
-- [ ] 编写失败用例。建立 `test_inflight_unknown_cannot_retry`，查询暂时不存在但原线程仍可能提交，`assert decision.can_retry is False`；已存在一致返回原结果，输入不一致拒绝，查询失败保留未知，确认不存在且原事务不能迟到才允许检查原资格。成功副作用后保存未知不得自动再次调用。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/persistence/test_commit_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。停用失效连接，在新可靠连接上核实完整操作；取消不会更换 key，内存分配的事件 ID 不作为提交证明。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 每个核实分区具有唯一结果，错误和未知不解释为空。
+- [x] 编写失败用例。建立 `test_inflight_unknown_cannot_retry`，查询暂时不存在但原线程仍可能提交，`assert decision.can_retry is False`；已存在一致返回原结果，输入不一致拒绝，查询失败保留未知，确认不存在且原事务不能迟到才允许检查原资格。成功副作用后保存未知不得自动再次调用。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/persistence/test_commit_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。停用失效连接，在新可靠连接上核实完整操作；取消不会更换 key，内存分配的事件 ID 不作为提交证明。
+- [x] 再运行上述命令，要求全部 PASS，并核对 每个核实分区具有唯一结果，错误和未知不解释为空。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_commit_recovery.py -q`，在真实事务提交前后与响应交付前中断，验证恢复使用原结果及原预算。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有写结果恢复入口是否存在先重做再查询的路径；记录门禁证据，建议以“feat: 实现提交未知的可靠核实”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有写结果恢复入口是否存在先重做再查询的路径；记录门禁证据，建议以“feat: 实现提交未知的可靠核实”形成独立提交。
 
 ### P5 窄仓储及短读事务
 

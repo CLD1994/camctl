@@ -141,13 +141,13 @@ S1、S2、S4 的端口先固定，允许受理首阶段组合；S3、S5、S6 实
 
 **接口与依赖：** 提供 `register(owner: ResponsibilityOwner) -> OwnerToken`、`handoff(token: OwnerToken, pending: OwnedTask) -> None`、异步 `drain_required() -> SupervisionResult`；先登记责任再解除原等待。前置交付：K1/K3 及本模块的 ResponsibilityOwner、OwnedTask 契约；具体协作者随后接入。
 
-- [ ] 编写失败用例。建立 `test_cancel_keeps_actual_owner`，线程或调用已开始且等待者取消，`assert resource_released is False`，直到实际结果及保存/通知结束才释放。覆盖排队撤回竞争、提交未知、目标终态但调用在途、接手异常；每项 `assert final_consumptions == 1`。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_supervision.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。只跟踪独立语义责任，把结果消费交给原业务拥有者；接手方沿同一身份、预算及允许步骤完成，不创建脱离会话监督的临时后台任务。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 取消后结果、通知和实际占用仍闭合。
+- [x] 编写失败用例。建立 `test_cancel_keeps_actual_owner`，线程或调用已开始且等待者取消，`assert resource_released is False`，直到实际结果及保存/通知结束才释放。覆盖排队撤回竞争、提交未知、目标终态但调用在途、接手异常；每项 `assert final_consumptions == 1`。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/session/test_supervision.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。只跟踪独立语义责任，把结果消费交给原业务拥有者；接手方沿同一身份、预算及允许步骤完成，不创建脱离会话监督的临时后台任务。
+- [x] 再运行上述命令，要求全部 PASS，并核对 取消后结果、通知和实际占用仍闭合。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/session/test_supervision.py -q`，先组合真实事件循环与可控任务，验证唯一接手和通知；P2、O3、F2、R5、L3 实施后分别在消费者集成中核验实际完成。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有 shield、create_task 和取消异常分支是否丢失结果或提前关闭句柄；记录门禁证据，建议以“feat: 实现实际任务监督与取消接手”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有 shield、create_task 和取消异常分支是否丢失结果或提前关闭句柄；记录门禁证据，建议以“feat: 实现实际任务监督与取消接手”形成独立提交。
 
 ### S6 错误顺序及完整会话收尾
 

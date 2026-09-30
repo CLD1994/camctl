@@ -87,13 +87,13 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **接口与依赖：** 提供 `validate_event(event: EventEnvelope, context: EventContext, registry: EventRegistry) -> ValidatedEvent`；EventContext 含事务范围、可靠前状态、实际关系和已取得证据，注册表由包资源生成。前置交付：K1—K3、B1；先实现首次受理及报告所需分支。
 
-- [ ] 编写失败用例。建立 `test_unimplemented_validator_rejects_write`，登记存在但具名校验未接入，断言拒绝；前后列越权、未知版本、错误引用 E/L、错误对象归属、缺少共同事件分别失败。`assert validated.references == expected_exact_references`，期望独立从事务范围构造。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_events.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。读取 event-transitions 的列权限、状态模型和具名校验，再执行对应业务纯校验；未知类型、版本、分支或未实现校验都不能默认接受。各业务增加事件时增加本任务的相应实现和反例。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 每个已支持分支的业务不变量有明确校验入口。
+- [x] 编写失败用例。建立 `test_unimplemented_validator_rejects_write`，登记存在但具名校验未接入，断言拒绝；前后列越权、未知版本、错误引用 E/L、错误对象归属、缺少共同事件分别失败。`assert validated.references == expected_exact_references`，期望独立从事务范围构造。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_events.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。读取 event-transitions 的列权限、状态模型和具名校验，再执行对应业务纯校验；未知类型、版本、分支或未实现校验都不能默认接受。各业务增加事件时增加本任务的相应实现和反例。
+- [x] 再运行上述命令，要求全部 PASS，并核对 每个已支持分支的业务不变量有明确校验入口。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_events.py -q`，P3 实际写事务拒绝缺项及跨表错误，即使行内 SQL 接受也不能提交。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 事件应用、修复、导入和目录重建是否存在绕过校验的入口；记录门禁证据，建议以“feat: 实现事件契约的生产校验”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 事件应用、修复、导入和目录重建是否存在绕过校验的入口；记录门禁证据，建议以“feat: 实现事件契约的生产校验”形成独立提交。
 
 ### H2 历史归属、公开变化与计数
 
@@ -101,13 +101,13 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **接口与依赖：** 提供 `derive_changes(events: tuple[ValidatedEvent, ...], before: StateSlice, after: StateSlice) -> ChangeSet`；StateSlice 含同事务前后事实及关系，不含当前设备信息。前置交付：H1、K4。
 
-- [ ] 编写失败用例。建立 `test_rebuild_uses_historical_relationship`，文件后来更改关系，重建旧事件仍关联旧对象；内部尝试变化不生成业务水位，公开交付变化补齐正确动作和计划。`assert changed_entities == expected_entities`；同一对象一笔事务多处变化按规格计数。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_changes.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。从事件版本和当时关系形成历史对象目录；调用纯公开投影判断实际报告变化，维护对象计数及快照进度。用同一规则正常写入和重建目录，重建核对原业务序号。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 两类目录、父子补齐及对象计数具有独立预期。
+- [x] 编写失败用例。建立 `test_rebuild_uses_historical_relationship`，文件后来更改关系，重建旧事件仍关联旧对象；内部尝试变化不生成业务水位，公开交付变化补齐正确动作和计划。`assert changed_entities == expected_entities`；同一对象一笔事务多处变化按规格计数。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_changes.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。从事件版本和当时关系形成历史对象目录；调用纯公开投影判断实际报告变化，维护对象计数及快照进度。用同一规则正常写入和重建目录，重建核对原业务序号。
+- [x] 再运行上述命令，要求全部 PASS，并核对 两类目录、父子补齐及对象计数具有独立预期。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_changes.py -q`，真实事务共同保存事件、投影、目录和进度，并核验 J 系列引用规则。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 父对象依赖变化是否因自身未改而漏报，是否用当前关系重新解释旧历史；记录门禁证据，建议以“feat: 实现历史目录与公开变化派生”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 父对象依赖变化是否因自身未改而漏报，是否用当前关系重新解释旧历史；记录门禁证据，建议以“feat: 实现历史目录与公开变化派生”形成独立提交。
 
 ### H3 正逆应用与独立恢复预期
 

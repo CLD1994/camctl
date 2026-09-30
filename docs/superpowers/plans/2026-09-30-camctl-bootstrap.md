@@ -99,13 +99,13 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 **接口与依赖：** 提供 `load_config(document: JsonValue | None, defaults: ConfigDefaults) -> ConfigSnapshot`；文件读取在 bootstrap 适配器完成，不在此纯函数中执行。前置交付：B1、K1、K2。
 
-- [ ] 编写失败用例。建立 `test_partial_override_checks_combination`，只覆盖一个日志水位造成 L≥H，断言配置错误；对 bool 次数、0 容量、非有限秒数、非法容量单位分别拒绝。`assert cfg.copy.segment_size_bytes == 134217728` 验证既定 128 MiB 默认适配。原动作模型作为独立输入，断言加载配置没有修改其次数和结果。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_configuration.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。通过 tomllib 的 Decimal 数字读取，逐字段覆盖后校验完整组合；配置默认值和合法范围从现有专题落实到单一定义。目录切换按持久化绑定条件另由仓储验证，不由字符串比较决定。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 本次配置不可被后续流程修改，省略与显式非法值不混用。
+- [x] 编写失败用例。建立 `test_partial_override_checks_combination`，只覆盖一个日志水位造成 L≥H，断言配置错误；对 bool 次数、0 容量、非有限秒数、非法容量单位分别拒绝。`assert cfg.copy.segment_size_bytes == 134217728` 验证既定 128 MiB 默认适配。原动作模型作为独立输入，断言加载配置没有修改其次数和结果。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/bootstrap/test_configuration.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。通过 tomllib 的 Decimal 数字读取，逐字段覆盖后校验完整组合；配置默认值和合法范围从现有专题落实到单一定义。目录切换按持久化绑定条件另由仓储验证，不由字符串比较决定。
+- [x] 再运行上述命令，要求全部 PASS，并核对 本次配置不可被后续流程修改，省略与显式非法值不混用。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_configuration.py -q`，读取真实 TOML 并组合目录绑定仓储，覆盖目录有残留、无残留、检查失败及共同保存。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有配置消费者是否使用同一个 ConfigSnapshot，是否错误重算旧事实；记录门禁证据，建议以“feat: 实现本地配置加载与冻结”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有配置消费者是否使用同一个 ConfigSnapshot，是否错误重算旧事实；记录门禁证据，建议以“feat: 实现本地配置加载与冻结”形成独立提交。
 
 ### B3 命令解析与机器结果编码
 
@@ -127,11 +127,11 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 **接口与依赖：** 提供 `initialize_state(config: ConfigSnapshot, locks: SessionLocks) -> InitResult`；日常连接只通过 P1.open_existing。前置交付：P1、S2 的会话锁接口，B2。
 
-- [ ] 编写失败用例。建立 `test_init_preserves_existing_database`，对已有有效库反复 init，`assert image_after == image_before`，独立核对数据库身份、全部当前事实和历史不变；不要求 WAL 检查或检查点前后的物理文件逐字节相同。已有无效文件不得覆盖。缺失目标、目录同步失败、两个 init 竞争、run 与 init 竞争、目录绑定不符分别验证。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_initialization.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。在同一会话锁下可靠确认存在性，仅显式 init 建立完整结构与唯一初始状态；遵守初始化文件及目录落盘顺序，无虚构业务事件。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 失败后不会出现被日常入口当作空库使用的半份数据库。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 建库和有效性检查的所有入口是否使用存在性默认或自动修复；记录门禁证据，建议以“feat: 实现显式状态库初始化”形成独立提交。
+- [x] 编写失败用例。建立 `test_init_preserves_existing_database`，对已有有效库反复 init，`assert image_after == image_before`，独立核对数据库身份、全部当前事实和历史不变；不要求 WAL 检查或检查点前后的物理文件逐字节相同。已有无效文件不得覆盖。缺失目标、目录同步失败、两个 init 竞争、run 与 init 竞争、目录绑定不符分别验证。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_initialization.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。在同一会话锁下可靠确认存在性，仅显式 init 建立完整结构与唯一初始状态；遵守初始化文件及目录落盘顺序，无虚构业务事件。
+- [x] 再运行上述命令，要求全部 PASS，并核对 失败后不会出现被日常入口当作空库使用的半份数据库。
+- [x] 审阅实际接口、状态分区及失败路径，检查 建库和有效性检查的所有入口是否使用存在性默认或自动修复；记录门禁证据，建议以“feat: 实现显式状态库初始化”形成独立提交。
 
 ### B5 静态能力导出
 
