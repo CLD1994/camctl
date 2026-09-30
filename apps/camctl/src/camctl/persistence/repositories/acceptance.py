@@ -121,10 +121,23 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
             AckDisposition.NOT_PROVIDED, current_wm, (current_wm, current_report), None, None
         )
     report_id = int(raw)
-    report = connection.execute(
-        "SELECT to_wm FROM reports WHERE id = ?", (report_id,)
+    # 判定规则由 reporting.ack 单一定义（R6）；本仓储只取事实并落地。
+    from camctl.reporting.ack import AckFacts, AckInput, decide_ack
+
+    row = connection.execute(
+        "SELECT from_wm, to_wm FROM reports WHERE id = ?", (report_id,)
     ).fetchone()
-    if report is None:
+    report = {"report_id": report_id, "from_wm": int(row[0]), "to_wm": int(row[1])} if row else None
+    decision = decide_ack(
+        AckInput(report_id=report_id),
+        AckFacts(
+            acknowledged_wm=current_wm,
+            acknowledged_report_id=current_report,
+            report=report,
+            report_known=report is not None,
+        ),
+    )
+    if decision.disposition.value == "invalid":
         return _AckEvaluation(
             AckDisposition.INVALID,
             current_wm,
@@ -132,13 +145,12 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
             None,
             {"stage": "ack", "code": "invalid_ack", "details": {"report_id": report_id}},
         )
-    new_wm = int(report[0])
-    if new_wm > current_wm:
+    if decision.disposition.value == "absorbed":
         return _AckEvaluation(
             AckDisposition.ABSORBED,
-            new_wm,
+            decision.new_acknowledged_wm,
             (current_wm, current_report),
-            (new_wm, report_id),
+            (decision.new_acknowledged_wm, report_id),
             None,
         )
     return _AckEvaluation(
