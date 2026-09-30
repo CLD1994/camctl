@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from enum import Enum
+from typing import Any, Sequence
 
 from camctl.acceptance.schema import (
     BodySchemaError,
@@ -168,3 +169,38 @@ def validate_capture_params(
     return ActionValidation(
         name="", raw=raw, ok=True, effective_params=effective
     )
+
+
+#: 动作终态编号（succeeded/failed/expired/canceled）。
+_TERMINAL_ACTION_STATUSES = frozenset({3, 4, 5, 6})
+
+
+class PlanState(Enum):
+    """父计划的运行状态。"""
+
+    PENDING = 1
+    RUNNING = 2
+    COMPLETED = 3
+
+
+@dataclass(frozen=True)
+class ActionManagement:
+    """派生父状态所需的动作事实：持久化状态及是否实际开始。"""
+
+    status: int
+    execution_started: int
+
+
+def derive_plan_state(actions: Sequence[ActionManagement]) -> PlanState:
+    """按全部动作的持久化事实派生父计划状态。
+
+    全部动作终态才 COMPLETED；存在实际开始过（execution_started=1）
+    的动作且尚有非终态时为 RUNNING；未执行而取消的动作不构成开始
+    事实，与剩余 pending 一起保持 PENDING。
+    """
+    entries = list(actions)
+    if entries and all(action.status in _TERMINAL_ACTION_STATUSES for action in entries):
+        return PlanState.COMPLETED
+    if any(action.execution_started == 1 for action in entries):
+        return PlanState.RUNNING
+    return PlanState.PENDING
