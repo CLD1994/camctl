@@ -88,13 +88,13 @@ D1/D2 的端口、静态定义及证据结构先完成，使其他模块可以�
 
 **接口与依赖：** 提供 `build_catalog(config: ConfigSnapshot, definitions: DriverDefinitions) -> CapabilityCatalog`、`apply_defaults(raw: JsonValue, definition: ParameterDefinition) -> EffectiveParams`；DriverDefinitions 是已部署驱动单一静态来源。前置交付：K1/K2、B2。
 
-- [ ] 编写失败用例。建立 `test_defaults_preserve_raw_input`，省略合法可默认字段，`assert raw == original` 且有效参数包含规定默认值；显式 null、非法值不被默认覆盖。缺版本或引用、无效组合规则、定义缺失必须失败；空设备目录合法。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_catalog.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。同一参数定义供导出及受理使用，包含完整 Schema 引用与必要说明；只导出已部署且实际声明能力，不把预留名称当实现。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 静态目录无设备连接，B5/A2 使用同源规则。
+- [x] 编写失败用例。建立 `test_defaults_preserve_raw_input`，省略合法可默认字段，`assert raw == original` 且有效参数包含规定默认值；显式 null、非法值不被默认覆盖。缺版本或引用、无效组合规则、定义缺失必须失败；空设备目录合法。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_catalog.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。同一参数定义供导出及受理使用，包含完整 Schema 引用与必要说明；只导出已部署且实际声明能力，不把预留名称当实现。
+- [x] 再运行上述命令，要求全部 PASS，并核对 静态目录无设备连接，B5/A2 使用同源规则。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/devices/test_catalog.py -q`，真实 describe、受理与公共合法/非法样例验证同源参数；客户端 Ajv 的真实消费由 I3 验证。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 Schema、默认值与执行转换是否各自维护一份完整定义；记录门禁证据，建议以“feat: 实现同源设备能力目录”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 Schema、默认值与执行转换是否各自维护一份完整定义；记录门禁证据，建议以“feat: 实现同源设备能力目录”形成独立提交。
 
 ### D2 可选能力、绑定与证据类型
 

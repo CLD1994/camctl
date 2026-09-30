@@ -112,13 +112,13 @@ Q1—Q3 可用受约束替身先实施。Q4 与 O2、C2 联合建立首个启动
 
 **接口与依赖：** 提供 `WorkNotifier.mark_changed(reason: WakeReason) -> WakeToken`、`snapshot() -> WakeToken`、异步 `wait_changed(observed: WakeToken, deadline: MonotonicDeadline | None) -> WakeToken`。前置交付：K1；WakeReason 在本模块集中定义，原因不替代持久化发现。
 
-- [ ] 编写失败用例。建立 `test_notify_between_check_and_wait`，控制通知在读版本、查工作、进入等待三个位置到达，`assert recheck_count >= 1`；取消原等待者但已提交由 S5 接手仍 mark_changed。重复通知合并但不丢最后变化，超时只触发重新判断。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/scheduling/test_notifications.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。在共享同步边界维护版本与等待登记，旧版本不可直接睡眠；外部 submit 由可靠持久化发现入口形成通知，不要求新增跨进程通知协议。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 无检查后睡死竞争，通知只是安排再次查询。
+- [x] 编写失败用例。建立 `test_notify_between_check_and_wait`，控制通知在读版本、查工作、进入等待三个位置到达，`assert recheck_count >= 1`；取消原等待者但已提交由 S5 接手仍 mark_changed。重复通知合并但不丢最后变化，超时只触发重新判断。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/scheduling/test_notifications.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。在共享同步边界维护版本与等待登记，旧版本不可直接睡眠；外部 submit 由可靠持久化发现入口形成通知，不要求新增跨进程通知协议。
+- [x] 再运行上述命令，要求全部 PASS，并核对 无检查后睡死竞争，通知只是安排再次查询。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_notifications.py -q`，真实写线程与调度协程控制提交后通知、外部 submit 和退出竞争。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部提交成功、读取机会释放、活动结束及来源结束通知入口；记录门禁证据，建议以“feat: 实现可靠调度通知交接”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部提交成功、读取机会释放、活动结束及来源结束通知入口；记录门禁证据，建议以“feat: 实现可靠调度通知交接”形成独立提交。
 
 ### Q4 原子授予、启动保留与派发再检查
 
