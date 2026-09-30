@@ -136,13 +136,13 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供 `encode_message(message: ControlMessage) -> bytes`、`decode_message(data: bytes) -> ControlMessage`、异步 `communicate(request: WorkerRequest) -> WorkerEvent`；WorkerRequest/WorkerEvent 为发送及已校验接收控制事件。前置交付：R1；Pipe 字节接口与线程通知端口。
 
-- [ ] 编写失败用例。在 `test_messages_reject_wrong_task_and_size` 中未知版本、额外字段、错误 task_id、部分帧、非 UTF-8 或超容量，`assert task_completed is False`；旧结果不能完成新任务。通信阻塞时事件循环及生成总时限仍推进，停止后线程实际退出才关闭责任。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_messages.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。建议控制消息 version=1、最大 64 KiB、一次最多一个待发送生成任务，集中定义并校验。每端单一收发线程/进程拥有者，未使用的 Pipe 端立即关闭；线程通过 call_soon_threadsafe 交事件，父进程监测独立于阻塞收发。结束子进程并关闭对端后使阻塞通信返回，再由拥有者关闭端点和回收线程。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 消息容量不携带业务大集合，控制错误不静默当成功。
+- [x] 编写失败用例。在 `test_messages_reject_wrong_task_and_size` 中未知版本、额外字段、错误 task_id、部分帧、非 UTF-8 或超容量，`assert task_completed is False`；旧结果不能完成新任务。通信阻塞时事件循环及生成总时限仍推进，停止后线程实际退出才关闭责任。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_messages.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。建议控制消息 version=1、最大 64 KiB、一次最多一个待发送生成任务，集中定义并校验。每端单一收发线程/进程拥有者，未使用的 Pipe 端立即关闭；线程通过 call_soon_threadsafe 交事件，父进程监测独立于阻塞收发。结束子进程并关闭对端后使阻塞通信返回，再由拥有者关闭端点和回收线程。
+- [x] 再运行上述命令，要求全部 PASS，并核对 消息容量不携带业务大集合，控制错误不静默当成功。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_messages.py -q`，真实 Pipe 覆盖部分帧、端点中断、发送阻塞、退出通知先后及线程关闭。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有重复端点、跨线程关闭和旧任务消息路径；记录门禁证据，建议以“feat: 实现报告控制通信契约”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有重复端点、跨线程关闭和旧任务消息路径；记录门禁证据，建议以“feat: 实现报告控制通信契约”形成独立提交。
 
 ### R5 spawn、保护、工作锁与实际回收
 
