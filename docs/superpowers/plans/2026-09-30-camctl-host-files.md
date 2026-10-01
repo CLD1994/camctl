@@ -145,13 +145,13 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **接口与依赖：** 提供异步 `publish_file(ref: FileRef, target: ReadyName) -> PublishResult`、`withdraw_file(identity: HandoffIdentity) -> WithdrawResult`；名称和身份由业务消费者提供。前置交付：F1/F2/F4；不依赖业务 DB。
 
-- [ ] 编写失败用例。建立 `test_move_success_sync_failure_is_visible`，移动成功后目录同步失败，`assert result.moved is True` 且 durable 未确认。移动前后领取、ENOENT 竞争及同名普通文件不覆盖分别处理；processing 对象 `assert remove_calls == 0`。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_handoff.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。先核对完整文件资格，原子移动再同步涉及目录，保留阶段；撤回仅操作 camctl 仍拥有的位置，主程序领取后不可修改。普通、报告、日志的恢复由各自流程决定。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 发布结果不要求文件持续留在 ready，日志无需状态库。
+- [x] 编写失败用例。建立 `test_move_success_sync_failure_is_visible`，移动成功后目录同步失败，`assert result.moved is True` 且 durable 未确认。移动前后领取、ENOENT 竞争及同名普通文件不覆盖分别处理；processing 对象 `assert remove_calls == 0`。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_handoff.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。先核对完整文件资格，原子移动再同步涉及目录，保留阶段；撤回仅操作 camctl 仍拥有的位置，主程序领取后不可修改。普通、报告、日志的恢复由各自流程决定。
+- [x] 再运行上述命令，要求全部 PASS，并核对 发布结果不要求文件持续留在 ready，日志无需状态库。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_handoff.py -q`，真实目录与受 C 领取契约约束的协作者交错移动和删除，核对同步及撤回；真实 C 组合由 I4/I5 验证。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有发布类型是否误用相同补投或覆盖规则；记录门禁证据，建议以“feat: 实现原子文件交接事实”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有发布类型是否误用相同补投或覆盖规则；记录门禁证据，建议以“feat: 实现原子文件交接事实”形成独立提交。
 
 ### F6 媒体工具的受管执行
 
