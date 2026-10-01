@@ -217,7 +217,8 @@
             "entity": "plan",
             "selection": "report_targets_and_parents",
             "order_by": "plans.id",
-            "empty": "omit"
+            "empty": "omit",
+            "encoding_order": 1
           }
         },
         "plan_file_diagnostics": {
@@ -230,7 +231,8 @@
             "entity": "diagnostic",
             "selection": "report_targets_and_parents",
             "order_by": "plan_file_diagnostics.id",
-            "empty": "omit"
+            "empty": "omit",
+            "encoding_order": 2
           }
         }
       }
@@ -314,7 +316,8 @@
             "entity": "action",
             "selection": "report_targets_and_parents",
             "order_by": "actions.id",
-            "empty": "omit"
+            "empty": "omit",
+            "encoding_order": 1
           }
         }
       }
@@ -734,7 +737,8 @@
             "entity": "output",
             "selection": "report_targets_and_parents",
             "order_by": "outputs.id",
-            "empty": "omit"
+            "empty": "omit",
+            "encoding_order": 1
           }
         },
         "deliveries": {
@@ -750,7 +754,8 @@
             "entity": "delivery",
             "selection": "report_targets_and_parents",
             "order_by": "deliveries.id",
-            "empty": "omit"
+            "empty": "omit",
+            "encoding_order": 2
           }
         },
         "automation": {

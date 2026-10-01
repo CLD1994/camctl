@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
-from camctl.contracts.json_values import MISSING, JsonParseError, parse_exact_json
+from camctl.contracts.json_values import MISSING, JsonParseError, is_json_integer, parse_exact_json
 from camctl.contracts.input_fields import reconstruct_action_input
 from camctl.contracts.values import ConsistencyError, format_utc_micros
 from camctl.contracts.workflow_errors import registered_error_spec, validate_error_details
@@ -25,6 +25,8 @@ __all__ = [
     "ProjectionInput",
     "PublicFragment",
     "PublicProjectionError",
+    "ProjectionStructure",
+    "projection_structure",
     "project_public",
     "public_changed",
 ]
@@ -49,6 +51,14 @@ class ProjectionInput:
 PublicFragment = dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ProjectionStructure:
+    """公开对象的身份字段及实体子集合；顺序来自字段依赖登记。"""
+
+    identity_field: str | None
+    entity_fields: tuple[tuple[str, str], ...]
+
+
 class _Omit:
     """合法省略标记。"""
 
@@ -68,10 +78,36 @@ OMIT = _Omit()
 
 @lru_cache(maxsize=1)
 def _dependencies() -> dict[str, Any]:
-    document = json.loads(resource_bytes(_RESOURCE))
+    document = parse_exact_json(resource_bytes(_RESOURCE).decode("utf-8"))
     if document.get("format_version") != 1:
         raise PublicProjectionError("报告字段依赖登记版本不受支持")
     return document
+
+
+def projection_structure(entity: str) -> ProjectionStructure:
+    """从同一权威投影取得编码结构，不复制字段与实体清单。"""
+    definition = _dependencies()["projections"].get(entity)
+    if definition is None:
+        raise PublicProjectionError(f"未登记的公开实体投影: {entity}")
+    identities = []
+    children = []
+    for name, field_spec in definition["fields"].items():
+        value = field_spec["value"]
+        if (value.get("op") == "read" and value.get("encoding") == "id"
+                and value.get("column") == definition["root_table"] + ".id"):
+            identities.append(name)
+        if value.get("op") == "entities":
+            order = value.get("encoding_order")
+            if not is_json_integer(order) or not 1 <= order <= len(definition["fields"]):
+                raise PublicProjectionError(f"实体子集合 {entity}.{name} 缺少合法编码顺序")
+            children.append((int(order), name, value["entity"]))
+    if len(identities) > 1:
+        raise PublicProjectionError(f"公开投影 {entity} 声明了多个对象身份")
+    children.sort()
+    if [order for order, _, _ in children] != list(range(1, len(children) + 1)):
+        raise PublicProjectionError(f"投影 {entity} 的子集合编码顺序必须唯一且连续")
+    return ProjectionStructure(identities[0] if identities else None,
+                               tuple((name, child) for _, name, child in children))
 
 
 def _enum_member(column: str, value: int) -> str:

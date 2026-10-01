@@ -29,6 +29,17 @@ test('正式登记覆盖公开字段，来源列均已落实到 SQL', () => {
   assert(!result.columns.includes('operation_attempts.attempt_no'));
   assert.deepEqual(result.pendingSql, []);
 });
+test('实体子集合必须登记明确编码顺序', () => rejected(value => {
+  delete value.projections.report.fields.plans.value.encoding_order;
+}));
+test('实体子集合的编码顺序不能重复', () => rejected(value => {
+  value.projections.action.fields.outputs.value.encoding_order = 1;
+  value.projections.action.fields.deliveries.value.encoding_order = 1;
+}));
+test('实体子集合的编码顺序必须连续', () => rejected(value => {
+  value.projections.report.fields.plans.value.encoding_order = 1;
+  value.projections.report.fields.plan_file_diagnostics.value.encoding_order = 3;
+}));
 test('遗漏已有公开字段被拒绝', () => rejected(value => { delete value.projections.action.fields.status; }));
 test('公共 Schema 增加字段后要求补齐登记', () => {
   const changed = structuredClone(schema); changed.$defs.delivery.properties.receipt = { type: 'string' };

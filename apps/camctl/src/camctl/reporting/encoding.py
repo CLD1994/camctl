@@ -1,94 +1,203 @@
-"""确定性分批报告编码。
+"""固定报告排版、精确数字及有容量上限的字节输出。
 
-公开字段直接消费 K4.project_public；编码固定字段顺序、精确数字
-写法（Decimal 直出）与逐批实体输出。同 H 的同一事实集合重编码
-字节一致；分批只是生产组织，不改变字节内容。
+公开字段由共享投影计算，实体层级由同一字段登记决定。此处只
+编码传入的固定事实；冻结历史的分页恢复由生成调用方负责。
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Tuple
+from decimal import Decimal
+from typing import Any
 
-from camctl.contracts.public_projection import ProjectionInput, project_public
-from camctl.contracts.schemas import SchemaValidationError, validate_document
-from camctl.persistence.transaction import encode_json_value
+from camctl.contracts.public_projection import (
+    OMIT, ProjectionInput, project_public, projection_structure,
+)
+from camctl.contracts.schemas import validate_document
+from camctl.contracts.values import ObjectId, parse_object_id
 
-__all__ = ["ReportDocument", "encode_report", "iter_encoded_batches"]
+__all__ = ["ReportDocument", "encode_number", "encode_report", "iter_report_chunks"]
 
 _SCHEMA = "protocol/status-report.schema.json"
+_DEFAULT_BUFFER_SIZE = 64 * 1024
+EntityEntry = tuple[str, int, tuple[str, tuple[int, ...]]]
 
 
 @dataclass(frozen=True)
 class ReportDocument:
-    """一份报告的机器身份与入选实体集合。"""
+    """传入编码器的报告身份与入选根实体；不承担历史读取。"""
 
     report_id: str
     from_wm: int
     to_wm: int
-    plans: Tuple[Tuple[str, int, Tuple[str, Tuple[int, ...]]], ...] = ()
-    diagnostics: Tuple[Tuple[str, int, Tuple[str, Tuple[int, ...]]], ...] = ()
+    plans: tuple[EntityEntry, ...] = ()
+    diagnostics: tuple[EntityEntry, ...] = ()
 
 
-def _fragment(entity: str, entity_id: int, facts: Mapping[str, Mapping[int, Mapping[str, Any]]],
-              selected: Mapping[str, Tuple[int, ...]]) -> dict[str, Any]:
-    return project_public(
-        ProjectionInput(
-            entity=entity,
-            root_id=entity_id,
-            tables=facts,
-            selected_entities=selected,
-        )
-    )
+def encode_number(value: int | Decimal) -> bytes:
+    """按报告数值分区输出统一精确写法，不受 Decimal 上下文影响。"""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        raise ValueError("报告数值必须是整数或 Decimal")
+    number = Decimal(value) if isinstance(value, int) else value
+    if not number.is_finite():
+        raise ValueError("报告数值必须有限")
+    sign, digits, exponent = number.as_tuple()
+    coefficient = "".join(str(digit) for digit in digits)
+    shortened = coefficient.rstrip("0")
+    if not shortened:
+        return b"0"
+    exponent += len(coefficient) - len(shortened)
+    adjusted = len(shortened) + exponent - 1
+    if -6 <= adjusted < 21:
+        point = len(shortened) + exponent
+        if point <= 0:
+            text = "0." + "0" * -point + shortened
+        elif point >= len(shortened):
+            text = shortened + "0" * (point - len(shortened))
+        else:
+            text = shortened[:point] + "." + shortened[point:]
+    else:
+        text = shortened[0]
+        if len(shortened) > 1:
+            text += "." + shortened[1:]
+        text += "e" + str(adjusted)
+    return (("-" if sign else "") + text).encode("ascii")
 
 
-def build_report_payload(document: ReportDocument, facts) -> dict[str, Any]:
-    """构建完整报告文档（结构验证在编码前完成）。"""
-    payload: dict[str, Any] = {
-        "report_id": document.report_id,
-        "from_wm": document.from_wm,
-        "to_wm": document.to_wm,
-    }
-    plans = [
-        _fragment(entity, entity_id, facts, _selected(entries))
-        for entity, entity_id, entries in document.plans
-    ]
-    plans = [fragment for fragment in plans if fragment]
-    if plans:
-        payload["plans"] = plans
-    diagnostics = [
-        _fragment(entity, entity_id, facts, {})
-        for entity, entity_id, _entries in document.diagnostics
-    ]
-    diagnostics = [fragment for fragment in diagnostics if fragment]
-    if diagnostics:
-        payload["plan_file_diagnostics"] = diagnostics
-    validate_document(_SCHEMA, payload)
-    return payload
+def _string(value: str) -> bytes:
+    return json.dumps(value, ensure_ascii=False).encode("utf-8")
 
 
-def _selected(entries: Tuple[str, Tuple[int, ...]]) -> dict[str, Tuple[int, ...]]:
-    return {entity: ids for entity, ids in (entries,) if entity}
+def _iter_value(value: Any) -> Iterator[bytes]:
+    if value is None:
+        yield b"null"
+    elif value is True:
+        yield b"true"
+    elif value is False:
+        yield b"false"
+    elif isinstance(value, (int, Decimal)):
+        yield encode_number(value)
+    elif isinstance(value, str):
+        yield _string(value)
+    elif isinstance(value, dict):
+        yield from _iter_object(value)
+    elif isinstance(value, list):
+        yield b"["
+        for position, member in enumerate(value):
+            if position:
+                yield b","
+            yield from _iter_value(member)
+        yield b"]"
+    else:
+        raise ValueError(f"报告字段不是合法精确 JSON 值: {type(value).__name__}")
 
 
-def encode_report(document: ReportDocument, facts) -> bytes:
-    """编码整份报告：结构验证通过后输出精确 JSON 行。"""
-    payload = build_report_payload(document, facts)
-    encoded = encode_json_value(payload)
-    return (encoded + "\n").encode("utf-8")
+def _iter_object(value: dict, entity: str | None = None) -> Iterator[bytes]:
+    if any(not isinstance(key, str) for key in value):
+        raise ValueError("报告对象字段名必须是字符串")
+    children = () if entity is None else projection_structure(entity).entity_fields
+    child_names = {name for name, _ in children}
+    yield b"{"
+    wrote = False
+    for name in sorted(value.keys() - child_names):
+        if wrote:
+            yield b","
+        yield _string(name)
+        yield b":"
+        yield from _iter_value(value[name])
+        wrote = True
+    for name, child_entity in children:
+        if name not in value:
+            continue
+        members = value[name]
+        if not isinstance(members, list):
+            raise ValueError(f"实体集合 {name} 必须是数组")
+        if not members:
+            continue
+        identity = projection_structure(child_entity).identity_field
+        if identity is None:
+            raise ValueError(f"实体 {child_entity} 缺少登记身份字段")
+        ordered = sorted(members, key=lambda member: parse_object_id(member[identity]))
+        previous = None
+        if wrote:
+            yield b","
+        yield _string(name)
+        yield b":["
+        for position, member in enumerate(ordered):
+            current = parse_object_id(member[identity])
+            if current == previous:
+                raise ValueError(f"实体集合 {name} 的身份重复: {current}")
+            previous = current
+            if position:
+                yield b","
+            yield from _iter_object(member, child_entity)
+        yield b"]"
+        wrote = True
+    yield b"}"
 
 
-def iter_encoded_batches(document: ReportDocument, facts, *, batch_size: int):
-    """逐批产出报告字节片段；拼接结果与整体编码完全一致。
+def _projected_entities(entries: tuple[EntityEntry, ...], entity: str, facts: Mapping) -> Iterator[dict]:
+    previous = None
+    for source_entity, row_id, selected in sorted(entries, key=lambda entry: ObjectId(entry[1])):
+        if source_entity != entity:
+            raise ValueError(f"集合要求 {entity}，实际为 {source_entity}")
+        if row_id == previous:
+            raise ValueError(f"实体 {entity} 的身份重复: {row_id}")
+        previous = row_id
+        selection = {selected[0]: selected[1]} if selected[0] else {}
+        fragment = project_public(ProjectionInput(entity, row_id, facts, selection))
+        if fragment is not OMIT:
+            yield fragment
 
-    逐批输出按 plans 列表切分；每个片段是完整 JSON 值的连续字节
-    流片段（由同一确定性编码器产出，不引入第二套格式）。
-    """
-    if batch_size < 1:
-        raise ValueError(f"批量上限必须是正整数: {batch_size}")
-    whole = encode_report(document, facts)
-    step = max(1, len(whole) // batch_size)
-    position = 0
-    while position < len(whole):
-        yield whole[position : position + step]
-        position += step
+
+def _iter_document(document: ReportDocument, facts: Mapping) -> Iterator[bytes]:
+    metadata = {"report_id": document.report_id, "from_wm": document.from_wm, "to_wm": document.to_wm}
+    parse_object_id(document.report_id)
+    validate_document(_SCHEMA, metadata)
+    collections = {"plans": document.plans, "plan_file_diagnostics": document.diagnostics}
+    yield b"{"
+    for position, name in enumerate(sorted(metadata)):
+        if position:
+            yield b","
+        yield _string(name)
+        yield b":"
+        yield from _iter_value(metadata[name])
+    for name, entity in projection_structure("report").entity_fields:
+        opened = False
+        for fragment in _projected_entities(collections[name], entity, facts):
+            # 单个根实体与真实公共结构组合校验；不会建立整份报告列表。
+            validate_document(_SCHEMA, {**metadata, name: [fragment]})
+            if opened:
+                yield b","
+            else:
+                yield b"," + _string(name) + b":["
+                opened = True
+            yield from _iter_object(fragment, entity)
+        if opened:
+            yield b"]"
+    yield b"}\n"
+
+
+def iter_report_chunks(document: ReportDocument, facts: Mapping, *, buffer_size: int) -> Iterator[bytes]:
+    """输出不超过容量的片段；后续投影失败时此前字节仍是未完成报告。"""
+    if isinstance(buffer_size, bool) or not isinstance(buffer_size, int) or buffer_size < 1:
+        raise ValueError("报告字节缓冲容量必须是正整数")
+    pending = bytearray()
+    for token in _iter_document(document, facts):
+        offset = 0
+        while offset < len(token):
+            length = min(buffer_size - len(pending), len(token) - offset)
+            pending.extend(token[offset:offset + length])
+            offset += length
+            if len(pending) == buffer_size:
+                yield bytes(pending)
+                pending.clear()
+    if pending:
+        yield bytes(pending)
+
+
+def encode_report(document: ReportDocument, facts: Mapping) -> bytes:
+    """完整编码的便利入口；文件生成使用 iter_report_chunks 逐段写出。"""
+    return b"".join(iter_report_chunks(document, facts, buffer_size=_DEFAULT_BUFFER_SIZE))

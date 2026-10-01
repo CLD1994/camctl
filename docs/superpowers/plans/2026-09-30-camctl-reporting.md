@@ -142,19 +142,29 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_encoding.py -q`，真实历史读取后编码并用公共 Schema、文件名摘要及独立字节预期验证。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 原始输入字段存在性、实体空集省略及跨页父子补齐；记录门禁证据，建议以“feat: 实现确定性分批报告编码”形成独立提交。
 
+**分项进度：** [报告编码与生成前置审查](2026-10-02-camctl-report-encoding-review.md)记录确定字节和编码缓冲的验证范围；完整 R3 仍需固定历史读取和子集合分页。
+
+- [x] 自身字段递归排序，实体子集合使用权威登记中的明确顺序；按完整整数 ID 排序并拒绝同集合重复身份。
+- [x] 精确数字按规定分区统一写法，不舍入，不受 Decimal 精度影响；字符串复用标准库转义，普通数组保序。
+- [x] 提供容量明确的字节输出接口，逐个投影根实体，缓冲变化不改变字节；后续投影错误保留失败，不能发布未完成文件。
+- [x] 真实受理、SQLite、冻结范围、公开投影与公共 Schema 组合后，编码符合独立字节预期；字段登记的书写顺序不改变结果。
+- [ ] 从固定 H 恢复分页入选事实，按子集合跨页写出；不组装完整计划或动作子树。
+
 ### R4 控制消息及通信线程所有权
 
 **预计文件：** `apps/camctl/src/camctl/reporting/messages.py`、`apps/camctl/src/camctl/reporting/communication.py`；测试为 `apps/camctl/tests/unit/reporting/test_messages.py` 和 `apps/camctl/tests/integration/reporting/test_messages.py`。
 
 **接口与依赖：** 提供 `encode_message(message: ControlMessage) -> bytes`、`decode_message(data: bytes) -> ControlMessage`、异步 `communicate(request: WorkerRequest) -> WorkerEvent`；WorkerRequest/WorkerEvent 为发送及已校验接收控制事件。前置交付：R1；Pipe 字节接口与线程通知端口。
 
-- [x] 编写失败用例。在 `test_messages_reject_wrong_task_and_size` 中未知版本、额外字段、错误 task_id、部分帧、非 UTF-8 或超容量，`assert task_completed is False`；旧结果不能完成新任务。通信阻塞时事件循环及生成总时限仍推进，停止后线程实际退出才关闭责任。
-- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_messages.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [x] 实施本任务。建议控制消息 version=1、最大 64 KiB、一次最多一个待发送生成任务，集中定义并校验。每端单一收发线程/进程拥有者，未使用的 Pipe 端立即关闭；线程通过 call_soon_threadsafe 交事件，父进程监测独立于阻塞收发。结束子进程并关闭对端后使阻塞通信返回，再由拥有者关闭端点和回收线程。
-- [x] 再运行上述命令，要求全部 PASS，并核对 消息容量不携带业务大集合，控制错误不静默当成功。
+- [ ] 编写失败用例。在 `test_messages_reject_wrong_task_and_size` 中未知版本、额外字段、错误 task_id、部分帧、非 UTF-8 或超容量，`assert task_completed is False`；旧结果不能完成新任务。通信阻塞时事件循环及生成总时限仍推进，停止后线程实际退出才关闭责任。
+- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_messages.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [ ] 实施本任务。建议控制消息 version=1、最大 64 KiB、一次最多一个待发送生成任务，集中定义并校验。每端单一收发线程/进程拥有者，未使用的 Pipe 端立即关闭；线程通过 call_soon_threadsafe 交事件，父进程监测独立于阻塞收发。结束子进程并关闭对端后使阻塞通信返回，再由拥有者关闭端点和回收线程。
+- [ ] 再运行上述命令，要求全部 PASS，并核对 消息容量不携带业务大集合，控制错误不静默当成功。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_messages.py -q`，真实 Pipe 覆盖部分帧、端点中断、发送阻塞、退出通知先后及线程关闭。
-- [x] 审阅实际接口、状态分区及失败路径，检查 所有重复端点、跨线程关闭和旧任务消息路径；记录门禁证据，建议以“feat: 实现报告控制通信契约”形成独立提交。
+- [ ] 审阅实际接口、状态分区及失败路径，检查 所有重复端点、跨线程关闭和旧任务消息路径；记录门禁证据，建议以“feat: 实现报告控制通信契约”形成独立提交。
+
+**实施状态：** 生产代码尚无 `messages.py`、`communication.py` 及对应消息测试；任务身份、帧校验和通信所有权仍需实现。
 
 ### R5 spawn、保护、工作锁与实际回收
 
@@ -162,13 +172,15 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供异步 `generate(job: GenerationJob) -> GenerationResult`、`stop_worker(reason: WorkerStopReason) -> WorkerSettlement`；Linux 适配 `install_parent_guard(expected_parent_pid: int) -> None` 与独立工作锁由子进程取得。前置交付：R3/R4、P1、S5、F1。
 
-- [x] 编写失败用例。建立 `test_exit_checks_delivered_result`，结果已到达而退出先处理，`assert generation.is_success is True`；仅残留文件无成功消息不得发布。父保护设置前后原父退出、保护失败、旧 worker 持锁、SQLite 启动能力失败、停止/超时/成功两种先后及迟到状态库错误均覆盖。
-- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_worker.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [x] 实施本任务。由在整个 worker 生命周期内存活的主线程启动 spawn；子进程先建立 PR_SET_PDEATHSIG=SIGKILL 并核对原父，再取得独立 flock、检查实际运行库，才 ready。每任务独立只读连接，短事务读取、完成写入/摘要/同步且无活动读事务后才成功。只复用成功健康 worker，失败后确认实际退出再清理。
-- [x] 再运行上述命令，要求全部 PASS，并核对 没有信号即结束或锁文件存在即占用的错误判定。
+- [ ] 编写失败用例。建立 `test_exit_checks_delivered_result`，结果已到达而退出先处理，`assert generation.is_success is True`；仅残留文件无成功消息不得发布。父保护设置前后原父退出、保护失败、旧 worker 持锁、SQLite 启动能力失败、停止/超时/成功两种先后及迟到状态库错误均覆盖。
+- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_worker.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [ ] 实施本任务。由在整个 worker 生命周期内存活的主线程启动 spawn；子进程先建立 PR_SET_PDEATHSIG=SIGKILL 并核对原父，再取得独立 flock、检查实际运行库，才 ready。每任务独立只读连接，短事务读取、完成写入/摘要/同步且无活动读事务后才成功。只复用成功健康 worker，失败后确认实际退出再清理。
+- [ ] 再运行上述命令，要求全部 PASS，并核对 没有信号即结束或锁文件存在即占用的错误判定。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_worker.py -q`，真实 Linux spawn/Pipe/父死亡/工作锁组合；未取得锁或未确认停止前禁止临时文件清理及复用。
-- [x] 审阅实际接口、状态分区及失败路径，检查 父线程寿命、句柄继承、结果与退出及全部工具资源；记录门禁证据，建议以“feat: 实现报告生成进程生命周期”形成独立提交。
+- [ ] 审阅实际接口、状态分区及失败路径，检查 父线程寿命、句柄继承、结果与退出及全部工具资源；记录门禁证据，建议以“feat: 实现报告生成进程生命周期”形成独立提交。
+
+**分项进度：** `worker.py` 有局部结果判定和先确认退出再清理的函数；现有集成测试运行独立子进程脚本，没有组合生产生成入口。尚无实际 spawn、父死亡保护、工作锁、冻结历史生成及 `supervisor.py`，这些任务保持未完成。
 
 ### R6 累计 ACK 及同步动作
 

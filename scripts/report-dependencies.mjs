@@ -24,7 +24,8 @@ const grammar = {
       operation('cases', { branches: { type: 'array', minItems: 1, items: object({ when: expression, value: expression }) }, otherwise: expression }),
       operation('project', { projection: text }),
       operation('rows', { projection: text, relations: strings, order_by: { type: 'array', minItems: 1, items: column } }),
-      operation('entities', { entity: text, selection: { const: 'report_targets_and_parents' }, order_by: column, empty: { const: 'omit' } }),
+      operation('entities', { entity: text, selection: { const: 'report_targets_and_parents' }, order_by: column,
+        encoding_order: { type: 'integer', minimum: 1 }, empty: { const: 'omit' } }),
       operation('extra_input', { column, exclude_schema: text, empty: { const: 'omit' } }),
       operation('registered_error', { code_column: column, details_column: column, registry_key: text, schema: { const: '#/$defs/error' } }),
       operation('failure_union', {
@@ -285,6 +286,11 @@ export function validateRegistration(registry, schema, { enums, errors, tables, 
       assert(assertion, `未知前置校验：${assertionName}`);
       for (const col of assertion.columns) checkColumn(col, scope);
     }
+    const encodingOrder = Object.values(projection.fields)
+      .filter(definition => definition.value.op === 'entities')
+      .map(definition => definition.value.encoding_order).sort((left, right) => left - right);
+    assert.deepEqual(encodingOrder, Array.from({ length: encodingOrder.length }, (_, index) => index + 1),
+      `${name} 的实体子集合编码顺序必须唯一且连续`);
     for (const [field, definition] of Object.entries(projection.fields)) {
       visit(definition.when, scope, name); visit(definition.value, scope, name, expected[field]); fields++;
       const allowed = literalValues(expected[field], schema), generated = generatedLiterals(definition.value);
