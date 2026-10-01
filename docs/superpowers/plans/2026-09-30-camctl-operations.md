@@ -127,13 +127,13 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 
 **接口与依赖：** 提供 `validate_query_scope(scope: QueryResponsibility) -> None`、`decide_query_next(facts: QueryFacts) -> QueryDecision`、`finish_check_round(round: ResultCheckRound, observations: CheckSet) -> CheckDecision`；这些类型按所属正式五种查询用途及核实结果定义。前置交付：O1/O2，目标活动的原设备配置。
 
-- [ ] 编写失败用例。建立 `test_pages_share_result_check_round`，一轮三批文件查询，`assert rounds_used == 1`；重启未完整结束的轮次按规则重新检查计新轮次，完整结果提交未知先核实。正常查询响应仍可能需要继续责任，不支持状态查询的任务 `assert query_attempts == 0`。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/operations/test_queries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。用途创建后不可改变，责任键、目标组合和配置完整保存；轮内失败不隐藏重发调用，状态查询与文件结果核实分别预算。可靠停止响应可满足已有判断时不为流程形式重复查询。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 Q-01—Q-12 逐项有用途、次数、间隔和归属断言。
+- [x] 编写失败用例。建立 `test_pages_share_result_check_round`，一轮三批文件查询，`assert rounds_used == 1`；重启未完整结束的轮次按规则重新检查计新轮次，完整结果提交未知先核实。正常查询响应仍可能需要继续责任，不支持状态查询的任务 `assert query_attempts == 0`。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/operations/test_queries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。用途创建后不可改变，责任键、目标组合和配置完整保存；轮内失败不隐藏重发调用，状态查询与文件结果核实分别预算。可靠停止响应可满足已有判断时不为流程形式重复查询。
+- [x] 再运行上述命令，要求全部 PASS，并核对 Q-01—Q-12 逐项有用途、次数、间隔和归属断言。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/operations/test_queries.py -q`，真实仓储与拍摄/残留收场替身组合，五种用途与跨设备配置保持独立。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 切换查询用途、轮内分页、恢复及配置改变是否刷新原预算；记录门禁证据，建议以“feat: 实现独立查询与核实责任”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 切换查询用途、轮内分页、恢复及配置改变是否刷新原预算；记录门禁证据，建议以“feat: 实现独立查询与核实责任”形成独立提交。
 
 ### O5 原尝试恢复及取消结果接手
 
