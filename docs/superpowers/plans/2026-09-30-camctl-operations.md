@@ -155,11 +155,11 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 
 **接口与依赖：** 使用真实 CLI/C 启动与 operations 接口；C 修改由 I1/I2 拥有，不在 Python 写主机回收逻辑。前置交付：I1/I2、O3/O5。
 
-- [ ] 编写失败用例。在 `test_next_run_waits_for_old_group_settlement` 中旧 camctl 已退出而工具或线程仍活，`assert next_run_started is False`；实际原组全部停止及最终回收后才按原 pending-start/预算放行。覆盖共享模拟服务端脱离前后、并行 submit 与其他组不受影响。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_process_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。用真实本地进程验证既定主机前提及 Python 启动归属，进程输出诊断不作为业务历史恢复证据；目标实际工具与主程序回收协作另列联调。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 R-08—R-12 与验收 32—36 的软件组合有证据。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 系统级放行与业务层资格是否互相代替；记录门禁证据，建议以“test: 验证受管调用与主机收场”形成独立提交。
+- [x] 编写失败用例。在 `test_next_run_waits_for_old_group_settlement` 中旧 camctl 已退出而工具或线程仍活，`assert next_run_started is False`；实际原组全部停止及最终回收后才按原 pending-start/预算放行。覆盖共享模拟服务端脱离前后、并行 submit 与其他组不受影响。
+- [x] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_process_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。用真实本地进程验证既定主机前提及 Python 启动归属，进程输出诊断不作为业务历史恢复证据；目标实际工具与主程序回收协作另列联调。
+- [x] 再运行上述命令，要求全部 PASS，并核对 R-08—R-12 与验收 32—36 的软件组合有证据。
+- [x] 审阅实际接口、状态分区及失败路径，检查 系统级放行与业务层资格是否互相代替；记录门禁证据，建议以“test: 验证受管调用与主机收场”形成独立提交。
 
 ## 模块完成门禁
 
