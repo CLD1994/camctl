@@ -117,13 +117,13 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **接口与依赖：** 提供同步 `transfer_segment(spec: SegmentSpec, source: ReadSession, target: WritableFile, clock: MonotonicClock) -> SegmentResult`；由 F2 在线程调用，WritableFile 是受约束写入/同步端口。前置交付：D4、F1/F2。
 
-- [ ] 编写失败用例。建立 `test_cancel_stops_between_chunks`，第一块完成后停止，`assert bytes_written < segment_end` 且没有新增同步；正在进行的同步返回后保留实际结果。覆盖剩余 0、小于/等于/大于段、跨边界块截取、提前 EOF、持续数据、设备日志、目标同步不计无数据等待。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_segments.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按 [C,E) 顺序读写，复用有界缓冲；块大小为独立工程参数，建议初值 1 MiB、合法范围为 1—4194304 字节的整数，单次请求不超过段剩余量。默认值和范围在消费前集中定义，后续按测量调整。源数据在线程及时观察，段大小读取既有配置，不把整段攒入内存。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 事件循环不逐块转发内容，数据到达与可靠进度分开。
+- [x] 编写失败用例。建立 `test_cancel_stops_between_chunks`，第一块完成后停止，`assert bytes_written < segment_end` 且没有新增同步；正在进行的同步返回后保留实际结果。覆盖剩余 0、小于/等于/大于段、跨边界块截取、提前 EOF、持续数据、设备日志、目标同步不计无数据等待。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_segments.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按 [C,E) 顺序读写，复用有界缓冲；块大小为独立工程参数，建议初值 1 MiB、合法范围为 1—4194304 字节的整数，单次请求不超过段剩余量。默认值和范围在消费前集中定义，后续按测量调整。源数据在线程及时观察，段大小读取既有配置，不把整段攒入内存。
+- [x] 再运行上述命令，要求全部 PASS，并核对 事件循环不逐块转发内容，数据到达与可靠进度分开。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_segments.py -q`，真实受控读取流和文件验证不同小块/段大小产生相同字节，停止控制可在段内到达。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 无数据计时是否跨本地写入、同步或数据库保存阶段累计；记录门禁证据，建议以“feat: 实现分段线程传输”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 无数据计时是否跨本地写入、同步或数据库保存阶段累计；记录门禁证据，建议以“feat: 实现分段线程传输”形成独立提交。
 
 ### F4 创建截断同步与摘要
 
