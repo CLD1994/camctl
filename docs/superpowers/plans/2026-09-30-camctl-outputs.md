@@ -96,13 +96,13 @@ X1 随首次录像完成；X2—X7 实现首条取回链。X8/X9 在明确来源
 
 **接口与依赖：** 提供 `validate_output_registration(drafts: tuple[OutputDraft, ...], facts: OutputCatalogFacts) -> RegistrationChanges`；RegistrationChanges 由 C3.finish_capture 的同一事务应用。前置交付：K1、D2、H1；不依赖取回全部实现。
 
-- [ ] 编写失败用例。在 `test_registration_preserves_device_file_identity` 中正式登记前后 `assert file_id_after == original_file_id`；没有归属或文件完成不能登记。合法登记尚无 SHA-256 可保存未知摘要，已有可靠值不得丢失；原片/修复/预览明确关联，任意目录顺序不能配对。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_catalog.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。把登记规则作为纯计算供采集完整终态事务使用；源位置、产物身份及关联固定，内部文件按适用校验提升。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 登记与动作结果原子，摘要不是所有产物的强制前置计算。
+- [x] 编写失败用例。在 `test_registration_preserves_device_file_identity` 中正式登记前后 `assert file_id_after == original_file_id`；没有归属或文件完成不能登记。合法登记尚无 SHA-256 可保存未知摘要，已有可靠值不得丢失；原片/修复/预览明确关联，任意目录顺序不能配对。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_catalog.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。把登记规则作为纯计算供采集完整终态事务使用；源位置、产物身份及关联固定，内部文件按适用校验提升。
+- [x] 再运行上述命令，要求全部 PASS，并核对 登记与动作结果原子，摘要不是所有产物的强制前置计算。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_catalog.py -q`，真实 C3/H3 组合证明正式产物与文件历史、原片关系及终态同时成立。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部拍摄及修复登记入口是否重复文件身份或拆开终态；记录门禁证据，建议以“feat: 实现正式产物登记规则”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部拍摄及修复登记入口是否重复文件身份或拆开终态；记录门禁证据，建议以“feat: 实现正式产物登记规则”形成独立提交。
 
 ### X2 来源固定、选择与精确 ID
 
