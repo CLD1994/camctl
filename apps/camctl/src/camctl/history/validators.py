@@ -13,6 +13,8 @@ from typing import Any, Callable, Mapping
 
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import TransactionRange
+from camctl.contracts.json_values import is_json_integer
+from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.history.changes import ChangeDerivationError, event_report_targets
 from camctl.history.events import (
     EventEnvelope,
@@ -81,13 +83,15 @@ def _fail(message: str) -> None:
 
 
 def _check_enum_value(table: str, column: str, value: Any) -> None:
-    if value is None or isinstance(value, bool):
+    if value is None:
         return
     definitions = load_enum_registry()
     enum_columns = {**definitions["enums"], **definitions["json_enums"]}
     definition = enum_columns.get(f"{table}.{column}")
-    if definition is None or not isinstance(value, int):
+    if definition is None:
         return
+    if not is_json_integer(value):
+        _fail(f"{table}.{column} 的枚举值必须是整数编号")
     if value not in set(definition["members"].values()):
         _fail(f"{table}.{column} 的值 {value} 不是登记的枚举编号")
 
@@ -126,14 +130,20 @@ def _match_update_spec(row: RowChange, spec: Mapping[str, Any], event_name: str,
     if before_keys != after_keys:
         _fail(f"{row.table}#{row.row_id} 更新前后列集合不一致")
     declared = set(spec.get("columns", before_keys))
-    if before_keys != declared:
+    if not before_keys or not before_keys <= declared:
         _fail(
             f"{row.table}#{row.row_id} 更新列 {sorted(before_keys)} 与声明的 {sorted(declared)} 不符"
         )
+    missing = set(spec.get("required", ())) - before_keys
+    if missing:
+        _fail(f"{row.table}#{row.row_id} 缺少必要更新列: {sorted(missing)}")
     allowed_columns = changeable_columns(row.table)
     illegal = before_keys - allowed_columns
     if illegal:
         _fail(f"{row.table}#{row.row_id} 更新了不可变或派生列: {sorted(illegal)}")
+    for image in (row.before, row.after):
+        for column, value in image.values.items():
+            _check_enum_value(row.table, column, value)
     for column, allowed in spec.get("before", {}).items():
         if column in row.before.values:
             value = row.before.values[column]
@@ -152,8 +162,6 @@ def _match_update_spec(row: RowChange, spec: Mapping[str, Any], event_name: str,
         if column in row.after.values and row.after.values[column] is None:
             _fail(f"{row.table}#{row.row_id} 的 {column} 不能为空")
     _check_transitions(row, spec, event_name, branch_name)
-    for column, value in row.after.values.items():
-        _check_enum_value(row.table, column, value)
     return True
 
 
@@ -341,12 +349,18 @@ register_guard("ownership", _ownership_guard)
 register_guard("report_impact", _report_impact_guard)
 
 
-def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEvent:
-    """按登记完整校验一条事件并解析对象引用。
-
-    结构校验先于守卫执行；分支要求的任何具名守卫未注册时
-    整条事件被拒绝，不能默认接受。
-    """
+def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[str, Any]]:
+    """保存与历史读取共用格式、分支及行权限，不执行业务守卫。"""
+    try:
+        for value in (event.event_id, event.transaction_id, event.event_type,
+                      event.event_version, event.reason):
+            ObjectId(value)
+        UtcMicros(event.occurred_at)
+        if event.change_seq is not None:
+            ObjectId(event.change_seq)
+        ObjectId(event.clock_status)
+    except ValueError as error:
+        raise EventValidationError(str(error)) from error
     registry = load_event_registry()
     if event.event_version != 1:
         _fail(f"事件 {event.event_id} 的正文版本 {event.event_version} 不受支持")
@@ -358,12 +372,22 @@ def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEven
     type_spec = registry["events"][event_name]
     if type_spec["version"] != event.event_version:
         _fail(f"事件 {event_name} 要求版本 {type_spec['version']}")
-    if event.clock_status not in (1, 2, 3):
-        _fail(f"事件 {event.event_id} 的时钟状态 {event.clock_status} 非法")
+    _check_enum_value("history_events", "clock_status", event.clock_status)
+    if not isinstance(event.evidence, Mapping):
+        _fail(f"事件 {event.event_id} 的 evidence 必须是对象")
     if not event.rows:
         _fail(f"事件 {event.event_id} 的 rows 为空")
     seen: set[tuple[str, int]] = set()
     for row in event.rows:
+        try:
+            ObjectId(row.row_id)
+        except ValueError as error:
+            raise EventValidationError(str(error)) from error
+        for image in (row.before, row.after):
+            if type(image.exists) is not bool or not isinstance(image.values, Mapping):
+                _fail(f"行 {row.table}#{row.row_id} 的存在性和值结构非法")
+            if not image.exists and image.values:
+                _fail(f"不存在的行 {row.table}#{row.row_id} 不能携带列值")
         if (row.table, row.row_id) in seen:
             _fail(f"行 {row.table}#{row.row_id} 在同一事件中出现两次")
         seen.add((row.table, row.row_id))
@@ -378,6 +402,12 @@ def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEven
                 f"行 {row.table}#{row.row_id} 不匹配 {event_name}.{branch_name}"
                 " 声明的任何行规格"
             )
+    return event_name, branch_name, branch
+
+
+def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEvent:
+    """完整结构校验后执行业务守卫，再解析实际对象引用。"""
+    event_name, branch_name, branch = validate_event_structure(event)
 
     for guard_name in branch["guards"]:
         guard = NAMED_GUARDS.get(guard_name)

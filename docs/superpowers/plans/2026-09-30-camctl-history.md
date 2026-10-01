@@ -93,7 +93,7 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 - [x] 再运行上述命令，要求全部 PASS，并核对 每个已支持分支的业务不变量有明确校验入口。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_events.py -q`，P3 实际写事务拒绝缺项及跨表错误，即使行内 SQL 接受也不能提交。
-- [x] 审阅实际接口、状态分区及失败路径，检查 事件应用、修复、导入和目录重建是否存在绕过校验的入口；记录门禁证据，建议以“feat: 实现事件契约的生产校验”形成独立提交。
+- [ ] 审阅实际接口、状态分区及失败路径，检查 事件应用、修复、导入和目录重建是否存在绕过校验的入口；记录门禁证据，建议以“feat: 实现事件契约的生产校验”形成独立提交。必要字段真实变化、多状态转换及证据成员校验仍按[结构余项](2026-10-02-camctl-history-read-review.md#事件结构余项的实施顺序)完成后验收。
 
 ### H2 历史归属、公开变化与计数
 
@@ -127,11 +127,18 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **接口与依赖：** 提供 `read_entities(request: EntityReadRequest) -> EntityBatch`、`read_events(request: EventReadRequest) -> Page[EventEnvelope, int]`；EventReadRequest 含对象、恢复方向、完整固定范围、最后事件位置和上限。分页结果遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)。前置交付：P5、H3。
 
-- [x] 编写失败用例。在 `test_each_projection_batch_binds_its_c` 中批间插入新提交，`assert restore(batch, h) == expected_at_h`；游标和事务在返回前关闭。长对象、事件跨批、父对象跨批补齐、不同批量和空范围分别验证。读取错误不能返回空 Page。
-- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_queries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [x] 实施本任务。在同一短读事务中取得投影及 C，转换为独立数据并结束游标和读事务后返回；实体、事件批量分别使用本次配置，按稳定 ID/事件位置续读。仅在可靠确认范围结束时返回空继续位置，最后一批仍交付其中的数据。
-- [x] 再运行上述命令，要求全部 PASS，并核对 所有实体恢复到同 H，长期读事务不会陪同 JSON 编码。
-- [x] 审阅实际接口、状态分区及失败路径，检查 读取接口是否返回活动 cursor、整棵子树或混合不同边界；记录门禁证据，建议以“feat: 实现固定历史边界分批查询”形成独立提交。
+- [ ] 编写失败用例。在 `test_each_projection_batch_binds_its_c` 中批间插入新提交，`assert restore(batch, h) == expected_at_h`；游标和事务在返回前关闭。长对象、事件跨批、父对象跨批补齐、不同批量和空范围分别验证。读取错误不能返回空 Page。
+- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_queries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [ ] 实施本任务。在同一短读事务中取得投影及 C，转换为独立数据并结束游标和读事务后返回；实体、事件批量分别使用本次配置，按稳定 ID/事件位置续读。仅在可靠确认范围结束时返回空继续位置，最后一批仍交付其中的数据。
+- [ ] 再运行上述命令，要求全部 PASS，并核对 所有实体恢复到同 H，长期读事务不会陪同 JSON 编码。
+- [ ] 审阅实际接口、状态分区及失败路径，检查 读取接口是否返回活动 cursor、整棵子树或混合不同边界；记录门禁证据，建议以“feat: 实现固定历史边界分批查询”形成独立提交。
+
+分项状态：
+
+- [x] [全局事件分页基础](2026-10-02-camctl-history-read-review.md)：核实完整 H、事务分组、严格范围和连续事件位置；正反向分页在返回前释放读资源，共用版本、分支及行权限校验。
+- [ ] 对象读取请求绑定数据库身份、对象、H、方向及恢复范围；当前投影与 C 联合读取，并组合正逆恢复。
+- [ ] 固定 H 的报告入选范围、关联候选优化、对象自身成员分批及父子补齐。
+- [ ] 事件结构余项：必要字段真实变化、空更新、多状态转换与证据成员校验；详见上述审查计划。
 
 ### H5 独立文件历史与关联候选
 
