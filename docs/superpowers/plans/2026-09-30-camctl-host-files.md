@@ -103,13 +103,13 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **接口与依赖：** 提供异步 `run_file_task(task: FileTask, owner: ResponsibilityOwner) -> FileTaskResult`、`request_stop(task_id: FileTaskId) -> None`；FileTaskResult 显式给出实际未执行或已结束结果。前置交付：S5、F1；执行器端口替身。
 
-- [ ] 编写失败用例。建立 `test_cancel_does_not_release_started_file`，排队或已开始分别取消，`assert lease.released is False` 直到实际结束；撤回与开始竞争只有一个结果。重复停止不重复释放，不对同文件安排第二段。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_tasks.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。通过 asyncio.to_thread 共享默认池，停止通知与任务状态形成唯一判定；已开始任务受监督跟踪，不以 Future 被取消作为真实结束。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 同文件最多一个未结束任务，关闭遵守实际执行状态。
+- [x] 编写失败用例。建立 `test_cancel_does_not_release_started_file`，排队或已开始分别取消，`assert lease.released is False` 直到实际结束；撤回与开始竞争只有一个结果。重复停止不重复释放，不对同文件安排第二段。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_tasks.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。通过 asyncio.to_thread 共享默认池，停止通知与任务状态形成唯一判定；已开始任务受监督跟踪，不以 Future 被取消作为真实结束。
+- [x] 再运行上述命令，要求全部 PASS，并核对 同文件最多一个未结束任务，关闭遵守实际执行状态。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_tasks.py -q`，真实默认线程池排队、跨段由不同线程执行及取消后结果组合。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有线程池调用与文件句柄关闭是否有一致拥有者；记录门禁证据，建议以“feat: 实现文件任务所有权与接手”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有线程池调用与文件句柄关闭是否有一致拥有者；记录门禁证据，建议以“feat: 实现文件任务所有权与接手”形成独立提交。
 
 ### F3 段内小块传输与源无数据观察
 
