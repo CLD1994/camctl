@@ -58,7 +58,8 @@ REGISTRY = EvidenceRegistry([STOP_CONFIRMED, OPERATION_RETURNED, QUERY_SNAPSHOT]
 
 _ERROR = ErrorValue(code="device_start_failed", stage="execution", details={})
 _TICKET = AttemptTicket(
-    attempt_id=3, operation="stop", target_id="7", responsibility_key="stop/7"
+    attempt_id=3, operation="stop", target_id="7", responsibility_key="stop/7",
+    run_id=1,
 )
 
 

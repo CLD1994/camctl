@@ -25,7 +25,7 @@ from camctl.history.changes import (
     derive_changes,
     event_report_targets,
 )
-from camctl.history.events import EventEnvelope, load_event_registry
+from camctl.history.events import SCHEMA_RESOURCES, EventEnvelope, load_event_registry
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -33,15 +33,6 @@ from camctl.history.validators import (
     validate_event,
 )
 from camctl.persistence.runtime import OwnedConnection
-
-_SCHEMA_RESOURCES = (
-    "sql/core.sql",
-    "sql/workflows.sql",
-    "sql/files.sql",
-    "sql/operations.sql",
-    "sql/reports.sql",
-    "sql/history.sql",
-)
 
 
 class TransactionError(ValueError):
@@ -124,7 +115,7 @@ class WriteReceipt:
 def json_columns() -> dict[str, frozenset[str]]:
     """从权威 SQL 收集按结构化值保存的 JSON 列。"""
     collected: dict[str, set[str]] = {}
-    for name in _SCHEMA_RESOURCES:
+    for name in SCHEMA_RESOURCES:
         sql = resource_bytes(name).decode("utf-8")
         for block in re.finditer(r"CREATE TABLE\s+(\w+)\s*\((.*?)\)\s*STRICT", sql, re.DOTALL):
             table = block.group(1)

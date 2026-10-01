@@ -101,11 +101,11 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 
 **接口与依赖：** 提供异步 `begin_attempt(command: AttemptIntent, key: OperationKey) -> DbOutcome[AttemptTicket]`、`finish_attempt(ticket: AttemptTicket, result: ValidatedOutcome, key: OperationKey) -> DbOutcome[OperationResult]`；OperationResult 含共同提交事实及通知目标。前置交付：P3/P4、H1/H2、O1；首次录像使用 Q4 组合操作。
 
-- [ ] 编写失败用例。建立 `test_prevented_dispatch_keeps_attempt_count`，意图提交后取消，`assert used_attempts == 1` 且 driver 未调用；意图失败则不派发。结果与设备/文件事实任一保存错误整组回滚，提交未知先核实；已有终态不会被迟到结果覆盖。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/operations/test_attempts.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。在原责任下占用预算及保存意图，再提交真实结果和适用等待/活动/文件事实；业务重试及动作完成由所属纯规则决定。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 各操作只取得一份真实结束记录，普通尝试意图引用不可省略。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部业务入口是否绕过先提交或拆开效果与尝试结果；记录门禁证据，建议以“feat: 实现操作意图及结果事务”形成独立提交。
+- [x] 编写失败用例。建立 `test_prevented_dispatch_keeps_attempt_count`，意图提交后取消，`assert used_attempts == 1` 且 driver 未调用；意图失败则不派发。结果与设备/文件事实任一保存错误整组回滚，提交未知先核实；已有终态不会被迟到结果覆盖。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/operations/test_attempts.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。在原责任下占用预算及保存意图，再提交真实结果和适用等待/活动/文件事实；业务重试及动作完成由所属纯规则决定。
+- [x] 再运行上述命令，要求全部 PASS，并核对 各操作只取得一份真实结束记录，普通尝试意图引用不可省略。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部业务入口是否绕过先提交或拆开效果与尝试结果；记录门禁证据，建议以“feat: 实现操作意图及结果事务”形成独立提交。
 
 ### O3 受管工具期限、停止与实际退出
 

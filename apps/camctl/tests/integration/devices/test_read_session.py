@@ -26,7 +26,8 @@ from camctl.operations.process import ToolSpec, execute_tool
 pytestmark = pytest.mark.asyncio
 
 _TICKET = AttemptTicket(
-    attempt_id=1, operation="read", target_id="9", responsibility_key="copy/9"
+    attempt_id=1, operation="read", target_id="9", responsibility_key="copy/9",
+    run_id=1,
 )
 
 

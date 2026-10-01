@@ -61,7 +61,8 @@ _DIGEST_UNAVAILABLE = EvidenceContract(
 _REGISTRY = EvidenceRegistry([_RETURNED, _ASSUMPTION, _DIGEST_OK, _DIGEST_UNAVAILABLE])
 
 _TICKET = AttemptTicket(
-    attempt_id=1, operation="digest", target_id="5", responsibility_key="digest/5"
+    attempt_id=1, operation="digest", target_id="5", responsibility_key="digest/5",
+    run_id=1,
 )
 
 

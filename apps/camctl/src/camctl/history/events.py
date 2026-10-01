@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Mapping
@@ -14,6 +15,16 @@ from typing import Any, Mapping
 from camctl.bootstrap.resources import resource_bytes
 
 _EVENT_REGISTRY_RESOURCE = "registry/event-transitions.json"
+
+#: 权威结构资源；事务内核与事件校验共同使用同一份 SQL。
+SCHEMA_RESOURCES = (
+    "sql/core.sql",
+    "sql/workflows.sql",
+    "sql/files.sql",
+    "sql/operations.sql",
+    "sql/reports.sql",
+    "sql/history.sql",
+)
 
 
 class HistoryEventError(ValueError):
@@ -52,6 +63,21 @@ class EventEnvelope:
     reason: int
     evidence: Mapping[str, Any]
     rows: tuple[RowChange, ...]
+
+
+@lru_cache(maxsize=1)
+def foreign_key_targets() -> dict[tuple[str, str], str]:
+    """从权威 SQL 收集 (表, 列) -> 被引用表 的单列外键指向。"""
+    targets: dict[tuple[str, str], str] = {}
+    for name in SCHEMA_RESOURCES:
+        sql = resource_bytes(name).decode("utf-8")
+        for block in re.finditer(r"CREATE TABLE\s+(\w+)\s*\((.*?)\)\s*STRICT", sql, re.DOTALL):
+            table, body = block.group(1), block.group(2)
+            for match in re.finditer(
+                r"(\w+)\s+INTEGER[^,)]*?REFERENCES\s+(\w+)\(id\)", body
+            ):
+                targets[(table, match.group(1))] = match.group(2)
+    return targets
 
 
 @lru_cache(maxsize=1)

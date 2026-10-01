@@ -2,8 +2,8 @@
 
 结果外层 format_version=1：调用状态、错误、效果分类、收场依据、
 观察及已知调用信息按正式结构表达。本地退出不推出远端退出或业务
-成功；可靠效果可与调用错误并存。AttemptTicket 的完整持久化字段
-由 O2 落地，本模块固定调用方核对所需的身份与操作上下文。
+成功；可靠效果可与调用错误并存。意图与结果的完整持久化事务由
+operations.attempts 与持久化仓储落地。
 """
 
 from __future__ import annotations
@@ -148,13 +148,15 @@ class ValidatedOutcome:
 class AttemptTicket:
     """一次已提交尝试的身份与操作上下文。
 
-    attempt_id 为本次流程内连续编号；operation 是 D2 登记的操作类
-    别；target_id 是观察身份核对的规范十进制目标；responsibility_
-    key 沿原流程责任键。原流程、活动或文件引用及实际配置由 O2
-    持久化时补齐，本字段集供结果核对使用。
+    run_id 是所属操作流程的持久化编号；attempt_id 为本次流程内连续
+    编号；operation 是 D2 登记的操作类别；target_id 是观察身份核对
+    的规范十进制目标（执行前检查等不指向具体对象时为空）；
+    responsibility_key 沿原流程责任键。实际配置由流程与尝试行各自
+    保存，本字段集供派发与结果核对使用。
     """
 
     attempt_id: int
     operation: str
     target_id: str | None
     responsibility_key: str
+    run_id: int

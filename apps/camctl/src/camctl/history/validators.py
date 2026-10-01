@@ -22,6 +22,7 @@ from camctl.history.events import (
     business_columns,
     changeable_columns,
     event_type_name,
+    foreign_key_targets,
     load_event_registry,
 )
 
@@ -94,8 +95,9 @@ def _check_enum_value(table: str, column: str, value: Any) -> None:
 def _match_create_spec(row: RowChange, spec: Mapping[str, Any]) -> bool:
     if spec.get("op") != "create" or row.table != spec["table"]:
         return False
+    # 分支的行规格是备选集合：存在性不满足时尝试下一规格。
     if row.before.exists or not row.after.exists:
-        _fail(f"{row.table}#{row.row_id} 的存在性不满足创建规格")
+        return False
     expected = business_columns(row.table)
     actual = set(row.after.values)
     if actual != set(expected):
@@ -116,8 +118,9 @@ def _match_create_spec(row: RowChange, spec: Mapping[str, Any]) -> bool:
 def _match_update_spec(row: RowChange, spec: Mapping[str, Any], event_name: str, branch_name: str) -> bool:
     if spec.get("op") != "update" or row.table != spec["table"]:
         return False
+    # 分支的行规格是备选集合：存在性不满足时尝试下一规格。
     if not row.before.exists or not row.after.exists:
-        _fail(f"{row.table}#{row.row_id} 更新要求前后行都存在")
+        return False
     before_keys = set(row.before.values)
     after_keys = set(row.after.values)
     if before_keys != after_keys:
@@ -160,11 +163,15 @@ def _check_transitions(row: RowChange, spec: Mapping[str, Any], event_name: str,
         model = state_models.get(f"{row.table}.{column}")
         if model is None:
             _fail(f"{row.table}.{column} 没有状态模型")
+        before_value = row.before.values.get(column)
+        after_value = row.after.values.get(column)
+        if before_value == after_value:
+            # 状态字段没有改变时无需状态转换；同一记录的其他真实变化
+            # 由事件行规格与业务校验约束。
+            continue
         edges = [edge for edge in model["edges"] if edge["id"] in transition_ids]
         if not edges:
             _fail(f"{row.table}.{column} 的转换 {transition_ids} 未登记")
-        before_value = row.before.values.get(column)
-        after_value = row.after.values.get(column)
         allowed_by = f"{event_name}.{branch_name}"
         for edge in edges:
             if allowed_by in edge["by"] and edge["from"] == before_value and edge["to"] == after_value:
@@ -186,8 +193,111 @@ def _transaction_guard(event: EventEnvelope, context: EventContext) -> None:
         )
 
 
+def _row_facts(
+    context: "EventContext",
+    table: str,
+    row_id: int,
+    overlays: Mapping[tuple[str, int], Mapping[str, Any]],
+) -> dict[str, Any]:
+    """按行编号取得该事件发生时的完整行事实（含自身编号）。
+
+    overlays 携带本事务先前事件及同一事件内其他行写入的值，使同
+    事件创建的引用行（如与首次尝试共同建立的流程）可以解析归属。
+    """
+    facts = dict(context.state_rows.get(table, {}).get(row_id, {}))
+    overlay = overlays.get((table, row_id))
+    if overlay is not None:
+        facts.update(overlay)
+    facts.setdefault("id", row_id)
+    return facts
+
+
+def _event_row_facts(
+    row: RowChange,
+    context: "EventContext",
+    overlays: Mapping[tuple[str, int], Mapping[str, Any]],
+) -> dict[str, Any]:
+    """事件行的完整事实：事务先前状态叠加本事件写入的值。"""
+    facts = _row_facts(context, row.table, row.row_id, overlays)
+    facts.update(row.after.values)
+    return facts
+
+
+def _condition_matches(facts: Mapping[str, Any], column: str, condition: Any) -> bool:
+    if condition == "present":
+        return facts.get(column) is not None
+    if isinstance(condition, list):
+        return facts.get(column) in condition
+    _fail(f"归属条件 {column}={condition!r} 未登记处理方式")
+    return False  # 仅为类型完整；_fail 必然抛出。
+
+
+def _resolve_owner_spec(
+    owner_spec: Mapping[str, Any],
+    table: str,
+    facts: Mapping[str, Any],
+    context: "EventContext",
+    overlays: Mapping[tuple[str, int], Mapping[str, Any]],
+    depth: int = 0,
+) -> tuple[str, int]:
+    """按登记的归属规格解析唯一历史对象 (实体名, 对象编号)。
+
+    cases 按行事实选择分支；inherit 沿外键继承被引用行的归属；
+    entity/id/via 沿外键链到达持有对象后读取编号列。解析所需的
+    引用行事实由命令作为 state_rows 提供或来自本事件写入，缺失时
+    明确拒绝。
+    """
+    if depth > 8:
+        _fail(f"{table} 的归属解析链超出深度限制")
+    if "cases" in owner_spec:
+        for case in owner_spec["cases"]:
+            when = case["when"]
+            if all(_condition_matches(facts, column, rule) for column, rule in when.items()):
+                return _resolve_owner_spec(
+                    case["owner"], table, facts, context, overlays, depth + 1
+                )
+        return _resolve_owner_spec(
+            owner_spec["otherwise"], table, facts, context, overlays, depth + 1
+        )
+    if "inherit" in owner_spec:
+        column = owner_spec["inherit"]
+        referenced = facts.get(column)
+        if referenced is None:
+            _fail(f"{table}.{column} 的继承归属引用为空")
+        ref_table = foreign_key_targets().get((table, column))
+        if ref_table is None:
+            _fail(f"未登记外键指向: {table}.{column}")
+        return _resolve_owner_spec(
+            load_event_registry()["tables"][ref_table]["owner"],
+            ref_table,
+            _row_facts(context, ref_table, referenced, overlays),
+            context,
+            overlays,
+            depth + 1,
+        )
+    current_table: str = table
+    current_facts: Mapping[str, Any] = facts
+    for column in owner_spec.get("via", ()):
+        referenced = current_facts.get(column)
+        if referenced is None:
+            _fail(f"{current_table}.{column} 的归属链引用为空")
+        ref_table = foreign_key_targets().get((current_table, column))
+        if ref_table is None:
+            _fail(f"未登记外键指向: {current_table}.{column}")
+        current_table = ref_table
+        current_facts = _row_facts(context, ref_table, referenced, overlays)
+    owner_id = current_facts.get(owner_spec["id"])
+    if owner_id is None:
+        _fail(f"{current_table}.{owner_spec['id']} 的归属编号缺失")
+    return owner_spec["entity"], owner_id
+
+
 def _ownership_guard(event: EventEnvelope, context: EventContext) -> None:
     tables = load_event_registry()["tables"]
+    overlays = {
+        (row.table, row.row_id): dict(row.after.values) if row.after.exists else {}
+        for row in event.rows
+    }
     for row in event.rows:
         spec = tables.get(row.table)
         if spec is None:
@@ -195,10 +305,13 @@ def _ownership_guard(event: EventEnvelope, context: EventContext) -> None:
         owner = context.owners.get((row.table, row.row_id))
         if owner is None:
             _fail(f"行 {row.table}#{row.row_id} 的历史归属未提供")
-        expected_entity = spec["owner"]["entity"]
-        if owner[0] != expected_entity:
+        expected = _resolve_owner_spec(
+            spec["owner"], row.table, _event_row_facts(row, context, overlays), context, overlays
+        )
+        if owner != expected:
             _fail(
-                f"行 {row.table}#{row.row_id} 的历史归属 {owner[0]!r} 与登记的 {expected_entity!r} 不一致"
+                f"行 {row.table}#{row.row_id} 的历史归属 {owner!r}"
+                f" 与登记解析的 {expected!r} 不一致"
             )
 
 
