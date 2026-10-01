@@ -7,13 +7,15 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 from typing import Callable
 
-from camctl.contracts.history_values import HistoryBoundary, ReadScope, validate_page
+from camctl.contracts.history_values import BoundaryError, HistoryBoundary, ReadOrder, ReadScope, validate_page
 from camctl.contracts.pages import Page
+from camctl.contracts.json_values import parse_exact_json, JsonParseError
+from camctl.contracts.values import ConsistencyError
+from camctl.acceptance.definitions import read_action_spec
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
@@ -49,24 +51,37 @@ class HistoryRepository:
         return HistoryBoundary(txn_id=int(row[0]), last_event_id=int(row[1]))
 
     def read_events(
-        self, scope: ReadScope, boundary: HistoryBoundary
-    ) -> Page[EventEnvelope]:
+        self, scope: ReadScope[int], boundary: HistoryBoundary
+    ) -> Page[EventEnvelope, int]:
         """按固定范围分批读取事件信封；结果独立拥有，游标严格推进。"""
         if scope.batch_limit < 1:
             raise ValueError(f"批量上限必须是正整数: {scope.batch_limit}")
+        if scope.order is ReadOrder.ASCENDING:
+            direction, operator = "ASC", ">"
+        elif scope.order is ReadOrder.DESCENDING:
+            direction, operator = "DESC", "<"
+        else:
+            raise BoundaryError(f"排序必须是 ReadOrder 成员: {scope.order!r}")
         connection = self._connect()
         try:
-            previous = scope.previous_position or 0
-            upper = min(scope.upper_position, boundary.last_event_id)
+            upper = boundary.last_event_id if scope.upper_position is None else min(
+                scope.upper_position, boundary.last_event_id
+            )
+            conditions = ["id >= ?", "id <= ?"]
+            parameters = [scope.lower_position, upper]
+            if scope.previous_position is not None:
+                conditions.append(f"id {operator} ?")
+                parameters.append(scope.previous_position)
             rows = connection.execute(
                 "SELECT id, transaction_id, event_type, event_version, occurred_at,"
                 " clock_status, change_seq, body_json FROM history_events"
-                " WHERE id > ? AND id <= ? ORDER BY id LIMIT ?",
-                (previous, upper, scope.batch_limit),
+                f" WHERE {' AND '.join(conditions)} ORDER BY id {direction} LIMIT ?",
+                (*parameters, scope.batch_limit),
             ).fetchall()
             items = tuple(_envelope_from_row(row) for row in rows)
             has_more = len(rows) == scope.batch_limit and (
-                rows[-1][0] < upper if rows else False
+                rows[-1][0] < upper if scope.order is ReadOrder.ASCENDING
+                else rows[-1][0] > scope.lower_position
             )
             page = Page(
                 items=items,
@@ -122,7 +137,10 @@ class HistoryRepository:
                 for row in rows:
                     values = dict(zip(names, row))
                     row_id = int(values.get("id", 0))
-                    tables.setdefault(table, {})[row_id] = _decode_row(values)
+                    decoded = _decode_row(values)
+                    if table == "actions":
+                        read_action_spec(decoded)
+                    tables.setdefault(table, {})[row_id] = decoded
             return tables
         finally:
             connection.close()
@@ -133,14 +151,14 @@ def _decode_row(values: dict) -> dict:
     for key, value in list(decoded.items()):
         if isinstance(value, str) and (key.endswith("_json") or key == "body_json"):
             try:
-                decoded[key] = json.loads(value)
-            except (json.JSONDecodeError, TypeError):
-                pass
+                decoded[key] = parse_exact_json(value)
+            except JsonParseError as error:
+                raise ConsistencyError(f"历史投影字段 {key} 不是有效精确 JSON") from error
     return decoded
 
 
 def _envelope_from_row(row) -> EventEnvelope:
-    body = json.loads(row[7])
+    body = parse_exact_json(row[7])
     rows = tuple(
         RowChange(
             table=item["table"],

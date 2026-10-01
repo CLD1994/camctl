@@ -153,7 +153,7 @@ class TestOtherPaths:
     async def test_host_end_control_schedules_stop(self) -> None:
         """主机负责结束：目标时长安排停止，不用检查公式。"""
         plan = plan_capture_wait(
-            _state(end_control=EndControl.HOST), _config(), _now()
+            _state(end_control=EndControl.HOST_TIMER), _config(), _now()
         )
         assert plan.kind is WaitKind.HOST_CONTROL_STOP
         assert plan.monotonic_deadline_ns == (

@@ -7,7 +7,7 @@ target_duration_ms 精确（1.5 秒=1500ms、1.0005 秒拒绝）；受理
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -17,13 +17,32 @@ from camctl.capture.models import (
     CaptureInput,
 )
 from camctl.capture.handlers import capture_handler, route_completion
+from camctl.devices.tasks import CaptureTask
 
 
 def _input(action_type: str = "camera_record", **params) -> CaptureInput:
-    return CaptureInput(action_type=action_type, effective_params=params)
+    return CaptureInput(action_type=action_type, effective_params=params,
+                        task=CaptureTask(action_type, **params) if action_type != "camera_take_photo" else None)
 
 
 class TestCaptureDefinition:
+    def test_record_definition_keeps_milliseconds_at_low_precision(self) -> None:
+        with localcontext() as context:
+            context.prec = 3
+            definition = CaptureDefinition.build(
+                _input(target_duration_s=Decimal("1.234"), stop_supported=True)
+            )
+        assert definition.target_duration_ms == 1234
+
+    def test_record_definition_rejects_tiny_fractional_millisecond(self) -> None:
+        with pytest.raises(ValueError):
+            CaptureDefinition.build(
+                _input(
+                    target_duration_s=Decimal("1.0000000000000000000000000001"),
+                    stop_supported=True,
+                )
+            )
+
     def test_record_definition_with_exact_duration(self) -> None:
         definition = CaptureDefinition.build(
             _input(target_duration_s=Decimal("1.5"), stop_supported=True)

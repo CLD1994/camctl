@@ -125,7 +125,7 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **预计文件：** `apps/camctl/src/camctl/history/queries.py`、`apps/camctl/src/camctl/persistence/repositories/history.py`；测试为 `apps/camctl/tests/integration/history/test_queries.py`。
 
-**接口与依赖：** 提供 `read_entities(request: EntityReadRequest) -> EntityBatch`、`read_events(request: EventReadRequest) -> Page[EventEnvelope]`；EventReadRequest 含对象、恢复方向、完整固定范围、最后事件位置和上限。分页结果遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)。前置交付：P5、H3。
+**接口与依赖：** 提供 `read_entities(request: EntityReadRequest) -> EntityBatch`、`read_events(request: EventReadRequest) -> Page[EventEnvelope, int]`；EventReadRequest 含对象、恢复方向、完整固定范围、最后事件位置和上限。分页结果遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)。前置交付：P5、H3。
 
 - [x] 编写失败用例。在 `test_each_projection_batch_binds_its_c` 中批间插入新提交，`assert restore(batch, h) == expected_at_h`；游标和事务在返回前关闭。长对象、事件跨批、父对象跨批补齐、不同批量和空范围分别验证。读取错误不能返回空 Page。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_queries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。

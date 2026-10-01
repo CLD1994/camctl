@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TextIO
 
-from camctl.contracts.schemas import SchemaValidationError, validate_document
+from camctl.contracts.schemas import SchemaRuleError, SchemaValidationError, validate_document
 from camctl.session.outcome import SessionOutcome
 
 __all__ = [
@@ -187,16 +187,13 @@ def main(
 def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
     import asyncio
 
-    from camctl.acceptance.input import parse_input, read_input
+    from camctl.acceptance.schema import RuleError
+    from camctl.acceptance.input import FileInputReader, parse_input, read_input
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.application import ConfigAdapter
     from camctl.bootstrap.config import ConfigError
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 
-    class _StdioReader:
-        def read(self, path: str) -> bytes:
-            with open(path, "rb") as handle:
-                return handle.read()
 
     try:
         adapter = ConfigAdapter(home=Path.home())
@@ -207,7 +204,7 @@ def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
 
     source = None
     if command.plan_path is not None:
-        read = asyncio.run(read_input(command.plan_path, _StdioReader()))
+        read = asyncio.run(read_input(command.plan_path, FileInputReader()))
         source = parse_input(read)
 
     try:
@@ -215,7 +212,7 @@ def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
             CommandMode.SUBMIT if command.kind is CommandKind.SUBMIT else CommandMode.RUN,
             config,
         )
-    except (FileNotFoundError, OSError) as error:
+    except (FileNotFoundError, OSError, RuleError) as error:
         print(f"camctl {command.kind.value}: {error}", file=err)
         return 1
 
@@ -239,6 +236,7 @@ def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
 
 
 def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
+    from camctl.acceptance.schema import RuleError
     from camctl.bootstrap.application import (
         ConfigAdapter,
         EmptyCapabilityCatalog,
@@ -254,7 +252,7 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
         catalog = build_catalog(config, default_driver_definitions())
         document = describe(config, catalog)
         payload = encode_describe_document(document).decode("utf-8")
-    except (ConfigError, SchemaValidationError, OSError) as error:
+    except (ConfigError, RuleError, SchemaRuleError, SchemaValidationError, OSError) as error:
         print(f"camctl describe: {error}", file=err)
         return 1
     out.write(payload)

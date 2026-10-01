@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.json_values import JsonValue
+from camctl.devices.tasks import CaptureTaskFactory
 
 __all__ = ["ParameterDefinition", "StaticActionCatalog"]
 
@@ -24,6 +25,8 @@ class ParameterDefinition:
 
     schema: JsonValue
     defaults: Mapping[str, JsonValue]
+    preview_supported: bool | None = None
+    task_factory: CaptureTaskFactory | None = None
 
 
 class StaticActionCatalog(Protocol):
@@ -37,6 +40,8 @@ class StaticActionCatalog(Protocol):
         """设备选择的驱动身份；设备不存在时为 None。"""
         ...
 
+    def device_supports(self, device_id: str, action_type: str) -> bool: ...
+
     def parameter_definition(
-        self, device_id: str, action_type: str
+        self, device_id: str, action_type: str, parameter_type: str
     ) -> ParameterDefinition | None: ...

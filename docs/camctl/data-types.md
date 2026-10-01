@@ -80,6 +80,8 @@ CLI 参数解析使用标准库 `argparse`；TOML 读取使用 Python 3.11 的 `
 
 精确数字适配集中在一处：
 
+`contracts.schemas` 提供统一的精确校验器构造、包内 Schema 读取及本地引用登记。受理、报告和能力说明通过该边界使用相同的数字规则；受理层只将规则错误与文档错误映射为所属错误类型。Schema 正文和引用资源均按精确 JSON 方式读取，根规则与独立资源的版本遵守[参数 Schema 版本契约](../architecture/camera-capabilities.md#拍摄参数的-json-schema)。
+
 | 操作 | 实现方向 | 必须保持的结果 |
 | --- | --- | --- |
 | JSON 解析 | 标准库解析，重复键检查，整数读作 `int`，小数和指数读作 `Decimal` | 非有限值、重复键及非法 Unicode 按既有输入层级失败 |

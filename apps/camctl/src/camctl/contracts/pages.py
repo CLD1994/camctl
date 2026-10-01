@@ -19,7 +19,7 @@ class PageError(ValueError):
 
 
 @dataclass(frozen=True)
-class Page(Generic[T]):
+class Page(Generic[T, C]):
     """一次读取交付的有界批次及继续位置。
 
     ``next_cursor`` 为 ``None`` 表示读取方已可靠确认扫描范围结束；

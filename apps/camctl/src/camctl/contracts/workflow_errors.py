@@ -6,16 +6,18 @@
 
 from __future__ import annotations
 
-import json
 from functools import lru_cache
 from typing import Mapping
 
 from camctl.bootstrap.resources import resource_bytes
+from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.schemas import create_validator, schema_registry, validation_errors
+from referencing.jsonschema import DRAFT202012
 
 
 @lru_cache(maxsize=1)
 def _registry() -> dict:
-    return json.loads(resource_bytes("protocol/workflow-codes.json"))
+    return parse_exact_json(resource_bytes("protocol/workflow-codes.json").decode("utf-8"))
 
 
 @lru_cache(maxsize=1)
@@ -44,6 +46,46 @@ def action_error_id(name: str) -> int:
         return action_error_ids()[name]
     except KeyError as error:
         raise ValueError(f"公共错误登记没有该动作错误: {name!r}") from error
+
+
+def action_error_spec(error_id: int) -> dict:
+    """读取已登记动作错误的完整契约，未登记编号不可解释。"""
+    for spec in _registry()["codes"].values():
+        if spec.get("action_error_id") == error_id and not isinstance(error_id, bool):
+            return spec
+    raise ValueError(f"公共错误登记没有该动作编号: {error_id!r}")
+
+
+def registered_error_spec(registry_key: str, error_id: int) -> tuple[str, dict]:
+    """按实际登记路径读取动作或明细错误，不复制错误清单。"""
+    if isinstance(error_id, bool) or not isinstance(error_id, int):
+        raise ValueError("已保存错误编号必须是整数")
+    for name, spec in _registry()["codes"].items():
+        value = spec
+        for key in registry_key.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        if value == error_id:
+            return name, spec
+    raise ValueError(f"错误编号 {error_id} 未登记为 {registry_key}")
+
+
+@lru_cache(maxsize=None)
+def _details_validator(code: str):
+    try:
+        details_schema = _registry()["codes"][code]["details_schema"]
+    except KeyError as error:
+        raise ValueError(f"未登记的公共错误码: {code}") from error
+    local = schema_registry().with_resource("workflow-codes.json", DRAFT202012.create_resource(_registry()))
+    schema = {"$schema":"https://json-schema.org/draft/2020-12/schema", **details_schema}
+    validated = create_validator(schema)
+    return type(validated)(schema, registry=local)
+
+
+def validate_error_details(code: str, details) -> None:
+    """生产与消费都验证已登记结构；文案不参与分类。"""
+    errors = validation_errors(_details_validator(code), details)
+    if errors:
+        raise ValueError(f"公共错误 {code} 的详情不符合登记结构: {errors[0].message}")
 
 
 def item_error_id(table: str, name: str) -> int:

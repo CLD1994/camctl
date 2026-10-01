@@ -20,6 +20,7 @@ const validate = (schema, value, label) => {
   assert(check(value), `${label}: ${ajv.errorsText(check.errors, { separator: '\n' })}`);
 };
 const registry = await json(join(root, 'protocol/errors/workflow-codes.json'));
+ajv.addSchema(registry, 'workflow-codes.json');
 const actionErrorIds = new Set();
 for (const [code, rule] of Object.entries(registry.codes)) {
   if (rule.action_error_id === undefined) continue;
@@ -37,6 +38,8 @@ for (const [code, value, valid] of [
   ['device_binding_unavailable', { device_id: 'camera', expected_driver_id: 'driver', actual_driver_id: 'other', reason: 'mismatch' }, true],
   ['action_validation_failed', { issues: [] }, false],
   ['action_validation_failed', { issues: [{ field: 'params', reason: 'required' }] }, true],
+  ['duplicate_auto_preview', { source_action_name:'shoot', obtain_action_names:['a','b'], issues:[{field:'actions[1].scheduled_at', reason:'range', value:'2026-02-30 09:00:00'}] }, true],
+  ['duplicate_auto_preview', { source_action_name:'shoot', obtain_action_names:['a','b'], issues:[] }, false],
 ]) {
   const { check } = errorChecks.get(code);
   assert.equal(Boolean(check(value)), valid, `${code}: 错误详情结构：${ajv.errorsText(check.errors)}`);

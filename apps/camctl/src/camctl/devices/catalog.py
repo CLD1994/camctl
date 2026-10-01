@@ -8,11 +8,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 from types import MappingProxyType
 from typing import Any, Mapping
 
 from camctl.acceptance.ports import ParameterDefinition
+from camctl.acceptance.schema import RuleError
 from camctl.bootstrap.config import ConfigSnapshot
+from camctl.devices.tasks import CaptureTaskFactory
+from camctl.devices.parameter_schemas import validate_parameter_schema, schema_with_defaults
 
 __all__ = [
     "ActionCapability",
@@ -41,6 +45,7 @@ class ActionCapability:
     preview_supported: bool
     schema: Mapping[str, Any]
     defaults: Mapping[str, Any]
+    task_factory: CaptureTaskFactory | None = None
 
 
 @dataclass(frozen=True)
@@ -48,7 +53,7 @@ class DriverDefinition:
     """一个已部署驱动的静态能力定义。"""
 
     driver_id: str
-    actions: Mapping[str, ActionCapability]
+    actions: Mapping[str, tuple[ActionCapability, ...]]
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,21 @@ class Catalog:
     def __init__(self, config: ConfigSnapshot, definitions: DriverDefinitions) -> None:
         self._devices: dict[str, Mapping[str, Any]] = dict(config.devices)
         self._definitions = definitions
+        for driver_id, definition in definitions.drivers.items():
+            if definition.driver_id != driver_id:
+                raise RuleError("驱动身份与登记键矛盾")
+            for action_type, capabilities in definition.actions.items():
+                if not capabilities:
+                    raise RuleError("已登记动作必须至少具有一种完整参数类型")
+                seen = set()
+                for capability in capabilities:
+                    if (capability.action_type != action_type or not capability.parameter_type
+                            or capability.parameter_type in seen or not isinstance(capability.preview_supported, bool)):
+                        raise RuleError("驱动动作及参数类型定义矛盾")
+                    seen.add(capability.parameter_type)
+        self._implemented = frozenset(
+            action_type for definition in definitions.drivers.values() for action_type in definition.actions
+        ) | {"obtain_action_outputs", "delete_action_outputs", "cancel_task", "report_status"}
         self._capabilities = self._resolve_capabilities()
 
     def _resolve_capabilities(self) -> dict[str, tuple[str, DriverDefinition, frozenset[str]]]:
@@ -85,24 +105,18 @@ class Catalog:
             driver_id = declaration.get("driver")
             definition = self._definitions.drivers.get(driver_id)
             if definition is None:
-                raise ValueError(f"设备 {device_id} 声明的驱动未部署: {driver_id!r}")
+                raise RuleError(f"设备 {device_id} 声明的驱动未部署: {driver_id!r}")
             kind = declaration.get("kind")
             declared = _KIND_ACTION_TYPES.get(kind, frozenset())
             resolved[device_id] = (driver_id, definition, declared)
         return resolved
 
     def action_types(self) -> frozenset[str]:
-        return frozenset(
-            action_type
-            for _, (_, definition, declared) in self._capabilities.items()
-            for action_type in definition.actions
-            if action_type in declared
-        ) | {
-            "obtain_action_outputs",
-            "delete_action_outputs",
-            "cancel_task",
-            "report_status",
-        }
+        return self._implemented
+
+    def device_supports(self, device_id: str, action_type: str) -> bool:
+        entry = self._capabilities.get(device_id)
+        return entry is not None and action_type in entry[2] and action_type in entry[1].actions
 
     def device_exists(self, device_id: str) -> bool:
         return device_id in self._capabilities
@@ -112,20 +126,31 @@ class Catalog:
         return entry[0] if entry is not None else None
 
     def parameter_definition(
-        self, device_id: str, action_type: str
+        self, device_id: str, action_type: str, parameter_type: str
     ) -> ParameterDefinition | None:
-        entry = self._capabilities.get(device_id)
-        if entry is None:
+        if not self.device_supports(device_id, action_type):
             return None
-        _, definition, declared = entry
-        if action_type not in declared:
+        _, definition, _ = self._capabilities[device_id]
+        capabilities = definition.actions[action_type]
+        seen: set[str] = set()
+        found = None
+        for capability in capabilities:
+            if capability.action_type != action_type or capability.parameter_type in seen:
+                raise RuleError("驱动能力与参数类型登记矛盾")
+            seen.add(capability.parameter_type)
+            if capability.parameter_type == parameter_type:
+                found = capability
+        if found is None:
             return None
-        capability = definition.actions.get(action_type)
-        if capability is None:
-            return None
-        return ParameterDefinition(
-            schema=dict(capability.schema), defaults=dict(capability.defaults)
-        )
+        if not isinstance(found.preview_supported, bool):
+            raise RuleError("驱动必须明确声明参数类型的预览支持")
+        schema = deepcopy(found.schema)
+        if not isinstance(schema, dict):
+            raise RuleError("参数 Schema 必须是对象")
+        validate_parameter_schema(parameter_type, schema)
+        schema = schema_with_defaults(schema, found.defaults)
+        return ParameterDefinition(schema=schema, defaults=deepcopy(found.defaults),
+                                   preview_supported=found.preview_supported, task_factory=found.task_factory)
 
     def document(self) -> dict[str, Any]:
         """能力说明文档（CapabilityCatalog 端口入口）。"""
@@ -139,18 +164,18 @@ class Catalog:
         ):
             actions = [
                 {
-                    "type": capability.action_type,
+                    "type": action_type,
                     "parameter_types": [
                         {
-                            "type": capability.parameter_type,
-                            "name": capability.name,
-                            "description": capability.description,
-                            "preview_supported": capability.preview_supported,
-                            "schema": dict(capability.schema),
-                        }
+                            "type": parameter.parameter_type,
+                            "name": parameter.name,
+                            "description": parameter.description,
+                            "preview_supported": parameter.preview_supported,
+                            "schema": dict(self.parameter_definition(device_id, action_type, parameter.parameter_type).schema),
+                        } for parameter in capabilities
                     ],
                 }
-                for action_type, capability in sorted(definition.actions.items())
+                for action_type, capabilities in sorted(definition.actions.items())
                 if action_type in declared
             ]
             devices.append(

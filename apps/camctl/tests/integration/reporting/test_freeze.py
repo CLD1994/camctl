@@ -13,7 +13,7 @@ import pytest
 
 from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
-from camctl.bootstrap.application import ConfigCapabilityCatalog
+from unit.acceptance.helpers import StubCatalog
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.initialization import InitOutcome, initialize_state
@@ -40,9 +40,7 @@ register_report_guards()
 
 pytestmark = pytest.mark.asyncio
 
-CATALOG = ConfigCapabilityCatalog(
-    {"cam-1": {"kind": "camera", "driver": "camctl-adb"}}
-)
+CATALOG = StubCatalog()
 
 
 def _plan_body(request_id: str) -> dict:

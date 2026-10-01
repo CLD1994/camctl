@@ -169,7 +169,15 @@ class TestCancelKeepsActualOwner:
 
     async def test_drain_consumes_late_handoffs(self) -> None:
         supervisor = Supervisor()
-        owner = RecordingOwner()
+        first_started = asyncio.Event()
+
+        class SignalingOwner(RecordingOwner):
+            async def take_over(self, task: OwnedTask) -> None:
+                if task.identity == "op-5":
+                    first_started.set()
+                await super().take_over(task)
+
+        owner = SignalingOwner()
         token = supervisor.register(owner)
         loop = asyncio.get_running_loop()
         first = loop.create_future()
@@ -177,12 +185,12 @@ class TestCancelKeepsActualOwner:
         supervisor.handoff(token, _task("op-5", first))
 
         async def late_handoff() -> None:
-            await asyncio.sleep(0.005)
+            await first_started.wait()
             supervisor.handoff(token, _task("op-6", second))
+            first.set_result({"kind": "COMPLETED"})
+            second.set_result({"kind": "COMPLETED"})
 
         late = asyncio.create_task(late_handoff())
-        loop.call_later(0.001, first.set_result, {"kind": "COMPLETED"})
-        loop.call_later(0.01, second.set_result, {"kind": "COMPLETED"})
         result = await supervisor.drain_required()
         await late
         assert sorted(owner.receipts) == ["op-5", "op-6"]

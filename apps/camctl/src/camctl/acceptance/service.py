@@ -42,6 +42,7 @@ class AckDisposition(Enum):
     VALID_NOT_ADVANCING = "valid_not_advancing"
     INVALID = "invalid"
     NOT_PROVIDED = "not_provided"
+    NOT_PROCESSED = "not_processed"
 
 
 @dataclass(frozen=True)

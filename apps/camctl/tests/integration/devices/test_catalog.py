@@ -38,7 +38,7 @@ _DEFINITIONS = DriverDefinitions(
         "camctl-adb": DriverDefinition(
             driver_id="camctl-adb",
             actions={
-                "camera_take_photo": ActionCapability(
+                "camera_take_photo": (ActionCapability(
                     action_type="camera_take_photo",
                     parameter_type="single_shot",
                     name="单张拍摄",
@@ -46,7 +46,7 @@ _DEFINITIONS = DriverDefinitions(
                     preview_supported=False,
                     schema=_SCHEMA,
                     defaults={"interval_s": Decimal("1.0")},
-                )
+                ),)
             },
         )
     }
@@ -123,3 +123,75 @@ class TestSameSourceRules:
         document["devices"][0]["actions"][0]["parameter_types"][0].pop("schema")
         with pytest.raises(SchemaValidationError):
             encode_describe_document(document)
+
+
+@pytest.mark.parametrize("device_id, supported", [("cam-1", True), ("cam-2", False)])
+@pytest.mark.parametrize("extra_device", [False, True])
+def test_device_support_keeps_local_failure_scope(device_id, supported, extra_device):
+    devices = {"cam-1":{"kind":"camera", "driver":"camctl-adb"},
+        "cam-2":{"kind":"camera", "driver":"other"}}
+    if extra_device:
+        devices["cam-3"] = {"kind":"camera", "driver":"camctl-adb"}
+    definitions = DriverDefinitions({**_DEFINITIONS.drivers,
+        "other":DriverDefinition("other", {})})
+    catalog = build_catalog(load_config({"devices":devices}, ConfigDefaults()), definitions)
+    body = _plan({"type":"single_shot", "quality":8})
+    body["actions"][0]["device_id"] = device_id
+    decision = validate_new_body(body, catalog)
+    assert not decision.is_whole_rejection
+    assert decision.actions[0].ok is supported
+    encode_describe_document(catalog.describe_document())
+
+
+def test_alternate_parameter_type_has_same_exported_and_effective_defaults():
+    from dataclasses import replace
+    capability = _DEFINITIONS.drivers["camctl-adb"].actions["camera_take_photo"][0]
+    alternate = replace(capability, parameter_type="alternate", preview_supported=True,
+        schema={**_SCHEMA,"properties":{**_SCHEMA["properties"],"type":{"const":"alternate"}}},
+        defaults={"interval_s":Decimal("2.0")})
+    definitions = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb",
+        {"camera_take_photo":(capability, alternate)})})
+    catalog = build_catalog(load_config({"devices":{"cam-1":{"kind":"camera","driver":"camctl-adb"}}}, ConfigDefaults()), definitions)
+    document = catalog.describe_document()
+    encode_describe_document(document)
+    exported = document["devices"][0]["actions"][0]["parameter_types"][1]
+    assert exported["type"] == "alternate"
+    assert exported["schema"]["properties"]["interval_s"]["default"] == Decimal("2.0")
+    decision = validate_new_body(_plan({"type":"alternate","quality":8}), catalog)
+    assert decision.actions[0].ok
+    assert decision.actions[0].effective_params == {"type":"alternate","quality":8,"interval_s":Decimal("2.0")}
+    assert decision.actions[0].parameter_definition.preview_supported is True
+
+
+@pytest.mark.parametrize("changes", [
+    {"$schema":None}, {"$schema":"https://json-schema.org/draft-07/schema"},
+    {"type":"invalid-type"}, {"type":"array"}, {"required":[]},
+    {"properties":{"type":{"const":"other"}}},
+    {"properties":{"type":{"const":"single_shot"},"extra":{"$ref":"missing.schema.json"}}},
+    {"properties":{"type":{"const":"single_shot"},"extra":{"$ref":"plan.schema.json#/$defs/source"}}},
+])
+def test_invalid_parameter_definition_fails_describe_and_acceptance(changes):
+    from dataclasses import replace
+    from camctl.acceptance.schema import RuleError
+    capability = _DEFINITIONS.drivers["camctl-adb"].actions["camera_take_photo"][0]
+    bad = replace(capability, schema={**_SCHEMA, **changes})
+    definitions = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb", {"camera_take_photo":(bad,)})})
+    config = load_config({"devices":{"cam-1":{"kind":"camera","driver":"camctl-adb"}}}, ConfigDefaults())
+    catalog = build_catalog(config, definitions)
+    with pytest.raises(RuleError):
+        catalog.describe_document()
+    with pytest.raises(RuleError):
+        validate_new_body(_plan({"type":"single_shot","quality":8}), catalog)
+
+
+def test_valid_parameter_local_reference_is_self_contained():
+    from dataclasses import replace
+    capability = _DEFINITIONS.drivers["camctl-adb"].actions["camera_take_photo"][0]
+    schema = {**_SCHEMA, "$defs":{"quality":{"type":"integer","minimum":1,"maximum":10}},
+        "properties":{**_SCHEMA["properties"],"quality":{"$ref":"#/$defs/quality"}}}
+    cap = replace(capability, schema=schema)
+    defs = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb", {"camera_take_photo":(cap,)})})
+    config = load_config({"devices":{"cam-1":{"kind":"camera","driver":"camctl-adb"}}},ConfigDefaults())
+    catalog = build_catalog(config, defs)
+    assert validate_new_body(_plan({"type":"single_shot","quality":8}),catalog).actions[0].ok
+    encode_describe_document(catalog.describe_document())

@@ -19,6 +19,9 @@
             },
             "minItems": 2,
             "uniqueItems": true
+          },
+          "issues": {
+            "$ref": "workflow-codes.json#/codes/action_validation_failed/details_schema/properties/issues"
           }
         },
         "required": [

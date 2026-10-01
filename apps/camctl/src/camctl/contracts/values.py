@@ -10,6 +10,7 @@ import re
 import secrets
 from datetime import date
 from decimal import Decimal
+from fractions import Fraction
 from typing import Any
 
 MAX_OBJECT_ID = 9223372036854775807
@@ -112,10 +113,10 @@ def parse_object_id(raw: Any) -> ObjectId:
         raise ValueTypeError(f"对象身份必须是规范十进制字符串: {raw!r}")
     if not _CANONICAL_ID.match(raw):
         raise ValueFormatError(f"对象身份不是规范十进制写法: {raw!r}")
-    value = int(raw)
-    if value > MAX_OBJECT_ID:
+    maximum = str(MAX_OBJECT_ID)
+    if len(raw) > len(maximum) or (len(raw) == len(maximum) and raw > maximum):
         raise ValueRangeError(f"对象身份超出范围 1～{MAX_OBJECT_ID}: {raw}")
-    return ObjectId(value)
+    return ObjectId(int(raw))
 
 
 def make_object_id(value: int) -> ObjectId:
@@ -179,16 +180,16 @@ def seconds_to_duration_ms(seconds: Any) -> DurationMillis:
     if isinstance(seconds, bool):
         raise ValueTypeError(f"秒值类型非法: {seconds!r}")
     if isinstance(seconds, int):
-        scaled = Decimal(seconds * 1000)
+        scaled = Fraction(seconds * 1000)
     elif isinstance(seconds, Decimal):
         if not seconds.is_finite():
             raise ValueRangeError(f"秒值不是有限数: {seconds}")
-        scaled = seconds * 1000
+        scaled = Fraction(seconds) * 1000
     else:
         raise ValueTypeError(f"秒值类型非法: {seconds!r}")
-    if scaled != scaled.to_integral_value():
+    if scaled.denominator != 1:
         raise ValueRangeError(f"秒值不能精确表示为整数毫秒: {seconds}")
-    result = int(scaled)
+    result = scaled.numerator
     if result < 0:
         raise ValueRangeError(f"毫秒时长不能为负: {seconds}")
     return DurationMillis(result)

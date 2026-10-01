@@ -33,12 +33,9 @@ def _plan(request_id: str) -> dict:
         "name": "plan",
         "actions": [
             {
-                "name": "shoot",
-                "type": "camera_take_photo",
-                "device_id": "cam-1",
-                "scheduled_at": "2026-01-15 09:00:00",
-                "params": {"type": "single_shot"},
-                "policy": {"max_delay_ms": 1000},
+                "name": "status",
+                "type": "report_status",
+                "params": {"scope": "full"},
             }
         ],
     }

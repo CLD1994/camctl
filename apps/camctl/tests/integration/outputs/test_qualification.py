@@ -98,7 +98,7 @@ def _seed_action(
             " cancel_requested, error_code, error_details_json, first_window_observed_at,"
             " expiration_reason, source_resolution_state, resolved_source_plan_id,"
             " target_selection_state, created_event_id, last_event_id, change_count)"
-            " VALUES (?, ?, ?, ?, ?, ?, NULL, '{}', '{}', 'camctl-adb', 1000,"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, NULL, '{}', '{}', 'camctl-adb', 1000,"
             " '{}', ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
             (action_id, plan_id, action_id, f"action-{action_id}", action_type,
              device_id, scheduled_at, status, started),

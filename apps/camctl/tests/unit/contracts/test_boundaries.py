@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 from typing import Any
+from typing import get_type_hints
+from enum import Enum
 
 import pytest
 
@@ -72,22 +74,31 @@ class TestHistoryBoundary:
 
 
 class TestPage:
+    def test_item_and_cursor_types_can_be_declared_together(self) -> None:
+        def read_page() -> Page[str, int]:
+            return Page(items=("item",), next_cursor=1)
+
+        assert get_type_hints(read_page)["return"] == Page[str, int]
+        page = read_page()
+        assert page.items == ("item",)
+        assert page.next_cursor == 1
+
     def test_empty_page_can_continue(self) -> None:
-        page: Page[int] = Page(items=(), next_cursor=41)
+        page: Page[int, int] = Page(items=(), next_cursor=41)
         assert page.exhausted is False
 
     def test_nonempty_page_can_continue(self) -> None:
-        page: Page[int] = Page(items=(1, 2), next_cursor=41)
+        page: Page[int, int] = Page(items=(1, 2), next_cursor=41)
         assert page.exhausted is False
         assert tuple(page.items) == (1, 2)
 
     def test_last_page_keeps_items(self) -> None:
-        page: Page[int] = Page(items=(7,), next_cursor=None)
+        page: Page[int, int] = Page(items=(7,), next_cursor=None)
         assert page.exhausted is True
         assert tuple(page.items) == (7,)
 
     def test_empty_page_is_exhausted(self) -> None:
-        page: Page[int] = Page(items=(), next_cursor=None)
+        page: Page[int, int] = Page(items=(), next_cursor=None)
         assert page.exhausted is True
 
     def test_exhausted_is_not_a_constructor_argument(self) -> None:
@@ -95,7 +106,7 @@ class TestPage:
             Page(items=(), next_cursor=None, exhausted=True)  # type: ignore[call-arg]
 
     def test_exhausted_is_not_assignable(self) -> None:
-        page: Page[int] = Page(items=(), next_cursor=None)
+        page: Page[int, int] = Page(items=(), next_cursor=None)
         with pytest.raises(AttributeError):
             page.exhausted = False  # type: ignore[misc]
 
@@ -105,6 +116,23 @@ class TestPage:
 
 
 class TestValidatePage:
+    @pytest.mark.parametrize(
+        "order", ["ascending", "descending", None, 1, True, Enum("OtherOrder", "ASCENDING").ASCENDING]
+    )
+    def test_invalid_order_is_rejected_at_construction(self, order) -> None:
+        with pytest.raises(BoundaryError):
+            self._scope(order=order)
+
+    def test_scope_cursor_type_and_annotations_can_be_resolved(self) -> None:
+        scope_type = get_type_hints(self._scope)["return"]
+        assert scope_type == ReadScope[int]
+        scope = ReadScope[int](
+            order=ReadOrder.ASCENDING, previous_position=10,
+            lower_position=1, upper_position=100, batch_limit=5,
+            cursor_position=lambda cursor: cursor,
+        )
+        validate_page(Page(items=("item",), next_cursor=11), scope)
+
     @staticmethod
     def _scope(
         order: ReadOrder = ReadOrder.ASCENDING,
@@ -122,7 +150,7 @@ class TestValidatePage:
         )
 
     def test_advancing_cursor_is_accepted(self) -> None:
-        page: Page[int] = Page(items=(1,), next_cursor=11)
+        page: Page[int, int] = Page(items=(1,), next_cursor=11)
         validate_page(page, self._scope())
 
     def test_ascending_cursor_must_strictly_advance(self) -> None:

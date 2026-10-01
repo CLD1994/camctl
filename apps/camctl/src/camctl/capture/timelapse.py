@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from camctl.devices.tasks import EndControl, StartReturn
 
 __all__ = [
     "CaptureWaitConfig",
@@ -26,21 +27,6 @@ __all__ = [
 #: 毫秒到微秒与纳秒的换算。
 _MS_TO_US = 1_000
 _MS_TO_NS = 1_000_000
-
-
-class StartReturn(Enum):
-    """启动成功响应的含义（首次受理固定）。"""
-
-    SENT = "sent"
-    STARTED = "started"
-    COMPLETED = "completed"
-
-
-class EndControl(Enum):
-    """任务的结束责任。"""
-
-    DEVICE = "device"
-    HOST = "host"
 
 
 class WaitKind(Enum):
@@ -128,7 +114,7 @@ def plan_capture_wait(
         return WaitPlan(kind=WaitKind.VERIFY_FILES_NOW)
     if state.start_return is StartReturn.COMPLETED:
         return WaitPlan(kind=WaitKind.VERIFY_FILES_NOW)
-    if state.end_control is EndControl.HOST:
+    if state.end_control is EndControl.HOST_TIMER:
         anchor = state.anchor_monotonic_ns
         if anchor is None:
             return WaitPlan(kind=WaitKind.UNRESOLVABLE)

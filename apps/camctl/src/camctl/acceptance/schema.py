@@ -7,14 +7,12 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
-from functools import lru_cache
 from typing import Any
 
 from jsonschema import Draft202012Validator
-from jsonschema.validators import extend
-
-from camctl.contracts.json_values import is_json_integer, is_multiple
+from camctl.contracts.schemas import (
+    SchemaRuleError, create_validator, load_schema, validation_errors,
+)
 
 __all__ = ["BodySchemaError", "RuleError", "precise_validator_for", "validate_precise"]
 
@@ -32,68 +30,21 @@ class BodySchemaError(ValueError):
     """输入文档不符合对应 Schema（用户参数错误）。"""
 
 
-def _is_integer(_checker, instance: Any) -> bool:
-    if isinstance(instance, bool):
-        return False
-    return isinstance(instance, (int, Decimal)) and is_json_integer(instance)
-
-
-def _is_number(_checker, instance: Any) -> bool:
-    if isinstance(instance, bool) or not isinstance(instance, (int, Decimal)):
-        return False
-    if isinstance(instance, Decimal):
-        return instance.is_finite()
-    return True
-
-
-def _multiple_of(validator, db: Any, instance: Any, schema: Any) -> list:
-    from jsonschema.exceptions import ValidationError
-
-    if not _is_number(None, instance):
-        return []
-    try:
-        divisor = Decimal(str(db)) if not isinstance(db, Decimal) else db
-    except Exception:  # pragma: no cover - 规则本身异常
-        return [ValidationError(f"multipleOf 规则值不合法: {db!r}")]
-    if not is_multiple(instance, divisor):
-        return [ValidationError(f"{instance!r} 不是 {db!r} 的整数倍")]
-    return []
-
-
-@lru_cache(maxsize=8)
-def _precise_draft() -> type:
-    from jsonschema import validators
-
-    type_checker = Draft202012Validator.TYPE_CHECKER.redefine(
-        "integer", lambda checker, instance: _is_integer(checker, instance)
-    ).redefine("number", lambda checker, instance: _is_number(checker, instance))
-    return extend(Draft202012Validator, {"multipleOf": _multiple_of}, type_checker=type_checker)
-
-
 def precise_validator_for(schema: Any) -> Draft202012Validator:
     """按精确数字适配构造校验器；规则无效抛 RuleError。"""
-    from camctl.contracts.schemas import SchemaValidationError
-
     try:
-        registry = _plan_registry()
-        validator_class = _precise_draft()
-        validator_class.check_schema(schema)
-        return validator_class(schema, registry=registry)
-    except Exception as error:
+        return create_validator(schema)
+    except SchemaRuleError as error:
         raise RuleError(f"Schema 规则无效: {error}") from error
-
-
-@lru_cache(maxsize=1)
-def _plan_registry():
-    from camctl.contracts.schemas import _registry
-
-    return _registry()
 
 
 def validate_precise(schema: Any, document: Any, *, label: str = "输入") -> None:
     """校验文档；不符合时抛 BodySchemaError，规则无效抛 RuleError。"""
     validator = precise_validator_for(schema)
-    errors = sorted(validator.iter_errors(document), key=lambda error: list(error.absolute_path))
+    try:
+        errors = validation_errors(validator, document)
+    except SchemaRuleError as error:
+        raise RuleError(str(error)) from error
     if errors:
         first = errors[0]
         location = "/".join(str(part) for part in first.absolute_path)
@@ -103,12 +54,56 @@ def validate_precise(schema: Any, document: Any, *, label: str = "输入") -> No
 
 def plan_schema() -> Any:
     """公共计划 Schema（精确校验使用）。"""
-    import json
-
-    from camctl.bootstrap.resources import resource_bytes
-
-    return json.loads(resource_bytes(_PLAN_SCHEMA_RESOURCE))
+    try:
+        return load_schema(_PLAN_SCHEMA_RESOURCE)
+    except SchemaRuleError as error:
+        raise RuleError(str(error)) from error
 
 
 def validate_plan_structure(document: Any) -> None:
-    validate_precise(plan_schema(), document, label="计划正文")
+    validate_precise(plan_fragment("plan_structure"), document, label="计划正文")
+
+
+def plan_fragment(name: str) -> dict:
+    """通过本地公共资源定位受理片段，保留其引用基址。"""
+    return {"$schema": Draft202012Validator.META_SCHEMA["$id"],
+            "$ref": f"plan.schema.json#/$defs/{name}"}
+
+
+def schema_issues(schema: Any, document: Any, prefix: str) -> tuple[dict, ...]:
+    """把 Schema 的已确定错误转换为公共机器字段，不解析错误文案。"""
+    import re
+
+    try:
+        errors = validation_errors(precise_validator_for(schema), document)
+    except SchemaRuleError as error:
+        raise RuleError(str(error)) from error
+    issues: list[dict] = []
+    for error in errors:
+        path = prefix
+        for part in error.absolute_path:
+            path += f"[{part}]" if isinstance(part, int) else f".{part}"
+        if error.validator == "required":
+            additions = [
+                {"field": f"{path}.{key}", "reason": "required"}
+                for key in error.validator_value if key not in error.instance
+            ]
+        elif error.validator == "additionalProperties" and error.validator_value is False:
+            properties = error.schema.get("properties", {})
+            patterns = error.schema.get("patternProperties", {})
+            additions = [
+                {"field": f"{path}.{key}", "reason": "unsupported", "value": value}
+                for key, value in error.instance.items()
+                if key not in properties and not any(re.search(pattern, key) for pattern in patterns)
+            ]
+        else:
+            reason = (
+                "type" if error.validator == "type" else
+                "unsupported" if error.validator in {"enum", "const"} else
+                "combination" if error.validator in {"oneOf", "anyOf", "not", "dependentRequired"} else "range"
+            )
+            additions = [{"field": path, "reason": reason, "value": error.instance}]
+        for issue in additions:
+            if issue not in issues:
+                issues.append(issue)
+    return tuple(issues)

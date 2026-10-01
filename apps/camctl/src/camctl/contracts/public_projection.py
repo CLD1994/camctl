@@ -15,8 +15,10 @@ from typing import Any, Mapping
 
 from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
-from camctl.contracts.json_values import JsonParseError, parse_exact_json
-from camctl.contracts.values import format_utc_micros
+from camctl.contracts.json_values import MISSING, JsonParseError, parse_exact_json
+from camctl.contracts.input_fields import reconstruct_action_input
+from camctl.contracts.values import ConsistencyError, format_utc_micros
+from camctl.contracts.workflow_errors import registered_error_spec, validate_error_details
 
 __all__ = [
     "OMIT",
@@ -147,6 +149,11 @@ def project_public(facts: ProjectionInput) -> PublicFragment:
         raise PublicProjectionError(
             f"缺少 {root_table}#{facts.root_id} 的 H 事实（对象未出生或未取得）"
         )
+    if facts.entity == "action":
+        try:
+            reconstruct_action_input(root)
+        except (ConsistencyError, JsonParseError, KeyError, ValueError) as error:
+            raise PublicProjectionError(str(error)) from error
     context = _Context(facts, root, root_table, facts.root_id)
     if not _truthy(projection.get("when", {"op": "literal", "value": True}), context):
         return OMIT  # 类型检查器友好的省略标记
@@ -209,11 +216,11 @@ def _eval(node: Mapping[str, Any], context: _Context) -> Any:
         return bool(context.related((relation,)))
     if op == "json_has":
         document = _json(node["column"], context)
-        return _pointer(document, node["pointer"]) is not None
+        return _pointer(document, node["pointer"]) is not MISSING
     if op == "json_member":
         document = _json(node["column"], context)
         value = _pointer(document, node["pointer"])
-        if value is None:
+        if value is MISSING:
             raise PublicProjectionError(f"{node['column']} 缺少成员 {node['pointer']!r}")
         return value
     if op == "all":
@@ -274,9 +281,12 @@ def _json(column: str, context: _Context) -> Any:
 
 def _pointer(document: Any, pointer: str) -> Any:
     node: Any = document
-    for segment in pointer.lstrip("/").split("/"):
+    if pointer == "":
+        return node
+    for encoded in pointer.lstrip("/").split("/"):
+        segment = encoded.replace("~1", "/").replace("~0", "~")
         if not isinstance(node, Mapping) or segment not in node:
-            return None
+            return MISSING
         node = node[segment]
     return node
 
@@ -359,16 +369,13 @@ def _registered_error(node: Mapping[str, Any], context: _Context) -> Any:
     if code_value is None:
         raise PublicProjectionError("错误字段要求非空错误编号")
     details_value = context.column(node["details_column"])
-    registry = json.loads(resource_bytes("protocol/workflow-codes.json"))
-    for name, spec in registry["codes"].items():
-        if spec.get(node["registry_key"]) == code_value:
-            details = details_value
-            if isinstance(details_value, str):
-                details = parse_exact_json(details_value)
-            return {"code": name, "stage": spec.get("stage"), "details": details}
-    raise PublicProjectionError(
-        f"{node['code_column']} 的编号 {code_value} 未登记为 {node['registry_key']}"
-    )
+    try:
+        name, spec = registered_error_spec(node["registry_key"], code_value)
+        details = parse_exact_json(details_value) if isinstance(details_value, str) else details_value
+        validate_error_details(name, details)
+    except (TypeError, ValueError) as error:
+        raise PublicProjectionError(str(error)) from error
+    return {"code":name, "stage":spec["stage"], "details":details}
 
 
 def _extra_input(node: Mapping[str, Any], context: _Context) -> Any:

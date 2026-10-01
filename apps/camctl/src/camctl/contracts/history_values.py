@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable
+from typing import Callable, Generic, TypeVar
 
 from camctl.contracts.pages import Page
 from camctl.contracts.values import MAX_OBJECT_ID
+
+T = TypeVar("T")
+C = TypeVar("C")
 
 
 class BoundaryError(ValueError):
@@ -99,7 +102,7 @@ class ReadOrder(Enum):
 
 
 @dataclass(frozen=True)
-class ReadScope:
+class ReadScope(Generic[C]):
     """一次分页读取的固定范围与排序。
 
     具体游标结构由所属查询接口定义；``cursor_position``
@@ -111,14 +114,16 @@ class ReadScope:
     lower_position: int
     upper_position: int | None
     batch_limit: int
-    cursor_position: Callable[[object], int]
+    cursor_position: Callable[[C], int]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.order, ReadOrder):
+            raise BoundaryError(f"排序必须是 ReadOrder 成员: {self.order!r}")
         if not isinstance(self.batch_limit, int) or isinstance(self.batch_limit, bool) or self.batch_limit < 1:
             raise BoundaryError(f"批量上限必须是正整数: {self.batch_limit!r}")
 
 
-def validate_page(page: Page, scope: ReadScope) -> None:
+def validate_page(page: Page[T, C], scope: ReadScope[C]) -> None:
     """按固定范围校验批次的继续位置与批量上限。
 
     继续位置必须沿排序方向严格推进并保持在固定范围内；
@@ -142,11 +147,13 @@ def validate_page(page: Page, scope: ReadScope) -> None:
             raise BoundaryError(
                 f"升序游标必须严格推进: {position} 未超过 {scope.previous_position}"
             )
-    else:
+    elif scope.order is ReadOrder.DESCENDING:
         if scope.previous_position is not None and position >= scope.previous_position:
             raise BoundaryError(
                 f"降序游标必须严格减小: {position} 未小于 {scope.previous_position}"
             )
+    else:
+        raise BoundaryError(f"排序必须是 ReadOrder 成员: {scope.order!r}")
     if position < scope.lower_position:
         raise BoundaryError(f"游标位置低于固定范围下界: {position}")
     if scope.upper_position is not None and position > scope.upper_position:

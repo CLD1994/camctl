@@ -29,7 +29,7 @@ async def _seed_plans(repository: HistoryRepository, count: int) -> HistoryBound
     """经受理仓储建立 count 个计划并返回完整 H。"""
     from camctl.acceptance.input import parse_input, read_input
     from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
-    from camctl.bootstrap.application import ConfigCapabilityCatalog
+    from unit.acceptance.helpers import StubCatalog
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.repositories.acceptance import (
         AcceptanceRepository,
@@ -38,9 +38,7 @@ async def _seed_plans(repository: HistoryRepository, count: int) -> HistoryBound
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
     register_acceptance_guards()
-    catalog = ConfigCapabilityCatalog(
-        {"cam-1": {"kind": "camera", "driver": "camctl-adb"}}
-    )
+    catalog = StubCatalog()
 
     class _Reader:
         def read(self, path: str) -> bytes:
@@ -98,6 +96,52 @@ class _StubSource:
 
 
 class TestReadEvents:
+    async def test_descending_events_follow_scope_order(self, repository: HistoryRepository) -> None:
+        boundary = await _seed_plans(repository, 3)
+        page = repository.read_events(
+            ReadScope(
+                order=ReadOrder.DESCENDING, previous_position=None,
+                lower_position=1, upper_position=boundary.last_event_id,
+                batch_limit=2, cursor_position=lambda cursor: cursor,
+            ), boundary,
+        )
+        assert [event.event_id for event in page.items] == [6, 5]
+        collected = list(page.items)
+        while not page.exhausted:
+            page = repository.read_events(
+                ReadScope(
+                    order=ReadOrder.DESCENDING, previous_position=page.next_cursor,
+                    lower_position=1, upper_position=boundary.last_event_id,
+                    batch_limit=2, cursor_position=lambda cursor: cursor,
+                ), boundary,
+            )
+            collected.extend(page.items)
+        assert [event.event_id for event in collected] == [6, 5, 4, 3, 2, 1]
+
+    async def test_first_page_obeys_lower_bound(self, repository: HistoryRepository) -> None:
+        boundary = await _seed_plans(repository, 2)
+        page = repository.read_events(
+            ReadScope(
+                order=ReadOrder.ASCENDING, previous_position=None,
+                lower_position=3, upper_position=boundary.last_event_id,
+                batch_limit=10, cursor_position=lambda cursor: cursor,
+            ), boundary,
+        )
+        assert [event.event_id for event in page.items] == [3, 4]
+        assert page.exhausted
+
+    async def test_unbounded_scope_uses_frozen_history_end(self, repository: HistoryRepository) -> None:
+        boundary = await _seed_plans(repository, 2)
+        page = repository.read_events(
+            ReadScope(
+                order=ReadOrder.ASCENDING, previous_position=None,
+                lower_position=1, upper_position=None,
+                batch_limit=10, cursor_position=lambda cursor: cursor,
+            ), boundary,
+        )
+        assert [event.event_id for event in page.items] == [1, 2, 3, 4]
+        assert page.exhausted
+
     async def test_paged_events_bind_boundary(self, repository: HistoryRepository) -> None:
         boundary = await _seed_plans(repository, 3)
         scope = ReadScope(

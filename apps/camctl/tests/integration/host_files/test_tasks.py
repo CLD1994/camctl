@@ -50,9 +50,12 @@ async def test_default_pool_runs_tasks_on_worker_threads() -> None:
     owner = StopAndAwaitOwner()
     loop_thread = threading.get_ident()
     seen_threads: list[int] = []
+    overlap = threading.Barrier(2)
 
     def body(stop: threading.Event, index: int) -> str:
         seen_threads.append(threading.get_ident())
+        if index in (1, 2):
+            overlap.wait(timeout=10)
         return f"p{index}"
 
     futures = [

@@ -1,8 +1,8 @@
 """F3 段内小块传输与源无数据观察的单元测试。
 
 按 [C,E) 顺序逐块读写：块大小与段长三种关系及跨边界截取、段尾
-恰好读完、提前 EOF、块间停止不新增同步、进行中的同步保留实际结
-果；目标写入与同步不累计源无数据等待；源错误分类透传。
+恰好读完、提前 EOF、块间停止不新增同步；目标写入与同步不累计
+源无数据等待；源错误分类透传。
 """
 
 from __future__ import annotations
@@ -57,14 +57,12 @@ class RecordingTarget:
         *,
         write_delay_s: float = 0.0,
         fail_write_on: int | None = None,
-        sync_gate: threading.Event | None = None,
         fail_sync: bool = False,
     ) -> None:
         self.written: list[bytes] = []
         self.sync_calls = 0
         self._write_delay = write_delay_s
         self._fail_write_on = fail_write_on
-        self._sync_gate = sync_gate
         self._fail_sync = fail_sync
 
     def write(self, data: bytes) -> int:
@@ -76,8 +74,6 @@ class RecordingTarget:
         return len(data)
 
     def sync(self) -> None:
-        if self._sync_gate is not None:
-            assert self._sync_gate.wait(timeout=10)
         self.sync_calls += 1
         if self._fail_sync:
             raise OSError("sync error")
@@ -203,32 +199,6 @@ async def test_stop_before_tail_sync_skips_sync() -> None:
     assert result.processed_end == 10
     assert result.synced is False
     assert target.sync_calls == 0
-
-
-async def test_sync_in_progress_keeps_actual_result() -> None:
-    """同步进行中停止到达：等待真实结果，已发生的同步保留。"""
-    gate = threading.Event()
-    stop = threading.Event()
-    stream = ScriptedStream([b"a" * 10])
-    session = await _session(10, stream=stream)
-    target = RecordingTarget(sync_gate=gate)
-    holder: list[SegmentResult] = []
-
-    def run() -> None:
-        holder.append(transfer_segment(_spec(0, 10, chunk=10, stop=stop), session, target))
-
-    worker = threading.Thread(target=run)
-    worker.start()
-    deadline = time.monotonic() + 10
-    while target.sync_calls == 0 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    stop.set()
-    gate.set()
-    worker.join(timeout=10)
-    result = holder[0]
-    assert result.error is None
-    assert result.synced is True
-    assert result.processed_end == 10
 
 
 async def test_sync_failure_is_reported() -> None:

@@ -46,10 +46,10 @@ class RuntimeDeps:
 
 
 def _default_catalog(config: ConfigSnapshot):
-    """按本地设备声明构建的默认静态目录（D1 落地前的如实占位）。"""
-    from camctl.bootstrap.application import ConfigCapabilityCatalog
+    """从 describe 使用的同一部署定义构建受理目录。"""
+    from camctl.devices.catalog import build_catalog, default_driver_definitions
 
-    return ConfigCapabilityCatalog(config.devices)
+    return build_catalog(config, default_driver_definitions())
 
 
 def build_runtime(

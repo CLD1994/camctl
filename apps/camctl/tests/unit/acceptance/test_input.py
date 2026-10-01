@@ -13,6 +13,7 @@ import pytest
 from camctl.acceptance.input import (
     InputDiagnostic,
     InputFileReader,
+    InputReadFailure,
     InputStage,
     parse_input,
     read_input,
@@ -46,12 +47,12 @@ async def _diagnostic_for(payload: bytes) -> InputDiagnostic:
 
 class TestReadInput:
     async def test_partial_read_has_no_identity(self) -> None:
-        reader = FakeReader(error=OSError("读取在后半段中断"))
+        reader = FakeReader(error=InputReadFailure(InputStage.READ, OSError("读取在后半段中断")))
         read = await read_input("/plans/p.json", reader)
         diagnostic = parse_input(read)
         assert isinstance(diagnostic, InputDiagnostic)
         assert diagnostic.request_id is None
-        assert diagnostic.stage is InputStage.OPEN
+        assert diagnostic.stage is InputStage.READ
         # 只尝试一次打开，不重读。
         assert reader.open_count == 1
 
@@ -64,7 +65,7 @@ class TestReadInput:
 
     async def test_open_error_keeps_path_and_detail(self) -> None:
         read = await read_input(
-            "/plans/missing.json", FakeReader(error=FileNotFoundError("no such file"))
+            "/plans/missing.json", FakeReader(error=InputReadFailure(InputStage.OPEN, FileNotFoundError("no such file")))
         )
         diagnostic = parse_input(read)
         assert diagnostic.path == "/plans/missing.json"

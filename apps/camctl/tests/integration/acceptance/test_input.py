@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from camctl.acceptance.input import (
+    FileInputReader,
     InputDiagnostic,
     InputStage,
     ParsedInput,
@@ -21,13 +22,40 @@ from camctl.acceptance.input import (
 pytestmark = pytest.mark.asyncio
 
 
-class RealFileReader:
-    def read(self, path: str) -> bytes:
-        with open(path, "rb") as handle:
-            return handle.read()
-
+RealFileReader = FileInputReader
 
 class TestRealFileInput:
+    async def test_opened_file_read_failure_discards_partial_content(self, tmp_path, monkeypatch):
+        import builtins
+        real_open = builtins.open
+        target = tmp_path / "interrupted.json"
+        target.write_bytes(b'{"request_id":"42","last_report_id":"20"}')
+        opened = []
+
+        class InterruptedFile:
+            def __init__(self, handle):
+                self.handle = handle
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.handle.close()
+            def read(self):
+                assert self.handle.read(20)
+                raise OSError("文件已经打开，读取尚未完成")
+
+        def open_with_read_fault(path, mode):
+            handle = real_open(path, mode)
+            opened.append(handle)
+            return InterruptedFile(handle)
+
+        monkeypatch.setattr(builtins, "open", open_with_read_fault)
+        read = await read_input(str(target), FileInputReader())
+        diagnostic = parse_input(read)
+        assert read.payload is None
+        assert diagnostic.stage is InputStage.READ and diagnostic.request_id is None
+        assert diagnostic.path == str(target)
+        assert len(opened) == 1 and opened[0].closed
+
     async def test_missing_file_is_open_diagnostic(self, tmp_path: Path) -> None:
         read = await read_input(str(tmp_path / "nope.json"), RealFileReader())
         diagnostic = parse_input(read)
@@ -60,3 +88,29 @@ class TestRealFileInput:
         parsed = parse_input(read)
         assert isinstance(parsed, ParsedInput)
         assert parsed.document["n"] == Decimal("1.10")
+
+
+@pytest.mark.parametrize("stage,code,public_stage", [("open","plan_file_read_failed","input_read"),("read","plan_file_read_failed","input_read"),("decode","invalid_encoding","input_parse"),("parse","invalid_json","input_parse")])
+async def test_input_diagnostic_matches_public_schema(environment, stage, code, public_stage):
+    from camctl.acceptance.service import accept_input, AckDisposition
+    from camctl.contracts.values import new_operation_key
+    from camctl.contracts.public_projection import ProjectionInput, project_public
+    from camctl.contracts.schemas import create_validator, validation_errors
+    from .test_acceptance import _owned
+    connection, context = environment
+    source = InputDiagnostic("/plans/broken.json", InputStage(stage), "完整输入不可用")
+    result = await accept_input(source, context, new_operation_key(), _owned(environment))
+    assert result.ack_disposition is AckDisposition.NOT_PROCESSED
+    cursor = connection.execute("SELECT * FROM plan_file_diagnostics")
+    row = dict(zip([d[0] for d in cursor.description], cursor.fetchone()))
+    fragment = project_public(ProjectionInput(entity="diagnostic", root_id=result.diagnostic_id, tables={"plan_file_diagnostics":{result.diagnostic_id:row}}))
+    assert fragment["errors"][0]["stage"] == public_stage
+    assert fragment["errors"][0]["code"] == code
+    assert "request_id" not in fragment
+    schema = {"$schema":"https://json-schema.org/draft/2020-12/schema", "$ref":"status-report.schema.json#/$defs/diagnostic"}
+    assert not validation_errors(create_validator(schema), fragment)
+    if stage in {"open","read"}:
+        assert fragment["errors"][0]["details"]["operation"] == stage
+
+
+from .test_acceptance import environment

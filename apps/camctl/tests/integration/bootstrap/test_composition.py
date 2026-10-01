@@ -25,6 +25,7 @@ from camctl.session.locks import probe_admission
 from ..persistence.test_runtime import _create_valid_database
 
 CAMERA_DEFINITION = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {"type": {"const": "single_shot"}},
     "required": ["type"],
@@ -50,7 +51,10 @@ class RecordingCatalog:
         self.calls.append(f"driver_id:{device_id}")
         return "camctl-adb"
 
-    def parameter_definition(self, device_id, action_type):
+    def device_supports(self, device_id, action_type):
+        return self.device_exists(device_id) and action_type.startswith("camera_")
+
+    def parameter_definition(self, device_id, action_type, parameter_type):
         self.calls.append(f"parameter_definition:{device_id}")
         return ParameterDefinition(schema=CAMERA_DEFINITION, defaults={})
 
@@ -196,3 +200,12 @@ class TestResourceCleanup:
         close_runtime(deps)
         close_runtime(deps)  # 重复关闭不重复处理。
         assert probe_admission(deps.admission_lock).is_free
+
+
+async def test_default_runtime_rejects_undeployed_driver(tmp_path):
+    from dataclasses import replace
+    cfg = _config_for(tmp_path)
+    initialize_state(cfg, Path(cfg.paths.state_db))
+    cfg = replace(cfg, devices={"cam-1":{"kind":"camera","driver":"undeployed"}})
+    with pytest.raises(ValueError):
+        build_runtime(CommandMode.SUBMIT, cfg)

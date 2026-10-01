@@ -12,12 +12,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum, IntEnum
+from enum import Enum
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.catalog import OutputKind
+from camctl.outputs.definitions import SelectionMode
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
 
 __all__ = [
@@ -63,14 +64,6 @@ _ACTION_SOURCE_RESOLUTION_FAILED = action_error_id("source_resolution_failed")
 
 #: 可用性到 output_unavailable 公共详情取值的映射。
 _UNAVAILABLE_TEXT = {3: "cleaned", 4: "missing"}
-
-
-class SelectionMode(IntEnum):
-    """执行定义保存的取回选择方式。"""
-
-    DEFAULT = 1
-    PREVIEW = 2
-    EXPLICIT_IDS = 3
 
 
 class ResolveFailure(Enum):

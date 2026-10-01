@@ -19,6 +19,7 @@ from camctl.acceptance.service import (
     accept_input,
 )
 from camctl.acceptance.ports import ParameterDefinition
+from camctl.devices.tasks import CaptureTask
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import (
@@ -54,6 +55,7 @@ pytestmark = pytest.mark.asyncio
 _NOW = 1_750_000_000_000_000
 
 _RECORD_DEFINITION = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {"type": {"const": "timed"}, "duration_s": {"type": "integer"}},
     "required": ["type"],
@@ -83,9 +85,13 @@ class Catalog:
     def driver_id(self, device_id):
         return {"cam-1": "camctl-adb", "cam-2": "vendor-x"}.get(device_id)
 
-    def parameter_definition(self, device_id, action_type):
+    def device_supports(self, device_id, action_type):
+        return self.device_exists(device_id) and action_type.startswith("camera_")
+
+    def parameter_definition(self, device_id, action_type, parameter_type):
         if action_type == "camera_record" and device_id in {"cam-1", "cam-2"}:
-            return ParameterDefinition(schema=_RECORD_DEFINITION, defaults={})
+            return ParameterDefinition(schema=_RECORD_DEFINITION, defaults={"duration_s":60}, preview_supported=False,
+                task_factory=lambda params: CaptureTask("camera_record", target_duration_s=params["duration_s"], stop_supported=True))
         return None
 
 

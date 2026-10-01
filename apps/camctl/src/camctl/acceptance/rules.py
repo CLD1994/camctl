@@ -16,10 +16,12 @@ from camctl.acceptance.schema import (
     RuleError,
     validate_plan_structure,
     validate_precise,
+    plan_fragment, schema_issues,
 )
 from camctl.acceptance.ports import ParameterDefinition, StaticActionCatalog
 from camctl.contracts.json_values import JsonValue
-from camctl.contracts.values import ValueFormatError, to_utc_micros
+from camctl.contracts.values import ObjectId, ValueFormatError, ValueTypeError, to_utc_micros
+from camctl.devices.parameter_schemas import validate_parameter_schema
 
 __all__ = ["ActionValidation", "BodyDecision", "validate_capture_params", "validate_new_body"]
 
@@ -41,6 +43,15 @@ class ActionValidation:
     effective_params: JsonValue | None = None
     device_id: str | None = None
     action_type: str | None = None
+    scheduled_at_micros: int | None = None
+    group_name: str | None = None
+    max_delay_ms: int | None = None
+    input_fields: JsonValue | None = None
+    failure_code: str | None = None
+    failure_details: JsonValue | None = None
+    driver_id: str | None = None
+    parameter_type: str | None = None
+    parameter_definition: ParameterDefinition | None = None
 
 
 @dataclass(frozen=True)
@@ -82,9 +93,13 @@ def validate_new_body(raw: JsonValue, catalog: StaticActionCatalog) -> BodyDecis
 
     actions = raw["actions"]
     rejection_reasons: list[str] = []
+    if raw["name"] != raw["name"].strip():
+        rejection_reasons.append("计划名称含首尾空白")
     names: set[str] = set()
     for action in actions:
         name = action["name"]
+        if name != name.strip():
+            rejection_reasons.append(f"动作名称含首尾空白: {name!r}")
         if name in names:
             rejection_reasons.append(f"动作名称重复: {name}")
         names.add(name)
@@ -100,8 +115,8 @@ def validate_new_body(raw: JsonValue, catalog: StaticActionCatalog) -> BodyDecis
         )
 
     validated: list[ActionValidation] = []
-    for action in actions:
-        validated.append(_validate_action(action, catalog))
+    for index, action in enumerate(actions):
+        validated.append(_validate_action(action, catalog, index))
     return BodyDecision(
         is_whole_rejection=False,
         actions=tuple(validated),
@@ -109,43 +124,89 @@ def validate_new_body(raw: JsonValue, catalog: StaticActionCatalog) -> BodyDecis
     )
 
 
-def _validate_action(action: JsonValue, catalog: StaticActionCatalog) -> ActionValidation:
-    name = action["name"]
-    action_type = action["type"]
-    device_id = action.get("device_id")
-    failure: str | None = None
-    effective: JsonValue | None = None
+def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int) -> ActionValidation:
+    prefix = f"actions[{index}]"
+    name, action_type = action["name"], action["type"]
+    issues = list(schema_issues(plan_fragment("action"), action, prefix))
+    input_fields = {key: value for key, value in action.items() if key not in {"name", "type"}}
+    device_id = scheduled = group = max_delay = None
+    effective = None
+    driver_id = None
+    definition = None
+    parameter_type = None
 
-    if action_type in _CAMERA_TYPES:
-        if not catalog.device_exists(device_id):
-            failure = f"设备不存在: {device_id!r}"
+    params = action.get("params")
+    if isinstance(params, dict):
+        for owner in ("source", "target"):
+            reference = params.get(owner)
+            if isinstance(reference, dict):
+                for field in ("action_name", "group"):
+                    candidate = reference.get(field)
+                    if isinstance(candidate, str) and candidate != candidate.strip():
+                        issues.append({"field":f"{prefix}.params.{owner}.{field}", "reason":"range", "value":candidate})
+
+    if "device_id" in action and action_type in _CAMERA_TYPES:
+        raw_device = action["device_id"]
+        if not schema_issues(plan_fragment("action/properties/device_id"), raw_device, prefix + ".device_id"):
+            if catalog.device_exists(raw_device):
+                device_id = raw_device
+                del input_fields["device_id"]
+            else:
+                issues.append({"field": prefix + ".device_id", "reason": "reference", "value": raw_device})
+    if "scheduled_at" in action:
+        try:
+            scheduled = to_utc_micros(action["scheduled_at"])
+        except (ValueTypeError, ValueFormatError):
+            issue = {"field": prefix + ".scheduled_at", "reason": "type" if not isinstance(action["scheduled_at"], str) else "range", "value": action["scheduled_at"]}
+            if issue not in issues:
+                issues.append(issue)
         else:
-            scheduled = action.get("scheduled_at")
-            try:
-                to_utc_micros(scheduled)
-            except ValueFormatError as error:
-                failure = f"计划时间非法: {error}"
-            if failure is None:
-                definition = catalog.parameter_definition(device_id, action_type)
+            del input_fields["scheduled_at"]
+    if "group" in action and action_type != "obtain_action_outputs":
+        candidate = action["group"]
+        if not schema_issues(plan_fragment("action/properties/group"), candidate, prefix + ".group"):
+            if candidate == candidate.strip():
+                group = candidate
+                del input_fields["group"]
+            else:
+                issues.append({"field": prefix + ".group", "reason": "range", "value": candidate})
+    if action_type in _CAMERA_TYPES:
+        if "policy" in action and not schema_issues(plan_fragment("camera_policy"), action["policy"], prefix + ".policy"):
+            max_delay = int(action["policy"]["max_delay_ms"])
+        if device_id is not None:
+            params = action.get("params")
+            if not catalog.device_supports(device_id, action_type):
+                issues.append({"field": prefix + ".type", "reason": "unsupported", "value": action_type})
+            elif isinstance(params, dict) and isinstance(params.get("type"), str) and params["type"]:
+                definition = catalog.parameter_definition(device_id, action_type, params["type"])
                 if definition is None:
-                    raise RuleError(
-                        f"目录声明支持 {device_id}/{action_type} 但缺少参数定义"
-                    )
-                params = action.get("params", {})
-                validation = validate_capture_params(params, definition)
-                if validation.ok:
-                    effective = validation.effective_params
+                    issues.append({"field": prefix + ".params.type", "reason": "unsupported", "value": params["type"]})
                 else:
-                    failure = f"参数不符合规则: {validation.failure}"
-
+                    validate_parameter_schema(params["type"], definition.schema)
+                    parameter_type = params["type"]
+                    parameter_result = validate_capture_params(params, definition)
+                    if parameter_result.ok:
+                        effective = parameter_result.effective_params
+                    else:
+                        for issue in parameter_result.failure_details["issues"]:
+                            rewritten = {**issue, "field": prefix + ".params" + issue["field"][6:]}
+                            if rewritten not in issues:
+                                issues.append(rewritten)
+        if not issues:
+            driver_id = catalog.driver_id(device_id)
+            if not isinstance(driver_id, str) or not driver_id:
+                raise RuleError("合法拍摄动作缺少驱动绑定")
     return ActionValidation(
-        name=name,
-        raw=action,
-        ok=failure is None,
-        failure=failure,
-        effective_params=effective,
-        device_id=device_id,
-        action_type=action_type,
+        name=name, raw=action, ok=not issues,
+        failure="; ".join(issue["field"] + ": " + issue["reason"] for issue in issues) or None,
+        effective_params=effective if not issues else None,
+        device_id=device_id, action_type=action_type,
+        scheduled_at_micros=scheduled, group_name=group, max_delay_ms=max_delay,
+        input_fields=input_fields,
+        failure_code="action_validation_failed" if issues else None,
+        failure_details={"issues": issues} if issues else None,
+        driver_id=driver_id,
+        parameter_type=parameter_type, parameter_definition=definition,
     )
 
 
@@ -153,22 +214,20 @@ def validate_capture_params(
     raw: JsonValue, definition: ParameterDefinition
 ) -> ActionValidation:
     """按驱动参数定义校验并补齐默认值；原输入保持不变。"""
+    issues = schema_issues(definition.schema, raw, "params")
+    if issues:
+        return ActionValidation(name="", raw=raw, ok=False,
+                                failure="; ".join(i["field"] + ": " + i["reason"] for i in issues),
+                                failure_details={"issues": list(issues)})
     if not isinstance(raw, dict):
-        return ActionValidation(
-            name="",
-            raw=raw,
-            ok=False,
-            failure="参数必须是对象",
-        )
-    effective: dict[str, Any] = dict(definition.defaults)
-    effective.update(raw)
-    try:
-        validate_precise(definition.schema, effective, label="参数")
-    except BodySchemaError as error:
-        return ActionValidation(name="", raw=raw, ok=False, failure=str(error))
-    return ActionValidation(
-        name="", raw=raw, ok=True, effective_params=effective
-    )
+        raise RuleError("拍摄参数 Schema 必须约束完整对象")
+    from camctl.devices.catalog import apply_defaults
+
+    effective = apply_defaults(raw, definition.defaults)
+    if schema_issues(definition.schema, effective, "params"):
+        raise RuleError("驱动默认值使合法原参数不再符合参数规则")
+    return ActionValidation(name="", raw=raw, ok=True, effective_params=effective)
+
 
 
 #: 动作终态编号（succeeded/failed/expired/canceled）。
@@ -204,3 +263,39 @@ def derive_plan_state(actions: Sequence[ActionManagement]) -> PlanState:
     if any(action.execution_started == 1 for action in entries):
         return PlanState.RUNNING
     return PlanState.PENDING
+
+
+@dataclass(frozen=True)
+class RequestIdentityDecision:
+    """完整解析后的请求身份；非法值只形成业务诊断。"""
+
+    request_id: ObjectId | None
+    error: dict | None
+
+
+def extract_request_identity(document: JsonValue) -> RequestIdentityDecision:
+    from camctl.contracts.json_values import MISSING, json_field
+    from camctl.contracts.values import parse_object_id, ValueTypeError, ValueRangeError
+
+    if not isinstance(document, dict):
+        return RequestIdentityDecision(None, {
+            "stage": "admission", "code": "plan_body_rejected",
+            "details": {"field": "", "reason": "type", "value": document},
+        })
+    raw = json_field(document, "request_id")
+    details = {"field": "request_id"}
+    if raw is MISSING:
+        details["reason"] = "required"
+    else:
+        try:
+            return RequestIdentityDecision(parse_object_id(raw), None)
+        except ValueTypeError:
+            details["reason"] = "type"
+        except ValueFormatError:
+            details["reason"] = "format"
+        except ValueRangeError:
+            details["reason"] = "range"
+        details["value"] = raw
+    return RequestIdentityDecision(None, {
+        "stage": "admission", "code": "invalid_request_id", "details": details,
+    })

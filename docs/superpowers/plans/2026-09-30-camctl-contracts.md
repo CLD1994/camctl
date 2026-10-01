@@ -28,7 +28,7 @@
 | `UtcMicros / DurationMillis` | 分别为 UTC 起点的整数微秒和非负或正整数毫秒；合法范围按所属字段校验，不混用单位。 |
 | `ClockPort / MonotonicClock` | contracts.clock 拥有时钟端口；monotonic_ns 返回本机单调整数纳秒，utc_micros 返回精确 UTC 微秒，读取失败明确抛错，测试使用替身。 |
 | `JsonValue / MISSING` | int、有限 Decimal、字符串、布尔值、None 及递归容器；MISSING 仅表示字段省略。 |
-| `HistoryBoundary / Page[T]` | 历史边界采用共享实施契约的字段；Page 的字段和结束属性遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)，游标包含固定范围与最后排序位置。 |
+| `HistoryBoundary / Page[T, C]` | 历史边界采用共享实施契约的字段；Page 的字段和结束属性遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)，游标类型 C 与读取范围关联，游标包含固定范围与最后排序位置。 |
 | `ProjectionInput / PublicFragment` | 单对象的类型、身份、自身事实和已恢复到同 H 的有界字段依赖；输出按公共 Schema 定义的字段片段，子集合由消费者分页组织。 |
 
 公共 ID 解析只接受规范十进制字符串；内部 ObjectId 从合法整数构造。下表单独描述普通 JSON 数值的整数转换，字符串在这个数值入口不是合法数字，不能与公共身份解析混用。转换先校验类型，再判断数值和范围。
@@ -108,7 +108,7 @@ K1、K2、K3 完成基础值后，受理和持久化可以实施。K4 先为首�
 
 **预计文件：** `apps/camctl/src/camctl/contracts/history_values.py`、`apps/camctl/src/camctl/contracts/pages.py`；测试为 `apps/camctl/tests/unit/contracts/test_boundaries.py`。
 
-**接口与依赖：** 提供遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)的 Page；建议提供 `validate_boundary(boundary: HistoryBoundary, transaction: TransactionRange) -> None` 和 `validate_page(page: Page[T], scope: ReadScope) -> None`。TransactionRange 含事务 ID、首尾事件，ReadScope 含固定上界、排序及上次游标；具体游标结构由所属查询接口定义。前置交付：K1；历史格式规定的初始边界。
+**接口与依赖：** 提供遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)的 Page；建议提供 `validate_boundary(boundary: HistoryBoundary, transaction: TransactionRange) -> None` 和 `validate_page(page: Page[T, C], scope: ReadScope[C]) -> None`。TransactionRange 含事务 ID、首尾事件，ReadScope 含固定上界、排序及上次游标；具体游标结构由所属查询接口定义。前置交付：K1；历史格式规定的初始边界。
 
 - [x] 编写失败用例。建立 `test_empty_page_can_continue`，仅用空 items 和合法后续候选游标构造 Page，`assert page.exhausted is False`。分别建立 `test_nonempty_page_can_continue`、`test_last_page_keeps_items`、`test_empty_page_is_exhausted`，覆盖其余三种成功状态，结束时仍保留本批数据；结束属性不可独立传入或赋值。事务中间位置、错误事务 ID、倒退或未推进游标、跨范围游标分别拒绝。初始化零事件边界另按规格验证。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/contracts/test_boundaries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。

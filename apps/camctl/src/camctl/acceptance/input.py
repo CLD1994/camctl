@@ -15,6 +15,8 @@ from camctl.contracts.json_values import JsonParseError, JsonValue, parse_exact_
 __all__ = [
     "InputDiagnostic",
     "InputFileReader",
+    "FileInputReader",
+    "InputReadFailure",
     "InputRead",
     "InputStage",
     "ParsedInput",
@@ -27,12 +29,24 @@ class InputStage(Enum):
     """一次输入尝试失败的阶段。"""
 
     OPEN = "open"
+    READ = "read"
     DECODE = "decode"
     PARSE = "parse"
 
 
+class InputReadFailure(OSError):
+    """适配器知道实际失败步骤；不携带部分读取内容。"""
+
+    def __init__(self, stage: InputStage, cause: OSError):
+        if stage not in {InputStage.OPEN, InputStage.READ}:
+            raise ValueError("文件读取失败步骤必须为 OPEN 或 READ")
+        super().__init__(str(cause))
+        self.stage = stage
+        self.cause = cause
+
+
 class InputFileReader(Protocol):
-    """输入文件读取端口：一次调用完成打开及完整读取。"""
+    """一次调用返回完整字节；文件失败抛带真实步骤的 InputReadFailure。"""
 
     def read(self, path: str) -> bytes: ...
 
@@ -73,9 +87,9 @@ async def read_input(path: str, reader: InputFileReader) -> InputRead:
     """组织一次打开及完整读取；失败保留阶段与实际错误。"""
     try:
         payload = reader.read(path)
-    except OSError as error:
+    except InputReadFailure as error:
         return InputRead(
-            path=path, payload=None, stage=InputStage.OPEN, detail=str(error)
+            path=path, payload=None, stage=error.stage, detail=str(error)
         )
     return InputRead(path=path, payload=payload, stage=None, detail=None)
 
@@ -106,3 +120,18 @@ def parse_input(read: InputRead) -> ParsedInput | InputDiagnostic:
             detail=str(error),
         )
     return ParsedInput(path=read.path, document=document)
+
+
+class FileInputReader:
+    """真实文件读取适配器：打开和完整读取各自报告实际失败步骤。"""
+
+    def read(self, path: str) -> bytes:
+        try:
+            handle = open(path, "rb")
+        except OSError as error:
+            raise InputReadFailure(InputStage.OPEN, error) from error
+        try:
+            with handle:
+                return handle.read()
+        except OSError as error:
+            raise InputReadFailure(InputStage.READ, error) from error

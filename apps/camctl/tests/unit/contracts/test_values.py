@@ -8,17 +8,10 @@ from __future__ import annotations
 
 
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, Inexact, Rounded, localcontext
 
 import pytest
 
-from camctl.contracts.enums import (
-    assert_public_contracts,
-    decode_member,
-    encode_member,
-    enum_for,
-    public_text,
-)
 from camctl.contracts.values import (
     DurationMillis,
     ObjectId,
@@ -162,6 +155,29 @@ class TestUtcMicros:
 
 
 class TestDurationMillis:
+    @pytest.mark.parametrize("precision", [1, 3, 28, 80])
+    def test_exact_milliseconds_do_not_depend_on_context(self, precision: int) -> None:
+        with localcontext() as context:
+            context.prec = precision
+            assert seconds_to_duration_ms(Decimal("1.234")) == 1234
+
+    @pytest.mark.parametrize("precision", [1, 3, 28, 80])
+    def test_sub_millisecond_difference_is_not_rounded(self, precision: int) -> None:
+        with localcontext() as context:
+            context.prec = precision
+            with pytest.raises(ValueRangeError):
+                seconds_to_duration_ms(Decimal("1.0000000000000000000000000001"))
+
+    def test_large_exact_duration_keeps_every_digit(self) -> None:
+        assert seconds_to_duration_ms(Decimal("12345678901234567890123456789.123")) == 12345678901234567890123456789123
+
+    def test_decimal_rounding_traps_do_not_affect_exact_conversion(self) -> None:
+        with localcontext() as context:
+            context.prec = 3
+            context.traps[Inexact] = True
+            context.traps[Rounded] = True
+            assert seconds_to_duration_ms(Decimal("1.234")) == 1234
+
     def test_exact_duration_conversion(self) -> None:
         assert seconds_to_duration_ms(Decimal("1.5")) == 1500
         assert seconds_to_duration_ms(Decimal("1e0")) == 1000
@@ -193,73 +209,6 @@ class TestDurationMillis:
         with pytest.raises(ValueError):
             DurationMillis(-1)
         assert DurationMillis(1500) == 1500
-
-
-class TestRegistryEnums:
-    def test_member_values_follow_registry(self) -> None:
-        # 独立预期：来源为编号一览文档中的固定成员与编号。
-        action_status = enum_for("actions.status")
-        assert [(member.name, int(member)) for member in action_status] == [
-            ("PENDING", 1),
-            ("RUNNING", 2),
-            ("SUCCEEDED", 3),
-            ("FAILED", 4),
-            ("EXPIRED", 5),
-            ("CANCELED", 6),
-        ]
-        plan_status = enum_for("plans.status")
-        assert [(member.name, int(member)) for member in plan_status] == [
-            ("PENDING", 1),
-            ("RUNNING", 2),
-            ("COMPLETED", 3),
-        ]
-        action_type = enum_for("actions.type")
-        assert int(action_type["CAMERA_TAKE_PHOTO"]) == 1
-        assert int(action_type["REPORT_STATUS"]) == 7
-
-    def test_unknown_code_is_rejected(self) -> None:
-        action_status = enum_for("actions.status")
-        with pytest.raises(ValueError):
-            action_status(99)
-
-    def test_cross_enum_mixing_is_rejected(self) -> None:
-        action_status = enum_for("actions.status")
-        with pytest.raises(ValueError):
-            encode_member("plans.status", action_status.RUNNING)
-        with pytest.raises(ValueError):
-            decode_member("plans.status", action_status.RUNNING)
-
-    def test_decode_and_round_trip(self) -> None:
-        member = decode_member("actions.status", 2)
-        assert member.name == "RUNNING"
-        assert encode_member("actions.status", member) == 2
-
-    def test_unknown_column_is_rejected(self) -> None:
-        with pytest.raises(ValueError):
-            enum_for("plans.nonexistent")
-
-    def test_public_text_encoding(self) -> None:
-        assert public_text(enum_for("plans.status").COMPLETED) == "completed"
-        assert public_text(enum_for("actions.type").CAMERA_RECORD) == "camera_record"
-        with pytest.raises(ValueError):
-            public_text("not-an-enum-member")  # type: ignore[arg-type]
-
-    def test_public_contracts_agree_with_schema(self) -> None:
-        # 生成的映射与权威资源一致：内部成员的小写名称集合
-        # 必须与公共 Schema 登记的文本枚举完全相同。
-        assert_public_contracts()
-
-    def test_registry_itself_is_well_formed(self) -> None:
-        # 独立核对登记的成员编号互不冲突且为正整数。
-        from camctl.contracts.enums import load_registry
-
-        registry = load_registry()
-        combined = {**registry["enums"], **registry["json_enums"]}
-        assert "actions.status" in combined
-        for column, definition in combined.items():
-            codes = list(definition["members"].values())
-            assert all(isinstance(code, int) and not isinstance(code, bool) and code > 0 for code in codes)
-            assert len(codes) == len(set(codes)), column
 
 
 class TestOperationKey:

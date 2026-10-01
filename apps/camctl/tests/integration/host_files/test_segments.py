@@ -164,3 +164,41 @@ async def test_stop_arrives_mid_segment_on_real_files(tmp_path: Path) -> None:
     assert result.source_ended is False
     assert target.sync_calls == 0
     assert target_path.read_bytes() == data[:500]
+
+
+async def test_sync_in_progress_keeps_actual_result(tmp_path: Path) -> None:
+    """同步已开始后收到停止请求，仍保留真实同步结果。"""
+    sync_started = threading.Event()
+    sync_release = threading.Event()
+    stop = threading.Event()
+    data = b"a" * 10
+    session = await _open_session(tmp_path, data)
+    target_path = tmp_path / "synced.bin"
+
+    class GatedTarget(RealTargetFile):
+        def sync(self) -> None:
+            sync_started.set()
+            assert sync_release.wait(timeout=10)
+            super().sync()
+
+    target = GatedTarget(target_path)
+    spec = SegmentSpec(
+        attempt="copy/9", round_index=0, target_name="copy-0001.part",
+        range_start=0, range_end=len(data), chunk_size=10, stop=stop,
+    )
+    worker = asyncio.create_task(asyncio.to_thread(transfer_segment, spec, session, target))
+    try:
+        assert await asyncio.to_thread(sync_started.wait, 10)
+        stop.set()
+    finally:
+        sync_release.set()
+        try:
+            result = await worker
+        finally:
+            target.close()
+
+    assert result.error is None
+    assert result.synced is True
+    assert result.processed_end == len(data)
+    assert target.sync_calls == 1
+    assert target_path.read_bytes() == data

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from io import StringIO
 
 import pytest
 
@@ -102,26 +103,6 @@ class TestSessionResultChannel:
             SessionOutcome(succeeded=False)
 
 
-class TestDescribeEncoding:
-    def test_empty_devices_document_validated_and_encoded(self) -> None:
-        output = encode_describe_document({"devices": []})
-        assert output.endswith(b"\n")
-        assert output.count(b"\n") == 1
-        assert json.loads(output) == {"devices": []}
-
-    def test_invalid_document_rejected_before_encoding(self) -> None:
-        with pytest.raises(Exception, match="capabilities"):
-            encode_describe_document({"devices": [], "unexpected": 1})
-        with pytest.raises(Exception):
-            encode_describe_document({})
-
-    def test_schema_failure_raises_validation_error_only(self) -> None:
-        from camctl.contracts.schemas import SchemaValidationError
-
-        with pytest.raises(SchemaValidationError):
-            encode_describe_document({"devices": [{"device_id": ""}]})
-
-
 class TestMainSyntaxExitCode:
     def test_syntax_error_exits_one_not_two(self, capsys) -> None:
         from camctl.cli import main
@@ -137,8 +118,80 @@ class TestMainSyntaxExitCode:
         assert main(["--version"]) == 0
         assert capsys.readouterr().out.endswith("\n")
 
-    def test_run_not_assembled_exits_one_with_stderr(self, capsys) -> None:
+    def test_run_not_assembled_exits_one_with_stderr(self, capsys, monkeypatch) -> None:
         from camctl.cli import main
+        from camctl.bootstrap import application
+        from camctl import cli
+        import sys
+        from types import ModuleType
+
+        monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls:cls("/unused")))
+        monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args:object())
+        def unavailable(*args):
+            raise FileNotFoundError("状态库不存在")
+        lifecycle = ModuleType("camctl.bootstrap.lifecycle")
+        lifecycle.build_runtime = unavailable
+        lifecycle.close_runtime = lambda deps:None
+        lifecycle.execute_command = None
+        monkeypatch.setitem(sys.modules, "camctl.bootstrap.lifecycle", lifecycle)
 
         assert main(["run"]) == 1
         assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("error_kind", ["rule", "document"])
+def test_describe_schema_error_returns_diagnostic(monkeypatch, error_kind) -> None:
+    from camctl import cli
+    from camctl.bootstrap import application
+    from camctl.contracts.schemas import SchemaRuleError, SchemaValidationError
+    from camctl.devices import catalog
+
+    failure = (SchemaRuleError if error_kind == "rule" else SchemaValidationError)("schema-case-17")
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: cls("/unused")))
+    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: object())
+    monkeypatch.setattr(catalog, "build_catalog", lambda *args: object())
+    monkeypatch.setattr(catalog, "default_driver_definitions", lambda: {})
+    monkeypatch.setattr(application, "describe", lambda *args: {"devices": []})
+
+    def validate(*args):
+        raise failure
+
+    monkeypatch.setattr(cli, "validate_document", validate)
+    out, err = StringIO(), StringIO()
+    assert cli.main(["describe"], stdout=out, stderr=err) == 1
+    assert out.getvalue() == ""
+    assert "schema-case-17" in err.getvalue()
+
+
+def test_describe_catalog_rule_error_returns_diagnostic(monkeypatch):
+    from camctl import cli
+    from camctl.bootstrap import application
+    from camctl.devices import catalog
+    from camctl.acceptance.schema import RuleError
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls:cls("/unused")))
+    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args:object())
+    def fail(*args):
+        raise RuleError("驱动未部署 driver-case-17")
+    monkeypatch.setattr(catalog, "build_catalog", fail)
+    out, err = StringIO(), StringIO()
+    assert cli.main(["describe"], stdout=out, stderr=err) == 1
+    assert out.getvalue() == "" and "driver-case-17" in err.getvalue()
+
+
+def test_describe_encoding_preserves_validation_boundary(monkeypatch):
+    from camctl import cli
+    seen = []
+    monkeypatch.setattr(cli, "validate_document", lambda schema, document:seen.append((schema,document)))
+    document = {"devices":[]}
+    assert json.loads(cli.encode_describe_document(document)) == document
+    assert seen == [("protocol/capabilities.schema.json", document)]
+
+
+def test_describe_encoding_propagates_validation_failure(monkeypatch):
+    from camctl import cli
+    from camctl.contracts.schemas import SchemaValidationError
+    def reject(*args):
+        raise SchemaValidationError("能力说明不可编码")
+    monkeypatch.setattr(cli, "validate_document", reject)
+    with pytest.raises(SchemaValidationError):
+        cli.encode_describe_document({"devices":[]})

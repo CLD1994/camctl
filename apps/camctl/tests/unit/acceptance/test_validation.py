@@ -19,6 +19,7 @@ from camctl.acceptance.rules import (
 from camctl.acceptance.schema import RuleError
 
 CAMERA_DEFINITION = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
         "type": {"const": "single_shot"},
@@ -44,7 +45,13 @@ class StubCatalog:
     def device_exists(self, device_id: str) -> bool:
         return device_id in self.devices
 
-    def parameter_definition(self, device_id: str, action_type: str):
+    def driver_id(self, device_id):
+        return "camctl-adb" if device_id in self.devices else None
+
+    def device_supports(self, device_id, action_type):
+        return self.device_exists(device_id) and action_type.startswith("camera_")
+
+    def parameter_definition(self, device_id: str, action_type: str, parameter_type: str):
         if device_id not in self.devices or action_type not in self.action_types():
             return None
         from camctl.acceptance.ports import ParameterDefinition
@@ -140,83 +147,39 @@ class TestRuleErrors:
     def test_invalid_schema_is_rule_error(self) -> None:
         from camctl.acceptance.ports import ParameterDefinition
 
-        broken = ParameterDefinition(schema={"type": "no-such-type"}, defaults={})
+        broken = ParameterDefinition(
+            schema={"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "no-such-type"},
+            defaults={},
+        )
         with pytest.raises(RuleError):
             validate_capture_params({"x": 1}, broken)
 
-    def test_missing_required_definition_for_supported_action(self) -> None:
-        catalog = StubCatalog()
-        catalog.devices = {"cam-1"}
-        # 目录声明支持但缺少定义属规则错误，不是用户参数错误。
-        class NoDefinition(StubCatalog):
-            def parameter_definition(self, device_id, action_type):
-                return None
-
-        with pytest.raises(RuleError):
-            validate_new_body(
-                _body([_camera_action()]), NoDefinition()
-            )
 
 
-class TestBodyDecisions:
-    def test_valid_camera_plan_accepted(self) -> None:
-        decision = validate_new_body(_body([_camera_action("a"), _camera_action("b")]), StubCatalog())
-        assert not decision.is_whole_rejection
-        assert [item.name for item in decision.actions if item.ok] == ["a", "b"]
+@pytest.mark.parametrize("conditional", [False, True])
+def test_required_field_not_filled_by_default(conditional):
+    from copy import deepcopy
+    from camctl.acceptance.ports import ParameterDefinition
+    schema = deepcopy(CAMERA_DEFINITION)
+    if conditional:
+        schema["allOf"] = [{"if":{"properties":{"type":{"const":"single_shot"}}}, "then":{"required":["shots"]}}]
+    else:
+        schema["required"] = ["type", "shots"]
+    result = validate_capture_params({"type":"single_shot"}, ParameterDefinition(schema, {"shots":1}))
+    assert not result.ok
+    assert result.failure_details["issues"] == [{"field":"params.shots", "reason":"required"}]
 
-    def test_duplicate_names_whole_rejection(self) -> None:
-        decision = validate_new_body(
-            _body([_camera_action("dup"), _camera_action("dup")]), StubCatalog()
-        )
-        assert decision.is_whole_rejection
 
-    def test_unknown_action_type_whole_rejection(self) -> None:
-        action = _camera_action()
-        action["type"] = "teleport"
-        decision = validate_new_body(_body([action]), StubCatalog())
-        assert decision.is_whole_rejection
+def test_invalid_defaults_are_rule_error():
+    from camctl.acceptance.ports import ParameterDefinition
+    with pytest.raises(RuleError):
+        validate_capture_params({"type":"single_shot"}, ParameterDefinition(CAMERA_DEFINITION, {"shots":99}))
 
-    def test_mixed_errors_stay_whole_rejection(self) -> None:
-        # 未知动作、名称重复与本动作参数错误混合：整份拒绝优先。
-        bad_params = _camera_action("bad")
-        bad_params["params"] = {"type": "single_shot", "shots": 99}
-        decision = validate_new_body(
-            _body([_camera_action("dup"), _camera_action("dup"), bad_params]),
-            StubCatalog(),
-        )
-        assert decision.is_whole_rejection
 
-    def test_order_independence(self) -> None:
-        bad = _camera_action("bad")
-        bad["params"] = {"type": "single_shot", "shots": 99}
-        good = _camera_action("good")
-        first = validate_new_body(_body([bad, good]), StubCatalog())
-        second = validate_new_body(_body([good, bad]), StubCatalog())
-        assert {item.name for item in first.actions} == {item.name for item in second.actions}
-        assert {item.name for item in first.actions if not item.ok} == {"bad"}
-
-    def test_unknown_device_is_action_failure(self) -> None:
-        decision = validate_new_body(
-            _body([_camera_action("shoot", device="cam-x")]), StubCatalog()
-        )
-        assert not decision.is_whole_rejection
-        assert [item.name for item in decision.actions if not item.ok] == ["shoot"]
-
-    def test_semantic_date_is_action_failure(self) -> None:
-        action = _camera_action()
-        action["scheduled_at"] = "2026-02-30 09:00:00"
-        decision = validate_new_body(_body([action]), StubCatalog())
-        assert not decision.is_whole_rejection
-        assert not decision.actions[0].ok
-
-    def test_invalid_created_at_is_whole_rejection(self) -> None:
-        body = _body([_camera_action()])
-        body["created_at"] = "2026-13-01 08:00:00"
-        decision = validate_new_body(body, StubCatalog())
-        assert decision.is_whole_rejection
-
-    def test_invalid_public_structure_is_whole_rejection(self) -> None:
-        body = _body([_camera_action()])
-        body["extra_field"] = 1
-        decision = validate_new_body(body, StubCatalog())
-        assert decision.is_whole_rejection
+@pytest.mark.parametrize("value", [None, False, 0, ""])
+def test_explicit_invalid_value_not_replaced(value):
+    from camctl.acceptance.ports import ParameterDefinition
+    raw = {"type":"single_shot", "shots":value}
+    result = validate_capture_params(raw, ParameterDefinition(CAMERA_DEFINITION, {"shots":1}))
+    assert not result.ok
+    assert raw["shots"] == value

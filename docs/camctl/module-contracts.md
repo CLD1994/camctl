@@ -40,7 +40,7 @@ O6 的真实 C 进程收场和 R9 的真实报告消费者用例分别位于根 
 | `MonotonicClock`、`ClockPort` | `contracts.clock`。前者提供整数单调纳秒，后者另提供精确 UTC 微秒；读取失败明确表达。实际标准库适配由装配创建，单调读数不跨运行恢复。 |
 | `JsonValue`、`MISSING` | `contracts.json_values`。精确的 JSON 类型与字段省略；`MISSING` 与显式 `None` 分开。集合跨线程传递时取得独立所有权。 |
 | `HistoryBoundary(txn_id, last_event_id)` | `contracts.history_values`。已经完成的完整历史事务边界；冻结 H、投影读取 C、快照 S 都采用此类型，变量名表达用途。初始化边界按历史规格表达。 |
-| `Page[T](items, next_cursor)` | `contracts.pages`。有界批次及继续位置，字段与完成语义遵守下文的[分页结果契约](#分页结果契约)。游标绑定所属查询范围和排序。 |
+| `Page[T, C](items, next_cursor)`、`ReadScope[C]` | `contracts.pages` 和 `contracts.history_values`。批次元素采用类型 `T`，批次与读取范围共同采用游标类型 `C`；字段与完成语义遵守下文的[分页结果契约](#分页结果契约)。游标绑定所属查询范围和排序。 |
 | `DbOutcome[T]` | `persistence.models`。已完成、确认未执行、确认回滚、结果未知的有约束联合结果；业务拒绝可以包含在已提交结果中。 |
 | `DbJob[T]`、`DbExecutor` | `persistence` 的内部执行边界。只有 SQLite 适配器创建完整读操作或事务任务，业务流程通过各自的窄仓储接口调用。 |
 | 各模块的 `*Repository` | 所属模块的 `ports.py`。提供完整业务操作；具体 SQLite 实现在 `persistence/repositories`，创建连接和控制事务的责任保持集中。 |
@@ -59,7 +59,7 @@ O6 的真实 C 进程收场和 R9 的真实报告消费者用例分别位于根 
 
 历史查询、报告读取和工作发现通过有界批次交付数据，调用方处理本批后再请求下一批。历史文件查询先检查一批候选，再恢复到报告冻结边界 H 并筛选；本批候选可能全部被排除，而后续候选仍有有效文件。因此，批次结果必须分别表达有效数据与扫描进度，调用方不能根据本批数据是否为空判断结束。
 
-`Page[T]` 只保存 `items` 和 `next_cursor`。它提供只读属性 `exhausted`，满足 `page.exhausted == (page.next_cursor is None)`；该属性不接受构造参数，也不独立保存。具体游标类型和查询函数签名由所属查询接口定义。
+`Page[T, C]` 只保存 `items` 和 `next_cursor`。它提供只读属性 `exhausted`，满足 `page.exhausted == (page.next_cursor is None)`；该属性不接受构造参数，也不独立保存。具体游标类型 `C` 和查询函数签名由所属查询接口定义，读取范围与批次采用同一游标类型。
 
 | 成功返回的 `items` | 成功返回的 `next_cursor` | 推导的 `exhausted` | 调用方行为 |
 | --- | --- | --- | --- |

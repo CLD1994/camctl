@@ -12,9 +12,10 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
-from camctl.acceptance.input import InputDiagnostic, ParsedInput
+from camctl.acceptance.input import InputDiagnostic, InputStage, ParsedInput
 from camctl.acceptance.links import PlanIdentities, prepare_plan
-from camctl.acceptance.rules import validate_new_body
+from camctl.acceptance.definitions import read_action_spec
+from camctl.acceptance.rules import extract_request_identity, validate_new_body
 from camctl.acceptance.service import (
     AcceptanceResult,
     AckDisposition,
@@ -22,8 +23,9 @@ from camctl.acceptance.service import (
     ProcessInput,
 )
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
-from camctl.contracts.values import OperationKey
-from camctl.contracts.workflow_errors import action_error_ids
+from camctl.contracts.json_values import MISSING, json_field
+from camctl.contracts.values import OperationKey, parse_object_id, ValueTypeError, ValueFormatError, ValueRangeError
+from camctl.contracts.workflow_errors import action_error_id, action_error_ids, registered_error_spec, validate_error_details
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -108,14 +110,23 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
     current_wm, current_report = int(state[0]), state[1]
     if document is None or not isinstance(document, Mapping):
         return _AckEvaluation(
-            AckDisposition.NOT_PROVIDED, current_wm, (current_wm, current_report), None, None
+            AckDisposition.NOT_PROCESSED, current_wm, (current_wm, current_report), None, None
         )
-    raw = document.get("last_report_id")
-    if raw is None:
+    raw = json_field(document, "last_report_id")
+    if raw is MISSING:
         return _AckEvaluation(
             AckDisposition.NOT_PROVIDED, current_wm, (current_wm, current_report), None, None
         )
-    report_id = int(raw)
+    try:
+        report_id = parse_object_id(raw)
+    except (ValueTypeError, ValueFormatError, ValueRangeError) as error:
+        reason = "type" if isinstance(error, ValueTypeError) else "range" if isinstance(error, ValueRangeError) else "format"
+        return _AckEvaluation(
+            AckDisposition.INVALID, current_wm, (current_wm, current_report), None,
+            {"stage": "ack", "code": "invalid_ack", "details": {
+                "field": "last_report_id", "reason": reason, "value": raw,
+            }},
+        )
     # 判定规则由 reporting.ack 单一定义（R6）；本仓储只取事实并落地。
     from camctl.reporting.ack import AckFacts, AckInput, decide_ack
 
@@ -138,7 +149,7 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
             current_wm,
             (current_wm, current_report),
             None,
-            {"stage": "ack", "code": "invalid_ack", "details": {"report_id": report_id}},
+            {"stage": "ack", "code": "invalid_ack", "details": {"field": "last_report_id", "reason": "reference", "value": raw}},
         )
     if decision.disposition.value == "absorbed":
         return _AckEvaluation(
@@ -199,14 +210,21 @@ class ProcessInputCommand:
         if isinstance(self._command.source, InputDiagnostic):
             return self._diagnostic_only(scope, occurred_at, ack)
 
-        request_id = int(document["request_id"])
+        identity = extract_request_identity(document)
+        if identity.request_id is None:
+            errors = [identity.error]
+            if ack.error_entry is not None:
+                errors.append(ack.error_entry)
+            return self._diagnostic_plan(scope, occurred_at, None, None, errors)
+        request_id = identity.request_id
         existing = connection.execute(
             "SELECT id FROM plans WHERE request_id = ?", (request_id,)
         ).fetchone()
         if existing is not None:
-            return self._reuse(scope, occurred_at, ack, int(existing[0]))
+            return self._reuse(scope, occurred_at, ack, int(existing[0]), request_id)
 
-        decision = validate_new_body(document, self._catalog)
+        body = {key: value for key, value in document.items() if key != "last_report_id"}
+        decision = validate_new_body(body, self._catalog)
         if decision.is_whole_rejection:
             return self._rejected(scope, occurred_at, ack, request_id, decision)
         return self._register(scope, occurred_at, ack, request_id, decision)
@@ -226,7 +244,7 @@ class ProcessInputCommand:
         self._owners[("runtime_state", 1)] = ("runtime_state", 1)
         return _envelope(event_id, txn_id, _ACK_EVENT, 1, (row,), occurred_at)
 
-    def _reuse(self, scope, occurred_at: int, ack: _AckEvaluation, plan_id: int) -> CommandPlan:
+    def _reuse(self, scope, occurred_at: int, ack: _AckEvaluation, plan_id: int, request_id: int) -> CommandPlan:
         result = AcceptanceResult(
             plan_disposition=PlanDisposition.REUSED,
             plan_id=plan_id,
@@ -239,7 +257,7 @@ class ProcessInputCommand:
             row, diagnostic_id = self._diagnostic_row(
                 scope.connection,
                 [ack.error_entry],
-                int(self._command.source.document["request_id"]),
+                request_id,
                 plan_id,
             )
             templates.append(
@@ -290,13 +308,15 @@ class ProcessInputCommand:
     def _diagnostic_only(self, scope, occurred_at: int, ack: _AckEvaluation) -> CommandPlan:
         source = self._command.source
         assert isinstance(source, InputDiagnostic)
-        errors = [
-            {
-                "stage": "input",
-                "code": f"{source.stage.value}_failed",
-                "details": {"path": source.path, "message": source.detail},
-            }
-        ]
+        is_read = source.stage in {InputStage.OPEN, InputStage.READ}
+        details = {"path":source.path, "message":source.detail}
+        if is_read:
+            details["operation"] = source.stage.value
+        errors = [{
+            "stage": "input_read" if is_read else "input_parse",
+            "code": "plan_file_read_failed" if is_read else "invalid_encoding" if source.stage == InputStage.DECODE else "invalid_json",
+            "details": details,
+        }]
         # 读取或解析失败不吸收 ACK，也不从片段取得请求身份。
         return self._diagnostic_plan(scope, occurred_at, None, None, errors)
 
@@ -367,10 +387,10 @@ class ProcessInputCommand:
             if action.auto_preview_source is not None:
                 link_values = {
                     "obtain_action_id": action.action_id,
-                    "source_action_id": prepared_action_id(prepared, action.auto_preview_source),
-                    "preview_support": None,
-                    "parameter_type": action.raw_fields.get("params", {}).get("type"),
-                    "is_valid": 0,
+                    "source_action_id": action.auto_preview_source_id,
+                    "preview_support": int(action.preview_support) if action.preview_support is not None else None,
+                    "parameter_type": action.source_parameter_type,
+                    "is_valid": int(action.ok),
                 }
                 rows.append(_row("auto_preview_links", link_id, link_values))
                 self._owners[("auto_preview_links", link_id)] = ("action", action.action_id)
@@ -492,19 +512,16 @@ class ProcessInputCommand:
             "group_name": action.group_name,
             "input_fields_json": raw,
             "driver_id": None,
-            "max_delay_ms": None,
-            "target_selection_state": None,
+            "max_delay_ms": action.max_delay_ms,
+            "target_selection_state": int(enum_for("actions.target_selection_state").PENDING)
+                if action.ok and literal in {"delete_action_outputs", "cancel_task"} else None,
             "execution_started": 0,
             "cancel_requested": 0,
             "first_window_observed_at": None,
             "expiration_reason": None,
         }
         if action.ok:
-            driver = (
-                self._catalog.driver_id(action.device_id)
-                if action.device_id is not None
-                else None
-            )
+            driver = action.driver_id
             effective = action.effective_params
             values.update(
                 {
@@ -513,24 +530,13 @@ class ProcessInputCommand:
                     "error_details_json": None,
                     "effective_params_json": effective,
                     "driver_id": driver,
-                    "execution_spec_json": {
-                        "action_type": literal,
-                        "driver_id": driver,
-                        "effective_params": effective,
-                    },
-                    "source_resolution_state": (
-                        2 if (literal == _OBTAIN_TYPE and action.in_plan_dependencies) else
-                        (1 if literal == _OBTAIN_TYPE else None)
-                    ),
-                    "resolved_source_plan_id": (
-                        plan_id if (literal == _OBTAIN_TYPE and action.in_plan_dependencies) else None
-                    ),
+                    "execution_spec_json": action.execution_spec,
+                    "source_resolution_state": action.source_resolution_state,
+                    "resolved_source_plan_id": action.source_plan_id,
                 }
             )
-            if literal.startswith("camera_"):
-                values["max_delay_ms"] = raw.get("policy", {}).get("max_delay_ms")
         else:
-            code = action_error_ids().get(action.failure_code or "action_validation_failed")
+            code = action_error_id(action.failure_code or "action_validation_failed")
             values.update(
                 {
                     "status": 4,
@@ -566,10 +572,7 @@ def prepared_action_id(prepared, name: str) -> int:
 
 
 def _failure_details(action) -> dict:
-    if action.failure_code == "duplicate_auto_preview":
-        source = action.raw_fields.get("params", {}).get("source", {}).get("action_name")
-        return {"source_action_name": source, "obtain_action_names": [action.name]}
-    return {"message": action.failure_reason}
+    return action.failure_details
 
 
 class AcceptanceRepository:
@@ -597,6 +600,10 @@ def _admission_guard(event, context) -> None:
         if row.table != "actions" or row.before.exists:
             continue
         values = row.after.values
+        try:
+            read_action_spec(values)
+        except ValueError as error:
+            raise EventValidationError(str(error)) from error
         status = values.get("status")
         if status == 4:
             if values.get("execution_started") != 0 or values.get("error_code") is None:
@@ -605,6 +612,13 @@ def _admission_guard(event, context) -> None:
                 )
             if values.get("execution_spec_json") is not None:
                 raise EventValidationError("受理失败动作不携带执行定义")
+            try:
+                code, spec = registered_error_spec("action_error_id", values["error_code"])
+                if spec["stage"] != "admission":
+                    raise ValueError("首次受理失败必须使用受理阶段错误")
+                validate_error_details(code, values["error_details_json"])
+            except (TypeError, ValueError, KeyError) as error:
+                raise EventValidationError(str(error)) from error
         elif status == 1:
             if values.get("execution_spec_json") is None:
                 raise EventValidationError("可受理动作必须携带执行定义")
@@ -649,7 +663,9 @@ def _source_members_guard(event, context) -> None:
             if owner_id not in fixed_now and (
                 owner is None or owner.get("source_resolution_state") != 2
             ):
-                raise EventValidationError("来源成员必须属于 FIXED 来源的取回动作")
+                raise EventValidationError("来源成员必须属于 FIXED 来源的取回或范围清理动作")
+            if owner is None or owner.get("type") not in {_action_type_code("obtain_action_outputs"), _action_type_code("delete_action_outputs")} :
+                raise EventValidationError("来源成员所属动作类型不适用")
             plan_id = fixed_now.get(owner_id) or (owner or {}).get(
                 "resolved_source_plan_id"
             )

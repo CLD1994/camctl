@@ -37,6 +37,7 @@ pytestmark = pytest.mark.asyncio
 _NOW = 1_750_000_000_000_000
 
 CAMERA_DEFINITION = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
         "type": {"const": "single_shot"},
@@ -52,7 +53,7 @@ class Catalog:
 
     def action_types(self):
         return frozenset(
-            {"camera_take_photo", "camera_record", "camera_timelapse", "obtain_action_outputs"}
+            {"camera_take_photo", "camera_record", "camera_timelapse", "obtain_action_outputs", "delete_action_outputs", "cancel_task", "report_status"}
         )
 
     def device_exists(self, device_id):
@@ -61,7 +62,10 @@ class Catalog:
     def driver_id(self, device_id):
         return "camctl-adb" if device_id == "cam-1" else None
 
-    def parameter_definition(self, device_id, action_type):
+    def device_supports(self, device_id, action_type):
+        return self.device_exists(device_id) and action_type.startswith("camera_")
+
+    def parameter_definition(self, device_id, action_type, parameter_type):
         if device_id == "cam-1" and action_type.startswith("camera_"):
             return ParameterDefinition(
                 schema=CAMERA_DEFINITION, defaults={"shots": 1}
@@ -290,7 +294,7 @@ class TestRequestReuse:
         original_actions = connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
 
         # 同一 request_id 重送：正文缺失 actions 也不参与校验。
-        again = await _accept(environment, tmp_path, _plan_body(request_id="42"))
+        again = await _accept(environment, tmp_path, {"request_id": "42"})
         assert again.plan_disposition is PlanDisposition.REUSED
         assert again.plan_id == first.plan_id
         assert connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0] == original_actions
@@ -356,7 +360,67 @@ class TestAckIndependence:
         parsed = parse_input(read)
         result = await accept_input(parsed, context, new_operation_key(), _owned(environment))
         assert result.plan_disposition is PlanDisposition.REJECTED
-        assert result.ack_disposition is AckDisposition.NOT_PROVIDED
+        assert result.ack_disposition is AckDisposition.NOT_PROCESSED
         assert result.ack_watermark == 0
         assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("identity", [None, True, 42, [], {}, "", "0", "042", "+42", "-42", " 42 ", "4.2", "4e1", "４２", "9223372036854775808"])
+async def test_identity_rejected_before_reuse(environment, tmp_path, identity):
+    connection, _ = environment
+    await _accept(environment, tmp_path, _plan_body())
+    result = await _accept(environment, tmp_path, {"request_id": identity})
+    assert result.plan_disposition is PlanDisposition.REJECTED
+    assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 1
+    assert connection.execute("SELECT request_id FROM plan_file_diagnostics").fetchone()[0] is None
+
+
+@pytest.mark.parametrize("plan_partition", ["new", "reuse", "rejected", "missing_identity"])
+@pytest.mark.parametrize("ack_partition", ["missing", "invalid", "known", "old"])
+async def test_plan_ack_matrix(environment, tmp_path, plan_partition, ack_partition):
+    connection, _ = environment
+    await _seed_report(environment, tmp_path, 1, to_wm=50)
+    if plan_partition == "reuse":
+        await _accept(environment, tmp_path, _plan_body())
+    if ack_partition == "old":
+        await _accept(environment, tmp_path, _plan_body(request_id="51", ack="1"))
+    before_count = connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0]
+    body = _plan_body()
+    if plan_partition == "reuse":
+        body = {"request_id": "42"}
+    elif plan_partition == "rejected":
+        body["actions"] = []
+    elif plan_partition == "missing_identity":
+        del body["request_id"]
+    if ack_partition != "missing":
+        body["last_report_id"] = None if ack_partition == "invalid" else "1"
+    result = await _accept(environment, tmp_path, body)
+    assert result.plan_disposition is {
+        "new": PlanDisposition.REGISTERED, "reuse": PlanDisposition.REUSED,
+        "rejected": PlanDisposition.REJECTED, "missing_identity": PlanDisposition.REJECTED,
+    }[plan_partition]
+    assert result.ack_disposition is {
+        "missing": AckDisposition.NOT_PROVIDED, "invalid": AckDisposition.INVALID,
+        "known": AckDisposition.ABSORBED, "old": AckDisposition.VALID_NOT_ADVANCING,
+    }[ack_partition]
+    assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == before_count + (plan_partition == "new")
+    assert result.ack_watermark == (50 if ack_partition in {"known", "old"} else 0)
+
+
+@pytest.mark.parametrize("ack", [True, 1, "01", "+1", " 1 ", "x", {}, "9223372036854775808"])
+async def test_invalid_ack_keeps_valid_plan(environment, tmp_path, ack):
+    connection, _ = environment
+    await _seed_report(environment, tmp_path, 1, to_wm=50)
+    body = _plan_body()
+    body["last_report_id"] = ack
+    result = await _accept(environment, tmp_path, body)
+    assert result.plan_disposition is PlanDisposition.REGISTERED
+    assert result.ack_disposition is AckDisposition.INVALID
+    assert result.ack_watermark == 0
+
+
+async def test_root_array_rejected_without_ack_processing(environment, tmp_path):
+    result = await _accept(environment, tmp_path, [])
+    assert result.plan_disposition is PlanDisposition.REJECTED
+    assert result.ack_disposition.value == "not_processed"
