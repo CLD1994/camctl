@@ -24,7 +24,8 @@
 
 | 类型 | 字段或含义 |
 | --- | --- |
-| `ReportOpportunity / ReportDecision` | 本次正常或受限报告机会、当前变化、ACK、同步、已有报告及文件位置；决定保留、冻结新报告、原报告补投、等待后续触发或结束。 |
+| `ReportOpportunity / ReportDecision` | 同一完整 H 的业务终点、累计 ACK、有效同步的最早起点及最晚开始边界；纯规则决定生成、复用或跳过。 |
+| `ReportSelection` | 写事务中实际选择的分支；生成及复用提供固定报告依据，跳过不提供报告。该结果不证明文件已经发布。 |
 | `FrozenReport / ReportBasisRef` | report_id、完整 H、范围/水位、冻结生成元数据和持久化依据引用；大集合留在库中分页读取，不放入控制消息。 |
 | `GenerationJob / TaskId` | 数据库位置/身份、report_id、BasisRef、task_id、独占临时文件、本次读取/忙等待及日志参数；TaskId 建议 uuid4 的 32 字符十六进制值，仅用于本次进程通信。 |
 | `ControlMessage / GenerationResult` | version=1，ready/job/result/shutdown 类型集中定义；成功含 task_id、原临时文件、大小和 SHA-256，失败含分类及必要诊断。 |
@@ -108,7 +109,7 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **预计文件：** `apps/camctl/src/camctl/reporting/policy.py`、`apps/camctl/src/camctl/persistence/repositories/reporting.py`；测试为 `apps/camctl/tests/unit/reporting/test_freeze.py` 和 `apps/camctl/tests/integration/reporting/test_freeze.py`。
 
-**接口与依赖：** 提供 `decide_report(opportunity: ReportOpportunity) -> ReportDecision`、异步 `freeze_report(command: FreezeReport, key: OperationKey) -> DbOutcome[FrozenReport]`；FreezeReport 只指定机会，冻结依据在事务内取得。前置交付：R1、P3/P4、S1；同步事实来自可靠仓储。
+**接口与依赖：** 提供 `decide_report(opportunity: ReportOpportunity, existing_reports: Iterable[AckReport]) -> ReportDecision`、异步 `freeze_report(key: OperationKey, owned: OwnedConnection) -> DbOutcome[ReportSelection]`。仓储在写事务中取得完整 H、累计 ACK、全部有效同步及一份合格候选，实际选择生成、复用或跳过；调用方不传入预先计算的范围。前置交付：R1、P3/P4、S1；同步事实来自可靠仓储。机会触发和文件责任由维护与发布流程另行判断。
 
 - [x] 编写失败用例。建立 `test_frozen_report_excludes_later_changes`，冻结 H 后新提交，`assert later_entity not in original_report_scope`；完整同步从 0、局部同步与普通 ACK 合并、已有宽报告可满足、报告 ID 更大但覆盖不足各独立判定。冻结不取当前事务的部分事件。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_freeze.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
@@ -118,11 +119,13 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_freeze.py -q`，真实 SQLite 冻结与并发受理/ACK/同步变化，核对完整事务及旧内容不变。
 - [ ] 审阅实际接口、状态分区及失败路径，检查所有正常/受限/显式同步机会的冻结及覆盖来源；记录门禁证据，建议以“feat: 实现报告机会与可靠冻结”形成独立提交。
 
-**分项进度：** [累计确认与同步结束审查](2026-10-02-camctl-ack-sync-review.md)验证冻结记录的生成与读取使用同一历史边界及业务终点。
+**分项进度：** [累计确认与同步结束审查](2026-10-02-camctl-ack-sync-review.md)与[报告范围及事务内选择审查](2026-10-02-camctl-report-freeze-review.md)记录冻结依据、范围选择和读取不变量的门禁。
 
 - [x] 在冻结写事务中取得完整 H 及其实际业务水位；冻结前有新提交时仍保存一致的生成依据。
 - [x] 精确校验报告依据，无效起点不截断；真实登记的报告可供 ACK 查询。
-- [ ] 从同一 H 取得累计 ACK 与全部有效同步要求，重判报告机会和起点。
+- [x] 从同一 H 取得累计 ACK 与全部有效同步要求，重判数据库内容需求和起点。
+- [x] 已有单份报告同时满足范围与全部开始历史时复用；没有内容需求时跳过，两者均不新增历史。
+- [x] 报告两端使用完整业务事务边界；局部同步起点报告在开始边界已经登记。矛盾时统一返回状态库错误。
 - [ ] 复用、替换、补投结合覆盖、历史边界及实际文件责任，并接入正常、受限及显式同步机会。
 
 ### R3 确定性流式编码

@@ -1,78 +1,63 @@
 """报告机会决定与原子冻结。
 
-机会决定是纯规则：按累计水位与最新变化判断是否生成、复用或跳
-过；已有报告按覆盖范围满足需求（不以 ID 大小代替覆盖）。冻结
-在写事务内重新取得完整 H 与范围，不含本事务的新变化。
+机会决定是纯规则：累计水位与全部有效同步共同确定范围；已有
+报告须同时满足业务范围和同步开始历史。仓储在写事务内选择生
+成、复用或跳过，不消费事务前计算的范围。
 """
 
 from __future__ import annotations
 
-import uuid
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Tuple
+from collections.abc import Iterable
 
-from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
-from camctl.contracts.values import OperationKey
+from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.transaction import CommandPlan, commit_operation
-from camctl.reporting.models import FrozenReport, validate_frozen_report
+from camctl.reporting.models import (
+    FrozenReport, ReportDecision, ReportDecisionKind, ReportOpportunity, ReportSelection,
+    validate_frozen_report,
+)
 from camctl.reporting.ack import AckReport
+from camctl.persistence.repositories.reporting import (
+    read_report_opportunity, read_covering_report, read_frozen_report,
+)
 
 __all__ = [
     "ReportDecision",
     "ReportDecisionKind",
     "ReportOpportunity",
+    "ReportSelection",
     "ReportingRepository",
     "decide_report",
     "freeze_report",
 ]
 
 
-class ReportDecisionKind(Enum):
-    GENERATE = "generate"
-    REUSE = "reuse"
-    SKIP = "skip"
-
-
-@dataclass(frozen=True)
-class ReportOpportunity:
-    """一次报告机会的事实：种类、需求范围与已有报告覆盖。"""
-
-    kind: str  # normal | full_sync | partial_sync
-    requested_from_wm: int
-    latest_change_wm: int
-    acknowledged_wm: int
-    existing_report_coverages: Tuple[Tuple[int, int, int], ...] = ()
-
-
-@dataclass(frozen=True)
-class ReportDecision:
-    kind: ReportDecisionKind
-    from_wm: int = 0
-    to_wm: int = 0
-    reused_report_id: int | None = None
-
-
-def decide_report(opportunity: ReportOpportunity) -> ReportDecision:
-    """按机会事实决定生成、复用或跳过。
-
-    完整同步从 0 起算；已有报告按覆盖范围满足需求时复用；没有
-    新变化（累计水位之后无业务序号）时跳过。
-    """
-    from_wm = 0 if opportunity.kind == "full_sync" else opportunity.requested_from_wm
-    to_wm = max(opportunity.latest_change_wm, from_wm)
-    if to_wm <= from_wm and not (opportunity.kind == "full_sync" and to_wm > 0):
-        return ReportDecision(kind=ReportDecisionKind.SKIP)
-    for report_id, cover_from, cover_to in opportunity.existing_report_coverages:
-        if cover_from <= from_wm and cover_to >= to_wm:
+def decide_report(
+    opportunity: ReportOpportunity, existing_reports: Iterable[AckReport] = (),
+) -> ReportDecision:
+    """一份报告须覆盖普通内容及全部同步，并包含所有同步开始历史。"""
+    from_wm = opportunity.acknowledged_wm
+    if opportunity.sync_from_wm is not None:
+        from_wm = min(from_wm, opportunity.sync_from_wm)
+    to_wm = opportunity.latest_change_wm
+    if to_wm == from_wm and opportunity.sync_from_wm is None:
+        return ReportDecision(ReportDecisionKind.SKIP, from_wm, to_wm)
+    started = opportunity.sync_started_boundary_event_id or 0
+    for report in existing_reports:
+        if not isinstance(report, AckReport):
+            raise ConsistencyError("已有报告必须提供明确的固定依据")
+        if (report.to_wm > to_wm
+                or report.frozen_event_id > opportunity.boundary.last_event_id):
+            raise ConsistencyError("已有报告不能超出本次一致历史边界")
+        if (report.from_wm <= from_wm and report.to_wm >= to_wm
+                and report.frozen_event_id >= started):
             return ReportDecision(
                 kind=ReportDecisionKind.REUSE,
                 from_wm=from_wm,
                 to_wm=to_wm,
-                reused_report_id=report_id,
+                reused_report_id=report.report_id,
             )
     return ReportDecision(kind=ReportDecisionKind.GENERATE, from_wm=from_wm, to_wm=to_wm)
 
@@ -80,38 +65,30 @@ def decide_report(opportunity: ReportOpportunity) -> ReportDecision:
 class _FreezeCommand:
     """原子冻结：事务内取完整 H 与范围，写入 reports 行。"""
 
-    def __init__(self, decision: ReportDecision, occurred_at: int) -> None:
-        self._decision = decision
+    def __init__(self, occurred_at: int) -> None:
         self._occurred_at = occurred_at
 
     def plan(self, scope) -> CommandPlan:
         from camctl.history.events import RowChange, RowImage
 
         connection = scope.connection
-        # 完整 H：取已提交事务的最大末位事件（不含本事务）。
-        boundary_row = connection.execute(
-            "SELECT MAX(last_event_id) FROM history_transactions"
-        ).fetchone()
-        last_event = int(boundary_row[0]) if boundary_row[0] is not None else 0
-        txn_row = connection.execute(
-            "SELECT MAX(id) FROM history_transactions"
-        ).fetchone()
-        txn_id = int(txn_row[0]) if txn_row[0] is not None else 0
-        boundary = (
-            INITIAL_BOUNDARY
-            if last_event == 0
-            else HistoryBoundary(txn_id=txn_id, last_event_id=last_event)
-        )
-        # 终点与 H 同源；事务前的生成决定不固定最终业务水位。
-        max_wm_row = connection.execute(
-            "SELECT MAX(change_seq) FROM history_events WHERE id <= ?", (last_event,)
-        ).fetchone()
-        max_wm = int(max_wm_row[0]) if max_wm_row[0] is not None else 0
-        to_wm = max_wm
-        from_wm = self._decision.from_wm
+        opportunity = read_report_opportunity(connection)
+        preliminary = decide_report(opportunity)
+        candidate = None
+        if preliminary.kind is not ReportDecisionKind.SKIP:
+            candidate = read_covering_report(connection, opportunity, preliminary.from_wm)
+        decision = decide_report(opportunity, () if candidate is None else (candidate,))
+        if decision.kind is not ReportDecisionKind.GENERATE:
+            report = (read_frozen_report(connection, candidate)
+                      if decision.kind is ReportDecisionKind.REUSE else None)
+            return CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
+                               result=ReportSelection(decision.kind, report))
+        boundary = opportunity.boundary
+        last_event = boundary.last_event_id
+        from_wm, to_wm = decision.from_wm, decision.to_wm
 
         report_id_row = connection.execute("SELECT MAX(id) FROM reports").fetchone()
-        report_id = (int(report_id_row[0]) if report_id_row[0] is not None else 0) + 1
+        report_id = (report_id_row[0] if report_id_row[0] is not None else 0) + 1
         AckReport(report_id, from_wm, to_wm, last_event)
 
         row = RowChange(
@@ -162,7 +139,7 @@ class _FreezeCommand:
             events=(event,),
             owners={("reports", report_id): ("report", report_id)},
             state_rows={"reports": {}},
-            result=report,
+            result=ReportSelection(ReportDecisionKind.GENERATE, report),
         )
 
 
@@ -171,14 +148,13 @@ class ReportingRepository:
 
     def freeze_report(
         self,
-        decision: ReportDecision,
         key: OperationKey,
         owned: OwnedConnection,
         *,
         occurred_at: int = 0,
-    ) -> DbOutcome[FrozenReport]:
+    ) -> DbOutcome[ReportSelection]:
         receipt = commit_operation(
-            _FreezeCommand(decision, occurred_at), key, owned
+            _FreezeCommand(occurred_at), key, owned
         )
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -188,10 +164,10 @@ class ReportingRepository:
 
 
 async def freeze_report(
-    decision: ReportDecision, key: OperationKey, owned: OwnedConnection
-) -> DbOutcome[FrozenReport]:
-    """冻结一份报告（异步入口；FreezeReport 只指定机会决定）。"""
-    return ReportingRepository().freeze_report(decision, key, owned)
+    key: OperationKey, owned: OwnedConnection,
+) -> DbOutcome[ReportSelection]:
+    """根据事务实际事实选择并冻结报告。"""
+    return ReportingRepository().freeze_report(key, owned)
 
 def _report_guard(event, context) -> None:
     """REPORT_CHANGED.FREEZE 的正式守卫（reports-runtime.md#报告字段）。"""
@@ -207,6 +183,8 @@ def _report_guard(event, context) -> None:
         version = after.get("format_version")
         if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise EventValidationError("报告格式版本不受支持")
+        if after["frozen_event_id"] >= context.transaction.first_event_id:
+            raise EventValidationError("冻结依据必须早于本次登记事务")
         if after.get("status") != 1:
             raise EventValidationError("冻结创建的状态必须是 REGISTERED")
 

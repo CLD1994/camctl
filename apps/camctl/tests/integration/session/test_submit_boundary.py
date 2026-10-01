@@ -24,7 +24,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.session import service
 from camctl.session.locks import acquire_admission, probe_admission
 from camctl.reporting.policy import (
-    ReportDecision, ReportDecisionKind, ReportingRepository, register_report_guards,
+    ReportingRepository, register_report_guards,
 )
 
 from ..acceptance.test_acceptance import Catalog, _plan_body
@@ -317,11 +317,10 @@ async def test_ack_and_input_follow_handoff_transaction(runtime, monkeypatch, ha
         assert seeded.kind is DbOutcomeKind.COMPLETED
         latest_wm = owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0]
         report = ReportingRepository().freeze_report(
-            ReportDecision(ReportDecisionKind.GENERATE, from_wm=0, to_wm=latest_wm),
             new_operation_key(), owned, occurred_at=1,
         )
         assert report.kind is DbOutcomeKind.COMPLETED
-        report_id = report.value.report_id
+        report_id = report.value.report.report_id
     finally:
         owned.connection.close()
     before = _saved_counts(runtime.state_db)
@@ -355,7 +354,6 @@ async def test_ack_only_after_terminal_plan_skips_probe(runtime, monkeypatch):
         assert _process(body, owned.connection).kind is DbOutcomeKind.COMPLETED
         latest_wm = owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0]
         report = ReportingRepository().freeze_report(
-            ReportDecision(ReportDecisionKind.GENERATE, from_wm=0, to_wm=latest_wm),
             new_operation_key(), owned, occurred_at=1,
         )
         assert report.kind is DbOutcomeKind.COMPLETED
@@ -367,7 +365,7 @@ async def test_ack_only_after_terminal_plan_skips_probe(runtime, monkeypatch):
 
     monkeypatch.setattr(service, "probe_admission", forbidden_probe)
     outcome = await execute_command(runtime, ParsedInput("ack.json", {
-        "request_id": "42", "last_report_id": str(report.value.report_id),
+        "request_id": "42", "last_report_id": str(report.value.report.report_id),
     }))
     assert outcome.succeeded is True
     assert outcome.needs_run is False
@@ -438,7 +436,6 @@ async def test_whole_rejection_ack_and_handoff_share_transaction(runtime, monkey
         assert _process(_plan_body(request_id="41"), owned.connection).kind is DbOutcomeKind.COMPLETED
         latest_wm = owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0]
         report = ReportingRepository().freeze_report(
-            ReportDecision(ReportDecisionKind.GENERATE, from_wm=0, to_wm=latest_wm),
             new_operation_key(), owned, occurred_at=1,
         )
         assert report.kind is DbOutcomeKind.COMPLETED
@@ -460,7 +457,7 @@ async def test_whole_rejection_ack_and_handoff_share_transaction(runtime, monkey
             raise OSError("接纳锁探测失败")
         monkeypatch.setattr(service, "probe_admission", failed_probe)
     outcome = await execute_command(runtime, ParsedInput("rejected.json", {
-        "request_id": "42", "last_report_id": str(report.value.report_id) if ack_valid else "999",
+        "request_id": "42", "last_report_id": str(report.value.report.report_id) if ack_valid else "999",
     }))
     expected_wm = latest_wm if ack_valid else 0
     assert observed == [expected_wm]

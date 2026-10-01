@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from camctl.contracts.values import ConsistencyError
+from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.reporting.ack import AckFacts, AckReport, SyncResponsibility
+from camctl.reporting.models import FrozenReport, ReportOpportunity
 
 
 def read_ack_state(connection) -> tuple[int, int | None, AckReport | None]:
@@ -43,13 +45,23 @@ def read_ack_report(connection, report_id: int) -> AckReport | None:
     latest = 0 if latest is None else latest
     if report.to_wm != latest:
         raise ConsistencyError("ACK 报告的覆盖终点与冻结历史不一致")
+    if report.from_wm != 0 and connection.execute(
+        "SELECT event.id FROM history_events AS event"
+        " JOIN history_transactions AS txn ON txn.id = event.transaction_id"
+        " WHERE event.change_seq = ? AND txn.last_event_id <= ?"
+        " AND NOT EXISTS (SELECT 1 FROM history_events AS later"
+        " WHERE later.transaction_id = event.transaction_id AND later.change_seq > event.change_seq)",
+        (report.from_wm, report.frozen_event_id),
+    ).fetchone() is None:
+        raise ConsistencyError("报告覆盖起点必须位于完整业务事务边界")
     return report
 
 
 def read_outstanding_syncs(connection) -> Iterator[tuple[SyncResponsibility, dict]]:
     cursor = connection.execute(
         "SELECT id, action_id, from_wm, started_boundary_event_id, status,"
-        " ack_report_id, ended_event_id FROM state_syncs WHERE status = 1 ORDER BY id"
+        " ack_report_id, ended_event_id, mode, after_report_id"
+        " FROM state_syncs WHERE status = 1 ORDER BY id"
     )
     try:
         for row in cursor:
@@ -61,8 +73,70 @@ def read_outstanding_syncs(connection) -> Iterator[tuple[SyncResponsibility, dic
                 (sync.started_boundary_event_id,),
             ).fetchone() is None:
                 raise ConsistencyError("同步开始位置不是完整历史边界")
+            if row[7] == 2:
+                origin = read_ack_report(connection, row[8])
+                if origin is None or origin.to_wm != sync.from_wm:
+                    raise ConsistencyError("局部同步固定起点与其报告依据不一致")
+                created = connection.execute(
+                    "SELECT created_event_id FROM reports WHERE id = ?", (row[8],),
+                ).fetchone()
+                if created is None or created[0] > sync.started_boundary_event_id:
+                    raise ConsistencyError("局部同步起点报告在开始边界尚未登记")
             values = dict(zip(("id", "action_id", "from_wm", "started_boundary_event_id",
-                               "status", "ack_report_id", "ended_event_id"), row))
+                               "status", "ack_report_id", "ended_event_id", "mode", "after_report_id"), row))
             yield sync, values
     finally:
         cursor.close()
+
+
+def read_report_opportunity(connection) -> ReportOpportunity:
+    """在调用方的同一事务中按流取得全部有效同步，汇总范围与历史要求。"""
+    row = connection.execute(
+        "SELECT id, last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    boundary = INITIAL_BOUNDARY if row is None else HistoryBoundary(row[0], row[1])
+    latest = connection.execute(
+        "SELECT MAX(change_seq) FROM history_events WHERE id <= ?", (boundary.last_event_id,),
+    ).fetchone()[0]
+    latest = 0 if latest is None else latest
+    acknowledged, _, _ = read_ack_state(connection)
+    sync_from = None
+    sync_boundary = None
+    for sync, _ in read_outstanding_syncs(connection):
+        if sync.from_wm > latest or sync.started_boundary_event_id > boundary.last_event_id:
+            raise ConsistencyError("同步固定定义超出本次冻结历史")
+        sync_from = sync.from_wm if sync_from is None else min(sync_from, sync.from_wm)
+        sync_boundary = (sync.started_boundary_event_id if sync_boundary is None
+                         else max(sync_boundary, sync.started_boundary_event_id))
+    return ReportOpportunity(boundary, latest, acknowledged, sync_from, sync_boundary)
+
+
+def read_covering_report(connection, opportunity: ReportOpportunity, from_wm: int) -> AckReport | None:
+    """只取一份同时覆盖普通范围和全部同步开始历史的候选，再校验其依据。"""
+    started = opportunity.sync_started_boundary_event_id or 0
+    row = connection.execute(
+        "SELECT id FROM reports WHERE from_wm <= ? AND to_wm >= ? AND frozen_event_id >= ?"
+        " ORDER BY frozen_event_id DESC, id LIMIT 1",
+        (from_wm, opportunity.latest_change_wm, started),
+    ).fetchone()
+    if row is None:
+        return None
+    report = read_ack_report(connection, row[0])
+    if report is None:
+        raise ConsistencyError("已选报告的固定依据缺失")
+    return report
+
+
+def read_frozen_report(connection, report: AckReport) -> FrozenReport:
+    """复用原冻结依据，不能换成本次事务的较新边界。"""
+    if report.frozen_event_id == 0:
+        boundary = INITIAL_BOUNDARY
+    else:
+        row = connection.execute(
+            "SELECT id, last_event_id FROM history_transactions WHERE last_event_id = ?",
+            (report.frozen_event_id,),
+        ).fetchone()
+        if row is None:
+            raise ConsistencyError("已选报告的完整冻结事务缺失")
+        boundary = HistoryBoundary(row[0], row[1])
+    return FrozenReport(report.report_id, boundary, report.from_wm, report.to_wm, 1)

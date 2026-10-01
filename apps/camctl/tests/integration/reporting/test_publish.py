@@ -14,9 +14,7 @@ import pytest
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.policy import (
-    ReportOpportunity,
     ReportingRepository,
-    decide_report,
     publish_report,
     record_report_bytes,
 )
@@ -45,22 +43,14 @@ def _freeze_report(tmp_path: Path, connection) -> int:
         await _submit(owned, tmp_path, "1")
 
     asyncio.run(scenario())
-    latest = int(
-        connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0]
-    )
-    decision = decide_report(
-        ReportOpportunity(
-            kind="normal", requested_from_wm=0, latest_change_wm=latest, acknowledged_wm=0
-        )
-    )
     from camctl.persistence.runtime import OwnedConnection
 
     owned = OwnedConnection(connection=connection, metadata=None)
     outcome = ReportingRepository().freeze_report(
-        decision, new_operation_key(), owned, occurred_at=1
+        new_operation_key(), owned, occurred_at=1
     )
     assert outcome.kind.value == "completed"
-    return outcome.value.report_id
+    return outcome.value.report.report_id
 
 
 class TestPublishFlow:

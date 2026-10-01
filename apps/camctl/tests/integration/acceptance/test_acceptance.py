@@ -139,27 +139,29 @@ def _owned(environment):
 
 
 async def _seed_report(environment, tmp_path: Path, report_id: int) -> None:
-    """提交一次填充受理，再用真实冻结入口分配所需报告身份。"""
+    """以真实输入变化及冻结分配所需报告身份。"""
     await _accept(environment, tmp_path, _plan_body(request_id=str(900 + report_id)))
     _freeze_reports(environment, report_id)
 
 
 def _freeze_reports(environment, report_id: int) -> None:
     from camctl.reporting.policy import (
-        ReportDecision, ReportDecisionKind, ReportingRepository, register_report_guards,
+        ReportingRepository, register_report_guards,
     )
+    from .test_atomicity import _process
 
     register_report_guards()
     connection, _ = environment
     previous = connection.execute("SELECT MAX(id) FROM reports").fetchone()[0] or 0
-    latest = connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0] or 0
     for expected_id in range(previous + 1, report_id + 1):
+        if expected_id > 1:
+            # 新诊断是应报告的真实业务变化，要求新的覆盖终点。
+            assert _process({}, connection).kind.value == "completed"
         outcome = ReportingRepository().freeze_report(
-            ReportDecision(ReportDecisionKind.GENERATE, 0, latest),
             new_operation_key(), _owned(environment), occurred_at=_NOW,
         )
         assert outcome.kind.value == "completed"
-        assert outcome.value.report_id == expected_id
+        assert outcome.value.report.report_id == expected_id
 
 
 class TestFirstAcceptance:
@@ -267,7 +269,7 @@ class TestFirstAcceptance:
         # _seed_report 的填充受理也占用一个计划身份。
         assert result.plan_id == 3
         assert result.ack_disposition is AckDisposition.ABSORBED
-        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 4
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 12
         assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 3
 
     async def test_register_with_invalid_ack_saves_plan_and_diagnostic(
@@ -310,10 +312,10 @@ class TestRequestReuse:
         again = await _accept(environment, tmp_path, _plan_body(request_id="42", ack="11"))
         assert again.plan_disposition is PlanDisposition.REUSED
         assert again.ack_disposition is AckDisposition.ABSORBED
-        assert again.ack_watermark == 4
+        assert again.ack_watermark == 14
         assert connection.execute(
             "SELECT acknowledged_wm, acknowledged_report_id FROM runtime_state"
-        ).fetchone() == (4, 11)
+        ).fetchone() == (14, 11)
 
 
 class TestAckIndependence:
@@ -326,8 +328,8 @@ class TestAckIndependence:
         result = await _accept(environment, tmp_path, body)
         assert result.plan_disposition is PlanDisposition.REJECTED
         assert result.ack_disposition is AckDisposition.ABSORBED
-        assert result.ack_watermark == 4
-        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 4
+        assert result.ack_watermark == 6
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 6
 
     async def test_invalid_ack_saved_as_diagnostic(self, environment, tmp_path) -> None:
         connection, _ = environment
@@ -339,19 +341,19 @@ class TestAckIndependence:
         assert "invalid_ack" in errors
         assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 0
 
-    async def test_valid_ack_not_advancing_keeps_watermark(self, environment, tmp_path) -> None:
+    async def test_older_valid_ack_keeps_watermark_and_identity(self, environment, tmp_path) -> None:
         connection, _ = environment
         await _seed_report(environment, tmp_path, 5)
         _freeze_reports(environment, 6)
-        body = _plan_body(request_id="79", ack="5")
+        body = _plan_body(request_id="79", ack="6")
         await _accept(environment, tmp_path, body)
-        again = await _accept(environment, tmp_path, _plan_body(request_id="79", ack="6"))
+        again = await _accept(environment, tmp_path, _plan_body(request_id="79", ack="5"))
         assert again.plan_disposition is PlanDisposition.REUSED
         assert again.ack_disposition is AckDisposition.VALID_NOT_ADVANCING
-        assert again.ack_watermark == 2
+        assert again.ack_watermark == 7
         assert connection.execute(
             "SELECT acknowledged_report_id FROM runtime_state"
-        ).fetchone()[0] == 5
+        ).fetchone()[0] == 6
 
     async def test_parse_failure_saves_diagnostic_without_ack(self, environment, tmp_path) -> None:
         connection, context = environment

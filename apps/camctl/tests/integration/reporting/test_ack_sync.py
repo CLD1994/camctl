@@ -29,7 +29,7 @@ from camctl.persistence.repositories.acceptance import register_acceptance_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.contracts.values import new_operation_key
 from camctl.reporting.policy import (
-    ReportDecision, ReportDecisionKind, ReportingRepository, register_report_guards,
+    ReportingRepository, register_report_guards,
 )
 
 from ..acceptance.test_acceptance import Catalog, _NOW, _plan_body
@@ -62,14 +62,12 @@ def sync_environment(tmp_path):
     connection.close()
 
 
-def _freeze(owned, from_wm=0):
-    latest = owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0]
+def _freeze(owned):
     outcome = ReportingRepository().freeze_report(
-        ReportDecision(ReportDecisionKind.GENERATE, from_wm, latest),
         new_operation_key(), owned, occurred_at=1,
     )
     assert outcome.kind is DbOutcomeKind.COMPLETED
-    return outcome.value
+    return outcome.value.report
 
 
 def _counts(connection):
@@ -101,10 +99,26 @@ def _existing_ack(owned, relation):
         return (0, None)
     if relation == "older":
         assert _process(_plan_body(request_id="43"), owned.connection).kind is DbOutcomeKind.COMPLETED
+    else:
+        # 新的同步开始历史要求产生同水位、不同身份的报告。
+        _additional_sync(owned.connection)
     previous = _freeze(owned)
+    if relation == "equal":
+        _cancel_additional_sync(owned.connection)
     owned.connection.execute("UPDATE runtime_state SET acknowledged_wm = ?, acknowledged_report_id = ?",
                              (previous.to_wm, previous.report_id))
     return previous.to_wm, previous.report_id
+
+
+def _additional_sync(connection, origin=None):
+    from .test_freeze import _sync
+
+    _sync(connection, 2, origin)
+
+
+def _cancel_additional_sync(connection):
+    ended = connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+    connection.execute("UPDATE state_syncs SET status = 3, ended_event_id = ? WHERE id = 2", (ended,))
 
 
 def test_equal_watermark_ack_ends_sync_in_input_transaction(sync_environment):
@@ -153,7 +167,15 @@ def test_report_history_and_origin_control_sync_end(sync_environment, history_in
     owned, report = sync_environment
     connection = owned.connection
     if not origin_covered:
-        report = _freeze(owned, from_wm=1)
+        # 已有完整责任暂不生效，局部同步要求从原报告终点之后开始。
+        ended = connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+        connection.execute("UPDATE state_syncs SET status = 3, ended_event_id = ? WHERE id = 1", (ended,))
+        connection.execute("UPDATE runtime_state SET acknowledged_wm = ?, acknowledged_report_id = ?",
+                           (report.to_wm, report.report_id))
+        _additional_sync(connection, report)
+        report = _freeze(owned)
+        _cancel_additional_sync(connection)
+        connection.execute("UPDATE state_syncs SET status = 1, ended_event_id = NULL WHERE id = 1")
     if not history_includes_start:
         later_boundary = connection.execute("SELECT MAX(last_event_id) FROM history_transactions").fetchone()[0]
         connection.execute("UPDATE state_syncs SET started_boundary_event_id = ?", (later_boundary,))
@@ -220,7 +242,7 @@ def test_unparsed_input_cannot_end_sync(sync_environment):
     assert owned.connection.execute("SELECT status FROM state_syncs").fetchone() == (1,)
 
 
-@pytest.mark.parametrize("mutation", ["watermark", "boundary", "runtime_missing", "cumulative_identity"])
+@pytest.mark.parametrize("mutation", ["watermark", "boundary", "runtime_missing", "cumulative_identity", "origin_after_start"])
 def test_unreliable_state_rolls_back_entire_input(sync_environment, mutation):
     owned, report = sync_environment
     connection = owned.connection
@@ -230,8 +252,10 @@ def test_unreliable_state_rolls_back_entire_input(sync_environment, mutation):
         connection.execute("UPDATE reports SET frozen_event_id = frozen_event_id - 1 WHERE id = 1")
     elif mutation == "runtime_missing":
         connection.execute("DELETE FROM runtime_state")
-    else:
+    elif mutation == "cumulative_identity":
         connection.execute("UPDATE runtime_state SET acknowledged_wm = 6, acknowledged_report_id = 1")
+    else:
+        connection.execute("UPDATE state_syncs SET mode = 2, after_report_id = 1, from_wm = 5")
     before = _counts(connection)
     outcome = _process(_body("registered", report), connection)
     assert outcome.kind is DbOutcomeKind.ROLLED_BACK

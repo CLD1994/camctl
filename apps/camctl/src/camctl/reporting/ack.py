@@ -24,6 +24,7 @@ __all__ = [
     "decide_ack",
     "decide_sync_cancel",
     "qualifies_sync",
+    "validate_watermark",
 ]
 
 
@@ -44,7 +45,8 @@ class AckInput:
         ObjectId(self.report_id)
 
 
-def _watermark(value: int, field: str) -> None:
+def validate_watermark(value: int, field: str) -> None:
+    """报告和同步规则共用的精确业务水位检查。"""
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2**53 - 1:
         raise ConsistencyError(f"{field} 必须是公共范围内的精确业务水位: {value!r}")
 
@@ -60,8 +62,8 @@ class AckReport:
 
     def __post_init__(self) -> None:
         ObjectId(self.report_id)
-        _watermark(self.from_wm, "from_wm")
-        _watermark(self.to_wm, "to_wm")
+        validate_watermark(self.from_wm, "from_wm")
+        validate_watermark(self.to_wm, "to_wm")
         if self.from_wm > self.to_wm:
             raise ConsistencyError("报告左端不能晚于右端")
         if (isinstance(self.frozen_event_id, bool)
@@ -80,7 +82,7 @@ class AckFacts:
     read_failed: bool = False
 
     def __post_init__(self) -> None:
-        _watermark(self.acknowledged_wm, "acknowledged_wm")
+        validate_watermark(self.acknowledged_wm, "acknowledged_wm")
         if self.acknowledged_report_id is not None:
             ObjectId(self.acknowledged_report_id)
         elif self.acknowledged_wm != 0:
@@ -113,7 +115,7 @@ class SyncResponsibility:
         ObjectId(self.sync_id)
         ObjectId(self.action_id)
         ObjectId(self.started_boundary_event_id)
-        _watermark(self.from_wm, "from_wm")
+        validate_watermark(self.from_wm, "from_wm")
 
 
 @dataclass(frozen=True)

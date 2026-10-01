@@ -184,7 +184,7 @@ class TestRealEntrypoints:
         from camctl.contracts.values import new_operation_key
         from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
         from camctl.reporting.policy import (
-            ReportOpportunity, ReportingRepository, decide_report, register_report_guards,
+            ReportingRepository, register_report_guards,
         )
         home = tmp_path / "home"
         home.mkdir()
@@ -196,14 +196,12 @@ class TestRealEntrypoints:
         register_report_guards()
         owned = open_existing(home / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         try:
-            to_wm = owned.connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0]
             outcome = ReportingRepository().freeze_report(
-                decide_report(ReportOpportunity(kind="normal", requested_from_wm=0,
-                    latest_change_wm=to_wm, acknowledged_wm=0)),
                 new_operation_key(), owned, occurred_at=1,
             )
             assert outcome.kind.value == "completed", outcome.error
-            report_id = str(outcome.value.report_id)
+            report_id = str(outcome.value.report.report_id)
+            to_wm = outcome.value.report.to_wm
         finally:
             owned.connection.close()
 
