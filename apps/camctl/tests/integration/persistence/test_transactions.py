@@ -565,7 +565,6 @@ class TestAtomicRollback:
                                         "locator_json": None,
                                         "original_name": None,
                                         "media_type": None,
-                                        "last_error_json": None,
                                     },
                                 ),
                                 after=RowImage(
@@ -577,7 +576,6 @@ class TestAtomicRollback:
                                         "locator_json": {},
                                         "original_name": "a.mp4",
                                         "media_type": "video/mp4",
-                                        "last_error_json": None,
                                     },
                                 ),
                             ),

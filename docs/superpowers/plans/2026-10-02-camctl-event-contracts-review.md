@@ -32,6 +32,8 @@
 
 完整行事实中的 JSON 列应按权威 SQL 分类恢复为精确结构化值，供比较、守卫和正文使用；文本列保持文本。旧 JSON 的成员顺序、空白及数值字面量不同不能导致旧值核对失败，布尔和数字、数组次序及不同数学值仍须区分。无效 JSON 应拒绝读取及保存，不能退化为原文本。审计入口为 `row_facts`、普通操作加载、报告管理加载、拍摄补记及产物选择；SQL 旧值核对与保存键复用也须使用相同精确语义。
 
+完整行读取取得的游标由该函数负责释放。函数应先取得行值和列名，释放游标，再解析 JSON；缺行返回和取得游标后的读取错误也须释放。产物选择的错误读取通过真实 SQLite 记录、包内登记及公开 `load_selection` 入口验证，归入集成测试。单元测试继续以受接口约束的 SQLite 和内存登记替身验证完整行读取及旧值比较，不因测试便利重新组织生产模块。
+
 应急补记按会话和活动创建新的最终流程及实际尝试；已有活动的状态与错误未改变时，只省略活动行，仍保存新会话的独立事实。错误改变时，正文必须保存旧结构化错误及新错误，不能把旧 JSON 文本当成业务字符串再次编码。
 
 证据审查还须覆盖普通尝试结果、输入诊断、设备观察、基准分块和应急补记。当前应急补记同时在流程行和证据保存会话身份，而格式 1 只允许公共成员与登记基准成员；应核对该事实的权威来源及恢复消费者。`branch.evidence` 的必要性和 `observation` 的具体结构须从对应正式业务契约核实，不能依实现便利增加证据字段或省略必要依据。
@@ -46,38 +48,58 @@
 
 优先采用现有精确 JSON 比较、事件及枚举登记和标准库 SQLite，不增加依赖，也不维护第二套状态转换或分支清单。
 
+## 已完成的局部修复
+
+- [x] 完整行读取按权威 SQL 分类恢复精确 JSON；SQL 旧值核对按结构与数学值比较，保留布尔与数字的差别。
+- [x] `row_facts` 在取得行值和列名后关闭游标，再解析 JSON；正常、缺行、无效 JSON 和 SQL 读取错误四个出口均已验证。
+- [x] 产物逐项错误通过精确解析读取，无效 JSON 报为 `ConsistencyError`；精确数字、重复成员和 `NaN` 均通过公开 `load_selection` 与真实 SQLite 验证。
+- [x] 普通操作结果与结束守卫合并可靠旧事实和变化字段；原失败与终态确实提交后，迟到结果只读返回。
+- [x] 相同延时配置在输入类型校验后只读返回，非法同值类型仍被拒绝；跨会话应急补记保存独立流程事实，并省略未变化活动行。
+- [x] 报告编码夹具直接使用结构化行事实；未接入守卫的事务夹具只列真实变化，两者保持原有行为断言。
+
+这些分项不代替 E2 至 E5 的完整门禁，同键复用及证据规则仍按下文推进。
+
 ## 验证记录
 
-当前实现将登记 JSON 列的精确解析集中在完整行读取边界，SQL 旧值核对使用同一精确值语义。普通操作结果与结束守卫合并可靠旧事实和变化字段；相同延时配置在输入类型校验后只读返回；跨会话应急补记保留独立流程事实并省略未变化的活动行。生产者、复用消费者和证据审查尚未闭合，E2 至 E5 保持未完成。本提交是实施进度快照，保留尚未修复的失败反例。
-
-提交前，Python 3.12 与 3.11 分别执行组件单元测试，各有 1278 项通过、7 项失败、1 项取消选择及 2 条警告：
+Python 3.12 与 3.11 分别执行组件单元测试，各有 1282 项通过、1 项取消选择及 2 条警告：
 
 ```sh
 PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tests ~/.venv/bin/python -m pytest apps/camctl/tests/unit -q -k 'not test_accepted_record_delivers_receipt'
 ```
 
-Python 3.11 使用 `~/.venv-camctl-contracts-311/bin/python` 执行同一组合。取消选择的是既有日志收据用例 `test_accepted_record_delivers_receipt`；该用例曾持续等待队列收据而未结束，不能视为通过。7 项失败分别验证 `row_facts` 在正常、缺失、无效 JSON 和 SQL 读取错误四个出口释放游标，以及产物选择 JSON 保留精确数字、拒绝重复成员和拒绝 `NaN`。
+Python 3.11 使用 `~/.venv-camctl-contracts-311/bin/python` 执行同一组合。取消选择的是既有日志收据用例 `test_accepted_record_delivers_receipt`；该用例曾持续等待队列收据而未结束，不能视为通过。两条警告来自同步测试误标异步，见[历史读取审查](2026-10-02-camctl-history-read-review.md#验证记录)。
 
-提交前，Python 3.12 执行以下真实 SQLite 组合，有 22 项通过、1 项失败：
+局部红—绿验证包括：游标释放与旧值核对的 13 项单元测试通过；产物精确读取的 4 项集成测试通过；报告编码与未接入守卫的 4 项集成测试通过。精度、重复成员及 `NaN` 的三个反例从直接调用私有解码函数升级为真实 SQLite 与公开读取的组合，没有删除失败条件或放宽配置。
+
+Python 3.12 执行全量组件集成测试，有 766 项通过、9 项失败及 3 条警告：
 
 ```sh
-PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tests ~/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_timelapse.py apps/camctl/tests/integration/capture/test_emergency.py apps/camctl/tests/integration/operations/test_attempts.py apps/camctl/tests/integration/reporting/test_publish.py::test_formal_prepare_cannot_replace_bytes_after_failure apps/camctl/tests/integration/reporting/test_publish.py::test_management_history_replays_success_failure_and_recovery apps/camctl/tests/integration/outputs/test_sources.py::test_saved_selection_preserves_mathematical_integer_in_error_details -q
+PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tests ~/.venv/bin/python -m pytest apps/camctl/tests/integration -q
 ```
 
-延时相同配置、无变化时的非法类型、应急跨会话同错误与不同错误、普通失败重试后成功结束、原终态提交后的迟到结果及报告历史回放均通过。唯一失败发生在 `load_selection` 读取已保存逐项错误时：数学值为 `9007199254740993` 的小数字面量被解码为 `9007199254740992.0`。Python 3.11 的对应集成组合尚未执行。
+剩余 9 项均位于 `outputs/test_qualification.py`，名称见[历史读取审查的逐项记录](2026-10-02-camctl-history-read-review.md#验证记录)。本次运行分别呈现交付创建缺少 `withdrawal_error_json`、拷贝夹具不满足交付与内部处理二选一约束、来源选择或处理归属链为空、跨设备候选被业务顺序阻挡，以及回滚后资格结果为空的错误。它们须沿产物资格流程分别核实根因；本计划不把全量集成视为通过。三条警告来自日志队列关闭的协程未等待及多进程同步测试误标异步。
 
-较早的 Python 3.12 全量组件集成运行有 759 项通过、10 项失败、2 项夹具错误及 3 条警告，尚未包含随后添加的游标和产物精确值反例。9 项产物资格既有失败见[历史读取审查的验证记录](2026-10-02-camctl-history-read-review.md)。其余失败为 `persistence/test_transactions.py::TestAtomicRollback::test_unimplemented_business_guard_rejects_write`：夹具把未变化的 `last_error_json` 写入正文，在抵达目标守卫前即被结构校验拒绝。两项夹具错误为 `reporting/test_encoding.py::test_real_acceptance_projection_encoding_matches_independent_bytes` 和 `test_shared_registration_field_reordering_preserves_bytes`：夹具重复解析已结构化的 JSON。它们须按完整行读取及真实变化契约适配，并保持原有行为断言；该运行不能作为最终门禁通过依据。
+Python 3.11 执行以下相关集成组合，有 324 项通过：
+
+```sh
+PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tests ~/.venv-camctl-contracts-311/bin/python -m pytest apps/camctl/tests/integration/capture apps/camctl/tests/integration/operations apps/camctl/tests/integration/reporting apps/camctl/tests/integration/scheduling apps/camctl/tests/integration/outputs/test_sources.py apps/camctl/tests/integration/outputs/test_saved_errors.py apps/camctl/tests/integration/persistence/test_transactions.py apps/camctl/tests/integration/history -q
+```
+
+独立评审复跑 13 项纯单元并核对三个产物解码调用处、游标清理顺序、测试分类和夹具断言，没有发现本次局部修复引入的新问题。完整 H1/H4、同键复用、证据及产物资格余项仍未完成。
 
 ## 未完成的实施边界
 
 | 入口与触发场景 | 修复要求与验收条件 |
 | --- | --- |
-| `transaction.row_facts` 已取得游标后返回或报错 | 使用标准库资源清理边界，在解析 JSON 前释放读取游标；正常、缺失、无效 JSON 和 SQL 错误四项反例必须通过，保留各自返回或异常语义。 |
-| `outputs._decoded` 与 `_saved_items` 读取逐项错误 | 复用精确 JSON 解析，将无效已存 JSON 报为 `ConsistencyError`；精确数字、重复成员、`NaN` 单元反例及 `load_selection` 真实组合必须通过。审计来源解析、选择固定及逐项读取的同类路径。 |
-| `test_output_rows.py` 导入产物持久化模块 | 当前导入会通过枚举和错误登记访问包资源。应在稳定登记边界使用内存替身，或在无登记依赖的纯值边界验证解析；不能以集成测试预装资源满足单元隔离要求。 |
-| 普通尝试结果及报告重新准备的同键重送 | 变化正文没有携带的身份和原结果必须从原事务依据恢复；不得读取当前可变状态来补造原结果。覆盖原结果不含终态变化以及当前状态后来推进两类情况。 |
+| `saved_transaction_events` 读取原事务 | 使用精确解析，保留原事务及事件身份，核对事件范围和结构；不存在、不可读和不可解释分别处理。审计拍摄、延时、调度、普通操作及产物消费者，不能先丢失精度再由消费者复制对象。 |
+| `FinishAttemptCommand._reuse` 重送尝试结果 | 从变化行的 `row.id` 核对只读流程与尝试身份，核对实际结果、错误、等待及结束决定，并从原完整事务边界恢复原响应。覆盖成功终态、失败后等待、失败终态及未知结果；后来状态推进不能改变原响应。 |
+| 报告重新准备的同键重送 | 区分首次确定字节和已知字节重建；后者的变化正文不要求重复包含 `size_bytes` 和 `sha256`。核对已证明不变的首次字节依据，覆盖后来发布后的原键重查及不同字节拒绝。 |
 | 报告失败、重新发起发布、再次报告相同错误 | `required` 与完整状态守卫必须共同允许正式契约定义的状态转换；不得为满足变化必填条件把未变化错误重写入正文。 |
-| 调度授予、产物来源解析与选择固定的同键异目标输入 | 在返回前核对原事件目标和输入事实；不得把原流程身份与新请求目标混成一个结果。普通开始还须核对原配置，授予结果须从格式 1 的 `row.id` 恢复行身份。 |
+| `GrantStartCommand._reuse` 的同键异目标或异配置输入 | 在返回前核对原动作、流程责任及采用配置；不得把原流程身份与新请求目标混成一个票据。相同事实只读返回完整原票据。 |
+| `BeginAttemptCommand._reuse` 的同键异配置输入 | 从原事务中的尝试事实核对实际采用配置，不能用后来重试更新的流程配置代替。后续尝试改变配置后，原键查询仍返回原票据。 |
+| `_ResolveSourcesCommand._reuse` 的同键异动作输入 | 核对原事件中的动作身份及来源输入，再返回原成功或失败结果；两种分支分别覆盖异目标拒绝。 |
+| `_FixSelectionCommand._reuse` 的同键异选择或异输入 | 核对原事务中的选择身份及固定输入，再返回原快照；后来出现新产物不能扩大原选择。 |
+| `_GrantFileCommand._reuse` 的授予或拒绝重送 | 从格式 1 的 `row.id` 恢复创建行身份，并核对原事件类型、目标及输入；分别覆盖外部交付、内部处理和最终拒绝，原响应包含原有全部关联身份。 |
 
 同键复用的验收按以下状态分类实施。各入口先建立能够失败的反例，再修复原事务读取和输入核对，最后验证真实保存入口没有新增事实。
 
@@ -87,3 +109,14 @@ PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tes
 | 原键、不同目标 | 拒绝复用；保留原事务和当前状态。 |
 | 原键、相同目标、不同配置或输入事实 | 拒绝复用；不能把新输入解释为原操作。 |
 | 原键、原输入，但当前状态已被后续事务推进 | 返回原事务确定的结果，不从当前状态推导新结果。 |
+
+报告失败按独立状态维度执行以下分类。先核对正式分支及守卫，再补反例和实现；同键重查的错误输入仍按原事务边界核对。
+
+| 原报告状态 | 本次错误与原错误 | 新事实 |
+| --- | --- | --- |
+| `FAILED` | 精确值相同 | 只读返回，没有新事实。 |
+| `FAILED` | 精确值不同 | 只保存错误变化。 |
+| 其他允许失败的状态 | 精确值相同 | 只保存到 `FAILED` 的状态变化，完整后状态仍保留非空错误。 |
+| 其他允许失败的状态 | 精确值不同 | 保存状态与错误变化。 |
+
+剩余修复的实施顺序为：先补原事务读取及错误分类的反例，再分别完成普通结果、报告准备与失败、普通开始配置、调度及各产物入口的反例和实现。每个入口的验收独立覆盖同键同输入、异目标、异输入和后来状态推进；写入、回滚及结果未知后的重查分别验证。原事务缺少变化字段时，只能从可信的只读身份或原完整边界恢复，禁止补默认值、重新执行外部操作、写入未变化字段或跳过非法已存事实。相关入口闭合后，再完成 E4 和最终 E5 门禁；若共用结构读取暴露 E4 中的非法生产事实，须先关闭该生产者及证据规则，不能放宽共用读取。

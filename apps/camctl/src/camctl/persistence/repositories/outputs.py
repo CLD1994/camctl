@@ -10,12 +10,12 @@ FIXED 状态同一事务保存。已固定的来源与选择不因重送、重�
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
 from camctl.contracts.enums import enum_for
+from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.outputs.catalog import OutputKind
@@ -672,7 +672,12 @@ class _FixSelectionCommand:
 def _decoded(raw: Any) -> dict[str, Any] | None:
     if raw is None:
         return None
-    return json.loads(raw) if isinstance(raw, str) else dict(raw)
+    if not isinstance(raw, str):
+        return dict(raw)
+    try:
+        return parse_exact_json(raw)
+    except ValueError as error:
+        raise ConsistencyError("已保存产物选择的错误详情不是有效精确 JSON") from error
 
 
 def _processing_completed(connection, source_action_id: int) -> bool:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any, Callable, Mapping, Protocol
@@ -620,13 +621,14 @@ def event_envelope(
 
 def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
     """读取完整行事实，按权威 SQL 的 JSON 列分类恢复精确结构化值。"""
-    cursor = connection.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
-    found = cursor.fetchone()
-    if found is None:
-        return None
+    with closing(connection.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))) as cursor:
+        found = cursor.fetchone()
+        if found is None:
+            return None
+        columns = tuple(description[0] for description in cursor.description)
     return {
         name: _read_sql_value(table, name, value)
-        for name, value in zip((d[0] for d in cursor.description), found)
+        for name, value in zip(columns, found)
     }
 
 

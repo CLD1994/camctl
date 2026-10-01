@@ -23,7 +23,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import json_columns, row_facts
+from camctl.persistence.transaction import row_facts
 from camctl.reporting.encoding import ReportDocument, encode_report, iter_report_chunks
 from camctl.reporting.policy import ReportingRepository, register_report_guards
 
@@ -80,9 +80,6 @@ def accepted_report(tmp_path):
         for table in ("plans", "actions"):
             row = row_facts(owned.connection, table, 1)
             assert row is not None
-            for column in json_columns().get(table, ()):
-                if row[column] is not None:
-                    row[column] = parse_exact_json(row[column])
             facts[table] = {1: row}
         document = ReportDocument(str(report.report_id), report.from_wm, report.to_wm,
                                   (("plan", 1, ("action", (1,))),))
