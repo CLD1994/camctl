@@ -155,20 +155,30 @@ async def test_exit_not_observed_keeps_waiting() -> None:
 
 
 #: WSL 内建组脚手架：setsid 建立独立进程组并输出 PGID 与工具 PID。
+#: 后台组显式丢弃标准输出：不继承 wsl.exe 的管道写端，管道关闭
+#: 不依赖 WSL relay 对后台进程的回收时机。
 _GROUP_SCRIPT = textwrap.dedent(
     """
-    setsid sh -c 'echo GROUP_READY; while true; do sleep 1; done' &
+    setsid sh -c 'while true; do sleep 1; done' >/dev/null 2>&1 &
     group_pid=$!
     sleep 0.3
     echo "$group_pid"
     """
 )
 
+#: wsl.exe 在配置了 localhost 代理时向输出混入 UTF-16 警告字节，
+#: 解码按替换处理，不因警告中断读取线程。
+_WSL_TEXT = {"text": True, "errors": "replace"}
+_WSL_NULL_INPUT = {"stdin": subprocess.DEVNULL}
+
 
 def _wsl_available() -> bool:
     try:
         completed = subprocess.run(
-            ["wsl.exe", "-e", "true"], capture_output=True, timeout=15
+            ["wsl.exe", "-e", "true"],
+            capture_output=True,
+            timeout=15,
+            **_WSL_NULL_INPUT,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -180,7 +190,10 @@ class _WslProbe(SettlementProbe):
 
     def _run(self, *args: str) -> int:
         completed = subprocess.run(
-            ["wsl.exe", "-e", *args], capture_output=True, timeout=15
+            ["wsl.exe", "-e", *args],
+            capture_output=True,
+            timeout=15,
+            **_WSL_NULL_INPUT,
         )
         return completed.returncode
 
@@ -208,8 +221,9 @@ class TestLinuxGroupSettlement:
         completed = subprocess.run(
             ["wsl.exe", "-e", "sh", "-c", _GROUP_SCRIPT],
             capture_output=True,
-            text=True,
             timeout=30,
+            **_WSL_TEXT,
+            **_WSL_NULL_INPUT,
         )
         lines = [
             line.strip()
@@ -228,6 +242,7 @@ class TestLinuxGroupSettlement:
                 ["wsl.exe", "-e", "kill", "--", f"-{pgid}"],
                 capture_output=True,
                 timeout=15,
+                **_WSL_NULL_INPUT,
             )
             assert terminated.returncode == 0
             settlement = check_host_settlement([pgid], probe, timeout_s=10)
@@ -237,6 +252,7 @@ class TestLinuxGroupSettlement:
                 ["wsl.exe", "-e", "kill", "-9", "--", f"-{pgid}"],
                 capture_output=True,
                 timeout=15,
+                **_WSL_NULL_INPUT,
             )
 
     async def test_linux_child_inherits_group(self) -> None:
@@ -248,8 +264,9 @@ class TestLinuxGroupSettlement:
         completed = subprocess.run(
             ["wsl.exe", "-e", "sh", "-c", script],
             capture_output=True,
-            text=True,
             timeout=30,
+            **_WSL_TEXT,
+            **_WSL_NULL_INPUT,
         )
         pgids = [
             int(line.strip())
