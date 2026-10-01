@@ -71,7 +71,7 @@ it.each(["earlier", "same", "later", "gap"] as const)(
       "accepted",
     );
     const incoming = deliveryFailureHistory("failed", "different-final-error");
-    incoming.report_id = 2;
+    incoming.report_id = "2";
     incoming.to_wm = kind === "earlier" ? 5 : kind === "same" ? 10 : 30;
     incoming.from_wm = kind === "gap" ? 20 : 0;
     if (kind === "gap") delete incoming.plans![0].actions![0].deliveries;
@@ -82,14 +82,14 @@ it.each(["earlier", "same", "later", "gap"] as const)(
     expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
       "failed",
     );
-    expect(app.store.report(2)).toBeUndefined();
+    expect(app.store.report("2")).toBeUndefined();
     expect(app.store.reports()).toHaveLength(1);
-    expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(initial.bytes);
+    expect(Buffer.from(app.store.report("1")!.bytes)).toEqual(initial.bytes);
     expect(app.snapshot()).toEqual(before);
     expect(app.state()).toMatchObject({
       coverage: 10,
       gapTarget: null,
-      ackId: 1,
+      ackId: "1",
     });
   },
 );
@@ -101,7 +101,7 @@ it.each(["apply", "gap"] as const)(
     app.applyReports([initial]);
     expect(app.coverage()).toBe(10);
     const incoming = deliveryFailureHistory();
-    incoming.report_id = 2;
+    incoming.report_id = "2";
     incoming.to_wm = 30;
     incoming.from_wm = mode === "apply" ? 10 : 20;
     delete incoming.plans![0].actions![0].deliveries;
@@ -112,14 +112,14 @@ it.each(["apply", "gap"] as const)(
     expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
       mode === "apply" ? "failed" : "gap",
     );
-    expect(app.store.report(2)).toBeUndefined();
+    expect(app.store.report("2")).toBeUndefined();
     expect(app.store.reports()).toHaveLength(1);
-    expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(initial.bytes);
+    expect(Buffer.from(app.store.report("1")!.bytes)).toEqual(initial.bytes);
     expect(app.snapshot()).toEqual(before);
     expect(app.state()).toMatchObject({
       coverage: 10,
       gapTarget: mode === "gap" ? 30 : null,
-      ackId: 1,
+      ackId: "1",
     });
   },
 );
@@ -129,7 +129,7 @@ it.each(["apply", "gap"] as const)(
     const { app } = setup();
     app.applyReports([reportInput(deliveryFailureHistory("preparing"))]);
     const incoming = deliveryFailureHistory();
-    incoming.report_id = 2;
+    incoming.report_id = "2";
     incoming.to_wm = 30;
     incoming.from_wm = mode === "apply" ? 10 : 20;
     const input = reportInput(incoming);
@@ -142,8 +142,8 @@ it.each(["apply", "gap"] as const)(
       gapTarget: mode === "gap" ? 30 : null,
     });
     if (mode === "apply")
-      expect(Buffer.from(app.store.report(2)!.bytes)).toEqual(input.bytes);
-    else expect(app.store.report(2)).toBeUndefined();
+      expect(Buffer.from(app.store.report("2")!.bytes)).toEqual(input.bytes);
+    else expect(app.store.report("2")).toBeUndefined();
   },
 );
 function report(n: number) {
@@ -189,7 +189,7 @@ it("重复报告复用原字节与接收记录", () => {
   apply(app, 1);
   apply(app, 1);
   expect(app.store.reports()).toHaveLength(1);
-  expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(report(1).bytes);
+  expect(Buffer.from(app.store.report("1")!.bytes)).toEqual(report(1).bytes);
 });
 it("反序上传同批报告先衔接，且不等待大视频上传", async () => {
   const { app, files } = setup();
@@ -237,17 +237,16 @@ it.each(["request", "parent", "filename"])(
     const initial = mappedReport(Buffer.from("video"));
     app.applyReports([reportInput(initial)]);
     const next = structuredClone(initial);
-    next.report_id = 2;
+    next.report_id = "2";
     next.from_wm = 40;
     next.to_wm = 45;
     if (change === "request") next.plans![0].request_id = "other";
     if (change === "parent") {
       next.plans![0].plan_instance_id = "other";
       next.plans![0].request_id = "other";
-      next.plans![0].plan_seq = 2;
     }
     if (change === "filename")
-      next.plans![0].actions![1].deliveries![0].file_name = "d-001.mkv";
+      next.plans![0].actions![1].deliveries![0].file_name = "1.mkv";
     const input = reportInput(next);
     app.applyReports([input]);
     expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
@@ -293,18 +292,17 @@ function cleanupHistory(watermark = 20) {
   report.to_wm = watermark;
   report.plans![0].actions = [
     {
-      action_instance_id: "cleanup",
+      action_instance_id: "3",
       name: "清理",
       type: "delete_action_outputs",
       scheduled_at: "2026-01-01 00:00:00",
-      input_params: { output_ids: ["out-1", "out-2"] },
+      input_params: { output_ids: ["1", "2"] },
       status: "failed",
-      execution: { started: true },
       error: { code: "delete_items_failed", stage: "execution", details: {} },
       result: {
         items: [
           {
-            output_id: "out-1",
+            output_id: "1",
             status: "failed",
             error: {
               code: "output_not_found",
@@ -325,11 +323,11 @@ it.each(["earlier-terminal", "same-own", "later-item", "gap-item"] as const)(
     const initial = reportInput(cleanupHistory());
     app.applyReports([initial]);
     const knownGap = cleanupHistory(50);
-    knownGap.report_id = 50;
+    knownGap.report_id = "50";
     knownGap.from_wm = 40;
     app.applyReports([reportInput(knownGap)]);
     const incoming = cleanupHistory();
-    incoming.report_id = 99;
+    incoming.report_id = "99";
     const action = incoming.plans![0].actions![0];
     if (kind === "earlier-terminal") {
       incoming.to_wm = 10;
@@ -338,12 +336,12 @@ it.each(["earlier-terminal", "same-own", "later-item", "gap-item"] as const)(
       action.result = {
         items: [
           {
-            output_id: "out-1",
+            output_id: "1",
             status: "succeeded",
             outcome: "absence_confirmed",
           },
           {
-            output_id: "out-2",
+            output_id: "2",
             status: "succeeded",
             outcome: "absence_confirmed",
           },
@@ -372,16 +370,16 @@ it.each(["earlier-terminal", "same-own", "later-item", "gap-item"] as const)(
     const imported = app.store.get<ImportFile>("imports", file.file.id)!;
     expect(imported.status).toBe("failed");
     expect(imported.message).toBeTruthy();
-    expect(app.store.report(99)).toBeUndefined();
+    expect(app.store.report("99")).toBeUndefined();
     expect(app.store.reports()).toHaveLength(1);
     expect(app.snapshot()).toEqual(before);
-    expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(initial.bytes);
+    expect(Buffer.from(app.store.report("1")!.bytes)).toEqual(initial.bytes);
     expect(app.state()).toMatchObject({
       coverage: 20,
       gapTarget: 50,
-      ackId: 1,
+      ackId: "1",
     });
-    expect(app.syncParams()).toEqual({ scope: "since", after_report_id: 1 });
+    expect(app.syncParams()).toEqual({ scope: "since", after_report_id: "1" });
   },
 );
 it("历史修复：合法较早与同水位报告保存精确原文而保持投影", () => {
@@ -390,15 +388,14 @@ it("历史修复：合法较早与同水位报告保存精确原文而保持投�
   app.applyReports([initial]);
   const snapshot = app.snapshot();
   const earlier = cleanupHistory(10);
-  earlier.report_id = 91;
+  earlier.report_id = "91";
   earlier.plans![0].status = "pending";
   const action = earlier.plans![0].actions![0];
   action.status = "pending";
-  action.execution = { started: false };
   delete action.error;
   delete action.result;
   const same = cleanupHistory();
-  same.report_id = 92;
+  same.report_id = "92";
   same.from_wm = 10;
   for (const report of [earlier, same]) {
     const input = reportInput(report);
@@ -415,7 +412,7 @@ it("历史修复：合法较早与同水位报告保存精确原文而保持投�
     expect(app.snapshot()).toEqual(snapshot);
   }
   expect(app.coverage()).toBe(20);
-  expect(app.ackId()).toBe(1);
+  expect(app.ackId()).toBe("1");
 });
 it("历史修复：同批错误文件不撤销成功且合法后续条目可推进", () => {
   const { app } = setup();
@@ -424,17 +421,17 @@ it("历史修复：同批错误文件不撤销成功且合法后续条目可推�
   initial.plans![0].actions![0].status = "running";
   delete initial.plans![0].actions![0].error;
   const bad = structuredClone(initial);
-  bad.report_id = 2;
+  bad.report_id = "2";
   bad.from_wm = 20;
   bad.to_wm = 25;
   bad.plans![0].actions![0].result = { items: [] };
   const next = cleanupHistory(30);
-  next.report_id = 3;
+  next.report_id = "3";
   next.from_wm = 20;
   next.plans![0].actions![0].result = {
     items: [
       {
-        output_id: "out-1",
+        output_id: "1",
         status: "failed",
         error: {
           code: "output_not_found",
@@ -442,7 +439,7 @@ it("历史修复：同批错误文件不撤销成功且合法后续条目可推�
           details: {},
         },
       },
-      { output_id: "out-2", status: "succeeded", outcome: "deleted" },
+      { output_id: "2", status: "succeeded", outcome: "deleted" },
     ],
   };
   const inputs = [reportInput(initial), reportInput(bad), reportInput(next)];
@@ -453,9 +450,9 @@ it("历史修复：同批错误文件不撤销成功且合法后续条目可推�
     ),
   ).toEqual(["accepted", "failed", "accepted"]);
   expect(app.coverage()).toBe(30);
-  expect(app.ackId()).toBe(3);
-  expect(app.store.reports().map((r) => r.report_id)).toEqual([1, 3]);
-  expect(Buffer.from(app.store.report(1)!.bytes)).toEqual(inputs[0].bytes);
+  expect(app.ackId()).toBe("3");
+  expect(app.store.reports().map((r) => r.report_id)).toEqual(["1", "3"]);
+  expect(Buffer.from(app.store.report("1")!.bytes)).toEqual(inputs[0].bytes);
   expect(app.snapshot().plans![0].actions![0].result).toEqual(
     next.plans![0].actions![0].result,
   );

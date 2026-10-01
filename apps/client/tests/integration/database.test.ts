@@ -65,12 +65,12 @@ describe("客户端数据库启动与事务", () => {
     expect(() =>
       store.transaction(() => {
         store.set("state", "coverage", 20);
-        store.saveReport(1, "original.json", Buffer.from("original"), 0, 20);
+        store.saveReport("1", "original.json", Buffer.from("original"), 0, 20);
         throw Error("写入故障");
       }),
     ).toThrow();
     expect(store.get("state", "coverage")).toBe(0);
-    expect(store.report(1)).toBeUndefined();
+    expect(store.report("1")).toBeUndefined();
   });
   it("成功事务保留原始字节并与状态共同恢复", () => {
     const { store } = setup();
@@ -79,11 +79,11 @@ describe("客户端数据库启动与事务", () => {
       '{\r\n "report_id":1,"from_wm":0,"to_wm":20\r\n}',
     );
     store.transaction(() => {
-      store.saveReport(1, "original.json", bytes, 0, 20);
+      store.saveReport("1", "original.json", bytes, 0, 20);
       store.set("state", "coverage", 20);
-      store.set("state", "snapshot", { report_id: 1, from_wm: 0, to_wm: 20 });
+      store.set("state", "snapshot", { report_id: "1", from_wm: 0, to_wm: 20 });
     });
-    expect(Buffer.from(store.report(1)!.bytes)).toEqual(bytes);
+    expect(Buffer.from(store.report("1")!.bytes)).toEqual(bytes);
     expect(store.get("state", "coverage")).toBe(20);
   });
 });

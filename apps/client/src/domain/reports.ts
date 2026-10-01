@@ -6,10 +6,10 @@ import { parseJson } from "../shared/json";
 import { validateBuiltinParams } from "../shared/action-params";
 import {
   createValidator,
+  isCanonicalId,
   isId,
   isName,
   isObject,
-  isPositive,
   isTimestamp,
   isUint,
   schemaIssues,
@@ -22,15 +22,10 @@ import type {
   Delivery,
 } from "../shared/types";
 import type {
-  Attempt,
-  Copy,
   CameraResult,
-  CaptureResult,
   ObtainResult,
   DeleteResult,
   CancelResult,
-  FollowupStop,
-  EmergencyStop,
 } from "../shared/status-report.generated";
 
 const validate = createValidator().compile<StatusReport>(schema);
@@ -39,46 +34,11 @@ const terminal = (status: ReportAction["status"]) =>
 function requireFact(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
-function attempts(values: Attempt[], maximum: number, path: string) {
-  requireFact(values.length <= maximum, `${path} 尝试次数超过上限`);
-  values.forEach((a, i) =>
-    requireFact(a.attempt_no === i + 1, `${path} 尝试编号不连续`),
-  );
-  requireFact(
-    values.filter((a) => a.status === "running").length <= 1,
-    `${path} 同一流程有多个运行尝试`,
-  );
-  const running = values.findIndex((a) => a.status === "running");
-  requireFact(
-    running === -1 || running === values.length - 1,
-    `${path} 运行中的尝试必须是最新尝试`,
-  );
-}
-function copyFacts(copy: Copy, path: string) {
-  attempts(copy.read_attempts, copy.max_read_attempts, path);
-  requireFact(
-    copy.recopies_used <= copy.max_recopies &&
-      copy.round === copy.recopies_used + 1,
-    `${path} 重拷轮次与预算不一致`,
-  );
-  requireFact(
-    copy.source_size === undefined || copy.committed_bytes <= copy.source_size,
-    `${path} 拷贝进度超过源长度`,
-  );
-}
 interface Index {
   plans: Map<string, ReportPlan>;
   actions: Map<string, { parent: string; value: ReportAction }>;
   outputs: Map<string, { parent: string; value: Output }>;
   deliveries: Map<string, { parent: string; value: Delivery }>;
-  flows: Map<
-    string,
-    {
-      parent: string;
-      kind: "followup" | "emergency";
-      value: FollowupStop | EmergencyStop;
-    }
-  >;
 }
 function indexReport(report: StatusReport): Index {
   const index: Index = {
@@ -86,21 +46,16 @@ function indexReport(report: StatusReport): Index {
     actions: new Map(),
     outputs: new Map(),
     deliveries: new Map(),
-    flows: new Map(),
   };
   const requests = new Set<string>();
-  const sequences = new Set<number>();
   const files = new Set<string>();
   for (const plan of report.plans ?? []) {
     requireFact(
-      !index.plans.has(plan.plan_instance_id) &&
-        !requests.has(plan.request_id) &&
-        !sequences.has(plan.plan_seq),
-      "计划身份、请求关联或受理序号重复",
+      !index.plans.has(plan.plan_instance_id) && !requests.has(plan.request_id),
+      "计划身份或请求关联重复",
     );
     index.plans.set(plan.plan_instance_id, plan);
     requests.add(plan.request_id);
-    sequences.add(plan.plan_seq);
     const names = new Set<string>();
     for (const action of plan.actions ?? []) {
       requireFact(
@@ -113,29 +68,6 @@ function indexReport(report: StatusReport): Index {
         value: action,
       });
       names.add(action.name);
-      if (action.type === "camera_record") {
-        const recording = (action.result as CameraResult | undefined)
-          ?.recording;
-        for (const [kind, flows] of [
-          ["followup", recording?.followup_stops],
-          ["emergency", recording?.emergency_stops],
-        ] as const)
-          for (const flow of flows ?? []) {
-            requireFact(!index.flows.has(flow.flow_id), "收场流程身份重复");
-            index.flows.set(flow.flow_id, {
-              parent: action.action_instance_id,
-              kind,
-              value: flow,
-            });
-          }
-        const triggers = (recording?.followup_stops ?? []).map(
-          (f) => f.trigger_action_instance_id,
-        );
-        requireFact(
-          new Set(triggers).size === triggers.length,
-          "同一触发动作不能为同一历史录像建立多个收场预算",
-        );
-      }
       for (const output of action.outputs ?? []) {
         requireFact(!index.outputs.has(output.output_id), "产物身份重复");
         requireFact(
@@ -169,19 +101,6 @@ function indexReport(report: StatusReport): Index {
   return index;
 }
 function associations(index: Index) {
-  for (const flow of index.flows.values())
-    if (flow.kind === "followup") {
-      const triggerId = (flow.value as FollowupStop).trigger_action_instance_id;
-      requireFact(triggerId !== flow.parent, "后续收场不能由目标录像自身触发");
-      const trigger = index.actions.get(triggerId)?.value;
-      const camera = index.actions.get(flow.parent)?.value;
-      if (trigger)
-        requireFact(
-          isCameraAction(trigger.type) &&
-            trigger.device_id === camera?.device_id,
-          "后续收场触发动作须属于目标相机",
-        );
-    }
   const selected = (
     owner: { parent: string; value: ReportAction },
     sourceId: string,
@@ -272,7 +191,14 @@ function associations(index: Index) {
       for (const failure of (action.result as unknown as ObtainResult)
         .failures) {
         selected(owner, failure.source_action_instance_id, failure.output_id);
-        const identity = `${failure.source_action_instance_id}/${failure.output_id ?? ""}/${failure.delivery_id ?? ""}`;
+        // 显式 ID 失败按请求标识区分，不因实体关联相同而合并。
+        const details = (failure.error as { details?: unknown }).details;
+        const requested =
+          isObject(details) &&
+          typeof details.requested_output_id === "string"
+            ? details.requested_output_id
+            : "";
+        const identity = `${failure.source_action_instance_id}/${failure.output_id ?? ""}/${failure.delivery_id ?? ""}/${requested}`;
         requireFact(!seen.has(identity), "取回失败项重复");
         seen.add(identity);
         const output = failure.output_id
@@ -399,9 +325,7 @@ function ownFacts(report: StatusReport) {
     for (const action of plan.actions ?? []) {
       requireFact(isName(action.name), "动作名称不合法");
       const admission =
-        action.status === "failed" &&
-        !action.execution.started &&
-        action.error?.stage === "admission";
+        action.status === "failed" && action.error?.stage === "admission";
       if (!admission) {
         if (action.scheduled_at !== undefined)
           requireFact(
@@ -436,86 +360,82 @@ function ownFacts(report: StatusReport) {
           );
         }
       }
-      if (!action.execution.started)
+      // 未开始（pending）动作不携带执行结果、产物或交付。
+      if (action.status === "pending")
         requireFact(
           action.result === undefined &&
             !action.outputs?.length &&
-            !action.deliveries?.length,
-          "未执行动作不能携带执行结果或产物交付",
+            !action.deliveries?.length &&
+            action.device_execution === undefined,
+          "未执行动作不能携带执行结果、产物交付或设备执行提示",
         );
       if (plan.status === "completed")
         requireFact(terminal(action.status), "已完成计划包含未终态动作");
       if (plan.status === "pending")
-        requireFact(!action.execution.started, "未执行计划包含已开始动作");
+        requireFact(
+          action.status === "pending" ||
+            (action.status === "failed" &&
+              (action.error as { stage?: string } | undefined)?.stage ===
+                "admission"),
+          "未执行计划包含已开始动作",
+        );
       if (action.expiration_reason === "window_missed")
-        requireFact(!action.execution.started, "错过启动窗口不应已有执行事实");
+        requireFact(
+          action.status === "pending",
+          "错过启动窗口不应已有执行事实",
+        );
       if (action.expiration_reason === "window_exhausted")
-        requireFact(action.execution.started, "启动窗口耗尽须已有执行事实");
-      if (
-        (action.type === "camera_take_photo" ||
-          action.type === "camera_timelapse") &&
-        action.result
-      ) {
-        const result = action.result as unknown as CaptureResult;
-        for (const key of ["start", "stop"] as const)
-          if (result[key])
-            attempts(
-              result[key].attempts,
-              result[key].max_attempts,
-              "拍摄" + key,
-            );
-      }
+        requireFact(
+          action.status !== "pending",
+          "启动窗口耗尽须已有执行事实",
+        );
+      // 设备执行提示只属于已终态的拍摄动作。
+      if (action.device_execution !== undefined)
+        requireFact(
+          terminal(action.status) && isCameraAction(action.type),
+          "设备执行提示只属于已终态拍摄动作",
+        );
       if (action.type === "camera_record" && action.result) {
         const result = action.result as CameraResult;
-        if (result.recording) {
-          const r = result.recording;
-          attempts(r.start.attempts, r.start.max_attempts, "录像启动");
-          attempts(r.stop.attempts, r.stop.max_attempts, "录像停止");
-          for (const stop of r.followup_stops ?? [])
-            attempts(stop.attempts, stop.max_attempts, "后续停止");
-          for (const stop of r.emergency_stops ?? [])
-            if (stop.max_attempts !== undefined)
-              requireFact(
-                stop.attempts_used <= stop.max_attempts,
-                "应急停止超过预算",
-              );
-          for (const collection of [r.followup_stops, r.emergency_stops])
-            if (collection)
-              requireFact(
-                new Set(collection.map((s) => s.flow_id)).size ===
-                  collection.length,
-                "停止流程身份重复",
-              );
-        }
-        if (result.source_copy) copyFacts(result.source_copy, "原片输入副本");
         if (action.status === "succeeded" && result.repair)
           requireFact(
-            !["undetermined", "pending", "running"].includes(
-              result.repair.status,
-            ),
-            "录像成功时修复仍未结束",
+            result.repair.status !== "failed" || result.repair.error !== undefined,
+            "录像修复失败须携带错误",
           );
       }
       if (action.type === "delete_action_outputs" && action.result) {
         const items = (action.result as unknown as DeleteResult).items;
-        requireFact(
+        const ids =
           isObject(action.input_params) &&
-            Array.isArray(action.input_params.output_ids),
-          "清理输入缺少目标",
-        );
-        const ids = action.input_params.output_ids;
-        requireFact(
-          items.length <= ids.length &&
-            items.every((item, i) => item.output_id === ids[i]),
-          "清理逐项结果顺序与输入不一致",
-        );
-        if (action.status === "succeeded")
+          Array.isArray(action.input_params.output_ids)
+            ? action.input_params.output_ids
+            : undefined;
+        if (ids) {
+          // 精确 ID 模式：逐项结果与输入目标一一对应。
           requireFact(
-            items.length === ids.length &&
-              items.length > 0 &&
-              items.every((i) => i.status === "succeeded"),
-            "清理成功缺少全部目标的成功事实",
+            items.length <= ids.length &&
+              items.every((item, i) => item.output_id === ids[i]),
+            "清理逐项结果顺序与输入不一致",
           );
+          if (action.status === "succeeded")
+            requireFact(
+              items.length === ids.length &&
+                items.length > 0 &&
+                items.every((i) => i.status === "succeeded"),
+              "清理成功缺少全部目标的成功事实",
+            );
+        } else {
+          // 范围模式：按已确定目标逐项报告；可靠确认空集合允许成功。
+          requireFact(
+            new Set(items.map((i) => i.output_id)).size === items.length,
+            "清理逐项结果目标重复",
+          );
+          if (action.status === "succeeded")
+            requireFact(
+              items.every((i) => i.status === "succeeded"),
+              "清理成功包含未成功目标",
+            );
+        }
       }
       if (action.type === "cancel_task" && action.result) {
         const items = (action.result as unknown as CancelResult).items;
@@ -570,22 +490,6 @@ function ownFacts(report: StatusReport) {
             /^[A-Za-z0-9]+$/.test(suffix),
           "交付文件名必须使用完整交付 ID 和安全扩展名",
         );
-        copyFacts(delivery.copy, "交付拷贝");
-        if (
-          ["prepared", "publishing", "published", "withdrawn"].includes(
-            delivery.status,
-          )
-        ) {
-          requireFact(
-            delivery.copy.committed_bytes === delivery.size,
-            "准备完成的字节进度不等于完整长度",
-          );
-          if (delivery.copy.source_size !== undefined)
-            requireFact(
-              delivery.copy.source_size === delivery.size,
-              "完整源长度与交付长度不一致",
-            );
-        }
       }
     }
   }
@@ -606,7 +510,7 @@ export function parseReport(fileName: string, bytes: Uint8Array): StatusReport {
     fileName,
   );
   requireFact(
-    match && !/[\r\n]/.test(fileName) && isPositive(Number(match[1])),
+    match && !/[\r\n]/.test(fileName),
     "报告文件名不合法",
   );
   requireFact(
@@ -620,7 +524,7 @@ export function parseReport(fileName: string, bytes: Uint8Array): StatusReport {
   const value = parseJson(text);
   validateReport(value);
   requireFact(
-    value.report_id === Number(match[1]),
+    value.report_id === match[1],
     "报告文件名与正文身份不一致",
   );
   return value;
@@ -632,31 +536,6 @@ function unchanged(old: object, next: object, keys: string[], label: string) {
         isDeepStrictEqual(Reflect.get(old, key), Reflect.get(next, key)),
       `${label} 的不可变字段 ${key} 改变`,
     );
-}
-function attemptHistory(old: Attempt[], next: Attempt[]) {
-  requireFact(next.length >= old.length, "已登记尝试不能消失");
-  old.forEach((before, i) => {
-    requireFact(before.attempt_no === next[i].attempt_no, "尝试编号不可改变");
-    if (before.status === "succeeded" || before.status === "failed")
-      requireFact(isDeepStrictEqual(before, next[i]), "已确定尝试结果不可改变");
-  });
-}
-function copyHistory(old: Copy, next: Copy) {
-  unchanged(
-    old,
-    next,
-    ["max_read_attempts", "read_idle_timeout_s", "max_recopies"],
-    "拷贝预算",
-  );
-  attemptHistory(old.read_attempts, next.read_attempts);
-  requireFact(next.recopies_used >= old.recopies_used, "额外重拷计数不可回退");
-  if (next.round === old.round)
-    requireFact(
-      next.committed_bytes >= old.committed_bytes,
-      "同轮拷贝进度不可回退",
-    );
-  if (old.source_size !== undefined)
-    requireFact(next.source_size === old.source_size, "已知源长度不可改变");
 }
 function sameOwnFields(old: Index, next: Index) {
   const own = (value: object, children: string[]) =>
@@ -726,31 +605,18 @@ function itemHistory<T extends { status: string }>(
 }
 function actionResultHistory(before: ReportAction, after: ReportAction) {
   if (
-    before.type === "camera_take_photo" ||
-    before.type === "camera_timelapse"
+    (before.type === "camera_record" ||
+      before.type === "camera_take_photo" ||
+      before.type === "camera_timelapse") &&
+    before.type === after.type
   ) {
-    const old = before.result as CaptureResult | undefined;
-    const next = after.result as CaptureResult | undefined;
-    if (old) {
-      requireFact(next, "已保存拍摄结果不能消失");
-      if (terminal(before.status))
-        requireFact(isDeepStrictEqual(old, next), "拍摄终态结果不可改写");
-      for (const key of ["captured_count", "elapsed_s"] as const)
-        if (old.capture[key] !== undefined)
-          requireFact(
-            next.capture[key] !== undefined &&
-              next.capture[key]! >= old.capture[key]!,
-            "可靠采集进度不能回退或消失",
-          );
-      for (const key of ["start", "stop"] as const)
-        if (old[key]) {
-          requireFact(
-            next[key] && next[key].max_attempts === old[key].max_attempts,
-            "拍摄尝试预算不可改变",
-          );
-          attemptHistory(old[key].attempts, next[key].attempts);
-        }
-    }
+    const old = before.result as CameraResult | undefined;
+    const next = after.result as CameraResult | undefined;
+    if (old && terminal(before.status))
+      requireFact(
+        isDeepStrictEqual(old, next),
+        "拍摄终态结果不可改写",
+      );
   }
 
   if (before.type === "obtain_action_outputs") {
@@ -793,41 +659,13 @@ function actionResultHistory(before: ReportAction, after: ReportAction) {
   }
 }
 function historicalIdentity(old: Index, next: Index, advancing: boolean) {
-  for (const [id, flow] of next.flows) {
-    const before = old.flows.get(id);
-    if (!before) continue;
-    requireFact(
-      before.parent === flow.parent && before.kind === flow.kind,
-      "收场流程归属或类别不可改变",
-    );
-    unchanged(
-      before.value,
-      flow.value,
-      flow.kind === "followup"
-        ? ["trigger_action_instance_id", "max_attempts"]
-        : ["session_id", "max_attempts", "attempts_used"],
-      "收场流程",
-    );
-    if (flow.kind === "emergency")
-      requireFact(
-        isDeepStrictEqual(before.value, flow.value),
-        "已回填应急停止事实不可改写",
-      );
-    if (advancing && flow.kind === "followup") {
-      const prior = before.value as FollowupStop;
-      const incoming = flow.value as FollowupStop;
-      attemptHistory(prior.attempts, incoming.attempts);
-      if (!["pending", "running"].includes(prior.status))
-        unchanged(prior, incoming, ["status", "error"], "后续收场终结结果");
-    }
-  }
   for (const [id, plan] of next.plans) {
     const before = old.plans.get(id);
     if (before) {
       unchanged(
         before,
         plan,
-        ["request_id", "plan_seq", "created_at", "name"],
+        ["request_id", "created_at", "name"],
         "计划",
       );
       if (advancing)
@@ -842,9 +680,8 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
     for (const existing of old.plans.values())
       requireFact(
         existing.plan_instance_id === id ||
-          (existing.request_id !== plan.request_id &&
-            existing.plan_seq !== plan.plan_seq),
-        "计划请求或受理序号关联冲突",
+          existing.request_id !== plan.request_id,
+        "计划请求关联冲突",
       );
   }
   for (const [id, action] of next.actions) {
@@ -867,25 +704,6 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
       ],
       "动作原始输入",
     );
-    if (before.value.type === "camera_record") {
-      const a = before.value.result as CameraResult | undefined;
-      const b = action.value.result as CameraResult | undefined;
-      if (a?.recording && b?.recording)
-        for (const key of ["start", "stop"] as const)
-          unchanged(
-            a.recording[key],
-            b.recording[key],
-            ["max_attempts"],
-            "录像尝试预算",
-          );
-      if (a?.source_copy && b?.source_copy)
-        unchanged(
-          a.source_copy,
-          b.source_copy,
-          ["max_read_attempts", "read_idle_timeout_s", "max_recopies"],
-          "原片拷贝预算",
-        );
-    }
     if (advancing) {
       actionResultHistory(before.value, action.value);
       requireFact(
@@ -897,41 +715,6 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
         before.value.status !== "running" || action.value.status !== "pending",
         "动作运行阶段不能回退",
       );
-      requireFact(
-        !before.value.execution.started || action.value.execution.started,
-        "已开始执行的事实不可消失",
-      );
-      if (before.value.type === "camera_record") {
-        const oldResult = before.value.result as CameraResult | undefined;
-        const nextResult = action.value.result as CameraResult | undefined;
-        if (oldResult?.recording) {
-          requireFact(nextResult?.recording, "已登记录像流程不能消失");
-          for (const key of ["start", "stop"] as const) {
-            requireFact(
-              oldResult.recording[key].max_attempts ===
-                nextResult.recording[key].max_attempts,
-              "录像尝试预算不可改变",
-            );
-            attemptHistory(
-              oldResult.recording[key].attempts,
-              nextResult.recording[key].attempts,
-            );
-          }
-          for (const flows of [
-            oldResult.recording.followup_stops,
-            oldResult.recording.emergency_stops,
-          ])
-            for (const flow of flows ?? [])
-              requireFact(
-                next.flows.has(flow.flow_id),
-                "已登记收场流程不能消失",
-              );
-        }
-        if (oldResult?.source_copy) {
-          requireFact(nextResult?.source_copy, "已登记原片拷贝不能消失");
-          copyHistory(oldResult.source_copy, nextResult.source_copy);
-        }
-      }
     }
   }
   for (const [id, output] of next.outputs) {
@@ -965,20 +748,13 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
     }
   }
   for (const [id, delivery] of next.deliveries) {
-    const before = old.deliveries.get(id);
-    if (before)
-      unchanged(
-        before.value.copy,
-        delivery.value.copy,
-        ["max_read_attempts", "read_idle_timeout_s", "max_recopies"],
-        "交付拷贝预算",
-      );
     for (const existing of old.deliveries.values())
       requireFact(
         existing.value.delivery_id === id ||
           existing.value.file_name !== delivery.value.file_name,
         "交付文件名被复用",
       );
+    const before = old.deliveries.get(id);
     if (before) {
       requireFact(before.parent === delivery.parent, "交付所属取回动作改变");
       unchanged(
@@ -988,7 +764,6 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
         "交付",
       );
       if (advancing) {
-        copyHistory(before.value.copy, delivery.value.copy);
         const status = before.value.status;
         const stages: readonly Delivery["status"][] = [
           "pending",
@@ -1122,7 +897,6 @@ export function validateReportAgainstHistory(
     actions: new Map([...first.actions, ...second.actions]),
     outputs: new Map([...first.outputs, ...second.outputs]),
     deliveries: new Map([...first.deliveries, ...second.deliveries]),
-    flows: new Map([...first.flows, ...second.flows]),
   });
   associations(combined(old, next));
   associations(combined(next, old));
@@ -1141,14 +915,14 @@ export function reportDecision(
   return to <= coverage ? "covered" : from <= coverage ? "apply" : "gap";
 }
 export function selectSyncReport(
-  reports: Array<{ report_id: number; to_wm: number }>,
+  reports: Array<{ report_id: string; to_wm: number }>,
   coverage: number,
-): number | null {
+): string | null {
   requireFact(isUint(coverage), "本地完整覆盖水位不合法");
-  let selected: { report_id: number; to_wm: number } | undefined;
+  let selected: { report_id: string; to_wm: number } | undefined;
   for (const report of reports) {
     requireFact(
-      isPositive(report.report_id) && isUint(report.to_wm),
+      isCanonicalId(report.report_id) && isUint(report.to_wm),
       "已保存报告的身份或水位不合法",
     );
     if (

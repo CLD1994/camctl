@@ -9,6 +9,7 @@ import type {
 import { validateParams } from "./capabilities";
 import { validateBuiltinParams, isSyncBasis } from "./action-params";
 import {
+  isCanonicalId,
   isId,
   isName,
   isObject,
@@ -63,9 +64,9 @@ export function validatePlan(
   );
   if (Object.hasOwn(plan, "last_report_id"))
     check(
-      isPositive(plan.last_report_id),
+      isCanonicalId(plan.last_report_id),
       "last_report_id",
-      "报告编号必须是正安全整数",
+      "报告编号必须是规范十进制身份",
     );
   if (!Array.isArray(plan.actions) || !plan.actions.length) {
     issue("actions", "invalid_actions", "至少需要一个动作");

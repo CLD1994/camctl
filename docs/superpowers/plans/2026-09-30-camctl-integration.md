@@ -94,9 +94,9 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 **接口建议：** `newRequestId(random, usedIds: RequestIdLookup) -> CanonicalId`、`formatProtocolTime(value) -> UtcText`、现有 `exportDraft` 与 `downloadRequest`。RequestIdLookup 按单个 ID 查询索引，不加载全部历史请求；查询失败不能当作身份未使用。工程建议由 Node crypto 提供均匀随机的合法正 63 位整数，保持 BigInt 和规范字符串；与本地已保存请求冲突时有限重选。分配策略及有限重选上限由该分配器集中定义，实施前审阅；公共契约不把请求 ID 作为顺序。该建议使用随机身份来支持独立客户端，保证范围不同于主机单库分配的单调实例 ID。
 
-- [ ] 建立 `test_export_retry_preserves_request_identity`：首次导出并保存后再次下载保持 ID 和正文，新的草稿意图取得新 ID；单独验证 0、越界、最大合法值和大于 Number 安全范围的身份。随机源及 usedIds 用受约束替身，冲突重选耗尽返回导出错误，不返回默认 ID。
-- [ ] 运行 `pnpm --dir apps/client exec vitest run tests/unit/request-id.test.ts tests/unit/capture.test.ts`，确认失败来自真实身份或导出规则。先获取现有基线并按根因区分，不把历史失败归因于新任务。
-- [ ] 把请求身份分配、原请求保存及草稿状态更新放在现有同一客户端事务内；下载只在提交后发生。完整审计验证用的临时身份、请求引用、查询参数、数据库读写及排序，保证身份不经 Number。时间按公共格式输出；describe 的真实能力直接供 Ajv 和界面消费。
+- [x] 建立 `test_export_retry_preserves_request_identity`：首次导出并保存后再次下载保持 ID 和正文，新的草稿意图取得新 ID；单独验证 0、越界、最大合法值和大于 Number 安全范围的身份。随机源及 usedIds 用受约束替身，冲突重选耗尽返回导出错误，不返回默认 ID。
+- [x] 运行 `pnpm --dir apps/client exec vitest run tests/unit/request-id.test.ts tests/unit/capture.test.ts`，确认失败来自真实身份或导出规则。先获取现有基线并按根因区分，不把历史失败归因于新任务。
+- [x] 把请求身份分配、原请求保存及草稿状态更新放在现有同一客户端事务内；下载只在提交后发生。完整审计验证用的临时身份、请求引用、查询参数、数据库读写及排序，保证身份不经 Number。时间按公共格式输出；describe 的真实能力直接供 Ajv 和界面消费。
 - [ ] 运行客户端类型检查及分类测试：`pnpm --dir apps/client typecheck`、`pnpm --dir apps/client test:unit`、`pnpm --dir apps/client test:integration`。用真实客户端库验证保存失败不下载、重启后原请求和 ACK、真实能力样例判定及报告保存后再确认。
 - [ ] 核对客户端报告适配任务一至四、时间和能力的全部消费者；将旧存储与当前表示的兼容问题按客户端有效数据规则处理，不伪造默认字段；建议提交“feat: 接入客户端公共身份与能力协议”。
 

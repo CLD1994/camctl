@@ -16,7 +16,7 @@
 | --- | --- |
 | [自动预览选择修复成品](preview-repaired/status-report-1-1ddd9af9225a8a8a1d6a9418438cd88ccf81a3a08c9de43e5fd19e63e5b4c649.json) | 预览为 2 MiB，修复成品为 1 MiB；实际 delivery 引用修复成品，原片、预览和修复成品各有身份。 |
 | [交接结果无法确认](handoff-unconfirmed/status-report-1-28ace100d059cea36f1d7ca7292e36d5ead1c197e3972e968007d62aab5abd98.json) | 交付为 failed，原因保留未知；取回整体失败，不声称客户端未收到。 |
-| [取消动作自身被取消](cancel-controller/status-report-1-da253023d20300ba3dca6365595d6529ec915444fd6359c73ac9375c88871343.json) | C1 为 canceled，条目说明目标取消已生效；C2 仅取消 C1 并成功，录像的停止仍在继续。 |
+| [取消动作自身被取消](cancel-controller/status-report-1-ca21c5bbb9f88309020fe1da9e2201c24a219533989ed7755d1d79517a709f3c.json) | C1 为 canceled，条目说明目标取消已生效；C2 仅取消 C1 并成功，录像的停止仍在继续。 |
 | [完整副本清理失败](canceled-complete-copy/status-report-1-1e0484d32c4cb0123f31b0eccf1cd13617bf913486ac2ed8931ba28149c8e020.json) | 取回与交付保持 canceled；发起取消的动作保留该次取消处理失败的逐项原因。 |
 | [按当前计划选择](range-selection/status-report-1-c4f487575cdda8dbfa75242182fe23d153965625385e42aa78a5b7f206cda643.json) | 取回交付关联实际来源和产物；清理按已确定的目标逐项报告结果。 |
 | [范围清理可靠空集合](empty-cleanup/status-report-1-4241dd4999185178eb77aaa16f09d505fbff929055d50189420637b965988b81.json) | 主机已可靠确认范围内没有产物，清理成功且逐项结果为空。 |

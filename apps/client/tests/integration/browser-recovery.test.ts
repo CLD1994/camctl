@@ -9,7 +9,7 @@ import { Application } from "../../src/server/application";
 import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
 import { RequestLifecycle, createStop } from "../../src/server/lifecycle";
-import { mappedReport, reportInput } from "./fixtures";
+import { mappedReport, reportInput, deliveryFileName } from "./fixtures";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -93,7 +93,7 @@ it("核验通过但媒体不能解码时保留原视频下载和核验结果", a
   );
   app.applyReports([reportInput(mappedReport(bytes))]);
   const file = files.createBatch([
-    { fileName: "d-001.mp4", kind: "video", size: bytes.length },
+    { fileName: deliveryFileName(), kind: "video", size: bytes.length },
   ]).files[0];
   await files.upload(file.id, Readable.from([bytes]));
   await files.idle();

@@ -15,6 +15,7 @@ const capabilities: Capabilities = {
               type: "fixed",
               name: "固定任务",
               description: "使用固定拍摄设置",
+              preview_supported: false,
               schema: {
                 $schema: "https://json-schema.org/draft/2020-12/schema",
                 type: "object",

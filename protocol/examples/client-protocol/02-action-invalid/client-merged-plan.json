@@ -23,34 +23,7 @@
         "duration_s": 60
       },
       "status": "succeeded",
-      "execution": {
-        "started": true
-      },
       "result": {
-        "recording": {
-          "start": {
-            "max_attempts": 3,
-            "attempts": [
-              {
-                "attempt_no": 1,
-                "status": "succeeded"
-              }
-            ]
-          },
-          "stop": {
-            "max_attempts": 3,
-            "attempts": [
-              {
-                "attempt_no": 1,
-                "status": "succeeded"
-              }
-            ]
-          },
-          "control_elapsed_s": 60,
-          "effect": {
-            "status": "compensated"
-          }
-        },
         "repair": {
           "status": "not_needed"
         }
@@ -90,9 +63,6 @@
         }
       },
       "status": "failed",
-      "execution": {
-        "started": false
-      },
       "error": {
         "code": "source_action_not_found",
         "stage": "admission",

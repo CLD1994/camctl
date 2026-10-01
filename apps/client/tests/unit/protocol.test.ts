@@ -29,6 +29,7 @@ const directory = () => ({
               type: "fixed",
               name: "固定",
               description: "演示",
+              preview_supported: false,
               schema: structuredClone(schema),
             },
           ],
@@ -300,8 +301,8 @@ describe("validatePlan", () => {
     {},
     null,
     { scope: "since" },
-    { after_report_id: 1 },
-    { scope: "full", after_report_id: 1 },
+    { after_report_id: "1" },
+    { scope: "full", after_report_id: "1" },
     { scope: "since", after_report_id: true },
   ])("拒绝同步组合错误 %#", (params) =>
     expect(
@@ -316,27 +317,27 @@ describe("validatePlan", () => {
       {
         name: "报告",
         type: "report_status",
-        params: { scope: "since", after_report_id: 4 },
+        params: { scope: "since", after_report_id: "4" },
       },
     ]);
     expect(
       validatePlan(p, null, {
-        reports: [{ report_id: 4, to_wm: 20 }],
+        reports: [{ report_id: "4", to_wm: 20 }],
         coverage: 20,
       }),
     ).toEqual([]);
     expect(
       validatePlan(p, null, {
-        reports: [{ report_id: 4, to_wm: 20 }],
+        reports: [{ report_id: "4", to_wm: 20 }],
         coverage: 19,
       }).length,
     ).toBeGreaterThan(0);
   });
   it.each([
-    { request_id: "r" },
-    { plan_instance_id: "p" },
-    { action_instance_id: "a" },
-    { plan_instance_id: "p", group: "组" },
+    { request_id: "7" },
+    { plan_instance_id: "8" },
+    { action_instance_id: "9" },
+    { plan_instance_id: "8", group: "组" },
   ])("接受取消目标组合 %#", (target) =>
     expect(
       validatePlan(

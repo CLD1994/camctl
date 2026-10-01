@@ -114,9 +114,15 @@ export function loadCapabilities(value: unknown): Capabilities {
         throw new Error("parameter_types 必须非空");
       const types = new Set<string>();
       for (const parameter of action.parameter_types) {
-        exact(parameter, ["type", "name", "description", "schema"], "参数类型");
+        exact(
+          parameter,
+          ["type", "name", "description", "preview_supported", "schema"],
+          "参数类型",
+        );
         for (const field of ["type", "name", "description"])
           nonempty(parameter[field], field);
+        if (typeof parameter.preview_supported !== "boolean")
+          throw new Error("preview_supported 必须是布尔值");
         unique(types, parameter.type as string, "参数类型");
         if (!isObject(parameter.schema)) throw new Error("schema 必须是对象");
         compile(parameter as unknown as ParameterType);

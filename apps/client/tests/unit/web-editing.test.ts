@@ -213,7 +213,6 @@ it("同名请求保持独立记录且报告独有计划没有本地原请求", (
       request_id: "r2",
       plan_instance_id: "p2",
       name: "同名",
-      plan_seq: 2,
       created_at: "2026-01-01 00:00:00",
       status: "completed",
     },

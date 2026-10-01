@@ -22,7 +22,7 @@ it("初始化明确保存零水位与空投影", () => {
   const app = setup();
   expect(app.store.get("state", "coverage")).toBe(0);
   expect(app.store.get("state", "snapshot")).toEqual({
-    report_id: 1,
+    report_id: "1",
     from_wm: 0,
     to_wm: 0,
   });
@@ -63,9 +63,9 @@ it.each([
 });
 it("合法终点零报告有可靠接收依据", () => {
   const app = setup();
-  app.applyReports([reportInput({ report_id: 1, from_wm: 0, to_wm: 0 })]);
+  app.applyReports([reportInput({ report_id: "1", from_wm: 0, to_wm: 0 })]);
   expect(app.coverage()).toBe(0);
-  expect(app.ackId()).toBe(1);
+  expect(app.ackId()).toBe("1");
   expect(app.store.status().state).toBe("ready");
 });
 it.each([false, true])("未初始化不因同步 full=%s 返回范围或建库", (full) => {

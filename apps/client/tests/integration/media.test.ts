@@ -27,15 +27,15 @@ it.each([
     const r = mappedReport(png);
     const capture = r.plans![0].actions![0];
     capture.type = "camera_take_photo";
-    capture.result = { capture: { status: "completed", captured_count: 1 } };
+    delete capture.result;
     capture.outputs![0].media_type = mediaType;
-    r.plans![0].actions![1].deliveries![0].file_name = "d-001.png";
+    r.plans![0].actions![1].deliveries![0].file_name = "1.png";
     const server = createHttpApp(app, files).listen(0, "127.0.0.1");
     await new Promise<void>((resolve) => server.once("listening", resolve));
     try {
       if (order === "before") app.applyReports([reportInput(r)]);
       const f = files.createBatch([
-        { fileName: "d-001.png", size: png.length, kind: "media" },
+        { fileName: "1.png", size: png.length, kind: "media" },
       ]).files[0];
       await files.upload(f.id, Readable.from([png]));
       await files.idle();

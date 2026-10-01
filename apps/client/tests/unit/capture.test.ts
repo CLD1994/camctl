@@ -19,6 +19,7 @@ const capabilities: Capabilities = {
             type: "fixed",
             name: "固定",
             description: "样例",
+            preview_supported: false,
             schema: {
               $schema: "https://json-schema.org/draft/2020-12/schema",
               type: "object",
@@ -41,20 +42,19 @@ const action = (type = "camera_take_photo") => ({
   params: { type: "fixed" },
 });
 const plan = (actions: unknown[]) => ({
-  request_id: "r1",
+  request_id: "1",
   name: "计划",
   created_at: "2026-09-16 00:00:00",
   actions,
 });
 const report = (status = "canceled"): unknown => ({
-  report_id: 1,
+  report_id: "1",
   from_wm: 0,
   to_wm: 10,
   plans: [
     {
-      plan_instance_id: "p1",
-      request_id: "r1",
-      plan_seq: 1,
+      plan_instance_id: "1",
+      request_id: "1",
       name: "计划",
       created_at: "2026-09-16 00:00:00",
       status: "completed",
@@ -62,21 +62,14 @@ const report = (status = "canceled"): unknown => ({
         {
           ...action(),
           params: undefined,
-          action_instance_id: "a1",
+          action_instance_id: "1",
           input_params: { type: "fixed" },
           effective_params: { type: "fixed" },
           status,
-          execution: { started: true },
-          result: {
-            capture: {
-              status: status === "succeeded" ? "completed" : "canceled",
-              captured_count: 1,
-            },
-          },
           outputs: [
             {
-              output_id: "o1",
-              source_action_instance_id: "a1",
+              output_id: "1",
+              source_action_instance_id: "1",
               kind: "original",
               media_type: "image/png",
               availability: "available",
@@ -127,25 +120,3 @@ it("取消单张拍摄可报告已保留图片", () =>
   expect(() =>
     validateReport(JSON.parse(JSON.stringify(report()))),
   ).not.toThrow());
-it("成功拍摄必须已完成采集", () => {
-  const r = report("succeeded") as StatusReport;
-  (r.plans![0].actions![0].result as any).capture.status = "running";
-  expect(() => validateReport(JSON.parse(JSON.stringify(r)))).toThrow();
-});
-it("新拍摄的启动尝试编号必须连续", () => {
-  const r = report("succeeded") as StatusReport;
-  (r.plans![0].actions![0].result as any).start = {
-    max_attempts: 2,
-    attempts: [{ attempt_no: 2, status: "succeeded" }],
-  };
-  expect(() => validateReport(JSON.parse(JSON.stringify(r)))).toThrow();
-});
-it("新拍摄终态的采集结果不可改写", () => {
-  const before = JSON.parse(JSON.stringify(report())) as StatusReport;
-  const after = structuredClone(before);
-  after.report_id = 2;
-  after.from_wm = 10;
-  after.to_wm = 20;
-  (after.plans![0].actions![0].result as any).capture.captured_count = 2;
-  expect(() => validateReportAgainstHistory(before, after)).toThrow();
-});

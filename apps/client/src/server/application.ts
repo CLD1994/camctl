@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { CryptoRandomSource, type RandomSource } from "../domain/request-id";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Store } from "./database";
@@ -30,6 +31,25 @@ function utc() {
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+function allocateRequestId(
+  random: RandomSource,
+  used: (id: string) => boolean,
+): string {
+  const MAX_RESELECTIONS = 8;
+  for (let attempt = 0; attempt <= MAX_RESELECTIONS; attempt += 1) {
+    const candidate = random.next();
+    if (candidate < 1n || candidate > 9_223_372_036_854_775_807n) {
+      throw new AppError("request_id_fault", "随机源产生越界请求身份");
+    }
+    if (!used(candidate.toString(10))) return candidate.toString(10);
+  }
+  throw new AppError(
+    "request_id_fault",
+    `请求身份重选耗尽（${MAX_RESELECTIONS + 1} 次冲突）`,
+  );
+}
+
 export class Application {
   readonly store: Store;
   capabilities: {
@@ -37,7 +57,9 @@ export class Application {
     error: string | null;
     generation: number;
   } = { active: null, error: null, generation: 0 };
-  constructor(directory: string) {
+  private readonly random: RandomSource;
+  constructor(directory: string, random: RandomSource = new CryptoRandomSource()) {
+    this.random = random;
     this.store = new Store(directory);
     this.reloadCapabilities();
   }
@@ -194,7 +216,7 @@ export class Application {
   snapshot(): StatusReport {
     return this.store.businessState().snapshot;
   }
-  ackId(): number | null {
+  ackId(): string | null {
     const state = this.store.businessState();
     return selectSyncReport(state.reports, state.coverage);
   }
@@ -238,7 +260,14 @@ export class Application {
           409,
         );
       const value = this.validateContent(content);
-      const requestId = randomUUID();
+      const requestId = allocateRequestId(this.random, (id) => {
+        try {
+          return this.store.get<ExportedRequest>("requests", id) !== undefined;
+        } catch {
+          // 查询失败不能当作身份未使用，按已占用继续重选。
+          return true;
+        }
+      });
       const now = utc();
       const {
         last_report_id: ack,

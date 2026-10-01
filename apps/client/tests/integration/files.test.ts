@@ -17,7 +17,7 @@ import { Files, type FileEffects } from "../../src/server/files";
 import type { Video } from "../../src/server/models";
 import type { ImportFile } from "../../src/server/models";
 import { DataError } from "../../src/server/database";
-import { mappedReport, reportInput } from "./fixtures";
+import { mappedReport, reportInput, deliveryFileName } from "./fixtures";
 const dirs: string[] = [];
 const contexts: Array<{ app: Application; files: Files }> = [];
 function setup() {
@@ -108,7 +108,7 @@ it("已核验文件丢失时拒绝读取", async () => {
 });
 it("重启恢复等待报告文件，不要求重新上传", async () => {
   const { app, files } = setup();
-  await upload(files, "d-001.mp4", Buffer.from("video"));
+  await upload(files, deliveryFileName(), Buffer.from("video"));
   mapping(app, Buffer.from("video"));
   const next = new Files(app);
   await next.recover();
@@ -120,7 +120,7 @@ it("完整目录恢复到其他位置仍能读取原视频", async () => {
   const bytes = Buffer.from("video");
   await upload(files, mapping(app, bytes), bytes);
   const currentId = files.videos()[0].id;
-  const originalReport = Buffer.from(app.store.report(1)!.bytes);
+  const originalReport = Buffer.from(app.store.report("1")!.bytes);
   const content = {
     text: JSON.stringify({
       name: "同步",
@@ -133,7 +133,7 @@ it("完整目录恢复到其他位置仍能读取原视频", async () => {
   const request = app.exportDraft(draft.id, draft.revision, content);
   const download = app.downloadRequest(request.id);
   const gap = mappedReport(bytes);
-  gap.report_id = 2;
+  gap.report_id = "2";
   gap.from_wm = 30;
   gap.to_wm = 40;
   app.applyReports([reportInput(gap)]);
@@ -156,11 +156,11 @@ it("完整目录恢复到其他位置仍能读取原视频", async () => {
   expect(v.id).toBe(currentId);
   expect(next.request(request.id)).toEqual(request);
   expect(next.downloadRequest(request.id)).toEqual(download);
-  expect(Buffer.from(next.store.report(1)!.bytes)).toEqual(originalReport);
+  expect(Buffer.from(next.store.report("1")!.bytes)).toEqual(originalReport);
   expect(next.state()).toMatchObject({
     coverage: 20,
     gapTarget: 40,
-    ackId: 1,
+    ackId: "1",
     historyMissing: true,
   });
   expect(next.store.get<ImportFile>("imports", incomplete.id)?.status).toBe(
@@ -193,7 +193,7 @@ it("恢复旧核验任务不得覆盖已切换的正确补发", async () => {
 });
 it("核验事务已提交但返回未知时保留已保存的核验依据", async () => {
   const { app, files } = setup();
-  await upload(files, "d-001.mp4", Buffer.from("video"));
+  await upload(files, deliveryFileName(), Buffer.from("video"));
   mapping(app, Buffer.from("video"));
   const original = app.store.transaction.bind(app.store);
   let injected = false;
@@ -503,7 +503,7 @@ it.each(["rollback", "readback"] as const)(
   async (fault) => {
     const { app, files } = setup();
     const bytes = Buffer.from("video");
-    await upload(files, "d-001.mp4", bytes);
+    await upload(files, deliveryFileName(), bytes);
     mapping(app, bytes);
     const id = files.videos()[0].id;
     const original = app.store.transaction.bind(app.store);
@@ -637,7 +637,7 @@ it.each([
       } else if (condition === "missing_mapping") {
         const spy = vi
           .spyOn(app, "snapshot")
-          .mockReturnValue({ report_id: 1, from_wm: 0, to_wm: 20 });
+          .mockReturnValue({ report_id: "1", from_wm: 0, to_wm: 20 });
         restore = () => spy.mockRestore();
       } else if (condition !== "verified") {
         const row = app.store.get<Video>("videos", name)!;

@@ -12,6 +12,7 @@ const parameter = (): ParameterType => ({
   type: "demo",
   name: "测试录像",
   description: "组合测试",
+  preview_supported: false,
   schema: {
     $schema: DIALECT,
     type: "object",

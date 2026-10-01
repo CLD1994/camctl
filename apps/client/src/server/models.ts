@@ -60,7 +60,7 @@ export interface ImportFile {
   status: ImportStatus;
   message?: string;
   bytesReceived: number;
-  reportId?: number;
+  reportId?: string;
   fromWm?: number;
   toWm?: number;
   videoId?: string;

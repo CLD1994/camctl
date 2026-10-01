@@ -1,4 +1,5 @@
 import { fileMediaType, previewKind } from "../shared/media";
+import { isCanonicalId } from "../shared/validation";
 import express from "express";
 import { createReadStream } from "node:fs";
 import { resolve } from "node:path";
@@ -175,8 +176,8 @@ export function createHttpApp(
     ),
   );
   app.get("/api/reports/:id/download", (req, res) => {
-    const id = Number(req.params.id);
-    if (!Number.isSafeInteger(id) || id <= 0)
+    const id = req.params.id;
+    if (!isCanonicalId(id))
       throw new AppError("invalid_report_id", "报告编号无效");
     const report = application.store.report(id);
     if (!report) throw new AppError("not_found", "报告原文不存在", 404);

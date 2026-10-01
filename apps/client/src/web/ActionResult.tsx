@@ -83,9 +83,6 @@ export function ActionResult({
         {capture?.captured_count !== undefined && (
           <p>已确认完成 {String(capture.captured_count)} 次采集</p>
         )}
-        {action.waiting?.map((w, i) => (
-          <Badge key={i} value={w.code} />
-        ))}
         {resultNotes(action).map((note, i) => (
           <p key={i} className={note.error ? "notice error" : ""}>
             {note.text}
@@ -99,7 +96,7 @@ export function ActionResult({
       <div hidden={!expanded}>
         <div className="button-row">
           <span>
-            {action.execution.started ? "执行已开始" : "执行尚未开始"}
+            {action.status === "pending" ? "执行尚未开始" : "执行已开始"}
           </span>
           {typeof action.device_id === "string" && (
             <span>设备：{action.device_id}</span>
@@ -175,7 +172,6 @@ export function ActionResult({
           <summary>执行技术详情</summary>
           <p className="identifier">{action.action_instance_id}</p>
           {action.error && <Facts value={action.error} />}{" "}
-          {action.waiting && <Facts value={action.waiting} />}{" "}
           {action.result && <Facts value={action.result} business />}
         </details>
         <details>

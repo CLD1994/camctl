@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { ImportFile } from "../../src/server/models";
 import type { StatusReport } from "../../src/shared/types";
 
@@ -19,12 +20,14 @@ export function reportInput(report: StatusReport) {
   return { file, bytes };
 }
 export function mappedReport(bytes: Buffer): StatusReport {
-  const r = JSON.parse(
-    readFileSync(
-      "../../protocol/examples/client-protocol/01-success/status-report-1-6a2d8346b79be33790f613d183707116fb16ec40908850b7e9963195bf4f9b62.json",
-      "utf8",
-    ),
-  ) as StatusReport;
+  const dir = join(
+    "../../protocol/examples/client-protocol",
+    "01-success",
+  );
+  const name = readdirSync(dir).find((f) =>
+    /^status-report-1-[0-9a-f]{64}\.json$/.test(f),
+  )!;
+  const r = JSON.parse(readFileSync(join(dir, name), "utf8")) as StatusReport;
   const digest = createHash("sha256").update(bytes).digest("hex");
   for (const action of r.plans![0].actions!) {
     for (const output of action.outputs ?? []) {
@@ -34,9 +37,13 @@ export function mappedReport(bytes: Buffer): StatusReport {
     for (const delivery of action.deliveries ?? []) {
       delivery.size = bytes.length;
       delivery.sha256 = digest;
-      delivery.copy.source_size = bytes.length;
-      delivery.copy.committed_bytes = bytes.length;
     }
   }
   return r;
+}
+/** 权威示例中 obtain 交付的文件名；上传与报告映射都从这里取得。 */
+export function deliveryFileName(): string {
+  return mappedReport(Buffer.from("probe")).plans![0].actions!.find(
+    (a) => a.type === "obtain_action_outputs",
+  )!.deliveries![0].file_name;
 }

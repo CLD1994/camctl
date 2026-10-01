@@ -27,7 +27,7 @@ export function BuiltinFields({
   path: Path;
   type: Exclude<ActionType, CameraActionType>;
   change: (next: DraftContent) => void;
-  reports: Array<{ report_id: number; to_wm: number }>;
+  reports: Array<{ report_id: string; to_wm: number }>;
   coverage: number;
 }) {
   const [json, setJson] = useState(false);

@@ -1,6 +1,14 @@
 import type { CameraActionType } from "./actions";
+import type { ValidateFunction } from "ajv";
 import type { ActionType, Issue } from "./types";
-import { isId, isName, isObject, isPositive, isUint } from "./validation";
+import planSchema from "../../../../protocol/schemas/plan.schema.json";
+import statusReportSchema from "../../../../protocol/schemas/status-report.schema.json";
+import {
+  createValidator,
+  isCanonicalId,
+  isUint,
+  schemaIssues,
+} from "./validation";
 
 export const builtinFields: Record<
   Exclude<ActionType, CameraActionType>,
@@ -13,11 +21,11 @@ export const builtinFields: Record<
 };
 
 export function isSyncBasis(
-  report: { report_id: number; to_wm: number },
+  report: { report_id: string; to_wm: number },
   coverage: unknown,
 ): boolean {
   return (
-    isPositive(report.report_id) &&
+    isCanonicalId(report.report_id) &&
     isUint(report.to_wm) &&
     isUint(coverage) &&
     report.to_wm <= coverage
@@ -66,67 +74,39 @@ export const targets: Mode[] = [
   },
 ];
 
+/** 非拍摄动作的参数契约直接编译自公共 plan.schema.json，不另维护字段清单。 */
+const paramDefs = {
+  obtain_action_outputs: "obtain_params",
+  delete_action_outputs: "delete_params",
+  cancel_task: "cancel_params",
+  report_status: "report_params",
+} as const;
+
+let compiledParams: Map<string, ValidateFunction> | undefined;
+function paramValidators() {
+  if (!compiledParams) {
+    const ajv = createValidator();
+    ajv.addSchema(
+      statusReportSchema as unknown as object,
+      "status-report.schema.json",
+    );
+    const defs = (planSchema as unknown as { $defs: object }).$defs;
+    compiledParams = new Map(
+      Object.values(paramDefs).map((def) => [
+        def,
+        ajv.compile({ $defs: defs, $ref: `#/$defs/${def}` }),
+      ]),
+    );
+  }
+  return compiledParams;
+}
+
 /** 非拍摄动作的静态参数契约；引用存在性由调用方已有完整资料判断。 */
 export function validateBuiltinParams(
   type: Exclude<ActionType, CameraActionType>,
   params: unknown,
   present: boolean,
 ): Issue[] {
-  const issues: Issue[] = [];
-  const check = (ok: boolean, path: string, message: string) => {
-    if (!ok) issues.push({ path, code: "invalid_params", message });
-  };
-  const fields = (
-    value: Record<string, unknown>,
-    allowed: readonly string[],
-    path: string,
-  ) => {
-    for (const key of Object.keys(value))
-      check(allowed.includes(key), `${path}.${key}`, "不接受此字段");
-  };
-  const ids = (value: unknown) => {
-    check(
-      Array.isArray(value) && value.length > 0,
-      "params.output_ids",
-      "必须填写非空产物 ID 数组",
-    );
-    if (Array.isArray(value)) {
-      const seen = new Set<unknown>();
-      value.forEach((id, i) => {
-        check(
-          isId(id) && !seen.has(id),
-          `params.output_ids[${i}]`,
-          "产物 ID 必须合法且不重复",
-        );
-        seen.add(id);
-      });
-    }
-  };
-  const reference = (
-    value: unknown,
-    combinations: string[][],
-    path: string,
-  ) => {
-    if (!isObject(value)) {
-      check(false, path, "引用必须是对象");
-      return;
-    }
-    const keys = Object.keys(value);
-    check(
-      combinations.some(
-        (combo) =>
-          combo.length === keys.length && combo.every((k) => keys.includes(k)),
-      ),
-      path,
-      "引用字段组合不合法",
-    );
-    for (const [key, v] of Object.entries(value))
-      check(
-        key === "group" || key === "action_name" ? isName(v) : isId(v),
-        `${path}.${key}`,
-        "引用值不合法",
-      );
-  };
   if (type === "report_status" && !present)
     return [
       {
@@ -135,53 +115,14 @@ export function validateBuiltinParams(
         message: "请选择完整或增量同步并填写报告参数",
       },
     ];
-  if (!isObject(params))
+  const validate = paramValidators().get(paramDefs[type]);
+  if (!validate || !validate(params))
     return [
-      { path: "params", code: "invalid_params", message: "参数必须是对象" },
+      {
+        path: "params",
+        code: "invalid_params",
+        message: "动作参数不符合公共参数契约",
+      },
     ];
-  switch (type) {
-    case "report_status": {
-      const keys = Object.keys(params);
-      check(
-        (keys.length === 1 && params.scope === "full") ||
-          (keys.length === 2 &&
-            keys.includes("scope") &&
-            keys.includes("after_report_id") &&
-            params.scope === "since" &&
-            isPositive(params.after_report_id)),
-        "params",
-        "请选择完整或增量同步；完整同步仅填写 scope，增量同步还须填写 after_report_id",
-      );
-      break;
-    }
-    case "delete_action_outputs":
-      fields(params, builtinFields[type], "params");
-      ids(params.output_ids);
-      break;
-    case "cancel_task":
-      fields(params, builtinFields[type], "params");
-      reference(
-        params.target,
-        targets.map((mode) => Object.keys(mode.fields)),
-        "params.target",
-      );
-      break;
-    case "obtain_action_outputs":
-      fields(params, builtinFields[type], "params");
-      reference(
-        params.source,
-        sources.map((mode) => Object.keys(mode.fields)),
-        "params.source",
-      );
-      if (Object.hasOwn(params, "output_ids")) {
-        ids(params.output_ids);
-        check(
-          !isObject(params.source) || !Object.hasOwn(params.source, "group"),
-          "params.output_ids",
-          "产物筛选只适用于动作级引用",
-        );
-      }
-      break;
-  }
-  return issues;
+  return [];
 }

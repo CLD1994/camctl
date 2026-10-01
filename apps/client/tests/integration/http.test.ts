@@ -7,7 +7,7 @@ import { Readable } from "node:stream";
 import { Application } from "../../src/server/application";
 import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
-import { mappedReport, reportInput } from "./fixtures";
+import { mappedReport, reportInput, deliveryFileName } from "./fixtures";
 const clean: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const c of clean.splice(0)) await c();
@@ -23,7 +23,7 @@ it.each(["play", "download", "range"] as const)(
     const bytes = Buffer.from("video");
     app.applyReports([reportInput(mappedReport(bytes))]);
     const file = initial.createBatch([
-      { fileName: "d-001.mp4", size: bytes.length, kind: "video" },
+      { fileName: deliveryFileName(), size: bytes.length, kind: "video" },
     ]).files[0];
     await initial.upload(file.id, Readable.from([bytes]));
     await initial.idle();
@@ -185,7 +185,7 @@ it.each(["application/json", "application/octet-stream", undefined])(
 it("畸形 JSON 原文件到达逐文件诊断", async () => {
   const base = await setup();
   await fetch(base + "/api/initialize", { method: "POST" });
-  const input = reportInput({ report_id: 1, from_wm: 0, to_wm: 0 });
+  const input = reportInput({ report_id: "1", from_wm: 0, to_wm: 0 });
   const bytes = Buffer.from("{bad");
   const batch = await (
     await fetch(base + "/api/batches", {
@@ -224,7 +224,7 @@ it("HTTP 混合反序报告、视频补发与 Range 使用同一权威结果", a
   const bad = Buffer.from("wrong");
   const first = mappedReport(good);
   const second = structuredClone(first);
-  second.report_id = 2;
+  second.report_id = "2";
   second.from_wm = 20;
   second.to_wm = 30;
   const reports = [reportInput(first), reportInput(second)];

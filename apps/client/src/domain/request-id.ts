@@ -6,11 +6,13 @@
  * 时有限重选，重选耗尽返回导出错误——不返回默认 ID。
  */
 
+import { isCanonicalId } from "../shared/validation";
+
 export const MAX_REQUEST_ID = 9_223_372_036_854_775_807n;
 
 /** 规范十进制字符串：首位 1-9，无前导零、符号或空白。 */
 export function isValidCanonicalId(raw: string): boolean {
-  return /^[1-9][0-9]*$/.test(raw);
+  return isCanonicalId(raw);
 }
 
 /** 随机源端口：返回 1～MAX_REQUEST_ID 的均匀合法正整数。 */

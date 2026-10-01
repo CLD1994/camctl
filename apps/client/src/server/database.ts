@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseJson } from "../shared/json";
-import { isPositive, isUint } from "../shared/validation";
+import { isCanonicalId, isPositive, isUint } from "../shared/validation";
 import { validateReport } from "../domain/reports";
 import type { StatusReport } from "../shared/types";
 
@@ -19,7 +19,7 @@ export type Startup = {
   message?: string;
 };
 export interface SavedReport {
-  report_id: number;
+  report_id: string;
   file_name: string;
   bytes: Uint8Array;
   from_wm: number;
@@ -112,10 +112,10 @@ export class Store {
         BEGIN IMMEDIATE;
         CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL) STRICT;
         CREATE TABLE records(namespace TEXT NOT NULL,id TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(namespace,id)) STRICT;
-        CREATE TABLE reports(report_id INTEGER PRIMARY KEY,file_name TEXT NOT NULL UNIQUE,bytes BLOB NOT NULL,from_wm INTEGER NOT NULL,to_wm INTEGER NOT NULL) STRICT;
+        CREATE TABLE reports(report_id TEXT PRIMARY KEY,file_name TEXT NOT NULL UNIQUE,bytes BLOB NOT NULL,from_wm INTEGER NOT NULL,to_wm INTEGER NOT NULL) STRICT;
         INSERT INTO metadata VALUES('schema_version','1');
         INSERT INTO records VALUES('state','coverage','0');
-        INSERT INTO records VALUES('state','snapshot','{"report_id":1,"from_wm":0,"to_wm":0}');
+        INSERT INTO records VALUES('state','snapshot','{"report_id":"1","from_wm":0,"to_wm":0}');
         COMMIT;`);
     } finally {
       db.close();
@@ -150,7 +150,7 @@ export class Store {
         .all() as unknown as BusinessState["reports"];
       for (const report of reports)
         if (
-          !isPositive(report.report_id) ||
+          !isCanonicalId(report.report_id) ||
           !isUint(report.from_wm) ||
           !isUint(report.to_wm) ||
           report.from_wm > report.to_wm ||
@@ -215,7 +215,7 @@ export class Store {
       throw error;
     }
   }
-  report(id: number): SavedReport | undefined {
+  report(id: string): SavedReport | undefined {
     return this.db()
       .prepare("SELECT * FROM reports WHERE report_id=?")
       .get(id) as unknown as SavedReport | undefined;
@@ -228,7 +228,7 @@ export class Store {
       .all() as unknown as Array<Omit<SavedReport, "bytes">>;
   }
   saveReport(
-    id: number,
+    id: string,
     name: string,
     bytes: Uint8Array,
     from: number,

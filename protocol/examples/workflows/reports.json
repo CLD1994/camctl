@@ -1,7 +1,7 @@
 {
   "preview": "preview-repaired/status-report-1-1ddd9af9225a8a8a1d6a9418438cd88ccf81a3a08c9de43e5fd19e63e5b4c649.json",
   "handoff": "handoff-unconfirmed/status-report-1-28ace100d059cea36f1d7ca7292e36d5ead1c197e3972e968007d62aab5abd98.json",
-  "cancellation": "cancel-controller/status-report-1-da253023d20300ba3dca6365595d6529ec915444fd6359c73ac9375c88871343.json",
+  "cancellation": "cancel-controller/status-report-1-ca21c5bbb9f88309020fe1da9e2201c24a219533989ed7755d1d79517a709f3c.json",
   "cleanup": "canceled-complete-copy/status-report-1-1e0484d32c4cb0123f31b0eccf1cd13617bf913486ac2ed8931ba28149c8e020.json",
   "range": "range-selection/status-report-1-c4f487575cdda8dbfa75242182fe23d153965625385e42aa78a5b7f206cda643.json",
   "empty": "empty-cleanup/status-report-1-4241dd4999185178eb77aaa16f09d505fbff929055d50189420637b965988b81.json",

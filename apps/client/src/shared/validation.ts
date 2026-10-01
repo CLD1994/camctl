@@ -10,6 +10,8 @@ export const isId = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) &&
   !/[\r\n]/.test(value);
+export const isCanonicalId = (value: unknown): value is string =>
+  typeof value === "string" && /^[1-9][0-9]*$/.test(value);
 export const isUint = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 export const isPositive = (value: unknown): value is number =>
