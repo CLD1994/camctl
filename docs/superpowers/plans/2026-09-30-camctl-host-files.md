@@ -159,13 +159,13 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **接口与依赖：** 提供异步 `probe_media(input: FileRef, request: ProbeRequest) -> MediaProbe`、`repair_media(input: FileRef, output: FileRef, request: RepairRequest) -> MediaArtifact`；请求由 C8 固定处理决定。前置交付：O3、F1/F4。
 
-- [ ] 编写失败用例。建立 `test_failed_media_output_is_not_complete`，工具失败但文件存在，`assert artifact.complete is False`；精确媒体时长不舍入到目标毫秒，非法结构与读取错误单独分类。probe/repair 不改变动作终态或源文件。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_media.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。复用 ffprobe/ffmpeg，只解析业务需要字段并控制输出容量；实际退出、必要成品校验、同步及摘要分别确认，厂商/工具参数由任务已保存决定取得。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 媒体进程保持 camctl 组且实际收场后才释放文件。
+- [x] 编写失败用例。建立 `test_failed_media_output_is_not_complete`，工具失败但文件存在，`assert artifact.complete is False`；精确媒体时长不舍入到目标毫秒，非法结构与读取错误单独分类。probe/repair 不改变动作终态或源文件。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_media.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。复用 ffprobe/ffmpeg，只解析业务需要字段并控制输出容量；实际退出、必要成品校验、同步及摘要分别确认，厂商/工具参数由任务已保存决定取得。
+- [x] 再运行上述命令，要求全部 PASS，并核对 媒体进程保持 camctl 组且实际收场后才释放文件。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_media.py -q`，真实最小媒体文件与工具验证成功/失败及取消，未安装工具按实际配置或处理错误分类。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 媒体包装和工具入口是否绕过 O3，是否把遗留文件当成功；记录门禁证据，建议以“feat: 接入受管媒体文件处理”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 媒体包装和工具入口是否绕过 O3，是否把遗留文件当成功；记录门禁证据，建议以“feat: 接入受管媒体文件处理”形成独立提交。
 
 ### F7 文件消费者及失败边界组合
 
