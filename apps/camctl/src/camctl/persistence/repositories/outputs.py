@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from camctl.contracts.enums import enum_for
@@ -45,11 +46,22 @@ from camctl.persistence.transaction import (
     saved_transaction_events,
     update_change as _update,
 )
-from camctl.contracts.workflow_errors import action_error_id
+from camctl.contracts.workflow_errors import action_error_id, item_error_id
+from camctl.outputs.qualification import (
+    FileCandidate,
+    FileQualification,
+    OperationConfig,
+    QualificationOutcome,
+)
 
 _SOURCE_RESOLVED_EVENT = 3
 _TARGETS_FIXED_EVENT = 4
 _ACTION_STARTED_EVENT = 5
+_READ_PERMISSION_EVENT = 21
+_COPY_CHANGED_EVENT = 22
+_DELIVERY_CHANGED_EVENT = 23
+_INTERMEDIATE_FILE_EVENT = 26
+_OPERATION_CONFIGURED_EVENT = 10
 
 _FIX_REASON = 1
 _FAIL_REASON = 2
@@ -95,6 +107,45 @@ _KIND_BY_CODE = {
         (3, OutputKind.PREVIEW),
     )
 }
+
+#: READ_PERMISSION_CHANGED 的分支。
+_GRANT_REASON = 1
+_REJECT_REASON = 2
+#: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
+_OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
+_OUTPUT_CLEANUP_STARTED_CODE = item_error_id("obtain_items", "output_cleanup_started")
+_SOURCE_FILE_UNCONFIRMED_CODE = item_error_id("obtain_items", "source_file_unconfirmed")
+
+_RUN_KIND = enum_for("operation_runs.kind")
+_RUN_STATUS = enum_for("operation_runs.status")
+_AVAILABILITY = enum_for("outputs.availability")
+_PRESENCE = enum_for("device_files.presence_state")
+_COMPLETION = enum_for("device_files.completion_state")
+_RESTRICTION = enum_for("cleanup_items.restriction_state")
+_CLEANUP_STATUS = enum_for("cleanup_items.status")
+_PURPOSE = enum_for("intermediate_files.purpose")
+_RETENTION = enum_for("intermediate_files.retention_state")
+_FILE_CLEANUP = enum_for("intermediate_files.cleanup_state")
+_DELIVERY_STATUS = enum_for("deliveries.status")
+_WITHDRAWAL = enum_for("deliveries.withdrawal_state")
+_RESET_STATE = enum_for("file_copies.reset_state")
+_VERIFICATION = enum_for("file_copies.verification_state")
+
+#: 清理项仍对源产物构成读取限制的状态组合。
+_ACTIVE_RESTRICTIONS = (
+    int(_RESTRICTION.ACTIVE),
+    int(_RESTRICTION.IRREVERSIBLE),
+)
+_ACTIVE_CLEANUP_STATUS = (
+    int(_CLEANUP_STATUS.UNRESOLVED),
+    int(_CLEANUP_STATUS.PENDING_DELETE),
+    int(_CLEANUP_STATUS.DELETING),
+)
+#: 读取流程仍占用设备机会或源保护的状态。
+_UNFINISHED_RUN_STATUS = (
+    int(_RUN_STATUS.PENDING),
+    int(_RUN_STATUS.ACTIVE),
+)
 
 
 @dataclass(frozen=True)
@@ -782,8 +833,556 @@ def _source_error_details(code: int, source_action_id: int) -> dict[str, Any]:
     return {"source_action_instance_id": source_action_id}
 
 
+class _GrantFileCommand:
+    """读取资格授予的完整事务命令。
+
+    一个事务内核对全部可靠限制与业务顺序：授予时目标文件、交
+    付（取回分支）、读取流程、拷贝及取回项更新按五（或内部处理
+    三）个事件共同建档；清理限制与产物不可用保存逐项最终失败；
+    排序阻挡与设备占用作为可等待拒绝返回，不落库。
+    """
+
+    #: 命令涉及并供守卫与报告关联读取的表。
+    _TABLES = (
+        "actions",
+        "action_dependencies",
+        "obtain_source_selections",
+        "obtain_items",
+        "outputs",
+        "device_files",
+        "cleanup_items",
+        "recording_processing",
+        "deliveries",
+        "file_copies",
+        "operation_runs",
+        "intermediate_files",
+    )
+
+    def __init__(self, command: FileCandidate, key: OperationKey) -> None:
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise TransactionError(f"候选动作不存在: {command.action_id}")
+        if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
+            return self._wait("action_not_eligible")
+        self._state["actions"] = {command.action_id: action}
+
+        output = row_facts(connection, "outputs", command.output_id)
+        if output is None:
+            raise ConsistencyError(
+                f"候选产物记录缺失: output {command.output_id}"
+            )
+        if output["device_file_id"] != command.source_device_file_id:
+            raise TransactionError(
+                f"候选产物与源文件不一致: output {command.output_id}"
+                f" file {command.source_device_file_id}"
+            )
+        self._state["outputs"] = {command.output_id: output}
+        device_file = row_facts(connection, "device_files", command.source_device_file_id)
+        if device_file is None:
+            raise ConsistencyError(
+                f"源文件记录缺失: device_files {command.source_device_file_id}"
+            )
+        self._state["device_files"] = {
+            command.source_device_file_id: device_file
+        }
+        if command.item_id is not None:
+            item = row_facts(connection, "obtain_items", command.item_id)
+            if item is None:
+                raise ConsistencyError(f"取回项记录缺失: {command.item_id}")
+            self._state["obtain_items"] = {command.item_id: item}
+            if item["status"] == int(_ITEM_STATUS.DELIVERY_CREATED):
+                return self._item_already_granted(connection, item)
+            if item["status"] != int(_ITEM_STATUS.SELECTED):
+                return CommandPlan(
+                    events=(),
+                    owners=self._owners,
+                    state_rows=self._state,
+                    read_only=True,
+                    result=FileQualification(
+                        outcome=QualificationOutcome.REJECTED_FINAL,
+                        copy_id=None,
+                        run_id=None,
+                        delivery_id=None,
+                        target_file_id=None,
+                        reason="item_finished",
+                    ),
+                )
+        else:
+            processing = row_facts(
+                connection, "recording_processing", command.processing_id
+            )
+            if processing is None:
+                raise ConsistencyError(
+                    f"录像处理记录缺失: {command.processing_id}"
+                )
+            self._state["recording_processing"] = {
+                command.processing_id: processing
+            }
+
+        final_error = self._final_rejection(connection, output, device_file)
+        if final_error is not None:
+            return self._reject_item(scope, final_error)
+
+        device_id = self._source_device(connection, device_file)
+        if self._device_busy(connection, device_id):
+            return self._wait("device_busy")
+        if self._source_protected(connection, command.source_device_file_id):
+            return self._wait("source_protected")
+        if not self._wins_business_order(connection, action, device_id):
+            return self._wait("business_order")
+
+        return self._grant(scope, action, output, device_file, device_id)
+
+    # ---- 资格核对 ----
+
+    def _final_rejection(self, connection, output, device_file) -> int | None:
+        """不可授予的最终失败错误码；None 表示可通过。"""
+        if output["availability"] != int(_AVAILABILITY.AVAILABLE):
+            return _OUTPUT_UNAVAILABLE_CODE
+        if (
+            device_file["presence_state"] != int(_PRESENCE.PRESENT)
+            or device_file["completion_state"] != int(_COMPLETION.COMPLETE)
+        ):
+            return _SOURCE_FILE_UNCONFIRMED_CODE
+        cleanup = connection.execute(
+            "SELECT status FROM cleanup_items"
+            " WHERE output_id = ? AND restriction_state IN (?, ?)"
+            " AND status IN (?, ?, ?) LIMIT 1",
+            (
+                self._command.output_id,
+                *_ACTIVE_RESTRICTIONS,
+                *_ACTIVE_CLEANUP_STATUS,
+            ),
+        ).fetchone()
+        if cleanup is not None:
+            if cleanup[0] == int(_CLEANUP_STATUS.DELETING):
+                return _OUTPUT_CLEANUP_STARTED_CODE
+            return _OUTPUT_UNAVAILABLE_CODE
+        return None
+
+    def _source_device(self, connection, device_file) -> str:
+        source_action = row_facts(
+            connection, "actions", device_file["source_action_id"]
+        )
+        if source_action is None:
+            raise ConsistencyError(
+                f"源动作记录缺失: {device_file['source_action_id']}"
+            )
+        device_id = source_action.get("device_id")
+        if not device_id:
+            raise TransactionError(
+                f"源动作未绑定设备: {device_file['source_action_id']}"
+            )
+        self._state["actions"] = {
+            **self._state["actions"],
+            device_file["source_action_id"]: source_action,
+        }
+        return device_id
+
+    def _device_busy(self, connection, device_id: str) -> bool:
+        row = connection.execute(
+            "SELECT 1 FROM file_copies fc"
+            " JOIN operation_runs r ON r.copy_id = fc.id AND r.kind = 3"
+            " WHERE fc.slot_device_id = ? AND r.status IN (?, ?) LIMIT 1",
+            (device_id, *_UNFINISHED_RUN_STATUS),
+        ).fetchone()
+        return row is not None
+
+    def _source_protected(self, connection, device_file_id: int) -> bool:
+        row = connection.execute(
+            "SELECT 1 FROM file_copies fc"
+            " JOIN operation_runs r ON r.copy_id = fc.id AND r.kind = 3"
+            " WHERE fc.source_device_file_id = ? AND r.status IN (?, ?) LIMIT 1",
+            (device_file_id, *_UNFINISHED_RUN_STATUS),
+        ).fetchone()
+        return row is not None
+
+    def _wins_business_order(self, connection, action, device_id: str) -> bool:
+        """同设备存在排序更早的合格候选时不授予本候选。
+
+        排序键为计划时间、同时间取回优先、计划与输入顺序；协程
+        唤醒顺序不影响判定。
+        """
+        mine = self._order_key(
+            action["scheduled_at"], int(action["type"]),
+            action["plan_id"], action["input_index"],
+        )
+        obtain_rows = connection.execute(
+            "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index, a.type"
+            " FROM obtain_items oi"
+            " JOIN obtain_source_selections s ON s.id = oi.selection_id"
+            " JOIN action_dependencies ad ON ad.id = s.dependency_id"
+            " JOIN actions src ON src.id = ad.depends_on_action_id"
+            " JOIN device_files df ON df.source_action_id = src.id"
+            " JOIN outputs o ON o.device_file_id = df.id"
+            " JOIN actions a ON a.id = ad.action_id"
+            " WHERE oi.status = ? AND a.status = ? AND a.cancel_requested = 0"
+            " AND a.scheduled_at IS NOT NULL AND src.device_id = ?"
+            " AND df.presence_state = ? AND df.completion_state = ?"
+            " AND o.availability = ?",
+            (
+                int(_ITEM_STATUS.SELECTED),
+                int(_ACTION_STATUS.RUNNING),
+                device_id,
+                int(_PRESENCE.PRESENT),
+                int(_COMPLETION.COMPLETE),
+                int(_AVAILABILITY.AVAILABLE),
+            ),
+        ).fetchall()
+        processing_rows = connection.execute(
+            "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index, a.type"
+            " FROM recording_processing rp"
+            " JOIN actions a ON a.id = rp.action_id"
+            " JOIN device_files df ON df.id = rp.source_device_file_id"
+            " JOIN actions src ON src.id = df.source_action_id"
+            " WHERE rp.repair_state = ? AND a.status = ? AND a.cancel_requested = 0"
+            " AND a.scheduled_at IS NOT NULL AND src.device_id = ?"
+            " AND df.presence_state = ? AND df.completion_state = ?",
+            (
+                int(enum_for("recording_processing.repair_state").PENDING),
+                int(_ACTION_STATUS.RUNNING),
+                device_id,
+                int(_PRESENCE.PRESENT),
+                int(_COMPLETION.COMPLETE),
+            ),
+        ).fetchall()
+        for action_id, scheduled_at, plan_id, input_index, action_type in (
+            list(obtain_rows) + list(processing_rows)
+        ):
+            if int(action_id) == self._command.action_id:
+                continue
+            other = self._order_key(scheduled_at, int(action_type), plan_id, input_index)
+            if other < mine:
+                return False
+        return True
+
+    @staticmethod
+    def _order_key(scheduled_at, action_type: int, plan_id, input_index):
+        return (scheduled_at, 0 if action_type == _OBTAIN_TYPE else 1, plan_id, input_index)
+
+    # ---- 授予建档 ----
+
+    def _grant(self, scope, action, output, device_file, device_id: str) -> CommandPlan:
+        command = self._command
+        is_delivery = command.item_id is not None
+        config = command.config
+
+        target_file_id = next_row_id(scope.connection, "intermediate_files")
+        delivery_id = (
+            next_row_id(scope.connection, "deliveries") if is_delivery else None
+        )
+        copy_id = next_row_id(scope.connection, "file_copies")
+        run_id = next_row_id(scope.connection, "operation_runs")
+
+        specs: list[tuple[int, int, tuple]] = []
+        intermediate_row = _row(
+            "intermediate_files",
+            target_file_id,
+            {
+                "owner_action_id": command.action_id if not is_delivery else None,
+                "owner_delivery_id": delivery_id,
+                "purpose": int(_PURPOSE.DELIVERY_COPY if is_delivery else _PURPOSE.RECORDING_INPUT),
+                "relative_path": command.target_relative_path,
+                "retention_state": int(_RETENTION.REQUIRED),
+                "cleanup_state": int(_FILE_CLEANUP.NOT_NEEDED),
+                "size_bytes": None,
+                "sha256": None,
+                "last_error_json": None,
+            },
+        )
+        specs.append((_INTERMEDIATE_FILE_EVENT, 1, (intermediate_row,)))
+        self._owners[("intermediate_files", target_file_id)] = (
+            "intermediate_file", target_file_id,
+        )
+
+        if is_delivery:
+            delivery_row = _row(
+                "deliveries",
+                delivery_id,
+                {
+                    "action_id": command.action_id,
+                    "output_id": command.output_id,
+                    "file_name": command.delivery_file_name,
+                    "display_name": command.delivery_display_name,
+                    "status": int(_DELIVERY_STATUS.PENDING),
+                    "publication_intent_event_id": None,
+                    "published_event_id": None,
+                    "withdrawal_state": int(_WITHDRAWAL.NOT_REQUESTED),
+                    "error_json": None,
+                },
+            )
+            specs.append((_DELIVERY_CHANGED_EVENT, 1, (delivery_row,)))
+            self._owners[("deliveries", delivery_id)] = ("delivery", delivery_id)
+
+        run_row = _row(
+            "operation_runs",
+            run_id,
+            {
+                "action_id": command.action_id,
+                "delivery_id": delivery_id,
+                "kind": int(_RUN_KIND.READ_FILE),
+                "query_purpose": None,
+                "responsibility_key": f"read/{copy_id}",
+                "activity_id": None,
+                "copy_id": copy_id,
+                "cleanup_item_id": None,
+                "session_key": None,
+                "status": int(_RUN_STATUS.PENDING),
+                "attempts_used": 0,
+                "max_attempts_used": config.max_attempts,
+                "timeout_s_json": _seconds_json(config.timeout_s),
+                "retry_interval_s_json": _seconds_json(config.retry_interval_s),
+                "retry_wait_required": 0,
+                "error_json": None,
+            },
+        )
+        specs.append((_OPERATION_CONFIGURED_EVENT, 1, (run_row,)))
+
+        copy_owner = (
+            ("delivery", delivery_id) if is_delivery else ("action", command.action_id)
+        )
+        copy_row = _row(
+            "file_copies",
+            copy_id,
+            {
+                "delivery_id": delivery_id,
+                "processing_id": command.processing_id,
+                "source_device_file_id": command.source_device_file_id,
+                "source_intermediate_file_id": None,
+                "target_file_id": target_file_id,
+                "round": 1,
+                "recopies_used": 0,
+                "max_recopies_used": 0,
+                "source_size": device_file["size_bytes"],
+                "source_sha256": None,
+                "committed_bytes": 0,
+                "reset_state": int(_RESET_STATE.READY),
+                "slot_device_id": device_id,
+                "verification_state": int(_VERIFICATION.NOT_PERFORMED),
+                "target_sha256": None,
+                "verification_error_json": None,
+            },
+        )
+        specs.append((_COPY_CHANGED_EVENT, 1, (copy_row,)))
+        self._owners[("file_copies", copy_id)] = copy_owner
+        self._owners[("operation_runs", run_id)] = copy_owner
+
+        if is_delivery:
+            item = self._state["obtain_items"][command.item_id]
+            item_row = _update(
+                "obtain_items",
+                command.item_id,
+                {
+                    "status": item["status"],
+                    "source_dependency": item["source_dependency"],
+                    "delivery_id": item["delivery_id"],
+                },
+                {
+                    "status": int(_ITEM_STATUS.DELIVERY_CREATED),
+                    "source_dependency": 1,
+                    "delivery_id": delivery_id,
+                },
+            )
+            specs.append((_READ_PERMISSION_EVENT, _GRANT_REASON, (item_row,)))
+            self._owners[("obtain_items", command.item_id)] = (
+                "action", command.action_id,
+            )
+
+        events = self._envelopes(scope, specs)
+        return CommandPlan(
+            events=events,
+            owners=self._owners,
+            state_rows=self._state,
+            result=FileQualification(
+                outcome=QualificationOutcome.GRANTED,
+                copy_id=copy_id,
+                run_id=run_id,
+                delivery_id=delivery_id,
+                target_file_id=target_file_id,
+                reason=None,
+            ),
+        )
+
+    def _envelopes(self, scope, specs: list[tuple[int, int, tuple]]):
+        """一次性分配本组事件的编号并构造事件信封。"""
+        allocation = scope.allocate(len(specs))
+        return tuple(
+            _envelope(
+                allocation.first_event_id + index,
+                allocation.txn_id,
+                event_type,
+                reason,
+                rows,
+                self._command.occurred_at,
+            )
+            for index, (event_type, reason, rows) in enumerate(specs)
+        )
+
+    def _reject_item(self, scope, error_code: int) -> CommandPlan:
+        """清理限制、删除处理者或产物不可用：保存逐项最终失败。"""
+        command = self._command
+        if command.item_id is None:
+            # 内部处理的读取失败由录像处理自身事件表达，本命令只返回。
+            return self._wait_final(error_code)
+        item = self._state["obtain_items"][command.item_id]
+        details = {"output_id": command.output_id}
+        self._owners[("obtain_items", command.item_id)] = (
+            "action", command.action_id,
+        )
+        row = _update(
+            "obtain_items",
+            command.item_id,
+            {
+                "status": item["status"],
+                "error_code": item["error_code"],
+                "error_details_json": item["error_details_json"],
+            },
+            {
+                "status": int(_ITEM_STATUS.FAILED),
+                "error_code": error_code,
+                "error_details_json": details,
+            },
+        )
+        event = self._envelopes(
+            scope, [(_READ_PERMISSION_EVENT, _REJECT_REASON, (row,))]
+        )[0]
+        return CommandPlan(
+            events=(event,),
+            owners=self._owners,
+            state_rows=self._state,
+            result=FileQualification(
+                outcome=QualificationOutcome.REJECTED_FINAL,
+                copy_id=None,
+                run_id=None,
+                delivery_id=None,
+                target_file_id=None,
+                reason=f"error_code={error_code}",
+            ),
+        )
+
+    def _wait_final(self, error_code: int) -> CommandPlan:
+        return CommandPlan(
+            events=(),
+            owners=self._owners,
+            state_rows=self._state,
+            read_only=True,
+            result=FileQualification(
+                outcome=QualificationOutcome.REJECTED_FINAL,
+                copy_id=None,
+                run_id=None,
+                delivery_id=None,
+                target_file_id=None,
+                reason=f"error_code={error_code}",
+            ),
+        )
+
+    def _wait(self, reason: str) -> CommandPlan:
+        """可等待拒绝：不落库，稍后按原资格重新申请。"""
+        return CommandPlan(
+            events=(),
+            owners=self._owners,
+            state_rows=self._state,
+            read_only=True,
+            result=FileQualification(
+                outcome=QualificationOutcome.REJECTED,
+                copy_id=None,
+                run_id=None,
+                delivery_id=None,
+                target_file_id=None,
+                reason=reason,
+            ),
+        )
+
+    def _item_already_granted(self, connection, item) -> CommandPlan:
+        delivery_id = item["delivery_id"]
+        copy = connection.execute(
+            "SELECT id FROM file_copies WHERE delivery_id = ?", (delivery_id,)
+        ).fetchone()
+        run = connection.execute(
+            "SELECT id FROM operation_runs WHERE copy_id = ? AND kind = 3",
+            (copy[0] if copy else -1,),
+        ).fetchone()
+        return CommandPlan(
+            events=(),
+            owners=self._owners,
+            state_rows=self._state,
+            read_only=True,
+            result=FileQualification(
+                outcome=QualificationOutcome.GRANTED,
+                copy_id=copy[0] if copy else None,
+                run_id=run[0] if run else None,
+                delivery_id=delivery_id,
+                target_file_id=None,
+                reason="already_granted",
+            ),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """同键重送：从已保存事件重建原结果。"""
+        copy_id = run_id = delivery_id = target_file_id = None
+        granted = False
+        for event in saved:
+            for row in event.get("body", {}).get("rows", []):
+                values = row.get("after", {})
+                if not values.get("exists", True) and row.get("table") != "obtain_items":
+                    continue
+                after = values.get("values", values)
+                table = row.get("table")
+                if table == "file_copies" and after.get("id"):
+                    copy_id = after["id"]
+                elif table == "operation_runs" and after.get("id"):
+                    run_id = after["id"]
+                elif table == "deliveries" and after.get("id"):
+                    delivery_id = after["id"]
+                elif table == "intermediate_files" and after.get("id"):
+                    target_file_id = after["id"]
+                elif table == "obtain_items" and after.get("status") == int(
+                    _ITEM_STATUS.DELIVERY_CREATED
+                ):
+                    granted = True
+        if not granted and copy_id is None:
+            outcome = QualificationOutcome.REJECTED_FINAL
+        elif granted or copy_id is not None:
+            outcome = QualificationOutcome.GRANTED
+        else:
+            outcome = QualificationOutcome.REJECTED
+        return CommandPlan(
+            events=(),
+            owners=self._owners,
+            state_rows=self._state,
+            read_only=True,
+            result=FileQualification(
+                outcome=outcome,
+                copy_id=copy_id,
+                run_id=run_id,
+                delivery_id=delivery_id,
+                target_file_id=target_file_id,
+                reason="resent",
+            ),
+        )
+
+
+def _seconds_json(value) -> str:
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
+    return str(value)
+
+
 class OutputsRepository:
-    """来源固定与选择的 SQLite 仓储。"""
+    """来源固定、选择与读取资格的 SQLite 仓储。"""
 
     def resolve_sources(
         self, command: ResolveSources, key: OperationKey, owned: OwnedConnection
@@ -795,6 +1394,12 @@ class OutputsRepository:
         self, command: FixSelection, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SelectionSaved]:
         receipt = commit_operation(_FixSelectionCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
+    def grant_file(
+        self, command: FileCandidate, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[FileQualification]:
+        receipt = commit_operation(_GrantFileCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
 
@@ -935,7 +1540,168 @@ def _source_selection_guard(event, context) -> None:
                 )
 
 
+def _intermediate_guard(event, context) -> None:
+    """中间文件建档守卫：用途与归属互斥、初始保留与清理状态固定。"""
+    if event.event_type != _INTERMEDIATE_FILE_EVENT or event.reason != 1:
+        return
+    for row in event.rows:
+        if row.table != "intermediate_files" or row.before.exists:
+            raise EventValidationError("中间文件建档必须是创建行")
+        values = row.after.values
+        purpose = values.get("purpose")
+        if values.get("retention_state") != int(_RETENTION.REQUIRED):
+            raise EventValidationError("新建中间文件必须处于 REQUIRED 保留状态")
+        if values.get("cleanup_state") != int(_FILE_CLEANUP.NOT_NEEDED):
+            raise EventValidationError("新建中间文件不得登记清理待办")
+        if values.get("size_bytes") is not None or values.get("sha256") is not None:
+            raise EventValidationError("新建中间文件尚无内容事实")
+        has_delivery = values.get("owner_delivery_id") is not None
+        has_action = values.get("owner_action_id") is not None
+        if purpose == int(_PURPOSE.DELIVERY_COPY):
+            if not has_delivery or has_action:
+                raise EventValidationError("交付副本必须归属交付且不归属动作")
+        elif has_delivery or not has_action:
+            raise EventValidationError("处理用途的中间文件必须归属动作")
+
+
+def _delivery_guard(event, context) -> None:
+    """交付建档守卫：初始待准备、未发布且未撤回。"""
+    if event.event_type != _DELIVERY_CHANGED_EVENT or event.reason != 1:
+        return
+    for row in event.rows:
+        if row.table != "deliveries" or row.before.exists:
+            raise EventValidationError("交付建档必须是创建行")
+        values = row.after.values
+        if values.get("status") != int(_DELIVERY_STATUS.PENDING):
+            raise EventValidationError("新建交付必须处于 PENDING")
+        if values.get("withdrawal_state") != int(_WITHDRAWAL.NOT_REQUESTED):
+            raise EventValidationError("新建交付不得携带撤回状态")
+        if (
+            values.get("publication_intent_event_id") is not None
+            or values.get("published_event_id") is not None
+            or values.get("error_json") is not None
+        ):
+            raise EventValidationError("新建交付不得携带发布或错误事实")
+
+
+def _copy_guard(event, context) -> None:
+    """拷贝建档守卫：首轮、零进度、初始验证与重置状态。"""
+    if event.event_type != _COPY_CHANGED_EVENT or event.reason != 1:
+        return
+    for row in event.rows:
+        if row.table != "file_copies" or row.before.exists:
+            raise EventValidationError("拷贝建档必须是创建行")
+        values = row.after.values
+        expected = {
+            "round": 1,
+            "recopies_used": 0,
+            "committed_bytes": 0,
+            "reset_state": int(_RESET_STATE.READY),
+            "verification_state": int(_VERIFICATION.NOT_PERFORMED),
+            "target_sha256": None,
+            "verification_error_json": None,
+            "source_sha256": None,
+        }
+        for column, value in expected.items():
+            if values.get(column) != value:
+                raise EventValidationError(
+                    f"新建拷贝的 {column} 必须是 {value!r}: {values.get(column)!r}"
+                )
+        if values.get("source_size") is None:
+            raise EventValidationError("新建拷贝必须携带源长度")
+        if not values.get("slot_device_id"):
+            raise EventValidationError("设备来源拷贝必须占用所属设备的读取机会")
+        if (values.get("delivery_id") is None) == (values.get("processing_id") is None):
+            raise EventValidationError("拷贝必须恰归属交付或录像处理之一")
+
+
+def _copy_links_guard(event, context) -> None:
+    """拷贝关联守卫：每份新拷贝与唯一 READ_FILE 流程共同保存。"""
+    if event.event_type != _COPY_CHANGED_EVENT or event.reason != 1:
+        return
+    runs = context.state_rows.get("operation_runs", {})
+    for row in event.rows:
+        if row.table != "file_copies" or row.before.exists:
+            continue
+        copy_id = row.row_id
+        values = row.after.values
+        matches = [
+            facts
+            for facts in runs.values()
+            if facts.get("kind") == int(_RUN_KIND.READ_FILE)
+            and facts.get("copy_id") == copy_id
+        ]
+        if len(matches) != 1:
+            raise EventValidationError(
+                f"每份新拷贝必须恰有一条 READ_FILE 流程: copy {copy_id}"
+                f" 流程 {len(matches)} 条"
+            )
+        run = matches[0]
+        if run.get("responsibility_key") != f"read/{copy_id}":
+            raise EventValidationError("READ_FILE 流程责任键与拷贝不一致")
+        if run.get("delivery_id") != values.get("delivery_id"):
+            raise EventValidationError("READ_FILE 流程与拷贝的交付归属不一致")
+
+
+def _read_permission_guard(event, context) -> None:
+    """读取资格守卫：授予与逐项拒绝均恰好作用于一条 SELECTED 项。"""
+    if event.event_type == _READ_PERMISSION_EVENT and event.reason == _GRANT_REASON:
+        updates = [
+            row
+            for row in event.rows
+            if row.table == "obtain_items" and row.before.exists
+        ]
+        if len(updates) != 1:
+            raise EventValidationError("资格授予必须恰好更新一条取回项")
+        row = updates[0]
+        before = row.before.values
+        after = row.after.values
+        if (
+            before.get("status") != int(_ITEM_STATUS.SELECTED)
+            or before.get("source_dependency") != 0
+            or before.get("delivery_id") is not None
+        ):
+            raise EventValidationError("只有未依赖源的 SELECTED 项能被授予")
+        if (
+            after.get("status") != int(_ITEM_STATUS.DELIVERY_CREATED)
+            or after.get("source_dependency") != 1
+            or after.get("delivery_id") is None
+        ):
+            raise EventValidationError("授予必须建立源依赖并回填交付")
+        delivery_id = after.get("delivery_id")
+        delivery = context.state_rows.get("deliveries", {}).get(delivery_id)
+        if delivery is None or delivery.get("status") != int(_DELIVERY_STATUS.PENDING):
+            raise EventValidationError("授予回填的交付必须已在同事务建档")
+    elif event.event_type == _READ_PERMISSION_EVENT and event.reason == _REJECT_REASON:
+        updates = [
+            row
+            for row in event.rows
+            if row.table == "obtain_items" and row.before.exists
+        ]
+        if len(updates) != 1:
+            raise EventValidationError("逐项拒绝必须恰好更新一条取回项")
+        after = updates[0].after.values
+        if (
+            after.get("status") != int(_ITEM_STATUS.FAILED)
+            or after.get("error_code") is None
+            or after.get("error_details_json") is None
+        ):
+            raise EventValidationError("逐项拒绝必须保存最终失败及错误")
+    elif event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == 1:
+        for row in event.rows:
+            if row.table != "deliveries" or row.before.exists:
+                continue
+            items = context.state_rows.get("obtain_items", {})
+            if not items:
+                raise EventValidationError("交付建档必须提供待授予的取回项事实")
+
+
 def register_outputs_guards() -> None:
-    """注册来源与选择事件的正式业务守卫（装配期调用）。"""
+    """注册来源、选择与读取资格事件的正式业务守卫（装配期调用）。"""
     register_guard("selection_initialization", _selection_initialization_guard)
     register_guard("source_selection", _source_selection_guard)
+    register_guard("intermediate", _intermediate_guard)
+    register_guard("delivery", _delivery_guard)
+    register_guard("copy", _copy_guard)
+    register_guard("copy_links", _copy_links_guard)
+    register_guard("read_permission", _read_permission_guard)
