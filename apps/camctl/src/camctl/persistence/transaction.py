@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, Protocol
 from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
+from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import OperationKey
 from camctl.history.changes import (
     ChangeDerivationError,
@@ -569,12 +570,17 @@ def row_change(table: str, row_id: int, values: dict) -> RowChange:
 
 
 def update_change(table: str, row_id: int, before: dict, after: dict) -> RowChange:
-    """构造更新行：前后列集合一致，旧值来自本事务刚读到的状态。"""
+    """从相同拟更新集合构造真实变化；旧值来自本事务刚读到的状态。"""
+    if before.keys() != after.keys():
+        raise TransactionError(f"{table}#{row_id} 更新前后字段集合不同")
+    changed = [column for column in before if not json_equal(before[column], after[column])]
+    if not changed:
+        raise TransactionError(f"{table}#{row_id} 没有可保存的变化")
     return RowChange(
         table=table,
         row_id=row_id,
-        before=RowImage(exists=True, values=before),
-        after=RowImage(exists=True, values=after),
+        before=RowImage(exists=True, values={column: before[column] for column in changed}),
+        after=RowImage(exists=True, values={column: after[column] for column in changed}),
     )
 
 

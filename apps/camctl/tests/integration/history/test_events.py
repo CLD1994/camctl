@@ -7,11 +7,14 @@ P3 事务内核执行 H1 校验：登记外分支、错误归属或缺项守卫�
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
 import pytest
 
 from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError
+from camctl.history.decoding import decode_event_row
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
@@ -21,6 +24,16 @@ from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import PlanCreateCommand, plan_guards
 
 _CREATED_AT = 1_700_000_000_000_000
+
+
+def test_registered_observation_rejects_later_illegal_state_transition():
+    body = {"reason": 2, "evidence": {"observation": {}}, "rows": [{
+        "table": "device_activities", "id": 1,
+        "before": {"exists": True, "values": {"dispatch_state": 1, "activity_state": 3}},
+        "after": {"exists": True, "values": {"dispatch_state": 2, "activity_state": 2}},
+    }]}
+    with pytest.raises(ConsistencyError):
+        decode_event_row((1, 1, 13, 1, 0, 2, None, json.dumps(body)))
 
 
 def _open(tmp_path: Path) -> OwnedConnection:

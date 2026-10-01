@@ -68,6 +68,29 @@ def _value(owned, sql: str, *params):
     return row
 
 
+def test_unchanged_wait_configuration_returns_saved_result_without_new_history(tmp_path):
+    owned = _environment(tmp_path)
+    repository = TimelapseRepository()
+    try:
+        config = CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0)
+        plan = plan_capture_wait(
+            TimelapseState(clock_trusted=True, start_return=StartReturn.SENT,
+                           end_control=EndControl.DEVICE, sent_at_utc=_NOW,
+                           anchor_monotonic_ns=5_000_000_000), config,
+            ClockReading(utc_us=_NOW, monotonic_ns=5_000_000_000))
+        command = ScheduleWait(action_id=1, plan=plan, driver_margin_ms=0,
+                               extra_wait_ms=0, occurred_at=_NOW)
+        first = repository.schedule_wait(command, new_operation_key(), owned)
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        before = owned.connection.execute("SELECT id, body_json FROM history_events ORDER BY id").fetchall()
+        second = repository.reconfigure_wait(command, new_operation_key(), owned)
+        assert second.kind is DbOutcomeKind.COMPLETED, second.error
+        assert second.value.expected_check_at == plan.check_at_utc
+        assert owned.connection.execute("SELECT id, body_json FROM history_events ORDER BY id").fetchall() == before
+    finally:
+        owned.connection.close()
+
+
 def test_schedule_saves_wait_plan_from_send_anchor(tmp_path: Path) -> None:
     """等待安排保存发送锚点推导的预计检查；DB 延迟不参与计算。"""
     owned = _environment(tmp_path)

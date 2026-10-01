@@ -13,7 +13,7 @@ from typing import Any, Callable, Mapping
 
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import TransactionRange
-from camctl.contracts.json_values import is_json_integer
+from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.history.changes import ChangeDerivationError, event_report_targets
 from camctl.history.events import (
@@ -137,6 +137,10 @@ def _match_update_spec(row: RowChange, spec: Mapping[str, Any], event_name: str,
     missing = set(spec.get("required", ())) - before_keys
     if missing:
         _fail(f"{row.table}#{row.row_id} 缺少必要更新列: {sorted(missing)}")
+    unchanged = {column for column in before_keys
+                 if json_equal(row.before.values[column], row.after.values[column])}
+    if unchanged:
+        _fail(f"{row.table}#{row.row_id} 的更新列没有实际变化: {sorted(unchanged)}")
     allowed_columns = changeable_columns(row.table)
     illegal = before_keys - allowed_columns
     if illegal:
@@ -158,9 +162,6 @@ def _match_update_spec(row: RowChange, spec: Mapping[str, Any], event_name: str,
                 _fail(
                     f"{row.table}#{row.row_id} 更新后 {column}={value!r} 不在允许范围 {allowed}"
                 )
-    for column in spec.get("required", ()):
-        if column in row.after.values and row.after.values[column] is None:
-            _fail(f"{row.table}#{row.row_id} 的 {column} 不能为空")
     _check_transitions(row, spec, event_name, branch_name)
     return True
 
@@ -183,11 +184,12 @@ def _check_transitions(row: RowChange, spec: Mapping[str, Any], event_name: str,
         allowed_by = f"{event_name}.{branch_name}"
         for edge in edges:
             if allowed_by in edge["by"] and edge["from"] == before_value and edge["to"] == after_value:
-                return
-        _fail(
-            f"{row.table}#{row.row_id} 的 {column} 从 {before_value!r} 到 {after_value!r}"
-            f" 不满足 {event_name}.{branch_name} 声明的转换 {transition_ids}"
-        )
+                break
+        else:
+            _fail(
+                f"{row.table}#{row.row_id} 的 {column} 从 {before_value!r} 到 {after_value!r}"
+                f" 不满足 {event_name}.{branch_name} 声明的转换 {transition_ids}"
+            )
 
 
 def _transaction_guard(event: EventEnvelope, context: EventContext) -> None:
@@ -408,6 +410,20 @@ def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[st
 def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEvent:
     """完整结构校验后执行业务守卫，再解析实际对象引用。"""
     event_name, branch_name, branch = validate_event_structure(event)
+    for row in event.rows:
+        if not row.before.exists:
+            continue
+        before = dict(context.state_rows.get(row.table, {}).get(row.row_id, {}))
+        before.update(row.before.values)
+        after = {**before, **row.after.values}
+        spec = next(spec for spec in branch["rows"]
+                    if spec["table"] == row.table and spec["op"] == "update")
+        for side, facts in (("before", before), ("after", after)):
+            for column, allowed in spec.get(side, {}).items():
+                if column not in facts:
+                    _fail(f"{row.table}#{row.row_id} 缺少 {side}.{column} 的可靠事实")
+                if not any(json_equal(facts[column], value) for value in allowed):
+                    _fail(f"{row.table}#{row.row_id} 的 {side}.{column} 不满足分支条件")
 
     for guard_name in branch["guards"]:
         guard = NAMED_GUARDS.get(guard_name)

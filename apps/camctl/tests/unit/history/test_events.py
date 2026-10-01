@@ -106,15 +106,13 @@ class TestRegistryDrivenValidation:
                         exists=True,
                         values={"completion_state": 1, "completion_evidence_json": None,
                                 "size_bytes": None, "locator_json": None,
-                                "original_name": None, "media_type": None,
-                                "last_error_json": None},
+                                "original_name": None, "media_type": None},
                     ),
                     after=RowImage(
                         exists=True,
                         values={"completion_state": 2, "completion_evidence_json": {},
                                 "size_bytes": 10, "locator_json": {},
-                                "original_name": "a.mp4", "media_type": "video/mp4",
-                                "last_error_json": None},
+                                "original_name": "a.mp4", "media_type": "video/mp4"},
                     ),
                 ),
             ),
@@ -295,7 +293,8 @@ class TestOwnershipAndReportImpact:
                     ),
                 ),
             )
-            context = EventContext(transaction=TXN, owners={("actions", 8): ("action", 8)}, state_rows={})
+            context = EventContext(transaction=TXN, owners={("actions", 8): ("action", 8)},
+                                   state_rows={"actions": {8: {"type": 1, "status": 1}}})
             with pytest.raises(EventValidationError, match="change_seq"):
                 validate_event(event, context)
         finally:
@@ -323,11 +322,11 @@ def _file_checksum_envelope(change_seq: int | None = 9) -> EventEnvelope:
                 row_id=3,
                 before=RowImage(
                     exists=True,
-                    values={"checksum_support": 1, "sha256": None, "last_error_json": None},
+                    values={"checksum_support": 1, "sha256": None},
                 ),
                 after=RowImage(
                     exists=True,
-                    values={"checksum_support": 2, "sha256": "b" * 64, "last_error_json": None},
+                    values={"checksum_support": 2, "sha256": "b" * 64},
                 ),
             ),
         ),

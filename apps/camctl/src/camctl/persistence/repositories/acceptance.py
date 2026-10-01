@@ -78,12 +78,9 @@ def _row(table: str, row_id: int, values: dict) -> RowChange:
 
 
 def _update(table: str, row_id: int, before: dict, after: dict) -> RowChange:
-    return RowChange(
-        table=table,
-        row_id=row_id,
-        before=RowImage(exists=True, values=before),
-        after=RowImage(exists=True, values=after),
-    )
+    from camctl.persistence.transaction import update_change
+
+    return update_change(table, row_id, before, after)
 
 
 def _envelope(

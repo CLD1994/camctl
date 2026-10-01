@@ -552,6 +552,20 @@ def test_failure_json_type_changes_are_distinct_inputs(connection, tmp_path, old
         assert actual["context"][0]["value"] == new
 
 
+def test_equal_report_error_with_new_key_does_not_create_a_new_fact(connection, tmp_path):
+    from decimal import Decimal
+
+    report_id = _freeze_report(tmp_path, connection)
+    error = {"reason": "file error", "context": {"count": 1, "ready": True}}
+    first = record_report_failure(new_operation_key(), _owned(connection), report_id, error)
+    assert first.kind.value == "completed"
+    before = _saved_state(connection)
+    same_error = {"context": {"ready": True, "count": Decimal("1.0")}, "reason": "file error"}
+    second = record_report_failure(new_operation_key(), _owned(connection), report_id, same_error)
+    assert second.kind.value == "completed", second.error
+    assert _saved_state(connection) == before
+
+
 def test_non_persistable_formal_error_rolls_back_transaction(connection, tmp_path):
     report_id = _freeze_report(tmp_path, connection)
     before = _saved_state(connection)
