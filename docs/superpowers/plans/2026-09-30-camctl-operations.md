@@ -141,13 +141,13 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 
 **接口与依赖：** 提供 `recover_attempt(facts: RecoveryFacts) -> AttemptRecoveryDecision`、异步 `settle_owned_call(call: ManagedCall, owner: ResponsibilityOwner) -> None`。前置交付：O1—O4、P4、S5。
 
-- [ ] 编写失败用例。建立 `test_unknown_attempt_does_not_redispatch`，只有意图且主机收场已可靠完成，`assert decision.redispatch is False`；保存对应恢复依据但不补造原超时、退出、时刻或配置。已确认读取错误与未保存读取失败分开，取消后可靠结果仍保存。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/operations/test_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按原身份和运行假设适用范围核实；本地收场完成不生成拍摄结束或删除成功，实际新观察另保存。接手结果前原拥有者及资源不释放。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 未知、已失败、可续传和可靠未派发没有混用。
+- [x] 编写失败用例。建立 `test_unknown_attempt_does_not_redispatch`，只有意图且主机收场已可靠完成，`assert decision.redispatch is False`；保存对应恢复依据但不补造原超时、退出、时刻或配置。已确认读取错误与未保存读取失败分开，取消后可靠结果仍保存。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/operations/test_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按原身份和运行假设适用范围核实；本地收场完成不生成拍摄结束或删除成功，实际新观察另保存。接手结果前原拥有者及资源不释放。
+- [x] 再运行上述命令，要求全部 PASS，并核对 未知、已失败、可续传和可靠未派发没有混用。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/operations/test_recovery.py -q`，调用返回、收场、结果回滚/未知及重启各边界验证历史和当前事实。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有副作用恢复是否根据剩余额度直接发令；记录门禁证据，建议以“feat: 实现原尝试恢复与接手”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有副作用恢复是否根据剩余额度直接发令；记录门禁证据，建议以“feat: 实现原尝试恢复与接手”形成独立提交。
 
 ### O6 主机收场与下一调用组合
 
