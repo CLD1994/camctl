@@ -88,11 +88,11 @@ Q1—Q3 可用受约束替身先实施。Q4 与 O2、C2 联合建立首个启动
 
 **接口与依赖：** 提供 `decide_schedule(facts: ScheduleFacts) -> ScheduleDecision`、`order_candidates(candidates: Sequence[Candidate]) -> tuple[Candidate, ...]`；Candidate 含稳定 ID、计划时间、类型及归属。前置交付：K1—K3、S1 的执行模式。
 
-- [ ] 编写失败用例。建立 `test_order_is_independent_of_wakeup`，打乱输入与通知顺序，`assert ordered_ids == expected_by_contract`；时间覆盖到点前、两端包含、超窗和 0 宽窗口。已有成功、原调用在途、原意图未知、核实耗尽各给独立预期，不能统一判过期。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/scheduling/test_rules.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。精确比较可信墙钟与启动窗口，等待使用单调钟；按业务规定的时间、类型及稳定身份排序，不在规则中查询外部资源。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 调度状态分区及候选排序与原有决策表对应。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 普通拍摄、恢复、准备及来源资格是否使用不同的时间规则；记录门禁证据，建议以“feat: 实现调度资格与候选顺序”形成独立提交。
+- [x] 编写失败用例。建立 `test_order_is_independent_of_wakeup`，打乱输入与通知顺序，`assert ordered_ids == expected_by_contract`；时间覆盖到点前、两端包含、超窗和 0 宽窗口。已有成功、原调用在途、原意图未知、核实耗尽各给独立预期，不能统一判过期。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/scheduling/test_rules.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。精确比较可信墙钟与启动窗口，等待使用单调钟；按业务规定的时间、类型及稳定身份排序，不在规则中查询外部资源。
+- [x] 再运行上述命令，要求全部 PASS，并核对 调度状态分区及候选排序与原有决策表对应。
+- [x] 审阅实际接口、状态分区及失败路径，检查 普通拍摄、恢复、准备及来源资格是否使用不同的时间规则；记录门禁证据，建议以“feat: 实现调度资格与候选顺序”形成独立提交。
 
 ### Q2 有界发现及缓存扩展
 
