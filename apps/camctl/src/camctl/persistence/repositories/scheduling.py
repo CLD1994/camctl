@@ -52,7 +52,10 @@ _RUN_UPDATE_COLUMNS = (
     "retry_wait_required",
 )
 
-#: 动作类型编号：camera_record。
+#: 动作类型编号：三种拍摄动作共用设备占用竞争。
+_CAMERA_ACTION_TYPES = (1, 2, 3)
+
+#: 动作类型编号：camera_record（启动机会持有者推导范围）。
 _CAMERA_RECORD_TYPE = 2
 
 #: 动作状态：RUNNING。
@@ -110,9 +113,9 @@ class GrantStartCommand:
         request = self._request
         action = self._load_action(connection, request.action_id)
         self._state["actions"] = {request.action_id: action}
-        if action["type"] != _CAMERA_RECORD_TYPE:
+        if action["type"] not in _CAMERA_ACTION_TYPES:
             raise TransactionError(
-                f"启动授予只适用于录像动作: {request.action_id}"
+                f"启动授予只适用于拍摄动作: {request.action_id}"
             )
         if action["cancel_requested"]:
             return self._rejected("canceled")
@@ -285,9 +288,9 @@ class GrantStartCommand:
         rows = connection.execute(
             "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index"
             " FROM actions a"
-            " WHERE a.type = ? AND a.status = ? AND a.cancel_requested = 0"
+            " WHERE a.type IN (1, 2, 3) AND a.status = ? AND a.cancel_requested = 0"
             " AND a.device_id = ? AND a.scheduled_at IS NOT NULL",
-            (_CAMERA_RECORD_TYPE, _ACTION_RUNNING, request.device_id),
+            (_ACTION_RUNNING, request.device_id),
         ).fetchall()
         action = self._state["actions"][request.action_id]
         mine = (

@@ -132,13 +132,13 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 **接口与依赖：** 提供异步 `run_photo(context: CaptureContext) -> CaptureStep`、`decide_photo(state: PhotoState, result: CaptureAssessment) -> PhotoDecision`；PhotoDecision 采用该任务的完成声明。前置交付：C1、O2/O4、C6 结果端口。
 
-- [ ] 编写失败用例。在 `test_photo_uses_declared_completion` 中完成后返回和只发送两种契约分别执行，`assert observed_completion == supplied_evidence`；单张任务不默认录像计时/停止。未启动取消、可能启动无停止拒绝、已有合法完成文件在取消后保留。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_photo.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。只实现相应照片任务规则，核实归属和必要文件条件；查询与停止仅在能力声明需要时调用，多文件产物沿 C6/X1 正式登记。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 照片不被录像流程的默认假设决定结果。
+- [x] 编写失败用例。在 `test_photo_uses_declared_completion` 中完成后返回和只发送两种契约分别执行，`assert observed_completion == supplied_evidence`；单张任务不默认录像计时/停止。未启动取消、可能启动无停止拒绝、已有合法完成文件在取消后保留。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_photo.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。只实现相应照片任务规则，核实归属和必要文件条件；查询与停止仅在能力声明需要时调用，多文件产物沿 C6/X1 正式登记。
+- [x] 再运行上述命令，要求全部 PASS，并核对 照片不被录像流程的默认假设决定结果。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_photo.py -q`，真实仓储、调度和报告组合照片正常、失败、取消与重启，设备用契约替身。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 照片结果、文件检查和取消是否被统一录像分支覆盖；记录门禁证据，建议以“feat: 实现单张拍摄流程”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 照片结果、文件检查和取消是否被统一录像分支覆盖；记录门禁证据，建议以“feat: 实现单张拍摄流程”形成独立提交。
 
 ### C5 延时摄影等待及跨重启恢复
 
