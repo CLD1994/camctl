@@ -153,9 +153,6 @@ class ReportUpdate:
 
     def plan(self, scope):
         facts = row_facts(scope.connection, "reports", self.report_id)
-        if facts["last_error_json"] is not None:
-            from camctl.contracts.json_values import parse_exact_json
-            facts["last_error_json"] = parse_exact_json(facts["last_error_json"])
         before = {key: facts[key] for key in self.after}
         allocation = scope.allocate(1)
         event = event_envelope(allocation.first_event_id, allocation.txn_id, 28,
@@ -503,8 +500,6 @@ def test_management_history_replays_success_failure_and_recovery(connection, tmp
         image = apply_forward(image, value)
         states["reports"][report_id].update(event.rows[0].after.values)
     current = row_facts(connection, "reports", report_id)
-    if current["last_error_json"] is not None:
-        current["last_error_json"] = parse_exact_json(current["last_error_json"])
     assert image.rows[("reports", report_id)] == {k: current[k] for k in business}
     for event in reversed(validated):
         image = apply_reverse(image, event)

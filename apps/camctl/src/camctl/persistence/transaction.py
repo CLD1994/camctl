@@ -18,8 +18,8 @@ from typing import Any, Callable, Mapping, Protocol
 from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
-from camctl.contracts.json_values import json_equal
-from camctl.contracts.values import OperationKey
+from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.changes import (
     ChangeDerivationError,
     StateSlice,
@@ -219,6 +219,15 @@ def _sql_value(table: str, column: str, value: Any) -> Any:
     return value
 
 
+def _read_sql_value(table: str, column: str, value: Any) -> Any:
+    if value is not None and column in json_columns().get(table, frozenset()):
+        try:
+            return parse_exact_json(value)
+        except ValueError as error:
+            raise ConsistencyError(f"{table}.{column} 不是有效精确 JSON") from error
+    return value
+
+
 def _write_projections(
     connection: sqlite3.Connection,
     events: tuple[EventEnvelope, ...],
@@ -243,8 +252,9 @@ def _write_projections(
                         f"更新目标 {row.table}#{row.row_id} 在当前状态中不存在"
                     )
                 for column, actual in zip(columns, selected):
-                    expected = _sql_value(row.table, column, row.before.values[column])
-                    if actual != expected:
+                    expected = row.before.values[column]
+                    actual = _read_sql_value(row.table, column, actual)
+                    if not json_equal(actual, expected):
                         raise TransactionError(
                             f"{row.table}#{row.row_id}.{column} 的旧值与当前状态不符:"
                             f" 事件认为 {expected!r}，实际 {actual!r}"
@@ -536,7 +546,7 @@ def commit_operation(
             ),
             change_set=change_set,
         )
-    except (TransactionError, EventValidationError, ChangeDerivationError) as error:
+    except (TransactionError, ConsistencyError, EventValidationError, ChangeDerivationError) as error:
         return _rollback_or_unknown(connection, begun, error)
     except sqlite3.Error as error:
         if committing:
@@ -609,13 +619,13 @@ def event_envelope(
 
 
 def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
-    """读取一行完整列值（原始类型，JSON 列仍为文本）。"""
+    """读取完整行事实，按权威 SQL 的 JSON 列分类恢复精确结构化值。"""
     cursor = connection.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
     found = cursor.fetchone()
     if found is None:
         return None
     return {
-        name: value
+        name: _read_sql_value(table, name, value)
         for name, value in zip((d[0] for d in cursor.description), found)
     }
 

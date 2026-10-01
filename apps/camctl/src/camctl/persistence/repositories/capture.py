@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
+from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import OperationKey
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.outputs.catalog import (
@@ -508,27 +509,18 @@ class SaveEmergencyCommand:
                 }
             )
             rows.append(_row("operation_attempts", attempt_id, values))
-        self._owners[("device_activities", self._activity_id)] = owner
-        activity_row = _update(
-            "device_activities",
-            self._activity_id,
-            {
-                "activity_state": activity["activity_state"],
-                "occupancy_state": activity["occupancy_state"],
-                "last_error_json": activity["last_error_json"],
-            },
-            {
-                "activity_state": activity_after,
-                "occupancy_state": activity["occupancy_state"],
-                "last_error_json": activity_error,
-            },
-        )
+        before = {"activity_state": activity["activity_state"],
+                  "last_error_json": activity["last_error_json"]}
+        after = {"activity_state": activity_after, "last_error_json": activity_error}
+        if not json_equal(before, after):
+            self._owners[("device_activities", self._activity_id)] = owner
+            rows.append(_update("device_activities", self._activity_id, before, after))
         event = _envelope(
             first_id,
             allocation.txn_id,
             _EMERGENCY_RECORDED_EVENT,
             1,
-            tuple(rows) + (activity_row,),
+            tuple(rows),
             self._occurred_at,
             evidence={"session_key": self._session_key},
         )

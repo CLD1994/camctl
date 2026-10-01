@@ -10,7 +10,6 @@ operation_finish、retry）在本模块注册。
 
 from __future__ import annotations
 
-import json
 from typing import Any, Mapping
 
 from camctl.contracts.enums import decode_member, enum_for
@@ -99,16 +98,7 @@ def _fail(message: str) -> None:
 
 def _load_row(connection, table: str, row_id: int) -> dict | None:
     """读取行事实并把秒数与 JSON 列恢复为精确值。"""
-    values = row_facts(connection, table, row_id)
-    if values is None:
-        return None
-    for column in ("timeout_s_json", "retry_interval_s_json"):
-        if column in values:
-            values[column] = seconds_from_json(values[column])
-    for column in ("error_json", "result_json"):
-        if column in values and isinstance(values[column], str):
-            values[column] = json.loads(values[column])
-    return values
+    return row_facts(connection, table, row_id)
 
 
 def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
@@ -893,7 +883,7 @@ def _attempt_result_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "operation_attempts" or not row.before.exists:
             continue
-        after = row.after.values
+        after = _row_after_facts(context, row)
         if after.get("result_event_id") != event.event_id:
             _fail("结果引用必须指向本次事件")
         status = after.get("status")
@@ -941,9 +931,9 @@ def _operation_finish_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "operation_runs" or not row.before.exists:
             continue
-        after = row.after.values
-        if "status" not in after:
+        if "status" not in row.after.values:
             continue
+        after = _row_after_facts(context, row)
         status = after.get("status")
         error = after.get("error_json")
         if status in (int(_RUN_STATUS.FAILED), int(_RUN_STATUS.UNCONFIRMED)):

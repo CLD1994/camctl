@@ -16,7 +16,7 @@
 | 非空允许子集、必要变化齐全 | 继续核对两侧枚举、首次赋值、每个状态转换及分支条件 |
 | 第一个改变的状态列合法、另一个非法 | 拒绝；字段和转换的排列次序不能影响结果 |
 | 状态字段未进入变化正文 | 结构校验不补造转换；保存时从可靠旧记录及本次覆盖值核对分支的完整条件 |
-| 某条拟更新行无任何变化、同一事件有其他真实事实 | 生产者省略该行，不推进该行所属对象的自身历史 |
+| 某条拟更新行无任何变化、同一事件有其他真实事实 | 生产者省略该行；对象的自身历史仅由同一事件中实际保存的所属事实推进 |
 | 整项业务命令已满足输入、没有任何新事实 | 返回原结果的只读命令，不分配事件、不增加次数；输入矛盾和读取失败仍报错 |
 | 保存或读取发现非法事实 | 保存整组回滚；读取为 `ConsistencyError`，不跳过事件、默认成功或重做外部操作 |
 
@@ -28,13 +28,19 @@
 
 历史正文只携带变化字段，不能在解码时凭当前数据库填补旧分支条件。保存时完整条件需要可靠上下文；同事务先前事件的事实由 P3 逐事件推进，不能使用事务最终状态提前解释前一个事件。
 
+调度新尝试的派发字段从“未派发”或“明确拒绝且无效果”改为“可能已派发”，必然有真实变化。相同操作键的授予返回原票据；已经可能派发的活动不能仅为省略空更新而开放新的派发资格。
+
+完整行事实中的 JSON 列应按权威 SQL 分类恢复为精确结构化值，供比较、守卫和正文使用；文本列保持文本。旧 JSON 的成员顺序、空白及数值字面量不同不能导致旧值核对失败，布尔和数字、数组次序及不同数学值仍须区分。无效 JSON 应拒绝读取及保存，不能退化为原文本。审计入口为 `row_facts`、普通操作加载、报告管理加载、拍摄补记及产物选择；SQL 旧值核对与保存键复用也须使用相同精确语义。
+
+应急补记按会话和活动创建新的最终流程及实际尝试；已有活动的状态与错误未改变时，只省略活动行，仍保存新会话的独立事实。错误改变时，正文必须保存旧结构化错误及新错误，不能把旧 JSON 文本当成业务字符串再次编码。
+
 证据审查还须覆盖普通尝试结果、输入诊断、设备观察、基准分块和应急补记。当前应急补记同时在流程行和证据保存会话身份，而格式 1 只允许公共成员与登记基准成员；应核对该事实的权威来源及恢复消费者。`branch.evidence` 的必要性和 `observation` 的具体结构须从对应正式业务契约核实，不能依实现便利增加证据字段或省略必要依据。
 
 ## 实施顺序与门禁
 
 - [x] E1：先用内存登记和 `decode_event_row` 建立多状态反例；分别覆盖首列合法后列非法、交换列次序、所有改变列合法及只改变一个列。修复 `_check_transitions` 的提前返回，分别验证公开保存入口和存储解码入口。
 - [ ] E2：先建立空更新、未变化必要列、数字同值、对象同值及布尔与数字变化的失败测试，再实现严格变化正文与共用构造。枚举两侧保持完整检查；非法字段集合不能被构造器过滤后接受。
-- [ ] E3：逐个审计生产者。调度重复派发、应急补记、延时相同配置和相同报告错误分别验证无新事实的结果。审计守卫对事件字段的直接读取，将完整状态约束放在可靠上下文边界；用真实 SQLite 证明保存并读取的正文只含变化，原操作键复用不重复写入。
+- [ ] E3：逐个审计生产者。调度同键重送与合法重试、应急补记、延时相同配置和相同报告错误分别验证保存与无新事实的结果。先用相同活动跨会话的同错误、不同错误反例验证 JSON 旧值与空行处理，再在完整行读取和 SQL 核对边界统一精确值语义。审计守卫对事件字段的直接读取，将完整状态约束放在可靠上下文边界；用真实 SQLite 证明保存并读取的正文只含变化，原操作键复用不重复写入。普通尝试结果和报告重新准备的复用须单独覆盖；变化正文没有携带的身份或原结果不能用当前可变状态补造。
 - [ ] E4：完成证据成员与分支必要性的状态分类，先补反例再修复共用结构边界及相应生产者。驱动证据含义和跨表资格仍由具名守卫负责，读取不重新决策。未明确的观察结构先核实规格，不自行选默认值。
 - [ ] E5：执行两版 Python 单元与相关 SQLite 组合；全量组件回归按具体名称记录既有失败。独立检查补充反例、生产者、守卫及恢复消费者；同步历史计划、路线图和本计划的复选框后提交。完整 H1 和 H4 只能在各自全部门禁闭合后勾选。
 
@@ -42,22 +48,42 @@
 
 ## 验证记录
 
-本次提交保存 E1、E2 的结构校验及构造器实现、保存入口的完整分支条件检查和 E3 的回归反例。生产者与具名守卫的适配尚未闭合，E2 至 E5 保持未完成。
+当前实现将登记 JSON 列的精确解析集中在完整行读取边界，SQL 旧值核对使用同一精确值语义。普通操作结果与结束守卫合并可靠旧事实和变化字段；相同延时配置在输入类型校验后只读返回；跨会话应急补记保留独立流程事实并省略未变化的活动行。生产者、复用消费者和证据审查尚未闭合，E2 至 E5 保持未完成。本提交是实施进度快照，保留尚未修复的失败反例。
 
-Python 3.12 与 3.11 分别执行以下单元测试组合，各有 90 项通过：
+提交前，Python 3.12 与 3.11 分别执行组件单元测试，各有 1278 项通过、7 项失败、1 项取消选择及 2 条警告：
 
 ```sh
-PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tests ~/.venv/bin/python -m pytest apps/camctl/tests/unit/history/test_decoding.py apps/camctl/tests/unit/history/test_events.py apps/camctl/tests/unit/persistence/test_event_building.py -q
+PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tests ~/.venv/bin/python -m pytest apps/camctl/tests/unit -q -k 'not test_accepted_record_delivers_receipt'
 ```
 
-Python 3.11 使用 `~/.venv-camctl-contracts-311/bin/python` 执行同一组合。Python 3.12 全量单元运行排除既有未结束用例后，在 783 项通过时仍未结束，已中断，不能作为全量通过依据。
+Python 3.11 使用 `~/.venv-camctl-contracts-311/bin/python` 执行同一组合。取消选择的是既有日志收据用例 `test_accepted_record_delivers_receipt`；该用例曾持续等待队列收据而未结束，不能视为通过。7 项失败分别验证 `row_facts` 在正常、缺失、无效 JSON 和 SQL 读取错误四个出口释放游标，以及产物选择 JSON 保留精确数字、拒绝重复成员和拒绝 `NaN`。
 
-Python 3.12 的关键集成组合有 2 项通过、3 项失败：真实登记的多状态反例和重复报告错误的只读返回通过；以下失败保留为 E3 的验收条件。
+提交前，Python 3.12 执行以下真实 SQLite 组合，有 22 项通过、1 项失败：
 
-| 用例 | 触发过程与待实施要求 |
+```sh
+PYTHONPATH=/workspaces/camctl/apps/camctl/src:/workspaces/camctl/apps/camctl/tests ~/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_timelapse.py apps/camctl/tests/integration/capture/test_emergency.py apps/camctl/tests/integration/operations/test_attempts.py apps/camctl/tests/integration/reporting/test_publish.py::test_formal_prepare_cannot_replace_bytes_after_failure apps/camctl/tests/integration/reporting/test_publish.py::test_management_history_replays_success_failure_and_recovery apps/camctl/tests/integration/outputs/test_sources.py::test_saved_selection_preserves_mathematical_integer_in_error_details -q
+```
+
+延时相同配置、无变化时的非法类型、应急跨会话同错误与不同错误、普通失败重试后成功结束、原终态提交后的迟到结果及报告历史回放均通过。唯一失败发生在 `load_selection` 读取已保存逐项错误时：数学值为 `9007199254740993` 的小数字面量被解码为 `9007199254740992.0`。Python 3.11 的对应集成组合尚未执行。
+
+较早的 Python 3.12 全量组件集成运行有 759 项通过、10 项失败、2 项夹具错误及 3 条警告，尚未包含随后添加的游标和产物精确值反例。9 项产物资格既有失败见[历史读取审查的验证记录](2026-10-02-camctl-history-read-review.md)。其余失败为 `persistence/test_transactions.py::TestAtomicRollback::test_unimplemented_business_guard_rejects_write`：夹具把未变化的 `last_error_json` 写入正文，在抵达目标守卫前即被结构校验拒绝。两项夹具错误为 `reporting/test_encoding.py::test_real_acceptance_projection_encoding_matches_independent_bytes` 和 `test_shared_registration_field_reordering_preserves_bytes`：夹具重复解析已结构化的 JSON。它们须按完整行读取及真实变化契约适配，并保持原有行为断言；该运行不能作为最终门禁通过依据。
+
+## 未完成的实施边界
+
+| 入口与触发场景 | 修复要求与验收条件 |
 | --- | --- |
-| `capture/test_timelapse.py::test_unchanged_wait_configuration_returns_saved_result_without_new_history` | 首次等待安排成功后，相同配置的重新安排被空变化构造器拒绝。生产者须在分配事件前确认无新事实并只读返回，保留原预计检查时间及全部历史。 |
-| `operations/test_attempts.py::test_failed_attempt_with_retry_wait_then_second_attempt` | 第一次失败及重试等待已保存，第二次派发清零等待后，成功结束被守卫拒绝。守卫只读变化正文，未从可靠旧记录取得没有变化的 `retry_wait_required=0`；须合并完整事实后检查结束条件。 |
-| `operations/test_attempts.py::test_late_result_does_not_overwrite_terminal_state` | 原失败及终态写入因结束守卫拒绝而回滚，随后迟到成功被当成未结束尝试保存。须先证明原终态成功提交，再验证迟到结果返回 `ALREADY_ENDED`，不覆盖终态、不增加历史。 |
+| `transaction.row_facts` 已取得游标后返回或报错 | 使用标准库资源清理边界，在解析 JSON 前释放读取游标；正常、缺失、无效 JSON 和 SQL 错误四项反例必须通过，保留各自返回或异常语义。 |
+| `outputs._decoded` 与 `_saved_items` 读取逐项错误 | 复用精确 JSON 解析，将无效已存 JSON 报为 `ConsistencyError`；精确数字、重复成员、`NaN` 单元反例及 `load_selection` 真实组合必须通过。审计来源解析、选择固定及逐项读取的同类路径。 |
+| `test_output_rows.py` 导入产物持久化模块 | 当前导入会通过枚举和错误登记访问包资源。应在稳定登记边界使用内存替身，或在无登记依赖的纯值边界验证解析；不能以集成测试预装资源满足单元隔离要求。 |
+| 普通尝试结果及报告重新准备的同键重送 | 变化正文没有携带的身份和原结果必须从原事务依据恢复；不得读取当前可变状态来补造原结果。覆盖原结果不含终态变化以及当前状态后来推进两类情况。 |
+| 报告失败、重新发起发布、再次报告相同错误 | `required` 与完整状态守卫必须共同允许正式契约定义的状态转换；不得为满足变化必填条件把未变化错误重写入正文。 |
+| 调度授予、产物来源解析与选择固定的同键异目标输入 | 在返回前核对原事件目标和输入事实；不得把原流程身份与新请求目标混成一个结果。普通开始还须核对原配置，授予结果须从格式 1 的 `row.id` 恢复行身份。 |
 
-较早的历史、受理、报告、普通操作、拍摄、调度及产物集成运行有 518 项通过、11 项失败。其中 2 项为上表的普通操作用例，另有 9 项产物资格既有失败，见[历史读取审查的验证记录](2026-10-02-camctl-history-read-review.md)。该运行未包含随后添加的回归用例及完整分支条件检查，不能替代最终门禁。
+同键复用的验收按以下状态分类实施。各入口先建立能够失败的反例，再修复原事务读取和输入核对，最后验证真实保存入口没有新增事实。
+
+| 操作键及请求事实 | 结果 |
+| --- | --- |
+| 原键、原目标、原输入 | 只读返回原结果，不增加历史、次数或派发资格。 |
+| 原键、不同目标 | 拒绝复用；保留原事务和当前状态。 |
+| 原键、相同目标、不同配置或输入事实 | 拒绝复用；不能把新输入解释为原操作。 |
+| 原键、原输入，但当前状态已被后续事务推进 | 返回原事务确定的结果，不从当前状态推导新结果。 |

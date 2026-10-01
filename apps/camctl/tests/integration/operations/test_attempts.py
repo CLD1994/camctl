@@ -454,7 +454,7 @@ def test_late_result_does_not_overwrite_terminal_state(tmp_path: Path) -> None:
                 evidence_type="adb_foreground_assumption",
             ),
         )
-        repository.finish_attempt(
+        initial = repository.finish_attempt(
             AttemptFinish(
                 ticket=ticket,
                 outcome=failed,
@@ -467,6 +467,8 @@ def test_late_result_does_not_overwrite_terminal_state(tmp_path: Path) -> None:
             new_operation_key(),
             owned,
         )
+        assert initial.kind is DbOutcomeKind.COMPLETED, initial.error
+        assert initial.value.run_status is RunStatus.UNCONFIRMED
         events_before = _event_count(owned)
 
         # 迟到的成功结果不覆盖已保存的失败与终态。

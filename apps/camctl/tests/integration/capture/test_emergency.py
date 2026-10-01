@@ -238,6 +238,37 @@ async def test_duplicate_session_flow_is_rejected(tmp_path: Path) -> None:
         owned.connection.close()
 
 
+@pytest.mark.parametrize("second_outcome", [EmergencyOutcome.NOT_ATTEMPTED, EmergencyOutcome.UNCONFIRMED])
+async def test_later_session_preserves_exact_old_error_and_omits_unchanged_activity(tmp_path, second_outcome):
+    from camctl.contracts.json_values import parse_exact_json
+
+    owned = _environment(tmp_path)
+    try:
+        first = _save(owned, EmergencyRecord(EmergencyOutcome.NOT_ATTEMPTED, 0, 3), ())
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        attempts = () if second_outcome is EmergencyOutcome.NOT_ATTEMPTED else (
+            _attempt(status=4, error={"code": "timeout", "stage": "transport"}),)
+        second = CaptureRepository().save_emergency(
+            session_key="b" * 32, action_id=1, activity_id=1,
+            record=EmergencyRecord(second_outcome, len(attempts), 3), attempts=attempts,
+            occurred_at=_NOW, key=new_operation_key(), owned=owned,
+            timeout_s=Decimal("10"), retry_interval_s=Decimal("1"))
+        assert second.kind is DbOutcomeKind.COMPLETED, second.error
+        body = parse_exact_json(_value(owned, "SELECT body_json FROM history_events ORDER BY id DESC LIMIT 1")[0])
+        activities = [row for row in body["rows"] if row["table"] == "device_activities"]
+        assert _value(owned, "SELECT COUNT(*) FROM operation_runs WHERE kind = 9")[0] == 2
+        if second_outcome is EmergencyOutcome.NOT_ATTEMPTED:
+            assert activities == []
+        else:
+            assert len(activities) == 1
+            assert activities[0]["before"]["values"] == {
+                "last_error_json": {"code": "emergency_not_attempted", "stage": "emergency"}}
+            assert activities[0]["after"]["values"] == {
+                "last_error_json": {"code": "emergency_stop_unconfirmed", "stage": "emergency"}}
+    finally:
+        owned.connection.close()
+
+
 async def test_unconfirmed_with_attempts_saves_unconfirmed(tmp_path: Path) -> None:
     owned = _environment(tmp_path)
     try:

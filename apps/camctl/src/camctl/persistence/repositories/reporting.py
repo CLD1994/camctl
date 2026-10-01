@@ -153,8 +153,6 @@ def read_report_management(connection, report_id: int) -> dict:
     facts = row_facts(connection, "reports", report_id)
     if facts is None:
         raise ConsistencyError("报告管理记录缺失")
-    if facts["last_error_json"] is not None:
-        facts["last_error_json"] = parse_exact_json(facts["last_error_json"])
     validate_report_management(facts)
     definition = load_event_registry()["events"]["REPORT_CHANGED"]
     published = connection.execute(

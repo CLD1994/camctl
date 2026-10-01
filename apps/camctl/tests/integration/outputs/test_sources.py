@@ -527,6 +527,24 @@ def test_fix_selection_partial_failure_saves_per_item_results(
         connection.close()
 
 
+def test_saved_selection_preserves_mathematical_integer_in_error_details(tmp_path):
+    _, owned, repository, selection_id = _prepared_selection(tmp_path)
+    try:
+        facts = load_selection_facts(owned.connection, 21)
+        snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.EXPLICIT_IDS,
+                                  requested_output_ids=(9007199254740993,))
+        outcome = repository.fix_selection(FixSelection(selection_id, snapshot, _NOW),
+                                            new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        # 存储文本改用数学值相同的小数字面量，业务事实保持原值。
+        owned.connection.execute("UPDATE obtain_items SET error_details_json = ? WHERE selection_id = ?",
+                                 ('{"requested_output_id":9007199254740993.0}', selection_id))
+        saved = load_selection(owned.connection, selection_id)
+        assert saved.items[0].error_details["requested_output_id"] == 9007199254740993
+    finally:
+        owned.connection.close()
+
+
 def test_fixed_selection_survives_restart_without_reselecting(
     tmp_path: Path,
 ) -> None:

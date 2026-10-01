@@ -8,7 +8,10 @@ CAPTURE_WAIT_CHANGED 事件保存；重启后采用本次额外等待重算预�
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from camctl.capture.timelapse import (
     CaptureWaitConfig,
@@ -17,6 +20,7 @@ from camctl.capture.timelapse import (
     StartReturn,
     TimelapseState,
     WaitKind,
+    WaitPlan,
     plan_capture_wait,
 )
 from camctl.contracts.values import new_operation_key
@@ -86,6 +90,27 @@ def test_unchanged_wait_configuration_returns_saved_result_without_new_history(t
         second = repository.reconfigure_wait(command, new_operation_key(), owned)
         assert second.kind is DbOutcomeKind.COMPLETED, second.error
         assert second.value.expected_check_at == plan.check_at_utc
+        assert owned.connection.execute("SELECT id, body_json FROM history_events ORDER BY id").fetchall() == before
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("field,value", [("extra_wait_ms", 0.0), ("extra_wait_ms", False),
+                                         ("check_at_utc", float(_NOW + 600_000_000))])
+def test_same_wait_values_do_not_hide_invalid_input_types(tmp_path, field, value):
+    owned = _environment(tmp_path)
+    repository = TimelapseRepository()
+    try:
+        command = ScheduleWait(1, WaitPlan(WaitKind.WAIT_THEN_CHECK, _NOW + 600_000_000), 0, 0, _NOW)
+        first = repository.schedule_wait(command, new_operation_key(), owned)
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        if field == "check_at_utc":
+            command = replace(command, plan=replace(command.plan, check_at_utc=value))
+        else:
+            command = replace(command, **{field: value})
+        before = owned.connection.execute("SELECT id, body_json FROM history_events ORDER BY id").fetchall()
+        outcome = repository.reconfigure_wait(command, new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
         assert owned.connection.execute("SELECT id, body_json FROM history_events ORDER BY id").fetchall() == before
     finally:
         owned.connection.close()
