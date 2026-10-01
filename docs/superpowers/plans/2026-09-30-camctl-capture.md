@@ -146,13 +146,13 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 **接口与依赖：** 提供 `plan_capture_wait(state: TimelapseState, config: CaptureWaitConfig, now: ClockReading) -> WaitPlan`、异步 `run_timelapse(context: CaptureContext) -> CaptureStep`；WaitPlan 含原发送 UTC、预计检查时间和本次单调截止。前置交付：C1、O2/O4、C6；固定完成方式及 stop_supported。
 
-- [ ] 编写失败用例。建立 `test_send_only_has_no_device_completion`，发送成功，`assert device_state_is_observed_ended is False`；锚点取得后 DB 延迟不推迟预计检查。无查询重启计算剩余等待、默认额外等待 0、本次配置变化、原生完成后返回不再等全时长、主机负责结束四类分别验证。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_timelapse.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。分别实现原生任务、发送后等待、状态完成和主机结束路径；驱动必要余量首次固定，部署额外等待采用本次值并保存实际依据。跨重启日期时间用于剩余等待，本次进程使用单调钟，原活动限制仍保留。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 无查询合法路径不创建查询预算，首次核实前不周期查询状态。
+- [x] 编写失败用例。建立 `test_send_only_has_no_device_completion`，发送成功，`assert device_state_is_observed_ended is False`；锚点取得后 DB 延迟不推迟预计检查。无查询重启计算剩余等待、默认额外等待 0、本次配置变化、原生完成后返回不再等全时长、主机负责结束四类分别验证。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_timelapse.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。分别实现原生任务、发送后等待、状态完成和主机结束路径；驱动必要余量首次固定，部署额外等待采用本次值并保存实际依据。跨重启日期时间用于剩余等待，本次进程使用单调钟，原活动限制仍保留。
+- [x] 再运行上述命令，要求全部 PASS，并核对 无查询合法路径不创建查询预算，首次核实前不周期查询状态。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_timelapse.py -q`，在发送、等待登记、复检和完整结果事务各边界中断并改变本次配置，验证旧报告不变。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有完成方式和等待恢复是否补造直接设备观察；记录门禁证据，建议以“feat: 实现延时摄影等待与恢复”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有完成方式和等待恢复是否补造直接设备观察；记录门禁证据，建议以“feat: 实现延时摄影等待与恢复”形成独立提交。
 
 ### C6 文件归属、集合核实及占用释放
 
