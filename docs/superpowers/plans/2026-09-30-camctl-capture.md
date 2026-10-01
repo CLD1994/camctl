@@ -104,10 +104,10 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 **接口与依赖：** 提供异步 `start_recording(context: CaptureContext) -> CaptureStep`、纯 `recording_stop_target(anchor: MonotonicInstant, duration: DurationMillis) -> MonotonicInstant`；CaptureStep 表达已保存事实和下步责任。前置交付：Q4、O2/O3、C1。
 
-- [ ] 编写失败用例。建立 `test_recording_anchor_precedes_persistence`，驱动可靠启动响应时钟为 t，数据库和日志随后延迟，`assert stop_target == t + duration`；意图与派发两次窗口检查，窗口内派发窗口后确认仍接受；仅发送、拒绝无效果、未知及可靠启动后调用错误分别保留。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_recording_start.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。首次授予使用 Q4 的完整事务，驱动确认时立即取锚点并保存原依据，不在查询源文件后重新计时；有限启动与核实按原身份、次数和窗口推进。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 正常录像不主动少录，启动确认不自动提供源文件身份。
+- [x] 编写失败用例。建立 `test_recording_anchor_precedes_persistence`，驱动可靠启动响应时钟为 t，数据库和日志随后延迟，`assert stop_target == t + duration`；意图与派发两次窗口检查，窗口内派发窗口后确认仍接受；仅发送、拒绝无效果、未知及可靠启动后调用错误分别保留。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_recording_start.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。首次授予使用 Q4 的完整事务，驱动确认时立即取锚点并保存原依据，不在查询源文件后重新计时；有限启动与核实按原身份、次数和窗口推进。
+- [x] 再运行上述命令，要求全部 PASS，并核对 正常录像不主动少录，启动确认不自动提供源文件身份。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_recording_start.py -q`，真实调度、仓储和驱动替身在各启动边界中断，报告保留原事实。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 启动、查询及迟到成功是否错误重建锚点或重开已终态；记录门禁证据，建议以“feat: 实现录像启动与可靠计时”形成独立提交。

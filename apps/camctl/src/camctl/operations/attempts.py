@@ -127,9 +127,17 @@ class AttemptConfig:
     def __post_init__(self) -> None:
         _positive_int(self.max_attempts, "max_attempts")
         if self.timeout_s is not None:
-            _seconds(self.timeout_s, "timeout_s", allow_zero=False)
+            object.__setattr__(
+                self, "timeout_s", _seconds(self.timeout_s, "timeout_s", allow_zero=False)
+            )
         if self.retry_interval_s is not None:
-            _seconds(self.retry_interval_s, "retry_interval_s", allow_zero=True)
+            object.__setattr__(
+                self,
+                "retry_interval_s",
+                _seconds(
+                    self.retry_interval_s, "retry_interval_s", allow_zero=True
+                ),
+            )
 
 
 @dataclass(frozen=True)
