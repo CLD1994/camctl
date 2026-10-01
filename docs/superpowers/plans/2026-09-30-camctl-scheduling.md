@@ -100,11 +100,11 @@ Q1—Q3 可用受约束替身先实施。Q4 与 O2、C2 联合建立首个启动
 
 **接口与依赖：** 提供异步 `discover_work(request: CandidateRequest) -> CandidatePage`；候选结果包含原责任，分页部分遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)。候选读取与执行资格复核分别处理，Page 不授予执行机会。前置交付：P5、Q1。
 
-- [ ] 编写失败用例。建立 `test_terminal_action_does_not_hide_call`，动作终态而尝试 RUNNING，`assert attempt_id in discovered_responsibilities`；后续页有更早合格候选、缓存淘汰、仅有未来动作、新 submit 未改变缓存父对象时都能发现。无关已完成历史增加不导致全库常驻加载。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_discovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按未完成管理字段及独立责任索引分页；只保存本批和必要近期缓存，候选不足时继续持久化扩展。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 有限查询不漏终态后责任或缓存外工作。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 发现入口是否只查 actions 非终态或最新计划序列；记录门禁证据，建议以“feat: 实现有界调度工作发现”形成独立提交。
+- [x] 编写失败用例。建立 `test_terminal_action_does_not_hide_call`，动作终态而尝试 RUNNING，`assert attempt_id in discovered_responsibilities`；后续页有更早合格候选、缓存淘汰、仅有未来动作、新 submit 未改变缓存父对象时都能发现。无关已完成历史增加不导致全库常驻加载。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_discovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按未完成管理字段及独立责任索引分页；只保存本批和必要近期缓存，候选不足时继续持久化扩展。
+- [x] 再运行上述命令，要求全部 PASS，并核对 有限查询不漏终态后责任或缓存外工作。
+- [x] 审阅实际接口、状态分区及失败路径，检查 发现入口是否只查 actions 非终态或最新计划序列；记录门禁证据，建议以“feat: 实现有界调度工作发现”形成独立提交。
 
 ### Q3 提交与进入等待的通知交接
 
