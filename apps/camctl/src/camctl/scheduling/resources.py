@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from camctl.contracts.values import ConsistencyError
 from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
 
 __all__ = [
@@ -21,10 +22,6 @@ __all__ = [
     "current_start_holder",
     "recheck_dispatch",
 ]
-
-
-class ConsistencyError(ValueError):
-    """持有者推导发现非法组合；不按排序挑选后继续。"""
 
 
 @dataclass(frozen=True)

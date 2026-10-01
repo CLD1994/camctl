@@ -110,13 +110,13 @@ X1 随首次录像完成；X2—X7 实现首条取回链。X8/X9 在明确来源
 
 **接口与依赖：** 提供 `resolve_source(spec: SourceSpec, lookup: SourceLookup) -> SourceResolution`、`select_outputs(source: SourceResolution, facts: OutputCatalogFacts, mode: SelectionMode) -> SelectionSnapshot`；SourceSpec/SelectionMode 来自 A3 固定执行定义。前置交付：X1、K1/K2、P3；来源执行定义由本模块提供给 A3。
 
-- [ ] 编写失败用例。建立 `test_empty_selection_is_fixed`，来源完成无产物，`assert selection.is_fixed is True` 且 ids=()，与未选定不同。默认选择以修复替代原片、不含预览；修复不可用不回退。精确 ID 不存在/错误来源/已清理各逐项失败且无 delivery；可靠存在过而后记录缺失是状态库错误。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_sources.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。本计划关联使用受理保存关系，跨计划在执行资格后一次固定；逐来源完成后固定选择，保存合法空和每项最终失败，不因新文件出现重新选择。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 来源形式及精确筛选不会扩大范围，读取失败不当空集。
+- [x] 编写失败用例。建立 `test_empty_selection_is_fixed`，来源完成无产物，`assert selection.is_fixed is True` 且 ids=()，与未选定不同。默认选择以修复替代原片、不含预览；修复不可用不回退。精确 ID 不存在/错误来源/已清理各逐项失败且无 delivery；可靠存在过而后记录缺失是状态库错误。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_sources.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。本计划关联使用受理保存关系，跨计划在执行资格后一次固定；逐来源完成后固定选择，保存合法空和每项最终失败，不因新文件出现重新选择。
+- [x] 再运行上述命令，要求全部 PASS，并核对 来源形式及精确筛选不会扩大范围，读取失败不当空集。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_sources.py -q`，真实 SQLite 固定来源、重启及部分失败，覆盖所有六种来源形式和合法空选择。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 同计划/跨计划/组/全计划/预览/精确 ID 入口；记录门禁证据，建议以“feat: 实现固定来源与产物选择”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 同计划/跨计划/组/全计划/预览/精确 ID 入口；记录门禁证据，建议以“feat: 实现固定来源与产物选择”形成独立提交。
 
 ### X3 读取和删除资格的共同事务
 

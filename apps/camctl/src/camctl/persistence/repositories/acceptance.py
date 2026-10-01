@@ -8,10 +8,8 @@ diagnostic、ack）在本模块注册，替换各测试替身。
 
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass, replace
-from functools import lru_cache
 from typing import Any, Mapping
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
@@ -23,9 +21,9 @@ from camctl.acceptance.service import (
     PlanDisposition,
     ProcessInput,
 )
-from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.values import OperationKey
+from camctl.contracts.workflow_errors import action_error_ids
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -43,15 +41,12 @@ _ACTION_EVENT = 2
 _MEMBERS_EVENT = 3
 _DIAGNOSTIC_EVENT = 27
 
-
-@lru_cache(maxsize=1)
-def _workflow_error_ids() -> Mapping[str, int]:
-    registry = json.loads(resource_bytes("protocol/workflow-codes.json"))
-    return {
-        name: spec["action_error_id"]
-        for name, spec in registry["codes"].items()
-        if "action_error_id" in spec
-    }
+#: 能产生正式产物的拍摄动作类型（成员名来自登记）。
+_CAPTURE_TYPES = frozenset(
+    int(member.value)
+    for member in enum_for("actions.type")
+    if member.name in {"CAMERA_TAKE_PHOTO", "CAMERA_RECORD", "CAMERA_TIMELAPSE"}
+)
 
 
 def _action_type_code(literal: str) -> int:
@@ -535,7 +530,7 @@ class ProcessInputCommand:
             if literal.startswith("camera_"):
                 values["max_delay_ms"] = raw.get("policy", {}).get("max_delay_ms")
         else:
-            code = _workflow_error_ids().get(action.failure_code or "action_validation_failed")
+            code = action_error_ids().get(action.failure_code or "action_validation_failed")
             values.update(
                 {
                     "status": 4,
@@ -634,6 +629,12 @@ def _plan_aggregate_guard(event, context) -> None:
 
 
 def _source_members_guard(event, context) -> None:
+    fixed_now: dict[int, Any] = {}
+    for row in event.rows:
+        if row.table == "actions" and row.before.exists:
+            after = row.after.values
+            if after.get("source_resolution_state") == 2:
+                fixed_now[row.row_id] = after.get("resolved_source_plan_id")
     for row in event.rows:
         if row.table == "actions" and not row.before.exists:
             values = row.after.values
@@ -643,8 +644,28 @@ def _source_members_guard(event, context) -> None:
         if row.table == "action_dependencies" and not row.before.exists:
             owner_id = row.after.values.get("action_id")
             owner = context.state_rows.get("actions", {}).get(owner_id)
-            if owner is None or owner.get("source_resolution_state") != 2:
+            # 执行期固定在同一事件把所属动作更新为 FIXED；受理成员
+            # 则要求先前事件已创建 FIXED 动作。
+            if owner_id not in fixed_now and (
+                owner is None or owner.get("source_resolution_state") != 2
+            ):
                 raise EventValidationError("来源成员必须属于 FIXED 来源的取回动作")
+            plan_id = fixed_now.get(owner_id) or (owner or {}).get(
+                "resolved_source_plan_id"
+            )
+            member = context.state_rows.get("actions", {}).get(
+                row.after.values.get("depends_on_action_id")
+            )
+            if (
+                plan_id is None
+                or member is None
+                or member.get("plan_id") != plan_id
+                or member.get("type") not in _CAPTURE_TYPES
+            ):
+                raise EventValidationError(
+                    "来源成员必须是指向来源计划且能产生产物的拍摄动作:"
+                    f" {row.after.values.get('depends_on_action_id')!r}"
+                )
 
 
 def _diagnostic_guard(event, context) -> None:
