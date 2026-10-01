@@ -25,7 +25,13 @@ from camctl.history.changes import (
     derive_changes,
     event_report_targets,
 )
-from camctl.history.events import SCHEMA_RESOURCES, EventEnvelope, load_event_registry
+from camctl.history.events import (
+    SCHEMA_RESOURCES,
+    EventEnvelope,
+    RowChange,
+    RowImage,
+    load_event_registry,
+)
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -530,3 +536,94 @@ def _rollback_or_unknown(
     except sqlite3.Error as rollback_error:
         return WriteReceipt(kind="unknown", error=rollback_error)
     return WriteReceipt(kind="rolled_back", error=error)
+
+
+# -- 仓储共享的事务构建辅助 -------------------------------------------
+
+
+def row_change(table: str, row_id: int, values: dict) -> RowChange:
+    """构造创建行：本事件建立该行的全部业务列。"""
+    return RowChange(
+        table=table,
+        row_id=row_id,
+        before=RowImage(exists=False, values={}),
+        after=RowImage(exists=True, values=values),
+    )
+
+
+def update_change(table: str, row_id: int, before: dict, after: dict) -> RowChange:
+    """构造更新行：前后列集合一致，旧值来自本事务刚读到的状态。"""
+    return RowChange(
+        table=table,
+        row_id=row_id,
+        before=RowImage(exists=True, values=before),
+        after=RowImage(exists=True, values=after),
+    )
+
+
+def event_envelope(
+    event_id: int,
+    txn_id: int,
+    event_type: int,
+    reason: int,
+    rows,
+    occurred_at: int,
+) -> EventEnvelope:
+    """按正文版本 1 构造事件信封；change_seq 由内核分配。"""
+    return EventEnvelope(
+        event_id=event_id,
+        transaction_id=txn_id,
+        event_type=event_type,
+        event_version=1,
+        occurred_at=occurred_at,
+        clock_status=2,
+        change_seq=None,
+        reason=reason,
+        evidence={},
+        rows=tuple(rows),
+    )
+
+
+def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
+    """读取一行完整列值（原始类型，JSON 列仍为文本）。"""
+    cursor = connection.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
+    found = cursor.fetchone()
+    if found is None:
+        return None
+    return {
+        name: value
+        for name, value in zip((d[0] for d in cursor.description), found)
+    }
+
+
+def next_row_id(connection: sqlite3.Connection, table: str) -> int:
+    """按已提交最大 ID 分配下一行编号。"""
+    row = connection.execute(f"SELECT MAX(id) FROM {table}").fetchone()
+    return (int(row[0]) if row[0] is not None else 0) + 1
+
+
+def saved_transaction_events(
+    connection: sqlite3.Connection, operation_key: OperationKey
+) -> list[dict] | None:
+    """按操作身份取得已提交事务的事件事实；不存在时为空。
+
+    正文按原样解析，reason 从正文读取；供提交结果未知后的核实与
+    重送复用，不产生副作用。
+    """
+    row = connection.execute(
+        "SELECT id FROM history_transactions WHERE operation_key = ?",
+        (str(operation_key),),
+    ).fetchone()
+    if row is None:
+        return None
+    events: list[dict] = []
+    for event_type, body in connection.execute(
+        "SELECT event_type, body_json FROM history_events"
+        " WHERE transaction_id = ? ORDER BY id",
+        (int(row[0]),),
+    ):
+        document = json.loads(body)
+        events.append(
+            {"type": int(event_type), "reason": document.get("reason"), "body": document}
+        )
+    return events

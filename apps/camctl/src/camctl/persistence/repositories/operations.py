@@ -43,6 +43,12 @@ from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
     commit_operation,
+    event_envelope as _envelope,
+    next_row_id as _next_id,
+    row_change as _row,
+    row_facts,
+    saved_transaction_events as _saved_transaction_events,
+    update_change as _update,
 )
 
 _RUN_KIND = enum_for("operation_runs.kind")
@@ -91,49 +97,11 @@ def _fail(message: str) -> None:
     raise EventValidationError(message)
 
 
-def _row(table: str, row_id: int, values: dict) -> RowChange:
-    return RowChange(
-        table=table,
-        row_id=row_id,
-        before=RowImage(exists=False, values={}),
-        after=RowImage(exists=True, values=values),
-    )
-
-
-def _update(table: str, row_id: int, before: dict, after: dict) -> RowChange:
-    return RowChange(
-        table=table,
-        row_id=row_id,
-        before=RowImage(exists=True, values=before),
-        after=RowImage(exists=True, values=after),
-    )
-
-
-def _envelope(
-    event_id: int, txn_id: int, event_type: int, reason: int, rows, occurred_at: int
-) -> EventEnvelope:
-    return EventEnvelope(
-        event_id=event_id,
-        transaction_id=txn_id,
-        event_type=event_type,
-        event_version=1,
-        occurred_at=occurred_at,
-        clock_status=2,
-        change_seq=None,
-        reason=reason,
-        evidence={},
-        rows=tuple(rows),
-    )
-
-
 def _load_row(connection, table: str, row_id: int) -> dict | None:
-    cursor = connection.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
-    found = cursor.fetchone()
-    if found is None:
+    """读取行事实并把秒数与 JSON 列恢复为精确值。"""
+    values = row_facts(connection, table, row_id)
+    if values is None:
         return None
-    values = {
-        name: value for name, value in zip((d[0] for d in cursor.description), found)
-    }
     for column in ("timeout_s_json", "retry_interval_s_json"):
         if column in values:
             values[column] = seconds_from_json(values[column])
@@ -141,11 +109,6 @@ def _load_row(connection, table: str, row_id: int) -> dict | None:
         if column in values and isinstance(values[column], str):
             values[column] = json.loads(values[column])
     return values
-
-
-def _next_id(connection, table: str) -> int:
-    row = connection.execute(f"SELECT MAX(id) FROM {table}").fetchone()
-    return (int(row[0]) if row[0] is not None else 0) + 1
 
 
 def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
@@ -254,26 +217,6 @@ def _run_owner_ref(
             raise TransactionError("流程缺少设备活动事实")
         return ("action", activity["action_id"])
     return ("action", run_facts["action_id"])
-
-
-def _saved_transaction_events(connection, key: OperationKey) -> list[dict] | None:
-    """按操作身份取得已提交事务的事件事实；不存在时为空。"""
-    row = connection.execute(
-        "SELECT id FROM history_transactions WHERE operation_key = ?", (str(key),)
-    ).fetchone()
-    if row is None:
-        return None
-    events: list[dict] = []
-    for event_type, body in connection.execute(
-        "SELECT event_type, body_json FROM history_events"
-        " WHERE transaction_id = ? ORDER BY id",
-        (int(row[0]),),
-    ):
-        document = json.loads(body)
-        events.append(
-            {"type": int(event_type), "reason": document.get("reason"), "body": document}
-        )
-    return events
 
 
 def _event_rows(saved: Mapping[str, Any], table: str) -> list[dict]:

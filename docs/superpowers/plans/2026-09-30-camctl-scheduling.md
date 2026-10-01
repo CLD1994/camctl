@@ -126,11 +126,11 @@ Q1—Q3 可用受约束替身先实施。Q4 与 O2、C2 联合建立首个启动
 
 **接口与依赖：** 提供异步 `grant_start(command: StartCandidate, key: OperationKey) -> DbOutcome[DispatchGrant]` 与纯 `validate_dispatch(grant: DispatchGrant, current: DispatchFacts) -> DispatchDecision`；首次 grant 含原活动、流程、意图及次数。前置交付：Q1/Q2、O2、P3、C1 的固定执行定义；不等待 C2 的录像流程。
 
-- [ ] 编写失败用例。建立 `test_grant_does_not_skip_dispatch_recheck`，可靠提交后时间超窗或取消生效，`assert driver_calls == 0` 且次数不退还。首次机会记录缺活动、意图或参数任一项整组拒绝；同设备两个候选竞争只能一个获准，同时间资源排序始终一致。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_resources.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。完整写事务中再核对排序、准备、占用、保留、窗口及预算；可靠授予后检查派发，未发且已阻止迟到执行时由 O1/O2 保存 dispatch_prevented。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 W 系列首次授予及保存窗口观察对应事务全部成立。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有启动入口是否绕过 grant 或把等待保留当作实际活动；记录门禁证据，建议以“feat: 实现原子启动授予与再检查”形成独立提交。
+- [x] 编写失败用例。建立 `test_grant_does_not_skip_dispatch_recheck`，可靠提交后时间超窗或取消生效，`assert driver_calls == 0` 且次数不退还。首次机会记录缺活动、意图或参数任一项整组拒绝；同设备两个候选竞争只能一个获准，同时间资源排序始终一致。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_resources.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。完整写事务中再核对排序、准备、占用、保留、窗口及预算；可靠授予后检查派发，未发且已阻止迟到执行时由 O1/O2 保存 dispatch_prevented。
+- [x] 再运行上述命令，要求全部 PASS，并核对 W 系列首次授予及保存窗口观察对应事务全部成立。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有启动入口是否绕过 grant 或把等待保留当作实际活动；记录门禁证据，建议以“feat: 实现原子启动授予与再检查”形成独立提交。
 
 ### Q5 处理器接入与执行协程创建
 
