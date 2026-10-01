@@ -116,13 +116,13 @@ D1/D2 的端口、静态定义及证据结构先完成，使其他模块可以�
 
 **接口与依赖：** 提供异步 `invoke(command: DeviceCommand, call: AttemptTicket, transport: ManagedTransport) -> CallOutcome`；DeviceCommand 是具体驱动已经确认的单次操作，ManagedTransport 采用 O3。前置交付：D2、O3；具体命令必须来自已核验驱动定义。
 
-- [ ] 编写失败用例。建立 `test_failed_hash_is_not_unsupported`，声明源摘要能力而本次调用失败，`assert outcome.error is not None` 且能力保持支持；发送成功、启动成功、任务完成后返回、明确拒绝、超时及成功后错误分别符合保证范围。`assert implicit_retries == 0`。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_transport.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。调用一次明确操作并交出类型化事实，业务预算及重试留给流程；共享 ADB 服务端启动等待包含在本次调用期限，不恢复服务端后暗自重发业务命令。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 本地退出和原始文本不会直接生成设备成功事实。
+- [x] 编写失败用例。建立 `test_failed_hash_is_not_unsupported`，声明源摘要能力而本次调用失败，`assert outcome.error is not None` 且能力保持支持；发送成功、启动成功、任务完成后返回、明确拒绝、超时及成功后错误分别符合保证范围。`assert implicit_retries == 0`。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_transport.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。调用一次明确操作并交出类型化事实，业务预算及重试留给流程；共享 ADB 服务端启动等待包含在本次调用期限，不恢复服务端后暗自重发业务命令。
+- [x] 再运行上述命令，要求全部 PASS，并核对 本地退出和原始文本不会直接生成设备成功事实。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/devices/test_transport.py -q`，用真实受管本地工具和受接口约束的响应源验证期限、退出及分类。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有隐藏重试、异常默认和 stdout 解析分支；记录门禁证据，建议以“feat: 接入单次设备调用适配”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有隐藏重试、异常默认和 stdout 解析分支；记录门禁证据，建议以“feat: 接入单次设备调用适配”形成独立提交。
 
 ### D4 源读取会话与独立停止控制
 

@@ -92,12 +92,24 @@ class Settlement:
 class CallInfo:
     """实际取得的调用信息：本地退出与远端退出分别表达。"""
 
-    local_exit_code: int | None
-    remote_exit_code: int | None
+    local_exit_code: int | None = None
+    local_signal: int | None = None
+    remote_exit_code: int | None = None
 
     def __post_init__(self) -> None:
-        if self.local_exit_code is None and self.remote_exit_code is None:
+        provided = [
+            value
+            for value in (self.local_exit_code, self.local_signal, self.remote_exit_code)
+            if value is not None
+        ]
+        if not provided:
             raise ValueError("call_info 至少携带一种已知调用信息")
+        # 本地正常退出码与本地终止信号互斥；远端退出独立表达。
+        if (
+            self.local_exit_code is not None
+            and self.local_signal is not None
+        ):
+            raise ValueError("本地退出码与终止信号只能提供其一")
         if self.remote_exit_code is not None and not (
             0 <= self.remote_exit_code <= 255
         ):
