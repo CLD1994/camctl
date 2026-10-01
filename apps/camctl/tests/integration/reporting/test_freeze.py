@@ -74,7 +74,7 @@ async def _submit(owned: OwnedConnection, tmp_path: Path, request_id: str) -> No
     await accept_input(
         parsed,
         AcceptanceContext(
-            mode=CommandMode.SUBMIT,
+            mode=CommandMode.RUN,
             catalog=CATALOG,
             repository=AcceptanceRepository(),
             clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),

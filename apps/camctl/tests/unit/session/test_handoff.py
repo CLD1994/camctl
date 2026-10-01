@@ -10,6 +10,7 @@ import pytest
 
 from camctl.session.handoff import (
     HandoffOutcome,
+    SubmitHandoff,
     WorkFactsError,
     decide_handoff,
 )
@@ -73,3 +74,21 @@ class TestDecideHandoff:
 
         with pytest.raises((WorkFactsError, FactDimensionError)):
             decide_handoff(classify_work(_facts(unfinished_actions=None)), _FREE)
+
+
+def test_submit_with_no_work_skips_admission_probe():
+    def forbidden_probe():
+        pytest.fail("无工作时不应进行锁操作")
+
+    handoff = SubmitHandoff(lambda connection: _facts(), forbidden_probe)
+    assert handoff.needs_run(object()) is False
+
+
+@pytest.mark.parametrize("facts", [
+    _facts(unfinished_actions=1), _facts(required_settlements=1),
+    _facts(pending_report_changes=True), _facts(report_failed_no_new_changes=True),
+])
+@pytest.mark.parametrize("probe, expected", [(_FREE, True), (_CONFLICT, False)])
+def test_submit_handoff_classifies_required_work(facts, probe, expected):
+    handoff = SubmitHandoff(lambda connection: facts, lambda: probe)
+    assert handoff.needs_run(object()) is expected

@@ -19,7 +19,7 @@ from ..persistence.test_transactions import FailingConnection
 
 def _process(body, connection, key=None):
     return AcceptanceRepository().process_input(
-        ProcessInput(ParsedInput("original.json", body), Catalog(), CommandMode.SUBMIT, _NOW),
+        ProcessInput(ParsedInput("original.json", body), Catalog(), CommandMode.RUN, _NOW),
         key or new_operation_key(), OwnedConnection(connection, None),
     )
 

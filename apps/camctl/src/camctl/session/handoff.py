@@ -9,11 +9,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Callable
 
 from camctl.session.locks import AdmissionProbe
-from camctl.session.work import WorkDecision, WorkDecisionKind
+from camctl.session.work import WorkDecision, WorkDecisionKind, WorkFacts, classify_work
 
-__all__ = ["HandoffDecision", "HandoffOutcome", "WorkFactsError", "decide_handoff"]
+__all__ = ["HandoffDecision", "HandoffOutcome", "SubmitHandoff", "WorkFactsError", "decide_handoff"]
+
+
+@dataclass(frozen=True)
+class SubmitHandoff:
+    """受理事务内读取最新工作，仅在有责任时探测接纳锁。"""
+
+    facts_query: Callable[[Any], WorkFacts]
+    probe: Callable[[], AdmissionProbe]
+
+    def needs_run(self, connection: Any) -> bool:
+        work = classify_work(self.facts_query(connection))
+        if work.kind is WorkDecisionKind.CAN_EXIT_SUCCESS:
+            return False
+        return decide_handoff(work, self.probe()).needs_run
 
 
 class WorkFactsError(ValueError):

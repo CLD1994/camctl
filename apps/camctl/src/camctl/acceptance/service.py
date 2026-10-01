@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, Protocol
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
-from camctl.acceptance.ports import StaticActionCatalog
+from camctl.acceptance.ports import InputHandoff, StaticActionCatalog
 from camctl.contracts.values import OperationKey
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
@@ -59,6 +59,8 @@ class AcceptanceResult:
     ack_disposition: AckDisposition
     ack_watermark: int
     diagnostic_id: int | None = None
+    #: submit 的事务内接管结果；run 的输入受理不计算该字段。
+    needs_run: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,7 @@ class ProcessInput:
     catalog: StaticActionCatalog
     mode: CommandMode
     occurred_at: int
+    submit_handoff: InputHandoff | None = None
 
 
 class AcceptanceRepository(Protocol):
@@ -85,6 +88,7 @@ class AcceptanceContext:
     catalog: StaticActionCatalog
     repository: AcceptanceRepository
     clock: Any = None
+    submit_handoff: InputHandoff | None = None
 
 
 class AcceptanceStateError(RuntimeError):
@@ -108,6 +112,7 @@ async def accept_input(
         catalog=context.catalog,
         mode=context.mode,
         occurred_at=occurred_at,
+        submit_handoff=context.submit_handoff,
     )
     outcome = context.repository.process_input(command, key, owned)
     if outcome.kind is DbOutcomeKind.COMPLETED:

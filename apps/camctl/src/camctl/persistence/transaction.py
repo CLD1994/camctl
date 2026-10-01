@@ -13,7 +13,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, replace
 from functools import lru_cache
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
@@ -72,6 +72,9 @@ class CommandPlan:
     state_rows: Mapping[str, Mapping[int, Mapping[str, Any]]]
     result: Any = None
     read_only: bool = False
+    #: 投影写完后、事务结束前完成依赖新状态的响应判断。
+    #: 只允许可靠状态查询和非阻塞资格操作，不执行长任务或新写入。
+    complete_result: Callable[[sqlite3.Connection, Any], Any] | None = None
 
 
 class TransactionScope:
@@ -380,8 +383,15 @@ def commit_operation(
         if len(events) == 0:
             if not plan.read_only:
                 raise TransactionError("写事务没有权威事件")
+            try:
+                result = (
+                    plan.complete_result(connection, plan.result)
+                    if plan.complete_result else plan.result
+                )
+            except Exception as error:
+                return _rollback_or_unknown(connection, True, error)
             connection.execute("ROLLBACK")
-            return WriteReceipt(kind="completed", result=plan.result)
+            return WriteReceipt(kind="completed", result=result)
         allocation = scope.allocation
         if allocation is None:
             raise TransactionError("命令没有分配编号范围")
@@ -508,11 +518,18 @@ def commit_operation(
         _write_projections(connection, tuple(sequenced), derived)
         _write_derived_history(connection, tuple(sequenced), derived)
 
+        try:
+            result = (
+                plan.complete_result(connection, plan.result)
+                if plan.complete_result else plan.result
+            )
+        except Exception as error:
+            return _rollback_or_unknown(connection, True, error)
         committing = True
         connection.execute("COMMIT")
         return WriteReceipt(
             kind="completed",
-            result=plan.result,
+            result=result,
             boundary=HistoryBoundary(
                 txn_id=allocation.txn_id, last_event_id=allocation.last_event_id
             ),

@@ -22,14 +22,14 @@ from camctl.session.clock import (
     check_clock,
     enter_execution,
 )
-from camctl.session.handoff import decide_handoff
+from camctl.session.handoff import SubmitHandoff
 from camctl.session.locks import (
     AdmissionLease,
     SessionLease,
     probe_admission,
 )
 from camctl.session.outcome import SessionOutcome
-from camctl.session.work import WorkFacts, classify_work, WorkDecisionKind
+from camctl.session.work import WorkFacts
 
 __all__ = ["SessionContext", "run_session"]
 
@@ -120,14 +120,9 @@ async def _submit_session(
             return _outcome_error("state_db_error", {"error": str(error)})
         if context.notifier is not None:
             notify_acceptance(accepted, context.notifier)
-        try:
-            facts = context.facts_query(owned.connection)
-            work = classify_work(facts)
-            probe = probe_admission(context.paths.admission_lock)
-            decision = decide_handoff(work, probe)
-        except Exception as error:
-            return _outcome_error("state_db_error", {"error": str(error)})
-        return SessionOutcome(succeeded=True, needs_run=decision.needs_run)
+        if type(accepted.needs_run) is not bool:
+            return _outcome_error("state_db_error", {"error": "已完成的 submit 缺少接管结果"})
+        return SessionOutcome(succeeded=True, needs_run=accepted.needs_run)
     finally:
         owned.connection.close()
 
@@ -202,6 +197,10 @@ def _acceptance_context(context: SessionContext, owned: OwnedConnection):
         catalog=context.catalog,
         repository=context.acceptance_repository,
         clock=context.clock,
+        submit_handoff=SubmitHandoff(
+            facts_query=context.facts_query,
+            probe=lambda: probe_admission(context.paths.admission_lock),
+        ) if context.mode is CommandMode.SUBMIT else None,
     )
 
 

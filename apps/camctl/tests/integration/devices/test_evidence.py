@@ -124,7 +124,7 @@ def environment(tmp_path: Path):
     _create_valid_database(tmp_path / "state.db")
     owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
     context = AcceptanceContext(
-        mode=CommandMode.SUBMIT,
+        mode=CommandMode.RUN,
         catalog=Catalog(),
         repository=AcceptanceRepository(),
         clock=type("Clock", (), {"utc_micros": staticmethod(lambda: _NOW)})(),

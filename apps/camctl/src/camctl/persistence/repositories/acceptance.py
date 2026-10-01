@@ -19,6 +19,7 @@ from camctl.acceptance.rules import extract_request_identity, validate_new_body
 from camctl.acceptance.service import (
     AcceptanceResult,
     AckDisposition,
+    CommandMode,
     PlanDisposition,
     ProcessInput,
 )
@@ -185,6 +186,22 @@ class ProcessInputCommand:
         self._ack: _AckEvaluation | None = None
 
     def plan(self, scope) -> CommandPlan:
+        if self._command.mode is CommandMode.SUBMIT:
+            if self._command.submit_handoff is None:
+                raise TransactionError("submit 必须在输入事务内提供接管判断")
+            return replace(self._plan_input(scope), complete_result=self._complete_handoff)
+        if (self._command.mode is not CommandMode.RUN
+                or self._command.submit_handoff is not None):
+            raise TransactionError("输入命令模式与接管端口不符")
+        return self._plan_input(scope)
+
+    def _complete_handoff(self, connection, result: AcceptanceResult) -> AcceptanceResult:
+        needs_run = self._command.submit_handoff.needs_run(connection)
+        if type(needs_run) is not bool:
+            raise TransactionError("接管判断必须返回布尔值")
+        return replace(result, needs_run=needs_run)
+
+    def _plan_input(self, scope) -> CommandPlan:
         connection = scope.connection
         occurred_at = self._command.occurred_at
         document = (

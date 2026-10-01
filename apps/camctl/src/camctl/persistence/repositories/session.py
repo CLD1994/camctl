@@ -1,7 +1,8 @@
 """会话侧仓储：事务内接纳关闭。
 
 正常关闭在同一写事务内重新检查工作并释放接纳；有新工作或报告
-失败等待变化时保持接纳。锁释放是事务内的非阻塞锁操作，不产生
+失败后尚有新工作时保持接纳；没有新工作的失败机会结束后关闭。
+锁释放是事务内的非阻塞锁操作，不产生
 权威事件。
 """
 
@@ -43,7 +44,9 @@ class _CloseCommand:
     def plan(self, scope) -> CommandPlan:
         facts = self._command.facts_query(scope.connection)
         decision = classify_work(facts)
-        closed = decision.kind is WorkDecisionKind.CAN_EXIT_SUCCESS
+        closed = decision.kind in (
+            WorkDecisionKind.CAN_EXIT_SUCCESS, WorkDecisionKind.EXIT_REPORT_ERROR,
+        )
         if closed:
             self._command.release_admission()
         return CommandPlan(

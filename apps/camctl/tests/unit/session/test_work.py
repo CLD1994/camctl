@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import pytest
+from decimal import Decimal
 
 from camctl.session.work import (
     FactDimensionError,
@@ -113,3 +114,20 @@ class TestUnknownFacts:
     def test_negative_counts_rejected(self) -> None:
         with pytest.raises(ValueError):
             _facts(unfinished_actions=-1)
+
+
+@pytest.mark.parametrize("dimension", ["unfinished_actions", "required_settlements"])
+@pytest.mark.parametrize("invalid", [True, False, 0.0, 1.5, "1", Decimal("1"), [], -1])
+def test_work_count_requires_actual_nonnegative_integer(dimension, invalid):
+    with pytest.raises(FactDimensionError):
+        _facts(**{dimension: invalid})
+
+
+@pytest.mark.parametrize("dimension", [
+    "pending_report_changes", "report_failed_no_new_changes", "residual_device_facts",
+    "deferred_work_cleanup", "waiting_acknowledgement", "snapshot_backlog",
+])
+@pytest.mark.parametrize("invalid", [None, 0, 1, "false", [], {}])
+def test_work_flag_requires_actual_boolean(dimension, invalid):
+    with pytest.raises(FactDimensionError):
+        _facts(**{dimension: invalid})

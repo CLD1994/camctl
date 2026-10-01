@@ -1,7 +1,7 @@
 """S4 事务内接管与接纳关闭的组件集成测试。
 
 真实 SQLite、接纳锁与关闭事务组合：submit 竞争接纳关闭的两种先
-后、多次探测互不误认、报告失败等待新变化保持接纳。
+后、多次探测互不误认、报告失败机会结束后关闭接纳。
 """
 
 from __future__ import annotations
@@ -118,11 +118,11 @@ class TestSubmitRacesAdmissionClose:
     def test_report_failure_waits_for_new_changes(self, database) -> None:
         owned, admission_lock = database
         repository = SessionRepository()
-        # 报告失败且无新变化：保留接纳等待后续变化，不关闭。
+        # 报告失败且无新变化：关闭接纳，责任仍保留给后续 run。
         result = _close(
             repository, owned, _facts(report_failed_no_new_changes=True), lambda: None
         )
-        assert result.admission_closed is False
+        assert result.admission_closed is True
         assert result.work.kind is WorkDecisionKind.EXIT_REPORT_ERROR
         # 新变化先提交：继续处理（需要驱动）。
         result = _close(
@@ -133,6 +133,20 @@ class TestSubmitRacesAdmissionClose:
         )
         assert result.admission_closed is False
         assert result.work.kind is WorkDecisionKind.NEEDS_DRIVER
+
+    def test_report_failure_closes_real_admission(self, database) -> None:
+        owned, admission_lock = database
+        lease = acquire_admission(admission_lock)
+        try:
+            result = _close(
+                SessionRepository(), owned,
+                _facts(report_failed_no_new_changes=True), lease.close,
+            )
+            assert result.admission_closed is True
+            assert result.work.kind is WorkDecisionKind.EXIT_REPORT_ERROR
+            assert probe_admission(admission_lock).is_free
+        finally:
+            lease.close()
 
 
 class TestProbeIsolation:

@@ -71,7 +71,7 @@ async def _seed_plans(repository: HistoryRepository, count: int) -> HistoryBound
             await accept_input(
                 source,
                 AcceptanceContext(
-                    mode=CommandMode.SUBMIT,
+                    mode=CommandMode.RUN,
                     catalog=catalog,
                     repository=AcceptanceRepository(),
                     clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),

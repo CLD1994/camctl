@@ -27,7 +27,7 @@
 | `InputRead / ParsedInput` | 完整输入或带阶段的读取/解析失败；只有成功 ParsedInput 才含可检查字段。 |
 | `AcceptanceContext` | 命令模式、不可变配置、静态驱动定义及可选 submit 交接探测端口。 |
 | `BodyDecision / ActionValidation` | 整份拒绝或完整可受理动作集合；每个动作保留原输入、有效参数、关联与本动作失败。 |
-| `AckDecision / AcceptanceResult` | ACK 未提供、有效或无效；计划首次受理、复用或拒绝及完整提交凭据分别表达。 |
+| `AckDecision / AcceptanceResult` | ACK 未提供、有效或无效；计划首次受理、复用或拒绝及完整提交凭据分别表达。`submit` 结果携带同一事务内完成的接管判断；`run` 的输入受理不计算该字段。 |
 | `AcceptanceRepository` | 原子处理输入的端口，在事务内决定请求复用、正文校验、独立 ACK 和需要的交接判断。 |
 
 整份 JSON 读取或解析失败时不进入下表，保存输入诊断且不吸收 ACK。成功解析后先查请求成功受理关联，再按下表组合。

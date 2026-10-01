@@ -12,7 +12,13 @@ from typing import Any, Mapping, Protocol
 from camctl.contracts.json_values import JsonValue
 from camctl.devices.tasks import CaptureTaskFactory
 
-__all__ = ["ParameterDefinition", "StaticActionCatalog"]
+__all__ = ["InputHandoff", "ParameterDefinition", "StaticActionCatalog"]
+
+
+class InputHandoff(Protocol):
+    """在输入投影保存后、同一写事务内完成接管判断。"""
+
+    def needs_run(self, connection: Any) -> bool: ...
 
 
 @dataclass(frozen=True)

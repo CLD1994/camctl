@@ -113,7 +113,7 @@ class TestAcceptanceNotification:
             result = await accept_input(
                 parse_input(read),
                 AcceptanceContext(
-                    mode=CommandMode.SUBMIT,
+                    mode=CommandMode.RUN,
                     catalog=deps.catalog,
                     repository=AcceptanceRepository(),
                     clock=deps.clock if hasattr(deps, "clock") else None,

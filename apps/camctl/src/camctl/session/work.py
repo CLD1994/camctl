@@ -42,7 +42,7 @@ class WorkFacts:
     #: 仍应继续执行或恢复的有限设备收场、产物处理或交付流程数。
     required_settlements: int | None
     #: 应报告的业务变化尚未完成本地报告职责（含受理拒绝与 ACK 错误）。
-    pending_report_changes: bool | None
+    pending_report_changes: bool
     #: 本次报告处理已失败且尚未出现需要下一轮处理的新变化。
     report_failed_no_new_changes: bool
     #: 已结束动作留下的残留设备事实（无安全且必要的主动收场责任）。
@@ -57,10 +57,14 @@ class WorkFacts:
     def __post_init__(self) -> None:
         for name in ("unfinished_actions", "required_settlements"):
             value = getattr(self, name)
-            if value is not None and (isinstance(value, bool) or value < 0):
+            if value is not None and (type(value) is not int or value < 0):
                 raise FactDimensionError(f"{name} 必须是非负整数或 None: {value!r}")
-        if self.pending_report_changes is None:
-            raise FactDimensionError("pending_report_changes 未知")
+        for name in (
+            "pending_report_changes", "report_failed_no_new_changes", "residual_device_facts",
+            "deferred_work_cleanup", "waiting_acknowledgement", "snapshot_backlog",
+        ):
+            if type(getattr(self, name)) is not bool:
+                raise FactDimensionError(f"{name} 必须是可靠布尔值: {getattr(self, name)!r}")
 
 
 @dataclass(frozen=True)
