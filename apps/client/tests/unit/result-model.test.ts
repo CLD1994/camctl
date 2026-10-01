@@ -23,7 +23,6 @@ const capture = {
   name: "拍摄",
   status: "canceled",
   outputs: [output],
-  execution: { started: true },
 } as ReportAction;
 const d = (id: string) =>
   ({
@@ -40,7 +39,6 @@ const obtain = (id: string) =>
     type: "obtain_action_outputs",
     name: "取回",
     status: "succeeded",
-    execution: { started: true },
     deliveries: [d(id)],
   }) as ReportAction;
 const plans = [
@@ -88,6 +86,26 @@ it("好副本不会掩盖另一次失败交付", () => {
   expect(rows[0].state).toBe("ready");
   expect(rows[0].problems).toBe(1);
 });
+it("主机已发布但本地尚未收到文件时保持等待", () => {
+  const rows = resultProducts(obtain("d1"), plans, []);
+  expect(rows[0].deliveries).toHaveLength(1);
+  expect(rows[0].state).toBe("waiting");
+  expect(rows[0].problems).toBe(0);
+});
+it("本地文件核验失败标记注意并计数", () => {
+  const mismatched = [
+    { id: "v1", fileName: "d1.png", status: "mismatch" },
+  ] as Video[];
+  const rows = resultProducts(obtain("d1"), plans, mismatched);
+  expect(rows[0].state).toBe("attention");
+  expect(rows[0].problems).toBe(1);
+});
+it("部分产物被保留清理时其余产物仍全部列出", () => {
+  const kept: Output = { ...output, output_id: "o2", cleanup: { status: "canceled" } };
+  const action = { ...capture, outputs: [output, kept] } as ReportAction;
+  const rows = resultProducts(action, [], []);
+  expect(rows.map((r) => r.id)).toEqual(["o1", "o2"]);
+});
 it("没有交付的来源失败仍出现在动作业务摘要", () => {
   const action = {
     ...obtain("d1"),
@@ -112,4 +130,28 @@ it("录像成功但修复失败仍提示后处理异常", () => {
     result: { repair: { status: "failed" } },
   } as ReportAction;
   expect(resultNotes(action).some((n) => n.error)).toBe(true);
+});
+it("设备结束未确认或仍在运行都以自然语言提示", () => {
+  const unconfirmed = {
+    ...capture,
+    status: "failed",
+    error: { code: "future_code", stage: "execution", details: {} },
+    device_execution: { status: "end_unconfirmed" },
+  } as ReportAction;
+  const running = {
+    ...unconfirmed,
+    device_execution: { status: "still_running" },
+  } as ReportAction;
+  expect(
+    resultNotes(unconfirmed).some((n) => n.error && n.text.includes("尚未确认")),
+  ).toBe(true);
+  expect(
+    resultNotes(running).some((n) => n.error && n.text.includes("仍在执行")),
+  ).toBe(true);
+  // 提示解除后摘要不再保留设备执行说法。
+  expect(
+    resultNotes({ ...unconfirmed, device_execution: undefined }).some((n) =>
+      n.text.includes("设备"),
+    ),
+  ).toBe(false);
 });

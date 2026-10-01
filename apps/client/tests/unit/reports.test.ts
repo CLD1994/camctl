@@ -225,6 +225,80 @@ describe("parseReport", () => {
     ];
     expect(() => parse(r)).toThrow();
   });
+  it.each(["still_running", "end_unconfirmed"] as const)(
+    "接受终态拍摄动作的设备执行提示 %s",
+    (status) => {
+      const r = report();
+      r.plans![0].actions![0].device_execution = { status };
+      expect(
+        parse(r).plans![0].actions![0].device_execution,
+      ).toEqual({ status });
+    },
+  );
+  it("接受设备执行提示携带观察错误", () => {
+    const r = report();
+    r.plans![0].actions![0].device_execution = {
+      status: "still_running",
+      error,
+    };
+    expect(
+      parse(r).plans![0].actions![0].device_execution?.error,
+    ).toEqual(error);
+  });
+  it.each(["running", undefined])(
+    "拒绝未知或缺失状态的设备执行提示 %j",
+    (status) => {
+      const r = report();
+      r.plans![0].actions![0].device_execution = { status } as never;
+      expect(() => parse(r)).toThrow();
+    },
+  );
+  it("拒绝非拍摄动作携带设备执行提示", () => {
+    const r = report();
+    r.plans![0].actions![1].device_execution = { status: "still_running" };
+    expect(() => parse(r)).toThrow();
+  });
+  it("拒绝未终态动作携带设备执行提示", () => {
+    const r = report();
+    r.plans![0].status = "running";
+    const camera = r.plans![0].actions![0];
+    camera.status = "running";
+    camera.outputs = [];
+    camera.device_execution = { status: "still_running" };
+    expect(() => parse(r)).toThrow();
+  });
+  it.each([
+    { check_status: "completed", duration: { status: "available", seconds: 60 } },
+    { check_status: "failed", duration: { status: "unknown" }, error },
+    { check_status: "unconfirmed", duration: { status: "unknown" }, error },
+  ])("接受媒体检查最终结论 %j", (media) => {
+    const r = report();
+    r.plans![0].actions![0].outputs![0].media = media as never;
+    expect(parse(r).plans![0].actions![0].outputs![0].media).toEqual(media);
+  });
+  it("拒绝媒体失败结论缺少观察错误", () => {
+    const r = report();
+    r.plans![0].actions![0].outputs![0].media = {
+      check_status: "failed",
+      duration: { status: "unknown" },
+    } as never;
+    expect(() => parse(r)).toThrow();
+  });
+  it("拒绝未执行检查携带观察错误", () => {
+    const r = report();
+    r.plans![0].actions![0].outputs![0].media = {
+      check_status: "not_performed",
+      duration: { status: "unknown" },
+      error,
+    } as never;
+    expect(() => parse(r)).toThrow();
+  });
+  it("拒绝交付长度与正式产物不一致", () => {
+    const r = report();
+    r.plans![0].actions![0].outputs![0].size = 100;
+    r.plans![0].actions![1].deliveries![0].size = 99;
+    expect(() => parse(r)).toThrow();
+  });
 });
 describe("reportDecision", () => {
   it.each([
@@ -599,7 +673,7 @@ describe("历史观察边界", () => {
         false,
       ),
   );
-  it.each(["error", "result", "media", "cleanup"] as const)(
+  it.each(["error", "result", "media", "cleanup", "device_execution"] as const)(
     "同水位自身字段差异 %s",
     (field) => {
       const a =
@@ -616,9 +690,51 @@ describe("历史观察边界", () => {
         b.plans![0].actions![0].outputs![0].media.check_status = "running";
       if (field === "cleanup")
         b.plans![0].actions![0].outputs![0].cleanup = { status: "canceled" };
+      if (field === "device_execution")
+        b.plans![0].actions![0].device_execution = { status: "still_running" };
       historyPair(a, b, "same", false);
     },
   );
+  describe("设备执行提示合并", () => {
+    const later = (
+      to: number,
+      device_execution?: { status: "still_running" | "end_unconfirmed" },
+    ): StatusReport => {
+      const r = report();
+      r.report_id = "2";
+      r.from_wm = 20;
+      r.to_wm = to;
+      if (device_execution)
+        r.plans![0].actions![0].device_execution = device_execution;
+      return r;
+    };
+    it("较新报告使提示出现、改变并随省略而消失", () => {
+      const appear = mergeReport(report(), later(40, { status: "still_running" }));
+      expect(
+        appear.plans![0].actions![0].device_execution?.status,
+      ).toBe("still_running");
+      const changed = mergeReport(
+        appear,
+        later(60, { status: "end_unconfirmed" }),
+      );
+      expect(
+        changed.plans![0].actions![0].device_execution?.status,
+      ).toBe("end_unconfirmed");
+      const gone = mergeReport(changed, later(80));
+      expect(gone.plans![0].actions![0].device_execution).toBeUndefined();
+      expect(gone.plans![0].actions![0].status).toBe("succeeded");
+    });
+    it("提示消失后较旧报告不能使其重新出现", () => {
+      const current = mergeReport(report(), later(40, { status: "still_running" }));
+      const cleared = mergeReport(current, later(60));
+      expect(cleared.plans![0].actions![0].device_execution).toBeUndefined();
+      const older = later(50, { status: "still_running" });
+      older.report_id = "3";
+      const merged = mergeReport(cleared, older);
+      expect(merged.plans![0].actions![0].device_execution).toBeUndefined();
+      expect(merged.to_wm).toBe(60);
+    });
+  });
   it.each(["omit", "empty", "order"] as const)(
     "同水位集合%s不属于自身差异",
     (kind) => {

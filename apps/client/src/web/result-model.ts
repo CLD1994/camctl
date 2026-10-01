@@ -14,6 +14,15 @@ export function resultNotes(
 ): Array<{ text: string; error: boolean }> {
   const notes: Array<{ text: string; error: boolean }> = [];
   const result = action.result;
+  // 设备执行提示不属于动作 result，没有 result 的动作也要提示。
+  if (action.device_execution)
+    notes.push({
+      text:
+        action.device_execution.status === "still_running"
+          ? "动作已有结果，设备仍在执行该动作要求的工作"
+          : "设备是否已结束该动作的工作尚未确认",
+      error: true,
+    });
   if (!result) return notes;
   if (Array.isArray(result.failures) && result.failures.length)
     notes.push({
@@ -42,8 +51,6 @@ export function resultNotes(
     ["failed", "unconfirmed"].includes(String(result.check.check_status))
   )
     notes.push({ text: "媒体检查未通过或无法确认，详见执行记录", error: true });
-  if (isObject(result.capture) && result.capture.status === "unconfirmed")
-    notes.push({ text: "采集或停止结果无法确认", error: true });
   if (action.type === "report_status" && action.status === "succeeded")
     notes.push({ text: "主机已生成状态报告", error: false });
   return notes;

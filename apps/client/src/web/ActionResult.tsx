@@ -2,7 +2,6 @@ import { useState } from "react";
 import { resultProducts, resultNotes } from "./result-model";
 import { MediaResults } from "./MediaResults";
 import { isCameraAction } from "../shared/actions";
-import { isObject } from "../shared/validation";
 import { actionLabel, Badge, Facts } from "./common";
 import { utcToLocal } from "./editing";
 import type { ReportAction, ReportPlan } from "../shared/types";
@@ -32,7 +31,6 @@ export function ActionResult({
   const ready = products.filter((p) => p.state === "ready").length;
   const problems = products.reduce((sum, p) => sum + p.problems, 0);
   const result = action.result;
-  const capture = isObject(result?.capture) ? result.capture : undefined;
   const counts = [
     ["video", "个视频"],
     ["image", "张图片"],
@@ -80,9 +78,6 @@ export function ActionResult({
               : "报告中没有已登记产物"}
           </p>
         ) : null}
-        {capture?.captured_count !== undefined && (
-          <p>已确认完成 {String(capture.captured_count)} 次采集</p>
-        )}
         {resultNotes(action).map((note, i) => (
           <p key={i} className={note.error ? "notice error" : ""}>
             {note.text}
