@@ -160,13 +160,13 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 **接口与依赖：** 提供 `assess_capture_files(files: CaptureFileSet, requirements: ProductRequirements) -> CaptureAssessment`、`decide_release(state: ActivityFacts) -> ReleaseDecision`；ProductRequirements 及 ActivityFacts 来自对应驱动声明和持久化事实。前置交付：D2、O4、X1、Q4。
 
-- [ ] 编写失败用例。建立 `test_written_file_does_not_complete_set`，一份文件已写完但集合未齐，`assert assessment.is_complete is False`；合法空、缺必需类型、明确不满足、暂未齐、读取错误、轮次耗尽分别处理。ENDED+HELD 不表示仍拍摄；文件归属未定同范围新拍摄不得放行。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_results.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。分别保存归属、文件完成、集合及必要检查依据，一轮分页只用一个核实次数；统一按 O 系列模型释放占用。预览关系依据明确配对事实，不按目录顺序。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 每种事实与必要证据独立保存，缺任一条件不得登记成功或释放。
+- [x] 编写失败用例。建立 `test_written_file_does_not_complete_set`，一份文件已写完但集合未齐，`assert assessment.is_complete is False`；合法空、缺必需类型、明确不满足、暂未齐、读取错误、轮次耗尽分别处理。ENDED+HELD 不表示仍拍摄；文件归属未定同范围新拍摄不得放行。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_results.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。分别保存归属、文件完成、集合及必要检查依据，一轮分页只用一个核实次数；统一按 O 系列模型释放占用。预览关系依据明确配对事实，不按目录顺序。
+- [x] 再运行上述命令，要求全部 PASS，并核对 每种事实与必要证据独立保存，缺任一条件不得登记成功或释放。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_results.py -q`，真实文件历史、产物登记、占用事务及三种能力替身，完成 Q/O 系列适用验收。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部正常、停止、取消、无效果、恢复、残留和应急释放入口；记录门禁证据，建议以“feat: 实现拍摄结果与占用判定”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部正常、停止、取消、无效果、恢复、残留和应急释放入口；记录门禁证据，建议以“feat: 实现拍摄结果与占用判定”形成独立提交。
 
 ### C7 有限安全收场与应急最终补记
 
