@@ -185,6 +185,11 @@ class ClockSection:
 
 
 @dataclass(frozen=True)
+class AdbSection:
+    terminate_grace_s: Decimal
+
+
+@dataclass(frozen=True)
 class PathsSection:
     state_db: str
     log_file: str
@@ -204,6 +209,7 @@ class ConfigSnapshot:
     copy: CopySection
     cleanup: CleanupSection
     clock: ClockSection
+    adb: AdbSection
     paths: PathsSection
     #: 设备目录的原始声明；驱动专属字段的深校验由设备接入契约承接。
     devices: Mapping[str, Any]
@@ -225,6 +231,7 @@ class ConfigDefaults:
     log_queue_low_watermark: int = 700
     log_queue_high_watermark: int = 800
     log_info_sample_probability: str = "0.1"
+    adb_terminate_grace_s: str = "3"
     plan_poll_interval_ms: int = 500
     wakeup_margin_ms: int = 50
     queue_capacity: int = 64
@@ -257,7 +264,7 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         document = {}
     if not isinstance(document, Mapping):
         raise ConfigError(f"配置文档必须是表: {type(document).__name__}")
-    root = _take(document, "配置", ("database", "session", "log", "history", "copy", "cleanup", "clock", "paths", "devices"))
+    root = _take(document, "配置", ("database", "session", "log", "history", "copy", "cleanup", "clock", "adb", "paths", "devices"))
 
     database = _take(root.get("database", {}), "database", ("queue_capacity", "busy_timeout_ms", "wal_autocheckpoint_pages"))
     db_section = DatabaseSection(
@@ -383,6 +390,16 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
 
     devices = _validate_devices(root.get("devices", {}))
 
+    adb = _take(root.get("adb", {}), "adb", ("terminate_grace_s",))
+    raw_grace = adb.get("terminate_grace_s", defaults.adb_terminate_grace_s)
+    if isinstance(raw_grace, str):
+        try:
+            raw_grace = Decimal(raw_grace)
+        except InvalidOperation as error:
+            raise ConfigError(f"adb.terminate_grace_s 必须是数值秒: {raw_grace!r}") from error
+    adb_section = AdbSection(
+        terminate_grace_s=_require_positive_seconds(raw_grace, "adb.terminate_grace_s")
+    )
     return ConfigSnapshot(
         database=db_section,
         session=session_section,
@@ -391,6 +408,7 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         copy=copy_section,
         cleanup=cleanup_section,
         clock=clock_section,
+        adb=adb_section,
         paths=paths_section,
         devices=devices,
     )

@@ -113,13 +113,13 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 
 **接口与依赖：** 提供异步 `execute_tool(spec: ToolSpec, stop: StopSignal) -> RawToolOutcome`；RawToolOutcome 含实际退出、受约束输出及错误，设备解释由 D3 完成。前置交付：S5、系统调用/时钟端口及固定终止宽限配置。
 
-- [ ] 编写失败用例。建立 `test_signal_is_not_exit`，信号已发送但 wait 未返回，`assert call.is_finished is False`；已退出、宽限内退出、到期升级、发送时恰好退出、重复取消不续期分别覆盖。工具 stdout 不进入 CLI 结果，部分输出不延长调用总期限。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/operations/test_process.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。异步启动并捕获输出，不创建新进程组或转交组外执行；在所属目标范围终止并确认 actual exit/资源关闭，工具与包装程序全部使用统一启动路径。普通 ADB 使用实际精确 terminate_grace_s，恢复无原值时不补造。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 本地实际收场才允许结束结果或冲突新操作。
+- [x] 编写失败用例。建立 `test_signal_is_not_exit`，信号已发送但 wait 未返回，`assert call.is_finished is False`；已退出、宽限内退出、到期升级、发送时恰好退出、重复取消不续期分别覆盖。工具 stdout 不进入 CLI 结果，部分输出不延长调用总期限。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/operations/test_process.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。异步启动并捕获输出，不创建新进程组或转交组外执行；在所属目标范围终止并确认 actual exit/资源关闭，工具与包装程序全部使用统一启动路径。普通 ADB 使用实际精确 terminate_grace_s，恢复无原值时不补造。
+- [x] 再运行上述命令，要求全部 PASS，并核对 本地实际收场才允许结束结果或冲突新操作。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/operations/test_process.py -q`，真实 Linux 工具、包装后代和输出管道，覆盖正常、超时及取消收场；真实 C 原组收场由根 O6 用例核验。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 ADB、ffmpeg、ffprobe 及包装程序所有启动入口和句柄继承；记录门禁证据，建议以“feat: 实现受管工具生命周期”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 ADB、ffmpeg、ffprobe 及包装程序所有启动入口和句柄继承；记录门禁证据，建议以“feat: 实现受管工具生命周期”形成独立提交。
 
 ### O4 独立查询责任与产物核实轮次
 
