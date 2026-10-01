@@ -32,8 +32,12 @@ from camctl.scheduling.resources import recheck_dispatch
 __all__ = [
     "CaptureContext",
     "GrantDecision",
+    "RecordingDecision",
+    "RecordingFacts",
     "RecordingPhase",
+    "RecordingState",
     "StartDispatch",
+    "decide_recording_next",
     "recording_stop_target",
     "start_recording",
 ]
@@ -47,8 +51,90 @@ def recording_stop_target(anchor_ns: int, duration: DurationMillis) -> int:
     return anchor_ns + int(duration) * _MS_TO_NS
 
 
+@dataclass(frozen=True)
+class RecordingState:
+    """一次录像停止判定的已保存事实。
+
+    anchor_from_current_session 表示计时锚点属于本进程会话；重启后
+    旧单调钟读数不能与新会话时钟组合计时，须先对账。
+    """
+
+    action_terminal: bool
+    started_confirmed: bool
+    anchor_from_current_session: bool
+    stop_target_ns: int | None
+    monotonic_now_ns: int | None
+    stop_confirmed: bool
+    file_complete_guaranteed: bool
+    stop_attempts_used: int
+    stop_max_attempts: int
+    stop_in_flight: bool
+
+
+@dataclass(frozen=True)
+class RecordingFacts:
+    """停止判定的补充事实；取消共用原停止预算，不单独刷新。"""
+
+    canceled: bool = False
+
+
+@dataclass(frozen=True)
+class RecordingDecision:
+    """停止判定结果：阶段与是否登记新的停止尝试。"""
+
+    phase: RecordingPhase
+    new_stop_attempt: bool = False
+    stop_attempts_used: int = 0
+
+
+def decide_recording_next(
+    state: RecordingState, facts: RecordingFacts
+) -> RecordingDecision:
+    """按录像成功标准决定停止与核实。
+
+    正常录像到达锚点加完整时长才停止，不主动少录；停止成功与文件
+    完成保证分别核对；调用尚未结束保持资源；停止预算沿原流程累计，
+    取消与恢复不刷新。
+    """
+    used = state.stop_attempts_used
+    if state.action_terminal:
+        return RecordingDecision(phase=RecordingPhase.ALREADY_TERMINAL, stop_attempts_used=used)
+    if not state.started_confirmed:
+        return RecordingDecision(phase=RecordingPhase.NOT_RUNNING, stop_attempts_used=used)
+    if state.stop_confirmed:
+        if state.file_complete_guaranteed:
+            return RecordingDecision(
+                phase=RecordingPhase.CONTROL_COMPLETE, stop_attempts_used=used
+            )
+        return RecordingDecision(
+            phase=RecordingPhase.VERIFY_FILE_COMPLETE, stop_attempts_used=used
+        )
+    if not state.anchor_from_current_session:
+        return RecordingDecision(
+            phase=RecordingPhase.RECONCILE_REQUIRED, stop_attempts_used=used
+        )
+    if state.stop_in_flight:
+        return RecordingDecision(
+            phase=RecordingPhase.STOP_IN_FLIGHT, stop_attempts_used=used
+        )
+    assert state.stop_target_ns is not None and state.monotonic_now_ns is not None
+    if state.monotonic_now_ns < state.stop_target_ns:
+        return RecordingDecision(
+            phase=RecordingPhase.WAIT_RECORD, stop_attempts_used=used
+        )
+    if used >= state.stop_max_attempts:
+        return RecordingDecision(
+            phase=RecordingPhase.STOP_EXHAUSTED, stop_attempts_used=used
+        )
+    return RecordingDecision(
+        phase=RecordingPhase.READY_TO_STOP,
+        new_stop_attempt=True,
+        stop_attempts_used=used + 1,
+    )
+
+
 class RecordingPhase(Enum):
-    """一次启动编排的结果分区。"""
+    """录像执行的阶段分区：启动编排与停止推进共用。"""
 
     START_CONFIRMED = "start_confirmed"
     START_CONFIRMED_WITH_ERROR = "start_confirmed_with_error"
@@ -57,6 +143,15 @@ class RecordingPhase(Enum):
     START_UNKNOWN = "start_unknown"
     DISPATCH_PREVENTED = "dispatch_prevented"
     NOT_GRANTED = "not_granted"
+    NOT_RUNNING = "not_running"
+    WAIT_RECORD = "wait_record"
+    READY_TO_STOP = "ready_to_stop"
+    STOP_IN_FLIGHT = "stop_in_flight"
+    VERIFY_FILE_COMPLETE = "verify_file_complete"
+    CONTROL_COMPLETE = "control_complete"
+    STOP_EXHAUSTED = "stop_exhausted"
+    RECONCILE_REQUIRED = "reconcile_required"
+    ALREADY_TERMINAL = "already_terminal"
 
 
 @dataclass(frozen=True)
