@@ -102,13 +102,13 @@ D1/D2 的端口、静态定义及证据结构先完成，使其他模块可以�
 
 **接口与依赖：** 提供 `check_binding(saved: DeviceBinding, current: ConfigSnapshot) -> BindingResult`、`validate_observation(value: DeviceObservation, contract: EvidenceContract) -> None`；EvidenceContract 定义类型、版本、操作及结构。前置交付：D1、K1/K2；先定义本模块的观察类型，O1 随后验证外层结果。
 
-- [ ] 编写失败用例。建立 `test_absent_query_is_declared_capability`，无查询能力但有时间产物完成方式，`assert declaration.query_supported is False` 且其他能力有效；建立 `test_terminal_source_keeps_binding`，取回/删除从原文件及动作读原驱动。未知证据版本、错误身份、设备缺失及驱动改变分别拒绝实际调用。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_evidence.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。分开定义控制、停止、查询、结果、读取、摘要和删除 Protocol；证据登记同源用于生产验证与替身，有限数组数量及字段只保留必要事实。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 无统一万能驱动接口，绑定错误不增加尝试次数。
+- [x] 编写失败用例。建立 `test_absent_query_is_declared_capability`，无查询能力但有时间产物完成方式，`assert declaration.query_supported is False` 且其他能力有效；建立 `test_terminal_source_keeps_binding`，取回/删除从原文件及动作读原驱动。未知证据版本、错误身份、设备缺失及驱动改变分别拒绝实际调用。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_evidence.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。分开定义控制、停止、查询、结果、读取、摘要和删除 Protocol；证据登记同源用于生产验证与替身，有限数组数量及字段只保留必要事实。
+- [x] 再运行上述命令，要求全部 PASS，并核对 无统一万能驱动接口，绑定错误不增加尝试次数。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/devices/test_evidence.py -q`，真实持久化加受约束驱动替身，覆盖拍摄、跨设备取回、清理及独立收场的绑定错误。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有设备访问是否从原关联取得绑定而非当前默认驱动；记录门禁证据，建议以“feat: 定义能力与设备证据接口”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有设备访问是否从原关联取得绑定而非当前默认驱动；记录门禁证据，建议以“feat: 定义能力与设备证据接口”形成独立提交。
 
 ### D3 一次设备操作及原始返回适配
 
