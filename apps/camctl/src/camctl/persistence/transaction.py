@@ -568,6 +568,7 @@ def event_envelope(
     reason: int,
     rows,
     occurred_at: int,
+    evidence: dict | None = None,
 ) -> EventEnvelope:
     """按正文版本 1 构造事件信封；change_seq 由内核分配。"""
     return EventEnvelope(
@@ -579,7 +580,7 @@ def event_envelope(
         clock_status=2,
         change_seq=None,
         reason=reason,
-        evidence={},
+        evidence=evidence if evidence is not None else {},
         rows=tuple(rows),
     )
 

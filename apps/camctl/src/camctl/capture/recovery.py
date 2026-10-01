@@ -1,0 +1,175 @@
+"""录像有限安全收场与应急停止编排。
+
+仅在会话致命错误、可靠归属、排他资格、驱动安全重复停止能力及
+可运行条件成立时执行有限应急停止；额度在发令前占用且不退还，
+同一会话同一录像唯一流程。停止确认即结束流程不补发；停止结果
+与持久化结果分别表达，保存失败不阻止有限停止。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Protocol
+
+__all__ = [
+    "EmergencyBudget",
+    "EmergencyDecision",
+    "EmergencyFacts",
+    "EmergencyOutcome",
+    "EmergencyRecord",
+    "EmergencyStopPort",
+    "RecordStatus",
+    "emergency_eligibility",
+    "emergency_stop",
+]
+
+
+class EmergencyDecision(Enum):
+    """应急停止的资格分区。"""
+
+    ELIGIBLE = "eligible"
+    ALREADY_CONFIRMED_SKIP = "already_confirmed_skip"
+    BUDGET_EXHAUSTED_END = "budget_exhausted_end"
+    INELIGIBLE_KEEP_DIAGNOSIS = "ineligible_keep_diagnosis"
+
+
+class EmergencyOutcome(Enum):
+    """应急处理的结果分区；只证明停止事实，不宣告动作成功。"""
+
+    STOPPED = "stopped"
+    UNCONFIRMED = "unconfirmed"
+    NOT_ATTEMPTED = "not_attempted"
+
+
+class RecordStatus(Enum):
+    """补记保存结果的分区；与实际停止结果分开表达。"""
+
+    RECORDED = "recorded"
+    NOT_RECORDED = "not_recorded"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class EmergencyFacts:
+    """应急资格判定的事实输入。"""
+
+    process_can_handle: bool
+    session_fatal_error: bool
+    stop_confirmed: bool
+    ownership_confirmed: bool
+    exclusive_eligibility: bool
+    driver_safe_repeat_stop: bool
+    config_known: bool
+    budget_available: bool
+
+
+def emergency_eligibility(facts: EmergencyFacts) -> EmergencyDecision:
+    """判定是否执行有限应急停止。
+
+    普通业务失败、报告失败及日志失败不取得应急资格；执行条件任
+    一不成立或未知时保留诊断，不依据猜测操作设备。
+    """
+    if facts.stop_confirmed:
+        return EmergencyDecision.ALREADY_CONFIRMED_SKIP
+    if not facts.process_can_handle or not facts.session_fatal_error:
+        return EmergencyDecision.INELIGIBLE_KEEP_DIAGNOSIS
+    if not (
+        facts.ownership_confirmed
+        and facts.exclusive_eligibility
+        and facts.driver_safe_repeat_stop
+        and facts.config_known
+    ):
+        return EmergencyDecision.INELIGIBLE_KEEP_DIAGNOSIS
+    if not facts.budget_available:
+        return EmergencyDecision.BUDGET_EXHAUSTED_END
+    return EmergencyDecision.ELIGIBLE
+
+
+class EmergencyBudget:
+    """本次会话对同一录像的应急停止限额（内存计数）。
+
+    每次发令前占用一次额度；明确失败、超时或结果未知均不退还。
+    内存计数只限制当前进程，不承诺跨进程准确恢复。
+    """
+
+    def __init__(self, max_attempts: int) -> None:
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts < 1:
+            raise ValueError(f"应急限额必须是正整数: {max_attempts!r}")
+        self._max_attempts = max_attempts
+        self._used = 0
+
+    @property
+    def max_attempts(self) -> int:
+        return self._max_attempts
+
+    @property
+    def attempts_used(self) -> int:
+        return self._used
+
+    def take(self) -> bool:
+        """发令前占用一次额度；无额度返回 False。"""
+        if self._used >= self._max_attempts:
+            return False
+        self._used += 1
+        return True
+
+    def report_failure(self) -> None:
+        """失败不退还已占用额度。"""
+
+    def report_unknown(self) -> None:
+        """结果未知不退还已占用额度。"""
+
+
+class EmergencyStopPort(Protocol):
+    """应急停止端口：一次停止调用及其确认。"""
+
+    async def stop(self) -> Any: ...
+
+
+@dataclass(frozen=True)
+class EmergencyRecord:
+    """一次应急处理的最终事实：结果与保存状态分别表达。"""
+
+    outcome: EmergencyOutcome
+    attempts_used: int
+    max_attempts: int
+    record_status: RecordStatus = RecordStatus.NOT_RECORDED
+
+
+async def emergency_stop(
+    facts: EmergencyFacts, budget: EmergencyBudget, port: EmergencyStopPort
+) -> EmergencyRecord:
+    """执行有限应急停止并形成最终记录。
+
+    已确认停止不补发；资格不成立时不发令如实记录未尝试；额度内
+    循环调用至确认或耗尽。记录初始为未保存；持久化由补记事务另
+    行执行并更新保存状态。
+    """
+    decision = emergency_eligibility(facts)
+    if decision is EmergencyDecision.ALREADY_CONFIRMED_SKIP:
+        return EmergencyRecord(
+            outcome=EmergencyOutcome.STOPPED,
+            attempts_used=0,
+            max_attempts=budget.max_attempts,
+        )
+    if decision is EmergencyDecision.INELIGIBLE_KEEP_DIAGNOSIS:
+        return EmergencyRecord(
+            outcome=EmergencyOutcome.NOT_ATTEMPTED,
+            attempts_used=0,
+            max_attempts=budget.max_attempts,
+        )
+    while True:
+        if not budget.take():
+            return EmergencyRecord(
+                outcome=EmergencyOutcome.UNCONFIRMED,
+                attempts_used=budget.attempts_used,
+                max_attempts=budget.max_attempts,
+            )
+        response = await port.stop()
+        if getattr(response, "confirmed", False):
+            return EmergencyRecord(
+                outcome=EmergencyOutcome.STOPPED,
+                attempts_used=budget.attempts_used,
+                max_attempts=budget.max_attempts,
+            )

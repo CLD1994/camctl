@@ -149,6 +149,7 @@ def _seed_activity(
     action_id: int,
     *,
     dispatch_state: int = 1,
+    activity_state: int = 1,
 ) -> None:
     connection.execute(
         "INSERT INTO device_activities (id, action_id, task_key, task_locator_json,"
@@ -160,9 +161,9 @@ def _seed_activity(
         " wait_completed_event_id, capture_json, control_elapsed_ns,"
         " completion_basis, completion_evidence_json, result_set_state,"
         " last_error_json)"
-        " VALUES (?, ?, ?, NULL, 1, 1, 1, 1, 1, 1, '{}', 1, NULL, NULL, ?, 1, 1,"
+        " VALUES (?, ?, ?, NULL, 1, 1, 1, 1, 1, 1, '{}', 1, NULL, NULL, ?, ?, 1,"
         " NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, NULL)",
-        (action_id, action_id, f"{action_id:032x}", dispatch_state),
+        (action_id, action_id, f"{action_id:032x}", dispatch_state, activity_state),
     )
 
 
