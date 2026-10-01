@@ -11,11 +11,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
 
+from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId
+
 __all__ = [
     "AckDecision",
     "AckDisposition",
     "AckFacts",
     "AckInput",
+    "AckReport",
     "SyncChanges",
     "SyncResponsibility",
     "decide_ack",
@@ -37,6 +40,35 @@ class AckInput:
 
     report_id: int
 
+    def __post_init__(self) -> None:
+        ObjectId(self.report_id)
+
+
+def _watermark(value: int, field: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2**53 - 1:
+        raise ConsistencyError(f"{field} 必须是公共范围内的精确业务水位: {value!r}")
+
+
+@dataclass(frozen=True)
+class AckReport:
+    """ACK 使用的已登记报告依据；文件处理状态不影响确认资格。"""
+
+    report_id: int
+    from_wm: int
+    to_wm: int
+    frozen_event_id: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.report_id)
+        _watermark(self.from_wm, "from_wm")
+        _watermark(self.to_wm, "to_wm")
+        if self.from_wm > self.to_wm:
+            raise ConsistencyError("报告左端不能晚于右端")
+        if (isinstance(self.frozen_event_id, bool)
+                or not isinstance(self.frozen_event_id, int)
+                or not 0 <= self.frozen_event_id <= MAX_OBJECT_ID):
+            raise ConsistencyError("报告冻结位置必须是非负精确事件编号")
+
 
 @dataclass(frozen=True)
 class AckFacts:
@@ -44,9 +76,19 @@ class AckFacts:
 
     acknowledged_wm: int
     acknowledged_report_id: int | None
-    report: Any | None = None
-    report_known: bool = True
+    report: AckReport | None = None
     read_failed: bool = False
+
+    def __post_init__(self) -> None:
+        _watermark(self.acknowledged_wm, "acknowledged_wm")
+        if self.acknowledged_report_id is not None:
+            ObjectId(self.acknowledged_report_id)
+        elif self.acknowledged_wm != 0:
+            raise ConsistencyError("非零累计确认位置必须保存报告身份")
+        if self.report is not None and not isinstance(self.report, AckReport):
+            raise ConsistencyError("ACK 必须使用有明确结构的报告依据")
+        if type(self.read_failed) is not bool:
+            raise ConsistencyError("报告读取结果必须是布尔值")
 
 
 @dataclass(frozen=True)
@@ -60,12 +102,18 @@ class AckDecision:
 
 @dataclass(frozen=True)
 class SyncResponsibility:
-    """一条显式同步责任：覆盖区间与所属动作。"""
+    """同步的固定起点、开始事务末位及所属动作。"""
 
     sync_id: int
     action_id: int
     from_wm: int
-    to_wm: int
+    started_boundary_event_id: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.sync_id)
+        ObjectId(self.action_id)
+        ObjectId(self.started_boundary_event_id)
+        _watermark(self.from_wm, "from_wm")
 
 
 @dataclass(frozen=True)
@@ -89,13 +137,15 @@ def decide_ack(ack: AckInput, facts: AckFacts) -> AckDecision:
             new_acknowledged_wm=facts.acknowledged_wm,
             new_acknowledged_report_id=facts.acknowledged_report_id,
         )
-    if not facts.report_known or facts.report is None:
+    if facts.report is None:
         return AckDecision(
             disposition=AckDisposition.INVALID,
             new_acknowledged_wm=facts.acknowledged_wm,
             new_acknowledged_report_id=facts.acknowledged_report_id,
         )
-    report_wm = int(facts.report["to_wm"])
+    if facts.report.report_id != ack.report_id:
+        raise ConsistencyError("ACK 报告事实与查询身份不符")
+    report_wm = facts.report.to_wm
     if report_wm > facts.acknowledged_wm:
         return AckDecision(
             disposition=AckDisposition.ABSORBED,
@@ -109,11 +159,10 @@ def decide_ack(ack: AckInput, facts: AckFacts) -> AckDecision:
     )
 
 
-def qualifies_sync(report: Any, sync: SyncResponsibility) -> bool:
-    """报告覆盖范围是否完整满足同步责任。"""
-    from_wm = int(report["from_wm"])
-    to_wm = int(report["to_wm"])
-    return from_wm <= sync.from_wm and to_wm >= sync.to_wm
+def qualifies_sync(report: AckReport, sync: SyncResponsibility) -> bool:
+    """报告须覆盖固定起点，且其历史包含同步开始的完整事务。"""
+    return (report.from_wm <= sync.from_wm
+            and report.frozen_event_id >= sync.started_boundary_event_id)
 
 
 def decide_sync_cancel(facts: Mapping[str, Any]) -> SyncChanges:

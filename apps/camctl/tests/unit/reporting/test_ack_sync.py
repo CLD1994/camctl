@@ -9,21 +9,21 @@ from __future__ import annotations
 
 import pytest
 
+from camctl.contracts.values import ConsistencyError
+
 from camctl.reporting.ack import (
     AckDisposition,
     AckFacts,
     AckInput,
+    AckReport,
     SyncResponsibility,
     decide_ack,
     decide_sync_cancel,
     qualifies_sync,
 )
 
-_REPORT = type("Report", (), {})  # FrozenReport 替身由字段构造
-
-
-def _report(report_id: int, to_wm: int):
-    return {"report_id": report_id, "from_wm": 0, "to_wm": to_wm}
+def _report(report_id: int, to_wm: int, *, from_wm=0, frozen=20):
+    return AckReport(report_id, from_wm, to_wm, frozen)
 
 
 def _facts(
@@ -31,14 +31,12 @@ def _facts(
     acknowledged_wm: int = 0,
     acknowledged_report_id: int | None = None,
     report=None,
-    report_known: bool = True,
     read_failed: bool = False,
 ) -> AckFacts:
     return AckFacts(
         acknowledged_wm=acknowledged_wm,
         acknowledged_report_id=acknowledged_report_id,
         report=report,
-        report_known=report_known,
         read_failed=read_failed,
     )
 
@@ -77,7 +75,7 @@ class TestDecideAck:
 
     def test_unknown_report_is_invalid(self) -> None:
         decision = decide_ack(
-            AckInput(report_id=404), _facts(report_known=False)
+            AckInput(report_id=404), _facts(report=None)
         )
         assert decision.disposition is AckDisposition.INVALID
 
@@ -87,21 +85,70 @@ class TestDecideAck:
 
 
 class TestSyncQualification:
-    def test_report_covering_sync_range_qualifies(self) -> None:
-        report = _report(5, 800)
-        sync = SyncResponsibility(sync_id=1, action_id=8, from_wm=100, to_wm=700)
-        assert qualifies_sync(report, sync) is True
-
-    def test_partial_coverage_does_not_qualify(self) -> None:
-        report = _report(5, 300)
-        sync = SyncResponsibility(sync_id=1, action_id=8, from_wm=100, to_wm=700)
+    def test_report_before_sync_start_does_not_qualify(self) -> None:
+        report = _report(5, 800, frozen=4)
+        sync = SyncResponsibility(1, 8, 100, 5)
         assert qualifies_sync(report, sync) is False
+
+    @pytest.mark.parametrize("frozen,from_wm,want", [
+        (19, 101, False), (19, 100, False), (20, 101, False),
+        (20, 100, True), (21, 99, True),
+    ])
+    def test_history_and_origin_are_independent(self, frozen, from_wm, want) -> None:
+        report = _report(5, 300, from_wm=from_wm, frozen=frozen)
+        sync = SyncResponsibility(1, 8, 100, 20)
+        assert qualifies_sync(report, sync) is want
 
     def test_equal_watermark_ack_can_end_sync(self) -> None:
         # 水位等于当前：不推进累计身份，但满足完整同步即结束责任。
         report = _report(6, 800)
-        sync = SyncResponsibility(sync_id=1, action_id=8, from_wm=0, to_wm=800)
+        sync = SyncResponsibility(1, 8, 0, 20)
         assert qualifies_sync(report, sync) is True
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("from_wm", True), ("from_wm", "0"), ("to_wm", 1.5),
+    ("to_wm", -1), ("to_wm", 2**53), ("frozen_event_id", False),
+    ("frozen_event_id", "20"), ("frozen_event_id", -1),
+    ("frozen_event_id", 2**63),
+])
+def test_report_basis_rejects_unreliable_fields(field, bad):
+    values = {"report_id": 1, "from_wm": 0, "to_wm": 300, "frozen_event_id": 20}
+    values[field] = bad
+    with pytest.raises(ConsistencyError):
+        AckReport(**values)
+
+
+def test_report_basis_rejects_inverted_range():
+    with pytest.raises(ConsistencyError):
+        AckReport(1, 301, 300, 20)
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("acknowledged_wm", True), ("acknowledged_wm", "0"),
+    ("acknowledged_wm", -1), ("acknowledged_wm", 2**53),
+    ("read_failed", 1), ("report", {"to_wm": 20}),
+])
+def test_ack_facts_reject_unreliable_fields(field, bad):
+    values = {"acknowledged_wm": 0, "acknowledged_report_id": None}
+    values[field] = bad
+    with pytest.raises(ConsistencyError):
+        AckFacts(**values)
+
+
+def test_nonzero_ack_watermark_requires_identity():
+    with pytest.raises(ConsistencyError):
+        AckFacts(1, None)
+
+
+def test_ack_report_identity_must_match_lookup():
+    with pytest.raises(ConsistencyError):
+        decide_ack(AckInput(1), _facts(report=_report(2, 300)))
+
+
+def test_large_watermarks_remain_exact():
+    decision = decide_ack(AckInput(5), _facts(report=_report(5, 2**53 - 1)))
+    assert decision.new_acknowledged_wm == 9007199254740991
 
 
 class TestSyncCancel:

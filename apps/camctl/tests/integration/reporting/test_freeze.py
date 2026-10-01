@@ -98,6 +98,32 @@ def _latest_wm(connection) -> int:
 
 
 class TestFreeze:
+    async def test_freeze_uses_actual_watermark_after_new_submission(self, environment, tmp_path) -> None:
+        await _submit(environment, tmp_path, "1")
+        decision = decide_report(ReportOpportunity(
+            kind="normal", requested_from_wm=0, latest_change_wm=2, acknowledged_wm=0,
+        ))
+        await _submit(environment, tmp_path, "2")
+        outcome = ReportingRepository().freeze_report(
+            decision, new_operation_key(), environment, occurred_at=1,
+        )
+        assert outcome.kind.value == "completed"
+        assert outcome.value.to_wm == 4
+        from camctl.persistence.repositories.reporting import read_ack_report
+
+        assert read_ack_report(environment.connection, outcome.value.report_id).to_wm == 4
+
+    async def test_freeze_rejects_origin_past_actual_history(self, environment, tmp_path) -> None:
+        from camctl.reporting.policy import ReportDecision
+
+        await _submit(environment, tmp_path, "1")
+        outcome = ReportingRepository().freeze_report(
+            ReportDecision(ReportDecisionKind.GENERATE, 3, 4),
+            new_operation_key(), environment, occurred_at=1,
+        )
+        assert outcome.kind.value == "rolled_back"
+        assert environment.connection.execute("SELECT COUNT(*) FROM reports").fetchone() == (0,)
+
     async def test_freeze_takes_complete_boundary_excluding_own_event(
         self, environment, tmp_path
     ) -> None:

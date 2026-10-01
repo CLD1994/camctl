@@ -30,6 +30,8 @@
 | `ControlMessage / GenerationResult` | version=1，ready/job/result/shutdown 类型集中定义；成功含 task_id、原临时文件、大小和 SHA-256，失败含分类及必要诊断。 |
 | `WorkerState / GenerationState` | 工作进程启动、健康空闲、生成、停止、退出确认；任务未决、成功、失败、超时、停止及有效结果确认分别表达。 |
 | `ReportRepository / PublicationResult` | 冻结、发布事实、同步结束及 ACK 窄用例；实际发布来自 F5，不由文件存在猜测生成成功。 |
+| `AckReport / AckFacts` | 确认使用的报告身份、覆盖起点与终点、冻结事件位置，以及累计水位和累计身份；可靠不存在与读取失败分别表达。 |
+| `SyncResponsibility` | 同步身份、发起动作、固定起点与开始事务的完整末位；资格同时比较业务范围和历史顺序。 |
 
 主进程串行确认当前任务的结果、停止和超时。
 
@@ -110,11 +112,18 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 - [x] 编写失败用例。建立 `test_frozen_report_excludes_later_changes`，冻结 H 后新提交，`assert later_entity not in original_report_scope`；完整同步从 0、局部同步与普通 ACK 合并、已有宽报告可满足、报告 ID 更大但覆盖不足各独立判定。冻结不取当前事务的部分事件。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_freeze.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [x] 实施本任务。事务内重新取得全部范围及原完整 H，保存不可变逻辑报告；保留/替换/补投按内容责任及文件证据，不按名字或编号决定。
+- [ ] 实施本任务。事务内重新取得全部范围及原完整 H，保存不可变逻辑报告；保留/替换/补投按内容责任及文件证据，不按名字或编号决定。
 - [x] 再运行上述命令，要求全部 PASS，并核对 没有把业务水位当历史边界，生成期间新变化交下一轮。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_freeze.py -q`，真实 SQLite 冻结与并发受理/ACK/同步变化，核对完整事务及旧内容不变。
-- [x] 审阅实际接口、状态分区及失败路径，检查 所有正常/受限/显式同步机会的冻结及覆盖来源；记录门禁证据，建议以“feat: 实现报告机会与可靠冻结”形成独立提交。
+- [ ] 审阅实际接口、状态分区及失败路径，检查所有正常/受限/显式同步机会的冻结及覆盖来源；记录门禁证据，建议以“feat: 实现报告机会与可靠冻结”形成独立提交。
+
+**分项进度：** [累计确认与同步结束审查](2026-10-02-camctl-ack-sync-review.md)验证冻结记录的生成与读取使用同一历史边界及业务终点。
+
+- [x] 在冻结写事务中取得完整 H 及其实际业务水位；冻结前有新提交时仍保存一致的生成依据。
+- [x] 精确校验报告依据，无效起点不截断；真实登记的报告可供 ACK 查询。
+- [ ] 从同一 H 取得累计 ACK 与全部有效同步要求，重判报告机会和起点。
+- [ ] 复用、替换、补投结合覆盖、历史边界及实际文件责任，并接入正常、受限及显式同步机会。
 
 ### R3 确定性流式编码
 
@@ -162,15 +171,25 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **预计文件：** `apps/camctl/src/camctl/reporting/ack.py`、`apps/camctl/src/camctl/persistence/repositories/reporting.py`；测试为 `apps/camctl/tests/unit/reporting/test_ack_sync.py` 和 `apps/camctl/tests/integration/reporting/test_ack_sync.py`。
 
-**接口与依赖：** 提供 `decide_ack(ack: AckInput, facts: AckFacts) -> AckDecision`、`qualifies_sync(report: FrozenReport, sync: SyncResponsibility) -> bool`、`decide_sync_cancel(facts: SyncFacts) -> SyncChanges`；ACK 写入由 A4 同事务消费。前置交付：R1/R2、P3；先实现纯 ACK 与同步规则，A4 随后在完整输入事务内消费。
+**接口与依赖：** 提供 `decide_ack(ack: AckInput, facts: AckFacts) -> AckDecision`、`qualifies_sync(report: AckReport, sync: SyncResponsibility) -> bool`、`decide_sync_cancel(facts: SyncFacts) -> SyncChanges`；ACK 写入由 A4 同事务消费。前置交付：R1/R2、P3；先实现纯 ACK 与同步规则，A4 随后在完整输入事务内消费。
 
-- [x] 编写失败用例。建立 `test_equal_watermark_ack_can_end_sync`，有效 ACK 水位等当前但满足完整/局部同步，`assert sync_ended is True`；较旧报告 ID 不代表旧水位，未知报告与读取失败分别分类。未执行、运行和成功后的报告动作取消，既有待确认同步按正式规则保持/结束。
-- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_ack_sync.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [x] 实施本任务。单调累计业务水位，逐个判断报告范围是否满足同步；有效 ACK 无新报告循环。报告动作成功与同步等待确认是不同责任，发布结果按 R7 完成适用动作。
-- [x] 再运行上述命令，要求全部 PASS，并核对 ACK 与输入原子、同水位也可结束责任，同步取消不停止共享生成。
+- [ ] 编写失败用例。建立 `test_equal_watermark_ack_can_end_sync`，有效 ACK 水位等当前但满足完整/局部同步，`assert sync_ended is True`；较旧报告 ID 不代表旧水位，未知报告与读取失败分别分类。未执行、运行和成功后的报告动作取消，既有待确认同步按正式规则保持/结束。
+- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_ack_sync.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [ ] 实施本任务。单调累计业务水位，逐个判断报告范围和冻结历史是否满足同步；有效 ACK 无新报告循环。报告动作成功与同步等待确认是不同责任，发布结果按 R7 完成适用动作。
+- [ ] 再运行上述命令，要求全部 PASS，并核对 ACK 与输入原子、同水位也可结束责任，同步取消不停止共享生成。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_ack_sync.py -q`，A4/R7 实施后组合真实受理、同步、发布和 ACK 事务，核对同一事务及取消；该消费者验证归阶段 2 门禁。
-- [x] 审阅实际接口、状态分区及失败路径，检查 全部 ACK、重复输入、显式同步及取消入口；记录门禁证据，建议以“feat: 实现累计确认与同步规则”形成独立提交。
+- [ ] 审阅实际接口、状态分区及失败路径，检查全部 ACK、重复输入、显式同步及取消入口；记录门禁证据，建议以“feat: 实现累计确认与同步规则”形成独立提交。
+
+**分项进度：** [累计确认与同步结束审查](2026-10-02-camctl-ack-sync-review.md)记录具体矩阵与门禁。以上完整任务的勾选须包含同步开始、本地完成和取消消费者。
+
+- [x] ACK 的精确事实模型：报告起点、终点与冻结边界；同步固定起点与开始事务末位。
+- [x] 有效 ACK 在全部输入分区中原子结束合格的已有责任，同水位及较旧 ACK 仍检查资格；报告管理不增加业务水位。
+- [x] 正式守卫反例、读写失败、提交结果未知、submit 接管回滚及 ACK 与同步事件的正向/逆向回放。
+- [ ] 同步实际开始、固定起点不存在时的动作失败及恢复。
+- [ ] 本地报告满足与动作成功共同保存，以及 ACK 先结束后的本地完成。
+- [ ] 取消消费者与纯取消规则覆盖未开始、运行和终态动作；共享生成继续执行。
+- [ ] CLI 对提交结果未知的完整核实与恢复装配。
 
 ### R7 发布、替换与同报告补投
 

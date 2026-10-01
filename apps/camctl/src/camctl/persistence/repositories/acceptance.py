@@ -31,6 +31,13 @@ from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.repositories.reporting import (
+    read_ack_report, read_ack_state, read_outstanding_syncs,
+)
+from camctl.reporting.ack import (
+    AckFacts, AckInput, AckReport, SyncResponsibility,
+    AckDisposition as ReportAckDisposition, decide_ack, qualifies_sync,
+)
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
@@ -39,6 +46,7 @@ from camctl.persistence.transaction import (
 
 _OBTAIN_TYPE = "obtain_action_outputs"
 _ACK_EVENT = 30
+_SYNC_EVENT = 29
 _PLAN_EVENT = 1
 _ACTION_EVENT = 2
 _MEMBERS_EVENT = 3
@@ -102,13 +110,11 @@ class _AckEvaluation:
     before: tuple[int, Any]
     after: tuple[int, int] | None
     error_entry: dict | None
+    report: AckReport | None = None
 
 
 def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluation:
-    state = connection.execute(
-        "SELECT acknowledged_wm, acknowledged_report_id FROM runtime_state WHERE id = 1"
-    ).fetchone()
-    current_wm, current_report = int(state[0]), state[1]
+    current_wm, current_report, cumulative_report = read_ack_state(connection)
     if document is None or not isinstance(document, Mapping):
         return _AckEvaluation(
             AckDisposition.NOT_PROCESSED, current_wm, (current_wm, current_report), None, None
@@ -129,22 +135,16 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
             }},
         )
     # 判定规则由 reporting.ack 单一定义（R6）；本仓储只取事实并落地。
-    from camctl.reporting.ack import AckFacts, AckInput, decide_ack
-
-    row = connection.execute(
-        "SELECT from_wm, to_wm FROM reports WHERE id = ?", (report_id,)
-    ).fetchone()
-    report = {"report_id": report_id, "from_wm": int(row[0]), "to_wm": int(row[1])} if row else None
+    report = cumulative_report if report_id == current_report else read_ack_report(connection, report_id)
     decision = decide_ack(
         AckInput(report_id=report_id),
         AckFacts(
             acknowledged_wm=current_wm,
             acknowledged_report_id=current_report,
             report=report,
-            report_known=report is not None,
         ),
     )
-    if decision.disposition.value == "invalid":
+    if decision.disposition is ReportAckDisposition.INVALID:
         return _AckEvaluation(
             AckDisposition.INVALID,
             current_wm,
@@ -152,13 +152,14 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
             None,
             {"stage": "ack", "code": "invalid_ack", "details": {"field": "last_report_id", "reason": "reference", "value": raw}},
         )
-    if decision.disposition.value == "absorbed":
+    if decision.disposition is ReportAckDisposition.ABSORBED:
         return _AckEvaluation(
             AckDisposition.ABSORBED,
             decision.new_acknowledged_wm,
             (current_wm, current_report),
             (decision.new_acknowledged_wm, report_id),
             None,
+            report,
         )
     return _AckEvaluation(
         AckDisposition.VALID_NOT_ADVANCING,
@@ -166,6 +167,7 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
         (current_wm, current_report),
         None,
         None,
+        report,
     )
 
 
@@ -210,18 +212,16 @@ class ProcessInputCommand:
             else None
         )
 
-        self._state["runtime_state"] = {
-            1: dict(zip(("acknowledged_wm", "acknowledged_report_id"),
-                        self._ack_state(connection)))
-        }
         ack = _evaluate_ack(connection, document if document is not None else None)
         self._ack = ack
-        if ack.after is not None and document is not None:
-            report_id = ack.after[1]
+        self._state["runtime_state"] = {
+            1: dict(zip(("acknowledged_wm", "acknowledged_report_id"), ack.before))
+        }
+        if ack.report is not None:
+            report = ack.report
             self._state["reports"] = {
-                report_id: dict(
-                    zip(("id", "to_wm"), (report_id, ack.after[0]))
-                )
+                report.report_id: {"id": report.report_id, "from_wm": report.from_wm,
+                                   "to_wm": report.to_wm, "frozen_event_id": report.frozen_event_id}
             }
 
         if isinstance(self._command.source, InputDiagnostic):
@@ -282,22 +282,6 @@ class ProcessInputCommand:
                     _envelope(0, 0, _DIAGNOSTIC_EVENT, 1, (row,), occurred_at),
                     evidence={"input_key": uuid.uuid4().hex},
                 )
-            )
-        if ack.after is not None:
-            allocation = scope.allocate(len(templates) + 1)
-            events = self._sequenced(templates, allocation) + (
-                self._ack_event(allocation.last_event_id, allocation.txn_id, occurred_at),
-            )
-            return CommandPlan(
-                events=events, owners=self._owners, state_rows=self._state, result=result
-            )
-        if not templates:
-            return CommandPlan(
-                events=(),
-                owners=self._owners,
-                state_rows=self._state,
-                read_only=True,
-                result=result,
             )
         return self._finalize(scope, templates, replace(result, diagnostic_id=diagnostic_id))
 
@@ -366,19 +350,7 @@ class ProcessInputCommand:
             ack_watermark=self._ack.watermark_after if self._ack else 0,
             diagnostic_id=diagnostic_id,
         )
-        ack = self._ack
-        if ack is None or ack.after is None:
-            return self._finalize(scope, templates, result)
-        allocation = scope.allocate(len(templates) + 1)
-        events = self._sequenced(templates, allocation) + (
-            self._ack_event(allocation.last_event_id, allocation.txn_id, occurred_at),
-        )
-        return CommandPlan(
-            events=events,
-            owners=self._owners,
-            state_rows=self._state,
-            result=result,
-        )
+        return self._finalize(scope, templates, result)
 
     def _register(self, scope, occurred_at: int, ack: _AckEvaluation, request_id: int, decision) -> CommandPlan:
         connection = scope.connection
@@ -480,26 +452,38 @@ class ProcessInputCommand:
             ack_watermark=ack.watermark_after,
             diagnostic_id=diagnostic_id,
         )
-        if ack.after is None:
-            return self._finalize(scope, templates, result)
-        allocation = scope.allocate(len(templates) + 1)
-        events = self._sequenced(templates, allocation)
-        events = events + (
-            self._ack_event(allocation.last_event_id, allocation.txn_id, occurred_at),
-        )
-        return CommandPlan(
-            events=events,
-            owners=self._owners,
-            state_rows=self._state,
-            result=result,
-        )
+        return self._finalize(scope, templates, result)
 
     def _finalize(
         self, scope, templates: list, result: AcceptanceResult
     ) -> CommandPlan:
-        allocation = scope.allocate(len(templates))
+        ack = self._ack
+        matched = []
+        if ack is not None and ack.report is not None:
+            if ack.after is not None:
+                templates.append(self._ack_event(0, 0, self._command.occurred_at))
+            for sync, values in read_outstanding_syncs(scope.connection):
+                if qualifies_sync(ack.report, sync):
+                    matched.append((sync, values))
+                    self._state.setdefault("state_syncs", {})[sync.sync_id] = values
+                    self._owners[("state_syncs", sync.sync_id)] = ("state_sync", sync.sync_id)
+        count = len(templates) + len(matched)
+        if count == 0:
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                               result=result, read_only=True)
+        allocation = scope.allocate(count)
+        events = list(self._sequenced(templates, allocation))
+        for index, (sync, values) in enumerate(matched, start=len(templates)):
+            event_id = allocation.first_event_id + index
+            columns = ("status", "ack_report_id", "ended_event_id")
+            row = _update("state_syncs", sync.sync_id,
+                          {column: values[column] for column in columns},
+                          {"status": int(enum_for("state_syncs.status").ACKNOWLEDGED),
+                           "ack_report_id": ack.report.report_id, "ended_event_id": event_id})
+            events.append(_envelope(event_id, allocation.txn_id, _SYNC_EVENT, 3, (row,),
+                                    self._command.occurred_at))
         return CommandPlan(
-            events=self._sequenced(templates, allocation),
+            events=tuple(events),
             owners=self._owners,
             state_rows=self._state,
             result=result,
@@ -567,13 +551,6 @@ class ProcessInputCommand:
             )
         self._owners[("actions", action.action_id)] = ("action", action.action_id)
         return _row("actions", action.action_id, values)
-
-    @staticmethod
-    def _ack_state(connection) -> tuple[int, Any]:
-        row = connection.execute(
-            "SELECT acknowledged_wm, acknowledged_report_id FROM runtime_state WHERE id = 1"
-        ).fetchone()
-        return int(row[0]), row[1]
 
     @staticmethod
     def _next_id(connection, table: str) -> int:
@@ -714,6 +691,27 @@ def _diagnostic_guard(event, context) -> None:
 
 def _ack_guard(event, context) -> None:
     for row in event.rows:
+        if row.table == "state_syncs":
+            if row.after.values.get("status") != int(enum_for("state_syncs.status").ACKNOWLEDGED):
+                raise EventValidationError("ACK 同步结束必须保存确认状态")
+            values = context.state_rows.get("state_syncs", {}).get(row.row_id)
+            if values is None:
+                raise EventValidationError("ACK 同步结束缺少原责任依据")
+            report_id = row.after.values.get("ack_report_id")
+            report = context.state_rows.get("reports", {}).get(report_id)
+            if report is None:
+                raise EventValidationError("同步确认必须引用实际报告")
+            try:
+                basis = AckReport(report_id, report["from_wm"], report["to_wm"], report["frozen_event_id"])
+                sync = SyncResponsibility(row.row_id, values["action_id"], values["from_wm"],
+                                          values["started_boundary_event_id"])
+            except (ValueError, KeyError) as error:
+                raise EventValidationError("同步确认依据无法可靠解释") from error
+            if not qualifies_sync(basis, sync):
+                raise EventValidationError("ACK 报告未满足同步起点与开始历史边界")
+            if row.after.values.get("ended_event_id") != event.event_id:
+                raise EventValidationError("同步结束依据必须是本事件")
+            continue
         if row.table != "runtime_state" or not row.before.exists:
             continue
         after = row.after.values
@@ -735,3 +733,6 @@ def register_acceptance_guards() -> None:
     register_guard("source_members", _source_members_guard)
     register_guard("diagnostic", _diagnostic_guard)
     register_guard("ack", _ack_guard)
+    from camctl.reporting.policy import register_sync_guard
+
+    register_sync_guard()

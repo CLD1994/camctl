@@ -19,6 +19,7 @@ from camctl.persistence.runtime import OwnedConnection
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.transaction import CommandPlan, commit_operation
 from camctl.reporting.models import FrozenReport, validate_frozen_report
+from camctl.reporting.ack import AckReport
 
 __all__ = [
     "ReportDecision",
@@ -101,18 +102,18 @@ class _FreezeCommand:
             if last_event == 0
             else HistoryBoundary(txn_id=txn_id, last_event_id=last_event)
         )
-        # 范围：决定给定的 [from, to]，但不得越过完整 H 的水位。
+        # 终点与 H 同源；事务前的生成决定不固定最终业务水位。
         max_wm_row = connection.execute(
             "SELECT MAX(change_seq) FROM history_events WHERE id <= ?", (last_event,)
         ).fetchone()
         max_wm = int(max_wm_row[0]) if max_wm_row[0] is not None else 0
-        to_wm = min(self._decision.to_wm, max_wm)
-        from_wm = min(self._decision.from_wm, to_wm)
+        to_wm = max_wm
+        from_wm = self._decision.from_wm
 
         report_id_row = connection.execute("SELECT MAX(id) FROM reports").fetchone()
         report_id = (int(report_id_row[0]) if report_id_row[0] is not None else 0) + 1
+        AckReport(report_id, from_wm, to_wm, last_event)
 
-        created_event = last_event  # 报告创建引用冻结依据（先前完整边界）
         row = RowChange(
             table="reports",
             row_id=report_id,
@@ -120,7 +121,7 @@ class _FreezeCommand:
             after=RowImage(
                 exists=True,
                 values={
-                    "frozen_event_id": max(0, last_event),
+                    "frozen_event_id": last_event,
                     "from_wm": from_wm,
                     "to_wm": to_wm,
                     "format_version": 1,
@@ -198,15 +199,14 @@ def _report_guard(event, context) -> None:
         if row.table != "reports" or row.before.exists:
             continue
         after = row.after.values
-        frozen = after.get("frozen_event_id")
-        if frozen is None or frozen < 0:
-            raise EventValidationError("冻结依据必须是完整历史边界的事件位置")
-        if after.get("format_version") != 1:
+        try:
+            AckReport(row.row_id, after.get("from_wm"), after.get("to_wm"),
+                      after.get("frozen_event_id"))
+        except ValueError as error:
+            raise EventValidationError(str(error)) from error
+        version = after.get("format_version")
+        if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise EventValidationError("报告格式版本不受支持")
-        from_wm = after.get("from_wm")
-        to_wm = after.get("to_wm")
-        if from_wm is None or to_wm is None or to_wm < from_wm or from_wm < 0:
-            raise EventValidationError("覆盖水位范围不合法")
         if after.get("status") != 1:
             raise EventValidationError("冻结创建的状态必须是 REGISTERED")
 
@@ -379,18 +379,13 @@ def record_report_bytes(
 
 
 def _sync_guard(event, context) -> None:
-    """PUBLISH/INTENT 的同步守卫：本地满足的同步责任共同结束。
-
-    第一版：发布事实与满足的本地报告责任共同保存；同步责任的具
-    体结束判定由 R6.qualifies_sync 驱动（消费方传入），守卫只核
-    对事件本身不改写未完成同步的既有事实。
-    """
+    """同步的结束事实引用本事件；ACK 资格由 ACK 守卫负责。"""
     for row in event.rows:
         if row.table != "state_syncs" or row.before.exists is False:
             continue
-        after_status = row.after.values.get("status")
-        if after_status == 4 and row.before.values.get("status") != 3:
-            raise EventValidationError("同步结束必须来自已结束等待的状态")
+        if "ended_event_id" in row.after.values:
+            if row.after.values["ended_event_id"] != event.event_id:
+                raise EventValidationError("同步结束依据必须是本事件")
 
 
 def register_sync_guard() -> None:

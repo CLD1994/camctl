@@ -90,7 +90,7 @@ def test_concurrent_same_request_allocates_one_instance(tmp_path):
 @pytest.mark.parametrize("failed_table", ["actions", "action_dependencies", "plans", "runtime_state"])
 async def test_registration_members_and_ack_roll_back_together(environment, tmp_path, failed_table):
     connection, _ = environment
-    await _seed_report(environment, tmp_path, report_id=20, to_wm=4)
+    await _seed_report(environment, tmp_path, report_id=20)
     tables = ("plans", "actions", "action_dependencies", "auto_preview_links",
               "plan_file_diagnostics", "history_transactions", "history_events")
     before = {table: connection.execute(f"SELECT * FROM {table}").fetchall() for table in tables}

@@ -138,27 +138,28 @@ def _owned(environment):
     return OwnedConnection(connection=connection, metadata=None)
 
 
-async def _seed_report(environment, tmp_path: Path, report_id: int, to_wm: int) -> None:
-    """登记一份报告：先提交一次填充受理，提供冻结与创建的事件依据。"""
-    connection, _ = environment
-    previous = connection.execute(
-        "SELECT last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    frozen = int(previous[0]) if previous is not None else 0
+async def _seed_report(environment, tmp_path: Path, report_id: int) -> None:
+    """提交一次填充受理，再用真实冻结入口分配所需报告身份。"""
     await _accept(environment, tmp_path, _plan_body(request_id=str(900 + report_id)))
-    created = int(
-        connection.execute(
-            "SELECT last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1"
-        ).fetchone()[0]
+    _freeze_reports(environment, report_id)
+
+
+def _freeze_reports(environment, report_id: int) -> None:
+    from camctl.reporting.policy import (
+        ReportDecision, ReportDecisionKind, ReportingRepository, register_report_guards,
     )
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO reports (id, frozen_event_id, from_wm, to_wm, format_version, status,"
-        " publication_count, created_event_id, last_event_id)"
-        " VALUES (?, ?, 0, ?, 1, 1, 0, ?, ?)",
-        (report_id, frozen, to_wm, created, created),
-    )
-    connection.execute("COMMIT")
+
+    register_report_guards()
+    connection, _ = environment
+    previous = connection.execute("SELECT MAX(id) FROM reports").fetchone()[0] or 0
+    latest = connection.execute("SELECT MAX(change_seq) FROM history_events").fetchone()[0] or 0
+    for expected_id in range(previous + 1, report_id + 1):
+        outcome = ReportingRepository().freeze_report(
+            ReportDecision(ReportDecisionKind.GENERATE, 0, latest),
+            new_operation_key(), _owned(environment), occurred_at=_NOW,
+        )
+        assert outcome.kind.value == "completed"
+        assert outcome.value.report_id == expected_id
 
 
 class TestFirstAcceptance:
@@ -258,7 +259,7 @@ class TestFirstAcceptance:
     async def test_register_with_absorbing_ack_saves_both(self, environment, tmp_path) -> None:
         connection, _ = environment
         await _accept(environment, tmp_path, _plan_body(request_id="1"))
-        await _seed_report(environment, tmp_path, 9, to_wm=300)
+        await _seed_report(environment, tmp_path, 9)
         result = await _accept(
             environment, tmp_path, _plan_body(request_id="88", ack="9")
         )
@@ -266,7 +267,7 @@ class TestFirstAcceptance:
         # _seed_report 的填充受理也占用一个计划身份。
         assert result.plan_id == 3
         assert result.ack_disposition is AckDisposition.ABSORBED
-        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 300
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 4
         assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 3
 
     async def test_register_with_invalid_ack_saves_plan_and_diagnostic(
@@ -305,14 +306,14 @@ class TestRequestReuse:
     async def test_reuse_with_advancing_ack_saves_watermark(self, environment, tmp_path) -> None:
         connection, _ = environment
         await _accept(environment, tmp_path, _plan_body())
-        await _seed_report(environment, tmp_path, 11, to_wm=500)
+        await _seed_report(environment, tmp_path, 11)
         again = await _accept(environment, tmp_path, _plan_body(request_id="42", ack="11"))
         assert again.plan_disposition is PlanDisposition.REUSED
         assert again.ack_disposition is AckDisposition.ABSORBED
-        assert again.ack_watermark == 500
+        assert again.ack_watermark == 4
         assert connection.execute(
             "SELECT acknowledged_wm, acknowledged_report_id FROM runtime_state"
-        ).fetchone() == (500, 11)
+        ).fetchone() == (4, 11)
 
 
 class TestAckIndependence:
@@ -320,13 +321,13 @@ class TestAckIndependence:
         connection, _ = environment
         # 先建立已提交历史，为报告登记提供冻结与创建依据。
         await _accept(environment, tmp_path, _plan_body(request_id="1"))
-        await _seed_report(environment, tmp_path, 3, to_wm=800)
+        await _seed_report(environment, tmp_path, 3)
         body = _plan_body(request_id="77", ack="3", actions=[])
         result = await _accept(environment, tmp_path, body)
         assert result.plan_disposition is PlanDisposition.REJECTED
         assert result.ack_disposition is AckDisposition.ABSORBED
-        assert result.ack_watermark == 800
-        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 800
+        assert result.ack_watermark == 4
+        assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()[0] == 4
 
     async def test_invalid_ack_saved_as_diagnostic(self, environment, tmp_path) -> None:
         connection, _ = environment
@@ -340,14 +341,14 @@ class TestAckIndependence:
 
     async def test_valid_ack_not_advancing_keeps_watermark(self, environment, tmp_path) -> None:
         connection, _ = environment
-        await _seed_report(environment, tmp_path, 5, to_wm=100)
+        await _seed_report(environment, tmp_path, 5)
+        _freeze_reports(environment, 6)
         body = _plan_body(request_id="79", ack="5")
         await _accept(environment, tmp_path, body)
-        await _seed_report(environment, tmp_path, 6, to_wm=100)
         again = await _accept(environment, tmp_path, _plan_body(request_id="79", ack="6"))
         assert again.plan_disposition is PlanDisposition.REUSED
         assert again.ack_disposition is AckDisposition.VALID_NOT_ADVANCING
-        assert again.ack_watermark == 100
+        assert again.ack_watermark == 2
         assert connection.execute(
             "SELECT acknowledged_report_id FROM runtime_state"
         ).fetchone()[0] == 5
@@ -380,7 +381,7 @@ async def test_identity_rejected_before_reuse(environment, tmp_path, identity):
 @pytest.mark.parametrize("ack_partition", ["missing", "invalid", "known", "old"])
 async def test_plan_ack_matrix(environment, tmp_path, plan_partition, ack_partition):
     connection, _ = environment
-    await _seed_report(environment, tmp_path, 1, to_wm=50)
+    await _seed_report(environment, tmp_path, 1)
     if plan_partition == "reuse":
         await _accept(environment, tmp_path, _plan_body())
     if ack_partition == "old":
@@ -405,13 +406,13 @@ async def test_plan_ack_matrix(environment, tmp_path, plan_partition, ack_partit
         "known": AckDisposition.ABSORBED, "old": AckDisposition.VALID_NOT_ADVANCING,
     }[ack_partition]
     assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == before_count + (plan_partition == "new")
-    assert result.ack_watermark == (50 if ack_partition in {"known", "old"} else 0)
+    assert result.ack_watermark == (2 if ack_partition in {"known", "old"} else 0)
 
 
 @pytest.mark.parametrize("ack", [True, 1, "01", "+1", " 1 ", "x", {}, "9223372036854775808"])
 async def test_invalid_ack_keeps_valid_plan(environment, tmp_path, ack):
     connection, _ = environment
-    await _seed_report(environment, tmp_path, 1, to_wm=50)
+    await _seed_report(environment, tmp_path, 1)
     body = _plan_body()
     body["last_report_id"] = ack
     result = await _accept(environment, tmp_path, body)
