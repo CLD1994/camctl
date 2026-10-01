@@ -130,13 +130,13 @@ D1/D2 的端口、静态定义及证据结构先完成，使其他模块可以�
 
 **接口与依赖：** 提供异步 `open_read(source: SourceFile, offset: int, ticket: AttemptTicket) -> ReadSession`；会话同步 `read_chunk(limit: int) -> ReadChunk`、线程安全 `request_stop() -> None`、异步 `wait_stopped() -> ReadEnd`；ReadChunk 含字节或明确 EOF/错误，ReadEnd 为实际停止证据。前置交付：D2/D3、O3；SourceFile 含原身份、定位及固定长度。
 
-- [ ] 编写失败用例。建立 `test_read_control_allows_stop`，线程正等待源数据，事件循环可发出读取停止及必要录像停止；`assert read_resources_closed is False` 直到读取实际结束。连续数据及时重置无数据计时，设备日志不能重置；同会话并发 read_chunk 拒绝，偏移及短读精确。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_read_session.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。字节在读取端与分段线程流动，控制通道独立可用；不要求等待整段返回才能观察停止或数据。源定位信息留在驱动，主机路径另由 F1 管理。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 线程跨段复用会话安全，实际停止前拷贝机会仍保留。
+- [x] 编写失败用例。建立 `test_read_control_allows_stop`，线程正等待源数据，事件循环可发出读取停止及必要录像停止；`assert read_resources_closed is False` 直到读取实际结束。连续数据及时重置无数据计时，设备日志不能重置；同会话并发 read_chunk 拒绝，偏移及短读精确。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/devices/test_read_session.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。字节在读取端与分段线程流动，控制通道独立可用；不要求等待整段返回才能观察停止或数据。源定位信息留在驱动，主机路径另由 F1 管理。
+- [x] 再运行上述命令，要求全部 PASS，并核对 线程跨段复用会话安全，实际停止前拷贝机会仍保留。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/devices/test_read_session.py -q`，真实受控流和默认线程池验证取消、无数据、偏移、必要控制及 O3 收场。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 句柄关闭、读取错误及数据到达的所有线程边界；记录门禁证据，建议以“feat: 实现可停止的设备读取会话”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 句柄关闭、读取错误及数据到达的所有线程边界；记录门禁证据，建议以“feat: 实现可停止的设备读取会话”形成独立提交。
 
 ### D5 驱动契约测试与实际设备接入交付
 

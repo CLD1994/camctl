@@ -111,11 +111,13 @@ class ResultDriver(Protocol):
 
 @runtime_checkable
 class ReadDriver(Protocol):
-    """连续文件读取端口；会话形状由 D4 固定。"""
+    """连续文件读取端口：打开可停止的读取会话（形状见 D4）。"""
 
     declaration: DriverDeclaration
 
-    async def open_read(self, request: ControlRequest) -> DeviceCallResult:
+    async def open_read(
+        self, source: "object", offset: int, ticket: "object"
+    ) -> "object":
         ...
 
 
