@@ -131,13 +131,13 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **接口与依赖：** 提供 `prepare_target(ref: FileRef, desired_length: int) -> FileMutationResult`、`sync_target(ref: FileRef) -> SyncResult`、`hash_target(ref: FileRef) -> HashResult`；异步包装使用 F2。前置交付：F1/F2；调用方已给恢复或重拷资格。
 
-- [ ] 编写失败用例。在 `test_truncate_failure_blocks_continue` 中截断失败，`assert can_continue is False`；文件同步成功但目录同步失败返回分阶段事实。最终 SHA-256 用固定独立字节预期，`assert digest == expected_digest`；读取错误不能当空文件摘要。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_file_io.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。用标准文件操作及 hashlib 流式处理，遵守必要目录同步；不在本模块重置数据库进度、预算或自动重拷。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 创建、截断、同步和摘要的实际阶段可恢复。
+- [x] 编写失败用例。在 `test_truncate_failure_blocks_continue` 中截断失败，`assert can_continue is False`；文件同步成功但目录同步失败返回分阶段事实。最终 SHA-256 用固定独立字节预期，`assert digest == expected_digest`；读取错误不能当空文件摘要。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_file_io.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。用标准文件操作及 hashlib 流式处理，遵守必要目录同步；不在本模块重置数据库进度、预算或自动重拷。
+- [x] 再运行上述命令，要求全部 PASS，并核对 创建、截断、同步和摘要的实际阶段可恢复。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_file_io.py -q`，真实文件验证截断尾部、完整摘要及同步/空间错误；系统调用故障用窄注入点提供确定错误。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部 sync/flush/close 顺序是否把关闭等同落盘；记录门禁证据，建议以“feat: 实现文件同步与摘要事实”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部 sync/flush/close 顺序是否把关闭等同落盘；记录门禁证据，建议以“feat: 实现文件同步与摘要事实”形成独立提交。
 
 ### F5 原子交接与撤回事实
 
