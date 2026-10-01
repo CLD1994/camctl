@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 from camctl.session.locks import (
@@ -74,7 +75,16 @@ def test_lock_released_after_abnormal_exit(tmp_path: Path) -> None:
     assert child.stdout.readline().strip() == "HELD"
     child.kill()
     child.wait(timeout=30)
-    probe = probe_admission(admission_path)
+    # 进程对象退出与内核锁句柄回收在 Windows 上不同步完成；在限期内
+    # 按谓词轮询，超期仍未释放才是失败。
+    deadline = time.monotonic() + 10
+    while True:
+        probe = probe_admission(admission_path)
+        if probe.status is AdmissionProbeStatus.ACQUIRED_AND_RELEASED:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
     assert probe.status is AdmissionProbeStatus.ACQUIRED_AND_RELEASED
 
 
