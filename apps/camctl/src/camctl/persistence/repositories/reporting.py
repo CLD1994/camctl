@@ -6,8 +6,12 @@ from collections.abc import Iterator
 
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
+from camctl.contracts.enums import decode_member, load_registry as load_enum_registry
+from camctl.contracts.json_values import parse_exact_json
+from camctl.persistence.transaction import row_facts
+from camctl.history.events import load_event_registry
 from camctl.reporting.ack import AckFacts, AckReport, SyncResponsibility
-from camctl.reporting.models import FrozenReport, ReportOpportunity
+from camctl.reporting.models import FrozenReport, ReportOpportunity, ReportPublication, ReportStatus, validate_report_management
 
 
 def read_ack_state(connection) -> tuple[int, int | None, AckReport | None]:
@@ -140,3 +144,52 @@ def read_frozen_report(connection, report: AckReport) -> FrozenReport:
             raise ConsistencyError("已选报告的完整冻结事务缺失")
         boundary = HistoryBoundary(row[0], row[1])
     return FrozenReport(report.report_id, boundary, report.from_wm, report.to_wm, 1)
+
+
+def read_report_management(connection, report_id: int) -> dict:
+    """在写事务内取得可靠固定依据与完整管理事实，JSON 保持精确值。"""
+    if read_ack_report(connection, report_id) is None:
+        raise ConsistencyError(f"报告 {report_id} 不存在")
+    facts = row_facts(connection, "reports", report_id)
+    if facts is None:
+        raise ConsistencyError("报告管理记录缺失")
+    if facts["last_error_json"] is not None:
+        facts["last_error_json"] = parse_exact_json(facts["last_error_json"])
+    validate_report_management(facts)
+    definition = load_event_registry()["events"]["REPORT_CHANGED"]
+    published = connection.execute(
+        "SELECT event.id, event.event_type, event.event_version, event.body_json"
+        " FROM entity_event_links AS link JOIN history_events AS event ON event.id = link.event_id"
+        " WHERE link.entity_type = ? AND link.entity_id = ? AND event.event_type = ?"
+        " AND json_extract(event.body_json, '$.reason') = ? ORDER BY link.event_id DESC LIMIT 1",
+        (load_enum_registry()["history_objects"]["report"]["id"], report_id,
+         definition["id"], definition["branches"]["PUBLISH"]["reason"]),
+    ).fetchone()
+    if (published is None) != (facts["last_published_event_id"] is None):
+        raise ConsistencyError("报告成功投影与实际发布历史不一致")
+    if published is not None:
+        if (published[0] != facts["last_published_event_id"] or published[1] != definition["id"] or published[2] != 1
+                or facts["last_published_event_id"] > facts["last_event_id"]):
+            raise ConsistencyError("报告成功引用没有可靠的原发布事件")
+        body = parse_exact_json(published[3])
+        if not isinstance(body, dict) or body.get("reason") != definition["branches"]["PUBLISH"]["reason"]:
+            raise ConsistencyError("报告成功引用不是可靠发布分支")
+        rows = body.get("rows")
+        if not isinstance(rows, list):
+            raise ConsistencyError("报告成功事件缺少行事实")
+        own = [row for row in rows if row.get("table") == "reports" and row.get("id") == report_id]
+        if len(own) != 1:
+            raise ConsistencyError("报告成功事件不属于该报告")
+        before, after = own[0].get("before", {}), own[0].get("after", {})
+        old, new = before.get("values", {}), after.get("values", {})
+        recorded = ReportPublication(own[0]["id"], new.get("publication_count"), new.get("last_published_event_id"))
+        count = old.get("publication_count")
+        if (before.get("exists") is not True or after.get("exists") is not True
+                or isinstance(count, bool) or not isinstance(count, int) or count < 0
+                or decode_member("reports.status", old.get("status")) != ReportStatus.PUBLISHING
+                or decode_member("reports.status", new.get("status")) != ReportStatus.PUBLISHED
+                or recorded.publication_count != facts["publication_count"]
+                or count + 1 != facts["publication_count"]
+                or recorded.published_event_id != facts["last_published_event_id"]):
+            raise ConsistencyError("报告成功次数与原发布事件不一致")
+    return facts

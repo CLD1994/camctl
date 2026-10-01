@@ -208,6 +208,12 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_publication.py -q`，真实生成文件、SQLite、公共 Schema 和摘要检验，在各移动/保存边界安排协议允许的领取效果；真实 C/客户端组合由 I4/I5 验证。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 普通 delivery 与报告补投规则是否误共用，ready 替换是否仅看 ID；记录门禁证据，建议以“feat: 实现报告发布与补投”形成独立提交。
 
+**分项进度：** [报告字节与发布事实审查](2026-10-02-camctl-report-publication-review.md)记录下列数据库边界及验证证据；完整 R7 的勾选仍要求报告专属文件规则与真实消费者。
+
+- [x] 首次确定字节、独立发布意图、可靠交接结果及实际失败分别保存；同一报告字节不变，成功次数及引用与最近发布历史一致。
+- [x] 重复操作、读写失败、提交未知与正逆向回放保持历史及投影一致；文件已被领取删除仍可按已取得的可靠交接结果保存成功。
+- [ ] 报告专属目录引用、ready 替换、processing 保留、恢复观察、补投资格及同步本地完成的真实消费者。
+
 ### R8 失败触发、阶段时限与日志副本
 
 **预计文件：** `apps/camctl/src/camctl/reporting/maintenance.py`、`apps/camctl/src/camctl/reporting/supervisor.py`；测试为 `apps/camctl/tests/unit/reporting/test_maintenance.py` 和 `apps/camctl/tests/integration/reporting/test_maintenance.py`。

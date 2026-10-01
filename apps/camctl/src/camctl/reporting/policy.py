@@ -1,4 +1,4 @@
-"""报告机会决定与原子冻结。
+"""报告机会决定、原子冻结与独立发布管理事实。
 
 机会决定是纯规则：累计水位与全部有效同步共同确定范围；已有
 报告须同时满足业务范围和同步开始历史。仓储在写事务内选择生
@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from enum import IntEnum
 
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -16,12 +17,21 @@ from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.transaction import CommandPlan, commit_operation
 from camctl.reporting.models import (
     FrozenReport, ReportDecision, ReportDecisionKind, ReportOpportunity, ReportSelection,
-    validate_frozen_report,
+    ReportBytes, ReportPublication, ReportStatus, validate_frozen_report, validate_report_management,
 )
 from camctl.reporting.ack import AckReport
 from camctl.persistence.repositories.reporting import (
     read_report_opportunity, read_covering_report, read_frozen_report,
+    read_report_management,
 )
+from camctl.history.events import load_event_registry
+from camctl.host_files.handoff import PublishResult, PublishStage
+from camctl.host_files.io import DirectorySyncStage
+from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.persistence.transaction import encode_json_value, event_envelope, update_change
+
+_REPORT_EVENT = load_event_registry()["events"]["REPORT_CHANGED"]
+_ReportChange = IntEnum("ReportChange", {name: spec["reason"] for name, spec in _REPORT_EVENT["branches"].items()})
 
 __all__ = [
     "ReportDecision",
@@ -31,6 +41,11 @@ __all__ = [
     "ReportingRepository",
     "decide_report",
     "freeze_report",
+    "record_report_bytes",
+    "record_report_publish_intent",
+    "record_report_failure",
+    "publish_report",
+    "validate_report_publication_result",
 ]
 
 
@@ -170,12 +185,35 @@ async def freeze_report(
     return ReportingRepository().freeze_report(key, owned)
 
 def _report_guard(event, context) -> None:
-    """REPORT_CHANGED.FREEZE 的正式守卫（reports-runtime.md#报告字段）。"""
+    """验证 REPORT_CHANGED 各分支的固定字节与管理事实。"""
     for row in event.rows:
-        if row.table != "reports" or row.before.exists:
+        if row.table != "reports":
+            continue
+        if row.before.exists:
+            before = dict(context.state_rows.get("reports", {}).get(row.row_id, {}))
+            before.update(row.before.values)
+            after = {**before, **row.after.values}
+            try:
+                old_bytes = validate_report_management(before)
+                new_bytes = validate_report_management(after)
+                for values in (before, after):
+                    if values["last_error_json"] is not None:
+                        parse_exact_json(encode_json_value(values["last_error_json"]))
+                if event.reason == _ReportChange.INTENT and not json_equal(after["last_error_json"], before["last_error_json"]):
+                    raise EventValidationError("发布意图不能提前清除文件处理错误")
+            except (ValueError, RecursionError) as error:
+                raise EventValidationError(str(error)) from error
+            if old_bytes is not None and new_bytes != old_bytes:
+                raise EventValidationError("报告首次确定的字节依据不能改变")
+            if event.reason == _ReportChange.PUBLISH:
+                if after["publication_count"] != before["publication_count"] + 1:
+                    raise EventValidationError("每次可靠发布必须恰好增加一次成功计数")
+                if after["last_published_event_id"] != event.event_id:
+                    raise EventValidationError("本次发布依据必须引用当前事件")
             continue
         after = row.after.values
         try:
+            validate_report_management(after)
             AckReport(row.row_id, after.get("from_wm"), after.get("to_wm"),
                       after.get("frozen_event_id"))
         except ValueError as error:
@@ -187,6 +225,8 @@ def _report_guard(event, context) -> None:
             raise EventValidationError("冻结依据必须早于本次登记事务")
         if after.get("status") != 1:
             raise EventValidationError("冻结创建的状态必须是 REGISTERED")
+        if after["last_error_json"] is not None:
+            raise EventValidationError("新登记报告尚无文件处理错误")
 
 
 def register_report_guards() -> None:
@@ -194,84 +234,124 @@ def register_report_guards() -> None:
     register_sync_guard()
 
 
-class _PublishCommand:
-    """可靠发布：INTENT（2→3）与 PUBLISH（3→4）同一事务完成。"""
+def validate_report_publication_result(result: PublishResult) -> None:
+    """只有已确认移动、源移除及适用目录同步完整成功才能保存发布。"""
+    if (not isinstance(result, PublishResult) or result.stage is not PublishStage.MOVED
+            or result.source_removed is not True or result.error is not None
+            or (result.directory is not DirectorySyncStage.SYNCED and result.directory is not DirectorySyncStage.UNSUPPORTED)):
+        raise ConsistencyError("报告文件交接尚未可靠完成，不能保存发布成功")
 
-    def __init__(self, report_id: int, occurred_at: int) -> None:
-        self._report_id = report_id
-        self._occurred_at = occurred_at
+
+class _ReportManagementCommand:
+    """一次独立管理事实；每次在同一事务重新核对实际旧状态。"""
+
+    def __init__(self, kind: _ReportChange, key: OperationKey, report_id: int, occurred_at: int,
+                 *, contents: ReportBytes | None = None, file_result: PublishResult | None = None,
+                 error: dict | None = None) -> None:
+        self.kind, self.key, self.report_id = kind, key, report_id
+        self.occurred_at, self.contents = occurred_at, contents
+        self.file_result, self.error = file_result, error
 
     def plan(self, scope) -> CommandPlan:
-        from camctl.history.events import EventEnvelope, RowChange, RowImage
-        from camctl.persistence.transaction import TransactionError
+        from camctl.contracts.values import ObjectId
 
-        connection = scope.connection
-        row = connection.execute(
-            "SELECT status, size_bytes, sha256, publication_count,"
-            " last_published_event_id, last_error_json FROM reports WHERE id = ?",
-            (self._report_id,),
-        ).fetchone()
-        if row is None:
-            raise TransactionError(f"报告 {self._report_id} 不存在")
-        status, size_bytes, sha256, publication_count, last_pub, _err = row
-        if size_bytes is None or sha256 is None:
-            raise TransactionError("报告尚无确定字节，不能发布")
+        ObjectId(self.report_id)
+        facts = read_report_management(scope.connection, self.report_id)
+        contents = validate_report_management(facts)
+        if self.kind is _ReportChange.PREPARE:
+            if not isinstance(self.contents, ReportBytes):
+                raise ConsistencyError("报告准备只接收确定长度与摘要")
+            if contents is not None and contents != self.contents:
+                raise ConsistencyError("重建字节与首次确定的报告不一致")
+        if self.kind is _ReportChange.PUBLISH:
+            validate_report_publication_result(self.file_result)
+        if self.kind is _ReportChange.FAIL:
+            if not isinstance(self.error, dict):
+                raise ConsistencyError("报告文件错误必须是 JSON 对象")
+            # 取得可独立保存的精确值，拒绝非法 JSON 和不可持久化类型。
+            self.error = parse_exact_json(encode_json_value(self.error))
+        saved = self._saved_plan(scope.connection, contents)
+        if saved is not None:
+            return saved
 
-        allocation = scope.allocate(2)
-        intent = EventEnvelope(
-            event_id=allocation.first_event_id,
-            transaction_id=allocation.txn_id,
-            event_type=28, event_version=1, occurred_at=self._occurred_at,
-            clock_status=2, change_seq=None, reason=3, evidence={},
-            rows=(
-                RowChange(
-                    table="reports", row_id=self._report_id,
-                    before=RowImage(exists=True, values={"status": status, "last_error_json": None}),
-                    after=RowImage(exists=True, values={"status": 3, "last_error_json": None}),
-                ),
-            ),
-        )
-        publish = EventEnvelope(
-            event_id=allocation.last_event_id,
-            transaction_id=allocation.txn_id,
-            event_type=28, event_version=1, occurred_at=self._occurred_at,
-            clock_status=2, change_seq=None, reason=4, evidence={},
-            rows=(
-                RowChange(
-                    table="reports", row_id=self._report_id,
-                    before=RowImage(
-                        exists=True,
-                        values={"status": 3, "publication_count": publication_count,
-                                "last_published_event_id": last_pub, "last_error_json": None},
-                    ),
-                    after=RowImage(
-                        exists=True,
-                        values={"status": 4, "publication_count": publication_count + 1,
-                                "last_published_event_id": allocation.last_event_id,
-                                "last_error_json": None},
-                    ),
-                ),
-            ),
-        )
-        return CommandPlan(
-            events=(intent, publish),
-            owners={("reports", self._report_id): ("report", self._report_id)},
-            state_rows={"reports": {}},
-            result={"report_id": self._report_id, "publication_count": publication_count + 1},
-        )
+        status = ReportStatus(facts["status"])
+        after = {"status": status, "last_error_json": facts["last_error_json"]}
+        result = contents
+        if self.kind is _ReportChange.PREPARE:
+            if status not in (ReportStatus.REGISTERED, ReportStatus.FAILED):
+                return self._read_only(contents)
+            after.update(status=ReportStatus.PREPARED, size_bytes=self.contents.size_bytes,
+                         sha256=self.contents.sha256, last_error_json=None)
+            result = self.contents
+        elif self.kind is _ReportChange.INTENT:
+            if contents is None:
+                raise ConsistencyError("报告尚无确定字节，不能保存发布意图")
+            if status is ReportStatus.PUBLISHING:
+                return self._read_only(contents)
+            after["status"] = ReportStatus.PUBLISHING
+        elif self.kind is _ReportChange.PUBLISH:
+            if status is not ReportStatus.PUBLISHING:
+                raise ConsistencyError("报告必须先保存本次发布意图")
+            after.update(status=ReportStatus.PUBLISHED, publication_count=facts["publication_count"] + 1,
+                         last_published_event_id=None, last_error_json=None)
+        elif self.kind is _ReportChange.FAIL:
+            if status is ReportStatus.FAILED and json_equal(self.error, facts["last_error_json"]):
+                return self._read_only(None)
+            after.update(status=ReportStatus.FAILED, last_error_json=self.error)
+            result = None
+        else:
+            raise ConsistencyError("该管理入口不支持此报告变化")
+
+        allocation = scope.allocate(1)
+        if self.kind is _ReportChange.PUBLISH:
+            after["last_published_event_id"] = allocation.first_event_id
+            result = ReportPublication(self.report_id, after["publication_count"], allocation.first_event_id)
+        event = event_envelope(allocation.first_event_id, allocation.txn_id, _REPORT_EVENT["id"],
+                               self.kind, (update_change("reports", self.report_id,
+                                                        {k: facts[k] for k in after}, after),), self.occurred_at)
+        return CommandPlan(events=(event,), owners={("reports", self.report_id): ("report", self.report_id)},
+                           state_rows={"reports": {self.report_id: facts}}, result=result)
+
+    @staticmethod
+    def _read_only(result: ReportBytes | ReportPublication | None) -> CommandPlan:
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=result)
+
+    def _saved_plan(self, connection, contents: ReportBytes | None) -> CommandPlan | None:
+        """原操作键只复用同一目标与输入的已提交事实，绝不重做发布。"""
+        rows = connection.execute(
+            "SELECT event.id, event.event_type, event.body_json FROM history_events AS event"
+            " JOIN history_transactions AS txn ON txn.id = event.transaction_id"
+            " WHERE txn.operation_key = ? ORDER BY event.id LIMIT 2", (str(self.key),),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1 or rows[0][1] != _REPORT_EVENT["id"]:
+            raise ConsistencyError("报告操作键已用于其他事务")
+        event_id, _, raw = rows[0]
+        body = parse_exact_json(raw)
+        changes = body.get("rows", [])
+        if (body.get("reason") != self.kind or len(changes) != 1
+                or changes[0].get("table") != "reports" or changes[0].get("id") != self.report_id
+                or changes[0].get("before", {}).get("exists") is not True):
+            raise ConsistencyError("报告操作键与目标或管理分支不一致")
+        after = changes[0]["after"]["values"]
+        if self.kind is _ReportChange.PREPARE:
+            if ReportBytes(after["size_bytes"], after["sha256"]) != self.contents:
+                raise ConsistencyError("报告操作键对应不同字节")
+            return self._read_only(self.contents)
+        if self.kind is _ReportChange.PUBLISH:
+            if after["last_published_event_id"] != event_id:
+                raise ConsistencyError("原报告发布事实引用无效")
+            return self._read_only(ReportPublication(self.report_id, after["publication_count"], event_id))
+        if self.kind is _ReportChange.FAIL:
+            if not json_equal(after["last_error_json"], self.error):
+                raise ConsistencyError("报告操作键对应不同错误")
+            return self._read_only(None)
+        return self._read_only(contents)
 
 
-def publish_report(
-    repository_key: OperationKey,
-    owned: OwnedConnection,
-    report_id: int,
-    *,
-    occurred_at: int = 0,
-) -> DbOutcome:
-    """记录一次可靠发布（字节与文件证据在事务外已就绪）。"""
-    receipt = commit_operation(
-        _PublishCommand(report_id, occurred_at), repository_key, owned
-    )
+def _record_management(kind, key, owned, report_id, occurred_at, **values) -> DbOutcome:
+    receipt = commit_operation(_ReportManagementCommand(kind, key, report_id, occurred_at, **values), key, owned)
     if receipt.kind == "completed":
         return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
     if receipt.kind == "rolled_back":
@@ -279,81 +359,28 @@ def publish_report(
     return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
 
-def record_report_bytes(
-    key: OperationKey,
-    owned: OwnedConnection,
-    report_id: int,
-    payload: bytes,
-    *,
-    occurred_at: int = 0,
-) -> DbOutcome:
-    """保存报告确定字节（REPORT_CHANGED.BYTES：size 与 sha256）。"""
-    import hashlib
+def record_report_bytes(key: OperationKey, owned: OwnedConnection, report_id: int,
+                        contents: ReportBytes, *, occurred_at: int = 0) -> DbOutcome[ReportBytes]:
+    """保存合格生成结果的长度与摘要；重建匹配时保持首次确定字节。"""
+    return _record_management(_ReportChange.PREPARE, key, owned, report_id, occurred_at, contents=contents)
 
-    from camctl.history.events import EventEnvelope, RowChange, RowImage
 
-    digest = hashlib.sha256(payload).hexdigest()
+def record_report_publish_intent(key: OperationKey, owned: OwnedConnection, report_id: int,
+                                 *, occurred_at: int = 0) -> DbOutcome[ReportBytes]:
+    """发布文件之前保存意图；保持原确定字节和曾经成功的发布事实。"""
+    return _record_management(_ReportChange.INTENT, key, owned, report_id, occurred_at)
 
-    class _BytesCommand:
-        def plan(self, scope) -> CommandPlan:
-            connection = scope.connection
-            row = connection.execute(
-                "SELECT status, size_bytes, sha256, publication_count FROM reports WHERE id = ?",
-                (report_id,),
-            ).fetchone()
-            if row is None:
-                from camctl.persistence.transaction import TransactionError
 
-                raise TransactionError(f"报告 {report_id} 不存在")
-            status, size_bytes, sha256, _count = row
-            allocation = scope.allocate(1)
-            change = RowChange(
-                table="reports",
-                row_id=report_id,
-                before=RowImage(
-                    exists=True,
-                    values={
-                        "status": status,
-                        "size_bytes": size_bytes,
-                        "sha256": sha256,
-                        "last_error_json": None,
-                    },
-                ),
-                after=RowImage(
-                    exists=True,
-                    values={
-                        "status": 2,
-                        "size_bytes": len(payload),
-                        "sha256": digest,
-                        "last_error_json": None,
-                    },
-                ),
-            )
-            event = EventEnvelope(
-                event_id=allocation.first_event_id,
-                transaction_id=allocation.txn_id,
-                event_type=28,
-                event_version=1,
-                occurred_at=occurred_at,
-                clock_status=2,
-                change_seq=None,
-                reason=2,
-                evidence={},
-                rows=(change,),
-            )
-            return CommandPlan(
-                events=(event,),
-                owners={("reports", report_id): ("report", report_id)},
-                state_rows={"reports": {}},
-                result={"report_id": report_id, "size_bytes": len(payload), "sha256": digest},
-            )
+def publish_report(key: OperationKey, owned: OwnedConnection, report_id: int,
+                   file_result: PublishResult, *, occurred_at: int = 0) -> DbOutcome[ReportPublication]:
+    """按已确认交接结果保存一次成功；不重新检查文件是否仍在 ready。"""
+    return _record_management(_ReportChange.PUBLISH, key, owned, report_id, occurred_at, file_result=file_result)
 
-    receipt = commit_operation(_BytesCommand(), key, owned)
-    if receipt.kind == "completed":
-        return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
-    if receipt.kind == "rolled_back":
-        return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
-    return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+def record_report_failure(key: OperationKey, owned: OwnedConnection, report_id: int,
+                          error: dict, *, occurred_at: int = 0) -> DbOutcome[None]:
+    """保留本次文件处理错误；不抹除已有字节及此前成功发布。"""
+    return _record_management(_ReportChange.FAIL, key, owned, report_id, occurred_at, error=error)
 
 
 def _sync_guard(event, context) -> None:

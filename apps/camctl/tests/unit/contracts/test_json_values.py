@@ -18,10 +18,24 @@ from camctl.contracts.json_values import (
     is_multiple,
     json_field,
     parse_exact_json,
+    json_equal,
 )
 
 _LONE_SURROGATE = chr(0xD800)
 _TRAILING_SURROGATE = chr(0xDC00)
+
+
+@pytest.mark.parametrize("left,right,want", [
+    (True, 1, False), (False, 0, False), (1, True, False),
+    ({"value": [True]}, {"value": [1]}, False),
+    ({"a": 1, "b": 2}, {"b": 2, "a": 1}, True),
+    ([1, 2], [2, 1], False), ("1", 1, False), (None, None, True),
+    (1, Decimal("1.0"), True), (2**53 + 1, Decimal("9007199254740993"), True),
+    (2**53 + 1, Decimal("9007199254740992"), False),
+    ({"a": {"b": False}}, {"a": {"b": 0}}, False),
+])
+def test_json_equal_preserves_types_order_and_exact_numbers(left, right, want):
+    assert json_equal(left, right) is want
 
 
 class TestParseExactJson:

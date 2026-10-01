@@ -16,6 +16,14 @@ from camctl.contracts.values import ValueTypeError
 JsonValue: TypeAlias = "int | Decimal | str | bool | None | list[JsonValue] | dict[str, JsonValue]"
 
 
+def json_equal(left: JsonValue, right: JsonValue) -> bool:
+    """比较合法精确 JSON 值；区分布尔与数字，忽略对象成员顺序。"""
+    from jsonschema import Draft202012Validator
+
+    # 复用公共 const 语义；无需自建递归比较，也不执行外部引用读取。
+    return Draft202012Validator({"const": left}).is_valid(right)
+
+
 class JsonParseError(ValueError):
     """JSON 文本无法无歧义解析为精确值。"""
 

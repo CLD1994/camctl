@@ -10,15 +10,78 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Mapping, Tuple
 
-from camctl.contracts.enums import load_registry as load_enum_registry
+from camctl.contracts.enums import decode_member, enum_for, load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
-from camctl.contracts.values import ConsistencyError, ObjectId
+from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId
 from camctl.reporting.ack import validate_watermark
 
 __all__ = [
     "FrozenReport", "ReportDecision", "ReportDecisionKind", "ReportOpportunity",
-    "ReportSelection", "validate_frozen_report",
+    "ReportSelection", "ReportBytes", "ReportPublication", "ReportStatus",
+    "validate_frozen_report", "validate_report_management",
 ]
+
+ReportStatus = enum_for("reports.status")
+
+
+@dataclass(frozen=True)
+class ReportBytes:
+    """完整生成并同步成功后的确定长度与摘要；不携带报告正文。"""
+
+    size_bytes: int
+    sha256: str
+
+    def __post_init__(self) -> None:
+        if (isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int)
+                or not 0 <= self.size_bytes <= MAX_OBJECT_ID):
+            raise ConsistencyError("报告长度必须是 SQLite 非负整数")
+        if (not isinstance(self.sha256, str) or len(self.sha256) != 64
+                or any(c not in "0123456789abcdef" for c in self.sha256)):
+            raise ConsistencyError("报告摘要必须是 64 位小写十六进制")
+
+
+@dataclass(frozen=True)
+class ReportPublication:
+    report_id: int
+    publication_count: int
+    published_event_id: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.report_id)
+        ObjectId(self.publication_count)
+        ObjectId(self.published_event_id)
+
+
+def validate_report_management(facts: Mapping) -> ReportBytes | None:
+    """验证报告阶段、确定字节、成功次数及当前错误的有效组合。"""
+    required = {"status", "size_bytes", "sha256", "publication_count",
+                "last_published_event_id", "last_error_json"}
+    if not required.issubset(facts):
+        raise ConsistencyError("报告管理事实不完整")
+    status = decode_member("reports.status", facts["status"])
+    size, digest = facts["size_bytes"], facts["sha256"]
+    if (size is None) != (digest is None):
+        raise ConsistencyError("报告长度与摘要必须共同存在或共同省略")
+    contents = None if size is None else ReportBytes(size, digest)
+    if status in (ReportStatus.PREPARED, ReportStatus.PUBLISHING, ReportStatus.PUBLISHED) and contents is None:
+        raise ConsistencyError("该报告阶段必须已有确定字节")
+    count, published = facts["publication_count"], facts["last_published_event_id"]
+    if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= MAX_OBJECT_ID:
+        raise ConsistencyError("报告发布次数必须是 SQLite 非负整数")
+    if (count == 0) != (published is None):
+        raise ConsistencyError("报告发布次数与成功事件必须一致")
+    if published is not None:
+        ObjectId(published)
+        if contents is None:
+            raise ConsistencyError("曾经发布的报告必须保留确定字节")
+    if status == ReportStatus.PUBLISHED and count == 0:
+        raise ConsistencyError("已发布报告必须有成功事实")
+    error = facts["last_error_json"]
+    if error is not None and not isinstance(error, dict):
+        raise ConsistencyError("报告错误必须是 JSON 对象")
+    if status == ReportStatus.FAILED and error is None:
+        raise ConsistencyError("失败报告必须保留实际错误")
+    return contents
 
 #: 入选范围的对象类型（历史对象登记中 report_target 为真者）。
 _SCOPE_TYPES = frozenset(
