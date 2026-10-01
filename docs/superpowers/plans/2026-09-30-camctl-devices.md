@@ -144,11 +144,11 @@ D1/D2 的端口、静态定义及证据结构先完成，使其他模块可以�
 
 **接口与依赖：** 每个具体驱动实现 D1—D4 的适用端口；软件替身也执行同一契约测试。前置交付：软件依赖 D1—D4；正式厂商映射另需接入证据清单。
 
-- [ ] 编写失败用例。建立 `test_driver_declared_evidence_matches_consumers`，按各声明向 C6、X4、X8 提供合法、错误及边界结果，`assert accepted_facts == contract_facts`；不支持接口不可被消费者调用。实际相机联调另外核对响应、归属、固定内容、读取偏移和停止保证。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/devices/test_driver_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。先保存抽象接口证据及可复查输入，具体厂商映射取得证据后编写；第一版软件门禁只验真实业务消费者与受约束替身的协作。对未核验的设备设置和响应不写猜测实现，不宣称真实驱动通过。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 软件契约和实际设备验收分别有状态与证据，MCU 不增加运行依赖。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部驱动保证、返回格式和文件关系是否超出实际证据；记录门禁证据，建议以“test: 验证驱动契约与接入范围”形成独立提交。
+- [x] 编写失败用例。建立 `test_driver_declared_evidence_matches_consumers`，按各声明向 C6、X4、X8 提供合法、错误及边界结果，`assert accepted_facts == contract_facts`；不支持接口不可被消费者调用。实际相机联调另外核对响应、归属、固定内容、读取偏移和停止保证。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/devices/test_driver_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。先保存抽象接口证据及可复查输入，具体厂商映射取得证据后编写；第一版软件门禁只验真实业务消费者与受约束替身的协作。对未核验的设备设置和响应不写猜测实现，不宣称真实驱动通过。
+- [x] 再运行上述命令，要求全部 PASS，并核对 软件契约和实际设备验收分别有状态与证据，MCU 不增加运行依赖。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部驱动保证、返回格式和文件关系是否超出实际证据；记录门禁证据，建议以“test: 验证驱动契约与接入范围”形成独立提交。
 
 ## 模块完成门禁
 
