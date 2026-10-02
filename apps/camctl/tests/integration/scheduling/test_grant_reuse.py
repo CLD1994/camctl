@@ -9,6 +9,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.operations.attempts import AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RunFinish, RunOutcome
 from camctl.operations.models import AttemptStatus, AttemptTicket, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
@@ -220,6 +221,79 @@ def test_new_grant_rejects_unreliable_existing_run_before_qualification(environm
         ErrorValue("budget_exhausted", "operation")) if ended else None))
     owned.connection.execute("UPDATE operation_runs SET kind = 2 WHERE id = 1")
     result = _readonly(environment, _request(), new_operation_key())
+    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(result.error, ValueError), result.error
+
+
+def _seed_start_run(owned, status, attempts, waiting):
+    # 提供预建责任的当前行；本组验证授予，不声明完整历史对象重建。
+    owned.connection.execute(
+        "INSERT INTO operation_runs (id, action_id, kind, responsibility_key, activity_id,"
+        " status, attempts_used, max_attempts_used, timeout_s_json, retry_interval_s_json,"
+        " retry_wait_required, error_json) VALUES (7, 1, 1, 'start/1', 1, ?, ?, 3, '10', '0.5', ?, ?)",
+        (int(enum_for("operation_runs.status")[status]), attempts, waiting,
+         '{"code":"budget_exhausted","stage":"operation"}' if status in ("FAILED", "UNCONFIRMED") else None))
+
+
+@pytest.mark.parametrize("status,attempts,waiting", [
+    ("PENDING", 0, 1), ("PENDING", 1, 0), ("PENDING", 1, 1),
+    ("ACTIVE", 0, 0), ("ACTIVE", 0, 1), ("SUCCEEDED", 0, 0), ("UNCONFIRMED", 0, 0),
+])
+@pytest.mark.parametrize("maximum", [1, 3])
+def test_new_grant_rejects_illegal_run_state_before_budget_or_ended_result(environment, status, attempts, waiting, maximum):
+    owned, _ = environment
+    _seed_start_run(owned, status, attempts, waiting)
+    request = replace(_request(), config=AttemptConfig(maximum, Decimal("10"), Decimal("0.5")))
+    result = _readonly(environment, request, new_operation_key())
+    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(result.error, ValueError), result.error
+
+
+def test_pending_zero_attempts_without_wait_can_receive_first_grant(environment):
+    owned, repository = environment
+    _seed_start_run(owned, "PENDING", 0, 0)
+    key = new_operation_key()
+    first = _completed(repository.grant_start(_request(), key, owned))
+    assert first.ticket == AttemptTicket(1, "control", "1", "start/1", 7)
+    assert _completed(_readonly(environment, _request(), key)) == first
+
+
+@pytest.mark.parametrize("status,attempts", [
+    ("SUCCEEDED", 1), ("FAILED", 0), ("CANCELED", 0), ("UNCONFIRMED", 1), ("EXPIRED", 0),
+])
+def test_new_grant_keeps_valid_ended_run_ended(environment, status, attempts):
+    owned, _ = environment
+    _seed_start_run(owned, status, attempts, 0)
+    result = _completed(_readonly(environment, _request(), new_operation_key()))
+    assert result.outcome is GrantOutcome.REJECTED
+    assert result.reason == "run_ended"
+
+
+@pytest.mark.parametrize("status,attempts,waiting", [
+    ("PENDING", 0, 1), ("PENDING", 1, 1), ("ACTIVE", 0, 0), ("ACTIVE", 0, 1),
+])
+def test_original_grant_rejects_illegal_full_run_before_state(environment, status, attempts, waiting):
+    owned, repository = environment
+    request, key, first = _original(environment)
+    if attempts:
+        _finish_for_retry(owned, first.ticket)
+        request = replace(request, occurred_at=_NOW + 1)
+        key = new_operation_key()
+        _completed(repository.grant_start(request, key, owned))
+    with closing(owned.connection.execute(
+        "SELECT id, body_json FROM history_events WHERE transaction_id ="
+        " (SELECT id FROM history_transactions WHERE operation_key = ?)", (str(key),))) as cursor:
+        event_id, raw = cursor.fetchone()
+    body = json.loads(raw)
+    run = next(row for row in body["rows"] if row["table"] == "operation_runs")
+    before = {"status": int(enum_for("operation_runs.status")[status]),
+              "attempts_used": attempts, "retry_wait_required": waiting}
+    after = {"status": 2, "attempts_used": attempts + 1, "retry_wait_required": 0}
+    changed = [name for name in before if before[name] != after[name]]
+    run["before"] = {"exists": True, "values": {name: before[name] for name in changed}}
+    run["after"] = {"exists": True, "values": {name: after[name] for name in changed}}
+    owned.connection.execute("UPDATE history_events SET body_json = ? WHERE id = ?", (json.dumps(body), event_id))
+    result = _readonly(environment, request, key)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(result.error, ValueError), result.error
 

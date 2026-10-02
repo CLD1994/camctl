@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,7 +45,8 @@ _HOLDER_QUERY = (
 
 def current_start_holder(connection: Any, device_id: str) -> StartHolder | None:
     """推导设备的当前启动机会持有者；至多一个，多个为一致性错误。"""
-    rows = connection.execute(_HOLDER_QUERY, (device_id,)).fetchall()
+    with closing(connection.execute(_HOLDER_QUERY, (device_id,))) as cursor:
+        rows = cursor.fetchall()
     if not rows:
         return None
     if len(rows) > 1:

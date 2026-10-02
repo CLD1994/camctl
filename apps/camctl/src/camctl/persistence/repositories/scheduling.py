@@ -16,7 +16,7 @@ from typing import Any
 
 from camctl.contracts.enums import decode_member, enum_for
 from camctl.contracts.history_values import HistoryBoundary
-from camctl.contracts.json_values import json_equal
+from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ObjectId, OperationKey, UtcMicros
 from camctl.operations.attempts import (
     AttemptConfig,
@@ -304,7 +304,29 @@ class GrantStartCommand:
         identity = self._start_run_identity(activity_id)
         if any(not json_equal(run[name], value) for name, value in identity.items()):
             raise TransactionError("启动流程的只读身份与动作或活动不符")
+        self._verify_start_run_state(run)
         return identity
+
+    @staticmethod
+    def _verify_start_run_state(run: dict) -> None:
+        status, attempts, waiting = (run[name] for name in
+                                     ("status", "attempts_used", "retry_wait_required"))
+        if (not all(is_json_integer(value) for value in (status, attempts, waiting))
+                or attempts < 0 or waiting not in (0, 1)):
+            raise TransactionError("启动流程的状态、次数或等待标志非法")
+        try:
+            state = _RUN_STATUS(int(status))
+        except ValueError as error:
+            raise TransactionError("启动流程的状态未登记") from error
+        if state is _RUN_STATUS.PENDING:
+            valid = attempts == 0 and waiting == 0
+        elif state is _RUN_STATUS.ACTIVE:
+            valid = attempts > 0
+        else:
+            valid = waiting == 0 and (attempts > 0 or state not in
+                                      (_RUN_STATUS.SUCCEEDED, _RUN_STATUS.UNCONFIRMED))
+        if not valid:
+            raise TransactionError("启动流程的状态、次数与等待标志组合不符")
 
     def _is_first_candidate(self, connection, request: GrantRequest) -> bool:
         """同设备存在排序更早的合格候选时不授予本动作。"""
@@ -393,6 +415,9 @@ class GrantStartCommand:
             current_values=run, boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
             current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
         before = {**after, **run_row["before"]["values"]}
+        self._verify_start_run_state(after)
+        if run_row["before"]["exists"]:
+            self._verify_start_run_state(before)
         if (not json_equal(after["status"], int(_RUN_STATUS.ACTIVE))
                 or not json_equal(after["attempts_used"], values["attempt_no"])
                 or not json_equal(after["retry_wait_required"], 0)

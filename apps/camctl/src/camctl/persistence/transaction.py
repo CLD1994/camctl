@@ -637,7 +637,8 @@ def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict |
 
 def next_row_id(connection: sqlite3.Connection, table: str) -> int:
     """按已提交最大 ID 分配下一行编号。"""
-    row = connection.execute(f"SELECT MAX(id) FROM {table}").fetchone()
+    with closing(connection.execute(f"SELECT MAX(id) FROM {table}")) as cursor:
+        row = cursor.fetchone()
     return (int(row[0]) if row[0] is not None else 0) + 1
 
 
