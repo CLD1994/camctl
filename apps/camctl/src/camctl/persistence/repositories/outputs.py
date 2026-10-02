@@ -1530,8 +1530,10 @@ class _GrantFileCommand:
                 or existing.delivery_id != ids.get("deliveries")):
             raise ConsistencyError("原建档事务与当前准备责任的身份不一致")
         current_copy = self._state["file_copies"][existing.copy_id]
-        if (current_copy["source_size"] != source_snapshot["size_bytes"]
-                or (source_snapshot["sha256"] is not None and current_copy["source_sha256"] != source_snapshot["sha256"])
+        if (not json_equal(current_copy["source_size"], source_snapshot["size_bytes"])
+                or (source_snapshot["sha256"] is not None
+                    and (current_copy["source_sha256"] != source_snapshot["sha256"]
+                         or source["sha256"] != source_snapshot["sha256"]))
                 or copy["after"]["values"]["slot_device_id"] != device):
             raise ConsistencyError("原建档事务的源内容或设备身份不一致")
         for table, names in (("intermediate_files", ("relative_path",)),

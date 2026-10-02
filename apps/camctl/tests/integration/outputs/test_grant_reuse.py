@@ -10,7 +10,7 @@ import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind
-from camctl.outputs.qualification import OperationConfig, QualificationOutcome
+from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -23,7 +23,7 @@ from ..operations.test_result_reuse import _FaultConnection
 
 
 @pytest.fixture(params=["device", "host", "internal"])
-def granted(request):
+def read_request(request):
     if request.param == "host":
         owned, command = request.getfixturevalue("local_read")
     else:
@@ -35,11 +35,20 @@ def granted(request):
     else:
         owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
+    return owned, command
+
+
+def _save_grant(owned, command):
     key = new_operation_key()
     first = OutputsRepository().grant_file(command, key, owned)
     assert first.kind is DbOutcomeKind.COMPLETED, first.error
     assert first.value.outcome is QualificationOutcome.GRANTED
     return owned, command, key, first.value
+
+
+@pytest.fixture
+def granted(read_request):
+    return _save_grant(*read_request)
 
 
 def _reuse(owned, command, key):
@@ -249,6 +258,84 @@ def test_original_known_checksum_cannot_be_cleared(local_read):
     result = _reuse(owned, command, key)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(result.error, ConsistencyError), result.error
+
+
+def _set_source_fact(owned, command, name, value):
+    table, identity = (("device_files", command.source_device_file_id)
+                       if command.source_device_file_id is not None
+                       else ("intermediate_files", command.source_intermediate_file_id))
+    if table == "device_files" and name == "sha256":
+        owned.connection.execute("UPDATE device_files SET checksum_support=2 WHERE id=?", (identity,))
+    owned.connection.execute(f"UPDATE {table} SET {name}=? WHERE id=?", (value, identity))
+    owned.connection.commit()
+
+
+@pytest.mark.parametrize("source_digest,copy_digest,valid", [
+    ("a" * 64, "a" * 64, True),
+    (None, "a" * 64, False),
+    ("a" * 64, None, False),
+    ("b" * 64, "a" * 64, False),
+    ("a" * 64, "b" * 64, False),
+    ("b" * 64, "b" * 64, False),
+    (None, None, False),
+])
+def test_original_known_digest_is_preserved_by_source_and_copy(read_request, source_digest, copy_digest, valid):
+    owned, command = read_request
+    _set_source_fact(owned, command, "sha256", "a" * 64)
+    _, _, key, first = _save_grant(owned, command)
+    _set_source_fact(owned, command, "sha256", source_digest)
+    owned.connection.execute("UPDATE file_copies SET source_sha256=? WHERE id=?", (copy_digest, first.copy_id))
+    owned.connection.commit()
+    result = _reuse(owned, command, key)
+    if valid:
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value == first
+    else:
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(result.error, ConsistencyError), result.error
+
+
+@pytest.mark.parametrize("source_digest,copy_digest,valid", [
+    (None, None, True),
+    ("a" * 64, None, True),
+    (None, "a" * 64, True),
+    ("a" * 64, "a" * 64, True),
+    ("a" * 64, "b" * 64, False),
+])
+def test_original_unknown_digest_preserves_later_observations(read_request, source_digest, copy_digest, valid):
+    owned, command = read_request
+    _set_source_fact(owned, command, "sha256", None)
+    _, _, key, first = _save_grant(owned, command)
+    _set_source_fact(owned, command, "sha256", source_digest)
+    owned.connection.execute("UPDATE file_copies SET source_sha256=? WHERE id=?", (copy_digest, first.copy_id))
+    owned.connection.commit()
+    result = _reuse(owned, command, key)
+    if valid:
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value == first
+    else:
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(result.error, ConsistencyError), result.error
+
+
+@pytest.mark.parametrize("size,saved_size,valid", [
+    (0, False, False), (1, True, False),
+    (0, 0.0, True), (1, 1.0, True),
+    (1, 1.5, False), (1, "1", False), (1, None, False),
+])
+def test_original_length_uses_json_numeric_semantics(read_request, size, saved_size, valid):
+    owned, command = read_request
+    _set_source_fact(owned, command, "size_bytes", size)
+    _, _, key, first = _save_grant(owned, command)
+    _change_event(owned, key, "file_copies",
+                  lambda body: body["rows"][0]["after"]["values"].update(source_size=saved_size))
+    result = _reuse(owned, command, key)
+    if valid:
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value == first
+    else:
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(result.error, ConsistencyError), result.error
 
 
 @pytest.fixture
