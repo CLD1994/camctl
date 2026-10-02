@@ -8,9 +8,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import closing
 from enum import IntEnum
 
-from camctl.contracts.values import ConsistencyError, OperationKey
+from camctl.contracts.values import ConsistencyError, OperationKey, UtcMicros
+from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.history.validators import EventValidationError, register_guard
@@ -22,13 +24,13 @@ from camctl.reporting.models import (
 from camctl.reporting.ack import AckReport
 from camctl.persistence.repositories.reporting import (
     read_report_opportunity, read_covering_report, read_frozen_report,
-    read_report_management,
+    read_report_management, read_ack_report,
 )
 from camctl.history.events import load_event_registry
 from camctl.host_files.handoff import PublishResult, PublishStage
 from camctl.host_files.io import DirectorySyncStage
 from camctl.contracts.json_values import json_equal, parse_exact_json
-from camctl.persistence.transaction import encode_json_value, event_envelope, saved_transaction_events, update_change
+from camctl.persistence.transaction import encode_json_value, event_envelope, read_transaction_range, saved_transaction_events, update_change
 
 _REPORT_EVENT = load_event_registry()["events"]["REPORT_CHANGED"]
 _ReportChange = IntEnum("ReportChange", {name: spec["reason"] for name, spec in _REPORT_EVENT["branches"].items()})
@@ -80,13 +82,18 @@ def decide_report(
 class _FreezeCommand:
     """原子冻结：事务内取完整 H 与范围，写入 reports 行。"""
 
-    def __init__(self, occurred_at: int) -> None:
+    def __init__(self, occurred_at: int, key: OperationKey) -> None:
         self._occurred_at = occurred_at
+        self._key = key
 
     def plan(self, scope) -> CommandPlan:
         from camctl.history.events import RowChange, RowImage
 
         connection = scope.connection
+        UtcMicros(self._occurred_at)
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._saved_plan(connection, saved)
         opportunity = read_report_opportunity(connection)
         preliminary = decide_report(opportunity)
         candidate = None
@@ -102,7 +109,8 @@ class _FreezeCommand:
         last_event = boundary.last_event_id
         from_wm, to_wm = decision.from_wm, decision.to_wm
 
-        report_id_row = connection.execute("SELECT MAX(id) FROM reports").fetchone()
+        with closing(connection.execute("SELECT MAX(id) FROM reports")) as cursor:
+            report_id_row = cursor.fetchone()
         report_id = (report_id_row[0] if report_id_row[0] is not None else 0) + 1
         AckReport(report_id, from_wm, to_wm, last_event)
 
@@ -157,6 +165,46 @@ class _FreezeCommand:
             result=ReportSelection(ReportDecisionKind.GENERATE, report),
         )
 
+    def _saved_plan(self, connection, saved) -> CommandPlan:
+        if (len(saved) != 1 or saved[0]["type"] != _REPORT_EVENT["id"]
+                or saved[0]["reason"] != _ReportChange.FREEZE):
+            raise ConsistencyError("原操作键不属于报告冻结阶段")
+        event = saved[0]
+        if event["occurred_at"] != self._occurred_at:
+            raise ConsistencyError("冻结重送的事件时刻与原输入不同")
+        rows = event["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "reports"
+                or rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]):
+            raise ConsistencyError("原冻结必须创建恰好一份报告")
+        row = rows[0]
+        original = row["after"]["values"]
+        validate_report_management(original)
+        if original["status"] != ReportStatus.REGISTERED or original["last_error_json"] is not None:
+            raise ConsistencyError("原冻结的登记状态无效")
+        current = read_ack_report(connection, row["id"])
+        if current is None:
+            raise ConsistencyError("原冻结报告缺失")
+        fixed = {"frozen_event_id": current.frozen_event_id, "from_wm": current.from_wm,
+                 "to_wm": current.to_wm, "format_version": 1}
+        with closing(connection.execute(
+            "SELECT created_event_id FROM reports WHERE id = ?", (row["id"],),
+        )) as cursor:
+            created = cursor.fetchone()
+        if (created is None or created[0] != event["event_id"]
+                or any(not json_equal(value, original[name]) for name, value in fixed.items())):
+            raise ConsistencyError("原报告身份或固定生成依据与冻结历史不符")
+        transaction = event["transaction"]
+        boundary = INITIAL_BOUNDARY
+        if transaction.txn_id != 1:
+            prior = read_transaction_range(connection, transaction.txn_id - 1)
+            boundary = HistoryBoundary(prior.txn_id, prior.last_event_id)
+        if original["frozen_event_id"] != boundary.last_event_id:
+            raise ConsistencyError("原报告 H 必须是登记前的完整已提交边界")
+        report = FrozenReport(row["id"], boundary, original["from_wm"], original["to_wm"], original["format_version"])
+        validate_frozen_report(report)
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
+                           result=ReportSelection(ReportDecisionKind.GENERATE, report))
+
 
 class ReportingRepository:
     """报告冻结的 SQLite 仓储：唯一写事务经 P3 内核。"""
@@ -169,7 +217,7 @@ class ReportingRepository:
         occurred_at: int = 0,
     ) -> DbOutcome[ReportSelection]:
         receipt = commit_operation(
-            _FreezeCommand(occurred_at), key, owned
+            _FreezeCommand(occurred_at, key), key, owned
         )
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)

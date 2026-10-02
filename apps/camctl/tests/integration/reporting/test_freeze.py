@@ -444,24 +444,26 @@ async def test_unknown_freeze_commit_is_resolved_by_original_operation_key(envir
         assert (check.execute("SELECT id FROM history_transactions WHERE operation_key = ?", (str(key),)).fetchone()
                 is not None) is commit_reached_database
         assert check.execute("SELECT COUNT(*) FROM reports").fetchone() == (int(commit_reached_database),)
-    retry = _freeze(environment)
-    assert retry.value.kind is (ReportDecisionKind.REUSE if commit_reached_database else ReportDecisionKind.GENERATE)
+    retry = ReportingRepository().freeze_report(key, environment)
+    assert retry.kind is DbOutcomeKind.COMPLETED, retry.error
+    assert retry.value.kind is ReportDecisionKind.GENERATE
     assert connection.execute("SELECT COUNT(*) FROM reports").fetchone() == (1,)
 
 
 async def test_formal_freeze_guard_rejects_boundary_inside_own_transaction(environment, tmp_path):
     await _submit(environment, tmp_path, "1")
+    key = new_operation_key()
 
     class IncorrectBoundary:
         def plan(self, scope):
-            plan = _FreezeCommand(1).plan(scope)
+            plan = _FreezeCommand(1, key).plan(scope)
             event = plan.events[0]
             row = event.rows[0]
             after = replace(row.after, values={**row.after.values, "frozen_event_id": event.event_id})
             return replace(plan, events=(replace(event, rows=(replace(row, after=after),)),))
 
     before = _counts(environment.connection)
-    receipt = commit_operation(IncorrectBoundary(), new_operation_key(), environment)
+    receipt = commit_operation(IncorrectBoundary(), key, environment)
     assert receipt.kind == "rolled_back"
     assert isinstance(receipt.error, EventValidationError)
     assert _counts(environment.connection) == before
