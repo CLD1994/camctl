@@ -28,10 +28,11 @@ def test_selection_errors_satisfy_public_schema_after_commit(tmp_path, scenario,
             _seed_output(connection, 501, 11 if scenario == "mismatch" else 21, 1,
                          availability={"cleaned": 3, "restricted": 2}.get(scenario, 1))
         connection.commit()
+        requested = () if scenario == "preview_missing" else (501,)
         snapshot = select_outputs(
-            _fixed_resolution((21,)), load_selection_facts(connection, 21),
+            _fixed_resolution((21,)), load_selection_facts(connection, 21, requested_output_ids=requested),
             SelectionMode.PREVIEW if scenario == "preview_missing" else SelectionMode.EXPLICIT_IDS,
-            requested_output_ids=None if scenario == "preview_missing" else (501,),
+            requested_output_ids=requested,
         )
         result = repository.fix_selection(FixSelection(selection_id, snapshot, _NOW), new_operation_key(), owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error

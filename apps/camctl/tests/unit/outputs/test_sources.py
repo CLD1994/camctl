@@ -13,19 +13,19 @@ import pytest
 
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.catalog import OutputKind
-from camctl.outputs.sources import (
-    ActionFacts,
-    CatalogEntry,
-    ResolveFailure,
-    ResolutionState,
-    SelectionFacts,
-    SelectionMode,
-    SelectionSnapshot,
-    SourceResolution,
-    SourceSpec,
-    select_outputs,
-    resolve_source,
-)
+from .test_original_selection import sources, no_resource_reads
+
+ActionFacts = sources.ActionFacts
+CatalogEntry = sources.CatalogEntry
+ResolveFailure = sources.ResolveFailure
+ResolutionState = sources.ResolutionState
+SelectionFacts = sources.SelectionFacts
+SelectionMode = sources.SelectionMode
+SelectionSnapshot = sources.SelectionSnapshot
+SourceResolution = sources.SourceResolution
+SourceSpec = sources.SourceSpec
+select_outputs = sources.select_outputs
+resolve_source = sources.resolve_source
 
 _CAPTURE = 2  # CAMERA_RECORD
 _REPORT = 7  # REPORT_STATUS
@@ -101,15 +101,13 @@ def _facts(
     *,
     source_action_id: int = 11,
     source_completed: bool = True,
-    known: set[int] | None = None,
+    checked: dict[int, int | None] | None = None,
 ) -> SelectionFacts:
     return SelectionFacts(
         source_action_id=source_action_id,
         source_completed=source_completed,
         outputs=entries,
-        known_output_ids=frozenset(known)
-        if known is not None
-        else frozenset(entry.output_id for entry in entries),
+        checked_output_sources={} if checked is None else checked,
     )
 
 
@@ -377,7 +375,7 @@ def test_explicit_ids_fail_per_item_without_delivery() -> None:
             member_action_ids=(11,),
             source_plan_id=1,
         ),
-        _facts(entries, known={702, 703, 704}),
+        _facts(entries, checked={702: 12, 901: None}),
         SelectionMode.EXPLICIT_IDS,
         requested_output_ids=(901, 702, 703, 704),
     )
@@ -477,7 +475,7 @@ def test_previously_confirmed_missing_record_is_consistency_error() -> None:
                 source_action_id=11,
                 source_completed=True,
                 outputs=(_entry(704, OutputKind.ORIGINAL),),
-                known_output_ids=frozenset({704}),
+                checked_output_sources={701: None},
                 previously_confirmed_ids=frozenset({701}),
             ),
             SelectionMode.DEFAULT,

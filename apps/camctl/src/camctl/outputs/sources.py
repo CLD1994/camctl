@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ConsistencyError
+from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
@@ -320,8 +320,10 @@ class OriginalOutputs:
 class SelectionFacts:
     """一个固定来源的选择事实。
 
-    outputs 是该来源动作的全部正式产物；known_output_ids 覆盖整
-    个产物目录，用于区分“不存在”与“归属其他来源”；
+    outputs 是该来源动作的全部正式产物，独立证明这些记录存在。
+    checked_output_sources 只保存目录外已核实的请求及此前确认 ID：
+    值为实际来源 ID 或可靠不存在的 None，缺少键表示尚未查询。
+    补充查询不能重复目录成员，也不能声称遗漏的记录属于本来源。
     previously_confirmed_ids 是此前已可靠确认存在的产物身份，其
     记录缺失属于状态库矛盾。source_completed 表示来源已终态且
     适用产物处理完成。
@@ -330,7 +332,7 @@ class SelectionFacts:
     source_action_id: int
     source_completed: bool
     outputs: tuple[CatalogEntry, ...]
-    known_output_ids: frozenset[int]
+    checked_output_sources: Mapping[int, int | None] = field(default_factory=dict)
     previously_confirmed_ids: frozenset[int] = field(default=frozenset())
 
 
@@ -402,7 +404,20 @@ def select_outputs(
     """
     if source.state != ResolutionState.FIXED:
         raise ValueError("只有 FIXED 来源能进行产物选择")
-    missing = facts.previously_confirmed_ids - facts.known_output_ids
+    by_id = {entry.output_id: entry for entry in facts.outputs}
+    if len(by_id) != len(facts.outputs):
+        raise ConsistencyError("完整来源目录不能重复登记同一产物身份")
+    for output_id, source_id in facts.checked_output_sources.items():
+        try:
+            ObjectId(output_id)
+            if source_id is not None:
+                ObjectId(source_id)
+        except ValueError as error:
+            raise ConsistencyError("产物存在性查询的身份或归属无法解释") from error
+        if output_id in by_id or source_id == facts.source_action_id:
+            raise ConsistencyError("产物补充查询与本来源完整目录矛盾")
+    missing = {identity for identity in facts.previously_confirmed_ids
+               if _record_source(facts, by_id, identity) is None}
     if missing:
         raise ConsistencyError(
             f"此前已可靠确认存在的产物记录缺失: {sorted(missing)}"
@@ -411,7 +426,16 @@ def select_outputs(
         return SelectionSnapshot(is_fixed=False)
     if mode in (SelectionMode.DEFAULT, SelectionMode.PREVIEW):
         return _select_families(facts, SelectionMode(mode))
-    return _select_explicit(facts, requested_output_ids)
+    return _select_explicit(facts, requested_output_ids, by_id)
+
+
+def _record_source(facts: SelectionFacts, by_id: Mapping[int, CatalogEntry], output_id: int) -> int | None:
+    """从完整目录或明确的补充查询中取得归属，未查询不是不存在。"""
+    if output_id in by_id:
+        return facts.source_action_id
+    if output_id not in facts.checked_output_sources:
+        raise ConsistencyError(f"产物记录存在性尚未可靠核实: {output_id}")
+    return facts.checked_output_sources[output_id]
 
 
 def _item_for_availability(
@@ -553,16 +577,15 @@ def _select_families(facts: SelectionFacts, mode: SelectionMode) -> SelectionSna
 
 
 def _select_explicit(
-    facts: SelectionFacts, requested_output_ids: tuple[int, ...]
+    facts: SelectionFacts, requested_output_ids: tuple[int, ...], by_id: Mapping[int, CatalogEntry]
 ) -> SelectionSnapshot:
     if not requested_output_ids:
         raise ValueError("精确 ID 取回必须提供非空请求列表")
     if len(set(requested_output_ids)) != len(requested_output_ids):
         raise ValueError(f"请求列表不得重复: {requested_output_ids}")
-    by_id = {entry.output_id: entry for entry in facts.outputs}
     items: list[SelectedItem] = []
     for requested in requested_output_ids:
-        if requested not in facts.known_output_ids:
+        if _record_source(facts, by_id, requested) is None:
             items.append(
                 SelectedItem(
                     basis=ItemBasis.EXPLICIT,

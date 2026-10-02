@@ -764,13 +764,18 @@ def load_selection_facts(
     connection,
     source_action_id: int,
     *,
+    requested_output_ids: tuple[int, ...] = (),
     previously_confirmed_ids: frozenset[int] = frozenset(),
 ) -> SelectionFacts:
     """读取一个来源动作的选择事实。
 
-    source_completed 由动作终态与适用产物处理共同推导；known 覆盖
-    全目录以区分不存在与归属不匹配。
+    source_completed 由动作终态与适用产物处理共同推导。完整目录
+    证明本来源成员；只补查目录外的实际请求及此前确认 ID，并保留
+    实际归属和可靠不存在。调用方在同一数据库读取快照中使用。
     """
+    ObjectId(source_action_id)
+    requested = frozenset(ObjectId(identity) for identity in requested_output_ids)
+    previous = frozenset(ObjectId(identity) for identity in previously_confirmed_ids)
     source = row_facts(connection, "actions", source_action_id)
     if source is None:
         raise ConsistencyError(f"来源动作不存在: {source_action_id}")
@@ -779,14 +784,24 @@ def load_selection_facts(
         and _processing_completed(connection, source_action_id)
     )
     entries = tuple(member.entry for member in _catalog_members(connection, source_action_id))
-    with closing(connection.execute("SELECT id FROM outputs")) as cursor:
-        known = frozenset(int(row[0]) for row in cursor)
+    local_ids = {entry.output_id for entry in entries}
+    query_ids = sorted((requested | previous) - local_ids)
+    checked: dict[int, int | None] = {}
+    for offset in range(0, len(query_ids), 128):
+        batch = query_ids[offset:offset + 128]
+        placeholders = ",".join("?" for _ in batch)
+        with closing(connection.execute(
+            f"SELECT id, source_action_id FROM outputs WHERE id IN ({placeholders})", batch,
+        )) as cursor:
+            rows = cursor.fetchall()
+        checked.update(dict.fromkeys(batch))
+        checked.update(rows)
     return SelectionFacts(
         source_action_id=source_action_id,
         source_completed=completed,
         outputs=entries,
-        known_output_ids=known,
-        previously_confirmed_ids=previously_confirmed_ids,
+        checked_output_sources=checked,
+        previously_confirmed_ids=previous,
     )
 
 

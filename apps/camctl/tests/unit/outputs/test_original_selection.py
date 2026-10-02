@@ -20,10 +20,10 @@ def _isolated_sources():
     # 仅提供本组选择分支消费的登记样本；真实登记组合由集成测试验证。
     definitions = {
         "actions.type": {"CAMERA_RECORD": 2},
-        "actions.source_resolution_state": {"FIXED": 2, "FAILED": 3},
-        "obtain_items.status": {"SELECTED": 2, "FAILED": 4},
+        "actions.source_resolution_state": {"PENDING": 1, "FIXED": 2, "FAILED": 3},
+        "obtain_items.status": {"UNRESOLVED": 1, "SELECTED": 2, "FAILED": 4},
         "obtain_items.basis": {"ORIGINAL": 1, "REPAIRED": 2, "PREVIEW": 3,
-                               "REPAIRED_NOT_LARGER": 4},
+                               "REPAIRED_NOT_LARGER": 4, "EXPLICIT": 5},
         "outputs.availability": {"AVAILABLE": 1, "RESTRICTED": 2, "CLEANED": 3,
                                  "MISSING": 4, "UNKNOWN": 5},
     }

@@ -16,7 +16,7 @@ from .test_sources import _NOW, _fixed_resolution, _prepared_selection
 def saved_error(tmp_path):
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
     try:
-        facts = load_selection_facts(owned.connection, 21)
+        facts = load_selection_facts(owned.connection, 21, requested_output_ids=(9007199254740993,))
         snapshot = select_outputs(
             _fixed_resolution((21,)), facts, SelectionMode.EXPLICIT_IDS,
             requested_output_ids=(9007199254740993,),

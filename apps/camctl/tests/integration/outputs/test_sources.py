@@ -508,12 +508,13 @@ def test_fix_selection_partial_failure_saves_per_item_results(
     _seed_output(connection, 702, 11, 1)  # 属于其他来源
     connection.commit()
     try:
-        facts = load_selection_facts(connection, 21)
+        requested = (901, 702, 501, 502)
+        facts = load_selection_facts(connection, 21, requested_output_ids=requested)
         snapshot = select_outputs(
             _fixed_resolution((21,)),
             facts,
             SelectionMode.EXPLICIT_IDS,
-            requested_output_ids=(901, 702, 501, 502),
+            requested_output_ids=requested,
         )
         outcome = repository.fix_selection(
             FixSelection(
@@ -543,7 +544,7 @@ def test_fix_selection_partial_failure_saves_per_item_results(
 def test_saved_selection_preserves_mathematical_integer_in_error_details(tmp_path):
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
     try:
-        facts = load_selection_facts(owned.connection, 21)
+        facts = load_selection_facts(owned.connection, 21, requested_output_ids=(9007199254740993,))
         snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.EXPLICIT_IDS,
                                   requested_output_ids=(9007199254740993,))
         outcome = repository.fix_selection(FixSelection(selection_id, snapshot, _NOW),
