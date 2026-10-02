@@ -11,7 +11,6 @@ FIXED 状态同一事务保存。已固定的来源与选择不因重送、重�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any
 
 from camctl.contracts.enums import enum_for
@@ -81,6 +80,8 @@ _ACTION_TERMINAL = (
     int(_ACTION_STATUS.CANCELED),
 )
 _OBTAIN_TYPE = int(_ACTION_TYPE.OBTAIN_ACTION_OUTPUTS)
+_OUTPUT_KIND = enum_for("outputs.kind")
+_DEVICE_FILE_ROLE = enum_for("device_files.role")
 _CAPTURE_TYPES = frozenset(
     int(member.value)
     for member in _ACTION_TYPE
@@ -872,42 +873,21 @@ class _GrantFileCommand:
         }
 
     def plan(self, scope) -> CommandPlan:
+        if not isinstance(self._command, FileCandidate):
+            raise TypeError("读取资格申请必须使用 FileCandidate")
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
             return self._reuse(saved)
         command = self._command
-        action = row_facts(connection, "actions", command.action_id)
-        if action is None:
-            raise TransactionError(f"候选动作不存在: {command.action_id}")
+        action = self._required(connection, "actions", command.action_id)
+        device_file = self._required(connection, "device_files", command.source_device_file_id)
+        output = self._load_target(connection, action, device_file)
+        device_id = self._source_device(connection, device_file)
         if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
             return self._wait("action_not_eligible")
-        self._state["actions"] = {command.action_id: action}
-
-        output = row_facts(connection, "outputs", command.output_id)
-        if output is None:
-            raise ConsistencyError(
-                f"候选产物记录缺失: output {command.output_id}"
-            )
-        if output["device_file_id"] != command.source_device_file_id:
-            raise TransactionError(
-                f"候选产物与源文件不一致: output {command.output_id}"
-                f" file {command.source_device_file_id}"
-            )
-        self._state["outputs"] = {command.output_id: output}
-        device_file = row_facts(connection, "device_files", command.source_device_file_id)
-        if device_file is None:
-            raise ConsistencyError(
-                f"源文件记录缺失: device_files {command.source_device_file_id}"
-            )
-        self._state["device_files"] = {
-            command.source_device_file_id: device_file
-        }
         if command.item_id is not None:
-            item = row_facts(connection, "obtain_items", command.item_id)
-            if item is None:
-                raise ConsistencyError(f"取回项记录缺失: {command.item_id}")
-            self._state["obtain_items"] = {command.item_id: item}
+            item = self._state["obtain_items"][command.item_id]
             if item["status"] == int(_ITEM_STATUS.DELIVERY_CREATED):
                 return self._item_already_granted(connection, item)
             if item["status"] != int(_ITEM_STATUS.SELECTED):
@@ -925,23 +905,10 @@ class _GrantFileCommand:
                         reason="item_finished",
                     ),
                 )
-        else:
-            processing = row_facts(
-                connection, "recording_processing", command.processing_id
-            )
-            if processing is None:
-                raise ConsistencyError(
-                    f"录像处理记录缺失: {command.processing_id}"
-                )
-            self._state["recording_processing"] = {
-                command.processing_id: processing
-            }
-
         final_error = self._final_rejection(connection, output, device_file)
         if final_error is not None:
             return self._reject_item(scope, final_error)
 
-        device_id = self._source_device(connection, device_file)
         if self._device_busy(connection, device_id):
             return self._wait("device_busy")
         if self._source_protected(connection, command.source_device_file_id):
@@ -949,19 +916,68 @@ class _GrantFileCommand:
         if not self._wins_business_order(connection, action, device_id):
             return self._wait("business_order")
 
-        return self._grant(scope, action, output, device_file, device_id)
+        return self._grant(scope, device_file, device_id)
 
     # ---- 资格核对 ----
 
+    def _required(self, connection, table: str, row_id: int) -> dict:
+        facts = row_facts(connection, table, row_id)
+        if facts is None:
+            raise ConsistencyError(f"读取责任关联记录缺失: {table}#{row_id}")
+        self._state[table][row_id] = facts
+        return facts
+
+    def _load_target(self, connection, action, device_file) -> dict | None:
+        """先核对固定归属，再由调用方判断当前执行状态。"""
+        command = self._command
+        if command.item_id is None:
+            processing = self._required(connection, "recording_processing", command.processing_id)
+            if (
+                action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+                or processing["action_id"] != command.action_id
+                or processing["source_device_file_id"] != command.source_device_file_id
+                or device_file["source_action_id"] != command.action_id
+                or device_file["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
+            ):
+                raise ConsistencyError("内部读取的录像、处理责任与原片归属不一致")
+            return None
+
+        item = self._required(connection, "obtain_items", command.item_id)
+        selection = self._required(connection, "obtain_source_selections", item["selection_id"])
+        dependency = self._required(connection, "action_dependencies", selection["dependency_id"])
+        output = self._required(connection, "outputs", command.output_id)
+        source_action = self._required(connection, "actions", dependency["depends_on_action_id"])
+        source_role = {
+            int(_OUTPUT_KIND.ORIGINAL): int(_DEVICE_FILE_ROLE.ORIGINAL),
+            int(_OUTPUT_KIND.PREVIEW): int(_DEVICE_FILE_ROLE.PREVIEW),
+        }.get(output["kind"])
+        if (
+            action["type"] != _OBTAIN_TYPE
+            or action["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED)
+            or action["resolved_source_plan_id"] != source_action["plan_id"]
+            or dependency["action_id"] != command.action_id
+            or selection["status"] != int(_SELECTION_STATUS.FIXED)
+            or item["output_id"] != command.output_id
+            or dependency["depends_on_action_id"] != output["source_action_id"]
+            or output["source_action_id"] != device_file["source_action_id"]
+            or output["device_file_id"] != command.source_device_file_id
+            or source_role is None
+            or device_file["role"] != source_role
+        ):
+            raise ConsistencyError("取回动作、固定选择、产物与源文件归属不一致")
+        return output
+
     def _final_rejection(self, connection, output, device_file) -> int | None:
         """不可授予的最终失败错误码；None 表示可通过。"""
-        if output["availability"] != int(_AVAILABILITY.AVAILABLE):
+        if output is not None and output["availability"] != int(_AVAILABILITY.AVAILABLE):
             return _OUTPUT_UNAVAILABLE_CODE
         if (
             device_file["presence_state"] != int(_PRESENCE.PRESENT)
             or device_file["completion_state"] != int(_COMPLETION.COMPLETE)
         ):
             return _SOURCE_FILE_UNCONFIRMED_CODE
+        if output is None:
+            return None
         cleanup = connection.execute(
             "SELECT status FROM cleanup_items"
             " WHERE output_id = ? AND restriction_state IN (?, ?)"
@@ -979,23 +995,17 @@ class _GrantFileCommand:
         return None
 
     def _source_device(self, connection, device_file) -> str:
-        source_action = row_facts(
-            connection, "actions", device_file["source_action_id"]
-        )
-        if source_action is None:
-            raise ConsistencyError(
-                f"源动作记录缺失: {device_file['source_action_id']}"
-            )
-        device_id = source_action.get("device_id")
-        if not device_id:
-            raise TransactionError(
-                f"源动作未绑定设备: {device_file['source_action_id']}"
-            )
-        self._state["actions"] = {
-            **self._state["actions"],
-            device_file["source_action_id"]: source_action,
-        }
-        return device_id
+        observer = self._required(connection, "actions", device_file["observer_action_id"])
+        source = self._required(connection, "actions", device_file["source_action_id"])
+        binding = (observer["device_id"], observer["driver_id"])
+        if (
+            observer["type"] not in _CAPTURE_TYPES
+            or source["type"] not in _CAPTURE_TYPES
+            or not all(isinstance(value, str) and value for value in binding)
+            or binding != (source["device_id"], source["driver_id"])
+        ):
+            raise ConsistencyError("设备文件观察者与可靠来源的原设备绑定不一致")
+        return observer["device_id"]
 
     def _device_busy(self, connection, device_id: str) -> bool:
         row = connection.execute(
@@ -1080,7 +1090,7 @@ class _GrantFileCommand:
 
     # ---- 授予建档 ----
 
-    def _grant(self, scope, action, output, device_file, device_id: str) -> CommandPlan:
+    def _grant(self, scope, device_file, device_id: str) -> CommandPlan:
         command = self._command
         is_delivery = command.item_id is not None
         config = command.config
@@ -1126,6 +1136,7 @@ class _GrantFileCommand:
                     "publication_intent_event_id": None,
                     "published_event_id": None,
                     "withdrawal_state": int(_WITHDRAWAL.NOT_REQUESTED),
+                    "withdrawal_error_json": None,
                     "error_json": None,
                 },
             )
@@ -1148,8 +1159,8 @@ class _GrantFileCommand:
                 "status": int(_RUN_STATUS.PENDING),
                 "attempts_used": 0,
                 "max_attempts_used": config.max_attempts,
-                "timeout_s_json": _seconds_json(config.timeout_s),
-                "retry_interval_s_json": _seconds_json(config.retry_interval_s),
+                "timeout_s_json": config.timeout_s,
+                "retry_interval_s_json": config.retry_interval_s,
                 "retry_wait_required": 0,
                 "error_json": None,
             },
@@ -1378,12 +1389,6 @@ class _GrantFileCommand:
                 reason="resent",
             ),
         )
-
-
-def _seconds_json(value) -> str:
-    if not isinstance(value, Decimal):
-        value = Decimal(str(value))
-    return str(value)
 
 
 class OutputsRepository:

@@ -122,9 +122,9 @@ X1 随首次录像完成；X2—X7 实现首条取回链。X8/X9 在明确来源
 
 **预计文件：** `apps/camctl/src/camctl/outputs/qualification.py`、`apps/camctl/src/camctl/persistence/repositories/outputs.py`；测试为 `apps/camctl/tests/integration/outputs/test_qualification.py`。
 
-**接口与依赖：** 提供异步 `grant_file(command: FileCandidate, key: OperationKey) -> DbOutcome[FileQualification]`；读取获准时同时建立所需依赖、delivery、copy、目标文件及读取流程。前置交付：X2、Q1/Q4、O2、P3。
+**接口与依赖：** 提供异步 `grant_file(command: FileCandidate, key: OperationKey) -> DbOutcome[FileQualification]`；取回取得逐产物读取资格时同时建立源依赖、delivery、copy、目标文件及读取流程。相机读取机会由已建档拷贝另行取得，等待机会期间保留源依赖；内部处理直接引用原录像处理责任及设备原片。具体状态分区和修复门禁见[文件读取资格与拷贝责任](2026-10-02-camctl-file-qualification-review.md)。前置交付：X2、Q1/Q4、O2、P3。
 
-- [ ] 编写失败用例。在 `test_qualification_uses_business_order` 中颠倒来源结束及协程唤醒，`assert winner == expected_by_plan_time`，同时间取回优先。已有读取保护、不可撤销清理限制、唯一删除处理者及跨设备候选分别验证；缺任一建档行整笔拒绝。
+- [ ] 编写失败用例。在 `test_qualification_uses_business_order` 中颠倒来源结束及协程唤醒，`assert winner == expected_by_plan_time`。同一产物的取回与清理按计划时间排列，同时间取回优先；相机拷贝机会按发起动作时间、计划、数组位置及文件登记顺序排列，内部处理与取回不另设类型优先级。已有读取保护、不可撤销清理限制、唯一删除处理者及跨设备候选分别验证；缺任一建档行整笔拒绝。
 - [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_qualification.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
 - [ ] 实施本任务。事务内查全部可靠限制和业务顺序，完整授予或保存逐项拒绝；内部检查/修复共用设备单文件读取机会，不必创建 delivery。
 - [ ] 再运行上述命令，要求全部 PASS，并核对 资格不是先检查后另事务抢占，等待不消耗尝试。

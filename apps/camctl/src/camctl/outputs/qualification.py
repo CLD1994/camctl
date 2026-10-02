@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 
-from camctl.contracts.values import MAX_OBJECT_ID
+from camctl.contracts.values import MAX_OBJECT_ID, ObjectId, UtcMicros
 
 __all__ = [
     "FileCandidate",
@@ -89,7 +89,7 @@ class FileCandidate:
     action_id: int
     item_id: int | None
     processing_id: int | None
-    output_id: int
+    output_id: int | None
     source_device_file_id: int
     target_relative_path: str
     delivery_file_name: str
@@ -98,12 +98,22 @@ class FileCandidate:
     occurred_at: int
 
     def __post_init__(self) -> None:
+        for value in (self.action_id, self.source_device_file_id):
+            ObjectId(value)
+        for value in (self.item_id, self.processing_id, self.output_id):
+            if value is not None:
+                ObjectId(value)
         if (self.item_id is None) == (self.processing_id is None):
             raise ValueError(
                 "候选必须恰属于取回项或录像处理之一:"
                 f" item={self.item_id!r} processing={self.processing_id!r}"
             )
+        if (self.item_id is None) != (self.output_id is None):
+            raise ValueError("取回候选必须填写正式产物，内部处理候选不填写正式产物")
+        if not isinstance(self.config, OperationConfig):
+            raise ValueError("候选必须使用已校验的读取配置")
         if not self.target_relative_path or not self.delivery_file_name:
             raise ValueError("目标相对路径与交付文件名不能为空")
-        if not isinstance(self.occurred_at, int) or self.occurred_at <= 0:
-            raise ValueError(f"事件时间必须是正整数微秒: {self.occurred_at!r}")
+        timestamp = UtcMicros(self.occurred_at)
+        if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+            raise ValueError(f"事件时间超出 SQLite 整数微秒范围: {self.occurred_at!r}")

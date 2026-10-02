@@ -136,7 +136,7 @@ def _seed_device_file(
         " presence_state, completion_state, completion_evidence_json, size_bytes,"
         " checksum_support, sha256, last_error_json, created_event_id,"
         " last_event_id, change_count)"
-        " VALUES (?, ?, ?, ?, '{}', '{}', 'video.mp4', 'video/mp4', 1, NULL, NULL,"
+        " VALUES (?, ?, ?, ?, '{}', '{}', 'video.mp4', 'video/mp4', 2, NULL, NULL,"
         f" {presence_state}, {completion_state}, ?, ?, 3, NULL, NULL, 1, 1, 1)",
         (file_id, source_action_id, source_action_id, f"file-{file_id:04d}",
          completion_evidence, size if completion_state == 3 else None),
@@ -177,6 +177,11 @@ def _seed_selection_and_item(
     output_id: int,
 ) -> None:
     """种下已固定选择与 SELECTED 项（X2 结果状态）。"""
+    connection.execute(
+        "UPDATE actions SET source_resolution_state=2,"
+        " resolved_source_plan_id=(SELECT plan_id FROM actions WHERE id=?) WHERE id=?",
+        (source_action_id, owner_action_id),
+    )
     connection.execute(
         "INSERT INTO action_dependencies (id, action_id, depends_on_action_id)"
         " VALUES (?, ?, ?)",
@@ -300,7 +305,7 @@ def _candidate(
         action_id=seedling.action_id,
         item_id=seedling.item_id,
         processing_id=seedling.processing_id,
-        output_id=seedling.output_id,
+        output_id=seedling.output_id if seedling.processing_id is None else None,
         source_device_file_id=seedling.file_id,
         target_relative_path=f"deliveries/{seedling.output_id}-{tag}.part"
         if seedling.processing_id is None
