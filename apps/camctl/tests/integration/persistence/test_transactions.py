@@ -184,6 +184,61 @@ def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path
         owned.connection.close()
 
 
+@pytest.mark.parametrize("covered", [True, False])
+def test_complete_query_tracks_prior_events_without_using_future_rows(tmp_path, plan_guards, monkeypatch, covered):
+    """可靠空范围随前序创建推进；没有覆盖时不能用当前或未来行补证。"""
+    from contextlib import closing
+
+    from camctl.history import validators
+    from camctl.persistence.transaction import CommandPlan
+
+    _create_valid_database(tmp_path / "state.db")
+    observed = []
+
+    def inspect(event, context):
+        current = context.complete_rows("plans", "id", 1)
+        later = context.complete_rows("plans", "id", 2)
+        observed.append((event.event_type, event.rows[0].row_id,
+                         current.get(1, {}).get("status"), tuple(later)))
+
+    monkeypatch.setitem(validators.NAMED_GUARDS, "admission", inspect)
+    monkeypatch.setitem(validators.NAMED_GUARDS, "plan_aggregate", inspect)
+
+    class CreateStartAndCreate:
+        def plan(self, scope):
+            with closing(scope.connection.execute(
+                "SELECT id, request_id, name, created_at, status FROM plans WHERE id IN (1, 2)"
+            )) as cursor:
+                rows = {row[0]: dict(zip(("request_id", "name", "created_at", "status"), row[1:]))
+                        for row in cursor.fetchall()}
+            allocation = scope.allocate(3)
+            coverage = validators.ReadCoverage({("plans", "id"): {1, 2}} if covered else {})
+            return CommandPlan(events=(
+                _plan_create_envelope(allocation.first_event_id, allocation.txn_id, 1, 101),
+                _plan_start_envelope(allocation.first_event_id + 1, allocation.txn_id, 1, 1),
+                _plan_create_envelope(allocation.last_event_id, allocation.txn_id, 2, 102),
+            ), owners={("plans", 1): ("plan", 1), ("plans", 2): ("plan", 2)},
+                state_rows={"plans": rows}, read_coverage=coverage)
+
+    owned = _open(tmp_path)
+    try:
+        before = tuple(owned.connection.iterdump())
+        receipt = commit_operation(CreateStartAndCreate(), new_operation_key(), owned)
+        if covered:
+            assert receipt.kind == "completed", receipt.error
+            assert set(observed) == {(1, 1, None, ()), (9, 1, 1, ()), (1, 2, 2, ())}
+            assert owned.connection.execute("SELECT id, status FROM plans ORDER BY id").fetchall() == [(1, 2), (2, 1)]
+            with closing(owned.connection.execute("SELECT body_json FROM history_events")) as cursor:
+                assert all(set(parse_exact_json(row[0])) == {"reason", "evidence", "rows"}
+                           for row in cursor.fetchall())
+        else:
+            assert receipt.kind == "rolled_back", receipt.error
+            assert isinstance(receipt.error, validators.EventValidationError), receipt.error
+            assert tuple(owned.connection.iterdump()) == before
+    finally:
+        owned.connection.close()
+
+
 class FailingConnection:
     """在首个匹配前缀的语句上失败的连接替身；其余语句透传。"""
 

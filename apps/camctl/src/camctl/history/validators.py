@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Callable, Mapping
 
@@ -16,6 +16,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.history.changes import ChangeDerivationError, event_report_targets
+from camctl.history.reads import ReadCoverage
 from camctl.history.events import (
     EventEnvelope,
     HistoryEventError,
@@ -45,12 +46,53 @@ class EventContext:
     沿登记关联解析应报告对象。transaction_rows 是完整事务提案的行
     事实，仅用于固定身份及历史归属关系；不得用于提前判断后来的
     状态或执行资格。未提供时，固定关联只能使用事件已有事实。
+    read_coverage 声明本事务完整读取的范围，需确认集合完整性的
+    守卫通过 complete_rows 读取该范围内的当前行。
     """
 
     transaction: TransactionRange
     owners: Mapping[tuple[str, int], tuple[str, int]]
     state_rows: Mapping[str, Mapping[int, Mapping[str, Any]]]
     transaction_rows: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None
+    read_coverage: ReadCoverage = field(default_factory=ReadCoverage)
+
+    def __post_init__(self) -> None:
+        # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；
+        # bool、float 等与整数相等的键不能冒充可靠的物理行身份。
+        for table in {table for table, _ in self.read_coverage.ranges}:
+            for row_id in self.state_rows.get(table, {}):
+                try:
+                    ObjectId(row_id)
+                except ValueError as error:
+                    raise EventValidationError(f"完整读取范围的行身份无效: {table}#{row_id!r}") from error
+
+    def complete_rows(self, table: str, column: str, identity: int) -> Mapping[int, Mapping[str, Any]]:
+        """取得可靠完整范围的当前行；未知覆盖或无法判断成员时拒绝。
+
+        主键以行映射的键为准，其他身份列必须显式存在；合法空关
+        联不匹配正身份。只读取 state_rows，不读取事务未来提案。
+        """
+        if not self.read_coverage.covers(table, column, identity):
+            raise EventValidationError(f"缺少完整读取范围: {table}.{column}={identity}")
+        rows = self.state_rows.get(table, {})
+        if column == "id":
+            return {identity: rows[identity]} if identity in rows else {}
+        result = {}
+        for row_id, row in rows.items():
+            if column not in row:
+                raise EventValidationError(f"无法判断读取范围成员: {table}#{row_id}.{column} 缺失")
+            value = row[column]
+            if value is None:
+                continue
+            if not is_json_integer(value):
+                raise EventValidationError(f"读取范围成员身份无效: {table}#{row_id}.{column}={value!r}")
+            try:
+                ObjectId(int(value))
+            except ValueError as error:
+                raise EventValidationError(f"读取范围成员身份越界: {table}#{row_id}.{column}") from error
+            if value == identity:
+                result[row_id] = row
+        return result
 
     @property
     def association_rows(self) -> Mapping[str, Mapping[int, Mapping[str, Any]]]:
