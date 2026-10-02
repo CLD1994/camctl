@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 
+from camctl.contracts.values import MAX_OBJECT_ID
+
 __all__ = [
     "FileCandidate",
     "FileQualification",
@@ -40,8 +42,12 @@ class OperationConfig:
     retry_interval_s: Decimal
 
     def __post_init__(self) -> None:
-        if not isinstance(self.max_attempts, int) or self.max_attempts <= 0:
-            raise ValueError(f"尝试上限必须是正整数: {self.max_attempts!r}")
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or not 1 <= self.max_attempts <= MAX_OBJECT_ID
+        ):
+            raise ValueError(f"尝试上限必须是可保存的正整数: {self.max_attempts!r}")
         for name in ("timeout_s", "retry_interval_s"):
             value = getattr(self, name)
             if (
@@ -49,8 +55,10 @@ class OperationConfig:
                 or not isinstance(value, Decimal)
                 or not value.is_finite()
                 or value < 0
+                or (name == "timeout_s" and value == 0)
             ):
-                raise ValueError(f"{name} 必须是有限非负秒数: {value!r}")
+                domain = "正" if name == "timeout_s" else "非负"
+                raise ValueError(f"{name} 必须是有限{domain} Decimal 秒数: {value!r}")
 
 
 @dataclass(frozen=True)
