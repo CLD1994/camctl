@@ -16,7 +16,7 @@ from typing import Any
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
-from camctl.contracts.values import ConsistencyError, OperationKey
+from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
@@ -27,6 +27,7 @@ from camctl.outputs.catalog import OutputKind
 from camctl.outputs.sources import (
     ActionFacts,
     CatalogEntry,
+    OriginalOutputs,
     ResolutionState,
     SelectionFacts,
     SelectionMode,
@@ -805,6 +806,72 @@ def load_selection_facts(
         known_output_ids=known,
         previously_confirmed_ids=previously_confirmed_ids,
     )
+
+
+def load_output_family(connection, output_id: int) -> OriginalOutputs:
+    """只读取得当前产物所属的一份原片及派生关系，最多三个产物。
+
+    目标必须已经登记；派生关系缺失与可靠没有派生产物分别处理。
+    第三个派生 ID 只用于识别超出一份预览及一份修复成品的矛盾，
+    不读取同一来源的其他原片或全库目录。调用方使用同一事务快照。
+    """
+    ObjectId(output_id)
+
+    def required(table, identity):
+        facts = row_facts(connection, table, identity)
+        if facts is None:
+            raise ConsistencyError(f"产物关联记录缺失: {table}#{identity}")
+        return facts
+
+    def origin(identity):
+        with closing(connection.execute(
+            "SELECT original_output_id FROM output_origins WHERE output_id=?", (identity,),
+        )) as cursor:
+            row = cursor.fetchone()
+        return row[0] if row is not None else None
+
+    target = required("outputs", output_id)
+    original_id = origin(output_id)
+    if target["kind"] == int(_OUTPUT_KIND.ORIGINAL):
+        if original_id is not None:
+            raise ConsistencyError("原片不能携带派生关联")
+        original = target
+    else:
+        if original_id is None:
+            raise ConsistencyError("派生产物缺少原片关联")
+        original = required("outputs", original_id)
+        if original["kind"] != int(_OUTPUT_KIND.ORIGINAL) or origin(original_id) is not None:
+            raise ConsistencyError("派生产物必须指向没有派生关联的原片")
+    original_id = original["id"]
+    with closing(connection.execute(
+        "SELECT output_id FROM output_origins WHERE original_output_id=? ORDER BY output_id LIMIT 3",
+        (original_id,),
+    )) as cursor:
+        related_ids = tuple(row[0] for row in cursor.fetchall())
+    if len(related_ids) > 2:
+        raise ConsistencyError("同一原片最多登记一份预览和一份修复成品")
+    by_kind = {}
+    for identity in (original_id, *related_ids):
+        entry = original if identity == original_id else target if identity == output_id else required("outputs", identity)
+        kind = OutputKind[_OUTPUT_KIND(entry["kind"]).name]
+        if kind in by_kind or entry["source_action_id"] != original["source_action_id"]:
+            raise ConsistencyError("派生产物重复或不属于原片来源")
+        is_device = entry["device_file_id"] is not None
+        file = required("device_files" if is_device else "intermediate_files",
+                        entry["device_file_id"] if is_device else entry["intermediate_file_id"])
+        if file["source_action_id" if is_device else "owner_action_id"] != original["source_action_id"]:
+            raise ConsistencyError("产物承载文件不属于原片来源")
+        size = file["size_bytes"]
+        if size is not None and (not is_json_integer(size) or size < 0):
+            raise ConsistencyError("产物完整长度无法解释")
+        by_kind[kind] = CatalogEntry(
+            output_id=identity, kind=kind, availability=entry["availability"], size_bytes=size,
+            original_output_id=None if identity == original_id else original_id,
+        )
+    if output_id not in (original_id, *related_ids):
+        raise ConsistencyError("目标产物未保留在原片派生关系中")
+    return OriginalOutputs(original["source_action_id"], by_kind[OutputKind.ORIGINAL],
+                           by_kind.get(OutputKind.PREVIEW), by_kind.get(OutputKind.REPAIRED))
 
 
 def _saved_items(connection, selection_id: int) -> list[SelectedItem]:

@@ -24,6 +24,7 @@ from camctl.contracts.workflow_errors import action_error_id, item_error_id
 __all__ = [
     "ActionFacts",
     "CatalogEntry",
+    "OriginalOutputs",
     "ItemStatus",
     "ResolveFailure",
     "ResolutionState",
@@ -35,6 +36,7 @@ __all__ = [
     "SourceResolution",
     "SourceSpec",
     "resolve_source",
+    "select_for_original",
     "select_outputs",
 ]
 
@@ -305,6 +307,16 @@ class CatalogEntry:
 
 
 @dataclass(frozen=True)
+class OriginalOutputs:
+    """同一来源的一份原片及已登记派生产物；空值表示可靠不存在。"""
+
+    source_action_id: int
+    original: CatalogEntry
+    preview: CatalogEntry | None = None
+    repaired: CatalogEntry | None = None
+
+
+@dataclass(frozen=True)
 class SelectionFacts:
     """一个固定来源的选择事实。
 
@@ -397,10 +409,8 @@ def select_outputs(
         )
     if not facts.source_completed:
         return SelectionSnapshot(is_fixed=False)
-    if mode == SelectionMode.DEFAULT:
-        return _select_default(facts)
-    if mode == SelectionMode.PREVIEW:
-        return _select_preview(facts)
+    if mode in (SelectionMode.DEFAULT, SelectionMode.PREVIEW):
+        return _select_families(facts, SelectionMode(mode))
     return _select_explicit(facts, requested_output_ids)
 
 
@@ -458,53 +468,63 @@ def _unique_derived(
     return found[0] if found else None
 
 
-def _select_default(facts: SelectionFacts) -> SelectionSnapshot:
-    originals = sorted(
-        (
-            entry
-            for entry in facts.outputs
-            if entry.kind is OutputKind.ORIGINAL
-        ),
-        key=lambda entry: entry.output_id,
-    )
-    if not originals:
-        return SelectionSnapshot(
-            is_fixed=True, items=(), source_error_code=SELECTION_NO_OUTPUTS
+def select_for_original(
+    source_action_id: int,
+    original: CatalogEntry,
+    mode: SelectionMode,
+    *,
+    preview: CatalogEntry | None = None,
+    repaired: CatalogEntry | None = None,
+) -> SelectedItem:
+    """按默认或预览规则选择一份原片的目标，不保存选择或授予资格。
+
+    调用方提供同源原片及其全部适用派生产物，另行核对来源完成、
+    已固定选择和候选资格。本函数只决定选中身份及其选择依据；
+    不可用目标不回退，未知存在性仍保留该身份供后续确认。
+    """
+    if not isinstance(mode, SelectionMode) or mode not in (SelectionMode.DEFAULT, SelectionMode.PREVIEW):
+        raise ValueError("逐原片选择只适用于默认和预览方式")
+    if original.kind is not OutputKind.ORIGINAL or original.original_output_id is not None:
+        raise ConsistencyError("逐原片选择要求没有派生关联的原片")
+    identities = {original.output_id}
+    for entry, kind in ((preview, OutputKind.PREVIEW), (repaired, OutputKind.REPAIRED)):
+        if entry is None:
+            continue
+        if (entry.kind is not kind or entry.original_output_id != original.output_id
+                or entry.output_id in identities):
+            raise ConsistencyError("派生产物的角色、身份或原片关联不一致")
+        identities.add(entry.output_id)
+    if mode is SelectionMode.DEFAULT:
+        return _item_for_availability(
+            repaired if repaired is not None else original,
+            ItemBasis.REPAIRED if repaired is not None else ItemBasis.ORIGINAL,
+            original_output_id=original.output_id if repaired is not None else None,
         )
-    items: list[SelectedItem] = []
-    for original in originals:
-        repaired = _unique_derived(facts.outputs, OutputKind.REPAIRED, original.output_id)
-        chosen = repaired if repaired is not None else original
-        if Availability(chosen.availability) is Availability.AVAILABLE:
-            items.append(
-                SelectedItem(
-                    basis=ItemBasis.REPAIRED
-                    if repaired is not None
-                    else ItemBasis.ORIGINAL,
-                    status=ItemStatus.SELECTED,
-                    output_id=chosen.output_id,
-                    original_output_id=original.output_id
-                    if repaired is not None
-                    else None,
-                )
-            )
-        else:
-            # 所选修复成品不可用不回退原片，未知存在性留待后续核实。
-            items.append(
-                _item_for_availability(
-                    chosen,
-                    ItemBasis.REPAIRED
-                    if repaired is not None
-                    else ItemBasis.ORIGINAL,
-                    original_output_id=original.output_id
-                    if repaired is not None
-                    else None,
-                )
-            )
-    return SelectionSnapshot(is_fixed=True, items=tuple(items))
+    if preview is None:
+        return SelectedItem(
+            basis=ItemBasis.PREVIEW, status=ItemStatus.FAILED,
+            original_output_id=original.output_id, error_code=_ITEM_PREVIEW_MISSING,
+            error_details={"source_action_instance_id": str(source_action_id),
+                           "original_output_id": str(original.output_id)},
+        )
+    if repaired is not None and (preview.size_bytes is None or repaired.size_bytes is None):
+        return SelectedItem(
+            basis=ItemBasis.PREVIEW, status=ItemStatus.FAILED, output_id=preview.output_id,
+            preview_output_id=preview.output_id, original_output_id=original.output_id,
+            error_code=_ITEM_SOURCE_FILE_UNCONFIRMED,
+            error_details={"output_id": str(preview.output_id)},
+        )
+    use_repaired = repaired is not None and repaired.size_bytes <= preview.size_bytes
+    return _item_for_availability(
+        repaired if use_repaired else preview,
+        ItemBasis.REPAIRED_NOT_LARGER if use_repaired else ItemBasis.PREVIEW,
+        original_output_id=original.output_id, preview_output_id=preview.output_id,
+        preview_size=preview.size_bytes if repaired is not None else None,
+        repaired_size=repaired.size_bytes if repaired is not None else None,
+    )
 
 
-def _select_preview(facts: SelectionFacts) -> SelectionSnapshot:
+def _select_families(facts: SelectionFacts, mode: SelectionMode) -> SelectionSnapshot:
     originals = sorted(
         (
             entry
@@ -521,108 +541,14 @@ def _select_preview(facts: SelectionFacts) -> SelectionSnapshot:
     any_preview_target = False
     for original in originals:
         preview = _unique_derived(facts.outputs, OutputKind.PREVIEW, original.output_id)
-        if preview is None:
-            # 逐份保存预览缺失；不因有修复成品自动改传该成品。
-            items.append(
-                SelectedItem(
-                    basis=ItemBasis.PREVIEW,
-                    status=ItemStatus.FAILED,
-                    original_output_id=original.output_id,
-                    error_code=_ITEM_PREVIEW_MISSING,
-                    error_details={
-                        "source_action_instance_id": str(facts.source_action_id),
-                        "original_output_id": str(original.output_id),
-                    },
-                )
-            )
-            continue
-        any_preview_target = True
         repaired = _unique_derived(facts.outputs, OutputKind.REPAIRED, original.output_id)
-        if (
-            repaired is not None
-            and preview.size_bytes is not None
-            and repaired.size_bytes is not None
-        ):
-            if repaired.size_bytes <= preview.size_bytes:
-                items.append(
-                    _preview_family_item(
-                        repaired,
-                        ItemBasis.REPAIRED_NOT_LARGER,
-                        original.output_id,
-                        preview.output_id,
-                        preview.size_bytes,
-                        repaired.size_bytes,
-                    )
-                )
-            else:
-                items.append(
-                    _preview_family_item(
-                        preview,
-                        ItemBasis.PREVIEW,
-                        original.output_id,
-                        preview.output_id,
-                        preview.size_bytes,
-                        repaired.size_bytes,
-                    )
-                )
-            continue
-        if repaired is not None and (
-            preview.size_bytes is None or repaired.size_bytes is None
-        ):
-            # 完整大小无法确认：不猜测选择，也不冒充无产物。
-            items.append(
-                SelectedItem(
-                    basis=ItemBasis.PREVIEW,
-                    status=ItemStatus.FAILED,
-                    output_id=preview.output_id,
-                    preview_output_id=preview.output_id,
-                    original_output_id=original.output_id,
-                    error_code=_ITEM_SOURCE_FILE_UNCONFIRMED,
-                    error_details={"output_id": str(preview.output_id)},
-                )
-            )
-            continue
-        items.append(
-            _preview_family_item(
-                preview,
-                ItemBasis.PREVIEW,
-                original.output_id,
-                preview.output_id,
-                None,
-                None,
-            )
-        )
-    source_error = None if any_preview_target else _SELECTION_PREVIEW_MISSING
+        any_preview_target |= preview is not None
+        items.append(select_for_original(facts.source_action_id, original, mode,
+                                         preview=preview, repaired=repaired))
+    source_error = (_SELECTION_PREVIEW_MISSING
+                    if mode is SelectionMode.PREVIEW and not any_preview_target else None)
     return SelectionSnapshot(
         is_fixed=True, items=tuple(items), source_error_code=source_error
-    )
-
-
-def _preview_family_item(
-    entry: CatalogEntry,
-    basis: int,
-    original_id: int,
-    preview_id: int,
-    preview_size: int | None,
-    repaired_size: int | None,
-) -> SelectedItem:
-    if Availability(entry.availability) == Availability.AVAILABLE:
-        return SelectedItem(
-            basis=basis,
-            status=ItemStatus.SELECTED,
-            output_id=entry.output_id,
-            original_output_id=original_id,
-            preview_output_id=preview_id,
-            preview_size=preview_size,
-            repaired_size=repaired_size,
-        )
-    return _item_for_availability(
-        entry,
-        basis,
-        original_output_id=original_id,
-        preview_output_id=preview_id,
-        preview_size=preview_size,
-        repaired_size=repaired_size,
     )
 
 
