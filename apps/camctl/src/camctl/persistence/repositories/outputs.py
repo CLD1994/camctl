@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
@@ -883,16 +883,9 @@ class _GrantFileCommand:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(connection, saved)
         command = self._command
-        action = self._required(connection, "actions", command.action_id)
-        is_device_source = command.source_device_file_id is not None
-        source_file = self._required(
-            connection, "device_files" if is_device_source else "intermediate_files",
-            command.source_device_file_id if is_device_source else command.source_intermediate_file_id,
-        )
-        output = self._load_target(connection, action, source_file)
-        device_id = self._source_device(connection, source_file) if is_device_source else None
+        action, source_file, output, device_id = self._load_inputs(connection)
         existing = self._existing_preparation(connection, source_file, device_id)
         if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
             return self._wait("action_not_eligible")
@@ -930,6 +923,16 @@ class _GrantFileCommand:
         return self._grant(scope, source_file, device_id)
 
     # ---- 资格核对 ----
+
+    def _load_inputs(self, connection):
+        command = self._command
+        action = self._required(connection, "actions", command.action_id)
+        is_device = command.source_device_file_id is not None
+        source = self._required(connection, "device_files" if is_device else "intermediate_files",
+            command.source_device_file_id if is_device else command.source_intermediate_file_id)
+        output = self._load_target(connection, action, source)
+        device = self._source_device(connection, source) if is_device else None
+        return action, source, output, device
 
     def _required(self, connection, table: str, row_id: int) -> dict:
         facts = row_facts(connection, table, row_id)
@@ -1167,19 +1170,32 @@ class _GrantFileCommand:
     def _grant(self, scope, source_file, device_id: str | None) -> CommandPlan:
         command = self._command
         is_delivery = command.item_id is not None
-        config = command.config
-
         target_file_id = next_row_id(scope.connection, "intermediate_files")
         delivery_id = (
             next_row_id(scope.connection, "deliveries") if is_delivery else None
         )
         copy_id = next_row_id(scope.connection, "file_copies")
         run_id = next_row_id(scope.connection, "operation_runs")
+        specs, owners = self._grant_specs(source_file, device_id, target_file_id, delivery_id, copy_id, run_id,
+            self._state["obtain_items"][command.item_id] if is_delivery else None)
+        self._owners.update(owners)
+        return CommandPlan(
+            events=self._envelopes(scope, specs), owners=self._owners, state_rows=self._state,
+            result=FileQualification(outcome=QualificationOutcome.GRANTED, copy_id=copy_id,
+                run_id=run_id, delivery_id=delivery_id, target_file_id=target_file_id, reason=None),
+        )
+
+    def _grant_specs(self, source_file, device_id, target_file_id, delivery_id, copy_id, run_id, item):
+        """以固定输入形成完整建档事实，供首次保存和原键核对共用。"""
+        command = self._command
+        is_delivery = command.item_id is not None
+        config = command.config
         purpose = FilePurpose.DELIVERY_COPY if is_delivery else FilePurpose.RECORDING_INPUT
         target_path = relative_file_path(purpose, target_file_id, command.target_extension)
         delivery_name = object_file_name(delivery_id, command.delivery_extension) if is_delivery else None
 
         specs: list[tuple[int, int, tuple]] = []
+        owners = {}
         intermediate_row = _row(
             "intermediate_files",
             target_file_id,
@@ -1196,7 +1212,7 @@ class _GrantFileCommand:
             },
         )
         specs.append((_INTERMEDIATE_FILE_EVENT, 1, (intermediate_row,)))
-        self._owners[("intermediate_files", target_file_id)] = (
+        owners[("intermediate_files", target_file_id)] = (
             "intermediate_file", target_file_id,
         )
 
@@ -1218,7 +1234,7 @@ class _GrantFileCommand:
                 },
             )
             specs.append((_DELIVERY_CHANGED_EVENT, 1, (delivery_row,)))
-            self._owners[("deliveries", delivery_id)] = ("delivery", delivery_id)
+            owners[("deliveries", delivery_id)] = ("delivery", delivery_id)
 
         run_row = _row(
             "operation_runs",
@@ -1270,11 +1286,10 @@ class _GrantFileCommand:
             },
         )
         specs.append((_COPY_CHANGED_EVENT, 1, (copy_row,)))
-        self._owners[("file_copies", copy_id)] = copy_owner
-        self._owners[("operation_runs", run_id)] = copy_owner
+        owners[("file_copies", copy_id)] = copy_owner
+        owners[("operation_runs", run_id)] = copy_owner
 
         if is_delivery:
-            item = self._state["obtain_items"][command.item_id]
             item_row = _update(
                 "obtain_items",
                 command.item_id,
@@ -1290,24 +1305,11 @@ class _GrantFileCommand:
                 },
             )
             specs.append((_READ_PERMISSION_EVENT, _GRANT_REASON, (item_row,)))
-            self._owners[("obtain_items", command.item_id)] = (
+            owners[("obtain_items", command.item_id)] = (
                 "action", command.action_id,
             )
 
-        events = self._envelopes(scope, specs)
-        return CommandPlan(
-            events=events,
-            owners=self._owners,
-            state_rows=self._state,
-            result=FileQualification(
-                outcome=QualificationOutcome.GRANTED,
-                copy_id=copy_id,
-                run_id=run_id,
-                delivery_id=delivery_id,
-                target_file_id=target_file_id,
-                reason=None,
-            ),
-        )
+        return specs, owners
 
     def _envelopes(self, scope, specs: list[tuple[int, int, tuple]]):
         """一次性分配本组事件的编号并构造事件信封。"""
@@ -1480,49 +1482,95 @@ class _GrantFileCommand:
             delivery_id=delivery_id, target_file_id=target["id"], reason="already_granted",
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
-        """同键重送：从已保存事件重建原结果。"""
-        copy_id = run_id = delivery_id = target_file_id = None
-        granted = False
+    def _reuse(self, connection, saved: list[dict]) -> CommandPlan:
+        """原键核对完整业务组和原输入；不重新判断当前普通资格。"""
+        if any(event["occurred_at"] != self._command.occurred_at for event in saved):
+            raise TransactionError("读取申请的事实时刻与原事务不同")
+        if len(saved) == 1 and (saved[0]["type"], saved[0]["reason"]) == (_READ_PERMISSION_EVENT, _REJECT_REASON):
+            return self._reuse_rejection(connection, saved[0])
+        required = {"intermediate_files", "operation_runs", "file_copies"}
+        if self._command.item_id is not None:
+            required.update(("deliveries", "obtain_items"))
+        rows, events = {}, {}
         for event in saved:
-            for row in event.get("body", {}).get("rows", []):
-                values = row.get("after", {})
-                if not values.get("exists", True) and row.get("table") != "obtain_items":
-                    continue
-                after = values.get("values", values)
-                table = row.get("table")
-                if table == "file_copies" and after.get("id"):
-                    copy_id = after["id"]
-                elif table == "operation_runs" and after.get("id"):
-                    run_id = after["id"]
-                elif table == "deliveries" and after.get("id"):
-                    delivery_id = after["id"]
-                elif table == "intermediate_files" and after.get("id"):
-                    target_file_id = after["id"]
-                elif table == "obtain_items" and after.get("status") == int(
-                    _ITEM_STATUS.DELIVERY_CREATED
-                ):
-                    granted = True
-        if not granted and copy_id is None:
-            outcome = QualificationOutcome.REJECTED_FINAL
-        elif granted or copy_id is not None:
-            outcome = QualificationOutcome.GRANTED
-        else:
-            outcome = QualificationOutcome.REJECTED
+            changes = event["body"]["rows"]
+            if len(changes) != 1 or changes[0]["table"] in rows:
+                raise ConsistencyError("原建档事务的业务成员重复或不完整")
+            row = changes[0]
+            rows[row["table"]], events[row["table"]] = row, event
+        if rows.keys() != required:
+            raise TransactionError("原操作身份不属于本次读取建档阶段")
+        for table, row in rows.items():
+            if (row["before"]["exists"] != (table == "obtain_items") or not row["after"]["exists"]):
+                raise TransactionError("原操作身份的创建或资格变更阶段不符")
+        copy = rows["file_copies"]
+        source_snapshot = {"size_bytes": copy["after"]["values"]["source_size"],
+                           "sha256": copy["after"]["values"]["source_sha256"]}
+        ids = {name: row["id"] for name, row in rows.items()}
+        try:
+            specs, _ = self._grant_specs(source_snapshot, copy["after"]["values"]["slot_device_id"],
+                ids["intermediate_files"], ids.get("deliveries"), ids["file_copies"], ids["operation_runs"],
+                {"status": int(_ITEM_STATUS.SELECTED), "source_dependency": 0, "delivery_id": None})
+        except PathRuleError as error:
+            raise TransactionError("重送的文件名称无法对应原建档身份") from error
+        for event_type, reason, (expected,) in specs:
+            original, event = rows[expected.table], events[expected.table]
+            if (event["type"], event["reason"]) != (event_type, reason):
+                raise TransactionError("原操作身份的事件阶段与读取建档不符")
+            if (original["id"] != expected.row_id
+                    or original["before"]["exists"] != expected.before.exists
+                    or original["after"]["exists"] != expected.after.exists
+                    or not json_equal(original["before"].get("values", {}), expected.before.values)
+                    or not json_equal(original["after"]["values"], expected.after.values)):
+                raise TransactionError("原建档事实与本次读取申请的目标或采用参数不同")
+        _, source, _, device = self._load_inputs(connection)
+        existing = self._existing_preparation(connection, source, device)
+        if (existing is None or existing.copy_id != ids["file_copies"]
+                or existing.run_id != ids["operation_runs"] or existing.target_file_id != ids["intermediate_files"]
+                or existing.delivery_id != ids.get("deliveries")):
+            raise ConsistencyError("原建档事务与当前准备责任的身份不一致")
+        current_copy = self._state["file_copies"][existing.copy_id]
+        if (current_copy["source_size"] != source_snapshot["size_bytes"]
+                or (source_snapshot["sha256"] is not None and current_copy["source_sha256"] != source_snapshot["sha256"])
+                or copy["after"]["values"]["slot_device_id"] != device):
+            raise ConsistencyError("原建档事务的源内容或设备身份不一致")
+        for table, names in (("intermediate_files", ("relative_path",)),
+                             ("deliveries", ("file_name", "display_name"))):
+            if table not in rows:
+                continue
+            current = self._state[table][ids[table]]
+            if (current["created_event_id"] != events[table]["event_id"]
+                    or any(not json_equal(current[name], rows[table]["after"]["values"][name]) for name in names)):
+                raise ConsistencyError("原建档记录的创建引用或固定名称不一致")
         return CommandPlan(
-            events=(),
-            owners=self._owners,
-            state_rows=self._state,
-            read_only=True,
+            events=(), owners=self._owners, state_rows=self._state, read_only=True,
             result=FileQualification(
-                outcome=outcome,
-                copy_id=copy_id,
-                run_id=run_id,
-                delivery_id=delivery_id,
-                target_file_id=target_file_id,
-                reason="resent",
+                outcome=QualificationOutcome.GRANTED, copy_id=existing.copy_id, run_id=existing.run_id,
+                delivery_id=existing.delivery_id, target_file_id=existing.target_file_id, reason=None,
             ),
         )
+
+    def _reuse_rejection(self, connection, event) -> CommandPlan:
+        rows = event["body"]["rows"]
+        command = self._command
+        if (command.item_id is None or len(rows) != 1 or rows[0]["table"] != "obtain_items"
+                or rows[0]["id"] != command.item_id):
+            raise TransactionError("原拒绝事务不属于本次取回项")
+        row = rows[0]
+        before = {"status": int(_ITEM_STATUS.SELECTED), "error_code": None, "error_details_json": None}
+        after = row["after"]["values"]
+        if (not row["before"]["exists"] or not row["after"]["exists"]
+                or not json_equal(row["before"]["values"], before)
+                or set(after) != set(before) or after["status"] != int(_ITEM_STATUS.FAILED)
+                or after["error_code"] not in (_OUTPUT_UNAVAILABLE_CODE, _OUTPUT_CLEANUP_STARTED_CODE)):
+            raise ConsistencyError("原事务不是已选中产物的建档前拒绝")
+        _, source, output, device = self._load_inputs(connection)
+        item = self._state["obtain_items"][command.item_id]
+        _validate_obtain_error({**item, **after}, output["source_action_id"])
+        if (self._existing_preparation(connection, source, device) is not None
+                or any(not json_equal(item[name], value) for name, value in after.items())):
+            raise ConsistencyError("已拒绝取回项未保留原事务的最终事实")
+        return self._wait_final(after["error_code"])
 
 
 class OutputsRepository:
