@@ -8,13 +8,16 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from typing import Any
 
 from camctl.contracts.enums import decode_member, enum_for
-from camctl.contracts.values import OperationKey
+from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.json_values import json_equal
+from camctl.contracts.values import ObjectId, OperationKey, UtcMicros
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptTicket,
@@ -22,6 +25,7 @@ from camctl.operations.attempts import (
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
@@ -106,13 +110,21 @@ class GrantStartCommand:
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
+        request = self._request
+        ObjectId(request.action_id)
+        UtcMicros(request.occurred_at)
+        if not isinstance(request.config, AttemptConfig):
+            raise TransactionError("启动授予要求受约束的尝试配置")
+        if not isinstance(request.device_id, str) or not request.device_id:
+            raise TransactionError("启动授予要求明确的设备身份")
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(scope, saved)
 
-        request = self._request
         action = self._load_action(connection, request.action_id)
         self._state["actions"] = {request.action_id: action}
+        if action["device_id"] != request.device_id:
+            raise TransactionError("启动授予的设备与动作保存的设备不符")
         if action["type"] not in _CAMERA_ACTION_TYPES:
             raise TransactionError(
                 f"启动授予只适用于拍摄动作: {request.action_id}"
@@ -135,11 +147,16 @@ class GrantStartCommand:
         if not self._is_first_candidate(connection, request):
             return self._rejected("not_first_candidate")
 
-        activity = row_facts(connection, "device_activities", request.action_id)
-        if activity is None:
+        with closing(connection.execute(
+            "SELECT id FROM device_activities WHERE action_id = ?", (request.action_id,),
+        )) as cursor:
+            found_activity = cursor.fetchone()
+        activity = (None if found_activity is None
+                    else row_facts(connection, "device_activities", found_activity[0]))
+        if activity is None or activity["action_id"] != request.action_id:
             # 首次机会记录必须包含活动身份；缺活动整组拒绝。
             raise TransactionError(f"设备活动不存在: {request.action_id}")
-        self._state["device_activities"] = {request.action_id: activity}
+        self._state["device_activities"] = {activity["id"]: activity}
         if activity["dispatch_state"] not in (
             int(_DISPATCH_STATE.NOT_DISPATCHED),
             int(_DISPATCH_STATE.REJECTED_WITHOUT_EFFECT),
@@ -149,12 +166,14 @@ class GrantStartCommand:
             )
 
         key_str = f"start/{request.action_id}"
-        found = connection.execute(
+        with closing(connection.execute(
             "SELECT id FROM operation_runs WHERE responsibility_key = ?", (key_str,)
-        ).fetchone()
+        )) as cursor:
+            found = cursor.fetchone()
         run_facts = None
         if found is not None:
             run_facts = self._load_run(connection, int(found[0]))
+            self._verify_start_run(run_facts, activity["id"])
             self._state.setdefault("operation_runs", {})[run_facts["id"]] = run_facts
             if run_facts["status"] not in (
                 int(_RUN_STATUS.PENDING),
@@ -202,15 +221,7 @@ class GrantStartCommand:
                 "operation_runs",
                 run_id,
                 {
-                    "action_id": request.action_id,
-                    "delivery_id": None,
-                    "kind": int(_RUN_KIND.START),
-                    "query_purpose": None,
-                    "responsibility_key": key_str,
-                    "activity_id": request.action_id,
-                    "copy_id": None,
-                    "cleanup_item_id": None,
-                    "session_key": None,
+                    **self._start_run_identity(activity["id"]),
                     "status": int(_RUN_STATUS.ACTIVE),
                     "attempts_used": 1,
                     "max_attempts_used": request.config.max_attempts,
@@ -236,13 +247,13 @@ class GrantStartCommand:
             )
         activity_row = _update(
             "device_activities",
-            request.action_id,
+            activity["id"],
             {"dispatch_state": activity["dispatch_state"]},
             {"dispatch_state": int(_DISPATCH_STATE.MAY_HAVE_DISPATCHED)},
         )
         self._owners[("operation_runs", run_id)] = owner
         self._owners[("operation_attempts", attempt_id)] = owner
-        self._owners[("device_activities", request.action_id)] = owner
+        self._owners[("device_activities", activity["id"])] = owner
         event = _envelope(
             event_id,
             allocation.txn_id,
@@ -254,7 +265,7 @@ class GrantStartCommand:
         ticket = AttemptTicket(
             attempt_id=attempt_no,
             operation="control",
-            target_id=str(request.action_id),
+            target_id=str(activity["id"]),
             responsibility_key=key_str,
             run_id=run_id,
         )
@@ -265,7 +276,7 @@ class GrantStartCommand:
             result=GrantResult(
                 outcome=GrantOutcome.GRANTED,
                 ticket=ticket,
-                activity_id=request.action_id,
+                activity_id=activity["id"],
             ),
         )
 
@@ -283,15 +294,28 @@ class GrantStartCommand:
             values[column] = seconds_from_json(values[column])
         return values
 
+    def _start_run_identity(self, activity_id: int) -> dict[str, Any]:
+        action_id = self._request.action_id
+        return {"action_id": action_id, "delivery_id": None, "kind": int(_RUN_KIND.START),
+                "query_purpose": None, "responsibility_key": f"start/{action_id}",
+                "activity_id": activity_id, "copy_id": None, "cleanup_item_id": None, "session_key": None}
+
+    def _verify_start_run(self, run: dict, activity_id: int) -> dict[str, Any]:
+        identity = self._start_run_identity(activity_id)
+        if any(not json_equal(run[name], value) for name, value in identity.items()):
+            raise TransactionError("启动流程的只读身份与动作或活动不符")
+        return identity
+
     def _is_first_candidate(self, connection, request: GrantRequest) -> bool:
         """同设备存在排序更早的合格候选时不授予本动作。"""
-        rows = connection.execute(
+        with closing(connection.execute(
             "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index"
             " FROM actions a"
             " WHERE a.type IN (1, 2, 3) AND a.status = ? AND a.cancel_requested = 0"
             " AND a.device_id = ? AND a.scheduled_at IS NOT NULL",
             (_ACTION_RUNNING, request.device_id),
-        ).fetchall()
+        )) as cursor:
+            rows = cursor.fetchall()
         action = self._state["actions"][request.action_id]
         mine = (
             action["scheduled_at"],
@@ -324,24 +348,72 @@ class GrantStartCommand:
             result=GrantResult(outcome=GrantOutcome.REJECTED, reason=reason),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
-        started = [event for event in saved if event["type"] == _ATTEMPT_STARTED_EVENT]
-        if not started:
+    def _reuse(self, scope, saved: list[dict]) -> CommandPlan:
+        if (len(saved) != 1 or saved[0]["type"] != _ATTEMPT_STARTED_EVENT
+                or saved[0]["reason"] != 1):
             raise TransactionError("操作身份已用于其他阶段，不能作为授予重送")
-        attempt_values = None
-        for row in started[0]["body"].get("rows", []):
-            if row.get("table") == "operation_attempts" and row["after"]["exists"]:
-                attempt_values = row["after"]["values"]
-        if attempt_values is None:
-            raise TransactionError("已保存授予缺少尝试事实")
+        event = saved[0]
         request = self._request
-        run_id = int(attempt_values["run_id"])
+        rows = event["body"]["rows"]
+        by_table = {row["table"]: row for row in rows}
+        if (event["occurred_at"] != request.occurred_at or len(rows) != 3
+                or set(by_table) != {"operation_attempts", "operation_runs", "device_activities"}):
+            raise TransactionError("原授予的事务组成或事实时刻与输入不符")
+        attempt_row = by_table["operation_attempts"]
+        run_row = by_table["operation_runs"]
+        activity_row = by_table["device_activities"]
+        if (attempt_row["before"]["exists"] or not attempt_row["after"]["exists"]
+                or not run_row["after"]["exists"] or not activity_row["before"]["exists"]
+                or not activity_row["after"]["exists"]):
+            raise TransactionError("原授予的尝试、流程或活动不属于本次输入")
+        values = attempt_row["after"]["values"]
+        if (not json_equal(values["run_id"], run_row["id"])
+                or not json_equal(values["intent_event_id"], event["event_id"])
+                or values["copy_round"] is not None):
+            raise TransactionError("原授予的尝试与流程或意图不符")
+        connection = scope.connection
+        attempt = row_facts(connection, "operation_attempts", attempt_row["id"])
+        run = self._load_run(connection, run_row["id"])
+        activity = row_facts(connection, "device_activities", activity_row["id"])
+        action = self._load_action(connection, request.action_id)
+        fixed = self._verify_start_run(run, activity_row["id"])
+        if (attempt is None or activity is None or activity["action_id"] != request.action_id
+                or action["device_id"] != request.device_id):
+            raise TransactionError("原授予的可靠记录或只读关联与输入不符")
+        config = {"max_attempts_used": request.config.max_attempts,
+                  "timeout_s_json": request.config.timeout_s,
+                  "retry_interval_s_json": request.config.retry_interval_s}
+        attempt_columns = ("run_id", "attempt_no", "copy_round", "intent_event_id", *config)
+        if (any(not json_equal(attempt[name], values[name]) for name in attempt_columns)
+                or any(not json_equal(values[name], value) for name, value in config.items())):
+            raise TransactionError("原授予的尝试身份或采用配置与输入不符")
+        transaction = event["transaction"]
+        after = read_row_values_at_boundary(connection, owner=("action", request.action_id),
+            table="operation_runs", row_id=run_row["id"], columns=frozenset(_RUN_UPDATE_COLUMNS),
+            current_values=run, boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+        before = {**after, **run_row["before"]["values"]}
+        if (not json_equal(after["status"], int(_RUN_STATUS.ACTIVE))
+                or not json_equal(after["attempts_used"], values["attempt_no"])
+                or not json_equal(after["retry_wait_required"], 0)
+                or any(not json_equal(after[name], values[name]) for name in config)
+                or any(name in after and not json_equal(value, after[name])
+                       for name, value in run_row["after"]["values"].items())
+                or (not run_row["before"]["exists"]
+                    and (not json_equal(values["attempt_no"], 1)
+                         or any(not json_equal(run_row["after"]["values"][name], value)
+                                for name, value in fixed.items())))
+                or (run_row["before"]["exists"]
+                    and (before["status"] not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))
+                         or not json_equal(before["attempts_used"], values["attempt_no"] - 1)
+                         or (values["attempt_no"] > 1 and not json_equal(before["retry_wait_required"], 1))))):
+            raise TransactionError("原授予的完整流程状态、次数或配置不符")
         ticket = AttemptTicket(
-            attempt_id=int(attempt_values["attempt_no"]),
+            attempt_id=int(values["attempt_no"]),
             operation="control",
-            target_id=str(request.action_id),
-            responsibility_key=f"start/{request.action_id}",
-            run_id=run_id,
+            target_id=str(activity_row["id"]),
+            responsibility_key=run["responsibility_key"],
+            run_id=run_row["id"],
         )
         return CommandPlan(
             events=(),
@@ -351,7 +423,7 @@ class GrantStartCommand:
             result=GrantResult(
                 outcome=GrantOutcome.GRANTED,
                 ticket=ticket,
-                activity_id=request.action_id,
+                activity_id=activity_row["id"],
             ),
         )
 
