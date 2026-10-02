@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from contextlib import closing
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
+from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
@@ -569,12 +570,8 @@ class _FixSelectionCommand:
                 f"来源选择状态不可解释: {command.selection_id}"
                 f" {selection['status']!r}"
             )
-        with closing(connection.execute(
-            "SELECT 1 FROM obtain_items WHERE selection_id=? LIMIT 1", (command.selection_id,),
-        )) as cursor:
-            has_items = cursor.fetchone() is not None
-        if has_items:
-            raise ConsistencyError("尚未固定的来源选择不能已有目标条目")
+        reads = _CatalogReads(connection)
+        reads.require_empty_selection(command.selection_id)
         snapshot = command.snapshot
         if not snapshot.is_fixed:
             raise TransactionError("未完成选择不能固定")
@@ -589,7 +586,7 @@ class _FixSelectionCommand:
             raise TransactionError(
                 f"来源动作未终态不能固定选择: {source_action_id}"
             )
-        if not _processing_completed(connection, source_action_id):
+        if not _processing_completed_facts(reads.processing(source_action_id)):
             raise TransactionError(
                 f"来源适用产物处理未完成: {source_action_id}"
             )
@@ -601,17 +598,17 @@ class _FixSelectionCommand:
             mode, requested = read_selection_request(owner["execution_spec_json"], owner["input_fields_json"])
         except ValueError as error:
             raise ConsistencyError("已保存的取回选择定义或原请求无法解释") from error
-        members = _catalog_members(connection, source_action_id)
+        members = reads.catalog(source_action_id)
         entries = tuple(member.entry for member in members)
         facts = SelectionFacts(source_action_id, True, entries,
-                               checked_output_sources=_checked_output_sources(connection, entries, requested))
+                               checked_output_sources=reads.checked_sources(entries, requested))
         expected = select_outputs(
             SourceResolution(state=ResolutionState.FIXED, member_action_ids=(source_action_id,),
                              source_plan_id=source["plan_id"]), facts, mode, requested)
         if not _same_selection(snapshot, expected):
             raise TransactionError("选择快照与已保存请求及当前来源事实不一致")
-        for member in members:
-            self._state["outputs"][member.entry.output_id] = member.row
+        for table, current in reads.state_rows.items():
+            self._state.setdefault(table, {}).update(current)
 
         rows = []
         if snapshot.source_error_code is None:
@@ -673,6 +670,7 @@ class _FixSelectionCommand:
             result=SelectionSaved(
                 selection_id=command.selection_id, snapshot=snapshot
             ),
+            read_coverage=reads.read_coverage(),
         )
 
     def _reuse(self, saved: list[dict], connection) -> CommandPlan:
@@ -727,15 +725,14 @@ def _same_selection(left: SelectionSnapshot, right: SelectionSnapshot) -> bool:
 
 def _processing_completed(connection, source_action_id: int) -> bool:
     """来源动作的适用产物处理是否已完成（录像检查/修复/丢弃）。"""
-    with closing(connection.execute(
-        "SELECT check_state, repair_state, discard_state FROM recording_processing"
-        " WHERE action_id = ?",
-        (source_action_id,),
-    )) as cursor:
-        row = cursor.fetchone()
+    return _processing_completed_facts(_CatalogReads(connection).processing(source_action_id))
+
+
+def _processing_completed_facts(row) -> bool:
     if row is None:
         return True
-    check_state, repair_state, discard_state = (int(value) for value in row)
+    check_state, repair_state, discard_state = (
+        int(row[column]) for column in ("check_state", "repair_state", "discard_state"))
     return (
         check_state not in _UNFINISHED_PROCESSING_CHECK
         and repair_state not in _UNFINISHED_PROCESSING_REPAIR
@@ -777,25 +774,212 @@ def _guard_read_time(event, context, action_id) -> None:
 class _CatalogMember:
     """已核对文件关系的产物行及其选择依据。"""
 
-    row: dict[str, Any]
+    row: Mapping[str, Any]
     entry: CatalogEntry
 
 
-def _catalog_members(connection, source_action_id: int) -> list[_CatalogMember]:
-    """分批枚举完整来源，每组原片及派生关系只加载一次。"""
+class _FamilyReads(Protocol):
+    """一份原片关系解释所需的可靠行及完整关联范围。"""
+
+    def required(self, table: str, identity: int) -> Mapping[str, Any]: ...
+    def origin(self, identity: int) -> int | None: ...
+    def related(self, original_id: int) -> tuple[int, ...]: ...
+
+
+class _CatalogReads:
+    """在同一数据库读取快照中保留原始事实及成功查询的范围。"""
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.state_rows: dict[str, dict[int, dict[str, Any]]] = {}
+        self._ranges: dict[tuple[str, str], set[int]] = {}
+        self._full_rows: set[tuple[str, int]] = set()
+
+    def _covered(self, table, column, identity):
+        self._ranges.setdefault((table, column), set()).add(identity)
+
+    def read_coverage(self) -> ReadCoverage:
+        return ReadCoverage(self._ranges)
+
+    def _remember(self, table, identity, facts, *, complete=False):
+        """合并同一快照的已读字段；局部读取不能使完整行退化。"""
+        rows = self.state_rows.setdefault(table, {})
+        existing = rows.get(identity)
+        if existing is None:
+            existing = rows[identity] = facts
+        else:
+            for column, value in facts.items():
+                if column in existing and not json_equal(existing[column], value):
+                    raise ConsistencyError(f"同一读取快照中的记录事实矛盾: {table}#{identity}.{column}")
+            for column, value in facts.items():
+                existing.setdefault(column, value)
+        if complete:
+            self._full_rows.add((table, identity))
+        return existing
+
+    def processing(self, source_action_id: int) -> dict[str, Any] | None:
+        with closing(self.connection.execute(
+            "SELECT check_state, repair_state, discard_state, id, action_id FROM recording_processing"
+            " WHERE action_id = ?", (source_action_id,),
+        )) as cursor:
+            row = cursor.fetchone()
+        facts = None
+        if row is not None:
+            facts = dict(zip(("check_state", "repair_state", "discard_state", "id", "action_id"), row))
+            facts = self._remember("recording_processing", row[3], facts)
+        self._covered("recording_processing", "action_id", source_action_id)
+        return facts
+
+    def require_empty_selection(self, selection_id: int) -> None:
+        with closing(self.connection.execute(
+            "SELECT 1 FROM obtain_items WHERE selection_id=? LIMIT 1", (selection_id,),
+        )) as cursor:
+            has_items = cursor.fetchone() is not None
+        if has_items:
+            raise ConsistencyError("尚未固定的来源选择不能已有目标条目")
+        self._covered("obtain_items", "selection_id", selection_id)
+
+    def checked_sources(self, entries, identities) -> dict[int, int | None]:
+        """只补查目录外的实际目标；失败不返回部分核实结果。"""
+        local_ids = {entry.output_id for entry in entries}
+        query_ids = sorted(set(identities) - local_ids)
+        checked: dict[int, int | None] = {}
+        for offset in range(0, len(query_ids), 128):
+            batch = query_ids[offset:offset + 128]
+            placeholders = ",".join("?" for _ in batch)
+            with closing(self.connection.execute(
+                f"SELECT id, source_action_id FROM outputs WHERE id IN ({placeholders})", batch,
+            )) as cursor:
+                rows = cursor.fetchall()
+            checked.update(dict.fromkeys(batch))
+            for identity, source in rows:
+                self._remember("outputs", identity, {
+                    "id": identity, "source_action_id": source})
+                checked[identity] = source
+            for identity in batch:
+                self._covered("outputs", "id", identity)
+        return checked
+
+    def required(self, table: str, identity: int) -> dict[str, Any]:
+        ObjectId(identity)
+        rows = self.state_rows.setdefault(table, {})
+        if (table, identity) not in self._full_rows:
+            facts = row_facts(self.connection, table, identity)
+            if facts is None:
+                raise ConsistencyError(f"产物关联记录缺失: {table}#{identity}")
+            self._remember(table, identity, facts, complete=True)
+            self._covered(table, "id", identity)
+        return rows[identity]
+
+    def origin(self, identity: int) -> int | None:
+        with closing(self.connection.execute(
+            "SELECT original_output_id, id, output_id FROM output_origins WHERE output_id=?", (identity,),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is not None:
+            self._remember("output_origins", row[1], {
+                "id": row[1], "output_id": row[2], "original_output_id": row[0]})
+        self._covered("output_origins", "output_id", identity)
+        return row[0] if row is not None else None
+
+    def related(self, original_id: int) -> tuple[int, ...]:
+        with closing(self.connection.execute(
+            "SELECT output_id, id, original_output_id FROM output_origins"
+            " WHERE original_output_id=? ORDER BY output_id LIMIT 3", (original_id,),
+        )) as cursor:
+            rows = cursor.fetchall()
+        if len(rows) > 2:
+            raise ConsistencyError("同一原片最多登记一份预览和一份修复成品")
+        for output_id, identity, original in rows:
+            self._remember("output_origins", identity, {
+                "id": identity, "output_id": output_id, "original_output_id": original})
+        self._covered("output_origins", "original_output_id", original_id)
+        return tuple(row[0] for row in rows)
+
+    def catalog(self, source_action_id: int) -> tuple[_CatalogMember, ...]:
+        """分批枚举完整来源；只有读取和解释全部成功才声明完整范围。"""
+        ObjectId(source_action_id)
+        members: dict[int, _CatalogMember] = {}
+        with closing(self.connection.execute(
+            "SELECT id FROM outputs WHERE source_action_id = ? ORDER BY id", (source_action_id,),
+        )) as cursor:
+            while batch := cursor.fetchmany(128):
+                for (output_id,) in batch:
+                    _include_family(self, members, source_action_id, output_id)
+        self._covered("outputs", "source_action_id", source_action_id)
+        return tuple(sorted(members.values(), key=lambda member: member.entry.output_id))
+
+
+def _include_family(reads: _FamilyReads, members, source_action_id, output_id) -> None:
+    if output_id in members:
+        return
+    for member in _family_members(reads, output_id):
+        if member.row["source_action_id"] != source_action_id:
+            raise ConsistencyError("产物关联集合不属于指定来源")
+        members[member.entry.output_id] = member
+
+
+class _CurrentCatalogReads:
+    """按当前行建立关联索引，查询不扫描未来提案或重复扫描全部关联。"""
+
+    def __init__(self, context):
+        self.context = context
+        self._origins = {}
+        self._related = {}
+        for row in context.state_rows.get("output_origins", {}).values():
+            try:
+                output_id, original_id = row["output_id"], row["original_output_id"]
+                for identity in (output_id, original_id):
+                    if not is_json_integer(identity):
+                        raise ValueError("关联身份必须是整数")
+                    ObjectId(int(identity))
+            except (KeyError, ValueError) as error:
+                raise ConsistencyError("产物原片关联身份缺失或无效") from error
+            if output_id in self._origins:
+                raise ConsistencyError("同一产物不能重复登记原片关联")
+            self._origins[int(output_id)] = int(original_id)
+            self._related.setdefault(int(original_id), []).append(int(output_id))
+
+    def required(self, table: str, identity: int) -> Mapping[str, Any]:
+        if not is_json_integer(identity):
+            raise ConsistencyError(f"产物关联身份无效: {table}#{identity!r}")
+        try:
+            identity = ObjectId(int(identity))
+        except ValueError as error:
+            raise ConsistencyError(f"产物关联身份越界: {table}#{identity!r}") from error
+        facts = self.context.state_rows.get(table, {}).get(identity)
+        if facts is None:
+            raise ConsistencyError(f"产物关联记录缺失: {table}#{identity}")
+        if "id" in facts:
+            if not is_json_integer(facts["id"]) or facts["id"] != identity:
+                raise ConsistencyError(f"产物关联行身份矛盾: {table}#{identity}")
+            return facts
+        return {**facts, "id": int(identity)}
+
+    def _require_coverage(self, column, identity):
+        if not self.context.read_coverage.covers("output_origins", column, identity):
+            raise EventValidationError(f"缺少原片关联完整读取范围: {column}={identity}")
+
+    def origin(self, identity: int) -> int | None:
+        self._require_coverage("output_id", identity)
+        return self._origins.get(identity)
+
+    def related(self, original_id: int) -> tuple[int, ...]:
+        self._require_coverage("original_output_id", original_id)
+        return tuple(sorted(self._related.get(original_id, ())))
+
+
+def _catalog_from_context(context, source_action_id: int) -> tuple[_CatalogMember, ...]:
+    rows = context.complete_rows("outputs", "source_action_id", source_action_id)
+    reads = _CurrentCatalogReads(context)
     members: dict[int, _CatalogMember] = {}
-    with closing(connection.execute(
-        "SELECT id FROM outputs WHERE source_action_id = ? ORDER BY id", (source_action_id,),
-    )) as cursor:
-        while batch := cursor.fetchmany(128):
-            for (output_id,) in batch:
-                if output_id in members:
-                    continue
-                for member in _load_family_members(connection, output_id):
-                    if member.row["source_action_id"] != source_action_id:
-                        raise ConsistencyError("产物关联集合不属于指定来源")
-                    members[member.entry.output_id] = member
-    return sorted(members.values(), key=lambda member: member.entry.output_id)
+    for output_id in sorted(rows):
+        _include_family(reads, members, source_action_id, output_id)
+    return tuple(sorted(members.values(), key=lambda member: member.entry.output_id))
+
+
+def _catalog_members(connection, source_action_id: int) -> tuple[_CatalogMember, ...]:
+    return _CatalogReads(connection).catalog(source_action_id)
 
 
 def load_selection_facts(
@@ -833,19 +1017,7 @@ def load_selection_facts(
 
 def _checked_output_sources(connection, entries, identities) -> dict[int, int | None]:
     """完整目录之外的实际目标按有界批次核实；失败不返回部分事实。"""
-    local_ids = {entry.output_id for entry in entries}
-    query_ids = sorted(set(identities) - local_ids)
-    checked: dict[int, int | None] = {}
-    for offset in range(0, len(query_ids), 128):
-        batch = query_ids[offset:offset + 128]
-        placeholders = ",".join("?" for _ in batch)
-        with closing(connection.execute(
-            f"SELECT id, source_action_id FROM outputs WHERE id IN ({placeholders})", batch,
-        )) as cursor:
-            rows = cursor.fetchall()
-        checked.update(dict.fromkeys(batch))
-        checked.update(rows)
-    return checked
+    return _CatalogReads(connection).checked_sources(entries, identities)
 
 
 def load_output_family(connection, output_id: int) -> OriginalOutputs:
@@ -862,21 +1034,13 @@ def load_output_family(connection, output_id: int) -> OriginalOutputs:
 
 
 def _load_family_members(connection, output_id: int) -> tuple[_CatalogMember, ...]:
-    """逐产物与完整来源读取共用的固定关系边界。"""
+    return _family_members(_CatalogReads(connection), output_id)
+
+
+def _family_members(reads: _FamilyReads, output_id: int) -> tuple[_CatalogMember, ...]:
+    """逐产物、完整来源及当前事实解释共用的固定关系边界。"""
     ObjectId(output_id)
-
-    def required(table, identity):
-        facts = row_facts(connection, table, identity)
-        if facts is None:
-            raise ConsistencyError(f"产物关联记录缺失: {table}#{identity}")
-        return facts
-
-    def origin(identity):
-        with closing(connection.execute(
-            "SELECT original_output_id FROM output_origins WHERE output_id=?", (identity,),
-        )) as cursor:
-            row = cursor.fetchone()
-        return row[0] if row is not None else None
+    required, origin = reads.required, reads.origin
 
     target = required("outputs", output_id)
     original_id = origin(output_id)
@@ -884,18 +1048,14 @@ def _load_family_members(connection, output_id: int) -> tuple[_CatalogMember, ..
         if original_id is not None:
             raise ConsistencyError("原片不能携带派生关联")
         original = target
+        original_id = output_id
     else:
         if original_id is None:
             raise ConsistencyError("派生产物缺少原片关联")
         original = required("outputs", original_id)
         if original["kind"] != int(_OUTPUT_KIND.ORIGINAL) or origin(original_id) is not None:
             raise ConsistencyError("派生产物必须指向没有派生关联的原片")
-    original_id = original["id"]
-    with closing(connection.execute(
-        "SELECT output_id FROM output_origins WHERE original_output_id=? ORDER BY output_id LIMIT 3",
-        (original_id,),
-    )) as cursor:
-        related_ids = tuple(row[0] for row in cursor.fetchall())
+    related_ids = reads.related(original_id)
     if len(related_ids) > 2:
         raise ConsistencyError("同一原片最多登记一份预览和一份修复成品")
     by_kind = {}

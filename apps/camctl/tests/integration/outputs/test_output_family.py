@@ -170,8 +170,8 @@ class FamilyConnection(_FaultConnection):
 
     def execute(self, sql, parameters=()):
         cursor = self._connection.execute(sql, parameters)
-        stage = ("origin" if sql.startswith("SELECT original_output_id FROM output_origins") else
-                 "related" if sql.startswith("SELECT output_id FROM output_origins") else None)
+        stage = ("origin" if sql.startswith("SELECT original_output_id, id, output_id FROM output_origins") else
+                 "related" if sql.startswith("SELECT output_id, id, original_output_id FROM output_origins") else None)
         if stage is None:
             return cursor
         probe = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
@@ -232,6 +232,6 @@ def test_family_lookup_bounds_duplicate_detection(family_database):
 
 
 def test_family_query_execution_failure_never_means_no_derivative(family_database):
-    failing = _FaultConnection(family_database.connection, "SELECT output_id FROM output_origins")
+    failing = _FaultConnection(family_database.connection, "SELECT output_id, id, original_output_id FROM output_origins")
     with pytest.raises(sqlite3.OperationalError):
         outputs.load_output_family(failing, 701)

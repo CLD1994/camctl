@@ -133,7 +133,7 @@ class CatalogConnection(_FaultConnection):
     def execute(self, sql, parameters=()):
         prefixes = {
             "catalog": ("SELECT id FROM outputs WHERE source_action_id", "SELECT o.id, o.source_action_id"),
-            "processing": ("SELECT check_state, repair_state, discard_state FROM recording_processing",),
+            "processing": ("SELECT check_state, repair_state, discard_state, id, action_id FROM recording_processing",),
             "items": ("SELECT requested_output_id, output_id, basis, original_output_id",),
             "exists": ("SELECT 1 FROM outputs WHERE id",),
             "pending_items": ("SELECT 1 FROM obtain_items WHERE selection_id",),
