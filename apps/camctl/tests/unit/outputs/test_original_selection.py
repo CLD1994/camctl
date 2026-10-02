@@ -1,14 +1,81 @@
 """一份原片的选择规则由完整选择与逐产物候选共同使用。"""
 
 from dataclasses import replace
+from contextlib import ExitStack
+from enum import IntEnum
+from importlib.util import find_spec, module_from_spec
+import sys
+from unittest.mock import create_autospec, patch
 
 import pytest
 
 from camctl.contracts.values import ConsistencyError
-from camctl.outputs import sources
+from camctl.bootstrap import resources
+from camctl.contracts import enums, schemas, workflow_errors
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
-from camctl.outputs.sources import CatalogEntry, ItemStatus
+
+
+def _isolated_sources():
+    # 仅提供本组选择分支消费的登记样本；真实登记组合由集成测试验证。
+    definitions = {
+        "actions.type": {"CAMERA_RECORD": 2},
+        "actions.source_resolution_state": {"FIXED": 2, "FAILED": 3},
+        "obtain_items.status": {"SELECTED": 2, "FAILED": 4},
+        "obtain_items.basis": {"ORIGINAL": 1, "REPAIRED": 2, "PREVIEW": 3,
+                               "REPAIRED_NOT_LARGER": 4},
+        "outputs.availability": {"AVAILABLE": 1, "RESTRICTED": 2, "CLEANED": 3,
+                                 "MISSING": 4, "UNKNOWN": 5},
+    }
+    item_codes = {
+        ("obtain_items", "output_not_found"): 1,
+        ("obtain_items", "output_source_mismatch"): 2,
+        ("obtain_items", "output_unavailable"): 3,
+        ("obtain_items", "output_cleanup_started"): 4,
+        ("obtain_items", "source_file_unconfirmed"): 6,
+        ("obtain_items", "preview_missing"): 8,
+        ("obtain_source_selections", "no_outputs"): 1,
+        ("obtain_source_selections", "preview_missing"): 2,
+    }
+    with ExitStack() as stack:
+        readers = _block_resources(stack)
+        stack.enter_context(patch.object(enums, "enum_for", create_autospec(
+            enums.enum_for, side_effect=lambda column: IntEnum(column, definitions[column]))))
+        stack.enter_context(patch.object(workflow_errors, "item_error_id", create_autospec(
+            workflow_errors.item_error_id, side_effect=lambda table, name: item_codes[table, name])))
+        stack.enter_context(patch.object(workflow_errors, "action_error_id", create_autospec(
+            workflow_errors.action_error_id, return_value=99)))
+        spec = find_spec("camctl.outputs.sources")
+        module = module_from_spec(spec)
+        # dataclass 在定义时查询所属模块；离开后恢复原实例，不修改真实登记缓存。
+        stack.enter_context(patch.dict(sys.modules, {spec.name: module}))
+        spec.loader.exec_module(module)
+        for reader in readers:
+            reader.assert_not_called()
+    return module
+
+
+def _block_resources(stack):
+    readers = []
+    for module in (resources, enums, schemas, workflow_errors):
+        reader = create_autospec(module.resource_bytes,
+            side_effect=AssertionError("单元测试不能读取真实包资源"))
+        stack.enter_context(patch.object(module, "resource_bytes", reader))
+        readers.append(reader)
+    return readers
+
+
+@pytest.fixture(autouse=True)
+def no_resource_reads():
+    with ExitStack() as stack:
+        readers = _block_resources(stack)
+        yield
+        for reader in readers:
+            reader.assert_not_called()
+
+
+sources = _isolated_sources()
+CatalogEntry, ItemStatus = sources.CatalogEntry, sources.ItemStatus
 
 
 ORIGINAL = CatalogEntry(101, OutputKind.ORIGINAL, 1, size_bytes=1000)

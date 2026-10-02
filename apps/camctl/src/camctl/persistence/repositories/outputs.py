@@ -861,6 +861,28 @@ def load_output_family(connection, output_id: int) -> OriginalOutputs:
                         entry["device_file_id"] if is_device else entry["intermediate_file_id"])
         if file["source_action_id" if is_device else "owner_action_id"] != original["source_action_id"]:
             raise ConsistencyError("产物承载文件不属于原片来源")
+        if is_device:
+            expected_role = {
+                OutputKind.ORIGINAL: _DEVICE_FILE_ROLE.ORIGINAL,
+                OutputKind.PREVIEW: _DEVICE_FILE_ROLE.PREVIEW,
+            }.get(kind)
+            if expected_role is None or file["role"] != int(expected_role):
+                raise ConsistencyError("设备产物与承载文件角色不一致")
+            if file["completion_state"] != int(_COMPLETION.COMPLETE):
+                raise ConsistencyError("已登记设备产物必须保留文件完成事实")
+            if kind is OutputKind.PREVIEW:
+                if (file["original_device_file_id"] != original["device_file_id"]
+                        or file["pairing_evidence_json"] is None):
+                    raise ConsistencyError("预览的设备文件配对与产物原片关联不一致")
+            elif (file["original_device_file_id"] is not None
+                  or file["pairing_evidence_json"] is not None):
+                raise ConsistencyError("原片文件不能携带预览配对")
+        elif (kind is not OutputKind.REPAIRED
+              or file["owner_delivery_id"] is not None
+              or file["purpose"] != int(_PURPOSE.REPAIR_OUTPUT)
+              or file["retention_state"] != int(_RETENTION.PROMOTED)
+              or file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)):
+            raise ConsistencyError("修复产物必须由来源动作的已提升修复文件承载")
         size = file["size_bytes"]
         if size is not None and (not is_json_integer(size) or size < 0):
             raise ConsistencyError("产物完整长度无法解释")

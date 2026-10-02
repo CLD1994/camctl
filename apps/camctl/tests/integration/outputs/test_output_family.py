@@ -120,6 +120,47 @@ def test_family_lookup_preserves_unknown_complete_size(family_database):
     assert (result.output_id, result.error_code) == (702, 6)
 
 
+@pytest.mark.parametrize("target", [701, 702, 703])
+@pytest.mark.parametrize("change", [
+    "UPDATE device_files SET role=1 WHERE id=501",
+    "UPDATE device_files SET role=1, original_device_file_id=NULL, pairing_evidence_json=NULL WHERE id=502",
+    "UPDATE device_files SET original_device_file_id=505 WHERE id=502",
+    "UPDATE device_files SET original_device_file_id=NULL, pairing_evidence_json=NULL WHERE id=502",
+    "UPDATE device_files SET completion_state=1, completion_evidence_json=NULL, size_bytes=NULL WHERE id=501",
+    "UPDATE device_files SET completion_state=1, completion_evidence_json=NULL, size_bytes=NULL WHERE id=502",
+    "UPDATE intermediate_files SET purpose=2 WHERE id=801",
+    "UPDATE intermediate_files SET retention_state=1 WHERE id=801",
+    "UPDATE intermediate_files SET retention_state=2, cleanup_state=2 WHERE id=801",
+    "UPDATE outputs SET device_file_id=NULL, intermediate_file_id=801 WHERE id=701",
+])
+def test_family_lookup_rejects_file_relationship_conflicts(family_database, target, change):
+    connection = family_database.connection
+    # 承载种类反例交换引用，保留各文件只被一个产物引用的 SQL 约束。
+    if change.endswith("WHERE id=701") and "UPDATE outputs" in change:
+        connection.execute("UPDATE outputs SET intermediate_file_id=NULL, device_file_id=503 WHERE id=703")
+    connection.execute(change)
+    connection.commit()
+    before = tuple(connection.iterdump())
+    with pytest.raises(ConsistencyError):
+        outputs.load_output_family(connection, target)
+    assert tuple(connection.iterdump()) == before
+
+
+@pytest.mark.parametrize("target", [701, 702, 703])
+@pytest.mark.parametrize("availability,presence", [(3, 3), (4, 3), (5, 1)])
+def test_family_lookup_preserves_later_file_existence_states(family_database, target, availability, presence):
+    connection = family_database.connection
+    connection.execute("UPDATE outputs SET availability=?, cleanup_status=?, error_json=? WHERE source_action_id=11",
+                       (availability, 4 if availability == 3 else 1, None if availability == 3 else '{}'))
+    connection.execute("UPDATE device_files SET presence_state=? WHERE source_action_id=11", (presence,))
+    connection.commit()
+    before = tuple(connection.iterdump())
+    result = outputs.load_output_family(connection, target)
+    assert (result.original.output_id, result.preview.output_id, result.repaired.output_id) == (701, 702, 703)
+    assert (result.original.availability, result.preview.availability, result.repaired.availability) == (availability,) * 3
+    assert tuple(connection.iterdump()) == before
+
+
 class FamilyConnection(_FaultConnection):
     def __init__(self, connection, fail=None):
         super().__init__(connection, "unused")
