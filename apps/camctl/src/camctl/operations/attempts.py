@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 
+from camctl.contracts.values import MAX_OBJECT_ID, UtcMicros
+from camctl.devices.evidence import OPERATIONS
 from camctl.operations.models import (
     AttemptStatus,
     AttemptTicket,
@@ -36,6 +38,7 @@ __all__ = [
     "RunOutcome",
     "RunStatus",
     "dispatch_decision",
+    "query_responsibility_key",
     "responsibility_key",
     "seconds_from_json",
 ]
@@ -87,9 +90,20 @@ class AttemptConfigError(ValueError):
 
 
 def _positive_int(value: object, name: str, *, minimum: int = 1) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise AttemptConfigError(f"{name} 必须是不小于 {minimum} 的整数: {value!r}")
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or not minimum <= value <= MAX_OBJECT_ID):
+        raise AttemptConfigError(f"{name} 必须是 {minimum}～{MAX_OBJECT_ID} 的整数: {value!r}")
     return value
+
+
+def _utc_micros(value: object) -> UtcMicros:
+    try:
+        timestamp = UtcMicros(value)
+    except ValueError as error:
+        raise AttemptConfigError(f"occurred_at 必须是整数 UTC 微秒: {value!r}") from error
+    if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+        raise AttemptConfigError(f"occurred_at 超出 SQLite 整数范围: {value!r}")
+    return timestamp
 
 
 def _seconds(value: object, name: str, *, allow_zero: bool) -> Decimal:
@@ -188,17 +202,20 @@ class AttemptIntent:
     target: AttemptTarget
     query_purpose: QueryPurpose | None
     config: AttemptConfig
+    occurred_at: int
     copy_round: int | None = None
-    occurred_at: int = 0
 
     def __post_init__(self) -> None:
         _positive_int(self.action_id, "action_id")
-        if not isinstance(self.operation, str) or not self.operation:
-            raise AttemptConfigError(f"operation 必须是非空标识: {self.operation!r}")
+        if not isinstance(self.operation, str) or self.operation not in OPERATIONS:
+            raise AttemptConfigError(f"operation 必须是已登记的操作类别: {self.operation!r}")
         if not isinstance(self.kind, OperationKind):
             raise AttemptConfigError(f"kind 必须是 OperationKind: {self.kind!r}")
-        if self.occurred_at:
-            _positive_int(self.occurred_at, "occurred_at", minimum=1)
+        if not isinstance(self.target, AttemptTarget):
+            raise AttemptConfigError(f"target 必须是 AttemptTarget: {self.target!r}")
+        if not isinstance(self.config, AttemptConfig):
+            raise AttemptConfigError(f"config 必须是 AttemptConfig: {self.config!r}")
+        _utc_micros(self.occurred_at)
         if self.kind is OperationKind.QUERY_ACTIVITY:
             if not isinstance(self.query_purpose, QueryPurpose):
                 raise AttemptConfigError("查询意图必须填写 query_purpose")
@@ -220,9 +237,24 @@ class AttemptIntent:
                 f"实际填写 {sorted(filled)}"
             )
         if self.kind is OperationKind.READ_FILE:
-            _positive_int(self.copy_round or 0, "copy_round")
+            _positive_int(self.copy_round, "copy_round")
         elif self.copy_round is not None:
             raise AttemptConfigError("只有读取尝试保存 copy_round")
+
+
+def query_responsibility_key(
+    action_id: int, purpose: QueryPurpose, activity_id: int | None
+) -> str:
+    """从查询固定身份生成规范责任键，不构造调用意图或事实时刻。"""
+    _positive_int(action_id, "action_id")
+    if not isinstance(purpose, QueryPurpose):
+        raise AttemptConfigError("查询责任必须填写 QueryPurpose")
+    if purpose is QueryPurpose.BEFORE_EXECUTION:
+        if activity_id is not None:
+            raise AttemptConfigError("执行前检查不得指向具体活动")
+        return f"query/preflight/{action_id}"
+    _positive_int(activity_id, "activity_id")
+    return f"query/{purpose.value}/{action_id}/{activity_id}"
 
 
 def responsibility_key(intent: AttemptIntent) -> str:
@@ -230,13 +262,7 @@ def responsibility_key(intent: AttemptIntent) -> str:
     kind = intent.kind
     if kind is OperationKind.QUERY_ACTIVITY:
         assert intent.query_purpose is not None
-        if intent.query_purpose is QueryPurpose.BEFORE_EXECUTION:
-            return f"query/preflight/{intent.action_id}"
-        assert intent.target.activity_id is not None
-        return (
-            f"query/{intent.query_purpose.value}/{intent.action_id}"
-            f"/{intent.target.activity_id}"
-        )
+        return query_responsibility_key(intent.action_id, intent.query_purpose, intent.target.activity_id)
     if kind in _ACTIVITY_KINDS:
         assert intent.target.activity_id is not None
         if kind is OperationKind.CHECK_CAPTURE_RESULTS:
@@ -331,7 +357,7 @@ class AttemptFinish:
     run_finish: RunFinish | None = None
 
     def __post_init__(self) -> None:
-        _positive_int(self.occurred_at, "occurred_at")
+        _utc_micros(self.occurred_at)
         if self.retry_wait and self.run_finish is not None:
             raise AttemptConfigError("重试等待与流程结束不能同时提交")
 

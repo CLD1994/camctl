@@ -14,11 +14,8 @@ from typing import Tuple
 
 from camctl.operations.attempts import (
     AttemptConfig,
-    AttemptIntent,
-    AttemptTarget,
-    OperationKind,
     QueryPurpose,
-    responsibility_key,
+    query_responsibility_key,
 )
 
 __all__ = [
@@ -66,16 +63,7 @@ class QueryResponsibility:
 
     @property
     def responsibility_key(self) -> str:
-        return responsibility_key(
-            AttemptIntent(
-                operation="query",
-                action_id=self.action_id,
-                kind=OperationKind.QUERY_ACTIVITY,
-                target=AttemptTarget(activity_id=self.activity_id),
-                query_purpose=self.purpose,
-                config=self.config,
-            )
-        )
+        return query_responsibility_key(self.action_id, self.purpose, self.activity_id)
 
 
 def validate_query_scope(scope: QueryResponsibility) -> None:

@@ -42,6 +42,16 @@ def _scope(purpose: QueryPurpose, *, action_id: int = 7, activity_id: int | None
 
 
 class TestValidateQueryScope:
+    @pytest.mark.parametrize("purpose,activity_id,expected", [
+        (QueryPurpose.BEFORE_EXECUTION, None, "query/preflight/7"),
+        (QueryPurpose.START_CONFIRMATION, 3, "query/start/7/3"),
+        (QueryPurpose.ACTIVITY_OBSERVATION, 3, "query/activity/7/3"),
+        (QueryPurpose.STOP_CONFIRMATION, 3, "query/stop/7/3"),
+        (QueryPurpose.RESIDUAL_STOP_CONFIRMATION, 3, "query/residual/7/3"),
+    ])
+    def test_key_uses_fixed_query_identity(self, purpose, activity_id, expected) -> None:
+        assert _scope(purpose, activity_id=activity_id).responsibility_key == expected
+
     def test_purpose_and_targets_are_immutable_identity(self) -> None:
         scope = _scope(QueryPurpose.STOP_CONFIRMATION)
         with pytest.raises(Exception):

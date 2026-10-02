@@ -22,6 +22,7 @@ from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.attempts import (
     AttemptFinish,
+    AttemptIntent,
     AttemptTarget,
     BeginAttemptResult,
     BeginDisposition,
@@ -226,13 +227,15 @@ def _event_rows(saved: Mapping[str, Any], table: str) -> list[dict]:
 class BeginAttemptCommand:
     """一次普通尝试意图的完整事务命令。"""
 
-    def __init__(self, intent, key: OperationKey) -> None:
+    def __init__(self, intent: AttemptIntent, key: OperationKey) -> None:
         self._intent = intent
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
     def plan(self, scope) -> CommandPlan:
+        if not isinstance(self._intent, AttemptIntent):
+            raise TransactionError("普通意图输入必须是 AttemptIntent")
         connection = scope.connection
         saved = _saved_transaction_events(connection, self._key)
         if saved is not None:
@@ -253,9 +256,10 @@ class BeginAttemptCommand:
             self._state,
         )
 
-        found = connection.execute(
+        with closing(connection.execute(
             "SELECT id FROM operation_runs WHERE responsibility_key = ?", (key_str,)
-        ).fetchone()
+        )) as cursor:
+            found = cursor.fetchone()
         run_facts = (
             _load_row(connection, "operation_runs", int(found[0])) if found else None
         )
@@ -404,10 +408,11 @@ class BeginAttemptCommand:
         )
         if run_facts["query_purpose"] != expected_purpose:
             raise TransactionError("查询用途与意图不符")
-        max_no = connection.execute(
+        with closing(connection.execute(
             "SELECT MAX(attempt_no) FROM operation_attempts WHERE run_id = ?",
             (run_facts["id"],),
-        ).fetchone()[0]
+        )) as cursor:
+            max_no = cursor.fetchone()[0]
         if int(run_facts["attempts_used"]) != int(max_no or 0):
             raise TransactionError(
                 f"累计次数与最大尝试编号不符: {run_facts['attempts_used']} != {max_no}"
@@ -774,7 +779,7 @@ class OperationRepository:
     """操作意图与结果事务的 SQLite 仓储。"""
 
     def begin_attempt(
-        self, intent, key: OperationKey, owned: OwnedConnection
+        self, intent: AttemptIntent, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[BeginAttemptResult]:
         receipt = commit_operation(BeginAttemptCommand(intent, key), key, owned)
         return _outcome_of(receipt)

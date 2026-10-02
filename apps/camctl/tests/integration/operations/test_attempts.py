@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
@@ -44,6 +47,7 @@ from camctl.persistence.repositories.operations import (
     register_operation_guards,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.transaction import TransactionError
 
 from ..persistence.test_runtime import _create_valid_database
 
@@ -216,6 +220,61 @@ def _run_value(owned, sql: str, *params):
 
 def _event_count(owned) -> int:
     return int(_run_value(owned, "SELECT COUNT(*) FROM history_events")[0])
+
+
+@pytest.mark.parametrize("occurred_at", [-1, 0, _NOW])
+def test_intent_saves_exact_utc_microseconds(tmp_path: Path, occurred_at) -> None:
+    owned = _seed_environment(tmp_path)
+    try:
+        outcome = OperationRepository().begin_attempt(
+            _preflight_intent(occurred_at=occurred_at), new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED
+        assert outcome.value.disposition is BeginDisposition.GRANTED
+        assert _run_value(owned,
+            "SELECT occurred_at FROM history_events WHERE event_type = 11") == (occurred_at,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("occurred_at", [-1, 0, _NOW])
+def test_finish_saves_exact_utc_microseconds(tmp_path: Path, occurred_at) -> None:
+    owned = _seed_environment(tmp_path)
+    repository = OperationRepository()
+    try:
+        grant = repository.begin_attempt(_preflight_intent(), new_operation_key(), owned)
+        assert grant.kind is DbOutcomeKind.COMPLETED
+        ticket = grant.value.ticket
+        result = _outcome(status=AttemptStatus.SUCCEEDED, error=None, effect=EffectState.UNKNOWN,
+                          basis=SettlementBasis.OBSERVED, evidence_type="query_returned")
+        outcome = repository.finish_attempt(
+            AttemptFinish(ticket, _validated(ticket, result), occurred_at), new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED
+        assert outcome.value.disposition is FinishDisposition.SAVED
+        assert _run_value(owned,
+            "SELECT occurred_at FROM history_events WHERE event_type = 12") == (occurred_at,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("saved_key", [False, True])
+@pytest.mark.parametrize("invalid_intent", ["mapping", "untyped_fields"])
+def test_invalid_intent_type_rolls_back_before_key_reuse(tmp_path: Path, saved_key, invalid_intent) -> None:
+    owned = _seed_environment(tmp_path)
+    repository = OperationRepository()
+    key = new_operation_key()
+    intent = _preflight_intent()
+    try:
+        if saved_key:
+            grant = repository.begin_attempt(intent, key, owned)
+            assert grant.kind is DbOutcomeKind.COMPLETED
+        before = tuple(owned.connection.iterdump())
+        invalid = {} if invalid_intent == "mapping" else SimpleNamespace(**vars(intent))
+        outcome = repository.begin_attempt(invalid, key, owned)
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(outcome.error, TransactionError)
+        assert tuple(owned.connection.iterdump()) == before
+    finally:
+        owned.connection.close()
 
 
 def test_first_intent_creates_run_and_attempt_together(tmp_path: Path) -> None:
