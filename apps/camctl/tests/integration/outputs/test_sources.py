@@ -516,11 +516,11 @@ def test_fix_selection_partial_failure_saves_per_item_results(
         ).fetchall()
         assert tuple(row[0] for row in rows) == (901, 702, 501, 502)
         assert rows[0][2] == 4 and rows[0][3] == 1  # output_not_found
-        assert json.loads(rows[0][4]) == {"requested_output_id": 901}
+        assert json.loads(rows[0][4]) == {"requested_output_id": "901"}
         assert rows[1][3] == 2  # output_source_mismatch
         assert rows[1][1] is None
         assert rows[2][3] == 3  # output_unavailable
-        assert json.loads(rows[2][4]) == {"output_id": 501, "availability": "cleaned"}
+        assert json.loads(rows[2][4]) == {"output_id": "501", "availability": "cleaned"}
         assert rows[3][2] == 2 and rows[3][1] == 502
         assert all(row[5] is None for row in rows)
     finally:

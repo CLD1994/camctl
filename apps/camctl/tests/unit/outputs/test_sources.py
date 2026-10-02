@@ -339,7 +339,7 @@ def test_default_repaired_unavailable_does_not_fall_back() -> None:
     (item,) = selection.items
     assert item.status_name == "FAILED"
     assert item.error_code == 3  # output_unavailable
-    assert item.error_details["output_id"] == 503
+    assert item.error_details["output_id"] == "503"
     assert item.error_details["availability"] == "cleaned"
     assert 501 not in selection.selected_output_ids
 
@@ -393,7 +393,7 @@ def test_explicit_ids_fail_per_item_without_delivery() -> None:
     assert not_found.status_name == "FAILED"
     assert not_found.error_code == 1  # output_not_found
     assert not_found.output_id is None
-    assert not_found.error_details == {"requested_output_id": 901}
+    assert not_found.error_details == {"requested_output_id": "901"}
 
     assert mismatch.status_name == "FAILED"
     assert mismatch.error_code == 2  # output_source_mismatch
@@ -401,7 +401,7 @@ def test_explicit_ids_fail_per_item_without_delivery() -> None:
 
     assert cleaned.status_name == "FAILED"
     assert cleaned.error_code == 3
-    assert cleaned.error_details == {"output_id": 703, "availability": "cleaned"}
+    assert cleaned.error_details == {"output_id": "703", "availability": "cleaned"}
 
     assert selected.status_name == "SELECTED"
     assert selected.output_id == 704
@@ -425,6 +425,24 @@ def test_explicit_unknown_availability_stays_unresolved() -> None:
     assert item.status_name == "UNRESOLVED"
     assert item.requested_output_id == 704
     assert item.output_id is None
+
+
+@pytest.mark.parametrize("mode,kind", [
+    (SelectionMode.DEFAULT, OutputKind.REPAIRED),
+    (SelectionMode.PREVIEW, OutputKind.PREVIEW),
+])
+def test_known_target_with_unknown_presence_keeps_selection_without_final_error(mode, kind):
+    entries = (_entry(701, OutputKind.ORIGINAL),
+               _entry(702, kind, availability=5, original_output_id=701, size_bytes=100))
+    selection = select_outputs(
+        SourceResolution(state=ResolutionState.FIXED, member_action_ids=(11,), source_plan_id=1),
+        _facts(entries), mode,
+    )
+    item, = selection.items
+    assert item.status_name == "SELECTED"
+    assert item.output_id == 702
+    assert item.error_code is None
+    assert item.error_details is None
 
 
 def test_explicit_duplicate_request_rejected() -> None:

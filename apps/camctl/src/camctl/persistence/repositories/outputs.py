@@ -10,6 +10,7 @@ FIXED 状态同一事务保存。已固定的来源与选择不因重送、重�
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,7 +50,9 @@ from camctl.persistence.transaction import (
     saved_transaction_events,
     update_change as _update,
 )
-from camctl.contracts.workflow_errors import action_error_id, item_error_id
+from camctl.contracts.workflow_errors import (
+    action_error_id, item_error_id, registered_error_spec, validate_error_details,
+)
 from camctl.outputs.qualification import (
     FileCandidate,
     FileQualification,
@@ -129,6 +132,7 @@ _PRESENCE = enum_for("device_files.presence_state")
 _COMPLETION = enum_for("device_files.completion_state")
 _RESTRICTION = enum_for("cleanup_items.restriction_state")
 _CLEANUP_STATUS = enum_for("cleanup_items.status")
+_OUTPUT_CLEANUP_STATUS = enum_for("outputs.cleanup_status")
 _PURPOSE = enum_for("intermediate_files.purpose")
 _RETENTION = enum_for("intermediate_files.retention_state")
 _FILE_CLEANUP = enum_for("intermediate_files.cleanup_state")
@@ -141,11 +145,6 @@ _VERIFICATION = enum_for("file_copies.verification_state")
 _ACTIVE_RESTRICTIONS = (
     int(_RESTRICTION.ACTIVE),
     int(_RESTRICTION.IRREVERSIBLE),
-)
-_ACTIVE_CLEANUP_STATUS = (
-    int(_CLEANUP_STATUS.UNRESOLVED),
-    int(_CLEANUP_STATUS.PENDING_DELETE),
-    int(_CLEANUP_STATUS.DELETING),
 )
 #: 读取流程仍占用设备机会或源保护的状态。
 _UNFINISHED_RUN_STATUS = (
@@ -841,7 +840,7 @@ def _item_values(selection_id: int, item: SelectedItem) -> dict[str, Any]:
 def _source_error_details(code: int, source_action_id: int) -> dict[str, Any]:
     if code == SELECTION_NO_OUTPUTS:
         return {}
-    return {"source_action_instance_id": source_action_id}
+    return {"source_action_instance_id": str(source_action_id)}
 
 
 class _GrantFileCommand:
@@ -914,9 +913,9 @@ class _GrantFileCommand:
                         reason="item_finished",
                     ),
                 )
-        final_error = self._final_rejection(connection, output, source_file)
-        if final_error is not None:
-            return self._reject_item(scope, final_error)
+        readiness = self._source_readiness(scope, output, source_file)
+        if readiness is not None:
+            return readiness
 
         if device_id is not None and self._device_busy(connection, device_id):
             return self._wait("device_busy")
@@ -976,6 +975,8 @@ class _GrantFileCommand:
             if (source_role is None or source_file["role"] != source_role
                     or output["source_action_id"] != source_file["source_action_id"]):
                 raise ConsistencyError("设备产物与源文件角色或归属不一致")
+            if source_file["completion_state"] != int(_COMPLETION.COMPLETE):
+                raise ConsistencyError("已登记设备产物必须保留文件完成事实")
         elif (
             output["kind"] != int(_OUTPUT_KIND.REPAIRED)
             or source_action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
@@ -997,32 +998,72 @@ class _GrantFileCommand:
                 raise ConsistencyError("主机源文件的保存路径与固定身份不一致") from error
         return output
 
-    def _final_rejection(self, connection, output, source_file) -> int | None:
-        """不可授予的最终失败错误码；None 表示可通过。"""
-        if output is not None and output["availability"] != int(_AVAILABILITY.AVAILABLE):
-            return _OUTPUT_UNAVAILABLE_CODE
-        if self._command.source_device_file_id is not None and (
-            source_file["presence_state"] != int(_PRESENCE.PRESENT)
-            or source_file["completion_state"] != int(_COMPLETION.COMPLETE)
-        ):
-            return _SOURCE_FILE_UNCONFIRMED_CODE
+    def _source_readiness(self, scope, output, source_file) -> CommandPlan | None:
+        """核对源事实；等待与最终拒绝分开，None 表示可继续协调。"""
         if output is None:
+            if (source_file["completion_state"] == int(_COMPLETION.UNCONFIRMED)
+                    or source_file["presence_state"] == int(_PRESENCE.ABSENT)):
+                return self._wait_final(_SOURCE_FILE_UNCONFIRMED_CODE)
+            if (source_file["completion_state"] != int(_COMPLETION.COMPLETE)
+                    or source_file["presence_state"] == int(_PRESENCE.UNKNOWN)):
+                return self._wait("source_file_unconfirmed")
             return None
-        cleanup = connection.execute(
-            "SELECT status FROM cleanup_items"
-            " WHERE output_id = ? AND restriction_state IN (?, ?)"
-            " AND status IN (?, ?, ?) LIMIT 1",
-            (
-                self._command.output_id,
-                *_ACTIVE_RESTRICTIONS,
-                *_ACTIVE_CLEANUP_STATUS,
-            ),
-        ).fetchone()
-        if cleanup is not None:
-            if cleanup[0] == int(_CLEANUP_STATUS.DELETING):
-                return _OUTPUT_CLEANUP_STARTED_CODE
-            return _OUTPUT_UNAVAILABLE_CODE
+
+        phase = self._cleanup_phase(scope.connection, output["id"])
+        availability = _AVAILABILITY(output["availability"])
+        if phase is not None:
+            expected = (_AVAILABILITY.CLEANED if phase == _OUTPUT_CLEANUP_STATUS.COMPLETED
+                        else _AVAILABILITY.RESTRICTED)
+            if availability != expected or output["cleanup_status"] != int(phase):
+                raise ConsistencyError("产物的清理投影与有效清理责任不一致")
+        elif (
+            availability in (_AVAILABILITY.CLEANED, _AVAILABILITY.RESTRICTED)
+            or output["cleanup_status"] not in (
+                int(_OUTPUT_CLEANUP_STATUS.NOT_REQUESTED), int(_OUTPUT_CLEANUP_STATUS.CANCELED),
+            )
+        ):
+            raise ConsistencyError("产物清理投影缺少有效限制或清理完成事实")
+        elif self._command.source_device_file_id is not None:
+            expected = {
+                int(_PRESENCE.PRESENT): _AVAILABILITY.AVAILABLE,
+                int(_PRESENCE.ABSENT): _AVAILABILITY.MISSING,
+                int(_PRESENCE.UNKNOWN): _AVAILABILITY.UNKNOWN,
+            }[source_file["presence_state"]]
+            if availability != expected:
+                raise ConsistencyError("产物可用性与设备文件存在事实不一致")
+
+        details = {"output_id": str(output["id"])}
+        if availability in (_AVAILABILITY.CLEANED, _AVAILABILITY.MISSING):
+            details["availability"] = availability.name.lower()
+            return self._reject_item(scope, _OUTPUT_UNAVAILABLE_CODE, details)
+        if availability == _AVAILABILITY.RESTRICTED:
+            return self._reject_item(scope, _OUTPUT_CLEANUP_STARTED_CODE, details)
+        if availability == _AVAILABILITY.UNKNOWN:
+            return self._wait("source_file_unconfirmed")
         return None
+
+    def _cleanup_phase(self, connection, output_id):
+        """汇总同产物有效限制和成功优先级，不重建已解除限制的历史。"""
+        # 受登记约束的枚举常量内联，使 SQLite 能匹配有效限制的部分索引。
+        restrictions = ",".join(str(value) for value in _ACTIVE_RESTRICTIONS)
+        with closing(connection.execute(
+            "SELECT COUNT(*), MAX(status = ?), MAX(status = ?), MAX(status = ?)"
+            f" FROM cleanup_items WHERE output_id = ? AND restriction_state IN ({restrictions})",
+            (
+                int(_CLEANUP_STATUS.SUCCEEDED), int(_CLEANUP_STATUS.DELETING),
+                int(_CLEANUP_STATUS.PENDING_DELETE), output_id,
+            ),
+        )) as cursor:
+            count, completed, deleting, pending = cursor.fetchone()
+        if count == 0:
+            return None
+        if completed:
+            return _OUTPUT_CLEANUP_STATUS.COMPLETED
+        if deleting:
+            return _OUTPUT_CLEANUP_STATUS.RUNNING
+        if pending:
+            return _OUTPUT_CLEANUP_STATUS.PENDING
+        return _OUTPUT_CLEANUP_STATUS.INCOMPLETE
 
     def _source_device(self, connection, device_file) -> str:
         observer = self._required(connection, "actions", device_file["observer_action_id"])
@@ -1280,14 +1321,10 @@ class _GrantFileCommand:
             for index, (event_type, reason, rows) in enumerate(specs)
         )
 
-    def _reject_item(self, scope, error_code: int) -> CommandPlan:
+    def _reject_item(self, scope, error_code: int, details: dict) -> CommandPlan:
         """清理限制、删除处理者或产物不可用：保存逐项最终失败。"""
         command = self._command
-        if command.item_id is None:
-            # 内部处理的读取失败由录像处理自身事件表达，本命令只返回。
-            return self._wait_final(error_code)
         item = self._state["obtain_items"][command.item_id]
-        details = {"output_id": command.output_id}
         self._owners[("obtain_items", command.item_id)] = (
             "action", command.action_id,
         )
@@ -1551,8 +1588,20 @@ def _source_selection_guard(event, context) -> None:
     if source.get("status") not in _ACTION_TERMINAL:
         raise EventValidationError("选择固定要求来源动作已终态")
     error_code = selection.after.values.get("error_code")
+    details = selection.after.values.get("error_details_json")
+    _validate_saved_error("obtain_source_selections", error_code, details)
+    if details is not None:
+        if ("source_action_instance_id" in details
+                and details["source_action_instance_id"] != str(source["id"])):
+            raise EventValidationError("来源错误必须指向实际固定来源")
+        if "original_output_id" in details:
+            original = context.state_rows.get("outputs", {}).get(int(details["original_output_id"]))
+            if (original is None or original.get("source_action_id") != source["id"]
+                    or original.get("kind") != int(_OUTPUT_KIND.ORIGINAL)):
+                raise EventValidationError("来源错误中的原片必须属于实际固定来源")
     for item in items:
         values = item.after.values
+        _validate_obtain_error(values, source["id"])
         if values.get("selection_id") != selection.row_id:
             raise EventValidationError("选择条目必须属于所固定的来源选择")
         if values.get("delivery_id") is not None or values.get("source_dependency") != 0:
@@ -1687,6 +1736,35 @@ def _copy_links_guard(event, context) -> None:
             raise EventValidationError("READ_FILE 流程与拷贝的交付归属不一致")
 
 
+def _validate_saved_error(table, code, details) -> None:
+    """错误详情使用公共登记的格式，不在报告生成时补救。"""
+    if code is None:
+        if details is not None:
+            raise EventValidationError("没有错误码时不能保存错误详情")
+        return
+    try:
+        name, _ = registered_error_spec(f"item_error_ids.{table}", code)
+        validate_error_details(name, details)
+    except (TypeError, ValueError) as error:
+        raise EventValidationError(str(error)) from error
+
+
+def _validate_obtain_error(values, source_id) -> None:
+    details = values.get("error_details_json")
+    _validate_saved_error("obtain_items", values.get("error_code"), details)
+    if details is None:
+        return
+    identities = {
+        "output_id": values.get("output_id"),
+        "requested_output_id": values.get("requested_output_id"),
+        "original_output_id": values.get("original_output_id"),
+        "source_action_instance_id": source_id,
+    }
+    for name, identity in identities.items():
+        if name in details and (identity is None or details[name] != str(identity)):
+            raise EventValidationError(f"取回错误详情与原目标不一致: {name}")
+
+
 def _obtain_member_guard(event, context) -> None:
     """核实或拒绝只推进事件发生前已固定且仍有普通资格的成员。"""
     if event.event_type != _READ_PERMISSION_EVENT or event.reason not in (
@@ -1737,6 +1815,8 @@ def _obtain_member_guard(event, context) -> None:
         raise EventValidationError("未核实成员必须是尚未关联产物的显式请求")
     if explicit and item.get("requested_output_id") is None:
         raise EventValidationError("显式成员必须保留原请求产物 ID")
+    if event.reason == _REJECT_REASON:
+        _validate_obtain_error({**item, **row.after.values}, dependency["depends_on_action_id"])
     if event.reason == _RESOLVE_REASON:
         if not unresolved:
             raise EventValidationError("显式核实只能推进原 UNRESOLVED 项")

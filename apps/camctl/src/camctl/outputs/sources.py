@@ -62,10 +62,6 @@ _SELECTION_PREVIEW_MISSING = item_error_id(
 #: 来源解析失败的动作错误编号。
 _ACTION_SOURCE_RESOLUTION_FAILED = action_error_id("source_resolution_failed")
 
-#: 可用性到 output_unavailable 公共详情取值的映射。
-_UNAVAILABLE_TEXT = {3: "cleaned", 4: "missing"}
-
-
 class ResolveFailure(Enum):
     """来源解析失败的公共原因（写入动作错误详情的 reason 字段）。"""
 
@@ -408,12 +404,12 @@ def select_outputs(
     return _select_explicit(facts, requested_output_ids)
 
 
-def _availability_failure(
+def _item_for_availability(
     entry: CatalogEntry,
     basis: int,
     **references: Any,
 ) -> SelectedItem:
-    """按可用性生成不可取回的逐项失败或未决。"""
+    """按可用性保存实际失败或保留待确认目标，不重新选择。"""
     availability = Availability(entry.availability)
     references.setdefault("output_id", entry.output_id)
     if availability == Availability.RESTRICTED:
@@ -421,7 +417,7 @@ def _availability_failure(
             basis=basis,
             status=ItemStatus.FAILED,
             error_code=_ITEM_OUTPUT_CLEANUP_STARTED,
-            error_details={"output_id": entry.output_id},
+            error_details={"output_id": str(entry.output_id)},
             **references,
         )
     if availability in (Availability.CLEANED, Availability.MISSING):
@@ -430,17 +426,15 @@ def _availability_failure(
             status=ItemStatus.FAILED,
             error_code=_ITEM_OUTPUT_UNAVAILABLE,
             error_details={
-                "output_id": entry.output_id,
-                "availability": _UNAVAILABLE_TEXT[availability.value],
+                "output_id": str(entry.output_id),
+                "availability": availability.name.lower(),
             },
             **references,
         )
-    # 状态库仍无法确认文件事实：不猜缺失也不当作可选。
+    # 目标已由选择规则确定；暂时未知的存在性不能证明有限核实已结束。
     return SelectedItem(
         basis=basis,
-        status=ItemStatus.FAILED,
-        error_code=_ITEM_SOURCE_FILE_UNCONFIRMED,
-        error_details={"output_id": entry.output_id},
+        status=ItemStatus.SELECTED,
         **references,
     )
 
@@ -495,9 +489,9 @@ def _select_default(facts: SelectionFacts) -> SelectionSnapshot:
                 )
             )
         else:
-            # 所选修复成品不可用不回退原片，失败项保留实际所选身份。
+            # 所选修复成品不可用不回退原片，未知存在性留待后续核实。
             items.append(
-                _availability_failure(
+                _item_for_availability(
                     chosen,
                     ItemBasis.REPAIRED
                     if repaired is not None
@@ -536,8 +530,8 @@ def _select_preview(facts: SelectionFacts) -> SelectionSnapshot:
                     original_output_id=original.output_id,
                     error_code=_ITEM_PREVIEW_MISSING,
                     error_details={
-                        "source_action_instance_id": facts.source_action_id,
-                        "original_output_id": original.output_id,
+                        "source_action_instance_id": str(facts.source_action_id),
+                        "original_output_id": str(original.output_id),
                     },
                 )
             )
@@ -584,7 +578,7 @@ def _select_preview(facts: SelectionFacts) -> SelectionSnapshot:
                     preview_output_id=preview.output_id,
                     original_output_id=original.output_id,
                     error_code=_ITEM_SOURCE_FILE_UNCONFIRMED,
-                    error_details={"output_id": preview.output_id},
+                    error_details={"output_id": str(preview.output_id)},
                 )
             )
             continue
@@ -622,7 +616,7 @@ def _preview_family_item(
             preview_size=preview_size,
             repaired_size=repaired_size,
         )
-    return _availability_failure(
+    return _item_for_availability(
         entry,
         basis,
         original_output_id=original_id,
@@ -649,7 +643,7 @@ def _select_explicit(
                     status=ItemStatus.FAILED,
                     requested_output_id=requested,
                     error_code=_ITEM_OUTPUT_NOT_FOUND,
-                    error_details={"requested_output_id": requested},
+                    error_details={"requested_output_id": str(requested)},
                 )
             )
             continue
@@ -661,7 +655,7 @@ def _select_explicit(
                     status=ItemStatus.FAILED,
                     requested_output_id=requested,
                     error_code=_ITEM_OUTPUT_SOURCE_MISMATCH,
-                    error_details={"requested_output_id": requested},
+                    error_details={"requested_output_id": str(requested)},
                 )
             )
             continue
@@ -685,7 +679,7 @@ def _select_explicit(
             )
         else:
             items.append(
-                _availability_failure(
+                _item_for_availability(
                     entry,
                     ItemBasis.EXPLICIT,
                     requested_output_id=requested,

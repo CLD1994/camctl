@@ -47,7 +47,7 @@ def _event(context, reason):
         item.update(status=1, basis=5, requested_output_id=701, output_id=None)
         after = {"status": 2, "output_id": 701}
     else:
-        after = {"status": 4, "error_code": 4, "error_details_json": {"output_id": 701}}
+        after = {"status": 4, "error_code": 4, "error_details_json": {"output_id": "701"}}
     row = update_change("obtain_items", 101, {key: item[key] for key in after}, after)
     return event_envelope(2, 2, 21, reason, (row,), _NOW)
 
@@ -128,7 +128,7 @@ def test_unresolved_explicit_member_can_end_without_output_association(member_co
         status=1, basis=5, requested_output_id=999, output_id=None,
     )
     event = _event(member_context, 2)
-    after = {"status": 4, "error_code": 1, "error_details_json": {"requested_output_id": 999}}
+    after = {"status": 4, "error_code": 1, "error_details_json": {"requested_output_id": "999"}}
     item = member_context.state_rows["obtain_items"][101]
     event = replace(event, rows=(update_change("obtain_items", 101,
         {key: item[key] for key in after}, after),))
@@ -167,7 +167,7 @@ class _AdvanceMember:
         item = state["obtain_items"][101]
         after = ({"status": 2, "output_id": 701} if self.reason == 4 else {
             "status": 4, "error_code": 1,
-            "error_details_json": {"requested_output_id": 999},
+            "error_details_json": {"requested_output_id": "999"},
         })
         allocation = scope.allocate(1)
         event = event_envelope(allocation.first_event_id, allocation.txn_id, 21,
@@ -205,3 +205,19 @@ def test_member_event_and_projection_commit_or_rollback_together(read_targets, r
         events = saved_transaction_events(owned.connection, key)
         assert len(events) == 1
         assert (events[0]["type"], events[0]["reason"]) == (21, reason)
+
+
+@pytest.mark.parametrize("code,details", [
+    (3, {"output_id": "701"}),
+    (4, {"output_id": 701}),
+    (4, {"output_id": "702"}),
+    (1, {"requested_output_id": "999"}),
+])
+def test_rejected_member_requires_registered_error_details_for_original_target(member_context, code, details):
+    event = _event(member_context, 2)
+    item = member_context.state_rows["obtain_items"][101]
+    after = {"status": 4, "error_code": code, "error_details_json": details}
+    event = replace(event, rows=(update_change("obtain_items", 101,
+        {key: item[key] for key in after}, after),))
+    with pytest.raises(EventValidationError):
+        validate_event(event, member_context)
