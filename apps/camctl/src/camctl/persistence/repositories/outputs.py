@@ -116,6 +116,7 @@ _KIND_BY_CODE = {
 #: READ_PERMISSION_CHANGED 的分支。
 _GRANT_REASON = 1
 _REJECT_REASON = 2
+_RESOLVE_REASON = 4
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
 _OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
 _OUTPUT_CLEANUP_STARTED_CODE = item_error_id("obtain_items", "output_cleanup_started")
@@ -1686,8 +1687,75 @@ def _copy_links_guard(event, context) -> None:
             raise EventValidationError("READ_FILE 流程与拷贝的交付归属不一致")
 
 
+def _obtain_member_guard(event, context) -> None:
+    """核实或拒绝只推进事件发生前已固定且仍有普通资格的成员。"""
+    if event.event_type != _READ_PERMISSION_EVENT or event.reason not in (
+        _REJECT_REASON, _RESOLVE_REASON,
+    ):
+        return
+
+    def required(table, identity):
+        facts = context.state_rows.get(table, {}).get(identity)
+        if facts is None:
+            raise EventValidationError(f"取回成员的当前关联事实缺失: {table}#{identity}")
+        return facts
+
+    updates = [row for row in event.rows if row.table == "obtain_items" and row.before.exists]
+    if len(updates) != 1:
+        raise EventValidationError("取回成员核实或拒绝必须恰好推进一条已有项")
+    row = updates[0]
+    item = required("obtain_items", row.row_id)
+    selection = required("obtain_source_selections", item.get("selection_id"))
+    dependency = required("action_dependencies", selection.get("dependency_id"))
+    owner = required("actions", dependency.get("action_id"))
+    source = required("actions", dependency.get("depends_on_action_id"))
+    if (
+        selection.get("status") != int(_SELECTION_STATUS.FIXED)
+        or selection.get("error_code") is not None
+        or selection.get("error_details_json") is not None
+        or owner.get("type") != _OBTAIN_TYPE
+        or owner.get("status") != int(_ACTION_STATUS.RUNNING)
+        or owner.get("cancel_requested") != 0
+        or owner.get("source_resolution_state") != int(_RESOLUTION_STATE.FIXED)
+        or owner.get("resolved_source_plan_id") is None
+        or owner.get("resolved_source_plan_id") != source.get("plan_id")
+        or source.get("type") not in _CAPTURE_TYPES
+        or source.get("status") not in _ACTION_TERMINAL
+    ):
+        raise EventValidationError("取回成员要求来源拍摄已终态、选择已固定且无来源级错误，取回仍在执行中并未取消")
+    if (
+        item.get("status") not in (int(_ITEM_STATUS.UNRESOLVED), int(_ITEM_STATUS.SELECTED))
+        or item.get("source_dependency") != 0
+        or item.get("delivery_id") is not None
+        or item.get("error_code") is not None
+        or item.get("error_details_json") is not None
+    ):
+        raise EventValidationError("只有尚未建档或结束的取回项能核实或拒绝")
+    unresolved = item["status"] == int(_ITEM_STATUS.UNRESOLVED)
+    explicit = item.get("basis") == int(_ITEM_BASIS.EXPLICIT)
+    if unresolved and (not explicit or item.get("output_id") is not None):
+        raise EventValidationError("未核实成员必须是尚未关联产物的显式请求")
+    if explicit and item.get("requested_output_id") is None:
+        raise EventValidationError("显式成员必须保留原请求产物 ID")
+    if event.reason == _RESOLVE_REASON:
+        if not unresolved:
+            raise EventValidationError("显式核实只能推进原 UNRESOLVED 项")
+        output_id = row.after.values.get("output_id")
+    else:
+        output_id = item.get("output_id")
+    if output_id is None:
+        if event.reason == _RESOLVE_REASON or not unresolved:
+            raise EventValidationError("已选中或核实成功的成员必须关联真实产物")
+        return
+    output = required("outputs", output_id)
+    if output.get("source_action_id") != dependency.get("depends_on_action_id"):
+        raise EventValidationError("取回成员的真实产物必须属于固定来源")
+    if explicit and output_id != item["requested_output_id"]:
+        raise EventValidationError("显式成员的真实产物必须等于原请求 ID")
+
+
 def _read_permission_guard(event, context) -> None:
-    """读取资格守卫：授予与逐项拒绝均恰好作用于一条 SELECTED 项。"""
+    """授予推进一条 SELECTED 项；拒绝保存一条未建档项的最终错误。"""
     if event.event_type == _READ_PERMISSION_EVENT and event.reason == _GRANT_REASON:
         updates = [
             row
@@ -1748,3 +1816,4 @@ def register_outputs_guards() -> None:
     register_guard("copy", _copy_guard)
     register_guard("copy_links", _copy_links_guard)
     register_guard("read_permission", _read_permission_guard)
+    register_guard("obtain_member", _obtain_member_guard)
