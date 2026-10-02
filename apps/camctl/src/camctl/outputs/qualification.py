@@ -66,8 +66,9 @@ class OperationConfig:
 class FileQualification:
     """一次资格申请的实际结果。
 
-    授予时 copy_id、run_id、target_file_id 与（取回分支的）
-    delivery_id 指向同事务建档的行；拒绝时均为 None 并携带原因。
+    GRANTED 时 copy_id、run_id、target_file_id 与（取回分支的）
+    delivery_id 指向首次共同建档或已核实的原记录。该结果不替代
+    实际读取的流程、尝试及派发资格检查；拒绝时身份均为 None 并携带原因。
     """
 
     outcome: QualificationOutcome
@@ -82,7 +83,7 @@ class FileQualification:
 class FileCandidate:
     """一次文件资格申请：目标产物、源文件与建档所需身份。
 
-    取回路径携带 item_id（SELECTED 取回项）；内部检查/修复路径携
+    取回路径携带 item_id（已固定取回项，首次建档须为 SELECTED）；内部检查/修复路径携
     带 processing_id（录像处理责任），共用设备单文件读取机会且不
     创建交付。主机产物使用 source_intermediate_file_id，config 为
     None 表示不适用设备配置；本地读取的次数上限固定为 1。

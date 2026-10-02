@@ -22,6 +22,7 @@ from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
     PathRuleError, object_file_name, relative_file_path, validate_relative_file_path,
 )
+from camctl.operations.attempts import AttemptTarget, OperationKind, operation_responsibility_key
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.sources import (
     ActionFacts,
@@ -892,12 +893,14 @@ class _GrantFileCommand:
         )
         output = self._load_target(connection, action, source_file)
         device_id = self._source_device(connection, source_file) if is_device_source else None
+        existing = self._existing_preparation(connection, source_file, device_id)
         if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
             return self._wait("action_not_eligible")
+        if existing is not None:
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                               read_only=True, result=existing)
         if command.item_id is not None:
             item = self._state["obtain_items"][command.item_id]
-            if item["status"] == int(_ITEM_STATUS.DELIVERY_CREATED):
-                return self._item_already_granted(connection, item)
             if item["status"] != int(_ITEM_STATUS.SELECTED):
                 return CommandPlan(
                     events=(),
@@ -1392,28 +1395,89 @@ class _GrantFileCommand:
             ),
         )
 
-    def _item_already_granted(self, connection, item) -> CommandPlan:
-        delivery_id = item["delivery_id"]
-        copy = connection.execute(
-            "SELECT id FROM file_copies WHERE delivery_id = ?", (delivery_id,)
-        ).fetchone()
-        run = connection.execute(
-            "SELECT id FROM operation_runs WHERE copy_id = ? AND kind = 3",
-            (copy[0] if copy else -1,),
-        ).fetchone()
-        return CommandPlan(
-            events=(),
-            owners=self._owners,
-            state_rows=self._state,
-            read_only=True,
-            result=FileQualification(
-                outcome=QualificationOutcome.GRANTED,
-                copy_id=copy[0] if copy else None,
-                run_id=run[0] if run else None,
-                delivery_id=delivery_id,
-                target_file_id=None,
-                reason="already_granted",
-            ),
+    def _find_one(self, connection, table: str, condition: str, parameters: tuple) -> dict | None:
+        """按内部固定查询定位一条责任；重复与缺失分别处理。"""
+        with closing(connection.execute(
+            f"SELECT id FROM {table} WHERE {condition} LIMIT 2", parameters,
+        )) as cursor:
+            identities = cursor.fetchall()
+        if len(identities) > 1:
+            raise ConsistencyError(f"读取准备责任存在重复记录: {table}")
+        return self._required(connection, table, identities[0][0]) if identities else None
+
+    def _existing_preparation(self, connection, source_file, device_id) -> FileQualification | None:
+        """核对原准备责任的完整关联；不改写其配置、进度或生命周期。"""
+        command = self._command
+        delivery_id = None
+        internal_run = None
+        if command.item_id is not None:
+            item = self._state["obtain_items"][command.item_id]
+            delivery_id = item["delivery_id"]
+            delivery = self._find_one(connection, "deliveries", "action_id = ? AND output_id = ?",
+                                      (command.action_id, command.output_id))
+            if delivery_id is None:
+                if delivery is not None or item["status"] == int(_ITEM_STATUS.DELIVERY_CREATED):
+                    raise ConsistencyError("取回项缺少原交付关联")
+                return None
+            if (delivery is None or delivery["id"] != delivery_id
+                    or item["status"] != int(_ITEM_STATUS.DELIVERY_CREATED)):
+                raise ConsistencyError("原交付与取回动作、产物或条目不一致")
+            try:
+                _, separator, extension = delivery["file_name"].partition(".")
+                if not separator or delivery["file_name"] != object_file_name(delivery_id, extension):
+                    raise PathRuleError("交付文件名不符合原身份")
+            except PathRuleError as error:
+                raise ConsistencyError("原交付文件名与固定身份不一致") from error
+            copy = self._find_one(connection, "file_copies", "delivery_id = ?", (delivery_id,))
+            target = self._find_one(connection, "intermediate_files", "owner_delivery_id = ? AND purpose = ?",
+                                    (delivery_id, int(_PURPOSE.DELIVERY_COPY)))
+            purpose = FilePurpose.DELIVERY_COPY
+        else:
+            copy = self._find_one(connection, "file_copies", "processing_id = ?", (command.processing_id,))
+            target = self._find_one(connection, "intermediate_files", "owner_action_id = ? AND purpose = ?",
+                                    (command.action_id, int(_PURPOSE.RECORDING_INPUT)))
+            internal_run = self._find_one(connection, "operation_runs",
+                f"action_id = ? AND kind = {int(_RUN_KIND.READ_FILE)}", (command.action_id,))
+            purpose = FilePurpose.RECORDING_INPUT
+            if copy is None and target is None and internal_run is None:
+                return None
+        if copy is None or target is None:
+            raise ConsistencyError("已有读取准备责任缺少拷贝或目标文件")
+        if (
+            copy["delivery_id"] != delivery_id or copy["processing_id"] != command.processing_id
+            or copy["source_device_file_id"] != command.source_device_file_id
+            or copy["source_intermediate_file_id"] != command.source_intermediate_file_id
+            or copy["target_file_id"] != target["id"]
+            or copy["source_size"] != source_file["size_bytes"]
+            or copy["slot_device_id"] not in (None, device_id)
+        ):
+            raise ConsistencyError("原拷贝与业务责任、源文件、目标或设备归属不一致")
+        if (copy["source_sha256"] is not None and source_file["sha256"] is not None
+                and copy["source_sha256"] != source_file["sha256"]):
+            raise ConsistencyError("原拷贝与源文件的已知摘要不一致")
+        try:
+            validate_relative_file_path(purpose, target["id"], target["relative_path"])
+        except PathRuleError as error:
+            raise ConsistencyError("原读取目标路径与固定身份不一致") from error
+        key = operation_responsibility_key(OperationKind.READ_FILE, command.action_id,
+                                           AttemptTarget(copy_id=copy["id"]), None)
+        # READ_FILE 是有限登记常量；字面值让 SQLite 使用 one_read_flow 部分索引。
+        run = self._find_one(connection, "operation_runs", f"copy_id = ? AND kind = {int(_RUN_KIND.READ_FILE)}",
+                             (copy["id"],))
+        keyed_run = self._find_one(connection, "operation_runs", "responsibility_key = ?", (key,))
+        if run is None or keyed_run is None or run["id"] != keyed_run["id"]:
+            raise ConsistencyError("原拷贝缺少唯一且责任键一致的读取流程")
+        if command.processing_id is not None and (internal_run is None or internal_run["id"] != run["id"]):
+            raise ConsistencyError("内部读取流程与原录像处理责任不一致")
+        expected = {"action_id": command.action_id, "delivery_id": delivery_id,
+                    "kind": int(_RUN_KIND.READ_FILE), "copy_id": copy["id"],
+                    "responsibility_key": key, "activity_id": None,
+                    "cleanup_item_id": None, "query_purpose": None, "session_key": None}
+        if any(run[name] != value for name, value in expected.items()):
+            raise ConsistencyError("原读取流程的类型、目标或归属不一致")
+        return FileQualification(
+            outcome=QualificationOutcome.GRANTED, copy_id=copy["id"], run_id=run["id"],
+            delivery_id=delivery_id, target_file_id=target["id"], reason="already_granted",
         )
 
     def _reuse(self, saved: list[dict]) -> CommandPlan:
