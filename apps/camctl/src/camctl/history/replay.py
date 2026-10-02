@@ -11,6 +11,7 @@ from typing import Any, Iterable, Mapping
 
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.json_values import json_equal
 from camctl.history.validators import ValidatedEvent
 
 
@@ -57,6 +58,14 @@ def _own_rows(event: ValidatedEvent, entity: tuple[int, int]):
     )
 
 
+def _require_values(key, current: Mapping[str, Any], expected: Mapping[str, Any]) -> None:
+    for column, value in expected.items():
+        if column not in current:
+            raise ReplayError(f"行 {key} 缺少事件要求核对的列 {column}")
+        if not json_equal(current[column], value):
+            raise ReplayError(f"行 {key} 的 {column} 当前值与事件要求值不一致")
+
+
 def apply_forward(image: EntityImage, event: ValidatedEvent) -> EntityImage:
     """把一条事件应用到对象镜像；只应用属于该对象的行。
 
@@ -77,11 +86,7 @@ def apply_forward(image: EntityImage, event: ValidatedEvent) -> EntityImage:
             if key not in rows:
                 raise ReplayError(f"行 {key} 不存在，无法更新")
             current = rows[key]
-            for column, value in row.before.values.items():
-                if column in current and current[column] != value:
-                    raise ReplayError(
-                        f"行 {key} 的 {column} 当前值 {current[column]!r} 与事件前值 {value!r} 不一致"
-                    )
+            _require_values(key, current, row.before.values)
             merged = dict(current)
             merged.update(row.after.values)
             rows[key] = merged
@@ -113,16 +118,14 @@ def apply_reverse(image: EntityImage, event: ValidatedEvent) -> EntityImage:
         if not row.before.exists:
             if key not in rows:
                 raise ReplayError(f"行 {key} 不存在，无法逆向移除")
+            if not json_equal(dict(rows[key]), dict(row.after.values)):
+                raise ReplayError(f"行 {key} 的完整业务值与创建后的事实不一致")
             del rows[key]
         else:
             if key not in rows:
                 raise ReplayError(f"行 {key} 不存在，无法逆向更新")
             current = rows[key]
-            for column, value in row.after.values.items():
-                if column in current and current[column] != value:
-                    raise ReplayError(
-                        f"行 {key} 的 {column} 当前值 {current[column]!r} 与事件后值 {value!r} 不一致"
-                    )
+            _require_values(key, current, row.after.values)
             merged = dict(current)
             merged.update(row.before.values)
             rows[key] = merged

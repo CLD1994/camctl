@@ -18,6 +18,7 @@ from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.transaction import row_facts
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary, ReadOrder, ReadScope, TransactionRange
+from camctl.history.events import business_columns
 from camctl.history.replay import EntityImage, apply_forward, apply_reverse
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 from camctl.persistence.repositories.acceptance import ProcessInputCommand
@@ -321,7 +322,8 @@ def test_sync_and_ack_history_replay_preserves_independent_facts(sync_environmen
     images = {}
     objects = load_enum_registry()["history_objects"]
     for table, name in (("runtime_state", "runtime_state"), ("state_syncs", "state_sync")):
-        images[table] = EntityImage(objects[name]["id"], 1, True, {(table, 1): before[table]}, first - 1, 0)
+        values = {column: before[table][column] for column in business_columns(table)}
+        images[table] = EntityImage(objects[name]["id"], 1, True, {(table, 1): values}, first - 1, 0)
     originals = deepcopy(images)
     validated = []
     for event in page.items:
@@ -331,7 +333,9 @@ def test_sync_and_ack_history_replay_preserves_independent_facts(sync_environmen
         for row in event.rows:
             states[row.table][row.row_id].update(row.after.values)
     for table, image in images.items():
-        assert image.rows[(table, 1)] == row_facts(connection, table, 1)
+        facts = row_facts(connection, table, 1)
+        assert image.rows[(table, 1)] == {column: facts[column] for column in business_columns(table)}
+        assert set(image.rows[(table, 1)]) == business_columns(table)
         assert image.change_count == 1
     assert images["state_syncs"].rows[("state_syncs", 1)]["local_report_id"] is None
     for event in reversed(validated):
