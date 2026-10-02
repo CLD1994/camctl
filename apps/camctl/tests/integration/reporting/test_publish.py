@@ -372,7 +372,7 @@ def _before_operation(connection, report_id, operation):
 
 
 @pytest.mark.parametrize("operation", ["prepare", "intent", "publish", "failure"])
-@pytest.mark.parametrize("prefix", ["SELECT * FROM reports", "SELECT event.id, event.event_type", "INSERT INTO history_events", "UPDATE reports"])
+@pytest.mark.parametrize("prefix", ["SELECT * FROM reports", "SELECT id FROM history_transactions", "INSERT INTO history_events", "UPDATE reports"])
 def test_management_read_or_write_failure_preserves_all_facts(connection, tmp_path, operation, prefix):
     from ..persistence.test_transactions import FailingConnection
     report_id = _freeze_report(tmp_path, connection)
@@ -461,6 +461,39 @@ def test_old_publish_key_returns_original_success_after_later_republication(conn
     assert reused.kind.value == "completed"
     assert reused.value == first.value
     assert _saved_state(connection) == before
+
+
+@pytest.mark.parametrize("operation", ["prepare", "intent", "publish", "failure"])
+@pytest.mark.parametrize("invalid", ["missing_member", "range", "body_structure"])
+def test_management_key_with_invalid_original_group_is_not_reused(connection, tmp_path, operation, invalid):
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.transaction import encode_json_value
+
+    report_id = _freeze_report(tmp_path, connection)
+    _before_operation(connection, report_id, operation)
+    key = new_operation_key()
+    saved = _operation(connection, report_id, operation, key)
+    assert saved.kind.value == "completed", saved.error
+    transaction_id, event_id = connection.execute(
+        "SELECT id, first_event_id FROM history_transactions WHERE operation_key = ?", (str(key),),
+    ).fetchone()
+    if invalid == "missing_member":
+        connection.execute("DELETE FROM history_events WHERE id = ?", (event_id,))
+    elif invalid == "range":
+        connection.execute("UPDATE history_transactions SET last_event_id = 10000001 WHERE id = ?",
+                           (transaction_id,))
+    else:
+        raw = connection.execute("SELECT body_json FROM history_events WHERE id = ?", (event_id,)).fetchone()[0]
+        body = parse_exact_json(raw)
+        body["evidence"] = []
+        connection.execute("UPDATE history_events SET body_json = ? WHERE id = ?",
+                           (encode_json_value(body), event_id))
+    before = tuple(connection.iterdump())
+    repeated = _operation(connection, report_id, operation, key)
+    assert repeated.kind.value == "rolled_back"
+    assert isinstance(repeated.error, ConsistencyError)
+    assert tuple(connection.iterdump()) == before
 
 
 def test_management_history_replays_success_failure_and_recovery(connection, tmp_path):

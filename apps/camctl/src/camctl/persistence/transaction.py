@@ -14,11 +14,11 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, replace
 from functools import lru_cache
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, TypedDict
 
 from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
-from camctl.contracts.history_values import HistoryBoundary, TransactionRange
+from camctl.contracts.history_values import BoundaryError, HistoryBoundary, TransactionRange
 from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.changes import (
@@ -27,6 +27,7 @@ from camctl.history.changes import (
     derive_changes,
     event_report_targets,
 )
+from camctl.history.decoding import decode_event_row
 from camctl.history.events import (
     SCHEMA_RESOURCES,
     EventEnvelope,
@@ -170,7 +171,7 @@ def encode_json_value(value: Any) -> str:
     return dump(value)
 
 
-def _encode_body(event: EventEnvelope) -> str:
+def _body_document(event: EventEnvelope) -> dict[str, Any]:
     rows = []
     for row in event.rows:
         rows.append(
@@ -181,9 +182,11 @@ def _encode_body(event: EventEnvelope) -> str:
                 "after": {"exists": row.after.exists, "values": dict(row.after.values)},
             }
         )
-    return encode_json_value(
-        {"reason": event.reason, "evidence": dict(event.evidence), "rows": rows}
-    )
+    return {"reason": event.reason, "evidence": dict(event.evidence), "rows": rows}
+
+
+def _encode_body(event: EventEnvelope) -> str:
+    return encode_json_value(_body_document(event))
 
 
 def _scalar(connection: sqlite3.Connection, sql: str) -> int:
@@ -638,28 +641,92 @@ def next_row_id(connection: sqlite3.Connection, table: str) -> int:
     return (int(row[0]) if row[0] is not None else 0) + 1
 
 
+def read_transaction_range(
+    connection: sqlite3.Connection, transaction_id: int,
+    validated: TransactionRange | None = None,
+) -> TransactionRange:
+    """核实完整事务范围、前一边界及成员；复用范围只限已核验的不可变历史。"""
+    with closing(connection.execute(
+        "SELECT id, first_event_id, last_event_id FROM history_transactions WHERE id = ?",
+        (transaction_id,),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"历史事务 {transaction_id} 不存在")
+    try:
+        transaction = TransactionRange(*row)
+    except BoundaryError as error:
+        raise ConsistencyError(f"历史事务 {transaction_id} 的范围无效") from error
+    if transaction.txn_id != transaction_id:
+        raise ConsistencyError(f"历史事务 {transaction_id} 的身份不一致")
+    if transaction_id > 1:
+        with closing(connection.execute(
+            "SELECT last_event_id FROM history_transactions WHERE id = ?", (transaction_id - 1,),
+        )) as cursor:
+            previous = cursor.fetchone()
+    else:
+        previous = (0,)
+    if previous is None or previous[0] + 1 != transaction.first_event_id:
+        raise ConsistencyError(f"历史事务 {transaction_id} 与前一完整边界不连续")
+    if validated is not None:
+        if transaction != validated:
+            raise ConsistencyError(f"已核验历史事务 {transaction_id} 的范围发生变化")
+        return transaction
+    with closing(connection.execute(
+        "SELECT COUNT(*), MIN(id), MAX(id) FROM history_events WHERE transaction_id = ?",
+        (transaction_id,),
+    )) as cursor:
+        count, first, last = cursor.fetchone()
+    if (count != transaction.last_event_id - transaction.first_event_id + 1
+            or first != transaction.first_event_id or last != transaction.last_event_id):
+        raise ConsistencyError(f"历史事务 {transaction_id} 的成员与首尾范围不一致")
+    return transaction
+
+
+class SavedEvent(TypedDict):
+    """已存事件的身份、完整事务范围和精确正文，供原操作键核实使用。"""
+
+    event_id: int
+    transaction: TransactionRange
+    type: int
+    reason: int
+    body: dict[str, Any]
+
+
 def saved_transaction_events(
     connection: sqlite3.Connection, operation_key: OperationKey
-) -> list[dict] | None:
-    """按操作身份取得已提交事务的事件事实；不存在时为空。
+) -> list[SavedEvent] | None:
+    """在调用方的同一事务内读取原键的完整、可解释事件事实。
 
-    正文按原样解析，reason 从正文读取；供提交结果未知后的核实与
-    重送复用，不产生副作用。
+    仅缺键返回 None；已存事务的范围、成员或正文无效时整项失败，
+    不交付前缀，也不执行业务决定。取得的游标在所有出口释放。
     """
-    row = connection.execute(
+    with closing(connection.execute(
         "SELECT id FROM history_transactions WHERE operation_key = ?",
         (str(operation_key),),
-    ).fetchone()
+    )) as cursor:
+        row = cursor.fetchone()
     if row is None:
         return None
-    events: list[dict] = []
-    for event_type, body in connection.execute(
-        "SELECT event_type, body_json FROM history_events"
+    transaction = read_transaction_range(connection, row[0])
+    events: list[SavedEvent] = []
+    next_event_id = transaction.first_event_id
+    with closing(connection.execute(
+        "SELECT id, transaction_id, event_type, event_version, occurred_at,"
+        " clock_status, change_seq, body_json FROM history_events"
         " WHERE transaction_id = ? ORDER BY id",
-        (int(row[0]),),
-    ):
-        document = json.loads(body)
-        events.append(
-            {"type": int(event_type), "reason": document.get("reason"), "body": document}
-        )
+        (transaction.txn_id,),
+    )) as cursor:
+        for stored in cursor:
+            event = decode_event_row(stored)
+            if (event.transaction_id != transaction.txn_id or event.event_id != next_event_id
+                    or event.event_id > transaction.last_event_id):
+                raise ConsistencyError(f"历史事务 {transaction.txn_id} 的事件身份、范围或顺序不一致")
+            events.append(SavedEvent(
+                event_id=event.event_id, transaction=transaction, type=event.event_type,
+                reason=event.reason, body=_body_document(event),
+            ))
+            next_event_id += 1
+    if next_event_id != transaction.last_event_id + 1:
+        raise ConsistencyError(f"历史事务 {transaction.txn_id} 的事件成员缺失")
     return events

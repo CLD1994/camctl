@@ -38,11 +38,7 @@ def database():
         elif "COUNT(*)" in statement:
             cursor.fetchone.return_value = data["summary"]
         elif "FROM history_events" in statement:
-            rows = data["rows"]
-            # 同一真实接口的两种 SELECT 形状，旧实现仍能暴露目标缺陷。
-            if statement.startswith("SELECT event_type, body_json"):
-                rows = [(row[2], row[7]) for row in rows]
-            cursor.__iter__.return_value = iter(rows)
+            cursor.__iter__.return_value = iter(data["rows"])
         else:
             raise AssertionError(f"未声明的 SQL 读取: {statement}")
         return cursor
@@ -91,6 +87,82 @@ def test_invalid_later_event_rejects_whole_saved_group(database, registration, i
     data["rows"][1] = (8, 3, 1, 1, 0, 1, 6, invalid)
     with pytest.raises(ConsistencyError):
         saved_transaction_events(connection, _KEY)
+
+
+@pytest.mark.parametrize("rows", [
+    [], [(7, 3, 1, 1, 0, 1, 5, _BODY)],
+    [(7, 3, 1, 1, 0, 1, 5, _BODY), (8, 4, 1, 1, 0, 1, 6, _BODY)],
+    [(7, 3, 1, 1, 0, 1, 5, _BODY), (9, 3, 1, 1, 0, 1, 6, _BODY)],
+    [(8, 3, 1, 1, 0, 1, 6, _BODY), (7, 3, 1, 1, 0, 1, 5, _BODY)],
+    [(7, 3, 1, 1, 0, 1, 5, _BODY), (7, 3, 1, 1, 0, 1, 6, _BODY)],
+])
+def test_member_stream_must_match_verified_range(database, registration, rows):
+    connection, data = database
+    data["rows"] = rows
+    with pytest.raises(ConsistencyError):
+        saved_transaction_events(connection, _KEY)
+
+
+@pytest.mark.parametrize("sql_prefix", [
+    "SELECT id FROM history_transactions", "SELECT id, first_event_id",
+    "SELECT last_event_id", "SELECT COUNT(*)", "SELECT id, transaction_id",
+])
+def test_sql_query_error_is_preserved_and_acquired_cursors_close(database, registration, sql_prefix):
+    connection, data = database
+    execute = connection.execute.side_effect
+    failure = sqlite3.OperationalError("数据库读取失败")
+
+    def fail_query(statement, parameters=()):
+        if statement.startswith(sql_prefix):
+            raise failure
+        return execute(statement, parameters)
+
+    connection.execute.side_effect = fail_query
+    with pytest.raises(sqlite3.OperationalError) as caught:
+        saved_transaction_events(connection, _KEY)
+    assert caught.value is failure
+    for cursor in data["cursors"]:
+        cursor.close.assert_called_once_with()
+
+
+def test_key_fetch_error_closes_acquired_cursor(database):
+    connection, data = database
+    execute = connection.execute.side_effect
+    failure = sqlite3.OperationalError("操作键读取失败")
+
+    def fail_fetch(statement, parameters=()):
+        cursor = execute(statement, parameters)
+        cursor.fetchone.side_effect = failure
+        return cursor
+
+    connection.execute.side_effect = fail_fetch
+    with pytest.raises(sqlite3.OperationalError) as caught:
+        saved_transaction_events(connection, _KEY)
+    assert caught.value is failure
+    data["cursors"][0].close.assert_called_once_with()
+
+
+def test_event_iteration_error_does_not_return_prefix(database, registration):
+    connection, data = database
+    execute = connection.execute.side_effect
+    failure = sqlite3.OperationalError("后续事件读取失败")
+
+    def rows_then_error(rows):
+        yield rows[0]
+        raise failure
+
+    def fail_iteration(statement, parameters=()):
+        cursor = execute(statement, parameters)
+        if "FROM history_events" in statement and "COUNT(*)" not in statement:
+            cursor.__iter__.return_value = rows_then_error(data["rows"])
+        return cursor
+
+    connection.execute.side_effect = fail_iteration
+    with pytest.raises(sqlite3.OperationalError) as caught:
+        saved_transaction_events(connection, _KEY)
+    assert caught.value is failure
+    for cursor in data["cursors"]:
+        cursor.close.assert_called_once_with()
 
 
 @pytest.mark.parametrize("state", ["valid", "missing", "invalid"])

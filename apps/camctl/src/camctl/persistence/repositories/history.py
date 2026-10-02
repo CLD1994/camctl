@@ -21,6 +21,7 @@ from camctl.acceptance.definitions import read_action_spec
 from camctl.history.events import EventEnvelope
 from camctl.history.decoding import decode_event_row
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.transaction import read_transaction_range as _transaction_range
 
 __all__ = ["HistoryRepository"]
 
@@ -213,34 +214,6 @@ def _decode_row(values: dict) -> dict:
 def _one(connection, statement, parameters=()):
     with closing(connection.execute(statement, parameters)) as cursor:
         return cursor.fetchone()
-
-
-def _transaction_range(connection, transaction_id: int,
-                       validated: TransactionRange | None = None) -> TransactionRange:
-    row = _one(connection,
-               "SELECT id, first_event_id, last_event_id FROM history_transactions WHERE id = ?",
-               (transaction_id,))
-    if row is None:
-        raise ConsistencyError(f"历史事务 {transaction_id} 不存在")
-    try:
-        transaction = TransactionRange(*row)
-    except BoundaryError as error:
-        raise ConsistencyError(f"历史事务 {transaction_id} 的范围无效") from error
-    previous = (_one(connection, "SELECT last_event_id FROM history_transactions WHERE id = ?",
-                     (transaction_id - 1,)) if transaction_id > 1 else (0,))
-    if previous is None or previous[0] + 1 != transaction.first_event_id:
-        raise ConsistencyError(f"历史事务 {transaction_id} 与前一完整边界不连续")
-    if validated is not None:
-        if transaction != validated:
-            raise ConsistencyError(f"已核验历史事务 {transaction_id} 的范围发生变化")
-        return transaction
-    count, first, last = _one(connection,
-        "SELECT COUNT(*), MIN(id), MAX(id) FROM history_events WHERE transaction_id = ?",
-        (transaction_id,))
-    if (count != transaction.last_event_id - transaction.first_event_id + 1
-            or first != transaction.first_event_id or last != transaction.last_event_id):
-        raise ConsistencyError(f"历史事务 {transaction_id} 的成员与首尾范围不一致")
-    return transaction
 
 
 def _event_range(scope: ReadScope[int], boundary: HistoryBoundary) -> tuple[int, int]:

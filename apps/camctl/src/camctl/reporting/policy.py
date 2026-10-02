@@ -28,7 +28,7 @@ from camctl.history.events import load_event_registry
 from camctl.host_files.handoff import PublishResult, PublishStage
 from camctl.host_files.io import DirectorySyncStage
 from camctl.contracts.json_values import json_equal, parse_exact_json
-from camctl.persistence.transaction import encode_json_value, event_envelope, update_change
+from camctl.persistence.transaction import encode_json_value, event_envelope, saved_transaction_events, update_change
 
 _REPORT_EVENT = load_event_registry()["events"]["REPORT_CHANGED"]
 _ReportChange = IntEnum("ReportChange", {name: spec["reason"] for name, spec in _REPORT_EVENT["branches"].items()})
@@ -318,19 +318,15 @@ class _ReportManagementCommand:
 
     def _saved_plan(self, connection, contents: ReportBytes | None) -> CommandPlan | None:
         """原操作键只复用同一目标与输入的已提交事实，绝不重做发布。"""
-        rows = connection.execute(
-            "SELECT event.id, event.event_type, event.body_json FROM history_events AS event"
-            " JOIN history_transactions AS txn ON txn.id = event.transaction_id"
-            " WHERE txn.operation_key = ? ORDER BY event.id LIMIT 2", (str(self.key),),
-        ).fetchall()
-        if not rows:
+        events = saved_transaction_events(connection, self.key)
+        if events is None:
             return None
-        if len(rows) != 1 or rows[0][1] != _REPORT_EVENT["id"]:
+        if len(events) != 1 or events[0]["type"] != _REPORT_EVENT["id"]:
             raise ConsistencyError("报告操作键已用于其他事务")
-        event_id, _, raw = rows[0]
-        body = parse_exact_json(raw)
-        changes = body.get("rows", [])
-        if (body.get("reason") != self.kind or len(changes) != 1
+        event_id = events[0]["event_id"]
+        body = events[0]["body"]
+        changes = body["rows"]
+        if (events[0]["reason"] != self.kind or len(changes) != 1
                 or changes[0].get("table") != "reports" or changes[0].get("id") != self.report_id
                 or changes[0].get("before", {}).get("exists") is not True):
             raise ConsistencyError("报告操作键与目标或管理分支不一致")
