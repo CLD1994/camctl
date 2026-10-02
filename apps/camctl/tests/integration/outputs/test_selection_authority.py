@@ -6,12 +6,12 @@ import sqlite3
 
 import pytest
 
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.outputs.sources import SelectionMode, SelectionSnapshot, SelectedItem, select_outputs
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 
-from .test_catalog_integrity import selection_database
+from .test_catalog_integrity import CatalogConnection, selection_database
 from .test_output_family import family_database
 from .test_sources import _NOW, _fixed_resolution
 from .test_selection_lookup import LookupConnection
@@ -40,6 +40,7 @@ def _reject(owned, snapshot):
         outputs.FixSelection(61, snapshot, _NOW), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.ROLLED_BACK, result
     assert tuple(owned.connection.iterdump()) == before
+    return result
 
 
 @pytest.mark.parametrize("mode,ids,selected", [
@@ -157,6 +158,53 @@ def test_saved_mode_conflicting_with_original_selector_cannot_be_fixed(selection
                              (json.dumps({"params": params}),))
     owned.connection.commit()
     _reject(owned, snapshot)
+
+
+@pytest.mark.parametrize("status,output_id,requested,basis,error,details", [
+    (2, 701, None, 1, None, None),
+    (1, None, 999, 5, None, None),
+    (4, None, 999, 5, 1, '{"requested_output_id":"999"}'),
+])
+def test_pending_selection_cannot_append_to_existing_items(
+    selection_database, status, output_id, requested, basis, error, details,
+):
+    owned = selection_database
+    _request(owned.connection, SelectionMode.DEFAULT)
+    snapshot = _snapshot(owned.connection)
+    owned.connection.execute(
+        "INSERT INTO obtain_items (id, selection_id, requested_output_id, output_id, basis,"
+        " original_output_id, preview_output_id, preview_size, repaired_size, status,"
+        " source_dependency, delivery_id, error_code, error_details_json)"
+        " VALUES (99, 61, ?, ?, ?, NULL, NULL, NULL, NULL, ?, 0, NULL, ?, ?)",
+        (requested, output_id, basis, status, error, details))
+    owned.connection.commit()
+    result = _reject(owned, snapshot)
+    assert isinstance(result.error, ConsistencyError), result.error
+
+
+@pytest.mark.parametrize("state", ["empty", "present", "execute", "fetch"])
+def test_pending_item_query_closes_cursor_and_propagates_failure(selection_database, state):
+    owned = selection_database
+    _request(owned.connection, SelectionMode.DEFAULT)
+    snapshot = _snapshot(owned.connection)
+    if state == "present":
+        owned.connection.execute("INSERT INTO obtain_items"
+            " (id,selection_id,output_id,basis,status,source_dependency) VALUES (99,61,701,1,2,0)")
+        owned.connection.commit()
+    probe = CatalogConnection(owned.connection, state, "pending_items")
+    before = tuple(owned.connection.iterdump())
+    result = outputs.OutputsRepository().fix_selection(outputs.FixSelection(61, snapshot, _NOW),
+        new_operation_key(), replace(owned, connection=probe))
+    assert result.kind is (DbOutcomeKind.COMPLETED if state == "empty" else DbOutcomeKind.ROLLED_BACK)
+    if state in ("execute", "fetch"):
+        assert result.error is probe.error
+    if state == "present":
+        assert isinstance(result.error, ConsistencyError), result.error
+    if state != "empty":
+        assert tuple(owned.connection.iterdump()) == before
+    assert len(probe.cursors) == (0 if state == "execute" else 1)
+    for cursor in probe.cursors:
+        cursor.close.assert_called_once_with()
 
 
 @pytest.mark.parametrize("stage", ["execute", "fetch"])

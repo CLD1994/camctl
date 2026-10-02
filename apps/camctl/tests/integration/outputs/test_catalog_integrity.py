@@ -136,6 +136,7 @@ class CatalogConnection(_FaultConnection):
             "processing": ("SELECT check_state, repair_state, discard_state FROM recording_processing",),
             "items": ("SELECT requested_output_id, output_id, basis, original_output_id",),
             "exists": ("SELECT 1 FROM outputs WHERE id",),
+            "pending_items": ("SELECT 1 FROM obtain_items WHERE selection_id",),
         }
         is_catalog = sql.startswith(prefixes[self.query])
         if is_catalog and self.fault == "execute":

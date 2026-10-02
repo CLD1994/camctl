@@ -569,6 +569,12 @@ class _FixSelectionCommand:
                 f"来源选择状态不可解释: {command.selection_id}"
                 f" {selection['status']!r}"
             )
+        with closing(connection.execute(
+            "SELECT 1 FROM obtain_items WHERE selection_id=? LIMIT 1", (command.selection_id,),
+        )) as cursor:
+            has_items = cursor.fetchone() is not None
+        if has_items:
+            raise ConsistencyError("尚未固定的来源选择不能已有目标条目")
         snapshot = command.snapshot
         if not snapshot.is_fixed:
             raise TransactionError("未完成选择不能固定")
