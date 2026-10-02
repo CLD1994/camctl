@@ -13,7 +13,7 @@ from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.decoding import decode_event_row
-from camctl.history.events import business_columns, HistoryEventError
+from camctl.history.events import business_columns, HistoryEventError, load_event_registry
 from camctl.history.replay import ReplayError, reverse_row_values
 from camctl.persistence.transaction import read_transaction_range
 
@@ -66,12 +66,26 @@ def read_row_values_at_boundary(
     if entity is None:
         raise ConsistencyError(f"限定行恢复的对象种类 {owner[0]} 未登记")
     ref = (entity["id"], owner[1])
-    primary = _anchor(_one(connection,
-        f"SELECT last_event_id, change_count FROM {entity['table']} WHERE id = ?", (owner[1],)), "当前对象")
+    derived = load_event_registry()["tables"][entity["table"]]["derived"]
+    if "last_event_id" not in derived:
+        raise ConsistencyError("限定行恢复要求对象主表声明可靠末事件")
+    counted = "change_count" in derived
+    names = "last_event_id, change_count" if counted else "last_event_id"
+    primary = _one(connection, f"SELECT {names} FROM {entity['table']} WHERE id = ?", (owner[1],))
+    if counted:
+        primary = _anchor(primary, "当前对象")
+    else:
+        if primary is None or len(primary) != 1:
+            raise ConsistencyError("当前对象缺少可靠末事件")
+        try:
+            ObjectId(primary[0])
+        except ValueError as error:
+            raise ConsistencyError("当前对象的末事件无效") from error
     head = _anchor(_one(connection,
         "SELECT event_id, change_count FROM entity_event_links"
         " WHERE entity_type = ? AND entity_id = ? ORDER BY event_id DESC LIMIT 1", ref), "对象目录")
-    if primary != head or head[0] > current_boundary.last_event_id:
+    if ((primary != head if counted else primary[0] != head[0])
+            or head[0] > current_boundary.last_event_id):
         raise ConsistencyError("当前对象的末事件与次数不符合可靠目录头及 C")
     floor_row = _one(connection,
         "SELECT event_id, change_count FROM entity_event_links"

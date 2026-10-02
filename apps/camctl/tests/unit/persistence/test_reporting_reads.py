@@ -9,15 +9,17 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts import enums
-from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
 from camctl.reporting.ack import AckReport
+from camctl.persistence.transaction import saved_transaction_events
+from camctl.history.events import load_event_registry
 
 
 @pytest.fixture
 def repository(monkeypatch):
     # 解释器加载源码前隔离登记读取；独立模型实例及缓存随夹具恢复。
-    status = IntEnum("reports.status", {"REGISTERED": 1})
+    status = IntEnum("reports.status", {"REGISTERED": 1, "PREPARED": 2})
     authority_registry_reader = enums.load_registry
     monkeypatch.setattr(enums, "enum_for", create_autospec(enums.enum_for, return_value=status))
     monkeypatch.setattr(enums, "load_registry", create_autospec(enums.load_registry,
@@ -34,11 +36,11 @@ def repository(monkeypatch):
     monkeypatch.setattr(module, "load_event_registry", create_autospec(module.load_event_registry,
         return_value={"events": {"REPORT_CHANGED": {"id": 28, "branches": {"PUBLISH": {"reason": 4}}}}}))
     monkeypatch.setattr(module, "load_enum_registry", create_autospec(authority_registry_reader,
-        return_value={"history_objects": {"report": {"id": 4}}}))
+        return_value={"history_objects": {"report": {"id": 6}}}))
     facts = {"id": 7, "frozen_event_id": 0, "from_wm": 0, "to_wm": 0, "format_version": 1,
              "status": 1, "size_bytes": None, "sha256": None, "publication_count": 0,
              "last_published_event_id": None, "last_error_json": None,
-             "created_event_id": 1, "last_event_id": 1, "change_count": 1}
+             "created_event_id": 1, "last_event_id": 1}
     monkeypatch.setattr(module, "row_facts", create_autospec(module.row_facts, return_value=facts))
     monkeypatch.setattr(module, "validate_report_management", create_autospec(module.validate_report_management,
         return_value=None))
@@ -51,10 +53,13 @@ def database():
     data = {"cursors": [], "fault": None, "error": sqlite3.OperationalError("报告读取不可用"),
             "state": (0, None), "definition": (0, 0, 0, 1, 1), "boundary": (1, 2), "boundary_exists": (1,),
             "watermark": (None,), "candidate": (7,), "published": None, "created": (1,), "syncs": []}
+    data["first_bytes"] = (3, "a" * 32)
     data["business"] = (1,)
 
     def execute(sql, parameters=()):
-        if sql.startswith("SELECT acknowledged_wm"):
+        if sql.startswith("SELECT link.event_id, txn.operation_key"):
+            tag = "first_bytes"
+        elif sql.startswith("SELECT acknowledged_wm"):
             tag = "state"
         elif sql.startswith("SELECT from_wm"):
             tag = "definition"
@@ -198,5 +203,78 @@ def test_report_management_closes_published_lookup_before_fact_error(repository,
     data["published"] = (2, 28, 1, "{}")
     with pytest.raises(ConsistencyError):
         repository.read_report_management(connection, 7)
+    for cursor in data["cursors"]:
+        cursor.close.assert_called_once_with()
+
+
+@pytest.fixture
+def byte_event(repository, monkeypatch):
+    event = {"event_id": 3, "transaction": TransactionRange(2, 3, 3),
+             "type": 28, "occurred_at": 1, "reason": 2,
+             "body": {"reason": 2, "evidence": {}, "rows": [{
+                 "table": "reports", "id": 7,
+                 "before": {"exists": True, "values": {"status": 1, "size_bytes": None, "sha256": None}},
+                 "after": {"exists": True, "values": {"status": 2, "size_bytes": 6, "sha256": "a" * 64}},
+             }]}}
+    monkeypatch.setattr(repository, "load_event_registry", create_autospec(load_event_registry,
+        return_value={"events": {"REPORT_CHANGED": {"id": 28, "branches": {"PREPARE": {"reason": 2}}}}}))
+    reader = create_autospec(saved_transaction_events, return_value=[event])
+    monkeypatch.setattr(repository, "saved_transaction_events", reader, raising=False)
+    return event, reader
+
+
+@pytest.mark.parametrize("fault", [None, "fetch", "execute", "group"])
+def test_first_report_bytes_preserve_value_exception_and_cursor_ownership(repository, database, byte_event, fault):
+    connection, data = database
+    _, reader = byte_event
+    data["fault"] = fault
+    if fault == "group":
+        reader.side_effect = data["error"]
+    if fault is None:
+        assert repository.read_report_bytes_at_boundary(connection, 7, 8) == repository.ReportBytes(6, "a" * 64)
+    else:
+        with pytest.raises(sqlite3.OperationalError) as raised:
+            repository.read_report_bytes_at_boundary(connection, 7, 8)
+        assert raised.value is data["error"]
+    for cursor in data["cursors"]:
+        cursor.close.assert_called_once_with()
+
+
+def test_first_report_bytes_can_be_unknown_at_original_boundary(repository, database, byte_event):
+    connection, data = database
+    _, reader = byte_event
+    data["first_bytes"] = None
+    reader.side_effect = AssertionError("没有来源时不能补造历史")
+    assert repository.read_report_bytes_at_boundary(connection, 7, 2) is None
+    for cursor in data["cursors"]:
+        cursor.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("invalid", ["group_missing", "event_id", "phase", "row_id", "creation",
+                                    "missing_size", "known_before", "wrong_stage", "after_boundary"])
+def test_first_report_bytes_reject_unreliable_source(repository, database, byte_event, invalid):
+    connection, data = database
+    event, reader = byte_event
+    change = event["body"]["rows"][0]
+    if invalid == "group_missing":
+        reader.return_value = None
+    elif invalid == "event_id":
+        event["event_id"] = 4
+    elif invalid == "phase":
+        event["reason"] = 3
+    elif invalid == "row_id":
+        change["id"] = 8
+    elif invalid == "creation":
+        change["before"]["exists"] = False
+    elif invalid == "missing_size":
+        del change["after"]["values"]["size_bytes"]
+    elif invalid == "known_before":
+        change["before"]["values"].update(size_bytes=6, sha256="a" * 64)
+    elif invalid == "wrong_stage":
+        change["after"]["values"]["status"] = 3
+    else:
+        event["transaction"] = TransactionRange(2, 3, 9)
+    with pytest.raises(ConsistencyError):
+        repository.read_report_bytes_at_boundary(connection, 7, 8)
     for cursor in data["cursors"]:
         cursor.close.assert_called_once_with()

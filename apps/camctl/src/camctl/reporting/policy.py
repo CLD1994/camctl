@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from contextlib import closing
 from enum import IntEnum
 
@@ -24,8 +24,9 @@ from camctl.reporting.models import (
 from camctl.reporting.ack import AckReport
 from camctl.persistence.repositories.reporting import (
     read_report_opportunity, read_covering_report, read_frozen_report,
-    read_report_management, read_ack_report,
+    read_report_management, read_ack_report, read_report_bytes_at_boundary,
 )
+from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.history.events import load_event_registry
 from camctl.host_files.handoff import PublishResult, PublishStage
 from camctl.host_files.io import DirectorySyncStage
@@ -232,6 +233,31 @@ async def freeze_report(
     """根据事务实际事实选择并冻结报告。"""
     return ReportingRepository().freeze_report(key, owned)
 
+def _validate_management_change(reason: int, event_id: int, before: Mapping, after: Mapping) -> ReportBytes | None:
+    """完整前后状态符合权威分支约束，字节和发布事实保持原含义。"""
+    old_bytes = validate_report_management(before)
+    new_bytes = validate_report_management(after)
+    definition = _REPORT_EVENT["branches"][_ReportChange(reason).name]["rows"][0]
+    if definition["op"] != "update":
+        raise ConsistencyError("该报告分支不能更新已有报告")
+    for side, values in (("before", before), ("after", after)):
+        for name, allowed in definition.get(side, {}).items():
+            if name not in values or not any(json_equal(values[name], value) for value in allowed):
+                raise ConsistencyError(f"报告 {side}.{name} 不符合完整分支状态")
+        if values["last_error_json"] is not None:
+            parse_exact_json(encode_json_value(values["last_error_json"]))
+    if old_bytes is not None and new_bytes != old_bytes:
+        raise ConsistencyError("报告首次确定的字节依据不能改变")
+    if reason == _ReportChange.INTENT and not json_equal(after["last_error_json"], before["last_error_json"]):
+        raise ConsistencyError("发布意图不能提前清除文件处理错误")
+    if reason == _ReportChange.PUBLISH:
+        if after["publication_count"] != before["publication_count"] + 1:
+            raise ConsistencyError("每次可靠发布必须恰好增加一次成功计数")
+        if after["last_published_event_id"] != event_id:
+            raise ConsistencyError("本次发布依据必须引用当前事件")
+    return new_bytes
+
+
 def _report_guard(event, context) -> None:
     """验证 REPORT_CHANGED 各分支的固定字节与管理事实。"""
     for row in event.rows:
@@ -242,22 +268,9 @@ def _report_guard(event, context) -> None:
             before.update(row.before.values)
             after = {**before, **row.after.values}
             try:
-                old_bytes = validate_report_management(before)
-                new_bytes = validate_report_management(after)
-                for values in (before, after):
-                    if values["last_error_json"] is not None:
-                        parse_exact_json(encode_json_value(values["last_error_json"]))
-                if event.reason == _ReportChange.INTENT and not json_equal(after["last_error_json"], before["last_error_json"]):
-                    raise EventValidationError("发布意图不能提前清除文件处理错误")
+                _validate_management_change(event.reason, event.event_id, before, after)
             except (ValueError, RecursionError) as error:
                 raise EventValidationError(str(error)) from error
-            if old_bytes is not None and new_bytes != old_bytes:
-                raise EventValidationError("报告首次确定的字节依据不能改变")
-            if event.reason == _ReportChange.PUBLISH:
-                if after["publication_count"] != before["publication_count"] + 1:
-                    raise EventValidationError("每次可靠发布必须恰好增加一次成功计数")
-                if after["last_published_event_id"] != event.event_id:
-                    raise EventValidationError("本次发布依据必须引用当前事件")
             continue
         after = row.after.values
         try:
@@ -304,13 +317,10 @@ class _ReportManagementCommand:
         from camctl.contracts.values import ObjectId
 
         ObjectId(self.report_id)
-        facts = read_report_management(scope.connection, self.report_id)
-        contents = validate_report_management(facts)
+        UtcMicros(self.occurred_at)
         if self.kind is _ReportChange.PREPARE:
             if not isinstance(self.contents, ReportBytes):
                 raise ConsistencyError("报告准备只接收确定长度与摘要")
-            if contents is not None and contents != self.contents:
-                raise ConsistencyError("重建字节与首次确定的报告不一致")
         if self.kind is _ReportChange.PUBLISH:
             validate_report_publication_result(self.file_result)
         if self.kind is _ReportChange.FAIL:
@@ -318,9 +328,13 @@ class _ReportManagementCommand:
                 raise ConsistencyError("报告文件错误必须是 JSON 对象")
             # 取得可独立保存的精确值，拒绝非法 JSON 和不可持久化类型。
             self.error = parse_exact_json(encode_json_value(self.error))
-        saved = self._saved_plan(scope.connection, contents)
+        saved = saved_transaction_events(scope.connection, self.key)
         if saved is not None:
-            return saved
+            return self._saved_plan(scope, saved)
+        facts = read_report_management(scope.connection, self.report_id)
+        contents = validate_report_management(facts)
+        if self.kind is _ReportChange.PREPARE and contents is not None and contents != self.contents:
+            raise ConsistencyError("重建字节与首次确定的报告不一致")
 
         status = ReportStatus(facts["status"])
         after = {"status": status, "last_error_json": facts["last_error_json"]}
@@ -364,11 +378,8 @@ class _ReportManagementCommand:
     def _read_only(result: ReportBytes | ReportPublication | None) -> CommandPlan:
         return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=result)
 
-    def _saved_plan(self, connection, contents: ReportBytes | None) -> CommandPlan | None:
+    def _saved_plan(self, scope, events) -> CommandPlan:
         """原操作键只复用同一目标与输入的已提交事实，绝不重做发布。"""
-        events = saved_transaction_events(connection, self.key)
-        if events is None:
-            return None
         if len(events) != 1 or events[0]["type"] != _REPORT_EVENT["id"]:
             raise ConsistencyError("报告操作键已用于其他事务")
         event_id = events[0]["event_id"]
@@ -376,13 +387,31 @@ class _ReportManagementCommand:
         changes = body["rows"]
         if (events[0]["reason"] != self.kind or len(changes) != 1
                 or changes[0].get("table") != "reports" or changes[0].get("id") != self.report_id
-                or changes[0].get("before", {}).get("exists") is not True):
+                or changes[0].get("before", {}).get("exists") is not True
+                or changes[0].get("after", {}).get("exists") is not True
+                or events[0]["occurred_at"] != self.occurred_at):
             raise ConsistencyError("报告操作键与目标或管理分支不一致")
-        after = changes[0]["after"]["values"]
+        connection = scope.connection
+        facts = read_report_management(connection, self.report_id)
+        columns = frozenset({"status", "size_bytes", "sha256", "publication_count",
+                             "last_published_event_id", "last_error_json"})
+        transaction = events[0]["transaction"]
+        after = read_row_values_at_boundary(connection, owner=("report", self.report_id),
+            table="reports", row_id=self.report_id, columns=columns, current_values=facts,
+            boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+        changed = changes[0]["after"]["values"]
+        if any(name not in after or not json_equal(value, after[name]) for name, value in changed.items()):
+            raise ConsistencyError("原报告管理变化与原完整边界不一致")
+        before = {**after, **changes[0]["before"]["values"]}
+        contents = _validate_management_change(self.kind, event_id, before, after)
+        basis = read_report_bytes_at_boundary(connection, self.report_id, transaction.last_event_id)
+        if contents != basis:
+            raise ConsistencyError("原报告字节与首次确定的历史依据不符")
         if self.kind is _ReportChange.PREPARE:
-            if ReportBytes(after["size_bytes"], after["sha256"]) != self.contents:
+            if contents != self.contents:
                 raise ConsistencyError("报告操作键对应不同字节")
-            return self._read_only(self.contents)
+            return self._read_only(contents)
         if self.kind is _ReportChange.PUBLISH:
             if after["last_published_event_id"] != event_id:
                 raise ConsistencyError("原报告发布事实引用无效")

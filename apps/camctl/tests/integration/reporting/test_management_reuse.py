@@ -3,6 +3,7 @@
 from contextlib import closing
 import json
 import sqlite3
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -11,8 +12,9 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.reporting.policy import (
     publish_report, record_report_bytes, record_report_failure, record_report_publish_intent,
 )
+from camctl.reporting import policy
 
-from .test_publish import connection, _bytes, _freeze_report, _moved, _owned, _publish
+from .test_publish import connection, _bytes, _freeze_report, _moved, _owned, _publish, _update
 
 
 ERROR = {"reason": "report file", "context": {"ready": True, "count": 1}}
@@ -202,3 +204,84 @@ def test_original_intent_survives_report_history_crossing_restore_page(connectio
     for index in range(129):
         _completed(_call(connection, report_id, "failure", new_operation_key(), error={"index": index}))
     assert _completed(_readonly(connection, report_id, "intent", key)) == original == _bytes()
+
+
+@pytest.mark.parametrize("phase,requested", [("prepare", "intent"), ("intent", "publish"),
+                                           ("publish", "failure"), ("failure", "prepare")])
+def test_management_wrong_phase_is_rejected_before_current_management(connection, tmp_path, monkeypatch, phase, requested):
+    report_id, key, _ = _original(connection, tmp_path, phase)
+    monkeypatch.setattr(policy, "read_report_management", create_autospec(policy.read_report_management,
+        side_effect=AssertionError("异阶段键不能进入当前管理状态")))
+    result = _readonly(connection, report_id, requested, key)
+    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(result.error, ConsistencyError), result.error
+
+
+@pytest.mark.parametrize("phase", ["prepare", "intent", "publish", "failure"])
+def test_original_management_key_rejects_another_report(connection, tmp_path, phase):
+    from ..acceptance.test_atomicity import _process
+    from .test_freeze import _plan_body
+
+    report_id, key, _ = _original(connection, tmp_path, phase)
+    assert _process(_plan_body("2"), connection).kind is DbOutcomeKind.COMPLETED
+    second = _completed(policy.ReportingRepository().freeze_report(new_operation_key(), _owned(connection))).report
+    assert second.report_id != report_id
+    result = _readonly(connection, second.report_id, phase, key)
+    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(result.error, ConsistencyError), result.error
+
+
+@pytest.mark.parametrize("phase", ["prepare", "failure"])
+def test_unchanged_fact_in_original_delta_still_rejects_different_input(connection, tmp_path, phase):
+    report_id, _, _ = _original(connection, tmp_path, "prepare")
+    _completed(_call(connection, report_id, "failure", new_operation_key()))
+    if phase == "failure":
+        _completed(_call(connection, report_id, "intent", new_operation_key()))
+    key = new_operation_key()
+    _completed(_call(connection, report_id, phase, key))
+    _completed(_publish(connection, report_id))
+    inputs = ({"contents": _bytes(b"different\n")} if phase == "prepare"
+              else {"error": {"reason": "report file", "context": {"ready": 1, "count": 1}}})
+    result = _readonly(connection, report_id, phase, key, **inputs)
+    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(result.error, ConsistencyError), result.error
+
+
+@pytest.mark.parametrize("mutation", ["head", "gap", "floor", "value", "before_state", "member"])
+def test_management_reuse_rejects_unreliable_original_or_restore_history(connection, tmp_path, mutation):
+    report_id, key, _ = _original(connection, tmp_path, "intent")
+    with closing(connection.execute("SELECT last_event_id FROM history_transactions WHERE operation_key = ?", (str(key),))) as cursor:
+        original_event_id = cursor.fetchone()[0]
+    _completed(_call(connection, report_id, "failure", new_operation_key(), error={"index": 1}))
+    with closing(connection.execute("SELECT last_event_id FROM reports WHERE id = ?", (report_id,))) as cursor:
+        middle = cursor.fetchone()[0]
+    _completed(_call(connection, report_id, "failure", new_operation_key(), error={"index": 2}))
+    if mutation == "head":
+        connection.execute("UPDATE reports SET last_event_id = ? WHERE id = ?", (middle, report_id))
+    elif mutation in ("gap", "floor"):
+        event_id = middle if mutation == "gap" else original_event_id
+        connection.execute("DELETE FROM entity_event_links WHERE event_id = ?", (event_id,))
+    elif mutation == "value":
+        connection.execute("UPDATE reports SET last_error_json = ? WHERE id = ?", ('{"index":99}', report_id))
+    elif mutation == "member":
+        connection.execute("DELETE FROM history_events WHERE id = ?", (middle,))
+    else:
+        with closing(connection.execute("SELECT body_json FROM history_events WHERE id = ?", (original_event_id,))) as cursor:
+            body = json.loads(cursor.fetchone()[0])
+        body["rows"][0]["before"]["values"]["status"] = 4
+        connection.execute("UPDATE history_events SET body_json = ? WHERE id = ?", (json.dumps(body), original_event_id))
+    result = _readonly(connection, report_id, "intent", key)
+    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(result.error, ConsistencyError), result.error
+
+
+@pytest.mark.parametrize("missing", ["stage", "error"])
+def test_formal_failure_requires_full_failed_state_and_error(connection, tmp_path, missing):
+    report_id, _, _ = _original(connection, tmp_path, "prepare")
+    before = tuple(connection.iterdump())
+    result = _update(connection, report_id, 5,
+                     {"last_error_json": ERROR} if missing == "stage" else {"status": 5})
+    assert result.kind == "rolled_back"
+    from camctl.history.validators import EventValidationError
+    assert isinstance(result.error, EventValidationError), result.error
+    assert tuple(connection.iterdump()) == before

@@ -9,7 +9,7 @@ import pytest
 
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
-from camctl.history.events import EventEnvelope, RowChange, RowImage, business_columns
+from camctl.history.events import EventEnvelope, RowChange, RowImage, business_columns, load_event_registry
 from camctl.history.decoding import decode_event_row
 from camctl.contracts.enums import load_registry
 from camctl.persistence.transaction import read_transaction_range
@@ -30,12 +30,13 @@ def database():
                 (3, _event(3, 8, {"max_attempts_used": 1}, {"max_attempts_used": 2})),
                 (2, _event(2, 7, {"max_attempts_used": 1}, {"max_attempts_used": 2})),
             ]}
+    data["ref"] = (1, 1)
 
     def execute(sql, parameters=()):
         assert sql.lstrip().startswith("SELECT"), "读取不能结束调用方事务或写入事实"
         cursor = create_autospec(sqlite3.Cursor, instance=True)
         data["cursors"].append(cursor)
-        if sql.startswith("SELECT last_event_id, change_count"):
+        if sql.startswith("SELECT last_event_id"):
             tag = "primary"
             cursor.fetchone.return_value = data["primary"]
         elif sql.startswith("SELECT event_id, change_count"):
@@ -44,7 +45,7 @@ def database():
         elif sql.startswith("SELECT l.change_count"):
             tag = "page"
             entity_type, entity_id, lower, upper, previous, limit = parameters
-            assert (entity_type, entity_id) == (1, 1)
+            assert (entity_type, entity_id) == data["ref"]
             selected = [(count, event) for count, event in data["events"]
                         if lower < event.event_id <= upper and event.event_id < previous][:limit]
             rows = [(count, event.event_id, event.transaction_id, event.event_type,
@@ -63,11 +64,16 @@ def database():
     return connection, data
 
 
-def _reader(monkeypatch, data):
+def _reader(monkeypatch, data, *, report=False):
     reader = import_module("camctl.persistence.row_history")
     monkeypatch.setattr(reader, "load_enum_registry", create_autospec(load_registry, return_value={
-        "history_objects": {"action": {"id": 1, "table": "actions"}},
+        "history_objects": ({"report": {"id": 6, "table": "reports"}} if report
+                            else {"action": {"id": 1, "table": "actions"}}),
     }))
+    monkeypatch.setattr(reader, "load_event_registry", create_autospec(load_event_registry, return_value={
+        "tables": ({"reports": {"derived": ["id", "created_event_id", "last_event_id"]}} if report
+                   else {"actions": {"derived": ["id", "created_event_id", "last_event_id", "change_count"]}}),
+    }), raising=False)
     monkeypatch.setattr(reader, "business_columns", create_autospec(business_columns,
         return_value=frozenset({"status", "error_json", "max_attempts_used"})))
     monkeypatch.setattr(reader, "read_transaction_range", create_autospec(read_transaction_range,
@@ -89,6 +95,36 @@ def test_read_restores_only_requested_row_and_columns(database, monkeypatch):
     connection, data = database
     reader = _reader(monkeypatch, data)
     assert _read(reader, connection) == {"max_attempts_used": 1}
+
+
+@pytest.mark.parametrize("case", ["valid", "missing", "wrong_event", "boolean", "fetch_error"])
+def test_report_row_history_uses_directory_count_without_projected_counter(database, monkeypatch, case):
+    connection, data = database
+    data.update(primary=(4,), head=(4, 3), ref=(6, 7))
+    data["events"] = [
+        (3, EventEnvelope(4, 4, 28, 1, 1, 2, None, 3, {}, (
+            RowChange("reports", 7, RowImage(True, {"status": 2}), RowImage(True, {"status": 3})),))),
+        (2, EventEnvelope(2, 2, 28, 1, 1, 2, None, 2, {}, (
+            RowChange("reports", 7, RowImage(True, {"status": 1, "size_bytes": None, "sha256": None}),
+                      RowImage(True, {"status": 2, "size_bytes": 6, "sha256": "a" * 64})),))),
+    ]
+    if case == "missing":
+        data["primary"] = None
+    elif case == "wrong_event":
+        data["primary"] = (3,)
+    elif case == "boolean":
+        data["primary"] = (True,)
+    elif case == "fetch_error":
+        data["fault"] = "primary"
+    reader = _reader(monkeypatch, data, report=True)
+    request = dict(owner=("report", 7), table="reports", columns=frozenset({"status"}), current_values={"status": 3})
+    if case == "valid":
+        assert _read(reader, connection, **request) == {"status": 1}
+    else:
+        with pytest.raises(sqlite3.OperationalError if case == "fetch_error" else ConsistencyError):
+            _read(reader, connection, **request)
+    for cursor in data["cursors"]:
+        cursor.close.assert_called_once_with()
 
 
 def test_read_at_current_boundary_does_not_rewind(database, monkeypatch):

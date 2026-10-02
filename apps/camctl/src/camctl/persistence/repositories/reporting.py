@@ -5,19 +5,61 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import closing
 
-from camctl.contracts.values import ConsistencyError
+from camctl.contracts.values import ConsistencyError, OperationKey, ObjectId, MAX_OBJECT_ID
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.contracts.enums import decode_member, load_registry as load_enum_registry
 from camctl.contracts.json_values import parse_exact_json
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.transaction import row_facts, saved_transaction_events
 from camctl.history.events import load_event_registry
 from camctl.reporting.ack import AckFacts, AckReport, SyncResponsibility
-from camctl.reporting.models import FrozenReport, ReportOpportunity, ReportPublication, ReportStatus, validate_report_management
+from camctl.reporting.models import FrozenReport, ReportBytes, ReportOpportunity, ReportPublication, ReportStatus, validate_report_management
 
 
 def _read_one(connection, sql, parameters=()):
     with closing(connection.execute(sql, parameters)) as cursor:
         return cursor.fetchone()
+
+
+def read_report_bytes_at_boundary(connection, report_id: int, last_event_id: int) -> ReportBytes | None:
+    """核实 H 内首次确定字节的完整事务；无来源表示当时尚未形成字节。"""
+    ObjectId(report_id)
+    if (isinstance(last_event_id, bool) or not isinstance(last_event_id, int)
+            or not 0 <= last_event_id <= MAX_OBJECT_ID):
+        raise ConsistencyError("报告字节来源要求可靠的历史上界")
+    definition = load_event_registry()["events"]["REPORT_CHANGED"]
+    prepare = definition["branches"]["PREPARE"]["reason"]
+    source = _read_one(connection,
+        "SELECT link.event_id, txn.operation_key FROM entity_event_links AS link"
+        " JOIN history_events AS event ON event.id = link.event_id"
+        " JOIN history_transactions AS txn ON txn.id = event.transaction_id"
+        " WHERE link.entity_type = ? AND link.entity_id = ? AND link.event_id <= ?"
+        " AND event.event_type = ? AND json_extract(event.body_json, '$.reason') = ?"
+        " ORDER BY link.event_id LIMIT 1",
+        (load_enum_registry()["history_objects"]["report"]["id"], report_id,
+         last_event_id, definition["id"], prepare),
+    )
+    if source is None:
+        return None
+    try:
+        ObjectId(source[0])
+        key = OperationKey(source[1])
+    except ValueError as error:
+        raise ConsistencyError("报告首次字节来源的历史身份无效") from error
+    saved = saved_transaction_events(connection, key)
+    matches = [] if saved is None else [event for event in saved if event["event_id"] == source[0]]
+    if (len(matches) != 1 or matches[0]["type"] != definition["id"] or matches[0]["reason"] != prepare
+            or matches[0]["transaction"].last_event_id > last_event_id):
+        raise ConsistencyError("报告首次字节缺少对应的完整历史事务")
+    changes = [row for row in matches[0]["body"]["rows"] if row["table"] == "reports" and row["id"] == report_id]
+    if (len(changes) != 1 or changes[0]["before"]["exists"] is not True
+            or changes[0]["after"]["exists"] is not True):
+        raise ConsistencyError("报告首次字节不属于原报告更新")
+    before, after = changes[0]["before"]["values"], changes[0]["after"]["values"]
+    if (not {"size_bytes", "sha256"} <= before.keys() or not {"size_bytes", "sha256"} <= after.keys()
+            or before["size_bytes"] is not None or before["sha256"] is not None
+            or after.get("status") != ReportStatus.PREPARED):
+        raise ConsistencyError("报告首次字节必须从共同未知形成确定字节")
+    return ReportBytes(after["size_bytes"], after["sha256"])
 
 
 def read_ack_state(connection) -> tuple[int, int | None, AckReport | None]:

@@ -7753,9 +7753,7 @@
                   5
                 ]
               },
-              "required": [
-                "last_error_json"
-              ],
+              "required": [],
               "transitions": {
                 "status": [
                   "transition_5",
