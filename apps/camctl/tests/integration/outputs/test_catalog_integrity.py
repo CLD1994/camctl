@@ -23,6 +23,7 @@ def selection_database(family_database):
     connection = owned.connection
     _seed_action(connection, 30, 1, action_type=4)
     connection.execute("UPDATE actions SET source_resolution_state=2, resolved_source_plan_id=1 WHERE id=30")
+    connection.execute('UPDATE actions SET input_fields_json=\'{"params":{"source":{"action_instance_id":"11"}}}\' WHERE id=30')
     connection.execute("UPDATE actions SET status=3 WHERE id=11")
     connection.execute("INSERT INTO action_dependencies (id, action_id, depends_on_action_id) VALUES (41, 30, 11)")
     connection.execute("INSERT INTO obtain_source_selections"

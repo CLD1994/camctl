@@ -9,13 +9,14 @@ from camctl.outputs.sources import SelectionMode, select_outputs
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import FixSelection, load_selection, load_selection_facts
 
-from .test_sources import _NOW, _fixed_resolution, _prepared_selection
+from .test_sources import _NOW, _fixed_resolution, _prepared_selection, _set_selection_request
 
 
 @pytest.fixture
 def saved_error(tmp_path):
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
     try:
+        _set_selection_request(owned.connection, SelectionMode.EXPLICIT_IDS, (9007199254740993,))
         facts = load_selection_facts(owned.connection, 21, requested_output_ids=(9007199254740993,))
         snapshot = select_outputs(
             _fixed_resolution((21,)), facts, SelectionMode.EXPLICIT_IDS,

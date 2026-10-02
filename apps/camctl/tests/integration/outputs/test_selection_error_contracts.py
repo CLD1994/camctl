@@ -13,7 +13,7 @@ from camctl.persistence.transaction import event_envelope, row_facts, update_cha
 from camctl.history.validators import EventValidationError
 from camctl.outputs.sources import SelectionMode, select_outputs
 
-from .test_sources import _NOW, _prepared_selection, _fixed_resolution, _seed_output
+from .test_sources import _NOW, _prepared_selection, _fixed_resolution, _seed_output, _set_selection_request
 from .test_member_guard import member_context, read_targets
 
 
@@ -29,6 +29,8 @@ def test_selection_errors_satisfy_public_schema_after_commit(tmp_path, scenario,
                          availability={"cleaned": 3, "restricted": 2}.get(scenario, 1))
         connection.commit()
         requested = () if scenario == "preview_missing" else (501,)
+        _set_selection_request(connection,
+            SelectionMode.PREVIEW if scenario == "preview_missing" else SelectionMode.EXPLICIT_IDS, requested)
         snapshot = select_outputs(
             _fixed_resolution((21,)), load_selection_facts(connection, 21, requested_output_ids=requested),
             SelectionMode.PREVIEW if scenario == "preview_missing" else SelectionMode.EXPLICIT_IDS,

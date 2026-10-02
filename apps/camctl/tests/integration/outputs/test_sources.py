@@ -420,7 +420,20 @@ def _prepared_selection(tmp_path: Path):
     owned.connection.execute("BEGIN IMMEDIATE")
     owned.connection.execute("UPDATE actions SET status = 3 WHERE id = 21")
     owned.connection.commit()
+    _set_selection_request(owned.connection, SelectionMode.DEFAULT)
     return target, owned, repository, selection_id
+
+
+def _set_selection_request(connection, mode, requested=()):
+    """保存测试所消费的真实取回选择定义和原参数。"""
+    params = {"source": {"action_instance_id": "21"}}
+    if mode == SelectionMode.EXPLICIT_IDS:
+        params["output_ids"] = [str(identity) for identity in requested]
+    elif mode == SelectionMode.PREVIEW:
+        params["filter"] = "preview"
+    connection.execute("UPDATE actions SET execution_spec_json=?, input_fields_json=? WHERE id=30",
+                       (json.dumps({"selection_mode": int(mode)}), json.dumps({"params": params})))
+    connection.commit()
 
 
 def test_fix_selection_default_replaces_original_with_repaired(
@@ -509,6 +522,7 @@ def test_fix_selection_partial_failure_saves_per_item_results(
     connection.commit()
     try:
         requested = (901, 702, 501, 502)
+        _set_selection_request(connection, SelectionMode.EXPLICIT_IDS, requested)
         facts = load_selection_facts(connection, 21, requested_output_ids=requested)
         snapshot = select_outputs(
             _fixed_resolution((21,)),
@@ -544,6 +558,7 @@ def test_fix_selection_partial_failure_saves_per_item_results(
 def test_saved_selection_preserves_mathematical_integer_in_error_details(tmp_path):
     _, owned, repository, selection_id = _prepared_selection(tmp_path)
     try:
+        _set_selection_request(owned.connection, SelectionMode.EXPLICIT_IDS, (9007199254740993,))
         facts = load_selection_facts(owned.connection, 21, requested_output_ids=(9007199254740993,))
         snapshot = select_outputs(_fixed_resolution((21,)), facts, SelectionMode.EXPLICIT_IDS,
                                   requested_output_ids=(9007199254740993,))

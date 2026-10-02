@@ -11,7 +11,7 @@ FIXED 状态同一事务保存。已固定的来源与选择不因重送、重�
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 from camctl.contracts.enums import enum_for
@@ -24,6 +24,7 @@ from camctl.host_files.paths import (
 )
 from camctl.operations.attempts import AttemptTarget, OperationKind, operation_responsibility_key
 from camctl.outputs.catalog import OutputKind
+from camctl.outputs.definitions import read_selection_request
 from camctl.outputs.sources import (
     ActionFacts,
     CatalogEntry,
@@ -571,6 +572,11 @@ class _FixSelectionCommand:
         snapshot = command.snapshot
         if not snapshot.is_fixed:
             raise TransactionError("未完成选择不能固定")
+        if (owner["type"] != _OBTAIN_TYPE
+                or owner["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED)
+                or source["type"] not in _CAPTURE_TYPES
+                or owner["resolved_source_plan_id"] != source["plan_id"]):
+            raise ConsistencyError("首次选择要求已固定的取回来源及同计划拍摄成员")
         if owner["status"] != int(_ACTION_STATUS.RUNNING) or owner["cancel_requested"]:
             raise TransactionError("选择固定要求取回动作执行中且未取消")
         if source["status"] not in _ACTION_TERMINAL:
@@ -585,7 +591,20 @@ class _FixSelectionCommand:
         self._owners[("obtain_source_selections", command.selection_id)] = (
             "action", owner_action_id,
         )
-        for member in _catalog_members(connection, source_action_id):
+        try:
+            mode, requested = read_selection_request(owner["execution_spec_json"], owner["input_fields_json"])
+        except ValueError as error:
+            raise ConsistencyError("已保存的取回选择定义或原请求无法解释") from error
+        members = _catalog_members(connection, source_action_id)
+        entries = tuple(member.entry for member in members)
+        facts = SelectionFacts(source_action_id, True, entries,
+                               checked_output_sources=_checked_output_sources(connection, entries, requested))
+        expected = select_outputs(
+            SourceResolution(state=ResolutionState.FIXED, member_action_ids=(source_action_id,),
+                             source_plan_id=source["plan_id"]), facts, mode, requested)
+        if not _same_selection(snapshot, expected):
+            raise TransactionError("选择快照与已保存请求及当前来源事实不一致")
+        for member in members:
             self._state["outputs"][member.entry.output_id] = member.row
 
         rows = []
@@ -687,6 +706,19 @@ def _decoded(raw: Any) -> dict[str, Any] | None:
         raise ConsistencyError("已保存产物选择的错误详情不是有效精确 JSON") from error
 
 
+def _same_selection(left: SelectionSnapshot, right: SelectionSnapshot) -> bool:
+    """逐项精确比较完整快照，不复制整组条目；布尔值不能充当编号。"""
+    def item_facts(item):
+        return {**{field.name: getattr(item, field.name) for field in fields(SelectedItem)},
+                "error_details": None if item.error_details is None else dict(item.error_details)}
+
+    return (left.is_fixed is right.is_fixed
+            and json_equal(left.source_error_code, right.source_error_code)
+            and len(left.items) == len(right.items)
+            and all(json_equal(item_facts(actual), item_facts(expected))
+                    for actual, expected in zip(left.items, right.items)))
+
+
 def _processing_completed(connection, source_action_id: int) -> bool:
     """来源动作的适用产物处理是否已完成（录像检查/修复/丢弃）。"""
     with closing(connection.execute(
@@ -784,8 +816,19 @@ def load_selection_facts(
         and _processing_completed(connection, source_action_id)
     )
     entries = tuple(member.entry for member in _catalog_members(connection, source_action_id))
+    return SelectionFacts(
+        source_action_id=source_action_id,
+        source_completed=completed,
+        outputs=entries,
+        checked_output_sources=_checked_output_sources(connection, entries, requested | previous),
+        previously_confirmed_ids=previous,
+    )
+
+
+def _checked_output_sources(connection, entries, identities) -> dict[int, int | None]:
+    """完整目录之外的实际目标按有界批次核实；失败不返回部分事实。"""
     local_ids = {entry.output_id for entry in entries}
-    query_ids = sorted((requested | previous) - local_ids)
+    query_ids = sorted(set(identities) - local_ids)
     checked: dict[int, int | None] = {}
     for offset in range(0, len(query_ids), 128):
         batch = query_ids[offset:offset + 128]
@@ -796,13 +839,7 @@ def load_selection_facts(
             rows = cursor.fetchall()
         checked.update(dict.fromkeys(batch))
         checked.update(rows)
-    return SelectionFacts(
-        source_action_id=source_action_id,
-        source_completed=completed,
-        outputs=entries,
-        checked_output_sources=checked,
-        previously_confirmed_ids=previous,
-    )
+    return checked
 
 
 def load_output_family(connection, output_id: int) -> OriginalOutputs:
