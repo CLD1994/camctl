@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
@@ -96,11 +96,13 @@ _CAPTURE_TYPES = frozenset(
     if member.name in {"CAMERA_TAKE_PHOTO", "CAMERA_RECORD", "CAMERA_TIMELAPSE"}
 )
 _SOURCE_RESOLUTION_FAILED_CODE = action_error_id("source_resolution_failed")
+_CHECK_STATE = enum_for("recording_processing.check_state")
+_REPAIR_STATE = enum_for("recording_processing.repair_state")
 
 #: 录像处理中仍未结束的状态；存在即表示适用产物处理未完成。
-_UNFINISHED_PROCESSING_CHECK = frozenset({int(enum_for("recording_processing.check_state").RUNNING)})
+_UNFINISHED_PROCESSING_CHECK = frozenset({int(_CHECK_STATE.RUNNING)})
 _UNFINISHED_PROCESSING_REPAIR = frozenset(
-    {int(member) for member in enum_for("recording_processing.repair_state")
+    {int(member) for member in _REPAIR_STATE
      if member.name in {"PENDING", "RUNNING"}}
 )
 _UNFINISHED_PROCESSING_DISCARD = frozenset(
@@ -701,6 +703,19 @@ def _processing_completed(connection, source_action_id: int) -> bool:
         and repair_state not in _UNFINISHED_PROCESSING_REPAIR
         and discard_state not in _UNFINISHED_PROCESSING_DISCARD
     )
+
+
+def _processing_requires_existing_input(processing) -> bool:
+    """工具阶段是否证明原输入已经建立；False 不授予首次输入资格。"""
+    try:
+        check, repair = processing["check_state"], processing["repair_state"]
+        if not is_json_integer(check) or not is_json_integer(repair):
+            raise ValueError("处理阶段必须是登记的整数编号")
+        check, repair = _CHECK_STATE(check), _REPAIR_STATE(repair)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError("原录像的检查或修复阶段缺失或无法解释") from error
+    return (check in (_CHECK_STATE.RUNNING, _CHECK_STATE.COMPLETED)
+            or repair in (_REPAIR_STATE.RUNNING, _REPAIR_STATE.SUCCEEDED))
 
 
 def _catalog_rows(connection, source_action_id: int) -> list[dict[str, Any]]:
@@ -1442,6 +1457,8 @@ class _GrantFileCommand:
                 f"action_id = ? AND kind = {int(_RUN_KIND.READ_FILE)}", (command.action_id,))
             purpose = FilePurpose.RECORDING_INPUT
             if copy is None and target is None and internal_run is None:
+                if _processing_requires_existing_input(self._state["recording_processing"][command.processing_id]):
+                    raise ConsistencyError("原片工具处理已经开始，但原输入准备责任缺失")
                 return None
         if copy is None or target is None:
             raise ConsistencyError("已有读取准备责任缺少拷贝或目标文件")
@@ -1820,6 +1837,14 @@ def _copy_guard(event, context) -> None:
             raise EventValidationError("主机来源拷贝不占用相机读取机会")
         if (values.get("delivery_id") is None) == (values.get("processing_id") is None):
             raise EventValidationError("拷贝必须恰归属交付或录像处理之一")
+        if values.get("processing_id") is not None:
+            processing = context.state_rows.get("recording_processing", {}).get(values["processing_id"])
+            try:
+                requires_existing = _processing_requires_existing_input(processing)
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
+            if requires_existing:
+                raise EventValidationError("原片工具处理已经开始，不能创建替代输入拷贝")
 
 
 def _copy_links_guard(event, context) -> None:
