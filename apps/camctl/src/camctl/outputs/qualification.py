@@ -89,6 +89,8 @@ class FileCandidate:
     None 表示不适用设备配置；本地读取的次数上限固定为 1。
     调用方只提供扩展名，事务分配身份后生成目标路径及交付文件名；
     delivery_display_name 仅用于取回交付的可读名称。
+    occurred_at 是正常执行入口实际取得的 UTC 微秒读数，用于核对
+    首次建档是否已到发起动作的计划时间；调用方仍负责会话墙钟检查。
     """
 
     action_id: int

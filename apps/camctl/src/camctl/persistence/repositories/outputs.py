@@ -254,6 +254,13 @@ def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
     return facts
 
 
+def _required_current_facts(context, table, identity):
+    facts = context.state_rows.get(table, {}).get(identity)
+    if facts is None:
+        raise EventValidationError(f"取回成员的当前关联事实缺失: {table}#{identity}")
+    return facts
+
+
 class _ResolveSourcesCommand:
     """执行期来源解析的完整事务命令。"""
 
@@ -718,6 +725,23 @@ def _processing_requires_existing_input(processing) -> bool:
             or repair in (_REPAIR_STATE.RUNNING, _REPAIR_STATE.SUCCEEDED))
 
 
+def _read_is_due(action, occurred_at: int) -> bool:
+    """首次读取建档的时间条件；不代替会话墙钟可信性检查。"""
+    if action is None or not is_json_integer(action.get("scheduled_at")):
+        raise ConsistencyError("读取发起动作的计划时间缺失或无法解释")
+    return action["scheduled_at"] <= occurred_at
+
+
+def _guard_read_time(event, context, action_id) -> None:
+    action = context.state_rows.get("actions", {}).get(action_id)
+    try:
+        due = _read_is_due(action, event.occurred_at)
+    except ConsistencyError as error:
+        raise EventValidationError(str(error)) from error
+    if not due:
+        raise EventValidationError("读取发起动作尚未到计划时间")
+
+
 def _catalog_rows(connection, source_action_id: int) -> list[dict[str, Any]]:
     rows = connection.execute(
         "SELECT o.id, o.source_action_id, o.kind, o.device_file_id,"
@@ -924,6 +948,8 @@ class _GrantFileCommand:
                         reason="item_finished",
                     ),
                 )
+        if not _read_is_due(action, command.occurred_at):
+            return self._wait("not_due")
         readiness = self._source_readiness(scope, output, source_file)
         if readiness is not None:
             return readiness
@@ -1845,6 +1871,12 @@ def _copy_guard(event, context) -> None:
                 raise EventValidationError(str(error)) from error
             if requires_existing:
                 raise EventValidationError("原片工具处理已经开始，不能创建替代输入拷贝")
+            parent = processing
+        else:
+            parent = context.association_rows.get("deliveries", {}).get(values["delivery_id"])
+        if parent is None:
+            raise EventValidationError("新建拷贝缺少发起责任的固定关联")
+        _guard_read_time(event, context, parent.get("action_id"))
 
 
 def _copy_links_guard(event, context) -> None:
@@ -1911,21 +1943,15 @@ def _obtain_member_guard(event, context) -> None:
     ):
         return
 
-    def required(table, identity):
-        facts = context.state_rows.get(table, {}).get(identity)
-        if facts is None:
-            raise EventValidationError(f"取回成员的当前关联事实缺失: {table}#{identity}")
-        return facts
-
     updates = [row for row in event.rows if row.table == "obtain_items" and row.before.exists]
     if len(updates) != 1:
         raise EventValidationError("取回成员核实或拒绝必须恰好推进一条已有项")
     row = updates[0]
-    item = required("obtain_items", row.row_id)
-    selection = required("obtain_source_selections", item.get("selection_id"))
-    dependency = required("action_dependencies", selection.get("dependency_id"))
-    owner = required("actions", dependency.get("action_id"))
-    source = required("actions", dependency.get("depends_on_action_id"))
+    item = _required_current_facts(context, "obtain_items", row.row_id)
+    selection = _required_current_facts(context, "obtain_source_selections", item.get("selection_id"))
+    dependency = _required_current_facts(context, "action_dependencies", selection.get("dependency_id"))
+    owner = _required_current_facts(context, "actions", dependency.get("action_id"))
+    source = _required_current_facts(context, "actions", dependency.get("depends_on_action_id"))
     if (
         selection.get("status") != int(_SELECTION_STATUS.FIXED)
         or selection.get("error_code") is not None
@@ -1966,7 +1992,7 @@ def _obtain_member_guard(event, context) -> None:
         if event.reason == _RESOLVE_REASON or not unresolved:
             raise EventValidationError("已选中或核实成功的成员必须关联真实产物")
         return
-    output = required("outputs", output_id)
+    output = _required_current_facts(context, "outputs", output_id)
     if output.get("source_action_id") != dependency.get("depends_on_action_id"):
         raise EventValidationError("取回成员的真实产物必须属于固定来源")
     if explicit and output_id != item["requested_output_id"]:
@@ -2002,6 +2028,13 @@ def _read_permission_guard(event, context) -> None:
         delivery = context.state_rows.get("deliveries", {}).get(delivery_id)
         if delivery is None or delivery.get("status") != int(_DELIVERY_STATUS.PENDING):
             raise EventValidationError("授予回填的交付必须已在同事务建档")
+        item = _required_current_facts(context, "obtain_items", row.row_id)
+        selection = _required_current_facts(context, "obtain_source_selections", item.get("selection_id"))
+        dependency = _required_current_facts(context, "action_dependencies", selection.get("dependency_id"))
+        if (delivery.get("action_id") != dependency.get("action_id")
+                or delivery.get("output_id") != item.get("output_id")):
+            raise EventValidationError("授予回填的交付必须属于原取回动作及同一产物")
+        _guard_read_time(event, context, dependency.get("action_id"))
     elif event.event_type == _READ_PERMISSION_EVENT and event.reason == _REJECT_REASON:
         updates = [
             row
