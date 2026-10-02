@@ -295,23 +295,16 @@ _CONFIG = OperationConfig(
 )
 
 
-def _candidate(
-    seedling: _Seedling,
-    *,
-    suffix: str | None = None,
-) -> FileCandidate:
-    tag = suffix if suffix is not None else str(seedling.item_id or seedling.processing_id)
+def _candidate(seedling: _Seedling) -> FileCandidate:
     return FileCandidate(
         action_id=seedling.action_id,
         item_id=seedling.item_id,
         processing_id=seedling.processing_id,
         output_id=seedling.output_id if seedling.processing_id is None else None,
         source_device_file_id=seedling.file_id,
-        target_relative_path=f"deliveries/{seedling.output_id}-{tag}.part"
-        if seedling.processing_id is None
-        else f"recording-inputs/{seedling.output_id}-{tag}.part",
-        delivery_file_name=f"{seedling.output_id}-{tag}.mp4",
-        delivery_display_name=f"产物 {seedling.output_id}",
+        target_extension="part",
+        delivery_extension="mp4" if seedling.processing_id is None else None,
+        delivery_display_name=f"产物 {seedling.output_id}" if seedling.processing_id is None else None,
         config=_CONFIG,
         occurred_at=_NOW,
     )
@@ -367,13 +360,13 @@ def test_qualification_uses_business_order(tmp_path: Path) -> None:
     late = _Seedling(action_id=32, item_id=102, output_id=702, file_id=502)
 
     # 唤醒顺序颠倒：先申请较晚候选，按计划时间被拒。
-    late_first = _grant(owned, repository, _candidate(late, suffix="b"))
+    late_first = _grant(owned, repository, _candidate(late))
     assert not _granted(late_first)
-    early_first = _grant(owned, repository, _candidate(early, suffix="a"))
+    early_first = _grant(owned, repository, _candidate(early))
     assert _granted(early_first)
 
     # 授予后设备槽被占用，较晚候选仍不可开始。
-    late_retry = _grant(owned, repository, _candidate(late, suffix="b"))
+    late_retry = _grant(owned, repository, _candidate(late))
     assert not _granted(late_retry)
     owned.close()
 
@@ -434,7 +427,7 @@ def test_existing_read_protection_preserves_original_copy(tmp_path: Path) -> Non
 
     repository = OutputsRepository()
     candidate = _Seedling(action_id=32, item_id=101, output_id=701, file_id=501)
-    result = _grant(owned, repository, _candidate(candidate, suffix="c"))
+    result = _grant(owned, repository, _candidate(candidate))
     assert not _granted(result)
     # 原拷贝行保持不变。
     assert _row(owned, "SELECT committed_bytes FROM file_copies WHERE id = 900")[0] == 0
@@ -608,7 +601,7 @@ def test_grant_creates_all_records_atomically(tmp_path: Path) -> None:
     assert repeat.kind is DbOutcomeKind.COMPLETED
     assert repeat.value.copy_id == value.copy_id
     assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 1
-    again = _grant(owned, repository, _candidate(candidate, suffix="d"))
+    again = _grant(owned, repository, _candidate(candidate))
     assert not _granted(again)
     assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 1
     owned.close()

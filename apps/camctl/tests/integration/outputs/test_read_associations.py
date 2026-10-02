@@ -56,8 +56,9 @@ def _command(*, internal=False):
         action_id=11 if internal else 31, item_id=None if internal else 101,
         processing_id=5 if internal else None, output_id=None if internal else 701,
         source_device_file_id=501,
-        target_relative_path="recording-inputs/1.part" if internal else "deliveries/1.part",
-        delivery_file_name="1.mp4", delivery_display_name="录像",
+        target_extension="part",
+        delivery_extension=None if internal else "mp4",
+        delivery_display_name=None if internal else "录像",
         config=OperationConfig(3, Decimal("10"), Decimal("0")), occurred_at=_NOW,
     )
 

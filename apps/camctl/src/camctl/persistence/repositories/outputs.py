@@ -17,6 +17,10 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.validators import EventValidationError, register_guard
+from camctl.host_files.models import FilePurpose
+from camctl.host_files.paths import (
+    PathRuleError, object_file_name, relative_file_path, validate_relative_file_path,
+)
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.sources import (
     ActionFacts,
@@ -881,9 +885,13 @@ class _GrantFileCommand:
             return self._reuse(saved)
         command = self._command
         action = self._required(connection, "actions", command.action_id)
-        device_file = self._required(connection, "device_files", command.source_device_file_id)
-        output = self._load_target(connection, action, device_file)
-        device_id = self._source_device(connection, device_file)
+        is_device_source = command.source_device_file_id is not None
+        source_file = self._required(
+            connection, "device_files" if is_device_source else "intermediate_files",
+            command.source_device_file_id if is_device_source else command.source_intermediate_file_id,
+        )
+        output = self._load_target(connection, action, source_file)
+        device_id = self._source_device(connection, source_file) if is_device_source else None
         if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
             return self._wait("action_not_eligible")
         if command.item_id is not None:
@@ -905,18 +913,18 @@ class _GrantFileCommand:
                         reason="item_finished",
                     ),
                 )
-        final_error = self._final_rejection(connection, output, device_file)
+        final_error = self._final_rejection(connection, output, source_file)
         if final_error is not None:
             return self._reject_item(scope, final_error)
 
-        if self._device_busy(connection, device_id):
+        if device_id is not None and self._device_busy(connection, device_id):
             return self._wait("device_busy")
-        if self._source_protected(connection, command.source_device_file_id):
+        if device_id is not None and self._source_protected(connection, command.source_device_file_id):
             return self._wait("source_protected")
-        if not self._wins_business_order(connection, action, device_id):
+        if device_id is not None and not self._wins_business_order(connection, action, device_id):
             return self._wait("business_order")
 
-        return self._grant(scope, device_file, device_id)
+        return self._grant(scope, source_file, device_id)
 
     # ---- 资格核对 ----
 
@@ -927,7 +935,7 @@ class _GrantFileCommand:
         self._state[table][row_id] = facts
         return facts
 
-    def _load_target(self, connection, action, device_file) -> dict | None:
+    def _load_target(self, connection, action, source_file) -> dict | None:
         """先核对固定归属，再由调用方判断当前执行状态。"""
         command = self._command
         if command.item_id is None:
@@ -936,8 +944,8 @@ class _GrantFileCommand:
                 action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
                 or processing["action_id"] != command.action_id
                 or processing["source_device_file_id"] != command.source_device_file_id
-                or device_file["source_action_id"] != command.action_id
-                or device_file["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                or source_file["source_action_id"] != command.action_id
+                or source_file["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
             ):
                 raise ConsistencyError("内部读取的录像、处理责任与原片归属不一致")
             return None
@@ -959,21 +967,42 @@ class _GrantFileCommand:
             or selection["status"] != int(_SELECTION_STATUS.FIXED)
             or item["output_id"] != command.output_id
             or dependency["depends_on_action_id"] != output["source_action_id"]
-            or output["source_action_id"] != device_file["source_action_id"]
             or output["device_file_id"] != command.source_device_file_id
-            or source_role is None
-            or device_file["role"] != source_role
+            or output["intermediate_file_id"] != command.source_intermediate_file_id
         ):
             raise ConsistencyError("取回动作、固定选择、产物与源文件归属不一致")
+        if command.source_device_file_id is not None:
+            if (source_role is None or source_file["role"] != source_role
+                    or output["source_action_id"] != source_file["source_action_id"]):
+                raise ConsistencyError("设备产物与源文件角色或归属不一致")
+        elif (
+            output["kind"] != int(_OUTPUT_KIND.REPAIRED)
+            or source_action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+            or source_file["owner_action_id"] != output["source_action_id"]
+            or source_file["owner_delivery_id"] is not None
+            or source_file["purpose"] != int(_PURPOSE.REPAIR_OUTPUT)
+            or source_file["retention_state"] != int(_RETENTION.PROMOTED)
+            or source_file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)
+            or source_file["size_bytes"] is None
+        ):
+            raise ConsistencyError("主机产物必须关联原录像已提升的完整修复文件")
+        if command.source_intermediate_file_id is not None:
+            try:
+                validate_relative_file_path(
+                    FilePurpose.REPAIR_OUTPUT, command.source_intermediate_file_id,
+                    source_file["relative_path"],
+                )
+            except PathRuleError as error:
+                raise ConsistencyError("主机源文件的保存路径与固定身份不一致") from error
         return output
 
-    def _final_rejection(self, connection, output, device_file) -> int | None:
+    def _final_rejection(self, connection, output, source_file) -> int | None:
         """不可授予的最终失败错误码；None 表示可通过。"""
         if output is not None and output["availability"] != int(_AVAILABILITY.AVAILABLE):
             return _OUTPUT_UNAVAILABLE_CODE
-        if (
-            device_file["presence_state"] != int(_PRESENCE.PRESENT)
-            or device_file["completion_state"] != int(_COMPLETION.COMPLETE)
+        if self._command.source_device_file_id is not None and (
+            source_file["presence_state"] != int(_PRESENCE.PRESENT)
+            or source_file["completion_state"] != int(_COMPLETION.COMPLETE)
         ):
             return _SOURCE_FILE_UNCONFIRMED_CODE
         if output is None:
@@ -1090,7 +1119,7 @@ class _GrantFileCommand:
 
     # ---- 授予建档 ----
 
-    def _grant(self, scope, device_file, device_id: str) -> CommandPlan:
+    def _grant(self, scope, source_file, device_id: str | None) -> CommandPlan:
         command = self._command
         is_delivery = command.item_id is not None
         config = command.config
@@ -1101,6 +1130,9 @@ class _GrantFileCommand:
         )
         copy_id = next_row_id(scope.connection, "file_copies")
         run_id = next_row_id(scope.connection, "operation_runs")
+        purpose = FilePurpose.DELIVERY_COPY if is_delivery else FilePurpose.RECORDING_INPUT
+        target_path = relative_file_path(purpose, target_file_id, command.target_extension)
+        delivery_name = object_file_name(delivery_id, command.delivery_extension) if is_delivery else None
 
         specs: list[tuple[int, int, tuple]] = []
         intermediate_row = _row(
@@ -1110,7 +1142,7 @@ class _GrantFileCommand:
                 "owner_action_id": command.action_id if not is_delivery else None,
                 "owner_delivery_id": delivery_id,
                 "purpose": int(_PURPOSE.DELIVERY_COPY if is_delivery else _PURPOSE.RECORDING_INPUT),
-                "relative_path": command.target_relative_path,
+                "relative_path": target_path,
                 "retention_state": int(_RETENTION.REQUIRED),
                 "cleanup_state": int(_FILE_CLEANUP.NOT_NEEDED),
                 "size_bytes": None,
@@ -1130,7 +1162,7 @@ class _GrantFileCommand:
                 {
                     "action_id": command.action_id,
                     "output_id": command.output_id,
-                    "file_name": command.delivery_file_name,
+                    "file_name": delivery_name,
                     "display_name": command.delivery_display_name,
                     "status": int(_DELIVERY_STATUS.PENDING),
                     "publication_intent_event_id": None,
@@ -1158,9 +1190,9 @@ class _GrantFileCommand:
                 "session_key": None,
                 "status": int(_RUN_STATUS.PENDING),
                 "attempts_used": 0,
-                "max_attempts_used": config.max_attempts,
-                "timeout_s_json": config.timeout_s,
-                "retry_interval_s_json": config.retry_interval_s,
+                "max_attempts_used": config.max_attempts if config is not None else 1,
+                "timeout_s_json": config.timeout_s if config is not None else None,
+                "retry_interval_s_json": config.retry_interval_s if config is not None else None,
                 "retry_wait_required": 0,
                 "error_json": None,
             },
@@ -1177,13 +1209,13 @@ class _GrantFileCommand:
                 "delivery_id": delivery_id,
                 "processing_id": command.processing_id,
                 "source_device_file_id": command.source_device_file_id,
-                "source_intermediate_file_id": None,
+                "source_intermediate_file_id": command.source_intermediate_file_id,
                 "target_file_id": target_file_id,
                 "round": 1,
                 "recopies_used": 0,
                 "max_recopies_used": 0,
-                "source_size": device_file["size_bytes"],
-                "source_sha256": None,
+                "source_size": source_file["size_bytes"],
+                "source_sha256": source_file["sha256"],
                 "committed_bytes": 0,
                 "reset_state": int(_RESET_STATE.READY),
                 "slot_device_id": device_id,
@@ -1610,7 +1642,6 @@ def _copy_guard(event, context) -> None:
             "verification_state": int(_VERIFICATION.NOT_PERFORMED),
             "target_sha256": None,
             "verification_error_json": None,
-            "source_sha256": None,
         }
         for column, value in expected.items():
             if values.get(column) != value:
@@ -1619,8 +1650,10 @@ def _copy_guard(event, context) -> None:
                 )
         if values.get("source_size") is None:
             raise EventValidationError("新建拷贝必须携带源长度")
-        if not values.get("slot_device_id"):
+        if values.get("source_device_file_id") is not None and not values.get("slot_device_id"):
             raise EventValidationError("设备来源拷贝必须占用所属设备的读取机会")
+        if values.get("source_intermediate_file_id") is not None and values.get("slot_device_id") is not None:
+            raise EventValidationError("主机来源拷贝不占用相机读取机会")
         if (values.get("delivery_id") is None) == (values.get("processing_id") is None):
             raise EventValidationError("拷贝必须恰归属交付或录像处理之一")
 

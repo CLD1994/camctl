@@ -13,6 +13,7 @@ from decimal import Decimal
 from enum import Enum
 
 from camctl.contracts.values import MAX_OBJECT_ID, ObjectId, UtcMicros
+from camctl.host_files.paths import validate_file_extension
 
 __all__ = [
     "FileCandidate",
@@ -83,24 +84,28 @@ class FileCandidate:
 
     取回路径携带 item_id（SELECTED 取回项）；内部检查/修复路径携
     带 processing_id（录像处理责任），共用设备单文件读取机会且不
-    创建交付。
+    创建交付。主机产物使用 source_intermediate_file_id，config 为
+    None 表示不适用设备配置；本地读取的次数上限固定为 1。
+    调用方只提供扩展名，事务分配身份后生成目标路径及交付文件名；
+    delivery_display_name 仅用于取回交付的可读名称。
     """
 
     action_id: int
     item_id: int | None
     processing_id: int | None
     output_id: int | None
-    source_device_file_id: int
-    target_relative_path: str
-    delivery_file_name: str
-    delivery_display_name: str
-    config: OperationConfig
+    source_device_file_id: int | None
+    target_extension: str | None
+    delivery_extension: str | None
+    delivery_display_name: str | None
+    config: OperationConfig | None
     occurred_at: int
+    source_intermediate_file_id: int | None = None
 
     def __post_init__(self) -> None:
-        for value in (self.action_id, self.source_device_file_id):
-            ObjectId(value)
-        for value in (self.item_id, self.processing_id, self.output_id):
+        ObjectId(self.action_id)
+        for value in (self.item_id, self.processing_id, self.output_id,
+                      self.source_device_file_id, self.source_intermediate_file_id):
             if value is not None:
                 ObjectId(value)
         if (self.item_id is None) == (self.processing_id is None):
@@ -110,10 +115,20 @@ class FileCandidate:
             )
         if (self.item_id is None) != (self.output_id is None):
             raise ValueError("取回候选必须填写正式产物，内部处理候选不填写正式产物")
-        if not isinstance(self.config, OperationConfig):
-            raise ValueError("候选必须使用已校验的读取配置")
-        if not self.target_relative_path or not self.delivery_file_name:
-            raise ValueError("目标相对路径与交付文件名不能为空")
+        if (self.source_device_file_id is None) == (self.source_intermediate_file_id is None):
+            raise ValueError("读取源必须恰为设备文件或主机文件之一")
+        if self.source_device_file_id is not None:
+            if not isinstance(self.config, OperationConfig):
+                raise ValueError("设备读取候选必须使用已校验的读取配置")
+        elif self.config is not None or self.processing_id is not None:
+            raise ValueError("主机产物取回不采用设备配置，内部原片必须来自设备")
+        validate_file_extension(self.target_extension)
+        if self.item_id is not None:
+            validate_file_extension(self.delivery_extension, required=True)
+            if not isinstance(self.delivery_display_name, str) or not self.delivery_display_name:
+                raise ValueError("交付可读名称必须是非空字符串")
+        elif self.delivery_extension is not None or self.delivery_display_name is not None:
+            raise ValueError("内部处理不填写交付扩展名或可读名称")
         timestamp = UtcMicros(self.occurred_at)
         if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
             raise ValueError(f"事件时间超出 SQLite 整数微秒范围: {self.occurred_at!r}")

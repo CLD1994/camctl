@@ -39,8 +39,8 @@ def internal_read(tmp_path):
         register_operation_guards()
         command = FileCandidate(
             action_id=11, item_id=None, processing_id=5, output_id=None,
-            source_device_file_id=501, target_relative_path="recording-inputs/1.part",
-            delivery_file_name="1.mp4", delivery_display_name="原片检查",
+            source_device_file_id=501, target_extension="part",
+            delivery_extension=None, delivery_display_name=None,
             config=OperationConfig(3, Decimal("10"), Decimal("3")), occurred_at=_NOW,
         )
         yield owned, command
@@ -96,3 +96,13 @@ def test_read_creation_write_failure_rolls_back_complete_responsibility(internal
     assert owned.connection.in_transaction is False
     retry = OutputsRepository().grant_file(command, key, owned)
     assert retry.kind is DbOutcomeKind.COMPLETED, retry.error
+
+
+def test_device_read_creation_preserves_known_source_checksum(internal_read):
+    owned, command = internal_read
+    owned.connection.execute("UPDATE device_files SET checksum_support=2, sha256=? WHERE id=501", ("b" * 64,))
+    owned.connection.commit()
+    result = OutputsRepository().grant_file(command, new_operation_key(), owned)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    with closing(owned.connection.execute("SELECT source_sha256 FROM file_copies WHERE id=?", (result.value.copy_id,))) as cursor:
+        assert cursor.fetchone() == ("b" * 64,)
