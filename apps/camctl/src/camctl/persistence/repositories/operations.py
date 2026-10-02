@@ -10,13 +10,14 @@ operation_finish、retry）在本模块注册。
 
 from __future__ import annotations
 
+from collections import ChainMap
 from contextlib import closing
 from dataclasses import asdict
 from typing import Any, Mapping
 
 from camctl.contracts.enums import decode_member, enum_for
 from camctl.contracts.history_values import HistoryBoundary
-from camctl.contracts.json_values import json_equal
+from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
@@ -34,6 +35,7 @@ from camctl.operations.attempts import (
     responsibility_key,
     seconds_from_json,
     ticket_target_id,
+    operation_responsibility_key,
 )
 from camctl.operations.models import (
     AttemptStatus,
@@ -146,6 +148,8 @@ def _load_flow_context(
         if copy is None:
             raise TransactionError(f"文件拷贝不存在: {target.copy_id}")
         state.setdefault("file_copies", {})[copy["id"]] = copy
+        if (copy["delivery_id"] is None) == (copy["processing_id"] is None):
+            raise ConsistencyError("拷贝必须恰归属交付或录像处理之一")
         if copy["delivery_id"] is not None:
             delivery = _load_row(connection, "deliveries", copy["delivery_id"])
             if delivery is None:
@@ -177,22 +181,147 @@ def _load_flow_context(
         original_kind = _PURPOSE_FLOW_KIND[query_purpose]
         with closing(connection.execute(
             "SELECT id FROM operation_runs WHERE kind = ? AND action_id = ?"
-            " AND activity_id = ?",
+            " AND activity_id = ? LIMIT 2",
             (int(original_kind), action_id, target.activity_id),
         )) as cursor:
             found = cursor.fetchall()
-        for (run_id,) in found:
-            loaded = _load_row(connection, "operation_runs", int(run_id))
-            if loaded is not None:
-                state.setdefault("operation_runs", {})[loaded["id"]] = loaded
+        if len(found) != 1:
+            raise ConsistencyError("查询确认必须关联唯一的原流程")
+        loaded = _load_row(connection, "operation_runs", int(found[0][0]))
+        if loaded is None:
+            raise ConsistencyError("查询确认引用的原流程记录不存在")
+        state.setdefault("operation_runs", {})[loaded["id"]] = loaded
         return
     if kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS):
-        with closing(connection.execute(
-            "SELECT 1 FROM cleanup_items WHERE id = ?", (target.cleanup_item_id,)
-        )) as cursor:
-            exists = cursor.fetchone()
-        if exists is None:
+        cleanup = _load_row(connection, "cleanup_items", target.cleanup_item_id)
+        if cleanup is None:
             raise TransactionError(f"清理项不存在: {target.cleanup_item_id}")
+        state.setdefault("cleanup_items", {})[cleanup["id"]] = cleanup
+
+
+def _fixed_reference(state, table: str, identity: int) -> Mapping[str, Any]:
+    """目标必须真实存在且身份一致；不读取或解释可变状态。"""
+    try:
+        ObjectId(identity)
+    except ValueError as error:
+        raise ConsistencyError(f"{table} 的关联身份无效") from error
+    facts = state.get(table, {}).get(identity)
+    # 行图以物理 ID 为键；新建事件的业务列不重复保存派生 ID。
+    if facts is None or not json_equal(facts.get("id", identity), identity):
+        raise ConsistencyError(f"固定关联缺少 {table}#{identity} 的事实")
+    return facts
+
+
+def _verify_run_identity(run: Mapping[str, Any], state) -> None:
+    """核对普通流程的固定列及目标归属，供写事件和只读入口共用。"""
+    try:
+        if not is_json_integer(run["kind"]):
+            raise ValueError("流程种类必须是整数编号")
+        kind = OperationKind[_RUN_KIND(run["kind"]).name]
+        purpose_code = run["query_purpose"]
+        if purpose_code is not None and not is_json_integer(purpose_code):
+            raise ValueError("查询用途必须是整数编号")
+        purpose = QueryPurpose[_QUERY_PURPOSE(purpose_code).name] if purpose_code is not None else None
+        target = AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"],
+                               cleanup_item_id=run["cleanup_item_id"])
+        expected = operation_responsibility_key(kind, run["action_id"], target, purpose)
+        delivery_id, session_key = run["delivery_id"], run["session_key"]
+    except (KeyError, ValueError) as error:
+        raise ConsistencyError("普通流程的固定身份字段无效或缺失") from error
+    if run.get("responsibility_key") != expected:
+        raise ConsistencyError("流程责任键与固定身份不符")
+    if session_key is not None or (kind is not OperationKind.READ_FILE and delivery_id is not None):
+        raise ConsistencyError("普通流程的会话或不适用交付引用必须为空")
+    action_id = run["action_id"]
+    if target.activity_id is not None:
+        activity = _fixed_reference(state, "device_activities", target.activity_id)
+        try:
+            ObjectId(activity["action_id"])
+        except (KeyError, ValueError) as error:
+            raise ConsistencyError("原活动缺少有效所属动作") from error
+        residual = kind is OperationKind.STOP_RESIDUAL or purpose is QueryPurpose.RESIDUAL_STOP_CONFIRMATION
+        if not residual and not json_equal(activity["action_id"], action_id):
+            raise ConsistencyError("流程与目标活动所属动作不符")
+        if purpose in _PURPOSE_FLOW_KIND:
+            original_kind = int(_PURPOSE_FLOW_KIND[purpose])
+            matches = [(identity, facts) for identity, facts in state.get("operation_runs", {}).items()
+                       if facts.get("kind") == original_kind
+                       and json_equal(facts.get("action_id"), action_id)
+                       and json_equal(facts.get("activity_id"), target.activity_id)]
+            if len(matches) != 1:
+                raise ConsistencyError("查询确认必须关联唯一的原流程")
+            original_id, original = matches[0]
+            _fixed_reference(state, "operation_runs", original_id)
+            _verify_run_identity(original, state)
+    elif target.copy_id is not None:
+        copy = _fixed_reference(state, "file_copies", target.copy_id)
+        try:
+            copy_delivery, copy_processing = copy["delivery_id"], copy["processing_id"]
+        except KeyError as error:
+            raise ConsistencyError("拷贝缺少完整的交付与处理关联字段") from error
+        if (copy_delivery is None) == (copy_processing is None):
+            raise ConsistencyError("拷贝必须恰归属交付或录像处理之一")
+        if not json_equal(delivery_id, copy_delivery):
+            raise ConsistencyError("读取流程与拷贝的交付引用不符")
+        parent = (_fixed_reference(state, "deliveries", copy_delivery)
+                  if copy_delivery is not None else
+                  _fixed_reference(state, "recording_processing", copy_processing))
+        if not json_equal(parent.get("action_id"), action_id):
+            raise ConsistencyError("读取流程与拷贝所属动作不符")
+        matches = [identity for identity, facts in state.get("operation_runs", {}).items()
+                   if facts.get("kind") == run["kind"] and json_equal(facts.get("copy_id"), target.copy_id)]
+        if len(matches) != 1 or not json_equal(matches[0], run.get("id")):
+            raise ConsistencyError("拷贝必须关联其唯一原读取流程")
+        _fixed_reference(state, "operation_runs", matches[0])
+    elif target.cleanup_item_id is not None:
+        cleanup = _fixed_reference(state, "cleanup_items", target.cleanup_item_id)
+        if not json_equal(cleanup.get("action_id"), action_id):
+            raise ConsistencyError("流程与目标清理项所属动作不符")
+
+
+def _intent_identity(intent: AttemptIntent) -> dict[str, Any]:
+    return {"action_id": intent.action_id, "kind": int(_RUN_KIND[intent.kind.name]),
+            "query_purpose": int(_QUERY_PURPOSE[intent.query_purpose.name]) if intent.query_purpose is not None else None,
+            "responsibility_key": responsibility_key(intent), "activity_id": intent.target.activity_id,
+            "copy_id": intent.target.copy_id, "cleanup_item_id": intent.target.cleanup_item_id,
+            "delivery_id": None, "session_key": None}
+
+
+def _verify_run_intent(run: Mapping[str, Any], intent: AttemptIntent) -> None:
+    """输入必须逐列指向原责任；交付归属由实际拷贝父对象核对。"""
+    expected = _intent_identity(intent)
+    for name in ("action_id", "kind", "query_purpose", "responsibility_key",
+                 "activity_id", "copy_id", "cleanup_item_id", "session_key"):
+        if name not in run or not json_equal(run[name], expected[name]):
+            raise ConsistencyError(f"流程固定字段 {name} 与意图不符")
+
+
+def _find_responsibility(connection, intent: AttemptIntent) -> int | None:
+    """按规范键和实际责任共同定位；错误键不能刷新原责任。"""
+    kind = intent.kind
+    values = _intent_identity(intent)
+    if kind in (OperationKind.START, OperationKind.STOP):
+        columns = ("action_id",)
+    elif kind is OperationKind.READ_FILE:
+        columns = ("copy_id",)
+    elif kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS):
+        columns = ("cleanup_item_id",)
+    elif kind is OperationKind.CHECK_CAPTURE_RESULTS:
+        columns = ("activity_id",)
+    elif kind is OperationKind.STOP_RESIDUAL:
+        columns = ("action_id", "activity_id")
+    else:
+        columns = ("action_id", "query_purpose", "activity_id")
+    predicate = " AND ".join(f"{column} IS ?" for column in columns)
+    with closing(connection.execute(
+        "SELECT id FROM operation_runs WHERE responsibility_key = ? OR (kind = ? AND "
+        + predicate + ") LIMIT 2",
+        (values["responsibility_key"], values["kind"], *(values[column] for column in columns)),
+    )) as cursor:
+        found = cursor.fetchall()
+    if len(found) > 1:
+        raise ConsistencyError("相同实际责任命中多条流程")
+    return int(found[0][0]) if found else None
 
 
 def _run_owner_ref(
@@ -256,13 +385,12 @@ class BeginAttemptCommand:
             self._state,
         )
 
-        with closing(connection.execute(
-            "SELECT id FROM operation_runs WHERE responsibility_key = ?", (key_str,)
-        )) as cursor:
-            found = cursor.fetchone()
+        found = _find_responsibility(connection, intent)
         run_facts = (
-            _load_row(connection, "operation_runs", int(found[0])) if found else None
+            _load_row(connection, "operation_runs", found) if found is not None else None
         )
+        if found is not None and run_facts is None:
+            raise ConsistencyError("责任键引用的流程记录不存在")
         if run_facts is not None:
             self._state.setdefault("operation_runs", {})[run_facts["id"]] = run_facts
             self._verify_existing_run(run_facts, intent, connection)
@@ -277,6 +405,9 @@ class BeginAttemptCommand:
                 raise TransactionError("后续尝试要求先建立重试等待")
             attempt_no = int(run_facts["attempts_used"]) + 1
         else:
+            if intent.kind is OperationKind.READ_FILE:
+                raise ConsistencyError("已有拷贝缺少其唯一原读取流程")
+            _verify_run_identity(_intent_identity(intent), self._state)
             attempt_no = 1
 
         allocation = scope.allocate(1)
@@ -395,19 +526,8 @@ class BeginAttemptCommand:
     def _verify_existing_run(
         self, run_facts: Mapping[str, Any], intent, connection
     ) -> None:
-        if run_facts["responsibility_key"] != responsibility_key(intent):
-            raise TransactionError("责任键与意图不符")
-        if run_facts["action_id"] != intent.action_id:
-            raise TransactionError("流程动作与意图不符")
-        if run_facts["kind"] != int(_RUN_KIND[intent.kind.name]):
-            raise TransactionError("流程种类与意图不符")
-        expected_purpose = (
-            int(_QUERY_PURPOSE[intent.query_purpose.name])
-            if intent.query_purpose is not None
-            else None
-        )
-        if run_facts["query_purpose"] != expected_purpose:
-            raise TransactionError("查询用途与意图不符")
+        _verify_run_intent(run_facts, intent)
+        _verify_run_identity(run_facts, self._state)
         with closing(connection.execute(
             "SELECT MAX(attempt_no) FROM operation_attempts WHERE run_id = ?",
             (run_facts["id"],),
@@ -431,12 +551,13 @@ class BeginAttemptCommand:
         intent = self._intent
         run_id = int(attempt_values["run_id"])
         current = _load_row(connection, "operation_runs", run_id)
-        if (
-            current is None
-            or current["responsibility_key"] != responsibility_key(intent)
-            or current["action_id"] != intent.action_id
-        ):
-            raise TransactionError("已保存意图与本次输入的责任不符")
+        if current is None:
+            raise ConsistencyError("已保存意图引用的流程记录不存在")
+        _verify_run_intent(current, intent)
+        self._state["operation_runs"] = {run_id: current}
+        _load_flow_context(connection, intent.kind, intent.action_id, intent.target,
+                           intent.query_purpose, self._state)
+        _verify_run_identity(current, self._state)
         ticket = AttemptTicket(
             attempt_id=int(attempt_values["attempt_no"]),
             operation=intent.operation,
@@ -592,6 +713,7 @@ class FinishAttemptCommand:
             self._state,
         )
 
+        _verify_run_identity(run_facts, self._state)
         owner = _run_owner_ref(run_facts, self._state)
         self._owners[("operation_runs", ticket.run_id)] = owner
         self._owners[("operation_attempts", attempt_id)] = owner
@@ -748,6 +870,7 @@ class FinishAttemptCommand:
             AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"]),
             QueryPurpose[decode_member("operation_runs.query_purpose", run["query_purpose"]).name]
             if run["query_purpose"] is not None else None, self._state)
+        _verify_run_identity(run, self._state)
         transaction = saved[0]["transaction"]
         original = read_row_values_at_boundary(connection, owner=_run_owner_ref(run, self._state),
             table="operation_runs", row_id=run["id"], columns=run_columns,
@@ -803,77 +926,36 @@ def _outcome_of(receipt) -> DbOutcome:
 
 
 def _operation_identity_guard(event, context) -> None:
+    relations = context.association_rows
+    if context.transaction_rows is None:
+        # 独立校验也必须包含当前创建行；不预取未来事件或改写事件前状态。
+        current_rows: dict[str, dict[int, dict[str, Any]]] = {}
+        for row in event.rows:
+            if row.after.exists:
+                facts = _row_after_facts(context, row)
+                current_rows.setdefault(row.table, {})[row.row_id] = facts
+        relations = ChainMap({
+            table: ChainMap(rows, relations.get(table, {}))
+            for table, rows in current_rows.items()
+        }, relations)
     for row in event.rows:
-        if row.table != "operation_runs":
-            continue
-        facts = _row_after_facts(context, row)
-        kind = facts.get("kind")
-        purpose = facts.get("query_purpose")
-        action_id = facts.get("action_id")
-        if kind == int(_RUN_KIND.EMERGENCY_STOP):
-            _fail("应急流程不经普通操作事件建立")
-        if kind == int(_RUN_KIND.QUERY_ACTIVITY):
-            if purpose is None:
-                _fail("查询流程必须填写用途")
-            if purpose == int(_QUERY_PURPOSE.BEFORE_EXECUTION):
-                if facts.get("activity_id") is not None:
-                    _fail("执行前检查不得指向具体活动")
-                expected = f"query/preflight/{action_id}"
-            else:
-                activity_id = facts.get("activity_id")
-                if activity_id is None:
-                    _fail("该查询用途必须指向目标活动")
-                purpose_name = decode_member(
-                    "operation_runs.query_purpose", purpose
-                ).name
-                expected = (
-                    f"query/{QueryPurpose[purpose_name].value}"
-                    f"/{action_id}/{activity_id}"
-                )
-                _verify_query_original_flow(context, purpose, action_id, activity_id)
-        elif kind == int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
-            expected = f"results/{facts.get('activity_id')}"
-        elif kind == int(_RUN_KIND.STOP_RESIDUAL):
-            expected = f"followup/{action_id}/{facts.get('activity_id')}"
-        elif kind in (int(_RUN_KIND.START), int(_RUN_KIND.STOP)):
-            expected = f"{OperationKind[_kind_name(kind)].value}/{action_id}"
-        elif kind == int(_RUN_KIND.READ_FILE):
-            expected = f"read/{facts.get('copy_id')}"
-        elif kind in (
-            int(_RUN_KIND.DELETE_FILE),
-            int(_RUN_KIND.CHECK_FILE_EXISTS),
-        ):
-            expected = f"{OperationKind[_kind_name(kind)].value}/{facts.get('cleanup_item_id')}"
+        if row.table == "operation_runs":
+            facts = _row_after_facts(context, row)
+        elif row.table == "file_copies" and not row.before.exists:
+            matches = [(identity, facts) for identity, facts in relations.get("operation_runs", {}).items()
+                       if facts.get("kind") == int(_RUN_KIND.READ_FILE)
+                       and json_equal(facts.get("copy_id"), row.row_id)]
+            if len(matches) != 1:
+                _fail("新拷贝必须关联唯一读取流程")
+            identity, saved_facts = matches[0]
+            facts = dict(saved_facts)
+            facts.setdefault("id", identity)
         else:
-            _fail(f"未登记的操作种类: {kind!r}")
             continue
-        if facts.get("responsibility_key") != expected:
-            _fail(
-                f"责任键 {facts.get('responsibility_key')!r} 与登记格式 {expected!r} 不符"
-            )
-        if kind != int(_RUN_KIND.QUERY_ACTIVITY) and purpose is not None:
-            _fail("只有查询流程保存查询用途")
-
-
-def _verify_query_original_flow(
-    context, purpose: int, action_id: int, activity_id: int
-) -> None:
-    purpose_name = decode_member("operation_runs.query_purpose", purpose).name
-    if purpose_name == "ACTIVITY_OBSERVATION":
-        activity = context.state_rows.get("device_activities", {}).get(activity_id)
-        if activity is None or activity.get("action_id") != action_id:
-            _fail("活动核实必须指向发起动作自己的活动")
-        return
-    original_kind = _PURPOSE_FLOW_KIND[QueryPurpose[purpose_name]]
-    runs = context.state_rows.get("operation_runs", {})
-    for facts in runs.values():
-        if (
-            facts.get("kind") == int(original_kind)
-            and facts.get("action_id") == action_id
-            and facts.get("activity_id") == activity_id
-        ):
-            return
-    _fail(f"查询用途 {purpose_name} 缺少对应的原流程事实")
+        try:
+            _verify_run_identity(facts, relations)
+        except ConsistencyError as error:
+            raise EventValidationError(str(error)) from error
 
 
 def _query_configuration_guard(event, context) -> None:

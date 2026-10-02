@@ -38,6 +38,7 @@ __all__ = [
     "RunOutcome",
     "RunStatus",
     "dispatch_decision",
+    "operation_responsibility_key",
     "query_responsibility_key",
     "responsibility_key",
     "seconds_from_json",
@@ -216,26 +217,7 @@ class AttemptIntent:
         if not isinstance(self.config, AttemptConfig):
             raise AttemptConfigError(f"config 必须是 AttemptConfig: {self.config!r}")
         _utc_micros(self.occurred_at)
-        if self.kind is OperationKind.QUERY_ACTIVITY:
-            if not isinstance(self.query_purpose, QueryPurpose):
-                raise AttemptConfigError("查询意图必须填写 query_purpose")
-            required = _QUERY_PURPOSE_COLUMNS[self.query_purpose]
-        else:
-            if self.query_purpose is not None:
-                raise AttemptConfigError("只有查询意图填写 query_purpose")
-            required = _KIND_TARGET_COLUMNS[self.kind]
-        values = {
-            "activity_id": self.target.activity_id,
-            "copy_id": self.target.copy_id,
-            "cleanup_item_id": self.target.cleanup_item_id,
-            "query_purpose": self.query_purpose,
-        }
-        filled = {name for name, value in values.items() if value is not None}
-        if filled != set(required):
-            raise AttemptConfigError(
-                f"{self.kind.value} 要求恰好填写 {sorted(required)}，"
-                f"实际填写 {sorted(filled)}"
-            )
+        operation_responsibility_key(self.kind, self.action_id, self.target, self.query_purpose)
         if self.kind is OperationKind.READ_FILE:
             _positive_int(self.copy_round, "copy_round")
         elif self.copy_round is not None:
@@ -259,23 +241,40 @@ def query_responsibility_key(
 
 def responsibility_key(intent: AttemptIntent) -> str:
     """按登记格式推导操作责任键；ID 使用无前导零十进制表示。"""
-    kind = intent.kind
+    return operation_responsibility_key(intent.kind, intent.action_id, intent.target, intent.query_purpose)
+
+
+def operation_responsibility_key(
+    kind: OperationKind, action_id: int, target: AttemptTarget, query_purpose: QueryPurpose | None
+) -> str:
+    """核对固定身份组合并生成责任键，不依赖调用配置或事实时刻。"""
+    _positive_int(action_id, "action_id")
+    if not isinstance(kind, OperationKind) or not isinstance(target, AttemptTarget):
+        raise AttemptConfigError("固定责任必须填写 OperationKind 和 AttemptTarget")
     if kind is OperationKind.QUERY_ACTIVITY:
-        assert intent.query_purpose is not None
-        return query_responsibility_key(intent.action_id, intent.query_purpose, intent.target.activity_id)
+        if not isinstance(query_purpose, QueryPurpose):
+            raise AttemptConfigError("查询责任必须填写 QueryPurpose")
+        required = _QUERY_PURPOSE_COLUMNS[query_purpose]
+    else:
+        if query_purpose is not None:
+            raise AttemptConfigError("只有查询责任填写用途")
+        required = _KIND_TARGET_COLUMNS[kind]
+    values = {"activity_id": target.activity_id, "copy_id": target.copy_id,
+              "cleanup_item_id": target.cleanup_item_id, "query_purpose": query_purpose}
+    filled = {name for name, value in values.items() if value is not None}
+    if filled != set(required):
+        raise AttemptConfigError(f"{kind.value} 要求恰好填写 {sorted(required)}，实际填写 {sorted(filled)}")
+    if kind is OperationKind.QUERY_ACTIVITY:
+        return query_responsibility_key(action_id, query_purpose, target.activity_id)
     if kind in _ACTIVITY_KINDS:
-        assert intent.target.activity_id is not None
         if kind is OperationKind.CHECK_CAPTURE_RESULTS:
-            return f"results/{intent.target.activity_id}"
-        return f"{kind.value}/{intent.action_id}"
+            return f"results/{target.activity_id}"
+        return f"{kind.value}/{action_id}"
     if kind is OperationKind.STOP_RESIDUAL:
-        assert intent.target.activity_id is not None
-        return f"followup/{intent.action_id}/{intent.target.activity_id}"
+        return f"followup/{action_id}/{target.activity_id}"
     if kind is OperationKind.READ_FILE:
-        assert intent.target.copy_id is not None
-        return f"read/{intent.target.copy_id}"
-    assert intent.target.cleanup_item_id is not None
-    return f"{kind.value}/{intent.target.cleanup_item_id}"
+        return f"read/{target.copy_id}"
+    return f"{kind.value}/{target.cleanup_item_id}"
 
 
 def ticket_target_id(intent: AttemptIntent) -> str | None:

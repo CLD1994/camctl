@@ -149,6 +149,41 @@ class PlanStartCommand:
         )
 
 
+def test_guards_receive_complete_proposal_without_advancing_event_state(tmp_path, plan_guards, monkeypatch):
+    """后续创建和变化可证明固定关联，不倒推当前事件的状态。"""
+    from camctl.history import validators
+    from camctl.persistence.transaction import CommandPlan
+
+    _create_valid_database(tmp_path / "state.db")
+    observed = []
+
+    def inspect(event, context):
+        observed.append((event.event_type,
+                         context.state_rows.get("plans", {}).get(1, {}).get("status"),
+                         context.transaction_rows["plans"][1]["status"]))
+
+    monkeypatch.setitem(validators.NAMED_GUARDS, "admission", inspect)
+    monkeypatch.setitem(validators.NAMED_GUARDS, "plan_aggregate", inspect)
+
+    class CreateAndStart:
+        def plan(self, scope):
+            allocation = scope.allocate(2)
+            return CommandPlan(
+                events=(
+                    _plan_create_envelope(allocation.first_event_id, allocation.txn_id, 1, 101),
+                    _plan_start_envelope(allocation.last_event_id, allocation.txn_id, 1, 1),
+                ), owners={("plans", 1): ("plan", 1)}, state_rows={"plans": {}},
+            )
+
+    owned = _open(tmp_path)
+    try:
+        receipt = commit_operation(CreateAndStart(), new_operation_key(), owned)
+        assert receipt.kind == "completed", receipt.error
+        assert set(observed) == {(1, None, 2), (9, 1, 2)}
+    finally:
+        owned.connection.close()
+
+
 class FailingConnection:
     """在首个匹配前缀的语句上失败的连接替身；其余语句透传。"""
 

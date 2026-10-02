@@ -42,12 +42,20 @@ class EventContext:
     owners 由调用方按事件发生时的实际关系解析：
     (表名, 行 ID) -> (历史对象名, 对象 ID)。state_rows 是该事件发
     生时（本事务先前事件已应用）的业务行事实，报告影响守卫用它
-    沿登记关联解析应报告对象。
+    沿登记关联解析应报告对象。transaction_rows 是完整事务提案的行
+    事实，仅用于固定身份及历史归属关系；不得用于提前判断后来的
+    状态或执行资格。未提供时，固定关联只能使用事件已有事实。
     """
 
     transaction: TransactionRange
     owners: Mapping[tuple[str, int], tuple[str, int]]
     state_rows: Mapping[str, Mapping[int, Mapping[str, Any]]]
+    transaction_rows: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None
+
+    @property
+    def association_rows(self) -> Mapping[str, Mapping[int, Mapping[str, Any]]]:
+        """取得固定关联事实；显式空提案不表示可以退回事件状态。"""
+        return self.state_rows if self.transaction_rows is None else self.transaction_rows
 
 
 @dataclass(frozen=True)
@@ -209,12 +217,12 @@ def _row_facts(
     row_id: int,
     overlays: Mapping[tuple[str, int], Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """按行编号取得该事件发生时的完整行事实（含自身编号）。
+    """按行编号取得归属解析所需的固定行关系（含自身编号）。
 
-    overlays 携带本事务先前事件及同一事件内其他行写入的值，使同
-    事件创建的引用行（如与首次尝试共同建立的流程）可以解析归属。
+    完整提案允许解析本事务后续创建的关联对象。归属登记只沿固定
+    身份列取值；overlays 保留同一事件内的行写入。这里不判断状态。
     """
-    facts = dict(context.state_rows.get(table, {}).get(row_id, {}))
+    facts = dict(context.association_rows.get(table, {}).get(row_id, {}))
     overlay = overlays.get((table, row_id))
     if overlay is not None:
         facts.update(overlay)
@@ -227,7 +235,7 @@ def _event_row_facts(
     context: "EventContext",
     overlays: Mapping[tuple[str, int], Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """事件行的完整事实：事务先前状态叠加本事件写入的值。"""
+    """事件行的固定归属事实：关联图叠加本事件写入的值。"""
     facts = _row_facts(context, row.table, row.row_id, overlays)
     facts.update(row.after.values)
     return facts
@@ -254,8 +262,8 @@ def _resolve_owner_spec(
 
     cases 按行事实选择分支；inherit 沿外键继承被引用行的归属；
     entity/id/via 沿外键链到达持有对象后读取编号列。解析所需的
-    引用行事实由命令作为 state_rows 提供或来自本事件写入，缺失时
-    明确拒绝。
+    引用行的固定关系由完整事务提案提供；未提供提案时，使用事件
+    之前的事实与本事件写入。缺少必需关系时明确拒绝。
     """
     if depth > 8:
         _fail(f"{table} 的归属解析链超出深度限制")

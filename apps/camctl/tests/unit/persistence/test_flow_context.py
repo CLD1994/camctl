@@ -9,6 +9,8 @@ import pytest
 
 from camctl.operations.attempts import AttemptTarget, OperationKind, QueryPurpose
 from camctl.contracts import enums
+from camctl.contracts.values import ConsistencyError
+from camctl.persistence import transaction
 from camctl.persistence.transaction import TransactionError
 
 
@@ -36,11 +38,17 @@ def operations(monkeypatch):
 
 @pytest.mark.parametrize("kind", [OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS])
 @pytest.mark.parametrize("branch", ["found", "missing", "read_error", "execute_error"])
-def test_cleanup_context_releases_cursor(operations, kind, branch):
+def test_cleanup_context_releases_cursor(operations, monkeypatch, kind, branch):
     connection = create_autospec(sqlite3.Connection, instance=True)
     cursor = create_autospec(sqlite3.Cursor, instance=True)
     connection.execute.return_value = cursor
-    cursor.fetchone.return_value = None if branch == "missing" else (1,)
+    columns = ("id", "action_id", "requested_output_id", "output_id", "status", "restriction_state",
+               "outcome", "final_event_id", "error_code", "error_details_json")
+    cursor.description = tuple((name, None, None, None, None, None, None) for name in columns)
+    values = (1, 1, 1, None, 1, 1, None, None, None, None)
+    cursor.fetchone.return_value = None if branch == "missing" else values
+    monkeypatch.setattr(transaction, "json_columns", create_autospec(transaction.json_columns,
+        return_value={"cleanup_items": frozenset({"error_details_json"})}))
     error = sqlite3.OperationalError("清理项查询不可用")
     if branch == "execute_error":
         connection.execute.side_effect = error
@@ -48,7 +56,9 @@ def test_cleanup_context_releases_cursor(operations, kind, branch):
         cursor.fetchone.side_effect = error
     expected = TransactionError if branch == "missing" else sqlite3.OperationalError
     if branch == "found":
-        operations._load_flow_context(connection, kind, 1, AttemptTarget(cleanup_item_id=1), None, {})
+        state = {}
+        operations._load_flow_context(connection, kind, 1, AttemptTarget(cleanup_item_id=1), None, state)
+        assert state["cleanup_items"] == {1: dict(zip(columns, values))}
     else:
         with pytest.raises(expected) as raised:
             operations._load_flow_context(connection, kind, 1, AttemptTarget(cleanup_item_id=1), None, {})
@@ -60,15 +70,18 @@ def test_cleanup_context_releases_cursor(operations, kind, branch):
         cursor.close.assert_called_once_with()
 
 
-@pytest.mark.parametrize("branch", ["found", "empty", "read_error", "execute_error"])
-def test_query_confirmation_context_releases_cursor(operations, monkeypatch, branch):
+@pytest.mark.parametrize("branch", ["found", "empty", "duplicate", "missing_record", "read_error", "execute_error"])
+@pytest.mark.parametrize("purpose,original_kind", [(QueryPurpose.START_CONFIRMATION, 1),
+    (QueryPurpose.STOP_CONFIRMATION, 2), (QueryPurpose.RESIDUAL_STOP_CONFIRMATION, 8)])
+def test_query_confirmation_context_releases_cursor(operations, monkeypatch, branch, purpose, original_kind):
     connection = create_autospec(sqlite3.Connection, instance=True)
     cursor = create_autospec(sqlite3.Cursor, instance=True)
     connection.execute.return_value = cursor
-    cursor.fetchall.return_value = [(2,)] if branch == "found" else []
+    cursor.fetchall.return_value = [] if branch == "empty" else [(2,), (3,)] if branch == "duplicate" else [(2,)]
     activity, run = {"id": 1}, {"id": 2}
     monkeypatch.setattr(operations, "_load_row", create_autospec(
-        operations._load_row, side_effect=lambda connection, table, row_id: activity if table == "device_activities" else run,
+        operations._load_row, side_effect=lambda connection, table, row_id: activity if table == "device_activities"
+        else None if branch == "missing_record" else run,
     ))
     error = sqlite3.OperationalError("查询确认的原流程不可用")
     if branch == "execute_error":
@@ -76,17 +89,22 @@ def test_query_confirmation_context_releases_cursor(operations, monkeypatch, bra
     elif branch == "read_error":
         cursor.fetchall.side_effect = error
     state = {}
-    if branch in ("found", "empty"):
+    if branch == "found":
         operations._load_flow_context(connection, OperationKind.QUERY_ACTIVITY, 1,
-                                      AttemptTarget(activity_id=1), QueryPurpose.START_CONFIRMATION, state)
+                                      AttemptTarget(activity_id=1), purpose, state)
         assert state["device_activities"] == {1: activity}
-        assert state.get("operation_runs", {}) == ({2: run} if branch == "found" else {})
+        assert state["operation_runs"] == {2: run}
     else:
-        with pytest.raises(sqlite3.OperationalError) as raised:
+        expected = ConsistencyError if branch in ("empty", "duplicate", "missing_record") else sqlite3.OperationalError
+        with pytest.raises(expected) as raised:
             operations._load_flow_context(connection, OperationKind.QUERY_ACTIVITY, 1,
-                                          AttemptTarget(activity_id=1), QueryPurpose.START_CONFIRMATION, state)
-        assert raised.value is error
+                                          AttemptTarget(activity_id=1), purpose, state)
+        if expected is sqlite3.OperationalError:
+            assert raised.value is error
     if branch == "execute_error":
         cursor.close.assert_not_called()
     else:
         cursor.close.assert_called_once_with()
+    sql, parameters = connection.execute.call_args.args
+    assert sql.endswith("LIMIT 2")
+    assert parameters == (original_kind, 1, 1)

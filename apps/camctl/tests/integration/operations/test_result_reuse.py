@@ -246,6 +246,14 @@ def test_result_redelivery_rejects_different_ticket(environment, field, value):
     assert isinstance(result.error, TransactionError), result.error
 
 
+def _test_run_state(connection, facts):
+    state = {"operation_runs": {facts["id"]: facts}}
+    if facts["cleanup_item_id"] is not None:
+        identity = facts["cleanup_item_id"]
+        state["cleanup_items"] = {identity: row_facts(connection, "cleanup_items", identity)}
+    return state
+
+
 class _CancelRun:
     def __init__(self, run_id):
         self.run_id = run_id
@@ -259,7 +267,7 @@ class _CancelRun:
         return CommandPlan(
             (event_envelope(allocation.first_event_id, allocation.txn_id, 10, 3, (row,), _NOW),),
             {("operation_runs", self.run_id): ("action", 1)},
-            {"operation_runs": {self.run_id: facts}},
+            _test_run_state(scope.connection, facts),
         )
 
 
@@ -354,7 +362,7 @@ class _SetRunConfig:
         return CommandPlan(
             (event_envelope(allocation.first_event_id, allocation.txn_id, 10, 2, (row,), _NOW),),
             {("operation_runs", self.run_id): ("action", 1)},
-            {"operation_runs": {self.run_id: facts}},
+            _test_run_state(scope.connection, facts),
         )
 
 
@@ -498,7 +506,7 @@ def test_result_recovery_pages_many_changes_in_one_complete_transaction(environm
                                {"max_attempts_used": initial + index}, {"max_attempts_used": initial + index + 1}),),
                 _NOW) for index in range(129))
             return CommandPlan(events, {("operation_runs", ticket.run_id): ("action", 1)},
-                               {"operation_runs": {ticket.run_id: facts}})
+                               _test_run_state(scope.connection, facts))
 
     receipt = commit_operation(ManyConfigurations(), new_operation_key(), owned)
     assert receipt.kind == "completed", receipt.error

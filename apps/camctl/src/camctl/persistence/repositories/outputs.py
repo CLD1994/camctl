@@ -1624,7 +1624,7 @@ def _copy_links_guard(event, context) -> None:
     """拷贝关联守卫：每份新拷贝与唯一 READ_FILE 流程共同保存。"""
     if event.event_type != _COPY_CHANGED_EVENT or event.reason != 1:
         return
-    runs = context.state_rows.get("operation_runs", {})
+    runs = context.association_rows.get("operation_runs", {})
     for row in event.rows:
         if row.table != "file_copies" or row.before.exists:
             continue

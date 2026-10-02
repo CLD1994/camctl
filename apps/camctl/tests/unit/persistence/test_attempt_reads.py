@@ -78,8 +78,11 @@ def database():
         cursor = create_autospec(sqlite3.Cursor, instance=True)
         data["cursors"].append(cursor)
         cursor.fetchone.return_value = (None,) if tag == "allocation" else data[tag]
+        if tag == "found":
+            cursor.fetchall.return_value = [data[tag]] if data[tag] is not None else []
         if data["fault"] == (tag, "fetch"):
             cursor.fetchone.side_effect = data["error"]
+            cursor.fetchall.side_effect = data["error"]
         return cursor
 
     connection.execute.side_effect = execute
@@ -151,3 +154,30 @@ def test_intent_plan_checks_input_type_before_saved_key_lookup(repository, datab
         _plan(module, connection, intent)
     module._saved_transaction_events.assert_not_called()
     connection.execute.assert_not_called()
+
+
+def test_responsibility_lookup_rejects_multiple_physical_flows_and_closes_cursor(repository):
+    from camctl.contracts.values import ConsistencyError
+
+    module, _ = repository
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    connection.execute.return_value = cursor
+    cursor.fetchall.return_value = [(7,), (8,)]
+    with pytest.raises(ConsistencyError):
+        _plan(module, connection)
+    cursor.close.assert_called_once_with()
+    assert connection.execute.call_args.args[0].endswith("LIMIT 2")
+
+
+def test_intent_plan_rejects_row_missing_after_responsibility_was_found(repository, database):
+    from camctl.contracts.values import ConsistencyError
+
+    module, _ = repository
+    connection, data = database
+    previous = module.row_facts.side_effect
+    module.row_facts.side_effect = lambda connection, table, identity: previous(connection, table, identity) if table == "actions" else None
+    with pytest.raises(ConsistencyError):
+        _plan(module, connection)
+    for cursor in data["cursors"]:
+        cursor.close.assert_called_once_with()

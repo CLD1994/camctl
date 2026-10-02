@@ -452,6 +452,7 @@ def commit_operation(
                 transaction=transaction_range,
                 owners=plan.owners,
                 state_rows=validation_state,
+                transaction_rows=working,
             )
             validated.append(validate_event(event, context))
             _apply_rows(validation_state, (event,))
