@@ -44,10 +44,6 @@ register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
 
-#: device_files.role 与产物种类的对应（按登记：1 原片/2 修复/3 预览）。
-_ROLE_FOR_KIND = {1: 1, 2: 2, 3: 3}
-
-
 def _seed_environment(tmp_path: Path):
     target = tmp_path / "state.db"
     _create_valid_database(target)
@@ -180,9 +176,25 @@ def _seed_output(
 ) -> None:
     if file_id is None:
         file_id = 900 + output_id
-    _seed_device_file(
-        connection, file_id, source_action_id, role=_ROLE_FOR_KIND[kind], size=size
-    )
+    device_file_id, intermediate_file_id = None, None
+    if kind == 2:
+        intermediate_file_id = file_id
+        connection.execute(
+            "INSERT INTO intermediate_files (id, owner_action_id, purpose, relative_path,"
+            " retention_state, cleanup_state, size_bytes, created_event_id, last_event_id, change_count)"
+            " VALUES (?, ?, 4, ?, 3, 1, ?, 1, 1, 1)",
+            (file_id, source_action_id, f"derived/{file_id}.mp4", size),
+        )
+    else:
+        device_file_id = file_id
+        _seed_device_file(connection, file_id, source_action_id, role=2 if kind == 1 else 3, size=size)
+        if kind == 3:
+            original_file_id, = _value(connection, "SELECT device_file_id FROM outputs WHERE id=?", original_output_id)
+            connection.execute(
+                "UPDATE device_files SET original_device_file_id=?,"
+                " pairing_evidence_json=? WHERE id=?",
+                (original_file_id, '{"method":1,"observation":{}}', file_id),
+            )
     cleanup = {1: 1, 2: 2, 3: 4, 4: 1, 5: 1}[availability]
     error_json = None if availability in (1, 2, 3) else {"reason": "seed"}
     connection.execute(
@@ -190,13 +202,14 @@ def _seed_output(
         " intermediate_file_id, original_name, media_type, availability,"
         " cleanup_status, cleanup_error_json, media_json, error_json,"
         " created_event_id, last_event_id, change_count)"
-        " VALUES (?, ?, ?, ?, NULL, 'video.mp4', 'video/mp4', ?, ?, NULL, '{}', ?,"
+        " VALUES (?, ?, ?, ?, ?, 'video.mp4', 'video/mp4', ?, ?, NULL, '{}', ?,"
         " 1, 1, 1)",
         (
             output_id,
             source_action_id,
             kind,
-            file_id,
+            device_file_id,
+            intermediate_file_id,
             availability,
             cleanup,
             json.dumps(error_json) if error_json is not None else None,

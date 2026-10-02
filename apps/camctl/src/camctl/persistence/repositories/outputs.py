@@ -111,15 +111,6 @@ _UNFINISHED_PROCESSING_DISCARD = frozenset(
      if member.name in {"PENDING", "RUNNING"}}
 )
 
-_KIND_BY_CODE = {
-    int(code): kind
-    for code, kind in (
-        (1, OutputKind.ORIGINAL),
-        (2, OutputKind.REPAIRED),
-        (3, OutputKind.PREVIEW),
-    )
-}
-
 #: READ_PERMISSION_CHANGED 的分支。
 _GRANT_REASON = 1
 _REJECT_REASON = 2
@@ -594,8 +585,8 @@ class _FixSelectionCommand:
         self._owners[("obtain_source_selections", command.selection_id)] = (
             "action", owner_action_id,
         )
-        for entry in _catalog_rows(connection, source_action_id):
-            self._state.setdefault("outputs", {})[entry["id"]] = entry
+        for member in _catalog_members(connection, source_action_id):
+            self._state["outputs"][member.entry.output_id] = member.row
 
         rows = []
         if snapshot.source_error_code is None:
@@ -698,11 +689,12 @@ def _decoded(raw: Any) -> dict[str, Any] | None:
 
 def _processing_completed(connection, source_action_id: int) -> bool:
     """来源动作的适用产物处理是否已完成（录像检查/修复/丢弃）。"""
-    row = connection.execute(
+    with closing(connection.execute(
         "SELECT check_state, repair_state, discard_state FROM recording_processing"
         " WHERE action_id = ?",
         (source_action_id,),
-    ).fetchone()
+    )) as cursor:
+        row = cursor.fetchone()
     if row is None:
         return True
     check_state, repair_state, discard_state = (int(value) for value in row)
@@ -743,21 +735,29 @@ def _guard_read_time(event, context, action_id) -> None:
         raise EventValidationError("读取发起动作尚未到计划时间")
 
 
-def _catalog_rows(connection, source_action_id: int) -> list[dict[str, Any]]:
-    rows = connection.execute(
-        "SELECT o.id, o.source_action_id, o.kind, o.device_file_id,"
-        " o.intermediate_file_id, o.availability, orig.original_output_id,"
-        " df.size_bytes AS device_size, im.size_bytes AS intermediate_size"
-        " FROM outputs o"
-        " LEFT JOIN output_origins orig ON orig.output_id = o.id"
-        " LEFT JOIN device_files df ON df.id = o.device_file_id"
-        " LEFT JOIN intermediate_files im ON im.id = o.intermediate_file_id"
-        " WHERE o.source_action_id = ? ORDER BY o.id",
-        (source_action_id,),
-    ).fetchall()
-    return [dict(zip(("id", "source_action_id", "kind", "device_file_id",
-                      "intermediate_file_id", "availability", "original_output_id",
-                      "device_size", "intermediate_size"), row)) for row in rows]
+@dataclass(frozen=True)
+class _CatalogMember:
+    """已核对文件关系的产物行及其选择依据。"""
+
+    row: dict[str, Any]
+    entry: CatalogEntry
+
+
+def _catalog_members(connection, source_action_id: int) -> list[_CatalogMember]:
+    """分批枚举完整来源，每组原片及派生关系只加载一次。"""
+    members: dict[int, _CatalogMember] = {}
+    with closing(connection.execute(
+        "SELECT id FROM outputs WHERE source_action_id = ? ORDER BY id", (source_action_id,),
+    )) as cursor:
+        while batch := cursor.fetchmany(128):
+            for (output_id,) in batch:
+                if output_id in members:
+                    continue
+                for member in _load_family_members(connection, output_id):
+                    if member.row["source_action_id"] != source_action_id:
+                        raise ConsistencyError("产物关联集合不属于指定来源")
+                    members[member.entry.output_id] = member
+    return sorted(members.values(), key=lambda member: member.entry.output_id)
 
 
 def load_selection_facts(
@@ -778,27 +778,9 @@ def load_selection_facts(
         source["status"] in _ACTION_TERMINAL
         and _processing_completed(connection, source_action_id)
     )
-    entries = tuple(
-        CatalogEntry(
-            output_id=int(row["id"]),
-            kind=_KIND_BY_CODE[int(row["kind"])],
-            availability=int(row["availability"]),
-            original_output_id=(
-                int(row["original_output_id"])
-                if row["original_output_id"] is not None
-                else None
-            ),
-            size_bytes=(
-                row["device_size"]
-                if row["device_size"] is not None
-                else row["intermediate_size"]
-            ),
-        )
-        for row in _catalog_rows(connection, source_action_id)
-    )
-    known = frozenset(
-        int(row[0]) for row in connection.execute("SELECT id FROM outputs")
-    )
+    entries = tuple(member.entry for member in _catalog_members(connection, source_action_id))
+    with closing(connection.execute("SELECT id FROM outputs")) as cursor:
+        known = frozenset(int(row[0]) for row in cursor)
     return SelectionFacts(
         source_action_id=source_action_id,
         source_completed=completed,
@@ -815,6 +797,14 @@ def load_output_family(connection, output_id: int) -> OriginalOutputs:
     第三个派生 ID 只用于识别超出一份预览及一份修复成品的矛盾，
     不读取同一来源的其他原片或全库目录。调用方使用同一事务快照。
     """
+    members = _load_family_members(connection, output_id)
+    by_kind = {member.entry.kind: member.entry for member in members}
+    return OriginalOutputs(members[0].row["source_action_id"], by_kind[OutputKind.ORIGINAL],
+                           by_kind.get(OutputKind.PREVIEW), by_kind.get(OutputKind.REPAIRED))
+
+
+def _load_family_members(connection, output_id: int) -> tuple[_CatalogMember, ...]:
+    """逐产物与完整来源读取共用的固定关系边界。"""
     ObjectId(output_id)
 
     def required(table, identity):
@@ -886,30 +876,34 @@ def load_output_family(connection, output_id: int) -> OriginalOutputs:
         size = file["size_bytes"]
         if size is not None and (not is_json_integer(size) or size < 0):
             raise ConsistencyError("产物完整长度无法解释")
-        by_kind[kind] = CatalogEntry(
-            output_id=identity, kind=kind, availability=entry["availability"], size_bytes=size,
-            original_output_id=None if identity == original_id else original_id,
+        by_kind[kind] = _CatalogMember(
+            row=entry,
+            entry=CatalogEntry(
+                output_id=identity, kind=kind, availability=entry["availability"], size_bytes=size,
+                original_output_id=None if identity == original_id else original_id,
+            ),
         )
     if output_id not in (original_id, *related_ids):
         raise ConsistencyError("目标产物未保留在原片派生关系中")
-    return OriginalOutputs(original["source_action_id"], by_kind[OutputKind.ORIGINAL],
-                           by_kind.get(OutputKind.PREVIEW), by_kind.get(OutputKind.REPAIRED))
+    return tuple(by_kind.values())
 
 
 def _saved_items(connection, selection_id: int) -> list[SelectedItem]:
-    rows = connection.execute(
+    with closing(connection.execute(
         "SELECT requested_output_id, output_id, basis, original_output_id,"
         " preview_output_id, preview_size, repaired_size, status, error_code,"
         " error_details_json FROM obtain_items WHERE selection_id = ? ORDER BY id",
         (selection_id,),
-    ).fetchall()
+    )) as cursor:
+        rows = cursor.fetchall()
     items: list[SelectedItem] = []
     for row in rows:
         output_id = row[1]
         if output_id is not None:
-            exists = connection.execute(
+            with closing(connection.execute(
                 "SELECT 1 FROM outputs WHERE id = ?", (output_id,)
-            ).fetchone()
+            )) as cursor:
+                exists = cursor.fetchone()
             if exists is None:
                 raise ConsistencyError(
                     f"已保存取回项引用的产物记录缺失: 选择 {selection_id}"
