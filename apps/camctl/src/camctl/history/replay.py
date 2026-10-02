@@ -12,6 +12,7 @@ from typing import Any, Iterable, Mapping
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal
+from camctl.history.events import RowChange
 from camctl.history.validators import ValidatedEvent
 
 
@@ -64,6 +65,25 @@ def _require_values(key, current: Mapping[str, Any], expected: Mapping[str, Any]
             raise ReplayError(f"行 {key} 缺少事件要求核对的列 {column}")
         if not json_equal(current[column], value):
             raise ReplayError(f"行 {key} 的 {column} 当前值与事件要求值不一致")
+
+
+def reverse_row_values(
+    values: Mapping[str, Any], change: RowChange, columns: frozenset[str],
+) -> dict[str, Any]:
+    """逆向恢复一行的指定业务列；不声明完整行或完整对象已经恢复。
+
+    调用方核实行身份、归属、事件区间及目录连续性。创建事件意味着
+    该行在目标边界尚不存在，不能返回补造的旧列。
+    """
+    key = (change.table, change.row_id)
+    if not change.before.exists or not change.after.exists:
+        raise ReplayError(f"行 {key} 在恢复边界前后不能证明存在")
+    if not columns or not columns <= values.keys():
+        raise ReplayError(f"行 {key} 缺少请求恢复的可靠列值")
+    _require_values(key, values, {name: value for name, value in change.after.values.items() if name in columns})
+    restored = {name: values[name] for name in columns}
+    restored.update({name: value for name, value in change.before.values.items() if name in columns})
+    return restored
 
 
 def apply_forward(image: EntityImage, event: ValidatedEvent) -> EntityImage:

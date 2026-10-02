@@ -10,10 +10,14 @@ operation_finish、retry）在本模块注册。
 
 from __future__ import annotations
 
+from contextlib import closing
+from dataclasses import asdict
 from typing import Any, Mapping
 
 from camctl.contracts.enums import decode_member, enum_for
-from camctl.contracts.values import OperationKey
+from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.json_values import json_equal
+from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.attempts import (
@@ -38,6 +42,7 @@ from camctl.operations.models import (
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
@@ -47,6 +52,7 @@ from camctl.persistence.transaction import (
     row_change as _row,
     row_facts,
     saved_transaction_events as _saved_transaction_events,
+    SavedEvent,
     update_change as _update,
 )
 
@@ -168,20 +174,22 @@ def _load_flow_context(
         state.setdefault("device_activities", {})[activity["id"]] = activity
     if kind is OperationKind.QUERY_ACTIVITY and query_purpose in _PURPOSE_FLOW_KIND:
         original_kind = _PURPOSE_FLOW_KIND[query_purpose]
-        found = connection.execute(
+        with closing(connection.execute(
             "SELECT id FROM operation_runs WHERE kind = ? AND action_id = ?"
             " AND activity_id = ?",
             (int(original_kind), action_id, target.activity_id),
-        ).fetchall()
+        )) as cursor:
+            found = cursor.fetchall()
         for (run_id,) in found:
             loaded = _load_row(connection, "operation_runs", int(run_id))
             if loaded is not None:
                 state.setdefault("operation_runs", {})[loaded["id"]] = loaded
         return
     if kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS):
-        exists = connection.execute(
+        with closing(connection.execute(
             "SELECT 1 FROM cleanup_items WHERE id = ?", (target.cleanup_item_id,)
-        ).fetchone()
+        )) as cursor:
+            exists = cursor.fetchone()
         if exists is None:
             raise TransactionError(f"清理项不存在: {target.cleanup_item_id}")
 
@@ -484,6 +492,39 @@ def _error_json(error) -> dict | None:
     return {"code": error.code, "stage": error.stage, "details": dict(error.details)}
 
 
+def _verify_result_ticket(finish: AttemptFinish, run: Mapping[str, Any], attempt: Mapping[str, Any]) -> None:
+    """核对原只读责任与当前票据，适用于首次结果、迟到结果和重送。"""
+    ticket = finish.ticket
+    try:
+        ObjectId(ticket.run_id)
+        ObjectId(ticket.attempt_id)
+    except ValueError as error:
+        raise TransactionError("结果票据的流程与尝试编号无效") from error
+    if (not json_equal(run["id"], ticket.run_id)
+            or not json_equal(attempt["run_id"], ticket.run_id)
+            or not json_equal(attempt["attempt_no"], ticket.attempt_id)
+            or run["responsibility_key"] != ticket.responsibility_key):
+        raise TransactionError("结果票据与原流程、尝试或责任不符")
+    if run["kind"] == int(_RUN_KIND.READ_FILE):
+        target = str(run["copy_id"])
+    elif run["kind"] in (int(_RUN_KIND.DELETE_FILE), int(_RUN_KIND.CHECK_FILE_EXISTS)):
+        target = str(run["cleanup_item_id"])
+    elif (run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
+          and run["query_purpose"] == int(_QUERY_PURPOSE.BEFORE_EXECUTION)):
+        target = None
+    else:
+        target = str(run["activity_id"])
+    if ticket.target_id != target:
+        raise TransactionError("结果票据的目标与原责任不符")
+    if not json_equal(asdict(finish.outcome.ticket), asdict(ticket)):
+        raise TransactionError("结果校验时的票据与本次结果票据不符")
+    if (finish.outcome.settlement_contract.operation != ticket.operation
+            or any(contract.operation != ticket.operation for contract in finish.outcome.observation_contracts)):
+        raise TransactionError("结果票据的操作类别与已校验结果不符")
+    if type(finish.retry_wait) is not bool:
+        raise TransactionError("重试等待输入必须是布尔值")
+
+
 class FinishAttemptCommand:
     """一次尝试结束结果的完整事务命令。"""
 
@@ -497,23 +538,25 @@ class FinishAttemptCommand:
         connection = scope.connection
         saved = _saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(scope, saved)
 
         finish = self._finish
         ticket = finish.ticket
-        found = connection.execute(
+        with closing(connection.execute(
             "SELECT id FROM operation_runs WHERE responsibility_key = ?",
             (ticket.responsibility_key,),
-        ).fetchone()
+        )) as cursor:
+            found = cursor.fetchone()
         if found is None or int(found[0]) != ticket.run_id:
             raise TransactionError(f"票据与流程不符: {ticket.responsibility_key}")
         run_facts = _load_row(connection, "operation_runs", ticket.run_id)
         assert run_facts is not None
         self._state["operation_runs"] = {ticket.run_id: run_facts}
-        attempt = connection.execute(
+        with closing(connection.execute(
             "SELECT id FROM operation_attempts WHERE run_id = ? AND attempt_no = ?",
             (ticket.run_id, ticket.attempt_id),
-        ).fetchone()
+        )) as cursor:
+            attempt = cursor.fetchone()
         if attempt is None:
             raise TransactionError(
                 f"尝试不存在: run {ticket.run_id} #{ticket.attempt_id}"
@@ -521,6 +564,7 @@ class FinishAttemptCommand:
         attempt_id = int(attempt[0])
         attempt_facts = _load_row(connection, "operation_attempts", attempt_id)
         assert attempt_facts is not None
+        _verify_result_ticket(finish, run_facts, attempt_facts)
         self._state["operation_attempts"] = {attempt_id: attempt_facts}
         _load_flow_context(
             connection,
@@ -652,27 +696,67 @@ class FinishAttemptCommand:
             ),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
-        results = [event for event in saved if event["type"] == _ATTEMPT_RESULT_EVENT]
-        if not results:
+    def _reuse(self, scope, saved: list[SavedEvent]) -> CommandPlan:
+        if (len(saved) not in (1, 2) or saved[0]["type"] != _ATTEMPT_RESULT_EVENT
+                or saved[0]["reason"] not in _RESULT_REASON.values()):
             raise TransactionError("操作身份已用于其他阶段，不能作为结果重送")
-        ticket = self._finish.ticket
-        attempt_values = None
-        for row in _event_rows(results[0], "operation_attempts"):
-            if row["after"]["exists"]:
-                attempt_values = row["after"]["values"]
-        if attempt_values is None:
+        rows = saved[0]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "operation_attempts"
+                or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]):
             raise TransactionError("已保存结果缺少尝试事实")
-        if int(attempt_values["run_id"]) != ticket.run_id or int(
-            attempt_values["attempt_no"]
-        ) != ticket.attempt_id:
-            raise TransactionError("已保存结果与本次输入的尝试不符")
-        run_status = None
-        for event in saved:
-            for row in _event_rows(event, "operation_runs"):
-                after = row["after"]["values"]
-                if "status" in after:
-                    run_status = RunStatus[_run_status_name(after["status"])]
+        finish = self._finish
+        connection = scope.connection
+        attempt = _load_row(connection, "operation_attempts", rows[0]["id"])
+        if attempt is None:
+            raise ConsistencyError("原结果引用的尝试记录不存在")
+        run = _load_row(connection, "operation_runs", attempt["run_id"])
+        if run is None:
+            raise ConsistencyError("原尝试所属的流程记录不存在")
+        _verify_result_ticket(finish, run, attempt)
+        if attempt["result_event_id"] != saved[0]["event_id"]:
+            raise ConsistencyError("已结束尝试的结果引用与原事务不符")
+        for name, value in rows[0]["after"]["values"].items():
+            if name not in attempt or not json_equal(attempt[name], value):
+                raise ConsistencyError("已结束尝试的事实与原结果事件不符")
+        outcome = finish.outcome.outcome
+        requested = {"status": int(_ATTEMPT_STATUS[outcome.status.name]),
+                     "effect_state": int(_EFFECT_STATE[outcome.effect.name]),
+                     "result_json": _result_json(finish.outcome), "error_json": _error_json(outcome.error)}
+        if (any(not json_equal(attempt[name], value) for name, value in requested.items())
+                or any(event["occurred_at"] != finish.occurred_at for event in saved)):
+            raise TransactionError("重送的结果或事实时刻与原事务不同")
+        waiting = len(saved) == 2 and (saved[1]["type"], saved[1]["reason"]) == (_RETRY_WAIT_EVENT, 1)
+        ending = len(saved) == 2 and (saved[1]["type"], saved[1]["reason"]) == (_OPERATION_CONFIGURED_EVENT, 3)
+        if (len(saved) == 2 and not waiting and not ending
+                or finish.retry_wait != waiting or (finish.run_finish is not None) != ending):
+            raise TransactionError("重送的流程处置与原结果事务不同")
+        run_columns = frozenset({"status", "retry_wait_required", "error_json"})
+        if len(saved) == 2:
+            run_rows = saved[1]["body"]["rows"]
+            if (len(run_rows) != 1 or run_rows[0]["table"] != "operation_runs"
+                    or run_rows[0]["id"] != run["id"] or not run_rows[0]["before"]["exists"]
+                    or not run_rows[0]["after"]["exists"]
+                    or not run_rows[0]["after"]["values"].keys() <= run_columns):
+                raise TransactionError("原流程处置的阶段、行身份或字段不符")
+        self._state["operation_runs"] = {run["id"]: run}
+        _load_flow_context(connection, OperationKind[_kind_name(run["kind"])], run["action_id"],
+            AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"]),
+            QueryPurpose[decode_member("operation_runs.query_purpose", run["query_purpose"]).name]
+            if run["query_purpose"] is not None else None, self._state)
+        transaction = saved[0]["transaction"]
+        original = read_row_values_at_boundary(connection, owner=_run_owner_ref(run, self._state),
+            table="operation_runs", row_id=run["id"], columns=run_columns,
+            current_values={name: run[name] for name in run_columns},
+            boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+        if len(saved) == 2:
+            for name, value in run_rows[0]["after"]["values"].items():
+                if not json_equal(original[name], value):
+                    raise ConsistencyError("原边界的流程事实与处置事件不符")
+        if finish.run_finish is not None:
+            if (original["status"] != int(_RUN_STATUS[finish.run_finish.status.name])
+                    or not json_equal(original["error_json"], _error_json(finish.run_finish.error))):
+                raise TransactionError("重送的流程结束状态或错误与原事务不同")
         return CommandPlan(
             events=(),
             owners=self._owners,
@@ -680,8 +764,8 @@ class FinishAttemptCommand:
             read_only=True,
             result=FinishAttemptResult(
                 disposition=FinishDisposition.SAVED,
-                attempt_status=_attempt_status_of(attempt_values["status"]),
-                run_status=run_status,
+                attempt_status=_attempt_status_of(attempt["status"]),
+                run_status=RunStatus[_run_status_name(original["status"])],
             ),
         )
 

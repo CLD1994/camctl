@@ -66,6 +66,12 @@ def test_missing_operation_key_is_absent(database):
     assert saved_transaction_events(connection, _KEY) is None
 
 
+def test_saved_events_keep_original_fact_time(database, registration):
+    connection, data = database
+    data["rows"][0] = (7, 3, 1, 1, 123456789, 1, 5, _BODY)
+    assert saved_transaction_events(connection, _KEY)[0]["occurred_at"] == 123456789
+
+
 @pytest.mark.parametrize("field,value", [
     ("range", None), ("range", (3, 8, 7)), ("range", (True, 7, 8)),
     ("previous", None), ("previous", (5,)), ("summary", (1, 7, 7)),

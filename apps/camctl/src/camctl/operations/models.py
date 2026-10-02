@@ -137,11 +137,12 @@ class CallOutcome:
 
 @dataclass(frozen=True)
 class ValidatedOutcome:
-    """通过证据登记与结果分区校验的结束结果。"""
+    """通过证据登记与结果分区校验，并绑定原票据的结束结果。"""
 
     outcome: CallOutcome
     settlement_contract: EvidenceContract
     observation_contracts: tuple[EvidenceContract, ...]
+    ticket: AttemptTicket
 
 
 @dataclass(frozen=True)

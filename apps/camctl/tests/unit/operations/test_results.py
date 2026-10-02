@@ -82,6 +82,14 @@ def _outcome(**overrides) -> CallOutcome:
     return CallOutcome(**values)
 
 
+def test_validated_outcome_preserves_complete_ticket_context():
+    validated = validate_outcome(_TICKET, _outcome(), REGISTRY)
+    assert validated.ticket == AttemptTicket(
+        attempt_id=3, operation="stop", target_id="7",
+        responsibility_key="stop/7", run_id=1,
+    )
+
+
 class TestRemoteExitPartition:
     def test_local_255_has_no_remote_result(self) -> None:
         outcome = _outcome(

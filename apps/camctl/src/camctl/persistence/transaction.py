@@ -687,6 +687,7 @@ class SavedEvent(TypedDict):
     """已存事件的身份、完整事务范围和精确正文，供原操作键核实使用。"""
 
     event_id: int
+    occurred_at: int
     transaction: TransactionRange
     type: int
     reason: int
@@ -723,7 +724,8 @@ def saved_transaction_events(
                     or event.event_id > transaction.last_event_id):
                 raise ConsistencyError(f"历史事务 {transaction.txn_id} 的事件身份、范围或顺序不一致")
             events.append(SavedEvent(
-                event_id=event.event_id, transaction=transaction, type=event.event_type,
+                event_id=event.event_id, occurred_at=event.occurred_at,
+                transaction=transaction, type=event.event_type,
                 reason=event.reason, body=_body_document(event),
             ))
             next_event_id += 1

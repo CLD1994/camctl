@@ -89,6 +89,8 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 
 **接口与依赖：** 提供 `validate_outcome(ticket: AttemptTicket, outcome: CallOutcome, evidence: EvidenceRegistry) -> ValidatedOutcome`。前置交付：K1/K2、D2/F1 的证据接口定义。
 
+`ValidatedOutcome` 保留校验时不可变的完整票据上下文。首次保存、迟到结果和原键重送均须核对该上下文与当前票据精确相符；无观察或无身份观察也不能省略此检查。同票据重新校验的等价结果允许使用，运行时上下文不另行持久化。具体门禁见[普通结果复用](2026-10-02-camctl-attempt-result-reuse.md)。
+
 - [x] 编写失败用例。建立 `test_local_255_has_no_remote_result`，只有本地 exit_code=255，`assert 'remote_exit_code' not in result.call_info`；有可信远端 255 才保存。缺 settlement、未知证据版本、观察与操作不匹配、空 observations 与 SQL NULL、成功与错误组合逐项验证。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/operations/test_results.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
 - [x] 实施本任务。按 format_version=1 及正式类型化对象验证全部字段和保证范围；保留真实成功观察与调用错误，原始输出不进入无限观察列表。

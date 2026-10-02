@@ -56,6 +56,7 @@ def validate_outcome(
         outcome=outcome,
         settlement_contract=settlement_contract,
         observation_contracts=observation_contracts,
+        ticket=ticket,
     )
 
 
