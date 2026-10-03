@@ -184,13 +184,15 @@ X6 的阶段验证：`outputs/copy.py` 提供 `decide_integrity`（五分区：M
 
 **接口与依赖：** 提供 `decide_handoff(facts: DeliveryFacts, files: DeliveryLocations) -> DeliveryDecision`、异步 `publish_delivery(identity: DeliveryIdentity, context: DeliveryContext) -> DeliveryResult`；位置观察分别分类 staging/ready/processing。前置交付：X6、F5、P3/P4。
 
-- [ ] 编写失败用例。建立 `test_missing_all_copies_is_final_unknown_failure`，无完成事实且可靠三处缺失，`assert error.code == 'delivery_handoff_unconfirmed'` 且重投次数 0；三处检查任一失败不能归此分支。完整 staging 继续原身份，ready/processing 可补本地事实，已保存完成不因文件删除撤销。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_delivery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。整次取回满足发布条件后，先提交原 delivery 发布意图，事务外移动/同步，最后按实际证据保存结果；主程序已经领取也可保存当前可靠完成。未知最终失败保持，其他项继续。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 本地交付不冒充远端传输或客户端收件。
+- [x] 编写失败用例。建立 `test_missing_all_copies_is_final_unknown_failure`，无完成事实且可靠三处缺失，`assert error.code == 'delivery_handoff_unconfirmed'` 且重投次数 0；三处检查任一失败不能归此分支。完整 staging 继续原身份，ready/processing 可补本地事实，已保存完成不因文件删除撤销。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_delivery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。（初始红：handoff 模块不存在。）
+- [x] 实施本任务。整次取回满足发布条件后，先提交原 delivery 发布意图，事务外移动/同步，最后按实际证据保存结果；主程序已经领取也可保存当前可靠完成。未知最终失败保持，其他项继续。
+- [x] 再运行上述命令，要求全部 PASS，并核对 本地交付不冒充远端传输或客户端收件。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_delivery.py -q`，真实目录、SQLite 及受协议约束的领取协作者，在意图、移动、同步和结果保存前后中断；真实 C 领取归 I5。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 普通交付是否误用报告补投、覆盖同名文件或删除 processing；记录门禁证据，建议以“feat: 实现普通交付与未知恢复”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 普通交付是否误用报告补投、覆盖同名文件或删除 processing；记录门禁证据，建议以“feat: 实现普通交付与未知恢复”形成独立提交。
+
+X7 的阶段验证：`outputs/handoff.py` 提供 `decide_handoff`（七分区：COMPLETED/DELIVERED_LOCALLY/PUBLISH/HOLD/UNCONFIRMED_FINAL/UNDECIDABLE/NOT_ACTIVE；ready/processing 副本必须按长度与摘要确认是同一完整副本，staging 副本按长度核对、观察携带摘要时一并核对；观察不可靠或多处并存归 UNDECIDABLE，不套用三处均无分支；终局未知失败构造公共登记的 `delivery_handoff_unconfirmed`，republishes 恒 0 不自动重投）与 `publish_delivery` 编排（加载交付事实→三位置观察→按分区执行：PUBLISH 先 `save_publication_intent` 再经 F5 `publish_file` 原子移动并同步目录，同步确认（含平台不支持）才 `save_publication`；同步失败保留已移动事实不保存完成；NOT_MOVED 后重新观察确认交付或保存终局失败；移动结果未知只保留诊断）。仓储新增 `save_publication_intent`（DELIVERY_CHANGED.INTENT reason 3：PREPARED→PUBLISHING 并把意图登记为本事件，取消或不在执行只读跳过，已有意图幂等 ALREADY）、`save_publication`（PUBLISH reason 4：PUBLISHING→PUBLISHED 并登记完成事件；确认已发生的外部交接结果不受发起责任取消影响；PREPARED 且副本已在交接位置时同一事务补存 INTENT 与 PUBLISH）、`save_unconfirmed_failure`（FAIL reason 5：保存公共错误对象，已 PUBLISHED 拒绝改判）与只读 `load_delivery_state`。守卫扩展 INTENT/PUBLISH（事件行必须自引用本事件并对应唯一已校验拷贝）与 FAIL（错误对象按公共登记校验且关联本次交付）。单元 33 项；集成 26 项覆盖正常发布全链、条件未满足保持、取消跳过意图、意图提交未知不移动并恢复、目录同步失败保留移动事实后按 ready 观察补存、主程序提前领取到 processing、NOT_MOVED 重新观察确认、ready 同名文件不覆盖且不投放 staging 副本、PUBLISHING 恢复继续原身份不分配新交付、副本已交接后取消仍保存事实、PREPARED 补意图组合、三处均无保存终局失败且终态不复活、观察失败不误判缺失、已保存完成不因文件删除撤销、未准备完成拒绝意图、已发布拒绝改判、四组原键恢复与输入不符拒绝、守卫接受真实/补意图事件并拒绝自引错误、未登记错误码及未校验拷贝的发布。真实 C 领取模块组合归 I5。
 
 ### X8 完整源清理与独立预算
 

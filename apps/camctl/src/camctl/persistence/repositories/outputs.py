@@ -33,6 +33,12 @@ from camctl.outputs.copy import (
     SourceChecksumSupport, TargetResetDecision, TargetResetOutcome, TargetResetRequest,
     VerificationDisposition, VerificationResult, VerificationSave,
 )
+from camctl.outputs.handoff import (
+    DeliveryFacts, DeliveryFailure, DeliveryStateFacts, FailureSaveDisposition,
+    FailureSaveOutcome, IntentDisposition, IntentSaveOutcome, PublicationDisposition,
+    PublicationIntentRequest, PublicationSaveOutcome, PublicationSaveRequest,
+    UnconfirmedFailureSave,
+)
 from camctl.outputs.definitions import read_selection_request
 from camctl.outputs.sources import (
     ActionFacts,
@@ -63,7 +69,8 @@ from camctl.persistence.transaction import (
     update_change as _update,
 )
 from camctl.contracts.workflow_errors import (
-    action_error_id, item_error_id, registered_error_spec, validate_error_details,
+    action_error_id, item_error_id, registered_error, registered_error_spec,
+    validate_error_details,
 )
 from camctl.outputs.qualification import (
     FileCandidate,
@@ -146,6 +153,10 @@ _CONFIGURE_REASON = 7
 _RELEASE_REASON = 3
 #: DELIVERY_CHANGED.PREPARE：保存副本准备阶段。
 _PREPARE_REASON = 2
+#: DELIVERY_CHANGED.INTENT/PUBLISH/FAIL：发布意图、可靠交接完成与终局失败。
+_INTENT_REASON = 3
+_PUBLISH_REASON = 4
+_DELIVERY_FAIL_REASON = 5
 #: INTERMEDIATE_FILE_CHANGED.LIFECYCLE：保存完整字节及保留用途变化。
 _LIFECYCLE_REASON = 2
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
@@ -3289,6 +3300,320 @@ class _PreparedSaveCommand(_CopyCompletionTablesMixin):
         )
 
 
+class _DeliveryPublicationMixin:
+    """交付发布事务的共同表事实：交付行、唯一拷贝与发起动作。"""
+
+    _TABLES = ("deliveries", "file_copies", "actions")
+
+    def _reset_state(self) -> None:
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def _load_delivery(self, connection, delivery_id: int) -> tuple[dict, dict]:
+        delivery = row_facts(connection, "deliveries", delivery_id)
+        if delivery is None:
+            raise ConsistencyError(f"交付记录不存在: {delivery_id}")
+        self._state["deliveries"][delivery["id"]] = delivery
+        self._owners[("deliveries", delivery["id"])] = ("delivery", delivery["id"])
+        with closing(connection.execute(
+            "SELECT id FROM file_copies WHERE delivery_id=?", (delivery_id,),
+        )) as cursor:
+            copies = cursor.fetchall()
+        if len(copies) != 1:
+            raise ConsistencyError("发布事务必须对应唯一交付拷贝")
+        copy = row_facts(connection, "file_copies", copies[0][0])
+        if copy is None:
+            raise ConsistencyError(f"交付拷贝记录缺失: {copies[0][0]}")
+        self._state["file_copies"][copy["id"]] = copy
+        return delivery, copy
+
+    def _owner_action(self, connection, delivery) -> dict:
+        action = row_facts(connection, "actions", delivery["action_id"])
+        if action is None:
+            raise ConsistencyError(f"交付的发起动作缺失: {delivery['action_id']}")
+        self._state["actions"][action["id"]] = action
+        return action
+
+    def _decision(self, result, *, read_only: bool = False) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            result=result, read_only=read_only,
+        )
+
+    def _intent_row(self, delivery, event_id: int):
+        return _update(
+            "deliveries", delivery["id"],
+            {"status": int(_DELIVERY_STATUS.PREPARED),
+             "publication_intent_event_id": None},
+            {"status": int(_DELIVERY_STATUS.PUBLISHING),
+             "publication_intent_event_id": event_id},
+        )
+
+    def _publish_row(self, delivery, event_id: int):
+        return _update(
+            "deliveries", delivery["id"],
+            {"status": int(_DELIVERY_STATUS.PUBLISHING),
+             "published_event_id": None},
+            {"status": int(_DELIVERY_STATUS.PUBLISHED),
+             "published_event_id": event_id},
+        )
+
+    def _envelopes(self, scope, specs, occurred_at: int):
+        allocation = scope.allocate(len(specs))
+        return tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, reason, rows, occurred_at,
+            )
+            for index, (event_type, reason, rows) in enumerate(specs)
+        )
+
+
+class _PublicationIntentCommand(_DeliveryPublicationMixin):
+    """发布意图保存事务命令。
+
+    副本准备完成且发起责任仍在执行时，把交付推进到 PUBLISHING，
+    并把意图登记为本事务的意图事件；意图不等于发布成功。
+    """
+
+    def __init__(self, request: PublicationIntentRequest, key: OperationKey) -> None:
+        if not isinstance(request, PublicationIntentRequest):
+            raise TypeError("发布意图申请必须使用 PublicationIntentRequest")
+        self._request = request
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        delivery, _copy = self._load_delivery(connection, self._request.delivery_id)
+        if delivery["status"] == int(_DELIVERY_STATUS.PUBLISHING) \
+                and delivery["publication_intent_event_id"] is not None:
+            return self._decision(
+                IntentSaveOutcome(IntentDisposition.ALREADY), read_only=True)
+        if delivery["status"] != int(_DELIVERY_STATUS.PREPARED):
+            raise ConsistencyError(
+                "交付未处于准备完成状态，不能保存发布意图:"
+                f" {delivery['status']!r}")
+        action = self._owner_action(connection, delivery)
+        if action["cancel_requested"] == 1:
+            return self._decision(
+                IntentSaveOutcome(
+                    IntentDisposition.SKIPPED, reason="cancel_requested"),
+                read_only=True)
+        if not _read_owner_eligible(action):
+            return self._decision(
+                IntentSaveOutcome(
+                    IntentDisposition.SKIPPED, reason="owner_not_running"),
+                read_only=True)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _DELIVERY_CHANGED_EVENT, _INTENT_REASON,
+            (self._intent_row(delivery, allocation.first_event_id),),
+            self._request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=IntentSaveOutcome(IntentDisposition.SAVED),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次意图保存响应；已提交事实不重复保存。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DELIVERY_CHANGED_EVENT, _INTENT_REASON)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为发布意图重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("发布意图的事实时刻与原事务不同")
+        return self._decision(
+            IntentSaveOutcome(IntentDisposition.ALREADY), read_only=True)
+
+
+class _PublicationSaveCommand(_DeliveryPublicationMixin):
+    """本地交付完成事实保存事务命令。
+
+    只有可靠交接依据（原子移动及目录同步完成，或恢复观察到交接
+    位置存在同一完整副本）才允许保存；确认已发生的外部事实不受
+    发起责任取消影响。意图缺失时（恢复观察到副本已在交接位置）
+    在同一事务先补存意图再保存完成。
+    """
+
+    def __init__(self, request: PublicationSaveRequest, key: OperationKey) -> None:
+        if not isinstance(request, PublicationSaveRequest):
+            raise TypeError("完成事实申请必须使用 PublicationSaveRequest")
+        self._request = request
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        delivery, _copy = self._load_delivery(connection, self._request.delivery_id)
+        status = delivery["status"]
+        if status == int(_DELIVERY_STATUS.PUBLISHED):
+            if delivery["published_event_id"] is None:
+                raise ConsistencyError("已发布的交付缺少完成事件引用")
+            return self._decision(
+                PublicationSaveOutcome(PublicationDisposition.ALREADY),
+                read_only=True)
+        if status == int(_DELIVERY_STATUS.PUBLISHING):
+            specs = [(_DELIVERY_CHANGED_EVENT, _PUBLISH_REASON)]
+        elif status == int(_DELIVERY_STATUS.PREPARED):
+            specs = [
+                (_DELIVERY_CHANGED_EVENT, _INTENT_REASON),
+                (_DELIVERY_CHANGED_EVENT, _PUBLISH_REASON),
+            ]
+        else:
+            raise ConsistencyError(
+                f"交付状态不能保存本地完成事实: {status!r}")
+        allocation = scope.allocate(len(specs))
+        first = allocation.first_event_id
+        rows_by_reason = {
+            _INTENT_REASON: (self._intent_row(delivery, first),),
+            _PUBLISH_REASON: (self._publish_row(delivery, first + len(specs) - 1),),
+        }
+        events = tuple(
+            _envelope(
+                first + index, allocation.txn_id,
+                event_type, reason, rows_by_reason[reason],
+                self._request.occurred_at,
+            )
+            for index, (event_type, reason) in enumerate(specs)
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=PublicationSaveOutcome(PublicationDisposition.SAVED),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次完成事实响应；覆盖补意图与直接保存两组合。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        expected = [
+            (_DELIVERY_CHANGED_EVENT, _INTENT_REASON),
+            (_DELIVERY_CHANGED_EVENT, _PUBLISH_REASON),
+        ]
+        if types != expected and types != expected[1:]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为完成事实重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("完成事实的时刻与原事务不同")
+        return self._decision(
+            PublicationSaveOutcome(PublicationDisposition.ALREADY), read_only=True)
+
+
+class _UnconfirmedFailureCommand(_DeliveryPublicationMixin):
+    """交接未知终局失败保存事务命令。
+
+    三个交接位置均无副本且无完成事实时，把交付结束为 FAILED，
+    保存公共错误 delivery_handoff_unconfirmed；不自动重投，
+    不因后续重启重新激活。
+    """
+
+    def __init__(self, request: UnconfirmedFailureSave, key: OperationKey) -> None:
+        if not isinstance(request, UnconfirmedFailureSave):
+            raise TypeError("终局失败申请必须使用 UnconfirmedFailureSave")
+        self._request = request
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        delivery, _copy = self._load_delivery(connection, self._request.delivery_id)
+        status = delivery["status"]
+        if status == int(_DELIVERY_STATUS.PUBLISHED):
+            raise ConsistencyError("已保存的完成事实不能改判终局失败")
+        if status not in (
+            int(_DELIVERY_STATUS.PREPARED), int(_DELIVERY_STATUS.PUBLISHING),
+        ):
+            raise ConsistencyError(
+                f"交付状态不属于交接未知失败的保存范围: {status!r}")
+        row = _update(
+            "deliveries", delivery["id"],
+            {"status": status, "error_json": None},
+            {"status": int(_DELIVERY_STATUS.FAILED),
+             "error_json": self._request.failure.as_json()},
+        )
+        events = self._envelopes(
+            scope, [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON, (row,))],
+            self._request.occurred_at,
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=FailureSaveOutcome(FailureSaveDisposition.SAVED),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次终局失败响应。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为终局失败重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("终局失败的事实时刻与原事务不同")
+        return self._decision(
+            FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
+
+
+def _load_delivery_state_facts(
+    connection, delivery_id: int,
+) -> DeliveryStateFacts:
+    """只读加载一份交付的交接事实、定位与准备记录。"""
+    ObjectId(delivery_id)
+    delivery = row_facts(connection, "deliveries", delivery_id)
+    if delivery is None:
+        raise ConsistencyError(f"交付记录不存在: {delivery_id}")
+    with closing(connection.execute(
+        "SELECT id FROM file_copies WHERE delivery_id=?", (delivery_id,),
+    )) as cursor:
+        copies = cursor.fetchall()
+    if len(copies) != 1:
+        raise ConsistencyError("交付必须对应唯一拷贝")
+    copy = row_facts(connection, "file_copies", copies[0][0])
+    if copy is None:
+        raise ConsistencyError(f"交付拷贝记录缺失: {copies[0][0]}")
+    target = row_facts(connection, "intermediate_files", copy["target_file_id"])
+    if target is None:
+        raise ConsistencyError(f"拷贝的目标中间文件缺失: {copy['target_file_id']}")
+    purpose = _target_purpose_model(copy, target)
+    try:
+        validate_relative_file_path(
+            purpose, copy["target_file_id"], target["relative_path"])
+    except PathRuleError as error:
+        raise ConsistencyError(f"目标保存路径不可定位: {error}") from error
+    if not isinstance(delivery["file_name"], str) or not delivery["file_name"]:
+        raise ConsistencyError("交付缺少交接文件名")
+    try:
+        facts = DeliveryFacts(
+            delivery_id=delivery_id,
+            status=delivery["status"],
+            publication_intent_event_id=delivery["publication_intent_event_id"],
+            published_event_id=delivery["published_event_id"],
+            prepared_size=target["size_bytes"],
+            prepared_sha256=target["sha256"],
+            withdrawal_requested=(
+                delivery["withdrawal_state"]
+                != int(_WITHDRAWAL.NOT_REQUESTED)),
+        )
+    except ValueError as error:
+        raise ConsistencyError(f"交付交接事实不可解释: {error}") from error
+    return DeliveryStateFacts(
+        facts=facts,
+        file_name=delivery["file_name"],
+        target=CopyTargetRef(
+            file_id=target["id"], purpose=purpose,
+            relative_path=target["relative_path"],
+        ),
+        action_id=delivery["action_id"],
+    )
+
+
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
 
@@ -3353,6 +3678,35 @@ class OutputsRepository:
         self, request: PreparedRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[PreparedSaveOutcome]:
         receipt = commit_operation(_PreparedSaveCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def load_delivery_state(
+        self, delivery_id: int, owned: OwnedConnection
+    ) -> DeliveryStateFacts:
+        return _load_delivery_state_facts(owned.connection, delivery_id)
+
+    def save_publication_intent(
+        self, request: PublicationIntentRequest, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[IntentSaveOutcome]:
+        receipt = commit_operation(
+            _PublicationIntentCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_publication(
+        self, request: PublicationSaveRequest, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[PublicationSaveOutcome]:
+        receipt = commit_operation(
+            _PublicationSaveCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_unconfirmed_failure(
+        self, request: UnconfirmedFailureSave, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[FailureSaveOutcome]:
+        receipt = commit_operation(
+            _UnconfirmedFailureCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
 
@@ -3580,20 +3934,67 @@ def _delivery_guard(event, context) -> None:
             if row.table != "deliveries" or row.after.values.get("status") != \
                     int(_DELIVERY_STATUS.PREPARED):
                 continue
-            copies = [
-                facts for facts in context.state_rows.get("file_copies", {}).values()
-                if facts.get("delivery_id") == row.row_id
-            ]
-            if len(copies) != 1:
-                raise EventValidationError("准备完成必须对应唯一交付拷贝")
-            copy = copies[0]
-            if copy.get("verification_state") not in (
-                int(_VERIFICATION.MATCHED),
-                int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
-            ):
-                raise EventValidationError("副本未完成字节校验不能准备完成")
-            if copy.get("committed_bytes") != copy.get("source_size"):
-                raise EventValidationError("副本字节未完整保存不能准备完成")
+            _require_publishable_copy(context, row.row_id)
+    elif event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == _INTENT_REASON:
+        for row in event.rows:
+            if row.table != "deliveries":
+                continue
+            after = row.after.values
+            if after.get("status") != int(_DELIVERY_STATUS.PUBLISHING) \
+                    or after.get("publication_intent_event_id") != event.event_id:
+                raise EventValidationError(
+                    "发布意图必须推进到 PUBLISHING 并引用本意图事件")
+            _require_publishable_copy(context, row.row_id)
+    elif event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == _PUBLISH_REASON:
+        for row in event.rows:
+            if row.table != "deliveries":
+                continue
+            after = row.after.values
+            if after.get("status") != int(_DELIVERY_STATUS.PUBLISHED) \
+                    or after.get("published_event_id") != event.event_id:
+                raise EventValidationError(
+                    "交接完成必须推进到 PUBLISHED 并引用本完成事件")
+            _require_publishable_copy(context, row.row_id)
+    elif event.event_type == _DELIVERY_CHANGED_EVENT \
+            and event.reason == _DELIVERY_FAIL_REASON:
+        for row in event.rows:
+            if row.table != "deliveries":
+                continue
+            error = row.after.values.get("error_json")
+            if row.after.values.get("status") != int(_DELIVERY_STATUS.FAILED):
+                continue
+            if not isinstance(error, Mapping):
+                raise EventValidationError("交付终局失败必须保存结构化错误")
+            code, stage = error.get("code"), error.get("stage")
+            details = error.get("details")
+            try:
+                spec = registered_error(code)
+                if stage != spec["stage"]:
+                    raise ValueError(
+                        f"失败阶段与公共登记不符: {stage!r} != {spec['stage']!r}")
+                validate_error_details(code, details)
+            except (TypeError, ValueError) as failure:
+                raise EventValidationError(str(failure)) from failure
+            if details.get("delivery_id") != str(row.row_id):
+                raise EventValidationError("交付失败详情必须关联本次交付")
+
+
+def _require_publishable_copy(context, delivery_id: int) -> None:
+    """发布前提：唯一交付拷贝已完成校验且字节完整保存。"""
+    copies = [
+        facts for facts in context.state_rows.get("file_copies", {}).values()
+        if facts.get("delivery_id") == delivery_id
+    ]
+    if len(copies) != 1:
+        raise EventValidationError("准备或发布必须对应唯一交付拷贝")
+    copy = copies[0]
+    if copy.get("verification_state") not in (
+        int(_VERIFICATION.MATCHED),
+        int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
+    ):
+        raise EventValidationError("副本未完成字节校验不能准备或发布")
+    if copy.get("committed_bytes") != copy.get("source_size"):
+        raise EventValidationError("副本字节未完整保存不能准备或发布")
 
 
 def _copy_guard(event, context) -> None:

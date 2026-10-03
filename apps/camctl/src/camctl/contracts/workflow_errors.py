@@ -48,6 +48,14 @@ def action_error_id(name: str) -> int:
         raise ValueError(f"公共错误登记没有该动作错误: {name!r}") from error
 
 
+def registered_error(name: str) -> dict:
+    """按公共名称读取错误契约（阶段与详情结构）；未登记名称不可构造。"""
+    try:
+        return _registry()["codes"][name]
+    except KeyError as error:
+        raise ValueError(f"公共错误登记没有该错误: {name!r}") from error
+
+
 def action_error_spec(error_id: int) -> dict:
     """读取已登记动作错误的完整契约，未登记编号不可解释。"""
     for spec in _registry()["codes"].values():
