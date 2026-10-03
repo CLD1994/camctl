@@ -27,7 +27,8 @@ from camctl.operations.attempts import AttemptTarget, OperationKind, operation_r
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.copy import (
-    AttemptRecord, CopyStateFacts, CopyTargetRef, TargetResetDecision,
+    AttemptRecord, CopyStateFacts, CopyTargetRef, ReliableSegment,
+    SegmentSaveDisposition, SegmentSaveOutcome, TargetResetDecision,
     TargetResetOutcome, TargetResetRequest,
 )
 from camctl.outputs.definitions import read_selection_request
@@ -133,6 +134,8 @@ _RESOLVE_REASON = 4
 #: COPY_CHANGED.SLOT：保存设备读取机会变化。
 _SLOT_REASON = 6
 _RESET_REASON = 5
+#: COPY_CHANGED.SEGMENT：保存已同步的可靠段进度。
+_SEGMENT_REASON = 2
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
 _OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
 _OUTPUT_NOT_FOUND_CODE = item_error_id("obtain_items", "output_not_found")
@@ -2569,6 +2572,122 @@ class _CopyResetCommand:
         )
 
 
+class _SegmentSaveCommand:
+    """一段可靠进度的保存事务命令。
+
+    段字节已实际写入并同步成功后，在写事务内核对当前拷贝轮次、
+    旧进度与发起责任的执行资格，再保存进度事件；取消或动作不在
+    执行时不新增进度提交。不新建读取尝试，不改动预算与等待。
+    """
+
+    _TABLES = ("file_copies", "deliveries", "recording_processing", "actions")
+
+    def __init__(self, command: ReliableSegment, key: OperationKey) -> None:
+        if not isinstance(command, ReliableSegment):
+            raise TypeError("段保存申请必须使用 ReliableSegment")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        copy = row_facts(connection, "file_copies", command.copy_id)
+        if copy is None:
+            raise ConsistencyError(f"拷贝记录不存在: {command.copy_id}")
+        self._state["file_copies"][copy["id"]] = copy
+        _copy_owner_of(connection, copy, self._state, self._owners)
+        action = self._owner_action(connection, copy)
+        if copy["reset_state"] != int(_RESET_STATE.READY):
+            raise ConsistencyError("重置意图未完成前不能保存拷贝进度")
+        if copy["round"] != command.copy_round:
+            raise ConsistencyError(
+                f"段所属轮次 {command.copy_round} 与当前拷贝轮次 {copy['round']} 不一致"
+            )
+        if copy["committed_bytes"] != command.committed_before:
+            raise ConsistencyError(
+                f"当前进度 {copy['committed_bytes']} 与段申请的旧进度"
+                f" {command.committed_before} 不一致"
+            )
+        if command.segment_end > copy["source_size"]:
+            raise ConsistencyError("段范围越过固定源长度")
+        if action["cancel_requested"] == 1:
+            return self._skip("cancel_requested", copy)
+        if not _read_owner_eligible(action):
+            return self._skip("owner_not_running", copy)
+        row = _update(
+            "file_copies", copy["id"],
+            {"committed_bytes": copy["committed_bytes"]},
+            {"committed_bytes": command.segment_end},
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _COPY_CHANGED_EVENT, _SEGMENT_REASON, (row,),
+            command.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,),
+            owners=self._owners,
+            state_rows=self._state,
+            result=SegmentSaveOutcome(
+                disposition=SegmentSaveDisposition.SAVED,
+                committed_bytes=command.segment_end,
+            ),
+        )
+
+    def _owner_action(self, connection, copy) -> dict:
+        if copy["delivery_id"] is not None:
+            action_id = self._state["deliveries"][copy["delivery_id"]]["action_id"]
+        else:
+            action_id = self._state["recording_processing"][copy["processing_id"]]["action_id"]
+        facts = row_facts(connection, "actions", action_id)
+        if facts is None:
+            raise ConsistencyError(f"发起动作记录缺失: actions#{action_id}")
+        self._state["actions"][action_id] = facts
+        return facts
+
+    def _skip(self, reason: str, copy) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=SegmentSaveOutcome(
+                disposition=SegmentSaveDisposition.SKIPPED,
+                committed_bytes=copy["committed_bytes"], reason=reason,
+            ),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次段保存响应；不按当前状态重新判定资格。"""
+        if len(saved) != 1 or saved[0]["type"] != _COPY_CHANGED_EVENT \
+                or saved[0]["reason"] != _SEGMENT_REASON:
+            raise TransactionError("操作身份已用于其他阶段，不能作为段保存重送")
+        event = saved[0]
+        if event["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("段保存的事实时刻与原事务不同")
+        rows = event["body"]["rows"]
+        if len(rows) != 1 or rows[0]["table"] != "file_copies" \
+                or rows[0]["id"] != self._command.copy_id:
+            raise TransactionError("原段保存的目标拷贝与输入不符")
+        before = rows[0]["before"]["values"].get("committed_bytes")
+        after = rows[0]["after"]["values"].get("committed_bytes")
+        if before != self._command.committed_before or after != self._command.segment_end:
+            raise TransactionError("原段保存的进度范围与输入不符")
+        return CommandPlan(
+            events=(), owners={}, state_rows={}, read_only=True,
+            result=SegmentSaveOutcome(
+                disposition=SegmentSaveDisposition.SAVED,
+                committed_bytes=self._command.segment_end,
+            ),
+        )
+
+
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
 
@@ -2609,6 +2728,12 @@ class OutputsRepository:
         self, request: TargetResetRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[TargetResetDecision]:
         receipt = commit_operation(_CopyResetCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_segment(
+        self, command: ReliableSegment, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[SegmentSaveOutcome]:
+        receipt = commit_operation(_SegmentSaveCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
 
@@ -2828,7 +2953,7 @@ def _delivery_guard(event, context) -> None:
 
 
 def _copy_guard(event, context) -> None:
-    """拷贝建档与目标重置守卫。"""
+    """拷贝建档、进度段与目标重置守卫。"""
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RESET_REASON:
         for row in event.rows:
             if row.table != "file_copies":
@@ -2838,6 +2963,23 @@ def _copy_guard(event, context) -> None:
                 raise EventValidationError("目标重置缺少当前拷贝事实")
             if copy.get("committed_bytes") != 0:
                 raise EventValidationError("重置完成要求可靠进度已经归零")
+        return
+    if event.event_type == _COPY_CHANGED_EVENT and event.reason == _SEGMENT_REASON:
+        for row in event.rows:
+            if row.table != "file_copies":
+                continue
+            copy = context.state_rows.get("file_copies", {}).get(row.row_id)
+            if copy is None:
+                raise EventValidationError("进度段缺少当前拷贝事实")
+            before = row.before.values.get("committed_bytes")
+            after = row.after.values.get("committed_bytes")
+            if not isinstance(after, int) or isinstance(after, bool) \
+                    or not isinstance(before, int) or isinstance(before, bool):
+                raise EventValidationError("进度段必须携带整数进度范围")
+            if after <= before:
+                raise EventValidationError("进度段必须推进可靠进度")
+            if after > copy.get("source_size"):
+                raise EventValidationError("进度段不能越过固定源长度")
         return
     if event.event_type != _COPY_CHANGED_EVENT or event.reason != 1:
         return

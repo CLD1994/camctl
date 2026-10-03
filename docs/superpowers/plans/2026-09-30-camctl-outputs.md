@@ -152,13 +152,15 @@ X4 的阶段验证：`outputs/copy.py` 提供 `decide_resume`（七分区加目�
 
 **接口与依赖：** 提供异步 `copy_next_segment(identity: CopyIdentity, context: CopyContext) -> CopyStep`、仓储 `save_segment(command: ReliableSegment, key: OperationKey) -> DbOutcome[CopyProgress]`；ReliableSegment 含原轮次、旧 C、范围及同步证据。前置交付：X4、F2/F3、P3/P4。
 
-- [ ] 编写失败用例。建立 `test_cancel_before_progress_prevents_new_commit`，段成功返回但普通取回已取消，`assert new_progress_writes == 0`；进度事务已开始则仍跟踪实际提交。同步失败 `assert progress_after == progress_before`；提交未知不得排下一段。改段大小后不把 C 对齐新倍数。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_copy_segments.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。一文件一次一段，段大小从本次配置取得；实际写入及同步可靠、资格仍成立才保存进度，确认提交后推进下一段。每段不新建读取尝试，不重置无数据等待或预算。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 可靠进度没有空洞、重复或未同步尾部，取消停止新增普通操作。
+- [x] 编写失败用例。建立 `test_cancel_before_progress_prevents_new_commit`（集成名 `test_transfer_success_but_canceled_owner_skips_progress_commit`），段成功返回但普通取回已取消，`assert _segment_events(owned) == 0`；进度事务已开始则仍跟踪实际提交。同步失败 `assert progress_after == progress_before`；提交未知不得排下一段。改段大小后不把 C 对齐新倍数。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_copy_segments.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。（初始红：plan_segment、ReliableSegment、ReadResumeRequest 均不存在。）
+- [x] 实施本任务。一文件一次一段，段大小从本次配置取得；实际写入及同步可靠、资格仍成立才保存进度，确认提交后推进下一段。每段不新建读取尝试，不重置无数据等待或预算。
+- [x] 再运行上述命令，要求全部 PASS，并核对 可靠进度没有空洞、重复或未同步尾部，取消停止新增普通操作。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_copy_segments.py -q`，真实默认池、SQLite 与可控源流，在段内、同步和进度提交前后中断。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 段成功、文件长度及进度保存是否被错误视为同一事实；记录门禁证据，建议以“feat: 实现可靠拷贝段与取消收场”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 段成功、文件长度及进度保存是否被错误视为同一事实；记录门禁证据，建议以“feat: 实现可靠拷贝段与取消收场”形成独立提交。
+
+X5 的阶段验证：`outputs/copy.py` 提供 `plan_segment`（E = C + min(S, N - C)；N-C=0 不产生空段；C 越界按一致性错误拒绝）与 `copy_next_segment` 编排（加载固定事实→计划段→线程内 `transfer_segment` 传输并同步→`save_segment` 事务保存；传输、同步或保存失败保留 `CopySegmentError` 阶段诊断，提交未知停止推进不排下一段）；`ReliableSegment` 构造强制已同步推进范围。仓储 `save_segment` 在写事务内核对轮次、旧进度、固定源长度与发起责任（取消→`cancel_requested`，动作不在执行→`owner_not_running`，均只读跳过不产生事件），保存 `COPY_CHANGED.SEGMENT`（reason 2）事件并同步投影；原键恢复首次响应，旧进度或范围不符拒绝。`_copy_guard` 扩展 SEGMENT 分支（进度必须推进且不越过源长度）。`host_files/io.py` 新增 `PositionedWriter`（定位到段起点的顺序写入与同步）与 `LocalSourceReader`（主机源顺序读取，与设备会话共用段传输接口）。补齐 `ATTEMPT_RESULT.RESUME_READ`（reason 4）生产者：`OperationsRepository.resume_read` 把本次运行采用的预算与期限写入原在途读取尝试（配置未变只读跳过，尝试已结束报告 `not_running`），`read_resume` 守卫注册并核对事件只属于读取流程。单元 35 项；集成 39 项覆盖交付/录像内部输入共用同一入口、10 字节三段推进与字节一致、无剩余不产生空段、改段大小从已确认位置继续不对齐、在途尝试数量不变、取消与终态动作跳过进度提交且物理尾部保留、同步失败进度不变、源提前结束按读取失败保留进度、停止通知在小块之间生效、提交未知不推进、原键恢复与输入不符拒绝、守卫接受真实事件并拒绝空段或越界推进、主机源分段字节一致、恢复配置三分区与原键、非读取流程被守卫拒绝。Python 3.11 通过组件单元 2623 项、集成 2840 项另 7 项跳过及根跨组件 34 项另 342 subtests；文档链接 2904 通过。
 
 ### X6 摘要、有限重拷与准备完成
 

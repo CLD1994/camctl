@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from camctl.devices.read_session import ReadChunk, ReadEnd
 from camctl.host_files.models import BoundDirectories, FileRef
 from camctl.host_files.paths import resolve_file
 from camctl.host_files.segments import DEFAULT_CHUNK_SIZE_BYTES
@@ -23,6 +24,8 @@ __all__ = [
     "FileIoError",
     "FileMutationResult",
     "HashResult",
+    "LocalSourceReader",
+    "PositionedWriter",
     "SyncResult",
     "hash_target",
     "prepare_target",
@@ -111,6 +114,87 @@ def _close(fd: int) -> None:
 
 def _read(fd: int, size: int) -> bytes:
     return os.read(fd, size)
+
+
+class PositionedWriter:
+    """定位到段起点的目标顺序写入器；供段传输任务使用。
+
+    以读写方式打开已由准备阶段建立的文件并移动到指定偏移；写入
+    允许短写，由段传输任务循环推进。关闭释放句柄，不隐式同步。
+    """
+
+    def __init__(self, path: Path, offset: int) -> None:
+        if type(offset) is not int or offset < 0:
+            raise FileIoError(f"段起点必须是非负整数: {offset!r}")
+        self._fd = os.open(path, os.O_RDWR | _BINARY)
+        try:
+            os.lseek(self._fd, offset, os.SEEK_SET)
+        except OSError:
+            _close(self._fd)
+            raise
+
+    def write(self, data: bytes | memoryview) -> int:
+        return os.write(self._fd, data)
+
+    def sync(self) -> None:
+        _fsync(self._fd)
+
+    def close(self) -> None:
+        _close(self._fd)
+
+    def __enter__(self) -> "PositionedWriter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+
+class LocalSourceReader:
+    """主机源文件的顺序读取适配；与设备读取会话共用段传输接口。
+
+    普通文件读取立即返回：读到文件尾即明确 EOF，不存在无数据等
+    待语义。关闭前 poll_stopped 一律未停止；关闭后返回包含累计
+    读取的结束事实，关闭失败直接抛出。
+    """
+
+    def __init__(self, path: Path, offset: int) -> None:
+        if type(offset) is not int or offset < 0:
+            raise FileIoError(f"读取偏移必须是非负整数: {offset!r}")
+        self._fd = _open_for_read(path)
+        try:
+            os.lseek(self._fd, offset, os.SEEK_SET)
+        except OSError:
+            _close(self._fd)
+            raise
+        self._position = offset
+        self._bytes_read = 0
+        self._closed = False
+
+    def position(self) -> int:
+        return self._position
+
+    def read_chunk(self, limit: int) -> ReadChunk:
+        if type(limit) is not int or limit <= 0:
+            raise FileIoError(f"读取长度必须是正整数: {limit!r}")
+        if self._closed:
+            return ReadChunk(data=None, error="stopped")
+        data = _read(self._fd, limit)
+        if not data:
+            return ReadChunk(data=None, eof=True)
+        self._position += len(data)
+        self._bytes_read += len(data)
+        return ReadChunk(data=data)
+
+    def poll_stopped(self) -> ReadEnd | None:
+        if not self._closed:
+            return None
+        return ReadEnd(stopped=True, bytes_read=self._bytes_read, error=None)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        _close(self._fd)
 
 
 def _sync_directory(path: Path) -> tuple[DirectorySyncStage, str | None]:

@@ -1,28 +1,38 @@
-"""共用拷贝的续传位置决策、目标准备与读取尝试计划。
+"""共用拷贝的续传准备、分段推进与可靠进度申请。
 
 取回、异常原片检查和修复的输入拷贝共用本模块：固定源身份与
-长度后，按可靠进度和主机文件事实决定续传位置；设备读取开始
-前的意图与次数由操作仓储保存，本模块不重复预算判断。行为契
-约为[重启后选择续传位置](../../architecture/file-copy.md#重启后选择续传位置)。
+长度后，按可靠进度和主机文件事实决定续传位置，再按本次配置
+的段大小逐段传输并申请进度保存。设备读取开始前的意图与次数
+由操作仓储保存，本模块不重复预算判断。行为契约为[重启后选择
+续传位置](../../architecture/file-copy.md#重启后选择续传位置)与
+[进度保存的分段大小](../../architecture/file-copy.md#进度保存的分段大小)。
 """
 
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Protocol, Sequence
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
     ConsistencyError, MAX_OBJECT_ID, ObjectId, OperationKey, UtcMicros,
     new_operation_key,
 )
-from camctl.host_files.io import prepare_target, sync_target
+from camctl.devices.read_session import ReadChunk, ReadEnd
+from camctl.host_files.io import (
+    LocalSourceReader as LocalCopySource, PositionedWriter, prepare_target, sync_target,
+)
 from camctl.host_files.models import (
     BoundDirectories, FileObservation, FileObservationKind, FilePurpose, FileRef,
 )
-from camctl.host_files.paths import inspect_file
+from camctl.host_files.paths import inspect_file, resolve_file
+from camctl.host_files.segments import (
+    DEFAULT_CHUNK_SIZE_BYTES, SegmentFailure, SegmentResult, SegmentSpec,
+    transfer_segment,
+)
 from camctl.persistence.models import DbOutcomeKind
 
 if TYPE_CHECKING:
@@ -283,6 +293,97 @@ class CopyStep:
     reset: TargetResetOutcome | None = None
 
 
+class SegmentOutcome(Enum):
+    """段计划的分区：仍有内容拷贝，或已全部可靠保存。"""
+
+    COPY = "copy"
+    ALL_COMMITTED = "all_committed"
+
+
+@dataclass(frozen=True)
+class SegmentFacts:
+    """段计划所需的固定事实：源长度 N、可靠进度 C 与本次段大小 S。"""
+
+    source_size: int
+    committed_bytes: int
+    segment_size: int
+
+    def __post_init__(self) -> None:
+        for name, value in (("source_size", self.source_size),
+                            ("committed_bytes", self.committed_bytes)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} 必须是非负整数: {value!r}")
+        if isinstance(self.segment_size, bool) or not isinstance(self.segment_size, int) \
+                or self.segment_size <= 0:
+            raise ValueError(f"segment_size 必须是正整数: {self.segment_size!r}")
+
+
+@dataclass(frozen=True)
+class SegmentPlan:
+    """一段的计划范围 [start, end)；无剩余内容时不携带范围。
+
+    final 表示本段到达固定源长度，段提交后进入所属流程的完整性
+   确认，不再安排下一段。
+    """
+
+    outcome: SegmentOutcome
+    start: int | None = None
+    end: int | None = None
+    final: bool = False
+
+
+def plan_segment(facts: SegmentFacts) -> SegmentPlan:
+    """按 E = C + min(S, N - C) 计划下一段；已无内容不产生空段。
+
+    旧进度不是新段大小倍数时从原位置继续，不向上或向下对齐；
+    进度越界按一致性错误处理。
+    """
+    if not isinstance(facts, SegmentFacts):
+        raise TypeError(f"段计划必须使用 SegmentFacts: {facts!r}")
+    size, committed, segment = facts.source_size, facts.committed_bytes, facts.segment_size
+    if committed > size:
+        raise ConsistencyError(f"可靠进度 {committed} 超过固定源长度 {size}")
+    if committed == size:
+        return SegmentPlan(SegmentOutcome.ALL_COMMITTED)
+    end = committed + min(segment, size - committed)
+    return SegmentPlan(
+        SegmentOutcome.COPY, start=committed, end=end, final=end == size,
+    )
+
+
+@dataclass(frozen=True)
+class ReliableSegment:
+    """一段已写入并同步成功的目标范围；未同步字节不能构造保存申请。
+
+    committed_before 是保存前数据库中的可靠进度；保存事务核对
+    该旧值与当前拷贝一致后，才把进度推进到 segment_end。
+    """
+
+    copy_id: int
+    copy_round: int
+    committed_before: int
+    segment_end: int
+    synced: bool
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.copy_id)
+        for name, value in (("copy_round", self.copy_round),):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} 必须是正整数: {value!r}")
+        for name, value in (("committed_before", self.committed_before),
+                            ("segment_end", self.segment_end)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} 必须是非负整数: {value!r}")
+        if self.segment_end <= self.committed_before:
+            raise ValueError("段保存申请必须推进可靠进度")
+        if not isinstance(self.synced, bool) or not self.synced:
+            raise ValueError("段尾同步未确认的字节不能保存为可靠进度")
+        timestamp = UtcMicros(self.occurred_at)
+        if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+            raise ValueError(f"事实时刻超出 SQLite 整数范围: {self.occurred_at!r}")
+
+
 @dataclass(frozen=True)
 class CopyContext:
     """续传准备的协作者：仓储、连接、目录绑定与事实时刻。"""
@@ -292,6 +393,137 @@ class CopyContext:
     roots: BoundDirectories
     occurred_at: int
     reset_key: OperationKey | None = None
+
+
+class SegmentSaveDisposition(Enum):
+    """段保存事务的可靠结果分区。"""
+
+    SAVED = "saved"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class SegmentSaveOutcome:
+    """段保存事务的返回：新进度，或不保存的可靠原因。
+
+    SKIPPED 表示保存前核对到发起责任已取消或不在执行，未提交任
+    何进度事件；已开始的进度事务按数据库执行规则确认实际结果。
+    """
+
+    disposition: SegmentSaveDisposition
+    committed_bytes: int
+    reason: str | None = None
+
+
+class CopySegmentError(RuntimeError):
+    """一段拷贝失败；保留实际阶段，不猜测未确认尾部的效果。"""
+
+    def __init__(self, stage: str, detail: str) -> None:
+        super().__init__(f"{stage}: {detail}")
+        self.stage = stage
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class SegmentSource(Protocol):
+    """段传输读取端的端口：设备读取会话与主机源读取器共同满足。"""
+
+    def position(self) -> int: ...
+
+    def read_chunk(self, limit: int) -> ReadChunk: ...
+
+    def poll_stopped(self) -> ReadEnd | None: ...
+
+
+@dataclass(frozen=True)
+class SegmentContext:
+    """一段拷贝的协作者、本次段大小与停止通知。"""
+
+    repository: "OutputsRepository"
+    owned: "OwnedConnection"
+    roots: BoundDirectories
+    occurred_at: int
+    segment_size: int
+    session: SegmentSource
+    chunk_size: int = DEFAULT_CHUNK_SIZE_BYTES
+    stop: threading.Event | None = None
+    key: OperationKey | None = None
+
+
+@dataclass(frozen=True)
+class SegmentStep:
+    """一次分段推进的结果；无剩余内容时不携带保存与传输事实。"""
+
+    plan: SegmentPlan
+    saved: SegmentSaveOutcome | None = None
+    transfer: SegmentResult | None = None
+
+
+def _transfer_segment(
+    ref: FileRef, roots: BoundDirectories, plan: SegmentPlan, spec: SegmentSpec,
+    session: SegmentSource,
+) -> SegmentResult:
+    """在工作线程内定位目标并传输本段；句柄随段打开和关闭。"""
+    host = resolve_file(ref, roots)
+    with PositionedWriter(host.path, plan.start) as writer:
+        return transfer_segment(spec, session, writer)
+
+
+async def copy_next_segment(copy_id: int, context: SegmentContext) -> SegmentStep:
+    """推进一段已建档拷贝：传输、同步并保存可靠进度。
+
+    一文件一次一段；段大小取自本次配置。实际写入及同步可靠、发
+    起责任仍有执行资格才保存进度，保存确认提交后由调用方推进下
+    一段。传输或保存失败保留阶段诊断，不推进可靠进度；提交结果
+    未知停止推进，恢复先确认数据库实际提交的进度。
+    """
+    if isinstance(context.segment_size, bool) or not isinstance(context.segment_size, int) \
+            or context.segment_size <= 0:
+        raise ValueError(f"本次段大小必须是正整数: {context.segment_size!r}")
+    facts = context.repository.load_copy_state(copy_id, context.owned)
+    plan = plan_segment(SegmentFacts(
+        source_size=facts.source_size,
+        committed_bytes=facts.committed_bytes,
+        segment_size=context.segment_size,
+    ))
+    if plan.outcome is SegmentOutcome.ALL_COMMITTED:
+        return SegmentStep(plan=plan)
+    assert plan.start is not None and plan.end is not None
+    spec = SegmentSpec(
+        attempt=f"copy/{copy_id}", round_index=facts.round,
+        target_name=facts.target.relative_path,
+        range_start=plan.start, range_end=plan.end,
+        chunk_size=context.chunk_size,
+        stop=context.stop if context.stop is not None else threading.Event(),
+    )
+    ref = FileRef(
+        file_id=facts.target.file_id, purpose=facts.target.purpose,
+        relative_path=facts.target.relative_path, root=context.roots.staging,
+    )
+    result = await asyncio.to_thread(_transfer_segment, ref, context.roots, plan, spec,
+                                     context.session)
+    if result.error is SegmentFailure.SYNC_FAILED:
+        raise CopySegmentError("segment_sync_failed", str(result.failure))
+    if result.error is not None:
+        raise CopySegmentError("segment_transfer_failed", str(result.error))
+    if not result.synced:
+        raise CopySegmentError("segment_sync_failed", "段尾同步未确认")
+    key = context.key if context.key is not None else new_operation_key()
+    outcome = context.repository.save_segment(
+        ReliableSegment(
+            copy_id=copy_id, copy_round=facts.round,
+            committed_before=plan.start, segment_end=plan.end,
+            synced=True, occurred_at=context.occurred_at,
+        ),
+        key, context.owned,
+    )
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise CopySegmentError(
+            "segment_save_unknown" if outcome.kind is DbOutcomeKind.UNKNOWN
+            else "segment_save_failed",
+            str(outcome.error),
+        )
+    return SegmentStep(plan=plan, saved=outcome.value, transfer=result)
 
 
 def _observation_of(observation: FileObservation) -> TargetFileObservation:

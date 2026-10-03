@@ -23,6 +23,9 @@ from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.attempts import (
     AttemptFinish,
+    ReadResumeDecision,
+    ReadResumeDisposition,
+    ReadResumeRequest,
     AttemptIntent,
     AttemptTarget,
     BeginAttemptResult,
@@ -78,6 +81,9 @@ _RESULT_REASON = {
     AttemptStatus.FAILED: 2,
     AttemptStatus.UNKNOWN: 3,
 }
+
+#: ATTEMPT_RESULT.RESUME_READ：恢复同一未结束读取尝试的配置。
+_RESUME_READ_REASON = 4
 
 _RUN_UPDATE_COLUMNS = (
     "status",
@@ -966,6 +972,126 @@ class FinishAttemptCommand:
         )
 
 
+class _ReadResumeCommand:
+    """恢复同一未结束读取尝试配置的事务命令。
+
+    重启后沿原在途尝试继续读取时，把本次运行采用的预算与期限写
+    入原尝试行；不新增尝试或次数，不改动结果与效果状态。配置与
+    原保存值相同时不产生事件。
+    """
+
+    _CONFIG_COLUMNS = ("max_attempts_used", "timeout_s_json", "retry_interval_s_json")
+
+    def __init__(self, request: ReadResumeRequest, key: OperationKey) -> None:
+        self._request = request
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = _saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        ticket = self._request.ticket
+        run = self._load_run(connection, ticket)
+        attempt_id = self._load_attempt(connection, run, ticket)
+        attempt = row_facts(connection, "operation_attempts", attempt_id)
+        assert attempt is not None
+        self._state["operation_attempts"] = {attempt_id: attempt}
+        _verify_result_ticket_config(self._request, run, attempt)
+        owner = _run_owner_ref(run, self._state)
+        self._owners[("operation_runs", run["id"])] = owner
+        self._owners[("operation_attempts", attempt_id)] = owner
+        if attempt["status"] != int(_ATTEMPT_STATUS.RUNNING):
+            return self._decision(ReadResumeDisposition.NOT_RUNNING)
+        desired = {
+            "max_attempts_used": self._request.config.max_attempts,
+            "timeout_s_json": self._request.config.timeout_s,
+            "retry_interval_s_json": self._request.config.retry_interval_s,
+        }
+        changed = {
+            column: value for column, value in desired.items()
+            if not json_equal(attempt[column], value)
+        }
+        if not changed:
+            return self._decision(ReadResumeDisposition.UNCHANGED)
+        row = _update(
+            "operation_attempts", attempt_id,
+            {column: attempt[column] for column in changed},
+            changed,
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _ATTEMPT_RESULT_EVENT, _RESUME_READ_REASON, (row,),
+            self._request.occurred_at, evidence={"attempt_id": attempt_id},
+        )
+        return CommandPlan(
+            events=(event,),
+            owners=self._owners,
+            state_rows=self._state,
+            result=ReadResumeDecision(ReadResumeDisposition.APPLIED),
+        )
+
+    def _load_run(self, connection, ticket) -> dict:
+        run = _load_row(connection, "operation_runs", ticket.run_id)
+        if run is None:
+            raise TransactionError(f"恢复配置的流程记录不存在: {ticket.run_id}")
+        if run["responsibility_key"] != ticket.responsibility_key:
+            raise TransactionError("恢复配置的票据与原流程责任不符")
+        self._state["operation_runs"] = {run["id"]: run}
+        _load_flow_context(
+            connection, OperationKind[_kind_name(run["kind"])], run["action_id"],
+            AttemptTarget(
+                activity_id=run["activity_id"], copy_id=run["copy_id"],
+                cleanup_item_id=run["cleanup_item_id"],
+            ),
+            QueryPurpose[decode_member(
+                "operation_runs.query_purpose", run["query_purpose"]).name]
+            if run["query_purpose"] is not None else None,
+            self._state,
+        )
+        _verify_run_identity(run, self._state)
+        return run
+
+    def _load_attempt(self, connection, run, ticket) -> int:
+        with closing(connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id = ? AND attempt_no = ?",
+            (run["id"], ticket.attempt_id),
+        )) as cursor:
+            found = cursor.fetchone()
+        if found is None:
+            raise TransactionError(
+                f"恢复配置的尝试不存在: run {run['id']} #{ticket.attempt_id}"
+            )
+        return int(found[0])
+
+    def _decision(self, disposition: ReadResumeDisposition) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True, result=ReadResumeDecision(disposition),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次恢复配置响应；不按当前状态重新判定。"""
+        if len(saved) != 1 or saved[0]["type"] != _ATTEMPT_RESULT_EVENT \
+                or saved[0]["reason"] != _RESUME_READ_REASON:
+            raise TransactionError("操作身份已用于其他阶段，不能作为恢复配置重送")
+        event = saved[0]
+        if event["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("恢复配置的事实时刻与原事务不同")
+        rows = event["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "operation_attempts"
+                or rows[0]["after"]["values"].keys()
+                - set(self._CONFIG_COLUMNS)):
+            raise TransactionError("原恢复配置的目标尝试或字段与输入不符")
+        return CommandPlan(
+            events=(), owners={}, state_rows={}, read_only=True,
+            result=ReadResumeDecision(ReadResumeDisposition.APPLIED),
+        )
+
+
 class OperationRepository:
     """操作意图与结果事务的 SQLite 仓储。"""
 
@@ -979,6 +1105,12 @@ class OperationRepository:
         self, finish: AttemptFinish, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FinishAttemptResult]:
         receipt = commit_operation(FinishAttemptCommand(finish, key), key, owned)
+        return _outcome_of(receipt)
+
+    def resume_read(
+        self, request: ReadResumeRequest, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ReadResumeDecision]:
+        receipt = commit_operation(_ReadResumeCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
 
@@ -1172,6 +1304,35 @@ def _attempt_result_guard(event, context) -> None:
             _fail("调用信息必须是对象")
 
 
+def _verify_result_ticket_config(request: ReadResumeRequest, run, attempt) -> None:
+    """核对恢复配置申请与原流程、尝试的固定身份。"""
+    ticket = request.ticket
+    if (not json_equal(run["id"], ticket.run_id)
+            or not json_equal(attempt["run_id"], ticket.run_id)
+            or not json_equal(attempt["attempt_no"], ticket.attempt_id)
+            or run["responsibility_key"] != ticket.responsibility_key):
+        raise TransactionError("恢复配置票据与原流程、尝试或责任不符")
+    if run["kind"] != int(_RUN_KIND.READ_FILE):
+        raise TransactionError("恢复配置只适用于读取流程")
+    if ticket.target_id != str(run["copy_id"]):
+        raise TransactionError("恢复配置票据的目标与原责任不符")
+
+
+def _read_resume_guard(event, context) -> None:
+    """恢复配置事件守卫：只属于读取流程的在途尝试。"""
+    if event.event_type != _ATTEMPT_RESULT_EVENT or event.reason != _RESUME_READ_REASON:
+        return
+    for row in event.rows:
+        if row.table != "operation_attempts":
+            continue
+        attempt = context.state_rows.get("operation_attempts", {}).get(row.row_id)
+        if attempt is None:
+            _fail("恢复配置缺少当前尝试事实")
+        run = context.state_rows.get("operation_runs", {}).get(attempt["run_id"])
+        if run is None or run.get("kind") != int(_RUN_KIND.READ_FILE):
+            _fail("恢复配置只属于读取流程的尝试")
+
+
 def _operation_finish_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "operation_runs" or not row.before.exists:
@@ -1212,5 +1373,6 @@ def register_operation_guards() -> None:
     register_guard("query_configuration", _query_configuration_guard)
     register_guard("attempt_intent", _attempt_intent_guard)
     register_guard("attempt_result", _attempt_result_guard)
+    register_guard("read_resume", _read_resume_guard)
     register_guard("operation_finish", _operation_finish_guard)
     register_guard("retry", _retry_guard)

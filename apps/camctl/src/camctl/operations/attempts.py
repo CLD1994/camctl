@@ -416,3 +416,44 @@ def seconds_from_json(raw: object) -> Decimal | None:
         return Decimal(str(raw))
     except InvalidOperation as error:
         raise AttemptConfigError(f"保存的秒数不是数值: {raw!r}") from error
+
+
+class ReadResumeDisposition(Enum):
+    """恢复在途读取尝试配置的可靠结果分区。"""
+
+    APPLIED = "applied"
+    UNCHANGED = "unchanged"
+    NOT_RUNNING = "not_running"
+
+
+@dataclass(frozen=True)
+class ReadResumeDecision:
+    """恢复配置事务的返回：已保存本次配置、配置未变或尝试已结束。"""
+
+    disposition: ReadResumeDisposition
+
+
+@dataclass(frozen=True)
+class ReadResumeRequest:
+    """恢复同一未结束读取尝试配置的申请。
+
+    主机重启后沿原在途尝试继续读取时，本次运行的后续等待和调用
+    采用本次配置（[本地配置变化与未完成工作]
+    (../../architecture/configuration.md#本地配置变化与未完成工作)）；
+    本申请把该配置作为恢复事实写入原尝试行，不新增尝试或次数。
+    """
+
+    ticket: AttemptTicket
+    config: AttemptConfig
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.ticket, AttemptTicket):
+            raise TypeError(f"ticket 必须是 AttemptTicket: {self.ticket!r}")
+        if not isinstance(self.config, AttemptConfig):
+            raise TypeError(f"config 必须是 AttemptConfig: {self.config!r}")
+        if self.ticket.operation != "read":
+            raise AttemptConfigError(
+                f"只有读取尝试可以恢复配置: {self.ticket.operation!r}"
+            )
+        _utc_micros(self.occurred_at)
