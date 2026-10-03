@@ -33,6 +33,9 @@ def read_environment(tmp_path):
     _seed_device_file(connection, 501, 11)
     _seed_output(connection, 701, 11, 501)
     _seed_processing(connection, 801, 11, 501)
+    # 内部输入建档要求检查构成独立输入需求；未决决定按需求规则不授予。
+    connection.execute(
+        "UPDATE recording_processing SET check_decision=3, check_basis_json='{}' WHERE id=801")
     connection.execute(
         "INSERT INTO deliveries (id, action_id, output_id, file_name, display_name, status,"
         " publication_intent_event_id, published_event_id, withdrawal_state, withdrawal_error_json,"

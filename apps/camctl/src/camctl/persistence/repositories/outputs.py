@@ -111,6 +111,7 @@ _CAPTURE_TYPES = frozenset(
 )
 _SOURCE_RESOLUTION_FAILED_CODE = action_error_id("source_resolution_failed")
 _CHECK_STATE = enum_for("recording_processing.check_state")
+_CHECK_DECISION = enum_for("recording_processing.check_decision")
 _REPAIR_STATE = enum_for("recording_processing.repair_state")
 _DISCARD_STATE = enum_for("recording_processing.discard_state")
 
@@ -827,6 +828,41 @@ def _processing_requires_existing_input(processing) -> bool:
             or repair in (_REPAIR_STATE.RUNNING, _REPAIR_STATE.SUCCEEDED))
 
 
+def _internal_input_requirement(processing) -> str | None:
+    """三类准备记录均无时的当前内部输入需求判定。
+
+    返回 None 表示存在输入需求（独立检查或修复需求）；否则返回只
+    读不授予的原因。工具阶段已证明输入存在、或检查需求仍在而修
+    复已终局结束（2026-10-03 决策按不可解释状态处理）时抛一致性
+    错误。检查已失败或未确认时不保留待执行修复的输入需求。
+    """
+    try:
+        decision = _CHECK_DECISION(processing["check_decision"])
+        check = _CHECK_STATE(processing["check_state"])
+        repair = _REPAIR_STATE(processing["repair_state"])
+        discard = _DISCARD_STATE(processing["discard_state"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError("原录像的处理决定或阶段缺失或无法解释") from error
+    if _processing_requires_existing_input(processing):
+        raise ConsistencyError("原片工具处理已经开始，但原输入准备责任缺失")
+    if discard in (_DISCARD_STATE.PENDING, _DISCARD_STATE.RUNNING):
+        return "discard_active"
+    if decision is _CHECK_DECISION.REQUIRED and check is _CHECK_STATE.NOT_PERFORMED:
+        if repair in (_REPAIR_STATE.FAILED, _REPAIR_STATE.CANCELED):
+            raise ConsistencyError("检查需求仍在而修复已终局结束，处理阶段组合不可解释")
+        return None
+    if repair is _REPAIR_STATE.PENDING:
+        if check in (_CHECK_STATE.FAILED, _CHECK_STATE.UNCONFIRMED):
+            return "input_need_ended"
+        return None
+    if (check in (_CHECK_STATE.FAILED, _CHECK_STATE.UNCONFIRMED)
+            or repair in (_REPAIR_STATE.FAILED, _REPAIR_STATE.CANCELED)):
+        return "input_need_ended"
+    if decision is _CHECK_DECISION.UNDETERMINED or repair is _REPAIR_STATE.UNDETERMINED:
+        return "input_undecided"
+    return "input_not_needed"
+
+
 def _read_is_due(action, occurred_at: int) -> bool:
     """首次读取建档的时间条件；不代替会话墙钟可信性检查。"""
     if action is None or not is_json_integer(action.get("scheduled_at")):
@@ -1469,6 +1505,11 @@ class _GrantFileCommand:
                         reason="item_finished",
                     ),
                 )
+        else:
+            requirement = _internal_input_requirement(
+                self._state["recording_processing"][command.processing_id])
+            if requirement is not None:
+                return self._wait(requirement)
         if not _read_is_due(action, command.occurred_at):
             return self._wait("not_due")
         readiness = self._source_readiness(scope, output, source_file)
@@ -2825,11 +2866,12 @@ def _copy_guard(event, context) -> None:
         if values.get("processing_id") is not None:
             processing = context.state_rows.get("recording_processing", {}).get(values["processing_id"])
             try:
-                requires_existing = _processing_requires_existing_input(processing)
+                requirement = _internal_input_requirement(processing)
             except ConsistencyError as error:
                 raise EventValidationError(str(error)) from error
-            if requires_existing:
-                raise EventValidationError("原片工具处理已经开始，不能创建替代输入拷贝")
+            if requirement is not None:
+                raise EventValidationError(
+                    "当前处理不具备新的内部输入需求，不能创建输入拷贝")
             parent = processing
         else:
             parent = context.association_rows.get("deliveries", {}).get(values["delivery_id"])

@@ -577,6 +577,9 @@ def test_internal_processing_grant_skips_delivery(qualification_environment) -> 
     _seed_device_file(connection, 501, 11)
     _seed_output(connection, 701, 11, 501)
     _seed_processing(connection, 5, 11, 501)
+    # 检查构成独立输入需求；未决决定按当前需求规则只读不授予。
+    connection.execute(
+        "UPDATE recording_processing SET check_decision=3, check_basis_json='{}' WHERE id=5")
     connection.commit()
 
     repository = OutputsRepository()

@@ -10,7 +10,7 @@ import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind
-from camctl.outputs.qualification import QualificationOutcome
+from camctl.outputs.qualification import OperationConfig, QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -371,3 +371,27 @@ def test_rejection_key_rejects_changed_used_target_or_time(rejected, field, valu
     result = _reuse(owned, replace(command, **{field: value}), key)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(result.error, (ConsistencyError, TransactionError)), result.error
+
+
+@pytest.mark.parametrize("field,value", [
+    ("target_extension", "bin"),
+    ("delivery_extension", "avi"),
+    ("delivery_display_name", "改名后的名称"),
+])
+def test_rejection_key_ignores_unused_preparation_params(rejected, field, value):
+    """拒绝分支未采用的建档参数不参与原键核对（2026-10-03 决策）。"""
+    owned, command, key, first = rejected
+    result = _reuse(owned, replace(command, **{field: value}), key)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value == first
+
+
+def test_rejection_key_ignores_changed_read_config(rejected):
+    """读取配置属于拒绝分支未采用的参数；主机源候选不携带配置。"""
+    owned, command, key, first = rejected
+    if command.config is None:
+        pytest.skip("主机源候选不携带读取配置")
+    changed = replace(command, config=OperationConfig(9, Decimal("99"), Decimal("5")))
+    result = _reuse(owned, changed, key)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value == first
