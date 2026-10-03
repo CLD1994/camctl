@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import threading
 
 import pytest
@@ -157,3 +158,215 @@ async def test_cancelled_and_normal_tasks_settle_uniquely() -> None:
         assert result.value == f"{identity}-stopped"
     assert executor.unfinished_files() == ()
     assert executor.lease_of(FileTaskId("t1")) is None
+
+
+@pytest.mark.parametrize("body_fails", [False, True])
+@pytest.mark.parametrize("wrapper_fails", [False, True])
+async def test_completed_result_is_consumed_after_waiter_cancel(body_fails, wrapper_fails):
+    completed, deliver, wrapper_ended = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    supervisor = Supervisor()
+    owner = StopAndAwaitOwner()
+    marker = object()
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled = []
+    loop.set_exception_handler(lambda _, context: unhandled.append(context))
+
+    async def runner(fn):
+        result = await asyncio.to_thread(fn)
+        completed.set()
+        try:
+            await deliver.wait()
+            if wrapper_fails:
+                raise RuntimeError("wrapper failed after completion")
+            return result
+        finally:
+            wrapper_ended.set()
+
+    def body(stop):
+        if body_fails:
+            raise OSError("file operation failed")
+        return marker
+
+    executor = FileTaskExecutor(supervisor, thread_runner=runner)
+    waiting = asyncio.create_task(executor.run_file_task(_task("done", 9, body), owner))
+    try:
+        await asyncio.wait_for(completed.wait(), 5)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        assert [task.identity for task in supervisor.outstanding()] == ["done"]
+        assert executor.unfinished_files() == ()
+        with pytest.raises(FileTaskError):
+            await executor.run_file_task(_task("done", 9, lambda _: None), owner)
+        settled = await asyncio.wait_for(supervisor.drain_required(), 5)
+        assert [task.identity for task in settled.settled] == ["done"]
+        assert settled.failed == ()
+        assert len(owner.results) == 1
+        result = owner.results[0][1]
+        if body_fails:
+            assert result.value is None
+            assert "OSError" in result.error and "file operation failed" in result.error
+        else:
+            assert result.value is marker and result.error is None
+        deliver.set()
+        await asyncio.wait_for(wrapper_ended.wait(), 5)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        gc.collect()
+        assert unhandled == []
+    finally:
+        deliver.set()
+        await asyncio.wait_for(asyncio.gather(waiting, return_exceptions=True), 5)
+        await asyncio.wait_for(wrapper_ended.wait(), 5)
+        loop.set_exception_handler(previous_handler)
+
+
+async def test_wrapper_failure_during_execution_retains_lease_and_shared_result():
+    started, release = threading.Event(), threading.Event()
+    supervisor = Supervisor()
+    workers = []
+    failure = RuntimeError("runner observation failed")
+    marker = object()
+
+    async def runner(fn):
+        worker = asyncio.create_task(asyncio.to_thread(fn))
+        workers.append(worker)
+        assert await asyncio.to_thread(started.wait, 5)
+        raise failure
+
+    def body(stop):
+        started.set()
+        assert release.wait(5), "测试未释放文件操作"
+        return marker
+
+    class ObservingOwner(StopAndAwaitOwner):
+        def __init__(self):
+            super().__init__()
+            self.received = asyncio.Event()
+            self.handle = None
+
+        async def take_over(self, task):
+            self.handle = task.pending
+            self.received.set()
+            await super().take_over(task)
+
+    owner = ObservingOwner()
+    executor = FileTaskExecutor(supervisor, thread_runner=runner)
+    pending = []
+    try:
+        with pytest.raises(RuntimeError) as raised:
+            await executor.run_file_task(_task("running", 9, body), owner)
+        assert raised.value is failure
+        assert executor.unfinished_files() == (9,)
+        lease = executor.lease_of(FileTaskId("running"))
+        assert lease.acquired and not lease.released
+        with pytest.raises(FileTaskError):
+            await executor.run_file_task(_task("conflict", 9, lambda _: None), owner)
+        draining = asyncio.create_task(supervisor.drain_required())
+        pending.append(draining)
+        await asyncio.wait_for(owner.received.wait(), 5)
+        canceled = asyncio.create_task(owner.handle.wait())
+        waiting = asyncio.create_task(owner.handle.wait())
+        pending.extend([canceled, waiting])
+        await asyncio.sleep(0)
+        canceled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await canceled
+        assert not waiting.done()
+        assert not lease.released
+        release.set()
+        result = await asyncio.wait_for(waiting, 5)
+        assert result.value is marker
+        assert result is await owner.handle.wait()
+        drained = await asyncio.wait_for(draining, 5)
+        assert drained.failed == ()
+        assert len(owner.results) == 1 and owner.results[0][1] is result
+        assert lease.released is True
+        assert executor.unfinished_files() == ()
+    finally:
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*workers, *pending, return_exceptions=True), 5)
+
+
+@pytest.mark.parametrize("waiter_canceled", [False, True])
+async def test_body_cancellation_always_completes_supervised_result(waiter_canceled):
+    started, release = threading.Event(), threading.Event()
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
+    owner = StopAndAwaitOwner()
+
+    def body(stop):
+        started.set()
+        assert release.wait(5), "测试未释放文件操作"
+        raise asyncio.CancelledError("file operation canceled")
+
+    waiting = asyncio.create_task(executor.run_file_task(_task("body-cancel", 9, body), owner))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        lease = executor.lease_of(FileTaskId("body-cancel"))
+        if waiter_canceled:
+            waiting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiting
+            assert not lease.released
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        drained = await asyncio.wait_for(supervisor.drain_required(), 5)
+        assert drained.failed == ()
+        assert [entry.identity for entry in drained.settled] == ["body-cancel"]
+        assert len(owner.results) == 1
+        result = owner.results[0][1]
+        assert result.ran is True and "CancelledError" in result.error
+        assert lease.released is True
+        assert executor.unfinished_files() == ()
+        assert (await executor.run_file_task(_task("following", 9, lambda _: None), owner)).error is None
+    finally:
+        release.set()
+        await asyncio.wait_for(asyncio.gather(waiting, return_exceptions=True), 5)
+        await asyncio.wait_for(supervisor.drain_required(), 5)
+
+
+async def test_result_delivery_allows_identity_reuse_but_old_handle_cannot_release_new_identity():
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
+    handles = []
+
+    class Owner(StopAndAwaitOwner):
+        async def take_over(self, task):
+            handles.append(task.pending)
+            await super().take_over(task)
+
+    owner = Owner()
+
+    def canceled_body(stop):
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await executor.run_file_task(_task("reused", 9, canceled_body), owner)
+    with pytest.raises(FileTaskError):
+        await executor.run_file_task(_task("reused", 9, lambda _: None), owner)
+    assert (await executor.run_file_task(_task("different", 9, lambda _: "next"), owner)).value == "next"
+    await asyncio.wait_for(supervisor.drain_required(), 5)
+    old_handle = handles[0]
+    started, release = threading.Event(), threading.Event()
+
+    def following_body(stop):
+        started.set()
+        assert release.wait(5), "测试未释放后续操作"
+        return "following"
+
+    following = asyncio.create_task(executor.run_file_task(_task("reused", 9, following_body), owner))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        assert (await old_handle.wait()).error is not None
+        # 使用另一文件，防止文件互斥掩盖任务身份被错误释放。
+        with pytest.raises(FileTaskError):
+            await executor.run_file_task(_task("reused", 10, lambda _: None), owner)
+        assert executor.unfinished_files() == (9,)
+        release.set()
+        assert (await asyncio.wait_for(following, 5)).value == "following"
+    finally:
+        release.set()
+        await asyncio.wait_for(asyncio.gather(following, return_exceptions=True), 5)
