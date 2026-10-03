@@ -25,6 +25,7 @@ from camctl.host_files.paths import (
 )
 from camctl.operations.attempts import AttemptTarget, OperationKind, operation_responsibility_key
 from camctl.outputs.catalog import OutputKind
+from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.definitions import read_selection_request
 from camctl.outputs.sources import (
     ActionFacts,
@@ -145,11 +146,6 @@ _VERIFICATION = enum_for("file_copies.verification_state")
 _ACTIVE_RESTRICTIONS = (
     int(_RESTRICTION.ACTIVE),
     int(_RESTRICTION.IRREVERSIBLE),
-)
-#: 读取流程仍占用设备机会或源保护的状态。
-_UNFINISHED_RUN_STATUS = (
-    int(_RUN_STATUS.PENDING),
-    int(_RUN_STATUS.ACTIVE),
 )
 
 
@@ -1041,6 +1037,97 @@ class _CurrentCatalogReads:
         return tuple(sorted(members.values(), key=lambda member: member.entry.output_id))
 
 
+
+class _ProductReads(_CatalogReads):
+    """逐产物候选的 SQL 读取；只为需要进一步判断的动作加载完整原请求。"""
+
+    def __init__(self, connection, state_rows):
+        super().__init__(connection)
+        self.state_rows = state_rows
+        for table, rows in state_rows.items():
+            for identity in rows:
+                self._full_rows.add((table, identity))
+                self._covered(table, "id", identity)
+
+    def optional(self, table, identity):
+        ObjectId(identity)
+        if (table, identity) not in self._full_rows:
+            row = row_facts(self.connection, table, identity)
+            if row is not None:
+                self._remember(table, identity, row, complete=True)
+            self._full_rows.add((table, identity))
+            self._covered(table, "id", identity)
+        return self.state_rows.get(table, {}).get(identity)
+
+    def members(self, table, column, value):
+        # 表和列仅由内部规则提供；完整范围不包含隐含的状态过滤。
+        if value not in self._ranges.get((table, column), ()):
+            with closing(self.connection.execute(
+                f"SELECT id FROM {table} WHERE {column}=? ORDER BY id", (value,),
+            )) as cursor:
+                while batch := cursor.fetchmany(128):
+                    for (identity,) in batch:
+                        self.required(table, identity)
+            self._covered(table, column, value)
+        return {identity: row for identity, row in self.state_rows.get(table, {}).items()
+                if row[column] == value}
+
+    def actions(self):
+        states = (int(_ACTION_STATUS.PENDING), int(_ACTION_STATUS.RUNNING))
+        columns = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
+        with closing(self.connection.execute(
+            f"SELECT {', '.join(columns)} FROM actions WHERE status IN (?, ?) ORDER BY id", states,
+        )) as cursor:
+            while batch := cursor.fetchmany(128):
+                for row in batch:
+                    self._remember("actions", row[0], dict(zip(columns, row)))
+        for state in states:
+            self._covered("actions", "status", state)
+        # 后续按需读取来源动作会扩展事实字典，枚举只保留本次动作身份。
+        return tuple((identity, row) for identity, row in self.state_rows["actions"].items()
+                     if row["status"] in states)
+
+    def family(self, output_id):
+        return _original_outputs(self, output_id)
+
+    def processing_completed(self, source_id):
+        return _processing_completed_facts(self.processing(source_id))
+
+
+class _CurrentProductReads(_CurrentCatalogReads):
+    """正式资格守卫复核同一范围的当前行，不读取事务未来提案。"""
+
+    def optional(self, table, identity):
+        rows = self.context.complete_rows(table, "id", identity)
+        return self.required(table, identity) if rows else None
+
+    def members(self, table, column, value):
+        rows = self.context.complete_rows(table, column, value)
+        return {identity: self.required(table, identity) for identity in rows}
+
+    def actions(self):
+        rows = {}
+        for state in (_ACTION_STATUS.PENDING, _ACTION_STATUS.RUNNING):
+            rows.update(self.members("actions", "status", int(state)))
+        return tuple(rows.items())
+
+    def family(self, output_id):
+        return _original_outputs(self, output_id)
+
+    def processing_completed(self, source_id):
+        rows = self.members("recording_processing", "action_id", source_id)
+        if len(rows) > 1:
+            raise ConsistencyError("录像处理责任重复")
+        return _processing_completed_facts(next(iter(rows.values()), None))
+
+
+def _original_outputs(reads, output_id):
+    members = _family_members(reads, output_id)
+    by_kind = {member.entry.kind: member.entry for member in members}
+    return OriginalOutputs(members[0].row["source_action_id"], by_kind[OutputKind.ORIGINAL],
+                           by_kind.get(OutputKind.PREVIEW), by_kind.get(OutputKind.REPAIRED))
+
+
 def _catalog_members(connection, source_action_id: int) -> tuple[_CatalogMember, ...]:
     return _CatalogReads(connection).catalog(source_action_id)
 
@@ -1090,10 +1177,7 @@ def load_output_family(connection, output_id: int) -> OriginalOutputs:
     第三个派生 ID 只用于识别超出一份预览及一份修复成品的矛盾，
     不读取同一来源的其他原片或全库目录。调用方使用同一事务快照。
     """
-    members = _load_family_members(connection, output_id)
-    by_kind = {member.entry.kind: member.entry for member in members}
-    return OriginalOutputs(members[0].row["source_action_id"], by_kind[OutputKind.ORIGINAL],
-                           by_kind.get(OutputKind.PREVIEW), by_kind.get(OutputKind.REPAIRED))
+    return _original_outputs(_CatalogReads(connection), output_id)
 
 
 def _load_family_members(connection, output_id: int) -> tuple[_CatalogMember, ...]:
@@ -1255,7 +1339,7 @@ class _GrantFileCommand:
     一个事务内核对全部可靠限制与业务顺序：授予时目标文件、交
     付（取回分支）、读取流程、拷贝及取回项更新按五（或内部处理
     三）个事件共同建档；清理限制与产物不可用保存逐项最终失败；
-    排序阻挡与设备占用作为可等待拒绝返回，不落库。
+    同产物较早候选作为可等待拒绝返回，不落库；相机机会另行取得。
     """
 
     #: 命令涉及并供守卫与报告关联读取的表。
@@ -1278,6 +1362,7 @@ class _GrantFileCommand:
         self._command = command
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._read_coverage = ReadCoverage()
         self._state: dict[str, dict[int, dict[str, Any]]] = {
             table: {} for table in self._TABLES
         }
@@ -1320,12 +1405,11 @@ class _GrantFileCommand:
         if readiness is not None:
             return readiness
 
-        if device_id is not None and self._device_busy(connection, device_id):
-            return self._wait("device_busy")
-        if device_id is not None and self._source_protected(connection, command.source_device_file_id):
-            return self._wait("source_protected")
-        if device_id is not None and not self._wins_business_order(connection, action, device_id):
-            return self._wait("business_order")
+        if output is not None:
+            reads = _ProductReads(connection, self._state)
+            if has_product_predecessor(reads, command.action_id, command.output_id, command.occurred_at):
+                return self._wait("business_order")
+            self._read_coverage = reads.read_coverage()
 
         return self._grant(scope, source_file)
 
@@ -1494,87 +1578,6 @@ class _GrantFileCommand:
             raise ConsistencyError("设备文件观察者与可靠来源的原设备绑定不一致")
         return observer["device_id"]
 
-    def _device_busy(self, connection, device_id: str) -> bool:
-        row = connection.execute(
-            "SELECT 1 FROM file_copies fc"
-            " JOIN operation_runs r ON r.copy_id = fc.id AND r.kind = 3"
-            " WHERE fc.slot_device_id = ? AND r.status IN (?, ?) LIMIT 1",
-            (device_id, *_UNFINISHED_RUN_STATUS),
-        ).fetchone()
-        return row is not None
-
-    def _source_protected(self, connection, device_file_id: int) -> bool:
-        row = connection.execute(
-            "SELECT 1 FROM file_copies fc"
-            " JOIN operation_runs r ON r.copy_id = fc.id AND r.kind = 3"
-            " WHERE fc.source_device_file_id = ? AND r.status IN (?, ?) LIMIT 1",
-            (device_file_id, *_UNFINISHED_RUN_STATUS),
-        ).fetchone()
-        return row is not None
-
-    def _wins_business_order(self, connection, action, device_id: str) -> bool:
-        """同设备存在排序更早的合格候选时不授予本候选。
-
-        排序键为计划时间、同时间取回优先、计划与输入顺序；协程
-        唤醒顺序不影响判定。
-        """
-        mine = self._order_key(
-            action["scheduled_at"], int(action["type"]),
-            action["plan_id"], action["input_index"],
-        )
-        obtain_rows = connection.execute(
-            "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index, a.type"
-            " FROM obtain_items oi"
-            " JOIN obtain_source_selections s ON s.id = oi.selection_id"
-            " JOIN action_dependencies ad ON ad.id = s.dependency_id"
-            " JOIN actions src ON src.id = ad.depends_on_action_id"
-            " JOIN device_files df ON df.source_action_id = src.id"
-            " JOIN outputs o ON o.device_file_id = df.id"
-            " JOIN actions a ON a.id = ad.action_id"
-            " WHERE oi.status = ? AND a.status = ? AND a.cancel_requested = 0"
-            " AND a.scheduled_at IS NOT NULL AND src.device_id = ?"
-            " AND df.presence_state = ? AND df.completion_state = ?"
-            " AND o.availability = ?",
-            (
-                int(_ITEM_STATUS.SELECTED),
-                int(_ACTION_STATUS.RUNNING),
-                device_id,
-                int(_PRESENCE.PRESENT),
-                int(_COMPLETION.COMPLETE),
-                int(_AVAILABILITY.AVAILABLE),
-            ),
-        ).fetchall()
-        processing_rows = connection.execute(
-            "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index, a.type"
-            " FROM recording_processing rp"
-            " JOIN actions a ON a.id = rp.action_id"
-            " JOIN device_files df ON df.id = rp.source_device_file_id"
-            " JOIN actions src ON src.id = df.source_action_id"
-            " WHERE rp.repair_state = ? AND a.status = ? AND a.cancel_requested = 0"
-            " AND a.scheduled_at IS NOT NULL AND src.device_id = ?"
-            " AND df.presence_state = ? AND df.completion_state = ?",
-            (
-                int(enum_for("recording_processing.repair_state").PENDING),
-                int(_ACTION_STATUS.RUNNING),
-                device_id,
-                int(_PRESENCE.PRESENT),
-                int(_COMPLETION.COMPLETE),
-            ),
-        ).fetchall()
-        for action_id, scheduled_at, plan_id, input_index, action_type in (
-            list(obtain_rows) + list(processing_rows)
-        ):
-            if int(action_id) == self._command.action_id:
-                continue
-            other = self._order_key(scheduled_at, int(action_type), plan_id, input_index)
-            if other < mine:
-                return False
-        return True
-
-    @staticmethod
-    def _order_key(scheduled_at, action_type: int, plan_id, input_index):
-        return (scheduled_at, 0 if action_type == _OBTAIN_TYPE else 1, plan_id, input_index)
-
     # ---- 授予建档 ----
 
     def _grant(self, scope, source_file) -> CommandPlan:
@@ -1591,6 +1594,7 @@ class _GrantFileCommand:
         self._owners.update(owners)
         return CommandPlan(
             events=self._envelopes(scope, specs), owners=self._owners, state_rows=self._state,
+            read_coverage=self._read_coverage,
             result=FileQualification(outcome=QualificationOutcome.GRANTED, copy_id=copy_id,
                 run_id=run_id, delivery_id=delivery_id, target_file_id=target_file_id, reason=None),
         )
@@ -2436,6 +2440,12 @@ def _read_permission_guard(event, context) -> None:
                 or delivery.get("output_id") != item.get("output_id")):
             raise EventValidationError("授予回填的交付必须属于原取回动作及同一产物")
         _guard_read_time(event, context, dependency.get("action_id"))
+        try:
+            if has_product_predecessor(_CurrentProductReads(context), dependency["action_id"],
+                                       item["output_id"], event.occurred_at):
+                raise EventValidationError("较早的合格产物候选尚未取得资格")
+        except ConsistencyError as error:
+            raise EventValidationError(str(error)) from error
     elif event.event_type == _READ_PERMISSION_EVENT and event.reason == _REJECT_REASON:
         updates = [
             row
