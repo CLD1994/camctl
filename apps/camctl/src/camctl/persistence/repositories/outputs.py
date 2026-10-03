@@ -64,6 +64,12 @@ from camctl.outputs.qualification import (
     OperationConfig,
     QualificationOutcome,
 )
+from camctl.outputs.slots import SlotDecision, SlotOutcome, SlotRequest
+from camctl.scheduling.order import (
+    ActionCandidate as _OrderAction,
+    FileCandidate as _OrderFile,
+    file_key as _file_order_key,
+)
 
 _SOURCE_RESOLVED_EVENT = 3
 _TARGETS_FIXED_EVENT = 4
@@ -119,6 +125,8 @@ _UNFINISHED_PROCESSING_DISCARD = frozenset(
 _GRANT_REASON = 1
 _REJECT_REASON = 2
 _RESOLVE_REASON = 4
+#: COPY_CHANGED.SLOT：保存设备读取机会变化。
+_SLOT_REASON = 6
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
 _OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
 _OUTPUT_NOT_FOUND_CODE = item_error_id("obtain_items", "output_not_found")
@@ -2047,6 +2055,283 @@ class _GrantFileCommand:
         return self._wait_final(after["error_code"])
 
 
+#: 机会变化的方向；授予与释放分别是独立事务入口。
+_SLOT_GRANT = "grant"
+_SLOT_RELEASE = "release"
+
+_ATTEMPT_STATUS = enum_for("operation_attempts.status")
+_RUN_TERMINAL = frozenset(
+    int(_RUN_STATUS[member]) for member in ("SUCCEEDED", "FAILED", "CANCELED", "UNCONFIRMED", "EXPIRED")
+)
+
+
+class _SlotChangeCommand:
+    """相机读取机会的授予或释放事务命令。
+
+    使用已建档拷贝和原责任，不创建替代记录。授予在写事务内核对
+    当前持有者、资格及候选排序后保存归属；释放核对原责任和实际
+    读取及重试结束，不能凭迟到通知清空新归属。
+    """
+
+    _TABLES = (
+        "file_copies", "device_files", "operation_runs", "operation_attempts",
+        "actions", "deliveries", "recording_processing",
+    )
+
+    def __init__(self, request: SlotRequest, direction: str, key: OperationKey) -> None:
+        if not isinstance(request, SlotRequest):
+            raise TypeError("机会变化申请必须使用 SlotRequest")
+        if direction not in (_SLOT_GRANT, _SLOT_RELEASE):
+            raise ValueError(f"未知的机会变化方向: {direction!r}")
+        self._request = request
+        self._direction = direction
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._coverage = ReadCoverage()
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        copy = self._load_copy(connection)
+        source = self._load_source(connection, copy)
+        device_id = self._source_device(connection, source)
+        run = self._load_run(connection, copy["id"])
+        if self._direction == _SLOT_GRANT:
+            action = self._load_owner_action(connection, copy)
+            return self._grant(scope, copy, device_id, run, action)
+        return self._release(scope, copy, device_id, run)
+
+    # ---- 共同事实加载 ----
+
+    def _required(self, connection, table: str, row_id: int) -> dict:
+        facts = row_facts(connection, table, row_id)
+        if facts is None:
+            raise ConsistencyError(f"机会责任关联记录缺失: {table}#{row_id}")
+        self._state[table][row_id] = facts
+        return facts
+
+    def _load_copy(self, connection) -> dict:
+        copy = self._required(connection, "file_copies", self._request.copy_id)
+        if not is_json_integer(copy["id"]):
+            raise ConsistencyError("拷贝身份无效")
+        self._owners[("file_copies", copy["id"])] = self._copy_owner(connection, copy)
+        return copy
+
+    def _copy_owner(self, connection, copy) -> tuple[str, int]:
+        if copy["delivery_id"] is not None:
+            self._required(connection, "deliveries", copy["delivery_id"])
+            return ("delivery", copy["delivery_id"])
+        if copy["processing_id"] is not None:
+            processing = self._required(connection, "recording_processing", copy["processing_id"])
+            return ("action", processing["action_id"])
+        raise ConsistencyError("拷贝缺少交付或处理归属")
+
+    def _load_source(self, connection, copy) -> dict:
+        if copy["source_device_file_id"] is None:
+            raise ConsistencyError("主机源拷贝不申请相机读取机会")
+        return self._required(connection, "device_files", copy["source_device_file_id"])
+
+    def _source_device(self, connection, source) -> str:
+        observer = self._required(connection, "actions", source["observer_action_id"])
+        origin = self._required(connection, "actions", source["source_action_id"])
+        binding = (observer["device_id"], observer["driver_id"])
+        if (not all(isinstance(value, str) and value for value in binding)
+                or binding != (origin["device_id"], origin["driver_id"])):
+            raise ConsistencyError("读取源观察者与可靠来源的原设备绑定不一致")
+        return binding[0]
+
+    def _load_run(self, connection, copy_id: int) -> dict:
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+            (f"read/{copy_id}",),
+        )) as cursor:
+            identities = cursor.fetchall()
+        if len(identities) != 1:
+            raise ConsistencyError("拷贝的 READ_FILE 流程缺失或重复")
+        return self._required(connection, "operation_runs", identities[0][0])
+
+    def _load_owner_action(self, connection, copy) -> dict:
+        if copy["delivery_id"] is not None:
+            action_id = self._state["deliveries"][copy["delivery_id"]]["action_id"]
+        elif copy["processing_id"] is not None:
+            action_id = self._state["recording_processing"][copy["processing_id"]]["action_id"]
+        else:
+            raise ConsistencyError("拷贝缺少交付或处理归属")
+        return self._required(connection, "actions", action_id)
+
+    def _load_attempts(self, connection, run_id: int) -> None:
+        with closing(connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id = ?", (run_id,),
+        )) as cursor:
+            identities = [row[0] for row in cursor.fetchall()]
+        for identity in identities:
+            self._required(connection, "operation_attempts", identity)
+        self._coverage = ReadCoverage({("operation_attempts", "run_id"): frozenset({ObjectId(run_id)})})
+
+    # ---- 授予 ----
+
+    def _grant(self, scope, copy, device_id: str, run, action) -> CommandPlan:
+        slot = copy["slot_device_id"]
+        if slot == device_id:
+            return self._decision(SlotOutcome.HELD)
+        if slot is not None:
+            raise ConsistencyError("拷贝的读取机会不属于原来源设备")
+        if run["status"] in _RUN_TERMINAL or not _read_owner_eligible(action):
+            return self._decision(SlotOutcome.FINISHED)
+        if not _read_is_due(action, self._request.occurred_at):
+            return self._decision(SlotOutcome.WAIT, "not_due")
+        if run["retry_wait_required"] == 1:
+            return self._decision(SlotOutcome.WAIT, "retry_wait")
+        if self._device_holder(scope.connection, device_id) is not None:
+            return self._decision(SlotOutcome.WAIT, "device_busy")
+        eligible, reason = self._first_candidate(scope.connection, device_id)
+        if not eligible:
+            return self._decision(SlotOutcome.WAIT, reason)
+        return self._save(scope, copy, None, device_id, SlotOutcome.GRANTED)
+
+    def _device_holder(self, connection, device_id: str) -> int | None:
+        with closing(connection.execute(
+            "SELECT id FROM file_copies WHERE slot_device_id = ?", (device_id,),
+        )) as cursor:
+            rows = cursor.fetchall()
+        others = [row[0] for row in rows if row[0] != self._request.copy_id]
+        if len(others) > 1:
+            raise ConsistencyError("同一设备的读取机会存在多个持有者")
+        return others[0] if others else None
+
+    def _first_candidate(self, connection, device_id: str) -> tuple[bool, str]:
+        """本拷贝是否为该设备统一文件顺序中最早的合格候选。"""
+        occurred_at = self._request.occurred_at
+        keys: list[tuple] = []
+        mine: tuple | None = None
+        with closing(connection.execute(
+            "SELECT fc.id AS copy_id, fc.slot_device_id,"
+            " df.completion_state, df.observer_action_id,"
+            " r.id AS run_id, r.status AS run_status, r.retry_wait_required,"
+            " a.id AS action_id, a.scheduled_at, a.plan_id, a.input_index,"
+            " a.status AS action_status, a.cancel_requested"
+            " FROM file_copies fc"
+            " JOIN device_files df ON df.id = fc.source_device_file_id"
+            " JOIN actions ob ON ob.id = df.observer_action_id"
+            " LEFT JOIN deliveries d ON d.id = fc.delivery_id"
+            " LEFT JOIN recording_processing rp ON rp.id = fc.processing_id"
+            " LEFT JOIN actions a ON a.id = COALESCE(d.action_id, rp.action_id)"
+            " LEFT JOIN operation_runs r ON r.responsibility_key = 'read/' || fc.id"
+            " WHERE ob.device_id = ? AND fc.slot_device_id IS NULL",
+            (device_id,),
+        )) as cursor:
+            rows = cursor.fetchall()
+        for row in rows:
+            copy_id, _, completion, _, run_id, run_status, retry_wait, action_id, \
+                scheduled_at, plan_id, input_index, action_status, cancel_requested = row
+            if run_id is None or action_id is None:
+                raise ConsistencyError("同设备候选拷贝缺少读取流程或发起动作")
+            eligible = (
+                action_status == int(_ACTION_STATUS.RUNNING)
+                and cancel_requested == 0
+                and scheduled_at is not None and scheduled_at <= occurred_at
+                and run_status not in _RUN_TERMINAL
+                and retry_wait == 0
+                and completion == 3
+            )
+            if not eligible:
+                continue
+            key = _file_order_key(_OrderFile(
+                action=_OrderAction(action_id, scheduled_at, plan_id, input_index),
+                entry_index=copy_id,
+            ))
+            keys.append(key)
+            if copy_id == self._request.copy_id:
+                mine = key
+        if mine is None:
+            return False, "source_not_ready"
+        if any(key < mine for key in keys):
+            return False, "predecessor"
+        return True, ""
+
+    # ---- 释放 ----
+
+    def _release(self, scope, copy, device_id: str, run) -> CommandPlan:
+        slot = copy["slot_device_id"]
+        if slot is None:
+            return self._decision(SlotOutcome.ALREADY_RELEASED)
+        if slot != device_id:
+            raise ConsistencyError("拷贝的读取机会不属于原来源设备")
+        self._load_attempts(scope.connection, run["id"])
+        if any(attempt["status"] == int(_ATTEMPT_STATUS.RUNNING)
+               for attempt in self._state["operation_attempts"].values()):
+            return self._decision(SlotOutcome.WAIT, "read_active")
+        if run["retry_wait_required"] == 1:
+            return self._decision(SlotOutcome.WAIT, "retry_wait")
+        if run["status"] not in _RUN_TERMINAL and copy["committed_bytes"] < copy["source_size"]:
+            return self._decision(SlotOutcome.WAIT, "still_reading")
+        return self._save(scope, copy, device_id, None, SlotOutcome.RELEASED)
+
+    # ---- 事件与出口 ----
+
+    def _save(self, scope, copy, before_slot, after_slot, outcome) -> CommandPlan:
+        copy_id = copy["id"]
+        row = _update(
+            "file_copies", copy_id,
+            {"slot_device_id": before_slot},
+            {"slot_device_id": after_slot},
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _COPY_CHANGED_EVENT, _SLOT_REASON, (row,),
+            self._request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,),
+            owners=self._owners,
+            state_rows=self._state,
+            read_coverage=self._coverage,
+            result=SlotDecision(outcome=outcome),
+        )
+
+    def _decision(self, outcome: SlotOutcome, reason: str | None = None) -> CommandPlan:
+        return CommandPlan(
+            events=(),
+            owners=self._owners,
+            state_rows=self._state,
+            read_only=True,
+            read_coverage=self._coverage,
+            result=SlotDecision(outcome=outcome, reason=reason),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次机会变化响应；不重新判定当前资格或归属。"""
+        if len(saved) != 1 or saved[0]["type"] != _COPY_CHANGED_EVENT or saved[0]["reason"] != _SLOT_REASON:
+            raise TransactionError("操作身份已用于其他阶段，不能作为机会变化重送")
+        event = saved[0]
+        if event["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("机会变化的事实时刻与原事务不同")
+        rows = event["body"]["rows"]
+        if len(rows) != 1 or rows[0]["table"] != "file_copies" or rows[0]["id"] != self._request.copy_id:
+            raise TransactionError("原机会变化的目标拷贝与输入不符")
+        row = rows[0]
+        before_slot = row["before"]["values"].get("slot_device_id") if row["before"]["exists"] else None
+        after_slot = row["after"]["values"].get("slot_device_id")
+        if after_slot is not None:
+            if self._direction != _SLOT_GRANT or before_slot is not None:
+                raise TransactionError("原机会变化的方向与输入不符")
+            outcome = SlotOutcome.GRANTED
+        else:
+            if self._direction != _SLOT_RELEASE or before_slot is None:
+                raise TransactionError("原机会变化的方向与输入不符")
+            outcome = SlotOutcome.RELEASED
+        return CommandPlan(
+            events=(), owners={}, state_rows={}, read_only=True,
+            result=SlotDecision(outcome=outcome),
+        )
+
+
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
 
@@ -2066,6 +2351,18 @@ class OutputsRepository:
         self, command: FileCandidate, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FileQualification]:
         receipt = commit_operation(_GrantFileCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
+    def grant_read_slot(
+        self, request: SlotRequest, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[SlotDecision]:
+        receipt = commit_operation(_SlotChangeCommand(request, _SLOT_GRANT, key), key, owned)
+        return _outcome_of(receipt)
+
+    def release_read_slot(
+        self, request: SlotRequest, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[SlotDecision]:
+        receipt = commit_operation(_SlotChangeCommand(request, _SLOT_RELEASE, key), key, owned)
         return _outcome_of(receipt)
 
 
@@ -2459,6 +2756,89 @@ def _obtain_member_guard(event, context) -> None:
         raise EventValidationError("显式成员的真实产物必须等于原请求 ID")
 
 
+def _slot_run(context, copy_id: int) -> dict[str, Any]:
+    matches = [
+        facts
+        for facts in context.state_rows.get("operation_runs", {}).values()
+        if facts.get("copy_id") == copy_id
+    ]
+    if len(matches) != 1:
+        raise EventValidationError("机会变化必须提供拷贝的唯一 READ_FILE 流程事实")
+    run = matches[0]
+    if run.get("kind") != int(_RUN_KIND.READ_FILE):
+        raise EventValidationError("机会变化关联的流程不是 READ_FILE")
+    return run
+
+
+def _slot_owner_action(context, copy) -> dict[str, Any]:
+    action_id = None
+    if copy.get("delivery_id") is not None:
+        action_id = context.state_rows.get("deliveries", {}).get(
+            copy["delivery_id"], {}).get("action_id")
+    elif copy.get("processing_id") is not None:
+        action_id = context.state_rows.get("recording_processing", {}).get(
+            copy["processing_id"], {}).get("action_id")
+    if not is_json_integer(action_id):
+        raise EventValidationError("机会授予缺少发起动作的固定关联")
+    return _guard_facts(context, "actions", action_id)
+
+
+def _read_slot_guard(event, context) -> None:
+    """机会变化守卫：授予核对绑定与当前资格，释放核对读取及重试结束。"""
+    if event.event_type != _COPY_CHANGED_EVENT or event.reason != _SLOT_REASON:
+        return
+    for row in event.rows:
+        if row.table != "file_copies":
+            raise EventValidationError("机会变化必须作用于拷贝行")
+        if set(row.after.values) != {"slot_device_id"}:
+            raise EventValidationError("机会变化只保存归属列")
+        copy_id = row.row_id
+        copy = _guard_facts(context, "file_copies", copy_id)
+        run = _slot_run(context, copy_id)
+        source_id = copy.get("source_device_file_id")
+        if source_id is None:
+            raise EventValidationError("主机源拷贝不能占用相机读取机会")
+        source = _guard_facts(context, "device_files", source_id)
+        observer = _guard_facts(context, "actions", source["observer_action_id"])
+        origin = _guard_facts(context, "actions", source["source_action_id"])
+        binding = (observer["device_id"], observer["driver_id"])
+        if (not all(isinstance(value, str) and value for value in binding)
+                or binding != (origin["device_id"], origin["driver_id"])):
+            raise EventValidationError("读取源观察者与可靠来源的原设备绑定不一致")
+        after_slot = row.after.values["slot_device_id"]
+        if after_slot is not None:
+            before_slot = row.before.values.get("slot_device_id") if row.before.exists else None
+            if before_slot is not None:
+                raise EventValidationError("授予必须从空闲机会开始")
+            if after_slot != binding[0]:
+                raise EventValidationError("授予的设备必须等于原来源设备绑定")
+            if run["status"] in _RUN_TERMINAL:
+                raise EventValidationError("读取责任已结束，不能再授予机会")
+            if run["retry_wait_required"] != 0:
+                raise EventValidationError("重试等待期间不授予新的读取机会")
+            action = _slot_owner_action(context, copy)
+            try:
+                if not _read_owner_eligible(action):
+                    raise EventValidationError("机会授予要求发起动作执行中且未取消")
+                if not _read_is_due(action, event.occurred_at):
+                    raise EventValidationError("机会授予要求发起动作已到计划时间")
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
+            continue
+        if not row.before.exists or row.before.values.get("slot_device_id") is None:
+            raise EventValidationError("释放要求当前持有机会")
+        if row.before.values["slot_device_id"] != binding[0]:
+            raise EventValidationError("释放的机会必须属于原来源设备")
+        attempts = context.complete_rows("operation_attempts", "run_id", run["id"])
+        if any(attempt.get("status") == int(_ATTEMPT_STATUS.RUNNING)
+               for attempt in attempts.values()):
+            raise EventValidationError("实际读取未结束，不能释放机会")
+        if run["retry_wait_required"] != 0:
+            raise EventValidationError("重试等待期间保留机会")
+        if run["status"] not in _RUN_TERMINAL and copy["committed_bytes"] < copy["source_size"]:
+            raise EventValidationError("源内容尚未读完，机会保留")
+
+
 def _read_permission_guard(event, context) -> None:
     """授予推进一条 SELECTED 项；拒绝保存一条未建档项的最终错误。"""
     if event.event_type == _READ_PERMISSION_EVENT and event.reason == _GRANT_REASON:
@@ -2535,5 +2915,6 @@ def register_outputs_guards() -> None:
     register_guard("delivery", _delivery_guard)
     register_guard("copy", _copy_guard)
     register_guard("copy_links", _copy_links_guard)
+    register_guard("read_slot", _read_slot_guard)
     register_guard("read_permission", _read_permission_guard)
     register_guard("obtain_member", _obtain_member_guard)
