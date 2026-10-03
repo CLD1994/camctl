@@ -134,7 +134,8 @@ class CatalogConnection(_FaultConnection):
         prefixes = {
             "catalog": ("SELECT id FROM outputs WHERE source_action_id", "SELECT o.id, o.source_action_id"),
             "processing": ("SELECT check_state, repair_state, discard_state, id, action_id FROM recording_processing",),
-            "items": ("SELECT requested_output_id, output_id, basis, original_output_id",),
+            "items": ("SELECT requested_output_id, output_id, basis, original_output_id",
+                      "SELECT id FROM obtain_items WHERE selection_id"),
             "exists": ("SELECT 1 FROM outputs WHERE id",),
             "pending_items": ("SELECT 1 FROM obtain_items WHERE selection_id",),
         }

@@ -16,7 +16,7 @@ from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
-from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
+from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId, OperationKey, UtcMicros
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
@@ -120,6 +120,7 @@ _REJECT_REASON = 2
 _RESOLVE_REASON = 4
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
 _OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
+_OUTPUT_SOURCE_MISMATCH_CODE = item_error_id("obtain_items", "output_source_mismatch")
 _OUTPUT_CLEANUP_STARTED_CODE = item_error_id("obtain_items", "output_cleanup_started")
 _SOURCE_FILE_UNCONFIRMED_CODE = item_error_id("obtain_items", "source_file_unconfirmed")
 
@@ -179,6 +180,12 @@ class FixSelection:
     selection_id: int
     snapshot: SelectionSnapshot
     occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.selection_id)
+        timestamp = UtcMicros(self.occurred_at)
+        if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+            raise ValueError(f"事件时间超出 SQLite 整数微秒范围: {self.occurred_at!r}")
 
 
 @dataclass(frozen=True)
@@ -521,6 +528,8 @@ class _FixSelectionCommand:
         }
 
     def plan(self, scope) -> CommandPlan:
+        if not isinstance(self._command, FixSelection):
+            raise TypeError("选择固定申请必须使用 FixSelection")
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
@@ -675,29 +684,85 @@ class _FixSelectionCommand:
         )
 
     def _reuse(self, saved: list[dict], connection) -> CommandPlan:
-        fixed = [event for event in saved if event["type"] == _TARGETS_FIXED_EVENT]
-        if not fixed:
+        if (len(saved) != 1 or (saved[0]["type"], saved[0]["reason"])
+                != (_TARGETS_FIXED_EVENT, _OBTAIN_REASON)):
             raise TransactionError("操作身份已用于其他阶段，不能作为选择固定重送")
-        selection_id = self._command.selection_id
-        selection = row_facts(connection, "obtain_source_selections", selection_id)
-        if selection is None:
-            raise ConsistencyError(
-                f"已提交选择固定找不到来源选择: {selection_id}"
-            )
+        event = saved[0]
+        command = self._command
+        selections = [row for row in event["body"]["rows"] if row["table"] == "obtain_source_selections"]
+        if len(selections) != 1:
+            raise ConsistencyError("原选择固定事务必须包含一个来源选择")
+        selected = selections[0]
+        if (not json_equal(selected["id"], command.selection_id)
+                or not json_equal(event["occurred_at"], command.occurred_at)):
+            raise TransactionError("选择固定的目标或事实时刻与原事务不同")
+        items = sorted((row for row in event["body"]["rows"] if row["table"] == "obtain_items"),
+                       key=lambda row: row["id"])
+        if any(not json_equal(row["after"]["values"]["selection_id"], command.selection_id) for row in items):
+            raise ConsistencyError("原选择固定事务包含其他来源选择的条目")
+        after = selected["after"]["values"]
+        snapshot = SelectionSnapshot(
+            is_fixed=True,
+            source_error_code=after.get("error_code"),
+            items=tuple(SelectedItem(**{
+                field.name: row["after"]["values"][
+                    "error_details_json" if field.name == "error_details" else field.name]
+                for field in fields(SelectedItem)
+            }) for row in items),
+        )
+        if not _same_selection(command.snapshot, snapshot):
+            raise TransactionError("选择固定的完整快照与原事务不同")
+        _check_fixed_selection(connection, command.selection_id, after, items)
         return CommandPlan(
             events=(),
             owners=self._owners,
             state_rows=self._state,
-            result=SelectionSaved(
-                selection_id=selection_id,
-                snapshot=SelectionSnapshot(
-                    is_fixed=True,
-                    items=tuple(_saved_items(connection, selection_id)),
-                    source_error_code=selection["error_code"],
-                ),
-            ),
+            result=SelectionSaved(selection_id=command.selection_id, snapshot=snapshot),
             read_only=True,
         )
+
+
+def _check_fixed_selection(connection, selection_id, selected, items) -> None:
+    """原成员与固定依据必须仍存在；后续进度不参与首次响应。"""
+    selection = row_facts(connection, "obtain_source_selections", selection_id)
+    if selection is None or any(not json_equal(selection[name], selected.get(name))
+            for name in ("status", "error_code", "error_details_json")):
+        raise ConsistencyError(f"已提交选择固定的当前来源选择不一致: {selection_id}")
+    changing = {"status", "output_id", "source_dependency", "delivery_id", "error_code", "error_details_json"}
+    with closing(connection.execute(
+        "SELECT id FROM obtain_items WHERE selection_id = ? ORDER BY id", (selection_id,),
+    )) as cursor:
+        # 逐项读取并核对完整成员；多出的第一项即足以证明集合不一致。
+        for original in items:
+            current_id = cursor.fetchone()
+            if current_id is None or current_id[0] != original["id"]:
+                raise ConsistencyError(f"已固定来源选择的成员缺失或改变: {selection_id}")
+            current = row_facts(connection, "obtain_items", current_id[0])
+            initial = original["after"]["values"]
+            if (current is None or any(not json_equal(current[name], value)
+                           for name, value in initial.items() if name not in changing)):
+                raise ConsistencyError(f"已固定取回项的创建身份或选择依据改变: {original['id']}")
+            output_id = current["output_id"]
+            if initial["status"] == int(_ITEM_STATUS.UNRESOLVED):
+                output_valid = output_id is None or output_id == initial["requested_output_id"]
+            else:
+                output_valid = output_id == initial["output_id"]
+            terminal = initial["status"] in (int(_ITEM_STATUS.FAILED), int(_ITEM_STATUS.CANCELED))
+            if (not output_valid
+                    or (initial["status"] != int(_ITEM_STATUS.UNRESOLVED)
+                        and current["status"] == int(_ITEM_STATUS.UNRESOLVED))
+                    or (terminal and any(not json_equal(current[name], initial[name]) for name in changing))):
+                raise ConsistencyError(f"已固定取回项的目标或终态改变: {original['id']}")
+            known = {output_id, initial["output_id"], initial["original_output_id"], initial["preview_output_id"]}
+            if (initial["status"] == int(_ITEM_STATUS.UNRESOLVED)
+                    or initial["error_code"] == _OUTPUT_SOURCE_MISMATCH_CODE):
+                known.add(initial["requested_output_id"])
+            for identity in known - {None}:
+                with closing(connection.execute("SELECT 1 FROM outputs WHERE id = ?", (identity,))) as output:
+                    if output.fetchone() is None:
+                        raise ConsistencyError(f"已固定取回项引用的产物记录缺失: {identity}")
+        if cursor.fetchone() is not None:
+            raise ConsistencyError(f"已固定来源选择的成员增加: {selection_id}")
 
 
 def _decoded(raw: Any) -> dict[str, Any] | None:
