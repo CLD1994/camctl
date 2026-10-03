@@ -246,3 +246,112 @@ async def test_probe_argv_uses_managed_prefix(fake: FakeMedia) -> None:
     assert argv[0] == "C:\\tools\\ffprobe.exe"
     assert "-of" in argv and "json" in argv
     assert argv[-1] == str(_ROOT / "staging" / "recording-inputs" / "11.mp4")
+
+
+@pytest.mark.parametrize("entry", ["probe", "repair"])
+@pytest.mark.parametrize("reason", [None, "cancelled", "timeout"])
+@pytest.mark.parametrize(
+    "exit_value", [LocalExit(exit_code=0), LocalExit(exit_code=1), LocalExit(signal=15), None]
+)
+async def test_tool_completion_requires_exit_and_no_call_error(
+    fake: FakeMedia, entry: str, reason: str | None, exit_value: LocalExit | None
+) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=exit_value,
+        output=b'{"format":{"duration":"1.25"}}',
+        error=reason,
+        used_grace_s=Decimal("5") if reason else None,
+    )
+    fake.output_exists = True
+    fake.output_size = 1
+    if entry == "probe":
+        result = await probe_media(_input_ref(), _roots(), ProbeRequest())
+        succeeded = result.duration_s is not None
+    else:
+        result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+        succeeded = result.complete
+        assert result.exists is True
+
+    if reason is None and exit_value == LocalExit(exit_code=0):
+        assert succeeded is True
+        assert result.error is None
+    else:
+        assert succeeded is False
+        assert result.error is not None
+        assert result.error.startswith("tool_failed:")
+        if reason:
+            assert reason in result.error
+        if exit_value is None:
+            assert "no-exit" in result.error
+        elif exit_value.signal is not None:
+            assert f"signal={exit_value.signal}" in result.error
+        else:
+            assert f"exit={exit_value.exit_code}" in result.error
+
+
+@pytest.mark.parametrize(
+    ("literal", "expected"),
+    [
+        ('"3.01699900000000000000000000001"', "3.01699900000000000000000000001"),
+        ("3.01699900000000000000000000001", "3.01699900000000000000000000001"),
+        ("9007199254740993", "9007199254740993"),
+        ("1.00000000000000000000000000001e-3", "0.00100000000000000000000000000001"),
+        ("0", "0"),
+        ('"0.000000"', "0"),
+    ],
+)
+async def test_probe_numeric_representations_are_exact(
+    fake: FakeMedia, literal: str, expected: str
+) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=('{"format":{"duration":' + literal + '}}').encode(),
+        error=None,
+        used_grace_s=None,
+    )
+    result = await probe_media(_input_ref(), _roots(), ProbeRequest())
+    assert result.error is None
+    assert result.duration_s == Decimal(expected)
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "-0.001", '"-1e-100"', '"NaN"', '"sNaN"', '"Infinity"', '"-Infinity"',
+        "NaN", "Infinity", "-Infinity", "true", "false", "null", "[]", "{}",
+        '"N/A"', '""',
+    ],
+)
+async def test_probe_invalid_duration_is_unknown(fake: FakeMedia, literal: str) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=('{"format":{"duration":' + literal + '}}').encode(),
+        error=None,
+        used_grace_s=None,
+    )
+    result = await probe_media(_input_ref(), _roots(), ProbeRequest())
+    assert result.duration_s is None
+    assert result.error is not None
+    assert result.error.startswith("invalid_structure:")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"format":{"duration":1,"duration":2}}',
+        b'{"format":{"duration":1},"format":{"duration":2}}',
+        b'{"format":{"duration":"\xff"}}',
+        b'{"format":{"duration":1},"other":"\\ud800"}',
+        b'[]', b'{"format":null}', b'{"format":[]}',
+    ],
+)
+async def test_probe_malformed_output_is_not_partially_used(
+    fake: FakeMedia, payload: bytes
+) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0), output=payload, error=None, used_grace_s=None
+    )
+    result = await probe_media(_input_ref(), _roots(), ProbeRequest())
+    assert result.duration_s is None
+    assert result.error is not None
+    assert result.error.startswith("invalid_structure:")

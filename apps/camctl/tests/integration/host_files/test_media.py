@@ -1,8 +1,7 @@
 """F6 受管媒体工具与真实子进程的组合集成测试。
 
 可执行替身工具经真实 O3 受管执行验证成功、失败、部分成品与取
-消；真实 ffprobe/ffmpeg 存在时补充真实工具用例；未安装工具按处
-理错误分类。
+消。本文件验证进程和文件协作，不证明真实视频时长或修复正确性。
 """
 
 from __future__ import annotations
@@ -156,3 +155,57 @@ async def test_missing_tool_is_classified(tmp_path: Path) -> None:
     )
     assert probe.error is not None
     assert probe.error.startswith("tool_unavailable")
+
+
+async def test_subprocess_numeric_duration_keeps_all_digits(tmp_path: Path) -> None:
+    input_ref, _, roots, _, _ = _setup(tmp_path)
+    tool = _tool(
+        tmp_path, "exact-probe",
+        'print(\'{"format":{"duration":1.00000000000000000000000000001e-3}}\')',
+    )
+    result = await probe_media(input_ref, roots, ProbeRequest(ffprobe=tool))
+    assert result.error is None
+    assert result.duration_s == Decimal("0.00100000000000000000000000000001")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="需要 POSIX SIGTERM 处理器")
+@pytest.mark.parametrize("entry", ["probe", "repair"])
+async def test_cancelled_tool_zero_exit_is_not_success(tmp_path: Path, entry: str) -> None:
+    input_ref, output_ref, roots, input_path, output_path = _setup(tmp_path)
+    tool = _tool(tmp_path, "cancel-zero", """
+import signal, sys
+from pathlib import Path
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+if "-i" in sys.argv:
+    Path(sys.argv[-1]).write_bytes(b"partial output")
+else:
+    print('{"format":{"duration":"1.25"}}', flush=True)
+Path(__file__).with_suffix(".ready").write_text("ready")
+while True:
+    signal.pause()
+""")
+    ready = tmp_path / "cancel-zero.ready"
+
+    class StopWhenReady:
+        async def requested(self) -> None:
+            # 以工具已装好信号处理器并写出内容为条件；期限仅使测试故障能收场。
+            deadline = asyncio.get_running_loop().time() + 5
+            while not ready.exists() and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.01)
+
+    if entry == "probe":
+        result = await probe_media(input_ref, roots, ProbeRequest(ffprobe=tool), stop=StopWhenReady())
+        assert result.duration_s is None
+    else:
+        result = await repair_media(
+            input_ref, output_ref, roots, RepairRequest(ffmpeg=tool), stop=StopWhenReady()
+        )
+        assert result.complete is False
+        assert result.exists is True
+        assert output_path.read_bytes() == b"partial output"
+    assert ready.exists(), "工具未到达可取消阶段"
+    assert result.error is not None
+    assert result.error.startswith("tool_failed:")
+    assert "cancelled" in result.error
+    assert "exit=0" in result.error
+    assert input_path.read_bytes() == b"x" * 250

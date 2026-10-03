@@ -9,12 +9,12 @@ ffprobe 只解析业务需要的时长字段并保持全精度；ffmpeg 成品�
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from camctl.contracts.json_values import parse_exact_json
 from camctl.host_files.io import (
     DirectorySyncStage,
     HashResult,
@@ -134,20 +134,25 @@ async def probe_media(
     outcome = await _run_tool(argv, stop)
     if isinstance(outcome, str):
         return MediaProbe(duration_s=None, error=outcome)
-    if outcome.exit is None or outcome.exit.exit_code != 0:
+    if outcome.error is not None or outcome.exit is None or outcome.exit.exit_code != 0:
         return MediaProbe(duration_s=None, error=_tool_failure("tool_failed", outcome))
     try:
-        payload = json.loads(outcome.output or b"")
-    except ValueError:
+        payload = parse_exact_json((outcome.output or b"").decode("utf-8"))
+    except (ValueError, InvalidOperation):
         return MediaProbe(duration_s=None, error="invalid_structure: 输出不是预期结构")
     if not isinstance(payload, dict) or not isinstance(payload.get("format"), dict):
         return MediaProbe(duration_s=None, error="invalid_structure: 输出不是预期结构")
     if "duration" not in payload["format"]:
         return MediaProbe(duration_s=None, error="missing_duration: 缺少时长字段")
+    value = payload["format"]["duration"]
+    if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
+        return MediaProbe(duration_s=None, error="invalid_structure: 时长不是数字")
     try:
-        duration = Decimal(str(payload["format"]["duration"]))
+        duration = Decimal(value)
     except (InvalidOperation, ValueError):
         return MediaProbe(duration_s=None, error="invalid_structure: 时长不是数字")
+    if not duration.is_finite() or duration < 0:
+        return MediaProbe(duration_s=None, error="invalid_structure: 时长必须是有限非负数")
     return MediaProbe(duration_s=duration, error=None)
 
 
@@ -177,7 +182,7 @@ async def repair_media(
         return _incomplete(
             exists=exists, error=outcome, directory=DirectorySyncStage.NOT_ATTEMPTED
         )
-    if outcome.exit is None or outcome.exit.exit_code != 0:
+    if outcome.error is not None or outcome.exit is None or outcome.exit.exit_code != 0:
         return _incomplete(
             exists=exists,
             error=_tool_failure("tool_failed", outcome),
@@ -238,6 +243,8 @@ def _tool_failure(kind: str, outcome: RawToolOutcome) -> str:
         if exit_value is not None and exit_value.exit_code is not None
         else f"signal={exit_value.signal}" if exit_value is not None else "no-exit"
     )
+    if outcome.error is not None:
+        detail = f"{outcome.error}; {detail}"
     return f"{kind}: {detail}"
 
 
