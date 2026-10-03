@@ -719,7 +719,10 @@ def test_earlier_obtain_participates_before_its_selection_is_saved(
             (json.dumps({"params": {"source": {"action_name": "action-11"}}}), owner))
     if not selection_fixed:
         connection.execute("DELETE FROM obtain_items WHERE id=101")
-        connection.execute("UPDATE obtain_source_selections SET status=1 WHERE id=101")
+        if owner_status == 1:
+            connection.execute("DELETE FROM obtain_source_selections WHERE id=101")
+        else:
+            connection.execute("UPDATE obtain_source_selections SET status=1 WHERE id=101")
     connection.commit()
     before = tuple(connection.iterdump())
     result = _grant(owned, OutputsRepository(), replace(_candidate(_Seedling(32, 102, 701, 501)), occurred_at=_LATER))
