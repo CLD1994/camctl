@@ -192,27 +192,31 @@ def _obtain_targets(reads: CompetitionReads, identity: int, action: Row, output_
         if len(matching) != 1:
             raise ConsistencyError("同一取回来源必须有唯一依赖")
         selections = reads.members("obtain_source_selections", "dependency_id", matching[0])
-        if len(selections) != 1:
+        if _member(_STATUS, action["status"]) == _STATUS.PENDING:
+            if selections:
+                raise ConsistencyError("尚未开始的取回不能已有来源选择责任")
+        elif len(selections) != 1:
             raise ConsistencyError("固定来源必须有唯一选择责任")
-        selection_id, selection = next(iter(selections.items()))
-        state = _member(_SELECTION, selection["status"])
-        if state == _SELECTION.FIXED:
-            if selection["error_code"] is not None:
+        else:
+            selection_id, selection = next(iter(selections.items()))
+            state = _member(_SELECTION, selection["status"])
+            if state == _SELECTION.FIXED:
+                if selection["error_code"] is not None:
+                    return False
+                # 仅读取涉及当前产物的成员，不加载其他原片或整个选择目录。
+                items = dict(reads.members("obtain_items", "output_id", output_id))
+                items.update(reads.members("obtain_items", "requested_output_id", output_id))
+                for item in items.values():
+                    if item["selection_id"] != selection_id:
+                        continue
+                    status = _member(_ITEM, item["status"])
+                    if status in (_ITEM.SELECTED, _ITEM.UNRESOLVED):
+                        if item["delivery_id"] is not None or item["source_dependency"] != 0:
+                            raise ConsistencyError("尚未授予的取回项已携带准备责任")
+                        return True
                 return False
-            # 仅读取涉及当前产物的成员，不加载其他原片或整个选择目录。
-            items = dict(reads.members("obtain_items", "output_id", output_id))
-            items.update(reads.members("obtain_items", "requested_output_id", output_id))
-            for item in items.values():
-                if item["selection_id"] != selection_id:
-                    continue
-                status = _member(_ITEM, item["status"])
-                if status in (_ITEM.SELECTED, _ITEM.UNRESOLVED):
-                    if item["delivery_id"] is not None or item["source_dependency"] != 0:
-                        raise ConsistencyError("尚未授予的取回项已携带准备责任")
-                    return True
-            return False
-        if reads.members("obtain_items", "selection_id", selection_id):
-            raise ConsistencyError("尚未固定的选择不能已有成员")
+            if reads.members("obtain_items", "selection_id", selection_id):
+                raise ConsistencyError("尚未固定的选择不能已有成员")
     try:
         mode, requested = read_selection_request(action["execution_spec_json"], action["input_fields_json"])
     except (TypeError, ValueError) as error:
