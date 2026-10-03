@@ -1,6 +1,7 @@
 """来源选择保存的错误由公共登记直接消费，关联列仍保存整数身份。"""
 
 from contextlib import closing
+from dataclasses import replace
 
 import pytest
 
@@ -8,13 +9,12 @@ from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import registered_error_spec, validate_error_details
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import FixSelection, load_selection_facts
-from camctl.persistence.repositories.outputs import _source_selection_guard
-from camctl.persistence.transaction import event_envelope, row_facts, update_change
-from camctl.history.validators import EventValidationError
+from camctl.persistence.transaction import row_facts
+from camctl.history.validators import EventValidationError, validate_event
 from camctl.outputs.sources import SelectionMode, select_outputs
 
 from .test_sources import _NOW, _prepared_selection, _fixed_resolution, _seed_output, _set_selection_request
-from .test_member_guard import member_context, read_targets
+from .test_selection_guard import _proposal, selection_database, family_database
 
 
 @pytest.mark.parametrize("scenario,expected", [
@@ -54,33 +54,39 @@ def test_selection_errors_satisfy_public_schema_after_commit(tmp_path, scenario,
         owned.connection.close()
 
 
-def _source_error_event(context, code, details):
-    context.state_rows["obtain_source_selections"][31]["status"] = 1
-    context.state_rows["obtain_items"].clear()
-    row = update_change("obtain_source_selections", 31,
-        {"status": 1, "error_code": None, "error_details_json": None},
-        {"status": 2, "error_code": code, "error_details_json": details})
-    return event_envelope(2, 2, 4, 1, (row,), _NOW)
+def _source_error_event(owned, code, details):
+    connection = owned.connection
+    if code == 1:
+        connection.execute("DELETE FROM output_origins")
+        connection.execute("DELETE FROM outputs WHERE source_action_id=11")
+    else:
+        connection.execute("DELETE FROM output_origins WHERE output_id=702")
+        connection.execute("DELETE FROM outputs WHERE id=702")
+    connection.commit()
+    event, context = _proposal(owned, SelectionMode.DEFAULT if code == 1 else SelectionMode.PREVIEW)
+    row = event.rows[0]
+    assert row.after.values["error_code"] == code
+    row = replace(row, after=replace(row.after, values={**row.after.values, "error_details_json": details}))
+    return replace(event, rows=(row, *event.rows[1:])), context
 
 
 @pytest.mark.parametrize("details", [
     {"source_action_instance_id": "12"},
-    {"source_action_instance_id": "11", "original_output_id": "702"},
+    {"source_action_instance_id": "11", "original_output_id": "704"},
     {"source_action_instance_id": "11", "original_output_id": "703"},
     {"source_action_instance_id": "11", "original_output_id": "999"},
 ])
-def test_source_error_must_refer_to_actual_source_and_original(member_context, details):
-    member_context.state_rows["outputs"][702] = {"id": 702, "source_action_id": 12, "kind": 1}
-    member_context.state_rows["outputs"][703] = {"id": 703, "source_action_id": 11, "kind": 2}
-    event = _source_error_event(member_context, 2, details)
+def test_source_error_must_refer_to_actual_source_and_original(selection_database, details):
+    event, context = _source_error_event(selection_database, 2, details)
+    context.state_rows["outputs"][704] = {"id": 704, "source_action_id": 12, "kind": 1}
     with pytest.raises(EventValidationError):
-        _source_selection_guard(event, member_context)
+        validate_event(event, context)
 
 
 @pytest.mark.parametrize("code,details", [
     (1, {}), (2, {"source_action_instance_id": "11"}),
     (2, {"source_action_instance_id": "11", "original_output_id": "701"}),
 ])
-def test_source_error_accepts_registered_details_for_actual_source(member_context, code, details):
-    event = _source_error_event(member_context, code, details)
-    _source_selection_guard(event, member_context)
+def test_source_error_accepts_registered_details_for_actual_source(selection_database, code, details):
+    event, context = _source_error_event(selection_database, code, details)
+    validate_event(event, context)

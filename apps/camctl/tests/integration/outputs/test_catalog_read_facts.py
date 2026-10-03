@@ -44,7 +44,7 @@ def test_catalog_read_keeps_raw_rows_and_complete_scopes(family_database):
 
 def test_current_catalog_matches_sql_catalog_without_sql_access(family_database):
     members, context = _read(family_database.connection)
-    current = outputs._catalog_from_context(context, 11)
+    current = outputs._CurrentCatalogReads(context).catalog(11)
     assert tuple(member.entry for member in current) == tuple(member.entry for member in members)
 
 
@@ -58,7 +58,7 @@ def test_current_catalog_requires_complete_relationship_ranges(family_database, 
     ranges = dict(context.read_coverage.ranges)
     ranges[table, column] = ranges[table, column] - {identity}
     with pytest.raises(EventValidationError):
-        outputs._catalog_from_context(replace(context, read_coverage=ReadCoverage(ranges)), 11)
+        outputs._CurrentCatalogReads(replace(context, read_coverage=ReadCoverage(ranges))).catalog(11)
 
 
 @pytest.mark.parametrize("table,identity,column,value", [
@@ -72,14 +72,14 @@ def test_current_catalog_rechecks_file_relationships(family_database, table, ide
     _, context = _read(family_database.connection)
     context.state_rows[table][identity][column] = value
     with pytest.raises(ConsistencyError):
-        outputs._catalog_from_context(context, 11)
+        outputs._CurrentCatalogReads(context).catalog(11)
 
 
 def test_current_catalog_uses_current_sizes_and_not_future_proposal(family_database):
     _, context = _read(family_database.connection)
     future = {"intermediate_files": {801: {"size_bytes": 99}}}
     context.state_rows["intermediate_files"][801]["size_bytes"] = 120
-    current = outputs._catalog_from_context(replace(context, transaction_rows=future), 11)
+    current = outputs._CurrentCatalogReads(replace(context, transaction_rows=future)).catalog(11)
     assert {member.entry.output_id: member.entry.size_bytes for member in current} == {
         701: 4096, 702: 100, 703: 120, 705: 4096}
 
@@ -91,7 +91,7 @@ def test_reliable_empty_catalog_can_be_reinterpreted(family_database):
     connection.commit()
     members, context = _read(connection)
     assert members == ()
-    assert outputs._catalog_from_context(context, 11) == ()
+    assert outputs._CurrentCatalogReads(context).catalog(11) == ()
 
 
 @pytest.mark.parametrize("fault", ["execute", "fetch", "decode"])
@@ -138,14 +138,14 @@ def test_current_catalog_rejects_conflicting_embedded_identity(family_database, 
     _, context = _read(family_database.connection)
     context.state_rows["outputs"][701]["id"] = embedded
     with pytest.raises(ConsistencyError):
-        outputs._catalog_from_context(context, 11)
+        outputs._CurrentCatalogReads(context).catalog(11)
 
 
 @pytest.mark.parametrize("embedded", [701, Decimal("701.0")])
 def test_current_catalog_preserves_equivalent_embedded_identity(family_database, embedded):
     _, context = _read(family_database.connection)
     context.state_rows["outputs"][701]["id"] = embedded
-    current = outputs._catalog_from_context(context, 11)
+    current = outputs._CurrentCatalogReads(context).catalog(11)
     assert tuple(member.entry.output_id for member in current) == (701, 702, 703, 705)
     assert context.state_rows["outputs"][701]["id"] is embedded
 
@@ -161,7 +161,7 @@ def test_existence_lookup_and_catalog_keep_complete_output_fields(family_databas
         reads.catalog(12)
     context = EventContext(TransactionRange(1, 1, 1), {}, reads.state_rows,
                            read_coverage=reads.read_coverage())
-    current, = outputs._catalog_from_context(context, 12)
+    current, = outputs._CurrentCatalogReads(context).catalog(12)
     assert (current.entry.output_id, current.entry.size_bytes, current.row["source_action_id"]) == (704, 4096, 12)
 
 
@@ -233,7 +233,7 @@ def test_first_fix_supplies_complete_current_facts_to_registered_guard(selection
 
     def inspect(event, context):
         original_guard(event, context)
-        catalog = outputs._catalog_from_context(context, 11)
+        catalog = outputs._CurrentCatalogReads(context).catalog(11)
         assert context.complete_rows("obtain_items", "selection_id", 61) == {}
         assert context.complete_rows("recording_processing", "action_id", 11) == {}
         if requested:

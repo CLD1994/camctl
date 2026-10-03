@@ -101,6 +101,7 @@ _CAPTURE_TYPES = frozenset(
 _SOURCE_RESOLUTION_FAILED_CODE = action_error_id("source_resolution_failed")
 _CHECK_STATE = enum_for("recording_processing.check_state")
 _REPAIR_STATE = enum_for("recording_processing.repair_state")
+_DISCARD_STATE = enum_for("recording_processing.discard_state")
 
 #: 录像处理中仍未结束的状态；存在即表示适用产物处理未完成。
 _UNFINISHED_PROCESSING_CHECK = frozenset({int(_CHECK_STATE.RUNNING)})
@@ -109,7 +110,7 @@ _UNFINISHED_PROCESSING_REPAIR = frozenset(
      if member.name in {"PENDING", "RUNNING"}}
 )
 _UNFINISHED_PROCESSING_DISCARD = frozenset(
-    {int(member) for member in enum_for("recording_processing.discard_state")
+    {int(member) for member in _DISCARD_STATE
      if member.name in {"PENDING", "RUNNING"}}
 )
 
@@ -731,8 +732,14 @@ def _processing_completed(connection, source_action_id: int) -> bool:
 def _processing_completed_facts(row) -> bool:
     if row is None:
         return True
-    check_state, repair_state, discard_state = (
-        int(row[column]) for column in ("check_state", "repair_state", "discard_state"))
+    try:
+        states = tuple(row[column] for column in ("check_state", "repair_state", "discard_state"))
+        if not all(is_json_integer(value) for value in states):
+            raise ValueError("处理状态必须是登记的整数编号")
+        check_state, repair_state, discard_state = (
+            enum(value) for enum, value in zip((_CHECK_STATE, _REPAIR_STATE, _DISCARD_STATE), states))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError("来源处理状态缺失或无效") from error
     return (
         check_state not in _UNFINISHED_PROCESSING_CHECK
         and repair_state not in _UNFINISHED_PROCESSING_REPAIR
@@ -968,14 +975,12 @@ class _CurrentCatalogReads:
         self._require_coverage("original_output_id", original_id)
         return tuple(sorted(self._related.get(original_id, ())))
 
-
-def _catalog_from_context(context, source_action_id: int) -> tuple[_CatalogMember, ...]:
-    rows = context.complete_rows("outputs", "source_action_id", source_action_id)
-    reads = _CurrentCatalogReads(context)
-    members: dict[int, _CatalogMember] = {}
-    for output_id in sorted(rows):
-        _include_family(reads, members, source_action_id, output_id)
-    return tuple(sorted(members.values(), key=lambda member: member.entry.output_id))
+    def catalog(self, source_action_id: int) -> tuple[_CatalogMember, ...]:
+        rows = self.context.complete_rows("outputs", "source_action_id", source_action_id)
+        members: dict[int, _CatalogMember] = {}
+        for output_id in sorted(rows):
+            _include_family(self, members, source_action_id, output_id)
+        return tuple(sorted(members.values(), key=lambda member: member.entry.output_id))
 
 
 def _catalog_members(connection, source_action_id: int) -> tuple[_CatalogMember, ...]:
@@ -2007,8 +2012,66 @@ def _selection_initialization_guard(event, context) -> None:
             raise EventValidationError("初始化的选择不携带来源错误")
 
 
+def _current_selection_snapshot(context, selection_id: int) -> tuple[int, SelectionSnapshot]:
+    """只按完整当前事实解释首次选择，不采用事件结果或未来事务行。"""
+    reads = _CurrentCatalogReads(context)
+    selection = reads.required("obtain_source_selections", selection_id)
+    if (not json_equal(selection["status"], int(_SELECTION_STATUS.PENDING))
+            or selection["error_code"] is not None or selection["error_details_json"] is not None):
+        raise EventValidationError("首次固定要求当前选择为无错误的 PENDING")
+    dependency = reads.required("action_dependencies", selection["dependency_id"])
+    owner = reads.required("actions", dependency["action_id"])
+    source = reads.required("actions", dependency["depends_on_action_id"])
+    source_id = int(source["id"])
+    for facts, columns in (
+        (owner, ("type", "status", "source_resolution_state", "resolved_source_plan_id")),
+        (source, ("type", "status", "plan_id")),
+    ):
+        if not all(is_json_integer(facts[column]) for column in columns):
+            raise EventValidationError("当前动作的类型、状态或来源身份无效")
+    source_plan_id = ObjectId(int(source["plan_id"]))
+    if (owner["type"] != _OBTAIN_TYPE
+            or owner["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED)
+            or source["type"] not in _CAPTURE_TYPES
+            or owner["resolved_source_plan_id"] != source_plan_id):
+        raise EventValidationError("首次选择要求已固定的取回来源及同计划拍摄成员")
+    if (owner["status"] != int(_ACTION_STATUS.RUNNING)
+            or not json_equal(owner["cancel_requested"], 0)
+            or not json_equal(owner["execution_started"], 1)):
+        raise EventValidationError("选择固定要求取回动作执行中且未取消")
+    if source["status"] not in _ACTION_TERMINAL:
+        raise EventValidationError("选择固定要求来源动作已终态")
+    if context.complete_rows("obtain_items", "selection_id", selection_id):
+        raise EventValidationError("PENDING 选择已有条目，不能追加首次选择")
+    mode, requested = read_selection_request(owner["execution_spec_json"], owner["input_fields_json"])
+    processing = context.complete_rows("recording_processing", "action_id", source_id)
+    if len(processing) > 1:
+        raise EventValidationError("来源动作不能存在多条处理记录")
+    if not _processing_completed_facts(next(iter(processing.values()), None)):
+        raise EventValidationError("来源适用产物处理未完成")
+    entries = tuple(member.entry for member in reads.catalog(source_id))
+    local_ids = {entry.output_id for entry in entries}
+    checked = {}
+    for identity in requested:
+        if identity in local_ids:
+            continue
+        found = context.complete_rows("outputs", "id", identity)
+        if not found:
+            checked[identity] = None
+        else:
+            actual_source = reads.required("outputs", identity)["source_action_id"]
+            if not is_json_integer(actual_source):
+                raise EventValidationError("请求产物的当前来源身份无效")
+            checked[identity] = int(ObjectId(int(actual_source)))
+    expected = select_outputs(
+        SourceResolution(state=ResolutionState.FIXED, member_action_ids=(source_id,),
+                         source_plan_id=source_plan_id),
+        SelectionFacts(source_id, True, entries, checked_output_sources=checked), mode, requested)
+    return source_id, expected
+
+
 def _source_selection_guard(event, context) -> None:
-    """逐来源选择守卫：PENDING 一次固定，条目与来源事实共同提交。"""
+    """逐来源选择守卫：按保存请求核对完整结果及条目 ID 对应的顺序。"""
     if event.event_type != _TARGETS_FIXED_EVENT or event.reason != _OBTAIN_REASON:
         return
     selection_updates = [
@@ -2026,68 +2089,32 @@ def _source_selection_guard(event, context) -> None:
     selection = selection_updates[0]
     if selection.before.values.get("status") != int(_SELECTION_STATUS.PENDING):
         raise EventValidationError("只有 PENDING 选择能固定")
-    dependency_id = None
-    for row_id, values in context.state_rows.get(
-        "obtain_source_selections", {}
-    ).items():
-        if row_id == selection.row_id:
-            dependency_id = values.get("dependency_id")
-    if dependency_id is None:
-        # 命令须在 state_rows 提供选择事实。
-        facts = _guard_facts(context, "obtain_source_selections", selection.row_id)
-        dependency_id = facts.get("dependency_id")
-    dependency = _guard_facts(context, "action_dependencies", int(dependency_id or 0))
-    owner = _guard_facts(context, "actions", int(dependency.get("action_id") or 0))
-    if owner.get("status") != int(_ACTION_STATUS.RUNNING) or owner.get("cancel_requested"):
-        raise EventValidationError("选择固定要求取回动作执行中且未取消")
-    source = _guard_facts(
-        context, "actions", int(dependency.get("depends_on_action_id") or 0)
-    )
-    if source.get("status") not in _ACTION_TERMINAL:
-        raise EventValidationError("选择固定要求来源动作已终态")
+    try:
+        source_id, expected = _current_selection_snapshot(context, selection.row_id)
+    except (KeyError, TypeError, ValueError) as error:
+        raise EventValidationError(f"首次选择的当前事实无法解释: {error}") from error
+    items.sort(key=lambda row: row.row_id)
+    if len(items) != len(expected.items) or any(
+        not json_equal(row.after.values, _item_values(selection.row_id, item))
+        for row, item in zip(items, expected.items)
+    ):
+        raise EventValidationError("选择条目的完整集合、保存顺序或依据与原请求及当前事实不一致")
     error_code = selection.after.values.get("error_code")
     details = selection.after.values.get("error_details_json")
+    if not json_equal(error_code, expected.source_error_code):
+        raise EventValidationError("来源选择错误与原请求及当前事实不一致")
     _validate_saved_error("obtain_source_selections", error_code, details)
     if details is not None:
         if ("source_action_instance_id" in details
-                and details["source_action_instance_id"] != str(source["id"])):
+                and details["source_action_instance_id"] != str(source_id)):
             raise EventValidationError("来源错误必须指向实际固定来源")
         if "original_output_id" in details:
             original = context.state_rows.get("outputs", {}).get(int(details["original_output_id"]))
-            if (original is None or original.get("source_action_id") != source["id"]
+            if (original is None or original.get("source_action_id") != source_id
                     or original.get("kind") != int(_OUTPUT_KIND.ORIGINAL)):
                 raise EventValidationError("来源错误中的原片必须属于实际固定来源")
     for item in items:
-        values = item.after.values
-        _validate_obtain_error(values, source["id"])
-        if values.get("selection_id") != selection.row_id:
-            raise EventValidationError("选择条目必须属于所固定的来源选择")
-        if values.get("delivery_id") is not None or values.get("source_dependency") != 0:
-            raise EventValidationError("选择阶段不建立交付或源依赖")
-        output_id = values.get("output_id")
-        if output_id is not None:
-            output = context.state_rows.get("outputs", {}).get(output_id)
-            if output is None or output.get("source_action_id") != source.get("id"):
-                raise EventValidationError(
-                    f"选择条目引用不属于来源的产物: {output_id}"
-                )
-        status = values.get("status")
-        basis = values.get("basis")
-        if status == int(_ITEM_STATUS.UNRESOLVED) and (
-            basis != int(_ITEM_BASIS.EXPLICIT) or output_id is not None
-        ):
-            raise EventValidationError("未决条目只适用于显式请求")
-        if status == int(_ITEM_STATUS.FAILED) and values.get("error_code") is None:
-            raise EventValidationError("失败条目必须携带错误")
-        if status != int(_ITEM_STATUS.FAILED) and values.get("error_code") is not None:
-            raise EventValidationError("只有失败条目携带错误")
-    if error_code is not None and items:
-        # 来源级错误表达整来源无可选目标，不与逐项选择并存。
-        for item in items:
-            if item.after.values.get("status") == int(_ITEM_STATUS.SELECTED):
-                raise EventValidationError(
-                    "来源级错误不能与已选中条目并存"
-                )
+        _validate_obtain_error(item.after.values, source_id)
 
 
 def _intermediate_guard(event, context) -> None:

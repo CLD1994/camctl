@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import replace
+from decimal import Decimal
 
 import pytest
 
@@ -28,7 +29,7 @@ def _proposal(owned, mode=SelectionMode.DEFAULT):
             new_operation_key()).plan(TransactionScope(owned.connection, 1, 1))
     finally:
         owned.connection.rollback()
-    return replace(plan.events[0], change_seq=1), EventContext(
+    return plan.events[0], EventContext(
         TransactionRange(2, 2, 2), dict(plan.owners), deepcopy(plan.state_rows),
         read_coverage=plan.read_coverage)
 
@@ -123,12 +124,13 @@ def test_current_old_item_prevents_first_fix(selection_database, status):
 
 
 @pytest.mark.parametrize("changes", [
-    {"check_state": 3}, {"repair_state": 3}, {"discard_state": 2},
+    {"check_state": 2}, {"repair_state": 3}, {"repair_state": 4},
+    {"discard_state": 2}, {"discard_state": 3},
 ])
 def test_unfinished_current_processing_prevents_fix(selection_database, changes):
     event, context = _proposal(selection_database)
     context.state_rows["recording_processing"] = {51: {
-        "action_id": 11, "check_state": 1, "repair_state": 1, "discard_state": 1, **changes}}
+        "action_id": 11, "check_state": 1, "repair_state": 2, "discard_state": 1, **changes}}
     with pytest.raises(EventValidationError):
         validate_event(event, context)
 
@@ -143,3 +145,80 @@ def test_future_rows_cannot_supply_current_selection_facts(selection_database, t
     del context.state_rows[table][identity]
     with pytest.raises(EventValidationError):
         validate_event(event, replace(context, transaction_rows=future))
+
+
+@pytest.mark.parametrize("table,identity,changes", [
+    ("actions", 30, {"cancel_requested": 1}),
+    ("actions", 30, {"execution_started": 0}),
+    ("actions", 11, {"status": 2}),
+    ("actions", 11, {"type": True}),
+    ("actions", 30, {"resolved_source_plan_id": True}),
+    ("actions", 30, {"cancel_requested": False}),
+    ("obtain_source_selections", 61, {"status": True}),
+    ("obtain_source_selections", 61, {"error_code": 1, "error_details_json": {}}),
+    ("action_dependencies", 41, {"depends_on_action_id": True}),
+    ("outputs", 704, {"source_action_id": True}),
+])
+def test_future_eligible_facts_do_not_override_current_ineligibility(selection_database, table, identity, changes):
+    event, context = _proposal(selection_database, SelectionMode.EXPLICIT_IDS)
+    future = deepcopy(context.state_rows)
+    context.state_rows[table][identity].update(changes)
+    with pytest.raises(EventValidationError):
+        validate_event(event, replace(context, transaction_rows=future))
+
+
+@pytest.mark.parametrize("column", ["check_state", "repair_state", "discard_state"])
+@pytest.mark.parametrize("invalid", [None, True, "1", 99])
+def test_invalid_processing_state_is_not_completed(selection_database, column, invalid):
+    event, context = _proposal(selection_database)
+    context.state_rows["recording_processing"] = {51: {
+        "action_id": 11, "check_state": 1, "repair_state": 2, "discard_state": 1, column: invalid}}
+    with pytest.raises(EventValidationError):
+        validate_event(event, context)
+
+
+@pytest.mark.parametrize("check,repair,discard", [(1, 2, 1), (3, 5, 1), (4, 6, 4), (5, 7, 5)])
+def test_finished_processing_states_permit_selection(selection_database, check, repair, discard):
+    event, context = _proposal(selection_database)
+    context.state_rows["recording_processing"] = {51: {
+        "action_id": 11, "check_state": check, "repair_state": repair, "discard_state": discard}}
+    validate_event(event, context)
+
+
+def test_multiple_current_processing_records_are_not_one_completed_responsibility(selection_database):
+    event, context = _proposal(selection_database)
+    context.state_rows["recording_processing"] = {
+        identity: {"action_id": 11, "check_state": 1, "repair_state": 2, "discard_state": 1}
+        for identity in (51, 52)}
+    with pytest.raises(EventValidationError):
+        validate_event(event, context)
+
+
+def test_equivalent_numeric_facts_and_noncontiguous_ids_preserve_selection(selection_database):
+    event, context = _proposal(selection_database, SelectionMode.PREVIEW)
+    for table, rows in context.state_rows.items():
+        for values in rows.values():
+            for column, value in values.items():
+                if type(value) is int:
+                    values[column] = Decimal(value)
+    first, second = event.rows[1:]
+    context.owners["obtain_items", 100] = context.owners["obtain_items", second.row_id]
+    event = replace(event, rows=(event.rows[0], first, replace(second, row_id=100)))
+    validate_event(event, context)
+
+
+@pytest.mark.parametrize("mode", list(SelectionMode))
+def test_reliably_empty_catalog_uses_saved_mode(selection_database, mode):
+    connection = selection_database.connection
+    connection.execute("DELETE FROM output_origins")
+    connection.execute("DELETE FROM outputs WHERE source_action_id=11")
+    connection.commit()
+    event, context = _proposal(selection_database, mode)
+    validate_event(event, context)
+    if mode is SelectionMode.EXPLICIT_IDS:
+        assert [row.after.values["error_code"] for row in event.rows[1:]] == [1, 1, 1, 2]
+        selection = {**context.state_rows["obtain_source_selections"][61], **event.rows[0].after.values}
+        assert selection["error_code"] is None
+    else:
+        assert len(event.rows) == 1
+        assert event.rows[0].after.values["error_code"] == 1
