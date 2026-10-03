@@ -38,9 +38,15 @@ DIRECTORIES = ("/srv/camctl/staging", "/srv/camctl/ready", "/srv/camctl/processi
 
 
 def _create_valid_database(path: Path, *, format_version: int = 1) -> None:
-    """按权威 SQL 构造完整有效的状态库（测试准备，不经过被测入口）。"""
+    """按权威 SQL 构造完整有效的状态库（测试准备，不经过被测入口）。
+
+    准备连接关闭同步落盘：synchronous 是连接级属性，不进入库文件，
+    建出的库内容与生产初始化一致；测试环境的库不需要崩溃持久性，
+    避免每个测试在 FULL 同步下为 schema 脚本付出多次 fsync。
+    """
     connection = sqlite3.connect(path)
     try:
+        connection.execute("PRAGMA synchronous=OFF")
         connection.execute("PRAGMA journal_mode=wal")
         connection.execute("BEGIN IMMEDIATE")
         for name in SCHEMA_RESOURCES:
