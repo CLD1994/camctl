@@ -1,12 +1,14 @@
 """分段结果保留实际写入下界、失败阶段和独立源结束事实。"""
 
 import threading
+from dataclasses import replace
+from decimal import Decimal
 from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.devices.read_session import ReadChunk, ReadEnd, ReadSession
-from camctl.host_files.segments import SegmentSpec, WritableFile, transfer_segment
+from camctl.host_files.segments import SegmentError, SegmentSpec, WritableFile, transfer_segment
 
 
 def _spec(stop=None):
@@ -26,6 +28,15 @@ def _target():
     target = create_autospec(WritableFile, instance=True)
     target.write.side_effect = len
     return target
+
+
+@pytest.mark.parametrize("field", ["round_index", "range_start", "range_end", "chunk_size"])
+@pytest.mark.parametrize("invalid", [True, 1.0, Decimal(1), "1", None])
+def test_segment_numeric_fields_require_integers(field, invalid):
+    # 范围足够容纳 1，确保失败依据是类型而不是恰好越界。
+    spec = SegmentSpec("copy/9", 0, "copy.part", 0, 3, 2, threading.Event())
+    with pytest.raises(SegmentError):
+        replace(spec, **{field: invalid})
 
 
 def test_short_writes_deliver_entire_chunk_before_next_read():

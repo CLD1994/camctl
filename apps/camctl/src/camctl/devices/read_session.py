@@ -55,7 +55,7 @@ class SourceFile:
     size_bytes: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.size_bytes, int) or self.size_bytes < 0:
+        if type(self.size_bytes) is not int or self.size_bytes < 0:
             raise ValueError(f"源文件长度必须是整数: {self.size_bytes!r}")
 
 
@@ -108,10 +108,17 @@ class ReadSession:
         stream: SourceStream,
         no_data_timeout_s: Decimal,
     ) -> None:
+        if type(offset) is not int or not 0 <= offset <= source.size_bytes:
+            raise ReadSessionError(
+                f"读取偏移必须是 0~{source.size_bytes} 范围内的整数: {offset!r}"
+            )
+        if (not isinstance(no_data_timeout_s, Decimal)
+                or not no_data_timeout_s.is_finite() or no_data_timeout_s <= 0):
+            raise ReadSessionError(f"无数据超时必须是有限正 Decimal 秒数: {no_data_timeout_s!r}")
         self._source = source
         self._position = offset
         self._stream = stream
-        self._timeout_s = float(no_data_timeout_s)
+        self._timeout_s = no_data_timeout_s
         self._stop_requested = threading.Event()
         self._stop_lock = threading.Lock()
         self._control_lock = threading.Lock()
@@ -135,7 +142,7 @@ class ReadSession:
 
     def read_chunk(self, limit: int) -> ReadChunk:
         """同步读取下一段文件内容；同会话并发调用拒绝。"""
-        if limit <= 0:
+        if type(limit) is not int or limit <= 0:
             raise ReadSessionError(f"读取长度必须是正整数: {limit!r}")
         if self._completion.done():
             self._completion.result()
@@ -181,7 +188,7 @@ class ReadSession:
                 if eof:
                     self._finish(None)
                 return ReadChunk(data=data, eof=eof)
-            if time.monotonic() - last_data >= self._timeout_s:
+            if Decimal.from_float(time.monotonic() - last_data) >= self._timeout_s:
                 self._finish("no_data")
                 return ReadChunk(data=None, error="no_data")
             time.sleep(_POLL_INTERVAL_S)
@@ -261,12 +268,6 @@ async def open_read(
     no_data_timeout_s: Decimal,
 ) -> ReadSession:
     """打开一个读取会话；偏移必须落在已知固定长度内。"""
-    if not 0 <= offset <= source.size_bytes:
-        raise ReadSessionError(
-            f"读取偏移越界: {offset} 不在 0~{source.size_bytes}"
-        )
     if ticket.operation != "read":
         raise ReadSessionError(f"尝试票据操作类别不是读取: {ticket.operation!r}")
-    if not no_data_timeout_s.is_finite() or no_data_timeout_s <= 0:
-        raise ReadSessionError(f"无数据超时必须是有限正秒数: {no_data_timeout_s!r}")
     return ReadSession(source, offset, stream, no_data_timeout_s)

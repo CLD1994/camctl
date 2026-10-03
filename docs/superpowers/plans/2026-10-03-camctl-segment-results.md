@@ -49,4 +49,4 @@ Python 3.11 与 3.12 的 `tests/unit/devices` 和 `tests/unit/host_files` 各通
 
 两版的 `tests/integration/devices/test_read_session.py`、`test_read_session_settlement.py` 和 `tests/integration/host_files/test_segments.py`、`test_tasks.py` 各通过 38 项。真实文件验证短写和异常前实际写入，真实读取会话区分读取及关闭失败；文件任务组合验证段结果在执行器中完整保留。关闭屏障验证非阻塞观察未完成结果；同步屏障验证取消后仍保留已开始同步的成功或失败。
 
-独立复核核对数据校验位置、短写续写、取消检查、缓冲生命周期、错误出口和源关闭依据。数值输入类型校验、数据库可靠进度、截断恢复、业务重试和相机机会事务仍需各自的后续验证，不能由本任务的测试代替。
+独立复核核对数据校验位置、短写续写、取消检查、缓冲生命周期、错误出口和源关闭依据。读取与分段的数值入口另由 `test_read_parameters.py` 及分段参数用例覆盖，相关双版本回归各通过 252 项单元和 38 项集成测试。数据库可靠进度、截断恢复、业务重试和相机机会事务仍需各自的后续验证，不能由本任务的测试代替。

@@ -65,6 +65,12 @@ class SegmentSpec:
     def __post_init__(self) -> None:
         if not self.attempt or not self.target_name:
             raise SegmentError("尝试与目标名称不能为空")
+        for field, value in (
+            ("round_index", self.round_index), ("range_start", self.range_start),
+            ("range_end", self.range_end), ("chunk_size", self.chunk_size),
+        ):
+            if type(value) is not int:
+                raise SegmentError(f"{field} 必须是整数: {value!r}")
         if self.round_index < 0:
             raise SegmentError(f"轮次不能为负: {self.round_index!r}")
         if self.range_start < 0 or self.range_end <= self.range_start:
