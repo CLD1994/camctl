@@ -29,6 +29,7 @@ from camctl.operations.process import (
     RawToolOutcome,
     StopSignal,
     ToolSpec,
+    ToolStartError,
     execute_tool,
 )
 
@@ -303,10 +304,8 @@ async def _run_tool(
     )
     try:
         return await _execute_tool(spec, stop=control)
-    except FileNotFoundError:
-        return "tool_unavailable: 工具不存在或不可执行"
-    except PermissionError:
-        return "tool_unavailable: 工具不可执行"
+    except ToolStartError as error:
+        return f"tool_unavailable: {error}"
 
 
 def _tool_failure(kind: str, outcome: RawToolOutcome) -> str:
@@ -318,4 +317,8 @@ def _tool_failure(kind: str, outcome: RawToolOutcome) -> str:
     )
     if outcome.error is not None:
         detail = f"{outcome.error}; {detail}"
+    for failure in outcome.signal_failures:
+        detail += f"; {failure.stage.value}: {failure.message}"
+    if outcome.output_failure is not None:
+        detail += f"; output: {outcome.output_failure}"
     return f"{kind}: {detail}"

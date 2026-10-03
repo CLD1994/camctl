@@ -115,12 +115,22 @@ async def invoke(
     raw = await transport.run(spec, stop=stop or _NeverStop())
     facts = command.interpreter.interpret(raw)
 
-    transport_error = (
-        ErrorValue(code=f"transport_{raw.error}", stage="transport", details={})
-        if raw.error is not None
-        else None
-    )
-    call_error = facts.error or transport_error
+    call_error = facts.error
+    if raw.error is not None:
+        details = {}
+        if raw.output_failure is not None:
+            details["output_failure"] = raw.output_failure
+        if raw.signal_failures:
+            details["signal_failures"] = [
+                {"stage": failure.stage.value, "message": failure.message}
+                for failure in raw.signal_failures
+            ]
+        if facts.error is not None:
+            details["response_error"] = {
+                "code": facts.error.code, "stage": facts.error.stage,
+                "details": dict(facts.error.details),
+            }
+        call_error = ErrorValue(code=f"transport_{raw.error}", stage="transport", details=details)
     status = AttemptStatus.FAILED if call_error is not None else AttemptStatus.SUCCEEDED
     assumed = raw.error is not None
     contract = command.assumption_contract if assumed else command.returned_contract

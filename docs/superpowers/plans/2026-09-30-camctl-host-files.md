@@ -159,7 +159,7 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **预计文件：** `apps/camctl/src/camctl/host_files/media.py`；测试为 `apps/camctl/tests/unit/host_files/test_media.py` 和 `apps/camctl/tests/integration/host_files/test_media.py`。
 
-**接口与依赖：** 提供异步 `probe_media(input: FileRef, request: ProbeRequest) -> MediaProbe`、`repair_media(input: FileRef, output: FileRef, request: RepairRequest) -> MediaArtifact`；请求由 C8 固定处理决定。前置交付：O3、F1/F4。
+**接口与依赖：** 异步 `probe_media`、`repair_media` 接收文件引用、绑定目录、工具请求及共享 `FileTaskExecutor`、`FileTaskId`、责任拥有者。两者返回 `FileTaskResult`，实际执行结果的 `value` 分别承载 `MediaProbe`、`MediaArtifact`；停止通过执行器或接手句柄请求。请求由 C8 固定处理决定。前置交付：O3、F1/F2/F4。
 
 - [x] 编写失败用例。建立 `test_failed_media_output_is_not_complete`，工具失败但文件存在，`assert artifact.complete is False`；精确媒体时长不舍入到目标毫秒，非法结构与读取错误单独分类。probe/repair 不改变动作终态或源文件。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_media.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
@@ -169,9 +169,11 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_media.py -q`，真实最小媒体文件与工具验证成功/失败及取消，未安装工具按实际配置或处理错误分类。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 媒体包装和工具入口是否绕过 O3，是否把遗留文件当成功；记录门禁证据，建议以“feat: 接入受管媒体文件处理”形成独立提交。
 
-调用错误与实际退出、数字精度及非法时长分类的局部验证见[媒体结果计划 M1](2026-10-03-camctl-media-results-review.md#实施顺序与验收)。可靠视频时长、取消后的结果责任及保存链按 M2、M3b、M4 继续验证；脚本工具集成测试不能代替真实媒体样本验收。
+调用错误与实际退出、数字精度及非法时长分类的局部验证见[媒体结果计划 M1](2026-10-03-camctl-media-results-review.md#实施顺序与验收)。可靠视频时长及保存链按 M2、M4 继续验证；脚本工具集成测试不能代替真实媒体样本验收。
 
-文件观察、摘要及同步结果的局部接口按该计划 M3a 验证；截断、摘要、文件同步和目录同步的关闭错误保留实际效果及先前错误。M3b 的线程执行与完整任务责任、M4 的保存仍未完成，F6 总门禁保持未勾选。
+文件观察、摘要及同步结果的局部接口按该计划 M3a 验证；截断、摘要、文件同步和目录同步的关闭错误保留实际效果及先前错误。M4 的保存仍未完成，F6 总门禁保持未勾选。
+
+- [x] M3b 验证媒体任务与同步文件任务共用占用登记，覆盖排队、实际执行、等待取消、结果未领取及拥有者接手。真实线程池与工具组合确认停止后只做适用收场；信号和输出读取错误不丢失实际退出与文件事实。
 
 ### F7 文件消费者及失败边界组合
 

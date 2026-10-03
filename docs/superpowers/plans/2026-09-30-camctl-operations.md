@@ -123,6 +123,8 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/operations/test_process.py -q`，真实 Linux 工具、包装后代和输出管道，覆盖正常、超时及取消收场；真实 C 原组收场由根 O6 用例核验。
 - [x] 审阅实际接口、状态分区及失败路径，检查 ADB、ffmpeg、ffprobe 及包装程序所有启动入口和句柄继承；记录门禁证据，建议以“feat: 实现受管工具生命周期”形成独立提交。
 
+- [x] 按[媒体结果计划的进程异常收场契约](2026-10-03-camctl-media-results-review.md#m3b-的进程异常收场契约)验证启动分类、发送信号时恰好退出、两次信号发送失败、输出读取失败及组合错误。输出失败触发原终止流程；辅助观察任务完成收场，媒体文件占用持续到实际工作结束，ADB 保留传输与响应错误及可靠观察。
+
 ### O4 独立查询责任与产物核实轮次
 
 **预计文件：** `apps/camctl/src/camctl/operations/queries.py`；测试为 `apps/camctl/tests/unit/operations/test_queries.py` 和 `apps/camctl/tests/integration/operations/test_queries.py`。

@@ -23,7 +23,7 @@ from camctl.operations.models import (
     EffectState,
     ErrorValue,
 )
-from camctl.operations.process import LocalExit, RawToolOutcome, ToolSpec
+from camctl.operations.process import LocalExit, RawToolOutcome, SignalFailure, SignalStage, ToolSpec
 from camctl.devices.adb_transport import (
     DeviceCommand,
     InterpretedFacts,
@@ -203,7 +203,8 @@ async def test_timeout_records_assumption_with_grace() -> None:
     assert outcome.effect is EffectState.UNKNOWN
 
 
-async def test_success_then_error_keeps_both() -> None:
+@pytest.mark.parametrize("error", ["timeout", "output_failed"])
+async def test_success_then_error_keeps_both(error) -> None:
     observation = DeviceObservation(
         type="file_digest_obtained", version=1, data={"file_id": "5", "sha256": "a" * 64}
     )
@@ -215,12 +216,17 @@ async def test_success_then_error_keeps_both() -> None:
         _command(interpreter),
         _TICKET,
         _Transport(
-            RawToolOutcome(exit=LocalExit(exit_code=0), output=b"digest", error="timeout", used_grace_s=Decimal(3))
+            RawToolOutcome(
+                exit=LocalExit(exit_code=0), output=b"digest", error=error, used_grace_s=Decimal(3),
+                output_failure="read failed" if error == "output_failed" else None,
+            )
         ),
     )
     assert outcome.status.value == "failed"
     assert outcome.effect is EffectState.CONFIRMED
     assert outcome.observations == (observation,)
+    if error == "output_failed":
+        assert outcome.error.details["output_failure"] == "read failed"
 
 
 async def test_local_exit_alone_never_confirms() -> None:
@@ -241,3 +247,26 @@ async def test_no_implicit_retries() -> None:
     )
     await invoke(_command(interpreter), _TICKET, transport)
     assert transport.runs == 1
+
+
+@pytest.mark.parametrize("response_error", [None, ErrorValue("device_failed", "response", {"reason": "rejected"})])
+async def test_signal_failure_and_response_error_are_preserved(response_error):
+    interpreter = _Interpreter(InterpretedFacts(
+        observations=(), error=response_error, effect=EffectState.UNKNOWN,
+    ))
+    raw = RawToolOutcome(
+        LocalExit(exit_code=7), b"", "cancelled", Decimal(3),
+        (SignalFailure(SignalStage.KILL, "PermissionError: denied"),),
+        output_failure="OSError: pipe read failed",
+    )
+    outcome = await invoke(_command(interpreter), _TICKET, _Transport(raw))
+    assert outcome.error.code == "transport_cancelled"
+    assert outcome.error.details["signal_failures"] == [
+        {"stage": "kill", "message": "PermissionError: denied"},
+    ]
+    assert outcome.call_info.local_exit_code == 7
+    assert outcome.error.details["output_failure"] == "OSError: pipe read failed"
+    if response_error is not None:
+        assert outcome.error.details["response_error"] == {
+            "code": "device_failed", "stage": "response", "details": {"reason": "rejected"},
+        }

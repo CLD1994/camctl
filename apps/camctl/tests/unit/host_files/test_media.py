@@ -24,7 +24,7 @@ from media_helpers import probe_media, repair_media
 from camctl.host_files.models import (
     BoundDirectories, FileObservation, FileObservationKind, FilePurpose, FileRef,
 )
-from camctl.operations.process import LocalExit, RawToolOutcome
+from camctl.operations.process import LocalExit, RawToolOutcome, SignalFailure, SignalStage, ToolStartError
 
 pytestmark = pytest.mark.asyncio
 
@@ -233,7 +233,7 @@ async def test_probe_tool_failed(fake: FakeMedia) -> None:
 
 
 async def test_tool_unavailable(fake: FakeMedia) -> None:
-    fake.fail_spawn = FileNotFoundError("no ffprobe")
+    fake.fail_spawn = ToolStartError("no ffprobe")
     probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
     assert probe.error is not None
     assert probe.error.startswith("tool_unavailable")
@@ -244,6 +244,56 @@ async def test_tool_unavailable(fake: FakeMedia) -> None:
     assert artifact.complete is False
     assert artifact.error is not None
     assert artifact.error.startswith("tool_unavailable")
+
+
+@pytest.mark.parametrize("entry", ["probe", "repair"])
+async def test_signal_failure_keeps_actual_exit_and_reason(fake, entry):
+    fake.outcome = RawToolOutcome(
+        LocalExit(exit_code=7), b"", "cancelled", Decimal("1"),
+        (SignalFailure(SignalStage.TERMINATE, "PermissionError: denied"),),
+        output_failure="OSError: pipe read failed",
+    )
+    if entry == "probe":
+        result = await probe_media(_input_ref(), _roots(), ProbeRequest())
+    else:
+        result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+    assert "exit=7" in result.error
+    assert "cancelled" in result.error
+    assert "terminate" in result.error and "denied" in result.error
+    assert "pipe read failed" in result.error
+    assert "tool_unavailable" not in result.error
+
+
+@pytest.mark.parametrize("entry", ["probe", "repair"])
+async def test_stop_before_tool_start_preserves_no_dispatch(fake, entry):
+    import asyncio
+    from camctl.host_files.tasks import FileTaskExecutor, FileTaskId
+    from camctl.session.supervision import Supervisor
+
+    class Owner:
+        async def take_over(self, task):
+            raise AssertionError("正常领取不应接手")
+
+    executor, identity = FileTaskExecutor(Supervisor()), FileTaskId("before-tool")
+    kwargs = dict(executor=executor, task_id=identity, owner=Owner())
+    operation = (media.probe_media(_input_ref(), _roots(), ProbeRequest(), **kwargs)
+                 if entry == "probe" else media.repair_media(
+                     _input_ref(), _output_ref(), _roots(), RepairRequest(), **kwargs))
+    waiting = asyncio.create_task(operation)
+    await asyncio.sleep(0)
+    executor.request_stop(identity)
+    result = await waiting
+    assert result.error is None and "tool_cancelled" in result.value.error
+    assert fake.argvs == []
+    assert executor.unfinished_files() == ()
+
+
+async def test_repair_rejects_same_file_before_starting_tool(fake):
+    from camctl.host_files.tasks import FileTaskError
+
+    with pytest.raises(FileTaskError):
+        await repair_media(_input_ref(), _input_ref(), _roots(), RepairRequest())
+    assert fake.argvs == []
 
 
 async def test_probe_argv_uses_managed_prefix(fake: FakeMedia) -> None:
