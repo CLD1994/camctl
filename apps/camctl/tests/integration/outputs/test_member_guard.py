@@ -9,6 +9,7 @@ import pytest
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.reads import ReadCoverage
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.transaction import (
     CommandPlan, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change,
@@ -124,6 +125,8 @@ def test_explicit_selected_member_keeps_requested_identity(member_context):
 
 
 def test_unresolved_explicit_member_can_end_without_output_association(member_context):
+    member_context = replace(member_context,
+        read_coverage=ReadCoverage({("outputs", "id"): frozenset({999})}))
     member_context.state_rows["obtain_items"][101].update(
         status=1, basis=5, requested_output_id=999, output_id=None,
     )
@@ -173,7 +176,12 @@ class _AdvanceMember:
         event = event_envelope(allocation.first_event_id, allocation.txn_id, 21,
             self.reason, (update_change("obtain_items", 101,
                 {key: item[key] for key in after}, after),), _NOW)
-        return CommandPlan((event,), {("obtain_items", 101): ("action", 31)}, state)
+        requested = item["requested_output_id"]
+        target = row_facts(scope.connection, "outputs", requested)
+        if target is not None:
+            state["outputs"][requested] = target
+        return CommandPlan((event,), {("obtain_items", 101): ("action", 31)}, state,
+            read_coverage=ReadCoverage({("outputs", "id"): frozenset({requested})}))
 
 
 @pytest.mark.parametrize("reason", [2, 4])

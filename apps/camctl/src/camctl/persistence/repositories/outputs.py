@@ -120,6 +120,7 @@ _REJECT_REASON = 2
 _RESOLVE_REASON = 4
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
 _OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
+_OUTPUT_NOT_FOUND_CODE = item_error_id("obtain_items", "output_not_found")
 _OUTPUT_SOURCE_MISMATCH_CODE = item_error_id("obtain_items", "output_source_mismatch")
 _OUTPUT_CLEANUP_STARTED_CODE = item_error_id("obtain_items", "output_cleanup_started")
 _SOURCE_FILE_UNCONFIRMED_CODE = item_error_id("obtain_items", "source_file_unconfirmed")
@@ -704,11 +705,7 @@ class _FixSelectionCommand:
         snapshot = SelectionSnapshot(
             is_fixed=True,
             source_error_code=after.get("error_code"),
-            items=tuple(SelectedItem(**{
-                field.name: row["after"]["values"][
-                    "error_details_json" if field.name == "error_details" else field.name]
-                for field in fields(SelectedItem)
-            }) for row in items),
+            items=tuple(_selected_item(row["after"]["values"]) for row in items),
         )
         if not _same_selection(command.snapshot, snapshot):
             raise TransactionError("选择固定的完整快照与原事务不同")
@@ -753,14 +750,10 @@ def _check_fixed_selection(connection, selection_id, selected, items) -> None:
                         and current["status"] == int(_ITEM_STATUS.UNRESOLVED))
                     or (terminal and any(not json_equal(current[name], initial[name]) for name in changing))):
                 raise ConsistencyError(f"已固定取回项的目标或终态改变: {original['id']}")
-            known = {output_id, initial["output_id"], initial["original_output_id"], initial["preview_output_id"]}
-            if (initial["status"] == int(_ITEM_STATUS.UNRESOLVED)
-                    or initial["error_code"] == _OUTPUT_SOURCE_MISMATCH_CODE):
+            known = _known_output_ids(initial) | _known_output_ids(current)
+            if initial["status"] == int(_ITEM_STATUS.UNRESOLVED):
                 known.add(initial["requested_output_id"])
-            for identity in known - {None}:
-                with closing(connection.execute("SELECT 1 FROM outputs WHERE id = ?", (identity,))) as output:
-                    if output.fetchone() is None:
-                        raise ConsistencyError(f"已固定取回项引用的产物记录缺失: {identity}")
+            _require_output_records(connection, known)
         if cursor.fetchone() is not None:
             raise ConsistencyError(f"已固定来源选择的成员增加: {selection_id}")
 
@@ -1176,41 +1169,43 @@ def _family_members(reads: _FamilyReads, output_id: int) -> tuple[_CatalogMember
     return tuple(by_kind.values())
 
 
+def _known_output_ids(values: Mapping[str, Any]) -> set[int]:
+    """保存的关联及来源不匹配证明记录存在；裸请求不构成存在证明。"""
+    known = {values.get(name) for name in ("output_id", "original_output_id", "preview_output_id")} - {None}
+    if values.get("error_code") == _OUTPUT_SOURCE_MISMATCH_CODE:
+        requested = values.get("requested_output_id")
+        if requested is None:
+            raise ConsistencyError("来源不匹配的取回项缺少原请求产物身份")
+        known.add(requested)
+    return known
+
+
+def _require_output_records(connection, identities: set[int]) -> None:
+    for identity in sorted(identities):
+        with closing(connection.execute("SELECT 1 FROM outputs WHERE id = ?", (identity,))) as cursor:
+            if cursor.fetchone() is None:
+                raise ConsistencyError(f"已保存取回项引用的产物记录缺失: {identity}")
+
+
+def _selected_item(values: Mapping[str, Any]) -> SelectedItem:
+    return SelectedItem(**{
+        field.name: (_decoded(values["error_details_json"]) if field.name == "error_details" else values[field.name])
+        for field in fields(SelectedItem)
+    })
+
+
 def _saved_items(connection, selection_id: int) -> list[SelectedItem]:
-    with closing(connection.execute(
-        "SELECT requested_output_id, output_id, basis, original_output_id,"
-        " preview_output_id, preview_size, repaired_size, status, error_code,"
-        " error_details_json FROM obtain_items WHERE selection_id = ? ORDER BY id",
-        (selection_id,),
-    )) as cursor:
-        rows = cursor.fetchall()
+    columns = ("requested_output_id", "output_id", "basis", "original_output_id", "preview_output_id",
+               "preview_size", "repaired_size", "status", "error_code", "error_details_json")
     items: list[SelectedItem] = []
-    for row in rows:
-        output_id = row[1]
-        if output_id is not None:
-            with closing(connection.execute(
-                "SELECT 1 FROM outputs WHERE id = ?", (output_id,)
-            )) as cursor:
-                exists = cursor.fetchone()
-            if exists is None:
-                raise ConsistencyError(
-                    f"已保存取回项引用的产物记录缺失: 选择 {selection_id}"
-                    f" 产物 {output_id}"
-                )
-        items.append(
-            SelectedItem(
-                basis=int(row[2]),
-                status=int(row[7]),
-                output_id=output_id,
-                requested_output_id=row[0],
-                original_output_id=row[3],
-                preview_output_id=row[4],
-                preview_size=row[5],
-                repaired_size=row[6],
-                error_code=row[8],
-                error_details=_decoded(row[9]),
-            )
-        )
+    with closing(connection.execute(
+        f"SELECT {', '.join(columns)} FROM obtain_items WHERE selection_id = ? ORDER BY id", (selection_id,),
+    )) as cursor:
+        while rows := cursor.fetchmany(128):
+            for row in rows:
+                values = dict(zip(columns, row))
+                _require_output_records(connection, _known_output_ids(values))
+                items.append(_selected_item(values))
     return items
 
 
@@ -1372,6 +1367,9 @@ class _GrantFileCommand:
         selection = self._required(connection, "obtain_source_selections", item["selection_id"])
         dependency = self._required(connection, "action_dependencies", selection["dependency_id"])
         output = self._required(connection, "outputs", command.output_id)
+        for identity in _known_output_ids(item):
+            if identity not in self._state["outputs"]:
+                self._required(connection, "outputs", identity)
         source_action = self._required(connection, "actions", dependency["depends_on_action_id"])
         source_role = {
             int(_OUTPUT_KIND.ORIGINAL): int(_DEVICE_FILE_ROLE.ORIGINAL),
@@ -2341,6 +2339,8 @@ def _obtain_member_guard(event, context) -> None:
         raise EventValidationError("取回成员核实或拒绝必须恰好推进一条已有项")
     row = updates[0]
     item = _required_current_facts(context, "obtain_items", row.row_id)
+    for identity in _known_output_ids(item):
+        _required_current_facts(context, "outputs", identity)
     selection = _required_current_facts(context, "obtain_source_selections", item.get("selection_id"))
     dependency = _required_current_facts(context, "action_dependencies", selection.get("dependency_id"))
     owner = _required_current_facts(context, "actions", dependency.get("action_id"))
@@ -2375,6 +2375,17 @@ def _obtain_member_guard(event, context) -> None:
         raise EventValidationError("显式成员必须保留原请求产物 ID")
     if event.reason == _REJECT_REASON:
         _validate_obtain_error({**item, **row.after.values}, dependency["depends_on_action_id"])
+        code = row.after.values.get("error_code")
+        requested = item.get("requested_output_id")
+        if code == _OUTPUT_NOT_FOUND_CODE:
+            if context.complete_rows("outputs", "id", requested):
+                raise EventValidationError("当前查询已有请求产物，不能保存为不存在")
+        elif code == _OUTPUT_SOURCE_MISMATCH_CODE:
+            target = _required_current_facts(context, "outputs", requested)
+            target_source = target.get("source_action_id")
+            if (not is_json_integer(target_source) or target_source <= 0
+                    or target_source == dependency["depends_on_action_id"]):
+                raise EventValidationError("来源不匹配必须由当前其他来源产物证明")
     if event.reason == _RESOLVE_REASON:
         if not unresolved:
             raise EventValidationError("显式核实只能推进原 UNRESOLVED 项")
@@ -2422,6 +2433,8 @@ def _read_permission_guard(event, context) -> None:
         if delivery is None or delivery.get("status") != int(_DELIVERY_STATUS.PENDING):
             raise EventValidationError("授予回填的交付必须已在同事务建档")
         item = _required_current_facts(context, "obtain_items", row.row_id)
+        for identity in _known_output_ids(item):
+            _required_current_facts(context, "outputs", identity)
         selection = _required_current_facts(context, "obtain_source_selections", item.get("selection_id"))
         dependency = _required_current_facts(context, "action_dependencies", selection.get("dependency_id"))
         if (delivery.get("action_id") != dependency.get("action_id")
