@@ -72,7 +72,7 @@ def _read_rows(internal=False):
             "source_device_file_id": 501, "source_intermediate_file_id": None,
             "target_file_id": 602 if internal else 601, "round": 1, "recopies_used": 0,
             "max_recopies_used": 0, "source_size": 4096, "source_sha256": None,
-            "committed_bytes": 0, "reset_state": 1, "slot_device_id": "cam-1",
+            "committed_bytes": 0, "reset_state": 1, "slot_device_id": None,
             "verification_state": 1, "target_sha256": None, "verification_error_json": None,
         }),
     )
@@ -182,6 +182,9 @@ def test_legal_read_uses_consumer_parent_and_original_flow(read_environment, int
     owned = read_environment
     created = commit_operation(CreateReadAndCopy(internal), new_operation_key(), owned)
     assert created.kind == "completed", created.error
+    # 消费端以已持有机会为前提；共同建档本身仍保存空机会。
+    owned.connection.execute("UPDATE file_copies SET slot_device_id='cam-1' WHERE id=51")
+    owned.connection.commit()
     repository = OperationRepository()
     key = new_operation_key()
     intent = _read_intent(internal)

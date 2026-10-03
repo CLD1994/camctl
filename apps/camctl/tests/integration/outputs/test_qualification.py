@@ -15,9 +15,12 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import register_acceptance_guards
+from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import (
     OutputsRepository,
     register_outputs_guards,
@@ -32,6 +35,7 @@ from camctl.outputs.qualification import (
 from ..persistence.test_runtime import _create_valid_database
 
 register_acceptance_guards()
+register_operation_guards()
 register_outputs_guards()
 
 _NOW = 1_750_000_000_000_000
@@ -68,6 +72,15 @@ def _seed_environment(tmp_path: Path):
     )
     connection.commit()
     return target, owned
+
+
+@pytest.fixture
+def qualification_environment(tmp_path):
+    _, owned = _seed_environment(tmp_path)
+    try:
+        yield owned
+    finally:
+        owned.connection.close()
 
 
 def _seed_plan(connection: sqlite3.Connection, plan_id: int) -> None:
@@ -330,9 +343,9 @@ def _row(owned, sql: str, *params):
     return owned.connection.execute(sql, params).fetchone()
 
 
-def test_qualification_uses_business_order(tmp_path: Path) -> None:
+def test_qualification_uses_business_order(qualification_environment) -> None:
     """计划时间排序先于协程唤醒顺序；同时间取回优先。"""
-    target, owned = _seed_environment(tmp_path)
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -368,12 +381,11 @@ def test_qualification_uses_business_order(tmp_path: Path) -> None:
     # 授予后设备槽被占用，较晚候选仍不可开始。
     late_retry = _grant(owned, repository, _candidate(late))
     assert not _granted(late_retry)
-    owned.close()
 
 
-def test_same_time_obtain_wins_over_processing(tmp_path: Path) -> None:
+def test_same_time_obtain_wins_over_processing(qualification_environment) -> None:
     """同一计划时间下取回候选优先于录像内部处理候选。"""
-    target, owned = _seed_environment(tmp_path)
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -401,12 +413,11 @@ def test_same_time_obtain_wins_over_processing(tmp_path: Path) -> None:
     assert not _granted(processing_first)
     obtain_first = _grant(owned, repository, _candidate(obtain))
     assert _granted(obtain_first)
-    owned.close()
 
 
-def test_existing_read_protection_preserves_original_copy(tmp_path: Path) -> None:
+def test_existing_read_protection_preserves_original_copy(qualification_environment) -> None:
     """源文件已有活动拷贝时保留原拷贝，新申请不抢占。"""
-    target, owned = _seed_environment(tmp_path)
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -432,12 +443,11 @@ def test_existing_read_protection_preserves_original_copy(tmp_path: Path) -> Non
     # 原拷贝行保持不变。
     assert _row(owned, "SELECT committed_bytes FROM file_copies WHERE id = 900")[0] == 0
     assert _row(owned, "SELECT count(*) FROM file_copies")[0] == 1
-    owned.close()
 
 
-def test_cleanup_restriction_rejects_and_records(tmp_path: Path) -> None:
+def test_cleanup_restriction_rejects_and_records(qualification_environment) -> None:
     """不可撤销清理限制：逐项保存最终失败，不建立任何读取档案。"""
-    target, owned = _seed_environment(tmp_path)
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -471,11 +481,10 @@ def test_cleanup_restriction_rejects_and_records(tmp_path: Path) -> None:
     assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 0
     assert _row(owned, "SELECT count(*) FROM intermediate_files")[0] == 0
     assert _row(owned, "SELECT count(*) FROM operation_runs WHERE kind = 3")[0] == 0
-    owned.close()
 
 
-def test_delete_in_progress_rejects_with_dedicated_code(tmp_path: Path) -> None:
-    target, owned = _seed_environment(tmp_path)
+def test_delete_in_progress_rejects_with_dedicated_code(qualification_environment) -> None:
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -499,12 +508,11 @@ def test_delete_in_progress_rejects_with_dedicated_code(tmp_path: Path) -> None:
     assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
     item = _row(owned, "SELECT status, error_code FROM obtain_items WHERE id = 101")
     assert item == (4, 4)  # FAILED + output_cleanup_started
-    owned.close()
 
 
-def test_cross_device_candidates_do_not_block(tmp_path: Path) -> None:
+def test_cross_device_candidates_do_not_block(qualification_environment) -> None:
     """更早候选属于其他设备时不阻挡本设备授予。"""
-    target, owned = _seed_environment(tmp_path)
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -527,11 +535,10 @@ def test_cross_device_candidates_do_not_block(tmp_path: Path) -> None:
     candidate = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
     result = _grant(owned, repository, _candidate(candidate))
     assert _granted(result)
-    owned.close()
 
 
-def test_grant_creates_all_records_atomically(tmp_path: Path) -> None:
-    target, owned = _seed_environment(tmp_path)
+def test_grant_creates_all_records_atomically(qualification_environment) -> None:
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -566,7 +573,7 @@ def test_grant_creates_all_records_atomically(tmp_path: Path) -> None:
         value.copy_id,
     )
     assert copy == (
-        value.delivery_id, None, 501, 1, 0, 1, "cam-1", 1, 4096,
+        value.delivery_id, None, 501, 1, 0, 1, None, 1, 4096,
     )
     run = _row(
         owned,
@@ -596,20 +603,23 @@ def test_grant_creates_all_records_atomically(tmp_path: Path) -> None:
     )
     assert item == (3, 1, value.delivery_id)
 
-    # 同键重送复用原结果；同项新键不重复授予。
+    # 同键恢复首次结果，同项新键复用原准备责任且不写入新事实。
     repeat = repository.grant_file(_candidate(candidate), grant_key, owned)
     assert repeat.kind is DbOutcomeKind.COMPLETED
     assert repeat.value.copy_id == value.copy_id
     assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 1
+    before = tuple(connection.iterdump())
     again = _grant(owned, repository, _candidate(candidate))
-    assert not _granted(again)
+    assert _granted(again), again.error
+    assert (again.value.copy_id, again.value.run_id, again.value.delivery_id, again.value.target_file_id) == (
+        value.copy_id, value.run_id, value.delivery_id, value.target_file_id)
+    assert tuple(connection.iterdump()) == before
     assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 1
-    owned.close()
 
 
-def test_internal_processing_grant_skips_delivery(tmp_path: Path) -> None:
-    """内部检查/修复共用读取机会：建档不含交付与取回项更新。"""
-    target, owned = _seed_environment(tmp_path)
+def test_internal_processing_grant_skips_delivery(qualification_environment) -> None:
+    """内部输入建档不含交付与取回项更新，初始读取机会为空。"""
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -634,7 +644,7 @@ def test_internal_processing_grant_skips_delivery(tmp_path: Path) -> None:
         " WHERE id = ?",
         value.copy_id,
     )
-    assert copy == (None, 5, "cam-1")
+    assert copy == (None, 5, None)
     run = _row(
         owned, "SELECT delivery_id, kind FROM operation_runs WHERE id = ?",
         value.run_id,
@@ -646,12 +656,11 @@ def test_internal_processing_grant_skips_delivery(tmp_path: Path) -> None:
         value.target_file_id,
     )
     assert target_file == (2, 11)
-    owned.close()
 
 
-def test_unavailable_output_rejects_without_records(tmp_path: Path) -> None:
+def test_unavailable_output_rejects_without_records(qualification_environment) -> None:
     """产物不可用：逐项失败且不建立任何读取档案（整笔拒绝）。"""
-    target, owned = _seed_environment(tmp_path)
+    owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
@@ -674,4 +683,3 @@ def test_unavailable_output_rejects_without_records(tmp_path: Path) -> None:
     assert _row(owned, "SELECT count(*) FROM file_copies")[0] == 0
     assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 0
     assert _row(owned, "SELECT count(*) FROM operation_runs WHERE kind = 3")[0] == 0
-    owned.close()

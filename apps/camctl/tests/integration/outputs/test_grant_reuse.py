@@ -66,6 +66,11 @@ def test_original_key_returns_exact_first_grant(granted):
 
 
 def _later_attempt(owned, command, first):
+    # 已持有机会的投影夹具；本测试验证后续读取与原建档响应的关系。
+    if command.source_device_file_id is not None:
+        owned.connection.execute("UPDATE file_copies SET slot_device_id='cam-1' WHERE id=?",
+                                 (first.copy_id,))
+        owned.connection.commit()
     intent = AttemptIntent(operation="read", action_id=command.action_id, kind=OperationKind.READ_FILE,
         target=AttemptTarget(copy_id=first.copy_id), query_purpose=None,
         config=AttemptConfig(5, Decimal("23.000000000000000001"), Decimal("2.1")) if command.config else AttemptConfig(1),

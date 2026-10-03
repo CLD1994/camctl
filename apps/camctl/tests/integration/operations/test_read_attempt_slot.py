@@ -18,6 +18,17 @@ from ..outputs.test_grant_reuse import granted, read_request, read_targets, loca
 from ..outputs.test_selection_reuse_boundaries import _ReadProbe
 
 
+@pytest.fixture
+def ready_read(granted):
+    """提供已持有机会的当前事实，不替代机会授予事务的验收。"""
+    owned, command, _, prepared = granted
+    if command.source_device_file_id is not None:
+        owned.connection.execute("UPDATE file_copies SET slot_device_id='cam-1' WHERE id=?",
+                                 (prepared.copy_id,))
+        owned.connection.commit()
+    return granted
+
+
 def _intent(command, prepared):
     config = AttemptConfig(3, "10", "0") if command.config is not None else AttemptConfig(1)
     return AttemptIntent("read", command.action_id, OperationKind.READ_FILE,
@@ -25,8 +36,8 @@ def _intent(command, prepared):
 
 
 @pytest.mark.parametrize("slot", ["held", "absent", "foreign"])
-def test_new_read_attempt_requires_its_own_device_slot(granted, slot):
-    owned, command, _, prepared = granted
+def test_new_read_attempt_requires_its_own_device_slot(ready_read, slot):
+    owned, command, _, prepared = ready_read
     if slot != "held":
         owned.connection.execute("UPDATE file_copies SET slot_device_id=? WHERE id=?",
                                  (None if slot == "absent" else "another-camera", prepared.copy_id))
@@ -49,8 +60,8 @@ def test_new_read_attempt_requires_its_own_device_slot(granted, slot):
     assert tuple(owned.connection.iterdump()) == before
 
 
-def test_read_attempt_cannot_use_a_different_copy_round(granted):
-    owned, command, _, prepared = granted
+def test_read_attempt_cannot_use_a_different_copy_round(ready_read):
+    owned, command, _, prepared = ready_read
     before = tuple(owned.connection.iterdump())
     result = OperationRepository().begin_attempt(replace(_intent(command, prepared), copy_round=2),
                                                  new_operation_key(), owned)
@@ -59,8 +70,8 @@ def test_read_attempt_cannot_use_a_different_copy_round(granted):
     assert tuple(owned.connection.iterdump()) == before
 
 
-def test_read_attempt_requires_the_record_of_its_source(granted):
-    owned, command, _, prepared = granted
+def test_read_attempt_requires_the_record_of_its_source(ready_read):
+    owned, command, _, prepared = ready_read
     table, identity = (("device_files", command.source_device_file_id) if command.source_device_file_id is not None
                        else ("intermediate_files", command.source_intermediate_file_id))
     owned.connection.execute(f"DELETE FROM {table} WHERE id=?", (identity,))
@@ -74,8 +85,8 @@ def test_read_attempt_requires_the_record_of_its_source(granted):
 
 @pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
 @pytest.mark.parametrize("binding", ["missing_observer", "different_device", "different_driver"])
-def test_read_attempt_requires_consistent_original_device_binding(granted, binding):
-    owned, command, _, prepared = granted
+def test_read_attempt_requires_consistent_original_device_binding(ready_read, binding):
+    owned, command, _, prepared = ready_read
     owned.connection.execute("UPDATE device_files SET observer_action_id=? WHERE id=?",
                              (999 if binding == "missing_observer" else 12, command.source_device_file_id))
     if binding != "missing_observer":
@@ -90,8 +101,8 @@ def test_read_attempt_requires_consistent_original_device_binding(granted, bindi
 
 
 @pytest.mark.parametrize("state", ["released", "next_round"])
-def test_original_read_intent_does_not_reapply_current_slot_or_round(granted, state):
-    owned, command, _, prepared = granted
+def test_original_read_intent_does_not_reapply_current_slot_or_round(ready_read, state):
+    owned, command, _, prepared = ready_read
     intent, key = _intent(command, prepared), new_operation_key()
     repository = OperationRepository()
     first = repository.begin_attempt(intent, key, owned)
@@ -123,8 +134,8 @@ def _proposal(owned, command, prepared):
 
 @pytest.mark.parametrize("read_request", ["device", "internal"], indirect=True)
 @pytest.mark.parametrize("change", ["slot", "round", "source", "binding"])
-def test_formal_read_intent_cannot_use_future_slot_facts(granted, change):
-    owned, command, _, prepared = granted
+def test_formal_read_intent_cannot_use_future_slot_facts(ready_read, change):
+    owned, command, _, prepared = ready_read
     event, context = _proposal(owned, command, prepared)
     validate_event(event, context)
     future = deepcopy(context.state_rows)
@@ -161,8 +172,8 @@ class _IncompleteRead:
 
 
 @pytest.mark.parametrize("mutation", ["slot", "round", "source"])
-def test_real_intent_transaction_requires_complete_current_read_facts(granted, mutation, monkeypatch):
-    owned, command, _, prepared = granted
+def test_real_intent_transaction_requires_complete_current_read_facts(ready_read, mutation, monkeypatch):
+    owned, command, _, prepared = ready_read
     original = validators.NAMED_GUARDS["attempt_intent"]
     reached = []
 
@@ -181,8 +192,8 @@ def test_real_intent_transaction_requires_complete_current_read_facts(granted, m
 
 
 @pytest.mark.parametrize("failure", ["execute", "fetch"])
-def test_read_source_query_failure_is_preserved_without_attempt(granted, failure):
-    owned, command, _, prepared = granted
+def test_read_source_query_failure_is_preserved_without_attempt(ready_read, failure):
+    owned, command, _, prepared = ready_read
     table = "device_files" if command.source_device_file_id is not None else "intermediate_files"
     probe = _ReadProbe(owned.connection, f"SELECT * FROM {table}", failure)
     before = tuple(owned.connection.iterdump())
