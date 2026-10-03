@@ -2,7 +2,7 @@
 
 [来源与取回职责](sources-obtaining.md) · [清理与取消职责](cleanup-cancellation.md) · [结构定义](schema/workflows.sql)
 
-本页定义关系及明细表的字段语义。取回与清理的状态及类型编号见[内部枚举登记](enum-registry.json)；各类明细的错误编号见[公共错误登记](../../../protocol/errors/workflow-codes.json)的 `item_error_ids`，不从正文排列顺序推导编号。结构同步状态见[实施准备](../implementation-readiness.md#数据库规格同步清单)；每条关系都有自己的正整数 `id`，记录永久保留。所属动作的来源解析和目标固定状态见[计划与动作](plans-actions.md#来源解析与目标集合)。
+本页定义关系及明细表的字段语义。取回与清理的状态及类型编号见[内部枚举登记](enum-registry.json)；各类明细的错误编号见[公共错误登记](../../../protocol/errors/workflow-codes.json)的 `item_error_ids`，不从正文排列顺序推导编号。结构同步状态见[结构与检查边界](schema/README.md#结构同步状态)；每条关系都有自己的正整数 `id`，记录永久保留。所属动作的来源解析和目标固定状态见[计划与动作](plans-actions.md#来源解析与目标集合)。
 
 整数编号由[统一定义](enum-registry.json)提供，[编号一览](enum-values.md)从该定义生成。本页使用成员名称说明字段含义和处理规则。
 

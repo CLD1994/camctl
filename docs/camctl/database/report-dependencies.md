@@ -100,4 +100,4 @@ node --disable-warning=ExperimentalWarning --test tests/integration/report-depen
 
 第一版登记的 `sql_pending` 为空，全部来源列和关系使用实际 SQL 校验。历史对象的编号、主表及目录资格由[内部登记](enum-registry.json)的 `history_objects` 提供；报告字段登记中的公开实体与这些报告目标须对应，内部文件仍只作为读取依赖。
 
-条件场景从具体已保存事实检验设备提示出现和解除、原输入省略与 `null`、结果分支、交付固定依据等规则。检查器不执行全部业务不变量，也不代替生产事件处理器、Python 生成器、真实历史恢复、完整目录重建或跨组件集成。后续实现须读取本登记，并完成[历史与报告实施准备](../implementation-readiness.md#历史与报告的实施准备)规定的验证。
+条件场景从具体已保存事实检验设备提示出现和解除、原输入省略与 `null`、结果分支、交付固定依据等规则。检查器不执行全部业务不变量，也不代替生产事件处理器、Python 生成器、真实历史恢复、完整目录重建或跨组件集成。后续实现须读取本登记，并完成[历史与报告验收](consistency-verification.md#独立历史与报告重建)规定的验证。

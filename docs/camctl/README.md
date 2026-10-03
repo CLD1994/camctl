@@ -7,7 +7,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 1. 先读[设计总览](../architecture/README.md)与[概念](../architecture/concepts.md)，了解计划、动作、正式产物、交付和报告之间的关系。
 2. 按[全局阅读路线](../architecture/reading-guide.md)了解受理、执行、文件交接和报告的正常流程及失败规则。
 3. 阅读[实现总览](implementation.md)，理解运行环境、线程与进程分工、模块协作和接口完成含义。
-4. 按下表进入自己负责的实现专题，最后检查[实施准备](implementation-readiness.md)和[软件验证](verification.md)。
+4. 按下表进入自己负责的实现专题，最后按[软件验证](verification.md)核对跨模块契约及验收要求。
 5. 进入实施时，按[第一版实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)确定阶段依赖，再从[模块计划目录](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)进入所属模块的具体任务。先核对[共享实施契约](module-contracts.md)、前置交付和实际代码，再按任务的失败测试、实现步骤与门禁推进。
 
 设计中的行为契约、不变量和失败语义必须保持。标为“建议”的内部命名、物理表和接口组织可以根据实际数据流调整。库能力核验、测试通过与真实设备联调是不同层次的证据，不能互相代替。
@@ -30,15 +30,14 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | 报告进程如何启动、复用、停止和回收？ | [报告进程与通信](report-runtime.md)：任务身份、结果确认、超时、管道和工作锁 |
 | 如何证明上述软件模块能共同工作？ | [软件验证与实施顺序](verification.md)：单元测试、集成测试、契约验证和阶段方向 |
 
-## 实施准备与证据
+## 实施计划与验证依据
 
 | 文档 | 用途 |
 | --- | --- |
 | [第一版实施路线图与模块计划目录](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口) | 引用 15 个模块计划及跨组件集成计划，按任务编排阶段、前置交付和完整业务链门禁 |
 | [跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md) | C 进程启动与原组收场、客户端协议接入、真实业务闭环及全量验收映射 |
-| [实施准备与端到端契约检查](implementation-readiness.md) | 关键协作场景、实施设计交付物、计划交接条件及待决策状态 |
-| [数据库表职责核对](database-boundary-review.md) | 业务流程与表的对应关系、数据库之外的状态，以及跨表协作的验证要求 |
-| [依赖与接入核验](integration-readiness.md) | 库能力核验范围、组件协议接入任务、设备联调证据与尚未完成的技术工作 |
+| [跨模块契约检查](verification.md#跨模块契约检查) | 配置、取消、文件、历史和报告等边界的组合验证入口 |
+| [依赖能力核验与设备联调输入](integration-readiness.md) | 有日期及环境范围的库能力实验，以及真实设备联调所需证据 |
 
 各专题的验收要求共同约束实现。[真实设备联调](integration-readiness.md#设备证据与联调输入)、目标主机部署及硬件性能测量单独安排，不作为第一版软件集成测试的运行前提或通过门槛。
 

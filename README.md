@@ -4,11 +4,11 @@ camctl 项目包含个人电脑客户端、嵌入式 Linux 上的设备控制 CL
 
 ## 组件入口
 
-| 组件 | 技术与责任 | 当前状态 |
+| 组件 | 技术与责任 | 进度与验证 |
 | --- | --- | --- |
-| [客户端](apps/client/README.md) | TypeScript、React、Node.js；计划编辑、报告与媒体导入 | 已实现 MVP |
-| [camctl CLI](apps/camctl/README.md) | Python；调度、设备通信、持久化、产物与报告 | 已定义设计，待实现 |
-| [主程序 demo](apps/host-demo/README.md) | C；供对接方参考的 Linux 进程调用与文件交接示例 | 已定义职责，待实现 |
+| [客户端](apps/client/README.md) | TypeScript、React、Node.js；计划编辑、报告与媒体导入 | [客户端验证记录](docs/client/verification.md) |
+| [camctl CLI](apps/camctl/README.md) | Python；调度、设备通信、持久化、产物与报告 | [实施路线图](docs/superpowers/plans/2026-09-30-camctl-implementation-roadmap.md) |
+| [主程序 demo](apps/host-demo/README.md) | C；供对接方参考的 Linux 进程调用与文件交接示例 | [接入模块验证记录](docs/host-demo/verification.md) |
 
 ## 启动客户端
 

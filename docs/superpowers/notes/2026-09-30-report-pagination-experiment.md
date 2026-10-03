@@ -1,6 +1,6 @@
 # 报告对象分页的 SQLite 实验
 
-本页记录开发环境的查询实验，不作为目标主机性能承诺。有效算法、候选容量和 SQL 统一见[报告对象选择](../../camctl/database/report-changes.md#报告对象选择的索引与分页)，完整结构和生产验收见[实施清单](../../camctl/implementation-readiness.md#数据库规格同步清单)。
+本页记录开发环境的查询实验，不作为目标主机性能承诺。有效算法、候选容量和 SQL 统一见[报告对象选择](../../camctl/database/report-changes.md#报告对象选择的索引与分页)，完整结构见[SQL 目录](../../camctl/database/schema/README.md)，生产验收见[报告分页验证](../../camctl/database/consistency-verification.md#报告对象分页的具体查询验证)。
 
 ## 环境与测量范围
 

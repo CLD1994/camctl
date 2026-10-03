@@ -1,6 +1,6 @@
 # 报告生成进程与通信
 
-[设计入口](README.md) · [实现总览](implementation.md) · [实施准备](implementation-readiness.md)
+[设计入口](README.md) · [实现总览](implementation.md) · [跨模块契约检查](verification.md#跨模块契约检查)
 
 本页定义主进程、报告子进程和通信线程怎样协作，以及停止、超时和迟到结果怎样处理。报告的生成资格、覆盖范围和失败后触发由[状态报告](../architecture/status-reports.md)定义，实体读取与恢复由[历史查询](historical-state-query.md)定义。独立进程改变执行位置，不改变报告内容或业务责任。
 

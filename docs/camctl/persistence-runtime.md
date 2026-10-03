@@ -1,6 +1,6 @@
 # 数据库执行、事务与缓存
 
-[设计入口](README.md) · [实现总览](implementation.md) · [实施准备](implementation-readiness.md)
+[设计入口](README.md) · [实现总览](implementation.md) · [跨模块契约检查](verification.md#跨模块契约检查)
 
 本页定义数据库线程的操作接纳、事务完成与取消语义，并说明格式检查、物理结构和缓存的实现方向。历史位置 H 表示要恢复的完整事务边界，C 表示读取当前投影时绑定的边界，S 表示已保存快照的边界；概念与算法见[历史状态查询](historical-state-query.md)。表名及职责遵守[数据库结构与字段归属](database-schema.md)。未被规格固定的接口名、SQL 组织和索引方案属于实现建议，输入输出、不变量与失败分类属于必须保持的契约。
 

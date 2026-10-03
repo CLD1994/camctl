@@ -15,7 +15,7 @@
 | 保存事件时允许修改哪些字段，怎样验证状态转换？ | [事件转换规则](database/event-transitions.md) |
 | 报告字段依赖哪些历史事实，哪些变化需要报告？ | [字段依赖说明](database/report-dependencies.md)与[报告变化目录](database/report-changes.md) |
 | 部署使用哪个 SQLite 运行库，怎样检查其能力？ | [运行库与部署要求](sqlite-runtime.md) |
-| 哪些生产工作尚未完成，如何验收？ | [实施清单](implementation-readiness.md#数据库规格同步清单)与[一致性验收](database/consistency-verification.md) |
+| 哪些生产工作尚未完成，如何验收？ | [模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)与[一致性验收](database/consistency-verification.md) |
 | 哪些事实必须共同提交，提交未知时如何恢复？ | [事务接口](database/transactions.md) |
 | 各表如何表示身份、时间、空值和枚举？怎样选择列、子表或 JSON？ | [公共存储规则](database/common.md) |
 | 计划和动作如何保存原输入、受理依据、运行状态及最终错误？ | [计划与动作](database/plans-actions.md) |
@@ -29,7 +29,7 @@
 
 首次阅读先了解[公共存储规则](database/common.md)，再按负责的业务进入对应表专题。查询历史状态时，结合[历史状态查询](historical-state-query.md)；设计写事务时，结合[数据库执行与事务](persistence-runtime.md)。
 
-保存与恢复事件时，结合[事件转换规则](database/event-transitions.md)和[历史格式](database/history-formats.md)；生成报告时，结合[公共字段契约](../architecture/report-format.md)和[字段依赖说明](database/report-dependencies.md)。这些专题定义有效规则，实施状态由实施清单统一跟踪。
+保存与恢复事件时，结合[事件转换规则](database/event-transitions.md)和[历史格式](database/history-formats.md)；生成报告时，结合[公共字段契约](../architecture/report-format.md)和[字段依赖说明](database/report-dependencies.md)。这些专题定义有效规则，实施进度由[模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)跟踪。
 
 ## 主要业务对象与主表边界
 
@@ -37,9 +37,9 @@
 
 设备文件的身份、定位信息、业务归属及可靠取得的文件事实由 `device_files` 保存；主机中间文件的归属、用途及清理状态由 `intermediate_files` 保存。取消动作的逐目标处理由 `cancel_items` 保存，针对目标取回中各份交付的处理由 `cancel_delivery_items` 保存。录像内部检查与修复的决定、进度和结果由 `recording_processing` 保存，动作在设备上启动的持续活动及其已知状态由 `device_activities` 保存。
 
-显式状态同步的固定起点、开始依据和责任结束情况由 `state_syncs` 保存，客户端累计确认位置、可信历史时间下界及中间文件清理继续位置由 `runtime_state` 保存。业务投影按下表职责组织；表目录与结构同步状态分别维护。
+显式状态同步的固定起点、开始依据和责任结束情况由 `state_syncs` 保存，客户端累计确认位置、可信历史时间下界及中间文件清理继续位置由 `runtime_state` 保存。业务投影按下表职责组织；实施进度由对应模块计划跟踪。
 
-历史事实及提交分组分别由 `history_events`、`history_transactions` 保存，对象自身历史关联由 `entity_event_links` 保存，报告选择目录由 `report_entity_changes` 保存。对象快照及其维护进度分别由 `entity_snapshots`、`entity_snapshot_progress` 保存，数据库元信息由 `database_metadata` 保存。表清单的覆盖范围与跨流程职责见[数据库表职责核对](database-boundary-review.md)。
+历史事实及提交分组分别由 `history_events`、`history_transactions` 保存，对象自身历史关联由 `entity_event_links` 保存，报告选择目录由 `report_entity_changes` 保存。对象快照及其维护进度分别由 `entity_snapshots`、`entity_snapshot_progress` 保存，数据库元信息由 `database_metadata` 保存。跨表提交与恢复边界见[事务接口](database/transactions.md)。
 
 | 主表 | 一条记录表示什么 | 归属与生命周期 |
 | --- | --- | --- |
@@ -83,8 +83,21 @@
 | `entity_snapshot_progress` | [对象尚未被快照包含的变化次数](database/history.md#对象快照与维护进度) |
 | `database_metadata` | [数据库标识、实例身份、格式及目录绑定](database/reports-runtime.md#数据库元信息) |
 
+## 数据库之外的状态
+
+| 状态或数据 | 保存与恢复依据 |
+| --- | --- |
+| 普通日志、日志副本和跨会话故障轮次 | 普通日志及[独立故障标记文件](../architecture/log-failure-marker.md#跨-run-的独立状态文件)；状态库不可用时仍须保留相应诊断与交付能力 |
+| 会话接纳资格、报告工作资格 | 内核锁及实际进程状态；数据库记录不能代替持锁事实 |
+| 调度缓存、已吸收计划序号、单调钟计时及本次队列等待 | 会话内存；重启根据可靠业务记录重新建立，不能回放旧会话的锁、协程或单调钟值 |
+| 报告生成任务、分页位置与本次尝试观察边界 | 活跃任务与会话处理状态；重启通过冻结报告、业务变化、同步责任和实际文件恢复，新会话按规则重新取得处理机会 |
+| 设备绑定、驱动能力及部署配置 | 本地配置与驱动定义；用户要求、设备身份、驱动选择及生效拍摄参数随动作保存，本地执行配置在每次运行加载，实际判断依据随对应历史事实保存 |
+| 输入计划文件、正式文件、交付文件和报告 JSON | 文件系统及各自所有权规则；数据库保存身份、事实和恢复依据，完整报告 JSON 按冻结依据重建 |
+
+这些边界分别见[会话协议](../architecture/protocol-session.md)、[报告维护](../architecture/report-maintenance.md)、[报告进程](report-runtime.md)及[文件交接](../architecture/file-handoff.md)。报告的每次成功发布仍属于持久化历史，不能与生成进程的临时状态混为一谈。
+
 ## 规格维护与实施边界
 
-字段和约束在所属专题维护；各表共用的表示与事务原则只在[公共存储规则](database/common.md)定义。字段验证要求随所属定义保存，跨流程协作检查见[数据库表职责核对](database-boundary-review.md)。新增字段按职责加入对应专题，不在本入口扩展详细定义。
+字段和约束在所属专题维护；各表共用的表示与事务原则只在[公共存储规则](database/common.md)定义。字段验证要求随所属定义保存，跨流程协作检查见[一致性验收](database/consistency-verification.md)。新增字段按职责加入对应专题，不在本入口扩展详细定义。
 
-目标字段、状态组合及跨表契约由对应专题定义；[六份 SQL](database/schema/README.md)及验证脚本的同步状态见[数据库规格同步清单](implementation-readiness.md#数据库规格同步清单)。覆盖关系见[字段与结构设计覆盖](database-boundary-review.md#字段与结构设计覆盖)，实现和验证任务见[事务接口](database/transactions.md#实现与验证门槛)与[实施准备](implementation-readiness.md)。规格检查不代替生产持久化实现、软件集成或设备验证。
+目标字段、状态组合及跨表契约由对应专题定义；字段专题与 SQL 的对应关系见[结构目录](database/schema/README.md)，检查命令见[脚本说明](../../scripts/README.md#数据库结构与运行库)。生产实现遵守[事务接口的验证门槛](database/transactions.md#实现与验证门槛)，进度由模块计划跟踪。规格检查不代替生产持久化实现、软件集成或设备验证。

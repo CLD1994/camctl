@@ -1,6 +1,6 @@
 # 输入类型、精确数字与编码适配
 
-[设计入口](README.md) · [实现总览](implementation.md) · [实施准备](implementation-readiness.md)
+[设计入口](README.md) · [实现总览](implementation.md) · [跨模块契约检查](verification.md#跨模块契约检查)
 
 本页说明输入如何转为内部类型，以及数值如何经过校验、保存、历史恢复和报告输出而保持精确。公共输入的合法性由[输入契约](../architecture/plan-input.md)定义，报告字节格式由[字段契约](../architecture/report-format.md)定义；这里说明实现这些契约所需的适配。
 

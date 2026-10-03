@@ -1,6 +1,6 @@
 # 设备驱动与文件执行
 
-[设计入口](README.md) · [实现总览](implementation.md) · [实施准备](implementation-readiness.md)
+[设计入口](README.md) · [实现总览](implementation.md) · [跨模块契约检查](verification.md#跨模块契约检查)
 
 本页说明设备驱动怎样返回证据，以及协程怎样组织线程中的文件操作。取回、清理、取消和文件交接的业务规则仍由[产物专题](../architecture/outputs.md)及其细则定义；这里规定执行位置、接口完成含义与资源所有权。
 

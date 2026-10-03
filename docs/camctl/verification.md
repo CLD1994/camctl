@@ -1,6 +1,6 @@
 # 软件验证与实施顺序
 
-[设计入口](README.md) · [实现总览](implementation.md) · [实施准备](implementation-readiness.md)
+[设计入口](README.md) · [实现总览](implementation.md)
 
 本页定义 camctl 实现的测试分工和跨职责验证要求。各业务专题中的决策表及验收场景仍须逐项落实。具体阶段与门禁见[第一版实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)，接口、测试文件、失败用例和执行步骤见其引用的[模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)及[跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md)。进入代码实施前核对所需前置交付和实际代码。
 
@@ -46,3 +46,22 @@
 | 报告与文件 | 身份不匹配、迟到结果、取消及资源所有权 | 真实管道、子进程、文件同步和停止；超时后临时文件不被提前复用 |
 
 这些门禁约束后续实现。临时能力验证不计作上述生产单元或集成测试通过，设备和目标 ARM64 环境须另行验收。
+
+## 跨模块契约检查
+
+检查从输入和可靠保存的事实开始，沿实际操作、结果保存、失败、取消与重启恢复，直到报告或交付等可观察结果。下表定位需要组合验证的边界；状态分类和判定规则由链接中的专题定义。各模块的测试分别通过后，仍须验证整条业务流程。
+
+| 场景 | 规则与验收入口 | 组合验证重点 |
+| --- | --- | --- |
+| 配置变化后继续工作 | [本地配置变化](../architecture/configuration.md#本地配置变化与未完成工作)、[设备绑定异常](../architecture/configuration.md#设备绑定异常的影响范围) | 拍摄、跨设备取回、清理、取消及独立收场核对原绑定；因绑定异常而拒绝创建调用时不消耗尝试次数。新操作采用本次配置，历史次数、原身份和终态保持，其他设备继续。 |
+| 延时摄影等待与完成 | [完成核实](../architecture/camera-capture.md#设备自行结束时的等待与完成核实)、[相机验证](../architecture/camera-verification.md) | 按驱动声明区分发送与完成，不支持查询时不创建查询预算；发送锚点、跨重启等待、取消资格、文件写完与集合齐备分别验证。 |
+| 普通交付移入 ready 后，结果保存前中断 | [交付恢复决策表](../architecture/file-handoff.md#普通交付的保存顺序与中断恢复)、[产物验证](../architecture/output-verification.md) | 组合真实目录、领取模块与 SQLite，在移动、同步、保存前后中断；覆盖文件已被领取并删除、源文件已清理及取消竞争。 |
+| 来源结束后，取回与清理同时具备条件 | [资格授予顺序](../architecture/outputs.md#延后执行时的取回与清理顺序)、[数据库一致性验收](database/consistency-verification.md#取回读取保护与清理) | 交换唤醒、选择保存和查询返回顺序；覆盖动作、组、计划、显式产物 ID、自动预览及重启恢复。 |
+| 取消动作自身被取消 | [取消阶段与目标范围](../architecture/task-cancellation.md#取消动作自身被取消)、[取消计划](../superpowers/plans/2026-09-30-camctl-cancellation.md) | 分别验证后一次取消是否直接包含原目标，以及完整目标集合包含自身的情形；设备停止、文件结束与交付撤回责任均须保留。 |
+| 取消后的完整副本与录像处理中间文件 | [取回文件生命周期](../architecture/obtaining-outputs.md#取回中间文件的保留与清理)、[录像处理文件生命周期](../architecture/camera-recovery.md#内部中间文件的保留与清理)、[清理预算](../architecture/file-handoff.md#中间文件清理的运行预算) | 在取消、实际操作结束、成品登记及删除保存前后中断；覆盖归属未知、后续仍需使用、删除失败、跨会话继续位置及同次运行重复发现。 |
+| 日志错误触发副本交付 | [写入通知](logging-runtime.md#日志适配与写入完成通知)、[日志交付](../architecture/log-delivery.md)、[故障标记](../architecture/log-failure-marker.md) | 组合队列、持锁写入与复制、标记及文件交接；覆盖创建或更新标记失败、取消、遗留文件清理和状态库不可用。 |
+| 业务事实保存后生成历史报告 | [历史与报告验收](database/consistency-verification.md#独立历史与报告重建)、[报告验证](../architecture/report-acceptance.md) | 比较从初始状态回放、快照正向恢复及当前投影逆向恢复；对象及关联均取自同一完整历史边界，旧报告字节保持。 |
+| 公共协议跨组件读写 | [客户端适配计划](../superpowers/plans/2026-09-30-report-client-adaptation.md)、[跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md) | 能力导出、计划生成、run/submit 受理、报告生成、导入及 ACK 消费同一协议和样例；覆盖精确 ID、请求复用、时间、关联与部分结果。 |
+| camctl 退出后仍有工具进程 | [主程序收场契约](../host-demo/design.md#接入模块的本地进程收场责任)、[跨组件收场任务](../superpowers/plans/2026-09-30-camctl-integration.md#i2-保留退出记录分批检查原组与最终回收) | 组合退出观察、原组终止、存活线程检查、最终回收和下一调用；成员退出、权限错误、信息不完整与解析失败分别处理。 |
+
+具体任务及进度由[模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)跟踪；正式验收条目与实际生产入口、测试和证据的对应关系由[全量验收任务](../superpowers/plans/2026-09-30-camctl-integration.md#i6-全量契约映射软件验收与部署交接)落实。真实设备证据见[联调输入](integration-readiness.md#设备证据与联调输入)，目标主机安装、性能与物理断电验证单独记录。

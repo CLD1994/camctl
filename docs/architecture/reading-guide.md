@@ -17,7 +17,7 @@
 
 持久化专题按[历史存储](../camctl/history-storage.md)、[历史查询](../camctl/historical-state-query.md)、[快照维护](../camctl/history-snapshots.md)的顺序阅读，再结合[数据库执行](../camctl/persistence-runtime.md)核对队列、事务和缓存。日志与报告分别对照业务专题和[日志执行](../camctl/logging-runtime.md)、[报告进程](../camctl/report-runtime.md)，避免把业务触发条件与库的默认行为混为一谈。
 
-规则阅读完毕后，用[软件验证要求](../camctl/verification.md)和[端到端契约检查](../camctl/implementation-readiness.md)检查模块之间的衔接。真实设备证据及目标环境安装验证另见[依赖与接入核验](../camctl/integration-readiness.md)。
+规则阅读完毕后，用[软件验证要求](../camctl/verification.md)和[跨模块契约检查](../camctl/verification.md#跨模块契约检查)检查模块之间的衔接。真实设备证据及目标环境安装验证另见[依赖与接入核验](../camctl/integration-readiness.md)。
 
 ## 按完整业务流程评审
 

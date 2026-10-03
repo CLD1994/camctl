@@ -6,7 +6,7 @@
 
 ## 协议定义与校验入口
 
-以下文件定义计划输入、设备能力、状态报告及相关错误的公共机器表示。各组件必须按同一协议读写数据；组件接入与集成验收要求见[实施准备](../docs/camctl/implementation-readiness.md#各组件接入公共机器协议)。
+以下文件定义计划输入、设备能力、状态报告及相关错误的公共机器表示。各组件必须按同一协议读写数据；组件接入与集成验收要求见[跨组件协议接入任务](../docs/superpowers/plans/2026-09-30-camctl-integration.md#i3-客户端请求身份时间能力及报告消费)。
 
 | 文件 | 定义内容 |
 | --- | --- |
@@ -23,6 +23,6 @@
 
 运行 `node scripts/check-protocol.mjs` 校验 Schema、共享样例、报告摘要及已登记错误详情。脚本使用客户端已锁定的 Ajv；文件检查属于规格验证，不代替真实软件组件的集成测试。软件集成测试使用受接口契约约束的设备替身，真实设备联调另行安排。
 
-## 组件适配状态
+## 组件接入与验收
 
-报告 Schema、协议样例和字段说明定义第一版的目标格式。客户端生成类型、导入校验、合并和展示尚待按[客户端适配计划](../docs/superpowers/plans/2026-09-30-report-client-adaptation.md)实施；当前客户端直接读取公共 Schema，不能据协议规格检查通过判断客户端已兼容。camctl 的字段依赖登记、历史生成和跨组件一致性仍按[实施准备](../docs/camctl/implementation-readiness.md#历史与报告的实施准备)落实。
+报告 Schema、协议样例和字段说明定义第一版的目标格式。客户端生成类型、导入校验、合并和展示的任务及进度见[客户端适配计划](../docs/superpowers/plans/2026-09-30-report-client-adaptation.md)。协议规格检查与客户端兼容性验收分别执行。camctl 的字段依赖登记、历史生成和跨组件一致性仍按[历史与报告验收](../docs/camctl/database/consistency-verification.md#独立历史与报告重建)落实。

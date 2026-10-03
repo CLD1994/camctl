@@ -1,6 +1,6 @@
 # 日志投递、线程与多进程适配
 
-[设计入口](README.md) · [实现总览](implementation.md) · [实施准备](implementation-readiness.md)
+[设计入口](README.md) · [实现总览](implementation.md) · [跨模块契约检查](verification.md#跨模块契约检查)
 
 本页完整定义日志入口、队列接纳、取消与退出，并说明标准库、Janus 和文件处理器的适配方式。日志配置、通道故障及日志副本的业务规则见[运行日志](../architecture/logging.md)。先读组件分工和投递规则，再核对水位判定与实现适配。
 

@@ -1,12 +1,12 @@
 # camctl 实现总览
 
-[设计入口](README.md) · [全局行为规格](../architecture/README.md) · [实施准备](implementation-readiness.md)
+[设计入口](README.md) · [全局行为规格](../architecture/README.md) · [跨模块契约检查](verification.md#跨模块契约检查)
 
 本页是 camctl 第一版实现设计的总览：先说明范围与运行条件，再说明工作在哪里执行、模块如何协作，以及何时创建动作协程。业务行为以 [architecture 设计专题](../architecture/README.md)为依据，公共机器字段以根目录 [protocol](../../protocol/README.md)为唯一来源。
 
 ## 文档范围与使用方式
 
-接口契约规定输入、输出、责任和失败语义。具体 Python 类型、函数签名、数据库结构和代码文件划分属于实施设计；建议采用的组织方式不限制实施者在保持契约的前提下调整。生产实现及各环境的验证进度另见[实施准备](implementation-readiness.md)和[依赖与接入核验](integration-readiness.md)。
+接口契约规定输入、输出、责任和失败语义。具体 Python 类型、函数签名、数据库结构和代码文件划分属于实施设计；建议采用的组织方式不限制实施者在保持契约的前提下调整。生产实现与软件验收进度见[实施路线图及模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)，依赖实验与设备联调所需证据见[核验记录](integration-readiness.md)。
 
 按职责查阅完整实现细则：
 
@@ -88,7 +88,7 @@ camctl 以较为乐观的 MVP（最小可行产品）为目标，优先打通计
 | 异步测试 | `pytest-asyncio` | 管理测试事件循环，执行异步测试 |
 | 测试替身 | `pytest-mock`，配合手写 fake | 使用 `mocker` 管理替换与清理，替身受真实接口约束 |
 
-第三方依赖的版本核验基线见[依赖基线](integration-readiness.md#依赖基线)，生产锁文件尚未生成。生产依赖与测试依赖分别管理；测试工具只用于开发和验收环境。源码、依赖和发布物的目录边界遵守[仓库结构](../architecture/repository-layout.md)，组件入口约定使用 `pyproject.toml`、`uv.lock`、`src/camctl` 及分类测试。
+依赖声明在组件 [pyproject.toml](../../apps/camctl/pyproject.toml) 中维护，解析后的版本由 [uv.lock](../../apps/camctl/uv.lock) 固定；库能力的实验依据见[依赖核验记录](integration-readiness.md#依赖基线)。生产依赖与测试依赖分别管理；测试工具只用于开发和验收环境。源码、依赖和发布物的目录边界遵守[仓库结构](../architecture/repository-layout.md)，组件入口约定使用 `pyproject.toml`、`uv.lock`、`src/camctl` 及分类测试。
 
 
 ## 执行位置与异步接口

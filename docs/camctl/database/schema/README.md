@@ -2,20 +2,20 @@
 
 [数据库入口](../../database-schema.md) · [公共规则](../common.md)
 
-| SQL | 所定义的表 |
-| --- | --- |
-| [core.sql](core.sql) | 计划与动作 |
-| [workflows.sql](workflows.sql) | 自动预览、来源、取回、清理和取消明细 |
-| [files.sql](files.sql) | 设备文件、中间文件、正式产物、来源关系、交付和拷贝 |
-| [operations.sql](operations.sql) | 操作流程、尝试、设备活动和录像处理 |
-| [reports.sql](reports.sql) | 输入诊断、报告、同步、全局运行状态和元信息 |
-| [history.sql](history.sql) | 历史事务、事件、自身恢复关联、报告变化目录、快照和维护进度 |
+| SQL | 所定义的表 | 字段语义 |
+| --- | --- | --- |
+| [core.sql](core.sql) | 计划与动作 | [计划与动作](../plans-actions.md)、[执行定义](../execution-definitions.md) |
+| [workflows.sql](workflows.sql) | 自动预览、来源、取回、清理和取消明细 | [流程字段](../workflow-fields.md) |
+| [files.sql](files.sql) | 设备文件、中间文件、正式产物、来源关系、交付和拷贝 | [文件字段](../file-fields.md) |
+| [operations.sql](operations.sql) | 操作流程、尝试、设备活动和录像处理 | [操作字段](../operation-fields.md) |
+| [reports.sql](reports.sql) | 输入诊断、报告、同步、全局运行状态和元信息 | [报告与运行状态](../reports-runtime.md#字段与状态组合) |
+| [history.sql](history.sql) | 历史事务、事件、自身恢复关联、报告变化目录、快照和维护进度 | [历史格式](../history-formats.md) |
 
 ## 结构同步状态
 
 本目录六份文件合起来定义 30 张表。来源依赖、清理项结果与产物汇总、单向流程关联、独立文件历史、两类目录及文件快照范围已落实到 SQL；[报告字段登记](../report-dependencies.json)的来源列与关联均使用实际结构核对。
 
-等待事实、启动流程过期、设备查询、应急补记、活动占用、报告分页及部署目录绑定所需的结构已与各自规格同步。等待条件由所属业务记录表达；启动流程过期时保留已有尝试次数，残留停止流程只允许在尚未尝试时过期。生产工作见[实施清单](../../implementation-readiness.md#数据库规格同步清单)；结构检查通过不表示业务事件处理、跨表事实校验、历史恢复或报告生成已经实现。
+等待事实、启动流程过期、设备查询、应急补记、活动占用、报告分页及部署目录绑定所需的结构已与各自规格同步。等待条件由所属业务记录表达；启动流程过期时保留已有尝试次数，残留停止流程只允许在尚未尝试时过期。生产工作见[模块计划](../../../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)；结构检查通过不表示业务事件处理、跨表事实校验、历史恢复或报告生成已经实现。
 
 事件类型范围由[事件转换规则](../event-transitions.json)生成，包含应急最终补记事件；业务列分类与实际 SQL 完整对应，生产代码仍须执行各事件的完整业务校验。
 
