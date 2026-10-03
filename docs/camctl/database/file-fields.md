@@ -114,7 +114,7 @@
 | `max_recopies_used` | 最近一次实际判定采用的本地上限；允许小于已用次数，不是累计预算的权威值 |
 | `committed_bytes` | 当前轮次可靠进度，初始 0，始终不超过固定长度；分段成功后先同步文件再保存 |
 | `reset_state` | `READY` 或 `RESET_PENDING`；后者表示新轮次已经登记，目标文件尚须可靠截断或重建，不能直接续传 |
-| `slot_device_id` | 已可靠保留的相机读取机会，尚未取得或已经解除时为空；全库非空值唯一，等候重试时继续保留 |
+| `slot_device_id` | 初始为空；取得后保存已可靠保留的相机读取机会，解除后为空；全库非空值唯一，等候重试时继续保留 |
 | `verification_state` | `NOT_PERFORMED`、`RUNNING`、`MATCHED`、`MISMATCHED`、`SOURCE_CHECKSUM_UNAVAILABLE`、`FAILED` |
 | `target_sha256` | 当前轮次完整目标摘要，尚未取得时为空；不能保存 Python 哈希对象或将部分摘要当成完整摘要 |
 | `verification_error_json` | 校验明确失败时必填，其他校验状态为空；摘要不一致通过 `MISMATCHED` 表示 |

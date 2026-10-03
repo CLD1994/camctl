@@ -6227,6 +6227,9 @@
                 "committed_bytes": [
                   0
                 ],
+                "slot_device_id": [
+                  null
+                ],
                 "reset_state": [
                   1
                 ],

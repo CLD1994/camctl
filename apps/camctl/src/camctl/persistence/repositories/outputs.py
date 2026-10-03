@@ -1327,7 +1327,7 @@ class _GrantFileCommand:
         if device_id is not None and not self._wins_business_order(connection, action, device_id):
             return self._wait("business_order")
 
-        return self._grant(scope, source_file, device_id)
+        return self._grant(scope, source_file)
 
     # ---- 资格核对 ----
 
@@ -1577,7 +1577,7 @@ class _GrantFileCommand:
 
     # ---- 授予建档 ----
 
-    def _grant(self, scope, source_file, device_id: str | None) -> CommandPlan:
+    def _grant(self, scope, source_file) -> CommandPlan:
         command = self._command
         is_delivery = command.item_id is not None
         target_file_id = next_row_id(scope.connection, "intermediate_files")
@@ -1586,7 +1586,7 @@ class _GrantFileCommand:
         )
         copy_id = next_row_id(scope.connection, "file_copies")
         run_id = next_row_id(scope.connection, "operation_runs")
-        specs, owners = self._grant_specs(source_file, device_id, target_file_id, delivery_id, copy_id, run_id,
+        specs, owners = self._grant_specs(source_file, target_file_id, delivery_id, copy_id, run_id,
             self._state["obtain_items"][command.item_id] if is_delivery else None)
         self._owners.update(owners)
         return CommandPlan(
@@ -1595,7 +1595,7 @@ class _GrantFileCommand:
                 run_id=run_id, delivery_id=delivery_id, target_file_id=target_file_id, reason=None),
         )
 
-    def _grant_specs(self, source_file, device_id, target_file_id, delivery_id, copy_id, run_id, item):
+    def _grant_specs(self, source_file, target_file_id, delivery_id, copy_id, run_id, item):
         """以固定输入形成完整建档事实，供首次保存和原键核对共用。"""
         command = self._command
         is_delivery = command.item_id is not None
@@ -1689,7 +1689,7 @@ class _GrantFileCommand:
                 "source_sha256": source_file["sha256"],
                 "committed_bytes": 0,
                 "reset_state": int(_RESET_STATE.READY),
-                "slot_device_id": device_id,
+                "slot_device_id": None,
                 "verification_state": int(_VERIFICATION.NOT_PERFORMED),
                 "target_sha256": None,
                 "verification_error_json": None,
@@ -1920,7 +1920,7 @@ class _GrantFileCommand:
                            "sha256": copy["after"]["values"]["source_sha256"]}
         ids = {name: row["id"] for name, row in rows.items()}
         try:
-            specs, _ = self._grant_specs(source_snapshot, copy["after"]["values"]["slot_device_id"],
+            specs, _ = self._grant_specs(source_snapshot,
                 ids["intermediate_files"], ids.get("deliveries"), ids["file_copies"], ids["operation_runs"],
                 {"status": int(_ITEM_STATUS.SELECTED), "source_dependency": 0, "delivery_id": None})
         except PathRuleError as error:
@@ -1945,9 +1945,8 @@ class _GrantFileCommand:
         if (not json_equal(current_copy["source_size"], source_snapshot["size_bytes"])
                 or (source_snapshot["sha256"] is not None
                     and (current_copy["source_sha256"] != source_snapshot["sha256"]
-                         or source["sha256"] != source_snapshot["sha256"]))
-                or copy["after"]["values"]["slot_device_id"] != device):
-            raise ConsistencyError("原建档事务的源内容或设备身份不一致")
+                         or source["sha256"] != source_snapshot["sha256"]))):
+            raise ConsistencyError("原建档事务的源内容不一致")
         for table, names in (("intermediate_files", ("relative_path",)),
                              ("deliveries", ("file_name", "display_name"))):
             if table not in rows:
@@ -2248,10 +2247,6 @@ def _copy_guard(event, context) -> None:
                 )
         if values.get("source_size") is None:
             raise EventValidationError("新建拷贝必须携带源长度")
-        if values.get("source_device_file_id") is not None and not values.get("slot_device_id"):
-            raise EventValidationError("设备来源拷贝必须占用所属设备的读取机会")
-        if values.get("source_intermediate_file_id") is not None and values.get("slot_device_id") is not None:
-            raise EventValidationError("主机来源拷贝不占用相机读取机会")
         if (values.get("delivery_id") is None) == (values.get("processing_id") is None):
             raise EventValidationError("拷贝必须恰归属交付或录像处理之一")
         if values.get("processing_id") is not None:
