@@ -34,6 +34,8 @@ class CompetitionReads(Protocol):
     def required(self, table: str, identity: int) -> Row: ...
     def optional(self, table: str, identity: int) -> Row | None: ...
     def members(self, table: str, column: str, value: int) -> Mapping[int, Row]: ...
+    def action(self, identity: int) -> Row | None: ...
+    def plan_actions(self, plan_id: int) -> Mapping[int, Row]: ...
     def family(self, output_id: int) -> OriginalOutputs: ...
     def processing_completed(self, source_id: int) -> bool: ...
 
@@ -86,12 +88,19 @@ class _SourceLookup:
         return ActionFacts(identity, row["plan_id"], row["type"], row["name"], row["group_name"])
 
     def action_by_id(self, identity):
-        row = self.reads.optional("actions", identity)
+        row = self.reads.action(identity)
         return None if row is None else self._fact(identity, row)
 
     def plan_actions(self, plan_id):
         return tuple(self._fact(identity, row)
-                     for identity, row in self.reads.members("actions", "plan_id", plan_id).items())
+                     for identity, row in self.reads.plan_actions(plan_id).items())
+
+
+def _source_action(reads: CompetitionReads, identity: int) -> Row:
+    row = reads.action(identity)
+    if row is None:
+        raise ConsistencyError(f"固定来源动作缺失: {identity}")
+    return row
 
 
 def _sources(reads: CompetitionReads, identity: int, action: Row) -> tuple[int, ...]:
@@ -104,7 +113,7 @@ def _sources(reads: CompetitionReads, identity: int, action: Row) -> tuple[int, 
         members = []
         for dependency in dependencies.values():
             source_id = _integer(dependency["depends_on_action_id"], minimum=1)
-            source = reads.required("actions", source_id)
+            source = _source_action(reads, source_id)
             if source["plan_id"] != plan_id or _member(_ACTION, source["type"]) not in _CAPTURE:
                 raise ConsistencyError("固定来源成员不属于原来源计划的拍摄动作")
             members.append(source_id)
@@ -126,7 +135,7 @@ def _sources(reads: CompetitionReads, identity: int, action: Row) -> tuple[int, 
 
 
 def _source_ready(reads: CompetitionReads, source_id: int) -> bool:
-    source = reads.required("actions", source_id)
+    source = _source_action(reads, source_id)
     return (_member(_STATUS, source["status"]) in _TERMINAL
             and reads.processing_completed(source_id))
 

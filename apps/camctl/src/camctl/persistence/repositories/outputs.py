@@ -1037,7 +1037,6 @@ class _CurrentCatalogReads:
         return tuple(sorted(members.values(), key=lambda member: member.entry.output_id))
 
 
-
 class _ProductReads(_CatalogReads):
     """逐产物候选的 SQL 读取；只为需要进一步判断的动作加载完整原请求。"""
 
@@ -1058,6 +1057,41 @@ class _ProductReads(_CatalogReads):
             self._full_rows.add((table, identity))
             self._covered(table, "id", identity)
         return self.state_rows.get(table, {}).get(identity)
+
+    _SOURCE_COLUMNS = ("id", "type", "status", "plan_id", "name", "group_name")
+
+    def action(self, identity):
+        """来源只读元数据；完整候选请求仍由 required 按需补读。"""
+        ObjectId(identity)
+        row = self.state_rows.get("actions", {}).get(identity)
+        if row is not None and all(column in row for column in self._SOURCE_COLUMNS):
+            self._covered("actions", "id", identity)
+            return row
+        if identity not in self._ranges.get(("actions", "id"), ()):
+            with closing(self.connection.execute(
+                f"SELECT {', '.join(self._SOURCE_COLUMNS)} FROM actions WHERE id=?", (identity,),
+            )) as cursor:
+                values = cursor.fetchone()
+            if values is not None:
+                row = self._remember("actions", identity, dict(zip(self._SOURCE_COLUMNS, values)))
+            self._covered("actions", "id", identity)
+        return row
+
+    def plan_actions(self, plan_id):
+        """完整计划成员范围包括无关分组和终态动作，但不读取它们的正文。"""
+        ObjectId(plan_id)
+        if plan_id not in self._ranges.get(("actions", "plan_id"), ()):
+            with closing(self.connection.execute(
+                f"SELECT {', '.join(self._SOURCE_COLUMNS)} FROM actions WHERE plan_id=? ORDER BY id",
+                (plan_id,),
+            )) as cursor:
+                while batch := cursor.fetchmany(128):
+                    for values in batch:
+                        self._remember("actions", values[0], dict(zip(self._SOURCE_COLUMNS, values)))
+                        self._covered("actions", "id", values[0])
+            self._covered("actions", "plan_id", plan_id)
+        return {identity: row for identity, row in self.state_rows.get("actions", {}).items()
+                if row["plan_id"] == plan_id}
 
     def members(self, table, column, value):
         # 表和列仅由内部规则提供；完整范围不包含隐含的状态过滤。
@@ -1104,6 +1138,12 @@ class _CurrentProductReads(_CurrentCatalogReads):
     def members(self, table, column, value):
         rows = self.context.complete_rows(table, column, value)
         return {identity: self.required(table, identity) for identity in rows}
+
+    def action(self, identity):
+        return self.optional("actions", identity)
+
+    def plan_actions(self, plan_id):
+        return self.members("actions", "plan_id", plan_id)
 
     def actions(self):
         rows = {}
