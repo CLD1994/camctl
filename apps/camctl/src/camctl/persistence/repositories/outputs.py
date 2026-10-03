@@ -26,6 +26,10 @@ from camctl.host_files.paths import (
 from camctl.operations.attempts import AttemptTarget, OperationKind, operation_responsibility_key
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.competition import has_product_predecessor
+from camctl.outputs.copy import (
+    AttemptRecord, CopyStateFacts, CopyTargetRef, TargetResetDecision,
+    TargetResetOutcome, TargetResetRequest,
+)
 from camctl.outputs.definitions import read_selection_request
 from camctl.outputs.sources import (
     ActionFacts,
@@ -127,6 +131,7 @@ _REJECT_REASON = 2
 _RESOLVE_REASON = 4
 #: COPY_CHANGED.SLOT：保存设备读取机会变化。
 _SLOT_REASON = 6
+_RESET_REASON = 5
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
 _OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
 _OUTPUT_NOT_FOUND_CODE = item_error_id("obtain_items", "output_not_found")
@@ -2065,6 +2070,26 @@ _RUN_TERMINAL = frozenset(
 )
 
 
+def _copy_owner_of(connection, copy, state, owners) -> None:
+    """解析拷贝的发起责任并把固定关联行保存为当前事实。"""
+    if copy["delivery_id"] is not None:
+        facts = row_facts(connection, "deliveries", copy["delivery_id"])
+        if facts is None:
+            raise ConsistencyError(f"机会责任关联记录缺失: deliveries#{copy['delivery_id']}")
+        state.setdefault("deliveries", {})[copy["delivery_id"]] = facts
+        owners[("file_copies", copy["id"])] = ("delivery", copy["delivery_id"])
+        return
+    if copy["processing_id"] is not None:
+        facts = row_facts(connection, "recording_processing", copy["processing_id"])
+        if facts is None:
+            raise ConsistencyError(
+                f"机会责任关联记录缺失: recording_processing#{copy['processing_id']}")
+        state.setdefault("recording_processing", {})[copy["processing_id"]] = facts
+        owners[("file_copies", copy["id"])] = ("action", facts["action_id"])
+        return
+    raise ConsistencyError("拷贝缺少交付或处理归属")
+
+
 class _SlotChangeCommand:
     """相机读取机会的授予或释放事务命令。
 
@@ -2123,13 +2148,8 @@ class _SlotChangeCommand:
         return copy
 
     def _copy_owner(self, connection, copy) -> tuple[str, int]:
-        if copy["delivery_id"] is not None:
-            self._required(connection, "deliveries", copy["delivery_id"])
-            return ("delivery", copy["delivery_id"])
-        if copy["processing_id"] is not None:
-            processing = self._required(connection, "recording_processing", copy["processing_id"])
-            return ("action", processing["action_id"])
-        raise ConsistencyError("拷贝缺少交付或处理归属")
+        _copy_owner_of(connection, copy, self._state, self._owners)
+        return self._owners[("file_copies", copy["id"])]
 
     def _load_source(self, connection, copy) -> dict:
         if copy["source_device_file_id"] is None:
@@ -2332,6 +2352,182 @@ class _SlotChangeCommand:
         )
 
 
+#: 中间文件用途编号与共用文件模型的对应；所有入口共用一份映射。
+_PURPOSE_MODELS = {int(member): FilePurpose[member.name] for member in _PURPOSE}
+
+
+def _target_purpose_model(copy, target) -> FilePurpose:
+    """核对目标中间文件的用途与拷贝归属一致，并返回共用模型。"""
+    purpose = _PURPOSE_MODELS.get(target["purpose"])
+    if purpose is None:
+        raise ConsistencyError(f"目标用途不属于登记枚举: {target['purpose']!r}")
+    expected = (
+        FilePurpose.DELIVERY_COPY if copy["delivery_id"] is not None
+        else FilePurpose.RECORDING_INPUT
+    )
+    if purpose is not expected:
+        raise ConsistencyError(
+            f"目标用途 {purpose.value} 与拷贝归属要求的 {expected.value} 不一致")
+    return purpose
+
+
+def _verify_source_identity(connection, copy) -> None:
+    """核对源文件身份仍然固定：当前长度必须等于建档时保存的长度。"""
+    if copy["source_device_file_id"] is not None:
+        source = row_facts(connection, "device_files", copy["source_device_file_id"])
+        if source is None:
+            raise ConsistencyError(
+                f"拷贝的设备源文件缺失: {copy['source_device_file_id']}")
+        size = source["size_bytes"]
+    elif copy["source_intermediate_file_id"] is not None:
+        source = row_facts(
+            connection, "intermediate_files", copy["source_intermediate_file_id"])
+        if source is None:
+            raise ConsistencyError(
+                f"拷贝的主机源文件缺失: {copy['source_intermediate_file_id']}")
+        size = source["size_bytes"]
+    else:
+        raise ConsistencyError("拷贝缺少设备或主机源文件")
+    if not is_json_integer(size) or size != copy["source_size"]:
+        raise ConsistencyError(
+            f"源文件当前长度 {size!r} 与建档固定长度 {copy['source_size']!r} 不一致")
+
+
+def _read_attempt_facts(connection, copy_id: int) -> tuple[AttemptRecord, ...]:
+    """读取拷贝唯一 READ_FILE 流程的全部尝试事实。"""
+    with closing(connection.execute(
+        "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+        (f"read/{copy_id}",),
+    )) as cursor:
+        identities = cursor.fetchall()
+    if len(identities) != 1:
+        raise ConsistencyError("拷贝的 READ_FILE 流程缺失或重复")
+    with closing(connection.execute(
+        "SELECT id, attempt_no, status, copy_round FROM operation_attempts"
+        " WHERE run_id = ? ORDER BY attempt_no", (identities[0][0],),
+    )) as cursor:
+        rows = cursor.fetchall()
+    try:
+        return tuple(
+            AttemptRecord(
+                attempt_id=row[0], attempt_no=row[1], status=row[2], copy_round=row[3],
+            )
+            for row in rows
+        )
+    except ValueError as error:
+        raise ConsistencyError(f"读取尝试事实不可解释: {error}") from error
+
+
+def _load_copy_state_facts(connection, copy_id: int) -> CopyStateFacts:
+    """只读加载一份已建档拷贝的固定事实，供续传准备消费。"""
+    ObjectId(copy_id)
+    copy = row_facts(connection, "file_copies", copy_id)
+    if copy is None:
+        raise ConsistencyError(f"拷贝记录不存在: {copy_id}")
+    target = row_facts(connection, "intermediate_files", copy["target_file_id"])
+    if target is None:
+        raise ConsistencyError(f"拷贝的目标中间文件缺失: {copy['target_file_id']}")
+    purpose = _target_purpose_model(copy, target)
+    try:
+        validate_relative_file_path(
+            purpose, copy["target_file_id"], target["relative_path"])
+    except PathRuleError as error:
+        raise ConsistencyError(f"目标保存路径不可定位: {error}") from error
+    _verify_source_identity(connection, copy)
+    return CopyStateFacts(
+        copy_id=copy_id,
+        source_size=copy["source_size"],
+        committed_bytes=copy["committed_bytes"],
+        round=copy["round"],
+        reset_pending=copy["reset_state"] == int(_RESET_STATE.RESET_PENDING),
+        target=CopyTargetRef(
+            file_id=copy["target_file_id"], purpose=purpose,
+            relative_path=target["relative_path"],
+        ),
+        attempts=_read_attempt_facts(connection, copy_id),
+    )
+
+
+class _CopyResetCommand:
+    """目标重置完成事务命令。
+
+    物理重置（截断或重建）已经可靠完成后，把重置意图翻转为
+    READY；不重新分配交付或重拷轮次，不改动次数与进度。
+    """
+
+    _TABLES = ("file_copies", "deliveries", "recording_processing")
+
+    def __init__(self, request: TargetResetRequest, key: OperationKey) -> None:
+        if not isinstance(request, TargetResetRequest):
+            raise TypeError("目标重置申请必须使用 TargetResetRequest")
+        self._request = request
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        copy = row_facts(connection, "file_copies", self._request.copy_id)
+        if copy is None:
+            raise ConsistencyError(f"拷贝记录不存在: {self._request.copy_id}")
+        self._state["file_copies"][copy["id"]] = copy
+        _copy_owner_of(connection, copy, self._state, self._owners)
+        if copy["reset_state"] == int(_RESET_STATE.READY):
+            return self._decision(TargetResetOutcome.ALREADY_READY)
+        if copy["committed_bytes"] != 0:
+            raise ConsistencyError("重置完成前可靠进度必须已经归零")
+        row = _update(
+            "file_copies", copy["id"],
+            {"reset_state": int(_RESET_STATE.RESET_PENDING)},
+            {"reset_state": int(_RESET_STATE.READY)},
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _COPY_CHANGED_EVENT, _RESET_REASON, (row,),
+            self._request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,),
+            owners=self._owners,
+            state_rows=self._state,
+            result=TargetResetDecision(TargetResetOutcome.COMPLETED),
+        )
+
+    def _decision(self, outcome: TargetResetOutcome) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True, result=TargetResetDecision(outcome),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次重置响应；不重复保存或按当前状态重判。"""
+        if len(saved) != 1 or saved[0]["type"] != _COPY_CHANGED_EVENT \
+                or saved[0]["reason"] != _RESET_REASON:
+            raise TransactionError("操作身份已用于其他阶段，不能作为目标重置重送")
+        event = saved[0]
+        if event["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("目标重置的事实时刻与原事务不同")
+        rows = event["body"]["rows"]
+        if len(rows) != 1 or rows[0]["table"] != "file_copies" \
+                or rows[0]["id"] != self._request.copy_id:
+            raise TransactionError("原目标重置的目标拷贝与输入不符")
+        before = rows[0]["before"]["values"].get("reset_state")
+        after = rows[0]["after"]["values"].get("reset_state")
+        if before != int(_RESET_STATE.RESET_PENDING) \
+                or after != int(_RESET_STATE.READY):
+            raise TransactionError("原目标重置的状态转换与登记不符")
+        return CommandPlan(
+            events=(), owners={}, state_rows={}, read_only=True,
+            result=TargetResetDecision(TargetResetOutcome.COMPLETED),
+        )
+
+
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
 
@@ -2363,6 +2559,15 @@ class OutputsRepository:
         self, request: SlotRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SlotDecision]:
         receipt = commit_operation(_SlotChangeCommand(request, _SLOT_RELEASE, key), key, owned)
+        return _outcome_of(receipt)
+
+    def load_copy_state(self, copy_id: int, owned: OwnedConnection) -> CopyStateFacts:
+        return _load_copy_state_facts(owned.connection, copy_id)
+
+    def reset_copy_target(
+        self, request: TargetResetRequest, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[TargetResetDecision]:
+        receipt = commit_operation(_CopyResetCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
 
@@ -2582,7 +2787,17 @@ def _delivery_guard(event, context) -> None:
 
 
 def _copy_guard(event, context) -> None:
-    """拷贝建档守卫：首轮、零进度、初始验证与重置状态。"""
+    """拷贝建档与目标重置守卫。"""
+    if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RESET_REASON:
+        for row in event.rows:
+            if row.table != "file_copies":
+                continue
+            copy = context.state_rows.get("file_copies", {}).get(row.row_id)
+            if copy is None:
+                raise EventValidationError("目标重置缺少当前拷贝事实")
+            if copy.get("committed_bytes") != 0:
+                raise EventValidationError("重置完成要求可靠进度已经归零")
+        return
     if event.event_type != _COPY_CHANGED_EVENT or event.reason != 1:
         return
     for row in event.rows:

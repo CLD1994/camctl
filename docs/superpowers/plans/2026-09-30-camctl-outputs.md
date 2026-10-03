@@ -136,13 +136,15 @@ X1 随首次录像完成；X2—X7 实现首条取回链。X8/X9 在明确来源
 
 **接口与依赖：** 提供 `decide_resume(facts: CopyFacts) -> CopyDecision`、异步 `prepare_copy(identity: CopyIdentity, service: CopyContext) -> CopyStep`；CopyContext 含仓储、读取和文件端口，CopyStep 表达原身份及待办阶段。前置交付：X3、D4、F1/F4、O2/O5。
 
-- [ ] 编写失败用例。按上方七个续传分区建立 `test_resume_preserves_confirmed_prefix`，C=3、L=5、N=6，`assert decision.truncate_to == 3` 且 offset=3；C=0/L缺失、L=C=N、不可靠检查及长度越界分别断言。未保存读取失败重启沿原尝试，已明确失败只能新增合法尝试。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_copy_resume.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。固定源身份、长度、原目标及处理归属；读取开始前保存意图/次数；续传截断必须同步成功才继续，不重新分配 delivery 或重拷轮次。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 取回、原片检查及修复可以调用同一 CopyService。
+- [x] 编写失败用例。按上方七个续传分区建立 `test_resume_preserves_confirmed_prefix`，C=3、L=5、N=6，`assert decision.truncate_to == 3` 且 offset=3；C=0/L缺失、L=C=N、不可靠检查及长度越界分别断言。未保存读取失败重启沿原尝试，已明确失败只能新增合法尝试。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_copy_resume.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。固定源身份、长度、原目标及处理归属；读取开始前保存意图/次数；续传截断必须同步成功才继续，不重新分配 delivery 或重拷轮次。
+- [x] 再运行上述命令，要求全部 PASS，并核对 取回、原片检查及修复可以调用同一 CopyService。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_copy_resume.py -q`，真实文件与数据库验证多次中断、可靠尾部、源身份改变和两种失败恢复。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有恢复入口是否从当前长度默认进度或补满读取次数；记录门禁证据，建议以“feat: 实现共用拷贝与续传准备”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有恢复入口是否从当前长度默认进度或补满读取次数；记录门禁证据，建议以“feat: 实现共用拷贝与续传准备”形成独立提交。
+
+X4 的阶段验证：`outputs/copy.py` 提供 `decide_resume`（七分区加目标重置分区：CREATE/CONTINUE/TRUNCATE/VERIFY/RESET_TARGET）与 `decide_attempt`（在途尝试沿原尝试恢复、已明确失败只能经合法入口新增、旧轮次忽略、未来轮次拒绝）纯规则，`prepare_copy` 经仓储与文件端口编排观察、截断/创建、同步与 `COPY_CHANGED.RESET` 保存；仓储新增只读 `load_copy_state`（核对目标用途与归属一致、保存路径可定位、源文件当前长度等于建档固定长度）与 `reset_copy_target` 事务（重置意图 2→1，进度非零拒绝，原键恢复首次响应），`copy` 守卫扩展核对重置完成时当前拷贝进度已归零。单元 40 项；集成 40 项覆盖交付/录像内部输入/主机修复产物三类来源共用同一入口、截尾后续传与字节保持、同步失败阻断且可靠进度不变、设备与主机源身份改变拒绝、真实在途尝试恢复且数据库不变、已失败尝试只能新增且预算耗尽被 `begin_attempt` 拒绝、重置的截断-保存两步与截断后断电的幂等恢复、原键恢复与输入不符拒绝、目录占用目标路径不当作缺失。Python 3.11 通过组件单元 2588 项、集成 2780 项另 6 项跳过及根跨组件 34 项另 342 subtests。所有恢复入口不以当前文件长度默认进度、不补满读取次数；预算、重试等待与机会判断仍唯一由意图入口承担。SEGMENT 事件生产者属 X5，进度种子在测试中直接保存并注明。
 
 ### X5 分段提交、取消和可靠进度
 
