@@ -27,9 +27,11 @@ from camctl.operations.attempts import AttemptTarget, OperationKind, operation_r
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.copy import (
-    AttemptRecord, CopyStateFacts, CopyTargetRef, ReliableSegment,
-    SegmentSaveDisposition, SegmentSaveOutcome, TargetResetDecision,
-    TargetResetOutcome, TargetResetRequest,
+    AttemptRecord, CopyStateFacts, CopyTargetRef, PreparedCopy, PreparedDisposition,
+    PreparedRequest, PreparedSaveOutcome, RecopyDisposition, RecopyRegistration,
+    RecopyResult, ReliableSegment, SegmentSaveDisposition, SegmentSaveOutcome,
+    SourceChecksumSupport, TargetResetDecision, TargetResetOutcome, TargetResetRequest,
+    VerificationDisposition, VerificationResult, VerificationSave,
 )
 from camctl.outputs.definitions import read_selection_request
 from camctl.outputs.sources import (
@@ -136,6 +138,16 @@ _SLOT_REASON = 6
 _RESET_REASON = 5
 #: COPY_CHANGED.SEGMENT：保存已同步的可靠段进度。
 _SEGMENT_REASON = 2
+#: COPY_CHANGED.VERIFY/RECOPY/CONFIGURE：保存校验、重拷轮次与判定上限。
+_VERIFY_REASON = 3
+_RECOPY_REASON = 4
+_CONFIGURE_REASON = 7
+#: READ_PERMISSION_CHANGED.RELEASE：解除原源文件保护。
+_RELEASE_REASON = 3
+#: DELIVERY_CHANGED.PREPARE：保存副本准备阶段。
+_PREPARE_REASON = 2
+#: INTERMEDIATE_FILE_CHANGED.LIFECYCLE：保存完整字节及保留用途变化。
+_LIFECYCLE_REASON = 2
 #: 资格逐项最终失败的错误码（workflow-codes.json 权威装载）。
 _OUTPUT_UNAVAILABLE_CODE = item_error_id("obtain_items", "output_unavailable")
 _OUTPUT_NOT_FOUND_CODE = item_error_id("obtain_items", "output_not_found")
@@ -2415,14 +2427,30 @@ def _target_purpose_model(copy, target) -> FilePurpose:
     return purpose
 
 
-def _verify_source_identity(connection, copy) -> None:
-    """核对源文件身份仍然固定：当前长度必须等于建档时保存的长度。"""
+#: device_files.checksum_support 与共用能力模型的对应；主机源总是可计算摘要。
+_CHECKSUM_SUPPORT = {
+    1: SourceChecksumSupport.UNDETERMINED,
+    2: SourceChecksumSupport.SUPPORTED,
+    3: SourceChecksumSupport.UNSUPPORTED,
+}
+
+
+def _verify_source_identity(connection, copy) -> tuple[int, SourceChecksumSupport]:
+    """核对源文件身份仍然固定，并返回其摘要能力。
+
+    当前长度必须等于建档时保存的长度；主机源文件总可以计算
+    摘要，设备源按已保存的能力判定表达。
+    """
     if copy["source_device_file_id"] is not None:
         source = row_facts(connection, "device_files", copy["source_device_file_id"])
         if source is None:
             raise ConsistencyError(
                 f"拷贝的设备源文件缺失: {copy['source_device_file_id']}")
         size = source["size_bytes"]
+        support = _CHECKSUM_SUPPORT.get(source["checksum_support"])
+        if support is None:
+            raise ConsistencyError(
+                f"设备源摘要能力不属于登记枚举: {source['checksum_support']!r}")
     elif copy["source_intermediate_file_id"] is not None:
         source = row_facts(
             connection, "intermediate_files", copy["source_intermediate_file_id"])
@@ -2430,11 +2458,13 @@ def _verify_source_identity(connection, copy) -> None:
             raise ConsistencyError(
                 f"拷贝的主机源文件缺失: {copy['source_intermediate_file_id']}")
         size = source["size_bytes"]
+        support = SourceChecksumSupport.SUPPORTED
     else:
         raise ConsistencyError("拷贝缺少设备或主机源文件")
     if not is_json_integer(size) or size != copy["source_size"]:
         raise ConsistencyError(
             f"源文件当前长度 {size!r} 与建档固定长度 {copy['source_size']!r} 不一致")
+    return copy["source_size"], support
 
 
 def _read_attempt_facts(connection, copy_id: int) -> tuple[AttemptRecord, ...]:
@@ -2477,7 +2507,7 @@ def _load_copy_state_facts(connection, copy_id: int) -> CopyStateFacts:
             purpose, copy["target_file_id"], target["relative_path"])
     except PathRuleError as error:
         raise ConsistencyError(f"目标保存路径不可定位: {error}") from error
-    _verify_source_identity(connection, copy)
+    _, support = _verify_source_identity(connection, copy)
     return CopyStateFacts(
         copy_id=copy_id,
         source_size=copy["source_size"],
@@ -2489,6 +2519,12 @@ def _load_copy_state_facts(connection, copy_id: int) -> CopyStateFacts:
             relative_path=target["relative_path"],
         ),
         attempts=_read_attempt_facts(connection, copy_id),
+        source_sha256=copy["source_sha256"],
+        target_sha256=copy["target_sha256"],
+        verification_state=copy["verification_state"],
+        recopies_used=copy["recopies_used"],
+        max_recopies_used=copy["max_recopies_used"],
+        source_support=support,
     )
 
 
@@ -2688,6 +2724,571 @@ class _SegmentSaveCommand:
         )
 
 
+class _CopyCompletionTablesMixin:
+    """完整性收尾命令的共同事实加载与发起责任核对。"""
+
+    _TABLES: tuple[str, ...]
+
+    def _load_copy(self, connection, copy_id: int) -> dict:
+        copy = row_facts(connection, "file_copies", copy_id)
+        if copy is None:
+            raise ConsistencyError(f"拷贝记录不存在: {copy_id}")
+        self._state["file_copies"][copy["id"]] = copy
+        _copy_owner_of(connection, copy, self._state, self._owners)
+        return copy
+
+    def _owner_action(self, connection, copy) -> dict:
+        if copy["delivery_id"] is not None:
+            action_id = self._state["deliveries"][copy["delivery_id"]]["action_id"]
+        else:
+            action_id = self._state["recording_processing"][copy["processing_id"]]["action_id"]
+        facts = row_facts(connection, "actions", action_id)
+        if facts is None:
+            raise ConsistencyError(f"发起动作记录缺失: actions#{action_id}")
+        self._state["actions"][action_id] = facts
+        return facts
+
+    def _require_full_progress(self, copy) -> None:
+        if copy["reset_state"] != int(_RESET_STATE.READY):
+            raise ConsistencyError("重置意图未完成前不能进入完整性收尾")
+        if copy["committed_bytes"] != copy["source_size"]:
+            raise ConsistencyError(
+                f"完整性收尾要求可靠进度到达固定源长度:"
+                f" {copy['committed_bytes']}/{copy['source_size']}"
+            )
+
+    def _decision(self, result, *, read_only: bool = False) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=read_only, result=result,
+        )
+
+
+class _IntegritySaveCommand(_CopyCompletionTablesMixin):
+    """校验结果保存事务命令。
+
+    全部字节可靠保存后保存源端与主机端摘要的比较结论；获取失败
+    保存诊断，不降级为不支持。取消或动作不在执行时不新增校验
+    事实。不改动轮次、进度与预算。
+    """
+
+    _TABLES = ("file_copies", "deliveries", "recording_processing", "actions")
+
+    def __init__(self, command: VerificationSave, key: OperationKey) -> None:
+        if not isinstance(command, VerificationSave):
+            raise TypeError("校验保存申请必须使用 VerificationSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved, connection)
+        command = self._command
+        copy = self._load_copy(connection, command.copy_id)
+        action = self._owner_action(connection, copy)
+        self._require_full_progress(copy)
+        if copy["verification_state"] not in (
+            int(_VERIFICATION.NOT_PERFORMED), int(_VERIFICATION.RUNNING),
+        ):
+            raise ConsistencyError(
+                f"校验事实已经保存: {copy['verification_state']!r}")
+        if command.source_sha256 is not None \
+                and copy["source_sha256"] is not None \
+                and command.source_sha256 != copy["source_sha256"]:
+            raise ConsistencyError("登记源摘要与已保存的源摘要不一致")
+        if action["cancel_requested"] == 1:
+            return self._decision(
+                VerificationResult(
+                    VerificationDisposition.SKIPPED, copy["verification_state"],
+                    "cancel_requested"),
+                read_only=True)
+        if not _read_owner_eligible(action):
+            return self._decision(
+                VerificationResult(
+                    VerificationDisposition.SKIPPED, copy["verification_state"],
+                    "owner_not_running"),
+                read_only=True)
+        before = {"verification_state": copy["verification_state"]}
+        after = {"verification_state": command.state}
+        if copy["source_sha256"] is None and command.source_sha256 is not None:
+            before["source_sha256"] = None
+            after["source_sha256"] = command.source_sha256
+        if command.target_sha256 != copy["target_sha256"]:
+            before["target_sha256"] = copy["target_sha256"]
+            after["target_sha256"] = command.target_sha256
+        if command.error_json is not None and not json_equal(
+                command.error_json, copy["verification_error_json"]):
+            before["verification_error_json"] = copy["verification_error_json"]
+            after["verification_error_json"] = command.error_json
+        row = _update("file_copies", copy["id"], before, after)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _COPY_CHANGED_EVENT, _VERIFY_REASON, (row,),
+            command.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,),
+            owners=self._owners,
+            state_rows=self._state,
+            result=VerificationResult(VerificationDisposition.SAVED, command.state),
+        )
+
+    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
+        """原键恢复首次校验保存响应；不按当前状态重新判定资格。"""
+        if len(saved) != 1 or saved[0]["type"] != _COPY_CHANGED_EVENT \
+                or saved[0]["reason"] != _VERIFY_REASON:
+            raise TransactionError("操作身份已用于其他阶段，不能作为校验保存重送")
+        event = saved[0]
+        if event["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("校验保存的事实时刻与原事务不同")
+        rows = event["body"]["rows"]
+        if len(rows) != 1 or rows[0]["table"] != "file_copies" \
+                or rows[0]["id"] != self._command.copy_id:
+            raise TransactionError("原校验保存的目标拷贝与输入不符")
+        after = rows[0]["after"]["values"]
+        committed = row_facts(connection, "file_copies", self._command.copy_id)
+        if after.get("verification_state") != self._command.state:
+            raise TransactionError("原校验保存的状态与输入不符")
+        for column, expected in (
+            ("source_sha256", self._command.source_sha256),
+            ("target_sha256", self._command.target_sha256),
+            ("verification_error_json", self._command.error_json),
+        ):
+            actual = after.get(column, committed[column] if committed else None)
+            if actual != expected:
+                raise TransactionError("原校验保存的摘要事实与输入不符")
+        return CommandPlan(
+            events=(), owners={}, state_rows={}, read_only=True,
+            result=VerificationResult(VerificationDisposition.SAVED, self._command.state),
+        )
+
+
+class _RecopyCommand(_CopyCompletionTablesMixin):
+    """整片重拷登记事务命令。
+
+    不一致事实尚未保存时先在同一事务保存 VERIFY(MISMATCHED)，随
+    后消耗一次重拷次数并把进度归零、登记重置意图；额度耗尽只保
+    存判定上限，取消或动作不在执行时不开始新重拷。
+    """
+
+    _TABLES = ("file_copies", "deliveries", "recording_processing", "actions")
+
+    def __init__(self, command: RecopyRegistration, key: OperationKey) -> None:
+        if not isinstance(command, RecopyRegistration):
+            raise TypeError("重拷登记申请必须使用 RecopyRegistration")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved, connection)
+        command = self._command
+        copy = self._load_copy(connection, command.copy_id)
+        action = self._owner_action(connection, copy)
+        self._require_full_progress(copy)
+        state = copy["verification_state"]
+        if state not in (int(_VERIFICATION.NOT_PERFORMED),
+                         int(_VERIFICATION.MISMATCHED)):
+            raise ConsistencyError(
+                f"只有未校验或已不一致的拷贝能登记重拷: {state!r}")
+        if copy["source_sha256"] is not None \
+                and copy["source_sha256"] != command.source_sha256:
+            raise ConsistencyError("已保存的源摘要与登记输入不一致")
+        if state == int(_VERIFICATION.MISMATCHED) \
+                and copy["target_sha256"] != command.target_sha256:
+            raise ConsistencyError("已保存的主机摘要与登记输入不一致")
+        if action["cancel_requested"] == 1:
+            return self._decision(
+                RecopyResult(RecopyDisposition.SKIPPED, reason="cancel_requested"),
+                read_only=True)
+        if not _read_owner_eligible(action):
+            return self._decision(
+                RecopyResult(RecopyDisposition.SKIPPED, reason="owner_not_running"),
+                read_only=True)
+        if copy["recopies_used"] >= command.max_recopies:
+            return self._exhausted(scope, copy)
+        specs = []
+        if state == int(_VERIFICATION.NOT_PERFORMED):
+            specs.append((
+                _COPY_CHANGED_EVENT, _VERIFY_REASON, (self._verify_mismatch_row(copy),),
+            ))
+        round_now, used_now = copy["round"], copy["recopies_used"]
+        before = {
+            "round": round_now,
+            "recopies_used": used_now,
+            "committed_bytes": copy["source_size"],
+            "reset_state": int(_RESET_STATE.READY),
+            "verification_state": int(_VERIFICATION.MISMATCHED),
+            "target_sha256": command.target_sha256,
+        }
+        after = {
+            "round": round_now + 1,
+            "recopies_used": used_now + 1,
+            "committed_bytes": 0,
+            "reset_state": int(_RESET_STATE.RESET_PENDING),
+            "verification_state": int(_VERIFICATION.NOT_PERFORMED),
+            "target_sha256": None,
+        }
+        if command.max_recopies != copy["max_recopies_used"]:
+            before["max_recopies_used"] = copy["max_recopies_used"]
+            after["max_recopies_used"] = command.max_recopies
+        specs.append((
+            _COPY_CHANGED_EVENT, _RECOPY_REASON,
+            (_update("file_copies", copy["id"], before, after),),
+        ))
+        allocation = scope.allocate(len(specs))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, reason, rows, command.occurred_at,
+            )
+            for index, (event_type, reason, rows) in enumerate(specs)
+        )
+        return CommandPlan(
+            events=events,
+            owners=self._owners,
+            state_rows=self._state,
+            result=RecopyResult(
+                RecopyDisposition.REGISTERED,
+                round=round_now + 1, recopies_used=used_now + 1,
+            ),
+        )
+
+    def _verify_mismatch_row(self, copy) -> tuple:
+        """构造不一致事实行：源摘要与主机摘要都保存为比较依据。"""
+        before = {"verification_state": copy["verification_state"]}
+        after = {"verification_state": int(_VERIFICATION.MISMATCHED)}
+        if copy["source_sha256"] is None:
+            before["source_sha256"] = None
+            after["source_sha256"] = self._command.source_sha256
+        before["target_sha256"] = copy["target_sha256"]
+        after["target_sha256"] = self._command.target_sha256
+        return _update("file_copies", copy["id"], before, after)
+
+    def _exhausted(self, scope, copy) -> CommandPlan:
+        """额度耗尽：保存不一致诊断与实际判定上限，不登记新轮次。"""
+        specs = []
+        if copy["verification_state"] == int(_VERIFICATION.NOT_PERFORMED):
+            specs.append((
+                _COPY_CHANGED_EVENT, _VERIFY_REASON, (self._verify_mismatch_row(copy),),
+            ))
+        if self._command.max_recopies != copy["max_recopies_used"]:
+            specs.append((
+                _COPY_CHANGED_EVENT, _CONFIGURE_REASON,
+                (_update(
+                    "file_copies", copy["id"],
+                    {"max_recopies_used": copy["max_recopies_used"]},
+                    {"max_recopies_used": self._command.max_recopies},
+                ),),
+            ))
+        result = RecopyResult(
+            RecopyDisposition.EXHAUSTED,
+            round=copy["round"], recopies_used=copy["recopies_used"],
+        )
+        if not specs:
+            return self._decision(result, read_only=True)
+        allocation = scope.allocate(len(specs))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, reason, rows, self._command.occurred_at,
+            )
+            for index, (event_type, reason, rows) in enumerate(specs)
+        )
+        return CommandPlan(
+            events=events,
+            owners=self._owners,
+            state_rows=self._state,
+            result=result,
+        )
+
+    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
+        """原键恢复首次重拷登记响应；不重新判定额度或资格。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        registered = ([(_COPY_CHANGED_EVENT, _VERIFY_REASON),
+                       (_COPY_CHANGED_EVENT, _RECOPY_REASON)],
+                      [(_COPY_CHANGED_EVENT, _RECOPY_REASON)])
+        exhausted = ([(_COPY_CHANGED_EVENT, _VERIFY_REASON),
+                      (_COPY_CHANGED_EVENT, _CONFIGURE_REASON)],
+                     [(_COPY_CHANGED_EVENT, _CONFIGURE_REASON)])
+        if types not in registered and types not in exhausted:
+            raise TransactionError("操作身份已用于其他阶段，不能作为重拷登记重送")
+        for event in saved:
+            if event["occurred_at"] != self._command.occurred_at:
+                raise TransactionError("重拷登记的事实时刻与原事务不同")
+            for row in event["body"]["rows"]:
+                if row["table"] != "file_copies" \
+                        or row["id"] != self._command.copy_id:
+                    raise TransactionError("原重拷登记的目标拷贝与输入不符")
+        committed = row_facts(connection, "file_copies", self._command.copy_id)
+        final_rows = saved[-1]["body"]["rows"][0]
+        if types in registered:
+            before = final_rows["before"]["values"]
+            after = final_rows["after"]["values"]
+            if before.get("target_sha256") != self._command.target_sha256:
+                raise TransactionError("原重拷登记的主机摘要与输入不符")
+            limit = after.get("max_recopies_used", committed["max_recopies_used"]
+                              if committed else None)
+            if limit != self._command.max_recopies:
+                raise TransactionError("原重拷登记的判定上限与输入不符")
+            if (_COPY_CHANGED_EVENT, _VERIFY_REASON) in types:
+                verify_values = saved[0]["body"]["rows"][0]["after"]["values"]
+                source = verify_values.get(
+                    "source_sha256", committed["source_sha256"] if committed else None)
+                if source != self._command.source_sha256:
+                    raise TransactionError("原不一致事实的源摘要与输入不符")
+            elif before.get("verification_state") != int(_VERIFICATION.MISMATCHED):
+                raise TransactionError("单独重拷事件必须以已保存的不一致事实为前提")
+            return CommandPlan(
+                events=(), owners={}, state_rows={}, read_only=True,
+                result=RecopyResult(
+                    RecopyDisposition.REGISTERED,
+                    round=after.get("round"), recopies_used=after.get("recopies_used"),
+                ),
+            )
+        if (_COPY_CHANGED_EVENT, _VERIFY_REASON) in types:
+            verify_values = saved[0]["body"]["rows"][0]["after"]["values"]
+            source = verify_values.get(
+                "source_sha256", committed["source_sha256"] if committed else None)
+            if source != self._command.source_sha256 \
+                    or verify_values.get("target_sha256") != self._command.target_sha256:
+                raise TransactionError("原不一致事实的摘要与输入不符")
+        if (_COPY_CHANGED_EVENT, _CONFIGURE_REASON) in types:
+            configured = saved[-1]["body"]["rows"][0]["after"]["values"]
+            if configured.get("max_recopies_used") != self._command.max_recopies:
+                raise TransactionError("原判定上限与输入不符")
+        else:
+            limit = committed["max_recopies_used"] if committed else None
+            if limit != self._command.max_recopies:
+                raise TransactionError("原判定的实际上限与输入不符")
+        return CommandPlan(
+            events=(), owners={}, state_rows={}, read_only=True,
+            result=RecopyResult(
+                RecopyDisposition.EXHAUSTED,
+                round=committed["round"] if committed else None,
+                recopies_used=committed["recopies_used"] if committed else None,
+            ),
+        )
+
+
+class _PreparedSaveCommand(_CopyCompletionTablesMixin):
+    """副本准备完成事务命令。
+
+    校验通过或明确不支持降级完成后，保存目标文件完整字节事实，
+    普通交付与进入 PREPARED、解除取回源依赖共同提交；内部输入
+    副本不解除取回源依赖，源保留由所属处理状态表达。
+    """
+
+    _TABLES = (
+        "file_copies", "intermediate_files", "deliveries", "obtain_items",
+        "obtain_source_selections", "action_dependencies", "recording_processing",
+        "actions",
+    )
+
+    def __init__(self, request: PreparedRequest, key: OperationKey) -> None:
+        if not isinstance(request, PreparedRequest):
+            raise TypeError("准备完成申请必须使用 PreparedRequest")
+        self._request = request
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        request = self._request
+        copy = self._load_copy(connection, request.copy_id)
+        self._require_full_progress(copy)
+        if copy["verification_state"] not in (
+            int(_VERIFICATION.MATCHED),
+            int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
+        ):
+            raise ConsistencyError(
+                "副本完成字节校验前不能准备完成:"
+                f" {copy['verification_state']!r}")
+        if copy["target_sha256"] != request.target_sha256:
+            raise ConsistencyError("准备完成申请的主机摘要与已保存校验不一致")
+        if copy["source_size"] != request.size_bytes:
+            raise ConsistencyError("准备完成申请的完整长度与固定源长度不一致")
+        target = row_facts(connection, "intermediate_files", copy["target_file_id"])
+        if target is None:
+            raise ConsistencyError(f"拷贝的目标中间文件缺失: {copy['target_file_id']}")
+        self._state["intermediate_files"][target["id"]] = target
+        self._owners[("intermediate_files", target["id"])] = (
+            "intermediate_file", target["id"],
+        )
+        is_delivery = copy["delivery_id"] is not None
+        item = None
+        delivery = None
+        if is_delivery:
+            self._owners[("deliveries", copy["delivery_id"])] = (
+                "delivery", copy["delivery_id"],
+            )
+            with closing(connection.execute(
+                "SELECT id FROM obtain_items WHERE delivery_id=?", (copy["delivery_id"],),
+            )) as cursor:
+                found = cursor.fetchone()
+            if found is None:
+                raise ConsistencyError("交付缺少关联的取回项")
+            item = row_facts(connection, "obtain_items", found[0])
+            if item is None:
+                raise ConsistencyError(f"取回项记录缺失: {found[0]}")
+            self._state["obtain_items"][item["id"]] = item
+            selection = row_facts(
+                connection, "obtain_source_selections", item["selection_id"])
+            if selection is None:
+                raise ConsistencyError(f"取回项的选择记录缺失: {item['selection_id']}")
+            self._state["obtain_source_selections"][selection["id"]] = selection
+            dependency = row_facts(
+                connection, "action_dependencies", selection["dependency_id"])
+            if dependency is None:
+                raise ConsistencyError(
+                    f"选择的来源依赖缺失: {selection['dependency_id']}")
+            self._state["action_dependencies"][dependency["id"]] = dependency
+            self._owners[("obtain_items", item["id"])] = (
+                "action", self._state["deliveries"][copy["delivery_id"]]["action_id"],
+            )
+            delivery = self._state["deliveries"][copy["delivery_id"]]
+            already = (
+                delivery["status"] == int(_DELIVERY_STATUS.PREPARED)
+                and item["source_dependency"] == 0
+                and target["size_bytes"] == request.size_bytes
+                and target["sha256"] == request.target_sha256
+            )
+            if already:
+                return self._already(copy, target, released=True)
+            if delivery["status"] not in (
+                int(_DELIVERY_STATUS.PENDING), int(_DELIVERY_STATUS.PREPARING),
+            ):
+                raise ConsistencyError(
+                    f"交付已离开准备阶段: {delivery['status']!r}")
+            if item["source_dependency"] != 1:
+                raise ConsistencyError("取回项源依赖已解除，不能重复准备完成")
+        elif (target["size_bytes"] == request.size_bytes
+                and target["sha256"] == request.target_sha256):
+            return self._already(copy, target, released=False)
+        action = self._owner_action(connection, copy)
+        if action["cancel_requested"] == 1:
+            return self._decision(
+                PreparedSaveOutcome(PreparedDisposition.SKIPPED, reason="cancel_requested"),
+                read_only=True)
+        if not _read_owner_eligible(action):
+            return self._decision(
+                PreparedSaveOutcome(
+                    PreparedDisposition.SKIPPED, reason="owner_not_running"),
+                read_only=True)
+        specs = [(
+            _INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON,
+            (_update(
+                "intermediate_files", target["id"],
+                {"size_bytes": target["size_bytes"], "sha256": target["sha256"]},
+                {"size_bytes": request.size_bytes, "sha256": request.target_sha256},
+            ),),
+        )]
+        prepared = PreparedCopy(
+            copy_id=copy["id"], target_file_id=target["id"],
+            size_bytes=request.size_bytes, sha256=request.target_sha256,
+            source_dependency_released=is_delivery,
+        )
+        if is_delivery:
+            specs.append((
+                _DELIVERY_CHANGED_EVENT, _PREPARE_REASON,
+                (_update(
+                    "deliveries", delivery["id"],
+                    {"status": delivery["status"]},
+                    {"status": int(_DELIVERY_STATUS.PREPARED)},
+                ),),
+            ))
+            specs.append((
+                _READ_PERMISSION_EVENT, _RELEASE_REASON,
+                (_update(
+                    "obtain_items", item["id"],
+                    {"source_dependency": 1},
+                    {"source_dependency": 0},
+                ),),
+            ))
+        allocation = scope.allocate(len(specs))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, reason, rows, request.occurred_at,
+            )
+            for index, (event_type, reason, rows) in enumerate(specs)
+        )
+        return CommandPlan(
+            events=events,
+            owners=self._owners,
+            state_rows=self._state,
+            result=PreparedSaveOutcome(PreparedDisposition.SAVED, prepared=prepared),
+        )
+
+    def _already(self, copy, target, *, released: bool) -> CommandPlan:
+        """先前事务已完整提交本次事实；恢复重放不重复保存。"""
+        return self._decision(PreparedSaveOutcome(
+            PreparedDisposition.ALREADY,
+            prepared=PreparedCopy(
+                copy_id=copy["id"], target_file_id=target["id"],
+                size_bytes=target["size_bytes"], sha256=target["sha256"],
+                source_dependency_released=released,
+            ),
+        ), read_only=True)
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次准备完成响应；已提交事实不重复保存。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        expected = [
+            (_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON),
+            (_DELIVERY_CHANGED_EVENT, _PREPARE_REASON),
+            (_READ_PERMISSION_EVENT, _RELEASE_REASON),
+        ]
+        if types != expected[:1] and types != expected:
+            raise TransactionError("操作身份已用于其他阶段，不能作为准备完成重送")
+        first = saved[0]
+        if first["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("准备完成的事实时刻与原事务不同")
+        target_file_id = None
+        for event in saved:
+            for row in event["body"]["rows"]:
+                after = row["after"]["values"]
+                if row["table"] == "intermediate_files":
+                    target_file_id = row["id"]
+                    if (after.get("size_bytes") != self._request.size_bytes
+                            or after.get("sha256") != self._request.target_sha256):
+                        raise TransactionError("原准备完成的字节事实与输入不符")
+        if target_file_id is None:
+            raise TransactionError("原准备完成缺少目标文件事实")
+        released = (_READ_PERMISSION_EVENT, _RELEASE_REASON) in types
+        return CommandPlan(
+            events=(), owners={}, state_rows={}, read_only=True,
+            result=PreparedSaveOutcome(
+                PreparedDisposition.ALREADY,
+                prepared=PreparedCopy(
+                    copy_id=self._request.copy_id, target_file_id=target_file_id,
+                    size_bytes=self._request.size_bytes,
+                    sha256=self._request.target_sha256,
+                    source_dependency_released=released,
+                ),
+            ),
+        )
+
+
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
 
@@ -2734,6 +3335,24 @@ class OutputsRepository:
         self, command: ReliableSegment, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SegmentSaveOutcome]:
         receipt = commit_operation(_SegmentSaveCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_verification(
+        self, command: VerificationSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[VerificationResult]:
+        receipt = commit_operation(_IntegritySaveCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
+    def register_recopy(
+        self, command: RecopyRegistration, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[RecopyResult]:
+        receipt = commit_operation(_RecopyCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_prepared(
+        self, request: PreparedRequest, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[PreparedSaveOutcome]:
+        receipt = commit_operation(_PreparedSaveCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
 
@@ -2909,51 +3528,76 @@ def _source_selection_guard(event, context) -> None:
 
 
 def _intermediate_guard(event, context) -> None:
-    """中间文件建档守卫：用途与归属互斥、初始保留与清理状态固定。"""
-    if event.event_type != _INTERMEDIATE_FILE_EVENT or event.reason != 1:
-        return
-    for row in event.rows:
-        if row.table != "intermediate_files" or row.before.exists:
-            raise EventValidationError("中间文件建档必须是创建行")
-        values = row.after.values
-        purpose = values.get("purpose")
-        if values.get("retention_state") != int(_RETENTION.REQUIRED):
-            raise EventValidationError("新建中间文件必须处于 REQUIRED 保留状态")
-        if values.get("cleanup_state") != int(_FILE_CLEANUP.NOT_NEEDED):
-            raise EventValidationError("新建中间文件不得登记清理待办")
-        if values.get("size_bytes") is not None or values.get("sha256") is not None:
-            raise EventValidationError("新建中间文件尚无内容事实")
-        has_delivery = values.get("owner_delivery_id") is not None
-        has_action = values.get("owner_action_id") is not None
-        if purpose == int(_PURPOSE.DELIVERY_COPY):
-            if not has_delivery or has_action:
-                raise EventValidationError("交付副本必须归属交付且不归属动作")
-        elif has_delivery or not has_action:
-            raise EventValidationError("处理用途的中间文件必须归属动作")
+    """中间文件建档与字节事实守卫：用途互斥、初始状态固定。"""
+    if event.event_type == _INTERMEDIATE_FILE_EVENT and event.reason == 1:
+        for row in event.rows:
+            if row.table != "intermediate_files" or row.before.exists:
+                raise EventValidationError("中间文件建档必须是创建行")
+            values = row.after.values
+            purpose = values.get("purpose")
+            if values.get("retention_state") != int(_RETENTION.REQUIRED):
+                raise EventValidationError("新建中间文件必须处于 REQUIRED 保留状态")
+            if values.get("cleanup_state") != int(_FILE_CLEANUP.NOT_NEEDED):
+                raise EventValidationError("新建中间文件不得登记清理待办")
+            if values.get("size_bytes") is not None or values.get("sha256") is not None:
+                raise EventValidationError("新建中间文件尚无内容事实")
+            has_delivery = values.get("owner_delivery_id") is not None
+            has_action = values.get("owner_action_id") is not None
+            if purpose == int(_PURPOSE.DELIVERY_COPY):
+                if not has_delivery or has_action:
+                    raise EventValidationError("交付副本必须归属交付且不归属动作")
+            elif has_delivery or not has_action:
+                raise EventValidationError("处理用途的中间文件必须归属动作")
+    elif event.event_type == _INTERMEDIATE_FILE_EVENT and event.reason == _LIFECYCLE_REASON:
+        for row in event.rows:
+            if row.table != "intermediate_files":
+                continue
+            after = row.after.values
+            if "sha256" in after or "size_bytes" in after:
+                if after.get("sha256") is None or after.get("size_bytes") is None:
+                    raise EventValidationError("完整字节事实必须同时携带长度与摘要")
 
 
 def _delivery_guard(event, context) -> None:
-    """交付建档守卫：初始待准备、未发布且未撤回。"""
-    if event.event_type != _DELIVERY_CHANGED_EVENT or event.reason != 1:
-        return
-    for row in event.rows:
-        if row.table != "deliveries" or row.before.exists:
-            raise EventValidationError("交付建档必须是创建行")
-        values = row.after.values
-        if values.get("status") != int(_DELIVERY_STATUS.PENDING):
-            raise EventValidationError("新建交付必须处于 PENDING")
-        if values.get("withdrawal_state") != int(_WITHDRAWAL.NOT_REQUESTED):
-            raise EventValidationError("新建交付不得携带撤回状态")
-        if (
-            values.get("publication_intent_event_id") is not None
-            or values.get("published_event_id") is not None
-            or values.get("error_json") is not None
-        ):
-            raise EventValidationError("新建交付不得携带发布或错误事实")
+    """交付建档与准备阶段守卫：初始待准备，完成准备以校验为前提。"""
+    if event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == 1:
+        for row in event.rows:
+            if row.table != "deliveries" or row.before.exists:
+                raise EventValidationError("交付建档必须是创建行")
+            values = row.after.values
+            if values.get("status") != int(_DELIVERY_STATUS.PENDING):
+                raise EventValidationError("新建交付必须处于 PENDING")
+            if values.get("withdrawal_state") != int(_WITHDRAWAL.NOT_REQUESTED):
+                raise EventValidationError("新建交付不得携带撤回状态")
+            if (
+                values.get("publication_intent_event_id") is not None
+                or values.get("published_event_id") is not None
+                or values.get("error_json") is not None
+            ):
+                raise EventValidationError("新建交付不得携带发布或错误事实")
+    elif event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == _PREPARE_REASON:
+        for row in event.rows:
+            if row.table != "deliveries" or row.after.values.get("status") != \
+                    int(_DELIVERY_STATUS.PREPARED):
+                continue
+            copies = [
+                facts for facts in context.state_rows.get("file_copies", {}).values()
+                if facts.get("delivery_id") == row.row_id
+            ]
+            if len(copies) != 1:
+                raise EventValidationError("准备完成必须对应唯一交付拷贝")
+            copy = copies[0]
+            if copy.get("verification_state") not in (
+                int(_VERIFICATION.MATCHED),
+                int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
+            ):
+                raise EventValidationError("副本未完成字节校验不能准备完成")
+            if copy.get("committed_bytes") != copy.get("source_size"):
+                raise EventValidationError("副本字节未完整保存不能准备完成")
 
 
 def _copy_guard(event, context) -> None:
-    """拷贝建档、进度段与目标重置守卫。"""
+    """拷贝建档、进度段、目标重置、校验与重拷守卫。"""
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RESET_REASON:
         for row in event.rows:
             if row.table != "file_copies":
@@ -2980,6 +3624,61 @@ def _copy_guard(event, context) -> None:
                 raise EventValidationError("进度段必须推进可靠进度")
             if after > copy.get("source_size"):
                 raise EventValidationError("进度段不能越过固定源长度")
+        return
+    if event.event_type == _COPY_CHANGED_EVENT and event.reason == _VERIFY_REASON:
+        for row in event.rows:
+            if row.table != "file_copies":
+                continue
+            copy = context.state_rows.get("file_copies", {}).get(row.row_id)
+            if copy is None:
+                raise EventValidationError("校验事实缺少当前拷贝事实")
+            if copy.get("committed_bytes") != copy.get("source_size"):
+                raise EventValidationError("校验要求全部字节可靠保存")
+            after = row.after.values
+            state = after.get("verification_state")
+            source = after.get("source_sha256", copy.get("source_sha256"))
+            target = after.get("target_sha256", copy.get("target_sha256"))
+            if state == int(_VERIFICATION.MATCHED):
+                if source is None or target is None or source != target:
+                    raise EventValidationError("校验通过要求源摘要与主机摘要一致")
+            elif state == int(_VERIFICATION.MISMATCHED):
+                if source is None or target is None or source == target:
+                    raise EventValidationError("摘要不一致要求两个摘要都存在且不等")
+            elif state == int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE):
+                if source is not None:
+                    raise EventValidationError("明确不支持源端摘要不能携带源摘要")
+            elif state == int(_VERIFICATION.FAILED):
+                if after.get("verification_error_json") is None:
+                    raise EventValidationError("校验失败必须携带失败诊断")
+            else:
+                raise EventValidationError("校验事务只能保存终局校验状态")
+        return
+    if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RECOPY_REASON:
+        for row in event.rows:
+            if row.table != "file_copies":
+                continue
+            copy = context.state_rows.get("file_copies", {}).get(row.row_id)
+            if copy is None:
+                raise EventValidationError("重拷登记缺少当前拷贝事实")
+            before = row.before.values
+            after = row.after.values
+            if before.get("committed_bytes") != copy.get("source_size"):
+                raise EventValidationError("重拷登记要求全部字节已经可靠保存")
+            if after.get("round") != before.get("round", 0) + 1 \
+                    or after.get("recopies_used") != before.get("recopies_used", -1) + 1:
+                raise EventValidationError("重拷登记必须恰好增加一轮并消耗一次额度")
+            if after.get("committed_bytes") != 0:
+                raise EventValidationError("重拷登记必须把可靠进度归零")
+            if after.get("target_sha256") is not None:
+                raise EventValidationError("新一轮拷贝不能沿用旧目标摘要")
+        return
+    if event.event_type == _COPY_CHANGED_EVENT and event.reason == _CONFIGURE_REASON:
+        for row in event.rows:
+            if row.table != "file_copies":
+                continue
+            limit = row.after.values.get("max_recopies_used")
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+                raise EventValidationError("判定上限必须是非负整数")
         return
     if event.event_type != _COPY_CHANGED_EVENT or event.reason != 1:
         return
@@ -3297,6 +3996,34 @@ def _read_permission_guard(event, context) -> None:
             or after.get("error_details_json") is None
         ):
             raise EventValidationError("逐项拒绝必须保存最终失败及错误")
+    elif event.event_type == _READ_PERMISSION_EVENT and event.reason == _RELEASE_REASON:
+        for row in event.rows:
+            if row.table != "obtain_items" or not row.before.exists:
+                continue
+            if row.before.values.get("source_dependency") != 1 \
+                    or row.after.values.get("source_dependency") != 0:
+                raise EventValidationError("解除源依赖必须从有效依赖翻转为解除")
+            item = context.state_rows.get("obtain_items", {}).get(row.row_id)
+            if item is None:
+                raise EventValidationError("解除源依赖缺少取回项事实")
+            delivery_id = item.get("delivery_id")
+            delivery = context.state_rows.get("deliveries", {}).get(delivery_id)
+            if delivery_id is None or delivery is None:
+                raise EventValidationError("解除源依赖缺少交付事实")
+            copies = [
+                facts for facts in context.state_rows.get("file_copies", {}).values()
+                if facts.get("delivery_id") == delivery_id
+            ]
+            if len(copies) != 1:
+                raise EventValidationError("解除源依赖必须对应唯一交付拷贝")
+            copy = copies[0]
+            if copy.get("verification_state") not in (
+                int(_VERIFICATION.MATCHED),
+                int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
+            ):
+                raise EventValidationError("副本可靠准备前不能解除源保护")
+            if copy.get("committed_bytes") != copy.get("source_size"):
+                raise EventValidationError("副本字节未完整保存前不能解除源保护")
     elif event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == 1:
         for row in event.rows:
             if row.table != "deliveries" or row.before.exists:
@@ -3304,6 +4031,37 @@ def _read_permission_guard(event, context) -> None:
             items = context.state_rows.get("obtain_items", {})
             if not items:
                 raise EventValidationError("交付建档必须提供待授予的取回项事实")
+
+
+def _processing_guard(event, context) -> None:
+    """录像处理相关守卫；处理状态分支由媒体处理模块接入。
+
+    本模块只约束共同经过的文件字节事实：处理输入副本保存完整
+    字节事实与其唯一拷贝的校验完成共同成立。
+    """
+    if event.event_type != _INTERMEDIATE_FILE_EVENT or event.reason != _LIFECYCLE_REASON:
+        return
+    for row in event.rows:
+        if row.table != "intermediate_files":
+            continue
+        if row.after.values.get("sha256") is None:
+            continue
+        copies = [
+            facts for facts in context.state_rows.get("file_copies", {}).values()
+            if facts.get("target_file_id") == row.row_id
+        ]
+        if not copies:
+            continue
+        if len(copies) != 1:
+            raise EventValidationError("处理输入的完整字节事实必须对应唯一拷贝")
+        copy = copies[0]
+        if copy.get("verification_state") not in (
+            int(_VERIFICATION.MATCHED),
+            int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
+        ):
+            raise EventValidationError("处理输入副本未完成字节校验不能保存完整事实")
+        if copy.get("committed_bytes") != copy.get("source_size"):
+            raise EventValidationError("处理输入副本字节未完整保存不能保存完整事实")
 
 
 def register_outputs_guards() -> None:
@@ -3316,4 +4074,5 @@ def register_outputs_guards() -> None:
     register_guard("copy_links", _copy_links_guard)
     register_guard("read_slot", _read_slot_guard)
     register_guard("read_permission", _read_permission_guard)
+    register_guard("processing", _processing_guard)
     register_guard("obtain_member", _obtain_member_guard)

@@ -1,11 +1,13 @@
-"""共用拷贝的续传准备、分段推进与可靠进度申请。
+"""共用拷贝的续传准备、分段推进、可靠进度与完整性收尾。
 
 取回、异常原片检查和修复的输入拷贝共用本模块：固定源身份与
 长度后，按可靠进度和主机文件事实决定续传位置，再按本次配置
-的段大小逐段传输并申请进度保存。设备读取开始前的意图与次数
+的段大小逐段传输并申请进度保存，全部字节可靠保存后按源端摘
+要能力完成完整性判定与准备收尾。设备读取开始前的意图与次数
 由操作仓储保存，本模块不重复预算判断。行为契约为[重启后选择
-续传位置](../../architecture/file-copy.md#重启后选择续传位置)与
-[进度保存的分段大小](../../architecture/file-copy.md#进度保存的分段大小)。
+续传位置](../../architecture/file-copy.md#重启后选择续传位置)、
+[进度保存的分段大小](../../architecture/file-copy.md#进度保存的分段大小)与
+[读取正确性与文件校验](../../architecture/file-copy.md#读取正确性与文件校验)。
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ import asyncio
 import threading
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
@@ -23,7 +25,8 @@ from camctl.contracts.values import (
 )
 from camctl.devices.read_session import ReadChunk, ReadEnd
 from camctl.host_files.io import (
-    LocalSourceReader as LocalCopySource, PositionedWriter, prepare_target, sync_target,
+    LocalSourceReader as LocalCopySource, PositionedWriter, hash_target, prepare_target,
+    sync_target,
 )
 from camctl.host_files.models import (
     BoundDirectories, FileObservation, FileObservationKind, FilePurpose, FileRef,
@@ -40,6 +43,24 @@ if TYPE_CHECKING:
     from camctl.persistence.runtime import OwnedConnection
 
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
+_VERIFICATION = enum_for("file_copies.verification_state")
+_HEX = frozenset("0123456789abcdef")
+
+
+class SourceChecksumSupport(Enum):
+    """源端摘要能力的可靠判定；未知不能折叠为不支持。"""
+
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+    UNDETERMINED = "undetermined"
+
+
+def _require_digest(name: str, value) -> None:
+    """摘要必须是 64 位小写十六进制，或明确未知（None）。"""
+    if value is None:
+        return
+    if not isinstance(value, str) or len(value) != 64 or not set(value) <= _HEX:
+        raise ValueError(f"{name} 必须是 64 位小写十六进制摘要: {value!r}")
 
 
 class ResumeOutcome(Enum):
@@ -282,6 +303,12 @@ class CopyStateFacts:
     reset_pending: bool
     target: CopyTargetRef
     attempts: tuple[AttemptRecord, ...]
+    source_sha256: str | None = None
+    target_sha256: str | None = None
+    verification_state: int = int(_VERIFICATION.NOT_PERFORMED)
+    recopies_used: int = 0
+    max_recopies_used: int = 0
+    source_support: SourceChecksumSupport = SourceChecksumSupport.UNDETERMINED
 
 
 @dataclass(frozen=True)
@@ -583,3 +610,490 @@ async def prepare_copy(copy_id: int, context: CopyContext) -> CopyStep:
         reset = outcome.value.outcome
     attempt = decide_attempt(facts.attempts, facts.round)
     return CopyStep(decision=decision, attempt=attempt, reset=reset)
+
+
+class IntegrityOutcome(Enum):
+    """完整性判定的分区；与源端校验决策表一一对应。"""
+
+    MATCHED = "matched"
+    MISMATCHED = "mismatched"
+    SOURCE_UNAVAILABLE = "source_unavailable"
+    VERIFICATION_FAILED = "verification_failed"
+    CAPABILITY_UNDETERMINED = "capability_undetermined"
+
+
+class RecopyPlan(Enum):
+    """摘要不一致后的重拷判定；读取尝试次数不参与本判定。"""
+
+    REGISTER = "register"
+    EXHAUSTED = "exhausted"
+    OWNER_NOT_ELIGIBLE = "owner_not_eligible"
+
+
+@dataclass(frozen=True)
+class IntegrityFacts:
+    """完整性判定所需的固定事实。
+
+    source_sha256 为空表达本次未可靠取得源摘要；支持源端校验时
+    必须同时给出获取结果或获取失败之一。owner_running 表达发起
+    责任是否仍允许执行；读取尝试次数不属于本判定输入。
+    """
+
+    source_size: int
+    committed_bytes: int
+    source_support: SourceChecksumSupport
+    source_sha256: str | None = None
+    source_error: object | None = None
+    target_sha256: str | None = None
+    target_error: object | None = None
+    owner_running: bool = True
+    recopies_used: int = 0
+    max_recopies: int = 0
+
+    def __post_init__(self) -> None:
+        for name, value in (("source_size", self.source_size),
+                            ("committed_bytes", self.committed_bytes),
+                            ("recopies_used", self.recopies_used),
+                            ("max_recopies", self.max_recopies)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} 必须是非负整数: {value!r}")
+        if not isinstance(self.source_support, SourceChecksumSupport):
+            raise ValueError(
+                f"源端摘要能力必须使用 SourceChecksumSupport: {self.source_support!r}")
+        if not isinstance(self.owner_running, bool):
+            raise ValueError(f"发起责任资格必须是布尔值: {self.owner_running!r}")
+        _require_digest("source_sha256", self.source_sha256)
+        _require_digest("target_sha256", self.target_sha256)
+
+
+@dataclass(frozen=True)
+class IntegrityDecision:
+    """完整性决定；摘要不一致时附带重拷判定。"""
+
+    outcome: IntegrityOutcome
+    recopy: RecopyPlan | None = None
+    error: object | None = None
+
+
+def decide_integrity(facts: IntegrityFacts) -> IntegrityDecision:
+    """按源端摘要能力与比较结果决定完整性收尾分区。
+
+    主机摘要必须已经可靠计算；能力未知先确认能力，不折叠为不
+    支持分支。摘要不一致时按重拷次数与本次上限独立判定，读取
+    尝试预算不影响本决定。
+    """
+    if not isinstance(facts, IntegrityFacts):
+        raise TypeError(f"完整性判定必须使用 IntegrityFacts: {facts!r}")
+    if facts.committed_bytes != facts.source_size:
+        raise ConsistencyError(
+            f"可靠进度 {facts.committed_bytes} 尚未到达固定源长度 {facts.source_size}"
+        )
+    if facts.target_sha256 is None:
+        if facts.target_error is None:
+            raise ConsistencyError("主机摘要计算失败必须携带失败诊断")
+        return IntegrityDecision(
+            outcome=IntegrityOutcome.VERIFICATION_FAILED, error=facts.target_error)
+    if facts.source_support is SourceChecksumSupport.UNDETERMINED:
+        return IntegrityDecision(outcome=IntegrityOutcome.CAPABILITY_UNDETERMINED)
+    if facts.source_support is SourceChecksumSupport.UNSUPPORTED:
+        if facts.source_sha256 is not None:
+            raise ConsistencyError("明确不支持的源不能携带源端摘要")
+        return IntegrityDecision(outcome=IntegrityOutcome.SOURCE_UNAVAILABLE)
+    if facts.source_sha256 is None:
+        if facts.source_error is None:
+            raise ConsistencyError("支持源端校验时必须给出获取结果或获取失败")
+        return IntegrityDecision(
+            outcome=IntegrityOutcome.VERIFICATION_FAILED, error=facts.source_error)
+    if facts.source_sha256 == facts.target_sha256:
+        return IntegrityDecision(outcome=IntegrityOutcome.MATCHED)
+    if not facts.owner_running:
+        plan = RecopyPlan.OWNER_NOT_ELIGIBLE
+    elif facts.recopies_used >= facts.max_recopies:
+        plan = RecopyPlan.EXHAUSTED
+    else:
+        plan = RecopyPlan.REGISTER
+    return IntegrityDecision(outcome=IntegrityOutcome.MISMATCHED, recopy=plan)
+
+
+#: 校验事务允许保存的终局状态；进行中状态由编排过程表达，不落库。
+_TERMINAL_VERIFICATION = frozenset(
+    int(_VERIFICATION[member])
+    for member in ("MATCHED", "MISMATCHED", "SOURCE_CHECKSUM_UNAVAILABLE", "FAILED")
+)
+
+
+@dataclass(frozen=True)
+class VerificationSave:
+    """一次校验结果的保存申请。
+
+    state 是目标校验状态；MATCHED/MISMATCHED 必须携带源摘要，
+    FAILED 必须携带错误诊断对象且不能携带源摘要，明确不支持分
+    支两者都不携带。error_json 是结构化诊断对象，由持久化内核
+    按 JSON 列约定序列化。
+    """
+
+    copy_id: int
+    state: int
+    source_sha256: str | None
+    target_sha256: str
+    error_json: Mapping[str, Any] | None
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.copy_id)
+        if isinstance(self.state, bool) or not isinstance(self.state, int) \
+                or self.state not in _TERMINAL_VERIFICATION:
+            raise ValueError(f"校验状态必须是登记的终局状态: {self.state!r}")
+        _require_digest("source_sha256", self.source_sha256)
+        _require_digest("target_sha256", self.target_sha256)
+        if self.error_json is not None and not isinstance(self.error_json, Mapping):
+            raise ValueError(f"校验诊断必须是对象: {self.error_json!r}")
+        if self.state == int(_VERIFICATION.FAILED):
+            if self.source_sha256 is not None or self.error_json is None:
+                raise ValueError("校验失败必须携带错误诊断且不能携带源摘要")
+        elif self.state == int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE):
+            if self.source_sha256 is not None or self.error_json is not None:
+                raise ValueError("明确不支持分支不携带源摘要或错误诊断")
+        else:
+            if self.source_sha256 is None or self.error_json is not None:
+                raise ValueError("摘要比较结果必须携带源摘要且不携带错误诊断")
+        timestamp = UtcMicros(self.occurred_at)
+        if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+            raise ValueError(f"事实时刻超出 SQLite 整数范围: {self.occurred_at!r}")
+
+
+class VerificationDisposition(Enum):
+    """校验保存事务的可靠结果分区。"""
+
+    SAVED = "saved"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """校验保存事务的返回；SKIPPED 表示核对到取消或不在执行。"""
+
+    disposition: VerificationDisposition
+    state: int
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class RecopyRegistration:
+    """一次整片重拷的登记申请。
+
+    source_sha256 与 target_sha256 是判定不一致所依据的两个摘要；
+    max_recopies 是本次判定实际采用的本地上限。
+    """
+
+    copy_id: int
+    source_sha256: str
+    target_sha256: str
+    max_recopies: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.copy_id)
+        if self.source_sha256 is None or self.target_sha256 is None:
+            raise ValueError("重拷登记必须携带判定不一致所依据的两个摘要")
+        _require_digest("source_sha256", self.source_sha256)
+        _require_digest("target_sha256", self.target_sha256)
+        if isinstance(self.max_recopies, bool) or not isinstance(self.max_recopies, int) \
+                or self.max_recopies < 0:
+            raise ValueError(f"本次重拷上限必须是非负整数: {self.max_recopies!r}")
+        timestamp = UtcMicros(self.occurred_at)
+        if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+            raise ValueError(f"事实时刻超出 SQLite 整数范围: {self.occurred_at!r}")
+
+
+class RecopyDisposition(Enum):
+    """重拷登记事务的分区。"""
+
+    REGISTERED = "registered"
+    EXHAUSTED = "exhausted"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class RecopyResult:
+    """重拷登记事务的返回；登记成功携带新轮次与已用次数。"""
+
+    disposition: RecopyDisposition
+    round: int | None = None
+    recopies_used: int | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class PreparedRequest:
+    """副本准备完成的保存申请：完整目标事实与事实时刻。"""
+
+    copy_id: int
+    target_sha256: str
+    size_bytes: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.copy_id)
+        _require_digest("target_sha256", self.target_sha256)
+        if isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int) \
+                or self.size_bytes < 0:
+            raise ValueError(f"完整目标长度必须是非负整数: {self.size_bytes!r}")
+        timestamp = UtcMicros(self.occurred_at)
+        if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+            raise ValueError(f"事实时刻超出 SQLite 整数范围: {self.occurred_at!r}")
+
+
+@dataclass(frozen=True)
+class PreparedCopy:
+    """已可靠准备的副本事实；released 表达本次事务解除取回源依赖。
+
+    录像内部输入副本的源保留由所属处理状态表达，不解除取回项
+    源依赖；准备完成事务尚未确认提交时，调用方不能视为已解除。
+    """
+
+    copy_id: int
+    target_file_id: int
+    size_bytes: int
+    sha256: str
+    source_dependency_released: bool
+
+
+class CopyCompletionError(RuntimeError):
+    """完整性收尾失败；保留实际阶段，不猜测未确认事实。"""
+
+    def __init__(self, stage: str, detail: str) -> None:
+        super().__init__(f"{stage}: {detail}")
+        self.stage = stage
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class SourceDigest:
+    """源端摘要获取的一次结果；digest 为空表达获取失败。"""
+
+    digest: str | None = None
+    error: object | None = None
+
+    def __post_init__(self) -> None:
+        _require_digest("digest", self.digest)
+        if self.digest is None and self.error is None:
+            raise ValueError("源端摘要获取失败必须携带失败诊断")
+
+
+class SourceDigestReader(Protocol):
+    """源端摘要获取端口；设备摘要驱动与测试替身共同满足。"""
+
+    async def read_digest(self) -> SourceDigest: ...
+
+
+@dataclass(frozen=True)
+class CompletionContext:
+    """完整性收尾的协作者、源摘要端口与本次事实时刻。"""
+
+    repository: "OutputsRepository"
+    owned: "OwnedConnection"
+    roots: BoundDirectories
+    occurred_at: int
+    digest: SourceDigestReader | None = None
+    max_recopies: int = 1
+    key: OperationKey | None = None
+
+
+class CompletionPhase(Enum):
+    """完整性收尾的出口：已准备完成，或已登记新一轮重拷。"""
+
+    PREPARED = "prepared"
+    RECOPY_REGISTERED = "recopy_registered"
+
+
+@dataclass(frozen=True)
+class CompletionStep:
+    """一次完整性收尾的结果。"""
+
+    phase: CompletionPhase
+    prepared: PreparedCopy | None = None
+    recopy: RecopyResult | None = None
+
+
+class PreparedDisposition(Enum):
+    """准备完成事务的分区。"""
+
+    SAVED = "saved"
+    ALREADY = "already"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class PreparedSaveOutcome:
+    """准备完成事务的返回。
+
+    SKIPPED 表示核对到取消或不在执行；ALREADY 表示本次事实先前
+    已完整提交（断电恢复重放），不重复保存事件。
+    """
+
+    disposition: PreparedDisposition
+    prepared: PreparedCopy | None = None
+    reason: str | None = None
+
+
+_OWNER_ERROR_STAGES = {"cancel_requested": "owner_canceled",
+                       "owner_not_running": "owner_not_running"}
+
+
+def _owner_stage(reason: str | None) -> str:
+    return _OWNER_ERROR_STAGES.get(reason or "", "owner_not_running")
+
+
+def _require_completed(outcome, stage_failed: str, stage_unknown: str) -> None:
+    """仓储结果不是完成时按分区保留阶段诊断。"""
+    if outcome.kind is DbOutcomeKind.COMPLETED:
+        return
+    raise CopyCompletionError(
+        stage_unknown if outcome.kind is DbOutcomeKind.UNKNOWN else stage_failed,
+        str(outcome.error),
+    )
+
+
+async def complete_copy(copy_id: int, context: CompletionContext) -> CompletionStep:
+    """收尾一份全部字节可靠保存的拷贝：校验、有限重拷或准备完成。
+
+    主机摘要必须计算；源端支持时必须比较，获取失败不能降级为不
+    支持。摘要不一致在同一事务保存不一致事实并登记新一轮从零
+    拷贝，随后由调用方重置目标并重新分段。准备完成与解除取回源
+    依赖共同保存；提交结果未知时不冒充已解除。
+    """
+    facts = context.repository.load_copy_state(copy_id, context.owned)
+    if facts.committed_bytes != facts.source_size:
+        raise CopyCompletionError(
+            "copy_incomplete",
+            f"可靠进度 {facts.committed_bytes} 尚未到达固定源长度 {facts.source_size}")
+    state = facts.verification_state
+    if state == int(_VERIFICATION.FAILED):
+        raise CopyCompletionError("verification_failed", "校验已终局失败")
+    if state == int(_VERIFICATION.MISMATCHED):
+        if facts.target_sha256 is None or facts.source_sha256 is None:
+            raise ConsistencyError("已保存的不一致结果缺少判定所依据的摘要")
+        return await _register_recopy(copy_id, context, facts, facts.target_sha256)
+    if state in (int(_VERIFICATION.MATCHED),
+                 int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE)):
+        digest = facts.target_sha256
+        if digest is None:
+            raise ConsistencyError("已完成的校验缺少主机摘要")
+        return await _save_prepared(copy_id, context, digest)
+    return await _verify_and_finish(copy_id, context, facts)
+
+
+async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
+    """计算主机摘要、取得源摘要并按完整性判定收尾。"""
+    ref = FileRef(
+        file_id=facts.target.file_id, purpose=facts.target.purpose,
+        relative_path=facts.target.relative_path, root=context.roots.staging,
+    )
+    hashed = await asyncio.to_thread(hash_target, ref, context.roots)
+    if hashed.error is not None or hashed.digest is None:
+        raise CopyCompletionError("host_digest_failed", hashed.error or "未知失败")
+    source_sha256, source_error = facts.source_sha256, None
+    if source_sha256 is None \
+            and facts.source_support is SourceChecksumSupport.SUPPORTED:
+        if context.digest is None:
+            raise CopyCompletionError(
+                "digest_reader_missing", "支持源端校验但未提供源摘要端口")
+        fetched = await context.digest.read_digest()
+        if fetched.digest is None:
+            source_error = fetched.error
+        else:
+            source_sha256 = fetched.digest
+    decision = decide_integrity(IntegrityFacts(
+        source_size=facts.source_size,
+        committed_bytes=facts.committed_bytes,
+        source_support=facts.source_support,
+        source_sha256=source_sha256,
+        source_error=source_error,
+        target_sha256=hashed.digest,
+        owner_running=True,
+        recopies_used=facts.recopies_used,
+        max_recopies=context.max_recopies,
+    ))
+    if decision.outcome is IntegrityOutcome.CAPABILITY_UNDETERMINED:
+        raise CopyCompletionError(
+            "checksum_support_undetermined", "先确认设备源端摘要能力")
+    if decision.outcome is IntegrityOutcome.MISMATCHED:
+        assert source_sha256 is not None
+        return await _register_recopy(copy_id, context, facts, hashed.digest,
+                                      source_sha256)
+    if decision.outcome is IntegrityOutcome.VERIFICATION_FAILED:
+        save_state = int(_VERIFICATION.FAILED)
+        source_value = None
+        error_json = {"reason": str(decision.error)}
+    elif decision.outcome is IntegrityOutcome.SOURCE_UNAVAILABLE:
+        save_state = int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE)
+        source_value, error_json = None, None
+    else:
+        save_state = int(_VERIFICATION.MATCHED)
+        source_value, error_json = source_sha256, None
+    key = context.key if context.key is not None else new_operation_key()
+    outcome = context.repository.save_verification(
+        VerificationSave(
+            copy_id=copy_id, state=save_state, source_sha256=source_value,
+            target_sha256=hashed.digest, error_json=error_json,
+            occurred_at=context.occurred_at,
+        ),
+        key, context.owned,
+    )
+    if outcome.kind is DbOutcomeKind.COMPLETED \
+            and outcome.value.disposition is VerificationDisposition.SKIPPED:
+        raise CopyCompletionError(
+            _owner_stage(outcome.value.reason), "发起责任不再执行")
+    _require_completed(outcome, "verification_save_failed", "verification_save_unknown")
+    if save_state == int(_VERIFICATION.FAILED):
+        raise CopyCompletionError("verification_failed", str(decision.error))
+    return await _save_prepared(copy_id, context, hashed.digest)
+
+
+async def _register_recopy(copy_id, context, facts, target_sha256: str,
+                           source_sha256: str | None = None) -> CompletionStep:
+    """保存不一致事实（如尚未保存）并按剩余额度登记新一轮重拷。"""
+    if source_sha256 is None:
+        source_sha256 = facts.source_sha256
+    if source_sha256 is None or not target_sha256:
+        raise ConsistencyError("重拷登记缺少判定所依据的摘要")
+    key = context.key if context.key is not None else new_operation_key()
+    outcome = context.repository.register_recopy(
+        RecopyRegistration(
+            copy_id=copy_id, source_sha256=source_sha256,
+            target_sha256=target_sha256, max_recopies=context.max_recopies,
+            occurred_at=context.occurred_at,
+        ),
+        key, context.owned,
+    )
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        _require_completed(outcome, "recopy_register_failed", "recopy_register_unknown")
+    result = outcome.value
+    if result.disposition is RecopyDisposition.SKIPPED:
+        raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
+    if result.disposition is RecopyDisposition.EXHAUSTED:
+        raise CopyCompletionError(
+            "recopy_budget_exhausted",
+            f"已用 {facts.recopies_used} 次重拷，本次上限 {context.max_recopies}")
+    return CompletionStep(phase=CompletionPhase.RECOPY_REGISTERED, recopy=result)
+
+
+async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep:
+    """保存准备完成事实；与解除取回源依赖共同提交。"""
+    facts = context.repository.load_copy_state(copy_id, context.owned)
+    key = context.key if context.key is not None else new_operation_key()
+    outcome = context.repository.save_prepared(
+        PreparedRequest(
+            copy_id=copy_id, target_sha256=target_sha256,
+            size_bytes=facts.source_size, occurred_at=context.occurred_at,
+        ),
+        key, context.owned,
+    )
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        _require_completed(outcome, "prepared_save_failed", "prepared_save_unknown")
+    result = outcome.value
+    if result.disposition is PreparedDisposition.SKIPPED:
+        raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
+    assert result.prepared is not None
+    return CompletionStep(phase=CompletionPhase.PREPARED, prepared=result.prepared)

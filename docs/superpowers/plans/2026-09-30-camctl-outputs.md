@@ -168,13 +168,15 @@ X5 的阶段验证：`outputs/copy.py` 提供 `plan_segment`（E = C + min(S, N 
 
 **接口与依赖：** 提供 `decide_integrity(facts: IntegrityFacts) -> IntegrityDecision`、异步 `complete_copy(identity: CopyIdentity, context: CopyContext) -> DbOutcome[PreparedCopy]`；IntegrityFacts 含固定长度、可靠读取、主机摘要及源能力/摘要结果。前置交付：X5、D2/D3、F4。
 
-- [ ] 编写失败用例。建立 `test_prepared_commit_releases_source`，完整性及同步成功但准备事务尚未确认，`assert source_dependency_released is False`；事务提交后为 True。源摘要支持相同/不同/失败、明确不支持、能力未知五分区覆盖。读取额与重拷额独立，已用读取 3 仍可合法重拷但读取再次错误立即耗尽。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_copy_complete.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。主机 SHA-256 必须计算；源支持时必须比较，失败不能降级。摘要不一致先提交轮次消耗和进度归零，再截断/重建并记录重置完成；准备完成与解除源依赖共同保存并通知清理。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 两类预算及原身份保持，已准备副本不再依赖源存在。
+- [x] 编写失败用例。建立 `test_prepared_commit_releases_source`，完整性及同步成功但准备事务尚未确认，`assert source_dependency_released is False`；事务提交后为 True。源摘要支持相同/不同/失败、明确不支持、能力未知五分区覆盖。读取额与重拷额独立，已用读取 3 仍可合法重拷但读取再次错误立即耗尽。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_copy_complete.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。（初始红：IntegrityFacts、decide_integrity、VerificationSave 均不存在。）
+- [x] 实施本任务。主机 SHA-256 必须计算；源支持时必须比较，失败不能降级。摘要不一致先提交轮次消耗和进度归零，再截断/重建并记录重置完成；准备完成与解除源依赖共同保存并通知清理。
+- [x] 再运行上述命令，要求全部 PASS，并核对 两类预算及原身份保持，已准备副本不再依赖源存在。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_copy_complete.py -q`，真实字节摘要、重拷决定到文件重置各中断边界及来源清理竞争。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 完整性、重拷、内部输入和普通取回是否存在绕过校验；记录门禁证据，建议以“feat: 实现拷贝校验与副本准备”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 完整性、重拷、内部输入和普通取回是否存在绕过校验；记录门禁证据，建议以“feat: 实现拷贝校验与副本准备”形成独立提交。
+
+X6 的阶段验证：`outputs/copy.py` 提供 `decide_integrity`（五分区：MATCHED/MISMATCHED/SOURCE_UNAVAILABLE/VERIFICATION_FAILED/CAPABILITY_UNDETERMINED；MISMATCHED 附带 REGISTER/EXHAUSTED/OWNER_NOT_ELIGIBLE 重拷子判定，只依赖重拷次数与本次上限，不接收读取尝试次数）、`SourceChecksumSupport`（设备源按 `device_files.checksum_support` 映射，主机源总是支持）与 `complete_copy` 编排（线程内 `hash_target` 计算主机摘要；源摘要按已保存值复用，未取得且支持时经 `SourceDigestReader` 端口获取；能力未知不折叠为不支持；分支保存后进入准备完成、重拷登记或保留阶段诊断）。仓储新增 `save_verification`（COPY_CHANGED.VERIFY reason 3：全部字节可靠保存后才保存终局校验状态，取消或不在执行只读跳过）、`register_recopy`（不一致事实尚未保存时在同一事务先保存 VERIFY(MISMATCHED) 再保存 RECOPY reason 4（轮次与额度各增一、进度归零、登记重置意图、清除旧目标摘要）；额度耗尽保存不一致诊断与实际判定上限（CONFIGURE reason 7），不登记新轮次；取消或不在执行不开始重拷）、`save_prepared`（校验通过后目标文件完整字节事实（INTERMEDIATE_FILE_CHANGED.LIFECYCLE）、交付进入 PREPARED（DELIVERY_CHANGED.PREPARE）与解除取回源依赖（READ_PERMISSION_CHANGED.RELEASE）共同提交；内部输入副本不解除取回源依赖；先前已提交的完整事实幂等恢复）。守卫扩展：`_copy_guard` 校验/重拷/判定上限分支（MATCHED 要求摘要一致、MISMATCHED 要求都存在且不等、重拷必须归零且恰好增加一轮）、`_read_permission_guard` RELEASE 分支（副本可靠准备前不能解除源保护）、`_delivery_guard` PREPARE 分支、`_intermediate_guard` LIFECYCLE 分支（完整字节必须同时携带长度与摘要）并注册 `processing` 守卫（处理输入副本完整字节事实以唯一拷贝校验完成为前提；处理状态分支留待媒体处理模块接入）。单元 43 项；集成 22 项覆盖交付与内部输入、校验通过准备完成并解除源依赖、准备事务提交未知不冒充解除且恢复重放幂等、明确不支持降级完成、能力未知停止、获取失败保存诊断不降级、端口取得源摘要保存并在重复收尾时复用、主机摘要计算失败不保存状态、进度未满拒绝收尾、摘要不一致双事件登记新一轮（轮次/额度/归零/重置意图/清摘要）、重拷后截断重建新一轮完整拷贝再校验通过并准备完成的端到端闭环、额度耗尽保存判定上限不登记、读取尝试耗尽不阻止重拷且新一轮新增尝试仍被原预算拒绝、取消不校验不重拷、内部输入不解除源依赖、主机派生成品源校验、三个事务入口原键恢复与输入不符拒绝、守卫接受真实事件并拒绝摘要不一致的 MATCHED、未满进度的重拷与未校验的源依赖解除。Python 3.11 通过组件单元 2666 项、集成 2864 项另 7 项跳过及根跨组件 34 项另 342 subtests；文档链接 2905 通过。清理等待者的唤醒通知属执行层调度，解除事实已由 RELEASE 事件持久化，随 C8/调度接入消费。
 
 ### X7 普通交付发布及恢复
 
