@@ -22,6 +22,8 @@ from camctl.session.supervision import (
 )
 
 __all__ = [
+    "AsyncFileTask",
+    "AsyncFileControl",
     "FileLease",
     "FileTask",
     "FileTaskError",
@@ -64,10 +66,56 @@ class FileTask:
     resources: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.file_id, int) or self.file_id <= 0:
+        if type(self.file_id) is not int or self.file_id <= 0:
             raise FileTaskError(f"文件身份必须是正整数: {self.file_id!r}")
         if not self.stage or not self.business:
             raise FileTaskError("阶段与业务标签不能为空")
+
+    @property
+    def file_ids(self) -> tuple[int, ...]:
+        return (self.file_id,)
+
+
+@dataclass(frozen=True)
+class AsyncFileTask:
+    """持有全部关联文件的异步流程；阻塞工作仍由流程提交默认线程池。"""
+
+    task_id: FileTaskId
+    file_ids: tuple[int, ...]
+    stage: str
+    business: str
+    body: Callable[["AsyncFileControl"], Awaitable[Any]]
+    resources: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.file_ids, tuple) or not self.file_ids
+                or any(type(identity) is not int or identity <= 0 for identity in self.file_ids)
+                or len(set(self.file_ids)) != len(self.file_ids)):
+            raise FileTaskError("关联文件必须是互不重复的正整数身份")
+        if not self.stage or not self.business:
+            raise FileTaskError("阶段与业务标签不能为空")
+
+
+class AsyncFileControl:
+    """同一停止请求供工具协程和文件线程观察；不取消执行协程。"""
+
+    def __init__(self, state: "_TaskState") -> None:
+        self._state = state
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._state.stop_event.is_set()
+
+    @property
+    def stop_event(self) -> threading.Event:
+        return self._state.stop_event
+
+    def request_stop(self) -> None:
+        self._state.request_stop()
+
+    async def requested(self) -> None:
+        if not self.stop_requested:
+            await self._state.stop_signal.wait()
 
 
 @dataclass(frozen=True)
@@ -133,7 +181,7 @@ class FileTaskHandle:
 
     def request_stop(self) -> None:
         """幂等请求停止；不等待，立即返回。"""
-        self._state.stop_event.set()
+        self._state.request_stop()
 
     async def wait(self) -> FileTaskResult:
         """等待实际结果；取消本次等待不取消共享完成事实。"""
@@ -166,12 +214,19 @@ class _TaskStage(enum.Enum):
 class _TaskState:
     """一项任务的运行时状态；由执行器锁保护裁决与结束。"""
 
-    def __init__(self, task: FileTask) -> None:
+    def __init__(self, task: FileTask | AsyncFileTask) -> None:
         self.task = task
         self.stage = _TaskStage.QUEUED
         self.stop_event = threading.Event()
+        self.loop = asyncio.get_running_loop()
+        self.stop_signal = asyncio.Event()
         self.lease = FileLease()
         self.completion: Future[FileTaskResult] = Future()
+
+    def request_stop(self) -> None:
+        self.stop_event.set()
+        if not self.completion.done():
+            self.loop.call_soon_threadsafe(self.stop_signal.set)
 
 
 class FileTaskExecutor:
@@ -200,8 +255,23 @@ class FileTaskExecutor:
         取消作为实际结束。
         """
         state = self._admit(task)
+        return await self._wait_for_execution(
+            state, owner, lambda: self._runner(lambda: self._execute(state))
+        )
+
+    async def run_async_file_task(
+        self, task: AsyncFileTask, owner: ResponsibilityOwner
+    ) -> FileTaskResult:
+        """执行持有多文件的异步任务，共用撤回、冲突及实际结果接手机制。"""
+        state = self._admit(task)
+        return await self._wait_for_execution(state, owner, lambda: self._execute_async(state))
+
+    async def _wait_for_execution(
+        self, state: _TaskState, owner: ResponsibilityOwner,
+        start: Callable[[], Awaitable[FileTaskResult]],
+    ) -> FileTaskResult:
         try:
-            future = asyncio.ensure_future(self._runner(lambda: self._execute(state)))
+            future = asyncio.ensure_future(start())
             self._runners.add(future)
             future.add_done_callback(self._observe_runner)
             result = await asyncio.shield(future)
@@ -224,7 +294,7 @@ class FileTaskExecutor:
         with self._lock:
             state = self._tasks.get(task_id)
         if state is not None:
-            state.stop_event.set()
+            state.request_stop()
 
     def lease_of(self, task_id: FileTaskId) -> FileLease | None:
         """未结束任务的当前修改资格；已结束或未知返回 None。"""
@@ -237,29 +307,26 @@ class FileTaskExecutor:
         with self._lock:
             return tuple(sorted(self._files))
 
-    def _admit(self, task: FileTask) -> _TaskState:
+    def _admit(self, task: FileTask | AsyncFileTask) -> _TaskState:
         with self._lock:
             if task.task_id in self._tasks:
                 raise FileTaskError(f"任务身份仍被执行或未交付结果占用: {task.task_id.value}")
-            if task.file_id in self._files:
-                raise FileTaskError(
-                    f"同文件已有未结束任务: file {task.file_id}"
-                    f" 任务 {self._files[task.file_id].value}"
-                )
+            for identity in task.file_ids:
+                if identity in self._files:
+                    raise FileTaskError(
+                        f"同文件已有未结束任务: file {identity}"
+                        f" 任务 {self._files[identity].value}"
+                    )
             state = _TaskState(task)
             self._tasks[task.task_id] = state
-            self._files[task.file_id] = task.task_id
+            for identity in task.file_ids:
+                self._files[identity] = task.task_id
             return state
 
     def _execute(self, state: _TaskState) -> FileTaskResult:
         """线程池中的实际执行：开始裁决、执行体及结束清理。"""
-        with self._lock:
-            if state.stage is not _TaskStage.QUEUED:
-                if state.completion.done():
-                    return state.completion.result()
-                raise FileTaskError("执行包装器不能并发调用同一任务")
-            state.stage = _TaskStage.STARTED
-            state.lease._mark_acquired()
+        if not self._begin(state):
+            return state.completion.result()
         task = state.task
         try:
             value = task.body(state.stop_event)
@@ -279,6 +346,34 @@ class FileTaskExecutor:
             )
         self._finish(state, result)
         return result
+
+    async def _execute_async(self, state: _TaskState) -> FileTaskResult:
+        if not self._begin(state):
+            return state.completion.result()
+        try:
+            value = await state.task.body(AsyncFileControl(state))
+            result = FileTaskResult(state.task.task_id, ran=True, value=value)
+        except asyncio.CancelledError as error:
+            self._finish(state, FileTaskResult(
+                state.task.task_id, ran=True, error=f"{type(error).__name__}: {error}",
+            ))
+            raise
+        except Exception as error:
+            result = FileTaskResult(
+                state.task.task_id, ran=True, error=f"{type(error).__name__}: {error}",
+            )
+        self._finish(state, result)
+        return result
+
+    def _begin(self, state: _TaskState) -> bool:
+        with self._lock:
+            if state.stage is not _TaskStage.QUEUED:
+                if state.completion.done():
+                    return False
+                raise FileTaskError("执行包装器不能并发调用同一任务")
+            state.stage = _TaskStage.STARTED
+            state.lease._mark_acquired()
+            return True
 
     def _try_withdraw(self, state: _TaskState) -> bool:
         """撤回排队任务；与开始裁决竞争，只允许一个结果。"""
@@ -304,8 +399,9 @@ class FileTaskExecutor:
 
     def _release_file_locked(self, state: _TaskState) -> None:
         task = state.task
-        if self._files.get(task.file_id) == task.task_id:
-            del self._files[task.file_id]
+        for identity in task.file_ids:
+            if self._files.get(identity) == task.task_id:
+                del self._files[identity]
 
     def _release_identity(self, state: _TaskState) -> None:
         with self._lock:
@@ -325,7 +421,7 @@ class FileTaskExecutor:
                 identity=task.task_id.value,
                 stage=task.stage,
                 business=task.business,
-                resources=(f"file:{task.file_id}", *task.resources),
+                resources=(*(f"file:{identity}" for identity in task.file_ids), *task.resources),
                 pending=FileTaskHandle(state, lambda: self._release_identity(state)),
             ),
         )

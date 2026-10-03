@@ -19,9 +19,8 @@ from camctl.host_files.media import (
     MediaProbe,
     ProbeRequest,
     RepairRequest,
-    probe_media,
-    repair_media,
 )
+from media_helpers import probe_media, repair_media
 from camctl.host_files.models import (
     BoundDirectories, FileObservation, FileObservationKind, FilePurpose, FileRef,
 )

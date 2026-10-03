@@ -9,7 +9,8 @@ ffprobe 只解析业务需要的时长字段并保持全精度；ffmpeg 成品�
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 
 from camctl.contracts.json_values import parse_exact_json
@@ -22,6 +23,8 @@ from camctl.host_files.io import (
 )
 from camctl.host_files.models import BoundDirectories, FileObservation, FileObservationKind, FileRef
 from camctl.host_files.paths import observe_file, resolve_file
+from camctl.host_files.tasks import AsyncFileControl, AsyncFileTask, FileTaskExecutor, FileTaskId, FileTaskResult
+from camctl.session.supervision import ResponsibilityOwner
 from camctl.operations.process import (
     RawToolOutcome,
     StopSignal,
@@ -79,6 +82,7 @@ class MediaArtifact:
     observation: FileObservation
     checksum: HashResult | None = None
     synchronization: SyncResult | None = None
+    postprocessing_stopped: bool = False
 
     @property
     def exists(self) -> bool | None:
@@ -145,13 +149,9 @@ class MediaArtifact:
         errors = (
             self.tool_error, self._file_error, self._checksum_error,
             self.synchronization.error if self.synchronization is not None else None,
+            "postprocessing_stopped: 已停止后续文件检查" if self.postprocessing_stopped else None,
         )
         return "; ".join(error for error in errors if error is not None) or None
-
-
-class _NeverStop:
-    async def requested(self) -> None:
-        await asyncio.Future()
 
 
 # 窄注入点：仅测试替换。
@@ -174,7 +174,24 @@ async def probe_media(
     roots: BoundDirectories,
     request: ProbeRequest,
     *,
-    stop: StopSignal | None = None,
+    executor: FileTaskExecutor,
+    task_id: FileTaskId,
+    owner: ResponsibilityOwner,
+) -> FileTaskResult:
+    """在共享文件责任中执行检查，返回任务结果及 MediaProbe。
+
+    停止通过 executor.request_stop(task_id) 请求；等待取消后的实际
+    结果交给 owner。领取结果不表示业务保存已经完成。
+    """
+    resolve_file(input, roots)
+    return await executor.run_async_file_task(
+        AsyncFileTask(task_id, (input.file_id,), "media_probe", "recording",
+                      lambda control: _probe(input, roots, request, control)), owner,
+    )
+
+
+async def _probe(
+    input: FileRef, roots: BoundDirectories, request: ProbeRequest, control: AsyncFileControl,
 ) -> MediaProbe:
     """经 ffprobe 取得媒体时长等必要事实。
 
@@ -187,7 +204,7 @@ async def probe_media(
         + request.extra_args
         + ("-show_entries", "format=duration", "-of", "json", str(host.path))
     )
-    outcome = await _run_tool(argv, stop)
+    outcome = await _run_tool(argv, control)
     if isinstance(outcome, str):
         return MediaProbe(duration_s=None, error=outcome)
     if outcome.error is not None or outcome.exit is None or outcome.exit.exit_code != 0:
@@ -218,7 +235,22 @@ async def repair_media(
     roots: BoundDirectories,
     request: RepairRequest,
     *,
-    stop: StopSignal | None = None,
+    executor: FileTaskExecutor,
+    task_id: FileTaskId,
+    owner: ResponsibilityOwner,
+) -> FileTaskResult:
+    """修复全程占用输入和输出，返回任务结果及 MediaArtifact。"""
+    resolve_file(input, roots)
+    resolve_file(output, roots)
+    return await executor.run_async_file_task(
+        AsyncFileTask(task_id, (input.file_id, output.file_id), "media_repair", "recording",
+                      lambda control: _repair(input, output, roots, request, control)), owner,
+    )
+
+
+async def _repair(
+    input: FileRef, output: FileRef, roots: BoundDirectories,
+    request: RepairRequest, control: AsyncFileControl,
 ) -> MediaArtifact:
     """经 ffmpeg 生成修复成品并分别确认退出、校验、同步与摘要。
 
@@ -232,7 +264,15 @@ async def repair_media(
         + request.output_args
         + (str(output_host.path),)
     )
-    outcome = await _run_tool(argv, stop)
+    outcome = await _run_tool(argv, control)
+    # 外层执行任务由文件执行器保留；等待者取消不会取消该线程等待。
+    return await asyncio.to_thread(_collect_artifact, outcome, output, roots, control.stop_event)
+
+
+def _collect_artifact(
+    outcome: RawToolOutcome | str, output: FileRef, roots: BoundDirectories,
+    stop: threading.Event,
+) -> MediaArtifact:
     observation = observe_file(output, roots)
     if isinstance(outcome, str):
         return MediaArtifact(tool_error=outcome, observation=observation)
@@ -243,21 +283,26 @@ async def repair_media(
     artifact = MediaArtifact(tool_error=None, observation=observation)
     if artifact._file_error is not None:
         return artifact
+    if stop.is_set():
+        return replace(artifact, postprocessing_stopped=True)
     digest = _file_digest(output, roots)
+    artifact = replace(artifact, checksum=digest)
+    if stop.is_set():
+        return replace(artifact, postprocessing_stopped=True)
     synced = _file_sync(output, roots)
-    return MediaArtifact(
-        tool_error=None, observation=observation, checksum=digest, synchronization=synced,
-    )
+    return replace(artifact, synchronization=synced)
 
 
 async def _run_tool(
-    argv: tuple[str, ...], stop: StopSignal | None
+    argv: tuple[str, ...], control: AsyncFileControl
 ) -> RawToolOutcome | str:
+    if control.stop_requested:
+        return "tool_cancelled: 工具尚未启动，停止请求已生效"
     spec = ToolSpec(
         argv=argv, timeout_s=None, terminate_grace_s=_MEDIA_TERMINATE_GRACE_S
     )
     try:
-        return await _execute_tool(spec, stop=stop or _NeverStop())
+        return await _execute_tool(spec, stop=control)
     except FileNotFoundError:
         return "tool_unavailable: 工具不存在或不可执行"
     except PermissionError:

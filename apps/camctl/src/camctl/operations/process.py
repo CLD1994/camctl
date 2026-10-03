@@ -184,12 +184,15 @@ async def _read_bounded(stream: asyncio.StreamReader | None, limit: int) -> byte
         return b""
     chunks: list[bytes] = []
     total = 0
-    while total < limit:
-        chunk = await stream.read(min(65536, limit - total))
+    while True:
+        chunk = await stream.read(65536)
         if not chunk:
             break
-        chunks.append(chunk)
-        total += len(chunk)
+        # 保留上限只限制返回值；继续排空管道，才能让工具写完并实际退出。
+        if total < limit:
+            retained = chunk[:limit - total]
+            chunks.append(retained)
+            total += len(retained)
     return b"".join(chunks)
 
 

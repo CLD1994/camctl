@@ -21,9 +21,8 @@ from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.media import (
     ProbeRequest,
     RepairRequest,
-    probe_media,
-    repair_media,
 )
+from media_helpers import probe_media, repair_media
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
 
 pytestmark = pytest.mark.asyncio

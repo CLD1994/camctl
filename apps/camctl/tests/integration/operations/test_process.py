@@ -105,3 +105,21 @@ async def test_output_captured_up_to_limit() -> None:
     assert outcome.error is None
     assert outcome.output is not None
     assert len(outcome.output) == OUTPUT_LIMIT_BYTES
+
+
+async def test_output_beyond_pipe_capacity_is_drained_before_exit() -> None:
+    class Never:
+        async def requested(self) -> None:
+            await asyncio.Future()
+
+    async with asyncio.timeout(5):
+        outcome = await _run(
+            _tool(
+                f"import sys; sys.stdout.buffer.write(b'x' * {OUTPUT_LIMIT_BYTES * 4}); sys.stdout.flush()",
+                timeout_s=Decimal("2"),
+            ),
+            Never(),
+        )
+    assert outcome.error is None
+    assert outcome.exit.exit_code == 0
+    assert outcome.output == b"x" * OUTPUT_LIMIT_BYTES
