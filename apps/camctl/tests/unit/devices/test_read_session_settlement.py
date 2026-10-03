@@ -7,7 +7,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.devices.read_session import SourceFile, SourceStream, open_read
+from camctl.devices.read_session import ReadSessionError, SourceFile, SourceStream, open_read
 from camctl.operations.models import AttemptTicket
 
 pytestmark = pytest.mark.asyncio
@@ -33,6 +33,33 @@ async def test_read_failure_closes_source_and_retains_partial_byte_count():
     stream.close.assert_called_once_with()
     end = await session.wait_stopped()
     assert (end.stopped, end.bytes_read, end.error) == (True, 2, "failed")
+
+
+@pytest.mark.parametrize("invalid", [b"cde", "cd", None, 0, bytearray(b"cd")])
+@pytest.mark.parametrize("close_fails", [False, True])
+async def test_invalid_source_return_cannot_advance_position(invalid, close_fails):
+    stream = create_autospec(SourceStream, instance=True)
+    stream.read.side_effect = [b"ab", invalid]
+    close_failure = OSError("close failed")
+    if close_fails:
+        stream.close.side_effect = close_failure
+    session = await _session(stream)
+    assert session.read_chunk(2).data == b"ab"
+    if close_fails:
+        with pytest.raises(ExceptionGroup) as raised:
+            session.read_chunk(2)
+        assert isinstance(raised.value.exceptions[0], ReadSessionError)
+        assert raised.value.exceptions[1] is close_failure
+        with pytest.raises(OSError) as closed:
+            await session.wait_stopped()
+        assert closed.value is close_failure
+    else:
+        with pytest.raises(ReadSessionError):
+            session.read_chunk(2)
+        end = await session.wait_stopped()
+        assert (end.stopped, end.bytes_read, end.error) == (True, 2, "failed")
+    assert session.position() == 2
+    stream.close.assert_called_once_with()
 
 
 @pytest.mark.parametrize("finish", ["eof", "stop"])

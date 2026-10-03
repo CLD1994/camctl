@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
-from camctl.devices.read_session import ReadSession
+from camctl.devices.read_session import ReadEnd, ReadError, ReadSession
 
 __all__ = [
     "DEFAULT_CHUNK_SIZE_BYTES",
     "MAX_CHUNK_SIZE_BYTES",
     "SegmentError",
+    "SegmentFailure",
     "SegmentResult",
     "SegmentSpec",
     "WritableFile",
@@ -34,9 +36,12 @@ class SegmentError(ValueError):
 
 
 class WritableFile(Protocol):
-    """受约束目标端口：顺序写入与显式同步。"""
+    """顺序写入与显式同步；write 返回实际写入数，允许短写和零写。
 
-    def write(self, data: bytes) -> int: ...
+    只在调用期间使用数据缓冲；抛出异常时，本次调用的写入效果未知。
+    """
+
+    def write(self, data: bytes | memoryview) -> int: ...
 
     def sync(self) -> None: ...
 
@@ -76,15 +81,35 @@ class SegmentSpec:
 class SegmentResult:
     """一次段传输的实际结果。
 
-    processed_end 是已写入目标的源偏移（不含）；synced 只在段尾同步
-    真实成功后为 True。source_ended 表示源读取已实际结束（EOF 或错
-    误结束），与段是否完成无关。
+    processed_end 是已确认写入的连续范围末尾（不含），不是可靠进度。
+    write_extent_known 为 False 时，异常写入可能还有未确认的效果。
+    synced 只表示段尾同步成功；源结束事实来自会话的独立完成观察。
+    source_end 和 source_close_error 均为空表示尚未确认关闭结果，
+    所属流程仍须通过 wait_stopped 跟踪收场。
     """
 
     processed_end: int
     synced: bool
-    error: str | None
-    source_ended: bool
+    error: SegmentFailure | None
+    failure: Exception | None
+    write_extent_known: bool
+    source_end: ReadEnd | None
+    source_close_error: Exception | None
+
+    @property
+    def source_ended(self) -> bool:
+        return self.source_end is not None and self.source_end.stopped
+
+
+class SegmentFailure(StrEnum):
+    """分段结果的机器分类；原异常独立保存在 failure。"""
+
+    STOPPED = "stopped"
+    NO_DATA = "no_data"
+    SOURCE_EOF_EARLY = "source_eof_early"
+    READ_FAILED = "read_failed"
+    WRITE_FAILED = "write_failed"
+    SYNC_FAILED = "sync_failed"
 
 
 def transfer_segment(
@@ -102,48 +127,80 @@ def transfer_segment(
     remaining = spec.range_end - spec.range_start
     processed = 0
     synced = False
-    source_ended = False
-    error: str | None = None
+    write_extent_known = True
+    error: SegmentFailure | None = None
+    failure: Exception | None = None
     while remaining > 0:
         if spec.stop.is_set():
-            error = "stopped"
+            error = SegmentFailure.STOPPED
             break
-        chunk = source.read_chunk(min(spec.chunk_size, remaining))
+        try:
+            chunk = source.read_chunk(min(spec.chunk_size, remaining))
+        except Exception as read_failure:
+            error, failure = SegmentFailure.READ_FAILED, read_failure
+            break
         if chunk.data:
-            try:
-                target.write(chunk.data)
-            except Exception as failure:  # 目标错误保留已写字节与阶段。
-                error = _describe("write_failed", failure)
+            # 视图切片不复制剩余内容；每次只持有一个源块。
+            with memoryview(chunk.data) as pending:
+                offset = 0
+                while offset < len(pending):
+                    if spec.stop.is_set():
+                        error = SegmentFailure.STOPPED
+                        break
+                    try:
+                        with pending[offset:] as part:
+                            count = target.write(part)
+                    except Exception as write_failure:
+                        error, failure = SegmentFailure.WRITE_FAILED, write_failure
+                        write_extent_known = False
+                        break
+                    if type(count) is not int or not 0 <= count <= len(pending) - offset:
+                        error = SegmentFailure.WRITE_FAILED
+                        failure = SegmentError(f"目标返回非法写入数: {count!r}")
+                        write_extent_known = False
+                        break
+                    if count == 0:
+                        error = SegmentFailure.WRITE_FAILED
+                        failure = SegmentError("目标写入未取得进展")
+                        break
+                    offset += count
+                    processed += count
+                    remaining -= count
+            if error is not None:
                 break
-            processed += len(chunk.data)
-            remaining -= len(chunk.data)
         if chunk.error is not None:
-            source_ended = True
-            error = chunk.error
+            if chunk.error in (SegmentFailure.STOPPED, SegmentFailure.NO_DATA):
+                error = SegmentFailure(chunk.error)
+            else:
+                error, failure = SegmentFailure.READ_FAILED, ReadError(chunk.error)
             break
         if chunk.eof:
-            source_ended = True
             if remaining > 0:
-                error = "source_eof_early"
+                error = SegmentFailure.SOURCE_EOF_EARLY
             break
     if error is None and spec.stop.is_set():
         # 段尾同步前停止：字节已写入，可靠进度不推进。
-        error = "stopped"
+        error = SegmentFailure.STOPPED
     if error is None:
         assert remaining == 0
         try:
             target.sync()
-        except Exception as failure:
-            error = _describe("sync_failed", failure)
+        except Exception as sync_failure:
+            error, failure = SegmentFailure.SYNC_FAILED, sync_failure
         else:
             synced = True
+    source_end = None
+    source_close_error = None
+    try:
+        source_end = source.poll_stopped()
+    except Exception as close_failure:
+        source_close_error = close_failure
     return SegmentResult(
         processed_end=spec.range_start + processed,
         synced=synced,
         error=error,
-        source_ended=source_ended,
+        failure=failure,
+        write_extent_known=write_extent_known,
+        source_end=source_end,
+        source_close_error=source_close_error,
     )
-
-
-def _describe(kind: str, failure: Exception) -> str:
-    return f"{kind}: {type(failure).__name__}: {failure}"

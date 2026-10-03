@@ -35,7 +35,7 @@ _POLL_INTERVAL_S = 0.001
 
 
 class ReadSessionError(ValueError):
-    """会话使用错误：偏移越界或并发读取同一会话。"""
+    """会话使用或源端契约错误：范围、并发或返回数据不合法。"""
 
 
 class ReadError(Exception):
@@ -81,7 +81,8 @@ class ReadEnd:
 class SourceStream(Protocol):
     """驱动读取端端口：只交付文件内容字节，已过滤日志与控制响应。
 
-    read 返回空字节串表示此刻没有新文件数据（不是 EOF）；cancel
+    read 返回不超过 limit 的 bytes，空字节串表示此刻没有新文件数据
+    （不是 EOF）；非法类型或超长返回属于源端契约错误。cancel
     只发送信号唤醒可能在驱动内阻塞的等待，不等待实际读取结束。
     close 在读取调用结束后执行，成功
     返回才证明资源关闭。读取和关闭异常分别保留，不当作 EOF。
@@ -126,6 +127,12 @@ class ReadSession:
     def position(self) -> int:
         return self._position
 
+    def poll_stopped(self) -> ReadEnd | None:
+        """非阻塞观察关闭：未完成返回 None，完成则返回事实或抛出关闭错误。"""
+        if not self._completion.done():
+            return None
+        return self._completion.result()
+
     def read_chunk(self, limit: int) -> ReadChunk:
         """同步读取下一段文件内容；同会话并发调用拒绝。"""
         if limit <= 0:
@@ -159,7 +166,12 @@ class ReadSession:
             if self._stop_requested.is_set():
                 self._finish("stopped")
                 return ReadChunk(data=None, error="stopped")
-            data = self._stream.read(min(limit, remaining))
+            requested = min(limit, remaining)
+            data = self._stream.read(requested)
+            if not isinstance(data, bytes):
+                raise ReadSessionError(f"源读取必须返回 bytes，实际为 {type(data).__name__}")
+            if len(data) > requested:
+                raise ReadSessionError(f"源返回 {len(data)} 字节，超过请求的 {requested} 字节")
             if data:
                 # 文件内容字节到达：立即重置无数据计时并交付。
                 last_data = time.monotonic()

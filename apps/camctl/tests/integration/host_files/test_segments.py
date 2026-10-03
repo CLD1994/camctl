@@ -11,12 +11,15 @@ import os
 import threading
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.devices.read_session import SourceFile, open_read
+from camctl.devices.read_session import ReadSessionError, SourceFile, open_read
 from camctl.host_files.segments import SegmentSpec, transfer_segment
+from camctl.host_files.tasks import FileTask, FileTaskExecutor, FileTaskId
 from camctl.operations.models import AttemptTicket
+from camctl.session.supervision import ResponsibilityOwner, Supervisor
 
 pytestmark = pytest.mark.asyncio
 
@@ -55,7 +58,7 @@ class RealTargetFile:
         )
         self.sync_calls = 0
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: bytes | memoryview) -> int:
         return os.write(self._fd, data)
 
     def sync(self) -> None:
@@ -75,7 +78,7 @@ class StoppingTarget:
         self.stop = threading.Event()
         self.written_chunks = 0
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: bytes | memoryview) -> int:
         count = self._target.write(data)
         self.written_chunks += 1
         if self.written_chunks == self._stop_after:
@@ -157,6 +160,8 @@ async def test_stop_arrives_mid_segment_on_real_files(tmp_path: Path) -> None:
         result = await asyncio.to_thread(transfer_segment, spec, session, stopping)
     finally:
         target.close()
+        session.request_stop()
+        await session.wait_stopped()
 
     assert result.error == "stopped"
     assert result.processed_end == 500
@@ -166,11 +171,13 @@ async def test_stop_arrives_mid_segment_on_real_files(tmp_path: Path) -> None:
     assert target_path.read_bytes() == data[:500]
 
 
-async def test_sync_in_progress_keeps_actual_result(tmp_path: Path) -> None:
+@pytest.mark.parametrize("sync_fails", [False, True])
+async def test_sync_in_progress_keeps_actual_result(tmp_path: Path, sync_fails: bool) -> None:
     """同步已开始后收到停止请求，仍保留真实同步结果。"""
     sync_started = threading.Event()
     sync_release = threading.Event()
     stop = threading.Event()
+    failure = OSError("sync failed")
     data = b"a" * 10
     session = await _open_session(tmp_path, data)
     target_path = tmp_path / "synced.bin"
@@ -179,6 +186,8 @@ async def test_sync_in_progress_keeps_actual_result(tmp_path: Path) -> None:
         def sync(self) -> None:
             sync_started.set()
             assert sync_release.wait(timeout=10)
+            if sync_fails:
+                raise failure
             super().sync()
 
     target = GatedTarget(target_path)
@@ -197,8 +206,171 @@ async def test_sync_in_progress_keeps_actual_result(tmp_path: Path) -> None:
         finally:
             target.close()
 
-    assert result.error is None
-    assert result.synced is True
+    assert result.error == ("sync_failed" if sync_fails else None)
+    assert result.failure is (failure if sync_fails else None)
+    assert result.synced is (not sync_fails)
     assert result.processed_end == len(data)
-    assert target.sync_calls == 1
+    assert target.sync_calls == (0 if sync_fails else 1)
     assert target_path.read_bytes() == data
+
+
+@pytest.mark.parametrize("write_fails", [False, True])
+async def test_real_file_short_writes_keep_content_and_confirmed_prefix(tmp_path, write_fails):
+    data = b"abcdef"
+    session = await _open_session(tmp_path, data)
+    target_path = tmp_path / "short.bin"
+    failure = OSError("target failed after partial write")
+
+    class ShortTarget(RealTargetFile):
+        calls = 0
+
+        def write(self, data):
+            self.calls += 1
+            if write_fails and self.calls == 2:
+                # 异常前仍可能发生副作用，确认范围只能是此前成功调用的下界。
+                super().write(data[:1])
+                raise failure
+            return super().write(data[:2])
+
+    target = ShortTarget(target_path)
+    spec = SegmentSpec("copy/9", 0, "copy.part", 0, 6, 6, threading.Event())
+    try:
+        result = await asyncio.to_thread(transfer_segment, spec, session, target)
+    finally:
+        target.close()
+        session.request_stop()
+        await session.wait_stopped()
+    assert result.source_ended is True
+    assert result.source_end.bytes_read == 6
+    if write_fails:
+        assert result.error == "write_failed"
+        assert result.failure is failure
+        assert result.processed_end == 2
+        assert result.write_extent_known is False
+        assert result.synced is False
+        assert target.sync_calls == 0
+        assert target_path.read_bytes() == b"abc"
+    else:
+        assert result.error is None
+        assert result.processed_end == 6
+        assert result.write_extent_known is True
+        assert result.synced is True
+        assert target_path.read_bytes() == data
+
+
+@pytest.mark.parametrize("read_fails", [False, True])
+@pytest.mark.parametrize("close_fails", [False, True])
+async def test_segment_retains_real_read_and_close_results(tmp_path, read_fails, close_fails):
+    source_path = tmp_path / "source.bin"
+    source_path.write_bytes(b"abcdef")
+    read_failure, close_failure = OSError("read failed"), OSError("close failed")
+
+    class FailingStream(RealFileStream):
+        read_calls = 0
+
+        def read(self, limit):
+            self.read_calls += 1
+            if read_fails and self.read_calls == 2:
+                raise read_failure
+            return super().read(limit)
+
+        def close(self):
+            super().close()
+            if close_fails:
+                raise close_failure
+
+    session = await open_read(SourceFile("9", {}, 6), 0, _TICKET,
+                              stream=FailingStream(source_path), no_data_timeout_s=Decimal("30"))
+    target_path = tmp_path / "target.bin"
+    target = RealTargetFile(target_path)
+    spec = SegmentSpec("copy/9", 0, "copy.part", 0, 6, 2, threading.Event())
+    try:
+        result = await asyncio.to_thread(transfer_segment, spec, session, target)
+    finally:
+        target.close()
+        session.request_stop()
+        ending, = await asyncio.gather(session.wait_stopped(), return_exceptions=True)
+    expected_data = b"ab" if read_fails else (b"abcd" if close_fails else b"abcdef")
+    assert target_path.read_bytes() == expected_data
+    assert result.processed_end == len(expected_data)
+    assert result.write_extent_known is True
+    assert result.source_ended is (not close_fails)
+    assert result.synced is (not read_fails and not close_fails)
+    if read_fails or close_fails:
+        assert result.error == "read_failed"
+        assert target.sync_calls == 0
+    else:
+        assert result.error is None
+    if close_fails:
+        assert result.source_close_error is close_failure
+        assert ending is close_failure
+        if read_fails:
+            assert result.failure.exceptions == (read_failure, close_failure)
+        else:
+            assert result.failure is close_failure
+    else:
+        assert result.source_end == ending
+        assert result.source_close_error is None
+        assert result.failure is (read_failure if read_fails else None)
+
+
+@pytest.mark.parametrize("invalid", [b"cdefg", "cd", None])
+@pytest.mark.parametrize("close_fails", [False, True])
+async def test_file_task_retains_segment_result_for_invalid_source(tmp_path, invalid, close_fails):
+    source_path = tmp_path / "source.bin"
+    source_path.write_bytes(b"abcdef")
+    close_failure = OSError("close failed")
+
+    class InvalidStream(RealFileStream):
+        read_calls = 0
+        close_calls = 0
+
+        def read(self, limit):
+            self.read_calls += 1
+            return super().read(limit) if self.read_calls == 1 else invalid
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+            if close_fails:
+                raise close_failure
+
+    stream = InvalidStream(source_path)
+    session = await open_read(SourceFile("9", {}, 6), 0, _TICKET,
+                              stream=stream, no_data_timeout_s=Decimal("30"))
+    target_path = tmp_path / "target.bin"
+    target = RealTargetFile(target_path)
+    executor = FileTaskExecutor(Supervisor())
+    owner = create_autospec(ResponsibilityOwner, instance=True)
+
+    def body(stop):
+        return transfer_segment(SegmentSpec("copy/9", 0, "copy.part", 0, 6, 2, stop), session, target)
+
+    task = FileTask(FileTaskId("copy/9/segment"), 9, "segment", "copy", body)
+    try:
+        task_result = await executor.run_file_task(task, owner)
+    finally:
+        target.close()
+        session.request_stop()
+        ending, = await asyncio.gather(session.wait_stopped(), return_exceptions=True)
+    assert task_result.ran is True and task_result.error is None
+    result = task_result.value
+    assert result.error == "read_failed"
+    assert result.processed_end == 2
+    assert result.synced is False
+    assert target.sync_calls == 0
+    assert target_path.read_bytes() == b"ab"
+    assert session.position() == 2
+    assert stream.close_calls == 1
+    if close_fails:
+        assert isinstance(result.failure, ExceptionGroup)
+        assert isinstance(result.failure.exceptions[0], ReadSessionError)
+        assert result.failure.exceptions[1] is close_failure
+        assert result.source_close_error is close_failure
+        assert result.source_ended is False
+        assert ending is close_failure
+    else:
+        assert isinstance(result.failure, ReadSessionError)
+        assert result.source_end == ending
+        assert result.source_ended is True
+        assert result.source_end.bytes_read == 2

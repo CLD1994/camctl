@@ -70,11 +70,15 @@ async def test_waiters_observe_actual_close_result_after_reader_returns(read_fai
         assert await asyncio.to_thread(stream.close_started.wait, 5)
         assert not waiting.done()
         assert not reading.done()
+        assert session.poll_stopped() is None
         stream.allow_close_return.set()
         read_result, stop_result = await asyncio.wait_for(
             asyncio.gather(reading, waiting, return_exceptions=True), 5)
         if close_fails:
             assert stop_result is close_failure
+            with pytest.raises(OSError) as polled:
+                session.poll_stopped()
+            assert polled.value is close_failure
             if read_fails:
                 assert isinstance(read_result, ExceptionGroup)
                 assert read_result.exceptions == (read_failure, close_failure)
@@ -82,6 +86,7 @@ async def test_waiters_observe_actual_close_result_after_reader_returns(read_fai
                 assert read_result is close_failure
         else:
             assert stop_result.stopped is True
+            assert session.poll_stopped() == stop_result
             assert stop_result.bytes_read == (0 if read_fails else 4)
             if read_fails:
                 assert read_result is read_failure
@@ -204,6 +209,8 @@ async def test_segment_stop_finishes_session_without_next_source_read():
     try:
         result = await asyncio.wait_for(transfer, 5)
         assert (result.processed_end, result.synced, result.error) == (2, False, "stopped")
+        assert result.source_end is None
+        assert result.source_close_error is None
         assert target.data == b"ab"
         assert await asyncio.to_thread(stream.close_started.wait, 5)
         stream.allow_close_return.set()

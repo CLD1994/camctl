@@ -65,12 +65,12 @@ class RecordingTarget:
         self._fail_write_on = fail_write_on
         self._fail_sync = fail_sync
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: bytes | memoryview) -> int:
         if self._write_delay:
             time.sleep(self._write_delay)
         if self._fail_write_on is not None and len(self.written) == self._fail_write_on:
             raise RuntimeError("disk full")
-        self.written.append(data)
+        self.written.append(bytes(data))
         return len(data)
 
     def sync(self) -> None:
@@ -207,7 +207,8 @@ async def test_sync_failure_is_reported() -> None:
     target = RecordingTarget(fail_sync=True)
     result = transfer_segment(_spec(0, 10, chunk=10), session, target)
     assert result.error is not None
-    assert result.error.startswith("sync_failed")
+    assert result.error == "sync_failed"
+    assert isinstance(result.failure, OSError)
     assert result.processed_end == 10
     assert result.synced is False
 
@@ -218,8 +219,9 @@ async def test_write_failure_preserves_written_bytes() -> None:
     target = RecordingTarget(fail_write_on=1)
     result = transfer_segment(_spec(0, 20, chunk=10), session, target)
     assert result.error is not None
-    assert result.error.startswith("write_failed")
-    assert "disk full" in result.error
+    assert result.error == "write_failed"
+    assert isinstance(result.failure, RuntimeError)
+    assert "disk full" in str(result.failure)
     assert result.processed_end == 10
     assert result.synced is False
 
