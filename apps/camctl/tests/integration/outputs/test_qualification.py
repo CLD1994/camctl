@@ -1,17 +1,10 @@
-"""X3 读取和删除资格共同事务的组件集成测试。
-
-真实 SQLite 与 P3 事务内核：候选按计划时间排序、同时间取回优先，
-协程唤醒顺序不改变授予结果；已有读取保护、清理限制及删除处理者
-分别拒绝；跨设备候选互不阻挡；授予时依赖、交付、拷贝、目标文件
-及读取流程在同一事务建档，缺一即整笔拒绝；内部处理共用读取机会
-不创建交付。
-"""
+"""读取资格共同建档、独立副本及清理限制的真实 SQLite 集成测试。"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -248,58 +241,6 @@ def _seed_cleanup_item(
     )
 
 
-def _seed_active_copy(
-    connection: sqlite3.Connection,
-    *,
-    copy_id: int,
-    device_file_id: int,
-    device_id: str,
-    target_file_id: int,
-    delivery_id: int | None = None,
-    action_id: int,
-    owner_action_id: int,
-    output_id: int,
-) -> None:
-    """种下占用设备槽的既有活动拷贝（含 PENDING 读取流程）。"""
-    connection.execute(
-        "INSERT INTO intermediate_files (id, owner_action_id, owner_delivery_id,"
-        " purpose, relative_path, retention_state, cleanup_state, size_bytes, sha256,"
-        " last_error_json, created_event_id, last_event_id, change_count)"
-        " VALUES (?, ?, NULL, 2, ?, 1, 1, NULL, NULL, NULL, 1, 1, 1)",
-        (target_file_id, action_id, f"recording-inputs/{target_file_id}.part"),
-    )
-    if delivery_id is not None:
-        connection.execute(
-            "INSERT INTO file_copies (id, delivery_id, processing_id,"
-            " source_device_file_id, source_intermediate_file_id, target_file_id,"
-            " round, recopies_used, max_recopies_used, source_size, source_sha256,"
-            " committed_bytes, reset_state, slot_device_id, verification_state,"
-            " target_sha256, verification_error_json)"
-            " VALUES (?, ?, NULL, ?, NULL, ?, 1, 0, 0, 4096, NULL, 0, 1, ?, 1,"
-            " NULL, NULL)",
-            (copy_id, delivery_id, device_file_id, target_file_id, device_id),
-        )
-    else:
-        connection.execute(
-            "INSERT INTO file_copies (id, delivery_id, processing_id,"
-            " source_device_file_id, source_intermediate_file_id, target_file_id,"
-            " round, recopies_used, max_recopies_used, source_size, source_sha256,"
-            " committed_bytes, reset_state, slot_device_id, verification_state,"
-            " target_sha256, verification_error_json)"
-            " VALUES (?, NULL, NULL, ?, NULL, ?, 1, 0, 0, 4096, NULL, 0, 1, ?, 1,"
-            " NULL, NULL)",
-            (copy_id, device_file_id, target_file_id, device_id),
-        )
-    connection.execute(
-        "INSERT INTO operation_runs (id, action_id, delivery_id, kind, query_purpose,"
-        " responsibility_key, activity_id, copy_id, cleanup_item_id, session_key,"
-        " status, attempts_used, max_attempts_used, timeout_s_json,"
-        " retry_interval_s_json, retry_wait_required, error_json)"
-        " VALUES (?, ?, NULL, 3, NULL, ?, NULL, ?, NULL, NULL, 1, 0, NULL, NULL,"
-        " NULL, 0, NULL)",
-        (1000 + copy_id, action_id, f"read/{copy_id}", copy_id),
-    )
-
 
 _CONFIG = OperationConfig(
     max_attempts=3,
@@ -343,17 +284,188 @@ def _row(owned, sql: str, *params):
     return owned.connection.execute(sql, params).fetchone()
 
 
-def test_qualification_uses_business_order(qualification_environment) -> None:
-    """计划时间排序先于协程唤醒顺序；同时间取回优先。"""
+@pytest.mark.parametrize("occurred_at", [_NOW, _LATER])
+def test_different_products_prepare_independently_after_their_due_time(qualification_environment, occurred_at):
+    """两份产物分别建档；未来动作等待自己的计划时间。"""
+    owned = qualification_environment
+    connection = owned.connection
+    _seed_plan(connection, 1)
+    for source, file_id, output_id, owner, item, when in (
+        (11, 501, 701, 31, 101, _NOW), (12, 502, 702, 32, 102, _LATER),
+    ):
+        _seed_action(connection, source, 1, action_type=2, status=3)
+        _seed_action(connection, owner, 1, action_type=4, scheduled_at=when)
+        _seed_device_file(connection, file_id, source)
+        _seed_output(connection, output_id, source, file_id)
+        _seed_selection_and_item(connection, dependency_id=item, selection_id=item, item_id=item,
+            owner_action_id=owner, source_action_id=source, output_id=output_id)
+    connection.commit()
+    repository = OutputsRepository()
+    early = _candidate(_Seedling(action_id=31, item_id=101, output_id=701, file_id=501))
+    late = replace(_candidate(_Seedling(action_id=32, item_id=102, output_id=702, file_id=502)),
+                   occurred_at=occurred_at)
+    before = tuple(connection.iterdump())
+    result = _grant(owned, repository, late)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    if occurred_at == _NOW:
+        assert result.value.outcome is QualificationOutcome.REJECTED
+        assert result.value.reason == "not_due"
+        assert tuple(connection.iterdump()) == before
+    else:
+        assert _granted(result), result.value
+    first = _grant(owned, repository, replace(early, occurred_at=occurred_at))
+    assert _granted(first), first.error or first.value
+    assert connection.execute("SELECT slot_device_id FROM file_copies").fetchall() == (
+        [(None,)] if occurred_at == _NOW else [(None,), (None,)])
+
+
+@pytest.mark.parametrize("first_kind", ["obtain", "internal"])
+@pytest.mark.parametrize("internal_time", [_NOW - 1_000_000, _NOW, _NOW + 1_000_000])
+def test_internal_and_delivery_preparations_do_not_compete_for_camera_slot(
+    qualification_environment, first_kind, internal_time,
+):
+    """两种用途先建立独立准备责任，相机机会另行竞争。"""
+    owned = qualification_environment
+    connection = owned.connection
+    _seed_plan(connection, 1)
+    _seed_action(connection, 11, 1, action_type=2, status=3)
+    _seed_action(connection, 41, 1, action_type=4, scheduled_at=_NOW)
+    _seed_action(connection, 42, 1, action_type=2, scheduled_at=internal_time)
+    _seed_device_file(connection, 501, 11)
+    _seed_device_file(connection, 502, 42)
+    _seed_output(connection, 701, 11, 501)
+    _seed_selection_and_item(connection, dependency_id=1, selection_id=1, item_id=101,
+        owner_action_id=41, source_action_id=11, output_id=701)
+    _seed_processing(connection, 5, 42, 502)
+    connection.execute("UPDATE recording_processing SET check_decision=3, check_basis_json=? WHERE id=5",
+        (json.dumps({"reason": "INSUFFICIENT_TIMING", "target_duration_ms": 1000}),))
+    connection.commit()
+    candidates = {
+        "obtain": _candidate(_Seedling(action_id=41, item_id=101, output_id=701, file_id=501)),
+        "internal": _candidate(_Seedling(action_id=42, item_id=None, output_id=0, file_id=502, processing_id=5)),
+    }
+    order = (first_kind, "internal" if first_kind == "obtain" else "obtain")
+    repository = OutputsRepository()
+    results = []
+    for kind in order:
+        result = _grant(owned, repository, replace(candidates[kind], occurred_at=_LATER))
+        assert _granted(result), result.error or result.value
+        results.append(result.value)
+    assert results[0].copy_id != results[1].copy_id
+    assert results[0].target_file_id != results[1].target_file_id
+    assert connection.execute("SELECT slot_device_id FROM file_copies").fetchall() == [(None,), (None,)]
+
+
+@pytest.mark.parametrize("slot", [None, "cam-1"])
+def test_existing_read_protection_preserves_original_copy(qualification_environment, slot):
+    """同产物的新取回建立独立副本，不改变旧保护、进度及相机机会。"""
+    owned = qualification_environment
+    connection = owned.connection
+    _seed_plan(connection, 1)
+    _seed_action(connection, 11, 1, action_type=2, status=3)
+    _seed_device_file(connection, 501, 11)
+    _seed_output(connection, 701, 11, 501)
+    for owner, item, when in ((31, 101, _NOW), (32, 102, _LATER)):
+        _seed_action(connection, owner, 1, action_type=4, scheduled_at=when)
+        _seed_selection_and_item(connection, dependency_id=item, selection_id=item, item_id=item,
+            owner_action_id=owner, source_action_id=11, output_id=701)
+    connection.commit()
+    repository = OutputsRepository()
+    first = _grant(owned, repository, _candidate(_Seedling(31, 101, 701, 501)))
+    assert _granted(first), first.error or first.value
+    # 原持有状态及已保存进度是当前投影夹具，不代替机会与分段事务验收。
+    connection.execute("UPDATE file_copies SET slot_device_id=?, committed_bytes=1024 WHERE id=?",
+                       (slot, first.value.copy_id))
+    connection.commit()
+    previous = _row(owned, "SELECT * FROM file_copies WHERE id=?", first.value.copy_id)
+    later = replace(_candidate(_Seedling(32, 102, 701, 501)), occurred_at=_LATER)
+    second = _grant(owned, repository, later)
+    assert _granted(second), second.error or second.value
+    assert second.value.copy_id != first.value.copy_id
+    assert second.value.delivery_id != first.value.delivery_id
+    assert second.value.target_file_id != first.value.target_file_id
+    assert _row(owned, "SELECT * FROM file_copies WHERE id=?", first.value.copy_id) == previous
+    assert _row(owned, "SELECT slot_device_id FROM file_copies WHERE id=?", second.value.copy_id) == (None,)
+    assert connection.execute("SELECT source_dependency FROM obtain_items ORDER BY id").fetchall() == [(1,), (1,)]
+
+
+def test_cleanup_restriction_rejects_and_records(qualification_environment) -> None:
+    """不可撤销清理限制：逐项保存最终失败，不建立任何读取档案。"""
     owned = qualification_environment
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
-    _seed_action(connection, 11, 1, action_type=2)  # 拍摄 cam-1 @NOW
-    _seed_action(connection, 12, 1, action_type=2, device_id="cam-1",
-                 scheduled_at=_NOW)  # 同设备第二个源
+    _seed_action(connection, 11, 1, action_type=2, status=3)
     _seed_action(connection, 31, 1, action_type=4, scheduled_at=_NOW)
-    _seed_action(connection, 32, 1, action_type=4, scheduled_at=_LATER)
+    _seed_action(connection, 91, 1, action_type=5)  # DELETE 清理动作
+    _seed_device_file(connection, 501, 11)
+    _seed_output(connection, 701, 11, 501, availability=2)
+    _seed_selection_and_item(
+        connection, dependency_id=1, selection_id=1, item_id=101,
+        owner_action_id=31, source_action_id=11, output_id=701,
+    )
+    _seed_cleanup_item(
+        connection, 601, 91, 701, status=2, restriction_state=2
+    )  # PENDING_DELETE + ACTIVE 保护
+    connection.commit()
+
+    repository = OutputsRepository()
+    candidate = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
+    result = _grant(owned, repository, _candidate(candidate))
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
+    item = _row(
+        owned,
+        "SELECT status, error_code, source_dependency FROM obtain_items WHERE id = 101",
+    )
+    assert item[0] == 4  # FAILED
+    assert item[1] == 4  # output_cleanup_started
+    assert item[2] == 0
+    assert _row(owned, "SELECT count(*) FROM file_copies")[0] == 0
+    assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 0
+    assert _row(owned, "SELECT count(*) FROM intermediate_files")[0] == 0
+    assert _row(owned, "SELECT count(*) FROM operation_runs WHERE kind = 3")[0] == 0
+
+
+def test_delete_in_progress_rejects_with_dedicated_code(qualification_environment) -> None:
+    owned = qualification_environment
+    connection = owned.connection
+    connection.execute("BEGIN IMMEDIATE")
+    _seed_plan(connection, 1)
+    _seed_action(connection, 11, 1, action_type=2, status=3)
+    _seed_action(connection, 31, 1, action_type=4, scheduled_at=_NOW)
+    _seed_action(connection, 91, 1, action_type=5)
+    _seed_device_file(connection, 501, 11)
+    _seed_output(connection, 701, 11, 501, availability=2)
+    connection.execute("UPDATE outputs SET cleanup_status=3 WHERE id=701")
+    _seed_selection_and_item(
+        connection, dependency_id=1, selection_id=1, item_id=101,
+        owner_action_id=31, source_action_id=11, output_id=701,
+    )
+    _seed_cleanup_item(
+        connection, 601, 91, 701, status=3, restriction_state=2
+    )  # DELETING：唯一删除处理者持有目标
+    connection.commit()
+
+    repository = OutputsRepository()
+    candidate = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
+    result = _grant(owned, repository, _candidate(candidate))
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
+    item = _row(owned, "SELECT status, error_code FROM obtain_items WHERE id = 101")
+    assert item == (4, 4)  # FAILED + output_cleanup_started
+
+
+def test_cross_device_candidates_do_not_block(qualification_environment) -> None:
+    """更早候选属于其他设备时不阻挡本设备授予。"""
+    owned = qualification_environment
+    connection = owned.connection
+    connection.execute("BEGIN IMMEDIATE")
+    _seed_plan(connection, 1)
+    _seed_action(connection, 11, 1, action_type=2, device_id="cam-1", status=3)
+    _seed_action(connection, 12, 1, action_type=2, device_id="cam-2", status=3)
+    _seed_action(connection, 31, 1, action_type=4, scheduled_at=_LATER)
+    _seed_action(connection, 32, 1, action_type=4, scheduled_at=_NOW)
     _seed_device_file(connection, 501, 11)
     _seed_device_file(connection, 502, 12)
     _seed_output(connection, 701, 11, 501)
@@ -369,172 +481,10 @@ def test_qualification_uses_business_order(qualification_environment) -> None:
     connection.commit()
 
     repository = OutputsRepository()
-    early = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
-    late = _Seedling(action_id=32, item_id=102, output_id=702, file_id=502)
-
-    # 唤醒顺序颠倒：先申请较晚候选，按计划时间被拒。
-    late_first = _grant(owned, repository, _candidate(late))
-    assert not _granted(late_first)
-    early_first = _grant(owned, repository, _candidate(early))
-    assert _granted(early_first)
-
-    # 授予后设备槽被占用，较晚候选仍不可开始。
-    late_retry = _grant(owned, repository, _candidate(late))
-    assert not _granted(late_retry)
-
-
-def test_same_time_obtain_wins_over_processing(qualification_environment) -> None:
-    """同一计划时间下取回候选优先于录像内部处理候选。"""
-    owned = qualification_environment
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_plan(connection, 1)
-    _seed_plan(connection, 2)
-    _seed_action(connection, 11, 1, action_type=2)  # cam-1 @NOW
-    _seed_action(connection, 41, 1, action_type=4, scheduled_at=_NOW)
-    _seed_action(connection, 42, 2, action_type=2, device_id="cam-1",
-                 scheduled_at=_NOW)
-    _seed_device_file(connection, 501, 11)
-    _seed_output(connection, 701, 11, 501)
-    _seed_selection_and_item(
-        connection, dependency_id=1, selection_id=1, item_id=101,
-        owner_action_id=41, source_action_id=11, output_id=701,
-    )
-    _seed_processing(connection, 5, 42, 501)
-    connection.commit()
-
-    repository = OutputsRepository()
-    obtain = _Seedling(action_id=41, item_id=101, output_id=701, file_id=501)
-    processing = _Seedling(
-        action_id=42, item_id=None, output_id=701, file_id=501, processing_id=5
-    )
-
-    processing_first = _grant(owned, repository, _candidate(processing))
-    assert not _granted(processing_first)
-    obtain_first = _grant(owned, repository, _candidate(obtain))
-    assert _granted(obtain_first)
-
-
-def test_existing_read_protection_preserves_original_copy(qualification_environment) -> None:
-    """源文件已有活动拷贝时保留原拷贝，新申请不抢占。"""
-    owned = qualification_environment
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_plan(connection, 1)
-    _seed_action(connection, 11, 1, action_type=2)
-    _seed_action(connection, 31, 1, action_type=4, scheduled_at=_NOW)
-    _seed_action(connection, 32, 1, action_type=4, scheduled_at=_LATER)
-    _seed_device_file(connection, 501, 11)
-    _seed_output(connection, 701, 11, 501)
-    _seed_selection_and_item(
-        connection, dependency_id=1, selection_id=1, item_id=101,
-        owner_action_id=31, source_action_id=11, output_id=701,
-    )
-    _seed_active_copy(
-        connection, copy_id=900, device_file_id=501, device_id="cam-1",
-        target_file_id=800, action_id=11, owner_action_id=31, output_id=701,
-    )
-    connection.commit()
-
-    repository = OutputsRepository()
-    candidate = _Seedling(action_id=32, item_id=101, output_id=701, file_id=501)
-    result = _grant(owned, repository, _candidate(candidate))
-    assert not _granted(result)
-    # 原拷贝行保持不变。
-    assert _row(owned, "SELECT committed_bytes FROM file_copies WHERE id = 900")[0] == 0
-    assert _row(owned, "SELECT count(*) FROM file_copies")[0] == 1
-
-
-def test_cleanup_restriction_rejects_and_records(qualification_environment) -> None:
-    """不可撤销清理限制：逐项保存最终失败，不建立任何读取档案。"""
-    owned = qualification_environment
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_plan(connection, 1)
-    _seed_action(connection, 11, 1, action_type=2)
-    _seed_action(connection, 31, 1, action_type=4, scheduled_at=_NOW)
-    _seed_action(connection, 91, 1, action_type=5)  # DELETE 清理动作
-    _seed_device_file(connection, 501, 11)
-    _seed_output(connection, 701, 11, 501)
-    _seed_selection_and_item(
-        connection, dependency_id=1, selection_id=1, item_id=101,
-        owner_action_id=31, source_action_id=11, output_id=701,
-    )
-    _seed_cleanup_item(
-        connection, 601, 91, 701, status=2, restriction_state=2
-    )  # PENDING_DELETE + ACTIVE 保护
-    connection.commit()
-
-    repository = OutputsRepository()
+    # 两个相机各有已到期的合法候选；先申请计划时间较晚的 cam-1。
     candidate = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
-    result = _grant(owned, repository, _candidate(candidate))
-    assert result.kind is DbOutcomeKind.COMPLETED
-    assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
-    item = _row(
-        owned,
-        "SELECT status, error_code, source_dependency FROM obtain_items WHERE id = 101",
-    )
-    assert item[0] == 4  # FAILED
-    assert item[1] == 3  # output_unavailable
-    assert item[2] == 0
-    assert _row(owned, "SELECT count(*) FROM file_copies")[0] == 0
-    assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 0
-    assert _row(owned, "SELECT count(*) FROM intermediate_files")[0] == 0
-    assert _row(owned, "SELECT count(*) FROM operation_runs WHERE kind = 3")[0] == 0
-
-
-def test_delete_in_progress_rejects_with_dedicated_code(qualification_environment) -> None:
-    owned = qualification_environment
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_plan(connection, 1)
-    _seed_action(connection, 11, 1, action_type=2)
-    _seed_action(connection, 31, 1, action_type=4, scheduled_at=_NOW)
-    _seed_action(connection, 91, 1, action_type=5)
-    _seed_device_file(connection, 501, 11)
-    _seed_output(connection, 701, 11, 501)
-    _seed_selection_and_item(
-        connection, dependency_id=1, selection_id=1, item_id=101,
-        owner_action_id=31, source_action_id=11, output_id=701,
-    )
-    _seed_cleanup_item(
-        connection, 601, 91, 701, status=3, restriction_state=2
-    )  # DELETING：唯一删除处理者持有目标
-    connection.commit()
-
-    repository = OutputsRepository()
-    candidate = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
-    result = _grant(owned, repository, _candidate(candidate))
-    assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
-    item = _row(owned, "SELECT status, error_code FROM obtain_items WHERE id = 101")
-    assert item == (4, 4)  # FAILED + output_cleanup_started
-
-
-def test_cross_device_candidates_do_not_block(qualification_environment) -> None:
-    """更早候选属于其他设备时不阻挡本设备授予。"""
-    owned = qualification_environment
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    _seed_plan(connection, 1)
-    _seed_action(connection, 11, 1, action_type=2, device_id="cam-1")
-    _seed_action(connection, 12, 1, action_type=2, device_id="cam-2")
-    _seed_action(connection, 31, 1, action_type=4, scheduled_at=_LATER)
-    _seed_action(connection, 32, 1, action_type=4, scheduled_at=_NOW)
-    _seed_device_file(connection, 501, 11)
-    _seed_device_file(connection, 502, 12)
-    _seed_output(connection, 701, 11, 501)
-    _seed_output(connection, 702, 12, 502)
-    _seed_selection_and_item(
-        connection, dependency_id=1, selection_id=1, item_id=101,
-        owner_action_id=32, source_action_id=11, output_id=701,
-    )
-    connection.commit()
-
-    repository = OutputsRepository()
-    # cam-2 的更早取回动作 32 尚未具备候选（无 item）；本候选属于 cam-1。
-    candidate = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
-    result = _grant(owned, repository, _candidate(candidate))
-    assert _granted(result)
+    result = _grant(owned, repository, replace(_candidate(candidate), occurred_at=_LATER))
+    assert _granted(result), result.error
 
 
 def test_grant_creates_all_records_atomically(qualification_environment) -> None:
@@ -664,10 +614,10 @@ def test_unavailable_output_rejects_without_records(qualification_environment) -
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
     _seed_plan(connection, 1)
-    _seed_action(connection, 11, 1, action_type=2)
+    _seed_action(connection, 11, 1, action_type=2, status=3)
     _seed_action(connection, 31, 1, action_type=4, scheduled_at=_NOW)
-    _seed_device_file(connection, 501, 11)
-    _seed_output(connection, 701, 11, 501, availability=2)  # RESTRICTED
+    _seed_device_file(connection, 501, 11, presence_state=3)
+    _seed_output(connection, 701, 11, 501, availability=4)  # MISSING
     _seed_selection_and_item(
         connection, dependency_id=1, selection_id=1, item_id=101,
         owner_action_id=31, source_action_id=11, output_id=701,
@@ -677,9 +627,103 @@ def test_unavailable_output_rejects_without_records(qualification_environment) -
     repository = OutputsRepository()
     candidate = _Seedling(action_id=31, item_id=101, output_id=701, file_id=501)
     result = _grant(owned, repository, _candidate(candidate))
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
     assert result.value.outcome is QualificationOutcome.REJECTED_FINAL
     item = _row(owned, "SELECT status, error_code FROM obtain_items WHERE id = 101")
     assert item == (4, 3)
     assert _row(owned, "SELECT count(*) FROM file_copies")[0] == 0
     assert _row(owned, "SELECT count(*) FROM deliveries")[0] == 0
     assert _row(owned, "SELECT count(*) FROM operation_runs WHERE kind = 3")[0] == 0
+
+
+@pytest.mark.parametrize("cleanup_time", [_NOW - 1_000_000, _NOW, _NOW + 1_000_000])
+@pytest.mark.parametrize("cleanup_status", [1, 2])
+@pytest.mark.parametrize("selection_fixed", [False, True])
+def test_earlier_cleanup_participates_before_restriction_is_saved(
+    qualification_environment, cleanup_time, cleanup_status, selection_fixed,
+):
+    """已到期清理即使尚未保存限制，也参与同产物资格顺序。"""
+    owned = qualification_environment
+    connection = owned.connection
+    _seed_plan(connection, 1)
+    _seed_action(connection, 11, 1, action_type=2, status=3)
+    _seed_action(connection, 31, 1, action_type=4, scheduled_at=_NOW)
+    _seed_action(connection, 91, 1, action_type=5, scheduled_at=cleanup_time, status=cleanup_status)
+    _seed_device_file(connection, 501, 11)
+    _seed_output(connection, 701, 11, 501)
+    _seed_selection_and_item(connection, dependency_id=1, selection_id=1, item_id=101,
+        owner_action_id=31, source_action_id=11, output_id=701)
+    connection.execute("UPDATE actions SET input_fields_json=?, target_selection_state=? WHERE id=91",
+        (json.dumps({"params": {"output_ids": ["701"]}}), 2 if selection_fixed else 1))
+    if selection_fixed:
+        connection.execute(
+            "INSERT INTO cleanup_items (id, action_id, requested_output_id, output_id, status, restriction_state)"
+            " VALUES (601, 91, 701, NULL, 1, 1)")
+    connection.commit()
+    before = tuple(connection.iterdump())
+    candidate = replace(_candidate(_Seedling(31, 101, 701, 501)), occurred_at=_LATER)
+    result = _grant(owned, OutputsRepository(), candidate)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    if cleanup_time < _NOW:
+        assert result.value.outcome is QualificationOutcome.REJECTED
+        assert result.value.reason == "business_order"
+        assert tuple(connection.iterdump()) == before
+    else:
+        assert _granted(result), result.value
+        assert _row(owned, "SELECT source_dependency FROM obtain_items WHERE id=101") == (1,)
+
+
+@pytest.mark.parametrize("state", ["future", "canceled", "terminal", "other_output"])
+def test_ineligible_or_unrelated_cleanup_does_not_block_preparation(qualification_environment, state):
+    """只有当前合格且针对同一产物的清理候选参与比较。"""
+    owned = qualification_environment
+    connection = owned.connection
+    _seed_plan(connection, 1)
+    _seed_action(connection, 11, 1, action_type=2, status=3)
+    _seed_action(connection, 31, 1, action_type=4)
+    _seed_action(connection, 91, 1, action_type=5,
+        scheduled_at=_LATER + 1_000_000 if state == "future" else _NOW - 1_000_000,
+        status=2)
+    _seed_device_file(connection, 501, 11)
+    _seed_action(connection, 12, 1, action_type=2, status=3)
+    _seed_device_file(connection, 502, 12)
+    _seed_output(connection, 701, 11, 501)
+    _seed_output(connection, 702, 12, 502)
+    _seed_selection_and_item(connection, dependency_id=1, selection_id=1, item_id=101,
+        owner_action_id=31, source_action_id=11, output_id=701)
+    connection.execute("UPDATE actions SET input_fields_json=?, target_selection_state=1, cancel_requested=?, status=? WHERE id=91",
+        (json.dumps({"params": {"output_ids": ["702" if state == "other_output" else "701"]}}),
+         int(state in ("canceled", "terminal")), 6 if state == "terminal" else 2))
+    connection.commit()
+    result = _grant(owned, OutputsRepository(), replace(_candidate(_Seedling(31, 101, 701, 501)), occurred_at=_LATER))
+    assert _granted(result), result.error or result.value
+    assert _row(owned, "SELECT slot_device_id FROM file_copies WHERE id=?", result.value.copy_id) == (None,)
+
+
+@pytest.mark.parametrize("owner_status,selection_fixed", [(1, False), (2, False), (2, True)])
+def test_earlier_obtain_participates_before_its_selection_is_saved(
+    qualification_environment, owner_status, selection_fixed,
+):
+    """来源已结束且默认目标可确定时，保存选择的先后不能改变资格顺序。"""
+    owned = qualification_environment
+    connection = owned.connection
+    _seed_plan(connection, 1)
+    _seed_action(connection, 11, 1, action_type=2, status=3)
+    _seed_device_file(connection, 501, 11)
+    _seed_output(connection, 701, 11, 501)
+    for owner, item, when, status in ((31, 101, _NOW, owner_status), (32, 102, _LATER, 2)):
+        _seed_action(connection, owner, 1, action_type=4, scheduled_at=when, status=status)
+        _seed_selection_and_item(connection, dependency_id=item, selection_id=item, item_id=item,
+            owner_action_id=owner, source_action_id=11, output_id=701)
+        connection.execute("UPDATE actions SET input_fields_json=? WHERE id=?",
+            (json.dumps({"params": {"source": {"action_name": "action-11"}}}), owner))
+    if not selection_fixed:
+        connection.execute("DELETE FROM obtain_items WHERE id=101")
+        connection.execute("UPDATE obtain_source_selections SET status=1 WHERE id=101")
+    connection.commit()
+    before = tuple(connection.iterdump())
+    result = _grant(owned, OutputsRepository(), replace(_candidate(_Seedling(32, 102, 701, 501)), occurred_at=_LATER))
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert result.value.outcome is QualificationOutcome.REJECTED
+    assert result.value.reason == "business_order"
+    assert tuple(connection.iterdump()) == before
