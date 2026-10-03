@@ -67,9 +67,10 @@ class HostPath:
 
 @dataclass(frozen=True)
 class FileObservation:
-    """一次实际检查的结果；错误保留原始异常供诊断。"""
+    """一次实际检查；错误保留原始异常，普通文件大小与类型来自同一次观察。"""
 
     kind: FileObservationKind
     path: Path
     is_file: bool | None = None
     error: Any = None
+    size_bytes: int | None = None

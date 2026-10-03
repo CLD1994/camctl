@@ -22,7 +22,9 @@ from camctl.host_files.media import (
     probe_media,
     repair_media,
 )
-from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+from camctl.host_files.models import (
+    BoundDirectories, FileObservation, FileObservationKind, FilePurpose, FileRef,
+)
 from camctl.operations.process import LocalExit, RawToolOutcome
 
 pytestmark = pytest.mark.asyncio
@@ -48,6 +50,8 @@ class FakeMedia:
         self.argvs: list[tuple[str, ...]] = []
         self.output_exists = False
         self.output_size = 0
+        self.observe_error: OSError | None = None
+        self.is_file = True
         self.digest = HashResult(digest="a" * 64, size_bytes=1, error=None)
         self.sync = SyncResult(
             file_synced=True, directory=DirectorySyncStage.UNSUPPORTED, error=None
@@ -59,11 +63,16 @@ class FakeMedia:
             raise self.fail_spawn
         return self.outcome
 
-    def exists(self, path: Path) -> bool:
-        return self.output_exists
-
-    def size(self, path: Path) -> int:
-        return self.output_size
+    def observe(self, ref: FileRef, roots: BoundDirectories) -> FileObservation:
+        path = roots.staging / ref.relative_path
+        if self.observe_error is not None:
+            return FileObservation(FileObservationKind.ERROR, path, error=self.observe_error)
+        if not self.output_exists:
+            return FileObservation(FileObservationKind.MISSING, path)
+        return FileObservation(
+            FileObservationKind.VALID_OBJECT if self.is_file else FileObservationKind.TYPE_MISMATCH,
+            path, is_file=self.is_file, size_bytes=self.output_size if self.is_file else None,
+        )
 
     def hash_target(self, ref, roots):
         return self.digest
@@ -76,10 +85,9 @@ class FakeMedia:
 def fake(monkeypatch: pytest.MonkeyPatch) -> FakeMedia:
     fm = FakeMedia()
     monkeypatch.setattr(media, "_execute_tool", fm.execute)
-    monkeypatch.setattr(media, "_file_exists", fm.exists)
-    monkeypatch.setattr(media, "_file_size", fm.size)
     monkeypatch.setattr(media, "_file_digest", fm.hash_target)
     monkeypatch.setattr(media, "_file_sync", fm.sync_target)
+    monkeypatch.setattr(media, "observe_file", fm.observe)
     return fm
 
 
@@ -125,6 +133,7 @@ async def test_failed_media_output_is_not_complete(fake: FakeMedia) -> None:
 async def test_successful_repair_collects_full_evidence(fake: FakeMedia) -> None:
     fake.output_exists = True
     fake.output_size = 2048
+    fake.digest = HashResult(digest="a" * 64, size_bytes=2048, error=None)
     artifact = await repair_media(
         _input_ref(), _output_ref(), _roots(),
         RepairRequest(output_args=("-c", "copy")),
@@ -355,3 +364,85 @@ async def test_probe_malformed_output_is_not_partially_used(
     assert result.duration_s is None
     assert result.error is not None
     assert result.error.startswith("invalid_structure:")
+
+
+@pytest.mark.parametrize("hash_fails", [False, True])
+@pytest.mark.parametrize(
+    "synced",
+    [
+        SyncResult(False, DirectorySyncStage.NOT_ATTEMPTED, "fsync_failed: disk"),
+        SyncResult(True, DirectorySyncStage.FAILED, "directory_sync_failed: disk"),
+        SyncResult(True, DirectorySyncStage.SYNCED, "directory_close_failed: disk"),
+    ],
+)
+async def test_repair_keeps_sync_error_and_independent_hash(
+    fake: FakeMedia, synced: SyncResult, hash_fails: bool
+) -> None:
+    fake.output_exists = True
+    fake.output_size = 1
+    fake.sync = synced
+    if hash_fails:
+        fake.digest = HashResult(None, None, "read_failed: disk")
+    result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+    assert result.complete is (not hash_fails)
+    assert result.size_bytes == 1
+    assert result.file_synced is synced.file_synced
+    assert result.directory is synced.directory
+    assert result.error is not None and synced.error in result.error
+    if hash_fails:
+        assert "hash_failed" in result.error
+
+
+@pytest.mark.parametrize("tool_fails", [False, True])
+async def test_output_inspection_error_preserves_unknown_and_tool_error(
+    fake: FakeMedia, tool_fails: bool
+) -> None:
+    fake.observe_error = PermissionError("cannot inspect output")
+    if tool_fails:
+        fake.outcome = RawToolOutcome(LocalExit(exit_code=1), b"", None, None)
+    result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+    assert result.exists is None
+    assert result.complete is False
+    assert result.error is not None and "inspect_failed" in result.error
+    if tool_fails:
+        assert "tool_failed" in result.error
+
+
+async def test_non_file_output_does_not_qualify(fake: FakeMedia) -> None:
+    fake.output_exists = True
+    fake.output_size = 1
+    fake.is_file = False
+    result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+    assert result.exists is True
+    assert result.complete is False
+    assert result.error is not None and "output_type_mismatch" in result.error
+
+
+async def test_hash_length_conflict_is_not_complete(fake: FakeMedia) -> None:
+    fake.output_exists = True
+    fake.output_size = 2
+    result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+    assert result.size_bytes == 2
+    assert result.complete is False
+    assert result.error is not None and "size_mismatch" in result.error
+
+
+async def test_hash_close_failure_preserves_computed_digest(fake: FakeMedia) -> None:
+    fake.output_exists = True
+    fake.output_size = 1
+    fake.digest = HashResult("a" * 64, 1, "close_failed: disk")
+    result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+    assert result.complete is False
+    assert result.digest == "a" * 64
+    assert result.file_synced is True
+    assert result.error is not None and "close_failed" in result.error
+
+
+async def test_hash_close_and_size_conflict_are_both_visible(fake: FakeMedia) -> None:
+    fake.output_exists = True
+    fake.output_size = 2
+    fake.digest = HashResult("a" * 64, 1, "close_failed: disk")
+    result = await repair_media(_input_ref(), _output_ref(), _roots(), RepairRequest())
+    assert result.complete is False
+    assert "close_failed" in result.error
+    assert "size_mismatch" in result.error

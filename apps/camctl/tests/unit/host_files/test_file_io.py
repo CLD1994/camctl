@@ -26,6 +26,7 @@ from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
 from camctl.host_files.paths import PathRuleError
 
 _ROOT = Path("D:\\state\\staging")
+_REAL_DIRECTORY_SYNC = file_io._sync_directory
 
 
 class FakeFilesystem:
@@ -43,6 +44,8 @@ class FakeFilesystem:
         self.fail_fsync: OSError | None = None
         self.fail_directory_sync: OSError | None = None
         self.fail_read: OSError | None = None
+        self.fail_close: OSError | None = None
+        self.close_calls: list[int] = []
 
     def open_for_write(self, path) -> int:
         if self.fail_open_write is not None:
@@ -78,13 +81,16 @@ class FakeFilesystem:
             raise self.fail_fsync
         self.fsync_calls.append(fd)
 
-    def sync_directory(self, path) -> None:
+    def sync_directory(self, path) -> tuple[DirectorySyncStage, str | None]:
         if self.fail_directory_sync is not None:
             raise self.fail_directory_sync
         self.directory_syncs.append(str(path))
+        return DirectorySyncStage.SYNCED, None
 
     def close(self, fd: int) -> None:
-        pass
+        self.close_calls.append(fd)
+        if self.fail_close is not None:
+            raise self.fail_close
 
     def read(self, fd: int, size: int) -> bytes:
         if self.fail_read is not None:
@@ -103,6 +109,7 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeFilesystem:
     monkeypatch.setattr(file_io, "_sync_directory", fs.sync_directory)
     monkeypatch.setattr(file_io, "_close", fs.close)
     monkeypatch.setattr(file_io, "_read", fs.read)
+    monkeypatch.setattr(file_io, "_exists", lambda path: str(path) in fs.sizes)
     return fs
 
 
@@ -219,3 +226,79 @@ def test_path_rule_violation_propagates(fake: FakeFilesystem) -> None:
     )
     with pytest.raises(PathRuleError):
         prepare_target(bad, _roots(), 10)
+
+
+@pytest.mark.parametrize("truncate_fails", [False, True])
+def test_prepare_close_error_keeps_actual_truncate(
+    fake: FakeFilesystem, truncate_fails: bool
+) -> None:
+    fake.fail_close = OSError(errno.EIO, "close device")
+    if truncate_fails:
+        fake.fail_truncate = OSError(errno.ENOSPC, "truncate device")
+    result = prepare_target(_ref(), _roots(), 10)
+    assert result.created is True
+    assert result.truncated is (not truncate_fails)
+    assert result.can_continue is False
+    assert result.error is not None and "close_failed" in result.error
+    if truncate_fails:
+        assert "truncate_failed" in result.error
+    assert fake.close_calls == [10]
+
+
+@pytest.mark.parametrize("sync_fails", [False, True])
+def test_sync_close_error_keeps_actual_sync(fake: FakeFilesystem, sync_fails: bool) -> None:
+    fake.fail_close = OSError(errno.EIO, "close device")
+    if sync_fails:
+        fake.fail_fsync = OSError(errno.ENOSPC, "sync device")
+    result = sync_target(_ref(), _roots())
+    assert result.file_synced is (not sync_fails)
+    assert result.directory is DirectorySyncStage.NOT_ATTEMPTED
+    assert result.error is not None and "close_failed" in result.error
+    if sync_fails:
+        assert "fsync_failed" in result.error
+    assert fake.close_calls == [10]
+
+
+@pytest.mark.parametrize("read_fails", [False, True])
+def test_hash_close_error_keeps_complete_read(fake: FakeFilesystem, read_fails: bool) -> None:
+    fake.fail_close = OSError(errno.EIO, "close device")
+    if read_fails:
+        fake.fail_read = OSError(errno.EIO, "read device")
+    result = file_io.hash_target(_ref(), _roots())
+    assert result.error is not None and "close_failed" in result.error
+    if read_fails:
+        assert result.digest is None
+        assert result.size_bytes is None
+        assert "read_failed" in result.error
+    else:
+        assert result.digest == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        assert result.size_bytes == 0
+    assert fake.close_calls == [10]
+
+
+@pytest.mark.parametrize("sync_fails", [False, True])
+def test_directory_close_error_preserves_sync_phase(
+    fake: FakeFilesystem, monkeypatch: pytest.MonkeyPatch, sync_fails: bool
+) -> None:
+    monkeypatch.setattr(file_io, "_DIRECTORY_SYNC_SUPPORTED", True)
+    monkeypatch.setattr(file_io, "_sync_directory", _REAL_DIRECTORY_SYNC)
+    monkeypatch.setattr(file_io.os, "open", lambda *args: 99)
+    closed = []
+
+    def sync_directory_fd(fd):
+        if sync_fails:
+            raise OSError(errno.EIO, "directory sync")
+
+    def close_directory_fd(fd):
+        closed.append(fd)
+        raise OSError(errno.EIO, "directory close")
+
+    monkeypatch.setattr(file_io.os, "fsync", sync_directory_fd)
+    monkeypatch.setattr(file_io.os, "close", close_directory_fd)
+    result = sync_target(_ref(), _roots())
+    assert result.file_synced is True
+    assert result.directory is (DirectorySyncStage.FAILED if sync_fails else DirectorySyncStage.SYNCED)
+    assert result.error is not None and "directory_close_failed" in result.error
+    if sync_fails:
+        assert "directory_sync_failed" in result.error
+    assert closed == [99]

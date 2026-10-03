@@ -9,6 +9,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -151,3 +152,53 @@ async def test_async_wrapper_uses_file_tasks(tmp_path: Path) -> None:
     )
     assert second.ran is True
     assert second.value == hashlib.sha256(data).hexdigest()
+
+
+@pytest.mark.parametrize("operation", ["prepare", "hash", "sync"])
+async def test_close_error_keeps_real_file_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    ref, roots, path = _setup(tmp_path)
+    path.write_bytes(b"abcdef")
+
+    def close_then_report_error(fd: int) -> None:
+        os.close(fd)
+        raise OSError(errno.EIO, "close device")
+
+    monkeypatch.setattr(file_io, "_close", close_then_report_error)
+    if operation == "prepare":
+        result = prepare_target(ref, roots, 3)
+        assert result.created is False
+        assert result.truncated is True
+        assert result.can_continue is False
+        assert path.read_bytes() == b"abc"
+    elif operation == "hash":
+        result = hash_target(ref, roots)
+        assert result.digest == hashlib.sha256(b"abcdef").hexdigest()
+        assert result.size_bytes == 6
+    else:
+        result = sync_target(ref, roots)
+        assert result.file_synced is True
+        assert result.directory is DirectorySyncStage.NOT_ATTEMPTED
+    assert result.error is not None and "close_failed" in result.error
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="目录同步需要 POSIX 文件描述符")
+async def test_directory_close_error_keeps_completed_directory_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ref, roots, path = _setup(tmp_path)
+    path.write_bytes(b"data")
+    real_close = os.close
+
+    def close_directory_with_error(fd: int) -> None:
+        is_directory = stat.S_ISDIR(os.fstat(fd).st_mode)
+        real_close(fd)
+        if is_directory:
+            raise OSError(errno.EIO, "close directory")
+
+    monkeypatch.setattr(file_io.os, "close", close_directory_with_error)
+    result = sync_target(ref, roots)
+    assert result.file_synced is True
+    assert result.directory is DirectorySyncStage.SYNCED
+    assert result.error is not None and "directory_close_failed" in result.error

@@ -7,13 +7,17 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
+import os
 import sys
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+import camctl.host_files.io as file_io
+from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.media import (
     ProbeRequest,
     RepairRequest,
@@ -209,3 +213,74 @@ while True:
     assert "cancelled" in result.error
     assert "exit=0" in result.error
     assert input_path.read_bytes() == b"x" * 250
+
+
+@pytest.mark.parametrize("phase", ["file", "directory"])
+async def test_repair_real_file_sync_error_keeps_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    input_ref, output_ref, roots, _, output_path = _setup(tmp_path)
+    tool = _tool(tmp_path, "repair", _REPAIR_BODY)
+
+    def fail_sync(*args):
+        raise OSError(errno.EIO, "sync disk")
+
+    monkeypatch.setattr(file_io, "_DIRECTORY_SYNC_SUPPORTED", True)
+    monkeypatch.setattr(file_io, "_fsync" if phase == "file" else "_sync_directory", fail_sync)
+    result = await repair_media(input_ref, output_ref, roots, RepairRequest(ffmpeg=tool))
+    assert result.exists is True
+    assert result.complete is True
+    assert result.size_bytes == 259
+    assert result.digest == hashlib.sha256(output_path.read_bytes()).hexdigest()
+    assert result.file_synced is (phase == "directory")
+    assert result.directory is (DirectorySyncStage.FAILED if phase == "directory"
+                                else DirectorySyncStage.NOT_ATTEMPTED)
+    assert result.error is not None and "sync_failed" in result.error
+
+
+async def test_repair_keeps_both_real_close_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_ref, output_ref, roots, _, output_path = _setup(tmp_path)
+    tool = _tool(tmp_path, "repair", _REPAIR_BODY)
+
+    def close_then_report_error(fd: int) -> None:
+        os.close(fd)
+        raise OSError(errno.EIO, "close disk")
+
+    monkeypatch.setattr(file_io, "_close", close_then_report_error)
+    result = await repair_media(input_ref, output_ref, roots, RepairRequest(ffmpeg=tool))
+    assert result.complete is False
+    assert result.digest == hashlib.sha256(output_path.read_bytes()).hexdigest()
+    assert result.checksum.error is not None
+    assert result.synchronization.error is not None
+    assert result.file_synced is True
+    assert result.directory is DirectorySyncStage.NOT_ATTEMPTED
+    assert result.error.count("close_failed") == 2
+
+
+async def test_repair_output_directory_does_not_qualify(tmp_path: Path) -> None:
+    input_ref, output_ref, roots, _, output_path = _setup(tmp_path)
+    output_path.mkdir()
+    tool = _tool(tmp_path, "repair", "pass")
+    result = await repair_media(input_ref, output_ref, roots, RepairRequest(ffmpeg=tool))
+    assert result.exists is True
+    assert result.complete is False
+    assert result.checksum is None
+    assert result.synchronization is None
+    assert "output_type_mismatch" in result.error
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX 目录访问权限")
+async def test_repair_tool_and_inspection_errors_are_both_preserved(tmp_path: Path) -> None:
+    input_ref, output_ref, roots, _, output_path = _setup(tmp_path)
+    tool = _tool(tmp_path, "repair", _REPAIR_BODY)
+    output_path.parent.chmod(0o000)
+    try:
+        result = await repair_media(input_ref, output_ref, roots, RepairRequest(ffmpeg=tool))
+    finally:
+        output_path.parent.chmod(0o755)
+    assert result.exists is None
+    assert result.complete is False
+    assert "tool_failed" in result.error
+    assert "inspect_failed" in result.error

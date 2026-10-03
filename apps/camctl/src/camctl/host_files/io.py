@@ -54,8 +54,8 @@ class DirectorySyncStage(Enum):
 class FileMutationResult:
     """一次创建与截断的实际阶段。
 
-    can_continue 为 False 表示目标长度未可靠建立，续传写入必须停
-    止，不能在未知长度的文件上继续。
+    created、truncated 保留实际效果；只有整个准备阶段无错误才允
+    许继续。关闭失败不撤销已完成截断，但阻止后续写入。
     """
 
     created: bool
@@ -75,7 +75,7 @@ class SyncResult:
 
 @dataclass(frozen=True)
 class HashResult:
-    """一次摘要计算结果；读取错误时摘要为未知而非空文件摘要。"""
+    """一次摘要计算结果；未读完则摘要未知，读完后的关闭错误独立保留。"""
 
     digest: str | None
     size_bytes: int | None
@@ -113,12 +113,22 @@ def _read(fd: int, size: int) -> bytes:
     return os.read(fd, size)
 
 
-def _sync_directory(path: Path) -> None:
+def _sync_directory(path: Path) -> tuple[DirectorySyncStage, str | None]:
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    stage = DirectorySyncStage.FAILED
+    error = None
     try:
         os.fsync(fd)
+    except OSError as failure:
+        error = _describe("directory_sync_failed", failure)
+    else:
+        stage = DirectorySyncStage.SYNCED
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError as failure:
+            error = _combine_errors(error, _describe("directory_close_failed", failure))
+    return stage, error
 
 
 def _exists(path: Path) -> bool:
@@ -146,20 +156,20 @@ def prepare_target(
             can_continue=False,
             error=_describe("open_failed", failure),
         )
+    truncated = False
+    error = None
     try:
         try:
             _ftruncate(fd, desired_length)
         except OSError as failure:
-            return FileMutationResult(
-                created=not existed,
-                truncated=False,
-                can_continue=False,
-                error=_describe("truncate_failed", failure),
-            )
+            error = _describe("truncate_failed", failure)
+        else:
+            truncated = True
     finally:
-        _close(fd)
+        close_error = _close_result(fd)
+    error = _combine_errors(error, close_error)
     return FileMutationResult(
-        created=not existed, truncated=True, can_continue=True, error=None
+        created=not existed, truncated=truncated, can_continue=error is None, error=error
     )
 
 
@@ -174,16 +184,23 @@ def sync_target(ref: FileRef, roots: BoundDirectories) -> SyncResult:
             directory=DirectorySyncStage.NOT_ATTEMPTED,
             error=_describe("open_failed", failure),
         )
+    file_synced = False
+    error = None
     try:
         _fsync(fd)
     except OSError as failure:
-        return SyncResult(
-            file_synced=False,
-            directory=DirectorySyncStage.NOT_ATTEMPTED,
-            error=_describe("fsync_failed", failure),
-        )
+        error = _describe("fsync_failed", failure)
+    else:
+        file_synced = True
     finally:
-        _close(fd)
+        close_error = _close_result(fd)
+    error = _combine_errors(error, close_error)
+    if error is not None:
+        return SyncResult(
+            file_synced=file_synced,
+            directory=DirectorySyncStage.NOT_ATTEMPTED,
+            error=error,
+        )
     if not _DIRECTORY_SYNC_SUPPORTED:
         return SyncResult(
             file_synced=True,
@@ -191,7 +208,7 @@ def sync_target(ref: FileRef, roots: BoundDirectories) -> SyncResult:
             error=None,
         )
     try:
-        _sync_directory(host.path.parent)
+        directory, error = _sync_directory(host.path.parent)
     except OSError as failure:
         return SyncResult(
             file_synced=True,
@@ -199,7 +216,7 @@ def sync_target(ref: FileRef, roots: BoundDirectories) -> SyncResult:
             error=_describe("directory_sync_failed", failure),
         )
     return SyncResult(
-        file_synced=True, directory=DirectorySyncStage.SYNCED, error=None
+        file_synced=True, directory=directory, error=error
     )
 
 
@@ -214,23 +231,38 @@ def hash_target(ref: FileRef, roots: BoundDirectories) -> HashResult:
         )
     hasher = hashlib.sha256()
     size = 0
+    error = None
     try:
         while True:
             try:
                 block = _read(fd, DEFAULT_CHUNK_SIZE_BYTES)
             except OSError as failure:
-                return HashResult(
-                    digest=None,
-                    size_bytes=None,
-                    error=_describe("read_failed", failure),
-                )
+                error = _describe("read_failed", failure)
+                break
             if not block:
                 break
             hasher.update(block)
             size += len(block)
     finally:
+        close_error = _close_result(fd)
+    return HashResult(
+        digest=hasher.hexdigest() if error is None else None,
+        size_bytes=size if error is None else None,
+        error=_combine_errors(error, close_error),
+    )
+
+
+def _close_result(fd: int) -> str | None:
+    """关闭只尝试一次；错误作为实际结果返回，不覆盖先前阶段。"""
+    try:
         _close(fd)
-    return HashResult(digest=hasher.hexdigest(), size_bytes=size, error=None)
+    except OSError as failure:
+        return _describe("close_failed", failure)
+    return None
+
+
+def _combine_errors(*errors: str | None) -> str | None:
+    return "; ".join(error for error in errors if error is not None) or None
 
 
 def _describe(kind: str, failure: Exception) -> str:

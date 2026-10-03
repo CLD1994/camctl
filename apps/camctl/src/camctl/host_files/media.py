@@ -9,10 +9,8 @@ ffprobe 只解析业务需要的时长字段并保持全精度；ffmpeg 成品�
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 
 from camctl.contracts.json_values import parse_exact_json
 from camctl.host_files.io import (
@@ -22,8 +20,8 @@ from camctl.host_files.io import (
     hash_target,
     sync_target,
 )
-from camctl.host_files.models import BoundDirectories, FileRef
-from camctl.host_files.paths import resolve_file
+from camctl.host_files.models import BoundDirectories, FileObservation, FileObservationKind, FileRef
+from camctl.host_files.paths import observe_file, resolve_file
 from camctl.operations.process import (
     RawToolOutcome,
     StopSignal,
@@ -72,17 +70,83 @@ class RepairRequest:
 class MediaArtifact:
     """ffmpeg 实际成品及其大小、摘要与同步证据。
 
-    complete 只表示工具正常退出且必要成品校验通过，不表示拍摄成
-    功；同步与摘要是独立证据字段，分别表达。
+    complete 表示工具正常完成、普通非空文件和无错误的完整摘要
+    长度相符，不表示拍摄成功或同步成功。各阶段结果独立保留；
+    摘要关闭失败时仍可保留已算出的摘要，但完整性资格不成立。
     """
 
-    exists: bool
-    complete: bool
-    size_bytes: int | None
-    digest: str | None
-    file_synced: bool
-    directory: DirectorySyncStage
-    error: str | None
+    tool_error: str | None
+    observation: FileObservation
+    checksum: HashResult | None = None
+    synchronization: SyncResult | None = None
+
+    @property
+    def exists(self) -> bool | None:
+        if self.observation.kind is FileObservationKind.ERROR:
+            return None
+        return self.observation.kind is not FileObservationKind.MISSING
+
+    @property
+    def size_bytes(self) -> int | None:
+        return self.observation.size_bytes
+
+    @property
+    def digest(self) -> str | None:
+        return self.checksum.digest if self.checksum is not None else None
+
+    @property
+    def file_synced(self) -> bool:
+        return self.synchronization is not None and self.synchronization.file_synced
+
+    @property
+    def directory(self) -> DirectorySyncStage:
+        return (self.synchronization.directory if self.synchronization is not None
+                else DirectorySyncStage.NOT_ATTEMPTED)
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.tool_error is None and self._file_error is None
+            and self.checksum is not None and self._checksum_error is None
+        )
+
+    @property
+    def _file_error(self) -> str | None:
+        kind = self.observation.kind
+        if kind is FileObservationKind.ERROR:
+            return f"inspect_failed: {self.observation.error}"
+        if kind is FileObservationKind.MISSING:
+            return "output_missing: 成品不存在"
+        if kind is FileObservationKind.TYPE_MISMATCH:
+            return "output_type_mismatch: 成品不是普通文件"
+        if self.size_bytes is None:
+            return "output_size_unknown: 未取得成品大小"
+        if self.size_bytes == 0:
+            return "output_empty: 成品大小为零"
+        return None
+
+    @property
+    def _checksum_error(self) -> str | None:
+        checksum = self.checksum
+        if checksum is None:
+            return None
+        errors = []
+        if checksum.error is not None:
+            errors.append(f"hash_failed: {checksum.error}")
+        if checksum.digest is None or checksum.size_bytes is None:
+            if checksum.error is None:
+                errors.append("hash_incomplete: 缺少完整摘要或读取长度")
+        elif checksum.size_bytes != self.size_bytes:
+            errors.append(f"size_mismatch: observed={self.size_bytes}; hashed={checksum.size_bytes}")
+        return "; ".join(errors) or None
+
+    @property
+    def error(self) -> str | None:
+        errors = (
+            self.tool_error, self._file_error, self._checksum_error,
+            self.synchronization.error if self.synchronization is not None else None,
+        )
+        return "; ".join(error for error in errors if error is not None) or None
 
 
 class _NeverStop:
@@ -95,14 +159,6 @@ async def _execute_tool(
     spec: ToolSpec, *, stop: StopSignal, spawner=None
 ) -> RawToolOutcome:
     return await execute_tool(spec, stop=stop)
-
-
-def _file_exists(path: Path) -> bool:
-    return os.path.exists(path)
-
-
-def _file_size(path: Path) -> int:
-    return os.path.getsize(path)
 
 
 def _file_digest(ref: FileRef, roots: BoundDirectories) -> HashResult:
@@ -177,48 +233,20 @@ async def repair_media(
         + (str(output_host.path),)
     )
     outcome = await _run_tool(argv, stop)
-    exists = _file_exists(output_host.path)
+    observation = observe_file(output, roots)
     if isinstance(outcome, str):
-        return _incomplete(
-            exists=exists, error=outcome, directory=DirectorySyncStage.NOT_ATTEMPTED
-        )
+        return MediaArtifact(tool_error=outcome, observation=observation)
     if outcome.error is not None or outcome.exit is None or outcome.exit.exit_code != 0:
-        return _incomplete(
-            exists=exists,
-            error=_tool_failure("tool_failed", outcome),
-            directory=DirectorySyncStage.NOT_ATTEMPTED,
+        return MediaArtifact(
+            tool_error=_tool_failure("tool_failed", outcome), observation=observation,
         )
-    if not exists:
-        return _incomplete(
-            exists=False,
-            error="output_missing: 工具正常退出但成品不存在",
-            directory=DirectorySyncStage.NOT_ATTEMPTED,
-        )
-    size = _file_size(output_host.path)
-    if size == 0:
-        return _incomplete(
-            exists=True,
-            error="output_empty: 成品大小为零",
-            directory=DirectorySyncStage.NOT_ATTEMPTED,
-        )
+    artifact = MediaArtifact(tool_error=None, observation=observation)
+    if artifact._file_error is not None:
+        return artifact
     digest = _file_digest(output, roots)
     synced = _file_sync(output, roots)
-    if digest.error is not None:
-        return _incomplete(
-            exists=True,
-            error=f"hash_failed: {digest.error}",
-            directory=synced.directory,
-            size_bytes=size,
-            file_synced=synced.file_synced,
-        )
     return MediaArtifact(
-        exists=True,
-        complete=True,
-        size_bytes=size,
-        digest=digest.digest,
-        file_synced=synced.file_synced,
-        directory=synced.directory,
-        error=None,
+        tool_error=None, observation=observation, checksum=digest, synchronization=synced,
     )
 
 
@@ -246,22 +274,3 @@ def _tool_failure(kind: str, outcome: RawToolOutcome) -> str:
     if outcome.error is not None:
         detail = f"{outcome.error}; {detail}"
     return f"{kind}: {detail}"
-
-
-def _incomplete(
-    *,
-    exists: bool,
-    error: str,
-    directory: DirectorySyncStage,
-    size_bytes: int | None = None,
-    file_synced: bool = False,
-) -> MediaArtifact:
-    return MediaArtifact(
-        exists=exists,
-        complete=False,
-        size_bytes=size_bytes,
-        digest=None,
-        file_synced=file_synced,
-        directory=directory,
-        error=error,
-    )

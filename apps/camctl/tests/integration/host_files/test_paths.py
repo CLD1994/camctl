@@ -64,6 +64,7 @@ class TestRealObservations:
         observation = await inspect_file(_ref(roots), roots)
         assert observation.kind is FileObservationKind.VALID_OBJECT
         assert observation.is_file is True
+        assert observation.size_bytes == 4
 
     async def test_relocated_file_reports_missing_at_saved_location(
         self, tmp_path: Path

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import stat
 from pathlib import Path, PurePosixPath
 
 from camctl.contracts.values import ObjectId
@@ -22,7 +23,7 @@ from camctl.host_files.models import (
 )
 
 __all__ = [
-    "PURPOSE_DIRECTORIES", "inspect_file", "resolve_file", "object_file_name",
+    "PURPOSE_DIRECTORIES", "inspect_file", "observe_file", "resolve_file", "object_file_name",
     "relative_file_path", "validate_file_extension", "validate_relative_file_path",
 ]
 
@@ -116,19 +117,27 @@ async def inspect_file(ref: FileRef, roots: BoundDirectories) -> FileObservation
     实际文件访问在线程池执行：缺失、目录对象与检查错误分别表
     达，权限或访问失败不是缺失。
     """
+    return await asyncio.to_thread(observe_file, ref, roots)
+
+
+def observe_file(ref: FileRef, roots: BoundDirectories) -> FileObservation:
+    """同步文件任务内取得一次观察；类型和大小来自同一次 stat 结果。"""
     host = resolve_file(ref, roots)
-    return await asyncio.to_thread(_observe, host.path)
+    return _observe(host.path)
 
 
 def _observe(path: Path) -> FileObservation:
     try:
-        stat = os.stat(path)
+        observed = os.stat(path)
     except FileNotFoundError:
         return FileObservation(kind=FileObservationKind.MISSING, path=path)
     except OSError as error:
         return FileObservation(kind=FileObservationKind.ERROR, path=path, error=error)
-    if not os.path.isfile(path):
+    if not stat.S_ISREG(observed.st_mode):
         return FileObservation(
             kind=FileObservationKind.TYPE_MISMATCH, path=path, is_file=False
         )
-    return FileObservation(kind=FileObservationKind.VALID_OBJECT, path=path, is_file=True)
+    return FileObservation(
+        kind=FileObservationKind.VALID_OBJECT, path=path, is_file=True,
+        size_bytes=observed.st_size,
+    )
