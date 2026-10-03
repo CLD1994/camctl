@@ -212,6 +212,67 @@ def _fixed_reference(state, table: str, identity: int) -> Mapping[str, Any]:
     return facts
 
 
+def _copy_source(copy) -> tuple[str, int]:
+    try:
+        device, local = copy["source_device_file_id"], copy["source_intermediate_file_id"]
+        if (device is None) == (local is None):
+            raise ValueError("拷贝必须恰有一种来源")
+        return ("device_files", ObjectId(device)) if device is not None else ("intermediate_files", ObjectId(local))
+    except (KeyError, ValueError) as error:
+        raise ConsistencyError("拷贝缺少有效的唯一源身份") from error
+
+
+def _load_read_attempt_context(connection, copy, state) -> None:
+    """只为新读取意图补齐当前源及原设备绑定，不影响原键恢复。"""
+    def required(table, identity):
+        try:
+            ObjectId(identity)
+        except ValueError as error:
+            raise ConsistencyError(f"读取源的 {table} 身份无效") from error
+        rows = state.setdefault(table, {})
+        if identity not in rows:
+            facts = _load_row(connection, table, identity)
+            if facts is None:
+                raise ConsistencyError(f"读取源的关联记录缺失: {table}#{identity}")
+            rows[identity] = facts
+        return rows[identity]
+
+    table, identity = _copy_source(copy)
+    source = required(table, identity)
+    if table == "device_files":
+        for column in ("observer_action_id", "source_action_id"):
+            required("actions", source.get(column))
+
+
+def _read_attempt_has_slot(state, copy_id: int, copy_round: int) -> bool:
+    """当前源、机会和轮次合法时，判断设备拷贝是否已取得机会。"""
+    copy = _fixed_reference(state, "file_copies", copy_id)
+    table, identity = _copy_source(copy)
+    source = _fixed_reference(state, table, identity)
+    try:
+        slot = copy["slot_device_id"]
+        if table == "intermediate_files":
+            if slot is not None:
+                raise ConsistencyError("主机源拷贝不能持有相机读取机会")
+        else:
+            observer = _fixed_reference(state, "actions", source["observer_action_id"])
+            origin = _fixed_reference(state, "actions", source["source_action_id"])
+            binding = (observer["device_id"], observer["driver_id"])
+            if (not all(isinstance(value, str) and value for value in binding)
+                    or binding != (origin["device_id"], origin["driver_id"])):
+                raise ConsistencyError("读取源观察者与可靠来源的原设备绑定不一致")
+            if slot is not None and slot != binding[0]:
+                raise ConsistencyError("拷贝的读取机会不属于原来源设备")
+        current_round = copy["round"]
+    except KeyError as error:
+        raise ConsistencyError("当前读取源、绑定或拷贝缺少必要字段") from error
+    if not is_json_integer(current_round) or current_round < 1:
+        raise ConsistencyError("当前拷贝轮次无效")
+    if not json_equal(copy_round, current_round):
+        raise TransactionError("读取意图的轮次与当前拷贝不符")
+    return table == "intermediate_files" or slot is not None
+
+
 def _verify_run_identity(run: Mapping[str, Any], state) -> None:
     """核对普通流程的固定列及目标归属，供写事件和只读入口共用。"""
     try:
@@ -391,9 +452,14 @@ class BeginAttemptCommand:
         )
         if found is not None and run_facts is None:
             raise ConsistencyError("责任键引用的流程记录不存在")
+        read_has_slot = True
         if run_facts is not None:
             self._state.setdefault("operation_runs", {})[run_facts["id"]] = run_facts
             self._verify_existing_run(run_facts, intent, connection)
+            if intent.kind is OperationKind.READ_FILE:
+                copy = self._state["file_copies"][intent.target.copy_id]
+                _load_read_attempt_context(connection, copy, self._state)
+                read_has_slot = _read_attempt_has_slot(self._state, intent.target.copy_id, intent.copy_round)
             if run_facts["status"] not in (
                 int(_RUN_STATUS.PENDING),
                 int(_RUN_STATUS.ACTIVE),
@@ -410,6 +476,8 @@ class BeginAttemptCommand:
             _verify_run_identity(_intent_identity(intent), self._state)
             attempt_no = 1
 
+        if not read_has_slot:
+            return self._rejected("read_slot_not_held")
         allocation = scope.allocate(1)
         event_id = allocation.first_event_id
         attempt_id = _next_id(connection, "operation_attempts")
@@ -1046,6 +1114,12 @@ def _attempt_intent_guard(event, context) -> None:
             or copy_round < 1
         ):
             _fail("读取尝试必须保存正的拷贝轮次")
+        try:
+            held = _read_attempt_has_slot(context.state_rows, run_after.get("copy_id"), copy_round)
+        except (ConsistencyError, TransactionError) as error:
+            raise EventValidationError(str(error)) from error
+        if not held:
+            _fail("设备读取意图要求当前拷贝已取得原来源设备的读取机会")
     elif copy_round is not None:
         _fail("只有读取尝试保存拷贝轮次")
 
