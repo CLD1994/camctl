@@ -120,11 +120,11 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 - [x] 编写失败用例。在 `test_stop_uses_original_budget_across_cancel_and_restart` 中普通、取消及恢复入口共用原停止次数，`assert stop_count == expected_accumulated_count`；停止成功和文件完成保证分别核对。调用尚未结束保持资源，正式产物登记与终态任一写入失败整组回滚，重启不使用旧进程单调值继续计时。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_recording_finish.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [x] 实施本任务。按录像成功标准、取消和恢复模型决定停止及核实，保留原片事实；正常不强制裁剪，异常需处理时保留未完成。可靠产物、适用提升及父计划与动作结果同事务登记。
+- [ ] 实施本任务。按录像成功标准、取消和恢复模型决定停止及核实，保留原片事实；正常不强制裁剪，异常需处理时保留未完成。可靠产物、适用提升及父计划与动作结果同事务登记。登记关联、文件提升及原键恢复按[正式产物登记计划](2026-10-03-camctl-output-registration-review.md)收齐证据。
 - [x] 再运行上述命令，要求全部 PASS，并核对 停止、活动结束、产物和动作结果不混同，原终态不改写。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_recording_finish.py -q`，真实 SQLite、调度、报告与录像替身完成正常、停止耗尽、窗口后确认及恢复链。
-- [x] 审阅实际接口、状态分区及失败路径，检查 正常停止、取消、重启及后续残留收场是否刷新预算或漏占用；记录门禁证据，建议以“feat: 实现录像结束与正式登记”形成独立提交。
+- [ ] 审阅实际接口、状态分区及失败路径，检查 正常停止、取消、重启及后续残留收场是否刷新预算或漏占用；记录门禁证据，建议以“feat: 实现录像结束与正式登记”形成独立提交。
 
 ### C4 单张拍摄独立流程
 

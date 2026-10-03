@@ -2,16 +2,17 @@
 
 经 P3 事务内核组织：动作成功终态、正式产物登记及父计划状态在
 同一事务共同保存，任一写入失败整组回滚；登记前经 X1 纯规则校
-验，事件守卫复核文件角色与初始可用性组合。停止、活动结束与产
-物、动作结果分别保存，不互相混同。
+验，事件守卫从当前文件事实复核来源、原设备绑定、文件角色与初
+始可用性组合。停止、活动结束与产物、动作结果分别保存，不互相混同。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Mapping
 
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
+from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import OperationKey
 from camctl.history.validators import EventValidationError, register_guard
@@ -51,6 +52,12 @@ _KIND_CODES = {OutputKind.ORIGINAL: 1, OutputKind.REPAIRED: 2, OutputKind.PREVIE
 
 #: device_files.role 与产物种类的对应；修复产物承载于中间文件。
 _FILE_ROLE_FOR_KIND = {1: 2, 3: 3}
+_ACTION_TYPE = enum_for("actions.type")
+_CAPTURE_TYPES = frozenset({
+    _ACTION_TYPE.CAMERA_TAKE_PHOTO,
+    _ACTION_TYPE.CAMERA_RECORD,
+    _ACTION_TYPE.CAMERA_TIMELAPSE,
+})
 
 
 @dataclass(frozen=True)
@@ -99,15 +106,23 @@ def _action_finish_guard(event, context) -> None:
 
 
 def _output_guard(event, context) -> None:
-    """产物文件身份与角色一致性校验。"""
+    """从登记事件当前事实核对来源、原设备绑定及文件角色。"""
     for row in event.rows:
         if row.table != "outputs" or row.before.exists:
             continue
         values = row.after.values
+        source_id = values["source_action_id"]
+        source = _registration_facts(context, "actions", source_id)
+        source_binding = _capture_binding(source)
         kind = values.get("kind")
         device_file_id = values.get("device_file_id")
         if device_file_id is not None:
-            facts = _guard_facts(context, "device_files", device_file_id)
+            facts = _registration_facts(context, "device_files", device_file_id)
+            if facts.get("source_action_id") != source_id or facts.get("ownership_evidence_json") is None:
+                raise EventValidationError("产物承载文件缺少该来源动作的可靠归属")
+            observer = _registration_facts(context, "actions", facts.get("observer_action_id"))
+            if _capture_binding(observer) != source_binding:
+                raise EventValidationError("产物来源与文件观察者的原设备或驱动绑定不一致")
             expected_role = _FILE_ROLE_FOR_KIND.get(kind)
             if expected_role is not None and facts.get("role") != expected_role:
                 raise EventValidationError(
@@ -118,6 +133,28 @@ def _output_guard(event, context) -> None:
                 raise EventValidationError(
                     f"产物承载文件未完成: {device_file_id}"
                 )
+        else:
+            facts = _registration_facts(context, "intermediate_files", values.get("intermediate_file_id"))
+            if (facts.get("owner_action_id") != source_id
+                    or "owner_delivery_id" not in facts
+                    or facts["owner_delivery_id"] is not None):
+                raise EventValidationError("产物中间文件不属于来源动作的文件责任")
+
+
+def _registration_facts(context, table: str, identity: int | None) -> Mapping[str, Any]:
+    facts = context.state_rows.get(table, {}).get(identity)
+    if facts is None:
+        raise EventValidationError(f"产物登记缺少当前关联记录: {table}#{identity}")
+    return facts
+
+
+def _capture_binding(action: Mapping[str, Any]) -> tuple[str, str]:
+    if action.get("type") not in _CAPTURE_TYPES:
+        raise EventValidationError("产物来源和设备文件观察者必须是拍摄动作")
+    device, driver = action.get("device_id"), action.get("driver_id")
+    if not isinstance(device, str) or not device or not isinstance(driver, str) or not driver:
+        raise EventValidationError("拍摄动作缺少已保存的设备或驱动绑定")
+    return device, driver
 
 
 def _cleanup_aggregate_guard(event, context) -> None:
@@ -194,7 +231,8 @@ class FinishCaptureCommand:
         action = row_facts(connection, "actions", command.action_id)
         if action is None:
             raise TransactionError(f"动作不存在: {command.action_id}")
-        self._state["actions"] = self._sibling_actions(connection, action)
+        siblings = self._sibling_actions(connection, action)
+        self._state["actions"] = dict(siblings)
         self._state.setdefault("outputs", {})
         self._state.setdefault("device_files", {})
         plan = row_facts(connection, "plans", action["plan_id"])
@@ -207,18 +245,25 @@ class FinishCaptureCommand:
             )
 
         # 登记规则在同一事务内校验：任一草稿不合法整组拒绝。
+        _capture_binding(action)
+        if command.catalog_facts.action_id != command.action_id:
+            raise TransactionError("目录上下文与完成命令的动作身份不一致")
         changes = validate_output_registration(command.drafts, command.catalog_facts)
-        file_ids = [
-            output.device_file_id
-            for output in changes.outputs
-            if output.device_file_id is not None
-        ]
-        self._state["device_files"] = {}
-        for file_id in file_ids:
-            facts = row_facts(connection, "device_files", file_id)
+        for output in changes.outputs:
+            is_device = output.device_file_id is not None
+            table = "device_files" if is_device else "intermediate_files"
+            file_id = output.device_file_id if is_device else output.intermediate_file_id
+            facts = row_facts(connection, table, file_id)
             if facts is None:
-                raise TransactionError(f"设备文件不存在: {file_id}")
-            self._state["device_files"][file_id] = facts
+                raise TransactionError(f"产物承载文件不存在: {table}#{file_id}")
+            self._state.setdefault(table, {})[file_id] = facts
+            if is_device:
+                observer_id = facts["observer_action_id"]
+                if observer_id not in self._state["actions"]:
+                    observer = row_facts(connection, "actions", observer_id)
+                    if observer is None:
+                        raise TransactionError(f"文件观察者不存在: {observer_id}")
+                    self._state["actions"][observer_id] = observer
 
         templates = [
             _envelope(
@@ -265,7 +310,7 @@ class FinishCaptureCommand:
         plan_complete = all(
             values.get("status") in _ACTION_TERMINAL
             or values["id"] == command.action_id
-            for values in self._state["actions"].values()
+            for values in siblings.values()
         )
         plan_status = plan["status"]
         if plan_complete and plan["status"] in (1, 2):
