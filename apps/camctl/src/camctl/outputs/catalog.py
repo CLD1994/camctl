@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from camctl.contracts.values import ObjectId
+
 __all__ = [
     "FileReference",
     "OutputCatalogFacts",
@@ -40,6 +42,7 @@ class FileReference:
     def __post_init__(self) -> None:
         if (self.device_file_id is None) == (self.intermediate_file_id is None):
             raise ValueError("文件身份必须恰好指向设备文件或中间文件之一")
+        ObjectId(self.device_file_id if self.device_file_id is not None else self.intermediate_file_id)
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,9 @@ class OutputCatalogFacts:
 
     action_id: int
     ownership_confirmed: bool
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,13 @@ class OutputDraft:
     original_batch_file_id: int | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.kind, OutputKind):
+            raise ValueError("产物种类必须是 OutputKind")
+        if (self.kind is OutputKind.REPAIRED) != (self.file.intermediate_file_id is not None):
+            raise ValueError("原片和预览由设备文件承载，修复成品由中间文件承载")
+        for identity in (self.original_output_id, self.original_batch_file_id):
+            if identity is not None:
+                ObjectId(identity)
         if self.kind is OutputKind.ORIGINAL and (
             self.original_output_id is not None
             or self.original_batch_file_id is not None
@@ -90,7 +103,8 @@ class RegisteredOutput:
     device_file_id: int | None
     intermediate_file_id: int | None
     sha256: str | None
-    pairs_with: int | None = None
+    original_output_id: int | None = None
+    original_batch_file_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -110,36 +124,32 @@ def validate_output_registration(
     """
     if not facts.ownership_confirmed:
         raise ValueError("产物归属未确认，不能登记")
-    seen_files: set[int] = set()
+    seen_files: set[FileReference] = set()
     registered: list[RegisteredOutput] = []
-    batch_files: dict[int, OutputKind] = {}
+    batch_originals: set[int] = set()
     for draft in drafts:
-        file_id = draft.file.device_file_id or draft.file.intermediate_file_id or 0
-        if file_id in seen_files:
-            raise ValueError(f"文件身份重复登记: {file_id}")
-        seen_files.add(file_id)
+        if draft.file in seen_files:
+            raise ValueError(f"文件身份重复登记: {draft.file}")
+        seen_files.add(draft.file)
         if not draft.file_complete:
-            raise ValueError(f"文件尚未完成，不能登记: {file_id}")
-        batch_files[file_id] = draft.kind
+            raise ValueError(f"文件尚未完成，不能登记: {draft.file}")
+        if draft.kind is OutputKind.ORIGINAL:
+            batch_originals.add(draft.file.device_file_id)
     for draft in drafts:
-        file_id = draft.file.device_file_id or draft.file.intermediate_file_id or 0
-        pairs_with: int | None = None
-        if draft.original_output_id is not None:
-            pairs_with = draft.original_output_id
-        elif draft.original_batch_file_id is not None:
+        if draft.original_batch_file_id is not None:
             referenced = draft.original_batch_file_id
-            if batch_files.get(referenced) is not OutputKind.ORIGINAL:
+            if referenced not in batch_originals:
                 raise ValueError(
                     f"同批配对必须指向原片文件: {referenced}"
                 )
-            pairs_with = referenced
         registered.append(
             RegisteredOutput(
                 kind=draft.kind,
                 device_file_id=draft.file.device_file_id,
                 intermediate_file_id=draft.file.intermediate_file_id,
                 sha256=draft.sha256,
-                pairs_with=pairs_with,
+                original_output_id=draft.original_output_id,
+                original_batch_file_id=draft.original_batch_file_id,
             )
         )
     return RegistrationChanges(outputs=tuple(registered))

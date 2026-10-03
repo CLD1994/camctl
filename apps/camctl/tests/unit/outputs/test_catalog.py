@@ -114,7 +114,8 @@ class TestExplicitPairing:
             o for o in first.outputs if o.device_file_id == 12
         )
         original_row = next(o for o in first.outputs if o.device_file_id == 11)
-        assert preview_row.pairs_with == original_row.device_file_id
+        assert preview_row.original_batch_file_id == original_row.device_file_id
+        assert preview_row.original_output_id is None
 
     def test_preview_without_pairing_is_rejected(self) -> None:
         with pytest.raises(ValueError):
@@ -135,7 +136,8 @@ class TestExplicitPairing:
             original_output_id=5,
         )
         changes = validate_output_registration((draft,), _FACTS)
-        assert changes.outputs[0].pairs_with == 5
+        assert changes.outputs[0].original_output_id == 5
+        assert changes.outputs[0].original_batch_file_id is None
 
     def test_original_does_not_carry_pairing(self) -> None:
         with pytest.raises(ValueError):
@@ -157,3 +159,43 @@ class TestExplicitPairing:
         )
         with pytest.raises(ValueError):
             validate_output_registration((_original(11), preview), _FACTS)
+
+
+def test_equal_ids_in_different_file_tables_are_distinct():
+    repaired = OutputDraft(OutputKind.REPAIRED, FileReference(intermediate_file_id=11),
+                           True, original_batch_file_id=11)
+    changes = validate_output_registration((_original(11), repaired), _FACTS)
+    assert len(changes.outputs) == 2
+    assert changes.outputs[1].original_batch_file_id == 11
+
+
+@pytest.mark.parametrize("column", ["device_file_id", "intermediate_file_id"])
+@pytest.mark.parametrize("identity", [0, -1, True, 1.0, "1"])
+def test_file_identity_is_a_positive_integer(column, identity):
+    with pytest.raises(ValueError):
+        FileReference(**{column: identity})
+
+
+@pytest.mark.parametrize("reference", ["original_output_id", "original_batch_file_id"])
+@pytest.mark.parametrize("identity", [0, -1, True, 1.0, "1"])
+def test_origin_identity_is_a_positive_integer(reference, identity):
+    with pytest.raises(ValueError):
+        OutputDraft(OutputKind.PREVIEW, FileReference(device_file_id=12), True,
+                    **{reference: identity})
+
+
+@pytest.mark.parametrize("kind,file", [
+    (OutputKind.ORIGINAL, FileReference(intermediate_file_id=11)),
+    (OutputKind.PREVIEW, FileReference(intermediate_file_id=11)),
+    (OutputKind.REPAIRED, FileReference(device_file_id=11)),
+])
+def test_output_kind_selects_its_file_table(kind, file):
+    with pytest.raises(ValueError):
+        OutputDraft(kind, file, True,
+                    **({} if kind is OutputKind.ORIGINAL else {"original_output_id": 5}))
+
+
+@pytest.mark.parametrize("identity", [0, -1, True, 1.0, "1"])
+def test_catalog_action_identity_is_not_coerced(identity):
+    with pytest.raises(ValueError):
+        OutputCatalogFacts(identity, True)

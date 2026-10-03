@@ -101,6 +101,10 @@ def _scenario(owned, case):
         reads = outputs._CatalogReads(connection)
         assert reads.related(701) == ()
         assert reads.origin(999) is None
+        ranges = dict(plan.read_coverage.ranges)
+        for key, values in reads.read_coverage().ranges.items():
+            ranges[key] = ranges.get(key, frozenset()) | values
+        plan = replace(plan, read_coverage=ReadCoverage(ranges))
     plan.state_rows["plans"] = {identity: row_facts(connection, "plans", identity) for identity in (1, 2)}
     return plan, change
 

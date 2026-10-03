@@ -7,8 +7,10 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.history import validators
+from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventContext, EventValidationError
-from camctl.persistence.repositories.capture import register_capture_guards
+from camctl.outputs.catalog import OutputCatalogFacts
+from camctl.persistence.repositories.capture import FinishCapture, register_capture_guards
 from camctl.persistence.transaction import event_envelope, row_change
 
 
@@ -22,12 +24,25 @@ def _registration(kind=1):
                               "ownership_evidence_json": {}, "role": 3 if kind == 3 else 2,
                               "completion_state": 3}},
         "intermediate_files": {11: {"id": 11, "owner_action_id": 1, "owner_delivery_id": None}},
+        "outputs": {9: {"id": 9, "kind": 1, "source_action_id": 1, "device_file_id": 9,
+                        "intermediate_file_id": None}},
+        "output_origins": {},
     }
+    states["device_files"][9] = {**states["device_files"][11], "id": 9, "role": 2,
+                                "original_device_file_id": None, "pairing_evidence_json": None}
+    states["device_files"][11].update(original_device_file_id=9 if kind == 3 else None,
+                                      pairing_evidence_json={} if kind == 3 else None)
     values = {"source_action_id": 1, "kind": kind,
               "device_file_id": None if kind == 2 else 11,
               "intermediate_file_id": 11 if kind == 2 else None}
-    event = event_envelope(1, 1, 20, kind, (row_change("outputs", 10, values),), 1)
-    return event, EventContext(TransactionRange(1, 1, 1), {}, states)
+    rows = (row_change("outputs", 10, values),)
+    if kind != 1:
+        rows += (row_change("output_origins", 8, {"output_id": 10, "original_output_id": 9}),)
+    event = event_envelope(1, 1, 20, kind, rows, 1)
+    return event, EventContext(TransactionRange(1, 1, 1), {}, states, read_coverage=ReadCoverage({
+        ("output_origins", "output_id"): frozenset({9, 10}),
+        ("output_origins", "original_output_id"): frozenset({9}),
+    }))
 
 
 @pytest.fixture
@@ -116,3 +131,9 @@ def test_future_binding_cannot_replace_current_observer_binding(output_guard, ki
     context.state_rows["actions"][2]["driver_id"] = "other"
     with pytest.raises(EventValidationError):
         output_guard(event, replace(context, transaction_rows=future))
+
+
+@pytest.mark.parametrize("identity", [0, -1, True, 1.0, "1"])
+def test_finish_action_identity_is_not_coerced(identity):
+    with pytest.raises(ValueError):
+        FinishCapture(identity, (), OutputCatalogFacts(1, True), 1)

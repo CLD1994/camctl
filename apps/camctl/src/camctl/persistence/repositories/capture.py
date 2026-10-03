@@ -8,13 +8,15 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
-from camctl.contracts.values import OperationKey
+from camctl.contracts.values import ObjectId, OperationKey
+from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.outputs.catalog import (
     OutputCatalogFacts,
@@ -48,10 +50,12 @@ _PLAN_COMPLETE = 3
 #: 动作终态集合。
 _ACTION_TERMINAL = (3, 4, 5, 6)
 
-_KIND_CODES = {OutputKind.ORIGINAL: 1, OutputKind.REPAIRED: 2, OutputKind.PREVIEW: 3}
+_OUTPUT_KIND = enum_for("outputs.kind")
+_KIND_CODES = {kind: int(_OUTPUT_KIND[kind.name]) for kind in OutputKind}
 
 #: device_files.role 与产物种类的对应；修复产物承载于中间文件。
-_FILE_ROLE_FOR_KIND = {1: 2, 3: 3}
+_FILE_ROLE = enum_for("device_files.role")
+_FILE_ROLE_FOR_KIND = {_OUTPUT_KIND.ORIGINAL: _FILE_ROLE.ORIGINAL, _OUTPUT_KIND.PREVIEW: _FILE_ROLE.PREVIEW}
 _ACTION_TYPE = enum_for("actions.type")
 _CAPTURE_TYPES = frozenset({
     _ACTION_TYPE.CAMERA_TAKE_PHOTO,
@@ -68,6 +72,9 @@ class FinishCapture:
     drafts: tuple[OutputDraft, ...]
     catalog_facts: OutputCatalogFacts
     occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
 
 
 @dataclass(frozen=True)
@@ -110,35 +117,105 @@ def _output_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "outputs" or row.before.exists:
             continue
+        _output_file(row.after.values, context)
+    _output_relationships(event, context)
+
+
+def _output_file(values, context) -> None:
+    """新登记产物及所引用的既有原片共用文件身份与来源校验。"""
+    source_id = values["source_action_id"]
+    source = _registration_facts(context, "actions", source_id)
+    source_binding = _capture_binding(source)
+    kind = values.get("kind")
+    if not {"device_file_id", "intermediate_file_id"} <= values.keys():
+        raise EventValidationError("产物承载文件类型尚未完整读取")
+    device_file_id = values.get("device_file_id")
+    if (device_file_id is None) == (values.get("intermediate_file_id") is None):
+        raise EventValidationError("产物必须恰好由一种文件身份承载")
+    if device_file_id is not None:
+        facts = _registration_facts(context, "device_files", device_file_id)
+        if facts.get("source_action_id") != source_id or facts.get("ownership_evidence_json") is None:
+            raise EventValidationError("产物承载文件缺少该来源动作的可靠归属")
+        observer = _registration_facts(context, "actions", facts.get("observer_action_id"))
+        if _capture_binding(observer) != source_binding:
+            raise EventValidationError("产物来源与文件观察者的原设备或驱动绑定不一致")
+        expected_role = _FILE_ROLE_FOR_KIND.get(kind)
+        if expected_role is None or facts.get("role") != expected_role:
+            raise EventValidationError(f"产物种类与文件角色不符: kind={kind} role={facts.get('role')}")
+        if facts.get("completion_state") != 3:
+            raise EventValidationError(f"产物承载文件未完成: {device_file_id}")
+        if kind == _OUTPUT_KIND.ORIGINAL and (
+            "original_device_file_id" not in facts or "pairing_evidence_json" not in facts
+            or facts["original_device_file_id"] is not None or facts["pairing_evidence_json"] is not None
+        ):
+            raise EventValidationError("原片文件必须明确没有预览配对")
+    else:
+        if kind != _OUTPUT_KIND.REPAIRED:
+            raise EventValidationError("只有修复成品使用中间文件")
+        facts = _registration_facts(context, "intermediate_files", values.get("intermediate_file_id"))
+        if (facts.get("owner_action_id") != source_id
+                or "owner_delivery_id" not in facts
+                or facts["owner_delivery_id"] is not None):
+            raise EventValidationError("产物中间文件不属于来源动作的文件责任")
+
+
+def _output_relationships(event, context) -> None:
+    """登记自己的关系与当前完整反向集合共同决定原片及派生唯一性。"""
+    outputs = {row.row_id: row.after.values for row in event.rows
+               if row.table == "outputs" and not row.before.exists}
+    links: dict[int, list[Mapping[str, Any]]] = {}
+    for row in event.rows:
+        if row.table != "output_origins":
+            continue
         values = row.after.values
-        source_id = values["source_action_id"]
-        source = _registration_facts(context, "actions", source_id)
-        source_binding = _capture_binding(source)
-        kind = values.get("kind")
-        device_file_id = values.get("device_file_id")
-        if device_file_id is not None:
-            facts = _registration_facts(context, "device_files", device_file_id)
-            if facts.get("source_action_id") != source_id or facts.get("ownership_evidence_json") is None:
-                raise EventValidationError("产物承载文件缺少该来源动作的可靠归属")
-            observer = _registration_facts(context, "actions", facts.get("observer_action_id"))
-            if _capture_binding(observer) != source_binding:
-                raise EventValidationError("产物来源与文件观察者的原设备或驱动绑定不一致")
-            expected_role = _FILE_ROLE_FOR_KIND.get(kind)
-            if expected_role is not None and facts.get("role") != expected_role:
-                raise EventValidationError(
-                    f"产物种类与文件角色不符: kind={kind}"
-                    f" role={facts.get('role')}"
-                )
-            if facts.get("completion_state") != 3:
-                raise EventValidationError(
-                    f"产物承载文件未完成: {device_file_id}"
-                )
-        else:
-            facts = _registration_facts(context, "intermediate_files", values.get("intermediate_file_id"))
-            if (facts.get("owner_action_id") != source_id
-                    or "owner_delivery_id" not in facts
-                    or facts["owner_delivery_id"] is not None):
-                raise EventValidationError("产物中间文件不属于来源动作的文件责任")
+        if values["output_id"] not in outputs:
+            raise EventValidationError("关联必须属于本事件共同登记的产物")
+        links.setdefault(values["output_id"], []).append(values)
+    kinds_by_original: dict[int, set[int]] = {}
+    for identity, output in outputs.items():
+        if context.complete_rows("output_origins", "output_id", identity):
+            raise EventValidationError("新产物不能已有原片关联")
+        own_links = links.get(identity, ())
+        kind = output["kind"]
+        if kind == _OUTPUT_KIND.ORIGINAL:
+            if own_links:
+                raise EventValidationError("原片不能携带派生关联")
+            continue
+        if len(own_links) != 1:
+            raise EventValidationError("派生产物必须共同登记唯一原片关联")
+        original_id = own_links[0]["original_output_id"]
+        if original_id == identity:
+            raise EventValidationError("派生产物不能引用自身")
+        original = _registration_facts(context, "outputs", original_id)
+        if (original.get("kind") != _OUTPUT_KIND.ORIGINAL
+                or original.get("source_action_id") != output["source_action_id"]
+                or original.get("device_file_id") is None
+                or original.get("intermediate_file_id") is not None):
+            raise EventValidationError("派生关联必须指向同源的设备原片")
+        if context.complete_rows("output_origins", "output_id", original_id):
+            raise EventValidationError("引用的原片不能携带派生关联")
+        _output_file(original, context)
+        if kind == _OUTPUT_KIND.PREVIEW:
+            file = _registration_facts(context, "device_files", output["device_file_id"])
+            if (file.get("original_device_file_id") != original["device_file_id"]
+                    or file.get("pairing_evidence_json") is None):
+                raise EventValidationError("预览的产物关联与设备文件配对不一致")
+        if original_id not in kinds_by_original:
+            related = context.complete_rows("output_origins", "original_output_id", original_id)
+            kinds: set[int] = set()
+            for relation in related.values():
+                previous = _registration_facts(context, "outputs", relation["output_id"])
+                previous_kind = previous.get("kind")
+                if (previous_kind not in {_OUTPUT_KIND.PREVIEW, _OUTPUT_KIND.REPAIRED}
+                        or previous_kind in kinds
+                        or previous.get("source_action_id") != output["source_action_id"]):
+                    raise EventValidationError("已有原片派生集合的种类或来源矛盾")
+                kinds.add(previous_kind)
+            kinds_by_original[original_id] = kinds
+        kinds = kinds_by_original[original_id]
+        if kind in kinds:
+            raise EventValidationError("同一原片至多登记一份预览和一份修复成品")
+        kinds.add(kind)
 
 
 def _registration_facts(context, table: str, identity: int | None) -> Mapping[str, Any]:
@@ -221,6 +298,8 @@ class FinishCaptureCommand:
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
+        self._ranges: dict[tuple[str, str], set[int]] = {}
+        self._origin_members: dict[tuple[str, int], tuple[int, ...]] = {}
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
@@ -250,20 +329,26 @@ class FinishCaptureCommand:
             raise TransactionError("目录上下文与完成命令的动作身份不一致")
         changes = validate_output_registration(command.drafts, command.catalog_facts)
         for output in changes.outputs:
-            is_device = output.device_file_id is not None
-            table = "device_files" if is_device else "intermediate_files"
-            file_id = output.device_file_id if is_device else output.intermediate_file_id
-            facts = row_facts(connection, table, file_id)
-            if facts is None:
-                raise TransactionError(f"产物承载文件不存在: {table}#{file_id}")
-            self._state.setdefault(table, {})[file_id] = facts
-            if is_device:
-                observer_id = facts["observer_action_id"]
-                if observer_id not in self._state["actions"]:
-                    observer = row_facts(connection, "actions", observer_id)
-                    if observer is None:
-                        raise TransactionError(f"文件观察者不存在: {observer_id}")
-                    self._state["actions"][observer_id] = observer
+            self._load_file(connection, output.device_file_id, output.intermediate_file_id)
+
+        first_output_id = _next_id(connection, "outputs")
+        numbered = tuple((first_output_id + index, output) for index, output in enumerate(changes.outputs))
+        batch_originals = {output.device_file_id: identity for identity, output in numbered
+                           if output.kind is OutputKind.ORIGINAL}
+        original_ids = {}
+        for identity, output in numbered:
+            self._read_origins(connection, "output_id", identity)
+            original_id = output.original_output_id
+            if original_id is not None:
+                original = self._required(connection, "outputs", original_id)
+                self._load_file(connection, original["device_file_id"], original["intermediate_file_id"])
+            elif output.original_batch_file_id is not None:
+                original_id = batch_originals[output.original_batch_file_id]
+            if original_id is not None:
+                self._read_origins(connection, "output_id", original_id)
+                for relation in self._read_origins(connection, "original_output_id", original_id):
+                    self._required(connection, "outputs", relation["output_id"])
+                original_ids[identity] = original_id
 
         templates = [
             _envelope(
@@ -279,10 +364,9 @@ class FinishCaptureCommand:
                 command.occurred_at,
             )
         ]
-        output_ids: list[int] = []
-        next_output_id = _next_id(connection, "outputs")
-        for output in changes.outputs:
-            output_ids.append(next_output_id)
+        next_origin_id = _next_id(connection, "output_origins")
+        # 原片先进入当前事件事实，派生关系按显式引用解析；结果保持输入次序。
+        for output_id, output in sorted(numbered, key=lambda item: item[1].kind is not OutputKind.ORIGINAL):
             values = {
                 "source_action_id": command.action_id,
                 "kind": _KIND_CODES[output.kind],
@@ -296,14 +380,20 @@ class FinishCaptureCommand:
                 "media_json": {},
                 "error_json": None,
             }
-            self._owners[("outputs", next_output_id)] = ("output", next_output_id)
+            self._owners[("outputs", output_id)] = ("output", output_id)
+            rows = (_row("outputs", output_id, values),)
+            if output_id in original_ids:
+                rows += (_row("output_origins", next_origin_id, {
+                    "output_id": output_id, "original_output_id": original_ids[output_id],
+                }),)
+                self._owners[("output_origins", next_origin_id)] = ("output", output_id)
+                next_origin_id += 1
             templates.append(
                 _envelope(
                     0, 0, _OUTPUT_REGISTERED_EVENT, _KIND_CODES[output.kind],
-                    (_row("outputs", next_output_id, values),), command.occurred_at,
+                    rows, command.occurred_at,
                 )
             )
-            next_output_id += 1
         self._owners[("actions", command.action_id)] = (
             "action", command.action_id,
         )
@@ -344,12 +434,46 @@ class FinishCaptureCommand:
             events=events,
             owners=self._owners,
             state_rows=self._state,
+            read_coverage=ReadCoverage(self._ranges),
             result=CaptureResult(
                 action_status=_ACTION_SUCCEEDED,
                 plan_status=plan_status,
-                output_ids=tuple(output_ids),
+                output_ids=tuple(identity for identity, _ in numbered),
             ),
         )
+
+    def _required(self, connection, table, identity):
+        rows = self._state.setdefault(table, {})
+        if identity not in rows:
+            facts = row_facts(connection, table, identity)
+            if facts is None:
+                raise TransactionError(f"产物登记关联记录不存在: {table}#{identity}")
+            rows[identity] = facts
+        return rows[identity]
+
+    def _load_file(self, connection, device_id, intermediate_id):
+        table = "device_files" if device_id is not None else "intermediate_files"
+        file = self._required(connection, table, device_id if device_id is not None else intermediate_id)
+        if device_id is not None:
+            self._required(connection, "actions", file["observer_action_id"])
+
+    def _read_origins(self, connection, column, identity):
+        covered = self._ranges.setdefault(("output_origins", column), set())
+        rows = self._state.setdefault("output_origins", {})
+        if identity not in covered:
+            limit = 2 if column == "output_id" else 3
+            with closing(connection.execute(
+                f"SELECT id,output_id,original_output_id FROM output_origins WHERE {column}=? ORDER BY id LIMIT ?",
+                (identity, limit),
+            )) as cursor:
+                found = cursor.fetchall()
+            if len(found) == limit:
+                raise TransactionError("产物原片关联数量超过允许范围")
+            for row_id, output_id, original_id in found:
+                rows[row_id] = {"id": row_id, "output_id": output_id, "original_output_id": original_id}
+            self._origin_members[column, identity] = tuple(row[0] for row in found)
+            covered.add(identity)
+        return tuple(rows[row_id] for row_id in self._origin_members[column, identity])
 
     def _sibling_actions(self, connection, action) -> dict[int, dict[str, Any]]:
         rows = {}
