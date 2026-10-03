@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future
 import threading
 import time
 from dataclasses import dataclass
@@ -81,7 +82,9 @@ class SourceStream(Protocol):
     """驱动读取端端口：只交付文件内容字节，已过滤日志与控制响应。
 
     read 返回空字节串表示此刻没有新文件数据（不是 EOF）；cancel
-    唤醒可能在驱动内阻塞的等待；close 在读取实际结束后调用。
+    只发送信号唤醒可能在驱动内阻塞的等待，不等待实际读取结束。
+    close 在读取调用结束后执行，成功
+    返回才证明资源关闭。读取和关闭异常分别保留，不当作 EOF。
     """
 
     def read(self, limit: int) -> bytes: ...
@@ -92,7 +95,10 @@ class SourceStream(Protocol):
 
 
 class ReadSession:
-    """一个源文件的一次连续读取会话；线程读数据，事件循环控停。"""
+    """一个源文件的一次连续读取会话；线程读数据，创建时的事件循环控停。
+
+    所属流程在关闭事件循环前跟踪实际结束结果，不能取消等待后遗弃会话。
+    """
 
     def __init__(
         self,
@@ -106,13 +112,16 @@ class ReadSession:
         self._stream = stream
         self._timeout_s = float(no_data_timeout_s)
         self._stop_requested = threading.Event()
+        self._stop_lock = threading.Lock()
+        self._control_lock = threading.Lock()
         self._reading = threading.Lock()
         self._active = threading.Event()
         self._active.set()
         self._bytes_read = 0
         self._end_error: str | None = None
-        self._stopped_confirmed = threading.Event()
-        self._loop: asyncio.AbstractEventLoop | None = None
+        self._completion: Future[ReadEnd] = Future()
+        self._loop = asyncio.get_running_loop()
+        self._stop_future: asyncio.Future | None = None
 
     def position(self) -> int:
         return self._position
@@ -121,12 +130,22 @@ class ReadSession:
         """同步读取下一段文件内容；同会话并发调用拒绝。"""
         if limit <= 0:
             raise ReadSessionError(f"读取长度必须是正整数: {limit!r}")
-        if not self._active.is_set():
+        if self._completion.done():
+            self._completion.result()
             return ReadChunk(data=None, error="stopped")
         if not self._reading.acquire(blocking=False):
             raise ReadSessionError("同一会话不能并发读取")
         try:
+            if not self._active.is_set():
+                self._completion.result()
+                return ReadChunk(data=None, error="stopped")
             return self._read_locked(limit)
+        except Exception as failure:
+            try:
+                self._finish("failed")
+            except Exception as close_failure:
+                raise ExceptionGroup("源读取及关闭均失败", [failure, close_failure]) from None
+            raise
         finally:
             self._reading.release()
 
@@ -158,54 +177,67 @@ class ReadSession:
     def request_stop(self) -> None:
         """线程安全请求停止；不等待读取线程，立即返回。
 
-        没有读取在途时由本调用直接确认停止并关闭资源；有读取在
-        途时由读取循环观察到停止后确认。
+        源停止信号的错误直接抛出；关闭由独立工作线程负责，实际
+        关闭结果通过 wait_stopped 取得。每个会话只提交一次收场。
         """
-        self._stop_requested.set()
-        self._stream.cancel()
         if not self._active.is_set():
             return
-        if self._reading.acquire(blocking=False):
-            try:
-                if not self._active.is_set():
-                    return
-                self._finish("stopped")
-            finally:
-                self._reading.release()
+        with self._stop_lock:
+            if self._stop_requested.is_set():
+                return
+            self._stop_requested.set()
+        try:
+            # 已在关闭时不等待控制锁，也不再对即将关闭的源发信号。
+            if self._control_lock.acquire(blocking=False):
+                try:
+                    if self._active.is_set():
+                        self._stream.cancel()
+                finally:
+                    self._control_lock.release()
+        finally:
+            self._loop.call_soon_threadsafe(self._start_stop)
+
+    def _start_stop(self) -> None:
+        if self._completion.done():
+            return
+        self._stop_future = self._loop.run_in_executor(None, self._close_after_reader)
+        self._stop_future.add_done_callback(_observe_completion)
+
+    def _close_after_reader(self) -> None:
+        with self._reading:
+            self._finish("stopped")
 
     async def wait_stopped(self) -> ReadEnd:
-        """等待读取实际结束并确认资源关闭。"""
-        loop = asyncio.get_running_loop()
-        self._loop = loop
-        if self._stopped_confirmed.is_set():
-            return self._end()
-        future = loop.create_future()
-
-        def _done() -> None:
-            if not future.done():
-                future.set_result(None)
-
-        watcher = threading.Thread(target=self._await_confirmed, args=(_done, loop))
-        watcher.start()
-        await future
-        return self._end()
-
-    def _await_confirmed(self, notify, loop) -> None:
-        self._stopped_confirmed.wait()
-        loop.call_soon_threadsafe(notify)
+        """取得实际关闭结果；等待者取消不改变共享结果或停止源读取。"""
+        if self._completion.done():
+            return self._completion.result()
+        wrapped = asyncio.wrap_future(self._completion)
+        wrapped.add_done_callback(_observe_completion)
+        return await asyncio.shield(wrapped)
 
     def _finish(self, error: str | None) -> None:
         if self._active.is_set():
             self._active.clear()
             self._end_error = error
-            # 资源在读取实际结束后才关闭。
-            self._stream.close()
-            self._stopped_confirmed.set()
+            # 关闭成功与关闭失败都结束这次观察，只有成功才确认停止。
+            try:
+                with self._control_lock:
+                    self._stream.close()
+            except BaseException as failure:
+                self._completion.set_exception(failure)
+                raise
+            self._completion.set_result(self._end())
 
     def _end(self) -> ReadEnd:
         return ReadEnd(
             stopped=True, bytes_read=self._bytes_read, error=self._end_error
         )
+
+
+def _observe_completion(future: asyncio.Future) -> None:
+    """即使等待者取消也消费包装器异常；权威结果仍由会话永久保留。"""
+    if not future.cancelled():
+        future.exception()
 
 
 async def open_read(
