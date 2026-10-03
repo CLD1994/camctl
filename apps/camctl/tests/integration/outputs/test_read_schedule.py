@@ -13,8 +13,9 @@ from camctl.history.decoding import decode_event_row
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.transaction import TransactionScope
 
 from .test_grant_reuse import read_request, _save_grant
 from .test_local_read import local_read
@@ -103,7 +104,13 @@ def _scheduled_event(request, kind, event_type):
     else:
         owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
-    _, _, _, first = _save_grant(owned, command)
+    owned.connection.execute("BEGIN")
+    try:
+        plan = outputs._GrantFileCommand(command, new_operation_key()).plan(
+            TransactionScope(owned.connection, 1, 1))
+    finally:
+        owned.connection.rollback()
+    _save_grant(owned, command)
     with closing(owned.connection.execute(
         "SELECT id, transaction_id, event_type, event_version, occurred_at, clock_status, change_seq, body_json"
         " FROM history_events WHERE event_type=?", (event_type,),
@@ -113,22 +120,15 @@ def _scheduled_event(request, kind, event_type):
         "SELECT first_event_id, last_event_id FROM history_transactions WHERE id=?", (event.transaction_id,),
     )) as cursor:
         start, end = cursor.fetchone()
-    state = {}
-    for table in ("plans", "actions", "action_dependencies", "obtain_source_selections", "obtain_items",
-                  "outputs", "device_files", "recording_processing", "intermediate_files",
-                  "deliveries", "operation_runs", "file_copies"):
-        with closing(owned.connection.execute(f"SELECT id FROM {table}")) as cursor:
-            identities = [row[0] for row in cursor]
-        state[table] = {identity: row_facts(owned.connection, table, identity) for identity in identities}
-    proposed = deepcopy(state)
-    for row in event.rows:
-        if row.before.exists:
-            state[row.table][row.row_id].update(row.before.values)
-        else:
-            del state[row.table][row.row_id]
-    owner = ("action", command.action_id) if event_type == 21 or kind == "internal" else ("delivery", first.delivery_id)
+    state = deepcopy(plan.state_rows)
+    proposed = deepcopy(plan.state_rows)
+    for step in plan.events:
+        for row in step.rows:
+            proposed.setdefault(row.table, {}).setdefault(row.row_id, {}).update(row.after.values)
+            if step.event_id < event.event_id:
+                state.setdefault(row.table, {}).setdefault(row.row_id, {}).update(row.after.values)
     context = EventContext(TransactionRange(event.transaction_id, start, end),
-                           {(row.table, row.row_id): owner for row in event.rows}, state, proposed)
+                           plan.owners, state, proposed, plan.read_coverage)
     return event, context, command.action_id
 
 
@@ -179,6 +179,37 @@ def test_future_proposal_cannot_make_current_action_due(scheduled_event):
 def test_current_schedule_accepts_exact_json_integer(scheduled_event):
     event, context, action_id = scheduled_event
     context.state_rows["actions"][action_id]["scheduled_at"] = Decimal(str(event.occurred_at) + ".0")
+    validate_event(event, context)
+
+
+@pytest.mark.parametrize("status,canceled", [(1, 0), (2, 1), (3, 0), (4, 0), (5, 0), (6, 1)])
+def test_first_creation_requires_current_owner_eligibility(scheduled_event, status, canceled):
+    event, context, action_id = scheduled_event
+    context.state_rows["actions"][action_id].update(status=status, cancel_requested=canceled)
+    with pytest.raises(EventValidationError):
+        validate_event(event, context)
+
+
+@pytest.mark.parametrize("column,value", [
+    ("status", None), ("status", "2"), ("cancel_requested", None),
+    ("cancel_requested", False), ("cancel_requested", "0"), ("cancel_requested", 2),
+])
+def test_first_creation_requires_interpretable_current_owner(scheduled_event, column, value):
+    event, context, action_id = scheduled_event
+    context.state_rows["actions"][action_id][column] = value
+    with pytest.raises(EventValidationError):
+        validate_event(event, context)
+
+
+def test_future_ineligible_owner_does_not_replace_current_eligibility(scheduled_event):
+    event, context, action_id = scheduled_event
+    context.transaction_rows["actions"][action_id].update(status=6, cancel_requested=1)
+    validate_event(event, context)
+
+
+def test_current_owner_accepts_exact_json_integers(scheduled_event):
+    event, context, action_id = scheduled_event
+    context.state_rows["actions"][action_id].update(status=Decimal("2.0"), cancel_requested=Decimal("0.0"))
     validate_event(event, context)
 
 

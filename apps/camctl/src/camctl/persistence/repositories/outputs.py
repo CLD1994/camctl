@@ -821,9 +821,26 @@ def _read_is_due(action, occurred_at: int) -> bool:
     return action["scheduled_at"] <= occurred_at
 
 
-def _guard_read_time(event, context, action_id) -> None:
+def _read_owner_eligible(action) -> bool:
+    """首次建档的发起动作必须仍在执行且未取消；缺事实不能当作可执行。"""
+    if action is None:
+        raise ConsistencyError("读取发起动作缺失")
+    status, canceled = action.get("status"), action.get("cancel_requested")
+    if (not is_json_integer(status) or not is_json_integer(canceled)
+            or canceled not in (0, 1)):
+        raise ConsistencyError("读取发起动作的状态或取消标志无效")
+    try:
+        status = _ACTION_STATUS(int(status))
+    except ValueError as error:
+        raise ConsistencyError("读取发起动作的状态未登记") from error
+    return status == _ACTION_STATUS.RUNNING and canceled == 0
+
+
+def _guard_read_owner(event, context, action_id) -> None:
     action = context.state_rows.get("actions", {}).get(action_id)
     try:
+        if not _read_owner_eligible(action):
+            raise EventValidationError("首次读取建档要求发起动作执行中且未取消")
         due = _read_is_due(action, event.occurred_at)
     except ConsistencyError as error:
         raise EventValidationError(str(error)) from error
@@ -1417,7 +1434,7 @@ class _GrantFileCommand:
         command = self._command
         action, source_file, output, device_id = self._load_inputs(connection)
         existing = self._existing_preparation(connection, source_file, device_id)
-        if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
+        if not _read_owner_eligible(action):
             return self._wait("action_not_eligible")
         if existing is not None:
             return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
@@ -2306,7 +2323,7 @@ def _copy_guard(event, context) -> None:
             parent = context.association_rows.get("deliveries", {}).get(values["delivery_id"])
         if parent is None:
             raise EventValidationError("新建拷贝缺少发起责任的固定关联")
-        _guard_read_time(event, context, parent.get("action_id"))
+        _guard_read_owner(event, context, parent.get("action_id"))
 
 
 def _copy_links_guard(event, context) -> None:
@@ -2479,7 +2496,7 @@ def _read_permission_guard(event, context) -> None:
         if (delivery.get("action_id") != dependency.get("action_id")
                 or delivery.get("output_id") != item.get("output_id")):
             raise EventValidationError("授予回填的交付必须属于原取回动作及同一产物")
-        _guard_read_time(event, context, dependency.get("action_id"))
+        _guard_read_owner(event, context, dependency.get("action_id"))
         try:
             if has_product_predecessor(_CurrentProductReads(context), dependency["action_id"],
                                        item["output_id"], event.occurred_at):
