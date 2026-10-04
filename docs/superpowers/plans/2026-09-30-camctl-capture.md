@@ -311,6 +311,38 @@ R/Q/S/O 条目映射与报告字节对照）。设备观察与资格授予事件
 组合验收随第二段推进（见[文件资格计划](2026-10-02-camctl-file-
 qualification-review.md#首次建档资格与事件顺序的阶段验证)）。
 
+
+#### C9 第二段的阶段性验证（2026-10-05）：三能力处理器执行链
+
+`capture/handlers.py` 的三个 `NotImplementedError` 占位替换为真实
+执行链。`CaptureRuntime` 装配真实授予（grant_start）、尝试结果
+（finish_attempt）、文件观察（第一段三命令）、终态（finish_capture）
+与等待安排（schedule_wait）仓储，并注入设备控制、结果列举、墙钟、
+单调钟、启动窗口、延时等待配置与录像中段状态端口（契约替身与真
+实驱动同形）。共享尾段把结果列举观察落库（发现 → TASK_SCOPE 任务
+归属 → DEVICE_GUARANTEE 完成），经 C6 `assess_capture_files` 核实
+集合，可判定时保存终态与正式产物；失败保留完整且归属明确的文件。
+
+| 处理器 | 推进序列与分区 |
+| --- | --- |
+| 照片 | 无尝试时授予并调用 `take_photo`（`photo_taken` 确认）；调用错误同样保存尝试并进入判定——`FAILED_KEEP_FILES` 以 `capture_failed`（`device_failed`，详情携带活动身份）失败终态并保留文件；结果未齐只读等待，再次推进不重复调用；终态后幂等。 |
+| 录像 | 无启动尝试时授予并调用 `start_recording`（不依赖中段端口）；有尝试后经中段状态端口 `decide_recording_next`——停止确认与文件完成分区进入尾段，装载处理行后 `decide_recording_result` 判定终态；无处理责任或处理未结束时等待媒体链；等待计时、停止推进与跨会话对账留给调度接线段。 |
+| 延时摄影 | 发送（`timelapse_sent`）后消费活动观察边界保存的 `sent_at`（`DEVICE_OBSERVED` 生产者属活动持久化段，测试按该边界预置），经 `plan_capture_wait` 与真实 `schedule_wait` 安排等待；到达预计检查时间后走共享尾段。 |
+
+关键裁决：观察身份必须等于操作目标（票据目标即动作身份）；同一
+计划时间下更早动作阻塞启动授予（`not_first_candidate`），集成测试
+按能力单独建立动作；设备错误进入尝试结局的 `ErrorValue`（成功结
+局不得携带调用错误）；`expected_check_at` 要求 `sent_at` 与余量同
+置（表约束）。`test_capture_contract.py` 的 6 项集成测试覆盖三种
+能力正常路径、照片调用失败保留文件、结果未齐→迟到结果恢复、录像
+启动后停止确认的续推进、处理未建立保持运行、延时发送-等待-到点
+收尾。全量回归与 node 检查通过（Python 3.11）。
+
+C9 剩余分段：第三段录像媒体链调用方与 D4 读取会话工厂绑定、设备
+活动观察（`DEVICE_OBSERVED`）与录像中段事实生产者、第四段调度接
+线（Q6）与 `test_capture_contract.py` 总验收扩展（各副作用边界中
+断、固定 H 报告字节对照、R/Q/S/O 条目映射）。
+
 ## 模块完成门禁
 
 录像、照片及延时摄影正常、取消和重启路径通过真实软件组合；适用检查/修复完成后才最终登记。应急与普通预算分开，所有正式产物和公开结果与历史边界一致。
