@@ -24,6 +24,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
     FinishCapture,
+    FinishDisposition,
     register_capture_guards,
 )
 from camctl.persistence.repositories.operations import (
@@ -256,14 +257,29 @@ async def test_stop_uses_original_budget_across_cancel_and_restart(tmp_path: Pat
 
 
 async def test_terminal_action_is_not_rewritten(tmp_path: Path) -> None:
-    """已成功的动作再次登记完成：整组拒绝，原终态保持。"""
+    """已成功的动作再次登记完成：同输入恢复首次结果，追加被拒绝。
+
+    R4 后终态新键不再一律回滚：与既有登记一致的输入只读恢复首
+    次产物身份；改写或追加仍整组拒绝，原终态保持。完整重送矩阵
+    见 test_finish_reuse.py。
+    """
     owned = _environment(tmp_path)
     repository = CaptureRepository()
     try:
         first = repository.finish_capture(_finish(), new_operation_key(), owned)
         assert first.kind is DbOutcomeKind.COMPLETED
         again = repository.finish_capture(_finish(), new_operation_key(), owned)
-        assert again.kind is DbOutcomeKind.ROLLED_BACK
+        assert again.kind is DbOutcomeKind.COMPLETED, again.error
+        assert again.value.disposition is FinishDisposition.ALREADY
+        assert again.value.output_ids == first.value.output_ids
+        appended = FinishCapture(
+            action_id=1,
+            drafts=(_original_draft(11), _original_draft(12)),
+            catalog_facts=OutputCatalogFacts(action_id=1, ownership_confirmed=True),
+            occurred_at=_NOW,
+        )
+        refused = repository.finish_capture(appended, new_operation_key(), owned)
+        assert refused.kind is DbOutcomeKind.ROLLED_BACK
         action = _value(owned, "SELECT status FROM actions WHERE id = 1")
         assert action[0] == 3
         outputs = _value(owned, "SELECT COUNT(*) FROM outputs")

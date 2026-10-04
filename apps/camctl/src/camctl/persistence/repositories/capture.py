@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from contextlib import closing
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Any, Mapping
 
 from camctl.capture.media import RecordingFailure
@@ -134,6 +135,13 @@ class FinishCapture:
         ObjectId(self.action_id)
 
 
+class FinishDisposition(Enum):
+    """完成登记事务的保存结果：新保存或恢复首次结果。"""
+
+    SAVED = "saved"
+    ALREADY = "already"
+
+
 @dataclass(frozen=True)
 class CaptureResult:
     """完成登记的已保存事实。"""
@@ -141,6 +149,7 @@ class CaptureResult:
     action_status: int
     plan_status: int
     output_ids: tuple[int, ...]
+    disposition: FinishDisposition = FinishDisposition.SAVED
 
 
 def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
@@ -417,13 +426,16 @@ class FinishCaptureCommand:
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
-        if saved_transaction_events(connection, self._key) is not None:
-            raise TransactionError("完成登记的重送须由调用方按原事务核实")
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(connection, saved)
 
         command = self._command
         action = row_facts(connection, "actions", command.action_id)
         if action is None:
             raise TransactionError(f"动作不存在: {command.action_id}")
+        if action["status"] in _ACTION_TERMINAL:
+            return self._recover(connection, action)
         siblings = self._sibling_actions(connection, action)
         self._state["actions"] = dict(siblings)
         self._state.setdefault("outputs", {})
@@ -602,6 +614,121 @@ class FinishCaptureCommand:
                 plan_status=plan_status,
                 output_ids=tuple(identity for identity, _ in numbered),
             ),
+        )
+
+    def _draft_identities(self) -> list[tuple[int, int | None, int | None]]:
+        return [(_KIND_CODES[draft.kind], draft.file.device_file_id,
+                 draft.file.intermediate_file_id)
+                for draft in self._command.drafts]
+
+    def _reuse(self, connection, saved) -> CommandPlan:
+        """原键重送：核实原事务与输入一致，恢复首次结果与文件身份。
+
+        事实时刻、终态分支、错误码、动作与产物集合任一不同都按操
+        作身份冲突拒绝；不重新登记，也不改写既有终态。
+        """
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if not types or types[0][0] != _ACTION_FINISHED_EVENT:
+            raise TransactionError("原事务不是完成登记，不能作为重送核实")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("完成登记的事实时刻与原事务不同")
+        action_row = saved[0]["body"]["rows"][0]
+        if action_row["table"] != "actions" or action_row["id"] != command.action_id:
+            raise TransactionError("原完成登记属于其他动作")
+        after = action_row["after"]["values"]
+        if command.failure is None:
+            if types[0][1] != 1 or after.get("status") != _ACTION_SUCCEEDED:
+                raise TransactionError("原完成登记不是成功终态，与重送输入不同")
+        else:
+            if types[0][1] != 2 or after.get("status") != _ACTION_FAILED:
+                raise TransactionError("原完成登记不是失败终态，与重送输入不同")
+            spec = registered_error(command.failure.code)
+            if after.get("error_code") != spec["action_error_id"]:
+                raise TransactionError("原完成登记的错误码与重送输入不同")
+        registered: dict[tuple[int, int | None, int | None], int] = {}
+        origins: set[tuple[int, int]] = set()
+        for event, (event_type, reason) in zip(saved, types):
+            if event_type != _OUTPUT_REGISTERED_EVENT:
+                continue
+            for row in event["body"]["rows"]:
+                values = row["after"]["values"]
+                if row["table"] == "outputs":
+                    registered[(reason, values.get("device_file_id"),
+                                values.get("intermediate_file_id"))] = row["id"]
+                else:
+                    origins.add((values["output_id"],
+                                 values["original_output_id"]))
+        expected = self._draft_identities()
+        if sorted(registered) != sorted(expected):
+            raise TransactionError("原完成登记的产物集合与重送输入不同")
+        output_ids = tuple(registered[item] for item in expected)
+        for draft, identity in zip(command.drafts, expected):
+            if (draft.kind is not OutputKind.ORIGINAL
+                    and draft.original_output_id is not None
+                    and (registered[identity], draft.original_output_id)
+                    not in origins):
+                raise TransactionError("原完成登记的派生链接与重送输入不同")
+        action = row_facts(connection, "actions", command.action_id)
+        assert action is not None
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["actions"] = {action["id"]: action}
+        self._state["plans"] = {plan["id"]: plan}
+        self._owners[("actions", action["id"])] = (
+            "action", action["id"])
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CaptureResult(
+                action_status=after["status"], plan_status=plan["status"],
+                output_ids=output_ids,
+                disposition=FinishDisposition.ALREADY),
+        )
+
+    def _recover(self, connection, action) -> CommandPlan:
+        """终态后的新键：不重新登记；输入与既有登记一致才恢复结果。
+
+        终态分支或错误码不同、产物集合追加或改写都拒绝，既有终态
+        与第一次保存的文件身份保持不变。
+        """
+        command = self._command
+        if command.failure is None:
+            if action["status"] != _ACTION_SUCCEEDED:
+                raise TransactionError(
+                    f"动作终态不是完成登记结果，不能按成功重送: {action['status']!r}")
+        else:
+            if action["status"] != _ACTION_FAILED:
+                raise TransactionError(
+                    f"动作终态不是失败登记结果，不能按失败重送: {action['status']!r}")
+            spec = registered_error(command.failure.code)
+            if action["error_code"] != spec["action_error_id"]:
+                raise TransactionError("动作已保存的错误码与新键输入不同")
+        with closing(connection.execute(
+            "SELECT id, kind, device_file_id, intermediate_file_id"
+            " FROM outputs WHERE source_action_id=? ORDER BY id",
+            (command.action_id,),
+        )) as cursor:
+            registered = {
+                (kind, device, intermediate): output_id
+                for output_id, kind, device, intermediate in cursor}
+        expected = self._draft_identities()
+        if sorted(registered) != sorted(expected):
+            raise TransactionError(
+                "动作已终态，产物登记与新键输入不一致，不能追加或改写")
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["actions"] = {action["id"]: action}
+        self._state["plans"] = {plan["id"]: plan}
+        self._owners[("actions", action["id"])] = (
+            "action", action["id"])
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CaptureResult(
+                action_status=action["status"], plan_status=plan["status"],
+                output_ids=tuple(registered[item] for item in expected),
+                disposition=FinishDisposition.ALREADY),
         )
 
     def _required(self, connection, table, identity):
