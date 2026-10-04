@@ -210,6 +210,29 @@ X7 的阶段验证：`outputs/handoff.py` 提供 `decide_handoff`（七分区：
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_source_cleanup.py -q`，真实仓储、文件/设备替身验证全部删除与查询结果及取回先后竞争。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 设备源与主机派生成品的全部删除/查询入口是否暗自重试；记录门禁证据，建议以“feat: 实现源产物清理与独立预算”形成独立提交。
 
+#### X8 第一段的阶段性验证（2026-10-05）：清理守卫三件套
+
+`target_set`/`cleanup_member`/`cleanup` 三个具名守卫实现并注册进
+`register_outputs_guards`（此前在事件登记声明但未接入，生产内核按
+未实现守卫拒绝清理事件提交）。`target_set` 核对 TARGETS_FIXED 清
+理/取消/失败分支的动作类型（清理=5、取消=6、失败∈{5,6}）与目标
+状态转换；清理成员初始值必须未解析且无限制、不重复；精确清理固定
+全部原请求 ID 且保持顺序，范围清理的每个成员属于本动作固定来源的
+已登记产物；失败分支不创建成员。`cleanup_member` 核对成员推进要
+求目标集合已 FIXED、身份与原请求保持不变、产物身份只能经 RESTRICT
+从空值一次确认且等于原请求、直接终态创建只属于已固定集合的事务并
+携带本事件为最终事件。`cleanup` 核对终态成员的最终事件等于本事件、
+成功依据按结果分类（实际删除=已完成的删除调用或文件缺席事实、已
+有完成=产物已 CLEANED、存在性查询=文件缺席事实）、同一产物至多一
+个删除中成员。
+
+验证：`test_cleanup_guards.py` 12 项直接事件测试（精确集合匹配与
+失配、非法初始值、范围来源成员资格、失败分支零创建、推进需固定、
+RESTRICT 一次确认、终态最终事件与三类成功依据、唯一删除处理者）；
+单元+outputs 集成 4718 项通过。后续分段：FixCleanupTargets 目标固
+定命令、RESTRICT/删除/未知核实编排（cleanup_flow）与双预算、X9 取
+消接手，及 test_source_cleanup/test_cleanup_recovery 总验收。
+
 ### X9 清理取消、接手及原结果保持
 
 **预计文件：** `apps/camctl/src/camctl/outputs/cleanup.py`、`apps/camctl/src/camctl/outputs/qualification.py`；测试为 `apps/camctl/tests/unit/outputs/test_cleanup_recovery.py` 和 `apps/camctl/tests/integration/outputs/test_cleanup_recovery.py`。

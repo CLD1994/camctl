@@ -104,6 +104,21 @@ from camctl.scheduling.order import (
 
 _SOURCE_RESOLVED_EVENT = 3
 _TARGETS_FIXED_EVENT = 4
+_CLEANUP_CHANGED_EVENT = 24
+
+#: TARGETS_FIXED 的清理/取消/失败分支与动作类型。
+_TARGETS_CLEANUP_REASON = 2
+_TARGETS_CANCEL_REASON = 3
+_TARGETS_FAIL_REASON = 4
+_DELETE_ACTION_TYPE = 5
+_CANCEL_ACTION_TYPE = 6
+_TARGET_PENDING = 1
+_TARGET_FIXED = 2
+_TARGET_FAILED = 3
+
+_CLEANUP_ITEM_STATUS = enum_for("cleanup_items.status")
+_CLEANUP_RESTRICTION = enum_for("cleanup_items.restriction_state")
+_CLEANUP_OUTCOME = enum_for("cleanup_items.outcome")
 _ACTION_STARTED_EVENT = 5
 _READ_PERMISSION_EVENT = 21
 _COPY_CHANGED_EVENT = 22
@@ -5539,6 +5554,219 @@ def _processing_guard(event, context) -> None:
             raise EventValidationError("处理输入副本字节未完整保存不能保存完整事实")
 
 
+def _requested_cleanup_ids(action):
+    """精确清理的原请求 ID 列表；范围清理返回 None。"""
+    params = action.get("input_fields_json")
+    if not isinstance(params, Mapping):
+        raise EventValidationError("清理动作缺少原请求参数")
+    values = params.get("params")
+    if not isinstance(values, Mapping) or "output_ids" not in values:
+        return None
+    ids = values["output_ids"]
+    if not isinstance(ids, list) or not ids:
+        raise EventValidationError("精确清理缺少非空原目标列表")
+    return tuple(int(identity) for identity in ids)
+
+
+def _target_set_guard(event, context) -> None:
+    """TARGETS_FIXED 清理/取消/失败：类型、目标状态与成员集合一致。"""
+    if event.event_type != _TARGETS_FIXED_EVENT:
+        return
+    if event.reason not in (_TARGETS_CLEANUP_REASON, _TARGETS_CANCEL_REASON,
+                            _TARGETS_FAIL_REASON):
+        return
+    action_rows = [row for row in event.rows if row.table == "actions"]
+    if len(action_rows) != 1 or not action_rows[0].before.exists:
+        raise EventValidationError("目标固定必须恰好更新一条动作行")
+    action_id = action_rows[0].row_id
+    action = context.state_rows.get("actions", {}).get(action_id)
+    if action is None:
+        raise EventValidationError("目标固定缺少动作当前事实")
+    if event.reason == _TARGETS_FAIL_REASON:
+        if action.get("type") not in (_DELETE_ACTION_TYPE, _CANCEL_ACTION_TYPE):
+            raise EventValidationError("目标固定失败要求清理或取消动作")
+    else:
+        expected = (_CANCEL_ACTION_TYPE
+                    if event.reason == _TARGETS_CANCEL_REASON
+                    else _DELETE_ACTION_TYPE)
+        if action.get("type") != expected:
+            raise EventValidationError(
+                f"目标固定分支与动作类型不符: {action.get('type')!r}")
+    created = [row for row in event.rows
+               if row.table == "cleanup_items" and not row.before.exists]
+    if event.reason == _TARGETS_FAIL_REASON:
+        if created:
+            raise EventValidationError("目标固定失败不创建清理成员")
+        return
+    if event.reason != _TARGETS_CLEANUP_REASON:
+        return
+    if not created:
+        raise EventValidationError("清理目标固定必须创建清理成员")
+    requested = []
+    for row in created:
+        values = row.after.values
+        if values.get("action_id") != action_id:
+            raise EventValidationError("清理成员必须属于目标固定动作")
+        if (values.get("status") != int(_CLEANUP_ITEM_STATUS.UNRESOLVED)
+                or values.get("restriction_state")
+                != int(_CLEANUP_RESTRICTION.NOT_ESTABLISHED)
+                or values.get("output_id") is not None
+                or values.get("outcome") is not None
+                or values.get("final_event_id") is not None
+                or values.get("error_code") is not None):
+            raise EventValidationError("清理成员初始值必须是未解析且无限制")
+        requested.append(values.get("requested_output_id"))
+    if len(set(requested)) != len(requested):
+        raise EventValidationError("清理成员的原请求目标不能重复")
+    explicit = _requested_cleanup_ids(action)
+    if explicit is not None and tuple(requested) != explicit:
+        raise EventValidationError("精确清理固定全部原请求 ID 且保持顺序")
+    if explicit is None:
+        dependencies = context.state_rows.get("action_dependencies", {})
+        sources = {
+            values.get("depends_on_action_id")
+            for values in dependencies.values()
+            if values.get("action_id") == action_id
+        }
+        outputs = context.state_rows.get("outputs", {})
+        for identity in requested:
+            output = outputs.get(identity)
+            if output is None or output.get("source_action_id") not in sources:
+                raise EventValidationError(
+                    f"范围清理成员不属于本动作固定来源: {identity!r}")
+
+
+def _cleanup_member_guard(event, context) -> None:
+    """CLEANUP_CHANGED：成员归属、身份保持与直接终态事务边界。"""
+    if event.event_type != _CLEANUP_CHANGED_EVENT:
+        return
+    for row in event.rows:
+        if row.table != "cleanup_items":
+            continue
+        if not row.before.exists:
+            values = row.after.values
+            action = context.state_rows.get("actions", {}).get(
+                values.get("action_id"))
+            if (action is None
+                    or action.get("target_selection_state") != _TARGET_FIXED):
+                raise EventValidationError(
+                    "直接终态清理成员只能属于已固定的目标集合事务")
+            if values.get("final_event_id") != event.event_id:
+                raise EventValidationError("清理成员的最终事件必须是本事件")
+            continue
+        before_facts = context.state_rows.get("cleanup_items", {}).get(row.row_id)
+        if before_facts is None:
+            raise EventValidationError("清理成员更新缺少当前事实")
+        action = context.state_rows.get("actions", {}).get(
+            before_facts.get("action_id"))
+        if (action is None
+                or action.get("target_selection_state") != _TARGET_FIXED):
+            raise EventValidationError("清理成员推进要求目标集合已固定")
+        if (row.after.values.get("requested_output_id")
+                not in (None, before_facts.get("requested_output_id"))
+                or row.after.values.get("action_id")
+                not in (None, before_facts.get("action_id"))):
+            raise EventValidationError("清理成员身份与原请求保持不变")
+        if event.reason == 1:
+            confirmed = row.after.values.get("output_id")
+            if (confirmed is not None
+                    and before_facts.get("output_id") is not None):
+                raise EventValidationError("产物身份只能从空值一次确认")
+            if (confirmed is not None
+                    and confirmed != before_facts.get("requested_output_id")):
+                raise EventValidationError("确认的产物必须是原请求目标")
+
+
+def _cleanup_guard(event, context) -> None:
+    """CLEANUP_CHANGED：终态依据、最终事件与唯一删除处理者。"""
+    if event.event_type != _CLEANUP_CHANGED_EVENT:
+        return
+    for row in event.rows:
+        if row.table != "cleanup_items":
+            continue
+        values = row.after.values
+        terminal = values.get("status") in (
+            int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
+            int(_CLEANUP_ITEM_STATUS.FAILED),
+            int(_CLEANUP_ITEM_STATUS.CANCELED),
+        )
+        if terminal:
+            if values.get("final_event_id") != event.event_id:
+                raise EventValidationError("清理成员的最终事件必须是本事件")
+            if values.get("status") == int(_CLEANUP_ITEM_STATUS.SUCCEEDED):
+                _require_cleanup_success_basis(event, row, context)
+            continue
+        if values.get("status") == int(_CLEANUP_ITEM_STATUS.DELETING):
+            before = context.state_rows.get("cleanup_items", {}).get(
+                row.row_id, {})
+            target = before.get("output_id") or values.get("output_id")
+            if target is None:
+                continue
+            for identity, facts in context.state_rows.get(
+                    "cleanup_items", {}).items():
+                if identity == row.row_id:
+                    continue
+                if (facts.get("output_id") == target
+                        and facts.get("status")
+                        == int(_CLEANUP_ITEM_STATUS.DELETING)):
+                    raise EventValidationError("同一产物只能有一个删除中成员")
+
+
+def _require_cleanup_success_basis(event, row, context) -> None:
+    """成功依据按结果分类核对：实际删除、已有完成或存在性查询。"""
+    outcome = row.after.values.get("outcome")
+    if outcome is None:
+        raise EventValidationError("清理成功必须携带结果依据")
+    target = (row.after.values.get("output_id")
+              or row.before.values.get("output_id"))
+    if outcome == int(_CLEANUP_OUTCOME.ALREADY_CLEANED):
+        output = context.state_rows.get("outputs", {}).get(target)
+        if (output is None
+                or output.get("availability") != int(_AVAILABILITY.CLEANED)):
+            raise EventValidationError("已有完成依据要求产物已可靠清理")
+        return
+    output = context.state_rows.get("outputs", {}).get(target)
+    file_id = None
+    if output is not None:
+        file_id = (output.get("device_file_id")
+                   or output.get("intermediate_file_id"))
+    if outcome == int(_CLEANUP_OUTCOME.DELETED):
+        if not _completed_call_basis(context, row.row_id, file_id):
+            raise EventValidationError(
+                "实际删除依据要求已完成的删除调用或文件缺席事实")
+    elif outcome == int(_CLEANUP_OUTCOME.ABSENCE_CONFIRMED):
+        if file_id is not None and not _file_absent(context, file_id):
+            raise EventValidationError("存在性查询依据要求文件缺席事实")
+    else:
+        raise EventValidationError(f"未登记的清理结果依据: {outcome!r}")
+
+
+def _completed_call_basis(context, item_id, file_id) -> bool:
+    """本事件之前已有完成的删除调用或文件缺席事实。"""
+    if file_id is not None and _file_absent(context, file_id):
+        return True
+    runs = {
+        values.get("id"): values
+        for values in context.state_rows.get("operation_runs", {}).values()
+        if values.get("cleanup_item_id") == item_id
+    }
+    for attempt in context.state_rows.get("operation_attempts", {}).values():
+        run = runs.get(attempt.get("run_id"))
+        if (run is not None and attempt.get("status") == 2
+                and attempt.get("effect_state") == 3):
+            return True
+    return False
+
+
+def _file_absent(context, file_id) -> bool:
+    device = context.state_rows.get("device_files", {}).get(file_id)
+    if device is not None and device.get("presence_state") == 3:
+        return True
+    local = context.state_rows.get("intermediate_files", {}).get(file_id)
+    if local is not None and local.get("cleanup_state") == 4:
+        return True
+    return False
+
 def register_outputs_guards() -> None:
     """注册来源、选择与读取资格事件的正式业务守卫（装配期调用）。"""
     register_guard("selection_initialization", _selection_initialization_guard)
@@ -5553,3 +5781,6 @@ def register_outputs_guards() -> None:
     register_guard("processing", _processing_guard)
     register_guard("recording_source", _recording_source_guard)
     register_guard("obtain_member", _obtain_member_guard)
+    register_guard("target_set", _target_set_guard)
+    register_guard("cleanup_member", _cleanup_member_guard)
+    register_guard("cleanup", _cleanup_guard)
