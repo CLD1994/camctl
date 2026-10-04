@@ -34,6 +34,8 @@ _PURPOSE = enum_for("intermediate_files.purpose")
 
 #: 中间文件删除明确失败的公共错误码（workflow-codes.json 权威装载）。
 WORK_FILE_DELETE_FAILED = "work_file_delete_failed"
+#: 动作归属中间文件删除失败的公共错误码；详情携带文件身份。
+ACTION_WORK_FILE_DELETE_FAILED = "action_work_file_delete_failed"
 
 
 class WorkFileAction(Enum):
@@ -310,8 +312,9 @@ class CleanupResultSave:
         if self.outcome is WorkFileOutcome.FAILED:
             if not isinstance(self.error, WorkFileFailure):
                 raise TypeError("清理失败必须携带 WorkFileFailure")
-            if self.error.details.get("delivery_id") is None:
-                raise ValueError("清理失败详情缺少关联交付")
+            if (self.error.details.get("delivery_id") is None
+                    and self.error.details.get("file_id") is None):
+                raise ValueError("清理失败详情缺少归属身份（交付或文件）")
         if not isinstance(self.advance_cursor, bool):
             raise ValueError(f"游标推进必须是布尔值: {self.advance_cursor!r}")
         _require_timestamp(self.occurred_at)
@@ -475,10 +478,16 @@ def _require_completed(outcome, stage: str) -> None:
     raise WorkFileCleanupError(stage, str(outcome.error))
 
 
-def _delete_failure(delivery_id: int) -> WorkFileFailure:
+def _delete_failure(facts: WorkFileFacts) -> WorkFileFailure:
+    """删除失败按归属构造公共错误详情；交付与动作归属分别登记。"""
+    if facts.owner_delivery_id is not None:
+        return WorkFileFailure(
+            code=WORK_FILE_DELETE_FAILED,
+            details={"delivery_id": str(facts.owner_delivery_id)},
+        )
     return WorkFileFailure(
-        code=WORK_FILE_DELETE_FAILED,
-        details={"delivery_id": str(delivery_id)},
+        code=ACTION_WORK_FILE_DELETE_FAILED,
+        details={"file_id": str(facts.file_id)},
     )
 
 
@@ -502,10 +511,9 @@ def _perform_deletion(
 ) -> tuple[WorkFileSingleOutcome, str | None, bool]:
     """已判定可清理的文件：意图、观察、删除与结果的有限一次尝试。
 
-    观察失败或删除失败按交付副本保存公共错误；动作归属的文件尚无
-    登记的错误详情，失败时保留已保存意图的未决责任并携带诊断返回，
-    等待后续正常运行重新核实，不猜测结果，也不中断其余记录。
-    返回结果、诊断与是否已持久化保存清理结果。
+    观察失败或删除失败按归属保存公共错误（交付或动作归属的错误
+    详情均已登记）；删除成功与失败的结果都可靠保存，未决责任留
+    给后续正常运行重新核实，不中断其余记录。
     """
     if facts.cleanup_state != int(_CLEANUP.RUNNING):
         intent = context.repository.save_cleanup_intent(
@@ -516,13 +524,10 @@ def _perform_deletion(
     path = context.staging / facts.relative_path
     observation = _observe_work_file(path)
     if isinstance(observation, OSError):
-        if facts.owner_delivery_id is not None:
-            _save_result(
-                facts, WorkFileOutcome.FAILED,
-                _delete_failure(facts.owner_delivery_id), context,
-                advance_cursor=advance_cursor)
-            return WorkFileSingleOutcome.FAILED, str(observation), True
-        return WorkFileSingleOutcome.FAILED, str(observation), False
+        _save_result(
+            facts, WorkFileOutcome.FAILED, _delete_failure(facts), context,
+            advance_cursor=advance_cursor)
+        return WorkFileSingleOutcome.FAILED, str(observation), True
     if observation is False:
         _save_result(
             facts, WorkFileOutcome.COMPLETED, None, context,
@@ -531,13 +536,10 @@ def _perform_deletion(
     try:
         _remove_work_file(path)
     except OSError as failure:
-        if facts.owner_delivery_id is not None:
-            _save_result(
-                facts, WorkFileOutcome.FAILED,
-                _delete_failure(facts.owner_delivery_id), context,
-                advance_cursor=advance_cursor)
-            return WorkFileSingleOutcome.FAILED, str(failure), True
-        return WorkFileSingleOutcome.FAILED, str(failure), False
+        _save_result(
+            facts, WorkFileOutcome.FAILED, _delete_failure(facts), context,
+            advance_cursor=advance_cursor)
+        return WorkFileSingleOutcome.FAILED, str(failure), True
     _save_result(
         facts, WorkFileOutcome.COMPLETED, None, context,
         advance_cursor=advance_cursor)

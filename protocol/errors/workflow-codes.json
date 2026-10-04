@@ -211,6 +211,22 @@
         "additionalProperties": false
       }
     },
+    "action_work_file_delete_failed": {
+      "stage": "cleanup",
+      "description": "录像动作归属中间文件删除明确失败；清理责任保留，后续正常运行重新核实。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "additionalProperties": false
+      }
+    },
     "action_validation_failed": {
       "stage": "admission",
       "description": "动作自身字段校验失败；issues 保存全部已确定错误，省略字段不补 value。",

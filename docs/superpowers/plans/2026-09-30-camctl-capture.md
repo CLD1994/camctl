@@ -188,13 +188,13 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 **接口与依赖：** 提供 `decide_media_processing(facts: RecordingEvidence, config: MediaPolicy) -> MediaDecision`、异步 `process_recording(decision: MediaDecision, copies: CopyService, files: MediaFiles) -> MediaResult`；CopyService 采用 X4—X6，MediaFiles 采用 F6。前置交付：C3/C6、X4—X6、F6、X11。
 
-- [ ] 编写失败用例。建立 `test_repair_success_does_not_replace_capture_result`，修复成品合格但采集依据不满足，`assert capture_success is False`。按多录门槛及计时证据完整表测试恰好门槛、超过、缺证据、原片长度不足、空间错误及修复失败；内部检查不默认验证所有媒体内容。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_media_processing.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。复用正式读取资格及原片拷贝，保存固定处理决定后执行 ffprobe/ffmpeg；原片、输入副本、临时输出与成品身份分开，全部适用校验及提升与最终登记闭合。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 可靠原片不丢失，未验证临时文件不能成为正式产物。
+- [x] 编写失败用例。建立 `test_repair_success_does_not_replace_capture_result`，修复成品合格但采集依据不满足，`assert capture_success is False`。按多录门槛及计时证据完整表测试恰好门槛、超过、缺证据、原片长度不足、空间错误及修复失败；内部检查不默认验证所有媒体内容。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_media_processing.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。复用正式读取资格及原片拷贝，保存固定处理决定后执行 ffprobe/ffmpeg；原片、输入副本、临时输出与成品身份分开，全部适用校验及提升与最终登记闭合。
+- [x] 再运行上述命令，要求全部 PASS，并核对 可靠原片不丢失，未验证临时文件不能成为正式产物。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_media_processing.py -q`，真实最小媒体、SQLite、文件提升及历史报告，覆盖工具结束到登记和清理各中断边界。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 内部读写是否绕过统一拷贝、占用、取消及文件生命周期；记录门禁证据，建议以“feat: 实现异常录像检查与修复”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 内部读写是否绕过统一拷贝、占用、取消及文件生命周期；记录门禁证据，建议以“feat: 实现异常录像检查与修复”形成独立提交。
 
 #### C8 第一段的阶段性验证（2026-10-04）
 
@@ -249,6 +249,19 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 验证：`test_input_copy.py` 单元 17 项（端口替身：重入、续传位置、跳过与失败分区、端口调用次序与会话收场）、集成 7 项（真实 SQLite、真实资格/分段/完成事务与真实 ReadSession：完整链与重入、VERIFY 重入不开会话、等待两因、段失败按已确认进度续传、损坏字节登记重拷后次轮重读成功、发起责任取消跳过不提交进度）；全量回归单元 2870、集成 2964+7 skip、根 34+342、check-protocol、check-report-dependencies、check-doc-links 2913 通过（Python 3.11）。
 
 第二段仍剩余：DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。设备读取会话工厂（D4 绑定）与读取尝试纪律随调度接线接入；M2 的可靠视频时长来源仍阻塞在设备适配证据。
+
+#### C8 完成验证（2026-10-05）
+
+最后一组完成 DISCARD 衔接与动作错误码消费，C8 任务收口（各 checkbox 依据下述证据勾选）：
+
+- `decide_recording_result`（`capture/media.py`）按录像成功标准判定动作结果：时长不足与明确媒体错误优先按失败处理（`recording_too_short`、`recording_processing_failed` 的 `invalid_media`），控制完成与时长检查是独立成功依据（修复失败不否定、修复成功不替代），必要处理未结束保持待定，检查工具失败不单独否定控制依据，无可用输入按 `source_unavailable` 失败——空间不足经拷贝写入失败分区快速失败后即落入该判定。
+- `FinishCapture` 增加可选 `failure`：携带时按 `ACTION_FINISHED.FAIL` 保存执行失败终态（公共动作错误编号与协议 details 先经登记校验），产物登记、失败事实与父计划完成同事务提交；取消请求已生效的动作拒绝失败终态。
+- `execute_discard`（`capture/media.py`）衔接 X11：取消决定已保存（PENDING）后先保存运行阶段，再对动作归属中间文件逐项定向清理（释放保留、删除、保存结果），任一失败保存失败终态与错误结构（携带文件身份），单项失败不中断其余；执行中恢复入口沿用既有进度。
+- 动作归属清理失败错误码 `action_work_file_delete_failed`（详情携带文件身份）登记入公共错误清单，X11 的定向与历史清理对两种归属都可靠保存失败结果，未决责任留给后续运行。
+
+验证：`test_recording_result.py` 单元 19 项（决策表全分区：待定、失败证据优先、双成功依据、修复成败不影响判定、空间不足落位）、`test_discard.py` 单元 13 项（入口状态、意图先行、失败分区、恢复）与集成 7 项（真实清理事务与真实文件：释放删除、Windows 打开句柄触发删除失败并保存登记错误详情、执行中恢复、失败终态错误编号 16/15 与 details、结构不符整组拒绝、取消动作拒绝失败终态）；`test_work_files.py` 动作归属失败用例改为保存登记错误。全量回归单元 2901、集成 2971+7 skip、根 34+342、check-protocol（含新错误码）、check-report-dependencies、check-doc-links 2913 通过（Python 3.11）。
+
+C8 边界：设备读取会话工厂（D4 绑定）、读取尝试纪律与取消动作的完整收场接线归 C9/I5 及调度接入；完成事务原键重送归登记计划 R4；M2 的可靠视频时长来源仍阻塞在设备适配证据。
 
 ### C9 三种能力的完整链验收
 

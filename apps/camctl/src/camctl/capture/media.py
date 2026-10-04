@@ -21,6 +21,8 @@ from typing import Any, Protocol
 from camctl.capture.processing import (
     CheckResultSave,
     CheckPhase,
+    DiscardPhase,
+    DiscardProgressSave,
     MediaObservation,
     ProcessingDisposition,
     ProcessingError,
@@ -39,11 +41,20 @@ from camctl.contracts.values import ObjectId
 from camctl.host_files.media import MediaArtifact, MediaProbe
 from camctl.host_files.models import FilePurpose, FileRef
 from camctl.host_files.tasks import FileTaskResult
+from camctl.outputs.work_files import (
+    ACTION_WORK_FILE_DELETE_FAILED,
+    WorkFileCleanupError,
+    WorkFileSingleOutcome,
+)
 
 __all__ = [
     "CheckContext",
     "CheckExecutionPhase",
     "CheckStep",
+    "DiscardContext",
+    "DiscardExecutionPhase",
+    "DiscardSaves",
+    "DiscardStep",
     "MediaDecision",
     "MediaKind",
     "MediaPolicy",
@@ -51,14 +62,21 @@ __all__ = [
     "ProcessingSaves",
     "ProcessingStatus",
     "RecordingEvidence",
+    "RecordingFailure",
+    "RecordingOutcomeFacts",
+    "RecordingResult",
+    "RecordingResultKind",
     "RepairContext",
     "RepairExecutionPhase",
     "RepairStep",
     "SaveDisposition",
     "SaveReceipt",
+    "WorkFileCleaning",
     "check_observation_from_probe",
     "decide_media_processing",
+    "decide_recording_result",
     "execute_check",
+    "execute_discard",
     "execute_repair",
     "repair_decision_from_check",
     "repair_error_from_artifact",
@@ -156,6 +174,7 @@ def _gate_repair_start(evidence: RecordingEvidence) -> MediaDecision:
 _CHECK_DECISION = enum_for("recording_processing.check_decision")
 _CHECK_STATE = enum_for("recording_processing.check_state")
 _REPAIR_STATE = enum_for("recording_processing.repair_state")
+_DISCARD_STATE = enum_for("recording_processing.discard_state")
 
 #: 工具正常结束但未取得可靠时长的分类：核验未确认，不是工具失败。
 _UNCONFIRMED_PROBE_CODES = frozenset({"missing_duration", "invalid_structure"})
@@ -533,3 +552,256 @@ def _save_repair_failure(context: RepairContext, output: RepairOutputFile,
         return RepairStep(RepairExecutionPhase.FAILED_UNKNOWN,
                           output_file=output, error=saved.error)
     return RepairStep(RepairExecutionPhase.FAILED_SAVED, output_file=output)
+
+
+# ---- 录像动作结果判定 ----
+
+
+@dataclass(frozen=True)
+class RecordingFailure:
+    """录像动作执行失败的登记错误；采用公共动作错误码。"""
+
+    code: str
+    details: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.code, str) or not self.code:
+            raise ValueError(f"失败错误码必须是非空文本: {self.code!r}")
+        if not isinstance(self.details, dict):
+            raise TypeError(f"失败详情必须是对象: {self.details!r}")
+
+
+class RecordingResultKind(Enum):
+    """录像动作结果的分区。"""
+
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class RecordingResult:
+    """一次结果判定：成功依据或登记失败，或处理未结束。"""
+
+    kind: RecordingResultKind
+    basis: str | None = None
+    failure: RecordingFailure | None = None
+
+
+@dataclass(frozen=True)
+class RecordingOutcomeFacts:
+    """结果判定的已保存事实；取消与既有终态由调用方先行处理。
+
+    control_complete 表达正常或恢复控制完成依据已保存；check 事实
+    来自 recording_processing；input_unavailable 表达输入副本无法
+    取得而检查不能执行。
+    """
+
+    processing_id: int
+    control_complete: bool
+    check_decision: int
+    check_state: int
+    check_duration_s: Decimal | None
+    check_issues: bool
+    input_unavailable: bool
+    repair_state: int
+    target_duration_ms: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.processing_id)
+        for name in ("check_decision", "check_state", "repair_state"):
+            _state_int(name, getattr(self, name))
+        _state_int("target_duration_ms", self.target_duration_ms)
+        if self.target_duration_ms <= 0:
+            raise ValueError(
+                f"目标时长毫秒必须是正整数: {self.target_duration_ms!r}")
+        for name in ("control_complete", "check_issues", "input_unavailable"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"{name} 必须是布尔值")
+
+
+def decide_recording_result(facts: RecordingOutcomeFacts) -> RecordingResult:
+    """按录像成功标准判定动作结果。
+
+    时长不足与明确媒体错误优先按失败处理，不用后续成功依据覆盖
+    已知失败事实；控制完成与时长检查是独立成功依据，修复失败不
+    否定已有依据、修复成功不替代采集依据；必要处理未结束保持待
+    定，不提前判成功。
+    """
+    processing_id = str(facts.processing_id)
+    if facts.input_unavailable:
+        return RecordingResult(
+            RecordingResultKind.FAILED,
+            failure=RecordingFailure(
+                code="recording_processing_failed",
+                details={"processing_id": processing_id,
+                         "reason": "source_unavailable"}))
+    check_open = (facts.check_decision == int(_CHECK_DECISION.REQUIRED)
+                  and facts.check_state in (
+                      int(_CHECK_STATE.NOT_PERFORMED), int(_CHECK_STATE.RUNNING)))
+    repair_open = facts.repair_state in (
+        int(_REPAIR_STATE.PENDING), int(_REPAIR_STATE.RUNNING))
+    if check_open or repair_open:
+        return RecordingResult(RecordingResultKind.PENDING)
+    if facts.check_state == int(_CHECK_STATE.COMPLETED):
+        duration = facts.check_duration_s
+        if duration is not None and duration < Decimal(facts.target_duration_ms) / 1000:
+            return RecordingResult(
+                RecordingResultKind.FAILED,
+                failure=RecordingFailure(
+                    code="recording_too_short",
+                    details={"processing_id": processing_id}))
+        if facts.check_issues:
+            return RecordingResult(
+                RecordingResultKind.FAILED,
+                failure=RecordingFailure(
+                    code="recording_processing_failed",
+                    details={"processing_id": processing_id,
+                             "reason": "invalid_media"}))
+        if facts.control_complete:
+            return RecordingResult(
+                RecordingResultKind.SUCCEEDED, basis="control_complete")
+        if duration is not None:
+            return RecordingResult(
+                RecordingResultKind.SUCCEEDED, basis="check_duration")
+    elif facts.control_complete:
+        return RecordingResult(
+            RecordingResultKind.SUCCEEDED, basis="control_complete")
+    if facts.check_state == int(_CHECK_STATE.FAILED):
+        return RecordingResult(
+            RecordingResultKind.FAILED,
+            failure=RecordingFailure(
+                code="recording_processing_failed",
+                details={"processing_id": processing_id,
+                         "reason": "check_failed"}))
+    if facts.check_state == int(_CHECK_STATE.UNCONFIRMED):
+        return RecordingResult(
+            RecordingResultKind.FAILED,
+            failure=RecordingFailure(
+                code="recording_processing_failed",
+                details={"processing_id": processing_id,
+                         "reason": "duration_unconfirmed"}))
+    return RecordingResult(RecordingResultKind.PENDING)
+
+
+# ---- 取消后处理收场编排 ----
+
+
+class DiscardExecutionPhase(Enum):
+    """取消收场编排的结果分区。"""
+
+    NOT_PENDING = "not_pending"
+    ALREADY_FINISHED = "already_finished"
+    START_REJECTED = "start_rejected"
+    START_UNKNOWN = "start_unknown"
+    CLEANED = "cleaned"
+    CLEANUP_FAILED = "cleanup_failed"
+    RESULT_REJECTED = "result_rejected"
+    RESULT_UNKNOWN = "result_unknown"
+
+
+@dataclass(frozen=True)
+class DiscardStep:
+    """一次取消收场的结果：阶段与文件清理计数。"""
+
+    phase: DiscardExecutionPhase
+    cleaned: int = 0
+    failed: int = 0
+    error: BaseException | None = None
+
+
+class DiscardSaves(Protocol):
+    """取消收场进度端口；每次调用独立提交。"""
+
+    def save_discard_progress(
+        self, command: DiscardProgressSave) -> SaveReceipt: ...
+
+
+class WorkFileCleaning(Protocol):
+    """动作归属中间文件清理端口；适配层组合 X11 的定向清理入口。"""
+
+    def action_work_files(self, action_id: int) -> tuple[int, ...]: ...
+
+    async def clean(self, file_id: int): ...
+
+
+@dataclass(frozen=True)
+class DiscardContext:
+    """一次取消收场的输入：处理身份、当前进度与端口。"""
+
+    processing_id: int
+    action_id: int
+    discard_state: int
+    saves: DiscardSaves
+    cleaning: WorkFileCleaning
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.processing_id)
+        ObjectId(self.action_id)
+        _state_int("discard_state", self.discard_state)
+
+
+async def execute_discard(context: DiscardContext) -> DiscardStep:
+    """执行取消后的处理收场：保存运行阶段并清理动作归属中间文件。
+
+    取消决定已可靠保存（PENDING）后才进入；执行中恢复入口沿用既有
+    进度重新核实。文件清理逐项进行，单项失败不中断其余；任一失败
+    保存失败终态与错误结构（文件身份），未决责任留给后续运行。提
+    升为正式产物的文件不归本收场清理。
+    """
+    state = context.discard_state
+    if state == int(_DISCARD_STATE.PENDING):
+        started = context.saves.save_discard_progress(DiscardProgressSave(
+            context.processing_id, DiscardPhase.RUNNING, context.occurred_at))
+        if started.disposition is SaveDisposition.REJECTED:
+            return DiscardStep(DiscardExecutionPhase.START_REJECTED,
+                               error=started.error)
+        if started.disposition is SaveDisposition.UNKNOWN:
+            return DiscardStep(DiscardExecutionPhase.START_UNKNOWN,
+                               error=started.error)
+    elif state != int(_DISCARD_STATE.RUNNING):
+        if state in (int(_DISCARD_STATE.COMPLETED), int(_DISCARD_STATE.FAILED),
+                     int(_DISCARD_STATE.UNKNOWN)):
+            return DiscardStep(DiscardExecutionPhase.ALREADY_FINISHED)
+        return DiscardStep(DiscardExecutionPhase.NOT_PENDING)
+
+    cleaned = failed = 0
+    failure: ProcessingError | None = None
+    for file_id in context.cleaning.action_work_files(context.action_id):
+        try:
+            outcome = await context.cleaning.clean(file_id)
+        except WorkFileCleanupError as error:
+            failure = ProcessingError(
+                code="cleanup_failed", stage="discard",
+                details={"stage": error.stage, "message": error.detail})
+            failed += 1
+            continue
+        if outcome.outcome is WorkFileSingleOutcome.FAILED:
+            failed += 1
+            if failure is None:
+                failure = ProcessingError(
+                    code=ACTION_WORK_FILE_DELETE_FAILED, stage="discard",
+                    details={"file_id": str(file_id),
+                             "message": outcome.detail or "删除失败"})
+        elif outcome.outcome is WorkFileSingleOutcome.DELETED:
+            cleaned += 1
+    if failure is not None:
+        command = DiscardProgressSave(
+            context.processing_id, DiscardPhase.FAILED, context.occurred_at,
+            error=failure)
+    else:
+        command = DiscardProgressSave(
+            context.processing_id, DiscardPhase.COMPLETED, context.occurred_at)
+    saved = context.saves.save_discard_progress(command)
+    if saved.disposition is SaveDisposition.REJECTED:
+        return DiscardStep(DiscardExecutionPhase.RESULT_REJECTED,
+                           cleaned=cleaned, failed=failed, error=saved.error)
+    if saved.disposition is SaveDisposition.UNKNOWN:
+        return DiscardStep(DiscardExecutionPhase.RESULT_UNKNOWN,
+                           cleaned=cleaned, failed=failed, error=saved.error)
+    if failure is not None:
+        return DiscardStep(DiscardExecutionPhase.CLEANUP_FAILED,
+                           cleaned=cleaned, failed=failed)
+    return DiscardStep(DiscardExecutionPhase.CLEANED,
+                       cleaned=cleaned, failed=failed)

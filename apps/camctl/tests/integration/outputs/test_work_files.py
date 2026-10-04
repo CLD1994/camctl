@@ -414,7 +414,7 @@ def test_same_run_reuses_first_attempt_for_same_file(work_env):
 
 def test_action_owned_delete_failure_keeps_responsibility(
         work_env, monkeypatch):
-    """动作归属候选删除失败：保留未决责任，继续处理其余记录。"""
+    """动作归属候选删除失败：保存文件身份错误详情，继续其余记录。"""
     owned, roots, qualification = work_env
     _cancel_delivery(owned, qualification.delivery_id)
     _release_ok(owned, qualification.target_file_id)
@@ -432,8 +432,11 @@ def test_action_owned_delete_failure_keeps_responsibility(
     scan = asyncio.run(clean_work_files(_context(owned, roots)))
     monkeypatch.undo()
     assert (scan.checked, scan.cleaned, scan.failed) == (2, 1, 1)
-    # 动作归属候选保留已保存意图的未决责任，错误对象尚无登记详情。
-    assert _file_state(owned, 900)[1] == 3
+    # 动作归属候选保存失败事实与登记的错误详情，责任留给后续运行。
+    retention, cleanup, error = _file_state(owned, 900)
+    assert (retention, cleanup) == (2, 5)
+    assert json.loads(error)["code"] == "action_work_file_delete_failed"
+    assert json.loads(error)["details"] == {"file_id": "900"}
     assert (roots.staging / "recording-inputs" / "900.bin").exists()
     # 交付副本正常清理，游标推进到本次最后检查的记录。
     assert _file_state(owned, qualification.target_file_id)[:2] == (2, 4)

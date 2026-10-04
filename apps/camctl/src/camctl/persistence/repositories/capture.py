@@ -15,6 +15,7 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
+from camctl.capture.media import RecordingFailure
 from camctl.capture.processing import (
     CheckDecisionSave,
     CheckResultSave,
@@ -34,6 +35,10 @@ from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordSta
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
+from camctl.contracts.workflow_errors import (
+    registered_error,
+    validate_error_details,
+)
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
@@ -86,6 +91,7 @@ _PROCESSED_DISCARD_REASON = 3
 
 _ACTION_RUNNING = 2
 _ACTION_SUCCEEDED = 3
+_ACTION_FAILED = 4
 _PLAN_COMPLETE = 3
 
 #: 动作终态集合。
@@ -112,12 +118,17 @@ _CAPTURE_TYPES = frozenset({
 
 @dataclass(frozen=True)
 class FinishCapture:
-    """一次录像完成登记的完整输入：终态事实与全部适用产物。"""
+    """一次录像完成登记的完整输入：终态事实与全部适用产物。
+
+    failure 为空保存成功终态；携带失败时按公共动作错误码保存执行
+    失败终态，产物登记与失败事实同事务提交。
+    """
 
     action_id: int
     drafts: tuple[OutputDraft, ...]
     catalog_facts: OutputCatalogFacts
     occurred_at: int
+    failure: RecordingFailure | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
@@ -422,9 +433,21 @@ class FinishCaptureCommand:
         self._state["plans"] = {plan["id"]: plan}
         if action["status"] != _ACTION_RUNNING or action["cancel_requested"]:
             raise TransactionError(
-                f"只有未取消的执行中动作能保存成功终态: {command.action_id}"
+                f"只有未取消的执行中动作能保存终态: {command.action_id}"
                 f" status={action['status']}"
             )
+        action_status = _ACTION_SUCCEEDED
+        error_id: int | None = None
+        error_details: dict[str, Any] | None = None
+        if command.failure is not None:
+            spec = registered_error(command.failure.code)
+            if "action_error_id" not in spec:
+                raise TransactionError(
+                    f"失败错误码不是动作错误: {command.failure.code!r}")
+            validate_error_details(command.failure.code, command.failure.details)
+            action_status = _ACTION_FAILED
+            error_id = spec["action_error_id"]
+            error_details = dict(command.failure.details)
 
         # 登记规则在同一事务内校验：任一草稿不合法整组拒绝。
         _capture_binding(action)
@@ -454,17 +477,34 @@ class FinishCaptureCommand:
                     self._required(connection, "outputs", relation["output_id"])
                 original_ids[identity] = original_id
 
+        if command.failure is None:
+            action_row = _update(
+                "actions",
+                command.action_id,
+                {"status": action["status"]},
+                {"status": _ACTION_SUCCEEDED},
+            )
+            action_reason = 1
+        else:
+            action_row = _update(
+                "actions",
+                command.action_id,
+                {
+                    "status": action["status"],
+                    "error_code": action["error_code"],
+                    "error_details_json": action["error_details_json"],
+                },
+                {
+                    "status": _ACTION_FAILED,
+                    "error_code": error_id,
+                    "error_details_json": error_details,
+                },
+            )
+            action_reason = 2
         templates = [
             _envelope(
-                0, 0, _ACTION_FINISHED_EVENT, 1,
-                (
-                    _update(
-                        "actions",
-                        command.action_id,
-                        {"status": action["status"]},
-                        {"status": _ACTION_SUCCEEDED},
-                    ),
-                ),
+                0, 0, _ACTION_FINISHED_EVENT, action_reason,
+                (action_row,),
                 command.occurred_at,
             )
         ]
@@ -558,7 +598,7 @@ class FinishCaptureCommand:
             state_rows=self._state,
             read_coverage=ReadCoverage(self._ranges),
             result=CaptureResult(
-                action_status=_ACTION_SUCCEEDED,
+                action_status=action_status,
                 plan_status=plan_status,
                 output_ids=tuple(identity for identity, _ in numbered),
             ),
