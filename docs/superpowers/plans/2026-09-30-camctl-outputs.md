@@ -242,13 +242,13 @@ X7 的阶段验证：`outputs/handoff.py` 提供 `decide_handoff`（七分区：
 
 **接口与依赖：** 提供 `classify_work_file(facts: WorkFileFacts) -> WorkFileDecision`、异步 `clean_work_files(scope: WorkFileCleanupScope) -> WorkFileCleanupResult`；事实含用途、归属、可恢复责任、真实任务状态及持久化游标。前置交付：F1/F2、X4、S1；先提供中间文件用途和生命周期端口，C8 随后消费。
 
-- [ ] 编写失败用例。在 `test_work_file_cleanup_does_not_restart_action` 中取消后完整 staging 副本删除失败，`assert action.status == original_terminal_status` 且不会单独 needs_run。可恢复输入保留、已成正式文件不清理、实际操作未结束不删；首次新文件清理与历史扫描预算分别计数。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_work_files.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。中间文件建立时就保存用途/归属；先可靠保存取消或失败，再等实际操作结束后清理。历史清理按批量、每 run 上限及可靠游标有限推进，失败留后续正常 run，不原地循环。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 历史及新文件清理遵守既定不同预算，诊断可靠保存后允许会话收尾。
+- [x] 编写失败用例。在 `test_work_file_cleanup_does_not_restart_action` 中取消后完整 staging 副本删除失败，`assert action.status == original_terminal_status` 且不会单独 needs_run。可恢复输入保留、已成正式文件不清理、实际操作未结束不删；首次新文件清理与历史扫描预算分别计数。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_work_files.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。（初始红：work_files 模块不存在。）
+- [x] 实施本任务。中间文件建立时就保存用途/归属；先可靠保存取消或失败，再等实际操作结束后清理。历史清理按批量、每 run 上限及可靠游标有限推进，失败留后续正常 run，不原地循环。
+- [x] 再运行上述命令，要求全部 PASS，并核对 历史及新文件清理遵守既定不同预算，诊断可靠保存后允许会话收尾。
+- [x] 审阅实际接口、状态分区及失败路径，检查 半成品、完整取消副本、检查输入和修复输出所有生命周期；记录门禁证据，建议以”feat: 实现中间文件有限维护”形成独立提交。
 
-随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_work_files.py -q`，真实文件和 SQLite 验证重启续查、额度边界、删除失败及内部修复文件提升。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 半成品、完整取消副本、检查输入和修复输出所有生命周期；记录门禁证据，建议以“feat: 实现中间文件有限维护”形成独立提交。
+X11 的阶段验证：`outputs/work_files.py` 提供 `classify_work_file`（决策表：PROMOTED/HANDED_OFF 不归自动清理；归属交付或动作未终态保留；归属终态但目标拷贝仍有 RUNNING 尝试时先收场；归属终态且操作停止才可清理，REQUIRED 由编排先释放；RELEASABLE+COMPLETED 不重复）、`WorkFileLimits`（`cleanup.work_file_batch_size`/`cleanup.work_file_limit_per_run` 均 ≥1 整数、布尔拒绝）、`CleanupScan`（固定上界、剩余额度、单轮绕回：绕回段上界为本次起始继续位置，批上限不越过剩余额度）与 `clean_work_files`/`clean_one_work_file` 编排（首次入口不推游标不占历史额度；同一文件被两个入口发现时经会话登记复用本次实际结果；意图→观察→删除→结果顺序，观察不可靠或删除失败按公共错误保存后继续其余记录）。仓储新增 `save_retention_release`（LIFECYCLE：REQUIRED→RELEASABLE 核对归属交付 PUBLISHED/FAILED/CANCELED 留存或失败取消、动作终态及无 RUNNING 尝试；HANDED_OFF→RELEASABLE 核对交付 PUBLISHED/WITHDRAWN；已 RELEASABLE 幂等只读）、`save_cleanup_intent`（CLEANUP_INTENT：PENDING/FAILED/UNKNOWN→RUNNING，RUNNING 或 COMPLETED 拒绝）、`save_cleanup_result`（CLEANUP_RESULT：进入 COMPLETED 清除错误、FAILED 保存 `work_file_delete_failed` 并关联交付；与 CLEANUP_CURSOR_MOVED 游标推进同事务）、`save_cleanup_checked`（仅游标推进）与只读 `load_work_file_state`/`next_cleanup_candidates`/`max_cleanup_candidate_id`/`load_cleanup_cursor`。`save_publication` 补齐同事务 HANDED_OFF（发布确认后副本所有权归交接位置；留存工作副本经 4→2 释放清理）。守卫扩展 CLEANUP_INTENT（只推进清理状态且要求已释放）、CLEANUP_RESULT（完成不带错误、失败错误经公共登记校验）并注册 cursor 守卫。动作归属文件（录像输入/处理临时/修复输出）删除失败时公共登记尚无不含业务 ID 的错误详情：保留已保存意图的未决责任（cleanup_state=RUNNING，下次正常运行重新核实），以游标事务保存检查位置，具体原因经编排诊断携带；C8 消费时再按需登记错误码。单元 48 项；集成 21 项覆盖核心不重开用例（删除失败动作与交付终态保持、无新动作收场事件、失败后重试成功）、归属活跃与未停尝试释放拒绝、PROMOTED 不清理、外力改变归属保留、文件已删补记完成、观察失败不冒充、额度先尽续查、绕回单轮、保留候选占额推进、批上限不越剩余、首次清理不占历史额度、同 run 复用不二次尝试、动作归属失败保留责任且其余记录继续、发布 HANDED_OFF、PUBLISHED 留存副本释放清理、四组原键恢复与输入不符拒绝、守卫接受真实事件并拒绝缺错误/带错误完成/意图改保留状态。
 
 ### X12 产物链及历史组合验收
 

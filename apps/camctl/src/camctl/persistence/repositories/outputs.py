@@ -39,6 +39,13 @@ from camctl.outputs.handoff import (
     PublicationIntentRequest, PublicationSaveOutcome, PublicationSaveRequest,
     UnconfirmedFailureSave,
 )
+from camctl.outputs.work_files import (
+    CleanupChecked, CleanupCheckedDisposition, CleanupCheckedOutcome,
+    CleanupIntent, CleanupIntentDisposition, CleanupIntentOutcome,
+    CleanupResultDisposition, CleanupResultSave, CleanupResultSaveOutcome,
+    RetentionDisposition, RetentionRelease, RetentionReleaseOutcome,
+    WorkFileFailure, WorkFileFacts, WorkFileOutcome,
+)
 from camctl.outputs.definitions import read_selection_request
 from camctl.outputs.sources import (
     ActionFacts,
@@ -92,6 +99,11 @@ _READ_PERMISSION_EVENT = 21
 _COPY_CHANGED_EVENT = 22
 _DELIVERY_CHANGED_EVENT = 23
 _INTERMEDIATE_FILE_EVENT = 26
+_CLEANUP_CURSOR_EVENT = 32
+#: INTERMEDIATE_FILE_CHANGED.CLEANUP_INTENT/RESULT 与 CLEANUP_CURSOR_MOVED.CHECKED。
+_CLEANUP_INTENT_REASON = 3
+_CLEANUP_RESULT_REASON = 4
+_CURSOR_CHECKED_REASON = 1
 _OPERATION_CONFIGURED_EVENT = 10
 
 _FIX_REASON = 1
@@ -3301,9 +3313,9 @@ class _PreparedSaveCommand(_CopyCompletionTablesMixin):
 
 
 class _DeliveryPublicationMixin:
-    """交付发布事务的共同表事实：交付行、唯一拷贝与发起动作。"""
+    """交付发布事务的共同表事实：交付行、唯一拷贝、目标文件与发起动作。"""
 
-    _TABLES = ("deliveries", "file_copies", "actions")
+    _TABLES = ("deliveries", "file_copies", "actions", "intermediate_files")
 
     def _reset_state(self) -> None:
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
@@ -3335,6 +3347,17 @@ class _DeliveryPublicationMixin:
             raise ConsistencyError(f"交付的发起动作缺失: {delivery['action_id']}")
         self._state["actions"][action["id"]] = action
         return action
+
+    def _load_target(self, connection, copy) -> dict:
+        target = row_facts(
+            connection, "intermediate_files", copy["target_file_id"])
+        if target is None:
+            raise ConsistencyError(
+                f"交付拷贝的目标中间文件缺失: {copy['target_file_id']}")
+        self._state["intermediate_files"][target["id"]] = target
+        self._owners[("intermediate_files", target["id"])] = (
+            "intermediate_file", target["id"])
+        return target
 
     def _decision(self, result, *, read_only: bool = False) -> CommandPlan:
         return CommandPlan(
@@ -3454,7 +3477,7 @@ class _PublicationSaveCommand(_DeliveryPublicationMixin):
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
             return self._reuse(saved)
-        delivery, _copy = self._load_delivery(connection, self._request.delivery_id)
+        delivery, copy = self._load_delivery(connection, self._request.delivery_id)
         status = delivery["status"]
         if status == int(_DELIVERY_STATUS.PUBLISHED):
             if delivery["published_event_id"] is None:
@@ -3472,11 +3495,22 @@ class _PublicationSaveCommand(_DeliveryPublicationMixin):
         else:
             raise ConsistencyError(
                 f"交付状态不能保存本地完成事实: {status!r}")
+        target = self._load_target(connection, copy)
+        if target["retention_state"] == int(_RETENTION.REQUIRED):
+            # 交接完成后副本所有权归交接位置；留存工作副本经释放流程清理。
+            specs.append((_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON))
+        elif target["retention_state"] != int(_RETENTION.HANDED_OFF):
+            raise ConsistencyError(
+                "交付完成时目标文件的保留状态不可交接:"
+                f" {target['retention_state']!r}")
         allocation = scope.allocate(len(specs))
         first = allocation.first_event_id
+        publish_id = first + specs.index(
+            (_DELIVERY_CHANGED_EVENT, _PUBLISH_REASON))
         rows_by_reason = {
             _INTENT_REASON: (self._intent_row(delivery, first),),
-            _PUBLISH_REASON: (self._publish_row(delivery, first + len(specs) - 1),),
+            _PUBLISH_REASON: (self._publish_row(delivery, publish_id),),
+            _LIFECYCLE_REASON: (self._handoff_row(target),),
         }
         events = tuple(
             _envelope(
@@ -3491,12 +3525,20 @@ class _PublicationSaveCommand(_DeliveryPublicationMixin):
             result=PublicationSaveOutcome(PublicationDisposition.SAVED),
         )
 
+    def _handoff_row(self, target):
+        return _update(
+            "intermediate_files", target["id"],
+            {"retention_state": int(_RETENTION.REQUIRED)},
+            {"retention_state": int(_RETENTION.HANDED_OFF)},
+        )
+
     def _reuse(self, saved: list[dict]) -> CommandPlan:
         """原键恢复首次完成事实响应；覆盖补意图与直接保存两组合。"""
         types = [(event["type"], event["reason"]) for event in saved]
         expected = [
             (_DELIVERY_CHANGED_EVENT, _INTENT_REASON),
             (_DELIVERY_CHANGED_EVENT, _PUBLISH_REASON),
+            (_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON),
         ]
         if types != expected and types != expected[1:]:
             raise TransactionError("操作身份已用于其他阶段，不能作为完成事实重送")
@@ -3559,6 +3601,409 @@ class _UnconfirmedFailureCommand(_DeliveryPublicationMixin):
             raise TransactionError("终局失败的事实时刻与原事务不同")
         return self._decision(
             FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
+
+
+class _WorkFileMixin:
+    """中间文件清理事务的共同表事实：文件行、归属与运行状态。"""
+
+    _TABLES = ("intermediate_files", "deliveries", "actions", "runtime_state")
+
+    #: REQUIRED→RELEASABLE 允许的归属交付终态：留存副本、失败与取消。
+    _REQUIRED_RELEASE_DELIVERY = frozenset({
+        int(_DELIVERY_STATUS.PUBLISHED),
+        int(_DELIVERY_STATUS.FAILED),
+        int(_DELIVERY_STATUS.CANCELED),
+    })
+    #: HANDED_OFF→RELEASABLE 允许的归属交付终态：留存副本与已撤回。
+    _HANDOFF_RELEASE_DELIVERY = frozenset({
+        int(_DELIVERY_STATUS.PUBLISHED),
+        int(_DELIVERY_STATUS.WITHDRAWN),
+    })
+    _TERMINAL_ACTIONS = frozenset({3, 4, 5, 6})
+    _TERMINAL_DELIVERIES = frozenset({
+        int(_DELIVERY_STATUS.PUBLISHED),
+        int(_DELIVERY_STATUS.FAILED),
+        int(_DELIVERY_STATUS.CANCELED),
+        int(_DELIVERY_STATUS.WITHDRAWN),
+    })
+
+    def _reset_state(self) -> None:
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def _load_file(self, connection, file_id: int) -> dict:
+        file = row_facts(connection, "intermediate_files", file_id)
+        if file is None:
+            raise ConsistencyError(f"中间文件记录不存在: {file_id}")
+        self._state["intermediate_files"][file["id"]] = file
+        self._owners[("intermediate_files", file["id"])] = (
+            "intermediate_file", file["id"])
+        return file
+
+    def _load_owner(self, connection, file) -> tuple[dict, str]:
+        """归属交付或动作行；归属缺失属于状态库矛盾。"""
+        if file["owner_delivery_id"] is not None:
+            owner = row_facts(
+                connection, "deliveries", file["owner_delivery_id"])
+            table = "deliveries"
+        else:
+            owner = row_facts(
+                connection, "actions", file["owner_action_id"])
+            table = "actions"
+        if owner is None:
+            raise ConsistencyError(
+                f"中间文件的归属记录缺失: {file['id']}")
+        self._state[table][owner["id"]] = owner
+        return owner, table
+
+    def _require_stopped_operations(self, connection, file) -> None:
+        """释放前核对目标拷贝没有未结束的读取尝试。"""
+        with closing(connection.execute(
+            "SELECT COUNT(*) FROM operation_attempts AS a"
+            " JOIN operation_runs AS r ON a.run_id = r.id"
+            " JOIN file_copies AS c ON r.copy_id = c.id"
+            " WHERE c.target_file_id = ? AND a.status = 1",
+            (file["id"],),
+        )) as cursor:
+            running = cursor.fetchone()[0]
+        if running:
+            raise ConsistencyError(
+                f"中间文件 {file['id']} 仍有 {running} 个未结束操作尝试")
+
+    def _cursor_row(self, connection, file_id: int):
+        """历史清理游标推进行；引用本次可靠检查的中间文件。"""
+        with closing(connection.execute(
+            "SELECT cleanup_cursor_file_id FROM runtime_state WHERE id = 1",
+        )) as cursor:
+            saved = cursor.fetchone()
+        if saved is None:
+            raise ConsistencyError("全局运行状态记录缺失")
+        current = saved[0]
+        if current == file_id:
+            return None
+        self._owners[("runtime_state", 1)] = ("runtime_state", 1)
+        self._state["runtime_state"][1] = {"cleanup_cursor_file_id": current}
+        return _update(
+            "runtime_state", 1,
+            {"cleanup_cursor_file_id": current},
+            {"cleanup_cursor_file_id": file_id},
+        )
+
+    def _decision(self, result, *, read_only: bool = False) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            result=result, read_only=read_only,
+        )
+
+
+class _RetentionReleaseCommand(_WorkFileMixin):
+    """释放保留状态事务命令。
+
+    归属交付或动作已可靠终态、目标拷贝没有未结束尝试时，把
+    REQUIRED（或已交接后的 HANDED_OFF）推进到 RELEASABLE 并建立
+    清理待办；这是清理意图与物理删除的共同前提。
+    """
+
+    def __init__(self, request: RetentionRelease, key: OperationKey) -> None:
+        if not isinstance(request, RetentionRelease):
+            raise TypeError("释放申请必须使用 RetentionRelease")
+        self._request = request
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        file = self._load_file(connection, self._request.file_id)
+        retention = file["retention_state"]
+        if retention == int(_RETENTION.RELEASABLE):
+            return self._decision(
+                RetentionReleaseOutcome(RetentionDisposition.ALREADY),
+                read_only=True)
+        owner, table = self._load_owner(connection, file)
+        if retention == int(_RETENTION.REQUIRED):
+            allowed = (self._REQUIRED_RELEASE_DELIVERY if table == "deliveries"
+                       else self._TERMINAL_ACTIONS)
+        elif retention == int(_RETENTION.HANDED_OFF):
+            if table != "deliveries":
+                raise ConsistencyError("动作归属文件没有已交接保留状态")
+            allowed = self._HANDOFF_RELEASE_DELIVERY
+        else:
+            raise ConsistencyError(
+                f"已提升为正式产物的文件不能释放清理: {retention!r}")
+        if owner["status"] not in allowed:
+            raise ConsistencyError(
+                f"归属尚未进入允许释放的终态: {owner['status']!r}")
+        self._require_stopped_operations(connection, file)
+        row = _update(
+            "intermediate_files", file["id"],
+            {"retention_state": retention,
+             "cleanup_state": int(_FILE_CLEANUP.NOT_NEEDED)},
+            {"retention_state": int(_RETENTION.RELEASABLE),
+             "cleanup_state": int(_FILE_CLEANUP.PENDING)},
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON, (row,),
+            self._request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=RetentionReleaseOutcome(RetentionDisposition.RELEASED),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次释放响应。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为释放重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("释放的事实时刻与原事务不同")
+        return self._decision(
+            RetentionReleaseOutcome(RetentionDisposition.ALREADY),
+            read_only=True)
+
+
+class _CleanupIntentCommand(_WorkFileMixin):
+    """自动清理意图事务命令：意图先于物理删除可靠保存。"""
+
+    def __init__(self, request: CleanupIntent, key: OperationKey) -> None:
+        if not isinstance(request, CleanupIntent):
+            raise TypeError("意图申请必须使用 CleanupIntent")
+        self._request = request
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        file = self._load_file(connection, self._request.file_id)
+        if file["retention_state"] != int(_RETENTION.RELEASABLE):
+            raise ConsistencyError(
+                "清理意图要求文件已释放保留状态:"
+                f" {file['retention_state']!r}")
+        cleanup = file["cleanup_state"]
+        if cleanup == int(_FILE_CLEANUP.RUNNING):
+            raise ConsistencyError("清理意图已保存，等待实际结果")
+        if cleanup == int(_FILE_CLEANUP.COMPLETED):
+            raise ConsistencyError("清理已完成，不再保存意图")
+        if cleanup not in (
+            int(_FILE_CLEANUP.PENDING),
+            int(_FILE_CLEANUP.FAILED),
+            int(_FILE_CLEANUP.UNKNOWN),
+        ):
+            raise ConsistencyError(f"清理状态不能保存意图: {cleanup!r}")
+        row = _update(
+            "intermediate_files", file["id"],
+            {"cleanup_state": cleanup},
+            {"cleanup_state": int(_FILE_CLEANUP.RUNNING)},
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _INTERMEDIATE_FILE_EVENT, _CLEANUP_INTENT_REASON, (row,),
+            self._request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=CleanupIntentOutcome(CleanupIntentDisposition.SAVED),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次意图响应。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_INTERMEDIATE_FILE_EVENT, _CLEANUP_INTENT_REASON)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为清理意图重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("清理意图的事实时刻与原事务不同")
+        return self._decision(
+            CleanupIntentOutcome(CleanupIntentDisposition.ALREADY),
+            read_only=True)
+
+
+class _CleanupResultCommand(_WorkFileMixin):
+    """自动清理结果事务命令；可与游标推进同事务提交。
+
+    完成清除当前错误；失败保存按公共登记构造的错误对象。恢复
+    观察到文件已不存在时按完成补记，不重复物理删除。
+    """
+
+    def __init__(self, request: CleanupResultSave, key: OperationKey) -> None:
+        if not isinstance(request, CleanupResultSave):
+            raise TypeError("结果申请必须使用 CleanupResultSave")
+        self._request = request
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        file = self._load_file(connection, self._request.file_id)
+        if file["retention_state"] != int(_RETENTION.RELEASABLE):
+            raise ConsistencyError(
+                "清理结果要求文件处于释放保留状态:"
+                f" {file['retention_state']!r}")
+        before = file["cleanup_state"]
+        if before not in (
+            int(_FILE_CLEANUP.PENDING),
+            int(_FILE_CLEANUP.RUNNING),
+            int(_FILE_CLEANUP.FAILED),
+            int(_FILE_CLEANUP.UNKNOWN),
+        ):
+            raise ConsistencyError(f"清理状态不能保存结果: {before!r}")
+        after = (int(_FILE_CLEANUP.COMPLETED)
+                 if self._request.outcome is WorkFileOutcome.COMPLETED
+                 else int(_FILE_CLEANUP.FAILED))
+        error_json = (None if self._request.error is None
+                      else self._request.error.as_json())
+        specs = [(
+            _INTERMEDIATE_FILE_EVENT, _CLEANUP_RESULT_REASON,
+            (_update(
+                "intermediate_files", file["id"],
+                {"cleanup_state": before,
+                 "last_error_json": file["last_error_json"]},
+                {"cleanup_state": after, "last_error_json": error_json},
+            ),),
+        )]
+        if self._request.advance_cursor:
+            cursor_row = self._cursor_row(connection, file["id"])
+            if cursor_row is not None:
+                specs.append((
+                    _CLEANUP_CURSOR_EVENT, _CURSOR_CHECKED_REASON,
+                    (cursor_row,),
+                ))
+        allocation = scope.allocate(len(specs))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, reason, rows, self._request.occurred_at,
+            )
+            for index, (event_type, reason, rows) in enumerate(specs)
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=CleanupResultSaveOutcome(CleanupResultDisposition.SAVED),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次结果响应；游标推进可选共存。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        expected = [
+            (_INTERMEDIATE_FILE_EVENT, _CLEANUP_RESULT_REASON),
+            (_CLEANUP_CURSOR_EVENT, _CURSOR_CHECKED_REASON),
+        ]
+        if types != expected and types != expected[:1]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为清理结果重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("清理结果的事实时刻与原事务不同")
+        return self._decision(
+            CleanupResultSaveOutcome(CleanupResultDisposition.ALREADY),
+            read_only=True)
+
+
+class _CleanupCheckedCommand(_WorkFileMixin):
+    """历史清理游标推进事务命令。
+
+    检查过但本次不能安全删除的记录经此保存继续位置；只更新
+    runtime_state 的清理字段组，不产生业务变化。
+    """
+
+    def __init__(self, request: CleanupChecked, key: OperationKey) -> None:
+        if not isinstance(request, CleanupChecked):
+            raise TypeError("游标申请必须使用 CleanupChecked")
+        self._request = request
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        file = self._load_file(connection, self._request.file_id)
+        row = self._cursor_row(connection, file["id"])
+        if row is None:
+            return self._decision(
+                CleanupCheckedOutcome(CleanupCheckedDisposition.ALREADY),
+                read_only=True)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _CLEANUP_CURSOR_EVENT, _CURSOR_CHECKED_REASON, (row,),
+            self._request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=CleanupCheckedOutcome(CleanupCheckedDisposition.SAVED),
+        )
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次游标推进响应。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_CLEANUP_CURSOR_EVENT, _CURSOR_CHECKED_REASON)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为游标推进重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("游标推进的事实时刻与原事务不同")
+        return self._decision(
+            CleanupCheckedOutcome(CleanupCheckedDisposition.ALREADY),
+            read_only=True)
+
+
+def _load_work_file_facts(connection, file_id: int) -> WorkFileFacts:
+    """只读加载一份中间文件的清理判定事实。
+
+    归属终态与操作停止都按当前可靠记录核实；记录缺失或不可解释
+    属于状态库矛盾，不解释为归属活跃或已停止。
+    """
+    ObjectId(file_id)
+    file = row_facts(connection, "intermediate_files", file_id)
+    if file is None:
+        raise ConsistencyError(f"中间文件记录不存在: {file_id}")
+    if file["owner_delivery_id"] is not None:
+        delivery = row_facts(
+            connection, "deliveries", file["owner_delivery_id"])
+        if delivery is None:
+            raise ConsistencyError(
+                f"中间文件的归属交付缺失: {file['owner_delivery_id']}")
+        owner_finished = delivery["status"] in _WorkFileMixin._TERMINAL_DELIVERIES
+    else:
+        action = row_facts(
+            connection, "actions", file["owner_action_id"])
+        if action is None:
+            raise ConsistencyError(
+                f"中间文件的归属动作缺失: {file['owner_action_id']}")
+        owner_finished = action["status"] in _WorkFileMixin._TERMINAL_ACTIONS
+    with closing(connection.execute(
+        "SELECT COUNT(*) FROM operation_attempts AS a"
+        " JOIN operation_runs AS r ON a.run_id = r.id"
+        " JOIN file_copies AS c ON r.copy_id = c.id"
+        " WHERE c.target_file_id = ? AND a.status = 1",
+        (file_id,),
+    )) as cursor:
+        operations_stopped = cursor.fetchone()[0] == 0
+    try:
+        return WorkFileFacts(
+            file_id=file_id,
+            purpose=file["purpose"],
+            owner_action_id=file["owner_action_id"],
+            owner_delivery_id=file["owner_delivery_id"],
+            relative_path=file["relative_path"],
+            retention_state=file["retention_state"],
+            cleanup_state=file["cleanup_state"],
+            owner_finished=owner_finished,
+            operations_stopped=operations_stopped,
+        )
+    except ValueError as error:
+        raise ConsistencyError(f"中间文件事实不可解释: {error}") from error
 
 
 def _load_delivery_state_facts(
@@ -3708,6 +4153,73 @@ class OutputsRepository:
         receipt = commit_operation(
             _UnconfirmedFailureCommand(request, key), key, owned)
         return _outcome_of(receipt)
+
+    def load_work_file_state(
+        self, file_id: int, owned: OwnedConnection,
+    ) -> WorkFileFacts:
+        return _load_work_file_facts(owned.connection, file_id)
+
+    def save_retention_release(
+        self, request: RetentionRelease, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[RetentionReleaseOutcome]:
+        receipt = commit_operation(
+            _RetentionReleaseCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_cleanup_intent(
+        self, request: CleanupIntent, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CleanupIntentOutcome]:
+        receipt = commit_operation(
+            _CleanupIntentCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_cleanup_result(
+        self, request: CleanupResultSave, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CleanupResultSaveOutcome]:
+        receipt = commit_operation(
+            _CleanupResultCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def save_cleanup_checked(
+        self, request: CleanupChecked, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CleanupCheckedOutcome]:
+        receipt = commit_operation(
+            _CleanupCheckedCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def load_cleanup_cursor(self, owned: OwnedConnection) -> int | None:
+        with closing(owned.connection.execute(
+            "SELECT cleanup_cursor_file_id FROM runtime_state WHERE id = 1",
+        )) as cursor:
+            saved = cursor.fetchone()
+        if saved is None:
+            raise ConsistencyError("全局运行状态记录缺失")
+        return saved[0]
+
+    def next_cleanup_candidates(
+        self, after_id: int, ceiling: int, limit: int,
+        owned: OwnedConnection,
+    ) -> tuple[int, ...]:
+        if limit <= 0:
+            return ()
+        with closing(owned.connection.execute(
+            "SELECT id FROM intermediate_files"
+            " WHERE retention_state = 2 AND cleanup_state <> 4"
+            " AND id > ? AND id <= ? ORDER BY id LIMIT ?",
+            (after_id, ceiling, limit),
+        )) as cursor:
+            return tuple(int(row[0]) for row in cursor.fetchall())
+
+    def max_cleanup_candidate_id(self, owned: OwnedConnection) -> int:
+        with closing(owned.connection.execute(
+            "SELECT MAX(id) FROM intermediate_files"
+            " WHERE retention_state = 2 AND cleanup_state <> 4",
+        )) as cursor:
+            return int(cursor.fetchone()[0] or 0)
 
 
 def _outcome_of(receipt) -> DbOutcome:
@@ -3910,6 +4422,66 @@ def _intermediate_guard(event, context) -> None:
             if "sha256" in after or "size_bytes" in after:
                 if after.get("sha256") is None or after.get("size_bytes") is None:
                     raise EventValidationError("完整字节事实必须同时携带长度与摘要")
+    elif event.event_type == _INTERMEDIATE_FILE_EVENT \
+            and event.reason == _CLEANUP_INTENT_REASON:
+        for row in event.rows:
+            if row.table != "intermediate_files" or not row.before.exists:
+                raise EventValidationError("清理意图必须是中间文件更新行")
+            after = row.after.values
+            if set(after) != {"cleanup_state"}:
+                raise EventValidationError("清理意图只推进清理状态")
+            if after.get("cleanup_state") != int(_FILE_CLEANUP.RUNNING):
+                raise EventValidationError("清理意图必须推进到 RUNNING")
+            file = context.state_rows.get("intermediate_files", {}).get(row.row_id)
+            if file is None or file.get("retention_state") != int(_RETENTION.RELEASABLE):
+                raise EventValidationError("清理意图要求文件已释放保留")
+    elif event.event_type == _INTERMEDIATE_FILE_EVENT \
+            and event.reason == _CLEANUP_RESULT_REASON:
+        for row in event.rows:
+            if row.table != "intermediate_files" or not row.before.exists:
+                raise EventValidationError("清理结果必须是中间文件更新行")
+            after = row.after.values
+            if set(after) - {"cleanup_state", "last_error_json"}:
+                raise EventValidationError("清理结果只更新清理状态与错误")
+            target = after.get("cleanup_state")
+            if target not in (
+                int(_FILE_CLEANUP.COMPLETED),
+                int(_FILE_CLEANUP.FAILED),
+                int(_FILE_CLEANUP.UNKNOWN),
+            ):
+                raise EventValidationError("清理结果必须进入完成或失败分区")
+            error = after.get("last_error_json")
+            if target == int(_FILE_CLEANUP.COMPLETED) and error is not None:
+                raise EventValidationError("清理完成不得携带错误")
+            if target in (
+                int(_FILE_CLEANUP.FAILED), int(_FILE_CLEANUP.UNKNOWN),
+            ):
+                if not isinstance(error, Mapping):
+                    raise EventValidationError("清理失败必须保存结构化错误")
+                code, stage = error.get("code"), error.get("stage")
+                details = error.get("details")
+                try:
+                    spec = registered_error(code)
+                    if stage != spec["stage"]:
+                        raise ValueError(
+                            f"失败阶段与公共登记不符: {stage!r} != {spec['stage']!r}")
+                    validate_error_details(code, details)
+                except (TypeError, ValueError) as failure:
+                    raise EventValidationError(str(failure)) from failure
+
+
+def _cursor_guard(event, context) -> None:
+    """历史清理游标守卫：只推进继续位置且必须指向已检查文件。"""
+    if event.event_type == _CLEANUP_CURSOR_EVENT \
+            and event.reason == _CURSOR_CHECKED_REASON:
+        for row in event.rows:
+            if row.table != "runtime_state" or not row.before.exists:
+                raise EventValidationError("游标推进必须是运行状态更新行")
+            after = row.after.values
+            if set(after) != {"cleanup_cursor_file_id"}:
+                raise EventValidationError("游标事件只更新清理继续位置")
+            if after.get("cleanup_cursor_file_id") is None:
+                raise EventValidationError("游标推进必须指向已检查的中间文件")
 
 
 def _delivery_guard(event, context) -> None:
@@ -4470,6 +5042,7 @@ def register_outputs_guards() -> None:
     register_guard("selection_initialization", _selection_initialization_guard)
     register_guard("source_selection", _source_selection_guard)
     register_guard("intermediate", _intermediate_guard)
+    register_guard("cursor", _cursor_guard)
     register_guard("delivery", _delivery_guard)
     register_guard("copy", _copy_guard)
     register_guard("copy_links", _copy_links_guard)

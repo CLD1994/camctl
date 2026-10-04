@@ -590,7 +590,8 @@ def test_guard_accepts_backfill_publication_events(prepared_env):
             delivery_id=qualification.delivery_id, occurred_at=_NOW + 9),
         new_operation_key()))
     reasons = [event.reason for event in plan.events]
-    assert reasons == [3, 4]
+    # 意图、完成与目标文件交接（HANDED_OFF）在同一事务共同保存。
+    assert reasons == [3, 4, 2]
     _validate(plan)
 
 
