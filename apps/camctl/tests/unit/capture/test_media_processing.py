@@ -4,6 +4,10 @@
 触发；仅下界证据时下界超门槛即确认多录，未超不能证明无需修复；
 计时不足按未知进入原片检查；正常完成不触发异常修复；修复决定
 不替代采集结果。
+
+第二段覆盖处理状态推进命令与检查结果分类：决定与依据的配对、
+媒体观察的组合约束、结果命令的文件与错误互斥，以及门槛分类在
+边界上的精确划分。
 """
 
 from __future__ import annotations
@@ -18,6 +22,29 @@ from camctl.capture.media import (
     MediaPolicy,
     RecordingEvidence,
     decide_media_processing,
+)
+from camctl.capture.processing import (
+    CheckBasis,
+    CheckDecisionChoice,
+    CheckDecisionSave,
+    CheckDurationClass,
+    CheckPhase,
+    CheckReason,
+    CheckResultSave,
+    DiscardPhase,
+    DiscardProgressSave,
+    MediaObservation,
+    ProcessingDisposition,
+    ProcessingError,
+    RepairBasis,
+    RepairDecisionChoice,
+    RepairDecisionSave,
+    RepairOutcome,
+    RepairReason,
+    RepairResultSave,
+    SourceFileSave,
+    classify_check_duration,
+    repair_basis_from_check,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -138,3 +165,305 @@ class TestResultSeparation:
     async def test_media_kinds_are_distinct(self) -> None:
         assert MediaKind.ORIGINAL is not MediaKind.REPAIRED
         assert MediaKind.ORIGINAL is not MediaKind.TEMP_OUTPUT
+
+
+# ---- 处理状态推进命令与检查结果分类 ----
+
+
+def _basis(**overrides) -> CheckBasis:
+    values = dict(
+        reason=CheckReason.INSUFFICIENT_TIMING,
+        target_duration_ms=60_000,
+        control_elapsed_ns=None,
+        continuity_evidence=None,
+    )
+    values.update(overrides)
+    return CheckBasis(**values)
+
+
+def _error(code: str = "tool_failed") -> ProcessingError:
+    return ProcessingError(code=code, stage="media", details={"exit": 1})
+
+
+class TestProcessingError:
+    async def test_rejects_blank_code_and_non_mapping_details(self) -> None:
+        with pytest.raises(ValueError):
+            ProcessingError(code="", stage="media", details={})
+        with pytest.raises(ValueError):
+            ProcessingError(code="probe_failed", stage="", details={})
+        with pytest.raises(TypeError):
+            ProcessingError(code="probe_failed", stage="media", details=[("a", 1)])
+
+    async def test_as_json_keeps_protocol_shape(self) -> None:
+        assert _error().as_json() == {
+            "code": "tool_failed", "stage": "media", "details": {"exit": 1}}
+
+
+class TestCheckBasis:
+    async def test_rejects_invalid_numbers_and_flags(self) -> None:
+        with pytest.raises(ValueError):
+            _basis(target_duration_ms=0)
+        with pytest.raises(TypeError):
+            _basis(target_duration_ms=True)
+        with pytest.raises(ValueError):
+            _basis(control_elapsed_ns=-1)
+        with pytest.raises(TypeError):
+            _basis(control_elapsed_ns=True)
+
+    async def test_continuity_evidence_must_be_non_empty_tuple(self) -> None:
+        with pytest.raises(ValueError):
+            _basis(continuity_evidence=())
+        with pytest.raises(TypeError):
+            _basis(continuity_evidence=["anchor"])
+
+    async def test_as_json_omits_unknown_members(self) -> None:
+        assert _basis().as_json() == {
+            "reason": 2, "target_duration_ms": 60_000}
+        assert _basis(
+            control_elapsed_ns=70_500_000_000,
+            continuity_evidence=("anchor", "same-segment"),
+        ).as_json() == {
+            "reason": 2, "target_duration_ms": 60_000,
+            "control_elapsed_ns": 70_500_000_000,
+            "continuity_evidence": ["anchor", "same-segment"]}
+
+
+class TestRepairBasis:
+    async def test_threshold_required_for_threshold_reasons(self) -> None:
+        with pytest.raises(ValueError):
+            RepairBasis(
+                reason=RepairReason.BELOW_THRESHOLD,
+                target_duration_ms=60_000, threshold_s=None)
+        with pytest.raises(ValueError):
+            RepairBasis(
+                reason=RepairReason.THRESHOLD_REACHED,
+                target_duration_ms=60_000, threshold_s=None)
+
+    async def test_threshold_forbidden_for_other_reasons(self) -> None:
+        for reason in (RepairReason.NO_USABLE_INPUT, RepairReason.CANCELED):
+            with pytest.raises(ValueError):
+                RepairBasis(
+                    reason=reason, target_duration_ms=60_000,
+                    threshold_s=Decimal("70"))
+
+    async def test_seconds_must_be_finite_non_negative(self) -> None:
+        with pytest.raises(ValueError):
+            RepairBasis(
+                reason=RepairReason.BELOW_THRESHOLD,
+                target_duration_ms=60_000, threshold_s=Decimal("-1"))
+        with pytest.raises(ValueError):
+            RepairBasis(
+                reason=RepairReason.BELOW_THRESHOLD,
+                target_duration_ms=60_000, threshold_s=Decimal("NaN"))
+        with pytest.raises(ValueError):
+            RepairBasis(
+                reason=RepairReason.THRESHOLD_REACHED,
+                target_duration_ms=60_000, threshold_s=Decimal("70"),
+                actual_duration_s=Decimal("-0.5"))
+
+    async def test_as_json_keeps_exact_decimals(self) -> None:
+        basis = RepairBasis(
+            reason=RepairReason.THRESHOLD_REACHED,
+            target_duration_ms=60_000, threshold_s=Decimal("70"),
+            actual_duration_s=Decimal("75.125"))
+        assert basis.as_json() == {
+            "reason": 2, "target_duration_ms": 60_000,
+            "threshold_s": Decimal("70"),
+            "actual_duration_s": Decimal("75.125")}
+
+
+class TestMediaObservation:
+    async def test_completed_requires_duration_without_error(self) -> None:
+        with pytest.raises(ValueError):
+            MediaObservation(CheckPhase.COMPLETED, duration_s=None)
+        with pytest.raises(ValueError):
+            MediaObservation(
+                CheckPhase.COMPLETED, duration_s=Decimal("65"), error=_error())
+        assert MediaObservation(
+            CheckPhase.COMPLETED, duration_s=Decimal("0")).as_json() == {
+            "check_status": "completed",
+            "duration": {"status": "available", "seconds": Decimal("0")}}
+
+    async def test_failed_and_unconfirmed_require_error(self) -> None:
+        for phase in (CheckPhase.FAILED, CheckPhase.UNCONFIRMED):
+            with pytest.raises(ValueError):
+                MediaObservation(phase, duration_s=None)
+
+    async def test_running_has_no_conclusion(self) -> None:
+        with pytest.raises(ValueError):
+            MediaObservation(CheckPhase.RUNNING, duration_s=Decimal("65"))
+        with pytest.raises(ValueError):
+            MediaObservation(CheckPhase.RUNNING, error=_error())
+
+    async def test_issues_allowed_with_completed(self) -> None:
+        observation = MediaObservation(
+            CheckPhase.COMPLETED, duration_s=Decimal("65"),
+            issues=(ProcessingError(
+                "invalid_media", "media", {"at_s": "1"}),))
+        document = observation.as_json()
+        assert document["issues"] == [
+            {"code": "invalid_media", "stage": "media", "details": {"at_s": "1"}}]
+
+    async def test_unknown_duration_uses_status_object(self) -> None:
+        document = MediaObservation(
+            CheckPhase.UNCONFIRMED, error=_error("check_failed")).as_json()
+        assert document["duration"] == {"status": "unknown"}
+        assert "issues" not in document
+
+    async def test_duration_must_be_finite_non_negative(self) -> None:
+        with pytest.raises(ValueError):
+            MediaObservation(
+                CheckPhase.COMPLETED, duration_s=Decimal("-1"))
+
+
+class TestDecisionCommands:
+    _AT = 1
+
+    async def test_check_decision_pairs_reason_with_choice(self) -> None:
+        assert CheckDecisionSave(
+            1, CheckDecisionChoice.REQUIRED, _basis(),
+            occurred_at=self._AT).decision is CheckDecisionChoice.REQUIRED
+        assert CheckDecisionSave(
+            1, CheckDecisionChoice.NOT_NEEDED,
+            _basis(reason=CheckReason.CONTINUOUS_CONTROL_COMPLETE),
+            occurred_at=self._AT,
+        ).decision is CheckDecisionChoice.NOT_NEEDED
+        assert CheckDecisionSave(
+            1, CheckDecisionChoice.NOT_NEEDED,
+            _basis(reason=CheckReason.EXCESS_DURATION_CHECK),
+            occurred_at=self._AT,
+        ).decision is CheckDecisionChoice.NOT_NEEDED
+
+    async def test_check_decision_rejects_mismatched_pairs(self) -> None:
+        with pytest.raises(ValueError):
+            CheckDecisionSave(
+                1, CheckDecisionChoice.REQUIRED,
+                _basis(reason=CheckReason.CONTINUOUS_CONTROL_COMPLETE),
+                occurred_at=self._AT)
+        with pytest.raises(ValueError):
+            CheckDecisionSave(
+                1, CheckDecisionChoice.NOT_NEEDED, _basis(),
+                occurred_at=self._AT)
+
+    async def test_repair_decision_pairs_reason_with_state(self) -> None:
+        RepairDecisionSave(
+            1, RepairDecisionChoice.PENDING, RepairBasis(
+                reason=RepairReason.THRESHOLD_REACHED,
+                target_duration_ms=60_000, threshold_s=Decimal("70")),
+            occurred_at=self._AT)
+        RepairDecisionSave(
+            1, RepairDecisionChoice.NOT_NEEDED, RepairBasis(
+                reason=RepairReason.NO_USABLE_INPUT,
+                target_duration_ms=60_000),
+            occurred_at=self._AT)
+        RepairDecisionSave(
+            1, RepairDecisionChoice.CANCELED, RepairBasis(
+                reason=RepairReason.CANCELED, target_duration_ms=60_000),
+            occurred_at=self._AT)
+
+    async def test_repair_decision_rejects_mismatched_pairs(self) -> None:
+        with pytest.raises(ValueError):
+            RepairDecisionSave(
+                1, RepairDecisionChoice.PENDING, RepairBasis(
+                    reason=RepairReason.BELOW_THRESHOLD,
+                    target_duration_ms=60_000, threshold_s=Decimal("70")),
+                occurred_at=self._AT)
+        with pytest.raises(ValueError):
+            RepairDecisionSave(
+                1, RepairDecisionChoice.CANCELED, RepairBasis(
+                    reason=RepairReason.THRESHOLD_REACHED,
+                    target_duration_ms=60_000, threshold_s=Decimal("70")),
+                occurred_at=self._AT)
+
+
+class TestResultCommands:
+    _AT = 1
+
+    async def test_repair_success_requires_output_file(self) -> None:
+        with pytest.raises(ValueError):
+            RepairResultSave(1, RepairOutcome.SUCCEEDED, occurred_at=self._AT)
+        with pytest.raises(ValueError):
+            RepairResultSave(
+                1, RepairOutcome.SUCCEEDED, output_file_id=700,
+                error=_error(), occurred_at=self._AT)
+
+    async def test_repair_failure_requires_error_without_file(self) -> None:
+        with pytest.raises(ValueError):
+            RepairResultSave(1, RepairOutcome.FAILED, occurred_at=self._AT)
+        with pytest.raises(ValueError):
+            RepairResultSave(
+                1, RepairOutcome.FAILED, output_file_id=700,
+                error=_error("repair_failed"), occurred_at=self._AT)
+
+    async def test_repair_transitional_phases_carry_no_facts(self) -> None:
+        for phase in (RepairOutcome.RUNNING, RepairOutcome.CANCELED):
+            RepairResultSave(1, phase, occurred_at=self._AT)
+            with pytest.raises(ValueError):
+                RepairResultSave(
+                    1, phase, output_file_id=700, occurred_at=self._AT)
+            with pytest.raises(ValueError):
+                RepairResultSave(
+                    1, phase, error=_error(), occurred_at=self._AT)
+
+    async def test_discard_failure_requires_error(self) -> None:
+        for phase in (DiscardPhase.FAILED, DiscardPhase.UNKNOWN):
+            with pytest.raises(ValueError):
+                DiscardProgressSave(1, phase, occurred_at=self._AT)
+        for phase in (DiscardPhase.PENDING, DiscardPhase.RUNNING,
+                      DiscardPhase.COMPLETED):
+            DiscardProgressSave(1, phase, occurred_at=self._AT)
+            with pytest.raises(ValueError):
+                DiscardProgressSave(
+                    1, phase, error=_error(), occurred_at=self._AT)
+
+    async def test_source_file_requires_positive_ids(self) -> None:
+        with pytest.raises(Exception):
+            SourceFileSave(0, 11, 1)
+        with pytest.raises(Exception):
+            SourceFileSave(1, 0, 1)
+
+    async def test_check_result_carries_phase_from_observation(self) -> None:
+        command = CheckResultSave(
+            1, MediaObservation(
+                CheckPhase.COMPLETED, duration_s=Decimal("65")), occurred_at=1)
+        assert command.media.phase is CheckPhase.COMPLETED
+
+
+class TestClassifyCheckDuration:
+    async def test_partitions_are_exact_at_boundaries(self) -> None:
+        margin = Decimal("10")
+        assert classify_check_duration(
+            Decimal("60"), margin, Decimal("59.999")) \
+            is CheckDurationClass.SHORT
+        assert classify_check_duration(
+            Decimal("60"), margin, Decimal("60")) \
+            is CheckDurationClass.WITHIN
+        assert classify_check_duration(
+            Decimal("60"), margin, Decimal("65")) \
+            is CheckDurationClass.WITHIN
+        assert classify_check_duration(
+            Decimal("60"), margin, Decimal("70")) \
+            is CheckDurationClass.WITHIN
+        assert classify_check_duration(
+            Decimal("60"), margin, Decimal("70.001")) \
+            is CheckDurationClass.OVER
+
+    async def test_repair_basis_follows_check_classification(self) -> None:
+        basis = repair_basis_from_check(
+            Decimal("60"), Decimal("10"), Decimal("75.125"), 60_000)
+        assert basis.reason is RepairReason.THRESHOLD_REACHED
+        assert basis.threshold_s == Decimal("70")
+        assert basis.actual_duration_s == Decimal("75.125")
+        within = repair_basis_from_check(
+            Decimal("60"), Decimal("10"), Decimal("65"), 60_000)
+        assert within.reason is RepairReason.BELOW_THRESHOLD
+        assert within.actual_duration_s == Decimal("65")
+        short = repair_basis_from_check(
+            Decimal("60"), Decimal("10"), Decimal("30"), 60_000)
+        assert short.reason is RepairReason.BELOW_THRESHOLD
+        assert short.actual_duration_s == Decimal("30")
+
+
+class TestProcessingDisposition:
+    async def test_disposition_members_are_distinct(self) -> None:
+        assert ProcessingDisposition.SAVED is not ProcessingDisposition.ALREADY

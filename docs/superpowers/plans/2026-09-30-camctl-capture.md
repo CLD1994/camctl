@@ -196,6 +196,22 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_media_processing.py -q`，真实最小媒体、SQLite、文件提升及历史报告，覆盖工具结束到登记和清理各中断边界。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 内部读写是否绕过统一拷贝、占用、取消及文件生命周期；记录门禁证据，建议以“feat: 实现异常录像检查与修复”形成独立提交。
 
+#### C8 第一段的阶段性验证（2026-10-04）
+
+第一段完成[录像内部处理](../../camctl/database/operation-fields.md#录像内部处理)的持久化骨架，任务 checkbox 保持未勾：`capture/processing.py` 提供六个事务命令类型、公共 media 观察与检查时长三分区（`classify_check_duration`：严格短于目标、区间含端点、严格超门槛），`repositories/capture.py` 提供 RECORDING_DECIDED（检查决定/修复决定/原片关联）与 RECORDING_PROCESSED（检查结果/修复结果/取消收场）六个事务，原键重送恢复首次响应。processing 守卫补齐处理状态分支并单独注册 `recording_source`（登记声明的具名守卫）。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 决定与依据配对固定 | REQUIRED 检查决定只配 INSUFFICIENT_TIMING 依据；NOT_NEEDED 配连续控制完成或异常多录判定；PENDING 修复决定只配 THRESHOLD_REACHED，NOT_NEEDED 配 BELOW_THRESHOLD 或 NO_USABLE_INPUT。类型层固定配对，仓储与守卫复核。 |
+| 阶段转换 | 修复成功只能自 RUNNING 进入（3→5 无登记转换）；PENDING 可直接失败或取消。检查 FAILED 与 UNCONFIRMED 为终态。取消收场进度按 1→2、{2,3}→{3,4,5,6} 推进。 |
+| 媒体观察与阶段一致 | COMPLETED 必须携带可靠时长且无错误；FAILED/UNCONFIRMED 必须携带协议 error 结构；RUNNING 不携带结论（对协议 media allOf 的实现收严）。时长经精确 JSON 编码保持全精度。 |
+| 可靠原片与修复输出 | 原片关联核对角色 ORIGINAL、写完 COMPLETE 且 source_action_id 归属本动作；修复成功核对 REPAIR_OUTPUT 用途、归属与完整字节事实（size/sha256 非空）。 |
+| 幂等与冲突 | 原键重送恢复 ALREADY 只读；事实时刻不同按操作身份冲突拒绝；已固定决定不因重送或配置变化重算。 |
+
+验证：`test_media_processing.py` 单元 41 项、集成 24 项（正常链、逐命令分区、非法前提与转换回滚、原键恢复、守卫接受真实事件并拒绝媒体结构不一致、依据缺门槛、成品缺登记）；全量回归单元 2775、集成 2935+7 skip、根 34+342、node 111、文档链接 2907 均通过（Python 3.11）。`check-event-transitions.mjs` 的 history-formats.md 区段待同步为 HEAD 既有问题，与本段无关。
+
+第二段剩余：原片检查拷贝复用 X4—X6 读取资格与拷贝流程、probe/repair 受管执行接入 `MediaObservation` 与修复决定、修复成品提升及与 `finish_capture` 终态同事务整合、DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。M2 的可靠视频时长来源仍阻塞在设备适配证据。
+
 ### C9 三种能力的完整链验收
 
 **预计文件：** `apps/camctl/src/camctl/capture/handlers.py`、`apps/camctl/src/camctl/capture/recovery.py`；测试为 `apps/camctl/tests/integration/capture/test_capture_contract.py`。

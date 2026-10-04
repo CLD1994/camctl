@@ -12,10 +12,22 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
+from camctl.capture.processing import (
+    CheckDecisionSave,
+    CheckResultSave,
+    DiscardPhase,
+    DiscardProgressSave,
+    ProcessingDisposition,
+    ProcessingOutcome,
+    RepairDecisionSave,
+    RepairOutcome,
+    RepairResultSave,
+    SourceFileSave,
+)
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
-from camctl.contracts.values import ObjectId, OperationKey
+from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.outputs.catalog import (
@@ -42,6 +54,18 @@ _ACTION_FINISHED_EVENT = 8
 _OUTPUT_REGISTERED_EVENT = 20
 _PLAN_STATUS_EVENT = 9
 _EMERGENCY_RECORDED_EVENT = 33
+_RECORDING_DECIDED_EVENT = 18
+_RECORDING_PROCESSED_EVENT = 19
+
+#: RECORDING_DECIDED 的三个分支。
+_DECIDED_CHECK_REASON = 1
+_DECIDED_REPAIR_REASON = 2
+_DECIDED_SOURCE_REASON = 3
+
+#: RECORDING_PROCESSED 的三个分支。
+_PROCESSED_CHECK_REASON = 1
+_PROCESSED_REPAIR_REASON = 2
+_PROCESSED_DISCARD_REASON = 3
 
 _ACTION_RUNNING = 2
 _ACTION_SUCCEEDED = 3
@@ -486,6 +510,335 @@ class FinishCaptureCommand:
         return rows
 
 
+# -- 录像内部处理的决定与结果 ---------------------------------------
+
+
+#: 取消收场进度的合法转换；与 RECORDING_PROCESSED.DISCARD 登记一致。
+_DISCARD_NEXT = {
+    1: frozenset({DiscardPhase.PENDING.value}),
+    2: frozenset({
+        DiscardPhase.RUNNING.value, DiscardPhase.COMPLETED.value,
+        DiscardPhase.FAILED.value, DiscardPhase.UNKNOWN.value}),
+    3: frozenset({
+        DiscardPhase.COMPLETED.value, DiscardPhase.FAILED.value,
+        DiscardPhase.UNKNOWN.value}),
+}
+
+_FILE_PURPOSE = enum_for("intermediate_files.purpose")
+_FILE_COMPLETION = enum_for("device_files.completion_state")
+
+
+class _ProcessingCommand:
+    """录像内部处理事务的共同装载：处理行、核对行与只读决定。"""
+
+    def __init__(self) -> None:
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def _load_processing(self, connection, processing_id: int) -> dict[str, Any]:
+        rows = self._state.setdefault("recording_processing", {})
+        if processing_id not in rows:
+            facts = row_facts(connection, "recording_processing", processing_id)
+            if facts is None:
+                raise ConsistencyError(f"录像处理记录不存在: {processing_id}")
+            rows[processing_id] = facts
+        return rows[processing_id]
+
+    def _load_row(self, connection, table: str, row_id: int) -> dict[str, Any]:
+        rows = self._state.setdefault(table, {})
+        if row_id not in rows:
+            facts = row_facts(connection, table, row_id)
+            if facts is None:
+                raise ConsistencyError(f"处理关联记录不存在: {table}#{row_id}")
+            rows[row_id] = facts
+        return rows[row_id]
+
+    def _claim(self, processing) -> None:
+        self._owners[("recording_processing", processing["id"])] = (
+            "action", processing["action_id"])
+
+    def _decision(
+        self, disposition: ProcessingDisposition, *, read_only: bool = False,
+    ) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            result=ProcessingOutcome(disposition), read_only=read_only)
+
+    def _emit(
+        self, scope, event_type: int, reason: int, row, occurred_at: int,
+    ) -> CommandPlan:
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            event_type, reason, (row,), occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ProcessingOutcome(ProcessingDisposition.SAVED))
+
+    def _reuse(self, saved, event_type: int, reason: int, occurred_at: int) -> CommandPlan:
+        """原键恢复首次响应；承载其他阶段或事实时按身份冲突拒绝。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(event_type, reason)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为本事务重送")
+        if saved[0]["occurred_at"] != occurred_at:
+            raise TransactionError("处理事实的时刻与原事务不同")
+        return self._decision(ProcessingDisposition.ALREADY, read_only=True)
+
+
+class _CheckDecisionCommand(_ProcessingCommand):
+    """固定原片检查决定：UNDETERMINED 一次固定，不因重送重算。"""
+
+    def __init__(self, request: CheckDecisionSave, key: OperationKey) -> None:
+        if not isinstance(request, CheckDecisionSave):
+            raise TypeError("检查决定申请必须使用 CheckDecisionSave")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(
+                saved, _RECORDING_DECIDED_EVENT, _DECIDED_CHECK_REASON,
+                request.occurred_at)
+        processing = self._load_processing(connection, request.processing_id)
+        if processing["check_decision"] != 1:
+            raise ConsistencyError(
+                f"检查决定已固定，不重新判断: {processing['check_decision']!r}")
+        self._claim(processing)
+        row = _update(
+            "recording_processing", processing["id"],
+            {"check_decision": processing["check_decision"],
+             "check_basis_json": processing["check_basis_json"]},
+            {"check_decision": request.decision.value,
+             "check_basis_json": request.basis.as_json()},
+        )
+        return self._emit(
+            scope, _RECORDING_DECIDED_EVENT, _DECIDED_CHECK_REASON,
+            row, request.occurred_at)
+
+
+class _RepairDecisionCommand(_ProcessingCommand):
+    """固定修复决定：UNDETERMINED 一次固定，保存后配置变化不重算。"""
+
+    def __init__(self, request: RepairDecisionSave, key: OperationKey) -> None:
+        if not isinstance(request, RepairDecisionSave):
+            raise TypeError("修复决定申请必须使用 RepairDecisionSave")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(
+                saved, _RECORDING_DECIDED_EVENT, _DECIDED_REPAIR_REASON,
+                request.occurred_at)
+        processing = self._load_processing(connection, request.processing_id)
+        if processing["repair_state"] != 1:
+            raise ConsistencyError(
+                f"修复决定已固定，不重新判断: {processing['repair_state']!r}")
+        self._claim(processing)
+        row = _update(
+            "recording_processing", processing["id"],
+            {"repair_state": processing["repair_state"],
+             "repair_basis_json": processing["repair_basis_json"]},
+            {"repair_state": request.decision.value,
+             "repair_basis_json": request.basis.as_json()},
+        )
+        return self._emit(
+            scope, _RECORDING_DECIDED_EVENT, _DECIDED_REPAIR_REASON,
+            row, request.occurred_at)
+
+
+class _SourceFileCommand(_ProcessingCommand):
+    """首次关联可靠原片：属于本次动作、角色为原片且已确认写完。"""
+
+    def __init__(self, request: SourceFileSave, key: OperationKey) -> None:
+        if not isinstance(request, SourceFileSave):
+            raise TypeError("原片关联申请必须使用 SourceFileSave")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(
+                saved, _RECORDING_DECIDED_EVENT, _DECIDED_SOURCE_REASON,
+                request.occurred_at)
+        processing = self._load_processing(connection, request.processing_id)
+        if processing["source_device_file_id"] is not None:
+            raise ConsistencyError("可靠原片已关联，不重复关联")
+        file = self._load_row(
+            connection, "device_files", request.source_device_file_id)
+        if file["role"] != int(_FILE_ROLE.ORIGINAL):
+            raise ConsistencyError(
+                f"关联文件不是原片角色: {file['role']!r}")
+        if file["completion_state"] != int(_FILE_COMPLETION.COMPLETE):
+            raise ConsistencyError(
+                f"关联文件尚未确认写完: {file['completion_state']!r}")
+        if file["source_action_id"] != processing["action_id"]:
+            raise ConsistencyError(
+                f"关联文件属于其他动作: {file['source_action_id']!r}")
+        self._claim(processing)
+        row = _update(
+            "recording_processing", processing["id"],
+            {"source_device_file_id": processing["source_device_file_id"]},
+            {"source_device_file_id": request.source_device_file_id},
+        )
+        return self._emit(
+            scope, _RECORDING_DECIDED_EVENT, _DECIDED_SOURCE_REASON,
+            row, request.occurred_at)
+
+
+class _CheckResultCommand(_ProcessingCommand):
+    """保存检查执行阶段及公共媒体观察；只有 REQUIRED 决定可执行。"""
+
+    def __init__(self, request: CheckResultSave, key: OperationKey) -> None:
+        if not isinstance(request, CheckResultSave):
+            raise TypeError("检查结果申请必须使用 CheckResultSave")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(
+                saved, _RECORDING_PROCESSED_EVENT, _PROCESSED_CHECK_REASON,
+                request.occurred_at)
+        processing = self._load_processing(connection, request.processing_id)
+        if processing["check_decision"] != 3:
+            raise ConsistencyError(
+                f"检查决定未固定为需要检查: {processing['check_decision']!r}")
+        if processing["check_state"] not in (1, 2):
+            raise ConsistencyError(
+                f"检查阶段已终结，不再保存结果: {processing['check_state']!r}")
+        self._claim(processing)
+        row = _update(
+            "recording_processing", processing["id"],
+            {"check_state": processing["check_state"],
+             "media_json": processing["media_json"]},
+            {"check_state": request.media.phase.value,
+             "media_json": request.media.as_json()},
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _RECORDING_PROCESSED_EVENT, _PROCESSED_CHECK_REASON, (row,),
+            request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ProcessingOutcome(ProcessingDisposition.SAVED))
+
+
+class _RepairResultCommand(_ProcessingCommand):
+    """保存修复执行阶段及结果；成功必须指向完整修复输出。"""
+
+    def __init__(self, request: RepairResultSave, key: OperationKey) -> None:
+        if not isinstance(request, RepairResultSave):
+            raise TypeError("修复结果申请必须使用 RepairResultSave")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(
+                saved, _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON,
+                request.occurred_at)
+        processing = self._load_processing(connection, request.processing_id)
+        if processing["repair_state"] not in (3, 4):
+            raise ConsistencyError(
+                f"修复尚未取得执行决定或已终结: {processing['repair_state']!r}")
+        before: dict[str, Any] = {"repair_state": processing["repair_state"]}
+        after: dict[str, Any] = {"repair_state": request.phase.value}
+        if request.phase is RepairOutcome.SUCCEEDED:
+            output = self._load_row(
+                connection, "intermediate_files", request.output_file_id)
+            if output["purpose"] != int(_FILE_PURPOSE.REPAIR_OUTPUT):
+                raise ConsistencyError(
+                    f"修复成功必须指向修复输出文件: {output['purpose']!r}")
+            if output["owner_action_id"] != processing["action_id"]:
+                raise ConsistencyError("修复输出属于其他动作")
+            if output["size_bytes"] is None or output["sha256"] is None:
+                raise ConsistencyError("修复输出缺少完整字节事实")
+            before["repair_output_file_id"] = processing["repair_output_file_id"]
+            after["repair_output_file_id"] = request.output_file_id
+        elif request.phase is RepairOutcome.FAILED:
+            before["repair_error_json"] = processing["repair_error_json"]
+            after["repair_error_json"] = request.error.as_json()
+        self._claim(processing)
+        row = _update(
+            "recording_processing", processing["id"], before, after)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON, (row,),
+            request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ProcessingOutcome(ProcessingDisposition.SAVED))
+
+
+class _DiscardProgressCommand(_ProcessingCommand):
+    """保存取消后文件处理收场进度；失败或未知保留实际错误。"""
+
+    def __init__(self, request: DiscardProgressSave, key: OperationKey) -> None:
+        if not isinstance(request, DiscardProgressSave):
+            raise TypeError("收场进度申请必须使用 DiscardProgressSave")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(
+                saved, _RECORDING_PROCESSED_EVENT, _PROCESSED_DISCARD_REASON,
+                request.occurred_at)
+        processing = self._load_processing(connection, request.processing_id)
+        current = processing["discard_state"]
+        allowed = _DISCARD_NEXT.get(current, frozenset())
+        if request.phase.value not in allowed:
+            raise ConsistencyError(
+                f"收场进度不能从 {current!r} 推进到 {request.phase.value!r}")
+        before: dict[str, Any] = {"discard_state": current}
+        after: dict[str, Any] = {"discard_state": request.phase.value}
+        if request.error is not None:
+            before["discard_error_json"] = processing["discard_error_json"]
+            after["discard_error_json"] = request.error.as_json()
+        self._claim(processing)
+        row = _update(
+            "recording_processing", processing["id"], before, after)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _RECORDING_PROCESSED_EVENT, _PROCESSED_DISCARD_REASON, (row,),
+            request.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ProcessingOutcome(ProcessingDisposition.SAVED))
+
+
 class CaptureRepository:
     """采集完成终态事务的 SQLite 仓储。"""
 
@@ -525,6 +878,66 @@ class CaptureRepository:
         self, command: FinishCapture, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CaptureResult]:
         receipt = commit_operation(FinishCaptureCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_check_decision(
+        self, command: CheckDecisionSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ProcessingOutcome]:
+        receipt = commit_operation(_CheckDecisionCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_repair_decision(
+        self, command: RepairDecisionSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ProcessingOutcome]:
+        receipt = commit_operation(_RepairDecisionCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_source_file(
+        self, command: SourceFileSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ProcessingOutcome]:
+        receipt = commit_operation(_SourceFileCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_check_result(
+        self, command: CheckResultSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ProcessingOutcome]:
+        receipt = commit_operation(_CheckResultCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_repair_result(
+        self, command: RepairResultSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ProcessingOutcome]:
+        receipt = commit_operation(_RepairResultCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_discard_progress(
+        self, command: DiscardProgressSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ProcessingOutcome]:
+        receipt = commit_operation(_DiscardProgressCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":

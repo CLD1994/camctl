@@ -11,6 +11,7 @@ FIXED 状态同一事务保存。已固定的来源与选择不因重送、重�
 from __future__ import annotations
 
 from contextlib import closing
+from decimal import Decimal
 from dataclasses import dataclass, fields
 from typing import Any, Mapping, Protocol
 
@@ -100,6 +101,14 @@ _COPY_CHANGED_EVENT = 22
 _DELIVERY_CHANGED_EVENT = 23
 _INTERMEDIATE_FILE_EVENT = 26
 _CLEANUP_CURSOR_EVENT = 32
+_RECORDING_DECIDED_EVENT = 18
+_RECORDING_PROCESSED_EVENT = 19
+#: RECORDING_DECIDED 与 RECORDING_PROCESSED 的分支 reason。
+_DECIDED_CHECK_REASON = 1
+_DECIDED_REPAIR_REASON = 2
+_PROCESSED_CHECK_REASON = 1
+_PROCESSED_REPAIR_REASON = 2
+_PROCESSED_DISCARD_REASON = 3
 #: INTERMEDIATE_FILE_CHANGED.CLEANUP_INTENT/RESULT 与 CLEANUP_CURSOR_MOVED.CHECKED。
 _CLEANUP_INTENT_REASON = 3
 _CLEANUP_RESULT_REASON = 4
@@ -126,6 +135,8 @@ _ACTION_TERMINAL = (
 _OBTAIN_TYPE = int(_ACTION_TYPE.OBTAIN_ACTION_OUTPUTS)
 _OUTPUT_KIND = enum_for("outputs.kind")
 _DEVICE_FILE_ROLE = enum_for("device_files.role")
+_DEVICE_FILE_COMPLETION = enum_for("device_files.completion_state")
+_INTERMEDIATE_PURPOSE = enum_for("intermediate_files.purpose")
 _CAPTURE_TYPES = frozenset(
     int(member.value)
     for member in _ACTION_TYPE
@@ -5006,12 +5017,220 @@ def _read_permission_guard(event, context) -> None:
                 raise EventValidationError("交付建档必须提供待授予的取回项事实")
 
 
-def _processing_guard(event, context) -> None:
-    """录像处理相关守卫；处理状态分支由媒体处理模块接入。
+def _require_processing_error_document(name: str, document) -> None:
+    """协议 error 结构的处理诊断校验；三键完整。"""
+    if not isinstance(document, Mapping):
+        raise EventValidationError(f"{name} 必须是结构化对象")
+    for key in ("code", "stage"):
+        value = document.get(key)
+        if not isinstance(value, str) or not value:
+            raise EventValidationError(f"{name}.{key} 必须是非空文本")
+    if not isinstance(document.get("details"), Mapping):
+        raise EventValidationError(f"{name}.details 必须是对象")
 
-    本模块只约束共同经过的文件字节事实：处理输入副本保存完整
-    字节事实与其唯一拷贝的校验完成共同成立。
+
+def _is_precise_non_negative(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        return False
+    number = value if isinstance(value, Decimal) else Decimal(value)
+    return number.is_finite() and number >= 0
+
+
+def _validate_check_basis(basis) -> None:
+    """检查依据结构校验；未知成员省略，不默认为零。"""
+    if not isinstance(basis, Mapping):
+        raise EventValidationError("检查依据必须是结构化对象")
+    reason = basis.get("reason")
+    if isinstance(reason, bool) or not isinstance(reason, int) or reason not in (1, 2, 3):
+        raise EventValidationError(f"检查依据来源不在登记范围: {reason!r}")
+    target = basis.get("target_duration_ms")
+    if isinstance(target, bool) or not isinstance(target, int) or target <= 0:
+        raise EventValidationError(f"检查依据必须保存正整数目标时长: {target!r}")
+    elapsed = basis.get("control_elapsed_ns")
+    if elapsed is not None and (
+            isinstance(elapsed, bool) or not isinstance(elapsed, int) or elapsed < 0):
+        raise EventValidationError(f"控制耗时必须是非负整数: {elapsed!r}")
+    evidence = basis.get("continuity_evidence")
+    if evidence is not None:
+        if not isinstance(evidence, list) or not evidence or any(
+                not isinstance(item, str) or not item for item in evidence):
+            raise EventValidationError(f"连续性证据必须是非空文本列表: {evidence!r}")
+
+
+def _validate_repair_basis(basis) -> None:
+    """修复依据结构校验；门槛秒数随比较理由必填或省略。"""
+    if not isinstance(basis, Mapping):
+        raise EventValidationError("修复依据必须是结构化对象")
+    reason = basis.get("reason")
+    if isinstance(reason, bool) or not isinstance(reason, int) or reason not in (1, 2, 3, 4):
+        raise EventValidationError(f"修复依据来源不在登记范围: {reason!r}")
+    target = basis.get("target_duration_ms")
+    if isinstance(target, bool) or not isinstance(target, int) or target <= 0:
+        raise EventValidationError(f"修复依据必须保存正整数目标时长: {target!r}")
+    threshold = basis.get("threshold_s")
+    if reason in (1, 2):
+        if not _is_precise_non_negative(threshold):
+            raise EventValidationError(f"门槛比较理由必须提供精确门槛秒数: {threshold!r}")
+    elif threshold is not None:
+        raise EventValidationError("该修复理由不适用门槛秒数，应省略")
+    for key in ("actual_duration_s",):
+        value = basis.get(key)
+        if value is not None and not _is_precise_non_negative(value):
+            raise EventValidationError(f"{key} 必须是非负精确数值: {value!r}")
+    elapsed = basis.get("control_elapsed_ns")
+    if elapsed is not None and (
+            isinstance(elapsed, bool) or not isinstance(elapsed, int) or elapsed < 0):
+        raise EventValidationError(f"控制耗时必须是非负整数: {elapsed!r}")
+
+
+#: 检查阶段与公共 media 结构 check_status 的对应。
+_MEDIA_STATUS_BY_STATE = {2: "running", 3: "completed", 4: "failed", 5: "unconfirmed"}
+
+
+def _validate_media_document(document, check_state: int) -> None:
+    """公共 media 结构与保存阶段的一致性校验。"""
+    if not isinstance(document, Mapping):
+        raise EventValidationError("媒体观察必须是结构化对象")
+    if document.get("check_status") != _MEDIA_STATUS_BY_STATE.get(check_state):
+        raise EventValidationError(
+            f"媒体观察阶段与保存状态不一致: {document.get('check_status')!r}"
+            f" / {check_state!r}")
+    duration = document.get("duration")
+    if not isinstance(duration, Mapping):
+        raise EventValidationError("媒体时长必须是结构化对象")
+    duration_status = duration.get("status")
+    if duration_status == "available":
+        if not _is_precise_non_negative(duration.get("seconds")):
+            raise EventValidationError("可用时长必须保存非负精确秒数")
+    elif duration_status != "unknown":
+        raise EventValidationError(f"媒体时长状态不在允许范围: {duration_status!r}")
+    if check_state == 2:
+        if duration_status == "available" or "error" in document or "issues" in document:
+            raise EventValidationError("检查进行中不能携带时长、错误或问题结论")
+    if check_state == 3:
+        if duration_status != "available":
+            raise EventValidationError("检查完成必须保存可靠视频时长")
+        if "error" in document:
+            raise EventValidationError("检查完成不能同时携带错误")
+    if check_state in (4, 5):
+        error = document.get("error")
+        if error is None:
+            raise EventValidationError("检查失败或未确认必须保存实际错误")
+        _require_processing_error_document("媒体错误", error)
+    issues = document.get("issues")
+    if issues is not None:
+        if not isinstance(issues, list):
+            raise EventValidationError(f"媒体问题必须是列表: {issues!r}")
+        for issue in issues:
+            _require_processing_error_document("媒体问题", issue)
+
+
+def _single_processing_row(event, context):
+    """取本事件唯一的处理行及其当前事实。"""
+    rows = [row for row in event.rows if row.table == "recording_processing"]
+    if len(rows) != 1:
+        raise EventValidationError("处理事件必须恰好更新一条处理记录")
+    row = rows[0]
+    processing = context.state_rows.get("recording_processing", {}).get(row.row_id)
+    if processing is None:
+        raise EventValidationError("处理事件缺少当前处理事实")
+    return row, processing
+
+
+def _recording_source_guard(event, context) -> None:
+    """RECORDING_DECIDED.SOURCE：首次关联的原片必须可靠且属于本动作。"""
+    row, processing = _single_processing_row(event, context)
+    file_id = row.after.values.get("source_device_file_id")
+    if row.before.values.get("source_device_file_id") is not None:
+        raise EventValidationError("可靠原片只能首次关联")
+    if not isinstance(file_id, int) or isinstance(file_id, bool):
+        raise EventValidationError(f"原片身份必须是整数: {file_id!r}")
+    file = context.state_rows.get("device_files", {}).get(file_id)
+    if file is None:
+        raise EventValidationError("关联原片缺少当前文件事实")
+    if file.get("role") != int(_DEVICE_FILE_ROLE.ORIGINAL):
+        raise EventValidationError(f"关联文件不是原片角色: {file.get('role')!r}")
+    if file.get("completion_state") != int(_DEVICE_FILE_COMPLETION.COMPLETE):
+        raise EventValidationError("关联原片尚未确认写完")
+    if file.get("source_action_id") != processing.get("action_id"):
+        raise EventValidationError("关联原片属于其他动作")
+
+
+def _decided_processing_guard(event, context) -> None:
+    """RECORDING_DECIDED 检查与修复决定：一次固定、依据完整。"""
+    if event.reason == _DECIDED_CHECK_REASON:
+        row, _ = _single_processing_row(event, context)
+        decision = row.after.values.get("check_decision")
+        if row.before.values.get("check_decision") != 1 or decision not in (2, 3):
+            raise EventValidationError("检查决定必须从未判定一次固定")
+        _validate_check_basis(row.after.values.get("check_basis_json"))
+    elif event.reason == _DECIDED_REPAIR_REASON:
+        row, _ = _single_processing_row(event, context)
+        state = row.after.values.get("repair_state")
+        if row.before.values.get("repair_state") != 1 or state not in (2, 3, 7):
+            raise EventValidationError("修复决定必须从未判定一次固定")
+        _validate_repair_basis(row.after.values.get("repair_basis_json"))
+
+
+def _processed_processing_guard(event, context) -> None:
+    """RECORDING_PROCESSED 三分支：阶段、媒体与成品事实共同一致。"""
+    if event.reason == _PROCESSED_CHECK_REASON:
+        row, processing = _single_processing_row(event, context)
+        if processing.get("check_decision") != 3:
+            raise EventValidationError(
+                f"检查执行要求检查决定固定为需要检查: {processing.get('check_decision')!r}")
+        state = row.after.values.get("check_state")
+        if state not in (2, 3, 4, 5):
+            raise EventValidationError(f"检查阶段不在允许范围: {state!r}")
+        _validate_media_document(row.after.values.get("media_json"), state)
+    elif event.reason == _PROCESSED_REPAIR_REASON:
+        row, processing = _single_processing_row(event, context)
+        if row.before.values.get("repair_state") not in (3, 4):
+            raise EventValidationError(
+                "修复结果只能在待执行或执行中阶段保存")
+        state = row.after.values.get("repair_state")
+        if state not in (4, 5, 6, 7):
+            raise EventValidationError(f"修复阶段不在允许范围: {state!r}")
+        if state == 5:
+            file_id = row.after.values.get("repair_output_file_id")
+            if not isinstance(file_id, int) or isinstance(file_id, bool):
+                raise EventValidationError(f"修复成功必须指向修复输出: {file_id!r}")
+            output = context.state_rows.get("intermediate_files", {}).get(file_id)
+            if output is None:
+                raise EventValidationError("修复成功缺少输出文件事实")
+            if output.get("purpose") != int(_INTERMEDIATE_PURPOSE.REPAIR_OUTPUT):
+                raise EventValidationError(
+                    f"修复成功必须指向修复输出用途: {output.get('purpose')!r}")
+            if output.get("owner_action_id") != processing.get("action_id"):
+                raise EventValidationError("修复输出属于其他动作")
+            if output.get("size_bytes") is None or output.get("sha256") is None:
+                raise EventValidationError("修复成功要求输出已有完整字节事实")
+        elif state == 6:
+            _require_processing_error_document(
+                "修复错误", row.after.values.get("repair_error_json"))
+    elif event.reason == _PROCESSED_DISCARD_REASON:
+        row, _ = _single_processing_row(event, context)
+        state = row.after.values.get("discard_state")
+        if state not in (2, 3, 4, 5, 6):
+            raise EventValidationError(f"收场进度不在允许范围: {state!r}")
+        if state in (5, 6):
+            _require_processing_error_document(
+                "收场错误", row.after.values.get("discard_error_json"))
+
+
+def _processing_guard(event, context) -> None:
+    """录像处理守卫：字节事实与处理状态分支共同约束。
+
+    字节分支要求处理输入副本保存完整字节事实前完成唯一拷贝
+    校验；状态分支校验 RECORDING_DECIDED/RECORDING_PROCESSED 的
+    决定、依据、媒体结构与成品事实。
     """
+    if event.event_type == _RECORDING_DECIDED_EVENT:
+        _decided_processing_guard(event, context)
+        return
+    if event.event_type == _RECORDING_PROCESSED_EVENT:
+        _processed_processing_guard(event, context)
+        return
     if event.event_type != _INTERMEDIATE_FILE_EVENT or event.reason != _LIFECYCLE_REASON:
         return
     for row in event.rows:
@@ -5049,4 +5268,5 @@ def register_outputs_guards() -> None:
     register_guard("read_slot", _read_slot_guard)
     register_guard("read_permission", _read_permission_guard)
     register_guard("processing", _processing_guard)
+    register_guard("recording_source", _recording_source_guard)
     register_guard("obtain_member", _obtain_member_guard)
