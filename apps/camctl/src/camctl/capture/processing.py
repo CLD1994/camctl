@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ObjectId
+from camctl.host_files.paths import validate_file_extension
 
 __all__ = [
     "CheckBasis",
@@ -35,11 +36,16 @@ __all__ = [
     "RepairDecisionChoice",
     "RepairDecisionSave",
     "RepairOutcome",
+    "RepairOutputFile",
     "RepairReason",
     "RepairResultSave",
+    "RepairStart",
+    "RepairSuccess",
     "SourceFileSave",
     "classify_check_duration",
     "repair_basis_from_check",
+    "saved_check_duration",
+    "saved_target_duration_ms",
 ]
 
 _CHECK_DECISION = enum_for("recording_processing.check_decision")
@@ -470,6 +476,64 @@ class DiscardProgressSave:
             raise ValueError("该收场阶段不携带错误")
 
 
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+@dataclass(frozen=True)
+class RepairStart:
+    """登记修复输出文件并进入修复执行的事务输入。
+
+    输出扩展名沿用原片容器类型；路径身份在事务内分配，创建文件
+    前先登记路径和责任。
+    """
+
+    processing_id: int
+    extension: str | None
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.processing_id)
+        validate_file_extension(self.extension)
+
+
+@dataclass(frozen=True)
+class RepairOutputFile:
+    """修复输出文件的登记结果：文件身份、登记路径与保存处置。"""
+
+    disposition: ProcessingDisposition
+    file_id: int
+    relative_path: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.disposition, ProcessingDisposition):
+            raise TypeError(
+                f"登记处置必须是 ProcessingDisposition: {self.disposition!r}")
+        ObjectId(self.file_id)
+        if not isinstance(self.relative_path, str) or not self.relative_path:
+            raise ValueError(f"登记路径必须是非空文本: {self.relative_path!r}")
+
+
+@dataclass(frozen=True)
+class RepairSuccess:
+    """保存修复输出完整字节并固定修复成功的事务输入。"""
+
+    processing_id: int
+    output_file_id: int
+    size_bytes: int
+    sha256: str
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.processing_id)
+        ObjectId(self.output_file_id)
+        if (isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int)
+                or self.size_bytes <= 0):
+            raise ValueError(f"完整字节长度必须是正整数: {self.size_bytes!r}")
+        if (not isinstance(self.sha256, str) or len(self.sha256) != 64
+                or not set(self.sha256) <= _HEX_DIGITS):
+            raise ValueError(f"完整字节摘要必须是 64 位小写十六进制: {self.sha256!r}")
+
+
 def classify_check_duration(
     duration_s: Decimal, repair_margin_s: Decimal, observed_s: Decimal,
 ) -> CheckDurationClass:
@@ -505,3 +569,34 @@ def repair_basis_from_check(
         threshold_s=duration_s + repair_margin_s,
         actual_duration_s=observed_s,
     )
+
+
+def saved_check_duration(document: Mapping[str, Any]) -> Decimal | None:
+    """从已保存 media_json 读取检查取得的可靠时长。
+
+    检查未执行、失败或未确认时没有可靠时长，返回 None；结构不符
+    合公共 media 结构时报解释错误，不把未知折叠为零。
+    """
+    if not isinstance(document, Mapping):
+        raise ValueError("媒体结构必须是对象")
+    duration = document.get("duration")
+    if not isinstance(duration, Mapping):
+        raise ValueError("媒体结构缺少时长对象")
+    if document.get("check_status") != "completed":
+        return None
+    if duration.get("status") == "unknown":
+        return None
+    seconds = duration.get("seconds")
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, Decimal)):
+        raise ValueError("可用时长必须是精确十进制数")
+    return _seconds("已保存时长", seconds)
+
+
+def saved_target_duration_ms(document: Mapping[str, Any]) -> int:
+    """从已保存 check_basis_json 读取检查决定的目标时长毫秒。"""
+    if not isinstance(document, Mapping):
+        raise ValueError("检查依据必须是对象")
+    value = document.get("target_duration_ms")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("检查依据缺少整数目标时长毫秒")
+    return _positive_int("目标时长毫秒", value)

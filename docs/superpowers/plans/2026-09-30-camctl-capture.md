@@ -218,6 +218,22 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 第二段仍剩余：原片检查拷贝复用 X4—X6 读取资格与拷贝流程、probe/repair 受管执行接入 `MediaObservation` 与修复决定、DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。M2 的可靠视频时长来源仍阻塞在设备适配证据。
 
+#### C8 第二段的执行编排验证（2026-10-05）
+
+第二段完成检查与修复的受管执行编排接入，任务 checkbox 保持未勾：`capture/media.py` 提供 `check_observation_from_probe`、`repair_decision_from_check`、`repair_error_from_artifact` 换算规则与 `execute_check`/`execute_repair` 编排（`MediaTools`/`ProcessingSaves` 双端口，适配层持有执行器、任务身份、连接与操作键）；仓储新增 `start_repair_output`（修复输出路径登记与 PENDING→RUNNING 同事务）和 `complete_repair_output`（完整字节与 RUNNING→SUCCEEDED 同事务）；`processing.py` 新增 `RepairStart`/`RepairSuccess` 事务输入与 `saved_check_duration`/`saved_target_duration_ms` 解码。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 检查终态三分 | probe 工具错误（tool_failed/tool_unavailable/tool_cancelled/output_failed）按检查 FAILED 终态保存；工具正常结束但未取得可靠时长（missing_duration/invalid_structure）按 UNCONFIRMED 终态保存，时长判定保持未知；取得时长才 COMPLETED。分类码取诊断前缀，完整消息保留在错误 details。 |
+| 检查失败不派生修复决定 | 检查 FAILED/UNCONFIRMED 后 repair_state 保持 UNDETERMINED，不猜测未超门槛；与产物侧内部输入需求的 `input_need_ended` 分类一致。恢复入口只在检查完成且决定未固定时，按已保存 media_json 与 check_basis_json 补固定决定。 |
+| 修复输出身份先登记后写入 | 启动事务分配中间文件身份并登记 `derived/` 正式路径（retention REQUIRED、无字节事实）与 PENDING→RUNNING；`repair_output_file_id` 只由成功事务固定。恢复入口（RUNNING）按归属动作与 REPAIR_OUTPUT 用途查唯一登记行，多个登记属于不可解释状态。 |
+| 字节与成功同事务 | 完成事务先保存 INTERMEDIATE_FILE_CHANGED.LIFECYCLE（size+sha256），再保存 RECORDING_PROCESSED 修复分支（SUCCEEDED + repair_output_file_id）；守卫从同事务先行事件复核用途、归属与完整字节，与提升配对共用同一可见性机制。 |
+| 编排失败分区 | 保存被拒或未知、工具任务未取得观察（撤回或执行体错误）、修复成品不完整各自成相：意图保存未确认不启动工具，任务未取得观察不保存终态结论，不完整成品保存 FAILED 终态与结构化错误（工具分类码或 `artifact_incomplete`），责任留给下一次执行。 |
+
+验证：`test_media_execution.py` 单元 60 项（换算三分、恢复入口、逐保存失败分区、端口调用次序）、集成 11 项（真实 SQLite 与真实受管子进程：检查链完成与失败、检查完成后恢复补决定、修复登记-执行-字节-成功链、启动提交后恢复续执行、失败错误结构、命令原键重用与非法前提整组回滚）；全量回归单元 2853、集成 2957+7 skip、根 34+342、check-protocol、check-report-dependencies、check-doc-links 2912 通过（Python 3.11）。check-event-transitions 的 history-formats.md 区段仍为既有待同步问题，本轮未新增事件类型。
+
+第二段仍剩余：原片检查拷贝复用 X4—X6 读取资格与拷贝流程（编排调用资格申请与分段拷贝）、DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。M2 的可靠视频时长来源仍阻塞在设备适配证据；编排消费 probe 现有结果，不改变时长来源的可靠性边界。
+
 ### C9 三种能力的完整链验收
 
 **预计文件：** `apps/camctl/src/camctl/capture/handlers.py`、`apps/camctl/src/camctl/capture/recovery.py`；测试为 `apps/camctl/tests/integration/capture/test_capture_contract.py`。

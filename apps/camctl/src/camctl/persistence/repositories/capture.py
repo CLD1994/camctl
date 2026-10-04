@@ -1,10 +1,12 @@
-"""录像完成终态与正式产物登记的唯一事务。
+"""录像完成终态与录像内部处理的事务。
 
 经 P3 事务内核组织：动作成功终态、正式产物登记（含修复成品承载
 文件的共同提升）及父计划状态在同一事务共同保存，任一写入失败整
 组回滚；登记前经 X1 纯规则校验，事件守卫从当前文件事实复核来源、
 原设备绑定、文件角色、修复成功依据、初始可用性组合与提升配对。
-停止、活动结束与产物、动作结果分别保存，不互相混同。
+录像内部处理提供决定与结果保存，以及修复输出的登记与完成事务：
+路径登记先于文件写入，完整字节与修复成功同事务固定。停止、活动
+结束与产物、动作结果分别保存，不互相混同。
 """
 
 from __future__ import annotations
@@ -22,7 +24,10 @@ from camctl.capture.processing import (
     ProcessingOutcome,
     RepairDecisionSave,
     RepairOutcome,
+    RepairOutputFile,
     RepairResultSave,
+    RepairStart,
+    RepairSuccess,
     SourceFileSave,
 )
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
@@ -31,6 +36,8 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError, register_guard
+from camctl.host_files.models import FilePurpose
+from camctl.host_files.paths import relative_file_path
 from camctl.outputs.catalog import (
     OutputCatalogFacts,
     OutputDraft,
@@ -64,6 +71,8 @@ _LIFECYCLE_REASON = 2
 
 _RETENTION = enum_for("intermediate_files.retention_state")
 _PURPOSE = enum_for("intermediate_files.purpose")
+_FILE_CLEANUP = enum_for("intermediate_files.cleanup_state")
+_REPAIR_STATE = enum_for("recording_processing.repair_state")
 
 #: RECORDING_DECIDED 的三个分支。
 _DECIDED_CHECK_REASON = 1
@@ -983,6 +992,163 @@ class _DiscardProgressCommand(_ProcessingCommand):
             result=ProcessingOutcome(ProcessingDisposition.SAVED))
 
 
+class _RepairStartCommand(_ProcessingCommand):
+    """登记修复输出文件并进入修复执行；路径登记与运行阶段同事务。
+
+    创建文件前先登记路径和责任；修复输出自创建起使用 derived/
+    正式身份，保持同一文件身份和位置直到登记为正式产物。
+    """
+
+    def __init__(self, request: RepairStart, key: OperationKey) -> None:
+        if not isinstance(request, RepairStart):
+            raise TypeError("修复输出登记申请必须使用 RepairStart")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        processing = self._load_processing(connection, request.processing_id)
+        if processing["repair_state"] != int(_REPAIR_STATE.PENDING):
+            raise ConsistencyError(
+                f"修复尚未取得待执行决定: {processing['repair_state']!r}")
+        self._claim(processing)
+        file_id = _next_id(connection, "intermediate_files")
+        relative_path = relative_file_path(
+            FilePurpose.REPAIR_OUTPUT, file_id, request.extension)
+        file_row = _row(
+            "intermediate_files",
+            file_id,
+            {
+                "owner_action_id": processing["action_id"],
+                "owner_delivery_id": None,
+                "purpose": int(_PURPOSE.REPAIR_OUTPUT),
+                "relative_path": relative_path,
+                "retention_state": int(_RETENTION.REQUIRED),
+                "cleanup_state": int(_FILE_CLEANUP.NOT_NEEDED),
+                "size_bytes": None,
+                "sha256": None,
+                "last_error_json": None,
+            },
+        )
+        processing_row = _update(
+            "recording_processing", processing["id"],
+            {"repair_state": processing["repair_state"]},
+            {"repair_state": int(_REPAIR_STATE.RUNNING)},
+        )
+        self._owners[("intermediate_files", file_id)] = (
+            "intermediate_file", file_id)
+        allocation = scope.allocate(2)
+        events = (
+            _envelope(
+                allocation.first_event_id, allocation.txn_id,
+                _INTERMEDIATE_FILE_EVENT, 1, (file_row,), request.occurred_at),
+            _envelope(
+                allocation.first_event_id + 1, allocation.txn_id,
+                _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON,
+                (processing_row,), request.occurred_at),
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=RepairOutputFile(
+                ProcessingDisposition.SAVED, file_id, relative_path))
+
+    def _reuse(self, saved) -> CommandPlan:
+        """原键恢复首次登记响应：文件身份与路径取自原事务正文。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_INTERMEDIATE_FILE_EVENT, 1),
+                     (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为修复输出登记重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("修复输出登记的事实时刻与原事务不同")
+        created = saved[0]["body"]["rows"][0]
+        if created["table"] != "intermediate_files":
+            raise ConsistencyError("原事务的修复输出登记行不解释")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=RepairOutputFile(
+                ProcessingDisposition.ALREADY, created["id"],
+                created["after"]["values"]["relative_path"]))
+
+
+class _RepairSuccessCommand(_ProcessingCommand):
+    """保存修复输出完整字节并固定修复成功；字节与终态同事务。
+
+    事件先保存字节事实再保存成功终态，守卫从同事务先行事件复核
+    输出用途、归属与完整字节；重复提交按原键恢复首次响应。
+    """
+
+    def __init__(self, request: RepairSuccess, key: OperationKey) -> None:
+        if not isinstance(request, RepairSuccess):
+            raise TypeError("修复成功申请必须使用 RepairSuccess")
+        self._request = request
+        self._key = key
+        super().__init__()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        processing = self._load_processing(connection, request.processing_id)
+        if processing["repair_state"] != int(_REPAIR_STATE.RUNNING):
+            raise ConsistencyError(
+                f"修复不在执行中，不能固定成功: {processing['repair_state']!r}")
+        output = self._load_row(
+            connection, "intermediate_files", request.output_file_id)
+        if output["purpose"] != int(_PURPOSE.REPAIR_OUTPUT):
+            raise ConsistencyError(
+                f"修复成功必须指向修复输出文件: {output['purpose']!r}")
+        if output["owner_action_id"] != processing["action_id"]:
+            raise ConsistencyError("修复输出属于其他动作")
+        if output["size_bytes"] is not None or output["sha256"] is not None:
+            raise ConsistencyError("修复输出已保存完整字节事实")
+        self._claim(processing)
+        self._owners[("intermediate_files", output["id"])] = (
+            "intermediate_file", output["id"])
+        file_row = _update(
+            "intermediate_files", output["id"],
+            {"size_bytes": output["size_bytes"], "sha256": output["sha256"]},
+            {"size_bytes": request.size_bytes, "sha256": request.sha256},
+        )
+        processing_row = _update(
+            "recording_processing", processing["id"],
+            {"repair_state": processing["repair_state"],
+             "repair_output_file_id": processing["repair_output_file_id"]},
+            {"repair_state": int(_REPAIR_STATE.SUCCEEDED),
+             "repair_output_file_id": request.output_file_id},
+        )
+        allocation = scope.allocate(2)
+        events = (
+            _envelope(
+                allocation.first_event_id, allocation.txn_id,
+                _INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON, (file_row,),
+                request.occurred_at),
+            _envelope(
+                allocation.first_event_id + 1, allocation.txn_id,
+                _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON,
+                (processing_row,), request.occurred_at),
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=ProcessingOutcome(ProcessingDisposition.SAVED))
+
+    def _reuse(self, saved) -> CommandPlan:
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON),
+                     (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)]:
+            raise TransactionError("操作身份已用于其他阶段，不能作为修复成功重送")
+        if saved[0]["occurred_at"] != self._request.occurred_at:
+            raise TransactionError("修复成功的事实时刻与原事务不同")
+        return self._decision(ProcessingDisposition.ALREADY, read_only=True)
+
+
 class CaptureRepository:
     """采集完成终态事务的 SQLite 仓储。"""
 
@@ -1082,6 +1248,26 @@ class CaptureRepository:
         self, command: DiscardProgressSave, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ProcessingOutcome]:
         receipt = commit_operation(_DiscardProgressCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def start_repair_output(
+        self, command: RepairStart, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[RepairOutputFile]:
+        receipt = commit_operation(_RepairStartCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def complete_repair_output(
+        self, command: RepairSuccess, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ProcessingOutcome]:
+        receipt = commit_operation(_RepairSuccessCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":

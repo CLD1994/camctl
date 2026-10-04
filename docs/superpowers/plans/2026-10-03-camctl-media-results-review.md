@@ -184,3 +184,9 @@ env PYTHONPATH=apps/camctl/src:apps/camctl/tests python -m pytest -q \
 ```
 
 M3a、M3b 完成，M3 勾选。M4a 的决定与结果事务随 C8 第一段落地；M4b 的修复成品提升随 R3 落地（提升与登记同事务、元信息取实际文件事实，重送与恢复归 R4）；M2 的可靠视频时长及正式登记 R4—R5 继续按各自契约实施；F6 完整业务门禁仍未完成。
+
+### 检查与修复执行编排的接入记录（2026-10-05）
+
+C8 第二段的执行编排经端口消费两条媒体入口：`execute_check` 把 `MediaProbe` 换算为公共媒体观察（工具失败→检查 FAILED 终态；工具正常但未取得可靠时长→UNCONFIRMED 终态），`execute_repair` 消费 `MediaArtifact`（不完整成品按工具分类码或 `artifact_incomplete` 保存修复失败错误）。修复输出文件先经 `start_repair_output` 登记路径与责任再由工具写入，完整字节经 `complete_repair_output` 与修复成功同事务固定。验证与关键裁决见[采集计划 C8 第二段执行编排记录](2026-09-30-camctl-capture.md#c8-第二段的执行编排验证2026-10-05)。
+
+编排消费 probe 的现有结果，不改变 M2 的时长来源可靠性边界：容器时长仍不能作为可靠视频时长依据，接入编排不视为 M2 完成。
