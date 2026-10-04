@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Protocol
 
+from camctl.capture.models import ActivityObservationSave
 from camctl.capture.files import (
     FileCompletionSave,
     FileObservationSave,
@@ -258,9 +259,19 @@ def _operation_outcome(result: DeviceCallResult, confirmed_observation: str):
     return outcome, confirmed
 
 
+def _save_activity(runtime: CaptureRuntime, action_id: int, **facts) -> None:
+    """把发送或启动观察交活动观察边界落库；被拒按一致性错误上抛。"""
+    receipt = runtime.capture.save_activity_observation(
+        ActivityObservationSave(
+            action_id=action_id, occurred_at=runtime.wall_us(), **facts),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
 async def _control_call(runtime: CaptureRuntime, action, operation: str,
-                        confirmed_observation: str) -> HandlerOutcome:
-    """授予启动机会后发起一次设备控制调用并保存尝试结局。"""
+                        confirmed_observation: str,
+                        activity_facts=None) -> HandlerOutcome:
+    """授予启动机会后发起一次设备控制调用并保存尝试与活动观察。"""
     ticket, reason = runtime.grant(action)
     if ticket is None:
         return HandlerOutcome("not_granted", reason)
@@ -271,6 +282,10 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
     runtime.finish(ticket, outcome)
+    if activity_facts is not None and result.error is None:
+        _save_activity(runtime, action["id"],
+                       **(activity_facts(confirmed) if callable(activity_facts)
+                          else activity_facts))
     if result.error is not None:
         return HandlerOutcome("call_failed", "device_error")
     return HandlerOutcome("confirmed" if confirmed else "sent")
@@ -381,7 +396,12 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
         if action["cancel_requested"]:
             # 未派发取消不创建尝试；终态由取消收场处理。
             return
-        step = await _control_call(context, action, "take_photo", "photo_taken")
+        step = await _control_call(
+            context, action, "take_photo", "photo_taken",
+            activity_facts=lambda confirmed: (
+                {"sent_at": context.wall_us()}
+                | ({"started_at": context.wall_us(), "activity_state": 2}
+                   if confirmed else {})))
         if step.phase not in ("confirmed", "call_failed"):
             # 仅发送或未授予：没有可靠响应事实，等待下次推进。
             return
@@ -421,7 +441,12 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         # 尚未发起启动：首次授予并调用，不依赖中段事实端口。
         if action["cancel_requested"]:
             return
-        await _control_call(context, action, "start_recording", "start_confirmed")
+        await _control_call(
+            context, action, "start_recording", "start_confirmed",
+            activity_facts=lambda confirmed: (
+                {"sent_at": context.wall_us()}
+                | ({"started_at": context.wall_us(), "activity_state": 2}
+                   if confirmed else {})))
         return
     if context.recording_state is None:
         raise LookupError("录像中段事实端口未装配")
@@ -471,8 +496,10 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     if attempt is None:
         if action["cancel_requested"]:
             return
-        step = await _control_call(context, action, "start_timelapse", "timelapse_sent")
-        if step.phase not in ("confirmed", "sent"):
+        step = await _control_call(
+            context, action, "start_timelapse", "timelapse_sent",
+            activity_facts={"sent_at": context.wall_us()})
+        if step.phase not in ("confirmed", "sent", "call_failed"):
             return
     from contextlib import closing
 

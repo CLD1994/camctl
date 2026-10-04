@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Mapping
 
+from camctl.capture.models import ActivityObservationSave
 from camctl.capture.files import (
     FileCompletionSave,
     FileObservationSave,
@@ -80,6 +81,24 @@ _RECORDING_DECIDED_EVENT = 18
 _RECORDING_PROCESSED_EVENT = 19
 _INTERMEDIATE_FILE_EVENT = 26
 _DEVICE_FILE_EVENT = 17
+
+#: DEVICE_OBSERVED 的 OBSERVE 分支。
+_ACTIVITY_OBSERVE_EVENT = 13
+_ACTIVITY_OBSERVE_REASON = 2
+
+_ACTIVITY_DISPATCH = enum_for("device_activities.dispatch_state")
+_ACTIVITY_STATE = enum_for("device_activities.activity_state")
+
+#: 活动观察的合法状态转换（登记状态模型）。
+_ACTIVITY_DISPATCH_NEXT = {
+    1: frozenset({2}),
+    2: frozenset({1, 3, 4}),
+    4: frozenset({2}),
+}
+_ACTIVITY_STATE_NEXT = {
+    1: frozenset({2}),
+    2: frozenset({3}),
+}
 
 #: DEVICE_FILE_OBSERVED 的五个分支。
 _FILE_CREATE_REASON = 1
@@ -1504,6 +1523,107 @@ class CaptureRepository:
         if receipt.kind == "rolled_back":
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_activity_observation(
+        self, command: ActivityObservationSave, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[ObservationOutcome]:
+        receipt = commit_operation(_ActivityObserveCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
+# -- 设备活动观察 -----------------------------------------------------
+
+
+class _ActivityObserveCommand:
+    """保存一次设备活动观察（DEVICE_OBSERVED.OBSERVE）。
+
+    发送与启动时刻只能从空值一次保存；状态按登记转换推进；活动
+    结束不经本命令补造（须由可靠停止事实承载，见 activity 守卫）。
+    """
+
+    def __init__(self, command: ActivityObservationSave, key: OperationKey) -> None:
+        if not isinstance(command, ActivityObservationSave):
+            raise TypeError("活动观察申请必须使用 ActivityObservationSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        facts = row_facts(connection, "device_activities", command.action_id)
+        if facts is None:
+            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
+        self._state["device_activities"] = {command.action_id: facts}
+        before: dict[str, Any] = {}
+        after: dict[str, Any] = {}
+        for column, current, value in (
+            ("sent_at", facts["sent_at"], command.sent_at),
+            ("started_at", facts["started_at"], command.started_at),
+            ("dispatch_state", facts["dispatch_state"], command.dispatch_state),
+            ("activity_state", facts["activity_state"], command.activity_state),
+        ):
+            if value is None:
+                continue
+            if column in ("sent_at", "started_at"):
+                if current is not None:
+                    raise ConsistencyError(f"{column} 已保存，不因新观察改写")
+            else:
+                table = _ACTIVITY_DISPATCH_NEXT if column == "dispatch_state" else _ACTIVITY_STATE_NEXT
+                if value not in table.get(current, frozenset()):
+                    raise ConsistencyError(
+                        f"{column} 不能从 {current!r} 推进到 {value!r}")
+            before[column] = current
+            after[column] = value
+        if not after:
+            raise ConsistencyError("活动观察必须携带至少一项新事实")
+        row = _update("device_activities", command.action_id, before, after)
+        self._owners[("device_activities", command.action_id)] = (
+            "action", facts["action_id"])
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+            (row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ObservationOutcome(
+                ObservationDisposition.SAVED, command.action_id))
+
+    def _reuse(self, saved) -> CommandPlan:
+        """原键重送：核实原观察分支与输入后恢复首次响应。"""
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)]:
+            raise TransactionError("操作身份已用于其他事务，不能作为活动观察重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("活动观察的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_activities" or row["id"] != command.action_id:
+            raise TransactionError("原活动观察属于其他活动")
+        after = row["after"]["values"]
+        for column, value in (
+            ("sent_at", command.sent_at),
+            ("started_at", command.started_at),
+            ("dispatch_state", command.dispatch_state),
+            ("activity_state", command.activity_state),
+        ):
+            if not json_equal(after.get(column), value):
+                raise TransactionError("活动观察的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ObservationOutcome(
+                ObservationDisposition.ALREADY, command.action_id))
 
 
 # -- 设备文件观察登记 -------------------------------------------------

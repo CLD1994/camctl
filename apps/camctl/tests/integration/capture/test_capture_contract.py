@@ -150,10 +150,6 @@ def _environment(tmp_path: Path, actions):
     for action_id, action_type in actions:
         _seed_action(connection, action_id, action_type)
         _seed_activity(connection, action_id)
-    if actions == _TIMELAPSE:
-        # 发送事实由活动观察边界保存；此处按该边界先行预置。
-        connection.execute(
-            "UPDATE device_activities SET sent_at = ? WHERE id = 13", (_NOW,))
     connection.commit()
     return owned
 

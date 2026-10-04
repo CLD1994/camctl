@@ -10,11 +10,17 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from camctl.contracts.values import MAX_OBJECT_ID, seconds_to_duration_ms
+from camctl.contracts.values import (
+    MAX_OBJECT_ID,
+    ObjectId,
+    UtcMicros,
+    seconds_to_duration_ms,
+)
 from camctl.contracts.json_values import is_json_integer
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 
 __all__ = [
+    "ActivityObservationSave",
     "CaptureCompletion",
     "CaptureDefinition",
     "CaptureInput",
@@ -134,3 +140,32 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
     if task.result_wait_margin_s is not None:
         spec["result_wait_margin_ms"] = seconds_to_duration_ms(task.result_wait_margin_s)
     return validate_capture_spec(action_type, spec)
+
+
+@dataclass(frozen=True)
+class ActivityObservationSave:
+    """一次设备活动观察的保存输入（DEVICE_OBSERVED.OBSERVE）。
+
+    发送与启动时刻只能从空值一次保存；活动结束不经本命令补造。
+    至少携带一项新事实。
+    """
+
+    action_id: int
+    occurred_at: int
+    sent_at: int | None = None
+    started_at: int | None = None
+    dispatch_state: int | None = None
+    activity_state: int | None = None
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+        for name in ("sent_at", "started_at"):
+            value = getattr(self, name)
+            if value is not None:
+                UtcMicros(value)
+        if (self.sent_at is None and self.started_at is None
+                and self.dispatch_state is None and self.activity_state is None):
+            raise ValueError("活动观察必须携带至少一项事实")
+        if self.activity_state == 3:
+            raise ValueError("活动结束须由可靠停止事实承载，不经观察补造")
