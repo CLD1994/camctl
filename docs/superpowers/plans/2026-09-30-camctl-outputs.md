@@ -98,11 +98,11 @@ X1 随首次录像完成；X2—X7 实现首条取回链。X8/X9 在明确来源
 
 - [x] 编写失败用例。在 `test_registration_preserves_device_file_identity` 中正式登记前后 `assert file_id_after == original_file_id`；没有归属或文件完成不能登记。合法登记尚无 SHA-256 可保存未知摘要，已有可靠值不得丢失；原片/修复/预览明确关联，任意目录顺序不能配对。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_catalog.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。把登记规则作为纯计算供采集完整终态事务使用；源位置、产物身份及关联固定，内部文件按适用校验提升。派生关联、提升及可靠元信息按[正式产物登记计划](2026-10-03-camctl-output-registration-review.md)验收。
+- [x] 实施本任务。把登记规则作为纯计算供采集完整终态事务使用；源位置、产物身份及关联固定，内部文件按适用校验提升。派生关联、提升及可靠元信息按[正式产物登记计划](2026-10-03-camctl-output-registration-review.md)验收。
 - [x] 再运行上述命令，要求全部 PASS，并核对 登记与动作结果原子，摘要不是所有产物的强制前置计算。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_registration_relations.py apps/camctl/tests/integration/outputs/test_registration_source_sequence.py -q`，核验同批原片关联、既有原片的正式派生事件、逐种唯一性及完整回滚。文件提升和完整历史闭环另按 R3/R5 收齐证据。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部拍摄及修复登记入口是否重复文件身份或拆开终态；记录门禁证据，建议以“feat: 实现正式产物登记规则”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部拍摄及修复登记入口是否重复文件身份或拆开终态；记录门禁证据，建议以“feat: 实现正式产物登记规则”形成独立提交。
 
 ### X2 来源固定、选择与精确 ID
 

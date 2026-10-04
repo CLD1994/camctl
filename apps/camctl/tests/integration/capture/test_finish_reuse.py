@@ -24,6 +24,12 @@ from camctl.persistence.repositories.capture import (
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.transaction import TransactionError
 
+from camctl.outputs.catalog import (
+    FileReference,
+    OutputCatalogFacts,
+    OutputDraft,
+    OutputKind,
+)
 from .test_recording_finish import _environment, _finish, _original_draft, _NOW
 
 register_operation_guards()
@@ -163,6 +169,51 @@ def test_failure_finish_resend_and_recovery(tmp_path: Path) -> None:
             _finish_failed(), new_operation_key(), owned))
     assert recovered.disposition is FinishDisposition.ALREADY
     assert recovered.output_ids == first.output_ids
+
+
+def test_same_key_resend_rejects_different_failure_details(
+        tmp_path: Path) -> None:
+    """同一错误码但 details 不同：首次事实权威，重送按身份冲突拒绝。"""
+    owned = _environment(tmp_path)
+    repository = _repository()
+    key = new_operation_key()
+    _assert_completed(repository.finish_capture(
+        _finish_failed(code="recording_processing_failed",
+                       details={"processing_id": "1", "reason": "check_failed"}),
+        key, owned))
+    outcome = repository.finish_capture(
+        _finish_failed(code="recording_processing_failed",
+                       details={"processing_id": "2", "reason": "check_failed"}),
+        key, owned)
+    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(outcome.error, TransactionError)
+
+
+def test_batch_preview_registration_resend_recovers(tmp_path: Path) -> None:
+    """同批配对登记的重送恢复：原片与预览身份按输入次序恢复。"""
+    owned = _environment(tmp_path)
+    owned.connection.execute(
+        "UPDATE device_files SET original_device_file_id=11,"
+        " pairing_evidence_json='{}' WHERE id=12")
+    owned.connection.commit()
+    repository = _repository()
+    key = new_operation_key()
+    command = FinishCapture(
+        action_id=1,
+        drafts=(_original_draft(11), OutputDraft(
+            kind=OutputKind.PREVIEW,
+            file=FileReference(device_file_id=12),
+            file_complete=True,
+            original_batch_file_id=11,
+        )),
+        catalog_facts=OutputCatalogFacts(action_id=1, ownership_confirmed=True),
+        occurred_at=_NOW,
+    )
+    first = _assert_completed(repository.finish_capture(command, key, owned))
+    assert len(first.output_ids) == 2
+    again = _assert_completed(repository.finish_capture(command, key, owned))
+    assert again.disposition is FinishDisposition.ALREADY
+    assert again.output_ids == first.output_ids
 
 
 def test_failure_recovery_rejects_different_error(tmp_path: Path) -> None:

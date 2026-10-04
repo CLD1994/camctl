@@ -646,6 +646,9 @@ class FinishCaptureCommand:
             spec = registered_error(command.failure.code)
             if after.get("error_code") != spec["action_error_id"]:
                 raise TransactionError("原完成登记的错误码与重送输入不同")
+            if not json_equal(after.get("error_details_json"),
+                              command.failure.details):
+                raise TransactionError("原完成登记的错误详情与重送输入不同")
         registered: dict[tuple[int, int | None, int | None], int] = {}
         origins: set[tuple[int, int]] = set()
         for event, (event_type, reason) in zip(saved, types):
