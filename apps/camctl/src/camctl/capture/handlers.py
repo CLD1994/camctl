@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Protocol
@@ -222,6 +223,64 @@ class CaptureRuntime:
         receipt = self.operations.finish_attempt(
             attempt, new_operation_key(), self.owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
+class SessionRecordingState:
+    """录像中段事实的生产装载器。
+
+    启动确认与停止确认取自 start/stop 责任的最近尝试；停止次数与
+    在途取自停止流程行。计时锚点是本进程会话的单调钟读数（规格：
+    重启后旧读数不能与新会话组合，须先对账），由装配层在启动确认
+    后登记；未登记时按跨会话处理进入对账分区。
+    """
+
+    def __init__(self, runtime: "CaptureRuntime") -> None:
+        self._runtime = runtime
+        self._anchors: dict[int, tuple[int, int]] = {}
+
+    def anchor_confirmed(self, action_id: int, anchor_ns: int,
+                         stop_target_ns: int) -> None:
+        self._anchors[action_id] = (anchor_ns, stop_target_ns)
+
+    def recording_state(self, action_id: int) -> RecordingState:
+        runtime = self._runtime
+        action = runtime.action(action_id)
+        start = runtime.last_attempt(f"start/{action_id}")
+        started = (start is not None
+                   and start[0] == int(_ATTEMPT_STATUS.SUCCEEDED)
+                   and start[1] == int(_EFFECT_STATE.CONFIRMED))
+        with closing(runtime.owned.connection.execute(
+            "SELECT r.id, r.attempts_used, r.max_attempts_used,"
+            " (SELECT a.status FROM operation_attempts a WHERE a.run_id = r.id"
+            "  ORDER BY a.id DESC LIMIT 1),"
+            " (SELECT a.effect_state FROM operation_attempts a WHERE a.run_id = r.id"
+            "  ORDER BY a.id DESC LIMIT 1)"
+            " FROM operation_runs r WHERE r.responsibility_key = ?",
+            (f"stop/{action_id}",),
+        )) as cursor:
+            stop_run = cursor.fetchone()
+        used, maximum, in_flight = 0, 3, False
+        stop_confirmed = False
+        if stop_run is not None:
+            used, maximum = int(stop_run[1]), int(stop_run[2])
+            in_flight = stop_run[3] == int(_ATTEMPT_STATUS.RUNNING)
+            stop_confirmed = (
+                stop_run[3] == int(_ATTEMPT_STATUS.SUCCEEDED)
+                and stop_run[4] == int(_EFFECT_STATE.CONFIRMED))
+        anchor = self._anchors.get(action_id)
+        stop_target = anchor[1] if anchor is not None else None
+        return RecordingState(
+            action_terminal=action["status"] in _ACTION_TERMINAL,
+            started_confirmed=started,
+            anchor_from_current_session=anchor is not None,
+            stop_target_ns=stop_target,
+            monotonic_now_ns=self._runtime.monotonic_ns(),
+            stop_confirmed=stop_confirmed,
+            file_complete_guaranteed=stop_confirmed,
+            stop_attempts_used=used,
+            stop_max_attempts=maximum,
+            stop_in_flight=in_flight,
+        )
 
 
 def _binding(action: Mapping[str, Any]) -> DeviceBinding:
@@ -448,10 +507,13 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
                 | ({"started_at": context.wall_us(), "activity_state": 2}
                    if confirmed else {})))
         return
-    if context.recording_state is None:
+    port = context.recording_state
+    if port is None and isinstance(context, CaptureRuntime):
+        port = SessionRecordingState(context)
+    if port is None:
         raise LookupError("录像中段事实端口未装配")
     decision = decide_recording_next(
-        context.recording_state.recording_state(action_id),
+        port.recording_state(action_id),
         RecordingFacts(canceled=bool(action["cancel_requested"])),
     )
     if decision.phase is RecordingPhase.NOT_RUNNING:
@@ -501,8 +563,6 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
             activity_facts={"sent_at": context.wall_us()})
         if step.phase not in ("confirmed", "sent", "call_failed"):
             return
-    from contextlib import closing
-
     with closing(context.owned.connection.execute(
         "SELECT sent_at, expected_check_at FROM device_activities WHERE id = ?",
         (action_id,),

@@ -94,22 +94,19 @@ class ResultsDouble:
         return self.files_by_action.get(action_id, ())
 
 
-class StopConfirmed:
-    """录像中段事实端口替身：启动已确认且停止与文件完成。"""
-
-    def recording_state(self, action_id: int) -> RecordingState:
-        return RecordingState(
-            action_terminal=False,
-            started_confirmed=True,
-            anchor_from_current_session=True,
-            stop_target_ns=None,
-            monotonic_now_ns=None,
-            stop_confirmed=True,
-            file_complete_guaranteed=True,
-            stop_attempts_used=0,
-            stop_max_attempts=3,
-            stop_in_flight=False,
-        )
+def _seed_stopped_recording(connection, action_id: int) -> None:
+    """真实停止流程行与确认停止尝试，供生产中段装载器读取。"""
+    connection.execute(
+        "INSERT INTO operation_runs (id, action_id, delivery_id, kind, query_purpose,"
+        " responsibility_key, activity_id, copy_id, cleanup_item_id, session_key,"
+        " status, attempts_used, max_attempts_used, timeout_s_json,"
+        " retry_interval_s_json, retry_wait_required, error_json)"
+        " VALUES (30, ?, NULL, 2, NULL, 'stop/12', 12, NULL, NULL, NULL, 1, 1, 3,"
+        " '10', '1', 0, NULL)", (action_id,))
+    connection.execute(
+        "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
+        " intent_event_id, result_event_id, max_attempts_used, effect_state,"
+        " result_json) VALUES (40, 30, 1, 2, 1, 1, 3, 3, '{}')")
 
 
 def _entry(identity: str, *, size: int = 4096,
@@ -288,10 +285,10 @@ class TestRecordHandler:
                 " a JOIN operation_runs r ON a.run_id = r.id"
                 " WHERE r.responsibility_key = 'start/12'") == (1,)
             assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (2,)
-            # 停止与处理责任保存后，第二次推进走核实与终态尾段。
+            # 停止与处理责任保存后，第二次推进经生产装载器走尾段。
             _seed_processing(owned.connection, 12)
+            _seed_stopped_recording(owned.connection, 12)
             owned.connection.commit()
-            runtime.recording_state = StopConfirmed()
             runtime.results.files_by_action[12] = (_entry("clip-1"),)
             await capture_handler("camera_record")(12, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (3,)
@@ -305,8 +302,7 @@ class TestRecordHandler:
     async def test_processing_pending_keeps_action_running(self, tmp_path: Path):
         owned = _environment(tmp_path, _RECORD)
         try:
-            runtime = _runtime(owned, recording_state=StopConfirmed(),
-                               files={12: (_entry("clip-1"),)})
+            runtime = _runtime(owned, files={12: (_entry("clip-1"),)})
             await capture_handler("camera_record")(12, runtime)
             # 启动调用先行保存；处理责任未建立，终态等待媒体链。
             assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (2,)
@@ -335,3 +331,77 @@ class TestTimelapseHandler:
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
         finally:
             owned.connection.close()
+
+
+class TestDispatchLoop:
+    async def test_dispatch_routes_all_capabilities_per_plan(self, tmp_path: Path):
+        owned = _environment(tmp_path, ((11, 1), (12, 2), (13, 3)))
+        # 各能力单独计划，避免同计划更早动作阻塞授予。
+        for action_id in (12, 13):
+            owned.connection.execute(
+                "UPDATE actions SET plan_id = ? WHERE id = ?",
+                (action_id - 10, action_id))
+            owned.connection.execute(
+                "INSERT INTO plans (id, request_id, name, created_at, status,"
+                " created_event_id, last_event_id, change_count)"
+                " VALUES (?, ?, 'p', ?, 1, 1, 1, 1)",
+                (action_id - 10, 9000 + action_id, _NOW))
+        owned.connection.commit()
+        from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+
+        runtime = _runtime(owned, files={
+            11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+        results = await dispatch_ready(
+            runtime, ready_capture_actions(owned.connection, _NOW))
+        assert [item[0] for item in results] == [11, 12, 13]
+        assert all(item[1].phase == "dispatched" for item in results)
+        # 照片一次推进即终态；录像与延时仍按各自阶段推进。
+        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+
+
+class TestInterruptionRecovery:
+    async def test_fault_at_file_registration_rolls_back_and_recovers(
+            self, tmp_path: Path):
+        from dataclasses import replace
+
+        from ..operations.test_result_reuse import _FaultConnection
+
+        owned = _environment(tmp_path, _PHOTO)
+        runtime = _runtime(
+            owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+        runtime.owned = replace(
+            owned, connection=_FaultConnection(owned.connection, "INSERT INTO device_files"))
+        try:
+            await capture_handler("camera_take_photo")(11, runtime)
+        except Exception:
+            pass  # 文件登记失败的注入故障；此处只核对回滚与未终态。
+        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
+        before_attempts = _value(
+            owned, "SELECT COUNT(*) FROM operation_attempts")[0]
+        recovery = _runtime(
+            owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+        await capture_handler("camera_take_photo")(11, recovery)
+        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+        # 重入不重复调用设备，也不重复登记产物。
+        assert _value(owned, "SELECT COUNT(*) FROM operation_attempts")[0] == before_attempts
+        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+
+    async def test_history_bytes_stable_after_terminal_redispatch(
+            self, tmp_path: Path):
+        from camctl.capture.dispatch import dispatch_ready
+
+        owned = _environment(tmp_path, _PHOTO)
+        runtime = _runtime(
+            owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+        await dispatch_ready(runtime, [
+            __import__("camctl.scheduling.service", fromlist=["ActionDescriptor"])
+            .ActionDescriptor(action_id=11, action_type="camera_take_photo", ready=True)])
+        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+        before = tuple(owned.connection.execute(
+            "SELECT id, body_json FROM history_events ORDER BY id").fetchall())
+        await dispatch_ready(runtime, [
+            __import__("camctl.scheduling.service", fromlist=["ActionDescriptor"])
+            .ActionDescriptor(action_id=11, action_type="camera_take_photo", ready=True)])
+        after = tuple(owned.connection.execute(
+            "SELECT id, body_json FROM history_events ORDER BY id").fetchall())
+        assert after == before
