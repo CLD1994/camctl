@@ -621,68 +621,57 @@ class TestAtomicRollback:
             connection.close()
 
     def test_unimplemented_business_guard_rejects_write(self, tmp_path) -> None:
-        # 受理守卫已随 A4 正式注册；用文件事件展示未接入守卫（F 系列）
-        # 的明确拒绝：即使行内 SQL 可以接受也不能提交。
+        # 受理守卫已随 A4 正式注册；文件守卫已随采集观察登记注册。用
+        # 窗口观察事件展示未接入守卫（调度接线）的明确拒绝：即使行内
+        # SQL 可以接受也不能提交。
         from camctl.persistence.transaction import CommandPlan
 
         _create_valid_database(tmp_path / "state.db")
         owned = _open(tmp_path)
         connection = owned.connection
         try:
-            class FileCompleteCommand:
+            class WindowObserveCommand:
                 def plan(self, scope):
                     allocation = scope.allocate(1)
                     event = EventEnvelope(
                         event_id=allocation.first_event_id,
                         transaction_id=allocation.txn_id,
-                        event_type=17,
+                        event_type=7,
                         event_version=1,
                         occurred_at=_CREATED_AT,
                         clock_status=2,
                         change_seq=None,
-                        reason=3,
+                        reason=1,
                         evidence={},
                         rows=(
                             RowChange(
-                                table="device_files",
-                                row_id=3,
+                                table="actions",
+                                row_id=1,
                                 before=RowImage(
                                     exists=True,
-                                    values={
-                                        "completion_state": 1,
-                                        "completion_evidence_json": None,
-                                        "size_bytes": None,
-                                        "locator_json": None,
-                                        "original_name": None,
-                                        "media_type": None,
-                                    },
+                                    values={"first_window_observed_at": None},
                                 ),
                                 after=RowImage(
                                     exists=True,
-                                    values={
-                                        "completion_state": 2,
-                                        "completion_evidence_json": {},
-                                        "size_bytes": 10,
-                                        "locator_json": {},
-                                        "original_name": "a.mp4",
-                                        "media_type": "video/mp4",
-                                    },
+                                    values={"first_window_observed_at": _CREATED_AT},
                                 ),
                             ),
                         ),
                     )
                     return CommandPlan(
                         events=(event,),
-                        owners={("device_files", 3): ("device_file", 3)},
-                        state_rows={"device_files": {}, "outputs": {}},
+                        owners={("actions", 1): ("action", 1)},
+                        state_rows={"actions": {1: {
+                            "id": 1, "type": 1, "status": 1,
+                            "cancel_requested": 0}}, "outputs": {}},
                     )
 
             from camctl.history import validators
 
-            assert "device_file" not in validators.NAMED_GUARDS
-            receipt = commit_operation(FileCompleteCommand(), new_operation_key(), owned)
+            assert "window" not in validators.NAMED_GUARDS
+            receipt = commit_operation(WindowObserveCommand(), new_operation_key(), owned)
             assert receipt.kind == "rolled_back"
             assert "具名校验未接入" in str(receipt.error)
-            assert _count(connection, "device_files") == 0
+            assert _count(connection, "actions") == 0
         finally:
             connection.close()

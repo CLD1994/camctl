@@ -16,6 +16,14 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Mapping
 
+from camctl.capture.files import (
+    FileCompletionSave,
+    FileObservationSave,
+    ObservationDisposition,
+    ObservationOutcome,
+    OwnershipSave,
+    file_identity_key,
+)
 from camctl.capture.media import RecordingFailure
 from camctl.capture.processing import (
     CheckDecisionSave,
@@ -34,7 +42,7 @@ from camctl.capture.processing import (
 )
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
 from camctl.contracts.enums import enum_for
-from camctl.contracts.json_values import json_equal
+from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.contracts.workflow_errors import (
     registered_error,
@@ -71,6 +79,28 @@ _EMERGENCY_RECORDED_EVENT = 33
 _RECORDING_DECIDED_EVENT = 18
 _RECORDING_PROCESSED_EVENT = 19
 _INTERMEDIATE_FILE_EVENT = 26
+_DEVICE_FILE_EVENT = 17
+
+#: DEVICE_FILE_OBSERVED 的五个分支。
+_FILE_CREATE_REASON = 1
+_FILE_OWNERSHIP_REASON = 2
+_FILE_COMPLETE_REASON = 3
+_FILE_CHECKSUM_REASON = 4
+_FILE_PRESENCE_REASON = 5
+
+_FILE_PRESENCE = enum_for("device_files.presence_state")
+_FILE_COMPLETION = enum_for("device_files.completion_state")
+_FILE_CHECKSUM = enum_for("device_files.checksum_support")
+_OWNERSHIP_METHOD = enum_for("device_files.ownership_evidence_json.method")
+_COMPLETION_BASIS = enum_for("device_files.completion_evidence_json.basis")
+_PAIRING_METHOD = enum_for("device_files.pairing_evidence_json.method")
+
+#: 文件形成状态的合法转换（登记状态模型；COMPLETE 无出边）。
+_FILE_COMPLETION_NEXT = {
+    1: frozenset({2, 3, 4}),
+    2: frozenset({3, 4}),
+    4: frozenset({3}),
+}
 
 #: INTERMEDIATE_FILE_CHANGED.LIFECYCLE：保存完整字节及保留用途变化。
 _LIFECYCLE_REASON = 2
@@ -408,6 +438,7 @@ def register_capture_guards() -> None:
     register_guard("output", _output_guard)
     register_guard("cleanup_aggregate", _cleanup_aggregate_guard)
     register_guard("plan_aggregate", _plan_aggregate_guard)
+    register_guard("device_file", _device_file_guard)
     register_guard("emergency", _emergency_guard)
     register_guard("activity", _activity_guard)
     register_guard("release", _release_guard)
@@ -1443,6 +1474,515 @@ class CaptureRepository:
         if receipt.kind == "rolled_back":
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_file_observation(
+        self, command: FileObservationSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ObservationOutcome]:
+        receipt = commit_operation(_FileCreateCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_file_ownership(
+        self, command: OwnershipSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ObservationOutcome]:
+        receipt = commit_operation(_FileOwnershipCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_file_completion(
+        self, command: FileCompletionSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ObservationOutcome]:
+        receipt = commit_operation(_FileCompleteCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
+# -- 设备文件观察登记 -------------------------------------------------
+
+
+def _observer_binding(action) -> tuple[str, str]:
+    """观察者动作必须属于拍摄类型并携带固定设备与驱动绑定。"""
+    if action is None or action.get("type") not in _CAPTURE_TYPES:
+        raise ConsistencyError("设备文件观察者必须是拍摄动作")
+    device, driver = action.get("device_id"), action.get("driver_id")
+    if not isinstance(device, str) or not device or not isinstance(driver, str) or not driver:
+        raise ConsistencyError("设备文件观察者缺少已保存的设备或驱动绑定")
+    return device, driver
+
+
+class _FileCreateCommand:
+    """登记一次设备文件发现（DEVICE_FILE_OBSERVED.CREATE）。
+
+    身份键由观察者动作的固定设备与驱动绑定及驱动文件身份确定编
+    码构成；重复发现复用原行并核对定位，不创建第二份身份。
+    """
+
+    def __init__(self, command: FileObservationSave, key: OperationKey) -> None:
+        if not isinstance(command, FileObservationSave):
+            raise TypeError("文件发现申请必须使用 FileObservationSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(connection, saved)
+        command = self._command
+        action = row_facts(connection, "actions", command.observer_action_id)
+        if action is None:
+            raise ConsistencyError(f"观察动作不存在: {command.observer_action_id}")
+        self._state["actions"] = {command.observer_action_id: action}
+        device, driver = _observer_binding(action)
+        identity_key = file_identity_key(device, driver, command.file_identity)
+        with closing(connection.execute(
+            "SELECT id, locator_json FROM device_files WHERE identity_key = ?",
+            (identity_key,),
+        )) as cursor:
+            existing = cursor.fetchone()
+        if existing is not None:
+            file_id = int(existing[0])
+            if not json_equal(parse_exact_json(existing[1]), dict(command.locator)):
+                raise ConsistencyError(
+                    f"重复发现与已登记定位矛盾，保留原依据: {identity_key}")
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ObservationOutcome(ObservationDisposition.ALREADY, file_id),
+            )
+        file_id = _next_id(connection, "device_files")
+        row = _row("device_files", file_id, {
+            "observer_action_id": command.observer_action_id,
+            "source_action_id": None,
+            "identity_key": identity_key,
+            "locator_json": dict(command.locator),
+            "ownership_evidence_json": None,
+            "original_name": command.original_name,
+            "media_type": command.media_type,
+            "role": int(_FILE_ROLE.UNDETERMINED),
+            "original_device_file_id": None,
+            "pairing_evidence_json": None,
+            "presence_state": int(_FILE_PRESENCE.UNKNOWN),
+            "completion_state": int(_FILE_COMPLETION.UNKNOWN),
+            "completion_evidence_json": None,
+            "size_bytes": None,
+            "checksum_support": int(_FILE_CHECKSUM.UNDETERMINED),
+            "sha256": None,
+            "last_error_json": None,
+        })
+        self._owners[("device_files", file_id)] = ("device_file", file_id)
+        # 公开投影路由从文件行走到产物表；新发现尚无产物，装配空范围。
+        self._state.setdefault("device_files", {})[file_id] = dict(row.after.values)
+        self._state.setdefault("outputs", {})
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _DEVICE_FILE_EVENT, _FILE_CREATE_REASON, (row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ObservationOutcome(ObservationDisposition.SAVED, file_id, created=True))
+
+    def _reuse(self, connection, saved) -> CommandPlan:
+        """原键重送：核实原事务为同一发现的创建后恢复首次响应。"""
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DEVICE_FILE_EVENT, _FILE_CREATE_REASON)]:
+            raise TransactionError("操作身份已用于其他文件事务，不能作为发现重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("文件发现的事实时刻与原事务不同")
+        created = saved[0]["body"]["rows"][0]
+        if created["table"] != "device_files" or created.get("before", {}).get("exists"):
+            raise TransactionError("原事务不是该文件的首次发现登记")
+        values = created["after"]["values"]
+        action = row_facts(connection, "actions", command.observer_action_id)
+        if action is None:
+            raise ConsistencyError(f"观察动作不存在: {command.observer_action_id}")
+        self._state["actions"] = {command.observer_action_id: action}
+        device, driver = _observer_binding(action)
+        expected = file_identity_key(device, driver, command.file_identity)
+        if (values.get("observer_action_id") != command.observer_action_id
+                or values.get("identity_key") != expected
+                or not json_equal(values.get("locator_json"), dict(command.locator))
+                or not json_equal(values.get("original_name"), command.original_name)
+                or not json_equal(values.get("media_type"), command.media_type)):
+            raise TransactionError("文件发现的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state, read_only=True,
+            result=ObservationOutcome(
+                ObservationDisposition.ALREADY, int(created["id"]), created=True))
+
+
+class _FileOwnershipCommand:
+    """保存一次归属确认（DEVICE_FILE_OBSERVED.OWNERSHIP）。
+
+    来源只能从未知一次确认；预览配对原片必须已确认归属且属于同一
+    来源任务。
+    """
+
+    def __init__(self, command: OwnershipSave, key: OperationKey) -> None:
+        if not isinstance(command, OwnershipSave):
+            raise TypeError("归属确认申请必须使用 OwnershipSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        facts = self._load(connection, command.file_id)
+        if (facts["source_action_id"] is not None
+                or facts["ownership_evidence_json"] is not None):
+            raise ConsistencyError("文件来源已确认，不能再次确认或改指")
+        if facts["role"] != int(_FILE_ROLE.UNDETERMINED):
+            raise ConsistencyError("已确认用途的文件不能再次确认归属")
+        if command.role == int(_FILE_ROLE.PREVIEW):
+            if command.paired_device_file_id == command.file_id:
+                raise ConsistencyError("预览不能与自身配对")
+            paired = self._load(connection, command.paired_device_file_id)
+            if (paired["role"] != int(_FILE_ROLE.ORIGINAL)
+                    or paired["source_action_id"] != command.source_action_id):
+                raise ConsistencyError(
+                    "配对原片必须已确认归属且属于同一来源任务")
+        row = _update(
+            "device_files", command.file_id,
+            {
+                "source_action_id": facts["source_action_id"],
+                "ownership_evidence_json": facts["ownership_evidence_json"],
+                "role": facts["role"],
+                "original_device_file_id": facts["original_device_file_id"],
+                "pairing_evidence_json": facts["pairing_evidence_json"],
+            },
+            {
+                "source_action_id": command.source_action_id,
+                "ownership_evidence_json": command.ownership_evidence(),
+                "role": command.role,
+                "original_device_file_id": command.paired_device_file_id,
+                "pairing_evidence_json": command.pairing_evidence(),
+            },
+        )
+        self._owners[("device_files", command.file_id)] = (
+            "device_file", command.file_id)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _DEVICE_FILE_EVENT, _FILE_OWNERSHIP_REASON, (row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ObservationOutcome(
+                ObservationDisposition.SAVED, command.file_id))
+
+    def _load(self, connection, file_id: int) -> dict[str, Any]:
+        facts = row_facts(connection, "device_files", file_id)
+        if facts is None:
+            raise ConsistencyError(f"设备文件不存在: {file_id}")
+        self._state.setdefault("device_files", {})[file_id] = facts
+        _load_related_outputs(connection, self._state, file_id)
+        return facts
+
+    def _reuse(self, saved) -> CommandPlan:
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DEVICE_FILE_EVENT, _FILE_OWNERSHIP_REASON)]:
+            raise TransactionError("操作身份已用于其他文件事务，不能作为归属确认重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("归属确认的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_files" or row["id"] != command.file_id:
+            raise TransactionError("原归属确认属于其他文件")
+        after = row["after"]["values"]
+        if (after.get("source_action_id") != command.source_action_id
+                or after.get("role") != command.role
+                or not json_equal(after.get("ownership_evidence_json"),
+                                  command.ownership_evidence())
+                or not json_equal(after.get("original_device_file_id"),
+                                  command.paired_device_file_id)
+                or not json_equal(after.get("pairing_evidence_json"),
+                                  command.pairing_evidence())):
+            raise TransactionError("归属确认的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state, read_only=True,
+            result=ObservationOutcome(
+                ObservationDisposition.ALREADY, command.file_id))
+
+
+class _FileCompleteCommand:
+    """保存一次文件形成状态（DEVICE_FILE_OBSERVED.COMPLETE）。
+
+    状态按登记的转换表推进，已完成不倒退；等待与产物契约依据引用
+    已保存的等待完成事实；可靠观察可清除此前的失败证据。
+    """
+
+    def __init__(self, command: FileCompletionSave, key: OperationKey) -> None:
+        if not isinstance(command, FileCompletionSave):
+            raise TypeError("文件形成状态申请必须使用 FileCompletionSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        facts = self._load(connection, command.file_id)
+        current = facts["completion_state"]
+        allowed = _FILE_COMPLETION_NEXT.get(current, frozenset())
+        if command.state not in allowed:
+            raise ConsistencyError(
+                f"文件形成状态不能从 {current!r} 推进到 {command.state!r}")
+        if command.state == int(_FILE_COMPLETION.COMPLETE) and command.basis == int(
+                _COMPLETION_BASIS.TIME_AND_OUTPUTS):
+            activity = row_facts(connection, "device_activities", command.activity_id)
+            if (activity is None or activity.get("wait_completed_event_id")
+                    != command.wait_completed_event_id):
+                raise ConsistencyError(
+                    "等待与产物契约依据必须引用已保存的等待完成事实")
+            self._state["device_activities"] = {
+                command.activity_id: activity}
+        before: dict[str, Any] = {
+            "completion_state": current,
+            "completion_evidence_json": facts["completion_evidence_json"],
+            "size_bytes": facts["size_bytes"],
+            "last_error_json": facts["last_error_json"],
+        }
+        after: dict[str, Any] = {
+            "completion_state": command.state,
+            "completion_evidence_json": command.completion_evidence(),
+            "size_bytes": command.size_bytes,
+            "last_error_json": None if command.error is None else dict(command.error),
+        }
+        for column, value in (
+            ("locator_json", command.locator),
+            ("original_name", command.original_name),
+            ("media_type", command.media_type),
+        ):
+            if value is not None:
+                before[column] = facts[column]
+                after[column] = dict(value) if column == "locator_json" else value
+        row = _update("device_files", command.file_id, before, after)
+        self._owners[("device_files", command.file_id)] = (
+            "device_file", command.file_id)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _DEVICE_FILE_EVENT, _FILE_COMPLETE_REASON, (row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ObservationOutcome(
+                ObservationDisposition.SAVED, command.file_id))
+
+    def _load(self, connection, file_id: int) -> dict[str, Any]:
+        facts = row_facts(connection, "device_files", file_id)
+        if facts is None:
+            raise ConsistencyError(f"设备文件不存在: {file_id}")
+        self._state.setdefault("device_files", {})[file_id] = facts
+        _load_related_outputs(connection, self._state, file_id)
+        return facts
+
+    def _reuse(self, saved) -> CommandPlan:
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DEVICE_FILE_EVENT, _FILE_COMPLETE_REASON)]:
+            raise TransactionError("操作身份已用于其他文件事务，不能作为形成状态重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("形成状态的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_files" or row["id"] != command.file_id:
+            raise TransactionError("原形成状态属于其他文件")
+        after = row["after"]["values"]
+        if (after.get("completion_state") != command.state
+                or not json_equal(after.get("size_bytes"), command.size_bytes)
+                or not json_equal(after.get("completion_evidence_json"),
+                                  command.completion_evidence())
+                or not json_equal(after.get("last_error_json"),
+                                  None if command.error is None else dict(command.error))):
+            raise TransactionError("形成状态的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state, read_only=True,
+            result=ObservationOutcome(
+                ObservationDisposition.ALREADY, command.file_id))
+
+
+def _load_related_outputs(connection, state: dict, file_id: int) -> None:
+    """装入引用该文件的正式产物行，供公开投影路由解析报告目标。"""
+    outputs = state.setdefault("outputs", {})
+    with closing(connection.execute(
+        "SELECT id FROM outputs WHERE device_file_id = ?", (file_id,)
+    )) as cursor:
+        for (output_id,) in cursor.fetchall():
+            facts = row_facts(connection, "outputs", output_id)
+            if facts is not None:
+                outputs[output_id] = facts
+
+
+def _current_file_facts(context, row) -> Mapping[str, Any]:
+    facts = context.state_rows.get("device_files", {}).get(row.row_id)
+    if facts is None:
+        raise EventValidationError(f"设备文件事件缺少当前事实: device_files#{row.row_id}")
+    return facts
+
+
+def _device_file_guard(event, context) -> None:
+    """DEVICE_FILE_OBSERVED 五分支：身份、来源、配对与完成事实核对。
+
+    身份键编码观察者的固定绑定；来源只能从未知一次确认，预览配对
+    两端属于同一来源任务；形成状态按登记转换推进且已完成不倒退；
+    摘要与支持声明、存在性变化各自满足登记约束。
+    """
+    if event.event_type != _DEVICE_FILE_EVENT:
+        return
+    for row in event.rows:
+        if row.table != "device_files":
+            continue
+        _device_file_row_guard(event.reason, row, context)
+
+
+def _device_file_row_guard(reason: int, row, context) -> None:
+    if reason == _FILE_CREATE_REASON:
+        if row.before.exists:
+            raise EventValidationError("文件发现必须是创建行")
+        values = row.after.values
+        action = context.state_rows.get("actions", {}).get(
+            values.get("observer_action_id"))
+        if action is None:
+            raise EventValidationError("文件发现缺少观察者动作事实")
+        device, driver = _capture_binding(action)
+        key = values.get("identity_key")
+        try:
+            decoded = parse_exact_json(key)
+        except ValueError as error:
+            raise EventValidationError(f"文件身份键不是有效精确 JSON: {key!r}") from error
+        if (not isinstance(decoded, list) or len(decoded) != 3
+                or decoded[0] != device or decoded[1] != driver
+                or not isinstance(decoded[2], str) or not decoded[2]):
+            raise EventValidationError("文件身份键与观察者的设备或驱动绑定不一致")
+        if not isinstance(values.get("locator_json"), dict):
+            raise EventValidationError("文件定位结构必须是对象")
+        for column in ("role", "presence_state", "completion_state", "checksum_support"):
+            if values.get(column) != 1:
+                raise EventValidationError(f"新发现文件的 {column} 必须是未知初始值")
+        for column in ("source_action_id", "ownership_evidence_json",
+                       "original_device_file_id", "pairing_evidence_json",
+                       "completion_evidence_json", "size_bytes", "sha256",
+                       "last_error_json"):
+            if values.get(column) is not None:
+                raise EventValidationError(f"新发现文件不能携带 {column}")
+        return
+
+    if not row.before.exists:
+        raise EventValidationError("文件归属、形成状态、摘要及存在性必须是更新行")
+    if reason == _FILE_OWNERSHIP_REASON:
+        before, after = row.before.values, row.after.values
+        if (before.get("source_action_id") is not None
+                or before.get("ownership_evidence_json") is not None):
+            raise EventValidationError("文件来源只能从未知一次确认")
+        if before.get("role") != int(_FILE_ROLE.UNDETERMINED):
+            raise EventValidationError("已确认用途的文件不能再次确认归属")
+        source = after.get("source_action_id")
+        if not is_json_integer(source) or source < 1:
+            raise EventValidationError(f"确认来源必须是合法动作身份: {source!r}")
+        role = after.get("role")
+        if role not in (int(_FILE_ROLE.ORIGINAL), int(_FILE_ROLE.PREVIEW)):
+            raise EventValidationError(f"归属确认的用途必须是原片或预览: {role!r}")
+        evidence = after.get("ownership_evidence_json")
+        if not isinstance(evidence, dict) or evidence.get("method") not in (
+                int(member) for member in _OWNERSHIP_METHOD):
+            raise EventValidationError("归属证据缺少登记的方法编号")
+        if not isinstance(evidence.get("observation"), dict):
+            raise EventValidationError("归属证据缺少驱动观察依据")
+        if (evidence.get("method") == int(_OWNERSHIP_METHOD.BASELINE_DIFFERENCE)
+                and not is_json_integer(evidence.get("activity_id"))):
+            raise EventValidationError("固定基准差集证据必须填写活动身份")
+        paired = after.get("original_device_file_id")
+        pairing = after.get("pairing_evidence_json")
+        if role == int(_FILE_ROLE.PREVIEW):
+            if not is_json_integer(paired) or paired < 1 or paired == row.row_id:
+                raise EventValidationError(f"预览配对必须是其他文件身份: {paired!r}")
+            if (not isinstance(pairing, dict)
+                    or pairing.get("method") != int(_PAIRING_METHOD.DRIVER_PAIRING)
+                    or not isinstance(pairing.get("observation"), dict)):
+                raise EventValidationError("预览配对缺少驱动配对证据")
+            original = context.state_rows.get("device_files", {}).get(paired)
+            if original is None:
+                raise EventValidationError("预览配对缺少原片当前事实")
+            if (original.get("role") != int(_FILE_ROLE.ORIGINAL)
+                    or original.get("source_action_id") != source):
+                raise EventValidationError("配对两端必须属于同一来源任务且原片用途为原片")
+        elif paired is not None or pairing is not None:
+            raise EventValidationError("原片不携带配对")
+        return
+
+    facts = _current_file_facts(context, row)
+    after = row.after.values
+    if reason == _FILE_COMPLETE_REASON:
+        current = facts.get("completion_state")
+        state = after.get("completion_state")
+        if state not in _FILE_COMPLETION_NEXT.get(current, frozenset()):
+            raise EventValidationError(
+                f"文件形成状态不能从 {current!r} 推进到 {state!r}")
+        if state == int(_FILE_COMPLETION.COMPLETE):
+            size = after.get("size_bytes")
+            if not is_json_integer(size) or size < 0:
+                raise EventValidationError(f"完成状态必须携带非负完整大小: {size!r}")
+            evidence = after.get("completion_evidence_json")
+            if (not isinstance(evidence, dict)
+                    or evidence.get("basis") not in (
+                        int(member) for member in _COMPLETION_BASIS)):
+                raise EventValidationError("完成状态缺少登记依据")
+            if not isinstance(evidence.get("observation"), dict):
+                raise EventValidationError("完成状态缺少驱动观察依据")
+            if (evidence.get("basis") == int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
+                    and (not is_json_integer(evidence.get("activity_id"))
+                         or not is_json_integer(evidence.get("wait_completed_event_id")))):
+                raise EventValidationError("等待与产物契约依据必须引用任务及等待完成事件")
+        elif after.get("size_bytes") is not None:
+            raise EventValidationError("只有完成状态携带完整大小")
+        if state == int(_FILE_COMPLETION.UNCONFIRMED):
+            if not isinstance(after.get("last_error_json"), dict):
+                raise EventValidationError("未确认状态必须携带实际失败证据")
+        return
+
+    if reason == _FILE_CHECKSUM_REASON:
+        support = after.get("checksum_support")
+        if (facts.get("checksum_support") != int(_FILE_CHECKSUM.UNDETERMINED)
+                or support not in (int(_FILE_CHECKSUM.SUPPORTED),
+                                   int(_FILE_CHECKSUM.UNSUPPORTED))):
+            raise EventValidationError("摘要能力只能从未判定一次决定")
+        sha256 = after.get("sha256")
+        if sha256 is not None:
+            if (support != int(_FILE_CHECKSUM.SUPPORTED)
+                    or facts.get("completion_state") != int(_FILE_COMPLETION.COMPLETE)):
+                raise EventValidationError("摘要只能在已完成的受支持文件上保存")
+            if (not isinstance(sha256, str) or len(sha256) != 64
+                    or any(char not in "0123456789abcdef" for char in sha256)):
+                raise EventValidationError(f"摘要必须是 64 位小写十六进制: {sha256!r}")
+        return
+
+    if reason == _FILE_PRESENCE_REASON:
+        state = after.get("presence_state")
+        if state not in (int(member) for member in _FILE_PRESENCE) or state == facts.get(
+                "presence_state"):
+            raise EventValidationError("存在性观察必须是实际状态变化")
+        return
+    raise EventValidationError(f"未登记的设备文件观察分支: {reason!r}")
+
 
 
 # -- 应急停止最终补记 -------------------------------------------------

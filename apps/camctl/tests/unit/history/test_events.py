@@ -86,41 +86,39 @@ class TestRegistryDrivenValidation:
     def test_unimplemented_validator_rejects_write(self) -> None:
         from camctl.history import validators
 
-        # 文件事件的守卫包含尚未实现的 device_file（F 系列接入）。
-        assert "device_file" not in validators.NAMED_GUARDS
+        # 窗口观察的守卫 window 尚未实现（调度接线接入）。
+        assert "window" not in validators.NAMED_GUARDS
         event = EventEnvelope(
             event_id=101,
             transaction_id=7,
-            event_type=17,
+            event_type=7,
             event_version=1,
             occurred_at=1,
             clock_status=1,
             change_seq=None,
-            reason=3,
+            reason=1,
             evidence={},
             rows=(
                 RowChange(
-                    table="device_files",
-                    row_id=3,
+                    table="actions",
+                    row_id=5,
                     before=RowImage(
                         exists=True,
-                        values={"completion_state": 1, "completion_evidence_json": None,
-                                "size_bytes": None, "locator_json": None,
-                                "original_name": None, "media_type": None},
+                        values={"first_window_observed_at": None},
                     ),
                     after=RowImage(
                         exists=True,
-                        values={"completion_state": 2, "completion_evidence_json": {},
-                                "size_bytes": 10, "locator_json": {},
-                                "original_name": "a.mp4", "media_type": "video/mp4"},
+                        values={"first_window_observed_at": 1_750_000_000_000_000},
                     ),
                 ),
             ),
         )
         context = EventContext(
             transaction=TXN,
-            owners={("device_files", 3): ("device_file", 3)},
-            state_rows={"device_files": {3: {"action_id": 8}}, "outputs": {}},
+            owners={("actions", 5): ("action", 5)},
+            state_rows={"actions": {5: {"id": 5, "type": 1, "status": 1,
+                                        "cancel_requested": 0}},
+                        "outputs": {}},
         )
         with pytest.raises(EventValidationError, match="具名校验未接入"):
             validate_event(event, context)
