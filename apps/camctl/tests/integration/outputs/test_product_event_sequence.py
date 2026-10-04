@@ -24,10 +24,20 @@ from ..operations.test_result_reuse import _FaultConnection
 
 
 def _repair_file(connection, identity):
+    """登记前的修复输出：未提升、字节完整、修复成功事实齐备。"""
     connection.execute(
         "INSERT INTO intermediate_files (id, owner_action_id, purpose, relative_path, retention_state,"
-        " cleanup_state, size_bytes, created_event_id, last_event_id, change_count)"
-        " VALUES (?,11,4,?,3,1,4096,1,1,1)", (identity, f"derived/{identity}.mp4"))
+        " cleanup_state, size_bytes, sha256, created_event_id, last_event_id, change_count)"
+        " VALUES (?,11,4,?,1,1,4096,?,1,1,1)",
+        (identity, f"derived/{identity}.mp4", "d" * 64))
+    connection.execute(
+        "INSERT INTO recording_processing (id, action_id, source_device_file_id,"
+        " check_state, check_decision, check_basis_json, media_json, repair_state,"
+        " repair_basis_json, repair_output_file_id, repair_error_json,"
+        " discard_state, discard_error_json)"
+        " VALUES (1, 11, NULL, 3, 3, '{}', '{}', 5, '{}', ?, NULL, 1, NULL)",
+        (identity,),
+    )
 
 
 def _grant_plan(connection, command):
@@ -46,6 +56,7 @@ def _scenario(owned, case):
     if case == "host_missing":
         _repair_file(connection, 801)
         connection.execute("UPDATE outputs SET kind=2, device_file_id=NULL, intermediate_file_id=801 WHERE id=701")
+        connection.execute("UPDATE intermediate_files SET retention_state=3 WHERE id=801")
         _seed_output(connection, 703, 11, 501)
         connection.execute("INSERT INTO output_origins (output_id,original_output_id) VALUES (701,703)")
         connection.execute("UPDATE obtain_items SET basis=2, original_output_id=703 WHERE id=101")
@@ -56,6 +67,7 @@ def _scenario(owned, case):
                             {"availability": 4, "error_json": {"reason": "source_missing"}})
         change = event_envelope(2, 2, 20, 4, (row,), _NOW)
         plan.owners["outputs", 701] = ("output", 701)
+        changes = (change,)
     elif case == "source_finished":
         connection.execute("UPDATE actions SET status=2 WHERE id=12")
         connection.execute("UPDATE actions SET type=5, target_selection_state=1, execution_spec_json='{}',"
@@ -75,6 +87,7 @@ def _scenario(owned, case):
         change = event_envelope(2, 2, 8, 1,
             (update_change("actions", 12, {"status": 2}, {"status": 3}),), _NOW)
         plan.owners["actions", 12] = ("action", 12)
+        changes = (change,)
     else:
         assert case == "new_repair"
         _repair_file(connection, 599)
@@ -85,6 +98,8 @@ def _scenario(owned, case):
             "INSERT INTO outputs (id,source_action_id,kind,intermediate_file_id,availability,cleanup_status,"
             " media_json,created_event_id,last_event_id,change_count) VALUES (999,11,2,599,1,1,'{}',1,1,1)")
         connection.execute("INSERT INTO output_origins (id,output_id,original_output_id) VALUES (899,999,701)")
+        # 授权命令预跑要求库内一致：已登记的修复成品承载文件已提升。
+        connection.execute("UPDATE intermediate_files SET retention_state=3 WHERE id=599")
         connection.commit()
         plan = _grant_plan(connection, command)
         created = []
@@ -93,11 +108,21 @@ def _scenario(owned, case):
             created.append(row_change(table, identity, {key: values[key] for key in business_columns(table)}))
             plan.owners[table, identity] = ("output", 999)
         change = event_envelope(2, 2, 20, 2, tuple(created), _NOW)
+        promotion = event_envelope(2, 2, 26, 2, (
+            update_change("intermediate_files", 599,
+                          {"retention_state": 1}, {"retention_state": 3}),), _NOW)
+        plan.owners["intermediate_files", 599] = ("intermediate_file", 599)
+        changes = (change, promotion)
         connection.execute("DELETE FROM output_origins WHERE id=899")
         connection.execute("DELETE FROM outputs WHERE id=999")
+        connection.execute("UPDATE intermediate_files SET retention_state=1 WHERE id=599")
         connection.commit()
         del plan.state_rows["outputs"][999]
         del plan.state_rows["output_origins"][899]
+        plan.state_rows["intermediate_files"][599]["retention_state"] = 1
+        # 登记事件时刻的处理事实：本动作修复成功且输出指向 599。
+        plan.state_rows.setdefault("recording_processing", {})[1] = row_facts(
+            connection, "recording_processing", 1)
         reads = outputs._CatalogReads(connection)
         assert reads.related(701) == ()
         assert reads.origin(999) is None
@@ -106,7 +131,7 @@ def _scenario(owned, case):
             ranges[key] = ranges.get(key, frozenset()) | values
         plan = replace(plan, read_coverage=ReadCoverage(ranges))
     plan.state_rows["plans"] = {identity: row_facts(connection, "plans", identity) for identity in (1, 2)}
-    return plan, change
+    return plan, changes
 
 
 @pytest.mark.parametrize("case", ["host_missing", "new_repair", "source_finished"])
@@ -114,8 +139,8 @@ def _scenario(owned, case):
 def test_grant_uses_only_preceding_business_events(competition_database, monkeypatch, case, change_first):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
-    plan, change = _scenario(competition_database, case)
-    events = (change, *plan.events) if change_first else (*plan.events, change)
+    plan, changes = _scenario(competition_database, case)
+    events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
     original = validators.NAMED_GUARDS["read_permission"]
     seen = []
 
@@ -155,8 +180,8 @@ def test_later_write_failure_rolls_back_business_event_and_preparation(
 ):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
-    plan, change = _scenario(competition_database, case)
-    events = (change, *plan.events) if change_first else (*plan.events, change)
+    plan, changes = _scenario(competition_database, case)
+    events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
     before = tuple(competition_database.connection.iterdump())
     target = replace(competition_database, connection=_FaultConnection(competition_database.connection, prefix))
     receipt = commit_operation(_Sequence(events, plan), new_operation_key(), target)

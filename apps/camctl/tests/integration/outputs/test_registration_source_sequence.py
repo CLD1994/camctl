@@ -26,14 +26,14 @@ def test_foreign_file_cannot_be_registered_as_derivative(
 ):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
-    _, _, registration, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
+    _, _, registrations, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
     connection = selection_database.connection
     connection.execute(f"UPDATE {table} SET {column}=12 WHERE id=?", (file_id,))
     connection.commit()
     context.state_rows[table][file_id][column] = 12
     before = tuple(connection.iterdump())
 
-    receipt = commit_operation(_Sequence((registration,), context), new_operation_key(), selection_database)
+    receipt = commit_operation(_Sequence(registrations, context), new_operation_key(), selection_database)
 
     assert receipt.kind == "rolled_back"
     assert isinstance(receipt.error, EventValidationError), receipt.error
@@ -45,7 +45,7 @@ def test_foreign_file_cannot_be_registered_as_derivative(
 def test_existing_derivative_keeps_its_role_after_cleanup(selection_database, monkeypatch, kind, case, cleaned):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
-    _, _, registration, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
+    _, _, registrations, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
     connection = selection_database.connection
     _, file_id = _file(connection, 998, kind, 100)
     _output(connection, 998, kind, file_id)
@@ -60,13 +60,15 @@ def test_existing_derivative_keeps_its_role_after_cleanup(selection_database, mo
     assert reads.related(705) == (998,)
     for table, rows in reads.state_rows.items():
         context.state_rows.setdefault(table, {}).update(rows)
+    registration = registrations[0]
     origin = registration.rows[1]
     context.owners.pop(("output_origins", origin.row_id))
     context.owners["output_origins", 1001] = ("output", 999)
     registration = replace(registration, rows=(registration.rows[0], replace(origin, row_id=1001)))
     before = tuple(connection.iterdump())
 
-    receipt = commit_operation(_Sequence((registration,), context), new_operation_key(), selection_database)
+    receipt = commit_operation(
+        _Sequence((registration, *registrations[1:]), context), new_operation_key(), selection_database)
 
     assert receipt.kind == "rolled_back"
     assert isinstance(receipt.error, EventValidationError), receipt.error

@@ -21,8 +21,16 @@ def _derived_environment(tmp_path):
     connection.execute("UPDATE device_files SET original_device_file_id=11, pairing_evidence_json='{}' WHERE id=12")
     connection.execute(
         "INSERT INTO intermediate_files (id,owner_action_id,purpose,relative_path,retention_state,"
-        " cleanup_state,size_bytes,created_event_id,last_event_id,change_count)"
-        " VALUES (11,1,4,'derived/11.mp4',3,1,512,1,1,1)")
+        " cleanup_state,size_bytes,sha256,created_event_id,last_event_id,change_count)"
+        " VALUES (11,1,4,'derived/11.mp4',1,1,512,?,1,1,1)",
+        ("c" * 64,))
+    connection.execute(
+        "INSERT INTO recording_processing (id, action_id, source_device_file_id,"
+        " check_state, check_decision, check_basis_json, media_json, repair_state,"
+        " repair_basis_json, repair_output_file_id, repair_error_json,"
+        " discard_state, discard_error_json)"
+        " VALUES (1, 1, NULL, 3, 3, '{}', '{}', 5, '{}', 11, NULL, 1, NULL)"
+    )
     connection.commit()
     return owned
 

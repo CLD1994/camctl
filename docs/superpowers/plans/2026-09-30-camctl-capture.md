@@ -212,6 +212,12 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 第二段剩余：原片检查拷贝复用 X4—X6 读取资格与拷贝流程、probe/repair 受管执行接入 `MediaObservation` 与修复决定、修复成品提升及与 `finish_capture` 终态同事务整合、DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。M2 的可靠视频时长来源仍阻塞在设备适配证据。
 
+#### C8 第二段的阶段性验证（2026-10-05）
+
+第二段完成修复成品提升与 `finish_capture` 终态的同事务整合（对应媒体计划 M4b 与登记计划 R3），任务 checkbox 保持未勾：`FinishCaptureCommand` 对 REPAIRED 草稿核对修复资格后同事务保存 `INTERMEDIATE_FILE_CHANGED.LIFECYCLE`（保留状态 1→3），`output` 守卫补齐提升配对分支并复核登记资格；产物元信息从占位改为实际文件事实。关键裁决与验证见[登记计划 R3 验证记录](2026-10-03-camctl-output-registration-review.md#r3-验证记录)。
+
+第二段仍剩余：原片检查拷贝复用 X4—X6 读取资格与拷贝流程、probe/repair 受管执行接入 `MediaObservation` 与修复决定、DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。M2 的可靠视频时长来源仍阻塞在设备适配证据。
+
 ### C9 三种能力的完整链验收
 
 **预计文件：** `apps/camctl/src/camctl/capture/handlers.py`、`apps/camctl/src/camctl/capture/recovery.py`；测试为 `apps/camctl/tests/integration/capture/test_capture_contract.py`。

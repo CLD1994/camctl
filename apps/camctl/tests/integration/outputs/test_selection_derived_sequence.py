@@ -14,7 +14,7 @@ from camctl.history.validators import EventValidationError
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.transaction import commit_operation, event_envelope, row_change, row_facts
+from camctl.persistence.transaction import commit_operation, event_envelope, row_change, row_facts, update_change
 
 from .test_selection_guard import _proposal, _NOW, selection_database, family_database
 from .test_selection_event_sequence import _Sequence
@@ -33,7 +33,7 @@ _CASES = {
 }
 
 
-def _file(connection, identity, kind, size):
+def _file(connection, identity, kind, size, *, pending_repair: bool = False):
     if kind == 3:
         file_id = identity - 400
         _seed_device_file(connection, file_id, 11)
@@ -43,8 +43,18 @@ def _file(connection, identity, kind, size):
     file_id = identity - 100
     connection.execute(
         "INSERT INTO intermediate_files (id, owner_action_id, purpose, relative_path, retention_state,"
-        " cleanup_state, size_bytes, created_event_id, last_event_id, change_count)"
-        " VALUES (?, 11, 4, ?, 3, 1, ?, 1, 1, 1)", (file_id, f"derived/{file_id}.mp4", size))
+        " cleanup_state, size_bytes, sha256, created_event_id, last_event_id, change_count)"
+        " VALUES (?, 11, 4, ?, ?, 1, ?, ?, 1, 1, 1)",
+        (file_id, f"derived/{file_id}.mp4", 1 if pending_repair else 3, size, "e" * 64))
+    if pending_repair:
+        connection.execute(
+            "INSERT INTO recording_processing (id, action_id, source_device_file_id,"
+            " check_state, check_decision, check_basis_json, media_json, repair_state,"
+            " repair_basis_json, repair_output_file_id, repair_error_json,"
+            " discard_state, discard_error_json)"
+            " VALUES (1, 11, NULL, 3, 3, '{}', '{}', 5, '{}', ?, NULL, 1, NULL)",
+            (file_id,),
+        )
     return "intermediate_files", file_id
 
 
@@ -67,7 +77,8 @@ def _scenario(owned, mode, case):
     if previous_kind is not None:
         _, previous_file = _file(connection, 998, previous_kind, previous_size)
         _output(connection, 998, previous_kind, previous_file)
-    file_table, file_id = _file(connection, 999, kind, size)
+    file_table, file_id = _file(
+        connection, 999, kind, size, pending_repair=kind == 2)
     connection.commit()
     initial, current = _proposal(owned, mode)
     current.state_rows["plans"] = {1: row_facts(connection, "plans", 1)}
@@ -81,6 +92,9 @@ def _scenario(owned, mode, case):
         current.state_rows.setdefault(table, {}).update(rows)
     current = replace(current, read_coverage=ReadCoverage(ranges))
     origin_id = _output(connection, 999, kind, file_id)
+    if kind == 2:
+        # 变化后提案按一致状态预跑：登记后的修复承载文件已提升。
+        connection.execute("UPDATE intermediate_files SET retention_state=3 WHERE id=?", (file_id,))
     connection.commit()
     rows = []
     for table, identity in (("outputs", 999), ("output_origins", origin_id)):
@@ -91,8 +105,19 @@ def _scenario(owned, mode, case):
     current.owners.update(future.owners)
     connection.execute("DELETE FROM output_origins WHERE id=?", (origin_id,))
     connection.execute("DELETE FROM outputs WHERE id=999")
+    registration_events = [event_envelope(2, 2, 20, kind, tuple(rows), _NOW)]
+    if kind == 2:
+        # 登记事件时刻的事实：承载文件未提升、本动作修复成功。
+        connection.execute("UPDATE intermediate_files SET retention_state=1 WHERE id=?", (file_id,))
+        current.state_rows["intermediate_files"][file_id]["retention_state"] = 1
+        current.state_rows.setdefault("recording_processing", {})[1] = row_facts(
+            connection, "recording_processing", 1)
+        current.owners["intermediate_files", file_id] = ("intermediate_file", file_id)
+        registration_events.append(event_envelope(2, 2, 26, 2, (
+            update_change("intermediate_files", file_id,
+                          {"retention_state": 1}, {"retention_state": 3}),), _NOW))
     connection.commit()
-    return initial, changed, event_envelope(2, 2, 20, kind, tuple(rows), _NOW), current
+    return initial, changed, tuple(registration_events), current
 
 
 def _changes_selection(case, mode):
@@ -113,9 +138,9 @@ def test_derived_registration_and_origin_take_effect_together(
 ):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
-    initial, changed, registration, context = _scenario(selection_database, mode, case)
+    initial, changed, registrations, context = _scenario(selection_database, mode, case)
     selection = changed if select_changed else initial
-    events = (registration, selection) if registration_first else (selection, registration)
+    events = (*registrations, selection) if registration_first else (selection, *registrations)
     before = tuple(selection_database.connection.iterdump())
     seen = []
     original = validators.NAMED_GUARDS["source_selection"]
@@ -164,10 +189,10 @@ def test_derived_registration_and_origin_take_effect_together(
 def test_derived_registration_and_selection_rollback_together(selection_database, monkeypatch, kind, failure):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
-    _, selection, registration, context = _scenario(selection_database, SelectionMode.EXPLICIT_IDS, kind)
+    _, selection, registrations, context = _scenario(selection_database, SelectionMode.EXPLICIT_IDS, kind)
     before = tuple(selection_database.connection.iterdump())
     target = replace(selection_database, connection=_FaultConnection(selection_database.connection, failure))
-    receipt = commit_operation(_Sequence((registration, selection), context), new_operation_key(), target)
+    receipt = commit_operation(_Sequence((*registrations, selection), context), new_operation_key(), target)
     assert receipt.kind == "rolled_back", receipt.error
     assert isinstance(receipt.error, sqlite3.OperationalError), receipt.error
     assert tuple(selection_database.connection.iterdump()) == before

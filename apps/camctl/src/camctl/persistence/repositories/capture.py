@@ -1,9 +1,10 @@
 """录像完成终态与正式产物登记的唯一事务。
 
-经 P3 事务内核组织：动作成功终态、正式产物登记及父计划状态在
-同一事务共同保存，任一写入失败整组回滚；登记前经 X1 纯规则校
-验，事件守卫从当前文件事实复核来源、原设备绑定、文件角色与初
-始可用性组合。停止、活动结束与产物、动作结果分别保存，不互相混同。
+经 P3 事务内核组织：动作成功终态、正式产物登记（含修复成品承载
+文件的共同提升）及父计划状态在同一事务共同保存，任一写入失败整
+组回滚；登记前经 X1 纯规则校验，事件守卫从当前文件事实复核来源、
+原设备绑定、文件角色、修复成功依据、初始可用性组合与提升配对。
+停止、活动结束与产物、动作结果分别保存，不互相混同。
 """
 
 from __future__ import annotations
@@ -56,6 +57,13 @@ _PLAN_STATUS_EVENT = 9
 _EMERGENCY_RECORDED_EVENT = 33
 _RECORDING_DECIDED_EVENT = 18
 _RECORDING_PROCESSED_EVENT = 19
+_INTERMEDIATE_FILE_EVENT = 26
+
+#: INTERMEDIATE_FILE_CHANGED.LIFECYCLE：保存完整字节及保留用途变化。
+_LIFECYCLE_REASON = 2
+
+_RETENTION = enum_for("intermediate_files.retention_state")
+_PURPOSE = enum_for("intermediate_files.purpose")
 
 #: RECORDING_DECIDED 的三个分支。
 _DECIDED_CHECK_REASON = 1
@@ -76,6 +84,11 @@ _ACTION_TERMINAL = (3, 4, 5, 6)
 
 _OUTPUT_KIND = enum_for("outputs.kind")
 _KIND_CODES = {kind: int(_OUTPUT_KIND[kind.name]) for kind in OutputKind}
+
+
+def _unchecked_media() -> dict[str, Any]:
+    """登记时产物文件尚无媒体检查：公共 media 结构表达未检查与未知时长。"""
+    return {"check_status": "not_performed", "duration": {"status": "unknown"}}
 
 #: device_files.role 与产物种类的对应；修复产物承载于中间文件。
 _FILE_ROLE = enum_for("device_files.role")
@@ -137,12 +150,43 @@ def _action_finish_guard(event, context) -> None:
 
 
 def _output_guard(event, context) -> None:
-    """从登记事件当前事实核对来源、原设备绑定及文件角色。"""
+    """从事件当前事实核对来源、原设备绑定、文件角色与提升配对。"""
+    if event.event_type == _INTERMEDIATE_FILE_EVENT:
+        _promotion_pairing(event, context)
+        return
     for row in event.rows:
-        if row.table != "outputs" or row.before.exists:
-            continue
-        _output_file(row.after.values, context)
+        if row.table == "outputs" and not row.before.exists:
+            _output_file(row.after.values, context)
     _output_relationships(event, context)
+
+
+def _promotion_pairing(event, context) -> None:
+    """INTERMEDIATE_FILE_CHANGED.LIFECYCLE：提升只因同事务登记发生。
+
+    推进到 PROMOTED 的中间文件要求先前事件已登记承载它的修复成
+    品；释放与交接的保留变化不经本核对。
+    """
+    if event.reason != _LIFECYCLE_REASON:
+        return
+    for row in event.rows:
+        if row.table != "intermediate_files":
+            continue
+        if row.after.values.get("retention_state") != int(_RETENTION.PROMOTED):
+            continue
+        file = context.state_rows.get("intermediate_files", {}).get(row.row_id)
+        if file is None:
+            raise EventValidationError(
+                f"提升缺少当前文件事实: intermediate_files#{row.row_id}")
+        owner = file.get("owner_action_id")
+        for output in context.state_rows.get("outputs", {}).values():
+            if (output.get("kind") == _KIND_CODES[OutputKind.REPAIRED]
+                    and output.get("intermediate_file_id") == row.row_id
+                    and output.get("source_action_id") == owner):
+                break
+        else:
+            raise EventValidationError(
+                "文件提升必须由同事务先行的修复成品登记授权:"
+                f" intermediate_files#{row.row_id}")
 
 
 def _output_file(values, context) -> None:
@@ -181,6 +225,32 @@ def _output_file(values, context) -> None:
                 or "owner_delivery_id" not in facts
                 or facts["owner_delivery_id"] is not None):
             raise EventValidationError("产物中间文件不属于来源动作的文件责任")
+        _require_promotable_repair_output(facts)
+        _require_repair_success(context, source_id, values.get("intermediate_file_id"))
+
+
+def _require_promotable_repair_output(facts) -> None:
+    """修复成品的承载文件必须仍是未释放的完整修复输出。"""
+    if facts.get("purpose") != int(_PURPOSE.REPAIR_OUTPUT):
+        raise EventValidationError(
+            f"修复成品承载文件不是修复输出用途: {facts.get('purpose')!r}")
+    if facts.get("retention_state") != int(_RETENTION.REQUIRED):
+        raise EventValidationError(
+            "修复成品承载文件必须尚未释放、提升或交接:"
+            f" {facts.get('retention_state')!r}")
+    if facts.get("size_bytes") is None or facts.get("sha256") is None:
+        raise EventValidationError("修复成品承载文件缺少完整字节事实")
+
+
+def _require_repair_success(context, source_id: int, file_id) -> None:
+    """登记以本动作的修复成功事实为前提；缺失或指向他处均拒绝。"""
+    for processing in context.state_rows.get("recording_processing", {}).values():
+        if (processing.get("action_id") == source_id
+                and processing.get("repair_state") == RepairOutcome.SUCCEEDED.value
+                and processing.get("repair_output_file_id") == file_id):
+            return
+    raise EventValidationError(
+        f"产物登记缺少本动作的修复成功事实: intermediate_files#{file_id}")
 
 
 def _output_relationships(event, context) -> None:
@@ -354,6 +424,7 @@ class FinishCaptureCommand:
         changes = validate_output_registration(command.drafts, command.catalog_facts)
         for output in changes.outputs:
             self._load_file(connection, output.device_file_id, output.intermediate_file_id)
+        self._verify_repaired_outputs(connection, changes)
 
         first_output_id = _next_id(connection, "outputs")
         numbered = tuple((first_output_id + index, output) for index, output in enumerate(changes.outputs))
@@ -390,18 +461,20 @@ class FinishCaptureCommand:
         ]
         next_origin_id = _next_id(connection, "output_origins")
         # 原片先进入当前事件事实，派生关系按显式引用解析；结果保持输入次序。
+        promoted_files: list[int] = []
         for output_id, output in sorted(numbered, key=lambda item: item[1].kind is not OutputKind.ORIGINAL):
+            name, media_type = self._readable_metadata(connection, output_id, output, original_ids)
             values = {
                 "source_action_id": command.action_id,
                 "kind": _KIND_CODES[output.kind],
                 "device_file_id": output.device_file_id,
                 "intermediate_file_id": output.intermediate_file_id,
-                "original_name": None,
-                "media_type": None,
+                "original_name": name,
+                "media_type": media_type,
                 "availability": 1,
                 "cleanup_status": 1,
                 "cleanup_error_json": None,
-                "media_json": {},
+                "media_json": _unchecked_media(),
                 "error_json": None,
             }
             self._owners[("outputs", output_id)] = ("output", output_id)
@@ -416,6 +489,22 @@ class FinishCaptureCommand:
                 _envelope(
                     0, 0, _OUTPUT_REGISTERED_EVENT, _KIND_CODES[output.kind],
                     rows, command.occurred_at,
+                )
+            )
+            if output.kind is OutputKind.REPAIRED:
+                promoted_files.append(output.intermediate_file_id)
+        # 登记事件先行；承载文件在同事务提升为正式产物保留状态。
+        for file_id in promoted_files:
+            self._owners[("intermediate_files", file_id)] = ("intermediate_file", file_id)
+            templates.append(
+                _envelope(
+                    0, 0, _INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON,
+                    (_update(
+                        "intermediate_files", file_id,
+                        {"retention_state": int(_RETENTION.REQUIRED)},
+                        {"retention_state": int(_RETENTION.PROMOTED)},
+                    ),),
+                    command.occurred_at,
                 )
             )
         self._owners[("actions", command.action_id)] = (
@@ -474,6 +563,61 @@ class FinishCaptureCommand:
                 raise TransactionError(f"产物登记关联记录不存在: {table}#{identity}")
             rows[identity] = facts
         return rows[identity]
+
+    def _verify_repaired_outputs(self, connection, changes) -> None:
+        """核对修复成品登记资格：未释放的完整修复输出配修复成功事实。
+
+        没有修复成品时不读取处理事实；守卫在事件层用同样事实复核。
+        """
+        repaired = [output for output in changes.outputs
+                    if output.kind is OutputKind.REPAIRED]
+        if not repaired:
+            return
+        with closing(connection.execute(
+                "SELECT id FROM recording_processing WHERE action_id = ?",
+                (self._command.action_id,))) as cursor:
+            found = cursor.fetchone()
+        processing = None
+        if found is not None:
+            processing = self._required(
+                connection, "recording_processing", int(found[0]))
+        for output in repaired:
+            file = self._state["intermediate_files"][output.intermediate_file_id]
+            if file.get("purpose") != int(_PURPOSE.REPAIR_OUTPUT):
+                raise TransactionError(
+                    "修复成品承载文件不是修复输出用途:"
+                    f" {output.intermediate_file_id}")
+            if file.get("retention_state") != int(_RETENTION.REQUIRED):
+                raise TransactionError(
+                    "修复成品承载文件必须尚未释放、提升或交接:"
+                    f" {file.get('retention_state')!r}")
+            if file.get("size_bytes") is None or file.get("sha256") is None:
+                raise TransactionError(
+                    f"修复成品承载文件缺少完整字节事实: {output.intermediate_file_id}")
+            if (processing is None
+                    or processing.get("repair_state") != RepairOutcome.SUCCEEDED.value
+                    or processing.get("repair_output_file_id")
+                    != output.intermediate_file_id):
+                raise TransactionError(
+                    "产物登记缺少本动作的修复成功事实:"
+                    f" {output.intermediate_file_id}")
+
+    def _readable_metadata(self, connection, output_id, output, original_ids):
+        """登记时的可读元信息取自承载文件行；观察未保存时保留未知。
+
+        修复成品沿用其关联原片设备文件的可读名称与类型：修复不重
+        新编码，媒体类型与原片一致。
+        """
+        if output.device_file_id is not None:
+            file = self._required(connection, "device_files", output.device_file_id)
+        else:
+            if output.original_batch_file_id is not None:
+                original_file_id = output.original_batch_file_id
+            else:
+                original_file_id = self._state["outputs"][
+                    original_ids[output_id]]["device_file_id"]
+            file = self._required(connection, "device_files", original_file_id)
+        return file.get("original_name"), file.get("media_type")
 
     def _load_file(self, connection, device_id, intermediate_id):
         table = "device_files" if device_id is not None else "intermediate_files"
