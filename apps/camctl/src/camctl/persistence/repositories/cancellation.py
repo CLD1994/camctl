@@ -389,11 +389,14 @@ class _ApplyCancelTargetCommand:
             effect_after = CancellationEffect.APPLIED.value
         else:
             raise ConsistencyError(f"取消生效方式不可解释: {mode!r}")
+        current_effect = item["cancellation_effect"]
+        apply_before = {"status": _ITEM_PENDING}
+        apply_after = {"status": _ITEM_RUNNING}
+        if current_effect != effect_after:
+            apply_before["cancellation_effect"] = current_effect
+            apply_after["cancellation_effect"] = effect_after
         apply_row = _update(
-            "cancel_items", command.item_id,
-            {"status": _ITEM_PENDING,
-             "cancellation_effect": CancellationEffect.NOT_APPLIED.value},
-            {"status": _ITEM_RUNNING, "cancellation_effect": effect_after})
+            "cancel_items", command.item_id, apply_before, apply_after)
         withdrawal_rows = self._withdrawal_rows(connection, item, target)
         if withdrawal_rows:
             # 报告关联解析沿撤回明细→取消成员/交付取事实。
@@ -562,8 +565,10 @@ class _RecordCancelResultCommand:
         self._state["actions"] = {origin["id"]: dict(origin)}
         if origin["type"] != _CANCEL_ACTION_TYPE:
             raise ConsistencyError("取消项结果要求取消动作")
-        if origin["status"] != int(_ACTION_STATUS.RUNNING):
-            raise TransactionError("取消项结果要求取消动作执行中")
+        if (origin["status"] != int(_ACTION_STATUS.RUNNING)
+                and origin["status"] not in _ACTION_TERMINAL):
+            raise TransactionError(
+                f"取消动作状态不可解释: {origin['id']} {origin['status']!r}")
         return item, origin
 
     def _already(self) -> CommandPlan:
@@ -1297,8 +1302,9 @@ def _guard_cancel_apply(event, context, items) -> None:
         if values.get("status") != _ITEM_RUNNING:
             raise EventValidationError("取消生效把成员推进到处理中")
         effect = values.get("cancellation_effect")
-        if effect not in (CancellationEffect.APPLIED.value,
-                          CancellationEffect.NOT_REQUIRED.value):
+        if effect is not None and effect not in (
+                CancellationEffect.APPLIED.value,
+                CancellationEffect.NOT_REQUIRED.value):
             raise EventValidationError(f"取消生效的效果非法: {effect!r}")
     for row in event.rows:
         if row.table != "actions":

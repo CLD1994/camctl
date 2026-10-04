@@ -165,8 +165,8 @@ def may_apply_cancel(eligibility: CancelEligibility) -> bool:
 #: 拍摄动作类型（资格表只适用设备任务）。
 _CAPTURE_TYPES = frozenset({1, 2, 3})
 _CANCEL_TASK_TYPE = 6
-#: 清理与报告动作：取消按各自模块规则收场，装配视为恒允许标记。
-_CLEANUP_TASK_TYPE, _REPORT_TASK_TYPE = 5, 7
+#: 取回、清理与报告动作：取消按各自模块规则收场，装配视为恒允许标记。
+_OBTAIN_TASK_TYPE, _CLEANUP_TASK_TYPE, _REPORT_TASK_TYPE = 4, 5, 7
 #: device_activities.dispatch_state 的登记编号。
 _DISPATCH_NOT_DISPATCHED, _DISPATCH_MAY_HAVE, _DISPATCH_RETURNED = 1, 2, 3
 _DISPATCH_REJECTED = 4
@@ -187,13 +187,15 @@ def load_eligibility_facts(connection, action_id: int) -> EligibilityFacts:
         raise ConsistencyError(f"取消目标动作不存在: {action_id}")
     kind = action["type"]
     if (kind not in _CAPTURE_TYPES and kind not in
-            (_CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE, _REPORT_TASK_TYPE)):
+            (_OBTAIN_TASK_TYPE, _CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE,
+             _REPORT_TASK_TYPE)):
         raise ConsistencyError(
             f"取消资格判断只适用已定义的目标类型: {action_id} type={kind!r}")
-    if kind in (_CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE, _REPORT_TASK_TYPE):
-        # 取消/清理/报告动作的收场按各自模块规则（停止等待、解除
-        # 限制或同步责任分类）：终态保持、取消已生效则复用原责任，
-        # 否则总是允许标记取消。
+    if kind in (_OBTAIN_TASK_TYPE, _CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE,
+                _REPORT_TASK_TYPE):
+        # 取回/取消/清理/报告动作的收场按各自模块规则（停止等待、
+        # 读取结束、解除限制或同步责任分类）：终态保持、取消已生效
+        # 则复用原责任，否则总是允许标记取消。
         return EligibilityFacts(
             terminal=action["status"] in _ACTION_TERMINAL,
             cancel_applied=bool(action["cancel_requested"]),
