@@ -12,6 +12,11 @@ from contextlib import closing
 from enum import Enum
 from typing import Any
 
+from camctl.cancellation.models import (
+    CancelProgress,
+    CancellationResult,
+    CancellationStatus,
+)
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.transaction import row_facts
 
@@ -22,7 +27,46 @@ __all__ = [
     "decide_cancel_eligibility",
     "load_eligibility_facts",
     "may_apply_cancel",
+    "summarize_cancel",
 ]
+
+
+#: cancel_items.status 的登记编号。
+_ITEM_PENDING, _ITEM_RUNNING, _ITEM_SUCCEEDED, _ITEM_FAILED = 1, 2, 3, 4
+_ITEM_CANCELED = 5
+
+
+def summarize_cancel(progress: CancelProgress) -> CancellationResult:
+    """按逐项进度判定取消动作的结果分类。
+
+    保存取消标记只表示生效到执行控制：任一项仍在处理即保持运行，
+    不能仅凭标记提前成功。全部项结束后，任一失败按登记的机器错误
+    cancel_items_failed 汇总（具体原因由逐项结果表达）；无失败才成
+    功。项 CANCELED 属取消发起者收场语义，普通汇总拒绝解释。
+    """
+    succeeded = failed = 0
+    for item in progress.items:
+        if item.status == _ITEM_SUCCEEDED:
+            succeeded += 1
+        elif item.status == _ITEM_FAILED:
+            failed += 1
+        elif item.status in (_ITEM_PENDING, _ITEM_RUNNING):
+            return CancellationResult(
+                status=CancellationStatus.RUNNING, succeeded=succeeded,
+                failed=failed)
+        else:
+            raise ValueError(
+                f"取消项状态不可由普通汇总解释: {item.item_id}"
+                f" status={item.status!r}")
+    if failed:
+        return CancellationResult(
+            status=CancellationStatus.FAILED, succeeded=succeeded,
+            failed=failed, error={
+                "code": "cancel_items_failed", "stage": "execution",
+                "details": {}})
+    return CancellationResult(
+        status=CancellationStatus.SUCCEEDED, succeeded=succeeded,
+        failed=failed)
 
 
 class DispatchPhase(Enum):

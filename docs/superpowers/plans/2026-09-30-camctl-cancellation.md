@@ -201,13 +201,56 @@ N3 生效事务消费 N1 固定集合与本决策表：允许分区保存取消�
 
 **接口与依赖：** 提供异步 `apply_cancel(command: ApplyCancel, key: OperationKey) -> DbOutcome[CancelProgress]`、`summarize_cancel(progress: CancelProgress) -> CancellationResult`；ApplyCancel 含固定集合及原发起者身份。前置交付：N1/N2、P3/P4、S5、目标模块的 TargetSettlementPort。
 
-- [ ] 编写失败用例。建立 `test_cancel_mark_is_not_settlement`，标记提交而停止仍在途，`assert cancel_status is ActionState.RUNNING`；全部有限处理结束才汇总。任一失败不放弃其他有限处理，最终机器错误 cancel_items_failed/execution/details={}，具体原因在 items。目标终态与取消项结果分别保持。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_effects.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。保存目标取消事实和独立必要责任，目标流程实际推进；取消动作只等待自身固定范围，原停止/读取/撤回预算复用，不创建第二套补偿。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 目标责任可在发起者不等待时继续发现和保存。
+- [x] 编写失败用例。建立 `test_cancel_mark_is_not_settlement`，标记提交而停止仍在途，`assert cancel_status is ActionState.RUNNING`；全部有限处理结束才汇总。任一失败不放弃其他有限处理，最终机器错误 cancel_items_failed/execution/details={}，具体原因在 items。目标终态与取消项结果分别保持。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_effects.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。保存目标取消事实和独立必要责任，目标流程实际推进；取消动作只等待自身固定范围，原停止/读取/撤回预算复用，不创建第二套补偿。
+- [x] 再运行上述命令，要求全部 PASS，并核对 目标责任可在发起者不等待时继续发现和保存。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/cancellation/test_effects.py -q`，真实仓储、调度和各目标替身，验证取消、迟到结果、提交未知及重启后汇总。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有结果接手、目标完成与发起者等待是否被一个 Future 混同；记录门禁证据，建议以“feat: 实现取消效果与独立收场”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有结果接手、目标完成与发起者等待是否被一个 Future 混同；记录门禁证据，建议以“feat: 实现取消效果与独立收场”形成独立提交。
+
+
+#### N3 的阶段性验证（2026-10-05）
+
+N3 完成，任务全部勾选：`cancellation/ports.py` 提供 `TargetSettlement-
+Port`（settle 返回 `SettlementOutcome(complete, failed)`，实际停止、读
+取结束与撤回由目标模块实现，端口不能伪装完成）。`service.py` 的
+`apply_cancel` 消费 N1 固定集合与 N2 资格：待处理项按资格保存生效或
+拒绝明细（UNVERIFIED 按一致性错误停止，不猜测）；效果 APPLIED 且目
+标未终态的项推进本次有限收场——端口完成且成功保存 CANCELED、完成
+且失败保存 target_cleanup_failed（不放弃其他项）、未完成保持处理
+中；已终态目标不改写。编排无 Future：逐项以数据库状态驱动，重入沿
+用原状态继续收场，发起者结束不丢责任。`rules.summarize_cancel` 判定
+动作结果（任一项处理中→RUNNING——保存取消标记不是完成；全部结束
+且任一失败→FAILED 携带登记机器错误 cancel_items_failed/execution/
+details={}；无失败→SUCCEEDED；项 CANCELED 属发起者收场语义，普通汇
+总拒绝解释）。
+
+仓储新增三事务：`apply_cancel_target`（CANCEL_CHANGED.APPLY 按四分
+区——未启动同事务终态取消（目标 1→6）+ 项成功；停止收场仅保存标记
+（cancel_requested 0→1）+ 项进入处理中；终态不改写目标按 ALREADY_
+TERMINAL 成功（效果 NOT_REQUIRED）；目标取消已生效只保存本项效果复
+用原责任）；`record_cancel_result`（RESULT：成功携带完成依据，失败
+携带公共错误经 item_error_id/validate_error_details，项 PENDING 或处
+理中均可进入终态）；`finish_cancel_action`（全部成员终态后 ACTION_
+FINISHED，任一失败按 cancel_items_failed(23) 空 details，全兄弟终态
+时 PLAN_STATUS 同事务；原键重送与终态新键恢复仿清理汇总模式）。守
+卫 `cancel` 扩展覆盖事件 25 三分支（生效转换与目标标记一致、结果依
+据与效果不改写、结束等待转 CANCELED）；按事件登记要求注册
+`withdrawal` 守卫（撤回明细属于本次目标的取回交付；完整撤回状态机
+归 N5）。目标动作行的历史归属是其自身（actions#N→action,N），取消
+成员行归属取消动作。
+
+验证：单元 `test_effects.py` 6 项（命名用例 `test_cancel_mark_is_
+not_settlement`、处理中保持运行、全部成功、任一失败携带机器错误、
+CANCELED 项与空进度拒绝解释）；集成 `test_effects.py` 12 项（APPLY
+四分区落库含未启动目标直接终态取消、终态目标不改写、拒绝项不动目
+标、生效幂等与原键重送/终态新键无新历史、汇总未终态拒绝/失败汇总
+23 空 details/全成功推进父计划/恢复、服务端到端三例：标记在途保持
+running 且收场只发起一次、收场失败不放弃其他项、迟到结果重启侧汇
+总与终态保存成立）。全量回归通过（Python 3.11；含取消组件 54 项）。
+
+N4 起处理取消发起者自身被取消（STOP_WAIT 消费与等待范围）。
 
 ### N4 取消动作自身被取消
 

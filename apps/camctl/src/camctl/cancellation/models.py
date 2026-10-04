@@ -15,12 +15,23 @@ from typing import Mapping
 from camctl.contracts.values import ObjectId, UtcMicros
 
 __all__ = [
+    "ApplyCancelTarget",
+    "CancelApplyMode",
+    "CancelItemProgress",
+    "CancelOutcomeChoice",
+    "CancelProgress",
     "CancelTarget",
     "CancelTargetError",
     "CancelTargetsDisposition",
     "CancelTargetsSaved",
+    "CancelActionDisposition",
+    "CancelActionFinished",
+    "CancellationResult",
+    "CancellationStatus",
     "FailCancelTargets",
+    "FinishCancelAction",
     "FixCancelTargets",
+    "RecordCancelResult",
     "CancellationEffect",
     "FixedCancelSet",
     "FixedTarget",
@@ -219,3 +230,158 @@ class FailCancelTargets:
             raise ValueError(
                 f"目标解析失败代码不在允许集合: {self.error.code!r}")
         UtcMicros(self.occurred_at)
+
+
+class CancelApplyMode(Enum):
+    """一次取消生效事务的目标处理方式（由取消资格决定）。"""
+
+    #: 可靠未启动：目标直接终态取消，本项同事务成功。
+    PRE_START = "pre_start"
+    #: 已启动或可能启动且支持停止：保存取消标记，停止收场另行推进。
+    WITH_STOP = "with_stop"
+    #: 目标已终态：不改写目标，本项按既有终态成功。
+    TERMINAL = "terminal"
+    #: 目标取消已生效：只保存本项效果，复用原取消责任收场。
+    ALREADY = "already"
+
+
+@dataclass(frozen=True)
+class ApplyCancelTarget:
+    """保存一个目标的取消生效（CANCEL_CHANGED.APPLY）。"""
+
+    item_id: int
+    mode: CancelApplyMode
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.item_id)
+        if not isinstance(self.mode, CancelApplyMode):
+            raise TypeError(
+                f"取消生效方式必须使用 CancelApplyMode: {self.mode!r}")
+        UtcMicros(self.occurred_at)
+
+
+class CancelOutcomeChoice(Enum):
+    """取消项成功的完成依据（登记整数一致）。"""
+
+    CANCELED = 1
+    ALREADY_TERMINAL = 2
+
+
+@dataclass(frozen=True)
+class RecordCancelResult:
+    """保存一个取消项的最终结果（CANCEL_CHANGED.RESULT）。
+
+    outcome 与 code 恰好一个：成功携带完成依据，失败携带公共错误
+    名称及详情。
+    """
+
+    item_id: int
+    occurred_at: int
+    outcome: CancelOutcomeChoice | None = None
+    code: str | None = None
+    details: dict | None = None
+
+    def __post_init__(self) -> None:
+        ObjectId(self.item_id)
+        UtcMicros(self.occurred_at)
+        if (self.outcome is None) == (self.code is None):
+            raise ValueError("取消项结果必须携带完成依据或错误之一")
+        if self.outcome is not None:
+            if not isinstance(self.outcome, CancelOutcomeChoice):
+                raise TypeError("完成依据必须使用 CancelOutcomeChoice")
+            if self.details is not None:
+                raise TypeError("取消项成功不携带错误详情")
+        else:
+            if not isinstance(self.code, str) or not self.code:
+                raise ValueError("取消项失败必须使用公共错误名称")
+            if not isinstance(self.details, dict):
+                raise TypeError("取消项失败详情必须是对象")
+
+
+@dataclass(frozen=True)
+class FinishCancelAction:
+    """取消动作汇总终态的申请输入：全部成员终态后保存动作结果。"""
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+
+
+class CancelItemProgress:
+    """一个取消项的当前进度快照；供汇总判定，不含目标自身状态。"""
+
+    __slots__ = ("item_id", "target_action_id", "status", "outcome",
+                 "error_code", "error_details_json")
+
+    def __init__(self, *, item_id: int, target_action_id: int, status: int,
+                 outcome: int | None = None, error_code: int | None = None,
+                 error_details_json=None) -> None:
+        self.item_id = item_id
+        self.target_action_id = target_action_id
+        self.status = status
+        self.outcome = outcome
+        self.error_code = error_code
+        self.error_details_json = error_details_json
+
+
+class CancelProgress:
+    """一次取消的逐项进度快照。"""
+
+    __slots__ = ("items",)
+
+    def __init__(self, *, items) -> None:
+        self.items = tuple(items)
+        if not self.items:
+            raise ValueError("取消进度必须包含至少一个目标项")
+        for item in self.items:
+            if not isinstance(item, CancelItemProgress):
+                raise TypeError("取消进度项必须使用 CancelItemProgress")
+
+
+class CancellationStatus(Enum):
+    """取消动作的结果分类。"""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class CancellationResult:
+    """取消汇总判定结果；失败携带登记的机器错误对象。"""
+
+    __slots__ = ("status", "succeeded", "failed", "error")
+
+    def __init__(self, *, status: CancellationStatus, succeeded: int,
+                 failed: int, error: dict | None = None) -> None:
+        self.status = status
+        self.succeeded = succeeded
+        self.failed = failed
+        self.error = error
+
+
+class CancelActionDisposition(Enum):
+    """取消动作汇总事务的结果分类。"""
+
+    SAVED = "saved"
+    #: 原键重送或动作已终态：只读复用首次结果。
+    ALREADY = "already"
+
+
+class CancelActionFinished:
+    """取消动作汇总事务的保存结果。"""
+
+    __slots__ = ("disposition", "action_status", "plan_status",
+                 "succeeded", "failed")
+
+    def __init__(self, *, disposition: CancelActionDisposition,
+                 action_status: int, plan_status: int, succeeded: int,
+                 failed: int) -> None:
+        self.disposition = disposition
+        self.action_status = action_status
+        self.plan_status = plan_status
+        self.succeeded = succeeded
+        self.failed = failed
