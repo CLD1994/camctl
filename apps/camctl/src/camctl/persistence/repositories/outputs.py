@@ -30,9 +30,16 @@ from camctl.host_files.paths import (
 from camctl.operations.attempts import AttemptTarget, OperationKind, operation_responsibility_key
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.cleanup_flow import (
+    CleanupItemDisposition,
+    CleanupItemSaved,
+    CleanupOutcomeChoice,
     CleanupTargetsDisposition,
     CleanupTargetsSaved,
+    FailCleanupItem,
+    FinishCleanupItem,
     FixCleanupTargets,
+    ProgressCleanupItem,
+    RestrictCleanupItem,
 )
 from camctl.outputs.competition import has_product_predecessor
 from camctl.outputs.copy import (
@@ -124,6 +131,9 @@ _TARGET_FIXED = 2
 _TARGET_FAILED = 3
 
 _CLEANUP_ITEM_STATUS = enum_for("cleanup_items.status")
+_FILE_PRESENCE = enum_for("device_files.presence_state")
+_OUTPUT_REGISTERED_EVENT = 20
+_OUTPUT_OBSERVATION_REASON = 4
 _CLEANUP_ITEM_NOT_FOUND = item_error_id("cleanup_items", "output_not_found")
 _CLEANUP_ITEMS_FAILED_ID = action_error_id("cleanup_items_failed")
 _CLEANUP_RESTRICTION = enum_for("cleanup_items.restriction_state")
@@ -4520,6 +4530,38 @@ class OutputsRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def restrict_cleanup_item(
+        self, command: RestrictCleanupItem, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[CleanupItemSaved]:
+        receipt = commit_operation(_RestrictCleanupCommand(command, key), key, owned)
+        return self._cleanup_item_outcome(receipt)
+
+    def progress_cleanup_item(
+        self, command: ProgressCleanupItem, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[CleanupItemSaved]:
+        receipt = commit_operation(_ProgressCleanupCommand(command, key), key, owned)
+        return self._cleanup_item_outcome(receipt)
+
+    def finish_cleanup_item(
+        self, command: FinishCleanupItem, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[CleanupItemSaved]:
+        receipt = commit_operation(_FinishCleanupItemCommand(command, key), key, owned)
+        return self._cleanup_item_outcome(receipt)
+
+    def fail_cleanup_item(
+        self, command: FailCleanupItem, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[CleanupItemSaved]:
+        receipt = commit_operation(_FailCleanupItemCommand(command, key), key, owned)
+        return self._cleanup_item_outcome(receipt)
+
+    @staticmethod
+    def _cleanup_item_outcome(receipt) -> DbOutcome[CleanupItemSaved]:
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def load_cleanup_cursor(self, owned: OwnedConnection) -> int | None:
         with closing(owned.connection.execute(
             "SELECT cleanup_cursor_file_id FROM runtime_state WHERE id = 1",
@@ -5974,6 +6016,413 @@ def _saved_member_ids(connection, action_id: int) -> tuple[int, ...]:
         (action_id,),
     )) as cursor:
         return tuple(int(row[0]) for row in cursor.fetchall())
+# -- 清理项生命周期：限制建立、删除推进与终态 -------------------------
+
+
+class _CleanupItemCommandMixin:
+    """清理项命令的共同装载：动作、成员、产物与删除尝试依据。"""
+
+    def _load_item(self, connection, item_id: int) -> dict[str, Any]:
+        item = row_facts(connection, "cleanup_items", item_id)
+        if item is None:
+            raise ConsistencyError(f"清理成员不存在: {item_id}")
+        self._state.setdefault("cleanup_items", {})[item_id] = dict(item)
+        action = row_facts(connection, "actions", item["action_id"])
+        if action is None:
+            raise ConsistencyError(f"清理动作不存在: {item['action_id']}")
+        self._state["actions"] = {item["action_id"]: dict(action)}
+        output_id = item["output_id"]
+        if output_id is not None:
+            output = row_facts(connection, "outputs", output_id)
+            if output is None:
+                raise ConsistencyError(f"产物不存在: {output_id}")
+            self._state.setdefault("outputs", {})[output_id] = dict(output)
+        else:
+            self._state.setdefault("outputs", {})
+        return item
+
+    def _load_delete_basis(self, connection, item_id: int) -> None:
+        """装载该成员的删除流程与尝试，供终态成功依据核对。"""
+        self._state.setdefault("operation_runs", {})
+        self._state.setdefault("operation_attempts", {})
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE cleanup_item_id = ?",
+            (item_id,),
+        )) as cursor:
+            run_ids = tuple(int(row[0]) for row in cursor.fetchall())
+        for run_id in run_ids:
+            run = row_facts(connection, "operation_runs", run_id)
+            if run is not None:
+                self._state["operation_runs"][run_id] = run
+            with closing(connection.execute(
+                "SELECT id FROM operation_attempts WHERE run_id = ?",
+                (run_id,),
+            )) as cursor:
+                attempt_ids = tuple(
+                    int(row[0]) for row in cursor.fetchall())
+            for attempt_id in attempt_ids:
+                attempt = row_facts(
+                    connection, "operation_attempts", attempt_id)
+                if attempt is not None:
+                    self._state["operation_attempts"][attempt_id] = attempt
+
+    def _claim(self, item) -> None:
+        self._owners[("cleanup_items", item["id"])] = (
+            "action", item["action_id"])
+
+
+class _RestrictCleanupCommand(_CleanupItemCommandMixin):
+    """建立删除限制（CLEANUP_CHANGED.RESTRICT + 产物可用性投影）。
+
+    成员从未解析进入限制中并首次确认产物身份；产物投影同事务进入
+    RESTRICTED/PENDING，阻止后续取回资格。
+    """
+
+    def __init__(self, command: RestrictCleanupItem, key: OperationKey) -> None:
+        if not isinstance(command, RestrictCleanupItem):
+            raise TypeError("限制建立申请必须使用 RestrictCleanupItem")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        command = self._command
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._verify_and_reuse(saved, (24, 1))
+        item = self._load_item(connection, command.item_id)
+        action = self._state["actions"][item["action_id"]]
+        if action["target_selection_state"] != _TARGET_FIXED:
+            raise ConsistencyError("限制建立要求目标集合已固定")
+        if action["status"] != int(_ACTION_STATUS.RUNNING) or action["cancel_requested"]:
+            raise TransactionError("限制建立要求清理动作执行中且未取消")
+        if item["status"] != int(_CLEANUP_ITEM_STATUS.UNRESOLVED):
+            return self._already(item)
+        output = self._state["outputs"].get(item["requested_output_id"])
+        if output is None:
+            raise ConsistencyError(
+                f"请求产物不存在，不能建立限制: {item['requested_output_id']}")
+        if (output["availability"] != int(_AVAILABILITY.AVAILABLE)
+                or output["cleanup_status"]
+                != int(_OUTPUT_CLEANUP_STATUS.NOT_REQUESTED)):
+            raise ConsistencyError("限制建立要求产物当前可用且未请求清理")
+        allocation = scope.allocate(2)
+        restrict = _update(
+            "cleanup_items", command.item_id,
+            {"output_id": item["output_id"],
+             "status": int(_CLEANUP_ITEM_STATUS.UNRESOLVED),
+             "restriction_state": int(_CLEANUP_RESTRICTION.NOT_ESTABLISHED)},
+            {"output_id": item["requested_output_id"],
+             "status": int(_CLEANUP_ITEM_STATUS.PENDING_DELETE),
+             "restriction_state": int(_CLEANUP_RESTRICTION.ACTIVE)},
+        )
+        projection = _update(
+            "outputs", item["requested_output_id"],
+            {"availability": output["availability"],
+             "cleanup_status": output["cleanup_status"]},
+            {"availability": int(_AVAILABILITY.RESTRICTED),
+             "cleanup_status": int(_OUTPUT_CLEANUP_STATUS.PENDING)},
+        )
+        self._claim(item)
+        self._owners[("outputs", item["requested_output_id"])] = (
+            "output", item["requested_output_id"])
+        events = (
+            _envelope(allocation.first_event_id, allocation.txn_id,
+                      _CLEANUP_CHANGED_EVENT, 1, (restrict,),
+                      command.occurred_at),
+            _envelope(allocation.first_event_id + 1, allocation.txn_id,
+                      _OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON,
+                      (projection,), command.occurred_at),
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.SAVED, command.item_id))
+
+    def _already(self, item) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.ALREADY, item["id"]))
+
+    def _verify_and_reuse(self, saved, expected):
+        if [(event["type"], event["reason"]) for event in saved][0] != expected:
+            raise TransactionError("原事务不是限制建立，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("限制建立的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "cleanup_items" or row["id"] != self._command.item_id:
+            raise TransactionError("原限制建立属于其他成员")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.ALREADY, self._command.item_id))
+
+
+class _ProgressCleanupCommand(_CleanupItemCommandMixin):
+    """进入删除执行（CLEANUP_CHANGED.PROGRESS + 投影 RUNNING）。"""
+
+    def __init__(self, command: ProgressCleanupItem, key: OperationKey) -> None:
+        if not isinstance(command, ProgressCleanupItem):
+            raise TypeError("删除推进申请必须使用 ProgressCleanupItem")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        command = self._command
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._verify_and_reuse(saved)
+        item = self._load_item(connection, command.item_id)
+        if item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING):
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CleanupItemSaved(
+                    CleanupItemDisposition.ALREADY, command.item_id))
+        if (item["status"] != int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)
+                or item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE)):
+            raise ConsistencyError("删除推进要求成员处于限制中")
+        output_id = item["output_id"]
+        output = self._state["outputs"].get(output_id)
+        if output is None or output["cleanup_status"] != int(
+                _OUTPUT_CLEANUP_STATUS.PENDING):
+            raise ConsistencyError("删除推进要求产物投影处于待删除")
+        allocation = scope.allocate(2)
+        progress = _update(
+            "cleanup_items", command.item_id,
+            {"status": int(_CLEANUP_ITEM_STATUS.PENDING_DELETE),
+             "restriction_state": int(_CLEANUP_RESTRICTION.ACTIVE)},
+            {"status": int(_CLEANUP_ITEM_STATUS.DELETING),
+             "restriction_state": int(_CLEANUP_RESTRICTION.IRREVERSIBLE)},
+        )
+        projection = _update(
+            "outputs", output_id,
+            {"cleanup_status": output["cleanup_status"]},
+            {"cleanup_status": int(_OUTPUT_CLEANUP_STATUS.RUNNING)},
+        )
+        self._claim(item)
+        self._owners[("outputs", output_id)] = ("output", output_id)
+        events = (
+            _envelope(allocation.first_event_id, allocation.txn_id,
+                      _CLEANUP_CHANGED_EVENT, 2, (progress,),
+                      command.occurred_at),
+            _envelope(allocation.first_event_id + 1, allocation.txn_id,
+                      _OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON,
+                      (projection,), command.occurred_at),
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.SAVED, command.item_id))
+
+    def _verify_and_reuse(self, saved):
+        if [(event["type"], event["reason"]) for event in saved][0] != (24, 2):
+            raise TransactionError("原事务不是删除推进，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("删除推进的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "cleanup_items" or row["id"] != self._command.item_id:
+            raise TransactionError("原删除推进属于其他成员")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.ALREADY, self._command.item_id))
+
+
+class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
+    """保存清理成功终态（存在性观察 + 可用性 CLEANED + 成员 SUCCEEDED）。
+
+    文件缺席事实、产物投影与成员终态同事务提交；成功依据由 cleanup
+    守卫按同事务先行事件或已完成的删除调用核对。
+    """
+
+    def __init__(self, command: FinishCleanupItem, key: OperationKey) -> None:
+        if not isinstance(command, FinishCleanupItem):
+            raise TypeError("清理成功申请必须使用 FinishCleanupItem")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        command = self._command
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._verify_and_reuse(saved)
+        item = self._load_item(connection, command.item_id)
+        if item["status"] in (int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
+                              int(_CLEANUP_ITEM_STATUS.FAILED),
+                              int(_CLEANUP_ITEM_STATUS.CANCELED)):
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CleanupItemSaved(
+                    CleanupItemDisposition.ALREADY, command.item_id))
+        if (item["status"] != int(_CLEANUP_ITEM_STATUS.DELETING)
+                or item["restriction_state"]
+                != int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
+            raise ConsistencyError("清理成功要求成员处于删除中")
+        output_id = item["output_id"]
+        output = self._state["outputs"].get(output_id)
+        if output is None or output["cleanup_status"] != int(
+                _OUTPUT_CLEANUP_STATUS.RUNNING):
+            raise ConsistencyError("清理成功要求产物投影处于清理中")
+        device_file_id = output.get("device_file_id")
+        intermediate_file_id = output.get("intermediate_file_id")
+        templates = []
+        if device_file_id is not None:
+            file = row_facts(connection, "device_files", device_file_id)
+            if file is None:
+                raise ConsistencyError(f"设备文件不存在: {device_file_id}")
+            self._state.setdefault("device_files", {})[device_file_id] = dict(file)
+            if file["presence_state"] == int(_FILE_PRESENCE.PRESENT):
+                templates.append((17, 5, (_update(
+                    "device_files", device_file_id,
+                    {"presence_state": int(_FILE_PRESENCE.PRESENT)},
+                    {"presence_state": int(_FILE_PRESENCE.ABSENT)}),),
+                    ("device_file", device_file_id)))
+            elif file["presence_state"] != int(_FILE_PRESENCE.ABSENT):
+                raise ConsistencyError("文件存在性未知，不能确认清理成功")
+        elif intermediate_file_id is not None:
+            raise ConsistencyError("主机源清理经交付与中间文件流程处理")
+        self._load_delete_basis(connection, command.item_id)
+        allocation = scope.allocate(2 + len(templates))
+        next_event_id = allocation.first_event_id
+        events = []
+        for event_type, reason, rows, owner in templates:
+            for (table, row_id) in [(rows[0].table, rows[0].row_id)]:
+                self._owners[(table, row_id)] = owner
+            events.append(_envelope(
+                next_event_id, allocation.txn_id, event_type, reason, rows,
+                command.occurred_at))
+            next_event_id += 1
+        succeed_event_id = next_event_id
+        succeed = _update(
+            "cleanup_items", command.item_id,
+            {"status": int(_CLEANUP_ITEM_STATUS.DELETING),
+             "restriction_state": int(_CLEANUP_RESTRICTION.IRREVERSIBLE),
+             "outcome": None, "final_event_id": None,
+             "error_code": None, "error_details_json": None},
+            {"status": int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
+             "restriction_state": int(_CLEANUP_RESTRICTION.IRREVERSIBLE),
+             "outcome": command.outcome.value,
+             "final_event_id": succeed_event_id,
+             "error_code": None, "error_details_json": None},
+        )
+        projection = _update(
+            "outputs", output_id,
+            {"availability": output["availability"],
+             "cleanup_status": output["cleanup_status"]},
+            {"availability": int(_AVAILABILITY.CLEANED),
+             "cleanup_status": int(_OUTPUT_CLEANUP_STATUS.COMPLETED)},
+        )
+        self._claim(item)
+        self._owners[("outputs", output_id)] = ("output", output_id)
+        events.append(_envelope(
+            succeed_event_id, allocation.txn_id, _CLEANUP_CHANGED_EVENT, 3,
+            (succeed,), command.occurred_at))
+        events.append(_envelope(
+            succeed_event_id + 1, allocation.txn_id,
+            _OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON,
+            (projection,), command.occurred_at))
+        return CommandPlan(
+            events=tuple(events), owners=self._owners, state_rows=self._state,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.SAVED, command.item_id))
+
+    def _verify_and_reuse(self, saved):
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if (24, 3) not in kinds:
+            raise TransactionError("原事务不是清理成功，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("清理成功的事实时刻与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.ALREADY, self._command.item_id))
+
+
+class _FailCleanupItemCommand(_CleanupItemCommandMixin):
+    """保存清理失败终态（CLEANUP_CHANGED.FAIL，携带公共错误）。"""
+
+    def __init__(self, command: FailCleanupItem, key: OperationKey) -> None:
+        if not isinstance(command, FailCleanupItem):
+            raise TypeError("清理失败申请必须使用 FailCleanupItem")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        command = self._command
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._verify_and_reuse(saved)
+        item = self._load_item(connection, command.item_id)
+        if item["status"] in (int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
+                              int(_CLEANUP_ITEM_STATUS.FAILED),
+                              int(_CLEANUP_ITEM_STATUS.CANCELED)):
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CleanupItemSaved(
+                    CleanupItemDisposition.ALREADY, command.item_id))
+        if item["status"] == int(_CLEANUP_ITEM_STATUS.UNRESOLVED):
+            raise ConsistencyError("未建立限制的成员不进入删除失败")
+        error_id = item_error_id("cleanup_items", command.code)
+        validate_error_details(command.code, command.details)
+        allocation = scope.allocate(1)
+        fail = _update(
+            "cleanup_items", command.item_id,
+            {"status": item["status"],
+             "restriction_state": item["restriction_state"],
+             "outcome": None, "final_event_id": None,
+             "error_code": None, "error_details_json": None},
+            {"status": int(_CLEANUP_ITEM_STATUS.FAILED),
+             "restriction_state": item["restriction_state"],
+             "outcome": None, "final_event_id": allocation.first_event_id,
+             "error_code": error_id, "error_details_json": dict(command.details)},
+        )
+        self._claim(item)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _CLEANUP_CHANGED_EVENT, 4, (fail,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.SAVED, command.item_id))
+
+    def _verify_and_reuse(self, saved):
+        if [(event["type"], event["reason"]) for event in saved][0] != (24, 4):
+            raise TransactionError("原事务不是清理失败，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("清理失败的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "cleanup_items" or row["id"] != self._command.item_id:
+            raise TransactionError("原清理失败属于其他成员")
+        after = row["after"]["values"]
+        if after.get("error_code") != item_error_id(
+                "cleanup_items", self._command.code):
+            raise TransactionError("清理失败的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.ALREADY, self._command.item_id))
+
+
 
 def register_outputs_guards() -> None:
     """注册来源、选择与读取资格事件的正式业务守卫（装配期调用）。"""

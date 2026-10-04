@@ -20,6 +20,7 @@ from camctl.capture.models import ActivityObservationSave
 from camctl.capture.files import (
     FileCompletionSave,
     FileObservationSave,
+    FilePresenceSave,
     ObservationDisposition,
     ObservationOutcome,
     OwnershipSave,
@@ -1524,6 +1525,16 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def save_file_presence(
+        self, command: FilePresenceSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ObservationOutcome]:
+        receipt = commit_operation(_FilePresenceCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def save_activity_observation(
         self, command: ActivityObservationSave, key: OperationKey,
         owned: OwnedConnection,
@@ -1535,6 +1546,86 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+
+
+class _FilePresenceCommand:
+    """保存一次文件存在性观察（DEVICE_FILE_OBSERVED.PRESENCE）。
+
+    存在性与清理成功分别保存；必须是实际状态变化。
+    """
+
+    def __init__(self, command: FilePresenceSave, key: OperationKey) -> None:
+        if not isinstance(command, FilePresenceSave):
+            raise TypeError("存在性观察申请必须使用 FilePresenceSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        facts = self._load(connection, command.file_id)
+        current = facts["presence_state"]
+        if current == command.state:
+            raise ConsistencyError(
+                f"存在性观察必须是实际状态变化: {command.file_id} {command.state!r}")
+        before: dict[str, Any] = {"presence_state": current}
+        after: dict[str, Any] = {"presence_state": command.state}
+        if command.locator is not None:
+            before["locator_json"] = facts["locator_json"]
+            after["locator_json"] = dict(command.locator)
+        if command.error is not None:
+            before["last_error_json"] = facts["last_error_json"]
+            after["last_error_json"] = dict(command.error)
+        row = _update("device_files", command.file_id, before, after)
+        self._owners[("device_files", command.file_id)] = (
+            "device_file", command.file_id)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _DEVICE_FILE_EVENT, _FILE_PRESENCE_REASON,
+            (row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ObservationOutcome(
+                ObservationDisposition.SAVED, command.file_id))
+
+    def _load(self, connection, file_id: int) -> dict[str, Any]:
+        facts = row_facts(connection, "device_files", file_id)
+        if facts is None:
+            raise ConsistencyError(f"设备文件不存在: {file_id}")
+        self._state.setdefault("device_files", {})[file_id] = facts
+        return facts
+
+    def _reuse(self, saved) -> CommandPlan:
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DEVICE_FILE_EVENT, _FILE_PRESENCE_REASON)]:
+            raise TransactionError(
+                "操作身份已用于其他文件事务，不能作为存在性观察重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("存在性观察的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_files" or row["id"] != command.file_id:
+            raise TransactionError("原存在性观察属于其他文件")
+        after = row["after"]["values"]
+        if (after.get("presence_state") != command.state
+                or not json_equal(after.get("locator_json"),
+                                  None if command.locator is None
+                                  else dict(command.locator))
+                or not json_equal(after.get("last_error_json"),
+                                  None if command.error is None
+                                  else dict(command.error))):
+            raise TransactionError("存在性观察的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ObservationOutcome(
+                ObservationDisposition.ALREADY, command.file_id))
 
 # -- 设备活动观察 -----------------------------------------------------
 

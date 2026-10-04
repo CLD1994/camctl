@@ -19,6 +19,7 @@ from camctl.persistence.transaction import encode_json_value
 
 __all__ = [
     "FileCompletionSave",
+    "FilePresenceSave",
     "FileObservationSave",
     "ObservationDisposition",
     "ObservationOutcome",
@@ -254,6 +255,29 @@ class FileCompletionSave:
             document["activity_id"] = self.activity_id
             document["wait_completed_event_id"] = self.wait_completed_event_id
         return document
+
+
+@dataclass(frozen=True)
+class FilePresenceSave:
+    """一次文件存在性观察的保存输入（DEVICE_FILE_OBSERVED.PRESENCE）。
+
+    必须是实际状态变化；在场与缺席分别表达，缺席不等于清理成功。
+    error 为空表示没有尚待表达的文件观察错误。
+    """
+
+    file_id: int
+    state: int
+    occurred_at: int
+    locator: Mapping[str, Any] | None = None
+    error: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        ObjectId(self.file_id)
+        if self.state not in (2, 3):
+            raise ValueError(f"存在性观察必须是在场或缺席: {self.state!r}")
+        _timestamp(self.occurred_at)
+        _mapping("文件定位结构", self.locator, required=False)
+        _mapping("文件观察错误", self.error, required=False)
 
 
 class ObservationDisposition(Enum):

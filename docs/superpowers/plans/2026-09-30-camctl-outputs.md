@@ -233,6 +233,32 @@ RESTRICT 一次确认、终态最终事件与三类成功依据、唯一删除�
 定命令、RESTRICT/删除/未知核实编排（cleanup_flow）与双预算、X9 取
 消接手，及 test_source_cleanup/test_cleanup_recovery 总验收。
 
+#### X8 第三段的阶段性验证（2026-10-05）：删除编排与独立预算
+
+删除链完整落地：`save_file_presence`（DEVICE_FILE_OBSERVED.PRESENCE
+生产者，必须是实际状态变化，原键重送恢复）；`restrict_cleanup_item`
+（CLEANUP_CHANGED.RESTRICT 成员未解析→限制中并首次确认产物 + 同事
+务 OUTPUT_REGISTERED.OBSERVATION 产物投影→RESTRICTED/PENDING，幂等
+按成员状态判定）；`progress_cleanup_item`（限制中→删除中，限制转
+不可撤销，投影→RUNNING）；`finish_cleanup_item`（文件缺席观察 +
+产物→CLEANED/COMPLETED + 成员 SUCCEEDED/outcome/final_event_id=本
+事件同事务提交，成功依据由 cleanup 守卫按同事务先行事件或已完成
+的删除调用核对）；`fail_cleanup_item`（FAIL 终态携带公共错误）。
+`cleanup_flow.delete_source_file` 串联：限制→删除意图（operations
+`delete/<item>` 流程，唯一删除中成员由守卫与部分唯一索引保证）→
+契约删除调用→结果事务；效果未知只能用 `exists/<item>` 查询预算核
+实——确认缺席按 ABSENCE_CONFIRMED 成功，确认仍在等待预算内重试
+（重试等待由结束事实置位，间隔来自尝试配置），查询也未知时等待；
+删除预算耗尽按 `delete_attempts_exhausted`（详情 output_id/max/
+used）终态失败。删除与查询两条流程预算独立。
+
+验证：`test_source_cleanup.py` 5 项（确认删除全链同事务投影、未知
+经查询确认缺席双流程各自一次尝试、仍在时保持删除中并预算内重试
+成功、预算耗尽终态失败详情合规、终态幂等不重复副作用）；
+`test_cleanup_guards.py` 17 项保持通过；全量回归通过（Python 3.11）。
+X8 剩余：范围清理目标固定、动作汇总 finish（cleanup_items_failed）、
+X9 取消后责任接手（test_cleanup_recovery.py）。
+
 ### X9 清理取消、接手及原结果保持
 
 **预计文件：** `apps/camctl/src/camctl/outputs/cleanup.py`、`apps/camctl/src/camctl/outputs/qualification.py`；测试为 `apps/camctl/tests/unit/outputs/test_cleanup_recovery.py` 和 `apps/camctl/tests/integration/outputs/test_cleanup_recovery.py`。
