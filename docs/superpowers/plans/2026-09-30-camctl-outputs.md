@@ -236,6 +236,20 @@ X7 的阶段验证：`outputs/handoff.py` 提供 `decide_handoff`（七分区：
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_previews.py -q`，真实三种拍摄、部分取回及取消联动，按领取契约控制文件位置；报告保留成功/失败项，真实 C 组合归 I5。
 - [ ] 审阅实际接口、状态分区及失败路径，检查 全部来源、部分成功和自动预览的发布/取消条件；记录门禁证据，建议以“feat: 实现自动预览与取回汇总”形成独立提交。
 
+#### X10 的阶段性验证（2026-10-05）
+
+X10 完成预览选择复用确认与统一发布汇总判定，任务 checkbox 保持未勾：预览选择由 `sources.py` 既有 `SelectionMode.PREVIEW` 路径共同实现（`select_for_original` 决策表：预览缺失逐项失败且不自动传修复成品；有修复成品时两侧完整大小必须已知，否则按不可确认逐项失败；修复成品小于或等于预览选修复成品（相等选修复成品）、大于预览选预览；未知存在性保留身份待确认）——自动与手动取回共用同一路径，不另建规则。新增 `outputs/obtain_summary.py`（命名替代建议的 previews.py/service.py：预览选择已在 sources.py，避免重复规则）提供 `obtain_item_stage`（条目与交付状态→准备阶段：等待资格或重试间隔→PENDING，准备或校验中→PROCESSING，可靠准备完成/发布中/已发布→PREPARED，最终失败含取消撤回→FAILED；待判定条目计入来源事实不进准备汇总，未知状态拒绝解释）与 `decide_obtain_finish`（开始发布条件决策表：任一来源判定未固定→WAIT_SOURCES；显式条目待判定→WAIT_ITEMS；条目等待准备、处理或重试→WAIT_PREPARATION；全部确定→READY_TO_PUBLISH 并计数成功与失败，整次有失败仍保留成功交付，无成功文件不创建交付由调用方执行；来源等待优先于条目与准备等待）。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 来源判定完成 ≡ 选择行 FIXED | 选择固定本身要求来源终态且产物判定完成（未完成来源 is_fixed=False 不保存固定）；汇总事实以固定性为来源侧输入。 |
+| PREPARED 含发布中与已发布 | 发布满足条件后逐文件进行，已开始或已完成的发布不使汇总回退等待。 |
+| 终态条目优先于交付观察 | 条目 FAILED/CANCELED 直接归最终失败，不再按交付状态解释。 |
+
+验证：单元 27 项（决策表全分区含命名用例 `test_publish_waits_for_complete_selection`、映射全状态、未知拒绝、事实校验，位于 `tests/unit/outputs/test_obtain_summary.py`）；集成 3 项（`tests/integration/outputs/test_obtain_summary.py`：真实选择与准备事务后一项真实准备完成、一项最终失败→READY(1,1)，经真实 `publish_delivery` 发布成功项且重判仍 READY；来源未固定→WAIT_SOURCES；交付 PREPARING→WAIT_PREPARATION）；全量回归单元 2929、集成 2984+7 skip、根 34+342、check-protocol、check-report-dependencies、check-doc-links 2914 通过（Python 3.11）。
+
+X10 仍剩余：取回动作终态汇总事务（发布汇总与父计划状态同事务保存）、读取与拍摄让路的调度接线（设备兼容性判定，Q6/I5）、取消联动消费（N1/N2）、真实三种拍摄与部分取回组合（I5）。
+
 ### X11 中间文件生命周期与有限维护
 
 **预计文件：** `apps/camctl/src/camctl/outputs/work_files.py`、`apps/camctl/src/camctl/persistence/repositories/outputs.py`；测试为 `apps/camctl/tests/unit/outputs/test_work_files.py` 和 `apps/camctl/tests/integration/outputs/test_work_files.py`。
