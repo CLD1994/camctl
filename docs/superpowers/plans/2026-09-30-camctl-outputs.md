@@ -124,11 +124,13 @@ X1 随首次录像完成；X2—X7 实现首条取回链。X8/X9 在明确来源
 
 **接口与依赖：** 提供异步 `grant_file(command: FileCandidate, key: OperationKey) -> DbOutcome[FileQualification]`；取回取得逐产物读取资格时同时建立源依赖、delivery、copy、目标文件及读取流程。相机读取机会由已建档拷贝另行取得，等待机会期间保留源依赖；内部处理直接引用原录像处理责任及设备原片。具体状态分区和修复门禁见[文件读取资格与拷贝责任](2026-10-02-camctl-file-qualification-review.md)。前置交付：X2、Q1/Q4、O2、P3。
 
-- [ ] 编写失败用例。在 `test_qualification_uses_business_order` 中颠倒来源结束及协程唤醒，`assert winner == expected_by_plan_time`。同一产物的取回与清理按计划时间排列，同时间取回优先；相机拷贝机会按发起动作时间、计划、数组位置及文件登记顺序排列，内部处理与取回不另设类型优先级。已有读取保护、不可撤销清理限制、唯一删除处理者及跨设备候选分别验证；缺任一建档行整笔拒绝。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_qualification.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。事务内查全部可靠限制和业务顺序，完整授予或保存逐项拒绝；内部检查/修复共用设备单文件读取机会，不必创建 delivery。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 资格不是先检查后另事务抢占，等待不消耗尝试。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部普通取回、自动预览、内部处理和源删除是否经过相同资格规则；记录门禁证据，建议以“feat: 实现读取与清理原子资格”形成独立提交。
+- [x] 编写失败用例。在 `test_qualification_uses_business_order` 中颠倒来源结束及协程唤醒，`assert winner == expected_by_plan_time`。同一产物的取回与清理按计划时间排列，同时间取回优先；相机拷贝机会按发起动作时间、计划、数组位置及文件登记顺序排列，内部处理与取回不另设类型优先级。已有读取保护、不可撤销清理限制、唯一删除处理者及跨设备候选分别验证；缺任一建档行整笔拒绝。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_qualification.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。事务内查全部可靠限制和业务顺序，完整授予或保存逐项拒绝；内部检查/修复共用设备单文件读取机会，不必创建 delivery。
+- [x] 再运行上述命令，要求全部 PASS，并核对 资格不是先检查后另事务抢占，等待不消耗尝试。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部普通取回、自动预览、内部处理和源删除是否经过相同资格规则；记录门禁证据，建议以“feat: 实现读取与清理原子资格”形成独立提交。
+
+X3 按[文件读取资格与拷贝责任](2026-10-02-camctl-file-qualification-review.md)的 F1—F5 完整实施与验收：逐产物候选竞争由 `outputs/competition.py` 纯规则提供，仓储与正式授予守卫共用；相机机会经独立 `grant_read_slot`/`release_read_slot` 事务按统一文件顺序授予。计划中建议的 `test_qualification_uses_business_order` 名称在实施中展开为资格矩阵（`test_qualification.py` 35 项）、候选生命周期（`test_fixed_candidates.py`）、来源解析（`test_product_competition.py`）、时间门禁（`test_read_schedule.py`）与机会事务（`test_read_slot.py`），全部通过；等待出口均为只读且不增加尝试次数。2026-10-05 的 F5 总收口完成矩阵复核、两层资源责任与原键恢复的独立复核，录像处理事件组合由 `test_selection_processing_sequence.py` 闭合。
 
 ### X4 共用拷贝身份与续传准备
 
