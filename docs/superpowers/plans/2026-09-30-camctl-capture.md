@@ -234,6 +234,22 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 第二段仍剩余：原片检查拷贝复用 X4—X6 读取资格与拷贝流程（编排调用资格申请与分段拷贝）、DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。M2 的可靠视频时长来源仍阻塞在设备适配证据；编排消费 probe 现有结果，不改变时长来源的可靠性边界。
 
+#### C8 第二段的输入取得编排验证（2026-10-05）
+
+第二段完成原片检查拷贝复用（X4—X6 读取资格与拷贝流程的编排接入），任务 checkbox 保持未勾：`capture/input_copy.py` 提供 `obtain_recording_input` 编排与端口（`RecordingCopies` 组合资格申请、状态装载、续传准备、分段推进与完整性收尾；`ReadSessionOpener`/`RecordingSource` 承载设备读取会话）。资格申请使用内部输入候选（processing_id + 设备源），建档或复用既有准备记录由资格事务统一裁决。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 就绪重入不重拷 | 就绪判定 = 校验 MATCHED/SOURCE_CHECKSUM_UNAVAILABLE 且目标字节事实已保存；重入直接返回就绪引用，不重开设备会话、不推进段。 |
+| 续传位置由准备决定 | 会话按准备决定的偏移打开：重拷重置后归零、续传取已确认进度、字节齐备只差收尾（VERIFY）不开会话直接完成。 |
+| 会话生命周期 | 段循环结束无论成败都请求停止并等待实际结束；段保存 SKIPPED（发起责任取消或不在执行）停止推进并透出原因，不为待清理副本继续读取。 |
+| 不一致不就地重试 | 完整性收尾登记新一轮重拷后本次返回待重拷，下一次执行经重置从零重读；完成事务优先采用已保存源摘要（跨轮一致），源摘要读取端口只在没有保存值时使用。 |
+| 编排边界 | 读取尝试预算与相机读取机会由意图入口管理，本编排不代替；资格等待与最终失败的原因原样透传，各失败分区不在本次执行内重试。 |
+
+验证：`test_input_copy.py` 单元 17 项（端口替身：重入、续传位置、跳过与失败分区、端口调用次序与会话收场）、集成 7 项（真实 SQLite、真实资格/分段/完成事务与真实 ReadSession：完整链与重入、VERIFY 重入不开会话、等待两因、段失败按已确认进度续传、损坏字节登记重拷后次轮重读成功、发起责任取消跳过不提交进度）；全量回归单元 2870、集成 2964+7 skip、根 34+342、check-protocol、check-report-dependencies、check-doc-links 2913 通过（Python 3.11）。
+
+第二段仍剩余：DISCARD 与中间文件清理的衔接、动作错误码消费（`recording_too_short`、`recording_processing_failed`）。设备读取会话工厂（D4 绑定）与读取尝试纪律随调度接线接入；M2 的可靠视频时长来源仍阻塞在设备适配证据。
+
 ### C9 三种能力的完整链验收
 
 **预计文件：** `apps/camctl/src/camctl/capture/handlers.py`、`apps/camctl/src/camctl/capture/recovery.py`；测试为 `apps/camctl/tests/integration/capture/test_capture_contract.py`。
