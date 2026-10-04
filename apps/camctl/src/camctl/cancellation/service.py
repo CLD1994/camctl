@@ -13,22 +13,36 @@ from typing import Any, Callable
 
 from camctl.cancellation.models import (
     ApplyCancelTarget,
+    CancelActionDisposition,
+    CancelActionFinished,
     CancelApplyMode,
     CancelItemProgress,
+    CancelOriginFacts,
     CancelOutcomeChoice,
     CancelProgress,
+    FinishCancelAction,
+    OriginCancelDecision,
     RecordCancelResult,
+    StopWaitCancelItems,
 )
 from camctl.cancellation.ports import TargetSettlementPort
 from camctl.cancellation.rules import (
     CancelEligibility,
     decide_cancel_eligibility,
+    decide_origin_cancel,
     load_eligibility_facts,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.persistence.transaction import TransactionError
 from camctl.persistence.models import DbOutcomeKind
 
-__all__ = ["ApplyCancel", "CancellationRuntime", "apply_cancel"]
+__all__ = [
+    "ApplyCancel",
+    "CancellationRuntime",
+    "OriginSettle",
+    "apply_cancel",
+    "settle_origin_cancel",
+]
 
 
 @dataclass(frozen=True)
@@ -133,3 +147,55 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
 def _completed(outcome) -> None:
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(f"取消生效事务未提交: {outcome.error}")
+
+
+@dataclass(frozen=True)
+class OriginSettle:
+    """一次取消发起者自身收场的输入。"""
+
+    origin_action_id: int
+
+
+async def settle_origin_cancel(
+        command: OriginSettle, runtime: CancellationRuntime):
+    """取消发起者的自身收场：停止施加与等待，以 canceled 结束。
+
+    按进度决策：已终态保留原结果；自身取消未生效时无收场可做；未
+    确认事务先核实。自身取消已生效时未结束项转入取消收场（保留取
+    消效果，目标责任独立继续），随后保存 canceled 终态。
+    """
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+
+    repository = runtime.repository
+    owned = runtime.owned
+    connection = owned.connection
+    row = connection.execute(
+        "SELECT status, cancel_requested FROM actions WHERE id = ?",
+        (command.origin_action_id,)).fetchone()
+    if row is None:
+        raise ConsistencyError(f"取消动作不存在: {command.origin_action_id}")
+    decision = decide_origin_cancel(CancelOriginFacts(
+        origin_terminal=row[0] in (3, 4, 5, 6),
+        origin_cancel_applied=bool(row[1])))
+    if decision is OriginCancelDecision.VERIFY_FIRST:
+        raise ConsistencyError(
+            "取消发起者事实不可靠，先核实再收场"
+            f": {command.origin_action_id}")
+    if decision is OriginCancelDecision.CONTINUE:
+        raise TransactionError(
+            "自身取消未生效的取消动作无自身收场可做"
+            f": {command.origin_action_id}")
+    if decision is OriginCancelDecision.KEEP_TERMINAL:
+        return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=CancelActionFinished(
+            disposition=CancelActionDisposition.ALREADY,
+            action_status=row[0], plan_status=0, succeeded=0, failed=0))
+    occurred = runtime.occurred_at()
+    stopped = repository.stop_wait_cancel_items(
+        StopWaitCancelItems(command.origin_action_id, occurred),
+        new_operation_key(), owned)
+    if stopped.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"结束等待事务未提交: {stopped.error}")
+    finished = repository.finish_origin_canceled(
+        FinishCancelAction(command.origin_action_id, runtime.occurred_at()),
+        new_operation_key(), owned)
+    return finished

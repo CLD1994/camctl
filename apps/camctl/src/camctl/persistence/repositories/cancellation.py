@@ -27,6 +27,7 @@ from camctl.cancellation.models import (
     FixCancelTargets,
     RecordCancelResult,
     SelectionBasis,
+    StopWaitCancelItems,
 )
 from camctl.cancellation.targets import CancelLookup, CancelLookupError
 from camctl.contracts.enums import enum_for
@@ -578,6 +579,26 @@ class CancellationRepository:
             _RecordCancelResultCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
+    def stop_wait_cancel_items(
+        self, command: StopWaitCancelItems, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CancelTargetsSaved]:
+        receipt = commit_operation(
+            _StopWaitCancelItemsCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
+    def finish_origin_canceled(
+        self, command: FinishCancelAction, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CancelActionFinished]:
+        receipt = commit_operation(
+            _FinishOriginCanceledCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_cancel_action(
         self, command: FinishCancelAction, key: OperationKey,
         owned: OwnedConnection,
@@ -780,6 +801,268 @@ class _FinishCancelActionCommand:
         self._state["plans"] = {plan["id"]: plan}
         return self._result_from(
             action, plan["status"], CancelActionDisposition.ALREADY)
+
+
+class _StopWaitCancelItemsCommand:
+    """取消发起者结束等待：未结束项转 CANCELED 并保留取消效果。
+
+    自身取消已生效后不再向目标施加取消；尚未结束的项保留已生效责
+    任（效果不改写），由目标所属流程独立继续。
+    """
+
+    def __init__(self, command: StopWaitCancelItems, key: OperationKey) -> None:
+        if not isinstance(command, StopWaitCancelItems):
+            raise TypeError("结束等待申请必须使用 StopWaitCancelItems")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        command = self._command
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        action = self._load_action(connection)
+        items = {}
+        with closing(connection.execute(
+            "SELECT id FROM cancel_items WHERE action_id = ? ORDER BY id",
+            (command.action_id,),
+        )) as cursor:
+            ids = tuple(int(row[0]) for row in cursor.fetchall())
+        for item_id in ids:
+            item = row_facts(connection, "cancel_items", item_id)
+            if item is not None:
+                items[item_id] = item
+        self._state["cancel_items"] = dict(items)
+        waiting = [
+            item for item in items.values()
+            if item["status"] in (_ITEM_PENDING, _ITEM_RUNNING)]
+        if not waiting:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CancelTargetsSaved(CancelTargetsDisposition.ALREADY, ()))
+        rows = tuple(
+            _update("cancel_items", item["id"],
+                    {"status": item["status"]},
+                    {"status": _ITEM_CANCELED})
+            for item in waiting)
+        for item in waiting:
+            self._owners[("cancel_items", item["id"])] = (
+                "action", command.action_id)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _CANCEL_CHANGED_EVENT, _CANCEL_STOP_WAIT_REASON, rows,
+            command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=CancelTargetsSaved(
+                CancelTargetsDisposition.SAVED,
+                tuple(item["id"] for item in waiting)))
+
+    def _load_action(self, connection):
+        action = row_facts(connection, "actions", self._command.action_id)
+        if action is None:
+            raise ConsistencyError(
+                f"取消动作不存在: {self._command.action_id}")
+        self._state["actions"] = {self._command.action_id: dict(action)}
+        if action["type"] != _CANCEL_ACTION_TYPE:
+            raise ConsistencyError("结束等待要求取消动作")
+        if not action["cancel_requested"]:
+            raise TransactionError("结束等待要求自身取消已生效")
+        if action["status"] != int(_ACTION_STATUS.RUNNING):
+            raise TransactionError("结束等待要求取消动作执行中")
+        if action["target_selection_state"] != _TARGET_FIXED:
+            raise ConsistencyError("结束等待要求目标集合已固定")
+        return action
+
+    def _reuse(self, saved) -> CommandPlan:
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds != [(_CANCEL_CHANGED_EVENT, _CANCEL_STOP_WAIT_REASON)]:
+            raise TransactionError("原事务不是结束等待，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("结束等待的事实时刻与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CancelTargetsSaved(CancelTargetsDisposition.ALREADY, ()))
+
+
+class _FinishOriginCanceledCommand:
+    """取消发起者以 canceled 结束（ACTION_FINISHED.CANCEL）。
+
+    自身取消已生效、全部成员终态（结束等待或逐项结果）后保存；已
+    生效目标的责任由目标流程独立继续，不由本终态撤销。
+    """
+
+    def __init__(self, command: FinishCancelAction, key: OperationKey) -> None:
+        if not isinstance(command, FinishCancelAction):
+            raise TypeError("取消收场申请必须使用 FinishCancelAction")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            "actions": {}, "cancel_items": {}, "plans": {},
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(connection, saved)
+        command = self._command
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise TransactionError(f"动作不存在: {command.action_id}")
+        if action["type"] != _CANCEL_ACTION_TYPE:
+            raise TransactionError(f"动作不是取消动作: {command.action_id}")
+        self._state["actions"][command.action_id] = action
+        if action["status"] in _ACTION_TERMINAL:
+            return self._recover(connection, action)
+        if action["status"] != int(_ACTION_STATUS.RUNNING):
+            raise TransactionError(
+                f"取消动作不在执行中: {command.action_id}")
+        if not action["cancel_requested"]:
+            raise TransactionError(
+                f"自身取消未生效的取消动作不能按取消终态收场:"
+                f" {command.action_id}")
+        items = _load_all_items(connection, self._state, self._owners,
+                                command.action_id)
+        if not items:
+            raise TransactionError(
+                f"取消动作没有可收场成员: {command.action_id}")
+        for item in items.values():
+            if item["status"] in (_ITEM_PENDING, _ITEM_RUNNING):
+                raise TransactionError(
+                    f"仍有未结束的取消成员，先结束等待: {item['id']}")
+        succeeded = sum(1 for item in items.values()
+                        if item["status"] == _ITEM_SUCCEEDED)
+        failed = sum(1 for item in items.values()
+                     if item["status"] == _ITEM_FAILED)
+        siblings = _load_siblings(connection, self._state,
+                                  action["plan_id"])
+        self._owners[("actions", command.action_id)] = (
+            "action", command.action_id)
+        templates = [(
+            _ACTION_FINISHED_EVENT, 4,
+            (_update("actions", command.action_id,
+                     {"status": action["status"]},
+                     {"status": _ACTION_CANCELED}),),
+        )]
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        plan_status = plan["status"]
+        if _siblings_complete(siblings, command.action_id) \
+                and plan["status"] in (1, 2):
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            templates.append((
+                _PLAN_STATUS_EVENT, 2,
+                (_update("plans", plan["id"],
+                         {"status": plan["status"]},
+                         {"status": _PLAN_COMPLETE}),),
+            ))
+            plan_status = _PLAN_COMPLETE
+        allocation = scope.allocate(len(templates))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, event_reason, rows, command.occurred_at,
+            )
+            for index, (event_type, event_reason, rows) in enumerate(templates)
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=CancelActionFinished(
+                disposition=CancelActionDisposition.SAVED,
+                action_status=_ACTION_CANCELED, plan_status=plan_status,
+                succeeded=succeeded, failed=failed),
+        )
+
+    def _recover(self, connection, action) -> CommandPlan:
+        if action["status"] != _ACTION_CANCELED:
+            raise TransactionError(
+                f"取消动作终态不是取消收场结果: {action['status']!r}")
+        _load_all_items(connection, self._state, self._owners, action["id"])
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        return _origin_result_from(self._state, self._owners, action,
+                                   plan["status"],
+                                   CancelActionDisposition.ALREADY)
+
+    def _reuse(self, connection, saved) -> CommandPlan:
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if not kinds or kinds[0] != (_ACTION_FINISHED_EVENT, 4) \
+                or kinds[1:] not in ([], [(_PLAN_STATUS_EVENT, 2)]):
+            raise TransactionError("原事务不是取消收场登记，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("取消收场的事实时刻与原事务不同")
+        action_row = saved[0]["body"]["rows"][0]
+        if action_row["table"] != "actions" \
+                or action_row["id"] != self._command.action_id:
+            raise TransactionError("原取消收场属于其他动作")
+        action = row_facts(connection, "actions", self._command.action_id)
+        assert action is not None
+        _load_all_items(connection, self._state, self._owners,
+                        self._command.action_id)
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        return _origin_result_from(self._state, self._owners, action,
+                                   plan["status"],
+                                   CancelActionDisposition.ALREADY)
+
+
+def _load_all_items(connection, state, owners, action_id):
+    with closing(connection.execute(
+        "SELECT id FROM cancel_items WHERE action_id = ? ORDER BY id",
+        (action_id,),
+    )) as cursor:
+        ids = tuple(int(row[0]) for row in cursor.fetchall())
+    items = {}
+    for item_id in ids:
+        item = row_facts(connection, "cancel_items", item_id)
+        if item is not None:
+            items[item_id] = item
+            owners[("cancel_items", item_id)] = ("action", action_id)
+    state["cancel_items"] = dict(items)
+    return items
+
+
+def _load_siblings(connection, state, plan_id):
+    with closing(connection.execute(
+        "SELECT id FROM actions WHERE plan_id=?", (plan_id,),
+    )) as cursor:
+        siblings = {
+            row[0]: row_facts(connection, "actions", row[0])
+            for row in cursor}
+    siblings = {key: value for key, value in siblings.items() if value}
+    state["actions"].update(siblings)
+    return siblings
+
+
+def _siblings_complete(siblings, current_action_id: int) -> bool:
+    return all(
+        values.get("status") in _ACTION_TERMINAL
+        or values["id"] == current_action_id
+        for values in siblings.values())
+
+
+def _origin_result_from(state, owners, action, plan_status, disposition):
+    items = state["cancel_items"]
+    succeeded = sum(1 for item in items.values()
+                    if item["status"] == _ITEM_SUCCEEDED)
+    failed = sum(1 for item in items.values()
+                 if item["status"] == _ITEM_FAILED)
+    return CommandPlan(
+        events=(), owners=owners, state_rows=state, read_only=True,
+        result=CancelActionFinished(
+            disposition=disposition, action_status=action["status"],
+            plan_status=plan_status, succeeded=succeeded, failed=failed))
 
 
 def _outcome_of(receipt) -> DbOutcome[CancelTargetsSaved]:

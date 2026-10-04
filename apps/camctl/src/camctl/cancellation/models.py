@@ -26,12 +26,15 @@ __all__ = [
     "CancelTargetsSaved",
     "CancelActionDisposition",
     "CancelActionFinished",
+    "CancelOriginFacts",
     "CancellationResult",
     "CancellationStatus",
+    "OriginCancelDecision",
     "FailCancelTargets",
     "FinishCancelAction",
     "FixCancelTargets",
     "RecordCancelResult",
+    "StopWaitCancelItems",
     "CancellationEffect",
     "FixedCancelSet",
     "FixedTarget",
@@ -385,3 +388,43 @@ class CancelActionFinished:
         self.plan_status = plan_status
         self.succeeded = succeeded
         self.failed = failed
+
+
+@dataclass(frozen=True)
+class CancelOriginFacts:
+    """取消发起者进度判定的输入事实。
+
+    pending_transactions 表示目标取消事务、自身最终结果或自身取消
+    的保存结果尚未确认；不可靠事实先核实，不猜测分支。
+    """
+
+    origin_terminal: bool
+    origin_cancel_applied: bool
+    pending_transactions: bool = False
+    facts_reliable: bool = True
+
+
+class OriginCancelDecision(Enum):
+    """取消发起者的处理分支。"""
+
+    #: 自身取消未生效且未终态：继续正常取消流程。
+    CONTINUE = "continue"
+    #: 已可靠保存终态：保留原终态，不重新取消或重开处理。
+    KEEP_TERMINAL = "keep_terminal"
+    #: 自身取消已生效：停止新增目标影响并结束等待，未结束项转入
+    #: 取消收场，发起者以 canceled 结束；已生效目标独立继续。
+    SETTLE_CANCELED = "settle_canceled"
+    #: 相关事务尚未确认或事实不可靠：先核实实际结果。
+    VERIFY_FIRST = "verify_first"
+
+
+@dataclass(frozen=True)
+class StopWaitCancelItems:
+    """取消发起者结束等待的申请输入（CANCEL_CHANGED.STOP_WAIT）。"""
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)

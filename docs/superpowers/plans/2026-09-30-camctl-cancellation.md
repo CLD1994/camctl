@@ -258,13 +258,46 @@ N4 起处理取消发起者自身被取消（STOP_WAIT 消费与等待范围）�
 
 **接口与依赖：** 提供 `decide_origin_cancel(facts: CancelOriginFacts) -> OriginCancelDecision`；facts 含自身终态/取消、已生效目标、尚未确认事务及自身实际责任。前置交付：N3、S5、L3 的自身重要日志责任。
 
-- [ ] 编写失败用例。建立 `test_second_cancel_does_not_expand_scope`，C1 取消 A 后 C2 只取消 C1，`assert c2.wait_targets == {c1_id}`，A 继续原停止；C2 同时包含 A 时复用 A 原流程。覆盖未生效、部分/全部生效、目标结果已完成但 C1 最终未提交、自身取消与未知事务组合。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_controller_cancel.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。先核实已提交和未知操作，自身取消成立后不新增目标影响、停止等待目标完成，但保留自身数据库/日志及实际任务收场；已生效目标独立继续，C1 最终 canceled。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 后一个取消的等待范围只由自身直接及有效关联目标决定。
+- [x] 编写失败用例。建立 `test_second_cancel_does_not_expand_scope`，C1 取消 A 后 C2 只取消 C1，`assert c2.wait_targets == {c1_id}`，A 继续原停止；C2 同时包含 A 时复用 A 原流程。覆盖未生效、部分/全部生效、目标结果已完成但 C1 最终未提交、自身取消与未知事务组合。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_controller_cancel.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。先核实已提交和未知操作，自身取消成立后不新增目标影响、停止等待目标完成，但保留自身数据库/日志及实际任务收场；已生效目标独立继续，C1 最终 canceled。
+- [x] 再运行上述命令，要求全部 PASS，并核对 后一个取消的等待范围只由自身直接及有效关联目标决定。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/cancellation/test_controller_cancel.py -q`，SQLite 在各生效与最终结果边界中断，验证 C1 canceled、C2 succeeded 与 A 仍停止可同时成立。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 设备停止、读取、交付撤回和清理四种独立收场的发起者取消；记录门禁证据，建议以“feat: 实现取消发起者的取消语义”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 设备停止、读取、交付撤回和清理四种独立收场的发起者取消；记录门禁证据，建议以“feat: 实现取消发起者的取消语义”形成独立提交。
+
+
+#### N4 的阶段性验证（2026-10-05）
+
+N4 完成，任务全部勾选：`rules.decide_origin_cancel`（输入 `CancelOrigin-
+Facts`：自身终态/取消已生效/未确认事务/事实可靠性）自上而下判定——
+不可靠或未确认事务 VERIFY_FIRST 先核实；已可靠保存终态 KEEP_TERMINAL
+保留原终态；自身取消已生效 SETTLE_CANCELED（停止新增目标影响并结束
+等待，未结束项转入取消收场，发起者以 canceled 结束）；否则 CONTINUE。
+等待范围由 N1 固定集合天然保证：集合只由直接目标与有效自动关联决
+定，不沿原取消对象递归扩大。
+
+仓储新增：`stop_wait_cancel_items`（CANCEL_CHANGED.STOP_WAIT 单事务把
+全部未结束项转 CANCELED，取消效果与已结束项不改写，无未结束项只读
+幂等）与 `finish_origin_canceled`（ACTION_FINISHED.CANCEL：自身
+cancel_requested 已生效、全部成员终态后保存 canceled 终态，全兄弟终
+态时 PLAN_STATUS 同事务；原键重送与终态新键恢复）。资格装配扩展：
+取消动作目标（type 6）的资格为终态保持、取消已生效复用、否则恒允
+许标记（停止等待即收场，能力恒成立）。服务 `settle_origin_cancel`
+按决策编排：SETTLE_CANCELED → 结束等待 + canceled 终态；KEEP_
+TERMINAL 只读；CONTINUE/VERIFY_FIRST 按事务错误停止。
+
+验证：单元 `test_controller_cancel.py` 7 项（决策表五分支：未生效继
+续、终态优先、取消生效收场、未确认与不可靠先核实；命名用例
+`test_second_cancel_does_not_expand_scope`——C2 集合只有 C1 不含 A；
+同时包含 C1 与 A 时两者都是直接目标各持依据）；集成 4 项（真实寻址
++固定集合 C2 只等待 C1 且 A 的取消事实仍归 C1；C1 canceled、C2 对
+C1 成功、A 保持取消标记与原停止流程同时成立；停止等待提交后、终态
+提交前后中断的重入幂等；C2 含 C1 与 A 时 C1 按终态成功、A 复用原责
+任继续等待且 A 的原取消项不被改写）。全量回归通过（Python 3.11）。
+
+设备停止、读取结束、交付撤回与清理的真实端口接线归 N5；未确认事务
+的核实由事务恢复机制（P3/P4）承担，决策表保留 VERIFY_FIRST 分区。
 
 ### N5 文件撤回、清理及同步组合
 

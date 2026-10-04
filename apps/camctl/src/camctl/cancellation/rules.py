@@ -13,9 +13,11 @@ from enum import Enum
 from typing import Any
 
 from camctl.cancellation.models import (
+    CancelOriginFacts,
     CancelProgress,
     CancellationResult,
     CancellationStatus,
+    OriginCancelDecision,
 )
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.transaction import row_facts
@@ -23,6 +25,8 @@ from camctl.persistence.transaction import row_facts
 __all__ = [
     "CancelEligibility",
     "DispatchPhase",
+    "OriginCancelDecision",
+    "decide_origin_cancel",
     "EligibilityFacts",
     "decide_cancel_eligibility",
     "load_eligibility_facts",
@@ -160,6 +164,7 @@ def may_apply_cancel(eligibility: CancelEligibility) -> bool:
 
 #: 拍摄动作类型（资格表只适用设备任务）。
 _CAPTURE_TYPES = frozenset({1, 2, 3})
+_CANCEL_TASK_TYPE = 6
 #: device_activities.dispatch_state 的登记编号。
 _DISPATCH_NOT_DISPATCHED, _DISPATCH_MAY_HAVE, _DISPATCH_RETURNED = 1, 2, 3
 _DISPATCH_REJECTED = 4
@@ -179,9 +184,17 @@ def load_eligibility_facts(connection, action_id: int) -> EligibilityFacts:
     if action is None:
         raise ConsistencyError(f"取消目标动作不存在: {action_id}")
     kind = action["type"]
-    if kind not in _CAPTURE_TYPES:
+    if kind not in _CAPTURE_TYPES and kind != _CANCEL_TASK_TYPE:
         raise ConsistencyError(
-            f"取消资格判断只适用设备任务: {action_id} type={kind!r}")
+            f"取消资格判断只适用设备或取消任务: {action_id} type={kind!r}")
+    if kind == _CANCEL_TASK_TYPE:
+        # 取消动作的收场就是停止施加并结束等待：终态保持、取消已
+        # 生效则复用原责任，否则总是允许标记取消（停止能力恒成立）。
+        return EligibilityFacts(
+            terminal=action["status"] in _ACTION_TERMINAL,
+            cancel_applied=bool(action["cancel_requested"]),
+            dispatch=DispatchPhase.STARTED,
+            stop_supported=True)
     activity = _activity_row(connection, action_id)
     return EligibilityFacts(
         terminal=action["status"] in _ACTION_TERMINAL,
@@ -235,3 +248,20 @@ def _stop_supported(action, kind: int, activity) -> bool:
     if not isinstance(value, bool):
         raise ConsistencyError(f"延时摄影停止能力非法: {value!r}")
     return value
+
+
+def decide_origin_cancel(facts: CancelOriginFacts) -> OriginCancelDecision:
+    """按取消发起者的进度与自身取消状态选择处理分支。
+
+    已可靠保存终态优先：保留原终态，不重新取消或重开处理。自身取
+    消已生效时停止新增目标影响并结束等待，未结束项转入取消收场，
+    发起者以 canceled 结束；已生效目标的责任由目标流程独立继续。
+    相关事务尚未确认或事实不可靠时先核实，不猜测分支。
+    """
+    if not facts.facts_reliable or facts.pending_transactions:
+        return OriginCancelDecision.VERIFY_FIRST
+    if facts.origin_terminal:
+        return OriginCancelDecision.KEEP_TERMINAL
+    if facts.origin_cancel_applied:
+        return OriginCancelDecision.SETTLE_CANCELED
+    return OriginCancelDecision.CONTINUE
