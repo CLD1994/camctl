@@ -88,13 +88,58 @@ N2/N3 的本地资格和独立责任端口随首次副作用接入，不能等�
 
 **接口与依赖：** 提供 `resolve_cancel_target(target: CancelTarget, facts: CancelLookup) -> TargetResolution`、`prepare_cancel_set(origin: ObjectId, resolved: ResolvedTargets) -> FixedCancelSet | CancelTargetError`。前置交付：A3、K1；自动关联从首次受理事实读取，X10 随后提供真实消费者验证。
 
-- [ ] 编写失败用例。建立 `test_self_target_has_no_partial_effect`，直接自身、所属计划、包含自身的组及 request_id 各入口，`assert target_effects == ()` 且错误 cancel_self_target；其他目标也不能部分生效。可靠不存在使用错误登记的 cancel_target_not_found，查询错误不归不存在；自动候选去重但保留拒绝直接目标。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_targets.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。先取得完整直接及自动关联候选，再检查自身，资格通过后固定实际集合和拒绝明细；不依据逐页半份结果先施加取消。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 完整寻址范围不受动作当前可取消性提前缩小。
+- [x] 编写失败用例。建立 `test_self_target_has_no_partial_effect`，直接自身、所属计划、包含自身的组及 request_id 各入口，`assert target_effects == ()` 且错误 cancel_self_target；其他目标也不能部分生效。可靠不存在使用错误登记的 cancel_target_not_found，查询错误不归不存在；自动候选去重但保留拒绝直接目标。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_targets.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。先取得完整直接及自动关联候选，再检查自身，资格通过后固定实际集合和拒绝明细；不依据逐页半份结果先施加取消。
+- [x] 再运行上述命令，要求全部 PASS，并核对 完整寻址范围不受动作当前可取消性提前缩小。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/cancellation/test_targets.py -q`，真实 SQLite 固定目标及自动关联，集合保存前后中断不产生部分取消。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 四种寻址入口与预览候选是否都经过自包含检查；记录门禁证据，建议以“feat: 实现完整取消目标检查”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 四种寻址入口与预览候选是否都经过自包含检查；记录门禁证据，建议以“feat: 实现完整取消目标检查”形成独立提交。
+
+
+#### N1 的阶段性验证（2026-10-05）
+
+N1 完成，任务全部勾选：`cancellation/models.py` 提供 `CancelTarget`
+（四种有约束组合在构造时校验互斥）、`TargetResolution`（可靠存在/
+可靠不存在/查询错误三分，`lookup_failed` 不折叠为 missing）、
+`TargetFacts`/`ResolvedTargets`/`FixedCancelSet`（`SelectionBasis` 与
+`CancellationEffect` 与登记整数一致）及仓储输入
+`FixCancelTargets`/`FailCancelTargets`（后者仅接受 cancel_self_target
+与 cancel_target_not_found）。`cancellation/targets.py` 提供
+`resolve_cancel_target`（四入口经 `CancelLookup` 端口查询，request_id
+按内部整数身份寻址）与 `prepare_cancel_set`：自身检查使用完整集合
+（直接目标∪全部自动关联候选），包含自身（含联动来源拒绝取消、联动
+本不会生效的候选）时返回 `CancelTargetError("cancel_self_target")`；
+通过后直接目标全部保留（终态目标初始 NOT_REQUIRED，其余 NOT_APPLIED），
+拍摄终态或允许取消才联动其自动预览取回（重叠记 BOTH，去重），拒绝
+取消的拍摄保留直接目标。`missing_target_error` 构造登记错误，详情
+保留原请求目标对象。
+
+仓储 `persistence/repositories/cancellation.py`：
+`fix_cancel_targets`（TARGETS_FIXED.CANCEL 单事务创建全部 cancel_items
+行，命令拒绝包含自身或重复目标、空集合按解析失败处理；原键重送核
+实分支/时刻/成员集合后只读恢复）与 `fail_cancel_targets`
+（TARGETS_FIXED.FAIL 以 24/25 结束动作且零成员；终态新键按原错误只
+读恢复、错误不符拒绝）。`SqliteCancelLookup`/`sqlite_auto_candidates`
+提供执行期查询（auto_preview_links is_valid=1）。守卫按登记名
+`cancel` 注册：成员初始值必须待处理无结果、依据与初始效果取值合法、
+联动成员须有有效自动关联且来源属于同事务直接目标、失败分支零成员
+且错误码限于登记集合；动作类型与目标状态转换仍由既有 target_set 与
+事件登记核对。
+
+验证：单元 `test_targets.py` 15 项（四入口寻址与各入口可靠不存在、
+查询错误不归不存在、自身检查四入口无部分效果、联动候选包含自身仍
+按完整集合失败、终态效果分区、联动条件、BOTH 去重、联动来源不在直
+接范围不联动）；集成 `test_targets.py` 10 项（真实 SQLite 四入口与
+missing、有效关联候选读取、固定集合事务含依据与初始效果、自身范围
+以 24 失败且零成员、不存在以 25 失败详情保留目标、原键重送/时刻冲
+突/终态新键不产生部分取消、空集合拒绝不落任何行、守卫正反例三组：
+联动无依据拒绝/非法初始值拒绝/失败分支成员与外错拒绝）。全量回归：
+组件单元 2994、集成 3083 另 7 项跳过（含取消集成；守卫用例后补单目
+录通过）、根跨组件 34 另 342 subtests、check-protocol、
+check-report-dependencies、check-doc-links 2917 通过（Python 3.11）。
+
+N2 起接入取消资格与启动竞争；N3 的生效事务消费本任务的固定集合。
 
 ### N2 取消资格及启动竞争
 
