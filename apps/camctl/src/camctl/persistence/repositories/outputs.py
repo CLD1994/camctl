@@ -54,6 +54,8 @@ from camctl.outputs.copy import (
     VerificationDisposition, VerificationResult, VerificationSave,
 )
 from camctl.outputs.handoff import (
+    AdvanceWithdrawal,
+    WithdrawalChoice,
     DeliveryFacts, DeliveryFailure, DeliveryStateFacts, FailureSaveDisposition,
     FailureSaveOutcome, IntentDisposition, IntentSaveOutcome, PublicationDisposition,
     PublicationIntentRequest, PublicationSaveOutcome, PublicationSaveRequest,
@@ -4560,6 +4562,14 @@ class OutputsRepository:
         receipt = commit_operation(_FailCleanupItemCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
+    def advance_withdrawal(
+        self, command: AdvanceWithdrawal, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CleanupItemSaved]:
+        receipt = commit_operation(
+            _AdvanceWithdrawalCommand(command, key), key, owned)
+        return self._cleanup_item_outcome(receipt)
+
     def cancel_cleanup_item(
         self, command: CancelCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
@@ -6989,6 +6999,158 @@ class _FinishCleanupActionCommand:
         self._state["plans"] = {plan["id"]: plan}
         return self._result_from(
             action, plan["status"], CleanupActionDisposition.ALREADY)
+
+
+
+
+class _AdvanceWithdrawalCommand:
+    """推进一份交付的撤回责任（DELIVERY_CHANGED.WITHDRAW）。
+
+    按可靠位置观察保存撤回完成、不可撤回、失败或未知；ready 撤回
+    与撤回明细、交付终态同事务提交。processing 不可撤回不删除交付
+    事实。
+    """
+
+    _FAILED_ITEM_ERRORS = {"withdrawal_failed": 1, "withdrawal_unconfirmed": 2}
+
+    def __init__(self, command: AdvanceWithdrawal, key: OperationKey) -> None:
+        if not isinstance(command, AdvanceWithdrawal):
+            raise TypeError("撤回推进申请必须使用 AdvanceWithdrawal")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        command = self._command
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        delivery = row_facts(connection, "deliveries", command.delivery_id)
+        if delivery is None:
+            raise ConsistencyError(f"交付不存在: {command.delivery_id}")
+        self._state["deliveries"] = {command.delivery_id: dict(delivery)}
+        # 报告关联解析沿撤回明细→取消成员/交付取事实。
+        self._state.setdefault("cancel_delivery_items", {})
+        self._state.setdefault("cancel_items", {})
+        state = delivery["withdrawal_state"]
+        choice = command.choice
+        rows: list = []
+        if choice is WithdrawalChoice.REQUESTED:
+            if state != int(_WITHDRAWAL.NOT_REQUESTED):
+                return self._already()
+            delivery_row = _update(
+                "deliveries", command.delivery_id,
+                {"withdrawal_state": state},
+                {"withdrawal_state": int(_WITHDRAWAL.PENDING)})
+            rows.append(delivery_row)
+        else:
+            if state != int(_WITHDRAWAL.PENDING):
+                return self._already()
+            status = delivery["status"]
+            if choice is WithdrawalChoice.WITHDRAWN:
+                after_state = int(_WITHDRAWAL.WITHDRAWN)
+                delivery_row = _update(
+                    "deliveries", command.delivery_id,
+                    {"withdrawal_state": state, "status": status},
+                    {"withdrawal_state": after_state,
+                     "status": int(_DELIVERY_STATUS.WITHDRAWN)})
+            elif choice is WithdrawalChoice.NOT_RETRACTABLE:
+                after_state = int(_WITHDRAWAL.NOT_RETRACTABLE)
+                delivery_row = _update(
+                    "deliveries", command.delivery_id,
+                    {"withdrawal_state": state},
+                    {"withdrawal_state": after_state})
+            elif choice is WithdrawalChoice.FAILED:
+                after_state = int(_WITHDRAWAL.FAILED)
+                delivery_row = _update(
+                    "deliveries", command.delivery_id,
+                    {"withdrawal_state": state,
+                     "withdrawal_error_json": None},
+                    {"withdrawal_state": after_state,
+                     "withdrawal_error_json": dict(command.error)})
+            else:
+                after_state = int(_WITHDRAWAL.UNKNOWN)
+                delivery_row = _update(
+                    "deliveries", command.delivery_id,
+                    {"withdrawal_state": state,
+                     "withdrawal_error_json": None},
+                    {"withdrawal_state": after_state,
+                     "withdrawal_error_json": dict(command.error)})
+            rows.append(delivery_row)
+            item = self._pending_item(connection)
+            if item is not None:
+                if choice is WithdrawalChoice.WITHDRAWN:
+                    item_after = 2
+                    error = None
+                elif choice is WithdrawalChoice.NOT_RETRACTABLE:
+                    item_after = 3
+                    error = None
+                else:
+                    item_after = 4
+                    error = (self._FAILED_ITEM_ERRORS.get(
+                        "withdrawal_failed")
+                        if choice is WithdrawalChoice.FAILED
+                        else self._FAILED_ITEM_ERRORS.get(
+                            "withdrawal_unconfirmed"))
+                before = {"status": 1, "error_code": None,
+                          "error_details_json": None}
+                after = {"status": item_after, "error_code": error,
+                         "error_details_json": (
+                             dict(command.error) if error is not None
+                             else None)}
+                rows.append(_update(
+                    "cancel_delivery_items", item["id"], before, after))
+                self._owners[("cancel_delivery_items", item["id"])] = (
+                    "action", item["action_owner_id"])
+        self._owners[("deliveries", command.delivery_id)] = (
+            "delivery", command.delivery_id)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _DELIVERY_CHANGED_EVENT, 7, tuple(rows), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.SAVED, command.delivery_id))
+
+    def _pending_item(self, connection):
+        with closing(connection.execute(
+            "SELECT c.id, c.cancel_item_id, ci.action_id"
+            " FROM cancel_delivery_items c"
+            " JOIN cancel_items ci ON ci.id = c.cancel_item_id"
+            " WHERE c.delivery_id = ? AND c.status = 1",
+            (self._command.delivery_id,),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        owner_row = row_facts(
+            connection, "cancel_items", int(row[1]))
+        if owner_row is not None:
+            self._state["cancel_items"][int(row[1])] = owner_row
+        item = row_facts(connection, "cancel_delivery_items", int(row[0]))
+        if item is None:
+            return None
+        self._state.setdefault("cancel_delivery_items", {})[item["id"]] = item
+        item["action_owner_id"] = int(row[2])
+        return item
+
+    def _already(self) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupItemSaved(
+                CleanupItemDisposition.ALREADY, self._command.delivery_id))
+
+    def _reuse(self, saved) -> CommandPlan:
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds != [(_DELIVERY_CHANGED_EVENT, 7)]:
+            raise TransactionError("原事务不是撤回推进，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("撤回推进的事实时刻与原事务不同")
+        return self._already()
 
 
 def register_outputs_guards() -> None:

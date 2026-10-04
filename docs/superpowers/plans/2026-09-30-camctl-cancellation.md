@@ -305,13 +305,44 @@ C1 成功、A 保持取消标记与原停止流程同时成立；停止等待提
 
 **接口与依赖：** 通过目标拥有者 `settle_cancel(target: CancelItemIdentity) -> CancelItemResult` 端口组织，实际实现分别由 capture、outputs、reporting 提供。前置交付：X7/X9/X11、R6、C7、N3/N4。
 
-- [ ] 编写失败用例。建立 `test_terminal_obtain_still_withdraws_ready`，原取回 succeeded 而 ready 可撤，`assert old_action_status is SUCCEEDED` 且交付撤回事实单独更新；processing 不删除。显式报告未开始/运行/成功后取消按原同步责任分类，不能取消共享生成任务。清理已删项不阻止其他项取消。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_target_types.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按真实目标类型调用窄端口，固定本次有限范围；时钟异常只接纳规定的未定时取消和安全收场，不扩张到普通取回或清理。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 取消生效、实际停止、不可撤回及同步责任的完成含义各自独立。
+- [x] 编写失败用例。建立 `test_terminal_obtain_still_withdraws_ready`，原取回 succeeded 而 ready 可撤，`assert old_action_status is SUCCEEDED` 且交付撤回事实单独更新；processing 不删除。显式报告未开始/运行/成功后取消按原同步责任分类，不能取消共享生成任务。清理已删项不阻止其他项取消。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_target_types.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按真实目标类型调用窄端口，固定本次有限范围；时钟异常只接纳规定的未定时取消和安全收场，不扩张到普通取回或清理。
+- [x] 再运行上述命令，要求全部 PASS，并核对 取消生效、实际停止、不可撤回及同步责任的完成含义各自独立。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/cancellation/test_target_types.py -q`，真实文件、数据库、报告进程及目标流程验证撤回竞争、取消同步与清理未知。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 各目标的错误、终态后责任、有限预算及 processing 所有权；记录门禁证据，建议以“feat: 接入各目标取消与收场”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 各目标的错误、终态后责任、有限预算及 processing 所有权；记录门禁证据，建议以“feat: 接入各目标取消与收场”形成独立提交。
+
+
+#### N5 的阶段性验证（2026-10-05）
+
+N5 完成，任务全部勾选：`cancellation/settlement.py` 的 `TargetSettlement`
+按目标动作类型分派真实收场——拍摄目标等待执行链按原预算停止（终态
+即本次等待结束，不越权代停止）；取回目标推进交付撤回（取消生效事务
+为已发布交付创建撤回明细，端口按可靠位置观察保存：ready 经请求→撤
+回完成（交付 WITHDRAWN 与明细同事务）、processing 报不可撤回且不删
+除交付事实、位置未知先请求并保持等待核实）；清理目标对未发出删除
+的成员解除限制取消（复用 X9 cancel_cleanup_item），删除中的成员由清
+理执行链收场，已删项不阻止其他项；取消动作目标转发发起者收场（N4
+settle_origin_cancel）；报告目标本次责任分类完成且共享生成不在目标
+范围。仓储新增 `advance_withdrawal`（DELIVERY_CHANGED.WITHDRAW 按撤回
+状态机两步推进：REQUESTED 进入待执行，WITHDRAWN/NOT_RETRACTABLE/
+FAILED/UNKNOWN 保存结果并同步撤回明细）；取消生效命令（APPLY）为取
+回目标的已发布交付同事务创建撤回明细。资格装配扩展清理与报告目标
+（终态保持/复用/恒允许标记）。`decide_sync_cancel` 补运行中分区：未
+执行与运行中的报告动作可停止，已成功的保持实际结果。
+
+验证：单元 `test_target_types.py` 3 项（同步责任分类三分区与共享生成
+不在范围）；集成 7 项——命名用例 `test_terminal_obtain_still_withdraws_
+ready`（取回终态保持成功，撤回事实单独更新）、processing 交付不可撤
+回且不删除（取消仍成功）、位置未知先请求并等待、清理已删项不阻止待
+删除项解除限制、执行中拍摄等待执行链而终态拍摄完成、报告目标完成、
+取消动作目标经真实端口完成发起者收场且 C2 对 C1 成功。全量回归通过
+（Python 3.11）。
+
+ready 文件的物理移动与位置观察由文件交接层协作者提供（端口注入观察
+函数），真实目录组合随 N6/I5；R6 的同步实际开始、本地完成与取消消费
+者仍按报告计划推进（本轮已补运行中分类规则）。
 
 ### N6 所有目标入口与恢复验收
 

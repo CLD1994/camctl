@@ -170,14 +170,14 @@ def qualifies_sync(report: AckReport, sync: SyncResponsibility) -> bool:
 def decide_sync_cancel(facts: Mapping[str, Any]) -> SyncChanges:
     """取消未结束同步责任的实际变更范围。
 
-    未执行的报告动作可以停止；已开始与已成功的动作保持实际结
+    未执行与运行中的报告动作可以停止；已成功的动作保持实际结
     果；共享的报告生成不在取消范围内。
     """
     ended = tuple(sorted(facts.get("cancelled_sync_ids", ())))
     stopped: list[int] = []
     preserved: list[int] = []
     for action_id, state in sorted(facts.get("report_actions", {}).items()):
-        if state == "pending":
+        if state in ("pending", "running"):
             stopped.append(action_id)
         else:
             preserved.append(action_id)

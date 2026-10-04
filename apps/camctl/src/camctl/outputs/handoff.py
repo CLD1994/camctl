@@ -615,3 +615,41 @@ async def publish_delivery(
         raise DeliveryHandoffError("publish_move_failed", publish.error or "")
     raise DeliveryHandoffError(
         "publication_move_unknown", publish.error or "移动结果未知")
+
+
+class WithdrawalChoice(Enum):
+    """一次交付撤回推进的分支（与撤回状态机的转换一致）。"""
+
+    #: 首次请求撤回：撤回责任进入待执行。
+    REQUESTED = "requested"
+    #: 已确认从 ready 撤回：交付与撤回责任完成。
+    WITHDRAWN = "withdrawn"
+    #: 已确认进入 processing 或已被主程序处理：不可撤回。
+    NOT_RETRACTABLE = "not_retractable"
+    #: 撤回执行失败：保留错误，责任结束。
+    FAILED = "failed"
+    #: 位置或结果未知：责任保持待核实并保存错误依据。
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class AdvanceWithdrawal:
+    """推进一份交付撤回责任的申请输入（DELIVERY_CHANGED.WITHDRAW）。"""
+
+    delivery_id: int
+    choice: WithdrawalChoice
+    occurred_at: int
+    error: dict | None = None
+
+    def __post_init__(self) -> None:
+        from camctl.contracts.values import ObjectId, UtcMicros
+
+        ObjectId(self.delivery_id)
+        UtcMicros(self.occurred_at)
+        if not isinstance(self.choice, WithdrawalChoice):
+            raise TypeError(f"撤回分支必须使用 WithdrawalChoice: {self.choice!r}")
+        if self.choice in (WithdrawalChoice.FAILED, WithdrawalChoice.UNKNOWN):
+            if not isinstance(self.error, dict):
+                raise TypeError("失败或未知的撤回必须携带错误依据")
+        elif self.error is not None:
+            raise TypeError("完成或请求分支不携带错误依据")

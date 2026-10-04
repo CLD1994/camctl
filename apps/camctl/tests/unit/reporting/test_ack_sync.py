@@ -164,7 +164,7 @@ class TestSyncCancel:
         assert changes.stopped_action_ids == ()
 
     def test_report_action_states_map_to_cancel_scope(self) -> None:
-        # 未执行的报告动作可取消；已开始与已成功的不改结果。
+        # 未执行与运行中的报告动作可取消；已成功的不改结果。
         changes = decide_sync_cancel(
             {
                 "cancelled_sync_ids": (),
@@ -175,5 +175,5 @@ class TestSyncCancel:
                 },
             }
         )
-        assert changes.stopped_action_ids == (10,)
-        assert changes.preserved_action_ids == (11, 12)
+        assert changes.stopped_action_ids == (10, 11)
+        assert changes.preserved_action_ids == (12,)

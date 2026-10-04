@@ -85,6 +85,10 @@ _CANCEL_APPLY_REASON, _CANCEL_RESULT_REASON, _CANCEL_STOP_WAIT_REASON = 1, 2, 3
 #: cancel_items.status 的登记编号。
 _ITEM_PENDING, _ITEM_RUNNING, _ITEM_SUCCEEDED, _ITEM_FAILED, _ITEM_CANCELED =     1, 2, 3, 4, 5
 _CANCEL_ITEMS_FAILED = "cancel_items_failed"
+_OBTAIN_TARGET_TYPE = 4
+#: deliveries.status PUBLISHED 与 withdrawal_state NOT_REQUESTED。
+_DELIVERY_PUBLISHED = 5
+_WITHDRAWAL_NOT_REQUESTED = 1
 #: 动作状态：PENDING=1、RUNNING=2、SUCCEEDED=3、FAILED=4、CANCELED=6。
 _ACTION_SUCCEEDED, _ACTION_FAILED, _ACTION_CANCELED = 3, 4, 6
 
@@ -130,7 +134,7 @@ class _FixCancelTargetsCommand:
                 read_only=True,
                 result=CancelTargetsSaved(
                     CancelTargetsDisposition.ALREADY,
-                    _saved_item_targets(connection, command.action_id)))
+                    _saved_cancel_item_rows(connection, command.action_id)))
         if action["status"] != int(_ACTION_STATUS.RUNNING) \
                 or action["cancel_requested"]:
             raise TransactionError("目标固定要求取消动作执行中且未取消")
@@ -182,7 +186,8 @@ class _FixCancelTargetsCommand:
         return CommandPlan(
             events=(event,), owners=self._owners, state_rows=self._state,
             result=CancelTargetsSaved(
-                CancelTargetsDisposition.SAVED, tuple(sorted(seen))))
+                CancelTargetsDisposition.SAVED,
+                tuple(sorted(self._state["cancel_items"]))))
 
     def _load_links(self, connection, obtain_ids: list[int]) -> None:
         """装载联动依据：AUTO_PREVIEW/BOTH 成员的有效自动关联。"""
@@ -220,7 +225,7 @@ class _FixCancelTargetsCommand:
             read_only=True,
             result=CancelTargetsSaved(
                 CancelTargetsDisposition.ALREADY,
-                _saved_item_targets(connection, command.action_id)))
+                _saved_cancel_item_rows(connection, command.action_id)))
 
 
 class _FailCancelTargetsCommand:
@@ -389,12 +394,18 @@ class _ApplyCancelTargetCommand:
             {"status": _ITEM_PENDING,
              "cancellation_effect": CancellationEffect.NOT_APPLIED.value},
             {"status": _ITEM_RUNNING, "cancellation_effect": effect_after})
+        withdrawal_rows = self._withdrawal_rows(connection, item, target)
+        if withdrawal_rows:
+            # 报告关联解析沿撤回明细→取消成员/交付取事实。
+            self._state.setdefault("cancel_delivery_items", {})
+            self._state.setdefault("deliveries", {})
         self._claim(item, target_id)
         allocation = scope.allocate(self._MODE_EVENTS[mode])
         events = [_envelope(
             allocation.first_event_id, allocation.txn_id,
             _CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON,
-            (apply_row,) + action_rows, command.occurred_at)]
+            (apply_row,) + action_rows + withdrawal_rows,
+            command.occurred_at)]
         if outcome_event is not None:
             final_status, outcome_value = outcome_event
             result_row = _update(
@@ -433,6 +444,36 @@ class _ApplyCancelTargetCommand:
                 f"取消目标不存在: {item['target_action_id']}")
         self._state["actions"][target["id"]] = dict(target)
         return item, target
+
+    def _withdrawal_rows(self, connection, item, target) -> tuple:
+        """取回目标生效时为已发布交付创建撤回明细（待处理）。"""
+        if target["type"] != _OBTAIN_TARGET_TYPE:
+            return ()
+        next_item = next_row_id(connection, "cancel_delivery_items")
+        with closing(connection.execute(
+            "SELECT id FROM deliveries WHERE action_id = ? AND status = ?"
+            " AND withdrawal_state = ? ORDER BY id",
+            (target["id"], _DELIVERY_PUBLISHED, _WITHDRAWAL_NOT_REQUESTED),
+        )) as cursor:
+            delivery_ids = tuple(int(row[0]) for row in cursor.fetchall())
+        rows = []
+        for delivery_id in delivery_ids:
+            delivery_row = row_facts(connection, "deliveries", delivery_id)
+            if delivery_row is not None:
+                self._state.setdefault("deliveries", {})[
+                    delivery_id] = delivery_row
+            values = {
+                "cancel_item_id": item["id"],
+                "delivery_id": delivery_id,
+                "status": 1,
+                "error_code": None,
+                "error_details_json": None,
+            }
+            rows.append(_row("cancel_delivery_items", next_item, values))
+            self._owners[("cancel_delivery_items", next_item)] = (
+                "action", item["action_id"])
+            next_item += 1
+        return tuple(rows)
 
     def _claim(self, item, target_id: int) -> None:
         self._owners[("cancel_items", item["id"])] = (
@@ -1073,10 +1114,11 @@ def _outcome_of(receipt) -> DbOutcome[CancelTargetsSaved]:
     return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
 
-def _saved_item_targets(connection, action_id: int) -> tuple[int, ...]:
+def _saved_cancel_item_rows(connection, action_id: int) -> tuple[int, ...]:
+    """取消动作已保存成员的行编号（按创建顺序）。"""
     with closing(connection.execute(
-        "SELECT target_action_id FROM cancel_items WHERE action_id = ?"
-        " ORDER BY target_action_id", (action_id,),
+        "SELECT id FROM cancel_items WHERE action_id = ? ORDER BY id",
+        (action_id,),
     )) as cursor:
         return tuple(int(row[0]) for row in cursor.fetchall())
 
