@@ -147,13 +147,53 @@ N2 起接入取消资格与启动竞争；N3 的生效事务消费本任务的�
 
 **接口与依赖：** 提供 `decide_cancel_eligibility(target: TargetFacts) -> CancelEligibility`；TargetFacts 含原终态/取消、真实派发阶段、可能效果和固定 stop_supported。前置交付：Q4、C1/O1 的目标事实。
 
-- [ ] 编写失败用例。建立 `test_unknown_start_without_stop_is_rejected`，原启动在途或发送未知且 stop_supported=False，`assert may_apply_cancel is False`，原等待和核实继续；未启动允许，支持停止但实际失败与拒绝分开。拍摄拒绝时不间接取消自动取回，直接目标取回仍独立处理。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_eligibility.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按表完整判断，并在目标同一执行协调边界与启动派发确定顺序；使用原任务固定能力，不读取新默认值改变原保证。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 所有未启动/可能启动/已启动/终态×停止能力分区明确。
+- [x] 编写失败用例。建立 `test_unknown_start_without_stop_is_rejected`，原启动在途或发送未知且 stop_supported=False，`assert may_apply_cancel is False`，原等待和核实继续；未启动允许，支持停止但实际失败与拒绝分开。拍摄拒绝时不间接取消自动取回，直接目标取回仍独立处理。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/cancellation/test_eligibility.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按表完整判断，并在目标同一执行协调边界与启动派发确定顺序；使用原任务固定能力，不读取新默认值改变原保证。
+- [x] 再运行上述命令，要求全部 PASS，并核对 所有未启动/可能启动/已启动/终态×停止能力分区明确。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/cancellation/test_eligibility.py -q`，真实意图、派发与取消提交同步点竞争，核对取消先成立则无启动，启动先成立按对应分区。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 录像、照片、延时摄影和自动关联全部资格入口；记录门禁证据，建议以“feat: 实现取消资格与启动协调”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 录像、照片、延时摄影和自动关联全部资格入口；记录门禁证据，建议以“feat: 实现取消资格与启动协调”形成独立提交。
+
+
+#### N2 的阶段性验证（2026-10-05）
+
+N2 完成，任务全部勾选：`cancellation/rules.py` 提供
+`decide_cancel_eligibility`（自上而下不折叠分区：事实不可靠或派发
+不可靠→UNVERIFIED 先核实；终态→TERMINAL 保持并处理关联责任；取消
+已生效→ALREADY_CANCELED 复用原责任及预算；可靠未启动→ALLOW_PRE_
+START 允许且不要求停止能力；可能启动或已启动按首次固定停止能力分
+区——支持→ALLOW_WITH_STOP 按原归属与预算停止，不支持→REJECT_
+UNSUPPORTED 拒绝本项且原任务继续）与 `may_apply_cancel`（仅两个
+ALLOW 分区允许施加取消；N1 联动条件消费）。`EligibilityFacts` 携带
+终态、取消生效、`DispatchPhase`（NOT_STARTED/START_PENDING/STARTED/
+UNVERIFIED）与固定 stop_supported。
+
+`load_eligibility_facts` 从已保存事实装配：终态与取消请求取动作行；
+派发阶段按 execution_started 与 `device_activities.dispatch_state`
+（MAY_HAVE_DISPATCHED→START_PENDING、SUCCESS_RETURNED→STARTED、
+NOT_DISPATCHED/REJECTED_WITHOUT_EFFECT→NOT_STARTED，编号不可解释按
+状态库错误）；停止能力优先取首次建立活动时保存的
+`device_activities.stop_supported`，尚未建立活动的延时摄影按受理时
+固定的 `execution_spec_json.stop_supported`（缺失或非布尔按状态库错
+误，不用新默认值补齐）。非设备任务目标按一致性错误拒绝（取回、清
+理等的取消按 N5 的目标拥有者规则）。启动竞争由既有授予事务保证：
+`grant_start` 在同一写事务内核对 cancel_requested（rejected/canceled），
+取消先可靠成立则不授予启动。
+
+验证：单元 `test_eligibility.py` 9 项（终态优先于已生效取消、未启
+动×能力、可能启动/已启动×能力含命名用例 `test_unknown_start_
+without_stop_is_rejected`、不可靠两来源、may_apply 全成员核对）；
+集成 `test_eligibility.py` 8 项（活动能力分区的已启动允许/发送未知
+无能力拒绝/未建档未派发允许/终态/已生效复用、延时能力取受理定义且
+缺失按状态库错误、取消先成立则真实 grant_start 拒绝且不建活动、启
+动先成立按已启动分区沿用活动固定能力）。全量回归：组件单元 3003、
+集成全量通过（含取消组件 42 项）、根跨组件 34 另 342 subtests、
+check-protocol、check-report-dependencies、check-doc-links 2917 通
+过（Python 3.11）。
+
+N3 生效事务消费 N1 固定集合与本决策表：允许分区保存取消事实并阻
+止普通启动，拒绝分区保留失败明细且不修改目标取消标记。
 
 ### N3 取消生效与逐目标独立收场
 
