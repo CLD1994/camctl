@@ -1,8 +1,8 @@
 """源产物清理的目标固定输入与结果类型。
 
-精确清理按原请求逐项固定；范围清理等待全部来源固定并完成后固
-定。缺失目标按 output_not_found 直接终态，全部不可解析时同事务
-以 cleanup_items_failed 结束动作。
+精确清理按原请求逐项固定；范围清理等待全部来源固定并完成后按固
+定来源枚举产物。缺失目标按 output_not_found 直接终态，全部不可解
+析时动作的失败终态由汇总事务（cleanup_items_failed）保存。
 """
 
 from __future__ import annotations
@@ -14,12 +14,15 @@ from typing import Any, Callable
 from camctl.contracts.values import ObjectId, UtcMicros
 
 __all__ = [
+    "CleanupActionDisposition",
+    "CleanupActionFinished",
     "CleanupItemDisposition",
     "CleanupItemSaved",
     "CleanupOutcomeChoice",
     "CleanupTargetsDisposition",
     "CleanupTargetsSaved",
     "FailCleanupItem",
+    "FinishCleanupAction",
     "FinishCleanupItem",
     "FixCleanupTargets",
     "ProgressCleanupItem",
@@ -45,6 +48,8 @@ class CleanupTargetsDisposition(Enum):
     SAVED = "saved"
     #: 已固定集合或原键重送：只读复用首次结果。
     ALREADY = "already"
+    #: 范围来源尚未终态或适用处理未完成：只读等待，不产生事件。
+    WAITING = "waiting"
 
 
 @dataclass(frozen=True)
@@ -137,6 +142,37 @@ class FailCleanupItem:
         if not isinstance(self.details, dict):
             raise TypeError("清理失败详情必须是对象")
         _item_timestamp(self.occurred_at)
+
+
+@dataclass(frozen=True)
+class FinishCleanupAction:
+    """清理动作汇总终态的申请输入：全部成员终态后保存动作结果。"""
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+
+
+class CleanupActionDisposition(Enum):
+    """清理动作汇总事务的结果分类。"""
+
+    SAVED = "saved"
+    #: 原键重送或动作已终态：只读复用首次结果。
+    ALREADY = "already"
+
+
+@dataclass(frozen=True)
+class CleanupActionFinished:
+    """清理动作汇总事务的保存结果。"""
+
+    disposition: CleanupActionDisposition
+    action_status: int
+    plan_status: int
+    succeeded: int
+    failed: int
 
 
 # ---- 删除编排：限制 → 删除意图 → 设备调用 → 结果/核实 ----

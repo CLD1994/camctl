@@ -30,12 +30,15 @@ from camctl.host_files.paths import (
 from camctl.operations.attempts import AttemptTarget, OperationKind, operation_responsibility_key
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.cleanup_flow import (
+    CleanupActionDisposition,
+    CleanupActionFinished,
     CleanupItemDisposition,
     CleanupItemSaved,
     CleanupOutcomeChoice,
     CleanupTargetsDisposition,
     CleanupTargetsSaved,
     FailCleanupItem,
+    FinishCleanupAction,
     FinishCleanupItem,
     FixCleanupTargets,
     ProgressCleanupItem,
@@ -183,6 +186,8 @@ _PLAN_COMPLETE = 3
 
 #: 取回逐项最终失败的动作错误（具体失败项由条目事实表达）。
 _OBTAIN_ITEMS_FAILED = "obtain_items_failed"
+#: 清理逐项最终失败的动作错误（具体失败项由成员事实表达）。
+_CLEANUP_ITEMS_FAILED = "cleanup_items_failed"
 _OUTPUT_KIND = enum_for("outputs.kind")
 _DEVICE_FILE_ROLE = enum_for("device_files.role")
 _DEVICE_FILE_COMPLETION = enum_for("device_files.completion_state")
@@ -4554,6 +4559,18 @@ class OutputsRepository:
         receipt = commit_operation(_FailCleanupItemCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
+    def finish_cleanup_action(
+        self, command: FinishCleanupAction, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CleanupActionFinished]:
+        receipt = commit_operation(
+            _FinishCleanupActionCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     @staticmethod
     def _cleanup_item_outcome(receipt) -> DbOutcome[CleanupItemSaved]:
         if receipt.kind == "completed":
@@ -5838,9 +5855,10 @@ class _FixCleanupTargetsCommand:
     """固定清理动作的完整目标集合（TARGETS_FIXED.CLEANUP）。
 
     精确清理按原请求逐项固定：可解析目标创建未解析成员；可靠不存
-    在的目标先固定集合、再按 output_not_found 直接终态；全部不可解
-    析时同事务以 cleanup_items_failed 结束动作。范围清理等待全部
-    来源固定并完成后固定，随删除编排分段接入。
+    在的目标先固定集合、再按 output_not_found 直接终态。范围清理等
+    待全部固定来源终态且适用产物处理完成后，按来源枚举产物创建成
+    员；来源未就绪时只读等待。动作的失败汇总（cleanup_items_failed）
+    由完成登记事务在全部成员终态后保存。
     """
 
     def __init__(self, command, key: OperationKey) -> None:
@@ -5881,6 +5899,14 @@ class _FixCleanupTargetsCommand:
         # 公开投影路由从清理项走到产物表；装配空范围供解析。
         self._state.setdefault("cleanup_items", {})
         self._state.setdefault("outputs", {})
+        if requested is None:
+            requested = self._scope_targets(connection)
+            if requested is None:
+                return CommandPlan(
+                    events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True,
+                    result=CleanupTargetsSaved(
+                        CleanupTargetsDisposition.WAITING, ()))
         next_item = next_row_id(connection, "cleanup_items")
         members: list[tuple[int, int]] = []
         terminal: list[tuple[int, int]] = []
@@ -5964,6 +5990,54 @@ class _FixCleanupTargetsCommand:
                 CleanupTargetsDisposition.SAVED,
                 tuple(row_id for row_id, _ in members + terminal)))
 
+    def _scope_targets(self, connection) -> tuple[int, ...] | None:
+        """范围清理按固定来源枚举产物；来源未就绪时返回 None 表示等待。
+
+        全部固定来源终态且适用产物处理完成后才枚举，保证目标集合
+        不随来源后续变化扩大；守卫按同一来源事实核对成员资格。
+        """
+        dependencies = self._state.setdefault("action_dependencies", {})
+        sources: list[int] = []
+        with closing(connection.execute(
+            "SELECT id, depends_on_action_id FROM action_dependencies"
+            " WHERE action_id = ? ORDER BY id", (self._command.action_id,),
+        )) as cursor:
+            for dependency_id, source_id in cursor.fetchall():
+                sources.append(int(source_id))
+                dependency = row_facts(
+                    connection, "action_dependencies", int(dependency_id))
+                if dependency is not None:
+                    dependencies[int(dependency_id)] = dependency
+        if not sources:
+            raise ConsistencyError(
+                f"范围清理缺少固定来源: {self._command.action_id}")
+        actions = self._state["actions"]
+        for source_id in sources:
+            source = row_facts(connection, "actions", source_id)
+            if source is None:
+                raise ConsistencyError(f"来源动作不存在: {source_id}")
+            actions[source_id] = dict(source)
+            if source["status"] not in _ACTION_TERMINAL:
+                return None
+            if not _processing_completed(connection, source_id):
+                return None
+        outputs = self._state.setdefault("outputs", {})
+        identities: list[int] = []
+        with closing(connection.execute(
+            "SELECT id FROM outputs WHERE source_action_id IN (%s) ORDER BY id"
+            % ",".join("?" * len(sources)), sources,
+        )) as cursor:
+            for (identity,) in cursor.fetchall():
+                identity = int(identity)
+                identities.append(identity)
+                output = row_facts(connection, "outputs", identity)
+                if output is not None:
+                    outputs[identity] = output
+        if not identities:
+            raise TransactionError(
+                f"范围清理来源没有可清理产物: {self._command.action_id}")
+        return tuple(identities)
+
     def _reuse(self, connection, saved) -> CommandPlan:
         """原键重送：核实固定分支与成员集合后恢复首次响应。"""
         command = self._command
@@ -5979,7 +6053,11 @@ class _FixCleanupTargetsCommand:
             for event in saved
             for row in event["body"]["rows"]
             if row["table"] == "cleanup_items"}
-        if created != set(_explicit_cleanup_request(action)):
+        expected = _explicit_cleanup_request(action)
+        if expected is None:
+            scope = self._scope_targets(connection)
+            expected = () if scope is None else scope
+        if created != set(expected):
             raise TransactionError("目标固定的成员集合与重送输入不同")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
@@ -5989,17 +6067,20 @@ class _FixCleanupTargetsCommand:
                 _saved_member_ids(connection, command.action_id)))
 
 
-def _explicit_cleanup_request(action) -> tuple[int, ...]:
-    """精确清理的原请求目标；解析失败按一致性错误拒绝。"""
+def _explicit_cleanup_request(action) -> tuple[int, ...] | None:
+    """精确清理的原请求目标；范围清理（params.source）返回 None。"""
     fields = action["input_fields_json"]
     if not isinstance(fields, Mapping) or not isinstance(
             fields.get("params"), Mapping):
         raise ConsistencyError("清理动作缺少原请求参数")
-    values = fields["params"].get("output_ids")
-    if not isinstance(values, list) or not values:
+    values = fields["params"]
+    if "output_ids" not in values:
+        return None
+    ids = values["output_ids"]
+    if not isinstance(ids, list) or not ids:
         raise ConsistencyError("精确清理缺少非空原目标列表")
     identities = []
-    for value in values:
+    for value in ids:
         try:
             identities.append(parse_object_id(value))
         except ValueError as error:
@@ -6422,6 +6503,196 @@ class _FailCleanupItemCommand(_CleanupItemCommandMixin):
             result=CleanupItemSaved(
                 CleanupItemDisposition.ALREADY, self._command.item_id))
 
+
+
+class _FinishCleanupActionCommand:
+    """清理动作汇总终态：全部成员终态后保存动作结果与父计划状态。
+
+    任一成员最终失败（含不可解析目标的直接终态）按公共错误
+    cleanup_items_failed 汇总为失败；全部成功才成功。取消已生效的
+    动作不保存普通终态（取消收场由取消流程负责）。
+    """
+
+    def __init__(self, command: FinishCleanupAction, key: OperationKey) -> None:
+        if not isinstance(command, FinishCleanupAction):
+            raise TypeError("清理汇总申请必须使用 FinishCleanupAction")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            "actions": {}, "cleanup_items": {}, "plans": {},
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(connection, saved)
+        command = self._command
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise TransactionError(f"动作不存在: {command.action_id}")
+        if action["type"] != _DELETE_ACTION_TYPE:
+            raise TransactionError(f"动作不是清理动作: {command.action_id}")
+        self._state["actions"][command.action_id] = action
+        if action["status"] in _ACTION_TERMINAL:
+            return self._recover(connection, action)
+        if action["status"] != int(_ACTION_STATUS.RUNNING):
+            raise TransactionError(
+                f"清理动作不在执行中: {command.action_id}"
+                f" status={action['status']}")
+        if action["cancel_requested"]:
+            raise TransactionError(
+                f"取消请求已生效的清理动作不能保存普通终态: {command.action_id}")
+        if action["target_selection_state"] != _TARGET_FIXED:
+            raise TransactionError(
+                f"清理动作目标集合尚未固定: {command.action_id}")
+        items = self._load_items(connection)
+        if not items:
+            raise TransactionError(
+                f"清理动作没有可汇总成员: {command.action_id}")
+        for item in items.values():
+            if item["status"] == int(_CLEANUP_ITEM_STATUS.CANCELED):
+                raise ConsistencyError(
+                    "未取消的清理动作不应有已取消成员"
+                    f" {command.action_id}/{item['id']}")
+            if item["status"] not in (
+                    int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
+                    int(_CLEANUP_ITEM_STATUS.FAILED)):
+                raise TransactionError(
+                    f"清理成员尚未全部终态，不能保存汇总: {item['id']}"
+                    f" status={item['status']}")
+        failed = sum(
+            1 for item in items.values()
+            if item["status"] == int(_CLEANUP_ITEM_STATUS.FAILED))
+        succeeded = len(items) - failed
+        if failed:
+            action_status = int(_ACTION_STATUS.FAILED)
+            reason = 2
+            error_code = registered_error(_CLEANUP_ITEMS_FAILED)["action_error_id"]
+        else:
+            action_status = int(_ACTION_STATUS.SUCCEEDED)
+            reason = 1
+            error_code = None
+        before = {"status": action["status"]}
+        after = {"status": action_status}
+        if failed:
+            before.update(error_code=action["error_code"],
+                          error_details_json=action["error_details_json"])
+            after.update(error_code=error_code, error_details_json={})
+        siblings = self._load_siblings(connection, action)
+        self._owners[("actions", command.action_id)] = (
+            "action", command.action_id)
+        templates = [(
+            _ACTION_FINISHED_EVENT, reason,
+            (_update("actions", command.action_id, before, after),),
+        )]
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        plan_status = plan["status"]
+        if plan_complete(siblings, command.action_id) \
+                and plan["status"] in (1, 2):
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            templates.append((
+                _PLAN_STATUS_EVENT, 2,
+                (_update("plans", plan["id"],
+                         {"status": plan["status"]},
+                         {"status": _PLAN_COMPLETE}),),
+            ))
+            plan_status = _PLAN_COMPLETE
+        allocation = scope.allocate(len(templates))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, event_reason, rows, command.occurred_at,
+            )
+            for index, (event_type, event_reason, rows) in enumerate(templates)
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=CleanupActionFinished(
+                disposition=CleanupActionDisposition.SAVED,
+                action_status=action_status, plan_status=plan_status,
+                succeeded=succeeded, failed=failed),
+        )
+
+    def _load_items(self, connection) -> dict[int, dict[str, Any]]:
+        with closing(connection.execute(
+            "SELECT id FROM cleanup_items WHERE action_id = ? ORDER BY id",
+            (self._command.action_id,),
+        )) as cursor:
+            ids = tuple(int(row[0]) for row in cursor.fetchall())
+        items = {}
+        for item_id in ids:
+            item = row_facts(connection, "cleanup_items", item_id)
+            if item is not None:
+                items[item_id] = item
+                self._owners[("cleanup_items", item_id)] = (
+                    "action", self._command.action_id)
+        self._state["cleanup_items"] = dict(items)
+        return items
+
+    def _load_siblings(self, connection, action) -> dict[int, dict[str, Any]]:
+        with closing(connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (action["plan_id"],),
+        )) as cursor:
+            siblings = {
+                row[0]: row_facts(connection, "actions", row[0])
+                for row in cursor}
+        siblings = {key: value for key, value in siblings.items() if value}
+        self._state["actions"].update(siblings)
+        return siblings
+
+    def _recover(self, connection, action) -> CommandPlan:
+        """终态后的新键：按既有事实恢复结果，不重新登记。"""
+        if action["status"] not in (int(_ACTION_STATUS.SUCCEEDED),
+                                    int(_ACTION_STATUS.FAILED)):
+            raise TransactionError(
+                f"清理动作终态不是汇总结果: {action['status']!r}")
+        self._load_items(connection)
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        return self._result_from(
+            action, plan["status"], CleanupActionDisposition.ALREADY)
+
+    def _result_from(self, action, plan_status, disposition) -> CommandPlan:
+        items = self._state["cleanup_items"]
+        failed = sum(
+            1 for item in items.values()
+            if item["status"] == int(_CLEANUP_ITEM_STATUS.FAILED))
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupActionFinished(
+                disposition=disposition,
+                action_status=action["status"],
+                plan_status=plan_status, succeeded=len(items) - failed,
+                failed=failed),
+        )
+
+    def _reuse(self, connection, saved) -> CommandPlan:
+        """原键重送：核实事务身份后按既有事实恢复首次响应。"""
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if not kinds or kinds[0][0] != _ACTION_FINISHED_EVENT \
+                or kinds[0][1] not in (1, 2) \
+                or kinds[1:] not in ([], [(_PLAN_STATUS_EVENT, 2)]):
+            raise TransactionError("原事务不是清理汇总登记，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("清理汇总的事实时刻与原事务不同")
+        action_row = saved[0]["body"]["rows"][0]
+        if action_row["table"] != "actions" \
+                or action_row["id"] != self._command.action_id:
+            raise TransactionError("原清理汇总属于其他动作")
+        action = row_facts(connection, "actions", self._command.action_id)
+        assert action is not None
+        self._load_items(connection)
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        return self._result_from(
+            action, plan["status"], CleanupActionDisposition.ALREADY)
 
 
 def register_outputs_guards() -> None:
