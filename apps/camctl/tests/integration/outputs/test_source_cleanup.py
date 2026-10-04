@@ -239,15 +239,15 @@ class TestDeletionChain:
     async def test_delete_budget_exhaustion_fails_with_registered_error(
             self, pipeline):
         owned = pipeline
-        driver = DriverDouble(absent=False, present=None, query_error=None)
-        # 第一次：未知+查询也未知——两者预算为 1，随后再推进时两预算耗尽。
+        driver = DriverDouble(absent=False, present=True)
+        # 第一次：删除效果未知，查询确认仍在——等待预算内重试。
         first = await delete_source_file(
             _runtime(owned, driver, delete_attempts=1, query_attempts=1), 91)
-        assert first.phase == "query_unknown", first
-        driver.present = False
+        assert first.phase == "still_present", first
+        # 重试进入删除：删除预算耗尽按公共错误终态失败；查询预算独立
+        # 不受影响（未确认缺席不以删除代替核实）。
         second = await delete_source_file(
             _runtime(owned, driver, delete_attempts=1, query_attempts=1), 91)
-        # 删除预算耗尽按公共错误终态失败；查询预算独立不受影响。
         assert second.phase == "failed", second
         assert second.detail == "delete_attempts_exhausted", second
         row = _value(

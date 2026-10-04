@@ -202,13 +202,13 @@ X7 的阶段验证：`outputs/handoff.py` 提供 `decide_handoff`（七分区：
 
 **接口与依赖：** 提供 `decide_cleanup(facts: CleanupFacts) -> CleanupDecision`、异步 `advance_cleanup(item: CleanupIdentity, context: CleanupContext) -> CleanupStep`；实际文件删除/查询使用 D3 或 F2。前置交付：X2/X3、O2/O4、F1/F2、P3。
 
-- [ ] 编写失败用例。按文件已删除/仍存在/未知与两组额度有余/耗尽建立 `test_cleanup_budgets_are_independent`，`assert delete_used == expected_delete` 且 query_used 独立。删除额耗尽仍可剩余查询，未知且查询额耗尽不能重删；可靠完成不额外查询。已准备 delivery、修复产物及历史不级联删。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_source_cleanup.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。先固定完整目标，按资格和唯一处理者调用；每次真实删除或存在性查询前保存意图及所属次数，调用结束后文件事实、产物可用性、逐项与动作汇总共同提交。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 未知不变删除成功，配置改变和重启不重开终态。
+- [x] 编写失败用例。按文件已删除/仍存在/未知与两组额度有余/耗尽建立 `test_cleanup_budgets_are_independent`，`assert delete_used == expected_delete` 且 query_used 独立。删除额耗尽仍可剩余查询，未知且查询额耗尽不能重删；可靠完成不额外查询。已准备 delivery、修复产物及历史不级联删。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_source_cleanup.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。先固定完整目标，按资格和唯一处理者调用；每次真实删除或存在性查询前保存意图及所属次数，调用结束后文件事实、产物可用性、逐项与动作汇总共同提交。
+- [x] 再运行上述命令，要求全部 PASS，并核对 未知不变删除成功，配置改变和重启不重开终态。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_source_cleanup.py -q`，真实仓储、文件/设备替身验证全部删除与查询结果及取回先后竞争。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 设备源与主机派生成品的全部删除/查询入口是否暗自重试；记录门禁证据，建议以“feat: 实现源产物清理与独立预算”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 设备源与主机派生成品的全部删除/查询入口是否暗自重试；记录门禁证据，建议以“feat: 实现源产物清理与独立预算”形成独立提交。
 
 #### X8 第一段的阶段性验证（2026-10-05）：清理守卫三件套
 
@@ -259,19 +259,87 @@ used）终态失败。删除与查询两条流程预算独立。
 X8 剩余：范围清理目标固定、动作汇总 finish（cleanup_items_failed）、
 X9 取消后责任接手（test_cleanup_recovery.py）。
 
+#### X8 第四段的阶段性验证（2026-10-05）：范围固定与动作汇总收口
+
+X8 收口完成，任务全部勾选：`_FixCleanupTargetsCommand` 补范围清理分
+支——`params.source` 请求（`_requested_cleanup_ids` 返回 None）经
+`action_dependencies` 解析固定来源，全部来源终态且适用产物处理完成
+（`_processing_completed`）后才按来源枚举 `outputs.source_action_id`
+创建成员；来源未就绪返回只读 `WAITING`（新增 `CleanupTargetsDisposi-
+tion.WAITING`），不创建成员也不写历史；来源没有可清理产物时按事务错
+误拒绝（零产物动作收场归调度接线）。新增 `finish_cleanup_action`
+（`FinishCleanupAction`/`CleanupActionFinished`/`_FinishCleanupAction-
+Command`）：全部成员终态后保存 ACTION_FINISHED，任一 FAILED（含不可
+解析目标的直接终态）按 `cleanup_items_failed`（22，详情空对象）汇总
+失败，否则成功；父计划状态在全兄弟终态时同事务推进；原键重送核实事
+务身份与事实时刻，终态新键按既有事实只读恢复；取消已生效拒绝普通终
+态（取消收场归 N 系列）。守卫与重送核实均按固定来源成员资格闭环。
+
+验证：`test_cleanup_guards.py` 26 项（新增范围等待三分区与汇总终态
+六用例：失败汇总含父计划完成、全部成功、未终态拒绝、取消拒绝、原键
+重送与时刻冲突、终态新键恢复不写新历史）；全量回归通过（Python 3.11
+组件单元 2979、集成 3076 另 7 项跳过、根跨组件 34 另 342 subtests）。
+
 ### X9 清理取消、接手及原结果保持
 
 **预计文件：** `apps/camctl/src/camctl/outputs/cleanup.py`、`apps/camctl/src/camctl/outputs/qualification.py`；测试为 `apps/camctl/tests/unit/outputs/test_cleanup_recovery.py` 和 `apps/camctl/tests/integration/outputs/test_cleanup_recovery.py`。
 
 **接口与依赖：** 提供 `apply_cleanup_cancel(facts: CleanupFacts) -> CleanupCancelChanges`、`merge_cleanup_requests(facts: CleanupCoordination) -> CoordinationDecision`；Coordination 含全部有效项和原处理者。前置交付：X8、N3；已有真实删除责任。
 
-- [ ] 编写失败用例。建立 `test_later_cleanup_preserves_old_failure`，请求 A 查询耗尽失败，请求 B 后来确认不存在，`assert a.result == original_failure` 且 B 成功/产物清理事实更新。取消未发删除解除相应限制，可能已删保持限制；在途调用实际结束前仍跟踪，取消发起者结束不丢责任。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_cleanup_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。目标独立收场，保留原请求结果及预算；后续有效请求可以接手仍适用工作，不能重开旧项。正常及重启用同一候选时间排序。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 清理取消和读取保护按完整分区恢复，所有独立结果不被后续成功覆盖。
+- [x] 编写失败用例。建立 `test_later_cleanup_preserves_old_failure`，请求 A 查询耗尽失败，请求 B 后来确认不存在，`assert a.result == original_failure` 且 B 成功/产物清理事实更新。取消未发删除解除相应限制，可能已删保持限制；在途调用实际结束前仍跟踪，取消发起者结束不丢责任。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_cleanup_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。目标独立收场，保留原请求结果及预算；后续有效请求可以接手仍适用工作，不能重开旧项。正常及重启用同一候选时间排序。
+- [x] 再运行上述命令，要求全部 PASS，并核对 清理取消和读取保护按完整分区恢复，所有独立结果不被后续成功覆盖。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_cleanup_recovery.py -q`，真实 SQLite、并发取回和多个清理请求，固定取消、删除、查询及结果保存的竞争位置。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 来源、清理处理者、取回保护和逐项汇总的共同不变量；记录门禁证据，建议以“feat: 实现清理取消与责任接手”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 来源、清理处理者、取回保护和逐项汇总的共同不变量；记录门禁证据，建议以“feat: 实现清理取消与责任接手”形成独立提交。
+
+#### X9 的阶段性验证（2026-10-05）：取消收场与责任接手
+
+X9 完成，任务全部勾选。仓储新增 `cancel_cleanup_item`（CLEANUP_CHA-
+NGED.CANCEL）：未解析/待删除成员解除限制保存取消（PENDING_DELETE 的
+ACTIVE→RELEASED，未解析保持 NOT_ESTABLISHED），命令核对从未发出删除
+（不存在本项 DELETE_FILE 尝试）才允许解除；删除中成员的收场取消必须
+携带 `delete_unconfirmed` 或 `file_delete_failed` 并保留不可撤销限制；
+成员取消要求所属动作取消请求已生效。清理汇总投影改为派生
+（`_CleanupItemCommandMixin._derive_projection`）：按本产物全部清理成
+员自上而下判定 completed/running/pending/incomplete（错误来源按
+final_event_id 降序、同号按 id 降序选择，本事务终态事件必然最晚）/
+canceled/not_requested，restrict/progress/finish/fail/cancel 五个生产
+者共同维护 `outputs.availability`、`cleanup_status`、`cleanup_error_json`
+（结构化错误 `{code, stage, details}`），无实际变化时不生成投影事件。
+`restrict_cleanup_item` 放宽接手前置：允许在受限、未完成汇总（此前失
+败留下限制）或已清理产物上建立本项限制，按原请求目标装载未确认成员
+的产物行；`finish_cleanup_item` 允许待删除成员在无调用依据下保存
+ALREADY_CLEANED（产物已 CLEANED）或 ABSENCE_CONFIRMED（文件已缺席）。
+
+编排（`cleanup_flow`）以两个纯决策表驱动：`decide_cleanup_cancel`（终
+态保持/未发出解除/在途跟踪/收场后成功·未知·仍在）与 `decide_cleanup_
+entry`（复用完成/先核实/直接删除；未决删除按尝试编号与可靠查询观察
+的先后判定）。`delete_source_file` 重构：取消检查先于限制建立；接手
+前先核实本产物未决的删除效果（查询确认缺席直接成功、确认仍在转入删
+除、查询额耗尽按 `file_query_attempts_exhausted` 终态失败——修正此前
+误用 `delete_unconfirmed` 且详情键不合规的死代码）；在途删除调用结束
+后取消才生效时按实际结论收场（缺席成功、可靠在场按 `file_delete_fai-
+led`、其余 `delete_unconfirmed`）；查询预算耗尽的详情按实际尝试计数。
+
+验证：单元 `test_cleanup_recovery.py` 15 项（两张决策表全分区）；集
+成 6 项——`test_later_cleanup_preserves_old_failure`（A 查询耗尽失败保
+持原错误且产物进入 incomplete 保留结束原因，B 固定后接手不重开旧项、
+先用自己的查询额核实确认缺席成功，产物完成且汇总错误清空，A 原失败
+不变）、取消未发删除解除限制（成员 CANCELED/RELEASED、产物取消且可
+用性恢复）、未解析成员取消不建限制、删除效果未知取消保留不可撤销限
+制并按 delete_unconfirmed 收场（产物 incomplete 保留错误）、可靠确
+认仍在按 file_delete_failed 收场、在途调用跟踪到实际结束（挂起替身
+在取消到达后放行，尝试结果保存后按未知收场）。X8 语义随规格修正一
+处：删除效果未知且查询也未知时，重试先核实而非直接重删（
+`test_source_cleanup.py` 对应用例改为查询确认在场后删除预算耗尽）。
+全量回归：组件单元 2979、集成 3076 另 7 项跳过、根跨组件 34 另 342
+subtests、check-protocol、check-report-dependencies、check-doc-links
+2916 通过（Python 3.11）。
+
+X9 调度侧剩余（取消动作自身终态、跨动作候选排序与读取保护竞争）随
+N1—N6 与 X10 剩余接线推进。
 
 ### X10 自动预览及统一发布汇总
 
