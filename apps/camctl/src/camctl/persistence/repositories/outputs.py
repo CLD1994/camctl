@@ -13,6 +13,7 @@ from __future__ import annotations
 from contextlib import closing
 from decimal import Decimal
 from dataclasses import dataclass, fields
+from enum import Enum
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
@@ -48,6 +49,14 @@ from camctl.outputs.work_files import (
     WorkFileFailure, WorkFileFacts, WorkFileOutcome,
 )
 from camctl.outputs.definitions import read_selection_request
+from camctl.outputs.obtain_summary import (
+    ObtainFacts,
+    ObtainItemStage,
+    ObtainPhase,
+    ObtainSourceFacts,
+    decide_obtain_finish,
+    obtain_item_stage,
+)
 from camctl.outputs.sources import (
     ActionFacts,
     CatalogEntry,
@@ -133,6 +142,13 @@ _ACTION_TERMINAL = (
     int(_ACTION_STATUS.CANCELED),
 )
 _OBTAIN_TYPE = int(_ACTION_TYPE.OBTAIN_ACTION_OUTPUTS)
+
+_ACTION_FINISHED_EVENT = 8
+_PLAN_STATUS_EVENT = 9
+_PLAN_COMPLETE = 3
+
+#: 取回逐项最终失败的动作错误（具体失败项由条目事实表达）。
+_OBTAIN_ITEMS_FAILED = "obtain_items_failed"
 _OUTPUT_KIND = enum_for("outputs.kind")
 _DEVICE_FILE_ROLE = enum_for("device_files.role")
 _DEVICE_FILE_COMPLETION = enum_for("device_files.completion_state")
@@ -4070,6 +4086,267 @@ def _load_delivery_state_facts(
     )
 
 
+@dataclass(frozen=True)
+class FinishObtain:
+    """一次取回完成登记的输入。"""
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+
+
+class ObtainFinishDisposition(Enum):
+    """取回完成事务的保存结果：新保存或恢复首次结果。"""
+
+    SAVED = "saved"
+    ALREADY = "already"
+
+
+@dataclass(frozen=True)
+class ObtainFinishResult:
+    """取回完成登记的已保存事实。"""
+
+    action_status: int
+    plan_status: int
+    prepared: int
+    failed: int
+    disposition: ObtainFinishDisposition = ObtainFinishDisposition.SAVED
+
+
+class _FinishObtainCommand:
+    """取回动作终态汇总事务命令。
+
+    汇总判定确定且成功交付已全部发布后保存动作终态；任一逐项最
+    终失败按公共动作错误登记整次失败（成功交付保留，具体失败项
+    由条目事实表达），全部成功才保存成功终态。父计划状态与动作
+    终态同事务推进；原键重送与终态新键恢复首次结果。
+    """
+
+    _TABLES = (
+        "actions",
+        "action_dependencies",
+        "obtain_source_selections",
+        "obtain_items",
+        "deliveries",
+        "plans",
+    )
+
+    def __init__(self, command: FinishObtain, key: OperationKey) -> None:
+        if not isinstance(command, FinishObtain):
+            raise TypeError("取回完成申请必须使用 FinishObtain")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            table: {} for table in self._TABLES
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(connection, saved)
+        command = self._command
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise TransactionError(f"动作不存在: {command.action_id}")
+        if action["type"] != _OBTAIN_TYPE:
+            raise TransactionError(f"动作不是取回动作: {command.action_id}")
+        self._state["actions"][command.action_id] = action
+        if action["status"] == int(_ACTION_STATUS.RUNNING) \
+                and action["cancel_requested"]:
+            raise TransactionError(
+                f"取消请求已生效的取回动作不能保存终态: {command.action_id}")
+        if action["status"] in _ACTION_TERMINAL:
+            return self._recover(connection, action)
+        if action["status"] != int(_ACTION_STATUS.RUNNING):
+            raise TransactionError(
+                f"取回动作不在执行中: {command.action_id} status={action['status']}")
+
+        decision = decide_obtain_finish(self._load_facts(connection))
+        if decision.phase is not ObtainPhase.READY_TO_PUBLISH:
+            raise TransactionError(
+                f"取回汇总尚未确定，不能保存终态: {decision.phase.value}")
+        unpublished = self._unpublished_deliveries(connection)
+        if unpublished:
+            raise TransactionError(f"成功交付尚未全部发布: {sorted(unpublished)}")
+        if decision.failed:
+            action_status = int(_ACTION_STATUS.FAILED)
+            error_code = registered_error(_OBTAIN_ITEMS_FAILED)["action_error_id"]
+        elif decision.prepared:
+            action_status = int(_ACTION_STATUS.SUCCEEDED)
+            error_code = None
+        else:
+            raise TransactionError("取回没有可汇总条目，不能保存终态")
+
+        siblings = self._load_siblings(connection, action)
+        before = {"status": action["status"]}
+        after = {"status": action_status}
+        reason = 2 if decision.failed else 1
+        if decision.failed:
+            before.update(error_code=action["error_code"],
+                          error_details_json=action["error_details_json"])
+            after.update(error_code=error_code, error_details_json={})
+        templates = [(
+            _ACTION_FINISHED_EVENT, reason,
+            (_update("actions", command.action_id, before, after),),
+        )]
+        plan_status = action_plan = row_facts(
+            connection, "plans", action["plan_id"])
+        assert action_plan is not None
+        self._state["plans"] = {action_plan["id"]: action_plan}
+        plan_status = action_plan["status"]
+        if plan_complete(siblings, command.action_id) \
+                and action_plan["status"] in (1, 2):
+            self._owners[("plans", action_plan["id"])] = (
+                "plan", action_plan["id"])
+            templates.append((
+                _PLAN_STATUS_EVENT, 2,
+                (_update("plans", action_plan["id"],
+                         {"status": action_plan["status"]},
+                         {"status": _PLAN_COMPLETE}),),
+            ))
+            plan_status = _PLAN_COMPLETE
+        self._owners[("actions", command.action_id)] = (
+            "action", command.action_id)
+        allocation = scope.allocate(len(templates))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, event_reason, rows, command.occurred_at,
+            )
+            for index, (event_type, event_reason, rows) in enumerate(templates)
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=ObtainFinishResult(
+                action_status=action_status, plan_status=plan_status,
+                prepared=decision.prepared, failed=decision.failed),
+        )
+
+    def _load_facts(self, connection) -> ObtainFacts:
+        """从已保存行装配汇总事实；装载规则与选择、条目、交付状态一致。"""
+        command = self._command
+        sources: list[ObtainSourceFacts] = []
+        items: list[ObtainItemStage] = []
+        with closing(connection.execute(
+            "SELECT s.id, s.status FROM obtain_source_selections s"
+            " JOIN action_dependencies d ON d.id = s.dependency_id"
+            " WHERE d.action_id=? ORDER BY s.id", (command.action_id,),
+        )) as cursor:
+            selections = cursor.fetchall()
+        for selection_id, status in selections:
+            facts = row_facts(connection, "obtain_source_selections", selection_id)
+            if facts is not None:
+                self._state["obtain_source_selections"][selection_id] = facts
+            with closing(connection.execute(
+                "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?"
+                " AND status=1", (selection_id,),
+            )) as cursor:
+                unresolved = cursor.fetchone()[0]
+            sources.append(ObtainSourceFacts(
+                selection_fixed=status == int(_SELECTION_STATUS.FIXED),
+                unresolved_items=unresolved))
+            with closing(connection.execute(
+                "SELECT id, status, delivery_id FROM obtain_items"
+                " WHERE selection_id=? AND status<>1 ORDER BY id",
+                (selection_id,),
+            )) as cursor:
+                rows = cursor.fetchall()
+            for item_id, item_status, delivery_id in rows:
+                item = row_facts(connection, "obtain_items", item_id)
+                if item is not None:
+                    self._state["obtain_items"][item_id] = item
+                delivery = None
+                if delivery_id is not None:
+                    delivery = row_facts(connection, "deliveries", delivery_id)
+                    if delivery is not None:
+                        self._state["deliveries"][delivery_id] = delivery
+                    delivery = delivery["status"] if delivery else None
+                items.append(obtain_item_stage(item_status, delivery))
+        return ObtainFacts(sources=tuple(sources), items=tuple(items))
+
+    def _unpublished_deliveries(self, connection) -> tuple[int, ...]:
+        """汇总确定后仍处于准备或发布中的成功交付。"""
+        with closing(connection.execute(
+            "SELECT d.id FROM deliveries d"
+            " JOIN obtain_items i ON i.delivery_id = d.id"
+            " JOIN obtain_source_selections s ON s.id = i.selection_id"
+            " JOIN action_dependencies dep ON dep.id = s.dependency_id"
+            " WHERE dep.action_id=? AND i.status IN (?, ?)"
+            " AND d.status IN (?, ?) ORDER BY d.id",
+            (self._command.action_id,
+             int(_ITEM_STATUS.SELECTED), int(_ITEM_STATUS.DELIVERY_CREATED),
+             int(_DELIVERY_STATUS.PREPARED), int(_DELIVERY_STATUS.PUBLISHING)),
+        )) as cursor:
+            return tuple(row[0] for row in cursor)
+
+    def _load_siblings(self, connection, action) -> dict[int, dict[str, Any]]:
+        with closing(connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (action["plan_id"],),
+        )) as cursor:
+            siblings = {
+                row[0]: row_facts(connection, "actions", row[0])
+                for row in cursor}
+        siblings = {key: value for key, value in siblings.items() if value}
+        self._state["actions"].update(siblings)
+        return siblings
+
+    def _reuse(self, connection, saved) -> CommandPlan:
+        """原键重送：核实原事务身份后恢复首次结果。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if not types or types[0][0] != _ACTION_FINISHED_EVENT \
+                or types[1:] not in ([], [(_PLAN_STATUS_EVENT, 2)]):
+            raise TransactionError("原事务不是取回完成登记，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("取回完成登记的事实时刻与原事务不同")
+        action_row = saved[0]["body"]["rows"][0]
+        if action_row["table"] != "actions" \
+                or action_row["id"] != self._command.action_id:
+            raise TransactionError("原完成登记属于其他动作")
+        action = row_facts(connection, "actions", self._command.action_id)
+        assert action is not None
+        return self._recovered_result(connection, action)
+
+    def _recover(self, connection, action) -> CommandPlan:
+        """终态后的新键：不重新登记，按既有事实恢复结果或拒绝。"""
+        if action["status"] not in (int(_ACTION_STATUS.SUCCEEDED),
+                                    int(_ACTION_STATUS.FAILED)):
+            raise TransactionError(
+                f"取回动作终态不是完成登记结果: {action['status']!r}")
+        return self._recovered_result(connection, action)
+
+    def _recovered_result(self, connection, action) -> CommandPlan:
+        decision = decide_obtain_finish(self._load_facts(connection))
+        if decision.phase is not ObtainPhase.READY_TO_PUBLISH:
+            raise TransactionError(
+                f"取回汇总事实与终态不符: {decision.phase.value}")
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["actions"][action["id"]] = action
+        self._state["plans"] = {plan["id"]: plan}
+        self._owners[("actions", action["id"])] = ("action", action["id"])
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ObtainFinishResult(
+                action_status=action["status"], plan_status=plan["status"],
+                prepared=decision.prepared, failed=decision.failed,
+                disposition=ObtainFinishDisposition.ALREADY),
+        )
+
+
+def plan_complete(siblings, current_action_id: int) -> bool:
+    """父计划的全部动作（含本事务动作）是否都已终态。"""
+    return all(
+        values.get("status") in _ACTION_TERMINAL
+        or values["id"] == current_action_id
+        for values in siblings.values()
+    )
+
+
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
 
@@ -4077,6 +4354,12 @@ class OutputsRepository:
         self, command: ResolveSources, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ResolveSourcesOutcome]:
         receipt = commit_operation(_ResolveSourcesCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
+    def finish_obtain(
+        self, command: FinishObtain, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ObtainFinishResult]:
+        receipt = commit_operation(_FinishObtainCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def fix_selection(

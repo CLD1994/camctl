@@ -31,9 +31,15 @@ from camctl.outputs.obtain_summary import (
     obtain_item_stage,
 )
 from camctl.host_files.models import BoundDirectories
+from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.repositories.outputs import (
+    FinishObtain,
+    ObtainFinishDisposition,
+    OutputsRepository,
+)
+from camctl.persistence.transaction import TransactionError
 from camctl.outputs.qualification import OperationConfig
 
 from .test_copy_resume import _command, _qualified
@@ -113,6 +119,12 @@ def prepared_env(read_targets, tmp_path):
         repository=OutputsRepository(), owned=owned, roots=roots,
         occurred_at=_NOW + 5)))
     assert step.phase is CompletionPhase.PREPARED
+    owned.connection.commit()
+    return owned, roots, qualification
+
+
+def _add_failed_item(owned) -> None:
+    """种下一个显式 ID 未找到的最终失败条目（output_not_found）。"""
     owned.connection.execute(
         "INSERT INTO obtain_items (id, selection_id, requested_output_id,"
         " output_id, basis, original_output_id, preview_output_id,"
@@ -122,7 +134,6 @@ def prepared_env(read_targets, tmp_path):
         ' NULL, 1, \'{"requested_output_id": "705"}\')',
     )
     owned.connection.commit()
-    return owned, roots, qualification
 
 
 def test_publish_waits_until_all_sources_determined(prepared_env, tmp_path) -> None:
@@ -138,6 +149,7 @@ def test_publish_waits_until_all_sources_determined(prepared_env, tmp_path) -> N
 
 def test_publish_waits_while_preparation_in_progress(prepared_env) -> None:
     owned, roots, qualification = prepared_env
+    _add_failed_item(owned)
     owned.connection.execute(
         "UPDATE deliveries SET status=2 WHERE id=?",
         (qualification.delivery_id,))
@@ -149,6 +161,7 @@ def test_publish_waits_while_preparation_in_progress(prepared_env) -> None:
 def test_determined_summary_publishes_successes(prepared_env, tmp_path) -> None:
     """判定完成：真实发布成功项，失败项保留，重判仍可发布。"""
     owned, roots, qualification = prepared_env
+    _add_failed_item(owned)
     decision = decide_obtain_finish(_facts(owned, 31))
     assert decision.phase is ObtainPhase.READY_TO_PUBLISH, decision
     assert (decision.prepared, decision.failed) == (1, 1)
@@ -171,3 +184,157 @@ def test_determined_summary_publishes_successes(prepared_env, tmp_path) -> None:
     assert _value(
         owned, "SELECT status FROM deliveries WHERE id=?",
         qualification.delivery_id)[0] == 5
+
+
+# ---- 取回终态汇总事务 ----
+
+
+def _publish(owned, roots, delivery_id, tmp_path):
+    ready = tmp_path / "ready"
+    processing = tmp_path / "processing"
+    ready.mkdir(exist_ok=True)
+    processing.mkdir(exist_ok=True)
+    result = asyncio.run(publish_delivery(
+        delivery_id,
+        DeliveryContext(
+            repository=OutputsRepository(), owned=owned,
+            directories=DeliveryDirectories(
+                staging=roots.staging, ready=ready, processing=processing),
+            occurred_at=_NOW + 10)))
+    assert result.phase is DeliveryPhase.PUBLISHED
+
+
+def test_finish_obtain_succeeds_after_all_published(
+        prepared_env, tmp_path) -> None:
+    """全部条目成功且已发布：动作成功终态，失败项为零。"""
+    owned, roots, qualification = prepared_env
+    _publish(owned, roots, qualification.delivery_id, tmp_path)
+    outcome = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    result = outcome.value
+    assert (result.action_status, result.plan_status) == (3, 1)
+    assert (result.prepared, result.failed) == (1, 0)
+    row = _value(owned, "SELECT status, error_code FROM actions WHERE id=31")
+    assert row == (3, None)
+
+    recovered = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert recovered.kind is DbOutcomeKind.COMPLETED, recovered.error
+    assert recovered.value.disposition is ObtainFinishDisposition.ALREADY
+    assert (recovered.value.prepared, recovered.value.failed) == (1, 0)
+
+
+def test_finish_obtain_recovers_first_result_on_resend(
+        prepared_env, tmp_path) -> None:
+    owned, roots, qualification = prepared_env
+    _publish(owned, roots, qualification.delivery_id, tmp_path)
+    repository = OutputsRepository()
+    key = new_operation_key()
+    first = repository.finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20), key, owned)
+    assert first.kind is DbOutcomeKind.COMPLETED, first.error
+    events_before = _value(owned, "SELECT COUNT(*) FROM history_events")[0]
+    again = repository.finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20), key, owned)
+    assert again.kind is DbOutcomeKind.COMPLETED, again.error
+    assert again.value.disposition is ObtainFinishDisposition.ALREADY
+    assert again.value.prepared == first.value.prepared
+    assert _value(owned, "SELECT COUNT(*) FROM history_events")[0] == events_before
+    later = repository.finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 21), key, owned)
+    assert later.kind is DbOutcomeKind.ROLLED_BACK
+
+
+def test_finish_obtain_partial_failure_fails_action(
+        prepared_env, tmp_path) -> None:
+    """部分成功：先发布成功项，动作整体置失败并保留成功交付。"""
+    owned, roots, qualification = prepared_env
+    _add_failed_item(owned)
+    _publish(owned, roots, qualification.delivery_id, tmp_path)
+    outcome = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    result = outcome.value
+    assert result.action_status == 4
+    assert (result.prepared, result.failed) == (1, 1)
+    status, error_code, details = _value(
+        owned,
+        "SELECT status, error_code, error_details_json FROM actions"
+        " WHERE id=31")
+    assert (status, error_code, details) == (4, 21, "{}")
+    assert _value(
+        owned, "SELECT status FROM deliveries WHERE id=?",
+        qualification.delivery_id)[0] == 5
+
+
+def test_finish_obtain_all_failed_without_success_files(
+        prepared_env) -> None:
+    """没有成功文件：动作失败，具体失败项由条目事实表达。"""
+    owned, roots, qualification = prepared_env
+    _add_failed_item(owned)
+    owned.connection.execute(
+        "UPDATE deliveries SET status=6, error_json=? WHERE id=?",
+        ('{"reason": "seed_failure"}', qualification.delivery_id))
+    owned.connection.commit()
+    outcome = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    assert outcome.value.action_status == 4
+    assert (outcome.value.prepared, outcome.value.failed) == (0, 2)
+
+
+def test_finish_obtain_rejects_unpublished_deliveries(prepared_env) -> None:
+    """汇总确定但成功交付尚未发布：不能保存终态。"""
+    owned, roots, qualification = prepared_env
+    before = tuple(owned.connection.iterdump())
+    outcome = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+    assert isinstance(outcome.error, TransactionError)
+    assert tuple(owned.connection.iterdump()) == before
+
+
+def test_finish_obtain_rejects_undecided_summary(prepared_env) -> None:
+    """来源判定未固定：汇总未确定，不能保存终态。"""
+    owned, roots, qualification = prepared_env
+    owned.connection.execute(
+        "UPDATE obtain_source_selections SET status=1 WHERE id=31")
+    owned.connection.commit()
+    outcome = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+
+
+def test_finish_obtain_rejects_canceled_action(prepared_env) -> None:
+    owned, roots, qualification = prepared_env
+    owned.connection.execute(
+        "UPDATE actions SET cancel_requested=1 WHERE id=31")
+    owned.connection.commit()
+    outcome = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+
+
+def test_finish_obtain_completes_plan_with_terminal_siblings(
+        prepared_env, tmp_path) -> None:
+    owned, roots, qualification = prepared_env
+    _publish(owned, roots, qualification.delivery_id, tmp_path)
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id=12")
+    owned.connection.execute(
+        "UPDATE actions SET status=4, error_code=20, error_details_json='{}'"
+        " WHERE id=32")
+    owned.connection.commit()
+    outcome = OutputsRepository().finish_obtain(
+        FinishObtain(action_id=31, occurred_at=_NOW + 20),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    assert outcome.value.plan_status == 3
+    assert _value(owned, "SELECT status FROM plans WHERE id=1")[0] == 3

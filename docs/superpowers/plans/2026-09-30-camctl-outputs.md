@@ -250,6 +250,21 @@ X10 完成预览选择复用确认与统一发布汇总判定，任务 checkbox 
 
 X10 仍剩余：取回动作终态汇总事务（发布汇总与父计划状态同事务保存）、读取与拍摄让路的调度接线（设备兼容性判定，Q6/I5）、取消联动消费（N1/N2）、真实三种拍摄与部分取回组合（I5）。
 
+#### X10 第二段的阶段性验证（2026-10-05）
+
+第二段完成取回动作终态汇总事务，任务 checkbox 保持未勾：`repositories/outputs.py` 新增 `FinishObtain`/`ObtainFinishResult` 与 `_FinishObtainCommand`（仓储入口 `finish_obtain`）。命令从已保存的选择、条目与交付行装载汇总事实（与调度接线前的参考装载规则一致：选择按依赖归属、待判定条目计数、已判定条目经交付状态映射阶段），按 `decide_obtain_finish` 判定后才保存终态；成功交付必须全部已发布（PREPARED/PUBLISHING 拒绝），父计划状态与动作终态同事务推进（PLAN_STATUS 仅当全部兄弟动作终态）。原键重送核实事务身份后恢复首次结果；终态后新键按既有事实恢复，取消请求已生效的动作拒绝。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 部分失败整次失败 | 任一逐项最终失败把动作置 `failed`（`obtain_items_failed`，details 为空对象，具体失败项由条目 `result.failures` 表达），成功交付保留且已发布状态不回退；全部成功才 `succeeded`。 |
+| 无成功文件也失败 | 没有成功交付时不创建交付文件，动作按同一错误失败（prepared=0、failed>0 可保存终态）；既无成功也无失败条目（无可汇总条目）拒绝保存。 |
+| 终态次序 | 汇总确定先于发布完成检查：决策等待分区（来源/条目/准备）逐项拒绝，发布完成（交付 PUBLISHED）是保存终态的独立前提。 |
+| 恢复 | 原键重送核对首事件为完成登记、事实时刻与动作身份；恢复路径重新装载事实并要求与终态一致，不一致按身份冲突拒绝。 |
+
+验证：`test_obtain_summary.py` 集成新增 8 项（成功终态与新键恢复、原键重送与时刻冲突、部分失败置 failed 且成功交付保留、全败无交付、未发布拒绝、汇总未定拒绝、取消拒绝、兄弟终态齐备时父计划同事务完成）；全量回归单元 2929、集成 2992+7 skip、根 34+342、check-protocol、check-report-dependencies、check-doc-links 2914 通过（Python 3.11）。
+
+X10 仍剩余：读取与拍摄让路的调度接线（设备兼容性判定，Q6/I5）、取消联动消费（N1/N2）、真实三种拍摄与部分取回组合（I5）。
+
 ### X11 中间文件生命周期与有限维护
 
 **预计文件：** `apps/camctl/src/camctl/outputs/work_files.py`、`apps/camctl/src/camctl/persistence/repositories/outputs.py`；测试为 `apps/camctl/tests/unit/outputs/test_work_files.py` 和 `apps/camctl/tests/integration/outputs/test_work_files.py`。
