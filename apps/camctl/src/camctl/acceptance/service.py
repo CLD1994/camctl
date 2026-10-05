@@ -92,6 +92,10 @@ class AcceptanceContext:
 
 
 class AcceptanceStateError(RuntimeError):
+    """输入处理未完成；outcome_kind 保留回滚与结果未知的区别。"""
+
+    outcome_kind: Any = None
+
     """输入处理因状态库错误未完成；不输出任何已完成业务结果。"""
 
 
@@ -117,6 +121,8 @@ async def accept_input(
     outcome = context.repository.process_input(command, key, owned)
     if outcome.kind is DbOutcomeKind.COMPLETED:
         return outcome.value
-    raise AcceptanceStateError(
+    error = AcceptanceStateError(
         f"输入处理未完成（{outcome.kind.value}）: {outcome.error}"
     )
+    error.outcome_kind = outcome.kind
+    raise error

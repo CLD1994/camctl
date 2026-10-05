@@ -42,6 +42,8 @@ class RuntimeDeps:
     admission_lock: Path
     catalog: Any
     notifier: Any = None
+    #: 报告失败日志副本的文件通道；首次触发时创建，关闭时释放。
+    failure_channel: Any = None
     closed: bool = field(default=False)
 
 
@@ -101,6 +103,43 @@ def _clock_policy_factory(config: ConfigSnapshot) -> Callable[[Any], ClockCheckI
     return build
 
 
+def _failure_log_wiring(deps: RuntimeDeps):
+    """报告失败日志副本的触发装配：标记、通道与请求工厂。"""
+    from camctl.logging_runtime.clh_adapter import FileChannel
+    from camctl.logging_runtime.copies import (
+        CopyRequest, FailureLogService, MarkerStore,
+    )
+    from camctl.logging_runtime.models import LogLevel
+    from camctl.logging_runtime.service import LogRecord
+
+    staging = Path(deps.config.paths.staging).expanduser()
+    logs_dir = staging / "logs"
+    channel_box: dict = {}
+
+    def copy_request_factory(error: Exception) -> CopyRequest:
+        channel = channel_box.get("channel")
+        if channel is None:
+            channel = FileChannel(
+                Path(deps.config.paths.log_file).expanduser(),
+                max_bytes=deps.config.log.max_size,
+                file_count=deps.config.log.file_count,
+            )
+            channel_box["channel"] = channel
+            deps.failure_channel = channel
+        return CopyRequest(
+            trigger=LogRecord(
+                level=LogLevel.ERROR,
+                message=f"报告处理失败: {type(error).__name__}: {error}",
+            ),
+            staging_root=staging,
+            ready_dir=Path(deps.config.paths.ready).expanduser(),
+            channel=channel,
+            marker=MarkerStore(logs_dir),
+        )
+
+    return FailureLogService(MarkerStore(logs_dir)), copy_request_factory
+
+
 async def execute_command(
     deps: RuntimeDeps,
     source: ParsedInput | InputDiagnostic | None,
@@ -108,6 +147,7 @@ async def execute_command(
     """执行一次 run/submit 会话；调用方负责运行事件循环。"""
     from camctl.bootstrap.application import query_work_facts
 
+    failure_log, copy_request_factory = _failure_log_wiring(deps)
     context = SessionContext(
         mode=deps.mode,
         catalog=deps.catalog,
@@ -123,16 +163,20 @@ async def execute_command(
         acquire_admission=lambda: acquire_admission(deps.admission_lock),
         facts_query=query_work_facts,
         notifier=deps.notifier,
+        failure_log=failure_log,
+        copy_request_factory=copy_request_factory,
     )
     return await run_session(context, source)
 
 
-def close_runtime(deps: RuntimeDeps) -> None:
+def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体
     """关闭装配层持有的资源；重复关闭不重复处理。
 
     会话内部资源（锁与连接）由会话流程按收尾次序自行释放；装配
-    层在阶段 1 不持有跨命令资源。
+    层持有报告失败日志副本的文件通道。
     """
     if deps.closed:
         return
     deps.closed = True
+    if deps.failure_channel is not None:
+        deps.failure_channel.close()
