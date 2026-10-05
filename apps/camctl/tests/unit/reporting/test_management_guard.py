@@ -45,7 +45,13 @@ def policy(monkeypatch):
             "after": {"status": [1, 2, 3]}}]},
     }
     monkeypatch.setattr(events, "load_event_registry", create_autospec(events.load_event_registry,
-        return_value={"events": {"REPORT_CHANGED": {"id": 28, "branches": branches}}}))
+        return_value={"events": {
+            "REPORT_CHANGED": {"id": 28, "branches": branches},
+            # policy 模块导入期读取的事件身份；分支约束由集成测试验证。
+            "SYNC_CHANGED": {"id": 29, "branches": {}},
+            "ACTION_STARTED": {"id": 5, "branches": {}},
+            "ACTION_FINISHED": {"id": 8, "branches": {}},
+        }}))
     # 每个源码实例及 sys.modules 中原有实例都随 monkeypatch 恢复；不修改登记缓存或守卫表。
     for name in ("camctl.reporting.models", "camctl.persistence.repositories.reporting", "camctl.reporting.policy"):
         spec = find_spec(name)

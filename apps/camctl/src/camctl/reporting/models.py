@@ -18,6 +18,7 @@ from camctl.reporting.ack import validate_watermark
 __all__ = [
     "FrozenReport", "ReportDecision", "ReportDecisionKind", "ReportOpportunity",
     "ReportSelection", "ReportBytes", "ReportPublication", "ReportStatus",
+    "SyncMode", "SyncDisposition", "SyncSaved",
     "validate_frozen_report", "validate_report_management",
 ]
 
@@ -188,3 +189,34 @@ def validate_frozen_report(report: FrozenReport) -> None:
         for entity_id in ids:
             if not isinstance(entity_id, int) or isinstance(entity_id, bool) or entity_id < 1:
                 raise ValueError(f"{entity_name} 的对象身份非法: {entity_id!r}")
+
+
+class SyncMode(Enum):
+    """状态同步的起点模式（登记整数一致）。"""
+
+    #: 全量：从确认位置 0 开始。
+    FULL = 1
+    #: 增量：从指定报告之后开始。
+    INCREMENTAL = 2
+
+
+class SyncDisposition(Enum):
+    """同步消费者事务的结果分类。"""
+
+    SAVED = "saved"
+    ALREADY = "already"
+    #: 固定起点不存在：动作在同一事务保存执行失败，未建立责任。
+    FAILED = "failed"
+    #: 动作已到终态：责任按规则保留，继续等待合格 ACK 或后续报告机会。
+    KEPT = "kept"
+
+
+class SyncSaved:
+    """同步消费者事务的保存结果。"""
+
+    __slots__ = ("disposition", "sync_id")
+
+    def __init__(self, *, disposition: SyncDisposition,
+                 sync_id: int | None) -> None:
+        self.disposition = disposition
+        self.sync_id = sync_id

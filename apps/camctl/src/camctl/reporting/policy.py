@@ -16,11 +16,21 @@ from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.history.validators import EventValidationError, register_guard
-from camctl.persistence.transaction import CommandPlan, commit_operation
+from camctl.persistence.transaction import (
+    CommandPlan,
+    TransactionError,
+    commit_operation,
+    event_envelope as _envelope,
+    next_row_id,
+    row_change,
+    row_facts,
+)
 from camctl.reporting.models import (
     FrozenReport, ReportDecision, ReportDecisionKind, ReportOpportunity, ReportSelection,
     ReportBytes, ReportPublication, ReportStatus, validate_frozen_report, validate_report_management,
+    SyncDisposition, SyncMode, SyncSaved,
 )
+from camctl.contracts.workflow_errors import registered_error, validate_error_details
 from camctl.reporting.ack import AckReport
 from camctl.persistence.repositories.reporting import (
     read_report_opportunity, read_covering_report, read_frozen_report,
@@ -34,6 +44,13 @@ from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.persistence.transaction import encode_json_value, event_envelope, read_transaction_range, saved_transaction_events, update_change
 
 _REPORT_EVENT = load_event_registry()["events"]["REPORT_CHANGED"]
+_REPORT_ACTION_TYPE = 7
+_SYNC_EVENT = load_event_registry()["events"]["SYNC_CHANGED"]
+_SYNC_EVENT_ID = _SYNC_EVENT["id"]
+_ACTION_STARTED_EVENT_ID = load_event_registry()["events"]["ACTION_STARTED"]["id"]
+_ACTION_FINISHED_EVENT_ID = load_event_registry()["events"]["ACTION_FINISHED"]["id"]
+#: 成功、失败、过期终态：取消不结束这些动作的同步责任。
+_SYNC_KEEPING_TERMINAL = (3, 4, 5)
 _ReportChange = IntEnum("ReportChange", {name: spec["reason"] for name, spec in _REPORT_EVENT["branches"].items()})
 
 __all__ = [
@@ -49,6 +66,9 @@ __all__ = [
     "record_report_failure",
     "publish_report",
     "validate_report_publication_result",
+    "start_sync",
+    "record_local_report",
+    "cancel_sync",
 ]
 
 
@@ -456,6 +476,304 @@ def record_report_failure(key: OperationKey, owned: OwnedConnection, report_id: 
     return _record_management(_ReportChange.FAIL, key, owned, report_id, occurred_at, error=error)
 
 
+# ---- R6 剩余消费者：同步开始、本地完成与取消 ------------------------
+
+def start_sync(key: OperationKey, owned: OwnedConnection, *, action_id: int,
+               mode: SyncMode, occurred_at: int,
+               after_report_id: int | None = None) -> DbOutcome[SyncSaved]:
+    """同步实际开始：动作进入运行、起点确定与责任建立同一事务。
+
+    增量起点报告在本事务内核实；固定起点不存在时，动作先进入运行
+    并在同一事务保存执行失败，不建立同步责任。重试、重启及同一请
+    求重送沿用原记录，不重算起点。
+    """
+    command = _StartSyncCommand(key, action_id, mode, after_report_id,
+                                occurred_at)
+    receipt = commit_operation(command, key, owned)
+    return _sync_outcome(receipt)
+
+
+def record_local_report(key: OperationKey, owned: OwnedConnection, *,
+                        action_id: int, local_report_id: int,
+                        occurred_at: int) -> DbOutcome[SyncSaved]:
+    """本地报告满足与动作成功共同保存（SYNC_CHANGED.LOCAL）。
+
+    报告已经发布后，同一事务记录本地完成并保存动作成功终态；同步
+    责任已被合格 ACK 结束时仍可补记本地完成。
+    """
+    command = _LocalReportCommand(key, action_id, local_report_id,
+                                  occurred_at)
+    receipt = commit_operation(command, key, owned)
+    return _sync_outcome(receipt)
+
+
+def cancel_sync(key: OperationKey, owned: OwnedConnection, *, action_id: int,
+                occurred_at: int) -> DbOutcome[SyncSaved]:
+    """取消消费者：取消事务中结束该动作的同步责任（CANCEL）。
+
+    尚未开始的报告动作没有责任可结束；已成功的动作保留责任等待
+    合格 ACK，失败或过期的动作保留责任由后续报告机会继续。
+    """
+    command = _CancelSyncCommand(key, action_id, occurred_at)
+    receipt = commit_operation(command, key, owned)
+    return _sync_outcome(receipt)
+
+
+def _sync_outcome(receipt) -> DbOutcome[SyncSaved]:
+    if receipt.kind == "completed":
+        return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+    if receipt.kind == "rolled_back":
+        return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+    return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
+def _require_startable(action) -> None:
+    if (action["status"] != 1 or action["execution_started"] != 0
+            or action["cancel_requested"] != 0):
+        raise TransactionError(
+            "同步开始要求未启动且未取消的待执行报告动作:"
+            f" {action['id']} status={action['status']!r}"
+            f" cancel_requested={action['cancel_requested']!r}")
+
+
+class _StartSyncCommand:
+    """同步实际开始：同一事务写入动作开始并固定同步起点。"""
+
+    def __init__(self, key, action_id, mode, after_report_id,
+                 occurred_at) -> None:
+        if mode not in tuple(SyncMode):
+            raise TypeError(f"同步模式必须使用 SyncMode: {mode!r}")
+        if (mode is SyncMode.INCREMENTAL) == (after_report_id is None):
+            raise ValueError("增量同步必须携带起点报告，全量不携带")
+        self._key = key
+        self._action_id = action_id
+        self._mode = mode
+        self._after_report_id = after_report_id
+        self._occurred_at = occurred_at
+        self._owners: dict = {}
+        self._state: dict = {"actions": {}, "state_syncs": {}, "reports": {}}
+
+    def plan(self, scope):
+        connection = scope.connection
+        action = _load_action(connection, self._state, self._action_id)
+        if action["type"] != _REPORT_ACTION_TYPE:
+            raise ConsistencyError("同步开始要求报告动作")
+        existing = connection.execute(
+            "SELECT id FROM state_syncs WHERE action_id = ?",
+            (self._action_id,)).fetchone()
+        if existing is not None:
+            # 重试、重启及同一请求重送沿用原记录，不重算起点。
+            self._state["state_syncs"] = {
+                int(existing[0]): row_facts(
+                    connection, "state_syncs", int(existing[0]))}
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=SyncSaved(disposition=SyncDisposition.ALREADY,
+                                 sync_id=int(existing[0])))
+        _require_startable(action)
+        allocation = scope.allocate(2)
+        start = self._action_started_event(allocation)
+        if self._mode is SyncMode.INCREMENTAL:
+            anchor = row_facts(connection, "reports", self._after_report_id)
+            if anchor is None:
+                return self._anchor_missing_plan(allocation, start)
+            self._state["reports"][anchor["id"]] = anchor
+            from_wm = anchor["to_wm"]
+        else:
+            from_wm = 0
+        values = {
+            "action_id": self._action_id,
+            "mode": self._mode.value,
+            "after_report_id": self._after_report_id,
+            "from_wm": from_wm,
+            "started_boundary_event_id": allocation.last_event_id,
+            "status": 1,
+            "local_report_id": None,
+            "ack_report_id": None,
+            "ended_event_id": None,
+        }
+        sync_id = next_row_id(connection, "state_syncs")
+        self._state["state_syncs"][sync_id] = dict(values, id=sync_id)
+        self._owners[("state_syncs", sync_id)] = ("state_sync", sync_id)
+        create = _envelope(
+            allocation.last_event_id, allocation.txn_id,
+            _SYNC_EVENT_ID, 1,
+            (row_change("state_syncs", sync_id, values),), self._occurred_at)
+        return CommandPlan(
+            events=(start, create), owners=self._owners,
+            state_rows=self._state,
+            result=SyncSaved(disposition=SyncDisposition.SAVED,
+                             sync_id=sync_id))
+
+    def _action_started_event(self, allocation):
+        self._owners[("actions", self._action_id)] = (
+            "action", self._action_id)
+        update = update_change(
+            "actions", self._action_id,
+            {"status": 1, "execution_started": 0},
+            {"status": 2, "execution_started": 1})
+        return _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _ACTION_STARTED_EVENT_ID, 1, (update,), self._occurred_at)
+
+    def _anchor_missing_plan(self, allocation, start):
+        """固定起点不存在：同一事务保存动作开始与执行失败。"""
+        code = "sync_report_not_found"
+        details = {"after_report_id": str(self._after_report_id)}
+        validate_error_details(code, details)
+        fail = update_change(
+            "actions", self._action_id,
+            {"status": 2, "error_code": None, "error_details_json": None},
+            {"status": 4, "error_code": registered_error(code)["action_error_id"],
+             "error_details_json": details})
+        event = _envelope(
+            allocation.last_event_id, allocation.txn_id,
+            _ACTION_FINISHED_EVENT_ID, 2, (fail,), self._occurred_at)
+        return CommandPlan(
+            events=(start, event), owners=self._owners,
+            state_rows=self._state,
+            result=SyncSaved(disposition=SyncDisposition.FAILED,
+                             sync_id=None))
+
+
+class _LocalReportCommand:
+    """本地报告满足：同一事务填写本地报告并保存动作成功。"""
+
+    def __init__(self, key, action_id, local_report_id, occurred_at) -> None:
+        self._key = key
+        self._action_id = action_id
+        self._local_report_id = local_report_id
+        self._occurred_at = occurred_at
+        self._owners: dict = {}
+        self._state: dict = {"actions": {}, "state_syncs": {}, "reports": {}}
+
+    def plan(self, scope):
+        connection = scope.connection
+        sync = _load_sync(connection, self._state, self._action_id)
+        if sync["local_report_id"] == self._local_report_id:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=SyncSaved(disposition=SyncDisposition.ALREADY,
+                                 sync_id=sync["id"]))
+        if sync["local_report_id"] is not None:
+            raise TransactionError("本地报告已确定，不改写为另一份报告")
+        report = row_facts(connection, "reports", self._local_report_id)
+        if report is None:
+            raise ConsistencyError(f"本地报告不存在: {self._local_report_id}")
+        if ReportStatus(report["status"]) is not ReportStatus.PUBLISHED:
+            raise TransactionError(
+                f"本地报告满足要求报告已经发布: {self._local_report_id}")
+        self._state["reports"][report["id"]] = report
+        action = _load_action(connection, self._state, self._action_id)
+        if (action["status"] != 2 or action["execution_started"] != 1
+                or action["cancel_requested"] != 0):
+            raise TransactionError(
+                "本地报告满足要求报告动作正在运行且未取消:"
+                f" {self._action_id} status={action['status']!r}")
+        allocation = scope.allocate(2)
+        self._owners[("state_syncs", sync["id"])] = (
+            "state_sync", sync["id"])
+        local = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _SYNC_EVENT_ID, 2,
+            (update_change(
+                "state_syncs", sync["id"],
+                {"local_report_id": None},
+                {"local_report_id": self._local_report_id}),),
+            self._occurred_at)
+        self._owners[("actions", self._action_id)] = (
+            "action", self._action_id)
+        succeed = _envelope(
+            allocation.last_event_id, allocation.txn_id,
+            _ACTION_FINISHED_EVENT_ID, 1,
+            (update_change(
+                "actions", self._action_id,
+                {"status": 2}, {"status": 3}),),
+            self._occurred_at)
+        return CommandPlan(
+            events=(local, succeed), owners=self._owners,
+            state_rows=self._state,
+            result=SyncSaved(disposition=SyncDisposition.SAVED,
+                             sync_id=sync["id"]))
+
+
+class _CancelSyncCommand:
+    """取消消费者：取消事务中结束本动作的同步责任。"""
+
+    def __init__(self, key, action_id, occurred_at) -> None:
+        self._key = key
+        self._action_id = action_id
+        self._occurred_at = occurred_at
+        self._owners: dict = {}
+        self._state: dict = {"actions": {}, "state_syncs": {}}
+
+    def plan(self, scope):
+        connection = scope.connection
+        row = connection.execute(
+            "SELECT id FROM state_syncs WHERE action_id = ?",
+            (self._action_id,)).fetchone()
+        if row is None:
+            # 尚未开始的报告动作没有同步责任可结束。
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=SyncSaved(disposition=SyncDisposition.ALREADY,
+                                 sync_id=None))
+        sync = _load_sync(connection, self._state, self._action_id)
+        if sync["status"] in (2, 3):
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=SyncSaved(disposition=SyncDisposition.ALREADY,
+                                 sync_id=sync["id"]))
+        action = _load_action(connection, self._state, self._action_id)
+        if action["status"] in _SYNC_KEEPING_TERMINAL:
+            # 成功等待合格 ACK；失败或过期保留责任，由后续报告机会继续。
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=SyncSaved(disposition=SyncDisposition.KEPT,
+                                 sync_id=sync["id"]))
+        if not action["cancel_requested"]:
+            raise TransactionError("同步取消要求动作取消请求已生效")
+        allocation = scope.allocate(1)
+        self._owners[("state_syncs", sync["id"])] = (
+            "state_sync", sync["id"])
+        update = update_change(
+            "state_syncs", sync["id"],
+            {"status": 1, "ended_event_id": None},
+            {"status": 3, "ended_event_id": allocation.first_event_id})
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _SYNC_EVENT_ID, 4, (update,),
+            self._occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=SyncSaved(disposition=SyncDisposition.SAVED,
+                             sync_id=sync["id"]))
+
+
+def _load_action(connection, state, action_id):
+    action = row_facts(connection, "actions", action_id)
+    if action is None:
+        raise ConsistencyError(f"动作不存在: {action_id}")
+    state["actions"][action_id] = action
+    return action
+
+
+def _load_sync(connection, state, action_id):
+    row = connection.execute(
+        "SELECT id FROM state_syncs WHERE action_id = ?",
+        (action_id,)).fetchone()
+    if row is None:
+        raise ConsistencyError(f"同步责任不存在: {action_id}")
+    sync = row_facts(connection, "state_syncs", int(row[0]))
+    state["state_syncs"][sync["id"]] = sync
+    return sync
+
+
 def _sync_guard(event, context) -> None:
     """同步的结束事实引用本事件；ACK 资格由 ACK 守卫负责。"""
     for row in event.rows:
@@ -466,5 +784,30 @@ def _sync_guard(event, context) -> None:
                 raise EventValidationError("同步结束依据必须是本事件")
 
 
+def _action_start_guard(event, context) -> None:
+    """同步责任建立时，发起动作已进入运行且未取消。
+
+    开始事务先写入 ACTION_STARTED 再建立同步责任；回放按事件时点
+    状态核对这一顺序。时间与会话资格由运行入口负责，不在事件层
+    复验。
+    """
+    if event.event_type != _SYNC_EVENT_ID:
+        return
+    for row in event.rows:
+        if row.table != "state_syncs" or row.before.exists:
+            continue
+        action_id = row.after.values.get("action_id")
+        facts = context.state_rows.get("actions", {}).get(action_id)
+        if facts is None:
+            raise EventValidationError(
+                f"同步建立缺少动作事实: actions#{action_id!r}")
+        if (facts.get("status") != 2 or facts.get("execution_started") != 1
+                or facts.get("cancel_requested") != 0):
+            raise EventValidationError(
+                "同步责任要求发起动作已进入运行且未取消:"
+                f" actions#{action_id} status={facts.get('status')!r}")
+
+
 def register_sync_guard() -> None:
     register_guard("sync", _sync_guard)
+    register_guard("action_start", _action_start_guard)
