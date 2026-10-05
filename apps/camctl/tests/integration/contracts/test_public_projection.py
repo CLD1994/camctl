@@ -71,10 +71,47 @@ class TestProjectPublicPlan:
                 "plans": {1: {"id": 1, "request_id": 1, "name": "p", "created_at": 0, "status": 1}},
                 "actions": {1: action_row(1), 2: action_row(2)},
             },
-            selected_entities={"action": (2, 1)},
+            selected_entities={"action": {2: {}, 1: {}}},
         )
         fragment = project_public(facts)
         assert [a["action_instance_id"] for a in fragment["actions"]] == ["2", "1"]
+
+    def test_nested_selection_scopes_children_to_their_parent(self) -> None:
+        """入选树沿实体层级逐层限定：动作只携带自己的产物。"""
+        def action_row(action_id: int) -> dict:
+            return {
+                "id": action_id, "plan_id": 1, "input_index": action_id, "name": f"a{action_id}",
+                "type": 1, "device_id": "cam-1", "scheduled_at": 1_736_899_200_000_000,
+                "group_name": None, "status": 1, "execution_started": 0, "cancel_requested": 0,
+                "error_code": None, "error_details_json": None, "input_fields_json": {},
+                "effective_params_json": {}, "driver_id": "camctl-adb", "max_delay_ms": 1000,
+            }
+
+        def output_row(output_id: int, action_id: int) -> dict:
+            return {
+                "id": output_id, "source_action_id": action_id, "kind": 1,
+                "original_name": f"shot-{output_id}.jpg", "media_type": "image/jpeg",
+                "device_file_id": None, "intermediate_file_id": None,
+                "original_output_id": None, "original_batch_file_id": None,
+                "availability": 1, "media_json": {}, "error_code": None, "error_json": None,
+                "preview_of_output_id": None, "cleanup_status": 1, "cleanup_error_json": None,
+            }
+
+        facts = ProjectionInput(
+            entity="plan",
+            root_id=1,
+            tables={
+                "plans": {1: {"id": 1, "request_id": 1, "name": "p", "created_at": 0, "status": 1}},
+                "actions": {1: action_row(1), 2: action_row(2)},
+                "outputs": {9: output_row(9, 1), 12: output_row(12, 2)},
+            },
+            selected_entities={"action": {2: {}, 1: {"output": {9: {}}}}},
+        )
+        fragment = project_public(facts)
+        by_id = {a["action_instance_id"]: a for a in fragment["actions"]}
+        assert [o["output_id"] for o in by_id["1"]["outputs"]] == ["9"]
+        assert "outputs" not in by_id["2"]  # 入选作用域不跨父对象
+
 
     def test_unknown_enum_member_is_rule_error(self) -> None:
         with pytest.raises(PublicProjectionError):

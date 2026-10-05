@@ -40,12 +40,17 @@ class PublicProjectionError(ValueError):
 
 @dataclass(frozen=True)
 class ProjectionInput:
-    """一个对象在固定 H 的事实：行值、关联事实与已选实体。"""
+    """一个对象在固定 H 的事实：行值、关联事实与已选实体。
+
+    selected_entities 是当前对象的入选子树：键为子实体名，值为
+    {子实体 ID: 该子对象自己的入选子树}。入选沿实体层级逐层限定，
+    每个子对象只携带自己的入选后代。
+    """
 
     entity: str
     root_id: int
     tables: Mapping[str, Mapping[int, Mapping[str, Any]]]
-    selected_entities: Mapping[str, tuple[int, ...]] = field(default_factory=dict)
+    selected_entities: Mapping[str, Mapping[int, Mapping[str, Any]]] = field(default_factory=dict)
 
 
 PublicFragment = dict[str, Any]
@@ -367,20 +372,28 @@ def _project(projection_name: str, context: _Context) -> Any:
 
 def _entities(node: Mapping[str, Any], context: _Context) -> Any:
     entity = node["entity"]
-    ids = context.input.selected_entities.get(entity, ())
-    if not ids:
+    children = context.input.selected_entities.get(entity, {})
+    if not isinstance(children, Mapping):
+        raise PublicProjectionError(f"实体集合 {entity} 的入选必须是映射")
+    if not children:
         return OMIT if node.get("empty") == "omit" else []
-    return [
-        project_public(
-            ProjectionInput(
-                entity=entity,
-                root_id=entity_id,
-                tables=context.input.tables,
-                selected_entities=context.input.selected_entities,
+    fragments: list[Any] = []
+    for child_id, subtree in children.items():
+        if not isinstance(child_id, int) or isinstance(child_id, bool) or child_id < 1:
+            raise PublicProjectionError(f"实体集合 {entity} 的入选身份非法: {child_id!r}")
+        if not isinstance(subtree, Mapping):
+            raise PublicProjectionError(f"实体 {entity}#{child_id} 的入选子树必须是映射")
+        fragments.append(
+            project_public(
+                ProjectionInput(
+                    entity=entity,
+                    root_id=child_id,
+                    tables=context.input.tables,
+                    selected_entities=subtree,
+                )
             )
         )
-        for entity_id in ids
-    ]
+    return fragments
 
 
 def _rows(node: Mapping[str, Any], context: _Context) -> Any:

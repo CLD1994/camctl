@@ -9,11 +9,13 @@ import pytest
 
 from camctl.contracts.public_projection import ProjectionStructure, PublicProjectionError
 from camctl.reporting import encoding
-from camctl.reporting.encoding import ReportDocument, encode_number, encode_report, iter_report_chunks
+from camctl.reporting.encoding import (
+    ReportDocument, ReportStream, encode_number, encode_report, iter_report_chunks,
+)
 
 
 def _document(ids=(1,)):
-    return ReportDocument("7", 0, 5, tuple(("plan", identity, ("action", (5,))) for identity in ids))
+    return ReportDocument("7", 0, 5, tuple(("plan", identity, {"action": {5: {}}}) for identity in ids))
 
 
 def _action(identity="5"):
@@ -168,7 +170,7 @@ def test_diagnostics_follow_plans_and_use_integer_identity_order(fragments):
     for identity in (10, 2, 100):
         fragments[("diagnostic", identity)] = _diagnostic(str(identity))
     document = ReportDocument("7", 0, 5, _document().plans,
-                              tuple(("diagnostic", identity, ("", ())) for identity in (10, 2, 100)))
+                              tuple(("diagnostic", identity, {}) for identity in (10, 2, 100)))
     payload = json.loads(encode_report(document, {}))
     assert list(payload)[-2:] == ["plans", "plan_file_diagnostics"]
     assert [item["diagnostic_id"] for item in payload["plan_file_diagnostics"]] == ["2", "10", "100"]
@@ -176,7 +178,7 @@ def test_diagnostics_follow_plans_and_use_integer_identity_order(fragments):
 
 def test_duplicate_diagnostic_identity_is_rejected(fragments):
     fragments[("diagnostic", 2)] = _diagnostic("2")
-    document = ReportDocument("7", 0, 5, diagnostics=(("diagnostic", 2, ("", ())),) * 2)
+    document = ReportDocument("7", 0, 5, diagnostics=(("diagnostic", 2, {}),) * 2)
     with pytest.raises(ValueError):
         encode_report(document, {})
 
@@ -234,3 +236,39 @@ def test_invalid_json_fields_abort_generation(fragments, value):
     fragments[("plan", 1)]["actions"][0]["effective_params"] = {"type": "single_shot", "value": value}
     with pytest.raises(ValueError):
         encode_report(_document(), {})
+
+
+class TestReportStream:
+    """分段供给根实体片段与整树编码字节一致。"""
+
+    def test_sectioned_stream_matches_whole_document_bytes(self, fragments):
+        document = _document()
+        diagnostics = (("diagnostic", 2, {}),)
+        fragments[("diagnostic", 2)] = _diagnostic("2")
+        whole = encode_report(
+            ReportDocument("7", 0, 5, document.plans, diagnostics), {})
+        stream = ReportStream(ReportDocument("7", 0, 5))
+        parts = list(stream.open())
+        parts += list(stream.section("plans", fragments[("plan", 1)]))
+        parts += list(stream.section("plan_file_diagnostics",
+                                     fragments[("diagnostic", 2)]))
+        parts += list(stream.finish())
+        assert b"".join(parts) == whole
+
+    def test_stream_rejects_collection_order_regression(self, fragments):
+        stream = ReportStream(ReportDocument("7", 0, 5))
+        list(stream.open())
+        list(stream.section("plan_file_diagnostics", _diagnostic("2")))
+        with pytest.raises(ValueError):
+            list(stream.section("plans", fragments[("plan", 1)]))
+
+    def test_stream_without_sections_has_no_collections(self):
+        stream = ReportStream(ReportDocument("7", 0, 5))
+        assert b"".join([*stream.open(), *stream.finish()]) == encode_report(
+            ReportDocument("7", 0, 5), {})
+
+    def test_stream_sections_must_use_registered_collections(self):
+        stream = ReportStream(ReportDocument("7", 0, 5))
+        list(stream.open())
+        with pytest.raises(ValueError):
+            list(stream.section("unknown", {}))

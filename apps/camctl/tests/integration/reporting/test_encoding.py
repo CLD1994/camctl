@@ -82,7 +82,7 @@ def accepted_report(tmp_path):
             assert row is not None
             facts[table] = {1: row}
         document = ReportDocument(str(report.report_id), report.from_wm, report.to_wm,
-                                  (("plan", 1, ("action", (1,))),))
+                                  (("plan", 1, {"action": {1: {}}}),))
         yield document, facts
     finally:
         owned.connection.close()

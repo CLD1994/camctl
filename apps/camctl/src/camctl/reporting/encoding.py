@@ -18,16 +18,22 @@ from camctl.contracts.public_projection import (
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import ObjectId, parse_object_id
 
-__all__ = ["ReportDocument", "encode_number", "encode_report", "iter_report_chunks"]
+__all__ = [
+    "ReportDocument", "ReportStream", "encode_number", "encode_report", "iter_report_chunks",
+]
 
 _SCHEMA = "protocol/status-report.schema.json"
 _DEFAULT_BUFFER_SIZE = 64 * 1024
-EntityEntry = tuple[str, int, tuple[str, tuple[int, ...]]]
+EntityEntry = tuple[str, int, Mapping[str, Mapping[int, Any]]]
 
 
 @dataclass(frozen=True)
 class ReportDocument:
-    """传入编码器的报告身份与入选根实体；不承担历史读取。"""
+    """传入编码器的报告身份与入选根实体；不承担历史读取。
+
+    每个根实体的第三项是其入选子树，与公共投影的逐层入选结构
+    一致：{子实体名: {子实体 ID: 后代入选子树}}。
+    """
 
     report_id: str
     from_wm: int
@@ -146,38 +152,97 @@ def _projected_entities(entries: tuple[EntityEntry, ...], entity: str, facts: Ma
         if row_id == previous:
             raise ValueError(f"实体 {entity} 的身份重复: {row_id}")
         previous = row_id
-        selection = {selected[0]: selected[1]} if selected[0] else {}
-        fragment = project_public(ProjectionInput(entity, row_id, facts, selection))
+        fragment = project_public(ProjectionInput(entity, row_id, facts, dict(selected)))
         if fragment is not OMIT:
             yield fragment
 
 
-def _iter_document(document: ReportDocument, facts: Mapping) -> Iterator[bytes]:
-    metadata = {"report_id": document.report_id, "from_wm": document.from_wm, "to_wm": document.to_wm}
-    parse_object_id(document.report_id)
-    validate_document(_SCHEMA, metadata)
-    collections = {"plans": document.plans, "plan_file_diagnostics": document.diagnostics}
-    yield b"{"
-    for position, name in enumerate(sorted(metadata)):
-        if position:
-            yield b","
-        yield _string(name)
-        yield b":"
-        yield from _iter_value(metadata[name])
-    for name, entity in projection_structure("report").entity_fields:
-        opened = False
-        for fragment in _projected_entities(collections[name], entity, facts):
-            # 单个根实体与真实公共结构组合校验；不会建立整份报告列表。
-            validate_document(_SCHEMA, {**metadata, name: [fragment]})
-            if opened:
+class ReportStream:
+    """一份报告的分段字节流：根实体片段按集合登记顺序逐段供给。
+
+    字段、分隔符与集合顺序和整树编码共用同一规则，分段供给不改
+    变字节内容；未供给任何片段的集合整体省略。生成调用方按批恢
+    复入选事实并逐段供给，不组装整份报告对象。
+    """
+
+    def __init__(self, document: ReportDocument) -> None:
+        metadata = {
+            "report_id": document.report_id,
+            "from_wm": document.from_wm,
+            "to_wm": document.to_wm,
+        }
+        parse_object_id(document.report_id)
+        validate_document(_SCHEMA, metadata)
+        self._metadata = metadata
+        self._collections = projection_structure("report").entity_fields
+        self._position = -1
+        self._opened = False
+        self._finished = False
+
+    def open(self) -> Iterator[bytes]:
+        """文档起始：身份与覆盖元数据，首个集合由第一个片段打开。"""
+        if self._position != -1 or self._opened or self._finished:
+            raise ValueError("报告字节流已打开或已收尾")
+        yield b"{"
+        for index, name in enumerate(sorted(self._metadata)):
+            if index:
                 yield b","
-            else:
-                yield b"," + _string(name) + b":["
-                opened = True
-            yield from _iter_object(fragment, entity)
-        if opened:
+            yield _string(name)
+            yield b":"
+            yield from _iter_value(self._metadata[name])
+
+    def section(self, collection: str, fragment: Mapping) -> Iterator[bytes]:
+        """供给一个根实体片段；集合只能沿登记顺序推进。"""
+        entity = self._entity_of(collection)
+        if self._finished:
+            raise ValueError("报告字节流已收尾")
+        index = self._collection_index(collection)
+        if index < self._position:
+            raise ValueError(f"报告集合 {collection!r} 的供给顺序回退")
+        if index > self._position:
+            if self._opened:
+                yield b"]"
+            self._position = index
+            self._opened = False
+        # 单个根实体与真实公共结构组合校验；不建立整份报告列表。
+        validate_document(_SCHEMA, {**self._metadata, collection: [fragment]})
+        if self._opened:
+            yield b","
+        else:
+            yield b"," + _string(collection) + b":["
+            self._opened = True
+        yield from _iter_object(fragment, entity)
+
+    def finish(self) -> Iterator[bytes]:
+        """关闭当前集合并收尾；此后不能再供给片段。"""
+        if self._finished:
+            raise ValueError("报告字节流已收尾")
+        self._finished = True
+        if self._opened:
             yield b"]"
-    yield b"}\n"
+        yield b"}\n"
+
+    def _collection_index(self, collection: str) -> int:
+        for index, (name, _) in enumerate(self._collections):
+            if name == collection:
+                return index
+        raise ValueError(f"未登记的报告集合: {collection!r}")
+
+    def _entity_of(self, collection: str) -> str:
+        for name, entity in self._collections:
+            if name == collection:
+                return entity
+        raise ValueError(f"未登记的报告集合: {collection!r}")
+
+
+def _iter_document(document: ReportDocument, facts: Mapping) -> Iterator[bytes]:
+    stream = ReportStream(document)
+    yield from stream.open()
+    collections = {"plans": document.plans, "plan_file_diagnostics": document.diagnostics}
+    for name, entity in stream._collections:
+        for fragment in _projected_entities(collections[name], entity, facts):
+            yield from stream.section(name, fragment)
+    yield from stream.finish()
 
 
 def iter_report_chunks(document: ReportDocument, facts: Mapping, *, buffer_size: int) -> Iterator[bytes]:
