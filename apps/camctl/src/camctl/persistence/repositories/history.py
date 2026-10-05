@@ -49,14 +49,15 @@ class _FrozenRegistration:
 class HistoryRepository:
     """真实 SQLite 的历史读取仓储（报告进程使用只读连接）。"""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, config: DbConfig | None = None) -> None:
         self.path = Path(path)
+        self._config = config if config is not None else DbConfig()
         self._instance_id: str | None = None
         # 不可变历史允许复用已核验的组；只保留固定 H 和上一页末组。
         self._validated_ranges: dict[int, TransactionRange] = {}
 
     def _connect(self) -> sqlite3.Connection:
-        owned = open_existing(self.path, DbOpenMode.EXISTING_RO, DbConfig())
+        owned = open_existing(self.path, DbOpenMode.EXISTING_RO, self._config)
         return owned.connection
 
     def current_boundary(self) -> HistoryBoundary:
