@@ -334,3 +334,73 @@ class TestSettlementDimensions:
         assert facts.residual_device_facts is True
         assert facts.unfinished_actions == 0
         assert plan_id is not None
+
+
+class TestPendingDeadline:
+    """会话等待截止按待执行动作的下一生命周期时刻计算。"""
+
+    @staticmethod
+    def _context(at: int):
+        return type(
+            "Context", (),
+            {"clock": type(
+                "Clock", (),
+                {"utc_micros": staticmethod(lambda: at)})()})()
+
+    @staticmethod
+    def _submit_capture(owned, tmp_path: Path, request_id: str) -> None:
+        body = {
+            "request_id": request_id,
+            "created_at": "2026-01-15 08:00:00",
+            "name": f"plan-{request_id}",
+            "actions": [{
+                "name": "shoot", "type": "camera_take_photo",
+                "device_id": "cam-1",
+                "scheduled_at": "2026-01-15 09:00:00",
+                "params": {"type": "single_shot"},
+                "policy": {"max_delay_ms": 1000},
+            }],
+        }
+        target = tmp_path / f"capture-{request_id}.json"
+        target.write_text(json.dumps(body), encoding="utf-8")
+
+        async def scenario() -> None:
+            await accept_input(
+                parse_input(await read_input(str(target), _Reader())),
+                AcceptanceContext(
+                    mode=CommandMode.RUN, catalog=Catalog(),
+                    repository=AcceptanceRepository(),
+                    clock=type(
+                        "C", (), {"utc_micros": staticmethod(lambda: _NOW)})(),
+                ),
+                new_operation_key(), owned,
+            )
+
+        asyncio.run(scenario())
+
+    def test_capture_deadline_wakes_at_schedule_then_window_end(
+        self, owned, tmp_path,
+    ):
+        from camctl.contracts.values import to_utc_micros
+        from camctl.session.service import _pending_deadline_seconds
+
+        self._submit_capture(owned, tmp_path, "50")
+        scheduled = to_utc_micros("2026-01-15 09:00:00")
+        window_end = scheduled + 1_000 * 1000
+        # 计划时间之前：等待到计划时间。
+        assert _pending_deadline_seconds(
+            self._context(scheduled - 5_000_000), owned) == 5.0
+        # 窗口之内：等待到窗口结束（过期判定时刻），不再按已过的
+        # 计划时间立即唤醒。
+        assert _pending_deadline_seconds(
+            self._context(scheduled), owned) == 1.0
+        assert _pending_deadline_seconds(
+            self._context(window_end - 500_000), owned) == 0.5
+        # 窗口结束之后：立即唤醒去过期。
+        assert _pending_deadline_seconds(
+            self._context(window_end + 1), owned) == 0.0
+
+    def test_no_pending_actions_has_no_deadline(self, owned):
+        from camctl.session.service import _pending_deadline_seconds
+
+        assert _pending_deadline_seconds(self._context(_NOW), owned) is None

@@ -68,6 +68,7 @@ def build_runtime(
     )
     from camctl.persistence.repositories.operations import register_operation_guards
     from camctl.persistence.repositories.outputs import register_outputs_guards
+    from camctl.persistence.repositories.scheduling import register_window_guard
     from camctl.persistence.repositories.timelapse import register_timelapse_guards
     from camctl.reporting.policy import register_report_guards
 
@@ -82,6 +83,7 @@ def build_runtime(
     register_outputs_guards()
     register_cancellation_guards()
     register_report_guards()
+    register_window_guard()
     state_db = Path(config.paths.state_db).expanduser().resolve()
     if not state_db.exists():
         raise FileNotFoundError(f"状态库不存在，日常入口不创建: {state_db}")

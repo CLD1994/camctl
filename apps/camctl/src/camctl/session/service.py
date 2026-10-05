@@ -307,18 +307,33 @@ async def _try_close(
 def _pending_deadline_seconds(
     context: SessionContext, owned: OwnedConnection,
 ) -> float | None:
-    """最近一个待执行动作距现在的秒数；无待执行动作时为 None。"""
+    """最近一个待执行动作的下一生命周期时刻距现在的秒数。
+
+    计划时间之前等待到计划时间；已到期、有启动窗口的拍摄动作等
+    待到窗口结束（过期判定时刻）。没有待执行动作或都没有下一时
+    刻时为 None。
+    """
     try:
         with closing(owned.connection.execute(
-                "SELECT MIN(scheduled_at) FROM actions"
+                "SELECT type, scheduled_at, max_delay_ms FROM actions"
                 " WHERE status = 1 AND scheduled_at IS NOT NULL")) as cursor:
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
     except Exception:
         # 截止查询失败不改变分类：责任检查仍按各自错误规则处理。
         return None
-    if row is None or row[0] is None:
+    if not rows:
         return None
-    return max((int(row[0]) - context.clock.utc_micros()) / 1_000_000, 0.0)
+    now = context.clock.utc_micros()
+    next_times: list[int] = []
+    for kind, scheduled_at, max_delay_ms in rows:
+        scheduled = int(scheduled_at)
+        if now < scheduled:
+            next_times.append(scheduled)
+        elif int(kind) in (1, 2, 3) and max_delay_ms is not None:
+            next_times.append(scheduled + int(max_delay_ms) * 1000)
+    if not next_times:
+        return None
+    return max((min(next_times) - now) / 1_000_000, 0.0)
 
 
 async def _wait_for_more_work(

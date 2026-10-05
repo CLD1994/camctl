@@ -28,6 +28,7 @@ from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_com
 from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
+from camctl.contracts.values import new_operation_key
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
@@ -208,6 +209,11 @@ def _scalar(db_path: Path, sql: str):
         return connection.execute(sql).fetchone()
 
 
+def _all(db_path: Path, sql: str):
+    with sqlite3.connect(db_path) as connection:
+        return connection.execute(sql).fetchall()
+
+
 async def _await_status(db_path: Path, status: int, timeout_s: float = 12.0) -> None:
     """异步轮询动作状态；等待期间让出控制权供会话任务推进。"""
     deadline = time.monotonic() + timeout_s
@@ -312,3 +318,129 @@ class TestRunDispatch:
         finally:
             await _cancel(second)
         close_runtime(deps)
+
+
+class TestRunWindowExpiration:
+    """窗口外未派发动作的过期退出：报告流程与拍摄流程共同装配。"""
+
+    @staticmethod
+    def _flows(deps, driver, files):
+        from camctl.bootstrap.lifecycle import _report_assembly
+
+        report_flows, supervisor = _report_assembly(deps)
+        flows = {
+            "scheduling": capture_flow(_capture_factory(driver, files)),
+            **report_flows,
+        }
+        return flows, supervisor
+
+    async def test_run_expires_missed_window_and_exits(
+        self, tmp_path: Path,
+    ) -> None:
+        cfg = _config_for(tmp_path)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        # 计划时间与窗口都远在过去：会话首轮检查时窗口已结束且没有
+        # 持久化观察，动作按错过窗口过期。
+        source = await _parsed(tmp_path, _plan_body("9", "2026-01-15 09:00:00"))
+        driver = _ActivityDriver()
+        flows, supervisor = self._flows(deps, driver, {})
+        try:
+            outcome = await asyncio.wait_for(
+                execute_command(deps, source, flows=flows, poll_interval_s=0.1),
+                120)
+        finally:
+            await supervisor.stop()
+            close_runtime(deps)
+
+        assert outcome.succeeded is True, outcome.details
+        db = Path(cfg.paths.state_db)
+        assert _scalar(
+            db, "SELECT status, expiration_reason, first_window_observed_at"
+            " FROM actions WHERE id = 1") == (5, 1, None)
+        assert _scalar(db, "SELECT status FROM plans") == (3,)
+        # 过期动作从未派发设备调用。
+        assert driver.calls == []
+        # 过期变化已全部发布：报告责任清空后会话退出。
+        reports = _all(db, "SELECT id, status FROM reports")
+        assert reports and all(status == 4 for _, status in reports)
+        ready_files = list((tmp_path / "ready").glob("status-report-*.json"))
+        assert ready_files
+        assert not any((tmp_path / "staging" / "reports").iterdir())
+
+    async def test_run_expires_exhausted_window_after_observation(
+        self, tmp_path: Path,
+    ) -> None:
+        from camctl.acceptance.service import AcceptanceContext, accept_input
+        from camctl.persistence.repositories.acceptance import (
+            AcceptanceRepository,
+        )
+        from camctl.persistence.repositories.scheduling import (
+            ObserveOutcome,
+            ObserveWindowRequest,
+        )
+        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+        cfg = _config_for(tmp_path)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        # 先直接受理一个窗口临近的计划：窗口内保存首次观察后等待
+        # 窗口结束，模拟观察已提交但启动未发生的恢复场景。
+        scheduled_second = int(time.time()) + 2
+        body = _plan_body(
+            "10", datetime.fromtimestamp(scheduled_second, timezone.utc)
+            .strftime("%Y-%m-%d %H:%M:%S"))
+        body["actions"][0]["policy"]["max_delay_ms"] = 1500
+        source = await _parsed(tmp_path, body)
+
+        owned = open_existing(
+            Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            accepted = await accept_input(
+                source,
+                AcceptanceContext(
+                    mode=CommandMode.RUN,
+                    catalog=_Catalog(),
+                    repository=AcceptanceRepository(),
+                    clock=type("C", (), {
+                        "utc_micros": staticmethod(
+                            lambda: int(time.time() * 1_000_000))})(),
+                ),
+                new_operation_key(), owned,
+            )
+            assert accepted.plan_id is not None
+            while time.time() < scheduled_second + 0.1:
+                await asyncio.sleep(0.05)
+            now_us = int(time.time() * 1_000_000)
+            observation = SchedulingRepository().observe_window(
+                ObserveWindowRequest(
+                    action_id=1, trusted_wall_now=now_us, occurred_at=now_us),
+                new_operation_key(), owned)
+            assert observation.value.outcome is ObserveOutcome.OBSERVED
+            observed_at = now_us
+        finally:
+            owned.connection.close()
+
+        # 等待窗口结束后进入会话：按已持久化观察区分为窗口耗尽。
+        await asyncio.sleep(max(scheduled_second + 1.6 - time.time(), 0.0))
+        driver = _ActivityDriver()
+        flows, supervisor = self._flows(deps, driver, {})
+        try:
+            outcome = await asyncio.wait_for(
+                execute_command(deps, source, flows=flows, poll_interval_s=0.1),
+                120)
+        finally:
+            await supervisor.stop()
+            close_runtime(deps)
+
+        assert outcome.succeeded is True, outcome.details
+        db = Path(cfg.paths.state_db)
+        assert _scalar(
+            db, "SELECT status, expiration_reason, first_window_observed_at"
+            " FROM actions WHERE id = 1") == (5, 2, observed_at)
+        assert _scalar(db, "SELECT status FROM plans") == (3,)
+        assert driver.calls == []
+        reports = _all(db, "SELECT id, status FROM reports")
+        assert reports and all(status == 4 for _, status in reports)

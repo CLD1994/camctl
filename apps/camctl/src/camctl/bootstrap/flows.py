@@ -2,9 +2,10 @@
 
 每个流程是接在会话推进循环上的异步端口：接收会话上下文，每轮
 被驱动一次，自行管理所需连接与协作者。capture_flow 把到期拍
-摄工作推进一个事务批次：先开始取得时间资格的 pending 动作并
-登记设备活动，再把执行中的到期动作交给能力处理器；处理器内
-部按已保存事实幂等推进，重复调度不产生重复副作用。report_flow
+摄工作推进一个事务批次：窗口内检查到的动作先保存首次观察，窗
+口外仍未派发的动作保存过期终态，再把到期动作转入执行并登记设
+备活动，最后把执行中的到期动作交给能力处理器；处理器内部按
+已保存事实幂等推进，重复调度不产生重复副作用。report_flow
 每轮推进报告责任：开始到期的同步动作、补齐已覆盖但未保存的本
 地完成、冻结新的报告机会，并把进行中的报告推进到发布。
 """
@@ -20,6 +21,8 @@ from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import (
+    ExpireActionRequest,
+    ObserveWindowRequest,
     SchedulingRepository,
     StartActionRequest,
 )
@@ -28,14 +31,18 @@ from camctl.session.service import StateDbFailure
 __all__ = ["capture_flow", "report_flow"]
 
 
-def _due_pending_actions(connection: Any, now_us: int) -> list[int]:
-    """从当前投影取可开始执行的拍摄动作：待执行、未取消且已到时间。"""
+def _due_pending_actions(
+    connection: Any, now_us: int,
+) -> list[tuple[int, int, int]]:
+    """从当前投影取到期拍摄动作及窗口事实：待执行、未取消且已到时间。"""
     with closing(connection.execute(
-        "SELECT id FROM actions WHERE status = 1 AND cancel_requested = 0"
+        "SELECT id, scheduled_at, max_delay_ms FROM actions"
+        " WHERE status = 1 AND cancel_requested = 0"
         " AND type IN (1, 2, 3) AND scheduled_at <= ?"
         " ORDER BY plan_id, input_index", (now_us,)
     )) as cursor:
-        return [int(row[0]) for row in cursor.fetchall()]
+        return [(int(row[0]), int(row[1]), int(row[2]))
+                for row in cursor.fetchall()]
 
 
 def capture_flow(capture_factory: Callable[[Any], Any]) -> Callable[[Any], Any]:
@@ -51,7 +58,38 @@ def capture_flow(capture_factory: Callable[[Any], Any]) -> Callable[[Any], Any]:
         try:
             now = context.clock.utc_micros()
             scheduling = SchedulingRepository()
-            for action_id in _due_pending_actions(owned.connection, now):
+            for (action_id, scheduled_at,
+                 max_delay_ms) in _due_pending_actions(owned.connection, now):
+                if now > scheduled_at + max_delay_ms * 1000:
+                    # 窗口外仍未派发：按持久化观察区分错过与耗尽。
+                    outcome = scheduling.expire_action(
+                        ExpireActionRequest(
+                            action_id=action_id,
+                            trusted_wall_now=now,
+                            occurred_at=now,
+                        ),
+                        new_operation_key(),
+                        owned,
+                    )
+                    if outcome.kind is not DbOutcomeKind.COMPLETED:
+                        raise StateDbFailure(
+                            f"动作过期事务未完成（{outcome.kind.value}）:"
+                            f" {outcome.error}")
+                    continue
+                # 窗口内检查到动作：先保存首次观察，再判断开始资格。
+                observation = scheduling.observe_window(
+                    ObserveWindowRequest(
+                        action_id=action_id,
+                        trusted_wall_now=now,
+                        occurred_at=now,
+                    ),
+                    new_operation_key(),
+                    owned,
+                )
+                if observation.kind is not DbOutcomeKind.COMPLETED:
+                    raise StateDbFailure(
+                        f"窗口观察事务未完成（{observation.kind.value}）:"
+                        f" {observation.error}")
                 outcome = scheduling.start_action(
                     StartActionRequest(
                         action_id=action_id,
