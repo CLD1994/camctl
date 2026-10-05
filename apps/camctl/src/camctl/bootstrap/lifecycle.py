@@ -1,9 +1,9 @@
 """按命令装配运行资源与有序关闭。
 
 不建立全局数据库、驱动或配置单例：每次调用创建本次命令所需的
-协作者，流程只依赖端口。第一版阶段 1 尚无报告与日志资源，关闭
-次序按现有资源执行（接纳/会话句柄由会话流程自身释放，最后关
-闭数据库连接）。
+协作者，流程只依赖端口。run 会话默认装配生产报告流程与生成子
+进程监督方，会话结束后监督方先收场；接纳/会话句柄由会话流程自
+身释放，装配层最后关闭报告失败日志副本通道。
 """
 
 from __future__ import annotations
@@ -62,8 +62,26 @@ def build_runtime(
     notifier: Any = None,
 ) -> RuntimeDeps:
     """按命令模式创建运行协作者；不隐式创建状态库。"""
+    from camctl.persistence.repositories.capture import register_capture_guards
+    from camctl.persistence.repositories.cancellation import (
+        register_cancellation_guards,
+    )
+    from camctl.persistence.repositories.operations import register_operation_guards
+    from camctl.persistence.repositories.outputs import register_outputs_guards
+    from camctl.persistence.repositories.timelapse import register_timelapse_guards
+    from camctl.reporting.policy import register_report_guards
+
+    # 生产装配统一注册全部正式业务守卫：运行会话内会发出受理、
+    # 动作开始与终态、输出、报告与同步等事务。注册幂等，测试替
+    # 身按需覆盖同名守卫。
     register_acceptance_guards()
     register_clock_guard()
+    register_operation_guards()
+    register_capture_guards()
+    register_timelapse_guards()
+    register_outputs_guards()
+    register_cancellation_guards()
+    register_report_guards()
     state_db = Path(config.paths.state_db).expanduser().resolve()
     if not state_db.exists():
         raise FileNotFoundError(f"状态库不存在，日常入口不创建: {state_db}")
@@ -140,6 +158,34 @@ def _failure_log_wiring(deps: RuntimeDeps):
     return FailureLogService(MarkerStore(logs_dir)), copy_request_factory
 
 
+def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
+    """run 会话的生产报告流程与生成子进程监督方。
+
+    注册报告事务守卫后组装维护流程：到期的同步动作、报告冻结、
+    子进程生成与发布编排都由流程按轮推进；监督方惰性启动，由
+    execute_command 在会话结束后收场。
+    """
+    from camctl.bootstrap.flows import report_flow
+    from camctl.reporting.maintenance import MaintenanceLimits
+    from camctl.reporting.supervisor import WorkerSupervisor
+    from camctl.reporting.worker import report_lock_path
+
+    supervisor = WorkerSupervisor(
+        limits=MaintenanceLimits.defaults(),
+        lock_path=str(report_lock_path(deps.state_db)),
+    )
+    flow = report_flow(
+        state_db=deps.state_db,
+        staging=Path(deps.config.paths.staging).expanduser().resolve(),
+        ready=Path(deps.config.paths.ready).expanduser().resolve(),
+        processing=Path(deps.config.paths.processing).expanduser().resolve(),
+        history=deps.config.history,
+        database=deps.config.database,
+        supervisor=supervisor,
+    )
+    return {"report": flow}, supervisor
+
+
 async def execute_command(
     deps: RuntimeDeps,
     source: ParsedInput | InputDiagnostic | None,
@@ -150,13 +196,17 @@ async def execute_command(
 ) -> SessionOutcome:
     """执行一次 run/submit 会话；调用方负责运行事件循环。
 
-    flows、wake 与 poll_interval_s 是业务流程装配的注入点：调度、
-    设备与报告流程由部署装配提供（生产驱动接入前由集成测试注入
-    受契约约束的替身），进程内唤醒与轮询上限随流程一起接入。
+    flows、wake 与 poll_interval_s 是业务流程装配的注入点：显式
+    注入的流程映射整体替换生产装配；run 会话未注入时使用生产报
+    告流程（含生成子进程），submit 会话不驱动业务流程。进程内唤
+    醒与轮询上限随流程一起接入。
     """
     from camctl.bootstrap.application import query_work_facts
 
     failure_log, copy_request_factory = _failure_log_wiring(deps)
+    supervisor: Any = None
+    if flows is None and deps.mode is CommandMode.RUN:
+        flows, supervisor = _report_assembly(deps)
     overrides: dict[str, Any] = {
         "flows": flows if flows is not None else {},
         "wake": wake,
@@ -182,7 +232,11 @@ async def execute_command(
         copy_request_factory=copy_request_factory,
         **overrides,
     )
-    return await run_session(context, source)
+    try:
+        return await run_session(context, source)
+    finally:
+        if supervisor is not None:
+            await supervisor.stop()
 
 
 def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体

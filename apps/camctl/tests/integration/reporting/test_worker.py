@@ -163,7 +163,11 @@ class TestRunJob:
         result = run_job(job)
         assert result.job_id == job.job_id
         assert result.size_bytes > 0
-        generated = Path(job.staging_path).read_bytes()
+        # 文件已按报告身份与摘要改用规范文件名；临时名不再存在。
+        generated = Path(result.path).read_bytes()
+        assert Path(result.path).name == (
+            f"status-report-{report.report_id}-{result.sha256}.json")
+        assert not Path(job.staging_path).exists()
         assert hashlib.sha256(generated).hexdigest() == result.sha256
         assert result.size_bytes == len(generated)
 

@@ -89,11 +89,13 @@ def query_work_facts(connection) -> "WorkFacts":
     """会话责任维度的生产查询。
 
     各维度直接读取持久化投影：未完成动作含未来 scheduled_at 的
-    pending 动作；仍应推进的有限流程以未结束 operation_runs 表达。
-    报告维度以报告覆盖边界区分——任何状态的报告边界都是已接手
-    尝试，其后的新变化或仍在本地处理中的报告构成待处理变化；最
-    新尝试失败且无新变化时只剩等待新触发的责任。残留设备事实、
-    可延后清理与等待 ACK 如实呈现但不构成待处理工作。
+    pending 动作；运行中的报告动作属于报告维度，其同步等待本地
+    报告处理，不作为普通未完成动作无限延长会话。仍应推进的有限
+    流程以未结束 operation_runs 表达。报告维度以报告覆盖边界区
+    分——任何状态的报告边界都是已接手尝试，其后的新变化、仍在
+    本地处理中的报告或已发布覆盖但尚未保存的本地完成构成待处
+    理变化；最新尝试失败且无新变化时只剩等待新触发的责任。残留
+    设备事实、可延后清理与等待 ACK 如实呈现但不构成待处理工作。
     """
     from contextlib import closing
 
@@ -104,7 +106,8 @@ def query_work_facts(connection) -> "WorkFacts":
             return int(cursor.fetchone()[0])
 
     unfinished = scalar(
-        "SELECT COUNT(*) FROM actions WHERE status IN (1, 2)")
+        "SELECT COUNT(*) FROM actions"
+        " WHERE status = 1 OR (status = 2 AND type <> 7)")
     settlements = scalar(
         "SELECT COUNT(*) FROM operation_runs WHERE status IN (1, 2)")
     acknowledged = scalar(
@@ -121,6 +124,16 @@ def query_work_facts(connection) -> "WorkFacts":
     in_flight = _row_exists(
         connection,
         "SELECT 1 FROM reports WHERE status IN (1, 2, 3) LIMIT 1")
+    # 已发布报告覆盖开始历史但本地完成尚未保存：责任仍开放，会话
+    # 继续驱动保存，不把未保存的本地处理解释为已完成。
+    unsettled_local = _row_exists(
+        connection,
+        "SELECT 1 FROM state_syncs s WHERE s.status = 1"
+        " AND s.local_report_id IS NULL AND s.action_id IN"
+        " (SELECT id FROM actions WHERE status = 2)"
+        " AND EXISTS(SELECT 1 FROM reports r WHERE r.status = 4"
+        " AND r.from_wm <= s.from_wm"
+        " AND r.frozen_event_id >= s.started_boundary_event_id) LIMIT 1")
     failed_uncovered = _row_exists(
         connection,
         "SELECT 1 FROM reports r WHERE r.status = 5 AND r.to_wm = ?"
@@ -130,7 +143,7 @@ def query_work_facts(connection) -> "WorkFacts":
     return WorkFacts(
         unfinished_actions=unfinished,
         required_settlements=settlements,
-        pending_report_changes=has_new_changes or in_flight,
+        pending_report_changes=has_new_changes or in_flight or unsettled_local,
         report_failed_no_new_changes=(not has_new_changes) and failed_uncovered,
         residual_device_facts=_row_exists(
             connection,

@@ -32,14 +32,16 @@ from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.host_files.handoff import PublishResult, PublishStage
 from camctl.host_files.io import DirectorySyncStage
-from camctl.reporting.models import ReportBytes
+from camctl.reporting.models import ReportBytes, SyncMode
 from camctl.reporting.policy import (
     publish_report,
+    record_local_report,
     record_report_bytes,
     record_report_failure,
     record_report_publish_intent,
     register_report_guards,
     register_sync_guard,
+    start_sync,
 )
 
 from ..acceptance.test_acceptance import Catalog
@@ -227,6 +229,44 @@ class TestReportDimensions:
         assert facts.unfinished_actions == 1
         assert facts.pending_report_changes is False
         assert facts.waiting_acknowledgement is False
+
+    def test_running_report_action_is_not_ordinary_unfinished(self, owned, tmp_path):
+        _submit(owned, tmp_path, "1")
+        started = start_sync(
+            new_operation_key(), owned, action_id=1, mode=SyncMode.FULL,
+            occurred_at=_NOW)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        facts = query_work_facts(owned.connection)
+        # 运行中的报告动作由报告维度推进：等待本地报告处理的同步
+        # 不作为普通未完成动作无限延长会话；其开始构成待报告变化。
+        assert facts.unfinished_actions == 0
+        assert facts.pending_report_changes is True
+
+    def test_published_covering_report_with_unsaved_local_is_pending(self, owned, tmp_path):
+        _submit(owned, tmp_path, "1")
+        started = start_sync(
+            new_operation_key(), owned, action_id=1, mode=SyncMode.FULL,
+            occurred_at=_NOW)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        report = _freeze(owned)
+        _publish(owned, report.report_id, b'{"report_id":"1"}\n')
+        facts = query_work_facts(owned.connection)
+        # 覆盖同步开始的报告已发布但本地完成尚未保存：本地报告职
+        # 责仍开放，不能按已完成退出。
+        assert facts.pending_report_changes is True
+        settled = record_local_report(
+            new_operation_key(), owned, action_id=1,
+            local_report_id=report.report_id, occurred_at=_NOW)
+        assert settled.kind is DbOutcomeKind.COMPLETED, settled.error
+        facts = query_work_facts(owned.connection)
+        # 本地保存与动作成功本身是新的待报告变化：下一份报告覆盖
+        # 后本地职责才全部完成。
+        assert facts.pending_report_changes is True
+        followup = _freeze(owned)
+        _publish(owned, followup.report_id, b'{"report_id":"2"}\n')
+        facts = query_work_facts(owned.connection)
+        assert facts.pending_report_changes is False
+        assert facts.unfinished_actions == 0
 
 
 class TestSettlementDimensions:

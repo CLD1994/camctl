@@ -53,6 +53,7 @@ __all__ = [
     "StagedReport",
     "decide_republish",
     "deliver_report",
+    "deliver_staged_report",
     "observe_report_locations",
     "parse_report_file_name",
     "recover_report_files",
@@ -391,7 +392,7 @@ async def deliver_report(
     *,
     local_actions: Sequence[int] = (),
 ) -> DeliveryResult:
-    """执行一次报告发布的完整编排。
+    """把报告字节写入 staging 后执行发布的完整编排。
 
     staging 写入与字节登记、发布意图、旧报告撤下、原子移动和发
     布记录按证据顺序推进；任何一步失败或结果未知都停止后续步
@@ -406,7 +407,24 @@ async def deliver_report(
         _stage_payload, directories.staging, staged.name, payload)
     if stage_error is not None:
         return DeliveryResult(DeliveryOutcome.WRITE_FAILED, error=stage_error)
+    return await deliver_staged_report(
+        report_id, staged, directories, session, local_actions=local_actions)
 
+
+async def deliver_staged_report(
+    report_id: int,
+    staged: StagedReport,
+    directories: HandoffDirectories,
+    session: PublicationSession,
+    *,
+    local_actions: Sequence[int] = (),
+) -> DeliveryResult:
+    """发布已在 staging 完整写好的报告文件；不重写报告字节。
+
+    字节登记、发布意图、旧报告撤下、原子移动、发布记录与本地完
+    成的顺序和失败分类与 deliver_report 的相应阶段一致；staged
+    必须位于报告专属 staging 子目录且文件名携带本次字节摘要。
+    """
     prepare = session.prepare(
         report_id, ReportBytes(staged.size_bytes, staged.sha256))
     if prepare.kind is not DbOutcomeKind.COMPLETED:

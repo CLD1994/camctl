@@ -172,7 +172,8 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
     """执行一次生成任务并返回携带任务身份的分类结果。
 
     先核验实际打开的数据库实例身份，再按冻结依据生成并同步
-    staging 文件；成功结果在文件写入、摘要计算与同步完成后发
+    staging 文件；文件按报告身份与字节摘要改用规范文件名，供发布
+    编排直接交接。成功结果在文件写入、摘要计算与同步完成后发
     出。任何失败都转换为分类结果，不向主进程抛出异常。
     """
     observed = job.instance_id
@@ -184,6 +185,7 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
                 error_kind=ErrorKind.STATE, error_code="instance_mismatch",
                 error_message=(
                     f"数据库实例身份与任务不符: {observed} != {job.instance_id}"))
+        temporary = Path(job.staging_path)
         generated = generate_report_file(
             GenerationSpec(
                 db_path=Path(job.db_path),
@@ -191,14 +193,19 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
                 from_wm=job.from_wm,
                 to_wm=job.to_wm,
                 frozen_event_id=job.frozen_event_id,
-                staging_path=Path(job.staging_path),
+                staging_path=temporary,
                 entity_batch_size=job.entity_batch_size,
                 event_batch_size=job.event_batch_size,
             ),
         )
+        from camctl.reporting.publication import report_file_name
+
+        canonical = temporary.with_name(
+            report_file_name(job.report_id, generated.sha256))
+        os.replace(temporary, canonical)
         return ResultSuccessMessage(
             job_id=job.job_id, instance_id=observed,
-            path=str(generated.path), size_bytes=generated.size_bytes,
+            path=str(canonical), size_bytes=generated.size_bytes,
             sha256=generated.sha256)
     except BaseException as error:
         return ResultFailureMessage(

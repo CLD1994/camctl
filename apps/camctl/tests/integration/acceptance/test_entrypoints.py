@@ -1,10 +1,9 @@
 """A6 两个真实入口的输入受理闭环（无设备范围）。
 
 独立 CLI 进程组合 init/submit/run：坏新输入不破坏已有工作，有
-效与无效 ACK、缺失状态库分别给出契约内结果，恢复不依赖输入文件。
-run 在本地报告责任未完成时保持推进循环等待（报告生成链尚未装
-配），相应用例以后台进程短暂运行、确认受理事实落库后终止，按
-持久化状态验证受理契约。
+效与无效 ACK、缺失状态库分别给出契约内结果，恢复不依赖输入文
+件。run 会话装配生产报告流程：报告责任处理完毕后正常退出，按
+持久化状态与 ready 交付验证受理契约。
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ import os
 import subprocess
 import sys
 import sqlite3
-import time
 from pathlib import Path
 
 import pytest
@@ -32,58 +30,6 @@ def _run_cli(home: Path, *arguments: str, cwd: Path | None = None):
         cwd=str(cwd) if cwd else None,
         timeout=60,
     )
-
-
-def _terminate_cli(process) -> None:
-    """终止仍在推进循环的 run 会话并回收输出管道。"""
-    process.terminate()
-    try:
-        process.communicate(timeout=30)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.communicate()
-
-
-def _run_session_until_pending(
-    home: Path,
-    state_db: Path,
-    *arguments: str,
-    expect,
-) -> None:
-    """启动 run 会话并在受理事实落库后终止。
-
-    expect(connection) 轮询持久化事实确认受理事务已提交；随后断
-    言会话仍在推进（未按旧单次语义退出），终止进程交由调用方按
-    数据库状态断言。
-    """
-    environment = dict(os.environ)
-    environment["HOME"] = str(home)
-    environment["USERPROFILE"] = str(home)
-    process = subprocess.Popen(
-        [sys.executable, "-m", "camctl", *arguments],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=environment,
-    )
-    try:
-        deadline = time.monotonic() + 20.0
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise AssertionError(
-                    "run 会话提前退出：报告责任未装配时应保持推进等待")
-            try:
-                with sqlite3.connect(state_db) as connection:
-                    if expect(connection):
-                        break
-            except sqlite3.OperationalError:
-                pass
-            time.sleep(0.1)
-        else:
-            raise AssertionError("run 会话的受理事实在限时内未落库")
-        assert process.poll() is None
-    finally:
-        _terminate_cli(process)
 
 
 def _config(home: Path) -> Path:
@@ -148,21 +94,27 @@ class TestRealEntrypoints:
         assert message["body"]["needs_run"] is True
         assert submitted.stdout.count("\n") == 1
 
-        # run 保持推进循环等待报告责任（报告链未装配）：受理后不
-        # 退出，短暂运行确认后终止，持久化状态不受影响。
-        _run_session_until_pending(
-            home, home / "state.db", "run", "--config", str(config),
-            expect=lambda connection: connection.execute(
-                "SELECT COUNT(*) FROM actions").fetchone() == (1,),
-        )
+        # run 装配生产报告流程：同步动作完成、报告发布后正常退出。
+        finished = _run_cli(home, "run", "--config", str(config))
+        assert finished.returncode == 0, finished.stderr
+        with sqlite3.connect(home / "state.db") as connection:
+            assert connection.execute(
+                "SELECT status FROM actions").fetchall() == [(3,)]
+            assert connection.execute(
+                "SELECT COUNT(*) FROM reports WHERE status = 4"
+            ).fetchone()[0] >= 1
+        assert list((home / "ready").glob("status-report-*.json"))
 
-        # 重送同一请求：复用原计划，仍请求后续 run（动作仍待执行）。
+        # 重送同一请求：复用原计划；报告责任已完成，不再请求后续
+        # run。
         again = _run_cli(home, "submit", str(plan), "--config", str(config))
         assert again.returncode == 0
-        assert json.loads(again.stdout)["body"]["needs_run"] is True
+        message = json.loads(again.stdout)
+        assert message["kind"] == "succeeded"
+        assert message["body"]["needs_run"] is False
         with sqlite3.connect(home / "state.db") as connection:
             assert connection.execute("SELECT id,request_id FROM plans").fetchall() == [(1,42)]
-            assert connection.execute("SELECT name,status,execution_spec_json FROM actions").fetchall() == [("status",1,"{}")]
+            assert connection.execute("SELECT name,status,execution_spec_json FROM actions").fetchall() == [("status",3,"{}")]
 
     def test_bad_new_input_preserves_existing_work(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
@@ -174,22 +126,20 @@ class TestRealEntrypoints:
 
         broken = home / "broken.json"
         broken.write_bytes(b'{"request_id": "2", "actions": [')
-        _run_session_until_pending(
-            home, home / "state.db", "run", str(broken), "--config", str(config),
-            expect=lambda connection: connection.execute(
-                "SELECT COUNT(*) FROM plan_file_diagnostics").fetchone() == (1,),
-        )
+        result = _run_cli(home, "run", str(broken), "--config", str(config))
+        # 拒绝诊断被受理并报告，报告动作完成：会话正常退出。
+        assert result.returncode == 0, result.stderr
+        with sqlite3.connect(home / "state.db") as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM plan_file_diagnostics").fetchone() == (1,)
 
-        # 删除输入文件后重启：按持久化状态恢复，已有工作保持。
+        # 删除输入文件后重启：按持久化状态恢复，无新责任即正常退出。
         plan.unlink()
-        _run_session_until_pending(
-            home, home / "state.db", "run", "--config", str(config),
-            expect=lambda connection: connection.execute(
-                "SELECT COUNT(*) FROM actions").fetchone() == (1,),
-        )
+        recovery = _run_cli(home, "run", "--config", str(config))
+        assert recovery.returncode == 0, recovery.stderr
         with sqlite3.connect(home / "state.db") as connection:
             assert connection.execute("SELECT request_id FROM plans").fetchall() == [(1,)]
-            assert connection.execute("SELECT name,status FROM actions").fetchall() == [("status",1)]
+            assert connection.execute("SELECT name,status FROM actions").fetchall() == [("status",3)]
             assert connection.execute("SELECT COUNT(*) FROM plan_file_diagnostics").fetchone() == (1,)
 
     def test_invalid_body_submit_still_succeeds_with_diagnostics(self, tmp_path: Path) -> None:
@@ -284,27 +234,10 @@ class TestRealEntrypoints:
         incoming = home / "incoming.json"
         incoming.write_text(json.dumps(body), encoding="utf-8")
         if mode == "run":
-            # run 保持推进循环等待报告责任：受理（诊断、重用或 ACK
-            # 推进）落库后终止，按持久化状态验证。
-            if scenario in {"bad_identity", "bad_ack"}:
-                def expect(connection):
-                    return connection.execute(
-                        "SELECT COUNT(*) FROM plan_file_diagnostics"
-                    ).fetchone() == (1,)
-            elif scenario == "bad_action":
-                def expect(connection):
-                    return connection.execute(
-                        "SELECT COUNT(*) FROM actions WHERE status = 4"
-                    ).fetchone() == (1,)
-            else:
-                def expect(connection):
-                    return connection.execute(
-                        "SELECT acknowledged_wm FROM runtime_state"
-                    ).fetchone() == (to_wm,)
-            _run_session_until_pending(
-                home, home / "state.db", "run", str(incoming),
-                "--config", str(config), expect=expect,
-            )
+            # run 完成受理事实（诊断、重用或 ACK 推进）并报告后正
+            # 常退出，按持久化状态验证。
+            result = _run_cli(home, "run", str(incoming), "--config", str(config))
+            assert result.returncode == 0, result.stderr
         else:
             result = _run_cli(home, mode, str(incoming), "--config", str(config))
             assert result.returncode == 0, result.stderr
@@ -315,8 +248,11 @@ class TestRealEntrypoints:
         with sqlite3.connect(home / "state.db") as connection:
             expected_requests = [(42,), (43,)] if scenario in {"bad_ack", "bad_action"} else [(42,)]
             assert connection.execute("SELECT request_id FROM plans ORDER BY id").fetchall() == expected_requests
+            # run 会话驱动报告动作到终态；submit 不驱动，动作保持
+            # 受理时状态；受理失败的动作两种模式下都保持失败。
+            terminal = 3 if mode == "run" else 1
             assert connection.execute("SELECT status FROM actions ORDER BY id").fetchall() == (
-                [(1,), (4,)] if scenario == "bad_action" else [(1,)] * len(expected_requests))
+                [(terminal,), (4,)] if scenario == "bad_action" else [(terminal,)] * len(expected_requests))
             assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone() == (
                 (0,) if scenario == "bad_ack" else (to_wm,))
             diagnostics = connection.execute("SELECT errors_json FROM plan_file_diagnostics").fetchall()
