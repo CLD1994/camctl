@@ -138,11 +138,11 @@ L1—L4 和 L6 随首阶段日志基础实施；L5 随首条报告失败链完�
 
 **接口与依赖：** 提供异步 `copy_failure_log(request: CopyRequest) -> CopyReceipt`；请求在触发记录入队前绑定，日志线程在同一共享锁内追加触发记录并复制。前置交付：L3/L4、F5；不依赖 P 或业务状态库。
 
-- [ ] 编写失败用例。建立 `test_copy_contains_trigger_before_rotation`，触发写入后另一进程竞争轮换，`assert trigger_record in copied_bytes`；状态库不可用仍可发布。标记缺失/有效/无效/读错、并发第一次失败、复制与发布失败分别按专题处理；副本失败不递归复制。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/logging_runtime/test_copies.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按现有独立故障标记契约争取一次副本责任，触发追加与复制锁内协调，释放锁后使用本地交接接口。凭据分别确认原日志写入、复制与发布；失败清理按日志用途，不创建 delivery。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 每次规定责任最多一次，副本包含触发记录且不被 DB 故障阻挡。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 标记、复制、入队取消及文件发布的全部未知/失败分支；记录门禁证据，建议以“feat: 实现独立故障日志副本”形成独立提交。
+- [x] 编写失败用例。建立 `test_copy_contains_trigger_before_rotation`，触发写入后另一进程竞争轮换，`assert trigger_record in copied_bytes`；状态库不可用仍可发布。标记缺失/有效/无效/读错、并发第一次失败、复制与发布失败分别按专题处理；副本失败不递归复制。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/logging_runtime/test_copies.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按现有独立故障标记契约争取一次副本责任，触发追加与复制锁内协调，释放锁后使用本地交接接口。凭据分别确认原日志写入、复制与发布；失败清理按日志用途，不创建 delivery。
+- [x] 再运行上述命令，要求全部 PASS，并核对 每次规定责任最多一次，副本包含触发记录且不被 DB 故障阻挡。
+- [x] 审阅实际接口、状态分区及失败路径，检查 标记、复制、入队取消及文件发布的全部未知/失败分支；记录门禁证据，建议以“feat: 实现独立故障日志副本”形成独立提交。
 
 ## 行为契约与实施边界
 
