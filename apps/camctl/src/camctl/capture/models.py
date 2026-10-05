@@ -219,3 +219,35 @@ class ActivityObservationSave:
             raise ValueError("活动观察必须携带至少一项事实")
         if self.activity_state == 3:
             raise ValueError("活动结束须由可靠停止事实承载，不经观察补造")
+
+
+@dataclass(frozen=True)
+class ActivityReleaseSave:
+    """一次占用释放申请的输入（DEVICE_OBSERVED.RELEASE）。
+
+    释放判定由事务按统一占用规则完成；命令只携带活动身份与事实
+    时刻。
+    """
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+
+
+@dataclass(frozen=True)
+class ActivityConcludeSave:
+    """一次活动收场申请的输入（结束观察与占用释放同事务）。
+
+    活动必须已被观察到进行中；结束的可靠停止事实是 start 责任
+    的成功终态流程行，由事务装载核验。
+    """
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)

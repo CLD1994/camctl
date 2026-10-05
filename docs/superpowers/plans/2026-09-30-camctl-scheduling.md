@@ -153,6 +153,7 @@ Q1—Q3 可用受约束替身先实施。Q4 与 O2、C2 联合建立首个启动
 **接口与依赖：** 使用 `reevaluate_resource(target: ResourceIdentity) -> None` 通知端口；释放决定由所属业务仓储完整提交。前置交付：C3/C7、X3/X5/X8、O5、N3。
 
 - [ ] 编写失败用例。在 `test_release_never_erases_new_owner` 中迟到观察属于旧活动，`assert new_activity_occupancy_is_held`；组合正常停止、取消、无效果、可靠未派发、恢复、残留收场和应急补记全部入口。ENDED+HELD、UNKNOWN+适用完成依据、实际调用未完分别按 O 系列验收处理。
+  - 进度注记（2026-10-05）：迟到观察保留新占用、正常停止收场、无效果与可靠未派发的释放判定、输出范围未固定拒绝释放已交付（`test_recovery.py` 12 项 + photo 链收场断言 + 同会话推进用例）；取消、恢复对账、残留收场、应急补记入口随取消与收场链路在后续轮次接入，本项保持未勾。
 - [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
 - [ ] 实施本任务。把每个释放入口接入相同占用规则，提交后统一重新判断；原观察必须核对身份，活动结束不单独证明输出范围已解除限制。
 - [ ] 再运行上述命令，要求全部 PASS，并核对 W-01—W-20 与 O-01—O-06 有逐项组合用例，重启不丢候选或责任。

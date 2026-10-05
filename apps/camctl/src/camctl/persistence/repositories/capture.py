@@ -16,7 +16,11 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Mapping
 
-from camctl.capture.models import ActivityObservationSave
+from camctl.capture.models import (
+    ActivityConcludeSave,
+    ActivityObservationSave,
+    ActivityReleaseSave,
+)
 from camctl.capture.files import (
     FileCompletionSave,
     FileObservationSave,
@@ -83,9 +87,10 @@ _RECORDING_PROCESSED_EVENT = 19
 _INTERMEDIATE_FILE_EVENT = 26
 _DEVICE_FILE_EVENT = 17
 
-#: DEVICE_OBSERVED 的 OBSERVE 分支。
+#: DEVICE_OBSERVED 的 OBSERVE 与 RELEASE 分支。
 _ACTIVITY_OBSERVE_EVENT = 13
 _ACTIVITY_OBSERVE_REASON = 2
+_ACTIVITY_RELEASE_REASON = 3
 
 _ACTIVITY_DISPATCH = enum_for("device_activities.dispatch_state")
 _ACTIVITY_STATE = enum_for("device_activities.activity_state")
@@ -1546,6 +1551,30 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def release_occupancy(
+        self, command: ActivityReleaseSave, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[ActivityReleaseResult]:
+        receipt = commit_operation(
+            _ActivityReleaseCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def conclude_activity(
+        self, command: ActivityConcludeSave, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[ActivityConclusion]:
+        receipt = commit_operation(
+            _ActivityConcludeCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
 
 
 class _FilePresenceCommand:
@@ -1715,6 +1744,254 @@ class _ActivityObserveCommand:
             read_only=True,
             result=ObservationOutcome(
                 ObservationDisposition.ALREADY, command.action_id))
+
+
+# -- 设备活动占用释放与收场 -------------------------------------------
+
+
+class ReleaseOutcome(Enum):
+    """占用释放事务的可靠结果分区。"""
+
+    RELEASED = "released"
+    ALREADY = "already"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class ActivityReleaseResult:
+    """释放结果：保存或已有释放时成功，拒绝时携带可靠原因。"""
+
+    outcome: ReleaseOutcome
+    reason: str | None = None
+
+
+class ConcludeOutcome(Enum):
+    """活动收场事务的可靠结果分区。"""
+
+    CONCLUDED = "concluded"
+    ALREADY = "already"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class ActivityConclusion:
+    """收场结果：结束观察与占用释放在同一事务共同保存。"""
+
+    outcome: ConcludeOutcome
+    reason: str | None = None
+
+
+def release_basis_holds(facts: Mapping[str, Any]) -> bool:
+    """统一释放判定：活动结束、可靠未派发或无效果、适用完成依据。
+
+    与 device_activities 的 SQL 组合约束保持同一分区；录像采集判
+    定待定不阻止已结束活动释放。
+    """
+    if facts.get("activity_state") == 3:
+        return True
+    if facts.get("dispatch_state") in (1, 4):
+        return True
+    return facts.get("completion_basis") == 3
+
+
+class _ActivityReleaseCommand:
+    """释放本活动冲突占用的事务命令（DEVICE_OBSERVED.RELEASE）。
+
+    正常完成、停止、可靠未派发、无效果拒绝、恢复对账、残留收场
+    及应急补记共用本判定：释放依据三者居一，且输出范围归属限制
+    已经解除；只触发候选重新判断，不自动授予下一动作。
+    """
+
+    def __init__(self, command: ActivityReleaseSave, key: OperationKey) -> None:
+        if not isinstance(command, ActivityReleaseSave):
+            raise TypeError("占用释放申请必须使用 ActivityReleaseSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        command = self._command
+        facts = row_facts(connection, "device_activities", command.action_id)
+        if facts is None:
+            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
+        self._state["device_activities"] = {command.action_id: facts}
+        if facts["occupancy_state"] == 2:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ActivityReleaseResult(outcome=ReleaseOutcome.ALREADY))
+        if not release_basis_holds(facts):
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ActivityReleaseResult(
+                    outcome=ReleaseOutcome.REJECTED,
+                    reason="conditions_unmet"))
+        if facts["ownership_mode"] == 2 and facts["baseline_state"] != 3:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ActivityReleaseResult(
+                    outcome=ReleaseOutcome.REJECTED, reason="scope_limited"))
+
+        allocation = scope.allocate(1)
+        self._owners[("device_activities", command.action_id)] = (
+            "action", facts["action_id"])
+        row = _update(
+            "device_activities", command.action_id,
+            {"occupancy_state": 1}, {"occupancy_state": 2})
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON,
+            (row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ActivityReleaseResult(outcome=ReleaseOutcome.RELEASED))
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        """原键重送：核实原释放分支与输入后恢复首次响应。"""
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON)]:
+            raise TransactionError("操作身份已用于其他事务，不能作为占用释放重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("占用释放的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_activities" or row["id"] != command.action_id:
+            raise TransactionError("原占用释放属于其他活动")
+        facts = row_facts(scope.connection, "device_activities",
+                          command.action_id)
+        if facts is None or facts["occupancy_state"] != 2:
+            raise TransactionError("原占用释放的可靠记录与输入不符")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ActivityReleaseResult(outcome=ReleaseOutcome.RELEASED))
+
+
+class _ActivityConcludeCommand:
+    """活动收场事务命令：结束观察与占用释放共同保存。
+
+    活动结束的可靠停止事实是 start 责任的成功终态流程行，由本事
+    务装载核验；结束观察（DEVICE_OBSERVED.OBSERVE）与占用释放
+    （RELEASE）在同一事务，释放条件不满足时整组拒绝。
+    """
+
+    def __init__(self, command: ActivityConcludeSave, key: OperationKey) -> None:
+        if not isinstance(command, ActivityConcludeSave):
+            raise TypeError("活动收场申请必须使用 ActivityConcludeSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        command = self._command
+        facts = row_facts(connection, "device_activities", command.action_id)
+        if facts is None:
+            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
+        self._state["device_activities"] = {command.action_id: facts}
+        if facts["activity_state"] == 1:
+            return self._rejected("not_active")
+        if facts["occupancy_state"] == 2:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ActivityConclusion(outcome=ConcludeOutcome.ALREADY))
+        needs_ended = facts["activity_state"] == 2
+        if needs_ended and not self._load_stop_fact(
+                connection, command.action_id):
+            raise ConsistencyError(
+                "活动结束缺少可靠停止事实: "
+                f"start/{command.action_id}")
+        combined = dict(facts)
+        if needs_ended:
+            combined["activity_state"] = 3
+        if not release_basis_holds(combined):
+            return self._rejected("conditions_unmet")
+        if combined["ownership_mode"] == 2 and combined["baseline_state"] != 3:
+            return self._rejected("scope_limited")
+
+        allocation = scope.allocate(2 if needs_ended else 1)
+        owner = ("action", facts["action_id"])
+        self._owners[("device_activities", command.action_id)] = owner
+        events = []
+        next_event = allocation.first_event_id
+        if needs_ended:
+            events.append(_envelope(
+                next_event, allocation.txn_id,
+                _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+                (_update(
+                    "device_activities", command.action_id,
+                    {"activity_state": 2}, {"activity_state": 3}),),
+                command.occurred_at))
+            next_event += 1
+        events.append(_envelope(
+            next_event, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON,
+            (_update(
+                "device_activities", command.action_id,
+                {"occupancy_state": 1}, {"occupancy_state": 2}),),
+            command.occurred_at))
+        return CommandPlan(
+            events=tuple(events), owners=self._owners, state_rows=self._state,
+            result=ActivityConclusion(outcome=ConcludeOutcome.CONCLUDED))
+
+    def _load_stop_fact(self, connection, action_id: int) -> bool:
+        """装载 start 责任的成功终态流程行作为活动结束证据。"""
+        rows = {}
+        found = False
+        for row in connection.execute(
+            "SELECT id, status FROM operation_runs"
+            " WHERE responsibility_key = ? AND activity_id = ?",
+            (f"start/{action_id}", action_id),
+        ).fetchall():
+            facts = {"id": int(row[0]), "status": int(row[1])}
+            rows[int(row[0])] = facts
+            if facts["status"] == 3:
+                found = True
+        if rows:
+            self._state["operation_runs"] = rows
+        return found
+
+    def _rejected(self, reason: str) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ActivityConclusion(
+                outcome=ConcludeOutcome.REJECTED, reason=reason))
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        """原键重送：核实原收场组成后恢复首次响应。"""
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if not types or any(
+                event_type != _ACTIVITY_OBSERVE_EVENT for event_type, _ in types):
+            raise TransactionError("操作身份已用于其他事务，不能作为活动收场重送")
+        for event in saved:
+            if event["occurred_at"] != command.occurred_at:
+                raise TransactionError("活动收场的事实时刻与原事务不同")
+            for row in event["body"]["rows"]:
+                if (row["table"] != "device_activities"
+                        or row["id"] != command.action_id):
+                    raise TransactionError("原活动收场属于其他活动")
+        facts = row_facts(scope.connection, "device_activities",
+                          command.action_id)
+        if facts is None or facts["occupancy_state"] != 2:
+            raise TransactionError("原活动收场的可靠记录与输入不符")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ActivityConclusion(outcome=ConcludeOutcome.CONCLUDED))
 
 
 # -- 设备文件观察登记 -------------------------------------------------
@@ -2452,18 +2729,27 @@ def _activity_guard(event, context) -> None:
 
 
 def _release_guard(event, context) -> None:
-    """占用释放守卫：ENDED 仍可保持 HELD，释放要求活动已结束。"""
+    """占用释放守卫：统一释放判定与输出范围限制。
+
+    ENDED 仍可保持 HELD；保存 RELEASED 要求活动已结束、可靠未派
+    发或无效果拒绝、适用的等待与产物完成依据三者居一，且基准比
+    较的输出范围归属已经固定。
+    """
     for row in event.rows:
         if row.table != "device_activities" or not row.before.exists:
             continue
-        if (
+        if not (
             row.after.values.get("occupancy_state") == 2
             and row.before.values.get("occupancy_state") == 1
         ):
-            facts = dict(
-                context.state_rows.get("device_activities", {})
-                .get(row.row_id, {})
-            )
-            facts.update(row.after.values)
-            if facts.get("activity_state") != 3:
-                raise EventValidationError("占用释放要求活动已经结束")
+            continue
+        facts = dict(
+            context.state_rows.get("device_activities", {})
+            .get(row.row_id, {})
+        )
+        facts.update(row.after.values)
+        if not release_basis_holds(facts):
+            raise EventValidationError(
+                "占用释放缺少活动结束、未派发或完成依据")
+        if facts.get("ownership_mode") == 2 and facts.get("baseline_state") != 3:
+            raise EventValidationError("输出范围归属未固定不得释放占用")

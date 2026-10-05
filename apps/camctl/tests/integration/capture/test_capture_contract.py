@@ -231,6 +231,16 @@ class TestPhotoHandler:
             assert output == (1, 1, 3, 4096, 11)
             assert _value(
                 owned, "SELECT COUNT(*) FROM operation_attempts") == (1,)
+            # 成功链收场活动：调用成功返回即结束证据，占用同链释放。
+            activity = _value(
+                owned, "SELECT activity_state, occupancy_state, dispatch_state"
+                " FROM device_activities WHERE id = 11")
+            assert activity == (3, 2, 3)
+            # 再次推进幂等：活动已收场，不产生新的释放事件。
+            await capture_handler("camera_take_photo")(11, runtime)
+            assert _value(
+                owned, "SELECT COUNT(*) FROM history_events WHERE event_type = 13"
+                " AND json_extract(body_json, '$.reason') = 3") == (1,)
         finally:
             owned.connection.close()
 

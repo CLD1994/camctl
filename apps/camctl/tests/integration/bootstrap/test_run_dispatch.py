@@ -173,6 +173,27 @@ class _ActivityDriver(DriverDouble):
         )
 
 
+class _SequentialActivityDriver(DriverDouble):
+    """契约替身：按派发顺序核对各动作自身的活动身份。"""
+
+    def __init__(self, targets: tuple[str, ...]) -> None:
+        super().__init__()
+        self._targets = list(targets)
+
+    async def control(self, request) -> DeviceCallResult:
+        self.calls.append(request.operation)
+        observation_type, _ = self._OBSERVATIONS[request.operation]
+        target = self._targets[len(self.calls) - 1]
+        return DeviceCallResult(
+            observations=(
+                DeviceObservation(
+                    type=observation_type, version=1,
+                    data={"activity_id": target}),
+            ),
+            error=self.error,
+        )
+
+
 def _capture_factory(driver: DriverDouble, files: dict):
     def build(owned) -> CaptureRuntime:
         return CaptureRuntime(
@@ -442,5 +463,62 @@ class TestRunWindowExpiration:
             " FROM actions WHERE id = 1") == (5, 2, observed_at)
         assert _scalar(db, "SELECT status FROM plans") == (3,)
         assert driver.calls == []
+        reports = _all(db, "SELECT id, status FROM reports")
+        assert reports and all(status == 4 for _, status in reports)
+
+
+class TestSameDeviceProgress:
+    """Q6 会话级：占用释放后同设备下一动作继续推进。"""
+
+    async def test_second_action_proceeds_after_first_releases(
+        self, tmp_path: Path,
+    ) -> None:
+        cfg = _config_for(tmp_path)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        # 同设备两个拍摄动作：第一份完成后其占用释放，第二份在
+        # 同一会话内继续派发并完成。
+        body = {
+            "request_id": "21",
+            "created_at": "2026-01-15 08:00:00",
+            "name": "plan",
+            "actions": [
+                {
+                    "name": f"shoot-{index}",
+                    "type": "camera_take_photo",
+                    "device_id": "cam-1",
+                    "scheduled_at": _future_schedule(1),
+                    "params": {"type": "single_shot"},
+                    "policy": {"max_delay_ms": 30_000},
+                }
+                for index in range(2)
+            ],
+        }
+        source = await _parsed(tmp_path, body)
+        driver = _SequentialActivityDriver(("1", "2"))
+        files = {
+            1: (_entry("shot-1", kind=ResultFileKind.PHOTO),),
+            2: (_entry("shot-2", kind=ResultFileKind.PHOTO),),
+        }
+        flows, supervisor = TestRunWindowExpiration._flows(deps, driver, files)
+        try:
+            outcome = await asyncio.wait_for(
+                execute_command(deps, source, flows=flows, poll_interval_s=0.1),
+                120)
+        finally:
+            await supervisor.stop()
+            close_runtime(deps)
+
+        assert outcome.succeeded is True, outcome.details
+        db = Path(cfg.paths.state_db)
+        statuses = _all(db, "SELECT id, status FROM actions ORDER BY id")
+        assert statuses == [(1, 3), (2, 3)]
+        assert driver.calls == ["take_photo", "take_photo"]
+        # 两个活动都已收场并释放：同设备占用不再保持。
+        occupancies = _all(
+            db, "SELECT activity_state, occupancy_state FROM device_activities"
+            " ORDER BY id")
+        assert occupancies == [(3, 2), (3, 2)]
         reports = _all(db, "SELECT id, status FROM reports")
         assert reports and all(status == 4 for _, status in reports)

@@ -16,7 +16,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Protocol
 
-from camctl.capture.models import ActivityObservationSave
+from camctl.capture.models import (
+    ActivityConcludeSave,
+    ActivityObservationSave,
+)
 from camctl.capture.files import (
     FileCompletionSave,
     FileObservationSave,
@@ -59,7 +62,12 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.ports import ControlRequest, DeviceCallResult
-from camctl.operations.attempts import AttemptConfig, AttemptFinish
+from camctl.operations.attempts import (
+    AttemptConfig,
+    AttemptFinish,
+    RunFinish,
+    RunOutcome,
+)
 from camctl.operations.models import (
     AttemptStatus,
     CallOutcome,
@@ -108,6 +116,7 @@ _ACTION_TERMINAL = (3, 4, 5, 6)
 
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _EFFECT_STATE = enum_for("operation_attempts.effect_state")
+_DISPATCH_STATE = enum_for("device_activities.dispatch_state")
 
 
 @dataclass(frozen=True)
@@ -214,11 +223,16 @@ class CaptureRuntime:
             return None, result.reason
         return result.ticket, None
 
-    def finish(self, ticket, outcome: CallOutcome) -> None:
+    def finish(self, ticket, outcome: CallOutcome, *,
+               end_run: RunOutcome | None = None,
+               run_error: ErrorValue | None = None) -> None:
+        """保存尝试结果；调用收场后同时结束流程（启动责任闭合）。"""
         attempt = AttemptFinish(
             ticket=ticket,
             outcome=validate_outcome(ticket, outcome, self.evidence),
             occurred_at=self.wall_us(),
+            run_finish=None if end_run is None else RunFinish(
+                status=end_run, error=run_error),
         )
         receipt = self.operations.finish_attempt(
             attempt, new_operation_key(), self.owned)
@@ -330,7 +344,11 @@ def _save_activity(runtime: CaptureRuntime, action_id: int, **facts) -> None:
 async def _control_call(runtime: CaptureRuntime, action, operation: str,
                         confirmed_observation: str,
                         activity_facts=None) -> HandlerOutcome:
-    """授予启动机会后发起一次设备控制调用并保存尝试与活动观察。"""
+    """授予启动机会后发起一次设备控制调用并保存尝试与活动观察。
+
+    调用错误或可靠确认效果时同时结束启动流程（额度一次用尽）；
+    未确认的发送保持流程执行中，等待后续效果核实。
+    """
     ticket, reason = runtime.grant(action)
     if ticket is None:
         return HandlerOutcome("not_granted", reason)
@@ -340,11 +358,21 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         params=action["effective_params_json"],
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
-    runtime.finish(ticket, outcome)
+    if result.error is not None:
+        runtime.finish(
+            ticket, outcome, end_run=RunOutcome.FAILED,
+            run_error=outcome.error)
+    elif confirmed:
+        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
+    else:
+        runtime.finish(ticket, outcome)
     if activity_facts is not None and result.error is None:
-        _save_activity(runtime, action["id"],
-                       **(activity_facts(confirmed) if callable(activity_facts)
-                          else activity_facts))
+        facts = (activity_facts(confirmed) if callable(activity_facts)
+                 else activity_facts)
+        # 调用已可靠返回：派发状态推进到成功返回。
+        facts = {"dispatch_state": int(_DISPATCH_STATE.SUCCESS_RETURNED),
+                 **facts}
+        _save_activity(runtime, action["id"], **facts)
     if result.error is not None:
         return HandlerOutcome("call_failed", "device_error")
     return HandlerOutcome("confirmed" if confirmed else "sent")
@@ -396,6 +424,15 @@ def _register_observed(
             file_id,
         ))
     return tuple(registered)
+
+
+def _conclude_activity(runtime: CaptureRuntime, action_id: int) -> None:
+    """成功链收场活动：结束观察与占用释放同事务，幂等可重入。"""
+    receipt = runtime.capture.conclude_activity(
+        ActivityConcludeSave(
+            action_id=action_id, occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
 def _finish_capture(
@@ -482,6 +519,7 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
         PhotoCompletion.COMPLETED_ON_RETURN,
     )
     if decision is PhotoDecision.REGISTER_SUCCESS:
+        _conclude_activity(context, action_id)
         _finish_capture(context, action_id, entries, FileKind.PHOTO)
     elif decision is PhotoDecision.FAILED_KEEP_FILES:
         _finish_capture(
