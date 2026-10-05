@@ -18,6 +18,8 @@ from camctl.cancellation.models import (
     CancelActionFinished,
     CancelApplyMode,
     CancelOutcomeChoice,
+    CancelStartDisposition,
+    CancelStartResult,
     CancelTargetError,
     CancelTargetsDisposition,
     CancelTargetsSaved,
@@ -27,6 +29,7 @@ from camctl.cancellation.models import (
     FixCancelTargets,
     RecordCancelResult,
     SelectionBasis,
+    StartCancelAction,
     StopWaitCancelItems,
 )
 from camctl.cancellation.targets import CancelLookup, CancelLookupError
@@ -68,6 +71,8 @@ _CANCEL_ACTION_TYPE = 6
 _TARGETS_FIXED_EVENT = 4
 _TARGETS_CANCEL_REASON = 3
 _TARGETS_FAIL_REASON = 4
+_ACTION_STARTED_EVENT = 5
+_ACTION_STARTED_REASON = 1
 
 _ACTION_STATUS = enum_for("actions.status")
 _TARGET_PENDING, _TARGET_FIXED, _TARGET_FAILED = 1, 2, 3
@@ -98,6 +103,89 @@ class _ItemValues:
     target_action_id: int
     selection_basis: int
     cancellation_effect: int
+
+
+class _StartCancelCommand:
+    """取消动作开始执行的事务命令（ACTION_STARTED.START）。
+
+    只保存开始事实；目标解析与集合固定由后续事务推进。时间资格由
+    调用入口判断，本命令不复验墙钟。
+    """
+
+    def __init__(self, command: StartCancelAction, key: OperationKey) -> None:
+        if not isinstance(command, StartCancelAction):
+            raise TypeError("取消动作开始申请必须使用 StartCancelAction")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise ConsistencyError(f"取消动作不存在: {command.action_id}")
+        self._state["actions"] = {command.action_id: dict(action)}
+        if action["type"] != _CANCEL_ACTION_TYPE:
+            raise ConsistencyError(
+                f"开始事务只适用于取消动作: {command.action_id}"
+                f" type={action['type']!r}")
+        if action["status"] in _ACTION_TERMINAL:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CancelStartResult(
+                    disposition=CancelStartDisposition.ALREADY))
+        if action["cancel_requested"]:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=CancelStartResult(
+                    disposition=CancelStartDisposition.REJECTED,
+                    reason="canceled"))
+        if action["status"] != 1 or action["execution_started"] != 0:
+            raise TransactionError(
+                f"取消动作不在待执行状态: {command.action_id}"
+                f" status={action['status']!r}"
+                f" execution_started={action['execution_started']!r}")
+        self._owners[("actions", command.action_id)] = (
+            "action", command.action_id)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _ACTION_STARTED_EVENT, _ACTION_STARTED_REASON,
+            (_update(
+                "actions", command.action_id,
+                {"status": 1, "execution_started": 0},
+                {"status": 2, "execution_started": 1}),),
+            command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=CancelStartResult(disposition=CancelStartDisposition.SAVED))
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        """原键重送：核实原开始分支与输入后恢复首次响应。"""
+        command = self._command
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds != [(_ACTION_STARTED_EVENT, _ACTION_STARTED_REASON)]:
+            raise TransactionError("操作身份已用于其他事务，不能作为取消开始重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("取消开始的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "actions" or row["id"] != command.action_id:
+            raise TransactionError("原取消开始属于其他动作")
+        facts = row_facts(scope.connection, "actions", command.action_id)
+        if facts is None or facts["status"] != 2 \
+                or facts["execution_started"] != 1:
+            raise TransactionError("原取消开始的可靠记录与输入不符")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CancelStartResult(disposition=CancelStartDisposition.SAVED))
 
 
 class _FixCancelTargetsCommand:
@@ -592,6 +680,14 @@ class _RecordCancelResultCommand:
 
 class CancellationRepository:
     """取消目标固定与解析失败事务的 SQLite 仓储。"""
+
+    def start_cancel_action(
+        self, command: StartCancelAction, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CancelStartResult]:
+        receipt = commit_operation(
+            _StartCancelCommand(command, key), key, owned)
+        return _outcome_of(receipt)
 
     def fix_cancel_targets(
         self, command: FixCancelTargets, key: OperationKey,

@@ -20,6 +20,8 @@ __all__ = [
     "CancelItemProgress",
     "CancelOutcomeChoice",
     "CancelProgress",
+    "CancelStartDisposition",
+    "CancelStartResult",
     "CancelTarget",
     "CancelTargetError",
     "CancelTargetsDisposition",
@@ -34,6 +36,7 @@ __all__ = [
     "FinishCancelAction",
     "FixCancelTargets",
     "RecordCancelResult",
+    "StartCancelAction",
     "StopWaitCancelItems",
     "CancellationEffect",
     "FixedCancelSet",
@@ -193,6 +196,40 @@ class FixCancelTargets:
         ObjectId(self.action_id)
         if not isinstance(self.targets, FixedCancelSet):
             raise TypeError("固定取消目标必须使用 FixedCancelSet")
+        UtcMicros(self.occurred_at)
+
+
+class CancelStartDisposition(Enum):
+    """取消动作开始事务的结果分类。"""
+
+    SAVED = "saved"
+    #: 动作已终态或原键重送：只读恢复首次结果。
+    ALREADY = "already"
+    #: 取消请求已生效：不开始新的取消执行。
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class CancelStartResult:
+    """取消动作开始事务的保存结果。"""
+
+    disposition: CancelStartDisposition
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class StartCancelAction:
+    """一次取消动作开始执行的申请输入（ACTION_STARTED.START）。
+
+    有限收场入口（时钟异常受限会话）对未排期取消动作先保存开始事
+    实，再解析并固定目标集合；时间资格由调用入口判断。
+    """
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
         UtcMicros(self.occurred_at)
 
 

@@ -360,9 +360,17 @@ class HistoryRepository:
             for selection_id in selection_ids:
                 yield from _ids_where(
                     connection, "obtain_items", "selection_id", selection_id)
-            for cancel_item_id in _ids_where(connection, "cancel_items", "action_id", action):
+            for _, cancel_item_id in _ids_where(connection, "cancel_items", "action_id", action):
                 yield from _ids_where(
                     connection, "cancel_delivery_items", "cancel_item_id", cancel_item_id)
+            # 取消成员的目标动作行：cancel_item 投影经 cancel_target
+            # 关联读取目标类型，目标可能属于其他计划。
+            with closing(connection.execute(
+                    "SELECT target_action_id FROM cancel_items"
+                    " WHERE action_id = ?", (action,))) as cursor:
+                target_actions = {int(row[0]) for row in cursor.fetchall()}
+            for target in sorted(target_actions):
+                yield from _ids_where(connection, "actions", "id", target)
         elif name == "outputs":
             yield from _ids_where(connection, "outputs", "id", entity_id)
             yield from _ids_where(connection, "output_origins", "output_id", entity_id)

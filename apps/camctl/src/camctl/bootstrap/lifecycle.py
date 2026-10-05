@@ -165,9 +165,10 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
 
     注册报告事务守卫后组装维护流程：到期的同步动作、报告冻结、
     子进程生成与发布编排都由流程按轮推进；监督方惰性启动，由
-    execute_command 在会话结束后收场。
+    execute_command 在会话结束后收场。受限会话的取消流程与一次
+    报告机会由 execute_command 在此基础上另行装配。
     """
-    from camctl.bootstrap.flows import report_flow
+    from camctl.bootstrap.flows import cancel_flow, report_flow
     from camctl.reporting.maintenance import MaintenanceLimits
     from camctl.reporting.supervisor import WorkerSupervisor
     from camctl.reporting.worker import report_lock_path
@@ -176,11 +177,14 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
         limits=MaintenanceLimits.defaults(),
         lock_path=str(report_lock_path(deps.state_db)),
     )
+    staging = Path(deps.config.paths.staging).expanduser().resolve()
+    ready = Path(deps.config.paths.ready).expanduser().resolve()
+    processing = Path(deps.config.paths.processing).expanduser().resolve()
     flow = report_flow(
         state_db=deps.state_db,
-        staging=Path(deps.config.paths.staging).expanduser().resolve(),
-        ready=Path(deps.config.paths.ready).expanduser().resolve(),
-        processing=Path(deps.config.paths.processing).expanduser().resolve(),
+        staging=staging,
+        ready=ready,
+        processing=processing,
         history=deps.config.history,
         database=deps.config.database,
         supervisor=supervisor,
@@ -207,14 +211,43 @@ async def execute_command(
 
     failure_log, copy_request_factory = _failure_log_wiring(deps)
     supervisor: Any = None
-    if flows is None and deps.mode is CommandMode.RUN:
-        flows, supervisor = _report_assembly(deps)
+    restricted_supervisor: Any = None
     overrides: dict[str, Any] = {
         "flows": flows if flows is not None else {},
         "wake": wake,
     }
     if poll_interval_s is not None:
         overrides["poll_interval_s"] = poll_interval_s
+    if flows is None and deps.mode is CommandMode.RUN:
+        flows, supervisor = _report_assembly(deps)
+        # 受限会话装配：墙钟检查失败时消费规定取消流程与一次报告。
+        from camctl.bootstrap.flows import cancel_flow, report_flow
+        from camctl.reporting.maintenance import MaintenanceLimits
+        from camctl.reporting.supervisor import WorkerSupervisor
+        from camctl.reporting.worker import report_lock_path
+
+        restricted_supervisor = WorkerSupervisor(
+            limits=MaintenanceLimits.defaults(),
+            lock_path=str(report_lock_path(deps.state_db)),
+        )
+        staging = Path(deps.config.paths.staging).expanduser().resolve()
+        ready = Path(deps.config.paths.ready).expanduser().resolve()
+        processing = Path(deps.config.paths.processing).expanduser().resolve()
+        overrides.update(
+            flows=flows,
+            restricted_flows={"cancel": cancel_flow(
+                ready=ready, processing=processing)},
+            once_report=report_flow(
+                state_db=deps.state_db,
+                staging=staging,
+                ready=ready,
+                processing=processing,
+                history=deps.config.history,
+                database=deps.config.database,
+                supervisor=restricted_supervisor,
+                start_actions=False,
+            ),
+        )
     context = SessionContext(
         mode=deps.mode,
         catalog=deps.catalog,
@@ -239,6 +272,8 @@ async def execute_command(
     finally:
         if supervisor is not None:
             await supervisor.stop()
+        if restricted_supervisor is not None:
+            await restricted_supervisor.stop()
 
 
 def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体

@@ -8,6 +8,10 @@
 已保存事实幂等推进，重复调度不产生重复副作用。report_flow
 每轮推进报告责任：开始到期的同步动作、补齐已覆盖但未保存的本
 地完成、冻结新的报告机会，并把进行中的报告推进到发布。
+cancel_flow 是时钟异常受限会话的规定取消入口：驱动已受理、未
+排期且未取消的取消动作完成寻址、固定、生效与逐目标收场，全部
+成员终态后保存汇总终态；收场未完成的动作保持执行中，等待后续
+会话。
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from camctl.persistence.repositories.scheduling import (
 )
 from camctl.session.service import StateDbFailure
 
-__all__ = ["capture_flow", "report_flow"]
+__all__ = ["capture_flow", "cancel_flow", "report_flow"]
 
 
 def _due_pending_actions(
@@ -109,6 +113,236 @@ def capture_flow(capture_factory: Callable[[Any], Any]) -> Callable[[Any], Any]:
             owned.connection.close()
 
     return flow
+
+
+def _restricted_cancel_actions(owned: Any) -> list[tuple[int, int, str]]:
+    """受限入口的取消动作：已受理、未排期且自身未被取消。"""
+    with closing(owned.connection.execute(
+        "SELECT id, status, input_fields_json FROM actions"
+        " WHERE type = 6 AND scheduled_at IS NULL AND status IN (1, 2)"
+        " AND cancel_requested = 0 ORDER BY id"
+    )) as cursor:
+        return [(int(row[0]), int(row[1]), row[2])
+                for row in cursor.fetchall()]
+
+
+def _cancel_target_from_input(spec_json: str):
+    """从已受理取消动作的原始输入重建寻址对象；形态不可靠按状态库错误。"""
+    from camctl.cancellation.models import CancelTarget
+
+    try:
+        params = json.loads(spec_json)["params"]["target"]
+    except (ValueError, KeyError, TypeError) as error:
+        raise StateDbFailure(f"取消动作目标不可读: {error}") from error
+    if not isinstance(params, dict):
+        raise StateDbFailure(f"取消动作目标不是对象: {params!r}")
+    fields: dict[str, Any] = {}
+    for key in ("request_id", "group"):
+        if key in params:
+            fields[key] = params[key]
+    for key in ("plan_instance_id", "action_instance_id"):
+        if key in params:
+            try:
+                fields[key] = int(params[key])
+            except (TypeError, ValueError) as error:
+                raise StateDbFailure(
+                    f"取消动作目标身份不可解释: {key}={params[key]!r}"
+                ) from error
+    try:
+        return CancelTarget(**fields)
+    except ValueError as error:
+        raise StateDbFailure(f"取消动作目标不构成寻址组合: {error}") from error
+
+
+def _fixed_cancel_items(owned: Any, action_id: int) -> tuple[int, ...] | None:
+    """已固定的取消成员；尚未固定时返回 None。"""
+    with closing(owned.connection.execute(
+            "SELECT target_selection_state FROM actions WHERE id = ?",
+            (action_id,))) as cursor:
+        row = cursor.fetchone()
+    if row is None or row[0] is None or int(row[0]) != 2:
+        return None
+    with closing(owned.connection.execute(
+            "SELECT id FROM cancel_items WHERE action_id = ? ORDER BY id",
+            (action_id,))) as cursor:
+        return tuple(int(item[0]) for item in cursor.fetchall())
+
+
+def _withdrawal_position(owned: Any, ready: Path, processing: Path):
+    """按交付文件名观察当前交接位置；观察不到按未知处理。"""
+    def position(delivery_id: int) -> str:
+        with closing(owned.connection.execute(
+                "SELECT file_name FROM deliveries WHERE id = ?",
+                (delivery_id,))) as cursor:
+            row = cursor.fetchone()
+        if row is None or not isinstance(row[0], str) or not row[0]:
+            return "unknown"
+        if (ready / row[0]).exists():
+            return "ready"
+        if (processing / row[0]).exists():
+            return "processing"
+        return "unknown"
+    return position
+
+
+def cancel_flow(*, ready: Path, processing: Path) -> Callable[[Any], Any]:
+    """构造受限会话的取消入口流程。
+
+    逐动作推进完整取消链：开始（未开始时）→ 寻址 → 固定 → 生效
+    与逐目标收场 → 汇总终态。可靠不存在与自身包含按登记错误结束
+    取消动作；查询失败按状态库错误停止；收场未完成的成员保持处
+    理中，本次不等待设备工作。
+    """
+
+    async def flow(context: Any) -> None:
+        from camctl.cancellation.models import (
+            CancelStartDisposition,
+            FinishCancelAction,
+            StartCancelAction,
+        )
+        from camctl.cancellation.service import ApplyCancel
+        from camctl.cancellation.rules import (
+            CancellationStatus,
+            summarize_cancel,
+        )
+        from camctl.cancellation.service import (
+            CancellationRuntime,
+            apply_cancel,
+        )
+        from camctl.cancellation.settlement import TargetSettlement
+        from camctl.persistence.repositories.cancellation import (
+            CancellationRepository,
+        )
+        from camctl.persistence.repositories.outputs import OutputsRepository
+
+        owned = context.open_connection()
+        try:
+            repository = CancellationRepository()
+            occurred = context.clock.utc_micros
+            for action_id, status, spec_json in _restricted_cancel_actions(owned):
+                item_ids = _fixed_cancel_items(owned, action_id)
+                if item_ids is None:
+                    if status == 1:
+                        started = repository.start_cancel_action(
+                            StartCancelAction(
+                                action_id=action_id, occurred_at=occurred()),
+                            new_operation_key(), owned)
+                        if started.kind is not DbOutcomeKind.COMPLETED:
+                            raise StateDbFailure(
+                                "取消动作开始事务未完成"
+                                f"（{started.kind.value}）: {started.error}")
+                        if started.value.disposition \
+                                is CancelStartDisposition.REJECTED:
+                            continue
+                    item_ids = _resolve_and_fix(
+                        owned, repository, action_id, spec_json, occurred)
+                    if item_ids is None:
+                        continue
+                settlement = TargetSettlement(
+                    owned=owned, outputs=OutputsRepository(),
+                    cancellations=repository,
+                    withdrawal_positions=_withdrawal_position(
+                        owned, ready, processing),
+                    occurred_at=occurred)
+                progress = await apply_cancel(
+                    ApplyCancel(origin_action_id=action_id, item_ids=item_ids),
+                    CancellationRuntime(
+                        owned=owned, repository=repository,
+                        settlement=settlement, occurred_at=occurred))
+                if summarize_cancel(progress).status is CancellationStatus.RUNNING:
+                    # 收场未完成：保持执行中，等待后续会话推进。
+                    continue
+                finished = repository.finish_cancel_action(
+                    FinishCancelAction(action_id, occurred()),
+                    new_operation_key(), owned)
+                if finished.kind is not DbOutcomeKind.COMPLETED:
+                    raise StateDbFailure(
+                        "取消动作终态事务未完成"
+                        f"（{finished.kind.value}）: {finished.error}")
+        finally:
+            owned.connection.close()
+
+    return flow
+
+
+def _resolve_and_fix(
+        owned: Any, repository: Any, action_id: int, spec_json: str,
+        occurred: Callable[[], int]) -> tuple[int, ...] | None:
+    """解析并固定取消目标；可靠不存在或自身包含时按登记错误结束。
+
+    返回固定成员编号；取消动作已按解析失败终态时返回 None。
+    """
+    from camctl.cancellation.models import (
+        FailCancelTargets,
+        FixCancelTargets,
+        ResolvedTargets,
+        TargetFacts,
+    )
+    from camctl.cancellation.rules import (
+        decide_cancel_eligibility,
+        load_eligibility_facts,
+        may_apply_cancel,
+    )
+    from camctl.cancellation.targets import (
+        missing_target_error,
+        prepare_cancel_set,
+        resolve_cancel_target,
+    )
+    from camctl.persistence.repositories.cancellation import (
+        SqliteCancelLookup,
+        sqlite_auto_candidates,
+    )
+
+    target = _cancel_target_from_input(spec_json)
+    resolution = resolve_cancel_target(
+        target, SqliteCancelLookup(owned.connection))
+    if resolution.lookup_failed is not None:
+        raise StateDbFailure(
+            f"取消目标查询失败: {resolution.lookup_failed}")
+    if resolution.missing:
+        _fail_cancel_targets(
+            owned, repository, action_id,
+            missing_target_error(target), occurred)
+        return None
+    connection = owned.connection
+    with closing(connection.execute(
+            "SELECT id FROM actions WHERE status IN (3, 4, 5, 6)")) as cursor:
+        terminal = {int(row[0]) for row in cursor.fetchall()}
+    direct = tuple(
+        TargetFacts(
+            action_id=identity,
+            terminal=identity in terminal,
+            may_cancel=may_apply_cancel(decide_cancel_eligibility(
+                load_eligibility_facts(connection, identity))))
+        for identity in resolution.action_ids)
+    fixed = prepare_cancel_set(action_id, ResolvedTargets(
+        direct=direct,
+        auto_candidates=sqlite_auto_candidates(
+            connection, resolution.action_ids)))
+    from camctl.cancellation.models import CancelTargetError
+    if isinstance(fixed, CancelTargetError):
+        _fail_cancel_targets(owned, repository, action_id, fixed, occurred)
+        return None
+    saved = repository.fix_cancel_targets(
+        FixCancelTargets(action_id, fixed, occurred()),
+        new_operation_key(), owned)
+    if saved.kind is not DbOutcomeKind.COMPLETED:
+        raise StateDbFailure(
+            f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}")
+    return saved.value.item_ids
+
+
+def _fail_cancel_targets(
+        owned: Any, repository: Any, action_id: int, error, occurred) -> None:
+    from camctl.cancellation.models import FailCancelTargets
+
+    outcome = repository.fail_cancel_targets(
+        FailCancelTargets(action_id, error, occurred()),
+        new_operation_key(), owned)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise StateDbFailure(
+            f"取消目标解析失败事务未完成（{outcome.kind.value}）"
+            f": {outcome.error}")
 
 
 def _report_status_params(spec_json: str) -> dict:
@@ -211,6 +445,7 @@ def report_flow(
     history: Any,
     database: Any,
     supervisor: Any,
+    start_actions: bool = True,
 ) -> Callable[[Any], Any]:
     """构造推进报告责任的维护流程。
 
@@ -218,7 +453,9 @@ def report_flow(
     的报告推进到发布；无进行中报告时冻结新的报告机会。报告生成
     经监督方派发给独立子进程；状态库或历史错误按会话错误收场，
     普通报告失败保留责任，不轮询重试。会话开始时的首轮允许重试
-    此前失败的报告；同轮失败后不再重复，等待新的触发。
+    此前失败的报告；同轮失败后不再重复，等待新的触发。受限会话
+    的一次报告机会以 start_actions=False 构造：不启动新的同步
+    动作，已保存的同步责任仍参与覆盖判断。
     """
 
     instance_state: dict[str, str | None] = {"id": None}
@@ -374,7 +611,8 @@ def report_flow(
         owned = context.open_connection()
         try:
             now_us = context.clock.utc_micros()
-            _start_due_report_actions(owned, now_us)
+            if start_actions:
+                _start_due_report_actions(owned, now_us)
             _settle_covered_local_syncs(owned, now_us)
             pending = _in_flight_report_ids(owned)
             if not pending:
