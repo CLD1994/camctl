@@ -31,6 +31,7 @@ from camctl.devices.tasks import (
     EndControl,
     StartReturn,
 )
+from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
@@ -79,6 +80,8 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset()),
         EvidenceContract(type="timelapse_sent", version=1, operation="control",
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
+        EvidenceContract(type="results_returned", version=1, operation="result",
+                         fields=frozenset()),
     )
 )
 
@@ -149,8 +152,9 @@ def _timelapse_plan(request_id: str, scheduled_at: str) -> dict:
     }
 
 
-def _timelapse_factory(driver, results):
+def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = None):
     def build(owned) -> CaptureRuntime:
+        overrides = {} if check_config is None else {"check_config": check_config}
         return CaptureRuntime(
             owned=owned,
             scheduling=SchedulingRepository(),
@@ -166,15 +170,17 @@ def _timelapse_factory(driver, results):
                 scheduled_at=action["scheduled_at"],
                 window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
             wait_config=lambda params: _WAIT_CONFIG,
+            **overrides,
         )
 
     return build
 
 
-def _run_session(deps, driver, results):
+def _run_session(deps, driver, results, *, check_config: AttemptConfig | None = None):
     return asyncio.create_task(execute_command(
         deps, None,
-        flows={"scheduling": capture_flow(_timelapse_factory(driver, results))},
+        flows={"scheduling": capture_flow(
+            _timelapse_factory(driver, results, check_config=check_config))},
         poll_interval_s=0.1,
     ))
 
@@ -260,6 +266,158 @@ class TestTimelapseUnmetFinish:
                 db, "SELECT COUNT(*) FROM outputs") == (0,)
             assert _scalar(
                 db, "SELECT status FROM plans WHERE id = 1") == (3,)
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+
+class TestTimelapseCheckRounds:
+    async def test_incomplete_file_retries_next_round_then_succeeds(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "retry-round"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        # 第一轮：必需类别已在设备上但写入尚未完成，属于暂不齐备。
+        results = ResultsDouble({1: (_entry("sequence-1", complete=False),)})
+        task = _run_session(deps, driver, results)
+        try:
+            await _await_query(
+                db,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'",
+                (2, 1, 1))
+            assert _scalar(
+                db,
+                "SELECT a.status FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'results/1'"
+                " AND a.attempt_no = 1") == (2,)
+            assert _scalar(
+                db,
+                "SELECT result_set_state FROM device_activities"
+                " WHERE id = 1") == (1,)
+            # 下一轮文件写完：新轮次尝试后结论、流程结束与终态同链保存。
+            results.files_by_action[1] = (_entry("sequence-1"),)
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            run = _scalar(
+                db,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'")
+            assert run == (3, 2, 0)
+            assert _scalar(
+                db,
+                "SELECT a.status FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'results/1'"
+                " AND a.attempt_no = 2") == (2,)
+            assert _scalar(
+                db,
+                "SELECT result_set_state, completion_basis, occupancy_state"
+                " FROM device_activities WHERE id = 1") == (3, 3, 2)
+            assert _scalar(
+                db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1"
+                ) == (1,)
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+    async def test_exhausted_rounds_close_unconfirmed(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "exhausted"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        results = ResultsDouble({1: (_entry("sequence-1", complete=False),)})
+        task = _run_session(
+            deps, driver, results,
+            check_config=AttemptConfig(
+                max_attempts=1, timeout_s=Decimal("10"),
+                retry_interval_s=Decimal("3")))
+        try:
+            # 单轮预算用尽后不再列举：核实流程与集合结论同事务收场为
+            # 无法确认，动作按登记的公共错误失败，占用保持等待残留收场。
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (4,))
+            row = _scalar(
+                db,
+                "SELECT result_set_state, completion_basis, occupancy_state,"
+                " json_extract(capture_json, '$.status')"
+                " FROM device_activities WHERE id = 1")
+            assert row == (4, 1, 1, "unconfirmed")
+            assert _scalar(
+                db,
+                "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'results/1'") == (6, 1)
+            failure = _scalar(
+                db,
+                "SELECT error_code, json_extract(error_details_json, '$.reason')"
+                " FROM actions WHERE id = 1")
+            assert failure == (12, "outputs_unknown")
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+    async def test_listing_failure_consumes_round_then_recovers(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "listing-failure"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+
+        class _FlakyResults:
+            """第一轮列举抛错，之后返回完整结果。"""
+
+            def __init__(self) -> None:
+                self.failed = False
+
+            async def list_files(self, action_id: int) -> tuple:
+                if not self.failed:
+                    self.failed = True
+                    raise RuntimeError("listing transport failed")
+                return (_entry("sequence-1"),)
+
+        flaky = _FlakyResults()
+        task = _run_session(deps, driver, flaky)
+        try:
+            # 失败轮次保存失败尝试并建立重试等待；下一轮新尝试后成功。
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            run = _scalar(
+                db,
+                "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'results/1'")
+            assert run == (3, 2)
+            attempts = _scalar(
+                db,
+                "SELECT a.status FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'results/1'"
+                " AND a.attempt_no = 1")
+            assert attempts == (3,)
+            assert _scalar(
+                db,
+                "SELECT result_set_state, completion_basis"
+                " FROM device_activities WHERE id = 1") == (3, 3)
         finally:
             await _cancel(task)
         close_runtime(deps)

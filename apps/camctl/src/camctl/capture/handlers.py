@@ -3,10 +3,12 @@
 处理器是调度侧（Q5）登记的动作推进入口：按能力阶段推进一次执
 行——授予启动机会、发起设备契约调用、把结果列举观察登记为设备
 文件（归属按任务独立范围确认、完成按设备保证保存）、按 C6 核实
-产物集合，可判定时保存终态与正式产物。驱动与结果列举由端口提供
-（契约替身与真实驱动同形）。设备活动与处理决定的生产者随调度接
-线接入前，录像中段与延时等待事实经能力状态端口装载；录像媒体链
-与 D4 读取会话工厂属后续分段。
+产物集合，可判定时保存终态与正式产物。延时核实按 CHECK_CAPTURE_
+RESULTS 责任编排名额轮次：结论与尝试结束同事务提交，暂不齐备或
+列举失败建立重试等待后作为新轮次，预算耗尽按无法确认收场。驱
+动与结果列举由端口提供（契约替身与真实驱动同形）。设备活动与
+处理决定的生产者随调度接线接入前，录像中段与延时等待事实经能
+力状态端口装载；录像媒体链与 D4 读取会话工厂属后续分段。
 """
 
 from __future__ import annotations
@@ -132,6 +134,9 @@ _KNOWN_FAILURE_METHOD = "known_failure"
 
 _ACTION_TERMINAL = (3, 4, 5, 6)
 
+#: 结果核实轮次收场依据的证据类型（驱动登记 operation="result"）。
+_RESULTS_RETURNED = "results_returned"
+
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _EFFECT_STATE = enum_for("operation_attempts.effect_state")
 _DISPATCH_STATE = enum_for("device_activities.dispatch_state")
@@ -214,6 +219,10 @@ class CaptureRuntime:
     #: 停止尝试的本次预算；默认 3 次、单次 10 秒、重试间隔 1 秒。
     stop_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("1")))
+    #: 结果核实轮次的本次预算；默认 3 轮、单轮 10 秒、重试间隔 3 秒
+    #:（configuration.md#状态查询与产物核实的配置）。
+    check_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
+        max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
 
     def action(self, action_id: int) -> Mapping[str, Any]:
         facts = row_facts(self.owned.connection, "actions", action_id)
@@ -760,7 +769,41 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         # 取消已生效：核实与成功终态都不再推进，等待取消收场接入。
         return
     wait_event_id = _complete_timelapse_wait(context, action_id)
-    entries = await context.results.list_files(action_id)
+    with closing(context.owned.connection.execute(
+        "SELECT result_set_state FROM device_activities WHERE id = ?",
+        (action_id,),
+    )) as cursor:
+        concluded = cursor.fetchone()[0] in (3, 4)
+    if concluded:
+        # 中断后已有可靠结论：用原结果完成收尾，不重开核实责任。
+        await _finish_timelapse_conclusion(context, action_id)
+        return
+    in_flight = context.last_attempt(f"results/{action_id}")
+    if in_flight is not None and in_flight[0] == int(_ATTEMPT_STATUS.RUNNING):
+        # 中断遗留的在途轮次：跨会话恢复前停等，不提交新意图。
+        return
+    begin = _begin_check_round(context, action_id)
+    if begin.disposition is not BeginDisposition.GRANTED:
+        if begin.reason == "budget_exhausted":
+            # 有限轮次用尽：核实责任与无法确认结论同事务收场。
+            _close_check_unconfirmed(context, action_id)
+            _finish_capture(
+                context, action_id, (), FileKind.VIDEO,
+                failure=RecordingFailure(
+                    code="capture_result_unconfirmed",
+                    details={
+                        "activity_id": str(action_id),
+                        "reason": "outputs_unknown"}))
+        # 其余拒绝（责任已闭合）：等待收尾轮次，不再提交意图。
+        return
+    ticket = begin.ticket
+    try:
+        entries = await context.results.list_files(action_id)
+    except Exception:
+        # 本轮列举失败：保存失败结果并建立重试等待，下一轮重新核实。
+        context.finish(ticket, _round_outcome(
+            ErrorValue(code="device_error", stage="device")), retry_wait=True)
+        return
     assessment = assess_capture_files(
         CaptureFileSet(
             files=tuple(
@@ -772,13 +815,13 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         ProductRequirements(required_kinds=frozenset({FileKind.VIDEO})))
     if assessment.is_complete:
         _confirm_timelapse_results(
-            context, action_id, assessment, entries, wait_event_id)
+            context, action_id, assessment, entries, wait_event_id, ticket)
         # 时间与产物完成依据成立后解除占用；收尾处理不再阻塞同设备。
         _release_occupancy(context, action_id)
         _finish_capture(context, action_id, entries, FileKind.VIDEO)
     elif assessment.explicitly_unmet:
         _confirm_timelapse_results(
-            context, action_id, assessment, entries, wait_event_id)
+            context, action_id, assessment, entries, wait_event_id, ticket)
         _finish_capture(
             context, action_id, entries, FileKind.VIDEO,
             failure=RecordingFailure(
@@ -786,7 +829,88 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
                 details={
                     "activity_id": str(action_id),
                     "reason": "no_outputs"}))
-    # 暂未齐备：保留核实责任，等待下一轮列举后重新判定。
+    else:
+        # 暂不齐备：本轮成功结果与重试等待共同保存，下一轮作为新轮次。
+        context.finish(ticket, _round_outcome(), retry_wait=True)
+
+
+def _begin_check_round(runtime: CaptureRuntime, action_id: int):
+    """为一轮结果核实提交意图并返回授予结果；预算沿原流程累计。"""
+    outcome = runtime.operations.begin_attempt(
+        AttemptIntent(
+            operation="result", action_id=action_id,
+            kind=OperationKind.CHECK_CAPTURE_RESULTS,
+            target=AttemptTarget(activity_id=action_id),
+            query_purpose=None, config=runtime.check_config,
+            occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"核实意图事务未完成（{outcome.kind.value}）: {outcome.error}")
+    return outcome.value
+
+
+def _round_outcome(error: ErrorValue | None = None) -> CallOutcome:
+    """一轮结果列举的尝试结局：可靠返回，效果未知。"""
+    return CallOutcome(
+        status=(AttemptStatus.FAILED if error is not None
+                else AttemptStatus.SUCCEEDED),
+        error=error,
+        effect=EffectState.UNKNOWN,
+        settlement=Settlement(
+            basis=SettlementBasis.OBSERVED,
+            evidence=EvidenceValue(
+                type=_RESULTS_RETURNED, version=1, data={}),
+        ),
+    )
+
+
+def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int) -> None:
+    """预算耗尽：核实流程与无法确认的集合结论同事务收场。"""
+    receipt = runtime.capture.close_result_check_unconfirmed(
+        ResultSetSave(
+            action_id=action_id,
+            occurred_at=runtime.wall_us(),
+            phase=ResultSetPhase.UNCONFIRMED,
+            contract=_RESULT_CONTRACT,
+            observation={"reason": "attempts_exhausted"},
+            capture={"status": "unconfirmed",
+                     "error": {"code": "result_unconfirmed"}},
+            error={"code": "result_unconfirmed"},
+        ), new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
+async def _finish_timelapse_conclusion(
+    runtime: CaptureRuntime, action_id: int) -> None:
+    """集合已有结论后的收尾：按保存的判定登记产物与终态。
+
+    核实责任终态保持，不重开轮次；产物登记经收尾列举进行，列举
+    事实与已保存结论不一致时保持等待。
+    """
+    with closing(runtime.owned.connection.execute(
+        "SELECT result_set_state, completion_basis FROM device_activities"
+        " WHERE id = ?", (action_id,),
+    )) as cursor:
+        state, basis = cursor.fetchone()
+    entries = await runtime.results.list_files(action_id)
+    if state == 3 and basis == 3:
+        _release_occupancy(runtime, action_id)
+        _finish_capture(runtime, action_id, entries, FileKind.VIDEO)
+    elif state == 3:
+        _finish_capture(
+            runtime, action_id, entries, FileKind.VIDEO,
+            failure=RecordingFailure(
+                code="capture_failed",
+                details={"activity_id": str(action_id), "reason": "no_outputs"}))
+    else:
+        _finish_capture(
+            runtime, action_id, entries, FileKind.VIDEO,
+            failure=RecordingFailure(
+                code="capture_result_unconfirmed",
+                details={
+                    "activity_id": str(action_id),
+                    "reason": "outputs_unknown"}))
 
 
 def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:
@@ -808,13 +932,13 @@ def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:
 
 def _confirm_timelapse_results(
     runtime: CaptureRuntime, action_id: int, assessment, entries,
-    wait_event_id: int,
+    wait_event_id: int, ticket,
 ) -> None:
-    """把本轮结果集合核实结论与采集判定共同保存。
+    """把本轮结果集合核实结论与尝试结束、流程收场共同保存。
 
     完整集合满足时按时间与产物完成判定，依据引用已保存的等待完
     成事实；明确不满足保存已知失败。观察只记录实际列举到的文件
-    事实，不填理论张数。
+    事实，不填理论张数。结论与承载它的列举轮次原子提交。
     """
     identities = sorted(entry.identity for entry in entries)
     if assessment.is_complete:
@@ -844,8 +968,14 @@ def _confirm_timelapse_results(
                 "method": _KNOWN_FAILURE_METHOD,
                 "observation": {"files": identities, "missing": missing},
             })
-    receipt = runtime.capture.confirm_result_set(
-        command, new_operation_key(), runtime.owned)
+    finish = AttemptFinish(
+        ticket=ticket,
+        outcome=validate_outcome(ticket, _round_outcome(), runtime.evidence),
+        occurred_at=runtime.wall_us(),
+        run_finish=RunFinish(status=RunOutcome.SUCCEEDED),
+    )
+    receipt = runtime.capture.finish_result_check(
+        finish, command, new_operation_key(), runtime.owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 

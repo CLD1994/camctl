@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -20,23 +21,51 @@ from camctl.capture.models import (
     ResultSetSave,
     WaitCompletedSave,
 )
+from camctl.capture.handlers import CaptureRuntime, capture_handler
 from camctl.contracts.values import new_operation_key
+from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
+from camctl.operations.attempts import (
+    AttemptConfig,
+    AttemptFinish,
+    AttemptIntent,
+    AttemptTarget,
+    FinishDisposition,
+    OperationKind,
+    RunFinish,
+    RunOutcome,
+)
+from camctl.operations.models import (
+    AttemptStatus,
+    CallOutcome,
+    EffectState,
+    EvidenceValue,
+    Settlement,
+    SettlementBasis,
+)
+from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
     ReleaseOutcome,
     register_capture_guards,
 )
+from camctl.persistence.repositories.operations import (
+    OperationRepository,
+    register_operation_guards,
+)
+from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import (
     TimelapseRepository,
     register_timelapse_guards,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
+from .test_capture_contract import ResultsDouble, _entry
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action
 
 register_capture_guards()
+register_operation_guards()
 register_timelapse_guards()
 
 pytestmark = pytest.mark.asyncio
@@ -429,5 +458,388 @@ class TestResultSetConfirmation:
                     evidence={"method": "time_and_outputs",
                               "wait_completed_event_id": 1,
                               "observation": {}}))
+        finally:
+            owned.connection.close()
+
+
+#: 核实轮次尝试结果的证据登记：result 操作的可靠返回契约。
+_CHECK_EVIDENCE = EvidenceRegistry(
+    (EvidenceContract(type="results_returned", version=1, operation="result",
+                      fields=frozenset()),))
+
+_CHECK_CONFIG = AttemptConfig(
+    max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3"))
+
+
+def _check_ticket(owned):
+    """授予一轮结果核实尝试并返回票据。"""
+    outcome = OperationRepository().begin_attempt(
+        AttemptIntent(
+            operation="result", action_id=1,
+            kind=OperationKind.CHECK_CAPTURE_RESULTS,
+            target=AttemptTarget(activity_id=1),
+            query_purpose=None, config=_CHECK_CONFIG, occurred_at=_NOW),
+        new_operation_key(), owned)
+    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+    assert outcome.value.disposition.value == "granted"
+    return outcome.value.ticket
+
+
+def _round_finish(ticket, *, retry_wait: bool = False) -> AttemptFinish:
+    outcome = validate_outcome(ticket, CallOutcome(
+        status=AttemptStatus.SUCCEEDED, error=None, effect=EffectState.UNKNOWN,
+        settlement=Settlement(
+            basis=SettlementBasis.OBSERVED,
+            evidence=EvidenceValue(type="results_returned", version=1, data={}),
+        )), _CHECK_EVIDENCE)
+    return AttemptFinish(
+        ticket=ticket, outcome=outcome, occurred_at=_NOW,
+        retry_wait=retry_wait,
+        run_finish=None if retry_wait else RunFinish(status=RunOutcome.SUCCEEDED))
+
+
+class TestFinishResultCheck:
+    async def test_conclusion_commits_with_attempt_and_run_end(
+            self, tmp_path: Path) -> None:
+        """结论与尝试结果、流程结束同一事务提交。"""
+        owned = _environment(tmp_path)
+        try:
+            wait_id = _complete_wait(owned)
+            ticket = _check_ticket(owned)
+            outcome = CaptureRepository().finish_result_check(
+                _round_finish(ticket), _satisfied(wait_id),
+                new_operation_key(), owned)
+            assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+            assert outcome.value.finish.disposition is FinishDisposition.SAVED
+            assert outcome.value.finish.attempt_status is AttemptStatus.SUCCEEDED
+            assert outcome.value.result_set.result_set_state == 3
+            assert outcome.value.result_set.completion_basis == 3
+            run = _value(
+                owned,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'")
+            assert run == (3, 1, 0)
+            events = owned.connection.execute(
+                "SELECT transaction_id, event_type,"
+                " json_extract(body_json, '$.reason') FROM history_events"
+                " WHERE event_type IN (12, 10, 16) ORDER BY id").fetchall()
+            assert [row[1] for row in events] == [12, 10, 16]
+            assert len({row[0] for row in events}) == 1
+            assert events[2][2] == 1  # RESULT_SET_CONFIRMED.COMPLETE
+        finally:
+            owned.connection.close()
+
+    async def test_atomic_rejection_keeps_attempt_running(
+            self, tmp_path: Path) -> None:
+        """结论输入被拒时尝试与流程保持原状，不留半提交事实。"""
+        owned = _environment(tmp_path)
+        try:
+            ticket = _check_ticket(owned)
+            outcome = CaptureRepository().finish_result_check(
+                _round_finish(ticket), _satisfied(1),
+                new_operation_key(), owned)
+            assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+            row = _value(
+                owned,
+                "SELECT r.status, r.attempts_used, a.status"
+                " FROM operation_runs r JOIN operation_attempts a"
+                " ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'results/1'")
+            assert row == (2, 1, 1)
+            assert _value(
+                owned,
+                "SELECT result_set_state FROM device_activities"
+                " WHERE id = 1")[0] == 1
+        finally:
+            owned.connection.close()
+
+    async def test_same_key_resend_recovers_first_result(
+            self, tmp_path: Path) -> None:
+        """同键重送恢复首次的尝试结束与核实结论。"""
+        owned = _environment(tmp_path)
+        repository = CaptureRepository()
+        try:
+            wait_id = _complete_wait(owned)
+            ticket = _check_ticket(owned)
+            finish = _round_finish(ticket)
+            confirm = _satisfied(wait_id)
+            key = new_operation_key()
+            first = repository.finish_result_check(finish, confirm, key, owned)
+            assert first.kind is DbOutcomeKind.COMPLETED
+            resent = repository.finish_result_check(finish, confirm, key, owned)
+            assert resent.kind is DbOutcomeKind.COMPLETED
+            assert resent.value.result_set.result_set_state == 3
+            mismatched = repository.finish_result_check(
+                finish,
+                ResultSetSave(
+                    action_id=1, occurred_at=_NOW, phase=ResultSetPhase.COMPLETE,
+                    contract=_RESULT_CONTRACT,
+                    observation={"files": ["other-clip"]},
+                    capture={"status": "completed"},
+                    evidence={
+                        "method": "time_and_outputs",
+                        "wait_completed_event_id": wait_id,
+                        "observation": {"files": ["other-clip"]},
+                    }),
+                key, owned)
+            assert mismatched.kind is DbOutcomeKind.ROLLED_BACK
+            assert "重送" in str(mismatched.error)
+        finally:
+            owned.connection.close()
+
+    async def test_rejects_when_attempt_already_ended(
+            self, tmp_path: Path) -> None:
+        """已结束的尝试不能再携带结论提交。"""
+        owned = _environment(tmp_path)
+        try:
+            ticket = _check_ticket(owned)
+            assert OperationRepository().finish_attempt(
+                _round_finish(ticket, retry_wait=True),
+                new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
+            wait_id = _complete_wait(owned)
+            outcome = CaptureRepository().finish_result_check(
+                _round_finish(ticket), _satisfied(wait_id),
+                new_operation_key(), owned)
+            assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        finally:
+            owned.connection.close()
+
+
+class TestCloseResultCheckUnconfirmed:
+    def _pending_round(self, owned) -> None:
+        """一轮暂不齐备的核实：尝试成功结束并建立重试等待。"""
+        ticket = _check_ticket(owned)
+        assert OperationRepository().finish_attempt(
+            _round_finish(ticket, retry_wait=True),
+            new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
+
+    def _unconfirmed(self) -> ResultSetSave:
+        return ResultSetSave(
+            action_id=1, occurred_at=_NOW, phase=ResultSetPhase.UNCONFIRMED,
+            contract=_RESULT_CONTRACT,
+            observation={"reason": "attempts_exhausted"},
+            capture={"status": "unconfirmed",
+                     "error": {"code": "result_unconfirmed"}},
+            error={"code": "result_unconfirmed"},
+        )
+
+    async def test_budget_exhausted_closes_run_and_result_set(
+            self, tmp_path: Path) -> None:
+        """预算耗尽的收场把流程与集合结论同事务置为无法确认。"""
+        owned = _environment(tmp_path)
+        try:
+            _complete_wait(owned)
+            self._pending_round(owned)
+            outcome = CaptureRepository().close_result_check_unconfirmed(
+                self._unconfirmed(), new_operation_key(), owned)
+            assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+            run = _value(
+                owned,
+                "SELECT status, retry_wait_required, error_json IS NOT NULL"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'")
+            assert run == (6, 0, 1)
+            row = _value(
+                owned,
+                "SELECT result_set_state, completion_basis,"
+                " completion_evidence_json, json_extract(capture_json, '$.status'),"
+                " json_extract(last_error_json, '$.code')"
+                " FROM device_activities WHERE id = 1")
+            assert row == (4, 1, None, "unconfirmed", "result_unconfirmed")
+            events = owned.connection.execute(
+                "SELECT transaction_id, event_type FROM history_events"
+                " WHERE id > 1 ORDER BY id").fetchall()
+            assert [row[1] for row in events[-2:]] == [10, 16]
+            assert events[-1][0] == events[-2][0]
+        finally:
+            owned.connection.close()
+
+    async def test_same_key_resend_recovers_close(
+            self, tmp_path: Path) -> None:
+        """同键重送恢复首次的收场结果，不同输入拒绝。"""
+        owned = _environment(tmp_path)
+        repository = CaptureRepository()
+        try:
+            _complete_wait(owned)
+            self._pending_round(owned)
+            command = self._unconfirmed()
+            key = new_operation_key()
+            first = repository.close_result_check_unconfirmed(
+                command, key, owned)
+            assert first.kind is DbOutcomeKind.COMPLETED
+            resent = repository.close_result_check_unconfirmed(
+                command, key, owned)
+            assert resent.kind is DbOutcomeKind.COMPLETED
+            assert resent.value.result_set_state == 4
+            other = repository.close_result_check_unconfirmed(
+                ResultSetSave(
+                    action_id=1, occurred_at=_NOW,
+                    phase=ResultSetPhase.UNCONFIRMED,
+                    contract=_RESULT_CONTRACT,
+                    observation={"reason": "other"},
+                    capture={"status": "unconfirmed",
+                             "error": {"code": "result_unconfirmed"}},
+                    error={"code": "result_unconfirmed"},
+                ), key, owned)
+            assert other.kind is DbOutcomeKind.ROLLED_BACK
+            assert "重送" in str(other.error)
+        finally:
+            owned.connection.close()
+
+
+class TestConclusionRecovery:
+    """结论已保存而动作未收场的中断窗口：用原结果完成收尾。"""
+
+    def _concluded(self, tmp_path: Path, *, result_set_state: int,
+                   completion_basis: int, capture: str) -> object:
+        owned = _environment(tmp_path)
+        outcome = 1 if result_set_state == 3 else 3
+        evidence = (json.dumps({
+            "method": "time_and_outputs",
+            "observation": {"files": ["sequence-1"]},
+        }) if completion_basis == 3 else None)
+        owned.connection.execute(
+            "UPDATE device_activities SET result_set_state = ?,"
+            " completion_basis = ?, capture_json = ?, result_check_json = ?,"
+            " completion_evidence_json = ?, wait_completed_event_id = 1"
+            " WHERE id = 1",
+            (result_set_state, completion_basis, capture,
+             json.dumps({"contract": _RESULT_CONTRACT, "outcome": outcome,
+                         "observation": {"files": ["sequence-1"]}}),
+             evidence))
+        # 已确认的启动事实：处理器不再发起启动调用。
+        owned.connection.execute(
+            "INSERT INTO operation_runs (id, action_id, delivery_id, kind,"
+            " query_purpose, responsibility_key, activity_id, copy_id,"
+            " cleanup_item_id, session_key, status, attempts_used,"
+            " max_attempts_used, timeout_s_json, retry_interval_s_json,"
+            " retry_wait_required, error_json)"
+            " VALUES (50, 1, NULL, 1, NULL, 'start/1', 1, NULL, NULL, NULL,"
+            " 3, 1, 1, '10', '1', 0, NULL)")
+        owned.connection.execute(
+            "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
+            " intent_event_id, result_event_id, max_attempts_used, effect_state,"
+            " result_json) VALUES (51, 50, 1, 2, 1, 1, 1, 3, '{}')")
+        owned.connection.commit()
+        return owned
+
+    async def _advance(self, owned, files: dict) -> None:
+        from camctl.capture.timelapse import CaptureWaitConfig
+        from camctl.scheduling.rules import LaunchWindow
+
+        runtime = CaptureRuntime(
+            owned=owned,
+            scheduling=SchedulingRepository(),
+            operations=OperationRepository(),
+            capture=CaptureRepository(),
+            timelapse=TimelapseRepository(),
+            driver=None,
+            results=ResultsDouble(files),
+            evidence=EvidenceRegistry(()),
+            wall_us=lambda: _NOW + 700_000_000,
+            monotonic_ns=lambda: 5_000_000_000,
+            window_of=lambda action: LaunchWindow(
+                scheduled_at=action["scheduled_at"],
+                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
+            wait_config=lambda params: CaptureWaitConfig(
+                target_duration_ms=600_000, driver_margin_ms=0),
+        )
+        await capture_handler("camera_timelapse")(1, runtime)
+
+    async def test_satisfied_conclusion_finishes_without_new_round(
+            self, tmp_path: Path) -> None:
+        """满足结论保存后的中断：直接收尾，不重开核实轮次。"""
+        owned = self._concluded(
+            tmp_path, result_set_state=3, completion_basis=3,
+            capture='{"status": "completed"}')
+        try:
+            await self._advance(owned, {1: (_entry("sequence-1"),)})
+            assert _value(
+                owned, "SELECT status FROM actions WHERE id = 1") == (3,)
+            assert _value(
+                owned, "SELECT occupancy_state FROM device_activities"
+                " WHERE id = 1") == (2,)
+            assert _value(
+                owned, "SELECT COUNT(*) FROM outputs"
+                " WHERE source_action_id = 1") == (1,)
+            assert _value(
+                owned, "SELECT COUNT(*) FROM operation_runs"
+                " WHERE responsibility_key = 'results/1'") == (0,)
+        finally:
+            owned.connection.close()
+
+    async def test_unconfirmed_conclusion_fails_with_registered_error(
+            self, tmp_path: Path) -> None:
+        """无法确认结论保存后的中断：按登记错误收场失败终态。"""
+        owned = self._concluded(
+            tmp_path, result_set_state=4, completion_basis=1,
+            capture='{"status": "unconfirmed",'
+                    ' "error": {"code": "result_unconfirmed"}}')
+        try:
+            await self._advance(owned, {1: (_entry("sequence-1"),)})
+            failure = _value(
+                owned,
+                "SELECT status, error_code,"
+                " json_extract(error_details_json, '$.reason')"
+                " FROM actions WHERE id = 1")
+            assert failure == (4, 12, "outputs_unknown")
+            # 失败仍保留已列举的完整且归属明确的文件。
+            assert _value(
+                owned, "SELECT COUNT(*) FROM outputs") == (1,)
+            assert _value(
+                owned, "SELECT occupancy_state FROM device_activities"
+                " WHERE id = 1") == (1,)
+        finally:
+            owned.connection.close()
+
+
+class TestInterruptedRoundParks:
+    """中断遗留的在途核实轮次：停等跨会话恢复，不提交新意图。"""
+
+    async def test_running_round_waits_without_new_attempt(
+            self, tmp_path: Path) -> None:
+        owned = _environment(tmp_path)
+        # 已确认的启动事实：处理器不再发起启动调用。
+        owned.connection.execute(
+            "INSERT INTO operation_runs (id, action_id, delivery_id, kind,"
+            " query_purpose, responsibility_key, activity_id, copy_id,"
+            " cleanup_item_id, session_key, status, attempts_used,"
+            " max_attempts_used, timeout_s_json, retry_interval_s_json,"
+            " retry_wait_required, error_json)"
+            " VALUES (50, 1, NULL, 1, NULL, 'start/1', 1, NULL, NULL, NULL,"
+            " 3, 1, 1, '10', '1', 0, NULL)")
+        owned.connection.execute(
+            "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
+            " intent_event_id, result_event_id, max_attempts_used, effect_state,"
+            " result_json) VALUES (51, 50, 1, 2, 1, 1, 1, 3, '{}')")
+        owned.connection.execute(
+            "INSERT INTO operation_runs (id, action_id, delivery_id, kind,"
+            " query_purpose, responsibility_key, activity_id, copy_id,"
+            " cleanup_item_id, session_key, status, attempts_used,"
+            " max_attempts_used, timeout_s_json, retry_interval_s_json,"
+            " retry_wait_required, error_json)"
+            " VALUES (60, 1, NULL, 7, NULL, 'results/1', 1, NULL, NULL, NULL,"
+            " 2, 1, 3, '10', '3', 0, NULL)")
+        owned.connection.execute(
+            "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
+            " intent_event_id, result_event_id, max_attempts_used, effect_state,"
+            " result_json) VALUES (61, 60, 1, 1, 1, NULL, 3, 1, NULL)")
+        owned.connection.commit()
+        recovery = TestConclusionRecovery()
+        try:
+            await recovery._advance(owned, {1: (_entry("sequence-1"),)})
+            # 停等不产生新尝试与新事件，动作与集合保持原状。
+            assert _value(
+                owned, "SELECT status FROM actions WHERE id = 1") == (2,)
+            assert _value(
+                owned,
+                "SELECT result_set_state FROM device_activities"
+                " WHERE id = 1") == (1,)
+            assert _value(
+                owned,
+                "SELECT attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'results/1'") == (1,)
+            assert _value(
+                owned, "SELECT COUNT(*) FROM operation_attempts"
+                " WHERE run_id = 60") == (1,)
         finally:
             owned.connection.close()

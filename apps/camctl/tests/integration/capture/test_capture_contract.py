@@ -53,6 +53,8 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
         EvidenceContract(type="timelapse_sent", version=1, operation="control",
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
+        EvidenceContract(type="results_returned", version=1, operation="result",
+                         fields=frozenset()),
     )
 )
 
@@ -110,15 +112,16 @@ def _seed_stopped_recording(connection, action_id: int) -> None:
 
 
 def _entry(identity: str, *, size: int = 4096,
-           kind: ResultFileKind = ResultFileKind.VIDEO) -> object:
+           kind: ResultFileKind = ResultFileKind.VIDEO,
+           complete: bool = True) -> object:
     from camctl.capture.handlers import ObservedFile
 
     return ObservedFile(
         identity=identity,
         locator={"path": f"/DCIM/{identity}"},
         evidence={"listing": identity},
-        complete=True,
-        size_bytes=size,
+        complete=complete,
+        size_bytes=size if complete else None,
         kind=kind,
         original_name=f"{identity}.mp4",
         media_type="video/mp4",

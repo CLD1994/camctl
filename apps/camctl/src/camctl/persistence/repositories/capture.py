@@ -66,10 +66,16 @@ from camctl.outputs.catalog import (
     OutputKind,
     validate_output_registration,
 )
+from camctl.operations.attempts import (
+    AttemptFinish,
+    FinishAttemptResult,
+)
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.operations import FinishAttemptCommand
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.transaction import (
     CommandPlan,
+    TransactionAllocations,
     TransactionError,
     commit_operation,
     event_envelope as _envelope,
@@ -88,6 +94,12 @@ _RECORDING_DECIDED_EVENT = 18
 _RECORDING_PROCESSED_EVENT = 19
 _INTERMEDIATE_FILE_EVENT = 26
 _DEVICE_FILE_EVENT = 17
+
+#: 尝试结果与流程收场事件（OPERATION_ATTEMPT_CONCLUDED / OPERATION_CONFIGURED.FINISH）。
+_ATTEMPT_RESULT_EVENT = 12
+_RUN_END_EVENT = 10
+
+_RUN_STATUS = enum_for("operation_runs.status")
 
 #: DEVICE_OBSERVED 的 OBSERVE 与 RELEASE 分支。
 _ACTIVITY_OBSERVE_EVENT = 13
@@ -1777,6 +1789,30 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def finish_result_check(
+        self, finish: AttemptFinish, confirm: ResultSetSave,
+        key: OperationKey, owned: OwnedConnection,
+    ) -> DbOutcome[ResultCheckOutcome]:
+        receipt = commit_operation(
+            _FinishResultCheckCommand(finish, confirm, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def close_result_check_unconfirmed(
+        self, command: ResultSetSave, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[ResultSetOutcome]:
+        receipt = commit_operation(
+            _CloseResultCheckCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
 
 
 class _FilePresenceCommand:
@@ -2376,6 +2412,222 @@ class _ResultSetConfirmCommand:
                 ResultSetDisposition.ALREADY,
                 values["result_set_state"],
                 values.get("completion_basis")))
+
+
+@dataclass(frozen=True)
+class ResultCheckOutcome:
+    """一轮核实结论事务的结果：尝试结束与集合结论。"""
+
+    finish: FinishAttemptResult
+    result_set: ResultSetOutcome
+
+
+def _merged_state_rows(*states) -> dict[str, dict[int, dict[str, Any]]]:
+    """合并子计划的关联事实；同一行的事实必须一致。"""
+    merged: dict[str, dict[int, dict[str, Any]]] = {}
+    for state in states:
+        for table, rows in state.items():
+            target = merged.setdefault(table, {})
+            for row_id, facts in rows.items():
+                known = target.get(row_id)
+                if known is None:
+                    target[row_id] = facts
+                    continue
+                for column, value in known.items():
+                    if column in facts and not json_equal(value, facts[column]):
+                        raise TransactionError("复合事务的关联事实读取不一致")
+                target[row_id] = {**known, **facts}
+    return merged
+
+
+class _CompositeScope:
+    """复合命令的子范围：共享连接与边界，事件段按调用顺序切分。"""
+
+    def __init__(self, parent, first_event_id: int) -> None:
+        self._parent = parent
+        self._next_event_id = first_event_id
+        self._txn_id = parent.max_txn_id + 1
+
+    @property
+    def connection(self):
+        return self._parent.connection
+
+    @property
+    def max_txn_id(self) -> int:
+        return self._parent.max_txn_id
+
+    @property
+    def max_event_id(self) -> int:
+        return self._parent.max_event_id
+
+    def allocate(self, event_count: int) -> TransactionAllocations:
+        first = self._next_event_id
+        self._next_event_id += event_count
+        return TransactionAllocations(
+            txn_id=self._txn_id,
+            first_event_id=first,
+            last_event_id=first + event_count - 1,
+        )
+
+
+class _FinishResultCheckCommand:
+    """一轮核实结论与尝试结束、流程收场同事务提交的命令。
+
+    结论依据与承载它的列举轮次原子保存：任一侧输入被拒整组回滚，
+    不留下已结束而无结论的轮次；重送按原事务分段恢复。
+    """
+
+    def __init__(self, finish: AttemptFinish, confirm: ResultSetSave,
+                 key: OperationKey) -> None:
+        self._finish = finish
+        self._confirm = confirm
+        self._key = key
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        # 一次总分配覆盖尝试结果、流程收场与集合结论三个事件。
+        allocation = scope.allocate(3)
+        sub = _CompositeScope(scope, allocation.first_event_id)
+        finish_plan = FinishAttemptCommand(self._finish, self._key).plan(sub)
+        if finish_plan.read_only:
+            raise TransactionError("结论轮次的尝试已结束，不能再次携带结论提交")
+        confirm_plan = _ResultSetConfirmCommand(self._confirm, self._key).plan(sub)
+        return CommandPlan(
+            events=(*finish_plan.events, *confirm_plan.events),
+            owners={**finish_plan.owners, **confirm_plan.owners},
+            state_rows=_merged_state_rows(
+                finish_plan.state_rows, confirm_plan.state_rows),
+            result=ResultCheckOutcome(
+                finish=finish_plan.result, result_set=confirm_plan.result),
+        )
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        types = [(event["type"], event["reason"]) for event in saved]
+        if (len(types) != 3 or types[0][0] != _ATTEMPT_RESULT_EVENT
+                or types[1] != (_RUN_END_EVENT, 3)
+                or types[2][0] != _RESULT_SET_EVENT):
+            raise TransactionError("操作身份已用于其他事务，不能作为核实结论重送")
+        finish_plan = FinishAttemptCommand(
+            self._finish, self._key)._reuse(scope, saved[:2])
+        confirm_plan = _ResultSetConfirmCommand(
+            self._confirm, self._key)._reuse(saved[2:])
+        return CommandPlan(
+            events=(),
+            owners={**finish_plan.owners, **confirm_plan.owners},
+            state_rows=_merged_state_rows(
+                finish_plan.state_rows, confirm_plan.state_rows),
+            read_only=True,
+            result=ResultCheckOutcome(
+                finish=finish_plan.result, result_set=confirm_plan.result),
+        )
+
+
+class _CloseResultCheckCommand:
+    """预算耗尽时结束核实流程并保存无法确认结论的同事务命令。
+
+    没有在途尝试可承载结论：流程行按结果核实责任定位，与集合结
+    论原子收场；流程错误按登记的公共错误结构保存。
+    """
+
+    def __init__(self, command: ResultSetSave, key: OperationKey) -> None:
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(connection, saved)
+        command = self._command
+        if command.phase is not ResultSetPhase.UNCONFIRMED:
+            raise TransactionError("耗尽收场只保存无法确认的集合结论")
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+            (f"results/{command.action_id}",),
+        )) as cursor:
+            found = cursor.fetchone()
+        if found is None:
+            raise ConsistencyError(
+                f"活动 {command.action_id} 没有结果核实流程可收场")
+        run_facts = row_facts(connection, "operation_runs", int(found[0]))
+        assert run_facts is not None
+        if run_facts["status"] not in (1, 2):
+            raise ConsistencyError("已结束的核实流程不能再次收场")
+        self._state["operation_runs"] = {run_facts["id"]: run_facts}
+        error = self._run_error()
+        # 流程收场与集合结论共用一次总分配的两个事件段。
+        allocation = scope.allocate(2)
+        sub = _CompositeScope(scope, allocation.first_event_id)
+        run_allocation = sub.allocate(1)
+        run_row = _update(
+            "operation_runs",
+            run_facts["id"],
+            {
+                "status": run_facts["status"],
+                "retry_wait_required": run_facts["retry_wait_required"],
+                "error_json": run_facts["error_json"],
+            },
+            {
+                "status": int(_RUN_STATUS.UNCONFIRMED),
+                "retry_wait_required": 0,
+                "error_json": error,
+            },
+        )
+        self._owners[("operation_runs", run_facts["id"])] = (
+            "action", run_facts["action_id"])
+        run_event = _envelope(
+            run_allocation.first_event_id, run_allocation.txn_id,
+            _RUN_END_EVENT, 3, (run_row,), command.occurred_at)
+        confirm_plan = _ResultSetConfirmCommand(command, self._key).plan(sub)
+        return CommandPlan(
+            events=(run_event, *confirm_plan.events),
+            owners={**self._owners, **confirm_plan.owners},
+            state_rows=_merged_state_rows(self._state, confirm_plan.state_rows),
+            result=confirm_plan.result,
+        )
+
+    def _run_error(self) -> dict[str, Any]:
+        """按登记的公共错误结构构造流程错误（有限核实后结果未知）。"""
+        code = "capture_result_unconfirmed"
+        spec = registered_error(code)
+        details = {
+            "activity_id": str(self._command.action_id),
+            "reason": "outputs_unknown",
+        }
+        validate_error_details(code, details)
+        return {"code": code, "stage": spec["stage"], "details": details}
+
+    def _reuse(self, connection, saved) -> CommandPlan:
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_RUN_END_EVENT, 3),
+                     (_RESULT_SET_EVENT, _RESULT_PHASE_TARGETS[command.phase][0])]:
+            raise TransactionError("操作身份已用于其他事务，不能作为耗尽收场重送")
+        if any(event["occurred_at"] != command.occurred_at for event in saved):
+            raise TransactionError("耗尽收场的事实时刻与原事务不同")
+        rows = saved[0]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "operation_runs"
+                or not rows[0]["after"]["exists"]):
+            raise TransactionError("原收场缺少流程事实")
+        values = rows[0]["after"]["values"]
+        if (values.get("status") != int(_RUN_STATUS.UNCONFIRMED)
+                or values.get("retry_wait_required") != 0
+                or not json_equal(values.get("error_json"), self._run_error())):
+            raise TransactionError("耗尽收场的重送输入与原事务不同")
+        confirm_plan = _ResultSetConfirmCommand(
+            command, self._key)._reuse(saved[1:])
+        return CommandPlan(
+            events=(),
+            owners=confirm_plan.owners,
+            state_rows=_merged_state_rows(self._state, confirm_plan.state_rows),
+            read_only=True,
+            result=confirm_plan.result,
+        )
 
 
 # -- 设备文件观察登记 -------------------------------------------------
