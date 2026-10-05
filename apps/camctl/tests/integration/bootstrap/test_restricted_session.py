@@ -1,15 +1,16 @@
-"""时钟异常受限会话的生产装配集成测试。
+"""取消执行与受限会话的生产装配集成测试。
 
-真实 execute_command 装配（受理、启动时钟检查、受限收场流程与一
-次报告机会）：墙钟不可信时 run 不进入普通调度，仍执行本次新受理
-且未排期的取消动作并完成其目标取消与必要收场；已排期的取消动作
-与普通拍摄动作保留待执行，不用不可信墙钟判断过期或到时。受限会
-话处理一次报告责任后按时钟异常退出，不更新可信时间下界；重复受
-限运行不重复施加取消，也不为无新变化的责任生成新报告。
+真实 execute_command 装配：正常会话按排期或立即执行取消动作并
+完成目标取消；墙钟不可信的受限会话不进入普通调度，仍执行本次新
+受理且未排期的取消动作并完成其目标取消与必要收场，已排期的取消
+动作与普通拍摄动作保留待执行，不用不可信墙钟判断过期或到时。受
+限会话处理一次报告责任后按时钟异常退出，不更新可信时间下界；重
+复受限运行不重复施加取消，也不为无新变化的责任生成新报告。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -79,7 +80,8 @@ def _future_schedule(seconds: int) -> str:
 
 
 def _plan_with_photo(request_id: str, scheduled_at: str, *,
-                     cancel_scheduled_at: str | None) -> dict:
+                     cancel_scheduled_at: str | None,
+                     cancel_target: dict | None = None) -> dict:
     """一份拍摄计划：远期拍摄动作，可带一个已排期的取消动作。"""
     actions = [
         {
@@ -96,7 +98,8 @@ def _plan_with_photo(request_id: str, scheduled_at: str, *,
             "name": "later",
             "type": "cancel_task",
             "scheduled_at": cancel_scheduled_at,
-            "params": {"target": {"plan_instance_id": "900"}},
+            # 默认指向不存在的计划：受限对照里保持不执行即可。
+            "params": {"target": cancel_target or {"plan_instance_id": "900"}},
         })
     return {
         "request_id": request_id,
@@ -106,18 +109,20 @@ def _plan_with_photo(request_id: str, scheduled_at: str, *,
     }
 
 
-def _cancel_plan(request_id: str, target: dict) -> dict:
+def _cancel_plan(request_id: str, target: dict, *,
+                 scheduled_at: str | None = None) -> dict:
+    action = {
+        "name": "cancel",
+        "type": "cancel_task",
+        "params": {"target": target},
+    }
+    if scheduled_at is not None:
+        action["scheduled_at"] = scheduled_at
     return {
         "request_id": request_id,
         "created_at": "2026-01-15 08:00:00",
         "name": f"plan-{request_id}",
-        "actions": [
-            {
-                "name": "cancel",
-                "type": "cancel_task",
-                "params": {"target": target},
-            }
-        ],
+        "actions": [action],
     }
 
 
@@ -138,6 +143,77 @@ async def _submit_plan(tmp_path: Path, cfg, body: dict) -> None:
         assert outcome.succeeded is True, outcome.details
     finally:
         close_runtime(deps)
+
+
+class TestNormalCancelExecution:
+    """正常会话的取消执行：时钟可信时取消动作按排期推进。"""
+
+    async def test_normal_run_executes_cancel_and_exits(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "normal"
+        home.mkdir()
+        cfg = _config_for(home, restricted=False)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        # 远期拍摄计划与独立的已排期取消计划：取消到期后取消整个
+        # 拍摄计划，会话没有待执行工作，正常退出。
+        await _submit_plan(
+            tmp_path, cfg,
+            _plan_with_photo("1", _future_schedule(7200),
+                             cancel_scheduled_at=None))
+        await _submit_plan(
+            tmp_path, cfg,
+            _cancel_plan("2", {"plan_instance_id": "1"},
+                         scheduled_at=_future_schedule(1)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        try:
+            outcome = await asyncio.wait_for(
+                execute_command(deps, None, poll_interval_s=0.1), 120)
+        finally:
+            close_runtime(deps)
+
+        assert outcome.succeeded is True, outcome.details
+        assert _scalar(
+            db, "SELECT status FROM actions WHERE name = 'cancel'") == (3,)
+        assert _scalar(
+            db, "SELECT status, cancel_requested FROM actions"
+            " WHERE name = 'shoot'") == (6, 1)
+        assert _all(db, "SELECT status FROM cancel_items") == [(3,)]
+        assert _scalar(db, "SELECT COUNT(*) FROM reports WHERE status = 4")[0] >= 1
+        assert len(list((home / "ready").glob("status-report-*.json"))) >= 1
+
+    async def test_normal_run_executes_unscheduled_cancel_from_input(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "normal-unscheduled"
+        home.mkdir()
+        cfg = _config_for(home, restricted=False)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        await _submit_plan(
+            tmp_path, cfg,
+            _plan_with_photo("1", _future_schedule(7200),
+                             cancel_scheduled_at=None))
+        db = Path(cfg.paths.state_db)
+        shoot_id = _scalar(
+            db, "SELECT id FROM actions WHERE name = 'shoot'")[0]
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        try:
+            outcome = await asyncio.wait_for(
+                execute_command(
+                    deps,
+                    await _parsed(tmp_path, _cancel_plan(
+                        "2", {"action_instance_id": str(shoot_id)})),
+                    poll_interval_s=0.1),
+                120)
+        finally:
+            close_runtime(deps)
+
+        assert outcome.succeeded is True, outcome.details
+        assert _scalar(
+            db, "SELECT status FROM actions WHERE name = 'cancel'") == (3,)
+        assert _scalar(
+            db, "SELECT status FROM actions WHERE name = 'shoot'") == (6,)
 
 
 class TestRestrictedSession:

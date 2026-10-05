@@ -8,10 +8,10 @@
 已保存事实幂等推进，重复调度不产生重复副作用。report_flow
 每轮推进报告责任：开始到期的同步动作、补齐已覆盖但未保存的本
 地完成、冻结新的报告机会，并把进行中的报告推进到发布。
-cancel_flow 是时钟异常受限会话的规定取消入口：驱动已受理、未
-排期且未取消的取消动作完成寻址、固定、生效与逐目标收场，全部
-成员终态后保存汇总终态；收场未完成的动作保持执行中，等待后续
-会话。
+cancel_flow 推进取消动作：正常会话按可信墙钟执行到期或未排期的取
+消动作，时钟异常受限会话只执行未排期取消（同一流程以
+unscheduled_only 区分），完成寻址、固定、生效与逐目标收场；收场
+未完成的成员保持处理中，等待后续会话。
 """
 
 from __future__ import annotations
@@ -115,12 +115,23 @@ def capture_flow(capture_factory: Callable[[Any], Any]) -> Callable[[Any], Any]:
     return flow
 
 
-def _restricted_cancel_actions(owned: Any) -> list[tuple[int, int, str]]:
-    """受限入口的取消动作：已受理、未排期且自身未被取消。"""
+def _due_cancel_actions(owned: Any, now_us: int | None) -> list[tuple[int, int, str]]:
+    """本次推进的取消动作：已受理且自身未被取消。
+
+    正常会话按可信墙钟包含到期或未排期的动作；受限会话传入
+    now_us=None，只包含未排期动作，不依据不可信墙钟判断到时。
+    """
+    if now_us is None:
+        condition = "scheduled_at IS NULL"
+        params: tuple = ()
+    else:
+        condition = "(scheduled_at IS NULL OR scheduled_at <= ?)"
+        params = (now_us,)
     with closing(owned.connection.execute(
-        "SELECT id, status, input_fields_json FROM actions"
-        " WHERE type = 6 AND scheduled_at IS NULL AND status IN (1, 2)"
-        " AND cancel_requested = 0 ORDER BY id"
+        f"SELECT id, status, input_fields_json FROM actions"
+        f" WHERE type = 6 AND {condition} AND status IN (1, 2)"
+        f" AND cancel_requested = 0 ORDER BY id",
+        params,
     )) as cursor:
         return [(int(row[0]), int(row[1]), row[2])
                 for row in cursor.fetchall()]
@@ -185,13 +196,17 @@ def _withdrawal_position(owned: Any, ready: Path, processing: Path):
     return position
 
 
-def cancel_flow(*, ready: Path, processing: Path) -> Callable[[Any], Any]:
-    """构造受限会话的取消入口流程。
+def cancel_flow(
+    *, ready: Path, processing: Path, unscheduled_only: bool = False,
+) -> Callable[[Any], Any]:
+    """构造推进取消动作的会话流程。
 
     逐动作推进完整取消链：开始（未开始时）→ 寻址 → 固定 → 生效
     与逐目标收场 → 汇总终态。可靠不存在与自身包含按登记错误结束
     取消动作；查询失败按状态库错误停止；收场未完成的成员保持处
-    理中，本次不等待设备工作。
+    理中，本次不等待设备工作。正常会话按可信墙钟包含到期的已排
+    期取消；受限会话以 unscheduled_only=True 构造，只推进未排
+    期动作，不依据不可信墙钟判断到时。
     """
 
     async def flow(context: Any) -> None:
@@ -219,7 +234,8 @@ def cancel_flow(*, ready: Path, processing: Path) -> Callable[[Any], Any]:
         try:
             repository = CancellationRepository()
             occurred = context.clock.utc_micros
-            for action_id, status, spec_json in _restricted_cancel_actions(owned):
+            now_us = None if unscheduled_only else occurred()
+            for action_id, status, spec_json in _due_cancel_actions(owned, now_us):
                 item_ids = _fixed_cancel_items(owned, action_id)
                 if item_ids is None:
                     if status == 1:

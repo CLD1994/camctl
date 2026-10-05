@@ -180,16 +180,20 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
     staging = Path(deps.config.paths.staging).expanduser().resolve()
     ready = Path(deps.config.paths.ready).expanduser().resolve()
     processing = Path(deps.config.paths.processing).expanduser().resolve()
-    flow = report_flow(
-        state_db=deps.state_db,
-        staging=staging,
-        ready=ready,
-        processing=processing,
-        history=deps.config.history,
-        database=deps.config.database,
-        supervisor=supervisor,
-    )
-    return {"report": flow}, supervisor
+    flows = {
+        "report": report_flow(
+            state_db=deps.state_db,
+            staging=staging,
+            ready=ready,
+            processing=processing,
+            history=deps.config.history,
+            database=deps.config.database,
+            supervisor=supervisor,
+        ),
+        # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
+        "cancel": cancel_flow(ready=ready, processing=processing),
+    }
+    return flows, supervisor
 
 
 async def execute_command(
@@ -236,7 +240,7 @@ async def execute_command(
         overrides.update(
             flows=flows,
             restricted_flows={"cancel": cancel_flow(
-                ready=ready, processing=processing)},
+                ready=ready, processing=processing, unscheduled_only=True)},
             once_report=report_flow(
                 state_db=deps.state_db,
                 staging=staging,
