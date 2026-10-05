@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.service import CommandMode
@@ -143,11 +143,26 @@ def _failure_log_wiring(deps: RuntimeDeps):
 async def execute_command(
     deps: RuntimeDeps,
     source: ParsedInput | InputDiagnostic | None,
+    *,
+    flows: Mapping[str, Any] | None = None,
+    wake: Any = None,
+    poll_interval_s: float | None = None,
 ) -> SessionOutcome:
-    """执行一次 run/submit 会话；调用方负责运行事件循环。"""
+    """执行一次 run/submit 会话；调用方负责运行事件循环。
+
+    flows、wake 与 poll_interval_s 是业务流程装配的注入点：调度、
+    设备与报告流程由部署装配提供（生产驱动接入前由集成测试注入
+    受契约约束的替身），进程内唤醒与轮询上限随流程一起接入。
+    """
     from camctl.bootstrap.application import query_work_facts
 
     failure_log, copy_request_factory = _failure_log_wiring(deps)
+    overrides: dict[str, Any] = {
+        "flows": flows if flows is not None else {},
+        "wake": wake,
+    }
+    if poll_interval_s is not None:
+        overrides["poll_interval_s"] = poll_interval_s
     context = SessionContext(
         mode=deps.mode,
         catalog=deps.catalog,
@@ -165,6 +180,7 @@ async def execute_command(
         notifier=deps.notifier,
         failure_log=failure_log,
         copy_request_factory=copy_request_factory,
+        **overrides,
     )
     return await run_session(context, source)
 

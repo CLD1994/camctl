@@ -1,23 +1,27 @@
-"""原子启动授予事务：资格核对、共同保存与同键复用。
+"""调度侧开始与原子启动授予事务：资格核对、共同保存与同键复用。
 
-同一 BEGIN IMMEDIATE 写事务内核对持有者、占用、窗口、预算、取消
-及候选顺序，条件成立后把启动流程、尝试意图、次数、参数与设备活
-动派发事实作为一组共同保存；提交成功后才允许派发。首次机会记录
-缺活动、意图或参数任一项整组拒绝。
+开始事务把取得时间资格的 pending 拍摄动作转入执行并登记设备活动
+身份与固定能力（录像同时建立处理责任），一个事务内共同保存。授
+予事务在同一 BEGIN IMMEDIATE 写内核对持有者、占用、窗口、预算、
+取消及候选顺序，条件成立后把启动流程、尝试意图、次数、参数与设
+备活动派发事实作为一组共同保存；提交成功后才允许派发。首次机会
+记录缺活动、意图或参数任一项整组拒绝。
 """
 
 from __future__ import annotations
 
+import uuid
 from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Mapping
 
 from camctl.contracts.enums import decode_member, enum_for
 from camctl.contracts.history_values import HistoryBoundary
-from camctl.contracts.json_values import is_json_integer, json_equal
+from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
 from camctl.contracts.values import ObjectId, OperationKey, UtcMicros
+from camctl.capture.models import activity_capabilities
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptTicket,
@@ -46,6 +50,15 @@ _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _DISPATCH_STATE = enum_for("device_activities.dispatch_state")
 
 _ATTEMPT_STARTED_EVENT = 11
+_ACTION_STARTED_EVENT = 5
+_ACTIVITY_CREATE_EVENT = 13
+
+#: 拍摄动作类型编号到能力模块使用的字面名称。
+_CAMERA_TYPE_NAMES = {1: "camera_take_photo", 2: "camera_record",
+                      3: "camera_timelapse"}
+
+#: 动作状态：终态集合。
+_ACTION_TERMINAL = (3, 4, 5, 6)
 
 _RUN_UPDATE_COLUMNS = (
     "status",
@@ -64,6 +77,252 @@ _CAMERA_RECORD_TYPE = 2
 
 #: 动作状态：RUNNING。
 _ACTION_RUNNING = 2
+
+
+class StartOutcome(Enum):
+    """开始事务的可靠结果分区。"""
+
+    STARTED = "started"
+    ALREADY = "already"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class StartActionRequest:
+    """一次动作开始事务的输入。
+
+    动作必须仍为 pending 且未请求取消；可信时间由调用方按 Q1 规
+    则取得，事务内按动作自身窗口复核。
+    """
+
+    action_id: int
+    trusted_wall_now: int
+    occurred_at: int
+
+
+@dataclass(frozen=True)
+class StartActionResult:
+    """开始结果：开始时携带活动身份，拒绝时携带可靠原因。"""
+
+    outcome: StartOutcome
+    activity_id: int | None = None
+    reason: str | None = None
+
+
+class StartActionCommand:
+    """拍摄动作取得处理资格的完整事务命令。
+
+    同一事务保存开始事实（ACTION_STARTED：status 1→2、执行标记
+    0→1，录像动作同时建立处理责任）与设备活动登记（DEVICE_
+    OBSERVED.CREATE：活动身份及固定能力）。动作进入执行当且仅当
+    其活动身份已建立，两者不单独生效。
+    """
+
+    def __init__(self, request: StartActionRequest, key: OperationKey) -> None:
+        self._request = request
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        ObjectId(request.action_id)
+        UtcMicros(request.occurred_at)
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+
+        action = row_facts(connection, "actions", request.action_id)
+        if action is None:
+            raise TransactionError(f"开始事务要求动作存在: {request.action_id}")
+        self._state["actions"] = {request.action_id: action}
+        activity_id = self._existing_activity_id(connection, request.action_id)
+        if action["status"] == 2:
+            if action["execution_started"] != 1:
+                raise TransactionError(
+                    f"已运行动作缺少开始事实: {request.action_id}")
+            if activity_id is None:
+                raise TransactionError(
+                    f"已运行动作缺少设备活动登记: {request.action_id}")
+            return self._already(activity_id)
+        if action["status"] in _ACTION_TERMINAL:
+            return self._rejected("terminal")
+        if action["status"] != 1:
+            raise TransactionError(
+                f"动作状态不允许开始: {request.action_id} {action['status']!r}")
+        if action["execution_started"] != 0:
+            raise TransactionError(
+                f"开始事务要求未开始的动作: {request.action_id}")
+        if activity_id is not None:
+            raise TransactionError(
+                f"设备活动先于动作开始登记: {request.action_id}")
+        if action["cancel_requested"]:
+            return self._rejected("canceled")
+        literal = _CAMERA_TYPE_NAMES.get(action["type"])
+        if literal is None:
+            raise TransactionError(
+                f"开始事务只适用于拍摄动作: {request.action_id}"
+                f" type={action['type']!r}")
+        if not isinstance(action["device_id"], str) or not action["device_id"]:
+            raise TransactionError(f"拍摄动作缺少设备绑定: {request.action_id}")
+        if not isinstance(action["driver_id"], str) or not action["driver_id"]:
+            raise TransactionError(f"拍摄动作缺少驱动绑定: {request.action_id}")
+
+        window = LaunchWindow(
+            scheduled_at=int(action["scheduled_at"]),
+            window_end=int(action["scheduled_at"])
+            + int(action["max_delay_ms"]) * 1000,
+        )
+        phase = window_phase(window, request.trusted_wall_now)
+        if phase is WindowPhase.BEFORE_START:
+            return self._rejected("too_early")
+        if phase is WindowPhase.AFTER_WINDOW:
+            return self._rejected("window_ended")
+
+        capabilities = activity_capabilities(
+            literal, self._decoded_spec(action["execution_spec_json"]))
+        owner = ("action", request.action_id)
+        allocation = scope.allocate(2)
+
+        action_row = _update(
+            "actions", request.action_id,
+            {"status": 1, "execution_started": 0},
+            {"status": 2, "execution_started": 1})
+        self._owners[("actions", request.action_id)] = owner
+        started_rows = [action_row]
+        if action["type"] == 2:
+            processing_id = _next_id(connection, "recording_processing")
+            processing = self._processing_row(processing_id)
+            started_rows.append(processing)
+            self._owners[("recording_processing", processing_id)] = owner
+            self._state.setdefault(
+                "recording_processing", {})[processing_id] = dict(
+                processing.after.values, id=processing_id)
+        started = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _ACTION_STARTED_EVENT, 1, tuple(started_rows), request.occurred_at)
+
+        activity_id = _next_id(connection, "device_activities")
+        activity_values = {
+            "action_id": request.action_id,
+            "task_key": uuid.uuid4().hex,
+            "task_locator_json": None,
+            "state_query_supported": capabilities.state_query_supported,
+            "stop_supported": capabilities.stop_supported,
+            "safe_repeat_stop": capabilities.safe_repeat_stop,
+            "start_return_meaning": capabilities.start_return_meaning,
+            "completion_mode": capabilities.completion_mode,
+            "ownership_mode": capabilities.ownership_mode,
+            "output_scope_json": capabilities.output_scope_json,
+            "baseline_state": 1,
+            "baseline_first_event_id": None,
+            "baseline_last_event_id": None,
+            "dispatch_state": int(_DISPATCH_STATE.NOT_DISPATCHED),
+            "activity_state": 1,
+            "occupancy_state": 1,
+            "sent_at": None,
+            "started_at": None,
+            "result_wait_margin_ms": None,
+            "extra_wait_ms_used": None,
+            "expected_check_at": None,
+            "wait_completed_event_id": None,
+            "capture_json": None,
+            "control_elapsed_ns": None,
+            "completion_basis": None,
+            "completion_evidence_json": None,
+            "result_set_state": 1,
+            "result_check_json": None,
+            "last_error_json": None,
+        }
+        activity_row = _row("device_activities", activity_id, activity_values)
+        self._owners[("device_activities", activity_id)] = owner
+        self._state["device_activities"] = {
+            activity_id: dict(activity_values, id=activity_id)}
+        create = _envelope(
+            allocation.last_event_id, allocation.txn_id,
+            _ACTIVITY_CREATE_EVENT, 1, (activity_row,), request.occurred_at)
+        return CommandPlan(
+            events=(started, create), owners=self._owners,
+            state_rows=self._state,
+            result=StartActionResult(
+                outcome=StartOutcome.STARTED, activity_id=activity_id))
+
+    def _processing_row(self, processing_id: int):
+        """录像处理责任的初始行：各项均未决定，由后续事务推进。"""
+        return _row(
+            "recording_processing", processing_id,
+            {
+                "action_id": self._request.action_id,
+                "source_device_file_id": None,
+                "check_state": 1,
+                "check_decision": 1,
+                "check_basis_json": None,
+                "media_json": {},
+                "repair_state": 1,
+                "repair_basis_json": None,
+                "repair_output_file_id": None,
+                "repair_error_json": None,
+                "discard_state": 1,
+                "discard_error_json": None,
+            })
+
+    @staticmethod
+    def _existing_activity_id(connection, action_id: int) -> int | None:
+        with closing(connection.execute(
+            "SELECT id FROM device_activities WHERE action_id = ?", (action_id,),
+        )) as cursor:
+            found = cursor.fetchone()
+        return None if found is None else int(found[0])
+
+    @staticmethod
+    def _decoded_spec(raw: Any) -> Mapping[str, Any]:
+        spec = parse_exact_json(raw) if isinstance(raw, str) else raw
+        if not isinstance(spec, Mapping):
+            raise TransactionError("拍摄动作的执行定义不可解释")
+        return spec
+
+    def _already(self, activity_id: int) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=StartActionResult(
+                outcome=StartOutcome.ALREADY, activity_id=activity_id))
+
+    def _rejected(self, reason: str) -> CommandPlan:
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=StartActionResult(
+                outcome=StartOutcome.REJECTED, reason=reason))
+
+    def _reuse(self, scope, saved: list[dict]) -> CommandPlan:
+        """同键重送：核实原事务组成后恢复首次响应。"""
+        request = self._request
+        if (len(saved) != 2 or saved[0]["type"] != _ACTION_STARTED_EVENT
+                or saved[0]["reason"] != 1
+                or saved[1]["type"] != _ACTIVITY_CREATE_EVENT
+                or saved[1]["reason"] != 1):
+            raise TransactionError("操作身份已用于其他事务，不能作为开始重送")
+        for event in saved:
+            if event["occurred_at"] != request.occurred_at:
+                raise TransactionError("开始事务的事实时刻与原事务不同")
+        activity_row = saved[1]["body"]["rows"][0]
+        action_row = saved[0]["body"]["rows"][0]
+        if (activity_row["table"] != "device_activities"
+                or activity_row["id"] is None
+                or not activity_row["after"]["exists"]
+                or action_row["table"] != "actions"
+                or action_row["id"] != request.action_id):
+            raise TransactionError("原开始事务的组成与输入不符")
+        connection = scope.connection
+        action = row_facts(connection, "actions", request.action_id)
+        activity = row_facts(connection, "device_activities", activity_row["id"])
+        if (action is None or activity is None
+                or action["status"] != 2 or action["execution_started"] != 1
+                or activity["action_id"] != request.action_id):
+            raise TransactionError("原开始事务的可靠记录与输入不符")
+        return self._already(int(activity_row["id"]))
 
 
 class GrantOutcome(Enum):
@@ -454,7 +713,18 @@ class GrantStartCommand:
 
 
 class SchedulingRepository:
-    """调度授予事务的 SQLite 仓储。"""
+    """调度开始与授予事务的 SQLite 仓储。"""
+
+    def start_action(
+        self, request: StartActionRequest, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[StartActionResult]:
+        receipt = commit_operation(StartActionCommand(request, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
     def grant_start(
         self, request: GrantRequest, key: OperationKey, owned: OwnedConnection

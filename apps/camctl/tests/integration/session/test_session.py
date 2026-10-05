@@ -137,6 +137,143 @@ async def _run(context):
     return await run_session(context, None)
 
 
+class FixedClock:
+    """读数固定的墙钟：推进循环按轮读取当前时间。"""
+
+    def __init__(self, now: int) -> None:
+        self.now = now
+
+    def utc_micros(self) -> int:
+        return self.now
+
+    def monotonic_ns(self) -> int:
+        return 0
+
+
+class TestRunLoop:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_run_drives_flows_each_round_until_work_settles(self, environment):
+        import asyncio
+
+        context, recorder, holder, _ = environment
+        rounds = {"count": 0}
+        state = {"facts": _facts(unfinished_actions=1)}
+
+        async def flow(ctx):
+            rounds["count"] += 1
+            if rounds["count"] >= 3:
+                state["facts"] = _facts()
+
+        context.flows = {"work": flow}
+        holder["facts"] = lambda connection: state["facts"]
+        context.poll_interval_s = 0.01
+        outcome = await asyncio.wait_for(_run(context), timeout=10)
+        assert outcome.succeeded is True
+        # 每轮都驱动流程；责任清空后在关闭事务内释放接纳。
+        assert rounds["count"] == 3
+        from camctl.session.locks import probe_admission
+        assert probe_admission(
+            context.paths.admission_lock).status.value == "acquired_and_released"
+
+    async def test_wake_notification_shortens_idle_wait(self, environment):
+        import asyncio
+
+        from camctl.scheduling.notifications import WakeReason, WorkNotifier
+
+        context, recorder, holder, _ = environment
+        notifier = WorkNotifier()
+        context.wake = notifier
+        context.poll_interval_s = 30.0
+        state = {"facts": _facts(unfinished_actions=1)}
+        holder["facts"] = lambda connection: state["facts"]
+        calls = {"count": 0}
+
+        async def flow(ctx):
+            calls["count"] += 1
+            if calls["count"] >= 2:
+                state["facts"] = _facts()
+
+        context.flows = {"work": flow}
+        task = asyncio.create_task(_run(context))
+        await asyncio.sleep(0.05)
+        # 长轮询上限内只有通知能唤醒：仍停在第一轮。
+        assert calls["count"] == 1
+        notifier.mark_changed(WakeReason.NEW_WORK)
+        outcome = await asyncio.wait_for(task, timeout=10)
+        assert outcome.succeeded is True
+        assert calls["count"] == 2
+
+    async def test_pending_deadline_bounds_idle_wait(self, environment):
+        import asyncio
+
+        context, recorder, holder, tmp_path = environment
+        context.poll_interval_s = 30.0
+        clock = FixedClock(_MIN + 60_000_000)
+        context.clock = clock
+        state = {"facts": _facts(unfinished_actions=1)}
+        holder["facts"] = lambda connection: state["facts"]
+        calls = {"count": 0}
+
+        async def flow(ctx):
+            calls["count"] += 1
+            if calls["count"] >= 2:
+                state["facts"] = _facts()
+
+        context.flows = {"work": flow}
+        # 待执行动作在 1 秒后：等待受该截止约束，而非轮询上限。
+        seeding = context.open_connection()
+        try:
+            connection = seeding.connection
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT INTO history_transactions (id, operation_key,"
+                " first_event_id, last_event_id) VALUES (1, ?, 1, 1)", ("a" * 32,))
+            connection.execute(
+                "INSERT INTO history_events (id, transaction_id, event_type,"
+                " event_version, occurred_at, clock_status, change_seq, body_json)"
+                " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
+                (_MIN, '{"reason": 1, "evidence": {}, "rows": []}'))
+            connection.execute(
+                "INSERT INTO plans (id, request_id, name, created_at, status,"
+                " created_event_id, last_event_id, change_count)"
+                " VALUES (1, 4242, 'seed', ?, 1, 1, 1, 1)", (_MIN,))
+            connection.execute(
+                "INSERT INTO actions (id, plan_id, input_index, name, type,"
+                " scheduled_at, input_fields_json, execution_spec_json, status,"
+                " execution_started, cancel_requested, created_event_id,"
+                " last_event_id, change_count)"
+                " VALUES (1, 1, 0, 'future', 7, ?, '{}', '{}', 1, 0, 0, 1, 1, 1)",
+                (_MIN + 61_000_000,))
+            connection.commit()
+        finally:
+            seeding.connection.close()
+        outcome = await asyncio.wait_for(_run(context), timeout=10)
+        assert outcome.succeeded is True
+        assert calls["count"] >= 2
+
+    async def test_cancel_during_wait_releases_admission(self, environment):
+        import asyncio
+
+        from camctl.session.locks import probe_admission
+
+        context, recorder, holder, _ = environment
+        context.poll_interval_s = 30.0
+        holder["facts"] = lambda connection: _facts(unfinished_actions=1)
+        context.flows = {}
+        task = asyncio.create_task(_run(context))
+        await asyncio.sleep(0.05)
+        # 等待期间接纳仍被持有：探测观察到冲突。
+        probe = probe_admission(context.paths.admission_lock)
+        assert probe.status.value == "conflict"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # 会话收尾释放接纳句柄。
+        assert probe_admission(
+            context.paths.admission_lock).status.value == "acquired_and_released"
+
+
 class TestRunCompletion:
     pytestmark = pytest.mark.asyncio
     async def test_run_drives_flows_then_closes_admission(self, environment):

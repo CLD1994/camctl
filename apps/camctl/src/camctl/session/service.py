@@ -1,15 +1,19 @@
 """会话流程与有序收尾。
 
 run 与 submit 共用本入口：受理、时钟资格、接纳与退出检查按既定
-顺序组织。run 逐个驱动已注册流程：报告失败不阻塞设备工作并触发
-一次日志副本，状态库错误停止依赖已失效条件的工作；流程完成后在
-关闭事务内重查工作并按结果释放接纳。受限会话执行规定收场与一次
-报告机会后按时钟异常退出，不取得普通接纳。submit 对提交结果未
-知以同一请求幂等核实，不宣称受理成功或失败。
+顺序组织。run 的推进循环每轮驱动已注册流程，无进展时按真实责任
+分类判断是否关闭：可退出才在关闭事务内重查并释放接纳，仍需驱动
+则等待下一计划截止、进程内通知或轮询上限后继续。报告失败不阻塞
+设备工作并触发一次日志副本，状态库错误停止依赖已失效条件的工作。
+受限会话执行规定收场与一次报告机会后按时钟异常退出，不取得普通
+接纳。submit 对提交结果未知以同一请求幂等核实，不宣称受理成功或
+失败。
 """
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import closing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol
 
@@ -33,9 +37,12 @@ from camctl.session.locks import (
     probe_admission,
 )
 from camctl.session.outcome import SessionOutcome
-from camctl.session.work import WorkDecisionKind, WorkFacts
+from camctl.session.work import WorkDecisionKind, WorkFacts, classify_work
 
 __all__ = ["SessionContext", "StateDbFailure", "run_session"]
+
+#: 空闲等待下限：到期工作立即再推进，同时避免无界忙转。
+_MIN_IDLE_WAIT_S = 0.01
 
 
 class StateDbFailure(RuntimeError):
@@ -64,11 +71,12 @@ class SessionPaths:
 class SessionContext:
     """一次会话的协作者与运行参数。
 
-    flows 是已注册的业务流程端口（调度、设备、报告），按名称接
-    入；名为 "report" 的流程失败按报告错误处理并触发日志副本，
-    其余流程异常按状态库错误收口。restricted_flows 与 once_report
-    是受限会话的规定收场和一次报告端口。facts_query 在关闭事务内
-    重查工作事实。
+    flows 是已注册的业务流程端口（调度、设备、报告），推进循环每
+    轮全部驱动；名为 "report" 的流程失败按报告错误处理并触发日志
+    副本，其余流程异常按状态库错误收口。restricted_flows 与
+    once_report 是受限会话的规定收场和一次报告端口。facts_query
+    在推进循环和关闭事务内重查工作事实。wake 是进程内唤醒通知；
+    poll_interval_s 是外部输入的感知轮询上限。
     """
 
     mode: CommandMode
@@ -93,6 +101,17 @@ class SessionContext:
     failure_log: Any = None
     #: 报告失败触发副本时的请求工厂：(error) -> CopyRequest。
     copy_request_factory: Callable[[Any], Any] | None = None
+    #: 进程内工作唤醒通知；等待新工作时由生产者触发。
+    wake: Any = None
+    #: 外部输入感知的轮询上限（秒）；部署目标为 0.5 秒量级。
+    poll_interval_s: float = 0.5
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.poll_interval_s, (int, float)) or (
+                isinstance(self.poll_interval_s, bool)
+                or self.poll_interval_s <= 0):
+            raise ValueError(
+                f"poll_interval_s 必须是有限正秒数: {self.poll_interval_s!r}")
 
 
 def _outcome_error(reason: str, details: Mapping[str, Any] | None = None) -> SessionOutcome:
@@ -200,11 +219,21 @@ async def _run_session(
         except Exception as error:
             return _outcome_error("state_db_error", {"error": f"接纳锁取得失败: {error}"})
 
-        fatal = await _drive_flows(context)
-        if fatal is not None:
-            # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
-            return _outcome_error("state_db_error", {"error": fatal})
-        return await _close_and_finish(context, owned, admission_lease)
+        while True:
+            fatal = await _drive_flows(context)
+            if fatal is not None:
+                # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
+                return _outcome_error("state_db_error", {"error": fatal})
+            try:
+                decision = classify_work(context.facts_query(owned.connection))
+            except Exception as error:
+                return _outcome_error("state_db_error", {"error": str(error)})
+            if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
+                outcome = await _try_close(context, owned, admission_lease)
+                if outcome is not None:
+                    return outcome
+                # 关闭事务观察到新工作：继续推进，不释放接纳。
+            await _wait_for_more_work(context, owned)
     finally:
         # 收尾次序：释放接纳与会话句柄后关闭数据库连接。
         if admission_lease is not None:
@@ -246,11 +275,11 @@ async def _trigger_failure_log(context: SessionContext, error: Exception) -> Non
         pass
 
 
-async def _close_and_finish(
+async def _try_close(
     context: SessionContext, owned: OwnedConnection,
     admission_lease: AdmissionLease,
-) -> SessionOutcome:
-    """在关闭事务内重查工作并按结果释放接纳，组织最终结果。"""
+) -> SessionOutcome | None:
+    """在关闭事务内重查工作并按结果释放接纳；仍需驱动时返回 None。"""
     from camctl.persistence.repositories.session import CloseAdmission
 
     try:
@@ -270,7 +299,47 @@ async def _close_and_finish(
     decision = outcome.value.work
     if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR:
         return _outcome_error("report_error")
-    return SessionOutcome(succeeded=True)
+    if decision.kind is WorkDecisionKind.CAN_EXIT_SUCCESS:
+        return SessionOutcome(succeeded=True)
+    return None
+
+
+def _pending_deadline_seconds(
+    context: SessionContext, owned: OwnedConnection,
+) -> float | None:
+    """最近一个待执行动作距现在的秒数；无待执行动作时为 None。"""
+    try:
+        with closing(owned.connection.execute(
+                "SELECT MIN(scheduled_at) FROM actions"
+                " WHERE status = 1 AND scheduled_at IS NOT NULL")) as cursor:
+            row = cursor.fetchone()
+    except Exception:
+        # 截止查询失败不改变分类：责任检查仍按各自错误规则处理。
+        return None
+    if row is None or row[0] is None:
+        return None
+    return max((int(row[0]) - context.clock.utc_micros()) / 1_000_000, 0.0)
+
+
+async def _wait_for_more_work(
+    context: SessionContext, owned: OwnedConnection,
+) -> None:
+    """等待下一轮推进：最近待执行截止、进程内通知或轮询上限。
+
+    外部 submit 是独立进程，新计划按轮询上限发现；进程内生产者经
+    唤醒通知立即触发。等待期间保持接纳资格，取消按收尾路径释放。
+    """
+    wait_s = context.poll_interval_s
+    deadline = _pending_deadline_seconds(context, owned)
+    if deadline is not None:
+        wait_s = min(wait_s, deadline)
+    wait_s = max(wait_s, _MIN_IDLE_WAIT_S)
+    if context.wake is None:
+        await asyncio.sleep(wait_s)
+        return
+    loop = asyncio.get_running_loop()
+    await context.wake.wait_changed(context.wake.snapshot(),
+                                    loop.time() + wait_s)
 
 
 async def _restricted_session(context: SessionContext) -> SessionOutcome:

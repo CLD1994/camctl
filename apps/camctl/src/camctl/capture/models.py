@@ -20,11 +20,61 @@ from camctl.contracts.json_values import is_json_integer
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 
 __all__ = [
+    "ActivityCapabilities",
     "ActivityObservationSave",
     "CaptureCompletion",
     "CaptureDefinition",
     "CaptureInput",
+    "activity_capabilities",
 ]
+
+
+@dataclass(frozen=True)
+class ActivityCapabilities:
+    """设备活动登记时固定的实际能力（第一次建立活动时使用）。"""
+
+    state_query_supported: int
+    stop_supported: int
+    safe_repeat_stop: int
+    start_return_meaning: int
+    completion_mode: int
+    ownership_mode: int
+    output_scope_json: dict
+
+
+def activity_capabilities(
+    action_type: str, spec: Mapping[str, Any]
+) -> ActivityCapabilities:
+    """从动作类型与首次固定执行定义推导设备活动能力。
+
+    单张拍摄以成功返回为完成依据；录像必须支持停止，完成由停止
+    与产物集合判定；延时摄影沿用受理时固定任务契约中的同一能力
+    声明。第一版驱动无中途状态查询，输出范围均为任务独立范围。
+    """
+    if action_type == "camera_take_photo":
+        validate_capture_spec(action_type, spec)
+        return ActivityCapabilities(
+            state_query_supported=0, stop_supported=0, safe_repeat_stop=0,
+            start_return_meaning=int(StartReturn.COMPLETED),
+            completion_mode=int(CompletionMode.DEVICE_EVIDENCE),
+            ownership_mode=1, output_scope_json={})
+    if action_type == "camera_record":
+        validate_capture_spec(action_type, spec)
+        return ActivityCapabilities(
+            state_query_supported=0, stop_supported=1, safe_repeat_stop=1,
+            start_return_meaning=int(StartReturn.STARTED),
+            completion_mode=int(CompletionMode.TIME_AND_OUTPUTS),
+            ownership_mode=1, output_scope_json={})
+    if action_type == "camera_timelapse":
+        validated = validate_capture_spec(action_type, spec)
+        stop = 1 if validated["stop_supported"] else 0
+        return ActivityCapabilities(
+            state_query_supported=0, stop_supported=stop,
+            safe_repeat_stop=stop,
+            start_return_meaning=validated["start_return_meaning"],
+            completion_mode=validated["completion_mode"],
+            ownership_mode=1, output_scope_json={})
+    raise ValueError(f"非拍摄动作不推导设备活动能力: {action_type!r}")
 
 _CAMERA_TYPES = frozenset(
     {"camera_take_photo", "camera_record", "camera_timelapse"}

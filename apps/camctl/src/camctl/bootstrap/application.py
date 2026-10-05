@@ -77,31 +77,70 @@ def describe(config: ConfigSnapshot, catalog: CapabilityCatalog) -> Mapping[str,
     """
     return dict(catalog.document())
 
-def query_work_facts(connection) -> "WorkFacts":
-    """阶段 1 的工作事实查询：未完成动作与业务水位缺口。
+def _row_exists(connection, sql: str, parameters: tuple = ()) -> bool:
+    """查询是否存在至少一行；读取后即释放游标。"""
+    from contextlib import closing
 
-    设备收场、报告失败等待等维度随所属模块接入后补充查询；未知
-    维度尚未产生（False 表示没有该类责任，与无法判断区分）。
+    with closing(connection.execute(sql, parameters)) as cursor:
+        return cursor.fetchone() is not None
+
+
+def query_work_facts(connection) -> "WorkFacts":
+    """会话责任维度的生产查询。
+
+    各维度直接读取持久化投影：未完成动作含未来 scheduled_at 的
+    pending 动作；仍应推进的有限流程以未结束 operation_runs 表达。
+    报告维度以报告覆盖边界区分——任何状态的报告边界都是已接手
+    尝试，其后的新变化或仍在本地处理中的报告构成待处理变化；最
+    新尝试失败且无新变化时只剩等待新触发的责任。残留设备事实、
+    可延后清理与等待 ACK 如实呈现但不构成待处理工作。
     """
+    from contextlib import closing
+
     from camctl.session.work import WorkFacts
 
-    unfinished = int(
-        connection.execute("SELECT COUNT(*) FROM actions WHERE status IN (1, 2)").fetchone()[0]
-    )
-    acknowledged = int(
-        connection.execute("SELECT acknowledged_wm FROM runtime_state WHERE id = 1").fetchone()[0]
-    )
-    pending_report_row = connection.execute(
-        "SELECT EXISTS(SELECT 1 FROM report_entity_changes WHERE change_seq > ?)",
-        (acknowledged,),
-    ).fetchone()
+    def scalar(sql: str) -> int:
+        with closing(connection.execute(sql)) as cursor:
+            return int(cursor.fetchone()[0])
+
+    unfinished = scalar(
+        "SELECT COUNT(*) FROM actions WHERE status IN (1, 2)")
+    settlements = scalar(
+        "SELECT COUNT(*) FROM operation_runs WHERE status IN (1, 2)")
+    acknowledged = scalar(
+        "SELECT acknowledged_wm FROM runtime_state WHERE id = 1")
+    # 已接手边界：任意状态报告的最大覆盖水位；失败尝试也覆盖其范围，
+    # 之后的新变化才再次构成待处理报告责任。
+    attempted = scalar("SELECT COALESCE(MAX(to_wm), 0) FROM reports")
+    covered = scalar(
+        "SELECT COALESCE(MAX(to_wm), 0) FROM reports WHERE status = 4")
+    has_new_changes = _row_exists(
+        connection,
+        "SELECT 1 FROM report_entity_changes WHERE change_seq > ? LIMIT 1",
+        (attempted,))
+    in_flight = _row_exists(
+        connection,
+        "SELECT 1 FROM reports WHERE status IN (1, 2, 3) LIMIT 1")
+    failed_uncovered = _row_exists(
+        connection,
+        "SELECT 1 FROM reports r WHERE r.status = 5 AND r.to_wm = ?"
+        " AND NOT EXISTS(SELECT 1 FROM reports p WHERE p.status = 4"
+        " AND p.to_wm >= r.to_wm) LIMIT 1",
+        (attempted,))
     return WorkFacts(
         unfinished_actions=unfinished,
-        required_settlements=0,
-        pending_report_changes=bool(pending_report_row[0]),
-        report_failed_no_new_changes=False,
-        residual_device_facts=False,
-        deferred_work_cleanup=False,
-        waiting_acknowledgement=acknowledged > 0,
+        required_settlements=settlements,
+        pending_report_changes=has_new_changes or in_flight,
+        report_failed_no_new_changes=(not has_new_changes) and failed_uncovered,
+        residual_device_facts=_row_exists(
+            connection,
+            "SELECT 1 FROM device_activities da JOIN actions a ON a.id = da.action_id"
+            " WHERE a.status IN (3, 4, 5, 6) AND da.activity_state IN (1, 2) LIMIT 1"),
+        deferred_work_cleanup=_row_exists(
+            connection,
+            "SELECT 1 FROM intermediate_files"
+            " WHERE retention_state = 2 AND cleanup_state <> 4 LIMIT 1"),
+        waiting_acknowledgement=covered > acknowledged,
+        # 快照维护（H6）尚未接入生产数据路径；接入后按维护进度查询。
         snapshot_backlog=False,
     )

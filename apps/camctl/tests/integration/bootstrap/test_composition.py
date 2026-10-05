@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from pathlib import Path
 
@@ -136,16 +138,33 @@ class TestSubmitComposition:
 
 
 class TestRunComposition:
-    async def test_run_with_plan_accepts_and_exits_success(self, tmp_path: Path) -> None:
+    async def test_run_with_plan_holds_admission_while_work_pending(
+        self, tmp_path: Path
+    ) -> None:
         cfg = _config_for(tmp_path)
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         deps = build_runtime(CommandMode.RUN, cfg, catalog=RecordingCatalog())
         source = await _parsed(tmp_path, _plan_body())
-        outcome = await execute_command(deps, source)
+        task = asyncio.create_task(execute_command(deps, source))
+        try:
+            # 未注册推进流程：受理后仍有未完成动作，会话保持推进循环
+            # 并持有接纳，不按单次通过退出。
+            await asyncio.sleep(0.3)
+            assert probe_admission(deps.admission_lock).is_free is False
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         close_runtime(deps)
-        assert outcome.succeeded is True
-        # 会话退出后接纳锁不被遗留持有。
-        assert probe_admission(deps.admission_lock).is_free
+        # 取消收尾后接纳不遗留持有，受理结果保持可发现。
+        assert probe_admission(deps.admission_lock).is_free is True
+        import sqlite3
+
+        with sqlite3.connect(cfg.paths.state_db) as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM plans").fetchone()[0] == 1
+            assert connection.execute(
+                "SELECT COUNT(*) FROM actions").fetchone()[0] == 1
 
     async def test_bare_run_without_clock_lower_bound_restricted(self, tmp_path: Path) -> None:
         # 尚无可信下界且系统墙钟早于部署最小可信日期时受限退出；
@@ -172,9 +191,16 @@ class TestRunComposition:
         reader = type("R", (), {"read": staticmethod(lambda path: broken.read_bytes())})()
         diagnostic = parse_input(await read_input(str(broken), reader))
         run_deps = build_runtime(CommandMode.RUN, cfg, catalog=RecordingCatalog())
-        outcome = await execute_command(run_deps, diagnostic)
+        task = asyncio.create_task(execute_command(run_deps, diagnostic))
+        try:
+            # 诊断保存后仍有未完成动作：接纳保持持有。
+            await asyncio.sleep(0.3)
+            assert probe_admission(run_deps.admission_lock).is_free is False
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         close_runtime(run_deps)
-        assert outcome.succeeded is True
 
         from camctl.persistence.runtime import DbOpenMode, DbConfig, open_existing
 

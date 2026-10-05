@@ -41,6 +41,24 @@ def runtime(tmp_path: Path):
     close_runtime(deps)
 
 
+def _publish(owned, report_id: int) -> None:
+    import hashlib
+
+    from camctl.host_files.handoff import PublishResult, PublishStage
+    from camctl.host_files.io import DirectorySyncStage
+    from camctl.reporting.models import ReportBytes
+    from camctl.reporting.policy import (
+        publish_report, record_report_bytes, record_report_publish_intent,
+    )
+
+    payload = b'{"report_id":"1"}\n'
+    record_report_bytes(new_operation_key(), owned, report_id,
+                        ReportBytes(len(payload), hashlib.sha256(payload).hexdigest()))
+    record_report_publish_intent(new_operation_key(), owned, report_id)
+    publish_report(new_operation_key(), owned, report_id,
+                   PublishResult(PublishStage.MOVED, DirectorySyncStage.SYNCED, True, None))
+
+
 def _saved_counts(path: Path) -> dict[str, int]:
     with sqlite3.connect(path) as connection:
         return {
@@ -357,6 +375,7 @@ async def test_ack_only_after_terminal_plan_skips_probe(runtime, monkeypatch):
             new_operation_key(), owned, occurred_at=1,
         )
         assert report.kind is DbOutcomeKind.COMPLETED
+        _publish(owned, report.value.report.report_id)
     finally:
         owned.connection.close()
 
