@@ -147,6 +147,12 @@ def _environment(tmp_path: Path, actions):
     for action_id, action_type in actions:
         _seed_action(connection, action_id, action_type)
         _seed_activity(connection, action_id)
+        if action_type == 3:
+            # 发送后等待的延时任务固定时间与产物完成方式，判定从
+            # UNDETERMINED 开始。
+            connection.execute(
+                "UPDATE device_activities SET completion_mode = 2,"
+                " completion_basis = 1 WHERE id = ?", (action_id,))
     connection.commit()
     return owned
 

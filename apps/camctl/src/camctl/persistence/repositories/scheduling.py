@@ -286,7 +286,8 @@ class StartActionCommand:
             "wait_completed_event_id": None,
             "capture_json": None,
             "control_elapsed_ns": None,
-            "completion_basis": None,
+            # 照片与延时的采集判定从 UNDETERMINED 开始；录像不适用该列。
+            "completion_basis": None if action["type"] == 2 else 1,
             "completion_evidence_json": None,
             "result_set_state": 1,
             "result_check_json": None,

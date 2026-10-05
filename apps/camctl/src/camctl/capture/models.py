@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -21,10 +23,15 @@ from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartR
 
 __all__ = [
     "ActivityCapabilities",
+    "ActivityConcludeSave",
     "ActivityObservationSave",
+    "ActivityReleaseSave",
     "CaptureCompletion",
     "CaptureDefinition",
     "CaptureInput",
+    "ResultSetPhase",
+    "ResultSetSave",
+    "WaitCompletedSave",
     "activity_capabilities",
 ]
 
@@ -251,3 +258,132 @@ class ActivityConcludeSave:
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
         UtcMicros(self.occurred_at)
+
+
+class ResultSetPhase(Enum):
+    """结果集合核实的分支，与 RESULT_SET_CONFIRMED 的分支一一对应。"""
+
+    COMPLETE = "complete"
+    UNSATISFIED = "unsatisfied"
+    UNCONFIRMED = "unconfirmed"
+    BEGIN = "begin"
+
+
+#: 结论分支要求的采集状态（operation-fields.md#设备活动字段）。
+_PHASE_CAPTURE_STATUS = {
+    ResultSetPhase.COMPLETE: "completed",
+    ResultSetPhase.UNSATISFIED: "failed",
+    ResultSetPhase.UNCONFIRMED: "unconfirmed",
+}
+
+
+def _capture_result(name: str, value, phase: ResultSetPhase) -> None:
+    """采集结果只保存必填状态与驱动可靠提供的成员。"""
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} 必须是对象: {value!r}")
+    status = value.get("status")
+    expected = _PHASE_CAPTURE_STATUS[phase]
+    if status != expected:
+        raise ValueError(
+            f"{name} 的状态与结论不符: 期望 {expected!r}, 实际 {status!r}")
+    if "error" in value:
+        error = value["error"]
+        if expected == "completed":
+            raise ValueError(f"{name} 的完成状态不携带错误成员")
+        if not isinstance(error, Mapping):
+            raise ValueError(f"{name} 的错误必须是对象: {error!r}")
+    elif expected != "completed":
+        raise ValueError(f"{name} 的状态 {expected!r} 必须携带错误成员")
+    members = set(value) - {"status", "error", "captured_count", "elapsed_s"}
+    if members:
+        raise ValueError(f"{name} 携带未知成员: {sorted(members)}")
+    count = value.get("captured_count")
+    if count is not None and (isinstance(count, bool) or not is_json_integer(count)
+                              or not 0 <= count <= 9007199254740991):
+        raise ValueError(f"{name} 的采集次数必须是安全整数: {count!r}")
+    elapsed = value.get("elapsed_s")
+    if elapsed is not None:
+        if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
+            raise ValueError(f"{name} 的时长必须是数字: {elapsed!r}")
+        if not math.isfinite(elapsed) or elapsed < 0:
+            raise ValueError(f"{name} 的时长必须有限非负: {elapsed!r}")
+
+
+def _evidence_object(name: str, value) -> None:
+    """采集判定依据的结构：方法与实际观察，未知成员不接受。"""
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} 必须是对象: {value!r}")
+    method = value.get("method")
+    if not isinstance(method, str) or not method:
+        raise ValueError(f"{name} 的方法必须是非空文本: {method!r}")
+    if not isinstance(value.get("observation"), Mapping):
+        raise ValueError(f"{name} 必须携带实际观察对象")
+    members = set(value) - {
+        "method", "observation", "wait_completed_event_id", "attempt_id"}
+    if members:
+        raise ValueError(f"{name} 携带未知成员: {sorted(members)}")
+
+
+@dataclass(frozen=True)
+class WaitCompletedSave:
+    """等待完成事实的保存输入（CAPTURE_WAIT_CHANGED 完成分支）。
+
+    已安排的等待到期后保存一次完成事实；预计检查时间与发送事
+    实由事务核对，命令只携带活动身份与事实时刻。
+    """
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+
+
+@dataclass(frozen=True)
+class ResultSetSave:
+    """一次结果集合核实事实的保存输入（RESULT_SET_CONFIRMED）。
+
+    结论分支必须携带驱动结果规则标识与结构化依据；evidence 提
+    供采集判定依据（时间与产物或设备证据），UNSATISFIED 的已知
+    失败同样必须携带依据；BEGIN 只推进核实状态。
+    """
+
+    action_id: int
+    occurred_at: int
+    phase: ResultSetPhase
+    contract: str | None = None
+    observation: Mapping[str, Any] | None = None
+    capture: Mapping[str, Any] | None = None
+    evidence: Mapping[str, Any] | None = None
+    error: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+        if not isinstance(self.phase, ResultSetPhase):
+            raise ValueError(f"核实分支必须是登记分区: {self.phase!r}")
+        if self.phase is ResultSetPhase.BEGIN:
+            for name in ("contract", "observation", "capture", "evidence", "error"):
+                if getattr(self, name) is not None:
+                    raise ValueError(f"开始分支不携带{name}")
+            return
+        if not isinstance(self.contract, str) or not self.contract:
+            raise ValueError("结论分支必须携带驱动结果规则标识")
+        if not isinstance(self.observation, Mapping):
+            raise ValueError("结论分支必须携带结构化依据")
+        if self.capture is not None:
+            _capture_result("采集结果", self.capture, self.phase)
+        if self.phase is ResultSetPhase.COMPLETE:
+            _evidence_object("采集判定依据", self.evidence)
+            if self.error is not None:
+                raise ValueError("满足结论不携带核实错误")
+        elif self.phase is ResultSetPhase.UNSATISFIED:
+            _evidence_object("采集判定依据", self.evidence)
+            if self.error is not None and not isinstance(self.error, Mapping):
+                raise ValueError("核实错误必须是对象")
+        else:
+            if self.evidence is not None:
+                raise ValueError("无法确认分支不判定采集结果")
+            if self.error is not None and not isinstance(self.error, Mapping):
+                raise ValueError("核实错误必须是对象")

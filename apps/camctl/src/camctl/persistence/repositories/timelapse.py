@@ -1,9 +1,10 @@
-"""延时摄影等待安排的持久化事务。
+"""延时摄影等待的持久化事务。
 
 发送成功后的等待安排按 CAPTURE_WAIT_CHANGED 事件保存：首次安排
 （SCHEDULE）保存驱动必要余量、本次额外等待与预计检查时间；重启
 后配置变化按 RECONFIGURE 保存新安排，不覆盖已保存的等待完成事
-实。额外等待毫秒由调用方从本次配置显式提供，不从计划推导。
+实。额外等待毫秒由调用方从本次配置显式提供，不从计划推导。等待
+到期后按完成分支保存一次引用自身事件的完成事实。
 """
 
 from __future__ import annotations
@@ -11,9 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from camctl.capture.models import WaitCompletedSave
 from camctl.capture.timelapse import WaitPlan
 from camctl.contracts.json_values import json_equal
-from camctl.contracts.values import OperationKey
+from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
@@ -31,6 +33,7 @@ _CAPTURE_WAIT_EVENT = 15
 
 _SCHEDULE_REASON = 1
 _RECONFIGURE_REASON = 2
+_WAIT_COMPLETED_REASON = 3
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,88 @@ class WaitSaved:
     """等待安排保存结果。"""
 
     expected_check_at: int | None
+
+
+@dataclass(frozen=True)
+class WaitCompleted:
+    """等待完成保存结果：引用保存该事实的事件。"""
+
+    event_id: int
+
+
+class WaitCompletedCommand:
+    """保存等待完成事实的事务命令（CAPTURE_WAIT_CHANGED.COMPLETE）。
+
+    要求发送事实与预计检查时间已保存且完成事实尚不存在；引用的
+    事件就是本命令创建的事件本身，保存一次后不再改写。
+    """
+
+    def __init__(self, command: WaitCompletedSave, key: OperationKey) -> None:
+        if not isinstance(command, WaitCompletedSave):
+            raise TypeError("等待完成申请必须使用 WaitCompletedSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        command = self._command
+        activity = row_facts(connection, "device_activities", command.action_id)
+        if activity is None:
+            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
+        self._state["device_activities"] = {command.action_id: activity}
+        self._owners[("device_activities", command.action_id)] = (
+            "action", activity["action_id"])
+        if activity["sent_at"] is None or activity["expected_check_at"] is None:
+            raise ConsistencyError("等待完成要求已保存发送事实与预计检查时间")
+        if activity["wait_completed_event_id"] is not None:
+            raise ConsistencyError("等待完成事实已保存，不因新安排改写")
+        allocation = scope.allocate(1)
+        row = _update(
+            "device_activities", command.action_id,
+            {"wait_completed_event_id": None},
+            {"wait_completed_event_id": allocation.first_event_id},
+        )
+        event = _envelope(
+            allocation.first_event_id,
+            allocation.txn_id,
+            _CAPTURE_WAIT_EVENT,
+            _WAIT_COMPLETED_REASON,
+            (row,),
+            command.occurred_at,
+        )
+        return CommandPlan(
+            events=(event,),
+            owners=self._owners,
+            state_rows=self._state,
+            result=WaitCompleted(event_id=allocation.first_event_id),
+        )
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        """原键重送：核实原完成分支与输入后恢复首次响应。"""
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_CAPTURE_WAIT_EVENT, _WAIT_COMPLETED_REASON)]:
+            raise TransactionError("操作身份已用于其他事务，不能作为等待完成重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("等待完成的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_activities" or row["id"] != command.action_id:
+            raise TransactionError("原等待完成属于其他活动")
+        event_id = row["after"]["values"]["wait_completed_event_id"]
+        facts = row_facts(scope.connection, "device_activities",
+                          command.action_id)
+        if facts is None or facts["wait_completed_event_id"] != event_id:
+            raise TransactionError("原等待完成的可靠记录与输入不符")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=WaitCompleted(event_id=event_id),
+        )
 
 
 class ScheduleWaitCommand:
@@ -141,6 +226,17 @@ class TimelapseRepository:
             ScheduleWaitCommand(command, key, _RECONFIGURE_REASON), key, owned
         )
         return _outcome_of(receipt)
+
+    def complete_wait(
+        self, command: WaitCompletedSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[WaitCompleted]:
+        receipt = commit_operation(
+            WaitCompletedCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
 
 def _outcome_of(receipt) -> DbOutcome[WaitSaved]:

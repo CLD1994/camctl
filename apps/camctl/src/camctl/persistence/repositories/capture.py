@@ -20,6 +20,8 @@ from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
     ActivityReleaseSave,
+    ResultSetPhase,
+    ResultSetSave,
 )
 from camctl.capture.files import (
     FileCompletionSave,
@@ -91,6 +93,32 @@ _DEVICE_FILE_EVENT = 17
 _ACTIVITY_OBSERVE_EVENT = 13
 _ACTIVITY_OBSERVE_REASON = 2
 _ACTIVITY_RELEASE_REASON = 3
+
+#: RESULT_SET_CONFIRMED 的四个分支。
+_RESULT_SET_EVENT = 16
+_RESULT_COMPLETE_REASON = 1
+_RESULT_UNSATISFIED_REASON = 2
+_RESULT_UNCONFIRMED_REASON = 3
+_RESULT_BEGIN_REASON = 4
+
+#: 结论分支到（事件分支编号、目标核实状态、结果判定）的映射。
+_RESULT_PHASE_TARGETS = {
+    ResultSetPhase.COMPLETE: (_RESULT_COMPLETE_REASON, 3, 1),
+    ResultSetPhase.UNSATISFIED: (_RESULT_UNSATISFIED_REASON, 3, 2),
+    ResultSetPhase.UNCONFIRMED: (_RESULT_UNCONFIRMED_REASON, 4, 3),
+    ResultSetPhase.BEGIN: (_RESULT_BEGIN_REASON, 2, None),
+}
+
+#: 核实状态的合法转换（登记状态模型；3 与 4 无出边）。
+_RESULT_SET_NEXT = {
+    1: frozenset({2, 3, 4}),
+    2: frozenset({3, 4}),
+}
+
+#: 采集判定依据的方法标识与目标判定（operation-fields.md#设备活动字段）。
+_TIME_AND_OUTPUTS_METHOD = "time_and_outputs"
+_DEVICE_EVIDENCE_METHOD = "device_evidence"
+_KNOWN_FAILURE_METHOD = "known_failure"
 
 _ACTIVITY_DISPATCH = enum_for("device_activities.dispatch_state")
 _ACTIVITY_STATE = enum_for("device_activities.activity_state")
@@ -482,6 +510,7 @@ def register_capture_guards() -> None:
     register_guard("emergency", _emergency_guard)
     register_guard("activity", _activity_guard)
     register_guard("release", _release_guard)
+    register_guard("result_check", _result_check_guard)
 
 
 class FinishCaptureCommand:
@@ -1736,6 +1765,18 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def confirm_result_set(
+        self, command: ResultSetSave, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[ResultSetOutcome]:
+        receipt = commit_operation(
+            _ResultSetConfirmCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
 
 
 class _FilePresenceCommand:
@@ -2164,6 +2205,177 @@ class _ActivityConcludeCommand:
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
             result=ActivityConclusion(outcome=ConcludeOutcome.CONCLUDED))
+
+
+# -- 结果集合核实 -----------------------------------------------------
+
+
+class ResultSetDisposition(Enum):
+    """结果集合核实事务的可靠结果分区。"""
+
+    SAVED = "saved"
+    ALREADY = "already"
+
+
+@dataclass(frozen=True)
+class ResultSetOutcome:
+    """核实结果：保存后的核实状态与采集判定。"""
+
+    disposition: ResultSetDisposition
+    result_set_state: int
+    completion_basis: int | None
+
+
+class _ResultSetConfirmCommand:
+    """保存一次结果集合核实事实的事务命令（RESULT_SET_CONFIRMED）。
+
+    BEGIN 只把未核实的集合推进到核实中；结论分支保存驱动规则标
+    识、结构化依据与采集结果。时间与产物完成要求固定完成方式、
+    可靠发送、已保存的等待完成与一致的引用共同成立；设备证据要
+    求活动已经结束。录像活动不适用本命令。
+    """
+
+    def __init__(self, command: ResultSetSave, key: OperationKey) -> None:
+        if not isinstance(command, ResultSetSave):
+            raise TypeError("结果集合核实申请必须使用 ResultSetSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        facts = row_facts(connection, "device_activities", command.action_id)
+        if facts is None:
+            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
+        action = row_facts(connection, "actions", facts["action_id"])
+        if action is None:
+            raise ConsistencyError(f"活动所属动作不存在: {facts['action_id']}")
+        self._state["device_activities"] = {command.action_id: facts}
+        self._state["actions"] = {facts["action_id"]: action}
+        self._owners[("device_activities", command.action_id)] = (
+            "action", facts["action_id"])
+        if action["type"] == 2:
+            raise ConsistencyError(
+                "录像活动不适用结果集合核实，采集判定列保持为空")
+        reason, target, outcome = _RESULT_PHASE_TARGETS[command.phase]
+        current = facts["result_set_state"]
+        if target not in _RESULT_SET_NEXT.get(current, frozenset()):
+            raise ConsistencyError(
+                f"结果集合状态不能从 {current!r} 推进到 {target!r}")
+        before: dict[str, Any] = {"result_set_state": current}
+        after: dict[str, Any] = {"result_set_state": target}
+        if outcome is not None:
+            before["result_check_json"] = facts["result_check_json"]
+            after["result_check_json"] = {
+                "contract": command.contract,
+                "outcome": outcome,
+                "observation": dict(command.observation),
+            }
+        basis, evidence = self._basis_after(facts)
+        if basis != facts["completion_basis"]:
+            before["completion_basis"] = facts["completion_basis"]
+            after["completion_basis"] = basis
+            before["completion_evidence_json"] = facts["completion_evidence_json"]
+            after["completion_evidence_json"] = evidence
+        if command.capture is not None:
+            before["capture_json"] = facts["capture_json"]
+            after["capture_json"] = dict(command.capture)
+        error_after = self._error_after(facts)
+        if error_after != facts["last_error_json"]:
+            before["last_error_json"] = facts["last_error_json"]
+            after["last_error_json"] = error_after
+        row = _update("device_activities", command.action_id, before, after)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _RESULT_SET_EVENT, reason, (row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ResultSetOutcome(
+                ResultSetDisposition.SAVED, target, basis))
+
+    def _basis_after(self, facts) -> tuple[int | None, dict | None]:
+        """按分支与已保存事实确定采集判定；只从待定初始化一次。"""
+        command = self._command
+        current = facts["completion_basis"]
+        if command.phase is ResultSetPhase.BEGIN:
+            return current, None
+        if command.phase is ResultSetPhase.UNSATISFIED:
+            if current not in (None, 1):
+                raise ConsistencyError("采集判定已确定，不能再保存明确不满足")
+            return 4, dict(command.evidence)
+        if command.phase is ResultSetPhase.UNCONFIRMED:
+            if current not in (None, 1):
+                raise ConsistencyError("采集判定已确定，不能再变为无法确认")
+            if command.capture is None or current == 1:
+                return current, None
+            # 保存未知采集事实要求判定列脱离空值；待定是唯一合法落点。
+            return 1, None
+        method = command.evidence["method"]
+        if method == _TIME_AND_OUTPUTS_METHOD:
+            if facts["completion_mode"] != 2:
+                raise ConsistencyError("固定完成方式不是时间与产物，判定不适用")
+            if (facts["dispatch_state"] != 3 or facts["sent_at"] is None
+                    or facts["expected_check_at"] is None
+                    or facts["wait_completed_event_id"] is None):
+                raise ConsistencyError("时间与产物判定缺少可靠发送与等待完成事实")
+            if (command.evidence.get("wait_completed_event_id")
+                    != facts["wait_completed_event_id"]):
+                raise ConsistencyError("完成依据引用的等待事件与本活动不符")
+            if facts["activity_state"] == 2:
+                raise ConsistencyError("不能以时间与产物判定覆盖进行中的实际观察")
+            return 3, dict(command.evidence)
+        if method == _DEVICE_EVIDENCE_METHOD:
+            if facts["activity_state"] != 3:
+                raise ConsistencyError("设备证据判定要求原活动已经结束")
+            return 2, dict(command.evidence)
+        raise ConsistencyError(f"未登记的采集判定方法: {method!r}")
+
+    def _error_after(self, facts):
+        command = self._command
+        if command.phase is ResultSetPhase.COMPLETE:
+            return None
+        return None if command.error is None else dict(command.error)
+
+    def _reuse(self, saved) -> CommandPlan:
+        """原键重送：核实原分支与输入后恢复首次结果。"""
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        reason = _RESULT_PHASE_TARGETS[command.phase][0]
+        if types != [(_RESULT_SET_EVENT, reason)]:
+            raise TransactionError("操作身份已用于其他事务，不能作为结果核实重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("结果核实的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_activities" or row["id"] != command.action_id:
+            raise TransactionError("原结果核实属于其他活动")
+        values = row["after"]["values"]
+        expected_check = None if command.phase is ResultSetPhase.BEGIN else {
+            "contract": command.contract,
+            "outcome": _RESULT_PHASE_TARGETS[command.phase][2],
+            "observation": dict(command.observation),
+        }
+        pairs = (
+            ("result_check_json", expected_check),
+            ("capture_json", None if command.capture is None else dict(command.capture)),
+            ("last_error_json",
+             None if command.error is None else dict(command.error)),
+        )
+        for column, value in pairs:
+            if column in values and not json_equal(values.get(column), value):
+                raise TransactionError("结果核实的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ResultSetOutcome(
+                ResultSetDisposition.ALREADY,
+                values["result_set_state"],
+                values.get("completion_basis")))
 
 
 # -- 设备文件观察登记 -------------------------------------------------
@@ -2877,7 +3089,11 @@ def _emergency_guard(event, context) -> None:
 
 
 def _activity_guard(event, context) -> None:
-    """活动状态守卫：结束不由路径、超时或本地退出补造。"""
+    """活动状态守卫：结束不由路径、超时或本地退出补造。
+
+    采集判定列只适用于照片与延时：录像活动不得携带采集结果或判
+    定依据；确定判定只能从待定初始化一次并同事务携带依据。
+    """
     for row in event.rows:
         if row.table != "device_activities" or not row.before.exists:
             continue
@@ -2898,6 +3114,26 @@ def _activity_guard(event, context) -> None:
             )
             if not stopped:
                 raise EventValidationError("活动结束缺少可靠停止事实")
+        basis_before = row.before.values.get("completion_basis")
+        basis_after = row.after.values.get("completion_basis")
+        capture_columns = (
+            "capture_json", "completion_basis", "completion_evidence_json")
+        if any(row.after.values.get(column) is not None
+               for column in capture_columns):
+            action_id = row.before.values.get(
+                "action_id", context.state_rows.get(
+                    "device_activities", {}).get(row.row_id, {}).get("action_id"))
+            action = context.state_rows.get("actions", {}).get(action_id)
+            if action is None:
+                raise EventValidationError(
+                    f"采集判定列要求动作事实: actions#{action_id}")
+            if action.get("type") == 2:
+                raise EventValidationError("录像活动不得携带采集结果或判定依据")
+        if basis_after != basis_before and basis_after in (2, 3, 4):
+            if basis_before not in (None, 1):
+                raise EventValidationError("采集判定已确定，不能再改判")
+            if not row.after.values.get("completion_evidence_json"):
+                raise EventValidationError("确定的采集判定缺少可靠依据")
 
 
 def _release_guard(event, context) -> None:
@@ -2925,3 +3161,44 @@ def _release_guard(event, context) -> None:
                 "占用释放缺少活动结束、未派发或完成依据")
         if facts.get("ownership_mode") == 2 and facts.get("baseline_state") != 3:
             raise EventValidationError("输出范围归属未固定不得释放占用")
+
+
+def _result_check_guard(event, context) -> None:
+    """结果集合核实守卫：分支、判定编码与轮次状态一致。
+
+    一轮只消耗一次：开始分支只推进状态，结论分支必须携带规则标
+    识与结构化依据，判定编码与分支对应；取消或耗尽不补造集合。
+    """
+    if event.event_type != _RESULT_SET_EVENT:
+        return
+    rows = [
+        row for row in event.rows
+        if row.table == "device_activities" and row.before.exists
+    ]
+    if len(rows) != 1:
+        raise EventValidationError("结果集合核实恰好修改一个设备活动")
+    row = rows[0]
+    state_after = row.after.values.get("result_set_state")
+    state_before = row.before.values.get("result_set_state")
+    if event.reason == _RESULT_BEGIN_REASON:
+        if (state_before, state_after) != (1, 2):
+            raise EventValidationError("开始分支只把未核实集合推进到核实中")
+        extra = set(row.after.values) - {"result_set_state"}
+        if extra:
+            raise EventValidationError(f"开始分支不携带结论事实: {sorted(extra)}")
+        return
+    outcome_by_reason = {
+        _RESULT_COMPLETE_REASON: (3, 1),
+        _RESULT_UNSATISFIED_REASON: (3, 2),
+        _RESULT_UNCONFIRMED_REASON: (4, 3),
+    }
+    expected = outcome_by_reason.get(event.reason)
+    if expected is None or state_before not in (1, 2) or state_after != expected[0]:
+        raise EventValidationError("结论分支与核实状态转换不符")
+    check = row.after.values.get("result_check_json")
+    if not isinstance(check, Mapping):
+        raise EventValidationError("结论分支必须保存结果集合核实依据")
+    if (not isinstance(check.get("contract"), str) or not check["contract"]
+            or check.get("outcome") != expected[1]
+            or not isinstance(check.get("observation"), Mapping)):
+        raise EventValidationError("结果集合核实依据的结构或判定编码非法")

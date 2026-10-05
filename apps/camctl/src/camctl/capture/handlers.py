@@ -19,6 +19,10 @@ from typing import Any, Callable, Mapping, Protocol
 from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
+    ActivityReleaseSave,
+    ResultSetPhase,
+    ResultSetSave,
+    WaitCompletedSave,
 )
 from camctl.capture.files import (
     FileCompletionSave,
@@ -120,6 +124,11 @@ _REQUIRED_KINDS = {
 #: 归属证据方法与完成依据（file-fields.md#设备文件）。
 _TASK_SCOPE = 1
 _DEVICE_GUARANTEE = 1
+
+#: 第一版任务范围列举的结果规则标识与采集判定方法。
+_RESULT_CONTRACT = "task_scope_files"
+_TIME_AND_OUTPUTS_METHOD = "time_and_outputs"
+_KNOWN_FAILURE_METHOD = "known_failure"
 
 _ACTION_TERMINAL = (3, 4, 5, 6)
 
@@ -553,6 +562,15 @@ def _finish_capture(
         "terminal", "failed" if failure is not None else "succeeded")
 
 
+def _release_occupancy(runtime: CaptureRuntime, action_id: int) -> None:
+    """按统一释放判定解除本活动占用；条件不满足保持原状。"""
+    receipt = runtime.capture.release_occupancy(
+        ActivityReleaseSave(
+            action_id=action_id, occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
 def _target_duration_ms(action: Mapping[str, Any]) -> int:
     """从首次固定的执行定义读取录像目标时长（毫秒）。
 
@@ -738,8 +756,97 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         return
     if context.wall_us() < activity[1]:
         return
+    if action["cancel_requested"]:
+        # 取消已生效：核实与成功终态都不再推进，等待取消收场接入。
+        return
+    wait_event_id = _complete_timelapse_wait(context, action_id)
     entries = await context.results.list_files(action_id)
-    _finish_capture(context, action_id, entries, FileKind.VIDEO)
+    assessment = assess_capture_files(
+        CaptureFileSet(
+            files=tuple(
+                CaptureFile(
+                    file_id=entry.identity, kind=entry.kind,
+                    complete=entry.complete, ownership_confirmed=True)
+                for entry in entries),
+            set_finalized=True),
+        ProductRequirements(required_kinds=frozenset({FileKind.VIDEO})))
+    if assessment.is_complete:
+        _confirm_timelapse_results(
+            context, action_id, assessment, entries, wait_event_id)
+        # 时间与产物完成依据成立后解除占用；收尾处理不再阻塞同设备。
+        _release_occupancy(context, action_id)
+        _finish_capture(context, action_id, entries, FileKind.VIDEO)
+    elif assessment.explicitly_unmet:
+        _confirm_timelapse_results(
+            context, action_id, assessment, entries, wait_event_id)
+        _finish_capture(
+            context, action_id, entries, FileKind.VIDEO,
+            failure=RecordingFailure(
+                code="capture_failed",
+                details={
+                    "activity_id": str(action_id),
+                    "reason": "no_outputs"}))
+    # 暂未齐备：保留核实责任，等待下一轮列举后重新判定。
+
+
+def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:
+    """到期的等待先保存一次完成事实，返回其事件引用。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT wait_completed_event_id FROM device_activities WHERE id = ?",
+        (action_id,),
+    )) as cursor:
+        saved = cursor.fetchone()
+    if saved is not None and saved[0] is not None:
+        return saved[0]
+    receipt = runtime.timelapse.complete_wait(
+        WaitCompletedSave(
+            action_id=action_id, occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    return receipt.value.event_id
+
+
+def _confirm_timelapse_results(
+    runtime: CaptureRuntime, action_id: int, assessment, entries,
+    wait_event_id: int,
+) -> None:
+    """把本轮结果集合核实结论与采集判定共同保存。
+
+    完整集合满足时按时间与产物完成判定，依据引用已保存的等待完
+    成事实；明确不满足保存已知失败。观察只记录实际列举到的文件
+    事实，不填理论张数。
+    """
+    identities = sorted(entry.identity for entry in entries)
+    if assessment.is_complete:
+        command = ResultSetSave(
+            action_id=action_id,
+            occurred_at=runtime.wall_us(),
+            phase=ResultSetPhase.COMPLETE,
+            contract=_RESULT_CONTRACT,
+            observation={"files": identities},
+            capture={"status": "completed"},
+            evidence={
+                "method": _TIME_AND_OUTPUTS_METHOD,
+                "wait_completed_event_id": wait_event_id,
+                "observation": {"files": identities},
+            })
+    else:
+        missing = sorted(str(kind.value) for kind in assessment.missing_kinds)
+        command = ResultSetSave(
+            action_id=action_id,
+            occurred_at=runtime.wall_us(),
+            phase=ResultSetPhase.UNSATISFIED,
+            contract=_RESULT_CONTRACT,
+            observation={"files": identities, "missing": missing},
+            capture={"status": "failed",
+                     "error": {"code": "capture_unsatisfied"}},
+            evidence={
+                "method": _KNOWN_FAILURE_METHOD,
+                "observation": {"files": identities, "missing": missing},
+            })
+    receipt = runtime.capture.confirm_result_set(
+        command, new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
 _HANDLERS: dict[str, ActionHandler] = {
