@@ -65,17 +65,37 @@ def _seed_running_action(
     _seed_record_action(connection, action_id, 1, input_index=input_index)
 
 
-def _seed_terminal_run(connection, action_id: int, *, status: int = 3) -> None:
-    """start 责任的终态流程行；status=3 是活动结束的可靠停止事实。"""
+def _seed_terminal_run(
+    connection, action_id: int, *, status: int = 3, responsibility: str = "start",
+) -> None:
+    """终态流程行；录像活动的可靠停止事实用 stop 责任，照片用 start。"""
+    kind = 2 if responsibility == "stop" else 1
     connection.execute(
         "INSERT INTO operation_runs (id, action_id, delivery_id, kind, query_purpose,"
         " responsibility_key, activity_id, copy_id, cleanup_item_id, session_key,"
         " status, attempts_used, max_attempts_used, timeout_s_json,"
         " retry_interval_s_json, retry_wait_required, error_json)"
-        " VALUES (?, ?, NULL, 1, NULL, ?, ?, NULL, NULL, NULL, ?, 1, 1, '30', '1',"
+        " VALUES (?, ?, NULL, ?, NULL, ?, ?, NULL, NULL, NULL, ?, 1, 1, '30', '1',"
         " 0, ?)",
-        (action_id + 50, action_id, f"start/{action_id}", action_id, status,
+        (action_id + 50, action_id, kind, f"{responsibility}/{action_id}",
+         action_id, status,
          None if status == 3 else '{"code": "call_failed"}'))
+
+
+def _seed_photo_action(connection, action_id: int) -> None:
+    connection.execute(
+        "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
+        " scheduled_at, group_name, input_fields_json, effective_params_json,"
+        " driver_id, max_delay_ms, execution_spec_json, status, execution_started,"
+        " cancel_requested, error_code, error_details_json, first_window_observed_at,"
+        " expiration_reason, source_resolution_state, resolved_source_plan_id,"
+        " target_selection_state, created_event_id, last_event_id, change_count)"
+        " VALUES (?, 1, 0, ?, 1, 'cam-1', ?, NULL, '{}', ?,"
+        " 'camctl-adb', 1000, '{}', 2, 1, 0, NULL,"
+        " NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
+        (action_id, f"photo-{action_id}", _NOW,
+         '{"type": "single_shot"}'),
+    )
 
 
 def _release(owned, action_id: int, *, key=None):
@@ -270,8 +290,8 @@ class TestConcludeRequiresStopFact:
         _seed_activity(connection, 1, dispatch_state=3, activity_state=2)
         connection.commit()
 
-        # 没有任何 start 责任成功终态流程行：活动结束缺少可靠停止
-        # 事实，整组拒绝且不保存任何收场事实。
+        # 录像活动没有任何 stop 责任成功终态流程行：活动结束缺少
+        # 可靠停止事实，整组拒绝且不保存任何收场事实。
         outcome = _conclude(owned, 1)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
         assert _value(
@@ -279,7 +299,7 @@ class TestConcludeRequiresStopFact:
             " FROM device_activities WHERE id = 1") == (2, 1)
 
         connection.execute("BEGIN IMMEDIATE")
-        _seed_terminal_run(connection, 1, status=3)
+        _seed_terminal_run(connection, 1, status=3, responsibility="stop")
         connection.commit()
         saved = _conclude(owned, 1)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
@@ -298,6 +318,37 @@ class TestConcludeRequiresStopFact:
 
         outcome = _conclude(owned, 1)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+
+    async def test_record_start_run_is_not_stop_fact(self, owned):
+        """启动调用的成功不证明录像已停止：start 责任行不作录像停止事实。"""
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_running_action(connection, 1)
+        _seed_activity(connection, 1, dispatch_state=3, activity_state=2)
+        _seed_terminal_run(connection, 1, status=3, responsibility="start")
+        connection.commit()
+
+        outcome = _conclude(owned, 1)
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (2, 1)
+
+    async def test_photo_start_run_is_stop_fact(self, owned):
+        """照片整次活动随启动调用完成：start 责任成功即可靠停止事实。"""
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_photo_action(connection, 1)
+        _seed_activity(connection, 1, dispatch_state=3, activity_state=2)
+        _seed_terminal_run(connection, 1, status=3, responsibility="start")
+        connection.commit()
+
+        outcome = _conclude(owned, 1)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert outcome.value.outcome is ConcludeOutcome.CONCLUDED
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (3, 2)
 
     async def test_unknown_activity_rejects_conclude(self, owned):
         connection = owned.connection

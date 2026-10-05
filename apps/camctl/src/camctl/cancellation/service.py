@@ -113,26 +113,35 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
             " FROM cancel_items WHERE id = ?", (item_id,)).fetchone()
         _, effect, target_id = row
         if row[0] == 2 and effect == 2:
-            # 取消已生效且目标尚未终态：推进本次有限收场。
+            # 取消已生效：本次有限收场经结算端口按目标类型推进。
+            # 端口自行判断剩余工作（拍摄的停止等待、取回的交付撤回），
+            # 不以目标是否终态为前提；全部完成后按目标终态选择完成
+            # 依据：目标以 canceled 结束证明取消达成，其他终态保持
+            # 原结果。
             target_status = connection.execute(
                 "SELECT status FROM actions WHERE id = ?",
                 (target_id,)).fetchone()
-            if target_status is not None and target_status[0] not in (3, 4, 5, 6):
-                outcome = await runtime.settlement.settle(target_id)
-                if outcome.complete:
-                    if outcome.failed:
-                        _completed(repository.record_cancel_result(
-                            RecordCancelResult(
-                                item_id, runtime.occurred_at(),
-                                code="target_cleanup_failed",
-                                details={"action_instance_id": str(target_id)}),
-                            new_operation_key(), owned))
-                    else:
-                        _completed(repository.record_cancel_result(
-                            RecordCancelResult(
-                                item_id, runtime.occurred_at(),
-                                outcome=CancelOutcomeChoice.CANCELED),
-                            new_operation_key(), owned))
+            if target_status is None:
+                raise ConsistencyError(
+                    f"取消目标动作不存在: {target_id}")
+            outcome = await runtime.settlement.settle(target_id)
+            if outcome.complete:
+                if outcome.failed:
+                    _completed(repository.record_cancel_result(
+                        RecordCancelResult(
+                            item_id, runtime.occurred_at(),
+                            code="target_cleanup_failed",
+                            details={"action_instance_id": str(target_id)}),
+                        new_operation_key(), owned))
+                else:
+                    basis = (
+                        CancelOutcomeChoice.CANCELED
+                        if target_status[0] == 6
+                        else CancelOutcomeChoice.ALREADY_TERMINAL)
+                    _completed(repository.record_cancel_result(
+                        RecordCancelResult(
+                            item_id, runtime.occurred_at(), outcome=basis),
+                        new_operation_key(), owned))
         final = connection.execute(
             "SELECT status, cancellation_effect, outcome, error_code,"
             " error_details_json, target_action_id FROM cancel_items"

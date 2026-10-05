@@ -92,7 +92,8 @@ def decide_recording_next(
 ) -> RecordingDecision:
     """按录像成功标准决定停止与核实。
 
-    正常录像到达锚点加完整时长才停止，不主动少录；停止成功与文件
+    正常录像到达锚点加完整时长才停止，不主动少录；取消生效后不经
+    计时立即按剩余预算停止，也不依赖本会话锚点。停止成功与文件
     完成保证分别核对；调用尚未结束保持资源；停止预算沿原流程累计，
     取消与恢复不刷新。
     """
@@ -109,19 +110,21 @@ def decide_recording_next(
         return RecordingDecision(
             phase=RecordingPhase.VERIFY_FILE_COMPLETE, stop_attempts_used=used
         )
-    if not state.anchor_from_current_session:
-        return RecordingDecision(
-            phase=RecordingPhase.RECONCILE_REQUIRED, stop_attempts_used=used
-        )
     if state.stop_in_flight:
         return RecordingDecision(
             phase=RecordingPhase.STOP_IN_FLIGHT, stop_attempts_used=used
         )
-    assert state.stop_target_ns is not None and state.monotonic_now_ns is not None
-    if state.monotonic_now_ns < state.stop_target_ns:
-        return RecordingDecision(
-            phase=RecordingPhase.WAIT_RECORD, stop_attempts_used=used
-        )
+    if not facts.canceled:
+        if not state.anchor_from_current_session:
+            return RecordingDecision(
+                phase=RecordingPhase.RECONCILE_REQUIRED, stop_attempts_used=used
+            )
+        assert (state.stop_target_ns is not None
+                and state.monotonic_now_ns is not None)
+        if state.monotonic_now_ns < state.stop_target_ns:
+            return RecordingDecision(
+                phase=RecordingPhase.WAIT_RECORD, stop_attempts_used=used
+            )
     if used >= state.stop_max_attempts:
         return RecordingDecision(
             phase=RecordingPhase.STOP_EXHAUSTED, stop_attempts_used=used

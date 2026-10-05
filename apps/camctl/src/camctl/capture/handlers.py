@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Protocol
 
@@ -42,6 +42,7 @@ from camctl.capture.recording import (
     RecordingPhase,
     RecordingState,
     decide_recording_next,
+    recording_stop_target,
 )
 from camctl.capture.results import (
     CaptureFile,
@@ -65,6 +66,10 @@ from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptFinish,
+    AttemptIntent,
+    AttemptTarget,
+    BeginDisposition,
+    OperationKind,
     RunFinish,
     RunOutcome,
 )
@@ -85,7 +90,11 @@ from camctl.outputs.catalog import (
     OutputKind,
 )
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import CaptureRepository, FinishCapture
+from camctl.persistence.repositories.capture import (
+    CaptureRepository,
+    FinishCanceledCapture,
+    FinishCapture,
+)
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import GrantRequest, SchedulingRepository
 from camctl.persistence.repositories.timelapse import ScheduleWait, TimelapseRepository
@@ -151,6 +160,12 @@ class DeviceControlPort(Protocol):
     async def control(self, request: ControlRequest) -> DeviceCallResult: ...
 
 
+class DeviceStopPort(Protocol):
+    """设备停止操作端口；录像停止调用经此发出。"""
+
+    async def stop(self, request: ControlRequest) -> DeviceCallResult: ...
+
+
 class ResultFilesPort(Protocol):
     """结果列举端口：返回本任务观察到的候选产物文件。"""
 
@@ -185,6 +200,11 @@ class CaptureRuntime:
     window_of: Callable[[Mapping[str, Any]], LaunchWindow]
     wait_config: Callable[[Mapping[str, Any]], CaptureWaitConfig]
     recording_state: RecordingStatePort | None = None
+    #: 录像停止调用端口；未装配时录像不能停止。
+    stopper: DeviceStopPort | None = None
+    #: 停止尝试的本次预算；默认 3 次、单次 10 秒、重试间隔 1 秒。
+    stop_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
+        max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("1")))
 
     def action(self, action_id: int) -> Mapping[str, Any]:
         facts = row_facts(self.owned.connection, "actions", action_id)
@@ -225,7 +245,8 @@ class CaptureRuntime:
 
     def finish(self, ticket, outcome: CallOutcome, *,
                end_run: RunOutcome | None = None,
-               run_error: ErrorValue | None = None) -> None:
+               run_error: ErrorValue | None = None,
+               retry_wait: bool = False) -> None:
         """保存尝试结果；调用收场后同时结束流程（启动责任闭合）。"""
         attempt = AttemptFinish(
             ticket=ticket,
@@ -233,6 +254,7 @@ class CaptureRuntime:
             occurred_at=self.wall_us(),
             run_finish=None if end_run is None else RunFinish(
                 status=end_run, error=run_error),
+            retry_wait=retry_wait,
         )
         receipt = self.operations.finish_attempt(
             attempt, new_operation_key(), self.owned)
@@ -245,12 +267,15 @@ class SessionRecordingState:
     启动确认与停止确认取自 start/stop 责任的最近尝试；停止次数与
     在途取自停止流程行。计时锚点是本进程会话的单调钟读数（规格：
     重启后旧读数不能与新会话组合，须先对账），由装配层在启动确认
-    后登记；未登记时按跨会话处理进入对账分区。
+    后登记；未登记时按跨会话处理进入对账分区。推进循环每轮重建运
+    行时时，装配层传入同一会话共享的锚点表，锚点跨轮保留。
     """
 
-    def __init__(self, runtime: "CaptureRuntime") -> None:
+    def __init__(self, runtime: "CaptureRuntime",
+                 anchors: dict[int, tuple[int, int]] | None = None) -> None:
         self._runtime = runtime
-        self._anchors: dict[int, tuple[int, int]] = {}
+        self._anchors: dict[int, tuple[int, int]] = (
+            {} if anchors is None else anchors)
 
     def anchor_confirmed(self, action_id: int, anchor_ns: int,
                          stop_target_ns: int) -> None:
@@ -301,7 +326,8 @@ def _binding(action: Mapping[str, Any]) -> DeviceBinding:
     return DeviceBinding(device_id=action["device_id"], driver_id=action["driver_id"])
 
 
-def _operation_outcome(result: DeviceCallResult, confirmed_observation: str):
+def _operation_outcome(result: DeviceCallResult, confirmed_observation: str,
+                       evidence_type: str = "operation_returned"):
     """按契约调用结果构造尝试结局：可靠观察与调用错误并存。"""
     confirmed = any(
         observation.type == confirmed_observation
@@ -325,7 +351,7 @@ def _operation_outcome(result: DeviceCallResult, confirmed_observation: str):
         effect=effect,
         settlement=Settlement(
             basis=SettlementBasis.OBSERVED,
-            evidence=EvidenceValue(type="operation_returned", version=1, data={}),
+            evidence=EvidenceValue(type=evidence_type, version=1, data={}),
         ),
         observations=result.observations,
     )
@@ -435,6 +461,63 @@ def _conclude_activity(runtime: CaptureRuntime, action_id: int) -> None:
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
+def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
+    """会话内缓存录像中段事实装载器；计时锚点跨推进保留。"""
+    if context.recording_state is None:
+        context.recording_state = SessionRecordingState(context)
+    return context.recording_state
+
+
+async def _stop_call(runtime: CaptureRuntime, action) -> HandlerOutcome:
+    """按原停止预算发起一次录像停止调用并保存尝试结果。
+
+    意图先提交才派发；可靠确认结束停止流程，错误或未确认保持流
+    程执行中并建立重试等待，预算沿原流程累计不刷新。
+    """
+    if runtime.stopper is None:
+        raise LookupError("录像停止端口未装配")
+    intent = AttemptIntent(
+        operation="stop",
+        action_id=action["id"],
+        kind=OperationKind.STOP,
+        target=AttemptTarget(activity_id=action["id"]),
+        query_purpose=None,
+        config=runtime.stop_config,
+        occurred_at=runtime.wall_us(),
+    )
+    outcome = runtime.operations.begin_attempt(
+        intent, new_operation_key(), runtime.owned)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"停止意图事务未完成（{outcome.kind.value}）: {outcome.error}")
+    if outcome.value.disposition is not BeginDisposition.GRANTED:
+        return HandlerOutcome("stop_not_granted", outcome.value.reason)
+    ticket = outcome.value.ticket
+    response = await runtime.stopper.stop(ControlRequest(
+        operation="stop_recording",
+        binding=_binding(action),
+        params=action["effective_params_json"],
+    ))
+    call, confirmed = _operation_outcome(
+        response, "stop_confirmed", evidence_type="stop_returned")
+    if confirmed:
+        runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED)
+    else:
+        runtime.finish(ticket, call, retry_wait=True)
+    if response.error is not None:
+        return HandlerOutcome("stop_failed", "device_error")
+    return HandlerOutcome("confirmed" if confirmed else "sent")
+
+
+def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int) -> None:
+    """取消终态：放弃内容，不登记正式产物。"""
+    receipt = runtime.capture.finish_canceled_capture(
+        FinishCanceledCapture(
+            action_id=action_id, occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
 def _finish_capture(
     runtime: CaptureRuntime, action_id: int, entries: tuple[ObservedFile, ...],
     required: FileKind, *, failure: RecordingFailure | None = None,
@@ -471,16 +554,17 @@ def _finish_capture(
 
 
 def _target_duration_ms(action: Mapping[str, Any]) -> int:
-    params = action["effective_params_json"]
-    if not isinstance(params, Mapping):
-        raise ConsistencyError("录像生效参数不是对象")
-    duration = params.get("target_duration_s")
-    if isinstance(duration, bool) or not isinstance(duration, (int, Decimal, float)):
-        raise ConsistencyError(f"录像缺少可解释的目标时长: {duration!r}")
-    milliseconds = int(Decimal(str(duration)) * 1000)
-    if milliseconds <= 0:
-        raise ConsistencyError(f"录像目标时长必须是正数: {duration!r}")
-    return milliseconds
+    """从首次固定的执行定义读取录像目标时长（毫秒）。
+
+    定义缺失或非法属于状态库错误；本会话不猜测时长继续执行。
+    """
+    spec = action["execution_spec_json"]
+    if not isinstance(spec, Mapping):
+        raise ConsistencyError("录像执行定义缺失，目标时长不可读")
+    duration = spec.get("target_duration_ms")
+    if isinstance(duration, bool) or not isinstance(duration, int) or duration < 1:
+        raise ConsistencyError(f"录像目标时长缺失或非法: {duration!r}")
+    return duration
 
 
 async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
@@ -538,28 +622,47 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         # 尚未发起启动：首次授予并调用，不依赖中段事实端口。
         if action["cancel_requested"]:
             return
-        await _control_call(
+        step = await _control_call(
             context, action, "start_recording", "start_confirmed",
             activity_facts=lambda confirmed: (
                 {"sent_at": context.wall_us()}
                 | ({"started_at": context.wall_us(), "activity_state": 2}
                    if confirmed else {})))
+        if step.phase == "confirmed":
+            # 启动确认即取本会话单调锚点；停止目标 = 锚点 + 目标时长。
+            port = _recording_port(context)
+            anchor_ns = context.monotonic_ns()
+            port.anchor_confirmed(
+                action_id, anchor_ns,
+                recording_stop_target(anchor_ns, _target_duration_ms(action)))
         return
-    port = context.recording_state
-    if port is None and isinstance(context, CaptureRuntime):
-        port = SessionRecordingState(context)
-    if port is None:
-        raise LookupError("录像中段事实端口未装配")
+    port = _recording_port(context)
+    canceled = bool(action["cancel_requested"])
     decision = decide_recording_next(
         port.recording_state(action_id),
-        RecordingFacts(canceled=bool(action["cancel_requested"])),
+        RecordingFacts(canceled=canceled),
     )
     if decision.phase is RecordingPhase.NOT_RUNNING:
+        if canceled:
+            # 启动未确认时取消：不重新启动，收场归启动核实链。
+            return
         await _control_call(context, action, "start_recording", "start_confirmed")
+        return
+    if decision.phase is RecordingPhase.READY_TO_STOP:
+        step = await _stop_call(context, action)
+        if step.phase == "confirmed":
+            # 停止确认：活动以可靠停止事实收场，重入进入终态分支。
+            _conclude_activity(context, action_id)
+            return await _record_handler(action_id, context)
         return
     if decision.phase not in (RecordingPhase.CONTROL_COMPLETE,
                               RecordingPhase.VERIFY_FILE_COMPLETE):
-        # 等待计时、停止推进与跨会话对账随中段端口接线后由调度推进。
+        # 等待计时、跨会话对账与预算耗尽的收场随后续接线推进。
+        return
+    _conclude_activity(context, action_id)
+    if canceled:
+        # 停止已确认后取消生效：终止后续核验，放弃本次录像内容。
+        _finish_canceled_capture(context, action_id)
         return
     processing = context.owned.connection.execute(
         "SELECT id, check_decision, check_state, repair_state"

@@ -132,3 +132,34 @@ class TestStopBudgetShared:
         )
         assert decision.phase is RecordingPhase.RECONCILE_REQUIRED
         assert decision.new_stop_attempt is False
+
+
+class TestCanceledStop:
+    """取消生效后立即停止：不等待停止目标，也不依赖本会话锚点。"""
+
+    async def test_cancel_before_target_stops_immediately(self) -> None:
+        decision = decide_recording_next(_state(), RecordingFacts(canceled=True))
+        assert decision.phase is RecordingPhase.READY_TO_STOP
+        assert decision.new_stop_attempt is True
+
+    async def test_cancel_without_session_anchor_still_stops(self) -> None:
+        """跨会话锚点只影响计时；取消不计时，仍按剩余预算停止。"""
+        decision = decide_recording_next(
+            _state(anchor_from_current_session=False,
+                   stop_target_ns=None, monotonic_now_ns=None),
+            RecordingFacts(canceled=True),
+        )
+        assert decision.phase is RecordingPhase.READY_TO_STOP
+        assert decision.new_stop_attempt is True
+
+    async def test_cancel_respects_in_flight_call(self) -> None:
+        decision = decide_recording_next(
+            _state(stop_in_flight=True), RecordingFacts(canceled=True))
+        assert decision.phase is RecordingPhase.STOP_IN_FLIGHT
+        assert decision.new_stop_attempt is False
+
+    async def test_cancel_respects_original_budget(self) -> None:
+        decision = decide_recording_next(
+            _state(stop_attempts_used=_MAX_STOP), RecordingFacts(canceled=True))
+        assert decision.phase is RecordingPhase.STOP_EXHAUSTED
+        assert decision.new_stop_attempt is False

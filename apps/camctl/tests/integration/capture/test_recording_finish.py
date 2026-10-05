@@ -23,6 +23,7 @@ from camctl.outputs.catalog import (
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
+    FinishCanceledCapture,
     FinishCapture,
     FinishDisposition,
     register_capture_guards,
@@ -93,7 +94,8 @@ def _seed_plan(connection, plan_id: int) -> None:
     )
 
 
-def _seed_action(connection, action_id: int, plan_id: int) -> None:
+def _seed_action(connection, action_id: int, plan_id: int,
+                 *, cancel_requested: int = 0) -> None:
     connection.execute(
         "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
         " scheduled_at, group_name, input_fields_json, effective_params_json,"
@@ -102,9 +104,9 @@ def _seed_action(connection, action_id: int, plan_id: int) -> None:
         " expiration_reason, source_resolution_state, resolved_source_plan_id,"
         " target_selection_state, created_event_id, last_event_id, change_count)"
         " VALUES (?, ?, 0, 'rec', 2, 'cam-1', ?, NULL, '{}',"
-        " '{\"target_duration_s\": 60}', 'camctl-adb', 1000, '{}', 2, 1, 0, NULL,"
+        " '{\"target_duration_s\": 60}', 'camctl-adb', 1000, '{}', 2, 1, ?, NULL,"
         " NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
-        (action_id, plan_id, _NOW),
+        (action_id, plan_id, _NOW, cancel_requested),
     )
 
 
@@ -284,6 +286,77 @@ async def test_terminal_action_is_not_rewritten(tmp_path: Path) -> None:
         assert action[0] == 3
         outputs = _value(owned, "SELECT COUNT(*) FROM outputs")
         assert outputs[0] == 1
+    finally:
+        owned.connection.close()
+
+
+async def test_canceled_finish_ends_action_without_outputs(tmp_path: Path) -> None:
+    """取消终态：放弃内容不登记产物，动作与父计划同事务收场。"""
+    owned = _environment(tmp_path)
+    connection = owned.connection
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        "UPDATE actions SET cancel_requested = 1 WHERE id = 1")
+    connection.commit()
+    repository = CaptureRepository()
+    try:
+        outcome = repository.finish_canceled_capture(
+            FinishCanceledCapture(action_id=1, occurred_at=_NOW),
+            new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED
+        assert outcome.value.action_status == 6
+        assert outcome.value.plan_status == 3
+        assert outcome.value.output_ids == ()
+        action = _value(owned, "SELECT status FROM actions WHERE id = 1")
+        assert action[0] == 6
+        plan = _value(owned, "SELECT status FROM plans WHERE id = 1")
+        assert plan[0] == 3
+        outputs = _value(owned, "SELECT COUNT(*) FROM outputs")
+        assert outputs[0] == 0
+    finally:
+        owned.connection.close()
+
+
+async def test_canceled_finish_requires_saved_cancel_mark(tmp_path: Path) -> None:
+    """取消标记未保存的执行中动作不能按取消终态收场。"""
+    owned = _environment(tmp_path)
+    repository = CaptureRepository()
+    try:
+        outcome = repository.finish_canceled_capture(
+            FinishCanceledCapture(action_id=1, occurred_at=_NOW),
+            new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        action = _value(owned, "SELECT status FROM actions WHERE id = 1")
+        assert action[0] == 2
+    finally:
+        owned.connection.close()
+
+
+async def test_canceled_finish_reuse_and_recovery(tmp_path: Path) -> None:
+    """同键重送与终态新键都只读恢复首次结果；其他终态拒绝。"""
+    owned = _environment(tmp_path)
+    connection = owned.connection
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        "UPDATE actions SET cancel_requested = 1 WHERE id = 1")
+    connection.commit()
+    repository = CaptureRepository()
+    try:
+        command = FinishCanceledCapture(action_id=1, occurred_at=_NOW)
+        first = repository.finish_canceled_capture(
+            command, new_operation_key(), owned)
+        assert first.kind is DbOutcomeKind.COMPLETED
+        again = repository.finish_canceled_capture(
+            command, new_operation_key(), owned)
+        assert again.kind is DbOutcomeKind.COMPLETED, again.error
+        assert again.value.disposition is FinishDisposition.ALREADY
+        assert again.value.action_status == 6
+        new_key = repository.finish_canceled_capture(
+            FinishCanceledCapture(action_id=1, occurred_at=_NOW + 1),
+            new_operation_key(), owned)
+        assert new_key.kind is DbOutcomeKind.COMPLETED
+        assert new_key.value.disposition is FinishDisposition.ALREADY
+        assert new_key.value.action_status == 6
     finally:
         owned.connection.close()
 

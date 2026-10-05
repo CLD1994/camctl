@@ -101,7 +101,7 @@ def _seed_stopped_recording(connection, action_id: int) -> None:
         " responsibility_key, activity_id, copy_id, cleanup_item_id, session_key,"
         " status, attempts_used, max_attempts_used, timeout_s_json,"
         " retry_interval_s_json, retry_wait_required, error_json)"
-        " VALUES (30, ?, NULL, 2, NULL, 'stop/12', 12, NULL, NULL, NULL, 1, 1, 3,"
+        " VALUES (30, ?, NULL, 2, NULL, 'stop/12', 12, NULL, NULL, NULL, 3, 1, 3,"
         " '10', '1', 0, NULL)", (action_id,))
     connection.execute(
         "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
@@ -157,7 +157,8 @@ _TIMELAPSE = ((13, 3),)
 
 
 def _seed_action(connection, action_id: int, action_type: int) -> None:
-    params = "{}" if action_type != 2 else '{"target_duration_s": 60}'
+    """录像种子按受理约定保存执行定义（目标时长毫秒）。"""
+    spec = '{"target_duration_ms": 60000}' if action_type == 2 else '{}'
     connection.execute(
         "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
         " scheduled_at, group_name, input_fields_json, effective_params_json,"
@@ -165,9 +166,10 @@ def _seed_action(connection, action_id: int, action_type: int) -> None:
         " cancel_requested, error_code, error_details_json, first_window_observed_at,"
         " expiration_reason, source_resolution_state, resolved_source_plan_id,"
         " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, '{}', ?, 'camctl-adb', 1000,"
-        " '{}', 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
-        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW, params),
+        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, '{}', '{}',"
+        " 'camctl-adb', 1000, ?, 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL,"
+        " NULL, 1, 1, 1)",
+        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW, spec),
     )
 
 
