@@ -170,3 +170,50 @@ class TestProjectPublicAction:
     def test_json_column_decoded_structured(self) -> None:
         fragment = project_public(self._action_facts())
         assert fragment["effective_params"] == {"quality": Decimal("1.5")}
+
+
+class TestNestedProjectionRelations:
+    """嵌套投影沿自身声明的关联建立子上下文，跨表列按关联行取值。"""
+
+    def _output_facts(self, output_row, tables_extra=None):
+        tables = {
+            "outputs": {9: output_row},
+            **(tables_extra or {}),
+        }
+        return ProjectionInput(entity="output", root_id=9, tables=tables, selected_entities={})
+
+    def _output_row(self, **columns):
+        row = {
+            "id": 9, "source_action_id": 1, "kind": 1, "original_name": "s.jpg",
+            "media_type": "image/jpeg", "device_file_id": None, "intermediate_file_id": None,
+            "original_output_id": None, "original_batch_file_id": None, "availability": 1,
+            "media_json": {}, "error_code": None, "error_json": None,
+            "preview_of_output_id": None, "cleanup_status": 1, "cleanup_error_json": None,
+        }
+        row.update(columns)
+        return row
+
+    def test_checksum_reads_referenced_device_file(self):
+        digest = "a" * 64
+        facts = self._output_facts(
+            self._output_row(device_file_id=4),
+            {"device_files": {4: {"id": 4, "size_bytes": 12, "sha256": digest}}},
+        )
+        fragment = project_public(facts)
+        assert fragment["checksum"] == {"status": "available", "sha256": digest}
+        assert fragment["size"] == 12
+
+    def test_checksum_reads_referenced_host_file(self):
+        digest = "b" * 64
+        facts = self._output_facts(
+            self._output_row(intermediate_file_id=7),
+            {"intermediate_files": {7: {"id": 7, "size_bytes": 30, "sha256": digest}}},
+        )
+        fragment = project_public(facts)
+        assert fragment["checksum"] == {"status": "available", "sha256": digest}
+        assert fragment["size"] == 30
+
+    def test_missing_referenced_file_facts_is_rule_error(self):
+        facts = self._output_facts(self._output_row(device_file_id=4))
+        with pytest.raises(PublicProjectionError):
+            project_public(facts)

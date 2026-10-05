@@ -1,7 +1,9 @@
-"""历史仓储：固定 H 的全局事件分页与报告候选查询。
+"""历史仓储：固定 H 的全局事件分页、报告范围选择与对象恢复。
 
 全局事件页在同一短读事务内核实 H 和事务分组，转换为独立数据并
-在返回前释放游标与连接；继续位置沿规定排序严格推进。
+在返回前释放游标与连接；继续位置沿规定排序严格推进。报告范围
+按业务水位窗口分页选择并沿归属外键补齐父对象；对象恢复在同一
+短读事务内联合读取当前投影与 C，按对象目录逆向恢复到 H。
 """
 
 from __future__ import annotations
@@ -9,17 +11,25 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from contextlib import closing, contextmanager
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 
+from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import (
     BoundaryError, HistoryBoundary, INITIAL_BOUNDARY, ReadOrder, ReadScope, TransactionRange, validate_page,
 )
 from camctl.contracts.pages import Page
 from camctl.contracts.json_values import parse_exact_json, JsonParseError
-from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID
+from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId
 from camctl.acceptance.definitions import read_action_spec
 from camctl.history.events import EventEnvelope
 from camctl.history.decoding import decode_event_row
+from camctl.history.queries import (
+    ReportScope,
+    ReportScopeRequest,
+    build_report_scope,
+    report_target_types,
+)
+from camctl.history.replay import ReplayError, reverse_row_values
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import read_transaction_range as _transaction_range
 
@@ -171,6 +181,235 @@ class HistoryRepository:
         finally:
             connection.close()
 
+    def select_report_scope(self, request: ReportScopeRequest) -> ReportScope:
+        """选择一份报告在固定窗口内的全部入选对象并补齐父对象。
+
+        各报告目标类型按对象 ID 游标分页读取至集合结束；归属外键
+        来自当前投影（计划归属在创建后不变）。窗口内容只由已提交
+        历史决定，后续提交不改变既有窗口。
+        """
+        types = report_target_types()
+        selected: dict[str, list[int]] = {name: [] for name in types}
+        connection = self._connect()
+        try:
+            for name, type_id in types.items():
+                after = 0
+                while True:
+                    page = self.select_report_entities(
+                        entity_type=type_id, from_wm=request.from_wm,
+                        to_wm=request.to_wm, after_id=after,
+                        limit=request.entity_batch_size)
+                    selected[name].extend(page)
+                    if len(page) < request.entity_batch_size:
+                        break
+                    after = page[-1]
+            action_plan = self._foreign_keys(
+                connection, "actions", "plan_id", selected["action"])
+            output_action = self._foreign_keys(
+                connection, "outputs", "source_action_id", selected["output"])
+            delivery_action = self._foreign_keys(
+                connection, "deliveries", "action_id", selected["delivery"])
+            # 产物与交付的父动作可能是仅被补齐的动作：补充其归属查询。
+            parent_actions = sorted(
+                set(output_action.values()) | set(delivery_action.values()))
+            missing = [action_id for action_id in parent_actions
+                       if action_id not in action_plan]
+            if missing:
+                marks = ",".join("?" * len(missing))
+                with closing(connection.execute(
+                        f"SELECT id, plan_id FROM actions WHERE id IN ({marks})",
+                        tuple(missing))) as cursor:
+                    for row in cursor.fetchall():
+                        action_plan[int(row[0])] = int(row[1])
+        finally:
+            connection.close()
+        return build_report_scope(
+            plans=selected["plan"], actions=selected["action"],
+            outputs=selected["output"], deliveries=selected["delivery"],
+            diagnostics=selected["diagnostic"],
+            action_plan=action_plan, output_action=output_action,
+            delivery_action=delivery_action)
+
+    @staticmethod
+    def _foreign_keys(
+        connection: sqlite3.Connection, table: str, column: str,
+        identities: Sequence[int],
+    ) -> dict[int, int]:
+        if not identities:
+            return {}
+        marks = ",".join("?" * len(identities))
+        with closing(connection.execute(
+                f"SELECT id, {column} FROM {table} WHERE id IN ({marks})",
+                tuple(identities))) as cursor:
+            rows = cursor.fetchall()
+        return {int(row[0]): int(row[1]) for row in rows}
+
+    def restore_entity(
+        self, entity: str, entity_id: int, boundary: HistoryBoundary,
+        *, event_batch_size: int = 128,
+    ) -> dict[tuple[str, int], dict]:
+        """恢复一个历史对象在固定 H 的自身行（当前投影逆向恢复）。
+
+        同一短读事务内取得当前投影与 C；随后按对象目录自 C 逆向处
+        理 (H, C] 的关联事件。H 之后创建的行不进入结果；正逆恢复
+        不改变真实投影。读取批次只影响分页次数，不影响结果。
+        """
+        ObjectId(entity_id)
+        if event_batch_size < 1:
+            raise ValueError(f"事件批量必须是正整数: {event_batch_size}")
+        spec = load_enum_registry()["history_objects"].get(entity)
+        if spec is None:
+            raise ConsistencyError(f"未知历史对象类型: {entity!r}")
+        with self._read_connection() as connection:
+            current_boundary = self._boundary(connection)
+            if (boundary.txn_id > current_boundary.txn_id
+                    or boundary.last_event_id > current_boundary.last_event_id):
+                raise ConsistencyError("恢复目标边界晚于可靠当前边界")
+            seeded = self._seed_entity_rows(connection, spec, entity_id)
+            if not seeded:
+                raise ConsistencyError(
+                    f"对象 {entity}#{entity_id} 在当前投影中不存在")
+            rows = self._reverse_to_boundary(
+                connection,
+                ref=(spec["id"], entity_id), primary_table=spec["table"],
+                seeded=seeded, boundary=boundary,
+                current_boundary=current_boundary,
+                event_batch_size=event_batch_size)
+            return rows
+
+    def _seed_entity_rows(
+        self, connection: sqlite3.Connection, spec: dict, entity_id: int,
+    ) -> dict[tuple[str, int], dict]:
+        """取得对象在当前投影的自身行（报告字段相关的归属表）。"""
+        tables: dict[tuple[str, int], dict] = {}
+        for table, row_id in self._entity_row_ids(
+            connection, spec, entity_id
+        ):
+            tables[(table, row_id)] = _table_row(connection, table, row_id)
+        return tables
+
+    @staticmethod
+    def _entity_row_ids(
+        connection: sqlite3.Connection, spec: dict, entity_id: int,
+    ) -> Iterator[tuple[str, int]]:
+        """枚举对象自身行的 (表, 行 ID)：主表行与归属子表行。"""
+        name = spec["table"]
+        if name == "actions":
+            yield from _ids_where(connection, "actions", "id", entity_id)
+            action = entity_id
+            yield from _ids_where(connection, "device_activities", "action_id", action)
+            yield from _ids_where(connection, "recording_processing", "action_id", action)
+            yield from _ids_where(connection, "cleanup_items", "action_id", action)
+            yield from _ids_where(connection, "cancel_items", "action_id", action)
+            yield from _ids_where(connection, "auto_preview_links", "obtain_action_id", action)
+            dependencies = _ids_where(connection, "action_dependencies", "action_id", action)
+            yield from dependencies
+            for dependency_id in (row_id for table, row_id in dependencies):
+                yield from _ids_where(
+                    connection, "obtain_source_selections", "dependency_id", dependency_id)
+            for selection_id in _selection_ids(connection, dependencies):
+                yield from _ids_where(
+                    connection, "obtain_items", "selection_id", selection_id)
+            for cancel_item_id in _ids_where(connection, "cancel_items", "action_id", action):
+                yield from _ids_where(
+                    connection, "cancel_delivery_items", "cancel_item_id", cancel_item_id)
+        else:
+            yield from _ids_where(connection, name, "id", entity_id)
+
+    def _reverse_to_boundary(
+        self, connection: sqlite3.Connection, *, ref: tuple[int, int],
+        primary_table: str, seeded: Mapping[tuple[str, int], dict],
+        boundary: HistoryBoundary, current_boundary: HistoryBoundary,
+        event_batch_size: int,
+    ) -> dict[tuple[str, int], dict]:
+        """按对象目录自 C 逆向恢复到 H；核对锚点与目录连续性。"""
+        from camctl.persistence.row_history import _anchor
+
+        counted = _counted_object(primary_table)
+        names = "last_event_id, change_count" if counted else "last_event_id"
+        primary = _one(connection,
+                       f"SELECT {names} FROM {primary_table} WHERE id = ?", (ref[1],))
+        if counted:
+            primary = _anchor(primary, "当前对象")
+        else:
+            if primary is None or len(primary) != 1:
+                raise ConsistencyError("当前对象缺少可靠末事件")
+            try:
+                ObjectId(primary[0])
+            except ValueError as error:
+                raise ConsistencyError("当前对象的末事件无效") from error
+        head = _anchor(_one(connection,
+            "SELECT event_id, change_count FROM entity_event_links"
+            " WHERE entity_type = ? AND entity_id = ? ORDER BY event_id DESC LIMIT 1", ref),
+            "对象目录")
+        if ((primary != head if counted else primary[0] != head[0])
+                or head[0] > current_boundary.last_event_id):
+            raise ConsistencyError("当前对象的末事件与次数不符合可靠目录头及 C")
+        floor_row = _one(connection,
+            "SELECT event_id, change_count FROM entity_event_links"
+            " WHERE entity_type = ? AND entity_id = ? AND event_id <= ?"
+            " ORDER BY event_id DESC LIMIT 1",
+            (*ref, boundary.last_event_id))
+        floor = (0, 0) if floor_row is None else _anchor(floor_row, "H 的对象目录位置")
+        if (floor[0] > boundary.last_event_id or floor[1] > head[1]
+                or (floor[1] == head[1]) != (floor[0] == head[0])):
+            raise ConsistencyError("H 的目录位置与当前对象目录矛盾")
+
+        rows: dict[tuple[str, int], dict] = {
+            key: dict(values) for key, values in seeded.items()}
+        expected_count = head[1]
+        previous = current_boundary.last_event_id + 1
+        recent: TransactionRange | None = None
+        while expected_count > floor[1]:
+            with closing(connection.execute(
+                "SELECT l.change_count, e.id, e.transaction_id, e.event_type,"
+                " e.event_version, e.occurred_at, e.clock_status, e.change_seq,"
+                " e.body_json FROM entity_event_links AS l"
+                " LEFT JOIN history_events AS e ON e.id = l.event_id"
+                " WHERE l.entity_type = ? AND l.entity_id = ? AND l.event_id > ?"
+                " AND l.event_id <= ? AND l.event_id < ?"
+                " ORDER BY l.event_id DESC LIMIT ?",
+                (*ref, boundary.last_event_id, current_boundary.last_event_id,
+                 previous, event_batch_size),
+            )) as cursor:
+                stored_rows = cursor.fetchall()
+            if not stored_rows or len(stored_rows) > event_batch_size:
+                raise ConsistencyError("对象历史目录缺少必要事件或批量范围无效")
+            for stored in stored_rows:
+                event = decode_event_row(stored[1:])
+                if (stored[0] != expected_count
+                        or not boundary.last_event_id < event.event_id < previous
+                        or not boundary.txn_id < event.transaction_id <= current_boundary.txn_id):
+                    raise ConsistencyError("对象历史目录的事件位置、事务或累计次数不连续")
+                recent = _transaction_range(
+                    connection, event.transaction_id,
+                    recent if recent is not None and recent.txn_id == event.transaction_id else None)
+                if not recent.first_event_id <= event.event_id <= recent.last_event_id:
+                    raise ConsistencyError("对象历史事件不属于其完整事务范围")
+                for change in event.rows:
+                    key = (change.table, change.row_id)
+                    target = rows.get(key)
+                    if target is None:
+                        continue
+                    if not change.before.exists:
+                        # 创建于 (H, C]：目标边界处该行尚不存在。
+                        del rows[key]
+                        continue
+                    if not change.after.exists:
+                        raise ConsistencyError(
+                            f"行 {key} 的更新事件在保存后不存在，无法逆向恢复")
+                    try:
+                        rows[key] = reverse_row_values(
+                            target, change, frozenset(target))
+                    except ReplayError as error:
+                        raise ConsistencyError(
+                            f"对象 {ref} 的行 {key} 恢复依据不连续") from error
+                expected_count -= 1
+                previous = event.event_id
+            if expected_count < floor[1]:
+                raise ConsistencyError("对象历史目录越过 H 的可靠累计次数")
+        return rows
+
     def entity_facts(
         self, entity_type: int, entity_ids: tuple[int, ...]
     ) -> dict[str, dict[int, dict]]:
@@ -209,6 +448,47 @@ def _decode_row(values: dict) -> dict:
             except JsonParseError as error:
                 raise ConsistencyError(f"历史投影字段 {key} 不是有效精确 JSON") from error
     return decoded
+
+
+def _ids_where(
+    connection: sqlite3.Connection, table: str, column: str, value: int,
+) -> list[tuple[str, int]]:
+    """按归属外键枚举子表行身份（报告字段相关归属表）。"""
+    with closing(connection.execute(
+            f"SELECT id FROM {table} WHERE {column} = ?", (value,))) as cursor:
+        return [(table, int(row[0])) for row in cursor.fetchall()]
+
+
+def _selection_ids(
+    connection: sqlite3.Connection, dependencies: Sequence[tuple[str, int]],
+) -> list[int]:
+    if not dependencies:
+        return []
+    marks = ",".join("?" * len(dependencies))
+    with closing(connection.execute(
+            f"SELECT id FROM obtain_source_selections"
+            f" WHERE dependency_id IN ({marks})",
+            tuple(row_id for _, row_id in dependencies))) as cursor:
+        return [int(row[0]) for row in cursor.fetchall()]
+
+
+def _table_row(connection: sqlite3.Connection, table: str, row_id: int) -> dict:
+    """取得并解码一行当前投影（业务列与 JSON 列结构化）。"""
+    with closing(connection.execute(
+            f"SELECT * FROM {table} WHERE id = ?", (row_id,))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"当前投影缺少 {table}#{row_id}")
+    names = [description[0] for description in cursor.description]
+    return _decode_row(dict(zip(names, row)))
+
+
+def _counted_object(table: str) -> bool:
+    """对象主表是否保存累计变化计数（单一权威：事件规则登记）。"""
+    from camctl.history.events import load_event_registry
+
+    derived = load_event_registry()["tables"][table]["derived"]
+    return "change_count" in derived
 
 
 def _one(connection, statement, parameters=()):

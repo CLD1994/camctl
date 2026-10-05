@@ -129,22 +129,68 @@ class _Context:
     row: Mapping[str, Any]
     table: str
     row_id: int
+    #: 当前投影声明的关联；跨表列沿这些关联解析到唯一关联行。
+    relations: tuple[str, ...] = ()
 
     def with_row(self, table: str, row_id: int) -> "_Context":
         row = self.input.tables.get(table, {}).get(row_id)
         if row is None:
             raise PublicProjectionError(f"缺少 {table}#{row_id} 的 H 事实")
-        return _Context(self.input, row, table, row_id)
+        return _Context(self.input, row, table, row_id, self.relations)
 
     def column(self, column: str) -> Any:
         table, _, name = column.rpartition(".")
-        if table != self.table:
-            raise PublicProjectionError(f"列 {column} 不在当前上下文表 {self.table} 中")
+        if table == self.table:
+            source: Mapping[str, Any] | None = self.row
+            source_id: int | None = self.row_id
+        else:
+            source, source_id = self._related_column_source(table, column)
+        if source is None:
+            # optional 关联无关联行：跨表列按 SQL NULL 参与条件与取值。
+            return None
         if name == "id":
-            return self.row_id
-        if name not in self.row:
-            raise PublicProjectionError(f"{table}#{self.row_id} 缺少列 {name} 的 H 事实")
-        return self.row[name]
+            return source_id
+        if name not in source:
+            raise PublicProjectionError(f"{table}#{source_id} 缺少列 {name} 的 H 事实")
+        return source[name]
+
+    def _related_column_source(
+        self, table: str, column: str
+    ) -> tuple[Mapping[str, Any] | None, int | None]:
+        """沿当前投影声明的关联解析跨表列的唯一关联行。"""
+        registry = _dependencies()["relations"]
+        candidates = [
+            name for name in self.relations
+            if registry[name]["from"].split(".")[0] == self.table
+            and registry[name]["to"].split(".")[0] == table
+        ]
+        if not candidates:
+            raise PublicProjectionError(f"列 {column} 不在当前上下文表 {self.table} 中")
+        if len(candidates) > 1:
+            raise PublicProjectionError(
+                f"列 {column} 在当前投影中存在多条到达 {table} 的关联")
+        relation = registry[candidates[0]]
+        from_table, _, from_field = relation["from"].rpartition(".")
+        anchor: Any = None
+        if from_field == "id":
+            anchor = self.row_id
+        elif from_field in self.row:
+            anchor = self.row[from_field]
+        if anchor is None:
+            # 关联外键为空：无关联行，跨表列按 SQL NULL 参与。
+            return None, None
+        matched = self.related((candidates[0],))
+        if len(matched) > 1:
+            raise PublicProjectionError(
+                f"列 {column} 需要恰好一行 {table} 关联事实，实际 {len(matched)} 行")
+        if not matched:
+            raise PublicProjectionError(
+                f"列 {column} 引用的 {table} 关联事实缺失（外键 {relation['from']}={anchor!r}）")
+        related_table, related_id = matched[0]
+        row = self.input.tables.get(related_table, {}).get(related_id)
+        if row is None:
+            raise PublicProjectionError(f"缺少 {related_table}#{related_id} 的 H 事实")
+        return row, related_id
 
     def related(self, relations: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
         """沿关系链取相关行（当前行出发，每步沿声明关联推进）。"""
@@ -195,7 +241,8 @@ def project_public(facts: ProjectionInput) -> PublicFragment:
             reconstruct_action_input(root)
         except (ConsistencyError, JsonParseError, KeyError, ValueError) as error:
             raise PublicProjectionError(str(error)) from error
-    context = _Context(facts, root, root_table, facts.root_id)
+    context = _Context(facts, root, root_table, facts.root_id,
+                       tuple(projection.get("relations", ())))
     if not _truthy(projection.get("when", {"op": "literal", "value": True}), context):
         return OMIT  # 类型检查器友好的省略标记
     fragment: PublicFragment = {}
