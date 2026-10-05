@@ -245,12 +245,12 @@ def _iter_document(document: ReportDocument, facts: Mapping) -> Iterator[bytes]:
     yield from stream.finish()
 
 
-def iter_report_chunks(document: ReportDocument, facts: Mapping, *, buffer_size: int) -> Iterator[bytes]:
-    """输出不超过容量的片段；后续投影失败时此前字节仍是未完成报告。"""
+def chunk_bytes(tokens: Iterator[bytes], *, buffer_size: int) -> Iterator[bytes]:
+    """把字节流按固定容量分块；后续投影失败时此前字节仍是未完成报告。"""
     if isinstance(buffer_size, bool) or not isinstance(buffer_size, int) or buffer_size < 1:
         raise ValueError("报告字节缓冲容量必须是正整数")
     pending = bytearray()
-    for token in _iter_document(document, facts):
+    for token in tokens:
         offset = 0
         while offset < len(token):
             length = min(buffer_size - len(pending), len(token) - offset)
@@ -261,6 +261,11 @@ def iter_report_chunks(document: ReportDocument, facts: Mapping, *, buffer_size:
                 pending.clear()
     if pending:
         yield bytes(pending)
+
+
+def iter_report_chunks(document: ReportDocument, facts: Mapping, *, buffer_size: int) -> Iterator[bytes]:
+    """输出不超过容量的片段；后续投影失败时此前字节仍是未完成报告。"""
+    return chunk_bytes(_iter_document(document, facts), buffer_size=buffer_size)
 
 
 def encode_report(document: ReportDocument, facts: Mapping) -> bytes:

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from contextlib import closing, contextmanager
 from collections.abc import Iterator, Mapping, Sequence
@@ -21,7 +22,7 @@ from camctl.contracts.pages import Page
 from camctl.contracts.json_values import parse_exact_json, JsonParseError
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId
 from camctl.acceptance.definitions import read_action_spec
-from camctl.history.events import EventEnvelope
+from camctl.history.events import EventEnvelope, load_event_registry
 from camctl.history.decoding import decode_event_row
 from camctl.history.queries import (
     ReportScope,
@@ -34,6 +35,15 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import read_transaction_range as _transaction_range
 
 __all__ = ["HistoryRepository"]
+
+
+@dataclass(frozen=True)
+class _FrozenRegistration:
+    """一份报告在冻结事务中登记的窗口依据与冻结边界。"""
+
+    from_wm: int
+    to_wm: int
+    boundary: HistoryBoundary
 
 
 class HistoryRepository:
@@ -181,6 +191,41 @@ class HistoryRepository:
         finally:
             connection.close()
 
+    def frozen_registration(self, report_id: int) -> "_FrozenRegistration":
+        """读取一份报告的冻结依据并核实其冻结边界完整。
+
+        frozen_event_id 必须是其所在历史事务的末事件；否则该位置
+        不是完整已提交边界，按状态库一致性错误处理。
+        """
+        ObjectId(report_id)
+        connection = self._connect()
+        try:
+            with closing(connection.execute(
+                    "SELECT from_wm, to_wm, frozen_event_id, format_version"
+                    " FROM reports WHERE id = ?", (report_id,))) as cursor:
+                row = cursor.fetchone()
+            if row is None:
+                raise ConsistencyError(f"报告 {report_id} 未登记")
+            if int(row[3]) != 1:
+                raise ConsistencyError(f"报告 {report_id} 的格式版本不受支持")
+            frozen_event_id = int(row[2])
+            with closing(connection.execute(
+                    "SELECT transaction_id FROM history_events WHERE id = ?",
+                    (frozen_event_id,))) as cursor:
+                event_row = cursor.fetchone()
+            if event_row is None:
+                raise ConsistencyError(
+                    f"报告 {report_id} 的冻结事件不在已提交历史中")
+            transaction = _transaction_range(connection, int(event_row[0]))
+            if transaction.last_event_id != frozen_event_id:
+                raise ConsistencyError(
+                    f"报告 {report_id} 的冻结位置不是完整已提交边界")
+            return _FrozenRegistration(
+                from_wm=int(row[0]), to_wm=int(row[1]),
+                boundary=HistoryBoundary(transaction.txn_id, frozen_event_id))
+        finally:
+            connection.close()
+
     def select_report_scope(self, request: ReportScopeRequest) -> ReportScope:
         """选择一份报告在固定窗口内的全部入选对象并补齐父对象。
 
@@ -304,17 +349,39 @@ class HistoryRepository:
             yield from _ids_where(connection, "auto_preview_links", "obtain_action_id", action)
             dependencies = _ids_where(connection, "action_dependencies", "action_id", action)
             yield from dependencies
-            for dependency_id in (row_id for table, row_id in dependencies):
-                yield from _ids_where(
-                    connection, "obtain_source_selections", "dependency_id", dependency_id)
-            for selection_id in _selection_ids(connection, dependencies):
+            selection_ids: list[int] = []
+            for _, dependency_id in dependencies:
+                selection_ids.extend(_ids_where(
+                    connection, "obtain_source_selections", "dependency_id", dependency_id,
+                    ids_only=True))
+            yield from [("obtain_source_selections", selection_id)
+                       for selection_id in selection_ids]
+            for selection_id in selection_ids:
                 yield from _ids_where(
                     connection, "obtain_items", "selection_id", selection_id)
             for cancel_item_id in _ids_where(connection, "cancel_items", "action_id", action):
                 yield from _ids_where(
                     connection, "cancel_delivery_items", "cancel_item_id", cancel_item_id)
+        elif name == "outputs":
+            yield from _ids_where(connection, "outputs", "id", entity_id)
+            yield from _ids_where(connection, "output_origins", "output_id", entity_id)
+        elif name == "deliveries":
+            yield from _ids_where(connection, "deliveries", "id", entity_id)
+            yield from _ids_where(connection, "file_copies", "delivery_id", entity_id)
         else:
             yield from _ids_where(connection, name, "id", entity_id)
+
+    def related_entity_ids(
+        self, table: str, column: str, value: int,
+    ) -> list[int]:
+        """按归属列枚举关联对象的行 ID（如动作的同步记录）。"""
+        connection = self._connect()
+        try:
+            with closing(connection.execute(
+                    f"SELECT id FROM {table} WHERE {column} = ?", (value,))) as cursor:
+                return [int(row[0]) for row in cursor.fetchall()]
+        finally:
+            connection.close()
 
     def _reverse_to_boundary(
         self, connection: sqlite3.Connection, *, ref: tuple[int, int],
@@ -325,26 +392,33 @@ class HistoryRepository:
         """按对象目录自 C 逆向恢复到 H；核对锚点与目录连续性。"""
         from camctl.persistence.row_history import _anchor
 
-        counted = _counted_object(primary_table)
-        names = "last_event_id, change_count" if counted else "last_event_id"
-        primary = _one(connection,
-                       f"SELECT {names} FROM {primary_table} WHERE id = ?", (ref[1],))
-        if counted:
-            primary = _anchor(primary, "当前对象")
-        else:
-            if primary is None or len(primary) != 1:
-                raise ConsistencyError("当前对象缺少可靠末事件")
-            try:
-                ObjectId(primary[0])
-            except ValueError as error:
-                raise ConsistencyError("当前对象的末事件无效") from error
+        derived = load_event_registry()["tables"][primary_table]["derived"]
+        anchored = "last_event_id" in derived
+        counted = "change_count" in derived
         head = _anchor(_one(connection,
             "SELECT event_id, change_count FROM entity_event_links"
             " WHERE entity_type = ? AND entity_id = ? ORDER BY event_id DESC LIMIT 1", ref),
             "对象目录")
-        if ((primary != head if counted else primary[0] != head[0])
-                or head[0] > current_boundary.last_event_id):
-            raise ConsistencyError("当前对象的末事件与次数不符合可靠目录头及 C")
+        if head[0] > current_boundary.last_event_id:
+            raise ConsistencyError("对象目录头超出可靠当前边界")
+        if anchored:
+            # 主表声明可靠末事件的对象额外核对表内锚点与目录头一致；
+            # 不声明锚点的对象（不可变诊断行、同步责任行等）以对象
+            # 目录为唯一位置依据。
+            names = "last_event_id, change_count" if counted else "last_event_id"
+            primary = _one(connection,
+                           f"SELECT {names} FROM {primary_table} WHERE id = ?", (ref[1],))
+            if counted:
+                primary = _anchor(primary, "当前对象")
+            else:
+                if primary is None or len(primary) != 1:
+                    raise ConsistencyError("当前对象缺少可靠末事件")
+                try:
+                    ObjectId(primary[0])
+                except ValueError as error:
+                    raise ConsistencyError("当前对象的末事件无效") from error
+            if (primary != head if counted else primary[0] != head[0]):
+                raise ConsistencyError("当前对象的末事件与次数不符合可靠目录头及 C")
         floor_row = _one(connection,
             "SELECT event_id, change_count FROM entity_event_links"
             " WHERE entity_type = ? AND entity_id = ? AND event_id <= ?"
@@ -452,24 +526,13 @@ def _decode_row(values: dict) -> dict:
 
 def _ids_where(
     connection: sqlite3.Connection, table: str, column: str, value: int,
-) -> list[tuple[str, int]]:
+    *, ids_only: bool = False,
+) -> list[tuple[str, int]] | list[int]:
     """按归属外键枚举子表行身份（报告字段相关归属表）。"""
     with closing(connection.execute(
             f"SELECT id FROM {table} WHERE {column} = ?", (value,))) as cursor:
-        return [(table, int(row[0])) for row in cursor.fetchall()]
-
-
-def _selection_ids(
-    connection: sqlite3.Connection, dependencies: Sequence[tuple[str, int]],
-) -> list[int]:
-    if not dependencies:
-        return []
-    marks = ",".join("?" * len(dependencies))
-    with closing(connection.execute(
-            f"SELECT id FROM obtain_source_selections"
-            f" WHERE dependency_id IN ({marks})",
-            tuple(row_id for _, row_id in dependencies))) as cursor:
-        return [int(row[0]) for row in cursor.fetchall()]
+        rows = [int(row[0]) for row in cursor.fetchall()]
+    return rows if ids_only else [(table, row_id) for row_id in rows]
 
 
 def _table_row(connection: sqlite3.Connection, table: str, row_id: int) -> dict:
@@ -481,14 +544,6 @@ def _table_row(connection: sqlite3.Connection, table: str, row_id: int) -> dict:
         raise ConsistencyError(f"当前投影缺少 {table}#{row_id}")
     names = [description[0] for description in cursor.description]
     return _decode_row(dict(zip(names, row)))
-
-
-def _counted_object(table: str) -> bool:
-    """对象主表是否保存累计变化计数（单一权威：事件规则登记）。"""
-    from camctl.history.events import load_event_registry
-
-    derived = load_event_registry()["tables"][table]["derived"]
-    return "change_count" in derived
 
 
 def _one(connection, statement, parameters=()):

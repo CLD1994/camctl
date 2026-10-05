@@ -240,9 +240,7 @@ def finished_photo(tmp_path):
         owned.connection.close()
 
 
-pytestmark = pytest.mark.asyncio
-
-
+@pytest.mark.asyncio
 class TestSelectReportScope:
     async def test_window_selects_targets_and_completes_parents(
         self, finished_photo
@@ -305,6 +303,7 @@ class TestSelectReportScope:
         assert small == large
 
 
+@pytest.mark.asyncio
 class TestRestoreEntity:
     async def test_rows_restore_to_boundary_h(self, finished_photo) -> None:
         owned, tmp_path = finished_photo
