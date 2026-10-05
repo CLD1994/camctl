@@ -212,19 +212,19 @@ R1/R2/R3 实现首批内容，R4/R5 实现真实进程，R6 的规则先支撑�
 
 **接口与依赖：** 提供异步 `publish_report(report: FrozenReport, generated: GenerationResult, context: PublicationContext) -> PublicationResult`、`recover_report_files(report: FrozenReport, files: ReportLocations) -> ReportFileDecision`。前置交付：R2/R5、F1/F5、P3/P4、R6。
 
-- [ ] 编写失败用例。在 `test_processing_report_is_never_modified` 中原报告在 processing，`assert processing_mutations == 0`；满足责任的 ready 保留，新报告覆盖足够才替换。移动/同步成功后即使 C 已领取删除仍可记发布；staging 残留从头生成；两处无文件且仍需补投沿原 report_id 同字节重建。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_publication.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。完整生成及同步后按文件规则发布，目录同步可靠后记录每次发布与适用本地同步/动作结果；恢复仅用登记和符合命名的目录事实，不常规读全文比对。实际清理遵守 R5 工作锁及退出确认。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 ready 至多一份待领取报告，processing 可与新 ready 并存。
+- [x] 编写失败用例。在 `test_processing_report_is_never_modified` 中原报告在 processing，`assert processing_mutations == 0`；满足责任的 ready 保留，新报告覆盖足够才替换。移动/同步成功后即使 C 已领取删除仍可记发布；staging 残留从头生成；两处无文件且仍需补投沿原 report_id 同字节重建。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/reporting/test_publication.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。完整生成及同步后按文件规则发布，目录同步可靠后记录每次发布与适用本地同步/动作结果；恢复仅用登记和符合命名的目录事实，不常规读全文比对。实际清理遵守 R5 工作锁及退出确认。
+- [x] 再运行上述命令，要求全部 PASS，并核对 ready 至多一份待领取报告，processing 可与新 ready 并存。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/reporting/test_publication.py -q`，真实生成文件、SQLite、公共 Schema 和摘要检验，在各移动/保存边界安排协议允许的领取效果；真实 C/客户端组合由 I4/I5 验证。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 普通 delivery 与报告补投规则是否误共用，ready 替换是否仅看 ID；记录门禁证据，建议以“feat: 实现报告发布与补投”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 普通 delivery 与报告补投规则是否误共用，ready 替换是否仅看 ID；记录门禁证据，建议以“feat: 实现报告发布与补投”形成独立提交。
 
 **分项进度：** [报告字节与发布事实审查](2026-10-02-camctl-report-publication-review.md)记录下列数据库边界及验证证据；完整 R7 的勾选仍要求报告专属文件规则与真实消费者。
 
 - [x] 首次确定字节、独立发布意图、可靠交接结果及实际失败分别保存；同一报告字节不变，成功次数及引用与最近发布历史一致。
 - [x] 重复操作、读写失败、提交未知与正逆向回放保持历史及投影一致；文件已被领取删除仍可按已取得的可靠交接结果保存成功。
-- [ ] 报告专属目录引用、ready 替换、processing 保留、恢复观察、补投资格及同步本地完成的真实消费者。
+- [x] 报告专属目录引用、ready 替换、processing 保留、恢复观察、补投资格及同步本地完成的真实消费者。
 
 ### R8 失败触发、阶段时限与日志副本
 

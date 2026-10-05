@@ -30,7 +30,9 @@ __all__ = [
     "WithdrawResult",
     "WithdrawStage",
     "publish_file",
+    "publish_staged_file",
     "withdraw_file",
+    "withdraw_ready_file",
 ]
 
 #: Windows 的 os.rename 原子且不覆盖已存在目标；POSIX 的 rename 会
@@ -159,9 +161,27 @@ async def publish_file(
     先核对完整文件资格并拒绝同名目标，再执行原子移动，随后同步
     涉及目录；同步失败或主程序提前领取不撤销已移动事实。
     """
+    host = resolve_file(ref, roots)
+    if directories.staging != roots.staging:
+        raise HandoffError(
+            f"交接目录与绑定不一致: {directories.staging!s} != {roots.staging!s}"
+        )
     return await asyncio.to_thread(
-        _publish, ref, roots, directories, target
+        _publish_path, host.path, directories, target
     )
+
+
+async def publish_staged_file(
+    source: Path,
+    directories: HandoffDirectories,
+    target: ReadyName,
+) -> PublishResult:
+    """把 staging 树内已完整准备的未登记文件发布到 ready。
+
+    状态报告文件不经中间文件登记，凭 staging 内路径发布；移动语
+    义与已登记文件一致。
+    """
+    return await asyncio.to_thread(_publish_path, source, directories, target)
 
 
 async def withdraw_file(identity: HandoffIdentity) -> WithdrawResult:
@@ -169,20 +189,29 @@ async def withdraw_file(identity: HandoffIdentity) -> WithdrawResult:
     return await asyncio.to_thread(_withdraw, identity)
 
 
-def _publish(
-    ref: FileRef,
-    roots: BoundDirectories,
+def withdraw_ready_file(identity: HandoffIdentity) -> WithdrawResult:
+    """撤回的同步核心；供同线程编排直接复用。"""
+    return _withdraw(identity)
+
+
+def _publish_path(
+    source: Path,
     directories: HandoffDirectories,
     target: ReadyName,
 ) -> PublishResult:
-    host = resolve_file(ref, roots)
-    if directories.staging != roots.staging:
+    try:
+        outside = not source.resolve().is_relative_to(
+            directories.staging.resolve())
+    except OSError as failure:
         raise HandoffError(
-            f"交接目录与绑定不一致: {directories.staging!s} != {roots.staging!s}"
+            f"发布源不可定位: {source!s}: {failure}") from failure
+    if outside:
+        raise HandoffError(
+            f"发布源必须位于 staging 树内: {source!s} 不在 {directories.staging!s}"
         )
     target_path = directories.ready / target.name
     try:
-        _stat(host.path)
+        _stat(source)
     except FileNotFoundError:
         return _not_moved("source_missing")
     except OSError as failure:
@@ -200,7 +229,7 @@ def _publish(
     error: str | None = None
     if _RENAME_WITHOUT_OVERWRITE:
         try:
-            _rename(host.path, target_path)
+            _rename(source, target_path)
         except FileExistsError:
             return _not_moved("target_exists")
         except FileNotFoundError:
@@ -217,7 +246,7 @@ def _publish(
         source_removed = True
     else:
         try:
-            _link(host.path, target_path)
+            _link(source, target_path)
         except FileExistsError:
             return _not_moved("target_exists")
         except FileNotFoundError:
@@ -225,7 +254,7 @@ def _publish(
         except OSError as failure:
             return _not_moved(_describe("move_failed", failure))
         try:
-            _unlink(host.path)
+            _unlink(source)
         except OSError as failure:
             # 目标已建立：已移动事实保留，源删除失败单独表达。
             error = _describe("source_remove_failed", failure)
@@ -234,7 +263,7 @@ def _publish(
             source_removed = True
 
     directory, sync_error = _sync_directories(
-        host.path.parent, directories.ready
+        source.parent, directories.ready
     )
     if error is None:
         error = sync_error

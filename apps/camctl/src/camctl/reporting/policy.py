@@ -65,6 +65,7 @@ __all__ = [
     "record_report_publish_intent",
     "record_report_failure",
     "publish_report",
+    "record_recovered_publication",
     "validate_report_publication_result",
     "start_sync",
     "record_local_report",
@@ -519,6 +520,25 @@ def cancel_sync(key: OperationKey, owned: OwnedConnection, *, action_id: int,
     return _sync_outcome(receipt)
 
 
+def record_recovered_publication(key: OperationKey, owned: OwnedConnection,
+                                 report_id: int, *, observed_sha256: str,
+                                 occurred_at: int = 0) -> DbOutcome[ReportPublication | None]:
+    """恢复时发现报告已发布：按目录观察证据保存发布事实。
+
+    观察摘要与首次确定字节核对一致才保存；未发布过的报告与发布
+    意图（必要时连同失败恢复）在同一事务补齐。保留现有文件，不
+    重复生成或投放。
+    """
+    command = _RecoveredPublicationCommand(
+        key, report_id, observed_sha256, occurred_at)
+    receipt = commit_operation(command, key, owned)
+    if receipt.kind == "completed":
+        return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+    if receipt.kind == "rolled_back":
+        return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+    return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
 def _sync_outcome(receipt) -> DbOutcome[SyncSaved]:
     if receipt.kind == "completed":
         return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
@@ -753,6 +773,89 @@ class _CancelSyncCommand:
             events=(event,), owners=self._owners, state_rows=self._state,
             result=SyncSaved(disposition=SyncDisposition.SAVED,
                              sync_id=sync["id"]))
+
+
+class _RecoveredPublicationCommand:
+    """恢复时发现已发布：以目录观察证据补齐发布事实。
+
+    证据核对：观察文件自称摘要与首次确定字节一致。PREPARED 的报
+    告同事务补发布意图与发布；FAILED 的报告先恢复到发布中再保存
+    发布；已发布过的报告不追加事实。
+    """
+
+    def __init__(self, key, report_id, observed_sha256, occurred_at) -> None:
+        self._key = key
+        self._report_id = report_id
+        self._observed_sha256 = observed_sha256
+        self._occurred_at = occurred_at
+        self._owners: dict = {}
+        self._state: dict = {"reports": {}}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        facts = read_report_management(connection, self._report_id)
+        contents = validate_report_management(facts)
+        self._state["reports"][self._report_id] = facts
+        if contents is None:
+            raise ConsistencyError(
+                f"恢复发现要求报告已有确定字节: {self._report_id}")
+        if contents.sha256 != self._observed_sha256:
+            raise ConsistencyError(
+                f"恢复观察与首次确定的报告字节不一致: {self._report_id}")
+        self._owners[("reports", self._report_id)] = (
+            "report", self._report_id)
+        status = ReportStatus(facts["status"])
+        if status is ReportStatus.PUBLISHED:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ReportPublication(
+                    self._report_id, facts["publication_count"],
+                    facts["last_published_event_id"]))
+
+        if status is ReportStatus.PREPARED:
+            prefix = (_ReportChange.INTENT,)
+        elif status is ReportStatus.PUBLISHING:
+            prefix = ()
+        elif status is ReportStatus.FAILED:
+            prefix = (_ReportChange.RECOVER,)
+        else:
+            raise ConsistencyError(
+                "报告状态不能由恢复观察保存发布: "
+                f"{self._report_id} status={status.value!r}")
+        allocation = scope.allocate(len(prefix) + 1)
+        publish_event_id = allocation.last_event_id
+        reasons = (*prefix, _ReportChange.PUBLISH)
+        row_groups = []
+        for reason in reasons:
+            if reason is _ReportChange.PUBLISH:
+                row_groups.append((update_change(
+                    "reports", self._report_id,
+                    {"status": ReportStatus.PUBLISHING,
+                     "publication_count": facts["publication_count"],
+                     "last_published_event_id": facts["last_published_event_id"],
+                     "last_error_json": facts["last_error_json"]},
+                    {"status": ReportStatus.PUBLISHED,
+                     "publication_count": facts["publication_count"] + 1,
+                     "last_published_event_id": publish_event_id,
+                     "last_error_json": None}),))
+            else:
+                row_groups.append((update_change(
+                    "reports", self._report_id,
+                    {"status": status},
+                    {"status": ReportStatus.PUBLISHING}),))
+        events = tuple(
+            _envelope(event_id, allocation.txn_id, _REPORT_EVENT["id"],
+                      reason, rows_of_one, self._occurred_at)
+            for event_id, reason, rows_of_one in zip(
+                range(allocation.first_event_id, publish_event_id + 1),
+                reasons, row_groups)
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=ReportPublication(
+                self._report_id, facts["publication_count"] + 1,
+                publish_event_id))
 
 
 def _load_action(connection, state, action_id):
