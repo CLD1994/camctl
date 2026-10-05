@@ -5,7 +5,9 @@
 查时间先保存等待完成事实，再核实结果集合。完整集合满足时按时间
 与产物完成判定保存采集结论并解除占用，动作成功终态与正式产物共
 同登记；必需类别缺失保存已知失败，动作失败终态且不补造设备结束
-事实，占用保持持有等待残留收场。
+事实，占用保持持有等待残留收场。等待中取消按停止能力分区：可停
+止任务立即停止并保留已拍完文件，不可停止任务拒绝取消且原任务正
+常收场。
 """
 
 from __future__ import annotations
@@ -20,10 +22,11 @@ import pytest
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.bootstrap.flows import capture_flow
+from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.timelapse import CaptureWaitConfig
+from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.tasks import (
     CaptureTask,
@@ -57,9 +60,11 @@ from ..capture.test_capture_contract import ResultsDouble, _entry
 from .test_recording_stop import (
     _await_query,
     _cancel,
+    _cancel_plan,
     _config_for,
     _future_schedule,
     _scalar,
+    _StopDouble,
     _submit_plan,
 )
 from .test_run_dispatch import _ActivityDriver, _parsed
@@ -82,6 +87,10 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
+        EvidenceContract(type="stop_returned", version=1, operation="stop",
+                         fields=frozenset()),
+        EvidenceContract(type="stop_confirmed", version=1, operation="stop",
+                         fields=frozenset({"activity_id"}), identity_field="activity_id"),
     )
 )
 
@@ -93,14 +102,17 @@ _TIMELAPSE_DEFINITION = {
     "additionalProperties": False,
 }
 
-_WAIT_CONFIG = CaptureWaitConfig(target_duration_ms=2_000, driver_margin_ms=0)
-
 
 class _TimelapseCatalog:
-    """受理目录替身：支持 cam-1 的发送后等待延时任务。"""
+    """受理目录替身：支持 cam-1 的发送后等待延时任务与取消动作。"""
+
+    def __init__(self, *, stop_supported: bool = False,
+                 duration_s: Decimal = Decimal("2")) -> None:
+        self.stop_supported = stop_supported
+        self.duration_s = duration_s
 
     def action_types(self):
-        return frozenset({"camera_timelapse"})
+        return frozenset({"camera_timelapse", "cancel_task"})
 
     def device_exists(self, device_id):
         return device_id == "cam-1"
@@ -120,13 +132,13 @@ class _TimelapseCatalog:
         def task(params):
             return CaptureTask(
                 "camera_timelapse",
-                target_duration_s=Decimal("2"),
+                target_duration_s=self.duration_s,
                 duration_based=True,
                 wait_after_send=True,
                 end_control=EndControl.DEVICE,
                 start_return_meaning=StartReturn.SENT,
                 completion_mode=CompletionMode.TIME_AND_OUTPUTS,
-                stop_supported=False,
+                stop_supported=self.stop_supported,
                 result_wait_margin_s=Decimal("0"),
             )
 
@@ -152,9 +164,12 @@ def _timelapse_plan(request_id: str, scheduled_at: str) -> dict:
     }
 
 
-def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = None):
+def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = None,
+                       stopper=None, wait_ms: int = 2_000):
     def build(owned) -> CaptureRuntime:
         overrides = {} if check_config is None else {"check_config": check_config}
+        if stopper is not None:
+            overrides["stopper"] = stopper
         return CaptureRuntime(
             owned=owned,
             scheduling=SchedulingRepository(),
@@ -169,18 +184,27 @@ def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = 
             window_of=lambda action: LaunchWindow(
                 scheduled_at=action["scheduled_at"],
                 window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-            wait_config=lambda params: _WAIT_CONFIG,
+            wait_config=lambda params: CaptureWaitConfig(
+                target_duration_ms=wait_ms, driver_margin_ms=0),
             **overrides,
         )
 
     return build
 
 
-def _run_session(deps, driver, results, *, check_config: AttemptConfig | None = None):
+def _run_session(deps, driver, results, *,
+                 check_config: AttemptConfig | None = None,
+                 stopper=None, wait_ms: int = 2_000, cancel_flow_paths=None):
+    flows = {"scheduling": capture_flow(
+        _timelapse_factory(driver, results, check_config=check_config,
+                           stopper=stopper, wait_ms=wait_ms))}
+    if cancel_flow_paths is not None:
+        flows["cancel"] = cancel_flow(
+            ready=Path(cancel_flow_paths[0]),
+            processing=Path(cancel_flow_paths[1]))
     return asyncio.create_task(execute_command(
         deps, None,
-        flows={"scheduling": capture_flow(
-            _timelapse_factory(driver, results, check_config=check_config))},
+        flows=flows,
         poll_interval_s=0.1,
     ))
 
@@ -418,6 +442,103 @@ class TestTimelapseCheckRounds:
                 db,
                 "SELECT result_set_state, completion_basis"
                 " FROM device_activities WHERE id = 1") == (3, 3)
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+
+class TestTimelapseCancel:
+    """等待中取消的延时收场：可停止任务立即停止并保留已拍完文件。"""
+
+    async def test_cancel_stops_stoppable_timelapse_and_keeps_files(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "stoppable-cancel"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog(stop_supported=True, duration_s=Decimal("600"))
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        # 取消排期在发送之后、预计检查时间之前：停止由取消触发。
+        await _submit_plan(
+            tmp_path, cfg, catalog, _cancel_plan("2", 1, _future_schedule(5)))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        stopper = _StopDouble()
+        # 已拍完文件在设备上：取消收尾的核实把它登记为正式产物。
+        results = ResultsDouble({1: (_entry("sequence-1"),)})
+        task = _run_session(
+            deps, driver, results, stopper=stopper, wait_ms=600_000,
+            cancel_flow_paths=(cfg.paths.ready, cfg.paths.processing))
+        try:
+            # 等待中取消生效：不经目标时长立即停止，取消终态与已拍
+            # 完产物同事务登记。
+            await _await_query(
+                db, "SELECT status, cancel_requested FROM actions WHERE id = 1",
+                (6, 1))
+            assert stopper.calls == ["stop_timelapse"]
+            assert _scalar(
+                db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1"
+                ) == (1,)
+            # 活动以可靠停止事实结束并释放占用；集合结论不经等待判定。
+            assert _scalar(
+                db,
+                "SELECT activity_state, occupancy_state, result_set_state"
+                " FROM device_activities WHERE id = 1") == (3, 2, 1)
+            assert _scalar(
+                db, "SELECT status FROM plans WHERE id = 1") == (3,)
+            # 取消动作在目标终态后收场：成员与动作同为成功。
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name = 'cancel'", (3,))
+            assert _scalar(
+                db, "SELECT status FROM cancel_items") == (3,)
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+    async def test_unstoppable_cancel_fails_and_task_completes(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "unstoppable-cancel"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        # 取消落在发送之后、预计检查时间之前：无停止能力被拒绝。
+        await _submit_plan(
+            tmp_path, cfg, catalog, _cancel_plan("2", 1, _future_schedule(3)))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        results = ResultsDouble({1: (_entry("sequence-1"),)})
+        task = _run_session(
+            deps, driver, results,
+            cancel_flow_paths=(cfg.paths.ready, cfg.paths.processing))
+        try:
+            # 拒绝取消是本次取消项的失败，不标记目标。
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name = 'cancel'", (4,))
+            assert _scalar(
+                db,
+                "SELECT status, error_code FROM cancel_items"
+                ) == (4, registered_error("task_cancel_unsupported")
+                      ["item_error_ids"]["cancel_items"])
+            assert _scalar(
+                db, "SELECT status, error_code FROM actions WHERE name = 'cancel'"
+                ) == (4, registered_error("cancel_items_failed")["action_error_id"])
+            assert _scalar(
+                db, "SELECT cancel_requested FROM actions WHERE id = 1") == (0,)
+            # 原任务继续等待、核实产物并登记正常结果。
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            assert _scalar(
+                db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1"
+                ) == (1,)
+            assert _scalar(
+                db, "SELECT status FROM plans WHERE id = 1") == (3,)
         finally:
             await _cancel(task)
         close_runtime(deps)

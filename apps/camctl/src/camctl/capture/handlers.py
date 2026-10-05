@@ -486,14 +486,16 @@ def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
     return context.recording_state
 
 
-async def _stop_call(runtime: CaptureRuntime, action) -> HandlerOutcome:
-    """按原停止预算发起一次录像停止调用并保存尝试结果。
+async def _stop_call(runtime: CaptureRuntime, action,
+                     operation: str = "stop_recording") -> HandlerOutcome:
+    """按原停止预算发起一次设备停止调用并保存尝试结果。
 
     意图先提交才派发；可靠确认结束停止流程，错误或未确认保持流
-    程执行中并建立重试等待，预算沿原流程累计不刷新。
+    程执行中并建立重试等待，预算沿原流程累计不刷新。停止操作字
+    面量由调用方按任务类型提供。
     """
     if runtime.stopper is None:
-        raise LookupError("录像停止端口未装配")
+        raise LookupError("设备停止端口未装配")
     intent = AttemptIntent(
         operation="stop",
         action_id=action["id"],
@@ -512,7 +514,7 @@ async def _stop_call(runtime: CaptureRuntime, action) -> HandlerOutcome:
         return HandlerOutcome("stop_not_granted", outcome.value.reason)
     ticket = outcome.value.ticket
     response = await runtime.stopper.stop(ControlRequest(
-        operation="stop_recording",
+        operation=operation,
         binding=_binding(action),
         params=action["effective_params_json"],
     ))
@@ -739,6 +741,10 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     if activity is None or activity[0] is None:
         # 发送事实（sent_at）由活动观察边界保存；尚未保存时等待。
         return
+    if action["cancel_requested"]:
+        # 可停止延时的取消已生效：不再等待计时，立即按停止预算收场。
+        await _cancel_timelapse_stop(context, action)
+        return
     config = context.wait_config(action["effective_params_json"])
     if activity[1] is None:
         plan = plan_capture_wait(
@@ -764,9 +770,6 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         return
     if context.wall_us() < activity[1]:
-        return
-    if action["cancel_requested"]:
-        # 取消已生效：核实与成功终态都不再推进，等待取消收场接入。
         return
     wait_event_id = _complete_timelapse_wait(context, action_id)
     with closing(context.owned.connection.execute(
@@ -832,6 +835,58 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     else:
         # 暂不齐备：本轮成功结果与重试等待共同保存，下一轮作为新轮次。
         context.finish(ticket, _round_outcome(), retry_wait=True)
+
+
+async def _cancel_timelapse_stop(context: CaptureRuntime, action) -> None:
+    """等待中取消的可停止延时收场：立即停止并保留已拍完文件。
+
+    停止决策与录像共用一套阶段规则：取消不经计时立即按剩余预算
+    停止。停止确认后活动以可靠停止事实收场并释放占用，收尾核实
+    把已拍完且确认完成的文件登记为正式产物。启动未确认的取消归
+    启动核实链；在途停止与预算耗尽等待停止结果或残留收场接线。
+    """
+    port = _recording_port(context)
+    decision = decide_recording_next(
+        port.recording_state(action["id"]),
+        RecordingFacts(canceled=True),
+    )
+    if decision.phase is not RecordingPhase.READY_TO_STOP:
+        if decision.phase is RecordingPhase.CONTROL_COMPLETE:
+            # 停止已确认（中断恢复）：直接进入取消收尾。
+            _conclude_activity(context, action["id"])
+            await _close_canceled_timelapse(context, action["id"])
+        return
+    step = await _stop_call(context, action, "stop_timelapse")
+    if step.phase == "confirmed":
+        _conclude_activity(context, action["id"])
+        await _close_canceled_timelapse(context, action["id"])
+
+
+async def _close_canceled_timelapse(
+    context: CaptureRuntime, action_id: int) -> None:
+    """取消延时收尾：已拍完文件与取消终态同事务登记为正式产物。"""
+    try:
+        entries = await context.results.list_files(action_id)
+    except Exception:
+        # 收尾列举失败：完成情况未知，不登记产物，保留原观察事实。
+        entries = ()
+    registered = _register_observed(context, action_id, entries)
+    drafts = tuple(
+        OutputDraft(
+            kind=OutputKind.ORIGINAL,
+            file=FileReference(device_file_id=file_id),
+            file_complete=True)
+        for (file, file_id), entry in zip(registered, entries)
+        if entry.complete)
+    receipt = context.capture.finish_canceled_capture(
+        FinishCanceledCapture(
+            action_id=action_id,
+            occurred_at=context.wall_us(),
+            drafts=drafts,
+            catalog_facts=OutputCatalogFacts(
+                action_id=action_id, ownership_confirmed=True)),
+        new_operation_key(), context.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
 def _begin_check_round(runtime: CaptureRuntime, action_id: int):

@@ -25,8 +25,8 @@ class ReadyActions(Protocol):
 def ready_capture_actions(connection, now_us: int) -> list[ActionDescriptor]:
     """从当前投影取可推进的拍摄动作。
 
-    未取消的到期拍摄正常推进；已取消的执行中录像一并推进（取消
-    联动：停止链立即收场），其余已取消动作不再派发。
+    未取消的到期拍摄正常推进；已取消的执行中录像与可停止延时一
+    并推进（取消联动：停止链立即收场），其余已取消动作不再派发。
     """
     from camctl.scheduling.service import ActionDescriptor
 
@@ -36,7 +36,7 @@ def ready_capture_actions(connection, now_us: int) -> list[ActionDescriptor]:
         "SELECT id, type FROM actions WHERE status = 2"
         " AND ((cancel_requested = 0 AND type IN (1, 2, 3)"
         "       AND scheduled_at <= ?)"
-        "      OR (cancel_requested = 1 AND type = 2))"
+        "      OR (cancel_requested = 1 AND type IN (2, 3)))"
         " ORDER BY plan_id, input_index", (now_us,)
     )) as cursor:
         rows = cursor.fetchall()

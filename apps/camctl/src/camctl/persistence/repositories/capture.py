@@ -64,6 +64,7 @@ from camctl.outputs.catalog import (
     OutputCatalogFacts,
     OutputDraft,
     OutputKind,
+    RegistrationChanges,
     validate_output_registration,
 )
 from camctl.operations.attempts import (
@@ -233,17 +234,21 @@ class FinishCapture:
 
 @dataclass(frozen=True)
 class FinishCanceledCapture:
-    """一次取消终态登记的输入：放弃内容，不登记产物。
+    """一次取消终态登记的输入：已拍完文件成为正式产物，其余放弃。
 
-    要求取消标记已先保存（结束事务在事务内检查该标记）；已观察
-    的设备文件保留原事实，不提升为正式产物。
+    要求取消标记已先保存（结束事务在事务内检查该标记）；只有已
+    确认归属且写入完成的草稿登记为正式产物，与取消终态同事务提
+    交。不提供草稿时本次取消不登记任何产物（如录像放弃内容）。
     """
 
     action_id: int
     occurred_at: int
+    drafts: tuple[OutputDraft, ...] = ()
+    catalog_facts: OutputCatalogFacts | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
+
 
 class FinishDisposition(Enum):
     """完成登记事务的保存结果：新保存或恢复首次结果。"""
@@ -526,9 +531,17 @@ def register_capture_guards() -> None:
 
 
 class FinishCaptureCommand:
-    """一次录像完成登记的完整事务命令。"""
+    """一次拍摄完成登记的完整事务命令。
 
-    def __init__(self, command: FinishCapture, key: OperationKey) -> None:
+    canceled 模式服务已生效取消的执行中动作：终态为取消，登记已
+    拍完且确认完成的草稿（未提供草稿则不登记产物）。普通模式要
+    求动作未取消，终态为成功或失败。
+    """
+
+    def __init__(self, command, key: OperationKey, *,
+                 canceled: bool = False) -> None:
+        self._canceled = canceled
+        self._failure = None if canceled else command.failure
         self._command = command
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
@@ -555,29 +568,38 @@ class FinishCaptureCommand:
         plan = row_facts(connection, "plans", action["plan_id"])
         assert plan is not None
         self._state["plans"] = {plan["id"]: plan}
-        if action["status"] != _ACTION_RUNNING or action["cancel_requested"]:
+        if action["status"] != _ACTION_RUNNING or (
+                bool(action["cancel_requested"]) != self._canceled):
             raise TransactionError(
-                f"只有未取消的执行中动作能保存终态: {command.action_id}"
-                f" status={action['status']}"
-            )
+                f"执行中动作的取消标记与完成登记分支不符:"
+                f" {command.action_id} status={action['status']}"
+                f" cancel_requested={action['cancel_requested']}")
         action_status = _ACTION_SUCCEEDED
         error_id: int | None = None
         error_details: dict[str, Any] | None = None
-        if command.failure is not None:
-            spec = registered_error(command.failure.code)
+        if self._canceled:
+            action_status = _ACTION_CANCELED
+        elif self._failure is not None:
+            spec = registered_error(self._failure.code)
             if "action_error_id" not in spec:
                 raise TransactionError(
-                    f"失败错误码不是动作错误: {command.failure.code!r}")
-            validate_error_details(command.failure.code, command.failure.details)
+                    f"失败错误码不是动作错误: {self._failure.code!r}")
+            validate_error_details(self._failure.code, self._failure.details)
             action_status = _ACTION_FAILED
             error_id = spec["action_error_id"]
-            error_details = dict(command.failure.details)
+            error_details = dict(self._failure.details)
 
         # 登记规则在同一事务内校验：任一草稿不合法整组拒绝。
         _capture_binding(action)
-        if command.catalog_facts.action_id != command.action_id:
-            raise TransactionError("目录上下文与完成命令的动作身份不一致")
-        changes = validate_output_registration(command.drafts, command.catalog_facts)
+        if command.catalog_facts is None:
+            if not self._canceled or command.drafts:
+                raise TransactionError("产物登记缺少目录上下文")
+            changes = RegistrationChanges(outputs=())
+        else:
+            if command.catalog_facts.action_id != command.action_id:
+                raise TransactionError("目录上下文与完成命令的动作身份不一致")
+            changes = validate_output_registration(
+                command.drafts, command.catalog_facts)
         for output in changes.outputs:
             self._load_file(connection, output.device_file_id, output.intermediate_file_id)
         self._verify_repaired_outputs(connection, changes)
@@ -601,7 +623,15 @@ class FinishCaptureCommand:
                     self._required(connection, "outputs", relation["output_id"])
                 original_ids[identity] = original_id
 
-        if command.failure is None:
+        if self._canceled:
+            action_row = _update(
+                "actions",
+                command.action_id,
+                {"status": action["status"]},
+                {"status": _ACTION_CANCELED},
+            )
+            action_reason = 4
+        elif self._failure is None:
             action_row = _update(
                 "actions",
                 command.action_id,
@@ -749,17 +779,20 @@ class FinishCaptureCommand:
         if action_row["table"] != "actions" or action_row["id"] != command.action_id:
             raise TransactionError("原完成登记属于其他动作")
         after = action_row["after"]["values"]
-        if command.failure is None:
+        if self._canceled:
+            if types[0][1] != 4 or after.get("status") != _ACTION_CANCELED:
+                raise TransactionError("原完成登记不是取消终态，与重送输入不同")
+        elif self._failure is None:
             if types[0][1] != 1 or after.get("status") != _ACTION_SUCCEEDED:
                 raise TransactionError("原完成登记不是成功终态，与重送输入不同")
         else:
             if types[0][1] != 2 or after.get("status") != _ACTION_FAILED:
                 raise TransactionError("原完成登记不是失败终态，与重送输入不同")
-            spec = registered_error(command.failure.code)
+            spec = registered_error(self._failure.code)
             if after.get("error_code") != spec["action_error_id"]:
                 raise TransactionError("原完成登记的错误码与重送输入不同")
             if not json_equal(after.get("error_details_json"),
-                              command.failure.details):
+                              self._failure.details):
                 raise TransactionError("原完成登记的错误详情与重送输入不同")
         registered: dict[tuple[int, int | None, int | None], int] = {}
         origins: set[tuple[int, int]] = set()
@@ -808,7 +841,12 @@ class FinishCaptureCommand:
         与第一次保存的文件身份保持不变。
         """
         command = self._command
-        if command.failure is None:
+        if self._canceled:
+            if action["status"] != _ACTION_CANCELED:
+                raise TransactionError(
+                    f"动作终态不是取消登记结果，不能按取消收场重送:"
+                    f" {action['status']!r}")
+        elif self._failure is None:
             if action["status"] != _ACTION_SUCCEEDED:
                 raise TransactionError(
                     f"动作终态不是完成登记结果，不能按成功重送: {action['status']!r}")
@@ -816,7 +854,7 @@ class FinishCaptureCommand:
             if action["status"] != _ACTION_FAILED:
                 raise TransactionError(
                     f"动作终态不是失败登记结果，不能按失败重送: {action['status']!r}")
-            spec = registered_error(command.failure.code)
+            spec = registered_error(self._failure.code)
             if action["error_code"] != spec["action_error_id"]:
                 raise TransactionError("动作已保存的错误码与新键输入不同")
         with closing(connection.execute(
@@ -943,140 +981,6 @@ class FinishCaptureCommand:
             if facts is not None:
                 rows[int(row[0])] = facts
         return rows
-
-
-class _FinishCanceledCaptureCommand:
-    """取消终态事务命令：执行中的已取消动作按取消收场。
-
-    不登记产物（废弃内容不成为可取回产物）；动作转取消终态，兄弟
-    全部终态时父计划同事务完成。原键重送与终态新键都只读恢复首次
-    结果，其他终态拒绝。
-    """
-
-    def __init__(self, command: FinishCanceledCapture, key: OperationKey) -> None:
-        if not isinstance(command, FinishCanceledCapture):
-            raise TypeError("取消终态申请必须使用 FinishCanceledCapture")
-        self._command = command
-        self._key = key
-        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
-        self._state: dict[str, dict[int, dict[str, Any]]] = {}
-
-    def plan(self, scope) -> CommandPlan:
-        connection = scope.connection
-        saved = saved_transaction_events(connection, self._key)
-        if saved is not None:
-            return self._reuse(connection, saved)
-        command = self._command
-        action = row_facts(connection, "actions", command.action_id)
-        if action is None:
-            raise TransactionError(f"动作不存在: {command.action_id}")
-        if action["status"] in _ACTION_TERMINAL:
-            return self._recover(action, connection)
-        if (action["status"] != _ACTION_RUNNING
-                or not action["cancel_requested"]):
-            raise TransactionError(
-                "只有取消已生效的执行中动作能按取消终态收场:"
-                f" {command.action_id} status={action['status']}"
-                f" cancel_requested={action['cancel_requested']}")
-        siblings = self._sibling_facts(connection, action)
-        self._state["actions"] = dict(siblings)
-        plan = row_facts(connection, "plans", action["plan_id"])
-        assert plan is not None
-        self._state["plans"] = {plan["id"]: plan}
-        self._owners[("actions", command.action_id)] = (
-            "action", command.action_id)
-        templates = [_envelope(
-            0, 0, _ACTION_FINISHED_EVENT, 4,
-            (_update("actions", command.action_id,
-                     {"status": _ACTION_RUNNING},
-                     {"status": _ACTION_CANCELED}),),
-            command.occurred_at,
-        )]
-        plan_status = plan["status"]
-        plan_complete = all(
-            values.get("status") in _ACTION_TERMINAL
-            or values["id"] == command.action_id
-            for values in siblings.values()
-        )
-        if plan_complete and plan["status"] in (1, 2):
-            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
-            templates.append(_envelope(
-                0, 0, _PLAN_STATUS_EVENT, 2,
-                (_update("plans", plan["id"],
-                         {"status": plan["status"]},
-                         {"status": _PLAN_COMPLETE}),),
-                command.occurred_at,
-            ))
-            plan_status = _PLAN_COMPLETE
-        allocation = scope.allocate(len(templates))
-        events = tuple(
-            replace(
-                template,
-                event_id=allocation.first_event_id + index,
-                transaction_id=allocation.txn_id,
-            )
-            for index, template in enumerate(templates)
-        )
-        return CommandPlan(
-            events=events, owners=self._owners, state_rows=self._state,
-            result=CaptureResult(
-                action_status=_ACTION_CANCELED, plan_status=plan_status,
-                output_ids=()),
-        )
-
-    def _sibling_facts(self, connection, action) -> dict[int, dict[str, Any]]:
-        rows: dict[int, dict[str, Any]] = {}
-        for row in connection.execute(
-            "SELECT id FROM actions WHERE plan_id = ?", (action["plan_id"],)
-        ).fetchall():
-            facts = row_facts(connection, "actions", int(row[0]))
-            if facts is not None:
-                rows[int(row[0])] = facts
-        return rows
-
-    def _recover(self, action, connection) -> CommandPlan:
-        """终态后的新键：只有取消终态可只读恢复，其余拒绝。"""
-        if action["status"] != _ACTION_CANCELED:
-            raise TransactionError(
-                f"动作终态不是取消收场结果，不能按取消终态重送:"
-                f" {action['status']!r}")
-        return self._already(action, connection)
-
-    def _reuse(self, connection, saved) -> CommandPlan:
-        """原键重送：核实原取消终态组成后恢复首次响应。"""
-        command = self._command
-        types = [(event["type"], event["reason"]) for event in saved]
-        if not types or types[0] != (_ACTION_FINISHED_EVENT, 4) \
-                or types[1:] not in ([], [(_PLAN_STATUS_EVENT, 2)]):
-            raise TransactionError("原事务不是取消终态登记，不能作为重送核实")
-        if saved[0]["occurred_at"] != command.occurred_at:
-            raise TransactionError("取消终态的事实时刻与原事务不同")
-        action_row = saved[0]["body"]["rows"][0]
-        if action_row["table"] != "actions" \
-                or action_row["id"] != command.action_id:
-            raise TransactionError("原取消终态属于其他动作")
-        if action_row["after"]["values"].get("status") != _ACTION_CANCELED:
-            raise TransactionError("原取消终态的终态分支与重送输入不同")
-        return self._already(None, connection)
-
-    def _already(self, action, connection) -> CommandPlan:
-        """装载当前动作与计划事实，只读返回首次取消终态结果。"""
-        if action is None:
-            action = row_facts(connection, "actions", self._command.action_id)
-            assert action is not None
-        plan = row_facts(connection, "plans", action["plan_id"])
-        assert plan is not None
-        self._state["actions"] = {action["id"]: action}
-        self._state["plans"] = {plan["id"]: plan}
-        self._owners[("actions", action["id"])] = ("action", action["id"])
-        return CommandPlan(
-            events=(), owners=self._owners, state_rows=self._state,
-            read_only=True,
-            result=CaptureResult(
-                action_status=action["status"], plan_status=plan["status"],
-                output_ids=(),
-                disposition=FinishDisposition.ALREADY),
-        )
 
 
 # -- 录像内部处理的决定与结果 ---------------------------------------
@@ -1615,7 +1519,7 @@ class CaptureRepository:
         owned: OwnedConnection
     ) -> DbOutcome[CaptureResult]:
         receipt = commit_operation(
-            _FinishCanceledCaptureCommand(command, key), key, owned)
+            FinishCaptureCommand(command, key, canceled=True), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -2115,9 +2019,11 @@ class _ActivityReleaseCommand:
 class _ActivityConcludeCommand:
     """活动收场事务命令：结束观察与占用释放共同保存。
 
-    活动结束的可靠停止事实按动作类型选择：录像是 stop 责任、照片与延时是 start 责任的成功终态流程行，由本事
-    务装载核验；结束观察（DEVICE_OBSERVED.OBSERVE）与占用释放
-    （RELEASE）在同一事务，释放条件不满足时整组拒绝。
+    活动结束的可靠停止事实按动作类型选择：照片整次活动随启动调
+    用完成，使用 start 责任；录像与延时活动随停止调用结束，使用
+    stop 责任的成功终态流程行，由本事务装载核验；结束观察
+    （DEVICE_OBSERVED.OBSERVE）与占用释放（RELEASE）在同一事务，
+    释放条件不满足时整组拒绝。
     """
 
     def __init__(self, command: ActivityConcludeSave, key: OperationKey) -> None:
@@ -2138,14 +2044,22 @@ class _ActivityConcludeCommand:
         if facts is None:
             raise ConsistencyError(f"设备活动不存在: {command.action_id}")
         self._state["device_activities"] = {command.action_id: facts}
-        if facts["activity_state"] == 1:
-            return self._rejected("not_active")
         if facts["occupancy_state"] == 2:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
                 read_only=True,
                 result=ActivityConclusion(outcome=ConcludeOutcome.ALREADY))
-        needs_ended = facts["activity_state"] == 2
+        if facts["activity_state"] == 3:
+            needs_ended = False
+        elif facts["activity_state"] == 2:
+            needs_ended = True
+        else:
+            # 活动状态未知但启动已生效或可能生效（如延时发送后等待）：
+            # 可靠停止事实同样证明活动存在并结束；可靠确认没有启动
+            # 效果的活动不能凭空结束。
+            if facts["dispatch_state"] in (1, 4):
+                return self._rejected("not_active")
+            needs_ended = True
         if needs_ended and not self._load_stop_fact(
                 connection, command.action_id):
             raise ConsistencyError(
@@ -2170,7 +2084,8 @@ class _ActivityConcludeCommand:
                 _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
                 (_update(
                     "device_activities", command.action_id,
-                    {"activity_state": 2}, {"activity_state": 3}),),
+                    {"activity_state": facts["activity_state"]},
+                    {"activity_state": 3}),),
                 command.occurred_at))
             next_event += 1
         events.append(_envelope(
@@ -2187,15 +2102,15 @@ class _ActivityConcludeCommand:
     def _load_stop_fact(self, connection, action_id: int) -> bool:
         """按动作类型装载成功终态流程行作为活动结束证据。
 
-        录像活动随停止调用结束，证据是 stop 责任的成功终态流程行；
-        照片整次活动随启动调用完成，延时拍摄沿发送事实计时，两者
-        使用 start 责任。启动调用的成功不证明录像已停止。
+        照片整次活动随启动调用完成，使用 start 责任；录像与延时活
+        动随停止调用结束，使用 stop 责任。启动调用的成功不证明采
+        集已经结束，正常延时按等待与产物判定解除占用，不经本命令。
         """
         action_row = connection.execute(
             "SELECT type FROM actions WHERE id = ?", (action_id,)).fetchone()
         responsibility = (
             f"stop/{action_id}"
-            if action_row is not None and int(action_row[0]) == 2
+            if action_row is not None and int(action_row[0]) in (2, 3)
             else f"start/{action_id}")
         rows = {}
         found = False

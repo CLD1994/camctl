@@ -98,6 +98,27 @@ def _seed_photo_action(connection, action_id: int) -> None:
     )
 
 
+def _seed_timelapse_action(connection, action_id: int) -> None:
+    connection.execute(
+        "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
+        " scheduled_at, group_name, input_fields_json, effective_params_json,"
+        " driver_id, max_delay_ms, execution_spec_json, status, execution_started,"
+        " cancel_requested, error_code, error_details_json, first_window_observed_at,"
+        " expiration_reason, source_resolution_state, resolved_source_plan_id,"
+        " target_selection_state, created_event_id, last_event_id, change_count)"
+        " VALUES (?, 1, 0, ?, 3, 'cam-1', ?, NULL, '{}', ?,"
+        " 'camctl-adb', 1000,"
+        " '{\"duration_based\": true, \"wait_after_send\": true,"
+        " \"end_control\": 1, \"stop_supported\": true,"
+        " \"start_return_meaning\": 1, \"completion_mode\": 2,"
+        " \"target_duration_ms\": 2000, \"result_wait_margin_ms\": 0}',"
+        " 2, 1, 0, NULL,"
+        " NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
+        (action_id, f"timelapse-{action_id}", _NOW,
+         '{"type": "timelapse"}'),
+    )
+
+
 def _release(owned, action_id: int, *, key=None):
     return CaptureRepository().release_occupancy(
         ActivityReleaseSave(action_id=action_id, occurred_at=_NOW),
@@ -350,7 +371,52 @@ class TestConcludeRequiresStopFact:
             owned, "SELECT activity_state, occupancy_state"
             " FROM device_activities WHERE id = 1") == (3, 2)
 
+    async def test_timelapse_start_run_is_not_stop_fact(self, owned):
+        """延时活动不随启动调用结束：start 责任成功不构成结束证据。"""
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_timelapse_action(connection, 1)
+        _seed_activity(connection, 1, dispatch_state=3, activity_state=1)
+        _seed_terminal_run(connection, 1, status=3, responsibility="start")
+        connection.commit()
+
+        outcome = _conclude(owned, 1)
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (1, 1)
+
+    async def test_stopped_timelapse_concludes_via_stop_run(self, owned):
+        """等待中的延时活动状态未知：stop 责任成功即结束证据，收场释放。"""
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_timelapse_action(connection, 1)
+        _seed_activity(connection, 1, dispatch_state=3, activity_state=1)
+        _seed_terminal_run(connection, 1, status=3, responsibility="stop")
+        connection.commit()
+
+        outcome = _conclude(owned, 1)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert outcome.value.outcome is ConcludeOutcome.CONCLUDED
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (3, 2)
+
     async def test_unknown_activity_rejects_conclude(self, owned):
+        """启动效果不存在的未知活动不能收场；可能存在的须有停止事实。"""
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_running_action(connection, 1)
+        _seed_activity(connection, 1, dispatch_state=1, activity_state=1)
+        connection.commit()
+
+        outcome = _conclude(owned, 1)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert outcome.value.outcome is ConcludeOutcome.REJECTED
+        assert outcome.value.reason == "not_active"
+
+    async def test_dispatched_unknown_activity_needs_stop_fact(self, owned):
+        """启动已生效而活动状态未知：结束仍须可靠停止事实。"""
         connection = owned.connection
         connection.execute("BEGIN IMMEDIATE")
         _seed_running_action(connection, 1)
@@ -358,6 +424,7 @@ class TestConcludeRequiresStopFact:
         connection.commit()
 
         outcome = _conclude(owned, 1)
-        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-        assert outcome.value.outcome is ConcludeOutcome.REJECTED
-        assert outcome.value.reason == "not_active"
+        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (1, 1)
