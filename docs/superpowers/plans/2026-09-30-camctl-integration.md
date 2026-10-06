@@ -124,6 +124,18 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 - [ ] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py tests/integration/test_camctl_output_roundtrip.py tests/integration/test_camctl_cancellation_roundtrip.py tests/integration/test_camctl_session_recovery.py -q`，交错并发 submit、关闭阶段新提交、未来动作、时钟异常、设备绑定改变、配置重载、报告失败、迟到结果、提交未知和重启恢复。核对原身份、预算、确定结果、旧报告及实际占用，不能只核对最新终态。
 - [ ] 沿权威输入到用户结果审计各链所有接缝，补齐真实双方与重要替身的契约组合；建议提交“test: 验证第一版跨组件业务与恢复”。
 
+#### I5 第一条链验证记录（2026-10-06）
+
+已建立 `tests/integration/test_camctl_capture_roundtrip.py` 与共用基础设施：`camctl_fixtures.py`（部署目录、计划构造、剧本替身驱动与部署装配入口）、`_camctl_stub_entry.py`（进程启动阶段登记替身后进入生产 CLI 的部署装配桥）、`client_import_driver.ts`（经客户端 `Application.applyReports` 真实导入路径消费报告的 tsx 驱动）。四个指定用例中 `test_photo_keeps_completed_outputs` 与 `test_timelapse_recovers_remaining_wait` 已完成并通过；录像与清理两用例随各自链路后续建立。
+
+先红证据：两用例初次运行失败于 `设备 cam-1 声明的驱动未部署: 'test-stub'`——真实 CLI 的受理目录与 describe 都从 `default_driver_definitions()` 取驱动定义，而该来源没有进程启动登记点，部署装配无法接入。修复在责任边界完成：新增 `camctl.devices.definitions_runtime`（登记/快照/重复拒绝/reset，与驱动端口登记 `devices.drivers.runtime` 对称的部署接入面），`default_driver_definitions()` 改为返回登记快照；describe 与受理共用同一来源。登记点配 4 项单元测试（apps/camctl/tests/unit/devices/test_definitions_runtime.py）。
+
+两用例的行为事实：照片链覆盖 init、submit（受理保存，`needs_run` 布尔）、run（替身驱动经登记端口推进，动作与计划成功终态、photo 产物登记、活动收场）、报告发布到 ready 根目录（staging 无残留；会话内多批报告只保留最新文件）、客户端真实导入保存（`saved_report_ids`/`ackId` 与报告身份一致）、顶层 `last_report_id` 的 ACK 递交被受理接口吸收（`runtime_state` 累计确认推进到报告 `to_wm`）、完成后产物事实在无取回与清理时保持不变。延时链覆盖 run 会话中断（等待安排已保存为 CAPTURE_WAIT_CHANGED 首次安排）后，第二个 run 恢复剩余等待、保存等待完成事实并按时间与产物判定成功。
+
+测试环境事实：本机没有 ffprobe/ffmpeg，录像链的媒体检查受管工具无法在本机组合，录像用例与真实 C 领取模块（Windows 本机无法编译 POSIX 模块）一并列入后续链路；客户端消费位置目前为 ready（C 领取环节未接入时的等价位置事实），接入 C 领取后改为 processing。
+
+回归证据（2026-10-06，Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_capture_roundtrip.py` 2 项通过；根 `tests/integration` 36 项+342 子测试通过；apps/camctl 单元 3296 项连续两轮通过（期间一轮 9F/34E、一轮 1E 为既有记录的 Windows 瞬时资源压力漂移，涉事测试单独运行均通过）；bootstrap 集成 64 项、acceptance 集成 226 项通过。
+
 ### I6 全量契约映射、软件验收与部署交接
 
 **预计文件：** `docs/camctl/verification.md`、`apps/camctl/README.md`、`tests/integration/README.md`、`docs/client/acceptance.md`、`docs/host-demo/verification.md`；建议新增 `tests/integration/test_camctl_acceptance_map.py`，并在 `docs/camctl/software-acceptance.md` 保存实施时取得的验收映射和真实证据，链接具体测试，不复制登记的完整值清单。

@@ -1,0 +1,406 @@
+"""跨组件集成测试共用夹具。
+
+真实 camctl CLI 以子进程运行；部署装配桥（_camctl_stub_entry）在
+子进程启动阶段登记受契约约束的设备替身，替身的驱动定义与运行端
+口同源登记，其余装配全部来自生产入口。客户端消费经 tsx 驱动调
+用客户端服务的真实导入路径。设备替身的行为由剧本文件描述，同步
+点用门文件表达，不使用随机 sleep。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent
+_REPO = _ROOT.parent.parent
+
+#: 无部署装配时的直接 CLI 入口（受理等不依赖驱动登记的命令）。
+_DIRECT_ENTRY = "from camctl.cli import main; raise SystemExit(main())"
+
+#: 部署装配桥：先登记替身驱动再进入生产 CLI。
+_BRIDGE = _ROOT / "_camctl_stub_entry.py"
+
+_CLIENT_DIR = _REPO / "apps" / "client"
+
+
+@dataclass(frozen=True)
+class CliResult:
+    """一次 CLI 子进程的结果：退出码与两路输出。"""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+
+    def message(self) -> dict:
+        """解析 stdout 的单行结果消息（成功与业务错误共用形态）。"""
+        lines = [line for line in self.stdout.splitlines() if line]
+        assert len(lines) == 1, f"stdout 应只有一行结果: {self.stdout!r}"
+        return json.loads(lines[0])
+
+
+class Deployment:
+    """一个初始化前的部署目录：配置、计划文件与替身剧本。"""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.home = root / "deployment"
+        self.staging = self.home / "staging"
+        self.ready = self.home / "ready"
+        self.processing = self.home / "processing"
+        self.gates = root / "gates"
+        for directory in (self.home, self.staging, self.ready,
+                          self.processing, self.gates):
+            directory.mkdir(parents=True)
+        self.state_db = self.home / "state.db"
+        self.config_path = self.home / "config.toml"
+        self.config_path.write_text(
+            "\n".join(
+                [
+                    "[paths]",
+                    f'state_db = "{_toml_path(self.state_db)}"',
+                    f'log_file = "{_toml_path(self.home / "camctl.log")}"',
+                    f'staging = "{_toml_path(self.staging)}"',
+                    f'ready = "{_toml_path(self.ready)}"',
+                    f'processing = "{_toml_path(self.processing)}"',
+                    "",
+                    "[clock]",
+                    'min_plausible_date = "2025-01-01"',
+                    "",
+                    "[devices.cam-1]",
+                    'kind = "camera"',
+                    'driver = "test-stub"',
+                    "",
+                    "[devices.cam-1.result_check]",
+                    'retry_interval_s = "0"',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self.driver_spec = root / "driver-spec.json"
+
+    def _write_driver_spec(self, driver: dict) -> None:
+        spec = dict(driver)
+        spec["gate_dir"] = str(self.gates)
+        self.driver_spec.write_text(
+            json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+
+    def camctl(self, *args: str, driver: dict | None = None,
+               timeout_s: float = 180.0) -> CliResult:
+        """运行真实 camctl CLI；driver 提供时经部署装配桥接入替身。"""
+        environment = os.environ.copy()
+        if driver is not None:
+            self._write_driver_spec(driver)
+            environment["CAMCTL_TEST_DRIVER_SPEC"] = str(self.driver_spec)
+            command = [sys.executable, str(_BRIDGE), *args]
+        else:
+            command = [sys.executable, "-c", _DIRECT_ENTRY, *args]
+        completed = subprocess.run(
+            command, capture_output=True, text=True, env=environment,
+            timeout=timeout_s)
+        return CliResult(completed.returncode, completed.stdout, completed.stderr)
+
+    def start_camctl(self, *args: str, driver: dict | None = None):
+        """启动不等待退出的 run 子进程（会话中断场景）。"""
+        environment = os.environ.copy()
+        self._write_driver_spec(driver)
+        environment["CAMCTL_TEST_DRIVER_SPEC"] = str(self.driver_spec)
+        return subprocess.Popen(
+            [sys.executable, str(_BRIDGE), *args],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=environment)
+
+    def write_plan(self, body: dict) -> Path:
+        target = self.root / f"plan-{body['request_id']}.json"
+        target.write_text(
+            json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        return target
+
+    def import_reports_with_client(self, reports_dir: Path) -> dict:
+        """用客户端服务的真实导入路径消费报告，返回保存凭据。
+
+        驱动脚本扫描目录中的 status-report 文件，经客户端 Application
+        校验、合并并保存，输出已保存报告与累计确认位置。
+        """
+        store = self.root / "client-store"
+        output = self.root / "client-import.json"
+        completed = subprocess.run(
+            ["node", "--import", "tsx", str(_ROOT / "client_import_driver.ts"),
+             str(reports_dir), str(store), str(output)],
+            capture_output=True, text=True, cwd=str(_CLIENT_DIR), timeout=120)
+        assert completed.returncode == 0, (
+            f"客户端导入驱动失败: {completed.stderr}\n{completed.stdout}")
+        return json.loads(output.read_text(encoding="utf-8"))
+
+
+def _toml_path(path: Path) -> str:
+    """TOML 基本字符串路径：反斜杠转义后可移植。"""
+    return str(path).replace("\\", "\\\\")
+
+
+def future_schedule(seconds: int) -> str:
+    """计划时间按 UTC 表达；部署时钟与受理解析都使用 UTC。"""
+    moment = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return moment.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def photo_plan(request_id: str, scheduled_at: str) -> dict:
+    return {
+        "request_id": request_id,
+        "created_at": "2026-01-15 08:00:00",
+        "name": f"plan-{request_id}",
+        "actions": [
+            {
+                "name": "shoot",
+                "type": "camera_take_photo",
+                "device_id": "cam-1",
+                "scheduled_at": scheduled_at,
+                "params": {"type": "single_shot"},
+                "policy": {"max_delay_ms": 5000},
+            }
+        ],
+    }
+
+
+def timelapse_plan(request_id: str, scheduled_at: str) -> dict:
+    return {
+        "request_id": request_id,
+        "created_at": "2026-01-15 08:00:00",
+        "name": f"plan-{request_id}",
+        "actions": [
+            {
+                "name": "timelapse",
+                "type": "camera_timelapse",
+                "device_id": "cam-1",
+                "scheduled_at": scheduled_at,
+                "params": {"type": "timelapse"},
+                "policy": {"max_delay_ms": 5000},
+            }
+        ],
+    }
+
+
+def stub_driver_spec(files: dict[str, list[dict]], *,
+                     timelapse_duration_s: float = 3.0,
+                     gates: dict[str, str] | None = None) -> dict:
+    """设备替身剧本：驱动能力、按活动身份的结果文件与同步门。
+
+    files 的键是活动身份（单动作部署从 1 开始）；gates 把端口名映
+    到剧本目录中的门文件名，该文件出现前替身不响应对应调用。
+    """
+    return {
+        "driver_id": "test-stub",
+        "timelapse_duration_s": timelapse_duration_s,
+        "files": files,
+        "gates": gates or {},
+    }
+
+
+def photo_file(identity: str) -> dict:
+    """一张完整照片的结果列举条目（photo kind）。"""
+    return {
+        "identity": identity,
+        "locator": {"path": f"/DCIM/{identity}"},
+        "size_bytes": 4096,
+        "complete": True,
+        "kind": "photo",
+        "original_name": f"{identity}.jpg",
+        "media_type": "image/jpeg",
+    }
+
+
+def video_file(identity: str) -> dict:
+    """一段完整视频的结果列举条目（video kind）。"""
+    return {
+        "identity": identity,
+        "locator": {"path": f"/DCIM/{identity}"},
+        "size_bytes": 8192,
+        "complete": True,
+        "kind": "video",
+        "original_name": f"{identity}.mp4",
+        "media_type": "video/mp4",
+    }
+
+
+#: 替身驱动用到的观察契约（与 D2/D4 契约测试同形态）。
+_STUB_EVIDENCE_CONTRACTS = (
+    ("operation_returned", 1, "control", frozenset(), None),
+    ("photo_taken", 1, "control", frozenset({"activity_id"}), "activity_id"),
+    ("start_confirmed", 1, "control", frozenset({"activity_id"}), "activity_id"),
+    ("timelapse_sent", 1, "control", frozenset({"activity_id"}), "activity_id"),
+    ("stop_returned", 1, "stop", frozenset(), None),
+    ("stop_confirmed", 1, "stop", frozenset({"activity_id"}), "activity_id"),
+    ("result_files_listed", 1, "result",
+     frozenset({"activity_id", "entries"}), "activity_id"),
+    ("results_returned", 1, "result", frozenset(), None),
+)
+
+_CONTROL_OBSERVATIONS = {
+    "take_photo": "photo_taken",
+    "start_recording": "start_confirmed",
+    "start_timelapse": "timelapse_sent",
+}
+
+_GATE_TIMEOUT_S = 120.0
+
+
+class _ScriptedStubDriver:
+    """受契约约束的设备替身：启动确认、停止确认与结果列举。
+
+    行为来自剧本：按活动身份返回结果文件条目；剧本 gates 映射的
+    端口在对应门文件出现前不响应（显式同步点，非随机 sleep）。
+    """
+
+    def __init__(self, spec: dict, gate_dir: Path) -> None:
+        self._spec = spec
+        self._gate_dir = gate_dir
+        self.calls: list[tuple[str, str]] = []
+
+    def _await_gate(self, port: str) -> None:
+        gate = self._spec.get("gates", {}).get(port)
+        if not gate:
+            return
+        target = self._gate_dir / gate
+        deadline = time.monotonic() + _GATE_TIMEOUT_S
+        while not target.exists():
+            assert time.monotonic() < deadline, f"门超时: {target}"
+            time.sleep(0.02)
+
+    async def control(self, request) -> object:
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.devices.ports import DeviceCallResult
+
+        self._await_gate("control")
+        # 活动身份由设备侧分配并随确认观察报告；后续结果列举请求
+        # 以该身份回询（剧本 files 的键即此身份）。
+        identity = str(self._spec.get("activity_identity", "1"))
+        self.calls.append(("control", request.operation))
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type=_CONTROL_OBSERVATIONS[request.operation], version=1,
+                data={"activity_id": identity}),),
+            error=None)
+
+    async def stop(self, request) -> object:
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.devices.ports import DeviceCallResult
+
+        self._await_gate("stop")
+        identity = str(request.params.get("activity_id",
+                                          self._spec.get("activity_identity", "1")))
+        self.calls.append(("stop", request.operation))
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type="stop_confirmed", version=1,
+                data={"activity_id": identity}),),
+            error=None)
+
+    async def list_results(self, request, batch: int) -> object:
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.devices.ports import DeviceCallResult
+
+        self._await_gate("result")
+        identity = str(request.params["activity_id"])
+        self.calls.append(("result", identity))
+        entries = self._spec.get("files", {}).get(identity, [])
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type="result_files_listed", version=1,
+                data={"activity_id": identity, "entries": entries}),),
+            error=None)
+
+
+def _stub_definition(spec: dict):
+    """替身的驱动定义：照片单张与设备自结束的延时任务。"""
+    from decimal import Decimal
+
+    from camctl.devices.catalog import ActionCapability, DriverDefinition
+    from camctl.devices.tasks import (
+        CaptureTask,
+        CompletionMode,
+        EndControl,
+        StartReturn,
+    )
+
+    def photo_task(params):
+        return CaptureTask("camera_take_photo")
+
+    def timelapse_task(params):
+        return CaptureTask(
+            "camera_timelapse",
+            target_duration_s=Decimal(str(spec.get("timelapse_duration_s", 3.0))),
+            duration_based=True,
+            wait_after_send=True,
+            end_control=EndControl.DEVICE,
+            start_return_meaning=StartReturn.SENT,
+            completion_mode=CompletionMode.TIME_AND_OUTPUTS,
+            stop_supported=False,
+            result_wait_margin_s=Decimal("0"),
+        )
+
+    schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"type": {"const": "…"}},
+        "required": ["type"],
+        "additionalProperties": False,
+    }
+    photo_schema = json.loads(json.dumps(schema))
+    photo_schema["properties"]["type"]["const"] = "single_shot"
+    timelapse_schema = json.loads(json.dumps(schema))
+    timelapse_schema["properties"]["type"]["const"] = "timelapse"
+    return DriverDefinition(
+        driver_id=spec["driver_id"],
+        actions={
+            "camera_take_photo": (ActionCapability(
+                action_type="camera_take_photo", parameter_type="single_shot",
+                name="单张拍摄", description="跨组件替身的单张拍摄",
+                preview_supported=False, schema=photo_schema, defaults={},
+                task_factory=photo_task),),
+            "camera_timelapse": (ActionCapability(
+                action_type="camera_timelapse", parameter_type="timelapse",
+                name="延时摄影", description="跨组件替身的定时结束延时任务",
+                preview_supported=False, schema=timelapse_schema, defaults={},
+                task_factory=timelapse_task),),
+        },
+    )
+
+
+def install_stub_driver(spec: dict) -> None:
+    """部署装配：驱动定义与运行端口同源登记，随后由生产 CLI 接管。"""
+    from camctl.devices.definitions_runtime import register_driver_definitions
+    from camctl.devices.drivers.registry import DriverEntry, DriverStatus
+    from camctl.devices.drivers.runtime import register_drivers
+    from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
+    from camctl.devices.ports import DriverDeclaration
+
+    evidence = EvidenceRegistry(tuple(
+        EvidenceContract(
+            type=kind, version=version, operation=operation, fields=fields,
+            identity_field=identity)
+        for kind, version, operation, fields, identity
+        in _STUB_EVIDENCE_CONTRACTS
+    ))
+    register_driver_definitions(_stub_definition(spec))
+    register_drivers(DriverEntry(
+        driver_id=spec["driver_id"],
+        driver=_ScriptedStubDriver(spec, Path(spec.get("gate_dir", "."))),
+        declaration=DriverDeclaration(
+            control_supported=True,
+            stop_supported=True,
+            query_supported=False,
+            result_supported=True,
+            read_supported=False,
+            digest_supported=False,
+            delete_supported=False,
+        ),
+        evidence=evidence,
+        status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED,
+    ))

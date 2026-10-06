@@ -197,9 +197,13 @@ def build_catalog(config: ConfigSnapshot, definitions: DriverDefinitions) -> Cat
     return Catalog(config, definitions)
 
 def default_driver_definitions() -> DriverDefinitions:
-    """当前进程内置的已部署驱动定义。
+    """当前进程可见的已部署驱动定义。
 
-    第一版相机驱动定义随驱动接入登记于此；未部署的驱动不出现，
-    声明了未部署驱动的设备在目录构建时报部署错误。
+    第一版没有内置厂商映射；部署适配（或集成测试的受约束替身）
+    在进程启动阶段经定义登记点接入，登记结果与将来内置的厂商映
+    射合并。未登记定义的驱动不出现，声明了未登记驱动定义的设备
+    在目录构建时报部署错误。
     """
-    return DriverDefinitions(drivers={})
+    from camctl.devices.definitions_runtime import current_driver_definitions
+
+    return current_driver_definitions()
