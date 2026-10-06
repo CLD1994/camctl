@@ -106,11 +106,25 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 **协作输入：** 初始化后的临时部署目录、真实包、只含 report_status 的合法计划和可靠客户端存储；另一组输入为非法正文但有效 ACK。客户端驱动输出实际文件及可靠保存凭据，C 驱动使用公开接入接口。
 
-- [ ] 建立 `test_report_import_ack_roundtrip`，独立断言请求身份、计划与动作事实、报告摘要、客户端已保存对象和主机累计确认；主程序领取前后分别检查真实位置，不能仅断言“流程没有抛错”。
-- [ ] B1 测试环境建立后运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_report_roundtrip.py -q`，确认失败来自尚未贯通的接缝。
-- [ ] 串联真实客户端导出、C run/submit、camctl、ready→processing、客户端原字节导入及后续 ACK。测试驱动只负责递交和读取，不直接修改业务库以制造期望状态。
-- [ ] 再运行同一命令，分别覆盖输入拒绝但有效 ACK、报告冻结后新提交、同请求重送、只吸收 ACK、领取即删除、报告保存失败重试、普通生成失败及数据库失效日志副本。可靠保存失败时 ACK 不推进；旧报告重建的字节保持。
-- [ ] 审阅所有交接点的事实和失败诊断，再运行相关 C/客户端组件集成；建议提交“test: 验证无设备跨组件闭环”。
+- [x] 建立 `test_report_import_ack_roundtrip`，独立断言请求身份、计划与动作事实、报告摘要、客户端已保存对象和主机累计确认；主程序领取前后分别检查真实位置，不能仅断言“流程没有抛错”。
+- [x] B1 测试环境建立后运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_report_roundtrip.py -q`，确认失败来自尚未贯通的接缝。
+- [x] 串联真实客户端导出、C run/submit、camctl、ready→processing、客户端原字节导入及后续 ACK。测试驱动只负责递交和读取，不直接修改业务库以制造期望状态。
+- [ ] 再运行同一命令，分别覆盖输入拒绝但有效 ACK、报告冻结后新提交、同请求重送、只吸收 ACK、领取即删除、报告保存失败重试、普通生成失败及数据库失效日志副本。可靠保存失败时 ACK 不推进；旧报告重建的字节保持。（八场景已覆盖五：非法正文有效 ACK、报告冻结后新提交、同请求重送、领取即删除、ACK 吸收；报告保存失败重试、普通生成失败、数据库失效日志副本随对应故障注入链路补齐。）
+- [x] 审阅所有交接点的事实和失败诊断，再运行相关 C/客户端组件集成；建议提交“test: 验证无设备跨组件闭环”。
+
+#### I4 验证记录（2026-10-07）
+
+已建立 `tests/integration/test_camctl_report_roundtrip.py` 三个用例与共用基础设施：`Deployment(devices=False)` 无设备部署、客户端导出/导入驱动（`camctl_fixtures.py` 的 `export_plan_with_client`/`import_reports_with_client`）、WSL 构建的真实 host-demo 会话（`HostDemo`：stdin 命令协议 submit/claim，camctl 启动桥转换 /mnt 路径与 Windows 解释器）。C 模块为 POSIX 实现，按部署验证裁决在 WSL x86 Linux 用 git worktree LF 检出构建（Windows 检出的 CRLF 会破坏 vendor manifest 校验）。
+
+先红证据：主链初次贯通失败于客户端导入拒绝报告——报告快照中出现“未执行计划包含已开始动作”（客户端 `validateReport` 拒绝 pending 计划携带 started 动作），及计划停在执行中无人推进。按计划执行状态规格（plans.status 是动作聚合：曾有动作开始且未全部终态即执行中）确认为生产缺陷并在责任边界修复：报告同步动作的开始事务与本地完成事务（`reporting/policy.py`）分别补齐计划首次开始（PLAN_STATUS_CHANGED.START）与全部终态完成（COMPLETE）事件，与拍摄、取回链的既有模式对齐。
+
+同类缺陷审计（同一不变量的全部动作开始入口）：拍摄动作开始（`scheduling.py` StartActionCommand）与取消动作开始（`cancellation.py` _StartCancelCommand）同样不推计划首次开始，一并修复；取回/删除动作的执行入口尚未实现（`_due_pending_actions` 只选拍摄类型），将随取回链接入时按同模式保证。
+
+行为事实：主链覆盖 init、describe（`{"devices": []}` 进入客户端存储）、客户端真实导出（整数请求身份、首份无 ACK）、C 受管 submit 与 run、报告发布到 ready、C 领取移动到 processing（ready 撤空、原字节 size/sha256 核对）、客户端真实导入（`saved_report_ids`/`ack_id` 与报告身份一致）、第二份导出自动携带 `last_report_id` 并被受理接口吸收（`runtime_state` 累计确认推进到报告 `to_wm`）。扩展场景覆盖：非法正文但有效 ACK（正文被拒不建计划、ACK 仍被吸收）、同请求重送（计划与动作身份保持一次受理）、领取即删除（主链断言）与报告冻结后新提交（主链第二份即 ACK 组合）。报告保存失败重试、普通生成失败、数据库失效日志副本三场景未在本轮覆盖，随对应故障注入链路（225 行状态库不可用日志副本等）补齐。
+
+回归证据（2026-10-07，Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_report_roundtrip.py` 3 项通过；reporting 集成 345 项（含新增同步生命周期计划状态断言与“最后动作成功完成计划”用例）、capture 199、outputs 1787、scheduling 125、cancellation 44、session 81、bootstrap 64、acceptance 226 及其余目录全绿；apps/camctl 单元 3296 项连续两轮通过；根跨组件 capture roundtrip 2 项通过。期间若干轮出现 asyncio 事件循环创建失败的瞬时 error（WinError 10055 系统套接字缓冲区不足）：新旧代码交替对照证实与本次改动无关（stash 版同等失败），涉事测试单独运行均通过，资源回落后整目录全绿。
+
+客户端侧修复：`apps/client/src/server/application.ts` 的 `utc()` 原 `toISOString().replace` 残留毫秒，违反公共协议秒级时间戳；改为 `formatProtocolTime` 截断到秒，配导出正文创建时间格式的集成断言。
 
 ### I5 三种采集、取回、取消及清理的跨组件组合
 

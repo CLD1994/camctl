@@ -24,9 +24,13 @@ import {
   selectSyncReport,
   validateReportAgainstHistory,
 } from "../domain/reports";
+import { formatProtocolTime, type UtcText } from "../domain/protocol-time";
 
-function utc() {
-  return new Date().toISOString().replace("T", " ").replace(/Z$/, "");
+function utc(): UtcText {
+  // toISOString 恒为 UTC 且格式固定；截到秒符合公共协议时间字面量。
+  return formatProtocolTime(
+    new Date().toISOString().slice(0, 19).replace("T", " "),
+  );
 }
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -38,6 +38,14 @@ const content = {
 };
 
 describe("导出与请求身份", () => {
+  it("导出正文的创建时间符合公共协议秒级格式", () => {
+    const app = setup(new SequenceRandom([31n]));
+    const exported = app.exportDraft(app.createDraft(content).id, 1, content);
+    expect(exported.body.created_at).toMatch(
+      /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/,
+    );
+  });
+
   it("test_export_retry_preserves_request_identity", () => {
     const random = new SequenceRandom([11n, 22n]);
     const app = setup(random);

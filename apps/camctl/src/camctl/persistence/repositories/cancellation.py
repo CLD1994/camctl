@@ -152,9 +152,15 @@ class _StartCancelCommand:
                 f"取消动作不在待执行状态: {command.action_id}"
                 f" status={action['status']!r}"
                 f" execution_started={action['execution_started']!r}")
+        # 动作开始事实与计划首次开始同一事务保存（计划执行状态规格：
+        # 曾有动作开始且未全部终态的计划为执行中）。
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError(f"计划不存在: {action['plan_id']}")
+        self._state.setdefault("plans", {})[plan["id"]] = plan
         self._owners[("actions", command.action_id)] = (
             "action", command.action_id)
-        allocation = scope.allocate(1)
+        allocation = scope.allocate(2 if plan["status"] == 1 else 1)
         event = _envelope(
             allocation.first_event_id, allocation.txn_id,
             _ACTION_STARTED_EVENT, _ACTION_STARTED_REASON,
@@ -163,15 +169,27 @@ class _StartCancelCommand:
                 {"status": 1, "execution_started": 0},
                 {"status": 2, "execution_started": 1}),),
             command.occurred_at)
+        events = [event]
+        if plan["status"] == 1:
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            events.append(_envelope(
+                allocation.last_event_id, allocation.txn_id,
+                _PLAN_STATUS_EVENT, 1,
+                (_update("plans", plan["id"],
+                 {"status": 1}, {"status": 2}),),
+                command.occurred_at))
         return CommandPlan(
-            events=(event,), owners=self._owners, state_rows=self._state,
+            events=tuple(events), owners=self._owners, state_rows=self._state,
             result=CancelStartResult(disposition=CancelStartDisposition.SAVED))
 
     def _reuse(self, scope, saved) -> CommandPlan:
         """原键重送：核实原开始分支与输入后恢复首次响应。"""
         command = self._command
         kinds = [(event["type"], event["reason"]) for event in saved]
-        if kinds != [(_ACTION_STARTED_EVENT, _ACTION_STARTED_REASON)]:
+        if kinds not in (
+                [(_ACTION_STARTED_EVENT, _ACTION_STARTED_REASON)],
+                [(_ACTION_STARTED_EVENT, _ACTION_STARTED_REASON),
+                 (_PLAN_STATUS_EVENT, 1)]):
             raise TransactionError("操作身份已用于其他事务，不能作为取消开始重送")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("取消开始的事实时刻与原事务不同")

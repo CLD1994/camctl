@@ -49,6 +49,10 @@ _SYNC_EVENT = load_event_registry()["events"]["SYNC_CHANGED"]
 _SYNC_EVENT_ID = _SYNC_EVENT["id"]
 _ACTION_STARTED_EVENT_ID = load_event_registry()["events"]["ACTION_STARTED"]["id"]
 _ACTION_FINISHED_EVENT_ID = load_event_registry()["events"]["ACTION_FINISHED"]["id"]
+_PLAN_STATUS_EVENT = load_event_registry()["events"]["PLAN_STATUS_CHANGED"]["id"]
+#: 与拍摄、取回链一致的动作终态集合及计划完成状态。
+_ACTION_TERMINAL = (3, 4, 5, 6)
+_PLAN_COMPLETE = 3
 #: 成功、失败、过期终态：取消不结束这些动作的同步责任。
 _SYNC_KEEPING_TERMINAL = (3, 4, 5)
 _ReportChange = IntEnum("ReportChange", {name: spec["reason"] for name, spec in _REPORT_EVENT["branches"].items()})
@@ -592,16 +596,44 @@ class _StartSyncCommand:
                 result=SyncSaved(disposition=SyncDisposition.ALREADY,
                                  sync_id=int(existing[0])))
         _require_startable(action)
-        allocation = scope.allocate(2)
-        start = self._action_started_event(allocation)
+        # 动作开始事实与计划状态同事务保存：曾有动作开始且未全部
+        # 终态时计划为执行中（计划执行状态规格的完整分区）。
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError(f"计划不存在: {action['plan_id']}")
+        self._state.setdefault("plans", {})[plan["id"]] = plan
+        anchor = None
         if self._mode is SyncMode.INCREMENTAL:
             anchor = row_facts(connection, "reports", self._after_report_id)
-            if anchor is None:
-                return self._anchor_missing_plan(allocation, start)
+        if anchor is not None:
             self._state["reports"][anchor["id"]] = anchor
-            from_wm = anchor["to_wm"]
-        else:
-            from_wm = 0
+        # 正常分支本动作进入执行中，计划至多首次开始；锚点缺失分
+        # 支本动作直接终态，计划可能随之完成。
+        plan_terminal = False
+        next_plan_status = None
+        if self._mode is SyncMode.INCREMENTAL and anchor is None:
+            siblings = connection.execute(
+                "SELECT id, status FROM actions WHERE plan_id = ?",
+                (action["plan_id"],)).fetchall()
+            plan_terminal = all(
+                status in _ACTION_TERMINAL or int(row_id) == self._action_id
+                for row_id, status in siblings)
+            next_plan_status = (
+                _PLAN_COMPLETE if plan_terminal else 2
+                if plan["status"] in (1, 2) else None)
+        elif plan["status"] == 1:
+            next_plan_status = 2
+        allocation = scope.allocate(
+            3 if next_plan_status is not None else 2)
+        start = self._action_started_event(allocation)
+        if self._mode is SyncMode.INCREMENTAL and anchor is None:
+            return self._anchor_missing_plan(allocation, start, plan,
+                                             next_plan_status)
+        from_wm = anchor["to_wm"] if anchor is not None else 0
+        events = [start]
+        if next_plan_status is not None:
+            events.append(self._plan_change_event(
+                allocation, plan, next_plan_status))
         values = {
             "action_id": self._action_id,
             "mode": self._mode.value,
@@ -621,10 +653,21 @@ class _StartSyncCommand:
             _SYNC_EVENT_ID, 1,
             (row_change("state_syncs", sync_id, values),), self._occurred_at)
         return CommandPlan(
-            events=(start, create), owners=self._owners,
+            events=(*events, create), owners=self._owners,
             state_rows=self._state,
             result=SyncSaved(disposition=SyncDisposition.SAVED,
                              sync_id=sync_id))
+
+    def _plan_change_event(self, allocation, plan, next_status: int):
+        """计划状态变化事件：执行中（START）或全部终态（COMPLETE）。"""
+        reason = 2 if next_status == _PLAN_COMPLETE else 1
+        self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+        update = update_change(
+            "plans", plan["id"],
+            {"status": plan["status"]}, {"status": next_status})
+        return _envelope(
+            allocation.first_event_id + 1, allocation.txn_id,
+            _PLAN_STATUS_EVENT, reason, (update,), self._occurred_at)
 
     def _action_started_event(self, allocation):
         self._owners[("actions", self._action_id)] = (
@@ -637,7 +680,7 @@ class _StartSyncCommand:
             allocation.first_event_id, allocation.txn_id,
             _ACTION_STARTED_EVENT_ID, 1, (update,), self._occurred_at)
 
-    def _anchor_missing_plan(self, allocation, start):
+    def _anchor_missing_plan(self, allocation, start, plan, next_plan_status):
         """固定起点不存在：同一事务保存动作开始与执行失败。"""
         code = "sync_report_not_found"
         details = {"after_report_id": str(self._after_report_id)}
@@ -650,8 +693,14 @@ class _StartSyncCommand:
         event = _envelope(
             allocation.last_event_id, allocation.txn_id,
             _ACTION_FINISHED_EVENT_ID, 2, (fail,), self._occurred_at)
+        # 本动作在该事务内直接终态；计划随之首次开始或完成。
+        events = [start]
+        if next_plan_status is not None:
+            events.append(self._plan_change_event(
+                allocation, plan, next_plan_status))
+        events.append(event)
         return CommandPlan(
-            events=(start, event), owners=self._owners,
+            events=tuple(events), owners=self._owners,
             state_rows=self._state,
             result=SyncSaved(disposition=SyncDisposition.FAILED,
                              sync_id=None))
@@ -692,7 +741,18 @@ class _LocalReportCommand:
             raise TransactionError(
                 "本地报告满足要求报告动作正在运行且未取消:"
                 f" {self._action_id} status={action['status']!r}")
-        allocation = scope.allocate(2)
+        # 计划内全部动作到达终态时，动作成功与计划完成同事务保存
+        # （与拍摄、取回链的终态事务一致，不留下无人推进的计划）。
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError(f"计划不存在: {action['plan_id']}")
+        siblings = connection.execute(
+            "SELECT id, status FROM actions WHERE plan_id = ?",
+            (action["plan_id"],)).fetchall()
+        plan_complete = all(
+            status in _ACTION_TERMINAL or int(row_id) == self._action_id
+            for row_id, status in siblings)
+        allocation = scope.allocate(3 if plan_complete else 2)
         self._owners[("state_syncs", sync["id"])] = (
             "state_sync", sync["id"])
         local = _envelope(
@@ -706,14 +766,25 @@ class _LocalReportCommand:
         self._owners[("actions", self._action_id)] = (
             "action", self._action_id)
         succeed = _envelope(
-            allocation.last_event_id, allocation.txn_id,
+            allocation.first_event_id + 1, allocation.txn_id,
             _ACTION_FINISHED_EVENT_ID, 1,
             (update_change(
                 "actions", self._action_id,
                 {"status": 2}, {"status": 3}),),
             self._occurred_at)
+        events = [local, succeed]
+        if plan_complete and plan["status"] in (1, 2):
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            self._state.setdefault("plans", {})[plan["id"]] = plan
+            events.append(_envelope(
+                allocation.last_event_id, allocation.txn_id,
+                _PLAN_STATUS_EVENT, 2,
+                (update_change(
+                    "plans", plan["id"],
+                    {"status": plan["status"]}, {"status": _PLAN_COMPLETE}),),
+                self._occurred_at))
         return CommandPlan(
-            events=(local, succeed), owners=self._owners,
+            events=tuple(events), owners=self._owners,
             state_rows=self._state,
             result=SyncSaved(disposition=SyncDisposition.SAVED,
                              sync_id=sync["id"]))

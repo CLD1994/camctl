@@ -23,7 +23,12 @@ from typing import Any, Mapping
 from camctl.contracts.enums import decode_member, enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
-from camctl.contracts.values import ObjectId, OperationKey, UtcMicros
+from camctl.contracts.values import (
+    ConsistencyError,
+    ObjectId,
+    OperationKey,
+    UtcMicros,
+)
 from camctl.capture.models import activity_capabilities
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.attempts import (
@@ -239,8 +244,14 @@ class StartActionCommand:
 
         capabilities = activity_capabilities(
             literal, self._decoded_spec(action["execution_spec_json"]))
+        # 动作开始事实与计划首次开始同一事务保存（计划执行状态规格：
+        # 曾有动作开始且未全部终态的计划为执行中）。
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError(f"计划不存在: {action['plan_id']}")
+        self._state.setdefault("plans", {})[plan["id"]] = plan
         owner = ("action", request.action_id)
-        allocation = scope.allocate(2)
+        allocation = scope.allocate(3 if plan["status"] == 1 else 2)
 
         action_row = _update(
             "actions", request.action_id,
@@ -300,8 +311,18 @@ class StartActionCommand:
         create = _envelope(
             allocation.last_event_id, allocation.txn_id,
             _ACTIVITY_CREATE_EVENT, 1, (activity_row,), request.occurred_at)
+        events = [started]
+        if plan["status"] == 1:
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            events.append(_envelope(
+                allocation.first_event_id + 1, allocation.txn_id,
+                _PLAN_STATUS_EVENT, 1,
+                (_update("plans", plan["id"],
+                 {"status": 1}, {"status": 2}),),
+                request.occurred_at))
+        events.append(create)
         return CommandPlan(
-            events=(started, create), owners=self._owners,
+            events=tuple(events), owners=self._owners,
             state_rows=self._state,
             result=StartActionResult(
                 outcome=StartOutcome.STARTED, activity_id=activity_id))
@@ -357,15 +378,18 @@ class StartActionCommand:
     def _reuse(self, scope, saved: list[dict]) -> CommandPlan:
         """同键重送：核实原事务组成后恢复首次响应。"""
         request = self._request
-        if (len(saved) != 2 or saved[0]["type"] != _ACTION_STARTED_EVENT
+        if (len(saved) not in (2, 3)
+                or saved[0]["type"] != _ACTION_STARTED_EVENT
                 or saved[0]["reason"] != 1
-                or saved[1]["type"] != _ACTIVITY_CREATE_EVENT
-                or saved[1]["reason"] != 1):
+                or saved[-1]["type"] != _ACTIVITY_CREATE_EVENT
+                or saved[-1]["reason"] != 1
+                or any(event["type"] != _PLAN_STATUS_EVENT
+                       or event["reason"] != 1 for event in saved[1:-1])):
             raise TransactionError("操作身份已用于其他事务，不能作为开始重送")
         for event in saved:
             if event["occurred_at"] != request.occurred_at:
                 raise TransactionError("开始事务的事实时刻与原事务不同")
-        activity_row = saved[1]["body"]["rows"][0]
+        activity_row = saved[-1]["body"]["rows"][0]
         action_row = saved[0]["body"]["rows"][0]
         if (activity_row["table"] != "device_activities"
                 or activity_row["id"] is None

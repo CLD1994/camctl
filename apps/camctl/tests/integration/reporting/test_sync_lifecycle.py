@@ -1,7 +1,8 @@
 """R6 同步消费者生命周期的组件集成测试。
 
 同步实际开始与动作进入运行同一事务（起点确定、固定开始边界、
-起点不存在时的动作失败）、本地报告满足与动作成功共同保存（含
+起点不存在时的动作失败），计划首次开始与动作成功后的计划完成
+也保存在同一事务内；本地报告满足与动作成功共同保存（含
 ACK 先结束后的补记）、取消消费者覆盖未开始、运行与终态动作；
 共享报告生成不受取消影响；重试、重启与同一请求重送沿用原记录。
 """
@@ -122,7 +123,7 @@ def _ack_end_sync(owned, action_id: int) -> None:
     row = _value(owned, "SELECT id FROM state_syncs WHERE action_id = ?",
                  action_id)
     owned.connection.execute(
-        "UPDATE state_syncs SET status = 2, ack_report_id = 1, ended_event_id = 3"
+        "UPDATE state_syncs SET status = 2, ack_report_id = 1, ended_event_id = 4"
         " WHERE id = ?", (row[0],))
     owned.connection.commit()
 
@@ -140,15 +141,16 @@ class TestStartSync:
             " started_boundary_event_id, status FROM state_syncs"
             " WHERE action_id = 40")
         assert row[0] == 1 and row[1] is None and row[2] == 0
-        assert row[3] == 3 and row[4] == 1  # 开始边界=本事务末位事件
-        # 动作进入运行；两个事件同属一个事务。
+        assert row[3] == 4 and row[4] == 1  # 开始边界=本事务末位事件
+        # 动作进入运行；计划首次开始；三个事件同属一个事务。
         assert _value(
             owned, "SELECT status, execution_started, cancel_requested"
             " FROM actions WHERE id = 40") == (2, 1, 0)
+        assert _value(owned, "SELECT status FROM plans WHERE id = 1") == (2,)
         events = owned.connection.execute(
             "SELECT id, transaction_id, event_type FROM history_events"
             " WHERE id >= 2 ORDER BY id").fetchall()
-        assert [(r[0], r[2]) for r in events] == [(2, 5), (3, 29)]
+        assert [(r[0], r[2]) for r in events] == [(2, 5), (3, 9), (4, 29)]
         assert len({r[1] for r in events}) == 1
 
     def test_start_is_idempotent_for_retry_and_resend(self, pipeline):
@@ -199,7 +201,9 @@ class TestStartSync:
         events = [(r[0], r[1]) for r in owned.connection.execute(
             "SELECT id, event_type FROM history_events WHERE id >= 2"
             " ORDER BY id").fetchall()]
-        assert events == [(2, 5), (3, 8)]
+        assert events == [(2, 5), (3, 9), (4, 8)]
+        # 动作失败后计划仍处于执行中（其余动作尚未开始）。
+        assert _value(owned, "SELECT status FROM plans WHERE id = 1") == (2,)
         # 恢复：失败不改写其他报告动作的正常开始。
         recovery = start_sync(
             new_operation_key(), owned, action_id=40, mode=SyncMode.FULL,
@@ -240,18 +244,50 @@ class TestLocalReport:
             " WHERE action_id = 40") == (2, 1)
         assert _value(owned, "SELECT status FROM actions WHERE id = 40") == (3,)
         events = [(r[0], r[1]) for r in owned.connection.execute(
-            "SELECT id, event_type FROM history_events WHERE id >= 4"
+            "SELECT id, event_type FROM history_events WHERE id >= 5"
             " ORDER BY id").fetchall()]
-        assert events == [(4, 29), (5, 8)]
+        assert events == [(5, 29), (6, 8)]
         transactions = {r[0] for r in owned.connection.execute(
-            "SELECT transaction_id FROM history_events WHERE id IN (4, 5)"
+            "SELECT transaction_id FROM history_events WHERE id IN (5, 6)"
         ).fetchall()}
         assert len(transactions) == 1
+        # 其余动作尚未终态：计划保持执行中，本事务无计划状态事件。
+        assert _value(owned, "SELECT status FROM plans WHERE id = 1") == (2,)
         # 同一请求重送：本地完成与成功事实原样恢复。
         again = record_local_report(
             new_operation_key(), owned, action_id=40, local_report_id=2,
             occurred_at=_NOW)
         assert again.value.disposition.value == "already"
+
+    def test_final_action_success_completes_plan(self, pipeline):
+        owned = pipeline
+        # 其余动作先到达终态；真实链路由各自的事务写入。
+        # 报告动作执行前失败（spec 未确定）；拍摄动作执行前取消。
+        owned.connection.execute(
+            "UPDATE actions SET status = 4, error_code = 1,"
+            " error_details_json = '{}', execution_spec_json = NULL"
+            " WHERE id = 41")
+        owned.connection.execute(
+            "UPDATE actions SET status = 6, cancel_requested = 1"
+            " WHERE id = 11")
+        owned.connection.commit()
+        start_sync(new_operation_key(), owned, action_id=40,
+                   mode=SyncMode.FULL, occurred_at=_NOW)
+        outcome = record_local_report(
+            new_operation_key(), owned, action_id=40, local_report_id=2,
+            occurred_at=_NOW)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert _value(owned, "SELECT status FROM actions WHERE id = 40") == (3,)
+        # 最后一个动作成功：计划完成与动作成功同一事务保存。
+        assert _value(owned, "SELECT status FROM plans WHERE id = 1") == (3,)
+        events = [(r[0], r[1]) for r in owned.connection.execute(
+            "SELECT id, event_type FROM history_events WHERE id >= 5"
+            " ORDER BY id").fetchall()]
+        assert events == [(5, 29), (6, 8), (7, 9)]
+        transactions = {r[0] for r in owned.connection.execute(
+            "SELECT transaction_id FROM history_events WHERE id IN (5, 6, 7)"
+        ).fetchall()}
+        assert len(transactions) == 1
 
     def test_local_report_after_ack_end(self, pipeline):
         owned = pipeline
@@ -299,7 +335,7 @@ class TestCancelSync:
             owned, "SELECT status, ended_event_id FROM state_syncs"
             " WHERE action_id = 40")
         assert row[0] == 3
-        assert row[1] == 6  # 结束依据是取消事件自身
+        assert row[1] == 7  # 结束依据是取消事件自身
         # 其他同步继续；共享生成（reports）不受取消影响。
         assert _value(
             owned, "SELECT status FROM state_syncs WHERE action_id = 41"

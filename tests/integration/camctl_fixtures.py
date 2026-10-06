@@ -48,7 +48,7 @@ class CliResult:
 class Deployment:
     """一个初始化前的部署目录：配置、计划文件与替身剧本。"""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, devices: bool = True) -> None:
         self.root = root
         self.home = root / "deployment"
         self.staging = self.home / "staging"
@@ -73,13 +73,19 @@ class Deployment:
                     "[clock]",
                     'min_plausible_date = "2025-01-01"',
                     "",
-                    "[devices.cam-1]",
-                    'kind = "camera"',
-                    'driver = "test-stub"',
-                    "",
-                    "[devices.cam-1.result_check]",
-                    'retry_interval_s = "0"',
-                    "",
+                    *(
+                        [
+                            "[devices.cam-1]",
+                            'kind = "camera"',
+                            'driver = "test-stub"',
+                            "",
+                            "[devices.cam-1.result_check]",
+                            'retry_interval_s = "0"',
+                            "",
+                        ]
+                        if devices
+                        else []
+                    ),
                 ]
             ),
             encoding="utf-8",
@@ -123,21 +129,41 @@ class Deployment:
             json.dumps(body, ensure_ascii=False), encoding="utf-8")
         return target
 
+    def run_client_driver(self, *args: str, output: Path) -> dict:
+        """运行客户端真实服务驱动（export/import），返回输出凭据。"""
+        completed = subprocess.run(
+            ["node", "--import", "tsx", str(_ROOT / "client_driver.ts"), *args,
+             str(output)],
+            capture_output=True, text=True, cwd=str(_CLIENT_DIR), timeout=120)
+        assert completed.returncode == 0, (
+            f"客户端驱动失败: {completed.stderr}\n{completed.stdout}")
+        return json.loads(output.read_text(encoding="utf-8"))
+
     def import_reports_with_client(self, reports_dir: Path) -> dict:
         """用客户端服务的真实导入路径消费报告，返回保存凭据。
 
         驱动脚本扫描目录中的 status-report 文件，经客户端 Application
         校验、合并并保存，输出已保存报告与累计确认位置。
         """
-        store = self.root / "client-store"
-        output = self.root / "client-import.json"
-        completed = subprocess.run(
-            ["node", "--import", "tsx", str(_ROOT / "client_import_driver.ts"),
-             str(reports_dir), str(store), str(output)],
-            capture_output=True, text=True, cwd=str(_CLIENT_DIR), timeout=120)
-        assert completed.returncode == 0, (
-            f"客户端导入驱动失败: {completed.stderr}\n{completed.stdout}")
-        return json.loads(output.read_text(encoding="utf-8"))
+        return self.run_client_driver(
+            "import", str(reports_dir), str(self.root / "client-store"),
+            output=self.root / "client-import.json")
+
+    def export_plan_with_client(self, plan_body: dict) -> tuple[Path, dict]:
+        """用客户端服务的真实导出路径产生计划文件，返回路径与凭据。
+
+        计划正文经能力校验后由客户端分配随机整数请求身份；客户端
+        已保存报告时下载正文自动携带 last_report_id（ACK）。
+        """
+        body_path = self.root / "plan-body.json"
+        body_path.write_text(
+            json.dumps(plan_body, ensure_ascii=False), encoding="utf-8")
+        sequence = len(list(self.root.glob("client-plan-*"))) + 1
+        plan_path = self.root / f"client-plan-{sequence}.json"
+        receipt = self.run_client_driver(
+            "export", str(self.root / "client-store"), str(body_path),
+            str(plan_path), output=self.root / "client-export.json")
+        return plan_path, receipt
 
 
 def _toml_path(path: Path) -> str:
