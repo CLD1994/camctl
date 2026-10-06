@@ -24,6 +24,7 @@ from camctl.capture.models import (
     ResultSetSave,
 )
 from camctl.capture.files import (
+    FileChecksumSave,
     FileCompletionSave,
     FileObservationSave,
     FilePresenceSave,
@@ -1646,6 +1647,16 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def save_file_checksum(
+        self, command: FileChecksumSave, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ObservationOutcome]:
+        receipt = commit_operation(_FileChecksumCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def save_activity_observation(
         self, command: ActivityObservationSave, key: OperationKey,
         owned: OwnedConnection,
@@ -1792,6 +1803,76 @@ class _FilePresenceCommand:
                                   None if command.error is None
                                   else dict(command.error))):
             raise TransactionError("存在性观察的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ObservationOutcome(
+                ObservationDisposition.ALREADY, command.file_id))
+
+
+class _FileChecksumCommand:
+    """保存一次设备源摘要能力声明（DEVICE_FILE_OBSERVED.CHECKSUM）。
+
+    能力只能从未判定一次决定；实际摘要与查询错误另行保存。
+    """
+
+    def __init__(self, command: FileChecksumSave, key: OperationKey) -> None:
+        if not isinstance(command, FileChecksumSave):
+            raise TypeError("摘要能力声明申请必须使用 FileChecksumSave")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        facts = self._load(connection, command.file_id)
+        if facts["checksum_support"] != int(_FILE_CHECKSUM.UNDETERMINED):
+            raise ConsistencyError(
+                f"摘要能力已决定，不重复声明: {command.file_id}"
+                f" {facts['checksum_support']!r}")
+        row = _update(
+            "device_files", command.file_id,
+            {"checksum_support": facts["checksum_support"]},
+            {"checksum_support": command.support},
+        )
+        self._owners[("device_files", command.file_id)] = (
+            "device_file", command.file_id)
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _DEVICE_FILE_EVENT, _FILE_CHECKSUM_REASON, (row,),
+            command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ObservationOutcome(
+                ObservationDisposition.SAVED, command.file_id))
+
+    def _load(self, connection, file_id: int) -> dict[str, Any]:
+        facts = row_facts(connection, "device_files", file_id)
+        if facts is None:
+            raise ConsistencyError(f"设备文件不存在: {file_id}")
+        self._state.setdefault("device_files", {})[file_id] = facts
+        return facts
+
+    def _reuse(self, saved) -> CommandPlan:
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DEVICE_FILE_EVENT, _FILE_CHECKSUM_REASON)]:
+            raise TransactionError(
+                "操作身份已用于其他文件事务，不能作为摘要能力声明重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("摘要能力声明的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "device_files" or row["id"] != command.file_id:
+            raise TransactionError("原摘要能力声明属于其他文件")
+        after = row["after"]["values"]
+        if after.get("checksum_support") != command.support:
+            raise TransactionError("摘要能力声明的重送输入与原事务不同")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,

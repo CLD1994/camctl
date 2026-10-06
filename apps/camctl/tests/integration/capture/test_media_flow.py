@@ -105,6 +105,7 @@ def _flow(pipeline, driver, tools) -> MediaFlow:
         tools=tools,
         policy=MediaPolicy(repair_margin_s=Decimal("2")),
         occurred_at=lambda: 1_750_000_100_000_000,
+        digest_supported=True,
         digest=_Digest(_CONTENT),
     )
 

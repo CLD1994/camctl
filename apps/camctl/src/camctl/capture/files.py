@@ -18,6 +18,7 @@ from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.persistence.transaction import encode_json_value
 
 __all__ = [
+    "FileChecksumSave",
     "FileCompletionSave",
     "FilePresenceSave",
     "FileObservationSave",
@@ -278,6 +279,26 @@ class FilePresenceSave:
         _timestamp(self.occurred_at)
         _mapping("文件定位结构", self.locator, required=False)
         _mapping("文件观察错误", self.error, required=False)
+
+
+@dataclass(frozen=True)
+class FileChecksumSave:
+    """一次设备源摘要能力声明的保存输入（DEVICE_FILE_OBSERVED.CHECKSUM）。
+
+    能力由读取绑定的驱动声明，只能从未判定一次决定；已决定的能力
+    不重复声明。实际取得的源摘要在可靠取得后另行保存，不与能力混
+    同表达。
+    """
+
+    file_id: int
+    support: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.file_id)
+        if self.support not in (2, 3):
+            raise ValueError(f"摘要能力声明必须是支持或不支持: {self.support!r}")
+        _timestamp(self.occurred_at)
 
 
 class ObservationDisposition(Enum):

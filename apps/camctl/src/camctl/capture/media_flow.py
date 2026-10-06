@@ -15,6 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable
 
+from camctl.capture.files import FileChecksumSave
 from camctl.capture.input_copy import (
     InputContext,
     InputStep,
@@ -231,7 +232,11 @@ def load_processing_status(owned: OwnedConnection, processing_id: int) -> Proces
 
 @dataclass
 class MediaFlow:
-    """媒体链调用方的端口集合；工具与摘要读取由装配层注入。"""
+    """媒体链调用方的端口集合；工具与摘要读取由装配层注入。
+
+    digest_supported 是读取绑定的驱动摘要能力声明；首次媒体处理
+    前把来源文件的摘要能力从未判定一次固定。
+    """
 
     owned: OwnedConnection
     roots: BoundDirectories
@@ -239,6 +244,7 @@ class MediaFlow:
     tools: MediaTools
     policy: MediaPolicy
     occurred_at: Callable[[], int]
+    digest_supported: bool
     digest: Any = None
     repair_extension: str | None = None
 
@@ -250,6 +256,29 @@ class MediaFlow:
             self.owned, self.roots, self.occurred_at)
 
 
+def _ensure_checksum_support(
+    flow: MediaFlow, source_device_file_id: int) -> None:
+    """按绑定声明固定来源文件的摘要能力；已决定的能力不重复声明。"""
+    with closing(flow.owned.connection.execute(
+        "SELECT checksum_support FROM device_files WHERE id = ?",
+        (source_device_file_id,),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"设备文件不存在: {source_device_file_id}")
+    if row[0] != 1:
+        return
+    support = 2 if flow.digest_supported else 3
+    outcome = CaptureRepository().save_file_checksum(
+        FileChecksumSave(
+            file_id=source_device_file_id,
+            support=support,
+            occurred_at=flow.occurred_at()),
+        new_operation_key(), flow.owned)
+    if outcome.kind is not _DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"摘要能力声明未完成: {outcome.error}")
+
+
 async def run_recording_media(
     flow: MediaFlow, action_id: int, processing_id: int,
     source_device_file_id: int, *, target_extension: str | None = "mp4",
@@ -259,6 +288,7 @@ async def run_recording_media(
     输入未就绪、检查未终态或修复不待执行时返回对应步骤；保存被
     拒或未知的分区原样透传，由下一次推进按已保存事实续跑。
     """
+    _ensure_checksum_support(flow, source_device_file_id)
     status = load_processing_status(flow.owned, processing_id)
     input_step = await obtain_recording_input(InputContext(
         action_id=action_id,

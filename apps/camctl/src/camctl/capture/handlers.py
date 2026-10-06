@@ -29,6 +29,7 @@ from camctl.capture.models import (
 from camctl.capture.files import (
     FileCompletionSave,
     FileObservationSave,
+    FilePresenceSave,
     OwnershipSave,
 )
 from camctl.capture.media import (
@@ -36,12 +37,21 @@ from camctl.capture.media import (
     RecordingOutcomeFacts,
     decide_recording_result,
 )
+from camctl.capture.media_flow import MediaFlow, run_recording_media
 from camctl.capture.photo import (
     CaptureAssessment,
     PhotoCompletion,
     PhotoDecision,
     PhotoState,
     decide_photo,
+)
+from camctl.capture.processing import (
+    CheckBasis,
+    CheckDecisionChoice,
+    CheckDecisionSave,
+    CheckReason,
+    SourceFileSave,
+    saved_check_duration,
 )
 from camctl.capture.recording import (
     RecordingFacts,
@@ -66,6 +76,7 @@ from camctl.capture.timelapse import (
     plan_capture_wait,
 )
 from camctl.contracts.enums import enum_for
+from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.ports import ControlRequest, DeviceCallResult
@@ -140,6 +151,10 @@ _RESULTS_RETURNED = "results_returned"
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _EFFECT_STATE = enum_for("operation_attempts.effect_state")
 _DISPATCH_STATE = enum_for("device_activities.dispatch_state")
+_CHECK_DECISION = enum_for("recording_processing.check_decision")
+_CHECK_STATE = enum_for("recording_processing.check_state")
+_REPAIR_STATE = enum_for("recording_processing.repair_state")
+_FILE_PRESENCE = enum_for("device_files.presence_state")
 
 
 @dataclass(frozen=True)
@@ -216,6 +231,8 @@ class CaptureRuntime:
     recording_state: RecordingStatePort | None = None
     #: 录像停止调用端口；未装配时录像不能停止。
     stopper: DeviceStopPort | None = None
+    #: 录像媒体链端口；未装配时需要检查的录像不推进，等待装配会话。
+    media: MediaFlow | None = None
     #: 停止尝试的本次预算；默认 3 次、单次 10 秒、重试间隔 1 秒。
     stop_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("1")))
@@ -440,6 +457,15 @@ def _register_observed(
             ), new_operation_key(), runtime.owned)
         assert observed.kind is DbOutcomeKind.COMPLETED, observed.error
         file_id = observed.value.file_id
+        if observed.value.created:
+            # 同一次列举确认文件在场；重复发现沿用已保存的存在事实。
+            present = runtime.capture.save_file_presence(
+                FilePresenceSave(
+                    file_id=file_id,
+                    state=int(_FILE_PRESENCE.PRESENT),
+                    occurred_at=occurred),
+                new_operation_key(), runtime.owned)
+            assert present.kind is DbOutcomeKind.COMPLETED, present.error
         owned = runtime.capture.save_file_ownership(
             OwnershipSave(
                 file_id=file_id,
@@ -541,9 +567,15 @@ def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int) -> None:
 def _finish_capture(
     runtime: CaptureRuntime, action_id: int, entries: tuple[ObservedFile, ...],
     required: FileKind, *, failure: RecordingFailure | None = None,
+    registered=None, repair_file_id: int | None = None,
 ) -> HandlerOutcome:
-    """C6 核实产物集合并保存终态；失败保留完整且归属明确的文件。"""
-    registered = _register_observed(runtime, action_id, entries)
+    """C6 核实产物集合并保存终态；失败保留完整且归属明确的文件。
+
+    registered 传入已登记的观察结果避免重复登记；repair_file_id
+    携带修复成功的成品时与原片同事务登记为 REPAIRED 产物。
+    """
+    if registered is None:
+        registered = _register_observed(runtime, action_id, entries)
     assessment = assess_capture_files(
         CaptureFileSet(files=tuple(file for file, _ in registered), set_finalized=True),
         ProductRequirements(required_kinds=frozenset({required})),
@@ -557,6 +589,17 @@ def _finish_capture(
         for (file, file_id), entry in zip(registered, entries)
         if entry.complete
     )
+    if repair_file_id is not None:
+        original_file_ids = [
+            file_id for (file, file_id), entry in zip(registered, entries)
+            if entry.complete]
+        if original_file_ids:
+            drafts = drafts + (OutputDraft(
+                kind=OutputKind.REPAIRED,
+                file=FileReference(intermediate_file_id=repair_file_id),
+                file_complete=True,
+                original_batch_file_id=original_file_ids[0],
+            ),)
     if failure is None and not assessment.is_complete:
         return HandlerOutcome("files_incomplete", str(assessment.missing_kinds))
     receipt = runtime.capture.finish_capture(
@@ -693,31 +736,117 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         # 停止已确认后取消生效：终止后续核验，放弃本次录像内容。
         _finish_canceled_capture(context, action_id)
         return
-    processing = context.owned.connection.execute(
-        "SELECT id, check_decision, check_state, repair_state"
-        " FROM recording_processing WHERE action_id = ?", (action_id,)).fetchone()
-    if processing is None:
-        # 处理责任尚未建立；正常录像的无需检查决定随媒体链接线保存。
+    await _advance_recording_outcome(context, action, decision)
+    # 判定待定（必要处理未结束）时等待媒体链下次推进。
+
+
+def _load_processing_row(runtime: CaptureRuntime, action_id: int):
+    """装载录像处理行的决定、进度与原片归属；无责任行返回 None。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT id, check_decision, check_state, media_json, repair_state,"
+        " repair_output_file_id, source_device_file_id"
+        " FROM recording_processing WHERE action_id = ?",
+        (action_id,),
+    )) as cursor:
+        return cursor.fetchone()
+
+
+def _save_source_file(
+    runtime: CaptureRuntime, processing_id: int, source_file_id: int) -> None:
+    """首次把可靠原片归属到处理行；媒体链读取资格以此对齐。"""
+    receipt = runtime.capture.save_source_file(
+        SourceFileSave(
+            processing_id=processing_id,
+            source_device_file_id=source_file_id,
+            occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
+def _save_not_needed_decision(
+    runtime: CaptureRuntime, processing_id: int, target_duration_ms: int) -> None:
+    """连续控制完成：固定无需检查决定，控制依据即成功依据。"""
+    receipt = runtime.capture.save_check_decision(
+        CheckDecisionSave(
+            processing_id=processing_id,
+            decision=CheckDecisionChoice.NOT_NEEDED,
+            basis=CheckBasis(
+                reason=CheckReason.CONTINUOUS_CONTROL_COMPLETE,
+                target_duration_ms=target_duration_ms),
+            occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
+def _processing_open(row) -> bool:
+    """检查或修复仍有待执行或执行中的责任。"""
+    return (row[2] in (int(_CHECK_STATE.NOT_PERFORMED), int(_CHECK_STATE.RUNNING))
+            or row[4] in (int(_REPAIR_STATE.PENDING), int(_REPAIR_STATE.RUNNING)))
+
+
+async def _advance_recording_outcome(
+    context: CaptureRuntime, action, decision) -> None:
+    """建立检查决定、推进媒体链并按录像成功标准收场。
+
+    控制完成固定无需检查决定；计时证据不足的检查决定由跨会话对
+    账收场建立，此前保持待定。需要检查的处理行经媒体端口推进拷
+    贝、检查与修复，判定装载已保存的检查时长与媒体问题，修复成
+    功的成品与原片同事务登记。
+    """
+    action_id = action["id"]
+    row = _load_processing_row(context, action_id)
+    if row is None:
+        # 处理责任尚未建立；终态等待责任建立后的推进。
         return
+    control_complete = decision.phase is RecordingPhase.CONTROL_COMPLETE
+    if row[1] == int(_CHECK_DECISION.UNDETERMINED):
+        if not control_complete:
+            # 停止确认但文件完成未保证：需要检查的依据归跨会话对账
+            # 收场固定，不在此猜测计时证据不足。
+            return
+        _save_not_needed_decision(
+            context, int(row[0]), _target_duration_ms(action))
+        row = _load_processing_row(context, action_id)
+    entries = await context.results.list_files(action_id)
+    registered = _register_observed(context, action_id, entries)
+    source_file_id = next(
+        (file_id for (file, file_id), entry in zip(registered, entries)
+         if entry.complete and entry.kind is FileKind.VIDEO), None)
+    if row[1] == int(_CHECK_DECISION.REQUIRED) and _processing_open(row):
+        # 媒体端口未装配时等待装配会话；已归属原片沿用归属事实，未
+        # 归属时以本次观察的完整原片首次关联。
+        source = row[6] if row[6] is not None else source_file_id
+        if source is not None and context.media is not None:
+            if row[6] is None:
+                _save_source_file(context, int(row[0]), source)
+            await run_recording_media(
+                context.media, action_id, int(row[0]), source)
+            row = _load_processing_row(context, action_id)
+    media_json = parse_exact_json(row[3]) if row[3] else None
     facts = RecordingOutcomeFacts(
-        processing_id=processing[0],
-        control_complete=decision.phase is RecordingPhase.CONTROL_COMPLETE,
-        check_decision=processing[1],
-        check_state=processing[2],
-        check_duration_s=None,
-        check_issues=False,
-        input_unavailable=False,
-        repair_state=processing[3],
+        processing_id=int(row[0]),
+        control_complete=control_complete,
+        check_decision=int(row[1]),
+        check_state=int(row[2]),
+        check_duration_s=(saved_check_duration(media_json)
+                          if row[2] == int(_CHECK_STATE.COMPLETED) else None),
+        check_issues=bool(media_json.get("issues")) if media_json else False,
+        input_unavailable=(
+            row[1] == int(_CHECK_DECISION.REQUIRED)
+            and row[6] is None and source_file_id is None),
+        repair_state=int(row[4]),
         target_duration_ms=_target_duration_ms(action),
     )
     result = decide_recording_result(facts)
-    entries = await context.results.list_files(action_id)
     if result.kind.value == "succeeded":
-        _finish_capture(context, action_id, entries, FileKind.VIDEO)
+        _finish_capture(
+            context, action_id, entries, FileKind.VIDEO,
+            registered=registered,
+            repair_file_id=int(row[5]) if row[4] == int(
+                _REPAIR_STATE.SUCCEEDED) and row[5] is not None else None)
     elif result.kind.value == "failed":
         _finish_capture(context, action_id, entries, FileKind.VIDEO,
-                        failure=result.failure)
-    # 待定（必要处理未结束）等待媒体链推进。
+                        registered=registered, failure=result.failure)
 
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
