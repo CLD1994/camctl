@@ -6,13 +6,15 @@
 产物集合，可判定时保存终态与正式产物。延时核实按 CHECK_CAPTURE_
 RESULTS 责任编排名额轮次：结论与尝试结束同事务提交，暂不齐备或
 列举失败建立重试等待后作为新轮次，预算耗尽按无法确认收场。驱
-动与结果列举由端口提供（契约替身与真实驱动同形）。设备活动与
-处理决定的生产者随调度接线接入前，录像中段与延时等待事实经能
-力状态端口装载；录像媒体链与 D4 读取会话工厂属后续分段。
+动与结果列举由端口提供（契约替身与真实驱动同形）；录像中段事
+实经能力状态端口装载，媒体链按媒体端口推进；时钟异常会话的保
+守收场经 advance_winddown 接入，达到等待窗口后停止并保存等待
+阶段，不启动媒体链。
 """
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import closing
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -66,6 +68,9 @@ from camctl.capture.recording import (
     RecoveredControlDecision,
     RecoveredControlFacts,
     RecoveredControlReason,
+    WinddownFacts,
+    WinddownPhase,
+    decide_conservative_winddown,
     decide_recording_next,
     decide_recording_reconciliation,
     decide_recovered_control,
@@ -134,6 +139,7 @@ __all__ = [
     "CaptureRuntime",
     "HandlerOutcome",
     "ObservedFile",
+    "advance_winddown",
     "capture_handler",
     "route_completion",
 ]
@@ -900,6 +906,122 @@ async def _reconcile_recording(
         # 对账满足的停止确认：活动以可靠停止事实收场，重入终态判定。
         _conclude_activity(context, action["id"])
         await _record_handler(action["id"], context)
+
+
+async def _save_winddown_progress(
+    runtime: CaptureRuntime, action) -> bool:
+    """保存保守停止后的等待阶段；列举不可靠时保持未定等待后续会话。
+
+    登记结果观察（归属与写完事实）、固定计时证据不足的检查决定并
+    关联源文件；不启动媒体链、不登记正式产物，动作保持执行中表
+    达“已停止，等待正常会话处理”。
+    """
+    action_id = action["id"]
+    row = _load_processing_row(runtime, action_id)
+    if row is None:
+        return False
+    try:
+        entries = await runtime.results.list_files(action_id)
+    except Exception:
+        # 停止依据已可靠保存：等待阶段未取得文件证据前保持未定，
+        # 后续会话按已保存事实重新推进。
+        return False
+    registered = _register_observed(runtime, action_id, entries)
+    source_file_id = next(
+        (file_id for (file, file_id), entry in zip(registered, entries)
+         if entry.complete and entry.kind is FileKind.VIDEO), None)
+    if source_file_id is None:
+        # 尚无写完的完整原片可归属：不能用等待阶段代替文件证据。
+        return False
+    if row[1] == int(_CHECK_DECISION.UNDETERMINED):
+        receipt = runtime.capture.save_check_decision(
+            CheckDecisionSave(
+                processing_id=int(row[0]),
+                decision=CheckDecisionChoice.REQUIRED,
+                basis=CheckBasis(
+                    reason=CheckReason.INSUFFICIENT_TIMING,
+                    target_duration_ms=_target_duration_ms(action)),
+                occurred_at=runtime.wall_us()),
+            new_operation_key(), runtime.owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if row[6] is None:
+        _save_source_file(runtime, int(row[0]), source_file_id)
+    return True
+
+
+async def advance_winddown(
+    action_id: int, context: CaptureRuntime, first_seen: dict[int, int],
+    *, wait_cap_s: Decimal,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+) -> HandlerOutcome:
+    """时钟异常会话的保守收场推进入口。
+
+    前提是受限会话：墙钟不可信，录像由既往会话确认启动且锚点随
+    会话失效。未取消的录像额外等待 min(目标时长, wait_cap_s)（本
+    会话单调钟，first_seen 登记首次观察读数）后放弃计时，按原停
+    止预算停止并保存等待阶段；停止尝试失败按重试间隔在预算内重
+    试。取消已生效的录像不经计时立即停止并按取消规则收场。停止
+    已确认时不重复停止：取消则收终态，否则保存等待阶段；启动未
+    确认、在途停止、预算耗尽及本会话锚点分别归各自责任链。
+    """
+    action = context.action(action_id)
+    if action["status"] in _ACTION_TERMINAL:
+        return HandlerOutcome("already_terminal")
+    port = _recording_port(context)
+    canceled = bool(action["cancel_requested"])
+    decision = decide_recording_next(
+        port.recording_state(action_id), RecordingFacts(canceled=canceled))
+    if decision.phase is RecordingPhase.NOT_RUNNING:
+        return HandlerOutcome("not_running")
+    if decision.phase in (RecordingPhase.STOP_IN_FLIGHT,
+                          RecordingPhase.STOP_EXHAUSTED,
+                          RecordingPhase.WAIT_RECORD):
+        # 在途停止与预算耗尽按既有规则等待；本会话锚点属于正常
+        # 计时，不满足保守收场前提。
+        return HandlerOutcome(decision.phase.value)
+    if decision.phase in (RecordingPhase.CONTROL_COMPLETE,
+                          RecordingPhase.VERIFY_FILE_COMPLETE):
+        # 停止已确认（既往或本流程）：不重复停止，不启动后处理。
+        _conclude_activity(context, action_id)
+        if canceled:
+            _finish_canceled_capture(context, action_id)
+            return HandlerOutcome("canceled_final")
+        saved = await _save_winddown_progress(context, action)
+        return HandlerOutcome(
+            "progress_saved" if saved else "progress_deferred")
+    if not canceled:
+        # 保守等待只用本会话单调钟，不接续既往会话读数。
+        anchor_ns = first_seen.setdefault(action_id, context.monotonic_ns())
+        plan = decide_conservative_winddown(WinddownFacts(
+            first_seen_ns=anchor_ns,
+            monotonic_now_ns=port.recording_state(action_id).monotonic_now_ns,
+            target_duration_ms=_target_duration_ms(action),
+            recovery_wait_cap_s=wait_cap_s))
+        if plan.phase is WinddownPhase.WAIT:
+            await sleep(plan.remaining_s or 0.0)
+    retried = False
+    while True:
+        decision = decide_recording_next(
+            port.recording_state(action_id),
+            RecordingFacts(canceled=canceled, timing_waived=True))
+        if decision.phase is not RecordingPhase.READY_TO_STOP:
+            return HandlerOutcome(decision.phase.value)
+        if retried:
+            # 上一次尝试失败：按重试间隔等待后再试，预算内有限重试。
+            await sleep(float(context.stop_config.retry_interval_s))
+        retried = True
+        step = await _stop_call(context, action)
+        if step.phase == "confirmed":
+            # 保守停止确认：活动以可靠停止事实收场，保存等待阶段
+            # 或取消终态，交给后续正常会话。
+            _conclude_activity(context, action_id)
+            if canceled:
+                _finish_canceled_capture(context, action_id)
+                return HandlerOutcome("canceled_final")
+            saved = await _save_winddown_progress(context, action)
+            return HandlerOutcome(
+                "progress_saved" if saved else "progress_deferred")
+        # 失败或仅发送：重入循环按预算判定是否重试。
 
 
 async def _advance_recording_outcome(

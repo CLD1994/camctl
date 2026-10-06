@@ -3,11 +3,13 @@
 按设备声明与驱动登记项组装 CaptureRuntime：控制、停止、读取与源
 端摘要端口经 port_for 按静态声明取得，媒体链（读取会话、受管检
 查修复工具与修复余量）随读取声明构造，未声明读取能力的驱动不装
-配媒体端口，处理行保持等待。结果列举端口暂无生产实现，由部署注
-入（D5 驱动适配接入后补齐），因此本装配尚未接入 run 会话的默认
-流程集合。驱动未登记或设备未声明的动作本轮不推进，等待后续装配
-会话；异常多录修复余量读取 devices.<id>.recording.repair_margin_s
-（configuration.md#配置归属），默认 10 秒。
+配媒体端口，处理行保持等待。时钟异常的受限会话以 media_enabled
+=False 构造：不装配媒体链，保守收场只停止并保存等待阶段。结果列
+举端口暂无生产实现，由部署注入（D5 驱动适配接入后补齐），因此本
+装配尚未接入 run 会话的默认流程集合。驱动未登记或设备未声明的动
+作本轮不推进，等待后续装配会话；异常多录修复余量读取
+devices.<id>.recording.repair_margin_s（configuration.md#配置归属），
+默认 10 秒。
 """
 
 from __future__ import annotations
@@ -210,6 +212,7 @@ def session_capture_assembly(
     monotonic_ns: Callable[[], int] | None = None,
     probe_request: ProbeRequest | None = None,
     repair_request: RepairRequest | None = None,
+    media_enabled: bool = True,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
@@ -217,6 +220,8 @@ def session_capture_assembly(
     CaptureRuntime。设备未声明、驱动未登记或控制能力未声明时返回
     None，本轮不推进该设备的动作，保持已保存状态等待后续会话。
     wall_us 与 monotonic_ns 缺省使用真实系统钟，测试可注入受控读数。
+    media_enabled=False 供时钟异常的受限会话构造：不装配媒体链，
+    保守收场不启动拷贝、核验与修复。
     """
 
     anchors: dict[int, tuple[int, int]] = {}
@@ -245,9 +250,11 @@ def session_capture_assembly(
             stop_port = port_for(entry, "stop")
         except CapabilityNotDeclaredError:
             stop_port = None
-        media = _media_flow_with(
-            owned, entry, device_id, str(driver_id), tools, staging, wall,
-            declaration)
+        media = (
+            _media_flow_with(
+                owned, entry, device_id, str(driver_id), tools, staging,
+                wall, declaration)
+            if media_enabled else None)
         runtime = CaptureRuntime(
             owned=owned,
             scheduling=SchedulingRepository(),

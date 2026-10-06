@@ -103,11 +103,16 @@ class _MemoryStream:
 
 
 class _SessionDriver:
-    """登记项驱动替身：启动/停止确认、连续读取与源端摘要。"""
+    """登记项驱动替身：启动/停止确认、连续读取与源端摘要。
 
-    def __init__(self, content: bytes) -> None:
+    stop_failures 指定停止调用先失败的次数，用于停止预算内的
+    重试场景。
+    """
+
+    def __init__(self, content: bytes, *, stop_failures: int = 0) -> None:
         self._content = content
         self._sha256 = hashlib.sha256(content).hexdigest()
+        self._stop_failures = stop_failures
         self.calls: list[tuple[str, str]] = []
 
     async def control(self, request) -> DeviceCallResult:
@@ -123,6 +128,10 @@ class _SessionDriver:
 
     async def stop(self, request) -> DeviceCallResult:
         self.calls.append(("stop", request.operation))
+        if self._stop_failures > 0:
+            self._stop_failures -= 1
+            return DeviceCallResult(
+                observations=(), error={"code": "device_error"})
         return DeviceCallResult(
             observations=(
                 DeviceObservation(

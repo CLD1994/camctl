@@ -42,6 +42,10 @@ __all__ = [
     "RecoveredControlFacts",
     "RecoveredControlReason",
     "StartDispatch",
+    "WinddownDecision",
+    "WinddownFacts",
+    "WinddownPhase",
+    "decide_conservative_winddown",
     "decide_recording_next",
     "decide_recording_reconciliation",
     "decide_recovered_control",
@@ -80,9 +84,14 @@ class RecordingState:
 
 @dataclass(frozen=True)
 class RecordingFacts:
-    """停止判定的补充事实；取消共用原停止预算，不单独刷新。"""
+    """停止判定的补充事实；取消共用原停止预算，不单独刷新。
+
+    timing_waived 表示保守收场已达到等待上限，放弃计时判定直接
+    按停止预算停止；在途尝试与预算耗尽仍照常优先。
+    """
 
     canceled: bool = False
+    timing_waived: bool = False
 
 
 @dataclass(frozen=True)
@@ -121,7 +130,7 @@ def decide_recording_next(
         return RecordingDecision(
             phase=RecordingPhase.STOP_IN_FLIGHT, stop_attempts_used=used
         )
-    if not facts.canceled:
+    if not facts.canceled and not facts.timing_waived:
         if not state.anchor_from_current_session:
             return RecordingDecision(
                 phase=RecordingPhase.RECONCILE_REQUIRED, stop_attempts_used=used
@@ -205,6 +214,54 @@ class RecoveredControlReason(Enum):
 
     CONTINUOUS = "continuous"
     EXCESS_DURATION = "excess_duration"
+
+
+class WinddownPhase(Enum):
+    """时钟异常会话保守等待窗口的判定分区。"""
+
+    WAIT = "wait"
+    ELAPSED = "elapsed"
+
+
+@dataclass(frozen=True)
+class WinddownFacts:
+    """保守收场等待判定的输入事实。
+
+    窗口取目标时长与恢复等待上限的较小者；计时只用本会话单调
+    钟，first_seen_ns 是本会话首次观察该录像的读数，不接续既往
+    会话。
+    """
+
+    first_seen_ns: int
+    monotonic_now_ns: int
+    target_duration_ms: int
+    recovery_wait_cap_s: Decimal
+
+
+@dataclass(frozen=True)
+class WinddownDecision:
+    """保守收场等待判定结果：仍在窗口内时携带剩余秒数。"""
+
+    phase: WinddownPhase
+    remaining_s: float | None = None
+
+
+def decide_conservative_winddown(facts: WinddownFacts) -> WinddownDecision:
+    """判定时钟异常会话的保守等待是否达到上限。
+
+    达到 min(duration_s, recovery_wait_cap_s) 即可尝试停止，即使
+    无法证明录满全部目标时长也不为完整性无界等待；上限是异常恢
+    复保护参数，不是正常录像时长的上限。
+    """
+    window_ns = min(
+        facts.target_duration_ms * _MS_TO_NS,
+        int(facts.recovery_wait_cap_s * Decimal(1_000_000_000)))
+    deadline_ns = facts.first_seen_ns + window_ns
+    if facts.monotonic_now_ns < deadline_ns:
+        return WinddownDecision(
+            phase=WinddownPhase.WAIT,
+            remaining_s=(deadline_ns - facts.monotonic_now_ns) / 1e9)
+    return WinddownDecision(phase=WinddownPhase.ELAPSED)
 
 
 @dataclass(frozen=True)

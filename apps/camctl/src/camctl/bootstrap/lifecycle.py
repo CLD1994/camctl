@@ -201,15 +201,18 @@ async def execute_command(
     source: ParsedInput | InputDiagnostic | None,
     *,
     flows: Mapping[str, Any] | None = None,
+    restricted_flows: Mapping[str, Any] | None = None,
     wake: Any = None,
     poll_interval_s: float | None = None,
 ) -> SessionOutcome:
     """执行一次 run/submit 会话；调用方负责运行事件循环。
 
-    flows、wake 与 poll_interval_s 是业务流程装配的注入点：显式
-    注入的流程映射整体替换生产装配；run 会话未注入时使用生产报
-    告流程（含生成子进程），submit 会话不驱动业务流程。进程内唤
-    醒与轮询上限随流程一起接入。
+    flows、restricted_flows、wake 与 poll_interval_s 是业务流程装配
+    的注入点：显式注入的流程映射整体替换生产装配；run 会话未注入
+    时使用生产报告流程（含生成子进程），submit 会话不驱动业务流
+    程。受限会话的保守收场流程经 restricted_flows 注入（生产装配
+    在 D5 结果列举端口接入后一并接线）。进程内唤醒与轮询上限随
+    流程一起接入。
     """
     from camctl.bootstrap.application import query_work_facts
 
@@ -252,6 +255,8 @@ async def execute_command(
                 start_actions=False,
             ),
         )
+    elif restricted_flows is not None:
+        overrides["restricted_flows"] = restricted_flows
     context = SessionContext(
         mode=deps.mode,
         catalog=deps.catalog,

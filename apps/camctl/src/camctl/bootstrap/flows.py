@@ -16,8 +16,11 @@ unscheduled_only 区分），完成寻址、固定、生效与逐目标收场；
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import closing
+from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -32,7 +35,7 @@ from camctl.persistence.repositories.scheduling import (
 )
 from camctl.session.service import StateDbFailure
 
-__all__ = ["capture_flow", "cancel_flow", "report_flow"]
+__all__ = ["capture_flow", "cancel_flow", "report_flow", "winddown_flow"]
 
 
 def _due_pending_actions(
@@ -141,6 +144,54 @@ def capture_flow(capture_factory: Callable[[Any, str], Any]) -> Callable[[Any], 
                 if runtime is None:
                     continue
                 await dispatch_ready(runtime, group)
+        finally:
+            owned.connection.close()
+
+    return flow
+
+
+@dataclass(frozen=True)
+class _WinddownTarget:
+    """受限收场流程选中的执行中录像。"""
+
+    action_id: int
+
+
+def winddown_flow(
+    *, capture_factory: Callable[[Any, str], Any], wait_cap_s: Decimal,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+) -> Callable[[Any], Any]:
+    """构造时钟异常会话的录像保守收场流程。
+
+    对既往会话确认启动、尚未停止的执行中录像，以本会话单调钟额
+    外等待 min(目标时长, wait_cap_s) 后按原停止预算停止，停止确认
+    后保存等待阶段（计时证据不足检查与源文件关联），不启动媒体
+    链与正式产物登记，动作保持执行中等待取得正常执行资格的会话；
+    取消已生效的录像不经计时立即停止收场。启动未确认或驱动未登
+    记的录像本轮不推进，保持已保存状态等待各自责任链。
+    """
+
+    async def flow(context: Any) -> None:
+        from camctl.capture.handlers import advance_winddown
+
+        owned = context.open_connection()
+        try:
+            with closing(owned.connection.execute(
+                    "SELECT id FROM actions"
+                    " WHERE type = 2 AND status = 2"
+                    " ORDER BY plan_id, input_index")) as cursor:
+                targets = [_WinddownTarget(int(row[0]))
+                           for row in cursor.fetchall()]
+            first_seen: dict[int, int] = {}
+            for device_id, group in _ready_device_groups(
+                    owned.connection, targets):
+                runtime = capture_factory(owned, device_id)
+                if runtime is None:
+                    continue
+                for target in group:
+                    await advance_winddown(
+                        target.action_id, runtime, first_seen,
+                        wait_cap_s=wait_cap_s, sleep=sleep)
         finally:
             owned.connection.close()
 

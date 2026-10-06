@@ -21,6 +21,9 @@ from camctl.capture.recording import (
     RecordingState,
     RecoveredControlFacts,
     RecoveredControlReason,
+    WinddownFacts,
+    WinddownPhase,
+    decide_conservative_winddown,
     decide_recording_next,
     decide_recording_reconciliation,
     decide_recovered_control,
@@ -239,3 +242,90 @@ class TestRecoveredControl:
             self._facts(stop_confirmed_at_us=None)) is None
         assert decide_recovered_control(
             self._facts(stop_confirmed_at_us=_NOW_US - 80_000_000)) is None
+
+
+class TestConservativeWinddown:
+    """时钟异常会话保守等待窗口的判定分区。
+
+    窗口取目标时长与恢复等待上限的较小者，只用本会话单调钟从首
+    次观察起计时；达到窗口即可停止，不为完整性无界等待。
+    """
+
+    def _facts(self, **overrides) -> WinddownFacts:
+        values = dict(
+            first_seen_ns=1_000_000_000,
+            monotonic_now_ns=1_000_000_000,
+            target_duration_ms=120_000,
+            recovery_wait_cap_s=Decimal("60"),
+        )
+        values.update(overrides)
+        return WinddownFacts(**values)
+
+    async def test_before_window_waits_with_remainder(self) -> None:
+        """目标时长超过上限时窗口取上限，未到窗口返回剩余等待。"""
+        decision = decide_conservative_winddown(self._facts(
+            monotonic_now_ns=1_000_000_000 + 30_000_000_000))
+        assert decision.phase is WinddownPhase.WAIT
+        assert decision.remaining_s == pytest.approx(30.0)
+
+    async def test_at_window_is_elapsed(self) -> None:
+        """恰好达到窗口即可停止（含等号）。"""
+        decision = decide_conservative_winddown(self._facts(
+            monotonic_now_ns=1_000_000_000 + 60_000_000_000))
+        assert decision.phase is WinddownPhase.ELAPSED
+        assert decision.remaining_s is None
+
+    async def test_beyond_window_is_elapsed(self) -> None:
+        decision = decide_conservative_winddown(self._facts(
+            monotonic_now_ns=1_000_000_000 + 61_000_000_000))
+        assert decision.phase is WinddownPhase.ELAPSED
+
+    async def test_shorter_duration_limits_window(self) -> None:
+        """目标时长不足上限时窗口取目标时长，不为恢复保护多等。"""
+        waiting = decide_conservative_winddown(self._facts(
+            monotonic_now_ns=1_000_000_000 + 4_500_000_000,
+            target_duration_ms=5_000))
+        assert waiting.phase is WinddownPhase.WAIT
+        assert waiting.remaining_s == pytest.approx(0.5)
+        elapsed = decide_conservative_winddown(self._facts(
+            monotonic_now_ns=1_000_000_000 + 5_000_000_000,
+            target_duration_ms=5_000))
+        assert elapsed.phase is WinddownPhase.ELAPSED
+
+    async def test_zero_cap_never_waits(self) -> None:
+        """上限为零表示立即停止，仍经停止预算发出停止。"""
+        decision = decide_conservative_winddown(
+            self._facts(recovery_wait_cap_s=Decimal("0")))
+        assert decision.phase is WinddownPhase.ELAPSED
+
+
+class TestTimingWaivedStop:
+    """保守收场达到上限后的停止判定：放弃计时，仅按停止预算。"""
+
+    async def test_waived_timing_stops_without_session_anchor(self) -> None:
+        """跨会话锚点不再阻断：达到保守窗口后按预算尝试停止。"""
+        decision = decide_recording_next(
+            _state(anchor_from_current_session=False),
+            RecordingFacts(timing_waived=True))
+        assert decision.phase is RecordingPhase.READY_TO_STOP
+        assert decision.new_stop_attempt is True
+        assert decision.stop_attempts_used == 1
+
+    async def test_waived_timing_keeps_in_flight_and_budget_gates(
+            self) -> None:
+        """在途尝试与预算耗尽仍优先于新的停止尝试。"""
+        in_flight = decide_recording_next(
+            _state(anchor_from_current_session=False, stop_in_flight=True),
+            RecordingFacts(timing_waived=True))
+        assert in_flight.phase is RecordingPhase.STOP_IN_FLIGHT
+        exhausted = decide_recording_next(
+            _state(anchor_from_current_session=False,
+                   stop_attempts_used=_MAX_STOP),
+            RecordingFacts(timing_waived=True))
+        assert exhausted.phase is RecordingPhase.STOP_EXHAUSTED
+
+    async def test_unwaived_cross_session_still_reconciles(self) -> None:
+        """未放弃计时的跨会话录像仍先进对账，不被保守分支截获。"""
+        decision = decide_recording_next(
+            _state(anchor_from_current_session=False), RecordingFacts())
+        assert decision.phase is RecordingPhase.RECONCILE_REQUIRED
