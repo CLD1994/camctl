@@ -50,14 +50,25 @@ from camctl.capture.processing import (
     CheckDecisionChoice,
     CheckDecisionSave,
     CheckReason,
+    RepairBasis,
+    RepairDecisionChoice,
+    RepairDecisionSave,
+    RepairReason,
     SourceFileSave,
     saved_check_duration,
 )
 from camctl.capture.recording import (
+    ReconciliationFacts,
+    ReconciliationPhase,
     RecordingFacts,
     RecordingPhase,
     RecordingState,
+    RecoveredControlDecision,
+    RecoveredControlFacts,
+    RecoveredControlReason,
     decide_recording_next,
+    decide_recording_reconciliation,
+    decide_recovered_control,
     recording_stop_target,
 )
 from camctl.capture.results import (
@@ -233,6 +244,8 @@ class CaptureRuntime:
     stopper: DeviceStopPort | None = None
     #: 录像媒体链端口；未装配时需要检查的录像不推进，等待装配会话。
     media: MediaFlow | None = None
+    #: 异常多录修复门槛的本次余量秒数（configuration.md#配置归属）。
+    repair_margin_s: Decimal = Decimal("10")
     #: 停止尝试的本次预算；默认 3 次、单次 10 秒、重试间隔 1 秒。
     stop_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("1")))
@@ -315,6 +328,10 @@ class SessionRecordingState:
     def anchor_confirmed(self, action_id: int, anchor_ns: int,
                          stop_target_ns: int) -> None:
         self._anchors[action_id] = (anchor_ns, stop_target_ns)
+
+    def has_session_anchor(self, action_id: int) -> bool:
+        """本会话是否持有该动作的启动确认锚点。"""
+        return action_id in self._anchors
 
     def recording_state(self, action_id: int) -> RecordingState:
         runtime = self._runtime
@@ -727,9 +744,13 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
             _conclude_activity(context, action_id)
             return await _record_handler(action_id, context)
         return
+    if decision.phase is RecordingPhase.RECONCILE_REQUIRED:
+        # 锚点随既往会话失效：按已保存启动墙钟与当前可信墙钟对账。
+        await _reconcile_recording(context, action)
+        return
     if decision.phase not in (RecordingPhase.CONTROL_COMPLETE,
                               RecordingPhase.VERIFY_FILE_COMPLETE):
-        # 等待计时、跨会话对账与预算耗尽的收场随后续接线推进。
+        # 等待计时与预算耗尽的收场随后续接线推进。
         return
     _conclude_activity(context, action_id)
     if canceled:
@@ -778,10 +799,107 @@ def _save_not_needed_decision(
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
-def _processing_open(row) -> bool:
-    """检查或修复仍有待执行或执行中的责任。"""
-    return (row[2] in (int(_CHECK_STATE.NOT_PERFORMED), int(_CHECK_STATE.RUNNING))
-            or row[4] in (int(_REPAIR_STATE.PENDING), int(_REPAIR_STATE.RUNNING)))
+def _save_excess_decisions(
+    runtime: CaptureRuntime, processing_id: int, target_duration_ms: int,
+    control: RecoveredControlDecision) -> None:
+    """异常多录：无需检查但达到修复门槛，两决定一次固定。"""
+    elapsed = control.control_elapsed_ns
+    receipt = runtime.capture.save_check_decision(
+        CheckDecisionSave(
+            processing_id=processing_id,
+            decision=CheckDecisionChoice.NOT_NEEDED,
+            basis=CheckBasis(
+                reason=CheckReason.EXCESS_DURATION_CHECK,
+                target_duration_ms=target_duration_ms,
+                control_elapsed_ns=elapsed),
+            occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    repair = runtime.capture.save_repair_decision(
+        RepairDecisionSave(
+            processing_id=processing_id,
+            decision=RepairDecisionChoice.PENDING,
+            basis=RepairBasis(
+                reason=RepairReason.THRESHOLD_REACHED,
+                target_duration_ms=target_duration_ms,
+                threshold_s=runtime.repair_margin_s,
+                actual_duration_s=(
+                    None if elapsed is None
+                    else Decimal(elapsed) / Decimal(1_000_000_000)),
+                control_elapsed_ns=elapsed),
+            occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert repair.kind is DbOutcomeKind.COMPLETED, repair.error
+
+
+def _media_responsibility_open(row) -> bool:
+    """需要媒体链推进的责任：待执行的检查（仅需要检查时）或修复。
+
+    无需检查且未达修复门槛的处理行没有媒体责任，控制完成即按结
+    果集合核实收场。
+    """
+    return ((row[1] == int(_CHECK_DECISION.REQUIRED)
+             and row[2] in (int(_CHECK_STATE.NOT_PERFORMED),
+                            int(_CHECK_STATE.RUNNING)))
+            or row[4] in (int(_REPAIR_STATE.PENDING),
+                          int(_REPAIR_STATE.RUNNING)))
+
+
+def _activity_started_at(runtime: CaptureRuntime, action_id: int) -> int | None:
+    """读取启动确认保存的墙钟；跨会话对账的历史计时依据。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT started_at FROM device_activities WHERE action_id = ?",
+        (action_id,),
+    )) as cursor:
+        row = cursor.fetchone()
+    return None if row is None else row[0]
+
+
+def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | None:
+    """读取停止责任最近可靠确认尝试的结果事件墙钟。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT e.occurred_at FROM operation_runs r"
+        " JOIN operation_attempts a ON a.run_id = r.id"
+        " JOIN history_events e ON e.id = a.result_event_id"
+        " WHERE r.responsibility_key = ? AND a.status = ? AND a.effect_state = ?"
+        " ORDER BY a.id DESC LIMIT 1",
+        (f"stop/{action_id}", int(_ATTEMPT_STATUS.SUCCEEDED),
+         int(_EFFECT_STATE.CONFIRMED)),
+    )) as cursor:
+        row = cursor.fetchone()
+    return None if row is None else int(row[0])
+
+
+def _recovered_control_facts(
+    runtime: CaptureRuntime, action) -> RecoveredControlFacts:
+    """恢复停止后控制完成依据判定的事实装载。"""
+    action_id = action["id"]
+    return RecoveredControlFacts(
+        session_anchor=_recording_port(runtime).has_session_anchor(action_id),
+        started_at_us=_activity_started_at(runtime, action_id),
+        stop_confirmed_at_us=_stop_confirmed_at(runtime, action_id),
+        target_duration_ms=_target_duration_ms(action),
+        repair_margin_s=runtime.repair_margin_s)
+
+
+async def _reconcile_recording(
+    context: CaptureRuntime, action) -> None:
+    """跨会话对账：可信计时证明满足即停止，未满足等待剩余时长。
+
+    计时不可靠（启动确认墙钟缺失）归时钟异常会话的保守收场接线，
+    本处不推测已经录够；停止确认后重入处理器进入终态判定。
+    """
+    phase = decide_recording_reconciliation(ReconciliationFacts(
+        started_at_us=_activity_started_at(context, action["id"]),
+        target_duration_ms=_target_duration_ms(action),
+        trusted_now_us=context.wall_us()))
+    if phase is not ReconciliationPhase.TIMING_SATISFIED:
+        return
+    step = await _stop_call(context, action)
+    if step.phase == "confirmed":
+        # 对账满足的停止确认：活动以可靠停止事实收场，重入终态判定。
+        _conclude_activity(context, action["id"])
+        await _record_handler(action["id"], context)
 
 
 async def _advance_recording_outcome(
@@ -804,17 +922,25 @@ async def _advance_recording_outcome(
             # 停止确认但文件完成未保证：需要检查的依据归跨会话对账
             # 收场固定，不在此猜测计时证据不足。
             return
-        _save_not_needed_decision(
-            context, int(row[0]), _target_duration_ms(action))
+        target_ms = _target_duration_ms(action)
+        control = decide_recovered_control(_recovered_control_facts(context, action))
+        if control is None:
+            # 计时证据缺失：不折叠为连续控制完成，保持未定等待对账。
+            return
+        if control.reason is RecoveredControlReason.EXCESS_DURATION:
+            _save_excess_decisions(context, int(row[0]), target_ms, control)
+        else:
+            _save_not_needed_decision(context, int(row[0]), target_ms)
         row = _load_processing_row(context, action_id)
     entries = await context.results.list_files(action_id)
     registered = _register_observed(context, action_id, entries)
     source_file_id = next(
         (file_id for (file, file_id), entry in zip(registered, entries)
          if entry.complete and entry.kind is FileKind.VIDEO), None)
-    if row[1] == int(_CHECK_DECISION.REQUIRED) and _processing_open(row):
-        # 媒体端口未装配时等待装配会话；已归属原片沿用归属事实，未
-        # 归属时以本次观察的完整原片首次关联。
+    if _media_responsibility_open(row):
+        # 检查或修复责任未终局时经媒体端口推进；媒体端口未装配时
+        # 等待装配会话。已归属原片沿用归属事实，未归属时以本次观
+        # 察的完整原片首次关联。
         source = row[6] if row[6] is not None else source_file_id
         if source is not None and context.media is not None:
             if row[6] is None:
@@ -832,8 +958,8 @@ async def _advance_recording_outcome(
                           if row[2] == int(_CHECK_STATE.COMPLETED) else None),
         check_issues=bool(media_json.get("issues")) if media_json else False,
         input_unavailable=(
-            row[1] == int(_CHECK_DECISION.REQUIRED)
-            and row[6] is None and source_file_id is None),
+            _media_responsibility_open(row) and row[6] is None
+            and source_file_id is None),
         repair_state=int(row[4]),
         target_duration_ms=_target_duration_ms(action),
     )

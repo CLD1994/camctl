@@ -32,12 +32,19 @@ from camctl.scheduling.resources import recheck_dispatch
 __all__ = [
     "CaptureContext",
     "GrantDecision",
+    "ReconciliationFacts",
+    "ReconciliationPhase",
     "RecordingDecision",
     "RecordingFacts",
     "RecordingPhase",
     "RecordingState",
+    "RecoveredControlDecision",
+    "RecoveredControlFacts",
+    "RecoveredControlReason",
     "StartDispatch",
     "decide_recording_next",
+    "decide_recording_reconciliation",
+    "decide_recovered_control",
     "recording_stop_target",
     "start_recording",
 ]
@@ -155,6 +162,97 @@ class RecordingPhase(Enum):
     STOP_EXHAUSTED = "stop_exhausted"
     RECONCILE_REQUIRED = "reconcile_required"
     ALREADY_TERMINAL = "already_terminal"
+
+
+class ReconciliationPhase(Enum):
+    """跨会话对账按可信计时的判定分区。"""
+
+    TIMING_SATISFIED = "timing_satisfied"
+    TIMING_WAIT_REMAINDER = "timing_wait_remainder"
+    TIMING_UNRELIABLE = "timing_unreliable"
+
+
+@dataclass(frozen=True)
+class ReconciliationFacts:
+    """一次跨会话对账判定的输入事实。
+
+    启动确认墙钟与当前可信墙钟同源；目标时长毫秒精确换算比较。
+    """
+
+    started_at_us: int | None
+    target_duration_ms: int
+    trusted_now_us: int
+
+
+def decide_recording_reconciliation(
+    facts: ReconciliationFacts,
+) -> ReconciliationPhase:
+    """以已保存的启动墙钟与当前可信墙钟对账目标时长。
+
+    启动确认墙钟缺失时不能组合计时，按计时不可靠交保守收场规则
+    处理，不推测已经录够；恰好到达目标即视为满足。
+    """
+    if facts.started_at_us is None:
+        return ReconciliationPhase.TIMING_UNRELIABLE
+    target_us = facts.started_at_us + facts.target_duration_ms * 1_000
+    if facts.trusted_now_us >= target_us:
+        return ReconciliationPhase.TIMING_SATISFIED
+    return ReconciliationPhase.TIMING_WAIT_REMAINDER
+
+
+class RecoveredControlReason(Enum):
+    """恢复停止后控制完成依据的判定理由。"""
+
+    CONTINUOUS = "continuous"
+    EXCESS_DURATION = "excess_duration"
+
+
+@dataclass(frozen=True)
+class RecoveredControlDecision:
+    """恢复停止后控制完成依据的判定结果；耗时随多录判定携带。"""
+
+    reason: RecoveredControlReason
+    control_elapsed_ns: int | None = None
+
+
+@dataclass(frozen=True)
+class RecoveredControlFacts:
+    """恢复停止后控制完成依据判定的输入事实。
+
+    本会话锚点的正常停止以锚点加目标为停止目标，不超门槛；恢复
+    停止以启动墙钟到停止确认墙钟的控制耗时判定多录。
+    """
+
+    session_anchor: bool
+    started_at_us: int | None
+    stop_confirmed_at_us: int | None
+    target_duration_ms: int
+    repair_margin_s: Decimal
+
+
+def decide_recovered_control(
+    facts: RecoveredControlFacts,
+) -> RecoveredControlDecision | None:
+    """判定恢复停止的控制完成依据与异常多录门槛。
+
+    控制耗时超过目标加余量即达到多录修复条件，恰好相等不触发。
+    计时证据缺失时不折叠为连续控制完成，返回 None 由调用方保持
+    未定决定等待对账。
+    """
+    if facts.session_anchor:
+        return RecoveredControlDecision(RecoveredControlReason.CONTINUOUS)
+    if (facts.started_at_us is None or facts.stop_confirmed_at_us is None
+            or facts.stop_confirmed_at_us < facts.started_at_us):
+        return None
+    elapsed_ns = (facts.stop_confirmed_at_us - facts.started_at_us) * 1_000
+    threshold_ns = int(
+        (Decimal(facts.target_duration_ms) / Decimal(1_000)
+         + facts.repair_margin_s) * Decimal(1_000_000_000))
+    if elapsed_ns > threshold_ns:
+        return RecoveredControlDecision(
+            RecoveredControlReason.EXCESS_DURATION,
+            control_elapsed_ns=elapsed_ns)
+    return RecoveredControlDecision(RecoveredControlReason.CONTINUOUS)
 
 
 @dataclass(frozen=True)

@@ -8,21 +8,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 import pytest
 
 from camctl.capture.recording import (
+    ReconciliationFacts,
+    ReconciliationPhase,
     RecordingDecision,
     RecordingFacts,
     RecordingPhase,
     RecordingState,
+    RecoveredControlFacts,
+    RecoveredControlReason,
     decide_recording_next,
+    decide_recording_reconciliation,
+    decide_recovered_control,
 )
 
 pytestmark = pytest.mark.asyncio
 
 _STOP_TARGET = 10_000_000_000
 _MAX_STOP = 2
+_NOW_US = 1_750_000_000_000_000
 
 
 def _state(**overrides) -> RecordingState:
@@ -163,3 +171,71 @@ class TestCanceledStop:
             _state(stop_attempts_used=_MAX_STOP), RecordingFacts(canceled=True))
         assert decision.phase is RecordingPhase.STOP_EXHAUSTED
         assert decision.new_stop_attempt is False
+
+
+class TestReconciliationTiming:
+    """跨会话对账按可信计时的判定分区。"""
+
+    async def test_missing_start_time_is_unreliable(self) -> None:
+        """启动确认墙钟缺失不能组合计时，不推测已经录够。"""
+        decision = decide_recording_reconciliation(ReconciliationFacts(
+            started_at_us=None, target_duration_ms=60_000,
+            trusted_now_us=_NOW_US))
+        assert decision is ReconciliationPhase.TIMING_UNRELIABLE
+
+    async def test_before_target_waits_remainder(self) -> None:
+        decision = decide_recording_reconciliation(ReconciliationFacts(
+            started_at_us=_NOW_US - 30_000_000,
+            target_duration_ms=60_000, trusted_now_us=_NOW_US))
+        assert decision is ReconciliationPhase.TIMING_WAIT_REMAINDER
+
+    async def test_at_target_is_satisfied(self) -> None:
+        """恰好到达目标即满足（毫秒精确换算，含等号）。"""
+        decision = decide_recording_reconciliation(ReconciliationFacts(
+            started_at_us=_NOW_US - 60_000_000,
+            target_duration_ms=60_000, trusted_now_us=_NOW_US))
+        assert decision is ReconciliationPhase.TIMING_SATISFIED
+
+
+class TestRecoveredControl:
+    """恢复停止后控制完成依据与异常多录门槛判定。"""
+
+    def _facts(self, **overrides) -> RecoveredControlFacts:
+        values = dict(
+            session_anchor=False,
+            started_at_us=_NOW_US - 70_000_000,
+            stop_confirmed_at_us=_NOW_US,
+            target_duration_ms=60_000,
+            repair_margin_s=Decimal("10"),
+        )
+        values.update(overrides)
+        return RecoveredControlFacts(**values)
+
+    async def test_session_anchor_is_continuous(self) -> None:
+        """本会话锚点的正常停止不超门槛，不按恢复计时判定。"""
+        decision = decide_recovered_control(self._facts(session_anchor=True))
+        assert decision is not None
+        assert decision.reason is RecoveredControlReason.CONTINUOUS
+        assert decision.control_elapsed_ns is None
+
+    async def test_at_threshold_is_continuous(self) -> None:
+        """恰好达到目标加余量不触发修复（含等号）。"""
+        decision = decide_recovered_control(self._facts())
+        assert decision is not None
+        assert decision.reason is RecoveredControlReason.CONTINUOUS
+
+    async def test_beyond_threshold_is_excess(self) -> None:
+        decision = decide_recovered_control(
+            self._facts(stop_confirmed_at_us=_NOW_US + 1))
+        assert decision is not None
+        assert decision.reason is RecoveredControlReason.EXCESS_DURATION
+        assert decision.control_elapsed_ns == 70_000_001_000
+
+    async def test_missing_timing_evidence_stays_undecided(self) -> None:
+        """计时证据缺失不折叠为连续控制完成。"""
+        assert decide_recovered_control(
+            self._facts(started_at_us=None)) is None
+        assert decide_recovered_control(
+            self._facts(stop_confirmed_at_us=None)) is None
+        assert decide_recovered_control(
+            self._facts(stop_confirmed_at_us=_NOW_US - 80_000_000)) is None

@@ -313,9 +313,11 @@ async def run_recording_media(
         saves=flow.saves(),
         occurred_at=flow.occurred_at(),
     ))
-    if check.phase is not CheckExecutionPhase.CHECK_COMPLETED:
+    if (check.phase is not CheckExecutionPhase.CHECK_COMPLETED
+            and check.phase is not CheckExecutionPhase.NOT_REQUIRED):
         return check
-    # 检查完成且修复决定已保存：待执行才继续，无需修复时到此为止。
+    # 检查完成或检查不适用：修复决定待执行才继续（计时判定的异常
+    # 多录不经检查直接修复），无需修复时到此为止。
     status = load_processing_status(flow.owned, processing_id)
     if status.repair_state not in (3, 4):
         return check
