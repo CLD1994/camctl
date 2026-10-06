@@ -166,13 +166,22 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **接口与依赖：** 提供 `prepare_snapshot(seed: EntityImage) -> PreparedSnapshot`、异步 `maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult`；context 含本次阈值、批量、会话状态和窄仓储。前置交付：H4、P2/P3、S5。
 
-- [ ] 编写失败用例。建立 `test_snapshot_preserves_later_changes`，S 处次数 5，保存前最新次数 8，`assert remaining_changes == 3`；入队前 9 秒超时只停用本次维护，已入队或实际 DB 错误不得用此降级。新提交、空位和迟到通知不能重新启用；退出按准备、入队前、排队、已开始分别处理。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_snapshots.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。从统一对象登记取得资格及完整自身成员，保存原 S 和原计数，再按写事务最新计数更新 Δ。业务优先，批量后让出；停用状态只在会话内保存，维护不延长会话或产生 needs_run。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 快照未提交不能查询，S 后变化与原历史始终保留。
+- [x] 编写失败用例。建立 `test_snapshot_preserves_later_changes`，S 处次数 5，保存前最新次数 8，`assert remaining_changes == 3`；入队前 9 秒超时只停用本次维护，已入队或实际 DB 错误不得用此降级。新提交、空位和迟到通知不能重新启用；退出按准备、入队前、排队、已开始分别处理。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/history/test_snapshots.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。从统一对象登记取得资格及完整自身成员，保存原 S 和原计数，再按写事务最新计数更新 Δ。业务优先，批量后让出；停用状态只在会话内保存，维护不延长会话或产生 needs_run。
+- [x] 再运行上述命令，要求全部 PASS，并核对 快照未提交不能查询，S 后变化与原历史始终保留。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_snapshots.py -q`，真实线程和 SQLite 组合并交错准备与业务写入，覆盖全部快照对象及同一会话停用。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 文件自身成员、动作处理记录及报告依赖是否被错误复制到父快照或漏掉；记录门禁证据，建议以“feat: 实现有限历史快照维护”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 文件自身成员、动作处理记录及报告依赖是否被错误复制到父快照或漏掉；记录门禁证据，建议以“feat: 实现有限历史快照维护”形成独立提交。门禁证据见[H6 验证记录](#h6-验证记录)。
+
+### H6 验证记录（2026-10-06）
+
+- 反例先行：新增单元 `test_snapshots.py` 11 项在实现前运行，FAIL 为 `camctl.history.snapshots` 模块不存在（ModuleNotFoundError），属目标行为缺失；此后按编解码、种子校验、维护循环分批转绿。
+- 实现摘要：`snapshots.py` 定义种子与准备结果值类型、精确确定编码（JSON Lines，头记录后按表名字典序与行 ID 升序，Decimal 输出裸数字字面量，64KiB 滑动字节切块不整拼）、`prepare_snapshot`、`decode_snapshot`、会话内停用状态与 `SnapshotStore` 端口（候选查询、批量装载、保存），`maintain_snapshots` 按候选批次循环并在批量间让出。`repositories/history.py` 从 `restore_entity` 提取 `restore_within`（调用方持有的读事务连接内恢复，供一批对象共用同一 S），新增 `SqliteSnapshotStore`：候选查询走真实 `snapshot_candidates` 索引排序；装载在短读事务内逐对象恢复并取边界内最大变更计数；保存在写事务内落 `entity_snapshots`（zeroblob 加 blobopen 逐块写）、重复保存同边界逐块核对内容后复用不重复扣减、基准取旧基准与新计数的较大值、同事务更新进度行。入队超时映射为独立的 `SnapshotEnqueueTimeout`（仅入队前超时可停用本次维护），实际数据库错误映射为 `SnapshotMaintenanceError` 向上传播，两类异常不互相继承，避免维护循环把数据库错误误判为可降级。
+- 分区核对：快照未提交不能查询由保存与进度更新在同一写事务内完成保证，集成测试在停用后核对进度行仍保留待定计数；S 后变化与原历史始终保留由真实交错用例验证（S 处次数 5、保存前最新 8、待定 3，随后读事务按 8 计数推进）；停用只在会话状态内保存，同会话再次维护零查询，数据库错误不停用。维护使用 SNAPSHOT 优先级，业务作业优先出队；入队超时停用后业务读写照常完成。
+- 集成发现：raw 种子对象被生产命令推进（动作完成、授予建立交付行）后合法获得快照进度，断言改为从 `entity_snapshot_progress` 全表推导预期集合，不硬编码自动 ID。
+- 测试证据（Python 3.11，Windows）：单元 `test_snapshots.py` 11/11；集成 `test_snapshots.py` 5/5（六类对象全部落快照且与独立恢复比对一致、真实交错 5/8/3、候选排序、重复保存复用、入队超时停用且业务继续）；单元全量 3292（三轮，前两轮位置漂移均单独复跑通过，定性本机瞬时负载）；history 与 persistence 目录 154；outputs 1784 通过 1 跳过（四轮：三处不同位置漂移各自单独复跑通过后一轮全绿，与既有环境漂移定性一致）；reporting 344（三轮同款）；根 Python 集成 34 项及子测试；根 Node 集成 111；check-database-spec 3079 项断言、check-doc-links 2930 链接、check-protocol、check-event-transitions、check-report-dependencies 全部通过。
+- 后置：会话装配（运行循环挂维护协程、提交后唤醒、收尾四阶段接线、`query_work_facts` 的 `snapshot_backlog`）归后续轮次，本任务交付可独立调用的维护入口与窄仓储；快照积压不延长会话、不产生 needs_run，与规格一致。
 
 ### H7 全部事件覆盖与查询规模
 

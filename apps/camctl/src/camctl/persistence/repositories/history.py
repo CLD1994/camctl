@@ -20,7 +20,7 @@ from camctl.contracts.history_values import (
 )
 from camctl.contracts.pages import Page
 from camctl.contracts.json_values import parse_exact_json, JsonParseError
-from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId
+from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId, new_operation_key
 from camctl.acceptance.definitions import read_action_spec
 from camctl.history.events import EventEnvelope, load_event_registry
 from camctl.history.decoding import decode_event_row
@@ -37,10 +37,28 @@ from camctl.history.queries import (
     report_target_types,
 )
 from camctl.history.replay import ReplayError, reverse_row_values
+from camctl.history.snapshots import (
+    EntityImage,
+    PreparedSnapshot,
+    SavedProgress,
+    SnapshotEnqueueTimeout,
+    SnapshotMaintenanceError,
+    SnapshotRef,
+    SnapshotRow,
+)
+from camctl.persistence.executor import DbExecutor
+from camctl.persistence.models import (
+    DbEnqueueTimeoutError,
+    DbJob,
+    DbJobKind,
+    DbOutcome,
+    DbOutcomeKind,
+    DbPriority,
+)
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import read_transaction_range as _transaction_range
 
-__all__ = ["HistoryRepository"]
+__all__ = ["HistoryRepository", "SqliteSnapshotStore"]
 
 
 @dataclass(frozen=True)
@@ -306,28 +324,41 @@ class HistoryRepository:
         理 (H, C] 的关联事件。H 之后创建的行不进入结果；正逆恢复
         不改变真实投影。读取批次只影响分页次数，不影响结果。
         """
+        with self._read_connection() as connection:
+            return self.restore_within(
+                connection, entity, entity_id, boundary,
+                event_batch_size=event_batch_size)
+
+    def restore_within(
+            self, connection: sqlite3.Connection, entity: str,
+            entity_id: int, boundary: HistoryBoundary,
+            *, event_batch_size: int = 128,
+    ) -> dict[tuple[str, int], dict]:
+        """在调用方持有的读事务连接内恢复对象到固定 H。
+
+        供同一读取视图内恢复多个对象共用一个一致边界（如快照依
+        据读取）；连接的读事务由调用方开启与结束。
+        """
         ObjectId(entity_id)
         if event_batch_size < 1:
             raise ValueError(f"事件批量必须是正整数: {event_batch_size}")
         spec = load_enum_registry()["history_objects"].get(entity)
         if spec is None:
             raise ConsistencyError(f"未知历史对象类型: {entity!r}")
-        with self._read_connection() as connection:
-            current_boundary = self._boundary(connection)
-            if (boundary.txn_id > current_boundary.txn_id
-                    or boundary.last_event_id > current_boundary.last_event_id):
-                raise ConsistencyError("恢复目标边界晚于可靠当前边界")
-            seeded = self._seed_entity_rows(connection, spec, entity_id)
-            if not seeded:
-                raise ConsistencyError(
-                    f"对象 {entity}#{entity_id} 在当前投影中不存在")
-            rows = self._reverse_to_boundary(
-                connection,
-                ref=(spec["id"], entity_id), primary_table=spec["table"],
-                seeded=seeded, boundary=boundary,
-                current_boundary=current_boundary,
-                event_batch_size=event_batch_size)
-            return rows
+        current_boundary = self._boundary(connection)
+        if (boundary.txn_id > current_boundary.txn_id
+                or boundary.last_event_id > current_boundary.last_event_id):
+            raise ConsistencyError("恢复目标边界晚于可靠当前边界")
+        seeded = self._seed_entity_rows(connection, spec, entity_id)
+        if not seeded:
+            raise ConsistencyError(
+                f"对象 {entity}#{entity_id} 在当前投影中不存在")
+        return self._reverse_to_boundary(
+            connection,
+            ref=(spec["id"], entity_id), primary_table=spec["table"],
+            seeded=seeded, boundary=boundary,
+            current_boundary=current_boundary,
+            event_batch_size=event_batch_size)
 
     def _seed_entity_rows(
             self, connection: sqlite3.Connection, spec: dict, entity_id: int,
@@ -779,3 +810,183 @@ def _event_range(scope: ReadScope[int], boundary: HistoryBoundary) -> tuple[int,
             and not scope.lower_position <= scope.previous_position <= upper):
         raise BoundaryError("事件继续位置不属于固定读取范围")
     return max(1, scope.lower_position), upper
+
+
+class SqliteSnapshotStore:
+    """经数据库线程以快照优先级执行的快照维护窄仓储。
+
+    候选查询与依据读取是读操作，依据读取在同一读事务内取一致
+    边界 S 并恢复全部对象；保存是短写事务，插入完整快照后按写
+    事务最新计数更新维护进度。入队前超时翻译为维护停用信号，
+    其余数据库失败按状态库错误表达。
+    """
+
+    def __init__(self, path: Path, executor: DbExecutor, *,
+                 config: DbConfig | None = None) -> None:
+        self._path = Path(path)
+        self._executor = executor
+        self._config = config
+
+    async def snapshot_candidates(
+            self, threshold: int, limit: int) -> tuple[SnapshotRef, ...]:
+        def execute(owned):
+            with closing(owned.connection.execute(
+                    "SELECT entity_type, entity_id FROM entity_snapshot_progress"
+                    " WHERE pending_changes >= ?"
+                    " ORDER BY pending_changes DESC, entity_type_name COLLATE BINARY,"
+                    " entity_id LIMIT ?", (threshold, limit))) as cursor:
+                return tuple(
+                    SnapshotRef(entity_type=int(row[0]), entity_id=int(row[1]))
+                    for row in cursor.fetchall())
+        return await self._run(DbJobKind.READ, execute, "快照候选查询")
+
+    async def load_entity_images(
+            self, refs: tuple[SnapshotRef, ...]) -> tuple[EntityImage, ...]:
+        repository = HistoryRepository(self._path, config=self._config)
+
+        def execute(owned):
+            connection = owned.connection
+            with closing(connection.execute("BEGIN")):
+                pass
+            try:
+                boundary = repository._boundary(connection)
+                images = []
+                for ref in refs:
+                    name = _snapshot_entity_name(ref.entity_type)
+                    rows = repository.restore_within(
+                        connection, name, ref.entity_id, boundary)
+                    counted = _one(
+                        connection,
+                        "SELECT MAX(change_count) FROM entity_event_links"
+                        " WHERE entity_type = ? AND entity_id = ? AND event_id <= ?",
+                        (ref.entity_type, ref.entity_id, boundary.last_event_id))
+                    change_count = None if counted is None else counted[0]
+                    if change_count is None or int(change_count) < 1:
+                        raise SnapshotMaintenanceError(
+                            f"对象 {ref} 在读取视图缺少可靠累计次数")
+                    images.append(EntityImage(
+                        entity_type=ref.entity_type,
+                        entity_id=ref.entity_id,
+                        boundary=boundary,
+                        change_count=int(change_count),
+                        rows=tuple(
+                            SnapshotRow(table=table, row_id=row_id, values=values)
+                            for (table, row_id), values in sorted(rows.items()))))
+                with closing(connection.execute("COMMIT")):
+                    pass
+                return tuple(images)
+            except BaseException:
+                with closing(connection.execute("ROLLBACK")):
+                    pass
+                raise
+        return await self._run(DbJobKind.READ, execute, "快照依据读取")
+
+    async def save_snapshots(
+            self, prepared: tuple[PreparedSnapshot, ...]) -> tuple[SavedProgress, ...]:
+        def execute(owned):
+            connection = owned.connection
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                saved = tuple(
+                    _save_one_snapshot(connection, item) for item in prepared)
+            except BaseException as error:
+                with closing(connection.execute("ROLLBACK")):
+                    pass
+                return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=error)
+            # 提交阶段错误交由执行器按结果未知处理（失效连接关闭）。
+            connection.execute("COMMIT")
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=saved)
+        return await self._run(DbJobKind.WRITE, execute, "快照保存")
+
+    async def _run(self, kind: DbJobKind, execute, description: str):
+        job = DbJob(
+            key=new_operation_key(), description=description, kind=kind,
+            priority=DbPriority.SNAPSHOT, execute=execute)
+        submit = (self._executor.submit_read if kind is DbJobKind.READ
+                  else self._executor.submit_write)
+        payload = await submit(job)
+        if kind is DbJobKind.READ:
+            if isinstance(payload, DbOutcome):
+                _raise_snapshot_failure(payload.error, description)
+            if payload.error is not None:
+                raise SnapshotMaintenanceError(
+                    f"{description}失败: {payload.error}") from payload.error
+            return payload.value
+        if payload.kind is DbOutcomeKind.COMPLETED:
+            return payload.value
+        _raise_snapshot_failure(payload.error, description)
+
+
+def _raise_snapshot_failure(error: BaseException | None, description: str) -> None:
+    if isinstance(error, DbEnqueueTimeoutError):
+        raise SnapshotEnqueueTimeout(f"{description}入队前等待空位超时") from error
+    raise SnapshotMaintenanceError(f"{description}失败: {error}") from error
+
+
+def _snapshot_entity_name(entity_type: int) -> str:
+    for name, spec in load_enum_registry()["history_objects"].items():
+        if spec["id"] == entity_type:
+            return name
+    raise SnapshotMaintenanceError(f"未知的历史对象类型编号: {entity_type!r}")
+
+
+def _save_one_snapshot(
+        connection: sqlite3.Connection, item: PreparedSnapshot) -> SavedProgress:
+    """在保存事务内写入一份快照并按最新计数更新维护进度。"""
+    progress = _one(
+        connection,
+        "SELECT current_change_count, snapshot_change_count"
+        " FROM entity_snapshot_progress WHERE entity_type = ? AND entity_id = ?",
+        (item.entity_type, item.entity_id))
+    if progress is None:
+        raise SnapshotMaintenanceError(
+            f"对象 {SnapshotRef(item.entity_type, item.entity_id)} 缺少维护进度")
+    latest, baseline = int(progress[0]), int(progress[1])
+    existing = _one(
+        connection,
+        "SELECT id, change_count, format_version, length(content)"
+        " FROM entity_snapshots WHERE entity_type = ? AND entity_id = ?"
+        " AND boundary_event_id = ?",
+        (item.entity_type, item.entity_id, item.boundary.last_event_id))
+    if existing is not None:
+        snapshot_id = int(existing[0])
+        if (int(existing[1]) != item.change_count
+                or int(existing[2]) != item.format_version
+                or int(existing[3]) != item.length):
+            raise SnapshotMaintenanceError(
+                f"对象 {SnapshotRef(item.entity_type, item.entity_id)} 在边界"
+                f" {item.boundary.last_event_id} 的既有快照与本次内容矛盾")
+        _verify_existing_content(connection, snapshot_id, item)
+    else:
+        cursor = connection.execute(
+            "INSERT INTO entity_snapshots (entity_type, entity_id,"
+            " boundary_event_id, change_count, format_version, content)"
+            " VALUES (?, ?, ?, ?, ?, zeroblob(?))",
+            (item.entity_type, item.entity_id, item.boundary.last_event_id,
+             item.change_count, item.format_version, item.length))
+        snapshot_id = int(cursor.lastrowid)
+        with connection.blobopen("entity_snapshots", "content", snapshot_id) as blob:
+            for chunk in item.chunks:
+                blob.write(chunk)
+    new_baseline = max(baseline, item.change_count)
+    if new_baseline != baseline:
+        connection.execute(
+            "UPDATE entity_snapshot_progress SET snapshot_change_count = ?,"
+            " latest_snapshot_id = ? WHERE entity_type = ? AND entity_id = ?",
+            (new_baseline, snapshot_id, item.entity_type, item.entity_id))
+    return SavedProgress(
+        ref=SnapshotRef(item.entity_type, item.entity_id),
+        remaining_changes=latest - new_baseline)
+
+
+
+def _verify_existing_content(
+        connection: sqlite3.Connection, snapshot_id: int, item: PreparedSnapshot) -> None:
+    """逐块核对既有快照字节与本次内容一致后复用，不重复扣减。"""
+    with connection.blobopen(
+            "entity_snapshots", "content", snapshot_id) as blob:
+        for chunk in item.chunks:
+            if blob.read(len(chunk)) != chunk:
+                raise SnapshotMaintenanceError(
+                    f"对象 {SnapshotRef(item.entity_type, item.entity_id)} 的"
+                    f"既有快照 #{snapshot_id} 内容与本次不一致")
