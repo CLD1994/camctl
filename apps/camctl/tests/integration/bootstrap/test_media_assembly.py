@@ -413,3 +413,90 @@ class TestUnregisteredDriverKeepsAction:
         assert _scalar(
             db, "SELECT started_at IS NULL FROM device_activities"
             " WHERE action_id = 1") == (1,)
+
+
+class TestRetryIntervalInjection:
+    """设备级重试间隔随装配进入运行时预算与媒体链。"""
+
+    @staticmethod
+    def _open(cfg):
+        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+        return open_existing(
+            Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+
+    async def test_device_intervals_reach_runtime_configs(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "intervals"
+        home.mkdir()
+        cfg = load_config(
+            {
+                "paths": {
+                    "state_db": str(home / "state.db"),
+                    "log_file": str(home / "camctl.log"),
+                    "staging": str(home / "staging"),
+                    "ready": str(home / "ready"),
+                    "processing": str(home / "processing"),
+                },
+                "devices": {
+                    "cam-1": {
+                        "kind": "camera",
+                        "driver": "camctl-adb",
+                        "recording": {
+                            "start_retry_interval_s": "4",
+                            "stop_retry_interval_s": "0.5",
+                        },
+                        "result_check": {"retry_interval_s": "2"},
+                        "copy": {"retry_interval_s": "1"},
+                    }
+                },
+            },
+            ConfigDefaults(),
+        )
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        factory = session_capture_assembly(
+            devices=cfg.devices,
+            drivers=_registry(_SessionDriver(_CONTENT)),
+            results=ResultsDouble({}),
+            staging=Path(cfg.paths.staging),
+            wait_config=lambda params: None,
+            monotonic_ns=time.monotonic_ns,
+        )
+        owned = self._open(cfg)
+        try:
+            runtime = factory(owned, "cam-1")
+            assert runtime is not None
+            assert runtime.stop_config.retry_interval_s == Decimal("0.5")
+            assert runtime.check_config.retry_interval_s == Decimal("2")
+            assert runtime.media is not None
+            assert runtime.media.retry_interval_s == Decimal("1")
+        finally:
+            owned.connection.close()
+
+    async def test_spec_defaults_apply_without_device_overrides(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "defaults"
+        home.mkdir()
+        cfg = _config(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        factory = session_capture_assembly(
+            devices=cfg.devices,
+            drivers=_registry(_SessionDriver(_CONTENT)),
+            results=ResultsDouble({}),
+            staging=Path(cfg.paths.staging),
+            wait_config=lambda params: None,
+            monotonic_ns=time.monotonic_ns,
+        )
+        owned = self._open(cfg)
+        try:
+            runtime = factory(owned, "cam-1")
+            assert runtime is not None
+            # 未覆盖时采用规格默认：停止与核实间隔 3 秒。
+            assert runtime.stop_config.retry_interval_s == Decimal("3")
+            assert runtime.check_config.retry_interval_s == Decimal("3")
+            assert runtime.media is not None
+            assert runtime.media.retry_interval_s == Decimal("3")
+        finally:
+            owned.connection.close()

@@ -198,3 +198,77 @@ class TestRunRecordingMedia:
         assert status.check_state == 3
         assert status.check_duration_s == Decimal("90")
         assert status.target_duration_ms == 60000
+
+
+class _Clock:
+    """受控单调钟：按秒推进读数。"""
+
+    def __init__(self, ns: int = 5_000_000_000) -> None:
+        self.ns = ns
+
+    def __call__(self) -> int:
+        return self.ns
+
+    def advance_s(self, seconds: Decimal) -> None:
+        self.ns += int(Decimal(seconds) * 1_000_000_000)
+
+
+class _FailingStream:
+    """读取流替身：读取即抛通信中断。"""
+
+    def read(self, limit: int) -> bytes:
+        raise RuntimeError("传输中断")
+
+    def stop(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _FlakyReadDriver:
+    """读取驱动替身：读取会话的真实打开计数；流读取即失败。"""
+
+    def __init__(self) -> None:
+        self.opens = 0
+
+    async def open_read(self, source: SourceFile, offset: int, ticket):
+        self.opens += 1
+        return ReadSession(source, offset, _FailingStream(), Decimal("10"))
+
+
+class TestCopyRetryInterval:
+    async def test_segment_failure_waits_interval_before_next_read(
+            self, pipeline):
+        from camctl.capture.input_copy import InputPhase
+
+        owned, roots = pipeline[0], pipeline[1]
+        driver = _FlakyReadDriver()
+        tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
+        clock = _Clock()
+        flow = MediaFlow(
+            owned=owned,
+            roots=roots,
+            sessions=DriverReadSessions(owned, driver, ticket=None),
+            tools=tools,
+            policy=MediaPolicy(repair_margin_s=Decimal("2")),
+            occurred_at=lambda: 1_750_000_100_000_000,
+            digest_supported=True,
+            digest=_Digest(_CONTENT),
+            retry_interval_s=Decimal("3"),
+            monotonic_ns=clock,
+        )
+        step = await run_recording_media(flow, 1, 1, 11)
+        # 段传输通信失败：保存失败事实并建立读取重试等待。
+        assert step.phase is InputPhase.SEGMENT_FAILED, step
+        assert driver.opens == 1
+        clock.advance_s(Decimal("1"))
+        waited = await run_recording_media(flow, 1, 1, 11)
+        # 间隔未到：不开新读取会话，不触设备。
+        assert waited.phase is InputPhase.RETRY_WAITING, waited
+        assert driver.opens == 1
+        clock.advance_s(Decimal("2"))
+        retried = await run_recording_media(flow, 1, 1, 11)
+        # 到时：恢复续传，再次打开读取会话。
+        assert retried.phase is InputPhase.SEGMENT_FAILED, retried
+        assert driver.opens == 2

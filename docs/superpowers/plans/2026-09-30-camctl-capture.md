@@ -718,6 +718,64 @@ D5 结果列举端口接入后一并接线，取消流程先于保守收场驱�
 C9 后置：结果列举端口暂由部署注入（D5 驱动适配提供生产实现后，
 装配工厂接入 run 会话默认流程集合与受限会话的保守收场流程）。
 
+#### C9 第十四段的阶段性验证（2026-10-06）：重试间隔的时间强制
+
+已存在重试语义的责任统一接入设备级间隔的时间强制：结果核实轮次
+（`results/<activity_id>`）、录像停止（`stop/<action_id>`）、清理删
+除与查询（`delete/<item_id>`、`exists/<item_id>`）和拷贝读取
+（`media-input/<processing_id>`）。间隔未到时不发起新尝试，以返回
+分区表达等待（`ListingPhase.RETRY_WAIT`、
+`HandlerOutcome("stop_retry_wait")`、`CleanupStep` 的
+`delete_retry_wait`/`query_retry_wait`、`InputPhase.RETRY_WAITING`），
+由推进循环下一轮重新判定，同一轮内继续处理其他设备与动作的调度事
+件，不阻塞调度器；等待不消耗尝试次数、上限和窗口。
+
+门槛机制（`operations/attempts.py` 的 `RetryWaitGate` 与
+`retry_wait_remaining_s`）：以会话内单调钟锚点表和流程行的权威字
+段共同判定——`attempts_used`、`retry_wait_required`、
+`max_attempts_used` 任一表明无需等待（无尝试、上轮未建立重试等待、
+预算已耗尽）即开闸，锚点在 `finish(retry_wait=True)` 事务成功后登
+记；跨会话恢复没有锚点时按本会话首次观察重新计时（本轮不立即重试，
+也不无限等待）；预算耗尽预检先行，立即交回意图事务按耗尽收场，不
+为等待延长资格。拷贝链无流程行锚点事实，用同门槛建立侧的
+`pending` 语义：只对本会话已记录的锚点等待。受限单次驱动的保守收
+场流程保留其内部有界等待（该流程无推进循环可依托），与门槛不构成
+双重等待。
+
+间隔配置接入 `devices.<id>` 五组字段（`result_check.retry_interval_s`、
+`recording.stop_retry_interval_s`、`copy.retry_interval_s`、
+`cleanup.delete_retry_interval_s`、`cleanup.query_retry_interval_s`，
+默认 3 秒，有限非负秒数校验），装配工厂按设备声明注入各责任运行时，
+媒体链落库的 `retry_interval_s_json` 与实际强制间隔取同一来源。
+`recording.start_retry_interval_s` 仅接入配置校验：启动责任当前一次
+用尽（错误即失败终态），启动重试机制（预算与机会保留模型）为独立
+后置任务，接入时一并消费该间隔。
+
+既有缺陷修复（本轮暴露）：清理 exists 流程中查询可靠确认仍在的轮
+次原本无处置结束，使 `retry_wait_required` 保持 0，后续
+`begin_attempt` 以"后续尝试要求先建立重试等待"拒绝，流程被锁死；
+修正为确认仍在与无可靠事实的轮次都按重试等待结束轮次（确认缺席仍
+由调用方收场终态），与第七十四段"成功但不终局的轮次必须建立重试
+等待"同类。
+
+验证：`test_retry_intervals.py` 5 项（核实与停止间隔等待、零间隔、
+预算耗尽即时收场、跨会话重新计时）、`test_cleanup_intervals.py`
+3 项（删除与查询间隔、零间隔）、`test_media_flow.py` 拷贝间隔
+1 项、`test_attempt_inputs.py` 纯函数与门槛 9 项、
+`test_configuration.py` 设备间隔配置 4 项、`test_media_assembly.py`
+设备声明注入 1 项；既有测试按间隔语义修正（`test_listing_rounds.py`
+零间隔注入、`test_restricted_winddown.py` 停止重试等待 3 秒、
+`test_recording_stop.py`/`test_timelapse_finish.py`/`test_run_dispatch.py`
+会话共享锚点表——推进循环每轮重建运行时，锚点跨轮保留）。
+全量单元 3261、集成分目录独占顺序（capture 198、outputs 1784+1skip、
+bootstrap 61、acceptance+cancellation+contracts+devices 344、
+history+host_files+logging_runtime+operations 342+5skip、persistence
+69、reporting 344、scheduling 125、session 81）与根 34+342、全部
+Node/Python 检查器通过（Python 3.11）。event-transitions 检查器此前
+记录的"文档生成区段待同步"确认为 Windows 检出的 CRLF 行尾与脚本
+生成的 LF 区段不匹配：`--write` 重写后规范化内容与 HEAD 一致，无实
+际漂移。
+
 ## 模块完成门禁
 
 录像、照片及延时摄影正常、取消和重启路径通过真实软件组合；适用检查/修复完成后才最终登记。应急与普通预算分开，所有正式产物和公开结果与历史边界一致。

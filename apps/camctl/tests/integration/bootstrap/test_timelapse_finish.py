@@ -26,6 +26,7 @@ from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.timelapse import CaptureWaitConfig
+from camctl.operations.attempts import RetryWaitGate
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.tasks import (
@@ -166,6 +167,8 @@ def _timelapse_plan(request_id: str, scheduled_at: str) -> dict:
 
 def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = None,
                        stopper=None, wait_ms: int = 2_000):
+    retry_gate = RetryWaitGate()
+
     def build(owned, device_id: str) -> CaptureRuntime:
         overrides = {} if check_config is None else {"check_config": check_config}
         if stopper is not None:
@@ -186,6 +189,7 @@ def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = 
                 window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
             wait_config=lambda params: CaptureWaitConfig(
                 target_duration_ms=wait_ms, driver_margin_ms=0),
+            retry_gate=retry_gate,
             **overrides,
         )
 

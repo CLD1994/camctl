@@ -193,3 +193,100 @@ def test_config_preserves_exact_seconds_and_optional_values():
 def test_config_preserves_seconds_range_constraints(field, value):
     with pytest.raises(AttemptConfigError):
         AttemptConfig(1, **{field: value})
+
+
+def test_retry_wait_remaining_opens_gate_when_elapsed_reaches_interval():
+    # 会话单调钟从锚点起已经过整段间隔（含等号）：可以开始下一次尝试。
+    assert attempts.retry_wait_remaining_s(
+        Decimal("3"), 100_000_000_000, 103_000_000_000) is None
+    assert attempts.retry_wait_remaining_s(
+        Decimal("3"), 0, 500_000_000_000) is None
+
+
+def test_retry_wait_zero_interval_never_waits():
+    # 间隔为零表示满足重试资格后不额外等待。
+    assert attempts.retry_wait_remaining_s(Decimal("0"), 0, 0) is None
+
+
+def test_retry_wait_not_elapsed_returns_exact_remaining():
+    remaining = attempts.retry_wait_remaining_s(
+        Decimal("2.5"), 10_000_000_000, 11_500_000_000)
+    assert remaining == Decimal("1.0")
+    assert attempts.retry_wait_remaining_s(
+        Decimal("3"), 5_000_000_000, 6_000_000_000) == Decimal("2")
+
+
+def test_retry_wait_gate_skips_first_attempt_and_unset_wait():
+    gate = attempts.RetryWaitGate()
+    opened = dict(attempts_used=0, retry_wait_required=False,
+                  max_attempts_used=3, interval_s=Decimal("3"), now_ns=0)
+    assert gate.remaining("stop/1", **opened) is None
+    # 流程未处于重试等待：资格判定交还意图事务，不做时间等待。
+    assert gate.remaining(
+        "stop/1", attempts_used=2, retry_wait_required=False,
+        max_attempts_used=3, interval_s=Decimal("3"), now_ns=0) is None
+    # 不适用定时重试的流程不做时间等待。
+    assert gate.remaining(
+        "stop/1", attempts_used=2, retry_wait_required=True,
+        max_attempts_used=3, interval_s=None, now_ns=0) is None
+
+
+def test_retry_wait_gate_opens_promptly_when_budget_exhausted():
+    # 预算耗尽不为等待间隔推迟：立即交由意图事务按耗尽收场。
+    gate = attempts.RetryWaitGate()
+    assert gate.remaining(
+        "results/1", attempts_used=3, retry_wait_required=True,
+        max_attempts_used=3, interval_s=Decimal("3"), now_ns=0) is None
+
+
+def test_retry_wait_gate_established_anchor_waits_then_opens():
+    gate = attempts.RetryWaitGate()
+    gate.established("stop/1", now_ns=1_000_000_000)
+    assert gate.remaining(
+        "stop/1", attempts_used=1, retry_wait_required=True,
+        max_attempts_used=3, interval_s=Decimal("3"),
+        now_ns=2_000_000_000) == Decimal("2")
+    assert gate.remaining(
+        "stop/1", attempts_used=1, retry_wait_required=True,
+        max_attempts_used=3, interval_s=Decimal("3"),
+        now_ns=4_000_000_000) is None
+
+
+def test_retry_wait_gate_recounts_cross_session_wait_from_first_observation():
+    # 本会话首次观察到既往会话留下的重试等待：按本次间隔从现在重新计时。
+    gate = attempts.RetryWaitGate()
+    assert gate.remaining(
+        "stop/1", attempts_used=1, retry_wait_required=True,
+        max_attempts_used=3, interval_s=Decimal("3"),
+        now_ns=7_000_000_000) == Decimal("3")
+    assert gate.remaining(
+        "stop/1", attempts_used=1, retry_wait_required=True,
+        max_attempts_used=3, interval_s=Decimal("3"),
+        now_ns=9_000_000_000) == Decimal("1")
+    assert gate.remaining(
+        "stop/1", attempts_used=1, retry_wait_required=True,
+        max_attempts_used=3, interval_s=Decimal("3"),
+        now_ns=10_000_000_000) is None
+
+
+def test_retry_wait_gate_cleared_anchor_recounts_on_next_wait():
+    gate = attempts.RetryWaitGate()
+    gate.established("stop/1", now_ns=0)
+    gate.cleared("stop/1")
+    # 流程结束清除锚点后再次处于等待：从首次观察重新起算。
+    assert gate.remaining(
+        "stop/1", attempts_used=1, retry_wait_required=True,
+        max_attempts_used=3, interval_s=Decimal("3"),
+        now_ns=10_000_000_000) == Decimal("3")
+
+
+def test_retry_wait_gate_pending_only_waits_recorded_anchors():
+    # 拷贝链的等待以本会话记录的失败锚点为准：无锚点不等待。
+    gate = attempts.RetryWaitGate()
+    assert gate.pending("media-input/1", interval_s=Decimal("3"), now_ns=0) is None
+    gate.established("media-input/1", now_ns=1_000_000_000)
+    assert gate.pending(
+        "media-input/1", interval_s=Decimal("3"), now_ns=2_000_000_000
+    ) == Decimal("2")
+    assert gate.pending(
+        "media-input/1", interval_s=Decimal("3"), now_ns=4_000_000_000) is None

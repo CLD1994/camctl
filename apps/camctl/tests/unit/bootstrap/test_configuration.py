@@ -176,3 +176,55 @@ class TestDeviceRecordingConfig:
         with pytest.raises(ConfigError, match="recording"):
             load_config(
                 {"devices": {"cam-1": self._device(12)}}, ConfigDefaults())
+
+
+class TestDeviceRetryIntervalConfig:
+    """设备级重试间隔键：有限非负秒数，加载时规范化为 Decimal。
+
+    覆盖 communication.md#通信重试间隔 与状态查询、产物核实及设备
+    文件删除查询的间隔字段；未接入消费方的键保持原样冻结。
+    """
+
+    @staticmethod
+    def _device(subtable: str, body: dict) -> dict:
+        return {"kind": "camera", "driver": "adb", subtable: body}
+
+    def test_recording_intervals_accept_number_and_text(self) -> None:
+        for field in ("start_retry_interval_s", "stop_retry_interval_s"):
+            for value, expected in ((3, Decimal("3")), ("2.5", Decimal("2.5")),
+                                    (0, Decimal("0"))):
+                cfg = load_config(
+                    {"devices": {"cam-1": self._device(
+                        "recording", {field: value})}}, ConfigDefaults())
+                assert cfg.devices["cam-1"]["recording"][field] == expected
+
+    def test_recording_intervals_reject_invalid_values(self) -> None:
+        for field in ("start_retry_interval_s", "stop_retry_interval_s"):
+            for bad in (-1, "-0.5", True, None, "soon", "NaN", "Infinity", 1.0):
+                with pytest.raises(ConfigError, match=field):
+                    load_config(
+                        {"devices": {"cam-1": self._device(
+                            "recording", {field: bad})}}, ConfigDefaults())
+
+    def test_copy_and_cleanup_and_result_check_intervals_validated(self) -> None:
+        for subtable, field in (
+                ("copy", "retry_interval_s"),
+                ("cleanup", "delete_retry_interval_s"),
+                ("cleanup", "query_retry_interval_s"),
+                ("result_check", "retry_interval_s")):
+            cfg = load_config(
+                {"devices": {"cam-1": self._device(
+                    subtable, {field: "1.5"})}}, ConfigDefaults())
+            assert cfg.devices["cam-1"][subtable][field] == Decimal("1.5")
+            for bad in (-1, True, "soon", "NaN", 1.0):
+                with pytest.raises(ConfigError, match=field):
+                    load_config(
+                        {"devices": {"cam-1": self._device(
+                            subtable, {field: bad})}}, ConfigDefaults())
+
+    def test_subtables_must_be_tables(self) -> None:
+        for subtable in ("copy", "cleanup", "result_check"):
+            with pytest.raises(ConfigError, match=subtable):
+                load_config(
+                    {"devices": {"cam-1": self._device(subtable, 12)}},
+                    ConfigDefaults())

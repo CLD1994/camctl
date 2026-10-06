@@ -202,7 +202,8 @@ def _seed_processing(connection, action_id: int) -> None:
 
 def _runtime(owned, *, driver=None, files=None, wall=None,
              recording_state=None, results=None,
-             listing_cache=None) -> CaptureRuntime:
+             listing_cache=None, check_config=None,
+             stop_config=None) -> CaptureRuntime:
     from camctl.scheduling.rules import LaunchWindow
 
     return CaptureRuntime(
@@ -223,6 +224,8 @@ def _runtime(owned, *, driver=None, files=None, wall=None,
             target_duration_ms=600_000, driver_margin_ms=0),
         recording_state=recording_state,
         listing_cache=listing_cache,
+        **({"check_config": check_config} if check_config is not None else {}),
+        **({"stop_config": stop_config} if stop_config is not None else {}),
     )
 
 

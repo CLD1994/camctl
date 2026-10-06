@@ -28,6 +28,7 @@ from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_com
 from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
+from camctl.operations.attempts import RetryWaitGate
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
@@ -195,6 +196,8 @@ class _SequentialActivityDriver(DriverDouble):
 
 
 def _capture_factory(driver: DriverDouble, files: dict):
+    retry_gate = RetryWaitGate()
+
     def build(owned, device_id: str) -> CaptureRuntime:
         return CaptureRuntime(
             owned=owned,
@@ -212,6 +215,7 @@ def _capture_factory(driver: DriverDouble, files: dict):
                 window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
             wait_config=lambda params: CaptureWaitConfig(
                 target_duration_ms=600_000, driver_margin_ms=0),
+            retry_gate=retry_gate,
         )
 
     return build

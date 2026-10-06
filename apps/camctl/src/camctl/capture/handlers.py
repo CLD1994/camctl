@@ -105,6 +105,7 @@ from camctl.operations.attempts import (
     AttemptTarget,
     BeginDisposition,
     OperationKind,
+    RetryWaitGate,
     RunFinish,
     RunOutcome,
 )
@@ -254,13 +255,16 @@ class CaptureRuntime:
     media: MediaFlow | None = None
     #: 异常多录修复门槛的本次余量秒数（configuration.md#配置归属）。
     repair_margin_s: Decimal = Decimal("10")
-    #: 停止尝试的本次预算；默认 3 次、单次 10 秒、重试间隔 1 秒。
+    #: 停止尝试的本次预算；默认 3 次、单次 10 秒、重试间隔 3 秒
+    #:（configuration.md#通信重试间隔）。
     stop_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
-        max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("1")))
+        max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
     #: 结果核实轮次的本次预算；默认 3 轮、单轮 10 秒、重试间隔 3 秒
     #:（configuration.md#状态查询与产物核实的配置）。
     check_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
+    #: 重试间隔的会话内时间门槛；装配层闭包共享，跨推进轮次保留。
+    retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
     #: 会话内已观察的结果列举缓存（动作到列举与登记事实）；装配层
     #: 闭包共享，跨推进轮次保留，避免等待中的重复列举消耗核实名额。
     listing_cache: dict[int, tuple[tuple, tuple]] | None = None
@@ -306,7 +310,10 @@ class CaptureRuntime:
                end_run: RunOutcome | None = None,
                run_error: ErrorValue | None = None,
                retry_wait: bool = False) -> None:
-        """保存尝试结果；调用收场后同时结束流程（启动责任闭合）。"""
+        """保存尝试结果；调用收场后同时结束流程（启动责任闭合）。
+
+        保存重试等待时以当前单调读数登记间隔锚点；流程结束清除。
+        """
         attempt = AttemptFinish(
             ticket=ticket,
             outcome=validate_outcome(ticket, outcome, self.evidence),
@@ -318,6 +325,35 @@ class CaptureRuntime:
         receipt = self.operations.finish_attempt(
             attempt, new_operation_key(), self.owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        if retry_wait:
+            self.retry_gate.established(
+                ticket.responsibility_key, self.monotonic_ns())
+        elif end_run is not None:
+            self.retry_gate.cleared(ticket.responsibility_key)
+
+    def retry_wait_remaining(self, responsibility: str,
+                             interval_s: Decimal | None) -> Decimal | None:
+        """责任当前重试等待的剩余秒数；可开始下一次尝试时为 None。
+
+        以流程行的等待标志与累计次数为权威（首次尝试不预先等待、
+        预算耗尽即时交还意图事务），跨会话恢复的等待按本次间隔从
+        本会话首次观察重新计时。
+        """
+        with closing(self.owned.connection.execute(
+            "SELECT attempts_used, retry_wait_required, max_attempts_used"
+            " FROM operation_runs WHERE responsibility_key = ?",
+            (responsibility,),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return self.retry_gate.remaining(
+            responsibility,
+            attempts_used=int(row[0]),
+            retry_wait_required=int(row[1]) == 1,
+            max_attempts_used=int(row[2]),
+            interval_s=interval_s,
+            now_ns=self.monotonic_ns())
 
 
 class SessionRecordingState:
@@ -546,10 +582,15 @@ async def _stop_call(runtime: CaptureRuntime, action,
 
     意图先提交才派发；可靠确认结束停止流程，错误或未确认保持流
     程执行中并建立重试等待，预算沿原流程累计不刷新。停止操作字
-    面量由调用方按任务类型提供。
+    面量由调用方按任务类型提供。重试等待的间隔未到时不提交新意
+    图，由推进循环下一轮再判。
     """
     if runtime.stopper is None:
         raise LookupError("设备停止端口未装配")
+    remaining = runtime.retry_wait_remaining(
+        f"stop/{action['id']}", runtime.stop_config.retry_interval_s)
+    if remaining is not None:
+        return HandlerOutcome("stop_retry_wait", f"{remaining}s")
     intent = AttemptIntent(
         operation="stop",
         action_id=action["id"],
@@ -1418,13 +1459,18 @@ async def _listing_round(
     runtime: CaptureRuntime, action_id: int) -> ListingRound:
     """按 results 责任的有限轮次推进一次结果列举。
 
-    在途轮次跨会话恢复前停等；本轮列举失败保存实际结果与重试等
-    待；预算耗尽交由调用方按所属拍摄及收场规则结束；其余拒绝说
-    明核实责任已闭合，调用方按直接列举回退。
+    在途轮次跨会话恢复前停等；上一轮的重试等待按核实间隔到时才
+    开始新轮次，未到时不提交新意图、不消耗名额；本轮列举失败保
+    存实际结果与重试等待；预算耗尽交由调用方按所属拍摄及收场规
+    则结束；其余拒绝说明核实责任已闭合，调用方按直接列举回退。
     """
     in_flight = runtime.last_attempt(f"results/{action_id}")
     if in_flight is not None and in_flight[0] == int(_ATTEMPT_STATUS.RUNNING):
         return ListingRound(ListingPhase.IN_FLIGHT)
+    if runtime.retry_wait_remaining(
+            f"results/{action_id}",
+            runtime.check_config.retry_interval_s) is not None:
+        return ListingRound(ListingPhase.RETRY_WAIT)
     begin = _begin_check_round(runtime, action_id)
     if begin.disposition is not BeginDisposition.GRANTED:
         if begin.reason == "budget_exhausted":

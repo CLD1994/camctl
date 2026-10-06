@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 from pathlib import Path
+from time import monotonic_ns as _default_monotonic_ns
 
 import pytest
 
@@ -159,7 +160,8 @@ def pipeline(tmp_path: Path):
     owned.connection.close()
 
 
-def _runtime(owned, driver, *, delete_attempts=1, query_attempts=1) -> CleanupRuntime:
+def _runtime(owned, driver, *, delete_attempts=1, query_attempts=1,
+             monotonic_ns=_default_monotonic_ns) -> CleanupRuntime:
     return CleanupRuntime(
         owned=owned,
         outputs=OutputsRepository(),
@@ -174,6 +176,7 @@ def _runtime(owned, driver, *, delete_attempts=1, query_attempts=1) -> CleanupRu
         query_config=AttemptConfig(
             max_attempts=query_attempts, timeout_s=Decimal("10"),
             retry_interval_s=Decimal("1")),
+        monotonic_ns=monotonic_ns,
     )
 
 
@@ -223,16 +226,19 @@ class TestDeletionChain:
     async def test_unknown_delete_with_file_still_present_waits(self, pipeline):
         owned = pipeline
         driver = DriverDouble(absent=False, present=True)
-        step = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=2), 91)
+        clock = {"ns": _default_monotonic_ns()}
+        runtime = _runtime(
+            owned, driver, delete_attempts=2,
+            monotonic_ns=lambda: clock["ns"])
+        step = await delete_source_file(runtime, 91)
         assert step.phase == "still_present", step
         # 成员保持删除中，不因文件仍在判定失败。
         assert _value(
             owned, "SELECT status FROM cleanup_items WHERE id = 91") == (3,)
-        # 预算内重试：再次推进发起第二次删除并成功。
+        # 预算内重试：删除间隔到时后再次推进发起第二次删除并成功。
         driver.absent = True
-        retry = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=2), 91)
+        clock["ns"] += 1_000_000_000
+        retry = await delete_source_file(runtime, 91)
         assert retry.phase == "succeeded", retry
         assert driver.delete_calls == 2
 

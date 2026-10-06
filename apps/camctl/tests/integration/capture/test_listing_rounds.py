@@ -11,12 +11,14 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from camctl.capture.handlers import capture_handler
 from camctl.capture.results import FileKind as ResultFileKind
+from camctl.operations.attempts import AttemptConfig
 
 from .test_capture_contract import (
     _NOW,
@@ -31,6 +33,11 @@ from .test_capture_contract import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+#: 本文件验证轮次记账与终态分区，不验证计时：核实间隔置零保持
+#: 背靠背重试；间隔的时间强制由 test_retry_intervals.py 单独验证。
+_IMMEDIATE_CHECK = AttemptConfig(
+    max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("0"))
 
 
 class _FlakyResults:
@@ -66,7 +73,7 @@ class TestPhotoListingRounds:
             flaky = _FlakyResults(
                 {11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)},
                 failures=1)
-            runtime = _runtime(owned, results=flaky)
+            runtime = _runtime(owned, results=flaky, check_config=_IMMEDIATE_CHECK)
             await capture_handler("camera_take_photo")(11, runtime)
             # 本轮列举失败：保存失败结果与重试等待，动作保持执行中。
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
@@ -85,7 +92,7 @@ class TestPhotoListingRounds:
         owned = _environment(tmp_path, _PHOTO)
         try:
             flaky = _FlakyResults({}, failures=3)
-            runtime = _runtime(owned, results=flaky)
+            runtime = _runtime(owned, results=flaky, check_config=_IMMEDIATE_CHECK)
             for _ in range(3):
                 await capture_handler("camera_take_photo")(11, runtime)
             # 三轮全部失败后预算耗尽：不发起第四次设备列举。
@@ -108,7 +115,7 @@ class TestPhotoListingRounds:
 class TestRecordingListingRounds:
     async def _stopped_tail(self, owned, results):
         """推进到停止确认后的录像尾段：启动先行，停止与处理已保存。"""
-        runtime = _runtime(owned, results=results)
+        runtime = _runtime(owned, results=results, check_config=_IMMEDIATE_CHECK)
         await capture_handler("camera_record")(12, runtime)
         _seed_processing(owned.connection, 12)
         _seed_stopped_recording(owned.connection, 12)
@@ -194,7 +201,7 @@ class TestRecordingListingRounds:
 class TestCanceledTimelapseCloseRounds:
     async def _cancel_after_send(self, owned, results):
         """先正常发送并安排等待，再置取消并种已确认的停止。"""
-        runtime = _runtime(owned, results=results)
+        runtime = _runtime(owned, results=results, check_config=_IMMEDIATE_CHECK)
         await capture_handler("camera_timelapse")(13, runtime)
         owned.connection.execute(
             "UPDATE actions SET cancel_requested = 1 WHERE id = 13")

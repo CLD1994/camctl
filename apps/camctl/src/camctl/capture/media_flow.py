@@ -10,14 +10,16 @@ CaptureProcessingSaves 适配处理事务。run_recording_media 串联输入
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from time import monotonic_ns as _default_monotonic_ns
 from typing import Any, Callable
 
 from camctl.capture.files import FileChecksumSave
 from camctl.capture.input_copy import (
     InputContext,
+    InputPhase,
     InputStep,
     obtain_recording_input,
 )
@@ -51,6 +53,7 @@ from camctl.outputs.copy import (
     prepare_copy,
 )
 from camctl.outputs.qualification import FileCandidate, OperationConfig
+from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.models import DbOutcomeKind as _DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -66,10 +69,11 @@ __all__ = [
     "run_recording_media",
 ]
 
-#: 内部读取采用的段大小与尝试配置（第一版固定值，随部署配置接入可调）。
+#: 内部读取采用的段大小与次数、调用时限（第一版固定值，重试间隔
+#: 随设备声明 devices.<id>.copy.retry_interval_s 接入）。
 _SEGMENT_SIZE = 4 * 1024 * 1024
-_READ_CONFIG = OperationConfig(
-    max_attempts=3, timeout_s=Decimal("60"), retry_interval_s=Decimal("1"))
+_READ_MAX_ATTEMPTS = 3
+_READ_TIMEOUT_S = Decimal("60")
 
 
 def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile:
@@ -244,6 +248,10 @@ class MediaFlow:
     前把来源文件的摘要能力从未判定一次固定。digest_for 按源设备
     文件构造源端摘要读取端口，装配层持有驱动端口时提供；固定的
     digest 端口仍适用于单一源的简单装配。
+
+    retry_interval_s 是本设备文件读取的重试间隔
+    （configuration.md#通信重试间隔），读取失败后按它在会话单调钟
+    上等待再次读取；retry_gate 由装配层会话共享。
     """
 
     owned: OwnedConnection
@@ -256,6 +264,9 @@ class MediaFlow:
     digest: Any = None
     digest_for: Callable[[int], Any] | None = None
     repair_extension: str | None = None
+    retry_interval_s: Decimal = Decimal("3")
+    monotonic_ns: Callable[[], int] = _default_monotonic_ns
+    retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
 
     def saves(self) -> CaptureProcessingSaves:
         return CaptureProcessingSaves(self.owned)
@@ -296,7 +307,16 @@ async def run_recording_media(
 
     输入未就绪、检查未终态或修复不待执行时返回对应步骤；保存被
     拒或未知的分区原样透传，由下一次推进按已保存事实续跑。
+
+    本会话上一次段传输或完整性收尾的通信失败保存了重试等待时，
+    间隔未到不开始新的读取（不开会话、不触设备），返回等待分区；
+    副本就绪或登记重拷清除等待，重拷流程的首次读取不预等待。
     """
+    wait_key = f"media-input/{processing_id}"
+    if flow.retry_gate.pending(
+            wait_key, interval_s=flow.retry_interval_s,
+            now_ns=flow.monotonic_ns()) is not None:
+        return InputStep(InputPhase.RETRY_WAITING)
     _ensure_checksum_support(flow, source_device_file_id)
     status = load_processing_status(flow.owned, processing_id)
     digest = (flow.digest_for(source_device_file_id)
@@ -306,7 +326,9 @@ async def run_recording_media(
         processing_id=processing_id,
         source_device_file_id=source_device_file_id,
         target_extension=target_extension,
-        config=_READ_CONFIG,
+        config=OperationConfig(
+            max_attempts=_READ_MAX_ATTEMPTS, timeout_s=_READ_TIMEOUT_S,
+            retry_interval_s=flow.retry_interval_s),
         segment_size=_SEGMENT_SIZE,
         staging=flow.roots.staging,
         copies=flow.copies(),
@@ -314,6 +336,13 @@ async def run_recording_media(
         occurred_at=flow.occurred_at(),
         digest=digest,
     ))
+    if input_step.phase in (InputPhase.SEGMENT_FAILED,
+                            InputPhase.COMPLETION_FAILED):
+        # 读取通信失败：登记锚点，间隔内不再次读取。
+        flow.retry_gate.established(wait_key, flow.monotonic_ns())
+    elif input_step.phase in (InputPhase.INPUT_READY,
+                              InputPhase.RECOPY_PENDING):
+        flow.retry_gate.cleared(wait_key)
     if input_step.input_file is None:
         return input_step
     check = await execute_check(CheckContext(

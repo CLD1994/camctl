@@ -108,6 +108,7 @@ class InputPhase(Enum):
     OWNER_SKIPPED = "owner_skipped"
     COMPLETION_FAILED = "completion_failed"
     RECOPY_PENDING = "recopy_pending"
+    RETRY_WAITING = "retry_waiting"
 
 
 @dataclass(frozen=True)

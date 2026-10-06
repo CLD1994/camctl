@@ -41,6 +41,7 @@ from camctl.devices.read_session import SourceFile
 from camctl.host_files.media import ProbeRequest, RepairRequest, probe_media, repair_media
 from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskExecutor, FileTaskId, FileTaskResult
+from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.outputs.copy import SourceDigest
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
@@ -57,6 +58,21 @@ __all__ = [
 
 #: 异常多录修复余量的默认秒数（camera-recording.md#配置归属）。
 _DEFAULT_REPAIR_MARGIN_S = Decimal("10")
+
+#: 通信重试间隔的规格默认秒数（configuration.md#通信重试间隔）。
+_DEFAULT_RETRY_INTERVAL_S = Decimal("3")
+
+
+def _device_seconds(
+    declaration: Mapping[str, Any], section: str, key: str,
+    default: Decimal,
+) -> Decimal:
+    """读取设备子表中已规范化的秒数；未配置用默认值。"""
+    subtable = declaration.get(section)
+    if not isinstance(subtable, Mapping):
+        return default
+    value = subtable.get(key, default)
+    return value if isinstance(value, Decimal) else Decimal(str(value))
 
 #: 源端摘要观察的契约类型与版本（devices 契约测试共用同一形态）。
 _DIGEST_TYPE = "file_digest"
@@ -226,6 +242,7 @@ def session_capture_assembly(
 
     anchors: dict[int, tuple[int, int]] = {}
     listings: dict[int, tuple[tuple, tuple]] = {}
+    retry_gate = RetryWaitGate()
     roots = BoundDirectories(staging=staging)
     executor = FileTaskExecutor(Supervisor())
     tools = HostMediaTools(
@@ -254,7 +271,7 @@ def session_capture_assembly(
         media = (
             _media_flow_with(
                 owned, entry, device_id, str(driver_id), tools, staging,
-                wall, declaration)
+                wall, declaration, retry_gate, monotonic)
             if media_enabled else None)
         runtime = CaptureRuntime(
             owned=owned,
@@ -273,6 +290,17 @@ def session_capture_assembly(
             media=media,
             repair_margin_s=_repair_margin_s(declaration),
             listing_cache=listings,
+            retry_gate=retry_gate,
+            stop_config=AttemptConfig(
+                max_attempts=3, timeout_s=Decimal("10"),
+                retry_interval_s=_device_seconds(
+                    declaration, "recording", "stop_retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S)),
+            check_config=AttemptConfig(
+                max_attempts=3, timeout_s=Decimal("10"),
+                retry_interval_s=_device_seconds(
+                    declaration, "result_check", "retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S)),
         )
         runtime.recording_state = SessionRecordingState(runtime, anchors)
         return runtime
@@ -289,11 +317,14 @@ def _media_flow_with(
     staging: Path,
     occurred_at: Callable[[], int],
     declaration: Mapping[str, Any],
+    retry_gate: RetryWaitGate,
+    monotonic: Callable[[], int],
 ) -> MediaFlow | None:
     """按登记声明与设备声明构造媒体链；未声明读取能力时不装配。
 
     读取尝试票据与修复成品扩展名保持第一版默认；源端摘要读取在
-    声明支持时按源设备文件经驱动端口取得。
+    声明支持时按源设备文件经驱动端口取得。读取重试间隔取自
+    devices.<id>.copy.retry_interval_s，时间门槛随装配会话共享。
     """
     try:
         read_port = port_for(entry, "read")
@@ -313,4 +344,9 @@ def _media_flow_with(
         occurred_at=occurred_at,
         digest_supported=digest_supported,
         digest_for=digest_for,
+        retry_interval_s=_device_seconds(
+            declaration, "copy", "retry_interval_s",
+            _DEFAULT_RETRY_INTERVAL_S),
+        monotonic_ns=monotonic,
+        retry_gate=retry_gate,
     )

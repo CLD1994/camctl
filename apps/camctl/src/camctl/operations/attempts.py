@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 
@@ -34,6 +34,7 @@ __all__ = [
     "OperationKind",
     "QueryPurpose",
     "RefusalKind",
+    "RetryWaitGate",
     "RunFinish",
     "RunOutcome",
     "RunStatus",
@@ -41,6 +42,7 @@ __all__ = [
     "operation_responsibility_key",
     "query_responsibility_key",
     "responsibility_key",
+    "retry_wait_remaining_s",
     "seconds_from_json",
 ]
 
@@ -409,13 +411,85 @@ def dispatch_decision(outcome: DbOutcome[BeginAttemptResult]) -> DispatchDecisio
 def seconds_from_json(raw: object) -> Decimal | None:
     """从数据库 JSON 数字文本恢复精确秒数；空值为空。"""
     if raw is None:
-        return None
+        return raw
     if isinstance(raw, Decimal):
         return raw
     try:
         return Decimal(str(raw))
     except InvalidOperation as error:
         raise AttemptConfigError(f"保存的秒数不是数值: {raw!r}") from error
+
+
+def retry_wait_remaining_s(
+    interval_s: Decimal, anchor_ns: int, now_ns: int
+) -> Decimal | None:
+    """按会话单调钟计算重试等待的剩余秒数；可以开始时为 None。
+
+    interval_s 是本次运行该操作采用的重试间隔，由 AttemptConfig 保
+    证为有限非负秒数；零表示不额外等待。anchor_ns 是本会话保存重
+    试等待（或首次观察到既往等待）时的单调读数，now_ns 是当前读
+    数。已经过整段间隔（含等号）即视为到时，剩余值保持精确小数。
+    """
+    elapsed_s = Decimal(now_ns - anchor_ns) / Decimal(1_000_000_000)
+    if interval_s == 0 or elapsed_s >= interval_s:
+        return None
+    return interval_s - elapsed_s
+
+
+@dataclass
+class RetryWaitGate:
+    """重试间隔的会话内时间门槛（通信重试间隔）。
+
+    锚点只在保存重试等待的事务成功后以当前单调读数登记，会话共享
+    同一实例；流程结束清除。流程是否处于重试等待以流程行的等待标
+    志为权威，未处于等待的流程不做时间等待，资格仍由意图事务判
+    定。跨会话恢复的等待按本次间隔从本会话首次观察重新计时，等待
+    与尝试次数、上限及启动窗口互不消耗。
+    """
+
+    anchors: dict[str, int] = field(default_factory=dict)
+
+    def established(self, responsibility: str, now_ns: int) -> None:
+        """保存重试等待后登记锚点。"""
+        self.anchors[responsibility] = now_ns
+
+    def cleared(self, responsibility: str) -> None:
+        """流程结束后清除锚点。"""
+        self.anchors.pop(responsibility, None)
+
+    def remaining(
+        self, responsibility: str, *, attempts_used: int,
+        retry_wait_required: bool, max_attempts_used: int,
+        interval_s: Decimal | None, now_ns: int,
+    ) -> Decimal | None:
+        """流程行驱动的时间门槛：剩余等待秒数，可开始时为 None。
+
+        首次尝试不预先等待；预算耗尽不为等待推迟，立即交由意图事
+        务按耗尽收场；不适用定时重试的间隔为空。处于重试等待且无
+        本会话锚点时，按本次间隔从首次观察重新计时。
+        """
+        if (interval_s is None or attempts_used == 0
+                or not retry_wait_required
+                or attempts_used >= max_attempts_used):
+            return None
+        anchor_ns = self.anchors.get(responsibility)
+        if anchor_ns is None:
+            anchor_ns = now_ns
+            self.anchors[responsibility] = anchor_ns
+        return retry_wait_remaining_s(interval_s, anchor_ns, now_ns)
+
+    def pending(
+        self, responsibility: str, *, interval_s: Decimal, now_ns: int,
+    ) -> Decimal | None:
+        """已记录失败锚点的剩余等待；无锚点不等待。
+
+        拷贝链的读取失败不在流程行保存重试等待，等待事实只有本会
+        话记录的锚点：无锚点表示本会话没有未消化的失败。
+        """
+        anchor_ns = self.anchors.get(responsibility)
+        if anchor_ns is None:
+            return None
+        return retry_wait_remaining_s(interval_s, anchor_ns, now_ns)
 
 
 class ReadResumeDisposition(Enum):

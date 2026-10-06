@@ -327,7 +327,7 @@ class TestStopRetryWithinBudget:
             tmp_path, "retry", driver, results, fake)
         assert outcome.reason == "clock_invalid"
         # 前两次停止失败按重试间隔重试，第三次确认后保存等待阶段。
-        assert fake.waits == [2.0, 1.0, 1.0]
+        assert fake.waits == [2.0, 3.0, 3.0]
         stop_calls = [call for call in driver.calls if call[0] == "stop"]
         assert len(stop_calls) == 3
         assert _scalar(db, "SELECT status FROM actions WHERE id = 1") == (2,)
@@ -352,7 +352,7 @@ class TestStopExhaustedKeepsRecording:
         assert outcome.reason == "clock_invalid"
         # 停止预算耗尽：不再无界重试，动作保持执行中等待既有失败
         # 与残留收场规则，不建立等待阶段。
-        assert fake.waits == [2.0, 1.0, 1.0]
+        assert fake.waits == [2.0, 3.0, 3.0]
         stop_calls = [call for call in driver.calls if call[0] == "stop"]
         assert len(stop_calls) == 3
         assert _scalar(db, "SELECT status FROM actions WHERE id = 1") == (2,)

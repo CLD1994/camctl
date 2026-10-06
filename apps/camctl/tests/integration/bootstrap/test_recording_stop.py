@@ -31,6 +31,7 @@ from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.tasks import CaptureTask
 from camctl.devices.ports import DeviceCallResult
+from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
@@ -215,8 +216,9 @@ async def _submit_plan(tmp_path: Path, cfg, catalog, body: dict) -> None:
 
 
 def _record_factory(driver, stopper, results, clock):
-    """会话共享锚点表：推进循环每轮重建运行时，锚点跨轮保留。"""
+    """会话共享锚点表与重试等待门槛：推进循环每轮重建运行时，跨轮保留。"""
     anchors: dict[int, tuple[int, int]] = {}
+    retry_gate = RetryWaitGate()
 
     def build(owned, device_id: str) -> CaptureRuntime:
         runtime = CaptureRuntime(
@@ -236,6 +238,7 @@ def _record_factory(driver, stopper, results, clock):
             wait_config=lambda params: CaptureWaitConfig(
                 target_duration_ms=600_000, driver_margin_ms=0),
             stopper=stopper,
+            retry_gate=retry_gate,
         )
         runtime.recording_state = SessionRecordingState(runtime, anchors)
         return runtime
@@ -359,7 +362,12 @@ class TestStopRetryWithinBudget:
                 " WHERE id = 1", (1,))
             clock["ns"] += 6_000_000_001
             # 第一次停止调用失败保存调用错误并建立重试等待，预算沿原
-            # 流程累计；第二次停止调用成功后结束流程并收场活动。
+            # 流程累计；停止间隔到时后第二次停止调用成功并结束流程。
+            await _await_query(
+                db,
+                "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'stop/1'", (2, 1))
+            clock["ns"] += 3_000_000_000
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"

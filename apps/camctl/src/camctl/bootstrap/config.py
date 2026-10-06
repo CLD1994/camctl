@@ -446,30 +446,41 @@ def _probability_field(section: Mapping[str, Any], key: str, default: str) -> De
     return _require_probability(raw, f"log.{key}")
 
 
-def _validated_recording(device_id: str, raw: Any) -> Mapping[str, Any] | None:
-    """校验并规范化设备录像配置键；未提供时返回 None。
+def _validated_seconds_subtable(
+    device_id: str, raw: Any, section: str, keys: tuple[str, ...],
+) -> Mapping[str, Any] | None:
+    """校验并规范化设备子表中的秒数字段；未提供子表时返回 None。
 
-    repair_margin_s 允许有限非负秒数（数字或精确文本），加载时统一
-    为 Decimal；其余键按原样冻结，随消费方接入再校验。
+    列出的键允许有限非负秒数（数字或精确文本），加载时统一为
+    Decimal；其余键按原样冻结，随消费方接入再校验。
     """
     if raw is None:
         return None
     if not isinstance(raw, Mapping):
-        raise ConfigError(f"devices.{device_id}.recording 必须是表: {raw!r}")
-    recording = dict(raw)
-    if "repair_margin_s" in recording:
-        name = f"devices.{device_id}.recording.repair_margin_s"
-        value = recording["repair_margin_s"]
+        raise ConfigError(f"devices.{device_id}.{section} 必须是表: {raw!r}")
+    normalized = dict(raw)
+    for key in keys:
+        if key not in normalized:
+            continue
+        name = f"devices.{device_id}.{section}.{key}"
+        value = normalized[key]
         if isinstance(value, str):
             try:
                 value = Decimal(value)
             except InvalidOperation as error:
                 raise ConfigError(
-                    f"{name} 必须是数值秒: {recording['repair_margin_s']!r}"
+                    f"{name} 必须是数值秒: {normalized[key]!r}"
                 ) from error
-        recording["repair_margin_s"] = _require_positive_seconds(
+        normalized[key] = _require_positive_seconds(
             value, name, allow_zero=True)
-    return recording
+    return normalized
+
+
+def _validated_recording(device_id: str, raw: Any) -> Mapping[str, Any] | None:
+    """校验并规范化设备录像配置键；未提供时返回 None。"""
+    return _validated_seconds_subtable(
+        device_id, raw, "recording",
+        ("repair_margin_s", "start_retry_interval_s", "stop_retry_interval_s"))
 
 
 def _validate_devices(raw: Any) -> Mapping[str, Any]:
@@ -488,5 +499,13 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
             device_id, normalized.pop("recording", None))
         if recording is not None:
             normalized["recording"] = recording
+        for section, keys in (
+                ("copy", ("retry_interval_s",)),
+                ("cleanup", ("delete_retry_interval_s", "query_retry_interval_s")),
+                ("result_check", ("retry_interval_s",))):
+            subtable = _validated_seconds_subtable(
+                device_id, normalized.pop(section, None), section, keys)
+            if subtable is not None:
+                normalized[section] = subtable
         validated[device_id] = _freeze(normalized)
     return MappingProxyType(validated)
