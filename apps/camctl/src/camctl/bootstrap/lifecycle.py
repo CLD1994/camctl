@@ -161,14 +161,21 @@ def _failure_log_wiring(deps: RuntimeDeps):
 
 
 def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
-    """run 会话的生产报告流程与生成子进程监督方。
+    """run 会话的生产流程与生成子进程监督方。
 
     注册报告事务守卫后组装维护流程：到期的同步动作、报告冻结、
     子进程生成与发布编排都由流程按轮推进；监督方惰性启动，由
-    execute_command 在会话结束后收场。受限会话的取消流程与一次
-    报告机会由 execute_command 在此基础上另行装配。
+    execute_command 在会话结束后收场。拍摄推进经进程驱动登记解析
+    设备端口（未登记驱动的设备本轮不推进）；取消动作按排期或立即
+    执行。受限会话的取消流程、一次报告机会与保守收场由
+    execute_command 在此基础上另行装配。
     """
-    from camctl.bootstrap.flows import cancel_flow, report_flow
+    from camctl.bootstrap.capture_assembly import (
+        execution_wait_config,
+        session_capture_assembly,
+    )
+    from camctl.bootstrap.flows import cancel_flow, capture_flow, report_flow
+    from camctl.devices.drivers.runtime import current_registry
     from camctl.reporting.maintenance import MaintenanceLimits
     from camctl.reporting.supervisor import WorkerSupervisor
     from camctl.reporting.worker import report_lock_path
@@ -192,6 +199,14 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
         "cancel": cancel_flow(ready=ready, processing=processing),
+        # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
+        # 首次固定的执行定义。
+        "scheduling": capture_flow(session_capture_assembly(
+            devices=deps.config.devices,
+            drivers=current_registry(),
+            staging=staging,
+            wait_config=execution_wait_config,
+        )),
     }
     return flows, supervisor
 
@@ -209,10 +224,9 @@ async def execute_command(
 
     flows、restricted_flows、wake 与 poll_interval_s 是业务流程装配
     的注入点：显式注入的流程映射整体替换生产装配；run 会话未注入
-    时使用生产报告流程（含生成子进程），submit 会话不驱动业务流
-    程。受限会话的保守收场流程经 restricted_flows 注入（生产装配
-    在 D5 结果列举端口接入后一并接线）。进程内唤醒与轮询上限随
-    流程一起接入。
+    时使用生产流程（报告生成子进程、取消与拍摄推进，受限会话另有
+    取消、一次报告与保守收场），submit 会话不驱动业务流程。进程内
+    唤醒与轮询上限随流程一起接入。
     """
     from camctl.bootstrap.application import query_work_facts
 
@@ -227,8 +241,18 @@ async def execute_command(
         overrides["poll_interval_s"] = poll_interval_s
     if flows is None and deps.mode is CommandMode.RUN:
         flows, supervisor = _report_assembly(deps)
-        # 受限会话装配：墙钟检查失败时消费规定取消流程与一次报告。
-        from camctl.bootstrap.flows import cancel_flow, report_flow
+        # 受限会话装配：墙钟检查失败时消费规定取消流程、一次报告机
+        # 会与录像保守收场（不装配媒体链）。
+        from camctl.bootstrap.capture_assembly import (
+            execution_wait_config,
+            session_capture_assembly,
+        )
+        from camctl.bootstrap.flows import (
+            cancel_flow,
+            report_flow,
+            winddown_flow,
+        )
+        from camctl.devices.drivers.runtime import current_registry
         from camctl.reporting.maintenance import MaintenanceLimits
         from camctl.reporting.supervisor import WorkerSupervisor
         from camctl.reporting.worker import report_lock_path
@@ -242,8 +266,21 @@ async def execute_command(
         processing = Path(deps.config.paths.processing).expanduser().resolve()
         overrides.update(
             flows=flows,
-            restricted_flows={"cancel": cancel_flow(
-                ready=ready, processing=processing, unscheduled_only=True)},
+            restricted_flows={
+                "cancel": cancel_flow(
+                    ready=ready, processing=processing, unscheduled_only=True),
+                # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
+                "winddown": winddown_flow(
+                    capture_factory=session_capture_assembly(
+                        devices=deps.config.devices,
+                        drivers=current_registry(),
+                        staging=staging,
+                        wait_config=execution_wait_config,
+                        media_enabled=False,
+                    ),
+                    wait_cap_s=deps.config.clock.recovery_wait_cap_s,
+                ),
+            },
             once_report=report_flow(
                 state_db=deps.state_db,
                 staging=staging,

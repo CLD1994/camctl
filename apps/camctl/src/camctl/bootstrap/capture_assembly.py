@@ -1,15 +1,15 @@
 """拍摄推进运行时的会话级装配。
 
-按设备声明与驱动登记项组装 CaptureRuntime：控制、停止、读取与源
-端摘要端口经 port_for 按静态声明取得，媒体链（读取会话、受管检
-查修复工具与修复余量）随读取声明构造，未声明读取能力的驱动不装
-配媒体端口，处理行保持等待。时钟异常的受限会话以 media_enabled
-=False 构造：不装配媒体链，保守收场只停止并保存等待阶段。结果列
-举端口暂无生产实现，由部署注入（D5 驱动适配接入后补齐），因此本
-装配尚未接入 run 会话的默认流程集合。驱动未登记或设备未声明的动
-作本轮不推进，等待后续装配会话；异常多录修复余量读取
-devices.<id>.recording.repair_margin_s（configuration.md#配置归属），
-默认 10 秒。
+按设备声明与驱动登记项组装 CaptureRuntime：控制、停止、结果列举、
+读取与源端摘要端口经 port_for 按静态声明取得，结果列举缺省按驱动
+result 端口构造生产适配（DriverResultListing），注入 results 时整体
+替换为部署端口。媒体链（读取会话、受管检查修复工具与修复余量）
+随读取声明构造，未声明读取能力的驱动不装配媒体端口，处理行保持
+等待。时钟异常的受限会话以 media_enabled=False 构造：不装配媒体
+链，保守收场只停止并保存等待阶段。驱动未登记、设备未声明或生产
+装配下结果列举能力未声明的动作本轮不推进，等待后续装配会话；异
+常多录修复余量读取 devices.<id>.recording.repair_margin_s
+（configuration.md#配置归属），默认 10 秒。
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from typing import Any, Callable, Mapping
 
 from camctl.capture.handlers import (
     CaptureRuntime,
+    ObservedFile,
     ResultFilesPort,
     SessionRecordingState,
 )
@@ -30,6 +31,8 @@ from camctl.capture.media_flow import (
     MediaFlow,
     load_confirmed_source,
 )
+from camctl.capture.results import FileKind
+from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError,
@@ -52,7 +55,9 @@ from camctl.session.supervision import OwnedTask, Supervisor
 
 __all__ = [
     "DriverDigestReader",
+    "DriverResultListing",
     "HostMediaTools",
+    "execution_wait_config",
     "session_capture_assembly",
 ]
 
@@ -61,6 +66,11 @@ _DEFAULT_REPAIR_MARGIN_S = Decimal("10")
 
 #: 通信重试间隔的规格默认秒数（configuration.md#通信重试间隔）。
 _DEFAULT_RETRY_INTERVAL_S = Decimal("3")
+
+#: 结果列举观察的契约类型、版本与单次批量（D5 契约测试共用同一形态）。
+_RESULT_LISTED_TYPE = "result_files_listed"
+_RESULT_LISTED_VERSION = 1
+_RESULT_BATCH_SIZE = 100
 
 
 def _device_seconds(
@@ -187,6 +197,88 @@ class DriverDigestReader:
                 digest=None, error=f"digest_observation_invalid: {error}")
 
 
+class DriverResultListing:
+    """结果列举端口的驱动适配：list_results 观察转候选产物文件。
+
+    每次列举按活动身份调用驱动的 result 端口，观察经登记契约校验
+    后逐条解释为 ObservedFile；条目自身结构作为归属与完成的结构化
+    依据。登记证据缺少列举契约属于装配错误，直接暴露；调用错误在
+    没有可靠观察时表达为异常，由核实轮次按列举失败收场；可靠观察
+    与调用错误并存时观察优先。
+    """
+
+    def __init__(
+        self, driver: Any, binding: DeviceBinding, evidence: Any,
+    ) -> None:
+        self._driver = driver
+        self._binding = binding
+        self._evidence = evidence
+
+    async def list_files(self, action_id: int) -> tuple[ObservedFile, ...]:
+        from camctl.devices.evidence import validate_observation
+
+        contract = self._evidence.contract(
+            _RESULT_LISTED_TYPE, _RESULT_LISTED_VERSION)
+        request = ControlRequest(
+            operation="result",
+            binding=self._binding,
+            params={"activity_id": str(action_id)},
+        )
+        result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
+        listed = [observation for observation in result.observations
+                  if observation.type == _RESULT_LISTED_TYPE]
+        if not listed:
+            if result.error is not None:
+                raise RuntimeError(
+                    f"结果列举调用失败: {dict(result.error)}")
+            raise RuntimeError("结果列举观察缺失: 驱动未返回列举契约观察")
+        entries: list[ObservedFile] = []
+        for observation in listed:
+            validate_observation(
+                observation, contract, expected_identity=str(action_id))
+            entries.extend(
+                _observed_file(entry)
+                for entry in observation.data.get("entries", ()))
+        return tuple(entries)
+
+
+def _observed_file(entry: Any) -> ObservedFile:
+    """把一条列举条目解释为候选产物文件；结构非法明确拒绝。"""
+    if not isinstance(entry, Mapping) or not isinstance(
+            entry.get("identity"), str) or not entry["identity"]:
+        raise ValueError(f"列举条目缺少稳定文件身份: {entry!r}")
+    locator = entry.get("locator")
+    if not isinstance(locator, Mapping):
+        raise ValueError(f"列举条目缺少定位结构: {entry!r}")
+    size = entry.get("size_bytes")
+    if size is not None and (isinstance(size, bool) or not isinstance(size, int)):
+        raise ValueError(f"列举条目大小不是整数或空: {entry!r}")
+    complete = entry.get("complete")
+    if not isinstance(complete, bool):
+        raise ValueError(f"列举条目未声明完整与否: {entry!r}")
+    raw_kind = entry.get("kind", "other")
+    try:
+        kind = FileKind(raw_kind)
+    except ValueError:
+        kind = FileKind.OTHER
+    original = entry.get("original_name")
+    media = entry.get("media_type")
+    if original is not None and not isinstance(original, str):
+        raise ValueError(f"列举条目原始文件名不是文本: {entry!r}")
+    if media is not None and not isinstance(media, str):
+        raise ValueError(f"列举条目媒体类型不是文本: {entry!r}")
+    return ObservedFile(
+        identity=entry["identity"],
+        locator=dict(locator),
+        evidence=dict(entry),
+        complete=complete,
+        size_bytes=size,
+        kind=kind,
+        original_name=original,
+        media_type=media,
+    )
+
+
 def _digest_reader_factory(
     owned: Any, driver: Any, binding: DeviceBinding, evidence: Any,
 ) -> Callable[[int], DriverDigestReader]:
@@ -198,6 +290,26 @@ def _digest_reader_factory(
             driver, binding, evidence, source, str(source_device_file_id))
 
     return resolve
+
+
+def execution_wait_config(action: Mapping[str, Any]) -> CaptureWaitConfig:
+    """从已保存的动作行取得延时等待配置。
+
+    目标时长与驱动必要余量在受理时固定于执行定义（result_wait_
+    margin_ms），读取只使用首次保存的事实；部署额外等待第一版不
+    配置。定义缺少目标时长属于不可推进的任务形态，明确拒绝。
+    """
+    import json
+
+    spec = action["execution_spec_json"]
+    if isinstance(spec, str):
+        spec = json.loads(spec)
+    if not isinstance(spec, Mapping) or "target_duration_ms" not in spec:
+        raise ValueError("延时执行定义缺少 target_duration_ms")
+    return CaptureWaitConfig(
+        target_duration_ms=int(spec["target_duration_ms"]),
+        driver_margin_ms=int(spec.get("result_wait_margin_ms", 0)),
+    )
 
 
 def _repair_margin_s(declaration: Mapping[str, Any]) -> Decimal:
@@ -221,7 +333,7 @@ def session_capture_assembly(
     *,
     devices: Mapping[str, Mapping[str, Any]],
     drivers: DriverRegistry,
-    results: ResultFilesPort,
+    results: ResultFilesPort | None = None,
     staging: Path,
     wait_config: Callable[[Mapping[str, Any]], Any],
     wall_us: Callable[[], int] | None = None,
@@ -233,11 +345,13 @@ def session_capture_assembly(
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
     会话共享录像锚点表、结果列举缓存与媒体任务执行器；每个推进轮
-    次按设备构造 CaptureRuntime。设备未声明、驱动未登记或控制能力
-    未声明时返回 None，本轮不推进该设备的动作，保持已保存状态等待
-    后续会话。wall_us 与 monotonic_ns 缺省使用真实系统钟，测试可注
-    入受控读数。media_enabled=False 供时钟异常的受限会话构造：不装
-    配媒体链，保守收场不启动拷贝、核验与修复。
+    次按设备构造 CaptureRuntime。设备未声明、驱动未登记、控制能力
+    未声明或结果列举能力未声明（生产装配时）返回 None，本轮不推进
+    该设备的动作，保持已保存状态等待后续会话。results 未注入时按
+    驱动 result 端口构造生产列举适配（DriverResultListing），注入时
+    整体替换为部署提供的端口。wall_us 与 monotonic_ns 缺省使用真实
+    系统钟，测试可注入受控读数。media_enabled=False 供时钟异常的受
+    限会话构造：不装配媒体链，保守收场不启动拷贝、核验与修复。
     """
 
     anchors: dict[int, tuple[int, int]] = {}
@@ -268,6 +382,17 @@ def session_capture_assembly(
             stop_port = port_for(entry, "stop")
         except CapabilityNotDeclaredError:
             stop_port = None
+        if results is not None:
+            results_port: ResultFilesPort | None = results
+        else:
+            try:
+                result_port = port_for(entry, "result")
+            except CapabilityNotDeclaredError:
+                return None
+            results_port = DriverResultListing(
+                result_port,
+                DeviceBinding(device_id=device_id, driver_id=str(driver_id)),
+                entry.evidence)
         media = (
             _media_flow_with(
                 owned, entry, device_id, str(driver_id), tools, staging,
@@ -280,7 +405,7 @@ def session_capture_assembly(
             capture=CaptureRepository(),
             timelapse=TimelapseRepository(),
             driver=control_port,
-            results=results,
+            results=results_port,
             evidence=entry.evidence,
             wall_us=wall,
             monotonic_ns=monotonic,

@@ -352,10 +352,13 @@ class TestRunWindowExpiration:
     def _flows(deps, driver, files):
         from camctl.bootstrap.lifecycle import _report_assembly
 
+        # 生产报告与取消流程 + 本测试的自定义拍摄工厂：生产装配的
+        # scheduling 依赖进程驱动登记（测试不登记），必须排除。
         report_flows, supervisor = _report_assembly(deps)
         flows = {
             "scheduling": capture_flow(_capture_factory(driver, files)),
-            **report_flows,
+            **{name: flow for name, flow in report_flows.items()
+               if name != "scheduling"},
         }
         return flows, supervisor
 

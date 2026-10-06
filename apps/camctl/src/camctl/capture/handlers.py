@@ -231,9 +231,9 @@ class RecordingStatePort(Protocol):
 class CaptureRuntime:
     """处理器组合的真实仓储端口与设备替身注入点。
 
-    window_of 从动作行取得启动窗口；wait_config 从生效参数取得延时
-    等待配置；monotonic_ns 提供会话单调钟；evidence 登记驱动观察契
-    约供尝试结果校验。
+    window_of 从动作行取得启动窗口；wait_config 从动作行取得延时
+    等待配置（目标时长与余量读首次固定的执行定义）；monotonic_ns
+    提供会话单调钟；evidence 登记驱动观察契约供尝试结果校验。
     """
 
     owned: Any
@@ -1233,7 +1233,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         # 可停止延时的取消已生效：不再等待计时，立即按停止预算收场。
         await _cancel_timelapse_stop(context, action)
         return
-    config = context.wait_config(action["effective_params_json"])
+    config = context.wait_config(action)
     if activity[1] is None:
         plan = plan_capture_wait(
             TimelapseState(
