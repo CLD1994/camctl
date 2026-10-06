@@ -25,9 +25,15 @@ from camctl.acceptance.definitions import read_action_spec
 from camctl.history.events import EventEnvelope, load_event_registry
 from camctl.history.decoding import decode_event_row
 from camctl.history.queries import (
+    FileHistoryCursor,
+    FileHistoryKind,
+    FileHistoryPage,
+    FileHistoryRequest,
+    FileRecord,
     ReportScope,
     ReportScopeRequest,
     build_report_scope,
+    candidate_scan_spec,
     report_target_types,
 )
 from camctl.history.replay import ReplayError, reverse_row_values
@@ -324,7 +330,7 @@ class HistoryRepository:
             return rows
 
     def _seed_entity_rows(
-        self, connection: sqlite3.Connection, spec: dict, entity_id: int,
+            self, connection: sqlite3.Connection, spec: dict, entity_id: int,
     ) -> dict[tuple[str, int], dict]:
         """取得对象在当前投影的自身行（报告字段相关的归属表）。"""
         tables: dict[tuple[str, int], dict] = {}
@@ -333,6 +339,196 @@ class HistoryRepository:
         ):
             tables[(table, row_id)] = _table_row(connection, table, row_id)
         return tables
+
+    # ---- 关联文件的同边界查询 ----
+
+    def read_files_at_h(self, request: FileHistoryRequest) -> FileHistoryPage:
+        """按固定 H 查询关联的设备文件或主机中间文件。
+
+        引用类查询先恢复引用方，再按 H 时的实际引用恢复文件；必需
+        引用指向不存在的文件按一致性错误处理。候选类查询绑定扫描
+        固定上界，逐候选恢复到 H 后按当时的固定归属筛选；继续位置
+        越过已检查候选，不取最后一个有效结果。主对象在 H 不存在与
+        存在但集合为空分别表达。
+        """
+        if request.kind in (FileHistoryKind.OUTPUT_FILE, FileHistoryKind.COPY_FILES,
+                            FileHistoryKind.PROCESSING_FILES):
+            return self._read_referenced_files(request)
+        return self._read_candidate_files(request)
+
+    def _restore_owner_rows(
+            self, entity: str, entity_id: int, boundary: HistoryBoundary,
+    ) -> dict[tuple[str, int], dict] | None:
+        """恢复引用方到 H；从未存在或 H 时不存在都返回 None。"""
+        spec = load_enum_registry()["history_objects"].get(entity)
+        with self._read_connection() as connection:
+            present = _one(connection,
+                f"SELECT 1 FROM {spec['table']} WHERE id = ?", (entity_id,))
+            if present is None:
+                return None
+        rows = self.restore_entity(entity, entity_id, boundary)
+        return rows or None
+
+    def _restored_file(
+            self, entity: str, table: str, file_id: int,
+            boundary: HistoryBoundary, *,
+            required: bool,
+    ) -> FileRecord | None:
+        """恢复一个文件到 H；required 时缺失按一致性错误处理。"""
+        rows = self._restore_owner_rows(entity, file_id, boundary)
+        row = None if rows is None else rows.get((table, file_id))
+        if row is None:
+            if required:
+                raise ConsistencyError(
+                    f"H 保存的必需引用指向不存在或不完整的文件: {entity}#{file_id}")
+            raise ConsistencyError(
+                f"候选 {entity}#{file_id} 的创建元数据与恢复历史矛盾")
+        return FileRecord(file_type=entity, file_id=file_id, row=row)
+
+    def _read_referenced_files(self, request: FileHistoryRequest) -> FileHistoryPage:
+        kind = request.kind
+        boundary = request.boundary
+        if kind is FileHistoryKind.OUTPUT_FILE:
+            rows = self._restore_owner_rows("output", request.output_id, boundary)
+            if rows is None:
+                return self._absent_page()
+            output_row = rows.get(("outputs", request.output_id))
+            if output_row is None:
+                return self._absent_page()
+            refs: list[tuple[str, str, int]] = []
+            if output_row["device_file_id"] is not None:
+                refs.append(("device_file", "device_files",
+                             output_row["device_file_id"]))
+            if output_row["intermediate_file_id"] is not None:
+                refs.append(("intermediate_file", "intermediate_files",
+                             output_row["intermediate_file_id"]))
+            if not refs:
+                raise ConsistencyError(f"产物 {request.output_id} 缺少文件引用")
+        elif kind is FileHistoryKind.COPY_FILES:
+            with self._read_connection() as connection:
+                owner = _one(connection,
+                    "SELECT delivery_id, processing_id FROM file_copies WHERE id = ?",
+                    (request.copy_id,))
+            if owner is None:
+                return self._absent_page()
+            if owner[0] is not None:
+                rows = self._restore_owner_rows("delivery", int(owner[0]), boundary)
+            else:
+                with self._read_connection() as connection:
+                    action_id = _one(
+                        connection,
+                        "SELECT action_id FROM recording_processing WHERE id = ?",
+                        (int(owner[1]),))
+                if action_id is None:
+                    raise ConsistencyError(
+                        f"拷贝 {request.copy_id} 的处理行不存在: {owner[1]!r}")
+                rows = self._restore_owner_rows("action", int(action_id[0]), boundary)
+            if rows is None:
+                return self._absent_page()
+            copy_row = rows.get(("file_copies", request.copy_id))
+            if copy_row is None:
+                return self._absent_page()
+            refs = []
+            if copy_row["source_device_file_id"] is not None:
+                refs.append(("device_file", "device_files",
+                             copy_row["source_device_file_id"]))
+            if copy_row["source_intermediate_file_id"] is not None:
+                refs.append(("intermediate_file", "intermediate_files",
+                             copy_row["source_intermediate_file_id"]))
+            if copy_row["target_file_id"] is None:
+                raise ConsistencyError(f"拷贝 {request.copy_id} 缺少目标文件")
+            refs.append(("intermediate_file", "intermediate_files",
+                         copy_row["target_file_id"]))
+        else:
+            rows = self._restore_owner_rows("action", request.action_id, boundary)
+            if rows is None:
+                return self._absent_page()
+            processing = {
+                row_id: values for (table, row_id), values in rows.items()
+                if table == "recording_processing"}
+            if len(processing) > 1:
+                raise ConsistencyError(
+                    f"动作 {request.action_id} 拥有多条处理记录")
+            refs = []
+            if processing:
+                values = next(iter(processing.values()))
+                if values["source_device_file_id"] is not None:
+                    refs.append(("device_file", "device_files",
+                                 values["source_device_file_id"]))
+                if values["repair_output_file_id"] is not None:
+                    refs.append(("intermediate_file", "intermediate_files",
+                                 values["repair_output_file_id"]))
+        items = tuple(
+            self._restored_file(entity, table, file_id, boundary, required=True)
+            for entity, table, file_id in refs)
+        return FileHistoryPage(True, Page(items=items, next_cursor=None))
+
+    def _read_candidate_files(self, request: FileHistoryRequest) -> FileHistoryPage:
+        request.check_cursor()
+        table, entity, column = candidate_scan_spec(request.kind)
+        owner_table = (
+            "deliveries" if column == "owner_delivery_id" else "actions")
+        with self._read_connection() as connection:
+            current = self._boundary(connection)
+            if (request.boundary.txn_id > current.txn_id
+                    or request.boundary.last_event_id > current.last_event_id):
+                raise ConsistencyError("关联文件查询边界晚于可靠当前边界")
+            owner = _one(connection,
+                f"SELECT created_event_id FROM {owner_table} WHERE id = ?",
+                (request.owner_id,))
+            owner_present = bool(
+                owner is not None and owner[0] <= request.boundary.last_event_id)
+            if request.cursor is not None:
+                upper_id = request.cursor.upper_id
+                after_id = request.cursor.after_id
+            else:
+                upper_id = int(_one(
+                    connection, f"SELECT MAX(id) FROM {table}")[0] or 0)
+                after_id = 0
+            with closing(connection.execute(
+                    f"SELECT id FROM {table} WHERE {column} = ? AND id > ?"
+                    " AND id <= ? AND created_event_id <= ?"
+                    " ORDER BY id LIMIT ?",
+                    (request.owner_id, after_id, upper_id,
+                     request.boundary.last_event_id, request.batch_size),
+            )) as scan:
+                candidates = [int(row[0]) for row in scan.fetchall()]
+        if not owner_present:
+            return self._absent_page()
+        items: list[FileRecord] = []
+        for candidate_id in candidates:
+            record = self._restored_file(
+                entity, table, candidate_id, request.boundary, required=False)
+            assert record is not None
+            restored = record.row.get(column)
+            if restored is None:
+                # H 时归属尚未成立（如来源从未知补为确认）：不是成员。
+                if column == "source_action_id":
+                    continue
+                raise ConsistencyError(
+                    f"候选 {entity}#{candidate_id} 的固定归属 {column} 为空")
+            if restored != request.owner_id:
+                if column == "source_action_id":
+                    # 来源确认后不可改归属；不同值属于矛盾投影。
+                    raise ConsistencyError(
+                        f"候选 {entity}#{candidate_id} 的来源归属与扫描条件矛盾")
+                raise ConsistencyError(
+                    f"候选 {entity}#{candidate_id} 的固定归属 {column} 与扫描条件矛盾")
+            items.append(record)
+        if (len(candidates) < request.batch_size
+                or candidates[-1] >= upper_id):
+            next_cursor = None
+        else:
+            next_cursor = FileHistoryCursor(
+                kind=request.kind, boundary=request.boundary,
+                owner_id=request.owner_id, upper_id=upper_id,
+                after_id=candidates[-1])
+        return FileHistoryPage(True, Page(items=tuple(items), next_cursor=next_cursor))
+
+    @staticmethod
+    def _absent_page() -> FileHistoryPage:
+        return FileHistoryPage(False, Page(items=(), next_cursor=None))
+
 
     @staticmethod
     def _entity_row_ids(
@@ -344,7 +540,14 @@ class HistoryRepository:
             yield from _ids_where(connection, "actions", "id", entity_id)
             action = entity_id
             yield from _ids_where(connection, "device_activities", "action_id", action)
-            yield from _ids_where(connection, "recording_processing", "action_id", action)
+            processing_ids = _ids_where(
+                connection, "recording_processing", "action_id", action)
+            yield from processing_ids
+            # 录像动作自身包含内部处理引用的拷贝行（交付拷贝由交付
+            # 子树包含）；归属列不变，恢复范围按处理行归属。
+            for _, processing_id in processing_ids:
+                yield from _ids_where(
+                    connection, "file_copies", "processing_id", processing_id)
             yield from _ids_where(connection, "cleanup_items", "action_id", action)
             yield from _ids_where(connection, "cancel_items", "action_id", action)
             yield from _ids_where(connection, "auto_preview_links", "obtain_action_id", action)

@@ -146,11 +146,19 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **接口与依赖：** 提供 `read_files_at_h(request: FileHistoryRequest) -> FileHistoryPage`；分页部分采用 K3 提供的 Page，并遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)。前置交付：H4、H1 的独立文件及关系事件；X1/X4 接入后补齐实际文件消费者验证。
 
-- [ ] 编写失败用例。建立 `test_old_files_use_same_h`，H 后文件清理、归属补齐或关系变化，`assert file_ids_at_h == expected_old_ids`；建立 `test_filtered_empty_page_continues`，首页候选在 H 均无效而后页有效，断言首页有继续位置且结束属性为 False，后页仍返回并被消费者处理。分别覆盖末页有数据、末页为空、固定上界、读取失败及 device_file/intermediate_file 独立恢复。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_file_history.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。按规格 SQL 从限定历史目录获得候选，绑定最大候选 ID，逐候选恢复同 H 后筛选；继续位置取已检查候选，不取最后有效结果。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 H-01—H-06 全部分区落实，当前清理状态不替代旧事实。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 产物、取回、交付及内部处理的全部关联文件入口；记录门禁证据，建议以“feat: 实现关联文件的同边界历史查询”形成独立提交。
+- [x] 编写失败用例。建立 `test_old_files_use_same_h`，H 后文件清理、归属补齐或关系变化，`assert file_ids_at_h == expected_old_ids`；建立 `test_filtered_empty_page_continues`，首页候选在 H 均无效而后页有效，断言首页有继续位置且结束属性为 False，后页仍返回并被消费者处理。分别覆盖末页有数据、末页为空、固定上界、读取失败及 device_file/intermediate_file 独立恢复。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_file_history.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。按规格 SQL 从限定历史目录获得候选，绑定最大候选 ID，逐候选恢复同 H 后筛选；继续位置取已检查候选，不取最后有效结果。
+- [x] 再运行上述命令，要求全部 PASS，并核对 H-01—H-06 全部分区落实，当前清理状态不替代旧事实。
+- [x] 审阅实际接口、状态分区及失败路径，检查 产物、取回、交付及内部处理的全部关联文件入口；记录门禁证据，建议以“feat: 实现关联文件的同边界历史查询”形成独立提交。门禁证据见[H5 验证记录](#h5-验证记录)。
+
+### H5 验证记录（2026-10-06）
+
+- 反例先行：新增 `test_file_history.py` 16 项在实现前运行，FAIL 为 `FileHistoryKind` 等接口不存在，属目标行为缺失。首轮实现后 12 项失败均指向同一测试准备错误：raw SQL 种子的锚定行没有对象目录，被恢复按契约正确拒绝；改为被恢复行一律经生产命令创建（观察、所有权、完成、修复链、受理、完成登记、授予），raw 种子只保留不被恢复的所属对象与处理、拷贝子行后全绿。
+- 实现摘要：`queries.py` 定义七种查询种类、请求与继续位置的精确校验（种类、所属对象恰一、H 与继续位置一致）及候选扫描规格；`repositories/history.py` 新增 `read_files_at_h`，引用类先恢复引用方再按 H 引用恢复文件，候选类在短读事务绑定固定上界后逐候选恢复筛选，继续位置取本页最后检查的候选。同轮修复两处实现：动作子树枚举补上处理行拥有的拷贝行（此前仅交付子树包含）；拷贝引用方的所属动作从处理行取得，不再误用处理身份。
+- 分区核对（规格“本页检查结果”六行）：已读完与末页空、越过无效候选、返回 H 事实含当时空值、必需引用缺失为一致性错误、读取失败按状态库错误传播分别有专测；归属矛盾的防御分支在真实写入下由“来源确认一次后不可改”守卫保证不可达，与必需引用缺失共用同一错误通道。取消与退出的资源释放由每次调用的短读事务与连接关闭结构保证，接口不跨调用持有游标或半成品。当前清理状态不替代旧事实由在场转缺席与成品字节固定两用例验证。
+- 测试证据（Python 3.11，Windows）：`test_file_history.py` 16/16；history 目录 80；outputs 目录 1784 通过 1 跳过；单元全量 3281（三轮，前两轮出现与改动无交集的位置漂移，涉事测试单独复跑通过，定性本机瞬时负载）；根 Python 集成 34 项及子测试；根 Node 集成 111；check-database-spec 3079 项断言、check-doc-links 2930 链接、check-protocol、check-event-transitions、check-report-dependencies 全部通过（event-transitions 首次运行报 history-formats.md 需同步，--write 后 `git diff --ignore-cr-at-eol` 为空，定性 CRLF 行尾假差异）。
+- 后置：X1/X4 接入后的实际文件消费者验证按任务声明后置；本验证不覆盖真实设备读取与多进程并发。
 
 ### H6 快照维护与会话退出
 
