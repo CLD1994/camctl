@@ -33,7 +33,8 @@ args = sys.argv[1:]
 input_path = args[-1]
 with open(input_path, "rb") as source:
     size = len(source.read())
-print(json.dumps({"format": {"duration": f"{size / 100:.6f}"}}))
+print(json.dumps({"streams": [{"codec_type": "video"}],
+                 "format": {"duration": f"{size / 100:.6f}"}}))
 """
 
 _REPAIR_BODY = """
@@ -164,11 +165,31 @@ async def test_subprocess_numeric_duration_keeps_all_digits(tmp_path: Path) -> N
     input_ref, _, roots, _, _ = _setup(tmp_path)
     tool = _tool(
         tmp_path, "exact-probe",
-        'print(\'{"format":{"duration":1.00000000000000000000000000001e-3}}\')',
+        'print(\'{"streams": [{"codec_type": "video"}],'
+        '"format":{"duration":1.00000000000000000000000000001e-3}}\')',
     )
     result = await probe_media(input_ref, roots, ProbeRequest(ffprobe=tool))
     assert result.error is None
     assert result.duration_s == Decimal("0.00100000000000000000000000000001")
+
+
+async def test_subprocess_audio_only_container_is_not_video_duration(
+        tmp_path: Path) -> None:
+    """真实子进程：无视频流的容器时长不作为视频时长事实。
+
+    容器时长语义（2026-10-06 用户裁决）要求有视频流；纯音频容器
+    有时长也不采用，按未确认分类不补造。
+    """
+    input_ref, _, roots, _, _ = _setup(tmp_path)
+    tool = _tool(
+        tmp_path, "audio-only-probe",
+        'print(\'{"streams": [{"codec_type": "audio"}],'
+        '"format":{"duration":"3.5"}}\')',
+    )
+    result = await probe_media(input_ref, roots, ProbeRequest(ffprobe=tool))
+    assert result.duration_s is None
+    assert result.error is not None
+    assert result.error.startswith("no_video_stream")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="需要 POSIX SIGTERM 处理器")

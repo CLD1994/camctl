@@ -68,7 +68,8 @@ _POLICY = MediaPolicy(repair_margin_s=Decimal("10"))
 
 _PROBE_BODY = """
 import json, sys
-print(json.dumps({"format": {"duration": "75.125"}}))
+print(json.dumps({"streams": [{"codec_type": "video"}],
+                 "format": {"duration": "75.125"}}))
 """
 
 _FAILING_PROBE_BODY = """
@@ -409,6 +410,41 @@ async def test_check_pipeline_tool_failure_is_terminal(pipeline, tmp_path) -> No
     assert media["check_status"] == "failed"
     assert media["duration"] == {"status": "unknown"}
     assert media["error"]["code"] == "tool_failed"
+    assert media["error"]["stage"] == "probe"
+    assert _events(owned, 18, 2) == 0
+
+
+@pytest.mark.asyncio
+async def test_check_pipeline_audio_only_saves_unconfirmed(
+        pipeline, tmp_path) -> None:
+    """无视频流的容器：时长不作为视频时长事实，按未确认保存不补造。
+
+    容器时长语义（2026-10-06 用户裁决）要求有视频流：纯音频容器
+    的 format.duration 存在也不采用，时长判定保持未知，修复决定不
+    固定。
+    """
+    owned, staging, tools = pipeline
+    tools.probe_request = ProbeRequest(
+        ffprobe=_tool(
+            tmp_path, "probe-audio-only",
+            'import json\n'
+            'print(json.dumps({"streams": [{"codec_type": "audio"}],'
+            ' "format": {"duration": "75.125"}}))\n'))
+    step = await execute_check(CheckContext(
+        processing=_status(owned), input_file=_input_ref(staging),
+        policy=_POLICY, tools=tools, saves=_RepositorySaves(owned),
+        occurred_at=_NOW + 10))
+    assert step.phase is CheckExecutionPhase.CHECK_TERMINAL
+    row = _row(
+        owned,
+        "SELECT check_state, repair_state, media_json FROM recording_processing"
+        " WHERE id=1")
+    assert row[0] == 5
+    assert row[1] == 1
+    media = _json_value(row[2])
+    assert media["check_status"] == "unconfirmed"
+    assert media["duration"] == {"status": "unknown"}
+    assert media["error"]["code"] == "no_video_stream"
     assert media["error"]["stage"] == "probe"
     assert _events(owned, 18, 2) == 0
 

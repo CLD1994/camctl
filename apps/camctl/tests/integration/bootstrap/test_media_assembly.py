@@ -72,7 +72,10 @@ _EVIDENCE = EvidenceRegistry(
     )
 )
 
-_PROBE_BODY = 'print(\'{"format": {"duration": "1"}}\')\n'
+_PROBE_BODY = (
+    'print(\'{"streams": [{"codec_type": "video"}],'
+    ' "format": {"duration": "1"}}\')\n'
+)
 _REPAIR_BODY = (
     "import shutil, sys\n"
     "shutil.copyfile(sys.argv[-2], sys.argv[-1])\n"

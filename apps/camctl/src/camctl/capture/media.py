@@ -177,7 +177,10 @@ _REPAIR_STATE = enum_for("recording_processing.repair_state")
 _DISCARD_STATE = enum_for("recording_processing.discard_state")
 
 #: 工具正常结束但未取得可靠时长的分类：核验未确认，不是工具失败。
-_UNCONFIRMED_PROBE_CODES = frozenset({"missing_duration", "invalid_structure"})
+#: 无视频流的容器不提供视频时长事实（容器时长语义要求有视频流），
+#: 与缺少时长、结构不符同样按未确认处理。
+_UNCONFIRMED_PROBE_CODES = frozenset(
+    {"missing_duration", "invalid_structure", "no_video_stream"})
 
 
 def _error_from_message(stage: str, message: str) -> ProcessingError:

@@ -96,9 +96,15 @@ def test_probe_tool_error_is_failed_check(error: str) -> None:
 @pytest.mark.parametrize("error", [
     "missing_duration: 缺少时长字段",
     "invalid_structure: 时长不是数字",
+    "invalid_structure: 输出缺少流信息段",
+    "no_video_stream: 容器没有视频流",
 ])
 def test_unreliable_duration_is_unconfirmed_check(error: str) -> None:
-    """工具正常结束但未取得可靠时长：核验未确认，时长判定未知。"""
+    """工具正常结束但未取得可靠时长：核验未确认，时长判定未知。
+
+    无视频流的容器不提供视频时长事实（容器时长语义只接受有视频
+    流的容器时长），与缺少时长同样按未确认分类不补造。
+    """
     observation = check_observation_from_probe(
         MediaProbe(duration_s=None, error=error))
     assert observation.phase is CheckPhase.UNCONFIRMED

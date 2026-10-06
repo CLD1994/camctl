@@ -187,7 +187,8 @@ async def test_hash_failure_keeps_exit_and_sync_evidence(fake: FakeMedia) -> Non
 async def test_probe_duration_keeps_full_precision(fake: FakeMedia) -> None:
     fake.outcome = RawToolOutcome(
         exit=LocalExit(exit_code=0),
-        output=b'{"format": {"duration": "3.016999"}}',
+        output=(b'{"streams": [{"codec_type": "video"}],'
+                b' "format": {"duration": "3.016999"}}'),
         error=None,
         used_grace_s=None,
     )
@@ -197,6 +198,67 @@ async def test_probe_duration_keeps_full_precision(fake: FakeMedia) -> None:
     assert probe.duration_s == Decimal("3.016999")
     # 全精度保留：不舍入到目标毫秒。
     assert probe.duration_s != Decimal("3.017")
+
+
+async def test_probe_accepts_video_only_container_without_audio(
+        fake: FakeMedia) -> None:
+    """容器时长作为视频时长事实：没有音频流不影响时长取得。"""
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(b'{"streams": [{"codec_type": "video"}],'
+                b' "format": {"duration": "6"}}'),
+        error=None,
+        used_grace_s=None,
+    )
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+    assert probe.error is None
+    assert probe.duration_s == Decimal("6")
+
+
+@pytest.mark.parametrize(
+    "streams",
+    [
+        '[{"codec_type": "audio"}]',
+        '[{"codec_type": "audio"}, {"codec_type": "data"}]',
+        '[]',
+        '[{"other": "subtitle"}]',
+    ],
+)
+async def test_probe_without_video_stream_is_not_video_duration(
+        fake: FakeMedia, streams: str) -> None:
+    """无视频流的容器不提供视频时长事实，明确分类不补造。"""
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(f'{{"streams": {streams}, "format": {{"duration": "3.5"}}}}'
+                ).encode(),
+        error=None,
+        used_grace_s=None,
+    )
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+    assert probe.duration_s is None
+    assert probe.error is not None
+    assert probe.error.startswith("no_video_stream")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"format": {"duration": "3.5"}}',
+        b'{"streams": "video", "format": {"duration": "3.5"}}',
+        b'{"streams": {}, "format": {"duration": "3.5"}}',
+    ],
+)
+async def test_probe_missing_stream_section_is_invalid_structure(
+        fake: FakeMedia, payload: bytes) -> None:
+    """工具输出缺少流信息段：结构不符，不解释为有视频。"""
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0), output=payload, error=None,
+        used_grace_s=None,
+    )
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+    assert probe.duration_s is None
+    assert probe.error is not None
+    assert probe.error.startswith("invalid_structure")
 
 
 async def test_probe_invalid_structure(fake: FakeMedia) -> None:
@@ -316,7 +378,8 @@ async def test_tool_completion_requires_exit_and_no_call_error(
 ) -> None:
     fake.outcome = RawToolOutcome(
         exit=exit_value,
-        output=b'{"format":{"duration":"1.25"}}',
+        output=(b'{"streams": [{"codec_type": "video"}],'
+                b' "format":{"duration":"1.25"}}'),
         error=reason,
         used_grace_s=Decimal("5") if reason else None,
     )
@@ -363,7 +426,8 @@ async def test_probe_numeric_representations_are_exact(
 ) -> None:
     fake.outcome = RawToolOutcome(
         exit=LocalExit(exit_code=0),
-        output=('{"format":{"duration":' + literal + '}}').encode(),
+        output=('{"streams": [{"codec_type": "video"}],'
+                '"format":{"duration":' + literal + '}}').encode(),
         error=None,
         used_grace_s=None,
     )

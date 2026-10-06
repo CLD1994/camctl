@@ -51,7 +51,10 @@ from .test_recording_stop import (
 pytestmark = pytest.mark.asyncio
 
 #: 检查工具按目标时长回报的探测时长（与 _RecordCatalog 的 6 秒一致）。
-_PROBE_BODY_SIX = 'print(\'{"format": {"duration": "6"}}\')\n'
+_PROBE_BODY_SIX = (
+    'print(\'{"streams": [{"codec_type": "video"}],'
+    ' "format": {"duration": "6"}}\')\n'
+)
 
 
 class _FakeWinddownClock:

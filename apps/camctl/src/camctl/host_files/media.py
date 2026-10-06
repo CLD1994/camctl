@@ -197,13 +197,16 @@ async def _probe(
     """经 ffprobe 取得媒体时长等必要事实。
 
     工具不可用、退出失败、输出结构非法与字段缺失分别分类；时长
-    以 Decimal 保留全部精度，不舍入到任何目标粒度。
+    以 Decimal 保留全部精度，不舍入到任何目标粒度。视频时长事实
+    取容器时长（format.duration，含估算值，误差几秒可接受）；无
+    视频流的容器不提供视频时长，明确分类不补造。
     """
     host = resolve_file(input, roots)
     argv = (
         (request.ffprobe, "-v", "error")
         + request.extra_args
-        + ("-show_entries", "format=duration", "-of", "json", str(host.path))
+        + ("-show_entries", "format=duration:stream=codec_type",
+           "-of", "json", str(host.path))
     )
     outcome = await _run_tool(argv, control)
     if isinstance(outcome, str):
@@ -227,6 +230,15 @@ async def _probe(
         return MediaProbe(duration_s=None, error="invalid_structure: 时长不是数字")
     if not duration.is_finite() or duration < 0:
         return MediaProbe(duration_s=None, error="invalid_structure: 时长必须是有限非负数")
+    streams = payload.get("streams")
+    if not isinstance(streams, list):
+        return MediaProbe(duration_s=None, error="invalid_structure: 输出缺少流信息段")
+    if not any(
+            isinstance(stream, dict)
+            and stream.get("codec_type") == "video"
+            for stream in streams):
+        return MediaProbe(
+            duration_s=None, error="no_video_stream: 容器没有视频流")
     return MediaProbe(duration_s=duration, error=None)
 
 
