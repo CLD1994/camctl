@@ -61,6 +61,7 @@ __all__ = [
     "DriverReadSessions",
     "MediaFlow",
     "RecordingInputCopies",
+    "load_confirmed_source",
     "load_processing_status",
     "run_recording_media",
 ]
@@ -69,6 +70,23 @@ __all__ = [
 _SEGMENT_SIZE = 4 * 1024 * 1024
 _READ_CONFIG = OperationConfig(
     max_attempts=3, timeout_s=Decimal("60"), retry_interval_s=Decimal("1"))
+
+
+def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile:
+    """按身份事实装载已确认写完的设备源文件；未完成不可读取。"""
+    with closing(owned.connection.execute(
+        "SELECT identity_key, locator_json, size_bytes, completion_state"
+        " FROM device_files WHERE id = ?", (file_id,)
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"设备文件不存在: {file_id}")
+    identity_key, locator_raw, size_bytes, completion = row
+    if completion != 3 or size_bytes is None:
+        raise ConsistencyError(
+            f"设备文件尚未确认写完，不能读取: {file_id}")
+    return SourceFile(
+        identity_key, parse_exact_json(locator_raw), int(size_bytes))
 
 
 class DriverReadSessions:
@@ -85,19 +103,7 @@ class DriverReadSessions:
         self._ticket = ticket
 
     async def open_session(self, source_device_file_id: int, offset: int):
-        with closing(self._owned.connection.execute(
-            "SELECT identity_key, locator_json, size_bytes, completion_state"
-            " FROM device_files WHERE id = ?", (source_device_file_id,)
-        )) as cursor:
-            row = cursor.fetchone()
-        if row is None:
-            raise ConsistencyError(f"设备文件不存在: {source_device_file_id}")
-        identity_key, locator_raw, size_bytes, completion = row
-        if completion != 3 or size_bytes is None:
-            raise ConsistencyError(
-                f"设备文件尚未确认写完，不能读取: {source_device_file_id}")
-        source = SourceFile(
-            identity_key, parse_exact_json(locator_raw), int(size_bytes))
+        source = load_confirmed_source(self._owned, source_device_file_id)
         return await self._driver.open_read(source, offset, self._ticket)
 
 
@@ -235,7 +241,9 @@ class MediaFlow:
     """媒体链调用方的端口集合；工具与摘要读取由装配层注入。
 
     digest_supported 是读取绑定的驱动摘要能力声明；首次媒体处理
-    前把来源文件的摘要能力从未判定一次固定。
+    前把来源文件的摘要能力从未判定一次固定。digest_for 按源设备
+    文件构造源端摘要读取端口，装配层持有驱动端口时提供；固定的
+    digest 端口仍适用于单一源的简单装配。
     """
 
     owned: OwnedConnection
@@ -246,6 +254,7 @@ class MediaFlow:
     occurred_at: Callable[[], int]
     digest_supported: bool
     digest: Any = None
+    digest_for: Callable[[int], Any] | None = None
     repair_extension: str | None = None
 
     def saves(self) -> CaptureProcessingSaves:
@@ -290,6 +299,8 @@ async def run_recording_media(
     """
     _ensure_checksum_support(flow, source_device_file_id)
     status = load_processing_status(flow.owned, processing_id)
+    digest = (flow.digest_for(source_device_file_id)
+              if flow.digest_for is not None else flow.digest)
     input_step = await obtain_recording_input(InputContext(
         action_id=action_id,
         processing_id=processing_id,
@@ -301,7 +312,7 @@ async def run_recording_media(
         copies=flow.copies(),
         sessions=flow.sessions,
         occurred_at=flow.occurred_at(),
-        digest=flow.digest,
+        digest=digest,
     ))
     if input_step.input_file is None:
         return input_step

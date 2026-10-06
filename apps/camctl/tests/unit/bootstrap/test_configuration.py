@@ -148,3 +148,31 @@ class TestSnapshotImmutability:
             load_config({"devices": {"cam-1": {"driver": "adb"}}}, ConfigDefaults())
         with pytest.raises(ConfigError, match="driver"):
             load_config({"devices": {"cam-1": {"kind": "camera"}}}, ConfigDefaults())
+
+
+class TestDeviceRecordingConfig:
+    """devices.<id>.recording 的录像配置键：有限非负秒数。"""
+
+    @staticmethod
+    def _device(recording) -> dict:
+        return {"kind": "camera", "driver": "adb", "recording": recording}
+
+    def test_repair_margin_accepts_number_and_text(self) -> None:
+        for value, expected in ((2, Decimal("2")), ("2.5", Decimal("2.5")),
+                                (0, Decimal("0"))):
+            cfg = load_config(
+                {"devices": {"cam-1": self._device(
+                    {"repair_margin_s": value})}}, ConfigDefaults())
+            assert cfg.devices["cam-1"]["recording"]["repair_margin_s"] == expected
+
+    def test_repair_margin_rejects_invalid_values(self) -> None:
+        for bad in (-1, "-0.5", True, None, "soon", "NaN", "Infinity", 1.0):
+            with pytest.raises(ConfigError, match="repair_margin_s"):
+                load_config(
+                    {"devices": {"cam-1": self._device(
+                        {"repair_margin_s": bad})}}, ConfigDefaults())
+
+    def test_recording_must_be_table(self) -> None:
+        with pytest.raises(ConfigError, match="recording"):
+            load_config(
+                {"devices": {"cam-1": self._device(12)}}, ConfigDefaults())

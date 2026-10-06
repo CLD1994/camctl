@@ -49,12 +49,40 @@ def _due_pending_actions(
                 for row in cursor.fetchall()]
 
 
-def capture_flow(capture_factory: Callable[[Any], Any]) -> Callable[[Any], Any]:
-    """构造推进拍摄工作的调度流程。
+def _ready_device_groups(
+    connection: Any, descriptors: Iterable,
+) -> list[tuple[str, list]]:
+    """把就绪描述符按设备身份分组，保持原推进顺序。"""
+    descriptor_list = list(descriptors)
+    identities = [descriptor.action_id for descriptor in descriptor_list]
+    device_of: dict[int, str] = {}
+    if identities:
+        placeholders = ",".join("?" * len(identities))
+        with closing(connection.execute(
+            f"SELECT id, device_id FROM actions WHERE id IN ({placeholders})",
+            identities,
+        )) as cursor:
+            device_of = {int(row[0]): row[1] for row in cursor.fetchall()}
+    groups: list[tuple[str, list]] = []
+    members: dict[str, list] = {}
+    for descriptor in descriptor_list:
+        device_id = device_of.get(descriptor.action_id)
+        if device_id is None:
+            continue
+        if device_id not in members:
+            members[device_id] = []
+            groups.append((device_id, members[device_id]))
+        members[device_id].append(descriptor)
+    return groups
 
-    capture_factory 接收本轮流量的数据库连接，返回组装好的
-    CaptureRuntime；生产装配提供真实驱动端口，集成测试注入受
-    契约约束的替身。
+
+def capture_flow(capture_factory: Callable[[Any, str], Any]) -> Callable[[Any], Any]:
+    """构造推进拍摄工作的调度程序。
+
+    capture_factory 接收本轮流量的数据库连接与设备身份，返回该设
+    备组装好的 CaptureRuntime；返回 None 表示该设备本轮不推进（如
+    驱动未登记），对应动作保持已保存状态等待后续会话。生产装配提
+    供真实驱动端口，集成测试注入受契约约束的替身。
     """
 
     async def flow(context: Any) -> None:
@@ -107,8 +135,12 @@ def capture_flow(capture_factory: Callable[[Any], Any]) -> Callable[[Any], Any]:
                     raise StateDbFailure(
                         f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
             descriptors: Iterable = ready_capture_actions(owned.connection, now)
-            runtime = capture_factory(owned)
-            await dispatch_ready(runtime, descriptors)
+            for device_id, group in _ready_device_groups(
+                    owned.connection, descriptors):
+                runtime = capture_factory(owned, device_id)
+                if runtime is None:
+                    continue
+                await dispatch_ready(runtime, group)
         finally:
             owned.connection.close()
 

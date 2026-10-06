@@ -216,7 +216,7 @@ def _record_factory(driver, stopper, results, clock):
     """会话共享锚点表：推进循环每轮重建运行时，锚点跨轮保留。"""
     anchors: dict[int, tuple[int, int]] = {}
 
-    def build(owned) -> CaptureRuntime:
+    def build(owned, device_id: str) -> CaptureRuntime:
         runtime = CaptureRuntime(
             owned=owned,
             scheduling=SchedulingRepository(),

@@ -2767,6 +2767,18 @@ class _FileOwnershipCommand:
         facts = self._load(connection, command.file_id)
         if (facts["source_action_id"] is not None
                 or facts["ownership_evidence_json"] is not None):
+            if (facts["source_action_id"] == command.source_action_id
+                    and facts["ownership_evidence_json"] is not None
+                    and facts["role"] == command.role
+                    and facts["original_device_file_id"]
+                    == command.paired_device_file_id):
+                # 重复列举再次观察到同一归属事实：按已确认处理，
+                # 保持已保存依据，不产生重复事件。
+                return CommandPlan(
+                    events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True,
+                    result=ObservationOutcome(
+                        ObservationDisposition.ALREADY, command.file_id))
             raise ConsistencyError("文件来源已确认，不能再次确认或改指")
         if facts["role"] != int(_FILE_ROLE.UNDETERMINED):
             raise ConsistencyError("已确认用途的文件不能再次确认归属")
@@ -2863,6 +2875,20 @@ class _FileCompleteCommand:
         command = self._command
         facts = self._load(connection, command.file_id)
         current = facts["completion_state"]
+        if (command.state == current
+                and command.state == int(_FILE_COMPLETION.COMPLETE)):
+            # 重复列举再次观察到同一完成事实：长度一致按已确认处
+            # 理，保持已保存依据；已完成文件的长度固定，不一致是
+            # 设备观察矛盾。
+            if command.size_bytes != facts["size_bytes"]:
+                raise ConsistencyError(
+                    "已完成文件的完整大小与既往确认不一致:"
+                    f" {facts['size_bytes']!r} -> {command.size_bytes!r}")
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ObservationOutcome(
+                    ObservationDisposition.ALREADY, command.file_id))
         allowed = _FILE_COMPLETION_NEXT.get(current, frozenset())
         if command.state not in allowed:
             raise ConsistencyError(

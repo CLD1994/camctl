@@ -195,7 +195,7 @@ class _SequentialActivityDriver(DriverDouble):
 
 
 def _capture_factory(driver: DriverDouble, files: dict):
-    def build(owned) -> CaptureRuntime:
+    def build(owned, device_id: str) -> CaptureRuntime:
         return CaptureRuntime(
             owned=owned,
             scheduling=SchedulingRepository(),

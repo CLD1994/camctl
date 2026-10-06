@@ -446,6 +446,32 @@ def _probability_field(section: Mapping[str, Any], key: str, default: str) -> De
     return _require_probability(raw, f"log.{key}")
 
 
+def _validated_recording(device_id: str, raw: Any) -> Mapping[str, Any] | None:
+    """校验并规范化设备录像配置键；未提供时返回 None。
+
+    repair_margin_s 允许有限非负秒数（数字或精确文本），加载时统一
+    为 Decimal；其余键按原样冻结，随消费方接入再校验。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ConfigError(f"devices.{device_id}.recording 必须是表: {raw!r}")
+    recording = dict(raw)
+    if "repair_margin_s" in recording:
+        name = f"devices.{device_id}.recording.repair_margin_s"
+        value = recording["repair_margin_s"]
+        if isinstance(value, str):
+            try:
+                value = Decimal(value)
+            except InvalidOperation as error:
+                raise ConfigError(
+                    f"{name} 必须是数值秒: {recording['repair_margin_s']!r}"
+                ) from error
+        recording["repair_margin_s"] = _require_positive_seconds(
+            value, name, allow_zero=True)
+    return recording
+
+
 def _validate_devices(raw: Any) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         raise ConfigError(f"devices 必须是表: {raw!r}")
@@ -457,5 +483,10 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
             raise ConfigError(f"devices.{device_id} 必须是表: {declaration!r}")
         _require_nonempty_str(declaration.get("kind"), f"devices.{device_id}.kind")
         _require_nonempty_str(declaration.get("driver"), f"devices.{device_id}.driver")
-        validated[device_id] = _freeze(declaration)
+        normalized = dict(declaration)
+        recording = _validated_recording(
+            device_id, normalized.pop("recording", None))
+        if recording is not None:
+            normalized["recording"] = recording
+        validated[device_id] = _freeze(normalized)
     return MappingProxyType(validated)

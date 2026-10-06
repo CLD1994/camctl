@@ -166,7 +166,7 @@ def _timelapse_plan(request_id: str, scheduled_at: str) -> dict:
 
 def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = None,
                        stopper=None, wait_ms: int = 2_000):
-    def build(owned) -> CaptureRuntime:
+    def build(owned, device_id: str) -> CaptureRuntime:
         overrides = {} if check_config is None else {"check_config": check_config}
         if stopper is not None:
             overrides["stopper"] = stopper
