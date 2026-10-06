@@ -141,7 +141,7 @@ def _failure_log_wiring(deps: RuntimeDeps):
         if channel is None:
             channel = FileChannel(
                 Path(deps.config.paths.log_file).expanduser(),
-                max_bytes=deps.config.log.max_size,
+                max_bytes=deps.config.log.max_size_bytes,
                 file_count=deps.config.log.file_count,
             )
             channel_box["channel"] = channel

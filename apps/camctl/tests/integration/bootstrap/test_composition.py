@@ -228,6 +228,70 @@ class TestResourceCleanup:
         assert probe_admission(deps.admission_lock).is_free
 
 
+class TestFailureLogComposition:
+    """真实装配的报告失败日志副本：触发交付、标记抑制与库失效分类。
+
+    execute_command 的流程注入点只替换业务流程；日志副本装配
+    （FailureLogService、文件通道与标记存储）保持生产来源，验证
+    装配产物在真实部署布局下完成交付并抑制重复复制。
+    """
+
+    @staticmethod
+    def _copies(ready: Path) -> list[Path]:
+        from camctl.logging_runtime.copies import is_copy_file_name
+
+        return sorted(
+            path for path in ready.iterdir() if is_copy_file_name(path.name))
+
+    async def test_report_failure_copy_delivery_and_suppression(
+            self, tmp_path: Path) -> None:
+        cfg = _config_for(tmp_path)
+        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        ready = Path(cfg.paths.ready)
+        logs_dir = Path(cfg.paths.staging) / "logs"
+
+        async def report_crashes(context) -> None:
+            raise RuntimeError("生成通道意外损坏")
+
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=RecordingCatalog())
+        try:
+            outcome = await execute_command(deps, None, flows={"report": report_crashes})
+            assert outcome.succeeded is True  # 空库无待办：会话正常关闭。
+            copies = self._copies(ready)
+            assert len(copies) == 1
+            content = copies[0].read_bytes()
+            # 副本包含触发记录（真实装配的错误文本）。
+            assert "报告处理失败: RuntimeError: 生成通道意外损坏".encode() in content
+            # 标记可靠存在；原日志留在配置路径。
+            from camctl.logging_runtime.copies import MARKER_NAME
+
+            assert (logs_dir / MARKER_NAME).exists()
+            assert Path(cfg.paths.log_file).exists()
+
+            # 同一部署再次报告失败：标记抑制另一份副本（无递归复制）。
+            again = await execute_command(
+                deps, None, flows={"report": report_crashes})
+            assert again.succeeded is True
+            assert self._copies(ready) == copies
+        finally:
+            close_runtime(deps)
+
+    async def test_broken_state_db_exits_with_state_error(
+            self, tmp_path: Path) -> None:
+        cfg = _config_for(tmp_path)
+        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        # 状态库文件失效（非数据库内容）：run 会话按状态库错误分类退出，
+        # 不把它解释为报告失败或成功。
+        Path(cfg.paths.state_db).write_bytes(b"not-a-sqlite-database")
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=RecordingCatalog())
+        try:
+            outcome = await execute_command(deps, None)
+            assert outcome.succeeded is False
+            assert outcome.reason == "state_db_error"
+        finally:
+            close_runtime(deps)
+
+
 async def test_default_runtime_rejects_undeployed_driver(tmp_path):
     from dataclasses import replace
     cfg = _config_for(tmp_path)
