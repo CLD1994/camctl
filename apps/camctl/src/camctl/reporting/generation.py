@@ -162,13 +162,24 @@ def _plan_facts(
     facts: dict[str, dict[int, dict]] = {}
     _merge(facts, repo.restore_entity("plan", subtree.plan_id, boundary))
     for action_id, action_selection in subtree.selection.get("action", {}).items():
-        _merge(facts, repo.restore_entity("action", action_id, boundary))
+        rows = repo.restore_entity("action", action_id, boundary)
+        _merge(facts, rows)
         for sync_id in repo.related_entity_ids("state_syncs", "action_id", action_id):
             _merge(facts, repo.restore_entity("state_sync", sync_id, boundary))
         for output_id in action_selection.get("output", {}):
             _merge_output(repo, facts, output_id, boundary)
         for delivery_id in action_selection.get("delivery", {}):
             _merge_delivery(repo, facts, delivery_id, boundary)
+        # 取回失败汇总覆盖该动作在 H 的全部关联交付，不受本次报告的
+        # 交付增量子集合限制：条目引用的交付行随动作事实一并恢复。
+        referenced = sorted({
+            int(values["delivery_id"])
+            for (table, _row_id), values in rows.items()
+            if table == "obtain_items" and values.get("delivery_id") is not None
+        })
+        for delivery_id in referenced:
+            if delivery_id not in action_selection.get("delivery", {}):
+                _merge_delivery(repo, facts, delivery_id, boundary)
     return facts
 
 

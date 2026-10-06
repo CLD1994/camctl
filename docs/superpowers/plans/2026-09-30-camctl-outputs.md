@@ -427,11 +427,23 @@ X11 的阶段验证：`outputs/work_files.py` 提供 `classify_work_file`（决�
 
 **接口与依赖：** 使用 X1—X11、C1—C8、N1—N5、H1—H6 和 R1—R8 的真实接口。前置交付：X1—X11、C1—C8、N1—N5、H1—H6、R1—R8；H7/N6 为同层验收，不作为前置。
 
-- [ ] 编写失败用例。在 `test_output_lifecycles_are_independent` 中源后来清理、原 delivery 已准备，`assert delivery_can_continue is True`；同 output 两个新请求产生独立交付，同请求重送不产生新交付。所有来源/资格/拷贝/清理/交接边界中断后核对同 H 的事实及固定报告字节。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_outputs_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。逐项映射 output-verification 和数据库验收 01—51、69—72 的适用条目，执行真实仓储、文件、受管调用和报告组件组合；设备使用契约替身，真实 C 领取的跨组件验证由 I5 承接。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 所有来源和文件生命周期闭合，没有仅正常路径的通过声明。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部错误、未知、取消、预算、清理及跨请求结果保持；记录门禁证据，建议以“test: 验证产物取回清理完整闭环”形成独立提交。
+- [x] 编写失败用例。在 `test_output_lifecycles_are_independent` 中源后来清理、原 delivery 已准备，`assert delivery_can_continue is True`；同 output 两个新请求产生独立交付，同请求重送不产生新交付。所有来源/资格/拷贝/清理/交接边界中断后核对同 H 的事实及固定报告字节。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_outputs_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。（初始红：冻结报告用例在 `public_projection.py` 的 `failure_union` 占位处失败——取回失败汇总投影未实施，属组合暴露的真缺口；跨窗口用例随后在报告 2 缺失败条目处失败——交付事实装配不受增量子集限制的规则未落实。）
+- [x] 实施本任务。逐项映射 output-verification 和数据库验收 01—51、69—72 的适用条目，执行真实仓储、文件、受管调用和报告组件组合；设备使用契约替身，真实 C 领取的跨组件验证由 I5 承接。
+- [x] 再运行上述命令，要求全部 PASS，并核对 所有来源和文件生命周期闭合，没有仅正常路径的通过声明。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部错误、未知、取消、预算、清理及跨请求结果保持；记录门禁证据，建议以“test: 验证产物取回清理完整闭环”形成独立提交。
+
+X12 验证记录（2026-10-06）：
+
+**组合形态。** 单计划四动作（拍摄→两个取回→范围清理）经真实受理、调度、拷贝、交付、清理与报告组件闭环运行：受理 `accept_input` 建立计划；`start_action`+`dispatch_ready` 用契约驱动替身（`_ActivityDriver`+`ResultsDouble`）完成拍摄并登记正式产物；两个取回各自经 `resolve_sources`（执行期固定来源）、`select_outputs`+`fix_selection`、`grant_file`（共同建档）、分段拷贝与 `complete_copy` 到 PREPARED；范围清理经 `fix_cleanup_targets`+`delete_source_file`（契约删除替身）真实删除源文件；交付经 `publish_delivery` 发布；`finish_obtain` 保存取回终态。设备交互全部使用受接口契约约束的替身；普通动作（取回/清理）的 PENDING→RUNNING 开始命令不存在于生产入口（`StartActionCommand` 只适用拍摄），该前提与 X2—X11 一致以投影事实表达，命令装配归阶段 2/I3/I5。清理来源采用与拍摄同计划的 `action_name` 引用（受理即时 FIXED）；精确 `output_ids` 清理与跨计划清理的执行期来源固定同为 run 循环装配范围，组合中不伪造命令。
+
+**组合暴露的缺口与实施。** ① `failure_union`（取回失败汇总）公开投影未实施（原占位直接抛规则错误）：按登记实施于 `contracts/public_projection.py`——分支沿登记关系链正向展开并保留到达路径（`_relation_paths`），分支投影按自身 `when` 过滤（不满足跳过），条目按（固定依赖 ID、分支序、分支身份）排序，同一分支重复返回同一身份按 `state_database_error` 暴露不静默去重，空集输出空数组。② 跨表列解析原只支持"根行沿声明关系正向一跳"，而 `source_failure`/`item_failure` 需要从子行沿外键反向（及多跳）读父表列：`_related_column_source` 改为在投影声明关系图上枚举双向路径，可选外键为空按 SQL NULL 参与条件与取值，锚点存在而行缺失仍按关联事实缺失报错；既有正向单跳投影行为不变（delivery/automation/device_execution 等全部回归通过）。③ 报告事实装配缺口：取回失败汇总的查询范围是"该取回在 H 的全部固定来源、明细及关联交付，不受本次报告的交付增量子集合限制"，而交付行此前仅随窗口入选合并——前窗建档（或失败）的交付在后窗报告中会缺行：`reporting/generation._plan_facts` 对动作恢复行中 `obtain_items.delivery_id` 引用的交付逐个补齐恢复（含承载产物）。④ 测试辅助教训：`_mark_running` 裸 UPDATE 不写历史事件，在冻结边界之后使用会污染旧边界恢复（逆向恢复无法撤销无事件的投影变化，冻结字节用例曾因此泄漏 clean 动作 running 状态）；改为幂等且只在相关固定边界读取之前表达。
+
+**测试证据。** 投影级（`tests/integration/contracts/test_public_projection.py` 新增 6 用例：无失败空数组、来源失败读来源身份与登记错误、条目失败读产物关联与错误、交付失败读交付/产物/错误、依赖→分支→身份排序、重复交付身份规则错误；先红后绿）。组合级（`tests/integration/outputs/test_outputs_contract.py` 4 用例）：独立生命周期（两个新请求独立交付、同请求重送复用不新建、源清理后两个已准备交付继续发布 PUBLISHED、全部发布后两个取回保存成功终态）；清理阻止新取回而历史保持（固定 H 的 OUTPUT_FILE 在场事实不变、当前边界转缺席、新请求选择保存 output_unavailable 失败条目、建档 REJECTED_FINAL 不新建交付）；冻结报告字节（清理、发布、重送推进后按同一冻结依据重建字节完全一致）；跨窗口失败汇总（前窗终局失败的交付经发布失败链真实落库，报告 1 窗口内含失败条目，报告 2 窗口外交付不入增量子集而失败汇总仍完整、交付字段省略）。全量回归（Python 3.11）：单元全量 3292 通过（连续两轮）；集成 contracts+reporting 378、outputs 1788+1 skipped、bootstrap 64（复跑全绿）、acceptance 226；根 tests/integration 34 项+342 子测试；客户端单元 488 与 typecheck 通过；五检查器（database-spec、report-dependencies 23 投影 99 字段映射、protocol、doc-links 2930 链接、event-transitions）全部通过。环境漂移按既定协议定性（位置漂移+涉事测试单独通过+复跑全绿，无代码问题）。
+
+**验收条目映射。** 数据库验收 29—36 属 ADB 调用收场区域（host-demo/接入模块边界），由 R 轮次与 I5 承接，不在 X12 适用范围。其余适用条目的归属：01—10（等待与来源结束）由来源等待与选择轮次的 `test_sources.py`、`test_selection_*` 系列验证，组合覆盖主路径（执行期固定来源、PENDING→FIXED、取消保持）；11—16（读取流程、共同建档、竞争顺序、依赖解除、提交中断、三路径恢复）由 `test_copy_segments.py`、`test_copy_resume.py`、`test_copy_creation_slot.py`、`test_read_recovery*.py`、`test_read_associations.py`、`test_grant_reuse.py`、`test_product_competition.py` 验证，组合覆盖真实建档→拷贝→PREPARED→依赖解除链与冻结字节；17—28、37—39、44—45、47（清理限制、依赖触发、间隔预算、接手、取消收场）由 `test_cleanup_guards.py`、`test_cleanup_intervals.py`、`test_cleanup_recovery.py`、`test_source_cleanup.py`、`test_member_guard.py`、`test_member_lookup_evidence.py` 验证，组合覆盖范围清理固定→真实删除→产物不可用→阻止新取回；40—43、46、48—50（产物汇总状态表、错误选择、`final_event_id` 规则）由 `test_output_family.py`、`test_saved_errors.py`、`test_product_event_sequence.py`、`test_catalog_integrity.py` 验证；51 与 69（取回项与交付职责、取回字段组合）由 `test_obtain_summary.py`、`test_selection_guard*.py`、`test_catalog_integrity.py` 验证，组合覆盖 DELIVERY_CREATED 保持、重送复用与失败汇总；70—72（清理字段矩阵、三种 outcome、产物字段矩阵）由 `test_cleanup_guards.py`、`test_source_cleanup.py`、`test_output_family.py` 验证。output-verification 行为覆盖清单中"每个新请求产生独立 delivery、同一产物两次独立取回不同文件名、清理不级联、已获资格取回优先（business_order 严格早于才阻塞）、新取回被阻止"等由组合与上述文件共同覆盖；"取消撤回 ready、processing 不可撤回"由取消收场轮次（N1—N6，cancellation 目录）验证；真实设备联调与物理断电验证按规格单独安排（B7/部署验证），不属于本轮门槛。
+
+**后置事项。** 普通（取回/清理）动作开始命令、精确清理与跨计划清理的执行期来源固定、统一 run 循环装配归阶段 2/I3/I5；真实 C 领取的跨组件验证归 I5；H7/N6 同层验收另行安排。
 
 ## 模块完成门禁
 

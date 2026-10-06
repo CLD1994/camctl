@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from camctl.bootstrap.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
@@ -157,40 +157,60 @@ class _Context:
     def _related_column_source(
         self, table: str, column: str
     ) -> tuple[Mapping[str, Any] | None, int | None]:
-        """沿当前投影声明的关联解析跨表列的唯一关联行。"""
+        """沿投影声明的关联解析跨表列的唯一关联行。
+
+        声明关联作为无向边连通投影的各表：正向步沿外键取子行，
+        反向步沿同一外键取回父行。枚举到达目标表的全部路径；可选
+        外键为空使该路径无行，跨表列按 SQL NULL 参与条件与取值。
+        """
         registry = _dependencies()["relations"]
-        candidates = [
-            name for name in self.relations
-            if registry[name]["from"].split(".")[0] == self.table
-            and registry[name]["to"].split(".")[0] == table
-        ]
-        if not candidates:
+        adjacency: dict[str, list[tuple[Mapping[str, Any], bool]]] = {}
+        for name in self.relations:
+            relation = registry[name]
+            from_table = relation["from"].split(".")[0]
+            to_table = relation["to"].split(".")[0]
+            if from_table == to_table:
+                continue
+            adjacency.setdefault(from_table, []).append((relation, True))
+            adjacency.setdefault(to_table, []).append((relation, False))
+        paths = _table_paths(adjacency, self.table, table)
+        if not paths:
             raise PublicProjectionError(f"列 {column} 不在当前上下文表 {self.table} 中")
-        if len(candidates) > 1:
-            raise PublicProjectionError(
-                f"列 {column} 在当前投影中存在多条到达 {table} 的关联")
-        relation = registry[candidates[0]]
-        from_table, _, from_field = relation["from"].rpartition(".")
-        anchor: Any = None
-        if from_field == "id":
-            anchor = self.row_id
-        elif from_field in self.row:
-            anchor = self.row[from_field]
-        if anchor is None:
-            # 关联外键为空：无关联行，跨表列按 SQL NULL 参与。
+        final: list[tuple[str, int]] = []
+        null_gap = False
+        missing = False
+        for path in paths:
+            positions = ((self.table, self.row_id),)
+            died_by_null = False
+            for relation, forward in path:
+                positions, any_anchor = _hop_positions(
+                    self.input.tables, relation, positions, forward)
+                if positions:
+                    continue
+                died_by_null = not any_anchor
+                break
+            if positions:
+                final.extend(positions)
+            elif died_by_null:
+                null_gap = True
+            else:
+                missing = True
+        if final:
+            unique = sorted(set(final))
+            if len(unique) > 1:
+                raise PublicProjectionError(
+                    f"列 {column} 需要恰好一行 {table} 关联事实，实际 {len(unique)} 行")
+            row = self.input.tables.get(table, {}).get(unique[0][1])
+            if row is None:
+                raise PublicProjectionError(
+                    f"缺少 {table}#{unique[0][1]} 的 H 事实")
+            return row, unique[0][1]
+        if null_gap and not missing:
+            # optional 关联无关联行：跨表列按 SQL NULL 参与条件与取值。
             return None, None
-        matched = self.related((candidates[0],))
-        if len(matched) > 1:
-            raise PublicProjectionError(
-                f"列 {column} 需要恰好一行 {table} 关联事实，实际 {len(matched)} 行")
-        if not matched:
-            raise PublicProjectionError(
-                f"列 {column} 引用的 {table} 关联事实缺失（外键 {relation['from']}={anchor!r}）")
-        related_table, related_id = matched[0]
-        row = self.input.tables.get(related_table, {}).get(related_id)
-        if row is None:
-            raise PublicProjectionError(f"缺少 {related_table}#{related_id} 的 H 事实")
-        return row, related_id
+        raise PublicProjectionError(
+            f"列 {column} 引用的 {table} 关联事实缺失（外键起点 {self.table}#{self.row_id}）"
+        )
 
     def related(self, relations: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
         """沿关系链取相关行（当前行出发，每步沿声明关联推进）。"""
@@ -333,7 +353,7 @@ def _eval(node: Mapping[str, Any], context: _Context) -> Any:
     if op == "extra_input":
         return _extra_input(node, context)
     if op == "failure_union":
-        raise PublicProjectionError("failure_union（取回失败汇总）随取回链实施接入")
+        return _failure_union(node, context)
     raise PublicProjectionError(f"未登记的操作: {op!r}")
 
 
@@ -484,3 +504,176 @@ def _extra_input(node: Mapping[str, Any], context: _Context) -> Any:
     excluded = set(plan_schema["$defs"]["action"].get("properties", {}))
     extras = {key: value for key, value in document.items() if key not in excluded}
     return extras or OMIT
+
+
+def _table_paths(
+    adjacency: Mapping[str, Sequence[tuple[Mapping[str, Any], bool]]],
+    source: str, target: str,
+) -> list[tuple[tuple[Mapping[str, Any], bool], ...]]:
+    """在投影声明的关联图上枚举 source 到 target 的全部简单路径。"""
+    found: list[tuple[tuple[Mapping[str, Any], bool], ...]] = []
+
+    def walk(current: str, visited: set[str],
+             path: tuple[tuple[Mapping[str, Any], bool], ...]) -> None:
+        if current == target:
+            found.append(path)
+            return
+        for relation, forward in adjacency.get(current, ()):
+            far = (
+                relation["to"].split(".")[0] if forward
+                else relation["from"].split(".")[0])
+            if far in visited:
+                continue
+            walk(far, visited | {far}, path + ((relation, forward),))
+
+    walk(source, {source}, ())
+    return found
+
+
+def _hop_positions(
+    tables: Mapping[str, Mapping[int, Mapping[str, Any]]],
+    relation: Mapping[str, Any],
+    positions: tuple[tuple[str, int], ...],
+    forward: bool,
+) -> tuple[tuple[tuple[str, int], ...], bool]:
+    """沿一条关联推进行位置，返回（到达位置, 是否存在非空外键）。
+
+    forward 为 True 时从 from 端推进到 to 端（取子行）；False 时从
+    to 端推进回 from 端（取父行）。两端按外键值相等匹配。
+    """
+    from_table, _, from_field = relation["from"].rpartition(".")
+    to_table, _, to_field = relation["to"].rpartition(".")
+    if forward:
+        near_table, near_field = from_table, from_field
+        far_table, far_field = to_table, to_field
+    else:
+        near_table, near_field = to_table, to_field
+        far_table, far_field = from_table, from_field
+    near_rows = tables.get(near_table, {})
+    far_rows = tables.get(far_table, {})
+    matched: set[tuple[str, int]] = set()
+    any_anchor = False
+    for _table, near_id in positions:
+        near_row = near_rows.get(near_id)
+        if near_row is None:
+            raise PublicProjectionError(f"缺少 {near_table}#{near_id} 的 H 事实")
+        anchor = near_id if near_field == "id" else near_row.get(near_field)
+        if anchor is None:
+            continue
+        any_anchor = True
+        for far_id, far_row in far_rows.items():
+            value = far_id if far_field == "id" else far_row.get(far_field)
+            if value == anchor:
+                matched.add((far_table, far_id))
+    return tuple(sorted(matched)), any_anchor
+
+
+def _relation_paths(
+    context: _Context, relations: tuple[str, ...],
+) -> list[tuple[tuple[str, int], ...]]:
+    """沿关系链正向推进并保留每条完整到达路径。
+
+    与 Context.related 的逐级匹配同义，但保留中间表行位置，供顺
+    序键沿路径解析；同一终点经不同父行到达时保留全部路径。
+    """
+    registry = _dependencies()["relations"]
+    paths = [((context.table, context.row_id),)]
+    previous_table = context.table
+    for relation_name in relations:
+        relation = registry[relation_name]
+        from_table = relation["from"].split(".")[0]
+        from_field = relation["from"].split(".")[1]
+        to_table = relation["to"].split(".")[0]
+        to_field = relation["to"].split(".")[1]
+        if from_table != previous_table:
+            raise PublicProjectionError(
+                f"关系链在 {previous_table} 之后经 {relation_name} 离开 {from_table}，链不连贯")
+        rows_from = context.input.tables.get(from_table, {})
+        rows_to = context.input.tables.get(to_table, {})
+        next_paths = []
+        for candidate_id, candidate in rows_to.items():
+            target_value = (
+                candidate_id if to_field == "id" else candidate.get(to_field))
+            for path in paths:
+                source_id = path[-1][1]
+                source = rows_from.get(source_id)
+                if source is None:
+                    continue
+                source_value = (
+                    source_id if from_field == "id" else source.get(from_field))
+                if source_value == target_value:
+                    next_paths.append(path + ((to_table, candidate_id),))
+        paths = next_paths
+        previous_table = to_table
+        if not paths:
+            break
+    return paths
+
+
+def _chain_order_value(
+    key: str, path: tuple[tuple[str, int], ...],
+    tables: Mapping[str, Mapping[int, Mapping[str, Any]]],
+) -> Any:
+    """沿到达路径解析顺序键：路径行上的 id 或普通列值。"""
+    table, _, name = key.rpartition(".")
+    positions = [row_id for path_table, row_id in path if path_table == table]
+    if len(positions) != 1:
+        raise PublicProjectionError(f"顺序键 {key} 不在到达路径的恰一表上")
+    if name == "id":
+        return positions[0]
+    row = tables.get(table, {}).get(positions[0])
+    if row is None or name not in row:
+        raise PublicProjectionError(f"顺序键 {key} 缺少 H 事实")
+    return row[name]
+
+
+def _failure_union(node: Mapping[str, Any], context: _Context) -> Any:
+    """取回失败汇总：各分支沿登记关系链展开，按依赖、分支与身份排序。
+
+    分支出现条件不满足的行不进入汇总；同一分支重复返回同一身份
+    是查询或归属问题，按登记以状态库错误暴露，不静默去重。
+    """
+    projections = _dependencies()["projections"]
+    entries: list[tuple[tuple[Any, ...], int, Any, PublicFragment]] = []
+    for branch_index, branch in enumerate(node["branches"]):
+        projection = projections.get(branch["projection"])
+        if projection is None:
+            raise PublicProjectionError(f"未登记的失败分支投影: {branch['projection']}")
+        root_table = projection["root_table"]
+        identity_table, _, _identity_field = branch["identity"].rpartition(".")
+        if identity_table != root_table:
+            raise PublicProjectionError(
+                f"失败分支 {branch['projection']} 的身份列不在根表 {root_table} 上")
+        for path in _relation_paths(context, tuple(branch["relations"])):
+            terminal_table, terminal_id = path[-1]
+            if terminal_table != root_table:
+                raise PublicProjectionError(
+                    f"失败分支 {branch['projection']} 的关系链止于 {terminal_table}，"
+                    f"不是根表 {root_table}")
+            fragment = project_public(ProjectionInput(
+                entity=branch["projection"], root_id=terminal_id,
+                tables=context.input.tables,
+                selected_entities=context.input.selected_entities))
+            if fragment is OMIT:
+                continue
+            identity = context.with_row(
+                terminal_table, terminal_id).column(branch["identity"])
+            order_values = tuple(
+                branch_index if key == "branch_index"
+                else identity if key == "branch_identity"
+                else _chain_order_value(key, path, context.input.tables)
+                for key in node["order_by"])
+            entries.append((order_values, branch_index, identity, fragment))
+    seen: set[tuple[int, Any]] = set()
+    for _order, branch_index, identity, _fragment in entries:
+        if (branch_index, identity) in seen:
+            if node.get("duplicate") != "state_database_error":
+                raise PublicProjectionError(
+                    f"未登记的重复身份处理: {node.get('duplicate')!r}")
+            raise PublicProjectionError(
+                f"失败分支 {branch_index} 重复返回身份 {identity!r}，按状态库错误处理")
+        seen.add((branch_index, identity))
+    if not entries and node.get("empty") == "omit":
+        return OMIT
+    entries.sort(key=lambda entry: entry[0])
+    return [fragment for _order, _index, _identity, fragment in entries]

@@ -172,6 +172,130 @@ class TestProjectPublicAction:
         assert fragment["effective_params"] == {"quality": Decimal("1.5")}
 
 
+def _dependency_row(dep_id: int, *, source: int = 1) -> dict:
+    return {"id": dep_id, "action_id": 5, "depends_on_action_id": source}
+
+
+def _selection_row(sel_id: int, dep_id: int, *, error_code=None) -> dict:
+    return {"id": sel_id, "dependency_id": dep_id, "status": 2,
+            "error_code": error_code, "error_details_json": {}}
+
+
+def _item_row(item_id: int, sel_id: int, *, status=3, output_id=None,
+              delivery_id=None, error_code=None, details=None) -> dict:
+    return {"id": item_id, "selection_id": sel_id, "status": status,
+            "output_id": output_id, "delivery_id": delivery_id,
+            "error_code": error_code, "error_details_json": details}
+
+
+def _delivery_row(delivery_id: int, *, status=3, output_id=9) -> dict:
+    return {"id": delivery_id, "action_id": 5, "output_id": output_id,
+            "status": status,
+            "error_json": {"code": "delivery_handoff_unconfirmed",
+                           "stage": "publication",
+                           "details": {"delivery_id": str(delivery_id)}}}
+
+
+class TestObtainFailureUnion:
+    """取回失败汇总按登记的三分支展开：空集为空数组，按依赖与身份排序。"""
+
+    def _facts(self, *, deps=None, selections=None, items=None,
+               deliveries=None, outputs=None) -> ProjectionInput:
+        tables: dict = {"actions": {5: {"id": 5}}}
+        for name, rows in (("action_dependencies", deps),
+                           ("obtain_source_selections", selections),
+                           ("obtain_items", items),
+                           ("deliveries", deliveries),
+                           ("outputs", outputs)):
+            if rows is not None:
+                tables[name] = rows
+        return ProjectionInput(
+            entity="obtain_result", root_id=5, tables=tables, selected_entities={})
+
+    def test_no_failures_project_as_empty_array(self) -> None:
+        facts = self._facts(
+            deps={31: _dependency_row(31)},
+            selections={41: _selection_row(41, 31)},
+            items={51: _item_row(51, 41, status=2, output_id=9)},
+            deliveries={61: _delivery_row(61, status=3)},
+            outputs={9: {"id": 9, "source_action_id": 1}},
+        )
+        assert project_public(facts)["failures"] == []
+
+    def test_source_failure_reads_source_identity_and_registered_error(self) -> None:
+        facts = self._facts(
+            deps={31: _dependency_row(31, source=1)},
+            selections={41: _selection_row(41, 31, error_code=1)},
+        )
+        assert project_public(facts)["failures"] == [{
+            "source_action_instance_id": "1",
+            "error": {"code": "no_outputs", "stage": "output_selection",
+                      "details": {}},
+        }]
+
+    def test_item_failure_reads_item_output_and_error(self) -> None:
+        details = {"output_id": "9", "availability": "cleaned"}
+        facts = self._facts(
+            deps={31: _dependency_row(31, source=1)},
+            selections={41: _selection_row(41, 31)},
+            items={51: _item_row(51, 41, status=4, output_id=9,
+                                 error_code=3, details=details)},
+        )
+        assert project_public(facts)["failures"] == [{
+            "source_action_instance_id": "1",
+            "output_id": "9",
+            "error": {"code": "output_unavailable", "stage": "output_selection",
+                      "details": details},
+        }]
+
+    def test_delivery_failure_reads_delivery_output_and_error(self) -> None:
+        facts = self._facts(
+            deps={31: _dependency_row(31, source=1)},
+            selections={41: _selection_row(41, 31)},
+            items={51: _item_row(51, 41, status=3, output_id=9, delivery_id=61)},
+            deliveries={61: _delivery_row(61, status=6)},
+            outputs={9: {"id": 9, "source_action_id": 1}},
+        )
+        assert project_public(facts)["failures"] == [{
+            "source_action_instance_id": "1",
+            "output_id": "9",
+            "delivery_id": "61",
+            "error": {"code": "delivery_handoff_unconfirmed",
+                      "stage": "publication",
+                      "details": {"delivery_id": "61"}},
+        }]
+
+    def test_failures_order_by_dependency_then_branch_then_identity(self) -> None:
+        """同一依赖先列条目失败再列交付失败；依赖次序优先于分支次序。"""
+        facts = self._facts(
+            deps={31: _dependency_row(31, source=1),
+                  32: _dependency_row(32, source=2)},
+            selections={41: _selection_row(41, 31),
+                        42: _selection_row(42, 32, error_code=1)},
+            items={51: _item_row(51, 41, status=4, output_id=9, error_code=3,
+                                 details={"output_id": "9", "availability": "cleaned"}),
+                   52: _item_row(52, 41, status=3, output_id=9, delivery_id=61)},
+            deliveries={61: _delivery_row(61, status=6)},
+            outputs={9: {"id": 9, "source_action_id": 1}},
+        )
+        codes = [failure["error"]["code"]
+                 for failure in project_public(facts)["failures"]]
+        assert codes == ["output_unavailable", "delivery_handoff_unconfirmed",
+                         "no_outputs"]
+
+    def test_repeated_delivery_identity_is_rule_error(self) -> None:
+        facts = self._facts(
+            deps={31: _dependency_row(31, source=1)},
+            selections={41: _selection_row(41, 31)},
+            items={51: _item_row(51, 41, status=3, delivery_id=61),
+                   52: _item_row(52, 41, status=3, delivery_id=61)},
+            deliveries={61: _delivery_row(61, status=6)},
+            outputs={9: {"id": 9, "source_action_id": 1}},
+        )
+        with pytest.raises(PublicProjectionError):
+            project_public(facts)
+
+
 class TestNestedProjectionRelations:
     """嵌套投影沿自身声明的关联建立子上下文，跨表列按关联行取值。"""
 
