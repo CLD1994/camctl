@@ -387,3 +387,21 @@ class ResultSetSave:
                 raise ValueError("无法确认分支不判定采集结果")
             if self.error is not None and not isinstance(self.error, Mapping):
                 raise ValueError("核实错误必须是对象")
+
+
+@dataclass(frozen=True)
+class ResultRunClose:
+    """录像活动核实流程收场申请的输入（不携带集合结论）。
+
+    录像活动不适用结果集合核实，采集判定列保持为空；预算耗尽时
+    仅把 results 责任流程按无法确认收场，动作结果由调用方按所属
+    拍摄规则另行保存。
+    """
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+

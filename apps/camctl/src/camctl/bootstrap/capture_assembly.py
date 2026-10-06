@@ -216,15 +216,16 @@ def session_capture_assembly(
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
-    会话共享录像锚点表与媒体任务执行器；每个推进轮次按设备构造
-    CaptureRuntime。设备未声明、驱动未登记或控制能力未声明时返回
-    None，本轮不推进该设备的动作，保持已保存状态等待后续会话。
-    wall_us 与 monotonic_ns 缺省使用真实系统钟，测试可注入受控读数。
-    media_enabled=False 供时钟异常的受限会话构造：不装配媒体链，
-    保守收场不启动拷贝、核验与修复。
+    会话共享录像锚点表、结果列举缓存与媒体任务执行器；每个推进轮
+    次按设备构造 CaptureRuntime。设备未声明、驱动未登记或控制能力
+    未声明时返回 None，本轮不推进该设备的动作，保持已保存状态等待
+    后续会话。wall_us 与 monotonic_ns 缺省使用真实系统钟，测试可注
+    入受控读数。media_enabled=False 供时钟异常的受限会话构造：不装
+    配媒体链，保守收场不启动拷贝、核验与修复。
     """
 
     anchors: dict[int, tuple[int, int]] = {}
+    listings: dict[int, tuple[tuple, tuple]] = {}
     roots = BoundDirectories(staging=staging)
     executor = FileTaskExecutor(Supervisor())
     tools = HostMediaTools(
@@ -271,6 +272,7 @@ def session_capture_assembly(
             stopper=stop_port,
             media=media,
             repair_margin_s=_repair_margin_s(declaration),
+            listing_cache=listings,
         )
         runtime.recording_state = SessionRecordingState(runtime, anchors)
         return runtime

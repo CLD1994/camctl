@@ -156,6 +156,12 @@ def _environment(tmp_path: Path, actions):
             connection.execute(
                 "UPDATE device_activities SET completion_mode = 2,"
                 " completion_basis = 1 WHERE id = ?", (action_id,))
+        elif action_type == 1:
+            # 照片活动创建时同样从 UNDETERMINED 开始（operation-
+            # fields.md#设备活动字段）；录像的采集判定列保持为空。
+            connection.execute(
+                "UPDATE device_activities SET completion_basis = 1"
+                " WHERE id = ?", (action_id,))
     connection.commit()
     return owned
 
@@ -195,7 +201,8 @@ def _seed_processing(connection, action_id: int) -> None:
 
 
 def _runtime(owned, *, driver=None, files=None, wall=None,
-             recording_state=None) -> CaptureRuntime:
+             recording_state=None, results=None,
+             listing_cache=None) -> CaptureRuntime:
     from camctl.scheduling.rules import LaunchWindow
 
     return CaptureRuntime(
@@ -205,7 +212,7 @@ def _runtime(owned, *, driver=None, files=None, wall=None,
         capture=CaptureRepository(),
         timelapse=TimelapseRepository(),
         driver=driver if driver is not None else DriverDouble(),
-        results=ResultsDouble(files or {}),
+        results=results if results is not None else ResultsDouble(files or {}),
         evidence=_EVIDENCE,
         wall_us=lambda: wall if wall is not None else _NOW,
         monotonic_ns=lambda: 5_000_000_000,
@@ -215,6 +222,7 @@ def _runtime(owned, *, driver=None, files=None, wall=None,
         wait_config=lambda params: CaptureWaitConfig(
             target_duration_ms=600_000, driver_margin_ms=0),
         recording_state=recording_state,
+        listing_cache=listing_cache,
     )
 
 
@@ -240,8 +248,9 @@ class TestPhotoHandler:
                 " f.source_action_id FROM outputs o JOIN device_files f"
                 " ON f.id = o.device_file_id WHERE o.source_action_id = 11")
             assert output == (1, 1, 3, 4096, 11)
+            # 启动调用与首轮结果核实各占一次尝试。
             assert _value(
-                owned, "SELECT COUNT(*) FROM operation_attempts") == (1,)
+                owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
             # 成功链收场活动：调用成功返回即结束证据，占用同链释放。
             activity = _value(
                 owned, "SELECT activity_state, occupancy_state, dispatch_state"
@@ -280,13 +289,15 @@ class TestPhotoHandler:
             runtime = _runtime(owned, files={})
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
-            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (1,)
-            # 结果尚未列举：第二次推进不重复调用，仅消费迟到的结果。
+            # 启动调用与首轮核实（可靠返回但产物暂不齐备）各占一次尝试。
+            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
+            # 产物暂不齐备：第二次推进不重复调用设备，可靠列举轮次已
+            # 收场核实责任，迟到结果经直接列举消费。
             runtime.results.files_by_action[11] = (
                 _entry("shot-1", kind=ResultFileKind.PHOTO),)
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
-            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (1,)
+            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
             # 终态后再次推进不产生新事实。
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)

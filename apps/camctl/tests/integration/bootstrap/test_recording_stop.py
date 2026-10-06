@@ -78,6 +78,8 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset()),
         EvidenceContract(type="stop_confirmed", version=1, operation="stop",
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
+        EvidenceContract(type="results_returned", version=1, operation="result",
+                         fields=frozenset()),
     )
 )
 

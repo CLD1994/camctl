@@ -18,12 +18,14 @@ import asyncio
 from contextlib import closing
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Callable, Mapping, Protocol
 
 from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
     ActivityReleaseSave,
+    ResultRunClose,
     ResultSetPhase,
     ResultSetSave,
     WaitCompletedSave,
@@ -259,6 +261,9 @@ class CaptureRuntime:
     #:（configuration.md#状态查询与产物核实的配置）。
     check_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
+    #: 会话内已观察的结果列举缓存（动作到列举与登记事实）；装配层
+    #: 闭包共享，跨推进轮次保留，避免等待中的重复列举消耗核实名额。
+    listing_cache: dict[int, tuple[tuple, tuple]] | None = None
 
     def action(self, action_id: int) -> Mapping[str, Any]:
         facts = row_facts(self.owned.connection, "actions", action_id)
@@ -681,7 +686,23 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
             # 仅发送或未授予：没有可靠响应事实，等待下次推进。
             return
         attempt = context.last_attempt(f"start/{action_id}")
-    entries = await context.results.list_files(action_id)
+    listing = await _listing_round(context, action_id)
+    if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
+        # 在途或本轮列举失败：已保存实际结果与重试等待，下一轮重新核实。
+        return
+    if listing.phase is ListingPhase.EXHAUSTED:
+        # 有限轮次用尽：核实责任与无法确认结论同事务收场。
+        _close_check_unconfirmed(context, action_id)
+        _finish_capture(context, action_id, (), FileKind.PHOTO,
+                        failure=_unconfirmed_failure(action_id))
+        return
+    if listing.phase is ListingPhase.LISTED:
+        entries = listing.entries
+        ticket = listing.ticket
+    else:
+        # 核实责任已闭合：按直接列举回退，不再保存轮次事实。
+        entries = await context.results.list_files(action_id)
+        ticket = None
     assessment = CaptureAssessment(
         complete=bool(entries) and all(entry.complete for entry in entries))
     decision = decide_photo(
@@ -698,15 +719,24 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
         PhotoCompletion.COMPLETED_ON_RETURN,
     )
     if decision is PhotoDecision.REGISTER_SUCCESS:
+        if ticket is not None:
+            context.finish(ticket, _round_outcome(),
+                           end_run=RunOutcome.SUCCEEDED)
         _conclude_activity(context, action_id)
         _finish_capture(context, action_id, entries, FileKind.PHOTO)
     elif decision is PhotoDecision.FAILED_KEEP_FILES:
+        if ticket is not None:
+            context.finish(ticket, _round_outcome(),
+                           end_run=RunOutcome.SUCCEEDED)
         _finish_capture(
             context, action_id, entries, FileKind.PHOTO,
             failure=RecordingFailure(
                 code="capture_failed",
                 details={"activity_id": str(action_id), "reason": "device_failed"}))
-    # 其余分区（等待响应、取消保留、未知无停止）等待下次推进或取消收场。
+    elif ticket is not None:
+        # 其余分区（等待响应、取消保留、未知无停止）：本轮成功结果与
+        # 重试等待共同保存，等待下次推进或取消收场。
+        context.finish(ticket, _round_outcome(), retry_wait=True)
 
 
 async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
@@ -1029,9 +1059,9 @@ async def _advance_recording_outcome(
     """建立检查决定、推进媒体链并按录像成功标准收场。
 
     控制完成固定无需检查决定；计时证据不足的检查决定由跨会话对
-    账收场建立，此前保持待定。需要检查的处理行经媒体端口推进拷
-    贝、检查与修复，判定装载已保存的检查时长与媒体问题，修复成
-    功的成品与原片同事务登记。
+    账收场建立，此前保持待定。结果列举按 results 责任的有限轮次
+    推进，会话内已观察的列举事实直接复用；判定装载已保存的检查
+    时长与媒体问题，修复成功的成品与原片同事务登记。
     """
     action_id = action["id"]
     row = _load_processing_row(context, action_id)
@@ -1054,11 +1084,43 @@ async def _advance_recording_outcome(
         else:
             _save_not_needed_decision(context, int(row[0]), target_ms)
         row = _load_processing_row(context, action_id)
-    entries = await context.results.list_files(action_id)
-    registered = _register_observed(context, action_id, entries)
+    ticket = None
+    cached = (None if context.listing_cache is None
+              else context.listing_cache.get(action_id))
+    if cached is not None:
+        # 读取已保存的列举事实不构成新轮次；等待中的推进不消耗名额。
+        entries, registered = cached
+    else:
+        listing = await _listing_round(context, action_id)
+        if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
+            # 在途或本轮列举失败：已保存实际结果与重试等待。
+            return
+        if listing.phase is ListingPhase.EXHAUSTED:
+            # 录像活动不适用集合结论：仅核实流程按公共错误结构收场。
+            receipt = context.capture.close_unconfirmed_result_run(
+                ResultRunClose(
+                    action_id=action_id, occurred_at=context.wall_us()),
+                new_operation_key(), context.owned)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            _finish_capture(context, action_id, (), FileKind.VIDEO,
+                            failure=_unconfirmed_failure(action_id))
+            return
+        if listing.phase is ListingPhase.LISTED:
+            registered = _register_observed(context, action_id, listing.entries)
+            entries = listing.entries
+            ticket = listing.ticket
+        else:
+            # 核实责任已闭合：按直接列举回退，不再保存轮次事实。
+            entries = await context.results.list_files(action_id)
+            registered = _register_observed(context, action_id, entries)
     source_file_id = next(
         (file_id for (file, file_id), entry in zip(registered, entries)
          if entry.complete and entry.kind is FileKind.VIDEO), None)
+    if cached is None and context.listing_cache is not None and (
+            row[6] is not None or source_file_id is not None):
+        # 完整原片已归属且媒体链推进中：已保存观察足以继续装载，等
+        # 待装配不再重复列举；产物未齐的列举每轮重新观察文件到达。
+        context.listing_cache[action_id] = (entries, registered)
     if _media_responsibility_open(row):
         # 检查或修复责任未终局时经媒体端口推进；媒体端口未装配时
         # 等待装配会话。已归属原片沿用归属事实，未归属时以本次观
@@ -1086,15 +1148,23 @@ async def _advance_recording_outcome(
         target_duration_ms=_target_duration_ms(action),
     )
     result = decide_recording_result(facts)
-    if result.kind.value == "succeeded":
-        _finish_capture(
-            context, action_id, entries, FileKind.VIDEO,
-            registered=registered,
-            repair_file_id=int(row[5]) if row[4] == int(
-                _REPAIR_STATE.SUCCEEDED) and row[5] is not None else None)
-    elif result.kind.value == "failed":
-        _finish_capture(context, action_id, entries, FileKind.VIDEO,
-                        registered=registered, failure=result.failure)
+    if result.kind.value in ("succeeded", "failed"):
+        if ticket is not None:
+            # 承载结论的轮次以可靠结果收场核实责任。
+            context.finish(ticket, _round_outcome(),
+                           end_run=RunOutcome.SUCCEEDED)
+        if result.kind.value == "succeeded":
+            _finish_capture(
+                context, action_id, entries, FileKind.VIDEO,
+                registered=registered,
+                repair_file_id=int(row[5]) if row[4] == int(
+                    _REPAIR_STATE.SUCCEEDED) and row[5] is not None else None)
+        else:
+            _finish_capture(context, action_id, entries, FileKind.VIDEO,
+                            registered=registered, failure=result.failure)
+    elif ticket is not None:
+        # 终局依据尚不齐备：本轮成功结果与重试等待共同保存。
+        context.finish(ticket, _round_outcome(), retry_wait=True)
 
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
@@ -1158,32 +1228,19 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         # 中断后已有可靠结论：用原结果完成收尾，不重开核实责任。
         await _finish_timelapse_conclusion(context, action_id)
         return
-    in_flight = context.last_attempt(f"results/{action_id}")
-    if in_flight is not None and in_flight[0] == int(_ATTEMPT_STATUS.RUNNING):
-        # 中断遗留的在途轮次：跨会话恢复前停等，不提交新意图。
+    listing = await _listing_round(context, action_id)
+    if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT,
+                         ListingPhase.CLOSED):
+        # 在途、本轮列举失败或责任已闭合：等待收尾轮次，不提交新意图。
         return
-    begin = _begin_check_round(context, action_id)
-    if begin.disposition is not BeginDisposition.GRANTED:
-        if begin.reason == "budget_exhausted":
-            # 有限轮次用尽：核实责任与无法确认结论同事务收场。
-            _close_check_unconfirmed(context, action_id)
-            _finish_capture(
-                context, action_id, (), FileKind.VIDEO,
-                failure=RecordingFailure(
-                    code="capture_result_unconfirmed",
-                    details={
-                        "activity_id": str(action_id),
-                        "reason": "outputs_unknown"}))
-        # 其余拒绝（责任已闭合）：等待收尾轮次，不再提交意图。
+    if listing.phase is ListingPhase.EXHAUSTED:
+        # 有限轮次用尽：核实责任与无法确认结论同事务收场。
+        _close_check_unconfirmed(context, action_id)
+        _finish_capture(context, action_id, (), FileKind.VIDEO,
+                        failure=_unconfirmed_failure(action_id))
         return
-    ticket = begin.ticket
-    try:
-        entries = await context.results.list_files(action_id)
-    except Exception:
-        # 本轮列举失败：保存失败结果并建立重试等待，下一轮重新核实。
-        context.finish(ticket, _round_outcome(
-            ErrorValue(code="device_error", stage="device")), retry_wait=True)
-        return
+    entries = listing.entries
+    ticket = listing.ticket
     assessment = assess_capture_files(
         CaptureFileSet(
             files=tuple(
@@ -1241,12 +1298,30 @@ async def _cancel_timelapse_stop(context: CaptureRuntime, action) -> None:
 
 async def _close_canceled_timelapse(
     context: CaptureRuntime, action_id: int) -> None:
-    """取消延时收尾：已拍完文件与取消终态同事务登记为正式产物。"""
-    try:
-        entries = await context.results.list_files(action_id)
-    except Exception:
-        # 收尾列举失败：完成情况未知，不登记产物，保留原观察事实。
-        entries = ()
+    """取消延时收尾：已拍完文件与取消终态同事务登记为正式产物。
+
+    收尾列举按 results 责任的有限轮次推进：本轮失败保存实际结果
+    与重试等待并保留取消待收场事实；预算耗尽时集合结论按无法确
+    认收场，取消终态优先，不登记产物。
+    """
+    listing = await _listing_round(context, action_id)
+    if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
+        # 在途或本轮列举失败：取消待收场事实保持，下一轮重新核实。
+        return
+    if listing.phase is ListingPhase.EXHAUSTED:
+        _close_check_unconfirmed(context, action_id)
+        _finish_canceled_capture(context, action_id)
+        return
+    if listing.phase is ListingPhase.LISTED:
+        entries = listing.entries
+        context.finish(listing.ticket, _round_outcome(),
+                       end_run=RunOutcome.SUCCEEDED)
+    else:
+        # 核实责任已闭合：按直接列举回退，不再保存轮次事实。
+        try:
+            entries = await context.results.list_files(action_id)
+        except Exception:
+            entries = ()
     registered = _register_observed(context, action_id, entries)
     drafts = tuple(
         OutputDraft(
@@ -1311,6 +1386,58 @@ def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int) -> None:
             error={"code": "result_unconfirmed"},
         ), new_operation_key(), runtime.owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
+class ListingPhase(Enum):
+    """一轮结果列举推进的阶段分区。"""
+
+    LISTED = "listed"
+    IN_FLIGHT = "in_flight"
+    RETRY_WAIT = "retry_wait"
+    EXHAUSTED = "exhausted"
+    CLOSED = "closed"
+
+
+@dataclass(frozen=True)
+class ListingRound:
+    """一轮结果列举的推进结果：阶段、列举事实与承载它的票据。"""
+
+    phase: ListingPhase
+    entries: tuple[ObservedFile, ...] = ()
+    ticket: Any = None
+
+
+def _unconfirmed_failure(action_id: int) -> RecordingFailure:
+    """有限核实耗尽后的动作失败：产物结果无法确认。"""
+    return RecordingFailure(
+        code="capture_result_unconfirmed",
+        details={"activity_id": str(action_id), "reason": "outputs_unknown"})
+
+
+async def _listing_round(
+    runtime: CaptureRuntime, action_id: int) -> ListingRound:
+    """按 results 责任的有限轮次推进一次结果列举。
+
+    在途轮次跨会话恢复前停等；本轮列举失败保存实际结果与重试等
+    待；预算耗尽交由调用方按所属拍摄及收场规则结束；其余拒绝说
+    明核实责任已闭合，调用方按直接列举回退。
+    """
+    in_flight = runtime.last_attempt(f"results/{action_id}")
+    if in_flight is not None and in_flight[0] == int(_ATTEMPT_STATUS.RUNNING):
+        return ListingRound(ListingPhase.IN_FLIGHT)
+    begin = _begin_check_round(runtime, action_id)
+    if begin.disposition is not BeginDisposition.GRANTED:
+        if begin.reason == "budget_exhausted":
+            return ListingRound(ListingPhase.EXHAUSTED)
+        return ListingRound(ListingPhase.CLOSED)
+    ticket = begin.ticket
+    try:
+        entries = await runtime.results.list_files(action_id)
+    except Exception:
+        runtime.finish(ticket, _round_outcome(
+            ErrorValue(code="device_error", stage="device")), retry_wait=True)
+        return ListingRound(ListingPhase.RETRY_WAIT)
+    return ListingRound(ListingPhase.LISTED, entries, ticket)
 
 
 async def _finish_timelapse_conclusion(

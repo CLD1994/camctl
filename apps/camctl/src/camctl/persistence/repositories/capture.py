@@ -20,6 +20,7 @@ from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
     ActivityReleaseSave,
+    ResultRunClose,
     ResultSetPhase,
     ResultSetSave,
 )
@@ -1728,6 +1729,19 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def close_unconfirmed_result_run(
+        self, command: ResultRunClose, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[None]:
+        """录像活动预算耗尽：仅收场核实流程，不携带集合结论。"""
+        receipt = commit_operation(
+            _ResultRunCloseCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
 
 
 class _FilePresenceCommand:
@@ -2589,14 +2603,7 @@ class _CloseResultCheckCommand:
 
     def _run_error(self) -> dict[str, Any]:
         """按登记的公共错误结构构造流程错误（有限核实后结果未知）。"""
-        code = "capture_result_unconfirmed"
-        spec = registered_error(code)
-        details = {
-            "activity_id": str(self._command.action_id),
-            "reason": "outputs_unknown",
-        }
-        validate_error_details(code, details)
-        return {"code": code, "stage": spec["stage"], "details": details}
+        return _unconfirmed_run_error(self._command.action_id)
 
     def _reuse(self, connection, saved) -> CommandPlan:
         command = self._command
@@ -2624,6 +2631,99 @@ class _CloseResultCheckCommand:
             read_only=True,
             result=confirm_plan.result,
         )
+
+
+def _unconfirmed_run_error(action_id: int) -> dict[str, Any]:
+    """按登记的公共错误结构构造核实流程错误（有限轮次后结果未知）。"""
+    code = "capture_result_unconfirmed"
+    spec = registered_error(code)
+    details = {
+        "activity_id": str(action_id),
+        "reason": "outputs_unknown",
+    }
+    validate_error_details(code, details)
+    return {"code": code, "stage": spec["stage"], "details": details}
+
+
+class _ResultRunCloseCommand:
+    """预算耗尽时仅收场结果核实流程的事务命令（不携带集合结论）。
+
+    录像活动不适用结果集合核实，采集判定列保持为空；没有在途尝
+    试可承载结论时，流程行按结果核实责任定位，与集合结论通道分
+    别收场，流程错误按登记的公共错误结构保存。
+    """
+
+    def __init__(self, command: ResultRunClose, key: OperationKey) -> None:
+        if not isinstance(command, ResultRunClose):
+            raise TypeError("核实流程收场申请必须使用 ResultRunClose")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        command = self._command
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+            (f"results/{command.action_id}",),
+        )) as cursor:
+            found = cursor.fetchone()
+        if found is None:
+            raise ConsistencyError(
+                f"活动 {command.action_id} 没有结果核实流程可收场")
+        run_facts = row_facts(connection, "operation_runs", int(found[0]))
+        assert run_facts is not None
+        if run_facts["status"] not in (1, 2):
+            raise ConsistencyError("已结束的核实流程不能再次收场")
+        self._state["operation_runs"] = {run_facts["id"]: run_facts}
+        run_row = _update(
+            "operation_runs",
+            run_facts["id"],
+            {
+                "status": run_facts["status"],
+                "retry_wait_required": run_facts["retry_wait_required"],
+                "error_json": run_facts["error_json"],
+            },
+            {
+                "status": int(_RUN_STATUS.UNCONFIRMED),
+                "retry_wait_required": 0,
+                "error_json": _unconfirmed_run_error(command.action_id),
+            },
+        )
+        self._owners[("operation_runs", run_facts["id"])] = (
+            "action", run_facts["action_id"])
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _RUN_END_EVENT, 3, (run_row,), command.occurred_at)
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state)
+
+    def _reuse(self, saved) -> CommandPlan:
+        command = self._command
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_RUN_END_EVENT, 3)]:
+            raise TransactionError("操作身份已用于其他事务，不能作为核实收场重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("核实收场的事实时刻与原事务不同")
+        rows = saved[0]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "operation_runs"
+                or not rows[0]["after"]["exists"]):
+            raise TransactionError("原收场缺少流程事实")
+        values = rows[0]["after"]["values"]
+        if (values.get("status") != int(_RUN_STATUS.UNCONFIRMED)
+                or values.get("retry_wait_required") != 0
+                or not json_equal(
+                    values.get("error_json"),
+                    _unconfirmed_run_error(command.action_id))):
+            raise TransactionError("核实收场的重送输入与原事务不同")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True)
 
 
 # -- 设备文件观察登记 -------------------------------------------------
