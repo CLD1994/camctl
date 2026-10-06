@@ -576,6 +576,19 @@ def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
     return context.recording_state
 
 
+def _activity_id_of(runtime: CaptureRuntime, action_id: int) -> int:
+    """查询动作的唯一设备活动主键；动作与活动的主键不重合。"""
+    from contextlib import closing
+
+    with closing(runtime.owned.connection.execute(
+        "SELECT id FROM device_activities WHERE action_id = ?", (action_id,),
+    )) as cursor:
+        found = cursor.fetchone()
+    if found is None:
+        raise LookupError(f"设备活动不存在: {action_id}")
+    return int(found[0])
+
+
 async def _stop_call(runtime: CaptureRuntime, action,
                      operation: str = "stop_recording") -> HandlerOutcome:
     """按原停止预算发起一次设备停止调用并保存尝试结果。
@@ -595,7 +608,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
         operation="stop",
         action_id=action["id"],
         kind=OperationKind.STOP,
-        target=AttemptTarget(activity_id=action["id"]),
+        target=AttemptTarget(activity_id=_activity_id_of(runtime, action["id"])),
         query_purpose=None,
         config=runtime.stop_config,
         occurred_at=runtime.wall_us(),
@@ -1388,7 +1401,8 @@ def _begin_check_round(runtime: CaptureRuntime, action_id: int):
         AttemptIntent(
             operation="result", action_id=action_id,
             kind=OperationKind.CHECK_CAPTURE_RESULTS,
-            target=AttemptTarget(activity_id=action_id),
+            target=AttemptTarget(
+                activity_id=_activity_id_of(runtime, action_id)),
             query_purpose=None, config=runtime.check_config,
             occurred_at=runtime.wall_us()),
         new_operation_key(), runtime.owned)

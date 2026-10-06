@@ -406,6 +406,61 @@ X10 仍剩余：读取与拍摄让路的调度接线（设备兼容性判定，Q
 X10 剩余：真实驱动兼容性声明（D5）、三种拍摄与部分取回的跨组件
 组合（I5）；统一计划与执行协程的完整 run 循环装配归阶段 2/I3。
 
+#### X10 第四段的阶段性验证（2026-10-07）：取回执行链接入 run 会话
+
+新增 `outputs/obtain_flow.py` 取回执行编排并经 `bootstrap/obtain_assembly.py`
+接入生产 run 会话（`lifecycle._report_assembly` 注册 `obtain` 流程）。
+会话每轮 `advance_obtain` 依次推进：到时取回动作开始（`start_obtain_action`
+——受理时来源已固定的依赖在 ACTION_STARTED 事务内初始化 PENDING 选
+择行，`selection_initialization` 守卫强制每个依赖恰好一条）→ 来源解
+析（`ResolveSources`）→ 选择计算与固定（`read_selection_request`+
+`select_outputs`+`fix_selection`，来源未完成保持等待）→ 逐项建档
+（`grant_file`：候选资格、目标中间文件与 delivery 同事务）→ 读取推
+进（`_advance_reads` 消费 `plan_device_work`：设备有到时拍摄或让路工
+作时本轮不推进；新授予与在途读取经真实机会事务与 READ_FILE 尝试预算
+推进）→ 尝试执行（prepare、open_session、分段 transfer、complete_copy
+内部完整性校验后 PREPARED）→ 尝试收场（成功释放读取机会并清等待；
+预算耗尽先以 `read_attempts_exhausted` 闭合流程行再保存交付终局失败
+`fail_read_delivery`——要求流程 FAILED 且无在途尝试——并释放机会）→
+统一发布（`decide_obtain_finish` 判定后逐 PREPARED 交付 `publish_delivery`
+再 `finish_obtain` 与父计划同事务终态）。
+
+`DeviceWork` 补 `resume_reads` 字段修复契约缺口：此前“无拍摄工作的在
+途读取继续占用机会”只以空计划表达，消费方无从发现需继续推进的读取；
+现在 `decide_device_work` 对无拍摄工作的在途读取显式返回 resume 计划，
+拍摄占用分支仍为全空（读取等待）。错误码登记 `read_attempts_exhausted`
+（stage=source_read，details 携带 delivery_id、max_attempts、
+attempts_used，从已保存流程行读取保证与事实一致）。
+
+本段顺带修复同类生产缺陷“动作身份冒充设备活动主键”共九处：既有测
+试每库首个拍摄动作恰好活动主键等于动作主键而从未暴露，第二个拍摄
+动作的活动观察、占用释放、活动收场、结果核实、等待安排、停止与核
+实意图全部装载失败且异常被 `dispatch_ready` 记录吞掉、动作永卡执行
+中。统一改为按 `action_id` 查询唯一活动行（`load_activity_of_action`），
+真实主键参与行更新、所有权映射、状态行与原键重送校验。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 在途读取的继续推进由决策层显式表达 | `resume_reads` 让消费方无歧义发现持机会读取；不改动 grantable 与让路分支语义。 |
+| 预算耗尽的两步闭合 | 最后一次失败尝试先以 run_finish=FAILED 闭合流程行，再按流程事实保存交付终局失败并释放机会；中间态（流程 FAILED 但交付未失败）由下一轮幂等补齐。 |
+| 读取收场证据类型 `read_returned` | 沿 stop_returned/results_returned 惯例按操作专属命名，避免与 control 的 operation_returned 重复登记。 |
+| 交付展示名按产物来源命名 | `<原文件主干>-<来源计划名>-<来源动作名>.<原扩展名>`；修复成品加 repaired 前缀；扩展名取 original_name 合法后缀，不合规兜底 bin。 |
+
+验证：会话级集成 `tests/integration/bootstrap/test_obtain_flow.py` 4 项
+（正常链：跨计划取回发布到 ready 且字节一致、display_name 正确；显式
+实例不存在：来源解析失败保存动作终态且无交付；耗尽链：3 次尝试全部
+失败后交付 FAILED、错误详情 attempts_used=3、机会释放；让路链：录像执
+行期间零读取会话，录像终态后读取继续推进到发布，录像原片媒体链拷贝
+与取回读取共用端口）；单元 `test_device_work.py` 6 项覆盖 resume 分支；
+全量回归单元 3296、apps 集成分目录 3391（outputs 1788、capture 199、
+bootstrap 70、scheduling+operations 308、cancellation+devices+contracts
+124、acceptance+history+host_files 382、logging+persistence+reporting+
+session 520）、根集成混跑 3391 全绿（Python 3.11）。
+
+X10 剩余：真实驱动兼容性声明（D5）、三种拍摄与部分取回的跨组件组合
+（I5，含真实 C 领取模块与重复取回独立交付）；清理动作执行入口与取消
+收场消费（N 链）另行接线。
+
 
 ### X11 中间文件生命周期与有限维护
 

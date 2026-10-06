@@ -381,6 +381,176 @@ def _required_current_facts(context, table, identity):
     return facts
 
 
+@dataclass(frozen=True)
+class StartObtainAction:
+    """一次取回动作开始执行的输入；时间资格由调用入口判断。"""
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+
+
+class ObtainStartDisposition(Enum):
+    """取回动作开始事务的结果分区。"""
+
+    SAVED = "saved"
+    #: 动作已终态：只读恢复，不重复开始。
+    ALREADY = "already"
+    #: 未开始且不再普通执行（取消已生效），由取消链收场。
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class ObtainStartResult:
+    """取回动作开始事务的已保存事实。"""
+
+    disposition: ObtainStartDisposition = ObtainStartDisposition.SAVED
+    reason: str | None = None
+
+
+class _StartObtainCommand:
+    """取回动作开始执行的事务命令（ACTION_STARTED.START）。
+
+    只保存开始事实；来源解析、选择固定与读取推进由后续事务依次
+    推进。受理时已固定的同计划来源在开始事件中为每条既有依赖初
+    始化一条 PENDING 选择（守卫强制一一对应）；执行期解析的来源
+    没有既有依赖，选择由来源固定事务创建。到时取回动作开始时不
+    占用设备活动，与拍摄动作的启动互不影响；父计划首次开始与开
+    始事实同事务保存。
+    """
+
+    def __init__(self, command: StartObtainAction, key: OperationKey) -> None:
+        if not isinstance(command, StartObtainAction):
+            raise TypeError("取回开始申请必须使用 StartObtainAction")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved, connection)
+        command = self._command
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise ConsistencyError(f"取回动作不存在: {command.action_id}")
+        self._state["actions"] = {command.action_id: dict(action)}
+        if action["type"] != _OBTAIN_TYPE:
+            raise ConsistencyError(
+                f"开始事务只适用于取回动作: {command.action_id}"
+                f" type={action['type']!r}")
+        if action["status"] in _ACTION_TERMINAL:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ObtainStartResult(
+                    disposition=ObtainStartDisposition.ALREADY))
+        if action["cancel_requested"]:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ObtainStartResult(
+                    disposition=ObtainStartDisposition.REJECTED,
+                    reason="canceled"),
+            )
+        if action["status"] != int(_ACTION_STATUS.PENDING) \
+                or action["execution_started"] != 0:
+            raise TransactionError(
+                f"取回动作不在待执行状态: {command.action_id}"
+                f" status={action['status']!r}"
+                f" execution_started={action['execution_started']!r}")
+        dependencies = self._load_dependencies(connection)
+        if dependencies and action["source_resolution_state"] != int(
+                _RESOLUTION_STATE.FIXED):
+            raise ConsistencyError(
+                "既有来源依赖只允许受理时已固定的来源")
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError(f"计划不存在: {action['plan_id']}")
+        self._state.setdefault("plans", {})[plan["id"]] = plan
+        self._owners[("actions", command.action_id)] = (
+            "action", command.action_id)
+        rows = [_update(
+            "actions", command.action_id,
+            {"status": int(_ACTION_STATUS.PENDING),
+             "execution_started": 0},
+            {"status": int(_ACTION_STATUS.RUNNING),
+             "execution_started": 1})]
+        selection_id = next_row_id(connection, "obtain_source_selections")
+        for dependency_id in dependencies:
+            rows.append(_row(
+                "obtain_source_selections", selection_id,
+                {
+                    "dependency_id": dependency_id,
+                    "status": int(_SELECTION_STATUS.PENDING),
+                    "error_code": None,
+                    "error_details_json": None,
+                }))
+            self._owners[("obtain_source_selections", selection_id)] = (
+                "action", command.action_id)
+            selection_id += 1
+        allocation = scope.allocate(2 if plan["status"] == 1 else 1)
+        events = [_envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _ACTION_STARTED_EVENT, 1, tuple(rows),
+            command.occurred_at)]
+        if plan["status"] == 1:
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            events.append(_envelope(
+                allocation.last_event_id, allocation.txn_id,
+                _PLAN_STATUS_EVENT, 1,
+                (_update("plans", plan["id"],
+                 {"status": 1}, {"status": 2}),),
+                command.occurred_at))
+        return CommandPlan(
+            events=tuple(events), owners=self._owners, state_rows=self._state,
+            result=ObtainStartResult())
+
+    def _load_dependencies(self, connection) -> tuple[int, ...]:
+        """受理时已保存的同计划来源依赖；执行期解析来源没有依赖。"""
+        with closing(connection.execute(
+            "SELECT id FROM action_dependencies WHERE action_id = ?"
+            " ORDER BY id", (self._command.action_id,),
+        )) as cursor:
+            rows = cursor.fetchall()
+        identities = tuple(int(row[0]) for row in rows)
+        for identity in identities:
+            dependency = row_facts(connection, "action_dependencies", identity)
+            if dependency is None:
+                raise ConsistencyError(f"来源依赖记录缺失: {identity}")
+            self._state.setdefault(
+                "action_dependencies", {})[identity] = dependency
+        return identities
+
+    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
+        """原键重送：核实原开始分支与输入后恢复首次响应。"""
+        command = self._command
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds not in (
+                [(_ACTION_STARTED_EVENT, 1)],
+                [(_ACTION_STARTED_EVENT, 1), (_PLAN_STATUS_EVENT, 1)]):
+            raise TransactionError(
+                "操作身份已用于其他事务，不能作为取回开始重送")
+        if saved[0]["occurred_at"] != command.occurred_at:
+            raise TransactionError("取回开始的事实时刻与原事务不同")
+        row = saved[0]["body"]["rows"][0]
+        if row["table"] != "actions" or row["id"] != command.action_id:
+            raise TransactionError("原取回开始属于其他动作")
+        facts = row_facts(connection, "actions", command.action_id)
+        if facts is None or facts["status"] != int(_ACTION_STATUS.RUNNING) \
+                or facts["execution_started"] != 1:
+            raise TransactionError("原取回开始的可靠记录与输入不符")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ObtainStartResult())
+
+
 class _ResolveSourcesCommand:
     """执行期来源解析的完整事务命令。"""
 
@@ -3672,6 +3842,125 @@ class _UnconfirmedFailureCommand(_DeliveryPublicationMixin):
             FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
 
 
+@dataclass(frozen=True)
+class FailReadDelivery:
+    """一次读取耗尽交付失败的输入；预算事实从读取流程行读取。"""
+
+    delivery_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.delivery_id)
+        UtcMicros(self.occurred_at)
+
+
+class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
+    """读取尝试预算耗尽的交付终局失败事务命令。
+
+    读取流程已按 FAILED 终态收场且没有在途尝试时，把交付结束为
+    FAILED 并保存公共错误 read_attempts_exhausted；预算与累计次
+    数从流程行读取，保证详情与已保存事实一致。
+    """
+
+    _TABLES = (
+        "deliveries", "file_copies", "actions", "intermediate_files",
+        "operation_runs", "operation_attempts",
+    )
+
+    def __init__(self, command: FailReadDelivery, key: OperationKey) -> None:
+        if not isinstance(command, FailReadDelivery):
+            raise TypeError("读取耗尽失败申请必须使用 FailReadDelivery")
+        self._command = command
+        self._key = key
+        self._reset_state()
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+        delivery, copy = self._load_delivery(connection, self._command.delivery_id)
+        status = delivery["status"]
+        if status == int(_DELIVERY_STATUS.FAILED):
+            return self._decision(
+                FailureSaveOutcome(FailureSaveDisposition.ALREADY),
+                read_only=True)
+        if status not in (
+            int(_DELIVERY_STATUS.PENDING), int(_DELIVERY_STATUS.PREPARING),
+        ):
+            raise ConsistencyError(
+                f"交付状态不属于读取失败的保存范围: {status!r}")
+        run = self._load_read_run(connection, copy["id"])
+        self._require_read_finished(connection, run)
+        failure = DeliveryFailure(
+            code="read_attempts_exhausted",
+            stage=registered_error("read_attempts_exhausted")["stage"],
+            details={
+                "max_read_attempts": int(run["max_attempts_used"]),
+                "attempts_used": int(run["attempts_used"]),
+            },
+        )
+        row = _update(
+            "deliveries", delivery["id"],
+            {"status": status, "error_json": None},
+            {"status": int(_DELIVERY_STATUS.FAILED),
+             "error_json": failure.as_json()},
+        )
+        events = self._envelopes(
+            scope, [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON, (row,))],
+            self._command.occurred_at,
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=FailureSaveOutcome(FailureSaveDisposition.SAVED),
+        )
+
+    def _load_read_run(self, connection, copy_id: int) -> dict:
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+            (f"read/{copy_id}",),
+        )) as cursor:
+            identities = cursor.fetchall()
+        if len(identities) != 1:
+            raise ConsistencyError("交付拷贝的读取流程缺失或重复")
+        run = row_facts(connection, "operation_runs", identities[0][0])
+        if run is None:
+            raise ConsistencyError(f"读取流程记录缺失: {identities[0][0]}")
+        self._state["operation_runs"][run["id"]] = run
+        self._owners[("operation_runs", run["id"])] = ("action", run["action_id"])
+        return run
+
+    def _require_read_finished(self, connection, run) -> None:
+        """读取预算耗尽失败的保存前提：流程终态失败且无在途尝试。"""
+        _RUN_STATUS = enum_for("operation_runs.status")
+        _ATTEMPT_STATUS = enum_for("operation_attempts.status")
+        if run["status"] != int(_RUN_STATUS.FAILED):
+            raise ConsistencyError(
+                f"读取流程未按失败终态收场: {run['status']!r}")
+        with closing(connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id = ?"
+            " AND status = ?", (run["id"], int(_ATTEMPT_STATUS.RUNNING)),
+        )) as cursor:
+            active = cursor.fetchall()
+        for identity in active:
+            attempt = row_facts(connection, "operation_attempts", identity[0])
+            if attempt is not None:
+                self._state["operation_attempts"][identity[0]] = attempt
+        if active:
+            raise ConsistencyError("读取仍有在途尝试，不能保存终局失败")
+
+    def _reuse(self, saved: list[dict]) -> CommandPlan:
+        """原键恢复首次读取耗尽失败响应。"""
+        types = [(event["type"], event["reason"]) for event in saved]
+        if types != [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON)]:
+            raise TransactionError(
+                "操作身份已用于其他阶段，不能作为读取耗尽失败重送")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError("读取耗尽失败的事实时刻与原事务不同")
+        return self._decision(
+            FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
+
+
 class _WorkFileMixin:
     """中间文件清理事务的共同表事实：文件行、归属与运行状态。"""
 
@@ -4270,45 +4559,8 @@ class _FinishObtainCommand:
 
     def _load_facts(self, connection) -> ObtainFacts:
         """从已保存行装配汇总事实；装载规则与选择、条目、交付状态一致。"""
-        command = self._command
-        sources: list[ObtainSourceFacts] = []
-        items: list[ObtainItemStage] = []
-        with closing(connection.execute(
-            "SELECT s.id, s.status FROM obtain_source_selections s"
-            " JOIN action_dependencies d ON d.id = s.dependency_id"
-            " WHERE d.action_id=? ORDER BY s.id", (command.action_id,),
-        )) as cursor:
-            selections = cursor.fetchall()
-        for selection_id, status in selections:
-            facts = row_facts(connection, "obtain_source_selections", selection_id)
-            if facts is not None:
-                self._state["obtain_source_selections"][selection_id] = facts
-            with closing(connection.execute(
-                "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?"
-                " AND status=1", (selection_id,),
-            )) as cursor:
-                unresolved = cursor.fetchone()[0]
-            sources.append(ObtainSourceFacts(
-                selection_fixed=status == int(_SELECTION_STATUS.FIXED),
-                unresolved_items=unresolved))
-            with closing(connection.execute(
-                "SELECT id, status, delivery_id FROM obtain_items"
-                " WHERE selection_id=? AND status<>1 ORDER BY id",
-                (selection_id,),
-            )) as cursor:
-                rows = cursor.fetchall()
-            for item_id, item_status, delivery_id in rows:
-                item = row_facts(connection, "obtain_items", item_id)
-                if item is not None:
-                    self._state["obtain_items"][item_id] = item
-                delivery = None
-                if delivery_id is not None:
-                    delivery = row_facts(connection, "deliveries", delivery_id)
-                    if delivery is not None:
-                        self._state["deliveries"][delivery_id] = delivery
-                    delivery = delivery["status"] if delivery else None
-                items.append(obtain_item_stage(item_status, delivery))
-        return ObtainFacts(sources=tuple(sources), items=tuple(items))
+        return load_obtain_facts(
+            connection, self._command.action_id, self._state)
 
     def _unpublished_deliveries(self, connection) -> tuple[int, ...]:
         """汇总确定后仍处于准备或发布中的成功交付。"""
@@ -4380,6 +4632,54 @@ class _FinishObtainCommand:
         )
 
 
+def load_obtain_facts(
+    connection, action_id: int, state: dict | None = None,
+) -> ObtainFacts:
+    """从当前投影装配一个取回动作的汇总事实。
+
+    装载规则与选择、条目、交付状态一致；state 提供时顺路收集行
+    事实（事务命令复用），只读调用不传。"""
+    ObjectId(action_id)
+    sources: list[ObtainSourceFacts] = []
+    items: list[ObtainItemStage] = []
+    with closing(connection.execute(
+        "SELECT s.id, s.status FROM obtain_source_selections s"
+        " JOIN action_dependencies d ON d.id = s.dependency_id"
+        " WHERE d.action_id=? ORDER BY s.id", (action_id,),
+    )) as cursor:
+        selections = cursor.fetchall()
+    for selection_id, status in selections:
+        facts = row_facts(connection, "obtain_source_selections", selection_id)
+        if facts is not None and state is not None:
+            state.setdefault("obtain_source_selections", {})[selection_id] = facts
+        with closing(connection.execute(
+            "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?"
+            " AND status=1", (selection_id,),
+        )) as cursor:
+            unresolved = cursor.fetchone()[0]
+        sources.append(ObtainSourceFacts(
+            selection_fixed=status == int(_SELECTION_STATUS.FIXED),
+            unresolved_items=unresolved))
+        with closing(connection.execute(
+            "SELECT id, status, delivery_id FROM obtain_items"
+            " WHERE selection_id=? AND status<>1 ORDER BY id",
+            (selection_id,),
+        )) as cursor:
+            rows = cursor.fetchall()
+        for item_id, item_status, delivery_id in rows:
+            item = row_facts(connection, "obtain_items", item_id)
+            if item is not None and state is not None:
+                state.setdefault("obtain_items", {})[item_id] = item
+            delivery = None
+            if delivery_id is not None:
+                delivery = row_facts(connection, "deliveries", delivery_id)
+                if delivery is not None and state is not None:
+                    state.setdefault("deliveries", {})[delivery_id] = delivery
+                delivery = delivery["status"] if delivery else None
+            items.append(obtain_item_stage(item_status, delivery))
+    return ObtainFacts(sources=tuple(sources), items=tuple(items))
+
+
 def plan_complete(siblings, current_action_id: int) -> bool:
     """父计划的全部动作（含本事务动作）是否都已终态。"""
     return all(
@@ -4391,6 +4691,12 @@ def plan_complete(siblings, current_action_id: int) -> bool:
 
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
+
+    def start_obtain_action(
+        self, command: StartObtainAction, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[ObtainStartResult]:
+        receipt = commit_operation(_StartObtainCommand(command, key), key, owned)
+        return _outcome_of(receipt)
 
     def resolve_sources(
         self, command: ResolveSources, key: OperationKey, owned: OwnedConnection
@@ -4459,6 +4765,13 @@ class OutputsRepository:
         self, request: PreparedRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[PreparedSaveOutcome]:
         receipt = commit_operation(_PreparedSaveCommand(request, key), key, owned)
+        return _outcome_of(receipt)
+
+    def fail_read_delivery(
+        self, command: FailReadDelivery, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[FailureSaveOutcome]:
+        receipt = commit_operation(
+            _ReadDeliveryFailCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
     def load_delivery_state(
@@ -4953,7 +5266,11 @@ def _delivery_guard(event, context) -> None:
                 validate_error_details(code, details)
             except (TypeError, ValueError) as failure:
                 raise EventValidationError(str(failure)) from failure
-            if details.get("delivery_id") != str(row.row_id):
+            # 详情按公共登记结构化：带交付身份字段的（如交接未确
+            # 认）必须与本行一致；无身份字段的详情由命令装配的输
+            # 入交付定位，守卫不追加身份。
+            if details.get("delivery_id") is not None \
+                    and details.get("delivery_id") != str(row.row_id):
                 raise EventValidationError("交付失败详情必须关联本次交付")
 
 

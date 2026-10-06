@@ -86,42 +86,47 @@ class TestRegistryDrivenValidation:
     def test_unimplemented_validator_rejects_write(self) -> None:
         from camctl.history import validators
 
-        # 窗口观察的守卫 window 尚未实现（调度接线接入）。
-        assert "window" not in validators.NAMED_GUARDS
-        event = EventEnvelope(
-            event_id=101,
-            transaction_id=7,
-            event_type=7,
-            event_version=1,
-            occurred_at=1,
-            clock_status=1,
-            change_seq=None,
-            reason=1,
-            evidence={},
-            rows=(
-                RowChange(
-                    table="actions",
-                    row_id=5,
-                    before=RowImage(
-                        exists=True,
-                        values={"first_window_observed_at": None},
-                    ),
-                    after=RowImage(
-                        exists=True,
-                        values={"first_window_observed_at": 1_750_000_000_000_000},
+        # 窗口守卫可能已被同进程更早的装配测试注册；临时摘除并在
+        # 结束后恢复，使本用例不依赖测试执行顺序。
+        saved_guard = validators.NAMED_GUARDS.pop("window", None)
+        try:
+            event = EventEnvelope(
+                event_id=101,
+                transaction_id=7,
+                event_type=7,
+                event_version=1,
+                occurred_at=1,
+                clock_status=1,
+                change_seq=None,
+                reason=1,
+                evidence={},
+                rows=(
+                    RowChange(
+                        table="actions",
+                        row_id=5,
+                        before=RowImage(
+                            exists=True,
+                            values={"first_window_observed_at": None},
+                        ),
+                        after=RowImage(
+                            exists=True,
+                            values={"first_window_observed_at": 1_750_000_000_000_000},
+                        ),
                     ),
                 ),
-            ),
-        )
-        context = EventContext(
-            transaction=TXN,
-            owners={("actions", 5): ("action", 5)},
-            state_rows={"actions": {5: {"id": 5, "type": 1, "status": 1,
-                                        "cancel_requested": 0}},
-                        "outputs": {}},
-        )
-        with pytest.raises(EventValidationError, match="具名校验未接入"):
-            validate_event(event, context)
+            )
+            context = EventContext(
+                transaction=TXN,
+                owners={("actions", 5): ("action", 5)},
+                state_rows={"actions": {5: {"id": 5, "type": 1, "status": 1,
+                                            "cancel_requested": 0}},
+                            "outputs": {}},
+            )
+            with pytest.raises(EventValidationError, match="具名校验未接入"):
+                validate_event(event, context)
+        finally:
+            if saved_guard is not None:
+                validators.NAMED_GUARDS["window"] = saved_guard
 
     def test_unknown_event_type_rejected(self, admission_guards) -> None:
         envelope = _plan_accepted_envelope()

@@ -1896,6 +1896,26 @@ class _FileChecksumCommand:
 # -- 设备活动观察 -----------------------------------------------------
 
 
+def load_activity_of_action(connection, action_id: int) -> dict:
+    """装载动作的唯一设备活动行；动作与活动的主键不重合。
+
+    活动按动作建立（一动作一活动），查询按 action_id 定位后以真实
+    主键返回行事实，供观察、释放、收场与核实命令共用。
+    """
+    from contextlib import closing
+
+    with closing(connection.execute(
+        "SELECT id FROM device_activities WHERE action_id = ?", (action_id,),
+    )) as cursor:
+        found = cursor.fetchone()
+    if found is None:
+        raise ConsistencyError(f"设备活动不存在: {action_id}")
+    facts = row_facts(connection, "device_activities", int(found[0]))
+    if facts is None:
+        raise ConsistencyError(f"设备活动记录缺失: {found[0]}")
+    return facts
+
+
 class _ActivityObserveCommand:
     """保存一次设备活动观察（DEVICE_OBSERVED.OBSERVE）。
 
@@ -1913,14 +1933,14 @@ class _ActivityObserveCommand:
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
+        command = self._command
+        facts = load_activity_of_action(connection, command.action_id)
+        activity_id = facts["id"]
+        self._activity_id = activity_id
+        self._state["device_activities"] = {activity_id: facts}
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
             return self._reuse(saved)
-        command = self._command
-        facts = row_facts(connection, "device_activities", command.action_id)
-        if facts is None:
-            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
-        self._state["device_activities"] = {command.action_id: facts}
         before: dict[str, Any] = {}
         after: dict[str, Any] = {}
         for column, current, value in (
@@ -1943,8 +1963,8 @@ class _ActivityObserveCommand:
             after[column] = value
         if not after:
             raise ConsistencyError("活动观察必须携带至少一项新事实")
-        row = _update("device_activities", command.action_id, before, after)
-        self._owners[("device_activities", command.action_id)] = (
+        row = _update("device_activities", activity_id, before, after)
+        self._owners[("device_activities", activity_id)] = (
             "action", facts["action_id"])
         allocation = scope.allocate(1)
         event = _envelope(
@@ -1965,7 +1985,8 @@ class _ActivityObserveCommand:
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("活动观察的事实时刻与原事务不同")
         row = saved[0]["body"]["rows"][0]
-        if row["table"] != "device_activities" or row["id"] != command.action_id:
+        if (row["table"] != "device_activities"
+                or row["id"] != self._activity_id):
             raise TransactionError("原活动观察属于其他活动")
         after = row["after"]["values"]
         for column, value in (
@@ -2053,10 +2074,9 @@ class _ActivityReleaseCommand:
         if saved is not None:
             return self._reuse(scope, saved)
         command = self._command
-        facts = row_facts(connection, "device_activities", command.action_id)
-        if facts is None:
-            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
-        self._state["device_activities"] = {command.action_id: facts}
+        facts = load_activity_of_action(connection, command.action_id)
+        activity_id = facts["id"]
+        self._state["device_activities"] = {activity_id: facts}
         if facts["occupancy_state"] == 2:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
@@ -2077,10 +2097,10 @@ class _ActivityReleaseCommand:
                     outcome=ReleaseOutcome.REJECTED, reason="scope_limited"))
 
         allocation = scope.allocate(1)
-        self._owners[("device_activities", command.action_id)] = (
+        self._owners[("device_activities", activity_id)] = (
             "action", facts["action_id"])
         row = _update(
-            "device_activities", command.action_id,
+            "device_activities", activity_id,
             {"occupancy_state": 1}, {"occupancy_state": 2})
         event = _envelope(
             allocation.first_event_id, allocation.txn_id,
@@ -2098,12 +2118,12 @@ class _ActivityReleaseCommand:
             raise TransactionError("操作身份已用于其他事务，不能作为占用释放重送")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("占用释放的事实时刻与原事务不同")
+        facts = load_activity_of_action(scope.connection, command.action_id)
         row = saved[0]["body"]["rows"][0]
-        if row["table"] != "device_activities" or row["id"] != command.action_id:
+        if (row["table"] != "device_activities"
+                or row["id"] != facts["id"]):
             raise TransactionError("原占用释放属于其他活动")
-        facts = row_facts(scope.connection, "device_activities",
-                          command.action_id)
-        if facts is None or facts["occupancy_state"] != 2:
+        if facts["occupancy_state"] != 2:
             raise TransactionError("原占用释放的可靠记录与输入不符")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
@@ -2135,10 +2155,9 @@ class _ActivityConcludeCommand:
         if saved is not None:
             return self._reuse(scope, saved)
         command = self._command
-        facts = row_facts(connection, "device_activities", command.action_id)
-        if facts is None:
-            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
-        self._state["device_activities"] = {command.action_id: facts}
+        facts = load_activity_of_action(connection, command.action_id)
+        activity_id = facts["id"]
+        self._state["device_activities"] = {activity_id: facts}
         if facts["occupancy_state"] == 2:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
@@ -2156,7 +2175,7 @@ class _ActivityConcludeCommand:
                 return self._rejected("not_active")
             needs_ended = True
         if needs_ended and not self._load_stop_fact(
-                connection, command.action_id):
+                connection, command.action_id, activity_id):
             raise ConsistencyError(
                 "活动结束缺少可靠停止事实: "
                 f"{command.action_id}")
@@ -2170,7 +2189,7 @@ class _ActivityConcludeCommand:
 
         allocation = scope.allocate(2 if needs_ended else 1)
         owner = ("action", facts["action_id"])
-        self._owners[("device_activities", command.action_id)] = owner
+        self._owners[("device_activities", activity_id)] = owner
         events = []
         next_event = allocation.first_event_id
         if needs_ended:
@@ -2178,7 +2197,7 @@ class _ActivityConcludeCommand:
                 next_event, allocation.txn_id,
                 _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
                 (_update(
-                    "device_activities", command.action_id,
+                    "device_activities", activity_id,
                     {"activity_state": facts["activity_state"]},
                     {"activity_state": 3}),),
                 command.occurred_at))
@@ -2187,14 +2206,15 @@ class _ActivityConcludeCommand:
             next_event, allocation.txn_id,
             _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON,
             (_update(
-                "device_activities", command.action_id,
+                "device_activities", activity_id,
                 {"occupancy_state": 1}, {"occupancy_state": 2}),),
             command.occurred_at))
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
             result=ActivityConclusion(outcome=ConcludeOutcome.CONCLUDED))
 
-    def _load_stop_fact(self, connection, action_id: int) -> bool:
+    def _load_stop_fact(
+            self, connection, action_id: int, activity_id: int) -> bool:
         """按动作类型装载成功终态流程行作为活动结束证据。
 
         照片整次活动随启动调用完成，使用 start 责任；录像与延时活
@@ -2212,7 +2232,7 @@ class _ActivityConcludeCommand:
         for row in connection.execute(
             "SELECT id, status FROM operation_runs"
             " WHERE responsibility_key = ? AND activity_id = ?",
-            (responsibility, action_id),
+            (responsibility, activity_id),
         ).fetchall():
             facts = {"id": int(row[0]), "status": int(row[1])}
             rows[int(row[0])] = facts
@@ -2239,13 +2259,13 @@ class _ActivityConcludeCommand:
         for event in saved:
             if event["occurred_at"] != command.occurred_at:
                 raise TransactionError("活动收场的事实时刻与原事务不同")
+        facts = load_activity_of_action(scope.connection, command.action_id)
+        for event in saved:
             for row in event["body"]["rows"]:
                 if (row["table"] != "device_activities"
-                        or row["id"] != command.action_id):
+                        or row["id"] != facts["id"]):
                     raise TransactionError("原活动收场属于其他活动")
-        facts = row_facts(scope.connection, "device_activities",
-                          command.action_id)
-        if facts is None or facts["occupancy_state"] != 2:
+        if facts["occupancy_state"] != 2:
             raise TransactionError("原活动收场的可靠记录与输入不符")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
@@ -2291,19 +2311,18 @@ class _ResultSetConfirmCommand:
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
+        command = self._command
+        facts = load_activity_of_action(connection, command.action_id)
+        activity_id = facts["id"]
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
-        command = self._command
-        facts = row_facts(connection, "device_activities", command.action_id)
-        if facts is None:
-            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
+            return self._reuse(connection, saved)
         action = row_facts(connection, "actions", facts["action_id"])
         if action is None:
             raise ConsistencyError(f"活动所属动作不存在: {facts['action_id']}")
-        self._state["device_activities"] = {command.action_id: facts}
+        self._state["device_activities"] = {activity_id: facts}
         self._state["actions"] = {facts["action_id"]: action}
-        self._owners[("device_activities", command.action_id)] = (
+        self._owners[("device_activities", activity_id)] = (
             "action", facts["action_id"])
         if action["type"] == 2:
             raise ConsistencyError(
@@ -2335,7 +2354,7 @@ class _ResultSetConfirmCommand:
         if error_after != facts["last_error_json"]:
             before["last_error_json"] = facts["last_error_json"]
             after["last_error_json"] = error_after
-        row = _update("device_activities", command.action_id, before, after)
+        row = _update("device_activities", activity_id, before, after)
         allocation = scope.allocate(1)
         event = _envelope(
             allocation.first_event_id, allocation.txn_id,
@@ -2388,7 +2407,7 @@ class _ResultSetConfirmCommand:
             return None
         return None if command.error is None else dict(command.error)
 
-    def _reuse(self, saved) -> CommandPlan:
+    def _reuse(self, connection, saved) -> CommandPlan:
         """原键重送：核实原分支与输入后恢复首次结果。"""
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
@@ -2397,8 +2416,11 @@ class _ResultSetConfirmCommand:
             raise TransactionError("操作身份已用于其他事务，不能作为结果核实重送")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("结果核实的事实时刻与原事务不同")
+        activity_id = load_activity_of_action(
+            connection, command.action_id)["id"]
         row = saved[0]["body"]["rows"][0]
-        if row["table"] != "device_activities" or row["id"] != command.action_id:
+        if (row["table"] != "device_activities"
+                or row["id"] != activity_id):
             raise TransactionError("原结果核实属于其他活动")
         values = row["after"]["values"]
         expected_check = None if command.phase is ResultSetPhase.BEGIN else {
@@ -2523,7 +2545,7 @@ class _FinishResultCheckCommand:
         finish_plan = FinishAttemptCommand(
             self._finish, self._key)._reuse(scope, saved[:2])
         confirm_plan = _ResultSetConfirmCommand(
-            self._confirm, self._key)._reuse(saved[2:])
+            self._confirm, self._key)._reuse(scope.connection, saved[2:])
         return CommandPlan(
             events=(),
             owners={**finish_plan.owners, **confirm_plan.owners},
@@ -2623,7 +2645,7 @@ class _CloseResultCheckCommand:
                 or not json_equal(values.get("error_json"), self._run_error())):
             raise TransactionError("耗尽收场的重送输入与原事务不同")
         confirm_plan = _ResultSetConfirmCommand(
-            command, self._key)._reuse(saved[1:])
+            command, self._key)._reuse(connection, saved[1:])
         return CommandPlan(
             events=(),
             owners=confirm_plan.owners,

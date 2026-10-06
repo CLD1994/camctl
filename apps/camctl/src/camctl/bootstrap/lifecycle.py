@@ -175,6 +175,9 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
         session_capture_assembly,
     )
     from camctl.bootstrap.flows import cancel_flow, capture_flow, report_flow
+    from camctl.bootstrap.obtain_assembly import (
+        obtain_flow, session_obtain_assembly,
+    )
     from camctl.devices.drivers.runtime import current_registry
     from camctl.reporting.maintenance import MaintenanceLimits
     from camctl.reporting.supervisor import WorkerSupervisor
@@ -187,6 +190,7 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
     staging = Path(deps.config.paths.staging).expanduser().resolve()
     ready = Path(deps.config.paths.ready).expanduser().resolve()
     processing = Path(deps.config.paths.processing).expanduser().resolve()
+    drivers = current_registry()
     flows = {
         "report": report_flow(
             state_db=deps.state_db,
@@ -203,9 +207,19 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
         # 首次固定的执行定义。
         "scheduling": capture_flow(session_capture_assembly(
             devices=deps.config.devices,
-            drivers=current_registry(),
+            drivers=drivers,
             staging=staging,
             wait_config=execution_wait_config,
+        )),
+        # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
+        # 推进；拷贝段大小取自 copy 配置。
+        "obtain": obtain_flow(session_obtain_assembly(
+            devices=deps.config.devices,
+            drivers=drivers,
+            staging=staging,
+            ready=ready,
+            processing=processing,
+            segment_size=deps.config.copy.segment_size_bytes,
         )),
     }
     return flows, supervisor

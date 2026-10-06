@@ -668,8 +668,15 @@ class TestAtomicRollback:
 
             from camctl.history import validators
 
-            assert "window" not in validators.NAMED_GUARDS
-            receipt = commit_operation(WindowObserveCommand(), new_operation_key(), owned)
+            # 窗口守卫可能已被同进程更早的装配测试注册；临时摘除并
+            # 在结束后恢复，使本用例不依赖测试执行顺序。
+            saved_guard = validators.NAMED_GUARDS.pop("window", None)
+            try:
+                receipt = commit_operation(
+                    WindowObserveCommand(), new_operation_key(), owned)
+            finally:
+                if saved_guard is not None:
+                    validators.NAMED_GUARDS["window"] = saved_guard
             assert receipt.kind == "rolled_back"
             assert "具名校验未接入" in str(receipt.error)
             assert _count(connection, "actions") == 0

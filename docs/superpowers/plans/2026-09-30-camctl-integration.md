@@ -118,7 +118,7 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 先红证据：主链初次贯通失败于客户端导入拒绝报告——报告快照中出现“未执行计划包含已开始动作”（客户端 `validateReport` 拒绝 pending 计划携带 started 动作），及计划停在执行中无人推进。按计划执行状态规格（plans.status 是动作聚合：曾有动作开始且未全部终态即执行中）确认为生产缺陷并在责任边界修复：报告同步动作的开始事务与本地完成事务（`reporting/policy.py`）分别补齐计划首次开始（PLAN_STATUS_CHANGED.START）与全部终态完成（COMPLETE）事件，与拍摄、取回链的既有模式对齐。
 
-同类缺陷审计（同一不变量的全部动作开始入口）：拍摄动作开始（`scheduling.py` StartActionCommand）与取消动作开始（`cancellation.py` _StartCancelCommand）同样不推计划首次开始，一并修复；取回/删除动作的执行入口尚未实现（`_due_pending_actions` 只选拍摄类型），将随取回链接入时按同模式保证。
+同类缺陷审计（同一不变量的全部动作开始入口）：拍摄动作开始（`scheduling.py` StartActionCommand）与取消动作开始（`cancellation.py` _StartCancelCommand）同样不推计划首次开始，一并修复；取回动作的执行入口已于 2026-10-07 随取回链接入 run 会话按同模式保证（`outputs.py` StartObtainCommand 在计划待执行时同事务保存 PLAN_STATUS START，见[产物计划 X10 第四段](2026-09-30-camctl-outputs.md#x10-自动预览及统一发布汇总)），删除动作的执行入口仍待清理链接入时按同模式保证。
 
 行为事实：主链覆盖 init、describe（`{"devices": []}` 进入客户端存储）、客户端真实导出（整数请求身份、首份无 ACK）、C 受管 submit 与 run、报告发布到 ready、C 领取移动到 processing（ready 撤空、原字节 size/sha256 核对）、客户端真实导入（`saved_report_ids`/`ack_id` 与报告身份一致）、第二份导出自动携带 `last_report_id` 并被受理接口吸收（`runtime_state` 累计确认推进到报告 `to_wm`）。扩展场景覆盖：非法正文但有效 ACK（正文被拒不建计划、ACK 仍被吸收）、同请求重送（计划与动作身份保持一次受理）、领取即删除（主链断言）与报告冻结后新提交（主链第二份即 ACK 组合）。报告保存失败重试、普通生成失败、数据库失效日志副本三场景未在本轮覆盖，随对应故障注入链路（225 行状态库不可用日志副本等）补齐。
 

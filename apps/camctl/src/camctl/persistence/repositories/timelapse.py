@@ -18,6 +18,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.capture import load_activity_of_action
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.transaction import (
     CommandPlan,
@@ -86,11 +87,9 @@ class WaitCompletedCommand:
         if saved is not None:
             return self._reuse(scope, saved)
         command = self._command
-        activity = row_facts(connection, "device_activities", command.action_id)
-        if activity is None:
-            raise ConsistencyError(f"设备活动不存在: {command.action_id}")
-        self._state["device_activities"] = {command.action_id: activity}
-        self._owners[("device_activities", command.action_id)] = (
+        activity = load_activity_of_action(connection, command.action_id)
+        self._state["device_activities"] = {activity["id"]: activity}
+        self._owners[("device_activities", activity["id"])] = (
             "action", activity["action_id"])
         if activity["sent_at"] is None or activity["expected_check_at"] is None:
             raise ConsistencyError("等待完成要求已保存发送事实与预计检查时间")
@@ -98,7 +97,7 @@ class WaitCompletedCommand:
             raise ConsistencyError("等待完成事实已保存，不因新安排改写")
         allocation = scope.allocate(1)
         row = _update(
-            "device_activities", command.action_id,
+            "device_activities", activity["id"],
             {"wait_completed_event_id": None},
             {"wait_completed_event_id": allocation.first_event_id},
         )
@@ -126,12 +125,13 @@ class WaitCompletedCommand:
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("等待完成的事实时刻与原事务不同")
         row = saved[0]["body"]["rows"][0]
-        if row["table"] != "device_activities" or row["id"] != command.action_id:
+        if row["table"] != "device_activities":
             raise TransactionError("原等待完成属于其他活动")
         event_id = row["after"]["values"]["wait_completed_event_id"]
-        facts = row_facts(scope.connection, "device_activities",
-                          command.action_id)
-        if facts is None or facts["wait_completed_event_id"] != event_id:
+        activity = load_activity_of_action(scope.connection, command.action_id)
+        if row["id"] != activity["id"]:
+            raise TransactionError("原等待完成属于其他活动")
+        if activity["wait_completed_event_id"] != event_id:
             raise TransactionError("原等待完成的可靠记录与输入不符")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
@@ -155,11 +155,9 @@ class ScheduleWaitCommand:
         if saved_transaction_events(connection, self._key) is not None:
             raise TransactionError("等待安排的重送须由调用方按原事务核实")
         command = self._command
-        activity = row_facts(connection, "device_activities", command.action_id)
-        if activity is None:
-            raise TransactionError(f"设备活动不存在: {command.action_id}")
-        self._state["device_activities"] = {command.action_id: activity}
-        self._owners[("device_activities", command.action_id)] = (
+        activity = load_activity_of_action(connection, command.action_id)
+        self._state["device_activities"] = {activity["id"]: activity}
+        self._owners[("device_activities", activity["id"])] = (
             "action", activity["action_id"],
         )
         if self._reason == _SCHEDULE_REASON:
@@ -197,7 +195,7 @@ class ScheduleWaitCommand:
             allocation.txn_id,
             _CAPTURE_WAIT_EVENT,
             self._reason,
-            (_update("device_activities", command.action_id, before, after),),
+            (_update("device_activities", activity["id"], before, after),),
             command.occurred_at,
         )
         return CommandPlan(

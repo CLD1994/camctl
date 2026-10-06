@@ -668,6 +668,28 @@
         "obtain_items": 6
       }
     },
+    "read_attempts_exhausted": {
+      "stage": "source_read",
+      "description": "交付的源文件读取尝试预算耗尽，文件处理最终失败。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "max_read_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempts_used": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_read_attempts",
+          "attempts_used"
+        ],
+        "additionalProperties": false
+      }
+    },
     "delete_attempts_exhausted": {
       "stage": "cleanup",
       "description": "删除预算耗尽。",

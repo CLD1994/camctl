@@ -45,22 +45,28 @@ class DeviceWork:
     grant_reads: tuple[int, ...]
     #: 为到时拍摄让路、需要结束本次读取的在途工作。
     yield_reads: tuple[int, ...]
+    #: 无拍摄工作时继续推进的在途读取。
+    resume_reads: tuple[int, ...]
 
 
 def decide_device_work(facts: DeviceFacts) -> DeviceWork:
     """按拍摄优先与读取让路规则决定本轮设备工作。
 
-    第一版设备兼容性：拍摄与读取不并行——持机会读取遇到到时拍摄
-    时先结束本次读取，拍摄在下一轮派发；无拍摄工作的在途读取继续
-    占用机会，不重复授予其他读取。
+    第一版设备兼容性：拍摄与读取不并行——持机会读取遇到到时拍
+    摄时先结束本次读取，拍摄在下一轮派发；设备被拍摄活动占用时
+    读取不推进；无拍摄工作的在途读取继续占用机会并推进，不重复
+    授予其他读取。
     """
     if facts.held_reads and facts.due_captures:
-        return DeviceWork(facts.device_id, (), (), facts.held_reads)
+        return DeviceWork(
+            facts.device_id, (), (), facts.held_reads, ())
     if facts.due_captures:
-        return DeviceWork(facts.device_id, facts.due_captures, (), ())
-    if facts.held_captures or facts.held_reads:
-        return DeviceWork(facts.device_id, (), (), ())
-    return DeviceWork(facts.device_id, (), facts.grantable_reads, ())
+        return DeviceWork(facts.device_id, facts.due_captures, (), (), ())
+    if facts.held_captures:
+        return DeviceWork(facts.device_id, (), (), (), ())
+    if facts.held_reads:
+        return DeviceWork(facts.device_id, (), (), (), facts.held_reads)
+    return DeviceWork(facts.device_id, (), facts.grantable_reads, (), ())
 
 
 #: file_copies.verification_state 的完成态（MATCHED 与源摘要不可用降级）。
