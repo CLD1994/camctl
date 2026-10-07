@@ -109,15 +109,14 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
                         item_id, _MODE_BY_ELIGIBILITY[eligibility], occurred),
                     new_operation_key(), owned))
         row = connection.execute(
-            "SELECT status, cancellation_effect, target_action_id"
-            " FROM cancel_items WHERE id = ?", (item_id,)).fetchone()
-        _, effect, target_id = row
-        if row[0] == 2 and effect == 2:
-            # 取消已生效：本次有限收场经结算端口按目标类型推进。
-            # 端口自行判断剩余工作（拍摄的停止等待、取回的交付撤回），
-            # 不以目标是否终态为前提；全部完成后按目标终态选择完成
-            # 依据：目标以 canceled 结束证明取消达成，其他终态保持
-            # 原结果。
+            "SELECT status, target_action_id FROM cancel_items"
+            " WHERE id = ?", (item_id,)).fetchone()
+        if row[0] == 2:
+            # 成员处理中（取消已生效或终态目标的剩余收场）经结算
+            # 端口按目标类型推进。端口自行判断剩余工作（拍摄的停
+            # 止等待、取回的交付撤回），不以目标是否终态为前提；全
+            # 部完成后按目标终态选择完成依据：目标以 canceled 结束
+            # 证明取消达成，其他终态保持原结果。
             target_status = connection.execute(
                 "SELECT status FROM actions WHERE id = ?",
                 (target_id,)).fetchone()

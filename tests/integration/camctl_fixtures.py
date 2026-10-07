@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -82,6 +83,9 @@ class Deployment:
                             "[devices.cam-1.result_check]",
                             'retry_interval_s = "0"',
                             "",
+                            "[devices.cam-1.cleanup]",
+                            'retry_interval_s = "0"',
+                            "",
                         ]
                         if devices
                         else []
@@ -149,6 +153,20 @@ class Deployment:
             "import", str(reports_dir), str(self.root / "client-store"),
             output=self.root / "client-import.json")
 
+    def install_client_capabilities(self, driver: dict) -> None:
+        """把 camctl describe 的能力说明导入客户端存储。
+
+        真实链路中客户端从部署侧取得设备能力说明；测试以 describe
+        命令与替身驱动的登记定义同源产生同一说明。
+        """
+        described = self.camctl(
+            "describe", "--config", str(self.config_path), driver=driver)
+        assert described.exit_code == 0, described.stderr
+        store = self.root / "client-store"
+        store.mkdir(exist_ok=True)
+        (store / "device-capabilities.json").write_text(
+            described.stdout, encoding="utf-8")
+
     def export_plan_with_client(self, plan_body: dict) -> tuple[Path, dict]:
         """用客户端服务的真实导出路径产生计划文件，返回路径与凭据。
 
@@ -215,17 +233,27 @@ def timelapse_plan(request_id: str, scheduled_at: str) -> dict:
 
 def stub_driver_spec(files: dict[str, list[dict]], *,
                      timelapse_duration_s: float = 3.0,
-                     gates: dict[str, str] | None = None) -> dict:
+                     record_duration_s: float = 1.0,
+                     gates: dict[str, str] | None = None,
+                     device_files: dict[str, str] | None = None,
+                     delete_error: str | None = None) -> dict:
     """设备替身剧本：驱动能力、按活动身份的结果文件与同步门。
 
     files 的键是活动身份（单动作部署从 1 开始）；gates 把端口名映
     到剧本目录中的门文件名，该文件出现前替身不响应对应调用。
+    device_files 按设备侧文件身份提供读取内容（取回链的真实字节
+    与摘要来源）。delete_error 提供时删除调用持续返回该错误（效
+    果未知）；删除成功时移除设备内容并按契约回填文件缺席观察，
+    查询按设备内容实时报告存在性。
     """
     return {
         "driver_id": "test-stub",
         "timelapse_duration_s": timelapse_duration_s,
+        "record_duration_s": record_duration_s,
         "files": files,
         "gates": gates or {},
+        "device_files": device_files or {},
+        "delete_error": delete_error,
     }
 
 
@@ -266,6 +294,14 @@ _STUB_EVIDENCE_CONTRACTS = (
     ("result_files_listed", 1, "result",
      frozenset({"activity_id", "entries"}), "activity_id"),
     ("results_returned", 1, "result", frozenset(), None),
+    ("file_digest", 1, "digest",
+     frozenset({"file_id", "sha256"}), "file_id"),
+    ("read_returned", 1, "read", frozenset(), None),
+    ("delete_returned", 1, "delete", frozenset(), None),
+    ("file_absent", 1, "delete",
+     frozenset({"cleanup_item_id"}), "cleanup_item_id"),
+    ("file_presence", 1, "query",
+     frozenset({"cleanup_item_id", "present"}), "cleanup_item_id"),
 )
 
 _CONTROL_OBSERVATIONS = {
@@ -342,6 +378,93 @@ class _ScriptedStubDriver:
                 data={"activity_id": identity, "entries": entries}),),
             error=None)
 
+    def _device_content(self, identity: str) -> bytes:
+        """按设备侧文件身份取剧本内容；取回链的真实字节来源。"""
+        content = self._spec.get("device_files", {}).get(identity)
+        assert content is not None, f"剧本缺少设备文件内容: {identity!r}"
+        return (content.encode("utf-8") if isinstance(content, str)
+                else content)
+
+    async def open_read(self, source, offset: int, ticket):
+        from decimal import Decimal
+
+        from camctl.devices.read_session import ReadSession
+
+        identity = json.loads(source.file_id)[-1]
+        self.calls.append(("read", identity))
+        content = self._device_content(identity)[offset:]
+        return ReadSession(source, offset, _MemoryStream(content), Decimal("10"))
+
+    async def digest(self, request) -> object:
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.devices.ports import DeviceCallResult
+
+        identity = json.loads(request.params["identity_key"])[-1]
+        self.calls.append(("digest", identity))
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type="file_digest", version=1,
+                data={"file_id": request.params["file_id"],
+                      "sha256": hashlib.sha256(
+                          self._device_content(identity)).hexdigest()}),),
+            error=None)
+
+    async def delete(self, request) -> object:
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.devices.ports import DeviceCallResult
+
+        item_id = request.params["cleanup_item_id"]
+        self.calls.append(("delete", item_id))
+        error = self._spec.get("delete_error")
+        if error is not None:
+            # 删除调用失败且无观察：删除效果未知，由查询核实。
+            return DeviceCallResult(observations=(), error=error)
+        identity = json.loads(request.params["identity_key"])[-1]
+        self._spec["device_files"].pop(identity, None)
+        return DeviceCallResult(
+            observations=(
+                DeviceObservation(
+                    type="delete_returned", version=1, data={}),
+                DeviceObservation(
+                    type="file_absent", version=1,
+                    data={"cleanup_item_id": item_id}),
+            ),
+            error=None)
+
+    async def query_state(self, request) -> object:
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.devices.ports import DeviceCallResult
+
+        item_id = request.params["cleanup_item_id"]
+        self.calls.append(("query", item_id))
+        identity = json.loads(request.params["identity_key"])[-1]
+        present = identity in self._spec["device_files"]
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type="file_presence", version=1,
+                data={"cleanup_item_id": item_id,
+                      "present": present}),),
+            error=None)
+
+
+class _MemoryStream:
+    """内存字节流：与受管读取通道同形的同步读取与收场。"""
+
+    def __init__(self, content: bytes) -> None:
+        self._content = content
+        self._position = 0
+
+    def read(self, limit: int) -> bytes:
+        chunk = self._content[self._position:self._position + limit]
+        self._position += len(chunk)
+        return chunk
+
+    def cancel(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
 
 def _stub_definition(spec: dict):
     """替身的驱动定义：照片单张与设备自结束的延时任务。"""
@@ -357,6 +480,13 @@ def _stub_definition(spec: dict):
 
     def photo_task(params):
         return CaptureTask("camera_take_photo")
+
+    def record_task(params):
+        return CaptureTask(
+            "camera_record",
+            target_duration_s=Decimal(str(spec.get("record_duration_s", 1.0))),
+            stop_supported=True,
+        )
 
     def timelapse_task(params):
         return CaptureTask(
@@ -380,6 +510,8 @@ def _stub_definition(spec: dict):
     }
     photo_schema = json.loads(json.dumps(schema))
     photo_schema["properties"]["type"]["const"] = "single_shot"
+    record_schema = json.loads(json.dumps(schema))
+    record_schema["properties"]["type"]["const"] = "video"
     timelapse_schema = json.loads(json.dumps(schema))
     timelapse_schema["properties"]["type"]["const"] = "timelapse"
     return DriverDefinition(
@@ -390,6 +522,11 @@ def _stub_definition(spec: dict):
                 name="单张拍摄", description="跨组件替身的单张拍摄",
                 preview_supported=False, schema=photo_schema, defaults={},
                 task_factory=photo_task),),
+            "camera_record": (ActionCapability(
+                action_type="camera_record", parameter_type="video",
+                name="录像", description="跨组件替身的停止控制录像",
+                preview_supported=False, schema=record_schema, defaults={},
+                task_factory=record_task),),
             "camera_timelapse": (ActionCapability(
                 action_type="camera_timelapse", parameter_type="timelapse",
                 name="延时摄影", description="跨组件替身的定时结束延时任务",
@@ -421,11 +558,11 @@ def install_stub_driver(spec: dict) -> None:
         declaration=DriverDeclaration(
             control_supported=True,
             stop_supported=True,
-            query_supported=False,
+            query_supported=True,
             result_supported=True,
-            read_supported=False,
-            digest_supported=False,
-            delete_supported=False,
+            read_supported=True,
+            digest_supported=True,
+            delete_supported=True,
         ),
         evidence=evidence,
         status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED,

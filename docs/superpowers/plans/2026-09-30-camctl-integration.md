@@ -132,8 +132,8 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 **输入与预期：** 每个用例给出设备能力、输入计划、注入边界、已有事实和独立期望结果。控制设备返回、线程段结束、数据库提交及报告退出的同步点；不通过随机 sleep 安排竞争。
 
-- [ ] 分别建立 `test_recording_delivery_survives_late_cancel`、`test_photo_keeps_completed_outputs`、`test_timelapse_recovers_remaining_wait`、`test_cleanup_unknown_preserves_original_request_result`。每个用例只验证所属组合分支，机器身份、状态、错误码及预算精确断言，用户文案只核对必要事实。
-- [ ] 每引入一条链先运行相应根集成文件，例如 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py -q`，取得因缺失契约而失败的证据；前序能力缺失时回到所属模块任务，不在集成驱动中补造业务行为。
+- [x] 分别建立 `test_recording_delivery_survives_late_cancel`、`test_photo_keeps_completed_outputs`、`test_timelapse_recovers_remaining_wait`、`test_cleanup_unknown_preserves_original_request_result`。每个用例只验证所属组合分支，机器身份、状态、错误码及预算精确断言，用户文案只核对必要事实。
+- [x] 每引入一条链先运行相应根集成文件，例如 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py -q`，取得因缺失契约而失败的证据；前序能力缺失时回到所属模块任务，不在集成驱动中补造业务行为。
 - [ ] 按阶段 3—6 接入真实生产能力，覆盖不同可选查询/停止能力、文件与产物登记、普通与自动取回、内部录像处理、取消四种入口、清理竞争、终态后责任及新请求接手。
 - [ ] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py tests/integration/test_camctl_output_roundtrip.py tests/integration/test_camctl_cancellation_roundtrip.py tests/integration/test_camctl_session_recovery.py -q`，交错并发 submit、关闭阶段新提交、未来动作、时钟异常、设备绑定改变、配置重载、报告失败、迟到结果、提交未知和重启恢复。核对原身份、预算、确定结果、旧报告及实际占用，不能只核对最新终态。
 - [ ] 沿权威输入到用户结果审计各链所有接缝，补齐真实双方与重要替身的契约组合；建议提交“test: 验证第一版跨组件业务与恢复”。
@@ -149,6 +149,20 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 测试环境事实：本机没有 ffprobe/ffmpeg，录像链的媒体检查受管工具无法在本机组合，录像用例与真实 C 领取模块（Windows 本机无法编译 POSIX 模块）一并列入后续链路；客户端消费位置目前为 ready（C 领取环节未接入时的等价位置事实），接入 C 领取后改为 processing。
 
 回归证据（2026-10-06，Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_capture_roundtrip.py` 2 项通过；根 `tests/integration` 36 项+342 子测试通过；apps/camctl 单元 3296 项连续两轮通过（期间一轮 9F/34E、一轮 1E 为既有记录的 Windows 瞬时资源压力漂移，涉事测试单独运行均通过）；bootstrap 集成 64 项、acceptance 集成 226 项通过。
+
+#### I5 第二条链验证记录（2026-10-07）
+
+已建立 `tests/integration/test_camctl_output_roundtrip.py` 与 `tests/integration/test_camctl_cancellation_roundtrip.py`，四个指定用例全部完成。基础设施扩展：替身补 `camera_record` 能力与 `open_read`/`digest`/`delete`/`query_state` 四个端口及对应证据契约（`file_digest`、`read_returned`、`delete_returned`、`file_absent`、`file_presence`）；删除成功按契约回填文件缺席观察并移除设备内容，查询按设备内容实时报告存在性；新增 `install_client_capabilities` 把 `camctl describe` 输出写入客户端能力文件（客户端导出链的 `validatePlan` 需要非空能力）。
+
+两用例的行为事实：录像链覆盖客户端导出（record+obtain 同计划、按名称解析取回来源）→ run（录像、检查、修复、读取拷贝与摘要、交付 ready，ready 文件字节与替身内容一致）→ ready 手动移入 processing 模拟 C 领取 → 顶层 `request_id` 目标的迟到取消（processing 交付不可撤回，取消动作成功，原动作与交付事实保持，processing 文件字节不变）→ 报告导入与 ACK 吸收。清理链覆盖删除调用持续失败且查询确认文件仍在时按删除预算耗尽失败（成员失败、产物转受限、拍摄成功与产物身份保持）→ 首批报告（`cleanup_items_failed`、产物受限如实呈现）→ 客户端从报告取得产物身份后另一请求精确删除成功（产物转已清理、旧失败成员与旧动作事实不被改写）→ 第二批增量报告只含新变化实体 → 最终 ACK 吸收。
+
+先红证据与责任边界修复（均为既有生产缺陷，跨组件组合首次暴露）：①取回开始事务缺少 `obtain_source_selections` 表的事实预置，同计划按名称引用来源时开始事务回滚（`persistence/repositories/outputs.py` 预置空映射）；②`camera_result` 公开投影在检查、修复与清理字段全部省略时产生空对象，违反 minProperties（`report-dependencies.json` 的 when 收紧为存在处理行且有可报事实才投影，`exists` 短路保护无处理行分支）；③终态取回目标的撤回明细永不推进（TERMINAL 生效有明细时成员改保持处理中、编排对处理中成员一律结算、事件预算按是否携带结果事件动态分配，`cancellation` 仓储与编排同步修改，`test_target_types.py` 三用例改经 `apply_cancel` 真实编排驱动）；④清理成员终态时删除与存在性查询两条伴随流程的行保持待执行/执行中且带重试等待，会话的流程收尾计数无法归零，`run` 命令永不退出——新增 `StaleRunFinish` 伴随收场事务命令（`operations` 仓储逐行保存终态并清除重试等待，与尝试结束的流程收场分支同一守卫约束），清理流在每个成员终态点统一收场两条伴随流程，`already_terminal` 分支按成员已保存终态补齐收场（事务间中断的恢复路径），成员选择查询同时选中仍有伴随流程未收场的终态成员。
+
+伴随收场实现过程中的一次方向修正：曾把预算耗尽判定提前到尝试结束事务并即时终态化成员，apps 清理链 7 项测试证明其改变既有失败时序（当轮应报 `still_present`/`query_unknown`，耗尽由下一轮开始事务拒绝时收场）；回退为伴随收场单一收口后原有语义恢复且 run 会话正常退出。另修正存在性责任键拼装（`exists/{id}` 而非 `query/{id}`），耗尽详情的已用次数如实统计。
+
+遗留观察（归取消计划 N 链）：清理动作被取消请求标记后，`_running_cleanup_actions` 不再选中该动作，而取消结算对删除中成员等待“执行链”收场——两处组合下删除中成员无人推进，取消动作可能保持执行中；本轮用例未经过该组合，待 N 链按现实目录组合核实并修复。
+
+回归证据（2026-10-07，Windows 开发机，uv CPython 3.11）：根 `tests/integration` 41 项+342 子测试通过（含两个新用例）；apps/camctl 全量 6691 项通过、6 项跳过；五项仓库检查（doc-links、protocol、database-spec、report-dependencies、event-transitions）及 `report-dependencies.test.mjs` 全部通过。
 
 ### I6 全量契约映射、软件验收与部署交接
 

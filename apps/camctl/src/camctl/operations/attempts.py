@@ -372,6 +372,43 @@ class FinishAttemptResult:
     run_status: RunStatus | None = None
 
 
+@dataclass(frozen=True)
+class StaleRunFinish:
+    """拥有方终态时伴随流程的统一收场请求。
+
+    成员（如清理项）成功、失败或取消后，其支撑流程（删除与存在
+    性查询）不再有后续尝试；仍处于待执行或执行中的流程行按同一
+    最终结果结束。错误的携带规则与 RunFinish 一致，由守卫保证。
+    """
+
+    responsibility_keys: tuple[str, ...]
+    status: RunOutcome
+    occurred_at: int
+    error: ErrorValue | None = None
+
+    def __post_init__(self) -> None:
+        _utc_micros(self.occurred_at)
+        if not isinstance(self.status, RunOutcome):
+            raise AttemptConfigError(f"status 必须是 RunOutcome: {self.status!r}")
+        if not self.responsibility_keys:
+            raise AttemptConfigError("伴随流程收场至少要有一个责任键")
+        for key in self.responsibility_keys:
+            if not isinstance(key, str) or not key:
+                raise AttemptConfigError(f"责任键必须是非空字符串: {key!r}")
+        if self.status in (RunOutcome.FAILED, RunOutcome.UNCONFIRMED):
+            if self.error is None:
+                raise AttemptConfigError("失败或未确认结束必须携带流程错误")
+        elif self.error is not None:
+            raise AttemptConfigError("该结束结果不携带流程错误")
+
+
+@dataclass(frozen=True)
+class StaleRunFinishResult:
+    """伴随收场事务的返回：本次实际收场的流程身份。"""
+
+    finished_run_ids: tuple[int, ...] = ()
+
+
 class RefusalKind(Enum):
     """意图未授予时驱动不得派发的可靠分区。"""
 

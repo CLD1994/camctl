@@ -431,16 +431,10 @@ class _ApplyCancelTargetCommand:
     """保存一个目标的取消生效（CANCEL_CHANGED.APPLY）。
 
     可靠未启动的目标同事务终态取消并保存成功结果；已启动且支持停
-    止的只保存取消标记，停止收场另行推进；终态目标不改写，按既有
-    终态保存成功；目标取消已生效时只保存本项效果，复用原责任。
+    止的只保存取消标记，停止收场另行推进；终态目标不改写，有已发
+    布交付时先保存撤回明细并保持成员处理中，收场完成后按既有终态
+    保存成功；目标取消已生效时只保存本项效果，复用原责任。
     """
-
-    _MODE_EVENTS = {
-        CancelApplyMode.PRE_START: 2,
-        CancelApplyMode.WITH_STOP: 1,
-        CancelApplyMode.TERMINAL: 2,
-        CancelApplyMode.ALREADY: 1,
-    }
 
     def __init__(self, command: ApplyCancelTarget, key: OperationKey) -> None:
         if not isinstance(command, ApplyCancelTarget):
@@ -467,6 +461,7 @@ class _ApplyCancelTargetCommand:
         target_id = item["target_action_id"]
         action_rows: tuple = ()
         outcome_event = None
+        withdrawal_rows = self._withdrawal_rows(connection, item, target)
         if mode is CancelApplyMode.PRE_START:
             if target["status"] != 1 or target["cancel_requested"]:
                 raise ConsistencyError("未启动取消要求目标待执行且未取消")
@@ -486,9 +481,15 @@ class _ApplyCancelTargetCommand:
         elif mode is CancelApplyMode.TERMINAL:
             if target["status"] not in _ACTION_TERMINAL:
                 raise ConsistencyError("终态取消要求目标已终态")
-            outcome_event = (_ITEM_SUCCEEDED,
-                             CancelOutcomeChoice.ALREADY_TERMINAL.value)
-            effect_after = CancellationEffect.NOT_REQUIRED.value
+            if withdrawal_rows:
+                # 已发布交付的撤回是本次有限收场：成员保持处理中，
+                # 由结算端口推进撤回后按既有终态保存结果；位置未知
+                # 时保留等待核实的轮次。
+                effect_after = CancellationEffect.NOT_REQUIRED.value
+            else:
+                outcome_event = (_ITEM_SUCCEEDED,
+                                 CancelOutcomeChoice.ALREADY_TERMINAL.value)
+                effect_after = CancellationEffect.NOT_REQUIRED.value
         elif mode is CancelApplyMode.ALREADY:
             if not target["cancel_requested"]:
                 raise ConsistencyError("复用取消责任要求目标取消已生效")
@@ -503,13 +504,13 @@ class _ApplyCancelTargetCommand:
             apply_after["cancellation_effect"] = effect_after
         apply_row = _update(
             "cancel_items", command.item_id, apply_before, apply_after)
-        withdrawal_rows = self._withdrawal_rows(connection, item, target)
         if withdrawal_rows:
             # 报告关联解析沿撤回明细→取消成员/交付取事实。
             self._state.setdefault("cancel_delivery_items", {})
             self._state.setdefault("deliveries", {})
         self._claim(item, target_id)
-        allocation = scope.allocate(self._MODE_EVENTS[mode])
+        # 生效事件与可能的结果事件按实际组合分配，避免留空洞。
+        allocation = scope.allocate(2 if outcome_event is not None else 1)
         events = [_envelope(
             allocation.first_event_id, allocation.txn_id,
             _CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON,

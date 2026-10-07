@@ -35,6 +35,8 @@ from camctl.operations.attempts import (
     OperationKind,
     QueryPurpose,
     RunStatus,
+    StaleRunFinish,
+    StaleRunFinishResult,
     responsibility_key,
     seconds_from_json,
     ticket_target_id,
@@ -972,6 +974,144 @@ class FinishAttemptCommand:
         )
 
 
+class _FinishStaleRunsCommand:
+    """伴随流程统一收场的完整事务命令。
+
+    拥有方（如清理成员）终态后，责任键下仍待执行或执行中的流程行
+    不再有后续尝试，按请求的最终结果逐行保存终态并清除重试等待；
+    无匹配行时幂等完成，不产生事件。每个流程行一个结束事件，装
+    配与结束守卫约束与尝试结束的流程收场分支一致。
+    """
+
+    def __init__(self, request: StaleRunFinish, key: OperationKey) -> None:
+        if not isinstance(request, StaleRunFinish):
+            raise TypeError("伴随收场申请必须使用 StaleRunFinish")
+        self._request = request
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        request = self._request
+        saved = _saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        marks = ",".join("?" for _ in request.responsibility_keys)
+        with closing(connection.execute(
+            f"SELECT id FROM operation_runs"
+            f" WHERE responsibility_key IN ({marks}) AND status IN (?, ?)",
+            (*request.responsibility_keys,
+             int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)),
+        )) as cursor:
+            run_ids = sorted(int(row[0]) for row in cursor.fetchall())
+        if not run_ids:
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=StaleRunFinishResult(finished_run_ids=()),
+            )
+        rows = []
+        for run_id in run_ids:
+            run_facts = _load_row(connection, "operation_runs", run_id)
+            assert run_facts is not None
+            self._state.setdefault("operation_runs", {})[run_id] = run_facts
+            _load_flow_context(
+                connection,
+                OperationKind[_kind_name(run_facts["kind"])],
+                run_facts["action_id"],
+                AttemptTarget(
+                    activity_id=run_facts.get("activity_id"),
+                    copy_id=run_facts.get("copy_id"),
+                    cleanup_item_id=run_facts.get("cleanup_item_id"),
+                ),
+                (
+                    QueryPurpose[
+                        decode_member(
+                            "operation_runs.query_purpose",
+                            run_facts["query_purpose"],
+                        ).name
+                    ]
+                    if run_facts.get("query_purpose") is not None
+                    else None
+                ),
+                self._state,
+            )
+            _verify_run_identity(run_facts, self._state)
+            self._owners[("operation_runs", run_id)] = _run_owner_ref(
+                run_facts, self._state)
+            rows.append(_update(
+                "operation_runs", run_id,
+                {
+                    "status": run_facts["status"],
+                    "retry_wait_required": run_facts["retry_wait_required"],
+                    "error_json": run_facts["error_json"],
+                },
+                {
+                    "status": int(_RUN_STATUS[request.status.name]),
+                    "retry_wait_required": 0,
+                    "error_json": _error_json(request.error),
+                },
+            ))
+        allocation = scope.allocate(len(rows))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + offset,
+                allocation.txn_id,
+                _OPERATION_CONFIGURED_EVENT,
+                3,
+                (row,),
+                request.occurred_at,
+            )
+            for offset, row in enumerate(rows)
+        )
+        return CommandPlan(
+            events=events,
+            owners=self._owners,
+            state_rows=self._state,
+            result=StaleRunFinishResult(finished_run_ids=tuple(run_ids)),
+        )
+
+    def _reuse(self, scope, saved: list[SavedEvent]) -> CommandPlan:
+        request = self._request
+        connection = scope.connection
+        run_ids = []
+        for event in saved:
+            if (event["type"] != _OPERATION_CONFIGURED_EVENT
+                    or event["reason"] != 3):
+                raise TransactionError(
+                    "操作身份已用于其他阶段，不能作为伴随收场重送")
+            if event["occurred_at"] != request.occurred_at:
+                raise TransactionError("重送的伴随收场时刻与原事务不同")
+            rows = event["body"]["rows"]
+            if (len(rows) != 1 or rows[0]["table"] != "operation_runs"
+                    or not rows[0]["before"]["exists"]
+                    or not rows[0]["after"]["exists"]):
+                raise TransactionError("伴随收场事件必须是已有流程行的更新")
+            expected = {
+                "status": int(_RUN_STATUS[request.status.name]),
+                "retry_wait_required": 0,
+                "error_json": _error_json(request.error),
+            }
+            after = rows[0]["after"]["values"]
+            if set(after) - set(expected):
+                raise TransactionError("伴随收场只更新流程终态字段")
+            run_id = int(rows[0]["id"])
+            run_ids.append(run_id)
+            run = _load_row(connection, "operation_runs", run_id)
+            if run is None:
+                raise ConsistencyError("伴随收场的流程记录不存在")
+            self._state.setdefault("operation_runs", {})[run_id] = run
+            for name, value in expected.items():
+                if name in after and not json_equal(run.get(name), value):
+                    raise ConsistencyError("已收场流程的事实与原事件不符")
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=StaleRunFinishResult(finished_run_ids=tuple(run_ids)),
+        )
+
+
 class _ReadResumeCommand:
     """恢复同一未结束读取尝试配置的事务命令。
 
@@ -1105,6 +1245,12 @@ class OperationRepository:
         self, finish: AttemptFinish, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FinishAttemptResult]:
         receipt = commit_operation(FinishAttemptCommand(finish, key), key, owned)
+        return _outcome_of(receipt)
+
+    def finish_stale_runs(
+        self, request: StaleRunFinish, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[StaleRunFinishResult]:
+        receipt = commit_operation(_FinishStaleRunsCommand(request, key), key, owned)
         return _outcome_of(receipt)
 
     def resume_read(

@@ -948,8 +948,49 @@
         "action_processing"
       ],
       "when": {
-        "op": "exists",
-        "table": "recording_processing"
+        "op": "all",
+        "args": [
+          {
+            "op": "exists",
+            "table": "recording_processing"
+          },
+          {
+            "op": "any",
+            "args": [
+              {
+                "op": "enum_is",
+                "column": "recording_processing.check_state",
+                "members": [
+                  "COMPLETED",
+                  "FAILED",
+                  "UNCONFIRMED"
+                ]
+              },
+              {
+                "op": "enum_is",
+                "column": "recording_processing.repair_state",
+                "members": [
+                  "NOT_NEEDED",
+                  "SUCCEEDED",
+                  "FAILED",
+                  "CANCELED"
+                ]
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "read",
+                  "column": "actions.cancel_requested",
+                  "encoding": "identity"
+                },
+                "right": {
+                  "op": "literal",
+                  "value": 1
+                }
+              }
+            ]
+          }
+        ]
       },
       "fields": {
         "check": {

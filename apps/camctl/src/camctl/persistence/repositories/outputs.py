@@ -431,7 +431,11 @@ class _StartObtainCommand:
         self._command = command
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
-        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+        # 报告关联解析沿登记路由读取各表事实；开始事务可能为既有
+        # 依赖创建来源选择行，预置空映射。
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            "obtain_source_selections": {},
+        }
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection

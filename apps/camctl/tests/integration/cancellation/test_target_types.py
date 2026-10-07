@@ -166,14 +166,11 @@ class TestObtainWithdrawal:
     async def test_terminal_obtain_still_withdraws_ready(self, pipeline):
         """原取回已成功而 ready 可撤：终态保持，撤回事实单独更新。"""
         owned = pipeline
-        repository = CancellationRepository()
-        outcome = repository.apply_cancel_target(
-            ApplyCancelTarget(91, CancelApplyMode.TERMINAL, _NOW),
-            new_operation_key(), owned)
-        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         settlement = _settlement(owned, {301: "ready"})
-        result = await settlement.settle(21)
-        assert result.complete and not result.failed, result
+        progress = await apply_cancel(
+            ApplyCancel(origin_action_id=50, item_ids=(91,)),
+            _runtime(owned, settlement))
+        assert progress.items[0].status == 3, progress
         # 取回终态保持成功；交付与撤回明细单独更新。
         assert _value(
             owned, "SELECT status FROM actions WHERE id = 21") == (3,)
@@ -191,13 +188,11 @@ class TestObtainWithdrawal:
     async def test_processing_delivery_is_not_retractable(self, pipeline):
         """processing 中的交付不可撤回且不删除；取消仍可成功。"""
         owned = pipeline
-        repository = CancellationRepository()
-        repository.apply_cancel_target(
-            ApplyCancelTarget(91, CancelApplyMode.TERMINAL, _NOW),
-            new_operation_key(), owned)
         settlement = _settlement(owned, {301: "processing"})
-        result = await settlement.settle(21)
-        assert result.complete and not result.failed, result
+        progress = await apply_cancel(
+            ApplyCancel(origin_action_id=50, item_ids=(91,)),
+            _runtime(owned, settlement))
+        assert progress.items[0].status == 3, progress
         assert _value(
             owned, "SELECT status, withdrawal_state FROM deliveries"
             " WHERE id = 301") == (5, 4)
@@ -207,13 +202,11 @@ class TestObtainWithdrawal:
 
     async def test_unknown_position_keeps_waiting(self, pipeline):
         owned = pipeline
-        repository = CancellationRepository()
-        repository.apply_cancel_target(
-            ApplyCancelTarget(91, CancelApplyMode.TERMINAL, _NOW),
-            new_operation_key(), owned)
         settlement = _settlement(owned, {})
-        result = await settlement.settle(21)
-        assert not result.complete, result
+        progress = await apply_cancel(
+            ApplyCancel(origin_action_id=50, item_ids=(91,)),
+            _runtime(owned, settlement))
+        assert progress.items[0].status == 2, progress
         assert _value(
             owned, "SELECT withdrawal_state FROM deliveries"
             " WHERE id = 301") == (2,)
