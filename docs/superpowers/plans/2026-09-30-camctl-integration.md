@@ -238,11 +238,19 @@ R-09/R-10 的承载边界：本轮以真实 Linux 进程验证受管媒体工具
 
 **跨组件媒体链环境前提（2026-10-07 核实与决策）：** 生产按既定部署规格以裸名调用 `ffprobe`/`ffmpeg`（[部署依赖](../../architecture/initialization.md#依赖与部署)：工具由部署环境提供），生产装配不提供工具路径配置面。Windows 开发机核实：CreateProcess 对无扩展名命令只按 PATH 解析 `.exe`（实验证据：PATH 注入 `.cmd` 替身后裸名调用 FileNotFoundError），脚本替身无法对生产调用形态可见；显式 `.cmd` 绝对路径可执行，组件与装配层即以该模式注入请求参数验证工具行为（`bootstrap/test_media_assembly.py` 真实子进程+生产装配）。据此决策：不为测试增加生产配置面（无部署需求依据）；跨组件媒体检查/修复链（异常多录→检查→时长判定→修复→修复成品取回，record 按控制完成收场的路径已随 I5 覆盖）随 WSL x86 Linux 全链环境实施（本机 WSL 已有 ffprobe/ffmpeg 6.1.1，camctl 侧需与 B7 共享的 WSL Python 3.11 环境），Windows 侧不补依赖"本机无工具"这一环境巧合的用例（在装有工具的机器上语义会翻转）。
 
-- [ ] 先审计各专题及数据库验收，建立 `test_every_software_contract_has_evidence_owner` 对应的覆盖检查；它验证映射结构和引用，不把有一行映射当行为通过。缺少生产入口或可证伪用例时，明确返回所属模块任务。
+- [x] 先审计各专题及数据库验收，建立 `test_every_software_contract_has_evidence_owner` 对应的覆盖检查；它验证映射结构和引用，不把有一行映射当行为通过。缺少生产入口或可证伪用例时，明确返回所属模块任务。（2026-10-08 按[I6 验证记录](#i6-验证记录2026-10-08)建立[软件验收映射](../../camctl/software-acceptance.md)：163 条全部逐条映射，开放与部分覆盖条目逐条归属模块任务或路线图行。）
 - [ ] 先运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_acceptance_map.py -q`，确认缺项被识别；补齐实现及证据后再通过。随后分别执行共享契约中的全部单元、组件集成命令，以及 `uv run --project apps/camctl --group test pytest tests/integration -q`、客户端分类测试与 CTest；执行现有协议、文档和数据库规格检查。只修复已定位根因的失败，不删除测试或放宽规则。
 - [ ] 独立核验实际实现、事件校验器、真实导入关系、所有外部调用及异常分支，逐项收齐 C9、X12、N6、R9、H7、F7、D5 软件部分及其他模块门禁。类型、状态、目录、缓存与报告是否遗漏成员须用独立预期核对。
 - [ ] 将软件证据交 B7；B7 另行验证源码目录之外的构建和安装。记录 ARM64 运行库、外部工具、真实设备映射、目标资源和物理断电各自的检查输入、执行者和通过条件，不把软件替身的结果写成设备结论。
 - [ ] 更新有效运行文档和实际进度，核对没有隐藏的未决行为或消费者缺口；建议提交“docs: 记录第一版软件验收与部署交接”。
+
+#### I6 验证记录（2026-10-08）
+
+第一项（映射与覆盖检查）完成：新增 `docs/camctl/software-acceptance.md` 与 `tests/integration/test_camctl_acceptance_map.py`。权威条目清单从[数据库一致性验收](../../camctl/database/consistency-verification.md)解析（数字条目 72 条、字母条目 W/R/Q/S/O/V/E/J/F/H/P 共 91 条，合计 163 条），映射按原文小节分八节逐条建立，每条含原文链接、结论、归属模块任务、生产入口、测试、证据与未核验前提七项。结论分布：已覆盖 129 条、部分覆盖 31 条、开放 3 条。检查器（`test_every_software_contract_has_evidence_owner` 与统计一致性两个用例）核对：权威条目与映射条目集合相等；字段完整；结论取值合法；生产入口与测试路径按仓库根解析（允许通配）必须真实存在——首轮运行抓出仓储路径缺 `src/camctl/` 段、`test_residual_winddown.py` 拼写与 `test_replay_continuity.py` 误写三类引用错误，全部修正后通过；已覆盖条目的未核验前提必须为“无”、部分覆盖与开放条目必须列出归属，统计行与条目实际分布由第二用例锁定防止漂移。
+
+审计发现的未实施功能已登记到所属计划（bootstrap 计划 B4 开放项）：目录切换的“允许切换”分支（一致性验收 F-06/F-07/F-08 的切换分类与中断）无生产实现，现实现为绑定不一致一律保留原绑定；运行库不兼容时 run/submit 的 `configuration_error` 错误分类未实现（现归状态库错误通道）。两项与部分覆盖条目的中断矩阵、排序竞争、分页缓存淘汰、规模测量等未核验前提均逐条归属路线图行或模块任务，不在映射中折叠。跨模块契约检查表（verification.md 十场景）与各模块计划任务的映射属后续第二、三项 checkbox 的独立核验范围。
+
+验证（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 2 项通过；`node scripts/check-doc-links.mjs` 3113 个链接通过。
 
 ## 执行命令与最终门禁
 

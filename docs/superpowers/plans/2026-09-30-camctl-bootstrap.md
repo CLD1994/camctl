@@ -133,6 +133,8 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 - [x] 再运行上述命令，要求全部 PASS，并核对 失败后不会出现被日常入口当作空库使用的半份数据库。
 - [x] 审阅实际接口、状态分区及失败路径，检查 建库和有效性检查的所有入口是否使用存在性默认或自动修复；记录门禁证据，建议以“feat: 实现显式状态库初始化”形成独立提交。
 
+B4 开放项（2026-10-08 随 I6 验收映射审计登记，见[软件验收映射](../../camctl/software-acceptance.md)）：①目录切换的“允许切换”分支未实施——一致性验收 F-06/F-07/F-08 要求按各责任形态判定能否切换、责任全部结束且原目录只剩空目录时允许切换，并验证切换各边界中断；当前实现对绑定不一致一律保留原绑定拒绝，拒绝侧已由 `test_binding_mismatch_fails_and_keeps_binding` 覆盖。②运行库不兼容时 run/submit 的 `configuration_error` 错误分类未实现——V-03 规格要求不兼容返回 `configuration_error`，当前运行库检查失败经 `open_existing` 归入状态库错误通道；报告子进程启动失败保留责任的注入用例也未建立。两项均未排期，实施前在验收映射中保持开放或部分覆盖结论。
+
 ### B5 静态能力导出
 
 **预计文件：** `apps/camctl/src/camctl/cli.py`、`apps/camctl/src/camctl/bootstrap/application.py`；测试为 `apps/camctl/tests/unit/bootstrap/test_describe.py` 和 `apps/camctl/tests/integration/bootstrap/test_describe.py`。
