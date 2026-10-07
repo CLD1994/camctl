@@ -15,7 +15,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Any
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 
 _RUNTIME_RESOURCE = "runtime/sqlite-runtime.json"
 _SCHEMA_RESOURCES = (

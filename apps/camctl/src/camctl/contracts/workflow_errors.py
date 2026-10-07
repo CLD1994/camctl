@@ -9,7 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Mapping
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.schemas import create_validator, schema_registry, validation_errors
 from referencing.jsonschema import DRAFT202012

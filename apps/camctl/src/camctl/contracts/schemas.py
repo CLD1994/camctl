@@ -18,7 +18,7 @@ from jsonschema.exceptions import SchemaError, ValidationError
 from jsonschema.validators import extend
 from referencing.exceptions import CannotDetermineSpecification, Unresolvable
 
-from camctl.bootstrap.resources import ResourceError, resource_bytes
+from camctl.resources import ResourceError, resource_bytes
 from camctl.contracts.json_values import JsonParseError, is_json_integer, is_multiple, parse_exact_json
 
 __all__ = [

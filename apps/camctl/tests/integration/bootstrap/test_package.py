@@ -38,7 +38,7 @@ import hashlib
 import json
 import sys
 
-from camctl.bootstrap.resources import available_resources, resource_bytes
+from camctl.resources import available_resources, resource_bytes
 
 payload = {}
 for name in sorted(available_resources()):
@@ -101,7 +101,7 @@ def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
 
 def test_resource_names_reject_arbitrary_paths(tmp_path: Path) -> None:
     """资源访问只接受构建资源目录中的登记名称，不能穿透到任意路径。"""
-    from camctl.bootstrap.resources import ResourceError, resource_bytes
+    from camctl.resources import ResourceError, resource_bytes
 
     for bad in [
         "../resources.py",

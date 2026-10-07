@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 from camctl.persistence.runtime import (
     DatabaseInvalidError,
     DatabaseMissingError,

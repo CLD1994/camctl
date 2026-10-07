@@ -136,11 +136,13 @@ K1、K2、K3 完成基础值后，受理和持久化可以实施。K4 先为首�
 
 **接口与依赖：** 验证实际导入图与 bootstrap 装配；不新增通用插件框架或生产依赖检查服务。前置交付：B6 及本批已经接入的模块。
 
-- [ ] 编写失败用例。建立 `test_rules_do_not_import_adapters`，解析实际 Python 导入关系，`assert forbidden_edges == []`；用故意增加违规导入的最小样本确认检查可以失败。运行规则函数时外部接口替身均拒绝调用，验证 `assert external_calls == []`。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/contracts/test_dependencies.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。在集成测试读取真实源码结构与导入结果，检查共享层、规则、流程和适配器的方向；把确实需要的依赖作为有说明的允许边。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 检查面对别名、相对导入和换行仍有效，且检查对象不是空包。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 新增公共类型是否有真实消费者，是否把厂商响应或 SQL 行放入共享层；记录门禁证据，建议以“test: 验证实际模块依赖边界”形成独立提交。
+- [x] 编写失败用例。建立 `test_rules_do_not_import_adapters`，解析实际 Python 导入关系，`assert forbidden_edges == []`；用故意增加违规导入的最小样本确认检查可以失败。运行规则函数时外部接口替身均拒绝调用，验证 `assert external_calls == []`。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/contracts/test_dependencies.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。在集成测试读取真实源码结构与导入结果，检查共享层、规则、流程和适配器的方向；把确实需要的依赖作为有说明的允许边。
+- [x] 再运行上述命令，要求全部 PASS，并核对 检查面对别名、相对导入和换行仍有效，且检查对象不是空包。
+- [x] 审阅实际接口、状态分区及失败路径，检查 新增公共类型是否有真实消费者，是否把厂商响应或 SQL 行放入共享层；记录门禁证据，建议以“test: 验证实际模块依赖边界”形成独立提交。
+
+**K5 实施说明（2026-10-07）：** 检查器以 AST 解析全部源码的真实导入（相对导入解析到绝对名，`from camctl import x` 与成员名展开成完整路径，别名与多行括号形式在语法层处理），按五条方向规则输出违规边：共享层（contracts）不导入业务、适配器与持久化；业务流程不直接使用 sqlite3、对 `persistence.runtime` 只允许 `OwnedConnection` 类型注解；报告生成（worker 除外）不导入会话、采集或设备控制；适配器实现（logging_runtime、devices 实现）不导入业务流程、持久化或其他适配器实现；历史事件应用与公开投影不导入报告协调器。合成违规样本验证检查器对每类边都能报出。分层中的端口服务层（operations、devices.read_session/evidence/parameter_schemas、session.supervision、host_files、acceptance.schema）与装配入口（bootstrap、cli、worker、initialization、devices.catalog）按 module-contracts 的依赖图定义；确实需要的依赖（连接类型注解、worker 在子进程内开连接与使用锁后端、仓储依赖业务端口）以注释说明的允许边表达。检查暴露并修复一处真实方向违规：`bootstrap/resources.py` 是通用资源读取原语却被共享层反向依赖，已迁移为顶级模块 `camctl/resources.py`（13 处导入更新，bootstrap 计划文件表同步）。运行行为验证：外部接口替身（open/sqlite3.connect/Popen/socket）拒绝调用环境下运行 K1—K3 纯规则函数，无外部调用发生。共享层内无厂商响应或 SQL 行类型（R1 零业务与持久化导入）；本轮未新增公共类型。
 
 ## 模块完成门禁
 

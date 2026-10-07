@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Mapping, Sequence
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.json_values import MISSING, JsonParseError, is_json_integer, parse_exact_json
 from camctl.contracts.input_fields import reconstruct_action_input

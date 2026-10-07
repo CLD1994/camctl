@@ -10,7 +10,7 @@ from unittest.mock import create_autospec, patch
 import pytest
 
 from camctl.contracts.values import ConsistencyError
-from camctl.bootstrap import resources
+from camctl import resources
 from camctl.contracts import enums, schemas, workflow_errors
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode

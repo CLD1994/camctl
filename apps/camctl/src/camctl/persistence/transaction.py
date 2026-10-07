@@ -16,7 +16,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, Callable, Mapping, Protocol, TypedDict
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import BoundaryError, HistoryBoundary, TransactionRange
 from camctl.contracts.json_values import json_equal, parse_exact_json

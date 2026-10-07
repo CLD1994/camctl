@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Iterable, Mapping, TYPE_CHECKING
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.history.events import EventEnvelope, RowChange
 

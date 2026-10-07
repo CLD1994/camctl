@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Mapping
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 
 _EVENT_REGISTRY_RESOURCE = "registry/event-transitions.json"
 

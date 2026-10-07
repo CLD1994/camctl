@@ -47,7 +47,7 @@ init 结果完全采用初始化专题，不套用会话封装。参数语法错
 | --- | --- |
 | `apps/camctl/src/camctl/cli.py` | 解析、命令分派及最终 stdout。 |
 | `apps/camctl/src/camctl/bootstrap/config.py` | TOML 覆盖、严格校验和本次配置。 |
-| `apps/camctl/src/camctl/bootstrap/resources.py` | 从发行包定位权威生成资源。 |
+| `apps/camctl/src/camctl/resources.py` | 从发行包定位权威生成资源。 |
 | `apps/camctl/src/camctl/bootstrap/application.py` | 按命令装配实际协作者。 |
 | `apps/camctl/src/camctl/bootstrap/lifecycle.py` | 创建与有序关闭句柄。 |
 | `apps/camctl/src/camctl/persistence/initialization.py` | 显式建库和已存在库验证。 |
@@ -83,7 +83,7 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 ### B1 可安装包与资源来源
 
-**预计文件：** `apps/camctl/src/camctl/bootstrap/resources.py`；测试为 `apps/camctl/tests/integration/bootstrap/test_package.py`。
+**预计文件：** `apps/camctl/src/camctl/resources.py`；测试为 `apps/camctl/tests/integration/bootstrap/test_package.py`。
 
 **接口与依赖：** 提供 `resource_bytes(name: ResourceName) -> bytes`；ResourceName 从构建资源目录生成，不能由用户任意路径访问。前置交付：现有仓库结构与权威资源。
 
@@ -163,7 +163,7 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 ### B7 发行物与部署检查
 
-**预计文件：** `apps/camctl/src/camctl/bootstrap/resources.py`、`apps/camctl/src/camctl/bootstrap/application.py`；测试为 `apps/camctl/tests/integration/bootstrap/test_distribution.py`。
+**预计文件：** `apps/camctl/src/camctl/resources.py`、`apps/camctl/src/camctl/bootstrap/application.py`；测试为 `apps/camctl/tests/integration/bootstrap/test_distribution.py`。
 
 **接口与依赖：** 验证 installed camctl 入口、包资源、版本及外部工具检查；沿用模块公共接口。前置交付：I6、B1—B6 及其他模块的软件门禁；不以 B7 自身完成作为前置。
 

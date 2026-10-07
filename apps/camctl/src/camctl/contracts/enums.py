@@ -12,7 +12,7 @@ from enum import IntEnum
 from functools import lru_cache
 from typing import Any
 
-from camctl.bootstrap.resources import resource_bytes
+from camctl.resources import resource_bytes
 
 _REGISTRY_RESOURCE = "registry/enum-registry.json"
 _SCHEMA_RESOURCE = "protocol/status-report.schema.json"
