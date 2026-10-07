@@ -84,7 +84,8 @@ def _config_for(home: Path):
     )
 
 
-def _plan_body(request_id: str = "42") -> dict:
+def _plan_body(request_id: str = "42", *,
+               scheduled_at: str = "2026-01-15 09:00:00") -> dict:
     return {
         "request_id": request_id,
         "created_at": "2026-01-15 08:00:00",
@@ -94,12 +95,20 @@ def _plan_body(request_id: str = "42") -> dict:
                 "name": "shoot",
                 "type": "camera_take_photo",
                 "device_id": "cam-1",
-                "scheduled_at": "2026-01-15 09:00:00",
+                "scheduled_at": scheduled_at,
                 "params": {"type": "single_shot"},
                 "policy": {"max_delay_ms": 1000},
             }
         ],
     }
+
+
+def _future_schedule(seconds: int) -> str:
+    """晚于当前部署墙钟的计划时刻（UTC 表达），保持动作未完成。"""
+    from datetime import datetime, timedelta, timezone
+
+    moment = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
 async def _parsed(tmp_path: Path, body: dict):
@@ -180,7 +189,9 @@ class TestRunComposition:
         cfg = _config_for(tmp_path)
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         submit_deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=RecordingCatalog())
-        good = await _parsed(tmp_path, _plan_body(request_id="1"))
+        # 未来时刻的动作保持未完成：断言语义不依赖推进轮的时序。
+        good = await _parsed(
+            tmp_path, _plan_body(request_id="1", scheduled_at=_future_schedule(30)))
         outcome = await execute_command(submit_deps, good)
         close_runtime(submit_deps)
         assert outcome.succeeded is True

@@ -189,6 +189,109 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
     assert statuses == {"timelapse": "succeeded", "shoot": "succeeded"}
 
 
+def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
+    """启动调用在途时进程被终止：恢复会话不重复启动、不补造发送时
+    间，按无法确认失败收场；同设备后续动作不被遗留活动阻塞，会话
+    正常退出。"""
+    deployment = Deployment(tmp_path)
+    initialized = deployment.camctl(
+        "init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+
+    # 控制端口被门阻塞：第一个会话的启动调用发出后停在等门，被进
+    # 程级终止留下"可能派发但没有可靠发送时间"的事实。
+    spec = stub_driver_spec(
+        {"2": [photo_file("shot-late")]},
+        timelapse_duration_s=5.0,
+        gates={"control": "control.gate"},
+        device_files={"shot-late": "photo-payload-late"})
+    deployment.install_client_capabilities(spec)
+
+    plan_path, _ = deployment.export_plan_with_client(
+        timelapse_plan("0", future_schedule(1)))
+    submitted = deployment.camctl(
+        "submit", str(plan_path), "--config", str(deployment.config_path),
+        driver=spec)
+    assert submitted.exit_code == 0, submitted.stderr
+
+    first = deployment.start_camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    state_db = deployment.state_db
+    _await_row(
+        state_db,
+        "SELECT 1 FROM operation_attempts a"
+        " JOIN operation_runs r ON a.run_id = r.id"
+        " JOIN actions t ON t.id = r.action_id"
+        " WHERE t.name = 'timelapse' AND a.status = 1")
+    photo_path, _ = deployment.export_plan_with_client({
+        "request_id": "1",
+        "created_at": "2026-01-15 08:00:00",
+        "name": "after-interrupt",
+        "actions": [{
+            "name": "shoot",
+            "type": "camera_take_photo",
+            "device_id": "cam-1",
+            "scheduled_at": future_schedule(2),
+            "params": {"type": "single_shot"},
+            "policy": {"max_delay_ms": 5000},
+        }],
+    })
+    late = deployment.camctl(
+        "submit", str(photo_path), "--config", str(deployment.config_path),
+        driver=spec)
+    assert late.exit_code == 0, late.stderr
+    terminate_process_tree(first)
+
+    # 中断时刻的事实：启动尝试在途、发送时间未保存、动作执行中。
+    assert _query(
+        state_db, "SELECT status FROM actions WHERE name = 'timelapse'"
+    ) == [(2,)]
+    assert _query(
+        state_db,
+        "SELECT d.sent_at FROM device_activities d"
+        " JOIN actions t ON t.id = d.action_id WHERE t.name = 'timelapse'"
+    ) == [(None,)]
+
+    (deployment.gates / "control.gate").write_text("", encoding="utf-8")
+    recovered = deployment.camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    assert recovered.exit_code == 0, recovered.stderr
+
+    # 延时任务按无法确认失败收场：错误如实表达启动未知，启动流程
+    # 伴随收场，活动占用保持未知（不伪造释放依据）。
+    row = _query(
+        state_db,
+        "SELECT status, error_code, error_details_json"
+        " FROM actions WHERE name = 'timelapse'")[0]
+    assert row[0] == 4
+    assert row[1] == 12
+    assert json.loads(row[2])["reason"] == "start_unknown"
+    assert _query(
+        state_db,
+        "SELECT r.status FROM operation_runs r"
+        " JOIN actions t ON t.id = r.action_id"
+        " WHERE t.name = 'timelapse'"
+        " AND r.responsibility_key = 'start/' || t.id") == [(6,)]
+    assert _query(
+        state_db,
+        "SELECT d.occupancy_state FROM device_activities d"
+        " JOIN actions t ON t.id = d.action_id WHERE t.name = 'timelapse'"
+    ) == [(1,)]
+    # 同设备后续照片正常执行成功，两份计划都完成，会话正常退出。
+    assert _query(state_db, "SELECT status FROM plans") == [(3,), (3,)]
+    assert _query(
+        state_db, "SELECT status FROM actions WHERE name = 'shoot'") == [(3,)]
+    assert _query(
+        state_db,
+        "SELECT a.name FROM outputs o"
+        " JOIN actions a ON a.id = o.source_action_id") == [("shoot",)]
+    report = _ready_report(deployment)
+    statuses = {
+        action["name"]: action["status"]
+        for plan in report["plans"] for action in plan["actions"]}
+    assert statuses == {"timelapse": "failed", "shoot": "succeeded"}
+
+
 def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
     """并发 submit 交错执行互不干扰；同请求身份重送不重复受理。"""
     deployment = Deployment(tmp_path)

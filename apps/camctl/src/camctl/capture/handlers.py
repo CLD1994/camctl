@@ -652,6 +652,43 @@ def _settle_open_start(runtime: CaptureRuntime, action_id: int, status: RunOutco
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
+def _settle_start_without_sent_at(
+        runtime: CaptureRuntime, action, attempt) -> bool:
+    """可能派发但没有可靠发送时间的启动按无法核实收场。
+
+    启动尝试已存在而活动没有发送时间，说明调用可能在途或结果未
+    保存：录像与延时的时间及产物完成判定都依赖可靠发送时间，无
+    法核实原任务。按恢复规则不重复启动、不补造时间——调用已有
+    明确失败结果时按设备失败收场，否则按无法确认收场；活动占用
+    保持未知，不伪造释放依据。已收场返回 True。
+    """
+    activity_id = _activity_id_of(runtime, action["id"])
+    with closing(runtime.owned.connection.execute(
+        "SELECT sent_at FROM device_activities WHERE id = ?", (activity_id,),
+    )) as cursor:
+        sent_at = cursor.fetchone()[0]
+    if sent_at is not None:
+        return False
+    if attempt[0] == int(_ATTEMPT_STATUS.FAILED):
+        _finish_capture(
+            runtime, action["id"], (), FileKind.VIDEO,
+            failure=RecordingFailure(
+                code="capture_failed",
+                details={"activity_id": str(action["id"]),
+                         "reason": "device_failed"}))
+        return True
+    _settle_open_start(
+        runtime, action["id"], RunOutcome.UNCONFIRMED,
+        error=ErrorValue(code="result_unconfirmed", stage="device"))
+    _finish_capture(
+        runtime, action["id"], (), FileKind.VIDEO,
+        failure=RecordingFailure(
+            code="capture_result_unconfirmed",
+            details={"activity_id": str(action["id"]),
+                     "reason": "start_unknown"}))
+    return True
+
+
 def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
     """会话内缓存录像中段事实装载器；计时锚点跨推进保留。"""
     if context.recording_state is None:
@@ -913,7 +950,8 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         return
-    if context.last_attempt(f"start/{action_id}") is None:
+    open_start = context.last_attempt(f"start/{action_id}")
+    if open_start is None:
         # 尚未发起启动：首次授予并调用，不依赖中段事实端口。
         if action["cancel_requested"]:
             return
@@ -930,6 +968,9 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
             port.anchor_confirmed(
                 action_id, anchor_ns,
                 recording_stop_target(anchor_ns, _target_duration_ms(action)))
+        return
+    if _settle_start_without_sent_at(context, action, open_start):
+        # 可能派发但没有可靠发送时间：不重复启动，按无法核实收场。
         return
     port = _recording_port(context)
     canceled = bool(action["cancel_requested"])
@@ -1350,6 +1391,13 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
             activity_facts={"sent_at": context.wall_us()})
         if step.phase not in ("confirmed", "sent", "call_failed"):
             return
+        attempt = context.last_attempt(f"start/{action_id}")
+        if attempt is None:
+            return
+    if _settle_start_without_sent_at(context, action, attempt):
+        # 可能派发但没有可靠发送时间：无法计算等待锚点，不重复启
+        # 动、不补造时间，按无法核实收场。
+        return
     with closing(context.owned.connection.execute(
         "SELECT sent_at, expected_check_at FROM device_activities WHERE id = ?",
         (action_id,),

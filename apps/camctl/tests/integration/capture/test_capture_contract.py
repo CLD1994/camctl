@@ -112,23 +112,26 @@ def _seed_stopped_recording(connection, action_id: int) -> None:
         " result_json) VALUES (40, 30, 1, 2, 1, 1, 3, 3, '{}')")
 
 
-def _seed_open_start(connection, action_id: int) -> None:
+def _seed_open_start(connection, action_id: int, *,
+                     attempt_status: int = 1) -> None:
     """调用发出后结果未保存的启动责任：流程执行中、尝试在途。
 
     对应进程中断或保存被拒后重入的状态：动作运行中、活动可能已
-    派发、启动尝试没有可采纳的结束结果。
+    派发、启动尝试没有可采纳的结束结果；活动不保存发送时间，表
+    达"可能派发但无可靠发送时间"的恢复前提。
     """
     connection.execute(
         "INSERT INTO operation_runs (id, action_id, delivery_id, kind, query_purpose,"
         " responsibility_key, activity_id, copy_id, cleanup_item_id, session_key,"
         " status, attempts_used, max_attempts_used, timeout_s_json,"
         " retry_interval_s_json, retry_wait_required, error_json)"
-        " VALUES (50, ?, NULL, 1, NULL, 'start/11', 11, NULL, NULL, NULL, 2, 1, 1,"
-        " '30', '1', 0, NULL)", (action_id,))
+        f" VALUES (50, ?, NULL, 1, NULL, 'start/{action_id}', {action_id},"
+        " NULL, NULL, NULL, 2, 1, 1, '30', '1', 0, NULL)", (action_id,))
     connection.execute(
         "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
         " intent_event_id, result_event_id, max_attempts_used, effect_state,"
-        " result_json) VALUES (51, 50, 1, 1, 1, NULL, 1, 1, NULL)")
+        " result_json) VALUES (51, 50, 1, ?, 1, NULL, 1, 1, NULL)",
+        (attempt_status,))
     connection.execute(
         "UPDATE device_activities SET dispatch_state = 2 WHERE id = ?",
         (action_id,))
@@ -430,6 +433,33 @@ class TestRecordHandler:
         finally:
             owned.connection.close()
 
+    async def test_open_start_without_sent_at_fails_unconfirmed(
+            self, tmp_path: Path):
+        owned = _environment(tmp_path, _RECORD)
+        try:
+            _seed_open_start(owned.connection, 12)
+            owned.connection.commit()
+            runtime = _runtime(owned, files={})
+            # 启动调用可能在途且无可靠发送时间：无法核实原任务，
+            # 按无法确认失败收场；不重复启动、不补造时间。
+            await capture_handler("camera_record")(12, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (4,)
+            row = _value(
+                owned, "SELECT error_code, error_details_json"
+                " FROM actions WHERE id = 12")
+            assert row[0] == 12
+            assert json.loads(row[1])["reason"] == "start_unknown"
+            # 启动流程伴随收场为无法确认；活动占用保持未知，不释放。
+            assert _value(
+                owned, "SELECT status FROM operation_runs"
+                " WHERE responsibility_key = 'start/12'") == (6,)
+            activity = _value(
+                owned, "SELECT occupancy_state FROM device_activities"
+                " WHERE id = 12")
+            assert activity == (1,)
+        finally:
+            owned.connection.close()
+
 
 class TestTimelapseHandler:
     async def test_send_wait_then_finish(self, tmp_path: Path):
@@ -449,6 +479,34 @@ class TestTimelapseHandler:
             await capture_handler("camera_timelapse")(13, late)
             assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (3,)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+        finally:
+            owned.connection.close()
+
+    async def test_open_start_without_sent_at_fails_unconfirmed(
+            self, tmp_path: Path):
+        owned = _environment(tmp_path, _TIMELAPSE)
+        try:
+            _seed_open_start(owned.connection, 13)
+            owned.connection.commit()
+            runtime = _runtime(owned, files={})
+            # 等待锚点依赖可靠发送时间：可能派发但没有发送时间的
+            # 启动无法核实原任务，按无法确认失败收场；不重复启动、
+            # 不补造时间。
+            await capture_handler("camera_timelapse")(13, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (4,)
+            row = _value(
+                owned, "SELECT error_code, error_details_json"
+                " FROM actions WHERE id = 13")
+            assert row[0] == 12
+            assert json.loads(row[1])["reason"] == "start_unknown"
+            # 启动流程伴随收场为无法确认；活动占用保持未知，不释放。
+            assert _value(
+                owned, "SELECT status FROM operation_runs"
+                " WHERE responsibility_key = 'start/13'") == (6,)
+            activity = _value(
+                owned, "SELECT occupancy_state FROM device_activities"
+                " WHERE id = 13")
+            assert activity == (1,)
         finally:
             owned.connection.close()
 
