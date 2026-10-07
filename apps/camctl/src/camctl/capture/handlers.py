@@ -175,6 +175,9 @@ _CHECK_DECISION = enum_for("recording_processing.check_decision")
 _CHECK_STATE = enum_for("recording_processing.check_state")
 _REPAIR_STATE = enum_for("recording_processing.repair_state")
 _FILE_PRESENCE = enum_for("device_files.presence_state")
+_FILE_ROLE = enum_for("device_files.role")
+_ORIGINAL_ROLE = int(_FILE_ROLE.ORIGINAL)
+_PREVIEW_ROLE = int(_FILE_ROLE.PREVIEW)
 
 
 @dataclass(frozen=True)
@@ -182,7 +185,8 @@ class ObservedFile:
     """结果列举取得的一份候选产物文件。
 
     evidence 是驱动结构化依据，原样进入归属与完成证据；kind 由列
-    举方按驱动声明给出，未知时为 OTHER。
+    举方按驱动声明给出，未知时为 OTHER。paired_identity 非空表示
+    驱动声明本文件是同批该原片条目的预览。
     """
 
     identity: str
@@ -193,6 +197,7 @@ class ObservedFile:
     kind: FileKind = FileKind.OTHER
     original_name: str | None = None
     media_type: str | None = None
+    paired_identity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -503,11 +508,35 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     return HandlerOutcome("confirmed" if confirmed else "sent")
 
 
+def validate_observed_pairings(entries: tuple[ObservedFile, ...]) -> None:
+    """预览条目的配对必须指向同批的另一条原片条目。
+
+    配对目标缺失、自指或指向另一个预览时无法证明配对可靠，明确
+    拒绝整批登记，不猜测关联。
+    """
+    by_identity = {entry.identity: entry for entry in entries}
+    for entry in entries:
+        if entry.paired_identity is None:
+            continue
+        paired = by_identity.get(entry.paired_identity)
+        if (entry.paired_identity == entry.identity or paired is None
+                or paired.paired_identity is not None):
+            raise ConsistencyError(
+                "预览配对必须指向同批原片条目: "
+                f"{entry.identity!r} -> {entry.paired_identity!r}")
+
+
 def _register_observed(
     runtime: CaptureRuntime, action_id: int, entries: tuple[ObservedFile, ...],
 ) -> tuple[tuple[CaptureFile, int], ...]:
-    """把结果列举观察落库：发现、任务归属与完成事实一次登记。"""
-    registered: list[tuple[CaptureFile, int]] = []
+    """把结果列举观察落库：发现、任务归属与完成事实一次登记。
+
+    预览条目按驱动配对关联登记预览角色并保留配对证据；配对由
+    validate_observed_pairings 先行校验。
+    """
+    # 第一阶段按列举顺序保存发现与在场事实，并建立身份到文件主
+    # 键的映射供配对解析。
+    file_ids: dict[str, int] = {}
     for entry in entries:
         occurred = runtime.wall_us()
         observed = runtime.capture.save_file_observation(
@@ -520,25 +549,45 @@ def _register_observed(
                 media_type=entry.media_type,
             ), new_operation_key(), runtime.owned)
         assert observed.kind is DbOutcomeKind.COMPLETED, observed.error
-        file_id = observed.value.file_id
+        file_ids[entry.identity] = observed.value.file_id
         if observed.value.created:
             # 同一次列举确认文件在场；重复发现沿用已保存的存在事实。
             present = runtime.capture.save_file_presence(
                 FilePresenceSave(
-                    file_id=file_id,
+                    file_id=observed.value.file_id,
                     state=int(_FILE_PRESENCE.PRESENT),
                     occurred_at=occurred),
                 new_operation_key(), runtime.owned)
             assert present.kind is DbOutcomeKind.COMPLETED, present.error
-        owned = runtime.capture.save_file_ownership(
-            OwnershipSave(
-                file_id=file_id,
-                source_action_id=action_id,
-                method=_TASK_SCOPE,
-                role=2,
-                observation=entry.evidence,
-                occurred_at=occurred,
-            ), new_operation_key(), runtime.owned)
+    validate_observed_pairings(entries)
+    # 第二阶段保存归属与完成事实。
+    registered: list[tuple[CaptureFile, int]] = []
+    for entry in entries:
+        occurred = runtime.wall_us()
+        file_id = file_ids[entry.identity]
+        if entry.paired_identity is None:
+            owned = runtime.capture.save_file_ownership(
+                OwnershipSave(
+                    file_id=file_id,
+                    source_action_id=action_id,
+                    method=_TASK_SCOPE,
+                    role=_ORIGINAL_ROLE,
+                    observation=entry.evidence,
+                    occurred_at=occurred,
+                ), new_operation_key(), runtime.owned)
+        else:
+            owned = runtime.capture.save_file_ownership(
+                OwnershipSave(
+                    file_id=file_id,
+                    source_action_id=action_id,
+                    method=_TASK_SCOPE,
+                    role=_PREVIEW_ROLE,
+                    observation=entry.evidence,
+                    occurred_at=occurred,
+                    paired_device_file_id=file_ids[entry.paired_identity],
+                    pairing_observation={
+                        "paired_identity": entry.paired_identity},
+                ), new_operation_key(), runtime.owned)
         assert owned.kind is DbOutcomeKind.COMPLETED, owned.error
         if entry.complete:
             finished = runtime.capture.save_file_completion(
@@ -646,6 +695,32 @@ def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int) -> None:
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
+def _catalog_drafts(
+    registered: tuple[tuple[CaptureFile, int], ...],
+    entries: tuple[ObservedFile, ...],
+) -> tuple[OutputDraft, ...]:
+    """按登记结果构造产物目录草稿：原片与预览按配对分别登记。"""
+    file_ids = {
+        entry.identity: file_id
+        for (_, file_id), entry in zip(registered, entries)}
+    drafts = []
+    for (_, file_id), entry in zip(registered, entries):
+        if not entry.complete:
+            continue
+        if entry.paired_identity is None:
+            drafts.append(OutputDraft(
+                kind=OutputKind.ORIGINAL,
+                file=FileReference(device_file_id=file_id),
+                file_complete=True))
+        else:
+            drafts.append(OutputDraft(
+                kind=OutputKind.PREVIEW,
+                file=FileReference(device_file_id=file_id),
+                file_complete=True,
+                original_batch_file_id=file_ids[entry.paired_identity]))
+    return tuple(drafts)
+
+
 def _finish_capture(
     runtime: CaptureRuntime, action_id: int, entries: tuple[ObservedFile, ...],
     required: FileKind, *, failure: RecordingFailure | None = None,
@@ -662,19 +737,11 @@ def _finish_capture(
         CaptureFileSet(files=tuple(file for file, _ in registered), set_finalized=True),
         ProductRequirements(required_kinds=frozenset({required})),
     )
-    drafts = tuple(
-        OutputDraft(
-            kind=OutputKind.ORIGINAL,
-            file=FileReference(device_file_id=file_id),
-            file_complete=True,
-        )
-        for (file, file_id), entry in zip(registered, entries)
-        if entry.complete
-    )
+    drafts = _catalog_drafts(registered, entries)
     if repair_file_id is not None:
         original_file_ids = [
-            file_id for (file, file_id), entry in zip(registered, entries)
-            if entry.complete]
+            file_id for (_, file_id), entry in zip(registered, entries)
+            if entry.complete and entry.paired_identity is None]
         if original_file_ids:
             drafts = drafts + (OutputDraft(
                 kind=OutputKind.REPAIRED,
@@ -1377,13 +1444,7 @@ async def _close_canceled_timelapse(
         except Exception:
             entries = ()
     registered = _register_observed(context, action_id, entries)
-    drafts = tuple(
-        OutputDraft(
-            kind=OutputKind.ORIGINAL,
-            file=FileReference(device_file_id=file_id),
-            file_complete=True)
-        for (file, file_id), entry in zip(registered, entries)
-        if entry.complete)
+    drafts = _catalog_drafts(registered, entries)
     receipt = context.capture.finish_canceled_capture(
         FinishCanceledCapture(
             action_id=action_id,

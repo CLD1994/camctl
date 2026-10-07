@@ -267,6 +267,9 @@ def _observed_file(entry: Any) -> ObservedFile:
         raise ValueError(f"列举条目原始文件名不是文本: {entry!r}")
     if media is not None and not isinstance(media, str):
         raise ValueError(f"列举条目媒体类型不是文本: {entry!r}")
+    paired = entry.get("paired_identity")
+    if paired is not None and (not isinstance(paired, str) or not paired):
+        raise ValueError(f"列举条目配对身份不是非空文本或空: {entry!r}")
     return ObservedFile(
         identity=entry["identity"],
         locator=dict(locator),
@@ -276,6 +279,7 @@ def _observed_file(entry: Any) -> ObservedFile:
         kind=kind,
         original_name=original,
         media_type=media,
+        paired_identity=paired,
     )
 
 

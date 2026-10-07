@@ -195,11 +195,13 @@ def load_eligibility_facts(connection, action_id: int) -> EligibilityFacts:
                 _REPORT_TASK_TYPE):
         # 取回/取消/清理/报告动作的收场按各自模块规则（停止等待、
         # 读取结束、解除限制或同步责任分类）：终态保持、取消已生效
-        # 则复用原责任，否则总是允许标记取消。
+        # 则复用原责任；未开始的目标没有在途工作，按未启动分区直接
+        # 终态取消，已开始的允许标记后由各自流程收场。
         return EligibilityFacts(
             terminal=action["status"] in _ACTION_TERMINAL,
             cancel_applied=bool(action["cancel_requested"]),
-            dispatch=DispatchPhase.STARTED,
+            dispatch=(DispatchPhase.STARTED if action["execution_started"] == 1
+                      else DispatchPhase.NOT_STARTED),
             stop_supported=True)
     activity = _activity_row(connection, action_id)
     return EligibilityFacts(

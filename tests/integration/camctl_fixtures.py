@@ -236,7 +236,8 @@ def stub_driver_spec(files: dict[str, list[dict]], *,
                      record_duration_s: float = 1.0,
                      gates: dict[str, str] | None = None,
                      device_files: dict[str, str] | None = None,
-                     delete_error: str | None = None) -> dict:
+                     delete_error: str | None = None,
+                     photo_preview_supported: bool = False) -> dict:
     """设备替身剧本：驱动能力、按活动身份的结果文件与同步门。
 
     files 的键是活动身份（单动作部署从 1 开始）；gates 把端口名映
@@ -244,7 +245,8 @@ def stub_driver_spec(files: dict[str, list[dict]], *,
     device_files 按设备侧文件身份提供读取内容（取回链的真实字节
     与摘要来源）。delete_error 提供时删除调用持续返回该错误（效
     果未知）；删除成功时移除设备内容并按契约回填文件缺席观察，
-    查询按设备内容实时报告存在性。
+    查询按设备内容实时报告存在性。photo_preview_supported 声明
+    单张拍摄参数类型是否支持预览（驱动能力声明面）。
     """
     return {
         "driver_id": "test-stub",
@@ -254,6 +256,7 @@ def stub_driver_spec(files: dict[str, list[dict]], *,
         "gates": gates or {},
         "device_files": device_files or {},
         "delete_error": delete_error,
+        "photo_preview_supported": photo_preview_supported,
     }
 
 
@@ -280,6 +283,25 @@ def video_file(identity: str) -> dict:
         "kind": "video",
         "original_name": f"{identity}.mp4",
         "media_type": "video/mp4",
+    }
+
+
+def preview_file(identity: str, paired_identity: str, *,
+                 size_bytes: int = 2048) -> dict:
+    """一张完整预览图片的结果列举条目。
+
+    驱动以 paired_identity 声明与本批原片条目的配对关联（预览文
+    件规格：驱动提供对应原文件的明确关联及写入完成依据）。
+    """
+    return {
+        "identity": identity,
+        "locator": {"path": f"/DCIM/{identity}"},
+        "size_bytes": size_bytes,
+        "complete": True,
+        "kind": "photo",
+        "original_name": f"{identity}.jpg",
+        "media_type": "image/jpeg",
+        "paired_identity": paired_identity,
     }
 
 
@@ -520,7 +542,9 @@ def _stub_definition(spec: dict):
             "camera_take_photo": (ActionCapability(
                 action_type="camera_take_photo", parameter_type="single_shot",
                 name="单张拍摄", description="跨组件替身的单张拍摄",
-                preview_supported=False, schema=photo_schema, defaults={},
+                preview_supported=bool(
+                    spec.get("photo_preview_supported", False)),
+                schema=photo_schema, defaults={},
                 task_factory=photo_task),),
             "camera_record": (ActionCapability(
                 action_type="camera_record", parameter_type="video",

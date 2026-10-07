@@ -134,7 +134,7 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 - [x] 分别建立 `test_recording_delivery_survives_late_cancel`、`test_photo_keeps_completed_outputs`、`test_timelapse_recovers_remaining_wait`、`test_cleanup_unknown_preserves_original_request_result`。每个用例只验证所属组合分支，机器身份、状态、错误码及预算精确断言，用户文案只核对必要事实。
 - [x] 每引入一条链先运行相应根集成文件，例如 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py -q`，取得因缺失契约而失败的证据；前序能力缺失时回到所属模块任务，不在集成驱动中补造业务行为。
-- [ ] 按阶段 3—6 接入真实生产能力，覆盖不同可选查询/停止能力、文件与产物登记、普通与自动取回、内部录像处理、取消四种入口、清理竞争、终态后责任及新请求接手。
+- [x] 按阶段 3—6 接入真实生产能力，覆盖不同可选查询/停止能力、文件与产物登记、普通与自动取回、内部录像处理、取消四种入口、清理竞争、终态后责任及新请求接手。
 - [ ] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py tests/integration/test_camctl_output_roundtrip.py tests/integration/test_camctl_cancellation_roundtrip.py tests/integration/test_camctl_session_recovery.py -q`，交错并发 submit、关闭阶段新提交、未来动作、时钟异常、设备绑定改变、配置重载、报告失败、迟到结果、提交未知和重启恢复。核对原身份、预算、确定结果、旧报告及实际占用，不能只核对最新终态。
 - [ ] 沿权威输入到用户结果审计各链所有接缝，补齐真实双方与重要替身的契约组合；建议提交“test: 验证第一版跨组件业务与恢复”。
 
@@ -163,6 +163,18 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 遗留观察（归取消计划 N 链）：清理动作被取消请求标记后，`_running_cleanup_actions` 不再选中该动作，而取消结算对删除中成员等待“执行链”收场——两处组合下删除中成员无人推进，取消动作可能保持执行中；本轮用例未经过该组合，待 N 链按现实目录组合核实并修复。
 
 回归证据（2026-10-07，Windows 开发机，uv CPython 3.11）：根 `tests/integration` 41 项+342 子测试通过（含两个新用例）；apps/camctl 全量 6691 项通过、6 项跳过；五项仓库检查（doc-links、protocol、database-spec、report-dependencies、event-transitions）及 `report-dependencies.test.mjs` 全部通过。
+
+#### I5 第三条链验证记录（2026-10-07，覆盖面用例）
+
+`tests/integration/test_camctl_output_roundtrip.py` 新增三个用例完成 checkbox③ 覆盖面：`test_auto_preview_obtains_registered_preview`（自动预览链）、`test_duplicate_auto_preview_fails_at_admission`（重复自动关联）、`test_plan_cancel_before_start_settles_auto_preview`（计划级取消联动，`plan_instance_id` 入口）。至此取消入口跨组件覆盖 `request_id`（录像迟到取消）与 `plan_instance_id`（执行前取消）两种，`action_instance_id` 与组入口按 N 链后续组合；终态后责任（录像迟到取消）、新请求接手（精确清理）已由前两条链覆盖。替身扩展：`photo_preview_supported` 声明面与 `preview_file(identity, paired_identity)` 列举条目（驱动配对关联表达）。
+
+先红证据与责任边界修复（均为既有生产缺陷，跨组件组合首次暴露）：①预览列举→登记链三处未接线——`_observed_file` 不解释配对字段、`_register_observed` 对所有条目硬编码原片角色、`_finish_capture` 与取消收场路径只登记原片草稿；而 `OwnershipSave`、归属仓储、`OutputDraft` 与目录装配的预览支持全部就绪。修复：列举条目新增可选 `paired_identity`（驱动声明的同批原片关联，解释层校验非空文本），`_register_observed` 改两阶段登记（先全部保存发现与在场事实建立身份映射，再保存归属与完成事实；配对条目以预览角色归属并携带 `DRIVER_PAIRING` 配对证据），配对解析抽为 `validate_observed_pairings` 纯函数（目标缺失、自指、指向预览时整批拒绝）配单元测试；产物目录草稿构造统一为 `_catalog_drafts`（原片与预览按配对分别登记，修复成品只挂原片条目）。②取消资格装配对未开始的非拍摄目标自相矛盾：`load_eligibility_facts` 对取回/取消/清理/报告动作硬造 `dispatch=STARTED`（恒允许标记），而生效事务的停止收场分支要求目标真在执行中——待执行取回被拒绝，run 会话以 `state_db_error` 退出。修复按真实分区表达：`execution_started=0` 的非拍摄目标走未启动分区，执行前取消同事务直接终态化。③执行前取消终态化目标后，目标计划无人推进完成（I4 计划状态缺陷类的又一入口，第八十二段审计只覆盖了置 RUNNING 的三处写入点，直接终态化的 PRE_START 分支未被审计）：全部动作在执行前取消的计划按规格也应进入完成。修复在生效事务同事务补计划完成事件（目标恰好是计划最后一个未终态动作时），`_reuse` 校验相应扩展三事件形状。
+
+三用例的行为事实：自动预览链覆盖能力声明（`preview_supported` 从驱动定义导出）→ 客户端导出（取回三字段全填、`scheduled_at` 与拍摄同一时刻）→ run（拍摄成功、原片与预览分别登记为正式产物、预览设备文件保留原片引用与配对证据、自动取回选择预览产物、交付 ready 字节为预览内容）→ 报告表达两动作成功且自动取回携带 `automation` 展示关系（来源动作实例一致）。重复关联用例覆盖受理事务直接登记两个冲突取回失败（`duplicate_auto_preview`、阶段 `admission`、详情含来源名与全部冲突动作名）、拍摄正常执行、冲突动作无交付。取消联动用例覆盖拍摄执行前的计划级取消：计划实例入口直接针对计划内动作（含自动预览取回），待执行拍摄与关联取回都按取消收场，无产物无交付，报告逐动作如实表达。
+
+录像媒体检查与受管工具环境决策仍列后续链路（本机无 ffprobe/ffmpeg），C 领取真实组合同前。
+
+回归证据（2026-10-07，Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_output_roundtrip.py` 4 项通过；根 `tests/integration` 44 项通过；apps/camctl 单元 3303 项通过（含新增 `test_observed_pairings.py` 与 `test_result_listing.py` 配对解释扩展）；cancellation/persistence/capture/bootstrap 集成 386 项、outputs/acceptance/scheduling/operations/session/reporting 集成 2748 项+1 跳过、capture 分目录复跑 199 项通过；五项仓库检查全部通过（database-spec 须在统一 uv 环境运行，系统 Python 的 SQLite 版本不满足统一条件）。
 
 ### I6 全量契约映射、软件验收与部署交接
 

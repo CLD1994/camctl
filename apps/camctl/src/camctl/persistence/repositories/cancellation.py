@@ -461,6 +461,7 @@ class _ApplyCancelTargetCommand:
         target_id = item["target_action_id"]
         action_rows: tuple = ()
         outcome_event = None
+        plan_row = None
         withdrawal_rows = self._withdrawal_rows(connection, item, target)
         if mode is CancelApplyMode.PRE_START:
             if target["status"] != 1 or target["cancel_requested"]:
@@ -471,6 +472,10 @@ class _ApplyCancelTargetCommand:
                 {"cancel_requested": 1, "status": _ACTION_CANCELED}),)
             outcome_event = _ITEM_SUCCEEDED, CancelOutcomeChoice.CANCELED.value
             effect_after = CancellationEffect.APPLIED.value
+            # 直接终态取消可能使目标计划全部动作终态：同一事务补计划
+            # 完成事实，否则执行前取消的计划无人推进（计划执行状态
+            # 规格：全部动作在执行前取消的计划也进入完成）。
+            plan_row = self._pre_start_plan_row(connection, target)
         elif mode is CancelApplyMode.WITH_STOP:
             if target["status"] != 2 or target["cancel_requested"]:
                 raise ConsistencyError("停止收场取消要求目标执行中且未取消")
@@ -509,13 +514,15 @@ class _ApplyCancelTargetCommand:
             self._state.setdefault("cancel_delivery_items", {})
             self._state.setdefault("deliveries", {})
         self._claim(item, target_id)
-        # 生效事件与可能的结果事件按实际组合分配，避免留空洞。
-        allocation = scope.allocate(2 if outcome_event is not None else 1)
+        # 生效、结果与可能计划完成事件按实际组合分配，避免留空洞。
+        allocation = scope.allocate(
+            1 + int(outcome_event is not None) + int(plan_row is not None))
         events = [_envelope(
             allocation.first_event_id, allocation.txn_id,
             _CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON,
             (apply_row,) + action_rows + withdrawal_rows,
             command.occurred_at)]
+        next_event_id = allocation.first_event_id + 1
         if outcome_event is not None:
             final_status, outcome_value = outcome_event
             result_row = _update(
@@ -525,9 +532,14 @@ class _ApplyCancelTargetCommand:
                 {"status": final_status, "outcome": outcome_value,
                  "error_code": None, "error_details_json": None})
             events.append(_envelope(
-                allocation.first_event_id + 1, allocation.txn_id,
+                next_event_id, allocation.txn_id,
                 _CANCEL_CHANGED_EVENT, _CANCEL_RESULT_REASON,
                 (result_row,), command.occurred_at))
+            next_event_id += 1
+        if plan_row is not None:
+            events.append(_envelope(
+                next_event_id, allocation.txn_id,
+                _PLAN_STATUS_EVENT, 2, (plan_row,), command.occurred_at))
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
             result=CancelTargetsSaved(CancelTargetsDisposition.SAVED,
@@ -591,6 +603,33 @@ class _ApplyCancelTargetCommand:
         # 目标动作行属于其自身历史；取消成员行属于取消动作。
         self._owners[("actions", target_id)] = ("action", target_id)
 
+    def _pre_start_plan_row(self, connection, target):
+        """执行前直接终态取消的目标计划可能因此全部动作终态。
+
+        目标恰好是计划最后一个未终态动作时返回同事务补保存的计
+        划完成行；其他成员未终态时计划保持原状态，不伪造完成。
+        """
+        plan = row_facts(connection, "plans", target["plan_id"])
+        if plan is None:
+            raise ConsistencyError(f"目标计划不存在: {target['plan_id']}")
+        if plan["status"] not in (1, 2):
+            return None
+        with closing(connection.execute(
+                "SELECT id, status FROM actions WHERE plan_id = ?",
+                (plan["id"],),
+        )) as cursor:
+            rows = cursor.fetchall()
+        unfinished = {
+            int(action_id) for action_id, status in rows
+            if status not in _ACTION_TERMINAL}
+        if not rows or unfinished != {target["id"]}:
+            return None
+        self._state.setdefault("plans", {})[plan["id"]] = plan
+        self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+        return _update("plans", plan["id"],
+                       {"status": plan["status"]},
+                       {"status": _PLAN_COMPLETE})
+
     def _already(self) -> CommandPlan:
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
@@ -600,7 +639,13 @@ class _ApplyCancelTargetCommand:
 
     def _reuse(self, saved) -> CommandPlan:
         kinds = [(event["type"], event["reason"]) for event in saved]
-        if not kinds or kinds[0] != (_CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON):
+        if kinds not in (
+                [(_CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON)],
+                [(_CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON),
+                 (_CANCEL_CHANGED_EVENT, _CANCEL_RESULT_REASON)],
+                [(_CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON),
+                 (_CANCEL_CHANGED_EVENT, _CANCEL_RESULT_REASON),
+                 (_PLAN_STATUS_EVENT, 2)]):
             raise TransactionError("原事务不是取消生效，不能作为重送核实")
         if saved[0]["occurred_at"] != self._command.occurred_at:
             raise TransactionError("取消生效的事实时刻与原事务不同")

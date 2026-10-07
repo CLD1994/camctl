@@ -100,11 +100,31 @@ class TestDriverResultListing:
         assert files[0].locator == {"path": "/DCIM/11"}
         assert files[0].original_name == "11.mp4"
         assert files[0].media_type == "video/mp4"
+        assert files[0].paired_identity is None
         # 未完成条目允许无大小；未知类别不冒充已知类别。
         assert files[1].complete is False and files[1].size_bytes is None
         assert files[2].kind.value == "other"
         # 条目自身结构作为归属与完成的结构化依据。
         assert files[0].evidence["identity"] == "11"
+
+    def test_preview_entry_carries_driver_pairing(self) -> None:
+        driver = _ListingDriver(DeviceCallResult(
+            observations=(_listed([
+                _entry("11"),
+                _entry("11-preview", kind="photo", paired_identity="11"),
+            ]),), error=None))
+        files = asyncio.run(_adapter(driver).list_files(7))
+        assert files[1].paired_identity == "11"
+        assert files[0].paired_identity is None
+
+    def test_malformed_pairing_field_is_rejected(self) -> None:
+        for value in ("", 3, {}):
+            with pytest.raises(ValueError, match="配对身份"):
+                asyncio.run(_adapter(_ListingDriver(DeviceCallResult(
+                    observations=(_listed([
+                        _entry("11-preview", kind="photo",
+                               paired_identity=value)]),),
+                    error=None))).list_files(7))
 
     def test_call_error_without_observation_raises(self) -> None:
         driver = _ListingDriver(DeviceCallResult(
