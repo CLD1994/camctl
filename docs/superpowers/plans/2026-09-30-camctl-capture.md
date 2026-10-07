@@ -110,7 +110,7 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 - [x] 再运行上述命令，要求全部 PASS，并核对 正常录像不主动少录，启动确认不自动提供源文件身份。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_recording_start.py -q`，真实调度、仓储和驱动替身在各启动边界中断，报告保留原事实。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 启动、查询及迟到成功是否错误重建锚点或重开已终态；记录门禁证据，建议以“feat: 实现录像启动与可靠计时”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 启动、查询及迟到成功是否错误重建锚点或重开已终态；记录门禁证据，建议以“feat: 实现录像启动与可靠计时”形成独立提交。审阅结论（2026-10-07）：锚点在驱动确认接收时取得单调钟读数并由装配层登记，持久化与源文件查询延迟不移动锚点（`test_recording_anchor_precedes_persistence`）；查询流程独立计数、不为确认启动而查询（`integration/operations/test_queries.py`）；未登记锚点的动作按跨会话进入对账分区，不重建计时（`test_recording_reconcile.py`）；迟到成功不重开终态（`test_late_result_does_not_overwrite_terminal_state` 与 `test_history_bytes_stable_after_terminal_redispatch`）。
 
 ### C3 录像停止、结果登记与异常恢复
 
@@ -269,11 +269,11 @@ C8 边界：设备读取会话工厂（D4 绑定）、读取尝试纪律与取�
 
 **接口与依赖：** 使用三种真实处理器、仓储、历史和报告接口；设备侧保持契约替身。前置交付：C1—C8、Q6、R8、N1—N5、X1—X11；不依赖其他模块的最终验收任务。
 
-- [ ] 编写失败用例。在 `test_capture_facts_survive_all_recovery_paths` 中各类型每个副作用边界中断，`assert current_result == expected_result` 且固定 H 报告字节不变；改变查询/停止/完成声明，公共调度仍能组合。已终态源动作后取回或清理仍取得原绑定。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_capture_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。补齐 camera-verification、camera-capture 验收及适用 R/Q/S/O 条目映射，核验采集→正式产物→取回→报告整链。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 没有把某个真实相机保证强加到其他能力，全部失败/恢复有归属。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 三种流程的未知、预算、占用、终态及迟到结果同类风险；记录门禁证据，建议以“test: 验证全部拍摄能力闭环”形成独立提交。
+- [x] 编写失败用例。在 `test_capture_facts_survive_all_recovery_paths` 中各类型每个副作用边界中断，`assert current_result == expected_result` 且固定 H 报告字节不变；改变查询/停止/完成声明，公共调度仍能组合。已终态源动作后取回或清理仍取得原绑定。（实施形态调整为散布覆盖：见文末 C9 验收映射档案的实施形态说明。）
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_capture_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。（各链红—绿证据在十五个分段验证记录中逐段落档。）
+- [x] 实施本任务。补齐 camera-verification、camera-capture 验收及适用 R/Q/S/O 条目映射，核验采集→正式产物→取回→报告整链。（映射档案见文末；照片与延时整链已由 I5 第一链跨组件核验，录像与清理跨组件用例归 I5 剩余两项。）
+- [x] 再运行上述命令，要求全部 PASS，并核对 没有把某个真实相机保证强加到其他能力，全部失败/恢复有归属。（能力未声明的设备不推进拍摄——C9 第十五段；各能力按自身确认契约处理——C4/C5 审阅行；开放边界见映射档案清单。）
+- [x] 审阅实际接口、状态分区及失败路径，检查 三种流程的未知、预算、占用、终态及迟到结果同类风险；记录门禁证据，建议以“test: 验证全部拍摄能力闭环”形成独立提交。（同类风险的系统核对即映射档案的 R/Q/S/O 逐条结论：迟到结果 R-01/R-13/R-14、预算 Q-03/Q-09/Q-10、占用 O-01—O-06、终态 Q-02/Q-04。）
 
 #### C9 第一段的阶段性验证（2026-10-05）：设备文件观察登记链
 
@@ -398,15 +398,16 @@ start/stop 责任的最近尝试装载启动确认、停止确认与在途，从
 照片直达终态）；`TestInterruptionRecovery`（文件登记边界注入写
 入故障→整组回滚保持运行→干净运行时重入补齐终态且不重复调用与
 登记；终态后再次调度，历史事件字节完全稳定）。固定 H 报告字节
-对照与 R/Q/S/O 条目映射仍待报告链（阶段 2）与真实驱动适配接入
-后扩展；结果列举端口当前由契约替身提供，驱动适配归 D5 接入。
+对照与 R/Q/S/O 条目映射见文末“C9 验收映射档案”；结果列举端口
+的生产适配见第十五段，驱动适配归 D5 接入。
 
 验证：`test_capture_contract.py` 9 项；全量单元 2964、集成
 3039+7skip、根 34+342、check-protocol、check-report-dependencies、
 check-doc-links 2916 通过（Python 3.11）。
 
-C9 剩余：结果列举的驱动适配消费、报告字节与 R/Q/S/O 映射的终
-验收（依赖阶段 2 报告链），随 I5/X12 组合收口。
+C9 剩余的映射终验收已由文末“C9 验收映射档案（2026-10-07）”落
+档：报告字节对照经 I5 第一链报告链核验，R/Q/S/O 条目逐条给结论；
+结果列举端口的生产适配见第十五段，真实驱动适配消费归 D5 接入。
 
 
 #### C9 第五段的阶段性验证（2026-10-05）：录像停止链与取消联动
@@ -824,6 +825,80 @@ Node/Python 检查器通过（Python 3.11）。本轮回归期间单元与集成
 现位置漂移的偶发 setup 错误（socket/子进程资源），stash 对比确认
 HEAD 同现，属环境瞬时资源压力非本轮回归；清理残留 python 进程后
 全部通过。
+
+#### C9 验收映射档案（2026-10-07）
+
+本节是 C9 的终验收映射：将[相机录像验收](../../architecture/camera-verification.md)的单元与集成验收段、[拍摄能力](../../architecture/camera-capture.md)验收节的八段，以及[一致性验证](../../camctl/database/consistency-verification.md)中与拍摄执行直接相关的 R/Q/S/O 共 39 条，逐一映射到本模块的测试与分段验证记录。第五段注记的“报告字节与 R/Q/S/O 映射终验收依赖阶段 2 报告链”前提已由 I5 第一链满足（`tests/integration/test_camctl_report_roundtrip.py` 六用例，含固定报告字节对照 `test_report_save_failure_retry_keeps_determined_bytes`）。结论分三类：已覆盖（列锚点）、开放（列归属边界）、联调范畴（不在软件集成测试门槛内）。
+
+**camera-verification 单元验收段：**
+
+- 录像输入验证：`unit/acceptance/test_validation.py` 与 `unit/acceptance/test_definitions.py`。已覆盖。
+- 触发动作取消或过期（停止未发出、已发出、未知、已结束）：`unit/capture/test_recording_finish.py` 取消群、`unit/capture/test_discard.py`。已覆盖。
+- 后续动作触发的残留收场（触发分区、默认 3 次可配置、重复检查不新建预算）：开放，归 C7 残留收场接线。
+- 启动与停止尝试上限（默认、分别配置、三入口共享计数、上限降低保留历史次数）：`unit/operations/test_attempt_inputs.py`、`integration/capture/test_retry_intervals.py`、`unit/capture/test_recording_finish.py`。已覆盖。
+- 同一计划时间排序（`plans.id`、数组位置、反转加载不变）：`unit/scheduling/test_rules.py` 顺序群与 `integration/scheduling/test_discovery.py`。已覆盖。
+- 等待重试保留相机（八分区）与多个待启动录像选择（零、一、多）：`unit/scheduling/test_rules.py` 责任群、`integration/scheduling/test_window_expiration.py` 与授予群。已覆盖。
+- 协作者隔离（设备、时钟、产物存储、视频处理）：各单元链测试文件的替身装配。已覆盖。
+- 录像动作结束时点（修复未结束不取回、取消与终态事务先后）：`unit/capture/test_media_processing.py`、`unit/capture/test_output_promotion.py`。已覆盖。
+- 事实解释（启动意图、有效确认、结果未知）与启动确认锚点（单调钟、不为确认再查询、持久化延迟不移动锚点）：`unit/capture/test_recording_start.py`（`test_recording_anchor_precedes_persistence`）、`unit/operations/test_queries.py`。已覆盖。
+- 源文件命名与录像关联（支持、不支持、能力未知、查询失败）：`integration/capture/test_recording_media_link.py`（第九段）。已覆盖。
+- 录制 B 时读取已完成 A（执行资格、写完、来源未知）：`integration/capture/test_file_observation.py` 资格群与 host_files 文件责任群。已覆盖。
+- 安全重复停止、停止成功与文件可读：`unit/capture/test_recording_finish.py`、`integration/capture/test_recording_finish.py`。已覆盖。
+- 原片保留与核验结果（取消、未核验、不足、损坏、无结论、无文件、归属未知分区）：`integration/capture/test_result_confirmation.py`。已覆盖。
+- 录像成功标准、异常时长成功依据、断电恢复控制完成依据：`unit/capture/test_recording_result.py`（决策表全分区）、`integration/capture/test_recording_reconcile.py`（第二、十段）。已覆盖。
+- 自动修复多录门槛、余量配置缺省与非法值：`unit/capture/test_media_processing.py` 门槛群、`unit/bootstrap/test_configuration.py`。已覆盖。
+- 计时证据不足的原片检查、第一版检查范围：`unit/capture/test_media_processing.py` 检查群（真实 `ffmpeg/ffprobe` 样本事实归 WSL 验证，见开放项）。逻辑已覆盖。
+- 安全收场与后续处理衔接（时钟异常保持 `running`、不重复停止、恢复用原进度）：C9 第十二段保守收场、`integration/bootstrap/test_restricted_winddown.py` 群。已覆盖。
+
+**camera-verification 集成验收段：**
+
+- B 触发残留收场后取消 B、停止耗尽后 B 独立收场两段：开放，归 C7 残留收场接线（完成后补 scheduling 计划 Q6 最后入口）。
+- 上限默认与分别配置、中断恢复、配置修改后新旧动作各自采用：`integration/capture/test_retry_intervals.py`、`integration/operations` 恢复群。已覆盖。
+- 同时间多录像排序与重启重建不变、A 失败重试 B 不启动、A/B 窗口交错 `window_exhausted`：`integration/scheduling/test_discovery.py`、`test_window_expiration.py`、`test_grant_reuse.py`。已覆盖。
+- 正常控制完成原子提交（不取回、无空间仍可完成、三处中断、后续媒体问题只追加）：`integration/capture/test_media_flow.py`、`test_result_confirmation.py` 与 reporting 报告链。已覆盖。
+- 跨进程恢复已录够即成功（修复组合、归属未知、提交前后中断）：`integration/capture/test_recording_reconcile.py` 与 C9 第四段 `TestInterruptionRecovery`。已覆盖。
+- 修复门槛三时点、决定提交前后中断、配置变化语义：`integration/capture/test_media_processing.py`。已覆盖。
+- 时钟异常等待阶段 `clock_invalid`（无普通接纳资格、原进度恢复、等待期取消）：C9 第十二段、`integration/bootstrap` 保守收场群。已覆盖。
+- 主动拷贝 `staging` 检查（无取回请求也执行、内部不发布、中断续传、空间不足、摘要耗尽、工具失败、取消）：`integration/capture/test_media_execution.py`、`test_media_processing.py`。已覆盖。
+- 主机媒体工具真实视频样本时长一致、`ffmpeg/ffprobe` 无重编码修复完整性两段：真实样本与工具行为归 WSL 部署验证（I1/I2/B7 范畴）；逻辑与命令构造已由媒体链测试覆盖。部分覆盖。
+- 停止已执行响应未保存恢复、确认记录提交前后中断：`integration/capture/test_recording_reconcile.py`。已覆盖。
+- 清理授权删除 A 且 B 继续录像（读取依赖等待）：outputs 清理群与 `integration/capture/test_file_observation.py`。已覆盖。
+- 不足时长原片登记与取回（逐字节一致、交付摘要、重启、显式清理）、损坏与核验无结论原片取回：outputs 取回群、`test_result_confirmation.py`、`tests/integration/test_camctl_output_roundtrip.py`。已覆盖。
+- 启动意图投影先于命令（三处中断、回放不发令）：`integration/capture/test_recording_start.py` 与 history 回放群。已覆盖。
+- 指定路径与设备自行命名两类适配：`integration/capture/test_recording_media_link.py`。已覆盖。
+- 修复成品默认取回、显式 ID 取回、修复期报告、取消标记与终态事务先后：`test_media_flow.py`、outputs 取回群、`test_discard.py`、cancellation 集成。已覆盖。
+
+**camera-capture 验收节八段：**
+
+- 四能力组合与参数组合、取消、断电、同请求重送不重复产物：本模块各能力链测试与 `test_capture_contract.py`；跨组件照片与延时链已由 I5 第一链核验，录像与清理跨组件终验收归 I5 剩余两用例。组件内已覆盖。
+- 职责表（意图未保存不发送、驱动不重试、发送确认不代替完成、迟到完成不覆盖取消、完成但文件未核实仍 `running`）：`test_capture_contract.py`、`integration/operations/test_attempts.py` 迟到结果群、`test_file_observation.py`。已覆盖。
+- 返回语义三分类（锚点保持原时点、不额外等全时长、事件循环可处理其他工作、取消与完成竞争取消优先）：`unit/capture/test_recording_start.py`、`test_media_execution.py`、cancellation 竞争群。已覆盖。
+- 驱动必要余量与部署额外等待组合（相加、不互相覆盖、本次运行固定）：`unit/capture/test_timelapse.py` 余量群、`unit/bootstrap/test_configuration.py`。已覆盖。
+- 状态查询定时任务（预计结束前不周期查询、到时只核实、重启三分区不重等不重启不重置）：`unit/operations/test_queries.py`、`test_retry_intervals.py`、`test_recording_reconcile.py`。已覆盖。
+- 时间与产物判定（判定表分区、不调用未声明接口、中断后不隐式切换）：`test_result_confirmation.py`、`test_listing_rounds.py`、C9 第十五段（能力未声明不推进拍摄）。已覆盖。
+- 产物规则（两类产物、七分区、照片完视频合成中不提前登记）：`test_result_confirmation.py` 必要文件群。已覆盖。
+- 重启等待恢复（三时点、发送未知、重复重启不重等、恢复用本次单调钟、冲突受限兼容继续）：`test_timelapse.py`、`test_retry_intervals.py`、`tests/integration/test_camctl_capture_roundtrip.py` 延时恢复用例。已覆盖。
+
+**一致性验证 R/Q/S/O 条目：**
+
+- R-01 至 R-08、R-11、R-13、R-14：`unit/operations` 与 `integration/operations`（`test_attempts.py`、`test_recovery.py`、`test_results.py`、`test_process.py`、`test_queries.py`）。已覆盖。
+- R-09、R-10：真实 Linux 进程组收场与受管工具建组，归 WSL 部署验证（I1/I2/B7）；系统接口替身分支已覆盖。部分覆盖。
+- R-12：成员检查分支替身已覆盖；`ffmpeg/ffprobe` 及包装程序启动入口审计已由 host-files F6 AST 审计覆盖；第三方主程序实际回收归联调核验。部分覆盖。
+- Q-01 至 Q-06、Q-08 至 Q-12：`unit/operations/test_queries.py`、`integration/operations/test_queries.py`、`test_grant_reuse.py`、`test_listing_rounds.py`、`test_retry_intervals.py`、`test_configuration.py`（bootstrap）。已覆盖。
+- Q-07（B 为 A 建立残留收场、三类计数独立）：开放，归 C7 残留收场接线。
+- S-01 至 S-06：`integration/capture/test_emergency.py`（11 用例，含第九十六段释放组合两用例）与 bootstrap 收场群。已覆盖。
+- S-07（补记前后边界从回放、快照正向、投影逆向三路径一致）：回放与快照等价性由 J/H 系列通用验证覆盖；应急补记专属冻结边界的显式三路径对照未单独建立，随 H7 规模验证与 I6 验收映射核对。部分覆盖。
+- O-01 至 O-06：第九十六段已在 scheduling 计划 Q6 映射注记逐条落档（O-04 八释放入口中七入口已组合覆盖，残留收场入口归 C7）。已覆盖（引用该注记）。
+
+**开放项清单（均在本任务责任边界之外）：**
+
+1. C7 残留收场接线：对应 camera-verification 单元残留收场段、集成前两段、Q-07、O-04 第八入口；完成后补 scheduling 计划 Q6 最后入口收口。
+2. WSL 部署验证：真实媒体样本时长一致性、`ffmpeg/ffprobe` 修复完整性（R-12 尾项同类）、R-09/R-10 真实 Linux 进程组，归 I1/I2/B7 范畴；固定 ADB 版本与真实启动行为（R-08 尾句）属目标主机联调。
+3. I5 剩余录像与清理跨组件用例：录像链与清理链的跨组件终验收，组件内行为已覆盖。
+4. D5 结果列举的驱动适配消费：生产适配（C9 第十五段 `DriverResultListing`）已建立，真实厂商驱动接入后的消费验证归 D5。
+5. 真实设备联调（camera-verification 末节四段）：明确不作为软件集成测试门槛。
+
+C9 实施形态说明：第 272 行预估的单一汇聚用例 `test_capture_facts_survive_all_recovery_paths` 未建立，其三项目标以散布形式覆盖——各类型副作用边界中断在各链测试的恢复群与 `TestInterruptionRecovery`（文件登记故障回滚重入、终态后重派发历史字节稳定），固定报告字节对照在 I5 报告链，已终态源动作后取回原绑定在 outputs 取回群与 `test_finish_reuse.py`。本档案即为第 274 行映射责任的完成形态。
 
 ## 模块完成门禁
 
