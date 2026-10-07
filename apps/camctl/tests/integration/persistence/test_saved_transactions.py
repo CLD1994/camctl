@@ -1,7 +1,6 @@
 """原操作键读取与真实事件事务、精确解码及整组回滚的组合。"""
 
 from dataclasses import replace
-from decimal import Decimal
 
 import pytest
 
@@ -18,19 +17,11 @@ from .test_transactions import PlanCreateCommand, _open, plan_guards  # noqa: F4
 def saved_database(tmp_path, plan_guards):
     _create_valid_database(tmp_path / "state.db")
     owned = _open(tmp_path)
-
-    class PrecisePlans(PlanCreateCommand):
-        def plan(self, scope):
-            plan = super().plan(scope)
-            return replace(plan, events=tuple(replace(event, evidence={
-                "observation": {"value": Decimal("0.10000000000000001")},
-            }) for event in plan.events))
-
     key = new_operation_key()
     try:
         for command, operation_key in (
             (PlanCreateCommand((1,)), new_operation_key()),
-            (PrecisePlans((2, 3)), key),
+            (PlanCreateCommand((2, 3)), key),
             (PlanCreateCommand((4,)), new_operation_key()),
         ):
             receipt = commit_operation(command, operation_key, owned)
@@ -49,7 +40,8 @@ def test_original_key_reads_full_exact_group_after_later_commit(saved_database):
     assert [event["event_id"] for event in saved] == [2, 3]
     assert all(event["transaction"] == TransactionRange(2, 2, 3) for event in saved)
     assert [event["body"]["rows"][0]["id"] for event in saved] == [2, 3]
-    assert saved[0]["body"]["evidence"]["observation"]["value"] == Decimal("0.10000000000000001")
+    # 依据成员与分支登记一致；读取保持调用方事务且不改写任何数据。
+    assert saved[0]["body"]["evidence"] == {}
     assert connection.in_transaction is True
     assert connection.total_changes == changes
     connection.execute("ROLLBACK")

@@ -23,6 +23,7 @@ from camctl.capture.timelapse import (
     WaitPlan,
     plan_capture_wait,
 )
+from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.timelapse import (
@@ -87,6 +88,16 @@ def test_unchanged_wait_configuration_returns_saved_result_without_new_history(t
         first = repository.schedule_wait(command, new_operation_key(), owned)
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
         before = owned.connection.execute("SELECT id, body_json FROM history_events ORDER BY id").fetchall()
+        # 真实命令保存并读取的正文只含真实变化：更新行两侧列集合一致
+        # 且逐列精确不等；同值重送不再产生任何历史。
+        for _, body_text in before:
+            body = parse_exact_json(body_text)
+            for item in body["rows"]:
+                if not item["before"].get("exists"):
+                    continue
+                assert set(item["before"]["values"]) == set(item["after"]["values"])
+                for column, value in item["before"]["values"].items():
+                    assert not json_equal(value, item["after"]["values"][column])
         second = repository.reconfigure_wait(command, new_operation_key(), owned)
         assert second.kind is DbOutcomeKind.COMPLETED, second.error
         assert second.value.expected_check_at == plan.check_at_utc

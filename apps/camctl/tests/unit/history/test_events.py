@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from camctl.history.events import EventEnvelope, RowChange, RowImage
@@ -14,6 +16,7 @@ from camctl.history.validators import (
     EventValidationError,
     register_guard,
     validate_event,
+    validate_event_structure,
 )
 from camctl.contracts.history_values import TransactionRange
 
@@ -392,3 +395,242 @@ class TestFileRouteReportImpact:
         object.__setattr__(envelope, "rows", ())
         with pytest.raises(EventValidationError):
             validate_event(envelope, _acceptance_context())
+
+
+class TestStrictChangeBody:
+    """E2：更新正文只保存真实变化；必要列必须实际变化。
+
+    SOURCE_RESOLVED.FIX 声明 source_resolution_state 与
+    resolved_source_plan_id 为必要更新列，用它的行规格驱动内核
+    层反例。
+    """
+
+    @staticmethod
+    def _source_resolved(before: dict, after: dict) -> EventEnvelope:
+        return EventEnvelope(
+            event_id=101,
+            transaction_id=7,
+            event_type=3,
+            event_version=1,
+            occurred_at=1,
+            clock_status=1,
+            change_seq=None,
+            reason=1,
+            evidence={},
+            rows=(
+                RowChange(
+                    table="actions",
+                    row_id=8,
+                    before=RowImage(exists=True, values=before),
+                    after=RowImage(exists=True, values=after),
+                ),
+            ),
+        )
+
+    def test_unchanged_column_in_body_is_rejected(self) -> None:
+        event = self._source_resolved(
+            {"source_resolution_state": 1, "resolved_source_plan_id": None},
+            {"source_resolution_state": 2, "resolved_source_plan_id": None},
+        )
+        with pytest.raises(EventValidationError, match="没有实际变化"):
+            validate_event_structure(event)
+
+    @pytest.mark.parametrize(
+        "before_value,after_value",
+        [
+            (None, None),
+            (3, Decimal("3.0")),
+            (Decimal("2"), 2),
+            ({"a": 1, "b": 2}, {"b": 2, "a": 1}),
+        ],
+    )
+    def test_exact_json_equal_values_are_rejected_as_unchanged(
+        self, before_value, after_value
+    ) -> None:
+        """数字同值按数学值比较；null、等值 Decimal 及成员顺序不同的
+        同值对象同样折叠，不构成真实变化。"""
+        event = self._source_resolved(
+            {"source_resolution_state": 1, "resolved_source_plan_id": before_value},
+            {"source_resolution_state": 2, "resolved_source_plan_id": after_value},
+        )
+        with pytest.raises(EventValidationError, match="没有实际变化"):
+            validate_event_structure(event)
+
+    def test_missing_required_column_is_rejected(self) -> None:
+        """必要列未变化被构造器省略后，正文缺少该列即拒绝。"""
+        event = self._source_resolved(
+            {"source_resolution_state": 1}, {"source_resolution_state": 2}
+        )
+        with pytest.raises(EventValidationError, match="缺少必要更新列"):
+            validate_event_structure(event)
+
+    def test_empty_update_column_set_is_rejected(self) -> None:
+        event = self._source_resolved({}, {})
+        with pytest.raises(EventValidationError):
+            validate_event_structure(event)
+
+    def test_write_once_column_reassignment_is_rejected(self) -> None:
+        """一次写列只允许从空值赋值；已赋值后再改不构成合法更新。"""
+        event = self._source_resolved(
+            {"source_resolution_state": 1, "resolved_source_plan_id": 5},
+            {"source_resolution_state": 2, "resolved_source_plan_id": 9},
+        )
+        with pytest.raises(EventValidationError, match="一次写列"):
+            validate_event_structure(event)
+
+    def test_write_once_first_assignment_passes_structure(self) -> None:
+        event = self._source_resolved(
+            {"source_resolution_state": 1, "resolved_source_plan_id": None},
+            {"source_resolution_state": 2, "resolved_source_plan_id": 9},
+        )
+        validate_event_structure(event)
+
+    def test_boolean_is_not_the_flag_number_in_transitions(self) -> None:
+        """未枚举登记的标志列上，布尔不得冒充数字 1 命中分支或转换。
+
+        RETRY_WAIT_CHANGED.REQUIRE 声明 operation_runs.retry_wait_required
+        从 0 到 1；True 与 1 精确不等，不能通过结构校验。
+        """
+        event = EventEnvelope(
+            event_id=101,
+            transaction_id=7,
+            event_type=6,
+            event_version=1,
+            occurred_at=1,
+            clock_status=1,
+            change_seq=None,
+            reason=1,
+            evidence={},
+            rows=(
+                RowChange(
+                    table="operation_runs",
+                    row_id=40,
+                    before=RowImage(exists=True, values={"retry_wait_required": 0}),
+                    after=RowImage(exists=True, values={"retry_wait_required": True}),
+                ),
+            ),
+        )
+        with pytest.raises(EventValidationError, match="不在允许范围"):
+            validate_event_structure(event)
+
+
+class TestEvidenceMembers:
+    """E4：事件依据成员按分支登记使用，公共成员遵守格式类型。"""
+
+    @staticmethod
+    def _observe(evidence: dict) -> EventEnvelope:
+        return EventEnvelope(
+            event_id=101,
+            transaction_id=7,
+            event_type=13,
+            event_version=1,
+            occurred_at=1,
+            clock_status=1,
+            change_seq=None,
+            reason=2,
+            evidence=evidence,
+            rows=(
+                RowChange(
+                    table="device_activities",
+                    row_id=11,
+                    before=RowImage(exists=True, values={"sent_at": None}),
+                    after=RowImage(exists=True,
+                                   values={"sent_at": 1_700_000_000_000_000}),
+                ),
+            ),
+        )
+
+    def test_undeclared_member_is_rejected(self) -> None:
+        with pytest.raises(EventValidationError, match="登记成员"):
+            validate_event_structure(self._observe({"input_key": "a" * 32}))
+
+    def test_member_of_other_branch_is_undeclared_here(self, admission_guards) -> None:
+        envelope = _plan_accepted_envelope()
+        object.__setattr__(
+            envelope, "evidence", {"observation": {"value": Decimal("0.1")}})
+        with pytest.raises(EventValidationError, match="登记成员"):
+            validate_event_structure(envelope)
+
+    def test_observation_must_be_structured(self) -> None:
+        with pytest.raises(EventValidationError, match="observation 必须是结构化对象"):
+            validate_event_structure(self._observe({"observation": 5}))
+
+    def test_declared_structured_observation_passes_structure(self) -> None:
+        name, branch, _ = validate_event_structure(self._observe(
+            {"observation": {"type": "stop_confirmed", "version": 1,
+                             "data": {"activity_id": "11"}}}))
+        assert (name, branch) == ("DEVICE_OBSERVED", "OBSERVE")
+
+    @pytest.mark.parametrize("bad", ["9", 0, -1, True])
+    def test_attempt_id_must_be_positive_integer(self, bad) -> None:
+        event = EventEnvelope(
+            event_id=101,
+            transaction_id=7,
+            event_type=12,
+            event_version=1,
+            occurred_at=1,
+            clock_status=1,
+            change_seq=None,
+            reason=4,
+            evidence={"attempt_id": bad},
+            rows=(
+                RowChange(
+                    table="operation_attempts",
+                    row_id=9,
+                    before=RowImage(exists=True, values={"max_attempts_used": 2}),
+                    after=RowImage(exists=True, values={"max_attempts_used": 3}),
+                ),
+            ),
+        )
+        with pytest.raises(EventValidationError, match="attempt_id"):
+            validate_event_structure(event)
+
+    @pytest.mark.parametrize("bad", ["abc", "a" * 31, 12])
+    def test_input_key_must_be_32_hex_identity(self, bad) -> None:
+        event = EventEnvelope(
+            event_id=101,
+            transaction_id=7,
+            event_type=27,
+            event_version=1,
+            occurred_at=1,
+            clock_status=1,
+            change_seq=None,
+            reason=1,
+            evidence={"input_key": bad},
+            rows=(
+                RowChange(
+                    table="plan_file_diagnostics",
+                    row_id=5,
+                    before=RowImage(exists=False, values={}),
+                    after=RowImage(exists=True, values={
+                        "input_path": "plan.json", "request_id": "42",
+                        "plan_id": 1, "errors_json": {"code": "invalid_plan"},
+                    }),
+                ),
+            ),
+        )
+        with pytest.raises(EventValidationError, match="input_key"):
+            validate_event_structure(event)
+
+    def test_baseline_member_must_be_positive_integer(self) -> None:
+        event = EventEnvelope(
+            event_id=101,
+            transaction_id=7,
+            event_type=14,
+            event_version=1,
+            occurred_at=1,
+            clock_status=1,
+            change_seq=None,
+            reason=2,
+            evidence={"activity_id": 11, "chunk_count": "3", "entry_count": 3},
+            rows=(
+                RowChange(
+                    table="device_activities",
+                    row_id=11,
+                    before=RowImage(exists=True, values={"baseline_state": 2}),
+                    after=RowImage(exists=True, values={"baseline_state": 3}),
+                ),
+            ),
+        )
+        with pytest.raises(EventValidationError, match="chunk_count"):
+            validate_event_structure(event)

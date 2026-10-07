@@ -13,17 +13,18 @@ from unit.history.test_decoding import registration  # noqa: F401
 
 
 _KEY = OperationKey("a" * 32)
-_BODY = ('{"reason":1,"evidence":{"observation":{"value":0.10000000000000001}},'
-         '"rows":[{"table":"plans","id":1,"before":{"exists":false},'
-         '"after":{"exists":true,"values":{"request_id":42,"name":"plan",'
-         '"created_at":0,"status":1}}}]}')
+# 精确小数经 OBSERVE 分支登记的 observation 依据成员承载。
+_BODY = ('{"reason":2,"evidence":{"observation":{"value":0.10000000000000001}},'
+         '"rows":[{"table":"device_activities","id":11,'
+         '"before":{"exists":true,"values":{"sent_at":null}},'
+         '"after":{"exists":true,"values":{"sent_at":5}}}]}')
 
 
 @pytest.fixture
 def database():
     connection = create_autospec(sqlite3.Connection, instance=True)
     data = {"key_id": 3, "range": (3, 7, 8), "previous": (6,), "summary": (2, 7, 8),
-            "rows": [(7, 3, 1, 1, 0, 1, 5, _BODY), (8, 3, 1, 1, 0, 1, 6, _BODY)],
+            "rows": [(7, 3, 13, 1, 0, 1, 5, _BODY), (8, 3, 13, 1, 0, 1, 6, _BODY)],
             "cursors": []}
 
     def execute(statement, parameters=()):
@@ -68,7 +69,7 @@ def test_missing_operation_key_is_absent(database):
 
 def test_saved_events_keep_original_fact_time(database, registration):
     connection, data = database
-    data["rows"][0] = (7, 3, 1, 1, 123456789, 1, 5, _BODY)
+    data["rows"][0] = (7, 3, 13, 1, 123456789, 1, 5, _BODY)
     assert saved_transaction_events(connection, _KEY)[0]["occurred_at"] == 123456789
 
 
@@ -96,11 +97,11 @@ def test_invalid_later_event_rejects_whole_saved_group(database, registration, i
 
 
 @pytest.mark.parametrize("rows", [
-    [], [(7, 3, 1, 1, 0, 1, 5, _BODY)],
-    [(7, 3, 1, 1, 0, 1, 5, _BODY), (8, 4, 1, 1, 0, 1, 6, _BODY)],
-    [(7, 3, 1, 1, 0, 1, 5, _BODY), (9, 3, 1, 1, 0, 1, 6, _BODY)],
-    [(8, 3, 1, 1, 0, 1, 6, _BODY), (7, 3, 1, 1, 0, 1, 5, _BODY)],
-    [(7, 3, 1, 1, 0, 1, 5, _BODY), (7, 3, 1, 1, 0, 1, 6, _BODY)],
+    [], [(7, 3, 13, 1, 0, 1, 5, _BODY)],
+    [(7, 3, 13, 1, 0, 1, 5, _BODY), (8, 4, 13, 1, 0, 1, 6, _BODY)],
+    [(7, 3, 13, 1, 0, 1, 5, _BODY), (9, 3, 13, 1, 0, 1, 6, _BODY)],
+    [(8, 3, 13, 1, 0, 1, 6, _BODY), (7, 3, 13, 1, 0, 1, 5, _BODY)],
+    [(7, 3, 13, 1, 0, 1, 5, _BODY), (7, 3, 1, 1, 0, 1, 6, _BODY)],
 ])
 def test_member_stream_must_match_verified_range(database, registration, rows):
     connection, data = database

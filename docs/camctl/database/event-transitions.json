@@ -8190,7 +8190,9 @@
             "activity",
             "release"
           ],
-          "evidence": []
+          "evidence": [
+            "observation"
+          ]
         }
       }
     }

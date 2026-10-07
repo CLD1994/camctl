@@ -140,13 +140,24 @@ class TestEmergencyStop:
         assert record.attempts_used == 0
 
     async def test_already_confirmed_makes_no_calls(self) -> None:
+        observation = {"type": "stop_confirmed", "version": 1,
+                       "data": {"activity_id": "1"}}
         port = _StopPort()
         record = await emergency_stop(
-            _facts(stop_confirmed=True), EmergencyBudget(max_attempts=3), port
+            _facts(stop_confirmed=True, stop_observation=observation),
+            EmergencyBudget(max_attempts=3), port,
         )
         assert port.calls == 0
         assert record.outcome is EmergencyOutcome.STOPPED
         assert record.attempts_used == 0
+        assert record.stop_observation == observation
+
+    async def test_already_confirmed_without_observation_is_rejected(self) -> None:
+        """零尝试停止的补记必须保存停止依据；无可保存观察不能跳过。"""
+        with pytest.raises(ValueError, match="可靠停止依据"):
+            await emergency_stop(
+                _facts(stop_confirmed=True), EmergencyBudget(max_attempts=3), _StopPort()
+            )
 
     async def test_record_status_partitions(self) -> None:
         assert RecordStatus.RECORDED.value == "recorded"

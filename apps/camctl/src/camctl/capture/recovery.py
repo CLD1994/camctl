@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 __all__ = [
     "EmergencyBudget",
@@ -62,6 +62,7 @@ class EmergencyFacts:
     driver_safe_repeat_stop: bool
     config_known: bool
     budget_available: bool
+    stop_observation: Mapping[str, Any] | None = None
 
 
 def emergency_eligibility(facts: EmergencyFacts) -> EmergencyDecision:
@@ -135,6 +136,7 @@ class EmergencyRecord:
     attempts_used: int
     max_attempts: int
     record_status: RecordStatus = RecordStatus.NOT_RECORDED
+    stop_observation: Mapping[str, Any] | None = None
 
 
 async def emergency_stop(
@@ -148,10 +150,15 @@ async def emergency_stop(
     """
     decision = emergency_eligibility(facts)
     if decision is EmergencyDecision.ALREADY_CONFIRMED_SKIP:
+        if facts.stop_observation is None:
+            # 零尝试停止的补记必须保存停止依据；没有可保存的结构化
+            # 观察时不能宣称已确认停止。
+            raise ValueError("已确认停止的应急资格必须携带可靠停止依据")
         return EmergencyRecord(
             outcome=EmergencyOutcome.STOPPED,
             attempts_used=0,
             max_attempts=budget.max_attempts,
+            stop_observation=facts.stop_observation,
         )
     if decision is EmergencyDecision.INELIGIBLE_KEEP_DIAGNOSIS:
         return EmergencyRecord(

@@ -18,9 +18,17 @@ def registration(monkeypatch):
         "immutable": ["request_id", "name", "created_at"], "mutable": ["status"],
         "write_once": [], "derived": ["id", "created_event_id", "last_event_id", "change_count"],
         "owner": {"entity": "plan", "id": "id", "via": []}, "state_columns": ["status"],
+    }, "device_activities": {
+        "immutable": ["task_locator_json"], "mutable": ["sent_at", "started_at"],
+        "write_once": [], "derived": ["id", "created_event_id", "last_event_id", "change_count"],
+        "owner": {"entity": "action", "id": "id", "via": []}, "state_columns": [],
     }}, "events": {"PLAN_ACCEPTED": {"id": 1, "version": 1, "branches": {"CREATE": {
         "reason": 1, "rows": [{"table": "plans", "op": "create", "after": {"status": [1]}}],
-        "guards": [],
+        "guards": [], "evidence": [],
+    }}}, "DEVICE_OBSERVED": {"id": 13, "version": 1, "branches": {"OBSERVE": {
+        "reason": 2, "rows": [{"table": "device_activities", "op": "update",
+            "columns": ["sent_at"], "required": []}],
+        "guards": [], "evidence": ["observation"],
     }}}}, "state_models": {}}
     read = create_autospec(events.load_event_registry, return_value=registry)
     monkeypatch.setattr(events, "load_event_registry", read)
@@ -69,9 +77,24 @@ def test_integer_json_identity_is_normalized_without_rounding():
 
 
 def test_business_decimal_is_not_converted_to_float():
-    text = json.dumps(_body()).replace('"evidence": {}', '"evidence": {"observation": {"value": 0.10000000000000001}}')
-    event = decode_event_row(_row(body_json=text))
+    # 精确小数经 OBSERVE 分支登记的 observation 依据成员往返。
+    body = {"reason": 2, "evidence": {}, "rows": [{
+        "table": "device_activities", "id": 11,
+        "before": {"exists": True, "values": {"sent_at": None}},
+        "after": {"exists": True, "values": {"sent_at": 5}},
+    }]}
+    text = json.dumps(body).replace('"evidence": {}',
+                                    '"evidence": {"observation": {"value": 0.10000000000000001}}')
+    event = decode_event_row(_row(body_json=text, event_type=13))
     assert event.evidence["observation"]["value"] == Decimal("0.10000000000000001")
+
+
+def test_undeclared_evidence_member_is_rejected_on_decode():
+    """读取与保存共用依据成员白名单：未登记成员不能解释为合法事实。"""
+    text = json.dumps(_body()).replace(
+        '"evidence": {}', '"evidence": {"observation": {"value": 1}}')
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body_json=text))
 
 
 def test_boolean_is_not_a_numeric_column_enum():

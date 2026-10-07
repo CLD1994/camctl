@@ -34,7 +34,7 @@ def repository(monkeypatch):
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "load_event_registry", create_autospec(module.load_event_registry,
-        return_value={"events": {"REPORT_CHANGED": {"id": 28, "branches": {"PUBLISH": {"reason": 4}}}}}))
+        return_value={"events": {"REPORT_CHANGED": {"id": 28, "branches": {"PUBLISH": {"reason": 4, "evidence": []}}}}}))
     monkeypatch.setattr(module, "load_enum_registry", create_autospec(authority_registry_reader,
         return_value={"history_objects": {"report": {"id": 6}}}))
     facts = {"id": 7, "frozen_event_id": 0, "from_wm": 0, "to_wm": 0, "format_version": 1,
@@ -217,7 +217,7 @@ def byte_event(repository, monkeypatch):
                  "after": {"exists": True, "values": {"status": 2, "size_bytes": 6, "sha256": "a" * 64}},
              }]}}
     monkeypatch.setattr(repository, "load_event_registry", create_autospec(load_event_registry,
-        return_value={"events": {"REPORT_CHANGED": {"id": 28, "branches": {"PREPARE": {"reason": 2}}}}}))
+        return_value={"events": {"REPORT_CHANGED": {"id": 28, "branches": {"PREPARE": {"reason": 2, "evidence": []}}}}}))
     reader = create_autospec(saved_transaction_events, return_value=[event])
     monkeypatch.setattr(repository, "saved_transaction_events", reader, raising=False)
     return event, reader

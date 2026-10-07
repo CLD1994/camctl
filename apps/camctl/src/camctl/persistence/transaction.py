@@ -33,6 +33,7 @@ from camctl.history.events import (
     EventEnvelope,
     RowChange,
     RowImage,
+    changeable_columns,
     load_event_registry,
 )
 from camctl.history.reads import ReadCoverage
@@ -589,9 +590,20 @@ def row_change(table: str, row_id: int, values: dict) -> RowChange:
 
 
 def update_change(table: str, row_id: int, before: dict, after: dict) -> RowChange:
-    """从相同拟更新集合构造真实变化；旧值来自本事务刚读到的状态。"""
+    """从相同拟更新集合构造真实变化；旧值来自本事务刚读到的状态。
+
+    拟更新集合只能是该表的可变业务列：非法列无论是否变化都在构造
+    边界拒绝，不被过滤成合法子集后静默接受。
+    """
     if before.keys() != after.keys():
         raise TransactionError(f"{table}#{row_id} 更新前后字段集合不同")
+    try:
+        allowed = changeable_columns(table)
+    except KeyError as error:
+        raise TransactionError(f"未知业务投影表: {table}") from error
+    illegal = set(before) - allowed
+    if illegal:
+        raise TransactionError(f"{table}#{row_id} 拟更新列不是可变业务列: {sorted(illegal)}")
     changed = [column for column in before if not json_equal(before[column], after[column])]
     if not changed:
         raise TransactionError(f"{table}#{row_id} 没有可保存的变化")

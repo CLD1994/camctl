@@ -27,6 +27,7 @@ from camctl.history.events import (
     event_type_name,
     foreign_key_targets,
     load_event_registry,
+    write_once_columns,
 )
 
 Guard = Callable[[EventEnvelope, "EventContext"], None]
@@ -146,6 +147,13 @@ def _check_enum_value(table: str, column: str, value: Any) -> None:
         _fail(f"{table}.{column} 的值 {value} 不是登记的枚举编号")
 
 
+def _allowed_value(value: Any, allowed: Any) -> bool:
+    """按精确 JSON 语义判断分支取值是否在允许集合内；布尔不冒充数字。"""
+    if value is None:
+        return None in allowed
+    return any(json_equal(value, option) for option in allowed)
+
+
 def _match_create_spec(row: RowChange, spec: Mapping[str, Any]) -> bool:
     if spec.get("op") != "create" or row.table != spec["table"]:
         return False
@@ -162,7 +170,7 @@ def _match_create_spec(row: RowChange, spec: Mapping[str, Any]) -> bool:
         )
     for column, allowed in spec.get("after", {}).items():
         value = row.after.values.get(column)
-        if value not in allowed and not (value is None and None in allowed):
+        if not _allowed_value(value, allowed):
             _fail(f"{row.table}#{row.row_id} 创建后 {column}={value!r} 不在允许范围 {allowed}")
     for column, value in row.after.values.items():
         _check_enum_value(row.table, column, value)
@@ -195,20 +203,30 @@ def _match_update_spec(row: RowChange, spec: Mapping[str, Any], event_name: str,
     illegal = before_keys - allowed_columns
     if illegal:
         _fail(f"{row.table}#{row.row_id} 更新了不可变或派生列: {sorted(illegal)}")
+    reassigned = {
+        column for column in before_keys & write_once_columns(row.table)
+        if row.before.values[column] is not None
+    }
+    if reassigned:
+        # 一次写列只允许从空值赋值；正文未变化列已被拒绝，出现在
+        # 正文中的已赋值一次写列必然是再次更改。
+        _fail(
+            f"{row.table}#{row.row_id} 的一次写列 {sorted(reassigned)} 已赋值，不能再次更改"
+        )
     for image in (row.before, row.after):
         for column, value in image.values.items():
             _check_enum_value(row.table, column, value)
     for column, allowed in spec.get("before", {}).items():
         if column in row.before.values:
             value = row.before.values[column]
-            if value not in allowed and not (value is None and None in allowed):
+            if not _allowed_value(value, allowed):
                 _fail(
                     f"{row.table}#{row.row_id} 前置 {column}={value!r} 不在要求范围 {allowed}"
                 )
     for column, allowed in spec.get("after", {}).items():
         if column in row.after.values:
             value = row.after.values[column]
-            if value not in allowed and not (value is None and None in allowed):
+            if not _allowed_value(value, allowed):
                 _fail(
                     f"{row.table}#{row.row_id} 更新后 {column}={value!r} 不在允许范围 {allowed}"
                 )
@@ -224,16 +242,19 @@ def _check_transitions(row: RowChange, spec: Mapping[str, Any], event_name: str,
             _fail(f"{row.table}.{column} 没有状态模型")
         before_value = row.before.values.get(column)
         after_value = row.after.values.get(column)
-        if before_value == after_value:
+        if json_equal(before_value, after_value):
             # 状态字段没有改变时无需状态转换；同一记录的其他真实变化
-            # 由事件行规格与业务校验约束。
+            # 由事件行规格与业务校验约束。精确比较使布尔与数字的差别
+            # 不被 == 折叠，仍须命中已登记的转换边。
             continue
         edges = [edge for edge in model["edges"] if edge["id"] in transition_ids]
         if not edges:
             _fail(f"{row.table}.{column} 的转换 {transition_ids} 未登记")
         allowed_by = f"{event_name}.{branch_name}"
         for edge in edges:
-            if allowed_by in edge["by"] and edge["from"] == before_value and edge["to"] == after_value:
+            if (allowed_by in edge["by"]
+                    and json_equal(edge["from"], before_value)
+                    and json_equal(edge["to"], after_value)):
                 break
         else:
             _fail(
@@ -401,6 +422,30 @@ register_guard("ownership", _ownership_guard)
 register_guard("report_impact", _report_impact_guard)
 
 
+def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
+    """按格式 1 的公共与基准成员规则核对依据取值。
+
+    成员白名单来自分支登记；此处只核对已出现成员的取值类型。
+    布尔不是整数编号；驱动依据必须是结构化对象，成员顺序无关。
+    """
+    if member == "attempt_id":
+        if not is_json_integer(value) or value <= 0:
+            _fail(f"事件 {event_id} 的 evidence.attempt_id 必须是正整数")
+    elif member == "input_key":
+        if (not isinstance(value, str) or len(value) != 32
+                or any(char not in "0123456789abcdef" for char in value)):
+            _fail(f"事件 {event_id} 的 evidence.input_key 必须是 32 位十六进制身份")
+    elif member == "observation":
+        if not isinstance(value, Mapping):
+            _fail(f"事件 {event_id} 的 evidence.observation 必须是结构化对象")
+    elif member in ("activity_id", "chunk_no", "chunk_count", "entry_count"):
+        if not is_json_integer(value) or value <= 0:
+            _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
+    elif member == "entries":
+        if not isinstance(value, list):
+            _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
+
+
 def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[str, Any]]:
     """保存与历史读取共用格式、分支及行权限，不执行业务守卫。"""
     try:
@@ -427,6 +472,14 @@ def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[st
     _check_enum_value("history_events", "clock_status", event.clock_status)
     if not isinstance(event.evidence, Mapping):
         _fail(f"事件 {event.event_id} 的 evidence 必须是对象")
+    undeclared = set(event.evidence) - set(branch["evidence"])
+    if undeclared:
+        _fail(
+            f"事件 {event.event_id} 的 evidence 成员 {sorted(undeclared)}"
+            f" 不在 {event_name}.{branch_name} 的登记成员内"
+        )
+    for member, value in event.evidence.items():
+        _check_evidence_member(event.event_id, member, value)
     if not event.rows:
         _fail(f"事件 {event.event_id} 的 rows 为空")
     seen: set[tuple[str, int]] = set()

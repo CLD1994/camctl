@@ -3323,6 +3323,12 @@ class SaveEmergencyCommand:
             raise TransactionError("实际次数超过本会话固定限额")
         if record.attempts_used > 0 and not self._complete_config():
             raise TransactionError("已有尝试的补记要求完整配置")
+        stop_observation = record.stop_observation
+        if record.outcome is EmergencyOutcome.STOPPED:
+            if record.attempts_used == 0 and stop_observation is None:
+                raise TransactionError("零尝试停止的补记必须携带可靠停止依据")
+        elif stop_observation is not None:
+            raise TransactionError("停止依据只伴随停止成功的补记")
 
         responsibility_key = (
             f"emergency/{self._session_key}/{self._activity_id}"
@@ -3412,7 +3418,8 @@ class SaveEmergencyCommand:
             1,
             tuple(rows),
             self._occurred_at,
-            evidence={"session_key": self._session_key},
+            evidence=({"observation": dict(stop_observation)}
+                      if stop_observation is not None else None),
         )
         return CommandPlan(
             events=(event,),
@@ -3430,21 +3437,29 @@ class SaveEmergencyCommand:
 
 
 def _emergency_guard(event, context) -> None:
-    """应急补记的组合守卫：责任键、尝试归属、次数与结果组合。"""
-    session_key = event.evidence.get("session_key")
-    if not isinstance(session_key, str) or len(session_key) != 32:
-        raise EventValidationError("应急补记必须携带本会话身份")
+    """应急补记的组合守卫：责任键、尝试归属、次数与结果组合。
+
+    会话身份由本事件创建的最终流程行承载；停止成功的补记必须具
+    有可靠停止证据——零尝试或依据来自尝试结果之外时经事件依据成
+    员保存，其余保存在实际尝试结果的观察中；两种依据都须指向目
+    标活动。停止依据不伴随其他结果分类。
+    """
     run_values = None
     run_id = None
     attempts: list[dict] = []
     for row in event.rows:
         if row.table == "operation_runs" and not row.before.exists:
+            if run_values is not None:
+                raise EventValidationError("应急补记只共同创建一个最终流程")
             run_values = row.after.values
             run_id = row.row_id
         elif row.table == "operation_attempts" and not row.before.exists:
             attempts.append(row.after.values)
     if run_values is None:
         raise EventValidationError("应急补记缺少最终流程行")
+    session_key = run_values.get("session_key")
+    if not isinstance(session_key, str) or len(session_key) != 32:
+        raise EventValidationError("应急流程行必须携带本会话身份")
     expected_key = (
         f"emergency/{session_key}/{run_values.get('activity_id')}"
     )
@@ -3463,6 +3478,19 @@ def _emergency_guard(event, context) -> None:
         raise EventValidationError("停止未确认的补记必须有实际尝试")
     if status == 4 and attempts:
         raise EventValidationError("未能尝试的补记不创建尝试行")
+    observation = event.evidence.get("observation")
+    if observation is not None and status != 3:
+        raise EventValidationError("停止依据只伴随停止成功的补记")
+    if observation is not None or (status == 3 and not attempts):
+        _verify_stop_observation(observation, run_values)
+    if status == 3 and attempts and observation is None:
+        if not any(
+            _result_confirms_stop(attempt, run_values.get("activity_id"))
+            for attempt in attempts
+        ):
+            raise EventValidationError(
+                "停止成功的补记必须在尝试结果中保存指向目标活动的停止观察"
+            )
     numbers = [a.get("attempt_no") for a in attempts]
     if numbers != list(range(1, len(attempts) + 1)):
         raise EventValidationError("应急尝试必须从 1 连续编号")
@@ -3482,6 +3510,45 @@ def _emergency_guard(event, context) -> None:
             raise EventValidationError("应急补记不保存运行中尝试")
         if attempt.get("copy_round") is not None:
             raise EventValidationError("应急尝试没有拷贝轮次")
+
+
+def _structured_observation(observation) -> bool:
+    """观察的结构边界：非空类型、正整数版本与结构化数据。
+
+    证据类型与 data 成员是否符合驱动契约由装配层按证据登记核对；
+    本结构边界只排除不能解释为观察的形状。
+    """
+    return (
+        isinstance(observation, Mapping)
+        and isinstance(observation.get("type"), str)
+        and bool(observation.get("type"))
+        and is_json_integer(observation.get("version"))
+        and observation["version"] > 0
+        and isinstance(observation.get("data"), Mapping)
+    )
+
+
+def _result_confirms_stop(attempt_values, activity_id) -> bool:
+    """尝试结果是否携带指向目标活动的可靠停止观察。"""
+    result = attempt_values.get("result_json")
+    if not isinstance(result, Mapping):
+        return False
+    observations = result.get("observations")
+    if not isinstance(observations, list):
+        return False
+    return any(
+        _structured_observation(item)
+        and item["data"].get("activity_id") == str(activity_id)
+        for item in observations
+    )
+
+
+def _verify_stop_observation(observation, run_values: Mapping[str, Any]) -> None:
+    """核对事件依据成员中的停止依据的结构与目标指向。"""
+    if not _structured_observation(observation):
+        raise EventValidationError("停止的补记必须携带结构化停止依据")
+    if observation["data"].get("activity_id") != str(run_values.get("activity_id")):
+        raise EventValidationError("停止依据必须指向本补记的目标活动")
 
 
 def _activity_guard(event, context) -> None:

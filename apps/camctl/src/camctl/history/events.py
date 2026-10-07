@@ -120,3 +120,9 @@ def changeable_columns(table: str) -> frozenset[str]:
     """允许出现在更新 values 中的列（可变列与一次写列）。"""
     spec = load_event_registry()["tables"][table]
     return frozenset(spec["mutable"] + spec["write_once"])
+
+
+def write_once_columns(table: str) -> frozenset[str]:
+    """一次写列：只允许从空值变为有可靠依据的值。"""
+    spec = load_event_registry()["tables"][table]
+    return frozenset(spec["write_once"])

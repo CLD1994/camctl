@@ -35,14 +35,14 @@ def policy(monkeypatch):
     # 只提供本函数消费的合法分支约束；真实登记与守卫的组合由集成测试验证。
     branches = {
         "PREPARE": {"reason": 2, "rows": [{"op": "update", "before": {"status": [1, 5]},
-            "after": {"status": [2], "last_error_json": [None]}}]},
+            "after": {"status": [2], "last_error_json": [None]}}], "evidence": []},
         "INTENT": {"reason": 3, "rows": [{"op": "update", "before": {"status": [2, 4, 5]},
-            "after": {"status": [3]}}]},
+            "after": {"status": [3]}}], "evidence": []},
         "PUBLISH": {"reason": 4, "rows": [{"op": "update", "before": {"status": [3]},
-            "after": {"status": [4], "last_error_json": [None]}}]},
-        "FAIL": {"reason": 5, "rows": [{"op": "update", "after": {"status": [5]}}]},
+            "after": {"status": [4], "last_error_json": [None]}}], "evidence": []},
+        "FAIL": {"reason": 5, "rows": [{"op": "update", "after": {"status": [5]}}], "evidence": []},
         "RECOVER": {"reason": 6, "rows": [{"op": "update", "before": {"status": [5]},
-            "after": {"status": [1, 2, 3]}}]},
+            "after": {"status": [1, 2, 3]}}], "evidence": []},
     }
     monkeypatch.setattr(events, "load_event_registry", create_autospec(events.load_event_registry,
         return_value={"events": {

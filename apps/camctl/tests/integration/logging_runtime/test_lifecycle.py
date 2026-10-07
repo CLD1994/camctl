@@ -118,8 +118,10 @@ class TestRealFileClose:
         ):
             delivered_ok = True
             try:
+                # 重要交付用 WARNING：按接纳规则始终保留，不经水位区
+                # 的 INFO 采样，注入结果只取决于追加失败本身。
                 admission = await channel.deliver_important(
-                    LogRecord(level=LogLevel.INFO, message="写入失败记录")
+                    LogRecord(level=LogLevel.WARNING, message="写入失败记录")
                 )
                 delivered_ok = (
                     admission.decision.kind is AdmissionKind.ACCEPTED
