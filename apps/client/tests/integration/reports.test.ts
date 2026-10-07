@@ -9,7 +9,7 @@ import type { ImportFile } from "../../src/server/models";
 import { DataError } from "../../src/server/database";
 import { reportInput, mappedReport } from "./fixtures";
 import { validateReport } from "../../src/domain/reports";
-import type { Delivery } from "../../src/shared/types";
+import type { Delivery, StatusReport } from "../../src/shared/types";
 const clean: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const c of clean.splice(0)) await c();
@@ -456,4 +456,102 @@ it("历史修复：同批错误文件不撤销成功且合法后续条目可推�
   expect(app.snapshot().plans![0].actions![0].result).toEqual(
     next.plans![0].actions![0].result,
   );
+});
+
+function deviceExecutionSample(n: 1 | 2) {
+  const dir = "../../protocol/examples/workflows/device-execution";
+  const fileName = readdirSync(dir).find((f) =>
+    f.startsWith(`status-report-${n}-`),
+  )!;
+  return { fileName, bytes: readFileSync(join(dir, fileName)) };
+}
+function sampleInput(sample: { fileName: string; bytes: Buffer }) {
+  const file: ImportFile = {
+    id: crypto.randomUUID(),
+    batchId: "test",
+    fileName: sample.fileName,
+    kind: "report",
+    expectedSize: sample.bytes.length,
+    bytesReceived: sample.bytes.length,
+    status: "received",
+    createdAt: "test",
+  };
+  return { file, bytes: sample.bytes };
+}
+it("设备执行提示更新后重放旧报告，重启后提示与终态保持", () => {
+  const dir = mkdtempSync(join(tmpdir(), "camctl-hint-"));
+  const app = new Application(dir);
+  app.store.initialize();
+  let settled: StatusReport | undefined;
+  try {
+    // 样例 1：失败的录像动作携带仍在执行的提示。
+    const first = sampleInput(deviceExecutionSample(1));
+    app.applyReports([first]);
+    expect(
+      app.store.get<ImportFile>("imports", first.file.id)?.status,
+    ).toBe("accepted");
+    const hinted = app.snapshot().plans![0].actions![0];
+    expect(hinted.status).toBe("failed");
+    expect(hinted.device_execution).toEqual({ status: "still_running" });
+
+    // 样例 2：同动作省略提示——较新报告清除提示，不改终态与错误。
+    const second = sampleInput(deviceExecutionSample(2));
+    app.applyReports([second]);
+    expect(
+      app.store.get<ImportFile>("imports", second.file.id)?.status,
+    ).toBe("accepted");
+    const cleared = app.snapshot().plans![0].actions![0];
+    expect(cleared.status).toBe("failed");
+    expect(cleared.error).toEqual(hinted.error);
+    expect(cleared.device_execution).toBeUndefined();
+    settled = app.snapshot();
+
+    // 重放旧报告：同身份原字节复用原记录，已清除的提示不重现。
+    const replay = sampleInput(deviceExecutionSample(1));
+    app.applyReports([replay]);
+    expect(
+      app.store.get<ImportFile>("imports", replay.file.id)?.status,
+    ).toBe("duplicate");
+    expect(app.snapshot()).toEqual(settled);
+
+    // 提示消失后的乱序报告：旧窗口新身份重新携带提示，按旧历史
+    // 校验后只保存原文，不覆盖较新投影。
+    const stale = JSON.parse(
+      deviceExecutionSample(1).bytes.toString(),
+    ) as StatusReport;
+    stale.report_id = "3";
+    const outOfOrder = reportInput(stale);
+    app.applyReports([outOfOrder]);
+    expect(
+      app.store.get<ImportFile>("imports", outOfOrder.file.id)?.status,
+    ).toBe("covered");
+    expect(app.snapshot()).toEqual(settled);
+    expect(Buffer.from(app.store.report("3")!.bytes)).toEqual(
+      outOfOrder.bytes,
+    );
+    expect(app.state()).toMatchObject({ coverage: 2, ackId: "2" });
+  } finally {
+    app.store.close();
+  }
+  // 重启：同一目录重新装载，清除后的提示与原动作终态保持。
+  const restarted = new Application(dir);
+  try {
+    expect(restarted.snapshot()).toEqual(settled);
+    const action = restarted.snapshot().plans![0].actions![0];
+    expect(action.status).toBe("failed");
+    expect(action.device_execution).toBeUndefined();
+    expect(restarted.coverage()).toBe(2);
+    expect(restarted.ackId()).toBe("2");
+    expect(restarted.store.reports().map((r) => r.report_id)).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
+    expect(
+      Buffer.from(restarted.store.report("1")!.bytes),
+    ).toEqual(deviceExecutionSample(1).bytes);
+  } finally {
+    restarted.store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

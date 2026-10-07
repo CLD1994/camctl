@@ -97,8 +97,16 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 - [x] 建立 `test_export_retry_preserves_request_identity`：首次导出并保存后再次下载保持 ID 和正文，新的草稿意图取得新 ID；单独验证 0、越界、最大合法值和大于 Number 安全范围的身份。随机源及 usedIds 用受约束替身，冲突重选耗尽返回导出错误，不返回默认 ID。
 - [x] 运行 `pnpm --dir apps/client exec vitest run tests/unit/request-id.test.ts tests/unit/capture.test.ts`，确认失败来自真实身份或导出规则。先获取现有基线并按根因区分，不把历史失败归因于新任务。
 - [x] 把请求身份分配、原请求保存及草稿状态更新放在现有同一客户端事务内；下载只在提交后发生。完整审计验证用的临时身份、请求引用、查询参数、数据库读写及排序，保证身份不经 Number。时间按公共格式输出；describe 的真实能力直接供 Ajv 和界面消费。
-- [ ] 运行客户端类型检查及分类测试：`pnpm --dir apps/client typecheck`、`pnpm --dir apps/client test:unit`、`pnpm --dir apps/client test:integration`。用真实客户端库验证保存失败不下载、重启后原请求和 ACK、真实能力样例判定及报告保存后再确认。
-- [ ] 核对客户端报告适配任务一至四、时间和能力的全部消费者；将旧存储与当前表示的兼容问题按客户端有效数据规则处理，不伪造默认字段；建议提交“feat: 接入客户端公共身份与能力协议”。
+- [x] 运行客户端类型检查及分类测试：`pnpm --dir apps/client typecheck`、`pnpm --dir apps/client test:unit`、`pnpm --dir apps/client test:integration`。用真实客户端库验证保存失败不下载、重启后原请求和 ACK、真实能力样例判定及报告保存后再确认。
+- [x] 核对客户端报告适配任务一至四、时间和能力的全部消费者；将旧存储与当前表示的兼容问题按客户端有效数据规则处理，不伪造默认字段；建议提交“feat: 接入客户端公共身份与能力协议”。
+
+#### I3 验证记录（2026-10-07）
+
+命令与数字（Windows 开发机；本环境 Git Bash 无 `pnpm`，直接使用 `apps/client/node_modules/.bin` 下工具，与 `pnpm --dir` 等价）：`tsc --noEmit` 0 错误；`vitest run tests/unit` 15 文件 488 项全过；集成按用户既有裁决排除 `browser-*.test.ts` 后 10 文件 155 项全过。全量集成（含 browser）另有 9 项 HEAD 既有失败，`git stash` 对照同现且两次单跑各多一项不同抖动，全部位于 browser-media/browser-review/browser-editing，与本任务无关（明细见[客户端适配计划验证记录](2026-09-30-report-client-adaptation.md#客户端适配完成的验证记录2026-10-07)）。
+
+四项行为以真实客户端库核对：保存失败不下载——随机源零/越界身份导出被拒且不落新请求（`store.all("requests")` 为空、`exportedRequestId` 未定义），未完成输入与非法导出同样不落请求，`downloadRequest` 只读已提交请求（`tests/integration/requests.test.ts`、`application.test.ts`）；重启后原请求与 ACK——重启后原请求按原身份与正文提供（`test_export_retry_preserves_request_identity`），报告链重启后 coverage、ackId 与报告清单保持（`reports.test.ts` 设备执行提示用例）；真实能力样例判定——demo-device.json 组合约束经 Ajv 真实判定（`protocol-examples.test.ts`），能力目录重载失败保留旧目录、空目录替换、非法预设保留原参数（`application.test.ts`）；报告保存后再确认——`reports.test.ts` 导入链在保存事务内推进累计确认，乱序与重复不推进。
+
+消费者核对：时间由 `domain/protocol-time.ts` 统一输出，导出正文创建时间为秒级格式（集成断言），`web/App.tsx` 展示同源；请求身份以 BigInt 运算、规范十进制字符串表示（`domain/request-id.ts`），`reports.ts` 及共享层无 Number 转换点，大于安全整数范围的身份原样保留有专项用例；能力经 `shared/capabilities.ts` 的 `loadCapabilities`/`validateParams` 供 `application.ts` 状态、Ajv 校验与界面消费；任务一至四的生成类型、校验管线与展示模型消费见[客户端适配计划](2026-09-30-report-client-adaptation.md)。旧存储兼容按客户端有效数据规则处理：Store 对版本不符、快照与覆盖不一致、目录含无法解释数据等情况抛 DataError 进入 fault，不伪造默认字段（`state-integrity.test.ts`、`database.test.ts` 覆盖）。“feat: 接入客户端公共身份与能力协议”的实施已由提交 4393a3c 落地，本轮以测试与文档收口。
 
 ### I4 无设备的真实导出、报告、领取与 ACK 闭环
 
