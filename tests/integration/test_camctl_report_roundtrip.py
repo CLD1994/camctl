@@ -14,6 +14,7 @@ from __future__ import annotations
 import glob
 import hashlib
 import json
+import shutil
 import sqlite3
 import subprocess
 import time
@@ -340,3 +341,127 @@ def test_resubmitted_request_keeps_single_identity(
             (request_id,)) == [(1,)]
     finally:
         demo.stop()
+
+
+def test_report_generation_failure_preserves_responsibility(
+        tmp_path: Path) -> None:
+    """普通生成失败：失败责任保留、同步动作不虚构终态、会话按
+    report_error 退出；下一会话首轮重试并发布同一报告。
+
+    会话边界由直接 CLI 驱动：重试语义要求新会话没有可冻结的新工
+    作，C 主程序的受管通道只有 submit/claim，无法表达空 run。
+    """
+    deployment, state_db = _deployment_with_client(tmp_path)
+    plan_path, _ = deployment.export_plan_with_client(_plan_body("生成失败重试"))
+
+    # staging 的报告子目录被普通文件占据：生成子进程无法写出报告文
+    # 件，构成与状态库无关的普通生成失败。
+    reports_staging = deployment.staging / "reports"
+    reports_staging.write_text("", encoding="utf-8")
+
+    submitted = deployment.camctl(
+        "submit", str(plan_path), "--config", str(deployment.config_path))
+    assert submitted.exit_code == 0, submitted.stderr
+    failing = deployment.camctl(
+        "run", "--config", str(deployment.config_path))
+    # 会话不为等待报告重试持续运行：按报告失败退出并携带机器原因。
+    assert failing.exit_code == 1
+    failure = json.loads(failing.stdout)
+    assert failure["kind"] == "error"
+    assert failure["body"]["reason"] == "report_error"
+
+    # 同步动作与计划保留未完成事实（不虚构为成功或业务失败）；报告
+    # 保留失败责任且从未取得确定字节；ready 不出现报告文件。
+    assert _query(state_db, "SELECT status FROM plans") == [(2,)]
+    assert _query(
+        state_db, "SELECT status FROM actions WHERE name = 'sync'") == [(2,)]
+    rows = _query(
+        state_db,
+        "SELECT id, status, size_bytes, sha256, last_error_json FROM reports")
+    assert len(rows) == 1
+    report_id, status, size, sha, error = rows[0]
+    assert status == 5
+    assert (size, sha) == (None, None)
+    assert "生成失败" in json.loads(error)["error"]
+    assert _query(
+        state_db, "SELECT local_report_id FROM state_syncs") == [(None,)]
+    assert not glob.glob("status-report-*", root_dir=str(deployment.ready))
+
+    # 故障消除后：新的 run 会话在首轮重试此前失败的报告并发布；同
+    # 步动作以该报告本地完成，计划随后到终态，覆盖这些变化的下一
+    # 份报告在同会话发布并按生命周期撤下旧文件。
+    reports_staging.unlink()
+    retrying = deployment.camctl(
+        "run", "--config", str(deployment.config_path))
+    assert retrying.exit_code == 0, retrying.stderr
+    assert _query(state_db, "SELECT status FROM plans") == [(3,)]
+    assert _query(
+        state_db, "SELECT status FROM actions WHERE name = 'sync'") == [(3,)]
+    assert _query(state_db, "SELECT status FROM reports") == [(4,), (4,)]
+    assert _query(
+        state_db, "SELECT local_report_id FROM state_syncs") == [(report_id,)]
+    names = glob.glob("status-report-*.json", root_dir=str(deployment.ready))
+    assert len(names) == 1
+    latest = json.loads((deployment.ready / names[0]).read_text("utf-8"))
+    saved = deployment.import_reports_with_client(deployment.ready)
+    assert saved["saved_report_ids"] == [latest["report_id"]]
+
+
+def test_report_save_failure_retry_keeps_determined_bytes(
+        tmp_path: Path) -> None:
+    """报告保存失败重试：字节已登记的失败报告由下一会话重建发布，
+    重建字节与首次确定字节保持一致。"""
+    deployment, state_db = _deployment_with_client(tmp_path)
+    plan_path, _ = deployment.export_plan_with_client(_plan_body("保存失败重试"))
+
+    # ready 位置被普通文件占据：报告字节已生成并登记，交接无法进行。
+    shutil.rmtree(deployment.ready)
+    deployment.ready.write_text("", encoding="utf-8")
+
+    submitted = deployment.camctl(
+        "submit", str(plan_path), "--config", str(deployment.config_path))
+    assert submitted.exit_code == 0, submitted.stderr
+    failing = deployment.camctl(
+        "run", "--config", str(deployment.config_path))
+    assert failing.exit_code == 1
+    failure = json.loads(failing.stdout)
+    assert failure["kind"] == "error"
+    assert failure["body"]["reason"] == "report_error"
+
+    # 同步动作与计划保留未完成事实；报告保留保存失败责任，首次生成
+    # 已确定的字节事实不被失败抹除。
+    assert _query(state_db, "SELECT status FROM plans") == [(2,)]
+    assert _query(
+        state_db, "SELECT status FROM actions WHERE name = 'sync'") == [(2,)]
+    rows = _query(
+        state_db,
+        "SELECT id, status, size_bytes, sha256, last_error_json FROM reports")
+    assert len(rows) == 1
+    report_id, status, determined, sha, error = rows[0]
+    assert status == 5
+    assert determined is not None and sha is not None
+    assert "发布失败" in json.loads(error)["error"]
+    assert _query(
+        state_db, "SELECT local_report_id FROM state_syncs") == [(None,)]
+
+    # 恢复 ready 后：下一会话首轮重建同一报告并发布；重建字节与首
+    # 次确定字节不一致会在字节登记事务被拒绝，发布不可能完成。
+    deployment.ready.unlink()
+    deployment.ready.mkdir()
+    retrying = deployment.camctl(
+        "run", "--config", str(deployment.config_path))
+    assert retrying.exit_code == 0, retrying.stderr
+    assert _query(state_db, "SELECT status FROM plans") == [(3,)]
+    assert _query(
+        state_db, "SELECT status FROM actions WHERE name = 'sync'") == [(3,)]
+    assert _query(
+        state_db, "SELECT status, size_bytes, sha256 FROM reports WHERE id = ?",
+        (report_id,)) == [(4, determined, sha)]
+    assert _query(state_db, "SELECT status FROM reports") == [(4,), (4,)]
+    assert _query(
+        state_db, "SELECT local_report_id FROM state_syncs") == [(report_id,)]
+    names = glob.glob("status-report-*.json", root_dir=str(deployment.ready))
+    assert len(names) == 1
+    latest = json.loads((deployment.ready / names[0]).read_text("utf-8"))
+    saved = deployment.import_reports_with_client(deployment.ready)
+    assert saved["saved_report_ids"] == [latest["report_id"]]
