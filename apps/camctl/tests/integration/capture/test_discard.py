@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from contextlib import closing
 from decimal import Decimal
 from pathlib import Path
@@ -248,12 +250,22 @@ async def test_discard_delete_failure_saves_registered_error(
     """删除失败：文件保存登记错误详情，收场保存失败终态。"""
     owned, roots = environment
     _cancel_action(owned)
-    # 打开句柄使 Windows 拒绝删除；清理观察正常、删除明确失败。
-    handle = open(roots.staging / "recording-inputs" / "701.mp4", "rb")
-    try:
-        step = await execute_discard(_discard_context(owned, roots))
-    finally:
-        handle.close()
+    # 以操作系统拒绝删除的机制注入明确失败：Windows 打开句柄即拒绝
+    # 删除，POSIX 句柄不阻止 unlink，改为收回目录写权限。
+    if os.name == "posix":
+        inputs_dir = roots.staging / "recording-inputs"
+        directory_mode = inputs_dir.stat().st_mode
+        inputs_dir.chmod(0o500)
+        try:
+            step = await execute_discard(_discard_context(owned, roots))
+        finally:
+            inputs_dir.chmod(stat.S_IMODE(directory_mode))
+    else:
+        handle = open(roots.staging / "recording-inputs" / "701.mp4", "rb")
+        try:
+            step = await execute_discard(_discard_context(owned, roots))
+        finally:
+            handle.close()
     assert step.phase is DiscardExecutionPhase.CLEANUP_FAILED
     assert (step.cleaned, step.failed) == (1, 1)
     assert (roots.staging / "derived" / "702.mp4").exists() is False

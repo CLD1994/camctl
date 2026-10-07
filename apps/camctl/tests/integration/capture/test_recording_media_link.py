@@ -76,7 +76,7 @@ class _RepairTools:
             task_id=FileTaskId("probe"), ran=True,
             value=MediaProbe(duration_s=Decimal(self.duration_s), error=None))
 
-    async def repair(self, input, output) -> FileTaskResult:
+    async def repair(self, input, output, *, trim_s) -> FileTaskResult:
         self.calls.append("repair")
         return FileTaskResult(
             task_id=FileTaskId("repair"), ran=True,

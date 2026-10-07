@@ -8,8 +8,9 @@
 拍摄、占用拍摄或让路中的在途读取时本轮不推进读取；空闲设备上
 已建档拷贝经读取机会事务取得归属后，在读取尝试预算内打开设备
 会话完成可靠分段拷贝与完整性收尾，预算耗尽把交付结束为终局失
-败并交还机会。主机源拷贝不占用相机机会，其本地推进入口由本地
-读取链路另行接入。
+败并交还机会。主机源拷贝不占用相机机会，也不采用设备配置：按
+中间文件登记事实打开本地顺序读取，单次尝试预算内完成同样的分
+段与完整性收尾，失败即终局失败交付。
 """
 
 from __future__ import annotations
@@ -28,6 +29,9 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import (
     ConsistencyError, new_operation_key)
+from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
+from camctl.devices.read_session import ReadChunk, ReadEnd
+from camctl.host_files.io import LocalSourceReader
 from camctl.host_files.models import BoundDirectories
 from camctl.operations.attempts import (
     AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget,
@@ -73,6 +77,11 @@ _VERIFICATION = enum_for("file_copies.verification_state")
 #: 已完成副本校验的固定事实组合（与拷贝收尾口径一致）。
 _VERIFICATION_DONE = (3, 5)
 
+#: 交付不再有读取意义的终态（失败、取消与撤回；与读取事实口径一致）。
+_INACTIVE_DELIVERIES = tuple(
+    int(_DELIVERY_STATUS[member])
+    for member in ("FAILED", "CANCELED", "WITHDRAWN"))
+
 #: 交付扩展名的安全字符集；设备原始名称不满足时按未知类型处理。
 _SAFE_EXTENSION = re.compile(r"[A-Za-z0-9]+")
 _UNKNOWN_EXTENSION = "bin"
@@ -80,6 +89,13 @@ _UNKNOWN_EXTENSION = "bin"
 #: 第一版设备源读取的固定默认值（与媒体链读取一致）。
 _READ_MAX_ATTEMPTS = 3
 _READ_TIMEOUT_S = Decimal("60")
+
+#: 主机源读取的证据契约：读取操作专属命名，与设备读取同名同版。
+_LOCAL_READ_EVIDENCE = EvidenceRegistry(contracts=(
+    EvidenceContract(
+        type="read_returned", version=1, operation="read",
+        fields=frozenset()),
+))
 
 
 @dataclass(frozen=True)
@@ -116,6 +132,7 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
     for action_id in _running_actions(runtime.owned.connection):
         await _advance_action(runtime, action_id, now)
     await _advance_reads(runtime, now)
+    await _advance_local_reads(runtime, now)
 
 
 # ---- 动作生命周期 ----
@@ -317,7 +334,7 @@ def _delivery_candidate(
     if intermediate_file_id is None:
         raise ConsistencyError(f"产物缺少读取来源: {output_id}")
     return _host_source_candidate(
-        action, item_id, output_id, intermediate_file_id, now,
+        runtime, action, item_id, output_id, intermediate_file_id, now,
         plan_name, source_action_name)
 
 
@@ -624,9 +641,9 @@ async def _copy_delivery(
         return await _complete_copy(copies, facts["id"], digest)
     try:
         session = await sessions.open_session(
-            facts["source_device_file_id"], prepared.decision.offset)
+            _source_file_id(facts), prepared.decision.offset)
     except Exception as error:
-        # 打开会话也是一次设备读取调用：按读取失败保存本次尝试。
+        # 打开会话也是一次源读取调用：按读取失败保存本次尝试。
         return InputStep(InputPhase.SEGMENT_FAILED, copy_id=facts["id"],
                          error=error)
     try:
@@ -729,6 +746,186 @@ def _attempts_exhausted(runtime: ObtainRuntime, copy_id: int) -> bool:
     if row is None:
         raise ConsistencyError(f"读取流程缺失: read/{copy_id}")
     return int(row[0]) >= int(row[1])
+
+
+# ---- 主机源读取推进（不占相机机会） ----
+
+
+def _source_file_id(facts: Mapping) -> int:
+    """拷贝的读取源身份：设备源与主机源互斥，取实际存在的一方。"""
+    if facts["source_device_file_id"] is not None:
+        return int(facts["source_device_file_id"])
+    if facts["source_intermediate_file_id"] is not None:
+        return int(facts["source_intermediate_file_id"])
+    raise ConsistencyError(f"拷贝缺少读取来源: {facts['id']}")
+
+
+class LocalReadSessions:
+    """主机源读取会话：按中间文件登记路径打开本地顺序读取。
+
+    不经驱动、不占用相机读取机会；中间文件物理位于 staging 工作
+    根下的登记相对路径（derived/ 等），读取身份是登记事实。
+    """
+
+    def __init__(self, owned: Any, directories: DeliveryDirectories) -> None:
+        self._owned = owned
+        self._directories = directories
+
+    async def open_session(self, source_intermediate_file_id: int,
+                           offset: int) -> "_LocalReadSession":
+        with closing(self._owned.connection.execute(
+            "SELECT relative_path FROM intermediate_files WHERE id = ?",
+            (source_intermediate_file_id,),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            raise ConsistencyError(
+                f"中间文件缺失: {source_intermediate_file_id}")
+        path = self._directories.staging / str(row[0])
+        return _LocalReadSession(LocalSourceReader(path, offset))
+
+
+class _LocalReadSession:
+    """本地顺序读取的控制包装：关闭即停止，结束事实随后可得。"""
+
+    def __init__(self, reader: LocalSourceReader) -> None:
+        self._reader = reader
+
+    def position(self) -> int:
+        return self._reader.position()
+
+    def read_chunk(self, limit: int) -> ReadChunk:
+        return self._reader.read_chunk(limit)
+
+    def poll_stopped(self) -> ReadEnd | None:
+        return self._reader.poll_stopped()
+
+    def request_stop(self) -> None:
+        self._reader.close()
+
+    async def wait_stopped(self) -> ReadEnd:
+        self._reader.close()
+        end = self._reader.poll_stopped()
+        if end is None:
+            raise ConsistencyError("本地读取关闭缺少结束事实")
+        return end
+
+
+async def _advance_local_reads(runtime: ObtainRuntime, now: int) -> None:
+    """推进全部主机源交付拷贝：不依赖设备装配，逐份独立推进。"""
+    connection = runtime.owned.connection
+    with closing(connection.execute(
+        "SELECT c.id FROM file_copies c"
+        " JOIN deliveries d ON d.id = c.delivery_id"
+        " JOIN actions a ON a.id = d.action_id"
+        " WHERE c.source_device_file_id IS NULL"
+        " AND c.verification_state NOT IN (?, ?)"
+        " AND d.status NOT IN (?, ?, ?)"
+        " AND a.status = 2 AND a.cancel_requested = 0"
+        " ORDER BY c.id",
+        (*_VERIFICATION_DONE, *_INACTIVE_DELIVERIES),
+    )) as cursor:
+        copy_ids = tuple(int(row[0]) for row in cursor.fetchall())
+    sessions = LocalReadSessions(runtime.owned, runtime.directories)
+    for copy_id in copy_ids:
+        await _advance_local_read(runtime, sessions, copy_id, now)
+
+
+async def _advance_local_read(
+        runtime: ObtainRuntime, sessions: LocalReadSessions,
+        copy_id: int, now: int) -> None:
+    """在单次尝试预算内推进一份主机源交付拷贝到准备完成。"""
+    connection = runtime.owned.connection
+    facts = _read_facts(connection, copy_id)
+    if facts is None:
+        return
+    if facts["verification_state"] in _VERIFICATION_DONE:
+        # 已完成校验的副本只余发布；读取责任已完成。
+        return
+    if _read_wait_remaining(runtime, copy_id, None) is not None:
+        return
+    ticket = _begin_local_attempt(runtime, facts, now)
+    if ticket is None:
+        return
+    step = await _copy_delivery(runtime, sessions, facts, None)
+    _finish_local_attempt(runtime, facts, ticket, step)
+
+
+def _begin_local_attempt(runtime: ObtainRuntime, facts: Mapping, now: int):
+    """提交主机源读取意图；本地预算单次，耗尽即终局失败交付。
+
+    预算与期限随授予拷贝时保存的本地配置（一次、无时限、无定时
+    重试），不套用设备源默认值。
+    """
+    intent = AttemptIntent(
+        operation="read",
+        action_id=facts["action_id"],
+        kind=OperationKind.READ_FILE,
+        target=AttemptTarget(copy_id=facts["id"]),
+        query_purpose=None,
+        config=AttemptConfig(max_attempts=1, timeout_s=None,
+                             retry_interval_s=None),
+        occurred_at=now,
+        copy_round=facts["round"])
+    outcome = runtime.operations.begin_attempt(
+        intent, new_operation_key(), runtime.owned)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"读取意图事务未完成（{outcome.kind.value}）: {outcome.error}")
+    if outcome.value.disposition is BeginDisposition.GRANTED:
+        return outcome.value.ticket
+    if outcome.value.reason == "budget_exhausted":
+        _fail_local_delivery(runtime, facts, now)
+    return None
+
+
+def _fail_local_delivery(runtime: ObtainRuntime, facts: Mapping, now: int) -> None:
+    """本地读取预算耗尽：交付终局失败；主机源没有相机机会可交还。"""
+    failure = runtime.outputs.fail_read_delivery(
+        FailReadDelivery(delivery_id=facts["delivery_id"], occurred_at=now),
+        new_operation_key(), runtime.owned)
+    if failure.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"读取耗尽失败事务未完成（{failure.kind.value}）:"
+            f" {failure.error}")
+
+
+def _finish_local_attempt(
+        runtime: ObtainRuntime, facts: Mapping, ticket, step: InputStep) -> None:
+    """保存主机源读取尝试结果；失败即预算耗尽并终局失败交付。"""
+    succeeded = step.phase is InputPhase.INPUT_READY
+    exhausted = _attempts_exhausted(runtime, facts["id"])
+    outcome = CallOutcome(
+        status=(AttemptStatus.SUCCEEDED if succeeded
+                else AttemptStatus.FAILED),
+        error=None if succeeded else ErrorValue(
+            code="local_read_failed", stage="source_read",
+            details={
+                "phase": step.phase.value,
+                "reason": (
+                    str(step.error) if step.error is not None else None)}),
+        effect=EffectState.UNKNOWN,
+        settlement=Settlement(
+            basis=SettlementBasis.OBSERVED,
+            evidence=EvidenceValue(
+                type="read_returned", version=1, data={})),
+        observations=())
+    finish = runtime.operations.finish_attempt(
+        AttemptFinish(
+            ticket=ticket,
+            outcome=validate_outcome(ticket, outcome, _LOCAL_READ_EVIDENCE),
+            occurred_at=runtime.occurred_at(),
+            retry_wait=False,
+            run_finish=_run_finish(succeeded, exhausted)),
+        new_operation_key(), runtime.owned)
+    if finish.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"读取尝试收尾事务未完成（{finish.kind.value}）:"
+            f" {finish.error}")
+    if succeeded:
+        runtime.retry_gate.cleared(f"read/{facts['id']}")
+        return
+    _fail_local_delivery(runtime, facts, runtime.occurred_at())
 
 
 def _ensure_checksum_support(

@@ -79,7 +79,7 @@ class ProbeTools:
         return FileTaskResult(
             task_id=FileTaskId("probe"), ran=True, value=self.observation)
 
-    async def repair(self, input, output) -> FileTaskResult:
+    async def repair(self, input, output, *, trim_s) -> FileTaskResult:
         self.calls.append("repair")
         return FileTaskResult(task_id=FileTaskId("repair"), ran=False)
 

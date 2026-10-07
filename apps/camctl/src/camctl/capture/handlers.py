@@ -96,6 +96,7 @@ from camctl.capture.timelapse import (
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.operations.attempts import (
@@ -663,6 +664,41 @@ def _settle_open_start(runtime: CaptureRuntime, action_id: int, status: RunOutco
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
+def _settle_input_read_runs(runtime: CaptureRuntime, action_id: int,
+                            status: RunOutcome,
+                            failure: RecordingFailure | None) -> None:
+    """动作终态后收场录像输入副本的读取流程，幂等可重入。
+
+    授予输入副本时同步建立其读取流程行（读取机会排序依赖），但
+    输入链的分段推进不驱动该流程行；动作终态后输入读取不再有后
+    续工作，仍开放的流程按动作的最终结果结束，否则会话的流程收
+    尾计数无法归零。失败结果携带动作最终错误，阶段取公共登记。
+    """
+    with closing(runtime.owned.connection.execute(
+        "SELECT fc.id FROM file_copies fc"
+        " JOIN recording_processing rp ON rp.id = fc.processing_id"
+        " WHERE rp.action_id = ? AND fc.delivery_id IS NULL",
+        (action_id,),
+    )) as cursor:
+        keys = tuple(f"read/{int(row[0])}" for row in cursor.fetchall())
+    if not keys:
+        return
+    error = None
+    if failure is not None:
+        error = ErrorValue(
+            code=failure.code,
+            stage=registered_error(failure.code)["stage"],
+            details=dict(failure.details))
+    receipt = runtime.operations.finish_stale_runs(
+        StaleRunFinish(
+            responsibility_keys=keys,
+            status=status,
+            error=error,
+            occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
 def _settle_start_without_sent_at(
         runtime: CaptureRuntime, action, attempt) -> bool:
     """可能派发但没有可靠发送时间的启动按无法核实收场。
@@ -814,6 +850,8 @@ def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int) -> None:
             action_id=action_id, occurred_at=runtime.wall_us()),
         new_operation_key(), runtime.owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    _settle_input_read_runs(
+        runtime, action_id, RunOutcome.CANCELED, None)
 
 
 def _catalog_drafts(
@@ -882,6 +920,10 @@ def _finish_capture(
             failure=failure,
         ), new_operation_key(), runtime.owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    _settle_input_read_runs(
+        runtime, action_id,
+        RunOutcome.SUCCEEDED if failure is None else RunOutcome.FAILED,
+        failure)
     return HandlerOutcome(
         "terminal", "failed" if failure is not None else "succeeded")
 
@@ -1125,7 +1167,11 @@ def _save_excess_decisions(
             basis=RepairBasis(
                 reason=RepairReason.THRESHOLD_REACHED,
                 target_duration_ms=target_duration_ms,
-                threshold_s=runtime.repair_margin_s,
+                # 门槛秒数保存实际比较门槛（目标时长加修复余量），
+                # 与恢复停止判定使用的门槛一致（operation-fields.md
+                # threshold_s 字段语义）。
+                threshold_s=(Decimal(target_duration_ms) / Decimal(1_000)
+                             + runtime.repair_margin_s),
                 actual_duration_s=(
                     None if elapsed is None
                     else Decimal(elapsed) / Decimal(1_000_000_000)),

@@ -78,7 +78,9 @@ _PROBE_BODY = (
 )
 _REPAIR_BODY = (
     "import shutil, sys\n"
-    "shutil.copyfile(sys.argv[-2], sys.argv[-1])\n"
+    "args = sys.argv[1:]\n"
+    "source = args[args.index('-i') + 1]\n"
+    "shutil.copyfile(source, args[-1])\n"
 )
 
 
@@ -306,7 +308,8 @@ class TestExcessRepairThroughSessionAssembly:
         assert ("stop", "stop_recording") in driver.calls
         assert "read" in operations
         assert "digest" in operations
-        # 修复门槛秒数来自设备配置（2 秒），不是运行时默认值。
+        # 门槛秒数保存实际比较门槛：目标时长（1 秒）加设备配置的
+        # 修复余量（2 秒）。
         processing = _scalar(
             db,
             "SELECT check_decision,"
@@ -315,7 +318,7 @@ class TestExcessRepairThroughSessionAssembly:
             " json_extract(repair_basis_json, '$.reason'),"
             " json_extract(repair_basis_json, '$.threshold_s')"
             " FROM recording_processing WHERE action_id = 1")
-        assert processing == (2, 3, 5, 2, 2)
+        assert processing == (2, 3, 5, 2, 3)
         # 源端摘要能力按登记声明固定为已支持并经驱动端口比较。
         assert _scalar(
             db, "SELECT checksum_support FROM device_files"
@@ -370,7 +373,7 @@ class TestUndeclaredReadKeepsWaiting:
                 db,
                 "SELECT repair_state,"
                 " json_extract(repair_basis_json, '$.threshold_s')"
-                " FROM recording_processing WHERE action_id = 1", (3, 2))
+                " FROM recording_processing WHERE action_id = 1", (3, 3))
         finally:
             await _cancel(task)
             close_runtime(deps)

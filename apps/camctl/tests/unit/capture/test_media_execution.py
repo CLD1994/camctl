@@ -298,14 +298,15 @@ class _Tools:
         self.probe_result = probe_result
         self.repair_result = repair_result
         self.probe_calls: list[FileRef] = []
-        self.repair_calls: list[tuple[FileRef, FileRef]] = []
+        self.repair_calls: list[tuple[FileRef, FileRef, Decimal]] = []
 
     async def probe(self, input: FileRef) -> FileTaskResult:
         self.probe_calls.append(input)
         return self.probe_result
 
-    async def repair(self, input: FileRef, output: FileRef) -> FileTaskResult:
-        self.repair_calls.append((input, output))
+    async def repair(self, input: FileRef, output: FileRef,
+                     *, trim_s: Decimal) -> FileTaskResult:
+        self.repair_calls.append((input, output, trim_s))
         return self.repair_result
 
 
@@ -498,7 +499,7 @@ async def test_repair_registers_output_runs_tool_and_succeeds() -> None:
     assert step.phase is RepairExecutionPhase.SUCCEEDED
     assert saves.names() == ["start_repair_output", "complete_repair_output"]
     assert saves.calls[0][1] == RepairStart(1, "mp4", _NOW)
-    assert tools.repair_calls == [(_input_ref(), _OUTPUT_REF)]
+    assert tools.repair_calls == [(_input_ref(), _OUTPUT_REF, Decimal(60))]
     assert saves.calls[1][1] == RepairSuccess(1, 21, 2048, "c" * 64, _NOW)
     assert step.output_file == _REGISTERED_OUTPUT
 
@@ -513,7 +514,18 @@ async def test_repair_resumes_with_registered_output() -> None:
     step = await execute_repair(_repair_context(status, saves, tools))
     assert step.phase is RepairExecutionPhase.SUCCEEDED
     assert saves.names() == ["complete_repair_output"]
-    assert tools.repair_calls == [(_input_ref(), _OUTPUT_REF)]
+    assert tools.repair_calls == [(_input_ref(), _OUTPUT_REF, Decimal(60))]
+
+
+@pytest.mark.asyncio
+async def test_repair_trim_follows_saved_target_duration() -> None:
+    """裁剪时长按已保存修复决定的目标时长推导，保持十进制精度。"""
+    saves = _Saves({"start_repair_output": _saved(_REGISTERED_OUTPUT)})
+    tools = _Tools(None, _complete_result())
+    status = _status(repair_state=3, target_duration_ms=3_500)
+    step = await execute_repair(_repair_context(status, saves, tools))
+    assert step.phase is RepairExecutionPhase.SUCCEEDED
+    assert tools.repair_calls == [(_input_ref(), _OUTPUT_REF, Decimal("3.5"))]
 
 
 @pytest.mark.asyncio

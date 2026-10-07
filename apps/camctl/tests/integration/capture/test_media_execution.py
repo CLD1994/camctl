@@ -332,10 +332,15 @@ class _SubprocessTools:
             task_id=FileTaskId(f"probe-{self._counter}"),
             owner=_Owner())
 
-    async def repair(self, input: FileRef, output: FileRef):
+    async def repair(self, input: FileRef, output: FileRef, *,
+                     trim_s: Decimal):
         self._counter += 1
+        request = RepairRequest(
+            ffmpeg=self.repair_request.ffmpeg,
+            output_args=self.repair_request.output_args + (
+                "-c", "copy", "-t", str(trim_s)))
         return await real_media.repair_media(
-            input, output, self.roots, self.repair_request,
+            input, output, self.roots, request,
             executor=FileTaskExecutor(Supervisor()),
             task_id=FileTaskId(f"repair-{self._counter}"),
             owner=_Owner())

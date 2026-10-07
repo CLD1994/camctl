@@ -214,6 +214,18 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 回归证据（2026-10-07，Windows 开发机，uv CPython 3.11）：四文件连跑 13 项通过；根 `tests/integration` 50 项+342 子测试通过；apps/camctl 集成 3400 项通过+6 跳过（含修复后的 composition）；单元 3303 项通过；五项仓库检查全部通过。
 
+#### I5 第六条链验证记录（2026-10-07，WSL 媒体修复链与受管工具进程组）
+
+按上方"跨组件媒体链环境前提"决策在 WSL x86_64 Linux 完成环境建设与全链实施。环境事实：uv 注册表的 linux x86_64-gnu CPython 3.11.13—3.11.15 全部静态链接 SQLite 3.50.4，不满足权威运行条件（`sqlite-runtime.json` 要求 3.51.3 以上或精确回移版本），`_sqlite3` 编入解释器无法以环境覆盖；采用 python-build-standalone 20261003 构建 的 cpython-3.11.17（静态链接 SQLite 3.53.1，合规）安装至 `~/pythons/python`，`uv sync --python` 指定该解释器建立 `apps/camctl` 的 `.venv311`（含 test 依赖组）。代码经 `git worktree add --detach ~/camctl-wsl` 的独立工作树承载，改动文件手工同步；该环境与流程为 B7 发行物验证和 I4 跨组件故障注入直接复用。
+
+媒体链用例三件套（`tests/integration/test_camctl_media_roundtrip.py`，`skipif` 本机无 ffprobe/ffmpeg——工具是链的能力前提而非环境巧合，与 host_files 先例一致）：受限时钟会话保守收场后，正常会话对账停止并列举源文件，检查决定因计时证据不足而需要检查，真实 ffprobe 探测时长超过门槛（目标 3 秒加余量 0.5 秒）后修复执行，真实 ffmpeg 以流复制（`-c copy -t`）裁剪到目标时长，修复成品经主机源本地读取交付到 ready，全程断言检查/修复决定依据、媒体时长、产物与交付字节一致；跨会话对账多录链以启动墙钟到停止确认的控制耗时判定，检查不执行、直接修复并同样交付，两链取回动作均成功且计划终态；受管工具进程组用例断言工具进程的进程组身份等于调用方进程组（`/proc/self/stat` 第 5 字段），真实 Linux 进程层面承载"普通媒体工具保持所属 camctl 进程组"的软件事实。
+
+全链贯通暴露并修复六项既有生产缺陷（此前组件测试以 copyfile 替身或取消会话掩盖，均为首次全链覆盖暴露）：修复端口不接收裁剪时长且装配未组装裁剪参数，ffmpeg 按重编码全片执行、违反无重编码裁剪硬规格——协议改为携带语义化 `trim_s`，装配以目标时长换算并组装 `-c copy -t`；修复输出登记扩展名无默认来源（`repair_extension` 全仓无设置者），ffmpeg 无法按无扩展名路径确定输出格式——登记扩展名默认与输入副本一致（流复制沿用源容器），装配可显式覆盖；录像输入副本的读取流程行在授予拷贝时建立但输入链分段推进从不驱动它，动作终态后流程行永处待执行、会话收尾计数无法归零——动作终态收口（成功/失败经 `_finish_capture`、取消经 `_finish_canceled_capture`）以伴随收场机制按动作最终结果统一收场，失败携带动作最终错误；主机源产物取回的候选构造调用漏传运行时协作者（该路径首次被执行）；主机源交付副本建档后没有任何推进入口（模块文档既定的"本地读取链路另行接入"）——接入发现、本地会话（按中间文件登记路径在 staging 工作根打开 `LocalSourceReader`，与设备会话共用段传输接口）、单次预算尝试与收场，证据契约沿用读取操作专属的 `read_returned` 同名同版，失败即终局失败交付且不触碰相机读取机会事务（机会命令对主机源结构化拒绝）；异常多录修复决定保存的 `threshold_s` 只有余量，与字段规格"实际比较门槛时使用"及恢复停止判定实际使用的门槛（目标时长加余量）不符——保存实际比较门槛，检查链与对账链两入口语义一致。同步修正固化旧值的组件断言。
+
+R-09/R-10 的承载边界：本轮以真实 Linux 进程验证受管媒体工具保持调用方进程组、测试基建以 `killpg` 按组收场会话进程；C 接入模块的独立组建组、原组收场与延后回收的完整验证仍归 I1/I2（C 代码实施时）与 B7（发行物验证），不因软件层事实替代。
+
+回归证据（2026-10-07，WSL Ubuntu、cpython-3.11.17/SQLite 3.53.1、ffprobe/ffmpeg 6.1.1）：媒体链三用例通过；单元 3352 项+1 跳过（平台条件预期）；集成 capture 210 项、outputs+bootstrap 1874 项+1 跳过、host_files 86 项通过。同日 Windows 开发机（uv CPython 3.11）：单元 3353 项；集成 capture/bootstrap/history 382 项、outputs+bootstrap 1875 项、根 `tests/integration` 52 项+3 跳过（媒体三件按工具前提跳过）+342 子测试通过。已知偶发与本轮无关：`test_residual_winddown.py` 两个不同用例在 Windows 与 WSL 全量负载下各出现一次墙钟窗口漂移失败，单独重跑与同文件三连跑均稳定通过（与第五条链记录的 composition 偶发同类，负载敏感既有测试），留待窗口表达机制统一治理。
+
 ### I6 全量契约映射、软件验收与部署交接
 
 **预计文件：** `docs/camctl/verification.md`、`apps/camctl/README.md`、`tests/integration/README.md`、`docs/client/acceptance.md`、`docs/host-demo/verification.md`；建议新增 `tests/integration/test_camctl_acceptance_map.py`，并在 `docs/camctl/software-acceptance.md` 保存实施时取得的验收映射和真实证据，链接具体测试，不复制登记的完整值清单。

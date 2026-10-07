@@ -304,11 +304,17 @@ class ProcessingStatus:
 
 
 class MediaTools(Protocol):
-    """受管媒体工具端口；适配层持有执行器、任务身份与工具参数。"""
+    """受管媒体工具端口；适配层持有执行器、任务身份与工具参数。
+
+    repair 的裁剪时长来自已保存的修复决定（目标时长）；适配层负责
+    把该语义翻译为具体工具参数，调用方不构造工具命令行。
+    """
 
     async def probe(self, input: FileRef) -> FileTaskResult: ...
 
-    async def repair(self, input: FileRef, output: FileRef) -> FileTaskResult: ...
+    async def repair(
+        self, input: FileRef, output: FileRef, *, trim_s: Decimal,
+    ) -> FileTaskResult: ...
 
 
 class ProcessingSaves(Protocol):
@@ -518,7 +524,11 @@ async def execute_repair(context: RepairContext) -> RepairStep:
 
     output_ref = FileRef(output.file_id, FilePurpose.REPAIR_OUTPUT,
                          output.relative_path, context.input_file.root)
-    result = await context.tools.repair(context.input_file, output_ref)
+    # 裁剪时长来自已保存的目标时长（修复决定依据），不使用本次运行
+    # 的其他时值；适配层负责翻译为无重新编码的工具参数。
+    result = await context.tools.repair(
+        context.input_file, output_ref,
+        trim_s=Decimal(status.target_duration_ms) / 1000)
     if not result.ran or result.value is None:
         detail = result.error or "repair task did not run"
         return RepairStep(RepairExecutionPhase.TOOL_NOT_COMPLETED,

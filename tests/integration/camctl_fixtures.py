@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -38,7 +40,12 @@ def terminate_process_tree(process) -> None:
 
     run 会话派生报告 worker 等孙进程；只终止直接子进程会让孤儿继
     续持有状态库文件（Windows 上表现为后续连接报磁盘 I/O 错误）。
+    POSIX 上 CLI 以独立会话启动，按进程组终止整个会话。
     """
+    if os.name == "posix":
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        process.wait(timeout=30)
+        return
     subprocess.run(
         ["taskkill", "/PID", str(process.pid), "/T", "/F"],
         capture_output=True)
@@ -63,7 +70,8 @@ class CliResult:
 class Deployment:
     """一个初始化前的部署目录：配置、计划文件与替身剧本。"""
 
-    def __init__(self, root: Path, *, devices: bool = True) -> None:
+    def __init__(self, root: Path, *, devices: bool = True,
+                 recording_margin_s: str | None = None) -> None:
         self.root = root
         self.home = root / "deployment"
         self.staging = self.home / "staging"
@@ -94,6 +102,15 @@ class Deployment:
                             'kind = "camera"',
                             'driver = "test-stub"',
                             "",
+                            *(
+                                [
+                                    "[devices.cam-1.recording]",
+                                    f'repair_margin_s = "{recording_margin_s}"',
+                                    "",
+                                ]
+                                if recording_margin_s is not None
+                                else []
+                            ),
                             "[devices.cam-1.result_check]",
                             'retry_interval_s = "0"',
                             "",
@@ -109,6 +126,16 @@ class Deployment:
             encoding="utf-8",
         )
         self.driver_spec = root / "driver-spec.json"
+
+    def set_min_plausible_date(self, date_text: str) -> None:
+        """改写墙钟可信下界；未来日期使下次会话进入受限收场。"""
+        text = self.config_path.read_text(encoding="utf-8")
+        updated = re.sub(
+            r'min_plausible_date = "[^"]*"',
+            f'min_plausible_date = "{date_text}"',
+            text, count=1)
+        assert updated != text, "配置中未找到 min_plausible_date"
+        self.config_path.write_text(updated, encoding="utf-8")
 
     def _write_driver_spec(self, driver: dict) -> None:
         spec = dict(driver)
@@ -133,7 +160,11 @@ class Deployment:
         return CliResult(completed.returncode, completed.stdout, completed.stderr)
 
     def start_camctl(self, *args: str, driver: dict | None = None):
-        """启动不等待退出的 CLI 子进程（会话中断与并发场景）。"""
+        """启动不等待退出的 CLI 子进程（会话中断与并发场景）。
+
+        POSIX 上以独立会话启动，测试按进程组终止整个会话树；工具
+        与 worker 后代保持在会话组内，不脱离。
+        """
         environment = os.environ.copy()
         environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
         if driver is not None:
@@ -142,10 +173,11 @@ class Deployment:
             command = [sys.executable, str(_BRIDGE), *args]
         else:
             command = [sys.executable, "-c", _DIRECT_ENTRY, *args]
+        kwargs = {"start_new_session": True} if os.name == "posix" else {}
         return subprocess.Popen(
             command,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env=environment)
+            env=environment, **kwargs)
 
     def write_plan(self, body: dict) -> Path:
         target = self.root / f"plan-{body['request_id']}.json"
@@ -293,12 +325,16 @@ def photo_file(identity: str) -> dict:
     }
 
 
-def video_file(identity: str) -> dict:
-    """一段完整视频的结果列举条目（video kind）。"""
+def video_file(identity: str, *, size_bytes: int = 8192) -> dict:
+    """一段完整视频的结果列举条目（video kind）。
+
+    size_bytes 须与设备侧实际内容长度一致：取回拷贝按登记长度读取
+    并与源端摘要比较。
+    """
     return {
         "identity": identity,
         "locator": {"path": f"/DCIM/{identity}"},
-        "size_bytes": 8192,
+        "size_bytes": size_bytes,
         "complete": True,
         "kind": "video",
         "original_name": f"{identity}.mp4",
@@ -450,11 +486,17 @@ class _ScriptedStubDriver:
             error=None)
 
     def _device_content(self, identity: str) -> bytes:
-        """按设备侧文件身份取剧本内容；取回链的真实字节来源。"""
-        content = self._spec.get("device_files", {}).get(identity)
-        assert content is not None, f"剧本缺少设备文件内容: {identity!r}"
-        return (content.encode("utf-8") if isinstance(content, str)
-                else content)
+        """按设备侧文件身份取剧本内容；取回链的真实字节来源。
+
+        值为文本时按 UTF-8 编码；真实二进制媒体以 {"path": …} 提供
+        文件位置，读取实际字节（剧本经 JSON 传递，字节不能内联）。
+        """
+        entry = self._spec.get("device_files", {}).get(identity)
+        assert entry is not None, f"剧本缺少设备文件内容: {identity!r}"
+        if isinstance(entry, dict):
+            return Path(entry["path"]).read_bytes()
+        return (entry.encode("utf-8") if isinstance(entry, str)
+                else entry)
 
     async def open_read(self, source, offset: int, ticket):
         from decimal import Decimal

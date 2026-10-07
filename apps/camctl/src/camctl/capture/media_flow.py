@@ -364,7 +364,12 @@ async def run_recording_media(
     return await execute_repair(RepairContext(
         processing=status,
         input_file=input_step.input_file,
-        extension=flow.repair_extension,
+        # 修复成品与输入副本同容器：无重编码流复制沿用源容器的封
+        # 装格式，登记扩展名默认与输入副本一致，装配可用
+        # repair_extension 显式覆盖（camera-recovery.md 裁剪约束）。
+        extension=(flow.repair_extension
+                   if flow.repair_extension is not None
+                   else target_extension),
         tools=flow.tools,
         saves=flow.saves(),
         occurred_at=flow.occurred_at(),
