@@ -225,6 +225,11 @@ class TestCrossSessionReconciliation:
                 "SELECT check_decision, json_extract(check_basis_json, '$.reason')"
                 " FROM recording_processing WHERE id = 41")
             assert decision == (2, 1)
+            # 恢复对账入口的释放组合：停止成功后活动收场并释放占
+            # 用，同设备下一动作不再被该活动阻挡（O-04）。
+            assert _value(
+                owned, "SELECT activity_state, occupancy_state"
+                " FROM device_activities WHERE id = 1") == (3, 2)
         finally:
             owned.connection.close()
 

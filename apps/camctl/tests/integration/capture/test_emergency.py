@@ -22,7 +22,9 @@ from camctl.capture.recovery import (
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
+    ActivityReleaseSave,
     CaptureRepository,
+    ReleaseOutcome,
     register_capture_guards,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -292,5 +294,67 @@ async def test_unconfirmed_with_attempts_saves_unconfirmed(tmp_path: Path) -> No
             owned, "SELECT activity_state FROM device_activities WHERE id = 1"
         )
         assert activity[0] == 2  # 未确认停止不结束活动
+    finally:
+        owned.connection.close()
+
+
+async def test_recorded_emergency_stop_qualifies_for_release(
+        tmp_path: Path) -> None:
+    """应急补记入口的释放组合：停止可靠补记后按统一判定放行。
+
+    应急只证明停止事实：活动结束但占用保持；释放经统一判定核对
+    结束依据后放行，不因应急路径单独放行或扣留。
+    """
+    owned = _environment(tmp_path)
+    try:
+        record = EmergencyRecord(
+            outcome=EmergencyOutcome.STOPPED,
+            attempts_used=2,
+            max_attempts=3,
+        )
+        outcome = _save(owned, record, (_attempt(), _attempt(status=3)))
+        assert outcome.kind is DbOutcomeKind.COMPLETED
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (3, 1)
+
+        released = CaptureRepository().release_occupancy(
+            ActivityReleaseSave(action_id=1, occurred_at=_NOW),
+            new_operation_key(), owned,
+        )
+        assert released.kind is DbOutcomeKind.COMPLETED, released.error
+        assert released.value.outcome is ReleaseOutcome.RELEASED
+        assert _value(
+            owned, "SELECT occupancy_state FROM device_activities"
+            " WHERE id = 1") == (2,)
+    finally:
+        owned.connection.close()
+
+
+async def test_unrecorded_emergency_does_not_release(tmp_path: Path) -> None:
+    """停止未确认的应急结果不能凭内存事实推进释放。"""
+    owned = _environment(tmp_path)
+    try:
+        record = EmergencyRecord(
+            outcome=EmergencyOutcome.UNCONFIRMED, attempts_used=2, max_attempts=2
+        )
+        outcome = _save(
+            owned, record,
+            (_attempt(status=4, error={"code": "timeout", "stage": "transport"}),) * 2,
+        )
+        assert outcome.kind is DbOutcomeKind.COMPLETED
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (2, 1)
+
+        rejected = CaptureRepository().release_occupancy(
+            ActivityReleaseSave(action_id=1, occurred_at=_NOW),
+            new_operation_key(), owned,
+        )
+        assert rejected.kind is DbOutcomeKind.COMPLETED, rejected.error
+        assert rejected.value.outcome is ReleaseOutcome.REJECTED
+        assert _value(
+            owned, "SELECT occupancy_state FROM device_activities"
+            " WHERE id = 1") == (1,)
     finally:
         owned.connection.close()
