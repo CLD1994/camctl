@@ -41,6 +41,7 @@ from camctl.outputs.cleanup_flow import (
     CleanupTargetsDisposition,
     CleanupTargetsSaved,
     FailCleanupItem,
+    FinishCanceledCleanupAction,
     FinishCleanupAction,
     FinishCleanupItem,
     FixCleanupTargets,
@@ -5018,6 +5019,18 @@ class OutputsRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def finish_canceled_cleanup(
+        self, command: FinishCanceledCleanupAction, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CleanupActionFinished]:
+        receipt = commit_operation(
+            _FinishCanceledCleanupCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     @staticmethod
     def _cleanup_item_outcome(receipt) -> DbOutcome[CleanupItemSaved]:
         if receipt.kind == "completed":
@@ -7494,6 +7507,184 @@ class _FinishCleanupActionCommand:
         self._state["plans"] = {plan["id"]: plan}
         return self._result_from(
             action, plan["status"], CleanupActionDisposition.ALREADY)
+
+
+class _FinishCanceledCleanupCommand:
+    """取消的清理动作终态化：成员全部终态后保存动作取消终态。
+
+    取消已生效且成员全部终态（成功、失败或取消，含目标集合未固
+    定的零成员）时由取消结算调用；兄弟齐终态时同事务保存父计划
+    完成。已终态后重入按既有事实只读恢复。
+    """
+
+    def __init__(self, command: FinishCanceledCleanupAction,
+                 key: OperationKey) -> None:
+        if not isinstance(command, FinishCanceledCleanupAction):
+            raise TypeError(
+                "取消终态化申请必须使用 FinishCanceledCleanupAction")
+        self._command = command
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {
+            "actions": {}, "cleanup_items": {}, "plans": {},
+        }
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(connection, saved)
+        command = self._command
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise TransactionError(f"动作不存在: {command.action_id}")
+        if action["type"] != _DELETE_ACTION_TYPE:
+            raise TransactionError(f"动作不是清理动作: {command.action_id}")
+        self._state["actions"][command.action_id] = action
+        if action["status"] in _ACTION_TERMINAL:
+            return self._recover(connection, action)
+        if action["status"] != int(_ACTION_STATUS.RUNNING) \
+                or not action["cancel_requested"]:
+            raise TransactionError(
+                f"取消终态化要求执行中且已请求取消的清理动作:"
+                f" {command.action_id}"
+                f" status={action['status']}"
+                f" cancel_requested={action['cancel_requested']}")
+        items = self._load_items(connection)
+        for item in items.values():
+            if item["status"] not in (
+                    int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
+                    int(_CLEANUP_ITEM_STATUS.FAILED),
+                    int(_CLEANUP_ITEM_STATUS.CANCELED)):
+                raise TransactionError(
+                    f"清理成员尚未全部终态，不能取消终态化: {item['id']}"
+                    f" status={item['status']}")
+        siblings = self._load_siblings(connection, action)
+        self._owners[("actions", command.action_id)] = (
+            "action", command.action_id)
+        templates = [(
+            _ACTION_FINISHED_EVENT, 4,
+            (_update("actions", command.action_id,
+                     {"status": action["status"]},
+                     {"status": int(_ACTION_STATUS.CANCELED)}),),
+        )]
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        plan_status = plan["status"]
+        if plan_complete(siblings, command.action_id) \
+                and plan["status"] in (1, 2):
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            templates.append((
+                _PLAN_STATUS_EVENT, 2,
+                (_update("plans", plan["id"],
+                         {"status": plan["status"]},
+                         {"status": _PLAN_COMPLETE}),),
+            ))
+            plan_status = _PLAN_COMPLETE
+        allocation = scope.allocate(len(templates))
+        events = tuple(
+            _envelope(
+                allocation.first_event_id + index, allocation.txn_id,
+                event_type, event_reason, rows, command.occurred_at,
+            )
+            for index, (event_type, event_reason, rows) in enumerate(templates)
+        )
+        return CommandPlan(
+            events=events, owners=self._owners, state_rows=self._state,
+            result=CleanupActionFinished(
+                disposition=CleanupActionDisposition.SAVED,
+                action_status=int(_ACTION_STATUS.CANCELED),
+                plan_status=plan_status,
+                succeeded=self._succeeded(), failed=self._failed()),
+        )
+
+    def _load_items(self, connection) -> dict[int, dict[str, Any]]:
+        with closing(connection.execute(
+            "SELECT id FROM cleanup_items WHERE action_id = ? ORDER BY id",
+            (self._command.action_id,),
+        )) as cursor:
+            ids = tuple(int(row[0]) for row in cursor.fetchall())
+        items = {}
+        for item_id in ids:
+            item = row_facts(connection, "cleanup_items", item_id)
+            if item is not None:
+                items[item_id] = item
+                self._owners[("cleanup_items", item_id)] = (
+                    "action", self._command.action_id)
+        self._state["cleanup_items"] = dict(items)
+        return items
+
+    def _load_siblings(self, connection, action) -> dict[int, dict[str, Any]]:
+        with closing(connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (action["plan_id"],),
+        )) as cursor:
+            siblings = {
+                row[0]: row_facts(connection, "actions", row[0])
+                for row in cursor}
+        siblings = {key: value for key, value in siblings.items() if value}
+        self._state["actions"].update(siblings)
+        return siblings
+
+    def _succeeded(self) -> int:
+        return sum(
+            1 for item in self._state["cleanup_items"].values()
+            if item["status"] == int(_CLEANUP_ITEM_STATUS.SUCCEEDED))
+
+    def _failed(self) -> int:
+        return sum(
+            1 for item in self._state["cleanup_items"].values()
+            if item["status"] == int(_CLEANUP_ITEM_STATUS.FAILED))
+
+    def _recover(self, connection, action) -> CommandPlan:
+        """终态后的新键：按既有事实恢复结果，不重新登记。"""
+        if action["status"] != int(_ACTION_STATUS.CANCELED):
+            raise TransactionError(
+                f"取消终态化的动作终态不是取消: {action['status']!r}")
+        self._load_items(connection)
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupActionFinished(
+                disposition=CleanupActionDisposition.ALREADY,
+                action_status=action["status"],
+                plan_status=plan["status"],
+                succeeded=self._succeeded(), failed=self._failed()),
+        )
+
+    def _reuse(self, connection, saved) -> CommandPlan:
+        """原键重送：核实事务身份后按既有事实恢复首次响应。"""
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if not kinds or kinds[0][0] != _ACTION_FINISHED_EVENT \
+                or kinds[0][1] != 4 \
+                or kinds[1:] not in ([], [(_PLAN_STATUS_EVENT, 2)]):
+            raise TransactionError(
+                "原事务不是清理取消终态化登记，不能作为重送核实")
+        if saved[0]["occurred_at"] != self._command.occurred_at:
+            raise TransactionError(
+                "清理取消终态化的事实时刻与原事务不同")
+        action_row = saved[0]["body"]["rows"][0]
+        if action_row["table"] != "actions" \
+                or action_row["id"] != self._command.action_id:
+            raise TransactionError("原清理取消终态化属于其他动作")
+        action = row_facts(connection, "actions", self._command.action_id)
+        assert action is not None
+        self._load_items(connection)
+        plan = row_facts(connection, "plans", action["plan_id"])
+        assert plan is not None
+        self._state["plans"] = {plan["id"]: plan}
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=CleanupActionFinished(
+                disposition=CleanupActionDisposition.ALREADY,
+                action_status=action["status"],
+                plan_status=plan["status"],
+                succeeded=self._succeeded(), failed=self._failed()),
+        )
 
 
 

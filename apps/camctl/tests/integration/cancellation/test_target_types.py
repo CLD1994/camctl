@@ -215,7 +215,7 @@ class TestObtainWithdrawal:
 @pytest.mark.asyncio
 class TestCleanupSettlement:
     async def test_deleted_item_does_not_block_others(self, pipeline):
-        """清理动作目标：已删项保持，待删除项解除限制取消。"""
+        """清理动作目标：已删项保持，待删除项取消后动作终态化为取消。"""
         owned = pipeline
         owned.connection.execute(
             "UPDATE actions SET cancel_requested = 1 WHERE id = 30")
@@ -231,6 +231,12 @@ class TestCleanupSettlement:
         assert _value(
             owned, "SELECT status, restriction_state FROM cleanup_items"
             " WHERE id = 82") == (6, 3)
+        # 成员全部终态后结算把目标动作终态化为取消。
+        assert _value(
+            owned, "SELECT status FROM actions WHERE id = 30") == (6,)
+        # 已终态目标重入结算：按既有事实返回，不重复登记。
+        again = await settlement.settle(30)
+        assert again.complete and not again.failed, again
 
 
 @pytest.mark.asyncio

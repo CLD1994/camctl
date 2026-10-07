@@ -113,10 +113,21 @@ class TargetSettlement:
             failed=_DELIVERY_ITEM_FAILED in statuses)
 
     def _settle_cleanup(self, target_action_id: int) -> SettlementOutcome:
-        """清理目标：未发出删除的成员解除限制，删除中等待执行链。"""
-        from camctl.outputs.cleanup_flow import CancelCleanupItem
+        """清理目标：未发出删除的成员解除限制，删除中等待执行链。
+
+        成员全部终态（含目标集合未固定的零成员）后把目标动作终态
+        化为取消，取消动作的完成依据按终态化后的目标状态判定；目
+        标已终态时直接按成员事实返回，重入幂等。
+        """
+        from camctl.outputs.cleanup_flow import (
+            CancelCleanupItem, FinishCanceledCleanupAction)
 
         connection = self._owned.connection
+        action_row = connection.execute(
+            "SELECT status FROM actions WHERE id = ?",
+            (target_action_id,)).fetchone()
+        if action_row is None:
+            raise ValueError(f"取消目标动作不存在: {target_action_id}")
         with closing(connection.execute(
             "SELECT id, status FROM cleanup_items WHERE action_id = ?",
             (target_action_id,),
@@ -130,8 +141,17 @@ class TargetSettlement:
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
                     raise ValueError(f"清理取消事务未提交: {outcome.error}")
         statuses = {status for _, status in items}
-        if _CLEANUP_DELETING in statuses:
-            return SettlementOutcome(complete=False)
+        if int(action_row[0]) not in _ACTION_TERMINAL:
+            if _CLEANUP_DELETING in statuses:
+                return SettlementOutcome(complete=False)
+            finished = self._outputs.finish_canceled_cleanup(
+                FinishCanceledCleanupAction(
+                    action_id=target_action_id,
+                    occurred_at=self._occurred_at()),
+                new_operation_key(), self._owned)
+            if finished.kind is not DbOutcomeKind.COMPLETED:
+                raise ValueError(
+                    f"清理取消终态化事务未提交: {finished.error}")
         return SettlementOutcome(
             complete=True, failed=_CLEANUP_FAILED in statuses)
 

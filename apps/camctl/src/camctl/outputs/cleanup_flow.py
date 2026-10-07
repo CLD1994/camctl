@@ -207,6 +207,19 @@ class FinishCleanupAction:
         UtcMicros(self.occurred_at)
 
 
+@dataclass(frozen=True)
+class FinishCanceledCleanupAction:
+    """取消的清理动作终态化申请：取消生效且成员全部终态后由取消
+    结算保存动作取消终态；目标集合未固定的动作按零成员终态化。"""
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+
+
 class CleanupActionDisposition(Enum):
     """清理动作汇总事务的结果分类。"""
 
@@ -1093,10 +1106,14 @@ def _start_due(runtime: CleanupRuntime, now: int) -> None:
 
 
 def _running_cleanup_actions(runtime: CleanupRuntime) -> list[int]:
-    """执行中且未请求取消的清理动作。"""
+    """执行中的清理动作；已请求取消的仍驱动成员收场。
+
+    取消标记不排除选择：删除中的成员按取消分支收场、终态成员补
+    齐伴随收场都依赖执行链推进，动作终态化由取消结算保存。
+    """
     with closing(runtime.owned.connection.execute(
         "SELECT id FROM actions"
-        " WHERE status = 2 AND cancel_requested = 0 AND type = 5"
+        " WHERE status = 2 AND type = 5"
         " ORDER BY plan_id, input_index",
     )) as cursor:
         return [int(row[0]) for row in cursor.fetchall()]
@@ -1110,15 +1127,20 @@ async def _advance_cleanup_action(
 
     connection = runtime.owned.connection
     with closing(connection.execute(
-        "SELECT target_selection_state FROM actions WHERE id = ?",
+        "SELECT target_selection_state, cancel_requested"
+        " FROM actions WHERE id = ?",
         (action_id,),
     )) as cursor:
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError(f"清理动作不存在: {action_id}")
+    canceled = int(row[1]) == 1
     if row[0] == 1:
-        # 目标集合待固定；范围来源未就绪或零产物收场时本动作结束
-        # 本轮推进。
+        # 目标集合待固定；已请求取消时不再建立新的普通执行责任，
+        # 零成员目标由取消结算直接终态化。
+        if canceled:
+            return
+        # 范围来源未就绪或零产物收场时本动作结束本轮推进。
         if not _fix_targets(runtime, action_id, now):
             return
     elif row[0] != 2:
@@ -1146,6 +1168,10 @@ async def _advance_cleanup_action(
     )) as cursor:
         unfinished = int(cursor.fetchone()[0])
     if unfinished:
+        return
+    if canceled:
+        # 取消已请求：不保存普通汇总终态，动作终态化由取消结算
+        # 保存，完成依据按取消语义判定。
         return
     outcome = runtime.outputs.finish_cleanup_action(
         FinishCleanupAction(action_id=action_id, occurred_at=now),

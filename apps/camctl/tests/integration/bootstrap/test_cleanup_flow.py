@@ -36,8 +36,8 @@ from camctl.persistence.initialization import InitOutcome, initialize_state
 from ..capture.test_capture_contract import ResultsDouble
 from .test_run_dispatch import _parsed
 from .test_obtain_flow import (
-    _CAMERA_SCHEMA, _await_query, _cancel, _past_schedule, _photo_entry,
-    _photo_plan, _scalar)
+    _CAMERA_SCHEMA, _await_query, _cancel, _future_schedule, _past_schedule,
+    _photo_entry, _photo_plan, _scalar)
 
 
 async def _submit(tmp_path: Path, cfg, body: dict) -> None:
@@ -77,7 +77,8 @@ class _Catalog:
     """受理目录替身：支持 cam-1 的照片与清理动作。"""
 
     def action_types(self):
-        return frozenset({"camera_take_photo", "delete_action_outputs"})
+        return frozenset(
+            {"camera_take_photo", "delete_action_outputs", "cancel_task"})
 
     def device_exists(self, device_id):
         return device_id == "cam-1"
@@ -178,7 +179,8 @@ class _CleanupDriver:
                    else {"code": "device_error", "stage": "query"}))
 
 
-def _config(home: Path) -> object:
+def _config(home: Path, *, delete_retry_interval_s: str = "0",
+            query_retry_interval_s: str = "0") -> object:
     return load_config(
         {
             "paths": {
@@ -193,8 +195,8 @@ def _config(home: Path) -> object:
                     "kind": "camera",
                     "driver": "camctl-adb",
                     "cleanup": {
-                        "delete_retry_interval_s": "0",
-                        "query_retry_interval_s": "0",
+                        "delete_retry_interval_s": delete_retry_interval_s,
+                        "query_retry_interval_s": query_retry_interval_s,
                     },
                 }
             },
@@ -434,6 +436,84 @@ class TestCleanupExecutionLink:
             assert presence == (3,), presence
             assert len(driver.delete_calls) == 1
             assert len(driver.query_calls) == 1
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+
+def _cancel_plan(request_id: str, target_id: int, scheduled_at: str) -> dict:
+    return {
+        "request_id": request_id,
+        "created_at": "2026-01-15 08:00:00",
+        "name": f"plan-{request_id}",
+        "actions": [
+            {
+                "name": "cancel",
+                "type": "cancel_task",
+                "scheduled_at": scheduled_at,
+                "params": {"target": {"action_instance_id": str(target_id)}},
+            }
+        ],
+    }
+
+
+class TestCleanupCancelSettlement:
+    async def test_cancel_with_deleting_member_settles_and_cancels_action(
+            self, tmp_path: Path) -> None:
+        """取消生效时删除中成员经执行链收场，动作以取消终态结束。
+
+        删除调用失败且核实查询仍未知，成员在双等待窗口内跨轮保持
+        删除中；取消请求在窗口内生效后，执行链接手该成员并用查询
+        预算确认缺席，成员按缺席事实成功收场；取消结算把动作终态
+        化为取消，取消动作成功且完成依据为取消达成，两个计划都进
+        入完成。
+        """
+        # 删除与查询重试间隔拉长：首次失败与未知核实后成员在等待
+        # 窗口内保持删除中，取消计划在窗口内到期生效。
+        cfg = _config(
+            tmp_path, delete_retry_interval_s="30",
+            query_retry_interval_s="30")
+        db = Path(cfg.paths.state_db)
+        assert initialize_state(
+            cfg, db).outcome is InitOutcome.CREATED
+        await _submit(tmp_path, cfg, _photo_plan("1"))
+        output_id = await _run_photo_session(tmp_path, cfg)
+        await _submit(tmp_path, cfg, _cleanup_plan(
+            "2", {"output_ids": [str(output_id)]}))
+        purge_id = _scalar(db, "SELECT id FROM actions WHERE name='purge'")[0]
+        await _submit(tmp_path, cfg, _cancel_plan(
+            "3", int(purge_id), _future_schedule(3)))
+        driver = _CleanupDriver(
+            delete_results=(("error", None),),
+            query_results=(("unknown", None), ("absent", None)))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        task = _run_session(deps, cfg, driver, ResultsDouble({}))
+        try:
+            # 首次删除失败后成员保持删除中，等待窗口内取消生效。
+            await _await_query(db, "SELECT status FROM cleanup_items", (3,))
+            await _await_query(
+                db, "SELECT cancel_requested FROM actions WHERE name='purge'",
+                (1,))
+            # 执行链接手取消分支：查询确认缺席后成员成功收场。
+            await _await_query(
+                db, "SELECT status, outcome FROM cleanup_items", (4, 3))
+            # 取消结算把目标动作终态化为取消；取消动作成功。
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name='purge'", (6,))
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name='cancel'", (3,))
+            item = _scalar(db, "SELECT status, outcome FROM cancel_items")
+            assert item == (3, 1), item
+            cleanup_plan = _scalar(
+                db, "SELECT status FROM plans WHERE name='cleanup-plan-2'")
+            assert cleanup_plan == (3,), cleanup_plan
+            cancel_plan = _scalar(
+                db, "SELECT status FROM plans WHERE name='plan-3'")
+            assert cancel_plan == (3,), cancel_plan
+            # 取消生效后不再重试删除；窗口内一次未知核实加收场一
+            # 次缺席核实，共两次查询。
+            assert len(driver.delete_calls) == 1, driver.delete_calls
+            assert len(driver.query_calls) == 2, driver.query_calls
         finally:
             await _cancel(task)
         close_runtime(deps)

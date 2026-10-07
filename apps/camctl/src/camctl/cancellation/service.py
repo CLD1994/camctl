@@ -114,17 +114,18 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
         if row[0] == 2:
             # 成员处理中（取消已生效或终态目标的剩余收场）经结算
             # 端口按目标类型推进。端口自行判断剩余工作（拍摄的停
-            # 止等待、取回的交付撤回），不以目标是否终态为前提；全
-            # 部完成后按目标终态选择完成依据：目标以 canceled 结束
-            # 证明取消达成，其他终态保持原结果。
-            target_status = connection.execute(
-                "SELECT status FROM actions WHERE id = ?",
-                (target_id,)).fetchone()
-            if target_status is None:
-                raise ConsistencyError(
-                    f"取消目标动作不存在: {target_id}")
+            # 止等待、取回的交付撤回、清理的成员收场与动作终态
+            # 化），不以目标是否终态为前提；全部完成后按结算后的
+            # 目标终态选择完成依据：目标以 canceled 结束证明取消
+            # 达成，其他终态保持原结果。
             outcome = await runtime.settlement.settle(target_id)
             if outcome.complete:
+                target_status = connection.execute(
+                    "SELECT status FROM actions WHERE id = ?",
+                    (target_id,)).fetchone()
+                if target_status is None:
+                    raise ConsistencyError(
+                        f"取消目标动作不存在: {target_id}")
                 if outcome.failed:
                     _completed(repository.record_cancel_result(
                         RecordCancelResult(
