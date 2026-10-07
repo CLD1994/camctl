@@ -407,6 +407,17 @@ class _ScriptedStubDriver:
         self._gate_dir = gate_dir
         self.calls: list[tuple[str, str]] = []
 
+    def _trace(self, port: str, detail: str) -> None:
+        """跨组件诊断开关：把替身端口调用追加写入剧本目录日志。"""
+        if not os.environ.get("CAMCTL_TEST_TRACE_CALLS"):
+            return
+        with open(self._gate_dir / "stub-calls.log", "a",
+                  encoding="utf-8") as log:
+            log.write(f"{port} {detail}\n")
+
+    def _fail_trace(self, port: str, detail: str, error: BaseException) -> None:
+        self._trace(port, f"{detail} FAILED {type(error).__name__}: {error}")
+
     def _await_gate(self, port: str) -> None:
         gate = self._spec.get("gates", {}).get(port)
         if not gate:
@@ -441,6 +452,19 @@ class _ScriptedStubDriver:
         多一行处于已派发待响应（dispatch_state=2），即本次调用的
         操作目标。库不可读或无匹配行时返回 None，由调用方回退。
         """
+        return self._activity_identity(request, "da.dispatch_state = 2")
+
+    def _running_activity_identity(self, request) -> str | None:
+        """读部署状态库中该设备执行中的活动主键（停止调用目标）。
+
+        停止请求不携带任务身份（第一版接口缝隙）：生产按活动的执行
+        中事实发起停止对账，替身查库读该设备占用中且进行中的活动行
+        对齐。库不可读或无匹配行时返回 None，由调用方回退。
+        """
+        return self._activity_identity(
+            request, "da.occupancy_state = 1 AND da.activity_state = 2")
+
+    def _activity_identity(self, request, condition: str) -> str | None:
         state_db = os.environ.get("CAMCTL_TEST_STATE_DB")
         if not state_db:
             return None
@@ -450,7 +474,7 @@ class _ScriptedStubDriver:
                 row = probe.execute(
                     "SELECT da.id FROM device_activities da"
                     " JOIN actions a ON a.id = da.action_id"
-                    " WHERE a.device_id = ? AND da.dispatch_state = 2"
+                    f" WHERE a.device_id = ? AND {condition}"
                     " ORDER BY da.id DESC LIMIT 1",
                     (request.binding.device_id,)).fetchone()
         except sqlite3.Error:
@@ -462,8 +486,11 @@ class _ScriptedStubDriver:
         from camctl.devices.ports import DeviceCallResult
 
         self._await_gate("stop")
-        identity = str(request.params.get("activity_id",
-                                          self._spec.get("activity_identity", "1")))
+        # 停止确认观察身份须与生产核对的操作目标（执行中活动主键）
+        # 一致：查库对齐；查不到时回退请求参数或剧本身份。
+        identity = self._running_activity_identity(request) or str(
+            request.params.get("activity_id",
+                               self._spec.get("activity_identity", "1")))
         self.calls.append(("stop", request.operation))
         return DeviceCallResult(
             observations=(DeviceObservation(
@@ -505,8 +532,15 @@ class _ScriptedStubDriver:
 
         identity = json.loads(source.file_id)[-1]
         self.calls.append(("read", identity))
-        content = self._device_content(identity)[offset:]
-        return ReadSession(source, offset, _MemoryStream(content), Decimal("10"))
+        try:
+            content = self._device_content(identity)[offset:]
+            session = ReadSession(
+                source, offset, _MemoryStream(content), Decimal("10"))
+        except BaseException as error:
+            self._fail_trace("read", identity, error)
+            raise
+        self._trace("read", identity)
+        return session
 
     async def digest(self, request) -> object:
         from camctl.devices.evidence import DeviceObservation

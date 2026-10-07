@@ -834,10 +834,24 @@ async def _stop_call(runtime: CaptureRuntime, action,
     ))
     call, confirmed = _operation_outcome(
         response, "stop_confirmed", evidence_type="stop_returned")
-    if confirmed:
-        runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED)
-    else:
-        runtime.finish(ticket, call, retry_wait=True)
+    try:
+        if confirmed:
+            runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED)
+        else:
+            runtime.finish(ticket, call, retry_wait=True)
+    except OutcomeValidationError:
+        # 观察与收场依据不符合登记契约：该结果整体不可采纳，不落
+        # 库，按调用失败保存尝试终局（与启动调用同规则），不遗留
+        # 执行中的停止流程。
+        rejected, _ = _operation_outcome(
+            DeviceCallResult(observations=(), error={
+                "code": "invalid_device_result",
+                "message": "驱动结果不符合登记契约"}),
+            "stop_confirmed", evidence_type="stop_returned")
+        runtime.finish(
+            ticket, rejected, end_run=RunOutcome.FAILED,
+            run_error=rejected.error)
+        return HandlerOutcome("call_failed", "invalid_device_result")
     if response.error is not None:
         return HandlerOutcome("stop_failed", "device_error")
     return HandlerOutcome("confirmed" if confirmed else "sent")

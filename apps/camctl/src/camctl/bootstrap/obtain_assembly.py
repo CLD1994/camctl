@@ -2,9 +2,10 @@
 
 按设备声明与登记驱动解析读取协作者：驱动声明读取能力且设备装
 配完成时构造该设备的读取端口、绑定、证据与源端摘要工厂；读取
-重试间隔取自 devices.<id>.copy.retry_interval_s。会话内共享重试
-间隔时间门槛；未声明读取能力的设备不进入读取推进，其取回条目
-保持已建档状态等待后续会话。
+重试间隔取自 devices.<id>.copy.retry_interval_s，拍摄与读取的并
+行兼容取自驱动能力声明（缺省不并行）。会话内共享重试间隔时间
+门槛；未声明读取能力的设备不进入读取推进，其取回条目保持已建
+档状态等待后续会话。
 """
 
 from __future__ import annotations
@@ -89,6 +90,8 @@ def session_obtain_assembly(
                 retry_interval_s=_device_seconds(
                     declaration, "copy", "retry_interval_s",
                     _DEFAULT_RETRY_INTERVAL_S),
+                capture_read_parallel=bool(
+                    entry.declaration.capture_read_parallel_supported),
             )
         return ObtainRuntime(
             owned=owned,

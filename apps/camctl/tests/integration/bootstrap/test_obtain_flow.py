@@ -313,7 +313,8 @@ def _config(home: Path, *, retry_interval_s: str = "0") -> object:
     )
 
 
-def _registry(driver: _ObtainDriver) -> DriverRegistry:
+def _registry(driver: _ObtainDriver, *,
+              capture_read_parallel: bool = False) -> DriverRegistry:
     return DriverRegistry((
         DriverEntry(
             driver_id="camctl-adb",
@@ -326,6 +327,7 @@ def _registry(driver: _ObtainDriver) -> DriverRegistry:
                 read_supported=True,
                 digest_supported=True,
                 delete_supported=False,
+                capture_read_parallel_supported=capture_read_parallel,
             ),
             evidence=_EVIDENCE,
             status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED,
@@ -360,14 +362,19 @@ def _obtain_factory(cfg, drivers):
     )
 
 
-def _run_session(deps, cfg, driver, results, clock, tools_dir):
+def _run_session(deps, cfg, driver, results, clock, tools_dir, *,
+                 capture_read_parallel: bool = False):
     return asyncio.create_task(execute_command(
         deps, None,
         flows={
             "scheduling": capture_flow(
-                _capture_factory(cfg, _registry(driver), results, clock,
-                                 tools_dir)),
-            "obtain": obtain_flow(_obtain_factory(cfg, _registry(driver))),
+                _capture_factory(
+                    cfg, _registry(
+                        driver, capture_read_parallel=capture_read_parallel),
+                    results, clock, tools_dir)),
+            "obtain": obtain_flow(_obtain_factory(
+                cfg, _registry(
+                    driver, capture_read_parallel=capture_read_parallel))),
             "cancel": cancel_flow(ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
@@ -638,6 +645,83 @@ class TestObtainExecutionLink:
             # 取回读取按录像终态后的推进顺序最后发生。
             reads = [json.loads(call)[-1] for call in driver.read_calls]
             assert reads[-1] == "shot-1" and "clip-1" in reads, reads
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+    async def test_obtain_read_parallel_with_recording(self,
+                                                       tmp_path: Path) -> None:
+        """驱动声明拍摄与读取并行时，执行中的录像不阻塞取回读取。
+
+        照片先完成，取回读取首次失败进入重试等待；等待期间录像到
+        时启动并持续执行，重试在录像仍执行中时并行授予并推进到发
+        布，动作成功终态。一次一份拷贝互斥保持（本用例只有取回一
+        份拷贝）。
+        """
+        cfg = _config(tmp_path, retry_interval_s="1.5")
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        await _submit(tmp_path, cfg, _photo_plan("1"))
+        photo_row = _scalar(
+            Path(cfg.paths.state_db),
+            "SELECT id FROM actions WHERE name='shoot'")
+        await _submit(tmp_path, cfg, _obtain_plan(
+            "2", {"action_instance_id": str(photo_row[0])}))
+        tools_dir = _tools(tmp_path)
+        # 录像在读取重试等待期间到时启动：重试落进执行窗口。
+        await _submit(
+            tmp_path, cfg, _record_plan("3", _future_schedule(1)))
+        _CONTENT_BY_IDENTITY.clear()
+        _CONTENT_BY_IDENTITY["shot-1"] = _PHOTO_CONTENT
+        _CONTENT_BY_IDENTITY["clip-1"] = _RECORD_CONTENT
+        driver = _ObtainDriver(read_failures=1)
+        results = ResultsDouble(
+            {1: (_photo_entry("shot-1", "IMG_0001.jpg"),)})
+        clock = {"ns": time.monotonic_ns()}
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        task = _run_session(
+            deps, cfg, driver, results, clock, tools_dir,
+            capture_read_parallel=True)
+        try:
+            # 照片完成后首次读取失败，重试等待期间录像到时启动。
+            await _await_query(
+                db,
+                "SELECT started_at IS NOT NULL FROM device_activities"
+                " WHERE action_id ="
+                " (SELECT id FROM actions WHERE name='record')", (1,))
+            assert len(driver.read_calls) == 1, driver.read_calls
+            # 声明并行：重试不为执行中的录像让路，在录像终态前完成
+            # 拷贝、校验与发布。
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name='grab'", (3,))
+            delivery = _scalar(db, "SELECT id, status FROM deliveries")
+            assert delivery[1] == 5, delivery
+            ready_file = Path(cfg.paths.ready) / f"{delivery[0]}.jpg"
+            assert ready_file.read_bytes() == _PHOTO_CONTENT
+            assert len(driver.read_calls) == 2, driver.read_calls
+            # 录像仍执行中：读取完成不改变拍摄执行状态。
+            assert _scalar(
+                db, "SELECT status FROM actions WHERE name='record'") == (2,)
+            started_at = _scalar(
+                db, "SELECT started_at FROM device_activities WHERE id=2")[0]
+        finally:
+            await _cancel(task)
+            close_runtime(deps)
+        # 墙钟越过启动加目标加余量后，第二会话对账停止并完成录像。
+        deadline = started_at + int(3.2 * 1_000_000)
+        while time.time() * 1_000_000 < deadline:
+            await asyncio.sleep(0.05)
+        results.files_by_action[3] = (
+            _record_entry("clip-1", "VID_0001.mp4", _RECORD_CONTENT),)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        clock = {"ns": time.monotonic_ns()}
+        task = _run_session(
+            deps, cfg, driver, results, clock, tools_dir,
+            capture_read_parallel=True)
+        try:
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name='record'", (3,))
         finally:
             await _cancel(task)
         close_runtime(deps)

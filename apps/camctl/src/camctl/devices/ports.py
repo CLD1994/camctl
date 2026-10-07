@@ -31,10 +31,12 @@ __all__ = [
 
 @dataclass(frozen=True)
 class DriverDeclaration:
-    """驱动对七类操作的显式能力声明。
+    """驱动对七类操作及设备兼容性的显式能力声明。
 
     不支持以 False 表达，不是失败；声明支持但调用失败由调用结果
-    的错误分区表达，不降级为不支持。
+    的错误分区表达，不降级为不支持。capture_read_parallel_supported
+    声明同设备拍摄与文件读取可并行；未验证并行控制的驱动保持缺省
+    False，调度按拍摄与读取不并行的保守方式让路。
     """
 
     control_supported: bool
@@ -44,6 +46,7 @@ class DriverDeclaration:
     read_supported: bool
     digest_supported: bool
     delete_supported: bool
+    capture_read_parallel_supported: bool = False
 
 
 @dataclass(frozen=True)

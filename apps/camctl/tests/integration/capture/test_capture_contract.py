@@ -55,8 +55,29 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
+        EvidenceContract(type="stop_returned", version=1, operation="stop",
+                         fields=frozenset()),
+        EvidenceContract(type="stop_confirmed", version=1, operation="stop",
+                         fields=frozenset({"activity_id"}), identity_field="activity_id"),
     )
 )
+
+
+class StopDouble:
+    """停止端口替身：返回编排身份的确认观察。"""
+
+    def __init__(self, identity: str = "12") -> None:
+        self._identity = identity
+
+    async def stop(self, request) -> DeviceCallResult:
+        return DeviceCallResult(
+            observations=(
+                DeviceObservation(
+                    type="stop_confirmed", version=1,
+                    data={"activity_id": self._identity}),
+            ),
+            error=None,
+        )
 
 
 class DriverDouble:
@@ -419,6 +440,32 @@ class TestRecordHandler:
                 owned, "SELECT kind, device_file_id FROM outputs"
                 " WHERE source_action_id = 12")
             assert output == (1, 1)
+        finally:
+            owned.connection.close()
+
+    async def test_invalid_stop_observation_settles_stop_attempt(
+            self, tmp_path: Path):
+        owned = _environment(tmp_path, _RECORD)
+        try:
+            # 真实启动后到达停止阶段：驱动停止确认观察的身份与操作
+            # 目标（活动 12）不符时，结果不可采纳，停止尝试按调用失
+            # 败收场，不遗留执行中的停止流程与在途尝试。
+            runtime = _runtime(owned, files={})
+            await capture_handler("camera_record")(12, runtime)
+            from camctl.capture.handlers import _stop_call
+            runtime.stopper = StopDouble(identity="99")
+            step = await _stop_call(runtime, runtime.action(12))
+            assert step.phase == "call_failed"
+            stop_run = _value(
+                owned, "SELECT status, error_json FROM operation_runs"
+                " WHERE responsibility_key = 'stop/12'")
+            assert stop_run[0] == 4
+            assert stop_run[1] is not None
+            attempt = _value(
+                owned, "SELECT a.status FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'stop/12'")
+            assert attempt == (3,)
         finally:
             owned.connection.close()
 

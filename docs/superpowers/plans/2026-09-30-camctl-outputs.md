@@ -425,13 +425,13 @@ N1—N6 与 X10 剩余接线推进。
 
 **接口与依赖：** 提供 `select_previews(facts: PreviewFacts) -> SelectionSnapshot`、`decide_obtain_finish(facts: ObtainFacts) -> ObtainDecision`；facts 包含全部固定来源及逐项阶段，不能用缓存局部子集汇总。前置交付：X2—X7、C6、Q1/Q4、N1/N2。
 
-- [ ] 编写失败用例。在 `test_publish_waits_for_complete_selection` 中一来源已准备、另一仍未选，`assert may_publish is False`；所有来源和合法项完成准备/失败后才统一发布成功项，整次有失败仍保留成功交付。自动预览已开始兼容读取可继续，不兼容时本次读取结束再优先到时拍摄；下一文件和重试等待让路。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_previews.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。用明确预览关联选择，自动与手动共用预览选择方式；取消联动只由 N1/N2 决定，直接取消取回不反向取消拍摄。汇总全部适用结果及父状态同事务保存。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 没有早发、扩大筛选、回退替换或按目录配对。
+- [x] 编写失败用例。在 `test_publish_waits_for_complete_selection` 中一来源已准备、另一仍未选，`assert may_publish is False`；所有来源和合法项完成准备/失败后才统一发布成功项，整次有失败仍保留成功交付。自动预览已开始兼容读取可继续，不兼容时本次读取结束再优先到时拍摄；下一文件和重试等待让路。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/outputs/test_previews.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。用明确预览关联选择，自动与手动共用预览选择方式；取消联动只由 N1/N2 决定，直接取消取回不反向取消拍摄。汇总全部适用结果及父状态同事务保存。
+- [x] 再运行上述命令，要求全部 PASS，并核对 没有早发、扩大筛选、回退替换或按目录配对。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_previews.py -q`，真实三种拍摄、部分取回及取消联动，按领取契约控制文件位置；报告保留成功/失败项，真实 C 组合归 I5。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部来源、部分成功和自动预览的发布/取消条件；记录门禁证据，建议以“feat: 实现自动预览与取回汇总”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部来源、部分成功和自动预览的发布/取消条件；记录门禁证据，建议以“feat: 实现自动预览与取回汇总”形成独立提交。
 
 #### X10 的阶段性验证（2026-10-05）
 
@@ -535,10 +535,55 @@ bootstrap 70、scheduling+operations 308、cancellation+devices+contracts
 124、acceptance+history+host_files 382、logging+persistence+reporting+
 session 520）、根集成混跑 3391 全绿（Python 3.11）。
 
-X10 剩余：真实驱动兼容性声明（D5）、三种拍摄与部分取回的跨组件组合
-（I5，含真实 C 领取模块与重复取回独立交付）；取消收场消费（N 链）
-另行接线。清理动作执行入口已于 2026-10-07 接入（见上方 X8 第五段），
-取消收场消费仍待 N 链。
+X10 剩余已于 2026-10-08 全部收口（见下方 X10 收口记录）；取消收场
+消费（N 链）与清理动作执行入口分别于 2026-10-08、2026-10-07 接线完成。
+
+#### X10 收口（2026-10-08）：驱动兼容性声明与三种拍摄部分取回组合
+
+设备兼容性判定从硬编码裁决改为驱动声明：`DriverDeclaration` 新增
+`capture_read_parallel_supported`（缺省 False——未验证并行控制的驱动按
+拍摄与读取不并行的保守方式让路，与第一版裁决一致），`outputs/dispatch.py`
+的 `DeviceFacts`/`DeviceWork` 增加 `capture_read_parallel` 事实与回显、
+`decide_device_work` 按声明分支、`plan_device_work` 接受声明并行的设备集
+合；装配链 `session_obtain_assembly` 从登记声明解析进 `DeviceReadAssembly`，
+`_advance_reads` 以设备工作计划的自述并行标志判断读取推进条件。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 并行时到时拍摄与新授予同轮共存 | “拍摄优先于尚未开始的冲突读取”表达为同轮内拍摄先派发的顺序，不推迟读取授予——录像执行中活动持续出现在到时集合，若同轮不授予新读取，兼容设备上整段录像期间读取永远无法开始，与规格“当前相机支持拍摄期间读取其他已经完成的文件”矛盾。 |
+| 一次一份拷贝互斥不因并行声明改变 | 在途读取继续占用机会期间不重复授予（file-copy.md 第一版同一相机一次一份拷贝），并行只解除拍摄与读取之间的阻塞。 |
+| 未声明并行保持让路 | 缺省 False 是保守方向合并：未验证并行控制的驱动按不支持并行处理，让路、占用阻塞与重试等待规则保持原样。 |
+
+三种拍摄与部分取回的跨组件组合（X10 集成验收、I5 组合面）由
+`tests/integration/test_camctl_output_roundtrip.py` 的
+`test_three_capture_kinds_partial_obtain` 覆盖：照片、录像与延时同计划
+顺序执行（单设备互斥），照片与延时产物被两个取回动作分别取回交付
+（ready 两份字节与各自来源一致），录像产物保持登记不建交付，报告表
+达五个动作全部成功。
+
+组合用例首次运行暴露并修复一项既有生产缺陷（I5 第四条链同族）：
+`_stop_call` 把驱动停止确认观察直接交 `runtime.finish`，观察身份与操作
+目标（设备活动主键）不符时 `OutcomeValidationError` 上抛、停止流程与在
+途尝试遗留执行中、run 会话永不退出——启动调用路径（`_control_call`）
+已于 I5 第四条链接 invalid_device_result 收场，停止调用路径漏网。修复
+同模式：校验拒绝按调用失败保存尝试终局并结束停止流程；契约测试新增
+`test_invalid_stop_observation_settles_stop_attempt`（停止观察身份不符
+→ 尝试终局失败、流程 FAILED、无遗留）。跨组件替身的停止观察身份同步
+按执行中活动行查库对齐（与启动调用的已派发待响应对齐同一策略，停止
+请求同样不携带任务身份，属 D5 已记录的下发通道接缝）；替身另增环境
+开关的端口调用日志（`CAMCTL_TEST_TRACE_CALLS`，默认关闭）作为跨组件
+诊断基建。
+
+验证：单元 `test_device_work.py` 9 项（并行四分支：到时与在途共存、占
+用中授予、到时与新授予同轮、在途互斥保持）；调度集成 3 项（真实投影
+下并行共存与未声明对照）；会话级 `test_obtain_flow.py` 5 项新增并行链
+（照片完成后读取首败进入重试等待、等待期间录像到时启动、重试在录像
+执行中并行授予并推进到发布、动作成功且录像仍执行中、第二会话完成录
+像）；capture 契约 15 项含停止收场新用例；跨组件 `test_camctl_output_
+roundtrip.py` 5 项。全量回归（2026-10-08，Windows 开发机，uv CPython
+3.11）：单元 3357、apps 集成分目录 3458+6 skip（capture/outputs/
+bootstrap 2094+1、其余 1364+5）、根 `tests/integration` 56+4 skip+342
+子测试、五项仓库检查全部通过。
 
 
 ### X11 中间文件生命周期与有限维护

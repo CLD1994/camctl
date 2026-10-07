@@ -230,6 +230,17 @@ R-09/R-10 的承载边界：本轮以真实 Linux 进程验证受管媒体工具
 
 回归证据（2026-10-07，WSL Ubuntu、cpython-3.11.17/SQLite 3.53.1、ffprobe/ffmpeg 6.1.1）：媒体链三用例通过；单元 3352 项+1 跳过（平台条件预期）；集成 capture 210 项、outputs+bootstrap 1874 项+1 跳过、host_files 86 项通过。同日 Windows 开发机（uv CPython 3.11）：单元 3353 项；集成 capture/bootstrap/history 382 项、outputs+bootstrap 1875 项、根 `tests/integration` 52 项+3 跳过（媒体三件按工具前提跳过）+342 子测试通过。已知偶发与本轮无关：`test_residual_winddown.py` 两个不同用例在 Windows 与 WSL 全量负载下各出现一次墙钟窗口漂移失败，单独重跑与同文件三连跑均稳定通过（与第五条链记录的 composition 偶发同类，负载敏感既有测试），留待窗口表达机制统一治理。
 
+#### I5 组合补充记录（2026-10-08，三种拍摄与部分取回组合）
+
+X10 剩余的组合验收面补齐：`test_camctl_output_roundtrip.py` 新增
+`test_three_capture_kinds_partial_obtain`——照片、录像与延时同计划提交并
+在单设备上顺序执行（启动互斥），两个取回动作按名称分别引用照片与延
+时来源（部分取回：三来源取二），run 会话一轮完成全部拍摄、两次取回
+（一次一份拷贝依次进行）与统一发布；产物三份各自登记、交付恰两份且
+ready 字节与各自来源一致、录像产物无交付保持登记，报告表达五个动作
+全部成功。用例首跑暴露既有生产缺陷“停止调用结果校验拒绝无收场”
+（I5 第四条链同族，详见[outputs 计划 X10 收口记录](2026-09-30-camctl-outputs.md#x10-收口2026-10-08驱动兼容性声明与三种拍摄部分取回组合)），修复后全链通过。
+
 ### I6 全量契约映射、软件验收与部署交接
 
 **预计文件：** `docs/camctl/verification.md`、`apps/camctl/README.md`、`tests/integration/README.md`、`docs/client/acceptance.md`、`docs/host-demo/verification.md`；建议新增 `tests/integration/test_camctl_acceptance_map.py`，并在 `docs/camctl/software-acceptance.md` 保存实施时取得的验收映射和真实证据，链接具体测试，不复制登记的完整值清单。

@@ -2,7 +2,8 @@
 
 真实 SQLite 投影装配：到时拍摄按设备分组并优先、占用中的拍摄活动
 阻塞读取、持机会读取归属设备并让路、已取消动作的读取工作不进入普
-通授予（取消联动由取消收场流程推进）。
+通授予（取消联动由取消收场流程推进）；声明拍摄与读取并行的设备上
+让路与占用阻塞都不再发生。
 """
 
 from __future__ import annotations
@@ -177,3 +178,40 @@ def test_idle_device_after_capture_terminal_grants_reads(pipeline):
     cam1 = {work.device_id: work for work in works}["cam-1"]
     assert cam1.grant_reads == (41,)
     assert cam1.dispatch_captures == () and cam1.yield_reads == ()
+
+
+def test_parallel_declaration_keeps_reads_alongside_captures(pipeline):
+    owned = pipeline
+    # cam-1 声明并行：到时拍摄与持机会读取同轮共存（不让路），cam-2
+    # 未声明仍按占用阻塞。
+    works = plan_device_work(
+        owned.connection, _NOW, capture_read_parallel={"cam-1"})
+    by_device = {work.device_id: work for work in works}
+    cam1 = by_device["cam-1"]
+    assert cam1.capture_read_parallel is True
+    assert cam1.dispatch_captures == (11,)
+    assert cam1.yield_reads == () and cam1.resume_reads == (40,)
+    assert cam1.grant_reads == ()
+    cam2 = by_device["cam-2"]
+    assert cam2.capture_read_parallel is False
+    assert cam2.grant_reads == () and cam2.yield_reads == ()
+
+    # 拍摄未到时仍占用设备：并行声明下合格读取照常授予；同一投影
+    # 未声明并行时仍被占用阻塞（对照）。
+    owned.connection.execute(
+        "UPDATE actions SET scheduled_at = ? WHERE id = 11",
+        (_NOW + 10_000_000,))
+    owned.connection.execute(
+        "UPDATE file_copies SET slot_device_id = NULL WHERE id = 40")
+    owned.connection.execute(
+        "UPDATE deliveries SET status = 7 WHERE id = 301")
+    owned.connection.commit()
+    works = plan_device_work(
+        owned.connection, _NOW, capture_read_parallel={"cam-1"})
+    by_device = {work.device_id: work for work in works}
+    assert by_device["cam-1"].grant_reads == (41,)
+    assert by_device["cam-1"].dispatch_captures == ()
+    assert by_device["cam-1"].yield_reads == ()
+    serial = plan_device_work(owned.connection, _NOW)
+    by_serial = {work.device_id: work for work in serial}
+    assert by_serial["cam-1"].grant_reads == ()

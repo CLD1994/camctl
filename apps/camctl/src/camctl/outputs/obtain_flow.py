@@ -108,6 +108,8 @@ class DeviceReadAssembly:
     digest_supported: bool
     digest_for: Callable[[int], Any] | None
     retry_interval_s: Decimal
+    #: 驱动声明该设备拍摄与读取可并行（缺省不并行）。
+    capture_read_parallel: bool = False
 
 
 @dataclass
@@ -467,15 +469,21 @@ async def _publish_delivery(
 
 
 async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
-    """按设备工作计划推进读取；拍摄工作在时本轮不推进。
+    """按设备工作计划推进读取；未声明并行的设备在拍摄工作时让路。
 
     新授予的候选与已持有机会的在途读取共同推进：在途读取继续占
     用机会直至副本完成或终局失败，重试等待的间隔判定在逐拷贝推
-    进内完成。
+    进内完成。驱动声明拍摄与读取并行的设备上，到时拍摄的同轮派
+    发不阻塞读取推进。
     """
     connection = runtime.owned.connection
-    for work in plan_device_work(connection, now):
-        if work.dispatch_captures or work.yield_reads:
+    parallel = frozenset(
+        device_id for device_id, assembly in runtime.devices.items()
+        if assembly.capture_read_parallel)
+    for work in plan_device_work(
+            connection, now, capture_read_parallel=parallel):
+        if work.yield_reads or (
+                work.dispatch_captures and not work.capture_read_parallel):
             continue
         assembly = runtime.devices.get(work.device_id)
         if assembly is None:

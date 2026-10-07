@@ -10,6 +10,9 @@
 拍摄参数类型支持预览并按配对关联列举预览文件；客户端展开的自动
 取回按预览筛选选择真实登记的预览产物并交付。同一来源的重复自动
 关联在受理时登记失败；拍摄执行前的计划级取消联动收场自动取回。
+三种拍摄与部分取回组合（X10 剩余验收）由本文件末尾用例覆盖：照
+片、录像与延时同计划执行，部分来源的产物被取回交付，未取回产物
+保持登记事实。
 """
 
 from __future__ import annotations
@@ -38,6 +41,12 @@ _CLIP_CONTENT = ("clip-payload-" * 700)[:8192]
 _PHOTO_CONTENT = ("photo-payload-" * 320)[:4096]
 #: 设备侧预览内容；长度与 preview_file 条目的 size_bytes 一致。
 _PREVIEW_CONTENT = ("preview-payload-" * 160)[:2048]
+#: 组合用例的三份设备侧内容（照片、录像、延时序列）。截断前长度
+#: 覆盖条目声明的 size_bytes（4096/8192），拷贝按登记长度读取并做
+#: 源端摘要比较。
+_COMBO_PHOTO_CONTENT = ("combo-photo-" * 400)[:4096]
+_COMBO_CLIP_CONTENT = ("combo-clip-" * 745)[:8192]
+_COMBO_SEQ_CONTENT = ("combo-seq-" * 820)[:8192]
 
 
 def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
@@ -488,3 +497,111 @@ def test_plan_cancel_before_start_settles_auto_preview(
     assert statuses == {
         "shoot": "canceled", "auto-preview": "canceled",
         "cancel": "succeeded"}
+
+
+def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
+    """三种拍摄与部分取回组合：照片、录像与延时同计划顺序执行，
+    照片与延时产物被取回交付，录像产物保持登记不建交付。"""
+    deployment = Deployment(tmp_path)
+    initialized = deployment.camctl(
+        "init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+
+    # 动作主键按提交顺序：拍照 1、拍录 2、延时 3；列举按主键回询。
+    spec = stub_driver_spec(
+        {"1": [photo_file("combo-shot")],
+         "2": [video_file("combo-clip")],
+         "3": [video_file("combo-seq")]},
+        device_files={"combo-shot": _COMBO_PHOTO_CONTENT,
+                      "combo-clip": _COMBO_CLIP_CONTENT,
+                      "combo-seq": _COMBO_SEQ_CONTENT})
+    deployment.install_client_capabilities(spec)
+
+    shoot_at = future_schedule(1)
+    body = {
+        "request_id": "0",
+        "created_at": "2026-01-15 08:00:00",
+        "name": "three-kinds-partial",
+        "actions": [
+            {
+                "name": "拍照",
+                "type": "camera_take_photo",
+                "device_id": "cam-1",
+                "scheduled_at": shoot_at,
+                "params": {"type": "single_shot"},
+                "policy": {"max_delay_ms": 5000},
+            },
+            {
+                "name": "拍录",
+                "type": "camera_record",
+                "device_id": "cam-1",
+                "scheduled_at": shoot_at,
+                "params": {"type": "video"},
+                "policy": {"max_delay_ms": 5000},
+            },
+            {
+                "name": "延时",
+                "type": "camera_timelapse",
+                "device_id": "cam-1",
+                "scheduled_at": shoot_at,
+                "params": {"type": "timelapse"},
+                "policy": {"max_delay_ms": 5000},
+            },
+            {
+                "name": "取照片",
+                "type": "obtain_action_outputs",
+                "scheduled_at": shoot_at,
+                "params": {
+                    "source": {"action_name": "拍照"},
+                    "purpose": "manual",
+                },
+            },
+            {
+                "name": "取延时",
+                "type": "obtain_action_outputs",
+                "scheduled_at": shoot_at,
+                "params": {
+                    "source": {"action_name": "延时"},
+                    "purpose": "manual",
+                },
+            },
+        ],
+    }
+    plan_path, _ = deployment.export_plan_with_client(body)
+    submitted = deployment.camctl(
+        "submit", str(plan_path), "--config", str(deployment.config_path),
+        driver=spec)
+    assert submitted.exit_code == 0, submitted.stderr
+
+    # 一个 run 会话顺序完成三种拍摄与两次取回（一次一份拷贝）。
+    run = deployment.camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    assert run.exit_code == 0, run.stderr
+
+    state_db = deployment.state_db
+    assert _query(state_db, "SELECT status FROM plans") == [(3,)]
+    assert _query(
+        state_db, "SELECT status FROM actions ORDER BY id"
+    ) == [(3,), (3,), (3,), (3,), (3,)]
+    # 三种拍摄各自登记原片产物；只有被取回来源的两份建立交付。
+    assert _query(
+        state_db, "SELECT source_action_id, kind FROM outputs"
+        " ORDER BY source_action_id") == [(1, 1), (2, 1), (3, 1)]
+    assert _query(
+        state_db,
+        "SELECT d.action_id FROM deliveries d ORDER BY d.id") == [(4,), (5,)]
+    # ready 交付两份：字节与各自来源内容一致（部分取回事实）。
+    delivered = _delivered_files(deployment.ready)
+    assert len(delivered) == 2, delivered
+    assert {path.read_bytes() for path in delivered} == {
+        _COMBO_PHOTO_CONTENT.encode("utf-8"),
+        _COMBO_SEQ_CONTENT.encode("utf-8")}
+
+    # 报告表达五个动作全部成功；两个取回动作各自交付自己的来源。
+    report = _ready_report(deployment)
+    statuses = {
+        action["name"]: action["status"]
+        for plan in report["plans"] for action in plan["actions"]}
+    assert statuses == {
+        "拍照": "succeeded", "拍录": "succeeded", "延时": "succeeded",
+        "取照片": "succeeded", "取延时": "succeeded"}
