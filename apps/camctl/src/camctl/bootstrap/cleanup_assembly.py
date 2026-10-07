@@ -4,15 +4,16 @@
 询能力且设备装配完成时，以该设备构造清理运行时；删除与查询的尝
 试上限取自 cleanup 配置，调用时限与重试间隔取自
 devices.<id>.cleanup.*。第一版单相机运行假设下装配首个可用设备；
-成员目标绑定其他设备或主机派生成品时该成员保持等待，待对应链路
-接入。会话内共享重试间隔时间门槛；未声明删除或查询能力的设备不
-进入清理推进。
+成员目标绑定其他设备时该成员保持等待。主机派生成品经 staging 工
+作根的本地删除协作者清理（观察与设备调用同形，双预算共用）。会话
+内共享重试间隔时间门槛；未声明删除或查询能力的设备不进入清理推进。
 """
 
 from __future__ import annotations
 
 import time
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from camctl.bootstrap.capture_assembly import (
@@ -22,16 +23,67 @@ from camctl.bootstrap.capture_assembly import (
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError, DriverRegistry, port_for)
+from camctl.devices.evidence import DeviceObservation
+from camctl.devices.ports import DeviceCallResult
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
-from camctl.outputs.cleanup_flow import CleanupRuntime, advance_cleanup
+from camctl.outputs.cleanup_flow import (
+    CleanupRuntime, HostArtifactPort, LocalArtifactRequest, advance_cleanup)
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
-__all__ = ["cleanup_flow", "session_cleanup_assembly"]
+__all__ = [
+    "HostArtifacts", "cleanup_flow", "session_cleanup_assembly"]
 
 #: 删除与查询调用时限的规格默认秒数（configuration.md 设备文件删
 #: 除与查询的计时）。
 _DEFAULT_TIMEOUT_S = Decimal("10")
+
+
+class HostArtifacts(HostArtifactPort):
+    """主机派生成品的本地删除与存在性查询；观察与设备调用同形。
+
+    删除目标相对 staging 工作根解析；删除成功与目标本就不在同样
+    产出可靠缺席观察，输入输出失败保留调用错误进入查询核实。
+    """
+
+    def __init__(self, staging: Path) -> None:
+        self._staging = Path(staging)
+
+    async def delete(
+            self, request: LocalArtifactRequest) -> DeviceCallResult:
+        target = self._staging / request.path
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return DeviceCallResult(
+                observations=(),
+                error={"code": "local_io_failed", "stage": "delete"})
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type="file_absent", version=1,
+                data={"cleanup_item_id": str(request.cleanup_item_id)}),),
+            error=None)
+
+    async def query_state(
+            self, request: LocalArtifactRequest) -> DeviceCallResult:
+        target = self._staging / request.path
+        try:
+            target.stat()
+            present = True
+        except FileNotFoundError:
+            present = False
+        except OSError:
+            return DeviceCallResult(
+                observations=(),
+                error={"code": "local_io_failed", "stage": "query"})
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type="file_presence", version=1,
+                data={"cleanup_item_id": str(request.cleanup_item_id),
+                      "present": present}),),
+            error=None)
 
 
 def session_cleanup_assembly(
@@ -40,14 +92,17 @@ def session_cleanup_assembly(
     drivers: DriverRegistry,
     max_delete_attempts: int,
     max_query_attempts: int,
+    staging: Path | None = None,
     monotonic_ns: Callable[[], int] | None = None,
     occurred_at: Callable[[], int] | None = None,
 ) -> Callable[[Any], CleanupRuntime | None]:
     """构造会话级清理推进工厂：解析删除/查询协作者并组装运行时。
 
     会话共享重试间隔时间门槛；设备未声明、驱动未登记或删除/查询
-    能力未声明时本会话不装配清理推进，成员保持已保存状态等待后
-    续会话。时钟读数缺省使用真实系统钟，测试可注入受控读数。
+    能力未声明时本会话不装配清理推进，成员保持已保存状态等待后续
+    会话。主机派生成品的本地协作者按 staging 工作根装配（未提供
+    时此类成员保持等待）。时钟读数缺省使用真实系统钟，测试可注入
+    受控读数。
     """
     retry_gate = RetryWaitGate()
     monotonic = monotonic_ns if monotonic_ns is not None else time.monotonic_ns
@@ -83,6 +138,8 @@ def session_cleanup_assembly(
                 evidence=entry.evidence,
                 binding_of=binding_of,
                 occurred_at=wall,
+                local_files=(
+                    HostArtifacts(staging) if staging is not None else None),
                 delete_config=AttemptConfig(
                     max_attempts=max_delete_attempts,
                     timeout_s=_device_seconds(

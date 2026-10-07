@@ -7016,7 +7016,32 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
             elif file["presence_state"] != int(_FILE_PRESENCE.ABSENT):
                 raise ConsistencyError("文件存在性未知，不能确认清理成功")
         elif intermediate_file_id is not None:
-            raise ConsistencyError("主机源清理经交付与中间文件流程处理")
+            # 主机派生成品：文件缺席事实由清理完成状态承载；本次成
+            # 功先保存清理完成事件，同事务先行供成功依据核对。
+            file = row_facts(connection, "intermediate_files",
+                             intermediate_file_id)
+            if file is None:
+                raise ConsistencyError(
+                    f"中间文件不存在: {intermediate_file_id}")
+            self._state.setdefault("intermediate_files", {})[
+                intermediate_file_id] = dict(file)
+            if file["cleanup_state"] == int(_FILE_CLEANUP.COMPLETED):
+                pass
+            elif file["cleanup_state"] in (
+                    int(_FILE_CLEANUP.NOT_NEEDED),
+                    int(_FILE_CLEANUP.PENDING)):
+                if from_wait:
+                    raise ConsistencyError(
+                        "无本项删除调用的成功要求文件缺席事实先行")
+                templates.append((
+                    _INTERMEDIATE_FILE_EVENT, _CLEANUP_RESULT_REASON,
+                    (_update(
+                        "intermediate_files", intermediate_file_id,
+                        {"cleanup_state": file["cleanup_state"]},
+                        {"cleanup_state": int(_FILE_CLEANUP.COMPLETED)}),),
+                    ("intermediate_file", intermediate_file_id)))
+            else:
+                raise ConsistencyError("中间文件清理状态未决，不能确认清理成功")
         self._load_delete_basis(connection, command.item_id)
         after_item = {
             "id": item["id"], "action_id": item["action_id"],

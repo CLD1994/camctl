@@ -298,12 +298,13 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             segment_size=deps.config.copy.segment_size_bytes,
         )),
         # 清理推进：删除与查询端口按设备声明解析，尝试上限取自
-        # cleanup 配置；主机派生成品成员等待对应链路接入。
+        # cleanup 配置；主机派生成品经 staging 工作根本地删除。
         "cleanup": cleanup_flow(session_cleanup_assembly(
             devices=deps.config.devices,
             drivers=drivers,
             max_delete_attempts=deps.config.cleanup.max_delete_attempts,
             max_query_attempts=deps.config.cleanup.max_query_attempts,
+            staging=staging,
         )),
     }
     return flows, supervisor

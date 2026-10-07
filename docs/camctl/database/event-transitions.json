@@ -2226,6 +2226,14 @@
             "INTERMEDIATE_FILE_CHANGED.CLEANUP_RESULT"
           ],
           "id": "transition_14"
+        },
+        {
+          "from": 1,
+          "to": 4,
+          "by": [
+            "INTERMEDIATE_FILE_CHANGED.CLEANUP_RESULT"
+          ],
+          "id": "transition_15"
         }
       ]
     },
@@ -7481,7 +7489,7 @@
         },
         "CLEANUP_RESULT": {
           "reason": 4,
-          "title": "保存自动清理结果",
+          "title": "保存清理结果（自动与显式）",
           "rows": [
             {
               "table": "intermediate_files",
@@ -7492,9 +7500,11 @@
               ],
               "before": {
                 "retention_state": [
-                  2
+                  2,
+                  3
                 ],
                 "cleanup_state": [
+                  1,
                   2,
                   3,
                   5,
@@ -7522,7 +7532,8 @@
                   "transition_10",
                   "transition_11",
                   "transition_13",
-                  "transition_14"
+                  "transition_14",
+                  "transition_15"
                 ]
               }
             }

@@ -52,7 +52,7 @@ CREATE TABLE intermediate_files (
     CHECK (last_event_id >= created_event_id),
     CHECK ((owner_action_id IS NOT NULL) + (owner_delivery_id IS NOT NULL) = 1),
     CHECK ((purpose = 1 AND owner_delivery_id IS NOT NULL) OR (purpose <> 1 AND owner_action_id IS NOT NULL)),
-    CHECK (retention_state = 2 OR cleanup_state = 1),
+    CHECK (retention_state IN (2, 3) OR cleanup_state = 1),
     CHECK (retention_state <> 2 OR cleanup_state <> 1),
     CHECK (cleanup_state NOT IN (5,6) OR last_error_json IS NOT NULL),
     CHECK (sha256 IS NULL OR size_bytes IS NOT NULL)

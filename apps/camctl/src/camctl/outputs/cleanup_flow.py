@@ -371,6 +371,23 @@ class DeleteDriverPort:
 
 
 @dataclass(frozen=True)
+class LocalArtifactRequest:
+    """主机派生成品的删除/查询请求；path 相对 staging 工作根。"""
+
+    operation: str
+    cleanup_item_id: int
+    path: str
+
+
+class HostArtifactPort:
+    """主机派生成品的本地删除与查询端口；观察与设备调用同形。"""
+
+    async def delete(self, request: LocalArtifactRequest) -> object: ...
+
+    async def query_state(self, request: LocalArtifactRequest) -> object: ...
+
+
+@dataclass(frozen=True)
 class CleanupStep:
     """一次删除推进的结果分区。"""
 
@@ -396,6 +413,8 @@ class CleanupRuntime:
     occurred_at: Callable[[], int]
     delete_config: Any
     query_config: Any
+    #: 主机派生成品的本地删除协作者；未装配时此类成员保持等待。
+    local_files: HostArtifactPort | None = None
     monotonic_ns: Callable[[], int] = _default_monotonic_ns
     retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
 
@@ -620,10 +639,12 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
         if rejected is not None:
             return CleanupStep("companion_rejected", rejected)
         return CleanupStep("succeeded", choice.name)
-    # 设备调用目标：主机派生成品或未装配设备没有绑定，等待对应链
-    # 路接入，不解释为失败。
+    # 设备调用目标：主机派生成品经本地文件链路删除，未装配设备或
+    # 本地协作者时成员保持等待，不解释为失败。
     if runtime.binding_of(item_id) is None:
-        return CleanupStep("target_unbound")
+        if (_host_target(connection, item_id) is None
+                or runtime.local_files is None):
+            return CleanupStep("target_unbound")
     if entry is CleanupEntryChoice.VERIFY_FIRST:
         verified = await _verify_before_delete(
             runtime, item_id, action_id, output_id)
@@ -700,7 +721,6 @@ async def _delete_once(
         output_id: int) -> CleanupStep:
     """发起一次删除调用并保存结果；效果未知转入查询核实。"""
     from camctl.contracts.values import new_operation_key
-    from camctl.devices.ports import ControlRequest
     from camctl.operations.attempts import (
         AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RunOutcome)
     from camctl.operations.models import (
@@ -736,13 +756,11 @@ async def _delete_once(
                 runtime.delete_config, "delete_attempts_exhausted")
         return CleanupStep("delete_budget_rejected", ticket.value.reason)
     progress = runtime.outputs.progress_cleanup_item(
-        ProgressCleanupItem(item_id, occurred), new_operation_key(), runtime.owned)
+        ProgressCleanupItem(item_id, occurred), new_operation_key(),
+        runtime.owned)
     if progress.kind is not DbOutcomeKind.COMPLETED:
         return CleanupStep("progress_rejected", str(progress.error))
-    binding = runtime.binding_of(item_id)
-    result = await runtime.driver.delete(ControlRequest(
-        operation="delete", binding=binding,
-        params=_target_params(connection, item_id)))
+    result = await _call_delete(runtime, item_id)
     absent, errored = _delete_observation(result)
     if errored:
         status, effect = AttemptStatus.FAILED, (
@@ -993,8 +1011,7 @@ async def _run_query(runtime: CleanupRuntime, ticket, item_id: int) -> bool | No
     from camctl.operations.validation import validate_outcome
     from camctl.persistence.models import DbOutcomeKind
 
-    query_result = await runtime.driver.query_state(
-        _control_request(runtime, item_id, "query"))
+    query_result = await _call_query(runtime, item_id)
     present = _presence_observation(query_result)
     query_outcome = CallOutcome(
         status=AttemptStatus.SUCCEEDED if query_result.error is None
@@ -1030,6 +1047,45 @@ def _control_request(runtime: CleanupRuntime, item_id: int, operation: str):
     return ControlRequest(
         operation=operation, binding=runtime.binding_of(item_id),
         params=_target_params(runtime.owned.connection, item_id))
+
+
+def _host_target(connection, item_id: int) -> str | None:
+    """成员产物由主机中间文件承载时返回其工作路径；设备承载为 None。"""
+    row = connection.execute(
+        "SELECT f.relative_path FROM cleanup_items c"
+        " JOIN outputs o ON o.id = c.output_id"
+        " JOIN intermediate_files f ON f.id = o.intermediate_file_id"
+        " WHERE c.id = ?", (item_id,)).fetchone()
+    return None if row is None else str(row[0])
+
+
+async def _call_delete(runtime: CleanupRuntime, item_id: int):
+    """按成员目标发起一次删除调用；返回与设备调用同形的结果。"""
+    from camctl.devices.ports import ControlRequest
+
+    binding = runtime.binding_of(item_id)
+    if binding is None:
+        path = _host_target(runtime.owned.connection, item_id)
+        if path is None or runtime.local_files is None:
+            raise ConsistencyError(f"清理成员缺少可调用目标: {item_id}")
+        return await runtime.local_files.delete(LocalArtifactRequest(
+            operation="delete", cleanup_item_id=item_id, path=path))
+    return await runtime.driver.delete(ControlRequest(
+        operation="delete", binding=binding,
+        params=_target_params(runtime.owned.connection, item_id)))
+
+
+async def _call_query(runtime: CleanupRuntime, item_id: int):
+    """按成员目标发起一次存在性查询；返回与设备调用同形的结果。"""
+    binding = runtime.binding_of(item_id)
+    if binding is None:
+        path = _host_target(runtime.owned.connection, item_id)
+        if path is None or runtime.local_files is None:
+            raise ConsistencyError(f"清理成员缺少可调用目标: {item_id}")
+        return await runtime.local_files.query_state(LocalArtifactRequest(
+            operation="query", cleanup_item_id=item_id, path=path))
+    return await runtime.driver.query_state(
+        _control_request(runtime, item_id, "query"))
 
 
 def _target_params(connection, item_id: int) -> dict:

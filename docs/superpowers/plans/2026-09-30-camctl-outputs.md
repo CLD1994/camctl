@@ -300,9 +300,10 @@ cleanup.md 来源及产物状态表）固定空集合并同事务保存动作成
 PLAN_STATUS COMPLETE），替换此前的事务错误拒绝；`target_set` 守卫
 对应放宽为范围清理允许空成员。其三，删除与查询请求携带目标身份与
 设备文件定位（`cleanup_item_id`、`file_id`、`identity_key`、
-`locator`），驱动据此定位目标文件并回填成员身份观察；目标不是设备
-文件（主机派生成品）或绑定未装配设备时成员保持等待（target_unbound），
-待对应链路接入。其四，删除收场证据由 `operation_returned` 改为操作
+`locator`），驱动据此定位目标文件并回填成员身份观察；主机派生成品
+成员经本地文件协作者删除 `staging/derived/` 对应成品（2026-10-08
+接入，见 X8 收口记录），绑定未装配设备时成员保持等待
+（target_unbound）。其四，删除收场证据由 `operation_returned` 改为操作
 专属的 `delete_returned`——单相机驱动同时声明控制与删除时两者共用
 (type,version) 会冲突，沿 read_returned/stop_returned 裁决补齐；查询
 收场维持 file_presence。配置接入 `devices.<id>.cleanup.delete_timeout_s`
@@ -315,7 +316,7 @@ delete_attempts`/`max_query_attempts`；第一版单相机假设下装配首个�
 | 零产物范围清理按成功收场 | 来源终态且处理完成、可靠确认无正式产物时动作 `succeeded`（“无产物需要清理”），不创建清理成员；区别于指定动作类型不产生产物的受理失败。 |
 | 精确清理不要求来源状态 | output_ids 模式没有来源引用，执行时按 ID 核实存在性；范围清理维持受理时 FIXED 来源。 |
 | 删除调用证据专属命名 | `delete_returned`（op=delete）与控制的 `operation_returned` 区分，证据注册表 (type,version) 全局唯一。 |
-| 成员推进等待不解释为失败 | 主机派生成品、未装配设备的目标成员保持等待；流程层的成员推进仅对事务未完成或事实不一致分区报错。 |
+| 成员推进等待不解释为失败 | 未装配设备的目标成员保持等待；主机派生成品经本地删除链路推进（与设备调用同形、双预算共用）。流程层的成员推进仅对事务未完成或事实不一致分区报错。 |
 
 验证：会话级集成 `tests/integration/bootstrap/test_cleanup_flow.py` 4 项
 （精确清理一次删除成功：成员 SUCCEEDED/DELETED、产物 CLEANED、计划完
@@ -330,8 +331,32 @@ cancellation+devices+contracts 124、acceptance+history+host_files 382、
 logging_runtime+persistence+reporting+session 520）、根集成混跑 3395
 另 6 跳过、五检查器通过（Python 3.11）。
 
-X8 剩余：主机派生成品成员的删除链路接入（随 X11 中间文件维护）、
-多设备清理动作（第一版单相机假设，装配扩展时按设备路由成员）。
+X8 剩余（2026-10-08 收口）：主机派生成品成员的删除链路已接入——
+清理成员产物由提升中间文件承载（outputs.device_file_id 为空且
+intermediate_file_id 非空）时，执行链接入本地删除协作者：装配层提供
+`HostArtifacts`（staging 工作根的本地删除与存在性查询，观察与设备调
+用同形、file_absent/file_presence 证据共用），`delete_source_file` 按
+成员目标在设备驱动与本地协作者间分派，删除与查询双预算、重试间隔、
+取消收场与汇总全部共用设备链。清理成功的文件缺席事实由中间文件
+`cleanup_state` 承载：`finish_cleanup_item` 对此类成员同事务保存
+`INTERMEDIATE_FILE_CHANGED.CLEANUP_RESULT`（cleanup_state→COMPLETED，
+与成员终态同事务先行供成功依据核对）；配套扩展事件目录（该分支
+before 允许 retention_state=3 的提升承载、新增 cleanup_state 1→4 转
+换边）与中间文件表约束（`retention_state IN (2, 3) OR cleanup_state
+= 1`）。X11 自动清理通道边界不变（classify 对 PROMOTED/HANDED_OFF
+仍不归自动清理，历史扫描候选仍限 RELEASABLE），显式清理不占自动清
+理的历史额度。
+
+验证（先红后绿）：真实 run 会话用例两枚（`test_cleanup_flow.py` 的
+`TestHostArtifactCleanup`）——本地删除成功链（成品文件从
+staging/derived 消失、成员 SUCCEEDED/DELETED、中间文件 COMPLETED、
+产物 CLEANED 投影、动作与计划成功、设备驱动零调用）与删除结果未知
+经查询确认缺席链（ABSENCE_CONFIRMED、本地删除仅一次、中间文件
+COMPLETED）。全量回归通过（单元 3353；集成 outputs 1788、bootstrap
+93、cancellation/capture/persistence/history 419、其余 1155；根跨组
+件 55+342 subtests；五检查器全绿含事件目录同步，Python 3.11）。
+
+多设备清理动作仍属第一版单相机假设（装配扩展时按设备路由成员）。
 
 ### X9 清理取消、接手及原结果保持
 

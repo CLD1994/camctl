@@ -31,6 +31,8 @@ from camctl.devices.drivers.registry import (
 from camctl.devices.evidence import (
     DeviceObservation, EvidenceContract, EvidenceRegistry)
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
+from camctl.outputs.cleanup_flow import (
+    CleanupRuntime, HostArtifactPort, LocalArtifactRequest)
 from camctl.persistence.initialization import InitOutcome, initialize_state
 
 from ..capture.test_capture_contract import ResultsDouble
@@ -241,8 +243,45 @@ def _cleanup_plan(request_id: str, params: dict) -> dict:
     }
 
 
-def _run_session(deps, cfg, driver: _CleanupDriver, results) -> asyncio.Task:
+def _run_session(deps, cfg, driver: _CleanupDriver, results,
+                 local_files=None) -> asyncio.Task:
     registry = _registry(driver)
+    if local_files is None:
+        cleanup = cleanup_flow(session_cleanup_assembly(
+            devices=cfg.devices,
+            drivers=registry,
+            max_delete_attempts=cfg.cleanup.max_delete_attempts,
+            max_query_attempts=cfg.cleanup.max_query_attempts,
+            staging=Path(cfg.paths.staging),
+        ))
+    else:
+        # 测试注入本地删除替身；设备绑定恒为空，仅本地链路参与。
+        from camctl.operations.attempts import AttemptConfig, RetryWaitGate
+        from camctl.persistence.repositories.operations import (
+            OperationRepository)
+        from camctl.persistence.repositories.outputs import OutputsRepository
+
+        retry_gate = RetryWaitGate()
+
+        def factory(owned):
+            return CleanupRuntime(
+                owned=owned,
+                outputs=OutputsRepository(),
+                operations=OperationRepository(),
+                driver=driver,
+                evidence=_EVIDENCE,
+                binding_of=lambda item_id: None,
+                occurred_at=lambda: int(time.time() * 1_000_000),
+                local_files=local_files,
+                delete_config=AttemptConfig(
+                    max_attempts=cfg.cleanup.max_delete_attempts,
+                    timeout_s=None, retry_interval_s=0),
+                query_config=AttemptConfig(
+                    max_attempts=cfg.cleanup.max_query_attempts,
+                    timeout_s=None, retry_interval_s=0),
+                retry_gate=retry_gate)
+
+        cleanup = cleanup_flow(factory)
     return asyncio.create_task(execute_command(
         deps, None,
         flows={
@@ -254,12 +293,7 @@ def _run_session(deps, cfg, driver: _CleanupDriver, results) -> asyncio.Task:
                 wait_config=lambda params: CaptureWaitConfig(
                     target_duration_ms=1_000, driver_margin_ms=0),
             )),
-            "cleanup": cleanup_flow(session_cleanup_assembly(
-                devices=cfg.devices,
-                drivers=registry,
-                max_delete_attempts=cfg.cleanup.max_delete_attempts,
-                max_query_attempts=cfg.cleanup.max_query_attempts,
-            )),
+            "cleanup": cleanup,
             "cancel": cancel_flow(ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
@@ -517,3 +551,157 @@ class TestCleanupCancelSettlement:
         finally:
             await _cancel(task)
         close_runtime(deps)
+
+
+def _seed_repaired_artifact(db: Path, cfg, output_id: int) -> None:
+    """把照片产物改为主机修复成品承载；staging 建对应真实文件。"""
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute(
+            "INSERT INTO intermediate_files (id, owner_action_id, purpose,"
+            " relative_path, retention_state, cleanup_state, size_bytes,"
+            " created_event_id, last_event_id, change_count)"
+            " VALUES (900, (SELECT source_action_id FROM outputs"
+            " WHERE id = ?), 4, 'derived/900.jpg', 3, 1, 16, 1, 1, 1)",
+            (output_id,))
+        connection.execute(
+            "UPDATE outputs SET kind = 2, device_file_id = NULL,"
+            " intermediate_file_id = 900 WHERE id = ?", (output_id,))
+        connection.commit()
+    finally:
+        connection.close()
+    derived = Path(cfg.paths.staging) / "derived"
+    derived.mkdir(parents=True, exist_ok=True)
+    (derived / "900.jpg").write_bytes(b"repaired-artifact")
+
+
+class TestHostArtifactCleanup:
+    async def test_repaired_artifact_cleanup_deletes_local_file(
+            self, tmp_path: Path) -> None:
+        """主机修复成品成员删除 staging 对应成品并按删除事实收场。
+
+        修复成品由提升的中间文件承载，不属于设备删除目标：成员经
+        本地文件删除推进，成品文件从 staging/derived 消失，中间文
+        件保存清理完成，产物进入已清理投影，动作与计划成功收场；
+        设备驱动不收到任何删除或查询调用。
+        """
+        cfg = _config(tmp_path)
+        db = Path(cfg.paths.state_db)
+        assert initialize_state(
+            cfg, db).outcome is InitOutcome.CREATED
+        await _submit(tmp_path, cfg, _photo_plan("1"))
+        output_id = await _run_photo_session(tmp_path, cfg)
+        _seed_repaired_artifact(db, cfg, output_id)
+        await _submit(tmp_path, cfg, _cleanup_plan(
+            "2", {"output_ids": [str(output_id)]}))
+        driver = _CleanupDriver()
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        task = _run_session(deps, cfg, driver, ResultsDouble({}))
+        try:
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name='purge'", (3,))
+            item = _scalar(db, "SELECT status, outcome FROM cleanup_items")
+            assert item == (4, 1), item
+            local = _scalar(
+                db, "SELECT cleanup_state FROM intermediate_files")
+            assert local == (4,), local
+            output = _scalar(
+                db, "SELECT availability, cleanup_status FROM outputs")
+            assert output == (3, 4), output
+            artifact = Path(cfg.paths.staging) / "derived" / "900.jpg"
+            assert not artifact.exists()
+            assert driver.delete_calls == []
+            assert driver.query_calls == []
+            plan = _scalar(
+                db, "SELECT status FROM plans WHERE name='cleanup-plan-2'")
+            assert plan == (3,), plan
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+    async def test_repaired_artifact_unknown_delete_confirmed_absent(
+            self, tmp_path: Path) -> None:
+        """本地删除结果未知经查询确认缺席：按存在性依据成功收场。
+
+        删除调用失败不解释文件仍在，核实查询确认缺席后成员按缺席
+        依据成功，中间文件保存清理完成，动作与计划成功；本地删除
+        只调用一次，设备驱动不参与。
+        """
+        cfg = _config(tmp_path)
+        db = Path(cfg.paths.state_db)
+        assert initialize_state(
+            cfg, db).outcome is InitOutcome.CREATED
+        await _submit(tmp_path, cfg, _photo_plan("1"))
+        output_id = await _run_photo_session(tmp_path, cfg)
+        _seed_repaired_artifact(db, cfg, output_id)
+        await _submit(tmp_path, cfg, _cleanup_plan(
+            "2", {"output_ids": [str(output_id)]}))
+        # 本地删除失败（结果未知），核实查询确认缺席。
+        local = _LocalArtifacts(
+            delete_results=(("error", None),),
+            query_results=(("absent", None),))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+        task = _run_session(deps, cfg, _CleanupDriver(), ResultsDouble({}),
+                            local_files=local)
+        try:
+            await _await_query(
+                db, "SELECT status FROM actions WHERE name='purge'", (3,))
+            item = _scalar(db, "SELECT status, outcome FROM cleanup_items")
+            assert item == (4, 3), item
+            local_state = _scalar(
+                db, "SELECT cleanup_state FROM intermediate_files")
+            assert local_state == (4,), local_state
+            output = _scalar(
+                db, "SELECT availability, cleanup_status FROM outputs")
+            assert output == (3, 4), output
+            assert len(local.delete_calls) == 1, local.delete_calls
+            assert len(local.query_calls) == 1, local.query_calls
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+
+class _LocalArtifacts(HostArtifactPort):
+    """本地删除替身：按调用序返回配置结果，观察与真实适配器同形。
+
+    delete 的 absent 表示可靠缺席，error 表示调用失败（结果未
+    知）；query 的 absent/present 表示可靠在场事实。
+    """
+
+    def __init__(self, *, delete_results: tuple, query_results: tuple) -> None:
+        self._delete_results = list(delete_results)
+        self._query_results = list(query_results)
+        self.delete_calls: list[LocalArtifactRequest] = []
+        self.query_calls: list[LocalArtifactRequest] = []
+
+    def _next(self, results: list) -> tuple:
+        if len(results) > 1:
+            return results.pop(0)
+        return results[0]
+
+    async def delete(self, request: LocalArtifactRequest) -> DeviceCallResult:
+        self.delete_calls.append(request)
+        kind, error = self._next(self._delete_results)
+        observations = ()
+        if kind == "absent":
+            observations = (DeviceObservation(
+                type="file_absent", version=1,
+                data={"cleanup_item_id": str(request.cleanup_item_id)}),)
+        return DeviceCallResult(
+            observations=observations,
+            error=(None if error is None
+                   else {"code": "local_io_failed", "stage": "delete"}))
+
+    async def query_state(self, request: LocalArtifactRequest) -> DeviceCallResult:
+        self.query_calls.append(request)
+        kind, error = self._next(self._query_results)
+        observations = ()
+        if kind in ("present", "absent"):
+            observations = (DeviceObservation(
+                type="file_presence", version=1,
+                data={"cleanup_item_id": str(request.cleanup_item_id),
+                      "present": kind == "present"}),)
+        return DeviceCallResult(
+            observations=observations,
+            error=(None if error is None
+                   else {"code": "local_io_failed", "stage": "query"}))
