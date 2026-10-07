@@ -442,8 +442,8 @@ C9 剩余的映射终验收已由文末“C9 验收映射档案（2026-10-07）�
 中取消立即停止→取消终态→取消动作与成员收场）。全量单元 3217、集
 成 15 目录与根 34+342、三个 node 检查器通过（Python 3.11）。
 
-C9 后置：停止预算耗尽的残留收场（C7）、sent-only
-取消核实随后续轮次接入；等待中取消的延时收场（停止链与核实终止）
+C9 后置：sent-only
+取消核实随后续轮次接入；停止预算耗尽的残留收场已随[第十七段](#c9-第十七段的阶段性验证2026-10-07停止预算耗尽的残留收场接线)交付；等待中取消的延时收场（停止链与核实终止）
 见[第八段](#c9-第八段的阶段性验证2026-10-05等待中取消的延时收场)；
 异常录像媒体链接线见[第九段](#c9-第九段的阶段性验证2026-10-06异常录像媒体链接线)；
 跨会话对账与恢复决定见[第十段](#c9-第十段的阶段性验证2026-10-06跨会话对账与恢复决定建立)、
@@ -826,6 +826,50 @@ Node/Python 检查器通过（Python 3.11）。本轮回归期间单元与集成
 HEAD 同现，属环境瞬时资源压力非本轮回归；清理残留 python 进程后
 全部通过。
 
+#### C9 第十七段的阶段性验证（2026-10-07）：停止预算耗尽的残留收场接线
+
+原停止预算耗尽后的收场责任分两层落地。第一层终态化：录像三次停
+止尝试全部失败后，停止流程按未确认收场并携带 `recording_stop_failed`
+（`activity_id` 与 `operation_run_id` 必填），动作以零产物登记失败
+终态；设备活动缺少结束与释放依据，执行中事实与占用原样保留（取
+消触发的停止耗尽仍归取消收场链，不在本分支收场）。第二层残留收
+场（`capture/residual.py`）：到期拍摄动作开始前经残留门检查同设
+备残留候选——无候选或已有可靠空闲判定放行；候选存在且驱动声明
+查询能力时执行执行前检查（`query/preflight/<触发动作>`，观察契约
+`query_returned` 与 `activity_status`，目标不限定观察身份）：可靠
+空闲保存观察后放行；观察到候选活动仍在录制且声明停止与安全重复
+停止时建立独立收场流程（kind 8 `STOP_RESIDUAL`，责任键
+`followup/<触发>/<活动>`）并按 `devices.<id>.residual_stop.*` 预算
+（默认 3 次包含第一次、间隔 3 秒、时限 10 秒）发送停止，绑定与参
+数取活动归属动作；观察到其他活动或身份不可解释时等待，不推测空
+闲也不授权停止。停止发出未确认且无调用错误时先由确认查询
+（`query/residual/<触发>/<活动>`）核实：可靠空闲即按停止事实收场
+流程与活动；仍在录制、查询失败或查询预算耗尽时按声明的安全重复
+停止继续。停止可靠确认或确认查询空闲后，活动以该成功收场流程行
+为停止事实（`_load_stop_fact` 扩展 kind 8）经统一释放判定收场并释
+放占用，触发动作随后放行开始。收场预算耗尽按 `recording_stop_failed`
+失败终态化（数据库登记约束耗尽不得以未确认收场），残留事实保留，
+触发动作按窗口过期收尾。触发动作取消或过期后由 `residual_flow`
+孤儿扫描接管：未发出停止的流程保存 CANCELED/EXPIRED，已发出的按
+已保存意图继续使用剩余次数；触发动作终态后其执行前检查与确认查
+询责任一并结束。同一目标录像同时只保持一个未收口流程（规格按触
+发动作唯一约束之上更保守，避免对同一录像双重停止）；受限会话不
+推进残留收场，保守收场按既有规则等待正常会话。
+
+验证：`bootstrap/test_residual_winddown.py` 集成 8 项（真实 run 会
+话：耗尽终态化后残留活动占用保持→执行前检查确认残留→收场流程
+首停确认→活动收场释放并放行触发动作完成；检查失败期间取消触发
+不建流程不停止、检查责任随取消结束；首停发出后取消触发改由孤儿
+扫描用剩余次数完成收场；收场预算与原停止预算分别计数、耗尽保留
+残留且触发动作窗口过期；重启后沿原流程累计次数继续完成并放行触
+发动作；检查可靠空闲直接放行不停止、陈旧活动事实保留；观察到其
+他活动只等待不建流程；首停发出未确认经确认查询空闲收场不再重复
+停止）；`bootstrap/test_recording_stop.py` 新增耗尽终态化 1 项；
+`unit/bootstrap/test_configuration.py` 新增 query 与 residual_stop
+子表校验 4 项。全量单元 3352、集成 15 目录与根 52+342 通过
+（Python 3.11）。Q-07 三类计数独立、O-04 第八释放入口随本段闭合，
+scheduling 计划 Q6 已同步收口。
+
 #### C9 验收映射档案（2026-10-07）
 
 本节是 C9 的终验收映射：将[相机录像验收](../../architecture/camera-verification.md)的单元与集成验收段、[拍摄能力](../../architecture/camera-capture.md)验收节的八段，以及[一致性验证](../../camctl/database/consistency-verification.md)中与拍摄执行直接相关的 R/Q/S/O 共 39 条，逐一映射到本模块的测试与分段验证记录。第五段注记的“报告字节与 R/Q/S/O 映射终验收依赖阶段 2 报告链”前提已由 I5 第一链满足（`tests/integration/test_camctl_report_roundtrip.py` 六用例，含固定报告字节对照 `test_report_save_failure_retry_keeps_determined_bytes`）。结论分三类：已覆盖（列锚点）、开放（列归属边界）、联调范畴（不在软件集成测试门槛内）。
@@ -834,7 +878,7 @@ HEAD 同现，属环境瞬时资源压力非本轮回归；清理残留 python �
 
 - 录像输入验证：`unit/acceptance/test_validation.py` 与 `unit/acceptance/test_definitions.py`。已覆盖。
 - 触发动作取消或过期（停止未发出、已发出、未知、已结束）：`unit/capture/test_recording_finish.py` 取消群、`unit/capture/test_discard.py`。已覆盖。
-- 后续动作触发的残留收场（触发分区、默认 3 次可配置、重复检查不新建预算）：开放，归 C7 残留收场接线。
+- 后续动作触发的残留收场（触发分区、默认 3 次可配置、重复检查不新建预算）：`integration/bootstrap/test_residual_winddown.py` 八用例（第十七段）。已覆盖。
 - 启动与停止尝试上限（默认、分别配置、三入口共享计数、上限降低保留历史次数）：`unit/operations/test_attempt_inputs.py`、`integration/capture/test_retry_intervals.py`、`unit/capture/test_recording_finish.py`。已覆盖。
 - 同一计划时间排序（`plans.id`、数组位置、反转加载不变）：`unit/scheduling/test_rules.py` 顺序群与 `integration/scheduling/test_discovery.py`。已覆盖。
 - 等待重试保留相机（八分区）与多个待启动录像选择（零、一、多）：`unit/scheduling/test_rules.py` 责任群、`integration/scheduling/test_window_expiration.py` 与授予群。已覆盖。
@@ -852,7 +896,7 @@ HEAD 同现，属环境瞬时资源压力非本轮回归；清理残留 python �
 
 **camera-verification 集成验收段：**
 
-- B 触发残留收场后取消 B、停止耗尽后 B 独立收场两段：开放，归 C7 残留收场接线（完成后补 scheduling 计划 Q6 最后入口）。
+- B 触发残留收场后取消 B、停止耗尽后 B 独立收场两段：`integration/bootstrap/test_residual_winddown.py` 取消两段与耗尽段（第十七段）。已覆盖。
 - 上限默认与分别配置、中断恢复、配置修改后新旧动作各自采用：`integration/capture/test_retry_intervals.py`、`integration/operations` 恢复群。已覆盖。
 - 同时间多录像排序与重启重建不变、A 失败重试 B 不启动、A/B 窗口交错 `window_exhausted`：`integration/scheduling/test_discovery.py`、`test_window_expiration.py`、`test_grant_reuse.py`。已覆盖。
 - 正常控制完成原子提交（不取回、无空间仍可完成、三处中断、后续媒体问题只追加）：`integration/capture/test_media_flow.py`、`test_result_confirmation.py` 与 reporting 报告链。已覆盖。
@@ -885,15 +929,14 @@ HEAD 同现，属环境瞬时资源压力非本轮回归；清理残留 python �
 - R-09、R-10：真实 Linux 进程组收场与受管工具建组，归 WSL 部署验证（I1/I2/B7）；系统接口替身分支已覆盖。部分覆盖。
 - R-12：成员检查分支替身已覆盖；`ffmpeg/ffprobe` 及包装程序启动入口审计已由 host-files F6 AST 审计覆盖；第三方主程序实际回收归联调核验。部分覆盖。
 - Q-01 至 Q-06、Q-08 至 Q-12：`unit/operations/test_queries.py`、`integration/operations/test_queries.py`、`test_grant_reuse.py`、`test_listing_rounds.py`、`test_retry_intervals.py`、`test_configuration.py`（bootstrap）。已覆盖。
-- Q-07（B 为 A 建立残留收场、三类计数独立）：开放，归 C7 残留收场接线。
+- Q-07（B 为 A 建立残留收场、三类计数独立）：`integration/bootstrap/test_residual_winddown.py`（第十七段；执行前检查、收场停止、确认查询三类分别断言计数）。已覆盖。
 - S-01 至 S-06：`integration/capture/test_emergency.py`（11 用例，含第九十六段释放组合两用例）与 bootstrap 收场群。已覆盖。
 - S-07（补记前后边界从回放、快照正向、投影逆向三路径一致）：回放与快照等价性由 J/H 系列通用验证覆盖；应急补记专属冻结边界的显式三路径对照未单独建立，随 H7 规模验证与 I6 验收映射核对。部分覆盖。
-- O-01 至 O-06：第九十六段已在 scheduling 计划 Q6 映射注记逐条落档（O-04 八释放入口中七入口已组合覆盖，残留收场入口归 C7）。已覆盖（引用该注记）。
+- O-01 至 O-06：第九十六段已在 scheduling 计划 Q6 映射注记逐条落档；O-04 第八释放入口（残留收场）由第十七段交付，八入口齐。已覆盖（引用该注记）。
 
 **开放项清单（均在本任务责任边界之外）：**
 
-1. C7 残留收场接线：对应 camera-verification 单元残留收场段、集成前两段、Q-07、O-04 第八入口；完成后补 scheduling 计划 Q6 最后入口收口。
-2. WSL 部署验证：真实媒体样本时长一致性、`ffmpeg/ffprobe` 修复完整性（R-12 尾项同类）、R-09/R-10 真实 Linux 进程组，归 I1/I2/B7 范畴；固定 ADB 版本与真实启动行为（R-08 尾句）属目标主机联调。
+1. WSL 部署验证：真实媒体样本时长一致性、`ffmpeg/ffprobe` 修复完整性（R-12 尾项同类）、R-09/R-10 真实 Linux 进程组，归 I1/I2/B7 范畴；固定 ADB 版本与真实启动行为（R-08 尾句）属目标主机联调。
 3. I5 剩余录像与清理跨组件用例：录像链与清理链的跨组件终验收，组件内行为已覆盖。
 4. D5 结果列举的驱动适配消费：生产适配（C9 第十五段 `DriverResultListing`）已建立，真实厂商驱动接入后的消费验证归 D5。
 5. 真实设备联调（camera-verification 末节四段）：明确不作为软件集成测试门槛。

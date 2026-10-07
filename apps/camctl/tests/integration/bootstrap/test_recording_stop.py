@@ -441,3 +441,62 @@ class TestCancelDuringRecording:
         finally:
             await _cancel(task)
         close_runtime(deps)
+
+
+class TestStopBudgetExhausted:
+    async def test_exhausted_stop_finalizes_failed_and_keeps_occupancy(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "exhausted"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        await _submit_plan(
+            tmp_path, cfg, _RecordCatalog(),
+            _record_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=_RecordCatalog())
+        driver = _ActivityDriver()
+        stopper = _StopDouble(failures=99)
+        clock = {"ns": time.monotonic_ns()}
+        task = _run_session(
+            deps, cfg, driver, stopper, clock, ResultsDouble({}))
+        try:
+            await _await_query(
+                db,
+                "SELECT started_at IS NOT NULL FROM device_activities"
+                " WHERE id = 1", (1,))
+            clock["ns"] += 6_000_000_001
+            # 三次停止尝试全部失败：每次失败沿原预算按间隔重试（间隔
+            # 由测试时钟在失败保存后推进），耗尽后停止流程按未确认收
+            # 场，动作按 recording_stop_failed 登记失败终态；设备活动结
+            # 束与占用释放都缺乏可靠依据，执行事实原样保留等待残留收场。
+            await _await_query(
+                db,
+                "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'stop/1'", (2, 1))
+            for expected in (2, 3):
+                clock["ns"] += 3_000_000_000
+                await _await_query(
+                    db,
+                    "SELECT attempts_used FROM operation_runs"
+                    " WHERE responsibility_key = 'stop/1'", (expected,))
+            await _await_query(
+                db,
+                "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'stop/1'", (6, 3))
+            assert stopper.calls == ["stop_recording"] * 3
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (4,))
+            assert _scalar(
+                db, "SELECT error_code, error_details_json"
+                " FROM actions WHERE id = 1") == (
+                14, '{"activity_id":"1","operation_run_id":"2"}')
+            # 失败不登记正式产物，活动保持执行中且占用保持 HELD。
+            assert _scalar(db, "SELECT COUNT(*) FROM outputs") == (0,)
+            assert _scalar(
+                db, "SELECT activity_state, occupancy_state"
+                " FROM device_activities WHERE id = 1") == (2, 1)
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+

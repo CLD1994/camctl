@@ -84,6 +84,18 @@ def _device_seconds(
     value = subtable.get(key, default)
     return value if isinstance(value, Decimal) else Decimal(str(value))
 
+
+def _device_attempts(
+    declaration: Mapping[str, Any], section: str, default: int,
+) -> int:
+    """读取设备子表中已规范化的尝试上限；未配置用默认值。"""
+    subtable = declaration.get(section)
+    if not isinstance(subtable, Mapping):
+        return default
+    value = subtable.get("max_attempts", default)
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        else default
+
 #: 源端摘要观察的契约类型与版本（devices 契约测试共用同一形态）。
 _DIGEST_TYPE = "file_digest"
 _DIGEST_VERSION = 1
@@ -386,6 +398,10 @@ def session_capture_assembly(
             stop_port = port_for(entry, "stop")
         except CapabilityNotDeclaredError:
             stop_port = None
+        try:
+            query_port = port_for(entry, "query")
+        except CapabilityNotDeclaredError:
+            query_port = None
         if results is not None:
             results_port: ResultFilesPort | None = results
         else:
@@ -416,6 +432,7 @@ def session_capture_assembly(
             window_of=_window_of,
             wait_config=wait_config,
             stopper=stop_port,
+            state_query=query_port,
             media=media,
             repair_margin_s=_repair_margin_s(declaration),
             listing_cache=listings,
@@ -424,6 +441,20 @@ def session_capture_assembly(
                 max_attempts=3, timeout_s=Decimal("10"),
                 retry_interval_s=_device_seconds(
                     declaration, "recording", "stop_retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S)),
+            query_config=AttemptConfig(
+                max_attempts=_device_attempts(declaration, "query", 3),
+                timeout_s=_device_seconds(
+                    declaration, "query", "timeout_s", Decimal("10")),
+                retry_interval_s=_device_seconds(
+                    declaration, "query", "retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S)),
+            residual_config=AttemptConfig(
+                max_attempts=_device_attempts(declaration, "residual_stop", 3),
+                timeout_s=_device_seconds(
+                    declaration, "residual_stop", "timeout_s", Decimal("10")),
+                retry_interval_s=_device_seconds(
+                    declaration, "residual_stop", "retry_interval_s",
                     _DEFAULT_RETRY_INTERVAL_S)),
             check_config=AttemptConfig(
                 max_attempts=3, timeout_s=Decimal("10"),

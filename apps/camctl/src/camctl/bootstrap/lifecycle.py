@@ -237,7 +237,9 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
     from camctl.bootstrap.cleanup_assembly import (
         cleanup_flow, session_cleanup_assembly,
     )
-    from camctl.bootstrap.flows import cancel_flow, capture_flow, report_flow
+    from camctl.bootstrap.flows import (
+        cancel_flow, capture_flow, report_flow, residual_flow,
+    )
     from camctl.bootstrap.obtain_assembly import (
         obtain_flow, session_obtain_assembly,
     )
@@ -269,6 +271,14 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
         "scheduling": capture_flow(session_capture_assembly(
+            devices=deps.config.devices,
+            drivers=drivers,
+            staging=staging,
+            wait_config=execution_wait_config,
+        )),
+        # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
+        # 余次数完成停止并收场其查询责任。
+        "residual": residual_flow(session_capture_assembly(
             devices=deps.config.devices,
             drivers=drivers,
             staging=staging,

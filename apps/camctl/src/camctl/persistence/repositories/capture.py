@@ -2218,8 +2218,10 @@ class _ActivityConcludeCommand:
         """按动作类型装载成功终态流程行作为活动结束证据。
 
         照片整次活动随启动调用完成，使用 start 责任；录像与延时活
-        动随停止调用结束，使用 stop 责任。启动调用的成功不证明采
-        集已经结束，正常延时按等待与产物判定解除占用，不经本命令。
+        动随停止调用结束，使用 stop 责任。后续动作建立的残留收场流
+        程可靠确认停止时同样证明活动结束，按活动引用采纳任一成功
+        的收场流程。启动调用的成功不证明采集已经结束，正常延时按
+        等待与产物判定解除占用，不经本命令。
         """
         action_row = connection.execute(
             "SELECT type FROM actions WHERE id = ?", (action_id,)).fetchone()
@@ -2233,6 +2235,15 @@ class _ActivityConcludeCommand:
             "SELECT id, status FROM operation_runs"
             " WHERE responsibility_key = ? AND activity_id = ?",
             (responsibility, activity_id),
+        ).fetchall():
+            facts = {"id": int(row[0]), "status": int(row[1])}
+            rows[int(row[0])] = facts
+            if facts["status"] == 3:
+                found = True
+        for row in connection.execute(
+            "SELECT id, status FROM operation_runs"
+            " WHERE kind = 8 AND activity_id = ?",
+            (activity_id,),
         ).fetchall():
             facts = {"id": int(row[0]), "status": int(row[1])}
             rows[int(row[0])] = facts

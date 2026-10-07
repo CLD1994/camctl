@@ -152,13 +152,13 @@ Q1—Q3 可用受约束替身先实施。Q4 与 O2、C2 联合建立首个启动
 
 **接口与依赖：** 使用 `reevaluate_resource(target: ResourceIdentity) -> None` 通知端口；释放决定由所属业务仓储完整提交。前置交付：C3/C7、X3/X5/X8、O5、N3。
 
-- [ ] 编写失败用例。在 `test_release_never_erases_new_owner` 中迟到观察属于旧活动，`assert new_activity_occupancy_is_held`；组合正常停止、取消、无效果、可靠未派发、恢复、残留收场和应急补记全部入口。ENDED+HELD、UNKNOWN+适用完成依据、实际调用未完分别按 O 系列验收处理。
-  - 进度注记（2026-10-05，2026-10-07 更新）：迟到观察保留新占用、正常停止收场、无效果与可靠未派发的释放判定、输出范围未固定拒绝释放已交付（`test_recovery.py` 19 项 + photo 链收场断言 + 同会话推进用例）；取消入口已随录像停止链接入（`bootstrap/test_recording_stop.py` 3 项）；**恢复对账与应急补记两入口的组合于 2026-10-07 交付**——跨会话对账满足计时停止后活动收场并释放占用（`test_recording_reconcile.py::test_satisfied_timing_stops_and_succeeds` 尾部断言），应急停止可靠补记后经统一释放判定放行、未确认补记不凭内存事实释放（`test_emergency.py` 新增两用例，应急路径不单独放行也不扣留）。八入口仅剩**残留收场**：其接线属 STOP_EXHAUSTED 残留收场（C7）台账项，待 C7 实施后补该入口的组合用例并收口本任务。
+- [x] 编写失败用例。在 `test_release_never_erases_new_owner` 中迟到观察属于旧活动，`assert new_activity_occupancy_is_held`；组合正常停止、取消、无效果、可靠未派发、恢复、残留收场和应急补记全部入口。ENDED+HELD、UNKNOWN+适用完成依据、实际调用未完分别按 O 系列验收处理。
+  - 进度注记（2026-10-05，2026-10-07 更新）：迟到观察保留新占用、正常停止收场、无效果与可靠未派发的释放判定、输出范围未固定拒绝释放已交付（`test_recovery.py` 19 项 + photo 链收场断言 + 同会话推进用例）；取消入口已随录像停止链接入（`bootstrap/test_recording_stop.py` 3 项）；**恢复对账与应急补记两入口的组合于 2026-10-07 交付**——跨会话对账满足计时停止后活动收场并释放占用（`test_recording_reconcile.py::test_satisfied_timing_stops_and_succeeds` 尾部断言），应急停止可靠补记后经统一释放判定放行、未确认补记不凭内存事实释放（`test_emergency.py` 新增两用例，应急路径不单独放行也不扣留）。**残留收场入口已于 2026-10-07 交付**（capture 计划[第十七段](2026-09-30-camctl-capture.md#c9-第十七段的阶段性验证2026-10-07停止预算耗尽的残留收场接线)）：后续动作触发对历史录像的独立收场停止可靠确认或确认查询空闲后，活动以成功收场流程行为停止事实经统一释放判定收场并释放占用（`bootstrap/test_residual_winddown.py` 八用例，含重启累计与触发取消组合）。至此八入口齐：正常停止、取消、无效果、可靠未派发、恢复对账、应急补记、结果核实（延时完成判定）、残留收场。
   - 覆盖映射（2026-10-07 审计）：W-01/W-02 来源处理与选择恢复在 outputs 资格轮次；W-03 重试等待在尝试状态机用例；W-04/W-05/W-13—W-16 启动授予与候选竞争在 `test_resources.py`/`test_grant_reuse.py`/`test_start_action.py`；W-06/W-12 中断与重启恢复由 grant 原键核实链和跨组件 session_recovery 覆盖；W-07—W-12 读取机会在 capture 输入拷贝与 outputs 取回轮次；W-17—W-20 窗口与在途在 `test_window_expiration.py` 与应急停止；O-01/O-02/O-03/O-05/O-06 在 `test_recovery.py` 释放群与 M2 容器时长轮次。三路径历史恢复一致的部分验证依赖 H 系列快照与回放。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。把每个释放入口接入相同占用规则，提交后统一重新判断；原观察必须核对身份，活动结束不单独证明输出范围已解除限制。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 W-01—W-20 与 O-01—O-06 有逐项组合用例，重启不丢候选或责任。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部释放、通知、恢复和迟到结果路径的同类风险；记录门禁证据，建议以“test: 验证资源释放与重启调度”形成独立提交。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/scheduling/test_recovery.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。把每个释放入口接入相同占用规则，提交后统一重新判断；原观察必须核对身份，活动结束不单独证明输出范围已解除限制。
+- [x] 再运行上述命令，要求全部 PASS，并核对 W-01—W-20 与 O-01—O-06 有逐项组合用例，重启不丢候选或责任。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部释放、通知、恢复和迟到结果路径的同类风险；记录门禁证据，建议以“test: 验证资源释放与重启调度”形成独立提交。
 
 ## 模块完成门禁
 

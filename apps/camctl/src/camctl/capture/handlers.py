@@ -274,6 +274,17 @@ class CaptureRuntime:
     #: 会话内已观察的结果列举缓存（动作到列举与登记事实）；装配层
     #: 闭包共享，跨推进轮次保留，避免等待中的重复列举消耗核实名额。
     listing_cache: dict[int, tuple[tuple, tuple]] | None = None
+    #: 设备状态查询端口；未装配时执行前检查与残留收场确认查询不
+    #: 推进，触发动作按自身窗口与取消规则收尾。
+    state_query: Any = None
+    #: 执行前检查与确认查询的本次预算；默认 3 次、单次 10 秒、重试
+    #: 间隔 3 秒（configuration.md#状态查询与产物核实的配置）。
+    query_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
+        max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
+    #: 残留收场停止的本次预算；默认 3 次包含第一次、单次 10 秒、
+    #: 重试间隔 3 秒（camera-recovery.md#后续动作触发的残留收场）。
+    residual_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
+        max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
 
     def action(self, action_id: int) -> Mapping[str, Any]:
         facts = row_facts(self.owned.connection, "actions", action_id)
@@ -689,6 +700,45 @@ def _settle_start_without_sent_at(
     return True
 
 
+def _stop_run_id(runtime: CaptureRuntime, action_id: int) -> int:
+    """读取动作停止流程的主键；预算耗尽收场前流程必然存在。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+        (f"stop/{action_id}",),
+    )) as cursor:
+        found = cursor.fetchone()
+    if found is None:
+        raise LookupError(f"停止流程不存在: {action_id}")
+    return int(found[0])
+
+
+def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
+    """停止预算耗尽的收场：停止流程与动作按未确认失败终态化。
+
+    原停止预算内没有取得可靠停止确认时，停止流程按未确认收场并
+    携带 recording_stop_failed，动作以零产物登记失败终态。设备活
+    动缺少结束与释放依据，执行中事实与占用原样保留，由后续动作
+    触发的残留收场或取消收场处理（camera-recovery.md#停止预算
+    耗尽后的收场责任）。幂等：动作终态后重入走处理器终态分支。
+    """
+    activity_id = _activity_id_of(runtime, action["id"])
+    error = ErrorValue(
+        code="recording_stop_failed", stage="device_stop",
+        details={"activity_id": str(activity_id),
+                 "operation_run_id": str(_stop_run_id(runtime, action["id"]))})
+    receipt = runtime.operations.finish_stale_runs(
+        StaleRunFinish(
+            responsibility_keys=(f"stop/{action['id']}",),
+            status=RunOutcome.UNCONFIRMED,
+            error=error,
+            occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    _finish_capture(
+        runtime, action["id"], (), FileKind.VIDEO,
+        failure=RecordingFailure(code=error.code, details=dict(error.details)))
+
+
 def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
     """会话内缓存录像中段事实装载器；计时锚点跨推进保留。"""
     if context.recording_state is None:
@@ -995,9 +1045,15 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         # 锚点随既往会话失效：按已保存启动墙钟与当前可信墙钟对账。
         await _reconcile_recording(context, action)
         return
+    if decision.phase is RecordingPhase.STOP_EXHAUSTED:
+        if canceled:
+            # 取消触发的停止预算耗尽归取消收场链，不在本分支收场。
+            return
+        _settle_stop_exhausted(context, action)
+        return
     if decision.phase not in (RecordingPhase.CONTROL_COMPLETE,
                               RecordingPhase.VERIFY_FILE_COMPLETE):
-        # 等待计时与预算耗尽的收场随后续接线推进。
+        # 等计时；在途停止由尝试收场后重入推进。
         return
     _conclude_activity(context, action_id)
     if canceled:

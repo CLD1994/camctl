@@ -485,6 +485,44 @@ def _validated_recording(device_id: str, raw: Any) -> Mapping[str, Any] | None:
         ("repair_margin_s", "start_retry_interval_s", "stop_retry_interval_s"))
 
 
+def _validated_attempts_subtable(
+    device_id: str, raw: Any, section: str,
+) -> Mapping[str, Any] | None:
+    """校验查询与残留收场子表：正整数次数加间隔与时限秒。
+
+    次数必须是不小于 1 的整数（bool 不作次数）；重试间隔允许有限
+    非负秒数，0 表示不额外等待；调用时限要求正秒数（configuration
+    .md#状态查询与产物核实的配置、camera-recovery.md#后续动作触发
+    的残留收场）。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ConfigError(f"devices.{device_id}.{section} 必须是表: {raw!r}")
+    normalized = dict(raw)
+    if "max_attempts" in normalized:
+        attempts = normalized["max_attempts"]
+        name = f"devices.{device_id}.{section}.max_attempts"
+        if (isinstance(attempts, bool) or not isinstance(attempts, int)
+                or attempts < 1):
+            raise ConfigError(f"{name} 必须是正整数: {attempts!r}")
+    for key, positive in (("retry_interval_s", False), ("timeout_s", True)):
+        if key not in normalized:
+            continue
+        name = f"devices.{device_id}.{section}.{key}"
+        value = normalized[key]
+        if isinstance(value, str):
+            try:
+                value = Decimal(value)
+            except InvalidOperation as error:
+                raise ConfigError(
+                    f"{name} 必须是数值秒: {normalized[key]!r}"
+                ) from error
+        normalized[key] = _require_positive_seconds(
+            value, name, allow_zero=not positive)
+    return normalized
+
+
 def _validate_devices(raw: Any) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         raise ConfigError(f"devices 必须是表: {raw!r}")
@@ -501,6 +539,11 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
             device_id, normalized.pop("recording", None))
         if recording is not None:
             normalized["recording"] = recording
+        for section in ("query", "residual_stop"):
+            subtable = _validated_attempts_subtable(
+                device_id, normalized.pop(section, None), section)
+            if subtable is not None:
+                normalized[section] = subtable
         for section, keys, positive in (
                 ("copy", ("retry_interval_s",), ()),
                 ("cleanup", ("delete_retry_interval_s", "query_retry_interval_s",

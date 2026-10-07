@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+from camctl.capture.residual import residual_flow as _residual_flow_impl
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import (
@@ -35,20 +36,26 @@ from camctl.persistence.repositories.scheduling import (
 )
 from camctl.session.service import StateDbFailure
 
-__all__ = ["capture_flow", "cancel_flow", "report_flow", "winddown_flow"]
+__all__ = ["capture_flow", "cancel_flow", "report_flow", "residual_flow",
+           "winddown_flow"]
+
+
+def residual_flow(capture_factory):
+    """残留收场推进流程；实现见 camctl.capture.residual。"""
+    return _residual_flow_impl(capture_factory)
 
 
 def _due_pending_actions(
     connection: Any, now_us: int,
-) -> list[tuple[int, int, int]]:
+) -> list[tuple[int, str, int, int]]:
     """从当前投影取到期拍摄动作及窗口事实：待执行、未取消且已到时间。"""
     with closing(connection.execute(
-        "SELECT id, scheduled_at, max_delay_ms FROM actions"
+        "SELECT id, device_id, scheduled_at, max_delay_ms FROM actions"
         " WHERE status = 1 AND cancel_requested = 0"
         " AND type IN (1, 2, 3) AND scheduled_at <= ?"
         " ORDER BY plan_id, input_index", (now_us,)
     )) as cursor:
-        return [(int(row[0]), int(row[1]), int(row[2]))
+        return [(int(row[0]), row[1], int(row[2]), int(row[3]))
                 for row in cursor.fetchall()]
 
 
@@ -93,7 +100,7 @@ def capture_flow(capture_factory: Callable[[Any, str], Any]) -> Callable[[Any], 
         try:
             now = context.clock.utc_micros()
             scheduling = SchedulingRepository()
-            for (action_id, scheduled_at,
+            for (action_id, device_id, scheduled_at,
                  max_delay_ms) in _due_pending_actions(owned.connection, now):
                 if now > scheduled_at + max_delay_ms * 1000:
                     # 窗口外仍未派发：按持久化观察区分错过与耗尽。
@@ -125,6 +132,14 @@ def capture_flow(capture_factory: Callable[[Any, str], Any]) -> Callable[[Any], 
                     raise StateDbFailure(
                         f"窗口观察事务未完成（{observation.kind.value}）:"
                         f" {observation.error}")
+                # 开始前的残留门：设备上有已结束动作留下的执行中活动
+                # 时，按需查询并推进残留收场；未解除前动作保持待执行。
+                runtime = capture_factory(owned, device_id)
+                if runtime is not None:
+                    from camctl.capture.residual import pass_residual_gate
+                    if not await pass_residual_gate(
+                            runtime, runtime.action(action_id)):
+                        continue
                 outcome = scheduling.start_action(
                     StartActionRequest(
                         action_id=action_id,

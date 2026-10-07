@@ -228,3 +228,59 @@ class TestDeviceRetryIntervalConfig:
                 load_config(
                     {"devices": {"cam-1": self._device(subtable, 12)}},
                     ConfigDefaults())
+
+
+class TestAttemptSubtableConfig:
+    """devices.<id>.query 与 residual_stop：正整数次数加间隔与时限秒。
+
+    查询子表管五种查询用途共用的执行参数；残留收场子表管后续动
+    作停止历史录像的独立预算（camera-recovery.md#后续动作触发的
+    残留收场、configuration.md#状态查询与产物核实的配置）。
+    """
+
+    @staticmethod
+    def _device(section: str, subtable) -> dict:
+        return {"kind": "camera", "driver": "adb", section: subtable}
+
+    def test_attempts_accept_int_and_seconds_accept_number_and_text(
+            self) -> None:
+        for section in ("query", "residual_stop"):
+            cfg = load_config(
+                {"devices": {"cam-1": self._device(section, {
+                    "max_attempts": 5,
+                    "retry_interval_s": "2.5",
+                    "timeout_s": 8,
+                })}}, ConfigDefaults())
+            sub = cfg.devices["cam-1"][section]
+            assert sub["max_attempts"] == 5
+            assert sub["retry_interval_s"] == Decimal("2.5")
+            assert sub["timeout_s"] == Decimal("8")
+
+    def test_attempts_reject_non_positive_and_non_int(self) -> None:
+        for section in ("query", "residual_stop"):
+            for bad in (0, -1, True, None, "3", 3.0):
+                with pytest.raises(ConfigError, match="max_attempts"):
+                    load_config(
+                        {"devices": {"cam-1": self._device(section, {
+                            "max_attempts": bad})}}, ConfigDefaults())
+
+    def test_timeout_requires_positive_and_interval_allows_zero(
+            self) -> None:
+        for section in ("query", "residual_stop"):
+            cfg = load_config(
+                {"devices": {"cam-1": self._device(section, {
+                    "retry_interval_s": 0})}}, ConfigDefaults())
+            assert cfg.devices["cam-1"][section][
+                "retry_interval_s"] == Decimal("0")
+            for bad in (0, -1, "NaN", "Infinity", 1.0):
+                with pytest.raises(ConfigError, match="timeout_s"):
+                    load_config(
+                        {"devices": {"cam-1": self._device(section, {
+                            "timeout_s": bad})}}, ConfigDefaults())
+
+    def test_subtable_must_be_table(self) -> None:
+        for section in ("query", "residual_stop"):
+            with pytest.raises(ConfigError, match=section):
+                load_config(
+                    {"devices": {"cam-1": self._device(section, 12)}},
+                    ConfigDefaults())
