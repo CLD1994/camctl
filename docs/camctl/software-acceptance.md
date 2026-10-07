@@ -1396,12 +1396,12 @@
 
 #### 验收 68
 - 原文：[验收 68](database/consistency-verification.md#独立历史与报告重建)（带游标分页与分批处理的额外读取成本）。
-- 结论：部分覆盖
-- 归属：R 分页与阶段 7 规模验证（reporting 计划、路线图）。
+- 结论：已覆盖
+- 归属：R 分页、H7 规模测量（reporting 计划、history 计划）。
 - 生产入口：apps/camctl/src/camctl/reporting/encoding.py
-- 测试：apps/camctl/tests/integration/reporting/test_encoding.py
-- 证据：分页等价（对象集合、顺序、字节不变）已覆盖（reporting 计划分段验证记录）。
-- 未核验前提：带统计信息样本上的查询计划、读取量与额外成本测量，归路线图阶段 7 规模验证行。
+- 测试：apps/camctl/tests/integration/reporting/test_encoding.py、apps/camctl/tests/integration/history/test_complete_history.py
+- 证据：分页等价（对象集合、顺序、字节不变）已覆盖（reporting 计划分段验证记录）；带统计信息的代表性样本上分页选择与候选扫描命中实际索引、无临时排序，页大小 100 与 7 取得相同升序集合，恢复批次 128 与 3 结果一致（history 计划 H7 验证记录，Windows 开发机）。
+- 未核验前提：无
 
 #### 验收 H-01
 - 原文：[验收 H-01](database/consistency-verification.md#快照成员与历史文件集合)（逐表自身记录归属）。
@@ -1477,21 +1477,21 @@
 
 #### 验收 P-03
 - 原文：[验收 P-03](database/consistency-verification.md#报告对象分页的具体查询验证)（真实首批与后续游标查询的覆盖索引）。
-- 结论：部分覆盖
-- 归属：P6 索引成本与阶段 7（persistence 计划、路线图）。
+- 结论：已覆盖
+- 归属：P6 索引成本与 H7 规模测量（persistence 计划、history 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
-- 测试：apps/camctl/tests/integration/persistence/test_cache_queries.py
-- 证据：persistence 计划 P6 收口验证记录（EXPLAIN QUERY PLAN 断言五张体量表无 SCAN）。
-- 未核验前提：报告对象分页查询在带统计信息样本上的实际计划与执行工作量，归路线图阶段 7 规模验证行。
+- 测试：apps/camctl/tests/integration/persistence/test_cache_queries.py、apps/camctl/tests/integration/history/test_complete_history.py
+- 证据：persistence 计划 P6 收口验证记录（EXPLAIN QUERY PLAN 断言五张体量表无 SCAN）；ANALYZE 后的代表性样本上首批与续读经 `report_changes_by_entity` 覆盖索引检索、无临时排序（history 计划 H7 验证记录，Windows 开发机）。
+- 未核验前提：无
 
 #### 验收 P-04
 - 原文：[验收 P-04](database/consistency-verification.md#报告对象分页的具体查询验证)（数据形态组合下的扫描增长）。
-- 结论：部分覆盖
-- 归属：阶段 7 规模验证（路线图）。
-- 生产入口：apps/camctl/src/camctl/reporting/encoding.py
-- 测试：apps/camctl/tests/integration/persistence/test_cache_queries.py
-- 证据：查询计划不随规模退化为全表扫描已由 P6 索引断言部分表达。
-- 未核验前提：均匀/高重复/稀疏形态与页面缩小的实际工作量测量，归路线图阶段 7 规模验证行。
+- 结论：已覆盖
+- 归属：H7 规模测量（history 计划）。
+- 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
+- 测试：apps/camctl/tests/integration/history/test_complete_history.py
+- 证据：均匀（对象与目录行等量）、高重复（少数对象大量行）与稀疏（窗口外）三种形态混合样本上分页读完整、升序无重复，页大小 100 与 7 取得相同集合，高重复对象只贡献一次身份，计划不退化为全表扫描（history 计划 H7 验证记录，Windows 开发机）。
+- 未核验前提：无
 
 #### 验收 P-05
 - 原文：[验收 P-05](database/consistency-verification.md#报告对象分页的具体查询验证)（分页期间提交新事件的冻结范围不变）。
@@ -1504,14 +1504,99 @@
 
 #### 验收 P-06
 - 原文：[验收 P-06](database/consistency-verification.md#报告对象分页的具体查询验证)（候选峰值与完整选择工作量）。
-- 结论：部分覆盖
-- 归属：P5 批分离与阶段 7（persistence 计划、路线图）。
+- 结论：已覆盖
+- 归属：P5 批分离与 H7 规模测量（persistence 计划、history 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py
-- 测试：apps/camctl/tests/integration/persistence/test_repositories.py
-- 证据：批分离与不可变批次已覆盖（persistence 计划 P5 收口验证记录）。
-- 未核验前提：候选峰值与实际工作量测量，归路线图阶段 7 规模验证行。
+- 测试：apps/camctl/tests/integration/persistence/test_repositories.py、apps/camctl/tests/integration/history/test_complete_history.py
+- 证据：批分离与不可变批次已覆盖（persistence 计划 P5 收口验证记录）；代表性样本上候选扫描每批不超过固定批量、分页取得的候选集合与独立全量选择一致、半数晚于边界的候选被窗口过滤（history 计划 H7 验证记录，Windows 开发机）。
+- 未核验前提：无
+
+## 九、跨模块契约场景
+
+[跨模块契约检查](verification.md#跨模块契约检查)的十项组合场景在此映射到实际生产入口、测试与验证证据。场景条目独立于上文验收条目编号；每条包含五项：规则、结论、生产入口、测试、证据、未核验前提，结论分类与上文一致。单个模块测试通过不代表整条业务链组合成立，本节只登记已有组合证据的边界。
+
+#### 场景 配置变化后继续工作
+- 规则：[本地配置变化与未完成工作](../architecture/configuration.md#本地配置变化与未完成工作)、[设备绑定异常的影响范围](../architecture/configuration.md#设备绑定异常的影响范围)
+- 结论：部分覆盖
+- 生产入口：apps/camctl/src/camctl/bootstrap/config.py、apps/camctl/src/camctl/session/service.py
+- 测试：apps/camctl/tests/unit/bootstrap/test_configuration.py、apps/camctl/tests/integration/bootstrap/test_initialization.py、apps/camctl/tests/integration/outputs/test_work_files.py、apps/camctl/tests/integration/session/test_session.py
+- 证据：配置加载、部分覆盖组合校验与非法值拒绝由单元配置用例覆盖；绑定异常拒绝初始化且保持原绑定；工作文件清理按剩余额度与已用次数推进；会话每轮重新驱动流程。各模块计划的分段验证记录。
+- 未核验前提：同一状态库上配置变化前后连续运行、拍摄/取回/清理/取消核对原绑定且历史次数与终态保持的组合剧本；调用结束晚于流程结束。归路线图阶段 3 收口行与阶段 4 组合行。
+
+#### 场景 延时摄影等待与完成
+- 规则：[设备自行结束时的等待与完成核实](../architecture/camera-capture.md#设备自行结束时的等待与完成核实)、[相机验证](../architecture/camera-verification.md)
+- 结论：部分覆盖
+- 生产入口：apps/camctl/src/camctl/capture/handlers.py、apps/camctl/src/camctl/persistence/repositories/timelapse.py
+- 测试：apps/camctl/tests/integration/capture/test_result_confirmation.py
+- 证据：发送锚点保存、跨检查轮恢复、时间与产物双依据、不满足保存已知失败保持占用、未确认标记等分区均有失败用例并纳入回归（capture 计划分段验证记录）。
+- 未核验前提：单文件、多文件、合法空结果、集合未齐、读取错误、核实耗尽及跨运行配置变化的完整结果核实矩阵，归路线图阶段 4 结果核实行。
+
+#### 场景 普通交付移入 ready 后，结果保存前中断
+- 规则：[普通交付的保存顺序与中断恢复](../architecture/file-handoff.md#普通交付的保存顺序与中断恢复)、[产物验证](../architecture/output-verification.md)
+- 结论：已覆盖
+- 生产入口：apps/camctl/src/camctl/outputs/handoff.py、apps/camctl/src/camctl/outputs/copy.py
+- 测试：apps/camctl/tests/integration/outputs/test_delivery.py、apps/camctl/tests/integration/host_files/test_handoff.py
+- 证据：交付恢复决策表全部分区（意图保存未知、目录同步失败、主机先领取后保存、move 未落重新观察、发布恢复延续身份、取消后观察仍保存、既有 ready 不覆盖、已领取文件撤回不改写）与真实目录原子移动用例通过（outputs 与 host_files 计划分段验证记录）。
+- 未核验前提：无
+
+#### 场景 来源结束后，取回与清理同时具备条件
+- 规则：[延后执行时的取回与清理顺序](../architecture/outputs.md#延后执行时的取回与清理顺序)、[取回读取保护与清理](database/consistency-verification.md#取回读取保护与清理)
+- 结论：已覆盖
+- 生产入口：apps/camctl/src/camctl/outputs/qualification.py、apps/camctl/src/camctl/outputs/cleanup_flow.py
+- 测试：apps/camctl/tests/integration/outputs/test_qualification.py、apps/camctl/tests/integration/outputs/test_cleanup_guards.py
+- 证据：不同产物独立到期、内部与交付准备不竞争相机槽、既有读取保护保持原拷贝、清理限制拒绝并记录、删除进行中专用错误、跨设备候选不阻塞及清理守卫成员终态分区均通过（outputs 计划分段验证记录）。
+- 未核验前提：无
+
+#### 场景 取消动作自身被取消
+- 规则：[取消阶段与目标范围](../architecture/task-cancellation.md#取消动作自身被取消)、[取消计划](../superpowers/plans/2026-09-30-camctl-cancellation.md)
+- 结论：已覆盖
+- 生产入口：apps/camctl/src/camctl/cancellation/service.py、apps/camctl/src/camctl/cancellation/targets.py
+- 测试：apps/camctl/tests/integration/cancellation/test_controller_cancel.py、apps/camctl/tests/integration/cancellation/test_targets.py
+- 证据：后一次取消不扩大范围直接包含原目标、完整目标集合包含自身时动作失败且无任何取消项、取消动作自身成功后原目标继续、中断边界幂等重入及原键恢复不产生部分取消均通过（cancellation 计划分段验证记录）。
+- 未核验前提：无
+
+#### 场景 取消后的完整副本与录像处理中间文件
+- 规则：[取回中间文件的保留与清理](../architecture/obtaining-outputs.md#取回中间文件的保留与清理)、[内部中间文件的保留与清理](../architecture/camera-recovery.md#内部中间文件的保留与清理)、[中间文件清理的运行预算](../architecture/file-handoff.md#中间文件清理的运行预算)
+- 结论：已覆盖
+- 生产入口：apps/camctl/src/camctl/outputs/copy.py、apps/camctl/src/camctl/outputs/work_files.py
+- 测试：apps/camctl/tests/integration/outputs/test_copy_resume.py、apps/camctl/tests/integration/outputs/test_work_files.py、apps/camctl/tests/integration/capture/test_media_processing.py
+- 证据：拷贝续传中断矩阵（未确认尾截断、同步失败不推进、目标缺失保持事实、设备源身份变化拒绝）、历史扫描固定上界与跨轮游标、单轮绕回、删除失败保留责任及录像处理门槛三时点与决定提交前后中断均通过（outputs 与 capture 计划分段验证记录）。
+- 未核验前提：无
+
+#### 场景 日志错误触发副本交付
+- 规则：[日志适配与写入完成通知](logging-runtime.md#日志适配与写入完成通知)、[日志交付](../architecture/log-delivery.md)、[故障标记](../architecture/log-failure-marker.md)
+- 结论：已覆盖
+- 生产入口：apps/camctl/src/camctl/logging_runtime/copies.py、apps/camctl/src/camctl/session/service.py
+- 测试：apps/camctl/tests/integration/logging_runtime/test_copies.py、apps/camctl/tests/integration/session/test_session.py、tests/integration/test_camctl_report_roundtrip.py
+- 证据：副本包含触发错误与轮换竞争字节、标记创建失败先于复制、发布失败清理暂存、失败交付不重试、状态库不可用不阻塞交付（组件层与跨组件两处）及会话内触发链均通过（logging_runtime、session 计划与集成计划 I 系列验证记录）。
+- 未核验前提：无
+
+#### 场景 业务事实保存后生成历史报告
+- 规则：[独立历史与报告重建](database/consistency-verification.md#独立历史与报告重建)、[报告验证](../architecture/report-acceptance.md)
+- 结论：已覆盖
+- 生产入口：apps/camctl/src/camctl/persistence/repositories/history.py、apps/camctl/src/camctl/reporting/generation.py
+- 测试：apps/camctl/tests/integration/history/test_complete_history.py、apps/camctl/tests/integration/reporting/test_generation.py
+- 证据：综合剧本全部对象按初始回放、快照正向与当前投影逆向三路径恢复并与独立事件推导映像逐行核对；读取批次与恢复方向变化不改结果；同一报告重建字节不变。见 history 计划 H7 验证记录与 reporting 计划分段记录。
+- 未核验前提：无
+
+#### 场景 公共协议跨组件读写
+- 规则：[客户端适配计划](../superpowers/plans/2026-09-30-report-client-adaptation.md)、[跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md)
+- 结论：已覆盖
+- 生产入口：protocol/schemas
+- 测试：tests/integration/test_camctl_cancellation_roundtrip.py、tests/integration/test_camctl_capture_roundtrip.py、tests/integration/test_camctl_media_roundtrip.py、tests/integration/test_camctl_output_roundtrip.py、tests/integration/test_camctl_report_roundtrip.py、tests/integration/test_camctl_session_recovery.py、apps/client/tests/integration
+- 证据：能力导出、计划生成、run/submit 受理、报告生成、导入及 ACK 消费同一协议样例；精确 ID、请求复用、时间、关联与部分结果用例在 Windows 全量通过（集成计划 I4/I5 验证记录）。
+- 未核验前提：无
+
+#### 场景 camctl 退出后仍有工具进程
+- 规则：[接入模块的本地进程收场责任](../host-demo/design.md#接入模块的本地进程收场责任)、[I2 保留退出记录、分批检查原组与最终回收](../superpowers/plans/2026-09-30-camctl-integration.md#i2-保留退出记录分批检查原组与最终回收)
+- 结论：部分覆盖
+- 生产入口：apps/camctl/src/camctl/session/host_guard.py
+- 测试：tests/integration/test_camctl_process_recovery.py、apps/host-demo/tests/integration/test_process.c
+- 证据：下一调用等待原组收场、多个遗留进程全部等待、状态未知非空、退出未观察继续等待、Linux 组收场阻塞与子进程继承原组用真实进程验证通过（集成计划 I 系列验证记录）。
+- 未核验前提：C 接入模块独立组建组、保留退出记录的有限批次检查与最终回收完整组合（成员退出、权限错误、信息不完整与解析失败分别处理），归集成计划 I1/I2 与 B7 发行物验证。
 
 ## 执行记录
 
+- 2026-10-08（Windows 开发机，uv CPython 3.11）：新增[九、跨模块契约场景](#九跨模块契约场景)十项映射并扩展 `tests/integration/test_camctl_acceptance_map.py` 检查器（场景清单解析自 verification.md 表格、字段与引用逐项校验、条目解析不再跨章节读取）；验收 68、P-03、P-04、P-06 依据 history 计划 H7 规模测量记录升级为已覆盖。`tests/integration/test_camctl_acceptance_map.py` 3 项全部通过。
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 全部通过；引用的模块测试文件与生产入口路径逐一核验存在。此前的最近全量回归见[集成计划验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i4-验证记录2026-10-07)（Windows 单元 3353、根跨组件 52+4 跳+342 子测试、bootstrap 87、session 82；WSL 单元 3352+1 跳、reporting 345 等）。
-- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）。截至本记录：已覆盖 129 条，部分覆盖 31 条，开放 3 条；开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行，不作为行为通过的依据。
+- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 133 条，部分覆盖 27 条，开放 3 条；契约场景已覆盖 7 项，部分覆盖 3 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行，不作为行为通过的依据。

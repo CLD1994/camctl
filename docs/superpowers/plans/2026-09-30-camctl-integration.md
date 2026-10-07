@@ -240,7 +240,7 @@ R-09/R-10 的承载边界：本轮以真实 Linux 进程验证受管媒体工具
 
 - [x] 先审计各专题及数据库验收，建立 `test_every_software_contract_has_evidence_owner` 对应的覆盖检查；它验证映射结构和引用，不把有一行映射当行为通过。缺少生产入口或可证伪用例时，明确返回所属模块任务。（2026-10-08 按[I6 验证记录](#i6-验证记录2026-10-08)建立[软件验收映射](../../camctl/software-acceptance.md)：163 条全部逐条映射，开放与部分覆盖条目逐条归属模块任务或路线图行。）
 - [x] 先运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_acceptance_map.py -q`，确认缺项被识别；补齐实现及证据后再通过。随后分别执行共享契约中的全部单元、组件集成命令，以及 `uv run --project apps/camctl --group test pytest tests/integration -q`、客户端分类测试与 CTest；执行现有协议、文档和数据库规格检查。只修复已定位根因的失败，不删除测试或放宽规则。（2026-10-08 全量命令执行完成，无失败需修复；命令、环境与数字见[I6 验证记录](#i6-验证记录2026-10-08)第二项。）
-- [ ] 独立核验实际实现、事件校验器、真实导入关系、所有外部调用及异常分支，逐项收齐 C9、X12、N6、R9、H7、F7、D5 软件部分及其他模块门禁。类型、状态、目录、缓存与报告是否遗漏成员须用独立预期核对。
+- [x] 独立核验实际实现、事件校验器、真实导入关系、所有外部调用及异常分支，逐项收齐 C9、X12、N6、R9、H7、F7、D5 软件部分及其他模块门禁。类型、状态、目录、缓存与报告是否遗漏成员须用独立预期核对。（2026-10-08 完成：名单七项任务 checkbox 全部收齐——C9/X12/N6/R9/F7/D5 六项经全量回归复核，H7 为最后一项并在本轮交付独立预期核对（[history 计划 H7 验证记录](2026-09-30-camctl-history.md#h7-验证记录2026-10-08windows-开发机)），33 个登记事件类型与 104 个分支经覆盖映射逐项锚定；verification.md 跨模块契约十场景补入[软件验收映射第九节](../../camctl/software-acceptance.md#九跨模块契约场景)并扩展检查器，验收 68/P-03/P-04/P-06 升级为已覆盖（133/27/3）；X10 剩余（真实驱动兼容性声明、跨组件三种拍摄与部分取回组合、取消收场消费 N 链）与 B4 两项开放功能（目录切换允许分支、运行库 configuration_error 分类）按既有归属登记为开放条目，不折叠。详见[I6 验证记录](#i6-验证记录2026-10-08)第三项。）
 - [ ] 将软件证据交 B7；B7 另行验证源码目录之外的构建和安装。记录 ARM64 运行库、外部工具、真实设备映射、目标资源和物理断电各自的检查输入、执行者和通过条件，不把软件替身的结果写成设备结论。
 - [ ] 更新有效运行文档和实际进度，核对没有隐藏的未决行为或消费者缺口；建议提交“docs: 记录第一版软件验收与部署交接”。
 
@@ -259,6 +259,14 @@ WSL Ubuntu x86_64（cpython-3.11.17、SQLite 3.53.1、ffprobe/ffmpeg 6.1.1；wor
 执行中记录到两处环境事实，均定性为非回归：其一，bootstrap 目录首跑在第 11 个用例处停滞 30 分钟（输出直写日志确认无进展），清理残留 python 进程后整目录复跑 87 项全绿（148 秒），其余目录一次通过，符合本机既有瞬时拖挂的认定与处理方式；其二，WSL `/usr/bin/node` 为 v16.20.2，不支持客户端驱动使用的 `node --import`（需 20.6 以上），`test_camctl_report_roundtrip.py` 其余 5 个用例在该环境无法运行客户端驱动——这 5 个用例属 Windows 侧验证范围且本轮已全部通过；B7 在 WSL 验证发行物如需客户端链路，须先更新该环境 Node 版本。
 
 验证（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 2 项通过；`node scripts/check-doc-links.mjs` 3113 个链接通过。
+
+第三项（独立核验）完成（2026-10-08，Windows 开发机）：
+
+名单任务收齐：C9、X12、N6、R9、F7、D5 六项任务的 checkbox 此前已全部勾选，本轮以全量回归复核其门禁用例仍然通过；H7 是名单中最后一项未收任务，本轮按 TDD 交付——综合剧本上独立事件推导映像与生产三路径恢复逐行核对，先行暴露并修复交付/动作恢复遗漏读取流程与尝试行的 H-01 归属缺口（`_entity_row_ids` deliveries 分支补交付读取流程与尝试行、actions 分支补非交付流程与尝试行），33 个登记事件类型经 `_EVENT_COVERAGE` 映射逐项锚定（11 型剧本真实产生、21 型锚定既有用例、BASELINE_CHUNK 无生产写入方显式登记）；代表性样本（1.6 万目录行与 1.6 万文件行，ANALYZE 后）核对了分页选择与候选扫描的实际索引、去重与窗口过滤。命令、数字与环境见[history 计划 H7 验证记录](2026-09-30-camctl-history.md#h7-验证记录2026-10-08windows-开发机)。
+
+十场景映射：verification.md 跨模块契约检查的十项场景补入[软件验收映射第九节](../../camctl/software-acceptance.md#九跨模块契约场景)，每项含规则、结论、生产入口、测试、证据与未核验前提；结论为已覆盖 7 项、部分覆盖 3 项（配置变化组合剧本、延时摄影结果核实矩阵、C 模块完整收场组合，未核验前提分别归属路线图行与 I1/I2、B7）。检查器新增 `test_every_contract_scenario_is_mapped`：场景清单从 verification.md 表格解析（权威来源）、字段完整、多路径与规则链接逐项核验真实存在；条目解析改为遇标题行停止，不再跨章节读取。验收结论 68、P-03、P-04、P-06 依据 H7 规模测量升级为已覆盖，统计更新为 163 条中已覆盖 133、部分覆盖 27、开放 3（F-07/F-08/V-04，B4 已登记开放项），由统计一致性用例锁定。
+
+全量回归（本轮生产改动影响面）：history 91、persistence 74、reporting 345、outputs 1788 加 1 项跳过、acceptance 226、bootstrap 87、cancellation 44、capture 210、contracts 39、devices 46、host_files 81 加 5 项跳过、logging_runtime 28、operations 183、scheduling 125、session 82；单元全量 3353；根 Python 集成 55 通过、4 项平台条件跳过、342 子测试；check-event-transitions、check-report-dependencies、check-database-spec（3080 项断言）、check-doc-links（3141 链接）、check-protocol 通过。新测试文件 `history/test_complete_history.py` 6 项全部通过。
 
 ## 执行命令与最终门禁
 
