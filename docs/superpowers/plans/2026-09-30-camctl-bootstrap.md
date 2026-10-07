@@ -169,11 +169,25 @@ B4 开放项（2026-10-08 随 I6 验收映射审计登记，见[软件验收映�
 
 **接口与依赖：** 验证 installed camctl 入口、包资源、版本及外部工具检查；沿用模块公共接口。前置交付：I6、B1—B6 及其他模块的软件门禁；不以 B7 自身完成作为前置。
 
-- [ ] 编写失败用例。建立 `test_distribution_works_outside_repository`，在仓库之外安装正式发行物，`assert exit_code == 0` 验证 init、describe、submit 和设备替身 run；移除源码目录可见性后仍可读取所需资源。缺失资源与不符合 SQLite 条件的解释器应明确失败。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_distribution.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。补齐构建说明、安装与运行检查文档、目标 Python/SQLite/工具条件；运行时依赖只从锁文件取得。ARM64 与真实设备结果另记，不用开发容器通过代替。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 发行物自包含所需权威资源且不携带测试依赖，部署待核验事项明确。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有资源定位是否仍依赖当前 cwd 或源码路径；记录门禁证据，建议以“build: 验证独立发行与部署检查”形成独立提交。
+- [x] 编写失败用例。建立 `test_distribution_works_outside_repository`，在仓库之外安装正式发行物，`assert exit_code == 0` 验证 init、describe、submit 和设备替身 run；移除源码目录可见性后仍可读取所需资源。缺失资源与不符合 SQLite 条件的解释器应明确失败。（2026-10-08 交付：`test_distribution.py` 三用例共用模块级安装夹具——`uv build` 构建 wheel、`uv export --frozen --no-dev` 从锁文件导出运行时依赖、独立虚拟环境安装后 `--no-deps` 装 wheel；替身桥与夹具以副本进入部署目录，工作目录与进程环境（清除 PYTHONPATH）都不指向源码仓库，另以 `camctl.__file__` 断言包来自安装环境。全链用例另覆盖 `--version`、未初始化部署的 run 拒绝（日常入口不创建状态库）与损坏状态库的会话失败及日志落盘；资源缺失与 SQLite 条件不满足两用例断言 init 明确失败。）
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/bootstrap/test_distribution.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。（首轮三处失败均为测试自身笔误——config.toml 反斜杠未按 TOML 基本字符串转义、动作状态枚举成功/失败写反——修正后全绿；发行物在仓库外的构建、安装与运行未暴露生产缺口，本任务按 F6/F7/P5/P6 先例记录为对既有实现的收口验证，两故障分支断言的是既有明确失败行为，非先红新增。）
+- [x] 实施本任务。补齐构建说明、安装与运行检查文档、目标 Python/SQLite/工具条件；运行时依赖只从锁文件取得。ARM64 与真实设备结果另记，不用开发容器通过代替。（[构建、安装与运行检查](../../camctl/implementation.md#构建安装与运行检查)：构建钩子从仓库权威来源刷新包资源、sdist 内副本规则、锁文件导出与 `--no-deps` 安装三步、init 的运行库前置核验与明确失败、外部工具裸名依赖；运行时依赖以 `uv export --frozen --no-dev` 的钉定版本安装。）
+- [x] 再运行上述命令，要求全部 PASS，并核对 发行物自包含所需权威资源且不携带测试依赖，部署待核验事项明确。（Windows 本文件 3 项通过 6.51s、bootstrap 目录 90 项通过 154.26s；WSL x86 合规环境（部署验证裁决）cpython-3.11.17/SQLite 3.53.1 下 3 项通过 4.45s。wheel 元数据恰声明三个运行时依赖、安装环境不含 pytest/pytest_asyncio/pytest_mock、直接依赖版本与锁文件一致；真实 ARM64 硬件与真实设备核验登记于[部署交接与待核验项](../../camctl/verification.md#部署交接与待核验项)。数字见下方验证记录。）
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有资源定位是否仍依赖当前 cwd 或源码路径；记录门禁证据，建议以“build: 验证独立发行与部署检查”形成独立提交。（包资源只经 `importlib.resources` 按登记名读取（`camctl/resources.py` 拒绝任意路径），安装来源断言证明无 cwd 或源码路径依赖；提交 3f475bf。）
+
+### B7 验证记录（2026-10-08）
+
+测试形态：`apps/camctl/tests/integration/bootstrap/test_distribution.py` 三用例（仓库外全链、包资源缺失、SQLite 条件不满足）共用模块级安装夹具——在临时目录 `uv build` 构建正式 wheel；`uv export --project apps/camctl --frozen --no-dev --no-emit-project` 从锁文件导出运行时依赖（版本与哈希钉定）；`uv venv --python` 复用当前测试解释器创建独立环境，先装锁文件依赖再 `--no-deps` 安装 wheel；替身桥 `_camctl_stub_entry.py` 与 `camctl_fixtures.py` 以副本进入部署目录，CLI 子进程的工作目录保持在仓库之外且不继承 PYTHONPATH。
+
+全链断言：`camctl.__file__` 位于安装环境而非仓库；`available_resources()` 含 `sql/core.sql` 且可读取；wheel 元数据的 Requires-Dist 恰为 concurrent-log-handler、janus、jsonschema 三个运行时依赖；三个直接依赖的安装版本与锁文件导出一致；安装环境中 pytest、pytest_asyncio、pytest_mock 均不可导入；`--version` 输出 0.1.0；`init` 退出 0、stdout 为空、创建状态库；`describe`（经替身登记）导出一台设备且包含 camera_take_photo；`submit` 与 `run` 均以 `{"kind": "succeeded"}` 退出 0；run 会话在 ready 目录发布状态报告文件，动作表终态为成功（status=3）。run 会话内报告子进程经生产入口启动并完成，覆盖报告子进程的运行库入口检查。
+
+边界与日志断言：未初始化的部署上 `run` 以退出码 1 拒绝且不创建状态库（"日常入口不创建"部署规则，stdout 为空、错误在 stderr）；显式初始化后损坏状态库，`run` 以 `{"kind": "error", "reason": "state_db_error"}` 失败，会话错误记录经日志链写入配置的 `camctl.log`（干净会话无记录不创建日志文件是既定行为——关闭摘要只在有丢弃记录时写出，日志验证因此走失败路径）。
+
+故障分支：删除安装包内 `runtime/sqlite-runtime.json` 后 `init` 非零退出且错误输出指明该资源名，不静默创建不完整状态库（资源读取失败经 `ResourceError` 明确失败；错误通道的进一步分类属 B4 已登记开放项）；以解释器内属性替换模拟 SQLite 3.40.0（低于主线最低版本，条件判定本身另有单元测试），`init` 以退出码 1 报告"运行库条件不满足……不满足统一运行条件"，stdout 保持为空（`RuntimeLibraryError` 经 `StateDatabaseError` 通道由 init 优雅报告）。
+
+执行环境与结果：Windows 开发机（uv CPython 3.11/SQLite 3.53.1）本文件 3 项通过 6.51s、bootstrap 目录 90 项通过 154.26s；WSL x86 Ubuntu 合规环境（按部署验证裁决视同 ARM64；cpython-3.11.17 链接 SQLite 3.53.1，测试内容为最终版本）本文件 3 项通过 4.45s。两环境的构建、依赖导出与安装全部在源码仓库之外的临时目录完成。
+
+边界：真实 ARM64 硬件的编译与运行差异（C 模块工具链、glibc）、真实设备行为与目标资源实测按[部署交接与待核验项](../../camctl/verification.md#部署交接与待核验项)由对应执行者核验，不以本记录的 x86 通过代替；WSL 侧 Node v16 不支持客户端驱动链路所需的 node --import，客户端链路的 WSL 验证须先升级 Node（Windows 侧已验证，不折叠）。
 
 ## 模块完成门禁
 

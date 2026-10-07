@@ -1167,12 +1167,12 @@
 
 #### 验收 V-04
 - 原文：[验收 V-04](database/consistency-verification.md#sqlite-运行库与部署版本)（目标 Python 3.11/ARM64 发行物固定构建验证）。
-- 结论：开放
-- 归属：B7 发行物验证（bootstrap 计划）。
+- 结论：部分覆盖
+- 归属：真实 ARM64 硬件的构建与运行差异复验，见[部署交接与待核验项](verification.md#部署交接与待核验项)。
 - 生产入口：apps/camctl/src/camctl/persistence/runtime.py
-- 测试：apps/camctl/tests/integration/persistence/test_runtime.py
-- 证据：开发环境（Windows 与 WSL cpython-3.11.17/SQLite 3.53.1）的实际检查已通过；WSL 环境为 B7 复用（集成计划 I5 第六条链）。
-- 未核验前提：目标 ARM64 发行物的固定构建运行与记录，归 B7。
+- 测试：apps/camctl/tests/integration/bootstrap/test_distribution.py、apps/camctl/tests/integration/persistence/test_runtime.py
+- 证据：B7 已按部署验证裁决在 WSL x86 合规环境（cpython-3.11.17/SQLite 3.53.1）完成源码目录之外的发行物构建、按锁文件安装与 init/describe/submit/设备替身 run 验证，发行物自包含权威资源且只声明运行时依赖；Windows 开发机同样通过（[B7 验证记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-验证记录2026-10-08)）。
+- 未核验前提：真实 ARM64 硬件上的发行物构建（或安装）与运行差异复验，按部署交接表在目标硬件执行，不以 x86 通过代替。
 
 #### 验收 J-01
 - 原文：[验收 J-01](database/consistency-verification.md#历史引用与事务边界)（规则文件逐列核对引用分类）。
@@ -1599,4 +1599,4 @@
 
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：新增[九、跨模块契约场景](#九跨模块契约场景)十项映射并扩展 `tests/integration/test_camctl_acceptance_map.py` 检查器（场景清单解析自 verification.md 表格、字段与引用逐项校验、条目解析不再跨章节读取）；验收 68、P-03、P-04、P-06 依据 history 计划 H7 规模测量记录升级为已覆盖。`tests/integration/test_camctl_acceptance_map.py` 3 项全部通过。
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 全部通过；引用的模块测试文件与生产入口路径逐一核验存在。此前的最近全量回归见[集成计划验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i4-验证记录2026-10-07)（Windows 单元 3353、根跨组件 52+4 跳+342 子测试、bootstrap 87、session 82；WSL 单元 3352+1 跳、reporting 345 等）。
-- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 133 条，部分覆盖 27 条，开放 3 条；契约场景已覆盖 7 项，部分覆盖 3 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行，不作为行为通过的依据。
+- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 133 条，部分覆盖 28 条，开放 2 条；契约场景已覆盖 7 项，部分覆盖 3 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行（V-04 随 B7 交付升级为部分覆盖，剩余前提为真实 ARM64 硬件复验），不作为行为通过的依据。
