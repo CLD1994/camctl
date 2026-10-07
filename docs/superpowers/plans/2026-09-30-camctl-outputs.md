@@ -280,6 +280,59 @@ Command`）：全部成员终态后保存 ACTION_FINISHED，任一 FAILED（含�
 重送与时刻冲突、终态新键恢复不写新历史）；全量回归通过（Python 3.11
 组件单元 2979、集成 3076 另 7 项跳过、根跨组件 34 另 342 subtests）。
 
+#### X8 第五段的阶段性验证（2026-10-07）：清理执行链接入 run 会话
+
+新增 `bootstrap/cleanup_assembly.py` 会话装配并经 `lifecycle._report_
+assembly` 注册 `cleanup` 流程；`cleanup_flow.advance_cleanup` 每轮推
+进：到时清理动作开始（`StartCleanupAction`——`outputs.py` _Start-
+CleanupCommand 保存 ACTION_STARTED.START，计划待执行时同事务保存
+PLAN_STATUS START，原键重送与终态/取消分区同取回开始模式）→ 目标
+固定（`FixCleanupTargets`；范围来源未就绪只读等待）→ 逐未终态成员
+`delete_source_file`（限制、删除意图、双预算与查询核实既有链）→ 全
+部成员终态后 `finish_cleanup_action` 汇总。
+
+接线修复四处生产契约缺口：其一，精确清理（output_ids）受理时不建
+来源依赖、`source_resolution_state` 为空，而目标固定命令统一要求
+FIXED——放宽为仅范围清理（params.source）要求固定来源，精确清理按
+原请求 ID 逐项核实。其二，范围来源可靠确认无产物时按规格（output-
+cleanup.md 来源及产物状态表）固定空集合并同事务保存动作成功终态与
+父计划状态（TARGETS_FIXED 空成员 + ACTION_FINISHED 成功 + 可选
+PLAN_STATUS COMPLETE），替换此前的事务错误拒绝；`target_set` 守卫
+对应放宽为范围清理允许空成员。其三，删除与查询请求携带目标身份与
+设备文件定位（`cleanup_item_id`、`file_id`、`identity_key`、
+`locator`），驱动据此定位目标文件并回填成员身份观察；目标不是设备
+文件（主机派生成品）或绑定未装配设备时成员保持等待（target_unbound），
+待对应链路接入。其四，删除收场证据由 `operation_returned` 改为操作
+专属的 `delete_returned`——单相机驱动同时声明控制与删除时两者共用
+(type,version) 会冲突，沿 read_returned/stop_returned 裁决补齐；查询
+收场维持 file_presence。配置接入 `devices.<id>.cleanup.delete_timeout_s`
+与 `query_timeout_s`（正秒数），删除/查询尝试上限取自 `cleanup.max_
+delete_attempts`/`max_query_attempts`；第一版单相机假设下装配首个同
+时声明删除与查询能力的设备。
+
+| 关键裁决 | 内容 |
+| --- | --- |
+| 零产物范围清理按成功收场 | 来源终态且处理完成、可靠确认无正式产物时动作 `succeeded`（“无产物需要清理”），不创建清理成员；区别于指定动作类型不产生产物的受理失败。 |
+| 精确清理不要求来源状态 | output_ids 模式没有来源引用，执行时按 ID 核实存在性；范围清理维持受理时 FIXED 来源。 |
+| 删除调用证据专属命名 | `delete_returned`（op=delete）与控制的 `operation_returned` 区分，证据注册表 (type,version) 全局唯一。 |
+| 成员推进等待不解释为失败 | 主机派生成品、未装配设备的目标成员保持等待；流程层的成员推进仅对事务未完成或事实不一致分区报错。 |
+
+验证：会话级集成 `tests/integration/bootstrap/test_cleanup_flow.py` 4 项
+（精确清理一次删除成功：成员 SUCCEEDED/DELETED、产物 CLEANED、计划完
+成、请求携带成员与文件身份；范围来源失败无产物：零产物成功收场且无
+清理成员、无删除调用；删除持续错误且查询确认在场：3 次删除耗尽后成员
+FAILED（delete_attempts_exhausted，attempts_used=3）、动作按 cleanup_
+items_failed 失败；删除效果未知经查询确认缺席：ABSENCE_CONFIRMED 成功
+且设备文件缺席）；既有 `test_source_cleanup.py`/`test_cleanup_recovery.py`
+证据契约同步 delete_returned。全量回归：单元 3296、apps 集成分目录
+3395（outputs 1788、bootstrap 74、capture+scheduling+operations 507、
+cancellation+devices+contracts 124、acceptance+history+host_files 382、
+logging_runtime+persistence+reporting+session 520）、根集成混跑 3395
+另 6 跳过、五检查器通过（Python 3.11）。
+
+X8 剩余：主机派生成品成员的删除链路接入（随 X11 中间文件维护）、
+多设备清理动作（第一版单相机假设，装配扩展时按设备路由成员）。
+
 ### X9 清理取消、接手及原结果保持
 
 **预计文件：** `apps/camctl/src/camctl/outputs/cleanup.py`、`apps/camctl/src/camctl/outputs/qualification.py`；测试为 `apps/camctl/tests/unit/outputs/test_cleanup_recovery.py` 和 `apps/camctl/tests/integration/outputs/test_cleanup_recovery.py`。
@@ -458,8 +511,9 @@ bootstrap 70、scheduling+operations 308、cancellation+devices+contracts
 session 520）、根集成混跑 3391 全绿（Python 3.11）。
 
 X10 剩余：真实驱动兼容性声明（D5）、三种拍摄与部分取回的跨组件组合
-（I5，含真实 C 领取模块与重复取回独立交付）；清理动作执行入口与取消
-收场消费（N 链）另行接线。
+（I5，含真实 C 领取模块与重复取回独立交付）；取消收场消费（N 链）
+另行接线。清理动作执行入口已于 2026-10-07 接入（见上方 X8 第五段），
+取消收场消费仍待 N 链。
 
 
 ### X11 中间文件生命周期与有限维护

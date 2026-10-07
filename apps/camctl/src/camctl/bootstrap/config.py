@@ -447,12 +447,14 @@ def _probability_field(section: Mapping[str, Any], key: str, default: str) -> De
 
 
 def _validated_seconds_subtable(
-    device_id: str, raw: Any, section: str, keys: tuple[str, ...],
+    device_id: str, raw: Any, section: str, keys: tuple,
+    positive_keys: tuple = (),
 ) -> Mapping[str, Any] | None:
     """校验并规范化设备子表中的秒数字段；未提供子表时返回 None。
 
-    列出的键允许有限非负秒数（数字或精确文本），加载时统一为
-    Decimal；其余键按原样冻结，随消费方接入再校验。
+    列出的键默认允许有限非负秒数（数字或精确文本），positive_keys
+    中的键要求正秒数；加载时统一为 Decimal，其余键按原样冻结，随
+    消费方接入再校验。
     """
     if raw is None:
         return None
@@ -472,7 +474,7 @@ def _validated_seconds_subtable(
                     f"{name} 必须是数值秒: {normalized[key]!r}"
                 ) from error
         normalized[key] = _require_positive_seconds(
-            value, name, allow_zero=True)
+            value, name, allow_zero=key not in positive_keys)
     return normalized
 
 
@@ -499,12 +501,15 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
             device_id, normalized.pop("recording", None))
         if recording is not None:
             normalized["recording"] = recording
-        for section, keys in (
-                ("copy", ("retry_interval_s",)),
-                ("cleanup", ("delete_retry_interval_s", "query_retry_interval_s")),
-                ("result_check", ("retry_interval_s",))):
+        for section, keys, positive in (
+                ("copy", ("retry_interval_s",), ()),
+                ("cleanup", ("delete_retry_interval_s", "query_retry_interval_s",
+                             "delete_timeout_s", "query_timeout_s"),
+                 ("delete_timeout_s", "query_timeout_s")),
+                ("result_check", ("retry_interval_s",), ())):
             subtable = _validated_seconds_subtable(
-                device_id, normalized.pop(section, None), section, keys)
+                device_id, normalized.pop(section, None), section, keys,
+                positive_keys=positive)
             if subtable is not None:
                 normalized[section] = subtable
         validated[device_id] = _freeze(normalized)

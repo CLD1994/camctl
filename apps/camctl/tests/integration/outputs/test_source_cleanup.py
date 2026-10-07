@@ -48,7 +48,7 @@ _BINDING = DeviceBinding(device_id="cam-1", driver_id="camctl-adb")
 
 _EVIDENCE = EvidenceRegistry(
     (
-        EvidenceContract(type="operation_returned", version=1, operation="delete",
+        EvidenceContract(type="delete_returned", version=1, operation="delete",
                          fields=frozenset()),
         EvidenceContract(type="file_absent", version=1, operation="delete",
                          fields=frozenset({"cleanup_item_id"}),

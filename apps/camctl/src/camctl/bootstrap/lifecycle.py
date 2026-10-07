@@ -174,6 +174,9 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
         execution_wait_config,
         session_capture_assembly,
     )
+    from camctl.bootstrap.cleanup_assembly import (
+        cleanup_flow, session_cleanup_assembly,
+    )
     from camctl.bootstrap.flows import cancel_flow, capture_flow, report_flow
     from camctl.bootstrap.obtain_assembly import (
         obtain_flow, session_obtain_assembly,
@@ -220,6 +223,14 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
             ready=ready,
             processing=processing,
             segment_size=deps.config.copy.segment_size_bytes,
+        )),
+        # 清理推进：删除与查询端口按设备声明解析，尝试上限取自
+        # cleanup 配置；主机派生成品成员等待对应链路接入。
+        "cleanup": cleanup_flow(session_cleanup_assembly(
+            devices=deps.config.devices,
+            drivers=drivers,
+            max_delete_attempts=deps.config.cleanup.max_delete_attempts,
+            max_query_attempts=deps.config.cleanup.max_query_attempts,
         )),
     }
     return flows, supervisor

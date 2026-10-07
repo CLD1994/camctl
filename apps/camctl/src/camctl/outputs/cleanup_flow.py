@@ -1,18 +1,25 @@
-"""源产物清理的目标固定输入与结果类型。
+"""源产物清理的目标固定输入、结果类型与会话推进。
 
 精确清理按原请求逐项固定；范围清理等待全部来源固定并完成后按固
-定来源枚举产物。缺失目标按 output_not_found 直接终态，全部不可解
-析时动作的失败终态由汇总事务（cleanup_items_failed）保存。
+定来源枚举产物，来源可靠确认无产物时固定空集合并同事务按成功收
+场。缺失目标按 output_not_found 直接终态，全部不可解析时动作的
+失败终态由汇总事务（cleanup_items_failed）保存。
+
+会话推进每轮依次开始到时的清理动作、固定执行中动作的目标集合、
+经设备删除端口推进未终态成员，全部成员终态后保存汇总终态；删除
+请求携带成员与目标文件身份供驱动定位。
 """
 
 from __future__ import annotations
 
+import json
+from contextlib import closing
 from dataclasses import dataclass, field
 from enum import Enum
 from time import monotonic_ns as _default_monotonic_ns
 from typing import Any, Callable
 
-from camctl.contracts.values import ObjectId, UtcMicros
+from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
 from camctl.operations.attempts import RetryWaitGate
 
 __all__ = [
@@ -26,6 +33,8 @@ __all__ = [
     "CleanupItemDisposition",
     "CleanupItemSaved",
     "CleanupOutcomeChoice",
+    "CleanupStartDisposition",
+    "CleanupStartResult",
     "CleanupTargetsDisposition",
     "CleanupTargetsSaved",
     "FailCleanupItem",
@@ -34,9 +43,42 @@ __all__ = [
     "FixCleanupTargets",
     "ProgressCleanupItem",
     "RestrictCleanupItem",
+    "StartCleanupAction",
+    "advance_cleanup",
     "decide_cleanup_cancel",
     "decide_cleanup_entry",
+    "delete_source_file",
 ]
+
+
+@dataclass(frozen=True)
+class StartCleanupAction:
+    """一次清理动作开始执行的输入；时间资格由调用入口判断。"""
+
+    action_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+
+
+class CleanupStartDisposition(Enum):
+    """清理动作开始事务的结果分区。"""
+
+    SAVED = "saved"
+    #: 动作已终态：只读恢复，不重复开始。
+    ALREADY = "already"
+    #: 未开始且不再普通执行（取消已生效），由取消链收场。
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class CleanupStartResult:
+    """清理动作开始事务的已保存事实。"""
+
+    disposition: CleanupStartDisposition = CleanupStartDisposition.SAVED
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -500,6 +542,10 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
         if done.kind is not DbOutcomeKind.COMPLETED:
             return CleanupStep("result_rejected", str(done.error))
         return CleanupStep("succeeded", choice.name)
+    # 设备调用目标：主机派生成品或未装配设备没有绑定，等待对应链
+    # 路接入，不解释为失败。
+    if runtime.binding_of(item_id) is None:
+        return CleanupStep("target_unbound")
     if entry is CleanupEntryChoice.VERIFY_FIRST:
         verified = await _verify_before_delete(
             runtime, item_id, action_id, output_id)
@@ -613,7 +659,8 @@ async def _delete_once(
         return CleanupStep("progress_rejected", str(progress.error))
     binding = runtime.binding_of(item_id)
     result = await runtime.driver.delete(ControlRequest(
-        operation="delete", binding=binding, params={}))
+        operation="delete", binding=binding,
+        params=_target_params(connection, item_id)))
     absent, errored = _delete_observation(result)
     if errored:
         status, effect = AttemptStatus.FAILED, (
@@ -627,7 +674,7 @@ async def _delete_once(
         status=status, error=error, effect=effect,
         settlement=Settlement(
             basis=SettlementBasis.OBSERVED,
-            evidence=EvidenceValue(type="operation_returned", version=1, data={})),
+            evidence=EvidenceValue(type="delete_returned", version=1, data={})),
         observations=result.observations)
     finish = runtime.operations.finish_attempt(
         AttemptFinish(
@@ -861,4 +908,157 @@ def _control_request(runtime: CleanupRuntime, item_id: int, operation: str):
     from camctl.devices.ports import ControlRequest
 
     return ControlRequest(
-        operation=operation, binding=runtime.binding_of(item_id), params={})
+        operation=operation, binding=runtime.binding_of(item_id),
+        params=_target_params(runtime.owned.connection, item_id))
+
+
+def _target_params(connection, item_id: int) -> dict:
+    """删除/查询请求的目标身份与设备文件定位。
+
+    驱动按成员身份回填观察、按设备文件身份定位目标；目标不是设
+    备文件属于装配不一致，明确拒绝。
+    """
+    row = connection.execute(
+        "SELECT f.id, f.identity_key, f.locator_json"
+        " FROM cleanup_items c"
+        " JOIN outputs o ON o.id = c.output_id"
+        " JOIN device_files f ON f.id = o.device_file_id"
+        " WHERE c.id = ?", (item_id,)).fetchone()
+    if row is None:
+        raise ConsistencyError(f"清理成员缺少设备文件目标: {item_id}")
+    device_file_id, identity_key, locator_json = row
+    locator = json.loads(locator_json) \
+        if isinstance(locator_json, str) else {}
+    return {
+        "cleanup_item_id": str(item_id),
+        "file_id": str(device_file_id),
+        "identity_key": identity_key,
+        "locator": locator,
+    }
+
+
+# ---- 会话推进：开始、目标固定、成员删除与汇总 ----
+
+
+#: 清理成员的终态集合（成功、失败、取消）。
+_MEMBER_TERMINAL = (4, 5, 6)
+
+#: 推进结果中指示事务未完成或事实不一致的分区。
+_MEMBER_ERROR_PHASES = (
+    "missing_item", "restrict_rejected", "query_rejected",
+    "progress_rejected", "result_rejected", "delete_budget_rejected",
+    "query_budget_rejected", "finish_rejected", "fail_rejected",
+    "cancel_rejected")
+
+
+async def advance_cleanup(runtime: CleanupRuntime) -> None:
+    """推进一个轮次的清理执行链；各步按已保存事实幂等。
+
+    到时的待执行动作先开始，执行中的动作按目标集合状态推进：集
+    合未固定先固定（范围来源未就绪保持等待），集合已固定逐成员
+    推进删除，全部成员终态后保存汇总终态。
+    """
+    now = runtime.occurred_at()
+    _start_due(runtime, now)
+    for action_id in _running_cleanup_actions(runtime):
+        await _advance_cleanup_action(runtime, action_id, now)
+
+
+def _start_due(runtime: CleanupRuntime, now: int) -> None:
+    """开始到时的待执行清理动作；未到时与已取消动作不进入。"""
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcomeKind
+
+    with closing(runtime.owned.connection.execute(
+        "SELECT id FROM actions"
+        " WHERE status = 1 AND cancel_requested = 0 AND type = 5"
+        " AND scheduled_at <= ? ORDER BY plan_id, input_index", (now,),
+    )) as cursor:
+        due = [int(row[0]) for row in cursor.fetchall()]
+    for action_id in due:
+        outcome = runtime.outputs.start_cleanup_action(
+            StartCleanupAction(action_id=action_id, occurred_at=now),
+            new_operation_key(), runtime.owned)
+        if outcome.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(
+                f"清理开始事务未完成（{outcome.kind.value}）:"
+                f" {outcome.error}")
+
+
+def _running_cleanup_actions(runtime: CleanupRuntime) -> list[int]:
+    """执行中且未请求取消的清理动作。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT id FROM actions"
+        " WHERE status = 2 AND cancel_requested = 0 AND type = 5"
+        " ORDER BY plan_id, input_index",
+    )) as cursor:
+        return [int(row[0]) for row in cursor.fetchall()]
+
+
+async def _advance_cleanup_action(
+        runtime: CleanupRuntime, action_id: int, now: int) -> None:
+    """按已保存事实推进一个执行中的清理动作的下一个阶段。"""
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcomeKind
+
+    connection = runtime.owned.connection
+    with closing(connection.execute(
+        "SELECT target_selection_state FROM actions WHERE id = ?",
+        (action_id,),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"清理动作不存在: {action_id}")
+    if row[0] == 1:
+        # 目标集合待固定；范围来源未就绪或零产物收场时本动作结束
+        # 本轮推进。
+        if not _fix_targets(runtime, action_id, now):
+            return
+    elif row[0] != 2:
+        return
+    with closing(connection.execute(
+        "SELECT id FROM cleanup_items"
+        " WHERE action_id = ? AND status NOT IN (4, 5, 6) ORDER BY id",
+        (action_id,),
+    )) as cursor:
+        pending = [int(row[0]) for row in cursor.fetchall()]
+    for item_id in pending:
+        step = await delete_source_file(runtime, item_id)
+        if step.phase in _MEMBER_ERROR_PHASES:
+            raise ConsistencyError(
+                f"清理成员推进未完成: {item_id}"
+                f" {step.phase} {step.detail}")
+    with closing(connection.execute(
+        "SELECT COUNT(*) FROM cleanup_items"
+        " WHERE action_id = ? AND status NOT IN (4, 5, 6)", (action_id,),
+    )) as cursor:
+        unfinished = int(cursor.fetchone()[0])
+    if unfinished:
+        return
+    outcome = runtime.outputs.finish_cleanup_action(
+        FinishCleanupAction(action_id=action_id, occurred_at=now),
+        new_operation_key(), runtime.owned)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"清理汇总事务未完成（{outcome.kind.value}）:"
+            f" {outcome.error}")
+
+
+def _fix_targets(runtime: CleanupRuntime, action_id: int, now: int) -> bool:
+    """固定目标集合；来源未就绪或零产物已收场时返回假。"""
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcomeKind
+
+    outcome = runtime.outputs.fix_cleanup_targets(
+        FixCleanupTargets(action_id=action_id, occurred_at=now),
+        new_operation_key(), runtime.owned)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"清理目标固定事务未完成（{outcome.kind.value}）:"
+            f" {outcome.error}")
+    if outcome.value.disposition is CleanupTargetsDisposition.WAITING:
+        return False
+    if not outcome.value.item_ids:
+        # 范围来源可靠确认无产物：空集合已同事务按成功收场。
+        return False
+    return True
