@@ -135,7 +135,7 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 - [x] 分别建立 `test_recording_delivery_survives_late_cancel`、`test_photo_keeps_completed_outputs`、`test_timelapse_recovers_remaining_wait`、`test_cleanup_unknown_preserves_original_request_result`。每个用例只验证所属组合分支，机器身份、状态、错误码及预算精确断言，用户文案只核对必要事实。
 - [x] 每引入一条链先运行相应根集成文件，例如 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py -q`，取得因缺失契约而失败的证据；前序能力缺失时回到所属模块任务，不在集成驱动中补造业务行为。
 - [x] 按阶段 3—6 接入真实生产能力，覆盖不同可选查询/停止能力、文件与产物登记、普通与自动取回、内部录像处理、取消四种入口、清理竞争、终态后责任及新请求接手。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py tests/integration/test_camctl_output_roundtrip.py tests/integration/test_camctl_cancellation_roundtrip.py tests/integration/test_camctl_session_recovery.py -q`，交错并发 submit、关闭阶段新提交、未来动作、时钟异常、设备绑定改变、配置重载、报告失败、迟到结果、提交未知和重启恢复。核对原身份、预算、确定结果、旧报告及实际占用，不能只核对最新终态。
+- [x] 运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_capture_roundtrip.py tests/integration/test_camctl_output_roundtrip.py tests/integration/test_camctl_cancellation_roundtrip.py tests/integration/test_camctl_session_recovery.py -q`，交错并发 submit、关闭阶段新提交、未来动作、时钟异常、设备绑定改变、配置重载、报告失败、迟到结果、提交未知和重启恢复。核对原身份、预算、确定结果、旧报告及实际占用，不能只核对最新终态。
 - [ ] 沿权威输入到用户结果审计各链所有接缝，补齐真实双方与重要替身的契约组合；建议提交“test: 验证第一版跨组件业务与恢复”。
 
 #### I5 第一条链验证记录（2026-10-06）
@@ -175,6 +175,22 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 录像媒体检查与受管工具环境决策仍列后续链路（本机无 ffprobe/ffmpeg），C 领取真实组合同前。
 
 回归证据（2026-10-07，Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_output_roundtrip.py` 4 项通过；根 `tests/integration` 44 项通过；apps/camctl 单元 3303 项通过（含新增 `test_observed_pairings.py` 与 `test_result_listing.py` 配对解释扩展）；cancellation/persistence/capture/bootstrap 集成 386 项、outputs/acceptance/scheduling/operations/session/reporting 集成 2748 项+1 跳过、capture 分目录复跑 199 项通过；五项仓库检查全部通过（database-spec 须在统一 uv 环境运行，系统 Python 的 SQLite 版本不满足统一条件）。
+
+#### I5 第四条链验证记录（2026-10-07，会话恢复与并发）
+
+已建立 `tests/integration/test_camctl_session_recovery.py`，五用例完成 checkbox④ 指定面：进程重启恢复（树级终止后第二个 run 会话恢复剩余等待并完成关闭阶段迟到提交的新计划，运行间配置重载不破坏既有事实）、交错并发 submit 与同身份重送（三个 submit 进程并发、其中两份为同一计划文件，受理恰登记两份计划，run 会话两动作成功且产物恰两份）、未来动作会话驻留（到时前保持待执行，到时执行成功）与过去时刻超窗动作过期收场（EXPIRED、计划完成、产物按动作区分核对）、报告失败不阻止设备工作且责任保留到下一会话补交付（恢复 ready 目录后第二个 run 会话补发报告，客户端导入成功）、迟到结果不改写已确定终态（空列举按 no_outputs 失败后，迟到的设备文件不重开动作也不补造产物）。
+
+先红证据与责任边界修复：并发 submit 首次运行稳定复现 run 会话永不退出，诊断（桥新增 `CAMCTL_TEST_TRACE_DISPATCH` 包装打印单动作异常）揭示一条既有生产缺陷链：驱动确认观察身份与操作目标（设备活动主键，`AttemptTicket.target_id`）不符时，`finish` 的结果校验抛 `OutcomeValidationError` 且被 `dispatch_ready` 吞掉，启动流程遗留执行中、启动尝试遗留在途；photo 处理器重入把在途尝试折叠为调用失败（`attempt[0] != SUCCEEDED`），动作失败终态后启动流程仍无人收场，会话的流程收尾计数永不归零。单动作部署里活动主键与替身固定身份恰好重合，掩盖了该链。修复分三层：
+
+- 生产（启动结果不可采纳的收场）：`_control_call` 对结果校验拒绝按调用失败收场本次尝试（`invalid_device_result`，不保存坏观察与派发成功事实），不遗留执行中的启动流程。
+- 生产（在途尝试不折叠失败、动作终态收口启动流程）：photo 处理器重入读到启动尝试在途（RUNNING）或结果未知（UNKNOWN）时，按只发送契约由产物核实证明终局（完整产物登记成功、核实轮次耗尽按无法确认失败），不折叠为调用失败；动作终态的三个分支（成功、保留文件失败、无法确认）用 `StaleRunFinish` 伴随收场仍开放的启动流程（与清理链同模式）。配契约测试三用例（坏观察收场、在途+完整产物恢复成功、在途+无产物保持核实）。
+- 测试（替身身份对齐）：确认观察身份须与生产核对的操作目标一致，而控制请求不携带任务身份——替身从部署状态库读当前占用持有者的活动行对齐（授予事务先于控制调用提交、设备占用互斥保证同设备至多一行已派发待响应），新增 `CAMCTL_TEST_STATE_DB` 注入，库不可用时回退剧本身份。
+
+测试基建事实：Windows 上 `Popen.terminate` 只终止直接子进程，报告 worker 孙进程成孤儿并持有状态库，后续连接报磁盘 I/O 错误——新增 `terminate_process_tree`（`taskkill /T /F` 树杀）；树杀后操作系统清理句柄存在短暂延迟，测试查询按短退避重试。重启用例的中断点轮询到启动责任终态（控制调用已可靠收场），终止不落在控制调用在途窗口。
+
+遗留观察（归本计划 checkbox⑤ 审计与 D5 真实设备接入）：控制请求不携带任务身份（`task_key` 生成后未传入）而观察身份校验用活动主键、结果列举回询用动作主键，三处身份语义属 D5 驱动接入的既有接口缝隙，替身以查库对齐模拟“适配层知道任务身份”，D5 收口时统一；timelapse/record 的启动调用在途时进程被杀（在途尝试且发送事实未保存）会话恢复后重入死等，与 photo 同族的启动责任收场缺口，需要按恢复决策表“可能派发，驱动能核实原任务”路径定义核实语义，本轮用确定性中断窗口避开。
+
+回归证据（2026-10-07，Windows 开发机，uv CPython 3.11）：四文件连跑 12 项通过（checkbox④ 命令）；根 `tests/integration` 49 项+342 子测试通过；apps/camctl 集成 3398 项通过+6 跳过；单元 3303 项通过（含 capture 契约三新用例）；五项仓库检查全部通过。
 
 ### I6 全量契约映射、软件验收与部署交接
 

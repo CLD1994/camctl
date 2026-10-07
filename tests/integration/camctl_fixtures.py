@@ -12,9 +12,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -29,6 +31,18 @@ _DIRECT_ENTRY = "from camctl.cli import main; raise SystemExit(main())"
 _BRIDGE = _ROOT / "_camctl_stub_entry.py"
 
 _CLIENT_DIR = _REPO / "apps" / "client"
+
+
+def terminate_process_tree(process) -> None:
+    """终止会话子进程及其全部后代进程。
+
+    run 会话派生报告 worker 等孙进程；只终止直接子进程会让孤儿继
+    续持有状态库文件（Windows 上表现为后续连接报磁盘 I/O 错误）。
+    """
+    subprocess.run(
+        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+        capture_output=True)
+    process.wait(timeout=30)
 
 
 @dataclass(frozen=True)
@@ -106,6 +120,7 @@ class Deployment:
                timeout_s: float = 180.0) -> CliResult:
         """运行真实 camctl CLI；driver 提供时经部署装配桥接入替身。"""
         environment = os.environ.copy()
+        environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
         if driver is not None:
             self._write_driver_spec(driver)
             environment["CAMCTL_TEST_DRIVER_SPEC"] = str(self.driver_spec)
@@ -118,12 +133,17 @@ class Deployment:
         return CliResult(completed.returncode, completed.stdout, completed.stderr)
 
     def start_camctl(self, *args: str, driver: dict | None = None):
-        """启动不等待退出的 run 子进程（会话中断场景）。"""
+        """启动不等待退出的 CLI 子进程（会话中断与并发场景）。"""
         environment = os.environ.copy()
-        self._write_driver_spec(driver)
-        environment["CAMCTL_TEST_DRIVER_SPEC"] = str(self.driver_spec)
+        environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
+        if driver is not None:
+            self._write_driver_spec(driver)
+            environment["CAMCTL_TEST_DRIVER_SPEC"] = str(self.driver_spec)
+            command = [sys.executable, str(_BRIDGE), *args]
+        else:
+            command = [sys.executable, "-c", _DIRECT_ENTRY, *args]
         return subprocess.Popen(
-            [sys.executable, str(_BRIDGE), *args],
+            command,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=environment)
 
@@ -336,10 +356,14 @@ _GATE_TIMEOUT_S = 120.0
 
 
 class _ScriptedStubDriver:
-    """受契约约束的设备替身：启动确认、停止确认与结果列举。
+    """受契约约束的设备替身：启动确认、停止与结果列举。
 
-    行为来自剧本：按活动身份返回结果文件条目；剧本 gates 映射的
-    端口在对应门文件出现前不响应（显式同步点，非随机 sleep）。
+    行为来自剧本：结果列举按生产适配回询的动作主键返回条目（剧
+    本 files 的键即动作主键字符串）；剧本 gates 映射的端口在对应
+    门文件出现前不响应（显式同步点，非随机 sleep）。确认观察携带
+    的活动身份与生产核对的操作目标（设备活动主键）对齐：控制调
+    用先于响应提交授予事务，替身从部署状态库读当前占用持有者的
+    活动行取得该主键，库不可用时回退剧本 activity_identity。
     """
 
     def __init__(self, spec: dict, gate_dir: Path) -> None:
@@ -362,15 +386,40 @@ class _ScriptedStubDriver:
         from camctl.devices.ports import DeviceCallResult
 
         self._await_gate("control")
-        # 活动身份由设备侧分配并随确认观察报告；后续结果列举请求
-        # 以该身份回询（剧本 files 的键即此身份）。
-        identity = str(self._spec.get("activity_identity", "1"))
+        # 确认观察身份须与生产核对的操作目标（设备活动主键）一致。
+        # 控制请求不携带该身份（第一版接口缝隙），替身从部署状态库
+        # 读当前占用持有者的活动行对齐；查不到时回退剧本身份。
+        identity = self._held_activity_identity(request) or str(
+            self._spec.get("activity_identity", "1"))
         self.calls.append(("control", request.operation))
         return DeviceCallResult(
             observations=(DeviceObservation(
                 type=_CONTROL_OBSERVATIONS[request.operation], version=1,
                 data={"activity_id": identity}),),
             error=None)
+
+    def _held_activity_identity(self, request) -> str | None:
+        """读部署状态库中该设备已派发待响应的活动主键。
+
+        生产授予事务先于控制调用提交：设备占用互斥保证同一设备至
+        多一行处于已派发待响应（dispatch_state=2），即本次调用的
+        操作目标。库不可读或无匹配行时返回 None，由调用方回退。
+        """
+        state_db = os.environ.get("CAMCTL_TEST_STATE_DB")
+        if not state_db:
+            return None
+        uri = (f"file:{Path(state_db).as_posix()}?mode=ro")
+        try:
+            with closing(sqlite3.connect(uri, uri=True, timeout=5)) as probe:
+                row = probe.execute(
+                    "SELECT da.id FROM device_activities da"
+                    " JOIN actions a ON a.id = da.action_id"
+                    " WHERE a.device_id = ? AND da.dispatch_state = 2"
+                    " ORDER BY da.id DESC LIMIT 1",
+                    (request.binding.device_id,)).fetchone()
+        except sqlite3.Error:
+            return None
+        return None if row is None else str(int(row[0]))
 
     async def stop(self, request) -> object:
         from camctl.devices.evidence import DeviceObservation

@@ -108,6 +108,7 @@ from camctl.operations.attempts import (
     RetryWaitGate,
     RunFinish,
     RunOutcome,
+    StaleRunFinish,
 )
 from camctl.operations.models import (
     AttemptStatus,
@@ -118,7 +119,7 @@ from camctl.operations.models import (
     Settlement,
     SettlementBasis,
 )
-from camctl.operations.validation import validate_outcome
+from camctl.operations.validation import OutcomeValidationError, validate_outcome
 from camctl.outputs.catalog import (
     FileReference,
     OutputCatalogFacts,
@@ -477,7 +478,9 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     """授予启动机会后发起一次设备控制调用并保存尝试与活动观察。
 
     调用错误或可靠确认效果时同时结束启动流程（额度一次用尽）；
-    未确认的发送保持流程执行中，等待后续效果核实。
+    未确认的发送保持流程执行中，等待后续效果核实。驱动结果不符
+    合登记契约时不可采纳：按调用失败收场本次尝试，不遗留执行中
+    的启动流程。
     """
     ticket, reason = runtime.grant(action)
     if ticket is None:
@@ -488,14 +491,27 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         params=action["effective_params_json"],
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
-    if result.error is not None:
+    try:
+        if result.error is not None:
+            runtime.finish(
+                ticket, outcome, end_run=RunOutcome.FAILED,
+                run_error=outcome.error)
+        elif confirmed:
+            runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
+        else:
+            runtime.finish(ticket, outcome)
+    except OutcomeValidationError:
+        # 观察与收场依据不符合登记契约：该结果整体不可采纳，不落
+        # 库、不保存派发成功事实，按调用失败保存尝试终局。
+        rejected, _ = _operation_outcome(
+            DeviceCallResult(observations=(), error={
+                "code": "invalid_device_result",
+                "message": "驱动结果不符合登记契约"}),
+            confirmed_observation)
         runtime.finish(
-            ticket, outcome, end_run=RunOutcome.FAILED,
-            run_error=outcome.error)
-    elif confirmed:
-        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
-    else:
-        runtime.finish(ticket, outcome)
+            ticket, rejected, end_run=RunOutcome.FAILED,
+            run_error=rejected.error)
+        return HandlerOutcome("call_failed", "invalid_device_result")
     if activity_facts is not None and result.error is None:
         facts = (activity_facts(confirmed) if callable(activity_facts)
                  else activity_facts)
@@ -614,6 +630,24 @@ def _conclude_activity(runtime: CaptureRuntime, action_id: int) -> None:
     receipt = runtime.capture.conclude_activity(
         ActivityConcludeSave(
             action_id=action_id, occurred_at=runtime.wall_us()),
+        new_operation_key(), runtime.owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+
+
+def _settle_open_start(runtime: CaptureRuntime, action_id: int, status: RunOutcome,
+                       error: ErrorValue | None = None) -> None:
+    """动作终态后收场仍开放的启动流程，幂等可重入。
+
+    启动尝试在途（进程中断或结果不可保存）时流程行保持执行中，
+    但动作终态后不再有后续启动尝试；仍开放的流程按动作的最终
+    结果结束并清除重试等待，否则会话的流程收尾计数无法归零。
+    """
+    receipt = runtime.operations.finish_stale_runs(
+        StaleRunFinish(
+            responsibility_keys=(f"start/{action_id}",),
+            status=status,
+            error=error,
+            occurred_at=runtime.wall_us()),
         new_operation_key(), runtime.owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
@@ -814,6 +848,9 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     if listing.phase is ListingPhase.EXHAUSTED:
         # 有限轮次用尽：核实责任与无法确认结论同事务收场。
         _close_check_unconfirmed(context, action_id)
+        _settle_open_start(
+            context, action_id, RunOutcome.UNCONFIRMED,
+            error=ErrorValue(code="result_unconfirmed", stage="device"))
         _finish_capture(context, action_id, (), FileKind.PHOTO,
                         failure=_unconfirmed_failure(action_id))
         return
@@ -826,29 +863,41 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
         ticket = None
     assessment = CaptureAssessment(
         complete=bool(entries) and all(entry.complete for entry in entries))
+    # 启动尝试在途（RUNNING）或结果未知（UNKNOWN）时没有可采纳的
+    # 响应结论：不折叠为失败，按只发送契约由产物核实证明终局；
+    # 效果未知输入留给发送未确认的保守分区，不在这里短路核实。
+    response_unresolved = attempt[0] in (
+        int(_ATTEMPT_STATUS.RUNNING), int(_ATTEMPT_STATUS.UNKNOWN))
     decision = decide_photo(
         PhotoState(
             action_terminal=False,
             canceled=bool(action["cancel_requested"]),
             dispatched=True,
-            response_completed=attempt[1] == int(_EFFECT_STATE.CONFIRMED),
-            response_failed=attempt[0] != int(_ATTEMPT_STATUS.SUCCEEDED),
-            effect_unknown=attempt[1] == int(_EFFECT_STATE.UNKNOWN),
+            response_completed=not response_unresolved
+            and attempt[1] == int(_EFFECT_STATE.CONFIRMED),
+            response_failed=attempt[0] == int(_ATTEMPT_STATUS.FAILED),
+            effect_unknown=not response_unresolved
+            and attempt[1] == int(_EFFECT_STATE.UNKNOWN),
             stop_supported=False,
         ),
         assessment,
-        PhotoCompletion.COMPLETED_ON_RETURN,
+        (PhotoCompletion.SENT_ONLY if response_unresolved
+         else PhotoCompletion.COMPLETED_ON_RETURN),
     )
     if decision is PhotoDecision.REGISTER_SUCCESS:
         if ticket is not None:
             context.finish(ticket, _round_outcome(),
                            end_run=RunOutcome.SUCCEEDED)
+        _settle_open_start(context, action_id, RunOutcome.SUCCEEDED)
         _conclude_activity(context, action_id)
         _finish_capture(context, action_id, entries, FileKind.PHOTO)
     elif decision is PhotoDecision.FAILED_KEEP_FILES:
         if ticket is not None:
             context.finish(ticket, _round_outcome(),
                            end_run=RunOutcome.SUCCEEDED)
+        _settle_open_start(
+            context, action_id, RunOutcome.FAILED,
+            error=ErrorValue(code="device_failed", stage="device"))
         _finish_capture(
             context, action_id, entries, FileKind.PHOTO,
             failure=RecordingFailure(

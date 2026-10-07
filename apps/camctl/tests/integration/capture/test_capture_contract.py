@@ -62,8 +62,9 @@ _EVIDENCE = EvidenceRegistry(
 class DriverDouble:
     """契约替身：按操作返回编排的观察与可选错误。"""
 
-    def __init__(self, error=None) -> None:
+    def __init__(self, error=None, identity_override=None) -> None:
         self.error = error
+        self.identity_override = identity_override
         self.calls: list[str] = []
 
     #: 各操作的观察契约与操作目标（动作身份）。
@@ -80,7 +81,7 @@ class DriverDouble:
             observations=(
                 DeviceObservation(
                     type=observation_type, version=1,
-                    data={"activity_id": target}),
+                    data={"activity_id": self.identity_override or target}),
             ),
             error=self.error,
         )
@@ -109,6 +110,28 @@ def _seed_stopped_recording(connection, action_id: int) -> None:
         "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
         " intent_event_id, result_event_id, max_attempts_used, effect_state,"
         " result_json) VALUES (40, 30, 1, 2, 1, 1, 3, 3, '{}')")
+
+
+def _seed_open_start(connection, action_id: int) -> None:
+    """调用发出后结果未保存的启动责任：流程执行中、尝试在途。
+
+    对应进程中断或保存被拒后重入的状态：动作运行中、活动可能已
+    派发、启动尝试没有可采纳的结束结果。
+    """
+    connection.execute(
+        "INSERT INTO operation_runs (id, action_id, delivery_id, kind, query_purpose,"
+        " responsibility_key, activity_id, copy_id, cleanup_item_id, session_key,"
+        " status, attempts_used, max_attempts_used, timeout_s_json,"
+        " retry_interval_s_json, retry_wait_required, error_json)"
+        " VALUES (50, ?, NULL, 1, NULL, 'start/11', 11, NULL, NULL, NULL, 2, 1, 1,"
+        " '30', '1', 0, NULL)", (action_id,))
+    connection.execute(
+        "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
+        " intent_event_id, result_event_id, max_attempts_used, effect_state,"
+        " result_json) VALUES (51, 50, 1, 1, 1, NULL, 1, 1, NULL)")
+    connection.execute(
+        "UPDATE device_activities SET dispatch_state = 2 WHERE id = ?",
+        (action_id,))
 
 
 def _entry(identity: str, *, size: int = 4096,
@@ -304,6 +327,68 @@ class TestPhotoHandler:
             # 终态后再次推进不产生新事实。
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+        finally:
+            owned.connection.close()
+
+    async def test_invalid_observation_settles_start_and_fails_action(
+            self, tmp_path: Path):
+        owned = _environment(tmp_path, _PHOTO)
+        try:
+            # 驱动确认观察的身份与操作目标（活动 11）不符：结果不可
+            # 采纳，调用按失败收场，不遗留执行中的启动流程。
+            runtime = _runtime(
+                owned, driver=DriverDouble(identity_override="99"),
+                files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+            await capture_handler("camera_take_photo")(11, runtime)
+            start_run = _value(
+                owned, "SELECT status, error_json FROM operation_runs"
+                " WHERE responsibility_key = 'start/11'")
+            assert start_run[0] == 4
+            assert start_run[1] is not None
+            attempt = _value(
+                owned, "SELECT a.status FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'start/11'")
+            assert attempt == (3,)
+            # 坏结果按调用失败进入决策：保留完整文件并失败动作。
+            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (4,)
+            assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+        finally:
+            owned.connection.close()
+
+    async def test_open_start_with_outputs_recovers_success(self, tmp_path: Path):
+        owned = _environment(tmp_path, _PHOTO)
+        try:
+            _seed_open_start(owned.connection, 11)
+            owned.connection.commit()
+            runtime = _runtime(owned, files={11: (
+                _entry("shot-1", kind=ResultFileKind.PHOTO),)})
+            # 在途启动尝试没有可采纳的响应结果：不折叠为失败，由
+            # 产物核实证明完成。
+            await capture_handler("camera_take_photo")(11, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+            assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+            # 动作终态后启动流程伴随收场，会话收尾计数可归零。
+            assert _value(
+                owned, "SELECT status FROM operation_runs"
+                " WHERE responsibility_key = 'start/11'") == (3,)
+        finally:
+            owned.connection.close()
+
+    async def test_open_start_without_outputs_keeps_verifying(
+            self, tmp_path: Path):
+        owned = _environment(tmp_path, _PHOTO)
+        try:
+            _seed_open_start(owned.connection, 11)
+            owned.connection.commit()
+            runtime = _runtime(owned, files={})
+            await capture_handler("camera_take_photo")(11, runtime)
+            # 结果未知且暂无产物：保持运行等待核实轮次，不折叠失败。
+            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
+            start_run = _value(
+                owned, "SELECT status FROM operation_runs"
+                " WHERE responsibility_key = 'start/11'")
+            assert start_run == (2,)
         finally:
             owned.connection.close()
 
