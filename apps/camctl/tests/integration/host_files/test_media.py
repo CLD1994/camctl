@@ -304,3 +304,34 @@ async def test_repair_tool_and_inspection_errors_are_both_preserved(tmp_path: Pa
     assert result.complete is False
     assert "tool_failed" in result.error
     assert "inspect_failed" in result.error
+
+
+async def test_media_wrappers_execute_tools_only_through_the_managed_boundary() -> None:
+    """媒体包装不绕过 O3：进程启动只能经 operations.process。
+
+    media 模块不得导入 subprocess 或 asyncio 的子进程入口；工具
+    进程统一经受管启动边界执行（保持 camctl 进程组、上限捕获输
+    出、实际收场后才释放文件），不经执行器的进程会失去统一收场
+    与文件占用记录。
+    """
+    import ast
+
+    import camctl.host_files.media as media_module
+
+    source = Path(media_module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name == "subprocess" for alias in node.names):
+                problems.append(f"line {node.lineno}: 导入 subprocess")
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "subprocess":
+                problems.append(f"line {node.lineno}: 从 subprocess 导入")
+            if node.module == "asyncio" and any(
+                    alias.name.startswith("create_subprocess") for alias in node.names):
+                problems.append(f"line {node.lineno}: 使用 asyncio 子进程入口")
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr.startswith("create_subprocess")):
+            problems.append(f"line {node.lineno}: 直接启动子进程")
+    assert problems == [], f"媒体包装绕过受管执行边界: {problems}"

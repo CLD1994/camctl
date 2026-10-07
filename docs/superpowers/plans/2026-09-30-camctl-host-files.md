@@ -163,11 +163,10 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 - [x] 编写失败用例。建立 `test_failed_media_output_is_not_complete`，工具失败但文件存在，`assert artifact.complete is False`；精确媒体时长不舍入到目标毫秒，非法结构与读取错误单独分类。probe/repair 不改变动作终态或源文件。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/host_files/test_media.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。复用 ffprobe/ffmpeg，只解析业务需要字段并控制输出容量；实际退出、必要成品校验、同步及摘要分别确认，厂商/工具参数由任务已保存决定取得。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 媒体进程保持 camctl 组且实际收场后才释放文件。
-
+- [x] 实施本任务（随 M1/M2/M4 轮次交付并在本收口轮核对）。复用 ffprobe/ffmpeg：ffprobe 以 `-show_entries format=duration:stream=codec_type` 只解析业务需要字段并以 JSON 受控输出；ffmpeg 成品按实际退出、存在与非空观察、摘要长度相符、目录同步分别确认（`_collect_artifact` 分阶段保留，工具失败但文件存在时 complete 为 False）；工具路径与附加参数由 `ProbeRequest`/`RepairRequest`（任务已保存决定）提供，模块不另行发现工具。
+- [x] 再运行上述命令全部 PASS（本收口轮：单元+集成 100 passed 3 skipped），并核对 媒体进程保持 camctl 组且实际收场后才释放文件——进程统一经 O3 受管启动边界（`operations/process.py` 保持所属进程组、`execute_tool` 返回即本地收场完成），文件占用由 `AsyncFileTask` 生命周期保持，`test_media_tasks.py` 验证停止后只做适用收场且信号与输出读取错误不丢失实际退出与文件事实。
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_media.py -q`，真实最小媒体文件与工具验证成功/失败及取消，未安装工具按实际配置或处理错误分类。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 媒体包装和工具入口是否绕过 O3，是否把遗留文件当成功；记录门禁证据，建议以“feat: 接入受管媒体文件处理”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 媒体包装和工具入口是否绕过 O3，是否把遗留文件当成功——新增 `test_media_wrappers_execute_tools_only_through_the_managed_boundary`（AST 审计：media 模块不得导入 subprocess 或 asyncio 子进程入口）；遗留文件不当成功由 complete 语义与 `test_failed_media_output_is_not_complete` 保证。门禁证据：本计划收口提交。
 
 调用错误与实际退出、数字精度及非法时长分类的局部验证见[媒体结果计划 M1](2026-10-03-camctl-media-results-review.md#实施顺序与验收)。可靠视频时长及保存链按 M2、M4 继续验证；脚本工具集成测试不能代替真实媒体样本验收。
 
@@ -181,11 +180,15 @@ F1 的检查和 F5 的发布先支撑首条报告链。F2—F4 在首个拷贝�
 
 **接口与依赖：** 使用 F1—F6 与 X5/X7、R5/R7、L5 实际接口。前置交付：对应消费者已实现。
 
-- [ ] 编写失败用例。在 `test_file_contracts_keep_actual_side_effects` 中对写入、同步、移动、删除各边界注入错误或中断，`assert recorded_effect == observed_effect`；取消后调用延迟返回成功/错误，结束前禁止发布、删除或关闭。报告和日志规则分别核对，不要求未知普通交付重投。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_file_contract.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。补齐真实文件、默认线程池及各业务消费者的组合测试；进程中断仅验证软件恢复，不宣称物理断电保证。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 所有文件边界有分类和拥有者，合计积压测量不被当作固定内存保证。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 全部异常捕获、默认值和 finally 是否掩盖已发生效果；记录门禁证据，建议以“test: 验证真实文件执行边界”形成独立提交。
+- [x] 编写用例。`test_file_contract.py` 对四个边界注入错误或中断并断言记录与观察一致：写入（源读取失败时 `processed_end` 与目标文件字节一致）、同步（截断失败阻断、文件同步失败不尝试目录、目录同步失败保留文件阶段）、移动（成功/移动成功同步失败/同名拒绝三阶段与目录观察一致）、删除（撤回成功/不存在的 ready 按 NOT_PRESENT、已领取对象不动）。取消边界：停止在块间生效，已确认末尾不再推进。消费者规则分别核对：普通交付三处均无副本时终局失败且 `republishes == 0`（不自动重投），报告恢复按三位置实际观察分类（观察失败为 UNRELIABLE 不当不存在），日志副本发布失败停止后续步骤并保留 COPY_FAILED/COPY_UNKNOWN 分类。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/host_files/test_file_contract.py -q`。新文件对既有实现收口验证；首跑暴露的失败均为测试替身构造问题（缓冲写入不可观察、注入点与平台分支不符——Windows 目录同步恒 UNSUPPORTED，注入须显式模拟支持目录同步的平台），修正替身后全部 PASS，未发现生产缺陷。
+- [x] 实施本任务。补齐真实文件与各业务消费者的组合测试（真实 `decide_handoff`、`recover_report_files`、`deliver_failure_copy` 与真实文件系统、真实 MarkerStore 组合；发布端口按协议注入）。进程中断仅验证软件恢复，不宣称物理断电保证——真实消费者编排的中断恢复由跨组件轮次（`tests/integration` 的 report/output/cancellation roundtrip）验证。
+- [x] 再运行上述命令全部 PASS，并核对 所有文件边界有分类和拥有者（四边界各自返回分类结果；文件身份的占用登记与修改资格由 `test_file_ownership_registered_and_backlog_released` 验证），合计积压测量不被当作固定内存保证（`unfinished_files` 只反映未结束任务的快照，收场即释放，不累计历史）。
+- [x] 审阅实际接口、状态分区及失败路径，检查 全部异常捕获、默认值和 finally 是否掩盖已发生效果——四边界用例即“记录的效果必须等于观察的效果”的反例矩阵：移动成功同步失败保留已移动事实、截断失败保留原文件、读取失败保留已确认字节、撤回只作用于 camctl 仍拥有的位置。门禁证据：本计划收口提交（host_files 单元+集成 329 passed 5 skipped）。
+
+## 实施状态
+
+F1—F7 于 2026-10-07 全部收口（最后收口轮提交见 git 历史“test: 验证文件执行边界与受管媒体工具收口”）。F6 媒体工具执行随 M1/M2/M4 轮次实施，收口轮补 O3 边界 AST 审计并核对进程组与收场语义；F7 补齐四边界（写入/同步/移动/删除）错误注入下记录与观察一致的组合测试及三类消费者（普通交付/报告恢复/日志副本）规则核对。真实消费者编排与数据库的中断恢复组合由跨组件轮次验证（`tests/integration` 各 roundtrip）。
 
 ## 模块完成门禁
 
