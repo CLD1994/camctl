@@ -316,6 +316,64 @@ def test_distribution_works_outside_repository(installed: _Installed) -> None:
             "SELECT status FROM actions ORDER BY id")]
     assert statuses == [3], f"照片动作未成功终态: {statuses}"
 
+    # 版本入口：安装物自带版本说明。
+    versioned = installed.cli("--version")
+    assert versioned.returncode == 0, versioned.stderr
+    assert versioned.stdout.strip() == "0.1.0", versioned.stdout
+
+    # 运行日志：会话失败记录经日志链写入配置的日志文件；干净会话
+    # 无记录不创建文件是既定行为，日志验证走失败路径。
+    failed_home = installed.deploy / "deployment-failure"
+    for name in ("staging", "ready", "processing"):
+        (failed_home / name).mkdir(parents=True)
+    failed_state = failed_home / "state.db"
+    failed_config = failed_home / "config.toml"
+    failed_config.write_text(
+        "\n".join([
+            "[paths]",
+            f'state_db = "{_toml_path(failed_state)}"',
+            f'log_file = "{_toml_path(failed_home / "camctl.log")}"',
+            f'staging = "{_toml_path(failed_home / "staging")}"',
+            f'ready = "{_toml_path(failed_home / "ready")}"',
+            f'processing = "{_toml_path(failed_home / "processing")}"',
+            "",
+            "[clock]",
+            'min_plausible_date = "2025-01-01"',
+            "",
+            "[devices.cam-1]",
+            'kind = "camera"',
+            'driver = "test-stub"',
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    # 日常入口对缺失状态库的拒绝与安装物边界：不创建库、明确失败。
+    refused = installed.cli(
+        "run", "--config", str(failed_config), driver=_photo_driver())
+    assert refused.returncode == 1, (
+        f"缺失状态库仍成功: stdout={refused.stdout!r}")
+    assert refused.stdout.strip() == "", refused.stdout
+    assert "状态库不存在" in refused.stderr, refused.stderr
+    assert not failed_state.exists(), "日常入口创建了状态库"
+
+    # 运行日志：显式初始化后损坏状态库，会话层失败经日志链写入
+    # 配置的日志文件；干净会话无记录不创建文件是既定行为。
+    initialized_failure = installed.cli(
+        "init", "--config", str(failed_config))
+    assert initialized_failure.returncode == 0, initialized_failure.stderr
+    failed_state.write_bytes(b"not a sqlite database at all")
+    failed = installed.cli(
+        "run", "--config", str(failed_config), driver=_photo_driver())
+    log_file = failed_home / "camctl.log"
+    assert failed.returncode == 1, (
+        f"损坏状态库仍成功: stdout={failed.stdout!r}")
+    failure_message = json.loads(failed.stdout)
+    assert failure_message["kind"] == "error", failed.stdout
+    assert failure_message["body"]["reason"] == "state_db_error", failed.stdout
+    assert log_file.is_file() and log_file.stat().st_size > 0, (
+        f"会话失败未写运行日志: stdout={failed.stdout!r} "
+        f"stderr={failed.stderr!r}")
+
 
 def test_missing_package_resource_fails_init(installed: _Installed) -> None:
     """包资源缺失时 init 明确失败，不静默创建不完整状态库。"""
