@@ -189,11 +189,23 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 **接口与依赖：** 使用 H1—H6 与 R3 的真实接口；建立登记分支到具体用例的证据映射。前置交付：H1—H6、C1—C8、X1—X11、N1—N5、R1—R8 的生产能力；不依赖消费者的最终验收声明。
 
-- [ ] 编写失败用例。对每种生产事件建立 `test_every_event_matches_independent_history`，`assert restored == independently_expected_image`；三条路径相等之外仍检查每个自身成员及引用。改变批次、缓存与方向后 `assert bytes_a == bytes_b`。代表性数据 ANALYZE 后核对首批/续读实际索引、去重、稀疏变化及候选峰值。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_complete_history.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。补齐全部事件和文件生命周期的恢复反例、成员完整性与实际查询测量；资源测量注明开发环境、数据规模和主/报告进程合计，不写成目标性能承诺。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 验收 52—68、H、P、J 相关条目逐项有实际入口。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有读取分支、缓存依赖及未定义历史版本的处理；记录门禁证据，建议以“test: 验证全部历史恢复与分页规模”形成独立提交。
+- [x] 编写失败用例。对每种生产事件建立 `test_every_event_matches_independent_history`，`assert restored == independently_expected_image`；三条路径相等之外仍检查每个自身成员及引用。改变批次、缓存与方向后 `assert bytes_a == bytes_b`。代表性数据 ANALYZE 后核对首批/续读实际索引、去重、稀疏变化及候选峰值。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/history/test_complete_history.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。补齐全部事件和文件生命周期的恢复反例、成员完整性与实际查询测量；资源测量注明开发环境、数据规模和主/报告进程合计，不写成目标性能承诺。
+- [x] 再运行上述命令，要求全部 PASS，并核对 验收 52—68、H、P、J 相关条目逐项有实际入口。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有读取分支、缓存依赖及未定义历史版本的处理；记录门禁证据，建议以“test: 验证全部历史恢复与分页规模”形成独立提交。
+
+### H7 验证记录（2026-10-08，Windows 开发机）
+
+环境：uv CPython 3.11.15、SQLite 3.53.1。
+
+- 失败先行：综合剧本（受理、录像媒体、产物登记、取回交付、快照维护）上按 H-01 归属表独立推导的交付映像包含读取流程与尝试行，生产的 `_entity_row_ids` 恢复结果缺少这两类行——真实归属缺口，修复 deliveries 分支补读取流程与尝试行、actions 分支补非交付流程与尝试行（READ_FILE 流程行 action_id 非空，须按 `delivery_id IS NULL` 排除避免重复归属）；同轮发现生产行值含主键与派生历史元数据列而事件推导只有登记业务列，比较口径统一投影到 `business_columns`（投影职责在测试侧，生产行值保持全列供快照标识使用）。
+- 独立预期：`_naive_replay_image` 从全部事件朴素重放全库映像（create 插入、update 合并、delete 移除，不经生产恢复代码），`_object_expected_rows` 按外键归属语义独立筛选对象自身行；剧本产生的每个事件类型经三路径核对（初始回放、快照正向、当前投影逆向），断言成员完整、业务列精确值、change_count 与 `entity_event_links` 计数一致，逆向恢复批次 128 与 3 结果全等。raw 种子行（测试捷径，无创建事件）单独甄别：依赖它们的对象初始回放按种子清单跳过，真实不自洽仍失败。
+- 事件覆盖：33 个登记事件类型全部进入 `_EVENT_COVERAGE` 映射——11 个由综合剧本真实产生并三路径核对，21 个锚定既有模块测试文件，`BASELINE_CHUNK` 无生产写入方显式列为 `_NO_PRODUCER_EVENTS`（不折叠为已覆盖）；映射用例断言键集与登记一致、锚点文件存在、script 标记与剧本实际产生的类型集合一致。
+- 规模测量：代表性样本约 1.6 万目录行与 1.6 万文件行（均匀、高重复、稀疏三形态混合及多动作噪声文件）执行 ANALYZE 后——分页选择首批与续读经 `report_changes_by_entity` 索引检索（EXPLAIN QUERY PLAN 无 SCAN 无 TEMP），页大小 100 与 7 取得相同升序集合（≥4000 身份），高重复对象只贡献一次身份；候选扫描 SQL（与 `_read_candidate_files` 同形）命中 `device_files_observer` 索引，每批 ≤128，分页集合与独立全量选择一致，半数晚于边界的候选被窗口过滤。
+- 资源测量（开发环境数字，不构成目标主机性能承诺）：有限容量执行器（capacity 4、入队超时 9s）上并发 6 个受理事务与 4 个对象逆向恢复全部完成、事件计数前进（用例断言）；墙钟数字随本机负载波动，不以单轮数字记录。报告进程与受管工具进程的合计资源随 B7 发行物验证在目标环境测量。
+- 全量回归（Windows）：`test_complete_history.py` 6/6；history 91、persistence 74、reporting 345、outputs 1788+1 跳、acceptance 226、bootstrap 87、cancellation 44、capture 210、contracts 39、devices 46、host_files 81+5 跳、logging_runtime 28、operations 183、scheduling 125、session 82；单元 3353；根 Python 集成 55+4 跳+342 子测试；check-event-transitions、check-report-dependencies、check-database-spec（3080 项断言）、check-doc-links（3141 链接）、check-protocol 全部通过。
+- 验收映射：52—68、H、P、J 条目全部有实际入口；68、P-03、P-04、P-06 依据本记录升级为已覆盖（software-acceptance.md 第八节与执行记录）。
 
 ## 模块完成门禁
 

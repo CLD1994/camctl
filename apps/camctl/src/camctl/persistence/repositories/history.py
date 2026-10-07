@@ -580,6 +580,15 @@ class HistoryRepository:
             for _, processing_id in processing_ids:
                 yield from _ids_where(
                     connection, "file_copies", "processing_id", processing_id)
+            # 动作自身的流程与尝试行：交付读取流程按归属规格属于交
+            # 付子树，这里只取非交付流程，保持每个行恰有一个归属。
+            action_runs = _ids_where(
+                connection, "operation_runs", "action_id", action,
+                extra="delivery_id IS NULL")
+            yield from action_runs
+            for _, run_id in action_runs:
+                yield from _ids_where(
+                    connection, "operation_attempts", "run_id", run_id)
             yield from _ids_where(connection, "cleanup_items", "action_id", action)
             yield from _ids_where(connection, "cancel_items", "action_id", action)
             yield from _ids_where(connection, "auto_preview_links", "obtain_action_id", action)
@@ -612,6 +621,15 @@ class HistoryRepository:
         elif name == "deliveries":
             yield from _ids_where(connection, "deliveries", "id", entity_id)
             yield from _ids_where(connection, "file_copies", "delivery_id", entity_id)
+            # 交付自身包含读取流程与尝试行（H-01 归属表：普通拷贝
+            # 及读取流程、尝试）；流程行的动作列是发起者，历史归属
+            # 仍按交付。
+            delivery_runs = _ids_where(
+                connection, "operation_runs", "delivery_id", entity_id)
+            yield from delivery_runs
+            for _, run_id in delivery_runs:
+                yield from _ids_where(
+                    connection, "operation_attempts", "run_id", run_id)
         else:
             yield from _ids_where(connection, name, "id", entity_id)
 
@@ -770,17 +788,20 @@ def _decode_row(values: dict) -> dict:
 
 def _ids_where(
     connection: sqlite3.Connection, table: str, column: str, value: int,
-    *, ids_only: bool = False,
+    *, ids_only: bool = False, extra: str | None = None,
 ) -> list[tuple[str, int]] | list[int]:
     """按归属外键枚举子表行身份（报告字段相关归属表）。"""
+    condition = f"{column} = ?"
+    if extra is not None:
+        condition = f"{condition} AND {extra}"
     with closing(connection.execute(
-            f"SELECT id FROM {table} WHERE {column} = ?", (value,))) as cursor:
+            f"SELECT id FROM {table} WHERE {condition}", (value,))) as cursor:
         rows = [int(row[0]) for row in cursor.fetchall()]
     return rows if ids_only else [(table, row_id) for row_id in rows]
 
 
 def _table_row(connection: sqlite3.Connection, table: str, row_id: int) -> dict:
-    """取得并解码一行当前投影（业务列与 JSON 列结构化）。"""
+    """取得并解码一行当前投影（JSON 列结构化）。"""
     with closing(connection.execute(
             f"SELECT * FROM {table} WHERE id = ?", (row_id,))) as cursor:
         row = cursor.fetchone()
