@@ -212,6 +212,8 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 **验收映射字段：** 正式条目及链接、所属模块任务、实际生产入口、具体单元/集成用例、已执行命令及结果、尚未核验的前提。数据库验收的数字条目、W/R/Q/S/O/V/E/J/F/H/P 系列逐条映射，不仅登记一个大范围。
 
+**跨组件媒体链环境前提（2026-10-07 核实与决策）：** 生产按既定部署规格以裸名调用 `ffprobe`/`ffmpeg`（[部署依赖](../../architecture/initialization.md#依赖与部署)：工具由部署环境提供），生产装配不提供工具路径配置面。Windows 开发机核实：CreateProcess 对无扩展名命令只按 PATH 解析 `.exe`（实验证据：PATH 注入 `.cmd` 替身后裸名调用 FileNotFoundError），脚本替身无法对生产调用形态可见；显式 `.cmd` 绝对路径可执行，组件与装配层即以该模式注入请求参数验证工具行为（`bootstrap/test_media_assembly.py` 真实子进程+生产装配）。据此决策：不为测试增加生产配置面（无部署需求依据）；跨组件媒体检查/修复链（异常多录→检查→时长判定→修复→修复成品取回，record 按控制完成收场的路径已随 I5 覆盖）随 WSL x86 Linux 全链环境实施（本机 WSL 已有 ffprobe/ffmpeg 6.1.1，camctl 侧需与 B7 共享的 WSL Python 3.11 环境），Windows 侧不补依赖"本机无工具"这一环境巧合的用例（在装有工具的机器上语义会翻转）。
+
 - [ ] 先审计各专题及数据库验收，建立 `test_every_software_contract_has_evidence_owner` 对应的覆盖检查；它验证映射结构和引用，不把有一行映射当行为通过。缺少生产入口或可证伪用例时，明确返回所属模块任务。
 - [ ] 先运行 `uv run --project apps/camctl --group test pytest tests/integration/test_camctl_acceptance_map.py -q`，确认缺项被识别；补齐实现及证据后再通过。随后分别执行共享契约中的全部单元、组件集成命令，以及 `uv run --project apps/camctl --group test pytest tests/integration -q`、客户端分类测试与 CTest；执行现有协议、文档和数据库规格检查。只修复已定位根因的失败，不删除测试或放宽规则。
 - [ ] 独立核验实际实现、事件校验器、真实导入关系、所有外部调用及异常分支，逐项收齐 C9、X12、N6、R9、H7、F7、D5 软件部分及其他模块门禁。类型、状态、目录、缓存与报告是否遗漏成员须用独立预期核对。
