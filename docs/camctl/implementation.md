@@ -69,6 +69,16 @@ camctl 以较为乐观的 MVP（最小可行产品）为目标，优先打通计
 
 具体缓存条目数、其他队列的容量与满载处理、缓冲大小及其配置有效性规则仍需细化；数据库等待队列遵守规定的[容量配置](persistence-runtime.md#数据库等待队列容量)和[入队等待时限](persistence-runtime.md#数据库队列入队等待时限)。报告实体与事件读取批次已分别配置，默认值及生效规则见[读取批次配置](historical-state-query.md#实体与事件读取批次分别配置)。实际查询、编码、文件写入或进程运行失败时，继续按所属流程的失败与恢复契约处理；容量限制不改变数据完整性、事务边界或报告内容。
 
+## 构建、安装与运行检查
+
+正式发行物是 wheel 包。在仓库内执行 `uv build --project apps/camctl` 构建时，自定义构建钩子从仓库权威来源（`protocol` 的 Schema 与错误清单、`docs/camctl/database` 的结构 SQL 与登记表、`docs/camctl/sqlite-runtime.json`）刷新包内 `_resources` 目录，发行物自带全部权威资源；从 sdist 构建时仓库不可见，构建钩子使用 sdist 内已生成的资源副本，两者不允许出现既无权威来源又无副本的构建。
+
+目标主机安装分三步：先准备满足版本要求的 Python 3.11 解释器；再用 `uv export --project apps/camctl --frozen --no-dev --no-emit-project` 从锁文件导出运行时依赖清单（版本与哈希钉定），在部署虚拟环境中安装该清单；最后以 `uv pip install --no-deps` 安装 wheel 本体。发行物只声明三个运行时依赖（concurrent-log-handler、janus、jsonschema），测试依赖属于开发用依赖组，不进入部署环境。
+
+安装后的运行检查由 `camctl` 命令自身承担：`init` 在创建或验证状态库之前核验解释器版本与实际链接的 SQLite，条件以包内 `runtime/sqlite-runtime.json` 为权威（达到主线最低版本，或精确匹配回移修复清单），不满足时以退出码 1 报告"运行库条件不满足"，不创建状态库；包资源缺失时同样明确失败。`describe` 不依赖状态库即可导出设备能力说明。`adb`、`ffprobe`、`ffmpeg` 由部署环境提供裸名可执行文件，工具缺失或调用失败时的行为分类见[部署依赖](../architecture/initialization.md#依赖与部署)。
+
+仓库外构建、安装与运行由 `apps/camctl/tests/integration/bootstrap/test_distribution.py` 持续验证：它在仓库之外的独立虚拟环境按锁文件安装发行物，经安装后的 CLI 完成 init、describe、submit 与设备替身 run，并核对资源自包含、依赖边界及资源缺失与 SQLite 条件不满足的明确失败。真实 ARM64 硬件与真实设备的结果按[部署交接与待核验项](verification.md#部署交接与待核验项)单独核验，不由开发环境通过代替。
+
 ## 基础技术选型
 
 技术选型优先复用标准库和成熟第三方开源库。先根据规定的行为契约核实候选能力，再结合维护状况、目标主机兼容性及总体维护成本选择；能降低实现和维护成本的第三方依赖可以引入。通用机制需要自行实现时，说明现有方案无法覆盖的具体契约，自有代码集中于业务规则和必要适配。技术选型如下表所示，其他尚未确定的工具沿用这一原则评估。
