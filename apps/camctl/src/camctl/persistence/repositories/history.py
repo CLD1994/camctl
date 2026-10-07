@@ -111,7 +111,8 @@ class HistoryRepository:
     @staticmethod
     def _boundary(connection: sqlite3.Connection) -> HistoryBoundary:
         row = _one(connection,
-            "SELECT id, last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1"
+            "SELECT id, last_event_id FROM history_transactions"
+            " WHERE id = (SELECT MAX(id) FROM history_transactions)"
         )
         latest = _one(connection, "SELECT MAX(id) FROM history_events")[0]
         if row is None:

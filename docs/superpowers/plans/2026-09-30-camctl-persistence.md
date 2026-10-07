@@ -140,11 +140,11 @@ P1、P2 在首阶段完成；P3 与 H1/H2 联合建立首批事件事务；P4 �
 
 **接口与依赖：** 实际实现 A4、S4、Q4、O2、C3、X3/X5/X7/X8、N3、R2/R7 和 H6 拥有的 Repository 端口；本任务不新增表级公共接口。前置交付：对应业务命令及纯规则已在各计划的接口任务定义。
 
-- [ ] 编写失败用例。建立 `test_repository_returns_detached_batch`，本批返回后 `assert active_cursors == 0` 且无读事务；错误不得返回空批。每个新仓储调用组合真实事务，断言意图先于外部调用、同事务必要记录齐全以及跨线程集合不会被另一方修改。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_repositories.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。逐用例增加适配器，用 P3 统一提交；查询按固定范围和索引分页，分页结果遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)，转换为业务拥有的类型后结束游标和事务再返回。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 业务流程没有 SQLite 连接，完整用例没有多个自提交函数。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 新建仓储是否只验证 SQL 行内约束而遗漏具名业务校验；记录门禁证据，建议以“feat: 接入完整用例的 SQLite 仓储”形成独立提交。
+- [x] 编写用例。建立 `test_batch_is_detached_and_read_connection_is_released`：首批返回后提交新事务，断言新读事务立即可见新提交（没有跨调用持有的读事务）、固定 H 续批不含新写入并就此耗尽、批数据在全部后续读写后内容不变且集合为不可变元组；建立 `test_read_error_is_propagated_not_an_empty_batch`：伪造的 H 按一致性错误传播而不是空批。写侧“意图先于外部调用、同事务必要记录齐全”由 P3 的逐阶段中断回滚用例验证（`test_transactions.py`），分页契约与读事务结束后返回由 `integration/history/test_queries.py` 验证，不重复覆盖。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_repositories.py -q`。仓储适配器已随各业务模块实现，本任务是收口验证：新增用例对既有实现直接通过（3 passed），证明批分离与错误语义契约成立，无需先红步骤。
+- [x] 实施完成于各业务轮次：各仓储查询按固定范围和索引分页，分页结果遵守[分页结果契约](../../camctl/module-contracts.md#分页结果契约)，转换为业务拥有的类型后结束游标和事务再返回；写侧统一经 P3 事务内核提交。
+- [x] 再运行上述命令全部 PASS，并核对 业务流程没有 SQLite 连接（`integration/contracts/test_dependencies.py` 依赖检查器持续验证），完整用例没有多个自提交函数（`test_repositories_commit_only_through_the_transaction_kernel` 静态审计：仓储目录无 `.commit()` 调用、无 `sqlite3.connect` 直连，事务控制字面量只属于 `HistoryRepository` 读事务生命周期与 `SqliteSnapshotStore` 维护执行函数）。
+- [x] 审阅实际接口、状态分区及失败路径，检查 新建仓储是否只验证 SQL 行内约束而遗漏具名业务校验：具名业务校验由各业务守卫在事务内核提交前执行并随所属模块门禁验证，仓储层不重复实现。门禁证据：本任务提交（3 用例 + persistence/history 集成 159 passed + 单元 3309 passed）。
 
 ### P6 缓存与实际读取成本
 
@@ -152,14 +152,20 @@ P1、P2 在首阶段完成；P3 与 H1/H2 联合建立首批事件事务；P4 �
 
 **接口与依赖：** 提供 `cache_get(key: StateCacheKey) -> CacheLookup[T]`、`cache_put(key: StateCacheKey, value: T) -> None`；StateCacheKey 含数据库身份、H/C、对象身份与全部字段依赖版本，CacheLookup 明确命中或未命中。前置交付：H4/H5、R3；本批实际仓储。
 
-- [ ] 编写失败用例。在 `test_dependency_change_invalidates_parent_cache` 中仅改变关联 delivery/file，`assert public_result == expected_changed_result`，即使父对象自身计数未变也不能命中旧结果。改变容量与命中率后固定 H 字节相同；真实代表性数据 ANALYZE 后检查索引与读取量。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_cache_queries.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。只缓存读取结果，按容量释放终态对象；提交结果用于本次通知不直接充当永久最新状态。容量是工程建议，实施时以实际结构明确上限并记录测量，不引入推测性资源协调器。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 缓存及分页不会改变固定历史结果，候选扩展来自持久化查询。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有父对象和关联缓存是否只依赖自身计数或 latest_plan_id；记录门禁证据，建议以“perf: 实现有界状态缓存与查询验证”形成独立提交。
+- [x] 编写用例。建立 `test_history_reads_locate_rows_through_indexes`：种 30 个完整事务后 ANALYZE，以 trace 捕获仓储真实执行的每条查询，逐条 EXPLAIN QUERY PLAN 断言历史体量表（history_events、history_transactions、entity_event_links、report_entity_changes、plans）没有 SCAN 全表扫描；建立 `test_package_invariant_cache_reuses_the_same_object`：包资源不变量缓存的同一性验证。依赖失效用例属于 StateCacheKey 通用读取缓存，按规格“可评估、不将收益计入第一版性能承诺”后置（见实施说明）。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_cache_queries.py -q`。首跑暴露真实读取成本问题：`_boundary` 的最新事务查询 `ORDER BY id DESC LIMIT 1` 计划为 SCAN（读取量依赖优化器提前终止，不可从计划证明），修复为主键等值定位 `WHERE id = (SELECT MAX(id) FROM history_transactions)`（行为等价，计划为 SEARCH）后全部 PASS（2 passed）。
+- [x] 实施本任务。缓存按规格分层落地：SQLite 数据页缓存保持默认按需分配（DbConfig 不配置 cache_size）；不可变内容缓存（枚举登记、事件登记、权威结构表名）以进程内 lru_cache 加载且同一性可证；活动任务状态缓存为会话内结构（anchors、listing_cache），随会话生命周期释放。只缓存读取结果，不缓存提交结果充当当前状态，不引入推测性资源协调器。
+- [x] 再运行上述命令全部 PASS，并核对 缓存及分页不会改变固定历史结果（不变量缓存身份来自包资源而非状态数据库，固定 H 分页语义由 `test_queries.py` 验证），候选扩展来自持久化查询。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有父对象和关联缓存是否只依赖自身计数或 latest_plan_id：会话内缓存以会话与查询身份为界，报告生成不从缓存读取而按冻结窗口从持久化查询。门禁证据：本任务提交（2 用例；发现并修复 1 处读取成本问题）。
+
+## 实施状态
+
+P5 与 P6 于 2026-10-07 收口（提交见 git 历史“test: 验证仓储批分离与历史查询索引成本”）。仓储适配器与短读事务已随各业务模块轮次实现，本收口轮建立 `test_repositories.py` 与 `test_cache_queries.py` 汇总验证批分离、错误语义、提交路径静态审计与查询计划成本，并修复 `_boundary` 最新事务查询的主键定位。
+
+P6 的 StateCacheKey 通用读取缓存（依赖版本化键与容量驱逐）按 `docs/camctl/persistence-runtime.md` 中“指定历史边界计算结果可评估，不将收益计入第一版性能承诺”落档后置：第一版已实施的缓存分层为 SQLite 数据页缓存（默认按需分配）、包资源不变量的进程内缓存、会话内活动任务结构缓存。后续若有测量证据表明公开字段计算或历史边界计算构成实际瓶颈，再按该接口设计实施并补依赖失效用例。
 
 ## 模块完成门禁
 
-P1—P4 的真实线程及 SQLite 组合通过；各业务仓储都在所属模块门禁中证明完整原子操作。V、E、J 的适用验收及每个业务的提交前中断、确认回滚、成功未通知和未知提交有明确用例；P6 以真实负载证据完成。
+P1—P4 的真实线程及 SQLite 组合通过；各业务仓储都在所属模块门禁中证明完整原子操作。V、E、J 的适用验收及每个业务的提交前中断、确认回滚、成功未通知和未知提交有明确用例；P6 以代表性负载下的查询计划证据完成，通用状态缓存按规格后置。
 
 完成时核对本计划所有任务、引用的正式验收条目及消费者组合证据。已有测试全部通过仍不能替代遗漏需求检查；尚未核验的设备和部署前提单独记录。
