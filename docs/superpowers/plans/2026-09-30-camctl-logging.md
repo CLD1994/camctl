@@ -149,15 +149,15 @@ L1—L4 和 L6 随首阶段日志基础实施；L5 随首条报告失败链完�
 
 **接口与依赖：** 提供异步 `close_logging(runtime: LogRuntime) -> CloseResult`；LogRuntime 含生产状态、未完成记录、通道、计数及实际线程句柄。前置交付：L1—L4、S5。
 
-- [ ] 编写失败用例。建立 `test_close_summary_is_once`，重复关闭 `assert summary_attempts == 1`，全部零或级别过滤/通道禁用为 0。摘要由日志线程直接写，`assert summary_queue_puts == 0`；队列满时停止标记不能丢弃已接纳记录或直接抛 Full。
-- [ ] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/logging_runtime/test_lifecycle.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。先停止新生产并处理原重要等待/已接纳记录，再按最终计数最多尝试一条 WARNING，停止监听、关闭处理器及 Janus；线程等待异步组织，不阻塞事件循环。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 正常错误收场也能有序关闭，突然终止不补造摘要。
+- [x] 编写失败用例。建立 `test_close_summary_is_once`，重复关闭 `assert summary_attempts == 1`，全部零或级别过滤/通道禁用为 0。摘要由日志线程直接写，`assert summary_queue_puts == 0`；队列满时停止标记不能丢弃已接纳记录或直接抛 Full。
+- [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/logging_runtime/test_lifecycle.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
+- [x] 实施本任务。先停止新生产并处理原重要等待/已接纳记录，再按最终计数最多尝试一条 WARNING，停止监听、关闭处理器及 Janus；线程等待异步组织，不阻塞事件循环。
+- [x] 再运行上述命令，要求全部 PASS，并核对 正常错误收场也能有序关闭，突然终止不补造摘要。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/logging_runtime/test_lifecycle.py -q`，真实生产者、监听线程、满队列、通道禁用及多个进程分别汇总，核对任务/线程实际关闭。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 所有退出路径、重复关闭和摘要失败是否递归写日志；记录门禁证据，建议以“feat: 完成日志组件有序关闭”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 所有退出路径、重复关闭和摘要失败是否递归写日志；记录门禁证据，建议以“feat: 完成日志组件有序关闭”形成独立提交。
 
-**实施状态（2026-10-07 核对）：** L1—L5 组件本体与配置校验已完成并有测试证据。L6 的 `close_logging` 实现随 L4 提交（c498aaf）落地，但本任务的失败用例、测试文件（单元与集成 `test_lifecycle.py`）及审阅未执行。业务日志链尚未进入 run/submit 生产路径：`LogChannel` 无生产消费者，camctl 自身没有日志语句，`close_logging` 无调用方；`paths.log_file` 当前仅由报告失败日志副本通道使用。会话装配、来源路由与退出摘要调用随日志装配轮次完成。
+**实施状态（2026-10-07 核对）：** L1—L6 全部完成。L6 本轮（2026-10-07）落地：摘要随停止标记交给监听线程在消化完已接纳记录后写出（`service.py` 的 `_StopMarker`，满载时标记经有界等待入队，超时如实报告 `listener_stopped=False` 且不写摘要）；`close_logging` 重写为级别判定+进程身份+文件处理器关闭+队列关闭的完整次序。单元 `test_lifecycle.py`（6 用例）与集成 `test_lifecycle.py`（真实文件、禁用跳过、两进程独立汇总、监听线程实际退出）全绿。同轮修复 L2/L3 既有缺陷：监听线程结算重要记录凭据直接 set Future，回调进入队列而事件循环不被唤醒，等待协程永久阻塞；现统一经 `call_soon_threadsafe`（`_settle_receipt`）。业务日志链已接入 run/submit 生产路径：`build_runtime` 装配 `FileChannel`+`LogChannel`（配置取自 `session.log` 块，大写级别名在装配接缝映射枚举），`execute_command` 对会话失败结果与异常经异步入口记 ERROR 并在收场 `close_logging`；`close_runtime` 对未收场的日志链做同步兜底（不补写摘要）。报告失败日志副本链保持独立通道与业务链并存写同一 `paths.log_file`（CLH 文件锁互斥）；副本凭据化改造另行规格化。来源路由（camctl 命名空间适配与第三方 QueueHandler 接入）不在本计划范围，随日志适配规格安排。
 
 ## 模块完成门禁
 

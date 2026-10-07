@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import queue
 import random
 import threading
 from dataclasses import dataclass, field
@@ -53,6 +54,13 @@ class ChannelError(Exception):
     """日志文件通道失效；不再把记录标为写入成功。"""
 
 
+@dataclass(frozen=True)
+class _StopMarker:
+    """停止标记：携带关闭摘要，由监听线程在消化完已接纳记录后写出。"""
+
+    summary: LogRecord | None
+
+
 @dataclass
 class PendingLog:
     """一条已接纳、等待实际写入凭据的重要记录（仅一份）。"""
@@ -94,6 +102,8 @@ class LogChannel:
             target=self._consume, name="camctl-log-listener", daemon=True
         )
         self._listener_started = False
+        self._summary_written = False
+        self._stop_marker_done = False
 
     # -- 接纳入口 -----------------------------------------------------
 
@@ -180,7 +190,7 @@ class LogChannel:
             self._channel_failed = True
             for pending in self._pending.values():
                 if not pending.receipt.done():
-                    pending.receipt.set_exception(error)
+                    _settle_receipt(pending.receipt, error=error)
 
     def pending_count(self) -> int:
         with self._pending_lock:
@@ -195,8 +205,18 @@ class LogChannel:
 
     def _consume(self) -> None:
         while True:
-            record = self._queue.sync_q.get()
-            if record is None:
+            try:
+                record = self._queue.sync_q.get()
+            except janus.ShutDown:
+                # 队列被关闭唤醒：按关闭结果退出，剩余记录不再消费。
+                break
+            if isinstance(record, _StopMarker):
+                if record.summary is not None and not self._channel_failed:
+                    try:
+                        self._summary_written = bool(self._writer(record.summary))
+                    except Exception:
+                        self._summary_written = False
+                self._stop_marker_done = True
                 break
             if self._channel_failed:
                 self._settle_pending(record, False, ChannelError("日志通道已禁用"))
@@ -217,10 +237,7 @@ class LogChannel:
             ]
             for key, pending in matches:
                 if not pending.receipt.done():
-                    if error is not None:
-                        pending.receipt.set_exception(error)
-                    else:
-                        pending.receipt.set_result(written)
+                    _settle_receipt(pending.receipt, written=written, error=error)
                 del self._pending[key]
 
     # -- 关闭 ---------------------------------------------------------
@@ -229,31 +246,82 @@ class LogChannel:
     def counters(self) -> DropCounters:
         return self._counters
 
-    def stop_listener(self, timeout: float | None = None) -> None:
-        """停止接纳并结束监听线程；已接纳记录消费完为止。"""
-        self._closing = True
-        try:
-            self._queue.sync_q.put_nowait(None)
-        except Exception:
-            pass
-        if self._listener_started:
-            self._listener.join(timeout=timeout)
+    def stop_listener(
+        self,
+        timeout: float | None = None,
+        *,
+        summary: LogRecord | None = None,
+    ) -> bool:
+        """请求监听线程在消化完已接纳记录后写出摘要并退出。
 
-    def write_direct(self, record: LogRecord) -> bool:
-        """由日志线程直接写（关闭摘要），不经队列。"""
-        if self._channel_failed:
-            return False
+        停止标记经有界等待入队：队列满载时不丢弃标记，等待消费者
+        腾出容量，保证标记排在全部已接纳记录之后；超时仍未入队时
+        返回 False，此时摘要未写出，由调用方按监听未完成处置。线
+        程 join 在本线程执行；重复调用只请求一次停止。
+        """
+        if self._closing:
+            if self._listener_started:
+                self._listener.join()
+            return self._stop_marker_done
+        self._closing = True
+        if not self._listener_started:
+            self._stop_marker_done = True
+            return True
+        marker = _StopMarker(summary=summary)
         try:
-            return bool(self._writer(record))
-        except Exception:
+            if timeout is None:
+                self._queue.sync_q.put(marker)
+            else:
+                self._queue.sync_q.put(marker, timeout=timeout)
+        except queue.Full:
             return False
+        self._listener.join()
+        return self._stop_marker_done
+
+    @property
+    def summary_written(self) -> bool:
+        """关闭摘要是否由监听线程写出（join 后读取为终值）。"""
+        return self._summary_written
+
+    @property
+    def listener_alive(self) -> bool:
+        return self._listener.is_alive()
+
+    @property
+    def disabled(self) -> bool:
+        """文件通道是否已因写入失败禁用。"""
+        return self._channel_failed
 
     def async_close(self) -> None:
         self._queue.close()
 
-    def await_closed(self) -> None:
-        self._queue.wait_closed()
+    async def await_closed(self) -> None:
+        await self._queue.wait_closed()
 
 
 def _level_rank(level: LogLevel) -> int:
     return {LogLevel.DEBUG: 0, LogLevel.INFO: 1, LogLevel.WARNING: 2, LogLevel.ERROR: 3}[level]
+
+
+def _settle_receipt(
+    receipt: asyncio.Future,
+    *,
+    written: bool | None = None,
+    error: Exception | None = None,
+) -> None:
+    """结算重要记录凭据：经事件循环唤醒等待者。
+
+    监听线程也调用本函数；直接 set 会让回调进入队列而事件循环
+    得不到唤醒，等待协程将永久阻塞。调度到执行之间凭据可能已被
+    其他路径结算，重复结算直接忽略。
+    """
+
+    def settle() -> None:
+        if receipt.done():
+            return
+        if error is not None:
+            receipt.set_exception(error)
+        else:
+            receipt.set_result(written)
+
+    receipt.get_loop().call_soon_threadsafe(settle)

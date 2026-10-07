@@ -3,11 +3,12 @@
 不建立全局数据库、驱动或配置单例：每次调用创建本次命令所需的
 协作者，流程只依赖端口。run 会话默认装配生产报告流程与生成子
 进程监督方，会话结束后监督方先收场；接纳/会话句柄由会话流程自
-身释放，装配层最后关闭报告失败日志副本通道。
+身释放，装配层最后有序关闭业务日志链与报告失败日志副本通道。
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -44,6 +45,8 @@ class RuntimeDeps:
     notifier: Any = None
     #: 报告失败日志副本的文件通道；首次触发时创建，关闭时释放。
     failure_channel: Any = None
+    #: 业务日志链运行时；由 build_runtime 创建并在会话结束时有序关闭。
+    log_runtime: Any = None
     closed: bool = field(default=False)
 
 
@@ -96,6 +99,63 @@ def build_runtime(
         admission_lock=admission_lock,
         catalog=catalog if catalog is not None else _default_catalog(config),
         notifier=notifier,
+        log_runtime=_log_wiring(config),
+    )
+
+
+def _log_wiring(config: ConfigSnapshot):
+    """业务日志链装配：文件通道、接纳通道与关闭运行时。
+
+    追加失败经 ChannelWriteError 交给接纳通道按通道故障禁用；轮换
+    失败但仍追加成功时通道继续。监听线程在此启动，收场由
+    execute_command 的 close_logging 完成。
+    """
+    from camctl.logging_runtime.clh_adapter import ChannelWriteError, FileChannel
+    from camctl.logging_runtime.lifecycle import LogRuntime
+    from camctl.logging_runtime.models import LogLevel
+    from camctl.logging_runtime.service import LogChannel
+
+    log_config = config.log
+    # 配置层以大写名称校验级别；日志运行时枚举以小写值为键。
+    level = LogLevel(log_config.level.lower())
+    file_channel = FileChannel(
+        Path(config.paths.log_file).expanduser(),
+        max_bytes=log_config.max_size_bytes,
+        file_count=log_config.file_count,
+    )
+
+    def writer(record):
+        result = file_channel.write_record(record)
+        if result.append_error is not None:
+            raise ChannelWriteError(result.append_error)
+        return result.appended
+
+    channel = LogChannel(
+        capacity=log_config.queue_capacity,
+        low_watermark=log_config.queue_low_watermark,
+        high_watermark=log_config.queue_high_watermark,
+        level=level,
+        sample_probability=float(log_config.info_sample_probability),
+        writer=writer,
+    )
+    channel.start()
+    return LogRuntime(
+        channel=channel,
+        level=level,
+        file_closer=file_channel.close,
+        identity=f"pid={os.getpid()}",
+    )
+
+
+async def _emit_session_error(deps: RuntimeDeps, message: str) -> None:
+    """会话失败事实经异步入口记 ERROR；日志失败不改变业务结果。"""
+    from camctl.logging_runtime.models import LogLevel
+    from camctl.logging_runtime.service import LogRecord
+
+    if deps.log_runtime is None:
+        return
+    await deps.log_runtime.channel.alog(
+        LogRecord(level=LogLevel.ERROR, message=message)
     )
 
 
@@ -338,23 +398,46 @@ async def execute_command(
         copy_request_factory=copy_request_factory,
         **overrides,
     )
+    outcome: SessionOutcome | None = None
     try:
-        return await run_session(context, source)
+        outcome = await run_session(context, source)
+        return outcome
+    except Exception as error:
+        await _emit_session_error(deps, f"{type(error).__name__}: {error}")
+        raise
     finally:
+        # 会话失败结论先于监督方收场与日志关闭记录。
+        if outcome is not None and not outcome.succeeded:
+            await _emit_session_error(
+                deps, f"{deps.mode.value} 会话失败: {outcome.reason}"
+            )
         if supervisor is not None:
             await supervisor.stop()
         if restricted_supervisor is not None:
             await restricted_supervisor.stop()
+        if deps.log_runtime is not None:
+            from camctl.logging_runtime.lifecycle import close_logging
+
+            await close_logging(deps.log_runtime)
 
 
 def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体
     """关闭装配层持有的资源；重复关闭不重复处理。
 
     会话内部资源（锁与连接）由会话流程按收尾次序自行释放；装配
-    层持有报告失败日志副本的文件通道。
+    层持有报告失败日志副本的文件通道。业务日志链正常由
+    execute_command 的 close_logging 收场；这里只兜底尚未关闭的
+    残留（如会话早期异常），兜底不补写丢弃摘要。
     """
     if deps.closed:
         return
     deps.closed = True
     if deps.failure_channel is not None:
         deps.failure_channel.close()
+    runtime = deps.log_runtime
+    if runtime is not None and runtime.close_attempts == 0:
+        runtime.close_attempts = 1
+        runtime.listener_stopped = runtime.channel.stop_listener(0.5)
+        if runtime.file_closer is not None:
+            runtime.file_closer()
+        runtime.channel.async_close()

@@ -64,8 +64,19 @@ async def _submit(deps, tmp_path: Path, body: dict):
 
 @pytest.fixture()
 def environment(tmp_path: Path):
+    # 覆盖全部路径：默认值含未展开的 $HOME 字面量，真实会话会在
+    # 仓库根创建同名目录并写日志文件。
     config = load_config(
-        {"paths": {"state_db": str(tmp_path / "state.db")}}, ConfigDefaults()
+        {
+            "paths": {
+                "state_db": str(tmp_path / "state.db"),
+                "log_file": str(tmp_path / "camctl.log"),
+                "staging": str(tmp_path / "staging"),
+                "ready": str(tmp_path / "ready"),
+                "processing": str(tmp_path / "processing"),
+            }
+        },
+        ConfigDefaults(),
     )
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     notifier = RecordingNotifier()
