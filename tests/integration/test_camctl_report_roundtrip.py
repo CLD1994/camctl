@@ -14,15 +14,17 @@ from __future__ import annotations
 import glob
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import pytest
 
-from camctl_fixtures import Deployment, future_schedule
+from camctl_fixtures import Deployment, future_schedule, terminate_process_tree
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 
@@ -33,14 +35,27 @@ _WSL_LAUNCHER = "/tmp/camctl-i4-launcher.sh"
 
 _PROMPT = "模块初始化完成；可输入 submit <绝对路径>、claim、logs 或 help。"
 
+#: 测试自身已在 Linux（部署验证环境）时，构建与执行不再经 wsl.exe。
+_NATIVE_POSIX = os.name == "posix"
+
 
 def _to_wsl(path: Path) -> str:
-    """Windows 路径转 WSL 挂载形式（C:\\a\\b → /mnt/c/a/b）。"""
+    """Windows 盘符路径转 WSL 挂载形式（C:\\a\\b → /mnt/c/a/b）。
+
+    测试自身已在 Linux（部署验证环境）时路径保持不变。
+    """
     text = str(path).replace("\\", "/")
+    if _NATIVE_POSIX or text[1:2] != ":":
+        return text
     return f"/mnt/{text[0].lower()}{text[2:]}"
 
 
 def _wsl(script: str, timeout_s: float = 600.0) -> subprocess.CompletedProcess:
+    """在部署验证环境执行 shell 步骤；Windows 开发机经 wsl.exe 进入。"""
+    if _NATIVE_POSIX:
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True, text=True, encoding="utf-8", timeout=timeout_s)
     return subprocess.run(
         ["wsl.exe", "-e", "sh", "-c", script],
         capture_output=True, text=True, encoding="utf-8", timeout=timeout_s)
@@ -67,12 +82,13 @@ def _await(predicate, timeout_s: float, message: str):
 
 @pytest.fixture(scope="module")
 def host_demo() -> str:
-    """在 WSL 构建真实 host-demo 并部署 camctl 启动桥。"""
-    probe = subprocess.run(["wsl.exe", "-e", "true"],
-                           capture_output=True, timeout=30)
-    if probe.returncode != 0:
-        pytest.skip("WSL 不可用：C 主程序组合按部署验证裁决需要 WSL x86 Linux")
-    python = Path(__import__("sys").executable)
+    """在部署验证环境构建真实 host-demo 并部署 camctl 启动桥。"""
+    if not _NATIVE_POSIX:
+        probe = subprocess.run(["wsl.exe", "-e", "true"],
+                               capture_output=True, timeout=30)
+        if probe.returncode != 0:
+            pytest.skip("WSL 不可用：C 主程序组合按部署验证裁决需要 WSL x86 Linux")
+    python = Path(sys.executable)
     steps = [
         f"rm -rf {_WSL_WORKTREE} {_WSL_BUILD}",
         f"git -C {_to_wsl(_REPO)} worktree prune",
@@ -115,13 +131,17 @@ class HostDemo:
         self.proc: subprocess.Popen | None = None
 
     def start(self) -> None:
+        command = [
+            self._demo_path,
+            "--camctl", _WSL_LAUNCHER,
+            "--ready", _to_wsl(self.deployment.ready),
+            "--processing", _to_wsl(self.deployment.processing),
+            "--log", _to_wsl(self.log_path),
+            "--config", _to_wsl(self.deployment.config_path)]
+        if not _NATIVE_POSIX:
+            command = ["wsl.exe", "-e", *command]
         self.proc = subprocess.Popen(
-            ["wsl.exe", "-e", self._demo_path,
-             "--camctl", _WSL_LAUNCHER,
-             "--ready", _to_wsl(self.deployment.ready),
-             "--processing", _to_wsl(self.deployment.processing),
-             "--log", _to_wsl(self.log_path),
-             "--config", _to_wsl(self.deployment.config_path)],
+            command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8")
         assert self._reply() == _PROMPT
@@ -465,3 +485,151 @@ def test_report_save_failure_retry_keeps_determined_bytes(
     latest = json.loads((deployment.ready / names[0]).read_text("utf-8"))
     saved = deployment.import_reports_with_client(deployment.ready)
     assert saved["saved_report_ids"] == [latest["report_id"]]
+
+
+def _report_plan(request_id: str, action: str, scheduled_at: str) -> dict:
+    """直接递交的 report_status 计划：仅保持会话驻留，不在测试内到时。"""
+    return {
+        "request_id": request_id,
+        "created_at": "2026-01-15 08:00:00",
+        "name": f"plan-{request_id}",
+        "actions": [
+            {
+                "name": action,
+                "type": "report_status",
+                "scheduled_at": scheduled_at,
+                "params": {"scope": "full"},
+            }
+        ],
+    }
+
+
+def _log_copies(directory: Path) -> list[Path]:
+    return sorted(directory.glob("log-copy-*.log"))
+
+
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="会话中替换数据库文件的故障注入需要 POSIX 重命名语义；"
+           "按部署验证裁决由 WSL x86 Linux 承载")
+def test_state_db_failure_delivers_log_copy(
+        tmp_path: Path, host_demo: str) -> None:
+    """数据库失效日志副本：会话执行中状态库文件失效时报告处理失败，
+    日志副本不经状态库直接交付 ready；报告处理可靠恢复后故障轮结
+    束（标记删除），再次失效取得新一轮首次触发；C 主程序按既有
+    ready→processing 流程中转日志副本，保留完整文件名和内容。
+
+    注入点取报告生成子进程写出 staging 临时文件的时刻：报告流程
+    阻塞等待生成完成，同轮其余流程不可能运行；已打开的数据库连接
+    在自己的文件描述符上完成生成本轮的发布，下一轮报告流程打开
+    状态库失败，构成不依赖轮询时序的报告处理失败。
+    """
+    deployment = Deployment(tmp_path, devices=False)
+    initialized = deployment.camctl(
+        "init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+    marker_path = deployment.staging / "logs" / "failure-marker.json"
+    hidden_db = deployment.state_db.with_name("state.db.hidden")
+    reports_staging = deployment.staging / "reports"
+
+    def _run_fault_round(plan_path: Path, tag: str) -> None:
+        """递交计划并在报告生成子进程运行期间替换走会话的状态库。
+
+        计划携带一个远期动作使会话在生成本轮完成后仍有未完成责
+        任，必须进入下一轮；下一轮报告流程的连接打开失败触发日志
+        副本，随后其余流程的连接打开失败使会话按状态库错误退出。
+        """
+        submitted = deployment.camctl(
+            "submit", str(plan_path), "--config", str(deployment.config_path))
+        assert submitted.exit_code == 0, submitted.stderr
+        known = set(glob.glob("*.tmp", root_dir=str(reports_staging)))
+        session = deployment.start_camctl(
+            "run", "--config", str(deployment.config_path))
+        try:
+            def _generation_started():
+                if session.poll() is not None:
+                    session.wait()
+                    raise AssertionError(
+                        f"{tag}: 会话未开始生成就退出"
+                        f"({session.returncode}): {session.stderr.read()[:400]}")
+                return (set(glob.glob(
+                    "*.tmp", root_dir=str(reports_staging))) - known) or None
+
+            _await(_generation_started,
+                   timeout_s=120, message=f"{tag}: 报告生成未开始")
+            os.rename(deployment.state_db, hidden_db)
+            stdout, _ = session.communicate(timeout=120)
+        finally:
+            if session.poll() is None:
+                terminate_process_tree(session)
+        assert session.returncode == 1
+        failure = json.loads(stdout)
+        assert failure["kind"] == "error"
+        assert failure["body"]["reason"] == "state_db_error"
+
+    # 故障轮一：日志副本随报告处理失败交付，不依赖状态库可用。
+    first = deployment.write_plan(
+        _report_plan("5001", "sync-one", future_schedule(12)))
+    _run_fault_round(first, "故障轮一")
+    copies = _log_copies(deployment.ready)
+    assert len(copies) == 1
+    first_copy = copies[0]
+    trigger_text = first_copy.read_text(encoding="utf-8", errors="replace")
+    # 触发记录呈现报告处理失败及其状态库原因；错误类型取决于失效
+    # 被哪个打开动作观察到（文件缺失或打开失败），不逐字断言。
+    assert "报告处理失败: " in trigger_text
+    assert "状态库" in trigger_text
+    marker = json.loads(marker_path.read_bytes())
+    assert marker["copy_name"] == first_copy.name
+    assert marker["stage"] == "published"
+    first_round_id = marker["round_id"]
+
+    # 恢复：状态库归位后下一会话完成报告处理并正常退出，故障轮结
+    # 束、标记删除。
+    os.rename(hidden_db, deployment.state_db)
+    recovered = deployment.camctl(
+        "run", "--config", str(deployment.config_path))
+    assert recovered.exit_code == 0, recovered.stderr
+    assert not marker_path.exists()
+    assert _query(
+        deployment.state_db,
+        "SELECT status FROM actions WHERE name = 'sync-one'") == [(3,)]
+    assert _query(
+        deployment.state_db, "SELECT status FROM plans") == [(3,)]
+
+    # 故障轮二：恢复后的再次失效取得新的首次触发（新副本、新轮次）。
+    second = deployment.write_plan(
+        _report_plan("5002", "sync-two", future_schedule(60)))
+    _run_fault_round(second, "故障轮二")
+    copies = _log_copies(deployment.ready)
+    assert len(copies) == 2
+    second_marker = json.loads(marker_path.read_bytes())
+    assert second_marker["stage"] == "published"
+    assert second_marker["round_id"] != first_round_id
+    assert second_marker["copy_name"] not in {first_copy.name}
+    # 副本是复制时刻普通日志的字节快照：两份副本互为前缀，且都是最
+    # 终日志文件的前缀（此后日志只追加）。
+    log_bytes = (deployment.home / "camctl.log").read_bytes()
+    snapshots = sorted(
+        (path.read_bytes() for path in copies), key=len)
+    assert log_bytes.startswith(snapshots[1])
+    assert snapshots[1].startswith(snapshots[0])
+
+    # C 主程序领取：日志副本与报告一起按既有流程移动到 processing，
+    # 文件名与内容保持，ready 撤空。
+    demo = HostDemo(deployment, host_demo)
+    try:
+        demo.start()
+        payloads = {path.name: path.read_bytes() for path in copies}
+        demo.claim()
+        _await(lambda: len(_log_copies(deployment.processing)) == 2 or None,
+               timeout_s=30, message="领取未中转日志副本")
+        assert not _log_copies(deployment.ready)
+        for name, payload in payloads.items():
+            assert (deployment.processing / name).read_bytes() == payload
+        module_log = demo.module_log()
+        for name in payloads:
+            assert "operation=moved" in module_log
+            assert f"file={name}" in module_log
+    finally:
+        demo.stop()

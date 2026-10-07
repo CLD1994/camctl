@@ -220,7 +220,7 @@ def _failure_log_wiring(deps: RuntimeDeps):
     return FailureLogService(MarkerStore(logs_dir)), copy_request_factory
 
 
-def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
+def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any], Any]:
     """run 会话的生产流程与生成子进程监督方。
 
     注册报告事务守卫后组装维护流程：到期的同步动作、报告冻结、
@@ -228,7 +228,8 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
     execute_command 在会话结束后收场。拍摄推进经进程驱动登记解析
     设备端口（未登记驱动的设备本轮不推进）；取消动作按排期或立即
     执行。受限会话的取消流程、一次报告机会与保守收场由
-    execute_command 在此基础上另行装配。
+    execute_command 在此基础上另行装配。failure_log 的恢复入口接
+    入报告流程：报告本地处理可靠恢复时结束日志副本故障轮。
     """
     from camctl.bootstrap.capture_assembly import (
         execution_wait_config,
@@ -265,6 +266,8 @@ def _report_assembly(deps: RuntimeDeps) -> tuple[dict[str, Any], Any]:
             history=deps.config.history,
             database=deps.config.database,
             supervisor=supervisor,
+            on_recovered=(failure_log.on_report_recovered
+                          if failure_log is not None else None),
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
         "cancel": cancel_flow(ready=ready, processing=processing),
@@ -335,7 +338,7 @@ async def execute_command(
     if poll_interval_s is not None:
         overrides["poll_interval_s"] = poll_interval_s
     if flows is None and deps.mode is CommandMode.RUN:
-        flows, supervisor = _report_assembly(deps)
+        flows, supervisor = _report_assembly(deps, failure_log)
         # 受限会话装配：墙钟检查失败时消费规定取消流程、一次报告机
         # 会与录像保守收场（不装配媒体链）。
         from camctl.bootstrap.capture_assembly import (
@@ -385,6 +388,8 @@ async def execute_command(
                 database=deps.config.database,
                 supervisor=restricted_supervisor,
                 start_actions=False,
+                on_recovered=(failure_log.on_report_recovered
+                              if failure_log is not None else None),
             ),
         )
     elif restricted_flows is not None:

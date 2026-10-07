@@ -350,11 +350,15 @@ class TestRunWindowExpiration:
 
     @staticmethod
     def _flows(deps, driver, files):
-        from camctl.bootstrap.lifecycle import _report_assembly
+        from camctl.bootstrap.lifecycle import (
+            _failure_log_wiring, _report_assembly,
+        )
 
         # 生产报告与取消流程 + 本测试的自定义拍摄工厂：生产装配的
-        # scheduling 依赖进程驱动登记（测试不登记），必须排除。
-        report_flows, supervisor = _report_assembly(deps)
+        # scheduling 依赖进程驱动登记（测试不登记），必须排除；日志
+        # 副本服务与生产装配同源传入。
+        failure_log, _ = _failure_log_wiring(deps)
+        report_flows, supervisor = _report_assembly(deps, failure_log)
         flows = {
             "scheduling": capture_flow(_capture_factory(driver, files)),
             **{name: flow for name, flow in report_flows.items()

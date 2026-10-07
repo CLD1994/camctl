@@ -4,10 +4,10 @@ run 与 submit 共用本入口：受理、时钟资格、接纳与退出检查�
 顺序组织。run 的推进循环每轮驱动已注册流程，无进展时按真实责任
 分类判断是否关闭：可退出才在关闭事务内重查并释放接纳，仍需驱动
 则等待下一计划截止、进程内通知或轮询上限后继续。报告失败不阻塞
-设备工作并触发一次日志副本，状态库错误停止依赖已失效条件的工作。
-受限会话执行规定收场与一次报告机会后按时钟异常退出，不取得普通
-接纳。submit 对提交结果未知以同一请求幂等核实，不宣称受理成功或
-失败。
+设备工作并触发一次日志副本；报告流程因状态库错误失败时同样先触
+发一次日志副本，再按状态库错误停止依赖已失效条件的工作。受限会
+话执行规定收场与一次报告机会后按时钟异常退出，不取得普通接纳。
+submit 对提交结果未知以同一请求幂等核实，不宣称受理成功或失败。
 """
 
 from __future__ import annotations
@@ -248,13 +248,16 @@ async def _drive_flows(context: SessionContext) -> str | None:
     """逐个驱动已注册流程；单个失败不中断其余流程。
 
     报告流程（"report"）的失败保留责任并触发一次日志副本，设备
-    等其他工作继续；状态库错误立即停止后续流程。返回致命错误描
-    述或 None。
+    等其他工作继续；报告流程因状态库错误失败同样属于报告处理失
+    败，先触发日志副本再停止后续流程，会话按状态库错误收场。其
+    余流程的状态库错误立即停止后续流程。返回致命错误描述或 None。
     """
     for name, flow in context.flows.items():
         try:
             await flow(context)
         except StateDbFailure as error:
+            if name == "report":
+                await _trigger_failure_log(context, error)
             return str(error)
         except Exception as error:
             if name != "report":

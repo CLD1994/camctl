@@ -64,6 +64,10 @@ class Recorder:
         self.calls.append("report")
         raise RuntimeError("report file failed")
 
+    async def report_db_fails(self, context) -> None:
+        self.calls.append("report-db")
+        raise StateDbFailure("report db unusable")
+
     async def fails_db(self, context) -> None:
         self.calls.append("db")
         raise StateDbFailure("state db unusable")
@@ -303,6 +307,25 @@ class TestRunCompletion:
         assert outcome.succeeded is False
         assert outcome.reason == "report_error"
         # 首次报告失败触发一次日志副本交付。
+        assert len(failure_log.requests) == 1
+
+    async def test_report_state_db_failure_triggers_log_copy(
+            self, environment):
+        context, recorder, holder, _ = environment
+        failure_log = FakeFailureLog()
+        context.flows = {
+            "report": recorder.report_db_fails,
+            "devices": recorder.ok,
+        }
+        context.failure_log = failure_log
+        context.copy_request_factory = (
+            lambda error: _CopyProbe(error, context))
+        outcome = await _run(context)
+        # 报告处理因状态库错误失败：副本照常触发，会话按状态库错误
+        # 退出，后续流程不再运行。
+        assert outcome.succeeded is False
+        assert outcome.reason == "state_db_error"
+        assert recorder.calls == ["report-db"]
         assert len(failure_log.requests) == 1
 
     async def test_state_db_failure_stops_remaining_flows(self, environment):
