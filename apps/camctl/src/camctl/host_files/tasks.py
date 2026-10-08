@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import enum
 import threading
+from contextvars import ContextVar
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Protocol
 
 from camctl.session.supervision import (
@@ -52,6 +53,8 @@ class FileTaskId:
 
 #: 任务实际执行体：接受停止通知，返回实际结果；在线程池中同步运行。
 TaskBody = Callable[[threading.Event], Any]
+
+_owned_scope: ContextVar[Any] = ContextVar("camctl_owned_file_scope", default=None)
 
 
 @dataclass(frozen=True)
@@ -263,8 +266,70 @@ class FileTaskExecutor:
         self, task: AsyncFileTask, owner: ResponsibilityOwner
     ) -> FileTaskResult:
         """执行持有多文件的异步任务，共用撤回、冲突及实际结果接手机制。"""
+        scope = _owned_scope.get()
+        if (scope is not None and scope[0] is self and scope[3] is asyncio.current_task()
+                and set(task.file_ids) <= set(scope[1])):
+            try:
+                value = await task.body(scope[2])
+                return FileTaskResult(task.task_id, ran=True, value=value)
+            except Exception as error:
+                return FileTaskResult(task.task_id, ran=True,
+                                      error=f"{type(error).__name__}: {error}")
         state = self._admit(task)
         return await self._wait_for_execution(state, owner, lambda: self._execute_async(state))
+
+    async def run_owned_async_file_task(self, task: AsyncFileTask) -> Any:
+        """等待完整文件操作及原结果保存，取消后仍完成实际接手。
+
+        执行体包括所属流程的结果保存，异常保持原类型。外部取消
+        只中断原等待，已开始的任务经登记拥有者消费实际结果；
+        重复取消不能使持有连接的调用方提前离开。
+        """
+        scope = _owned_scope.get()
+        if (scope is not None and scope[0] is self and scope[3] is asyncio.current_task()
+                and set(task.file_ids) <= set(scope[1])):
+            return await task.body(scope[2])
+        owner = _OwnedFileResult()
+
+        async def body(control: AsyncFileControl) -> _OwnedFileOutcome:
+            token = _owned_scope.set((self, task.file_ids, control, asyncio.current_task()))
+            try:
+                return _OwnedFileOutcome(value=await task.body(control))
+            except BaseException as error:
+                return _OwnedFileOutcome(error=error)
+            finally:
+                _owned_scope.reset(token)
+
+        try:
+            result = await self.run_async_file_task(replace(task, body=body), owner)
+        except BaseException as interrupted:
+            if not owner.handed_over:
+                raise
+            self.request_stop(task.task_id)
+            drain = asyncio.create_task(self._supervisor.drain_required())
+            while True:
+                try:
+                    settled = await asyncio.shield(drain)
+                    break
+                except asyncio.CancelledError:
+                    if drain.done() and drain.cancelled():
+                        raise
+            if owner.result is not None:
+                actual = owner.result.value
+                if isinstance(actual, _OwnedFileOutcome) and actual.error is not None:
+                    interrupted.add_note(
+                        f"实际文件操作收场失败: {type(actual.error).__name__}: {actual.error}")
+            for failure in settled.failed:
+                interrupted.add_note(f"文件任务接手失败: {failure.error}")
+            raise interrupted
+        if not result.ran:
+            raise FileTaskError("完整文件操作未执行，不能提供完成结果")
+        actual = result.value
+        if not isinstance(actual, _OwnedFileOutcome):
+            raise FileTaskError(f"完整文件操作缺少实际结果: {result.error}")
+        if actual.error is not None:
+            raise actual.error
+        return actual.value
 
     async def _wait_for_execution(
         self, state: _TaskState, owner: ResponsibilityOwner,
@@ -414,6 +479,8 @@ class FileTaskExecutor:
 
     def _hand_over(self, state: _TaskState, owner: ResponsibilityOwner) -> None:
         token = self._supervisor.register(owner)
+        if isinstance(owner, _OwnedFileResult):
+            owner.handed_over = True
         task = state.task
         self._supervisor.handoff(
             token,
@@ -429,3 +496,22 @@ class FileTaskExecutor:
 
 def _withdrawn_result(state: _TaskState) -> FileTaskResult:
     return FileTaskResult(task_id=state.task.task_id, ran=False)
+
+
+@dataclass(frozen=True)
+class _OwnedFileOutcome:
+    """完整业务操作的实际返回或原异常，不丢弃异常分类。"""
+
+    value: Any = None
+    error: BaseException | None = None
+
+
+class _OwnedFileResult:
+    """登记的接手方只消费完整执行体已经形成的实际结束结果。"""
+
+    def __init__(self) -> None:
+        self.result: FileTaskResult | None = None
+        self.handed_over = False
+
+    async def take_over(self, task: OwnedTask) -> None:
+        self.result = await task.pending.wait()
