@@ -449,18 +449,21 @@ def _probability_field(section: Mapping[str, Any], key: str, default: str) -> De
 def _validated_seconds_subtable(
     device_id: str, raw: Any, section: str, keys: tuple,
     positive_keys: tuple = (),
-) -> Mapping[str, Any] | None:
-    """校验并规范化设备子表中的秒数字段；未提供子表时返回 None。
+    integer_fields: tuple[tuple[str, int], ...] = (),
+) -> Mapping[str, Any]:
+    """校验设备执行子表中的秒数、整数范围及合法字段。
 
     列出的键默认允许有限非负秒数（数字或精确文本），positive_keys
-    中的键要求正秒数；加载时统一为 Decimal，其余键按原样冻结，随
-    消费方接入再校验。
+    中的键要求正秒数，加载时统一为 Decimal。整数保持原值并核对
+    各字段下限；显式非法结构和未知字段不能由缺省值掩盖。
     """
-    if raw is None:
-        return None
-    if not isinstance(raw, Mapping):
-        raise ConfigError(f"devices.{device_id}.{section} 必须是表: {raw!r}")
+    _take(raw, f"devices.{device_id}.{section}",
+          (*keys, *(key for key, _ in integer_fields)))
     normalized = dict(raw)
+    for key, minimum in integer_fields:
+        if key in normalized:
+            normalized[key] = _require_int(
+                normalized[key], f"devices.{device_id}.{section}.{key}", minimum)
     for key in keys:
         if key not in normalized:
             continue
@@ -478,16 +481,19 @@ def _validated_seconds_subtable(
     return normalized
 
 
-def _validated_recording(device_id: str, raw: Any) -> Mapping[str, Any] | None:
-    """校验并规范化设备录像配置键；未提供时返回 None。"""
+def _validated_recording(device_id: str, raw: Any) -> Mapping[str, Any]:
+    """校验并规范化设备录像的时限、间隔与修复余量。"""
     return _validated_seconds_subtable(
         device_id, raw, "recording",
-        ("repair_margin_s", "start_retry_interval_s", "stop_retry_interval_s"))
+        ("repair_margin_s", "start_retry_interval_s", "stop_retry_interval_s",
+         "start_timeout_s", "stop_timeout_s"),
+        positive_keys=("start_timeout_s", "stop_timeout_s"),
+        integer_fields=(("max_start_attempts", 1), ("max_stop_attempts", 1)))
 
 
 def _validated_attempts_subtable(
     device_id: str, raw: Any, section: str,
-) -> Mapping[str, Any] | None:
+) -> Mapping[str, Any]:
     """校验查询与残留收场子表：正整数次数加间隔与时限秒。
 
     次数必须是不小于 1 的整数（bool 不作次数）；重试间隔允许有限
@@ -495,32 +501,9 @@ def _validated_attempts_subtable(
     .md#状态查询与产物核实的配置、camera-recovery.md#后续动作触发
     的残留收场）。
     """
-    if raw is None:
-        return None
-    if not isinstance(raw, Mapping):
-        raise ConfigError(f"devices.{device_id}.{section} 必须是表: {raw!r}")
-    normalized = dict(raw)
-    if "max_attempts" in normalized:
-        attempts = normalized["max_attempts"]
-        name = f"devices.{device_id}.{section}.max_attempts"
-        if (isinstance(attempts, bool) or not isinstance(attempts, int)
-                or attempts < 1):
-            raise ConfigError(f"{name} 必须是正整数: {attempts!r}")
-    for key, positive in (("retry_interval_s", False), ("timeout_s", True)):
-        if key not in normalized:
-            continue
-        name = f"devices.{device_id}.{section}.{key}"
-        value = normalized[key]
-        if isinstance(value, str):
-            try:
-                value = Decimal(value)
-            except InvalidOperation as error:
-                raise ConfigError(
-                    f"{name} 必须是数值秒: {normalized[key]!r}"
-                ) from error
-        normalized[key] = _require_positive_seconds(
-            value, name, allow_zero=not positive)
-    return normalized
+    return _validated_seconds_subtable(
+        device_id, raw, section, ("retry_interval_s", "timeout_s"),
+        positive_keys=("timeout_s",), integer_fields=(("max_attempts", 1),))
 
 
 def _validate_devices(raw: Any) -> Mapping[str, Any]:
@@ -535,25 +518,25 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
         _require_nonempty_str(declaration.get("kind"), f"devices.{device_id}.kind")
         _require_nonempty_str(declaration.get("driver"), f"devices.{device_id}.driver")
         normalized = dict(declaration)
-        recording = _validated_recording(
-            device_id, normalized.pop("recording", None))
-        if recording is not None:
-            normalized["recording"] = recording
+        if "recording" in normalized:
+            normalized["recording"] = _validated_recording(
+                device_id, normalized["recording"])
         for section in ("query", "residual_stop"):
-            subtable = _validated_attempts_subtable(
-                device_id, normalized.pop(section, None), section)
-            if subtable is not None:
-                normalized[section] = subtable
-        for section, keys, positive in (
-                ("copy", ("retry_interval_s",), ()),
+            if section in normalized:
+                normalized[section] = _validated_attempts_subtable(
+                    device_id, normalized[section], section)
+        for section, keys, positive, integer_fields in (
+                ("copy", ("retry_interval_s", "read_idle_timeout_s"),
+                 ("read_idle_timeout_s",), (("max_read_attempts", 1), ("max_recopies", 0))),
                 ("cleanup", ("delete_retry_interval_s", "query_retry_interval_s",
                              "delete_timeout_s", "query_timeout_s"),
-                 ("delete_timeout_s", "query_timeout_s")),
-                ("result_check", ("retry_interval_s",), ())):
-            subtable = _validated_seconds_subtable(
-                device_id, normalized.pop(section, None), section, keys,
-                positive_keys=positive)
-            if subtable is not None:
-                normalized[section] = subtable
+                 ("delete_timeout_s", "query_timeout_s"), ()),
+                ("result_check", ("retry_interval_s", "call_timeout_s"),
+                 ("call_timeout_s",), (("max_attempts", 1),)),
+                ("capture", (), (), (("extra_wait_ms", 0),))):
+            if section in normalized:
+                normalized[section] = _validated_seconds_subtable(
+                    device_id, normalized[section], section, keys,
+                    positive_keys=positive, integer_fields=integer_fields)
         validated[device_id] = _freeze(normalized)
     return MappingProxyType(validated)
