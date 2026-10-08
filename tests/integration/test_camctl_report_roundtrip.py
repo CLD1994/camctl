@@ -16,174 +16,20 @@ import hashlib
 import json
 import os
 import shutil
-import sqlite3
-import subprocess
-import sys
-import time
 from pathlib import Path
 
 import pytest
 
+from _wsl_host_demo import HostDemo, query_state, to_wsl, wait_for
 from camctl_fixtures import Deployment, future_schedule, terminate_process_tree
-
-_REPO = Path(__file__).resolve().parent.parent.parent
-
-_WSL_WORKTREE = "/tmp/camctl-i4-worktree"
-_WSL_BUILD = "/tmp/camctl-i4-build"
-_WSL_DEMO = "/tmp/camctl-i4-build/host-demo"
-_WSL_LAUNCHER = "/tmp/camctl-i4-launcher.sh"
-
-_PROMPT = "模块初始化完成；可输入 submit <绝对路径>、claim、logs 或 help。"
-
-#: 测试自身已在 Linux（部署验证环境）时，构建与执行不再经 wsl.exe。
-_NATIVE_POSIX = os.name == "posix"
-
-
-def _to_wsl(path: Path) -> str:
-    """Windows 盘符路径转 WSL 挂载形式（C:\\a\\b → /mnt/c/a/b）。
-
-    测试自身已在 Linux（部署验证环境）时路径保持不变。
-    """
-    text = str(path).replace("\\", "/")
-    if _NATIVE_POSIX or text[1:2] != ":":
-        return text
-    return f"/mnt/{text[0].lower()}{text[2:]}"
-
-
-def _wsl(script: str, timeout_s: float = 600.0) -> subprocess.CompletedProcess:
-    """在部署验证环境执行 shell 步骤；Windows 开发机经 wsl.exe 进入。"""
-    if _NATIVE_POSIX:
-        return subprocess.run(
-            ["bash", "-c", script],
-            capture_output=True, text=True, encoding="utf-8", timeout=timeout_s)
-    return subprocess.run(
-        ["wsl.exe", "-e", "sh", "-c", script],
-        capture_output=True, text=True, encoding="utf-8", timeout=timeout_s)
 
 
 def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
-    connection = sqlite3.connect(
-        f"file:{state_db.as_posix()}?mode=ro", uri=True, timeout=30)
-    try:
-        return connection.execute(sql, params).fetchall()
-    finally:
-        connection.close()
+    return query_state(state_db, sql, params)
 
 
 def _await(predicate, timeout_s: float, message: str):
-    """轮询直到谓词为真；显式同步点，不使用随机 sleep。"""
-    deadline = time.monotonic() + timeout_s
-    while True:
-        value = predicate()
-        if value:
-            return value
-        assert time.monotonic() < deadline, f"等待超时: {message}"
-
-
-@pytest.fixture(scope="module")
-def host_demo() -> str:
-    """在部署验证环境构建真实 host-demo 并部署 camctl 启动桥。"""
-    if not _NATIVE_POSIX:
-        probe = subprocess.run(["wsl.exe", "-e", "true"],
-                               capture_output=True, timeout=30)
-        if probe.returncode != 0:
-            pytest.skip("WSL 不可用：C 主程序组合按部署验证裁决需要 WSL x86 Linux")
-    python = Path(sys.executable)
-    steps = [
-        f"rm -rf {_WSL_WORKTREE} {_WSL_BUILD}",
-        f"git -C {_to_wsl(_REPO)} worktree prune",
-        f"git -C {_to_wsl(_REPO)} worktree add --detach {_WSL_WORKTREE} HEAD",
-        (f"cmake -S {_WSL_WORKTREE}/apps/host-demo -B {_WSL_BUILD}"
-         " -DCMAKE_BUILD_TYPE=Release >/dev/null"),
-        (f"cmake --build {_WSL_BUILD} --target host-demo -j4 >/dev/null"),
-    ]
-    for step in steps:
-        result = _wsl(step)
-        assert result.returncode == 0, (
-            f"WSL 构建步骤失败: {step}\n{result.stderr}")
-    launcher = (
-        "#!/bin/bash\n"
-        "conv() {\n"
-        "  case \"$1\" in\n"
-        "    /mnt/[a-z]/*) local d=${1#/mnt/}; d=${d%%/*};"
-        " printf '%s:/%s' \"$(echo \"$d\" | tr 'a-z' 'A-Z')\" \"${1#/mnt/$d/}\";;\n"
-        "    *) printf '%s' \"$1\";;\n"
-        "  esac\n"
-        "}\n"
-        "args=()\n"
-        "for a in \"$@\"; do [ -n \"$a\" ] && args+=(\"$(conv \"$a\")\"); done\n"
-        f"exec {_to_wsl(python)} -c"
-        " 'import sys; from camctl.cli import main; sys.exit(main(sys.argv[1:]))'"
-        " \"${args[@]}\"\n"
-    )
-    write_launcher = _wsl(f"cat > {_WSL_LAUNCHER} <<'LAUNCHER'\n{launcher}LAUNCHER\nchmod +x {_WSL_LAUNCHER}")
-    assert write_launcher.returncode == 0, write_launcher.stderr
-    return _WSL_DEMO
-
-
-class HostDemo:
-    """真实 host-demo 主程序的子进程会话（终端命令协议）。"""
-
-    def __init__(self, deployment: Deployment, demo_path: str) -> None:
-        self.deployment = deployment
-        self.log_path = deployment.root / "module.log"
-        self._demo_path = demo_path
-        self.proc: subprocess.Popen | None = None
-
-    def start(self) -> None:
-        command = [
-            self._demo_path,
-            "--camctl", _WSL_LAUNCHER,
-            "--ready", _to_wsl(self.deployment.ready),
-            "--processing", _to_wsl(self.deployment.processing),
-            "--log", _to_wsl(self.log_path),
-            "--config", _to_wsl(self.deployment.config_path)]
-        if not _NATIVE_POSIX:
-            command = ["wsl.exe", "-e", *command]
-        self.proc = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, encoding="utf-8")
-        assert self._reply() == _PROMPT
-
-    def _reply(self) -> str:
-        assert self.proc is not None
-        line = self.proc.stdout.readline().strip()
-        if not line and self.proc.poll() is not None:
-            self.fail("host-demo 提前退出")
-        return line
-
-    def fail(self, message: str) -> None:
-        assert self.proc is not None
-        raise AssertionError(f"{message}: {self.proc.stderr.read()[:400]}")
-
-    def submit(self, plan: Path) -> None:
-        assert self.proc is not None
-        self.proc.stdin.write(f"submit {_to_wsl(plan)}\n")
-        self.proc.stdin.flush()
-        assert self._reply() == "路径已接收；计划受理与执行结果请查看状态报告。"
-
-    def claim(self) -> None:
-        assert self.proc is not None
-        self.proc.stdin.write("claim\n")
-        self.proc.stdin.flush()
-        assert self._reply() == "领取调用已返回；可按主程序流程处理 processing 内的文件。"
-
-    def module_log(self) -> str:
-        return self.log_path.read_text(encoding="utf-8", errors="replace")
-
-    def stop(self) -> None:
-        if self.proc is None:
-            return
-        self.proc.stdin.close()
-        self.proc.terminate()
-        try:
-            self.proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-            self.proc.wait(timeout=15)
-        _wsl("pkill -f host-demo || true", timeout_s=60)
-        self.proc = None
+    return wait_for(predicate, timeout_s, message)
 
 
 def _plan_body(name: str) -> dict:
@@ -295,7 +141,7 @@ def test_report_import_ack_roundtrip(tmp_path: Path, host_demo: str) -> None:
 
         # 主程序侧事实：两次 submit 与领取都有模块日志记录。
         log = demo.module_log()
-        assert f"submit accepted path={_to_wsl(plan_path)}" in log
+        assert f"submit accepted path={to_wsl(plan_path)}" in log
         assert "claim" in log
     finally:
         demo.stop()

@@ -241,6 +241,14 @@ ready 字节与各自来源一致、录像产物无交付保持登记，报告�
 全部成功。用例首跑暴露既有生产缺陷“停止调用结果校验拒绝无收场”
 （I5 第四条链同族，详见[outputs 计划 X10 收口记录](2026-09-30-camctl-outputs.md#x10-收口2026-10-08驱动兼容性声明与三种拍摄部分取回组合)），修复后全链通过。
 
+#### I5 第七条链验证记录（2026-10-08，真实 C 模块递交链全场景复验）
+
+路线图“真实客户端导出、C 模块递交、camctl 执行、文件领取、客户端导入和后续 ACK”的复验范围收口：报告同步主链之外的全部场景（录像、照片、延时摄影、普通与自动取回、取消、清理）改为经同一 C 模块递交链执行，同步与报告失败恢复场景继续由报告主链用例承载。新增 `tests/integration/test_camctl_c_module_roundtrip.py` 三用例：三种拍摄加两次取回与清理的组合计划（六动作：产物三份登记、交付恰两份、来源产物按可靠删除转已清理、清理成员完成）、自动预览取回链（预览登记与配对证据、自动取回选择预览产物交付、报告自动用途展示）与迟到取消链（交付领取后按请求身份取消、不可撤回收场不删交付、携带 ACK 的取消计划一次递交完成取消与累计确认吸收）。三用例的计划均经客户端真实导出、host-demo `submit` 内部驱动 camctl 执行、`claim` 领取交付与报告进 processing、客户端真实导入并在下一份导出携带 ACK。
+
+带设备递交链的基建：host-demo 构建与启动辅助抽取为 `tests/integration/_wsl_host_demo.py`（构建、终端会话、路径转换与轮询共享，报告主链用例改为导入复用，构建经 `conftest.py` 的 session 夹具跨文件共享一次）；`write_stub_launcher` 为部署生成装配桥 launcher——环境变量嵌入该部署的替身剧本与状态库路径，host-demo 每次 submit/run 经部署装配桥登记受契约约束的设备替身后进入生产 CLI。两处环境事实（B7 与后续 WSL 验证共用）：其一，host-demo 的路径参数按其校验规则必须是部署验证环境的绝对路径（以 `/` 开头），launcher 路径须传 WSL 挂载形式；其二，WSL 启动 Windows 进程时只传递 `WSLENV` 声明的环境变量，装配桥的两个输入变量必须在 launcher 内随 `WSLENV` 导出，否则 camctl 按驱动未部署拒绝受理。首轮失败均为测试笔误（上述环境事实、设备侧内容常量截断前长度须覆盖条目声明的 size_bytes、领取前须按报告正文等待会话最终报告——中间报告在取回执行中即可发布）、以及一处测试计划时序修正（清理依赖来源终态即可执行，与正在拷贝的取回同窗口会先删除设备内容，清理排期移到取回完成后），未暴露生产缺陷，按 B7 先例定性为收口验证。
+
+回归证据（2026-10-08，Windows 开发机 uv CPython 3.11、SQLite 3.53.1；host-demo 于 WSL x86_64 构建）：本文件三用例通过（32 秒）；报告主链重构复用后 5 项通过加 1 项平台条件跳过；根 `tests/integration` 59 项通过、4 项按平台与工具前提跳过、342 项子测试通过；组件集成 15 目录分目录顺序全绿（acceptance 226、bootstrap 116 加 1 跳过、cancellation 44、capture 211、contracts 39、devices 46、history 91、host_files 81 加 5 跳过、logging_runtime 28、operations 183、outputs 1789 加 1 跳过、persistence 74、reporting 346、scheduling 125、session 85）；单元 3369 项通过；五项规格检查通过（文档链接 3179 个）。
+
 ### I6 全量契约映射、软件验收与部署交接
 
 **预计文件：** `docs/camctl/verification.md`、`apps/camctl/README.md`、`tests/integration/README.md`、`docs/client/acceptance.md`、`docs/host-demo/verification.md`；建议新增 `tests/integration/test_camctl_acceptance_map.py`，并在 `docs/camctl/software-acceptance.md` 保存实施时取得的验收映射和真实证据，链接具体测试，不复制登记的完整值清单。

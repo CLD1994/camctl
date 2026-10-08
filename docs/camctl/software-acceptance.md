@@ -1136,7 +1136,7 @@
 - 生产入口：apps/camctl/src/camctl/persistence/initialization.py、apps/camctl/src/camctl/persistence/directory_switch.py
 - 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py、apps/camctl/tests/unit/persistence/test_directory_switch.py
 - 证据：B4 开放项交付验证记录（提交注入失败回滚后重读判定 not_completed 且库值保持整套旧绑定、混合组合判 inconsistent 不混用新旧目录；提交成功后重读核实三列整体为新值；绑定保存失败时新空目录保留不构成切换成功；准备前各检查中止保持原绑定；切换保留数据库身份与全部表内容）。
-- 未核验前提：带真实报告历史、累计 ACK 与文件 ID 的库切换保留验证及切换后历史回放、进程在提交后返回前被终止的字面中断模拟，归 I 跨组件复验场景群（路线图 375-377 行）。
+- 未核验前提：带真实报告历史、累计 ACK 与文件 ID 的库切换保留验证及切换后历史回放、进程在提交后返回前被终止的字面中断模拟，归 I 跨组件复验场景群（路线图 376-377 行）。
 
 #### 验收 V-01
 - 原文：[验收 V-01](database/consistency-verification.md#sqlite-运行库与部署版本)（统一条件文件的版本判定）。
