@@ -1,8 +1,8 @@
 """真实 host-demo 主程序的构建、启动与替身桥 launcher 支持。
 
-C 模块为 POSIX 实现，按部署验证裁决在 WSL x86 Linux 构建；构建产
-物经 worktree 固定在部署验证环境内，跨测试文件以 session 夹具共
-享一次构建。带设备的递交链经 ``write_stub_launcher`` 生成的部署装
+C 模块为 POSIX 实现，在 Linux 或 WSL x86 Linux 构建当前工作区；
+跨测试文件以 session 夹具共享一次构建。带设备的递交链经
+``write_stub_launcher`` 生成的部署装
 配桥 launcher 接入受契约约束的设备替身，与正式部署装配同一接入
 面，随后不加修改地运行 camctl CLI。
 """
@@ -10,17 +10,18 @@ C 模块为 POSIX 实现，按部署验证裁决在 WSL x86 Linux 构建；构�
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 
-_WSL_WORKTREE = "/tmp/camctl-i4-worktree"
-_WSL_BUILD = "/tmp/camctl-i4-build"
-_WSL_DEMO = "/tmp/camctl-i4-build/host-demo"
-_WSL_LAUNCHER = "/tmp/camctl-i4-launcher.sh"
+_WSL_BUILD = f"/tmp/camctl-host-build-{uuid.uuid4().hex}"
+_WSL_DEMO = f"{_WSL_BUILD}/host-demo"
+_WSL_LAUNCHER = f"{_WSL_BUILD}/camctl-launcher.sh"
 
 _PROMPT = "模块初始化完成；可输入 submit <绝对路径>、claim、logs 或 help。"
 
@@ -100,7 +101,7 @@ def build_host_demo() -> str:
     """在部署验证环境构建真实 host-demo 并部署 camctl 启动桥。
 
     WSL 不可用时跳过：C 主程序组合按部署验证裁决需要 WSL x86
-    Linux。构建经固定 worktree 固定提交内容，基础 launcher 直接
+    Linux。构建使用当前工作区源码，基础 launcher 直接
     进入生产 CLI（无设备替身）。
     """
     import pytest
@@ -112,10 +113,7 @@ def build_host_demo() -> str:
             pytest.skip("WSL 不可用：C 主程序组合按部署验证裁决需要 WSL x86 Linux")
     python = Path(sys.executable)
     steps = [
-        f"rm -rf {_WSL_WORKTREE} {_WSL_BUILD}",
-        f"git -C {to_wsl(_REPO)} worktree prune",
-        f"git -C {to_wsl(_REPO)} worktree add --detach {_WSL_WORKTREE} HEAD",
-        (f"cmake -S {_WSL_WORKTREE}/apps/host-demo -B {_WSL_BUILD}"
+        (f"cmake -S {shlex.quote(to_wsl(_REPO / 'apps/host-demo'))} -B {_WSL_BUILD}"
          " -DCMAKE_BUILD_TYPE=Release >/dev/null"),
         (f"cmake --build {_WSL_BUILD} --target host-demo -j4 >/dev/null"),
     ]
@@ -124,7 +122,7 @@ def build_host_demo() -> str:
         assert result.returncode == 0, (
             f"WSL 构建步骤失败: {step}\n{result.stderr}")
     direct = (
-        f"exec {to_wsl(python)} -c"
+        f"exec {shlex.quote(to_wsl(python))} -c"
         " 'import sys; from camctl.cli import main; sys.exit(main(sys.argv[1:]))'"
         " \"${args[@]}\"\n")
     _write_launcher(_WSL_LAUNCHER, _launcher_body(direct))
@@ -164,21 +162,25 @@ class HostDemo:
         self._demo_path = demo_path
         self._launcher = launcher or _WSL_LAUNCHER
         self.proc: subprocess.Popen | None = None
+        self._host_pid: int | None = None
 
-    def start(self) -> None:
+    def start(self, *, env: dict[str, str] | None = None) -> None:
         command = [
             self._demo_path,
             "--camctl", self._launcher,
             "--ready", to_wsl(self.deployment.ready),
             "--processing", to_wsl(self.deployment.processing),
-            "--log", to_wsl(self.log_path),
-            "--config", to_wsl(self.deployment.config_path)]
+            "--log", to_wsl(self.log_path)]
+        if self.deployment.config_path is not None:
+            command.extend(["--config", to_wsl(self.deployment.config_path)])
         if not _NATIVE_POSIX:
-            command = ["wsl.exe", "-e", *command]
+            body = 'printf "%s\\n" "$$"; exec ' + shlex.join(command)
+            command = ["wsl.exe", "-e", "sh", "-c", body]
         self.proc = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, encoding="utf-8")
+            stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
+        self._host_pid = self.proc.pid if _NATIVE_POSIX else int(self._reply())
         assert self._reply() == _PROMPT
 
     def _reply(self) -> str:
@@ -210,6 +212,32 @@ class HostDemo:
     def stop(self) -> None:
         if self.proc is None:
             return
+        # 只处理本测试主程序创建的具体子进程组，随后让 C 模块完成回收。
+        cleanup = "\n".join([
+            "import os, signal, time",
+            "from pathlib import Path",
+            f"root = Path('/proc/{self._host_pid}/task')",
+            "groups = set()",
+            "if root.exists():",
+            "    for task in root.iterdir():",
+            "        for child in (task / 'children').read_text().split():",
+            "            pid = int(child)",
+            "            try:",
+            "                if os.getpgid(pid) == pid: groups.add(pid)",
+            "            except ProcessLookupError: pass",
+            "for group in groups:",
+            "    try: os.killpg(group, signal.SIGKILL)",
+            "    except ProcessLookupError: pass",
+            "deadline = time.monotonic() + 3",
+            "while any(Path(f'/proc/{pid}').exists() for pid in groups) and time.monotonic() < deadline:",
+            "    time.sleep(.01)",
+        ])
+        cleanup_python = to_wsl(Path(sys.executable)) if _NATIVE_POSIX else "python3.11"
+        result = run_wsl(f"{shlex.quote(cleanup_python)} -c {shlex.quote(cleanup)}", timeout_s=15)
+        assert result.returncode == 0, result.stderr
+        if not _NATIVE_POSIX:
+            result = run_wsl(f"kill -TERM {self._host_pid}", timeout_s=15)
+            assert result.returncode == 0, result.stderr
         self.proc.stdin.close()
         self.proc.terminate()
         try:
@@ -217,5 +245,4 @@ class HostDemo:
         except subprocess.TimeoutExpired:
             self.proc.kill()
             self.proc.wait(timeout=15)
-        run_wsl("pkill -f host-demo || true", timeout_s=60)
         self.proc = None

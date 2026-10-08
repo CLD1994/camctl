@@ -105,6 +105,19 @@ class TestEligibilityAssembly:
             load_eligibility_facts(connection, 11)
         ) is CancelEligibility.ALLOW_PRE_START
 
+    @pytest.mark.parametrize("stop_supported", [0, 1])
+    def test_running_without_attempt_is_reliably_not_started(
+            self, environment, stop_supported):
+        connection = environment.connection
+        _seed_activity(connection, 11, dispatch_state=1)
+        connection.execute(
+            "UPDATE device_activities SET stop_supported = ?, safe_repeat_stop = ?"
+            " WHERE action_id = 11", (stop_supported, stop_supported))
+        connection.commit()
+        assert decide_cancel_eligibility(
+            load_eligibility_facts(connection, 11)
+        ) is CancelEligibility.ALLOW_PRE_START
+
     def test_terminal_keeps_state(self, environment):
         owned = environment
         connection = owned.connection

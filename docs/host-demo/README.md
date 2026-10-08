@@ -6,6 +6,8 @@
 
 [实现设计](implementation.md)整理 arm64 Ubuntu 18.04 的技术选型、公开 C 接口、人工部署参数、串行提交、日志、资源上限，以及源码和静态库交付方式。[验证记录](verification.md)区分开发环境已执行的测试和真实 camctl、目标主机及断电验收。
 
+进程管理使用独立进程组、保留退出记录和原组收场后最终回收的方式。Linux 软件验证涵盖正常与异常退出、遗留线程、并行提交及共享服务端；实施和复验记录见[跨组件计划 I1/I2](../superpowers/plans/2026-09-30-camctl-integration.md#i1-独立进程组明确启动结果与主程序约定)。
+
 - [角色与职责](../architecture/system-context.md#主程序的集成边界)
 - [命令、启动及进程结果](../architecture/cli-commands.md)
 - [会话错误与恢复边界](../architecture/session-errors.md)

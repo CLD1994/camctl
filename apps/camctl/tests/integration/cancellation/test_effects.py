@@ -92,6 +92,9 @@ def pipeline(tmp_path: Path):
             "INSERT INTO cancel_items (id, action_id, target_action_id,"
             " selection_basis, status, cancellation_effect)"
             " VALUES (?, 50, ?, 1, 1, 1)", (item_id, target_id))
+    from ..scheduling.test_resources import _seed_activity
+
+    _seed_activity(connection, 11, dispatch_state=3)
     connection.commit()
     yield owned
     owned.connection.close()
@@ -125,6 +128,128 @@ def _runtime(owned, settlement):
 
 
 class TestApplyTransactions:
+    def test_inflight_cancel_closes_start_before_late_no_effect(self, pipeline):
+        from decimal import Decimal
+        from camctl.operations.attempts import AttemptConfig, AttemptFinish
+        from camctl.operations.models import (
+            AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
+            Settlement, SettlementBasis,
+        )
+        from camctl.operations.validation import validate_outcome
+        from camctl.persistence.repositories.capture import CaptureRepository, FinishCanceledCapture
+        from camctl.persistence.repositories.operations import OperationRepository
+        from camctl.persistence.repositories.scheduling import SchedulingRepository
+        from ..scheduling.test_resources import _grant_request, _CONTRACTS
+
+        owned = pipeline
+        owned.connection.execute("UPDATE device_activities SET dispatch_state = 1 WHERE action_id = 11")
+        grant = SchedulingRepository().grant_start(
+            _grant_request(11, config=AttemptConfig(2, Decimal("10"), Decimal("3"))),
+            new_operation_key(), owned)
+        assert grant.kind is DbOutcomeKind.COMPLETED, grant.error
+        ticket = grant.value.ticket
+        original_attempt = _value(owned, "SELECT * FROM operation_attempts WHERE run_id = ?", ticket.run_id)
+        command = ApplyCancelTarget(91, CancelApplyMode.WITH_STOP, _NOW)
+        key = new_operation_key()
+        applied = CancellationRepository().apply_cancel_target(command, key, owned)
+        assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+        assert _value(owned, "SELECT status, attempts_used, retry_wait_required FROM operation_runs"
+                      " WHERE id = ?", ticket.run_id) == (5, 1, 0)
+        assert _value(owned, "SELECT * FROM operation_attempts WHERE run_id = ?", ticket.run_id) == original_attempt
+        assert _value(owned, "SELECT dispatch_state, occupancy_state FROM device_activities WHERE action_id = 11") == (2, 1)
+        unchanged = tuple(owned.connection.iterdump())
+        replay = CancellationRepository().apply_cancel_target(command, key, owned)
+        assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
+        assert tuple(owned.connection.iterdump()) == unchanged
+        result = validate_outcome(ticket, CallOutcome(
+            status=AttemptStatus.FAILED, error=ErrorValue("canceled", "dispatch"),
+            effect=EffectState.NO_EFFECT,
+            settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                                  EvidenceValue("dispatch_prevented", 1, {})),
+            observations=()), _CONTRACTS)
+        receipt = OperationRepository().finish_attempt(
+            AttemptFinish(ticket, result, _NOW), new_operation_key(), owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        finished = CaptureRepository().finish_canceled_capture(
+            FinishCanceledCapture(11, _NOW, unstarted=True), new_operation_key(), owned)
+        assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+        assert _value(owned, "SELECT status, execution_started, cancel_requested FROM actions WHERE id = 11") == (6, 1, 1)
+
+    @pytest.mark.parametrize("action_type", [1, 2, 3])
+    @pytest.mark.parametrize("attempted", [False, True])
+    def test_running_unstarted_cancel_waits_for_local_finish(
+            self, pipeline, action_type, attempted):
+        from camctl.persistence.repositories.capture import CaptureRepository, FinishCanceledCapture
+
+        owned = pipeline
+        owned.connection.execute("UPDATE plans SET status = 2 WHERE id = 1")
+        owned.connection.execute("UPDATE actions SET type = ? WHERE id = 11", (action_type,))
+        owned.connection.execute(
+            "UPDATE device_activities SET dispatch_state = 1 WHERE action_id = 11")
+        owned.connection.commit()
+        if attempted:
+            from decimal import Decimal
+            from camctl.operations.attempts import AttemptConfig, AttemptFinish
+            from camctl.operations.models import (
+                AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
+                Settlement, SettlementBasis,
+            )
+            from camctl.operations.validation import validate_outcome
+            from camctl.persistence.repositories.operations import OperationRepository
+            from camctl.persistence.repositories.scheduling import SchedulingRepository
+            from ..scheduling.test_resources import _grant_request, _CONTRACTS
+
+            grant = SchedulingRepository().grant_start(
+                _grant_request(11, config=AttemptConfig(2, Decimal("10"), Decimal("3"))),
+                new_operation_key(), owned)
+            assert grant.kind is DbOutcomeKind.COMPLETED, grant.error
+            ticket = grant.value.ticket
+            result = validate_outcome(ticket, CallOutcome(
+                status=AttemptStatus.FAILED, error=ErrorValue("canceled", "dispatch"),
+                effect=EffectState.NO_EFFECT,
+                settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                                      EvidenceValue("dispatch_prevented", 1, {})),
+                observations=()), _CONTRACTS)
+            receipt = OperationRepository().finish_attempt(
+                AttemptFinish(ticket, result, _NOW, retry_wait=True),
+                new_operation_key(), owned)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        apply_key = new_operation_key()
+        outcome = CancellationRepository().apply_cancel_target(
+            ApplyCancelTarget(91, CancelApplyMode.PRE_START, _NOW),
+            apply_key, owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert _value(owned, "SELECT status, execution_started, cancel_requested"
+                      " FROM actions WHERE id = 11") == (2, 1, 1)
+        assert _value(owned, "SELECT status, cancellation_effect, outcome"
+                      " FROM cancel_items WHERE id = 91") == (2, 2, None)
+        if attempted:
+            assert _value(owned, "SELECT status, attempts_used, retry_wait_required"
+                          " FROM operation_runs WHERE responsibility_key = 'start/11'") == (5, 1, 0)
+        before_apply_replay = tuple(owned.connection.iterdump())
+        replay = CancellationRepository().apply_cancel_target(
+            ApplyCancelTarget(91, CancelApplyMode.PRE_START, _NOW), apply_key, owned)
+        assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
+        assert tuple(owned.connection.iterdump()) == before_apply_replay
+        command = FinishCanceledCapture(11, _NOW, unstarted=True)
+        key = new_operation_key()
+        repository = CaptureRepository()
+        finished = repository.finish_canceled_capture(command, key, owned)
+        assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+        assert _value(owned, "SELECT status, execution_started, cancel_requested"
+                      " FROM actions WHERE id = 11") == (6, 1, 1)
+        assert _value(owned, "SELECT dispatch_state, activity_state, occupancy_state"
+                      " FROM device_activities WHERE action_id = 11") == (1, 1, 2)
+        assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (int(attempted),)
+        assert _value(owned, "SELECT COUNT(DISTINCT transaction_id) FROM history_events"
+                      " WHERE event_type = 8 OR (event_type = 13"
+                      " AND json_extract(body_json, '$.reason') = 3)") == (1,)
+        before = tuple(owned.connection.iterdump())
+        for resend_key in (key, new_operation_key()):
+            result = repository.finish_canceled_capture(command, resend_key, owned)
+            assert result.kind is DbOutcomeKind.COMPLETED, result.error
+            assert tuple(owned.connection.iterdump()) == before
+
     def test_pre_start_target_cancels_immediately(self, pipeline):
         owned = pipeline
         outcome = CancellationRepository().apply_cancel_target(

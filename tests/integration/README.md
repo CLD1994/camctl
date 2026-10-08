@@ -8,4 +8,8 @@
 
 `event-transitions.test.mjs` 组合真实事件登记、SQL、枚举和报告依赖，验证列分类、分支和状态覆盖、历史归属及行权限反例。它验证设计检查器，不执行登记引用的业务校验，也不证明生产事件能够共同提交或恢复。
 
+`test_camctl_process_recovery.py` 在 Linux 和部署版 Python 3.11 上构建当前工作区的 C 接入模块，以真实 CLI 和受管工具验证独立组、保留退出记录、原组终止、完整核验、最终回收和下一次 run。信号和扫描同步点只位于 C 系统接口边界；测试覆盖未知状态、提前回收、待启动要求、共享预算、并行 submit 以及模拟服务端脱离与终止的竞争，不使用 Python 谓词代替 C 模块。目标实际工具及第三方主程序仍单独联调。
+
+`test_camctl_host_deployment.py` 验证默认配置与显式缺失配置下的真实 init/run 使用同一状态库，并按独立交付的 README 和 TOML 准备部署，使用真实 CLI 发布报告、C 模块同步领取及原始字节比对。它不连接设备；组件内的交付集成测试另行验证构建、安装、包内容和资料引用，两者共同覆盖第三方接入所需的配置与文件交接。
+
 跨组件验收沿计划导出、模块交接路径、CLI 执行与报告发布、同步领取到 `processing`、客户端导入追踪业务结果，契约见[接入模块验收要求](../../docs/host-demo/design.md#验收要求)。报告同步主链已由真实客户端导出、真实 C 主程序递交与领取（WSL 构建的 host-demo）、camctl CLI 执行及客户端导入串联验证；录像、照片、延时摄影、取回、取消、清理等场景已全部经同一 C 模块递交链复验（`test_camctl_c_module_roundtrip.py`，带设备链经部署装配桥接入受契约约束的设备替身），会话恢复、媒体修复与日志副本等场景经 camctl CLI 直接驱动验证，命令与环境见[集成计划验证记录](../../docs/superpowers/plans/2026-09-30-camctl-integration.md)。剩余为真实第三方主程序接入及目标环境执行，边界见[部署交接与待核验项](../../docs/camctl/verification.md#部署交接与待核验项)与[模块验证记录](../../docs/host-demo/verification.md)。

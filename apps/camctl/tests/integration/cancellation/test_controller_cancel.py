@@ -98,6 +98,9 @@ def pipeline(tmp_path: Path):
         "INSERT INTO cancel_items (id, action_id, target_action_id,"
         " selection_basis, status, cancellation_effect)"
         " VALUES (91, 50, 11, 1, 2, 2)")
+    from ..scheduling.test_resources import _seed_activity
+
+    _seed_activity(connection, 11, dispatch_state=3)
     connection.commit()
     yield owned
     owned.connection.close()

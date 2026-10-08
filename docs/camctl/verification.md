@@ -74,7 +74,7 @@
 
 | 入口类别 | 审计结论 | 责任依据 |
 | --- | --- | --- |
-| 子进程 | 全仓库唯一创建点是 `camctl.operations.process`（`asyncio.create_subprocess_exec`，受管工具进程组）；`subprocess` 模块也只有它导入，adb 传输适配经其运行接口使用子进程 | 主程序收场契约与媒体修复链：进程组归属、退出观察和最终回收由该模块统一承担 |
+| 子进程 | Python CLI 生产代码的受管工具唯一创建点是 `camctl.operations.process`（`asyncio.create_subprocess_exec`）；`subprocess` 模块也只有它导入，adb 传输适配经其运行接口使用子进程 | 工具继承 camctl 所属组，CLI 运行期间的正常退出、超时与取消收场由该模块承担。C 接入模块建立独立组，并负责 CLI 退出后的原组检查、保留退出记录及最终回收，软件证据见[接入模块验证记录](../host-demo/verification.md)。 |
 | 网络 | 零导入、零连接建立 | CLI 部署形态本身无网络面；无服务器代码 |
 | 文件系统 | 直接调用（内建 `open`、`os` 文件操作、Path 与 Traversable 方法）只出现在九个登记责任的模块：host_files（文件交接与读取）、logging_runtime（日志与副本文件）、persistence（建库、init 目录切换、回放重建）、reporting（报告生成、发布与撤下）、outputs（取回中间文件与交付读取）、session.locks（会话锁文件）、resources（包内权威资源）、acceptance.input（受理输入读取适配器）、bootstrap（装配目录准备） | 各模块对应的交接、日志副本、初始化、报告发布、取回生命周期、锁、资源与受理契约；业务流程模块经仓储连接或 host_files 端口间接访问，不直接触碰文件系统 |
 | 时钟 | 真实时钟读取集中在 `bootstrap/clocks.py` 装配端口与 `devices/read_session.py` 端口内的无数据计时；业务流程经注入的 `wall_us`/`monotonic_ns` 端口取时，各装配接受显式注入 | 测试可控时间与运行假设的时间边界（完成判定、等待与超时） |
@@ -87,6 +87,10 @@
 - 默认值：dataclass 标量 `field(default=...)` 仅 2 处（会话关闭标志初始 False、来源核实空集合），其余默认值均为 `default_factory` 的空容器或空映射，表示"尚无数据"而非替代判断；数据库读取不出现的字段不折叠为默认值，按各字段自己的状态分类（不存在、未知、未完成）表达。
 
 本次审计未发现无语义的异常吞没、静默默认或无责任归属的外部调用入口；审计发现的唯一行为缺陷（来源解析失败分支缺兄弟齐终态同事务完成计划）已在同日组合复验中按先失败测试修复并登记。
+
+## camctl_host 交付相关复验（2026-10-08）
+
+Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、首次控制残留检查、未启动动作过期与取消、迟到尝试结果及取消收场的专项验证。执行器和结果仓储分别保持动作、操作流程、尝试与设备活动的事实；取消动作结果由本次必要收场结论决定。测试按目录前台顺序执行，包含真实数据库事务恢复与历史恢复，不连接真实设备。完整分类、目录命令和结果由[执行接缝修复记录](../superpowers/plans/2026-10-08-capture-start-residual-gate.md#验证记录)维护；C 构建、包内容及根跨组件结果见[模块验证记录](../host-demo/verification.md)。
 
 ## 部署交接与待核验项
 

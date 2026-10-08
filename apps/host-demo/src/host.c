@@ -64,7 +64,7 @@ static void finish_submit(host *h) {
     host_inputs_pop(&h->inputs);
     pthread_mutex_unlock(&h->inputs_mutex);
 }
-static void collect(host *h, host_command command, uint64_t now) {
+static void collect(host *h, host_command command) {
     host_child *c = &h->children[command];
     if (!c->pid)
         return;
@@ -84,12 +84,14 @@ static void collect(host *h, host_command command, uint64_t now) {
         r.needs_run, c->overflow, c->io_error);
     if (r.kind != HOST_RESULT_SUCCESS)
         host_log(&h->logger, "call=%" PRIu64 " stdout=%.*s", c->id, (int)c->length, c->output);
-    host_schedule_finished(&h->schedule, command, r, now);
+    host_schedule_finished(&h->schedule, command, r, now_ms(h));
     c->pid = 0;
     if (command == HOST_SUBMIT)
         finish_submit(h);
 }
 static void launch(host *h, host_command command, uint64_t now) {
+    if (h->clock_failed)
+        return;
     host_schedule *s = &h->schedule;
     const char *path = NULL;
     uint64_t id = 0;
@@ -146,8 +148,8 @@ static void *worker_main(void *p) {
     host *h = p;
     for (;;) {
         uint64_t now = now_ms(h);
-        collect(h, HOST_RUN, now);
-        collect(h, HOST_SUBMIT, now);
+        collect(h, HOST_RUN);
+        collect(h, HOST_SUBMIT);
         if (!h->clock_failed) {
             launch(h, HOST_RUN, now);
             launch(h, HOST_SUBMIT, now);
@@ -186,6 +188,9 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
         goto unlock;
     }
     e = host_config_validate(config, initial);
+    if (e)
+        goto unlock;
+    e = host_check_reaping_contract();
     if (e)
         goto unlock;
     host *h = calloc(1, sizeof(*h));

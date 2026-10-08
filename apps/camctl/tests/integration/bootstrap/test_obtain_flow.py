@@ -335,7 +335,7 @@ def _registry(driver: _ObtainDriver, *,
     ))
 
 
-def _capture_factory(cfg, registry, results, clock, tools_dir):
+def _capture_factory(cfg, registry, results, clock, tools_dir, *, scenario_clock=None):
     return session_capture_assembly(
         devices=cfg.devices,
         drivers=registry,
@@ -343,6 +343,7 @@ def _capture_factory(cfg, registry, results, clock, tools_dir):
         staging=Path(cfg.paths.staging),
         wait_config=lambda params: CaptureWaitConfig(
             target_duration_ms=1_000, driver_margin_ms=0),
+        wall_us=scenario_clock.utc_micros if scenario_clock is not None else None,
         monotonic_ns=lambda: clock["ns"],
         probe_request=ProbeRequest(
             ffprobe=_tool(tools_dir, "ffprobe", _PROBE_BODY)),
@@ -351,7 +352,7 @@ def _capture_factory(cfg, registry, results, clock, tools_dir):
     )
 
 
-def _obtain_factory(cfg, drivers):
+def _obtain_factory(cfg, drivers, *, scenario_clock=None):
     return session_obtain_assembly(
         devices=cfg.devices,
         drivers=drivers,
@@ -359,11 +360,13 @@ def _obtain_factory(cfg, drivers):
         ready=Path(cfg.paths.ready),
         processing=Path(cfg.paths.processing),
         segment_size=cfg.copy.segment_size_bytes,
+        occurred_at=scenario_clock.utc_micros if scenario_clock is not None else None,
+        monotonic_ns=scenario_clock.monotonic_ns if scenario_clock is not None else None,
     )
 
 
 def _run_session(deps, cfg, driver, results, clock, tools_dir, *,
-                 capture_read_parallel: bool = False):
+                 capture_read_parallel: bool = False, scenario_clock=None):
     return asyncio.create_task(execute_command(
         deps, None,
         flows={
@@ -371,10 +374,11 @@ def _run_session(deps, cfg, driver, results, clock, tools_dir, *,
                 _capture_factory(
                     cfg, _registry(
                         driver, capture_read_parallel=capture_read_parallel),
-                    results, clock, tools_dir)),
+                    results, clock, tools_dir, scenario_clock=scenario_clock)),
             "obtain": obtain_flow(_obtain_factory(
                 cfg, _registry(
-                    driver, capture_read_parallel=capture_read_parallel))),
+                    driver, capture_read_parallel=capture_read_parallel),
+                scenario_clock=scenario_clock)),
             "cancel": cancel_flow(ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
@@ -650,7 +654,7 @@ class TestObtainExecutionLink:
         close_runtime(deps)
 
     async def test_obtain_read_parallel_with_recording(self,
-                                                       tmp_path: Path) -> None:
+                                                       tmp_path: Path, monkeypatch) -> None:
         """驱动声明拍摄与读取并行时，执行中的录像不阻塞取回读取。
 
         照片先完成，取回读取首次失败进入重试等待；等待期间录像到
@@ -658,6 +662,37 @@ class TestObtainExecutionLink:
         布，动作成功终态。一次一份拷贝互斥保持（本用例只有取回一
         份拷贝）。
         """
+        clock = {
+            "ns": time.monotonic_ns(),
+            "wall_us": (time.time_ns() // 1_000_000_000 + 1) * 1_000_000,
+        }
+
+        class ScenarioClock:
+            def utc_micros(self):
+                return clock["wall_us"]
+
+            def monotonic_ns(self):
+                return clock["ns"]
+
+            def advance(self, microseconds):
+                clock["wall_us"] += microseconds
+                clock["ns"] += microseconds * 1000
+
+        scenario_clock = ScenarioClock()
+        monkeypatch.setattr("camctl.bootstrap.lifecycle.SystemClock", lambda: scenario_clock)
+
+        class PausedRecordDriver(_ObtainDriver):
+            def __init__(self):
+                super().__init__(read_failures=1)
+                self.record_requested = asyncio.Event()
+                self.release_record = asyncio.Event()
+
+            async def control(self, request):
+                if request.operation == "start_recording":
+                    self.record_requested.set()
+                    await self.release_record.wait()
+                return await super().control(request)
+
         cfg = _config(tmp_path, retry_interval_s="1.5")
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
@@ -668,29 +703,39 @@ class TestObtainExecutionLink:
         await _submit(tmp_path, cfg, _obtain_plan(
             "2", {"action_instance_id": str(photo_row[0])}))
         tools_dir = _tools(tmp_path)
-        # 录像在读取重试等待期间到时启动：重试落进执行窗口。
+        # 时钟在首次读取失败保存前不推进，录像始终尚未到期。
+        record_due = time.strftime(
+            "%Y-%m-%d %H:%M:%S", time.gmtime((clock["wall_us"] + 1_000_000) / 1_000_000))
         await _submit(
-            tmp_path, cfg, _record_plan("3", _future_schedule(1)))
+            tmp_path, cfg, _record_plan("3", record_due))
         _CONTENT_BY_IDENTITY.clear()
         _CONTENT_BY_IDENTITY["shot-1"] = _PHOTO_CONTENT
         _CONTENT_BY_IDENTITY["clip-1"] = _RECORD_CONTENT
-        driver = _ObtainDriver(read_failures=1)
+        driver = PausedRecordDriver()
         results = ResultsDouble(
             {1: (_photo_entry("shot-1", "IMG_0001.jpg"),)})
-        clock = {"ns": time.monotonic_ns()}
         db = Path(cfg.paths.state_db)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
         task = _run_session(
             deps, cfg, driver, results, clock, tools_dir,
-            capture_read_parallel=True)
+            capture_read_parallel=True, scenario_clock=scenario_clock)
         try:
-            # 照片完成后首次读取失败，重试等待期间录像到时启动。
+            await _await_query(
+                db, "SELECT attempts_used, retry_wait_required FROM operation_runs"
+                " WHERE responsibility_key = 'read/1'", (1, 1))
+            assert len(driver.read_calls) == 1, driver.read_calls
+            scenario_clock.advance(1_000_000)
+            await asyncio.wait_for(driver.record_requested.wait(), 10)
+            # 控制端口明确暂停；读数与重试前提保持，不依赖真实延迟。
+            assert len(driver.read_calls) == 1, driver.read_calls
+            driver.release_record.set()
             await _await_query(
                 db,
                 "SELECT started_at IS NOT NULL FROM device_activities"
                 " WHERE action_id ="
                 " (SELECT id FROM actions WHERE name='record')", (1,))
             assert len(driver.read_calls) == 1, driver.read_calls
+            scenario_clock.advance(600_000)
             # 声明并行：重试不为执行中的录像让路，在录像终态前完成
             # 拷贝、校验与发布。
             await _await_query(
@@ -703,22 +748,17 @@ class TestObtainExecutionLink:
             # 录像仍执行中：读取完成不改变拍摄执行状态。
             assert _scalar(
                 db, "SELECT status FROM actions WHERE name='record'") == (2,)
-            started_at = _scalar(
-                db, "SELECT started_at FROM device_activities WHERE id=2")[0]
         finally:
             await _cancel(task)
             close_runtime(deps)
-        # 墙钟越过启动加目标加余量后，第二会话对账停止并完成录像。
-        deadline = started_at + int(3.2 * 1_000_000)
-        while time.time() * 1_000_000 < deadline:
-            await asyncio.sleep(0.05)
+        # 同一时钟越过启动加目标加余量，第二会话继续原录像结算。
+        scenario_clock.advance(3_200_000)
         results.files_by_action[3] = (
             _record_entry("clip-1", "VID_0001.mp4", _RECORD_CONTENT),)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-        clock = {"ns": time.monotonic_ns()}
         task = _run_session(
             deps, cfg, driver, results, clock, tools_dir,
-            capture_read_parallel=True)
+            capture_read_parallel=True, scenario_clock=scenario_clock)
         try:
             await _await_query(
                 db, "SELECT status FROM actions WHERE name='record'", (3,))

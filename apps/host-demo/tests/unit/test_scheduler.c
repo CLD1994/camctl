@@ -128,6 +128,18 @@ static void legal_error_not_retried(void **p) {
     host_schedule_finished(&s, HOST_RUN, error, 0);
     assert_false(host_schedule_take(&s, HOST_RUN, 100));
 }
+static void abnormal_retry_uses_completion_deadline(void **p) {
+    (void)p;
+    host_schedule s;
+    host_schedule_init(&s, false, 1, 200);
+    assert_true(host_schedule_take(&s, HOST_RUN, 1000));
+    host_schedule_spawned(&s, HOST_RUN);
+    host_schedule_finished(&s, HOST_RUN, bad, 1300);
+    assert_false(host_schedule_take(&s, HOST_RUN, 1499));
+    assert_int_equal(s.retries_used, 0);
+    assert_true(host_schedule_take(&s, HOST_RUN, 1500));
+    assert_int_equal(s.retries_used, 1);
+}
 int main(void) {
     const struct CMUnitTest tests[] = {cmocka_unit_test(initial),
                                        cmocka_unit_test(bounded_failures),
@@ -137,6 +149,7 @@ int main(void) {
                                        cmocka_unit_test(success_does_not_reset_budget),
                                        cmocka_unit_test(shared_budget_rechecked),
                                        cmocka_unit_test(started_submit_never_retried),
-                                       cmocka_unit_test(legal_error_not_retried)};
+                                       cmocka_unit_test(legal_error_not_retried),
+                                       cmocka_unit_test(abnormal_retry_uses_completion_deadline)};
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

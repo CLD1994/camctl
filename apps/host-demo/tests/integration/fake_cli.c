@@ -1,10 +1,50 @@
-#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <sys/prctl.h>
 #include <string.h>
 #include <unistd.h>
+static void *leftover_thread(void *context) {
+    int fd = *(int *)context;
+    assert(!prctl(PR_SET_NAME, "tool ) worker", 0, 0, 0));
+    assert(write(fd, "r", 1) == 1);
+    for (;;) pause();
+    return NULL;
+}
 int main(int argc, char **argv) {
     assert(argc >= 2);
+    if (argc > 2 && !strcmp(argv[2], "/hold")) {
+        for (;;) pause();
+    }
+    if (argc > 2 && !strncmp(argv[2], "/leftover-", 10)) {
+        assert(argc == 5 && !strcmp(argv[3], "--config"));
+        int ready[2];
+        assert(!pipe(ready));
+        pid_t pid = fork();
+        assert(pid >= 0);
+        if (!pid) {
+            close(ready[0]);
+            if (!strcmp(argv[2], "/leftover-thread")) {
+                pthread_t thread;
+                assert(!pthread_create(&thread, NULL, leftover_thread, &ready[1]));
+                pthread_exit(NULL);
+            }
+            assert(write(ready[1], "r", 1) == 1);
+            for (;;) pause();
+        }
+        close(ready[1]);
+        char byte;
+        assert(read(ready[0], &byte, 1) == 1);
+        close(ready[0]);
+        FILE *record = fopen(argv[4], "w");
+        assert(record);
+        fprintf(record, "%ld\n", (long)pid);
+        assert(!fclose(record));
+        puts("{\"kind\":\"succeeded\"}");
+        return !strcmp(argv[2], "/leftover-error") ? 7 : 0;
+    }
     if (argc > 2 && !strcmp(argv[2], "/exit127"))
         return 127;
     char block[4096];

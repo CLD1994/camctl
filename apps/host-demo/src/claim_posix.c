@@ -12,29 +12,37 @@ typedef struct {
     int ready, processing;
     DIR *listing;
     struct stat ready_stat, processing_stat;
+    const char *failed_step, *failed_path;
 } claim_context;
+static int directory_failure(claim_context *c, const char *step, const char *path, int e) {
+    c->failed_step = step;
+    c->failed_path = path;
+    return e;
+}
 static int begin(void *p) {
     claim_context *c = p;
     c->ready = open(c->config->ready_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (c->ready < 0)
-        return errno;
+        return directory_failure(c, "open", c->config->ready_path, errno);
     c->processing = open(c->config->processing_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (c->processing < 0)
-        return errno;
-    if (fstat(c->ready, &c->ready_stat) || fstat(c->processing, &c->processing_stat))
-        return errno;
+        return directory_failure(c, "open", c->config->processing_path, errno);
+    if (fstat(c->ready, &c->ready_stat))
+        return directory_failure(c, "fstat", c->config->ready_path, errno);
+    if (fstat(c->processing, &c->processing_stat))
+        return directory_failure(c, "fstat", c->config->processing_path, errno);
     if (c->ready_stat.st_dev != c->processing_stat.st_dev)
-        return EXDEV;
+        return directory_failure(c, "filesystem", c->config->processing_path, EXDEV);
     if (c->ready_stat.st_ino == c->processing_stat.st_ino)
-        return EINVAL;
+        return directory_failure(c, "identity", c->config->processing_path, EINVAL);
     int fd = fcntl(c->ready, F_DUPFD_CLOEXEC, 3);
     if (fd < 0)
-        return errno;
+        return directory_failure(c, "duplicate_listing_fd", c->config->ready_path, errno);
     c->listing = fdopendir(fd);
     if (!c->listing) {
         int e = errno;
         close(fd);
-        return e;
+        return directory_failure(c, "fdopendir", c->config->ready_path, e);
     }
     return 0;
 }
@@ -60,38 +68,42 @@ static int finish(void *p) {
     c->listing = NULL;
     return closedir(d) ? errno : 0;
 }
-static int check_directory(const char *path, const struct stat *original) {
+static int check_directory(claim_context *c, const char *path, const struct stat *original) {
     struct stat st;
     if (stat(path, &st))
-        return errno;
+        return directory_failure(c, "stat", path, errno);
     if (!S_ISDIR(st.st_mode) || st.st_dev != original->st_dev || st.st_ino != original->st_ino)
-        return ESTALE;
+        return directory_failure(c, "identity", path, ESTALE);
     if (faccessat(AT_FDCWD, path, R_OK | W_OK | X_OK, AT_EACCESS))
-        return errno;
+        return directory_failure(c, "access", path, errno);
     return 0;
 }
 static int healthy(void *p) {
     claim_context *c = p;
-    int e = check_directory(c->config->ready_path, &c->ready_stat);
-    return e ? e : check_directory(c->config->processing_path, &c->processing_stat);
+    int e = check_directory(c, c->config->ready_path, &c->ready_stat);
+    return e ? e : check_directory(c, c->config->processing_path, &c->processing_stat);
 }
-static int move(void *p, const char *name) {
+static host_claim_move_result move(void *p, const char *name) {
     claim_context *c = p;
     struct stat st;
     if (fstatat(c->ready, name, &st, AT_SYMLINK_NOFOLLOW))
-        return errno;
+        return (host_claim_move_result){HOST_CLAIM_SOURCE_CHECK_FAILED, errno};
     if (!S_ISREG(st.st_mode))
-        return EINVAL;
-    return renameat(c->ready, name, c->processing, name) ? errno : 0;
+        return (host_claim_move_result){HOST_CLAIM_SOURCE_NOT_REGULAR, EINVAL};
+    if (!renameat(c->ready, name, c->processing, name))
+        return (host_claim_move_result){HOST_CLAIM_MOVED, 0};
+    int e = errno;
+    return (host_claim_move_result){e == EIO || e == EINTR ? HOST_CLAIM_MOVE_UNKNOWN
+                                                         : HOST_CLAIM_MOVE_FAILED, e};
 }
-static int sync_dirs(void *p) {
+static host_claim_sync_result sync_dirs(void *p) {
     claim_context *c = p;
-    int e = 0;
+    host_claim_sync_result result = {0};
     if (fsync(c->processing))
-        e = errno;
-    if (fsync(c->ready) && !e)
-        e = errno;
-    return e;
+        result.processing_error = errno;
+    if (fsync(c->ready))
+        result.ready_error = errno;
+    return result;
 }
 static void end(void *p) {
     claim_context *c = p;
@@ -104,6 +116,12 @@ static void end(void *p) {
 }
 static void diagnose(void *p, const char *event, const char *name, int e) {
     claim_context *c = p;
+    if (!strcmp(event, "directories")) {
+        host_log(c->logger,
+                 "claim operation=%s step=%s directory=%s file=%s errno=%d detail=%s",
+                 event, c->failed_step, c->failed_path, name, e, strerror(e));
+        return;
+    }
     host_log(c->logger, "claim operation=%s ready=%s processing=%s file=%s errno=%d detail=%s",
              event, c->config->ready_path, c->config->processing_path, name, e,
              e ? strerror(e) : "ok");

@@ -13,7 +13,8 @@ command = args[0]
 plan = args[1] if len(args) > 1 and args[1] != '--config' else None
 with (root / 'trace').open('a') as stream:
     fcntl.flock(stream, fcntl.LOCK_EX)
-    stream.write(json.dumps({'command': command, 'plan': plan, 'pid': os.getpid()}) + '\n')
+    stream.write(json.dumps({'command': command, 'plan': plan, 'pid': os.getpid(),
+                             'pgid': os.getpgrp()}) + '\n')
     stream.flush()
 if command == 'run':
     while (root / 'hold-run').exists():

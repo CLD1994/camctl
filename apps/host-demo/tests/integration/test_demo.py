@@ -2,6 +2,7 @@ import json
 import os
 import pathlib
 import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -17,7 +18,10 @@ class DemoIntegration(unittest.TestCase):
             root=pathlib.Path(directory); ready=root/'ready'; processing=root/'processing'
             ready.mkdir(); processing.mkdir()
             plan=root/'计划 有空格.json'; plan.write_text('false')
-            proc=subprocess.Popen([DEMO,'--camctl',CLI,'--ready',str(ready),'--processing',str(processing),
+            launcher=root/'controlled-camctl'
+            launcher.write_text('#!/bin/sh\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(CLI)+' "$@"\n')
+            launcher.chmod(0o755)
+            proc=subprocess.Popen([DEMO,'--camctl',str(launcher),'--ready',str(ready),'--processing',str(processing),
                 '--log',str(root/'module.log'),'--config',str(root)], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True,start_new_session=True)
             def response():
@@ -44,6 +48,14 @@ class DemoIntegration(unittest.TestCase):
                 self.assertIn('继续运行',response())
                 self.assertIsNone(proc.poll())
             finally:
+                trace=root/'trace'
+                if trace.exists():
+                    for line in trace.read_text().splitlines():
+                        child=json.loads(line)
+                        try:
+                            if os.getpgid(child['pid']) == child['pgid']:
+                                os.killpg(child['pgid'],signal.SIGKILL)
+                        except ProcessLookupError: pass
                 try: os.killpg(proc.pid,signal.SIGKILL)
                 except ProcessLookupError: pass
                 proc.communicate(timeout=5)

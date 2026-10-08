@@ -7,7 +7,7 @@ describe 只读取本地配置与静态能力目录，不创建状态库、会�
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -47,11 +47,16 @@ class ConfigAdapter:
             raise ConfigError(f"配置文件无法可靠读取: {path}: {error}") from error
         except tomllib.TOMLDecodeError as error:
             raise ConfigError(f"配置文件解析失败: {path}: {error}") from error
-        return load_config(document, self._defaults)
+        config = load_config(document, self._defaults)
+        paths = {
+            field.name: self._expand(getattr(config.paths, field.name))
+            for field in fields(config.paths)
+        }
+        return replace(config, paths=replace(config.paths, **paths))
 
     def _expand(self, raw: str) -> str:
         if raw.startswith("$HOME/"):
-            return str(self._home / raw[len("$HOME/") :])
+            return str(Path(str(self._home) + raw[len("$HOME") :]))
         return raw
 
 

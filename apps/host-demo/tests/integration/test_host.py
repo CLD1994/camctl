@@ -2,6 +2,7 @@ import json
 import os
 import pathlib
 import select
+import shlex
 import shutil
 import signal
 import subprocess
@@ -21,9 +22,18 @@ class HostIntegration(unittest.TestCase):
         self.processing = self.root / 'processing'
         self.ready.mkdir(); self.processing.mkdir()
         self.proc = None
+        self.cli = self.root/'controlled-camctl'
+        self.cli.write_text('#!/bin/sh\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(CLI)+' "$@"\n')
+        self.cli.chmod(0o755)
 
     def tearDown(self):
         if self.proc:
+            for child in self.events():
+                try:
+                    if os.getpgid(child['pid']) == child['pgid']:
+                        os.killpg(child['pgid'], signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             try:
                 os.killpg(self.proc.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -31,9 +41,11 @@ class HostIntegration(unittest.TestCase):
             self.proc.communicate(timeout=5)
         self.tmp.cleanup()
 
-    def start(self, initial='-', program=CLI, log=None, retries=3, slow_log=False):
+    def start(self, initial='-', program=CLI, log=None, retries=3, slow_log=False, settings=None):
         environment=os.environ.copy()
+        environment.update(settings or {})
         if slow_log: environment['HOST_TEST_SLOW_LOG']='1'
+        if program == CLI: program = self.cli
         self.proc = subprocess.Popen([DRIVER, str(program), str(self.ready), str(self.processing),
             str(log or self.root / 'module.log'), str(self.root), str(initial), str(retries)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -108,6 +120,26 @@ class HostIntegration(unittest.TestCase):
         self.until(lambda: 'retry_exhausted' in self.logs())
         self.assertEqual([e['plan'] for e in self.events()], [str(a),None,None,None])
 
+    def test_retry_delay_starts_after_final_result(self):
+        (self.root/'run-mode').write_text('empty')
+        self.start(retries=1, settings={'HOST_TEST_RETRY_DELAY_MS':'200',
+                                      'HOST_TEST_FINAL_SCAN_DELAY_MS':'300'})
+        self.until(lambda: float(self.command('retry-gap').split()[1]) > 0)
+        gap = float(self.command('retry-gap').split()[1])
+        # 单调钟按整毫秒存储；这里只容许不足一毫秒的量化误差。
+        self.assertGreaterEqual(gap, 199, f'结果判定后只等待了 {gap}ms')
+
+    def test_clock_failure_at_completion_keeps_result_and_claim(self):
+        (self.root/'run-mode').write_text('empty')
+        self.start(retries=1, settings={'HOST_TEST_FAIL_COMPLETION_CLOCK':'1'})
+        self.until(lambda: 'clock_unknown' in self.logs())
+        self.assertIn('result=abnormal', self.logs())
+        self.assertEqual(self.command('submit '+str(self.plan('A'))), 'submit -1')
+        self.assertEqual(self.command('retry-gap'), 'retry-gap 0.000')
+        (self.ready/'file').write_text('data')
+        self.assertEqual(self.command('claim'), 'claimed')
+        self.assertTrue((self.processing/'file').exists())
+
     def test_legal_error_no_restart_and_submit_unknown_no_resend(self):
         (self.root/'run-mode').write_text('error'); self.start()
         self.until(lambda: 'result=error' in self.logs())
@@ -120,7 +152,7 @@ class HostIntegration(unittest.TestCase):
     def test_start_failure_retains_initial_after_exhaustion(self):
         executable=self.root/'camctl'; a=self.plan('A'); self.start(a, executable)
         self.until(lambda: 'retry_exhausted' in self.logs())
-        executable.symlink_to(CLI)
+        executable.symlink_to(self.cli)
         b=self.plan('B','true'); self.assertEqual(self.command('submit '+str(b)), 'submit 0')
         self.until(lambda: len(self.events())==2)
         self.assertEqual(self.events()[1]['plan'],str(a))
@@ -181,5 +213,40 @@ class HostIntegration(unittest.TestCase):
         (self.ready/'file').write_text('data')
         self.assertEqual(self.command('claim'),'claimed')
         self.assertTrue((self.processing/'file').exists())
+
+    def test_slow_archive_cleanup_does_not_block_management(self):
+        (self.root/'module.log.1').write_text('old archive')
+        self.start(settings={'HOST_TEST_LOG_FILE_COUNT':'1', 'HOST_TEST_SLOW_ARCHIVE_CLEANUP':'1'})
+        self.until(lambda: self.command('cleanup-state') == 'cleanup-entered 1')
+        for name, mode in [('noisy','noisy'), ('next','false')]:
+            self.assertEqual(self.command('submit '+str(self.plan(name, mode))), 'submit 0')
+        self.until(lambda: len(self.events()) == 3)
+        (self.ready/'file').write_text('data')
+        self.assertEqual(self.command('claim'), 'claimed')
+        self.assertTrue((self.processing/'file').exists())
+        self.assertEqual(self.command('unblock-log'), 'log-resumed')
+        self.until(lambda: (self.root/'module.log').exists() and
+                           not (self.root/'module.log.1').exists())
+
+    def test_archive_cleanup_failure_does_not_block_management(self):
+        (self.root/'module.log.1').write_text('old archive')
+        self.start(settings={'HOST_TEST_LOG_FILE_COUNT':'1', 'HOST_TEST_DENY_ARCHIVE_CLEANUP':'1'})
+        self.until(lambda: self.command('cleanup-state') == 'cleanup-entered 1')
+        for name in ['A','B']:
+            self.assertEqual(self.command('submit '+str(self.plan(name))), 'submit 0')
+        self.until(lambda: len(self.events()) == 3)
+        (self.ready/'file').write_text('data')
+        self.assertEqual(self.command('claim'), 'claimed')
+        self.assertTrue((self.processing/'file').exists())
+        self.assertEqual((self.root/'module.log.1').read_text(), 'old archive')
+
+    def test_changed_sigchld_prevents_next_launch(self):
+        self.start(retries=0)
+        self.until(lambda: 'command=run' in self.logs() and 'result=success' in self.logs())
+        self.assertEqual(self.command('ignore-children'), 'children-ignored')
+        plan=self.plan('A')
+        self.assertEqual(self.command('submit '+str(plan)), 'submit 0')
+        self.until(lambda: 'command=submit not_started errno=22' in self.logs())
+        self.assertEqual([e['command'] for e in self.events()], ['run'])
 
 if __name__=='__main__': unittest.main()

@@ -74,6 +74,10 @@ from camctl.operations.attempts import (
     FinishAttemptResult,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.capture_facts import (
+    include_start_facts, load_start_facts, release_basis_holds,
+    unstarted_events, verify_unstarted_final,
+)
 from camctl.persistence.repositories.operations import FinishAttemptCommand
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.transaction import (
@@ -247,9 +251,15 @@ class FinishCanceledCapture:
     occurred_at: int
     drafts: tuple[OutputDraft, ...] = ()
     catalog_facts: OutputCatalogFacts | None = None
+    #: 可靠未启动的本地收场：事务内复核原尝试，与适用占用释放共同保存。
+    unstarted: bool = False
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
+        if not isinstance(self.unstarted, bool):
+            raise TypeError("未启动收场标记必须是布尔值")
+        if self.unstarted and (self.drafts or self.catalog_facts is not None):
+            raise ValueError("未启动收场不登记拍摄产物")
 
 
 class FinishDisposition(Enum):
@@ -543,6 +553,7 @@ class FinishCaptureCommand:
     def __init__(self, command, key: OperationKey, *,
                  canceled: bool = False) -> None:
         self._canceled = canceled
+        self._unstarted = canceled and command.unstarted
         self._failure = None if canceled else command.failure
         self._command = command
         self._key = key
@@ -562,6 +573,8 @@ class FinishCaptureCommand:
         if action is None:
             raise TransactionError(f"动作不存在: {command.action_id}")
         if action["status"] in _ACTION_TERMINAL:
+            if self._unstarted:
+                verify_unstarted_final(connection, action)
             return self._recover(connection, action)
         siblings = self._sibling_actions(connection, action)
         self._state["actions"] = dict(siblings)
@@ -576,6 +589,14 @@ class FinishCaptureCommand:
                 f"执行中动作的取消标记与完成登记分支不符:"
                 f" {command.action_id} status={action['status']}"
                 f" cancel_requested={action['cancel_requested']}")
+        unstarted = None
+        if self._unstarted:
+            unstarted = load_start_facts(connection, action)
+            if not unstarted.not_started:
+                raise ConsistencyError("本地取消收场缺少可靠未启动依据")
+            if unstarted.run is not None and unstarted.run["status"] in (1, 2):
+                raise ConsistencyError("本地取消收场前普通启动责任必须已随取消结束")
+            include_start_facts(unstarted, self._state, self._owners)
         action_status = _ACTION_SUCCEEDED
         error_id: int | None = None
         error_details: dict[str, Any] | None = None
@@ -664,6 +685,9 @@ class FinishCaptureCommand:
                 command.occurred_at,
             )
         ]
+        if unstarted is not None:
+            templates.extend(unstarted_events(
+                unstarted, command.occurred_at, run_status=None))
         next_origin_id = _next_id(connection, "output_origins")
         # 原片先进入当前事件事实，派生关系按显式引用解析；结果保持输入次序。
         promoted_files: list[int] = []
@@ -772,6 +796,11 @@ class FinishCaptureCommand:
         作身份冲突拒绝；不重新登记，也不改写既有终态。
         """
         command = self._command
+        if self._unstarted:
+            action = row_facts(connection, "actions", command.action_id)
+            if action is None:
+                raise ConsistencyError("原本地取消动作不存在")
+            verify_unstarted_final(connection, action, saved)
         types = [(event["type"], event["reason"]) for event in saved]
         if not types or types[0][0] != _ACTION_FINISHED_EVENT:
             raise TransactionError("原事务不是完成登记，不能作为重送核实")
@@ -2037,19 +2066,6 @@ class ActivityConclusion:
 
     outcome: ConcludeOutcome
     reason: str | None = None
-
-
-def release_basis_holds(facts: Mapping[str, Any]) -> bool:
-    """统一释放判定：活动结束、可靠未派发或无效果、适用完成依据。
-
-    与 device_activities 的 SQL 组合约束保持同一分区；录像采集判
-    定待定不阻止已结束活动释放。
-    """
-    if facts.get("activity_state") == 3:
-        return True
-    if facts.get("dispatch_state") in (1, 4):
-        return True
-    return facts.get("completion_basis") == 3
 
 
 class _ActivityReleaseCommand:

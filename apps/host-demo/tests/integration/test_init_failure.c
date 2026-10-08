@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -53,6 +54,22 @@ int main(void) {
     int baseline = fd_count();
     assert(camctl_host_submit("/A") == -1);
     assert(errno == ENODEV);
+    struct sigaction original, action = {0}, after;
+    assert(!sigaction(SIGCHLD, NULL, &original));
+    action.sa_handler = SIG_IGN;
+    sigemptyset(&action.sa_mask);
+    assert(!sigaction(SIGCHLD, &action, NULL));
+    assert(camctl_host_init(&c, NULL) == -1);
+    assert(errno == EINVAL);
+    assert(!sigaction(SIGCHLD, NULL, &after));
+    assert(after.sa_handler == SIG_IGN);
+    action.sa_handler = SIG_DFL;
+    action.sa_flags = SA_NOCLDWAIT;
+    assert(!sigaction(SIGCHLD, &action, NULL));
+    assert(camctl_host_init(&c, NULL) == -1);
+    assert(errno == EINVAL);
+    assert(fd_count() == baseline);
+    assert(!sigaction(SIGCHLD, &original, NULL));
     for (int i = 1; i <= 2; i++) {
         malloc_failure = i;
         assert(camctl_host_init(&c, NULL) == -1);

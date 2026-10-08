@@ -275,7 +275,7 @@ class FailCancelTargets:
 class CancelApplyMode(Enum):
     """一次取消生效事务的目标处理方式（由取消资格决定）。"""
 
-    #: 可靠未启动：目标直接终态取消，本项同事务成功。
+    #: 可靠未启动：PENDING 直接取消，RUNNING 标记后等待本地收场。
     PRE_START = "pre_start"
     #: 已启动或可能启动且支持停止：保存取消标记，停止收场另行推进。
     WITH_STOP = "with_stop"

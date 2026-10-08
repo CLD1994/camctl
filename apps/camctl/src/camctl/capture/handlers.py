@@ -494,6 +494,11 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     合登记契约时不可采纳：按调用失败收场本次尝试，不遗留执行中
     的启动流程。
     """
+    if runtime.last_attempt(f"start/{action['id']}") is None:
+        from camctl.capture.residual import pass_residual_gate
+
+        if not await pass_residual_gate(runtime, action):
+            return HandlerOutcome("not_granted")
     ticket, reason = runtime.grant(action)
     if ticket is None:
         return HandlerOutcome("not_granted", reason)
@@ -748,15 +753,8 @@ def _stop_run_id(runtime: CaptureRuntime, action_id: int) -> int:
     return int(found[0])
 
 
-def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
-    """停止预算耗尽的收场：停止流程与动作按未确认失败终态化。
-
-    原停止预算内没有取得可靠停止确认时，停止流程按未确认收场并
-    携带 recording_stop_failed，动作以零产物登记失败终态。设备活
-    动缺少结束与释放依据，执行中事实与占用原样保留，由后续动作
-    触发的残留收场或取消收场处理（camera-recovery.md#停止预算
-    耗尽后的收场责任）。幂等：动作终态后重入走处理器终态分支。
-    """
+def _close_stop_exhausted(runtime: CaptureRuntime, action) -> RecordingFailure:
+    """保存停止预算耗尽的原流程结果；活动效果及占用保持原事实。"""
     activity_id = _activity_id_of(runtime, action["id"])
     error = ErrorValue(
         code="recording_stop_failed", stage="device_stop",
@@ -770,9 +768,22 @@ def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
             occurred_at=runtime.wall_us()),
         new_operation_key(), runtime.owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    return RecordingFailure(code=error.code, details=dict(error.details))
+
+
+def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
+    """停止预算耗尽的收场：停止流程与动作按未确认失败终态化。
+
+    原停止预算内没有取得可靠停止确认时，停止流程按未确认收场并
+    携带 recording_stop_failed，动作以零产物登记失败终态。设备活
+    动缺少结束与释放依据，执行中事实与占用原样保留，由后续动作
+    触发的残留收场或取消收场处理（camera-recovery.md#停止预算
+    耗尽后的收场责任）。幂等：动作终态后重入走处理器终态分支。
+    """
+    failure = _close_stop_exhausted(runtime, action)
     _finish_capture(
         runtime, action["id"], (), FileKind.VIDEO,
-        failure=RecordingFailure(code=error.code, details=dict(error.details)))
+        failure=failure)
 
 
 def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
@@ -857,15 +868,41 @@ async def _stop_call(runtime: CaptureRuntime, action,
     return HandlerOutcome("confirmed" if confirmed else "sent")
 
 
-def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int) -> None:
+def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
+                             unstarted: bool = False) -> None:
     """取消终态：放弃内容，不登记正式产物。"""
     receipt = runtime.capture.finish_canceled_capture(
         FinishCanceledCapture(
-            action_id=action_id, occurred_at=runtime.wall_us()),
+            action_id=action_id, occurred_at=runtime.wall_us(), unstarted=unstarted),
         new_operation_key(), runtime.owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     _settle_input_read_runs(
         runtime, action_id, RunOutcome.CANCELED, None)
+
+
+def _settle_unstarted_attempt(runtime: CaptureRuntime, action, attempt) -> bool:
+    """全部原尝试已可靠无效果时，按当前取消与启动窗口本地结束。"""
+    if (attempt is None or attempt[0] == int(_ATTEMPT_STATUS.RUNNING)
+            or attempt[1] != int(_EFFECT_STATE.NO_EFFECT)):
+        return False
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+    from camctl.persistence.repositories.scheduling import ExpireActionRequest, ExpireOutcome
+    from camctl.scheduling.rules import WindowPhase, window_phase
+
+    facts = load_start_facts(runtime.owned.connection, action)
+    if not facts.not_started:
+        return False
+    if action["cancel_requested"]:
+        _finish_canceled_capture(runtime, action["id"], unstarted=True)
+        return True
+    now = runtime.wall_us()
+    if window_phase(runtime.window_of(action), now) is not WindowPhase.AFTER_WINDOW:
+        return False
+    result = runtime.scheduling.expire_action(
+        ExpireActionRequest(action["id"], now, now), new_operation_key(), runtime.owned)
+    if result.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"可靠无效果启动的过期事务未完成: {result.error}")
+    return result.value.outcome is ExpireOutcome.EXPIRED
 
 
 def _catalog_drafts(
@@ -972,7 +1009,7 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     attempt = context.last_attempt(f"start/{action_id}")
     if attempt is None:
         if action["cancel_requested"]:
-            # 未派发取消不创建尝试；终态由取消收场处理。
+            _finish_canceled_capture(context, action_id, unstarted=True)
             return
         step = await _control_call(
             context, action, "take_photo", "photo_taken",
@@ -984,6 +1021,8 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
             # 仅发送或未授予：没有可靠响应事实，等待下次推进。
             return
         attempt = context.last_attempt(f"start/{action_id}")
+    if _settle_unstarted_attempt(context, action, attempt):
+        return
     listing = await _listing_round(context, action_id)
     if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
         # 在途或本轮列举失败：已保存实际结果与重试等待，下一轮重新核实。
@@ -1060,6 +1099,7 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
     if open_start is None:
         # 尚未发起启动：首次授予并调用，不依赖中段事实端口。
         if action["cancel_requested"]:
+            _finish_canceled_capture(context, action_id, unstarted=True)
             return
         step = await _control_call(
             context, action, "start_recording", "start_confirmed",
@@ -1074,6 +1114,11 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
             port.anchor_confirmed(
                 action_id, anchor_ns,
                 recording_stop_target(anchor_ns, _target_duration_ms(action)))
+        return
+    if _settle_unstarted_attempt(context, action, open_start):
+        return
+    if action["cancel_requested"]:
+        await _advance_canceled_capture(context, action, open_start)
         return
     if _settle_start_without_sent_at(context, action, open_start):
         # 可能派发但没有可靠发送时间：不重复启动，按无法核实收场。
@@ -1324,6 +1369,14 @@ async def advance_winddown(
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         return HandlerOutcome("already_terminal")
+    if action["cancel_requested"]:
+        start = context.last_attempt(f"start/{action_id}")
+        if start is None:
+            _finish_canceled_capture(context, action_id, unstarted=True)
+        elif not _settle_unstarted_attempt(context, action, start):
+            await _advance_canceled_capture(context, action, start)
+        return HandlerOutcome("canceled_final" if context.action(action_id)["status"]
+                              in _ACTION_TERMINAL else "cancel_pending")
     port = _recording_port(context)
     canceled = bool(action["cancel_requested"])
     decision = decide_recording_next(
@@ -1501,6 +1554,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     attempt = context.last_attempt(f"start/{action_id}")
     if attempt is None:
         if action["cancel_requested"]:
+            _finish_canceled_capture(context, action_id, unstarted=True)
             return
         step = await _control_call(
             context, action, "start_timelapse", "timelapse_sent",
@@ -1510,6 +1564,11 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         attempt = context.last_attempt(f"start/{action_id}")
         if attempt is None:
             return
+    if _settle_unstarted_attempt(context, action, attempt):
+        return
+    if action["cancel_requested"]:
+        await _advance_canceled_capture(context, action, attempt)
+        return
     if _settle_start_without_sent_at(context, action, attempt):
         # 可能派发但没有可靠发送时间：无法计算等待锚点，不重复启
         # 动、不补造时间，按无法核实收场。
@@ -1521,10 +1580,6 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         activity = cursor.fetchone()
     if activity is None or activity[0] is None:
         # 发送事实（sent_at）由活动观察边界保存；尚未保存时等待。
-        return
-    if action["cancel_requested"]:
-        # 可停止延时的取消已生效：不再等待计时，立即按停止预算收场。
-        await _cancel_timelapse_stop(context, action)
         return
     config = context.wait_config(action)
     if activity[1] is None:
@@ -1605,29 +1660,51 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         context.finish(ticket, _round_outcome(), retry_wait=True)
 
 
-async def _cancel_timelapse_stop(context: CaptureRuntime, action) -> None:
-    """等待中取消的可停止延时收场：立即停止并保留已拍完文件。
+async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> None:
+    """取消优先推进原停止责任，不依赖启动确认或计时锚点。
 
-    停止决策与录像共用一套阶段规则：取消不经计时立即按剩余预算
-    停止。停止确认后活动以可靠停止事实收场并释放占用，收尾核实
-    把已拍完且确认完成的文件登记为正式产物。启动未确认的取消归
-    启动核实链；在途停止与预算耗尽等待停止结果或残留收场接线。
+    原启动及停止调用在途时等待实际结果；可能启动的活动沿原 STOP
+    的身份、预算和间隔收场。结束未知不释放占用，也不补造启动时间。
     """
-    port = _recording_port(context)
-    decision = decide_recording_next(
-        port.recording_state(action["id"]),
-        RecordingFacts(canceled=True),
-    )
-    if decision.phase is not RecordingPhase.READY_TO_STOP:
-        if decision.phase is RecordingPhase.CONTROL_COMPLETE:
-            # 停止已确认（中断恢复）：直接进入取消收尾。
-            _conclude_activity(context, action["id"])
-            await _close_canceled_timelapse(context, action["id"])
+    action_id = action["id"]
+    if start is not None and start[0] == int(_ATTEMPT_STATUS.RUNNING):
         return
-    step = await _stop_call(context, action, "stop_timelapse")
-    if step.phase == "confirmed":
-        _conclude_activity(context, action["id"])
-        await _close_canceled_timelapse(context, action["id"])
+    with closing(context.owned.connection.execute(
+        "SELECT activity_state, stop_supported FROM device_activities WHERE action_id = ?",
+        (action_id,),
+    )) as cursor:
+        activity = cursor.fetchone()
+    if activity is None:
+        raise ConsistencyError("取消拍摄缺少设备活动")
+    stop = context.last_attempt(f"stop/{action_id}")
+    confirmed = (stop is not None and stop[0] != int(_ATTEMPT_STATUS.RUNNING)
+                 and stop[1] == int(_EFFECT_STATE.CONFIRMED))
+    ended = activity[0] == 3
+    if not ended and not confirmed:
+        if stop is not None and stop[0] == int(_ATTEMPT_STATUS.RUNNING):
+            return
+        with closing(context.owned.connection.execute(
+            "SELECT status FROM operation_runs WHERE responsibility_key = ?",
+            (f"stop/{action_id}",),
+        )) as cursor:
+            run = cursor.fetchone()
+        if run is None or run[0] in (1, 2):
+            if not activity[1]:
+                raise ConsistencyError("可能启动的取消拍摄缺少原停止能力")
+            step = await _stop_call(context, action,
+                                    "stop_timelapse" if action["type"] == 3 else "stop_recording")
+            if step.phase == "confirmed":
+                confirmed = True
+            elif step.phase == "stop_not_granted" and step.detail == "budget_exhausted":
+                _close_stop_exhausted(context, action)
+            elif step.phase != "call_failed":
+                return
+    if confirmed:
+        _conclude_activity(context, action_id)
+    if action["type"] == 3:
+        await _close_canceled_timelapse(context, action_id)
+    else:
+        _finish_canceled_capture(context, action_id)
 
 
 async def _close_canceled_timelapse(

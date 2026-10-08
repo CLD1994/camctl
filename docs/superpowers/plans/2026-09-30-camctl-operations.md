@@ -155,7 +155,7 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 
 ### O6 主机收场与下一调用组合
 
-**预计文件：** `apps/camctl/src/camctl/operations/process.py`；测试为 `tests/integration/test_camctl_process_recovery.py`。
+**预计文件：** `apps/camctl/src/camctl/operations/process.py`；测试为 `tests/integration/test_camctl_process_recovery.py`、`tests/integration/_host_recovery_entry.py`，C 同步驱动位于 `apps/host-demo/tests/integration/host_driver.c`。
 
 **接口与依赖：** 使用真实 CLI/C 启动与 operations 接口；C 修改由 I1/I2 拥有，不在 Python 写主机回收逻辑。前置交付：I1/I2、O3/O5。
 
@@ -166,6 +166,8 @@ O1/O2 的端口与类型在首个设备操作前稳定；O3 接入真实工具�
 - [x] 审阅实际接口、状态分区及失败路径，检查 系统级放行与业务层资格是否互相代替；记录门禁证据，建议以“test: 验证受管调用与主机收场”形成独立提交。
 
 ## 模块完成门禁
+
+O6 的真实 C/CLI 组合记录见[跨组件计划 I1/I2 验证记录](2026-09-30-camctl-integration.md#i1i2-验证记录2026-10-08linux-x86_64)：2026-10-08 Linux x86_64、CPython 3.11.16，8 项通过。生产工具启动沿用 `operations.process`，C 模块完成原组收场及最终回收；测试没有在 Python 实现主机放行。固定 ADB 版本、真实服务端行为和第三方实际回收仍按各自部署验收执行。
 
 统一意图/结果、真实工具收场和各查询用途均通过；普通及恢复结果保留原证据和版本。设备效果与本地生命周期各由自己的证据证明，C 主机组合有独立软件验收。
 

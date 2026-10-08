@@ -1,0 +1,8 @@
+# C 与终端接入示例使用的部署路径；其余设置采用 camctl 内置默认值。
+# camctl 与主程序使用同一账户；设备绑定按实际部署补充。
+[paths]
+state_db = "/srv/camctl/state.db"
+log_file = "/srv/camctl/camctl.log"
+staging = "/srv/camctl/staging"
+ready = "/srv/camctl/ready"
+processing = "/srv/camctl/processing"

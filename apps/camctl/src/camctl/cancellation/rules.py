@@ -21,6 +21,7 @@ from camctl.cancellation.models import (
 )
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.capture_facts import load_start_facts
 
 __all__ = [
     "CancelEligibility",
@@ -143,12 +144,14 @@ class EligibilityFacts:
 
 def decide_cancel_eligibility(facts: EligibilityFacts) -> CancelEligibility:
     """按取消资格表自上而下判定；不允许折叠分区。"""
-    if not facts.facts_reliable or facts.dispatch is DispatchPhase.UNVERIFIED:
+    if not facts.facts_reliable:
         return CancelEligibility.UNVERIFIED
     if facts.terminal:
         return CancelEligibility.TERMINAL
     if facts.cancel_applied:
         return CancelEligibility.ALREADY_CANCELED
+    if facts.dispatch is DispatchPhase.UNVERIFIED:
+        return CancelEligibility.UNVERIFIED
     if facts.dispatch is DispatchPhase.NOT_STARTED:
         return CancelEligibility.ALLOW_PRE_START
     if facts.stop_supported:
@@ -204,10 +207,19 @@ def load_eligibility_facts(connection, action_id: int) -> EligibilityFacts:
                       else DispatchPhase.NOT_STARTED),
             stop_supported=True)
     activity = _activity_row(connection, action_id)
+    terminal = action["status"] in _ACTION_TERMINAL
+    applied = bool(action["cancel_requested"])
+    if terminal or applied:
+        # 已有终态或生效事实不依赖重新判断物理启动阶段。
+        dispatch = DispatchPhase.UNVERIFIED
+    else:
+        start = load_start_facts(connection, action)
+        dispatch = (DispatchPhase.NOT_STARTED if start.not_started
+                    else _dispatch_phase(activity))
     return EligibilityFacts(
-        terminal=action["status"] in _ACTION_TERMINAL,
-        cancel_applied=bool(action["cancel_requested"]),
-        dispatch=_dispatch_phase(action, activity),
+        terminal=terminal,
+        cancel_applied=applied,
+        dispatch=dispatch,
         stop_supported=_stop_supported(action, kind, activity),
     )
 
@@ -226,18 +238,17 @@ def _activity_row(connection, action_id: int) -> dict[str, Any] | None:
     return row_facts(connection, "device_activities", int(row[0]))
 
 
-def _dispatch_phase(action, activity) -> DispatchPhase:
-    if action["execution_started"] == 1:
-        return DispatchPhase.STARTED
+def _dispatch_phase(activity) -> DispatchPhase:
     if activity is None:
-        return DispatchPhase.NOT_STARTED
+        return DispatchPhase.UNVERIFIED
     state = activity["dispatch_state"]
     if state == _DISPATCH_MAY_HAVE:
         return DispatchPhase.START_PENDING
     if state == _DISPATCH_RETURNED:
         return DispatchPhase.STARTED
     if state in (_DISPATCH_NOT_DISPATCHED, _DISPATCH_REJECTED):
-        return DispatchPhase.NOT_STARTED
+        # 活动行不能覆盖尚在途的原尝试或未完成的启动核实责任。
+        return DispatchPhase.START_PENDING
     raise ConsistencyError(
         f"派发阶段编号不可解释: {state!r}")
 

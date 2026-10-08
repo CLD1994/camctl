@@ -113,8 +113,10 @@ class ResultsDouble:
 
     def __init__(self, files_by_action: dict[int, tuple]) -> None:
         self.files_by_action = files_by_action
+        self.calls: list[int] = []
 
     async def list_files(self, action_id: int) -> tuple:
+        self.calls.append(action_id)
         return self.files_by_action.get(action_id, ())
 
 
@@ -559,6 +561,36 @@ class TestTimelapseHandler:
 
 
 class TestDispatchLoop:
+    @pytest.mark.parametrize("action_id,action_type", [(11, 1), (12, 2), (13, 3)])
+    @pytest.mark.parametrize("canceled", [False, True])
+    async def test_unstarted_action_finishes_without_device_work(
+            self, tmp_path, action_id, action_type, canceled):
+        from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+
+        owned = _environment(tmp_path, ((action_id, action_type),))
+        try:
+            if canceled:
+                owned.connection.execute(
+                    "UPDATE actions SET cancel_requested = 1 WHERE id = ?", (action_id,))
+                owned.connection.commit()
+            driver = DriverDouble()
+            files = ResultsDouble({})
+            runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+            outcomes = await dispatch_ready(
+                runtime, ready_capture_actions(owned.connection, _NOW + 1_000_001))
+            assert len(outcomes) == 1
+            assert not isinstance(outcomes[0][1], BaseException), outcomes
+            assert _value(owned, "SELECT status, execution_started, cancel_requested"
+                          " FROM actions WHERE id = ?", action_id) == (
+                              6 if canceled else 5, 1, int(canceled))
+            assert _value(owned, "SELECT dispatch_state, activity_state, occupancy_state"
+                          " FROM device_activities WHERE action_id = ?", action_id) == (1, 1, 2)
+            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (0,)
+            assert driver.calls == []
+            assert files.calls == []
+        finally:
+            owned.connection.close()
+
     async def test_dispatch_routes_all_capabilities_per_plan(self, tmp_path: Path):
         owned = _environment(tmp_path, ((11, 1), (12, 2), (13, 3)))
         # 各能力单独计划，避免同计划更早动作阻塞授予。

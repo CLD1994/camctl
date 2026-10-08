@@ -3,16 +3,55 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-static int mode, moves;
+static int mode, moves, ready_fd, ready_syncs, processing_syncs;
 static char removed[256], ready[4096], old_ready[4096];
+static char diagnostics[4096];
+int __real_fstatat(int, const char *, struct stat *, int);
+int __wrap_fstatat(int fd, const char *name, struct stat *st, int flags) {
+    ready_fd = fd;
+    if (mode == 4 || mode == 5) {
+        errno = mode == 4 ? EIO : EINTR;
+        return -1;
+    }
+    return __real_fstatat(fd, name, st, flags);
+}
+int __real_fsync(int);
+int __wrap_fsync(int fd) {
+    bool is_ready = fd == ready_fd;
+    if (is_ready)
+        ready_syncs++;
+    else
+        processing_syncs++;
+    if ((mode == 7 && !is_ready) || (mode == 8 && is_ready) || mode == 9) {
+        errno = is_ready ? ENOSPC : EIO;
+        return -1;
+    }
+    return __real_fsync(fd);
+}
+void __real_host_log(host_logger *, const char *, ...);
+void __wrap_host_log(host_logger *logger, const char *format, ...) {
+    char record[2048];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(record, sizeof(record), format, args);
+    va_end(args);
+    size_t used = strlen(diagnostics);
+    snprintf(diagnostics + used, sizeof(diagnostics) - used, "%s\n", record);
+    __real_host_log(logger, "%s", record);
+}
 int __real_renameat(int, const char *, int, const char *);
 int __wrap_renameat(int from, const char *source, int to, const char *target) {
     moves++;
+    if (mode == 11 || (mode == 13 && moves > 1)) {
+        errno = EACCES;
+        return -1;
+    }
     if (moves == 1 && mode == 1) {
         /* 明确在完整遍历之后、首项移动之前发布新文件并撤下当前文件。 */
         int fd = openat(from, "later", O_WRONLY | O_CREAT | O_EXCL, 0600);
@@ -23,8 +62,10 @@ int __wrap_renameat(int from, const char *source, int to, const char *target) {
         strcpy(removed, source);
     }
     int result = __real_renameat(from, source, to, target);
-    if (moves == 1 && mode == 2) {
+    if ((moves == 1 && (mode == 2 || mode == 10 || mode == 13)) || mode == 12) {
         assert(result == 0);
+        if (mode == 10)
+            assert(rename(ready, old_ready) == 0);
         errno = EIO;
         return -1;
     }
@@ -51,12 +92,17 @@ int main(int argc, char **argv) {
     snprintf(log, sizeof(log), "%s/log", root);
     assert(mkdir(ready, 0700) == 0);
     assert(mkdir(processing, 0700) == 0);
-    for (int i = 0; i < 3; i++) {
+    int entries = (mode == 1 || mode == 3 || mode == 12 || mode == 13) ? 3 : 1;
+    for (int i = 0; i < entries; i++) {
         char path[8192];
         snprintf(path, sizeof(path), "%s/%c", ready, 'a' + i);
-        int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-        assert(fd >= 0);
-        close(fd);
+        if (mode == 6) {
+            assert(mkdir(path, 0700) == 0);
+        } else {
+            int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+            assert(fd >= 0);
+            close(fd);
+        }
     }
     camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
     config.ready_path = ready;
@@ -66,7 +112,7 @@ int main(int argc, char **argv) {
     assert(host_logger_init(&logger, &config) == 0);
     host_claim_posix(&config, &logger);
     int delivered = 0;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < entries; i++) {
         char name[2] = {(char)('a' + i), 0};
         delivered += exists(processing, name);
     }
@@ -77,13 +123,39 @@ int main(int argc, char **argv) {
         assert(!exists(processing, removed));
         assert(!exists(processing, "later"));
     } else if (mode == 2) {
-        assert(moves == 3);
-        assert(delivered == 3);
-    } else {
+        assert(moves == 1);
+        assert(delivered == 1);
+        assert(strstr(diagnostics, "operation=move_unknown"));
+    } else if (mode == 3 || mode == 10) {
         assert(moves == 1);
         assert(delivered == 1);
         assert(access(ready, F_OK) < 0);
+    } else if (mode >= 4 && mode <= 6) {
+        assert(moves == 0);
+        assert(delivered == 0);
+        assert(exists(ready, "a"));
+        assert(strstr(diagnostics, mode == 6 ? "operation=source_not_regular"
+                                           : "operation=source_check_failed"));
+        char error[32];
+        snprintf(error, sizeof(error), "errno=%d", mode == 4 ? EIO : mode == 5 ? EINTR : EINVAL);
+        assert(strstr(diagnostics, error));
+        assert(!strstr(diagnostics, "move_unknown"));
+    } else if (mode == 11) {
+        assert(moves == 1);
+        assert(delivered == 0);
+        assert(exists(ready, "a"));
+        assert(strstr(diagnostics, "operation=move_failed"));
+    } else {
+        assert(moves == entries);
+        assert(delivered == (mode == 13 ? 1 : entries));
     }
+    int expected_syncs = ((mode >= 4 && mode <= 6) || mode == 11) ? 0 : 1;
+    assert(ready_syncs == expected_syncs);
+    assert(processing_syncs == expected_syncs);
+    if (mode == 7 || mode == 9)
+        assert(strstr(diagnostics, "operation=processing_directory_sync_unknown"));
+    if (mode == 8 || mode == 9)
+        assert(strstr(diagnostics, "operation=ready_directory_sync_unknown"));
     host_logger_abort(&logger);
     const char *directories[] = {ready, processing, old_ready};
     for (size_t i = 0; i < 3; i++) {
@@ -91,6 +163,8 @@ int main(int argc, char **argv) {
             char path[8192], name[2] = {(char)('a' + n), 0};
             snprintf(path, sizeof(path), "%s/%s", directories[i], n == 3 ? "later" : name);
             unlink(path);
+            if (mode == 6)
+                rmdir(path);
         }
         rmdir(directories[i]);
     }

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Mapping
@@ -37,6 +37,9 @@ from camctl.operations.attempts import (
     seconds_from_json,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.capture_facts import (
+    include_start_facts, load_start_facts, unstarted_events, verify_unstarted_final,
+)
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
@@ -550,8 +553,8 @@ class ExpireOutcome(Enum):
 class ExpireActionRequest:
     """一次动作过期事务的输入。
 
-    只处理窗口结束仍未派发（未保存开始事实）的动作；已开始的动
-    作在窗口结束后的处理由在途启动事实决定，不经本事务。
+    只处理窗口结束仍可靠未派发或全部启动尝试可靠无效果的动作。
+    进入 RUNNING 不等于物理启动；可能生效或待核实的启动继续原责任。
     """
 
     action_id: int
@@ -611,7 +614,8 @@ class ExpireActionCommand:
                 f" {action['status']!r}")
         if action["cancel_requested"]:
             return self._rejected("canceled")
-        if action["execution_started"]:
+        start = load_start_facts(connection, action)
+        if not start.not_started:
             return self._rejected("in_flight")
         window = LaunchWindow(
             scheduled_at=int(action["scheduled_at"]),
@@ -629,12 +633,12 @@ class ExpireActionCommand:
             or values["id"] == request.action_id
             for values in siblings.values()
         ) and plan["status"] in (1, 2)
-        allocation = scope.allocate(2 if plan_complete else 1)
+        include_start_facts(start, self._state, self._owners)
         self._owners[("actions", request.action_id)] = (
             "action", request.action_id)
         templates = [
             _envelope(
-                allocation.first_event_id, allocation.txn_id,
+                0, 0,
                 _ACTION_FINISHED_EVENT, 3,
                 (_update(
                     "actions", request.action_id,
@@ -644,11 +648,13 @@ class ExpireActionCommand:
                 request.occurred_at,
             )
         ]
+        templates.extend(unstarted_events(
+            start, request.occurred_at, run_status=int(_RUN_STATUS.EXPIRED)))
         if plan_complete:
             self._owners[("plans", plan["id"])] = ("plan", plan["id"])
             templates.append(
                 _envelope(
-                    allocation.last_event_id, allocation.txn_id,
+                    0, 0,
                     _PLAN_STATUS_EVENT, 2,
                     (_update(
                         "plans", plan["id"],
@@ -658,8 +664,12 @@ class ExpireActionCommand:
                     request.occurred_at,
                 )
             )
+        allocation = scope.allocate(len(templates))
+        events = tuple(replace(event, event_id=allocation.first_event_id + index,
+                               transaction_id=allocation.txn_id)
+                       for index, event in enumerate(templates))
         return CommandPlan(
-            events=tuple(templates), owners=self._owners,
+            events=events, owners=self._owners,
             state_rows=self._state,
             result=ExpireActionResult(
                 outcome=ExpireOutcome.EXPIRED,
@@ -675,8 +685,7 @@ class ExpireActionCommand:
     def _reuse(self, scope, saved: list[dict]) -> CommandPlan:
         """同键重送：核实原事务组成后恢复首次响应。"""
         request = self._request
-        if (len(saved) not in (1, 2)
-                or saved[0]["type"] != _ACTION_FINISHED_EVENT
+        if (not saved or saved[0]["type"] != _ACTION_FINISHED_EVENT
                 or saved[0]["reason"] != 3):
             raise TransactionError("操作身份已用于其他事务，不能作为过期重送")
         for event in saved:
@@ -689,6 +698,18 @@ class ExpireActionCommand:
         action = row_facts(scope.connection, "actions", request.action_id)
         if action is None or action["status"] != _ACTION_EXPIRED:
             raise TransactionError("原过期事务的可靠记录与输入不符")
+        order = {(8, 3): 0, (13, 2): 1, (10, 3): 2, (13, 3): 3, (9, 2): 4}
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if (any(kind not in order for kind in kinds) or len(set(kinds)) != len(kinds)
+                or [order[kind] for kind in kinds] != sorted(order[kind] for kind in kinds)):
+            raise TransactionError("原过期事务包含不适用的事件组成")
+        verify_unstarted_final(scope.connection, action, saved)
+        if kinds[-1] == (_PLAN_STATUS_EVENT, 2):
+            rows = saved[-1]["body"]["rows"]
+            if (len(rows) != 1 or rows[0]["table"] != "plans"
+                    or rows[0]["id"] != action["plan_id"]
+                    or rows[0]["after"]["values"] != {"status": _PLAN_COMPLETE}):
+                raise TransactionError("原过期事务的计划完成事实不符")
         reason_code = saved_row["after"]["values"].get("expiration_reason")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,

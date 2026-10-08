@@ -660,29 +660,29 @@
 
 #### 验收 32
 - 原文：[验收 32](database/consistency-verification.md#调用结果与中断恢复)（camctl 退出后遗留执行进程的终止与放行）。
-- 结论：部分覆盖
-- 归属：I1/I2 接入模块收场（integration 计划）与 B7（bootstrap 计划）。
-- 生产入口：apps/camctl/src/camctl/operations/process.py
-- 测试：apps/camctl/tests/integration/operations/test_process.py
-- 证据：camctl 侧受管进程边界与按组收场已覆盖（operations 计划分段验证记录；WSL 真实进程组事实见集成计划 I5 第六条链）。
-- 未核验前提：接入模块在旧执行进程停止前不启动新 run 的完整验证，归 I1/I2 的 C 模块实施与 B7。
+- 结论：已覆盖
+- 归属：I1/I2 与 O6（integration、operations 计划）。
+- 生产入口：apps/host-demo/src/process.c、apps/host-demo/src/process_group.c
+- 测试：tests/integration/test_camctl_process_recovery.py、apps/host-demo/tests/integration/test_process.c
+- 证据：I1/I2 的 2026-10-08 Linux 验证记录：零个、一个和多个遗留成员，正常与异常退出，信号已发出但尚未停止、已经停止但核验未完时均不放行；并行 submit 与主程序保持运行。
+- 未核验前提：无
 
 #### 验收 33
 - 原文：[验收 33](database/consistency-verification.md#调用结果与中断恢复)（退出信息取得失败与回收顺序）。
-- 结论：部分覆盖
+- 结论：已覆盖
 - 归属：I1/I2（integration 计划）。
-- 生产入口：apps/camctl/src/camctl/operations/process.py
-- 测试：apps/camctl/tests/integration/operations/test_process.py
-- 证据：进程检查失败分支已由系统接口替身覆盖（operations 计划分段验证记录）。
-- 未核验前提：真实信号与第三方主程序回收协作，归 I1/I2 与 B7。
+- 生产入口：apps/host-demo/src/process.c、apps/host-demo/src/process_group.c
+- 测试：apps/host-demo/tests/unit/test_process_unit.c、apps/host-demo/tests/unit/test_process_group.c、apps/host-demo/tests/integration/test_process.c、tests/integration/test_camctl_process_recovery.py
+- 证据：I1/I2 的 2026-10-08 Linux 验证记录：保留退出记录、成员检查与组信号失败、主线程僵尸而工作线程仍活、扫描中成员消失、最终回收失败与提前回收分别覆盖；具体 PID 回收与其他子进程互不干扰。
+- 未核验前提：无
 
 #### 验收 34
 - 原文：[验收 34](database/consistency-verification.md#调用结果与中断恢复)（收场期间 needs_run 与预算保持）。
 - 结论：已覆盖
-- 归属：S 会话交接（session 计划）。
-- 生产入口：apps/camctl/src/camctl/session/service.py
-- 测试：apps/camctl/tests/integration/session/test_handoff.py
-- 证据：session 计划分段验证记录（接纳关闭与交接群）。
+- 归属：I2/O6 主机收场与 S/O 会话、尝试恢复（integration、operations、session 计划）。
+- 生产入口：apps/host-demo/src/host.c、apps/host-demo/src/scheduler.c、apps/camctl/src/camctl/session/service.py、apps/camctl/src/camctl/operations/recovery.py
+- 测试：tests/integration/test_camctl_process_recovery.py、apps/camctl/tests/integration/session/test_handoff.py、apps/camctl/tests/integration/operations/test_recovery.py
+- 证据：I1/I2 的 2026-10-08 Linux 记录验证收场期间保留 pending、异常重启合并、预算耗尽后新提交只触发一次正常启动且不重置计数；业务身份与预算恢复继续由 session、operations 计划分段记录证明。
 - 未核验前提：无
 
 #### 验收 35
@@ -777,39 +777,39 @@
 
 #### 验收 R-09
 - 原文：[验收 R-09](database/consistency-verification.md#调用结果与中断恢复)（服务端脱离原组的收场范围）。
-- 结论：部分覆盖
-- 归属：I1/I2 与 B7（integration、bootstrap 计划）。
-- 生产入口：apps/camctl/src/camctl/operations/process.py
-- 测试：apps/camctl/tests/integration/operations/test_process.py
-- 证据：受管工具保持调用方进程组与按组收场的软件事实已在 WSL 真实进程验证（集成计划 I5 第六条链）。
-- 未核验前提：共享 ADB 服务端脱离原组的专属场景与真实服务端，归 I1/I2 与 B7。
+- 结论：已覆盖
+- 归属：I2/O6（integration、operations 计划）。
+- 生产入口：apps/host-demo/src/process.c、apps/host-demo/src/process_group.c、apps/camctl/src/camctl/operations/process.py
+- 测试：tests/integration/test_camctl_process_recovery.py
+- 证据：I1/I2 的 2026-10-08 Linux 验证记录：模拟服务端未脱离、已脱离及脱离与终止并发的三种真实进程组合；原组客户端停止后放行，独立服务端继续运行，并行 submit 不被终止，测试自身回收服务端。
+- 未核验前提：无
 
 #### 验收 R-10
 - 原文：[验收 R-10](database/consistency-verification.md#调用结果与中断恢复)（独立组建组与组归属保持）。
-- 结论：部分覆盖
-- 归属：I1/I2 与 B7（integration、bootstrap 计划）。
-- 生产入口：apps/camctl/src/camctl/operations/process.py
-- 测试：tests/integration/test_camctl_media_roundtrip.py
-- 证据：受管媒体工具独立组建组与组归属保持已由 WSL 真实进程验证（`/proc/self/stat` 进程组事实，集成计划 I5 第六条链）；建组失败替身分支已覆盖。
-- 未核验前提：C 主程序独立组建组、原组收场与延后回收的完整验证，归 I1/I2 与 B7。
+- 结论：已覆盖
+- 归属：I1（integration 计划）。
+- 生产入口：apps/host-demo/src/process.c、apps/camctl/src/camctl/operations/process.py
+- 测试：apps/host-demo/tests/unit/test_spawn.c、apps/host-demo/tests/integration/test_process.c、tests/integration/test_camctl_process_recovery.py
+- 证据：I1/I2 的 2026-10-08 Linux 验证记录：exec 前独立组，主程序、run 和 submit 的组相互独立，普通后代及生产入口启动的工具继承调用组；组建立失败不执行，程序不存在与已执行后退出 127 分别判定。
+- 未核验前提：无
 
 #### 验收 R-11
 - 原文：[验收 R-11](database/consistency-verification.md#调用结果与中断恢复)（SIGCHLD 处置方式与各自回收）。
-- 结论：部分覆盖
-- 归属：I1/I2 与 B7（integration、bootstrap 计划）。
-- 生产入口：apps/camctl/src/camctl/operations/process.py
-- 测试：apps/camctl/tests/integration/operations/test_process.py
-- 证据：系统接口替身分支已覆盖（capture 计划 C9 档案）。
-- 未核验前提：真实信号与第三方主程序回收协作，归 I1/I2 软件集成与 B7。
+- 结论：已覆盖
+- 归属：I1/I2（integration 计划）。
+- 生产入口：apps/host-demo/src/process.c、apps/host-demo/src/host.c
+- 测试：apps/host-demo/tests/unit/test_spawn.c、apps/host-demo/tests/integration/test_init_failure.c、apps/host-demo/tests/integration/test_process.c、apps/host-demo/tests/integration/test_host.py、tests/integration/test_camctl_process_recovery.py
+- 证据：I1/I2 的 2026-10-08 Linux 验证记录：SIG_DFL 与合法处理器，初始化拒绝显式忽略和 SA_NOCLDWAIT，运行期间设置变化阻止下一启动，提前回收后保留责任且不再发送旧组信号；模块不修改全局处置，各方具体 PID 回收互不干扰。
+- 未核验前提：无
 
 #### 验收 R-12
 - 原文：[验收 R-12](database/consistency-verification.md#调用结果与中断恢复)（成员检查不可读等分支与启动入口审计）。
 - 结论：部分覆盖
-- 归属：O 进程与 F6 审计（operations、host-files 计划）。
-- 生产入口：apps/camctl/src/camctl/operations/process.py
-- 测试：apps/camctl/tests/integration/host_files/test_file_contract.py
-- 证据：成员检查分支替身已覆盖；`ffmpeg`/`ffprobe` 启动入口审计已由 host-files 计划 F6 收口（AST 导入审计）。
-- 未核验前提：第三方主程序实际回收逻辑与目标工具行为，另列联调核验（capture 计划 C9 档案开放项）。
+- 归属：I1/I2/O6 与 F6 审计（integration、operations、host-files 计划）。
+- 生产入口：apps/host-demo/src/process.c、apps/host-demo/src/process_group.c、apps/camctl/src/camctl/operations/process.py
+- 测试：apps/host-demo/tests/unit/test_process_group.c、apps/host-demo/tests/unit/test_process_unit.c、tests/integration/test_camctl_process_recovery.py、apps/camctl/tests/integration/contracts/test_external_boundaries.py
+- 证据：I1/I2 的 2026-10-08 Linux 记录覆盖读取权限、格式与线程数量异常、归属未知、终止失败和扫描期间消失；生产工具创建点继续由真实源码 AST 边界检查证明，C 启动、退出、扫描、信号和回收入口已审计。
+- 未核验前提：第三方主程序实际回收逻辑、目标工具及包装程序的归属和查询、终止权限，由目标主机联调核验。
 
 #### 验收 R-13
 - 原文：[验收 R-13](database/consistency-verification.md#调用结果与中断恢复)（明确返回的记录）。
@@ -1589,14 +1589,16 @@
 
 #### 场景 camctl 退出后仍有工具进程
 - 规则：[接入模块的本地进程收场责任](../host-demo/design.md#接入模块的本地进程收场责任)、[I2 保留退出记录、分批检查原组与最终回收](../superpowers/plans/2026-09-30-camctl-integration.md#i2-保留退出记录分批检查原组与最终回收)
-- 结论：部分覆盖
-- 生产入口：apps/camctl/src/camctl/session/host_guard.py
-- 测试：tests/integration/test_camctl_process_recovery.py、apps/host-demo/tests/integration/test_process.c
-- 证据：下一调用等待原组收场、多个遗留进程全部等待、状态未知非空、退出未观察继续等待、Linux 组收场阻塞与子进程继承原组用真实进程验证通过（集成计划 I 系列验证记录）。
-- 未核验前提：C 接入模块独立组建组、保留退出记录的有限批次检查与最终回收完整组合（成员退出、权限错误、信息不完整与解析失败分别处理），归集成计划 I1/I2 与 B7 发行物验证。
+- 结论：已覆盖
+- 生产入口：apps/host-demo/src/process.c、apps/host-demo/src/process_group.c、apps/host-demo/src/host.c
+- 测试：tests/integration/test_camctl_process_recovery.py、apps/host-demo/tests/integration/test_process.c、apps/host-demo/tests/unit/test_process_group.c、apps/host-demo/tests/unit/test_process_unit.c
+- 证据：I1/I2 的 2026-10-08 Linux 验证记录：真实 C 模块与生产 CLI、工具启动组合验证保留退出记录、分批核验、组终止、线程实际停止、最终回收及下一调用；扫描未知和提前回收均保留管理责任。8 项 O6 全部通过。
+- 未核验前提：无
 
 ## 执行记录
 
+- 2026-10-08（Linux x86_64，CPython 3.11.16）：I1/I2 与真实 O6 组合验证通过，验收 32、33、R-09、R-10、R-11 及遗留工具契约场景升级为已覆盖；34 增补 C 收场期间 pending 与预算的证据，R-12 分别登记 C 软件证据和部署联调前提。具体命令、环境和范围见[接入模块验证记录](../host-demo/verification.md)及[跨组件计划](../superpowers/plans/2026-09-30-camctl-integration.md#i1i2-验证记录2026-10-08linux-x86_64)。
+
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：新增[九、跨模块契约场景](#九跨模块契约场景)十项映射并扩展 `tests/integration/test_camctl_acceptance_map.py` 检查器（场景清单解析自 verification.md 表格、字段与引用逐项校验、条目解析不再跨章节读取）；验收 68、P-03、P-04、P-06 依据 history 计划 H7 规模测量记录升级为已覆盖。`tests/integration/test_camctl_acceptance_map.py` 3 项全部通过。
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 全部通过；引用的模块测试文件与生产入口路径逐一核验存在。此前的最近全量回归见[集成计划验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i4-验证记录2026-10-07)（Windows 单元 3353、根跨组件 52+4 跳+342 子测试、bootstrap 87、session 82；WSL 单元 3352+1 跳、reporting 345 等）。
-- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 135 条，部分覆盖 28 条，开放 0 条；契约场景已覆盖 7 项，部分覆盖 3 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行（B4 两项开放功能已交付：目录切换允许分支与运行库 `configuration_error` 分类，F-06/V-03 升级为已覆盖，F-07/F-08 剩余前提为目标 Linux 符号链接对象、主程序恢复领取联调与带真实报告历史的切换保留验证），不作为行为通过的依据。
+- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 140 条，部分覆盖 23 条，开放 0 条；契约场景已覆盖 8 项，部分覆盖 2 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行（B4 两项开放功能已交付：目录切换允许分支与运行库 `configuration_error` 分类，F-06/V-03 升级为已覆盖，F-07/F-08 剩余前提为目标 Linux 符号链接对象、主程序恢复领取联调与带真实报告历史的切换保留验证），不作为行为通过的依据。

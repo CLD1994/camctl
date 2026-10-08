@@ -809,8 +809,10 @@ class FinishAttemptCommand:
             )
 
         outcome = finish.outcome.outcome
+        # 流程终态与在途尝试分别结算：迟到结果不能重开间隔或改写终态。
+        run_active = run_facts["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))
         event_count = 1 + (
-            1 if finish.retry_wait or finish.run_finish is not None else 0
+            1 if run_active and (finish.retry_wait or finish.run_finish is not None) else 0
         )
         allocation = scope.allocate(event_count)
         result_event = _envelope(
@@ -842,7 +844,7 @@ class FinishAttemptCommand:
         )
         events = [result_event]
         run_status_after = RunStatus[_run_status_name(run_facts["status"])]
-        if finish.retry_wait:
+        if run_active and finish.retry_wait:
             events.append(
                 _envelope(
                     allocation.last_event_id,
@@ -860,7 +862,7 @@ class FinishAttemptCommand:
                     finish.occurred_at,
                 )
             )
-        elif finish.run_finish is not None:
+        elif run_active and finish.run_finish is not None:
             final = finish.run_finish.status
             events.append(
                 _envelope(
@@ -930,8 +932,7 @@ class FinishAttemptCommand:
             raise TransactionError("重送的结果或事实时刻与原事务不同")
         waiting = len(saved) == 2 and (saved[1]["type"], saved[1]["reason"]) == (_RETRY_WAIT_EVENT, 1)
         ending = len(saved) == 2 and (saved[1]["type"], saved[1]["reason"]) == (_OPERATION_CONFIGURED_EVENT, 3)
-        if (len(saved) == 2 and not waiting and not ending
-                or finish.retry_wait != waiting or (finish.run_finish is not None) != ending):
+        if len(saved) == 2 and not waiting and not ending:
             raise TransactionError("重送的流程处置与原结果事务不同")
         run_columns = frozenset({"status", "retry_wait_required", "error_json"})
         if len(saved) == 2:
@@ -957,7 +958,14 @@ class FinishAttemptCommand:
             for name, value in run_rows[0]["after"]["values"].items():
                 if not json_equal(original[name], value):
                     raise ConsistencyError("原边界的流程事实与处置事件不符")
-        if finish.run_finish is not None:
+        # 单结果事务的原边界已经终态时，调用者请求的流程处置未生效。
+        # 从历史边界判定，不能用重送时已经变化的当前流程状态代替。
+        terminal_result_only = len(saved) == 1 and original["status"] not in (
+            int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))
+        if not terminal_result_only and (
+                finish.retry_wait != waiting or (finish.run_finish is not None) != ending):
+            raise TransactionError("重送的流程处置与原结果事务不同")
+        if ending and finish.run_finish is not None:
             if (original["status"] != int(_RUN_STATUS[finish.run_finish.status.name])
                     or not json_equal(original["error_json"], _error_json(finish.run_finish.error))):
                 raise TransactionError("重送的流程结束状态或错误与原事务不同")

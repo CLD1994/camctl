@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from camctl.cancellation.models import (
@@ -47,6 +47,10 @@ from camctl.contracts.workflow_errors import (
 )
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.capture_facts import (
+    include_start_facts, load_start_facts, start_finish_event,
+    unstarted_events, verify_unstarted_final,
+)
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.transaction import (
     CommandPlan,
@@ -430,8 +434,8 @@ class _FailCancelTargetsCommand:
 class _ApplyCancelTargetCommand:
     """保存一个目标的取消生效（CANCEL_CHANGED.APPLY）。
 
-    可靠未启动的目标同事务终态取消并保存成功结果；已启动且支持停
-    止的只保存取消标记，停止收场另行推进；终态目标不改写，有已发
+    PENDING 目标同事务终态取消并保存成功结果；RUNNING 目标保存取消
+    标记并结束普通启动责任，本地或设备收场另行推进；终态目标不改写，有已发
     布交付时先保存撤回明细并保持成员处理中，收场完成后按既有终态
     保存成功；目标取消已生效时只保存本项效果，复用原责任。
     """
@@ -449,7 +453,7 @@ class _ApplyCancelTargetCommand:
         command = self._command
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(connection, saved)
         item, target = self._load(connection)
         if item["status"] in (_ITEM_SUCCEEDED, _ITEM_FAILED):
             return self._already()
@@ -462,20 +466,31 @@ class _ApplyCancelTargetCommand:
         action_rows: tuple = ()
         outcome_event = None
         plan_row = None
+        start_events = []
         withdrawal_rows = self._withdrawal_rows(connection, item, target)
         if mode is CancelApplyMode.PRE_START:
-            if target["status"] != 1 or target["cancel_requested"]:
-                raise ConsistencyError("未启动取消要求目标待执行且未取消")
-            action_rows = (_update(
-                "actions", target_id,
-                {"cancel_requested": 0, "status": 1},
-                {"cancel_requested": 1, "status": _ACTION_CANCELED}),)
-            outcome_event = _ITEM_SUCCEEDED, CancelOutcomeChoice.CANCELED.value
+            if target["status"] not in (1, 2) or target["cancel_requested"]:
+                raise ConsistencyError("未启动取消要求目标仍有效且未取消")
+            if target["type"] in (1, 2, 3):
+                start = load_start_facts(connection, target)
+                if not start.not_started:
+                    raise ConsistencyError("未启动取消缺少可靠未启动依据")
+                include_start_facts(start, self._state, self._owners)
+                start_events = unstarted_events(
+                    start, command.occurred_at,
+                    run_status=int(enum_for("operation_runs.status").CANCELED), release=False)
+            elif target["status"] != 1:
+                raise ConsistencyError("非拍摄目标的未启动取消要求待执行状态")
+            before, after = {"cancel_requested": 0}, {"cancel_requested": 1}
+            if target["status"] == 1:
+                before["status"], after["status"] = 1, _ACTION_CANCELED
+                outcome_event = _ITEM_SUCCEEDED, CancelOutcomeChoice.CANCELED.value
+                plan_row = self._pre_start_plan_row(connection, target)
+            action_rows = (_update("actions", target_id, before, after),)
             effect_after = CancellationEffect.APPLIED.value
             # 直接终态取消可能使目标计划全部动作终态：同一事务补计划
             # 完成事实，否则执行前取消的计划无人推进（计划执行状态
             # 规格：全部动作在执行前取消的计划也进入完成）。
-            plan_row = self._pre_start_plan_row(connection, target)
         elif mode is CancelApplyMode.WITH_STOP:
             if target["status"] != 2 or target["cancel_requested"]:
                 raise ConsistencyError("停止收场取消要求目标执行中且未取消")
@@ -501,6 +516,14 @@ class _ApplyCancelTargetCommand:
             effect_after = CancellationEffect.APPLIED.value
         else:
             raise ConsistencyError(f"取消生效方式不可解释: {mode!r}")
+        if (mode in (CancelApplyMode.WITH_STOP, CancelApplyMode.ALREADY)
+                and target["type"] in (1, 2, 3) and target["status"] == 2):
+            start = load_start_facts(connection, target)
+            include_start_facts(start, self._state, self._owners)
+            finish = start_finish_event(
+                start.run, int(enum_for("operation_runs.status").CANCELED), command.occurred_at)
+            if finish is not None:
+                start_events.append(finish)
         current_effect = item["cancellation_effect"]
         apply_before = {"status": _ITEM_PENDING}
         apply_after = {"status": _ITEM_RUNNING}
@@ -516,13 +539,17 @@ class _ApplyCancelTargetCommand:
         self._claim(item, target_id)
         # 生效、结果与可能计划完成事件按实际组合分配，避免留空洞。
         allocation = scope.allocate(
-            1 + int(outcome_event is not None) + int(plan_row is not None))
+            1 + len(start_events) + int(outcome_event is not None) + int(plan_row is not None))
         events = [_envelope(
             allocation.first_event_id, allocation.txn_id,
             _CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON,
             (apply_row,) + action_rows + withdrawal_rows,
             command.occurred_at)]
         next_event_id = allocation.first_event_id + 1
+        for event in start_events:
+            events.append(replace(event, event_id=next_event_id,
+                                  transaction_id=allocation.txn_id))
+            next_event_id += 1
         if outcome_event is not None:
             final_status, outcome_value = outcome_event
             result_row = _update(
@@ -637,21 +664,44 @@ class _ApplyCancelTargetCommand:
             result=CancelTargetsSaved(CancelTargetsDisposition.ALREADY,
                                       (self._command.item_id,)))
 
-    def _reuse(self, saved) -> CommandPlan:
+    def _reuse(self, connection, saved) -> CommandPlan:
         kinds = [(event["type"], event["reason"]) for event in saved]
-        if kinds not in (
-                [(_CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON)],
-                [(_CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON),
-                 (_CANCEL_CHANGED_EVENT, _CANCEL_RESULT_REASON)],
-                [(_CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON),
-                 (_CANCEL_CHANGED_EVENT, _CANCEL_RESULT_REASON),
-                 (_PLAN_STATUS_EVENT, 2)]):
+        order = {(25, 1): 0, (13, 2): 1, (10, 3): 2, (25, 2): 3, (9, 2): 4}
+        if (not kinds or kinds[0] != (25, 1)
+                or any(kind not in order for kind in kinds)
+                or len(set(kinds)) != len(kinds)
+                or [order[kind] for kind in kinds] != sorted(order[kind] for kind in kinds)):
             raise TransactionError("原事务不是取消生效，不能作为重送核实")
-        if saved[0]["occurred_at"] != self._command.occurred_at:
+        if any(event["occurred_at"] != self._command.occurred_at for event in saved):
             raise TransactionError("取消生效的事实时刻与原事务不同")
         rows = saved[0]["body"]["rows"]
         if not rows or rows[0]["table"] != "cancel_items"                 or rows[0]["id"] != self._command.item_id:
             raise TransactionError("原取消生效属于其他成员")
+        if self._command.mode is CancelApplyMode.PRE_START:
+            item = row_facts(connection, "cancel_items", self._command.item_id)
+            target = row_facts(connection, "actions", item["target_action_id"])
+            if target["type"] in (1, 2, 3):
+                verify_unstarted_final(connection, target, saved, released=False)
+        elif self._command.mode in (CancelApplyMode.WITH_STOP, CancelApplyMode.ALREADY):
+            item = row_facts(connection, "cancel_items", self._command.item_id)
+            target = row_facts(connection, "actions", item["target_action_id"])
+            if target["type"] in (1, 2, 3):
+                start = load_start_facts(connection, target)
+                if start.run is not None and start.run["status"] in (1, 2):
+                    raise ConsistencyError("取消生效后普通启动责任仍未结束")
+                for event in saved:
+                    if (event["type"], event["reason"]) != (10, 3):
+                        continue
+                    finish_rows = event["body"]["rows"]
+                    if len(finish_rows) != 1 or start.run is None:
+                        raise ConsistencyError("取消生效的启动收场事实缺失")
+                    row = finish_rows[0]
+                    values = row["after"]["values"]
+                    if (row["table"] != "operation_runs" or row["id"] != start.run["id"]
+                            or values.get("status") != int(enum_for("operation_runs.status").CANCELED)
+                            or set(values) - {"status", "retry_wait_required", "error_json"}
+                            or any(start.run[column] != value for column, value in values.items())):
+                        raise ConsistencyError("取消生效的启动收场与原责任不符")
         return self._already()
 
 

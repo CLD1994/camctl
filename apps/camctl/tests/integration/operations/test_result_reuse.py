@@ -70,6 +70,48 @@ def _unchanged_reuse(repository, owned, finish, key):
     return value
 
 
+@pytest.mark.parametrize("original", [RunOutcome.CANCELED, RunOutcome.SUCCEEDED,
+                                      RunOutcome.FAILED, RunOutcome.UNCONFIRMED])
+@pytest.mark.parametrize("late", ["success", "unknown", "retry", "no_effect"])
+def test_late_attempt_preserves_terminal_run_and_reuses_result(environment, original, late):
+    from camctl.operations.attempts import StaleRunFinish
+
+    owned, repository = environment
+    ticket = repository.begin_attempt(_delete_intent(), new_operation_key(), owned).value.ticket
+    error = ErrorValue("budget_exhausted", "operation") if original in (
+        RunOutcome.FAILED, RunOutcome.UNCONFIRMED) else None
+    closed = repository.finish_stale_runs(
+        StaleRunFinish((ticket.responsibility_key,), original, _NOW, error),
+        new_operation_key(), owned)
+    assert closed.kind is DbOutcomeKind.COMPLETED, closed.error
+    before = owned.connection.execute("SELECT * FROM operation_runs WHERE id = ?", (ticket.run_id,)).fetchone()
+    if late == "success":
+        finish = _finish(ticket, AttemptStatus.SUCCEEDED, run_finish=RunFinish(RunOutcome.SUCCEEDED))
+    elif late == "unknown":
+        finish = _finish(ticket, AttemptStatus.UNKNOWN,
+                         run_finish=RunFinish(RunOutcome.UNCONFIRMED, ErrorValue("budget_exhausted", "operation")))
+    elif late == "no_effect":
+        from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
+        outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("canceled", "dispatch"),
+                              effect=EffectState.NO_EFFECT,
+                              settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                                                    EvidenceValue("dispatch_prevented", 1, {})),
+                              observations=())
+        contracts = EvidenceRegistry((EvidenceContract(
+            type="dispatch_prevented", version=1, operation="delete", fields=frozenset()),))
+        finish = AttemptFinish(ticket, validate_outcome(ticket, outcome, contracts), _NOW,
+                               run_finish=RunFinish(RunOutcome.FAILED, ErrorValue("budget_exhausted", "operation")))
+    else:
+        finish = _finish(ticket, retry_wait=True)
+    key = new_operation_key()
+    first = _saved(repository, owned, finish, key)
+    assert first.run_status is RunStatus[original.name]
+    assert owned.connection.execute("SELECT * FROM operation_runs WHERE id = ?", (ticket.run_id,)).fetchone() == before
+    again = _unchanged_reuse(repository, owned, finish, key)
+    assert again.kind is DbOutcomeKind.COMPLETED, again.error
+    assert again.value == first
+
+
 @pytest.mark.parametrize("status,decisions,run_status", [
     (AttemptStatus.SUCCEEDED, {}, RunStatus.ACTIVE),
     (AttemptStatus.FAILED, {}, RunStatus.ACTIVE),

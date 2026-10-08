@@ -15,8 +15,11 @@ from typing import Any, Callable
 from camctl.cancellation.service import OriginSettle
 from camctl.cancellation.ports import SettlementOutcome
 from camctl.cancellation.service import settle_origin_cancel
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.capture_facts import load_start_facts
+from camctl.persistence.transaction import row_facts
 
 __all__ = ["TargetSettlement"]
 
@@ -34,6 +37,8 @@ _DELIVERY_ITEM_PENDING, _DELIVERY_ITEM_WITHDRAWN = 1, 2
 _DELIVERY_ITEM_NOT_RETRACTABLE, _DELIVERY_ITEM_FAILED = 3, 4
 #: deliveries.withdrawal_state：NOT_REQUESTED。
 _WITHDRAWAL_NOT_REQUESTED = 1
+_RUN = enum_for("operation_runs.status")
+_KIND = enum_for("operation_runs.kind")
 
 
 class TargetSettlement:
@@ -56,8 +61,7 @@ class TargetSettlement:
             raise ValueError(f"取消目标动作不存在: {target_action_id}")
         kind, status = row
         if kind in _CAPTURE_TYPES:
-            # 停止由执行链按原预算收场；终态即本次等待结束。
-            return SettlementOutcome(complete=status in _ACTION_TERMINAL)
+            return self._settle_capture(target_action_id, status)
         if kind == _OBTAIN_TYPE:
             return await self._settle_obtain(target_action_id)
         if kind == _CLEANUP_TYPE:
@@ -69,6 +73,35 @@ class TargetSettlement:
             # 不属于目标范围，本次有限处理到此完成。
             return SettlementOutcome(complete=True)
         raise ValueError(f"取消目标类型不可解释: {target_action_id} {kind!r}")
+
+    def _settle_capture(self, target_action_id: int, status: int) -> SettlementOutcome:
+        """目标终态结束等待；本次必要停止的原结果决定取消是否成功。"""
+        if status not in _ACTION_TERMINAL:
+            return SettlementOutcome(complete=False)
+        connection = self._owned.connection
+        action = row_facts(connection, "actions", target_action_id)
+        if not action["cancel_requested"]:
+            return SettlementOutcome(complete=True)
+        facts = load_start_facts(connection, action)
+        with closing(connection.execute(
+            "SELECT kind, action_id, activity_id, status FROM operation_runs"
+            " WHERE responsibility_key = ?", (f"stop/{target_action_id}",),
+        )) as cursor:
+            stop = cursor.fetchone()
+        if stop is not None:
+            if (facts.activity is None or stop[:3] !=
+                    (int(_KIND.STOP), target_action_id, facts.activity["id"])):
+                raise ConsistencyError("取消收场的停止责任与原活动不符")
+            if stop[3] in (int(_RUN.PENDING), int(_RUN.ACTIVE)):
+                return SettlementOutcome(complete=False)
+            if stop[3] in (int(_RUN.FAILED), int(_RUN.UNCONFIRMED)):
+                # 后续新观察不覆盖本次有限处理已经保存的失败或未知结论。
+                return SettlementOutcome(complete=True, failed=True)
+            if stop[3] == int(_RUN.SUCCEEDED):
+                return SettlementOutcome(complete=True)
+        if facts.not_started or (facts.activity is not None and facts.activity["activity_state"] == 3):
+            return SettlementOutcome(complete=True)
+        raise ConsistencyError("取消拍摄终态缺少可靠无需停止或停止结束依据")
 
     async def _settle_obtain(self, target_action_id: int) -> SettlementOutcome:
         """取回目标：推进 ready 交付撤回，位置未知先请求并等待。"""

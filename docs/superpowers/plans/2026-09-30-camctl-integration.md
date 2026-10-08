@@ -66,15 +66,25 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 ### I1 独立进程组、明确启动结果与主程序约定
 
+#### I1/I2 执行范围与阶段门禁
+
+I1/I2 使用现有公开接口和调度器。输入是部署参数、具体子进程身份、退出观察及原组的进程和线程状态；输出是保留调用、继续收场或允许最终回收。只有最终回收与输出处理均完成时，才把调用结果交给调度器。待启动要求、首次计划路径和共享重试次数继续遵守正式规格。
+
+实施顺序是：先用系统接口替身验证启动前提与组建立失败，再实现 I1；随后用替身验证保留退出记录、扫描和终止的状态分区，再实现 I2；最后用真实 C 模块、Python CLI 和本地工具完成 O6。每个阶段先运行能够证伪契约的测试，再实现并运行对应单元及集成门禁。公开接口、CLI 协议和业务数据库不需要改变。
+
+扫描实现建议使用 libc 的目录与文件接口读取 Linux `/proc`，按进程和线程条目分批处理，不保存完整成员列表。标准接口已经提供独立组启动、保留退出记录和组信号能力；原组的收场判定由模块实现。每批必须有条目上限，未完成的一轮继续占用调用位置。发现存活成员并发送终止请求后，重新开始完整核验；成员消失等变化不能使半轮观察成为完成证据。读取拒绝、格式错误和身份不符携带具体诊断并保留位置；退出记录丢失时停止组信号和放行。
+
+阶段验收覆盖所有启动入口、正常和异常退出、最终输出先于退出、组信号失败、扫描未完与未知、僵尸主线程仍有工作线程、其他线程提前回收、并行提交、共享服务端及主程序自己的子进程。真实进程测试通过同步点控制退出和收场顺序，确认信号发出后仍不能提前启动下一次 `run`。最终审计从启动、输出、退出观察、扫描、信号、最终回收到调度放行的完整路径。
+
 **预计文件：** `apps/host-demo/src/process.c`、`apps/host-demo/src/process.h`、`apps/host-demo/src/host.c`、`apps/host-demo/include/camctl_host.h`、`apps/host-demo/tests/unit/test_process_unit.c`、`apps/host-demo/tests/integration/test_process.c`、`apps/host-demo/tests/integration/fake_cli.c`，以及 `docs/host-demo/design.md`、`apps/host-demo/README.md`。
 
 **接口建议：** `launch_call(command, input, options) -> launch_result` 保存具体 PID、原 PGID、启动证据和输出句柄；`check_child_reaping_contract() -> integration_status` 只检查可检查的信号设置。名称和结构按现有 C 接口调整，公开接口变更须同步调用方。
 
-- [ ] 在纯分类函数或系统接口替身上建立 `test_group_failure_never_executes_camctl`：组建立失败时执行入口调用次数为 0。分别验证 SIG_IGN、SA_NOCLDWAIT、普通 SIG_DFL、明确未启动及已执行后退出 127；不能通过自行修改全局信号设置修复前提。
-- [ ] 执行既有 CMake 配置与构建，再运行 `ctest --test-dir .local/host-demo-build -L unit --output-on-failure`；确认新增断言确实因目标能力缺失而失败。
-- [ ] 在 exec 前建立独立组，使用已有标准系统接口的错误证据；设置失败拒绝启动。run 和 submit 分别持有管理记录，只等待自己的具体 PID，关闭不应被工具继承的锁及无关描述符。
-- [ ] 用真实进程运行 `ctest --test-dir .local/host-demo-build -L integration --output-on-failure`，确认普通后代继承原组、同时 run/submit 组互不干扰、主程序其他子进程正常回收及输出规则成立。
-- [ ] 审阅所有启动和错误清理入口，记录“其他线程不提前回收”的主程序责任及验证证据；建议提交“feat: 完成 CLI 独立组启动与接入检查”。
+- [x] 在纯分类函数或系统接口替身上建立 `test_group_failure_never_executes_camctl`：组建立失败时执行入口调用次数为 0。分别验证 SIG_IGN、SA_NOCLDWAIT、普通 SIG_DFL、明确未启动及已执行后退出 127；不能通过自行修改全局信号设置修复前提。
+- [x] 执行既有 CMake 配置与构建，再运行 `ctest --test-dir .local/host-demo-build -L unit --output-on-failure`；确认新增断言确实因目标能力缺失而失败。
+- [x] 在 exec 前建立独立组，使用已有标准系统接口的错误证据；设置失败拒绝启动。run 和 submit 分别持有管理记录，只等待自己的具体 PID，关闭不应被工具继承的锁及无关描述符。
+- [x] 用真实进程运行 `ctest --test-dir .local/host-demo-build -L integration --output-on-failure`，确认普通后代继承原组、同时 run/submit 组互不干扰、主程序其他子进程正常回收及输出规则成立。
+- [x] 审阅所有启动和错误清理入口，记录“其他线程不提前回收”的主程序责任及验证证据；建议提交“feat: 完成 CLI 独立组启动与接入检查”。
 
 ### I2 保留退出记录、分批检查原组与最终回收
 
@@ -82,11 +92,19 @@ I4 只要求其无设备范围的能力；S6/B6 随后新增处理器时持续�
 
 **接口建议：** `observe_exit(pid) -> exit_observation`、`scan_group_batch(identity, cursor, limit) -> group_scan_result`、`advance_reaping(call, observation) -> call_transition`。扫描返回 LIVE、COMPLETE、UNKNOWN 或本轮尚未完成，UNKNOWN 携带具体步骤；进程 stat 解析按格式处理包含空格及括号的 comm，不按空格简单切分。
 
-- [ ] 建立 `test_kill_does_not_release_run_slot`，kill 返回成功但存活线程尚未退出时，调度器不得启动新 run。按上表逐个验证扫描未完、ENOENT、EACCES、不完整资料、解析错误、僵尸主线程仍有活线程、身份丢失及提前回收。
-- [ ] 执行 `ctest --test-dir .local/host-demo-build -L unit --output-on-failure` 并确认失败。涉及实际 /proc、线程和子进程的用例只放在集成测试，系统接口替身由真实接口约束。
-- [ ] 用 WNOWAIT 保留退出记录和身份保护，在可靠原身份下向原组发送 SIGKILL；有限批次检查进程及 task，全部执行工作停止后才最终回收具体 PID。停止请求后重新开始完整核验轮；成员变化或本轮未完不能沿用半轮结果宣称收场。调度器只在管理责任完成后应用既有重试和待启动规则，收场不重置预算。
-- [ ] 执行 `ctest --test-dir .local/host-demo-build -L integration --output-on-failure` 及 O6 真实组合；用同步点控制父退出、成员扫描和线程退出顺序，验证成功退出仍有后代、异常退出后下一调用、并行 submit 及共享服务端独立生命周期。不得运行全局 adb kill-server。
-- [ ] 审阅所有 wait、信号、扫描和放行入口，确认 C 不读业务库、不把本地停止写成设备成功；建议提交“feat: 完成原组收场与延后回收”。
+- [x] 建立 `test_kill_does_not_release_run_slot`，kill 返回成功但存活线程尚未退出时，调度器不得启动新 run。按上表逐个验证扫描未完、ENOENT、EACCES、不完整资料、解析错误、僵尸主线程仍有活线程、身份丢失及提前回收。
+- [x] 执行 `ctest --test-dir .local/host-demo-build -L unit --output-on-failure` 并确认失败。涉及实际 /proc、线程和子进程的用例只放在集成测试，系统接口替身由真实接口约束。
+- [x] 用 WNOWAIT 保留退出记录和身份保护，在可靠原身份下向原组发送 SIGKILL；有限批次检查进程及 task，全部执行工作停止后才最终回收具体 PID。停止请求后重新开始完整核验轮；成员变化或本轮未完不能沿用半轮结果宣称收场。调度器只在管理责任完成后应用既有重试和待启动规则，收场不重置预算。
+- [x] 执行 `ctest --test-dir .local/host-demo-build -L integration --output-on-failure` 及 O6 真实组合；用同步点控制父退出、成员扫描和线程退出顺序，验证成功退出仍有后代、异常退出后下一调用、并行 submit 及共享服务端独立生命周期。不得运行全局 adb kill-server。
+- [x] 审阅所有 wait、信号、扫描和放行入口，确认 C 不读业务库、不把本地停止写成设备成功；建议提交“feat: 完成原组收场与延后回收”。
+
+#### I1/I2 验证记录（2026-10-08，Linux x86_64）
+
+Ubuntu 24.04、GCC 13.3.0、glibc 2.39，测试解释器为 CPython 3.11.16（SQLite 3.53.1）。新增启动、退出保留和扫描测试先验证了相应反例，再通过分类门禁。CMake 3.28.3 Release 构建及 CMake 3.10.2 Release 构建均通过；两套构建的 `ctest -L unit --output-on-failure` 为 8/8，`ctest -L integration --output-on-failure` 为 8/8。使用 AddressSanitizer 与 UndefinedBehaviorSanitizer 的构建和分类测试见[组件验证记录](../../host-demo/verification.md)。
+
+`uv run --project apps/camctl --python 3.11 --frozen --group test pytest tests/integration/test_camctl_process_recovery.py -q` 为 8 项通过。真实 C 驱动进入生产 CLI，受管工具经 `operations.process.spawn_subprocess` 启动；覆盖正常与异常退出、终止请求后仍占位、全部停止但核验未完、未知扫描恢复、退出记录被提前取走、待启动要求及共享预算、并行 submit、服务端未脱离/已脱离/脱离与终止并发。测试的信号及扫描同步点只位于 C 系统接口边界，不承担放行判定。
+
+现有真实业务链复验：`test_camctl_report_roundtrip.py` 6 项通过，`test_camctl_c_module_roundtrip.py` 3 项通过，使用当前工作区构建的 C 模块，涵盖客户端导出、递交、执行、领取、导入及 ACK。扫描、保留记录、组信号、管道结束和调度交接已逐个入口审计；公开接口及业务协议保持原契约，C 不读写状态库、不产生设备效果事实。软件结论映射到验收 32—34、R-09—R-12；验收 35/36 与 R-08 的其他责任仍由各自已有任务和未核验前提跟踪。目标 ARM64、第三方实际回收逻辑和实际工具归属另行联调。
 
 ### I3 客户端请求身份、时间、能力及报告消费
 

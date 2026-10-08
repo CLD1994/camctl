@@ -30,7 +30,9 @@ typedef struct camctl_host_config {
         5000, 64,   256 * 1024, 256 * 1024, 8 * 1024, 10 * 1024 * 1024,                            \
         3}
 
-/* 初始化一次，成功后持续运行。0 仅表示本地安排成功，失败 -1 并设置 errno。 */
+/* 初始化一次，成功后持续运行。0 仅表示本地安排成功，失败 -1 并设置 errno。
+ * 主程序保留模块子进程的退出记录，不显式忽略 SIGCHLD、不设置 SA_NOCLDWAIT，
+ * 不抢先回收模块子进程；模块检查可检查的信号设置，不修改全局处置。 */
 int camctl_host_init(const camctl_host_config *config, const char *initial_plan_path);
 /* 复制路径；调用方保留完整写入并关闭的文件。0 不代表计划已受理。 */
 int camctl_host_submit(const char *plan_path);

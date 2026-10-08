@@ -20,7 +20,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.ports import ControlRequest
 from camctl.operations.attempts import (
     AttemptIntent,
@@ -31,7 +31,10 @@ from camctl.operations.attempts import (
     RunOutcome,
     StaleRunFinish,
 )
+from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.scheduling import ExpireActionRequest
+from camctl.scheduling.rules import WindowPhase, window_phase
 from camctl.persistence.repositories.operations import (
     _ATTEMPT_STATUS, _EFFECT_STATE,
 )
@@ -200,15 +203,31 @@ def _observed_activity(response: Any) -> int | None:
 
 
 async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
-    """拍摄动作开始前的残留门：True 放行开始，False 保持待执行。
+    """首次控制前检查当前条件：True 继续争取启动，False 不派发。
 
     无残留候选或已有可靠空闲判定与成功收场时放行；确认已知残留则
     建立收场流程并发送第一次停止；其他有效活动占用、查询不可用或
-    收场未完成时保持待执行，由启动窗口与取消规则收尾。
+    收场未完成时等待。尚未派发的 PENDING 或 RUNNING 动作均遵守
+    当前窗口与取消规则，窗口耗尽时按已有过期事务保存终态。
     """
 
     from camctl.capture.handlers import _conclude_activity
 
+    if trigger["status"] not in (1, 2) or trigger["cancel_requested"]:
+        return False
+    now = runtime.wall_us()
+    phase = window_phase(runtime.window_of(trigger), now)
+    if phase is WindowPhase.AFTER_WINDOW:
+        outcome = runtime.scheduling.expire_action(
+            ExpireActionRequest(
+                action_id=trigger["id"], trusted_wall_now=now, occurred_at=now),
+            new_operation_key(), runtime.owned)
+        if outcome.kind is not DbOutcomeKind.COMPLETED:
+            raise RuntimeError(
+                f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
+        return False
+    if phase is WindowPhase.BEFORE_START:
+        return False
     candidates = residual_candidates(
         runtime.owned.connection, trigger["device_id"])
     if not candidates:
@@ -220,7 +239,7 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
     candidate = candidates[0]
     flow = _unfinished_winddown(runtime.owned.connection, candidate.activity_id)
     if flow is not None:
-        await _advance_winddown(runtime, trigger["id"], candidate, flow)
+        await _advance_winddown(runtime, candidate, flow)
         return False
     if _succeeded_winddown(runtime.owned.connection, candidate.activity_id):
         # 成功流程已存在而活动未收口：补齐收场后放行（中断恢复）。
@@ -295,12 +314,22 @@ def _begin_query_attempt(
         raise RuntimeError(
             f"查询意图事务未完成（{outcome.kind.value}）: {outcome.error}")
     if outcome.value.disposition is not BeginDisposition.GRANTED:
+        if outcome.value.reason == "budget_exhausted":
+            finished = runtime.operations.finish_stale_runs(
+                StaleRunFinish(
+                    responsibility_keys=(responsibility,),
+                    status=RunOutcome.UNCONFIRMED,
+                    error=ErrorValue(code="result_unconfirmed", stage="device"),
+                    occurred_at=runtime.wall_us()),
+                new_operation_key(), runtime.owned)
+            if finished.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(f"查询预算耗尽的结果未保存: {finished.error}")
         return None
     return outcome.value.ticket
 
 
 async def _advance_winddown(
-    runtime: Any, trigger_id: int, candidate: ResidualCandidate,
+    runtime: Any, candidate: ResidualCandidate,
     flow: tuple[int, int, int],
 ) -> None:
     """把未收口的收场流程推进一个可执行步骤。
@@ -310,7 +339,30 @@ async def _advance_winddown(
     明的安全重复停止能力继续停止。
     """
 
+    run_id, trigger_id, _ = flow
+    with closing(runtime.owned.connection.execute(
+        "SELECT action_id, activity_id, status, attempts_used"
+        " FROM operation_runs WHERE id = ? AND kind = 8", (run_id,),
+    )) as cursor:
+        current = cursor.fetchone()
+    if current is None or current[:2] != (trigger_id, candidate.activity_id):
+        raise ConsistencyError("残留收场流程与原触发动作或目标活动不符")
+    if current[2] not in (1, 2):
+        return
     responsibility = _winddown_key(trigger_id, candidate.activity_id)
+    trigger = runtime.action(trigger_id)
+    expired = window_phase(runtime.window_of(trigger), runtime.wall_us()) is WindowPhase.AFTER_WINDOW
+    if current[3] == 0 and (trigger["cancel_requested"]
+                           or trigger["status"] in _TRIGGER_TERMINAL or expired):
+        result = runtime.operations.finish_stale_runs(
+            StaleRunFinish(
+                responsibility_keys=(responsibility,),
+                status=(RunOutcome.EXPIRED if not trigger["cancel_requested"]
+                        and (trigger["status"] == 5 or expired) else RunOutcome.CANCELED),
+                occurred_at=runtime.wall_us()), new_operation_key(), runtime.owned)
+        if result.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(f"未派发残留收场的结束事实未保存: {result.error}")
+        return
     attempt = _last_attempt(runtime.owned.connection, responsibility)
     if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.RUNNING):
         return
@@ -343,6 +395,14 @@ async def _stop_residual(
     )
 
     responsibility = _winddown_key(trigger_id, candidate.activity_id)
+    existing = _run_row(runtime.owned.connection, responsibility)
+    if existing is None or existing[2] == 0:
+        # 首次停止前重新核对当前触发资格；查询等待期间可能已经取消或超窗。
+        trigger = runtime.action(trigger_id)
+        if (trigger["cancel_requested"] or trigger["status"] in _TRIGGER_TERMINAL
+                or window_phase(runtime.window_of(trigger), runtime.wall_us())
+                is not WindowPhase.IN_WINDOW):
+            return
     intent = AttemptIntent(
         operation="stop",
         action_id=trigger_id,
@@ -358,7 +418,8 @@ async def _stop_residual(
         raise RuntimeError(
             f"残留收场意图事务未完成（{begin.kind.value}）: {begin.error}")
     if begin.value.disposition is not BeginDisposition.GRANTED:
-        _finish_winddown_exhausted(runtime, responsibility, candidate)
+        if begin.value.reason == "budget_exhausted":
+            _finish_winddown_exhausted(runtime, responsibility, candidate)
         return
     ticket = begin.value.ticket
     owner = runtime.action(candidate.action_id)
@@ -470,7 +531,7 @@ def residual_flow(capture_factory: Any) -> Any:
     触发动作取消或启动窗口耗尽后，已建立的收场流程不再由执行前检
     查门驱动：未发出停止的流程保存结束原因，已发出的按已保存意图
     继续使用剩余次数收场（camera-recovery.md#触发动作结束时的收
-    场）。触发动作终态后，其执行前检查与确认查询责任一并结束。
+    场）。执行前检查随触发资格结束；确认查询随原残留停止责任结束。
     """
 
     async def flow(context: Any) -> None:
@@ -501,29 +562,15 @@ def residual_flow(capture_factory: Any) -> Any:
                 )) as cursor:
                     facts = cursor.fetchone()
                 if facts is None:
-                    continue
-                trigger_status = int(facts[0])
+                    raise ConsistencyError(f"残留收场关联事实缺失: {run_id}")
                 candidate = ResidualCandidate(
                     activity_id=activity_id, action_id=int(facts[1]),
                     stop_supported=int(facts[2]), safe_repeat_stop=int(facts[3]))
                 runtime = capture_factory(owned, facts[4])
                 if runtime is None:
                     continue
-                if trigger_status in _TRIGGER_TERMINAL and used == 0:
-                    # 未发出停止：保存结束原因，不再开始收场。
-                    receipt = runtime.operations.finish_stale_runs(
-                        StaleRunFinish(
-                            responsibility_keys=(
-                                _winddown_key(trigger_id, activity_id),),
-                            status=(RunOutcome.CANCELED
-                                    if trigger_status == 6
-                                    else RunOutcome.EXPIRED),
-                            occurred_at=context.clock.utc_micros()),
-                        new_operation_key(), runtime.owned)
-                    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-                    continue
                 await _advance_winddown(
-                    runtime, trigger_id, candidate, (run_id, trigger_id, used))
+                    runtime, candidate, (run_id, trigger_id, used))
         finally:
             owned.connection.close()
 
@@ -531,21 +578,36 @@ def residual_flow(capture_factory: Any) -> Any:
 
 
 def _settle_orphan_queries(context: Any, owned: Any, operations: Any) -> None:
-    """触发动作终态后收场其未终态的执行前检查与确认查询流程。"""
+    """按查询用途和原停止责任结算，不以触发者终态覆盖必要核实。"""
 
     with closing(owned.connection.execute(
-        "SELECT r.responsibility_key, a.status FROM operation_runs r"
+        "SELECT r.responsibility_key, r.query_purpose, a.status, a.cancel_requested,"
+        " stop.id, stop.status, stop.attempts_used FROM operation_runs r"
         " JOIN actions a ON a.id = r.action_id"
+        " LEFT JOIN operation_runs stop ON stop.kind = 8"
+        " AND stop.action_id = r.action_id AND stop.activity_id = r.activity_id"
         " WHERE r.kind = 6 AND r.status IN (1, 2)"
-        " AND r.query_purpose IN (1, 5) AND a.status IN (3, 4, 5, 6)",
+        " AND r.query_purpose IN (1, 5)",
     )) as cursor:
         rows = cursor.fetchall()
-    for responsibility, status in rows:
+    for responsibility, purpose, status, canceled, stop_id, stop_status, used in rows:
+        if purpose == 1:
+            if not canceled and status not in _TRIGGER_TERMINAL:
+                continue
+            final = RunOutcome.CANCELED
+        else:
+            if stop_id is None:
+                raise ConsistencyError(f"残留确认查询缺少原停止责任: {responsibility}")
+            if stop_status in (1, 2):
+                if used > 0 or (not canceled and status not in _TRIGGER_TERMINAL):
+                    continue
+                final = RunOutcome.CANCELED
+            else:
+                final = RunOutcome.SUCCEEDED if stop_status == 3 else RunOutcome.CANCELED
         outcome = operations.finish_stale_runs(
             StaleRunFinish(
                 responsibility_keys=(responsibility,),
-                status=(RunOutcome.CANCELED if int(status) == 6
-                        else RunOutcome.EXPIRED),
+                status=final,
                 occurred_at=context.clock.utc_micros()),
             new_operation_key(), owned)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error

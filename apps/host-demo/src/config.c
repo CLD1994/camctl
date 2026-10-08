@@ -25,7 +25,8 @@ int host_config_validate(const camctl_host_config *c, const char *p) {
         c->log_record_capacity > 64 * 1024 ||
         c->log_record_capacity + sizeof(host_log_record) + 1 > c->log_queue_capacity ||
         c->log_file_size < c->log_record_capacity || c->log_file_size > 1024u * 1024u * 1024u ||
-        !c->log_file_count || c->log_file_count > 64 || c->retry_delay_ms > 86400000)
+        !c->log_file_count || c->log_file_count > HOST_LOG_FILE_COUNT_MAX ||
+        c->retry_delay_ms > 86400000)
         return EINVAL;
     return 0;
 }
