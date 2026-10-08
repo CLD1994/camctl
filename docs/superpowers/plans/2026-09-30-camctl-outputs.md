@@ -118,6 +118,8 @@ X1 随首次录像完成；X2—X7 实现首条取回链。X8/X9 在明确来源
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/outputs/test_sources.py -q`，真实 SQLite 固定来源、重启及部分失败，覆盖所有六种来源形式和合法空选择。
 - [x] 审阅实际接口、状态分区及失败路径，检查 同计划/跨计划/组/全计划/预览/精确 ID 入口；记录门禁证据，建议以“feat: 实现固定来源与产物选择”形成独立提交。
 
+2026-10-08 补充（跨组件组合暴露的终态化缝隙）：`_ResolveSourcesCommand` 的解析失败分支只登记动作失败终态，缺少取回完成登记的“兄弟齐终态同事务完成计划”检查——单动作计划在来源解析失败后计划永远停留在执行中且无推进入口。已在同一事务内补齐兄弟检查与 `PLAN_STATUS` 事件（组件用例 `test_resolve_sources_failure_completes_last_action_plan` 先红转绿），跨组件表达见[集成计划 I5 组合复验记录](2026-09-30-camctl-integration.md#i5-组合复验记录2026-10-08跨计划引用与多请求组合)。
+
 ### X3 读取和删除资格的共同事务
 
 **预计文件：** `apps/camctl/src/camctl/outputs/qualification.py`、`apps/camctl/src/camctl/persistence/repositories/outputs.py`；测试为 `apps/camctl/tests/integration/outputs/test_qualification.py`。

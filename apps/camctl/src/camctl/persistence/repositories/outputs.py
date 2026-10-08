@@ -674,6 +674,7 @@ class _ResolveSourcesCommand:
             "actions": {},
             "action_dependencies": {},
             "obtain_source_selections": {},
+            "plans": {},
         }
 
     def plan(self, scope) -> CommandPlan:
@@ -737,19 +738,39 @@ class _ResolveSourcesCommand:
             self._owners[("actions", command.action_id)] = (
                 "action", command.action_id,
             )
-            allocation = scope.allocate(1)
-            event = _envelope(
-                allocation.first_event_id,
-                allocation.txn_id,
-                _SOURCE_RESOLVED_EVENT,
-                _FAIL_REASON,
-                (
-                    _update("actions", command.action_id, before, after),
-                ),
-                command.occurred_at,
+            templates = [(
+                _SOURCE_RESOLVED_EVENT, _FAIL_REASON,
+                (_update("actions", command.action_id, before, after),),
+            )]
+            # 解析失败也是动作终态：兄弟齐终态时计划同事务完成，与
+            # 取回完成登记的规则同一不变量，否则单动作计划的解析
+            # 失败会让计划停留在执行中而没有推进入口。
+            action_plan = row_facts(connection, "plans", action["plan_id"])
+            assert action_plan is not None
+            self._state["plans"] = {action_plan["id"]: action_plan}
+            siblings = self._load_siblings(connection, action)
+            if plan_complete(siblings, command.action_id) \
+                    and action_plan["status"] in (1, 2):
+                self._owners[("plans", action_plan["id"])] = (
+                    "plan", action_plan["id"],
+                )
+                templates.append((
+                    _PLAN_STATUS_EVENT, 2,
+                    (_update("plans", action_plan["id"],
+                             {"status": action_plan["status"]},
+                             {"status": _PLAN_COMPLETE}),),
+                ))
+            allocation = scope.allocate(len(templates))
+            events = tuple(
+                _envelope(
+                    allocation.first_event_id + index, allocation.txn_id,
+                    event_type, event_reason, rows, command.occurred_at,
+                )
+                for index, (event_type, event_reason, rows)
+                in enumerate(templates)
             )
             return CommandPlan(
-                events=(event,),
+                events=events,
                 owners=self._owners,
                 state_rows=self._state,
                 result=ResolveSourcesOutcome(
@@ -831,6 +852,18 @@ class _ResolveSourcesCommand:
                 source_plan_id=resolution.source_plan_id,
             ),
         )
+
+    def _load_siblings(self, connection, action) -> dict[int, dict[str, Any]]:
+        with closing(connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (action["plan_id"],),
+        )) as cursor:
+            siblings = {
+                row[0]: row_facts(connection, "actions", row[0])
+                for row in cursor
+            }
+        siblings = {key: value for key, value in siblings.items() if value}
+        self._state["actions"].update(siblings)
+        return siblings
 
     def _saved_outcome(self, connection) -> ResolveSourcesOutcome:
         members = tuple(

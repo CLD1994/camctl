@@ -368,6 +368,39 @@ def test_resolve_sources_failure_saves_terminal_action(tmp_path: Path) -> None:
         owned.connection.close()
 
 
+def test_resolve_sources_failure_completes_last_action_plan(
+    tmp_path: Path,
+) -> None:
+    """解析失败也是动作终态：同计划兄弟全部终态时计划同事务完成。
+
+    与取回完成登记的兄弟齐终态规则同一不变量；否则单动作计划的
+    解析失败会让计划永远停留在执行中，且后续会话没有推进入口。
+    """
+    _, owned = _six_form_environment(tmp_path)
+    connection = owned.connection
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        "UPDATE actions SET status = 3 WHERE id IN (11, 12, 13, 14)")
+    connection.commit()
+    repository = OutputsRepository()
+    try:
+        outcome = repository.resolve_sources(
+            ResolveSources(
+                action_id=30,
+                spec=SourceSpec(action_instance_id=99),
+                occurred_at=_NOW,
+            ),
+            new_operation_key(),
+            owned,
+        )
+        assert outcome.kind is DbOutcomeKind.COMPLETED
+        assert outcome.value.fixed is False
+        assert _value(
+            owned, "SELECT status FROM plans WHERE id = 1") == (3,)
+    finally:
+        owned.connection.close()
+
+
 def test_legal_empty_source_set_fixes_without_selections(tmp_path: Path) -> None:
     """计划范围没有拍摄成员：合法空集合固定，零条选择。"""
     target, owned = _six_form_environment(tmp_path)

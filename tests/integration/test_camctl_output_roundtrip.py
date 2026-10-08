@@ -605,3 +605,174 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
     assert statuses == {
         "拍照": "succeeded", "拍录": "succeeded", "延时": "succeeded",
         "取照片": "succeeded", "取延时": "succeeded"}
+
+
+#: 跨计划引用用例的设备侧内容；截断前长度覆盖 4096 声明。
+_CROSS_FIRST_CONTENT = ("cross-plan-first-" * 250)[:4096]
+_CROSS_SECOND_CONTENT = ("cross-plan-second-" * 250)[:4096]
+
+
+def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
+    """跨计划引用与多请求组合：三个请求的计划在同一部署先后执行，
+    第二个请求的取回按稳定动作实例 ID 引用第一个请求的拍摄产物并
+    交付；第三个请求引用不存在的实例在执行资格取得后按解析失败
+    收场，不产生交付，已确定的跨计划交付不受影响。"""
+    deployment = Deployment(tmp_path)
+    initialized = deployment.camctl(
+        "init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+
+    # 动作主键按提交顺序：首拍 1、次拍 2、取回 3、坏引用取回 4；
+    # 列举按主键回询，取回引用不需要设备侧条目。
+    spec = stub_driver_spec(
+        {"1": [photo_file("cross-first")],
+         "2": [photo_file("cross-second")]},
+        device_files={"cross-first": _CROSS_FIRST_CONTENT,
+                      "cross-second": _CROSS_SECOND_CONTENT})
+    deployment.install_client_capabilities(spec)
+    state_db = deployment.state_db
+
+    # 第一个请求：一次拍摄取得稳定动作实例与产物身份。
+    first_body = {
+        "request_id": "0",
+        "created_at": "2026-01-15 08:00:00",
+        "name": "cross-plan-first",
+        "actions": [
+            {
+                "name": "首拍",
+                "type": "camera_take_photo",
+                "device_id": "cam-1",
+                "scheduled_at": future_schedule(1),
+                "params": {"type": "single_shot"},
+                "policy": {"max_delay_ms": 5000},
+            },
+        ],
+    }
+    first_path, _ = deployment.export_plan_with_client(first_body)
+    first_submit = deployment.camctl(
+        "submit", str(first_path), "--config", str(deployment.config_path),
+        driver=spec)
+    assert first_submit.exit_code == 0, first_submit.stderr
+    first_run = deployment.camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    assert first_run.exit_code == 0, first_run.stderr
+    first_action = _query(
+        state_db, "SELECT id FROM actions WHERE name = '首拍'")[0][0]
+
+    # 第二个请求：自己再拍一张，取回按动作实例 ID 引用第一个请求
+    # 的产物（跨计划引用；实例引用在执行资格取得后一次固定）。
+    second_body = {
+        "request_id": "0",
+        "created_at": "2026-01-15 08:00:00",
+        "name": "cross-plan-second",
+        "actions": [
+            {
+                "name": "次拍",
+                "type": "camera_take_photo",
+                "device_id": "cam-1",
+                "scheduled_at": future_schedule(1),
+                "params": {"type": "single_shot"},
+                "policy": {"max_delay_ms": 5000},
+            },
+            {
+                "name": "取回首拍",
+                "type": "obtain_action_outputs",
+                "scheduled_at": future_schedule(1),
+                "params": {
+                    "source": {"action_instance_id": str(first_action)},
+                    "purpose": "manual",
+                },
+            },
+        ],
+    }
+    second_path, _ = deployment.export_plan_with_client(second_body)
+    second_submit = deployment.camctl(
+        "submit", str(second_path), "--config", str(deployment.config_path),
+        driver=spec)
+    assert second_submit.exit_code == 0, second_submit.stderr
+    second_run = deployment.camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    assert second_run.exit_code == 0, second_run.stderr
+
+    # 三个动作全部成功；取回解析固定到第一个请求的真实来源计划。
+    assert _query(
+        state_db, "SELECT status FROM actions ORDER BY id") == [(3,), (3,), (3,)]
+    assert _query(
+        state_db,
+        "SELECT source_resolution_state, resolved_source_plan_id"
+        " FROM actions WHERE name = '取回首拍'"
+    ) == [(2, _query(
+        state_db, "SELECT plan_id FROM actions WHERE id = ?", (first_action,))[0][0])]
+    # 交付恰一份且字节是首拍内容：跨计划引用精确指向来源动作，
+    # 同计划的次拍产物保持登记、不被误取。
+    assert _query(
+        state_db, "SELECT action_id FROM deliveries") == [(3,)]
+    assert _query(
+        state_db, "SELECT source_action_id FROM outputs ORDER BY id"
+    ) == [(1,), (2,)]
+    delivered = _delivered_files(deployment.ready)
+    assert [path.read_bytes() for path in delivered] == [
+        _CROSS_FIRST_CONTENT.encode("utf-8")]
+
+    # 第三个请求：引用不存在的动作实例。受理不解析实例引用（提交
+    # 成功），执行资格取得后按解析失败收场：动作失败携带公共原因，
+    # 不产生交付，此前确定的跨计划交付保持不变。
+    third_body = {
+        "request_id": "0",
+        "created_at": "2026-01-15 08:00:00",
+        "name": "cross-plan-broken",
+        "actions": [
+            {
+                "name": "坏引用取回",
+                "type": "obtain_action_outputs",
+                "scheduled_at": future_schedule(1),
+                "params": {
+                    "source": {"action_instance_id": "999999"},
+                    "purpose": "manual",
+                },
+            },
+        ],
+    }
+    third_path, _ = deployment.export_plan_with_client(third_body)
+    third_submit = deployment.camctl(
+        "submit", str(third_path), "--config", str(deployment.config_path),
+        driver=spec)
+    assert third_submit.exit_code == 0, third_submit.stderr
+    third_run = deployment.camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    assert third_run.exit_code == 0, third_run.stderr
+    rows = _query(
+        state_db,
+        "SELECT status, error_code, source_resolution_state,"
+        " resolved_source_plan_id FROM actions WHERE name = '坏引用取回'")
+    assert rows == [(4, 20, 3, None)], rows
+    assert json.loads(_query(
+        state_db,
+        "SELECT error_details_json FROM actions WHERE name = '坏引用取回'"
+    )[0][0])["reason"] == "action_not_found"
+    assert _query(
+        state_db, "SELECT status FROM plans ORDER BY id") == [(3,), (3,), (3,)]
+    assert _query(
+        state_db, "SELECT action_id FROM deliveries") == [(3,)]
+
+    # 报告表达三请求组合的最终事实；客户端导入并递交 ACK。
+    report = _ready_report(deployment)
+    statuses = {
+        action["name"]: action["status"]
+        for plan in report["plans"] for action in plan["actions"]}
+    assert statuses == {
+        "首拍": "succeeded", "次拍": "succeeded", "取回首拍": "succeeded",
+        "坏引用取回": "failed"}
+    report_id = report["report_id"]
+    saved = deployment.import_reports_with_client(deployment.ready)
+    assert saved["saved_report_ids"] == [report_id]
+    ack = deployment.write_plan(
+        {"request_id": "0", "last_report_id": report_id})
+    absorbed = deployment.camctl(
+        "run", str(ack), "--config", str(deployment.config_path),
+        driver=spec)
+    assert absorbed.exit_code == 0, absorbed.stderr
+    assert _query(
+        state_db,
+        "SELECT acknowledged_report_id, acknowledged_wm FROM runtime_state"
+    ) == [(int(report_id), report["to_wm"])]
