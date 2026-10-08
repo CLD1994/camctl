@@ -102,6 +102,17 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv311 \
 
 中断桥只在生产事务或管道调用完成后使 CLI 进程退出一次；host、CLI 编排、数据库和客户端均未替换。断点观察包括 marker、实际写入副本、具体 PID 回收日志、自动重启参数和回调计数。完整发送断点矩阵、管道不可用、过期及取消由 M6 的另一组真实 CLI 集成测试验证，21 项通过，见[统一验证记录](../camctl/verification.md#电机控制与单向通知验证2026-10-08)。实际电机、目标主机性能与物理断电仍由部署验收。
 
+## 用户目录部署验证（2026-10-09）
+
+Linux x86_64 开发容器，GCC 13.3.0、CMake 3.28.3、CPython 3.11.16、SQLite 3.53.1。范围为[用户目录与路径补齐](implementation.md#用户目录与路径补齐)、默认安装、随包 TOML、终端演示及真实 CLI 文件交接。
+
+- Debug 和 Release 重新构建后分别执行 `ctest --test-dir .local/host-demo-build --output-on-failure`、`ctest --test-dir .local/host-demo-release --output-on-failure`：各 34 项通过，包含 12 个单元入口、22 个集成入口。
+- `unit_home_paths` 的 10 个用例覆盖缺省补齐、中文及空格路径、末尾分隔符、根目录、显式覆盖、重复调用、缺失及非法 home、空输出指针、完整路径长度边界和后续字段超限时不部分写入。测试不访问环境或文件系统。
+- `integration_demo` 覆盖不传路径参数时从 HOME 启动默认 CLI 并领取文件、原显式参数方式及非法 home。`integration_delivery` 覆盖源码包、安装示例、C 调用方使用新接口、默认用户安装前缀和作为子目录引入时保持父项目安装前缀。另有 C++11 调用方编译、链接和实际调用通过。
+- 从仓库根执行 `UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest tests/integration/test_camctl_host_deployment.py -q`：4 项通过。临时 HOME 含中文及空格；真实 CLI 显式初始化，真实 host 使用默认入口启动 CLI，报告由默认目录发布、领取并逐字节比较；同时验证 TOML 和 host 共同覆盖交接目录，以及默认／显式缺失配置的 CLI 路径规则。
+
+验证使用临时用户目录，没有更改运行账户的真实部署数据，也没有操作真实设备。CLI 启动桥使用指定 Python 3.11 调用生产入口；目标 ARM64 的 Python／SQLite 安装兼容性仍按部署联调验收。
+
 ## 仍需真实环境验收
 
 | 未验证项目 | 所需环境与验收方式 |

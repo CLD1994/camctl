@@ -16,18 +16,18 @@ cmake "$HOST_SOURCE_DIR" -DCMAKE_BUILD_TYPE=Release
 cmake --build . -- -j2
 ```
 
-生成 `libcamctl_host.a` 和 `host-demo`。安装到指定前缀：
+生成 `libcamctl_host.a` 和 `host-demo`。默认安装前缀为运行构建命令账户的 `$HOME/.camctl/host`，也可显式指定。以下命令把头文件、静态库与演示安装到用户目录：
 
 ```sh
-cmake "$HOST_SOURCE_DIR" -DCMAKE_INSTALL_PREFIX=/opt/camctl-host
+cmake "$HOST_SOURCE_DIR" -DCMAKE_INSTALL_PREFIX="$HOME/.camctl/host" -DCMAKE_INSTALL_LIBDIR=lib
 cmake --build . --target install
 ```
 
 在自己的工程中链接：
 
 ```sh
-cc -std=c11 main.c -I/opt/camctl-host/include \
-  /opt/camctl-host/lib/libcamctl_host.a -pthread -o main
+cc -std=c11 main.c -I"$HOME/.camctl/host/include" \
+  "$HOME/.camctl/host/lib/libcamctl_host.a" -pthread -o main
 ```
 
 也可将组件作为 CMake 子目录加入工程，再用 `target_link_libraries(main PRIVATE camctl_host)`。自行管理构建时，编译 `src` 中除 `demo.c` 外的 C 文件及 `vendor/yyjson/yyjson.c`，加入 `include`、`src`、`vendor/yyjson` 头文件目录，定义 `_GNU_SOURCE` 并链接 pthread。依赖清单和摘要见 [vendor/manifest.cmake](vendor/manifest.cmake)。
@@ -43,19 +43,25 @@ cpack --config CPackConfig.cmake
 
 ## 准备同一份部署配置
 
-camctl 与主程序以同一个账户运行。部署人员先准备 `/srv/camctl`，并使该账户能够读写其中的配置、状态库、日志和交接目录。下面的 C 与终端示例都使用 `/srv/camctl/config.toml`，交接路径与[随包配置示例](examples/config.toml)一致。
-
-首次部署且配置文件尚不存在时，以运行账户准备目录、复制配置并显式初始化 camctl：
+camctl 与主程序以同一个账户运行，默认部署目录为该账户的 `$HOME/.camctl`。在最终安装位置用部署要求的 Python 3.11 建立虚拟环境，并安装独立交付的 camctl wheel：
 
 ```sh
-mkdir -p /srv/camctl/staging /srv/camctl/ready /srv/camctl/processing
-cp /opt/camctl-host/share/doc/camctl_host/examples/config.toml /srv/camctl/config.toml
-/opt/camctl/bin/camctl init --config /srv/camctl/config.toml
+python3.11 -m venv "$HOME/.camctl/venv"
+"$HOME/.camctl/venv/bin/python" -m pip install /absolute/path/to/camctl-0.1.0-py3-none-any.whl
 ```
 
-这里使用前文的安装前缀。通过源码接入时，从组件的 `examples/config.toml` 复制同一份示例。它明确指定全部数据路径，可用于无设备的报告检查；实际设备绑定由部署配置提供。已有部署保留配置、状态库和历史，目录变更须先完成原目录中的文件交接及待处理责任，再执行 camctl 的目录切换流程。
+最后一个参数替换为实际 wheel 文件路径。安装后入口为 `$HOME/.camctl/venv/bin/camctl`，可直接执行，无需激活虚拟环境；实际 Python 所链接的 SQLite 必须满足 camctl 的运行库要求。
 
-部署人员负责保证 C 参数中的 `ready_path`、`processing_path` 与 camctl 生效配置中的实际路径相同。提供 `config_path` 时，各次 run/submit 使用该文件；省略时，camctl 读取运行账户的 `$HOME/.camctl/config.toml`。所选文件不存在时使用内置值，数据目录默认位于 `$HOME/.camctl`；仅提供一个配置文件名不代表覆盖已经生效。使用默认来源时，也须按该来源提供相同的实际交接路径并完成部署初始化。
+首次部署且配置文件尚不存在时，以运行账户复制示例并显式初始化：
+
+```sh
+cp -n "$HOME/.camctl/host/share/doc/camctl_host/examples/config.toml" "$HOME/.camctl/config.toml"
+"$HOME/.camctl/venv/bin/camctl" init
+```
+
+通过源码接入时，从组件的 [examples/config.toml](examples/config.toml) 复制同一份示例。示例省略 `[paths]`，状态库、日志及 `staging`、`ready`、`processing` 使用 CLI 内置的 home 默认值。`init` 负责创建状态库及交接目录；日常 host 启动不代替部署初始化。设备绑定由实际部署补充。已有部署保留配置、状态库和历史，目录变更继续遵守 camctl 的目录切换流程。
+
+`config_path = NULL` 时，CLI 读取运行账户的 `$HOME/.camctl/config.toml`；指定路径时只读取指定配置，文件不存在时采用内置默认值。指定配置文件不会自动改变其他路径。若 TOML 覆盖交接目录，主程序须同时覆盖 `ready_path`、`processing_path`，保证双方操作相同的目录。
 
 ## 三个调用时机
 
@@ -63,22 +69,24 @@ cp /opt/camctl-host/share/doc/camctl_host/examples/config.toml /srv/camctl/confi
 
 ```c
 #include "camctl_host.h"
+#include <stdlib.h>
 
 void motor(int position); /* 主程序提供定义。 */
 
-/* 主程序启动时执行一次。各路径由第三方部署人员准备。 */
+/* 主程序启动时执行一次；先完成上述部署初始化。 */
 camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
-config.camctl_path = "/opt/camctl/bin/camctl";
-config.ready_path = "/srv/camctl/ready";
-config.processing_path = "/srv/camctl/processing";
-config.log_path = "/srv/camctl/host.log";
-config.config_path = "/srv/camctl/config.toml";
+camctl_host_paths paths;
+if (camctl_host_config_set_home_paths(&config, &paths, getenv("HOME")) != 0) {
+    /* 报告 errno 并结束本次初始化。 */
+    return -1;
+}
+/* 如需显式覆盖路径或数值，在这里设置 config 对应成员。 */
 /* 接收电机通知时，在初始化前注册主程序自己的 void motor(int position)。 */
 int registered = camctl_host_register_motor_control_callback(motor);
 int initialized = registered == 0 ? camctl_host_init(&config, NULL) : -1;
 
-/* 收到计划并完整写入、关闭文件后执行。 */
-int accepted = camctl_host_submit("/srv/incoming/plan.json");
+/* 收到计划并完整写入、关闭文件后，传入该文件的绝对路径 plan_path。 */
+int accepted = camctl_host_submit(plan_path);
 
 /* 主程序选定处理待传文件的时机，同步领取，然后处理 processing。 */
 camctl_host_claim();
@@ -86,7 +94,7 @@ camctl_host_claim();
 
 初始化和递交返回 `0` 只说明本地已安排启动或接收路径；返回 `-1` 时通过 `errno` 了解拒绝原因。主程序须在初始化成功后调用另两个入口。计划是否受理、动作是否成功，以 camctl 生成的状态报告为准。
 
-模块复制初始化配置和路径字符串；接口返回后可以复用这些字符串缓冲区。计划文件应已完整写入并关闭，并由主程序短期保留。模块不复制文件正文，后续文件读取结果由 camctl 处理。
+路径补齐函数只填入为 `NULL` 的四个必填路径，保留已有配置和 `config_path`；传入的 home 必须是绝对路径。它不分配堆内存、不创建文件或目录，错误时保留配置与缓冲区，返回 `-1` 并设置 `EINVAL` 或 `ENAMETOOLONG`。`paths` 由调用方持有，生成的指针引用该缓冲区，必须保持有效且不移动，直至 `camctl_host_init` 返回。初始化复制配置和路径字符串，返回后可以复用缓冲区。计划文件应已完整写入并关闭，并由主程序短期保留。模块不复制文件正文，后续文件读取结果由 camctl 处理。
 
 初始化的第二个参数可提供首次计划的绝对路径。初始化成功后，模块持续运行；后续调用递交接口时，无论当前是否已有执行会话，模块都会自行选择正确命令。模块最多同时运行一个 `run` 和一个 `submit`，后续提交及其启动失败重试保持接收顺序。
 
@@ -114,7 +122,7 @@ CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI
 
 ## 配置范围与日志
 
-所有路径必须是绝对路径，长度最多为 `CAMCTL_HOST_PATH_MAX` 字节，不含末尾 NUL。`config_path` 和首次计划可以为 `NULL`；其他路径必填。默认值统一由公开头文件的 `CAMCTL_HOST_CONFIG_INIT` 提供。
+所有路径必须是绝对路径，长度最多为 `CAMCTL_HOST_PATH_MAX` 字节，不含末尾 NUL。`config_path` 和首次计划可以为 `NULL`；其他路径必填。数值默认值由公开头文件的具名宏及 `CAMCTL_HOST_CONFIG_INIT` 提供，缺省路径由 `camctl_host_config_set_home_paths` 在运行时构造；不展开 C 字符串中的 `$HOME` 或 `~`。
 
 | 成员 | 可配置范围 |
 | --- | --- |
@@ -142,23 +150,21 @@ CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI
 camctl 和部署目录准备好后：
 
 ```sh
-./host-demo --camctl /opt/camctl/bin/camctl \
-  --ready /srv/camctl/ready --processing /srv/camctl/processing \
-  --log /srv/camctl/host.log --config /srv/camctl/config.toml
+"$HOME/.camctl/host/bin/host-demo"
 ```
 
-可选参数：`--config`、`--initial-plan`、`--retry-limit`、`--retry-delay-ms`。启动参数中的空格路径按 shell 规则加引号。
+演示程序从 `HOME` 取得主目录；未设置时读取当前用户记录中的主目录。路径无法补齐时明确报错。`--camctl`、`--ready`、`--processing`、`--log`、`--config`、`--initial-plan`、`--retry-limit`、`--retry-delay-ms` 均可选；显式值覆盖对应默认项。指定全部必填路径时不依赖 home。启动参数中的空格路径按 shell 规则加引号。
 
 运行期间输入：
 
 ```text
-submit /srv/incoming/计划 有空格.json
+submit <计划文件的绝对路径>
 claim
 logs
 help
 ```
 
-`submit` 后面的整段内容是路径，终端命令中不加引号；每条命令以换行结束。`claim` 返回后，由主程序处理 `processing`。`logs` 显示当前日志末尾最多 64 KiB。终端输入结束后模块继续运行，本地演示可通过外部信号终止。
+将 `<计划文件的绝对路径>` 替换为实际路径。`submit` 后面的整段内容是路径，终端命令中不加引号，也不展开 `$HOME` 或 `~`；每条命令以换行结束。`claim` 返回后，由主程序处理 `processing`。`logs` 显示当前日志末尾最多 64 KiB。终端输入结束后模块继续运行，本地演示可通过外部信号终止。
 
 ## 分类测试
 

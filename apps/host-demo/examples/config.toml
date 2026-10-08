@@ -1,8 +1,4 @@
-# C 与终端接入示例使用的部署路径；其余设置采用 camctl 内置默认值。
-# camctl 与主程序使用同一账户；设备绑定按实际部署补充。
-[paths]
-state_db = "/srv/camctl/state.db"
-log_file = "/srv/camctl/camctl.log"
-staging = "/srv/camctl/staging"
-ready = "/srv/camctl/ready"
-processing = "/srv/camctl/processing"
+# camctl 与主程序使用同一运行账户。
+# 省略 [paths]，使用 CLI 内置的 $HOME/.camctl 数据路径。
+# 设备绑定及其他覆盖值按实际部署补充；空配置不会凭空绑定设备。
+# 如需覆盖交接目录，主程序必须同时覆盖 ready_path 与 processing_path。

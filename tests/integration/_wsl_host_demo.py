@@ -164,7 +164,7 @@ class HostDemo:
         self.proc: subprocess.Popen | None = None
         self._host_pid: int | None = None
 
-    def start(self, *, env: dict[str, str] | None = None) -> None:
+    def start(self, *, env: dict[str, str] | None = None, use_default_paths: bool = False) -> None:
         command = [
             self._demo_path,
             "--camctl", self._launcher,
@@ -173,6 +173,8 @@ class HostDemo:
             "--log", to_wsl(self.log_path)]
         if self.deployment.config_path is not None:
             command.extend(["--config", to_wsl(self.deployment.config_path)])
+        if use_default_paths:
+            command = [self._demo_path]
         if not _NATIVE_POSIX:
             body = 'printf "%s\\n" "$$"; exec ' + shlex.join(command)
             command = ["wsl.exe", "-e", "sh", "-c", body]

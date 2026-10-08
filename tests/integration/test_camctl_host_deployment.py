@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -37,54 +36,42 @@ def test_default_configuration_is_shared_by_init_and_run(tmp_path: Path, explici
 
 
 @pytest.mark.skipif(os.name != "posix", reason="独立交付示例在部署侧 Linux 环境验证")
+@pytest.mark.parametrize("custom_paths", [False, True])
 def test_shipped_deployment_guide_publishes_and_claims_same_report(
-    tmp_path: Path, host_demo: str,
+    tmp_path: Path, host_demo: str, custom_paths: bool,
 ):
-    materials = tmp_path / "materials"
-    materials.mkdir()
-    shutil.copyfile(_COMPONENT / "README.md", materials / "README.md")
-    if (_COMPONENT / "examples").exists():
-        shutil.copytree(_COMPONENT / "examples", materials / "examples")
-    example = dict(re.findall(
-        r'config\.(\w+)_path\s*=\s*(NULL|"[^"]*");',
-        (materials / "README.md").read_text(),
-    ))
-    original_root = Path(example["ready"].strip('"')).parent
-    runtime = tmp_path / "deployment"
-    runtime.mkdir()
-
-    def relocated(key: str) -> Path:
-        return runtime / Path(example[key].strip('"')).relative_to(original_root)
-
-    ready, processing = relocated("ready"), relocated("processing")
-    ready.mkdir()
-    processing.mkdir()
-    config = None
-    if example["config"] != "NULL":
-        config = relocated("config")
-        config.write_text((materials / "examples/config.toml").read_text().replace(
-            original_root.as_posix(), runtime.as_posix()))
-    home = tmp_path / "home"
-    home.mkdir()
+    home = tmp_path / "运行账户 home"
+    runtime = home / ".camctl"
+    runtime.mkdir(parents=True)
+    config = runtime / "config.toml"
+    shutil.copyfile(_COMPONENT / "examples/config.toml", config)
+    assert "paths" not in tomllib.loads(config.read_text())
+    ready, processing = runtime / "ready", runtime / "processing"
+    if custom_paths:
+        # 覆盖 TOML 时，host 必须显式使用同一组交接路径。
+        ready, processing = runtime / "custom-ready", runtime / "custom-processing"
+        with config.open("a") as stream:
+            stream.write("\n[paths]\nready = " + json.dumps(str(ready)) +
+                         "\nprocessing = " + json.dumps(str(processing)) + "\n")
     environment = {**os.environ, "HOME": str(home)}
-    options = ["--config", str(config)] if config else []
-    cli_ready = (Path(tomllib.loads(config.read_text())["paths"]["ready"])
-                 if config else home / ".camctl/ready")
     initialized = subprocess.run(
-        [sys.executable, "-c", _ENTRY, "init", *options],
+        [sys.executable, "-c", _ENTRY, "init"],
         cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30,
     )
     assert initialized.returncode == 0, initialized.stderr
-    launcher = tmp_path / "camctl"
+    assert (runtime / "state.db").is_file()
+    assert ready.is_dir() and processing.is_dir()
+    launcher = runtime / "venv/bin/camctl"
+    launcher.parent.mkdir(parents=True)
     launcher.write_text(
         f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(_ENTRY)} \"$@\"\n"
     )
     launcher.chmod(0o755)
     deployment = SimpleNamespace(
-        root=runtime, ready=ready, processing=processing, config_path=config,
+        root=runtime, ready=ready, processing=processing, config_path=None,
     )
     demo = HostDemo(deployment, host_demo, launcher=str(launcher))
-    demo.log_path = relocated("log")
+    demo.log_path = runtime / "host.log"
     now = datetime.now(timezone.utc)
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({
@@ -95,7 +82,7 @@ def test_shipped_deployment_guide_publishes_and_claims_same_report(
             "params": {"scope": "full"}}]}, ensure_ascii=False))
 
     def completed_report():
-        for path in cli_ready.glob("status-report-*.json"):
+        for path in ready.glob("status-report-*.json"):
             try:
                 content = path.read_bytes()
             except FileNotFoundError:
@@ -108,7 +95,7 @@ def test_shipped_deployment_guide_publishes_and_claims_same_report(
         return None
 
     try:
-        demo.start(env=environment)
+        demo.start(env=environment, use_default_paths=not custom_paths)
         demo.submit(plan)
         published, content = wait_for(completed_report, 30, "接入示例的报告动作未完成")
         demo.claim()

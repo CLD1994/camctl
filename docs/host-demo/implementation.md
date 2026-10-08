@@ -76,6 +76,24 @@ camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
 
 初始化成功后，模块随主程序持续运行，直到主机断电。第三方按初始化、收到计划、准备传输三个时机顺序调用这些入口。
 
+### 用户目录与路径补齐
+
+默认部署使用运行账户的 `$HOME/.camctl`。CLI 安装到其 `venv` 虚拟环境，入口为 `venv/bin/camctl`；host 安装前缀为 `host`，日志为 `host.log`。CLI 的配置、状态库、日志及交接目录沿用[本地配置](../architecture/configuration.md#本地配置的加载与更新)的默认值。主程序与 CLI 使用同一运行账户；随包 TOML 省略 `[paths]`，使用 CLI 内置数据路径。
+
+`CAMCTL_HOST_CONFIG_INIT` 提供数值默认值，路径初始为 `NULL`。主程序可以调用 `camctl_host_config_set_home_paths(config, paths, home)`，将四个尚为 `NULL` 的必填路径补齐为 home 下的绝对路径。`paths` 是调用方持有的 `camctl_host_paths` 缓冲区，生成的配置指针指向其中；调用方保持该对象有效且不移动，直到 `camctl_host_init` 返回并完成路径复制。函数不分配堆内存、不创建目录、不读取环境，也不修改已有路径和其他配置项。
+
+| 输入条件 | 结果 |
+| --- | --- |
+| `config` 或 `paths` 为 `NULL` | 返回 `-1`，`errno = EINVAL`。 |
+| 四个必填路径全部非 `NULL` | 返回 `0`，保持配置与缓冲区；不要求提供 home。显式路径是否合法仍由初始化校验。 |
+| 有待补齐路径，home 为 `NULL`、空或相对路径 | 返回 `-1`，`errno = EINVAL`，保持配置与缓冲区。 |
+| home 或任一待生成路径超过 `CAMCTL_HOST_PATH_MAX` | 返回 `-1`，`errno = ENAMETOOLONG`，保持配置与缓冲区，不部分补齐。 |
+| home 为合法绝对路径，待生成路径均未超限 | 去除 home 的末尾分隔符，为缺省成员生成 `/.camctl/venv/bin/camctl`、`/.camctl/ready`、`/.camctl/processing`、`/.camctl/host.log`，返回 `0`。 |
+
+`config_path` 保持调用方原值：`NULL` 让 CLI 选择默认配置文件；显式值只改变配置文件来源，不会自动迁移其他路径。自定义 TOML 改写交接目录时，主程序同时显式覆盖对应的 `ready_path`、`processing_path`。配置字符串中的 `$HOME` 和 `~` 不由 C 接口展开。
+
+演示程序在解析显式路径参数后补齐缺省项；home 优先取 `HOME` 环境变量，未设置时读取当前用户记录中的主目录，与 CLI 的用户目录来源一致。缺省路径所需的 home 无法取得或不是绝对路径时明确报错。显式指定全部必填路径时不依赖 home。CMake 未显式指定安装前缀时使用 `$HOME/.camctl/host`；构建环境没有合法绝对 HOME 时须显式指定前缀。
+
 ### 按消息类型注册回调
 
 主程序在初始化前，为需要接收的每种消息分别注册回调。电机控制使用以下公开接口：

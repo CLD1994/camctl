@@ -89,7 +89,55 @@ class DemoIntegration(unittest.TestCase):
                     proc.communicate(timeout=5)
 
     def test_invalid_start_arguments(self):
-        result=subprocess.run([DEMO],stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
+        result=subprocess.run([DEMO, '--unknown'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
         self.assertNotEqual(result.returncode,0)
         self.assertIn('--camctl',result.stderr)
+
+    def test_home_paths_work_without_explicit_path_options(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory) / '用户 home'
+            runtime = home / '.camctl'
+            ready, processing = runtime / 'ready', runtime / 'processing'
+            ready.mkdir(parents=True)
+            processing.mkdir()
+            launcher = runtime / 'venv/bin/camctl'
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' ' +
+                                shlex.quote(CLI) + ' "$@" --config ' +
+                                shlex.quote(str(runtime)) + '\n')
+            launcher.chmod(0o755)
+            with (runtime / 'output').open('w') as output:
+                proc = subprocess.Popen([DEMO], env={**os.environ, 'HOME': str(home)},
+                                        stdin=subprocess.PIPE, stdout=output, stderr=subprocess.PIPE,
+                                        start_new_session=True)
+                try:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        if (runtime / 'trace').exists():
+                            break
+                        if proc.poll() is not None:
+                            self.fail(proc.stderr.read().decode())
+                        time.sleep(.005)
+                    else:
+                        self.fail('默认 CLI 路径没有被启动')
+                    (ready / 'report').write_bytes(b'home report')
+                    proc.stdin.write(b'claim\n')
+                    proc.stdin.flush()
+                    deadline = time.monotonic() + 5
+                    while not (processing / 'report').exists() and time.monotonic() < deadline:
+                        time.sleep(.005)
+                    self.assertEqual((processing / 'report').read_bytes(), b'home report')
+                    self.assertTrue((runtime / 'host.log').exists())
+                finally:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    proc.communicate(timeout=5)
+
+    def test_relative_home_is_rejected_before_start(self):
+        result = subprocess.run([DEMO], env={**os.environ, 'HOME': 'relative'},
+                                capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(result.stderr)
 if __name__=='__main__': unittest.main()

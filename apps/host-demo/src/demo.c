@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <pwd.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,9 +13,10 @@
 static void motor(int position) { printf("收到电机位置通知：position=%d。\n", position); }
 static void usage(FILE *stream) {
     fputs(
-        "用法：host-demo --camctl <绝对路径> --ready <目录> --processing <目录> --log <日志路径>\n"
+        "用法：host-demo [--camctl <绝对路径>] [--ready <目录>] [--processing <目录>] [--log <日志路径>]\n"
         "                 [--config <camctl配置路径>] [--initial-plan <计划路径>]\n"
         "                 [--retry-limit <次数>] [--retry-delay-ms <毫秒>]\n"
+        "省略路径时使用运行账户 home 下的 .camctl；先安装 CLI 并执行 camctl init。\n"
         "终端命令：submit <绝对路径>、claim、logs、help。路径保留空格，不加引号。\n",
         stream);
 }
@@ -117,9 +119,22 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-    if (optind != argc || !config.camctl_path || !config.ready_path || !config.processing_path ||
-        !config.log_path) {
+    if (optind != argc) {
         usage(stderr);
+        return 1;
+    }
+    camctl_host_paths paths;
+    const char *home = NULL;
+    if (!config.camctl_path || !config.ready_path || !config.processing_path || !config.log_path) {
+        home = getenv("HOME");
+        if (!home) {
+            const struct passwd *account = getpwuid(getuid());
+            if (account)
+                home = account->pw_dir;
+        }
+    }
+    if (camctl_host_config_set_home_paths(&config, &paths, home)) {
+        fprintf(stderr, "默认路径构造失败：%s；请提供绝对 HOME 或显式路径。\n", strerror(errno));
         return 1;
     }
     setvbuf(stdout, NULL, _IOLBF, 0);

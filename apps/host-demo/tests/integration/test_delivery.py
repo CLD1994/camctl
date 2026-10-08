@@ -1,5 +1,6 @@
 """通过实际源码包、安装目录和独立调用方验证交付契约。"""
 import pathlib
+import os
 import re
 import shutil
 import subprocess
@@ -132,6 +133,46 @@ class DeliveryIntegration(unittest.TestCase):
                           f'-I{prefix}/include', str(prefix / 'lib/libcamctl_host.a'),
                           '-pthread', '-o', str(executable)], build)
         self.run_command([str(executable)], build)
+
+    def test_installed_header_exposes_home_path_helper(self):
+        _, build, prefix = self.installation()
+        source = build / 'home-consumer.c'
+        source.write_text('#include <camctl_host.h>\n#include <string.h>\n'
+                          'int main(void) {\n'
+                          ' camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;\n'
+                          ' camctl_host_paths paths;\n'
+                          ' if (camctl_host_config_set_home_paths(&config, &paths, "/user")) return 1;\n'
+                          ' return strcmp(config.ready_path, "/user/.camctl/ready") != 0;\n}\n')
+        executable = build / 'home-consumer'
+        self.run_command(['cc', '-std=c11', '-Werror', str(source),
+                          f'-I{prefix}/include', str(prefix / 'lib/libcamctl_host.a'),
+                          '-pthread', '-o', str(executable)], build)
+        self.run_command([str(executable)], build)
+
+    def test_default_installation_uses_home(self):
+        build = self.root / 'home-default-build'
+        home = self.root / '运行账户 home'
+        build.mkdir()
+        result = subprocess.run([CMAKE, str(SOURCE.resolve())], cwd=build,
+                                env={**os.environ, 'HOME': str(home)},
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cache = (build / 'CMakeCache.txt').read_text()
+        actual = re.search(r'^CMAKE_INSTALL_PREFIX:PATH=(.*)$', cache, re.MULTILINE).group(1)
+        self.assertEqual(pathlib.Path(actual), home / '.camctl/host')
+
+    def test_subdirectory_preserves_parent_installation_prefix(self):
+        parent = self.root / 'parent-project'
+        parent.mkdir()
+        (parent / 'CMakeLists.txt').write_text(
+            'cmake_minimum_required(VERSION 3.10.2)\nproject(parent LANGUAGES C)\n'
+            'file(WRITE "${CMAKE_BINARY_DIR}/prefix-before" "${CMAKE_INSTALL_PREFIX}")\n'
+            f'add_subdirectory("{SOURCE.resolve()}" host)\n'
+            'file(WRITE "${CMAKE_BINARY_DIR}/prefix-after" "${CMAKE_INSTALL_PREFIX}")\n')
+        build = parent / 'build'
+        build.mkdir()
+        self.run_command([CMAKE, str(parent)], build)
+        self.assertEqual((build / 'prefix-before').read_text(), (build / 'prefix-after').read_text())
 
     def test_installed_example_uses_public_header_and_library(self):
         _, build, prefix = self.installation()
