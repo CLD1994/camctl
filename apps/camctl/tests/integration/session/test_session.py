@@ -349,6 +349,80 @@ class TestRunCompletion:
         assert outcome.reason == "state_db_error"
 
 
+class TestRuntimeLibraryClassification:
+    """V-03：运行库不兼容按 configuration_error 分类，拒绝先于业务库打开。"""
+
+    pytestmark = pytest.mark.asyncio
+
+    @staticmethod
+    def _incompatible():
+        from camctl.persistence.runtime import RuntimeLibraryError
+
+        raise RuntimeLibraryError(
+            "Python 实际链接的 SQLite 3.30.1 不满足统一运行条件")
+
+    async def test_run_rejects_runtime_library_as_configuration_error(
+            self, environment, monkeypatch):
+        from camctl.persistence import runtime as runtime_module
+
+        monkeypatch.setattr(
+            runtime_module, "ensure_runtime_library", self._incompatible)
+        context, _, _, tmp_path = environment
+        missing = (tmp_path / "absent.db").resolve()
+        context.open_connection = lambda: open_existing(
+            missing, DbOpenMode.EXISTING_RW, DbConfig())
+        outcome = await _run(context)
+        # 运行库不满足部署要求：按配置错误分类，会话不受理任何工作。
+        assert outcome.succeeded is False
+        assert outcome.reason == "configuration_error"
+        assert "不满足统一运行条件" in outcome.details["error"]
+        # 拒绝发生在业务库打开之前：缺失的库不产生状态库错误，也不建库。
+        assert not missing.exists()
+
+    async def test_run_missing_database_still_state_db_error(self, environment):
+        context, _, _, tmp_path = environment
+        context.open_connection = lambda: open_existing(
+            (tmp_path / "absent.db").resolve(),
+            DbOpenMode.EXISTING_RW, DbConfig())
+        outcome = await _run(context)
+        # 运行库合格时，同一缺失目标仍按状态库错误分类。
+        assert outcome.succeeded is False
+        assert outcome.reason == "state_db_error"
+
+    async def test_submit_rejects_runtime_library_as_configuration_error(
+            self, tmp_path, monkeypatch):
+        from camctl.acceptance.input import ParsedInput
+        from camctl.persistence import runtime as runtime_module
+
+        monkeypatch.setattr(
+            runtime_module, "ensure_runtime_library", self._incompatible)
+        missing = (tmp_path / "absent.db").resolve()
+        source = ParsedInput(path=str(tmp_path / "plan.json"),
+                             document=_document())
+        context = SessionContext(
+            mode=CommandMode.SUBMIT,
+            catalog=None,
+            clock=FakeClock([_MIN]),
+            open_connection=lambda: open_existing(
+                missing, DbOpenMode.EXISTING_RW, DbConfig()),
+            acceptance_repository=AcceptanceRepository(),
+            session_repository=SessionRepository(),
+            paths=SessionPaths(session_lock=tmp_path / "s.lock",
+                               admission_lock=tmp_path / "a.lock"),
+            clock_policy=lambda connection: ClockCheckInput(
+                lower_bound_micros=None, min_plausible_micros=_MIN,
+                recheck_delay_s=0.0, recheck_count=1),
+            acquire_session=lambda: None,
+            acquire_admission=lambda: None,
+            facts_query=lambda connection: _facts(),
+        )
+        outcome = await run_session(context, source)
+        assert outcome.succeeded is False
+        assert outcome.reason == "configuration_error"
+        assert "不满足统一运行条件" in outcome.details["error"]
+        assert not missing.exists()
+
+
 class TestRestrictedSession:
     pytestmark = pytest.mark.asyncio
     def _restrict(self, environment) -> None:

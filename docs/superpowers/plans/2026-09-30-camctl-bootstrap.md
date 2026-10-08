@@ -133,7 +133,15 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 - [x] 再运行上述命令，要求全部 PASS，并核对 失败后不会出现被日常入口当作空库使用的半份数据库。
 - [x] 审阅实际接口、状态分区及失败路径，检查 建库和有效性检查的所有入口是否使用存在性默认或自动修复；记录门禁证据，建议以“feat: 实现显式状态库初始化”形成独立提交。
 
-B4 开放项（2026-10-08 随 I6 验收映射审计登记，见[软件验收映射](../../camctl/software-acceptance.md)）：①目录切换的“允许切换”分支未实施——一致性验收 F-06/F-07/F-08 要求按各责任形态判定能否切换、责任全部结束且原目录只剩空目录时允许切换，并验证切换各边界中断；当前实现对绑定不一致一律保留原绑定拒绝，拒绝侧已由 `test_binding_mismatch_fails_and_keeps_binding` 覆盖。②运行库不兼容时 run/submit 的 `configuration_error` 错误分类未实现——V-03 规格要求不兼容返回 `configuration_error`，当前运行库检查失败经 `open_existing` 归入状态库错误通道；报告子进程启动失败保留责任的注入用例也未建立。两项均未排期，实施前在验收映射中保持开放或部分覆盖结论。
+### B4 开放项交付记录（2026-10-08）
+
+两项开放功能按[阻止切换分类](../../architecture/configuration.md#哪些情况阻止切换目录)与[切换失败处理](../../architecture/configuration.md#切换入口共同保存与失败处理)交付：
+
+①目录切换的允许分支。`persistence/directory_switch.py` 提供：`load_switch_facts`/`classify_switch_eligibility`（REQUIRED、未完成清理、已提升未清理成品、未结束运行、未完成交付、未结束撤回、本地报告责任七类计数并按检查顺序给出首个阻止诊断；已结束清理、已 CLEANED 成品、CANCELED 交付、PUBLISHED 报告与终态运行不计）；`scan_directory_tree`（原目录必须存在且整树无文件与符号链接对象，目录项按固定批次读取；新目录须不存在或同样只剩空目录树）；`check_distinct_roots`（相同、互相包含与实际别名拒绝）与 `check_atomic_move_support`（三目录同一文件系统，不存在的目录按最近存在祖先判定）；`switch_directory_binding`（一次元信息事务重新核对旧绑定与责任后三路径整体 UPDATE，提交确认后重读核实，异常回滚并按重读的完整绑定分类 completed/not_completed/inconsistent）。`initialize_state` 绑定不一致时经 `_attempt_directory_switch` 依次完成资格、原目录、新目录、组合与落盘检查，成功返回 `InitOutcome.SWITCHED`；首次初始化与切换共同执行互异、别名与同一文件系统核对。`canonical_to_path` 把保存的规范绑定还原为本机路径用于扫描原目录。
+
+②运行库不兼容的错误分类。`session/service.py` 的 run/submit 入口对 `RuntimeLibraryError` 返回 `configuration_error`（拒绝先于业务库打开，经真实 `open_existing` 注入验证；运行库合格时同一缺失目标仍 `state_db_error`）；`initialize_state` 运行库门槛在任何文件创建前失败；报告子进程 RUNTIME_CHECK 启动失败注入用例验证 `StartupFailedMessage` 与退出码 3，报告责任由主进程按既有 START_FAILED 通道保留。
+
+测试：单元 `apps/camctl/tests/unit/persistence/test_directory_switch.py`（资格决策表与提交观察分类）；集成 `apps/camctl/tests/integration/bootstrap/test_directory_switch.py`（责任装载计数、目录树扫描、切换事务、端到端切换与各阻止分支、提交失败空目录残留、互含/相同/跨设备/大小写别名、来回切换）、`session/test_session.py` TestRuntimeLibraryClassification、`reporting/test_worker.py` TestStartupFailures、`bootstrap/test_initialization.py` TestRuntimeLibraryGate；`test_binding_mismatch_with_liability_keeps_binding` 以 REQUIRED 责任种子取代原无条件拒绝用例。验收映射 F-06/V-03 升为已覆盖、F-07/F-08 升为部分覆盖，剩余前提（目标 Linux 符号链接真实对象、主程序恢复领取联调、带真实报告历史的切换保留与回放、进程级中断字面模拟）归属 B7 目标部署复验与 I 跨组件场景群。
 
 ### B5 静态能力导出
 

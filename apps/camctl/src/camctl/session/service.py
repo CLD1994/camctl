@@ -23,7 +23,7 @@ from camctl.acceptance.service import AcceptanceResult, CommandMode, accept_inpu
 from camctl.contracts.clock import ClockPort
 from camctl.contracts.values import OperationKey, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
 from camctl.session.clock import (
     ClockCheckInput,
     ExecutionMode,
@@ -146,6 +146,9 @@ async def _submit_session(
         return _outcome_error("input_missing", {"reason": "submit 需要计划输入文件"})
     try:
         owned = context.open_connection()
+    except RuntimeLibraryError as error:
+        # 本进程运行库不满足部署要求：配置环境问题，不是状态库数据问题。
+        return _outcome_error("configuration_error", {"error": str(error)})
     except Exception as error:
         return _outcome_error("state_db_error", {"error": str(error)})
     try:
@@ -189,6 +192,9 @@ async def _run_session(
             return _outcome_error("state_db_error", {"error": f"会话锁取得失败: {error}"})
         try:
             owned = context.open_connection()
+        except RuntimeLibraryError as error:
+            # 同 submit：运行库不满足部署要求归配置错误，先于业务库打开拒绝。
+            return _outcome_error("configuration_error", {"error": str(error)})
         except Exception as error:
             return _outcome_error("state_db_error", {"error": str(error)})
         if source is not None:

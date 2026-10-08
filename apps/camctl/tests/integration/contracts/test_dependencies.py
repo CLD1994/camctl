@@ -61,8 +61,9 @@ ENTRY_PREFIXES = (
     "camctl.reporting.worker",
     "camctl.devices.catalog",
 )
-#: 允许边：业务流程以连接类型做签名注解，不打开连接。
-RUNTIME_TYPE_ONLY = {"OwnedConnection"}
+#: 允许边：业务流程以连接类型做签名注解、以运行库异常类型做错误
+#: 分类，不打开连接。
+RUNTIME_TYPE_ONLY = {"OwnedConnection", "RuntimeLibraryError"}
 #: 历史事件应用与公开投影所在的模块。
 HISTORY_APPLY_PREFIXES = (
     "camctl.contracts.public_projection",

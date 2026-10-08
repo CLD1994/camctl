@@ -124,13 +124,23 @@ class TestExistingDatabase:
         assert result.outcome is InitOutcome.FAILED
         assert target.read_bytes() == b""
 
-    def test_binding_mismatch_fails_and_keeps_binding(self, tmp_path: Path) -> None:
+    def test_binding_mismatch_with_liability_keeps_binding(self, tmp_path: Path) -> None:
         cfg = _config(tmp_path)
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        # 登记仍为 REQUIRED 的中间文件：原目录责任未结束，拒绝切换。
+        connection = sqlite3.connect(cfg.paths.state_db)
+        try:
+            connection.execute(
+                "INSERT INTO intermediate_files (id,owner_action_id,purpose,relative_path,"
+                "retention_state,cleanup_state,created_event_id,last_event_id,change_count)"
+                " VALUES (1,1,2,'derived/1.bin',1,1,1,1,1)")
+            connection.commit()
+        finally:
+            connection.close()
         moved = _config(tmp_path, prefix="new-")
         result = initialize_state(moved, Path(moved.paths.state_db))
         assert result.outcome is InitOutcome.FAILED
-        assert "绑定不一致" in result.detail
+        assert "REQUIRED" in result.detail
         owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
         try:
             # 绑定按平台规范字符串保存与核对（Windows 为可逆映射约定）。
@@ -139,6 +149,28 @@ class TestExistingDatabase:
             assert owned.metadata.staging_path == _canonical_binding(Path(cfg.paths.staging))
         finally:
             owned.connection.close()
+
+
+class TestRuntimeLibraryGate:
+    def test_incompatible_runtime_library_fails_before_any_file(
+            self, tmp_path: Path, monkeypatch) -> None:
+        from camctl.persistence import initialization as initialization_module
+        from camctl.persistence.runtime import RuntimeLibraryError
+
+        def incompatible() -> None:
+            raise RuntimeLibraryError(
+                "Python 实际链接的 SQLite 3.30.1 不满足统一运行条件")
+
+        monkeypatch.setattr(
+            initialization_module, "ensure_runtime_library", incompatible)
+        cfg = _config(tmp_path)
+        state_db = Path(cfg.paths.state_db)
+        result = initialize_state(cfg, state_db)
+        assert result.outcome is InitOutcome.FAILED
+        assert "运行库条件不满足" in result.detail
+        # 拒绝发生在任何文件创建之前：不建库、不建目录。
+        assert not state_db.exists()
+        assert not Path(cfg.paths.staging).exists()
 
 
 class TestLockCoordination:

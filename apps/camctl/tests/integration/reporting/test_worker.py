@@ -156,6 +156,43 @@ class TestRealWorkerProcess:
         assert shutdown.exitcode == 0
 
 
+class TestStartupFailures:
+    """V-03：运行库检查失败的启动报告与退出；责任由主进程按消息保留。"""
+
+    def test_runtime_check_failure_sends_startup_failure(
+            self, monkeypatch, tmp_path) -> None:
+        import multiprocessing
+        import os
+        import time
+
+        from camctl.persistence.runtime import RuntimeLibraryError
+        from camctl.reporting import worker as worker_module
+        from camctl.reporting.messages import decode_message
+
+        def incompatible() -> None:
+            raise RuntimeLibraryError(
+                "Python 实际链接的 SQLite 3.30.1 不满足统一运行条件")
+
+        monkeypatch.setattr(
+            worker_module, "ensure_runtime_library", incompatible)
+        parent_end, child_end = multiprocessing.get_context("spawn").Pipe(
+            duplex=True)
+        try:
+            code = worker_module.worker_main(
+                child_end, os.getpid(),
+                str(tmp_path / "state.db.report.lock"),
+                time.monotonic() + 5.0)
+        finally:
+            child_end.close()
+        try:
+            assert code == 3
+            failure = decode_message(parent_end.recv_bytes())
+            assert failure.phase is StartupPhase.RUNTIME_CHECK
+            assert "不满足统一运行条件" in failure.reason
+        finally:
+            parent_end.close()
+
+
 class TestRunJob:
     def test_run_job_returns_success_with_file_facts(self, frozen_report) -> None:
         db_path, instance_id, report, tmp_path = frozen_report

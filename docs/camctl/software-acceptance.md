@@ -1113,30 +1113,30 @@
 
 #### 验收 F-06
 - 原文：[验收 F-06](database/consistency-verification.md#中间文件的路径与定位)（阻止切换目录的完整分类）。
-- 结论：部分覆盖
-- 归属：B1 目录切换（bootstrap 计划；允许切换分支未实施）。
-- 生产入口：apps/camctl/src/camctl/persistence/initialization.py
-- 测试：apps/camctl/tests/integration/bootstrap/test_initialization.py
-- 证据：绑定不一致时拒绝切换并保留原绑定已覆盖（`test_binding_mismatch_fails_and_keeps_binding`）。
-- 未核验前提：按各责任形态（未完成清理、未交接交付、本地报告责任等）逐一判定能否切换的完整分类未实施，归 bootstrap 计划目录切换范围。
+- 结论：已覆盖
+- 归属：B4 目录切换开放项（bootstrap 计划）。
+- 生产入口：apps/camctl/src/camctl/persistence/directory_switch.py、apps/camctl/src/camctl/persistence/initialization.py
+- 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py、apps/camctl/tests/unit/persistence/test_directory_switch.py
+- 证据：B4 开放项交付验证记录（REQUIRED、未完成清理、已提升未清理成品、未结束运行、未完成交付与撤回、本地报告责任七类分别计数并按检查顺序给出首个阻止诊断；已结束清理、已 CLEANED 成品、CANCELED 交付、PUBLISHED 报告与终态运行不构成旧路径责任；切换事务内重新核对发现责任保持原绑定；目录不可靠检查的受控错误注入阻止切换）。
+- 未核验前提：无
 
 #### 验收 F-07
 - 原文：[验收 F-07](database/consistency-verification.md#中间文件的路径与定位)（责任全部结束后的允许切换）。
-- 结论：开放
-- 归属：B1 目录切换（bootstrap 计划；功能未实施）。
-- 生产入口：apps/camctl/src/camctl/persistence/initialization.py
-- 测试：apps/camctl/tests/integration/bootstrap/test_initialization.py
-- 证据：拒绝侧与恢复原配置继续已覆盖；允许切换分支（原目录只剩空目录、新目录不存在或空目录时切换）无生产实现与用例。
-- 未核验前提：允许切换的资格判定、根目录规范化组合与真实目录错误验证，归 bootstrap 计划目录切换范围（未排期）。
+- 结论：部分覆盖
+- 归属：B4 目录切换开放项（bootstrap 计划；允许切换分支已交付）。
+- 生产入口：apps/camctl/src/camctl/persistence/initialization.py、apps/camctl/src/camctl/persistence/directory_switch.py
+- 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py
+- 证据：B4 开放项交付验证记录（责任全部结束且原目录只剩空目录树时 SWITCHED 并三路径共同保存；数据库身份与全部业务历史保持；原目录原样保留、新目录准备后重复 init 按已有库验证；原配置恢复正常处理；相同、互相包含、跨文件系统与 Windows 大小写别名目录拒绝；来回切换各保存一整套绑定）。
+- 未核验前提：目标 Linux 环境的符号链接真实对象核对（Windows 开发环境不可创建）与主程序采用新交接路径后的恢复领取联调，归 B7 目标部署复验。
 
 #### 验收 F-08
 - 原文：[验收 F-08](database/consistency-verification.md#中间文件的路径与定位)（切换各边界中断与三路径共同更新）。
-- 结论：开放
-- 归属：B1 目录切换（bootstrap 计划；依赖切换功能）。
-- 生产入口：apps/camctl/src/camctl/persistence/initialization.py
-- 测试：apps/camctl/tests/integration/bootstrap/test_initialization.py
-- 证据：新建初始化的发布中断与提交未知已覆盖（硬链接原子发布群）。
-- 未核验前提：目录切换各边界中断与绑定三路径共同更新，依赖 F-07 的切换实现。
+- 结论：部分覆盖
+- 归属：B4 目录切换开放项（bootstrap 计划；中断矩阵主体已交付）。
+- 生产入口：apps/camctl/src/camctl/persistence/initialization.py、apps/camctl/src/camctl/persistence/directory_switch.py
+- 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py、apps/camctl/tests/unit/persistence/test_directory_switch.py
+- 证据：B4 开放项交付验证记录（提交注入失败回滚后重读判定 not_completed 且库值保持整套旧绑定、混合组合判 inconsistent 不混用新旧目录；提交成功后重读核实三列整体为新值；绑定保存失败时新空目录保留不构成切换成功；准备前各检查中止保持原绑定；切换保留数据库身份与全部表内容）。
+- 未核验前提：带真实报告历史、累计 ACK 与文件 ID 的库切换保留验证及切换后历史回放、进程在提交后返回前被终止的字面中断模拟，归 I 跨组件复验场景群（路线图 375-377 行）。
 
 #### 验收 V-01
 - 原文：[验收 V-01](database/consistency-verification.md#sqlite-运行库与部署版本)（统一条件文件的版本判定）。
@@ -1158,12 +1158,12 @@
 
 #### 验收 V-03
 - 原文：[验收 V-03](database/consistency-verification.md#sqlite-运行库与部署版本)（init、run、submit 与报告子进程的兼容分支）。
-- 结论：部分覆盖
-- 归属：B1 入口（bootstrap 计划）。
-- 生产入口：apps/camctl/src/camctl/persistence/runtime.py
-- 测试：apps/camctl/tests/integration/persistence/test_runtime.py
-- 证据：运行库检查先于业务库打开已在全部入口接线（`open_existing`、`initialize_state`、报告 worker 启动）；不满足时不创建空业务库由初始化落盘测试覆盖。
-- 未核验前提：run/submit 不兼容时的 `configuration_error` 错误分类与报告子进程启动失败保留责任的注入用例未建立，归 bootstrap 计划入口错误分类范围。
+- 结论：已覆盖
+- 归属：B4 开放项（bootstrap 计划）与 B1 入口（bootstrap 计划）。
+- 生产入口：apps/camctl/src/camctl/session/service.py、apps/camctl/src/camctl/persistence/initialization.py、apps/camctl/src/camctl/reporting/worker.py
+- 测试：apps/camctl/tests/integration/session/test_session.py、apps/camctl/tests/integration/bootstrap/test_initialization.py、apps/camctl/tests/integration/reporting/test_worker.py
+- 证据：B4 开放项交付验证记录（run/submit 注入运行库不兼容返回 `configuration_error` 且拒绝先于业务库打开、不创建空库；运行库合格时同一缺失目标仍按 `state_db_error`；init 不兼容在任何文件创建前失败；报告子进程 RUNTIME_CHECK 阶段启动失败发送 `StartupFailedMessage` 并以退出码 3 结束，报告责任由主进程按消息保留、普通设备工作继续）。
+- 未核验前提：无
 
 #### 验收 V-04
 - 原文：[验收 V-04](database/consistency-verification.md#sqlite-运行库与部署版本)（目标 Python 3.11/ARM64 发行物固定构建验证）。
@@ -1599,4 +1599,4 @@
 
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：新增[九、跨模块契约场景](#九跨模块契约场景)十项映射并扩展 `tests/integration/test_camctl_acceptance_map.py` 检查器（场景清单解析自 verification.md 表格、字段与引用逐项校验、条目解析不再跨章节读取）；验收 68、P-03、P-04、P-06 依据 history 计划 H7 规模测量记录升级为已覆盖。`tests/integration/test_camctl_acceptance_map.py` 3 项全部通过。
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 全部通过；引用的模块测试文件与生产入口路径逐一核验存在。此前的最近全量回归见[集成计划验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i4-验证记录2026-10-07)（Windows 单元 3353、根跨组件 52+4 跳+342 子测试、bootstrap 87、session 82；WSL 单元 3352+1 跳、reporting 345 等）。
-- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 133 条，部分覆盖 28 条，开放 2 条；契约场景已覆盖 7 项，部分覆盖 3 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行（V-04 随 B7 交付升级为部分覆盖，剩余前提为真实 ARM64 硬件复验），不作为行为通过的依据。
+- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 135 条，部分覆盖 28 条，开放 0 条；契约场景已覆盖 7 项，部分覆盖 3 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行（B4 两项开放功能已交付：目录切换允许分支与运行库 `configuration_error` 分类，F-06/V-03 升级为已覆盖，F-07/F-08 剩余前提为目标 Linux 符号链接对象、主程序恢复领取联调与带真实报告历史的切换保留验证），不作为行为通过的依据。

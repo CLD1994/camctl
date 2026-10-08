@@ -1,9 +1,10 @@
-"""显式状态库初始化与既有库验证。
+"""显式状态库初始化、既有库验证与目录绑定切换。
 
 初始化在目标状态库的稳定会话锁下判定实际状态：可靠不存在时经
 准备文件发布完整初始库；已有完整有效的库只做验证和目录准备，
-保留全部事实。发布保持"只创建尚不存在的目标"，失败不把准备
-文件当作业务库。日常入口不经过本模块创建数据库。
+保留全部事实；绑定与配置不一致且切换资格全部通过时，三路径一
+次事务共同保存新绑定。发布保持"只创建尚不存在的目标"，失败不
+把准备文件当作业务库。日常入口不经过本模块创建数据库。
 """
 
 from __future__ import annotations
@@ -16,6 +17,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from camctl.resources import resource_bytes
+from camctl.persistence.directory_switch import (
+    SwitchCommitError,
+    canonical_to_path,
+    check_atomic_move_support,
+    check_distinct_roots,
+    classify_switch_eligibility,
+    load_switch_facts,
+    scan_new_directories,
+    scan_original_directories,
+    switch_directory_binding,
+)
 from camctl.persistence.runtime import (
     DbConfig,
     DbOpenMode,
@@ -65,6 +77,7 @@ def _canonical_binding(path: Path) -> str:
 class InitOutcome(enum.Enum):
     CREATED = "created"
     VERIFIED_EXISTING = "verified_existing"
+    SWITCHED = "switched"
     FAILED = "failed"
 
 
@@ -153,6 +166,13 @@ def initialize_state(config, state_db: Path) -> InitResult:
     processing = Path(config.paths.processing).resolve()
     state_db = Path(state_db).resolve()
 
+    alias = check_distinct_roots((staging, ready, processing))
+    if alias is not None:
+        return InitResult(InitOutcome.FAILED, f"目录组合不合法: {alias}")
+    filesystem = check_atomic_move_support((staging, ready, processing))
+    if filesystem is not None:
+        return InitResult(InitOutcome.FAILED, f"目录组合不合法: {filesystem}")
+
     try:
         # 锁文件位于状态库父目录：先准备该目录，锁内再准备其余目录。
         state_db.parent.mkdir(parents=True, exist_ok=True)
@@ -168,30 +188,25 @@ def initialize_state(config, state_db: Path) -> InitResult:
         )
     except Exception as error:  # 锁系统的其他故障不能解释为无占用。
         return InitResult(InitOutcome.FAILED, f"会话锁取得失败: {error}", error)
+    roots = (staging, ready, processing)
     try:
         binding = (_canonical_binding(staging), _canonical_binding(ready), _canonical_binding(processing))
         if state_db.exists() or state_db.is_symlink():
             # 已有目标：无论内容如何都按已有库验证；无效时保留原文件。
-            result = _verify_existing(state_db, *binding)
-            if result.outcome is InitOutcome.VERIFIED_EXISTING:
-                try:
-                    _prepare_directories(state_db, staging, ready, processing)
-                except (OSError, StateDatabaseError) as error:
-                    return InitResult(
-                        InitOutcome.FAILED, f"目录准备失败: {error}", error
-                    )
-            return result
+            return _verify_existing(state_db, roots, binding)
         try:
-            _prepare_directories(state_db, staging, ready, processing)
+            _prepare_directories(state_db, *roots)
         except (OSError, StateDatabaseError) as error:
             return InitResult(InitOutcome.FAILED, f"目录准备失败: {error}", error)
-        return _create_new(state_db, *binding)
+        return _create_new(state_db, roots, binding)
     finally:
         lease.close()
 
 
 def _verify_existing(
-    state_db: Path, staging: str, ready: str, processing: str
+    state_db: Path,
+    roots: tuple[Path, Path, Path],
+    binding: tuple[str, str, str],
 ) -> InitResult:
     try:
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
@@ -201,14 +216,14 @@ def _verify_existing(
         )
     try:
         try:
-            verify_directory_binding(owned.metadata, staging, ready, processing)
-        except StateDatabaseError as error:
-            # 绑定不一致时按切换资格判断；资格检查不可靠时拒绝切换。
-            return InitResult(
-                InitOutcome.FAILED,
-                f"目录绑定与配置不一致，保留原绑定: {error}",
-                error,
-            )
+            verify_directory_binding(owned.metadata, *binding)
+        except StateDatabaseError:
+            # 绑定不一致：显式 init 是第一版唯一切换入口，按切换资格判定。
+            return _attempt_directory_switch(state_db, owned, roots, binding)
+        try:
+            _prepare_directories(state_db, *roots)
+        except (OSError, StateDatabaseError) as error:
+            return InitResult(InitOutcome.FAILED, f"目录准备失败: {error}", error)
     finally:
         owned.connection.close()
     return InitResult(
@@ -217,17 +232,86 @@ def _verify_existing(
     )
 
 
-def _create_new(state_db: Path, staging: str, ready: str, processing: str) -> InitResult:
+def _attempt_directory_switch(
+    state_db: Path,
+    owned,
+    roots: tuple[Path, Path, Path],
+    binding: tuple[str, str, str],
+) -> InitResult:
+    """绑定不一致时按切换规则处理；任一条件不满足保持原绑定。
+
+    先检查数据库责任资格，再在事务外核对原三目录只剩空目录树、
+    新三目录条件与部署组合，准备新目录后经一次元信息事务三路径共
+    同保存；数据库身份、历史与对象 ID 保持。切换不生成业务事件，
+    不复制、移动或清理任何业务文件。
+    """
+    old_binding = (
+        owned.metadata.staging_path,
+        owned.metadata.ready_path,
+        owned.metadata.processing_path,
+    )
+    try:
+        old_roots = tuple(canonical_to_path(value) for value in old_binding)
+    except StateDatabaseError as error:
+        return InitResult(
+            InitOutcome.FAILED, f"原绑定无法定位，保留原绑定: {error}", error
+        )
+    try:
+        blocked = classify_switch_eligibility(load_switch_facts(owned.connection))
+    except StateDatabaseError as error:
+        return InitResult(
+            InitOutcome.FAILED, f"切换责任检查不可靠，保留原绑定: {error}", error
+        )
+    if blocked is not None:
+        return InitResult(
+            InitOutcome.FAILED,
+            f"目录绑定与配置不一致，存在未结束责任，保留原绑定: {blocked}",
+        )
+    blocked = scan_original_directories(old_roots)
+    if blocked is not None:
+        return InitResult(
+            InitOutcome.FAILED, f"原目录未清空，保留原绑定: {blocked}")
+    blocked = scan_new_directories(roots)
+    if blocked is not None:
+        return InitResult(
+            InitOutcome.FAILED, f"新目录条件不满足，保留原绑定: {blocked}")
+    alias = check_distinct_roots(roots)
+    if alias is not None:
+        return InitResult(
+            InitOutcome.FAILED, f"新目录组合不合法，保留原绑定: {alias}")
+    filesystem = check_atomic_move_support(roots)
+    if filesystem is not None:
+        return InitResult(
+            InitOutcome.FAILED, f"新目录组合不合法，保留原绑定: {filesystem}")
+    try:
+        _prepare_directories(state_db, *roots)
+    except (OSError, StateDatabaseError) as error:
+        return InitResult(
+            InitOutcome.FAILED, f"新目录准备失败，原绑定仍有效: {error}", error)
+    try:
+        switch_directory_binding(owned, old_binding, binding)
+    except SwitchCommitError as error:
+        # 原绑定仍有效；新准备的空目录可以保留，重新执行时重新核对。
+        return InitResult(
+            InitOutcome.FAILED, f"绑定保存未完成，原绑定仍有效: {error}", error)
+    return InitResult(InitOutcome.SWITCHED, f"已切换目录绑定: {state_db}")
+
+
+def _create_new(
+    state_db: Path,
+    roots: tuple[Path, Path, Path],
+    binding: tuple[str, str, str],
+) -> InitResult:
     prepared = state_db.parent / f".{state_db.name}.init-{uuid.uuid4().hex}"
     try:
-        _build_initial_database(prepared, staging, ready, processing)
+        _build_initial_database(prepared, *binding)
         try:
             # 只创建尚不存在的目标：硬链接发布在目标已存在时原子失败。
             os.link(prepared, state_db)
         except FileExistsError:
             # 另一进程已发布完整库：按已有库重新验证。
             prepared.unlink()
-            return _verify_existing(state_db, staging, ready, processing)
+            return _verify_existing(state_db, roots, binding)
         _fsync_directory(state_db.parent)
     except (OSError, sqlite3.Error) as error:
         prepared.unlink(missing_ok=True)
