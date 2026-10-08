@@ -398,16 +398,7 @@
       ]
     },
     "camera_policy": {
-      "type": "object",
-      "properties": {
-        "max_delay_ms": {
-          "$ref": "status-report.schema.json#/$defs/uint"
-        }
-      },
-      "required": [
-        "max_delay_ms"
-      ],
-      "additionalProperties": false
+      "$ref": "#/$defs/time_window_policy"
     },
     "camera_params": {
       "type": "object",
@@ -634,6 +625,38 @@
               ]
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "motor_control"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/motor_params"
+              },
+              "policy": {
+                "$ref": "#/$defs/time_window_policy"
+              }
+            },
+            "required": [
+              "scheduled_at",
+              "params",
+              "policy"
+            ],
+            "not": {
+              "required": [
+                "device_id"
+              ]
+            }
+          }
         }
       ]
     },
@@ -690,6 +713,21 @@
         "request_id"
       ],
       "description": "仅在已无歧义解析且数据库确认 request_id 已受理后使用；ACK 仍独立校验。"
+    },
+    "time_window_policy": {
+      "type": "object",
+      "properties": {
+        "max_delay_ms": {
+          "$ref": "status-report.schema.json#/$defs/uint"
+        }
+      },
+      "required": [
+        "max_delay_ms"
+      ],
+      "additionalProperties": false
+    },
+    "motor_params": {
+      "$ref": "host-notification.schema.json#/$defs/motor_params"
     }
   }
 }

@@ -1,11 +1,15 @@
 import { isCameraAction } from "../shared/actions";
+import type { ValidateFunction } from "ajv";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import schema from "../../../../protocol/schemas/status-report.schema.json";
-import { parseJson } from "../shared/json";
+import { createProtocolValidator } from "../shared/protocol-validation";
+import {
+  parseJson,
+  cloneProtocolJson,
+  exactJsonIdentity,
+} from "../shared/json";
 import { validateBuiltinParams } from "../shared/action-params";
 import {
-  createValidator,
   isCanonicalId,
   isId,
   isName,
@@ -28,7 +32,10 @@ import type {
   CancelResult,
 } from "../shared/status-report.generated";
 
-const validate = createValidator().compile<StatusReport>(schema);
+const validate: ValidateFunction<StatusReport> =
+  createProtocolValidator().getSchema<StatusReport>(
+    "status-report.schema.json",
+  )!;
 const terminal = (status: ReportAction["status"]) =>
   status !== "pending" && status !== "running";
 function requireFact(condition: unknown, message: string): asserts condition {
@@ -194,8 +201,7 @@ function associations(index: Index) {
         // 显式 ID 失败按请求标识区分，不因实体关联相同而合并。
         const details = (failure.error as { details?: unknown }).details;
         const requested =
-          isObject(details) &&
-          typeof details.requested_output_id === "string"
+          isObject(details) && typeof details.requested_output_id === "string"
             ? details.requested_output_id
             : "";
         const identity = `${failure.source_action_instance_id}/${failure.output_id ?? ""}/${failure.delivery_id ?? ""}/${requested}`;
@@ -350,6 +356,14 @@ function ownFacts(report: StatusReport) {
             "拍摄公共输入不合法",
           );
         } else {
+          if (action.type === "motor_control")
+            requireFact(
+              isTimestamp(action.scheduled_at) &&
+                isObject(action.policy) &&
+                isUint(action.policy.max_delay_ms) &&
+                Object.keys(action.policy).length === 1,
+              "电机时间窗口输入不合法",
+            );
           requireFact(
             validateBuiltinParams(
               action.type,
@@ -385,10 +399,7 @@ function ownFacts(report: StatusReport) {
           "错过启动窗口不应已有执行事实",
         );
       if (action.expiration_reason === "window_exhausted")
-        requireFact(
-          action.status !== "pending",
-          "启动窗口耗尽须已有执行事实",
-        );
+        requireFact(action.status !== "pending", "启动窗口耗尽须已有执行事实");
       // 设备执行提示只属于已终态的拍摄动作。
       if (action.device_execution !== undefined)
         requireFact(
@@ -399,7 +410,8 @@ function ownFacts(report: StatusReport) {
         const result = action.result as CameraResult;
         if (action.status === "succeeded" && result.repair)
           requireFact(
-            result.repair.status !== "failed" || result.repair.error !== undefined,
+            result.repair.status !== "failed" ||
+              result.repair.error !== undefined,
             "录像修复失败须携带错误",
           );
       }
@@ -509,10 +521,7 @@ export function parseReport(fileName: string, bytes: Uint8Array): StatusReport {
   const match = /^status-report-([1-9][0-9]*)-([0-9a-f]{64})\.json$/.exec(
     fileName,
   );
-  requireFact(
-    match && !/[\r\n]/.test(fileName),
-    "报告文件名不合法",
-  );
+  requireFact(match && !/[\r\n]/.test(fileName), "报告文件名不合法");
   requireFact(
     createHash("sha256").update(bytes).digest("hex") === match[2],
     "报告原字节摘要不一致",
@@ -523,17 +532,26 @@ export function parseReport(fileName: string, bytes: Uint8Array): StatusReport {
   }).decode(bytes);
   const value = parseJson(text);
   validateReport(value);
-  requireFact(
-    value.report_id === match[1],
-    "报告文件名与正文身份不一致",
-  );
+  requireFact(value.report_id === match[1], "报告文件名与正文身份不一致");
   return value;
 }
-function unchanged(old: object, next: object, keys: string[], label: string) {
+function unchanged(
+  old: object,
+  next: object,
+  keys: string[],
+  label: string,
+  exact = false,
+) {
   for (const key of keys)
     requireFact(
       Object.hasOwn(old, key) === Object.hasOwn(next, key) &&
-        isDeepStrictEqual(Reflect.get(old, key), Reflect.get(next, key)),
+        (exact
+          ? exactJsonIdentity(
+              Reflect.get(old, key),
+              Object.hasOwn(old, key),
+            ) ===
+            exactJsonIdentity(Reflect.get(next, key), Object.hasOwn(next, key))
+          : isDeepStrictEqual(Reflect.get(old, key), Reflect.get(next, key))),
       `${label} 的不可变字段 ${key} 改变`,
     );
 }
@@ -554,10 +572,13 @@ function sameOwnFields(old: Index, next: Index) {
     const before = old.actions.get(id);
     if (before)
       requireFact(
-        isDeepStrictEqual(
-          own(before.value, ["outputs", "deliveries"]),
-          own(action.value, ["outputs", "deliveries"]),
-        ),
+        action.value.type === "motor_control"
+          ? exactJsonIdentity(own(before.value, ["outputs", "deliveries"])) ===
+              exactJsonIdentity(own(action.value, ["outputs", "deliveries"]))
+          : isDeepStrictEqual(
+              own(before.value, ["outputs", "deliveries"]),
+              own(action.value, ["outputs", "deliveries"]),
+            ),
         "同水位动作自身快照不一致",
       );
   }
@@ -613,10 +634,7 @@ function actionResultHistory(before: ReportAction, after: ReportAction) {
     const old = before.result as CameraResult | undefined;
     const next = after.result as CameraResult | undefined;
     if (old && terminal(before.status))
-      requireFact(
-        isDeepStrictEqual(old, next),
-        "拍摄终态结果不可改写",
-      );
+      requireFact(isDeepStrictEqual(old, next), "拍摄终态结果不可改写");
   }
 
   if (before.type === "obtain_action_outputs") {
@@ -662,12 +680,7 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
   for (const [id, plan] of next.plans) {
     const before = old.plans.get(id);
     if (before) {
-      unchanged(
-        before,
-        plan,
-        ["request_id", "created_at", "name"],
-        "计划",
-      );
+      unchanged(before, plan, ["request_id", "created_at", "name"], "计划");
       if (advancing)
         requireFact(
           before.status === "pending" ||
@@ -703,6 +716,7 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
         "effective_params",
       ],
       "动作原始输入",
+      action.value.type === "motor_control",
     );
     if (advancing) {
       actionResultHistory(before.value, action.value);
@@ -817,7 +831,7 @@ export function mergeReport(
     incoming.to_wm,
   );
   requireFact(decision !== "gap", "报告覆盖存在缺口");
-  if (decision === "covered") return structuredClone(current);
+  if (decision === "covered") return cloneProtocolJson(current);
   const combined: StatusReport = { ...incoming, from_wm: current.from_wm };
   const plans = members(
     current.plans,
@@ -861,7 +875,7 @@ export function mergeReport(
   );
   if (diagnostics !== undefined) combined.plan_file_diagnostics = diagnostics;
   ownFacts(combined);
-  return structuredClone(combined);
+  return cloneProtocolJson(combined);
 }
 /** 只检查已知证据，不应用状态，也不把缺口中的旧子状态当作新边界事实。 */
 export function validateReportAgainstHistory(

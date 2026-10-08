@@ -8,6 +8,9 @@ const root = new URL('../../', import.meta.url);
 const json = path => JSON.parse(readFileSync(new URL(path, root), 'utf8'));
 const registry = json('docs/camctl/database/report-dependencies.json');
 const schema = json('protocol/schemas/status-report.schema.json');
+const schemas = Object.fromEntries(readdirSync(new URL('protocol/schemas/', root))
+  .filter(name => name.endsWith('.schema.json'))
+  .map(name => [name, json(`protocol/schemas/${name}`)]));
 const enums = json('docs/camctl/database/enum-registry.json');
 const errors = json('protocol/errors/workflow-codes.json');
 const db = new DatabaseSync(':memory:');
@@ -19,7 +22,7 @@ const tables = Object.fromEntries(db.prepare("SELECT name FROM sqlite_schema WHE
 const foreignKeys = Object.fromEntries(Object.keys(tables).flatMap(table => db.prepare(`PRAGMA foreign_key_list(${table})`).all()
   .map(key => [`${table}.${key.from}`, `${key.table}.${key.to}`])));
 db.close();
-const check = (value = registry, publicSchema = schema) => validateRegistration(value, publicSchema, { enums, errors, tables, foreignKeys });
+const check = (value = registry, publicSchema = schema) => validateRegistration(value, publicSchema, { enums, errors, tables, foreignKeys, schemas });
 const rejected = mutate => { const value = structuredClone(registry); mutate(value); assert.throws(() => check(value)); };
 
 test('正式登记覆盖公开字段，来源列均已落实到 SQL', () => {

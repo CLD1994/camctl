@@ -47,6 +47,9 @@ class RuntimeDeps:
     failure_channel: Any = None
     #: 业务日志链运行时；由 build_runtime 创建并在会话结束时有序关闭。
     log_runtime: Any = None
+    #: CLI 拥有的单向通知写端；装配只借用，CLI 在全部退出路径关闭。
+    host_notifications: Any = None
+    motor_permits: dict = field(default_factory=dict)
     closed: bool = field(default=False)
 
 
@@ -63,6 +66,7 @@ def build_runtime(
     *,
     catalog: Any = None,
     notifier: Any = None,
+    host_notifications: Any = None,
 ) -> RuntimeDeps:
     """按命令模式创建运行协作者；不隐式创建状态库。"""
     from camctl.persistence.repositories.capture import register_capture_guards
@@ -87,6 +91,8 @@ def build_runtime(
     register_cancellation_guards()
     register_report_guards()
     register_window_guard()
+    from camctl.persistence.repositories.motor import register_motor_guards
+    register_motor_guards()
     state_db = Path(config.paths.state_db).expanduser().resolve()
     if not state_db.exists():
         raise FileNotFoundError(f"状态库不存在，日常入口不创建: {state_db}")
@@ -100,6 +106,7 @@ def build_runtime(
         catalog=catalog if catalog is not None else _default_catalog(config),
         notifier=notifier,
         log_runtime=_log_wiring(config),
+        host_notifications=host_notifications,
     )
 
 
@@ -257,6 +264,11 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
     ready = Path(deps.config.paths.ready).expanduser().resolve()
     processing = Path(deps.config.paths.processing).expanduser().resolve()
     drivers = current_registry()
+    from camctl.bootstrap.motor_assembly import motor_flow
+    from camctl.motor.notification import NotificationWriter
+    writer = deps.host_notifications
+    if writer is None:
+        writer = NotificationWriter(None)
     flows = {
         "report": report_flow(
             state_db=deps.state_db,
@@ -270,7 +282,9 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
                           if failure_log is not None else None),
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
-        "cancel": cancel_flow(ready=ready, processing=processing),
+        "cancel": cancel_flow(ready=ready, processing=processing,
+                              motor_permits=deps.motor_permits),
+        "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
         "scheduling": capture_flow(session_capture_assembly(
@@ -367,7 +381,8 @@ async def execute_command(
             flows=flows,
             restricted_flows={
                 "cancel": cancel_flow(
-                    ready=ready, processing=processing, unscheduled_only=True),
+                    ready=ready, processing=processing, unscheduled_only=True,
+                    motor_permits=deps.motor_permits),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
                     capture_factory=session_capture_assembly(

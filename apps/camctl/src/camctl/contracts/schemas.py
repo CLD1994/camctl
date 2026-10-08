@@ -31,6 +31,7 @@ _SCHEMA_RESOURCES = (
     "protocol/plan.schema.json",
     "protocol/status-report.schema.json",
     "protocol/capabilities.schema.json",
+    "protocol/host-notification.schema.json",
 )
 
 

@@ -362,6 +362,8 @@ def main() -> None:
             row.update(device_id='camera', scheduled_at=0, effective_params_json='{}', driver_id='driver', max_delay_ms=0)
         if action_type in (4, 5):
             row.update(scheduled_at=0, source_resolution_state=2, resolved_source_plan_id=1)
+        if action_type == 8:
+            row.update(scheduled_at=0,max_delay_ms=1000)
         insert(db, 'actions', **row)
     insert(db, 'auto_preview_links', id=1, obtain_action_id=2, source_action_id=1,
            parameter_type='photo', preview_support=1, is_valid=1)
@@ -387,6 +389,8 @@ def main() -> None:
            relative_path='deliveries/1.bin', retention_state=1, cleanup_state=1, **meta)
     insert(db, 'operation_runs', id=1, action_id=2, delivery_id=1, kind=3, responsibility_key='read/1', copy_id=1,
            status=2, attempts_used=1, max_attempts_used=3, timeout_s_json='10', retry_interval_s_json='3', retry_wait_required=0)
+    insert(db, 'actions',id=100,plan_id=1,input_index=99,name='motor',type=8,input_fields_json='{}',execution_spec_json='{}',status=2,execution_started=1,cancel_requested=0,scheduled_at=0,max_delay_ms=1000,**meta)
+    insert(db, 'motor_notifications', id=1,action_id=100,intent_at=0,intent_operation_key='motor-intent',outcome=1)
     insert(db, 'file_copies', id=1, delivery_id=1, source_device_file_id=1, target_file_id=1,
            round=1, recopies_used=0, max_recopies_used=2, source_size=100, committed_bytes=0,
            reset_state=1, slot_device_id='camera', verification_state=1)

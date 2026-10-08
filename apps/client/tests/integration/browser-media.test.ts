@@ -73,12 +73,12 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
     obtain = r.plans![0].actions![1];
   capture.type = "camera_timelapse";
   capture.name = "延时摄影";
-  capture.result = { capture: { status: "completed", captured_count: 100 } };
+  delete capture.result;
   const o = capture.outputs![0],
     d = obtain.deliveries![0];
   capture.outputs = Array.from({ length: 100 }, (_, i) => ({
     ...structuredClone(o),
-    output_id: "o-img-" + i,
+    output_id: String(1000 + i),
     original_name: "图片" + i + ".png",
     media_type: "image/png",
   }));
@@ -87,15 +87,20 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
   };
   obtain.deliveries = Array.from({ length: 100 }, (_, i) => ({
     ...structuredClone(d),
-    delivery_id: "d-img-" + i,
-    output_id: "o-img-" + i,
-    file_name: "d-img-" + i + ".png",
+    delivery_id: String(2000 + i),
+    output_id: String(1000 + i),
+    file_name: String(2000 + i) + ".png",
     display_name: "图片" + i + ".png",
   }));
   app.applyReports([reportInput(r)]);
+  expect(app.coverage(), JSON.stringify(app.state().imports)).toBe(r.to_wm);
   for (let i = 0; i < 14; i++) {
     const f = files.createBatch([
-      { fileName: "d-img-" + i + ".png", size: bytes.length, kind: "media" },
+      {
+        fileName: String(2000 + i) + ".png",
+        size: bytes.length,
+        kind: "media",
+      },
     ]).files[0];
     await files.upload(f.id, Readable.from([bytes]));
   }

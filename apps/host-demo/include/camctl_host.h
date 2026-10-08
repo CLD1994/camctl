@@ -8,6 +8,13 @@ extern "C" {
 
 /* 路径字节数不含结尾 NUL。所有路径均为绝对路径。 */
 #define CAMCTL_HOST_PATH_MAX 4095
+#define CAMCTL_HOST_NOTIFICATION_LINE_DEFAULT 4096
+#define CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT 64
+#define CAMCTL_HOST_NOTIFICATION_LINE_MAX 65536
+#define CAMCTL_HOST_NOTIFICATION_QUEUE_MAX 4096
+typedef void (*camctl_host_motor_control_callback)(int position);
+int camctl_host_register_motor_control_callback(camctl_host_motor_control_callback callback);
+
 typedef struct camctl_host_config {
     const char *camctl_path;
     const char *ready_path;
@@ -22,13 +29,26 @@ typedef struct camctl_host_config {
     size_t log_record_capacity;
     size_t log_file_size;
     uint32_t log_file_count;
+    size_t notification_line_capacity;  /* 包含 LF；1～65536 字节。 */
+    size_t notification_queue_capacity; /* 待调用记录；1～4096 项。 */
 } camctl_host_config;
 
 #define CAMCTL_HOST_CONFIG_INIT                                                                    \
-    {                                                                                              \
-        NULL, NULL, NULL,       NULL,       NULL,     3,                                           \
-        5000, 64,   256 * 1024, 256 * 1024, 8 * 1024, 10 * 1024 * 1024,                            \
-        3}
+    {NULL,                                                                                         \
+     NULL,                                                                                         \
+     NULL,                                                                                         \
+     NULL,                                                                                         \
+     NULL,                                                                                         \
+     3,                                                                                            \
+     5000,                                                                                         \
+     64,                                                                                           \
+     256 * 1024,                                                                                   \
+     256 * 1024,                                                                                   \
+     8 * 1024,                                                                                     \
+     10 * 1024 * 1024,                                                                             \
+     3,                                                                                            \
+     CAMCTL_HOST_NOTIFICATION_LINE_DEFAULT,                                                        \
+     CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT}
 
 /* 初始化一次，成功后持续运行。0 仅表示本地安排成功，失败 -1 并设置 errno。
  * 主程序保留模块子进程的退出记录，不显式忽略 SIGCHLD、不设置 SA_NOCLDWAIT，

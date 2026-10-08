@@ -59,6 +59,35 @@ class DemoIntegration(unittest.TestCase):
                 try: os.killpg(proc.pid,signal.SIGKILL)
                 except ProcessLookupError: pass
                 proc.communicate(timeout=5)
+    def test_demo_records_motor_notification_position(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            ready, processing = root / 'ready', root / 'processing'
+            ready.mkdir()
+            processing.mkdir()
+            (root / 'run-mode').write_text('motor_control')
+            launcher = root / 'controlled-camctl'
+            launcher.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' ' +
+                                shlex.quote(CLI) + ' "$@"\n')
+            launcher.chmod(0o755)
+            output = root / 'stdout'
+            with output.open('w') as stream:
+                proc = subprocess.Popen([DEMO, '--camctl', str(launcher), '--ready', str(ready),
+                                         '--processing', str(processing), '--log', str(root / 'log'),
+                                         '--config', str(root)], stdin=subprocess.PIPE,
+                                        stdout=stream, stderr=subprocess.PIPE, start_new_session=True)
+                try:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        if 'position=-12' in output.read_text():
+                            break
+                        time.sleep(.005)
+                    else:
+                        self.fail('演示回调未呈现通知的位置参数')
+                finally:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.communicate(timeout=5)
+
     def test_invalid_start_arguments(self):
         result=subprocess.run([DEMO],stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True)
         self.assertNotEqual(result.returncode,0)

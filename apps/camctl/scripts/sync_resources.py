@@ -17,6 +17,7 @@ RESOURCE_SOURCES: dict[str, str] = {
     "protocol/plan.schema.json": "protocol/schemas/plan.schema.json",
     "protocol/status-report.schema.json": "protocol/schemas/status-report.schema.json",
     "protocol/capabilities.schema.json": "protocol/schemas/capabilities.schema.json",
+    "protocol/host-notification.schema.json": "protocol/schemas/host-notification.schema.json",
     "protocol/workflow-codes.json": "protocol/errors/workflow-codes.json",
     "sql/core.sql": "docs/camctl/database/schema/core.sql",
     "sql/workflows.sql": "docs/camctl/database/schema/workflows.sql",

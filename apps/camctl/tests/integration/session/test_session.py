@@ -141,6 +141,28 @@ async def _run(context):
     return await run_session(context, None)
 
 
+@pytest.mark.asyncio
+async def test_final_clock_failure_releases_admission_before_restricted_work(environment):
+    from camctl.session.clock import ClockBecameUntrusted
+    from camctl.session.locks import probe_admission
+
+    context, recorder, holder, _ = environment
+
+    async def motor(ctx):
+        raise ClockBecameUntrusted("发送前检查失败")
+
+    async def cancel(ctx):
+        assert probe_admission(ctx.paths.admission_lock).status.value == "acquired_and_released"
+        recorder.calls.append("restricted-cancel")
+
+    context.flows = {"motor": motor, "other": recorder.ok}
+    context.restricted_flows = {"cancel": cancel}
+    context.once_report = recorder.ok
+    outcome = await _run(context)
+    assert outcome.reason == "clock_invalid"
+    assert recorder.calls == ["restricted-cancel", "ok"]
+
+
 class FixedClock:
     """读数固定的墙钟：推进循环按轮读取当前时间。"""
 

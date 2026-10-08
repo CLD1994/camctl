@@ -68,6 +68,10 @@ class TargetSettlement:
             return self._settle_cleanup(target_action_id)
         if kind == _CANCEL_TYPE:
             return await self._settle_cancel_action(target_action_id)
+        if kind == 8:
+            from camctl.persistence.repositories.motor import read_motor_facts
+            facts = read_motor_facts(self._owned.connection, target_action_id)
+            return SettlementOutcome(complete=facts.action["status"] in _ACTION_TERMINAL)
         if kind == _REPORT_TYPE:
             # 报告动作的同步责任分类由资格与生效承担；共享生成
             # 不属于目标范围，本次有限处理到此完成。

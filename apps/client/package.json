@@ -12,9 +12,9 @@
     "start": "tsx src/server/main.ts",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run tests/unit",
-    "pretest:integration": "npm run build",
+    "pretest:integration": "pnpm run build",
     "test:integration": "vitest run tests/integration",
-    "test": "npm run test:unit && npm run test:integration"
+    "test": "pnpm run test:unit && pnpm run test:integration"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

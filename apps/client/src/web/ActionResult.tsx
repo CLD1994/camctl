@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { resultProducts, resultNotes } from "./result-model";
+import { resultProducts, resultNotes, actionIssueText } from "./result-model";
 import { MediaResults } from "./MediaResults";
 import { isCameraAction } from "../shared/actions";
 import { actionLabel, Badge, Facts } from "./common";
@@ -16,8 +16,10 @@ export function ActionResult({
   run,
   open,
   active,
+  motorInputText,
 }: {
   active: boolean;
+  motorInputText?: string;
   action: ReportAction;
   plan: ReportPlan;
   allPlans: ReportPlan[];
@@ -40,13 +42,7 @@ export function ActionResult({
     return n ? [`${n} ${name}`] : [];
   });
   const issue = action.error;
-  const issueText = issue
-    ? typeof issue.details?.message === "string"
-      ? issue.details.message
-      : "执行遇到问题，展开查看原因"
-    : action.expiration_reason
-      ? "已超过允许启动的时间范围"
-      : undefined;
+  const issueText = actionIssueText(action);
   const syncMissing =
     issue?.code === "sync_report_not_found" ||
     (result && JSON.stringify(result).includes("sync_report_not_found"));
@@ -171,9 +167,18 @@ export function ActionResult({
         </details>
         <details>
           <summary>输入与生效参数</summary>
+          {action.type === "motor_control" && motorInputText !== undefined && (
+            <>
+              <p>输入参数</p>
+              <pre data-testid="motor-input-params">{motorInputText}</pre>
+            </>
+          )}
           <Facts
             value={{
-              输入参数: action.input_params,
+              ...(action.type === "motor_control" &&
+              motorInputText !== undefined
+                ? {}
+                : { 输入参数: action.input_params }),
               生效参数: action.effective_params,
               业务策略: action.policy,
             }}

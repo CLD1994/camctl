@@ -76,7 +76,8 @@
             "obtain_action_outputs",
             "delete_action_outputs",
             "cancel_task",
-            "report_status"
+            "report_status",
+            "motor_control"
           ]
         }
       ]
@@ -1279,7 +1280,14 @@
           "then": {
             "properties": {
               "type": {
-                "$ref": "#/$defs/camera_action_type"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/camera_action_type"
+                  },
+                  {
+                    "const": "motor_control"
+                  }
+                ]
               }
             },
             "required": [
@@ -1481,11 +1489,29 @@
                 }
               ]
             },
-            "properties": {
-              "policy": {
-                "maxProperties": 0
+            "allOf": [
+              {
+                "if": {
+                  "not": {
+                    "properties": {
+                      "type": {
+                        "const": "motor_control"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "policy": {
+                      "maxProperties": 0
+                    }
+                  }
+                }
               }
-            }
+            ]
           }
         },
         {
@@ -1929,6 +1955,73 @@
                 ]
               }
             }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "motor_control"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "effective_params"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                },
+                {
+                  "required": [
+                    "deliveries"
+                  ]
+                },
+                {
+                  "required": [
+                    "device_execution"
+                  ]
+                },
+                {
+                  "required": [
+                    "result"
+                  ]
+                }
+              ]
+            },
+            "allOf": [
+              {
+                "if": {
+                  "not": {
+                    "$ref": "#/$defs/admission_failure"
+                  }
+                },
+                "then": {
+                  "required": [
+                    "scheduled_at",
+                    "input_params",
+                    "policy"
+                  ],
+                  "properties": {
+                    "input_params": {
+                      "$ref": "host-notification.schema.json#/$defs/motor_params"
+                    },
+                    "policy": {
+                      "$ref": "plan.schema.json#/$defs/time_window_policy"
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       ]

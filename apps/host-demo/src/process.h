@@ -8,7 +8,8 @@
 typedef enum { HOST_EXEC_UNKNOWN, HOST_EXEC_OBSERVED } host_exec_evidence;
 typedef struct {
     pid_t pid, pgid;
-    int out_fd, err_fd;
+    int out_fd, err_fd, notification_fd, notification_write_fd;
+    bool notifications_enabled;
     char *output;
     size_t length, capacity;
     bool overflow, io_error, ended, reaped, wait_fault;
@@ -27,5 +28,7 @@ int host_child_spawn(host_child *c, const camctl_host_config *config, host_comma
 void host_child_collect(host_child *c, host_child_log log, void *context);
 bool host_child_done(const host_child *c);
 int host_pipe(int fds[2]);
+int host_child_prepare_notifications(host_child *c);
+void host_child_close_notifications(host_child *c);
 int host_check_reaping_contract(void);
 #endif

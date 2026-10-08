@@ -11,7 +11,7 @@ CREATE TABLE history_events (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     transaction_id INTEGER NOT NULL REFERENCES history_transactions(id) DEFERRABLE INITIALLY DEFERRED,
 -- 事件登记生成开始
-    event_type INTEGER NOT NULL CHECK (event_type IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33)),
+    event_type INTEGER NOT NULL CHECK (event_type IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34)),
 -- 事件登记生成结束
     event_version INTEGER NOT NULL CHECK (event_version = 1),
     occurred_at INTEGER NOT NULL,

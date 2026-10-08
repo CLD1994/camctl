@@ -32,6 +32,8 @@ FLOW_PREFIXES = (
     "camctl.cancellation",
     "camctl.reporting",
     "camctl.history",
+    "camctl.motor.service",
+    "camctl.motor.rules",
 )
 #: 设备与日志适配器实现（图中的 A 层；文件执行 host_files 归共享
 #: 基础设施）。适配器实现之间互不依赖。
@@ -50,6 +52,7 @@ PORT_PREFIXES = (
     "camctl.host_files",
     "camctl.devices.parameter_schemas",
     "camctl.acceptance.schema",
+    "camctl.motor.notification",
 )
 #: 装配入口与装配辅助：创建实际资源并传入流程，允许接触 SQLite、
 #: 配置与锁实现。报告生成子进程入口 worker 在自己的进程内承担同

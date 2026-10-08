@@ -121,6 +121,18 @@ class DeliveryIntegration(unittest.TestCase):
             with self.subTest(link=link):
                 self.assertTrue((readme.parent / link.split('#', 1)[0]).exists(), link)
 
+    def test_installed_motor_callback_has_only_int_position(self):
+        _, build, prefix = self.installation()
+        source = build / 'motor-consumer.c'
+        source.write_text('#include <camctl_host.h>\n'
+                          'static void motor(int position) {(void)position;}\n'
+                          'int main(void) {return camctl_host_register_motor_control_callback(motor);}\n')
+        executable = build / 'motor-consumer'
+        self.run_command(['cc', '-std=c11', '-Werror', str(source),
+                          f'-I{prefix}/include', str(prefix / 'lib/libcamctl_host.a'),
+                          '-pthread', '-o', str(executable)], build)
+        self.run_command([str(executable)], build)
+
     def test_installed_example_uses_public_header_and_library(self):
         _, build, prefix = self.installation()
         example = prefix / 'share/doc/camctl_host/examples/demo.c'

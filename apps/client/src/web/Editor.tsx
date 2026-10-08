@@ -600,9 +600,11 @@ function ActionEditor(
             <span>
               执行时间{" "}
               {isCameraAction(action.type) ||
-              ["obtain_action_outputs", "delete_action_outputs"].includes(
-                action.type,
-              ) ? (
+              [
+                "obtain_action_outputs",
+                "delete_action_outputs",
+                "motor_control",
+              ].includes(action.type) ? (
                 <span className="required">必填</span>
               ) : unselected ? (
                 <small>选择动作类型后确定时间要求</small>
@@ -849,7 +851,23 @@ function ActionEditor(
           </>
         ) : (
           <>
-            {Object.hasOwn(action, "policy") &&
+            {action.type === "motor_control" && (
+              <Field
+                content={content}
+                path={[...base, "policy", "max_delay_ms"]}
+                schema={{
+                  type: "integer",
+                  minimum: 0,
+                  title: "最大允许延迟",
+                  description: "单位为毫秒；必须明确填写，0 表示不允许延迟。",
+                }}
+                name="max_delay_ms"
+                required
+                change={change}
+              />
+            )}
+            {action.type !== "motor_control" &&
+              Object.hasOwn(action, "policy") &&
               (!isObject(action.policy) ||
                 Object.keys(action.policy).length > 0) && (
                 <div className="notice warning">
@@ -901,14 +919,18 @@ function ActionEditor(
             content={content}
             path={[...base, "policy"]}
             label="业务策略 JSON"
-            required={isCameraAction(action.type)}
+            required={
+              isCameraAction(action.type) || action.type === "motor_control"
+            }
             change={change}
           />
-          {!isCameraAction(action.type) && Object.hasOwn(action, "policy") && (
-            <button onClick={() => put("policy", undefined, true)}>
-              省略策略字段
-            </button>
-          )}
+          {!isCameraAction(action.type) &&
+            action.type !== "motor_control" &&
+            Object.hasOwn(action, "policy") && (
+              <button onClick={() => put("policy", undefined, true)}>
+                省略策略字段
+              </button>
+            )}
         </details>
       </div>
     </article>

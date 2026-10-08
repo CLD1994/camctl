@@ -572,6 +572,7 @@ class HistoryRepository:
             yield from _ids_where(connection, "actions", "id", entity_id)
             action = entity_id
             yield from _ids_where(connection, "device_activities", "action_id", action)
+            yield from _ids_where(connection, "motor_notifications", "action_id", action)
             processing_ids = _ids_where(
                 connection, "recording_processing", "action_id", action)
             yield from processing_ids
@@ -757,7 +758,7 @@ class HistoryRepository:
             tables: dict[str, dict[int, dict]] = {}
             for table in (
                 "plans", "actions", "outputs", "deliveries",
-                "plan_file_diagnostics", "device_activities", "auto_preview_links",
+                "plan_file_diagnostics", "device_activities", "motor_notifications", "auto_preview_links",
             ):
                 rows = connection.execute(
                     f"SELECT * FROM {table}"

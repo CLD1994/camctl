@@ -59,6 +59,7 @@
 | 表 | 记录职责与定义位置 |
 | --- | --- |
 | `output_origins` | [预览或修复成品与原产物的关系](database/outputs-files.md#产物来源关系) |
+| `motor_notifications` | [电机发送意图与结果](database/workflow-fields.md#电机发送事实) |
 | `auto_preview_links` | [自动取回与来源拍摄的关联及能力依据](database/sources-obtaining.md#自动预览取回关联) |
 | `action_dependencies` | [取回或范围清理的固定来源成员](database/sources-obtaining.md#取回与范围清理的来源成员) |
 | `obtain_source_selections` | [取回的逐来源选择进度](database/sources-obtaining.md#取回的来源选择与目标明细) |

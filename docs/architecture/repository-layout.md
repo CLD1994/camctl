@@ -6,7 +6,7 @@
 | --- | --- |
 | `apps/client` | 本地网页、Node.js 服务、客户端存储、依赖与组件测试 |
 | `apps/camctl` | ARM Linux 上的 Python CLI，实现设备调度、持久化和产物管理 |
-| `apps/host-demo` | C 接入模块与终端演示，供第三方主程序直接接入进程管理与文件领取 |
+| `apps/host-demo` | C 接入模块与终端演示，供第三方主程序接入进程管理、文件领取及各消息类型的回调 |
 | `protocol` | 机器可读 Schema 与标准协议样例的唯一来源 |
 | `docs/architecture` | 全局业务、协议语义与组件协作设计 |
 | `docs/client`、`docs/camctl`、`docs/host-demo` | 各组件的设计入口、运行与验证说明 |
@@ -41,5 +41,7 @@ Docker 构建上下文为仓库根，客户端 apps/client/Dockerfile 与 Compos
 演示生成文件与大型媒体不作为公共协议样例。协议样例仅有一份权威文件，报告文件名中已有摘要的字节必须保持不变。
 
 ## C 接入模块与终端演示
+
+模块解析[主程序通知](../../protocol/host-notifications.md)，按消息类型调用主程序注册的函数；电机实际控制由主程序负责。消息机器表示在根 `protocol` 维护，回调接口在 host 的[公开接口专题](../host-demo/implementation.md#按消息类型注册回调)定义。
 
 本组件使用 C，运行目标为 Linux，交付可由第三方现有主程序调用的模块，以及使用同一模块的终端演示程序。模块负责管理真实 CLI 进程、递交计划文件路径、有限自动重试和同步领取文件；业务调度由 camctl 负责，实际传输由第三方负责。行为与验收见[主程序接入设计规格](../host-demo/design.md)，构建、调用与分类测试见[源码入口](../../apps/host-demo/README.md)，实际验收范围见[验证记录](../host-demo/verification.md)。

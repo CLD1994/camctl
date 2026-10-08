@@ -26,7 +26,7 @@ def build_action_spec(validation) -> dict:
             return build_capture_spec(literal, task)
         if literal == "obtain_action_outputs":
             return validate_obtain_spec(build_obtain_spec(validation.raw["params"]))
-        if literal in {"delete_action_outputs", "cancel_task", "report_status"}:
+        if literal in {"delete_action_outputs", "cancel_task", "report_status", "motor_control"}:
             return {}
         raise ValueError("没有对应动作的执行定义")
     except (TypeError, ValueError, AttributeError) as error:
@@ -67,7 +67,7 @@ def read_action_spec(row: Mapping) -> dict | None:
             if validated != build_obtain_spec(original["params"]):
                 raise ValueError("取回选择方式与首次原输入矛盾")
             return validated
-        if literal in {"delete_action_outputs", "cancel_task", "report_status"} and spec == {}:
+        if literal in {"delete_action_outputs", "cancel_task", "report_status", "motor_control"} and spec == {}:
             return {}
         raise ValueError("执行定义与所属动作类型不符")
     except (KeyError, ValueError, TypeError) as error:

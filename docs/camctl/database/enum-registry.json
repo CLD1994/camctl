@@ -45,7 +45,8 @@
         "OBTAIN_ACTION_OUTPUTS": 4,
         "DELETE_ACTION_OUTPUTS": 5,
         "CANCEL_TASK": 6,
-        "REPORT_STATUS": 7
+        "REPORT_STATUS": 7,
+        "MOTOR_CONTROL": 8
       }
     },
     "cancel_delivery_items.status": {
@@ -483,6 +484,16 @@
         "OUTSTANDING": 1,
         "ACKNOWLEDGED": 2,
         "CANCELED": 3
+      }
+    },
+    "motor_notifications.outcome": {
+      "contract": "workflow-fields.md#电机发送事实",
+      "members": {
+        "PENDING": 1,
+        "NOT_SENT": 2,
+        "WRITTEN": 3,
+        "FAILED": 4,
+        "UNCONFIRMED": 5
       }
     }
   },

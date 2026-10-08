@@ -899,6 +899,150 @@
       "item_error_ids": {
         "cancel_items": 3
       }
+    },
+    "motor_channel_unavailable": {
+      "stage": "execution",
+      "description": "通知通道未接入、描述符失效或已经停用，本次动作未开始写入。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "enum": [
+              "not_connected",
+              "invalid_descriptor",
+              "disabled_after_partial_write"
+            ]
+          },
+          "errno": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reason": {
+                  "enum": [
+                    "not_connected",
+                    "disabled_after_partial_write"
+                  ]
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "errno"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "action_error_id": 27
+    },
+    "motor_notification_failed": {
+      "stage": "execution",
+      "description": "本次通知没有完整写入，保留实际失败原因、已经写入的字节数及适用的系统错误号。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "enum": [
+              "would_block",
+              "broken_pipe",
+              "os_error",
+              "short_write",
+              "message_too_large"
+            ]
+          },
+          "written_bytes": {
+            "$ref": "status-report.schema.json#/$defs/uint"
+          },
+          "errno": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "reason",
+          "written_bytes"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reason": {
+                  "enum": [
+                    "would_block",
+                    "broken_pipe",
+                    "os_error"
+                  ]
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            },
+            "then": {
+              "required": [
+                "errno"
+              ],
+              "properties": {
+                "written_bytes": {
+                  "const": 0
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "errno"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "reason": {
+                  "const": "message_too_large"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            },
+            "then": {
+              "properties": {
+                "written_bytes": {
+                  "const": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "action_error_id": 28
+    },
+    "motor_notification_unconfirmed": {
+      "stage": "execution",
+      "description": "恢复时已有发送意图，但没有可靠发送结果或未发送结论；不重发，也不补造写入事实。",
+      "details_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "action_error_id": 29
     }
   }
 }

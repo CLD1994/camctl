@@ -25,6 +25,7 @@ from camctl.contracts.values import OperationKey, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
 from camctl.session.clock import (
+    ClockBecameUntrusted,
     ClockCheckInput,
     ExecutionMode,
     check_clock,
@@ -226,7 +227,12 @@ async def _run_session(
             return _outcome_error("state_db_error", {"error": f"接纳锁取得失败: {error}"})
 
         while True:
-            fatal = await _drive_flows(context)
+            try:
+                fatal = await _drive_flows(context)
+            except ClockBecameUntrusted:
+                admission_lease.close()
+                admission_lease = None
+                return await _restricted_session(context)
             if fatal is not None:
                 # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
                 return _outcome_error("state_db_error", {"error": fatal})
@@ -261,6 +267,8 @@ async def _drive_flows(context: SessionContext) -> str | None:
     for name, flow in context.flows.items():
         try:
             await flow(context)
+        except ClockBecameUntrusted:
+            raise
         except StateDbFailure as error:
             if name == "report":
                 await _trigger_failure_log(context, error)
@@ -338,7 +346,7 @@ def _pending_deadline_seconds(
         scheduled = int(scheduled_at)
         if now < scheduled:
             next_times.append(scheduled)
-        elif int(kind) in (1, 2, 3) and max_delay_ms is not None:
+        elif int(kind) in (1, 2, 3, 8) and max_delay_ms is not None:
             next_times.append(scheduled + int(max_delay_ms) * 1000)
     if not next_times:
         return None
@@ -379,6 +387,8 @@ async def _restricted_session(context: SessionContext) -> SessionOutcome:
     if context.once_report is not None:
         try:
             await context.once_report(context)
+        except ClockBecameUntrusted:
+            raise
         except StateDbFailure as error:
             return _outcome_error("state_db_error", {"error": str(error)})
         except Exception:

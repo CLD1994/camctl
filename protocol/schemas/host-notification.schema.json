@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "camctl 向主程序发送的通知",
+  "description": "UTF-8 NDJSON 的单条消息内容；完整行、重复字段和 Unicode 标量值由解析层校验。CLI 输出规范整数，接收按精确数学值校验。",
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "motor_control"
+    },
+    "action_instance_id": {
+      "$ref": "status-report.schema.json#/$defs/entity_id"
+    },
+    "params": {
+      "$ref": "#/$defs/motor_params"
+    }
+  },
+  "required": [
+    "type",
+    "action_instance_id",
+    "params"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "motor_params": {
+      "type": "object",
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647,
+          "description": "主程序定义的位置；数学整数按精确值受理，CLI 输出规范十进制整数字面量。"
+        }
+      },
+      "required": [
+        "position"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

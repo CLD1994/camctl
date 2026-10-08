@@ -61,6 +61,7 @@
 | 5 | `DELETE_ACTION_OUTPUTS` |
 | 6 | `CANCEL_TASK` |
 | 7 | `REPORT_STATUS` |
+| 8 | `MOTOR_CONTROL` |
 
 ### `cancel_delivery_items.status`
 
@@ -595,6 +596,18 @@
 | 2 | `ACKNOWLEDGED` |
 | 3 | `CANCELED` |
 
+### `motor_notifications.outcome`
+
+[行为说明](workflow-fields.md#电机发送事实)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `PENDING` |
+| 2 | `NOT_SENT` |
+| 3 | `WRITTEN` |
+| 4 | `FAILED` |
+| 5 | `UNCONFIRMED` |
+
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`
@@ -683,6 +696,9 @@
 | 24 | `cancel_self_target` | `execution` |
 | 25 | `cancel_target_not_found` | `execution` |
 | 26 | `sync_report_not_found` | `execution` |
+| 27 | `motor_channel_unavailable` | `execution` |
+| 28 | `motor_notification_failed` | `execution` |
+| 29 | `motor_notification_unconfirmed` | `execution` |
 
 ### `cancel_delivery_items.error_code`
 

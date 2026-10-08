@@ -38,6 +38,7 @@ it.each([
   ["report_status", [], false],
   ["cancel_task", [], false],
   ["delete_action_outputs", [], false],
+  ["motor_control", [], false],
   ["camera_record", ["record"], true],
 ] as const)("动作 %s 决定设备栏及其候选", (action, devices, requiresDevice) => {
   const result = deviceOptions(capabilities, action);
@@ -49,6 +50,7 @@ it.each([
     "delete_action_outputs",
     "cancel_task",
     "report_status",
+    "motor_control",
   ]);
 });
 it.each([null, { devices: [] }, { devices: [capabilities.devices[1]] }])(
@@ -60,6 +62,7 @@ it.each([null, { devices: [] }, { devices: [capabilities.devices[1]] }])(
       "delete_action_outputs",
       "cancel_task",
       "report_status",
+      "motor_control",
     ]);
   },
 );

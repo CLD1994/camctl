@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, replace
 from typing import Any
@@ -33,6 +34,8 @@ from camctl.cancellation.models import (
     StopWaitCancelItems,
 )
 from camctl.cancellation.targets import CancelLookup, CancelLookupError
+from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.json_values import json_equal
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
     ConsistencyError,
@@ -45,12 +48,14 @@ from camctl.contracts.workflow_errors import (
     registered_error,
     validate_error_details,
 )
+from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture_facts import (
     include_start_facts, load_start_facts, start_finish_event,
     unstarted_events, verify_unstarted_final,
 )
+from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.transaction import (
     CommandPlan,
@@ -431,6 +436,14 @@ class _FailCancelTargetsCommand:
             result=CancelTargetsSaved(CancelTargetsDisposition.ALREADY, ()))
 
 
+def _motor_cancel_request(command):
+    return {
+        "item_id": command.item_id,
+        "mode": command.mode.value,
+        "occurred_at": command.occurred_at,
+    }
+
+
 class _ApplyCancelTargetCommand:
     """保存一个目标的取消生效（CANCEL_CHANGED.APPLY）。
 
@@ -440,9 +453,10 @@ class _ApplyCancelTargetCommand:
     保存成功；目标取消已生效时只保存本项效果，复用原责任。
     """
 
-    def __init__(self, command: ApplyCancelTarget, key: OperationKey) -> None:
+    def __init__(self, command: ApplyCancelTarget, key: OperationKey, motor_permits=None) -> None:
         if not isinstance(command, ApplyCancelTarget):
             raise TypeError("取消生效申请必须使用 ApplyCancelTarget")
+        self._motor_permits = motor_permits if motor_permits is not None else {}
         self._command = command
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
@@ -464,6 +478,8 @@ class _ApplyCancelTargetCommand:
         mode = command.mode
         target_id = item["target_action_id"]
         action_rows: tuple = ()
+        motor_rows: tuple = ()
+        motor_evidence = {"motor_request":_motor_cancel_request(command)} if target["type"] == 8 else {}
         outcome_event = None
         plan_row = None
         start_events = []
@@ -479,11 +495,26 @@ class _ApplyCancelTargetCommand:
                 start_events = unstarted_events(
                     start, command.occurred_at,
                     run_status=int(enum_for("operation_runs.status").CANCELED), release=False)
+            elif target['type'] == 8:
+                from camctl.motor.rules import owns_send_permit
+                from camctl.persistence.repositories.motor import read_motor_facts
+                facts = read_motor_facts(connection, target_id)
+                if facts.notification is not None:
+                    permit = self._motor_permits.get(target_id)
+                    if not owns_send_permit(facts,permit):
+                        raise ConsistencyError('电机未发送取消缺少本地原意图许可')
+                    notice = row_facts(connection,'motor_notifications',facts.notification.notification_id)
+                    self._state.setdefault('motor_notifications',{})[notice['id']] = notice
+                    self._owners[('motor_notifications',notice['id'])] = ('action',target_id)
+                    motor_rows = (_update('motor_notifications',notice['id'],
+                        {'outcome':1,'finished_at':None}, {'outcome':2,'finished_at':command.occurred_at}),)
+                    motor_evidence['motor_permit'] = {'action_id':permit.action_id,
+                        'notification_id':permit.notification_id,'operation_key':str(permit.operation_key)}
             elif target["status"] != 1:
                 raise ConsistencyError("非拍摄目标的未启动取消要求待执行状态")
             before, after = {"cancel_requested": 0}, {"cancel_requested": 1}
-            if target["status"] == 1:
-                before["status"], after["status"] = 1, _ACTION_CANCELED
+            if target["status"] == 1 or target["type"] == 8:
+                before["status"], after["status"] = target["status"], _ACTION_CANCELED
                 outcome_event = _ITEM_SUCCEEDED, CancelOutcomeChoice.CANCELED.value
                 plan_row = self._pre_start_plan_row(connection, target)
             action_rows = (_update("actions", target_id, before, after),)
@@ -543,8 +574,8 @@ class _ApplyCancelTargetCommand:
         events = [_envelope(
             allocation.first_event_id, allocation.txn_id,
             _CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON,
-            (apply_row,) + action_rows + withdrawal_rows,
-            command.occurred_at)]
+            (apply_row,) + action_rows + motor_rows + withdrawal_rows,
+            command.occurred_at, motor_evidence)]
         next_event_id = allocation.first_event_id + 1
         for event in start_events:
             events.append(replace(event, event_id=next_event_id,
@@ -570,7 +601,8 @@ class _ApplyCancelTargetCommand:
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
             result=CancelTargetsSaved(CancelTargetsDisposition.SAVED,
-                                      (command.item_id,)))
+                                      (command.item_id,)),
+            read_coverage=ReadCoverage({("motor_notifications","action_id"):frozenset([target_id])}) if target["type"] == 8 else ReadCoverage())
 
     def _load(self, connection):
         item = row_facts(connection, "cancel_items", self._command.item_id)
@@ -677,9 +709,23 @@ class _ApplyCancelTargetCommand:
         rows = saved[0]["body"]["rows"]
         if not rows or rows[0]["table"] != "cancel_items"                 or rows[0]["id"] != self._command.item_id:
             raise TransactionError("原取消生效属于其他成员")
+        original_item = row_facts(connection,'cancel_items',self._command.item_id)
+        if original_item is None:
+            raise ConsistencyError('原取消事务的成员不存在')
+        original_target = row_facts(connection,'actions',original_item['target_action_id'])
+        if original_target is None:
+            raise ConsistencyError('原取消事务的目标不存在')
+        if original_target['type'] == 8 and not json_equal(saved[0]['body']['evidence'].get('motor_request'),_motor_cancel_request(self._command)):
+            raise TransactionError('原电机取消事务的完整输入与本次核实不符')
         if self._command.mode is CancelApplyMode.PRE_START:
             item = row_facts(connection, "cancel_items", self._command.item_id)
             target = row_facts(connection, "actions", item["target_action_id"])
+            if target['type'] == 8:
+                from camctl.persistence.repositories.motor import read_motor_facts
+                from camctl.motor.models import SendOutcome
+                facts = read_motor_facts(connection,target['id'])
+                if facts.action['status'] != 6 or (facts.notification is not None and facts.notification.outcome is not SendOutcome.NOT_SENT):
+                    raise ConsistencyError('原电机取消缺少共同保存的未发送终态')
             if target["type"] in (1, 2, 3):
                 verify_unstarted_final(connection, target, saved, released=False)
         elif self._command.mode in (CancelApplyMode.WITH_STOP, CancelApplyMode.ALREADY):
@@ -792,8 +838,147 @@ class _RecordCancelResultCommand:
         return self._already()
 
 
+def _verify_motor_cancel_rows(connection, saved, item):
+    with closing(
+        connection.execute(
+            "SELECT id,last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1"
+        )
+    ) as cursor:
+        latest = cursor.fetchone()
+    if latest is None:
+        raise ConsistencyError("电机取消事务缺少当前完整历史边界")
+    current_boundary = HistoryBoundary(*latest)
+    transaction = saved[0]["transaction"]
+    boundary = HistoryBoundary(transaction.txn_id, transaction.last_event_id)
+    final = {}
+    for event in saved:
+        for row in event["body"]["rows"]:
+            if (
+                row["table"]
+                not in ("actions", "plans", "cancel_items", "motor_notifications")
+                or not row["after"]["exists"]
+            ):
+                raise ConsistencyError("电机取消原事务包含未知所属记录")
+            final.setdefault((row["table"], row["id"]), {}).update(
+                row["after"]["values"]
+            )
+    for (table, identity), values in final.items():
+        current = row_facts(connection, table, identity)
+        if current is None:
+            raise ConsistencyError("电机取消原事务的结果记录缺失")
+        if table == "plans":
+            owner = ("plan", identity)
+        elif table == "actions":
+            owner = ("action", identity)
+        elif table == "cancel_items":
+            if identity != item["id"] or current["action_id"] != item["action_id"]:
+                raise ConsistencyError("电机取消原事务成员身份不符")
+            owner = ("action", item["action_id"])
+        else:
+            if current["action_id"] != item["target_action_id"]:
+                raise ConsistencyError("电机取消发送记录所属不符")
+            owner = ("action", item["target_action_id"])
+        actual = read_row_values_at_boundary(
+            connection,
+            owner=owner,
+            table=table,
+            row_id=identity,
+            columns=frozenset(values),
+            current_values=current,
+            boundary=boundary,
+            current_boundary=current_boundary,
+        )
+        if not json_equal(actual, values):
+            raise ConsistencyError("电机取消原事务的完整结果与历史不符")
+    return boundary
+
+
 class CancellationRepository:
     """取消目标固定与解析失败事务的 SQLite 仓储。"""
+
+    def __init__(self, *, motor_permits=None):
+        self.motor_permits = motor_permits if motor_permits is not None else {}
+
+    def verify_motor_operation(self, command, key, owned):
+        """使用新连接只读核实电机目标的原生效或原结果事务。"""
+        from camctl.persistence.repositories.motor import read_motor_facts
+
+        if not isinstance(command, (ApplyCancelTarget, RecordCancelResult)):
+            raise TypeError("电机取消核实要求原生效或结果请求")
+        connection = owned.connection
+        reading = False
+        try:
+            key = OperationKey(str(key))
+            if connection.in_transaction:
+                raise TransactionError("电机取消核实要求独立新连接")
+            with closing(connection.execute("BEGIN")):
+                pass
+            reading = True
+            item = row_facts(connection, "cancel_items", command.item_id)
+            if item is None:
+                raise ConsistencyError("电机取消核实缺少原成员")
+            read_motor_facts(connection, item["target_action_id"])
+            saved = saved_transaction_events(connection, key)
+            if saved is None:
+                outcome = DbOutcome(
+                    DbOutcomeKind.ROLLED_BACK,
+                    error=TransactionError("原电机取消操作身份可靠未提交"),
+                    stage="verification",
+                )
+            else:
+                if isinstance(command, ApplyCancelTarget):
+                    plan = _ApplyCancelTargetCommand(
+                        command, key, self.motor_permits
+                    )._reuse(connection, saved)
+                else:
+                    plan = _RecordCancelResultCommand(command, key)._reuse(saved)
+                    rows = saved[0]["body"]["rows"]
+                    if len(rows) != 1:
+                        raise TransactionError("原电机取消项结果的事务组成不符")
+                    if command.outcome is not None:
+                        expected = {
+                            "status": _ITEM_SUCCEEDED,
+                            "outcome": command.outcome.value,
+                            "error_code": None,
+                            "error_details_json": None,
+                        }
+                    else:
+                        validate_error_details(command.code, command.details)
+                        expected = {
+                            "status": _ITEM_FAILED,
+                            "outcome": None,
+                            "error_code": item_error_id("cancel_items", command.code),
+                            "error_details_json": command.details,
+                        }
+                    after = rows[0]["after"]["values"]
+                    if any(
+                        not json_equal(after.get(name), value)
+                        for name, value in expected.items()
+                    ):
+                        raise TransactionError("原电机取消项结果的完整输入与本次核实不符")
+                if not plan.read_only or plan.events:
+                    raise ConsistencyError("电机取消核实不得产生新事件")
+                boundary = _verify_motor_cancel_rows(connection, saved, item)
+                outcome = DbOutcome(
+                    DbOutcomeKind.COMPLETED,
+                    plan.result,
+                    boundary=boundary,
+                    stage="verification",
+                )
+            with closing(connection.execute("COMMIT")):
+                pass
+            reading = False
+            return outcome
+        except (sqlite3.Error, ValueError, TypeError) as error:
+            if reading:
+                try:
+                    with closing(connection.execute("ROLLBACK")):
+                        pass
+                except sqlite3.Error as rollback_error:
+                    return DbOutcome(
+                        DbOutcomeKind.UNKNOWN, error=rollback_error, stage="verification"
+                    )
+            return DbOutcome(DbOutcomeKind.UNKNOWN, error=error, stage="verification")
 
     def start_cancel_action(
         self, command: StartCancelAction, key: OperationKey,
@@ -824,7 +1009,7 @@ class CancellationRepository:
         owned: OwnedConnection,
     ) -> DbOutcome[CancelTargetsSaved]:
         receipt = commit_operation(
-            _ApplyCancelTargetCommand(command, key), key, owned)
+            _ApplyCancelTargetCommand(command, key, self.motor_permits), key, owned)
         return _outcome_of(receipt)
 
     def record_cancel_result(
@@ -1537,6 +1722,35 @@ def _guard_cancel_apply(event, context, items) -> None:
                 for item in context.state_rows.get(
                     "cancel_items", {}).values()}:
             raise EventValidationError("被标记目标必须属于本次取消成员")
+        target = context.state_rows['actions'][row.row_id]
+        if target['type'] == 8:
+            from camctl.persistence.repositories.motor import _notice, _validate_combination
+            from camctl.motor.models import MotorActionFacts, SendOutcome, SendPermit
+            from camctl.motor.rules import owns_send_permit
+            previous = context.complete_rows('motor_notifications','action_id',row.row_id)
+            notification_rows = [change for change in event.rows if change.table == 'motor_notifications']
+            if after_status != 6:
+                raise EventValidationError('电机可靠未发送取消必须共同进入取消终态')
+            if previous:
+                if len(previous) != 1 or len(notification_rows) != 1:
+                    raise EventValidationError('电机意图取消必须有唯一发送结论')
+                notice_values = next(iter(previous.values()))
+                permit_values = event.evidence.get('motor_permit',{})
+                try:
+                    permit = SendPermit(**permit_values)
+                except TypeError as error:
+                    raise EventValidationError('电机取消缺少发送许可依据') from error
+                if not owns_send_permit(MotorActionFacts(target,_notice(notice_values)),permit):
+                    raise EventValidationError('电机取消许可与原未决意图不匹配')
+                change = notification_rows[0]
+                if change.row_id != notice_values['id'] or change.after.values != {'outcome':2,'finished_at':event.occurred_at}:
+                    raise EventValidationError('电机取消必须共同保存可靠未发送事实')
+                final_notice = _notice({**notice_values,**change.after.values})
+            else:
+                if notification_rows or event.evidence.get('motor_permit') is not None:
+                    raise EventValidationError('没有意图的取消不能补建发送事实')
+                final_notice = None
+            _validate_combination({**target,**row.after.values},final_notice)
         marked.add(row.row_id)
     for row in event.rows:
         if row.table == "cancel_delivery_items" and not row.before.exists:

@@ -5,7 +5,13 @@ import {
   expect as browserExpect,
   type Browser,
 } from "@playwright/test";
-import { mkdtempSync, rmSync, copyFileSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  copyFileSync,
+  readFileSync,
+  readdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
@@ -126,7 +132,7 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
   expect(JSON.parse(draft.content.text).actions[0]).toEqual({
     name: "取回产物",
     type: "obtain_action_outputs",
-    params: { source: { action_instance_id: "a-001" }, output_ids: ["o-001"] },
+    params: { source: { action_instance_id: "1" }, output_ids: ["4"] },
   });
   const append = async (button: string) => {
     await page.getByTestId("tab-records").click();
@@ -157,10 +163,10 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
   await append("准备取消计划");
   const actions = JSON.parse(application.draft(draft.id).content.text).actions;
   expect(actions.map((a: { params: unknown }) => a.params)).toEqual([
-    { source: { action_instance_id: "a-001" }, output_ids: ["o-001"] },
-    { output_ids: ["o-001"] },
-    { target: { action_instance_id: "a-001" } },
-    { target: { plan_instance_id: "p-001" } },
+    { source: { action_instance_id: "1" }, output_ids: ["4"] },
+    { output_ids: ["4"] },
+    { target: { action_instance_id: "1" } },
+    { target: { plan_instance_id: "1" } },
   ]);
   expect(
     actions.every(
@@ -203,11 +209,14 @@ it("未发布交付没有本地文件时不暗示文件等待送达", async () =
   const { page, application } = await setup();
   await page.getByTestId("initialize-button").click();
   await page.getByTestId("nav-import").click();
-  await page
-    .getByTestId("import-files")
-    .setInputFiles(
-      "../../protocol/examples/client-protocol/03-obtain-partial/status-report-1-7b785ee3d38af0ea04a1b546cc21204ae119eccff83757e297d7b8b2d28b0b2c.json",
-    );
+  await page.getByTestId("import-files").setInputFiles(
+    join(
+      "../../protocol/examples/client-protocol/03-obtain-partial",
+      readdirSync(
+        "../../protocol/examples/client-protocol/03-obtain-partial",
+      ).find((name) => /^status-report-1-[0-9a-f]{64}\.json$/.test(name))!,
+    ),
+  );
   await browserExpect.poll(() => application.snapshot().plans?.length).toBe(1);
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("tab-records").click();
@@ -227,13 +236,13 @@ it("未发布交付没有本地文件时不暗示文件等待送达", async () =
     await summary.click();
   const failed = page
     .locator(".delivery")
-    .filter({ hasText: "d-202.mp4" })
+    .filter({ hasText: "3.mp4" })
     .first();
   await browserExpect(failed).toContainText("尚无本地副本");
   await browserExpect(failed).not.toContainText("等待接收");
   const published = page
     .locator(".delivery")
-    .filter({ hasText: "d-201.mp4" })
+    .filter({ hasText: "2.mp4" })
     .first();
   await browserExpect(published).toContainText("等待接收");
 }, 20000);

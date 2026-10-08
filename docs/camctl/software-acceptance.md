@@ -1595,6 +1595,22 @@
 - 证据：I1/I2 的 2026-10-08 Linux 验证记录：真实 C 模块与生产 CLI、工具启动组合验证保留退出记录、分批核验、组终止、线程实际停止、最终回收及下一调用；扫描未知和提前回收均保留管理责任。8 项 O6 全部通过。
 - 未核验前提：无
 
+## 十、电机控制与主程序通知增量
+
+本表映射[电机动作](../architecture/motor-control.md)、[通知协议](../../protocol/host-notifications.md)和[回调注册](../host-demo/implementation.md#按消息类型注册回调)的软件行为，不改变前述数据库验收编号。实施归属为 M1—M6、HN1—HN6 和路线图的客户端接入项；实际命令、环境和结果由[电机验证记录](verification.md#电机控制与单向通知验证2026-10-08)保存。
+
+| 契约范围 | 生产入口 | 可证伪测试入口 |
+| --- | --- | --- |
+| 精确位置、窗口和共同机器格式 | `protocol/schemas/host-notification.schema.json`、`camctl.acceptance`、`shared/protocol-validation.ts` | Python `contracts/test_motor_schema.py`、客户端 `motor-control.test.ts`、C `test_notification.c` 共用原数夹具；覆盖数学整数、边界、长尾精度和非法参数。 |
+| 唯一意图与原事务核实 | `camctl.persistence.repositories.motor`、`camctl.motor.service` | `persistence/test_motor_transactions.py`、`unit/motor/test_service.py`：原请求／键及完整历史边界一致，核实只读且不重授许可。 |
+| 取消与最后资格检查 | `camctl.cancellation`、`camctl.motor.rules`、`camctl.bootstrap.motor_assembly` | `cancellation/test_motor_cancel.py`、`unit/motor/test_decisions.py`、根 `test_camctl_motor_recovery.py`：四种寻址、可靠未发送原子取消、未知意图拒绝撤回、窗口两端和时钟失信。 |
+| 单次写入与描述符所有权 | `camctl.motor.notification`、`camctl.cli` | `unit/motor/test_notification.py`、`integration/motor/test_notification_pipe.py`：完整／失败／短写分区、后续通道停用、真实工具及报告进程不继承写端、提前退出关闭。 |
+| host 接收、背压、回调及交付 | `apps/host-demo/src/notification.c`、`callback_queue.c`、`host.c` | host 单元及 `test_notifications.c`、`test_delivery.py`：解析边界、真正满队列时继续收集标准流与回收 PID、共享 FIFO、安装接口与源码包。 |
+| 不重发与用户可见结果 | Python 电机流程、C 公共接口、客户端报告导入 | 根 `test_camctl_motor_recovery.py`、`test_camctl_motor_notifications.py`：进程及提交边界故障、host 自动重启、客户端真实导出／导入／ACK、慢回调与相机共存。 |
+| 历史、报告及发行物 | `camctl.history`、`camctl.reporting`、客户端 `server/database.ts` | `integration/motor/test_history_reports.py`、`bootstrap/test_distribution.py`、客户端 `motor-exact-json.test.ts`：同 H 正逆恢复、无副作用、仓库外 wheel、失败输入原数、派生重建与回滚。 |
+
+Python 组件测试路径相对 `apps/camctl/tests/`；前两行未标出分类的 Python 测试属于 `integration/`。客户端测试分别位于 `apps/client/tests/unit/` 和 `integration/`，host 测试位于 `apps/host-demo/tests/`，根测试位于 `tests/integration/`。这些软件验证不覆盖 TX2、电机实际执行或物理断电，具体部署输入见[部署交接](verification.md#部署交接与待核验项)。
+
 ## 执行记录
 
 - 2026-10-08（Linux x86_64，CPython 3.11.16）：I1/I2 与真实 O6 组合验证通过，验收 32、33、R-09、R-10、R-11 及遗留工具契约场景升级为已覆盖；34 增补 C 收场期间 pending 与预算的证据，R-12 分别登记 C 软件证据和部署联调前提。具体命令、环境和范围见[接入模块验证记录](../host-demo/verification.md)及[跨组件计划](../superpowers/plans/2026-09-30-camctl-integration.md#i1i2-验证记录2026-10-08linux-x86_64)。

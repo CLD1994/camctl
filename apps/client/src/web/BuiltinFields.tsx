@@ -13,7 +13,8 @@ import {
 } from "../shared/action-params";
 import type { ActionType } from "../shared/types";
 import { parseDraft, setValue, pointer, valueAt, type Path } from "./editing";
-import { JsonField } from "./Fields";
+import { JsonField, Field } from "./Fields";
+import notificationSchema from "../../../../protocol/schemas/host-notification.schema.json";
 
 export function BuiltinFields({
   content,
@@ -100,6 +101,20 @@ export function BuiltinFields({
         </>
       ) : (
         <>
+          {type === "motor_control" && (
+            <Field
+              content={content}
+              path={[...path, "position"]}
+              schema={{
+                ...notificationSchema.$defs.motor_params.properties.position,
+                title: "位置",
+                description: "位置单位、零点和业务合法范围由主程序定义。",
+              }}
+              name="position"
+              required
+              change={change}
+            />
+          )}
           {extra.length > 0 && (
             <p className="notice warning">
               包含不适用字段：{extra.join("、")}。原值保留，请在参数 JSON
@@ -322,7 +337,7 @@ export function BuiltinFields({
                     onValueChange={(selectedValue) =>
                       put(
                         "after_report_id",
-                        Number(selectedValue),
+                        selectedValue,
                         selectedValue === "",
                       )
                     }

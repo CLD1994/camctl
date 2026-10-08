@@ -170,6 +170,9 @@ def _validate_action(action: JsonValue, catalog: StaticActionCatalog, index: int
                 del input_fields["group"]
             else:
                 issues.append({"field": prefix + ".group", "reason": "range", "value": candidate})
+    if action_type == "motor_control" and "policy" in action:
+        if not schema_issues(plan_fragment("time_window_policy"), action["policy"], prefix + ".policy"):
+            max_delay = int(action["policy"]["max_delay_ms"])
     if action_type in _CAMERA_TYPES:
         if "policy" in action and not schema_issues(plan_fragment("camera_policy"), action["policy"], prefix + ".policy"):
             max_delay = int(action["policy"]["max_delay_ms"])

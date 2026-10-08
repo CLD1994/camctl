@@ -8,12 +8,33 @@ import type { Video } from "../server/models";
 import { mediaGroup } from "../shared/media";
 import { isObject } from "../shared/validation";
 
+export function actionIssueText(action: ReportAction): string | undefined {
+  const issue = action.error;
+  if (action.type === "motor_control") {
+    if (issue?.code === "motor_channel_unavailable")
+      return "通知通道不可用，未开始发送控制通知";
+    if (issue?.code === "motor_notification_failed")
+      return "控制通知未完整发送，本次发送已结束";
+    if (issue?.code === "motor_notification_unconfirmed")
+      return "控制通知发送结果不确定，不会再次发送";
+  }
+  return issue
+    ? typeof issue.details?.message === "string"
+      ? issue.details.message
+      : "执行遇到问题，展开查看原因"
+    : action.expiration_reason
+      ? "已超过允许启动的时间范围"
+      : undefined;
+}
+
 /** 仅汇总报告明确提供的业务结果，不用动作终态补造逐文件结果。 */
 export function resultNotes(
   action: ReportAction,
 ): Array<{ text: string; error: boolean }> {
   const notes: Array<{ text: string; error: boolean }> = [];
   const result = action.result;
+  if (action.type === "motor_control" && action.status === "succeeded")
+    notes.push({ text: "控制通知已发送", error: false });
   // 设备执行提示不属于动作 result，没有 result 的动作也要提示。
   if (action.device_execution)
     notes.push({

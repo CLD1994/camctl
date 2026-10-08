@@ -10,6 +10,10 @@ const directory = new URL('../docs/camctl/database/', import.meta.url);
 const json = path => JSON.parse(readFileSync(new URL(path,directory),'utf8'));
 const registry = json('event-transitions.json');
 const reports = json(registry.report_dependencies), enums = json('enum-registry.json');
+const schemaDirectory = new URL('../protocol/schemas/',import.meta.url);
+const schemas = Object.fromEntries(readdirSync(schemaDirectory)
+  .filter(name => name.endsWith('.schema.json') && name !== 'status-report.schema.json')
+  .map(name => [name, JSON.parse(readFileSync(new URL(name,schemaDirectory),'utf8'))]));
 const db = new DatabaseSync(':memory:');
 try {
   for (const file of readdirSync(new URL('schema/',directory)).filter(f=>f.endsWith('.sql')).sort()) db.exec(readFileSync(new URL(`schema/${file}`,directory),'utf8'));
@@ -18,7 +22,7 @@ try {
   const foreignKeys = Object.fromEntries(Object.keys(tables).flatMap(table=>db.prepare(`PRAGMA foreign_key_list(${table})`).all().map(k=>[`${table}.${k.from}`,`${k.table}.${k.to}`])));
   const context = {tables,foreignKeys,enums,reports};
   const result = validateEventRegistration(registry,context);
-  const reportResult = validateRegistration(reports,json(reports.public_schema),{...context,errors:json(reports.error_registry)});
+  const reportResult = validateRegistration(reports,json(reports.public_schema),{...context,errors:json(reports.error_registry),schemas});
   assert.deepEqual(result.reportColumns,reportResult.columns.sort(),'报告用途分析与字段登记的实际来源不一致');
   for (const item of [{contract: registry.history_contract},...Object.values(registry.guards)]) {
     const [file] = item.contract.split('#'); readFileSync(new URL(file,directory),'utf8');

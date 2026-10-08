@@ -756,7 +756,7 @@ it("报告详情逐项失败来源ID和原输入保持报告字面值", async ()
         )!,
       ),
       "utf8",
-    ).replaceAll("a-202", "pending"),
+    ),
   );
   const action = report.plans[0].actions[0];
   action.input_params = { type: "running", status: "pending" };
@@ -787,7 +787,11 @@ it("报告详情逐项失败来源ID和原输入保持报告字面值", async ()
       .last()
       .locator("details")
       .filter({ has: page.getByText("执行技术详情", { exact: true }) })
-      .getByText("pending", { exact: true }),
+      .getByText(
+        report.plans[0].actions.at(-1).result.failures[0]
+          .source_action_instance_id,
+        { exact: true },
+      ),
   ).toBeVisible();
   await card.getByText("输入与生效参数", { exact: true }).click();
   await check(card.getByText("running", { exact: true }).first()).toBeVisible();

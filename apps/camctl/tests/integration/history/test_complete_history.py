@@ -482,6 +482,7 @@ async def test_every_event_matches_independent_history(world) -> None:
 #: 真实产生并经三路径核对；anchors 列出该类型行为断言的既有测试
 #: 文件（仓库根相对路径）。无生产写入方的类型注明而非折叠。
 _EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
+    "MOTOR_CHANGED": (False, ["apps/camctl/tests/integration/persistence/test_motor_transactions.py"]),
     "PLAN_ACCEPTED": (True, ["apps/camctl/tests/integration/acceptance/test_acceptance.py"]),
     "ACTION_ADMITTED": (True, ["apps/camctl/tests/integration/acceptance/test_acceptance.py"]),
     "SOURCE_RESOLVED": (False, ["apps/camctl/tests/integration/acceptance/test_acceptance.py"]),

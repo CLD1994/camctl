@@ -1,0 +1,18 @@
+{
+  "request_id": "101",
+  "created_at": "2026-10-08 08:00:00",
+  "name": "电机控制",
+  "actions": [
+    {
+      "name": "定位",
+      "type": "motor_control",
+      "scheduled_at": "2026-10-08 09:00:00",
+      "policy": {
+        "max_delay_ms": 0
+      },
+      "params": {
+        "position": 100
+      }
+    }
+  ]
+}

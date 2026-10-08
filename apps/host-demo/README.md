@@ -64,6 +64,8 @@ cp /opt/camctl-host/share/doc/camctl_host/examples/config.toml /srv/camctl/confi
 ```c
 #include "camctl_host.h"
 
+void motor(int position); /* 主程序提供定义。 */
+
 /* 主程序启动时执行一次。各路径由第三方部署人员准备。 */
 camctl_host_config config = CAMCTL_HOST_CONFIG_INIT;
 config.camctl_path = "/opt/camctl/bin/camctl";
@@ -71,7 +73,9 @@ config.ready_path = "/srv/camctl/ready";
 config.processing_path = "/srv/camctl/processing";
 config.log_path = "/srv/camctl/host.log";
 config.config_path = "/srv/camctl/config.toml";
-int initialized = camctl_host_init(&config, NULL);
+/* 接收电机通知时，在初始化前注册主程序自己的 void motor(int position)。 */
+int registered = camctl_host_register_motor_control_callback(motor);
+int initialized = registered == 0 ? camctl_host_init(&config, NULL) : -1;
 
 /* 收到计划并完整写入、关闭文件后执行。 */
 int accepted = camctl_host_submit("/srv/incoming/plan.json");
@@ -87,6 +91,16 @@ camctl_host_claim();
 初始化的第二个参数可提供首次计划的绝对路径。初始化成功后，模块持续运行；后续调用递交接口时，无论当前是否已有执行会话，模块都会自行选择正确命令。模块最多同时运行一个 `run` 和一个 `submit`，后续提交及其启动失败重试保持接收顺序。
 
 容量包含排队、正在提交和等待启动重试的路径。容量满返回 `-1`、`errno=EAGAIN`，原队列保持不变。非法配置或相对路径通常为 `EINVAL`，路径过长为 `ENAMETOOLONG`，未初始化为 `ENODEV`，重复初始化为 `EALREADY`，内存不足为 `ENOMEM`；其他初始化失败保留实际系统错误。
+
+## 电机通知回调
+
+主程序需要接收电机控制通知时，在初始化前调用 `camctl_host_register_motor_control_callback`。函数类型为 `void (*)(int position)`，只有位置参数；位置单位、零点、方向及业务范围由主程序定义。`position` 可以为负数或零，表示范围是 -2147483648～2147483647。终端演示先注册回调再初始化，只输出收到的位置。
+
+首次非空注册返回 `0`；`NULL` 始终返回 `-1` 并设置 `EINVAL`。初始化尚未成功时，重复非空注册返回 `EALREADY`；初始化成功后，非空注册返回 `EBUSY`。失败调用保留原回调，初始化失败也保留注册，允许修正条件后重试。注册只保存函数指针，不创建线程或调用函数。
+
+启用通知时，模块为每次 `run` 准备独立管道，并传入 `--host-notification-fd FD`；`submit` 不带此项。专用线程按消息接收顺序调用回调。回调执行期间不持有进程管理锁，可以调用 `camctl_host_submit`；主程序负责回调访问的状态及所执行设备操作的线程安全。长期阻塞的回调会延迟后续回调，队列满时模块暂停通知读取，继续处理其他输出、提交和进程回收。
+
+CLI 完整写入只表示通知已经发送；回调开始或返回也不向 CLI 提供设备成功证据。尚未读完的旧通知占用原 `run` 位置，排空后新的 `run` 使用新管道，已排队消息继续按原顺序交付。主程序退出或断电后不恢复内存队列。没有注册回调时不创建通知管道、解析缓冲、队列或回调线程。
 
 ## 部署准备与共存约定
 
@@ -112,8 +126,12 @@ camctl_host_claim();
 | `log_record_capacity` | 128 字节至 64 KiB，包含截断提示和换行 |
 | `log_file_size` | 至少容纳一条最大日志，最大 1 GiB |
 | `log_file_count` | 1 至 64 份，包含当前文件 |
+| `notification_line_capacity` | 1 至 65536 字节，包含结束 LF；默认由 `CAMCTL_HOST_NOTIFICATION_LINE_DEFAULT` 提供 |
+| `notification_queue_capacity` | 1 至 4096 项待分发位置，执行中的一项另计；默认由 `CAMCTL_HOST_NOTIFICATION_QUEUE_DEFAULT` 提供 |
 
 自动重试的次数由所有调用共用，成功后不清零。日志和输出容量只影响模块本地处理，不代表业务受理或执行结果。stdout 超限后继续读取并丢弃超出部分，本次结果按异常处理；JSON 解析临时内存由 stdout 上限推导，不随运行时间增长。
+
+通知单行容量包含 LF；超长行丢弃到下一 LF 后恢复，EOF 残片拒绝。已接纳的位置不会因为 CLI 异常退出而丢弃。通知缓冲由行、固定读取块、yyjson 解析池、有界位置队列和一条执行中记录组成，容量不随运行时长增长。默认配置的数据存储上界为 61956 字节，最大合法配置为 938244 字节；此外还有固定管理结构、分配器及线程运行开销。模块在分配前检查乘法和相加溢出。
 
 模块日志由专用线程写入指定文件；归档使用 `.1`、`.2` 等后缀，`.1` 为最近归档。路径和 `.1` 至 `.63` 的归档名称供本模块独占使用，不交给外部轮换程序同时管理。首次文件操作清理超出本次保留数的旧归档；每次写入前检查大小，包含当前文件的总数受配置限制。清理错误按文件通道故障处理，在内存保留步骤、归档编号和 errno，业务继续运行。
 

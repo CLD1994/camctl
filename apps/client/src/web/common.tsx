@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Issue } from "../shared/types";
+import { isRawNumber } from "../shared/json";
 export const actionNames: Record<string, string> = {
   camera_take_photo: "单张拍摄",
   camera_timelapse: "延时摄影",
@@ -8,6 +9,7 @@ export const actionNames: Record<string, string> = {
   delete_action_outputs: "清理源产物",
   cancel_task: "取消任务",
   report_status: "状态报告",
+  motor_control: "电机控制",
 };
 const labels: Record<string, string> = {
   pending: "等待执行",
@@ -138,6 +140,7 @@ export function Facts({
   value: unknown;
   business?: boolean;
 }) {
+  if (isRawNumber(value)) return <span>{value.rawJSON}</span>;
   if (value === null) return <span>null</span>;
   if (Array.isArray(value))
     return value.length ? (

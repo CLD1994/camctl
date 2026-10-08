@@ -296,6 +296,7 @@ def _withdrawal_position(owned: Any, ready: Path, processing: Path):
 
 def cancel_flow(
     *, ready: Path, processing: Path, unscheduled_only: bool = False,
+    motor_permits: dict | None = None,
 ) -> Callable[[Any], Any]:
     """构造推进取消动作的会话流程。
 
@@ -330,7 +331,7 @@ def cancel_flow(
 
         owned = context.open_connection()
         try:
-            repository = CancellationRepository()
+            repository = CancellationRepository(motor_permits=motor_permits)
             occurred = context.clock.utc_micros
             now_us = None if unscheduled_only else occurred()
             for action_id, status, spec_json in _due_cancel_actions(owned, now_us):
@@ -349,7 +350,7 @@ def cancel_flow(
                                 is CancelStartDisposition.REJECTED:
                             continue
                     item_ids = _resolve_and_fix(
-                        owned, repository, action_id, spec_json, occurred)
+                        owned, repository, action_id, spec_json, occurred, motor_permits)
                     if item_ids is None:
                         continue
                 settlement = TargetSettlement(
@@ -362,7 +363,9 @@ def cancel_flow(
                     ApplyCancel(origin_action_id=action_id, item_ids=item_ids),
                     CancellationRuntime(
                         owned=owned, repository=repository,
-                        settlement=settlement, occurred_at=occurred))
+                        settlement=settlement, occurred_at=occurred,
+                        motor_permits=motor_permits,
+                        open_connection=context.open_connection))
                 if summarize_cancel(progress).status is CancellationStatus.RUNNING:
                     # 收场未完成：保持执行中，等待后续会话推进。
                     continue
@@ -381,7 +384,8 @@ def cancel_flow(
 
 def _resolve_and_fix(
         owned: Any, repository: Any, action_id: int, spec_json: str,
-        occurred: Callable[[], int]) -> tuple[int, ...] | None:
+        occurred: Callable[[], int], motor_permits: dict | None = None,
+) -> tuple[int, ...] | None:
     """解析并固定取消目标；可靠不存在或自身包含时按登记错误结束。
 
     返回固定成员编号；取消动作已按解析失败终态时返回 None。
@@ -427,7 +431,7 @@ def _resolve_and_fix(
             action_id=identity,
             terminal=identity in terminal,
             may_cancel=may_apply_cancel(decide_cancel_eligibility(
-                load_eligibility_facts(connection, identity))))
+                load_eligibility_facts(connection, identity, motor_permits=motor_permits))))
         for identity in resolution.action_ids)
     fixed = prepare_cancel_set(action_id, ResolvedTargets(
         direct=direct,

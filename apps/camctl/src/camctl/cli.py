@@ -55,6 +55,7 @@ class Command:
     kind: CommandKind
     plan_path: str | None
     config_path: str | None
+    host_notification_fd: int | None = None
 
 
 class _Parser(argparse.ArgumentParser):
@@ -80,6 +81,8 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("plan_path", nargs="?")
     run_parser.add_argument("--config", dest="config_path", default=None)
+    run_parser.add_argument("--host-notification-fd", type=_notification_fd,
+                            default=None, help="主程序通知管道的写入描述符")
 
     submit_parser = subparsers.add_parser("submit")
     submit_parser.add_argument("plan_path")
@@ -88,6 +91,15 @@ def _build_parser() -> argparse.ArgumentParser:
     describe_parser = subparsers.add_parser("describe")
     describe_parser.add_argument("--config", dest="config_path", default=None)
     return parser
+
+
+def _notification_fd(raw: str) -> int:
+    if not raw.isascii() or not raw.isdecimal() or len(raw) > 10:
+        raise argparse.ArgumentTypeError("通知描述符必须是非标准流整数")
+    value = int(raw)
+    if not 3 <= value <= 2147483647:
+        raise argparse.ArgumentTypeError("通知描述符范围为 3～2147483647")
+    return value
 
 
 def parse_command(argv: Sequence[str]) -> Command:
@@ -105,7 +117,8 @@ def parse_command(argv: Sequence[str]) -> Command:
         raise CommandLineError("submit 需要计划输入文件路径")
     if kind in (CommandKind.INIT, CommandKind.DESCRIBE) and plan_path:
         raise CommandLineError(f"{kind.value} 不接受计划输入文件")
-    return Command(kind=kind, plan_path=plan_path, config_path=parsed.config_path)
+    return Command(kind=kind, plan_path=plan_path, config_path=parsed.config_path,
+                   host_notification_fd=getattr(parsed, "host_notification_fd", None))
 
 
 def encode_session_result(
@@ -185,6 +198,20 @@ def main(
 
 
 def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
+    from camctl.motor.notification import open_notification_writer
+
+    # 在读取配置、输入和启动任何协作者前取得写端所有权并禁止继承。
+    writer = (open_notification_writer(command.host_notification_fd)
+              if command.kind is CommandKind.RUN else None)
+    try:
+        return _execute_session_command(command, out, err, writer)
+    finally:
+        if writer is not None:
+            writer.close()
+
+
+def _execute_session_command(command: Command, out: TextIO, err: TextIO,
+                             writer) -> int:
     import asyncio
 
     from camctl.acceptance.schema import RuleError
@@ -211,6 +238,7 @@ def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
         deps = build_runtime(
             CommandMode.SUBMIT if command.kind is CommandKind.SUBMIT else CommandMode.RUN,
             config,
+            host_notifications=writer,
         )
     except (FileNotFoundError, OSError, RuleError) as error:
         print(f"camctl {command.kind.value}: {error}", file=err)

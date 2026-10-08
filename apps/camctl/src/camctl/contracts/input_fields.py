@@ -43,7 +43,7 @@ def reconstruct_action_input(row: Mapping[str, Any]) -> dict:
             raise ConsistencyError("已受理动作仍携带普通字段的原始例外")
         if validation_errors(_action_validator(), result):
             raise ConsistencyError("已受理动作的原输入不符合第一版公共动作结构")
-        if literal.startswith("camera_"):
+        if literal.startswith("camera_") or literal == "motor_control":
             if row["max_delay_ms"] is None or fields["policy"]["max_delay_ms"] != row["max_delay_ms"]:
-                raise ConsistencyError("已受理拍摄缺少原始策略或与生效延误上限矛盾")
+                raise ConsistencyError("已受理定时动作缺少原始策略或与生效延误上限矛盾")
     return result

@@ -64,6 +64,27 @@ export function pointer(document, path) {
   }, document);
 }
 
+/** 只在检查时展开调用方提供的本地公共文档；规则仍从各自权威文件读取。 */
+export function withLocalSchemas(schema, schemas = {}) {
+  const rootName = 'status-report.schema.json';
+  const escape = value => value.replaceAll('~','~0').replaceAll('/','~1');
+  function rewrite(node, document) {
+    if (Array.isArray(node)) return node.map(value => rewrite(value, document));
+    if (!node || typeof node !== 'object') return node;
+    return Object.fromEntries(Object.entries(node).map(([key,value]) => {
+      if (key !== '$ref') return [key,rewrite(value,document)];
+      const [file,fragment = ''] = value.split('#');
+      const target = file || document;
+      assert(target === rootName || Object.hasOwn(schemas,target), `未提供公共 Schema：${target}`);
+      assert(!fragment || fragment.startsWith('/'), `仅允许 JSON Pointer 引用：${value}`);
+      return [key,target === rootName ? `#${fragment}` : `#/$defs/__shared/${escape(target)}${fragment}`];
+    }));
+  }
+  const result = rewrite(schema,rootName);
+  result.$defs = {...result.$defs,__shared:Object.fromEntries(Object.entries(schemas).map(([name,value]) => [name,rewrite(value,name)]))};
+  return result;
+}
+
 function propertiesOf(node, schema) {
   if (!node || typeof node !== 'object') return {};
   const result = { ...(node.$ref ? propertiesOf(pointer(schema, node.$ref), schema) : {}), ...node.properties };
@@ -105,7 +126,8 @@ function generatedLiterals(node) {
 }
 
 /** 检查真实规格之间的结构接缝；返回可供覆盖审计使用的列集合。 */
-export function validateRegistration(registry, schema, { enums, errors, tables, foreignKeys }) {
+export function validateRegistration(registry, schema, { enums, errors, tables, foreignKeys, schemas = {} }) {
+  schema = withLocalSchemas(schema, schemas);
   assert(validateShape(registry), `登记格式错误：${ajv.errorsText(validateShape.errors)}`);
   const usedColumns = new Set(), pendingSql = new Set(), usedPending = new Set();
   const usedEntities = new Set(['report']), referencedProjections = new Set(['report']);
@@ -293,6 +315,21 @@ export function validateRegistration(registry, schema, { enums, errors, tables, 
       `${name} 的实体子集合编码顺序必须唯一且连续`);
     for (const [field, definition] of Object.entries(projection.fields)) {
       visit(definition.when, scope, name); visit(definition.value, scope, name, expected[field]); fields++;
+      if (definition.value.op === 'json_member') {
+        function constraints(branch) {
+          if (!branch || typeof branch !== 'object') return;
+          function refs(value) {
+            if (!value || typeof value !== 'object') return;
+            if (value.$ref) cover(value.$ref);
+            for (const [key,child] of Object.entries(value)) if (!['$defs','if','not'].includes(key)) refs(child);
+          }
+          refs(branch.properties?.[field]);
+          for (const [key,child] of Object.entries(branch)) if (['allOf','oneOf','anyOf','then','else'].includes(key)) {
+            if (Array.isArray(child)) child.forEach(constraints); else constraints(child);
+          }
+        }
+        constraints(node);
+      }
       const allowed = literalValues(expected[field], schema), generated = generatedLiterals(definition.value);
       if (allowed && generated) assert.deepEqual([...new Set(generated)].sort(), [...new Set(allowed)].sort(), `${name}.${field} 的公共枚举覆盖不完整`);
     }

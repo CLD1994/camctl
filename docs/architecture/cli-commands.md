@@ -8,6 +8,8 @@ CLI 是命令行接口：主程序通过启动 camctl 进程交给它工作。�
 
 采用本项目的[C 接入模块](../host-demo/design.md)时，下述命令选择、进程结果与后续启动均由模块封装；主程序使用初始化、递交计划路径和同步领取文件入口。
 
+电机控制另由主程序在初始化前注册位置回调。CLI 经 host 创建的独立管道发送单向通知，格式与生命周期见[主程序通知协议](../../protocol/host-notifications.md)。该管道与本页 stdout 最终会话结果、stderr 诊断及文件交接分别管理；无通知通道时仍可执行不依赖它的动作。
+
 本页导航：
 
 - [命令与用途](#命令与用途)
@@ -19,7 +21,7 @@ CLI 是命令行接口：主程序通过启动 camctl 进程交给它工作。�
 
 ```text
 camctl init [--config <path>]
-camctl run [<plan-path>] [--config <path>]
+camctl run [<plan-path>] [--config <path>] [--host-notification-fd FD]
 camctl submit <plan-path> [--config <path>]
 camctl describe [--config <path>]
 camctl --version
@@ -40,6 +42,8 @@ camctl run
 ```
 
 camctl 读取 SQLite 状态数据库中已受理的计划，继续执行任务、核实设备状态并生成必要报告。
+
+电机动作仅在 `run` 中按有效窗口发送通知，恢复时遵守[发送结果不确定不重发](motor-control.md#状态判断与恢复)。`--host-notification-fd FD` 仅供 `run` 接入独立通知管道，省略表示没有通知通道。FD 的语法、写端所有权、关闭时机与通道错误分类见[通知通道与生命周期](../../protocol/host-notifications.md#通道与生命周期)。其他命令使用该参数或提供非法 FD 时属于本页规定的 CLI 参数语法错误；语法合法但实际描述符失效时属于通道不可用，电机动作按其契约失败。该参数由 host 封装；主程序不需要自行组装消息或管理描述符。
 
 ### `submit`
 

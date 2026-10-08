@@ -92,6 +92,26 @@
 
 Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、首次控制残留检查、未启动动作过期与取消、迟到尝试结果及取消收场的专项验证。执行器和结果仓储分别保持动作、操作流程、尝试与设备活动的事实；取消动作结果由本次必要收场结论决定。测试按目录前台顺序执行，包含真实数据库事务恢复与历史恢复，不连接真实设备。完整分类、目录命令和结果由[执行接缝修复记录](../superpowers/plans/2026-10-08-capture-start-residual-gate.md#验证记录)维护；C 构建、包内容及根跨组件结果见[模块验证记录](../host-demo/verification.md)。
 
+## 电机控制与单向通知验证（2026-10-08）
+
+环境为 Linux x86_64 开发容器、CPython 3.11.16、SQLite 3.53.1、Node 24；host 使用 GCC 13.3.0、CMake 3.28.3，客户端浏览器验证使用 Chromium。范围为 [M1—M6](../superpowers/plans/2026-10-08-camctl-motor-control.md)、[HN1—HN6](../superpowers/plans/2026-10-08-camctl-host-notifications.md) 及客户端电机接入。设备侧只使用契约替身。
+
+| 验证层 | 命令入口与结果 |
+| --- | --- |
+| Python 单元 | `pytest apps/camctl/tests/unit -q`：3489 通过、1 跳过。 |
+| Python 组件集成 | 每个目录单独启动 pytest，顺序执行：acceptance 226、bootstrap 118、cancellation 66、capture 253、contracts 188、devices 46、history 91、host_files 86、logging_runtime 28、motor 12、operations 199、outputs 1790、persistence 106、reporting 346、scheduling 133、session 86，共 3774 通过、2 跳过。 |
+| CLI 故障与恢复 | `pytest tests/integration/test_camctl_motor_recovery.py -q`：21 通过；包括 11 个保存／写入／未知结果断点、3 个通道失败、过期、4 种取消寻址、未知意图取消和受理失败原参数。 |
+| CLI、host 与客户端组合 | `pytest tests/integration/test_camctl_motor_notifications.py -q`：5 通过；真实导出／回调／报告领取／导入／ACK、慢回调与下一 run、相机共存、两种中断的 host 自动恢复。 |
+| 客户端 | `pnpm --dir apps/client typecheck` 通过；`test:unit` 530 通过；`test:integration` 370 通过。精确数字与派生恢复的独立审查另复验 166 项和 2 项 Chromium 场景，见[客户端验证](../client/verification.md#电机控制接入)。 |
+| host | Debug、Release 各 33 项 CTest 通过，其中单元入口 11 项、集成入口 22 项；包含独立安装消费者和源码包重建，见[host 验证](../host-demo/verification.md#电机通知组件交付复验2026-10-08)。 |
+| 规格与检查器 | 协议 4 份 Schema、76 个电机共同夹具；事件 34 类／110 分支；报告依赖 23 个投影／99 条映射；数据库 31 表／3178 项断言；历史 SQL 同步检查通过。Node 的协议、事件和报告依赖检查器测试共 114 通过。 |
+
+上述 Python 命令统一使用 `UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11` 前缀。3 项跳过分别为非 Linux 父守护、Windows 文件名大小写别名和不携带读取配置的主机源候选，均是既有不适用分区。保留的 3 条 pytest 警告来自既有同步测试的 asyncio 标记。
+
+软件证据沿原请求、受理、发送意图、管道写入、回调、终态、报告及恢复逐段映射，见[电机增量验收映射](software-acceptance.md#十电机控制与主程序通知增量)。只有本次首次可靠提交意图才产生进程内许可；原键核实、历史回放与终态重入均不产生许可。数据库提交结果未知时，关闭旧连接并在同实例新连接上核实原完整请求及事务；取消生效与可靠未发送结论共同保存。测试分别观察实际写入、回调次数、事务及报告，不能用动作成功替代电机到位。
+
+目标 TX2／ARM64 安装、真实主程序和电机、单位与业务范围、目标机性能以及物理断电仍由下节部署交接负责。进程中断测试不构成物理断电证据。客户端原数往返要求 Node 和浏览器支持原生 `JSON.rawJSON`／`JSON.isRawJSON`，其他浏览器与本次增量的 Windows 验证尚未执行。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。

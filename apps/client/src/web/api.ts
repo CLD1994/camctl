@@ -1,6 +1,7 @@
 import type { Application } from "../server/application";
 import type { Draft, Video } from "../server/models";
 import type { Issue } from "../shared/types";
+import { parseJson } from "../shared/json";
 export type ClientState = ReturnType<Application["state"]> & {
   videos?: Video[];
   workerError?: string | null;
@@ -33,12 +34,15 @@ export async function api<T>(
       `请求结果尚未确认；请恢复连接并核对保存记录。原始诊断：${error instanceof Error ? error.message : String(error)}`,
     );
   });
-  const value = await response.json().catch(() => {
-    throw new HttpError(
-      "result_unconfirmed",
-      "无法读取完整响应，请重新读取保存记录以确认结果。",
-    );
-  });
+  const value = await response
+    .text()
+    .then((text) => parseJson(text) as any)
+    .catch(() => {
+      throw new HttpError(
+        "result_unconfirmed",
+        "无法读取完整响应，请重新读取保存记录以确认结果。",
+      );
+    });
   if (!response.ok)
     throw new HttpError(
       value.code ?? "http_error",

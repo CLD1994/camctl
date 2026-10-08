@@ -133,3 +133,21 @@ CREATE TABLE cancel_delivery_items (
         OR (status <> 4 AND error_code IS NULL AND error_details_json IS NULL))
 ) STRICT;
 CREATE INDEX cancel_delivery_waiters ON cancel_delivery_items(delivery_id, id) WHERE status = 1;
+
+-- 电机通知的专属发送事实；位置仍从动作的不可变原输入取得。
+CREATE TABLE motor_notifications (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    action_id INTEGER NOT NULL UNIQUE REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    intent_at INTEGER,
+    intent_operation_key TEXT UNIQUE CHECK (intent_operation_key IS NULL OR length(intent_operation_key) > 0),
+    outcome INTEGER NOT NULL CHECK (outcome IN (1,2,3,4,5)),
+    written_bytes INTEGER CHECK (written_bytes IS NULL OR written_bytes >= 0),
+    errno INTEGER CHECK (errno IS NULL OR errno > 0),
+    finished_at INTEGER,
+    CHECK ((intent_at IS NULL AND intent_operation_key IS NULL AND outcome = 2)
+        OR (intent_at IS NOT NULL AND intent_operation_key IS NOT NULL)),
+    CHECK ((outcome = 1 AND finished_at IS NULL AND written_bytes IS NULL AND errno IS NULL)
+        OR (outcome IN (2,5) AND finished_at IS NOT NULL AND written_bytes IS NULL AND errno IS NULL)
+        OR (outcome = 3 AND finished_at IS NOT NULL AND written_bytes IS NOT NULL AND written_bytes > 0 AND errno IS NULL)
+        OR (outcome = 4 AND finished_at IS NOT NULL AND written_bytes IS NOT NULL))
+) STRICT;

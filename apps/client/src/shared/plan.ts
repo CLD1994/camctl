@@ -110,7 +110,11 @@ export function validatePlan(
     const type = action.type as ActionType;
     const requiresTime =
       isCameraAction(type) ||
-      ["obtain_action_outputs", "delete_action_outputs"].includes(type);
+      [
+        "obtain_action_outputs",
+        "delete_action_outputs",
+        "motor_control",
+      ].includes(type);
     if (requiresTime || Object.hasOwn(action, "scheduled_at"))
       check(
         isTimestamp(action.scheduled_at),
@@ -150,7 +154,18 @@ export function validatePlan(
       `${path}.device_id`,
       "此动作必须省略设备字段",
     );
-    if (Object.hasOwn(action, "policy"))
+    if (type === "motor_control") {
+      if (!isObject(action.policy))
+        issue(`${path}.policy`, "invalid_policy", "电机控制必须提供时间策略");
+      else {
+        fields(action.policy, ["max_delay_ms"], `${path}.policy`);
+        check(
+          isUint(action.policy.max_delay_ms),
+          `${path}.policy.max_delay_ms`,
+          "最大延迟必须是非负安全整数",
+        );
+      }
+    } else if (Object.hasOwn(action, "policy"))
       check(
         isObject(action.policy) && !Object.keys(action.policy).length,
         `${path}.policy`,

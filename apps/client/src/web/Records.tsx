@@ -156,6 +156,9 @@ export function RecordDetail({
                 <ActionResult
                   key={action.action_instance_id}
                   action={action}
+                  motorInputText={
+                    state.motorInputTexts?.[action.action_instance_id]
+                  }
                   active={expanded}
                   plan={plan}
                   allPlans={allPlans}

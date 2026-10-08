@@ -9,6 +9,10 @@ const registry = json(new URL('report-dependencies.json', directory));
 const schema = json(new URL(registry.public_schema, directory));
 const enums = json(new URL(registry.enum_registry, directory));
 const errors = json(new URL(registry.error_registry, directory));
+const schemaDirectory = new URL('../protocol/schemas/',import.meta.url);
+const schemas = Object.fromEntries(readdirSync(schemaDirectory)
+  .filter(name => name.endsWith('.schema.json') && name !== 'status-report.schema.json')
+  .map(name => [name, JSON.parse(readFileSync(new URL(name,schemaDirectory),'utf8'))]));
 const db = new DatabaseSync(':memory:');
 try {
   for (const file of readdirSync(new URL('schema/', directory)).sort()) {
@@ -18,7 +22,7 @@ try {
     .map(({ name }) => [name, db.prepare(`PRAGMA table_info(${name})`).all().map(column => column.name)]));
   const foreignKeys = Object.fromEntries(Object.keys(tables).flatMap(table => db.prepare(`PRAGMA foreign_key_list(${table})`).all()
     .map(key => [`${table}.${key.from}`, `${key.table}.${key.to}`])));
-  const result = validateRegistration(registry, schema, { enums, errors, tables, foreignKeys });
+  const result = validateRegistration(registry, schema, { enums, errors, tables, foreignKeys, schemas });
   for (const [table, pending] of Object.entries(registry.sql_pending)) {
     const document = readFileSync(new URL(pending.specification.split('#')[0], directory), 'utf8');
     for (const column of pending.columns) assert(

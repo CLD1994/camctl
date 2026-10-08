@@ -84,7 +84,9 @@
 | 执行成功或运行后失败 | 成功状态及实际结果，或失败状态及最终错误 | 把运行失败写成受理校验失败 |
 | 过期或取消 | 保留实际状态、适用原因和已经成立的结果；过期附 `expiration_reason` | 把取消解释为已撤销全部副作用 |
 
-三种拍摄动作（`camera_take_photo`、`camera_record`、`camera_timelapse`）均采用启动窗口。`expiration_reason` 为 `window_missed` 或 `window_exhausted` 的成立条件遵守[公共过期规则](scheduling-execution.md#过期原因)。取回、清理、取消和报告动作不采用该窗口。动作结束后的设备执行情况、交付及用户要求的产物删除结果继续按各自事实更新，原动作终态保持。
+三种拍摄动作（`camera_take_photo`、`camera_record`、`camera_timelapse`）及 `motor_control` 均采用有效时间窗口。`expiration_reason` 为 `window_missed` 或 `window_exhausted` 的成立条件遵守[公共过期规则](scheduling-execution.md#过期原因)；电机动作的未知发送结果按其[恢复分类](motor-control.md#状态判断与恢复)报告失败，不能仅凭窗口结束写成过期。取回、清理、取消和报告动作不采用该窗口。动作结束后的设备执行情况、交付及用户要求的产物删除结果继续按各自事实更新，原动作终态保持。
+
+`motor_control` 的输入、状态及错误按[电机报告契约](motor-control.md#持久化与报告)表达。`succeeded` 表示控制通知已发送；客户端不能将它显示为电机已到位。该动作不提供 `effective_params`、`result`、产物、交付或 `device_execution`，发送事实不能被转换为对设备状态的观察。
 
 合法动作的公共输入字段须满足[第一版动作入口](plan-input.md#第一版动作入口)，例如取回与清理必须有 `scheduled_at`，非相机动作不接受 `device_id`。报告不会替原始输入修错；初始失败分支对这些字段保留任意 JSON 值，其他分支遵守已通过的输入契约。
 

@@ -420,3 +420,50 @@ def test_noncompliant_sqlite_fails_init(installed: _Installed) -> None:
     assert "运行库条件不满足" in failed.stderr, failed.stderr
     assert "统一运行条件" in failed.stderr, failed.stderr
     assert failed.stdout == ""
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='部署侧通知描述符继承')
+def test_installed_motor_plan_pipe_and_report_use_only_packaged_resources(installed):
+    """在仓库外消费共享 Schema、SQL、登记以及真实 submit/run 报告。"""
+    config = installed.deploy / 'motor.toml'
+    config.write_text(installed.config.read_text().split('[devices.cam-1]')[0]
+                      .replace('state.db', 'motor.db'))
+    plan = installed.deploy / 'motor-plan.json'
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    plan.write_text(json.dumps({'request_id':'8801','created_at':now,'name':'独立电机发行',
+        'actions':[{'name':'位置','type':'motor_control','scheduled_at':now,
+                    'params':{'position':2147483647},'policy':{'max_delay_ms':60000}}]}))
+    for command,args in [('init',[]),('submit',[str(plan)])]:
+        result=installed.cli(command,*args,'--config',str(config))
+        assert result.returncode==0,result.stderr
+    read_fd,write_fd=os.pipe()
+    try:
+        result=subprocess.run([str(installed.python),'-m','camctl','run','--config',str(config),
+                               '--host-notification-fd',str(write_fd)],pass_fds=(write_fd,),
+                              capture_output=True,text=True,cwd=installed.deploy,
+                              env=_clean_environment(),timeout=60)
+    finally:
+        os.close(write_fd)
+    try:
+        payload=os.read(read_fd,4096)
+        assert os.read(read_fd,1)==b''
+    finally:
+        os.close(read_fd)
+    assert result.returncode==0,result.stderr
+    assert json.loads(result.stdout)=={'kind':'succeeded'}
+    assert json.loads(payload)=={'type':'motor_control','action_instance_id':'1',
+                                 'params':{'position':2147483647}}
+    # 安装侧校验实际报告；跨文件 $ref 必须完全由 wheel 资源解析。
+    code=f'''
+from pathlib import Path
+from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.schemas import validate_document
+count=0
+for path in Path({str(installed.ready)!r}).glob('status-report-*.json'):
+    document=parse_exact_json(path.read_text())
+    validate_document('protocol/status-report.schema.json', document)
+    count+=sum(a['type']=='motor_control' and a['status']=='succeeded'
+               for p in document.get('plans',[]) for a in p['actions'])
+assert count > 0
+'''
+    _probe(installed,code)

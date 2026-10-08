@@ -30,6 +30,14 @@ _REPOSITORIES = Path(camctl.__file__).resolve().parent / "persistence" / "reposi
 #: 仓储经数据库执行器执行的函数。其他仓储自开写事务属于违规。
 _ALLOWED_TRANSACTION_OWNERS = {"HistoryRepository", "SqliteSnapshotStore"}
 
+# 电机事实读取和提交未知核实只建立一致的读视图；许可限定到函数，
+# 不允许这些仓储的其他入口自开事务，也不允许 BEGIN IMMEDIATE。
+_READ_TRANSACTION_FUNCTIONS = {
+    "module:read_motor_facts",
+    "MotorRepository.verify_operation",
+    "CancellationRepository.verify_motor_operation",
+}
+
 
 def _seed_transactions(tmp_path: Path, count: int) -> None:
     """用替身命令以每事务一个计划创建事件的方式种若干完整事务。"""
@@ -135,7 +143,13 @@ class TestCommitPathAudit:
                         and isinstance(node.args[0], ast.Constant)
                         and node.args[0].value in (
                             "BEGIN", "BEGIN IMMEDIATE", "COMMIT", "ROLLBACK")):
-                    transaction_owners.add(_statement_owner(tree, node))
+                    owner = _statement_owner(tree, node)
+                    if owner in _READ_TRANSACTION_FUNCTIONS:
+                        assert node.args[0].value != "BEGIN IMMEDIATE", (
+                            f"只读核实入口自开写事务: {path.name}:{node.lineno}"
+                        )
+                    else:
+                        transaction_owners.add(owner.split(".")[0])
 
         assert commit_calls == [], f"仓储绕过事务内核自提交: {commit_calls}"
         assert direct_connections == [], f"仓储直连数据库: {direct_connections}"
@@ -146,13 +160,13 @@ class TestCommitPathAudit:
 
 
 def _statement_owner(tree: ast.Module, node: ast.AST) -> str:
-    """定位事务控制语句的直接责任者：最外层所属函数的类名或模块。"""
+    """定位事务控制语句的最外层所属函数，保留类名与方法名。"""
     for container in ast.walk(tree):
         if not isinstance(container, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if node in ast.walk(container):
             name = _owning_class(tree, container)
-            return name if name else f"module:{container.name}"
+            return f"{name}.{container.name}" if name else f"module:{container.name}"
     return "module"
 
 

@@ -10,6 +10,8 @@ import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import type { Draft, Preset, ExportedRequest } from "../../src/server/models";
 import { mappedReport, reportInput } from "./fixtures";
+import { motorReport } from "../helpers/motor";
+import { createHash } from "node:crypto";
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
@@ -61,6 +63,106 @@ async function setup(capabilityText?: string) {
   await page.getByTestId("initialize-button").click();
   return { page, app, directory };
 }
+it("电机表单与 JSON 共用位置，保存恢复后导出并展示通知成功", async () => {
+  const { page, app } = await setup('{"devices":[]}');
+  await page.getByTestId("new-draft-button").click();
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  await choose(page.getByLabel("动作类型", { exact: true }), "motor_control");
+  await check(page.getByLabel("目标设备", { exact: true })).toHaveCount(0);
+  await page.getByLabel("执行时间", { exact: true }).fill("2026-10-08T20:00");
+  await page
+    .getByLabel("最大允许延迟 (max_delay_ms)", { exact: true })
+    .fill("1000");
+  const position = page.getByLabel("位置 (position)", { exact: true });
+  await position.fill("-2147483648");
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await check(page.getByLabel("动作参数 JSON", { exact: true })).toHaveValue(
+    '{\n  "position": -2147483648\n}',
+  );
+  await page
+    .getByLabel("动作参数 JSON", { exact: true })
+    .fill('{"position":1e2}');
+  await page.getByRole("button", { name: "参数表单", exact: true }).click();
+  await check(position).toHaveValue("100");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(position).toHaveValue("100");
+  await page.getByTestId("export-button").click();
+  await check
+    .poll(() => app.store.all<ExportedRequest>("requests").length)
+    .toBe(1);
+  const request = app.store.all<ExportedRequest>("requests")[0];
+  expect(request.body.actions).toEqual([
+    {
+      name: "动作 1",
+      type: "motor_control",
+      scheduled_at: "2026-10-08 12:00:00",
+      params: { position: 100 },
+      policy: { max_delay_ms: 1000 },
+    },
+  ]);
+  const report = motorReport(request.id, 100);
+  report.plans![0].created_at = request.body.created_at as string;
+  report.plans![0].name = request.body.name as string;
+  report.plans![0].actions![0].name = "动作 1";
+  app.applyReports([reportInput(report)]);
+  await page.reload();
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  await check(page.getByText("控制通知已发送", { exact: true })).toBeVisible();
+  await check(page.getByText("电机已到位", { exact: true })).toHaveCount(0);
+}, 20000);
+it.each(["1.0000000000000000001", "1e999"])(
+  "电机受理失败详情展示报告中的精确原数 %s",
+  async (token) => {
+    const { page, app } = await setup();
+    const report = motorReport();
+    report.plans![0].status = "pending";
+    Object.assign(report.plans![0].actions![0], {
+      status: "failed",
+      error: { code: "invalid_params", stage: "admission", details: {} },
+    });
+    const input = reportInput(report);
+    const bytes = Buffer.from(
+      input.bytes
+        .toString()
+        .replace('"position":0', `"position":${token}`)
+        .replace('"max_delay_ms":1000', '"max_delay_ms":-1e999'),
+    );
+    const fileName = `status-report-1-${createHash("sha256").update(bytes).digest("hex")}.json`;
+    app.applyReports([
+      {
+        bytes,
+        file: {
+          ...input.file,
+          fileName,
+          expectedSize: bytes.length,
+          bytesReceived: bytes.length,
+        },
+      },
+    ]);
+    expect(app.coverage()).toBe(1);
+    await page.reload();
+    await page.getByTestId("tab-records").click();
+    await page.getByTestId("record-open-button").click();
+    await page.getByRole("button", { name: /^展开动作 / }).click();
+    await page.getByText("输入与生效参数", { exact: true }).click();
+    await check(page.getByTestId("motor-input-params")).toHaveText(
+      `{"position":${token}}`,
+    );
+    await check(page.getByText("-1e999", { exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByTestId("tab-records").click();
+    await page.getByTestId("record-open-button").click();
+    await page.getByRole("button", { name: /^展开动作 / }).click();
+    await page.getByText("输入与生效参数", { exact: true }).click();
+    await check(page.getByTestId("motor-input-params")).toHaveText(
+      `{"position":${token}}`,
+    );
+  },
+  20000,
+);
 it("报告范围支持点击展开、键盘选择并保存恢复", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
@@ -70,7 +172,19 @@ it("报告范围支持点击展开、键盘选择并保存恢复", async () => {
   await type.focus();
   await type.press("ArrowDown");
   await check(page.getByRole("listbox")).toBeVisible();
-  await page.keyboard.press("End");
+  const selectable = await page
+    .getByRole("listbox")
+    .getByRole("option")
+    .evaluateAll((options) =>
+      options
+        .filter((option) => option.getAttribute("aria-disabled") !== "true")
+        .map((option) => option.getAttribute("data-value")),
+    );
+  const target = selectable.indexOf("report_status");
+  expect(target).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press("Home");
+  for (let index = 0; index < target; index++)
+    await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   const scope = page.getByRole("combobox", { name: "报告范围", exact: true });
   await scope.click();
@@ -153,7 +267,7 @@ it("取回来源只为指定动作实例展示附加产物筛选", async () => {
   await choose(source, "action_instance_id");
   await page.getByLabel("指定产物筛选").check();
   await page.getByRole("button", { name: "添加产物 ID", exact: true }).click();
-  await page.getByLabel("产物 ID 1", { exact: true }).fill("o-1");
+  await page.getByLabel("产物 ID 1", { exact: true }).fill("1");
   await choose(source, "action_name");
   await check(page.getByLabel("指定产物筛选")).toHaveCount(0);
   await check
@@ -487,9 +601,9 @@ it("删除产物通过列表编辑并由后端拒绝重复或空列表", async (
   );
   await page.getByTestId("draft-json-toggle").click();
   await page.getByRole("button", { name: "添加产物 ID" }).click();
-  await page.getByLabel("产物 ID 1", { exact: true }).fill("o-1");
+  await page.getByLabel("产物 ID 1", { exact: true }).fill("1");
   await page.getByRole("button", { name: "添加产物 ID" }).click();
-  await page.getByLabel("产物 ID 2", { exact: true }).fill("o-1");
+  await page.getByLabel("产物 ID 2", { exact: true }).fill("1");
   await page.getByTestId("export-button").click();
   expect(app.store.all("requests")).toHaveLength(0);
   await page.getByRole("button", { name: "移除产物 2", exact: true }).click();
@@ -516,17 +630,17 @@ it("取消目标四种模式互斥且手工跨计划 ID 不因本地未知被拒
     ["action_instance_id", "目标动作实例 ID", "action_instance_id"],
   ]) {
     await choose(page.getByLabel("取消目标"), mode);
-    await page.getByLabel(label, { exact: true }).fill("remote-1");
+    await page.getByLabel(label, { exact: true }).fill("9223372036854775807");
     await check
       .poll(
         () =>
           JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0]
             ?.params,
       )
-      .toEqual({ target: { [key]: "remote-1" } });
+      .toEqual({ target: { [key]: "9223372036854775807" } });
   }
   await choose(page.getByLabel("取消目标"), "plan_group");
-  await page.getByLabel("目标计划实例 ID").fill("p-1");
+  await page.getByLabel("目标计划实例 ID").fill("1");
   await page.getByLabel("目标组").fill("A");
   await page.getByTestId("export-button").click();
   await check.poll(() => app.store.all("requests").length).toBe(1);
@@ -675,7 +789,7 @@ it("内置参数的非法组合与类型原样保留且未完成输入不能被�
   await check(page.getByLabel("来源动作实例 ID")).toHaveValue("a-2");
 }, 20000);
 
-it("报告表单仅提供可靠覆盖的报告起点且导出保持数值类型", async () => {
+it("报告表单仅提供可靠覆盖的报告起点且导出保持精确字符串身份", async () => {
   const { page, app } = await setup();
   const report = mappedReport(Buffer.from("video"));
   app.applyReports([reportInput(report)]);
@@ -724,7 +838,7 @@ it.each([null, [], "text", false])(
     ).toEqual(params);
     await page.getByRole("button", { name: "清空参数并重新填写" }).click();
     await choose(page.getByLabel("取消目标"), "request_id");
-    await page.getByLabel("目标请求 ID").fill("req-1");
+    await page.getByLabel("目标请求 ID").fill("1");
     await page.getByTestId("export-button").click();
     await check.poll(() => app.store.all("requests").length).toBe(1);
   },

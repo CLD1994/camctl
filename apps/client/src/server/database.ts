@@ -180,13 +180,13 @@ export class Store {
     const row = this.db()
       .prepare("SELECT value FROM records WHERE namespace=? AND id=?")
       .get(namespace, id);
-    return row ? (JSON.parse(row.value as string) as T) : undefined;
+    return row ? (parseJson(row.value as string) as T) : undefined;
   }
   all<T>(namespace: string): T[] {
     return this.db()
       .prepare("SELECT value FROM records WHERE namespace=? ORDER BY rowid")
       .all(namespace)
-      .map((row) => JSON.parse(row.value as string) as T);
+      .map((row) => parseJson(row.value as string) as T);
   }
   set(namespace: string, id: string, value: unknown): void {
     this.db()
@@ -226,6 +226,13 @@ export class Store {
         "SELECT report_id,file_name,from_wm,to_wm FROM reports ORDER BY report_id",
       )
       .all() as unknown as Array<Omit<SavedReport, "bytes">>;
+  }
+  /** 按成功接收顺序逐份读取原文，用于恢复客户端派生信息。 */
+  *acceptedReportSources(): Iterable<SavedReport> {
+    for (const row of this.db()
+      .prepare("SELECT * FROM reports ORDER BY rowid")
+      .iterate())
+      yield row as unknown as SavedReport;
   }
   saveReport(
     id: string,

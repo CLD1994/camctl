@@ -24,6 +24,9 @@ else:
     while (root / 'hold-submit').exists():
         time.sleep(.005)
     mode = pathlib.Path(plan).read_text()
+if mode == 'motor_control':
+    fd = int(args[args.index('--host-notification-fd') + 1])
+    os.write(fd, b'{"type":"motor_control","action_instance_id":"1","params":{"position":-12}}\n')
 if mode == '127':
     sys.exit(127)
 if mode == 'overflow':

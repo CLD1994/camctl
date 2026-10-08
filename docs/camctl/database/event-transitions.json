@@ -777,6 +777,35 @@
         "via": []
       },
       "state_columns": []
+    },
+    "motor_notifications": {
+      "immutable": [
+        "action_id",
+        "intent_at",
+        "intent_operation_key"
+      ],
+      "mutable": [
+        "outcome",
+        "written_bytes",
+        "errno",
+        "finished_at"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [
+        "written_bytes",
+        "errno",
+        "finished_at"
+      ],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": [
+        "outcome"
+      ]
     }
   },
   "guards": {
@@ -1077,6 +1106,11 @@
           }
         ]
       }
+    },
+    "motor": {
+      "contract": "workflow-fields.md#电机发送事实",
+      "rule": "意图与开始共同保存；只有首次新意图事务交付本地许可。可靠未发送、完整写入、明确失败或恢复未知与动作终态及父计划聚合共同保存，未知不补造字节；同键核实原输入和完整事务，不重授许可。",
+      "scope": "transaction"
     }
   },
   "state_models": {
@@ -1086,7 +1120,13 @@
           "from": 1,
           "to": 2,
           "by": [
-            "PLAN_STATUS_CHANGED.START"
+            "PLAN_STATUS_CHANGED.START",
+            "MOTOR_CHANGED.PREPARE",
+            "MOTOR_CHANGED.WRITTEN",
+            "MOTOR_CHANGED.FAILED",
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
+            "MOTOR_CHANGED.EXPIRED",
+            "MOTOR_CHANGED.UNCONFIRMED"
           ],
           "id": "transition_1"
         },
@@ -1094,7 +1134,12 @@
           "from": 1,
           "to": 3,
           "by": [
-            "PLAN_STATUS_CHANGED.COMPLETE"
+            "PLAN_STATUS_CHANGED.COMPLETE",
+            "MOTOR_CHANGED.WRITTEN",
+            "MOTOR_CHANGED.FAILED",
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
+            "MOTOR_CHANGED.EXPIRED",
+            "MOTOR_CHANGED.UNCONFIRMED"
           ],
           "id": "transition_2"
         },
@@ -1102,7 +1147,12 @@
           "from": 2,
           "to": 3,
           "by": [
-            "PLAN_STATUS_CHANGED.COMPLETE"
+            "PLAN_STATUS_CHANGED.COMPLETE",
+            "MOTOR_CHANGED.WRITTEN",
+            "MOTOR_CHANGED.FAILED",
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
+            "MOTOR_CHANGED.EXPIRED",
+            "MOTOR_CHANGED.UNCONFIRMED"
           ],
           "id": "transition_3"
         }
@@ -1115,7 +1165,8 @@
           "to": 2,
           "by": [
             "ACTION_STARTED.START",
-            "CANCEL_CHANGED.APPLY"
+            "CANCEL_CHANGED.APPLY",
+            "MOTOR_CHANGED.PREPARE"
           ],
           "id": "transition_1"
         },
@@ -1123,7 +1174,8 @@
           "from": 1,
           "to": 5,
           "by": [
-            "ACTION_FINISHED.EXPIRE"
+            "ACTION_FINISHED.EXPIRE",
+            "MOTOR_CHANGED.EXPIRED"
           ],
           "id": "transition_2"
         },
@@ -1139,7 +1191,8 @@
           "from": 2,
           "to": 3,
           "by": [
-            "ACTION_FINISHED.SUCCEED"
+            "ACTION_FINISHED.SUCCEED",
+            "MOTOR_CHANGED.WRITTEN"
           ],
           "id": "transition_4"
         },
@@ -1149,7 +1202,10 @@
           "by": [
             "ACTION_FINISHED.FAIL",
             "SOURCE_RESOLVED.FAIL",
-            "TARGETS_FIXED.FAIL"
+            "TARGETS_FIXED.FAIL",
+            "MOTOR_CHANGED.FAILED",
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
+            "MOTOR_CHANGED.UNCONFIRMED"
           ],
           "id": "transition_5"
         },
@@ -1157,7 +1213,8 @@
           "from": 2,
           "to": 5,
           "by": [
-            "ACTION_FINISHED.EXPIRE"
+            "ACTION_FINISHED.EXPIRE",
+            "MOTOR_CHANGED.EXPIRED"
           ],
           "id": "transition_6"
         },
@@ -1169,6 +1226,14 @@
             "CANCEL_CHANGED.APPLY"
           ],
           "id": "transition_7"
+        },
+        {
+          "from": 1,
+          "to": 4,
+          "by": [
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE"
+          ],
+          "id": "transition_8"
         }
       ]
     },
@@ -1178,7 +1243,9 @@
           "from": 0,
           "to": 1,
           "by": [
-            "ACTION_STARTED.START"
+            "ACTION_STARTED.START",
+            "MOTOR_CHANGED.PREPARE",
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE"
           ],
           "id": "transition_1"
         }
@@ -3172,6 +3239,44 @@
           "id": "transition_2"
         }
       ]
+    },
+    "motor_notifications.outcome": {
+      "edges": [
+        {
+          "from": 1,
+          "to": 2,
+          "by": [
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
+            "MOTOR_CHANGED.EXPIRED",
+            "CANCEL_CHANGED.APPLY"
+          ],
+          "id": "transition_1"
+        },
+        {
+          "from": 1,
+          "to": 3,
+          "by": [
+            "MOTOR_CHANGED.WRITTEN"
+          ],
+          "id": "transition_2"
+        },
+        {
+          "from": 1,
+          "to": 4,
+          "by": [
+            "MOTOR_CHANGED.FAILED"
+          ],
+          "id": "transition_3"
+        },
+        {
+          "from": 1,
+          "to": 5,
+          "by": [
+            "MOTOR_CHANGED.UNCONFIRMED"
+          ],
+          "id": "transition_4"
+        }
+      ]
     }
   },
   "events": {
@@ -3972,7 +4077,8 @@
                 "type": [
                   1,
                   2,
-                  3
+                  3,
+                  8
                 ],
                 "status": [
                   1,
@@ -7251,6 +7357,33 @@
                   null
                 ]
               }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "update",
+              "columns": [
+                "outcome",
+                "finished_at"
+              ],
+              "before": {
+                "outcome": [
+                  1
+                ]
+              },
+              "after": {
+                "outcome": [
+                  2
+                ]
+              },
+              "required": [
+                "outcome",
+                "finished_at"
+              ],
+              "transitions": {
+                "outcome": [
+                  "transition_1"
+                ]
+              }
             }
           ],
           "guards": [
@@ -7262,7 +7395,10 @@
             "withdrawal",
             "plan_aggregate"
           ],
-          "evidence": []
+          "evidence": [
+            "motor_permit",
+            "motor_request"
+          ]
         },
         "RESULT": {
           "reason": 2,
@@ -8203,6 +8339,654 @@
           ],
           "evidence": [
             "observation"
+          ]
+        }
+      }
+    },
+    "MOTOR_CHANGED": {
+      "id": 34,
+      "version": 1,
+      "branches": {
+        "PREPARE": {
+          "reason": 1,
+          "title": "保存电机发送意图与动作开始",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": [
+                "status",
+                "execution_started",
+                "first_window_observed_at"
+              ],
+              "before": {
+                "type": [
+                  8
+                ],
+                "status": [
+                  1
+                ],
+                "cancel_requested": [
+                  0
+                ]
+              },
+              "after": {
+                "status": [
+                  2
+                ],
+                "execution_started": [
+                  1
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_1"
+                ],
+                "execution_started": [
+                  "transition_1"
+                ]
+              }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "create",
+              "after": {
+                "outcome": [
+                  1
+                ]
+              }
+            },
+            {
+              "table": "plans",
+              "op": "update",
+              "columns": [
+                "status"
+              ],
+              "before": {
+                "status": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "status": [
+                  2
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_1"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "motor"
+          ],
+          "evidence": [
+            "request"
+          ]
+        },
+        "WRITTEN": {
+          "reason": 2,
+          "title": "保存完整通知写入",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": [
+                "status"
+              ],
+              "before": {
+                "type": [
+                  8
+                ],
+                "status": [
+                  2
+                ],
+                "cancel_requested": [
+                  0
+                ]
+              },
+              "after": {
+                "status": [
+                  3
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_4"
+                ]
+              }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "update",
+              "columns": [
+                "outcome",
+                "written_bytes",
+                "errno",
+                "finished_at"
+              ],
+              "before": {
+                "outcome": [
+                  1
+                ]
+              },
+              "after": {
+                "outcome": [
+                  3
+                ]
+              },
+              "required": [
+                "outcome",
+                "finished_at"
+              ],
+              "transitions": {
+                "outcome": [
+                  "transition_2"
+                ]
+              }
+            },
+            {
+              "table": "plans",
+              "op": "update",
+              "columns": [
+                "status"
+              ],
+              "before": {
+                "status": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "status": [
+                  2,
+                  3
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_1",
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "motor"
+          ],
+          "evidence": [
+            "request"
+          ]
+        },
+        "FAILED": {
+          "reason": 3,
+          "title": "保存明确通知写入失败",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": [
+                "status",
+                "error_code",
+                "error_details_json"
+              ],
+              "before": {
+                "type": [
+                  8
+                ],
+                "status": [
+                  2
+                ],
+                "cancel_requested": [
+                  0
+                ]
+              },
+              "after": {
+                "status": [
+                  4
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_5"
+                ]
+              }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "update",
+              "columns": [
+                "outcome",
+                "written_bytes",
+                "errno",
+                "finished_at"
+              ],
+              "before": {
+                "outcome": [
+                  1
+                ]
+              },
+              "after": {
+                "outcome": [
+                  4
+                ]
+              },
+              "required": [
+                "outcome",
+                "finished_at"
+              ],
+              "transitions": {
+                "outcome": [
+                  "transition_3"
+                ]
+              }
+            },
+            {
+              "table": "plans",
+              "op": "update",
+              "columns": [
+                "status"
+              ],
+              "before": {
+                "status": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "status": [
+                  2,
+                  3
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_1",
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "motor"
+          ],
+          "evidence": [
+            "request"
+          ]
+        },
+        "CHANNEL_UNAVAILABLE": {
+          "reason": 4,
+          "title": "保存通道不可用与可靠未发送",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": [
+                "status",
+                "execution_started",
+                "error_code",
+                "error_details_json"
+              ],
+              "before": {
+                "type": [
+                  8
+                ],
+                "status": [
+                  1,
+                  2
+                ],
+                "cancel_requested": [
+                  0
+                ]
+              },
+              "after": {
+                "status": [
+                  4
+                ],
+                "execution_started": [
+                  1
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_8",
+                  "transition_5"
+                ],
+                "execution_started": [
+                  "transition_1"
+                ]
+              }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "create",
+              "after": {
+                "outcome": [
+                  2
+                ]
+              }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "update",
+              "columns": [
+                "outcome",
+                "written_bytes",
+                "errno",
+                "finished_at"
+              ],
+              "before": {
+                "outcome": [
+                  1
+                ]
+              },
+              "after": {
+                "outcome": [
+                  2
+                ]
+              },
+              "required": [
+                "outcome",
+                "finished_at"
+              ],
+              "transitions": {
+                "outcome": [
+                  "transition_1"
+                ]
+              }
+            },
+            {
+              "table": "plans",
+              "op": "update",
+              "columns": [
+                "status"
+              ],
+              "before": {
+                "status": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "status": [
+                  2,
+                  3
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_1",
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "motor"
+          ],
+          "evidence": [
+            "request"
+          ]
+        },
+        "EXPIRED": {
+          "reason": 5,
+          "title": "保存可靠未发送与过期",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": [
+                "status",
+                "expiration_reason"
+              ],
+              "before": {
+                "type": [
+                  8
+                ],
+                "status": [
+                  1,
+                  2
+                ],
+                "cancel_requested": [
+                  0
+                ]
+              },
+              "after": {
+                "status": [
+                  5
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_2",
+                  "transition_6"
+                ]
+              }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "update",
+              "columns": [
+                "outcome",
+                "written_bytes",
+                "errno",
+                "finished_at"
+              ],
+              "before": {
+                "outcome": [
+                  1
+                ]
+              },
+              "after": {
+                "outcome": [
+                  2
+                ]
+              },
+              "required": [
+                "outcome",
+                "finished_at"
+              ],
+              "transitions": {
+                "outcome": [
+                  "transition_1"
+                ]
+              }
+            },
+            {
+              "table": "plans",
+              "op": "update",
+              "columns": [
+                "status"
+              ],
+              "before": {
+                "status": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "status": [
+                  2,
+                  3
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_1",
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "motor"
+          ],
+          "evidence": [
+            "request"
+          ]
+        },
+        "UNCONFIRMED": {
+          "reason": 7,
+          "title": "保存恢复时发送结果不确定",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": [
+                "status",
+                "error_code",
+                "error_details_json"
+              ],
+              "before": {
+                "type": [
+                  8
+                ],
+                "status": [
+                  2
+                ],
+                "cancel_requested": [
+                  0
+                ]
+              },
+              "after": {
+                "status": [
+                  4
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_5"
+                ]
+              }
+            },
+            {
+              "table": "motor_notifications",
+              "op": "update",
+              "columns": [
+                "outcome",
+                "written_bytes",
+                "errno",
+                "finished_at"
+              ],
+              "before": {
+                "outcome": [
+                  1
+                ]
+              },
+              "after": {
+                "outcome": [
+                  5
+                ]
+              },
+              "required": [
+                "outcome",
+                "finished_at"
+              ],
+              "transitions": {
+                "outcome": [
+                  "transition_4"
+                ]
+              }
+            },
+            {
+              "table": "plans",
+              "op": "update",
+              "columns": [
+                "status"
+              ],
+              "before": {
+                "status": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "status": [
+                  2,
+                  3
+                ]
+              },
+              "required": [
+                "status"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_1",
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "motor"
+          ],
+          "evidence": [
+            "request"
           ]
         }
       }

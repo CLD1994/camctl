@@ -468,7 +468,7 @@ class ObserveWindowCommand:
             raise TransactionError(
                 f"观察事务要求动作存在: {request.action_id}")
         self._state["actions"] = {request.action_id: action}
-        if action["type"] not in _CAMERA_ACTION_TYPES:
+        if action["type"] not in (*_CAMERA_ACTION_TYPES, 8):
             return self._rejected("not_timed")
         if action["status"] in _ACTION_TERMINAL:
             return self._rejected("terminal")
@@ -604,7 +604,7 @@ class ExpireActionCommand:
         plan = row_facts(connection, "plans", action["plan_id"])
         assert plan is not None
         self._state["plans"] = {plan["id"]: plan}
-        if action["type"] not in _CAMERA_ACTION_TYPES:
+        if action["type"] not in (*_CAMERA_ACTION_TYPES, 8):
             return self._rejected("not_timed")
         if action["status"] in _ACTION_TERMINAL:
             return self._rejected("terminal")

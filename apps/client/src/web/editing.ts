@@ -101,7 +101,21 @@ export function editValue(
     throw new Error("父级 JSON 无法表示未完成的子字段，请先修正具体路径");
   let value: unknown;
   try {
-    value = parseJson(text);
+    const root = parseDraft(content);
+    const motor =
+      path[0] === "actions" &&
+      typeof path[1] === "number" &&
+      root.actions[path[1]]?.type === "motor_control";
+    const integerPaths =
+      motor && (path[2] === "params" || path[2] === "policy")
+        ? path.length === 3
+          ? [[path[2] === "params" ? "position" : "max_delay_ms"]]
+          : path.length === 4 &&
+              path[3] === (path[2] === "params" ? "position" : "max_delay_ms")
+            ? [[]]
+            : []
+        : [];
+    value = parseJson(text, integerPaths);
     if (
       kind === "number" &&
       (typeof value !== "number" || !Number.isFinite(value))

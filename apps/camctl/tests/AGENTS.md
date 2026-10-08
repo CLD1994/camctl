@@ -8,13 +8,13 @@
 
 ```bash
 # 单元测试（约 10 秒）
-UV_PROJECT_ENVIRONMENT=apps/camctl/.venv311 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit -q
+UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit -q
 
 # 组件集成测试：按目录逐个跑，不要合并成一条命令
-UV_PROJECT_ENVIRONMENT=apps/camctl/.venv311 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/reporting -q
+UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/reporting -q
 ```
 
-集成测试目录清单：acceptance、bootstrap、cancellation、capture、contracts、devices、history、host_files、logging_runtime、operations、outputs、persistence、reporting、scheduling、session。
+集成测试目录清单：acceptance、bootstrap、cancellation、capture、contracts、devices、history、host_files、logging_runtime、motor、operations、outputs、persistence、reporting、scheduling、session。
 
 不要用系统 Python 直接跑：系统解释器缺少测试依赖（如 `referencing`），SQLite 版本也不满足运行条件。
 

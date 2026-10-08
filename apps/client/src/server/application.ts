@@ -13,7 +13,12 @@ import {
   type Preset,
   type ImportFile,
 } from "./models";
-import { parseJson } from "../shared/json";
+import {
+  parseJson,
+  motorInputTexts,
+  type MotorInputText,
+  MOTOR_ORIGINAL_INPUT_FIELDS,
+} from "../shared/json";
 import { loadCapabilities, validateParams } from "../shared/capabilities";
 import { validatePlan } from "../shared/plan";
 import type { Capabilities, StatusReport } from "../shared/types";
@@ -55,6 +60,69 @@ function allocateRequestId(
 }
 
 export class Application {
+  private motorInputsReady = false;
+  private ensureMotorInputs() {
+    if (this.motorInputsReady) return;
+    if (!this.store.businessState().reports.length) {
+      this.motorInputsReady = true;
+      return;
+    }
+    this.store.transaction(() => {
+      const snapshot = this.store.businessState().snapshot;
+      const current = new Map(
+        snapshot.plans
+          ?.flatMap((p) => p.actions ?? [])
+          .filter((a) => a.type === "motor_control")
+          .map((a) => [a.action_instance_id, a]) ?? [],
+      );
+      const restored = new Set<string>();
+      const firstInputs = new Map<string, MotorInputText>();
+      for (const source of this.store.acceptedReportSources()) {
+        const report = parseReport(source.file_name, source.bytes);
+        const inputs = motorInputTexts(
+          new TextDecoder("utf-8", { fatal: true }).decode(source.bytes),
+        );
+        for (const [id, input] of Object.entries(inputs)) {
+          const first = firstInputs.get(id);
+          if (first) {
+            if (first.inputIdentity !== input.inputIdentity)
+              throw new Error(
+                "已接受报告的电机原参数互相矛盾，无法恢复派生信息",
+              );
+            continue;
+          }
+          firstInputs.set(id, input);
+          const saved = this.store.get<Partial<MotorInputText>>(
+            "motor_input_texts",
+            id,
+          );
+          if (
+            saved?.inputIdentity !== input.inputIdentity ||
+            saved?.text !== input.text
+          )
+            this.store.set("motor_input_texts", id, input);
+        }
+        for (const original of report.plans?.flatMap((p) => p.actions ?? []) ??
+          []) {
+          const target = current.get(original.action_instance_id);
+          if (
+            !target ||
+            original.type !== "motor_control" ||
+            restored.has(original.action_instance_id)
+          )
+            continue;
+          for (const key of MOTOR_ORIGINAL_INPUT_FIELDS) {
+            if (Object.hasOwn(original, key))
+              Reflect.set(target, key, Reflect.get(original, key));
+            else Reflect.deleteProperty(target, key);
+          }
+          restored.add(original.action_instance_id);
+        }
+      }
+      if (restored.size) this.store.set("state", "snapshot", snapshot);
+    });
+    this.motorInputsReady = true;
+  }
   readonly store: Store;
   capabilities: {
     active: Capabilities | null;
@@ -62,7 +130,10 @@ export class Application {
     generation: number;
   } = { active: null, error: null, generation: 0 };
   private readonly random: RandomSource;
-  constructor(directory: string, random: RandomSource = new CryptoRandomSource()) {
+  constructor(
+    directory: string,
+    random: RandomSource = new CryptoRandomSource(),
+  ) {
     this.random = random;
     this.store = new Store(directory);
     this.reloadCapabilities();
@@ -218,6 +289,7 @@ export class Application {
     return this.store.businessState().coverage;
   }
   snapshot(): StatusReport {
+    this.ensureMotorInputs();
     return this.store.businessState().snapshot;
   }
   ackId(): string | null {
@@ -389,6 +461,7 @@ export class Application {
   }
   applyReports(inputs: Array<{ file: ImportFile; bytes: Uint8Array }>): void {
     this.store.businessState();
+    this.ensureMotorInputs();
     const remaining: Array<{
       file: ImportFile;
       bytes: Uint8Array;
@@ -439,7 +512,15 @@ export class Application {
       const decision = reportDecision(coverage, report.from_wm, report.to_wm);
       const current = this.snapshot();
       let merged: StatusReport | undefined;
+      const motorTexts = motorInputTexts(
+        new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      );
       try {
+        for (const [id, value] of Object.entries(motorTexts)) {
+          const saved = this.store.get<MotorInputText>("motor_input_texts", id);
+          if (saved && saved.inputIdentity !== value.inputIdentity)
+            throw new Error("电机动作原始参数的数学值或类型改变");
+        }
         validateReportAgainstHistory(current, report);
         if (decision !== "gap") merged = mergeReport(current, report);
       } catch (error) {
@@ -467,6 +548,9 @@ export class Application {
           report.from_wm,
           report.to_wm,
         );
+        for (const [id, value] of Object.entries(motorTexts))
+          if (!this.store.get<MotorInputText>("motor_input_texts", id))
+            this.store.set("motor_input_texts", id, value);
         if (decision === "apply") {
           this.store.set("state", "snapshot", merged);
           this.store.set("state", "coverage", report.to_wm);
@@ -483,20 +567,41 @@ export class Application {
   state() {
     const startup = this.store.status();
     if (startup.state !== "ready")
-      return { startup, capabilities: this.capabilities };
+      return {
+        startup,
+        capabilities: this.capabilities,
+        motorInputTexts: {} as Record<string, string>,
+      };
+    this.ensureMotorInputs();
     const imports = this.store.all<ImportFile>("imports");
     const coverage = this.coverage();
     const gaps = imports
       .filter((f) => f.status === "gap" && f.toWm !== undefined)
       .map((f) => f.toWm!);
     const gapTarget = gaps.length ? Math.max(...gaps) : null;
+    const snapshot = this.snapshot();
     return {
       startup,
       capabilities: this.capabilities,
       drafts: this.store.all<Draft>("drafts"),
       requests: this.store.all<ExportedRequest>("requests"),
       presets: this.store.all<Preset>("presets"),
-      snapshot: this.snapshot(),
+      snapshot,
+      motorInputTexts: Object.fromEntries(
+        snapshot.plans?.flatMap((plan) =>
+          (plan.actions ?? [])
+            .filter((action) => action.type === "motor_control")
+            .flatMap((action) => {
+              const value = this.store.get<MotorInputText>(
+                "motor_input_texts",
+                action.action_instance_id,
+              );
+              return value?.text !== undefined
+                ? [[action.action_instance_id, value.text]]
+                : [];
+            }),
+        ) ?? [],
+      ) as Record<string, string>,
       reports: this.store.reports(),
       imports,
       coverage,

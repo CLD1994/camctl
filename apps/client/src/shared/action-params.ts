@@ -2,18 +2,14 @@ import type { CameraActionType } from "./actions";
 import type { ValidateFunction } from "ajv";
 import type { ActionType, Issue } from "./types";
 import planSchema from "../../../../protocol/schemas/plan.schema.json";
-import statusReportSchema from "../../../../protocol/schemas/status-report.schema.json";
-import {
-  createValidator,
-  isCanonicalId,
-  isUint,
-  schemaIssues,
-} from "./validation";
+import { createProtocolValidator } from "./protocol-validation";
+import { isCanonicalId, isUint, schemaIssues } from "./validation";
 
 export const builtinFields: Record<
   Exclude<ActionType, CameraActionType>,
   readonly string[]
 > = {
+  motor_control: ["position"],
   obtain_action_outputs: ["source", "output_ids"],
   delete_action_outputs: ["output_ids"],
   cancel_task: ["target"],
@@ -76,6 +72,7 @@ export const targets: Mode[] = [
 
 /** 非拍摄动作的参数契约直接编译自公共 plan.schema.json，不另维护字段清单。 */
 const paramDefs = {
+  motor_control: "motor_params",
   obtain_action_outputs: "obtain_params",
   delete_action_outputs: "delete_params",
   cancel_task: "cancel_params",
@@ -85,11 +82,7 @@ const paramDefs = {
 let compiledParams: Map<string, ValidateFunction> | undefined;
 function paramValidators() {
   if (!compiledParams) {
-    const ajv = createValidator();
-    ajv.addSchema(
-      statusReportSchema as unknown as object,
-      "status-report.schema.json",
-    );
+    const ajv = createProtocolValidator();
     const defs = (planSchema as unknown as { $defs: object }).$defs;
     compiledParams = new Map(
       Object.values(paramDefs).map((def) => [

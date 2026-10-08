@@ -72,7 +72,8 @@ export type Action = {
  * via the `definition` "action_type".
  */
 export type ActionType =
-  CameraActionType | ("obtain_action_outputs" | "delete_action_outputs" | "cancel_task" | "report_status");
+  | CameraActionType
+  | ("obtain_action_outputs" | "delete_action_outputs" | "cancel_task" | "report_status" | "motor_control");
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
  * via the `definition` "camera_action_type".

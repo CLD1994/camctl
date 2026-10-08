@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+static void motor(int position) { printf("收到电机位置通知：position=%d。\n", position); }
 static void usage(FILE *stream) {
     fputs(
         "用法：host-demo --camctl <绝对路径> --ready <目录> --processing <目录> --log <日志路径>\n"
@@ -121,11 +122,11 @@ int main(int argc, char **argv) {
         usage(stderr);
         return 1;
     }
-    if (camctl_host_init(&config, initial)) {
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    if (camctl_host_register_motor_control_callback(motor) || camctl_host_init(&config, initial)) {
         fprintf(stderr, "模块初始化失败：%s\n", strerror(errno));
         return 1;
     }
-    setvbuf(stdout, NULL, _IOLBF, 0);
     puts("模块初始化完成；可输入 submit <绝对路径>、claim、logs 或 help。");
     char line[CAMCTL_HOST_PATH_MAX + 32];
     while (fgets(line, sizeof(line), stdin)) {

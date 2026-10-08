@@ -1,6 +1,6 @@
 import { chromium } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** 生成实际可播放的浏览器视频及匹配报告；不把任意媒体冒充规格中的占位摘要。 */
@@ -23,9 +23,11 @@ export async function makeMediaFixture(directory:string) {
     video=Buffer.from(data);
   } finally {await browser.close();}
   const checksum=createHash('sha256').update(video).digest('hex');
-  const report=JSON.parse(await readFile('../../protocol/examples/client-protocol/01-success/status-report-1-6a2d8346b79be33790f613d183707116fb16ec40908850b7e9963195bf4f9b62.json','utf8'));
+  const reports='../../protocol/examples/client-protocol/01-success';
+  const reportFile=(await readdir(reports)).find((name)=>/^status-report-1-[0-9a-f]{64}\.json$/.test(name))!;
+  const report=JSON.parse(await readFile(join(reports,reportFile),'utf8'));
   const output=report.plans[0].actions[0].outputs[0];output.size=video.length;output.checksum.sha256=checksum;output.original_name='本地验证.webm';output.media_type='video/webm';
-  const delivery=report.plans[0].actions[1].deliveries[0];delivery.size=video.length;delivery.sha256=checksum;delivery.file_name='d-001.webm';delivery.display_name='本地验证-正常采集-主录像.webm';delivery.copy.committed_bytes=video.length;
+  const delivery=report.plans[0].actions[1].deliveries[0];delivery.size=video.length;delivery.sha256=checksum;delivery.file_name=delivery.delivery_id+'.webm';delivery.display_name='本地验证-正常采集-主录像.webm';
   const bytes=Buffer.from(JSON.stringify(report,null,2)+'\n');const reportName=`status-report-1-${createHash('sha256').update(bytes).digest('hex')}.json`;
   const videoPath=join(directory,delivery.file_name);const reportPath=join(directory,reportName);
   await writeFile(videoPath,video);await writeFile(reportPath,bytes);

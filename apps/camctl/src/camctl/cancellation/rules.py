@@ -178,7 +178,7 @@ _ACTION_TERMINAL = (3, 4, 5, 6)
 _TIME_LAPSE_TYPE = 3
 
 
-def load_eligibility_facts(connection, action_id: int) -> EligibilityFacts:
+def load_eligibility_facts(connection, action_id: int, *, motor_permits=None) -> EligibilityFacts:
     """从已保存事实装配目标设备任务的取消资格输入。
 
     停止能力优先取首次建立活动时保存的 `device_activities.stop_
@@ -189,6 +189,16 @@ def load_eligibility_facts(connection, action_id: int) -> EligibilityFacts:
     if action is None:
         raise ConsistencyError(f"取消目标动作不存在: {action_id}")
     kind = action["type"]
+    if kind == 8:
+        from camctl.motor.rules import owns_send_permit
+        from camctl.persistence.repositories.motor import read_motor_facts
+        facts = read_motor_facts(connection, action_id)
+        local = owns_send_permit(facts, (motor_permits or {}).get(action_id))
+        return EligibilityFacts(
+            terminal=action['status'] in _ACTION_TERMINAL,
+            cancel_applied=bool(action['cancel_requested']),
+            dispatch=DispatchPhase.NOT_STARTED if facts.notification is None or local else DispatchPhase.START_PENDING,
+            stop_supported=False)
     if (kind not in _CAPTURE_TYPES and kind not in
             (_OBTAIN_TASK_TYPE, _CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE,
              _REPORT_TASK_TYPE)):

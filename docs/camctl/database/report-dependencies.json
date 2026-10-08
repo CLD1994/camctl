@@ -369,7 +369,8 @@
               "OBTAIN_ACTION_OUTPUTS": "obtain_action_outputs",
               "DELETE_ACTION_OUTPUTS": "delete_action_outputs",
               "CANCEL_TASK": "cancel_task",
-              "REPORT_STATUS": "report_status"
+              "REPORT_STATUS": "report_status",
+              "MOTOR_CONTROL": "motor_control"
             }
           }
         },

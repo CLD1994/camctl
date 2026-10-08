@@ -18,8 +18,25 @@ void host_child_init(host_child *c, char *b, size_t n) {
     memset(c, 0, sizeof(*c));
     c->output = b;
     c->capacity = n;
-    c->out_fd = c->err_fd = -1;
+    c->out_fd = c->err_fd = c->notification_fd = c->notification_write_fd = -1;
     host_group_scan_init(&c->scan);
+}
+int host_child_prepare_notifications(host_child *c) {
+    if (c->notification_fd >= 0)
+        return 0;
+    int fds[2];
+    if (host_pipe(fds))
+        return errno;
+    c->notification_fd = fds[0];
+    c->notification_write_fd = fds[1];
+    return 0;
+}
+void host_child_close_notifications(host_child *c) {
+    if (c->notification_fd >= 0)
+        close(c->notification_fd);
+    if (c->notification_write_fd >= 0)
+        close(c->notification_write_fd);
+    c->notification_fd = c->notification_write_fd = -1;
 }
 int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command cmd,
                      const char *plan) {
@@ -28,7 +45,14 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
     int contract = host_check_reaping_contract();
     if (contract)
         return contract;
-    char *argv[7];
+    bool notify = cmd == HOST_RUN && c->notifications_enabled;
+    if (notify) {
+        int e = host_child_prepare_notifications(c);
+        if (e)
+            return e;
+    }
+    char notification_number[32];
+    char *argv[9];
     size_t n = 0;
     argv[n++] = (char *)cfg->camctl_path;
     argv[n++] = cmd == HOST_RUN ? "run" : "submit";
@@ -38,14 +62,25 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
         argv[n++] = "--config";
         argv[n++] = (char *)cfg->config_path;
     }
+    if (notify) {
+        snprintf(notification_number, sizeof(notification_number), "%d", c->notification_write_fd);
+        argv[n++] = "--host-notification-fd";
+        argv[n++] = notification_number;
+    }
     argv[n] = NULL;
     int out[2], err[2], rc;
-    if (host_pipe(out))
-        return errno;
+    if (host_pipe(out)) {
+        rc = errno;
+        if (notify)
+            host_child_close_notifications(c);
+        return rc;
+    }
     if (host_pipe(err)) {
         rc = errno;
         close(out[0]);
         close(out[1]);
+        if (notify)
+            host_child_close_notifications(c);
         return rc;
     }
     posix_spawn_file_actions_t actions;
@@ -65,7 +100,7 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
         (rc = posix_spawnattr_setsigdefault(&attr, &defaults)) ||
         (rc = posix_spawnattr_setpgroup(&attr, 0)) ||
         (rc = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF |
-                                               POSIX_SPAWN_SETPGROUP)) ||
+                                                  POSIX_SPAWN_SETPGROUP)) ||
         (rc = posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)) ||
         (rc = posix_spawn_file_actions_adddup2(&actions, out[1], 1)) ||
         (rc = posix_spawn_file_actions_adddup2(&actions, err[1], 2)) ||
@@ -74,14 +109,23 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
         (rc = posix_spawn_file_actions_addclose(&actions, out[1])) ||
         (rc = posix_spawn_file_actions_addclose(&actions, err[1])))
         goto attr;
+    if (notify && ((rc = posix_spawn_file_actions_adddup2(&actions, c->notification_write_fd,
+                                                          c->notification_write_fd)) ||
+                   (rc = posix_spawn_file_actions_addclose(&actions, c->notification_fd))))
+        goto attr;
     pid_t pid;
     rc = posix_spawn(&pid, cfg->camctl_path, &actions, &attr, argv, environ);
     if (!rc) {
         char *buffer = c->output;
         size_t capacity = c->capacity;
         uint64_t id = c->id;
+        int notification_fd = c->notification_fd, notification_write_fd = c->notification_write_fd;
+        bool enabled = c->notifications_enabled;
         host_child_init(c, buffer, capacity);
         c->id = id;
+        c->notifications_enabled = enabled;
+        c->notification_fd = notification_fd;
+        c->notification_write_fd = notification_write_fd;
         c->pid = pid;
         c->pgid = pid;
         c->out_fd = out[0];
@@ -94,6 +138,12 @@ actions:
 pipes:
     close(out[1]);
     close(err[1]);
+    if (notify) {
+        close(c->notification_write_fd);
+        c->notification_write_fd = -1;
+        if (rc)
+            host_child_close_notifications(c);
+    }
     if (rc) {
         close(out[0]);
         close(err[0]);
@@ -148,11 +198,13 @@ static void drain(host_child *c, int *fd, bool output, host_child_log log, void 
     }
 }
 static void event(host_child_log log, void *context, const char *step, const char *message) {
-    if (log) log(context, step, message, strlen(message));
+    if (log)
+        log(context, step, message, strlen(message));
 }
 static void identity_lost(host_child *c, host_child_log log, void *context, int error) {
     c->wait_fault = true;
-    if (!c->ended) c->termination = HOST_EXIT_UNKNOWN;
+    if (!c->ended)
+        c->termination = HOST_EXIT_UNKNOWN;
     host_group_scan_reset(&c->scan);
     event(log, context, "wait_unknown", strerror(error));
 }
@@ -160,12 +212,15 @@ static bool observe_exit(host_child *c, host_child_log log, void *context) {
     siginfo_t info = {0};
     if (waitid(P_PID, (id_t)c->pid, &info, WEXITED | WNOHANG | WNOWAIT)) {
         int error = errno;
-        if (error == ECHILD) identity_lost(c, log, context, error);
-        else if (error != EINTR) event(log, context, "wait_unknown", strerror(error));
+        if (error == ECHILD)
+            identity_lost(c, log, context, error);
+        else if (error != EINTR)
+            event(log, context, "wait_unknown", strerror(error));
         return false;
     }
     if (!info.si_pid) {
-        if (c->ended) identity_lost(c, log, context, ECHILD);
+        if (c->ended)
+            identity_lost(c, log, context, ECHILD);
         return false;
     }
     if (info.si_pid != c->pid) {
@@ -173,8 +228,10 @@ static bool observe_exit(host_child *c, host_child_log log, void *context) {
         return false;
     }
     if (info.si_code != CLD_EXITED && info.si_code != CLD_KILLED && info.si_code != CLD_DUMPED) {
-        if (c->ended) identity_lost(c, log, context, ESTALE);
-        else event(log, context, "child_not_exited", "state change without termination");
+        if (c->ended)
+            identity_lost(c, log, context, ESTALE);
+        else
+            event(log, context, "child_not_exited", "state change without termination");
         return false;
     }
     host_exit termination = info.si_code == CLD_EXITED ? HOST_EXIT_NORMAL : HOST_EXIT_SIGNAL;
@@ -194,16 +251,20 @@ static bool group_identity(host_child *c, host_child_log log, void *context) {
     pid_t group = getpgid(c->pid);
     if (c->pgid != c->pid || c->pgid <= 1 || group != c->pgid) {
         int error = group < 0 ? errno : ESTALE;
-        if (error == ESRCH || error == ESTALE) identity_lost(c, log, context, error);
-        else event(log, context, "group_identity_unknown", strerror(error));
+        if (error == ESRCH || error == ESTALE)
+            identity_lost(c, log, context, error);
+        else
+            event(log, context, "group_identity_unknown", strerror(error));
         return false;
     }
     return true;
 }
 static void settle(host_child *c, host_child_log log, void *context) {
-    if (!observe_exit(c, log, context) || !group_identity(c, log, context)) return;
+    if (!observe_exit(c, log, context) || !group_identity(c, log, context))
+        return;
     host_group_result result = host_group_scan_batch(&c->scan, c->pgid, 64);
-    if (result.status == HOST_GROUP_PENDING) return;
+    if (result.status == HOST_GROUP_PENDING)
+        return;
     if (result.status == HOST_GROUP_UNKNOWN) {
         if (c->settlement_error != result.error || c->settlement_operation != result.operation) {
             char message[256];
@@ -236,8 +297,10 @@ static void settle(host_child *c, host_child_log log, void *context) {
     pid_t pid = waitpid(c->pid, &status, WNOHANG);
     if (pid < 0) {
         int error = errno;
-        if (error == ECHILD) identity_lost(c, log, context, error);
-        else if (error != EINTR) event(log, context, "final_reap_unknown", strerror(error));
+        if (error == ECHILD)
+            identity_lost(c, log, context, error);
+        else if (error != EINTR)
+            event(log, context, "final_reap_unknown", strerror(error));
         return;
     }
     if (!pid) {
@@ -254,13 +317,15 @@ static void settle(host_child *c, host_child_log log, void *context) {
     event(log, context, "group_reaped", "all execution stopped; child record reaped");
 }
 void host_child_collect(host_child *c, host_child_log log, void *p) {
-    if (!c->pid) return;
-    if (!c->reaped && !c->wait_fault) settle(c, log, p);
+    if (!c->pid)
+        return;
+    if (!c->reaped && !c->wait_fault)
+        settle(c, log, p);
     drain(c, &c->out_fd, true, log, p);
     drain(c, &c->err_fd, false, log, p);
 }
 bool host_child_done(const host_child *c) {
-    return c->pid && c->reaped && c->out_fd < 0 && c->err_fd < 0;
+    return c->pid && c->reaped && c->out_fd < 0 && c->err_fd < 0 && c->notification_fd < 0;
 }
 int host_pipe(int fds[2]) {
     if (pipe2(fds, O_CLOEXEC))

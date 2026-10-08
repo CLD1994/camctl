@@ -4,7 +4,7 @@
 
 ## Windows 本地运行
 
-需要 Node.js 24.16 或同一主版本的后续版本。PowerShell 在仓库根目录执行：
+需要 Node.js 24.16 或同一主版本的后续版本。浏览器须支持原生 `JSON.rawJSON` 和 `JSON.isRawJSON`，以保留受理失败报告中超出普通浮点数范围的原始数字；已验证环境见[客户端验证记录](verification.md#电机控制接入)。PowerShell 在仓库根目录执行：
 
 ```powershell
 New-Item -ItemType Directory -Force data

@@ -2,6 +2,8 @@
 
 `schemas/` 保存机器可读协议的权威定义；`examples/` 保存能力说明、计划、报告和部署样例。客户端、CLI 及跨组件测试从这里读取或生成所需资源。
 
+[CLI 向主程序发送通知](host-notifications.md)定义独立管道中的 NDJSON 消息、整数位置参数及通道行为。电机动作的计划与报告 Schema、通知 Schema、错误登记及生产接入由[实施路线图](../docs/superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#电机控制与主程序通知接入)跟踪；本文档中的格式契约不表示现有发布程序已经支持该动作。
+
 语义说明见[全局设计](../docs/architecture/README.md)和[报告格式](../docs/architecture/report-format.md)。报告样例的文件名含原始字节摘要，修改报告时必须同步生成准确文件名及引用。
 
 ## 协议定义与校验入口

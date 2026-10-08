@@ -32,6 +32,10 @@ class ClockError(ValueError):
     """时钟检查输入或状态矛盾。"""
 
 
+class ClockBecameUntrusted(RuntimeError):
+    """运行中的最终资格检查发现墙钟不可信，须进入有限安全收场。"""
+
+
 class ClockTrustStatus(Enum):
     TRUSTED = "trusted"
     UNTRUSTED = "untrusted"

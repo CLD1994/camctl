@@ -1,0 +1,509 @@
+[
+  {
+    "name": "negative",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":-1}}",
+    "valid": true,
+    "position": "-1",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":-1}}\n"
+  },
+  {
+    "name": "zero",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":0}}",
+    "valid": true,
+    "position": "0",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":0}}\n"
+  },
+  {
+    "name": "minimum",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":-2147483648}}",
+    "valid": true,
+    "position": "-2147483648",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":-2147483648}}\n"
+  },
+  {
+    "name": "maximum",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":2147483647}}",
+    "valid": true,
+    "position": "2147483647",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":2147483647}}\n"
+  },
+  {
+    "name": "decimal-integer",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1.0}}",
+    "valid": true,
+    "position": "1",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1}}\n"
+  },
+  {
+    "name": "exponent-integer",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1e2}}",
+    "valid": true,
+    "position": "100",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":100}}\n"
+  },
+  {
+    "name": "negative-zero",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":-0.0}}",
+    "valid": true,
+    "position": "0",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":0}}\n"
+  },
+  {
+    "name": "exact-long-integer",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":2147483647.0000000000000000000000}}",
+    "valid": true,
+    "position": "2147483647",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":2147483647}}\n"
+  },
+  {
+    "name": "scaled-integer",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":100000000000000000000000e-21}}",
+    "valid": true,
+    "position": "100",
+    "wire": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":100}}\n"
+  },
+  {
+    "name": "boolean",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":true}}",
+    "valid": false
+  },
+  {
+    "name": "null",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":null}}",
+    "valid": false
+  },
+  {
+    "name": "string",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":\"100\"}}",
+    "valid": false
+  },
+  {
+    "name": "fraction",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1.5}}",
+    "valid": false
+  },
+  {
+    "name": "rounded-fraction",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1.00000000000000000000001}}",
+    "valid": false
+  },
+  {
+    "name": "rounded-upper-overflow",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":2147483647.00000000000000001}}",
+    "valid": false
+  },
+  {
+    "name": "rounded-lower-overflow",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":-2147483648.00000000000000001}}",
+    "valid": false
+  },
+  {
+    "name": "upper-overflow",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":2147483648}}",
+    "valid": false
+  },
+  {
+    "name": "lower-overflow",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":-2147483649}}",
+    "valid": false
+  },
+  {
+    "name": "tiny-fraction",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1e-1000}}",
+    "valid": false
+  },
+  {
+    "name": "large-exponent",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1e1000}}",
+    "valid": false
+  },
+  {
+    "name": "missing-position",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{}}",
+    "valid": false
+  },
+  {
+    "name": "extra-param",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1,\"speed\":1}}",
+    "valid": false
+  },
+  {
+    "name": "extra-field",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1},\"device_id\":\"motor\"}",
+    "valid": false
+  },
+  {
+    "name": "missing-id",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"params\":{\"position\":1}}",
+    "valid": false
+  },
+  {
+    "name": "invalid-id",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"0\",\"params\":{\"position\":1}}",
+    "valid": false
+  },
+  {
+    "name": "unknown-type",
+    "kind": "notification",
+    "json": "{\"type\":\"other\",\"action_instance_id\":\"12\",\"params\":{\"position\":1}}",
+    "valid": false
+  },
+  {
+    "name": "duplicate-position",
+    "kind": "notification",
+    "json": "{\"type\":\"motor_control\",\"action_instance_id\":\"12\",\"params\":{\"position\":1,\"position\":2}}",
+    "valid": false
+  },
+  {
+    "name": "plan-negative",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":-1}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-zero",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":0}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-minimum",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":-2147483648}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-maximum",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":2147483647}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-decimal-integer",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":1.0}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-exponent-integer",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":1e2}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-negative-zero",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":-0.0}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-exact-long-integer",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":2147483647.0000000000000000000000}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-scaled-integer",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":100000000000000000000000e-21}}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "plan-boolean",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":true}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-null",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":null}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-string",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":\"100\"}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-fraction",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":1.5}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-rounded-fraction",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":1.00000000000000000000001}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-rounded-upper-overflow",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":2147483647.00000000000000001}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-rounded-lower-overflow",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":-2147483648.00000000000000001}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-upper-overflow",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":2147483648}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-lower-overflow",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":-2147483649}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-tiny-fraction",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":1e-1000}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-large-exponent",
+    "kind": "plan",
+    "json": "{\"request_id\":\"101\",\"created_at\":\"2026-10-08 08:00:00\",\"name\":\"电机控制\",\"actions\":[{\"name\":\"定位\",\"type\":\"motor_control\",\"scheduled_at\":\"2026-10-08 09:00:00\",\"policy\":{\"max_delay_ms\":0},\"params\":{\"position\":1e1000}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-missing-params",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-missing-position",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"params\": {}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-extra-param",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"params\": {\"position\": 100, \"speed\": 1}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-device-id",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"params\": {\"position\": 100}, \"device_id\": \"motor\"}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-missing-policy",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"params\": {\"position\": 100}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-missing-max-delay",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {}, \"params\": {\"position\": 100}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-missing-time",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"policy\": {\"max_delay_ms\": 0}, \"params\": {\"position\": 100}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-negative-max-delay",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": -1}, \"params\": {\"position\": 100}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-extra-policy",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0, \"max_attempts\": 1}, \"params\": {\"position\": 100}}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-extra-action-field",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"params\": {\"position\": 100}, \"speed\": 1}]}",
+    "valid": false,
+    "admission": "action_failed"
+  },
+  {
+    "name": "plan-missing-name",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"params\": {\"position\": 100}}]}",
+    "valid": false,
+    "admission": "plan_rejected"
+  },
+  {
+    "name": "plan-unknown-type",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"unknown\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"params\": {\"position\": 100}}]}",
+    "valid": false,
+    "admission": "plan_rejected"
+  },
+  {
+    "name": "plan-group",
+    "kind": "plan",
+    "json": "{\"request_id\": \"101\", \"created_at\": \"2026-10-08 08:00:00\", \"name\": \"电机控制\", \"actions\": [{\"name\": \"定位\", \"type\": \"motor_control\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 1}, \"params\": {\"position\": 100}, \"group\": \"定位组\"}]}",
+    "valid": true,
+    "admission": "accepted"
+  },
+  {
+    "name": "report-pending",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"pending\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}}",
+    "valid": true
+  },
+  {
+    "name": "report-running",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"running\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}}",
+    "valid": true
+  },
+  {
+    "name": "report-succeeded",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}}",
+    "valid": true
+  },
+  {
+    "name": "report-canceled",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"canceled\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}}",
+    "valid": true
+  },
+  {
+    "name": "report-expired",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"expired\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"expiration_reason\": \"window_missed\"}",
+    "valid": true
+  },
+  {
+    "name": "report-failed",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"failed\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"error\": {\"stage\": \"execution\", \"code\": \"motor_notification_failed\", \"details\": {\"reason\": \"broken_pipe\", \"written_bytes\": 0, \"errno\": 32}}}",
+    "valid": true
+  },
+  {
+    "name": "report-forbidden-effective_params",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"effective_params\": {\"type\": \"motor\"}}",
+    "valid": false
+  },
+  {
+    "name": "report-forbidden-outputs",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"outputs\": []}",
+    "valid": false
+  },
+  {
+    "name": "report-forbidden-deliveries",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"deliveries\": []}",
+    "valid": false
+  },
+  {
+    "name": "report-forbidden-device_execution",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"device_execution\": {\"status\": \"still_running\"}}",
+    "valid": false
+  },
+  {
+    "name": "report-forbidden-result",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"result\": {}}",
+    "valid": false
+  },
+  {
+    "name": "report-forbidden-device_id",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}, \"device_id\": \"motor\"}",
+    "valid": false
+  },
+  {
+    "name": "report-missing-scheduled_at",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"policy\": {\"max_delay_ms\": 0}, \"input_params\": {\"position\": 100}}",
+    "valid": false
+  },
+  {
+    "name": "report-missing-policy",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"input_params\": {\"position\": 100}}",
+    "valid": false
+  },
+  {
+    "name": "report-missing-input_params",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"succeeded\", \"scheduled_at\": \"2026-10-08 09:00:00\", \"policy\": {\"max_delay_ms\": 0}}",
+    "valid": false
+  },
+  {
+    "name": "report-admission-raw-input",
+    "kind": "report",
+    "json": "{\"action_instance_id\": \"12\", \"name\": \"定位\", \"type\": \"motor_control\", \"status\": \"failed\", \"input_params\": {\"position\": true}, \"policy\": null, \"device_id\": \"motor\", \"error\": {\"stage\": \"admission\", \"code\": \"action_validation_failed\", \"details\": {\"issues\": [{\"field\": \"params.position\", \"reason\": \"type\"}]}}}",
+    "valid": true
+  }
+]

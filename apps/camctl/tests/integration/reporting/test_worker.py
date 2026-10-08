@@ -156,41 +156,51 @@ class TestRealWorkerProcess:
         assert shutdown.exitcode == 0
 
 
+def _worker_with_incompatible_runtime(child_end, parent_pid, lock_path):
+    """在真实子进程里注入运行库故障，保留父身份保护和工作锁。"""
+    import time
+
+    from camctl.persistence.runtime import RuntimeLibraryError
+    from camctl.reporting import worker as worker_module
+
+    def incompatible() -> None:
+        raise RuntimeLibraryError(
+            "Python 实际链接的 SQLite 3.30.1 不满足统一运行条件")
+
+    worker_module.ensure_runtime_library = incompatible
+    raise SystemExit(worker_module.worker_main(
+        child_end, parent_pid, lock_path, time.monotonic() + 5.0))
+
+
 class TestStartupFailures:
     """V-03：运行库检查失败的启动报告与退出；责任由主进程按消息保留。"""
 
     def test_runtime_check_failure_sends_startup_failure(
-            self, monkeypatch, tmp_path) -> None:
+            self, tmp_path) -> None:
         import multiprocessing
         import os
-        import time
-
-        from camctl.persistence.runtime import RuntimeLibraryError
-        from camctl.reporting import worker as worker_module
         from camctl.reporting.messages import decode_message
-
-        def incompatible() -> None:
-            raise RuntimeLibraryError(
-                "Python 实际链接的 SQLite 3.30.1 不满足统一运行条件")
-
-        monkeypatch.setattr(
-            worker_module, "ensure_runtime_library", incompatible)
-        parent_end, child_end = multiprocessing.get_context("spawn").Pipe(
-            duplex=True)
+        context = multiprocessing.get_context("spawn")
+        parent_end, child_end = context.Pipe(duplex=True)
+        process = context.Process(
+            target=_worker_with_incompatible_runtime,
+            args=(child_end, os.getpid(), str(tmp_path / "state.db.report.lock")))
         try:
-            code = worker_module.worker_main(
-                child_end, os.getpid(),
-                str(tmp_path / "state.db.report.lock"),
-                time.monotonic() + 5.0)
-        finally:
+            process.start()
             child_end.close()
-        try:
-            assert code == 3
+            assert parent_end.poll(10.0), "子进程未报告运行库检查失败"
             failure = decode_message(parent_end.recv_bytes())
             assert failure.phase is StartupPhase.RUNTIME_CHECK
             assert "不满足统一运行条件" in failure.reason
+            process.join(10.0)
+            assert process.exitcode == 3
         finally:
+            child_end.close()
             parent_end.close()
+            if process.is_alive():
+                process.kill()
+                process.join(10.0)
+            process.close()
 
 
 class TestRunJob:

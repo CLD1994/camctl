@@ -96,7 +96,7 @@ class Catalog:
                     seen.add(capability.parameter_type)
         self._implemented = frozenset(
             action_type for definition in definitions.drivers.values() for action_type in definition.actions
-        ) | {"obtain_action_outputs", "delete_action_outputs", "cancel_task", "report_status"}
+        ) | {"obtain_action_outputs", "delete_action_outputs", "cancel_task", "report_status", "motor_control"}
         self._capabilities = self._resolve_capabilities()
 
     def _resolve_capabilities(self) -> dict[str, tuple[str, DriverDefinition, frozenset[str]]]:
