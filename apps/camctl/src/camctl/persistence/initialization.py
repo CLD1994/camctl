@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from camctl.history.initial_state import runtime_state_values
 from camctl.resources import resource_bytes
 from camctl.persistence.directory_switch import (
     SwitchCommitError,
@@ -136,8 +137,12 @@ def _build_initial_database(
             " staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, 1, ?, ?, ?)",
             (uuid.uuid4().hex, staging, ready, processing),
         )
+        initial = runtime_state_values()
+        columns = ", ".join(initial)
+        parameters = ", ".join("?" for _ in initial)
         connection.execute(
-            "INSERT INTO runtime_state (id, acknowledged_wm) VALUES (1, 0)"
+            f"INSERT INTO runtime_state ({columns}) VALUES ({parameters})",
+            tuple(initial.values()),
         )
         connection.execute("COMMIT")
     finally:

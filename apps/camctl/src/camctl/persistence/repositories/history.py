@@ -2,8 +2,8 @@
 
 全局事件页在同一短读事务内核实 H 和事务分组，转换为独立数据并
 在返回前释放游标与连接；继续位置沿规定排序严格推进。报告范围
-按业务水位窗口分页选择并沿归属外键补齐父对象；对象恢复在同一
-短读事务内联合读取当前投影与 C，按对象目录逆向恢复到 H。
+按业务水位窗口分页选择并沿归属外键补齐父对象；对象恢复联合固定
+当前投影与 C、候选快照 S 和目录计数，每页短读结束后再应用事件。
 """
 
 from __future__ import annotations
@@ -14,15 +14,16 @@ from pathlib import Path
 from contextlib import closing, contextmanager
 from collections.abc import Iterator, Mapping, Sequence
 
-from camctl.contracts.enums import load_registry as load_enum_registry
+from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.history_values import (
     BoundaryError, HistoryBoundary, INITIAL_BOUNDARY, ReadOrder, ReadScope, TransactionRange, validate_page,
 )
 from camctl.contracts.pages import Page
-from camctl.contracts.json_values import parse_exact_json, JsonParseError
+from camctl.contracts.json_values import json_equal, parse_exact_json, JsonParseError
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId, new_operation_key
 from camctl.acceptance.definitions import read_action_spec
-from camctl.history.events import EventEnvelope, load_event_registry
+from camctl.history.events import EventEnvelope, business_columns, load_event_registry
+from camctl.history.initial_state import runtime_state_values
 from camctl.history.decoding import decode_event_row
 from camctl.history.queries import (
     FileHistoryCursor,
@@ -38,6 +39,7 @@ from camctl.history.queries import (
 )
 from camctl.history.replay import ReplayError, reverse_row_values
 from camctl.history.snapshots import (
+    FORMAT_VERSION,
     EntityImage,
     PreparedSnapshot,
     SavedProgress,
@@ -45,7 +47,9 @@ from camctl.history.snapshots import (
     SnapshotMaintenanceError,
     SnapshotRef,
     SnapshotRow,
+    decode_snapshot,
 )
+from camctl.history.validators import EventContext, EventValidationError, _resolve_owner_spec
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.models import (
     DbEnqueueTimeoutError,
@@ -56,6 +60,7 @@ from camctl.persistence.models import (
     DbPriority,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.row_validation import ProjectionRowValidator
 from camctl.persistence.transaction import read_transaction_range as _transaction_range
 
 __all__ = ["HistoryRepository", "SqliteSnapshotStore"]
@@ -68,6 +73,31 @@ class _FrozenRegistration:
     from_wm: int
     to_wm: int
     boundary: HistoryBoundary
+
+
+@dataclass(frozen=True)
+class _SnapshotChoice:
+    """一次读取已固定的快照身份、完整 S 与 S 处目录依据。"""
+
+    snapshot_id: int
+    boundary: HistoryBoundary
+    position: tuple[int, int]
+    format_version: int
+    transaction: TransactionRange
+
+
+@dataclass(frozen=True)
+class _ObjectSeed:
+    """同一个 C 读取视图内取得的自身行和恢复路径依据。"""
+
+    ref: tuple[int, int]
+    primary_table: str
+    current: HistoryBoundary
+    target: HistoryBoundary
+    rows: Mapping[tuple[str, int], dict]
+    head: tuple[int, int]
+    floor: tuple[int, int]
+    snapshot: _SnapshotChoice | None
 
 
 class HistoryRepository:
@@ -319,29 +349,69 @@ class HistoryRepository:
         self, entity: str, entity_id: int, boundary: HistoryBoundary,
         *, event_batch_size: int = 128,
     ) -> dict[tuple[str, int], dict]:
-        """恢复一个历史对象在固定 H 的自身行（当前投影逆向恢复）。
+        """按固定 C、H 和可用 S 的相关次数恢复对象自身行。
 
-        同一短读事务内取得当前投影与 C；随后按对象目录自 C 逆向处
-        理 (H, C] 的关联事件。H 之后创建的行不进入结果；正逆恢复
-        不改变真实投影。读取批次只影响分页次数，不影响结果。
+        先在同一短读视图取得投影副本和路径依据。选中快照只读取
+        其固定 ID；随后每页结束游标和读事务，再应用本页事件。
         """
         with self._read_connection() as connection:
-            return self.restore_within(
+            seed = self._object_seed(
                 connection, entity, entity_id, boundary,
                 event_batch_size=event_batch_size)
+        if seed.head[1] == seed.floor[1]:
+            return self._finish_rows(seed, dict(seed.rows))
+        snapshot = seed.snapshot
+        forward = (snapshot is not None and
+                   (snapshot.boundary == boundary or
+                    seed.floor[1] - snapshot.position[1] < seed.head[1] - seed.floor[1]))
+        if forward:
+            rows = self._snapshot_rows(seed)
+            lower, upper = snapshot.boundary, boundary
+            expected_count, end_count = snapshot.position[1] + 1, seed.floor[1]
+            previous = lower.last_event_id
+        else:
+            rows = dict(seed.rows)
+            lower, upper = boundary, seed.current
+            expected_count, end_count = seed.head[1], seed.floor[1] + 1
+            previous = upper.last_event_id + 1
+        while (expected_count <= end_count if forward else expected_count >= end_count):
+            events = self._object_event_page(
+                seed.ref, lower, upper, previous, expected_count,
+                forward=forward, batch_size=event_batch_size,
+                remaining=(end_count - expected_count + 1 if forward
+                           else expected_count - end_count + 1))
+            for event in events:
+                self._apply_object_event(seed, rows, event, forward=forward)
+                expected_count += 1 if forward else -1
+                previous = event.event_id
+        return self._finish_rows(seed, rows)
 
     def restore_within(
             self, connection: sqlite3.Connection, entity: str,
             entity_id: int, boundary: HistoryBoundary,
             *, event_batch_size: int = 128,
     ) -> dict[tuple[str, int], dict]:
-        """在调用方持有的读事务连接内恢复对象到固定 H。
+        """在调用方一致视图内复制当前对象，供快照种子读取。
 
-        供同一读取视图内恢复多个对象共用一个一致边界（如快照依
-        据读取）；连接的读事务由调用方开启与结束。
+        历史恢复须使用 restore_entity，使事件应用不持有读取事务。
+        本入口只接受该视图的完整当前边界。
         """
+        seed = self._object_seed(
+            connection, entity, entity_id, boundary,
+            event_batch_size=event_batch_size, include_snapshot=False)
+        if boundary != seed.current:
+            raise ConsistencyError("一致视图复制只接受当前边界，历史恢复须释放每页读事务")
+        return self._finish_rows(seed, dict(seed.rows))
+
+    def _object_seed(
+            self, connection: sqlite3.Connection, entity: str,
+            entity_id: int, boundary: HistoryBoundary, *, event_batch_size: int,
+            include_snapshot: bool = True,
+    ) -> _ObjectSeed:
+        from camctl.persistence.row_history import _anchor
+
         ObjectId(entity_id)
-        if event_batch_size < 1:
+        if isinstance(event_batch_size, bool) or not isinstance(event_batch_size, int) or event_batch_size < 1:
             raise ValueError(f"事件批量必须是正整数: {event_batch_size}")
         spec = load_enum_registry()["history_objects"].get(entity)
         if spec is None:
@@ -350,16 +420,57 @@ class HistoryRepository:
         if (boundary.txn_id > current_boundary.txn_id
                 or boundary.last_event_id > current_boundary.last_event_id):
             raise ConsistencyError("恢复目标边界晚于可靠当前边界")
+        if boundary != INITIAL_BOUNDARY:
+            transaction = _transaction_range(connection, boundary.txn_id)
+            if transaction.last_event_id != boundary.last_event_id:
+                raise ConsistencyError("恢复目标 H 不是该历史事务的完整结束位置")
         seeded = self._seed_entity_rows(connection, spec, entity_id)
-        if not seeded:
+        primary_key = (spec["table"], entity_id)
+        if primary_key not in seeded:
             raise ConsistencyError(
                 f"对象 {entity}#{entity_id} 在当前投影中不存在")
-        return self._reverse_to_boundary(
-            connection,
-            ref=(spec["id"], entity_id), primary_table=spec["table"],
-            seeded=seeded, boundary=boundary,
-            current_boundary=current_boundary,
-            event_batch_size=event_batch_size)
+        ref = (spec["id"], entity_id)
+        head_row = _one(connection,
+            "SELECT event_id, change_count FROM entity_event_links"
+            " WHERE entity_type = ? AND entity_id = ? ORDER BY event_id DESC LIMIT 1", ref)
+        initialized = (spec["table"] == "runtime_state"
+                       and entity_id == runtime_state_values()["id"])
+        head = (0, 0) if head_row is None and initialized else _anchor(head_row, "对象目录")
+        if head[0] > current_boundary.last_event_id:
+            raise ConsistencyError("对象目录头超出可靠当前边界")
+        derived = load_event_registry()["tables"][spec["table"]]["derived"]
+        primary = seeded[primary_key]
+        if (("last_event_id" in derived and primary["last_event_id"] != head[0])
+                or ("change_count" in derived and primary["change_count"] != head[1])):
+            raise ConsistencyError("当前对象的末事件与次数不符合可靠目录头及 C")
+        floor = _directory_position(connection, ref, boundary.last_event_id)
+        if (floor[1] > head[1]
+                or (floor[1] == head[1]) != (floor[0] == head[0])):
+            raise ConsistencyError("H 的目录位置与当前对象目录矛盾")
+        snapshot = None
+        if include_snapshot and head[1] != floor[1] and floor[1] > 0:
+            candidate = _one(connection,
+                "SELECT id, boundary_event_id, change_count, format_version"
+                " FROM entity_snapshots WHERE entity_type = ? AND entity_id = ?"
+                " AND boundary_event_id <= ? ORDER BY boundary_event_id DESC LIMIT 1",
+                (*ref, boundary.last_event_id))
+            if candidate is not None:
+                event_txn = _one(connection, "SELECT transaction_id FROM history_events WHERE id = ?",
+                                 (candidate[1],))
+                if event_txn is None:
+                    raise ConsistencyError("快照 S 缺少必要历史事务")
+                transaction = _transaction_range(connection, event_txn[0])
+                if transaction.last_event_id != candidate[1]:
+                    raise ConsistencyError("快照 S 不是完整历史事务的结束位置")
+                position = _directory_position(connection, ref, candidate[1])
+                if (candidate[3] != FORMAT_VERSION or candidate[2] != position[1]
+                        or not 0 < position[1] <= floor[1]):
+                    raise ConsistencyError("快照格式或 S 处累计次数与对象目录不符")
+                snapshot = _SnapshotChoice(candidate[0],
+                    HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+                    position, candidate[3], transaction)
+        return _ObjectSeed(ref, spec["table"], current_boundary, boundary,
+                           seeded, head, floor, snapshot)
 
     def _seed_entity_rows(
             self, connection: sqlite3.Connection, spec: dict, entity_id: int,
@@ -369,7 +480,10 @@ class HistoryRepository:
         for table, row_id in self._entity_row_ids(
             connection, spec, entity_id
         ):
-            tables[(table, row_id)] = _table_row(connection, table, row_id)
+            values = _table_row(connection, table, row_id)
+            if table == "actions":
+                read_action_spec(values)
+            tables[(table, row_id)] = values
         return tables
 
     # ---- 关联文件的同边界查询 ----
@@ -573,62 +687,37 @@ class HistoryRepository:
             action = entity_id
             yield from _ids_where(connection, "device_activities", "action_id", action)
             yield from _ids_where(connection, "motor_notifications", "action_id", action)
-            processing_ids = _ids_where(
-                connection, "recording_processing", "action_id", action)
-            yield from processing_ids
             # 录像动作自身包含内部处理引用的拷贝行（交付拷贝由交付
             # 子树包含）；归属列不变，恢复范围按处理行归属。
-            for _, processing_id in processing_ids:
+            for _, processing_id in _ids_where(connection, "recording_processing", "action_id", action):
+                yield "recording_processing", processing_id
                 yield from _ids_where(
                     connection, "file_copies", "processing_id", processing_id)
-            # 动作自身的流程与尝试行：交付读取流程按归属规格属于交
-            # 付子树，这里只取非交付流程，保持每个行恰有一个归属。
-            action_runs = _ids_where(
-                connection, "operation_runs", "action_id", action,
-                extra="delivery_id IS NULL")
-            yield from action_runs
-            for _, run_id in action_runs:
+            # 停止沿原活动归属，读取沿拷贝归属，查询保留触发动作。
+            for _, run_id in _owned_operation_run_ids(connection, "action", action):
+                yield "operation_runs", run_id
                 yield from _ids_where(
                     connection, "operation_attempts", "run_id", run_id)
             yield from _ids_where(connection, "cleanup_items", "action_id", action)
-            yield from _ids_where(connection, "cancel_items", "action_id", action)
             yield from _ids_where(connection, "auto_preview_links", "obtain_action_id", action)
-            dependencies = _ids_where(connection, "action_dependencies", "action_id", action)
-            yield from dependencies
-            selection_ids: list[int] = []
-            for _, dependency_id in dependencies:
-                selection_ids.extend(_ids_where(
-                    connection, "obtain_source_selections", "dependency_id", dependency_id,
-                    ids_only=True))
-            yield from [("obtain_source_selections", selection_id)
-                       for selection_id in selection_ids]
-            for selection_id in selection_ids:
-                yield from _ids_where(
-                    connection, "obtain_items", "selection_id", selection_id)
+            for _, dependency_id in _ids_where(connection, "action_dependencies", "action_id", action):
+                yield "action_dependencies", dependency_id
+                for _, selection_id in _ids_where(
+                        connection, "obtain_source_selections", "dependency_id", dependency_id):
+                    yield "obtain_source_selections", selection_id
+                    yield from _ids_where(connection, "obtain_items", "selection_id", selection_id)
             for _, cancel_item_id in _ids_where(connection, "cancel_items", "action_id", action):
+                yield "cancel_items", cancel_item_id
                 yield from _ids_where(
                     connection, "cancel_delivery_items", "cancel_item_id", cancel_item_id)
-            # 取消成员的目标动作行：cancel_item 投影经 cancel_target
-            # 关联读取目标类型，目标可能属于其他计划。
-            with closing(connection.execute(
-                    "SELECT target_action_id FROM cancel_items"
-                    " WHERE action_id = ?", (action,))) as cursor:
-                target_actions = {int(row[0]) for row in cursor.fetchall()}
-            for target in sorted(target_actions):
-                yield from _ids_where(connection, "actions", "id", target)
         elif name == "outputs":
             yield from _ids_where(connection, "outputs", "id", entity_id)
             yield from _ids_where(connection, "output_origins", "output_id", entity_id)
         elif name == "deliveries":
             yield from _ids_where(connection, "deliveries", "id", entity_id)
             yield from _ids_where(connection, "file_copies", "delivery_id", entity_id)
-            # 交付自身包含读取流程与尝试行（H-01 归属表：普通拷贝
-            # 及读取流程、尝试）；流程行的动作列是发起者，历史归属
-            # 仍按交付。
-            delivery_runs = _ids_where(
-                connection, "operation_runs", "delivery_id", entity_id)
-            yield from delivery_runs
-            for _, run_id in delivery_runs:
+            for _, run_id in _owned_operation_run_ids(connection, "delivery", entity_id):
+                yield "operation_runs", run_id
                 yield from _ids_where(
                     connection, "operation_attempts", "run_id", run_id)
         else:
@@ -646,134 +735,186 @@ class HistoryRepository:
         finally:
             connection.close()
 
-    def _reverse_to_boundary(
-        self, connection: sqlite3.Connection, *, ref: tuple[int, int],
-        primary_table: str, seeded: Mapping[tuple[str, int], dict],
-        boundary: HistoryBoundary, current_boundary: HistoryBoundary,
-        event_batch_size: int,
-    ) -> dict[tuple[str, int], dict]:
-        """按对象目录自 C 逆向恢复到 H；核对锚点与目录连续性。"""
-        from camctl.persistence.row_history import _anchor
+    def _snapshot_rows(self, seed: _ObjectSeed) -> dict[tuple[str, int], dict]:
+        """读取固定快照正文，释放事务后核对格式、主行及归属链。"""
+        choice = seed.snapshot
+        assert choice is not None
+        with self._read_connection() as connection:
+            stored = _one(connection,
+                "SELECT entity_type, entity_id, boundary_event_id, change_count,"
+                " format_version, content FROM entity_snapshots WHERE id = ?",
+                (choice.snapshot_id,))
+        if (stored is None or tuple(stored[:5]) !=
+                (*seed.ref, choice.boundary.last_event_id,
+                 choice.position[1], choice.format_version)):
+            raise ConsistencyError("已选快照的固定身份或元数据发生变化")
+        try:
+            header, decoded = decode_snapshot(stored[5], expect_ref=SnapshotRef(*seed.ref))
+            if (header["boundary_event_id"] != choice.boundary.last_event_id
+                    or header["change_count"] != choice.position[1]):
+                raise SnapshotMaintenanceError("快照正文头与固定元数据不一致")
+            rows = {}
+            registry = load_event_registry()["tables"]
+            with ProjectionRowValidator() as validator:
+                for record in decoded:
+                    ObjectId(record.values.get("id"))
+                    key = (record.table, record.row_id)
+                    current = seed.rows.get(key)
+                    if key in rows:
+                        raise SnapshotMaintenanceError(f"快照重复保存自身行: {key}")
+                    if current is None or record.table not in registry:
+                        raise SnapshotMaintenanceError(f"快照包含对象自身范围以外的行: {key}")
+                    values = dict(record.values)
+                    if values.keys() != current.keys():
+                        raise SnapshotMaintenanceError(f"快照行缺少必要列或包含未知列: {key}")
+                    # 不可变身份和创建位置必须保持；业务可变值使用 S 的
+                    # 原值，不能用新 C 的值覆盖已冻结快照。
+                    fixed = registry[record.table]["immutable"]
+                    for column in (*fixed, "id", "created_event_id"):
+                        if column in current and not json_equal(values[column], current[column]):
+                            raise SnapshotMaintenanceError(f"快照行的固定事实与当前对象矛盾: {key}.{column}")
+                    if ("created_event_id" in values
+                            and values["created_event_id"] > choice.boundary.last_event_id):
+                        raise SnapshotMaintenanceError(f"快照包含 S 之后创建的行: {key}")
+                    validator.validate(record.table, values)
+                    if record.table == "actions":
+                        read_action_spec(values)
+                    rows[key] = values
+            primary = rows.get((seed.primary_table, seed.ref[1]))
+            if primary is None:
+                raise SnapshotMaintenanceError("快照缺少对象完整主行")
+            derived = registry[seed.primary_table]["derived"]
+            if (("last_event_id" in derived and primary["last_event_id"] != choice.position[0])
+                    or ("change_count" in derived and primary["change_count"] != choice.position[1])):
+                raise SnapshotMaintenanceError("快照主行的 S 处末事件或累计次数不符")
+            state = {}
+            for (table, identity), values in rows.items():
+                state.setdefault(table, {})[identity] = values
+            context = EventContext(choice.transaction, {}, state)
+            name = _snapshot_entity_name(seed.ref[0])
+            for (table, identity), values in rows.items():
+                owner = _resolve_owner_spec(registry[table]["owner"], table, values, context, {})
+                if owner != (name, seed.ref[1]):
+                    raise SnapshotMaintenanceError(f"快照行 {table}#{identity} 的历史归属不符")
+            return rows
+        except (SnapshotMaintenanceError, EventValidationError, ValueError, TypeError, KeyError) as error:
+            raise ConsistencyError(f"对象 {seed.ref} 的已选快照无法可靠恢复") from error
 
-        derived = load_event_registry()["tables"][primary_table]["derived"]
-        anchored = "last_event_id" in derived
-        counted = "change_count" in derived
-        head = _anchor(_one(connection,
-            "SELECT event_id, change_count FROM entity_event_links"
-            " WHERE entity_type = ? AND entity_id = ? ORDER BY event_id DESC LIMIT 1", ref),
-            "对象目录")
-        if head[0] > current_boundary.last_event_id:
-            raise ConsistencyError("对象目录头超出可靠当前边界")
-        if anchored:
-            # 主表声明可靠末事件的对象额外核对表内锚点与目录头一致；
-            # 不声明锚点的对象（不可变诊断行、同步责任行等）以对象
-            # 目录为唯一位置依据。
-            names = "last_event_id, change_count" if counted else "last_event_id"
-            primary = _one(connection,
-                           f"SELECT {names} FROM {primary_table} WHERE id = ?", (ref[1],))
-            if counted:
-                primary = _anchor(primary, "当前对象")
-            else:
-                if primary is None or len(primary) != 1:
-                    raise ConsistencyError("当前对象缺少可靠末事件")
-                try:
-                    ObjectId(primary[0])
-                except ValueError as error:
-                    raise ConsistencyError("当前对象的末事件无效") from error
-            if (primary != head if counted else primary[0] != head[0]):
-                raise ConsistencyError("当前对象的末事件与次数不符合可靠目录头及 C")
-        floor_row = _one(connection,
-            "SELECT event_id, change_count FROM entity_event_links"
-            " WHERE entity_type = ? AND entity_id = ? AND event_id <= ?"
-            " ORDER BY event_id DESC LIMIT 1",
-            (*ref, boundary.last_event_id))
-        floor = (0, 0) if floor_row is None else _anchor(floor_row, "H 的对象目录位置")
-        if (floor[0] > boundary.last_event_id or floor[1] > head[1]
-                or (floor[1] == head[1]) != (floor[0] == head[0])):
-            raise ConsistencyError("H 的目录位置与当前对象目录矛盾")
-
-        rows: dict[tuple[str, int], dict] = {
-            key: dict(values) for key, values in seeded.items()}
-        expected_count = head[1]
-        previous = current_boundary.last_event_id + 1
-        recent: TransactionRange | None = None
-        while expected_count > floor[1]:
+    def _object_event_page(
+            self, ref: tuple[int, int], lower: HistoryBoundary, upper: HistoryBoundary,
+            previous: int, expected_count: int, *, forward: bool,
+            batch_size: int, remaining: int,
+    ) -> tuple[EventEnvelope, ...]:
+        """固定范围内复制一页目录事件；完整事务核验限于本页所需组。"""
+        direction, operator = ("ASC", ">") if forward else ("DESC", "<")
+        limit = min(batch_size, remaining)
+        with self._read_connection() as connection:
             with closing(connection.execute(
                 "SELECT l.change_count, e.id, e.transaction_id, e.event_type,"
                 " e.event_version, e.occurred_at, e.clock_status, e.change_seq,"
                 " e.body_json FROM entity_event_links AS l"
                 " LEFT JOIN history_events AS e ON e.id = l.event_id"
                 " WHERE l.entity_type = ? AND l.entity_id = ? AND l.event_id > ?"
-                " AND l.event_id <= ? AND l.event_id < ?"
-                " ORDER BY l.event_id DESC LIMIT ?",
-                (*ref, boundary.last_event_id, current_boundary.last_event_id,
-                 previous, event_batch_size),
+                f" AND l.event_id <= ? AND l.event_id {operator} ?"
+                f" ORDER BY l.event_id {direction} LIMIT ?",
+                (*ref, lower.last_event_id, upper.last_event_id, previous, limit),
             )) as cursor:
-                stored_rows = cursor.fetchall()
-            if not stored_rows or len(stored_rows) > event_batch_size:
-                raise ConsistencyError("对象历史目录缺少必要事件或批量范围无效")
-            for stored in stored_rows:
-                event = decode_event_row(stored[1:])
-                if (stored[0] != expected_count
-                        or not boundary.last_event_id < event.event_id < previous
-                        or not boundary.txn_id < event.transaction_id <= current_boundary.txn_id):
+                stored = cursor.fetchall()
+            if len(stored) != limit:
+                raise ConsistencyError("对象历史目录缺少必要事件或累计次数不连续")
+            events = []
+            recent = None
+            for row in stored:
+                event = decode_event_row(row[1:])
+                ordered = event.event_id > previous if forward else event.event_id < previous
+                if (row[0] != expected_count or not ordered
+                        or not lower.last_event_id < event.event_id <= upper.last_event_id
+                        or not lower.txn_id < event.transaction_id <= upper.txn_id):
                     raise ConsistencyError("对象历史目录的事件位置、事务或累计次数不连续")
-                recent = _transaction_range(
-                    connection, event.transaction_id,
-                    recent if recent is not None and recent.txn_id == event.transaction_id else None)
+                recent = _transaction_range(connection, event.transaction_id,
+                    recent if recent is not None and recent.txn_id == event.transaction_id
+                    else self._validated_ranges.get(event.transaction_id))
                 if not recent.first_event_id <= event.event_id <= recent.last_event_id:
                     raise ConsistencyError("对象历史事件不属于其完整事务范围")
-                for change in event.rows:
-                    key = (change.table, change.row_id)
-                    target = rows.get(key)
-                    if target is None:
-                        continue
-                    if not change.before.exists:
-                        # 创建于 (H, C]：目标边界处该行尚不存在。
-                        del rows[key]
-                        continue
-                    if not change.after.exists:
-                        raise ConsistencyError(
-                            f"行 {key} 的更新事件在保存后不存在，无法逆向恢复")
-                    try:
-                        rows[key] = reverse_row_values(
-                            target, change, frozenset(target))
-                    except ReplayError as error:
-                        raise ConsistencyError(
-                            f"对象 {ref} 的行 {key} 恢复依据不连续") from error
-                expected_count -= 1
+                events.append(event)
                 previous = event.event_id
-            if expected_count < floor[1]:
-                raise ConsistencyError("对象历史目录越过 H 的可靠累计次数")
-        return rows
+                expected_count += 1 if forward else -1
+            # 不可变组跨页复用；缓存只保留本页最后一组并由实例身份约束。
+            self._validated_ranges = {recent.txn_id: recent}
+            return tuple(events)
 
-    def entity_facts(
-        self, entity_type: int, entity_ids: tuple[int, ...]
-    ) -> dict[str, dict[int, dict]]:
-        """取得对象自身与其关联表在当前投影的行事实（报告生成用）。"""
-        if not entity_ids:
-            return {}
-        connection = self._connect()
-        try:
-            tables: dict[str, dict[int, dict]] = {}
-            for table in (
-                "plans", "actions", "outputs", "deliveries",
-                "plan_file_diagnostics", "device_activities", "motor_notifications", "auto_preview_links",
-            ):
-                rows = connection.execute(
-                    f"SELECT * FROM {table}"
-                ).fetchall()
-                names = [d[0] for d in connection.execute(f"SELECT * FROM {table} LIMIT 0").description]
-                for row in rows:
-                    values = dict(zip(names, row))
-                    row_id = int(values.get("id", 0))
-                    decoded = _decode_row(values)
-                    if table == "actions":
-                        read_action_spec(decoded)
-                    tables.setdefault(table, {})[row_id] = decoded
-            return tables
-        finally:
-            connection.close()
+    @staticmethod
+    def _apply_object_event(
+            seed: _ObjectSeed, rows: dict[tuple[str, int], dict],
+            event: EventEnvelope, *, forward: bool,
+    ) -> None:
+        """在读事务外应用自身行；固定归属不随可变状态改变。"""
+        touched = False
+        for change in event.rows:
+            key = (change.table, change.row_id)
+            current = seed.rows.get(key)
+            if current is None:
+                continue
+            touched = True
+            columns = business_columns(change.table)
+            target = rows.get(key)
+            try:
+                if forward:
+                    if not change.after.exists:
+                        raise ReplayError(f"行 {key} 的保存后事实不存在")
+                    if not change.before.exists:
+                        if target is not None or set(change.after.values) != columns:
+                            raise ReplayError(f"行 {key} 的创建事实不完整或已存在")
+                        created = {name: value for name, value in current.items() if name not in columns}
+                        created.update(change.after.values)
+                        rows[key] = created
+                    else:
+                        if target is None:
+                            raise ReplayError(f"行 {key} 的更新前不存在")
+                        for name, value in change.before.values.items():
+                            if name not in target or not json_equal(target[name], value):
+                                raise ReplayError(f"行 {key} 的 {name} 与事件前值不连续")
+                        updated = dict(target)
+                        updated.update(change.after.values)
+                        rows[key] = updated
+                elif not change.before.exists:
+                    if target is None or not json_equal(
+                            {name: target[name] for name in columns}, dict(change.after.values)):
+                        raise ReplayError(f"行 {key} 的完整创建后事实不连续")
+                    del rows[key]
+                else:
+                    if target is None:
+                        raise ReplayError(f"行 {key} 的逆向更新前不存在")
+                    rows[key] = reverse_row_values(target, change, frozenset(target))
+            except ReplayError as error:
+                raise ConsistencyError(f"对象 {seed.ref} 的行 {key} 恢复依据不连续") from error
+        if not touched:
+            raise ConsistencyError("对象目录事件没有对象自身行，关联范围不一致")
+
+    @staticmethod
+    def _finish_rows(seed: _ObjectSeed, rows: dict[tuple[str, int], dict]) -> dict[tuple[str, int], dict]:
+        """按 H 的对象目录重建主行元字段，并核对存在性分类。"""
+        key = (seed.primary_table, seed.ref[1])
+        if seed.floor[1] == 0:
+            if seed.primary_table == "runtime_state":
+                initial = runtime_state_values()
+                if (key != ("runtime_state", initial["id"]) or set(rows) != {key}
+                        or not json_equal(rows[key], initial)):
+                    raise ConsistencyError("全局单例在首次自身历史之前必须保持完整初始化事实")
+                return rows
+            if rows:
+                raise ConsistencyError("对象在 H 尚未创建，但历史恢复仍保留自身行")
+            return rows
+        if key not in rows:
+            raise ConsistencyError("对象在 H 已存在，但历史恢复缺少完整主行")
+        primary = dict(rows[key])
+        derived = load_event_registry()["tables"][seed.primary_table]["derived"]
+        if "last_event_id" in derived:
+            primary["last_event_id"] = seed.floor[0]
+        if "change_count" in derived:
+            primary["change_count"] = seed.floor[1]
+        rows[key] = primary
+        return rows
 
 
 def _decode_row(values: dict) -> dict:
@@ -787,18 +928,109 @@ def _decode_row(values: dict) -> dict:
     return decoded
 
 
+def _owned_operation_run_ids(
+        connection: sqlite3.Connection, entity: str,
+        entity_id: int,
+) -> Iterator[tuple[str, int]]:
+    """从固定关联的候选流程中解析唯一归属，不将触发者当作所有者。
+
+    LEFT JOIN 保留直接关联到本对象但缺失归属链的候选；随后核对
+    实际父记录和重复关联，异常不能被连接查询静默省略。
+    """
+    kinds = enum_for("operation_runs.kind")
+    candidates = _operation_run_candidates(connection, entity, entity_id, kinds)
+    for run_id in candidates:
+        run = _table_row(connection, "operation_runs", run_id)
+        try:
+            kind = kinds(run["kind"])
+        except ValueError as error:
+            raise ConsistencyError(f"流程 {run_id} 的种类未登记") from error
+        if kind is kinds.READ_FILE:
+            copy = _table_row(connection, "file_copies", run["copy_id"])
+            delivery_id, processing_id = copy["delivery_id"], copy["processing_id"]
+            if (delivery_id is None) == (processing_id is None):
+                raise ConsistencyError(f"读取流程 {run_id} 的拷贝没有唯一归属")
+            if run["delivery_id"] != delivery_id:
+                raise ConsistencyError(f"读取流程 {run_id} 的交付关联与拷贝不符")
+            if delivery_id is not None:
+                parent = _table_row(connection, "deliveries", delivery_id)
+                owner = ("delivery", delivery_id)
+            else:
+                parent = _table_row(connection, "recording_processing", processing_id)
+                owner = ("action", parent["action_id"])
+            if run["action_id"] != parent["action_id"]:
+                raise ConsistencyError(f"读取流程 {run_id} 的动作关联与拷贝归属不符")
+        elif kind in (kinds.STOP_RESIDUAL, kinds.EMERGENCY_STOP):
+            activity = _table_row(connection, "device_activities", run["activity_id"])
+            if run["delivery_id"] is not None:
+                raise ConsistencyError(f"停止流程 {run_id} 不应有关联交付")
+            owner = ("action", activity["action_id"])
+        else:
+            if run["delivery_id"] is not None:
+                raise ConsistencyError(f"流程 {run_id} 的种类不适用交付归属")
+            owner = ("action", run["action_id"])
+        if owner == (entity, entity_id):
+            yield "operation_runs", run_id
+
+
+def _operation_run_candidates(connection, entity, entity_id, kinds) -> Iterator[int]:
+    """沿现有归属索引逐页定位候选，避免扫描其他对象的流程。"""
+    previous = 0
+    while True:
+        if entity == "action":
+            statement = (
+                "SELECT id FROM operation_runs WHERE action_id = ? AND id > ?"
+                " UNION SELECT r.id FROM device_activities a"
+                " JOIN operation_runs r ON r.activity_id = a.id"
+                " WHERE a.action_id = ? AND r.kind = ? AND r.id > ?"
+                " UNION SELECT r.id FROM device_activities a"
+                " JOIN operation_runs r ON r.activity_id = a.id"
+                " WHERE a.action_id = ? AND r.kind = ? AND r.id > ?"
+                " UNION SELECT r.id FROM recording_processing p"
+                " JOIN file_copies c ON c.processing_id = p.id"
+                " JOIN operation_runs r ON r.copy_id = c.id AND r.kind = ?"
+                " WHERE p.action_id = ? AND r.id > ? ORDER BY id LIMIT ?")
+            parameters = (entity_id, previous,
+                entity_id, int(kinds.STOP_RESIDUAL), previous,
+                entity_id, int(kinds.EMERGENCY_STOP), previous,
+                int(kinds.READ_FILE), entity_id, previous, _MEMBER_BATCH_SIZE)
+        else:
+            # READ_FILE 的 delivery_id 必须与 copy 的 delivery_id 相同；
+            # 第二分支仍定位关联不一致的候选，让归属核对明确拒绝。
+            statement = (
+                "SELECT id FROM operation_runs WHERE delivery_id = ? AND id > ?"
+                " UNION SELECT r.id FROM file_copies c"
+                " JOIN operation_runs r ON r.copy_id = c.id AND r.kind = ?"
+                " WHERE c.delivery_id = ? AND r.id > ? ORDER BY id LIMIT ?")
+            parameters = (entity_id, previous, int(kinds.READ_FILE),
+                          entity_id, previous, _MEMBER_BATCH_SIZE)
+        with closing(connection.execute(statement, parameters)) as cursor:
+            candidates = cursor.fetchall()
+        for row in candidates:
+            previous = int(row[0])
+            yield previous
+        if len(candidates) < _MEMBER_BATCH_SIZE:
+            return
+
+
+_MEMBER_BATCH_SIZE = 128
+
+
 def _ids_where(
     connection: sqlite3.Connection, table: str, column: str, value: int,
-    *, ids_only: bool = False, extra: str | None = None,
-) -> list[tuple[str, int]] | list[int]:
-    """按归属外键枚举子表行身份（报告字段相关归属表）。"""
-    condition = f"{column} = ?"
-    if extra is not None:
-        condition = f"{condition} AND {extra}"
-    with closing(connection.execute(
-            f"SELECT id FROM {table} WHERE {condition}", (value,))) as cursor:
-        rows = [int(row[0]) for row in cursor.fetchall()]
-    return rows if ids_only else [(table, row_id) for row_id in rows]
+) -> Iterator[tuple[str, int]]:
+    """按固定归属逐页复制身份；不另存完整成员 ID 集合。"""
+    previous = 0
+    while True:
+        with closing(connection.execute(
+                f"SELECT id FROM {table} WHERE {column} = ? AND id > ?"
+                " ORDER BY id LIMIT ?", (value, previous, _MEMBER_BATCH_SIZE))) as cursor:
+            rows = cursor.fetchall()
+        for row in rows:
+            previous = int(row[0])
+            yield table, previous
+        if len(rows) < _MEMBER_BATCH_SIZE:
+            return
 
 
 def _table_row(connection: sqlite3.Connection, table: str, row_id: int) -> dict:
@@ -815,6 +1047,16 @@ def _table_row(connection: sqlite3.Connection, table: str, row_id: int) -> dict:
 def _one(connection, statement, parameters=()):
     with closing(connection.execute(statement, parameters)) as cursor:
         return cursor.fetchone()
+
+
+def _directory_position(connection, ref: tuple[int, int], upper: int) -> tuple[int, int]:
+    from camctl.persistence.row_history import _anchor
+
+    row = _one(connection,
+        "SELECT event_id, change_count FROM entity_event_links"
+        " WHERE entity_type = ? AND entity_id = ? AND event_id <= ?"
+        " ORDER BY event_id DESC LIMIT 1", (*ref, upper))
+    return (0, 0) if row is None else _anchor(row, "对象目录位置")
 
 
 def _event_range(scope: ReadScope[int], boundary: HistoryBoundary) -> tuple[int, int]:

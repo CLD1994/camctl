@@ -116,8 +116,9 @@ async def test_history_and_retry_keep_first_definition_after_default_changes(env
     catalog.duration = Decimal("9.876")
     reused = await _accept((connection, context), tmp_path, {"request_id":"42"})
     assert reused.plan_disposition is PlanDisposition.REUSED
-    facts = HistoryRepository(tmp_path / "state.db").entity_facts(1, (1,))
-    assert read_action_spec(facts["actions"][1]) == {"target_duration_ms":1234}
+    repository = HistoryRepository(tmp_path / "state.db")
+    row = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
+    assert read_action_spec(row) == {"target_duration_ms":1234}
 
 
 @pytest.mark.parametrize("spec", [None, "null", "[]", "{}", '{"target_duration_ms":true}', '{"target_duration_ms":0}', '{"action_type":"camera_record","target_duration_ms":1}'])
@@ -190,8 +191,8 @@ async def test_real_history_replay_and_reopened_database_keep_first_facts(enviro
         catalog.duration = Decimal("9.876")
         reused = await accept_input(ParsedInput("retry.json",{"request_id":"42"}),context,new_operation_key(),reopened)
         assert reused.plan_disposition is PlanDisposition.REUSED
-        saved = repository.entity_facts(1,(1,))
-        assert read_action_spec(saved["actions"][1]) == {"target_duration_ms":1234}
-        assert reconstruct_action_input(saved["actions"][1])["params"]["fraction"] == Decimal("0.12345678901234567890123456789")
+        saved = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
+        assert read_action_spec(saved) == {"target_duration_ms":1234}
+        assert reconstruct_action_input(saved)["params"]["fraction"] == Decimal("0.12345678901234567890123456789")
     finally:
         reopened.connection.close()

@@ -164,6 +164,19 @@ def _plan_facts(
     for action_id, action_selection in subtree.selection.get("action", {}).items():
         rows = repo.restore_entity("action", action_id, boundary)
         _merge(facts, rows)
+        # 取消项引用的目标是独立动作。公开字段需要目标类型时，另
+        # 取同一 H 的主行事实，不把目标变成取消对象的自身成员。
+        cancel_targets = sorted({
+            int(values["target_action_id"])
+            for (table, _row_id), values in rows.items()
+            if table == "cancel_items"
+        })
+        for target_id in cancel_targets:
+            target_rows = repo.restore_entity("action", target_id, boundary)
+            target = target_rows.get(("actions", target_id))
+            if target is None:
+                raise ConsistencyError(f"取消目标动作 {target_id} 在 H 不存在")
+            _merge(facts, {("actions", target_id): target})
         for sync_id in repo.related_entity_ids("state_syncs", "action_id", action_id):
             _merge(facts, repo.restore_entity("state_sync", sync_id, boundary))
         for output_id in action_selection.get("output", {}):

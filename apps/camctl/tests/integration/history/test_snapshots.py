@@ -36,7 +36,6 @@ from camctl.persistence.executor import DbExecutor
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..outputs.test_qualification import (
-    _seed_action,
     _seed_device_file,
     _seed_output,
     _seed_selection_and_item,
@@ -48,6 +47,7 @@ from .test_file_history import (
     _observe,
     _presence,
     _seed_processing,
+    _seed_obtain_action,
     _seed_repair_pending,
     _start_repair,
     _submit_plan,
@@ -61,7 +61,7 @@ async def session(tmp_path: Path):
     owned, target = _environment(tmp_path)
     connection = owned.connection
     # 交付链前提：取回动作 31 引用动作 11 的产物 701 与设备文件 501。
-    _seed_action(connection, 31, 1, action_type=4)
+    _seed_obtain_action(connection, 31, 1)
     _seed_device_file(connection, 501, 11)
     _seed_output(connection, 701, 11, 501)
     _seed_selection_and_item(
@@ -262,7 +262,7 @@ async def test_enqueue_timeout_disables_session_and_business_continues(
         tmp_path: Path) -> None:
     """快照操作入队前超时停用本次会话；业务操作不受影响继续执行。"""
     owned, target = _environment(tmp_path)
-    _seed_action(owned.connection, 31, 1, action_type=4)
+    _seed_obtain_action(owned.connection, 31, 1)
     _seed_device_file(owned.connection, 501, 11)
     _seed_output(owned.connection, 701, 11, 501)
     _seed_selection_and_item(

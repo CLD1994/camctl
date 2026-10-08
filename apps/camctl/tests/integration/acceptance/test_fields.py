@@ -156,7 +156,8 @@ async def test_history_keeps_exact_original_number(environment, tmp_path):
     from .test_atomicity import _process
     from camctl.persistence.models import DbOutcomeKind
     assert _process(_plan_body(actions=[original]), connection).kind is DbOutcomeKind.COMPLETED
-    row = HistoryRepository(tmp_path / "state.db").entity_facts(1,(1,))["actions"][1]
+    repository = HistoryRepository(tmp_path / "state.db")
+    row = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
     from camctl.contracts.input_fields import reconstruct_action_input
     assert reconstruct_action_input(row) == original
 
@@ -192,7 +193,8 @@ async def test_history_rejects_invalid_json_instead_of_returning_text(environmen
     connection.execute("PRAGMA ignore_check_constraints=ON")
     connection.execute("UPDATE actions SET input_fields_json = '{broken' WHERE id=1")
     with pytest.raises(ConsistencyError):
-        HistoryRepository(tmp_path / "state.db").entity_facts(1,(1,))
+        repository = HistoryRepository(tmp_path / "state.db")
+        repository.restore_entity("action", 1, repository.current_boundary())
 
 
 async def test_public_projection_rejects_wrong_registered_error_details(environment, tmp_path):
@@ -244,7 +246,8 @@ async def test_history_reader_rejects_missing_admitted_input(environment, tmp_pa
     await _accept(environment, tmp_path, _plan_body())
     connection.execute("UPDATE actions SET input_fields_json='{}' WHERE id=1")
     with pytest.raises(ConsistencyError):
-        HistoryRepository(tmp_path / "state.db").entity_facts(1, (1,))
+        repository = HistoryRepository(tmp_path / "state.db")
+        repository.restore_entity("action", 1, repository.current_boundary())
 
 
 @pytest.mark.parametrize("action_type,params", [

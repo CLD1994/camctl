@@ -104,6 +104,11 @@ def _seed_plan(connection, plan_id: int) -> None:
 
 
 def _seed_action(connection, action_id: int, *, action_type: int) -> None:
+    params = {"type": "ordinary"}
+    if action_type == 2:
+        params["duration_s"] = 60
+    original = {"params": params, "policy": {"max_delay_ms": 1000}}
+    definition = {"target_duration_ms": 60000} if action_type == 2 else {}
     connection.execute(
         "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
         " scheduled_at, group_name, input_fields_json, effective_params_json,"
@@ -111,10 +116,21 @@ def _seed_action(connection, action_id: int, *, action_type: int) -> None:
         " cancel_requested, error_code, error_details_json, first_window_observed_at,"
         " expiration_reason, source_resolution_state, resolved_source_plan_id,"
         " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, '{}', '{}', 'camctl-adb',"
-        " 1000, '{}', 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
-        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW),
+        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, ?, ?, 'camctl-adb',"
+        " 1000, ?, 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
+        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW,
+         json.dumps(original), json.dumps(params), json.dumps(definition)),
     )
+
+
+def _seed_obtain_action(connection, action_id: int, plan_id: int) -> None:
+    """历史读取用的取回前置种子，固定原输入与 DEFAULT 选择一致。"""
+    from ..outputs.test_qualification import _seed_action as seed_qualified_action
+
+    seed_qualified_action(connection, action_id, plan_id, action_type=4)
+    connection.execute("UPDATE actions SET input_fields_json = ? WHERE id = ?",
+        (json.dumps({"params": {"source": {"current_plan": True}, "purpose": "manual"}}),
+         action_id))
 
 
 def _seed_processing(connection, processing_id: int, action_id: int,

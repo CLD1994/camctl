@@ -13,6 +13,7 @@ from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal
 from camctl.history.events import RowChange
+from camctl.history.initial_state import runtime_state_values
 from camctl.history.validators import ValidatedEvent
 
 
@@ -162,6 +163,22 @@ def apply_reverse(image: EntityImage, event: ValidatedEvent) -> EntityImage:
     )
 
 
+def _require_initial_image(image: EntityImage) -> None:
+    """初始边界保留部署单例；其余业务对象尚未创建。"""
+    if image.change_count != 0 or image.last_event_id != 0:
+        raise ReplayError("初始化镜像的目录位置与累计次数必须为零")
+    initial = runtime_state_values()
+    runtime_type = load_enum_registry()["history_objects"]["runtime_state"]["id"]
+    if image.entity_type == runtime_type:
+        key = ("runtime_state", initial["id"])
+        business = {name: value for name, value in initial.items() if name != "id"}
+        if (image.entity_id != initial["id"] or not image.exists
+                or set(image.rows) != {key} or not json_equal(image.rows[key], business)):
+            raise ReplayError("初始化全局单例必须包含完整原始事实")
+    elif image.exists or image.rows:
+        raise ReplayError("初始化时普通业务对象尚未创建")
+
+
 def restore(
     seed: RestoreSeed,
     events: Iterable[ValidatedEvent],
@@ -173,6 +190,8 @@ def restore(
     逆向恢复；事件按位置连续应用，缺失中间事件时因行值或
     存在性不连续而拒绝。
     """
+    if seed.boundary.txn_id == 0 and seed.boundary.last_event_id == 0:
+        _require_initial_image(seed.image)
     if target.txn_id == 0 and target.last_event_id == 0:
         if seed.boundary.txn_id == 0:
             return seed.image
@@ -182,8 +201,8 @@ def restore(
             if event.envelope.event_id <= 0:
                 continue
             image = apply_reverse(image, event)
-        if image.change_count != 0 or image.exists:
-            raise ReplayError("逆向到初始化边界后镜像必须为空")
+        image = replace(image, last_event_id=0)
+        _require_initial_image(image)
         return image
 
     if seed.boundary.last_event_id <= target.last_event_id:

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 import asyncio
@@ -21,8 +22,9 @@ import sqlite3
 import pytest
 import pytest_asyncio
 
-from camctl.contracts.enums import load_registry
+from camctl.contracts.enums import enum_for, load_registry
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
+from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import new_operation_key
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import (
@@ -38,6 +40,7 @@ from camctl.history.snapshots import (
     maintain_snapshots,
 )
 from camctl.history.validators import ValidatedEvent
+from camctl.operations.attempts import QueryPurpose
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
@@ -46,6 +49,7 @@ from camctl.persistence.repositories.capture import (
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.transaction import row_facts
 
 from .test_file_history import (
     _environment,
@@ -57,6 +61,8 @@ from .test_file_history import (
     _start_repair,
     _submit_plan,
 )
+from .test_object_closure import NOW, cancellation_world, owned, _fix_members
+from .test_operation_ownership import _create_flow, _expected, _remember_run, operation_world
 
 register_capture_guards()
 register_outputs_guards()
@@ -64,11 +70,7 @@ register_outputs_guards()
 pytestmark = pytest.mark.asyncio
 
 _ENTITY_PRIMARY = {
-    "action": "actions", "delivery": "deliveries", "output": "outputs",
-    "plan": "plans", "diagnostic": "input_diagnostics",
-    "report": "reports", "state_sync": "state_syncs",
-    "runtime_state": "runtime_state", "device_file": "device_files",
-    "intermediate_file": "intermediate_files",
+    entity: spec["table"] for entity, spec in load_registry()["history_objects"].items()
 }
 
 #: 综合剧本经 raw 种子直接插入（无创建事件）的行；它们是测试捷径，
@@ -133,7 +135,7 @@ def _naive_replay_image(
             "SELECT id, body_json FROM history_events WHERE id <= ?"
             " ORDER BY id", (last_event_id,))) as cursor:
         for _event_id, body_text in cursor.fetchall():
-            body = json.loads(body_text)
+            body = parse_exact_json(body_text)
             for change in body.get("rows", ()):
                 table = change["table"]
                 row_id = int(change["id"])
@@ -148,96 +150,75 @@ def _naive_replay_image(
     return image
 
 
+def _expected_row_owner(image, key):
+    """从场景固定外键推导每行归属，不调用生产归属或成员解析器。"""
+    table, identity = key
+    values = image[key]
+    primary_entities = {primary: entity for entity, primary in _ENTITY_PRIMARY.items()}
+    if table in primary_entities:
+        return _entity_type_of(primary_entities[table]), identity
+    action_columns = {
+        "device_activities": "action_id", "recording_processing": "action_id",
+        "cleanup_items": "action_id", "cancel_items": "action_id",
+        "action_dependencies": "action_id", "auto_preview_links": "obtain_action_id",
+        "motor_notifications": "action_id",
+    }
+    if table in action_columns:
+        return _entity_type_of("action"), values[action_columns[table]]
+    if table == "output_origins":
+        return _entity_type_of("output"), values["output_id"]
+    parents = {
+        "obtain_source_selections": ("action_dependencies", "dependency_id"),
+        "obtain_items": ("obtain_source_selections", "selection_id"),
+        "cancel_delivery_items": ("cancel_items", "cancel_item_id"),
+        "operation_attempts": ("operation_runs", "run_id"),
+    }
+    if table in parents:
+        parent_table, column = parents[table]
+        return _expected_row_owner(image, (parent_table, values[column]))
+    if table == "file_copies":
+        if values["delivery_id"] is not None:
+            return _entity_type_of("delivery"), values["delivery_id"]
+        return _expected_row_owner(image, ("recording_processing", values["processing_id"]))
+    if table == "operation_runs":
+        kinds = enum_for("operation_runs.kind")
+        if values["kind"] == kinds.READ_FILE:
+            return _expected_row_owner(image, ("file_copies", values["copy_id"]))
+        if values["kind"] in (kinds.STOP_RESIDUAL, kinds.EMERGENCY_STOP):
+            return _expected_row_owner(image, ("device_activities", values["activity_id"]))
+        # 全部查询用途及其他普通流程属于触发动作。
+        return _entity_type_of("action"), values["action_id"]
+    raise AssertionError(f"独立预期未定义 {table} 的归属")
+
+
 def _object_expected_rows(
         image: dict[tuple[str, int], dict], entity: str, entity_id: int,
+        *, connection: sqlite3.Connection,
 ) -> dict[tuple[str, int], dict]:
-    """从全库映像按外键归属语义独立筛选对象自身行。
+    """先取得完整映像，再逐行沿固定外键分类，不依赖父行插入顺序。"""
+    if (_ENTITY_PRIMARY[entity], entity_id) not in image:
+        return {}
+    associations = _fixed_associations(connection, image)
+    owner = (_entity_type_of(entity), entity_id)
+    return {key: dict(values) for key, values in image.items()
+            if _expected_row_owner(associations, key) == owner}
 
-    归属语义与登记的自身成员范围一致（actions 的活动、处理、清
-    理项、取消项、依赖、选择、取回项、撤回明细与目标动作行；
-    outputs 的来源关系；deliveries 的拷贝行），但按外键值从映像
-    独立筛选，不经生产的目录查询。
-    """
-    primary = _ENTITY_PRIMARY[entity]
-    rows: dict[tuple[str, int], dict] = {}
-    primary_key = (primary, entity_id)
-    if primary_key not in image:
-        return rows
-    rows[primary_key] = dict(image[primary_key])
-    if entity == "action":
-        processing_ids: list[int] = []
-        dependency_ids: list[int] = []
-        selection_ids: list[int] = []
-        cancel_item_ids: list[int] = []
-        action_run_ids: list[int] = []
-        target_actions: set[int] = set()
-        member_columns = {
-            "device_activities": "action_id",
-            "recording_processing": "action_id",
-            "cleanup_items": "action_id",
-            "cancel_items": "action_id",
-            "action_dependencies": "action_id",
-            "auto_preview_links": "obtain_action_id",
-        }
-        for (table, row_id), values in image.items():
-            if table == "actions":
-                continue
-            column = member_columns.get(table)
-            if column is not None:
-                if values.get(column) == entity_id:
-                    rows[(table, row_id)] = dict(values)
-                    if table == "recording_processing":
-                        processing_ids.append(row_id)
-                    elif table == "action_dependencies":
-                        dependency_ids.append(row_id)
-                    elif table == "cancel_items":
-                        cancel_item_ids.append(row_id)
-                        target = values.get("target_action_id")
-                        if target is not None and target != entity_id:
-                            target_actions.add(int(target))
-            elif table == "obtain_source_selections" and values.get(
-                    "dependency_id") in dependency_ids:
-                rows[(table, row_id)] = dict(values)
-                selection_ids.append(row_id)
-            elif table == "obtain_items" and values.get(
-                    "selection_id") in selection_ids:
-                rows[(table, row_id)] = dict(values)
-            elif table == "cancel_delivery_items" and values.get(
-                    "cancel_item_id") in cancel_item_ids:
-                rows[(table, row_id)] = dict(values)
-            elif table == "operation_runs" and values.get(
-                    "action_id") == entity_id and values.get(
-                    "delivery_id") is None:
-                rows[(table, row_id)] = dict(values)
-                action_run_ids.append(row_id)
-            elif table == "operation_attempts" and values.get(
-                    "run_id") in action_run_ids:
-                rows[(table, row_id)] = dict(values)
-        for (table, row_id), values in image.items():
-            if table == "file_copies" and values.get(
-                    "processing_id") in processing_ids:
-                rows[(table, row_id)] = dict(values)
-        for target in target_actions:
-            target_key = ("actions", target)
-            if target_key in image:
-                rows[target_key] = dict(image[target_key])
-    elif entity == "output":
-        for (table, row_id), values in image.items():
-            if table == "output_origins" and values.get("output_id") == entity_id:
-                rows[(table, row_id)] = dict(values)
-    elif entity == "delivery":
-        delivery_run_ids: list[int] = []
-        for (table, row_id), values in image.items():
-            if table == "file_copies" and values.get("delivery_id") == entity_id:
-                rows[(table, row_id)] = dict(values)
-            elif table == "operation_runs" and values.get(
-                    "delivery_id") == entity_id:
-                rows[(table, row_id)] = dict(values)
-                delivery_run_ids.append(row_id)
-            elif table == "operation_attempts" and values.get(
-                    "run_id") in delivery_run_ids:
-                rows[(table, row_id)] = dict(values)
-    return rows
+
+def _fixed_associations(connection, image):
+    """既有 raw 种子只提供不可变外键，返回值的业务事实仍来自事件。"""
+    associations = dict(image)
+    for table, identity in _SEEDED_ROWS:
+        with closing(connection.execute(
+                f"SELECT id FROM {table} WHERE id = ?", (identity,))) as cursor:
+            present = cursor.fetchone() is not None
+        if present:
+            fixed = load_event_registry()["tables"][table]["immutable"]
+            values = row_facts(connection, table, identity)
+            associations[(table, identity)] = {
+                **associations.get((table, identity), {}),
+                **{column: values[column] for column in fixed},
+            }
+    return associations
 
 
 def _entity_type_of(entity: str) -> int:
@@ -256,6 +237,9 @@ def _validated_events(
             " ORDER BY event_id",
             (entity_type, entity_id, last_event_id))) as cursor:
         event_ids = [int(row[0]) for row in cursor.fetchall()]
+    # 完整边界包含本事务全部创建行，子行可先于父行出现在事件中。
+    associations = _fixed_associations(
+        connection, _naive_replay_image(connection, last_event_id))
     validated: list[ValidatedEvent] = []
     for event_id in event_ids:
         with closing(connection.execute(
@@ -278,21 +262,248 @@ def _validated_events(
         validated.append(ValidatedEvent(
             envelope, event_type_name(row[2]), branch,
             tuple(references),
-            {(change.table, change.row_id): references[0]
+            {(change.table, change.row_id): _expected_row_owner(
+                associations, (change.table, change.row_id))
              for change in envelope.rows}))
     return validated
 
 
 def _boundary_of(connection: sqlite3.Connection,
                  last_event_id: int) -> HistoryBoundary:
+    """对象目录末位可能在事务中间，状态边界取包含它的完整事务末位。"""
     with closing(connection.execute(
-            "SELECT transaction_id FROM history_events WHERE id = ?",
+            "SELECT t.id, t.last_event_id FROM history_events e"
+            " JOIN history_transactions t ON t.id = e.transaction_id"
+            " WHERE e.id = ?",
             (last_event_id,))) as cursor:
-        txn_id = int(cursor.fetchone()[0])
-    return HistoryBoundary(txn_id=txn_id, last_event_id=last_event_id)
+        txn_id, transaction_end = cursor.fetchone()
+    return HistoryBoundary(txn_id=int(txn_id), last_event_id=int(transaction_end))
+
+
+@pytest.mark.parametrize("side", ["target", "cancel"])
+async def test_multi_object_event_replay_uses_each_rows_actual_owner(cancellation_world, side):
+    """取消生效同一事件改变目标动作和取消项，分别恢复两个动作。"""
+    from camctl.cancellation.models import ApplyCancelTarget, CancelApplyMode
+    from camctl.persistence.models import DbOutcomeKind
+
+    world = cancellation_world
+    connection = world.owned.connection
+    _fix_members(world)
+    item_id = connection.execute(
+        "SELECT id FROM cancel_items WHERE action_id = 2 AND target_action_id = 1"
+    ).fetchone()[0]
+    applied = world.cancellation.apply_cancel_target(
+        ApplyCancelTarget(item_id, CancelApplyMode.PRE_START, NOW + 3),
+        new_operation_key(), world.owned)
+    assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+    target_ref, cancel_ref = (_entity_type_of("action"), 1), (_entity_type_of("action"), 2)
+    shared = connection.execute(
+        "SELECT a.event_id FROM entity_event_links a JOIN entity_event_links b"
+        " ON b.event_id = a.event_id WHERE a.entity_type = ? AND a.entity_id = ?"
+        " AND b.entity_type = ? AND b.entity_id = ? ORDER BY a.event_id LIMIT 1",
+        (*target_ref, *cancel_ref)).fetchone()
+    assert shared is not None, "真实取消生效未共同改变目标动作与取消项"
+    boundary = _boundary_of(connection, shared[0])
+    identity = 1 if side == "target" else 2
+    events = _validated_events(connection, "action", identity, boundary.last_event_id)
+    common = next(event for event in events if event.envelope.event_id == shared[0])
+    assert target_ref in common.references and cancel_ref in common.references
+    # cancel 分支特意检查不是首目录对象的动作，target 分支核对另一方。
+    assert common.references[0] == target_ref
+    if side == "cancel":
+        assert common.references[0] != cancel_ref
+    actual = restore(RestoreSeed(
+        EntityImage(_entity_type_of("action"), identity, False, {}, 0, 0),
+        INITIAL_BOUNDARY), events, boundary)
+    expected = _object_expected_rows(
+        _naive_replay_image(connection, boundary.last_event_id), "action", identity,
+        connection=connection)
+    assert expected
+    assert actual.rows == expected
+
+
+@pytest.mark.parametrize("branch", ["residual_stop", "emergency_stop", "residual_query"])
+@pytest.mark.parametrize("identity", [1, 2], ids=["activity_owner", "trigger_action"])
+async def test_real_operation_event_helper_classifies_rows_by_fixed_owner(operation_world, branch, identity):
+    world = operation_world
+    _create_flow(world, branch)
+    boundary = world.history.current_boundary()
+    events = _validated_events(world.owned.connection, "action", identity, boundary.last_event_id)
+    actual = restore(RestoreSeed(
+        EntityImage(_entity_type_of("action"), identity, False, {}, 0, 0),
+        INITIAL_BOUNDARY), events, boundary)
+    expected = _expected(world, identity)  # 场景明确的members，独立于helper与生产owner。
+    assert actual.rows == expected
+    image = _naive_replay_image(world.owned.connection, boundary.last_event_id)
+    reversed_image = dict(reversed(tuple(image.items())))
+    assert _object_expected_rows(reversed_image, "action", identity,
+                                 connection=world.owned.connection) == expected
+
+
+@pytest.mark.parametrize("purpose", list(QueryPurpose), ids=lambda value: value.name.lower())
+async def test_real_query_event_helper_keeps_each_purpose_with_trigger_action(operation_world, purpose):
+    from decimal import Decimal
+    from camctl.operations.attempts import (
+        AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
+    )
+    from camctl.persistence.models import DbOutcomeKind
+
+    world = operation_world
+    actor = 2 if purpose is QueryPurpose.RESIDUAL_STOP_CONFIRMATION else 1
+
+    def begin(kind, action_id, query_purpose=None):
+        target = AttemptTarget() if query_purpose is QueryPurpose.BEFORE_EXECUTION else AttemptTarget(activity_id=1)
+        begun = world.operations.begin_attempt(AttemptIntent(
+            "query" if query_purpose else "control" if kind is OperationKind.START else kind.value,
+            action_id, kind, target, query_purpose,
+            AttemptConfig(3, Decimal("5"), Decimal("1")), NOW + 1),
+            new_operation_key(), world.owned)
+        assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
+        assert begun.value.disposition is BeginDisposition.GRANTED, begun.value
+        _remember_run(world, begun.value.ticket.run_id, action_id)
+
+    if purpose is QueryPurpose.RESIDUAL_STOP_CONFIRMATION:
+        _create_flow(world, "residual_stop")
+    elif purpose is QueryPurpose.START_CONFIRMATION:
+        begin(OperationKind.START, 1)
+    elif purpose is QueryPurpose.STOP_CONFIRMATION:
+        begin(OperationKind.STOP, 1)
+    begin(OperationKind.QUERY_ACTIVITY, actor, purpose)
+    boundary = world.history.current_boundary()
+    for identity in (1, 2):
+        events = _validated_events(world.owned.connection, "action", identity, boundary.last_event_id)
+        actual = restore(RestoreSeed(
+            EntityImage(_entity_type_of("action"), identity, False, {}, 0, 0),
+            INITIAL_BOUNDARY), events, boundary)
+        assert actual.rows == _expected(world, identity)
+
+
+async def test_real_internal_read_event_helper_inherits_processing_action(owned):
+    """真实录像停止及完整结果固定检查责任，再授予内部 READ。"""
+    from camctl.acceptance.input import ParsedInput
+    from camctl.acceptance.service import CommandMode, PlanDisposition
+    from camctl.capture.handlers import capture_handler, advance_winddown, SessionRecordingState
+    from camctl.capture.recording import RecordingPhase, RecordingFacts, decide_recording_next
+    from camctl.capture.timelapse import CaptureWaitConfig
+    from camctl.operations.attempts import (
+        AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
+    )
+    from camctl.outputs.qualification import FileCandidate, OperationConfig, QualificationOutcome
+    from camctl.outputs.slots import SlotOutcome, SlotRequest
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+    from camctl.persistence.repositories.operations import OperationRepository
+    from camctl.persistence.repositories.outputs import OutputsRepository
+    from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
+    from ..capture.test_capture_contract import _entry, _runtime, ResultsDouble, DriverDouble, StopDouble
+    from ..bootstrap.test_recording_stop import _RecordCatalog, _record_plan
+    from .test_object_closure import _business_rows
+
+    accepted = AcceptanceRepository().process_input(ProcessInput(
+        ParsedInput("record.json", _record_plan("1", "2026-10-08 09:00:00")),
+        _RecordCatalog(), CommandMode.RUN, NOW), new_operation_key(), owned)
+    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+    assert accepted.value.plan_disposition is PlanDisposition.REGISTERED
+    started = SchedulingRepository().start_action(StartActionRequest(1, NOW, NOW),
+                                                  new_operation_key(), owned)
+    assert started.kind is DbOutcomeKind.COMPLETED, started.error
+    driver = DriverDouble(identity_override="1")
+    runtime = _runtime(owned, driver=driver,
+                       results=ResultsDouble({1: (_entry("video", size=10),)}), wall=NOW)
+    runtime.stopper = StopDouble("1")
+    runtime.wait_config = lambda _action: CaptureWaitConfig(target_duration_ms=6000, driver_margin_ms=0)
+    await capture_handler("camera_record")(1, runtime)
+    # 新会话没有前一会话的计时锚点，保守停止固定需要检查的原片。
+    runtime.recording_state = SessionRecordingState(runtime)
+    assert decide_recording_next(runtime.recording_state.recording_state(1),
+                                 RecordingFacts()).phase is RecordingPhase.RECONCILE_REQUIRED
+    now_ns = [20_000_000_000]
+    runtime.monotonic_ns = lambda: now_ns[0]
+
+    async def elapsed(seconds):
+        now_ns[0] += int(seconds * 1_000_000_000)
+
+    progress = await advance_winddown(1, runtime, {}, wait_cap_s=Decimal("6"), sleep=elapsed)
+    assert progress.phase == "progress_saved"
+    assert driver.calls == ["start_recording"]
+    assert decide_recording_next(runtime.recording_state.recording_state(1),
+                                 RecordingFacts()).phase is RecordingPhase.CONTROL_COMPLETE
+    processing = row_facts(owned.connection, "recording_processing", 1)
+    assert processing["source_device_file_id"] is not None
+    assert processing["check_decision"] == int(enum_for("recording_processing.check_decision").REQUIRED)
+    assert processing["check_state"] == int(enum_for("recording_processing.check_state").NOT_PERFORMED)
+    outputs = OutputsRepository()
+    granted = outputs.grant_file(FileCandidate(
+        action_id=1, item_id=None, processing_id=1, output_id=None,
+        source_device_file_id=processing["source_device_file_id"], target_extension="mp4",
+        delivery_extension=None, delivery_display_name=None,
+        config=OperationConfig(3, Decimal("10"), Decimal("0")), occurred_at=NOW),
+        new_operation_key(), owned)
+    assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+    assert granted.value.outcome is QualificationOutcome.GRANTED, granted.value
+    assert granted.value.delivery_id is None
+    copy_id = granted.value.copy_id
+    copy = row_facts(owned.connection, "file_copies", copy_id)
+    assert copy["processing_id"] == 1 and copy["delivery_id"] is None
+    slot = outputs.grant_read_slot(SlotRequest(copy_id, NOW), new_operation_key(), owned)
+    assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+    assert slot.value.outcome is SlotOutcome.GRANTED, slot.value
+    begun = OperationRepository().begin_attempt(AttemptIntent(
+        "read", 1, OperationKind.READ_FILE, AttemptTarget(copy_id=copy_id), None,
+        AttemptConfig(3, Decimal("10"), Decimal("0")), NOW, copy_round=copy["round"]),
+        new_operation_key(), owned)
+    assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
+    assert begun.value.disposition is BeginDisposition.GRANTED, begun.value
+    run_id = begun.value.ticket.run_id
+    # 场景只有一个录像动作；启动、停止、结果列举及内部读取均属于它。
+    members = {("actions", 1), ("device_activities", 1),
+               ("recording_processing", 1), ("file_copies", copy_id)}
+    for table in ("operation_runs", "operation_attempts"):
+        members.update((table, row[0]) for row in owned.connection.execute(f"SELECT id FROM {table}"))
+    expected = _business_rows({key: row_facts(owned.connection, *key) for key in members})
+    history = HistoryRepository(Path(owned.connection.execute("PRAGMA database_list").fetchone()[2]))
+    boundary = history.current_boundary()
+    events = _validated_events(owned.connection, "action", 1, boundary.last_event_id)
+    actual = restore(RestoreSeed(EntityImage(_entity_type_of("action"), 1, False, {}, 0, 0),
+                                 INITIAL_BOUNDARY), events, boundary)
+    assert ("operation_runs", run_id) in expected
+    assert actual.rows == expected
+    image = _naive_replay_image(owned.connection, boundary.last_event_id)
+    assert _object_expected_rows(dict(reversed(tuple(image.items()))), "action", 1,
+                                 connection=owned.connection) == expected
 
 
 # ---- 综合剧本 ----
+
+async def test_independent_event_image_preserves_precise_original_input(owned):
+    """真实受理的驱动参数在独立事件预期中保持原始十进制精度。"""
+    from camctl.acceptance.input import ParsedInput
+    from camctl.acceptance.ports import ParameterDefinition
+    from camctl.acceptance.service import CommandMode, PlanDisposition
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+    from .test_report_scope import _Catalog, _plan_body
+
+    class PreciseCatalog(_Catalog):
+        def parameter_definition(self, device_id, action_type, parameter_type):
+            definition = super().parameter_definition(device_id, action_type, parameter_type)
+            assert definition is not None
+            schema = dict(definition.schema)
+            schema["properties"] = dict(schema["properties"], exposure_s={"type": "number", "minimum": 0})
+            return ParameterDefinition(schema=schema, defaults={})
+
+    body = _plan_body("1", "2026-10-08 09:00:00")
+    body["actions"][0]["params"]["exposure_s"] = Decimal("0.12345678901234567890123456789")
+    accepted = AcceptanceRepository().process_input(ProcessInput(
+        ParsedInput("precise.json", body), PreciseCatalog(), CommandMode.RUN, NOW),
+        new_operation_key(), owned)
+    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+    assert accepted.value.plan_disposition is PlanDisposition.REGISTERED
+    boundary = HistoryRepository(Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])).current_boundary()
+    image = _naive_replay_image(owned.connection, boundary.last_event_id)
+    original = image[("actions", 1)]["input_fields_json"]["params"]["exposure_s"]
+    assert isinstance(original, Decimal)
+    assert original.as_tuple() == Decimal("0.12345678901234567890123456789").as_tuple()
 
 @pytest_asyncio.fixture()
 async def world(tmp_path: Path):
@@ -321,12 +532,12 @@ async def world(tmp_path: Path):
     # 交付链前提（与快照用例同款种子）：取回动作 31 引用动作 11 的
     # 产物 701 与设备文件 501。
     from ..outputs.test_qualification import (
-        _seed_action,
         _seed_device_file,
         _seed_output,
         _seed_selection_and_item,
     )
-    _seed_action(connection, 31, 1, action_type=4)
+    from .test_file_history import _seed_obtain_action
+    _seed_obtain_action(connection, 31, 1)
     _seed_device_file(connection, 501, 11)
     _seed_output(connection, 701, 11, 501)
     _seed_selection_and_item(
@@ -440,7 +651,7 @@ async def test_every_event_matches_independent_history(world) -> None:
 
         expected = _object_expected_rows(
             _naive_replay_image(connection, boundary.last_event_id),
-            entity, entity_id)
+            entity, entity_id, connection=connection)
 
         if from_initial is not None:
             assert from_initial.rows == expected, (entity, entity_id, "初始回放")
