@@ -43,23 +43,9 @@ cpack --config CPackConfig.cmake
 
 ## 准备同一份部署配置
 
-camctl 与主程序以同一个账户运行，默认部署目录为该账户的 `$HOME/.camctl`。在最终安装位置用部署要求的 Python 3.11 建立虚拟环境，并安装独立交付的 camctl wheel：
+camctl 与主程序以同一个账户运行，默认部署目录为该账户的 `$HOME/.camctl`。按照[真实 camctl 联调指南](docs/camctl-integration.md)人工复制独立交付的 `requirements.txt` 和 camctl wheel，使用 uv 安装并显式初始化。该指南从已安装的 host-demo 出发，逐步验证电机通知回调、状态报告领取和重复提交，所需文件与命令均面向目标主机。
 
-```sh
-python3.11 -m venv "$HOME/.camctl/venv"
-"$HOME/.camctl/venv/bin/python" -m pip install /absolute/path/to/camctl-0.1.0-py3-none-any.whl
-```
-
-最后一个参数替换为实际 wheel 文件路径。安装后入口为 `$HOME/.camctl/venv/bin/camctl`，可直接执行，无需激活虚拟环境；实际 Python 所链接的 SQLite 必须满足 camctl 的运行库要求。
-
-首次部署且配置文件尚不存在时，以运行账户复制示例并显式初始化：
-
-```sh
-cp -n "$HOME/.camctl/host/share/doc/camctl_host/examples/config.toml" "$HOME/.camctl/config.toml"
-"$HOME/.camctl/venv/bin/camctl" init
-```
-
-通过源码接入时，从组件的 [examples/config.toml](examples/config.toml) 复制同一份示例。示例省略 `[paths]`，状态库、日志及 `staging`、`ready`、`processing` 使用 CLI 内置的 home 默认值。`init` 负责创建状态库及交接目录；日常 host 启动不代替部署初始化。设备绑定由实际部署补充。已有部署保留配置、状态库和历史，目录变更继续遵守 camctl 的目录切换流程。
+安装后入口为 `$HOME/.camctl/venv/bin/camctl`，可直接执行，无需激活虚拟环境。配置示例为 [examples/config.toml](examples/config.toml)，省略 `[paths]` 时，状态库、日志及 `staging`、`ready`、`processing` 使用 CLI 内置的 home 默认值。`init` 负责创建状态库及交接目录；日常 host 启动不代替部署初始化。设备绑定由实际部署补充。已有部署保留配置、状态库和历史，目录变更继续遵守 camctl 的目录切换流程。
 
 `config_path = NULL` 时，CLI 读取运行账户的 `$HOME/.camctl/config.toml`；指定路径时只读取指定配置，文件不存在时采用内置默认值。指定配置文件不会自动改变其他路径。若 TOML 覆盖交接目录，主程序须同时覆盖 `ready_path`、`processing_path`，保证双方操作相同的目录。
 

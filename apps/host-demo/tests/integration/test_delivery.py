@@ -111,16 +111,17 @@ class DeliveryIntegration(unittest.TestCase):
         self.assertEqual(len(binary), 1)
         self.assertTrue(binary[0].name.startswith(f'{name}-{version}-'))
 
-    def test_installed_readme_links_resolve(self):
+    def test_installed_documentation_links_resolve(self):
         _, _, prefix = self.installation()
-        readme = prefix / 'share/doc/camctl_host/README.md'
-        links = re.findall(r'\[[^\]]+\]\(([^)]+)\)', readme.read_text())
-        self.assertTrue(links)
-        for link in links:
-            if '://' in link or link.startswith('#'):
-                continue
-            with self.subTest(link=link):
-                self.assertTrue((readme.parent / link.split('#', 1)[0]).exists(), link)
+        documentation = prefix / 'share/doc/camctl_host'
+        self.assertTrue((documentation / 'README.md').is_file())
+        for page in documentation.rglob('*.md'):
+            links = re.findall(r'\[[^\]]+\]\(([^)]+)\)', page.read_text())
+            for link in links:
+                if '://' in link or link.startswith('#'):
+                    continue
+                with self.subTest(page=page, link=link):
+                    self.assertTrue((page.parent / link.split('#', 1)[0]).exists(), link)
 
     def test_installed_motor_callback_has_only_int_position(self):
         _, build, prefix = self.installation()

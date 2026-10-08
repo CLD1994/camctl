@@ -157,6 +157,7 @@ string(REPLACE "(src/demo.c)" "(examples/demo.c)" host_install_readme "${host_in
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/README-install.md" "${host_install_readme}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/README-install.md" DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME README.md)
+install(DIRECTORY docs/ DESTINATION ${CMAKE_INSTALL_DOCDIR}/docs)
 install(FILES vendor/yyjson/LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR}/yyjson)
 install(FILES src/demo.c DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples)
 install(FILES examples/config.toml DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples)
