@@ -18,7 +18,8 @@ from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.json_values import MISSING, JsonParseError, is_json_integer, parse_exact_json
 from camctl.contracts.input_fields import reconstruct_action_input
 from camctl.contracts.values import ConsistencyError, format_utc_micros
-from camctl.contracts.workflow_errors import registered_error_spec, validate_error_details
+from camctl.contracts.schemas import SchemaRuleError
+from camctl.contracts.workflow_errors import registered_error_spec, validate_public_error, validate_public_json
 
 __all__ = [
     "OMIT",
@@ -268,9 +269,12 @@ def project_public(facts: ProjectionInput) -> PublicFragment:
     fragment: PublicFragment = {}
     for field_name, spec in projection["fields"].items():
         when = spec.get("when", {"op": "literal", "value": True})
-        if not _truthy(when, context):
-            continue
-        value = _eval(spec["value"], context)
+        try:
+            if not _truthy(when, context):
+                continue
+            value = _eval(spec["value"], context)
+        except PublicProjectionError as error:
+            raise PublicProjectionError(f"{facts.entity}.{field_name}: {error}") from error
         if value is OMIT:
             continue
         fragment[field_name] = value
@@ -371,7 +375,15 @@ def _read(node: Mapping[str, Any], context: _Context) -> Any:
             raise PublicProjectionError(f"{node['column']} 不是整数微秒: {value!r}")
         return format_utc_micros(value)
     if encoding == "json":
-        return _json(node["column"], context)
+        document = _json(node["column"], context)
+        if "schema" in node:
+            try:
+                validate_public_json(node["schema"], document)
+            except SchemaRuleError:
+                raise
+            except ValueError as error:
+                raise PublicProjectionError(f"{node['column']}: {error}") from error
+        return document
     raise PublicProjectionError(f"未登记的读取编码: {encoding!r}")
 
 
@@ -483,15 +495,19 @@ def _rows(node: Mapping[str, Any], context: _Context) -> Any:
 def _registered_error(node: Mapping[str, Any], context: _Context) -> Any:
     code_value = context.column(node["code_column"])
     if code_value is None:
-        raise PublicProjectionError("错误字段要求非空错误编号")
+        raise PublicProjectionError(f"{node['code_column']} 要求非空错误编号")
     details_value = context.column(node["details_column"])
     try:
         name, spec = registered_error_spec(node["registry_key"], code_value)
         details = parse_exact_json(details_value) if isinstance(details_value, str) else details_value
-        validate_error_details(name, details)
+        result = {"code": name, "stage": spec["stage"], "details": details}
+        validate_public_error(result)
+    except SchemaRuleError:
+        raise
     except (TypeError, ValueError) as error:
-        raise PublicProjectionError(str(error)) from error
-    return {"code":name, "stage":spec["stage"], "details":details}
+        raise PublicProjectionError(
+            f"{node['code_column']} / {node['details_column']}: {error}") from error
+    return result
 
 
 def _extra_input(node: Mapping[str, Any], context: _Context) -> Any:

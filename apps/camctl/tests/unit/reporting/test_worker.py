@@ -10,6 +10,8 @@ import sys
 import pytest
 
 from camctl.contracts.values import ConsistencyError
+from camctl.contracts.public_projection import PublicProjectionError
+from camctl.contracts.schemas import SchemaRuleError, SchemaValidationError
 from camctl.persistence.runtime import StateDatabaseError
 from camctl.reporting.messages import ErrorKind
 from camctl.reporting.worker import (
@@ -57,6 +59,14 @@ class TestErrorClassification:
     def test_other_errors_are_report_failures(self) -> None:
         assert classify_worker_error(OSError("磁盘写入失败")) is ErrorKind.REPORT
         assert classify_worker_error(ValueError("输入无效")) is ErrorKind.REPORT
+
+    @pytest.mark.parametrize("error,expected", [
+        (PublicProjectionError("历史字段不能解释"), ErrorKind.STATE),
+        (SchemaRuleError("Schema 规则不能解释"), ErrorKind.REPORT),
+        (SchemaValidationError("普通编码输入不合法"), ErrorKind.REPORT),
+    ])
+    def test_historical_instance_failure_has_its_own_classification(self, error, expected):
+        assert classify_worker_error(error) is expected
 
 
 class TestParentGuard:

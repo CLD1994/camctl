@@ -9,15 +9,21 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any, Mapping
 
-from camctl.resources import resource_bytes
-from camctl.contracts.json_values import parse_exact_json
-from camctl.contracts.schemas import create_validator, schema_registry, validation_errors
+from camctl.resources import ResourceError, resource_bytes
+from camctl.contracts.json_values import JsonParseError, parse_exact_json
+from camctl.contracts.schemas import (
+    SchemaRuleError, create_validator, load_schema, schema_registry, validation_errors,
+)
 from referencing.jsonschema import DRAFT202012
 
 
 @lru_cache(maxsize=1)
 def _registry() -> dict:
-    return parse_exact_json(resource_bytes("protocol/workflow-codes.json").decode("utf-8"))
+    name = "protocol/workflow-codes.json"
+    try:
+        return parse_exact_json(resource_bytes(name).decode("utf-8"))
+    except (ResourceError, OSError, UnicodeDecodeError, JsonParseError) as error:
+        raise SchemaRuleError(f"公共错误登记资源不可解释: {name}: {error}") from error
 
 
 @lru_cache(maxsize=1)
@@ -117,6 +123,52 @@ def validate_public_error(value: Mapping[str, Any]) -> None:
         if document["stage"] != spec["stage"]:
             raise ValueError(f"公共错误 {code} 的阶段不符合登记: {document['stage']!r}")
         validate_error_details(code, document["details"])
+
+
+@lru_cache(maxsize=1)
+def _public_json_registry():
+    """将登记含义加入本地错误 Schema，沿原引用验证嵌套错误。"""
+    report = load_schema("protocol/status-report.schema.json")
+    rules = report["$defs"]["error"].setdefault("allOf", [])
+    for code, spec in _registry()["codes"].items():
+        pointer = code.replace("~", "~0").replace("/", "~1")
+        rules.append({
+            "if": {"properties": {"code": {"const": code}}, "required": ["code"]},
+            "then": {"properties": {
+                "stage": {"const": spec["stage"]},
+                "details": {"$ref": f"workflow-codes.json#/codes/{pointer}/details_schema"},
+            }},
+        })
+    registry = schema_registry().with_resources([
+        ("status-report.schema.json", DRAFT202012.create_resource(report)),
+        ("workflow-codes.json", DRAFT202012.create_resource(_registry())),
+    ])
+    # 派生规则也遵守公共 Schema 方言；实例错误不参与此检查。
+    create_validator(report, registry=registry)
+    for spec in _registry()["codes"].values():
+        create_validator({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            **spec["details_schema"],
+        }, registry=registry)
+    return registry
+
+
+@lru_cache(maxsize=32)
+def _public_json_validator(schema_pointer: str):
+    return create_validator({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "status-report.schema.json" + schema_pointer,
+    }, registry=_public_json_registry())
+
+
+def validate_public_json(schema_pointer: str, document: Any) -> None:
+    """验证已声明的公共 JSON 结构及其中明确引用的登记错误。"""
+    errors = validation_errors(_public_json_validator(schema_pointer), document)
+    if errors:
+        first = errors[0]
+        location = "/".join(str(part) for part in first.absolute_path)
+        where = f" 位于 {location}" if location else ""
+        raise ValueError(f"公共字段不符合 {schema_pointer}{where}: {first.message}")
 
 
 def item_error_id(table: str, name: str) -> int:

@@ -84,7 +84,7 @@ class TestProjectPublicPlan:
                 "type": 1, "device_id": "cam-1", "scheduled_at": 1_736_899_200_000_000,
                 "group_name": None, "status": 1, "execution_started": 0, "cancel_requested": 0,
                 "error_code": None, "error_details_json": None, "input_fields_json": {},
-                "effective_params_json": {}, "driver_id": "camctl-adb", "max_delay_ms": 1000,
+                "effective_params_json": {"type": "photo"}, "driver_id": "camctl-adb", "max_delay_ms": 1000,
             }
 
         def output_row(output_id: int, action_id: int) -> dict:
@@ -93,7 +93,9 @@ class TestProjectPublicPlan:
                 "original_name": f"shot-{output_id}.jpg", "media_type": "image/jpeg",
                 "device_file_id": None, "intermediate_file_id": None,
                 "original_output_id": None, "original_batch_file_id": None,
-                "availability": 1, "media_json": {}, "error_code": None, "error_json": None,
+                "availability": 1,
+                "media_json": {"check_status": "not_performed", "duration": {"status": "unknown"}},
+                "error_code": None, "error_json": None,
                 "preview_of_output_id": None, "cleanup_status": 1, "cleanup_error_json": None,
             }
 
@@ -141,7 +143,7 @@ class TestProjectPublicAction:
             "error_code": None,
             "error_details_json": None,
             "input_fields_json": {},
-            "effective_params_json": {"quality": Decimal("1.5")},
+            "effective_params_json": {"type": "photo", "quality": Decimal("1.5")},
             "driver_id": "camctl-adb",
             "max_delay_ms": 1000,
         }
@@ -169,7 +171,14 @@ class TestProjectPublicAction:
 
     def test_json_column_decoded_structured(self) -> None:
         fragment = project_public(self._action_facts())
-        assert fragment["effective_params"] == {"quality": Decimal("1.5")}
+        assert fragment["effective_params"] == {"type": "photo", "quality": Decimal("1.5")}
+
+    def test_invalid_effective_parameter_type_identifies_public_field_and_source(self) -> None:
+        facts = self._action_facts(effective_params_json={"type": True, "quality": Decimal("1.5")})
+        with pytest.raises(PublicProjectionError) as caught:
+            project_public(facts)
+        assert "action.effective_params" in str(caught.value)
+        assert "actions.effective_params_json" in str(caught.value)
 
 
 def _dependency_row(dep_id: int, *, source: int = 1) -> dict:
@@ -311,7 +320,8 @@ class TestNestedProjectionRelations:
             "id": 9, "source_action_id": 1, "kind": 1, "original_name": "s.jpg",
             "media_type": "image/jpeg", "device_file_id": None, "intermediate_file_id": None,
             "original_output_id": None, "original_batch_file_id": None, "availability": 1,
-            "media_json": {}, "error_code": None, "error_json": None,
+            "media_json": {"check_status": "not_performed", "duration": {"status": "unknown"}},
+            "error_code": None, "error_json": None,
             "preview_of_output_id": None, "cleanup_status": 1, "cleanup_error_json": None,
         }
         row.update(columns)
@@ -341,3 +351,10 @@ class TestNestedProjectionRelations:
         facts = self._output_facts(self._output_row(device_file_id=4))
         with pytest.raises(PublicProjectionError):
             project_public(facts)
+
+    def test_invalid_saved_media_identifies_public_field_and_source(self):
+        facts = self._output_facts(self._output_row(media_json={}))
+        with pytest.raises(PublicProjectionError) as caught:
+            project_public(facts)
+        assert "output.media" in str(caught.value)
+        assert "outputs.media_json" in str(caught.value)

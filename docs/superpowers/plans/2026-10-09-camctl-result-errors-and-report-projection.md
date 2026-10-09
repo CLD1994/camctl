@@ -100,11 +100,39 @@
 
 - [x] `test_exhausted_results_generate_schema_valid_public_errors`：公开历史先达到有限核实失败终态，再真实冻结和生成报告。按 H 时的实际活动状态核 photo 的 `still_running` 与 timelapse 的 `end_unconfirmed`，分别核设备执行错误和动作最终错误的完整来源；调用真实公共 Schema。报告不增加公开 attempts、内部预算或额外错误成员。
 - [x] `test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen`：保存首次字节和摘要，关闭重开 Owned，再发生合法后续业务变化，按同 report ID/H、水位重建；字节与摘要相同、无额外设备/RESULTS、原历史前缀保持。
-- [ ] 写纯单元 `test_historical_error_shape_is_state_failure`：用受真实 HistoryRepository 返回形状约束的替身提供不完整 H 字段，核投影/生成边界抛状态前提异常并保留字段路径；不通过 SQL 修改不可变正文制造条件。
-- [ ] 写真实报告组件 `test_uninterpretable_frozen_error_stops_without_publish`：公共历史与冻结登记均真实，只在稳定历史读取端口返回不合法原字段。核无完整 staging/ready 发布、原 report 登记和 H 保持；worker/flow 返回 STATE，候选和设备操作不继续。不能只测 `classify_worker_error` 而省去实际 Schema 与保存边界。
-- [ ] 写控制分区 `test_output_io_error_remains_report_failure` 和普通 ValueError 分类回归：合法原历史经过真实生成，稳定文件端口控制 OSError；原报告责任保留、REPORT 分类保持，不误判 STATE。
-- [ ] 根确认红后修最窄历史实例解释边界，仅捕获该边界的 SchemaValidationError/明确字段结构错误，转换成已有状态前提异常；不得全局把所有 ValueError 或 SchemaRuleError 改成 STATE。
-- [ ] 根独立核对固定 H、完整错误来源、半成品清理、worker 分类与 flow 停止的端到端数据流。
+- [x] 纯单元 `test_historical_json_projection.py`：公开 `project_public` 使用内存资源和固定 H 返回形状，核非法实例抛状态前提异常并保留字段路径；资源故障原样返回规则异常，不访问文件系统。
+- [x] 真实报告组件 `test_result_error_state.py`：公共历史与冻结登记均真实，只在稳定历史读取端口返回不合法原字段。核无完整 staging/ready 发布、原 report 登记和 H 保持，真实 worker 返回 STATE；不通过 SQL 修改不可变正文制造条件。
+- [x] `test_result_error_flow.py` 沿真实监督方、通信线程、管道、worker、报告 flow 和 `_drive_flows` 核 STATE 停止后续 flow。进程替身受实际接口约束，任务仍执行真实 `run_job` 并返回正式编码消息；不复制监督方分类逻辑，不启动实际子进程。
+- [x] 文件故障与普通 ValueError 分类控制：合法原历史经过真实生成，实际写出及 flush 后由稳定 fsync 端口控制 OSError；worker 保持 REPORT，真实 flow 可靠记录报告失败后继续后续 flow，原冻结依据和未发布责任保持。
+- [x] 根确认红后修最窄历史实例解释边界，实例错误转换成已有状态前提异常，SchemaRuleError 原样传播；没有修改 worker 对普通 ValueError 的分类。
+- [x] 根独立核对固定 H、完整错误来源、半成品清理、worker 分类与 flow 停止的端到端数据流；最终目录门禁在下文记录。
+
+### 历史实例校验的实施模型
+
+`_read` 取得的 JSON 来自固定 H 的行值。正式依赖登记已为这些读取节点声明公共 Schema；实例结构与已登记错误含义在投影读取时核实，避免直到报告编码时才发现原历史不可解释。现有精确 JSON Schema 校验器可以直接复用，不新增依赖或复制字段、错误码清单。建议在 `_read` 共用边界按节点声明验证 JSON；本地公共错误 Schema 从权威登记生成 code、stage 和详情约束，使直接错误、媒体 error/issues 及诊断错误数组沿原 Schema 引用共同验证。错误详情中的普通同名成员没有错误 Schema 引用，仍按业务原值处理。内部函数组织属于实施建议。
+
+| 原输入或实际故障 | 投影和报告必须执行的行为 |
+| --- | --- |
+| JSON 不合法，或不满足读取节点声明的实例 Schema | 抛 `PublicProjectionError`，诊断保留公开投影字段及来源列；worker 返回 STATE。 |
+| 错误结构合法，但已登记 code 的 stage 或 details 不合法 | 同上；不能补值或把原登记码解释为未知驱动错误。 |
+| 完整未知驱动错误 | 保持 code、stage、details 原值及调用方输入。 |
+| 合法已登记错误或其他合法 JSON 字段 | 保持原公开值，使用原 H，不取得新设备观察。 |
+| Schema 规则、包资源或必需引用无法解释 | 原 `SchemaRuleError` 传播；不转换成历史实例错误。原 `_registered_error` 入口也遵守此规则。 |
+| 合法报告的文件写入、同步失败或普通参数 ValueError | 保持 REPORT 分类和原报告责任；不发布半成品。 |
+
+根先运行纯投影反例，再运行真实历史读取、生成和 worker 反例；取得有效红后实施共同边界。组件替身只控制 `HistoryRepository.restore_entity` 的返回事实，其余读取委托真实仓储；不通过 SQL 修改不可变历史。生产 worker 的 STATE 结果向 supervisor、report flow 和会话候选停止的传播另行用实际接线验证。
+
+2026-10-09，Linux 开发容器、Python 3.11.16：根独占 `/tmp/camctl-goal-result-error-state-red.log` 为 2 failed、1 passed、2.09s。真实公开耗尽历史、原冻结登记和接口约束的历史读取前提全部通过；缺 stage 在 `ReportStream` 才抛 `SchemaValidationError`，`run_job` 将同一错误返回为 REPORT。两个反例的原报告、历史前缀、ready 目录、设备调用和半成品清理断言保持。合法历史在真实写出及 flush 后实际到达 fsync 故障，OSError 保持 REPORT。这些有效红允许实施历史实例边界，不代表后续 flow 接线已验证。
+
+根独占纯投影反例 `/tmp/camctl-goal-historical-json-unit-red.log` 为 23 failed、8 passed、0.22s；扩展对象与数组嵌套错误后的 `/tmp/camctl-goal-historical-json-expanded-red.log` 为 27 failed、12 passed、0.23s。非法结构、登记含义、已声明其他 JSON Schema、规则错误隔离和诊断路径均未满足；完整值、无 Schema 值和详情中的普通同名成员保真控制通过。真实监督方和会话 flow 的 `/tmp/camctl-goal-result-error-flow-red.log` 为 1 failed、1 passed、1.70s：同一不完整历史仍返回 REPORT，合法历史的真实 fsync 故障则可靠记录报告失败后继续后续 flow。
+
+共同校验已实现为 `workflow_errors.validate_public_json`：独立本地报告 Schema 使用正式 workflow 登记生成错误约束，详情继续引用原登记；未知码保持公共开放结构。每个 JSON 节点按自身已声明的 Schema 验证，嵌套错误由现有校验器沿引用处理，不按成员名猜测。派生注册表缓存一份，校验器缓存最多三十二个引用；源资源与原历史不修改。`project_public` 为实例错误保留公开字段和来源列路径；`_registered_error` 使用共同公共错误验证并原样传播 `SchemaRuleError`。
+
+局部绿色 `/tmp/camctl-goal-historical-json-unit-green.log` 为 46 passed、1 skipped、0.50s，包含三十九项纯投影及 worker 错误分类控制。完整单元、真实 reporting、flow 及后续回归的实际门禁仍须分别记录，不能由局部绿色推定完成。
+
+独立审查发现 workflow 包资源的 decode/parse 故障和外部详情 Schema 规则尚未隔离。根独占 `/tmp/camctl-goal-historical-json-resource-red.log` 为 9 failed、40 passed、0.62s：两个入口的四种包资源故障均未返回 SchemaRuleError；read 的非法详情 type 抛 UnknownType，原 registered_error 规则校验控制通过。`_registry` 在资源读取边界转换具名资源异常并保留原 cause，派生注册表使用现有精确校验器检查每份正式详情 Schema；原 `$ref` 保持。随后 `/tmp/camctl-goal-historical-json-resource-green.log` 为 56 passed、1 skipped、0.52s，包含四十九项投影及 worker 分类控制。追加的详情非法约束和缺引用四项控制随最终单元门禁验证，不声明它们曾失败。
+
+`/tmp/camctl-goal-historical-json-flow-gate.log` 为 6 passed、5.76s，包含两项新真实组合与既有报告 flow 四项。STATE 分区保留整个原报告登记和全部历史、删除半成品、不发布、不调用后续 flow，监督方可靠回收工作者；REPORT 分区实际到达 fsync 故障，可靠追加报告失败历史并继续后续 flow，原 H、水位、未发布事实及设备调用保持。此场景的 flow 之前没有其他业务 flow；发现 STATE 不撤销此前已完成的合法事务。
 
 ## 任务三：未决语义与同类入口交接
 
@@ -181,4 +209,14 @@ Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 fai
 
 2026-10-09，Linux 开发容器、Python 3.11.16：根独占 `/tmp/camctl-goal-result-error-generation-gate.log` 为 3 passed、1.97s。公开 photo 和 timelapse 的实际 START、两轮 typed v1 RESULTS、有限耗尽及失败终态均由真实消费者保存，报告经真实 `freeze_report`、`generate_report_file` 和公共 Schema 校验。两处错误分别追溯到动作和设备活动；photo 的原活动为 ACTIVE，报告为 `still_running`，timelapse 的原活动为 UNKNOWN，报告为 `end_unconfirmed`。独立 action/activity 身份采用实际活动编号，没有用集合未确定推断设备已经停止。
 
-重建场景关闭原连接，在 fresh Owned 上公开受理后续合法计划，按原 report ID、H 和水位重新生成。字节、摘要和大小相同，原 H 前缀逐行保持，设备与 RESULTS 调用没有增加。这三项只证明合法核实错误和固定 H 重建；不完整历史的 STATE 分类、文件错误的 REPORT 控制分区、事件守卫及未决 UNSATISFIED 仍未完成。
+重建场景关闭原连接，在 fresh Owned 上公开受理后续合法计划，按原 report ID、H 和水位重新生成。字节、摘要和大小相同，原 H 前缀逐行保持，设备与 RESULTS 调用没有增加。这三项只证明合法核实错误和固定 H 重建；不完整历史的 STATE 分类和文件错误的 REPORT 控制由后续独立矩阵验证，最终范围见下文。事件守卫及未决 UNSATISFIED 仍按各自任务推进。
+
+### 历史实例校验的最终门禁与剩余边界
+
+2026-10-09，Linux 开发容器、Python 3.11.16。最后生产修改及五十三项纯投影矩阵之后，根独占全量单元 `/tmp/camctl-goal-historical-json-final-unit.log` 为 3773 passed、1 skipped、2 warnings、8.21s；两个 warning 来自既有同步测试的 asyncio 标记。整个 reporting 目录 `/tmp/camctl-goal-historical-json-final-reporting.log` 为 367 passed、29.42s，包含合法错误报告生成、原 H 重建、真实历史实例 STATE、文件 REPORT 控制，以及实际工作进程等既有组件回归。报告 flow 的六项组合证据见上文。
+
+公共契约目录的首次 `/tmp/camctl-goal-historical-json-contracts-gate.log` 为 180 passed、8 failed、3.36s。七项测试的相机生效参数缺 `type`，或媒体字段使用不符合正式 Schema 的空对象。合法前提补齐相机类型和未检查、时长未知的媒体结构；保留原 Decimal、父子入选、错误、checksum 和 size 断言，并增加两个真实资源的非法参数类型／空媒体路径控制。最终 `/tmp/camctl-goal-historical-json-contracts-final.log` 为 189 passed、1 failed、3.15s。
+
+剩余一项为 `TestImportGraph.test_rules_do_not_import_adapters`：`capture.residual` 直接导入 sqlite3，只在原文件恢复 callback 的异常分类中使用。该导入在本阶段起点 `07f0e70` 已存在，本阶段没有修改 residual 或放宽依赖守卫。后续须沿 callback 的状态错误生产端与消费者闭合异常边界，保留保存责任及候选停止语义，不能以重新导出 sqlite3 或允许违规边掩盖责任分工。
+
+独立只读审查最窄生产 diff、原资源隔离、派生错误约束及两处资源故障修复后，未发现该阶段的生产阻断。任务二的历史读取、报告生成、分类及后续 flow 停止已取得上述门禁；结果保存事件守卫、未决 UNSATISFIED、普通集合结束及 residual 的依赖边界仍分别推进。当前全部工作按用户授权整体保存为本地 checkpoint，不声明完整 apps/camctl 或全部组件目录已通过。
