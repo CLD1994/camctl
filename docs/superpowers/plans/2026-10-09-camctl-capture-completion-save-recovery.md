@@ -211,3 +211,85 @@ PYTHONPATH=/workspaces/camctl/apps/camctl/src apps/camctl/.venv/bin/python -m py
 | 仓储重送输入变体及原未决失败 | 没有改变全部仓储核实规则，也未选择 RESULTS v2、UNSATISFIED reason 或应急错误详情。相关缺口和十七项既有失败仍保留。 |
 
 任务四继续采用用户已授权的阶段整体本地提交；提交粒度较粗，可逆调整仍在当前特性分支进行。根负责生产实现，同一明确指派的协作者仅编写独立测试文件；根实际读取并独占运行。单元测试按仓库规则隔离真实 IO，重要协作边界由真实集成测试验证。实际门禁作为完成证据，不重复没有新增变化的测试，也不合并不同集成目录。审查范围使用 `5fc94b3` 至阶段工作区差异及新增文件，不用空提交范围代替实际审查；代价是证据必须逐项注明范围。
+
+## Task 5: 停止预算与完整耗尽收尾
+
+本任务从 `904593a` 继续落实[录像尝试上限](../../architecture/camera-recording.md#启动与停止的尝试上限)、[停止失败](../../architecture/camera-recovery.md#停止失败)及上文完整申请规则，不扩大第一版业务范围。停止尝试已经实际结束且结果可靠保存；耗尽收尾不创建新的尝试，也不改写原尝试结果。
+
+**生产入口：** `SessionRecordingState.recording_state`、`_stop_call`、普通 `_record_handler`、对账 `_reconcile_recording`、受限 `advance_winddown` 和取消 `_advance_canceled_capture`。前三种普通入口采用同一当前停止配置；取消及恢复沿用原 STOP 次数。后续残留活动的独立 `STOP_RESIDUAL` 不改作普通 STOP。
+
+| 原停止事实与本次配置 | 结果与不变量 |
+| --- | --- |
+| 原调用尚未实际返回 | 先跟踪原调用；下调上限不伪造结束或动作失败，也不追加调用。 |
+| 已有实际停止确认，调用同时带有错误 | 确认与错误分别保留；状态装载不能因尝试为 FAILED 抹去 CONFIRMED 效果，不再追加停止。 |
+| 未确认、原流程未终态、已用次数少于本次上限 | 原计时、归属及重试间隔资格成立后，沿原流程和原次数追加尝试；提高上限不跳过间隔。 |
+| 未确认、已用次数达到本次上限、普通录像已具备停止资格 | 原 STOP 保存 UNCONFIRMED／`recording_stop_failed`，普通动作保存同一失败依据；活动和占用保持。普通计时、对账及受限入口均须收场，不能只返回意图拒绝或循环等待。 |
+| 未确认且取消已生效，原停止额度耗尽 | 只关闭原 STOP，随后继续既有取消收尾；不能构造普通动作失败申请覆盖取消。 |
+| 原动作或停止流程已经终态 | 不因提高上限重新激活；原成功、失败、取消及调用事实保持。 |
+
+**完整保存申请建议：** 冻结 `StopCloseRequest(action_id, finish: StaleRunFinish, action_finish: FinishCapture | None, action_key: OperationKey | None)`，加入既有 `CaptureCompletionRequest` 的显式分派。普通耗尽在首次 STOP 保存前形成两个完整成员，固定同一事实时刻和各自独立的操作键；取消模式的动作成员及其键均为空。保持 STOP 与动作分别保存的已有事务分工，不增加新仓储协议或历史成员。
+
+共同 holder 先沿原主键调用 `OperationRepository.finish_stale_runs`；可靠完成后普通模式沿原动作键调用 `CaptureRepository.finish_capture`。任何一步未知、回滚、拒绝或核原键出错都保留整份申请并停止依赖业务。动作成员已有终态时仍先核原 STOP；合法空处理结果只适用于没有动作成员的 STOP 收尾，原普通请求仍要求完整 `CaptureResult`。可靠完成后清除原 STOP 等待责任；普通模式沿原动作成员继续适用的输入 READ 收尾。三个生产工厂、五个默认 flow 继续共用原集合。
+
+**预计文件：** `capture/handlers.py`；新增 `integration/capture/test_stop_current_budget.py`、`test_stop_close_save_recovery.py`、`integration/bootstrap/test_stop_close_default_recovery.py`；必要的共有 holder 单元边界。内部组织是建议，正式契约和已经证明的事务分工必须保持。
+
+- [x] 先写真实当前上限与在途矩阵，根独占运行 9 个分区：6 项行为失败、3 项保护分区通过。另以实际 FAILED／CONFIRMED 停止结果取得 1 项有效状态装载反例。诊断为 `/tmp/camctl-goal-stop-budget-red.log` 和 `/tmp/camctl-goal-stop-confirmed-error-red.log`。
+- [x] 普通 STOP、普通动作成员、取消 STOP 三种保存责任分别注入真实 COMMIT 前／后 UNKNOWN 与投影回滚；9 项反例全部失败于缺少原外层 holder 或缺少其 STOP 成员。诊断为 `/tmp/camctl-goal-stop-close-red.log`。
+- [x] 使状态装载及停止间隔实际使用当前上限；普通、对账和受限入口显式处理耗尽，不追加调用，不释放未知活动。实施冻结的完整申请及共同保存分派，取消模式保持既有取消结果。
+- [x] 根运行上述两个 capture 文件，23 项通过，包含四个停止确认消费者分区；原成员对象、各自键、事实时刻、次数、历史前缀与真实调用均符合独立预期。默认三个工厂及五入口先核原申请，改变当前配置／绑定、原键再次核实错误时均不先派发业务。
+- [x] 顺序执行受影响 capture、bootstrap 和完整单元门禁，分别重定向日志；实际登记保留的未决失败。独立只读审查及复审本阶段差异，核对文档链接及 diff，按用户授权统一提交。
+
+执行沿用用户的持续实现和整体阶段提交授权，不重新要求技能设计审批。测试依仓库规则按目录、前台独占；既有未决 RESULTS 格式、UNSATISFIED reason、应急错误身份以及上一阶段查询保存责任不由本任务补选语义。计划拆分不作为完成度分母，真实 CLI 两次运行及跨进程申请重建不能由局部测试推断完成。
+
+### 任务五的停止确认消费者
+
+确认时刻装载、普通恢复及受限收场必须消费相同的原停止事实。调用错误与停止确认分别保存；确认时刻只取原结果事件，不使用推进时的当前时刻代填。
+
+| 原停止结果与所属入口 | 必须继续的行为 |
+| --- | --- |
+| 原尝试仍在执行 | 等待实际返回，不构造确认或结束 |
+| 原尝试实际结束但没有确认 | 按当前额度及原资格继续，或保存耗尽结果 |
+| 原尝试实际结束且确认，无调用错误 | 使用原确认时刻，推进对应普通或受限收尾 |
+| 原尝试实际结束且确认，有调用错误 | 具有同一停止后推进资格；原错误、次数及原事件时刻保持 |
+| 普通恢复没有当前会话锚点 | 从原启动及停止事件推导控制依据，覆盖未超修复余量与超过余量的分区 |
+| 受限入口开始前或本次实际调用已确认停止 | 一次推进即保存活动结束、源文件关联及适用的待检查阶段，不依赖下一轮，不运行媒体读取、检查或修复 |
+| 原动作已有终态 | 不重执行设备工作；仍持有的申请继续先核原键 |
+
+执行顺序为先增加上述四个消费者反例并实际取得失败，再统一确认时刻和停止后推进资格，审计同类过滤，最后复验共有保存与受影响恢复入口。受限停止耗尽沿本专题“停止失败”规则结束普通动作；其默认集成断言须同时验证失败结果和保留的活动、占用、次数，不把耗尽解释为仍需继续原停止流程。
+
+### 任务五实施与验证记录（2026-10-09）
+
+环境为容器内 Python 3.11.16，沿用 `apps/camctl/.venv`。停止状态和重试间隔使用本次运行的停止上限，原次数、在途调用和已保存结果保持。普通计时、对账、受限及取消入口共享原 STOP；耗尽后的普通失败与取消分别推进，未知设备活动及占用不因业务结束而释放。
+
+冻结的 `StopCloseRequest` 在首次 STOP 保存前持有原成员、各自键和同一事实时刻。STOP 与普通动作仍分属两笔独立事务，任一步不能可靠核实时保留整份申请。共有恢复入口以新可靠连接先核原 STOP，再核适用动作成员；没有动作成员的取消 STOP 才允许空处理值，普通成员仍须取得完整 `CaptureResult`，并继续原输入 READ 收尾。
+
+停止确认采用“实际已结束且效果为 CONFIRMED”的资格，确认时刻取原结果事件。原尝试为 FAILED 且伴随调用错误时仍推进已确认停止后的工作，同时保留实际错误。`_stop_call` 在可靠保存完整实际结果后统一返回确认资格，普通、对账、取消和受限消费者使用同一依据。普通恢复的 60 秒及 75 秒分区在推进时钟为 200 秒时仍采用原结果时间；受限入口在一次调用内保存源文件关联、待检查决定和已确认的活动结束，不执行媒体读取、检查或修复。
+
+所有 pytest 由根 Agent 前台独占执行。命令前缀为 `PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest`，所列范围后接 `-q`，完整输出分别重定向到日志。消费者红测试另带 `-k 'recovered_control_uses_failed_confirmed_stop_original_time or winddown_saves_progress_once_after_failed_confirmed_stop'`。
+
+| 范围 | 实际结果 | 日志 |
+| --- | --- | --- |
+| 当前停止上限矩阵，实现前的九个分区 | 6 failed、3 passed，0.89s，exit 1；已保存实际尝试的前置成立。 | `/tmp/camctl-goal-stop-budget-red.log` |
+| FAILED／CONFIRMED 状态装载，实现前 | 1 failed，0.27s，exit 1；确认事实被状态装载遗漏。 | `/tmp/camctl-goal-stop-confirmed-error-red.log` |
+| STOP、普通动作及取消 STOP 保存故障，实现前 | 9 failed，1.02s，exit 1；真实提交前后未知与投影回滚均缺少原外层持有者。 | `/tmp/camctl-goal-stop-close-red.log` |
+| 四个停止确认消费者，实现修复前 | 3 failed、1 passed、10 deselected，2.04s，exit 1；两个恢复决定未推进，本次确认的受限入口未保存进度，进入前已确认的分区通过。 | `/tmp/camctl-goal-stop-confirmation-consumers-red.log` |
+| `capture/test_stop_current_budget.py` 与 `test_stop_close_save_recovery.py` | 23 passed，3.66s，exit 0。 | `/tmp/camctl-goal-stop-completion-final-green.log` |
+| `apps/camctl/tests/integration/capture` 全目录 | 644 passed、11 failed，167.76s，exit 1；失败用例集合与任务四完全相同。 | `/tmp/camctl-goal-stop-completion-capture-final.log` |
+| 下列九个受影响 bootstrap 文件 | 201 passed，132.92s，exit 0；包含新增的 42 个默认恢复分区。 | `/tmp/camctl-goal-stop-completion-bootstrap-final.log` |
+| `apps/camctl/tests/unit` 全目录 | 3925 passed、1 skipped、2 warnings，9.12s，exit 0。 | `/tmp/camctl-goal-stop-completion-unit-final.log` |
+
+受影响 bootstrap 文件为 `test_stop_close_default_recovery.py`、`test_recording_stop.py`、`test_restricted_winddown.py`、`test_residual_winddown.py`、`test_capture_completion_default_recovery.py`、`test_capture_completion_read_settlement.py`、`test_start_close_default_recovery.py`、`test_recording_results_cancellation.py` 及 `test_recording_results_saved_consumers.py`。本任务没有重跑 bootstrap 全目录，上一阶段六项未决失败仍保留。完整单元测试的两个 warning 仍来自 `test_source_stream_protocol_shape` 和 `test_local_exit_is_exclusive` 的既有同步测试 asyncio 标记。
+
+`TestStopExhaustionPreservesActivity` 按正式停止失败规则验证普通动作 FAILED、原 STOP UNCONFIRMED，以及原活动、占用、次数、调用与等待事实；原检查及文件断言继续保留。该用例独立通过 1 项、2.03s，最终亦包含在上述 bootstrap 门禁中。测试没有删除失败路径、放宽状态检查或吞掉错误。
+
+独立只读审查核对真实仓储、状态装载、普通恢复、取消、受限消费者和三份新增测试；两个停止确认消费者问题取得有效红测试后完成修复。同一审查者对这两项及耗尽断言进行一次限定复审，确认均闭合，没有新的阻塞问题。审查者没有运行 pytest；根独立执行门禁。文档文件链接与本任务两个正式规格标题锚点已核对，`git diff --check` 通过。
+
+| 证据边界及保留事项 | 当前有效结论 |
+| --- | --- |
+| 完整申请持有与默认恢复 | 证明同会话共有集合由新连接接手、原键与原成员保持，以及候选和时钟读取前的门禁；不证明内存申请跨进程重建或真实 CLI 两次运行。 |
+| STOP 与动作事务 | 保持原独立提交分工，可能暂时只提交 STOP；不能称为原子联合事务。 |
+| 原 STOP 已终态时的 `run_ended` 路由 | 既有状态装载不表达该终态，受限循环仍存在持续等待风险；其失败及后续恢复语义未由本任务补选。 |
+| 共有输入 READ 与取消 | 保持原成员的后续 READ 责任及原取消规则；四个新增确认消费者测试不单独证明完整取消链。 |
+| 已有未决与其他保存责任 | RESULTS v2、UNSATISFIED reason、应急错误身份及清理查询返回前的原保存责任仍保留；拍摄目录中的十一项及先前 bootstrap 六项未决失败不计作通过。 |
+
+用户要求本阶段统一提交后暂停。任务五按该边界结束，整体实现目标仍有未完成事项；新增缺陷分类与计划步骤不作为完成度分母。

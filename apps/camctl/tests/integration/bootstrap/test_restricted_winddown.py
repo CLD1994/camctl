@@ -342,8 +342,8 @@ class TestStopRetryWithinBudget:
             " WHERE responsibility_key = 'stop/1'") == (3,)
 
 
-class TestStopExhaustedKeepsRecording:
-    async def test_exhausted_budget_keeps_recording_running(
+class TestStopExhaustionPreservesActivity:
+    async def test_exhausted_budget_fails_action_and_preserves_activity(
             self, tmp_path: Path) -> None:
         driver = _SessionDriver(_CONTENT, stop_failures=10)
         cfg, db, driver, results = await _recording_in_flight(
@@ -353,12 +353,18 @@ class TestStopExhaustedKeepsRecording:
         outcome = await _restricted_session(
             tmp_path, "exhausted", driver, results, fake)
         assert outcome.reason == "clock_invalid"
-        # 停止预算耗尽：不再无界重试，动作保持执行中等待既有失败
-        # 与残留收场规则，不建立等待阶段。
+        # 停止预算耗尽：普通动作失败，停止未确认的活动和占用保留，
+        # 不追加原停止尝试，也不建立已经停止后的待检查阶段。
         assert fake.waits == [2.0, 3.0, 3.0]
         stop_calls = [call for call in driver.calls if call[0] == "stop"]
         assert len(stop_calls) == 3
-        assert _scalar(db, "SELECT status FROM actions WHERE id = 1") == (2,)
+        assert _scalar(db, "SELECT status,error_code FROM actions WHERE id = 1") == (4, 14)
+        assert _scalar(
+            db, "SELECT status,attempts_used,retry_wait_required FROM operation_runs"
+            " WHERE responsibility_key = 'stop/1'") == (6, 3, 0)
+        assert _scalar(
+            db, "SELECT activity_state,occupancy_state FROM device_activities"
+            " WHERE action_id = 1") == (2, 1)
         assert _scalar(
             db, "SELECT check_decision FROM recording_processing"
             " WHERE action_id = 1") == (1,)

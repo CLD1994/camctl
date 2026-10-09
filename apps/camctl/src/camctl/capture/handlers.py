@@ -108,7 +108,7 @@ from camctl.capture.timelapse import (
 )
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal, parse_exact_json
-from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
+from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.devices.ports import ControlRequest, DeviceCallResult
@@ -275,8 +275,26 @@ class StartCloseRequest:
     action_finish: FinishCapture
 
 
+@dataclass(frozen=True)
+class StopCloseRequest:
+    """原 STOP 收尾及适用普通动作结果，各自保留完整输入和原键。"""
+
+    action_id: int
+    finish: StaleRunFinish
+    action_finish: FinishCapture | None = None
+    action_key: OperationKey | None = None
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        if (self.action_finish is None) != (self.action_key is None):
+            raise ConsistencyError("停止收尾的动作成员与操作键必须同时存在")
+        if self.action_finish is not None and self.action_finish.action_id != self.action_id:
+            raise ConsistencyError("停止收尾与动作成员的身份不一致")
+
+
 CaptureCompletionRequest = (
-    FinishCapture | FinishRecordingResults | FinishCanceledCapture | FinishBindingFailure | StartCloseRequest
+    FinishCapture | FinishRecordingResults | FinishCanceledCapture | FinishBindingFailure
+    | StartCloseRequest | StopCloseRequest
 )
 
 
@@ -294,7 +312,7 @@ class PendingCaptureCompletion:
             return self.request.action_finish.action_id
         if isinstance(self.request, FinishRecordingResults):
             return self.request.capture.action_id
-        if isinstance(self.request, (FinishCapture, FinishCanceledCapture, FinishBindingFailure)):
+        if isinstance(self.request, (FinishCapture, FinishCanceledCapture, FinishBindingFailure, StopCloseRequest)):
             return self.request.action_id
         raise ConsistencyError("原拍摄完整申请类型无效")
 
@@ -336,10 +354,15 @@ def resume_result_check_closes(
 
 
 def _write_capture_completion(owned, pending: PendingCaptureCompletion, repository: CaptureRepository):
-    """整份申请只路由到其所属仓储，启动外层的两个成员共同提交。"""
+    """按申请类型保存原成员；STOP 与动作分别沿各自原键保存。"""
     request = pending.request
     if isinstance(request, StartCloseRequest):
         return repository.close_start(request.finish, request.action_finish, pending.key, owned)
+    if isinstance(request, StopCloseRequest):
+        receipt = OperationRepository().finish_stale_runs(request.finish, pending.key, owned)
+        if receipt.kind is not DbOutcomeKind.COMPLETED or request.action_finish is None:
+            return receipt
+        return repository.finish_capture(request.action_finish, request.action_key, owned)
     if isinstance(request, FinishRecordingResults):
         return repository.finish_recording_results(request, pending.key, owned)
     if isinstance(request, FinishCanceledCapture):
@@ -365,18 +388,23 @@ def resume_capture_completions(
             raise ConsistencyError("原拍摄完整申请与所属动作不一致")
         canceled = isinstance(pending.request, FinishCanceledCapture)
         start_close = isinstance(pending.request, StartCloseRequest)
+        stop_close = isinstance(pending.request, StopCloseRequest)
+        stop_only = stop_close and pending.request.action_finish is None
         if pending.input_reads is None:
             receipt = _write_capture_completion(owned, pending, repository)
             if receipt.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(
                     f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}")
-            if not start_close:
+            if not start_close and not stop_only:
                 if receipt.value is None:
                     raise ConsistencyError("原拍摄收场缺少可靠处理结果")
                 if receipt.value.disposition is FinishDisposition.RETIRED:
+                    if stop_close and retry_gate is not None:
+                        for responsibility in pending.request.finish.responsibility_keys:
+                            retry_gate.cleared(responsibility)
                     del pending_capture_completions[identity]
                     continue
-            if start_close and retry_gate is not None:
+            if (start_close or stop_close) and retry_gate is not None:
                 for responsibility in pending.request.finish.responsibility_keys:
                     retry_gate.cleared(responsibility)
             elif (retry_gate is not None
@@ -412,6 +440,10 @@ def _capture_input_read_finish(owned, request, action_id: int) -> PendingCapture
     if isinstance(request, (FinishBindingFailure, StartCloseRequest)):
         # 绑定失败已共同保存 READ；START 尚未确认时没有内部读取收尾。
         return None
+    if isinstance(request, StopCloseRequest):
+        if request.action_finish is None:
+            return None
+        request = request.action_finish
     with closing(owned.connection.execute(
         "SELECT r.id,r.kind,r.action_id,r.responsibility_key,fc.id,"
         " EXISTS(SELECT 1 FROM operation_attempts t WHERE t.run_id=r.id AND t.status=?)"
@@ -1013,7 +1045,8 @@ class SessionRecordingState:
     """录像中段事实的生产装载器。
 
     启动确认与停止确认取自 start/stop 责任的最近尝试；停止次数与
-    在途取自停止流程行。计时锚点是本进程会话的单调钟读数（规格：
+    在途取自停止流程行，上限取本次运行的停止配置。计时锚点是本
+    进程会话的单调钟读数（规格：
     重启后旧读数不能与新会话组合，须先对账），由装配层在启动确认
     后登记；未登记时按跨会话处理进入对账分区。推进循环每轮重建运
     行时时，装配层传入同一会话共享的锚点表，锚点跨轮保留。
@@ -1052,13 +1085,13 @@ class SessionRecordingState:
             (f"stop/{action_id}",),
         )) as cursor:
             stop_run = cursor.fetchone()
-        used, maximum, in_flight = 0, 3, False
+        used, maximum, in_flight = 0, runtime.stop_config.max_attempts, False
         stop_confirmed = False
         if stop_run is not None:
-            used, maximum = int(stop_run[1]), int(stop_run[2])
+            used = int(stop_run[1])
             in_flight = stop_run[3] == int(_ATTEMPT_STATUS.RUNNING)
             stop_confirmed = (
-                stop_run[3] == int(_ATTEMPT_STATUS.SUCCEEDED)
+                stop_run[3] != int(_ATTEMPT_STATUS.RUNNING)
                 and stop_run[4] == int(_EFFECT_STATE.CONFIRMED))
         anchor = self._anchors.get(action_id)
         stop_target = anchor[1] if anchor is not None else None
@@ -1586,22 +1619,26 @@ def _stop_run_id(runtime: CaptureRuntime, action_id: int) -> int:
     return int(found[0])
 
 
-def _close_stop_exhausted(runtime: CaptureRuntime, action) -> RecordingFailure:
+def _close_stop_exhausted(
+    runtime: CaptureRuntime, action, *, finish_action: bool = False,
+) -> RecordingFailure:
     """保存停止预算耗尽的原流程结果；活动效果及占用保持原事实。"""
     activity_id = _activity_id_of(runtime, action["id"])
     error = ErrorValue(
         code="recording_stop_failed", stage="device_stop",
         details={"activity_id": str(activity_id),
                  "operation_run_id": str(_stop_run_id(runtime, action["id"]))})
-    receipt = runtime.operations.finish_stale_runs(
-        StaleRunFinish(
+    occurred_at = runtime.wall_us()
+    failure = RecordingFailure(code=error.code, details=dict(error.details))
+    action_finish = (FinishCapture(
+        action["id"], (), OutputCatalogFacts(action["id"], ownership_confirmed=True),
+        occurred_at, failure=failure) if finish_action else None)
+    runtime.save_capture_completion(StopCloseRequest(
+        action["id"], StaleRunFinish(
             responsibility_keys=(f"stop/{action['id']}",),
-            status=RunOutcome.UNCONFIRMED,
-            error=error,
-            occurred_at=runtime.wall_us()),
-        new_operation_key(), runtime.owned)
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    return RecordingFailure(code=error.code, details=dict(error.details))
+            status=RunOutcome.UNCONFIRMED, error=error, occurred_at=occurred_at),
+        action_finish, new_operation_key() if action_finish is not None else None))
+    return failure
 
 
 def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
@@ -1613,10 +1650,7 @@ def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
     触发的残留收场或取消收场处理（camera-recovery.md#停止预算
     耗尽后的收场责任）。幂等：动作终态后重入走处理器终态分支。
     """
-    failure = _close_stop_exhausted(runtime, action)
-    _finish_capture(
-        runtime, action["id"], (), FileKind.VIDEO,
-        failure=failure)
+    _close_stop_exhausted(runtime, action, finish_action=True)
 
 
 def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
@@ -1646,15 +1680,16 @@ async def _stop_call(runtime: CaptureRuntime, action,
                      operation: str = "stop_recording") -> HandlerOutcome:
     """按原停止预算发起一次设备停止调用并保存尝试结果。
 
-    意图先提交才派发；可靠确认结束停止流程，错误或未确认保持流
-    程执行中并建立重试等待，预算沿原流程累计不刷新。停止操作字
-    面量由调用方按任务类型提供。重试等待的间隔未到时不提交新意
-    图，由推进循环下一轮再判。
+    意图先提交才派发；可靠确认结束停止流程，调用错误单独保存；
+    未确认保持流程执行中并建立重试等待，预算沿原流程累计不刷新。
+    停止操作字面量由调用方按任务类型提供。重试等待的间隔未到时
+    不提交新意图，由推进循环下一轮再判。
     """
     if runtime.stopper is None:
         raise LookupError("设备停止端口未装配")
     remaining = runtime.retry_wait_remaining(
-        f"stop/{action['id']}", runtime.stop_config.retry_interval_s)
+        f"stop/{action['id']}", runtime.stop_config.retry_interval_s,
+        maximum=runtime.stop_config.max_attempts)
     if remaining is not None:
         return HandlerOutcome("stop_retry_wait", f"{remaining}s")
     intent = AttemptIntent(
@@ -1704,9 +1739,11 @@ async def _stop_call(runtime: CaptureRuntime, action,
             ticket, rejected, end_run=RunOutcome.FAILED,
             run_error=rejected.error, occurred_at=returned_at, returned_ns=returned_ns)
         return HandlerOutcome("call_failed", "invalid_device_result")
+    if confirmed:
+        return HandlerOutcome("confirmed")
     if response.error is not None:
         return HandlerOutcome("stop_failed", "device_error")
-    return HandlerOutcome("confirmed" if confirmed else "sent")
+    return HandlerOutcome("sent")
 
 
 def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
@@ -2371,6 +2408,8 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
             # 停止确认：活动以可靠停止事实收场，重入进入终态分支。
             _conclude_activity(context, action_id)
             return await _record_handler(action_id, context)
+        if step.phase == "stop_not_granted" and step.detail == "budget_exhausted" and not canceled:
+            _settle_stop_exhausted(context, action)
         return
     if decision.phase is RecordingPhase.RECONCILE_REQUIRED:
         # 锚点随既往会话失效：按已保存启动墙钟与当前可信墙钟对账。
@@ -2555,9 +2594,9 @@ def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | None:
         "SELECT e.occurred_at FROM operation_runs r"
         " JOIN operation_attempts a ON a.run_id = r.id"
         " JOIN history_events e ON e.id = a.result_event_id"
-        " WHERE r.responsibility_key = ? AND a.status = ? AND a.effect_state = ?"
+        " WHERE r.responsibility_key = ? AND a.status <> ? AND a.effect_state = ?"
         " ORDER BY a.id DESC LIMIT 1",
-        (f"stop/{action_id}", int(_ATTEMPT_STATUS.SUCCEEDED),
+        (f"stop/{action_id}", int(_ATTEMPT_STATUS.RUNNING),
          int(_EFFECT_STATE.CONFIRMED)),
     )) as cursor:
         row = cursor.fetchone()
@@ -2594,6 +2633,8 @@ async def _reconcile_recording(
         # 对账满足的停止确认：活动以可靠停止事实收场，重入终态判定。
         _conclude_activity(context, action["id"])
         await _record_handler(action["id"], context)
+    elif step.phase == "stop_not_granted" and step.detail == "budget_exhausted":
+        _settle_stop_exhausted(context, action)
 
 
 async def _save_winddown_progress(
@@ -2673,10 +2714,12 @@ async def advance_winddown(
         port.recording_state(action_id), RecordingFacts(canceled=canceled))
     if decision.phase is RecordingPhase.NOT_RUNNING:
         return HandlerOutcome("not_running")
+    if decision.phase is RecordingPhase.STOP_EXHAUSTED:
+        _settle_stop_exhausted(context, action)
+        return HandlerOutcome(decision.phase.value)
     if decision.phase in (RecordingPhase.STOP_IN_FLIGHT,
-                          RecordingPhase.STOP_EXHAUSTED,
                           RecordingPhase.WAIT_RECORD):
-        # 在途停止与预算耗尽按既有规则等待；本会话锚点属于正常
+        # 在途停止等待实际结束；本会话锚点属于正常
         # 计时，不满足保守收场前提。
         return HandlerOutcome(decision.phase.value)
     if decision.phase in (RecordingPhase.CONTROL_COMPLETE,
@@ -2705,12 +2748,17 @@ async def advance_winddown(
             port.recording_state(action_id),
             RecordingFacts(canceled=canceled, timing_waived=True))
         if decision.phase is not RecordingPhase.READY_TO_STOP:
+            if decision.phase is RecordingPhase.STOP_EXHAUSTED:
+                _settle_stop_exhausted(context, action)
             return HandlerOutcome(decision.phase.value)
         if retried:
             # 上一次尝试失败：按重试间隔等待后再试，预算内有限重试。
             await sleep(float(context.stop_config.retry_interval_s))
         retried = True
         step = await _stop_call(context, action)
+        if step.phase == "stop_not_granted" and step.detail == "budget_exhausted":
+            _settle_stop_exhausted(context, action)
+            return HandlerOutcome(RecordingPhase.STOP_EXHAUSTED.value)
         if step.phase == "confirmed":
             # 保守停止确认：活动以可靠停止事实收场，保存等待阶段
             # 或取消终态，交给后续正常会话。
