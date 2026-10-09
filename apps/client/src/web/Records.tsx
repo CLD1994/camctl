@@ -9,6 +9,7 @@ import { download } from "./api";
 import type { PlanRecord } from "./editing";
 import { utcToLocal } from "./editing";
 import { Badge, Facts, Empty } from "./common";
+import { stringifyJson } from "../shared/json";
 export type Followup = {
   action: Record<string, unknown>;
   summary: string;
@@ -79,7 +80,7 @@ export function RecordDetail({
           <div>
             <small>主机报告</small>
             <strong>
-              {plan ? "已取得受理与执行依据" : "尚无计划执行依据"}
+              {plan ? "已取得计划受理及报告状态" : "尚无计划执行依据"}
             </strong>
             {plan && <span>{plan.plan_instance_id}</span>}
           </div>
@@ -128,23 +129,59 @@ export function RecordDetail({
           <>
             <div className="section-head">
               <h3>执行与结果</h3>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  follow({
-                    action: {
-                      name: `取消 ${plan.name}`,
-                      type: "cancel_task",
-                      params: {
-                        target: { plan_instance_id: plan.plan_instance_id },
+              <div className="button-row">
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    follow({
+                      action: {
+                        name: `取回 ${plan.name}`,
+                        type: "obtain_action_outputs",
+                        params: {
+                          source: { plan_instance_id: plan.plan_instance_id },
+                        },
                       },
-                    },
-                    summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
-                  })
-                }
-              >
-                准备取消计划
-              </button>
+                      summary: `取回计划 ${plan.name} · ${plan.plan_instance_id} 的默认产物：排除预览，优先对应修复成品`,
+                    })
+                  }
+                >
+                  准备取回计划默认产物
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    follow({
+                      action: {
+                        name: `清理 ${plan.name}`,
+                        type: "delete_action_outputs",
+                        params: {
+                          source: { plan_instance_id: plan.plan_instance_id },
+                        },
+                      },
+                      summary: `清理计划 ${plan.name} · ${plan.plan_instance_id} 的全部正式源产物，包括原文件、预览和修复成品；不包含仅取回的其他计划产物，不清理客户端副本`,
+                    })
+                  }
+                >
+                  准备清理计划全部源产物
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    follow({
+                      action: {
+                        name: `取消 ${plan.name}`,
+                        type: "cancel_task",
+                        params: {
+                          target: { plan_instance_id: plan.plan_instance_id },
+                        },
+                      },
+                      summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
+                    })
+                  }
+                >
+                  准备取消计划
+                </button>
+              </div>
             </div>
             {plan.status === "completed" && (
               <p className="notice">
@@ -177,13 +214,13 @@ export function RecordDetail({
         {request && (
           <details className="advanced">
             <summary>查看固定原请求 JSON</summary>
-            <pre>{JSON.stringify(request.body, null, 2)}</pre>
+            <pre>{stringifyJson(request.body, 2)}</pre>
           </details>
         )}
         {plan && (
           <details className="advanced">
             <summary>查看合并后的报告计划 JSON</summary>
-            <pre>{JSON.stringify(plan, null, 2)}</pre>
+            <pre>{stringifyJson(plan, 2)}</pre>
           </details>
         )}
       </div>

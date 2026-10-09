@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { resultProducts, resultNotes, actionIssueText } from "./result-model";
+import {
+  resultProducts,
+  resultNotes,
+  actionIssueText,
+  executionText,
+} from "./result-model";
 import { MediaResults } from "./MediaResults";
 import { isCameraAction } from "../shared/actions";
 import { actionLabel, Badge, Facts } from "./common";
@@ -86,9 +91,7 @@ export function ActionResult({
       </div>
       <div hidden={!expanded}>
         <div className="button-row">
-          <span>
-            {action.status === "pending" ? "执行尚未开始" : "执行已开始"}
-          </span>
+          <span>{executionText(action)}</span>
           {typeof action.device_id === "string" && (
             <span>设备：{action.device_id}</span>
           )}
@@ -115,22 +118,44 @@ export function ActionResult({
             准备取消动作
           </button>
           {isCameraAction(action.type) && (
-            <button
-              onClick={() =>
-                follow({
-                  action: {
-                    name: `取回 ${action.name}`,
-                    type: "obtain_action_outputs",
-                    params: {
-                      source: { action_instance_id: action.action_instance_id },
+            <>
+              <button
+                onClick={() =>
+                  follow({
+                    action: {
+                      name: `取回 ${action.name}`,
+                      type: "obtain_action_outputs",
+                      params: {
+                        source: {
+                          action_instance_id: action.action_instance_id,
+                        },
+                      },
                     },
-                  },
-                  summary: `取回 ${action.name} 的全部产物`,
-                })
-              }
-            >
-              准备取回全部产物
-            </button>
+                    summary: `取回 ${action.name} 的默认产物：排除预览，优先对应修复成品`,
+                  })
+                }
+              >
+                准备取回默认产物
+              </button>
+              <button
+                onClick={() =>
+                  follow({
+                    action: {
+                      name: `清理 ${action.name}`,
+                      type: "delete_action_outputs",
+                      params: {
+                        source: {
+                          action_instance_id: action.action_instance_id,
+                        },
+                      },
+                    },
+                    summary: `清理 ${action.name} 的全部正式源产物，包括原文件、预览和修复成品；不清理客户端副本`,
+                  })
+                }
+              >
+                准备清理动作全部源产物
+              </button>
+            </>
           )}
         </div>
         {syncMissing && (

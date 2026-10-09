@@ -439,7 +439,13 @@ it("取回来源只为指定动作实例展示附加产物筛选", async () => {
     "obtain_action_outputs",
   );
   const source = page.getByLabel("取回来源", { exact: true });
-  for (const mode of ["action_name", "group", "plan_group"]) {
+  for (const mode of [
+    "action_name",
+    "group",
+    "plan_group",
+    "current_plan",
+    "plan_instance_id",
+  ]) {
     await choose(source, mode);
     await check(page.getByLabel("指定产物筛选")).toHaveCount(0);
   }
@@ -945,7 +951,7 @@ it("内置参数的非法组合与类型原样保留且未完成输入不能被�
   expect(
     JSON.parse(app.draft(draft.id).content.text).actions[0].params,
   ).toEqual(params);
-  await page.getByRole("button", { name: "移除不适用的产物筛选" }).click();
+  await page.getByRole("button", { name: "移除已有精确产物列表" }).click();
   await page.getByRole("button", { name: "移除不适用参数字段" }).click();
   await choose(page.getByLabel("取回来源"), "action_instance_id");
   await page.getByLabel("来源动作实例 ID").fill("a-1");
@@ -1590,6 +1596,280 @@ it("新录像参数缺省时引导选择并默认折叠预设", async () => {
     )
     .toEqual({ type: "demo_fixed" });
 });
+it("范围表单明确生成六种取回与五种清理来源并可在窄屏操作", async () => {
+  const { page, app } = await setup();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const draft = app.createDraft({
+    text: JSON.stringify({
+      name: "范围",
+      actions: [
+        {
+          name: "取回",
+          type: "obtain_action_outputs",
+          scheduled_at: "2026-09-16 01:00:00",
+          params: {},
+        },
+        {
+          name: "清理",
+          type: "delete_action_outputs",
+          scheduled_at: "2026-09-16 01:00:00",
+          params: {},
+        },
+        {
+          name: "拍摄",
+          type: "camera_record",
+          device_id: "demo_cam0",
+          scheduled_at: "2026-09-16 01:00:00",
+          params: { type: "demo_fixed" },
+          policy: { max_delay_ms: 0 },
+        },
+      ],
+    }),
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  const read = (index: number) =>
+    JSON.parse(app.draft(draft.id).content.text).actions[index].params;
+  for (const [mode, wanted] of [
+    ["action_name", { action_name: "" }],
+    ["group", { group: "" }],
+    ["action_instance_id", { action_instance_id: "" }],
+    ["plan_group", { plan_instance_id: "", group: "" }],
+    ["current_plan", { current_plan: true }],
+    ["plan_instance_id", { plan_instance_id: "" }],
+  ] as const) {
+    await choose(page.getByLabel("取回来源"), mode);
+    await check.poll(() => read(0)).toEqual({ source: wanted });
+  }
+  const cleanup = page.locator(".action-card").nth(1);
+  for (const [mode, wanted] of [
+    ["output_ids", { output_ids: [] }],
+    ["action_name", { source: { action_name: "" } }],
+    ["action_instance_id", { source: { action_instance_id: "" } }],
+    ["current_plan", { source: { current_plan: true } }],
+    ["plan_instance_id", { source: { plan_instance_id: "" } }],
+  ] as const) {
+    await choose(cleanup.getByLabel("清理范围"), mode);
+    await check.poll(() => read(1)).toEqual(wanted);
+  }
+  expect(
+    (await readOptions(cleanup.getByLabel("清理范围"))).map((o) => o.value),
+  ).not.toContain("group");
+  await cleanup.getByLabel("来源计划实例 ID").fill("9223372036854775807");
+  await choose(page.getByLabel("取回来源"), "current_plan");
+  await check(page.getByLabel("current_plan")).toHaveCount(0);
+  await page.getByTestId("export-button").click();
+  await check
+    .poll(() => app.store.all<ExportedRequest>("requests").length)
+    .toBe(1);
+  expect(
+    app.store.all<ExportedRequest>("requests")[0].body.actions,
+  ).toMatchObject([
+    { params: { source: { current_plan: true } } },
+    { params: { source: { plan_instance_id: "9223372036854775807" } } },
+    { name: "拍摄" },
+  ]);
+}, 30000);
+
+it.each([
+  { source: { action_instance_id: "7" } },
+  { source: { action_instance_id: "7" }, filter: "default", purpose: "manual" },
+  { source: { action_instance_id: "7" }, filter: "preview", purpose: "manual" },
+])(
+  "取回筛选与用途从 JSON 经表单保存重开和后端导出保留字段存在性 %j",
+  async (params) => {
+    const { page, app } = await setup();
+    const draft = app.createDraft({
+      text: JSON.stringify({
+        name: "筛选",
+        actions: [
+          {
+            name: "取回",
+            type: "obtain_action_outputs",
+            scheduled_at: "2026-09-16 01:00:00",
+            params,
+          },
+        ],
+      }),
+    });
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await check(page.locator(".builtin-parameters")).not.toContainText(
+      "不适用字段",
+    );
+    await check(page.getByLabel("取回筛选")).toBeVisible();
+    await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+    expect(
+      JSON.parse(await page.getByLabel("动作参数 JSON").inputValue()),
+    ).toEqual(params);
+    await page.getByRole("button", { name: "参数表单", exact: true }).click();
+    await page.getByLabel("动作名称", { exact: true }).fill("改名取回");
+    await check(page.getByTestId("save-status")).toContainText("已保存");
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    expect(
+      JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+    ).toEqual(params);
+    await page.getByTestId("export-button").click();
+    await check
+      .poll(() => app.store.all<ExportedRequest>("requests").length)
+      .toBe(1);
+    expect(
+      app.store.all<ExportedRequest>("requests")[0].body.actions,
+    ).toMatchObject([{ params }]);
+  },
+  20000,
+);
+
+it("精确列表与筛选转换须明确选择，原非法组合和自动用途不被显示操作删除", async () => {
+  const { page, app } = await setup();
+  const params = {
+    source: { action_instance_id: "7" },
+    output_ids: ["4"],
+    filter: "preview",
+    purpose: "auto_preview",
+  };
+  const draft = app.createDraft({
+    text: JSON.stringify({
+      name: "显式转换",
+      actions: [{ name: "取回", type: "obtain_action_outputs", params }],
+    }),
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(page.locator(".builtin-parameters")).toContainText("组合");
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+  ).toEqual(params);
+  await choose(page.getByLabel("取回筛选"), "default");
+  await check
+    .poll(() => JSON.parse(app.draft(draft.id).content.text).actions[0].params)
+    .toEqual({
+      source: { action_instance_id: "7" },
+      filter: "default",
+      purpose: "auto_preview",
+    });
+  await page.getByLabel("指定产物筛选").check();
+  await check
+    .poll(() => JSON.parse(app.draft(draft.id).content.text).actions[0].params)
+    .toEqual({
+      source: { action_instance_id: "7" },
+      output_ids: [],
+      purpose: "auto_preview",
+    });
+}, 20000);
+
+it.each([
+  { source: { action_name: "拍摄" }, output_ids: ["4"], purpose: "manual" },
+  {
+    source: { action_name: "拍摄" },
+    filter: "preview",
+    purpose: "auto_preview",
+  },
+])(
+  "动作名合法精确列表及显式自动用途经表单保留并由后端导出 %j",
+  async (params) => {
+    const { page, app } = await setup();
+    app.capabilities.active!.devices[0].actions[0].parameter_types.find(
+      (p) => p.type === "demo_fixed",
+    )!.preview_supported = true;
+    const draft = app.createDraft({
+      text: JSON.stringify({
+        name: "合法输入",
+        actions: [
+          {
+            name: "拍摄",
+            type: "camera_record",
+            device_id: "demo_cam0",
+            scheduled_at: "2026-10-12 01:00:00",
+            params: { type: "demo_fixed" },
+            policy: { max_delay_ms: 0 },
+          },
+          {
+            name: "取回",
+            type: "obtain_action_outputs",
+            scheduled_at: "2026-10-12 01:00:00",
+            params,
+          },
+        ],
+      }),
+    });
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    const action = page.locator(".action-card").nth(1);
+    await check(action.getByLabel("指定产物筛选")).toHaveCount(0);
+    await check(action.locator(".builtin-parameters")).not.toContainText(
+      "不适用",
+    );
+    if ("output_ids" in params)
+      await check(action.locator(".builtin-parameters")).toContainText(
+        "参数 JSON",
+      );
+    await action
+      .getByRole("button", { name: "参数 JSON", exact: true })
+      .click();
+    expect(
+      JSON.parse(await action.getByLabel("动作参数 JSON").inputValue()),
+    ).toEqual(params);
+    await action.getByRole("button", { name: "参数表单", exact: true }).click();
+    await page.getByTestId("export-button").click();
+    await check
+      .poll(() => app.store.all<ExportedRequest>("requests").length)
+      .toBe(1);
+    expect(
+      (
+        app.store.all<ExportedRequest>("requests")[0].body.actions as Array<{
+          params: unknown;
+        }>
+      )[1].params,
+    ).toEqual(params);
+  },
+  20000,
+);
+
+it("来源非法常量与非文本值显示原词元，编辑精确列表不改写其他非法数值", async () => {
+  const { page, app } = await setup();
+  const draft = app.createDraft({
+    text: '{"name":"原输入","actions":[{"name":"取回","type":"obtain_action_outputs","params":{"source":{"current_plan":false}}},{"name":"清理","type":"delete_action_outputs","params":{"output_ids":["4",1.0000000000000001]}}]}',
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(page.locator(".action-card").first()).toContainText(
+    "current_plan: false",
+  );
+  await check(page.locator(".action-card").nth(1)).toContainText(
+    "1.0000000000000001",
+  );
+  await page.getByRole("button", { name: "移除产物 1", exact: true }).click();
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.draft(draft.id).content.text).actions[1].params
+          .output_ids.length,
+    )
+    .toBe(1);
+  expect(app.draft(draft.id).content.text).toContain("1.0000000000000001");
+  await page.getByRole("button", { name: "添加产物 ID", exact: true }).click();
+  await check
+    .poll(
+      () =>
+        JSON.parse(app.draft(draft.id).content.text).actions[1].params
+          .output_ids.length,
+    )
+    .toBe(2);
+  expect(app.draft(draft.id).content.text).toContain("1.0000000000000001");
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+  ).toEqual({ source: { current_plan: false } });
+  await choose(page.getByLabel("取回来源"), "current_plan");
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+  ).toEqual({ source: { current_plan: false } });
+  await page.getByRole("button", { name: "重新填写当前计划引用" }).click();
+  await check
+    .poll(() => JSON.parse(app.draft(draft.id).content.text).actions[0].params)
+    .toEqual({ source: { current_plan: true } });
+}, 20000);
 it("执行时间按本地显示并可点击文本区打开选择器", async () => {
   const { page, app } = await setup();
   app.createDraft({

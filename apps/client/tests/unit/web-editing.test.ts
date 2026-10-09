@@ -12,6 +12,7 @@ import {
   appendDraftAction,
 } from "../../src/web/editing";
 import { switchActionType } from "../../src/web/action-drafts";
+import * as editing from "../../src/web/editing";
 import type { DraftContent, ExportedRequest } from "../../src/server/models";
 const content = (): DraftContent => ({
   text: JSON.stringify({
@@ -24,6 +25,105 @@ const content = (): DraftContent => ({
       { name: "B", params: { type: "fixed" } },
     ],
   }),
+});
+const paramsContent = (params: unknown): DraftContent => ({
+  text: JSON.stringify({ name: "计划", actions: [{ name: "操作", params }] }),
+});
+const paramsPath = ["actions", 0, "params"];
+it.each([
+  ["action_name", { action_name: "" }],
+  ["group", { group: "" }],
+  ["action_instance_id", { action_instance_id: "" }],
+  ["plan_group", { plan_instance_id: "", group: "" }],
+  ["current_plan", { current_plan: true }],
+  ["plan_instance_id", { plan_instance_id: "" }],
+])("用户明确选择取回来源 %s 生成准确引用", (mode, want) => {
+  const next = editing.changeBuiltinMode(
+    paramsContent({
+      source: { action_instance_id: "7" },
+      output_ids: ["4"],
+      purpose: "auto_preview",
+      unknown: 2,
+    }),
+    paramsPath,
+    "obtain_action_outputs",
+    mode as any,
+  );
+  expect(parseDraft(next).actions[0].params).toEqual({
+    source: want,
+    purpose: "auto_preview",
+    unknown: 2,
+    ...(mode === "action_instance_id" ? { output_ids: ["4"] } : {}),
+  });
+});
+it.each([
+  ["output_ids", { output_ids: [] }],
+  ["action_name", { source: { action_name: "" } }],
+  ["action_instance_id", { source: { action_instance_id: "" } }],
+  ["current_plan", { source: { current_plan: true } }],
+  ["plan_instance_id", { source: { plan_instance_id: "" } }],
+])("用户明确选择清理方式 %s 替换互斥选择并保留额外字段", (mode, want) => {
+  const next = editing.changeBuiltinMode(
+    paramsContent({
+      source: { current_plan: false },
+      output_ids: ["4"],
+      unknown: 2,
+    }),
+    paramsPath,
+    "delete_action_outputs",
+    mode as any,
+  );
+  expect(parseDraft(next).actions[0].params).toEqual({ ...want, unknown: 2 });
+});
+it.each([
+  "/actions/0",
+  "/actions/0/params",
+  "/actions/0/params/source/action_name",
+])("范围转换不覆盖未完成路径 %s", (path) => {
+  const initial = {
+    ...paramsContent({ source: { action_name: "A" } }),
+    pending: { [path]: { kind: "json" as const, text: "{" } },
+  };
+  expect(() =>
+    editing.changeBuiltinMode(
+      initial,
+      paramsPath,
+      "obtain_action_outputs",
+      "current_plan",
+    ),
+  ).toThrow();
+  expect(initial.pending[path].text).toBe("{");
+});
+it("明确精确和预览转换才移除互斥字段，保留用途和词元资料", () => {
+  const initial: DraftContent = {
+    text: '{"name":"计划","actions":[{"name":"操作","params":{"source":{"action_instance_id":"7"},"filter":"preview","purpose":"manual","unknown":1.0000000000000001}}]}',
+    actionVariants: {
+      "0": [
+        {
+          type: "other",
+          fields: { params: { n: 1 } },
+          fieldsText: '{"params":{"n":1.0000000000000001}}',
+          pending: {},
+        },
+      ],
+    },
+  };
+  const exact = editing.changeObtainSelection(initial, paramsPath, "exact");
+  expect(parseDraft(exact).actions[0].params).toMatchObject({
+    output_ids: [],
+    purpose: "manual",
+  });
+  expect(parseDraft(exact).actions[0].params).not.toHaveProperty("filter");
+  const preview = editing.changeObtainSelection(exact, paramsPath, "preview");
+  expect(parseDraft(preview).actions[0].params).toMatchObject({
+    filter: "preview",
+    purpose: "manual",
+  });
+  expect(parseDraft(preview).actions[0].params).not.toHaveProperty(
+    "output_ids",
+  );
+  expect(preview.text).toContain("1.0000000000000001");
+  expect(preview.actionVariants).toEqual(initial.actionVariants);
 });
 it("类型切换隔离字段并恢复未完成输入，共用名称和时间", () => {
   const initial: DraftContent = {

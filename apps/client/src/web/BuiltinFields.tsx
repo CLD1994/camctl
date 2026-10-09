@@ -10,9 +10,25 @@ import {
   targets,
   builtinFields,
   isSyncBasis,
+  cleanupModes,
+  referenceMode,
 } from "../shared/action-params";
+import {
+  stringifyJson,
+  displayJsonValue,
+  parseClientJson,
+  cloneClientJson,
+} from "../shared/json";
 import type { ActionType } from "../shared/types";
-import { parseDraft, setValue, pointer, valueAt, type Path } from "./editing";
+import {
+  parseDraft,
+  setValue,
+  pointer,
+  valueAt,
+  changeBuiltinMode,
+  changeObtainSelection,
+  type Path,
+} from "./editing";
 import { JsonField, Field } from "./Fields";
 import notificationSchema from "../../../../protocol/schemas/host-notification.schema.json";
 
@@ -45,17 +61,26 @@ export function BuiltinFields({
   const put = (key: string, v: unknown, omit = false) =>
     change(setValue(content, [...path, key], v, omit));
   const reset = () => change(setValue(content, path, {}, false, true));
-  const modes = type === "obtain_action_outputs" ? sources : targets;
-  const referenceKey = type === "obtain_action_outputs" ? "source" : "target";
+  const modes =
+    type === "delete_action_outputs"
+      ? cleanupModes
+      : type === "obtain_action_outputs"
+        ? sources
+        : targets;
+  const referenceKey = type === "cancel_task" ? "target" : "source";
   const reference = params?.[referenceKey];
-  const mode = isObject(reference)
-    ? modes.find(
-        (m) =>
-          Object.keys(m.fields).length === Object.keys(reference).length &&
-          Object.keys(m.fields).every((k) => Object.hasOwn(reference, k)),
-      )
-    : undefined;
-  const group = isObject(reference) && Object.hasOwn(reference, "group");
+  const exactCleanup =
+    type === "delete_action_outputs" &&
+    params &&
+    Object.hasOwn(params, "output_ids");
+  const mode = exactCleanup
+    ? reference === undefined
+      ? cleanupModes.find((m) => m.id === "output_ids")
+      : undefined
+    : referenceMode(
+        reference,
+        modes.filter((m) => m.id !== "output_ids"),
+      );
   const outputFilter = mode?.id === "action_instance_id";
   const basis = reports.filter((r) => isSyncBasis(r, coverage));
   const reportMode =
@@ -131,45 +156,40 @@ export function BuiltinFields({
               </button>
             </p>
           )}
-          {(type === "obtain_action_outputs" || type === "cancel_task") && (
+          {(type === "obtain_action_outputs" ||
+            type === "delete_action_outputs" ||
+            type === "cancel_task") && (
             <>
               <p className="muted">
-                切换{type === "obtain_action_outputs" ? "来源" : "目标"}
+                切换{type === "cancel_task" ? "目标" : "来源"}
                 会清空原引用，需重新填写。
                 {type === "obtain_action_outputs" &&
-                  "只有指定动作实例可选择产物筛选，切换到其他来源时会清除筛选。"}
+                  "只有指定动作实例提供精确产物 ID 控件，切换到其他来源时会清除精确列表。默认取回排除预览并优先对应修复成品。"}
+                {type === "delete_action_outputs" &&
+                  "切换精确列表或来源范围会移除另一种选择。来源范围包含原文件、预览和修复成品，不清理客户端副本。"}
               </p>
               <label className="field">
                 <span>
-                  {type === "obtain_action_outputs" ? "取回来源" : "取消目标"}{" "}
+                  {type === "delete_action_outputs"
+                    ? "清理范围"
+                    : type === "obtain_action_outputs"
+                      ? "取回来源"
+                      : "取消目标"}{" "}
                   <span className="required">必填</span>
                 </span>
                 <Select
                   aria-label={
-                    type === "obtain_action_outputs" ? "取回来源" : "取消目标"
+                    type === "delete_action_outputs"
+                      ? "清理范围"
+                      : type === "obtain_action_outputs"
+                        ? "取回来源"
+                        : "取消目标"
                   }
                   value={mode?.id ?? ""}
                   onValueChange={(selectedValue) => {
                     const selected = modes.find((m) => m.id === selectedValue);
                     if (!selected) return;
-                    let next = setValue(
-                      content,
-                      [...path, referenceKey],
-                      Object.fromEntries(
-                        Object.keys(selected.fields).map((k) => [k, ""]),
-                      ),
-                    );
-                    if (
-                      type === "obtain_action_outputs" &&
-                      selected.id !== "action_instance_id"
-                    )
-                      next = setValue(
-                        next,
-                        [...path, "output_ids"],
-                        undefined,
-                        true,
-                      );
-                    change(next);
+                    change(changeBuiltinMode(content, path, type, selected.id));
                   }}
                 >
                   <SelectItem value="" disabled>
@@ -185,7 +205,9 @@ export function BuiltinFields({
               {reference !== undefined && !mode && (
                 <div className="notice warning">
                   引用字段组合需要修正：
-                  <pre>{JSON.stringify(reference, null, 2)}</pre>
+                  <pre>
+                    {displayJsonValue(params, referenceKey, reference, 2)}
+                  </pre>
                   选择一种来源或目标重新填写，或通过参数 JSON 修正。
                 </div>
               )}
@@ -196,9 +218,10 @@ export function BuiltinFields({
                       key={key}
                       label={label}
                       value={reference[key]}
+                      parent={reference}
+                      fieldKey={key}
                       candidates={
-                        type === "obtain_action_outputs" &&
-                        mode.id === "action_name"
+                        type !== "cancel_task" && mode.id === "action_name"
                           ? cameraActions.map((a) => a.name).filter(isName)
                           : type === "obtain_action_outputs" &&
                               mode.id === "group"
@@ -220,29 +243,100 @@ export function BuiltinFields({
                   ))}
                 </div>
               )}
+              {mode?.id === "current_plan" && isObject(reference) && (
+                <p
+                  className={
+                    reference.current_plan === true ? "muted" : "notice warning"
+                  }
+                >
+                  {reference.current_plan === true
+                    ? "来源为当前整个计划。"
+                    : `原值 current_plan: ${displayJsonValue(reference, "current_plan", reference.current_plan)} 必须为布尔 true；请通过 JSON 修正或明确重新填写当前计划引用。`}
+                  {reference.current_plan !== true && (
+                    <button
+                      onClick={() =>
+                        change(
+                          changeBuiltinMode(
+                            content,
+                            path,
+                            type as
+                              "obtain_action_outputs" | "delete_action_outputs",
+                            "current_plan",
+                          ),
+                        )
+                      }
+                    >
+                      重新填写当前计划引用
+                    </button>
+                  )}
+                </p>
+              )}
               {type === "obtain_action_outputs" && (
                 <>
-                  {group ? (
+                  <p className="muted">
+                    选择默认或手动预览筛选会移除精确列表；开启精确列表会移除
+                    filter。用途 purpose
+                    保留原值，手动预览选择不会写入自动用途。
+                  </p>
+                  <label className="field">
+                    <span>取回筛选</span>
+                    <Select
+                      aria-label="取回筛选"
+                      value={
+                        params?.filter === undefined
+                          ? "implicit"
+                          : params.filter === "default" ||
+                              params.filter === "preview"
+                            ? params.filter
+                            : "invalid"
+                      }
+                      onValueChange={(v) => {
+                        if (
+                          v === "implicit" ||
+                          v === "default" ||
+                          v === "preview"
+                        )
+                          change(changeObtainSelection(content, path, v));
+                      }}
+                    >
+                      <SelectItem value="implicit">不填写筛选</SelectItem>
+                      <SelectItem value="default">默认产物</SelectItem>
+                      <SelectItem value="preview">预览产物</SelectItem>
+                      {params?.filter !== undefined &&
+                        params.filter !== "default" &&
+                        params.filter !== "preview" && (
+                          <SelectItem value="invalid" disabled>
+                            原筛选待修正
+                          </SelectItem>
+                        )}
+                    </Select>
+                  </label>
+                  {params && Object.hasOwn(params, "purpose") && (
                     <p className="muted">
-                      取回来源组的正式产物，不支持按产物 ID 筛选。
+                      已填写用途 purpose：
+                      {displayJsonValue(params, "purpose", params.purpose)}
+                      。可通过参数 JSON 核对或修改。
                     </p>
-                  ) : (
-                    outputFilter && (
-                      <label className="optional-field">
-                        <input
-                          type="checkbox"
-                          aria-label="指定产物筛选"
-                          checked={
-                            params !== undefined &&
-                            Object.hasOwn(params, "output_ids")
-                          }
-                          onChange={(e) =>
-                            put("output_ids", [], !e.target.checked)
-                          }
-                        />
-                        <span>仅取回指定产物；不勾选时取回全部正式产物</span>
-                      </label>
-                    )
+                  )}
+                  {outputFilter && (
+                    <label className="optional-field">
+                      <input
+                        type="checkbox"
+                        aria-label="指定产物筛选"
+                        checked={
+                          params !== undefined &&
+                          Object.hasOwn(params, "output_ids")
+                        }
+                        onChange={(e) =>
+                          e.target.checked
+                            ? change(
+                                changeObtainSelection(content, path, "exact"),
+                              )
+                            : put("output_ids", undefined, true)
+                        }
+                      />
+                      <span>仅取回指定产物；不勾选时按来源与筛选取回</span>
+                    </label>
                   )}
                   {!outputFilter &&
                     params &&
@@ -250,11 +344,18 @@ export function BuiltinFields({
                       <div className="notice warning">
                         此来源不提供产物筛选表单；已有输入保留，可通过参数 JSON
                         核对或移除。原值：
-                        <pre>{JSON.stringify(params.output_ids, null, 2)}</pre>
+                        <pre>
+                          {displayJsonValue(
+                            params,
+                            "output_ids",
+                            params.output_ids,
+                            2,
+                          )}
+                        </pre>
                         <button
                           onClick={() => put("output_ids", undefined, true)}
                         >
-                          移除不适用的产物筛选
+                          移除已有精确产物列表
                         </button>
                       </div>
                     )}
@@ -269,18 +370,13 @@ export function BuiltinFields({
                     )}
                 </>
               )}
-            </>
-          )}
-          {type === "delete_action_outputs" && (
-            <>
-              <p className="muted">
-                明确列出要删除的正式产物 ID。列表不能为空，删除不表示清理全部。
-              </p>
-              <OutputIds
-                content={content}
-                path={[...path, "output_ids"]}
-                change={change}
-              />
+              {type === "delete_action_outputs" && exactCleanup && (
+                <OutputIds
+                  content={content}
+                  path={[...path, "output_ids"]}
+                  change={change}
+                />
+              )}
             </>
           )}
           {type === "report_status" && (
@@ -348,7 +444,12 @@ export function BuiltinFields({
                         (r) => r.report_id === params.after_report_id,
                       ) && (
                         <SelectItem value="invalid" disabled>
-                          {JSON.stringify(params.after_report_id)}（无可靠依据）
+                          {displayJsonValue(
+                            params,
+                            "after_report_id",
+                            params.after_report_id,
+                          )}
+                          （无可靠依据）
                         </SelectItem>
                       )}
                     {basis.map((r) => (
@@ -367,13 +468,19 @@ export function BuiltinFields({
               {issues.length > 0 && params && (
                 <div className="notice warning">
                   报告参数需要修正，原值：
-                  <pre>{JSON.stringify(params, null, 2)}</pre>
+                  <pre>{stringifyJson(params, 2)}</pre>
                   <button onClick={reset}>清空参数并重新填写</button>
                 </div>
               )}
             </>
           )}
         </>
+      )}
+      {issues.length > 0 && type !== "report_status" && (
+        <p className="notice warning">
+          参数字段、值或组合需要修正；原输入保留，请补齐表单或通过参数 JSON
+          核对。
+        </p>
       )}
     </section>
   );
@@ -384,11 +491,15 @@ function ReferenceField({
   value,
   candidates,
   change,
+  parent,
+  fieldKey,
 }: {
   label: string;
   value: unknown;
   candidates: string[];
   change: (value: string) => void;
+  parent: unknown;
+  fieldKey: string | number;
 }) {
   const id = useId();
   return (
@@ -411,7 +522,8 @@ function ReferenceField({
       )}
       {value !== undefined && typeof value !== "string" && (
         <small className="danger-text">
-          原值 {JSON.stringify(value)} 不是文本，请重新填写。
+          原值 {displayJsonValue(parent, fieldKey, value)}{" "}
+          不是文本，请重新填写。
         </small>
       )}
     </label>
@@ -455,6 +567,8 @@ function OutputIds({
           <ReferenceField
             label={`产物 ID ${index + 1}`}
             value={id}
+            parent={ids}
+            fieldKey={index}
             candidates={[]}
             change={(v) => change(setValue(content, [...path, index], v))}
           />
@@ -464,7 +578,9 @@ function OutputIds({
                 setValue(
                   content,
                   path,
-                  ids.filter((_, i) => i !== index),
+                  parseClientJson(
+                    `[${ids.flatMap((v, i) => (i === index ? [] : [displayJsonValue(ids, i, v)])).join(",")}]`,
+                  ),
                 ),
               )
             }
@@ -474,7 +590,13 @@ function OutputIds({
           </button>
         </div>
       ))}
-      <button onClick={() => change(setValue(content, path, [...ids, ""]))}>
+      <button
+        onClick={() => {
+          const next = cloneClientJson(ids);
+          next.push("");
+          change(setValue(content, path, next));
+        }}
+      >
         添加产物 ID
       </button>
       {!ids.length && (

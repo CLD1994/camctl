@@ -8,8 +8,30 @@ import type { Video } from "../server/models";
 import { mediaGroup } from "../shared/media";
 import { isObject } from "../shared/validation";
 
+/** 展示报告给出的处理状态和阶段，不从终态推断设备调用。 */
+export function executionText(action: ReportAction): string {
+  if (action.status === "pending") return "动作尚未进入执行";
+  if (action.status === "running")
+    return "动作已开始处理；具体进度以报告结果为准";
+  if (action.status === "failed")
+    return action.error?.stage === "admission"
+      ? "受理校验失败，动作未执行"
+      : `动作失败，报告阶段：${action.error?.stage ?? "未提供"}；执行经历以具体结果为准`;
+  if (action.status === "succeeded")
+    return "动作已成功结束；完成依据见具体结果";
+  const status = action.status === "canceled" ? "动作已取消" : "动作已过期";
+  return action.result ||
+    action.outputs?.length ||
+    action.deliveries?.length ||
+    action.device_execution
+    ? `${status}；已报告的结果、产物和设备执行情况分别保留`
+    : `${status}；报告未提供开始经历`;
+}
+
 export function actionIssueText(action: ReportAction): string | undefined {
   const issue = action.error;
+  if (issue?.stage === "admission")
+    return `受理校验失败，未执行${typeof issue.details?.message === "string" ? `：${issue.details.message}` : "，展开查看输入问题"}`;
   if (action.type === "motor_control") {
     if (issue?.code === "motor_channel_unavailable")
       return "通知通道不可用，未开始发送控制通知";
@@ -21,7 +43,7 @@ export function actionIssueText(action: ReportAction): string | undefined {
   return issue
     ? typeof issue.details?.message === "string"
       ? issue.details.message
-      : "执行遇到问题，展开查看原因"
+      : `动作失败（${issue.code}，阶段：${issue.stage}），展开查看原因`
     : action.expiration_reason
       ? "已超过允许启动的时间范围"
       : undefined;

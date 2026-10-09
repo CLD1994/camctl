@@ -7,6 +7,12 @@ import {
 import { isObject } from "../shared/validation";
 import type { DraftContent, ExportedRequest } from "../server/models";
 import type { ReportPlan } from "../shared/types";
+import {
+  sources,
+  cleanupModes,
+  targets,
+  type Mode,
+} from "../shared/action-params";
 
 export type Path = Array<string | number>;
 export type EditObject = Record<string, any>;
@@ -97,6 +103,72 @@ export function setValue(
     ),
   );
   return { ...content, text: stringifyJson(root, 2), pending };
+}
+function requireCompleteParams(content: DraftContent, path: Path): void {
+  const prefix = pointer(path);
+  if (
+    Object.keys(content.pending ?? {}).some(
+      (k) =>
+        k === prefix ||
+        k.startsWith(prefix + "/") ||
+        prefix.startsWith(k + "/"),
+    )
+  )
+    throw new Error("请先修正或放弃未完成输入，再切换参数模式");
+  const params = valueAt(parseDraft(content), path);
+  if (params !== undefined && !isObject(params))
+    throw new Error("参数原值不是对象，请通过 JSON 修正或明确重新填写");
+}
+/** 用户明确选择范围后才替换引用；其他字段与编辑资料保持原值。 */
+export function changeBuiltinMode(
+  content: DraftContent,
+  path: Path,
+  type: "obtain_action_outputs" | "delete_action_outputs" | "cancel_task",
+  id: Mode["id"],
+): DraftContent {
+  requireCompleteParams(content, path);
+  const modes =
+    type === "delete_action_outputs"
+      ? cleanupModes
+      : type === "cancel_task"
+        ? targets
+        : sources;
+  const mode = modes.find((m) => m.id === id);
+  if (!mode) throw new Error("此动作不支持该界面模式");
+  if (type === "delete_action_outputs" && id === "output_ids") {
+    const next = setValue(content, [...path, "source"], undefined, true);
+    return setValue(next, [...path, "output_ids"], []);
+  }
+  let next = setValue(
+    content,
+    [...path, type === "cancel_task" ? "target" : "source"],
+    {
+      ...Object.fromEntries(Object.keys(mode.fields).map((key) => [key, ""])),
+      ...mode.constants,
+    },
+  );
+  if (
+    type === "delete_action_outputs" ||
+    (type === "obtain_action_outputs" && id !== "action_instance_id")
+  )
+    next = setValue(next, [...path, "output_ids"], undefined, true);
+  return next;
+}
+/** 精确列表与显式筛选的互斥转换由用户选择，不在显示参数时执行。 */
+export function changeObtainSelection(
+  content: DraftContent,
+  path: Path,
+  selection: "exact" | "default" | "preview" | "implicit",
+): DraftContent {
+  requireCompleteParams(content, path);
+  if (selection === "exact") {
+    const next = setValue(content, [...path, "filter"], undefined, true);
+    return setValue(next, [...path, "output_ids"], []);
+  }
+  if (selection === "implicit")
+    return setValue(content, [...path, "filter"], undefined, true);
+  const next = setValue(content, [...path, "output_ids"], undefined, true);
+  return setValue(next, [...path, "filter"], selection);
 }
 export function editValue(
   content: DraftContent,

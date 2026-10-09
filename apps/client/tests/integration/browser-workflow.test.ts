@@ -21,6 +21,7 @@ import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import type { Draft } from "../../src/server/models";
 import { makeMediaFixture } from "../helpers/media";
+import { mappedReport, reportInput } from "./fixtures";
 
 let browser: Browser;
 let fixtures: Awaited<ReturnType<typeof makeMediaFixture>>;
@@ -161,12 +162,20 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
   await append("准备清理源产物");
   await append("准备取消动作");
   await append("准备取消计划");
+  await append("准备取回计划默认产物");
+  await append("准备清理计划全部源产物");
+  await append("准备取回默认产物");
+  await append("准备清理动作全部源产物");
   const actions = JSON.parse(application.draft(draft.id).content.text).actions;
   expect(actions.map((a: { params: unknown }) => a.params)).toEqual([
     { source: { action_instance_id: "1" }, output_ids: ["4"] },
     { output_ids: ["4"] },
     { target: { action_instance_id: "1" } },
     { target: { plan_instance_id: "1" } },
+    { source: { plan_instance_id: "1" } },
+    { source: { plan_instance_id: "1" } },
+    { source: { action_instance_id: "1" } },
+    { source: { action_instance_id: "1" } },
   ]);
   expect(
     actions.every(
@@ -174,7 +183,300 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
     ),
   ).toBe(true);
   expect(JSON.stringify(application.snapshot())).toBe(snapshot);
+  for (const input of await page.getByLabel("执行时间", { exact: true }).all())
+    await input.fill("2026-10-12T10:00");
+  await page.getByTestId("export-button").click();
+  await browserExpect(
+    page.getByTestId("download-request-button"),
+  ).toBeVisible();
+  const request = application.store.all<{ body: { actions: unknown[] } }>(
+    "requests",
+  )[0];
+  expect(request.body.actions).toMatchObject(
+    actions.map((a: object) => ({ ...a, scheduled_at: expect.any(String) })),
+  );
+  expect(JSON.stringify(application.snapshot())).toBe(snapshot);
 }, 20000);
+it("报告只有历史计划身份时仍可准备范围动作并核实追加回执丢失", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("probe"));
+  const plan = report.plans![0];
+  plan.actions = undefined;
+  plan.plan_instance_id = "9223372036854775807";
+  application.applyReports([reportInput(report)]);
+  const draft = application.createDraft({
+    text: '{"name":"目标","actions":[{"name":"同步","type":"report_status","params":{"scope":"full"}}]}',
+  });
+  await page.reload();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  await page.getByRole("button", { name: "准备取回计划默认产物" }).click();
+  await browserExpect(page.getByRole("dialog")).toContainText("默认产物");
+  await choose(page.getByLabel("目标草稿"), draft.id);
+  await page.route("**/api/drafts/*/actions", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+  await browserExpect(page.getByRole("dialog")).toHaveCount(0);
+  const actions = JSON.parse(application.draft(draft.id).content.text).actions;
+  expect(actions).toHaveLength(2);
+  expect(actions[1].params).toEqual({
+    source: { plan_instance_id: "9223372036854775807" },
+  });
+  expect(application.store.all("drafts")).toHaveLength(1);
+}, 20000);
+
+it.each(["camera_take_photo", "camera_timelapse", "camera_record"] as const)(
+  "拍摄 %s 在无产物且未开始时可准备清理，失败核实后仍使用同一目标",
+  async (type) => {
+    const { page, application } = await setup();
+    await page.getByTestId("initialize-button").click();
+    const report = mappedReport(Buffer.from("probe"));
+    report.plans![0].status = "pending";
+    report.plans![0].actions = [
+      {
+        action_instance_id: "99",
+        name: "未开始拍摄",
+        type,
+        status: "pending",
+        device_id: "demo_cam0",
+        scheduled_at: "2026-10-12 01:00:00",
+        input_params: { type: "demo_fixed" },
+        effective_params: { type: "demo_fixed" },
+        policy: { max_delay_ms: 0 },
+      },
+    ];
+    application.applyReports([reportInput(report)]);
+    const draft = application.createDraft({
+      text: '{"name":"目标","actions":[]}',
+    });
+    await page.reload();
+    await page.getByTestId("tab-records").click();
+    await page.getByTestId("record-open-button").click();
+    await page.getByRole("button", { name: "展开动作 未开始拍摄" }).click();
+    await page.getByRole("button", { name: "准备清理动作全部源产物" }).click();
+    await choose(page.getByLabel("目标草稿"), draft.id);
+    let once = true;
+    await page.route("**/api/drafts/*/actions", async (route) => {
+      if (once) {
+        once = false;
+        await route.fulfill({ status: 500, json: { error: "写入失败" } });
+      } else await route.continue();
+    });
+    await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+    await browserExpect(
+      page.getByRole("button", { name: "重试同一目标追加", exact: true }),
+    ).toBeVisible();
+    expect(
+      JSON.parse(application.draft(draft.id).content.text).actions,
+    ).toEqual([]);
+    await page
+      .getByRole("button", { name: "重试同一目标追加", exact: true })
+      .click();
+    await browserExpect(page.getByRole("dialog")).toHaveCount(0);
+    const actions = JSON.parse(
+      application.draft(draft.id).content.text,
+    ).actions;
+    expect(actions).toHaveLength(1);
+    expect(actions[0].params).toEqual({ source: { action_instance_id: "99" } });
+  },
+  20000,
+);
+
+it("动作详情按受理失败与无开始依据的取消终态展示事实", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("probe"));
+  const capture = report.plans![0].actions!.find(
+    (a) => a.type === "camera_record",
+  )!;
+  report.plans![0].actions = [
+    {
+      ...capture,
+      action_instance_id: "21",
+      name: "受理失败",
+      status: "failed",
+      effective_params: undefined,
+      outputs: undefined,
+      result: undefined,
+      error: {
+        code: "action_validation_failed",
+        stage: "admission",
+        details: { message: "参数错误" },
+      },
+    },
+    {
+      ...capture,
+      action_instance_id: "22",
+      name: "取消经历未知",
+      status: "canceled",
+      outputs: undefined,
+      result: undefined,
+      error: undefined,
+    },
+  ];
+  application.applyReports([reportInput(report)]);
+  await page.reload();
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  await page.getByRole("button", { name: "展开动作 受理失败" }).click();
+  await page.getByRole("button", { name: "展开动作 取消经历未知" }).click();
+  const admission = page
+    .locator(".result-card")
+    .filter({ hasText: "受理失败" });
+  await browserExpect(admission).toContainText("未执行");
+  await browserExpect(admission).not.toContainText("执行已开始");
+  const canceled = page
+    .locator(".result-card")
+    .filter({ hasText: "取消经历未知" });
+  await browserExpect(canceled).toContainText("未提供开始经历");
+  await browserExpect(canceled).not.toContainText("执行已开始");
+}, 20000);
+
+it("原文件预览和修复成品的精确操作保持所选 ID，不扩大来源范围", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("probe"));
+  const capture = report.plans![0].actions!.find(
+    (a) => a.type === "camera_record",
+  )!;
+  const original = capture.outputs![0];
+  capture.outputs = [
+    { ...original, output_id: "4", original_name: "原文件" },
+    {
+      ...original,
+      output_id: "5",
+      original_name: "预览",
+      kind: "preview",
+      preview_of_output_id: "4",
+    },
+    {
+      ...original,
+      output_id: "6",
+      original_name: "修复成品",
+      kind: "repaired",
+      derived_from_output_id: "4",
+    },
+  ];
+  report.plans![0].actions = [capture];
+  application.applyReports([reportInput(report)]);
+  const snapshot = JSON.stringify(application.snapshot());
+  const draft = application.createDraft({
+    text: '{"name":"精确目标","actions":[]}',
+  });
+  await page.reload();
+  for (const [name, id] of [
+    ["原文件", "4"],
+    ["预览", "5"],
+    ["修复成品", "6"],
+  ]) {
+    for (const operation of ["准备取回", "准备清理源产物"]) {
+      await page.getByTestId("tab-records").click();
+      await page.getByTestId("record-open-button").click();
+      await page.getByRole("button", { name: /^展开动作 / }).click();
+      const product = page
+        .locator(".product-card")
+        .filter({ has: page.getByText(name, { exact: true }) });
+      await product.getByText("更多操作与交付记录", { exact: true }).click();
+      await product
+        .getByRole("button", { name: operation, exact: true })
+        .click();
+      await choose(page.getByLabel("目标草稿"), draft.id);
+      await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+      await browserExpect(page.getByRole("dialog")).toHaveCount(0);
+      const action = JSON.parse(
+        application.draft(draft.id).content.text,
+      ).actions.at(-1);
+      expect(action.params).toEqual(
+        operation === "准备取回"
+          ? {
+              source: { action_instance_id: capture.action_instance_id },
+              output_ids: [id],
+            }
+          : { output_ids: [id] },
+      );
+    }
+  }
+  expect(JSON.stringify(application.snapshot())).toBe(snapshot);
+}, 30000);
+
+it("交付来源缺少快照时仍按同源或跨来源选择准备精确取回", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("probe"));
+  const obtain = report.plans![0].actions!.find(
+    (a) => a.type === "obtain_action_outputs",
+  )!;
+  const delivery = obtain.deliveries![0];
+  obtain.deliveries = [
+    {
+      ...delivery,
+      delivery_id: "81",
+      output_id: "41",
+      source_action_instance_id: "91",
+      file_name: "81.mp4",
+      display_name: "来源甲一",
+    },
+    {
+      ...delivery,
+      delivery_id: "82",
+      output_id: "42",
+      source_action_instance_id: "91",
+      file_name: "82.mp4",
+      display_name: "来源甲二",
+    },
+    {
+      ...delivery,
+      delivery_id: "83",
+      output_id: "43",
+      source_action_instance_id: "92",
+      file_name: "83.mp4",
+      display_name: "来源乙",
+    },
+  ];
+  report.plans![0].actions = [obtain];
+  application.applyReports([reportInput(report)]);
+  const draft = application.createDraft({
+    text: '{"name":"选择目标","actions":[]}',
+  });
+  await page.reload();
+  const open = async () => {
+    await page.getByTestId("tab-records").click();
+    await page.getByTestId("record-open-button").click();
+    await page.getByRole("button", { name: /^展开动作 / }).click();
+  };
+  const append = async () => {
+    await choose(page.getByLabel("目标草稿"), draft.id);
+    await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+    await browserExpect(page.getByRole("dialog")).toHaveCount(0);
+  };
+  await open();
+  await page.getByLabel("选择 来源甲一").check();
+  await page.getByLabel("选择 来源甲二").check();
+  await page
+    .getByRole("button", { name: "准备取回所选产物", exact: true })
+    .click();
+  await append();
+  await open();
+  await page.getByLabel("选择 来源甲一").check();
+  await page.getByLabel("选择 来源乙", { exact: true }).check();
+  await browserExpect(
+    page.getByRole("button", { name: "准备取回所选产物", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: /准备取回来源 92 的所选/ }).click();
+  await append();
+  expect(
+    JSON.parse(application.draft(draft.id).content.text).actions.map(
+      (a: { params: unknown }) => a.params,
+    ),
+  ).toEqual([
+    { source: { action_instance_id: "91" }, output_ids: ["41", "42"] },
+    { source: { action_instance_id: "92" }, output_ids: ["43"] },
+  ]);
+}, 25000);
 it("视频上传仍被挂起时报告可以应用并查看结果", async () => {
   const { page, application } = await setup();
   await page.getByTestId("initialize-button").click();
@@ -234,10 +536,7 @@ it("未发布交付没有本地文件时不暗示文件等待送达", async () =
     .getByText("更多操作与交付记录", { exact: true })
     .all())
     await summary.click();
-  const failed = page
-    .locator(".delivery")
-    .filter({ hasText: "3.mp4" })
-    .first();
+  const failed = page.locator(".delivery").filter({ hasText: "3.mp4" }).first();
   await browserExpect(failed).toContainText("尚无本地副本");
   await browserExpect(failed).not.toContainText("等待接收");
   const published = page
