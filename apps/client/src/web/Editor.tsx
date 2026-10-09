@@ -7,7 +7,7 @@ import type { Capabilities, Issue, ParameterType } from "../shared/types";
 import { ACTION_TYPES, validatePlan } from "../shared/plan";
 import { validateParams } from "../shared/capabilities";
 import { isObject } from "../shared/validation";
-import { parseJson } from "../shared/json";
+import { parseJson, cloneClientJson } from "../shared/json";
 import {
   parseDraft,
   setValue,
@@ -483,7 +483,7 @@ function ActionEditor(
         name: update ? selected!.name : presetName,
         deviceId: action.device_id,
         actionType: action.type,
-        params: structuredClone(action.params),
+        params: cloneClientJson(action.params),
       });
       setPresetId(preset.id);
       setNotice(update ? "预设已更新" : "预设已保存");
@@ -796,7 +796,7 @@ function ActionEditor(
                           setValue(
                             content,
                             [...base, "params"],
-                            structuredClone(selected.params),
+                            cloneClientJson(selected.params),
                             false,
                             true,
                           ),

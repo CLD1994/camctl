@@ -396,7 +396,7 @@ export class Application {
   copyRequest(id: string): Draft {
     const { request_id, created_at, last_report_id, ...intent } =
       this.request(id).body;
-    return this.createDraft({ text: JSON.stringify(intent, null, 2) });
+    return this.createDraft({ text: stringifyJson(intent, 2) });
   }
   markHandoff(id: string, marked: boolean): ExportedRequest {
     return this.store.transaction(() => {

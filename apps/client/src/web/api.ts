@@ -1,7 +1,7 @@
 import type { Application } from "../server/application";
 import type { Draft, Video } from "../server/models";
 import type { Issue } from "../shared/types";
-import { parseClientJson } from "../shared/json";
+import { parseClientJson, stringifyJson } from "../shared/json";
 export type ClientState = ReturnType<Application["state"]> & {
   videos?: Video[];
   workerError?: string | null;
@@ -25,7 +25,7 @@ export async function api<T>(
     method,
     headers:
       body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : stringifyJson(body),
     cache: "no-store",
     signal: AbortSignal.timeout(30000),
   }).catch((error: unknown) => {

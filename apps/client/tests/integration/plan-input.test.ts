@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,15 +7,27 @@ import { Application } from "../../src/server/application";
 import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
 import { loadCapabilities } from "../../src/shared/capabilities";
+import {
+  parseJson,
+  parseClientJson,
+  stringifyJson,
+} from "../../src/shared/json";
+import { validatePlan } from "../../src/shared/plan";
+import { validateParams } from "../../src/shared/capabilities";
+import { createValidator } from "../../src/shared/validation";
+import { setValue } from "../../src/web/editing";
+import type { ExportedRequest, Preset } from "../../src/server/models";
+import { reportInput, mappedReport } from "./fixtures";
 import { switchActionType } from "../../src/web/action-drafts";
 
 const clean: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const f of clean.splice(0).reverse()) await f();
 });
 const time = "2026-10-10 00:00:00";
 const rounded = "1.0000000000000001";
-function setup() {
+function setup(rule: object = { type: "integer" }) {
   const dir = mkdtempSync(join(tmpdir(), "camctl-input-"));
   clean.push(() => rmSync(dir, { recursive: true, force: true }));
   const app = new Application(dir, { next: () => 9223372036854775807n });
@@ -41,7 +53,7 @@ function setup() {
                   required: ["type"],
                   properties: {
                     type: { const: "fixed" },
-                    value: { type: "integer" },
+                    value: rule,
                     note: { type: "string" },
                   },
                   additionalProperties: false,
@@ -303,4 +315,176 @@ it("直接 HTTP 预设入口按原词元验证整数，合法表示可保存", a
   expect(invalidString.status).toBe(400);
   expect(app.store.all("presets")).toEqual([]);
   expect((await send("1.0")).status).toBe(201);
+});
+
+async function http(app: Application) {
+  const files = new Files(app);
+  const server = createHttpApp(app, files).listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  clean.push(async () => {
+    await files.idle();
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
+  });
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}/api`;
+}
+function reopen(app: Application) {
+  app.store.close();
+  const next = new Application(app.store.directory, { next: () => 2n });
+  next.capabilities.active = app.capabilities.active;
+  clean.push(() => next.store.close());
+  return next;
+}
+const nonintegerRules = [
+  { not: { type: "integer" } },
+  { oneOf: [{ type: "integer" }, { type: "number" }] },
+  { if: { type: "integer" }, then: false, else: { type: "number" } },
+  { type: "number" },
+  { type: ["integer", "number"] },
+  { anyOf: [{ type: "integer" }, { type: "number" }] },
+];
+function noninteger(params: unknown, app: Application) {
+  expect(
+    validateParams("cam", "camera_record", params, app.capabilities.active),
+  ).toEqual([]);
+  const check = createValidator().compile({
+    type: "object",
+    properties: { value: { not: { type: "integer" } } },
+  });
+  expect(check(params)).toBe(true);
+  expect(typeof (params as { value: unknown }).value).toBe("number");
+}
+it.each(
+  nonintegerRules.flatMap((rule) =>
+    [rounded, "-1e-400", "1.5"].map((token) => ({ rule, token })),
+  ),
+)("固定请求保存重开与复制保留数值分支 %#", ({ rule, token }) => {
+  let app = setup(rule);
+  const draft = app.createDraft(content(token));
+  const request = app.exportDraft(draft.id, 1, draft.content);
+  app = reopen(app);
+  app.markHandoff(request.id, true);
+  const downloaded = app.downloadRequest(request.id);
+  expect(validatePlan(downloaded, app.capabilities.active)).toEqual([]);
+  noninteger((downloaded.actions as any[])[0].params, app);
+  const copy = app.copyRequest(request.id);
+  app = reopen(app);
+  const next = app.exportDraft(
+    copy.id,
+    copy.revision,
+    app.draft(copy.id).content,
+  );
+  expect(next.id).not.toBe(request.id);
+  noninteger((app.downloadRequest(next.id).actions as any[])[0].params, app);
+});
+it("HTTP 固定正文在递交、ACK 更新和状态响应中保持同一数值事实", async () => {
+  const app = setup(nonintegerRules[0]);
+  const base = await http(app);
+  const draft = app.createDraft(content(rounded));
+  const response = await fetch(`${base}/drafts/${draft.id}/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ revision: 1, content: draft.content }),
+  });
+  const request = parseClientJson(await response.text()) as ExportedRequest;
+  noninteger((request.body.actions as any[])[0].params, app);
+  const first = parseJson(
+    await (await fetch(`${base}/requests/${request.id}/download`)).text(),
+  ) as any;
+  expect(validatePlan(first, app.capabilities.active)).toEqual([]);
+  app.applyReports([reportInput(mappedReport(Buffer.from("ack")))]);
+  const marked = await fetch(`${base}/requests/${request.id}/handoff`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: '{"marked":true}',
+  });
+  noninteger(
+    (
+      (parseClientJson(await marked.text()) as ExportedRequest).body
+        .actions as any[]
+    )[0].params,
+    app,
+  );
+  const second = parseJson(
+    await (await fetch(`${base}/requests/${request.id}/download`)).text(),
+  ) as any;
+  expect(second.last_report_id).toBe("1");
+  delete second.last_report_id;
+  expect(stringifyJson(second)).toBe(stringifyJson(first));
+  const state = parseClientJson(
+    await (await fetch(`${base}/state`)).text(),
+  ) as any;
+  noninteger(state.requests[0].body.actions[0].params, app);
+});
+it("HTTP 预设创建更新响应和重开状态保留分支，非法更新不改变已存参数", async () => {
+  let app = setup(nonintegerRules[1]);
+  let base = await http(app);
+  const send = (token: string, id?: string) =>
+    fetch(`${base}/presets${id ? "/" + id : ""}`, {
+      method: id ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: `{"name":"预设","deviceId":"cam","actionType":"camera_record","params":{"type":"fixed","value":${token}}}`,
+    });
+  const created = await send(rounded);
+  expect(created.status).toBe(201);
+  const preset = parseClientJson(await created.text()) as Preset;
+  noninteger(preset.params, app);
+  const updated = await send("-1e-400", preset.id);
+  expect(updated.status).toBe(200);
+  noninteger((parseClientJson(await updated.text()) as Preset).params, app);
+  const saved = stringifyJson(app.store.get("presets", preset.id));
+  for (const token of ["1", '"\\ud800"', "true", "null"]) {
+    expect((await send(token, preset.id)).status).toBe(400);
+    expect(stringifyJson(app.store.get("presets", preset.id))).toBe(saved);
+  }
+  app = reopen(app);
+  base = await http(app);
+  const state = parseClientJson(
+    await (await fetch(`${base}/state`)).text(),
+  ) as any;
+  noninteger(state.presets[0].params, app);
+  const applied = setValue(
+    content(),
+    ["actions", 0, "params"],
+    state.presets[0].params,
+  );
+  expect(() => app.validateContent(applied)).not.toThrow();
+  noninteger((parseJson(applied.text) as any).actions[0].params, app);
+});
+it.each(["requests", "drafts"])(
+  "固定导出 %s 写入失败回滚请求与草稿",
+  (namespace) => {
+    const app = setup(nonintegerRules[0]);
+    const draft = app.createDraft(content(rounded));
+    const set = app.store.set.bind(app.store);
+    vi.spyOn(app.store, "set").mockImplementation((kind, id, value) => {
+      if (kind === namespace) throw new Error("write rejected");
+      return set(kind, id, value);
+    });
+    expect(() => app.exportDraft(draft.id, 1, draft.content)).toThrow(
+      "write rejected",
+    );
+    expect(app.store.all("requests")).toEqual([]);
+    expect(app.draft(draft.id)).toEqual(draft);
+  },
+);
+it("预设写入失败保留已有预设且不留下新预设", () => {
+  const app = setup(nonintegerRules[0]);
+  const input = {
+    name: "预设",
+    deviceId: "cam",
+    actionType: "camera_record",
+    params: parseJson(`{"type":"fixed","value":${rounded}}`),
+  };
+  const preset = app.savePreset(input);
+  const prior = stringifyJson(app.store.all("presets"));
+  vi.spyOn(app.store, "set").mockImplementation(() => {
+    throw new Error("write rejected");
+  });
+  expect(() => app.savePreset({ ...input, id: preset.id })).toThrow(
+    "write rejected",
+  );
+  expect(() => app.savePreset(input)).toThrow("write rejected");
+  expect(stringifyJson(app.store.all("presets"))).toBe(prior);
 });

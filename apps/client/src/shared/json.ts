@@ -54,16 +54,29 @@ export function displayNumber(
     ? token
     : String(value);
 }
-/** 普通字段仍为 number；仅序列化阶段用原词元避免编辑改写数值事实。 */
+/** JSON 根片段的数字仍从原父容器取得词元；其他值使用合法 JSON 编码。 */
+export function displayJsonValue(
+  parent: unknown,
+  key: string | number,
+  value: unknown,
+  space?: number,
+): string {
+  return typeof value === "number"
+    ? displayNumber(parent, key, value)
+    : stringifyJson(value, space);
+}
+/** 由 JSON.stringify 或 HTTP 框架以实际父容器调用，保留原数字词元。 */
+export function preservingJsonReplacer(
+  this: unknown,
+  key: string,
+  current: unknown,
+): unknown {
+  const token = originalNumberToken(this, key, current);
+  return token === undefined ? current : rawJson.rawJSON(token);
+}
+/** 普通字段仍为 number；仅序列化阶段用原词元避免改写数值事实。 */
 export function stringifyJson(value: unknown, space?: number): string {
-  return JSON.stringify(
-    value,
-    function (key, current) {
-      const token = originalNumberToken(this, key, current);
-      return token === undefined ? current : rawJson.rawJSON(token);
-    },
-    space,
-  );
+  return JSON.stringify(value, preservingJsonReplacer, space);
 }
 
 /** 只保护电机整数契约；其他参数继续使用既有数值解析。 */

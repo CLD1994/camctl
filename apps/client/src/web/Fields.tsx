@@ -10,7 +10,7 @@ import {
   type Path,
 } from "./editing";
 import { sameValue, optionLabel } from "./parameter-options";
-import { displayNumber, stringifyJson } from "../shared/json";
+import { displayNumber, displayJsonValue } from "../shared/json";
 export function JsonField({
   content,
   path,
@@ -24,7 +24,8 @@ export function JsonField({
   change: (c: DraftContent) => void;
   required?: boolean;
 }) {
-  const value = valueAt(parseDraft(content), path),
+  const root = parseDraft(content),
+    value = valueAt(root, path),
     pending = content.pending?.[pointer(path)];
   return (
     <label className="field">
@@ -37,7 +38,15 @@ export function JsonField({
         spellCheck={false}
         readOnly={pendingBlocks(content, path)}
         value={
-          pending?.text ?? (value === undefined ? "" : stringifyJson(value, 2))
+          pending?.text ??
+          (value === undefined
+            ? ""
+            : displayJsonValue(
+                valueAt(root, path.slice(0, -1)),
+                path.at(-1)!,
+                value,
+                2,
+              ))
         }
         onChange={(e) => {
           change(editValue(content, path, e.target.value, "json"));
@@ -126,7 +135,14 @@ export function Field({
               readOnly={pendingBlocks(content, path)}
               value={
                 pending?.text ??
-                (value === undefined ? "" : stringifyJson(value, 2))
+                (value === undefined
+                  ? ""
+                  : displayJsonValue(
+                      valueAt(root, path.slice(0, -1)),
+                      path.at(-1)!,
+                      value,
+                      2,
+                    ))
               }
               onChange={(e) =>
                 change(editValue(content, path, e.target.value, "json"))
@@ -226,7 +242,14 @@ export function Field({
               readOnly={pendingBlocks(content, path)}
               value={
                 pending?.text ??
-                (value === undefined ? "" : stringifyJson(value, 2))
+                (value === undefined
+                  ? ""
+                  : displayJsonValue(
+                      valueAt(root, path.slice(0, -1)),
+                      path.at(-1)!,
+                      value,
+                      2,
+                    ))
               }
               onChange={(e) =>
                 change(editValue(content, path, e.target.value, "json"))
@@ -236,8 +259,13 @@ export function Field({
         </label>
         {showRaw && (
           <small className="danger-text">
-            原值 {JSON.stringify(value)} 无法用此控件表示，请重新填写或在 JSON
-            中修正。
+            原值{" "}
+            {displayJsonValue(
+              valueAt(root, path.slice(0, -1)),
+              path.at(-1)!,
+              value,
+            )}{" "}
+            无法用此控件表示，请重新填写或在 JSON 中修正。
           </small>
         )}
         {enumeration && allowed?.length === 0 && !choicesBlocked && (

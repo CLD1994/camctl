@@ -9,7 +9,11 @@ import { AppError, errorMessage } from "./models";
 import { DataError } from "./database";
 import { byteRange } from "./range";
 import { RequestLifecycle } from "./lifecycle";
-import { parseClientJson } from "../shared/json";
+import {
+  parseClientJson,
+  preservingJsonReplacer,
+  stringifyJson,
+} from "../shared/json";
 
 export function createHttpApp(
   application: Application,
@@ -18,6 +22,7 @@ export function createHttpApp(
 ) {
   const app = express();
   app.disable("x-powered-by");
+  app.set("json replacer", preservingJsonReplacer);
   const tracked =
     (
       handler: (
@@ -146,11 +151,8 @@ export function createHttpApp(
     res
       .type("application/json")
       .send(
-        JSON.stringify(
-          application.downloadRequest(String(req.params.id)),
-          null,
-          2,
-        ) + "\n",
+        stringifyJson(application.downloadRequest(String(req.params.id)), 2) +
+          "\n",
       );
   });
   app.post("/api/requests/:id/copy", (req, res) =>

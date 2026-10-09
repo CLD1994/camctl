@@ -8,7 +8,7 @@ import {
   closeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { parseJson, parseClientJson } from "../shared/json";
+import { parseJson, parseClientJson, stringifyJson } from "../shared/json";
 import { isCanonicalId, isPositive, isUint } from "../shared/validation";
 import { validateReport } from "../domain/reports";
 import type { StatusReport } from "../shared/types";
@@ -193,7 +193,7 @@ export class Store {
       .prepare(
         "INSERT INTO records(namespace,id,value) VALUES(?,?,?) ON CONFLICT(namespace,id) DO UPDATE SET value=excluded.value",
       )
-      .run(namespace, id, JSON.stringify(value));
+      .run(namespace, id, stringifyJson(value));
   }
   remove(namespace: string, id: string): void {
     this.db()

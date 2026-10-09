@@ -1,3 +1,6 @@
+import { validatePlan } from "../../src/shared/plan";
+import { validateParams } from "../../src/shared/capabilities";
+import { stringifyJson, parseJson } from "../../src/shared/json";
 import { choose, readOptions } from "./select-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
@@ -117,6 +120,128 @@ it("相机数字与参数 JSON 保留原词元且预设不会接受舍入后的�
   ).toBeDisabled();
   expect(app.store.all("presets")).toEqual([]);
 }, 20000);
+it("合法非整数预设保存、切换、重载与回执恢复保持原词元", async () => {
+  const token = "1.0000000000000001";
+  const { page, app } = await setup(
+    JSON.stringify({
+      devices: [
+        {
+          device_id: "cam",
+          driver_id: "demo",
+          actions: [
+            {
+              type: "camera_record",
+              parameter_types: [
+                {
+                  type: "fixed",
+                  name: "固定",
+                  description: "测试",
+                  preview_supported: false,
+                  schema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
+                    type: "object",
+                    required: ["type"],
+                    additionalProperties: false,
+                    properties: {
+                      type: { const: "fixed" },
+                      value: {
+                        oneOf: [{ type: "integer" }, { type: "number" }],
+                        title: "数值",
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  app.createDraft({
+    text: `{"name":"精确输入","actions":[{"name":"拍摄","type":"camera_record","device_id":"cam","scheduled_at":"2026-10-10 00:00:00","params":{"type":"fixed","value":${token}},"policy":{"max_delay_ms":0}}]}`,
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await page.getByText("拍摄参数预设", { exact: true }).click();
+  await page.getByLabel("预设名称", { exact: true }).fill("非整数");
+  await page.getByRole("button", { name: "保存为新预设", exact: true }).click();
+  await check(page.locator(".preset-box")).toContainText("预设已保存");
+  const preset = app.store.all<Preset>("presets")[0];
+  expect(
+    validateParams(
+      "cam",
+      "camera_record",
+      preset.params,
+      app.capabilities.active,
+    ),
+  ).toEqual([]);
+  expect(stringifyJson(preset.params)).toContain(token);
+  await choose(page.getByLabel("动作类型", { exact: true }), "report_status");
+  await choose(page.getByLabel("动作类型", { exact: true }), "camera_record");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await page.getByText("拍摄参数预设", { exact: true }).click();
+  await choose(page.getByLabel("已有预设"), preset.id);
+  await page.getByLabel("数值 (value)", { exact: true }).fill("1.5");
+  await page.getByRole("button", { name: "应用预设", exact: true }).click();
+  await check(page.getByLabel("数值 (value)", { exact: true })).toHaveValue(
+    token,
+  );
+  await page.getByRole("button", { name: "更新所选预设", exact: true }).click();
+  await check(page.locator(".preset-box")).toContainText("预设已更新");
+  await page.route("**/api/presets", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  await page.getByLabel("预设名称", { exact: true }).fill("回执待核实");
+  await page.getByRole("button", { name: "保存为新预设", exact: true }).click();
+  await check(page.locator(".preset-box")).toContainText("尚未确认");
+  expect(await readOptions(page.getByLabel("已有预设"))).toHaveLength(3);
+  for (const saved of app.store.all<Preset>("presets")) {
+    expect(
+      validateParams(
+        "cam",
+        "camera_record",
+        saved.params,
+        app.capabilities.active,
+      ),
+    ).toEqual([]);
+    expect(stringifyJson(saved.params)).toContain(token);
+  }
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  await page.getByTestId("export-button").click();
+  await check.poll(() => app.store.all("requests").length).toBe(1);
+  const request = app.store.all<ExportedRequest>("requests")[0];
+  app.store.close();
+  const recovered = new Application(app.store.directory, { next: () => 2n });
+  recovered.capabilities.active = app.capabilities.active;
+  try {
+    const first = stringifyJson(recovered.downloadRequest(request.id));
+    expect(
+      validatePlan(parseJson(first), recovered.capabilities.active),
+    ).toEqual([]);
+    expect(first).toContain(token);
+    recovered.applyReports([reportInput(mappedReport(Buffer.from("ack")))]);
+    recovered.markHandoff(request.id, true);
+    const { last_report_id, ...fixed } = recovered.downloadRequest(request.id);
+    expect(last_report_id).toBe("1");
+    expect(stringifyJson(fixed)).toBe(first);
+    const copy = recovered.copyRequest(request.id);
+    const exported = recovered.exportDraft(
+      copy.id,
+      copy.revision,
+      copy.content,
+    );
+    expect(validatePlan(exported.body, recovered.capabilities.active)).toEqual(
+      [],
+    );
+    expect(stringifyJson(exported.body)).toContain(token);
+  } finally {
+    recovered.store.close();
+  }
+}, 25000);
 it("电机表单与 JSON 共用位置，保存恢复后导出并展示通知成功", async () => {
   const { page, app } = await setup('{"devices":[]}');
   await page.getByTestId("new-draft-button").click();
