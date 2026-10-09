@@ -227,7 +227,7 @@ def fresh_closed_runtime(owned, world, binding):
         recording_anchors=anchors)
     runtime = factory(owned, "cam-1")
     assert runtime is not None
-    assert runtime.pending_start_results == runtime.pending_recording_results == runtime.pending_result_closes == {}
+    assert runtime.pending_start_results == runtime.pending_capture_completions == runtime.pending_result_closes == {}
     assert runtime.pending_file_observations == runtime.pending_media_results == {}
     assert runtime.pending_read_results == runtime.pending_read_business == runtime.pending_read_ends == {}
     assert runtime.continuing_read_tickets == {}

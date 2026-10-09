@@ -67,7 +67,7 @@ async def test_recording_cancel_owner_finishes_original_results_before_cancel_su
         original_attempts = _attempts(owned)
         assert len(original_attempts) == 4  # 已结束的 START、STOP、RESULTS 和实际 READ。
         assert not runtime.pending_start_results
-        assert not runtime.pending_recording_results
+        assert not runtime.pending_capture_completions
         assert listed == [1] and len(reader.requests) == len(ends) == 1
         assert tools.calls == ["probe"]
 
@@ -95,7 +95,7 @@ async def test_recording_cancel_owner_finishes_original_results_before_cancel_su
             assert len(inputs) == 1 and outcomes[0].kind is DbOutcomeKind.UNKNOWN
             request, original_key = inputs[0]
             assert request.run_id == run_id and request.capture.occurred_at == wall[0]
-            held = runtime.pending_recording_results[1]
+            held = runtime.pending_capture_completions[1]
             assert (held.request, held.key) == (request, original_key)
             assert owned.connection.in_transaction
             owned.connection.close()
@@ -131,7 +131,7 @@ async def test_recording_cancel_owner_finishes_original_results_before_cancel_su
             await context.restricted_flows["winddown"](context)
 
         assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (6, 1)
-        assert not deps.capture_recording_results
+        assert not deps.capture_completions
         if held_decision:
             assert inputs == [(request, original_key), (request, original_key)]
             assert outcomes[1].kind is DbOutcomeKind.COMPLETED, outcomes[1].error

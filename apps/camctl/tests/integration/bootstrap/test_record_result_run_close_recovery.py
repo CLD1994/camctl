@@ -52,7 +52,7 @@ async def _held_run_close(tmp_path, monkeypatch, after, *, with_file=True):
         deps, context, factory_calls = await _default_context(tmp_path, monkeypatch)
         runtime.pending_result_closes = deps.capture_result_closes
         runtime.pending_start_results = deps.capture_call_results
-        runtime.pending_recording_results = deps.capture_recording_results
+        runtime.pending_capture_completions = deps.capture_completions
         runtime.pending_file_observations = deps.capture_file_observations
         runtime.retry_gate = deps.capture_retry_gate
         activity_id, = owned.connection.execute(
@@ -268,7 +268,7 @@ async def test_reopened_record_without_session_request_consumes_durable_unconfir
     async with _held_run_close(tmp_path, monkeypatch, True, with_file=with_file) as world:
         # 新消费者没有旧会话 holder；只使用已提交流程和真实 v1 文件事实。
         reopened_runtime = replace(world.runtime, owned=world.owned,
-            pending_result_closes={}, pending_recording_results={}, pending_start_results={},
+            pending_result_closes={}, pending_capture_completions={}, pending_start_results={},
             pending_file_observations={}, listing_cache=None, recording_state=None)
         reopened_runtime.wall_us = lambda: world.formed_at + 2_000_000
         await world.advance(world.action_id, reopened_runtime)

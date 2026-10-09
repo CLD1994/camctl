@@ -117,7 +117,7 @@ async def test_canceled_timelapse_binding_failure_registers_retained_files_atomi
         assert owned is opened[-1] and device_id == "cam-1"
         runtime = factory(owned, device_id)
         assert runtime is not None
-        assert runtime.pending_start_results == runtime.pending_recording_results == runtime.pending_result_closes == {}
+        assert runtime.pending_start_results == runtime.pending_capture_completions == runtime.pending_result_closes == {}
         assert runtime.pending_file_observations == runtime.pending_media_results == {}
         assert runtime.pending_read_results == runtime.pending_read_business == runtime.pending_read_ends == {}
         assert runtime.continuing_read_tickets == {}

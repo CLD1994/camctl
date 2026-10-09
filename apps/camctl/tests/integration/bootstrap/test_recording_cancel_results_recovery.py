@@ -67,7 +67,7 @@ async def test_default_entry_retries_original_recording_cancel_after_unknown(
         run_id, before_run = _original_results(owned)
         assert (before_run["status"], before_run["attempts_used"], before_run["retry_wait_required"]) == (
             int(enum_for("operation_runs.status").ACTIVE), 1, 1)
-        assert not runtime.pending_start_results and not runtime.pending_recording_results
+        assert not runtime.pending_start_results and not runtime.pending_capture_completions
         assert runtime.results.calls == [1] and tools.calls == ["probe"]
         assert len(reader.requests) == len(ends) == 1
         assert all(end.stopped is True and end.error is None and end.bytes_read == len(_CONTENT) for end in ends)
@@ -90,7 +90,7 @@ async def test_default_entry_retries_original_recording_cancel_after_unknown(
         inputs, receipts, faults = [], [], []
 
         def save(repository, request, key, current):
-            pending = runtime.pending_recording_results[action_id]
+            pending = runtime.pending_capture_completions[action_id]
             assert (pending.request, pending.key) == (request, key)
             assert isinstance(request, FinishCanceledCapture)
             inputs.append((request, key))
@@ -113,7 +113,7 @@ async def test_default_entry_retries_original_recording_cancel_after_unknown(
         request, key = inputs[0]
         assert request.action_id == action_id and request.occurred_at == wall[0]
         assert request.unstarted is False and not request.drafts and request.catalog_facts is None
-        original_holder = runtime.pending_recording_results[action_id]
+        original_holder = runtime.pending_capture_completions[action_id]
         assert (original_holder.request, original_holder.key) == (request, key)
         owned.connection.close()
         reopened = open_existing(roots.staging.parent / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
@@ -143,7 +143,7 @@ async def test_default_entry_retries_original_recording_cancel_after_unknown(
         def saved():
             assert inputs == [(request, key), (request, key)]
             assert receipts[1].kind is DbOutcomeKind.COMPLETED, receipts[1].error
-            assert not runtime.pending_recording_results
+            assert not runtime.pending_capture_completions
             assert reopened.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (
                 int(enum_for("actions.status").CANCELED),)
             assert _snapshot(reopened, "operation_runs", run_id) == {

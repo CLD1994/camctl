@@ -34,6 +34,7 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.owned.connection = mocker.create_autospec(sqlite3.Connection, instance=True)
     cursor = mocker.create_autospec(sqlite3.Cursor, instance=True)
     cursor.fetchone.return_value = None
+    cursor.fetchall.return_value = []
     runtime.owned.connection.execute.return_value = cursor
     runtime.binding_check = None
     runtime.timelapse_deadlines = {}
@@ -150,11 +151,12 @@ async def test_unstarted_cancel_finishes_locally_without_device_control(mocker, 
     runtime.capture.finish_canceled_capture.return_value = DbOutcome(
         DbOutcomeKind.COMPLETED, CaptureResult(action_status=6, plan_status=1, output_ids=()))
     runtime.capture.canceled_recording_results.return_value = ()
-    runtime.pending_recording_results = {}
+    runtime.pending_capture_completions = {}
     runtime.retry_gate = None
-    runtime.resume_recording_results.side_effect = lambda identity: CaptureRuntime.resume_recording_results(
+    runtime.resume_capture_completions.side_effect = lambda identity: CaptureRuntime.resume_capture_completions(
         runtime, identity)
-    mocker.patch("camctl.capture.handlers._settle_input_read_runs")
+    runtime.save_capture_completion.side_effect = lambda command: CaptureRuntime.save_capture_completion(
+        runtime, command)
     await capture_handler(action_type)(2, runtime)
     runtime.capture.finish_canceled_capture.assert_called_once()
     command = runtime.capture.finish_canceled_capture.call_args.args[0]

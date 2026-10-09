@@ -138,7 +138,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 生产入口审计须分别列出：本阶段 canceled timelapse＋CLOSED；一般 photo/timelapse ACTIVE 结果及普通失败的完整文件；已有本地 CLOSED 分支；录像的独立取消内容规则；内部 READ 复合业务、restricted/residual/winddown 接线。前两类共享文件输入边界，后几类保持既有资格和事务规则，不增加新业务入口。
 
-`FinishCapture`／`FinishBindingFailure` 等消费者在 UNKNOWN 后持有完整申请的共同责任仍未闭合，留待统一保存申请阶段；本计划不新增绑定专属 holder。仓储原 key 复验绿色只证明给定原完整输入能够核实保存，不能证明 handler 在 UNKNOWN 后仍持有原输入和时刻。ENDED 加开放 STOP 的取消发起者闭合也保持独立。
+`FinishCapture`／`FinishBindingFailure` 等消费者在 UNKNOWN 后持有完整申请的共同责任由[完整申请保存恢复](2026-10-09-camctl-capture-completion-save-recovery.md#实施与验证记录2026-10-09)实现和验证，使用一个共有持有者。仓储原 key 复验与消费者继续持有原输入及时刻的证据分别记录。ENDED 加开放 STOP 的取消发起者闭合保持独立。
 
 普通 UNSATISFIED reason、应急错误身份、ResultSet 原申请输入身份及 RESULTS v2 均不作为本计划前置或决策对象。共同 `FinishCaptureCommand` 的其他完整输入重送缺口须如实列出，不能以本新增有限申请的严格核对宣称全部消费者完成。阶段交付仅对应实际源码和门禁，不代表 full app 验收。
 
@@ -176,6 +176,6 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 | `test_capture_failure_activity_identity::test_closed_unsatisfied_timelapse_reports_actual_activity_without_query`；`test_result_confirmation::TestResultSetConfirmation::test_unsatisfied_saves_known_failure_and_keeps_occupancy`；`test_result_consumer_saves::test_closed_result_consumers_use_saved_input_without_device_query[timelapse]`；`test_result_file_recovery::test_closed_latest_error_keeps_previously_registered_file_input[timelapse]` | 构造 UNSATISFIED 输入时错误缺 stage，被公共结构校验拒绝；正式错误 reason 及输入修正按结果错误计划推进，不补猜测值。 |
 | `test_emergency::test_zero_attempts_unknown_config_saves_not_attempted`；`test_later_session_preserves_exact_old_error_and_omits_unchanged_activity[NOT_ATTEMPTED]`；同入口 `[UNCONFIRMED]`；`test_unconfirmed_with_attempts_saves_unconfirmed`；`test_unrecorded_emergency_does_not_release` | 应急生产错误缺 details，被活动结果守卫拒绝；正式错误身份与详情仍待决定。五项与结果错误计划的既有记录一致。 |
 
-一般 photo/timelapse ACTIVE 实际结果和普通绑定失败的文件输入已经进入共同生产者，完成源码分类审计，但本阶段没有新增该分区的独立端到端矩阵；最新观察尚未登记也只核到源码责任。原申请消费者 UNKNOWN 持有、共同 FinishCapture 其他重送输入、ENDED 加开放 STOP 汇总和 ResultRunClose 的录像类型限制继续独立跟踪。仓储 UNKNOWN 反例由调用者保存完整原申请，不能代替这些消费者责任。
+一般 photo/timelapse ACTIVE 实际结果和普通绑定失败的文件输入已经进入共同生产者，完成源码分类审计，但本阶段没有新增该分区的独立端到端矩阵；最新观察尚未登记也只核到源码责任。原申请消费者 UNKNOWN 持有见[完整申请保存恢复](2026-10-09-camctl-capture-completion-save-recovery.md#实施与验证记录2026-10-09)；共同 FinishCapture 其他重送输入、ENDED 加开放 STOP 汇总和 ResultRunClose 的录像类型限制继续独立跟踪。本计划中的仓储 UNKNOWN 反例由调用者保存完整原申请，不能代替消费者责任的证据。
 
 独立只读审查核两处生产边界、三个草稿消费者、完整目录与原计划恢复、真实公开前置和已取得日志，未发现本阶段生产阻断。阶段提交只保存本计划限定的实现与验证，不声明全部拍摄流程或完整 apps/camctl 已通过。

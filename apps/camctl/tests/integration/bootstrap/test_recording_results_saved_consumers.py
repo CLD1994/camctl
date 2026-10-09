@@ -127,10 +127,10 @@ async def test_default_entry_confirms_original_recording_transaction_after_termi
         assert outcomes[1].kind is expected, outcomes[1].error
         assert len(opened) == 1 and len(factory_calls) == 1
         if confirmation == "saved":
-            assert not runtime.pending_recording_results
+            assert not runtime.pending_capture_completions
         else:
             assert unavailable[0].key_reads == 1
-            pending = runtime.pending_recording_results[1]
+            pending = runtime.pending_capture_completions[1]
             assert (pending.request, pending.key) == (request, key)
         assert tuple(reopened.connection.iterdump()) == before
         assert len(reader.requests) == 1 and tuple(driver.calls) == before_calls

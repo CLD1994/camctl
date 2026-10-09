@@ -53,13 +53,13 @@ def residual_flow(capture_factory, *, resume_media_results=None, resume_file_obs
 
 
 async def _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
-                                   resume_read_results=None, resume_recording_results=None):
+                                   resume_read_results=None, resume_capture_completions=None):
     """已有文件与媒体事实先保存；失败保留各自责任并停止业务步骤。"""
     try:
         if resume_read_results is not None:
             resume_read_results(owned)
-        if resume_recording_results is not None:
-            resume_recording_results(owned)
+        if resume_capture_completions is not None:
+            resume_capture_completions(owned)
         if resume_file_observations is not None:
             resume_file_observations(owned)
         if resume_media_results is not None:
@@ -336,7 +336,7 @@ def cancel_flow(
     work_files: Any = None,
     resume_media_results=None,
     resume_file_observations=None,
-    resume_recording_results=None,
+    resume_capture_completions=None,
 ) -> Callable[[Any], Any]:
     """构造推进取消动作的会话流程。
 
@@ -379,7 +379,7 @@ def cancel_flow(
         owned = context.open_connection()
         try:
             await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
-                                            resume_recording_results=resume_recording_results)
+                                            resume_capture_completions=resume_capture_completions)
             repository = CancellationRepository(motor_permits=motor_permits)
             occurred = context.clock.utc_micros
             withdrawal_context = WithdrawalContext(owned, OutputsRepository(), ready,

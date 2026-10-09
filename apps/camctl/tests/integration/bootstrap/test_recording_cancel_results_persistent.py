@@ -74,7 +74,7 @@ async def test_default_discovers_canceled_recording_results_without_session_hold
                 "SELECT e.event_type FROM actions a JOIN history_events e ON e.id=a.last_event_id"
                 " WHERE a.id=1").fetchone() == (12,)
             _same_id, before_run = _original_results(owned)
-        assert not deps.capture_recording_results
+        assert not deps.capture_completions
         assert _original_results(owned) == (run_id, before_run)
         attempts = _attempts(owned)
         history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
@@ -94,7 +94,7 @@ async def test_default_discovers_canceled_recording_results_without_session_hold
                 assert observer.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()[:len(history)] == history
                 assert observer.connection.execute("SELECT * FROM recording_processing ORDER BY id").fetchall() == media
                 assert observer.connection.execute("SELECT * FROM device_files ORDER BY id").fetchall() == files
-                assert not deps.capture_recording_results
+                assert not deps.capture_completions
                 assert (tuple(driver.calls), tuple(tools.calls), tuple(factory_calls)) == calls
                 assert len(reader.requests) == len(ends) == 1
             finally:

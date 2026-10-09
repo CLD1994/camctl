@@ -76,7 +76,7 @@ async def test_default_capture_consumes_closed_unconfirmed_after_binding_change(
         runtime = factory(owned, device_id)
         assert runtime is not None
         # 原 world 不含旧 runtime；这些是实际工厂新建的空会话集合。
-        assert runtime.pending_start_results == runtime.pending_recording_results == runtime.pending_result_closes == {}
+        assert runtime.pending_start_results == runtime.pending_capture_completions == runtime.pending_result_closes == {}
         assert runtime.pending_file_observations == runtime.pending_media_results == {}
         assert runtime.pending_read_results == runtime.pending_read_business == runtime.pending_read_ends == {}
         assert runtime.continuing_read_tickets == {}

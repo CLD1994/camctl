@@ -133,7 +133,7 @@ async def test_default_entry_resolves_uncommitted_recording_decision_from_cancel
             assert inputs == [(request, key), (request, key)]
             assert outcomes[1].kind is DbOutcomeKind.COMPLETED, outcomes[1].error
             assert outcomes[1].value.disposition.value == ("saved" if terminal is None else "retired")
-            assert not runtime.pending_recording_results
+            assert not runtime.pending_capture_completions
             events = saved_transaction_events(reopened.connection, key)
             if terminal is None:
                 assert events is not None and {event["occurred_at"] for event in events} == {request.capture.occurred_at}

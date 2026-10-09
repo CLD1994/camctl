@@ -152,8 +152,7 @@ async def test_closed_terminal_projection_rolls_back_outputs_and_action_together
         runtime.capture = receipts
         advance = capture_handler(world.handler)
 
-        expected_failure = AssertionError if consumer == "canceled_timelapse" else ConsistencyError
-        with pytest.raises(expected_failure):
+        with pytest.raises(ConsistencyError):
             await advance(world.action_id, runtime)
 
         assert fault.hits == 1 and not fault.armed
