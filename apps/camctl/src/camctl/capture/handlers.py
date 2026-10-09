@@ -269,7 +269,7 @@ class PendingResultCheckClose:
     """有限核实耗尽的完整决定；保存恢复沿用原 key 和 T1。"""
 
     key: OperationKey
-    request: ResultSetSave
+    request: ResultSetSave | ResultRunClose
 
 
 def resume_result_check_closes(
@@ -284,8 +284,15 @@ def resume_result_check_closes(
             continue
         if pending.request.action_id != identity:
             raise ConsistencyError("原核实耗尽申请与所属动作不一致")
-        receipt = repository.close_result_check_unconfirmed(pending.request, pending.key, owned)
-        if receipt.kind is not DbOutcomeKind.COMPLETED or receipt.value is None:
+        if isinstance(pending.request, ResultSetSave):
+            receipt = repository.close_result_check_unconfirmed(pending.request, pending.key, owned)
+            complete = receipt.kind is DbOutcomeKind.COMPLETED and receipt.value is not None
+        elif isinstance(pending.request, ResultRunClose):
+            receipt = repository.close_unconfirmed_result_run(pending.request, pending.key, owned)
+            complete = receipt.kind is DbOutcomeKind.COMPLETED
+        else:
+            raise ConsistencyError("原核实耗尽申请类型无效")
+        if not complete:
             raise ConsistencyError(f"原核实耗尽申请未可靠保存，完整申请仍持有: {receipt.error}")
         if retry_gate is not None:
             activity = _activity_id_of_connection(owned.connection, identity)
@@ -2602,11 +2609,11 @@ async def _advance_recording_outcome(
             registered = _register_listing(context, action_id, saved)
             if not unconfirmed:
                 # 录像仅收场核实责任，不生成延时摄影的集合结论。
-                receipt = context.capture.close_unconfirmed_result_run(
-                    ResultRunClose(
-                        action_id=action_id, occurred_at=context.wall_us()),
-                    new_operation_key(), context.owned)
-                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+                if action_id not in context.pending_result_closes:
+                    context.pending_result_closes[action_id] = PendingResultCheckClose(
+                        new_operation_key(), ResultRunClose(
+                            action_id=action_id, occurred_at=context.wall_us()))
+                context.resume_result_check_closes(action_id)
             _finish_capture(context, action_id, saved.entries, FileKind.VIDEO,
                             registered=registered, failure=_unconfirmed_failure(context, action_id))
             return

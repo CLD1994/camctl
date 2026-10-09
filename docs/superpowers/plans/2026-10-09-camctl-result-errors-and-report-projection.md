@@ -303,11 +303,11 @@ ResultRunClose 仓储的正常完整响应为 COMPLETED 且 value=None；这表�
 
 预计修改生产 `capture/handlers.py` 的申请类型、共同恢复和录像耗尽形成点；既有 `bootstrap/lifecycle.py` 及 `capture_assembly.py` 的同一集合接线需要实际复核，只有发现未覆盖时才修改。反例分别放 capture 的真实处理器恢复与 bootstrap 的默认恢复目录，不把数据库集成测试放在 unit。
 
-- [ ] 建立真实公开录像受理、START、STOP、完整 OTHER 文件或未完成 VIDEO 及一次 RESULTS 后预算耗尽的前置。完整 VIDEO 不作为耗尽前提，因为它可以满足录像文件要求并转入媒体或成功处理。实际仓储首写取得 COMMIT 前／后 UNKNOWN，关闭旧连接后以 fresh Owned 确认原 G。测试 spy 只控制 COMMIT 协议故障，不能因预期 holder 尚不存在而阻止第一次真实保存。
-- [ ] 直接处理器恢复分别核原申请、key、决定时刻、原实际次数和文件；原 G 可靠之前没有依赖动作收尾，可靠后不增加任何设备调用。另核没有会话申请的持久 UNCONFIRMED 恢复，不能为这种重启伪造旧申请。
-- [ ] 在五个默认入口分别覆盖 COMMIT 前／后。恢复到业务钟或候选之前检查原 G、原申请释放和原等待清除；再次 UNKNOWN／ROLLED_BACK 时原申请仍持有，factory、业务候选和设备调用保持未触发。
-- [ ] 根确认有效红后实现共同请求分类与录像耗尽持有。既有 ResultSetSave 的非空响应检查、原事务失败分类及恢复顺序保持；不通过类型默认值将缺响应解释为成功。
-- [ ] 根按目录独占运行新反例、既有照片／延时耗尽与录像原键门禁及全量单元，独立核源码、原 H 和调用次数。阶段完成后整体提交当前变更，未决错误身份与普通集合结束继续分别推进。
+- [x] 建立真实公开录像受理、START、STOP、完整 OTHER 文件及一次 RESULTS 后预算耗尽的前置。完整 VIDEO 不作为耗尽前提，因为它可以满足录像文件要求并转入媒体或成功处理。实际仓储首写取得 COMMIT 前／后 UNKNOWN，关闭旧连接后以 fresh Owned 确认原 G。测试 spy 只控制 COMMIT 协议故障，不能因预期 holder 尚不存在而阻止第一次真实保存。
+- [x] 直接处理器恢复分别核原申请、key、决定时刻、原实际次数和文件；原 G 可靠之前没有依赖动作收尾，可靠后不增加任何设备调用。另核没有会话申请的持久 UNCONFIRMED 恢复，不能为这种重启伪造旧申请。
+- [x] 在五个默认入口分别覆盖 COMMIT 前／后。恢复到业务钟或候选之前检查原 G、原申请释放和原等待清除；再次 UNKNOWN／ROLLED_BACK 时原申请仍持有，factory、业务候选和设备调用保持未触发。
+- [x] 根确认有效红后实现共同请求分类与录像耗尽持有。既有 ResultSetSave 的非空响应检查、原事务失败分类及恢复顺序保持；不通过类型默认值将缺响应解释为成功。
+- [x] 根按目录独占运行新反例、既有照片／延时耗尽与录像原键门禁及全量单元，独立核源码、原 H 和调用次数。阶段完成后整体提交当前变更，未决错误身份与普通集合结束继续分别推进。
 
 动作终态、取消及绑定变化的真实前置和后续业务资格由独立源码审查核实；遇到正式契约未覆盖的相互竞争结果时，只停止该分区，不能把原申请静默退役或改成新的决定。
 
@@ -316,3 +316,13 @@ ResultRunClose 仓储的正常完整响应为 COMPLETED 且 value=None；这表�
 根独占运行，环境为 Linux 开发容器、Python 3.11.16。`/tmp/camctl-goal-record-run-close-unit-red.log` 为 5 failed、9 passed、0.37s；共同恢复把 ResultRunClose 送到 ResultSetSave 端口，正常的空业务响应尚不能释放录像申请。`/tmp/camctl-goal-record-run-close-bootstrap-red.log` 为 22 failed、2 passed、12.74s；五个默认入口没有核原申请，直接录像重入在原 COMMIT 缺失时换 key 和时刻，原 COMMIT 已存在时没有确认旧申请。两个无会话 holder 的持久 UNCONFIRMED 控制通过。所有公开受理、START、STOP、实际 RESULTS 和首次保存故障前置均已完成，不把准备或导入错误计为行为反例。
 
 按用户要求，当前计划及测试整体保存为本地快照；生产修复尚未实施，这次提交不表示上述门禁通过。
+
+### 录像原申请的实施与验证（2026-10-09）
+
+反例快照为 `3c7f691`。生产改动仅位于 `capture/handlers.py`：有限耗尽集合同时保存 ResultSetSave 和 ResultRunClose，共同恢复明确按类型选择仓储和完整响应条件；录像在首写前保存原对象、key 和决定时刻，可靠前保持申请与重试等待。已有生命周期与处理器接线无需改变。
+
+Linux 开发容器、Python 3.11.16。根独占的新单元 `/tmp/camctl-goal-record-run-close-unit-green.log` 为 14 passed、0.29s。bootstrap 的新录像及既有照片／延时五入口 `/tmp/camctl-goal-record-run-close-bootstrap-green.log` 为 54 passed、27.06s；覆盖 COMMIT 前后、再次 UNKNOWN／ROLLED_BACK、直接录像处理器以及无旧 holder 的持久恢复。capture 的既有耗尽保存与录像重试 `/tmp/camctl-goal-record-run-close-capture-gate.log` 为 21 passed、10.55s，包含三个动作类型的真实原键及不同 activity ID 控制。全量单元 `/tmp/camctl-goal-record-run-close-all-unit.log` 为 3897 passed、1 skipped、2 warnings、8.96s；两个 warning 仍是既有同步测试的 asyncio 标记。
+
+独立只读审查核原申请不替换、失败后不释放、可靠后清等待、三个工厂共享集合和五入口的候选前顺序，未发现该阶段新增阻断。动作终态、取消与绑定筛选的静态顺序已核；这不等于所有相互竞争状态均已有运行反例。
+
+后续独立缺口仍保留：耗尽后 `_finish_capture` 的普通 FinishCapture 保存遇到 UNKNOWN 时没有同类完整申请责任；ResultRunClose 公共端口尚未校验动作只适用于录像。photo/timelapse 可靠 CLOSED 后的本地文件收尾与失效绑定也需独立修复。上述项目不作为本阶段完成声明。全量 capture 目录没有在此阶段重跑或宣称通过；上一阶段记录的 UNSATISFIED 与应急错误身份分区仍等待决策。
