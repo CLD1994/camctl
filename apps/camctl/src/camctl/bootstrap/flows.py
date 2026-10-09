@@ -44,9 +44,12 @@ __all__ = ["capture_flow", "cancel_flow", "report_flow", "residual_flow",
 def residual_flow(capture_factory, *, resume_media_results=None, resume_file_observations=None,
                   resume_read_results=None):
     """残留收场推进流程；实现见 camctl.capture.residual。"""
-    return _residual_flow_impl(capture_factory, resume_media_results=resume_media_results,
-                               resume_file_observations=resume_file_observations,
-                               resume_read_results=resume_read_results)
+    async def resume_actual_file_facts(owned):
+        await _resume_actual_file_facts(
+            owned, resume_file_observations, resume_media_results, resume_read_results)
+
+    return _residual_flow_impl(
+        capture_factory, resume_actual_file_facts=resume_actual_file_facts)
 
 
 async def _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,

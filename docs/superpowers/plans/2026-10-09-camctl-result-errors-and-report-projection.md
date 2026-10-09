@@ -219,4 +219,4 @@ Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 fai
 
 剩余一项为 `TestImportGraph.test_rules_do_not_import_adapters`：`capture.residual` 直接导入 sqlite3，只在原文件恢复 callback 的异常分类中使用。该导入在本阶段起点 `07f0e70` 已存在，本阶段没有修改 residual 或放宽依赖守卫。后续须沿 callback 的状态错误生产端与消费者闭合异常边界，保留保存责任及候选停止语义，不能以重新导出 sqlite3 或允许违规边掩盖责任分工。
 
-独立只读审查最窄生产 diff、原资源隔离、派生错误约束及两处资源故障修复后，未发现该阶段的生产阻断。任务二的历史读取、报告生成、分类及后续 flow 停止已取得上述门禁；结果保存事件守卫、未决 UNSATISFIED、普通集合结束及 residual 的依赖边界仍分别推进。当前全部工作按用户授权整体保存为本地 checkpoint，不声明完整 apps/camctl 或全部组件目录已通过。
+独立只读审查最窄生产 diff、原资源隔离、派生错误约束及两处资源故障修复后，未发现该阶段的生产阻断。任务二的历史读取、报告生成、分类及后续 flow 停止已取得上述门禁。residual 的依赖边界已沿[残留恢复计划](2026-10-09-camctl-residual-recovery-boundary.md#实施与验证记录)迁移至装配层，公共契约目录取得 190 passed；结果保存事件守卫、未决 UNSATISFIED 和普通集合结束仍分别推进。当前全部工作按用户授权整体保存为本地 checkpoint，不声明完整 apps/camctl 或全部组件目录已通过。
