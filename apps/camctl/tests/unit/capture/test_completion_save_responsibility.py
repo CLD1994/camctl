@@ -6,11 +6,15 @@ import sqlite3
 
 import pytest
 
-from camctl.capture.handlers import PendingCaptureCompletion, resume_capture_completions
+from camctl.capture.handlers import (
+    CaptureRuntime, PendingCaptureCompletion, StartCloseRequest, resume_capture_completions,
+)
 from camctl.capture.media import RecordingFailure
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.enums import enum_for
 from camctl.outputs.catalog import OutputCatalogFacts
+from camctl.operations.attempts import RetryWaitGate, RunOutcome, StaleRunFinish
+from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import (
     CaptureRepository, CaptureResult, FinishBindingFailure, FinishCanceledCapture,
@@ -114,3 +118,60 @@ def test_actual_read_still_running_keeps_completion_and_forbids_flow_finish():
             resume_capture_completions(owned, pending_capture_completions=held, capture=repository)
     assert held[23] is pending and pending.input_reads is None
     operations.finish_stale_runs.assert_not_called()
+
+
+def _start_close_request():
+    failure = RecordingFailure("capture_result_unconfirmed", {
+        "activity_id": "23", "reason": "start_unknown"})
+    return StartCloseRequest(
+        StaleRunFinish(("start/23", "query/start/23/23"), RunOutcome.UNCONFIRMED,
+            1_000, ErrorValue(failure.code, "execution", failure.details)),
+        FinishCapture(23, (), OutputCatalogFacts(23, True), 1_000, failure=failure))
+
+
+@pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED])
+def test_unreliable_start_close_preserves_both_requests_and_waits(kind):
+    # 若把嵌套动作单独保存，或提前清除等待，原复合责任便丢失。
+    request = _start_close_request()
+    pending = PendingCaptureCompletion(new_operation_key(), request)
+    held = {23: pending}
+    gate = RetryWaitGate({"start/23": 9, "query/start/23/23": 10, "start/24": 11})
+    repository = create_autospec(CaptureRepository, instance=True)
+    repository.close_start.return_value = DbOutcome(kind, error=RuntimeError("共同保存未完成"))
+    owned = _owned()
+    with pytest.raises(ConsistencyError):
+        resume_capture_completions(owned, pending_capture_completions=held,
+            capture=repository, retry_gate=gate)
+    assert held[23] is pending and pending.request is request
+    assert gate.anchors == {"start/23": 9, "query/start/23/23": 10, "start/24": 11}
+    repository.close_start.assert_called_once_with(request.finish, request.action_finish, pending.key, owned)
+    repository.finish_capture.assert_not_called()
+
+
+def test_start_close_legal_empty_success_releases_only_its_responsibilities():
+    # close_start 的空返回值是完整成功；错误要求 CaptureResult 会遗留责任。
+    request = _start_close_request()
+    pending = PendingCaptureCompletion(new_operation_key(), request)
+    held = {23: pending}
+    gate = RetryWaitGate({"start/23": 9, "query/start/23/23": 10, "start/24": 11})
+    repository = create_autospec(CaptureRepository, instance=True)
+    repository.close_start.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    owned = _owned()
+    resume_capture_completions(owned, pending_capture_completions=held,
+        capture=repository, retry_gate=gate)
+    assert held == {} and gate.anchors == {"start/24": 11}
+    repository.close_start.assert_called_once_with(request.finish, request.action_finish, pending.key, owned)
+    owned.connection.execute.assert_not_called()
+
+
+def test_new_start_close_cannot_replace_unconfirmed_original_request():
+    # 首次保存入口必须拒绝覆盖原完整申请，不能换 key 或决定时刻。
+    request = _start_close_request()
+    pending = PendingCaptureCompletion(new_operation_key(), request)
+    runtime = create_autospec(CaptureRuntime, instance=True)
+    runtime.pending_capture_completions = {23: pending}
+    replacement = _start_close_request()
+    with pytest.raises(ConsistencyError):
+        CaptureRuntime.save_capture_completion(runtime, replacement)
+    assert runtime.pending_capture_completions[23] is pending
+    assert pending.request is request and pending.request is not replacement

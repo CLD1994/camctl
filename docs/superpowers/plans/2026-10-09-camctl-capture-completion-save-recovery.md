@@ -25,7 +25,7 @@
 | 原内部读取仍有未结束的实际尝试 | 不按业务终态补造读取结束，保持申请和原读取责任，交回既有实际读取结束或恢复机制。 |
 | 原申请不存在于历史，当前已出现不兼容业务事实 | 保留申请并报告仓储的诊断；不自行增加通用退役语义。录像已有的明确退役规则保持。 |
 
-内部 READ 的完整申请继续由原读取拥有者保存，不再同时登记到拍摄集合。启动实际结果的复合申请仍由 `PendingCallResult` 保存；`close_start` 的外层保存责任另行核对，不能把其中嵌套的 `FinishCapture` 单独提交。
+内部 READ 的完整申请继续由原读取拥有者保存，不再同时登记到拍摄集合。包含实际调用结果的 `finish_start_result` 复合申请由 `PendingCallResult` 保存；没有新实际结果的 `close_start` 外层完整申请由共有集合持有 `StartCloseRequest`，实现与验证见[任务四](#task-4-启动流程外层复合申请的保存恢复)。其中嵌套的 `FinishCapture` 不能单独提交。
 
 ## 建议实现边界与横切检查
 
@@ -112,7 +112,7 @@ PYTHONPATH=/workspaces/camctl/apps/camctl/src apps/camctl/.venv/bin/python -m py
 | 考虑的分区 | 结论及未核验时的代价 |
 | --- | --- |
 | 带预览配对的 UNKNOWN 恢复 | 原完整 request 不被拆解；新增 fixture 只有一个原文件，没有专门的配对组合证据。若该组合有遗漏，需要补真实原片、预览及配对的 COMMIT 前后恢复测试。 |
-| `close_start` 的复合申请 | 仍由 `PendingCallResult` 负责；本阶段未改变其外层保存责任。不能将其中嵌套的 `FinishCapture` 算作本机制覆盖。 |
+| 两种启动复合申请 | 包含 `AttemptFinish` 的 `finish_start_result` 由 `PendingCallResult` 持有；没有新实际结果的 `close_start` 由共有集合持有完整 `StartCloseRequest`，见[任务四](#task-4-启动流程外层复合申请的保存恢复)。两者都不能单独提交嵌套的动作结果。 |
 | 进程退出后的原内存申请 | 会话内持有不等于申请已持久化；退出后按可靠数据库事实恢复。代价是本阶段不证明内存申请可以跨进程重建。 |
 | 原键未提交且出现不兼容取消或终态 | 仓储诊断后保留申请；普通请求不采用录像退役规则。未决分区需要确定语义后才能继续业务。 |
 | RESULTS v2、UNSATISFIED reason 与应急错误详情 | 保留原有失败与各自未决事项，不新增语义。代价是当前不能宣布全 app 验收通过。 |
@@ -140,3 +140,74 @@ PYTHONPATH=/workspaces/camctl/apps/camctl/src apps/camctl/.venv/bin/python -m py
 | v1 缺少集合结束依据 | `test_capture_contract::TestTimelapseHandler::test_send_wait_then_finish`；`test_timelapse_wait_runtime::test_backward_wall_clock_change_does_not_extend_current_session_wait`。测试预期 SUCCEEDED，实际仍 RUNNING。 |
 | UNSATISFIED 输入错误缺少 `stage` | `test_capture_failure_activity_identity::test_closed_unsatisfied_timelapse_reports_actual_activity_without_query`；`test_result_confirmation::TestResultSetConfirmation::test_unsatisfied_saves_known_failure_and_keeps_occupancy`；`test_result_consumer_saves::test_closed_result_consumers_use_saved_input_without_device_query[timelapse]`；`test_result_file_recovery::test_closed_latest_error_keeps_previously_registered_file_input[timelapse]`。公共结构校验拒绝输入；正式错误 reason 尚未确定。 |
 | 应急生产错误缺少 `details` | `test_emergency::test_zero_attempts_unknown_config_saves_not_attempted`；`test_later_session_preserves_exact_old_error_and_omits_unchanged_activity[EmergencyOutcome.NOT_ATTEMPTED]`；同入口 `[EmergencyOutcome.UNCONFIRMED]`；`test_unconfirmed_with_attempts_saves_unconfirmed`；`test_unrecorded_emergency_does_not_release`。活动结果守卫拒绝错误；身份与详情语义仍由结果错误计划跟踪。 |
+
+## Task 4: 启动流程外层复合申请的保存恢复
+
+**起点与消费：** `5fc94b3`；已实现的共有 `PendingCaptureCompletion` 及三个工厂、五种前置。`CaptureRepository.close_start(finish, action_finish, key, owned)` 没有新 `AttemptFinish`，以原 `StaleRunFinish` 和 `FinishCapture` 共同保存；正式成功返回 `DbOutcome[None]`，`COMPLETED/value=None` 合法。普通四类终态申请仍要求完整 `CaptureResult`，不得放宽其校验。
+
+**已确定的契约：** 在第一次提交前固定两个完整子请求、责任集合、错误及决定依据、共同事实时刻和 key，交给会话持有。未知或回滚后先核原外层请求；已有终态、当前绑定和配置变化均不能跳过。共同提交包含适用 START／QUERY、动作和父计划结果，以及可靠无效果分区的占用释放。没有实际调用在途时才形成该请求，不改变原调用尝试。
+
+已知生产入口的分类如下；此处不新增启动失败或释放占用的语义。
+
+| 业务前置 | 外层收场结果 |
+| --- | --- |
+| 所有原 START 尝试可靠无效果，动作未取消／过期，当前上限已经耗尽 | START FAILED、动作失败、适用占用释放共同保存。 |
+| 原 START 效果未知，设备没有查询能力或端口 | 原 START 和固定查询责任按 UNCONFIRMED 收场，动作失败，未知占用保持。 |
+| 原 START 效果未知，查询已经可靠结束或当前查询预算耗尽 | 与上一行相同，固定原查询责任与原尝试，禁止再次启动。 |
+
+每个业务分区分别应用以下保存规则。
+
+| 保存及恢复状态 | 会话责任与后续动作 |
+| --- | --- |
+| 首次外层申请尚未提交 | 先登记完整外层申请，再调用 `close_start`。 |
+| COMPLETED，包含该接口的合法空返回值 | 清除原请求的重试等待及持有责任；后续业务可以继续。 |
+| UNKNOWN、ROLLED_BACK、NOT_EXECUTED、原键读取失败或再次核实未知 | 保持同一申请及 key，诊断并停止依赖业务；不重新取得时钟、上限或设备端口来构造申请。 |
+| 数据库已保存动作终态，但会话还持有原请求 | 五个默认 flow 候选之前及直接 handler 终态早退之前仍核原请求。 |
+| 可靠确认原请求缺失，但取消或其他终态使原业务资格不兼容 | 保留原请求及仓储诊断，停止该分区；不增加退役、取消替换或新键重做规则。 |
+
+**建议实现：** 用内部冻结类型 `StartCloseRequest(finish, action_finish)` 表达完整外层请求，加入共有 holder 的显式分派。调用原 `close_start`，不修改仓储事务、格式或四类请求的成功判定。对该类型跳过输入 READ 的附属收尾，因为 START 尚未确认，不授予内部读取资格。命名和函数划分可以按实际数据流调整。
+
+**预估文件：** `capture/handlers.py`；新 `integration/capture/test_start_close_save_recovery.py` 和 `integration/bootstrap/test_start_close_default_recovery.py`；现有 `unit/capture/test_completion_save_responsibility.py`。现有工厂共用集合无需重新创建一套持有机制。
+
+- [x] 只写真实 capture 反例：三种业务前置分别覆盖真实 COMMIT 前／后 UNKNOWN，可靠无效果及未知两种前置另覆盖真实投影错误和可靠回滚。根独占运行新文件，预期失败于缺少原外层持有者；fixture 错误不算产品红。
+- [x] 实现完整外层登记和显式分派，再运行同一文件。预期原两个子请求对象、key、T1保持；终态与适用流程／占用同组保存、原尝试与历史前缀保持、无新增设备调用。
+- [x] 添加局部单元用例，验证原四类请求缺少 `CaptureResult` 仍被拒绝；新外层合法 `COMPLETED/value=None` 才释放，失败结果保持。同一动作不得替换原外层请求。
+- [x] 用真实 lifecycle 装配三个工厂，通过默认 scheduling、residual、winddown及正常／受限 cancel 五个入口核原申请。覆盖 COMMIT 前后和原键复验再次失败，改变当前配置与绑定，候选、时钟及设备不能先于核实被消费；手工把申请复制进第二工厂不算共享证明。
+- [x] 根顺序复验新增 capture、全部 START 已有门禁、共有终态门禁及受影响 bootstrap 恢复文件，再跑全 unit；目录分开、pytest独占。按真实改动选择更宽目录；已有十七项失败及先前环境范围继续准确保留。
+- [x] 独立只读审查本阶段差异和三个已知生产入口，重要修复取得有效红绿；更新实际证据，整体提交阶段变更并报告工作区状态。
+
+技能要求新设计或执行方法再次审批，与用户的持续完成目标及整体阶段提交授权冲突；依据更高优先级的持续授权继续实施已有保存契约，代价仅为可逆本地调整。此任务记录第一版已有责任的缺口，不作为新增业务范围或完成率分母。
+
+任务四审查重点：外层两个子请求不能拆交不同事务；合法空返回值不得放宽原四类请求；原查询责任、当前额度下降及无查询能力三入口均审计；已提交终态不能绕过核原键；可靠回滚后出现不兼容取消／终态时保留诊断，不自行选择退役规则。
+
+### 任务四实施与验证记录（2026-10-09）
+
+环境为容器内 Python 3.11.16，使用已有 `apps/camctl/.venv`。生产实现使用冻结的 `StartCloseRequest`，在首次提交前持有原两个子请求、key 和事实时刻；共有恢复入口将它们共同交给 `close_start`。该接口的合法空成功值只释放本申请的等待和保存责任，原四类请求仍要求完整处理结果。三个原生产入口的预算、错误和占用判定保持原契约。
+
+所有 pytest 都由根 Agent 前台独占运行。命令前缀为 `PYTHONPATH=/workspaces/camctl/apps/camctl/src apps/camctl/.venv/bin/python -m pytest`，下表范围后接 `-q`，完整输出重定向至所列日志。
+
+| 范围 | 实际结果 | 日志 |
+| --- | --- | --- |
+| `apps/camctl/tests/integration/capture/test_start_close_save_recovery.py`，实现前 | 8 failed，2.19s，exit 1；真实 COMMIT 前后未知及投影回滚前置成立，全部失败于缺少原外层持有者。 | `/tmp/camctl-goal-start-close-red.log` |
+| 同一 capture 文件，实现后 | 8 passed，1.57s，exit 0；原两个子请求对象、key、事实时刻及唯一完整事务保持，没有新设备调用。 | `/tmp/camctl-goal-start-close-green.log` |
+| `apps/camctl/tests/integration/bootstrap/test_start_close_default_recovery.py` | 42 passed，3.35s，exit 0；含三种实际前置、COMMIT 前后、五入口，以及原键核实再次 UNKNOWN／ROLLED_BACK。 | `/tmp/camctl-goal-start-close-bootstrap-new.log` |
+| 下列六个受影响 bootstrap 文件 | 137 passed，73.22s，exit 0；共有四类申请、录像收场及内部 READ 后续责任均通过。 | `/tmp/camctl-goal-start-close-bootstrap-regression.log` |
+| `apps/camctl/tests/integration/capture` 全目录 | 621 passed、11 failed，167.83s，exit 1；失败用例集合与任务三记录完全相同，错误仍属于已登记的三个未决分区。 | `/tmp/camctl-goal-start-close-capture-final.log` |
+| `apps/camctl/tests/unit` 全目录 | 3925 passed、1 skipped、2 warnings，9.22s，exit 0；新增 5 项外层保存责任分区通过。 | `/tmp/camctl-goal-start-close-unit-final.log` |
+
+受影响 bootstrap 命令逐项选择同一目录内的 `test_capture_completion_default_recovery.py`、`test_capture_completion_read_settlement.py`、`test_recording_results_cancellation.py`、`test_recording_results_saved_consumers.py`、`test_record_result_run_close_recovery.py` 和 `test_read_default_consumers.py`。本任务没有重跑约十分钟的 bootstrap 全目录；其上一阶段六项未决失败继续保留，不把局部回归称为目录全绿。全 unit 的两个 warning 仍是上文列出的既有同步测试 asyncio 标记。
+
+新增 capture 反例先实际失败，再实施生产逻辑。新增 bootstrap 验证沿用已经接通的共有前置，不移除有效接线来制造额外失败；新增单元边界没有各自独立红日志。局部单元测试最初的 `RunOutcome` 导入错误属于测试输入问题，不计作产品反例；最终全量已验证正式错误的 `execution` 阶段。
+
+实际 lifecycle 测试采用缺少设备声明的装配，三个真实工厂逐一检查共有集合及等待门的对象身份。原 START／QUERY 已由真实 handler 保存；原生产者在形成申请前接入空共有集合并交接已有等待锚点，五个实际 flow 以新可靠连接核实。此证据证明共有责任接手，不证明缺少绑定的工厂可以新建 START 请求。配置目录与原库登记身份匹配，没有改写数据库业务状态。
+
+独立只读审查实际读取本阶段差异、两个新增集成文件、单元文件、仓储及三个原生产入口，没有确认 Critical 或 Important 代码问题。计划中的保存责任说明按当前两个接口分别登记。审查没有运行 pytest；根独立执行上述门禁。
+
+| 审查考虑的边界 | 有效结论与未核验时的代价 |
+| --- | --- |
+| 可靠回滚后出现不兼容取消或终态 | 静态路径由仓储拒绝并保留原 holder；没有该竞争组合的独立实跑证据。不能据此宣布该组合完整验收。 |
+| 查询自然耗尽的最后一次返回 | 含实际返回的申请由 `finish_start_result` 持有；外层测试使用原额度为 2 时的一次真实失败查询，随后本次额度降为 1。不能混算两个入口。 |
+| 附属 READ 与进程退出 | START 未确认时没有内部 READ 收尾资格；本任务证明会话内持有及新连接核实，不证明进程退出后重建原内存申请。 |
+| 仓储重送输入变体及原未决失败 | 没有改变全部仓储核实规则，也未选择 RESULTS v2、UNSATISFIED reason 或应急错误详情。相关缺口和十七项既有失败仍保留。 |
+
+任务四继续采用用户已授权的阶段整体本地提交；提交粒度较粗，可逆调整仍在当前特性分支进行。根负责生产实现，同一明确指派的协作者仅编写独立测试文件；根实际读取并独占运行。单元测试按仓库规则隔离真实 IO，重要协作边界由真实集成测试验证。实际门禁作为完成证据，不重复没有新增变化的测试，也不合并不同集成目录。审查范围使用 `5fc94b3` 至阶段工作区差异及新增文件，不用空提交范围代替实际审查；代价是证据必须逐项注明范围。

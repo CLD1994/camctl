@@ -268,15 +268,30 @@ class PendingCaptureInputReads:
 
 
 @dataclass(frozen=True)
+class StartCloseRequest:
+    """没有新调用结果时，原 START 与动作共同收场的完整申请。"""
+
+    finish: StaleRunFinish
+    action_finish: FinishCapture
+
+
+CaptureCompletionRequest = (
+    FinishCapture | FinishRecordingResults | FinishCanceledCapture | FinishBindingFailure | StartCloseRequest
+)
+
+
+@dataclass(frozen=True)
 class PendingCaptureCompletion:
     """原拍摄收场的完整输入；核实保存沿用原 key 和事实时刻。"""
 
     key: OperationKey
-    request: FinishCapture | FinishRecordingResults | FinishCanceledCapture | FinishBindingFailure
+    request: CaptureCompletionRequest
     input_reads: PendingCaptureInputReads | None = None
 
     @property
     def action_id(self) -> int:
+        if isinstance(self.request, StartCloseRequest):
+            return self.request.action_finish.action_id
         if isinstance(self.request, FinishRecordingResults):
             return self.request.capture.action_id
         if isinstance(self.request, (FinishCapture, FinishCanceledCapture, FinishBindingFailure)):
@@ -320,6 +335,22 @@ def resume_result_check_closes(
         del pending_result_closes[identity]
 
 
+def _write_capture_completion(owned, pending: PendingCaptureCompletion, repository: CaptureRepository):
+    """整份申请只路由到其所属仓储，启动外层的两个成员共同提交。"""
+    request = pending.request
+    if isinstance(request, StartCloseRequest):
+        return repository.close_start(request.finish, request.action_finish, pending.key, owned)
+    if isinstance(request, FinishRecordingResults):
+        return repository.finish_recording_results(request, pending.key, owned)
+    if isinstance(request, FinishCanceledCapture):
+        return repository.finish_canceled_capture(request, pending.key, owned)
+    if isinstance(request, FinishBindingFailure):
+        return repository.finish_binding_failure(request, pending.key, owned)
+    if isinstance(request, FinishCapture):
+        return repository.finish_capture(request, pending.key, owned)
+    raise ConsistencyError("原拍摄完整申请类型无效")
+
+
 def resume_capture_completions(
     owned, *, pending_capture_completions: dict[int, PendingCaptureCompletion],
     action_id: int | None = None, capture: CaptureRepository | None = None,
@@ -333,27 +364,22 @@ def resume_capture_completions(
         if pending.action_id != identity:
             raise ConsistencyError("原拍摄完整申请与所属动作不一致")
         canceled = isinstance(pending.request, FinishCanceledCapture)
-        if isinstance(pending.request, FinishRecordingResults):
-            save = repository.finish_recording_results
-        elif canceled:
-            save = repository.finish_canceled_capture
-        elif isinstance(pending.request, FinishBindingFailure):
-            save = repository.finish_binding_failure
-        elif isinstance(pending.request, FinishCapture):
-            save = repository.finish_capture
-        else:
-            raise ConsistencyError("原拍摄完整申请类型无效")
+        start_close = isinstance(pending.request, StartCloseRequest)
         if pending.input_reads is None:
-            receipt = save(pending.request, pending.key, owned)
+            receipt = _write_capture_completion(owned, pending, repository)
             if receipt.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(
                     f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}")
-            if receipt.value is None:
-                raise ConsistencyError("原拍摄收场缺少可靠处理结果")
-            if receipt.value.disposition is FinishDisposition.RETIRED:
-                del pending_capture_completions[identity]
-                continue
-            if (retry_gate is not None
+            if not start_close:
+                if receipt.value is None:
+                    raise ConsistencyError("原拍摄收场缺少可靠处理结果")
+                if receipt.value.disposition is FinishDisposition.RETIRED:
+                    del pending_capture_completions[identity]
+                    continue
+            if start_close and retry_gate is not None:
+                for responsibility in pending.request.finish.responsibility_keys:
+                    retry_gate.cleared(responsibility)
+            elif (retry_gate is not None
                     and isinstance(pending.request, (FinishRecordingResults, FinishCanceledCapture))):
                 if canceled:
                     with closing(owned.connection.execute(
@@ -383,8 +409,8 @@ def resume_capture_completions(
 
 def _capture_input_read_finish(owned, request, action_id: int) -> PendingCaptureInputReads | None:
     """仅结束实际调用已返回的原输入读取责任，不修改读取尝试事实。"""
-    if isinstance(request, FinishBindingFailure):
-        # 绑定失败已经在原复合事务中保存适用 READ 及内部处理结果。
+    if isinstance(request, (FinishBindingFailure, StartCloseRequest)):
+        # 绑定失败已共同保存 READ；START 尚未确认时没有内部读取收尾。
         return None
     with closing(owned.connection.execute(
         "SELECT r.id,r.kind,r.action_id,r.responsibility_key,fc.id,"
@@ -711,7 +737,7 @@ class CaptureRuntime(_FileObservationSaves):
             action_id=action_id, capture=self.capture, retry_gate=self.retry_gate)
 
     def save_capture_completion(
-        self, request: FinishCapture | FinishRecordingResults | FinishCanceledCapture | FinishBindingFailure,
+        self, request: CaptureCompletionRequest,
     ) -> None:
         """首次保存前交接完整申请；未知和回滚后继续由会话持有。"""
         pending = PendingCaptureCompletion(new_operation_key(), request)
@@ -2192,15 +2218,11 @@ def _close_record_start(runtime, action, *, exhausted: bool, query_key: str | No
         final = RunOutcome.UNCONFIRMED
     keys = (f"start/{action['id']}",) + (() if query_key is None else (query_key,))
     now = runtime.wall_us()
-    receipt = runtime.capture.close_start(
+    runtime.save_capture_completion(StartCloseRequest(
         StaleRunFinish(responsibility_keys=keys, status=final, occurred_at=now, error=ErrorValue(
             failure.code, registered_error(failure.code)["stage"], failure.details)),
         FinishCapture(action["id"], (), OutputCatalogFacts(action["id"], True), now,
-                      failure=failure), new_operation_key(), runtime.owned)
-    if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"启动收场未可靠保存: {receipt.error}")
-    for key in keys:
-        runtime.retry_gate.cleared(key)
+                      failure=failure)))
 
 
 async def _confirm_record_start(runtime, action, facts):
