@@ -41,6 +41,7 @@ class FakeProcess:
     def __init__(self, output: bytes = b"") -> None:
         self.output = output
         self.output_failure = None
+        self.stderr = None
         self._exited: asyncio.Future[LocalExit] | None = None
         self.terminate_requests = 0
         self.kill_requests = 0
@@ -59,6 +60,10 @@ class FakeProcess:
 
     async def wait_output(self) -> None:
         return None
+
+    async def wait_output_failure(self) -> None:
+        if self.output_failure is None:
+            await asyncio.Future()
 
     def exit(self, exit_code: int | None = None, signal: int | None = None) -> None:
         if self._exited is None:
@@ -200,6 +205,48 @@ async def test_normal_exit_has_no_error_and_bounded_output() -> None:
     assert outcome.exit == LocalExit(exit_code=0)
     assert outcome.output == b"ok"
     assert process.terminate_requests == 0
+
+
+async def test_truncated_output_is_an_explicit_error_after_draining():
+    class Bytes:
+        def __init__(self):
+            self.chunks = iter([b"1234", b"56", b""])
+            self.calls = 0
+
+        async def read(self, limit):
+            self.calls += 1
+            return next(self.chunks)
+
+    stream = Bytes()
+    captured = await process_module._read_bounded(stream, 4)
+    assert captured.data == b"1234"
+    assert captured.error is not None
+    assert stream.calls == 3
+
+
+async def test_stderr_is_preserved_separately_from_file_data():
+    process = FakeProcess(b"file-data")
+    process.stderr = b"remote-error"
+    process.exit(exit_code=2)
+    outcome = await (await _drive(_spec(), process))
+    assert outcome.output == b"file-data"
+    assert getattr(outcome, "stderr", None) == b"remote-error"
+
+
+async def test_stream_sink_failure_is_a_classified_output_error():
+    class Bytes:
+        def __init__(self):
+            self.chunks = iter([b"file-data", b"remaining", b""])
+
+        async def read(self, limit):
+            return next(self.chunks)
+
+    async def sink(data):
+        raise OSError("sink failed")
+
+    captured = await process_module._read_bounded(Bytes(), 4, sink)
+    assert captured.data == b""
+    assert "sink failed" in captured.error
 
 
 def test_local_exit_is_exclusive() -> None:

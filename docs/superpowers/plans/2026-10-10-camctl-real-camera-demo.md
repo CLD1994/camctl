@@ -117,17 +117,19 @@ T2 软件验证（2026-10-10，容器，Python 3.11.16）：新增基准集成 2
 
 **接口：** `ManagedTransport.run(spec: ToolSpec, stop: StopSignal) -> RawToolOutcome` 复用 `execute_tool`。建议目录端口 `async read_directory(request: DirectoryRequest, *, stop: StopSignal) -> DirectoryRead`；request 包含原 `DeviceBinding`、输出范围、分页游标、batch 和本次期限，返回实际调用结果、读取错误及 `Page[FileIdentity, DirectoryCursor] | None`。`FileIdentity` 是包含原绑定作用域和完整设备路径的不可变定位结构，可精确编码为基准项；`DirectoryCursor` 是绑定本次目录范围且能校验进度的不透明游标。该端口用于只读基准准备，不冒用要求 RESULTS 票据的 `list_results`，也不消耗 START 次数。
 
-- [ ] **先写失败测试：** `test_directory_read_failure_is_not_empty` 断言 `error is not None`、`page is None`，即使此前有部分输出；旧文件与新子目录的完整路径仍可区分。覆盖空页有后续游标、末页非空、重复页、游标不前进、截断输出、空格/引号/换行文件名及错误绑定。真实进程、文件和管道测试放集成目录。
-- [ ] **运行红灯：** 先运行上述单元文件，再单独运行新 devices 集成文件，确认故障分类及受管收场尚未满足。
-- [ ] **接入已有受管调用：** 将具体 ADB transport 接到现有 `execute_tool`，使用明确 serial；相机路径按 shell 参数规则传递，主机用 argv。单次调用没有隐藏重试。保留实际退出、可靠观察与错误；截断或无法解释不算成功。目录按同一稳定身份顺序输出跨页有序流，基准和后续列举可分批合并比较。当前 stdout 有容量上限且 stderr 被丢弃，大输出必须分批或流式处理并显式识别不完整输入；需要响应通道时在原受管边界扩展有界采集，不在驱动另建无拥有者进程。
-- [ ] **实现文件端口：** 按已有接口提供目录/存在性/必要元数据、源 SHA-256、按 offset 连续读取和指定文件删除；复用 `SourceFile`、`ReadSession` 的真实停止责任。工具是否存在、输出格式、按位置读取及远端退出含义是 T9 的设备输入；容器测试用受真实端口约束的工具替身，未知工具能力不作为已支持声明。摘要读取失败保留错误，不以主机摘要代替源摘要。
-- [ ] **运行绿灯并提交：** 顺序运行 devices、operations 集成目录；验证停止请求后等实际退出、进程留在原组、共享 ADB 服务端不被清理，以及读取停止不伪装读完。提交适配及测试；无需引入通用插件框架。
+- [x] **先写失败测试：** `test_directory_read_failure_is_not_empty` 断言 `error is not None`、`page is None`，即使此前有部分输出；旧文件与新子目录的完整路径仍可区分。覆盖空页有后续游标、末页非空、重复页、游标不前进、截断输出、空格/引号/换行文件名及错误绑定。真实进程、文件和管道测试放集成目录。
+- [x] **运行红灯：** 先运行上述单元文件，再单独运行新 devices 集成文件，确认故障分类及受管收场尚未满足。
+- [x] **接入已有受管调用：** 将具体 ADB transport 接到现有 `execute_tool`，使用明确 serial；相机路径按 shell 参数规则传递，主机用 argv。单次调用没有隐藏重试。保留实际退出、可靠观察与错误；截断或无法解释不算成功。目录按同一稳定身份顺序输出跨页有序流，基准和后续列举可分批合并比较。当前 stdout 有容量上限且 stderr 被丢弃，大输出必须分批或流式处理并显式识别不完整输入；需要响应通道时在原受管边界扩展有界采集，不在驱动另建无拥有者进程。
+- [x] **实现文件端口：** 按已有接口提供目录/存在性/必要元数据、源 SHA-256、按 offset 连续读取和指定文件删除；复用 `SourceFile`、`ReadSession` 的真实停止责任。工具是否存在、输出格式、按位置读取及远端退出含义是 T9 的设备输入；容器测试用受真实端口约束的工具替身，未知工具能力不作为已支持声明。摘要读取失败保留错误，不以主机摘要代替源摘要。
+- [x] **运行绿灯并提交：** 顺序运行 devices、operations 集成目录；验证停止请求后等实际退出、进程留在原组、共享 ADB 服务端不被清理，以及读取停止不伪装读完。提交适配及测试；无需引入通用插件框架。
 
 ```python
 assert failed_directory.error is not None
 assert failed_directory.page is None
 assert final_nonempty_page.items and final_nonempty_page.next_cursor is None
 ```
+
+T3 软件验证（2026-10-10，容器，Python 3.11.16）：目录解释单元 21 项通过，具体文件适配和真实受管进程组合 14 项通过；devices、operations、host_files 单元目录及 devices、operations 组件集成目录顺序回归通过。验证包括双通道超限、输出消费者故障主动终止、进程组继承、特殊路径分页、源摘要、指定删除、大于捕获上限的连续读取和实际停止。ShellFileTools 仍为待设备核实的候选组合，未激活真实相机能力。
 
 ## T4 共用启动准备、范围独占及事务守卫
 

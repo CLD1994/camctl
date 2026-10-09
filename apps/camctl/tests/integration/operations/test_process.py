@@ -96,7 +96,7 @@ async def test_output_captured_up_to_limit() -> None:
 
     script = (
         "import sys\n"
-        f"sys.stdout.write('x' * {OUTPUT_LIMIT_BYTES + 4096})\n"
+        f"sys.stdout.write('x' * {OUTPUT_LIMIT_BYTES})\n"
         "sys.stdout.flush()\n"
     )
     outcome = await _run(
@@ -120,6 +120,7 @@ async def test_output_beyond_pipe_capacity_is_drained_before_exit() -> None:
             ),
             Never(),
         )
-    assert outcome.error is None
-    assert outcome.exit.exit_code == 0
+    assert outcome.error == "output_failed"
+    assert "output_limit_exceeded" in outcome.output_failure
+    assert outcome.exit is not None
     assert outcome.output == b"x" * OUTPUT_LIMIT_BYTES
