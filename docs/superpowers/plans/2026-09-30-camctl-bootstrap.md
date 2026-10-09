@@ -189,7 +189,7 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 全链断言：`camctl.__file__` 位于安装环境而非仓库；`available_resources()` 含 `sql/core.sql` 且可读取；wheel 元数据的 Requires-Dist 恰为 concurrent-log-handler、janus、jsonschema 三个运行时依赖；三个直接依赖的安装版本与锁文件导出一致；安装环境中 pytest、pytest_asyncio、pytest_mock 均不可导入；`--version` 输出 0.1.0；`init` 退出 0、stdout 为空、创建状态库；`describe`（经替身登记）导出一台设备且包含 camera_take_photo；`submit` 与 `run` 均以 `{"kind": "succeeded"}` 退出 0；run 会话在 ready 目录发布状态报告文件，动作表终态为成功（status=3）。run 会话内报告子进程经生产入口启动并完成，覆盖报告子进程的运行库入口检查。
 
-边界与日志断言：未初始化的部署上 `run` 以退出码 1 拒绝且不创建状态库（"日常入口不创建"部署规则，stdout 为空、错误在 stderr）；显式初始化后损坏状态库，`run` 以 `{"kind": "error", "reason": "state_db_error"}` 失败，会话错误记录经日志链写入配置的 `camctl.log`（干净会话无记录不创建日志文件是既定行为——关闭摘要只在有丢弃记录时写出，日志验证因此走失败路径）。
+边界与日志断言：未初始化的部署上 `run` 以退出码 1 拒绝且不创建状态库（“日常入口不创建”部署规则）；会话错误输出遵守[stdout 与退出状态](../../architecture/cli-commands.md#stdout-与退出状态)，采用一行 `{"kind": "error", "body": {"reason": "state_db_error", "details": {}}}` 结构并在 `details` 保留实际诊断。显式初始化后损坏状态库也以该状态库错误结构失败，会话错误记录经日志链写入配置的 `camctl.log`（干净会话无记录不创建日志文件是既定行为——关闭摘要只在有丢弃记录时写出，日志验证因此走失败路径）。
 
 故障分支：删除安装包内 `runtime/sqlite-runtime.json` 后 `init` 非零退出且错误输出指明该资源名，不静默创建不完整状态库（资源读取失败经 `ResourceError` 明确失败；错误通道的进一步分类属 B4 已登记开放项）；以解释器内属性替换模拟 SQLite 3.40.0（低于主线最低版本，条件判定本身另有单元测试），`init` 以退出码 1 报告"运行库条件不满足……不满足统一运行条件"，stdout 保持为空（`RuntimeLibraryError` 经 `StateDatabaseError` 通道由 init 优雅报告）。
 
@@ -197,8 +197,32 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 边界：真实 ARM64 硬件的编译与运行差异（C 模块工具链、glibc）、真实设备行为与目标资源实测按[部署交接与待核验项](../../camctl/verification.md#部署交接与待核验项)由对应执行者核验，不以本记录的 x86 通过代替；WSL 侧 Node v16 不支持客户端驱动链路所需的 node --import，客户端链路的 WSL 验证须先升级 Node（Windows 侧已验证，不折叠）。
 
+### B7 与默认拍摄装配的契约复验（2026-10-09）
+
+本阶段沿[拍摄动作的驱动绑定](../../camctl/database/plans-actions.md#拍摄动作的驱动绑定)、[驱动执行与产物边界](../../architecture/camera-capabilities.md#驱动执行与产物边界)以及正式 `ResultDriver`、`DeviceCallResult` 接口，复验发行物和正常延时摄影的真实协作前提。源码之外的安装流程、依赖隔离和成功预期保持原验收要求。
+
+发行物使用的共用设备替身通过 `DeviceCallResult.from_outcome` 返回完整 `CallOutcome`。原 `result_files_listed/v1` 条目保持原内容；真实列举返回以已经登记的 `results_returned/v1` 表达 `OBSERVED` 收场，不增加集合结束字段。正常延时摄影的受理目录由实际配置和真实 `DriverDefinition` 构建，复用已有参数定义和任务工厂；公开受理后核对 `actions.driver_id` 与配置及运行登记一致，再进入生产默认流程。
+
+- [x] 阅读既有完整 bootstrap 日志并区分两项前提：发行物的列举返回缺少完整调用结果；正常延时摄影受理时保存的驱动与本次配置不一致。`/tmp/camctl-goal-combined-bootstrap-current.log` 的发行物错误为 `state_db_error`，内容指向结果列举的完整实际返回；正常延时摄影在等待成功终态时已经失败。此记录不构成未决结果格式的红灯证据。
+- [x] 修正共用替身的完整结果返回和正常延时摄影的合法受理目录。发行物失败断言同时保留 stdout 与 stderr，供下一边界失败时定位真实错误。未修改生产代码、状态投影或集合判定预期。
+- [ ] root 在 Linux 容器、部署 Python 3.11 下前台独占执行以下两个节点，记录实际结果。导入、静态检查或前提修正不能替代本次发行物与生产装配验证。
+
+```sh
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/bootstrap/test_distribution.py::test_distribution_works_outside_repository -q
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/bootstrap/test_production_flows.py::TestRunSessionProductionScheduling::test_timelapse_reaches_success_through_default_flows -q
+```
+
+如果合法驱动与完整实际结果已经通过，而后续仍缺集合结束的正式依据，保留原成功预期与原实际观察，按 RESULTS 计划的未决格式单独记录；不得由 v1 文件列表推定集合已经结束。真实设备、ARM64 及物理断电仍按部署交接项单独验收。
+
+root 的 `/tmp/camctl-goal-fixture-binding-gate.log` 为 2 failed、31.02s。发行物全链已经完成照片拍摄、报告发布及动作成功；当前失败点是缺失状态库分支的旧空 stdout 预期。该分支依据[日常运行入口](../../architecture/initialization.md#日常运行入口)、[会话错误标识](../../architecture/session-errors.md#错误标识)及上述 CLI 输出契约，要求一行完整 `error`、`state_db_error`、对象类型诊断和退出码 1，库仍不存在。测试已经改为检查这些正式行为，尚待 root 复跑。
+
+同次正常延时摄影的只读失败库证明，首次受理保存 `production-double`，实际 START 成功且等待完成；原 RESULTS 的三次尝试均保存完整成功返回、`results_returned/v1` 收场和同一完整 VIDEO 观察，文件已经归属并完成。次数耗尽后原 run 与集合核实保存 `UNCONFIRMED`，动作采用 `capture_result_unconfirmed`／`outputs_unknown` 失败，未登记产物。本次失败属于 RESULTS 计划中未决集合结束依据的分区，成功预期和 v1 输入保持。随后报告生成还遇到 `device_execution/error` 缺少 `stage` 的 Schema 校验错误；这是另一责任边界的后续失败，尚未在本阶段修复或形成新验收结论。
+
 ## 模块完成门禁
 
 B1—B6 通过对应组件门禁；所有软件模块接入后 B7 在仓库外安装通过。实际 ARM64 依赖、工具和设备仍按部署清单核验，计划不承诺开发环境测量能够证明目标性能。
 
 完成时核对本计划所有任务、引用的正式验收条目及消费者组合证据。已有测试全部通过仍不能替代遗漏需求检查；尚未核验的设备和部署前提单独记录。
+
+
+2026-10-09，Linux 开发容器、Python 3.11.16：root 独占执行完整 `apps/camctl/tests/integration/bootstrap/test_distribution.py`，`/tmp/camctl-goal-distribution-typed-green.log` 为 4 passed、7.70s。真实 wheel 在仓库之外安装及运行、包资源、锁文件依赖、缺失状态库的结构化错误、不满足 SQLite 条件和发行物资源缺失分支均通过。该范围不证明正常延时集合完成、完整 bootstrap 或实际目标设备验收。当前 B7 修正、延时绑定前提、录像取消恢复及 READ 未完成候选一起按用户授权统一提交。

@@ -1,6 +1,7 @@
 """默认入口在筛选业务终态前，核实原录像共同收场申请。"""
 
 from dataclasses import replace
+import sqlite3
 
 import pytest
 
@@ -11,6 +12,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
+from camctl.session.service import StateDbFailure
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 from ..capture.test_capture_contract import ResultsDouble, _entry
@@ -21,9 +23,33 @@ from .test_read_default_consumers import _default_world
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.mark.parametrize("entrance", ["normal", "residual", "restricted"])
+class _UnavailableOriginalKey:
+    """原键查询真实失败；ROLLBACK 失败时仓储仍返回 UNKNOWN。"""
+
+    def __init__(self, connection, key, unknown):
+        self.connection, self.key, self.unknown = connection, key, unknown
+        self.key_reads = 0
+
+    def execute(self, sql, parameters=()):
+        normalized = " ".join(sql.split())
+        if normalized.startswith("SELECT id FROM history_transactions WHERE operation_key"):
+            assert parameters == (str(self.key),)
+            self.key_reads += 1
+            raise sqlite3.OperationalError("original transaction unavailable")
+        if normalized == "ROLLBACK" and self.unknown:
+            raise sqlite3.OperationalError("rollback unavailable")
+        return self.connection.execute(sql, parameters)
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+
+@pytest.mark.parametrize("entrance", [
+    "normal", "residual", "restricted", "normal-cancel", "restricted-cancel",
+])
+@pytest.mark.parametrize("confirmation", ["saved", "rolled-back", "unknown"])
 async def test_default_entry_confirms_original_recording_transaction_after_terminal(
-        pipeline, monkeypatch, entrance):
+        pipeline, monkeypatch, entrance, confirmation):
     from decimal import Decimal
 
     owned, roots, _source_id = pipeline
@@ -40,7 +66,7 @@ async def test_default_entry_confirms_original_recording_transaction_after_termi
         await capture_handler("camera_record")(1, runtime)
         original_attempts = _attempts(owned)
         original_save = CaptureRepository.finish_recording_results
-        inputs, outcomes = [], []
+        inputs, outcomes, unavailable = [], [], []
 
         def save(repository, request, key, current):
             inputs.append((request, key))
@@ -49,6 +75,10 @@ async def test_default_entry_confirms_original_recording_transaction_after_termi
                 result = original_save(repository, request, key, replace(current, connection=fault))
                 assert fault.commit_calls == 1
             else:
+                if confirmation != "saved":
+                    fault = _UnavailableOriginalKey(current.connection, key, confirmation == "unknown")
+                    unavailable.append(fault)
+                    current = replace(current, connection=fault)
                 result = original_save(repository, request, key, current)
             outcomes.append(result)
             return result
@@ -78,15 +108,30 @@ async def test_default_entry_confirms_original_recording_transaction_after_termi
 
         context.open_connection = open_connection
         wall[0] = _NOW + 300_000_000
-        selected = (context.flows["scheduling"] if entrance == "normal" else
-                    context.flows["residual"] if entrance == "residual" else
-                    context.restricted_flows["winddown"])
-        await selected(context)
+        selected = {
+            "normal": context.flows["scheduling"],
+            "residual": context.flows["residual"],
+            "restricted": context.restricted_flows["winddown"],
+            "normal-cancel": context.flows["cancel"],
+            "restricted-cancel": context.restricted_flows["cancel"],
+        }[entrance]
+        if confirmation == "saved":
+            await selected(context)
+        else:
+            with pytest.raises(StateDbFailure):
+                await selected(context)
 
         assert inputs == [(request, key), (request, key)]
-        assert outcomes[1].kind is DbOutcomeKind.COMPLETED, outcomes[1].error
+        expected = {"saved": DbOutcomeKind.COMPLETED,
+            "rolled-back": DbOutcomeKind.ROLLED_BACK, "unknown": DbOutcomeKind.UNKNOWN}[confirmation]
+        assert outcomes[1].kind is expected, outcomes[1].error
         assert len(opened) == 1 and len(factory_calls) == 1
-        assert not runtime.pending_recording_results
+        if confirmation == "saved":
+            assert not runtime.pending_recording_results
+        else:
+            assert unavailable[0].key_reads == 1
+            pending = runtime.pending_recording_results[1]
+            assert (pending.request, pending.key) == (request, key)
         assert tuple(reopened.connection.iterdump()) == before
         assert len(reader.requests) == 1 and tuple(driver.calls) == before_calls
         assert runtime.results.calls == [1] and tools.calls == ["probe", "probe"]

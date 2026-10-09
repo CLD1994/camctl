@@ -501,16 +501,22 @@ class _ScriptedStubDriver:
     async def list_results(self, request, batch: int) -> object:
         from camctl.devices.evidence import DeviceObservation
         from camctl.devices.ports import DeviceCallResult
+        from camctl.operations.models import (
+            CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis,
+        )
 
         self._await_gate("result")
         identity = str(request.params["activity_id"])
         self.calls.append(("result", identity))
         entries = self._spec.get("files", {}).get(identity, [])
-        return DeviceCallResult(
+        return DeviceCallResult.from_outcome(CallOutcome(
+            effect=EffectState.CONFIRMED,
+            settlement=Settlement(
+                SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation(
                 type="result_files_listed", version=1,
                 data={"activity_id": identity, "entries": entries}),),
-            error=None)
+        ))
 
     def _device_content(self, identity: str) -> bytes:
         """按设备侧文件身份取剧本内容；取回链的真实字节来源。

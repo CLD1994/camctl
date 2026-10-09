@@ -356,10 +356,11 @@ class FinishResidualBindingFailure:
 
 
 class FinishDisposition(Enum):
-    """完成登记事务的保存结果：新保存或恢复首次结果。"""
+    """完成申请的处理结果：新保存、复用原结果或可靠退役。"""
 
     SAVED = "saved"
     ALREADY = "already"
+    RETIRED = "retired"
 
 
 @dataclass(frozen=True)
@@ -3702,10 +3703,23 @@ class _FinishRecordingResultsCommand:
         action, run = self._identity(connection)
         if saved is not None:
             return self._reuse(scope, saved, run)
+        if action["status"] in _ACTION_TERMINAL or (
+                action["status"] == _ACTION_RUNNING and action["cancel_requested"]):
+            # 原申请确实未提交；当前取消或终态结束其普通登记资格。
+            # 已保存的尝试与原 run 独立保留，退役不产生业务终态。
+            plan = row_facts(connection, "plans", action["plan_id"])
+            if plan is None:
+                raise ConsistencyError("原录像终态申请缺少所属计划")
+            with closing(connection.execute(
+                "SELECT id FROM outputs WHERE source_action_id=? ORDER BY id", (action["id"],),
+            )) as cursor:
+                output_ids = tuple(row[0] for row in cursor)
+            return CommandPlan(events=(), owners={}, read_only=True,
+                state_rows={"actions": {action["id"]: action},
+                    "plans": {plan["id"]: plan}, "operation_runs": {run["id"]: run}},
+                result=CaptureResult(action["status"], plan["status"], output_ids,
+                    FinishDisposition.RETIRED))
         capture = FinishCaptureCommand(self._request.capture, self._key)
-        if action["status"] in _ACTION_TERMINAL:
-            # 已有终态只恢复原登记，不重新关闭普通核实责任。
-            return capture.plan(scope)
         self._ready(connection, action, run)
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         plans = [capture.plan(sub)]

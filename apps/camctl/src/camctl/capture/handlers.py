@@ -148,6 +148,7 @@ from camctl.persistence.repositories.capture import (
     FinishBindingFailure,
     FinishCanceledCapture,
     FinishCapture,
+    FinishDisposition,
     FinishRecordingResults,
 )
 from camctl.persistence.repositories.operations import OperationRepository
@@ -277,7 +278,9 @@ def resume_recording_results(
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(
                 f"原录像核实收场未可靠保存，完整申请仍持有: {receipt.error}")
-        if retry_gate is not None:
+        if receipt.value is None:
+            raise ConsistencyError("原录像核实收场缺少可靠处理结果")
+        if retry_gate is not None and receipt.value.disposition is not FinishDisposition.RETIRED:
             run = row_facts(owned.connection, "operation_runs", pending.request.run_id)
             if run is None:
                 raise ConsistencyError("已保存录像收场缺少原核实责任")

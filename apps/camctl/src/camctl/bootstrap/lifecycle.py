@@ -91,7 +91,6 @@ class RuntimeDeps:
 
 def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     """候选读取前保存原 READ 与录像终态申请，不取得当前设备资格。"""
-    from camctl.capture.handlers import resume_recording_results
     from camctl.capture.media_flow import resume_prepared_internal_reads
 
     resume_prepared_internal_reads(owned,
@@ -99,9 +98,31 @@ def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
         pending_read_business=deps.capture_read_business,
         pending_read_ends=deps.capture_read_ends,
         continuing_read_tickets=deps.capture_continuing_reads)
+    _resume_recording_requests(deps, owned)
+
+
+def _resume_recording_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
+    """核实已形成的原录像申请，取消入口不取得新的 READ 业务资格。"""
+    from camctl.capture.handlers import resume_recording_results
+
     resume_recording_results(owned,
         pending_recording_results=deps.capture_recording_results,
         retry_gate=deps.capture_retry_gate)
+
+
+def _resume_normal_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
+    """普通与残留入口先核原申请，再处理实际完成且必要摘要绑定失效的读取。"""
+    from camctl.capture.media_flow import resume_binding_internal_read_ends
+    from camctl.devices.bindings import check_binding
+
+    _resume_read_requests(deps, owned)
+    resume_binding_internal_read_ends(owned,
+        pending_read_results=deps.capture_read_results,
+        pending_read_business=deps.capture_read_business,
+        pending_read_ends=deps.capture_read_ends,
+        continuing_read_tickets=deps.capture_continuing_reads,
+        binding_check=lambda saved: check_binding(saved, deps.config),
+        occurred_at=SystemClock().utc_micros)
 
 
 def _default_catalog(config: ConfigSnapshot):
@@ -376,7 +397,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
     resume_files = partial(resume_file_observations,
         pending_file_observations=deps.capture_file_observations,
         pending_call_results=deps.capture_call_results)
-    resume_reads = partial(_resume_read_requests, deps)
+    resume_reads = partial(_resume_normal_read_requests, deps)
     recovery_logger = (None if deps.log_runtime is None else
                        recovery_diagnostics_logger(deps.log_runtime.channel))
     from camctl.bootstrap.motor_assembly import motor_flow
@@ -401,7 +422,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
                               motor_permits=deps.motor_permits,
                               work_files=deps.work_files,
                               resume_media_results=deps.work_files.resume_media_results,
-                              resume_file_observations=resume_files),
+                              resume_file_observations=resume_files,
+                              resume_recording_results=partial(_resume_recording_requests, deps)),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
@@ -555,7 +577,8 @@ async def execute_command(
                     ready=ready, processing=processing, unscheduled_only=True,
                     motor_permits=deps.motor_permits, work_files=deps.work_files,
                     resume_media_results=deps.work_files.resume_media_results,
-                    resume_file_observations=resume_files),
+                    resume_file_observations=resume_files,
+                    resume_recording_results=partial(_resume_recording_requests, deps)),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
                     capture_factory=session_capture_assembly(

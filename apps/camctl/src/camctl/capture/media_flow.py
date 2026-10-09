@@ -669,6 +669,81 @@ def resume_prepared_internal_reads(
     retry_read_business(scope)
 
 
+def resume_binding_internal_read_ends(
+    owned: OwnedConnection, *, pending_read_results: dict,
+    pending_read_business: dict, pending_read_ends: dict,
+    continuing_read_tickets: dict, binding_check: Callable, occurred_at: Callable,
+) -> None:
+    """普通与残留入口保存已实际读完、却缺必要源摘要的绑定失败。"""
+    from camctl.capture.media import RecordingFailure
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.bindings import DeviceBinding, binding_failure_details
+    from camctl.outputs.copy import SourceChecksumSupport
+    from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+    from camctl.persistence.repositories.capture import FinishBindingFailure
+
+    # 原完整申请的核实由 prepared 前置负责；失败传播后不会到达本分类。
+    if pending_read_results or pending_read_business:
+        return
+    action_status = enum_for("actions.status")
+    run_status = enum_for("operation_runs.status")
+    run_kind = enum_for("operation_runs.kind")
+    query_purpose = enum_for("operation_runs.query_purpose")
+    scope = SimpleNamespace(
+        owned=owned, operations=OperationRepository(),
+        pending_read_results=pending_read_results, pending_read_business=pending_read_business,
+        pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets)
+    for copy_id, held in tuple(pending_read_ends.items()):
+        row = owned.connection.execute(
+            "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,"
+            "r.kind,c.delivery_id,f.observer_action_id FROM file_copies c"
+            " JOIN recording_processing p ON p.id=c.processing_id"
+            " JOIN actions a ON a.id=p.action_id JOIN operation_runs r ON r.copy_id=c.id"
+            " JOIN device_files f ON f.id=c.source_device_file_id WHERE c.id=?", (copy_id,)).fetchone()
+        if row is None:
+            raise ConsistencyError("原内部读取结束缺少处理、源观察者与动作归属")
+        action_id, device_id, driver_id, status, canceled, run_id, read_status, kind, delivery_id, observer = row
+        # 不给取消、已有终态或其他原责任建立新的业务决定。
+        if status != int(action_status.RUNNING) or canceled or read_status != int(run_status.ACTIVE):
+            continue
+        if (run_id != held.ticket.run_id or kind != int(run_kind.READ_FILE)
+                or delivery_id is not None or observer != action_id):
+            raise ConsistencyError("原内部读取结束与拍摄处理责任不符")
+        facts = OutputsRepository().load_copy_state(copy_id, owned)
+        if (facts.committed_bytes != facts.source_size
+                or facts.source_support is not SourceChecksumSupport.SUPPORTED
+                or facts.source_sha256 is not None):
+            continue
+        unfinished = owned.connection.execute(
+            "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+            " WHERE r.action_id=? AND r.id!=? AND (t.status=1 OR t.result_json IS NULL) LIMIT 1",
+            (action_id, run_id)).fetchone()
+        if unfinished is not None:
+            continue
+        binding = binding_check(DeviceBinding(device_id, driver_id))
+        details = binding_failure_details(binding)
+        if details is None:
+            continue
+        responsibilities = tuple(row[0] for row in owned.connection.execute(
+            "SELECT responsibility_key FROM operation_runs WHERE action_id=? AND id!=?"
+            " AND kind IN (?,?,?,?,?) AND status IN (?,?)"
+            " AND (kind!=? OR query_purpose!=?) ORDER BY id",
+            (action_id, run_id, int(run_kind.START), int(run_kind.STOP), int(run_kind.READ_FILE),
+             int(run_kind.QUERY_ACTIVITY), int(run_kind.CHECK_CAPTURE_RESULTS),
+             int(run_status.PENDING), int(run_status.ACTIVE), int(run_kind.QUERY_ACTIVITY),
+             int(query_purpose.RESIDUAL_STOP_CONFIRMATION))))
+        formed_at = occurred_at()
+        scope.occurred_at = lambda original=formed_at: original
+        # 未取消的收场不会建立新的 STOP/RESULTS，故不取得其新配置或设备资格。
+        request = FinishBindingFailure(action_id, formed_at,
+            RecordingFailure("device_binding_unavailable", details), responsibility_keys=responsibilities)
+        business = PendingReadBusiness(CaptureRepository().finish_binding_failure, request, new_operation_key())
+        pending = held_binding_read_result(scope, copy_id, binding, business)
+        if pending is None:
+            raise ConsistencyError("已分类的必要摘要绑定失败缺少原完整读取结果")
+        _save_internal_read_and_settle(scope, pending)
+
+
 def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
     pending = save_read_result(flow, pending)
     if pending is None:

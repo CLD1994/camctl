@@ -171,3 +171,63 @@ root 独占 `/tmp/camctl-goal-recovery-phase-bootstrap.log` 为 108 passed、57.
 `test_read_default_save_gate.py` 的后续 6 项通过最终组合门禁：三个入口各覆盖已提交原 Finish 的完整组查询失败且回滚响应丢失（实际 `OperationRepository` 返回 UNKNOWN），以及原 slot 投影失败并可靠回滚（实际 `OutputsRepository` 返回已确认回滚的保存失败结果）。两者均在 fresh Owned 查询可靠 F，重送原完整 request／key，保留原 holder，原源读取及媒体调用不增加，也不进入候选查询、工厂或业务墙钟。这 6 项没有把两个错误和两种 holder 的全部交叉组合都覆盖；它们分别证伪完整 Finish 核实门和独立 child 保存门的停止责任。取消入口接入、raw End 技术校验及迟到取消冲突不在此生产范围。
 
 2026-10-09，Linux 容器、Python 3.11.16：根 Agent 的 `/tmp/camctl-goal-read-recording-bootstrap-final.log` 为 155 passed、92.60s，包含上述二十一项默认入口反例，以及原读取执行、必要摘要与原 End 绑定、文件前置保存、媒体保存／取消／本地收场、正常录像停止和受限默认装配。独立只读审查核对三个入口的原申请优先、失败停止、slot 原时刻及原键核实；提交前夹具问题经真实关闭重开修正后复验。capture 相关定向门禁为 138 passed，新增活动身份结论恢复与原媒体接线另有 26 passed；全单元为 3687 passed、1 skipped、2 个既有 warning。上述软件证据不证明 raw End 技术校验、continuing ticket、missingSHA 在跨工厂下的完整恢复，不决定晚取消预成 child 的状态语义，也不覆盖取消入口和真实设备验收。
+
+#### RD4 追加：普通与残留入口保存缺少必要源摘要的实际完成
+
+目标是让同一普通执行会话的 `capture_flow` 和 `residual_flow`，在筛选业务候选前接手已经实际结束但尚未形成完整 Finish 的原内部 READ。仅处理实际 clean 完整 End、原声明 SUPPORTED、必要 `source_sha256` 尚未取得、当前绑定 missing/mismatch 的分区。结果采用[实际读取结束与所属结果](../../architecture/file-copy.md#实际读取结束与所属结果)中的既定组合：原 attempt SUCCEEDED、observed/read_returned、无读取错误；原未终态 run FAILED/device_binding_unavailable；所属内部处理按原绑定错误结束。受限入口首次形成业务处置继续暂停，不从此阶段取得执行资格。
+
+2026-10-09 在 `655b561` 重新读取源码：四个集合已经由默认三工厂共享；`resume_prepared_internal_reads` 只消费完整 `PendingReadResult` 和已形成业务申请，只有 raw `HeldReadEnd` 时返回。normal 选中录像后可以经 `_record_handler` 的既有缺摘要绑定分支收场，但其业务筛选前尚无 raw 分类；residual 的旧调用枚举不含 READ_FILE，后续只推进残留停止责任，不能依赖它发现内部 READ。该定位是源码证据，新增四项尚未运行，不能登记为有效红。
+
+权威事实分开保存：实际拥有者取得的 `HeldReadEnd.ticket/end/evidence` 证明原源实际结束，数据库中原意图、可靠字节进度、源摘要能力、归属及取消／终态来自不可变历史和同步投影。`RuntimeDeps` 的共享集合承担同一会话的交接，不是新增设备身份或进程重启结果的来源；C=N、当前运行时是否能装配媒体、字典身份相同均不能替代原 End。当前配置保持该运行首次加载的值；绑定协作者不可用的测试不表示支持运行中重新加载配置。
+
+下表按行优先处理，原结果申请优先于新的 raw 分类：
+
+| 完整条件 | 此阶段的处理 | 必须保持的事实 |
+| --- | --- | --- |
+| 已持有完整 Finish 或业务申请 | 沿现有 prepared 保存责任重送原完整输入、key 和时刻，不重新判断绑定或形成另一申请。 | 已确定结果、配置、累计次数及既有终态不变。 |
+| 只有 raw End，但原 run 或所属 action 已终态 | 不形成新的 bindingFAILED，也不将终态改为 ACTIVE；沿原实际结果／终态规则保留独立责任。 | 既有终态及错误不变，raw End 不丢失。本阶段不实施该独立终态分类。 |
+| 只有 raw End，目标业务取消已可靠生效 | 不进入本次绑定失败分类；完整实际返回仍不能被改为不完整停止。 | 沿已批准的 actual SUCCEEDED + CANCELED 责任处理；本阶段不接取消入口或决定原 child 退役。 |
+| 原 End 不存在、实际拥有者未结束，或原 End/ticket/evidence/归属无法可靠解释 | 不生成实际成功或释放保护；可解释的其他分区保持原责任，归属矛盾按状态库前提错误停止。 | 不以 C=N 补 End，不造 UNKNOWN 恢复结果或新读取。 |
+| normal/residual，原 action/run ACTIVE、未取消，原 attempt RUNNING，其他原调用可靠结束，持有 clean 完整 End，可靠 C=N，原源 SUPPORTED 且 sourceSHA 缺失，原绑定 missing | 在候选筛选前形成并持有完整 Finish 与所属绑定失败申请，先保存实际结果，再保存所属失败。 | 原 attempt SUCCEEDED/read_returned/noerror；run FAILED/device_binding_unavailable，details.reason=missing，原字节／轮次／次数／摘要缺失与未校验事实不变。 |
+| 同上，但原绑定 mismatch，当前不同驱动已合法登记 | 同样先保存原实际结果再保存所属失败；不将原 locator 交给不同驱动。 | details.reason=mismatch 及 actual_driver_id 来自真实绑定核对；其余守恒同上。 |
+| sourceSHA 已可靠取得、原声明 UNSUPPORTED，或当前绑定 MATCHED | 本次 raw 绑定分类不处理，不调用原 `resume` 或新 source/digest/media。 | 保留其本地校验或必要设备输入责任，不误记 bindingFAILED。 |
+| 同一 action 还有其他 RUNNING／缺结果调用 | 不用业务失败替代这些调用已经结束；保留原实际结果和独立责任，不伪造结束或释放保护。 | 第一批前置保证 START/STOP 及其他原调用可靠结束；并行调用完整组合另列。 |
+| 受限入口只有 raw End、尚无完整 Finish | 保持原 End 和责任；不形成新的所属业务失败或技术校验决定。 | 受限资格边界沿[安全收场与后续处理的衔接](../../architecture/camera-recovery.md#安全收场与后续处理的衔接)，不由 normal/residual 验收扩大。 |
+
+原 End 在 T0 取得；完整 `AttemptFinish`（含 run 处置）首次确定时在 T1 取一次发生时刻并分配原操作键。原 typed `FinishBindingFailure` 首次确定的完整责任集合、取消输入、配置、时刻与独立 key 一起持有；若与 Finish 同次确定，可使用该次 T1，重送不得重新取钟。T0 与 T1 分开表达，不能从较早 End 的时刻补造之后才决定的业务失败。记录首次形成时刻的协作者与业务候选墙钟探针分开；前置形成输入需要取钟，不代表已经进入调度筛选。
+
+| 保存阶段与实际事务结果 | 原持有物与允许推进 |
+| --- | --- |
+| Finish 首次保存可靠完成 | 原实际尝试／run 先可靠保存，随后才提交已经持有的所属失败申请。 |
+| Finish 可靠回滚或 COMMIT UNKNOWN | 完整 Finish、key、T1 与所属原申请保持；不提交依赖 child，不查询候选或调用新设备／媒体。关闭原连接，fresh Owned 核实可靠 F 后沿原输入重送。 |
+| Finish 已 reliable，所属失败事务可靠回滚或 COMMIT UNKNOWN | 原 child 的完整申请、独立 key 与时刻保持；不再形成另一个 Finish 或 child，不提前解除保护。 |
+| 原 child 已 COMMIT 且动作因此终态，但响应 UNKNOWN | 候选消失也先核实原 key；守恒原终态、原结果和原完整事件组，不重复计数或释放。 |
+| 再次核实或保存仍 UNKNOWN／回滚 | 持有原申请并停止本轮候选推进；真实 repository 结果经现有 StateDbFailure 边界传播。 |
+| 原 child 未可靠提交，随后新取消与其输入冲突 | 保留原完整申请和 key，停止该分区；晚取消预成 child 的退役／重形成规则不在本阶段。 |
+
+新增组件文件建议为 `apps/camctl/tests/integration/bootstrap/test_read_default_raw_binding.py`。实现预估仅涉及 `capture/media_flow.py`／`outputs/read_attempts.py` 的严格 raw 分类，以及 `bootstrap/lifecycle.py` 提供固定绑定核对与输入形成时刻；`flows.py`／`capture/residual.py` 的前置接线位置已经正确。具体 helper 签名与字段是实施建议，根 Agent 协调后按真实数据流选择；不改录像 handlers、媒体仓储、取消 map 或 RESULTS v2。
+
+- [ ] 根 Agent 审查本追加计划的权威来源、状态优先级与入口范围，确认后才写新测试。
+- [ ] 新组件测试沿公开 `media_pipeline` 的受理、START/STOP、ENDED、源观察／归属／完成及 REQUIRED 检查前提，复用真实 `execute_command` 默认装配，由普通 factory 实际读取并持有 End。在源 digest 前控制首次本地完成失败，独立断言 clean End、原 ticket/evidence、SUPPORTED、C=N、sourceSHA 为空、verification NOT_PERFORMED、attempt RUNNING、slot 原归属及零媒体调用；不复制集合，不改 SQL 投影。
+- [ ] 写 normal/residual × missing/mismatch 四个有界分区；关闭原连接后由实际入口取得 fresh Owned。在 normal 业务候选钟及 residual 旧调用候选查询边界核保存已经完成，再截停后续业务。核 actual SUCCEEDED、read_returned、bindingFAILED 完整 details、checkFAILED 与原片／原工作文件保留及正确 slot 释放；原次数／字节／轮次／未校验事实不变，零新 source/digest/check/repair。第一批只证明内检 REQUIRED 的原责任，不把它记作所有 repair 状态覆盖。
+- [ ] 根独占运行新文件并确认四项实际行为红；导入、公开前提、守卫和故障可见性失败先修前提，不计有效红。之后根独立审查并授权最窄生产 helper／装配。
+- [ ] 追加 normal/residual 的取消／终态、MATCHED 与 reliableSHA/UNSUPPORTED 排除反例；以真实公开取消、原完整申请或真实保存输入建立条件，核本次分类不写新 bindingFAILED、不调用本地续接、不丢原 holder。当前生产不能合法同时建立的终态与 raw 组合先报告，不用 SQL 伪造历史。原完整实际结果的取消语义沿既有正式规则，不因排除而改为 UNKNOWN/read_stopped。
+- [ ] 生产有根授权后闭合四个分区，随后追加两个入口各自的 Finish COMMIT 前／后 UNKNOWN 和所属失败 child COMMIT 前／后 UNKNOWN，分别验证原完整 request/key/T1 与 reliable F。故障落到真实事务，关闭 UNKNOWN 原连接后 fresh Owned 判定，不读取原连接的未提交行证明可靠性；持续 UNKNOWN／回滚再验证保存门停止。根逐项核实际故障命中后运行绿色门禁，不由基础四项推导恢复全部完成。
+- [ ] 根独立 review 核共同 helper 的同类 raw 状态、prepared 优先及所属完整组，再分别跑 bootstrap 新文件、已有 default21、required-digest／held-binding／原键门禁，与 capture 相关内检目录分进程验收；仅根暂存和提交。
+
+新文件的首次门禁由根前台独占执行：
+
+```sh
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/bootstrap/test_read_default_raw_binding.py -q
+```
+
+尚未完成且不属于四项证据：受限首次业务决定资格、匹配 raw 的受限技术校验、取消入口接线、晚取消预成 child、continuing ticket、无原 End 的跨进程恢复、其他 RUNNING 调用共存及内部直接修复输入的完整矩阵。普通 obtain 的 holder 不属于这四个 capture 集合，其已有缺 SHA 结果门禁只能作为共享 helper 回归，不算默认入口交接证据。新的红绿和恢复门禁尚待根执行，本追加计划不改变 RD4 整体未完成状态。
+
+
+#### RD4 普通前置分类的阶段证据
+
+2026-10-09，Linux 开发容器、Python 3.11.16：root 的 `/tmp/camctl-goal-read-default-raw-binding-red.log` 为 4 failed、2.49s，四项均在候选边界仍见原实际 clean READ 的 attempt RUNNING；公开历史、实际 End、可靠 C=N 和必要源摘要缺失的前提已经通过。新增 normal/residual 专用分类后，`/tmp/camctl-goal-read-default-raw-binding-green.log` 为 4 passed、2.52s。restricted 保留 prepared-only，两个取消入口仍只有录像完整申请的专用恢复。
+
+独立追踪文件权威来源发现，新 classifier 将首次观察者与拍摄来源当作同一动作，违反 `file-fields.md` 的独立身份规则。公开受理观察者 B、实际 FileObservationSave、原来源 A 的 OwnershipSave／SourceFileSave 和真实 READ 建立四项反例；root 的 `/tmp/camctl-goal-read-distinct-observer-red.log` 为 4 failed、4 deselected、2.47s，均在前置分类错误拒绝合法归属。该生产候选与有效失败测试一起纳入统一 checkpoint，修复尚未完成；不得以首四项绿色声明 RD4 完成。
+
+共享 helper 回归 `/tmp/camctl-goal-read-raw-binding-bootstrap-gate.log` 为 35 passed、2 failed、20.48s。失败均为 `test_internal_held_end_reliable_sha_and_saved_results_continue_local_check` 的 missing/mismatch 分区：实际 READ、媒体检查、动作成功及原 RESULTS 尝试保持，原 RESULTS run 在共同终态时从 ACTIVE 变为 SUCCEEDED，而旧断言要求整份查询结果包括 ACTIVE 不变。需要沿原轮次与整体流程分工核对并更新该断言，不能为了保留测试旧预期重新留下 ACTIVE 责任。UNKNOWN、排除反例、取消、直接修复和多副本完整矩阵仍按本计划未完成任务处理。

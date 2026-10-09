@@ -55,7 +55,7 @@ _EVIDENCE = EvidenceRegistry((
 
 
 @pytest_asyncio.fixture
-async def media_pipeline(tmp_path):
+async def media_pipeline(tmp_path, request):
     cfg = _config(tmp_path)
     assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
     deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
@@ -95,7 +95,19 @@ async def media_pipeline(tmp_path):
         concluded = repository.conclude_activity(ActivityConcludeSave(1, _NOW), new_operation_key(), owned)
         assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
         assert owned.connection.execute("SELECT activity_state FROM device_activities WHERE action_id=1").fetchone() == (3,)
-        source = repository.save_file_observation(FileObservationSave(1, "original-recording", {
+        observer_action_id = 1
+        if getattr(request, "param", False):
+            observer = AcceptanceRepository().process_input(ProcessInput(ParsedInput("observer.json", {
+                "request_id": "2", "created_at": instant, "name": "原片观察者",
+                "actions": [{"name": "另一个录像动作", "type": "camera_record", "device_id": "cam-1",
+                    "scheduled_at": instant, "params": {"type": "video"},
+                    "policy": {"max_delay_ms": 5000}}]}), _Catalog(), CommandMode.RUN, _NOW),
+                new_operation_key(), owned)
+            assert observer.kind is DbOutcomeKind.COMPLETED, observer.error
+            observer_action_id = owned.connection.execute(
+                "SELECT id FROM actions WHERE name=?", ("另一个录像动作",)).fetchone()[0]
+            assert observer_action_id != 1
+        source = repository.save_file_observation(FileObservationSave(observer_action_id, "original-recording", {
             "path": "/DCIM/original.mp4"}, _NOW, "original.mp4", "video/mp4"), new_operation_key(), owned)
         assert source.kind is DbOutcomeKind.COMPLETED, source.error
         source_id = source.value.file_id

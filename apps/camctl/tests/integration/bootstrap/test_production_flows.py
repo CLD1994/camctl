@@ -22,6 +22,9 @@ import pytest
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+from camctl.devices.catalog import (
+    ActionCapability, DriverDefinition, DriverDefinitions, build_catalog,
+)
 from camctl.devices.drivers.registry import DriverEntry, DriverStatus
 from camctl.devices.drivers.runtime import (
     current_registry,
@@ -212,12 +215,26 @@ class TestRunSessionProductionScheduling:
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         driver = _ProductionDriver({1: [_entry("seq-1")]})
-        register_drivers(_entry_for_driver("production-double", driver))
+        driver_id = cfg.devices["cam-1"]["driver"]
+        register_drivers(_entry_for_driver(driver_id, driver))
+        parameter = _TimelapseCatalog().parameter_definition(
+            "cam-1", "camera_timelapse", "timelapse")
+        assert parameter is not None and parameter.task_factory is not None
+        catalog = build_catalog(cfg, DriverDefinitions({driver_id: DriverDefinition(
+            driver_id=driver_id,
+            actions={"camera_timelapse": (ActionCapability(
+                action_type="camera_timelapse", parameter_type="timelapse",
+                name="延时摄影", description="发送后等待的延时摄影替身",
+                preview_supported=False, schema=parameter.schema,
+                defaults=parameter.defaults, task_factory=parameter.task_factory),)},
+        )}))
         await _submit_plan(
-            tmp_path, cfg, _TimelapseCatalog(),
+            tmp_path, cfg, catalog,
             _timelapse_plan("1", _future_schedule(1)))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=_TimelapseCatalog())
+        assert _scalar(db, "SELECT driver_id FROM actions WHERE id = 1") == (driver_id,)
+        assert current_registry().entry(driver_id).driver is driver
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         task = asyncio.create_task(execute_command(deps, None))
         try:
             # 发送经生产装配确认；结果列举来自驱动 result 端口。

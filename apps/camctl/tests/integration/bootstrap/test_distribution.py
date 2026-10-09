@@ -306,7 +306,8 @@ def test_distribution_works_outside_repository(installed: _Installed) -> None:
     # run：设备替身完成拍摄，会话收场并发布报告。
     finished = installed.cli(
         "run", "--config", str(installed.config), driver=_photo_driver())
-    assert finished.returncode == 0, finished.stderr
+    assert finished.returncode == 0, (
+        f"run stdout: {finished.stdout}\nrun stderr: {finished.stderr}")
     assert json.loads(finished.stdout) == {"kind": "succeeded"}
 
     reports = list(installed.ready.glob("status-report-*.json"))
@@ -353,8 +354,14 @@ def test_distribution_works_outside_repository(installed: _Installed) -> None:
         "run", "--config", str(failed_config), driver=_photo_driver())
     assert refused.returncode == 1, (
         f"缺失状态库仍成功: stdout={refused.stdout!r}")
-    assert refused.stdout.strip() == "", refused.stdout
-    assert "状态库不存在" in refused.stderr, refused.stderr
+    assert refused.stdout.endswith("\n") and len(refused.stdout.splitlines()) == 1
+    refusal_message = json.loads(refused.stdout)
+    assert refusal_message["kind"] == "error", refused.stdout
+    assert refusal_message["body"]["reason"] == "state_db_error", refused.stdout
+    details = refusal_message["body"]["details"]
+    assert isinstance(details, dict), refused.stdout
+    assert any(isinstance(value, str) and str(failed_state) in value
+               for value in details.values()), refused.stdout
     assert not failed_state.exists(), "日常入口创建了状态库"
 
     # 运行日志：显式初始化后损坏状态库，会话层失败经日志链写入
