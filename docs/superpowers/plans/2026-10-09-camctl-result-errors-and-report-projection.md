@@ -220,3 +220,30 @@ Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 fai
 剩余一项为 `TestImportGraph.test_rules_do_not_import_adapters`：`capture.residual` 直接导入 sqlite3，只在原文件恢复 callback 的异常分类中使用。该导入在本阶段起点 `07f0e70` 已存在，本阶段没有修改 residual 或放宽依赖守卫。后续须沿 callback 的状态错误生产端与消费者闭合异常边界，保留保存责任及候选停止语义，不能以重新导出 sqlite3 或允许违规边掩盖责任分工。
 
 独立只读审查最窄生产 diff、原资源隔离、派生错误约束及两处资源故障修复后，未发现该阶段的生产阻断。任务二的历史读取、报告生成、分类及后续 flow 停止已取得上述门禁。residual 的依赖边界已沿[残留恢复计划](2026-10-09-camctl-residual-recovery-boundary.md#实施与验证记录)迁移至装配层，公共契约目录取得 190 passed；结果保存事件守卫、未决 UNSATISFIED 和普通集合结束仍分别推进。当前全部工作按用户授权整体保存为本地 checkpoint，不声明完整 apps/camctl 或全部组件目录已通过。
+
+## 活动与结果事件守卫的闭合执行
+
+阶段起点为 `0f15fd1`。`ResultSetSave` 在构造时验证错误，但保存了调用方仍可修改的嵌套 Mapping；实际事件的 `_activity_guard` 和 `_result_check_guard` 没有再次核错误结构。直接 `confirm_result_set`、复合 `finish_result_check` 和耗尽 `close_result_check_unconfirmed` 均经过共同结果事件，必须在事务内验证实际写入值。合法类型的构造不能代替保存事件的验证。
+
+确认规则来自[设备活动字段](../../camctl/database/operation-fields.md#设备活动字段)、本计划公共错误矩阵及既有正式错误登记。活动守卫接入 `DEVICE_OBSERVED` 的 CREATE、OBSERVE、RELEASE，`RESULT_SET_CONFIRMED` 的 COMPLETE、UNSATISFIED、UNCONFIRMED，以及 `EMERGENCY_RECORDED.FINAL`。新建活动检查完整 after；更新活动按当前可靠行、before 与 after 得到实际 after。没有改变错误列也要验证保留的原值；缺少判定所需字段时明确拒绝，不能将未知当作合法空值。回放仍只应用原历史，不执行这些业务守卫。
+
+| 活动实际 after 中的字段 | 已确定的保存结果 |
+| --- | --- |
+| `capture_json=None`、`last_error_json=None`，所属分区允许没有结果或错误 | 保持合法空值；不补造事实。 |
+| 非空 capture，status 为 running、completed 或 canceled | `error` 成员省略；保留驱动可靠提供的次数及秒数。 |
+| 非空 capture，status 为 failed 或 unconfirmed | 必须有完整公共 error；保留其真实阶段、详情与指向。 |
+| capture 状态与结果结论分区不符 | 拒绝；COMPLETE、UNSATISFIED、UNCONFIRMED 的新采集结果分别是 completed、failed、unconfirmed。 |
+| 非空 capture 携带未知成员；次数不是安全整数、秒数不是有限非负数，或使用 null 代替未知可选值 | 拒绝；未知次数和秒数使用成员省略。 |
+| 两处任一非空 error 缺成员、类型非法、空 code/stage、额外顶层成员，或登记 stage/details 不符 | 转为带 cause 的 EventValidationError，整个事务可靠回滚。 |
+| 两处完整登记错误或完整未知驱动错误 | 保持全部原值，不重命名、不标准化，不将未知码降为错误。 |
+| Schema、资源或引用自身不可解释 | 保持 SchemaRuleError，不混入历史实例错误。 |
+
+实施步骤：
+
+1. 根独占运行纯守卫反例。通过正式注册取得独立语义的活动、结果守卫，内存资源隔离公共 Schema，覆盖七个分支、新建空值、保留的非法错误、五个采集状态、两个错误位置及规则错误分类。先证明非法实例被旧守卫接受，不将资源或新接口导入错误计为有效红。
+2. 真实受理、调度和设备 START 形成合法前提。合法 ResultSetSave 构造后修改调用方仍持有的嵌套字典，分别经三个公共保存入口验证缺 stage、登记 stage 错误和登记 details 错误。拒绝为 ROLLED_BACK，原 H、投影、流程、尝试及设备调用保持，没有半组历史。另核合法错误与允许空值、原 key 重送和原输入保持。
+3. 建议把内部 capture 对象的共同验证放在原模型责任边界，由模型输入与活动守卫复用；内部函数和类型命名是实现建议。结果守卫核新 capture 与所属结论分区。业务错误验证复用现有 validate_public_error，并先排除 SchemaRuleError；不放宽登记或吞掉实例错误。
+4. 横切审计实际错误生产者与全部活动分支。正常 START、STOP、残留与绑定收场没有新活动错误生产；已有完整有限 RESULTS 耗尽错误继续通过。UNSATISFIED 的错误 reason 及应急两个框架错误的正式身份仍待决定，不能猜测或仅补空详情。应急省略活动行时仍可能创建带错误的流程，活动守卫不代替其独立生产与组合责任。
+5. 根顺序运行单元、capture 的新事务门禁与已有有限耗尽恢复门禁，必要时核相应 history 消费者。阶段报告区分守卫、生产者与历史重放的覆盖；按用户要求整体提交，不以未决分区或未执行候选宣称完整目标完成。
+
+当前新守卫与事务反例尚未编写或执行；应急身份问题已单独提交用户决策。该未决事项只停止其错误生产与正式登记的相关实施。
