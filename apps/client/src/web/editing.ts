@@ -24,7 +24,11 @@ export type EditObject = Record<string, any>;
 export function parseDraft(
   content: DraftContent,
 ): EditObject & { actions: EditObject[] } {
-  const value = parseJson(content.text);
+  return requireDraftRoot(parseJson(content.text));
+}
+function requireDraftRoot(
+  value: unknown,
+): EditObject & { actions: EditObject[] } {
   if (!isObject(value) || !Array.isArray(value.actions))
     throw new Error("计划必须是对象，并包含 actions 数组。请在 JSON 中修正。");
   return value as EditObject & { actions: EditObject[] };
@@ -221,10 +225,21 @@ export function editValue(
 ): DraftContent {
   if (pendingBlocks(content, path))
     throw new Error("父级 JSON 无法表示未完成的子字段，请先修正具体路径");
-  path = resolvePath(parseDraft(content), path);
+  const unfinished = (current: DraftContent): DraftContent => ({
+    ...current,
+    pending: { ...current.pending, [pointer(path)]: { kind, text } },
+  });
+  let parsed: unknown;
+  // 容器不可解析与已经确定的无效路径分开：前者只能保存原文，后者必须报错。
+  try {
+    parsed = parseJson(content.text);
+  } catch {
+    return unfinished(content);
+  }
+  const root = requireDraftRoot(parsed);
+  path = resolvePath(root, path);
   let value: unknown;
   try {
-    const root = parseDraft(content);
     const motor =
       path[0] === "actions" &&
       typeof path[1] === "number" &&
@@ -252,10 +267,7 @@ export function editValue(
       path[2] === "name"
     )
       content = renamePreviewSources(content, path[1], undefined);
-    return {
-      ...content,
-      pending: { ...content.pending, [pointer(path)]: { kind, text } },
-    };
+    return unfinished(content);
   }
   return setValue(
     content,

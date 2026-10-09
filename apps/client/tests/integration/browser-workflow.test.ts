@@ -772,3 +772,60 @@ it.each([
   },
   20000,
 );
+it.each(["rename", "remove"])(
+  "其他动作消除名称冲突后网页保存并导出 %s",
+  async (operation) => {
+    const { page, application } = await setup();
+    await page.getByTestId("initialize-button").click();
+    application.capabilities
+      .active!.devices[0].actions.find((a) => a.type === "camera_record")!
+      .parameter_types.find((p) => p.type === "demo_fixed")!.preview_supported =
+      true;
+    const c = linked(),
+      root = JSON.parse(c.text);
+    for (const a of root.actions.slice(0, 2)) {
+      a.device_id = "demo_cam0";
+      a.params = { type: "demo_fixed" };
+    }
+    root.actions[4].params.source = { action_instance_id: "999" };
+    c.text = JSON.stringify(root);
+    const d = application.createDraft(c),
+      autoId = d.content.automaticPreviews!.actions[2].id;
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await page
+      .locator(".action-card")
+      .nth(0)
+      .getByLabel("动作名称", { exact: true })
+      .fill("B");
+    await browserExpect
+      .poll(
+        () => JSON.parse(application.draft(d.id).content.text).actions[0].name,
+      )
+      .toBe("B");
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    const other = page.locator(".action-card").nth(1);
+    if (operation === "rename")
+      await other.getByLabel("动作名称", { exact: true }).fill("C");
+    else
+      await other
+        .getByRole("button", { name: "删除动作", exact: true })
+        .click();
+    const downloaded = page.waitForEvent("download");
+    await page.getByTestId("export-button").click();
+    const body = JSON.parse(
+        readFileSync((await (await downloaded).path())!, "utf8"),
+      ),
+      saved = application.draft(d.id);
+    const index = saved.content.automaticPreviews!.actions.findIndex(
+      (a) => a.id === autoId,
+    );
+    expect(body.actions[index].params.source.action_name).toBe("B");
+    expect(
+      saved.content.automaticPreviews!.actions[index].rename!.pending,
+    ).toBe(false);
+    expect(body.actions).toHaveLength(operation === "rename" ? 5 : 3);
+  },
+  20000,
+);

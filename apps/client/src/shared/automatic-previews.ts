@@ -29,17 +29,64 @@ const automatic = (a: unknown) =>
   a.type === "obtain_action_outputs" &&
   isObject(a.params) &&
   a.params.purpose === "auto_preview";
-function plan(content: DraftContent) {
-  const root = parseJson(content.text);
+type PreviewPlan = Record<string, unknown> & {
+  actions: Record<string, unknown>[];
+};
+/** 仅解析/结构不满足时不可用；不可用绝不表示空的可靠关联图。 */
+function inspectPlan(content: DraftContent): PreviewPlan | undefined {
+  let root: unknown;
+  try {
+    root = parseJson(content.text);
+  } catch {
+    return undefined;
+  }
+  return isObject(root) &&
+    Array.isArray(root.actions) &&
+    root.actions.every(isObject)
+    ? (root as PreviewPlan)
+    : undefined;
+}
+function plan(content: DraftContent): PreviewPlan {
+  const root = inspectPlan(content);
+  if (!root) throw Error("动作列表无法可靠解释");
+  return root;
+}
+function hasPending(content: DraftContent, path: string): boolean {
+  return Object.keys(content.pending ?? {}).some(
+    (p) => p === path || p.startsWith(path + "/") || path.startsWith(p + "/"),
+  );
+}
+type Applicability = "unneeded" | "supported" | "unknown";
+/** 类型、设备和参数只使用各自未被 pending 遮盖的当前事实。 */
+function applicability(
+  content: DraftContent,
+  action: Record<string, unknown>,
+  index: number,
+  k: CapabilityState,
+): Applicability {
+  const prefix = `/actions/${index}`;
+  if (hasPending(content, prefix + "/type")) return "unknown";
+  if (!isCameraAction(action.type))
+    return ACTION_TYPES.some((type) => type === action.type)
+      ? "unneeded"
+      : "unknown";
   if (
-    !isObject(root) ||
-    !Array.isArray(root.actions) ||
-    !root.actions.every(isObject)
+    hasPending(content, prefix + "/device_id") ||
+    hasPending(content, prefix + "/params") ||
+    k.error ||
+    !k.active ||
+    typeof action.device_id !== "string" ||
+    validateParams(action.device_id, action.type, action.params, k.active)
+      .length
   )
-    throw Error("动作列表无法可靠解释");
-  return root as Record<string, unknown> & {
-    actions: Record<string, unknown>[];
-  };
+    return "unknown";
+  const parameter = k.active.devices
+    .find((d) => d.device_id === action.device_id)!
+    .actions.find((a) => a.type === action.type)!
+    .parameter_types.find(
+      (p) => p.type === (action.params as Record<string, unknown>).type,
+    )!;
+  return parameter.preview_supported ? "supported" : "unneeded";
 }
 export function validPreviewMetadata(value: unknown): value is PreviewMetadata {
   return (
@@ -222,12 +269,8 @@ export function coordinatePreviews(
 ): { content: DraftContent; issues: string[] } {
   const issues: string[] = [];
   if (previewIntent(content) === "unset") return { content, issues };
-  let root: ReturnType<typeof plan>;
-  try {
-    root = plan(content);
-  } catch {
-    return { content, issues: ["正文尚不能可靠解释"] };
-  }
+  const root = inspectPlan(content);
+  if (!root) return { content, issues: ["正文尚不能可靠解释"] };
   const metadata = content.automaticPreviews!;
   if (
     !validPreviewMetadata(metadata) ||
@@ -257,83 +300,64 @@ export function coordinatePreviews(
       issues,
     };
   }
-  const names = root.actions.map((a) => a.name);
-
   const links = reliableLinks(content, root);
   if (!links)
     return { content, issues: ["自动取回来源缺失、重复或与资料矛盾"] };
-  if (k.error || !k.active)
-    return {
-      content,
-      issues: root.actions.some((a) => isCameraAction(a.type) || automatic(a))
-        ? ["能力说明不可可靠取得"]
-        : [],
-    };
   const next = cloneClientJson(content),
     working = plan(next),
     meta = next.automaticPreviews!,
-    removed = new Set<number>();
-  let changed = false;
+    removed = new Set<number>(),
+    states = new Map<number, Applicability>();
+  // 先判定明确不适用项，再用最终保留的名称集合处理所有已证明关联。
+  root.actions.forEach((a, i) => {
+    if (automatic(a)) return;
+    const state = applicability(content, a, i, k);
+    states.set(i, state);
+    const autoIndex = links.get(metadata.actions[i].id);
+    if (state === "unneeded" && autoIndex !== undefined) removed.add(autoIndex);
+  });
+  const names = root.actions
+    .filter((_, i) => !removed.has(i))
+    .map((a) => a.name);
+  let changed = removed.size > 0;
   for (let i = 0; i < root.actions.length; i++) {
     const a = root.actions[i],
       entry = metadata.actions[i];
     if (automatic(a)) continue;
-    const autoIndex = links.get(entry.id);
-    const prefix = `/actions/${i}`;
+    const autoIndex = links.get(entry.id),
+      state = states.get(i)!,
+      prefix = `/actions/${i}`;
+    if (state === "unneeded") continue;
+    const nameReady =
+      !hasPending(content, prefix + "/name") &&
+      isName(a.name) &&
+      names.filter((n) => n === a.name).length === 1;
     if (
       autoIndex !== undefined &&
-      metadata.actions[autoIndex].rename?.pending
+      nameReady &&
+      meta.actions[autoIndex].rename?.pending
     ) {
-      issues.push(`动作 ${a.name} 的局部改名尚待完成`);
+      const proof = meta.actions[autoIndex].rename!;
+      (
+        working.actions[autoIndex].params as {
+          source: { action_name: unknown };
+        }
+      ).source.action_name = a.name;
+      proof.actionName = a.name as string;
+      proof.pending = false;
+      changed = true;
+    }
+    if (!nameReady) issues.push(`动作 ${a.name} 的名称尚未有效`);
+    if (state === "unknown") {
+      issues.push(`动作 ${a.name} 的类型、设备、参数或能力尚不能确认`);
       continue;
     }
     if (
-      Object.keys(content.pending ?? {}).some(
-        (p) =>
-          p === prefix ||
-          p.startsWith(prefix + "/") ||
-          prefix.startsWith(p + "/"),
-      )
+      !nameReady ||
+      hasPending(content, prefix) ||
+      !isTimestamp(a.scheduled_at)
     ) {
-      issues.push(`动作 ${a.name} 尚有未完成输入`);
-      continue;
-    }
-    if (!isCameraAction(a.type)) {
-      if (
-        autoIndex !== undefined &&
-        ACTION_TYPES.some((type) => type === a.type)
-      ) {
-        removed.add(autoIndex);
-        changed = true;
-      }
-      continue;
-    }
-    if (
-      typeof a.device_id !== "string" ||
-      validateParams(a.device_id, a.type, a.params, k.active).length
-    ) {
-      issues.push(`拍摄 ${a.name} 的设备或参数尚未有效`);
-      continue;
-    }
-    if (
-      !isTimestamp(a.scheduled_at) ||
-      !isName(a.name) ||
-      names.filter((n) => n === a.name).length !== 1
-    ) {
-      issues.push(`拍摄 ${a.name} 的时间或名称尚未有效`);
-      continue;
-    }
-    const parameter = k.active.devices
-      .find((d) => d.device_id === a.device_id)!
-      .actions.find((x) => x.type === a.type)!
-      .parameter_types.find(
-        (p) => p.type === (a.params as Record<string, unknown>).type,
-      )!;
-    if (!parameter.preview_supported) {
-      if (autoIndex !== undefined) {
-        removed.add(autoIndex);
-        changed = true;
-      }
+      issues.push(`拍摄 ${a.name} 的时间或输入尚未完成`);
       continue;
     }
     if (autoIndex !== undefined) {
@@ -479,8 +503,9 @@ export function renamePreviewSources(
   name: unknown,
 ): DraftContent {
   if (previewIntent(content) !== "enabled") return content;
-  const root = plan(content),
-    links = reliableLinks(content, root);
+  const root = inspectPlan(content);
+  if (!root) return content;
+  const links = reliableLinks(content, root);
   if (!links || !root.actions[index]) return content;
   const next = cloneClientJson(content),
     meta = next.automaticPreviews!;
@@ -497,8 +522,21 @@ export function renamePreviewSources(
         pending: false,
       };
   }
+  // 任一动作的局部名称编辑都可能令已有来源重名；先保存整张旧图的归属。
+  const candidateNames = root.actions.map((a, i) =>
+    i === index ? name : a.name,
+  );
+  for (const [sourceId, i] of links) {
+    const source = meta.actions.findIndex((entry) => entry.id === sourceId);
+    const candidate = candidateNames[source];
+    if (
+      !isName(candidate) ||
+      candidateNames.filter((n) => n === candidate).length !== 1
+    )
+      meta.actions[i].rename!.pending = true;
+  }
   const autoIndex = links.get(meta.actions[index].id);
-  if (autoIndex === undefined) return content;
+  if (autoIndex === undefined) return next;
   const proof = meta.actions[autoIndex].rename!;
   if (
     !isName(name) ||
