@@ -63,14 +63,14 @@ async def _consume(runtime, consumer, action_id, handler):
         await capture_handler(handler)(action_id, runtime)
 
 
-def _assert_actual_saved(owned, action_id, actual):
+def _assert_actual_saved(owned, action_id, actual, *, attempts_used=1):
     row = owned.connection.execute(
         "SELECT t.status,t.result_json,t.error_json,r.attempts_used FROM operation_attempts t"
-        " JOIN operation_runs r ON r.id=t.run_id WHERE r.responsibility_key=?",
+        " JOIN operation_runs r ON r.id=t.run_id WHERE r.responsibility_key=? AND t.attempt_no=1",
         (f"results/{action_id}",)).fetchone()
     assert row is not None
     status, result_json, error_json, count = row
-    assert (status, count) == (3, 1)
+    assert (status, count) == (3, attempts_used)
     saved = json.loads(result_json)
     assert saved["settlement"] == {"basis": "assumed", "evidence": {
         "type": "adb_foreground_assumption", "version": 1,

@@ -46,9 +46,8 @@ class _FlakyResults(ResultsDouble):
 
     def __init__(self, files_by_action: dict[int, tuple],
                  failures: int = 0) -> None:
-        self.files_by_action = files_by_action
+        super().__init__(files_by_action)
         self.failures = failures
-        self.calls: list[int] = []
 
     async def list_files(self, action_id: int) -> tuple:
         self.calls.append(action_id)

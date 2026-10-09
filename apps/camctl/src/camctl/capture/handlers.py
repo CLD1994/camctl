@@ -2263,6 +2263,7 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_capture_completions(action_id)
     context.resume_result_check_closes(action_id)
     context.resume_file_observations(action_id)
+    context.resume_start_results(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         return
@@ -2307,12 +2308,15 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     entries = listing.entries
     ticket = None if listing.already_saved else listing.ticket
     registered = _register_listing(context, action_id, listing)
-    metadata = _result_file_metadata(context, listing.ticket)
-    metadata.update((entry.identity, entry) for entry in listing.entries)
-    entries, registered_files = _registered_result_files(context, action_id, metadata)
-    registered = tuple(registered_files[entry.identity] for entry in entries)
+    if isinstance(registered, RegisteredSourceFiles):
+        entries = registered.entries
+    else:
+        metadata = _result_file_metadata(context, listing.ticket)
+        metadata.update((entry.identity, entry) for entry in listing.entries)
+        entries, registered_files = _registered_result_files(context, action_id, metadata)
+        registered = tuple(registered_files[entry.identity] for entry in entries)
     files = assess_capture_files(
-        CaptureFileSet(files=tuple(file for file, _ in registered), set_finalized=False),
+        CaptureFileSet(files=(file for file, _ in registered), set_finalized=_listing_finalized(listing)),
         ProductRequirements(required_kinds=frozenset({FileKind.PHOTO})),
     )
     assessment = CaptureAssessment(
@@ -2346,20 +2350,26 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
                            end_run=RunOutcome.SUCCEEDED)
         _settle_open_start(context, action_id, RunOutcome.SUCCEEDED)
         _conclude_activity(context, action_id)
-        _finish_capture(context, action_id, entries, FileKind.PHOTO, registered=registered)
+        _finish_capture(context, action_id, entries, FileKind.PHOTO, registered=registered,
+                        set_finalized=_listing_finalized(listing))
     elif decision is PhotoDecision.FAILED_KEEP_FILES:
         if ticket is not None:
             _finish_listing_result(context, listing,
                            end_run=RunOutcome.SUCCEEDED)
-        _settle_open_start(
-            context, action_id, RunOutcome.FAILED,
-            error=ErrorValue(code="device_failed", stage="device"))
+        if attempt[0] == int(_ATTEMPT_STATUS.FAILED):
+            failure = RecordingFailure("capture_failed", {
+                "activity_id": str(_activity_id_of(context, action_id)), "reason": "device_failed"})
+            _settle_open_start(context, action_id, RunOutcome.FAILED,
+                              error=ErrorValue(code="device_failed", stage="device"))
+        else:
+            failure = _output_failure(context, action_id, files)
+            _settle_open_start(context, action_id, RunOutcome.SUCCEEDED)
+            _conclude_activity(context, action_id)
+        if failure is None:
+            raise ConsistencyError("单张拍摄明确失败缺少实际失败分区")
         _finish_capture(
             context, action_id, entries, FileKind.PHOTO, registered=registered,
-            failure=RecordingFailure(
-                code="capture_failed",
-                details={"activity_id": str(_activity_id_of(context, action_id)),
-                         "reason": "device_failed"}))
+            failure=failure)
     elif ticket is not None:
         # 其余分区（等待响应、取消保留、未知无停止）：本轮成功结果与
         # 重试等待共同保存，等待下次推进或取消收场。
@@ -3256,6 +3266,12 @@ async def _close_canceled_timelapse(
     if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
         # 在途或本轮列举失败：取消待收场事实保持，下一轮重新核实。
         return
+    if listing.phase is ListingPhase.LISTED and listing.outcome.error is not None:
+        # 已取得的文件事实先保存；读取错误按原有限预算重试，不能
+        # 因分页已返回而提前结束取消所需的文件核实。
+        _register_listing(context, action_id, listing)
+        _finish_listing_result(context, listing, retry_wait=True)
+        return
     if listing.phase is ListingPhase.EXHAUSTED:
         _close_check_unconfirmed(context, action_id)
         listing = _saved_result_listing(context, action_id)
@@ -3396,7 +3412,9 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
         activity = row_facts(runtime.owned.connection, "device_activities", int(listing.ticket.target_id))
         baseline = activity["ownership_mode"] == int(enum_for("device_activities.ownership_mode").BASELINE_COMPARISON)
         method = int(enum_for("device_files.ownership_evidence_json.method").BASELINE_DIFFERENCE) if baseline else _TASK_SCOPE
-        uses_wait = (runtime.action(action_id)["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+        action = runtime.action(action_id)
+        uses_wait = (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+            and not action["cancel_requested"]
             and activity["completion_mode"] == int(enum_for("device_activities.completion_mode").TIME_AND_OUTPUTS))
         wait_event = (activity["wait_completed_event_id"] if uses_wait else None)
         if uses_wait and wait_event is None:

@@ -54,7 +54,7 @@ from camctl.scheduling.rules import LaunchWindow
 from ..capture.test_capture_contract import (
     DriverDouble,
     ResultsDouble,
-    _EVIDENCE,
+    _PAGE_EVIDENCE,
     _entry,
 )
 from ..persistence.test_runtime import _create_valid_database
@@ -192,7 +192,7 @@ def _runtime(owned) -> CaptureRuntime:
         timelapse=TimelapseRepository(),
         driver=_ActivityDriver(activity_target="1"),
         results=ResultsDouble({1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}),
-        evidence=_EVIDENCE,
+        evidence=_PAGE_EVIDENCE,
         wall_us=lambda: int(time.time() * 1_000_000),
         monotonic_ns=time.monotonic_ns,
         window_of=lambda action: LaunchWindow(

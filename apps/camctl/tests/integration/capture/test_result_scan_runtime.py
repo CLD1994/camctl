@@ -141,6 +141,33 @@ async def test_page_registration_uses_original_fixed_baseline_difference(owned, 
     assert json.loads(row[1])["method"] == 2 and json.loads(row[1])["activity_id"] == int(ticket.target_id)
 
 
+@pytest.mark.parametrize("case", ["photos", "empty", "wrong_kind", "not_finalized", "incomplete"])
+async def test_photo_consumes_original_pages_and_precise_output_failure(tmp_path, case):
+    owned, runtime, action_id, handler = await consumer_world(tmp_path, "photo", independent_activity=True)
+    first = [{**_entry("a"), "kind": "photo", "complete": case != "incomplete"}]
+    last = [{**_entry("b"), "kind": "photo"}]
+    if case == "empty":
+        first = last = []
+    if case == "wrong_kind":
+        first, last = [_entry("a")], [_entry("b")]
+    driver = _pages(runtime, first=first, last=last, finalized=case != "not_finalized")
+    try:
+        await capture_handler(handler)(action_id, runtime)
+        status, code, details = owned.connection.execute("SELECT status,error_code,error_details_json FROM actions WHERE id=?", (action_id,)).fetchone()
+        if case == "photos":
+            assert status == 3 and code is None
+            assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+        elif case in ("empty", "wrong_kind"):
+            assert status == 4 and code == registered_error("capture_failed")["action_error_id"]
+            assert json.loads(details) == {"activity_id": "1", "reason": "no_outputs" if case == "empty" else "invalid_outputs"}
+        else:
+            assert status == 2 and code is None
+            assert owned.connection.execute("SELECT retry_wait_required FROM operation_runs WHERE kind=7").fetchone() == (1,)
+        assert driver.list_results.await_count == 2
+    finally:
+        owned.connection.close()
+
+
 @pytest.mark.parametrize("case", ["video", "empty", "wrong_kind"])
 async def test_recording_consumes_finalized_pages_and_distinguishes_output_failures(tmp_path, case):
     owned, runtime, action_id, handler = await consumer_world(tmp_path, "record", independent_activity=True)

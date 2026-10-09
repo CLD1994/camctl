@@ -9,7 +9,7 @@ from camctl.capture.results import FileKind
 from camctl.operations.attempts import AttemptConfig
 
 from .result_consumer_fixtures import consumer_world
-from .test_capture_contract import ResultsDouble, _entry
+from .test_capture_contract import ResultsDouble, _entry, _PAGE_EVIDENCE
 from .test_result_consumer_saves import _actual, _result_port
 
 pytestmark = pytest.mark.asyncio
@@ -32,7 +32,8 @@ async def test_photo_rechecks_unfinished_files_in_same_results_run(tmp_path, fir
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
     now = [5_000_000_000]
     runtime.monotonic_ns = lambda: now[0]
-    runtime.results = ResultsDouble({activity_id: first_files})
+    runtime.results = ResultsDouble({activity_id: first_files}, set_finalized=False)
+    runtime.evidence = _PAGE_EVIDENCE
     advance = capture_handler(handler)
     try:
         await advance(action_id, runtime)
@@ -44,6 +45,7 @@ async def test_photo_rechecks_unfinished_files_in_same_results_run(tmp_path, fir
             (first_run[0],)).fetchone()
 
         runtime.results.files_by_action[activity_id] = (_entry("shot", kind=FileKind.PHOTO),)
+        runtime.results.set_finalized = True
         await advance(action_id, runtime)
         assert runtime.results.calls == [activity_id]
         assert _result_run(owned, activity_id) == first_run

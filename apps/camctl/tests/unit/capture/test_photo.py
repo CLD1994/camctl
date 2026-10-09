@@ -49,6 +49,19 @@ def _assessment(
 
 
 class TestDeclaredCompletion:
+    @pytest.mark.parametrize("response_completed,explicitly_unmet,read_error,expected", [
+        (True, True, False, PhotoDecision.FAILED_KEEP_FILES),
+        (True, False, False, PhotoDecision.VERIFY_RESULTS),
+        (True, False, True, PhotoDecision.VERIFY_RESULTS),
+        (True, True, True, PhotoDecision.VERIFY_RESULTS),
+        (False, True, False, PhotoDecision.WAIT_RESPONSE),
+    ])
+    async def test_output_failure_requires_actual_completion(
+        self, response_completed, explicitly_unmet, read_error, expected):
+        assert decide_photo(_state(response_completed=response_completed),
+            _assessment(explicitly_unmet=explicitly_unmet, read_error=read_error),
+            PhotoCompletion.COMPLETED_ON_RETURN) is expected
+
     @pytest.mark.parametrize("response_completed,complete,completion,expected", [
         (True, False, PhotoCompletion.COMPLETED_ON_RETURN, PhotoDecision.VERIFY_RESULTS),
         (False, True, PhotoCompletion.SENT_ONLY, PhotoDecision.REGISTER_SUCCESS),

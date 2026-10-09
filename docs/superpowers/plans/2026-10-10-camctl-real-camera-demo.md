@@ -185,7 +185,9 @@ assert result_attempts_after_last_page == result_attempts_after_first_page
 
 设备完成依据的阶段实现（2026-10-10，容器 Python 3.11.16）：`DEVICE + DEVICE_EVIDENCE` 消费任一原可靠结果页的实际完成观察，与原调用结果及适用集合结论共同保存。读取错误、未知集合或未知文件格式不丢失真实结束；后轮可以沿用原完成观察。确定空集合及不合格文件保留设备结束并保存正确失败，按剩余限制释放。原完整保存申请跨连接恢复，改变完成依据或省略原页引用的原键重送被拒绝；正向、逆向和快照恢复得到一致活动事实。该阶段的相关单元 2166 项和 capture 专项 92 项通过，仍待主机定时结束、启动返回已完成及其余共有消费入口。
 
-该阶段扩大 reporting 目录为 366 项通过、1 项失败。失败的报告生成用例在阶段起点 `38fa5be` 独立源码副本中复现；其单张拍摄准备使用尚未接入集合确定的旧消费路径，计划因此仍为运行中。该问题由 T6 的共有消费者接线继续处理，未把 reporting 目录报告为通过。
+单张拍摄及取消收尾的阶段实现（2026-10-10，容器 Python 3.11.16）：单张拍摄消费原可靠页及全部已确认来源文件，以明确集合保证区分成功、确定空集合、不合格产物和继续核实。原读取错误先按原键保存，后续新轮次取得完整集合才形成成功。取消延时摄影保留设备保证已完成的文件，不要求正常目标等待到期；列举错误继续消耗原有限预算，实际停止与文件完成分别保存。相关 capture 专项 104 项、全部单元 4173 项通过（1 项跳过、2 项既有 warning）。reporting 完整目录 367 项通过，正常单张拍摄可收尾并生成报告。
+
+该阶段扩大 capture 完整目录曾取得 708 项通过、62 项失败；与 T5 的失败节点对照新增 16 项、解除 8 项。新增节点涉及分页取消等待前置、测试替身初始化及恢复断言，随后均在上述专项验证中通过。完整目录尚未重新验证，剩余合法延时组合、媒体共有消费及历史结果测试继续由 T6 处理；独立应急问题仍留原责任计划，不声明 capture 目录全绿。
 
 **建议文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py`、`capture/recording.py`、`persistence/repositories/capture.py`；补充 `apps/camctl/tests/integration/capture/test_capture_contract.py`、`test_timelapse_wait_runtime.py`、`test_result_confirmation.py`、`test_result_error_history.py`，以及 bootstrap 的 `test_timelapse_finish.py`、`test_recording_stop.py`。
 
