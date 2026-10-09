@@ -7,6 +7,7 @@ import {
   copyFileSync,
   readFileSync,
   readdirSync,
+  mkdirSync,
 } from "node:fs";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
@@ -62,7 +63,7 @@ async function setup() {
   return { app, files, page };
 }
 
-it("百张图片默认摘要，分页加载并支持跨页大图与选择", async () => {
+it("自动取回归并后百张图片分页，刷新保持选择与页码并验证窄屏", async () => {
   const { app, files, page } = await setup();
   const bytes = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1cAAAAASUVORK5CYII=",
@@ -83,8 +84,15 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
     media_type: "image/png",
   }));
   obtain.input_params = {
-    source: { action_instance_id: capture.action_instance_id },
+    source: { action_name: capture.name },
+    purpose: "auto_preview",
+    filter: "preview",
   };
+  obtain.automation = {
+    purpose: "auto_preview",
+    source_action_instance_id: capture.action_instance_id,
+  };
+  obtain.scheduled_at = capture.scheduled_at;
   obtain.deliveries = Array.from({ length: 100 }, (_, i) => ({
     ...structuredClone(d),
     delivery_id: String(2000 + i),
@@ -92,6 +100,19 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
     file_name: String(2000 + i) + ".png",
     display_name: "图片" + i + ".png",
   }));
+  capture.outputs.push({
+    ...o,
+    output_id: "1200",
+    media_type: "video/mp4",
+    original_name: "独立视频.mp4",
+  });
+  obtain.deliveries.push({
+    ...d,
+    delivery_id: "2200",
+    output_id: "1200",
+    file_name: "2200.mp4",
+    display_name: "独立视频.mp4",
+  });
   app.applyReports([reportInput(r)]);
   expect(app.coverage(), JSON.stringify(app.state().imports)).toBe(r.to_wm);
   for (let i = 0; i < 14; i++) {
@@ -109,14 +130,22 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
   await page.getByRole("tab", { name: /计划记录/ }).click();
   await page.getByTestId("record-open-button").first().click();
   const card = page.locator(".result-card").filter({
-    has: page.getByRole("heading", { name: "延时摄影", exact: true }),
+    has: page.getByRole("heading", { name: obtain.name, exact: true }),
   });
   await check(
-    card.getByRole("button", { name: "展开动作 延时摄影" }),
+    card.getByRole("button", { name: `展开动作 ${obtain.name}` }),
   ).toBeVisible();
   await check(page.locator("img[data-thumbnail]")).toHaveCount(0);
-  await card.getByRole("button", { name: "展开动作 延时摄影" }).click();
+  await card.getByRole("button", { name: `展开动作 ${obtain.name}` }).click();
+  await check(card).toHaveClass(/automatic-result/);
   await check(card.locator("img[data-thumbnail]")).toHaveCount(12);
+  if (process.env.CAMCTL_VISUAL_OUTPUT) {
+    mkdirSync(process.env.CAMCTL_VISUAL_OUTPUT, { recursive: true });
+    await page.screenshot({
+      path: join(process.env.CAMCTL_VISUAL_OUTPUT, "task-5-media-desktop.png"),
+      fullPage: true,
+    });
+  }
   await check
     .poll(() =>
       card
@@ -128,6 +157,24 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
   await card.getByLabel("选择 图片0.png", { exact: true }).check();
   await card.getByRole("button", { name: "图片下一页", exact: true }).click();
   await check(card).toContainText("已选择 1");
+  const newer = {
+    ...r,
+    report_id: "2",
+    from_wm: r.to_wm,
+    to_wm: r.to_wm + 1,
+    plans: [{ ...r.plans![0], actions: undefined }],
+  };
+  app.applyReports([reportInput(newer)]);
+  await check(page.locator(".workspace-footer")).toContainText(
+    String(newer.to_wm),
+  );
+  await check(card).toContainText("第 2 / 9 页");
+  await page.getByRole("button", { name: "查看全部动作", exact: true }).click();
+  await check(card).toContainText("已选择 1");
+  await page
+    .getByRole("button", { name: "按拍摄归并自动取回", exact: true })
+    .click();
+  await check(card).toContainText("第 2 / 9 页");
   await check(card.locator("img[data-thumbnail]")).toHaveCount(2);
   await card
     .getByRole("button", { name: "查看图片 图片12.png", exact: true })
@@ -149,6 +196,11 @@ it("百张图片默认摘要，分页加载并支持跨页大图与选择", asyn
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  if (process.env.CAMCTL_VISUAL_OUTPUT)
+    await page.screenshot({
+      path: join(process.env.CAMCTL_VISUAL_OUTPUT, "task-5-media-narrow.png"),
+      fullPage: true,
+    });
 }, 30000);
 
 it("照片与延时表单按能力显示，切换保留参数并导出当前类型", async () => {

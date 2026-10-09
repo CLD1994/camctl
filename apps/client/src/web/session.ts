@@ -334,7 +334,9 @@ export class DraftSession {
         this.observe(actual, undefined, capabilities);
       } else {
         this.conflict = cloneClientJson(actual);
-        this.error = "导出结果与已知草稿基线不一致，请核对后端记录。";
+        this.error = capabilities
+          ? "导出结果与已知草稿基线不一致，请核对后端记录。"
+          : "导出核实还需要同次能力与草稿观察，当前输入已保留。";
         this.changed();
       }
       return;
@@ -403,5 +405,30 @@ export class DraftSession {
     this.error = "";
     this.conflict = undefined;
     this.changed();
+  }
+}
+
+/** 调用方在此期间阻止新的编辑、导出、追加和删除，再发起能力重载。 */
+export async function prepareSessionsForReload(
+  sessions: DraftSession[],
+  observe: () => Promise<void>,
+) {
+  try {
+    if (sessions.some((s) => s.exportState === "unknown")) await observe();
+    for (const session of sessions) {
+      if (
+        session.deletionState === "deleted" ||
+        session.exportState === "exported"
+      )
+        continue;
+      if (!session.editable)
+        throw Error(`草稿 ${session.draft.id} 的操作结果尚未核实`);
+      await session.flush();
+      if (!session.saved) throw Error(`草稿 ${session.draft.id} 尚未可靠保存`);
+    }
+  } catch (error) {
+    throw Error(
+      `草稿保存或操作核实未完成，尚未开始能力重载：${(error as Error).message}`,
+    );
   }
 }

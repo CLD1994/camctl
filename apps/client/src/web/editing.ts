@@ -57,8 +57,14 @@ export function editPlanText(
 ): DraftContent {
   if (Object.keys(content.pending ?? {}).length)
     throw new Error("请先修正或明确省略未完成输入，再编辑整份 JSON");
-  if (Object.keys(content.actionVariants ?? {}).length && !replaceVariants)
-    throw new Error("整份计划替换需要确认清除其他动作类型的编辑内容");
+  if (
+    (content.automaticPreviews ||
+      Object.keys(content.actionVariants ?? {}).length) &&
+    !replaceVariants
+  )
+    throw new Error(
+      "整份计划替换需要确认清除自动预览资料及其他动作类型的编辑内容",
+    );
   return { text, pending: {} };
 }
 export function valueAt(value: unknown, path: Path): unknown {

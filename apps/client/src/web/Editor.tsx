@@ -7,7 +7,14 @@ import type { Capabilities, Issue, ParameterType } from "../shared/types";
 import { ACTION_TYPES, validatePlan } from "../shared/plan";
 import { validateParams } from "../shared/capabilities";
 import { isObject } from "../shared/validation";
-import { parseJson, cloneClientJson } from "../shared/json";
+import { parseJson, cloneClientJson, stringifyJson } from "../shared/json";
+import {
+  previewIntent,
+  setPreviewIntent,
+  coordinatePreviews,
+  copyDraftAction,
+  type CapabilityState,
+} from "../shared/automatic-previews";
 import {
   parseDraft,
   setValue,
@@ -38,12 +45,14 @@ import {
 interface Props {
   session: DraftSession;
   capabilities: Capabilities | null;
+  capabilityState: CapabilityState;
   presets: Preset[];
   reports: Array<{ report_id: string; to_wm: number }>;
   coverage: number;
   busy: boolean;
   onExport: () => void;
   onDelete: () => void;
+  onCopy: () => void;
   checkDeletion: () => void;
   checkExport: () => void;
   savePreset: (input: {
@@ -57,9 +66,18 @@ interface Props {
 export function Editor(props: Props) {
   const { session, capabilities, busy } = props;
   const [json, setJson] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [copyError, setCopyError] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const content = session.content;
+  const intent = previewIntent(content);
+  const previewIssues = coordinatePreviews(
+    content,
+    props.capabilityState,
+  ).issues;
+  const identity = (index: number) =>
+    content.automaticPreviews?.actions[index]?.id ?? String(index);
   const change = (next: DraftContent) => {
+    setCopyError("");
     session.edit(next);
     session.schedule();
   };
@@ -106,10 +124,6 @@ export function Editor(props: Props) {
   }
   const add = () => {
     if (plan) {
-      setCollapsed(
-        (current) =>
-          new Set([...current].filter((i) => i !== plan.actions.length)),
-      );
       change(
         appendDraftAction(content, {
           name: `动作 ${plan.actions.length + 1}`,
@@ -118,14 +132,6 @@ export function Editor(props: Props) {
     }
   };
   const remove = (index: number) => {
-    setCollapsed(
-      (current) =>
-        new Set(
-          [...current]
-            .filter((i) => i !== index)
-            .map((i) => (i > index ? i - 1 : i)),
-        ),
-    );
     change(removeAction(content, index));
   };
   return (
@@ -136,6 +142,9 @@ export function Editor(props: Props) {
           <h2>编辑草稿</h2>
         </div>
         <div className="button-row">
+          <button disabled={busy || !session.editable} onClick={props.onCopy}>
+            复制草稿
+          </button>
           <button
             className="quiet danger-text"
             disabled={busy || !session.editable}
@@ -151,6 +160,7 @@ export function Editor(props: Props) {
           </button>
         </div>
       </div>
+      <ErrorBox error={copyError} />
       <div className="save-line">
         <span data-testid="save-status" role="status">
           {session.deletionState === "deleting"
@@ -166,7 +176,10 @@ export function Editor(props: Props) {
                     : "等待保存…"}
         </span>
         {session.error && session.editable && (
-          <button onClick={() => void session.flush().catch(() => {})}>
+          <button
+            disabled={busy}
+            onClick={() => void session.flush().catch(() => {})}
+          >
             重试保存
           </button>
         )}
@@ -192,7 +205,7 @@ export function Editor(props: Props) {
       {session.conflict && (
         <details>
           <summary>查看后端冲突记录</summary>
-          <pre>{JSON.stringify(session.conflict, null, 2)}</pre>
+          <pre>{stringifyJson(session.conflict, 2)}</pre>
         </details>
       )}
       {session.appendLocked && (
@@ -201,6 +214,64 @@ export function Editor(props: Props) {
         </p>
       )}
       <SelectFieldset disabled={busy || !session.editable}>
+        <section className="notice" aria-label="自动获取预览文件">
+          <strong data-testid="preview-intent">
+            自动预览
+            {intent === "enabled"
+              ? "已开启"
+              : intent === "disabled"
+                ? "已关闭"
+                : "尚未设置"}
+          </strong>
+          <div className="button-row">
+            <button
+              disabled={intent === "enabled"}
+              onClick={() =>
+                change(
+                  setPreviewIntent(
+                    content,
+                    "enabled",
+                    crypto.randomUUID(),
+                    props.capabilityState,
+                  ).content,
+                )
+              }
+            >
+              开启自动预览
+            </button>
+            <button
+              disabled={intent === "disabled"}
+              onClick={() =>
+                change(
+                  setPreviewIntent(
+                    content,
+                    "disabled",
+                    crypto.randomUUID(),
+                    props.capabilityState,
+                  ).content,
+                )
+              }
+            >
+              关闭自动预览
+            </button>
+          </div>
+          <p data-testid="preview-status">
+            {intent === "unset"
+              ? "保留全部显式动作；选择开启或关闭后按该意图维护。"
+              : intent === "disabled"
+                ? "手动取回仍独立保留。"
+                : previewIssues.length
+                  ? "部分自动预览关联待核实。"
+                  : content.automaticPreviews?.actions.some((a) => a.sourceId)
+                    ? "符合条件的拍摄由客户端维护自动取回。"
+                    : "当前没有适用动作；新增符合条件的拍摄后自动维护。"}
+          </p>
+          {previewIssues.map((message, i) => (
+            <p key={i} className="warning">
+              {message}
+            </p>
+          ))}
+        </section>
         <PendingInputs content={content} change={change} />
         {json ? (
           <>
@@ -216,9 +287,10 @@ export function Editor(props: Props) {
                 value={content.text}
                 onChange={(e) => {
                   if (
-                    Object.keys(content.actionVariants ?? {}).length &&
+                    (content.automaticPreviews ||
+                      Object.keys(content.actionVariants ?? {}).length) &&
                     !window.confirm(
-                      "修改整份计划 JSON 将以当前计划替换编辑结构，并清除其他动作类型暂存的内容。是否继续？",
+                      "替换整份计划 JSON 将清除自动预览意图、动作关联和其他动作类型暂存内容。确认后自动预览为尚未设置，并保存输入原文。是否继续？",
                     )
                   )
                     return;
@@ -259,7 +331,9 @@ export function Editor(props: Props) {
                     </button>
                     <button
                       onClick={() =>
-                        setCollapsed(new Set(plan.actions.map((_, i) => i)))
+                        setCollapsed(
+                          new Set(plan.actions.map((_, i) => identity(i))),
+                        )
                       }
                     >
                       全部收起
@@ -275,24 +349,49 @@ export function Editor(props: Props) {
               </p>
             )}
             {plan.actions.map((action, index) =>
-              isObject(action) ? (
+              isObject(action) &&
+              action.type === "obtain_action_outputs" &&
+              isObject(action.params) &&
+              action.params.purpose === "auto_preview" ? (
+                <details
+                  className="advanced"
+                  key={identity(index)}
+                  data-testid="derived-preview"
+                >
+                  <summary>
+                    自动取回 · {String(action.name ?? "未命名")} · 技术详情
+                  </summary>
+                  <p>自动预览动作由开关管理，完整内容随计划导出。</p>
+                  <pre>{stringifyJson(action, 2)}</pre>
+                </details>
+              ) : isObject(action) ? (
                 <ActionEditor
-                  key={index}
+                  key={identity(index)}
                   {...props}
                   content={content}
                   index={index}
                   action={action}
                   change={change}
-                  collapsed={collapsed.has(index)}
+                  collapsed={collapsed.has(identity(index))}
                   toggle={() =>
                     setCollapsed((current) => {
                       const next = new Set(current);
-                      if (next.has(index)) next.delete(index);
-                      else next.add(index);
+                      if (next.has(identity(index)))
+                        next.delete(identity(index));
+                      else next.add(identity(index));
                       return next;
                     })
                   }
                   remove={() => remove(index)}
+                  copy={() => {
+                    try {
+                      change(copyDraftAction(content, index));
+                    } catch (error) {
+                      setCopyError(
+                        `动作复制未完成：${(error as Error).message}`,
+                      );
+                    }
+                  }}
                   issueCount={
                     issues.filter(
                       (issue) =>
@@ -424,6 +523,7 @@ function ActionEditor(
     collapsed: boolean;
     toggle: () => void;
     remove: () => void;
+    copy: () => void;
     issueCount: number;
   },
 ) {
@@ -515,6 +615,7 @@ function ActionEditor(
           </p>
         </div>
         <div className="button-row">
+          <button onClick={props.copy}>复制动作</button>
           <button
             aria-label={props.collapsed ? "展开动作" : "收起动作"}
             aria-expanded={!props.collapsed}

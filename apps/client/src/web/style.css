@@ -1366,3 +1366,26 @@ progress {
     padding: 12px;
   }
 }
+.automatic-result {
+  margin-left: 1.25rem;
+  border-left: 3px solid var(--accent, #287463);
+}
+.product-relation {
+  overflow-wrap: anywhere;
+}
+.automatic-source {
+  color: #59725f;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.record-detail .section-head > h3 {
+  flex-shrink: 0;
+}
+@media (max-width: 640px) {
+  .record-detail .section-head {
+    flex-wrap: wrap;
+  }
+  .automatic-result {
+    margin-left: 0.35rem;
+  }
+}

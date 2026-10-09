@@ -83,6 +83,7 @@ it("网页初始化并恢复未完成的草稿输入", async () => {
   await page.getByTestId("initialize-button").click();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill('{"name":"未完成",');
   await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
   expect(
@@ -550,6 +551,7 @@ it("网页导出与再次下载保持同一请求，复制后产生新请求", a
   await page.getByTestId("initialize-button").click();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "网页同步",

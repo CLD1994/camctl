@@ -713,6 +713,7 @@ it("内置取回表单区分所属组与来源组并保存四种引用", async (
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "取回",
@@ -772,6 +773,7 @@ it("删除产物通过列表编辑并由后端拒绝重复或空列表", async (
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "清理",
@@ -803,6 +805,7 @@ it("取消目标四种模式互斥且手工跨计划 ID 不因本地未知被拒
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "取消",
@@ -876,6 +879,7 @@ it("报告表单保留非法原值，完整同步不携带旧起点", async () =
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "报告",
@@ -1363,8 +1367,10 @@ it("保存响应延迟时立即导出仍使用最新完整内容", async () => {
         { name: "同步", type: "report_status", params: { scope: "full" } },
       ],
     });
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(plan("较早"));
   await started;
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(plan("最新"));
   await page.getByTestId("export-button").click();
   expect(app.store.all("requests")).toHaveLength(0);
@@ -1456,6 +1462,7 @@ it("导出回执丢失后仍打开已保存的同一原请求", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "回执核实",
@@ -1530,6 +1537,7 @@ it("人工标记清除只更正交接记录并保留固定正文", async () => {
   const { page, app } = await setup();
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
+  page.once("dialog", (dialog) => dialog.accept());
   await page.getByTestId("draft-json-input").fill(
     JSON.stringify({
       name: "人工交接",
@@ -1728,13 +1736,13 @@ it.each([
   20000,
 );
 
-it("精确列表与筛选转换须明确选择，原非法组合和自动用途不被显示操作删除", async () => {
+it("手动取回的精确列表与筛选转换须明确选择，原非法组合和用途不被显示操作删除", async () => {
   const { page, app } = await setup();
   const params = {
     source: { action_instance_id: "7" },
     output_ids: ["4"],
     filter: "preview",
-    purpose: "auto_preview",
+    purpose: "manual",
   };
   const draft = app.createDraft({
     text: JSON.stringify({
@@ -1760,7 +1768,7 @@ it("精确列表与筛选转换须明确选择，原非法组合和自动用途�
     .toEqual({
       source: { action_instance_id: "7" },
       filter: "default",
-      purpose: "auto_preview",
+      purpose: "manual",
     });
   await page.getByLabel("指定产物筛选").check();
   await check
@@ -1768,7 +1776,7 @@ it("精确列表与筛选转换须明确选择，原非法组合和自动用途�
     .toEqual({
       source: { action_instance_id: "7" },
       output_ids: [],
-      purpose: "auto_preview",
+      purpose: "manual",
     });
 }, 20000);
 
@@ -1882,22 +1890,33 @@ it.each([
     });
     await page.reload();
     await page.getByTestId("draft-open-button").click();
-    const action = page.locator(".action-card").nth(1);
-    await check(action.getByLabel("指定产物筛选")).toHaveCount(0);
-    await check(action.locator(".builtin-parameters")).not.toContainText(
-      "不适用",
-    );
-    if ("output_ids" in params)
-      await check(action.locator(".builtin-parameters")).toContainText(
-        "参数 JSON",
+    if (params.purpose === "auto_preview") {
+      const automatic = page.getByTestId("derived-preview");
+      await automatic.locator("summary").click();
+      expect(
+        JSON.parse(await automatic.locator("pre").innerText()).params,
+      ).toEqual(params);
+      await check(page.getByLabel("动作名称", { exact: true })).toHaveCount(1);
+    } else {
+      const action = page.locator(".action-card").nth(1);
+      await check(action.getByLabel("指定产物筛选")).toHaveCount(0);
+      await check(action.locator(".builtin-parameters")).not.toContainText(
+        "不适用",
       );
-    await action
-      .getByRole("button", { name: "参数 JSON", exact: true })
-      .click();
-    expect(
-      JSON.parse(await action.getByLabel("动作参数 JSON").inputValue()),
-    ).toEqual(params);
-    await action.getByRole("button", { name: "参数表单", exact: true }).click();
+      if ("output_ids" in params)
+        await check(action.locator(".builtin-parameters")).toContainText(
+          "参数 JSON",
+        );
+      await action
+        .getByRole("button", { name: "参数 JSON", exact: true })
+        .click();
+      expect(
+        JSON.parse(await action.getByLabel("动作参数 JSON").inputValue()),
+      ).toEqual(params);
+      await action
+        .getByRole("button", { name: "参数表单", exact: true })
+        .click();
+    }
     await page.getByTestId("export-button").click();
     await check
       .poll(() => app.store.all<ExportedRequest>("requests").length)

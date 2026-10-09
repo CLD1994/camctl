@@ -14,7 +14,7 @@ import {
   HttpError,
   type ClientState,
 } from "./api";
-import { DraftSession, sameContent } from "./session";
+import { DraftSession, sameContent, prepareSessionsForReload } from "./session";
 import { FollowOperation } from "./followup";
 import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
@@ -49,10 +49,16 @@ export function App() {
       undefined,
     ),
     mounted = useRef(true),
+    operationBusy = useRef(false),
+    reloadPaused = useRef(false),
     refreshing = useRef<Promise<ClientState> | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}),
     [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
-  const refresh = async () => {
+  const refresh = async (duringReload = false) => {
+    if (reloadPaused.current && !duringReload) {
+      if (refreshing.current) return refreshing.current;
+      throw Error("能力重载正在协调状态观察");
+    }
     if (refreshing.current) return refreshing.current;
     const exportTokens = new Map(
       [...sessions.current].map(([id, session]) => [
@@ -93,7 +99,9 @@ export function App() {
   useEffect(() => {
     mounted.current = true;
     void refresh().catch(() => {});
-    const timer = setInterval(() => void refresh().catch(() => {}), 900);
+    const timer = setInterval(() => {
+      if (!reloadPaused.current) void refresh().catch(() => {});
+    }, 900);
     const leave = (e: BeforeUnloadEvent) => {
       if ([...sessions.current.values()].some((s) => !s.saved)) {
         e.preventDefault();
@@ -134,13 +142,47 @@ export function App() {
     setError("");
   };
   const run = (fn: () => Promise<void>) => {
-    if (busy) return;
+    if (operationBusy.current) return;
+    operationBusy.current = true;
     setBusy(true);
     setError("");
     setNotice("");
     void fn()
       .catch((e) => setError((e as Error).message))
-      .finally(() => setBusy(false));
+      .finally(() => {
+        operationBusy.current = false;
+        setBusy(false);
+      });
+  };
+  const reloadCapabilities = async () => {
+    reloadPaused.current = true;
+    let started = false;
+    try {
+      // 已发的轮询先结束；其后只有本次流程可以启动下一份状态观察。
+      if (refreshing.current) await refreshing.current;
+      await prepareSessionsForReload(
+        [...sessions.current.values()],
+        async () => {
+          await refresh(true);
+        },
+      );
+      started = true;
+      await api("/capabilities/reload", "POST", {});
+      const latest = await refresh(true);
+      setNotice(
+        latest.capabilities.error
+          ? "本次加载未成功，请查看诊断"
+          : "能力说明已重新加载，未导出草稿已按自动预览意图协调",
+      );
+    } catch (error) {
+      if (!started)
+        throw Error(
+          `保存或状态核实未完成，尚未开始能力重载：${(error as Error).message}`,
+        );
+      throw Error(`能力重载已发起，结果尚待核实：${(error as Error).message}`);
+    } finally {
+      reloadPaused.current = false;
+    }
   };
   const create = async () => {
     const draft = await api<Draft>("/drafts", "POST", {});
@@ -263,6 +305,19 @@ export function App() {
   const copy = (id: string) =>
     run(async () => {
       const draft = await api<Draft>(`/requests/${id}/copy`, "POST", {});
+      openDraft(draft);
+      await refresh();
+    });
+  const copyDraft = () =>
+    run(async () => {
+      if (!current) return;
+      await current.flush();
+      if (!current.saved) throw Error("请先核实草稿保存状态");
+      const draft = await api<Draft>(
+        `/drafts/${current.draft.id}/copy`,
+        "POST",
+        {},
+      );
       openDraft(draft);
       await refresh();
     });
@@ -554,9 +609,10 @@ export function App() {
         </header>
         <ErrorBox
           error={
-            connection
+            error ||
+            (connection
               ? `无法取得最新状态：${connection}。下方保留此前读取的结果。`
-              : error
+              : "")
           }
         />
         {notice && (
@@ -725,17 +781,20 @@ export function App() {
                     key={selected}
                     session={current}
                     capabilities={state.capabilities.active}
+                    capabilityState={state.capabilities}
                     presets={state.presets ?? []}
                     reports={state.reports ?? []}
                     coverage={state.coverage ?? 0}
                     busy={busy}
                     onExport={exportDraft}
                     onDelete={() => removeDraft(current)}
+                    onCopy={copyDraft}
                     checkDeletion={() => removeDraft(current, true)}
                     checkExport={() =>
                       run(async () => {
-                        await current.checkExport();
                         await refresh();
+                        if (current.exportState === "unknown")
+                          throw Error(current.error);
                       })
                     }
                     savePreset={savePreset}
@@ -795,24 +854,7 @@ export function App() {
                 <h2>设备说明管理</h2>
                 <p>手工替换说明文件后，重新加载以检查并启用。</p>
               </div>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    const capabilities = await api<ClientState["capabilities"]>(
-                      "/capabilities/reload",
-                      "POST",
-                      {},
-                    );
-                    setState((old) => (old ? { ...old, capabilities } : old));
-                    setNotice(
-                      capabilities.error
-                        ? "本次加载未成功，请查看诊断"
-                        : "能力说明已重新加载；草稿内容保持，按新规则检查",
-                    );
-                  })
-                }
-              >
+              <button disabled={busy} onClick={() => run(reloadCapabilities)}>
                 重新加载能力说明
               </button>
             </div>
