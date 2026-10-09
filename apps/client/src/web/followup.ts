@@ -1,6 +1,11 @@
-import type { Draft } from "../server/models";
+import type { Draft, DraftContent } from "../server/models";
 import { HttpError } from "./api";
-import { parseDraft } from "./editing";
+import { cloneClientJson } from "../shared/json";
+import {
+  appendContentAction,
+  coordinatePreviews,
+  type CapabilityState,
+} from "../shared/automatic-previews";
 import { sameContent } from "./session";
 type Phase =
   | "new"
@@ -13,19 +18,27 @@ type Phase =
   | "conflict"
   | "done";
 export interface FollowTransport {
+  capabilities?(): CapabilityState | undefined;
   create(): Promise<Draft>;
   prepare(id: string): Promise<Draft>;
   append(
     id: string,
     revision: number,
     action: Record<string, unknown>,
+    expected?: AppendExpectation,
   ): Promise<Draft>;
   read(id: string): Promise<Draft>;
+}
+export interface AppendExpectation {
+  content: DraftContent;
+  capabilityVersion?: string;
 }
 export function classifyAppend(
   baseline: Draft,
   action: Record<string, unknown>,
   actual: Draft,
+  expected?: AppendExpectation,
+  capabilities?: CapabilityState,
 ): "appended" | "baseline" | "conflict" {
   if (actual.id !== baseline.id || actual.exportedRequestId) return "conflict";
   if (
@@ -33,23 +46,35 @@ export function classifyAppend(
     sameContent(actual.content, baseline.content)
   )
     return "baseline";
+  if (
+    actual.revision > baseline.revision &&
+    capabilities &&
+    (!actual.lastWrite || actual.lastWrite.revision <= baseline.revision) &&
+    sameContent(
+      coordinatePreviews(baseline.content, capabilities).content,
+      actual.content,
+    )
+  )
+    return "baseline";
   try {
-    const before = parseDraft(baseline.content),
-      after = parseDraft(actual.content),
-      last = after.actions.at(-1);
-    const { name: requestedName, ...requested } = action,
-      { name: actualName, ...appended } = last ?? {};
+    const content =
+      expected?.content ?? appendContentAction(baseline.content, action, true);
     if (
       actual.revision === baseline.revision + 1 &&
-      after.actions.length === before.actions.length + 1 &&
-      typeof actualName === "string" &&
-      JSON.stringify({ ...after, actions: after.actions.slice(0, -1) }) ===
-        JSON.stringify(before) &&
-      JSON.stringify(appended) === JSON.stringify(requested) &&
-      sameContent(
-        { ...actual.content, text: baseline.content.text },
-        baseline.content,
-      )
+      sameContent(actual.content, content)
+    )
+      return "appended";
+    const write = actual.lastWrite;
+    if (
+      write?.revision === baseline.revision + 1 &&
+      actual.revision >= write.revision &&
+      sameContent(write.input, content) &&
+      (sameContent(write.content, actual.content) ||
+        (!!capabilities &&
+          sameContent(
+            coordinatePreviews(write.content, capabilities).content,
+            actual.content,
+          )))
     )
       return "appended";
   } catch {
@@ -65,6 +90,7 @@ export class FollowOperation {
   result?: Draft;
   error = "";
   readonly action: Record<string, unknown>;
+  expected?: AppendExpectation;
   private running = false;
   constructor(
     destination: string,
@@ -73,20 +99,40 @@ export class FollowOperation {
   ) {
     this.phase = destination === "new" ? "new" : "target";
     this.targetId = destination === "new" ? undefined : destination;
-    this.action = structuredClone(action);
+    this.action = cloneClientJson(action);
   }
   get inProgress() {
     return this.running;
   }
+  private prepareExpectation() {
+    const capabilities = this.transport.capabilities?.();
+    const appended = appendContentAction(
+      this.baseline!.content,
+      this.action,
+      true,
+    );
+    this.expected = {
+      content: capabilities
+        ? coordinatePreviews(appended, capabilities).content
+        : appended,
+      capabilityVersion: capabilities?.version,
+    };
+  }
   private async verify() {
     try {
-      this.actual = structuredClone(await this.transport.read(this.targetId!));
+      this.actual = cloneClientJson(await this.transport.read(this.targetId!));
     } catch (error) {
       this.phase = "unknown";
       this.error = `追加结果尚未确认，请恢复连接后重新核实。${message(error)}`;
       return;
     }
-    const verdict = classifyAppend(this.baseline!, this.action, this.actual);
+    const verdict = classifyAppend(
+      this.baseline!,
+      this.action,
+      this.actual,
+      this.expected,
+      this.transport.capabilities?.(),
+    );
     if (verdict === "appended") {
       this.result = this.actual;
       this.phase = "done";
@@ -118,6 +164,8 @@ export class FollowOperation {
     if (this.phase === "not_appended") {
       await this.verify();
       if (this.phase !== "not_appended") return;
+      this.baseline = cloneClientJson(this.actual!);
+      this.prepareExpectation();
     }
     if (this.phase === "new") {
       this.phase = "creating";
@@ -145,7 +193,8 @@ export class FollowOperation {
         const baseline = await this.transport.prepare(this.targetId!);
         if (baseline.id !== this.targetId || baseline.exportedRequestId)
           throw Error("目标草稿不可追加");
-        this.baseline = structuredClone(baseline);
+        this.baseline = cloneClientJson(baseline);
+        this.prepareExpectation();
       } catch (error) {
         this.error = `目标草稿已确定，准备基线未完成。${message(error)}`;
         return;
@@ -158,8 +207,17 @@ export class FollowOperation {
         this.targetId!,
         this.baseline!.revision,
         this.action,
+        this.expected,
       );
-      if (classifyAppend(this.baseline!, this.action, actual) !== "appended")
+      if (
+        classifyAppend(
+          this.baseline!,
+          this.action,
+          actual,
+          this.expected,
+          this.transport.capabilities?.(),
+        ) !== "appended"
+      )
         throw Error("追加回执与本次动作不一致");
       this.actual = actual;
       this.result = actual;

@@ -1,6 +1,14 @@
 export const DRAFT_COMMON_ACTION_FIELDS = ["name", "scheduled_at"] as const;
+export type PreviewIntent = "enabled" | "disabled" | "unset";
+export interface PreviewMetadata {
+  intent: PreviewIntent;
+  namespace: string;
+  next: number;
+  actions: Array<{ id: string; sourceId?: string }>;
+}
 export interface DraftContent {
   text: string;
+  automaticPreviews?: PreviewMetadata;
   /** 尚不能形成 JSON 值的输入，随草稿保存，存在时禁止导出。 */
   pending?: Record<string, { kind: "number" | "json"; text: string }>;
   /** 非当前动作类型的编辑内容；键为动作下标，不进入执行协议。 */
@@ -21,6 +29,8 @@ export interface Draft {
   createdAt: string;
   updatedAt: string;
   exportedRequestId?: string;
+  /** 最近用户写入的原始完整依据；后续能力派生不覆盖它。 */
+  lastWrite?: { revision: number; input: DraftContent; content: DraftContent };
 }
 export interface ExportedRequest {
   id: string;
@@ -28,6 +38,7 @@ export interface ExportedRequest {
   body: Record<string, unknown>;
   exportedAt: string;
   handedAt: string | null;
+  copyContent?: DraftContent;
 }
 export interface Preset {
   id: string;

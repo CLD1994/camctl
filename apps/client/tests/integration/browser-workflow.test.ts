@@ -624,3 +624,46 @@ it("网页混合导入真实报告与视频，核验后播放并按范围下载"
     fixtures.video.subarray(0, 16),
   );
 }, 20000);
+
+it("能力版本变化后后续追加从最新观察准备重试", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("probe"));
+  report.plans![0].actions = undefined;
+  application.applyReports([reportInput(report)]);
+  const draft = application.createDraft();
+  await page.reload();
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  await page.getByRole("button", { name: "准备取回计划默认产物" }).click();
+  await choose(page.getByLabel("目标草稿"), draft.id);
+  let first = true;
+  await page.route("**/api/drafts/*/actions", async (route) => {
+    if (first) {
+      first = false;
+      application.reloadCapabilities();
+    }
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+  await browserExpect(
+    page.getByRole("button", { name: "重试同一目标追加", exact: true }),
+  ).toBeVisible();
+  expect(JSON.parse(application.draft(draft.id).content.text).actions).toEqual(
+    [],
+  );
+  await page.waitForResponse(
+    async (response) =>
+      response.url().endsWith("/api/state") &&
+      (await response.json()).capabilities.version ===
+        application.capabilities.version,
+  );
+  await page
+    .getByRole("button", { name: "重试同一目标追加", exact: true })
+    .click();
+  await browserExpect(page.getByRole("dialog")).toHaveCount(0);
+  expect(
+    JSON.parse(application.draft(draft.id).content.text).actions,
+  ).toHaveLength(1);
+  expect(application.store.all("drafts")).toHaveLength(1);
+}, 20000);

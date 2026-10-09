@@ -131,6 +131,7 @@ export function createHttpApp(
         String(req.params.id),
         req.body.revision,
         req.body.content,
+        req.body.capabilityVersion ?? null,
       ),
     ),
   );
@@ -140,6 +141,20 @@ export function createHttpApp(
         String(req.params.id),
         req.body.revision,
         req.body.action,
+        req.body.expected?.content,
+        req.body.expected?.capabilityVersion,
+      ),
+    ),
+  );
+  app.post("/api/drafts/:id/copy", (req, res) =>
+    res.status(201).json(application.copyDraft(String(req.params.id))),
+  );
+  app.post("/api/drafts/:id/actions/:index/copy", (req, res) =>
+    res.json(
+      application.copyAction(
+        String(req.params.id),
+        req.body.revision,
+        Number(req.params.index),
       ),
     ),
   );

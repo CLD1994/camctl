@@ -8,6 +8,11 @@ import { isObject } from "../shared/validation";
 import type { DraftContent, ExportedRequest } from "../server/models";
 import type { ReportPlan } from "../shared/types";
 import {
+  appendContentAction,
+  removeContentAction,
+  renamePreviewSources,
+} from "../shared/automatic-previews";
+import {
   sources,
   cleanupModes,
   targets,
@@ -71,6 +76,14 @@ export function setValue(
 ): DraftContent {
   if (!omit && !replace && pendingBlocks(content, path))
     throw new Error("此路径存在尚未解决的输入，请先逐项修正或明确省略");
+  if (
+    path.length === 3 &&
+    path[0] === "actions" &&
+    typeof path[1] === "number" &&
+    path[2] === "name" &&
+    !omit
+  )
+    content = renamePreviewSources(content, path[1], value);
   const root = parseDraft(content);
   let target: EditObject = root;
   for (const part of path.slice(0, -1)) {
@@ -219,41 +232,13 @@ export function removeAction(
   content: DraftContent,
   index: number,
 ): DraftContent {
-  const root = parseDraft(content);
-  root.actions.splice(index, 1);
-  const pending: NonNullable<DraftContent["pending"]> = {};
-  for (const [key, value] of Object.entries(content.pending ?? {})) {
-    const match = /^\/actions\/(\d+)(\/.*)?$/.exec(key);
-    if (!match) {
-      pending[key] = value;
-      continue;
-    }
-    const n = Number(match[1]);
-    if (n === index) continue;
-    pending[`/actions/${n > index ? n - 1 : n}${match[2] ?? ""}`] = value;
-  }
-  const actionVariants = Object.fromEntries(
-    Object.entries(content.actionVariants ?? {})
-      .filter(([key]) => Number(key) !== index)
-      .map(([key, value]) => [
-        String(Number(key) > index ? Number(key) - 1 : Number(key)),
-        value,
-      ]),
-  );
-  return {
-    ...content,
-    text: stringifyJson(root, 2),
-    pending,
-    ...(content.actionVariants ? { actionVariants } : {}),
-  };
+  return removeContentAction(content, index);
 }
 export function appendDraftAction(
   content: DraftContent,
   action: EditObject,
 ): DraftContent {
-  const root = parseDraft(content);
-  root.actions.push(cloneClientJson(action));
-  return { ...content, text: stringifyJson(root, 2) };
+  return appendContentAction(content, action);
 }
 export function resolveField(
   field: unknown,

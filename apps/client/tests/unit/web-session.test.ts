@@ -198,3 +198,196 @@ it("删除未知状态仅在可靠核实不存在后结束", async () => {
   await session.checkDeletion(async () => undefined);
   expect(session.deletionState).toBe("deleted");
 });
+
+it("完整版本比较包括预览三态和动作身份", () => {
+  const a = {
+    text: "{}",
+    automaticPreviews: {
+      intent: "enabled" as const,
+      namespace: "x",
+      next: 0,
+      actions: [],
+    },
+  };
+  expect(
+    sameContent(a, {
+      ...a,
+      automaticPreviews: { ...a.automaticPreviews, intent: "disabled" },
+    }),
+  ).toBe(false);
+});
+it("观察后端派生版本保留本地未保存正文与资料并更新保存基线", async () => {
+  const { coordinatePreviews, initializePreviewMetadata } =
+    await import("../../src/shared/automatic-previews");
+  const capabilities = {
+    active: { devices: [] },
+    error: null,
+    generation: 2,
+    version: "second",
+  };
+  const original = {
+    ...draft(),
+    content: initializePreviewMetadata(
+      {
+        text: JSON.stringify({
+          name: "原名",
+          actions: [
+            {
+              name: "自动",
+              type: "obtain_action_outputs",
+              params: { purpose: "auto_preview" },
+            },
+          ],
+        }),
+      },
+      "disabled",
+      "x",
+    ),
+  };
+  const session = new DraftSession(
+    original,
+    {
+      save: async (_id, revision, content) => ({
+        ...original,
+        revision: revision + 1,
+        content,
+      }),
+      read: async () => original,
+    },
+    () => {},
+  );
+  const local = {
+    ...original.content,
+    text: original.content.text.replace("原名", "本地新名"),
+    pending: { "/name": { kind: "json" as const, text: "{" } },
+  };
+  session.edit(local);
+  session.observe(
+    {
+      ...original,
+      revision: 2,
+      content: coordinatePreviews(original.content, capabilities).content,
+    },
+    undefined,
+    capabilities,
+  );
+  expect(session.revision).toBe(2);
+  expect(session.content.text).toContain("本地新名");
+  expect(session.content.pending).toEqual(local.pending);
+  await session.flush();
+  expect(session.revision).toBe(3);
+});
+it("未知保存后能力派生不以协调相等猜提交，原始写入依据才能证明提交", async () => {
+  const initial = draft(),
+    input = { text: '{"new":true}' };
+  let actual = {
+    ...initial,
+    revision: 3,
+    content: { text: '{"derived":true}' },
+    lastWrite: { revision: 2, input, content: { text: '{"derived":true}' } },
+  };
+  const session = new DraftSession(
+    initial,
+    {
+      save: async () => {
+        throw Error("响应丢失");
+      },
+      read: async () => actual,
+    },
+    () => {},
+  );
+  session.edit(input);
+  await session.flush();
+  expect(session.revision).toBe(3);
+  expect(session.content).toEqual(actual.content);
+  expect(session.saved).toBe(true);
+  const other = new DraftSession(
+    initial,
+    {
+      save: async () => {
+        throw Error("响应丢失");
+      },
+      read: async () => ({
+        ...actual,
+        lastWrite: { ...actual.lastWrite, input: initial.content },
+      }),
+    },
+    () => {},
+  );
+  other.edit(input);
+  await expect(other.flush()).rejects.toThrow();
+  expect(other.content).toEqual(input);
+  expect(other.saved).toBe(false);
+});
+
+it("导出未知遇到仅能力派生的新版本可证实未导出并保留新输入", async () => {
+  const { initializePreviewMetadata, coordinatePreviews } =
+    await import("../../src/shared/automatic-previews");
+  const k = {
+    active: { devices: [] },
+    error: null,
+    generation: 2,
+    version: "v2",
+  };
+  const original = {
+    ...draft(),
+    content: initializePreviewMetadata(
+      {
+        text: JSON.stringify({
+          name: "原",
+          actions: [
+            {
+              name: "自动",
+              type: "obtain_action_outputs",
+              params: { purpose: "auto_preview" },
+            },
+          ],
+        }),
+      },
+      "disabled",
+      "ns",
+    ),
+  };
+  const session = new DraftSession(
+    original,
+    { save: async () => original, read: async () => original },
+    () => {},
+  );
+  session.beginExport();
+  session.exportUnknown();
+  const actual = {
+    ...original,
+    revision: 2,
+    content: coordinatePreviews(original.content, k).content,
+  };
+  session.observe(actual, session.exportToken, k);
+  expect(session.exportState).toBe("editable");
+  expect(session.revision).toBe(2);
+  expect(session.content).toEqual(actual.content);
+});
+it("未核实保存的观察不能抬高基线或消除差异", async () => {
+  const initial = draft(),
+    pending = deferred<Draft>();
+  const session = new DraftSession(
+    initial,
+    {
+      save: async () => pending.promise,
+      read: async () => {
+        throw Error("offline");
+      },
+    },
+    () => {},
+  );
+  session.edit({ text: '{"local":true}' });
+  const flushing = session.flush();
+  session.observe(
+    { ...initial, revision: 8, content: { text: '{"remote":true}' } },
+    undefined,
+    { active: { devices: [] }, error: null, generation: 2, version: "v2" },
+  );
+  expect(session.revision).toBe(1);
+  expect(session.content.text).toContain("local");
+  pending.resolve({ ...initial, revision: 8 });
+  await expect(flushing).rejects.toThrow();
+  expect(session.saved).toBe(false);
+});

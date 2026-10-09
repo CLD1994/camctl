@@ -45,6 +45,9 @@ export function App() {
   const [, render] = useReducer((n) => n + 1, 0),
     sessions = useRef(new Map<string, DraftSession>()),
     deletedDrafts = useRef(new Set<string>()),
+    capabilityObservation = useRef<ClientState["capabilities"] | undefined>(
+      undefined,
+    ),
     mounted = useRef(true),
     refreshing = useRef<Promise<ClientState> | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}),
@@ -67,10 +70,11 @@ export function App() {
             ),
           };
         if (mounted.current) {
+          capabilityObservation.current = value.capabilities;
           for (const draft of value.drafts ?? [])
             sessions.current
               .get(draft.id)
-              ?.observe(draft, exportTokens.get(draft.id));
+              ?.observe(draft, exportTokens.get(draft.id), value.capabilities);
           setState(value);
           setConnection("");
         }
@@ -118,6 +122,7 @@ export function App() {
         },
       );
       sessions.current.set(draft.id, s);
+      s.coordinate(capabilityObservation.current);
     }
     return s;
   };
@@ -196,13 +201,14 @@ export function App() {
     run(async () => {
       if (!current) return;
       let record: ExportedRequest;
+      current.coordinate(capabilityObservation.current);
       await current.flush();
-      current.beginExport();
+      const snapshot = current.beginExport(capabilityObservation.current);
       try {
         record = await api<ExportedRequest>(
           `/drafts/${current.draft.id}/export`,
           "POST",
-          { revision: current.revision, content: current.content },
+          snapshot,
         );
       } catch (e) {
         if (e instanceof HttpError && e.status >= 400 && e.status < 500) {
@@ -295,6 +301,7 @@ export function App() {
       const pending = activeFollow ?? {
         follow: follow!,
         operation: new FollowOperation(destination, action, {
+          capabilities: () => capabilityObservation.current,
           create: () => api<Draft>("/drafts", "POST", {}),
           prepare: async (id) => {
             const initial = await readDraft(id),
@@ -313,8 +320,12 @@ export function App() {
             session.lockAppend();
             return actual;
           },
-          append: (id, revision, action) =>
-            api<Draft>(`/drafts/${id}/actions`, "POST", { revision, action }),
+          append: (id, revision, action, expected) =>
+            api<Draft>(`/drafts/${id}/actions`, "POST", {
+              revision,
+              action,
+              expected,
+            }),
           read: readDraft,
         }),
       };

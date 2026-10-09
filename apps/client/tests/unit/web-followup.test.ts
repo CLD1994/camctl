@@ -26,10 +26,14 @@ const appended = (): Draft => ({
   revision: 2,
   content: {
     ...baseline().content,
-    text: JSON.stringify({
-      name: "原计划",
-      actions: [{ ...action, name: "同步 2" }],
-    }),
+    text: JSON.stringify(
+      {
+        name: "原计划",
+        actions: [action],
+      },
+      null,
+      2,
+    ),
   },
 });
 it.each(["appended", "baseline", "conflict"] as const)(
@@ -118,7 +122,10 @@ it("已确认未追加只在明确重试时对同目标再次追加", async () =
   await op.advance();
   expect(op.phase).toBe("done");
   expect(tx.create).toHaveBeenCalledTimes(1);
-  expect(tx.append).toHaveBeenLastCalledWith("fixed", 1, action);
+  expect(tx.append).toHaveBeenLastCalledWith("fixed", 1, action, {
+    content: appended().content,
+    capabilityVersion: undefined,
+  });
 });
 it("基线读取失败后仍使用已知目标", async () => {
   const tx = transport({
@@ -193,5 +200,58 @@ it("准备目标基线期间重复调用不会并发追加", async () => {
   release();
   await Promise.all([first, second]);
   expect(tx.append).toHaveBeenCalledTimes(1);
+  expect(op.phase).toBe("done");
+});
+
+it("追加必须匹配发送前完整预期，不能接受任意返回名称或身份", async () => {
+  const wrong = {
+    ...appended(),
+    content: {
+      ...appended().content,
+      text: JSON.stringify(
+        { name: "原计划", actions: [{ ...action, name: "任意名称" }] },
+        null,
+        2,
+      ),
+    },
+  };
+  expect(classifyAppend(baseline(), action, wrong)).toBe("conflict");
+  const { initializePreviewMetadata } =
+    await import("../../src/shared/automatic-previews");
+  const base = {
+    ...baseline(),
+    content: initializePreviewMetadata(baseline().content, "enabled", "n"),
+  };
+  const actual = {
+    ...base,
+    revision: 2,
+    content: {
+      ...base.content,
+      text: JSON.stringify({ name: "原计划", actions: [action] }, null, 2),
+      automaticPreviews: {
+        ...base.content.automaticPreviews!,
+        next: 1,
+        actions: [{ id: "wrong" }],
+      },
+    },
+  };
+  expect(classifyAppend(base, action, actual)).toBe("conflict");
+});
+it("核实未追加后保留追加锁，重试不要求再次进入可编辑保存入口", async () => {
+  const tx = transport({
+    prepare: vi
+      .fn()
+      .mockResolvedValueOnce(baseline())
+      .mockRejectedValue(Error("追加锁仍持有")),
+    append: vi
+      .fn()
+      .mockRejectedValueOnce(Error("lost"))
+      .mockResolvedValue(appended()),
+    read: async () => baseline(),
+  });
+  const op = new FollowOperation("fixed", action, tx);
+  await op.advance();
+  expect(op.phase).toBe("not_appended");
+  await op.advance();
   expect(op.phase).toBe("done");
 });

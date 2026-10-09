@@ -65,6 +65,7 @@ function setup(rule: object = { type: "integer" }) {
       },
     ],
   });
+  app.capabilities.error = null;
   return app;
 }
 function content(token = "0") {
@@ -274,7 +275,11 @@ it("HTTP 接受包含非法编辑原文的私有草稿并完整返回状态", as
   const exported = await fetch(`${base}/api/drafts/${draft.id}/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: value, revision: 1 }),
+    body: JSON.stringify({
+      content: value,
+      revision: 1,
+      capabilityVersion: app.capabilities.version,
+    }),
   });
   expect(exported.status).toBe(400);
   expect(app.store.all("requests")).toEqual([]);
@@ -332,7 +337,7 @@ async function http(app: Application) {
 function reopen(app: Application) {
   app.store.close();
   const next = new Application(app.store.directory, { next: () => 2n });
-  next.capabilities.active = app.capabilities.active;
+  next.capabilities = { ...app.capabilities };
   clean.push(() => next.store.close());
   return next;
 }
@@ -385,7 +390,11 @@ it("HTTP 固定正文在递交、ACK 更新和状态响应中保持同一数值�
   const response = await fetch(`${base}/drafts/${draft.id}/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ revision: 1, content: draft.content }),
+    body: JSON.stringify({
+      revision: 1,
+      content: draft.content,
+      capabilityVersion: app.capabilities.version,
+    }),
   });
   const request = parseClientJson(await response.text()) as ExportedRequest;
   noninteger((request.body.actions as any[])[0].params, app);
