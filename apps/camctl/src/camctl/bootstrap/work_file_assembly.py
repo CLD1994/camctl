@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ConsistencyError
 from camctl.history.decoding import decode_event_row
 from camctl.outputs.work_files import (
     CleanupScan, WorkFileContext, WorkFileHistory, WorkFileLimits,
@@ -31,7 +33,7 @@ _TERMINAL_DELIVERIES = frozenset(int(_DELIVERY_STATUS[name]) for name in (
 class WorkFileRuntime:
     """保存会话的固定范围与处理记录，后台责任自己关闭独立连接。"""
 
-    def __init__(self, *, staging: Path, limits: WorkFileLimits):
+    def __init__(self, *, staging: Path, limits: WorkFileLimits, pending_media_results=None):
         self.staging = staging
         self.limits = limits
         self.repository = OutputsRepository()
@@ -43,11 +45,21 @@ class WorkFileRuntime:
         self.processed: dict = {}
         self.pending_results: dict = {}
         self.pending_withdrawals: dict = {}
+        self.pending_media_results = {} if pending_media_results is None else pending_media_results
         self._task: asyncio.Task | None = None
         self._token = self.supervisor.register(self)
         self._stopping = False
         self._discovery_after = 0
         self._first_files: set[int] = set()
+
+    async def resume_media_results(self, owned) -> None:
+        """筛选业务前核实会话已取得的媒体申请，不开始设备或工具操作。"""
+        from camctl.capture.media_flow import resume_media_saves
+
+        try:
+            await resume_media_saves(owned, self.pending_media_results, self.executor)
+        except (ConsistencyError, sqlite3.Error) as error:
+            raise StateDbFailure(f"原媒体申请未可靠保存: {error}") from error
 
     async def first_cleanup(self, file_ids: tuple[int, ...], *, owned, occurred_at: int):
         """采用本次必要文件的首次结果，不使用历史扫描范围或额度。"""
@@ -213,7 +225,7 @@ class WorkFileRuntime:
             raise StateDbFailure(f"中间文件维护未可靠完成: {error}") from error
 
     def required_settlements(self) -> int:
-        return int(self._task is not None and not self._task.done())
+        return int(self._task is not None and not self._task.done()) + len(self.pending_media_results)
 
     async def take_over(self, task: OwnedTask) -> None:
         await asyncio.shield(task.pending)
@@ -226,6 +238,12 @@ class WorkFileRuntime:
         if result.failed or files.failed:
             raise StateDbFailure("; ".join(
                 failure.error for failure in (*result.failed, *files.failed)))
+        if self.pending_media_results:
+            pending = next(iter(self.pending_media_results.values()))
+            raise StateDbFailure(
+                f"原媒体申请尚未可靠保存: processing_id={pending.command.processing_id},"
+                f" stage={pending.stage.value}, key={pending.key}: {pending.save_error}"
+            ) from pending.save_error
 
     def stop_new_work(self) -> None:
         """致命错误、取消或受限转换停止新增维护，保留实际收场。"""

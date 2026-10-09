@@ -41,9 +41,9 @@ __all__ = ["capture_flow", "cancel_flow", "report_flow", "residual_flow",
            "winddown_flow"]
 
 
-def residual_flow(capture_factory):
+def residual_flow(capture_factory, *, resume_media_results=None):
     """残留收场推进流程；实现见 camctl.capture.residual。"""
-    return _residual_flow_impl(capture_factory)
+    return _residual_flow_impl(capture_factory, resume_media_results=resume_media_results)
 
 
 def _due_pending_actions(
@@ -87,7 +87,7 @@ def _ready_device_groups(
     return groups
 
 
-def capture_flow(capture_factory: Callable[[Any, str], Any]) -> Callable[[Any], Any]:
+def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None) -> Callable[[Any], Any]:
     """构造推进拍摄工作的调度程序。
 
     capture_factory 接收本轮流量的数据库连接与设备身份，返回该设
@@ -99,6 +99,8 @@ def capture_flow(capture_factory: Callable[[Any, str], Any]) -> Callable[[Any], 
     async def flow(context: Any) -> None:
         owned = context.open_connection()
         try:
+            if resume_media_results is not None:
+                await resume_media_results(owned)
             now = context.clock.utc_micros()
             scheduling = SchedulingRepository()
             for (action_id, device_id, scheduled_at,
@@ -181,6 +183,7 @@ class _WinddownTarget:
 def winddown_flow(
     *, capture_factory: Callable[[Any, str], Any], wait_cap_s: Decimal,
     sleep: Callable[[float], Any] = asyncio.sleep,
+    resume_media_results=None,
 ) -> Callable[[Any], Any]:
     """构造时钟异常会话的录像保守收场流程。
 
@@ -197,6 +200,8 @@ def winddown_flow(
 
         owned = context.open_connection()
         try:
+            if resume_media_results is not None:
+                await resume_media_results(owned)
             with closing(owned.connection.execute(
                     "SELECT id FROM actions"
                     " WHERE type = 2 AND status = 2"
@@ -304,6 +309,7 @@ def cancel_flow(
     *, ready: Path, processing: Path, unscheduled_only: bool = False,
     motor_permits: dict | None = None,
     work_files: Any = None,
+    resume_media_results=None,
 ) -> Callable[[Any], Any]:
     """构造推进取消动作的会话流程。
 
@@ -345,6 +351,8 @@ def cancel_flow(
 
         owned = context.open_connection()
         try:
+            if resume_media_results is not None:
+                await resume_media_results(owned)
             repository = CancellationRepository(motor_permits=motor_permits)
             occurred = context.clock.utc_micros
             withdrawal_context = WithdrawalContext(owned, OutputsRepository(), ready,

@@ -101,10 +101,21 @@ async def test_default_cancel_confirms_original_media_before_new_cancel_success(
         else:
             await context.flows["cancel"](context)
             assert order[0] == "media_confirmation"
+            if not commit_after:
+                # 新取消已经生效，原拍摄拥有者仍须沿自身流程结束；
+                # 下一次取消推进才汇总这一可靠终态。
+                assert reopened.connection.execute(
+                    "SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (2,)
+                assert reopened.connection.execute(
+                    "SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (2, 1)
+                await context.flows["scheduling"](context)
+                assert reopened.connection.execute(
+                    "SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (6, 1)
+                await context.flows["cancel"](context)
             assert "start_cancel_action" in order and "finish_cancel_action" in order
             assert reopened.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (3,)
         assert len(inputs) == 2 and inputs[1] == inputs[0]
-        assert len(flow_connections) == 1
+        assert len(flow_connections) == (3 if not commit_after and confirmation == "saved" else 1)
         assert tools.probes == 1 and tools.repairs == 0 and len(driver.opens) == 1
         original_target = reopened.connection.execute(
             "SELECT status,cancel_requested FROM actions WHERE id=1").fetchone()

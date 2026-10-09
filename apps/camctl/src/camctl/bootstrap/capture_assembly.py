@@ -26,7 +26,7 @@ from camctl.capture.handlers import (
     CaptureRuntime,
     ListedResult,
     ObservedFile,
-    PendingCallResult,
+    PendingCallResult, PendingFileObservation,
     ResultFilesPort,
     SessionRecordingState,
 )
@@ -368,6 +368,8 @@ def session_capture_assembly(
     pending_call_results: dict[tuple[int, int], PendingCallResult] | None = None,
     recording_anchors: dict[int, tuple[int, int]] | None = None,
     retry_wait_gate: RetryWaitGate | None = None,
+    pending_media_results: dict | None = None,
+    pending_file_observations: dict[tuple[int, str], PendingFileObservation] | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
@@ -392,10 +394,12 @@ def session_capture_assembly(
     listings: dict[int, tuple[tuple, tuple]] = {}
     timelapse_deadlines: dict[int, int] = {}
     pending_start_results = {} if pending_call_results is None else pending_call_results
+    file_observations = {} if pending_file_observations is None else pending_file_observations
     continuing_read_tickets: dict = {}
     pending_read_results: dict = {}
     pending_read_business: dict = {}
     pending_read_ends: dict = {}
+    media_results = {} if pending_media_results is None else pending_media_results
     retry_gate = RetryWaitGate() if retry_wait_gate is None else retry_wait_gate
     roots = BoundDirectories(staging=staging)
     executor = file_executor if file_executor is not None else FileTaskExecutor(Supervisor())
@@ -425,10 +429,12 @@ def session_capture_assembly(
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
+            pending_file_observations=file_observations,
             retry_gate=retry_gate,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
             on_recovery_diagnostic=on_recovery_diagnostic,
+            pending_media_results=media_results, file_executor=executor,
             binding_check=lambda saved: check_binding(saved, current_config))
 
     def factory(owned: Any, device_id: str) -> CaptureRuntime | None:
@@ -478,6 +484,7 @@ def session_capture_assembly(
             media.pending_read_results = pending_read_results
             media.pending_read_business = pending_read_business
             media.pending_read_ends = pending_read_ends
+            media.pending_media_results = media_results
 
         def current_wait_config(action):
             extra_wait = declaration.get("capture", {}).get("extra_wait_ms", 0)
@@ -501,9 +508,11 @@ def session_capture_assembly(
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
+            pending_file_observations=file_observations,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
             on_recovery_diagnostic=on_recovery_diagnostic,
+            pending_media_results=media_results, file_executor=executor,
             stopper=stop_port,
             state_query=query_port,
             media=media,

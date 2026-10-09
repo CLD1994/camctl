@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 if TYPE_CHECKING:
-    from camctl.capture.handlers import PendingCallResult
+    from camctl.capture.handlers import PendingCallResult, PendingFileObservation
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.service import CommandMode
@@ -71,10 +71,14 @@ class RuntimeDeps:
     work_files: Any = None
     #: 原 await 拥有者的实际结果；普通、残留与受限工厂共用同一集合。
     capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
+    #: 文件发现及其派生事实具有独立生命周期，三种工厂共用。
+    capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
     capture_recording_anchors: dict[int, tuple[int, int]] = field(default_factory=dict)
     #: 已保存等待的原返回锚点；由流程行与剩余预算判定适用性。
     capture_retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
+    #: 本会话已经取得的媒体原申请；保存核实不依赖当前驱动能力。
+    capture_media_results: dict = field(default_factory=dict)
 
 
 def _default_catalog(config: ConfigSnapshot):
@@ -342,7 +346,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
     from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.outputs.work_files import WorkFileLimits
     deps.work_files = WorkFileRuntime(
-        staging=staging, limits=WorkFileLimits(
+        staging=staging, pending_media_results=deps.capture_media_results, limits=WorkFileLimits(
             batch_size=deps.config.cleanup.work_file_batch_size,
             limit_per_run=deps.config.cleanup.work_file_limit_per_run))
     recovery_logger = (None if deps.log_runtime is None else
@@ -367,7 +371,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
         "cancel": cancel_flow(ready=ready, processing=processing,
                               motor_permits=deps.motor_permits,
-                              work_files=deps.work_files),
+                              work_files=deps.work_files,
+                              resume_media_results=deps.work_files.resume_media_results),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
@@ -377,6 +382,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             staging=staging,
             wait_config=execution_wait_config,
             pending_call_results=deps.capture_call_results,
+            pending_file_observations=deps.capture_file_observations,
+            pending_media_results=deps.capture_media_results,
             recording_anchors=deps.capture_recording_anchors,
             retry_wait_gate=deps.capture_retry_gate,
             recovery_boundary=deps.recovery_boundary,
@@ -384,7 +391,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             on_recovery_diagnostic=recovery_logger,
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
-        )),
+        ), resume_media_results=deps.work_files.resume_media_results),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
         "residual": residual_flow(session_capture_assembly(
@@ -393,6 +400,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             staging=staging,
             wait_config=execution_wait_config,
             pending_call_results=deps.capture_call_results,
+            pending_file_observations=deps.capture_file_observations,
+            pending_media_results=deps.capture_media_results,
             recording_anchors=deps.capture_recording_anchors,
             retry_wait_gate=deps.capture_retry_gate,
             recovery_boundary=deps.recovery_boundary,
@@ -400,7 +409,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             on_recovery_diagnostic=recovery_logger,
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
-        )),
+        ), resume_media_results=deps.work_files.resume_media_results),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
         # 推进；拷贝段大小取自 copy 配置。
         "obtain": obtain_flow(session_obtain_assembly(
@@ -498,7 +507,8 @@ async def execute_command(
             restricted_flows={
                 "cancel": cancel_flow(
                     ready=ready, processing=processing, unscheduled_only=True,
-                    motor_permits=deps.motor_permits, work_files=deps.work_files),
+                    motor_permits=deps.motor_permits, work_files=deps.work_files,
+                    resume_media_results=deps.work_files.resume_media_results),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
                     capture_factory=session_capture_assembly(
@@ -507,15 +517,19 @@ async def execute_command(
                         staging=staging,
                         wait_config=execution_wait_config,
                         pending_call_results=deps.capture_call_results,
+                        pending_file_observations=deps.capture_file_observations,
+                        pending_media_results=deps.capture_media_results,
                         recording_anchors=deps.capture_recording_anchors,
                         retry_wait_gate=deps.capture_retry_gate,
                         media_enabled=False,
+                        file_executor=deps.work_files.executor,
                         recovery_boundary=deps.recovery_boundary,
                         recovery_max_event_id=lambda: deps.recovery_max_event_id,
                         on_recovery_diagnostic=(None if deps.log_runtime is None else
                             recovery_diagnostics_logger(deps.log_runtime.channel)),
                     ),
                     wait_cap_s=deps.config.clock.recovery_wait_cap_s,
+                    resume_media_results=deps.work_files.resume_media_results,
                 ),
             },
             once_report=report_flow(

@@ -296,14 +296,16 @@ async def test_internal_held_end_reliable_sha_and_saved_results_continue_local_c
         await capture_handler("camera_record")(1, _binding_fault(factory(recording.owned), "cam-1", change))
         _actual_result_saved(recording.owned, reader, ticket, state, completions)
         assert tuple(driver.calls) == calls
+        assert tuple(runtime.results.calls) == queries
         check, media = recording.owned.connection.execute(
             "SELECT check_state,media_json FROM recording_processing WHERE id=1").fetchone()
         assert check == int(enum_for("recording_processing.check_state").COMPLETED)
         from camctl.contracts.json_values import parse_exact_json
         assert "error" not in parse_exact_json(media)
-        assert recording.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()[0] != int(enum_for("actions.status").FAILED)
+        assert recording.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (
+            int(enum_for("actions.status").SUCCEEDED),)
         assert recording.owned.connection.execute(
-            "SELECT t.result_event_id,t.result_json FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
-            " WHERE r.kind=7 ORDER BY t.id DESC LIMIT 1").fetchone() == original_results[1:]
+            "SELECT r.status,t.result_event_id,t.result_json FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
+            " WHERE r.kind=7 ORDER BY t.id DESC LIMIT 1").fetchone() == original_results
     finally:
         recording.owned.connection.close()

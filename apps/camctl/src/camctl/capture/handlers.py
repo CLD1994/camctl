@@ -35,6 +35,7 @@ from camctl.capture.files import (
     FileObservationSave,
     FilePresenceSave,
     OwnershipSave,
+    ObservationOutcome,
 )
 from camctl.capture.media import (
     RecordingFailure,
@@ -106,7 +107,7 @@ from camctl.capture.timelapse import (
     plan_capture_wait,
 )
 from camctl.contracts.enums import enum_for
-from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
@@ -246,10 +247,73 @@ class PendingCallResult:
     result_listing: tuple[ObservedFile, ...] | None = None
     result_disposition_ready: bool = True
     result_set: ResultSetSave | None = None
+    result_registered_files: Mapping[str, tuple[CaptureFile, int]] | None = None
 
 
 # 启动装配和既有调用方使用同一个公共责任集合。
 PendingStartResult = PendingCallResult
+
+
+@dataclass(frozen=True)
+class PendingFileFact:
+    """一个在场、归属或完成事实的原申请及可靠保存阶段。"""
+
+    command: FilePresenceSave | OwnershipSave | FileCompletionSave
+    key: OperationKey
+    response: ObservationOutcome | None = None
+
+
+class FileFactStage(Enum):
+    PRESENCE = "presence"
+    OWNERSHIP = "ownership"
+    COMPLETION = "completion"
+
+
+@dataclass(frozen=True)
+class PendingFileObservation:
+    """独立于 RESULTS 收场的原文件发现请求及其可靠首次响应。"""
+
+    command: FileObservationSave
+    key: OperationKey
+    entries: tuple[ObservedFile, ...]
+    registered_files: Mapping[str, tuple[CaptureFile, int]]
+    response: ObservationOutcome | None = None
+    facts: dict[FileFactStage, PendingFileFact] = field(default_factory=dict)
+
+
+def _same_file_request(left, right) -> bool:
+    """文件保存申请的标量保持原类型契约，JSON 按精确值核对。"""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, FileObservationSave):
+        return (replace(left, locator=right.locator) == right
+                and json_equal(left.locator, right.locator))
+    if isinstance(left, OwnershipSave):
+        return (replace(left, observation=right.observation,
+                        pairing_observation=right.pairing_observation) == right
+                and json_equal(left.observation, right.observation)
+                and json_equal(left.pairing_observation, right.pairing_observation))
+    if isinstance(left, FileCompletionSave):
+        return (replace(left, observation=right.observation, error=right.error,
+                        locator=right.locator) == right
+                and json_equal(left.observation, right.observation)
+                and json_equal(left.error, right.error)
+                and json_equal(left.locator, right.locator))
+    if isinstance(left, FilePresenceSave):
+        return (replace(left, error=right.error, locator=right.locator) == right
+                and json_equal(left.error, right.error)
+                and json_equal(left.locator, right.locator))
+    raise TypeError("文件申请必须属于发现、在场、归属或完成阶段")
+
+
+def _same_observed_files(left: tuple[ObservedFile, ...] | None,
+                         right: tuple[ObservedFile, ...]) -> bool:
+    """同一原列举保留条目顺序、全部元数据及精确 JSON 观察。"""
+    return left is not None and len(left) == len(right) and all(
+        replace(original, locator=current.locator, evidence=current.evidence) == current
+        and json_equal(original.locator, current.locator)
+        and json_equal(original.evidence, current.evidence)
+        for original, current in zip(left, right))
 
 
 class DeviceControlPort(Protocol):
@@ -349,6 +413,11 @@ class CaptureRuntime:
     last_recovery_diagnostic: RecoveryDiagnostic | None = None
     #: 诊断进入本地运行日志，不影响原业务责任；相同诊断不重复投递。
     on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None
+    #: 已取得的媒体原申请由会话共享，保存资格独立于驱动和动作终态。
+    pending_media_results: dict = field(default_factory=dict)
+    file_executor: Any = None
+    #: 原文件发现写入前持有，普通、残留与受限工厂共用。
+    pending_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
 
     def record_recovery_diagnostic(self, diagnostic: RecoveryDiagnostic) -> None:
         if diagnostic == self.last_recovery_diagnostic:
@@ -532,6 +601,62 @@ class CaptureRuntime:
                 continue
             if self.action_id_of_ticket(pending.finish.ticket) == action_id:
                 self._save_call_result(identity, pending)
+
+    def resume_file_observations(self, action_id: int) -> None:
+        """业务筛选前核实原发现；后续文件事实可靠保存前保持首次响应。"""
+        for identity, pending in tuple(self.pending_file_observations.items()):
+            if identity[0] == action_id and identity in self.pending_file_observations:
+                _register_observed(self, action_id, pending.entries,
+                    occurred_at=pending.command.occurred_at, registered_files=pending.registered_files)
+
+    def _save_file_observations(self, action_id: int) -> None:
+        """仅核实持有的发现请求；整批事实保存负责释放生命周期。"""
+        for identity, pending in tuple(self.pending_file_observations.items()):
+            if identity[0] != action_id or pending.response is not None:
+                continue
+            error = None
+            for _ in range(2):
+                receipt = self.capture.save_file_observation(pending.command, pending.key, self.owned)
+                if receipt.kind is DbOutcomeKind.COMPLETED:
+                    self.pending_file_observations[identity] = replace(pending, response=receipt.value)
+                    break
+                error = receipt.error
+                if self.owned.connection.in_transaction:
+                    try:
+                        self.owned.connection.execute("ROLLBACK")
+                    except (DatabaseAccessError, ConsistencyError) as failure:
+                        raise ConsistencyError("原文件发现事务无法可靠结束，原请求仍持有") from failure
+            else:
+                raise ConsistencyError(f"原文件发现未可靠保存，原请求仍持有: {error}")
+
+    def _save_file_fact(self, identity: tuple[int, str], stage: FileFactStage,
+                        command: FilePresenceSave | OwnershipSave | FileCompletionSave) -> None:
+        """子阶段首次确定原请求和 key，未知提交先核实该身份。"""
+        observation = self.pending_file_observations[identity]
+        pending = observation.facts.get(stage)
+        if pending is None:
+            pending = PendingFileFact(command, new_operation_key())
+            observation.facts[stage] = pending
+        elif not _same_file_request(pending.command, command):
+            raise ConsistencyError("原文件事实子阶段的完整申请不可替换")
+        if pending.response is not None:
+            return
+        save = {FileFactStage.PRESENCE: self.capture.save_file_presence,
+                FileFactStage.OWNERSHIP: self.capture.save_file_ownership,
+                FileFactStage.COMPLETION: self.capture.save_file_completion}[stage]
+        error = None
+        for _ in range(2):
+            receipt = save(pending.command, pending.key, self.owned)
+            if receipt.kind is DbOutcomeKind.COMPLETED:
+                observation.facts[stage] = replace(pending, response=receipt.value)
+                return
+            error = receipt.error
+            if self.owned.connection.in_transaction:
+                try:
+                    self.owned.connection.execute("ROLLBACK")
+                except (DatabaseAccessError, ConsistencyError) as failure:
+                    raise ConsistencyError("原文件事实事务无法可靠结束，原申请仍持有") from failure
+        raise ConsistencyError(f"原文件事实未可靠保存，原申请仍持有: {error}")
 
     def action_id_of_ticket(self, ticket: AttemptTicket) -> int:
         run = row_facts(self.owned.connection, "operation_runs", ticket.run_id)
@@ -1028,6 +1153,7 @@ def validate_observed_pairings(entries: tuple[ObservedFile, ...]) -> None:
 def _register_observed(
     runtime: CaptureRuntime, action_id: int, entries: tuple[ObservedFile, ...],
     *, occurred_at: int | None = None,
+    registered_files: Mapping[str, tuple[CaptureFile, int]] | None = None,
 ) -> tuple[tuple[CaptureFile, int], ...]:
     """把结果列举观察落库：发现、任务归属与完成事实一次登记。
 
@@ -1037,47 +1163,65 @@ def _register_observed(
     # 第一阶段按列举顺序保存发现与在场事实，并建立身份到文件主
     # 键的映射供配对解析。
     file_ids: dict[str, int] = {}
+    saved_files = {} if registered_files is None else registered_files
     for entry in entries:
+        if entry.identity in saved_files:
+            continue
         occurred = runtime.wall_us() if occurred_at is None else occurred_at
-        observed = runtime.capture.save_file_observation(
-            FileObservationSave(
+        identity = (action_id, entry.identity)
+        command = FileObservationSave(
                 observer_action_id=action_id,
                 file_identity=entry.identity,
                 locator=entry.locator,
                 occurred_at=occurred,
                 original_name=entry.original_name,
                 media_type=entry.media_type,
-            ), new_operation_key(), runtime.owned)
-        assert observed.kind is DbOutcomeKind.COMPLETED, observed.error
-        file_ids[entry.identity] = observed.value.file_id
-        if observed.value.created:
-            # 同一次列举确认文件在场；重复发现沿用已保存的存在事实。
-            present = runtime.capture.save_file_presence(
-                FilePresenceSave(
-                    file_id=observed.value.file_id,
-                    state=int(_FILE_PRESENCE.PRESENT),
-                    occurred_at=occurred),
-                new_operation_key(), runtime.owned)
-            assert present.kind is DbOutcomeKind.COMPLETED, present.error
+            )
+        pending = runtime.pending_file_observations.get(identity)
+        if pending is None:
+            runtime.pending_file_observations[identity] = PendingFileObservation(
+                command, new_operation_key(), entries, saved_files)
+        elif (not _same_file_request(pending.command, command)
+                or not _same_observed_files(pending.entries, entries)
+                or pending.registered_files != saved_files):
+            raise ConsistencyError("待存文件发现的原完整请求不可替换")
+    runtime._save_file_observations(action_id)
+    for entry in entries:
+        if entry.identity in saved_files:
+            file_ids[entry.identity] = saved_files[entry.identity][1]
+            continue
+        identity = (action_id, entry.identity)
+        occurred = runtime.pending_file_observations[identity].command.occurred_at
+        observed = runtime.pending_file_observations[identity].response
+        file_ids[entry.identity] = observed.file_id
+        # 原 presence 申请必须先核实；没有原申请时才判断是否需要状态变化。
+        pending = runtime.pending_file_observations[identity]
+        if (FileFactStage.PRESENCE in pending.facts
+                or row_facts(runtime.owned.connection, "device_files", observed.file_id)["presence_state"]
+                   != int(_FILE_PRESENCE.PRESENT)):
+            runtime._save_file_fact(identity, FileFactStage.PRESENCE, FilePresenceSave(
+                file_id=observed.file_id, state=int(_FILE_PRESENCE.PRESENT), occurred_at=occurred))
     validate_observed_pairings(entries)
     # 第二阶段保存归属与完成事实。
     registered: list[tuple[CaptureFile, int]] = []
     for entry in entries:
-        occurred = runtime.wall_us() if occurred_at is None else occurred_at
+        if entry.identity in saved_files:
+            registered.append(saved_files[entry.identity])
+            continue
+        identity = (action_id, entry.identity)
+        occurred = runtime.pending_file_observations[identity].command.occurred_at
         file_id = file_ids[entry.identity]
         if entry.paired_identity is None:
-            owned = runtime.capture.save_file_ownership(
-                OwnershipSave(
+            ownership = OwnershipSave(
                     file_id=file_id,
                     source_action_id=action_id,
                     method=_TASK_SCOPE,
                     role=_ORIGINAL_ROLE,
                     observation=entry.evidence,
                     occurred_at=occurred,
-                ), new_operation_key(), runtime.owned)
+                )
         else:
-            owned = runtime.capture.save_file_ownership(
-                OwnershipSave(
+            ownership = OwnershipSave(
                     file_id=file_id,
                     source_action_id=action_id,
                     method=_TASK_SCOPE,
@@ -1087,25 +1231,30 @@ def _register_observed(
                     paired_device_file_id=file_ids[entry.paired_identity],
                     pairing_observation={
                         "paired_identity": entry.paired_identity},
-                ), new_operation_key(), runtime.owned)
-        assert owned.kind is DbOutcomeKind.COMPLETED, owned.error
+                )
+        runtime._save_file_fact(identity, FileFactStage.OWNERSHIP, ownership)
         if entry.complete:
-            finished = runtime.capture.save_file_completion(
-                FileCompletionSave(
+            runtime._save_file_fact(identity, FileFactStage.COMPLETION, FileCompletionSave(
                     file_id=file_id,
                     state=3,
                     occurred_at=occurred,
                     basis=_DEVICE_GUARANTEE,
                     observation=entry.evidence,
                     size_bytes=entry.size_bytes,
-                ), new_operation_key(), runtime.owned)
-            assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
+                ))
         registered.append((
             CaptureFile(
                 file_id=entry.identity, kind=entry.kind, complete=entry.complete,
                 ownership_confirmed=True),
             file_id,
         ))
+    result_files = {file.file_id: (file, file_id) for file, file_id in registered}
+    for identity, pending in tuple(runtime.pending_start_results.items()):
+        if (_same_observed_files(pending.result_listing, entries)
+                and runtime.action_id_of_ticket(pending.finish.ticket) == action_id):
+            runtime.pending_start_results[identity] = replace(pending, result_registered_files=result_files)
+    for entry in entries:
+        runtime.pending_file_observations.pop((action_id, entry.identity), None)
     return tuple(registered)
 
 
@@ -1484,6 +1633,8 @@ def _handle_binding_failure(
     details = binding_failure_details(binding_result)
     if details is None:
         return False
+    if _local_recording_listing(runtime, action) is not None:
+        return False
     with closing(runtime.owned.connection.execute(
         "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
         " WHERE r.action_id = ? AND t.status = ? LIMIT 1",
@@ -1602,6 +1753,7 @@ def _binding_failure_request(runtime, action, details, *, excluded_run_id=None):
 
 
 async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
+    context.resume_file_observations(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         return
@@ -1639,7 +1791,7 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
         return
     entries = listing.entries
     ticket = None if listing.already_saved else listing.ticket
-    registered = _register_observed(context, action_id, entries, occurred_at=listing.occurred_at)
+    registered = _register_listing(context, action_id, listing)
     assessment = CaptureAssessment(
         complete=bool(entries) and all(entry.complete for entry in entries))
     # 启动尝试在途（RUNNING）或结果未知（UNKNOWN）时没有可采纳的
@@ -1834,6 +1986,7 @@ async def _resume_internal_read_results(runtime):
 
 
 async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
+    context.resume_file_observations(action_id)
     await _resume_internal_read_results(context)
     context.resume_start_results(action_id)
     action = context.action(action_id)
@@ -1903,6 +2056,62 @@ def _load_processing_row(runtime: CaptureRuntime, action_id: int):
         (action_id,),
     )) as cursor:
         return cursor.fetchone()
+
+
+def _local_recording_listing(runtime: CaptureRuntime, action):
+    """原控制和读取均可靠结束时，装载单次录像的完整本地输入。"""
+    if (action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+            or action["cancel_requested"] or action["status"] in _ACTION_TERMINAL):
+        return None
+    connection = runtime.owned.connection
+    with closing(connection.execute(
+        "SELECT f.identity_key,f.completion_state,f.source_action_id,c.verification_state,"
+        " c.committed_bytes,c.source_size,c.target_sha256,h.owner_action_id,h.size_bytes,h.sha256,"
+        " h.retention_state,h.cleanup_state,r.id,r.status,a.activity_state"
+        " FROM recording_processing p JOIN device_files f ON f.id=p.source_device_file_id"
+        " JOIN file_copies c ON c.processing_id=p.id AND c.source_device_file_id=f.id"
+        " JOIN intermediate_files h ON h.id=c.target_file_id"
+        " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=?"
+        " JOIN device_activities a ON a.action_id=p.action_id WHERE p.action_id=?",
+        (int(_RUN_KIND.READ_FILE), action["id"]),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        return None
+    (identity, completion, owner, verification, committed, source_size, target_sha,
+     host_owner, host_size, host_sha, retention, cleanup, run_id, run_status, activity) = row
+    ready = enum_for("file_copies.verification_state")
+    if (completion != int(enum_for("device_files.completion_state").COMPLETE)
+            or owner != action["id"] or host_owner != action["id"]
+            or verification not in (int(ready.MATCHED), int(ready.SOURCE_CHECKSUM_UNAVAILABLE))
+            or committed != source_size or host_size != source_size or target_sha is None or host_sha != target_sha
+            or retention != int(enum_for("intermediate_files.retention_state").REQUIRED)
+            or cleanup != int(enum_for("intermediate_files.cleanup_state").NOT_NEEDED)
+            or run_status != int(enum_for("operation_runs.status").SUCCEEDED)
+            or activity != int(enum_for("device_activities.activity_state").ENDED)):
+        return None
+    # START、STOP 或 QUERY 仍需设备时，原绑定规则继续负责这些调用。
+    required = connection.execute(
+        "SELECT 1 FROM operation_runs WHERE action_id=? AND kind IN (?,?,?) AND status IN (1,2) LIMIT 1",
+        (action["id"], int(_RUN_KIND.START), int(_RUN_KIND.STOP), int(_RUN_KIND.QUERY_ACTIVITY))).fetchone()
+    unfinished = connection.execute(
+        "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " WHERE r.action_id=? AND (t.status=? OR t.result_json IS NULL) LIMIT 1",
+        (action["id"], int(_ATTEMPT_STATUS.RUNNING))).fetchone()
+    actual = connection.execute(
+        "SELECT status,result_event_id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
+        (run_id,)).fetchone()
+    if (required is not None or unfinished is not None or actual is None
+            or actual[0] != int(_ATTEMPT_STATUS.SUCCEEDED) or actual[1] is None):
+        return None
+    listing = _saved_result_listing(runtime, action["id"])
+    from camctl.capture.files import file_identity_key
+
+    if not any(entry.complete and entry.kind is FileKind.VIDEO and entry.paired_identity is None
+               and file_identity_key(action["device_id"], action["driver_id"], entry.identity) == identity
+               for entry in listing.entries):
+        return None
+    return listing
 
 
 def _save_source_file(
@@ -2048,6 +2257,7 @@ async def _save_winddown_progress(
     达“已停止，等待正常会话处理”。
     """
     action_id = action["id"]
+    runtime.resume_file_observations(action_id)
     row = _load_processing_row(runtime, action_id)
     if row is None:
         return False
@@ -2055,7 +2265,7 @@ async def _save_winddown_progress(
     if listing.phase not in (ListingPhase.LISTED, ListingPhase.CLOSED):
         return False
     entries = listing.entries
-    registered = _register_observed(runtime, action_id, entries, occurred_at=listing.occurred_at)
+    registered = _register_listing(runtime, action_id, listing)
     # 保守收场只保存待检查进度；核实与处理尚未终局，沿原责任保留等待。
     _finish_listing_result(runtime, listing, retry_wait=True)
     source_file_id = next(
@@ -2095,6 +2305,7 @@ async def advance_winddown(
     已确认时不重复停止：取消则收终态，否则保存等待阶段；启动未
     确认、在途停止、预算耗尽及本会话锚点分别归各自责任链。
     """
+    context.resume_file_observations(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         return HandlerOutcome("already_terminal")
@@ -2204,7 +2415,9 @@ async def _advance_recording_outcome(
         if listing is not None:
             ticket = listing.ticket
     else:
-        listing = await _listing_round(context, action_id)
+        listing = _local_recording_listing(context, action)
+        if listing is None:
+            listing = await _listing_round(context, action_id)
         if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
             # 在途或本轮列举失败：已保存实际结果与重试等待。
             return
@@ -2220,7 +2433,7 @@ async def _advance_recording_outcome(
             return
         entries = listing.entries
         ticket = None if listing.already_saved else listing.ticket
-        registered = _register_observed(context, action_id, entries, occurred_at=listing.occurred_at)
+        registered = _register_listing(context, action_id, listing)
     source_file_id = next(
         (file_id for (file, file_id), entry in zip(registered, entries)
          if entry.complete and entry.kind is FileKind.VIDEO), None)
@@ -2276,6 +2489,7 @@ async def _advance_recording_outcome(
 
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
+    context.resume_file_observations(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         context.timelapse_deadlines.pop(action_id, None)
@@ -2392,7 +2606,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         return
     # v1 文件观察分别证明归属与单文件事实，不提供集合确定依据。
     # 真实未确定分区保存原本轮与已取得文件，下一检查仍沿原有限责任。
-    _register_observed(context, action_id, listing.entries, occurred_at=listing.occurred_at)
+    _register_listing(context, action_id, listing)
     _finish_listing_result(context, listing, retry_wait=True)
 
 
@@ -2461,7 +2675,7 @@ async def _close_canceled_timelapse(
         return
     entries = listing.entries
     _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED)
-    registered = _register_observed(context, action_id, entries, occurred_at=listing.occurred_at)
+    registered = _register_listing(context, action_id, listing)
     drafts = _catalog_drafts(registered, entries)
     receipt = context.capture.finish_canceled_capture(
         FinishCanceledCapture(
@@ -2528,6 +2742,63 @@ class ListingRound:
     occurred_at: int | None = None
     returned_ns: int | None = None
     already_saved: bool = False
+    registered_files: Mapping[str, tuple[CaptureFile, int]] | None = None
+
+
+def _registered_result_files(runtime: CaptureRuntime, action_id: int,
+                             metadata: Mapping[str, ObservedFile]):
+    """原文件绑定、归属、配对与完成事实仍是本地文件输入的权威。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT id FROM device_files WHERE source_action_id=? ORDER BY id", (action_id,))) as cursor:
+        identifiers = tuple(row[0] for row in cursor.fetchall())
+    entries, registered = [], {}
+    for file_id in identifiers:
+        facts = row_facts(runtime.owned.connection, "device_files", file_id)
+        observer = runtime.action(facts["observer_action_id"])
+        identity = parse_exact_json(facts["identity_key"])
+        binding = _binding(observer)
+        if (not isinstance(identity, list) or len(identity) != 3
+                or identity[:2] != [binding.device_id, binding.driver_id]
+                or not isinstance(identity[2], str) or not identity[2]):
+            raise ConsistencyError("已登记结果文件的原身份与观察者绑定不符")
+        ownership = facts["ownership_evidence_json"]
+        if not isinstance(ownership, Mapping) or not isinstance(ownership.get("observation"), Mapping):
+            raise ConsistencyError("已登记结果文件缺少可靠归属依据")
+        original_input = metadata.get(identity[2])
+        if original_input is None:
+            raise ConsistencyError("已登记结果文件缺少原已保存 RESULTS 元数据")
+        if not json_equal(original_input.locator, facts["locator_json"]):
+            raise ConsistencyError("原 RESULTS 定位与已登记文件事实矛盾")
+        complete = facts["completion_state"] == 3
+        if complete and not isinstance(facts["completion_evidence_json"], Mapping):
+            raise ConsistencyError("已登记完整结果文件缺少完成依据")
+        paired = facts["original_device_file_id"]
+        if paired is not None:
+            original = row_facts(runtime.owned.connection, "device_files", paired)
+            if (original is None or original["source_action_id"] != action_id
+                    or original["role"] != _ORIGINAL_ROLE or facts["role"] != _PREVIEW_ROLE):
+                raise ConsistencyError("已登记预览文件缺少同源原片配对")
+            original_identity = parse_exact_json(original["identity_key"])
+            if original_input.paired_identity != original_identity[2]:
+                raise ConsistencyError("原 RESULTS 配对与已登记文件事实矛盾")
+        elif original_input.paired_identity is not None:
+            raise ConsistencyError("原 RESULTS 预览输入缺少已登记配对事实")
+        # 原 v1 承载类别、名称、媒体类型及配对元数据；文件行只覆盖明确保存的形成状态。
+        entry = replace(original_input, complete=complete,
+                        size_bytes=facts["size_bytes"] if complete else None)
+        if entry.identity in registered:
+            raise ConsistencyError("同一结果来源有重复驱动文件身份")
+        entries.append(entry)
+        registered[entry.identity] = (CaptureFile(entry.identity, entry.kind, entry.complete,
+                                                 ownership_confirmed=True), file_id)
+    validate_observed_pairings(tuple(entries))
+    return tuple(entries), registered
+
+
+def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingRound):
+    """已登记事实直接消费；只有尚未登记的原观察产生文件保存责任。"""
+    return _register_observed(runtime, action_id, listing.entries, occurred_at=listing.occurred_at,
+                              registered_files=listing.registered_files)
 
 
 def _unconfirmed_failure(action_id: int) -> RecordingFailure:
@@ -2545,7 +2816,7 @@ def _held_listing(runtime: CaptureRuntime, ticket: AttemptTicket) -> ListingRoun
         raise ConsistencyError("待存 RESULTS 原票据不符")
     return ListingRound(ListingPhase.LISTED, pending.result_listing, ticket,
                         pending.finish.outcome.outcome, pending.finish.occurred_at,
-                        pending.returned_ns)
+                        pending.returned_ns, registered_files=pending.result_registered_files)
 
 
 def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRound:
@@ -2566,8 +2837,35 @@ def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRou
     ticket = AttemptTicket(row[4], "result", str(activity_id), responsibility, row[0])
     actual = saved_outcome(row[5], row[6], parse_exact_json(row[7]),
                            None if row[8] is None else parse_exact_json(row[8]))
-    entries = files_from_outcome(ticket, actual)
-    return ListingRound(ListingPhase.CLOSED, entries, ticket, actual, row[9], None, True)
+    metadata: dict[str, ObservedFile] = {}
+    with closing(runtime.owned.connection.execute(
+        "SELECT attempt_no,status,effect_state,result_json,error_json FROM operation_attempts"
+        " WHERE run_id=? AND result_event_id IS NOT NULL ORDER BY attempt_no", (ticket.run_id,))) as cursor:
+        for attempt_no, status, effect, result_json, error_json in cursor:
+            previous_outcome = saved_outcome(status, effect, parse_exact_json(result_json),
+                None if error_json is None else parse_exact_json(error_json))
+            if any(value.type == "result_files_listed" for value in previous_outcome.observations):
+                original_ticket = AttemptTicket(attempt_no, "result", str(activity_id), responsibility, ticket.run_id)
+                for entry in files_from_outcome(original_ticket, previous_outcome):
+                    metadata[entry.identity] = entry
+    previous, registered = _registered_result_files(runtime, action_id, metadata)
+    previous_by_identity = {entry.identity: entry for entry in previous}
+    has_observation = any(value.type == "result_files_listed" for value in actual.observations)
+    if not has_observation and not previous:
+        raise ConsistencyError("已保存 RESULTS 缺少完整本地文件输入")
+    latest = files_from_outcome(ticket, actual) if has_observation else ()
+    entries = []
+    seen = set()
+    for entry in latest:
+        saved = previous_by_identity.get(entry.identity)
+        if saved is not None and not json_equal(saved.locator, entry.locator):
+            raise ConsistencyError("原 RESULTS 定位与已登记文件事实矛盾")
+        entries.append(entry if saved is None else saved)
+        seen.add(entry.identity)
+    entries.extend(entry for entry in previous if entry.identity not in seen)
+    validate_observed_pairings(tuple(entries))
+    return ListingRound(ListingPhase.CLOSED, tuple(entries), ticket, actual, row[9], None, True,
+                        registered_files=registered)
 
 
 def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
@@ -2592,6 +2890,7 @@ def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
 
 async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRound:
     """同一活动的有限核实；实际返回先持有，消费者随后确定真实处置。"""
+    runtime.resume_file_observations(action_id)
     activity_id = _activity_id_of(runtime, action_id)
     responsibility = f"results/{activity_id}"
     in_flight = runtime.last_attempt(responsibility)
@@ -2637,7 +2936,7 @@ async def _finish_timelapse_conclusion(
         state, basis = cursor.fetchone()
     listing = _saved_result_listing(runtime, action_id)
     entries = listing.entries
-    registered = _register_observed(runtime, action_id, entries, occurred_at=listing.occurred_at)
+    registered = _register_listing(runtime, action_id, listing)
     if state == 3 and basis == 3:
         _release_occupancy(runtime, action_id)
         _finish_capture(runtime, action_id, entries, FileKind.VIDEO, registered=registered)

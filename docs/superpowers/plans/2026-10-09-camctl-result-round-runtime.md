@@ -105,3 +105,64 @@ root 前台独占共同消费者门禁，`/tmp/camctl-goal-results-consumers-cur
 `integration/capture/test_result_file_recovery.py` 新增四个多轮 CLOSED 分区和六个真实 SQLite 文件发现故障分区，等待 root 独占确认有效红。延时摄影使用已有正式独立 UNSATISFIED 结论；测试不赋予 v1 集合结束含义。执行者仅核验模块实际可导入和 diff，无 pytest、无新增生产修改。
 
 完整历史前提复核：root 新十项日志 `/tmp/camctl-goal-result-file-recovery-red.log` 为 10 failed、1.31s。四项多轮文件丢失和四项投影／COMMIT 后原键差异属于行为失败；COMMIT 前两项尚处未知连接事务准备失败。共享世界需要能从真实 CREATE 历史重建原状态，已新增 `result_consumer_fixtures.py`，通过公开初始化、受理、调度、实际 START／STOP、活动结束、检查决定与取消仓储构造完整前提。未知连接实际关闭、重开并核对 metadata，原内存责任保持。十六项与新十项等待 root 重新验证；此前十六项绿色仅代表其原测试世界的消费者行为，不是完整原历史守卫的验收证据。
+
+### 文件责任的生产接线与待验范围
+
+2026-10-09，root 复核完整公开历史和正式守卫后，`/tmp/camctl-goal-results-real-world-current-4.log` 为 16 passed、10 failed，12.64s。十个新反例全部进入实际行为断言：四个 CLOSED 消费者丢失前轮可靠文件，六个发现阶段变更原申请 key。root 随后授权两类生产修复。
+
+`PendingFileObservation` 使用独立于原 RESULTS 结果收场的生命周期。首次写入前保存完整 `FileObservationSave`、原 key、原同轮条目及已可靠登记映射；`RuntimeDeps.capture_file_observations` 由普通、残留、受限工厂注入相同集合。入口在终态、绑定与轮次筛选之前推进待存文件责任。文件事务回滚或 UNKNOWN 时核实原请求，不能把当前投影当作原提交证明。
+
+后续在场、归属与完成使用各自 `PendingFileFact`，按 `FileFactStage` 保存完整申请、唯一 key 和可靠响应。每一子阶段独立保持，后面的错误不能清理前面的未知责任，也不能使已经可靠保存的阶段重新取得 key。整批文件事实完成后释放该文件责任，并把可靠登记映射交给原 raw RESULTS 结果；原实际 Outcome、结果事务身份和所属流程处分保持。
+
+| 在场事实与原保存阶段 | 后续动作 |
+| --- | --- |
+| 没有待核在场申请，已有可靠 PRESENT | 复用事实，不保存没有状态变化的观察。 |
+| 没有待核在场申请，当前 UNKNOWN 或 ABSENT，原实际条目确认在场 | 写前固定完整 PRESENT 申请、原条目时刻与 key，再提交实际状态变化。 |
+| 原在场申请尚未可靠保存，包括当前行已经 PRESENT | 沿原完整申请与 key 核实，不能仅凭行值跳过未知提交。 |
+| 原在场阶段已可靠完成，归属或完成尚未可靠保存 | 直接继续各自原申请和 key，不重新形成在场阶段。 |
+| 发现返回 ALREADY 且 created=False | 只证明发现存在；在场及来源关系仍按各自可靠事实和待存阶段判断。 |
+| 动作已终态且仍持有实际文件事实 | 保存原事实及必要派生，保持原 RESULTS 和动作结果。 |
+
+`_saved_result_listing` 保留最新完整 Outcome，按原观察者绑定核对 `device_files` 身份、定位、来源、配对与完成依据，并合并此前仍有效的文件。`_register_listing` 直接消费可靠文件映射，避免把历史观察重新写成当前在场事实；尚未登记的原 v1 条目仍沿原实际时刻登记。文件状态和原调用结果分别有权威来源，最新错误不撤销已登记文件，v1 条目仍不提供集合结束依据。
+
+后续子事实矩阵 `test_result_file_fact_saves.py` 覆盖照片／录像 × 在场／归属／完成 × 投影／COMMIT 前／COMMIT 后共十八项。root 日志 `/tmp/camctl-goal-result-file-facts-red.log` 为 18 failed、9.18s，故障均实际触发；在场原 key 改变及归属／完成恢复时的无变化在场请求属于实际恢复缺陷。root 授权后才接入上述逐阶段保存。生产导入、AST 和 diff 检查通过。root 独占十六项、十项、十八项，日志 `/tmp/camctl-goal-results-file-facts-current.log` 为 44 passed、20.48s。执行者实际读取日志，没有运行 pytest、暂存或提交。
+
+
+### 原 v1 元数据与可靠文件状态的共同装载
+
+原已保存 RESULTS 输入提供文件类别、原名称、媒体类型及配对元数据；可靠 `device_files` 事实提供来源、定位、配对关系、完成状态和大小。两类权威分别保持，文件行缺少类别字段不能解释为 OTHER。CLOSED 装载读取同一原 RESULTS 流程的已结束尝试，保留仍有效文件的完整 v1 元数据；最新 FAILED 没有观察时仍使用此前原已保存输入。最新完整 Outcome 和原尝试身份保持。
+
+`_registered_result_files` 核对原绑定、定位与配对，随后只覆盖原条目中明确由文件行保存的完成状态和大小。缺少原元数据或关系矛盾时停止并保留诊断。装载和本地消费不取得设备端口，不从 v1 推定集合完成。此实现仍以 `handlers.py` 共同 Loader 为最窄边界，READ 资格守卫和仓储保持。
+
+`test_result_file_metadata.py` 两项分别验证最新结果含原 v1 观察，以及最新 FAILED 没有观察时的原片与预览元数据。类别、名称、媒体类型、配对与大小保持，恢复零设备查询。root 修复前的 READ 日志 `/tmp/camctl-goal-read-digest-local-current-2.log` 为 13 passed、2 failed；修复后 `/tmp/camctl-goal-read-digest-local-current-3.log` 为 15 passed、9.80s，元数据日志 `/tmp/camctl-goal-result-file-metadata-current.log` 为 2 passed、1.34s。执行者已实际读取日志。
+
+当前生产与测试已冻结，完整 unit、capture、bootstrap 目录及端到端独立审查由 root 执行。44 项文件责任、15 项 READ 与 2 项元数据仅证明上述分区；分页格式及普通延时摄影集合成功仍等待既有正式决策。
+
+
+### 结构化 JSON 原申请的同一性
+
+完整原申请包括 JSON 字段的类型和值。JSON `true` 与数字 `1` 不同，对象成员顺序不影响同一性。文件发现定位、原条目的定位和完整观察依据、归属及配对依据、完成观察及错误、CLOSED 定位核对都遵守这一规则。类型化标量字段仍按其正式类型比较；JSON 字段复用项目 `contracts.json_values.json_equal`，不增加通用序列化器。
+
+| 原申请与本次输入 | 必须结果 |
+| --- | --- |
+| 完整字段相同，包括 JSON 类型和值 | 保留原请求与 key；阶段已有可靠响应时直接复用，不调用仓储。 |
+| 仅 JSON 对象成员顺序不同 | 视为同一输入，复用原请求、key 与可靠响应。 |
+| 任意 JSON 字段的布尔与数字不同 | 拒绝替换，原持有责任不变，不能调用仓储。 |
+| 其他类型化字段或 JSON 值改变 | 拒绝替换并保留原责任。 |
+
+`test_file_fact_identity.py` 两项纯单元候选围绕 `_save_file_fact` 验证可靠归属响应的原申请同一性；仓储与其他端口受正式接口的 autospec 约束，没有真实 IO。root 独占两项日志 `/tmp/camctl-goal-file-fact-identity-red.log` 为 1 failed、1 passed、0.19s，布尔改数字没有拒绝的分区形成有效红。root 授权后，`_same_file_request` 明确核对四类文件命令的 JSON 字段，其他字段完整保持；`_same_observed_files` 核对条目顺序、全部非 JSON 元数据和精确定位／观察，两个 Loader 定位核对也使用项目 `json_equal`。纯单元矩阵扩展到十一项，覆盖在场、归属配对、完成观察／错误／定位、发现定位与条目观察，以及非 JSON 原时刻改变。实际模块导入、生产导入与 diff 检查通过，等待 root 独占复验。
+
+
+### 后续阶段：default 入口前置保存与照片未齐备责任
+
+完整目录证据为 root 独占 `/tmp/camctl-goal-combined-capture-current.log` 的 404 passed、7 failed、59.06s，以及 `/tmp/camctl-goal-combined-bootstrap-current.log` 的 501 passed、1 skipped、16 failed、543.56s。完整单元目录由 root 报告 3673 passed、1 skipped。门禁失败按具体责任定位，当前阶段只实施已授权 JSON 比较；不据此修改 v1 集合语义或仓储守卫。
+
+建议实施顺序如下，每项须以真实前提形成有效红后单独授权：
+
+1. 构造 default 正常调度、取消、受限收场乘发现、在场、归属、完成四阶段的保存责任矩阵。原实际 Outcome、条目、T0、完整申请和 key 经公开受理、调度及设备替身形成；故障连接真实关闭重开，并保持同会话集合。COMMIT 后旧 F 只证明可靠已存业务终态；COMMIT 前取消入口须先保存既有实际文件事实，再保存取消生效。不得直接 SQL 制造终态作为准备。
+2. 在设备或业务资格筛选前接手共享文件责任。建议由 `session_capture_assembly` 提供仅保存原文件事实的 callback，在 normal `capture_flow`、`cancel_flow`、restricted `winddown_flow` 及适用 residual 入口打开连接后执行，保留现有 WF callback。该步骤不得调用驱动、重新取得条目时刻、处分 raw RESULTS 或重开业务终态；持续失败仍保留各自原申请。
+3. 照片可靠完成响应与文件齐备分别判断。文件为空或尚未完成时，原核实责任按已确定预算和间隔继续；后轮增加原责任尝试。当前首轮为空却先 CLOSED 的模型须以真实公开历史覆盖，旧测试的零新增轮次及直接列举不作为目标契约。完成文件的可靠状态改变另设前后两轮输入矩阵，不与空列表案例合并。
+4. 两个延时结论恢复用例使用实际持久化 v1 文件输入和公开独立结论，验证零设备查询；存在结论而原完整输入缺失时仍诊断。普通 v1 集合成功保持既有未决事项。
+5. 元数据装载沿正常有效状态库的正式投影读取边界核验原 run、活动与已保存尝试关联。具体新增历史正文或引用校验须先由正式资料和实际保证范围定义，不增加任意外部 SQL 篡改假设。
+
+bootstrap 十六项需按对应业务责任继续定位：两项报告配置错误在 `deps.work_files=None` 时读取 callback；分发物替身没有提供完整真实 RESULTS 返回；其余录像、取回协作、受限启动与延时分支目前以超时或已失败业务状态暴露，未逐项证明其根因。它们与 default 文件前置保存以及未决集合成功不能混写成同一缺陷，必须保留当前日志及逐项证据。

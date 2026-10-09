@@ -33,6 +33,7 @@ def _fresh_runtime(owned, original):
     resumed.monotonic_ns = original.monotonic_ns
     resumed.results = original.results
     resumed.pending_start_results = original.pending_start_results
+    resumed.pending_file_observations = original.pending_file_observations
     resumed.retry_gate = original.retry_gate
     return resumed
 

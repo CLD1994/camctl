@@ -46,7 +46,7 @@ from camctl.capture.processing import (
     CheckResultSave, RepairDecisionSave, RepairOutputFile, RepairResultSave,
     RepairStart, RepairSuccess, saved_check_duration, saved_target_duration_ms,
 )
-from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.devices.ports import ReadDriver
 from camctl.devices.read_session import SourceFile
@@ -209,6 +209,27 @@ class PendingMediaRequest:
     key: OperationKey
     action_id: int
     file_ids: tuple[int, ...]
+    save_error: BaseException | None = None
+
+
+def _media_request_values(command):
+    """沿类型化申请的业务编码核实完整原输入，区分 JSON 布尔与数字。"""
+    values = {"processing_id": command.processing_id, "occurred_at": command.occurred_at}
+    if isinstance(command, CheckResultSave):
+        values["media"] = command.media.as_json()
+    elif isinstance(command, RepairDecisionSave):
+        values.update(decision=command.decision.value, basis=command.basis.as_json())
+    elif isinstance(command, RepairResultSave):
+        values.update(phase=command.phase.value, output_file_id=command.output_file_id,
+            error=None if command.error is None else command.error.as_json())
+    elif isinstance(command, RepairStart):
+        values["extension"] = command.extension
+    elif isinstance(command, RepairSuccess):
+        values.update(output_file_id=command.output_file_id,
+            size_bytes=command.size_bytes, sha256=command.sha256)
+    else:
+        raise TypeError("媒体保存必须使用已定义的类型化申请")
+    return values
 
 
 class CaptureProcessingSaves:
@@ -260,11 +281,14 @@ class CaptureProcessingSaves:
                 files = tuple(dict.fromkeys((*files, command.output_file_id)))
             held = PendingMediaRequest(stage, deepcopy(command), new_operation_key(), owner[0], files)
             self.pending[identity] = held
-        elif command != held.command:
+        elif (type(command) is not type(held.command)
+                or not json_equal(_media_request_values(command), _media_request_values(held.command))):
             raise ConsistencyError("尚未保存的原媒体申请不能由后续申请替换")
         receipt = self._commit(getattr(self.repository, stage.value)(held.command, held.key, self.owned))
         if receipt.disposition is SaveDisposition.SAVED:
             del self.pending[identity]
+        else:
+            self.pending[identity] = replace(held, save_error=receipt.error)
         return receipt
 
 

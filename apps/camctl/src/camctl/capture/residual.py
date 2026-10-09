@@ -588,7 +588,7 @@ async def _confirm_by_query(
     return True
 
 
-def residual_flow(capture_factory: Any) -> Any:
+def residual_flow(capture_factory: Any, *, resume_media_results=None) -> Any:
     """构造无人驱动的残留收场推进流程。
 
     触发动作取消或启动窗口耗尽后，已建立的收场流程不再由执行前检
@@ -604,6 +604,8 @@ def residual_flow(capture_factory: Any) -> Any:
 
         owned = context.open_connection()
         try:
+            if resume_media_results is not None:
+                await resume_media_results(owned)
             await _recover_old_attempts(owned, capture_factory)
             _settle_orphan_queries(context, owned, OperationRepository())
             with closing(owned.connection.execute(

@@ -14,7 +14,7 @@
 
 生产入口为 `reporting/supervisor.py::WorkerSupervisor.generate`、`stop`、`_retire` 与 `reporting/communication.py::WorkerCommunicator.close`、`_run`。`generate` 的发送失败、剩余期限耗尽、`wait_for` 超时、`ChannelClosed`、协议错误及显式 `stop` 都进入收场。当前 `_retire` 清空监督引用并请求退出、等待、升级信号、关闭通信，却不再读取结果，尚未证明已送达状态库错误不会丢失。`generate` 当前只比较 `job_id`；结果的 `instance_id` 也必须匹配。
 
-现有 `unit/reporting/test_worker.py` 验证普通成功、即时状态库失败和退出顺序，但其中使用真实 Pipe 与通信线程；新增纯监督矩阵使用受真实接口约束的内存替身放单元层。新增真实管道／线程组合放 `integration/reporting`，不扩大既有文件的分类调整范围。
+`unit/reporting/test_worker.py` 只验证错误分类、父进程守护及使用内存锁替身的工作锁契约。`integration/reporting/test_supervisor_transport.py` 使用真实 Pipe、通信线程及替身进程验证监督者的就绪、启动失败、普通成功、即时状态库失败、退出顺序及超时收场。纯监督矩阵使用受真实接口约束的内存替身，位于单元层；真实管道、线程及子进程组合均位于 `integration/reporting`。
 
 此次只修改 supervisor、communication 及相关测试。主 Agent 负责 `bootstrap/lifecycle.py` 两种 supervisor 的停止结果消费；其他 Agent 负责报告业务消费者。`reporting` 不导入 `session`，不得改 `bootstrap/flows.py`。
 
@@ -50,8 +50,9 @@
 
 ### WL1 失败测试与判定矩阵
 
-**文件：** 新增 `unit/reporting/test_worker_late_state.py`，扩展 `integration/reporting/test_worker.py` 或新增 `test_communication_shutdown.py`；必要时更新既有错误身份测试的有效预期。
+**文件：** `unit/reporting/test_worker.py`、`unit/reporting/test_worker_late_state.py`、`integration/reporting/test_supervisor_transport.py`、`integration/reporting/test_worker.py` 及 `integration/reporting/test_communication_shutdown.py`；必要时更新既有错误身份测试的有效预期。
 
+- [x] 单元文件保留 `TestErrorClassification`、`TestParentGuard`、`TestWorkLock` 及内存锁替身；真实管道与通信线程文件包含 `TestSupervisorStartup`、`TestSupervisorGeneration` 及所需辅助代码。5 项局部契约和 9 项传输组合的测试内容与断言保持完整，不重复登记用例，也不让单元测试导入集成测试。
 - [ ] 纯单元替身使用 `create_autospec(..., spec_set=True)` 约束 WorkerCommunicator，进程替身遵守 ProcessHandle。通过受控时钟、队列与同步事件让 STATE 在超时决定或 Shutdown 后到达；分别断言发送失败、剩余期限耗尽、异步等待超时、协议错误及显式 stop 的结果。
 - [ ] 对同任务同实例的迟到 SUCCESS／REPORT 和两个错误身份维度分别断言不返回成功、不误判状态库失效；有效及时 SUCCESS 后的 stop 保持既有成功。
 - [ ] 用真实 Pipe 与通信线程验证 `close` 请求前已送达但尚未解码的完整 STATE 帧仍排在终端前，发送失败同时另一方向已有完整结果也保持该顺序；部分帧不能变成有效 STATE。
@@ -69,7 +70,7 @@
 
 ### WL3 独立组合验证与证据
 
-- [ ] 单独执行 `unit/reporting/test_worker_late_state.py`，然后 `unit/reporting/test_worker.py` 与相关通信／消息单元文件；真实管道与进程验证单独执行 `integration/reporting`。
+- [ ] 单独执行 `unit/reporting/test_worker_late_state.py` 的失败与修复验证，再执行整个 `unit` 目录；真实管道、线程与进程验证单独执行 `integration/reporting`，其中包含 `test_supervisor_transport.py`。
 - [ ] 在正常及受限会话的报告监督组合中断言迟到 STATE 进入 `state_db_error`，普通设备不继续依赖已失效前提，状态库不可用的日志副本仍独立处理。该消费者组合由主 Agent 登记。
 - [ ] 实际进程／线程仍活动时不能清理或复用临时文件；任务成功、停止、超时、错误身份、STATE／REPORT 分类及两种先后顺序均有独立预期。
 - [ ] 记录 Python 版本、环境、命令及结果；`git diff --check` 与文档链接／锚点检查只验证文档，不代替软件门禁。
@@ -77,8 +78,8 @@
 ## 验收命令与当前状态
 
 ```bash
-UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/reporting/test_worker_late_state.py -q
+UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit -q
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/reporting -q
 ```
 
-2026-10-09：计划已写；失败用例、生产修复和消费者组合按复选框及随后实际验证记录跟踪。硬件、真实设备与物理断电不在本任务范围。
+2026-10-09：局部契约与真实传输组合分别位于单元和集成目录；失败用例、生产修复和消费者组合按复选框及实际验证记录跟踪。硬件、真实设备与物理断电不在本任务范围。

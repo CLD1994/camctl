@@ -1,19 +1,17 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const excluded = new Set(['.git', '.local', '.superpowers', 'node_modules', 'dist', 'data', 'tmp', 'test-results', 'playwright-report']);
-function markdown(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
-    if (excluded.has(entry.name)) return [];
-    const file = join(directory, entry.name);
-    return entry.isDirectory() ? markdown(file) : entry.name.endsWith('.md') ? [file] : [];
-  });
-}
+// Git 的文件范围包含已跟踪文档和待加入的新文档，忽略构建中间产物。
+const markdown = [...new Set(execFileSync('git', [
+  'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.md',
+], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean))]
+  .map(file => join(root, file)).filter(existsSync);
 let checked = 0;
 const failures = [];
-for (const file of markdown(root)) {
+for (const file of markdown) {
   const text = readFileSync(file, 'utf8').replace(/```[\s\S]*?```/g, '');
   for (const match of text.matchAll(/\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/g)) {
     const url = match[1] ?? match[2];
