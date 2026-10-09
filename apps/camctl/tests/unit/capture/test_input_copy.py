@@ -1,7 +1,7 @@
 """C8 内部输入取得编排的单元测试。
 
 复用 X4—X6 的读取资格与拷贝流程：资格等待与最终失败、已完成副本
-重入不重拷、续传位置由准备决定（重置归零、VERIFY 不开会话）、段
+重入不重拷、续传位置由准备决定（重置归零、VERIFY 按原实际结束事实续行）、段
 保存跳过与各阶段失败分区、摘要不一致登记重拷后不就地重试。
 """
 
@@ -116,9 +116,10 @@ class _Session:
     def __init__(self) -> None:
         self.stop_requested = False
         self.awaited = False
+        self.offset = 0
 
     def position(self) -> int:
-        return 0
+        return self.offset
 
     def read_chunk(self, limit: int) -> ReadChunk:
         raise AssertionError("编排不直接读取会话")
@@ -144,6 +145,7 @@ class _Sessions:
     async def open_session(self, source_device_file_id: int,
                            offset: int) -> _Session:
         self.opens.append((source_device_file_id, offset))
+        self.session.offset = offset
         return self.session
 
 
@@ -199,12 +201,12 @@ class _Copies:
 
 
 def _context(copies: _Copies, sessions: _Sessions,
-             *, digest=None) -> InputContext:
+             *, digest=None, read_end=None) -> InputContext:
     return InputContext(
         action_id=1, processing_id=5, source_device_file_id=11,
         target_extension="mp4", config=_CONFIG, segment_size=4,
         staging=_STAGING, copies=copies, sessions=sessions,
-        digest=digest, occurred_at=_NOW)
+        digest=digest, occurred_at=_NOW, read_end=read_end)
 
 
 # ---- 正常与重入 ----
@@ -245,16 +247,41 @@ async def test_ready_copy_reentry_does_not_recopy() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verify_decision_skips_session() -> None:
-    """字节齐备只差收尾：准备判定 VERIFY，不开会话直接完成。"""
-    copies = _Copies(
-        state=_state(committed_bytes=_SOURCE_SIZE),
-        prepare=_copy_step(ResumeOutcome.VERIFY, None))
-    sessions = _Sessions()
+async def test_verify_without_end_confirms_session_at_saved_full_offset() -> None:
+    """全部字节已保存而无结束事实：从原文件末尾打开并确认实际结束。"""
+    copies = _Copies(state=_state(committed_bytes=_SOURCE_SIZE),
+        prepare=_copy_step(ResumeOutcome.VERIFY, None), segments=[_committed_step()])
+    class EndSession(_Session):
+        def read_chunk(self, limit):
+            assert self.position() == _SOURCE_SIZE
+            return ReadChunk(data=None, eof=True)
+
+    sessions = _Sessions(EndSession())
+
     step = await obtain_recording_input(_context(copies, sessions))
+
     assert step.phase is InputPhase.INPUT_READY
-    assert copies.calls == ["qualify", "state:9", "prepare", "complete"]
+    assert step.input_file == _INPUT_REF
+    assert step.read_end == ReadEnd(True, 0, None)
+    assert sessions.opens == [(11, _SOURCE_SIZE)]
+    assert sessions.session.stop_requested and sessions.session.awaited
+    assert copies.state.committed_bytes == _SOURCE_SIZE
+
+
+@pytest.mark.asyncio
+async def test_verify_with_original_end_completes_without_reopening_source() -> None:
+    copies = _Copies(state=_state(committed_bytes=_SOURCE_SIZE),
+        prepare=_copy_step(ResumeOutcome.VERIFY, None), segments=[AssertionError("不能再传输已存字节")])
+    sessions = _Sessions()
+    end = ReadEnd(True, _SOURCE_SIZE, None)
+
+    step = await obtain_recording_input(_context(copies, sessions, read_end=end))
+
+    assert step.phase is InputPhase.INPUT_READY
+    assert step.input_file == _INPUT_REF
+    assert step.read_end is end
     assert sessions.opens == []
+    assert copies.state.committed_bytes == _SOURCE_SIZE
 
 
 @pytest.mark.asyncio

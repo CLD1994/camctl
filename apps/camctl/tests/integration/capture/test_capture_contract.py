@@ -13,12 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from camctl.capture.handlers import CaptureRuntime, capture_handler
+from camctl.capture.handlers import CaptureRuntime, ListedResult, capture_handler
 from camctl.capture.recording import RecordingState
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
+from camctl.operations.models import (
+    AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
+    Settlement, SettlementBasis,
+)
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
     register_capture_guards,
@@ -55,6 +59,8 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
+        EvidenceContract(type="result_files_listed", version=1, operation="result",
+                         fields=frozenset({"activity_id", "entries"}), identity_field="activity_id"),
         EvidenceContract(type="stop_returned", version=1, operation="stop",
                          fields=frozenset()),
         EvidenceContract(type="stop_confirmed", version=1, operation="stop",
@@ -118,6 +124,25 @@ class ResultsDouble:
     async def list_files(self, action_id: int) -> tuple:
         self.calls.append(action_id)
         return self.files_by_action.get(action_id, ())
+
+    async def list_round(self, ticket, *, timeout_s) -> ListedResult:
+        try:
+            entries = await self.list_files(int(ticket.target_id))
+        except RuntimeError:
+            return ListedResult((), CallOutcome(
+                status=AttemptStatus.FAILED, error=ErrorValue("device_error", "device"),
+                effect=EffectState.UNKNOWN, settlement=Settlement(
+                    SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {}))))
+        files = [{"identity": entry.identity, "locator": dict(entry.locator),
+                  "complete": entry.complete, "size_bytes": entry.size_bytes,
+                  "kind": entry.kind.value, "original_name": entry.original_name,
+                  "media_type": entry.media_type, "paired_identity": entry.paired_identity}
+                 for entry in entries]
+        return ListedResult(entries, CallOutcome(
+            status=AttemptStatus.SUCCEEDED, error=None, effect=EffectState.CONFIRMED,
+            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
+            observations=(DeviceObservation("result_files_listed", 1,
+                {"activity_id": ticket.target_id, "entries": files}),)))
 
 
 def _seed_stopped_recording(connection, action_id: int) -> None:
@@ -486,11 +511,22 @@ class TestRecordHandler:
             self, tmp_path: Path):
         owned = _environment(tmp_path, _RECORD)
         try:
-            _seed_open_start(owned.connection, 12)
-            owned.connection.commit()
+            original = _runtime(owned)
+            ticket, reason = original.grant(original.action(12))
+            assert ticket is not None, reason
+            horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
             runtime = _runtime(owned, files={})
-            # 启动调用可能在途且无可靠发送时间：无法核实原任务，
-            # 按无法确认失败收场；不重复启动、不补造时间。
+            from camctl.capture.recovery import RecoveryBoundary
+
+            recovery = EvidenceRegistry((EvidenceContract(
+                "adb_foreground_recovery", 1, "control", frozenset()),))
+            runtime.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
+            runtime.recovery_max_event_id = horizon
+            runtime.recovery_evidence_for = lambda binding, operation: (
+                recovery if binding.driver_id == "camctl-adb" and operation == "control" else None)
+            # 旧本地发令已由 host 可靠收场，原结果和发送时间未保存。
+            # 恢复只保存实际采用的未知依据；未装配核实时按无法确认
+            # 失败结束普通 START，不重复启动或补造发送时间。
             await capture_handler("camera_record")(12, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (4,)
             row = _value(
@@ -506,6 +542,7 @@ class TestRecordHandler:
                 owned, "SELECT occupancy_state FROM device_activities"
                 " WHERE id = 12")
             assert activity == (1,)
+            assert runtime.driver.calls == []
         finally:
             owned.connection.close()
 

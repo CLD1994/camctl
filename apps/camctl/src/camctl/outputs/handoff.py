@@ -27,8 +27,10 @@ from camctl.host_files.handoff import (
 )
 from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.models import BoundDirectories, FileRef
+from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.copy import CopyTargetRef
 from camctl.persistence.models import DbOutcomeKind
+from camctl.session.supervision import Supervisor
 
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
@@ -425,6 +427,7 @@ class DeliveryContext:
     directories: DeliveryDirectories
     occurred_at: int
     publication_conditions_met: bool = True
+    executor: FileTaskExecutor | None = None
 
 
 class DeliveryPhase(Enum):
@@ -574,7 +577,15 @@ async def publish_delivery(
     下一次观察。
     """
     state = context.repository.load_delivery_state(delivery_id, context.owned)
-    decision = _decide_again(state, context)
+    executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
+    return await executor.run_owned_async_file_task(AsyncFileTask(
+        FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),
+        "delivery_publication", "副本发布及实际结果保存",
+        lambda _control: _publish_delivery(delivery_id, context, state), resources=("state_db",)))
+
+
+async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
+    decision = await asyncio.to_thread(_decide_again, state, context)
     if decision.outcome is DeliveryHandoffOutcome.COMPLETED:
         return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
     if decision.outcome is DeliveryHandoffOutcome.NOT_ACTIVE:
@@ -604,7 +615,7 @@ async def publish_delivery(
         raise DeliveryHandoffError(
             "publication_sync_failed", publish.error or "目录同步失败")
     if publish.stage is PublishStage.NOT_MOVED:
-        retry = _decide_again(state, context)
+        retry = await asyncio.to_thread(_decide_again, state, context)
         if retry.outcome is DeliveryHandoffOutcome.DELIVERED_LOCALLY:
             _save_publication(delivery_id, context)
             return DeliveryResult(DeliveryPhase.PUBLISHED, retry)

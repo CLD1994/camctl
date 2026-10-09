@@ -474,6 +474,8 @@ class BeginAttemptCommand:
             ):
                 return self._rejected("run_ended")
             if run_facts["attempts_used"] >= intent.config.max_attempts:
+                if intent.kind is OperationKind.READ_FILE:
+                    return self._read_exhausted(scope, run_facts)
                 return self._rejected("budget_exhausted")
             if run_facts["attempts_used"] >= 1 and run_facts["retry_wait_required"] != 1:
                 raise TransactionError("后续尝试要求先建立重试等待")
@@ -588,6 +590,41 @@ class BeginAttemptCommand:
             result=BeginAttemptResult(disposition=BeginDisposition.REJECTED, reason=reason),
         )
 
+    def _read_exhausted(self, scope, run) -> CommandPlan:
+        """原明确失败耗尽本次预算时，只采用新流程配置并结束原流程。"""
+        with closing(scope.connection.execute("SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
+                                               (run["id"],))) as cursor:
+            identities = cursor.fetchall()
+        attempts = tuple(_load_row(scope.connection, "operation_attempts", identity) for (identity,) in identities)
+        if any(attempt is None for attempt in attempts):
+            raise ConsistencyError("读取耗尽引用的原尝试不存在")
+        self._state.setdefault("operation_attempts", {}).update({attempt["id"]: attempt for attempt in attempts})
+        if (not attempts or any(a["status"] == int(_ATTEMPT_STATUS.RUNNING)
+                                 or a["result_json"] is None for a in attempts)
+                or max(attempts, key=lambda a: a["attempt_no"])["status"] != int(_ATTEMPT_STATUS.FAILED)
+                or run["retry_wait_required"] != 1):
+            raise TransactionError("读取耗尽必须已有原明确失败，不能结束原未完成尝试")
+        desired = {"max_attempts_used": self._intent.config.max_attempts,
+                   "timeout_s_json": self._intent.config.timeout_s,
+                   "retry_interval_s_json": self._intent.config.retry_interval_s}
+        changed = {key: value for key, value in desired.items() if not json_equal(run[key], value)}
+        specs = []
+        if changed:
+            specs.append((2, _update("operation_runs", run["id"],
+                                     {key: run[key] for key in changed}, changed)))
+        specs.append((3, _update("operation_runs", run["id"],
+            {"status": run["status"], "retry_wait_required": run["retry_wait_required"], "error_json": run["error_json"]},
+            {"status": int(_RUN_STATUS.FAILED), "retry_wait_required": 0,
+             "error_json": {"code": "read_attempts_exhausted", "stage": "source_read", "details": {}}})))
+        owner = _run_owner_ref(run, self._state)
+        self._owners[("operation_runs", run["id"])] = owner
+        allocation = scope.allocate(len(specs))
+        return CommandPlan(events=tuple(_envelope(
+            allocation.first_event_id + offset, allocation.txn_id, _OPERATION_CONFIGURED_EVENT,
+            reason, (row,), self._intent.occurred_at) for offset, (reason, row) in enumerate(specs)),
+            owners=self._owners, state_rows=self._state,
+            result=BeginAttemptResult(BeginDisposition.REJECTED, reason="budget_exhausted"))
+
     def _resolve_owner(self, run_facts, intent, run_id: int) -> tuple[str, int]:
         if run_facts is not None:
             return _run_owner_ref(run_facts, self._state)
@@ -615,6 +652,8 @@ class BeginAttemptCommand:
             )
 
     def _reuse(self, connection, saved: list[dict]) -> CommandPlan:
+        if self._intent.kind is OperationKind.READ_FILE and saved[-1]["type"] == _OPERATION_CONFIGURED_EVENT:
+            return self._reuse_read_exhausted(connection, saved)
         started = [event for event in saved if event["type"] == _ATTEMPT_STARTED_EVENT]
         if not started:
             raise TransactionError("操作身份已用于其他阶段，不能作为意图重送")
@@ -650,6 +689,37 @@ class BeginAttemptCommand:
                 disposition=BeginDisposition.GRANTED, ticket=ticket
             ),
         )
+
+    def _reuse_read_exhausted(self, connection, saved) -> CommandPlan:
+        """耗尽原键核实配置、轮次、归属与结束结果，不能重开尝试。"""
+        intent = self._intent
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds not in ([(_OPERATION_CONFIGURED_EVENT, 3)],
+                         [(_OPERATION_CONFIGURED_EVENT, 2), (_OPERATION_CONFIGURED_EVENT, 3)]):
+            raise TransactionError("原读取耗尽的完整事件组不符")
+        identity = _find_responsibility(connection, intent)
+        run = _load_row(connection, "operation_runs", identity) if identity is not None else None
+        if run is None:
+            raise TransactionError("原读取耗尽流程缺失")
+        self._state["operation_runs"] = {identity: run}
+        _load_flow_context(connection, intent.kind, intent.action_id, intent.target, intent.query_purpose, self._state)
+        _verify_run_intent(run, intent)
+        _verify_run_identity(run, self._state)
+        if self._state["file_copies"][intent.target.copy_id]["round"] != intent.copy_round:
+            raise TransactionError("读取耗尽原键的轮次不同")
+        expected = {"max_attempts_used": intent.config.max_attempts, "timeout_s_json": intent.config.timeout_s,
+                    "retry_interval_s_json": intent.config.retry_interval_s, "status": int(_RUN_STATUS.FAILED),
+                    "retry_wait_required": 0, "error_json": {"code": "read_attempts_exhausted", "stage": "source_read", "details": {}}}
+        for event in saved:
+            rows = event["body"]["rows"]
+            if (event["occurred_at"] != intent.occurred_at or len(rows) != 1
+                    or rows[0]["table"] != "operation_runs" or rows[0]["id"] != identity
+                    or any(name not in expected or not json_equal(expected[name], value)
+                           for name, value in rows[0]["after"]["values"].items())):
+                raise TransactionError("读取耗尽原键的时刻或完整输入不符")
+        if any(not json_equal(run[name], value) for name, value in expected.items()):
+            raise TransactionError("读取耗尽原键的采用配置或终态不符")
+        return self._rejected("budget_exhausted")
 
 
 def _result_json(validated: ValidatedOutcome) -> dict:
@@ -1123,9 +1193,9 @@ class _FinishStaleRunsCommand:
 class _ReadResumeCommand:
     """恢复同一未结束读取尝试配置的事务命令。
 
-    重启后沿原在途尝试继续读取时，把本次运行采用的预算与期限写
-    入原尝试行；不新增尝试或次数，不改动结果与效果状态。配置与
-    原保存值相同时不产生事件。
+    沿原在途尝试继续读取时，在同一事务保存流程与该尝试实际采用
+    的配置；不新增尝试或次数，不改动结果与效果状态。两个记录的
+    配置都与采用值相同时不产生事件。
     """
 
     _CONFIG_COLUMNS = ("max_attempts_used", "timeout_s_json", "retry_interval_s_json")
@@ -1140,7 +1210,7 @@ class _ReadResumeCommand:
         connection = scope.connection
         saved = _saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(scope, saved)
         ticket = self._request.ticket
         run = self._load_run(connection, ticket)
         attempt_id = self._load_attempt(connection, run, ticket)
@@ -1151,32 +1221,37 @@ class _ReadResumeCommand:
         owner = _run_owner_ref(run, self._state)
         self._owners[("operation_runs", run["id"])] = owner
         self._owners[("operation_attempts", attempt_id)] = owner
-        if attempt["status"] != int(_ATTEMPT_STATUS.RUNNING):
+        if (attempt["status"] != int(_ATTEMPT_STATUS.RUNNING)
+                or run["status"] not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))):
             return self._decision(ReadResumeDisposition.NOT_RUNNING)
+        if (attempt["result_json"] is not None or attempt["result_event_id"] is not None
+                or attempt["error_json"] is not None or run["retry_wait_required"] != 0
+                or attempt["attempt_no"] != run["attempts_used"]):
+            raise ConsistencyError("原读取未结束尝试的结果、次数或重试责任矛盾")
         desired = {
             "max_attempts_used": self._request.config.max_attempts,
             "timeout_s_json": self._request.config.timeout_s,
             "retry_interval_s_json": self._request.config.retry_interval_s,
         }
-        changed = {
-            column: value for column, value in desired.items()
-            if not json_equal(attempt[column], value)
-        }
-        if not changed:
+        changes = []
+        for table, facts, event_type, reason in (
+                ("operation_runs", run, _OPERATION_CONFIGURED_EVENT, 2),
+                ("operation_attempts", attempt, _ATTEMPT_RESULT_EVENT, _RESUME_READ_REASON)):
+            changed = {column: value for column, value in desired.items()
+                       if not json_equal(facts[column], value)}
+            if changed:
+                changes.append((event_type, reason, _update(table, facts["id"],
+                    {column: facts[column] for column in changed}, changed)))
+        if not changes:
             return self._decision(ReadResumeDisposition.UNCHANGED)
-        row = _update(
-            "operation_attempts", attempt_id,
-            {column: attempt[column] for column in changed},
-            changed,
-        )
-        allocation = scope.allocate(1)
-        event = _envelope(
-            allocation.first_event_id, allocation.txn_id,
-            _ATTEMPT_RESULT_EVENT, _RESUME_READ_REASON, (row,),
-            self._request.occurred_at, evidence={"attempt_id": attempt_id},
-        )
+        allocation = scope.allocate(len(changes))
+        events = tuple(_envelope(
+            allocation.first_event_id + offset, allocation.txn_id, event_type, reason, (row,),
+            self._request.occurred_at,
+            evidence={"attempt_id": attempt_id} if event_type == _ATTEMPT_RESULT_EVENT else None)
+            for offset, (event_type, reason, row) in enumerate(changes))
         return CommandPlan(
-            events=(event,),
+            events=events,
             owners=self._owners,
             state_rows=self._state,
             result=ReadResumeDecision(ReadResumeDisposition.APPLIED),
@@ -1221,21 +1296,54 @@ class _ReadResumeCommand:
             read_only=True, result=ReadResumeDecision(disposition),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
+    def _reuse(self, scope, saved: list[dict]) -> CommandPlan:
         """原键恢复首次恢复配置响应；不按当前状态重新判定。"""
-        if len(saved) != 1 or saved[0]["type"] != _ATTEMPT_RESULT_EVENT \
-                or saved[0]["reason"] != _RESUME_READ_REASON:
+        allowed = (( _OPERATION_CONFIGURED_EVENT, 2), (_ATTEMPT_RESULT_EVENT, _RESUME_READ_REASON))
+        kinds = tuple((event["type"], event["reason"]) for event in saved)
+        if (not kinds or len(kinds) > 2 or len(set(kinds)) != len(kinds)
+                or any(kind not in allowed for kind in kinds)
+                or kinds != tuple(kind for kind in allowed if kind in kinds)):
             raise TransactionError("操作身份已用于其他阶段，不能作为恢复配置重送")
-        event = saved[0]
-        if event["occurred_at"] != self._request.occurred_at:
-            raise TransactionError("恢复配置的事实时刻与原事务不同")
-        rows = event["body"]["rows"]
-        if (len(rows) != 1 or rows[0]["table"] != "operation_attempts"
-                or rows[0]["after"]["values"].keys()
-                - set(self._CONFIG_COLUMNS)):
-            raise TransactionError("原恢复配置的目标尝试或字段与输入不符")
+        run = self._load_run(scope.connection, self._request.ticket)
+        attempt_id = self._load_attempt(scope.connection, run, self._request.ticket)
+        attempt = _load_row(scope.connection, "operation_attempts", attempt_id)
+        if attempt is None:
+            raise ConsistencyError("原恢复配置引用的尝试不存在")
+        self._state["operation_attempts"] = {attempt_id: attempt}
+        _verify_result_ticket_config(self._request, run, attempt)
+        owner = _run_owner_ref(run, self._state)
+        config = self._request.config
+        desired = {"max_attempts_used": config.max_attempts,
+                   "timeout_s_json": config.timeout_s, "retry_interval_s_json": config.retry_interval_s}
+        columns = frozenset(self._CONFIG_COLUMNS)
+        transaction = saved[0]["transaction"]
+        for table, facts, kind in (("operation_runs", run, allowed[0]),
+                                   ("operation_attempts", attempt, allowed[1])):
+            original = read_row_values_at_boundary(scope.connection, owner=owner,
+                table=table, row_id=facts["id"], columns=columns,
+                current_values={column: facts[column] for column in columns},
+                boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+                current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+            if not json_equal(original, desired):
+                raise TransactionError("恢复配置的原键输入与原完整配置不同")
+            events = [event for event in saved if (event["type"], event["reason"]) == kind]
+            if not events:
+                continue
+            event, = events
+            rows = event["body"]["rows"]
+            if (event["occurred_at"] != self._request.occurred_at or len(rows) != 1
+                    or rows[0]["table"] != table or rows[0]["id"] != facts["id"]
+                    or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]
+                    or not rows[0]["after"]["values"]
+                    or not rows[0]["after"]["values"].keys() <= columns
+                    or rows[0]["before"]["values"].keys() != rows[0]["after"]["values"].keys()
+                    or any(not json_equal(desired[column], value)
+                           for column, value in rows[0]["after"]["values"].items())):
+                raise TransactionError("原恢复配置的时刻、行身份或完整变更与输入不符")
+            if table == "operation_attempts" and event["body"]["evidence"] != {"attempt_id": attempt_id}:
+                raise TransactionError("原恢复配置的证据不属于原尝试")
         return CommandPlan(
-            events=(), owners={}, state_rows={}, read_only=True,
+            events=(), owners=self._owners, state_rows=self._state, read_only=True,
             result=ReadResumeDecision(ReadResumeDisposition.APPLIED),
         )
 

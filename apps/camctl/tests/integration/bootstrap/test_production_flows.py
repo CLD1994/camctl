@@ -10,6 +10,7 @@ result 端口观察转成候选产物文件；受限会话（墙钟检查失败�
 
 from __future__ import annotations
 
+
 import asyncio
 import time
 from decimal import Decimal
@@ -32,6 +33,7 @@ from camctl.devices.evidence import (
     EvidenceContract,
     EvidenceRegistry,
 )
+from camctl.operations.models import CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis
 from camctl.devices.ports import ControlRequest, DeviceCallResult, DriverDeclaration
 from camctl.persistence.initialization import InitOutcome, initialize_state
 
@@ -105,11 +107,12 @@ class _ProductionDriver:
         identity = request.params["activity_id"]
         self.calls.append(("result", identity))
         entries = self._files.get(int(identity), [])
-        return DeviceCallResult(
+        return DeviceCallResult.from_outcome(CallOutcome(
+            effect=EffectState.CONFIRMED,
+            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation(
                 type="result_files_listed", version=1,
-                data={"activity_id": identity, "entries": entries}),),
-            error=None)
+                data={"activity_id": identity, "entries": entries}),)))
 
 
 def _entry(identity: str, *, kind: str = "video", size: int = 4096) -> dict:

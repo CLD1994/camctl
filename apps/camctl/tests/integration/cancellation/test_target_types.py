@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from camctl.cancellation.models import ApplyCancelTarget, CancelApplyMode
+from camctl.cancellation.models import ApplyCancelTarget, CancelApplyMode, StartCancelAction
 from camctl.cancellation.service import ApplyCancel, apply_cancel
 from camctl.cancellation.settlement import TargetSettlement
 from camctl.contracts.values import new_operation_key
@@ -30,6 +30,8 @@ from camctl.persistence.repositories.outputs import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
+from ..bootstrap.test_cancel_ready_runtime import _published
+from ..bootstrap.test_output_binding_changes import environment  # noqa: F401
 
 register_capture_guards()
 register_outputs_guards()
@@ -161,55 +163,66 @@ def _runtime(owned, settlement):
         settlement=settlement, occurred_at=lambda: _NOW + 10)
 
 
+async def _real_withdrawal_runtime(environment):
+    from camctl.bootstrap.flows import _resolve_and_fix
+    from camctl.outputs.withdrawal import WithdrawalContext, resume_withdrawals, withdraw_delivery
+    from camctl.cancellation.service import CancellationRuntime
+
+    cfg, owned, _context, _driver = environment
+    target, contents, files = await _published(environment)
+    origin, spec = owned.connection.execute("SELECT id,input_fields_json FROM actions WHERE type=6").fetchone()
+    repository = CancellationRepository()
+    started = repository.start_cancel_action(StartCancelAction(origin, _NOW), new_operation_key(), owned)
+    assert started.kind is DbOutcomeKind.COMPLETED, started.error
+    ids = _resolve_and_fix(owned, repository, origin, spec, lambda: _NOW)
+    work = WithdrawalContext(owned, OutputsRepository(), Path(cfg.paths.ready),
+        Path(cfg.paths.processing), lambda: _NOW, files.executor, files.pending_withdrawals)
+    settlement = TargetSettlement(owned, work.repository, repository, lambda _id: "unknown", lambda: _NOW,
+        withdrawal_execute=lambda identity: withdraw_delivery(identity, work),
+        withdrawal_resume=lambda identity: resume_withdrawals(identity, work))
+    return target, contents, origin, ids, CancellationRuntime(
+        owned=owned, repository=repository, settlement=settlement, occurred_at=lambda: _NOW)
+
+
 @pytest.mark.asyncio
 class TestObtainWithdrawal:
-    async def test_terminal_obtain_still_withdraws_ready(self, pipeline):
-        """原取回已成功而 ready 可撤：终态保持，撤回事实单独更新。"""
-        owned = pipeline
-        settlement = _settlement(owned, {301: "ready"})
-        progress = await apply_cancel(
-            ApplyCancel(origin_action_id=50, item_ids=(91,)),
-            _runtime(owned, settlement))
+    async def test_terminal_obtain_still_withdraws_ready(self, environment):
+        """原取回已成功，实际 ready 删除及结果保存后采用独立撤回结论。"""
+        cfg, owned, _context, _driver = environment
+        target, contents, origin, ids, runtime = await _real_withdrawal_runtime(environment)
+        progress = await apply_cancel(ApplyCancel(origin, ids), runtime)
         assert progress.items[0].status == 3, progress
-        # 取回终态保持成功；交付与撤回明细单独更新。
-        assert _value(
-            owned, "SELECT status FROM actions WHERE id = 21") == (3,)
-        assert _value(
-            owned, "SELECT status, withdrawal_state FROM deliveries"
-            " WHERE id = 301") == (8, 3)
-        assert _value(
-            owned, "SELECT status FROM cancel_delivery_items"
-            " WHERE delivery_id = 301") == (2,)
-        # 取消项按既有终态成功。
-        assert _value(
-            owned, "SELECT status, outcome FROM cancel_items"
-            " WHERE id = 91") == (3, 2)
+        assert _value(owned, "SELECT status FROM actions WHERE id=?", target) == (3,)
+        assert owned.connection.execute("SELECT status,withdrawal_state FROM deliveries ORDER BY id").fetchall() == [(8,3),(8,3)]
+        assert owned.connection.execute("SELECT status FROM cancel_delivery_items ORDER BY id").fetchall() == [(2,),(2,)]
+        assert all(not (Path(cfg.paths.ready)/name).exists() for name in contents)
+        assert _value(owned, "SELECT status,outcome FROM cancel_items WHERE id=?", ids[0]) == (3,2)
 
-    async def test_processing_delivery_is_not_retractable(self, pipeline):
-        """processing 中的交付不可撤回且不删除；取消仍可成功。"""
-        owned = pipeline
-        settlement = _settlement(owned, {301: "processing"})
-        progress = await apply_cancel(
-            ApplyCancel(origin_action_id=50, item_ids=(91,)),
-            _runtime(owned, settlement))
+    async def test_processing_delivery_is_not_retractable(self, environment):
+        """真实 processing 字节保持，原发布及原取回终态保持。"""
+        cfg, owned, _context, _driver = environment
+        target, contents, origin, ids, runtime = await _real_withdrawal_runtime(environment)
+        ready, processing = Path(cfg.paths.ready), Path(cfg.paths.processing)
+        for name in contents:
+            (ready/name).rename(processing/name)
+        progress = await apply_cancel(ApplyCancel(origin, ids), runtime)
         assert progress.items[0].status == 3, progress
-        assert _value(
-            owned, "SELECT status, withdrawal_state FROM deliveries"
-            " WHERE id = 301") == (5, 4)
-        assert _value(
-            owned, "SELECT status FROM cancel_delivery_items"
-            " WHERE delivery_id = 301") == (3,)
+        assert _value(owned, "SELECT status FROM actions WHERE id=?", target) == (3,)
+        assert owned.connection.execute("SELECT status,withdrawal_state FROM deliveries ORDER BY id").fetchall() == [(5,4),(5,4)]
+        assert owned.connection.execute("SELECT status FROM cancel_delivery_items ORDER BY id").fetchall() == [(3,),(3,)]
+        assert {name: (processing/name).read_bytes() for name in contents} == contents
 
-    async def test_unknown_position_keeps_waiting(self, pipeline):
-        owned = pipeline
-        settlement = _settlement(owned, {})
-        progress = await apply_cancel(
-            ApplyCancel(origin_action_id=50, item_ids=(91,)),
-            _runtime(owned, settlement))
-        assert progress.items[0].status == 2, progress
-        assert _value(
-            owned, "SELECT withdrawal_state FROM deliveries"
-            " WHERE id = 301") == (2,)
+    async def test_unknown_position_saves_finite_unconfirmed_result(self, environment):
+        """原文件位置无法确认时采用 UNKNOWN，不补造撤回成功。"""
+        cfg, owned, _context, _driver = environment
+        target, contents, origin, ids, runtime = await _real_withdrawal_runtime(environment)
+        for name in contents:
+            (Path(cfg.paths.ready)/name).unlink()
+        progress = await apply_cancel(ApplyCancel(origin, ids), runtime)
+        assert progress.items[0].status == 4, progress
+        assert _value(owned, "SELECT status FROM actions WHERE id=?", target) == (3,)
+        assert owned.connection.execute("SELECT status,withdrawal_state FROM deliveries ORDER BY id").fetchall() == [(5,6),(5,6)]
+        assert owned.connection.execute("SELECT status FROM cancel_delivery_items ORDER BY id").fetchall() == [(4,),(4,)]
 
 
 @pytest.mark.asyncio
@@ -248,13 +261,16 @@ class TestCaptureAndReportSettlement:
         # 已终态拍摄：等待结束，本次有限处理完成。
         assert (await settlement.settle(12)).complete is True
 
-    async def test_report_action_settles_without_shared_generation(
+    async def test_running_report_without_sync_rejects_settlement(
             self, pipeline):
-        """报告动作目标：本次责任分类完成，共享生成不在目标范围。"""
+        """运行中报告缺少原同步记录时不能声明有限收场已完成。"""
         owned = pipeline
         settlement = _settlement(owned, {})
-        result = await settlement.settle(40)
-        assert result.complete and not result.failed, result
+        with pytest.raises(ValueError):
+            await settlement.settle(40)
+        assert owned.connection.execute(
+            "SELECT status, cancel_requested FROM actions WHERE id = 40",
+        ).fetchone() == (2, 0)
 
 
 @pytest.mark.asyncio

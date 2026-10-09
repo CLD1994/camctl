@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+
 import asyncio
 import contextlib
 import hashlib
@@ -110,6 +112,7 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset()),
         EvidenceContract(type="results_returned", version=1,
                          operation="result", fields=frozenset()),
+        RESULT_FILES_CONTRACT,
         EvidenceContract(type="file_digest", version=1, operation="digest",
                          fields=frozenset({"file_id", "sha256"}),
                          identity_field="file_id"),
@@ -223,14 +226,14 @@ class _ObtainDriver:
             error=None,
         )
 
-    async def open_read(self, source: SourceFile, offset: int, ticket):
+    async def open_read(self, source: SourceFile, offset: int, ticket, *, idle_timeout_s):
         self.read_calls.append(source.file_id)
         if self._read_failures > 0:
             self._read_failures -= 1
             raise RuntimeError("设备读取通道失败")
         return ReadSession(
             source, offset,
-            _MemoryStream(_content_of(source, offset)), Decimal("10"))
+            _MemoryStream(_content_of(source, offset)), idle_timeout_s)
 
     async def digest(self, request) -> DeviceCallResult:
         file_id = request.params["file_id"]

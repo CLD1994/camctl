@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Mapping, Protocol
+
+from camctl.devices.evidence import EvidenceError, EvidenceRegistry
 
 __all__ = [
     "EmergencyBudget",
@@ -20,9 +22,62 @@ __all__ = [
     "EmergencyRecord",
     "EmergencyStopPort",
     "RecordStatus",
+    "RecoveryBoundary",
+    "RecoveryBlockedReason",
+    "RecoveryDiagnostic",
     "emergency_eligibility",
     "emergency_stop",
+    "recovery_registry",
 ]
+
+
+class RecoveryBoundary(Enum):
+    """调用方保证的旧本地执行收场边界；普通构造默认不确认。
+
+    正式 run 的部署调用方保证 host 已完成旧工作收场时使用
+    HOST_LOCAL_SETTLED；确认重新上电的嵌入式调用方可使用
+    HOST_POWER_CYCLE。此值不证明独立设备活动结束。
+    """
+
+    UNCONFIRMED = "unconfirmed"
+    HOST_LOCAL_SETTLED = "host_local_settled"
+    HOST_POWER_CYCLE = "host_power_cycle"
+
+
+class RecoveryBlockedReason(Enum):
+    """原调用仍承担责任时，阻止无依据恢复的输入分区。"""
+
+    UNCONFIRMED_BOUNDARY = "unconfirmed_boundary"
+    MISSING_HORIZON = "missing_horizon"
+    MISSING_EVIDENCE_LOOKUP = "missing_evidence_lookup"
+    EVIDENCE_UNAVAILABLE = "evidence_unavailable"
+    INTENT_OUTSIDE_HORIZON = "intent_outside_horizon"
+
+
+@dataclass(frozen=True)
+class RecoveryDiagnostic:
+    """单份恢复诊断，标明原流程及尝试；不生成数据库或机器协议。"""
+
+    reason: RecoveryBlockedReason
+    run_id: int
+    attempt_id: int
+
+
+def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
+    """从原驱动的适用声明和正式恢复模板取得单操作恢复契约。
+
+    恢复类型与版本共用空正文规则；原驱动必须明确声明本操作适用。
+    仅把模板的操作类别绑定原票据，不改变一般设备观察登记。
+    """
+    if entry is None or operation not in entry.declaration.adb_foreground_recovery_operations:
+        return None
+    try:
+        template = entry.evidence.contract("adb_foreground_recovery", 1)
+    except EvidenceError:
+        return None
+    if template.fields or template.identity_field is not None:
+        raise ValueError("原驱动恢复模板必须是正式 v1 空正文契约")
+    return EvidenceRegistry((replace(template, operation=operation),))
 
 
 class EmergencyDecision(Enum):

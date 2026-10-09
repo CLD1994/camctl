@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -17,12 +18,14 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
-    MAX_OBJECT_ID, ObjectId, UtcMicros, new_operation_key,
+    MAX_OBJECT_ID, ObjectId, OperationKey, UtcMicros, new_operation_key,
 )
 from camctl.contracts.workflow_errors import (
     registered_error, validate_error_details,
 )
 from camctl.persistence.models import DbOutcomeKind
+from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
+from camctl.session.supervision import Supervisor
 
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
@@ -201,20 +204,22 @@ class CleanupScan:
         limit = effective_batch(self.batch_size, self.remaining)
         if not self.wrapped:
             if self.after_id >= self.ceiling:
+                if min(self.start_after, self.ceiling) == 0:
+                    return None
                 return (0, limit), replace(self, wrapped=True, after_id=0)
             return (self.after_id, limit), self
-        if self.after_id >= self.start_after:
+        if self.after_id >= self.segment_ceiling():
             return None
         return (self.after_id, limit), self
 
     def segment_ceiling(self) -> int:
         """当前读取段的上界（含）：第一轮到固定上界，绕回后到本次起点。"""
-        return self.ceiling if not self.wrapped else self.start_after
+        return self.ceiling if not self.wrapped else min(self.start_after, self.ceiling)
 
     def advanced(self, checked_id: int) -> "CleanupScan":
         """一条记录检查完成：消耗一条额度并推进到该记录位置。"""
         if not isinstance(checked_id, int) or isinstance(checked_id, bool) \
-                or checked_id < self.after_id:
+                or checked_id <= self.after_id or checked_id > self.segment_ceiling():
             raise ValueError(f"检查位置必须向后推进: {checked_id!r}")
         if self.remaining <= 0:
             raise ValueError("额度已耗尽，不能再检查记录")
@@ -222,8 +227,7 @@ class CleanupScan:
 
     def exhausted_to_end(self) -> "CleanupScan":
         """当前区间无候选：位置推到段末，不消耗额度。"""
-        return replace(
-            self, after_id=self.ceiling if not self.wrapped else self.start_after)
+        return replace(self, after_id=self.segment_ceiling())
 
 
 # ---- 清理命令请求与失败对象 ----
@@ -400,6 +404,25 @@ class WorkFileCleanupError(RuntimeError):
         self.detail = detail
 
 
+@dataclass
+class WorkFileHistory:
+    """本次运行固定的历史范围与已经消耗的检查额度。"""
+
+    scan: CleanupScan | None = None
+    finished: bool = False
+
+
+@dataclass(frozen=True)
+class PendingWorkFileResult:
+    """实际文件结果已经取得，原保存请求尚待可靠核实。"""
+
+    request: CleanupResultSave
+    key: OperationKey
+    outcome: WorkFileSingleOutcome
+    detail: str | None
+    scan: CleanupScan | None = None
+
+
 @dataclass(frozen=True)
 class WorkFileContext:
     """清理编排的协作者、工作目录、事实时刻、预算与会话登记。
@@ -414,6 +437,11 @@ class WorkFileContext:
     occurred_at: int
     limits: WorkFileLimits
     processed: dict[int, WorkFileSingleOutcome] = field(default_factory=dict)
+    #: 正式装配注入本会话共用执行器，核实媒体、拷贝及清理实际占用。
+    executor: "FileTaskExecutor | None" = None
+    history: WorkFileHistory = field(default_factory=WorkFileHistory)
+    pending_results: dict[int, PendingWorkFileResult] = field(default_factory=dict)
+    stop_requested: Any = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.limits, WorkFileLimits):
@@ -422,6 +450,8 @@ class WorkFileContext:
             raise TypeError(f"staging 必须是目录路径: {self.staging!r}")
         if not isinstance(self.processed, dict):
             raise TypeError(f"会话登记必须是字典: {self.processed!r}")
+        if self.executor is None:
+            object.__setattr__(self, "executor", FileTaskExecutor(Supervisor()))
         _require_timestamp(self.occurred_at)
 
 
@@ -494,19 +524,34 @@ def _delete_failure(facts: WorkFileFacts) -> WorkFileFailure:
 def _save_result(
     facts: WorkFileFacts, outcome: WorkFileOutcome,
     failure: WorkFileFailure | None, context: WorkFileContext,
-    *, advance_cursor: bool,
+    *, advance_cursor: bool, detail: str | None = None,
 ) -> None:
     """保存清理结果；与游标推进同一事务提交。"""
     request = CleanupResultSave(
         file_id=facts.file_id, outcome=outcome, error=failure,
         occurred_at=context.occurred_at, advance_cursor=advance_cursor,
     )
+    pending = PendingWorkFileResult(
+        request=request, key=new_operation_key(),
+        outcome=(WorkFileSingleOutcome.FAILED if outcome is WorkFileOutcome.FAILED
+                 else WorkFileSingleOutcome.DELETED), detail=detail,
+        scan=context.history.scan if advance_cursor else None)
+    context.pending_results[facts.file_id] = pending
+    _save_pending_result(pending, context)
+
+
+def _save_pending_result(
+    pending: PendingWorkFileResult, context: WorkFileContext,
+) -> None:
+    """同一拥有者只核实完整原请求，不重新观察或删除文件。"""
     result = context.repository.save_cleanup_result(
-        request, new_operation_key(), context.owned)
+        pending.request, pending.key, context.owned)
     _require_completed(result, "cleanup_result_failed")
+    context.processed[pending.request.file_id] = pending.outcome
+    context.pending_results.pop(pending.request.file_id, None)
 
 
-def _perform_deletion(
+async def _perform_deletion(
     facts: WorkFileFacts, context: WorkFileContext, *, advance_cursor: bool,
 ) -> tuple[WorkFileSingleOutcome, str | None, bool]:
     """已判定可清理的文件：意图、观察、删除与结果的有限一次尝试。
@@ -522,11 +567,11 @@ def _perform_deletion(
             new_operation_key(), context.owned)
         _require_completed(intent, "cleanup_intent_failed")
     path = context.staging / facts.relative_path
-    observation = _observe_work_file(path)
+    observation = await asyncio.to_thread(_observe_work_file, path)
     if isinstance(observation, OSError):
         _save_result(
             facts, WorkFileOutcome.FAILED, _delete_failure(facts), context,
-            advance_cursor=advance_cursor)
+            advance_cursor=advance_cursor, detail=str(observation))
         return WorkFileSingleOutcome.FAILED, str(observation), True
     if observation is False:
         _save_result(
@@ -534,11 +579,11 @@ def _perform_deletion(
             advance_cursor=advance_cursor)
         return WorkFileSingleOutcome.DELETED, None, True
     try:
-        _remove_work_file(path)
+        await asyncio.to_thread(_remove_work_file, path)
     except OSError as failure:
         _save_result(
             facts, WorkFileOutcome.FAILED, _delete_failure(facts), context,
-            advance_cursor=advance_cursor)
+            advance_cursor=advance_cursor, detail=str(failure))
         return WorkFileSingleOutcome.FAILED, str(failure), True
     _save_result(
         facts, WorkFileOutcome.COMPLETED, None, context,
@@ -554,7 +599,7 @@ _SINGLE_OUTCOMES = {
 }
 
 
-def _delete_with_release(
+async def _delete_with_release(
     facts: WorkFileFacts, context: WorkFileContext, *, advance_cursor: bool,
 ) -> tuple[WorkFileSingleOutcome, str | None, bool]:
     """已判定可清理的文件先释放保留状态，再按意图、删除、结果推进。"""
@@ -564,7 +609,31 @@ def _delete_with_release(
                 file_id=facts.file_id, occurred_at=context.occurred_at),
             new_operation_key(), context.owned)
         _require_completed(release, "retention_release_failed")
-    return _perform_deletion(facts, context, advance_cursor=advance_cursor)
+    return await _perform_deletion(facts, context, advance_cursor=advance_cursor)
+
+
+async def _owned_deletion(
+    file_id: int, context: WorkFileContext, *, facts: WorkFileFacts | None = None,
+    advance_cursor: bool = False,
+) -> tuple[WorkFileSingleOutcome, str | None, bool]:
+    """实际文件处理及原结果保存共用文件资格，取消后完成接手。"""
+    async def perform(_control):
+        pending = context.pending_results.get(file_id)
+        if pending is not None:
+            _save_pending_result(pending, context)
+            return pending.outcome, pending.detail, True
+        assert facts is not None
+        result = await _delete_with_release(
+            facts, context, advance_cursor=advance_cursor)
+        context.processed[file_id] = result[0]
+        return result
+
+    assert context.executor is not None
+    return await context.executor.run_owned_async_file_task(AsyncFileTask(
+        task_id=FileTaskId(f"work-file/{file_id}/{new_operation_key()}"),
+        file_ids=(file_id,), stage="work_file_cleanup",
+        business="中间文件查询、删除及结果保存", resources=("state_db",),
+        body=perform))
 
 
 async def clean_one_work_file(
@@ -585,15 +654,23 @@ async def clean_one_work_file(
             decision=WorkFileDecision(
                 WorkFileAction.DELETE, "复用本次运行已处理的实际结果"),
             outcome=cached)
+    if file_id in context.pending_results:
+        outcome, detail, _ = await _owned_deletion(file_id, context)
+        return WorkFileSingleResult(
+            file_id, WorkFileDecision(WorkFileAction.DELETE, "核实原实际结果"),
+            outcome, detail)
     facts = context.repository.load_work_file_state(file_id, context.owned)
+    assert context.executor is not None
+    if file_id in context.executor.unfinished_files():
+        facts = replace(facts, operations_stopped=False)
     decision = classify_work_file(facts)
     if decision.action is not WorkFileAction.DELETE:
         outcome = _SINGLE_OUTCOMES[decision.action]
         context.processed[file_id] = outcome
         return WorkFileSingleResult(
             file_id=file_id, decision=decision, outcome=outcome)
-    outcome, detail, _persisted = _delete_with_release(
-        facts, context, advance_cursor=False)
+    outcome, detail, _persisted = await _owned_deletion(
+        file_id, context, facts=facts, advance_cursor=False)
     context.processed[file_id] = outcome
     return WorkFileSingleResult(
         file_id=file_id, decision=decision, outcome=outcome, detail=detail)
@@ -608,16 +685,36 @@ async def clean_work_files(context: WorkFileContext) -> WorkFileCleanupResult:
     每条记录的检查结果可靠保存后才越过对应记录。
     """
     repository = context.repository
-    ceiling = repository.max_cleanup_candidate_id(context.owned)
-    cursor = repository.load_cleanup_cursor(context.owned)
-    start_after = cursor if cursor is not None else 0
-    scan = CleanupScan(
-        start_after=start_after, ceiling=ceiling,
-        remaining=context.limits.limit_per_run,
-        batch_size=context.limits.batch_size, after_id=start_after)
+    history = context.history
+    if history.finished:
+        return WorkFileCleanupResult(checked=0, cleaned=0, kept=0, failed=0)
+    if history.scan is None:
+        ceiling = repository.max_cleanup_candidate_id(context.owned)
+        cursor = repository.load_cleanup_cursor(context.owned)
+        start_after = cursor if cursor is not None else 0
+        history.scan = CleanupScan(
+            start_after=start_after, ceiling=ceiling,
+            remaining=context.limits.limit_per_run,
+            batch_size=context.limits.batch_size, after_id=start_after)
+    scan = history.scan
     cleaned = kept = failed = 0
+    # COMMIT 已完成时该记录可能不再出现在候选 SQL 中。原实际
+    # 输入仍可靠持有，必须先核实原键，再消费原检查额度及位置。
+    for pending in tuple(context.pending_results.values()):
+        if not pending.request.advance_cursor:
+            continue
+        if pending.scan is None:
+            raise WorkFileCleanupError("cleanup_result_failed", "原历史检查范围缺失")
+        outcome, _detail, _ = await _owned_deletion(pending.request.file_id, context)
+        scan = pending.scan.advanced(pending.request.file_id)
+        history.scan = scan
+        cleaned += int(outcome is WorkFileSingleOutcome.DELETED)
+        failed += int(outcome is WorkFileSingleOutcome.FAILED)
     query = scan.next_query()
     while query is not None:
+        if context.stop_requested is not None and context.stop_requested():
+            history.scan = scan
+            return WorkFileCleanupResult(cleaned + kept + failed, cleaned, kept, failed)
         (after, limit), scan = query
         batch = repository.next_cleanup_candidates(
             after, scan.segment_ceiling(), limit, context.owned)
@@ -626,14 +723,21 @@ async def clean_work_files(context: WorkFileContext) -> WorkFileCleanupResult:
             query = scan.next_query()
             continue
         for file_id in batch:
+            if context.stop_requested is not None and context.stop_requested():
+                history.scan = scan
+                return WorkFileCleanupResult(cleaned + kept + failed, cleaned, kept, failed)
             cached = context.processed.get(file_id)
             if cached is None:
                 facts = repository.load_work_file_state(
                     file_id, context.owned)
+                assert context.executor is not None
+                if file_id in context.executor.unfinished_files():
+                    facts = replace(facts, operations_stopped=False)
                 decision = classify_work_file(facts)
                 if decision.action is WorkFileAction.DELETE:
-                    outcome, _detail, persisted = _delete_with_release(
-                        facts, context, advance_cursor=True)
+                    history.scan = scan
+                    outcome, _detail, persisted = await _owned_deletion(
+                        file_id, context, facts=facts, advance_cursor=True)
                     context.processed[file_id] = outcome
                     if not persisted:
                         # 结果尚无登记的错误对象可保存（动作归属），仍以
@@ -669,7 +773,10 @@ async def clean_work_files(context: WorkFileContext) -> WorkFileCleanupResult:
             else:
                 kept += 1
             scan = scan.advanced(file_id)
+            history.scan = scan
         query = scan.next_query()
+    history.scan = scan
+    history.finished = True
     return WorkFileCleanupResult(
         checked=cleaned + kept + failed, cleaned=cleaned,
         kept=kept, failed=failed)

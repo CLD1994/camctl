@@ -125,7 +125,8 @@ class WorkerCommunicator:
         """请求收场并等待线程实际退出；端点由通信线程关闭。
 
         已送达事件仍可继续读取。请求后未写出的待发送消息以
-        CommunicatorClosed 失败，不再尝试写出。
+        CommunicatorClosed 失败，不再尝试写出；端点中已经可读取
+        的完整消息仍先于关闭事实交给接收方。
         """
         if self._thread is None:
             raise RuntimeError("通信线程未启动")
@@ -153,6 +154,19 @@ class WorkerCommunicator:
                 self._emit(outcome)
         except BaseException as error:
             terminal = ChannelClosed(error)
+        # 请求关闭或发送失败不能丢弃另一方向已经送达的完整结果。
+        # 不等待新消息；对端实际退出后，未完成的读取会由 EOF 收场。
+        try:
+            while self._wait((self._connection,), 0):
+                outcome = self._receive_one()
+                if isinstance(outcome, ChannelClosed):
+                    if terminal is None or terminal.error is None:
+                        terminal = outcome
+                    break
+                self._emit(outcome)
+        except BaseException as error:
+            if terminal is None or terminal.error is None:
+                terminal = ChannelClosed(error)
         # 正常收场也发布关闭事实，接收方不会无限等待。
         if terminal is None:
             terminal = ChannelClosed(None)

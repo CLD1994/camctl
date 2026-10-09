@@ -228,3 +228,30 @@ def test_scan_wrapped_segment_stops_at_start():
     assert stepped.next_query() == ((5, 1), stepped)
     finished = stepped.advanced(6)
     assert finished.next_query() is None
+
+
+@pytest.mark.parametrize("start,expected", [(20, 20), (100, 100), (900, 100)])
+def test_wrapped_scan_never_crosses_fixed_registration_ceiling(start, expected):
+    scan = _scan(start_after=start, after_id=0, ceiling=100, wrapped=True)
+    assert scan.segment_ceiling() == expected
+    exhausted = scan.exhausted_to_end()
+    assert exhausted.after_id == expected
+    assert exhausted.next_query() is None
+
+
+def test_cursor_above_current_candidates_wraps_only_to_fixed_ceiling():
+    scan = _scan(start_after=900, after_id=900, ceiling=100)
+    (_after, _limit), wrapped = scan.next_query()
+    assert wrapped.segment_ceiling() == 100
+    assert wrapped.advanced(100).next_query() is None
+
+
+def test_scan_rejects_checked_record_past_current_fixed_segment():
+    scan = _scan(start_after=900, after_id=0, ceiling=100, wrapped=True)
+    with pytest.raises(ValueError):
+        scan.advanced(500)
+
+
+def test_cursor_above_empty_scope_does_not_create_wrapped_window():
+    scan = _scan(start_after=900, after_id=900, ceiling=0)
+    assert scan.next_query() is None

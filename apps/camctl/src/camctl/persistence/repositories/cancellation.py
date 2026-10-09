@@ -84,6 +84,7 @@ _ACTION_STARTED_EVENT = 5
 _ACTION_STARTED_REASON = 1
 
 _ACTION_STATUS = enum_for("actions.status")
+_SYNC_STATUS = enum_for("state_syncs.status")
 _TARGET_PENDING, _TARGET_FIXED, _TARGET_FAILED = 1, 2, 3
 #: 动作终态集合。
 _ACTION_TERMINAL = (3, 4, 5, 6)
@@ -436,12 +437,16 @@ class _FailCancelTargetsCommand:
             result=CancelTargetsSaved(CancelTargetsDisposition.ALREADY, ()))
 
 
-def _motor_cancel_request(command):
+def _cancel_request(command):
     return {
         "item_id": command.item_id,
         "mode": command.mode.value,
         "occurred_at": command.occurred_at,
     }
+
+
+def _motor_cancel_request(command):
+    return _cancel_request(command)
 
 
 class _ApplyCancelTargetCommand:
@@ -479,10 +484,13 @@ class _ApplyCancelTargetCommand:
         target_id = item["target_action_id"]
         action_rows: tuple = ()
         motor_rows: tuple = ()
-        motor_evidence = {"motor_request":_motor_cancel_request(command)} if target["type"] == 8 else {}
+        motor_evidence = ({"motor_request": _motor_cancel_request(command)}
+                          if target["type"] == 8
+                          else {"cancel_request": _cancel_request(command)})
         outcome_event = None
         plan_row = None
         start_events = []
+        canceled_sync = None
         withdrawal_rows = self._withdrawal_rows(connection, item, target)
         if mode is CancelApplyMode.PRE_START:
             if target["status"] not in (1, 2) or target["cancel_requested"]:
@@ -547,6 +555,26 @@ class _ApplyCancelTargetCommand:
             effect_after = CancellationEffect.APPLIED.value
         else:
             raise ConsistencyError(f"取消生效方式不可解释: {mode!r}")
+        if target["type"] == 7 and target["status"] == 2:
+            sync_id = connection.execute(
+                "SELECT id FROM state_syncs WHERE action_id = ?", (target_id,),
+            ).fetchone()
+            if sync_id is None or target["execution_started"] != 1:
+                raise ConsistencyError("运行中报告目标缺少原同步责任")
+            sync = row_facts(connection, "state_syncs", sync_id[0])
+            self._state.setdefault("state_syncs", {})[sync["id"]] = sync
+            if sync["local_report_id"] is not None:
+                raise ConsistencyError("运行中报告目标已保存本地成功结果")
+            if sync["status"] == int(_SYNC_STATUS.OUTSTANDING):
+                if mode is not CancelApplyMode.WITH_STOP:
+                    raise ConsistencyError("已生效报告取消的同步责任仍未结束")
+                canceled_sync = sync
+                self._owners[("state_syncs", sync["id"])] = ("state_sync", sync["id"])
+            elif sync["status"] == int(_SYNC_STATUS.CANCELED):
+                if mode is not CancelApplyMode.ALREADY:
+                    raise ConsistencyError("未取消报告目标的同步责任已取消")
+            elif sync["status"] != int(_SYNC_STATUS.ACKNOWLEDGED):
+                raise ConsistencyError("报告目标的同步状态不可解释")
         if (mode in (CancelApplyMode.WITH_STOP, CancelApplyMode.ALREADY)
                 and target["type"] in (1, 2, 3) and target["status"] == 2):
             start = load_start_facts(connection, target)
@@ -570,13 +598,22 @@ class _ApplyCancelTargetCommand:
         self._claim(item, target_id)
         # 生效、结果与可能计划完成事件按实际组合分配，避免留空洞。
         allocation = scope.allocate(
-            1 + len(start_events) + int(outcome_event is not None) + int(plan_row is not None))
+            1 + int(canceled_sync is not None) + len(start_events)
+            + int(outcome_event is not None) + int(plan_row is not None))
         events = [_envelope(
             allocation.first_event_id, allocation.txn_id,
             _CANCEL_CHANGED_EVENT, _CANCEL_APPLY_REASON,
             (apply_row,) + action_rows + motor_rows + withdrawal_rows,
             command.occurred_at, motor_evidence)]
         next_event_id = allocation.first_event_id + 1
+        if canceled_sync is not None:
+            events.append(_envelope(
+                next_event_id, allocation.txn_id, 29, 4,
+                (_update("state_syncs", canceled_sync["id"],
+                         {"status": int(_SYNC_STATUS.OUTSTANDING), "ended_event_id": None},
+                         {"status": int(_SYNC_STATUS.CANCELED), "ended_event_id": next_event_id}),),
+                command.occurred_at))
+            next_event_id += 1
         for event in start_events:
             events.append(replace(event, event_id=next_event_id,
                                   transaction_id=allocation.txn_id))
@@ -633,8 +670,8 @@ class _ApplyCancelTargetCommand:
         next_item = next_row_id(connection, "cancel_delivery_items")
         with closing(connection.execute(
             "SELECT id FROM deliveries WHERE action_id = ? AND status = ?"
-            " AND withdrawal_state = ? ORDER BY id",
-            (target["id"], _DELIVERY_PUBLISHED, _WITHDRAWAL_NOT_REQUESTED),
+            " ORDER BY id",
+            (target["id"], _DELIVERY_PUBLISHED),
         )) as cursor:
             delivery_ids = tuple(int(row[0]) for row in cursor.fetchall())
         rows = []
@@ -698,7 +735,7 @@ class _ApplyCancelTargetCommand:
 
     def _reuse(self, connection, saved) -> CommandPlan:
         kinds = [(event["type"], event["reason"]) for event in saved]
-        order = {(25, 1): 0, (13, 2): 1, (10, 3): 2, (25, 2): 3, (9, 2): 4}
+        order = {(25, 1): 0, (29, 4): 1, (13, 2): 2, (10, 3): 3, (25, 2): 4, (9, 2): 5}
         if (not kinds or kinds[0] != (25, 1)
                 or any(kind not in order for kind in kinds)
                 or len(set(kinds)) != len(kinds)
@@ -715,6 +752,68 @@ class _ApplyCancelTargetCommand:
         original_target = row_facts(connection,'actions',original_item['target_action_id'])
         if original_target is None:
             raise ConsistencyError('原取消事务的目标不存在')
+        evidence = saved[0]["body"]["evidence"]
+        if (original_target["type"] != 8
+                and not json_equal(evidence.get("cancel_request"), _cancel_request(self._command))):
+            raise TransactionError("原取消事务的完整输入与本次核实不符")
+        if original_target["type"] in (4, 5, 6, 7):
+            target_rows = [row for row in rows if row["table"] == "actions"]
+            effect = rows[0]["after"]["values"].get(
+                "cancellation_effect", original_item["cancellation_effect"])
+            if target_rows:
+                if len(target_rows) != 1 or target_rows[0]["id"] != original_target["id"]:
+                    raise ConsistencyError("原取消事务标记了其他目标")
+                change = target_rows[0]
+                after = change["after"]["values"]
+                before = change["before"]["values"]
+                if after == {"status": 6, "cancel_requested": 1} and before == {
+                        "status": 1, "cancel_requested": 0}:
+                    original_mode = CancelApplyMode.PRE_START
+                elif after == {"cancel_requested": 1} and before == {"cancel_requested": 0}:
+                    original_mode = CancelApplyMode.WITH_STOP
+                else:
+                    raise ConsistencyError("原取消事务的目标状态转换不可解释")
+                if effect != CancellationEffect.APPLIED.value or original_target["cancel_requested"] != 1:
+                    raise ConsistencyError("原取消事务的目标标记与成员效果不符")
+            elif effect == CancellationEffect.APPLIED.value:
+                original_mode = CancelApplyMode.ALREADY
+                if original_target["cancel_requested"] != 1:
+                    raise ConsistencyError("原复用取消责任的目标标记未保持")
+            elif effect == CancellationEffect.NOT_REQUIRED.value:
+                original_mode = CancelApplyMode.TERMINAL
+                if original_target["status"] not in _ACTION_TERMINAL:
+                    raise ConsistencyError("原终态取消的目标终态未保持")
+            else:
+                raise ConsistencyError("原取消事务的成员效果不可解释")
+            if self._command.mode is not original_mode:
+                raise TransactionError("取消生效重送的 mode 与原输入不同")
+            if (original_target["type"] == 7 and original_target["execution_started"] == 1
+                    and original_mode is not CancelApplyMode.TERMINAL):
+                sync_identity = connection.execute(
+                    "SELECT id FROM state_syncs WHERE action_id = ?", (original_target["id"],),
+                ).fetchone()
+                if sync_identity is None:
+                    raise ConsistencyError("原报告取消目标缺少同步责任")
+                sync = row_facts(connection, "state_syncs", sync_identity[0])
+                if (original_mode is not CancelApplyMode.TERMINAL
+                        and (sync["status"] not in (int(_SYNC_STATUS.CANCELED), int(_SYNC_STATUS.ACKNOWLEDGED))
+                             or sync["ended_event_id"] is None or sync["local_report_id"] is not None)):
+                    raise ConsistencyError("原报告取消的同步结束事实未保持")
+        sync_events = [event for event in saved if (event["type"], event["reason"]) == (29, 4)]
+        if sync_events:
+            if original_target["type"] != 7:
+                raise ConsistencyError("非报告取消事务携带同步结束")
+            event = sync_events[0]
+            sync_rows = event["body"]["rows"]
+            if len(sync_rows) != 1 or sync_rows[0]["table"] != "state_syncs":
+                raise ConsistencyError("原同步取消必须结束唯一同步记录")
+            sync = row_facts(connection, "state_syncs", sync_rows[0]["id"])
+            if (sync is None or sync["action_id"] != original_target["id"]
+                    or sync["status"] != int(_SYNC_STATUS.CANCELED)
+                    or sync["ended_event_id"] != event["event_id"]
+                    or sync_rows[0]["after"]["values"] != {
+                        "status": int(_SYNC_STATUS.CANCELED), "ended_event_id": event["event_id"]}):
+                raise ConsistencyError("原取消事务的同步结束事实不符")
         if original_target['type'] == 8 and not json_equal(saved[0]['body']['evidence'].get('motor_request'),_motor_cancel_request(self._command)):
             raise TransactionError('原电机取消事务的完整输入与本次核实不符')
         if self._command.mode is CancelApplyMode.PRE_START:
@@ -776,6 +875,13 @@ class _RecordCancelResultCommand:
         if item["status"] not in (_ITEM_PENDING, _ITEM_RUNNING):
             raise TransactionError(
                 f"取消成员状态不可解释: {command.item_id} {item['status']!r}")
+        target = row_facts(connection, "actions", item["target_action_id"])
+        if target is None:
+            raise ConsistencyError("取消结果缺少目标动作")
+        self._state["actions"][target["id"]] = target
+        if (target["type"] == 7 and command.outcome is not None
+                and target["status"] not in _ACTION_TERMINAL):
+            raise ConsistencyError("报告取消成功结果要求目标已终态")
         before = {"status": item["status"], "outcome": None,
                   "error_code": None, "error_details_json": None}
         if command.outcome is not None:
@@ -1691,6 +1797,59 @@ def _guard_cancel_changed(event, context) -> None:
 
 def _guard_cancel_apply(event, context, items) -> None:
     """APPLY：项进入处理中、效果一次确定、目标标记与项目标一致。"""
+    if len(items) != 1:
+        raise EventValidationError("取消生效必须处理唯一成员")
+    member = items[0]
+    item = context.state_rows.get("cancel_items", {}).get(member.row_id)
+    if item is None:
+        raise EventValidationError("取消生效缺少成员原事实")
+    target_id = item["target_action_id"]
+    target = context.state_rows.get("actions", {}).get(target_id)
+    if target is None:
+        raise EventValidationError("取消生效缺少目标原事实")
+    if target["type"] == 8:
+        if "cancel_request" in event.evidence:
+            raise EventValidationError("电机取消沿用 motor_request，不重复申请身份")
+    else:
+        request = event.evidence.get("cancel_request")
+        if (not isinstance(request, dict)
+                or set(request) != {"item_id", "mode", "occurred_at"}
+                or type(request["item_id"]) is not int
+                or request["item_id"] != member.row_id
+                or type(request["occurred_at"]) is not int
+                or request["occurred_at"] != event.occurred_at):
+            raise EventValidationError("取消生效必须携带原成员与时间的完整 cancel_request")
+        if "motor_request" in event.evidence or "motor_permit" in event.evidence:
+            raise EventValidationError("非电机取消不携带电机申请身份")
+        try:
+            mode = CancelApplyMode(request["mode"])
+        except (TypeError, ValueError) as error:
+            raise EventValidationError("取消生效的原模式非法") from error
+        target_changes = [row for row in event.rows if row.table == "actions"]
+        effect = member.after.values.get("cancellation_effect", item["cancellation_effect"])
+        if mode in (CancelApplyMode.PRE_START, CancelApplyMode.WITH_STOP):
+            if target["cancel_requested"] or len(target_changes) != 1:
+                raise EventValidationError("首次取消要求未取消目标及唯一目标标记")
+            change = target_changes[0]
+            if change.row_id != target_id or effect != CancellationEffect.APPLIED.value:
+                raise EventValidationError("首次取消的目标身份与成员效果不符")
+            expected = {"cancel_requested": 1}
+            if mode is CancelApplyMode.PRE_START:
+                if target["status"] == 1:
+                    expected["status"] = 6
+                elif target["status"] != 2 or target["type"] not in (1, 2, 3):
+                    raise EventValidationError("未启动取消要求待执行或可靠未启动的拍摄目标")
+            elif target["status"] != 2:
+                raise EventValidationError("停止收场取消要求目标运行中")
+            if change.after.values != expected:
+                raise EventValidationError("原取消模式与目标状态转换不符")
+        elif mode is CancelApplyMode.TERMINAL:
+            if (target["status"] not in _ACTION_TERMINAL or target_changes
+                    or effect != CancellationEffect.NOT_REQUIRED.value):
+                raise EventValidationError("终态取消要求原终态保持且成员无需施加取消")
+        elif (not target["cancel_requested"] or target_changes
+              or effect != CancellationEffect.APPLIED.value):
+            raise EventValidationError("复用取消要求原目标已取消且保持原标记")
     marked: set[int] = set()
     for row in items:
         values = row.after.values
@@ -1768,6 +1927,12 @@ def _guard_cancel_result(event, context, items) -> None:
                 None, before_facts.get("cancellation_effect")):
             raise EventValidationError("最终结果不改写取消效果")
         if values.get("status") == _ITEM_SUCCEEDED:
+            target = context.state_rows.get("actions", {}).get(
+                before_facts["target_action_id"])
+            if target is None:
+                raise EventValidationError("取消成功结果缺少目标动作事实")
+            if target["type"] == 7 and target["status"] not in _ACTION_TERMINAL:
+                raise EventValidationError("报告取消成功结果要求目标已终态")
             if values.get("outcome") not in (member.value for member in
                                              CancelOutcomeChoice):
                 raise EventValidationError("取消成功必须携带完成依据")

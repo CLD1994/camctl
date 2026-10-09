@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+
 import asyncio
 import contextlib
 import json
@@ -63,6 +65,7 @@ _EVIDENCE = EvidenceRegistry(
                          identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1,
                          operation="result", fields=frozenset()),
+        RESULT_FILES_CONTRACT,
         EvidenceContract(type="delete_returned", version=1, operation="delete",
                          fields=frozenset()),
         EvidenceContract(type="file_absent", version=1, operation="delete",

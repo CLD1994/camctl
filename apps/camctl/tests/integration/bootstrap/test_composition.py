@@ -141,8 +141,13 @@ class TestSubmitComposition:
 
     async def test_submit_missing_database_is_not_created(self, tmp_path: Path) -> None:
         cfg = _config_for(tmp_path)
-        with pytest.raises(FileNotFoundError):
-            build_runtime(CommandMode.SUBMIT, cfg)
+        deps = build_runtime(CommandMode.SUBMIT, cfg)
+        try:
+            outcome = await execute_command(deps, await _parsed(tmp_path, _plan_body()))
+        finally:
+            close_runtime(deps)
+        assert outcome.succeeded is False
+        assert outcome.reason == "state_db_error"
         assert not Path(cfg.paths.state_db).exists()
 
 

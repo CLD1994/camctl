@@ -46,6 +46,8 @@ def _job(job_id: str = "task-1") -> JobMessage:
         job_id=job_id, report_id=1, from_wm=0, to_wm=4, frozen_event_id=9,
         instance_id=_INSTANCE, db_path="/var/lib/camctl/state.db",
         staging_path="/var/lib/camctl/staging/reports/report-1.json",
+        staging_root="/var/lib/camctl/staging", ready_root="/var/lib/camctl/ready",
+        processing_root="/var/lib/camctl/processing",
         entity_batch_size=32, event_batch_size=256, busy_timeout_ms=9000)
 
 
@@ -230,7 +232,7 @@ class TestSupervisorGeneration:
         assert rig.supervisor.reusable
         await rig.supervisor.stop()
 
-    async def test_old_task_result_does_not_complete_new_task(self) -> None:
+    async def test_old_task_result_rejects_current_generation(self) -> None:
         rig = _Rig()
         rig.peer.send(ReadyMessage())
         await rig.supervisor.start()
@@ -238,8 +240,10 @@ class TestSupervisorGeneration:
             rig,
             lambda: (rig.peer.send(_success(job_id="stale-job")),
                      rig.peer.send(_success(job_id="task-1"))))
-        assert outcome.kind is GenerationOutcomeKind.SUCCESS
+        assert outcome.kind is GenerationOutcomeKind.PROTOCOL
         assert outcome.job_id == "task-1"
+        assert outcome.success is None
+        assert not rig.supervisor.reusable
         await rig.supervisor.stop()
 
     async def test_failure_result_retires_worker(self) -> None:

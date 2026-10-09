@@ -173,8 +173,10 @@ class TestRealEntrypoints:
         plan = _plan_file(home, "42")
         submitted = _run_cli(home, "submit", str(plan), "--config", str(config))
         assert submitted.returncode == 1
-        assert submitted.stdout == ""
-        assert "不存在" in submitted.stderr
+        message = json.loads(submitted.stdout)
+        assert message["kind"] == "error"
+        assert message["body"]["reason"] == "state_db_error"
+        assert str(home / "state.db") in message["body"]["details"]["error"]
         assert not (home / "state.db").exists()
 
     def test_undeployed_driver_rejects_run_and_submit_composition(self, tmp_path):

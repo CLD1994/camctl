@@ -586,7 +586,7 @@ class ExpireActionCommand:
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
-    def plan(self, scope) -> CommandPlan:
+    def plan(self, scope, *, start_result_events=()) -> CommandPlan:
         connection = scope.connection
         request = self._request
         ObjectId(request.action_id)
@@ -614,7 +614,8 @@ class ExpireActionCommand:
                 f" {action['status']!r}")
         if action["cancel_requested"]:
             return self._rejected("canceled")
-        start = load_start_facts(connection, action)
+        original_start = load_start_facts(connection, action)
+        start = load_start_facts(connection, action, result_events=start_result_events)
         if not start.not_started:
             return self._rejected("in_flight")
         window = LaunchWindow(
@@ -633,7 +634,7 @@ class ExpireActionCommand:
             or values["id"] == request.action_id
             for values in siblings.values()
         ) and plan["status"] in (1, 2)
-        include_start_facts(start, self._state, self._owners)
+        include_start_facts(original_start, self._state, self._owners)
         self._owners[("actions", request.action_id)] = (
             "action", request.action_id)
         templates = [

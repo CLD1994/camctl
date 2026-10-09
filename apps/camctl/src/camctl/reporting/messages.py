@@ -123,6 +123,9 @@ class JobMessage:
     instance_id: str
     db_path: str
     staging_path: str
+    staging_root: str
+    ready_root: str
+    processing_root: str
     entity_batch_size: int
     event_batch_size: int
     busy_timeout_ms: int
@@ -138,6 +141,8 @@ class JobMessage:
         _require_pattern(self.instance_id, "instance_id", _INSTANCE_ID_PATTERN)
         _require_text(self.db_path, "db_path", maximum=_MAX_PATH_CHARS)
         _require_text(self.staging_path, "staging_path", maximum=_MAX_PATH_CHARS)
+        for name in ("staging_root", "ready_root", "processing_root"):
+            _require_text(getattr(self, name), name, maximum=_MAX_PATH_CHARS)
         _require_int(self.entity_batch_size, "entity_batch_size", minimum=1)
         _require_int(self.event_batch_size, "event_batch_size", minimum=1)
         _require_int(self.busy_timeout_ms, "busy_timeout_ms", minimum=1)
@@ -271,7 +276,7 @@ def decode_message(data: bytes) -> ControlMessage:
     if message_kind is MessageKind.JOB:
         _require_fields(fields, {
             "job_id", "report_id", "from_wm", "to_wm", "frozen_event_id",
-            "instance_id", "db_path", "staging_path",
+            "instance_id", "db_path", "staging_path", "staging_root", "ready_root", "processing_root",
             "entity_batch_size", "event_batch_size", "busy_timeout_ms"})
         return JobMessage(
             job_id=payload["job_id"], report_id=payload["report_id"],
@@ -279,6 +284,8 @@ def decode_message(data: bytes) -> ControlMessage:
             frozen_event_id=payload["frozen_event_id"],
             instance_id=payload["instance_id"], db_path=payload["db_path"],
             staging_path=payload["staging_path"],
+            staging_root=payload["staging_root"], ready_root=payload["ready_root"],
+            processing_root=payload["processing_root"],
             entity_batch_size=payload["entity_batch_size"],
             event_batch_size=payload["event_batch_size"],
             busy_timeout_ms=payload["busy_timeout_ms"])

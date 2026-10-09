@@ -17,7 +17,13 @@ __all__ = [
     "BindingStatus",
     "DeviceBinding",
     "check_binding",
+    "binding_failure_details",
+    "DeviceConfigurationError",
 ]
+
+
+class DeviceConfigurationError(ValueError):
+    """设备配置或驱动登记无法可靠用于本次执行；不是局部绑定失败。"""
 
 
 @dataclass(frozen=True)
@@ -88,3 +94,19 @@ def check_binding(
     return BindingResult(
         status=status, binding=saved, current_driver_id=current_driver
     )
+
+
+def binding_failure_details(result: BindingResult) -> dict[str, str] | None:
+    """从合法配置的核对结果产生已登记的绑定失败详情。"""
+    if result.status is BindingStatus.MATCHED:
+        return None
+    if result.status is BindingStatus.UNAVAILABLE:
+        raise DeviceConfigurationError("设备声明无法可靠取得，不能作为合法运行配置使用")
+    details = {
+        "device_id": result.binding.device_id,
+        "expected_driver_id": result.binding.driver_id,
+        "reason": ("missing" if result.status is BindingStatus.DEVICE_MISSING else "mismatch"),
+    }
+    if result.current_driver_id is not None:
+        details["actual_driver_id"] = result.current_driver_id
+    return details

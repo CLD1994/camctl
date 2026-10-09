@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Callable, Mapping, Protocol
@@ -42,6 +42,9 @@ from camctl.capture.media import (
     decide_recording_result,
 )
 from camctl.capture.media_flow import MediaFlow, run_recording_media
+from camctl.capture.result_inputs import (
+    ListedResult, ObservedFile, files_from_outcome, saved_outcome,
+)
 from camctl.capture.photo import (
     CaptureAssessment,
     PhotoCompletion,
@@ -62,11 +65,14 @@ from camctl.capture.processing import (
     saved_check_duration,
 )
 from camctl.capture.recording import (
+    CaptureContext,
+    GrantDecision,
     ReconciliationFacts,
     ReconciliationPhase,
     RecordingFacts,
     RecordingPhase,
     RecordingState,
+    StartDispatch,
     RecoveredControlDecision,
     RecoveredControlFacts,
     RecoveredControlReason,
@@ -77,6 +83,10 @@ from camctl.capture.recording import (
     decide_recording_reconciliation,
     decide_recovered_control,
     recording_stop_target,
+    start_recording,
+)
+from camctl.capture.recovery import (
+    RecoveryBlockedReason, RecoveryBoundary, RecoveryDiagnostic,
 )
 from camctl.capture.results import (
     CaptureFile,
@@ -91,13 +101,15 @@ from camctl.capture.timelapse import (
     EndControl,
     StartReturn,
     TimelapseState,
+    WaitKind,
+    WaitPlan,
     plan_capture_wait,
 )
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
-from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.contracts.workflow_errors import registered_error
-from camctl.devices.bindings import DeviceBinding
+from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.operations.attempts import (
     AttemptConfig,
@@ -106,6 +118,7 @@ from camctl.operations.attempts import (
     AttemptTarget,
     BeginDisposition,
     OperationKind,
+    QueryPurpose,
     RetryWaitGate,
     RunFinish,
     RunOutcome,
@@ -113,6 +126,7 @@ from camctl.operations.attempts import (
 )
 from camctl.operations.models import (
     AttemptStatus,
+    AttemptTicket,
     CallOutcome,
     EffectState,
     ErrorValue,
@@ -127,14 +141,17 @@ from camctl.outputs.catalog import (
     OutputDraft,
     OutputKind,
 )
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DatabaseAccessError, DbOutcomeKind
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
+    FinishBindingFailure,
     FinishCanceledCapture,
     FinishCapture,
 )
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.repositories.scheduling import GrantRequest, SchedulingRepository
+from camctl.persistence.repositories.scheduling import (
+    ExpireActionRequest, GrantRequest, SchedulingRepository,
+)
 from camctl.persistence.repositories.timelapse import ScheduleWait, TimelapseRepository
 from camctl.persistence.transaction import row_facts
 from camctl.scheduling.rules import LaunchWindow
@@ -167,10 +184,8 @@ _KNOWN_FAILURE_METHOD = "known_failure"
 
 _ACTION_TERMINAL = (3, 4, 5, 6)
 
-#: 结果核实轮次收场依据的证据类型（驱动登记 operation="result"）。
-_RESULTS_RETURNED = "results_returned"
-
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
+_ACTION_TYPE = enum_for("actions.type")
 _EFFECT_STATE = enum_for("operation_attempts.effect_state")
 _DISPATCH_STATE = enum_for("device_activities.dispatch_state")
 _CHECK_DECISION = enum_for("recording_processing.check_decision")
@@ -180,26 +195,13 @@ _FILE_PRESENCE = enum_for("device_files.presence_state")
 _FILE_ROLE = enum_for("device_files.role")
 _ORIGINAL_ROLE = int(_FILE_ROLE.ORIGINAL)
 _PREVIEW_ROLE = int(_FILE_ROLE.PREVIEW)
-
-
-@dataclass(frozen=True)
-class ObservedFile:
-    """结果列举取得的一份候选产物文件。
-
-    evidence 是驱动结构化依据，原样进入归属与完成证据；kind 由列
-    举方按驱动声明给出，未知时为 OTHER。paired_identity 非空表示
-    驱动声明本文件是同批该原片条目的预览。
-    """
-
-    identity: str
-    locator: Mapping[str, Any]
-    evidence: Mapping[str, Any]
-    complete: bool
-    size_bytes: int | None
-    kind: FileKind = FileKind.OTHER
-    original_name: str | None = None
-    media_type: str | None = None
-    paired_identity: str | None = None
+_RUN_KIND = enum_for("operation_runs.kind")
+_RECOVERABLE_OPERATIONS = {
+    int(_RUN_KIND.START): "control", int(_RUN_KIND.STOP): "stop",
+    int(_RUN_KIND.QUERY_ACTIVITY): "query", int(_RUN_KIND.CHECK_CAPTURE_RESULTS): "result",
+    int(_RUN_KIND.STOP_RESIDUAL): "stop",
+}
+_QUERY_PURPOSE = enum_for("operation_runs.query_purpose")
 
 
 @dataclass(frozen=True)
@@ -208,6 +210,46 @@ class HandlerOutcome:
 
     phase: str
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class RecordingStartPreparation:
+    """真实启动返回与本次上限；不持有数据库读取或设备回调。"""
+
+    dispatch: StartDispatch
+    max_attempts: int
+
+
+@dataclass(frozen=True)
+class StartConfirmationPreparation:
+    """启动核实的原固定活动及本次上限。"""
+
+    activity: Mapping[str, Any]
+    max_attempts: int
+
+
+@dataclass(frozen=True)
+class PendingCallResult:
+    """原执行者持有的调用结果；保存核实不改变身份、事实或时钟。"""
+
+    key: OperationKey
+    finish: AttemptFinish
+    observation: ActivityObservationSave | None
+    start_finish: StaleRunFinish | None = None
+    action_finish: FinishCapture | FinishCanceledCapture | None = None
+    expiration: ExpireActionRequest | None = None
+    confirmation_anchor_ns: int | None = None
+    returned_ns: int = 0
+    action_failure: RecordingFailure | None = None
+    canceled_unstarted: bool = False
+    preparation: RecordingStartPreparation | StartConfirmationPreparation | None = None
+    result_listing: tuple[ObservedFile, ...] | None = None
+    result_disposition_ready: bool = True
+    result_set: ResultSetSave | None = None
+
+
+# 启动装配和既有调用方使用同一个公共责任集合。
+PendingStartResult = PendingCallResult
 
 
 class DeviceControlPort(Protocol):
@@ -225,7 +267,7 @@ class DeviceStopPort(Protocol):
 class ResultFilesPort(Protocol):
     """结果列举端口：返回本任务观察到的候选产物文件。"""
 
-    async def list_files(self, action_id: int) -> tuple[ObservedFile, ...]: ...
+    async def list_round(self, ticket: AttemptTicket, *, timeout_s: Decimal) -> ListedResult: ...
 
 
 class RecordingStatePort(Protocol):
@@ -255,6 +297,8 @@ class CaptureRuntime:
     monotonic_ns: Callable[[], int]
     window_of: Callable[[Mapping[str, Any]], LaunchWindow]
     wait_config: Callable[[Mapping[str, Any]], CaptureWaitConfig]
+    #: 核对已保存设备身份与本次固定配置；未提供时由调用方保证绑定匹配。
+    binding_check: Callable[[DeviceBinding], BindingResult] | None = None
     recording_state: RecordingStatePort | None = None
     #: 录像停止调用端口；未装配时录像不能停止。
     stopper: DeviceStopPort | None = None
@@ -262,11 +306,14 @@ class CaptureRuntime:
     media: MediaFlow | None = None
     #: 异常多录修复门槛的本次余量秒数（configuration.md#配置归属）。
     repair_margin_s: Decimal = Decimal("10")
+    #: 录像启动使用本次设备配置；正常与恢复保持原责任累计次数。
+    start_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
+        max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
     #: 停止尝试的本次预算；默认 3 次、单次 10 秒、重试间隔 3 秒
     #:（configuration.md#通信重试间隔）。
     stop_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
-    #: 结果核实轮次的本次预算；默认 3 轮、单轮 10 秒、重试间隔 3 秒
+    #: 结果核实轮次的本次预算；默认 3 轮、每次查询 10 秒、重试间隔 3 秒
     #:（configuration.md#状态查询与产物核实的配置）。
     check_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
@@ -275,6 +322,8 @@ class CaptureRuntime:
     #: 会话内已观察的结果列举缓存（动作到列举与登记事实）；装配层
     #: 闭包共享，跨推进轮次保留，避免等待中的重复列举消耗核实名额。
     listing_cache: dict[int, tuple[tuple, tuple]] | None = None
+    #: 本次会话未完成延时等待的单调截止；装配层跨推进共享，完成即释放。
+    timelapse_deadlines: dict[int, int] = field(default_factory=dict)
     #: 设备状态查询端口；未装配时执行前检查与残留收场确认查询不
     #: 推进，触发动作按自身窗口与取消规则收尾。
     state_query: Any = None
@@ -286,6 +335,27 @@ class CaptureRuntime:
     #: 重试间隔 3 秒（camera-recovery.md#后续动作触发的残留收场）。
     residual_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
+    #: 仅恢复固定启动边界之前的旧尝试，不用于本会话新派发调用。
+    recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED
+    recovery_max_event_id: int | None = None
+    recovery_evidence_for: Callable[[DeviceBinding, str], Any] | None = None
+    #: 会话装配共享，未核实的实际结果不能由 UNKNOWN 恢复覆盖。
+    pending_start_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
+    pending_read_results: dict = field(default_factory=dict)
+    pending_read_business: dict = field(default_factory=dict)
+    pending_read_ends: dict = field(default_factory=dict)
+    continuing_read_tickets: dict = field(default_factory=dict)
+    #: 无恢复依据保留责任与诊断；成功核实后清除，仅供本地消费。
+    last_recovery_diagnostic: RecoveryDiagnostic | None = None
+    #: 诊断进入本地运行日志，不影响原业务责任；相同诊断不重复投递。
+    on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None
+
+    def record_recovery_diagnostic(self, diagnostic: RecoveryDiagnostic) -> None:
+        if diagnostic == self.last_recovery_diagnostic:
+            return
+        self.last_recovery_diagnostic = diagnostic
+        if self.on_recovery_diagnostic is not None:
+            self.on_recovery_diagnostic(diagnostic)
 
     def action(self, action_id: int) -> Mapping[str, Any]:
         facts = row_facts(self.owned.connection, "actions", action_id)
@@ -312,13 +382,14 @@ class CaptureRuntime:
             action_id=action["id"],
             window=self.window_of(action),
             trusted_wall_now=self.wall_us(),
-            config=AttemptConfig(max_attempts=1, timeout_s=Decimal("30")),
+            config=(self.start_config if action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+                    else AttemptConfig(max_attempts=1, timeout_s=Decimal("30"))),
             occurred_at=self.wall_us(),
         )
         outcome = self.scheduling.grant_start(
             request, new_operation_key(), self.owned)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            return None, f"grant_{outcome.kind.value}"
+            raise ConsistencyError(f"启动授予事务未可靠完成: {outcome.error}")
         result = outcome.value
         if result.outcome.value != "granted":
             return None, result.reason
@@ -327,30 +398,150 @@ class CaptureRuntime:
     def finish(self, ticket, outcome: CallOutcome, *,
                end_run: RunOutcome | None = None,
                run_error: ErrorValue | None = None,
-               retry_wait: bool = False) -> None:
-        """保存尝试结果；调用收场后同时结束流程（启动责任闭合）。
+               retry_wait: bool = False,
+               activity: ActivityObservationSave | None = None,
+               start_finish: StaleRunFinish | None = None,
+               action_failure: RecordingFailure | None = None,
+               occurred_at: int | None = None,
+               expiration: ExpireActionRequest | None = None,
+               confirmation_anchor_ns: int | None = None,
+               returned_ns: int | None = None,
+               canceled_unstarted: bool = False) -> None:
+        """先持有完整实际结果，再保存原尝试及其适用的伴随事实。
 
-        保存重试等待时以当前单调读数登记间隔锚点；流程结束清除。
+        保存重试等待使用调用返回时的单调读数；流程结束清除。
         """
         attempt = AttemptFinish(
             ticket=ticket,
             outcome=validate_outcome(ticket, outcome, self.evidence),
-            occurred_at=self.wall_us(),
+            occurred_at=self.wall_us() if occurred_at is None else occurred_at,
             run_finish=None if end_run is None else RunFinish(
                 status=end_run, error=run_error),
             retry_wait=retry_wait,
         )
-        receipt = self.operations.finish_attempt(
-            attempt, new_operation_key(), self.owned)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        if retry_wait:
-            self.retry_gate.established(
-                ticket.responsibility_key, self.monotonic_ns())
-        elif end_run is not None:
-            self.retry_gate.cleared(ticket.responsibility_key)
+        identity = (ticket.run_id, ticket.attempt_id)
+        if identity in self.pending_start_results:
+            raise ConsistencyError("原调用结果仍待核实，不能替换实际结果")
+        pending = PendingCallResult(
+            new_operation_key(), attempt, activity, start_finish,
+            expiration=expiration, confirmation_anchor_ns=confirmation_anchor_ns,
+            returned_ns=self.monotonic_ns() if returned_ns is None else returned_ns,
+            action_failure=action_failure, canceled_unstarted=canceled_unstarted)
+        self.pending_start_results[identity] = pending
+        self._save_call_result(identity, pending)
+
+    def _write_call_result(self, pending: PendingCallResult):
+        """原请求的固定派生输入由各仓储在事务内核对可靠资格。"""
+        ticket = pending.finish.ticket
+        run = row_facts(self.owned.connection, "operation_runs", ticket.run_id)
+        if run is None:
+            raise ConsistencyError("原调用结果缺少所属流程")
+        if not pending.result_disposition_ready:
+            raise ConsistencyError("原 RESULTS 仍持有，所属消费者尚未确定结果处置")
+        if pending.result_set is not None:
+            if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+                raise ConsistencyError("集合结论必须使用原 RESULTS 责任")
+            return self.capture.finish_result_check(
+                pending.finish, pending.result_set, pending.key, self.owned)
+        is_start = run["kind"] == int(_RUN_KIND.START) or (
+            run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
+            and run["query_purpose"] == int(_QUERY_PURPOSE.START_CONFIRMATION))
+        if not is_start:
+            if (pending.observation is not None or pending.start_finish is not None
+                    or pending.action_failure is not None or pending.expiration is not None
+                    or pending.canceled_unstarted):
+                raise ConsistencyError("普通调用结果不能携带启动专属派生请求")
+            return self.operations.finish_attempt(pending.finish, pending.key, self.owned)
+        action_finish = pending.action_finish
+        if pending.action_failure is not None:
+            action_finish = FinishCapture(
+                run["action_id"], (), OutputCatalogFacts(run["action_id"], True),
+                pending.finish.occurred_at, failure=pending.action_failure)
+        if pending.canceled_unstarted:
+            action_finish = FinishCanceledCapture(
+                run["action_id"], pending.finish.occurred_at, unstarted=True)
+        return self.capture.finish_start_result(
+            pending.finish, pending.observation, pending.key, self.owned,
+            start_finish=pending.start_finish, action_finish=action_finish,
+            expiration=pending.expiration)
+
+    def hold_call_result(
+        self, ticket: AttemptTicket, outcome: CallOutcome, *,
+        occurred_at: int, returned_ns: int,
+        preparation: RecordingStartPreparation | StartConfirmationPreparation | None = None,
+        result_listing: tuple[ObservedFile, ...] | None = None,
+    ) -> None:
+        """在实际 await 返回后登记原结果，派生读取之前建立内存责任。"""
+        identity = (ticket.run_id, ticket.attempt_id)
+        if identity in self.pending_start_results:
+            raise ConsistencyError("原调用结果仍待核实，不能替换实际结果")
+        self.pending_start_results[identity] = PendingCallResult(
+            new_operation_key(), AttemptFinish(
+                ticket, validate_outcome(ticket, outcome, self.evidence), occurred_at),
+            None, returned_ns=returned_ns, preparation=preparation,
+            result_listing=result_listing,
+            result_disposition_ready=result_listing is None)
+
+    def save_held_result(self, ticket: AttemptTicket) -> None:
+        """原执行者与恢复入口使用同一个已持有结果。"""
+        identity = (ticket.run_id, ticket.attempt_id)
+        pending = self.pending_start_results.get(identity)
+        if pending is None or pending.finish.ticket != ticket:
+            raise ConsistencyError("原调用结果尚未持有或票据不符")
+        self._save_call_result(identity, pending)
+
+    def _save_call_result(self, identity, pending: PendingCallResult) -> None:
+        """最多重送一次原事务；可靠回滚与提交后错误使用同一身份。"""
+        for _ in range(2):
+            try:
+                if pending.preparation is not None:
+                    pending = _prepare_held_start_result(self, pending)
+                    self.pending_start_results[identity] = pending
+                receipt = self._write_call_result(pending)
+                error = receipt.error
+            except (DatabaseAccessError, ConsistencyError) as failure:
+                receipt = None
+                error = failure
+            if receipt is not None and receipt.kind is DbOutcomeKind.COMPLETED:
+                ticket = pending.finish.ticket
+                if pending.finish.retry_wait:
+                    self.retry_gate.established(ticket.responsibility_key, pending.returned_ns)
+                elif pending.finish.run_finish is not None or pending.expiration is not None:
+                    self.retry_gate.cleared(ticket.responsibility_key)
+                if pending.confirmation_anchor_ns is not None:
+                    action_id = self.action_id_of_ticket(ticket)
+                    action = self.action(action_id)
+                    _recording_port(self).anchor_confirmed(
+                        action_id, pending.confirmation_anchor_ns,
+                        recording_stop_target(pending.confirmation_anchor_ns,
+                                              _target_duration_ms(action)))
+                del self.pending_start_results[identity]
+                return
+            if self.owned.connection.in_transaction:
+                # 当前连接内的新投影不是可靠提交。结束事务后才能重送原键。
+                try:
+                    self.owned.connection.execute("ROLLBACK")
+                except (DatabaseAccessError, ConsistencyError) as error:
+                    raise ConsistencyError("原调用结果事务无法可靠结束，原结果仍持有") from error
+        raise ConsistencyError(f"原调用结果未可靠保存，原结果仍持有: {error}")
+
+    def resume_start_results(self, action_id: int) -> None:
+        """同会话原真实结果优先保存，包括动作已经终态的分区。"""
+        for identity, pending in tuple(self.pending_start_results.items()):
+            if not pending.result_disposition_ready:
+                continue
+            if self.action_id_of_ticket(pending.finish.ticket) == action_id:
+                self._save_call_result(identity, pending)
+
+    def action_id_of_ticket(self, ticket: AttemptTicket) -> int:
+        run = row_facts(self.owned.connection, "operation_runs", ticket.run_id)
+        if run is None:
+            raise ConsistencyError("原票据缺少所属流程")
+        return run["action_id"]
 
     def retry_wait_remaining(self, responsibility: str,
-                             interval_s: Decimal | None) -> Decimal | None:
+                             interval_s: Decimal | None, *,
+                             maximum: int | None = None) -> Decimal | None:
         """责任当前重试等待的剩余秒数；可开始下一次尝试时为 None。
 
         以流程行的等待标志与累计次数为权威（首次尝试不预先等待、
@@ -369,9 +560,76 @@ class CaptureRuntime:
             responsibility,
             attempts_used=int(row[0]),
             retry_wait_required=int(row[1]) == 1,
-            max_attempts_used=int(row[2]),
+            max_attempts_used=int(row[2]) if maximum is None else maximum,
             interval_s=interval_s,
             now_ns=self.monotonic_ns())
+
+    def recover_attempt(self, ticket: AttemptTicket) -> bool:
+        """可靠旧会话边界结束原前台发令；未知设备活动另行核实。"""
+        identity = (ticket.run_id, ticket.attempt_id)
+        pending = self.pending_start_results.get(identity)
+        if pending is not None:
+            self._save_call_result(identity, pending)
+            self.last_recovery_diagnostic = None
+            return True
+        with closing(self.owned.connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id = ? AND attempt_no = ?",
+            (ticket.run_id, ticket.attempt_id))) as cursor:
+            found = cursor.fetchone()
+        if found is None:
+            raise ConsistencyError("原恢复尝试不存在")
+        attempt = row_facts(self.owned.connection, "operation_attempts", found[0])
+        if attempt["status"] != int(_ATTEMPT_STATUS.RUNNING):
+            self.last_recovery_diagnostic = None
+            return True
+        blocked = None
+        if self.recovery_boundary is RecoveryBoundary.UNCONFIRMED:
+            blocked = RecoveryBlockedReason.UNCONFIRMED_BOUNDARY
+        elif self.recovery_max_event_id is None:
+            blocked = RecoveryBlockedReason.MISSING_HORIZON
+        elif self.recovery_evidence_for is None:
+            blocked = RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP
+        if blocked is not None:
+            self.record_recovery_diagnostic(RecoveryDiagnostic(
+                blocked, ticket.run_id, ticket.attempt_id))
+            return False
+        if (attempt["intent_event_id"] is None
+                or attempt["intent_event_id"] > self.recovery_max_event_id):
+            self.record_recovery_diagnostic(RecoveryDiagnostic(
+                RecoveryBlockedReason.INTENT_OUTSIDE_HORIZON,
+                ticket.run_id, ticket.attempt_id))
+            return False
+        run = row_facts(self.owned.connection, "operation_runs", ticket.run_id)
+        if run is None:
+            raise ConsistencyError("原恢复尝试缺少流程")
+        owner_id = run["action_id"]
+        if (run["kind"] in (int(_RUN_KIND.STOP_RESIDUAL), int(_RUN_KIND.EMERGENCY_STOP))
+                or (run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
+                    and run["query_purpose"] == int(_QUERY_PURPOSE.RESIDUAL_STOP_CONFIRMATION))):
+            activity = row_facts(self.owned.connection, "device_activities", run["activity_id"])
+            if activity is None:
+                raise ConsistencyError("原停止恢复责任缺少活动")
+            owner_id = activity["action_id"]
+        evidence = self.recovery_evidence_for(_binding(self.action(owner_id)), ticket.operation)
+        if evidence is None:
+            self.record_recovery_diagnostic(RecoveryDiagnostic(
+                RecoveryBlockedReason.EVIDENCE_UNAVAILABLE,
+                ticket.run_id, ticket.attempt_id))
+            return False
+        # RUNNING 意图不携带原调用结果。活动已有确认在其原记录中保持，
+        # 本次恢复不为原发令补造退出信息、观察或发生时刻。
+        recovered = CallOutcome(
+            status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
+            error=ErrorValue("result_not_saved", "recovery"),
+            settlement=Settlement(SettlementBasis.ASSUMED,
+                                  EvidenceValue("adb_foreground_recovery", 1, {})))
+        receipt = self.operations.finish_attempt(
+            AttemptFinish(ticket, validate_outcome(ticket, recovered, evidence), self.wall_us()),
+            new_operation_key(), self.owned)
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(f"原调用恢复结果未可靠保存: {receipt.error}")
+        self.last_recovery_diagnostic = None
+        return True
 
 
 class SessionRecordingState:
@@ -403,8 +661,10 @@ class SessionRecordingState:
         action = runtime.action(action_id)
         start = runtime.last_attempt(f"start/{action_id}")
         started = (start is not None
-                   and start[0] == int(_ATTEMPT_STATUS.SUCCEEDED)
                    and start[1] == int(_EFFECT_STATE.CONFIRMED))
+        activity = row_facts(runtime.owned.connection, "device_activities",
+                             _activity_id_of(runtime, action_id))
+        started = started or activity["started_at"] is not None
         with closing(runtime.owned.connection.execute(
             "SELECT r.id, r.attempts_used, r.max_attempts_used,"
             " (SELECT a.status FROM operation_attempts a WHERE a.run_id = r.id"
@@ -450,6 +710,8 @@ def _operation_outcome(result: DeviceCallResult, confirmed_observation: str,
         observation.type == confirmed_observation
         for observation in result.observations
     )
+    if result.outcome is not None:
+        return result.outcome, confirmed
     error = None
     if result.error is not None:
         code = result.error.get("code") if isinstance(result.error, Mapping) else None
@@ -494,6 +756,8 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     合登记契约时不可采纳：按调用失败收场本次尝试，不遗留执行中
     的启动流程。
     """
+    if operation == "start_recording":
+        return await _record_start_once(runtime, action)
     if runtime.last_attempt(f"start/{action['id']}") is None:
         from camctl.capture.residual import pass_residual_gate
 
@@ -508,6 +772,11 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         params=action["effective_params_json"],
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
+    # 返回时取得事实时间；结果事务和日志耗时不能改变设备返回锚点。
+    captured_facts = None
+    if activity_facts is not None and result.error is None:
+        captured_facts = (activity_facts(confirmed) if callable(activity_facts)
+                          else activity_facts)
     try:
         if result.error is not None:
             runtime.finish(
@@ -529,16 +798,213 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
             ticket, rejected, end_run=RunOutcome.FAILED,
             run_error=rejected.error)
         return HandlerOutcome("call_failed", "invalid_device_result")
-    if activity_facts is not None and result.error is None:
-        facts = (activity_facts(confirmed) if callable(activity_facts)
-                 else activity_facts)
+    if captured_facts is not None:
         # 调用已可靠返回：派发状态推进到成功返回。
         facts = {"dispatch_state": int(_DISPATCH_STATE.SUCCESS_RETURNED),
-                 **facts}
+                 **captured_facts}
         _save_activity(runtime, action["id"], **facts)
     if result.error is not None:
         return HandlerOutcome("call_failed", "device_error")
     return HandlerOutcome("confirmed" if confirmed else "sent")
+
+
+def _prepare_recording_start_result(runtime, pending, preparation):
+    """用原返回事实形成启动派生请求；保存重送保持该请求。"""
+    dispatch = preparation.dispatch
+    ticket, outcome = pending.finish.ticket, pending.finish.outcome.outcome
+    action_id = runtime.action_id_of_ticket(ticket)
+    current = runtime.action(action_id)
+    observation = None
+    if dispatch.confirmed or dispatch.sent_only:
+        facts = {"dispatch_state": int(_DISPATCH_STATE.SUCCESS_RETURNED)}
+        activity = row_facts(runtime.owned.connection, "device_activities",
+                             _activity_id_of(runtime, action_id))
+        if activity["sent_at"] is None:
+            facts["sent_at"] = dispatch.confirmed_at
+        if dispatch.confirmed:
+            if activity["started_at"] is None:
+                facts["started_at"] = dispatch.confirmed_at
+            if activity["activity_state"] != 2:
+                facts["activity_state"] = 2
+        observation = ActivityObservationSave(
+            action_id, dispatch.confirmed_at, **facts)
+    elif outcome.effect is EffectState.NO_EFFECT:
+        observation = ActivityObservationSave(
+            action_id, dispatch.confirmed_at,
+            dispatch_state=int(_DISPATCH_STATE.REJECTED_WITHOUT_EFFECT))
+    failure = None
+    expiration = None
+    end_run = RunOutcome.SUCCEEDED if dispatch.confirmed else None
+    run_error = None
+    if outcome.effect is EffectState.NO_EFFECT and not current["cancel_requested"]:
+        from camctl.scheduling.rules import WindowPhase, window_phase
+
+        run = row_facts(runtime.owned.connection, "operation_runs", ticket.run_id)
+        phase = window_phase(runtime.window_of(current), pending.finish.occurred_at)
+        if phase is WindowPhase.AFTER_WINDOW:
+            expiration = ExpireActionRequest(
+                action_id, pending.finish.occurred_at, dispatch.confirmed_at)
+        elif outcome.error is not None and outcome.error.code == "device_start_failed":
+            failure = RecordingFailure("device_start_failed", dict(outcome.error.details))
+            end_run = RunOutcome.FAILED
+            run_error = outcome.error
+        elif (phase is WindowPhase.IN_WINDOW
+              and run["attempts_used"] >= preparation.max_attempts):
+            failure = RecordingFailure("start_attempts_exhausted", {
+                "max_attempts": preparation.max_attempts,
+                "attempts_used": run["attempts_used"]})
+            end_run = RunOutcome.FAILED
+            run_error = ErrorValue(failure.code, "device_start", failure.details)
+    return replace(
+        pending,
+        finish=replace(pending.finish,
+            run_finish=None if end_run is None else RunFinish(end_run, run_error),
+            retry_wait=(outcome.effect is EffectState.NO_EFFECT
+                        and not current["cancel_requested"] and end_run is None
+                        and expiration is None)),
+        observation=observation, action_failure=failure, expiration=expiration,
+        confirmation_anchor_ns=dispatch.anchor_ns,
+        canceled_unstarted=(outcome.effect is EffectState.NO_EFFECT
+                            and bool(current["cancel_requested"])), preparation=None)
+
+
+def _prepare_start_confirmation_result(runtime, pending, preparation):
+    """启动核实派生只使用原活动、实际观察时刻与原单调读数。"""
+    activity = preparation.activity
+    ticket, call = pending.finish.ticket, pending.finish.outcome.outcome
+    observed_at, anchor = pending.finish.occurred_at, pending.returned_ns
+    action_id = runtime.action_id_of_ticket(ticket)
+    confirmed = any(observation.type == "activity_status"
+                    and observation.data.get("activity_id") == str(activity["id"])
+                    for observation in call.observations)
+    current = runtime.action(action_id)
+    with closing(runtime.owned.connection.execute(
+        "SELECT attempts_used FROM operation_runs WHERE id = ?", (ticket.run_id,))) as cursor:
+        used = cursor.fetchone()[0]
+    observation = None
+    failure = None
+    start_finish = None
+    final = None
+    run_error = None
+    if confirmed:
+        new_facts = {}
+        if activity["dispatch_state"] != int(_DISPATCH_STATE.SUCCESS_RETURNED):
+            new_facts["dispatch_state"] = int(_DISPATCH_STATE.SUCCESS_RETURNED)
+        if activity["started_at"] is None:
+            new_facts["started_at"] = observed_at
+        if activity["activity_state"] != 2:
+            new_facts["activity_state"] = 2
+        if new_facts:
+            observation = ActivityObservationSave(action_id, observed_at, **new_facts)
+        final = RunOutcome.SUCCEEDED
+        start_finish = StaleRunFinish(responsibility_keys=(f"start/{action_id}",),
+                                     status=RunOutcome.SUCCEEDED, occurred_at=observed_at)
+    if current["cancel_requested"] or current["status"] in _ACTION_TERMINAL:
+        return replace(
+            pending,
+            finish=replace(pending.finish, run_finish=RunFinish(
+                RunOutcome.CANCELED if current["cancel_requested"] else (
+                    RunOutcome.SUCCEEDED if confirmed else RunOutcome.UNCONFIRMED))),
+            observation=observation, preparation=None)
+    if not confirmed and used >= preparation.max_attempts:
+        failure = RecordingFailure("capture_result_unconfirmed", {
+            "activity_id": str(activity["id"]), "reason": "start_unknown"})
+        final = RunOutcome.UNCONFIRMED
+        run_error = ErrorValue(failure.code, "execution", failure.details)
+        start_finish = StaleRunFinish(responsibility_keys=(f"start/{action_id}",),
+                                     status=final, occurred_at=observed_at, error=run_error)
+    return replace(
+        pending,
+        finish=replace(pending.finish,
+            run_finish=None if final is None else RunFinish(final, run_error),
+            retry_wait=final is None),
+        observation=observation, start_finish=start_finish, action_failure=failure,
+        confirmation_anchor_ns=anchor if confirmed else None, preparation=None)
+
+
+def _prepare_held_start_result(runtime, pending):
+    preparation = pending.preparation
+    if isinstance(preparation, RecordingStartPreparation):
+        return _prepare_recording_start_result(runtime, pending, preparation)
+    if isinstance(preparation, StartConfirmationPreparation):
+        return _prepare_start_confirmation_result(runtime, pending, preparation)
+    raise ConsistencyError("原调用结果缺少合法的启动准备责任")
+
+
+async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
+    """将真实控制端口适配到一次启动骨架，事实时间先于保存。"""
+    if runtime.last_attempt(f"start/{action['id']}") is None:
+        from camctl.capture.residual import pass_residual_gate
+
+        if not await pass_residual_gate(runtime, action):
+            return HandlerOutcome("not_granted")
+
+    class Grants:
+        def grant(self, request):
+            ticket, reason = runtime.grant(runtime.action(action["id"]))
+            return GrantDecision("granted" if ticket is not None else "rejected",
+                                 ticket=ticket, reason=reason)
+
+    class Wall:
+        def now_us(self):
+            return runtime.wall_us()
+
+    class Driver:
+        dispatch = None
+
+        async def start(self, ticket):
+            result = await runtime.driver.control(ControlRequest(
+                "start_recording", _binding(action), action["effective_params_json"],
+                ticket=ticket, timeout_s=runtime.start_config.timeout_s))
+            received_at, anchor_ns = runtime.wall_us(), runtime.monotonic_ns()
+            outcome, confirmed = _operation_outcome(result, "start_confirmed")
+            self.dispatch = StartDispatch(
+                confirmed=confirmed,
+                anchor_ns=anchor_ns if confirmed else None,
+                confirmed_at=received_at,
+                sent_only=(not confirmed and outcome.status is AttemptStatus.SUCCEEDED
+                           and outcome.effect is EffectState.UNKNOWN),
+                rejected_no_effect=outcome.effect is EffectState.NO_EFFECT,
+                error=outcome.error, observations=outcome.observations, outcome=outcome)
+            runtime.hold_call_result(
+                ticket, outcome, occurred_at=received_at, returned_ns=anchor_ns,
+                preparation=RecordingStartPreparation(self.dispatch, runtime.start_config.max_attempts))
+            return self.dispatch
+
+    driver = Driver()
+
+    class Finishes:
+        def finish(self, ticket, outcome):
+            dispatch = driver.dispatch
+            assert dispatch is not None
+            runtime.save_held_result(ticket)
+
+        def finish_prevented(self, ticket, reason):
+            current = runtime.action(action["id"])
+            now = runtime.wall_us()
+            prevented = CallOutcome(
+                status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+                error=ErrorValue(reason, "dispatch"),
+                settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                                      EvidenceValue("dispatch_prevented", 1, {})))
+            runtime.finish(ticket, prevented, activity=ActivityObservationSave(
+                action["id"], now,
+                dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED)), occurred_at=now,
+                expiration=None if current["cancel_requested"] else ExpireActionRequest(
+                    action["id"], now, now),
+                canceled_unstarted=bool(current["cancel_requested"]))
+
+    step = await start_recording(CaptureContext(
+        device_id=action["device_id"], action_id=action["id"],
+        window=runtime.window_of(action), config=runtime.start_config,
+        duration=_target_duration_ms(action), trusted_wall_now=runtime.wall_us(),
+        wall=Wall(), grants=Grants(), driver=driver, finishes=Finishes(),
+        canceled_now=lambda: bool(runtime.action(action["id"])["cancel_requested"])))
+    if step.phase in (RecordingPhase.START_CONFIRMED, RecordingPhase.START_CONFIRMED_WITH_ERROR):
+        return HandlerOutcome("confirmed")
+    if step.phase is RecordingPhase.REJECTED_NO_EFFECT:
+        return HandlerOutcome("no_effect")
+    return HandlerOutcome(step.phase.value, step.reason)
 
 
 def validate_observed_pairings(entries: tuple[ObservedFile, ...]) -> None:
@@ -561,6 +1027,7 @@ def validate_observed_pairings(entries: tuple[ObservedFile, ...]) -> None:
 
 def _register_observed(
     runtime: CaptureRuntime, action_id: int, entries: tuple[ObservedFile, ...],
+    *, occurred_at: int | None = None,
 ) -> tuple[tuple[CaptureFile, int], ...]:
     """把结果列举观察落库：发现、任务归属与完成事实一次登记。
 
@@ -571,7 +1038,7 @@ def _register_observed(
     # 键的映射供配对解析。
     file_ids: dict[str, int] = {}
     for entry in entries:
-        occurred = runtime.wall_us()
+        occurred = runtime.wall_us() if occurred_at is None else occurred_at
         observed = runtime.capture.save_file_observation(
             FileObservationSave(
                 observer_action_id=action_id,
@@ -596,7 +1063,7 @@ def _register_observed(
     # 第二阶段保存归属与完成事实。
     registered: list[tuple[CaptureFile, int]] = []
     for entry in entries:
-        occurred = runtime.wall_us()
+        occurred = runtime.wall_us() if occurred_at is None else occurred_at
         file_id = file_ids[entry.identity]
         if entry.paired_identity is None:
             owned = runtime.capture.save_file_ownership(
@@ -842,14 +1309,19 @@ async def _stop_call(runtime: CaptureRuntime, action,
         operation=operation,
         binding=_binding(action),
         params=action["effective_params_json"],
+        ticket=ticket,
+        timeout_s=runtime.stop_config.timeout_s,
     ))
+    returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     call, confirmed = _operation_outcome(
         response, "stop_confirmed", evidence_type="stop_returned")
     try:
         if confirmed:
-            runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED)
+            runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED,
+                           occurred_at=returned_at, returned_ns=returned_ns)
         else:
-            runtime.finish(ticket, call, retry_wait=True)
+            runtime.finish(ticket, call, retry_wait=True,
+                           occurred_at=returned_at, returned_ns=returned_ns)
     except OutcomeValidationError:
         # 观察与收场依据不符合登记契约：该结果整体不可采纳，不落
         # 库，按调用失败保存尝试终局（与启动调用同规则），不遗留
@@ -861,7 +1333,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
             "stop_confirmed", evidence_type="stop_returned")
         runtime.finish(
             ticket, rejected, end_run=RunOutcome.FAILED,
-            run_error=rejected.error)
+            run_error=rejected.error, occurred_at=returned_at, returned_ns=returned_ns)
         return HandlerOutcome("call_failed", "invalid_device_result")
     if response.error is not None:
         return HandlerOutcome("stop_failed", "device_error")
@@ -944,7 +1416,7 @@ def _finish_capture(
     if registered is None:
         registered = _register_observed(runtime, action_id, entries)
     assessment = assess_capture_files(
-        CaptureFileSet(files=tuple(file for file, _ in registered), set_finalized=True),
+        CaptureFileSet(files=tuple(file for file, _ in registered), set_finalized=False),
         ProductRequirements(required_kinds=frozenset({required})),
     )
     drafts = _catalog_drafts(registered, entries)
@@ -1002,9 +1474,138 @@ def _target_duration_ms(action: Mapping[str, Any]) -> int:
     return duration
 
 
+def _handle_binding_failure(
+    runtime: CaptureRuntime, action: Mapping[str, Any],
+) -> bool:
+    """异常绑定不产生新调用；原结果可靠保存后共同保存业务收场。"""
+    if runtime.binding_check is None:
+        return False
+    binding_result = runtime.binding_check(_binding(action))
+    details = binding_failure_details(binding_result)
+    if details is None:
+        return False
+    with closing(runtime.owned.connection.execute(
+        "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
+        " WHERE r.action_id = ? AND t.status = ? LIMIT 1",
+        (action["id"], int(_ATTEMPT_STATUS.RUNNING)),
+    )) as cursor:
+        has_unfinished_attempt = cursor.fetchone() is not None
+    if has_unfinished_attempt:
+        with closing(runtime.owned.connection.execute(
+            "SELECT DISTINCT r.responsibility_key, r.kind FROM operation_attempts t"
+            " JOIN operation_runs r ON r.id = t.run_id"
+            " WHERE r.action_id = ? AND t.status = ? ORDER BY r.id",
+            (action["id"], int(_ATTEMPT_STATUS.RUNNING)),
+        )) as cursor:
+            unfinished = cursor.fetchall()
+        for responsibility, kind in unfinished:
+            if kind == int(_RUN_KIND.READ_FILE):
+                from types import SimpleNamespace
+                from camctl.outputs.read_attempts import read_host_boundary, record_read_diagnostic, running_read_ticket
+
+                copy_id = runtime.owned.connection.execute(
+                    "SELECT copy_id FROM operation_runs WHERE responsibility_key=?", (responsibility,)).fetchone()[0]
+                original = running_read_ticket(runtime.owned, copy_id)
+                if original is None:
+                    raise ConsistencyError("内部读取绑定失败缺少原未结束尝试")
+                ticket, intent_id = original
+                read_scope = SimpleNamespace(
+                    recovery_boundary=runtime.recovery_boundary, recovery_max_event_id=runtime.recovery_max_event_id,
+                    continuing_read_tickets=runtime.continuing_read_tickets,
+                    pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
+                    pending_read_business=runtime.pending_read_business, owned=runtime.owned, operations=runtime.operations,
+                    occurred_at=runtime.wall_us, last_recovery_diagnostic=runtime.last_recovery_diagnostic,
+                    recovery_evidence_for=runtime.recovery_evidence_for,
+                    on_recovery_diagnostic=runtime.record_recovery_diagnostic)
+                from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+                from camctl.capture.media_flow import _save_internal_read_and_settle
+
+                if copy_id in read_scope.pending_read_ends:
+                    request = _binding_failure_request(runtime, action, details, excluded_run_id=ticket.run_id)
+                    business = PendingReadBusiness(runtime.capture.finish_binding_failure, request, new_operation_key())
+                    actual = held_binding_read_result(read_scope, copy_id, binding_result, business)
+                    if actual is not None:
+                        _save_internal_read_and_settle(read_scope, actual)
+                        runtime.timelapse_deadlines.pop(action["id"], None)
+                        return True
+                if not read_host_boundary(read_scope, ticket, intent_id, continuing=False):
+                    return True
+                if runtime.recovery_evidence_for is None:
+                    record_read_diagnostic(read_scope, RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP, ticket)
+                    return True
+                source = runtime.owned.connection.execute(
+                    "SELECT a.device_id,a.driver_id FROM file_copies c JOIN device_files f ON f.id=c.source_device_file_id"
+                    " JOIN actions a ON a.id=f.observer_action_id WHERE c.id=?", (copy_id,)).fetchone()
+                if source is None:
+                    raise ConsistencyError("内部读取绑定失败缺少原文件观察者")
+                if runtime.recovery_evidence_for(DeviceBinding(*source), "read") is None:
+                    record_read_diagnostic(read_scope, RecoveryBlockedReason.EVIDENCE_UNAVAILABLE, ticket)
+                    return True
+                from camctl.outputs.read_attempts import recover_unavailable_read
+
+                if not recover_unavailable_read(read_scope, copy_id, DeviceBinding(*source), runtime.wall_us()):
+                    return True
+                continue
+            operation = _RECOVERABLE_OPERATIONS.get(kind)
+            if operation is None:
+                return True
+            ticket = _original_ticket(runtime, responsibility, operation)
+            if ticket is None:
+                raise ConsistencyError("绑定失败的未完成责任缺少原尝试票据")
+            if not runtime.recover_attempt(ticket):
+                return True
+    if action["cancel_requested"]:
+        from camctl.persistence.repositories.capture_facts import load_start_facts
+
+        facts = load_start_facts(runtime.owned.connection, action)
+        if facts.not_started:
+            return False
+        if facts.activity is not None and facts.activity["stop_supported"] == 0:
+            return False
+        with closing(runtime.owned.connection.execute(
+            "SELECT status FROM operation_runs WHERE responsibility_key = ?",
+            (f"stop/{action['id']}",),
+        )) as cursor:
+            stop = cursor.fetchone()
+        if action["type"] == 2 and (
+                facts.activity is not None and facts.activity["activity_state"] == 3
+                or stop is not None and stop[0] not in (1, 2)):
+            return False
+    from camctl.outputs.read_attempts import save_read_business
+
+    request = _binding_failure_request(runtime, action, details)
+    internal_read = runtime.owned.connection.execute(
+        "SELECT 1 FROM file_copies c JOIN recording_processing p ON p.id=c.processing_id"
+        " WHERE p.action_id=? LIMIT 1", (action["id"],)).fetchone()
+    receipt = (save_read_business(_read_result_scope(runtime), action["id"], "capture_binding_failure", request,
+                                  runtime.capture.finish_binding_failure) if internal_read is not None
+               else runtime.capture.finish_binding_failure(request, new_operation_key(), runtime.owned))
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"拍摄绑定失败的完整事务未完成（{receipt.kind.value}）: {receipt.error}")
+    runtime.timelapse_deadlines.pop(action["id"], None)
+    return True
+
+
+def _binding_failure_request(runtime, action, details, *, excluded_run_id=None):
+    with closing(runtime.owned.connection.execute(
+        "SELECT id,responsibility_key FROM operation_runs WHERE action_id = ?"
+        " AND kind IN (1, 2, 3, 6, 7) AND status IN (1, 2)"
+        " AND (kind != 6 OR query_purpose != 5) ORDER BY id", (action["id"],),
+    )) as cursor:
+        responsibilities = tuple(row[1] for row in cursor.fetchall() if row[0] != excluded_run_id)
+    return FinishBindingFailure(
+        action_id=action["id"], occurred_at=runtime.wall_us(),
+        failure=RecordingFailure(code="device_binding_unavailable", details=details),
+        canceled=bool(action["cancel_requested"]), stop_config=runtime.stop_config,
+        responsibility_keys=responsibilities, check_config=runtime.check_config)
+
+
 async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
+        return
+    if _handle_binding_failure(context, action):
         return
     attempt = context.last_attempt(f"start/{action_id}")
     if attempt is None:
@@ -1036,13 +1637,9 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
         _finish_capture(context, action_id, (), FileKind.PHOTO,
                         failure=_unconfirmed_failure(action_id))
         return
-    if listing.phase is ListingPhase.LISTED:
-        entries = listing.entries
-        ticket = listing.ticket
-    else:
-        # 核实责任已闭合：按直接列举回退，不再保存轮次事实。
-        entries = await context.results.list_files(action_id)
-        ticket = None
+    entries = listing.entries
+    ticket = None if listing.already_saved else listing.ticket
+    registered = _register_observed(context, action_id, entries, occurred_at=listing.occurred_at)
     assessment = CaptureAssessment(
         complete=bool(entries) and all(entry.complete for entry in entries))
     # 启动尝试在途（RUNNING）或结果未知（UNKNOWN）时没有可采纳的
@@ -1068,32 +1665,181 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     )
     if decision is PhotoDecision.REGISTER_SUCCESS:
         if ticket is not None:
-            context.finish(ticket, _round_outcome(),
+            _finish_listing_result(context, listing,
                            end_run=RunOutcome.SUCCEEDED)
         _settle_open_start(context, action_id, RunOutcome.SUCCEEDED)
         _conclude_activity(context, action_id)
-        _finish_capture(context, action_id, entries, FileKind.PHOTO)
+        _finish_capture(context, action_id, entries, FileKind.PHOTO, registered=registered)
     elif decision is PhotoDecision.FAILED_KEEP_FILES:
         if ticket is not None:
-            context.finish(ticket, _round_outcome(),
+            _finish_listing_result(context, listing,
                            end_run=RunOutcome.SUCCEEDED)
         _settle_open_start(
             context, action_id, RunOutcome.FAILED,
             error=ErrorValue(code="device_failed", stage="device"))
         _finish_capture(
-            context, action_id, entries, FileKind.PHOTO,
+            context, action_id, entries, FileKind.PHOTO, registered=registered,
             failure=RecordingFailure(
                 code="capture_failed",
                 details={"activity_id": str(action_id), "reason": "device_failed"}))
     elif ticket is not None:
         # 其余分区（等待响应、取消保留、未知无停止）：本轮成功结果与
         # 重试等待共同保存，等待下次推进或取消收场。
-        context.finish(ticket, _round_outcome(), retry_wait=True)
+        _finish_listing_result(context, listing, retry_wait=True)
+
+
+def _original_ticket(runtime: CaptureRuntime, responsibility: str, operation: str):
+    with closing(runtime.owned.connection.execute(
+        "SELECT r.id, a.attempt_no, r.activity_id FROM operation_runs r"
+        " JOIN operation_attempts a ON a.run_id = r.id"
+        " WHERE r.responsibility_key = ? ORDER BY a.attempt_no DESC LIMIT 1",
+        (responsibility,))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        return None
+    return AttemptTicket(row[1], operation, None if row[2] is None else str(row[2]),
+                         responsibility, row[0])
+
+
+def _close_record_start(runtime, action, *, exhausted: bool, query_key: str | None = None):
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+
+    facts = load_start_facts(runtime.owned.connection, action)
+    if exhausted:
+        failure = RecordingFailure("start_attempts_exhausted", {
+            "max_attempts": runtime.start_config.max_attempts,
+            "attempts_used": facts.attempts_used})
+        final = RunOutcome.FAILED
+    else:
+        failure = RecordingFailure("capture_result_unconfirmed", {
+            "activity_id": str(facts.activity["id"]), "reason": "start_unknown"})
+        final = RunOutcome.UNCONFIRMED
+    keys = (f"start/{action['id']}",) + (() if query_key is None else (query_key,))
+    now = runtime.wall_us()
+    receipt = runtime.capture.close_start(
+        StaleRunFinish(responsibility_keys=keys, status=final, occurred_at=now, error=ErrorValue(
+            failure.code, registered_error(failure.code)["stage"], failure.details)),
+        FinishCapture(action["id"], (), OutputCatalogFacts(action["id"], True), now,
+                      failure=failure), new_operation_key(), runtime.owned)
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"启动收场未可靠保存: {receipt.error}")
+    for key in keys:
+        runtime.retry_gate.cleared(key)
+
+
+async def _confirm_record_start(runtime, action, facts):
+    """未知启动沿同一独立查询责任有限核实；空闲不证明从未启动。"""
+    activity = facts.activity
+    key = f"query/start/{action['id']}/{activity['id']}"
+    latest = runtime.last_attempt(key)
+    if latest is not None and latest[0] == int(_ATTEMPT_STATUS.RUNNING):
+        ticket = _original_ticket(runtime, key, "query")
+        if not runtime.recover_attempt(ticket):
+            return
+    with closing(runtime.owned.connection.execute(
+        "SELECT status, attempts_used FROM operation_runs WHERE responsibility_key = ?",
+        (key,))) as cursor:
+        query = cursor.fetchone()
+    if runtime.state_query is None or not activity["state_query_supported"]:
+        _close_record_start(runtime, action, exhausted=False, query_key=key)
+        return
+    if query is not None and (query[0] not in (1, 2)
+                              or query[1] >= runtime.query_config.max_attempts):
+        _close_record_start(runtime, action, exhausted=False, query_key=key)
+        return
+    if runtime.retry_wait_remaining(
+            key, runtime.query_config.retry_interval_s,
+            maximum=runtime.query_config.max_attempts) is not None:
+        return
+    intent = AttemptIntent(
+        operation="query", action_id=action["id"], kind=OperationKind.QUERY_ACTIVITY,
+        target=AttemptTarget(activity_id=activity["id"]), config=runtime.query_config,
+        occurred_at=runtime.wall_us(), query_purpose=QueryPurpose.START_CONFIRMATION)
+    receipt = runtime.operations.begin_attempt(intent, new_operation_key(), runtime.owned)
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"启动核实意图未可靠提交: {receipt.error}")
+    if receipt.value.disposition is not BeginDisposition.GRANTED:
+        return
+    ticket = receipt.value.ticket
+    response = await runtime.state_query.query_state(ControlRequest(
+        "query", _binding(action), {"activity_id": str(activity["id"])},
+        ticket=ticket, timeout_s=runtime.query_config.timeout_s))
+    observed_at, anchor = runtime.wall_us(), runtime.monotonic_ns()
+    call, _ = _operation_outcome(response, "activity_status", evidence_type="query_returned")
+    runtime.hold_call_result(
+        ticket, call, occurred_at=observed_at, returned_ns=anchor,
+        preparation=StartConfirmationPreparation(dict(activity), runtime.query_config.max_attempts))
+    runtime.save_held_result(ticket)
+
+
+async def _advance_record_start(runtime, action, attempt) -> bool:
+    """返回 True 表示启动责任仍占本轮；False 表示进入已确认录像。"""
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+
+    if attempt[0] == int(_ATTEMPT_STATUS.RUNNING):
+        ticket = _original_ticket(runtime, f"start/{action['id']}", "control")
+        if not runtime.recover_attempt(ticket):
+            return True
+        attempt = runtime.last_attempt(f"start/{action['id']}")
+    facts = load_start_facts(runtime.owned.connection, action)
+    if action["cancel_requested"]:
+        if facts.activity is not None:
+            query_key = f"query/start/{action['id']}/{facts.activity['id']}"
+            query_attempt = runtime.last_attempt(query_key)
+            if query_attempt is not None and query_attempt[0] == int(_ATTEMPT_STATUS.RUNNING):
+                if not runtime.recover_attempt(_original_ticket(runtime, query_key, "query")):
+                    return True
+        if facts.not_started:
+            _finish_canceled_capture(runtime, action["id"], unstarted=True)
+        else:
+            await _advance_canceled_capture(runtime, action, attempt)
+        return True
+    if facts.activity["started_at"] is not None or attempt[1] == int(_EFFECT_STATE.CONFIRMED):
+        return False
+    if facts.not_started:
+        if _settle_unstarted_attempt(runtime, action, attempt):
+            return True
+        if facts.attempts_used >= runtime.start_config.max_attempts:
+            _close_record_start(runtime, action, exhausted=True)
+            return True
+        if runtime.retry_wait_remaining(
+                f"start/{action['id']}", runtime.start_config.retry_interval_s,
+                maximum=runtime.start_config.max_attempts) is not None:
+            return True
+        await _record_start_once(runtime, action)
+        return True
+    await _confirm_record_start(runtime, action, facts)
+    return True
+
+
+def _read_result_scope(runtime):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(owned=runtime.owned, operations=runtime.operations, occurred_at=runtime.wall_us,
+        pending_read_results=runtime.pending_read_results, pending_read_business=runtime.pending_read_business,
+        pending_read_ends=runtime.pending_read_ends, continuing_read_tickets=runtime.continuing_read_tickets)
+
+
+async def _resume_internal_read_results(runtime):
+    if not runtime.pending_read_business and not runtime.pending_read_results and not runtime.pending_read_ends:
+        return
+    from camctl.capture.media_flow import _save_internal_read_and_settle
+    from camctl.outputs.read_attempts import retry_read_business, retry_read_ends
+
+    scope = _read_result_scope(runtime)
+    retry_read_business(scope)
+    for pending in tuple(scope.pending_read_results.values()):
+        _save_internal_read_and_settle(scope, pending)
+    await retry_read_ends(scope)
 
 
 async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
+    await _resume_internal_read_results(context)
+    context.resume_start_results(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
+        return
+    if _handle_binding_failure(context, action):
         return
     open_start = context.last_attempt(f"start/{action_id}")
     if open_start is None:
@@ -1101,27 +1847,9 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         if action["cancel_requested"]:
             _finish_canceled_capture(context, action_id, unstarted=True)
             return
-        step = await _control_call(
-            context, action, "start_recording", "start_confirmed",
-            activity_facts=lambda confirmed: (
-                {"sent_at": context.wall_us()}
-                | ({"started_at": context.wall_us(), "activity_state": 2}
-                   if confirmed else {})))
-        if step.phase == "confirmed":
-            # 启动确认即取本会话单调锚点；停止目标 = 锚点 + 目标时长。
-            port = _recording_port(context)
-            anchor_ns = context.monotonic_ns()
-            port.anchor_confirmed(
-                action_id, anchor_ns,
-                recording_stop_target(anchor_ns, _target_duration_ms(action)))
+        await _control_call(context, action, "start_recording", "start_confirmed")
         return
-    if _settle_unstarted_attempt(context, action, open_start):
-        return
-    if action["cancel_requested"]:
-        await _advance_canceled_capture(context, action, open_start)
-        return
-    if _settle_start_without_sent_at(context, action, open_start):
-        # 可能派发但没有可靠发送时间：不重复启动，按无法核实收场。
+    if await _advance_record_start(context, action, open_start):
         return
     port = _recording_port(context)
     canceled = bool(action["cancel_requested"])
@@ -1133,7 +1861,8 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         if canceled:
             # 启动未确认时取消：不重新启动，收场归启动核实链。
             return
-        await _control_call(context, action, "start_recording", "start_confirmed")
+        # 已保存确认不得转入新的 START。缺少中段一致事实须暴露。
+        raise ConsistencyError("已确认录像缺少可继续的录像状态")
         return
     if decision.phase is RecordingPhase.READY_TO_STOP:
         step = await _stop_call(context, action)
@@ -1322,13 +2051,13 @@ async def _save_winddown_progress(
     row = _load_processing_row(runtime, action_id)
     if row is None:
         return False
-    try:
-        entries = await runtime.results.list_files(action_id)
-    except Exception:
-        # 停止依据已可靠保存：等待阶段未取得文件证据前保持未定，
-        # 后续会话按已保存事实重新推进。
+    listing = await _listing_round(runtime, action_id)
+    if listing.phase not in (ListingPhase.LISTED, ListingPhase.CLOSED):
         return False
-    registered = _register_observed(runtime, action_id, entries)
+    entries = listing.entries
+    registered = _register_observed(runtime, action_id, entries, occurred_at=listing.occurred_at)
+    # 保守收场只保存待检查进度；核实与处理尚未终局，沿原责任保留等待。
+    _finish_listing_result(runtime, listing, retry_wait=True)
     source_file_id = next(
         (file_id for (file, file_id), entry in zip(registered, entries)
          if entry.complete and entry.kind is FileKind.VIDEO), None)
@@ -1470,6 +2199,10 @@ async def _advance_recording_outcome(
     if cached is not None:
         # 读取已保存的列举事实不构成新轮次；等待中的推进不消耗名额。
         entries, registered = cached
+        original = _original_ticket(context, f"results/{_activity_id_of(context, action_id)}", "result")
+        listing = None if original is None else _held_listing(context, original)
+        if listing is not None:
+            ticket = listing.ticket
     else:
         listing = await _listing_round(context, action_id)
         if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
@@ -1485,14 +2218,9 @@ async def _advance_recording_outcome(
             _finish_capture(context, action_id, (), FileKind.VIDEO,
                             failure=_unconfirmed_failure(action_id))
             return
-        if listing.phase is ListingPhase.LISTED:
-            registered = _register_observed(context, action_id, listing.entries)
-            entries = listing.entries
-            ticket = listing.ticket
-        else:
-            # 核实责任已闭合：按直接列举回退，不再保存轮次事实。
-            entries = await context.results.list_files(action_id)
-            registered = _register_observed(context, action_id, entries)
+        entries = listing.entries
+        ticket = None if listing.already_saved else listing.ticket
+        registered = _register_observed(context, action_id, entries, occurred_at=listing.occurred_at)
     source_file_id = next(
         (file_id for (file, file_id), entry in zip(registered, entries)
          if entry.complete and entry.kind is FileKind.VIDEO), None)
@@ -1531,7 +2259,7 @@ async def _advance_recording_outcome(
     if result.kind.value in ("succeeded", "failed"):
         if ticket is not None:
             # 承载结论的轮次以可靠结果收场核实责任。
-            context.finish(ticket, _round_outcome(),
+            _finish_listing_result(context, listing,
                            end_run=RunOutcome.SUCCEEDED)
         if result.kind.value == "succeeded":
             _finish_capture(
@@ -1544,75 +2272,109 @@ async def _advance_recording_outcome(
                             registered=registered, failure=result.failure)
     elif ticket is not None:
         # 终局依据尚不齐备：本轮成功结果与重试等待共同保存。
-        context.finish(ticket, _round_outcome(), retry_wait=True)
+        _finish_listing_result(context, listing, retry_wait=True)
 
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
+        context.timelapse_deadlines.pop(action_id, None)
+        return
+    if _handle_binding_failure(context, action):
         return
     attempt = context.last_attempt(f"start/{action_id}")
     if attempt is None:
         if action["cancel_requested"]:
             _finish_canceled_capture(context, action_id, unstarted=True)
+            context.timelapse_deadlines.pop(action_id, None)
             return
+        send_anchor = None
+
+        def sent_facts(confirmed):
+            nonlocal send_anchor
+            if not confirmed:
+                return {}
+            send_anchor = context.monotonic_ns()
+            return {"sent_at": context.wall_us()}
+
         step = await _control_call(
             context, action, "start_timelapse", "timelapse_sent",
-            activity_facts={"sent_at": context.wall_us()})
+            activity_facts=sent_facts)
         if step.phase not in ("confirmed", "sent", "call_failed"):
             return
         attempt = context.last_attempt(f"start/{action_id}")
         if attempt is None:
             return
+        if send_anchor is not None:
+            config = context.wait_config(action)
+            context.timelapse_deadlines[action_id] = send_anchor + (
+                config.target_duration_ms + config.driver_margin_ms
+                + config.extra_wait_ms) * 1_000_000
     if _settle_unstarted_attempt(context, action, attempt):
+        context.timelapse_deadlines.pop(action_id, None)
         return
     if action["cancel_requested"]:
         await _advance_canceled_capture(context, action, attempt)
+        if context.action(action_id)["status"] in _ACTION_TERMINAL:
+            context.timelapse_deadlines.pop(action_id, None)
         return
     if _settle_start_without_sent_at(context, action, attempt):
         # 可能派发但没有可靠发送时间：无法计算等待锚点，不重复启
         # 动、不补造时间，按无法核实收场。
+        context.timelapse_deadlines.pop(action_id, None)
         return
     with closing(context.owned.connection.execute(
-        "SELECT sent_at, expected_check_at FROM device_activities WHERE id = ?",
+        "SELECT sent_at, expected_check_at, result_wait_margin_ms, extra_wait_ms_used,"
+        " wait_completed_event_id, result_set_state"
+        " FROM device_activities WHERE action_id = ?",
         (action_id,),
     )) as cursor:
         activity = cursor.fetchone()
     if activity is None or activity[0] is None:
         # 发送事实（sent_at）由活动观察边界保存；尚未保存时等待。
         return
-    config = context.wait_config(action)
-    if activity[1] is None:
-        plan = plan_capture_wait(
-            TimelapseState(
-                clock_trusted=True,
-                start_return=StartReturn.SENT,
-                end_control=EndControl.DEVICE,
-                sent_at_utc=activity[0],
-                anchor_monotonic_ns=context.monotonic_ns(),
-            ),
-            config,
-            ClockReading(
-                utc_us=context.wall_us(), monotonic_ns=context.monotonic_ns()),
-        )
-        receipt = context.timelapse.schedule_wait(
-            ScheduleWait(
-                action_id=action_id,
-                plan=plan,
-                driver_margin_ms=config.driver_margin_ms,
-                extra_wait_ms=config.extra_wait_ms,
-                occurred_at=context.wall_us(),
-            ), new_operation_key(), context.owned)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        return
-    if context.wall_us() < activity[1]:
-        return
+    if activity[4] is None:
+        config = context.wait_config(action)
+        check_at = activity[0] + (
+            config.target_duration_ms + config.driver_margin_ms
+            + config.extra_wait_ms) * 1000
+        if activity[1] is not None:
+            if (activity[2] != config.driver_margin_ms
+                    or activity[3] is None
+                    or activity[1] != activity[0] + (
+                        config.target_duration_ms + activity[2] + activity[3]) * 1000):
+                raise ConsistencyError("原延时等待与固定执行定义或发送锚点不符")
+        if action_id not in context.timelapse_deadlines:
+            plan = plan_capture_wait(
+                TimelapseState(
+                    clock_trusted=True, start_return=StartReturn.SENT,
+                    end_control=EndControl.DEVICE, sent_at_utc=activity[0],
+                    anchor_monotonic_ns=None, restart=True),
+                config, ClockReading(
+                    utc_us=context.wall_us(), monotonic_ns=context.monotonic_ns()))
+            context.timelapse_deadlines[action_id] = (
+                plan.monotonic_deadline_ns if plan.monotonic_deadline_ns is not None
+                else context.monotonic_ns())
+        plan = WaitPlan(
+            kind=WaitKind.WAIT_THEN_CHECK, check_at_utc=check_at,
+            monotonic_deadline_ns=context.timelapse_deadlines[action_id])
+        if activity[1] is None or activity[1] != check_at or activity[3] != config.extra_wait_ms:
+            save = (context.timelapse.schedule_wait if activity[1] is None
+                    else context.timelapse.reconfigure_wait)
+            receipt = save(
+                ScheduleWait(
+                    action_id=action_id, plan=plan,
+                    driver_margin_ms=config.driver_margin_ms,
+                    extra_wait_ms=config.extra_wait_ms, occurred_at=context.wall_us()),
+                new_operation_key(), context.owned)
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(
+                    f"延时等待安排事务未完成（{receipt.kind.value}）: {receipt.error}")
+        if context.monotonic_ns() < context.timelapse_deadlines[action_id]:
+            return
     wait_event_id = _complete_timelapse_wait(context, action_id)
-    with closing(context.owned.connection.execute(
-        "SELECT result_set_state FROM device_activities WHERE id = ?",
-        (action_id,),
-    )) as cursor:
-        concluded = cursor.fetchone()[0] in (3, 4)
+    context.timelapse_deadlines.pop(action_id, None)
+    concluded = activity[5] in (3, 4)
     if concluded:
         # 中断后已有可靠结论：用原结果完成收尾，不重开核实责任。
         await _finish_timelapse_conclusion(context, action_id)
@@ -1628,36 +2390,10 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         _finish_capture(context, action_id, (), FileKind.VIDEO,
                         failure=_unconfirmed_failure(action_id))
         return
-    entries = listing.entries
-    ticket = listing.ticket
-    assessment = assess_capture_files(
-        CaptureFileSet(
-            files=tuple(
-                CaptureFile(
-                    file_id=entry.identity, kind=entry.kind,
-                    complete=entry.complete, ownership_confirmed=True)
-                for entry in entries),
-            set_finalized=True),
-        ProductRequirements(required_kinds=frozenset({FileKind.VIDEO})))
-    if assessment.is_complete:
-        _confirm_timelapse_results(
-            context, action_id, assessment, entries, wait_event_id, ticket)
-        # 时间与产物完成依据成立后解除占用；收尾处理不再阻塞同设备。
-        _release_occupancy(context, action_id)
-        _finish_capture(context, action_id, entries, FileKind.VIDEO)
-    elif assessment.explicitly_unmet:
-        _confirm_timelapse_results(
-            context, action_id, assessment, entries, wait_event_id, ticket)
-        _finish_capture(
-            context, action_id, entries, FileKind.VIDEO,
-            failure=RecordingFailure(
-                code="capture_failed",
-                details={
-                    "activity_id": str(action_id),
-                    "reason": "no_outputs"}))
-    else:
-        # 暂不齐备：本轮成功结果与重试等待共同保存，下一轮作为新轮次。
-        context.finish(ticket, _round_outcome(), retry_wait=True)
+    # v1 文件观察分别证明归属与单文件事实，不提供集合确定依据。
+    # 真实未确定分区保存原本轮与已取得文件，下一检查仍沿原有限责任。
+    _register_observed(context, action_id, listing.entries, occurred_at=listing.occurred_at)
+    _finish_listing_result(context, listing, retry_wait=True)
 
 
 async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> None:
@@ -1723,17 +2459,9 @@ async def _close_canceled_timelapse(
         _close_check_unconfirmed(context, action_id)
         _finish_canceled_capture(context, action_id)
         return
-    if listing.phase is ListingPhase.LISTED:
-        entries = listing.entries
-        context.finish(listing.ticket, _round_outcome(),
-                       end_run=RunOutcome.SUCCEEDED)
-    else:
-        # 核实责任已闭合：按直接列举回退，不再保存轮次事实。
-        try:
-            entries = await context.results.list_files(action_id)
-        except Exception:
-            entries = ()
-    registered = _register_observed(context, action_id, entries)
+    entries = listing.entries
+    _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED)
+    registered = _register_observed(context, action_id, entries, occurred_at=listing.occurred_at)
     drafts = _catalog_drafts(registered, entries)
     receipt = context.capture.finish_canceled_capture(
         FinishCanceledCapture(
@@ -1761,21 +2489,6 @@ def _begin_check_round(runtime: CaptureRuntime, action_id: int):
         raise ConsistencyError(
             f"核实意图事务未完成（{outcome.kind.value}）: {outcome.error}")
     return outcome.value
-
-
-def _round_outcome(error: ErrorValue | None = None) -> CallOutcome:
-    """一轮结果列举的尝试结局：可靠返回，效果未知。"""
-    return CallOutcome(
-        status=(AttemptStatus.FAILED if error is not None
-                else AttemptStatus.SUCCEEDED),
-        error=error,
-        effect=EffectState.UNKNOWN,
-        settlement=Settlement(
-            basis=SettlementBasis.OBSERVED,
-            evidence=EvidenceValue(
-                type=_RESULTS_RETURNED, version=1, data={}),
-        ),
-    )
 
 
 def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int) -> None:
@@ -1811,6 +2524,10 @@ class ListingRound:
     phase: ListingPhase
     entries: tuple[ObservedFile, ...] = ()
     ticket: Any = None
+    outcome: CallOutcome | None = None
+    occurred_at: int | None = None
+    returned_ns: int | None = None
+    already_saved: bool = False
 
 
 def _unconfirmed_failure(action_id: int) -> RecordingFailure:
@@ -1820,62 +2537,119 @@ def _unconfirmed_failure(action_id: int) -> RecordingFailure:
         details={"activity_id": str(action_id), "reason": "outputs_unknown"})
 
 
-async def _listing_round(
-    runtime: CaptureRuntime, action_id: int) -> ListingRound:
-    """按 results 责任的有限轮次推进一次结果列举。
+def _held_listing(runtime: CaptureRuntime, ticket: AttemptTicket) -> ListingRound | None:
+    pending = runtime.pending_start_results.get((ticket.run_id, ticket.attempt_id))
+    if pending is None or pending.result_listing is None:
+        return None
+    if pending.finish.ticket != ticket:
+        raise ConsistencyError("待存 RESULTS 原票据不符")
+    return ListingRound(ListingPhase.LISTED, pending.result_listing, ticket,
+                        pending.finish.outcome.outcome, pending.finish.occurred_at,
+                        pending.returned_ns)
 
-    在途轮次跨会话恢复前停等；上一轮的重试等待按核实间隔到时才
-    开始新轮次，未到时不提交新意图、不消耗名额；本轮列举失败保
-    存实际结果与重试等待；预算耗尽交由调用方按所属拍摄及收场规
-    则结束；其余拒绝说明核实责任已闭合，调用方按直接列举回退。
-    """
-    in_flight = runtime.last_attempt(f"results/{action_id}")
+
+def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRound:
+    """CLOSED 消费原已保存输入；不取得当前驱动端口或新的时钟。"""
+    activity_id = _activity_id_of(runtime, action_id)
+    responsibility = f"results/{activity_id}"
+    with closing(runtime.owned.connection.execute(
+        "SELECT r.id,r.action_id,r.activity_id,r.kind,t.attempt_no,t.status,t.effect_state,"
+        " t.result_json,t.error_json,e.occurred_at FROM operation_runs r"
+        " JOIN operation_attempts t ON t.run_id=r.id"
+        " JOIN history_events e ON e.id=t.result_event_id"
+        " WHERE r.responsibility_key=? ORDER BY t.attempt_no DESC LIMIT 1",
+        (responsibility,))) as cursor:
+        row = cursor.fetchone()
+    if (row is None or row[1] != action_id or row[2] != activity_id
+            or row[3] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)):
+        raise ConsistencyError("RESULTS 责任缺少可核对的完整本地输入")
+    ticket = AttemptTicket(row[4], "result", str(activity_id), responsibility, row[0])
+    actual = saved_outcome(row[5], row[6], parse_exact_json(row[7]),
+                           None if row[8] is None else parse_exact_json(row[8]))
+    entries = files_from_outcome(ticket, actual)
+    return ListingRound(ListingPhase.CLOSED, entries, ticket, actual, row[9], None, True)
+
+
+def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
+                           retry_wait: bool = False, end_run: RunOutcome | None = None,
+                           result_set: ResultSetSave | None = None) -> None:
+    """首次固定真实处置后沿原 key 保存；已保存的 CLOSED 输入不再改写。"""
+    if listing.already_saved:
+        return
+    ticket = listing.ticket
+    identity = (ticket.run_id, ticket.attempt_id)
+    pending = runtime.pending_start_results.get(identity)
+    if pending is None or pending.finish.ticket != ticket or pending.finish.outcome.outcome is not listing.outcome:
+        raise ConsistencyError("RESULTS 原返回及其保存责任不可替换")
+    finish = replace(pending.finish, retry_wait=retry_wait,
+                     run_finish=None if end_run is None else RunFinish(end_run))
+    if pending.result_disposition_ready and (pending.finish != finish or pending.result_set != result_set):
+        raise ConsistencyError("RESULTS 原 key 的已确定处置不可改变")
+    pending = replace(pending, finish=finish, result_set=result_set, result_disposition_ready=True)
+    runtime.pending_start_results[identity] = pending
+    runtime.save_held_result(ticket)
+
+
+async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRound:
+    """同一活动的有限核实；实际返回先持有，消费者随后确定真实处置。"""
+    activity_id = _activity_id_of(runtime, action_id)
+    responsibility = f"results/{activity_id}"
+    in_flight = runtime.last_attempt(responsibility)
     if in_flight is not None and in_flight[0] == int(_ATTEMPT_STATUS.RUNNING):
+        ticket = _original_ticket(runtime, responsibility, "result")
+        held = _held_listing(runtime, ticket)
+        if held is not None:
+            return held
         return ListingRound(ListingPhase.IN_FLIGHT)
-    if runtime.retry_wait_remaining(
-            f"results/{action_id}",
-            runtime.check_config.retry_interval_s) is not None:
+    if runtime.retry_wait_remaining(responsibility, runtime.check_config.retry_interval_s,
+                                    maximum=runtime.check_config.max_attempts) is not None:
         return ListingRound(ListingPhase.RETRY_WAIT)
     begin = _begin_check_round(runtime, action_id)
     if begin.disposition is not BeginDisposition.GRANTED:
         if begin.reason == "budget_exhausted":
             return ListingRound(ListingPhase.EXHAUSTED)
-        return ListingRound(ListingPhase.CLOSED)
+        return _saved_result_listing(runtime, action_id)
     ticket = begin.ticket
-    try:
-        entries = await runtime.results.list_files(action_id)
-    except Exception:
-        runtime.finish(ticket, _round_outcome(
-            ErrorValue(code="device_error", stage="device")), retry_wait=True)
-        return ListingRound(ListingPhase.RETRY_WAIT)
-    return ListingRound(ListingPhase.LISTED, entries, ticket)
+    result = await runtime.results.list_round(ticket, timeout_s=runtime.check_config.timeout_s)
+    observed_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
+    runtime.hold_call_result(ticket, result.outcome, occurred_at=observed_at,
+                             returned_ns=returned_ns, result_listing=result.entries)
+    listing = _held_listing(runtime, ticket)
+    has_file_observation = any(value.type == "result_files_listed" for value in result.outcome.observations)
+    if not has_file_observation and result.outcome.error is not None:
+        _finish_listing_result(runtime, listing, retry_wait=True)
+        return ListingRound(ListingPhase.RETRY_WAIT, outcome=result.outcome,
+                            occurred_at=observed_at, returned_ns=returned_ns)
+    return listing
 
 
 async def _finish_timelapse_conclusion(
     runtime: CaptureRuntime, action_id: int) -> None:
     """集合已有结论后的收尾：按保存的判定登记产物与终态。
 
-    核实责任终态保持，不重开轮次；产物登记经收尾列举进行，列举
-    事实与已保存结论不一致时保持等待。
+    核实责任终态保持，不重开轮次；产物登记只消费原保存输入，
+    输入缺失或不可解释时保留诊断，不访问设备补写。
     """
     with closing(runtime.owned.connection.execute(
         "SELECT result_set_state, completion_basis FROM device_activities"
-        " WHERE id = ?", (action_id,),
+        " WHERE action_id = ?", (action_id,),
     )) as cursor:
         state, basis = cursor.fetchone()
-    entries = await runtime.results.list_files(action_id)
+    listing = _saved_result_listing(runtime, action_id)
+    entries = listing.entries
+    registered = _register_observed(runtime, action_id, entries, occurred_at=listing.occurred_at)
     if state == 3 and basis == 3:
         _release_occupancy(runtime, action_id)
-        _finish_capture(runtime, action_id, entries, FileKind.VIDEO)
+        _finish_capture(runtime, action_id, entries, FileKind.VIDEO, registered=registered)
     elif state == 3:
         _finish_capture(
-            runtime, action_id, entries, FileKind.VIDEO,
+            runtime, action_id, entries, FileKind.VIDEO, registered=registered,
             failure=RecordingFailure(
                 code="capture_failed",
                 details={"activity_id": str(action_id), "reason": "no_outputs"}))
     else:
         _finish_capture(
-            runtime, action_id, entries, FileKind.VIDEO,
+            runtime, action_id, entries, FileKind.VIDEO, registered=registered,
             failure=RecordingFailure(
                 code="capture_result_unconfirmed",
                 details={
@@ -1886,7 +2660,7 @@ async def _finish_timelapse_conclusion(
 def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:
     """到期的等待先保存一次完成事实，返回其事件引用。"""
     with closing(runtime.owned.connection.execute(
-        "SELECT wait_completed_event_id FROM device_activities WHERE id = ?",
+        "SELECT wait_completed_event_id FROM device_activities WHERE action_id = ?",
         (action_id,),
     )) as cursor:
         saved = cursor.fetchone()
@@ -1902,7 +2676,7 @@ def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:
 
 def _confirm_timelapse_results(
     runtime: CaptureRuntime, action_id: int, assessment, entries,
-    wait_event_id: int, ticket,
+    wait_event_id: int, listing: ListingRound,
 ) -> None:
     """把本轮结果集合核实结论与尝试结束、流程收场共同保存。
 
@@ -1914,7 +2688,7 @@ def _confirm_timelapse_results(
     if assessment.is_complete:
         command = ResultSetSave(
             action_id=action_id,
-            occurred_at=runtime.wall_us(),
+            occurred_at=listing.occurred_at,
             phase=ResultSetPhase.COMPLETE,
             contract=_RESULT_CONTRACT,
             observation={"files": identities},
@@ -1928,7 +2702,7 @@ def _confirm_timelapse_results(
         missing = sorted(str(kind.value) for kind in assessment.missing_kinds)
         command = ResultSetSave(
             action_id=action_id,
-            occurred_at=runtime.wall_us(),
+            occurred_at=listing.occurred_at,
             phase=ResultSetPhase.UNSATISFIED,
             contract=_RESULT_CONTRACT,
             observation={"files": identities, "missing": missing},
@@ -1938,15 +2712,7 @@ def _confirm_timelapse_results(
                 "method": _KNOWN_FAILURE_METHOD,
                 "observation": {"files": identities, "missing": missing},
             })
-    finish = AttemptFinish(
-        ticket=ticket,
-        outcome=validate_outcome(ticket, _round_outcome(), runtime.evidence),
-        occurred_at=runtime.wall_us(),
-        run_finish=RunFinish(status=RunOutcome.SUCCEEDED),
-    )
-    receipt = runtime.capture.finish_result_check(
-        finish, command, new_operation_key(), runtime.owned)
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    _finish_listing_result(runtime, listing, end_run=RunOutcome.SUCCEEDED, result_set=command)
 
 
 _HANDLERS: dict[str, ActionHandler] = {

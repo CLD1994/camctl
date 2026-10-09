@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from camctl.contracts.values import DurationMillis
 from camctl.devices.evidence import DeviceObservation
@@ -327,7 +327,7 @@ class GrantDecision:
 
 @dataclass(frozen=True)
 class StartDispatch:
-    """驱动启动响应：锚点在确认时由驱动取得。
+    """启动返回事实：运行时在返回后、保存前取得同组确认读数。
 
     confirmed 表示驱动可靠识别了启动成功响应，anchor_ns 是响应
     时刻的单调钟读数；sent_only 表示只确认发送；rejected_no_effect
@@ -340,6 +340,14 @@ class StartDispatch:
     rejected_no_effect: bool = False
     error: ErrorValue | None = None
     observations: tuple[DeviceObservation, ...] = ()
+    outcome: CallOutcome | None = None
+    confirmed_at: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome is not None and (
+                self.error != self.outcome.error
+                or self.observations != self.outcome.observations):
+            raise ValueError("启动响应必须保留完整结果的同源观察和错误")
 
 
 class GrantPort(Protocol):
@@ -383,6 +391,7 @@ class CaptureContext:
     driver: StartDriverPort
     finishes: FinishPort
     canceled: bool = False
+    canceled_now: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -434,7 +443,8 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
     check = recheck_dispatch(
         window=context.window,
         trusted_wall_now=context.wall.now_us(),
-        canceled=context.canceled,
+        canceled=(context.canceled if context.canceled_now is None
+                  else context.canceled_now()),
     )
     if not check.allowed:
         context.finishes.finish_prevented(ticket, check.reason or "prevented")
@@ -449,7 +459,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
             if dispatch.anchor_ns is not None
             else None
         )
-        outcome = _outcome(
+        outcome = dispatch.outcome or _outcome(
             status=(
                 AttemptStatus.SUCCEEDED
                 if dispatch.error is None
@@ -471,7 +481,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
             phase=phase, stop_target_ns=stop_target, ticket=ticket
         )
     if dispatch.sent_only:
-        outcome = _outcome(
+        outcome = dispatch.outcome or _outcome(
             status=AttemptStatus.SUCCEEDED,
             effect=EffectState.UNKNOWN,
             basis=SettlementBasis.OBSERVED,
@@ -482,7 +492,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
         context.finishes.finish(ticket, outcome)
         return CaptureStep(phase=RecordingPhase.SENT_ONLY, ticket=ticket)
     if dispatch.rejected_no_effect:
-        outcome = _outcome(
+        outcome = dispatch.outcome or _outcome(
             status=AttemptStatus.FAILED,
             effect=EffectState.NO_EFFECT,
             basis=SettlementBasis.OBSERVED,
@@ -494,7 +504,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
         return CaptureStep(
             phase=RecordingPhase.REJECTED_NO_EFFECT, ticket=ticket
         )
-    outcome = _outcome(
+    outcome = dispatch.outcome or _outcome(
         status=AttemptStatus.FAILED,
         effect=EffectState.UNKNOWN,
         basis=SettlementBasis.OBSERVED,

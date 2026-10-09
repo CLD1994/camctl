@@ -128,7 +128,7 @@ class TestMainSyntaxExitCode:
         monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls:cls("/unused")))
         monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args:object())
         def unavailable(mode, config, *, catalog=None, notifier=None,
-                        host_notifications=None):
+                        host_notifications=None, recovery_boundary=None):
             raise FileNotFoundError("状态库不存在")
         lifecycle = ModuleType("camctl.bootstrap.lifecycle")
         lifecycle.build_runtime = unavailable

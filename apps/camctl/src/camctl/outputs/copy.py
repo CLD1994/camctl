@@ -37,6 +37,8 @@ from camctl.host_files.segments import (
     transfer_segment,
 )
 from camctl.persistence.models import DbOutcomeKind
+from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
+from camctl.session.supervision import Supervisor
 
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
@@ -212,8 +214,8 @@ class AttemptDecision:
 def decide_attempt(attempts: Sequence[AttemptRecord], current_round: int) -> AttemptDecision:
     """未保存读取失败的重启沿原尝试；已明确失败只能新增合法尝试。
 
-    旧轮次的尝试属于历史，不参与恢复；当前轮次的在途尝试必须
-    唯一。预算、重试等待与机会由意图入口判断，本函数不重复。
+    重拷沿原未结束尝试，原尝试的轮次可以早于当前副本轮次；同一
+    副本的在途尝试必须唯一。预算、重试等待与机会由意图入口判断。
     """
     if isinstance(current_round, bool) or not isinstance(current_round, int) or current_round <= 0:
         raise ValueError(f"当前拷贝轮次必须是正整数: {current_round!r}")
@@ -227,11 +229,10 @@ def decide_attempt(attempts: Sequence[AttemptRecord], current_round: int) -> Att
             raise ConsistencyError(
                 f"读取尝试轮次 {record.copy_round} 超过当前轮次 {current_round}"
             )
-        if record.copy_round == current_round \
-                and record.status == int(_ATTEMPT_STATUS.RUNNING):
+        if record.status == int(_ATTEMPT_STATUS.RUNNING):
             in_flight.append(record)
     if len(in_flight) > 1:
-        raise ConsistencyError("同一拷贝轮次存在多个未结束读取尝试")
+        raise ConsistencyError("同一副本存在多个未结束读取尝试")
     if in_flight:
         return AttemptDecision(
             AttemptPlan.RESUME_EXISTING,
@@ -420,6 +421,7 @@ class CopyContext:
     roots: BoundDirectories
     occurred_at: int
     reset_key: OperationKey | None = None
+    executor: FileTaskExecutor | None = None
 
 
 class SegmentSaveDisposition(Enum):
@@ -445,10 +447,11 @@ class SegmentSaveOutcome:
 class CopySegmentError(RuntimeError):
     """一段拷贝失败；保留实际阶段，不猜测未确认尾部的效果。"""
 
-    def __init__(self, stage: str, detail: str) -> None:
+    def __init__(self, stage: str, detail: str, *, source_failed: bool = False) -> None:
         super().__init__(f"{stage}: {detail}")
         self.stage = stage
         self.detail = detail
+        self.source_failed = source_failed
 
 
 @dataclass(frozen=True)
@@ -475,6 +478,7 @@ class SegmentContext:
     chunk_size: int = DEFAULT_CHUNK_SIZE_BYTES
     stop: threading.Event | None = None
     key: OperationKey | None = None
+    executor: FileTaskExecutor | None = None
 
 
 @dataclass(frozen=True)
@@ -508,6 +512,19 @@ async def copy_next_segment(copy_id: int, context: SegmentContext) -> SegmentSte
             or context.segment_size <= 0:
         raise ValueError(f"本次段大小必须是正整数: {context.segment_size!r}")
     facts = context.repository.load_copy_state(copy_id, context.owned)
+    return await _owned_copy_operation(context, facts.target.file_id, "copy_segment",
+        lambda control: _copy_next_segment(copy_id, context, facts, control))
+
+
+async def _owned_copy_operation(context, file_id: int, stage: str, body):
+    """拷贝实际操作与原保存在同一文件资格内完成。"""
+    executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
+    return await executor.run_owned_async_file_task(AsyncFileTask(
+        FileTaskId(f"{stage}/{file_id}/{new_operation_key()}"), (file_id,),
+        stage, "副本实际操作及原结果保存", body, resources=("state_db",)))
+
+
+async def _copy_next_segment(copy_id, context, facts, control) -> SegmentStep:
     plan = plan_segment(SegmentFacts(
         source_size=facts.source_size,
         committed_bytes=facts.committed_bytes,
@@ -521,7 +538,7 @@ async def copy_next_segment(copy_id: int, context: SegmentContext) -> SegmentSte
         target_name=facts.target.relative_path,
         range_start=plan.start, range_end=plan.end,
         chunk_size=context.chunk_size,
-        stop=context.stop if context.stop is not None else threading.Event(),
+        stop=context.stop if context.stop is not None else control.stop_event,
     )
     ref = FileRef(
         file_id=facts.target.file_id, purpose=facts.target.purpose,
@@ -532,7 +549,8 @@ async def copy_next_segment(copy_id: int, context: SegmentContext) -> SegmentSte
     if result.error is SegmentFailure.SYNC_FAILED:
         raise CopySegmentError("segment_sync_failed", str(result.failure))
     if result.error is not None:
-        raise CopySegmentError("segment_transfer_failed", str(result.error))
+        raise CopySegmentError("segment_transfer_failed", str(result.error), source_failed=result.error in (
+            SegmentFailure.NO_DATA, SegmentFailure.SOURCE_EOF_EARLY, SegmentFailure.READ_FAILED))
     if not result.synced:
         raise CopySegmentError("segment_sync_failed", "段尾同步未确认")
     key = context.key if context.key is not None else new_operation_key()
@@ -582,6 +600,11 @@ async def prepare_copy(copy_id: int, context: CopyContext) -> CopyStep:
     轮次，不保存读取意图。
     """
     facts = context.repository.load_copy_state(copy_id, context.owned)
+    return await _owned_copy_operation(context, facts.target.file_id, "copy_prepare",
+        lambda _control: _prepare_copy(copy_id, context, facts))
+
+
+async def _prepare_copy(copy_id, context, facts) -> CopyStep:
     ref = FileRef(
         file_id=facts.target.file_id, purpose=facts.target.purpose,
         relative_path=facts.target.relative_path, root=context.roots.staging,
@@ -868,6 +891,16 @@ class CopyCompletionError(RuntimeError):
         self.detail = detail
 
 
+class RecopyExhausted(CopyCompletionError):
+    """可靠摘要比较不一致且本次新增重拷额度已经用尽。"""
+
+    def __init__(self, max_recopies: int, recopies_used: int) -> None:
+        super().__init__("recopy_budget_exhausted",
+                         f"已用 {recopies_used} 次重拷，本次上限 {max_recopies}")
+        self.max_recopies = max_recopies
+        self.recopies_used = recopies_used
+
+
 @dataclass(frozen=True)
 class SourceDigest:
     """源端摘要获取的一次结果；digest 为空表达获取失败。"""
@@ -898,6 +931,7 @@ class CompletionContext:
     digest: SourceDigestReader | None = None
     max_recopies: int = 1
     key: OperationKey | None = None
+    executor: FileTaskExecutor | None = None
 
 
 class CompletionPhase(Enum):
@@ -964,6 +998,11 @@ async def complete_copy(copy_id: int, context: CompletionContext) -> CompletionS
     依赖共同保存；提交结果未知时不冒充已解除。
     """
     facts = context.repository.load_copy_state(copy_id, context.owned)
+    return await _owned_copy_operation(context, facts.target.file_id, "copy_complete",
+        lambda _control: _complete_copy(copy_id, context, facts))
+
+
+async def _complete_copy(copy_id, context, facts) -> CompletionStep:
     if facts.committed_bytes != facts.source_size:
         raise CopyCompletionError(
             "copy_incomplete",
@@ -1073,9 +1112,7 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
     if result.disposition is RecopyDisposition.SKIPPED:
         raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
     if result.disposition is RecopyDisposition.EXHAUSTED:
-        raise CopyCompletionError(
-            "recopy_budget_exhausted",
-            f"已用 {facts.recopies_used} 次重拷，本次上限 {context.max_recopies}")
+        raise RecopyExhausted(context.max_recopies, facts.recopies_used)
     return CompletionStep(phase=CompletionPhase.RECOPY_REGISTERED, recopy=result)
 
 

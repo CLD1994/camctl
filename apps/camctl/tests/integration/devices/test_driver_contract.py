@@ -127,7 +127,7 @@ class ContractDriver:
     ) -> DeviceCallResult:
         return self._respond("result")
 
-    async def open_read(self, source, offset: int, ticket):
+    async def open_read(self, source, offset: int, ticket, *, idle_timeout_s):
         self.calls.append("read")
         raise AssertionError("契约测试不派发真实读取")
 

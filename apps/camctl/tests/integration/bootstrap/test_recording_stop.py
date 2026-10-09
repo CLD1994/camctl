@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+
 import asyncio
 import contextlib
 import sqlite3
@@ -81,6 +83,7 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
+        RESULT_FILES_CONTRACT,
     )
 )
 

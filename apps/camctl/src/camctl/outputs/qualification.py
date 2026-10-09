@@ -13,6 +13,7 @@ from decimal import Decimal
 from enum import Enum
 
 from camctl.contracts.values import MAX_OBJECT_ID, ObjectId, UtcMicros
+from camctl.devices.bindings import BindingResult, BindingStatus
 from camctl.host_files.paths import validate_file_extension
 
 __all__ = [
@@ -103,6 +104,8 @@ class FileCandidate:
     config: OperationConfig | None
     occurred_at: int
     source_intermediate_file_id: int | None = None
+    #: 设备源按原观察者身份核对本次配置；异常时不建立读取配置或流程。
+    binding_result: BindingResult | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
@@ -120,9 +123,15 @@ class FileCandidate:
         if (self.source_device_file_id is None) == (self.source_intermediate_file_id is None):
             raise ValueError("读取源必须恰为设备文件或主机文件之一")
         if self.source_device_file_id is not None:
-            if not isinstance(self.config, OperationConfig):
+            if self.binding_result is not None and not isinstance(self.binding_result, BindingResult):
+                raise TypeError("设备绑定核对必须使用 BindingResult")
+            failed_binding = self.binding_result is not None and self.binding_result.status in (
+                BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH)
+            if not failed_binding and not isinstance(self.config, OperationConfig):
                 raise ValueError("设备读取候选必须使用已校验的读取配置")
-        elif self.config is not None or self.processing_id is not None:
+            if self.binding_result is not None and self.binding_result.status is BindingStatus.UNAVAILABLE:
+                raise ValueError("无法可靠取得的配置不能作为普通设备绑定异常")
+        elif self.config is not None or self.processing_id is not None or self.binding_result is not None:
             raise ValueError("主机产物取回不采用设备配置，内部原片必须来自设备")
         validate_file_extension(self.target_extension)
         if self.item_id is not None:

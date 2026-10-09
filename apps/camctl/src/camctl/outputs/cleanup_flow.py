@@ -20,6 +20,7 @@ from time import monotonic_ns as _default_monotonic_ns
 from typing import Any, Callable
 
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
+from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.operations.attempts import RetryWaitGate
 
 __all__ = [
@@ -417,6 +418,8 @@ class CleanupRuntime:
     local_files: HostArtifactPort | None = None
     monotonic_ns: Callable[[], int] = _default_monotonic_ns
     retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
+    binding_check: Callable[[DeviceBinding], BindingResult] | None = None
+    for_item: Callable[[int], CleanupRuntime] | None = None
 
 
 def _delete_observation(result) -> tuple[bool, bool]:
@@ -641,6 +644,11 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
         return CleanupStep("succeeded", choice.name)
     # 设备调用目标：主机派生成品经本地文件链路删除，未装配设备或
     # 本地协作者时成员保持等待，不解释为失败。
+    if runtime.for_item is not None:
+        runtime = runtime.for_item(item_id)
+    failed_binding = _finish_binding_failure(runtime, item_id)
+    if failed_binding is not None:
+        return failed_binding
     if runtime.binding_of(item_id) is None:
         if (_host_target(connection, item_id) is None
                 or runtime.local_files is None):
@@ -651,6 +659,36 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
         if verified is not None:
             return verified
     return await _delete_once(runtime, item_id, action_id, output_id)
+
+
+def _finish_binding_failure(runtime, item_id, *, canceled=False):
+    binding = runtime.binding_of(item_id)
+    if binding is None or runtime.binding_check is None:
+        return None
+    result = runtime.binding_check(binding)
+    if binding_failure_details(result) is None:
+        return None
+    from camctl.persistence.repositories.outputs import FailCleanupBinding
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcomeKind
+
+    connection = runtime.owned.connection
+    source_id = connection.execute(
+        "SELECT o.device_file_id FROM cleanup_items c JOIN outputs o ON o.id=c.output_id WHERE c.id=?",
+        (item_id,)).fetchone()[0]
+    keys = tuple(row[0] for row in connection.execute(
+        "SELECT responsibility_key FROM operation_runs WHERE cleanup_item_id=? AND status IN (1,2) ORDER BY id",
+        (item_id,)).fetchall())
+    if canceled and not keys:
+        return _cancel_with_error(runtime, item_id, connection.execute(
+            "SELECT output_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0], "delete_unconfirmed")
+    saved = runtime.outputs.fail_cleanup_binding(FailCleanupBinding(
+        item_id, source_id, result, keys, runtime.occurred_at(), canceled), new_operation_key(), runtime.owned)
+    if saved.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"清理绑定失败事务未完成（{saved.kind.value}）: {saved.error}")
+    runtime.retry_gate.cleared(f"delete/{item_id}")
+    runtime.retry_gate.cleared(f"exists/{item_id}")
+    return CleanupStep("canceled" if canceled else "failed", "device_binding_unavailable")
 
 
 def _entry_facts(connection, output_id: int) -> CleanupEntryFacts:
@@ -760,7 +798,7 @@ async def _delete_once(
         runtime.owned)
     if progress.kind is not DbOutcomeKind.COMPLETED:
         return CleanupStep("progress_rejected", str(progress.error))
-    result = await _call_delete(runtime, item_id)
+    result = await _call_delete(runtime, item_id, ticket.value.ticket)
     absent, errored = _delete_observation(result)
     if errored:
         status, effect = AttemptStatus.FAILED, (
@@ -770,7 +808,7 @@ async def _delete_once(
         status, effect, error = AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, None
     else:
         status, effect, error = AttemptStatus.SUCCEEDED, EffectState.UNKNOWN, None
-    outcome = CallOutcome(
+    outcome = result.outcome or CallOutcome(
         status=status, error=error, effect=effect,
         settlement=Settlement(
             basis=SettlementBasis.OBSERVED,
@@ -858,6 +896,14 @@ async def _cancel_member(
     from camctl.operations.attempts import RunOutcome
     from camctl.persistence.models import DbOutcomeKind
 
+    pending = runtime.owned.connection.execute(
+        "SELECT 1 FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+        " WHERE r.cleanup_item_id=? AND (a.status=1 OR a.result_json IS NULL) LIMIT 1",
+        (item_id,)).fetchone()
+    if pending is not None:
+        # 原删除或查询未可靠收场；取消保持原成员、限制和调用责任。
+        return CleanupStep("call_tracking")
+
     if status in (1, 2):
         canceled = runtime.outputs.cancel_cleanup_item(
             CancelCleanupItem(item_id, runtime.occurred_at()),
@@ -900,6 +946,11 @@ async def _settle_canceling_member(
         return CleanupStep("succeeded", "ABSENCE_CONFIRMED")
     if facts["confirmed_present_after"]:
         return _cancel_with_error(runtime, item_id, output_id, "file_delete_failed")
+    if runtime.for_item is not None:
+        runtime = runtime.for_item(item_id)
+    binding_failure = _finish_binding_failure(runtime, item_id, canceled=True)
+    if binding_failure is not None:
+        return binding_failure
     ticket = _begin_query_attempt(
         runtime, item_id, _item_action(connection, item_id))
     if ticket.kind is DbOutcomeKind.COMPLETED and ticket.value.ticket is not None:
@@ -1011,9 +1062,9 @@ async def _run_query(runtime: CleanupRuntime, ticket, item_id: int) -> bool | No
     from camctl.operations.validation import validate_outcome
     from camctl.persistence.models import DbOutcomeKind
 
-    query_result = await _call_query(runtime, item_id)
+    query_result = await _call_query(runtime, item_id, ticket)
     present = _presence_observation(query_result)
-    query_outcome = CallOutcome(
+    query_outcome = query_result.outcome or CallOutcome(
         status=AttemptStatus.SUCCEEDED if query_result.error is None
         else AttemptStatus.FAILED,
         error=None if query_result.error is None
@@ -1041,12 +1092,15 @@ async def _run_query(runtime: CleanupRuntime, ticket, item_id: int) -> bool | No
     return present
 
 
-def _control_request(runtime: CleanupRuntime, item_id: int, operation: str):
+def _control_request(runtime: CleanupRuntime, item_id: int, operation: str, ticket):
     from camctl.devices.ports import ControlRequest
 
     return ControlRequest(
         operation=operation, binding=runtime.binding_of(item_id),
-        params=_target_params(runtime.owned.connection, item_id))
+        params=_target_params(runtime.owned.connection, item_id),
+        ticket=ticket,
+        timeout_s=(runtime.delete_config.timeout_s if operation == "delete"
+                   else runtime.query_config.timeout_s))
 
 
 def _host_target(connection, item_id: int) -> str | None:
@@ -1059,10 +1113,8 @@ def _host_target(connection, item_id: int) -> str | None:
     return None if row is None else str(row[0])
 
 
-async def _call_delete(runtime: CleanupRuntime, item_id: int):
+async def _call_delete(runtime: CleanupRuntime, item_id: int, ticket):
     """按成员目标发起一次删除调用；返回与设备调用同形的结果。"""
-    from camctl.devices.ports import ControlRequest
-
     binding = runtime.binding_of(item_id)
     if binding is None:
         path = _host_target(runtime.owned.connection, item_id)
@@ -1070,12 +1122,11 @@ async def _call_delete(runtime: CleanupRuntime, item_id: int):
             raise ConsistencyError(f"清理成员缺少可调用目标: {item_id}")
         return await runtime.local_files.delete(LocalArtifactRequest(
             operation="delete", cleanup_item_id=item_id, path=path))
-    return await runtime.driver.delete(ControlRequest(
-        operation="delete", binding=binding,
-        params=_target_params(runtime.owned.connection, item_id)))
+    return await runtime.driver.delete(
+        _control_request(runtime, item_id, "delete", ticket))
 
 
-async def _call_query(runtime: CleanupRuntime, item_id: int):
+async def _call_query(runtime: CleanupRuntime, item_id: int, ticket):
     """按成员目标发起一次存在性查询；返回与设备调用同形的结果。"""
     binding = runtime.binding_of(item_id)
     if binding is None:
@@ -1085,7 +1136,7 @@ async def _call_query(runtime: CleanupRuntime, item_id: int):
         return await runtime.local_files.query_state(LocalArtifactRequest(
             operation="query", cleanup_item_id=item_id, path=path))
     return await runtime.driver.query_state(
-        _control_request(runtime, item_id, "query"))
+        _control_request(runtime, item_id, "query", ticket))
 
 
 def _target_params(connection, item_id: int) -> dict:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal
@@ -26,7 +27,7 @@ from typing import Any, Callable, Iterable
 
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.capture.residual import residual_flow as _residual_flow_impl
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import (
     ExpireActionRequest,
@@ -158,7 +159,12 @@ def capture_flow(capture_factory: Callable[[Any, str], Any]) -> Callable[[Any], 
                 runtime = capture_factory(owned, device_id)
                 if runtime is None:
                     continue
-                await dispatch_ready(runtime, group)
+                outcomes = await dispatch_ready(runtime, group)
+                for action_id, outcome in outcomes:
+                    if isinstance(outcome, BaseException):
+                        raise outcome
+        except (sqlite3.Error, ConsistencyError) as error:
+            raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
         finally:
             owned.connection.close()
 
@@ -297,6 +303,7 @@ def _withdrawal_position(owned: Any, ready: Path, processing: Path):
 def cancel_flow(
     *, ready: Path, processing: Path, unscheduled_only: bool = False,
     motor_permits: dict | None = None,
+    work_files: Any = None,
 ) -> Callable[[Any], Any]:
     """构造推进取消动作的会话流程。
 
@@ -307,6 +314,13 @@ def cancel_flow(
     期取消；受限会话以 unscheduled_only=True 构造，只推进未排
     期动作，不依据不可信墙钟判断到时。
     """
+
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.session.supervision import Supervisor
+    from camctl.outputs.withdrawal import WithdrawalContext, resume_withdrawals, withdraw_delivery
+
+    executor = work_files.executor if work_files is not None else FileTaskExecutor(Supervisor())
+    pending_withdrawals = work_files.pending_withdrawals if work_files is not None else {}
 
     async def flow(context: Any) -> None:
         from camctl.cancellation.models import (
@@ -333,6 +347,21 @@ def cancel_flow(
         try:
             repository = CancellationRepository(motor_permits=motor_permits)
             occurred = context.clock.utc_micros
+            withdrawal_context = WithdrawalContext(owned, OutputsRepository(), ready,
+                processing, occurred, executor, pending_withdrawals)
+
+            async def execute_withdrawal(delivery_id):
+                try:
+                    return await withdraw_delivery(delivery_id, withdrawal_context)
+                except ConsistencyError as error:
+                    raise StateDbFailure(str(error)) from error
+
+            async def resume_withdrawal(action_id):
+                try:
+                    return await resume_withdrawals(action_id, withdrawal_context)
+                except ConsistencyError as error:
+                    raise StateDbFailure(str(error)) from error
+
             now_us = None if unscheduled_only else occurred()
             for action_id, status, spec_json in _due_cancel_actions(owned, now_us):
                 item_ids = _fixed_cancel_items(owned, action_id)
@@ -358,7 +387,8 @@ def cancel_flow(
                     cancellations=repository,
                     withdrawal_positions=_withdrawal_position(
                         owned, ready, processing),
-                    occurred_at=occurred)
+                    occurred_at=occurred, work_files=work_files,
+                    withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal)
                 progress = await apply_cancel(
                     ApplyCancel(origin_action_id=action_id, item_ids=item_ids),
                     CancellationRuntime(
@@ -509,6 +539,22 @@ def _start_due_report_actions(owned: Any, now_us: int) -> None:
                 f"同步开始事务未完成（{outcome.kind.value}）: {outcome.error}")
 
 
+def _settle_canceled_sync_actions(owned: Any, now_us: int) -> None:
+    """按目标自身标记完成取消收场，不依赖原取消发起者继续等待。"""
+    from camctl.reporting.policy import finish_canceled_sync_action
+
+    with closing(owned.connection.execute(
+            "SELECT id FROM actions WHERE type = 7 AND status = 2"
+            " AND cancel_requested = 1 ORDER BY id")) as cursor:
+        action_ids = tuple(int(row[0]) for row in cursor.fetchall())
+    for action_id in action_ids:
+        outcome = finish_canceled_sync_action(
+            new_operation_key(), owned, action_id=action_id, occurred_at=now_us)
+        if outcome.kind is not DbOutcomeKind.COMPLETED:
+            raise StateDbFailure(
+                f"报告取消收场事务未完成（{outcome.kind.value}）: {outcome.error}")
+
+
 def _settle_covered_local_syncs(owned: Any, now_us: int) -> None:
     """为已被已发布报告覆盖的同步动作补齐本地完成。
 
@@ -521,21 +567,25 @@ def _settle_covered_local_syncs(owned: Any, now_us: int) -> None:
             "SELECT s.action_id, MAX(r.id) FROM state_syncs s"
             " JOIN reports r ON r.status = 4 AND r.from_wm <= s.from_wm"
             " AND r.frozen_event_id >= s.started_boundary_event_id"
-            " WHERE s.status = 1 AND s.local_report_id IS NULL AND s.action_id IN"
-            " (SELECT id FROM actions WHERE status = 2)"
+            " WHERE s.status IN (1, 2) AND s.local_report_id IS NULL AND s.action_id IN"
+            " (SELECT id FROM actions WHERE status = 2 AND cancel_requested = 0)"
             " GROUP BY s.action_id ORDER BY s.action_id")) as cursor:
         rows = cursor.fetchall()
     for action_id, report_id in rows:
-        record_local_report(
+        outcome = record_local_report(
             new_operation_key(), owned, action_id=int(action_id),
             local_report_id=int(report_id), occurred_at=now_us)
+        if outcome.kind is not DbOutcomeKind.COMPLETED:
+            raise StateDbFailure(
+                f"同步本地完成事务未完成（{outcome.kind.value}）: {outcome.error}")
 
 
 def _covered_local_actions(owned: Any, from_wm: int, frozen_event_id: int) -> tuple[int, ...]:
     """一份报告发布成功后应保存本地完成的同步动作。"""
     with closing(owned.connection.execute(
             "SELECT a.id FROM actions a JOIN state_syncs s ON s.action_id = a.id"
-            " WHERE a.status = 2 AND s.status = 1 AND s.local_report_id IS NULL"
+            " WHERE a.status = 2 AND a.cancel_requested = 0"
+            " AND s.status IN (1, 2) AND s.local_report_id IS NULL"
             " AND s.from_wm >= ? AND s.started_boundary_event_id <= ?"
             " ORDER BY a.id", (from_wm, frozen_event_id))) as cursor:
         return tuple(int(row[0]) for row in cursor.fetchall())
@@ -581,21 +631,6 @@ def report_flow(
     记）；调用失败不阻止报告职责。
     """
 
-    instance_state: dict[str, str | None] = {"id": None}
-
-    def _instance_id() -> str:
-        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-
-        if instance_state["id"] is None:
-            reader = open_existing(
-                state_db, DbOpenMode.EXISTING_RO,
-                DbConfig(busy_timeout_ms=database.busy_timeout_ms))
-            try:
-                instance_state["id"] = reader.metadata.instance_id
-            finally:
-                reader.connection.close()
-        return instance_state["id"]
-
     def _temporary_staging_path(report_id: int, job_id: str) -> Path:
         from camctl.reporting.publication import REPORTS_DIRECTORY
 
@@ -623,7 +658,7 @@ def report_flow(
         from camctl.host_files.handoff import HandoffDirectories
         from camctl.persistence.repositories.history import HistoryRepository
         from camctl.persistence.runtime import DbConfig, StateDatabaseError
-        from camctl.reporting.messages import JobMessage, new_job_id
+        from camctl.reporting.messages import ErrorKind, JobMessage, new_job_id
         from camctl.reporting.publication import (
             DeliveryOutcome,
             DbPublicationSession,
@@ -680,9 +715,10 @@ def report_flow(
             from_wm=registration.from_wm,
             to_wm=registration.to_wm,
             frozen_event_id=registration.boundary.last_event_id,
-            instance_id=_instance_id(),
+            instance_id=owned.metadata.instance_id,
             db_path=str(state_db),
             staging_path=str(_temporary_staging_path(report_id, job_id)),
+            staging_root=str(staging), ready_root=str(ready), processing_root=str(processing),
             entity_batch_size=history.entity_batch_size,
             event_batch_size=history.event_batch_size,
             busy_timeout_ms=database.busy_timeout_ms,
@@ -693,6 +729,12 @@ def report_flow(
             raise StateDbFailure(
                 f"报告 {report_id} 生成遇到状态库错误: "
                 f"{failure.error_code}: {failure.error_message}")
+        if (generation.failure is not None
+                and generation.failure.error_kind is ErrorKind.REPORT
+                and generation.failure.error_code == "configuration_error"):
+            from camctl.persistence.runtime import DirectoryBindingError
+
+            raise DirectoryBindingError(generation.failure.error_message)
         if generation.kind is not GenerationOutcomeKind.SUCCESS:
             failure = generation.failure
             detail = (f"{failure.error_code}: {failure.error_message}"
@@ -730,13 +772,20 @@ def report_flow(
     flow_state: dict[str, bool] = {"started": False}
 
     async def flow(context: Any) -> None:
+        from camctl.persistence.runtime import DirectoryBindingError, StateDatabaseError
         from camctl.reporting.policy import ReportingRepository
 
         first_round = not flow_state["started"]
         flow_state["started"] = True
-        owned = context.open_connection()
+        try:
+            owned = context.open_connection()
+        except DirectoryBindingError:
+            raise
+        except (StateDatabaseError, sqlite3.Error) as error:
+            raise StateDbFailure(f"报告维护无法可靠打开状态库: {error}") from error
         try:
             now_us = context.clock.utc_micros()
+            _settle_canceled_sync_actions(owned, now_us)
             if start_actions:
                 _start_due_report_actions(owned, now_us)
             _settle_covered_local_syncs(owned, now_us)
@@ -767,6 +816,8 @@ def report_flow(
                     await on_recovered()
                 except Exception:
                     pass
+        except (sqlite3.Error, ConsistencyError) as error:
+            raise StateDbFailure(f"报告维护无法可靠读取或保存状态库事实: {error}") from error
         finally:
             owned.connection.close()
 

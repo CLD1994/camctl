@@ -1,7 +1,7 @@
 """调度侧动作推进循环（Q6 接线）。
 
 按推进资格描述符把到期动作路由到对应能力处理器：未知类型不默认
-路由，单个动作的推进错误不阻止其余动作；阻塞（未到时间、占用）
+路由，单个动作的业务错误不阻止其余动作，状态前提失效时停止本批；阻塞（未到时间、占用）
 动作没有描述符，自然不创建执行协程。本模块不创建驱动或数据库连
 接，一切经 CaptureRuntime 端口。
 """
@@ -11,6 +11,9 @@ from __future__ import annotations
 from typing import Iterable, Protocol
 
 from camctl.capture.handlers import CaptureRuntime, HandlerOutcome, capture_handler
+from camctl.contracts.values import ConsistencyError
+from camctl.devices.bindings import DeviceConfigurationError
+from camctl.persistence.models import DatabaseAccessError
 from camctl.scheduling.service import ActionDescriptor
 
 __all__ = ["ReadyActions", "dispatch_ready", "ready_capture_actions"]
@@ -53,8 +56,9 @@ async def dispatch_ready(
 ) -> list[tuple[int, HandlerOutcome | BaseException]]:
     """把就绪描述符逐一路由到能力处理器并推进一次。
 
-    单个动作的异常原样记录并继续其余动作；处理器内部按已保存事
-    实幂等推进，重复调度不产生重复副作用。
+    单个动作的异常原样记录；状态库或事实一致性前提失效时停止本批，
+    其他动作异常继续推进。处理器内部按已保存事实幂等推进，重复
+    调度不产生重复副作用。
     """
     results: list[tuple[int, HandlerOutcome | BaseException]] = []
     for descriptor in descriptors:
@@ -64,6 +68,8 @@ async def dispatch_ready(
             handler = capture_handler(descriptor.action_type)
             await handler(descriptor.action_id, runtime)
             results.append((descriptor.action_id, HandlerOutcome("dispatched")))
-        except BaseException as error:  # 单动作失败不阻止其余动作。
+        except BaseException as error:
             results.append((descriptor.action_id, error))
+            if isinstance(error, (DatabaseAccessError, ConsistencyError, DeviceConfigurationError)):
+                break
     return results

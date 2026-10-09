@@ -9,10 +9,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from camctl.capture.media import SaveDisposition, SaveReceipt
 from camctl.contracts.enums import enum_for
@@ -28,6 +30,7 @@ from camctl.outputs.copy import (
     CopyStateFacts,
     CopyStep,
     ResumeOutcome,
+    RecopyExhausted,
     SegmentOutcome,
     SegmentSaveDisposition,
     SegmentStep,
@@ -108,6 +111,7 @@ class InputPhase(Enum):
     OWNER_SKIPPED = "owner_skipped"
     COMPLETION_FAILED = "completion_failed"
     RECOPY_PENDING = "recopy_pending"
+    CHECKSUM_EXHAUSTED = "checksum_exhausted"
     RETRY_WAITING = "retry_waiting"
 
 
@@ -120,6 +124,10 @@ class InputStep:
     input_file: FileRef | None = None
     reason: str | None = None
     error: BaseException | None = None
+    source_failed: bool = False
+    read_end: ReadEnd | None = None
+    stop_requested: bool = False
+    content_complete: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,6 +149,9 @@ class InputContext:
     sessions: ReadSessionOpener
     occurred_at: int
     digest: SourceDigestReader | None = None
+    read_end: ReadEnd | None = None
+    on_read_end: Callable[[ReadEnd, bool], None] | None = None
+    on_read_start: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
@@ -192,12 +203,22 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
         return InputStep(InputPhase.PREPARE_FAILED, copy_id=copy_id,
                          error=error)
 
-    if prepared.decision.outcome is ResumeOutcome.VERIFY:
-        return await _complete_input(context, copy_id, facts)
+    if prepared.decision.outcome is ResumeOutcome.VERIFY and context.read_end is not None:
+        return replace(await _complete_input(context, copy_id, facts), read_end=context.read_end,
+                       stop_requested=True, content_complete=True)
 
-    session = await context.sessions.open_session(
-        context.source_device_file_id, prepared.decision.offset)
     try:
+        if context.on_read_start is not None:
+            context.on_read_start()
+        session = await context.sessions.open_session(
+            context.source_device_file_id, facts.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
+            else prepared.decision.offset)
+    except Exception as error:
+        return InputStep(InputPhase.SEGMENT_FAILED, copy_id=copy_id, error=error, source_failed=True)
+    result = None
+    try:
+        if prepared.decision.outcome is ResumeOutcome.VERIFY:
+            await confirm_read_at_full_offset(session)
         while True:
             step = await context.copies.transfer(
                 copy_id, session, context.segment_size)
@@ -207,16 +228,40 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
                 raise ConsistencyError(
                     "段推进未携带保存事实，拷贝端口契约不一致")
             if step.saved.disposition is SegmentSaveDisposition.SKIPPED:
-                return InputStep(
+                result = InputStep(
                     InputPhase.OWNER_SKIPPED, copy_id=copy_id,
                     reason=step.saved.reason)
+                break
     except (CopySegmentError, ConsistencyError) as error:
-        return InputStep(InputPhase.SEGMENT_FAILED, copy_id=copy_id,
-                         error=error)
+        result = InputStep(InputPhase.SEGMENT_FAILED, copy_id=copy_id,
+                           error=error, source_failed=isinstance(error, CopySegmentError) and error.source_failed)
     finally:
         session.request_stop()
-        await session.wait_stopped()
-    return await _complete_input(context, copy_id, facts)
+        end = await session.wait_stopped()
+        require_read_stopped(end)
+        if context.on_read_end is not None:
+            context.on_read_end(end, session.position() == facts.source_size)
+    if result is not None:
+        return replace(result, read_end=end, stop_requested=True, content_complete=session.position() == facts.source_size)
+    if end.error is not None:
+        return InputStep(InputPhase.SEGMENT_FAILED, copy_id=copy_id, read_end=end,
+                         error=RuntimeError(end.error), source_failed=end.error != "stopped", stop_requested=True,
+                         content_complete=session.position() == facts.source_size)
+    return replace(await _complete_input(context, copy_id, facts), read_end=end, stop_requested=True, content_complete=True)
+
+
+async def confirm_read_at_full_offset(session) -> None:
+    """末尾续传只取得真实 EOF；不能再读取已经可靠落盘的内容。"""
+    chunk = await asyncio.to_thread(session.read_chunk, 1)
+    if chunk.error is not None:
+        raise CopySegmentError("segment_transfer_failed", chunk.error, source_failed=chunk.error != "stopped")
+    if chunk.eof is not True or chunk.data not in (None, b""):
+        raise ConsistencyError("原文件末尾会话未确认 EOF，不能以本地摘要补造读取结束")
+
+
+def require_read_stopped(end: ReadEnd) -> None:
+    if not isinstance(end, ReadEnd) or end.stopped is not True:
+        raise ConsistencyError("原读取尚无可靠实际停止依据，保留原尝试及保护")
 
 
 async def _complete_input(context: InputContext, copy_id: int,
@@ -224,6 +269,8 @@ async def _complete_input(context: InputContext, copy_id: int,
     """完整性收尾：准备完成即就绪；登记重拷表示本次不重试。"""
     try:
         completion = await context.copies.complete(copy_id, context.digest)
+    except RecopyExhausted as error:
+        return InputStep(InputPhase.CHECKSUM_EXHAUSTED, copy_id=copy_id, error=error)
     except (CopyCompletionError, ConsistencyError) as error:
         return InputStep(InputPhase.COMPLETION_FAILED, copy_id=copy_id,
                          error=error)

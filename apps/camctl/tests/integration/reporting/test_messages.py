@@ -39,6 +39,8 @@ def _job(job_id: str = "task-1") -> JobMessage:
         instance_id=_INSTANCE,
         db_path="/var/lib/camctl/state.db",
         staging_path="/var/lib/camctl/staging/reports/report-1.json",
+        staging_root="/var/lib/camctl/staging", ready_root="/var/lib/camctl/ready",
+        processing_root="/var/lib/camctl/processing",
         entity_batch_size=32, event_batch_size=256, busy_timeout_ms=9000)
 
 

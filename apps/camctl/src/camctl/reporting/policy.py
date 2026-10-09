@@ -12,6 +12,7 @@ from contextlib import closing
 from enum import IntEnum
 
 from camctl.contracts.values import ConsistencyError, OperationKey, UtcMicros
+from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
@@ -55,6 +56,7 @@ _ACTION_TERMINAL = (3, 4, 5, 6)
 _PLAN_COMPLETE = 3
 #: 成功、失败、过期终态：取消不结束这些动作的同步责任。
 _SYNC_KEEPING_TERMINAL = (3, 4, 5)
+_SYNC_STATUS = enum_for("state_syncs.status")
 _ReportChange = IntEnum("ReportChange", {name: spec["reason"] for name, spec in _REPORT_EVENT["branches"].items()})
 
 __all__ = [
@@ -74,6 +76,7 @@ __all__ = [
     "start_sync",
     "record_local_report",
     "cancel_sync",
+    "finish_canceled_sync_action",
 ]
 
 
@@ -524,6 +527,15 @@ def cancel_sync(key: OperationKey, owned: OwnedConnection, *, action_id: int,
     return _sync_outcome(receipt)
 
 
+def finish_canceled_sync_action(
+    key: OperationKey, owned: OwnedConnection, *, action_id: int, occurred_at: int,
+) -> DbOutcome[SyncSaved]:
+    """结束报告动作的本地取消收场；不等待或停止共享报告生成。"""
+    receipt = commit_operation(
+        _FinishCanceledSyncCommand(key, action_id, occurred_at), key, owned)
+    return _sync_outcome(receipt)
+
+
 def record_recovered_publication(key: OperationKey, owned: OwnedConnection,
                                  report_id: int, *, observed_sha256: str,
                                  occurred_at: int = 0) -> DbOutcome[ReportPublication | None]:
@@ -844,6 +856,95 @@ class _CancelSyncCommand:
             events=(event,), owners=self._owners, state_rows=self._state,
             result=SyncSaved(disposition=SyncDisposition.SAVED,
                              sync_id=sync["id"]))
+
+
+class _FinishCanceledSyncCommand:
+    """同步已结束后，动作取消终态与适用计划完成共同保存。"""
+
+    def __init__(self, key, action_id, occurred_at) -> None:
+        self._key = key
+        self._action_id = action_id
+        self._occurred_at = occurred_at
+        self._owners: dict = {}
+        self._state: dict = {"actions": {}, "state_syncs": {}}
+
+    def plan(self, scope):
+        connection = scope.connection
+        UtcMicros(self._occurred_at)
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            kinds = [(event["type"], event["reason"]) for event in saved]
+            if (kinds not in ([(_ACTION_FINISHED_EVENT_ID, 4)],
+                             [(_ACTION_FINISHED_EVENT_ID, 4), (_PLAN_STATUS_EVENT, 2)])
+                    or any(event["occurred_at"] != self._occurred_at for event in saved)):
+                raise TransactionError("原操作键不是本次报告取消收场")
+            rows = saved[0]["body"]["rows"]
+            if (len(rows) != 1 or rows[0]["table"] != "actions"
+                    or rows[0]["id"] != self._action_id
+                    or rows[0]["after"]["values"] != {"status": 6}):
+                raise TransactionError("原报告取消收场属于其他动作")
+        action = _load_action(connection, self._state, self._action_id)
+        if action["type"] != _REPORT_ACTION_TYPE:
+            raise TransactionError("同步取消收场要求报告动作")
+        if saved is not None and len(saved) == 2:
+            plan_rows = saved[1]["body"]["rows"]
+            plan = row_facts(connection, "plans", action["plan_id"])
+            if (len(plan_rows) != 1 or plan_rows[0]["table"] != "plans"
+                    or plan_rows[0]["id"] != action["plan_id"]
+                    or plan_rows[0]["after"]["values"] != {"status": _PLAN_COMPLETE}
+                    or plan is None or plan["status"] != _PLAN_COMPLETE):
+                raise ConsistencyError("原报告取消收场的计划完成事实未保持")
+        if action["status"] in _SYNC_KEEPING_TERMINAL:
+            if saved is not None:
+                raise ConsistencyError("原报告取消终态未保持")
+            return self._already(None, SyncDisposition.KEPT)
+        if action["status"] == 6 and action["execution_started"] == 0:
+            if not action["cancel_requested"] or saved is not None:
+                raise ConsistencyError("报告执行前取消状态与收场事实不符")
+            return self._already(None)
+        sync = _load_sync(connection, self._state, self._action_id)
+        if (action["status"] not in (2, 6) or action["execution_started"] != 1
+                or action["cancel_requested"] != 1
+                or sync["local_report_id"] is not None
+                or sync["status"] not in (int(_SYNC_STATUS.CANCELED), int(_SYNC_STATUS.ACKNOWLEDGED))
+                or sync["ended_event_id"] is None):
+            raise ConsistencyError("报告取消收场缺少已生效取消与原同步结束事实")
+        if action["status"] == 6:
+            return self._already(sync["id"])
+        if saved is not None:
+            raise ConsistencyError("原报告取消收场未保存动作终态")
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError("报告取消收场缺少所属计划")
+        with closing(connection.execute(
+            "SELECT id, status FROM actions WHERE plan_id = ?", (action["plan_id"],),
+        )) as cursor:
+            siblings = cursor.fetchall()
+        complete = (plan["status"] in (1, 2) and all(
+            status in _ACTION_TERMINAL or action_id == self._action_id
+            for action_id, status in siblings))
+        allocation = scope.allocate(1 + int(complete))
+        self._owners[("actions", self._action_id)] = ("action", self._action_id)
+        events = [_envelope(
+            allocation.first_event_id, allocation.txn_id, _ACTION_FINISHED_EVENT_ID, 4,
+            (update_change("actions", self._action_id, {"status": 2}, {"status": 6}),),
+            self._occurred_at)]
+        if complete:
+            self._state["plans"] = {plan["id"]: plan}
+            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
+            events.append(_envelope(
+                allocation.last_event_id, allocation.txn_id, _PLAN_STATUS_EVENT, 2,
+                (update_change("plans", plan["id"],
+                               {"status": plan["status"]}, {"status": _PLAN_COMPLETE}),),
+                self._occurred_at))
+        return CommandPlan(
+            events=tuple(events), owners=self._owners, state_rows=self._state,
+            result=SyncSaved(disposition=SyncDisposition.SAVED, sync_id=sync["id"]))
+
+    def _already(self, sync_id, disposition=SyncDisposition.ALREADY):
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state, read_only=True,
+            result=SyncSaved(disposition=disposition, sync_id=sync_id))
 
 
 class _RecoveredPublicationCommand:

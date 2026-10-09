@@ -6,8 +6,9 @@ result 端口构造生产适配（DriverResultListing），注入 results 时整
 替换为部署端口。媒体链（读取会话、受管检查修复工具与修复余量）
 随读取声明构造，未声明读取能力的驱动不装配媒体端口，处理行保持
 等待。时钟异常的受限会话以 media_enabled=False 构造：不装配媒体
-链，保守收场只停止并保存等待阶段。驱动未登记、设备未声明或生产
-装配下结果列举能力未声明的动作本轮不推进，等待后续装配会话；异
+链，保守收场只停止并保存等待阶段。设备未声明时装配原绑定局部
+失败责任；驱动未登记按配置错误拒绝。控制能力或生产装配下结果
+列举能力未声明的动作保持原责任，等待适用装配；异
 常多录修复余量读取 devices.<id>.recording.repair_margin_s
 （configuration.md#配置归属），默认 10 秒。
 """
@@ -15,13 +16,17 @@ result 端口构造生产适配（DriverResultListing），注入 results 时整
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
 from camctl.capture.handlers import (
     CaptureRuntime,
+    ListedResult,
     ObservedFile,
+    PendingCallResult,
     ResultFilesPort,
     SessionRecordingState,
 )
@@ -32,8 +37,10 @@ from camctl.capture.media_flow import (
     load_confirmed_source,
 )
 from camctl.capture.results import FileKind
+from camctl.capture.result_inputs import observed_file as _observed_file
+from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recovery_registry
 from camctl.capture.timelapse import CaptureWaitConfig
-from camctl.devices.bindings import DeviceBinding
+from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError,
     DriverRegistry,
@@ -45,6 +52,8 @@ from camctl.host_files.media import ProbeRequest, RepairRequest, probe_media, re
 from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskExecutor, FileTaskId, FileTaskResult
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
+from camctl.operations.models import AttemptTicket
+from camctl.operations.validation import validate_outcome
 from camctl.outputs.copy import SourceDigest
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
@@ -87,12 +96,13 @@ def _device_seconds(
 
 def _device_attempts(
     declaration: Mapping[str, Any], section: str, default: int,
+    key: str = "max_attempts",
 ) -> int:
     """读取设备子表中已规范化的尝试上限；未配置用默认值。"""
     subtable = declaration.get(section)
     if not isinstance(subtable, Mapping):
         return default
-    value = subtable.get("max_attempts", default)
+    value = subtable.get(key, default)
     return value if isinstance(value, int) and not isinstance(value, bool) \
         else default
 
@@ -234,17 +244,43 @@ class DriverResultListing:
         self._binding = binding
         self._evidence = evidence
 
-    async def list_files(self, action_id: int) -> tuple[ObservedFile, ...]:
-        from camctl.devices.evidence import validate_observation
+    async def list_round(
+        self, ticket: AttemptTicket, *, timeout_s: Decimal,
+    ) -> ListedResult:
+        """沿已提交的活动票据调用一次，并保留完整实际结果。"""
+        if (ticket.operation != "result" or ticket.target_id is None
+                or ticket.responsibility_key != f"results/{ticket.target_id}"):
+            raise ValueError("结果列举要求原 RESULTS 活动票据")
+        request = ControlRequest(
+            operation="result", binding=self._binding,
+            params={"activity_id": ticket.target_id},
+            ticket=ticket, timeout_s=timeout_s)
+        result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
+        if result.outcome is None:
+            raise ValueError("结果列举缺少完整实际调用结果")
+        validate_outcome(ticket, result.outcome, self._evidence)
+        if not result.observations and result.error is not None:
+            return ListedResult((), result.outcome)
+        return ListedResult(
+            self._files_from_result(result, ticket.target_id), result.outcome)
 
-        contract = self._evidence.contract(
-            _RESULT_LISTED_TYPE, _RESULT_LISTED_VERSION)
+    async def list_files(self, action_id: int) -> tuple[ObservedFile, ...]:
+        self._evidence.contract(_RESULT_LISTED_TYPE, _RESULT_LISTED_VERSION)
         request = ControlRequest(
             operation="result",
             binding=self._binding,
             params={"activity_id": str(action_id)},
         )
         result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
+        return self._files_from_result(result, str(action_id))
+
+    def _files_from_result(
+        self, result: Any, activity_id: str,
+    ) -> tuple[ObservedFile, ...]:
+        from camctl.devices.evidence import validate_observation
+
+        contract = self._evidence.contract(
+            _RESULT_LISTED_TYPE, _RESULT_LISTED_VERSION)
         listed = [observation for observation in result.observations
                   if observation.type == _RESULT_LISTED_TYPE]
         if not listed:
@@ -255,52 +291,11 @@ class DriverResultListing:
         entries: list[ObservedFile] = []
         for observation in listed:
             validate_observation(
-                observation, contract, expected_identity=str(action_id))
+                observation, contract, expected_identity=activity_id)
             entries.extend(
                 _observed_file(entry)
                 for entry in observation.data.get("entries", ()))
         return tuple(entries)
-
-
-def _observed_file(entry: Any) -> ObservedFile:
-    """把一条列举条目解释为候选产物文件；结构非法明确拒绝。"""
-    if not isinstance(entry, Mapping) or not isinstance(
-            entry.get("identity"), str) or not entry["identity"]:
-        raise ValueError(f"列举条目缺少稳定文件身份: {entry!r}")
-    locator = entry.get("locator")
-    if not isinstance(locator, Mapping):
-        raise ValueError(f"列举条目缺少定位结构: {entry!r}")
-    size = entry.get("size_bytes")
-    if size is not None and (isinstance(size, bool) or not isinstance(size, int)):
-        raise ValueError(f"列举条目大小不是整数或空: {entry!r}")
-    complete = entry.get("complete")
-    if not isinstance(complete, bool):
-        raise ValueError(f"列举条目未声明完整与否: {entry!r}")
-    raw_kind = entry.get("kind", "other")
-    try:
-        kind = FileKind(raw_kind)
-    except ValueError:
-        kind = FileKind.OTHER
-    original = entry.get("original_name")
-    media = entry.get("media_type")
-    if original is not None and not isinstance(original, str):
-        raise ValueError(f"列举条目原始文件名不是文本: {entry!r}")
-    if media is not None and not isinstance(media, str):
-        raise ValueError(f"列举条目媒体类型不是文本: {entry!r}")
-    paired = entry.get("paired_identity")
-    if paired is not None and (not isinstance(paired, str) or not paired):
-        raise ValueError(f"列举条目配对身份不是非空文本或空: {entry!r}")
-    return ObservedFile(
-        identity=entry["identity"],
-        locator=dict(locator),
-        evidence=dict(entry),
-        complete=complete,
-        size_bytes=size,
-        kind=kind,
-        original_name=original,
-        media_type=media,
-        paired_identity=paired,
-    )
 
 
 def _digest_reader_factory(
@@ -320,8 +315,8 @@ def execution_wait_config(action: Mapping[str, Any]) -> CaptureWaitConfig:
     """从已保存的动作行取得延时等待配置。
 
     目标时长与驱动必要余量在受理时固定于执行定义（result_wait_
-    margin_ms），读取只使用首次保存的事实；部署额外等待第一版不
-    配置。定义缺少目标时长属于不可推进的任务形态，明确拒绝。
+    margin_ms），读取只使用首次保存的事实。会话装配再加入本次设备
+    的部署额外等待。定义缺少目标时长属于不可推进的任务形态，明确拒绝。
     """
     import json
 
@@ -365,39 +360,86 @@ def session_capture_assembly(
     probe_request: ProbeRequest | None = None,
     repair_request: RepairRequest | None = None,
     media_enabled: bool = True,
+    segment_size: int = 1024 * 1024,
+    recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED,
+    recovery_max_event_id: Callable[[], int | None] | None = None,
+    on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None,
+    file_executor: FileTaskExecutor | None = None,
+    pending_call_results: dict[tuple[int, int], PendingCallResult] | None = None,
+    recording_anchors: dict[int, tuple[int, int]] | None = None,
+    retry_wait_gate: RetryWaitGate | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
     会话共享录像锚点表、结果列举缓存与媒体任务执行器；每个推进轮
-    次按设备构造 CaptureRuntime。设备未声明、驱动未登记、控制能力
-    未声明或结果列举能力未声明（生产装配时）返回 None，本轮不推进
-    该设备的动作，保持已保存状态等待后续会话。results 未注入时按
+    次按设备构造 CaptureRuntime。设备未声明时构造不取得设备端口的
+    局部失败运行时，驱动未登记时抛配置错误。控制能力未声明或结果
+    列举能力未声明（生产装配时）返回 None，保持已保存责任。
+    results 未注入时按
     驱动 result 端口构造生产列举适配（DriverResultListing），注入时
     整体替换为部署提供的端口。wall_us 与 monotonic_ns 缺省使用真实
     系统钟，测试可注入受控读数。media_enabled=False 供时钟异常的受
     限会话构造：不装配媒体链，保守收场不启动拷贝、核验与修复。
+    recovery_max_event_id 读取会话已经固定的初始边界，不查询当前
+    数据库边界；恢复适用声明和证据按原动作的驱动登记取得。
+    pending_call_results 由会话拥有，普通、残留和受限工厂共用；
+    独立使用本工厂时，未传入集合则为其创建一份。
+    recording_anchors 与 retry_wait_gate 保留同会话原结果的单调计时
+    依据；三个生产工厂从会话接收同一对象，接手保存不会重新计时。
     """
 
-    anchors: dict[int, tuple[int, int]] = {}
+    anchors = {} if recording_anchors is None else recording_anchors
     listings: dict[int, tuple[tuple, tuple]] = {}
-    retry_gate = RetryWaitGate()
+    timelapse_deadlines: dict[int, int] = {}
+    pending_start_results = {} if pending_call_results is None else pending_call_results
+    continuing_read_tickets: dict = {}
+    pending_read_results: dict = {}
+    pending_read_business: dict = {}
+    pending_read_ends: dict = {}
+    retry_gate = RetryWaitGate() if retry_wait_gate is None else retry_wait_gate
     roots = BoundDirectories(staging=staging)
-    executor = FileTaskExecutor(Supervisor())
+    executor = file_executor if file_executor is not None else FileTaskExecutor(Supervisor())
     tools = HostMediaTools(
         roots, executor, _SessionMediaOwner(),
         probe_request=probe_request, repair_request=repair_request)
     wall = wall_us if wall_us is not None \
         else (lambda: int(time.time() * 1_000_000))
     monotonic = monotonic_ns if monotonic_ns is not None else time.monotonic_ns
+    current_config = SimpleNamespace(devices=devices)
+
+    def original_recovery_evidence(saved: DeviceBinding, operation: str):
+        return recovery_registry(drivers.entry(saved.driver_id), operation)
+
+    def fixed_recovery_boundary() -> int | None:
+        return None if recovery_max_event_id is None else recovery_max_event_id()
+
+    def binding_only_runtime(owned: Any) -> CaptureRuntime:
+        """缺少设备声明仍装配局部失败责任，不取得设备端口。"""
+        return CaptureRuntime(
+            owned=owned, scheduling=SchedulingRepository(),
+            operations=OperationRepository(), capture=CaptureRepository(),
+            timelapse=TimelapseRepository(), driver=None, results=None,
+            evidence=None, wall_us=wall, monotonic_ns=monotonic,
+            window_of=_window_of, wait_config=wait_config,
+            recovery_boundary=recovery_boundary,
+            recovery_max_event_id=fixed_recovery_boundary(),
+            recovery_evidence_for=original_recovery_evidence,
+            pending_start_results=pending_start_results,
+            retry_gate=retry_gate,
+            pending_read_results=pending_read_results, pending_read_business=pending_read_business,
+            pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
+            on_recovery_diagnostic=on_recovery_diagnostic,
+            binding_check=lambda saved: check_binding(saved, current_config))
 
     def factory(owned: Any, device_id: str) -> CaptureRuntime | None:
         declaration = devices.get(device_id)
         if not isinstance(declaration, Mapping):
-            return None
+            return binding_only_runtime(owned)
         driver_id = declaration.get("driver")
         entry = drivers.entry(driver_id) if isinstance(driver_id, str) else None
         if entry is None:
-            return None
+            raise DeviceConfigurationError(
+                f"设备 {device_id} 声明的驱动未登记: {driver_id!r}")
         try:
             control_port = port_for(entry, "control")
         except CapabilityNotDeclaredError:
@@ -424,8 +466,23 @@ def session_capture_assembly(
         media = (
             _media_flow_with(
                 owned, entry, device_id, str(driver_id), tools, staging,
-                wall, declaration, retry_gate, monotonic)
+                wall, declaration, retry_gate, monotonic, executor)
             if media_enabled else None)
+        if media is not None:
+            media.segment_size = segment_size
+            media.recovery_boundary = recovery_boundary
+            media.recovery_max_event_id = fixed_recovery_boundary()
+            media.recovery_evidence_for = original_recovery_evidence
+            media.on_recovery_diagnostic = on_recovery_diagnostic
+            media.continuing_read_tickets = continuing_read_tickets
+            media.pending_read_results = pending_read_results
+            media.pending_read_business = pending_read_business
+            media.pending_read_ends = pending_read_ends
+
+        def current_wait_config(action):
+            extra_wait = declaration.get("capture", {}).get("extra_wait_ms", 0)
+            return replace(wait_config(action), extra_wait_ms=extra_wait)
+
         runtime = CaptureRuntime(
             owned=owned,
             scheduling=SchedulingRepository(),
@@ -438,15 +495,35 @@ def session_capture_assembly(
             wall_us=wall,
             monotonic_ns=monotonic,
             window_of=_window_of,
-            wait_config=wait_config,
+            wait_config=current_wait_config,
+            binding_check=lambda saved: check_binding(saved, current_config),
+            recovery_boundary=recovery_boundary,
+            recovery_max_event_id=fixed_recovery_boundary(),
+            recovery_evidence_for=original_recovery_evidence,
+            pending_start_results=pending_start_results,
+            pending_read_results=pending_read_results, pending_read_business=pending_read_business,
+            pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
+            on_recovery_diagnostic=on_recovery_diagnostic,
             stopper=stop_port,
             state_query=query_port,
             media=media,
             repair_margin_s=_repair_margin_s(declaration),
             listing_cache=listings,
+            timelapse_deadlines=timelapse_deadlines,
             retry_gate=retry_gate,
+            start_config=AttemptConfig(
+                max_attempts=_device_attempts(
+                    declaration, "recording", 3, "max_start_attempts"),
+                timeout_s=_device_seconds(
+                    declaration, "recording", "start_timeout_s", Decimal("10")),
+                retry_interval_s=_device_seconds(
+                    declaration, "recording", "start_retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S)),
             stop_config=AttemptConfig(
-                max_attempts=3, timeout_s=Decimal("10"),
+                max_attempts=_device_attempts(
+                    declaration, "recording", 3, "max_stop_attempts"),
+                timeout_s=_device_seconds(
+                    declaration, "recording", "stop_timeout_s", Decimal("10")),
                 retry_interval_s=_device_seconds(
                     declaration, "recording", "stop_retry_interval_s",
                     _DEFAULT_RETRY_INTERVAL_S)),
@@ -465,7 +542,9 @@ def session_capture_assembly(
                     declaration, "residual_stop", "retry_interval_s",
                     _DEFAULT_RETRY_INTERVAL_S)),
             check_config=AttemptConfig(
-                max_attempts=3, timeout_s=Decimal("10"),
+                max_attempts=_device_attempts(declaration, "result_check", 3),
+                timeout_s=_device_seconds(
+                    declaration, "result_check", "call_timeout_s", Decimal("10")),
                 retry_interval_s=_device_seconds(
                     declaration, "result_check", "retry_interval_s",
                     _DEFAULT_RETRY_INTERVAL_S)),
@@ -487,12 +566,13 @@ def _media_flow_with(
     declaration: Mapping[str, Any],
     retry_gate: RetryWaitGate,
     monotonic: Callable[[], int],
+    file_executor: FileTaskExecutor | None = None,
 ) -> MediaFlow | None:
     """按登记声明与设备声明构造媒体链；未声明读取能力时不装配。
 
-    读取尝试票据与修复成品扩展名保持第一版默认；源端摘要读取在
-    声明支持时按源设备文件经驱动端口取得。读取重试间隔取自
-    devices.<id>.copy.retry_interval_s，时间门槛随装配会话共享。
+    读取次数、无数据阈值、重拷上限和重试间隔采用本次设备配置；
+    实际尝试票据由媒体入口可靠保存后交给读取端口。源端摘要读取
+    在声明支持时按源设备文件经驱动端口取得。
     """
     try:
         read_port = port_for(entry, "read")
@@ -517,4 +597,9 @@ def _media_flow_with(
             _DEFAULT_RETRY_INTERVAL_S),
         monotonic_ns=monotonic,
         retry_gate=retry_gate,
+        max_read_attempts=_device_attempts(declaration, "copy", 3, "max_read_attempts"),
+        read_idle_timeout_s=_device_seconds(declaration, "copy", "read_idle_timeout_s", Decimal("10")),
+        max_recopies=_device_attempts(declaration, "copy", 1, "max_recopies"),
+        evidence=entry.evidence,
+        file_executor=file_executor,
     )

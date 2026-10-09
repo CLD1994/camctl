@@ -30,13 +30,25 @@ class StartFacts:
     dispatch_state: int | None
 
 
-def load_start_facts(connection, action: Mapping[str, Any]) -> StartFacts:
+def load_start_facts(connection, action: Mapping[str, Any], *, result_events=()) -> StartFacts:
     """核对本动作活动、全部启动尝试及尚未结束的启动核实责任。"""
+    # 复合 START 结果事务只用已经形成并由内核共同校验的事件派生
+    # 后续本地终止资格，不写入数据库或把当前 RUNNING 误认为已结束。
+    projected = {}
+    for event in result_events:
+        for change in event.rows:
+            identity = change.table, change.row_id
+            projected.setdefault(identity, {}).update(change.after.values)
+
+    def after(table, row):
+        return None if row is None else {**row, **projected.get((table, row["id"]), {})}
+
     with closing(connection.execute(
         "SELECT id FROM device_activities WHERE action_id = ?", (action["id"],),
     )) as cursor:
         found = cursor.fetchone()
-    activity = None if found is None else row_facts(connection, "device_activities", found[0])
+    activity = after("device_activities", None if found is None else row_facts(
+        connection, "device_activities", found[0]))
     if action["execution_started"] and activity is None:
         raise ConsistencyError(f"已执行拍摄缺少设备活动: {action['id']}")
     with closing(connection.execute(
@@ -44,7 +56,8 @@ def load_start_facts(connection, action: Mapping[str, Any]) -> StartFacts:
         (f"start/{action['id']}",),
     )) as cursor:
         found = cursor.fetchone()
-    run = None if found is None else row_facts(connection, "operation_runs", found[0])
+    run = after("operation_runs", None if found is None else row_facts(
+        connection, "operation_runs", found[0]))
     used = 0
     all_no_effect = True
     all_not_dispatched = True
@@ -63,6 +76,25 @@ def load_start_facts(connection, action: Mapping[str, Any]) -> StartFacts:
             count, used, unresolved, dispatched = cursor.fetchone()
         if count != used or used != run["attempts_used"]:
             raise ConsistencyError(f"启动累计次数与原尝试不符: {action['id']}")
+        for (table, row_id), values in projected.items():
+            if table != "operation_attempts":
+                continue
+            original = row_facts(connection, table, row_id)
+            if original is None or original["run_id"] != run["id"]:
+                continue
+            final = {**original, **values}
+
+            def unresolved_result(row):
+                return (row["status"] == int(_ATTEMPT.RUNNING)
+                        or row["effect_state"] != int(_EFFECT.NO_EFFECT)
+                        or row["result_event_id"] is None)
+
+            def dispatched_result(row):
+                result = row["result_json"]
+                return result is not None and result["settlement"]["basis"] != "not_dispatched"
+
+            unresolved += int(unresolved_result(final)) - int(unresolved_result(original))
+            dispatched += int(dispatched_result(final)) - int(dispatched_result(original))
         all_no_effect = unresolved == 0
         all_not_dispatched = dispatched == 0
     with closing(connection.execute(

@@ -162,10 +162,20 @@ def test_two_in_flight_attempts_are_rejected():
         decide_attempt((_attempt(1, 1), _attempt(2, 1)), current_round=1)
 
 
-def test_attempts_of_earlier_rounds_do_not_resume():
-    """旧轮次的尝试属于历史，不沿原尝试，也不报重复。"""
-    decision = decide_attempt((_attempt(1, 1), _attempt(2, 2)), current_round=2)
+def test_finished_attempts_of_earlier_rounds_require_new_attempt():
+    decision = decide_attempt((_attempt(1, 3), _attempt(2, 2)), current_round=2)
     assert decision.plan is AttemptPlan.NEW_REQUIRED
+
+
+def test_recopy_resumes_original_running_attempt_of_earlier_round():
+    assert decide_attempt((_attempt(1, 1),), current_round=2) == AttemptDecision(
+        plan=AttemptPlan.RESUME_EXISTING, attempt_id=901, attempt_no=1,
+    )
+
+
+def test_running_attempts_across_rounds_are_rejected():
+    with pytest.raises(ConsistencyError):
+        decide_attempt((_attempt(1, 1), _attempt(2, 1, round_=2)), current_round=2)
 
 
 def test_attempt_from_unknown_later_round_is_rejected():

@@ -220,6 +220,7 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
     from camctl.bootstrap.application import ConfigAdapter
     from camctl.bootstrap.config import ConfigError
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+    from camctl.capture.recovery import RecoveryBoundary
 
 
     try:
@@ -239,6 +240,10 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
             CommandMode.SUBMIT if command.kind is CommandKind.SUBMIT else CommandMode.RUN,
             config,
             host_notifications=writer,
+            # 正式 run 的部署调用方须先完成旧进程组收场。
+            recovery_boundary=(RecoveryBoundary.HOST_LOCAL_SETTLED
+                               if command.kind is CommandKind.RUN
+                               else RecoveryBoundary.UNCONFIRMED),
         )
     except (FileNotFoundError, OSError, RuleError) as error:
         print(f"camctl {command.kind.value}: {error}", file=err)

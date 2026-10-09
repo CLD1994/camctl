@@ -1,8 +1,10 @@
 """首次拍摄控制重新核对残留，尚未派发的等待遵守启动窗口。"""
 import pytest
+from decimal import Decimal
 
 from camctl.capture.handlers import CaptureRuntime, DeviceControlPort, _control_call, capture_handler
 from camctl.capture.residual import pass_residual_gate
+from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.scheduling import (
     ExpireActionResult, ExpireOutcome, SchedulingRepository,
@@ -14,6 +16,9 @@ pytestmark = pytest.mark.asyncio
 
 def _runtime(mocker, *, now=100):
     runtime = mocker.create_autospec(CaptureRuntime, instance=True)
+    runtime.pending_read_results = {}
+    runtime.pending_read_business = {}
+    runtime.pending_read_ends = {}
     runtime.wall_us = mocker.Mock(return_value=now)
     runtime.monotonic_ns = mocker.Mock(return_value=100_000)
     runtime.window_of = mocker.Mock(return_value=LaunchWindow(100, 1100))
@@ -23,11 +28,16 @@ def _runtime(mocker, *, now=100):
         DbOutcomeKind.COMPLETED,
         value=ExpireActionResult(ExpireOutcome.EXPIRED, expiration_reason=2))
     runtime.owned = mocker.Mock()
+    runtime.binding_check = None
+    runtime.timelapse_deadlines = {}
+    runtime.start_config = AttemptConfig(3, Decimal("10"), Decimal("3"))
     runtime.last_attempt.return_value = None
     runtime.grant.return_value = (None, "device_busy")
     runtime.action.return_value = {
         "id": 2, "device_id": "cam-1", "status": 2, "cancel_requested": 0,
         "scheduled_at": 100, "max_delay_ms": 1,
+        "type": 2, "effective_params_json": {"type": "ordinary", "duration_s": 60},
+        "execution_spec_json": {"target_duration_ms": 60000},
     }
     return runtime
 

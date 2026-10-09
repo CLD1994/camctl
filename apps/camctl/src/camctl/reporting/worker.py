@@ -25,9 +25,12 @@ from camctl.history.replay import ReplayError
 from camctl.persistence.runtime import (
     DbConfig,
     DbOpenMode,
+    DatabaseMetadata,
+    DirectoryBindingError,
     StateDatabaseError,
     ensure_runtime_library,
     open_existing,
+    verify_directory_binding,
 )
 from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.messages import (
@@ -165,6 +168,8 @@ def acquire_work_lock(
 
 def classify_worker_error(error: BaseException) -> ErrorKind:
     """状态库与历史解释错误区别于普通报告失败。"""
+    if isinstance(error, DirectoryBindingError):
+        return ErrorKind.REPORT
     return ErrorKind.STATE if isinstance(error, _STATE_ERRORS) else ErrorKind.REPORT
 
 
@@ -178,13 +183,15 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
     """
     observed = job.instance_id
     try:
-        observed = _read_instance_id(job.db_path, job.busy_timeout_ms)
+        metadata = _read_job_metadata(job)
+        observed = metadata.instance_id
         if observed != job.instance_id:
             return ResultFailureMessage(
                 job_id=job.job_id, instance_id=observed,
                 error_kind=ErrorKind.STATE, error_code="instance_mismatch",
                 error_message=(
                     f"数据库实例身份与任务不符: {observed} != {job.instance_id}"))
+        verify_directory_binding(metadata, job.staging_root, job.ready_root, job.processing_root)
         temporary = Path(job.staging_path)
         generated = generate_report_file(
             GenerationSpec(
@@ -211,15 +218,16 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
         return ResultFailureMessage(
             job_id=job.job_id, instance_id=observed,
             error_kind=classify_worker_error(error),
-            error_code=type(error).__name__,
+            error_code=("configuration_error" if isinstance(error, DirectoryBindingError)
+                        else type(error).__name__),
             error_message=str(error)[:1024] or type(error).__name__)
 
 
-def _read_instance_id(db_path: str, busy_timeout_ms: int) -> str:
-    config = DbConfig(busy_timeout_ms=busy_timeout_ms)
-    owned = open_existing(Path(db_path), DbOpenMode.EXISTING_RO, config)
+def _read_job_metadata(job: JobMessage) -> DatabaseMetadata:
+    config = DbConfig(busy_timeout_ms=job.busy_timeout_ms)
+    owned = open_existing(Path(job.db_path), DbOpenMode.EXISTING_RO, config)
     try:
-        return owned.metadata.instance_id
+        return owned.metadata
     finally:
         owned.connection.close()
 

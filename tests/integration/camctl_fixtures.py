@@ -525,7 +525,7 @@ class _ScriptedStubDriver:
         return (entry.encode("utf-8") if isinstance(entry, str)
                 else entry)
 
-    async def open_read(self, source, offset: int, ticket):
+    async def open_read(self, source, offset: int, ticket, *, idle_timeout_s):
         from decimal import Decimal
 
         from camctl.devices.read_session import ReadSession
@@ -535,7 +535,7 @@ class _ScriptedStubDriver:
         try:
             content = self._device_content(identity)[offset:]
             session = ReadSession(
-                source, offset, _MemoryStream(content), Decimal("10"))
+                source, offset, _MemoryStream(content), idle_timeout_s)
         except BaseException as error:
             self._fail_trace("read", identity, error)
             raise

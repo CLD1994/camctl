@@ -9,20 +9,30 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
+
+if TYPE_CHECKING:
+    from camctl.capture.handlers import PendingCallResult
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.clocks import SystemClock
 from camctl.bootstrap.config import ConfigSnapshot
-from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
+from camctl.capture.recovery import RecoveryBoundary
+from camctl.operations.attempts import RetryWaitGate
+from camctl.persistence.runtime import (
+    DbConfig, DbOpenMode, DirectoryBindingError, OwnedConnection,
+    RuntimeLibraryError, StateDatabaseError, configured_directory_binding,
+    open_existing, verify_directory_binding,
+)
 from camctl.persistence.repositories.acceptance import (
     AcceptanceRepository,
     register_acceptance_guards,
 )
 from camctl.persistence.repositories.session import SessionRepository
+from camctl.reporting.messages import ResultFailureMessage
 from camctl.session.clock import ClockCheckInput, register_clock_guard
 from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
 from camctl.session.outcome import SessionOutcome
@@ -51,6 +61,20 @@ class RuntimeDeps:
     host_notifications: Any = None
     motor_permits: dict = field(default_factory=dict)
     closed: bool = field(default=False)
+    #: 装配前提未成立时保留机器结果，不启动报告协作者。
+    startup_error: SessionOutcome | None = None
+    #: 来自本次调用方的旧本地执行收场前提，不由进程重启推导。
+    recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED
+    #: 会话锁内首次可靠打开后固定，排除本会话后来建立的意图。
+    recovery_max_event_id: int | None = None
+    #: 正常运行共用的文件实际拥有者及固定维护范围；submit 不装配。
+    work_files: Any = None
+    #: 原 await 拥有者的实际结果；普通、残留与受限工厂共用同一集合。
+    capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
+    #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
+    capture_recording_anchors: dict[int, tuple[int, int]] = field(default_factory=dict)
+    #: 已保存等待的原返回锚点；由流程行与剩余预算判定适用性。
+    capture_retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
 
 
 def _default_catalog(config: ConfigSnapshot):
@@ -67,6 +91,7 @@ def build_runtime(
     catalog: Any = None,
     notifier: Any = None,
     host_notifications: Any = None,
+    recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED,
 ) -> RuntimeDeps:
     """按命令模式创建运行协作者；不隐式创建状态库。"""
     from camctl.persistence.repositories.capture import register_capture_guards
@@ -93,9 +118,33 @@ def build_runtime(
     register_window_guard()
     from camctl.persistence.repositories.motor import register_motor_guards
     register_motor_guards()
+    startup_error = None
+    try:
+        config = replace(config, paths=replace(
+            config.paths,
+            staging=configured_directory_binding(config.paths.staging, "staging"),
+            ready=configured_directory_binding(config.paths.ready, "ready"),
+            processing=configured_directory_binding(config.paths.processing, "processing"),
+        ))
+    except DirectoryBindingError as error:
+        startup_error = SessionOutcome(succeeded=False, reason="configuration_error",
+                                       details={"error": str(error)})
     state_db = Path(config.paths.state_db).expanduser().resolve()
-    if not state_db.exists():
-        raise FileNotFoundError(f"状态库不存在，日常入口不创建: {state_db}")
+    if startup_error is None:
+        try:
+            owned = open_existing(state_db, DbOpenMode.EXISTING_RO,
+                                  DbConfig(busy_timeout_ms=config.database.busy_timeout_ms))
+            try:
+                verify_directory_binding(owned.metadata, config.paths.staging,
+                                         config.paths.ready, config.paths.processing)
+            finally:
+                owned.connection.close()
+        except (DirectoryBindingError, RuntimeLibraryError) as error:
+            startup_error = SessionOutcome(succeeded=False, reason="configuration_error",
+                                           details={"error": str(error)})
+        except StateDatabaseError as error:
+            startup_error = SessionOutcome(succeeded=False, reason="state_db_error",
+                                           details={"error": str(error)})
     session_lock, admission_lock = lock_file_paths(state_db)
     return RuntimeDeps(
         mode=command_mode,
@@ -105,8 +154,11 @@ def build_runtime(
         admission_lock=admission_lock,
         catalog=catalog if catalog is not None else _default_catalog(config),
         notifier=notifier,
-        log_runtime=_log_wiring(config),
+        log_runtime=(_log_wiring(config) if startup_error is None
+                     or startup_error.reason == "state_db_error" else None),
         host_notifications=host_notifications,
+        startup_error=startup_error,
+        recovery_boundary=recovery_boundary,
     )
 
 
@@ -168,6 +220,28 @@ async def _emit_session_error(deps: RuntimeDeps, message: str) -> None:
 
 def _open_connection(state_db: Path) -> OwnedConnection:
     return open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+
+
+def _open_runtime_connection(deps: RuntimeDeps) -> OwnedConnection:
+    owned = _open_connection(deps.state_db)
+    try:
+        verify_directory_binding(owned.metadata, deps.config.paths.staging,
+                                 deps.config.paths.ready, deps.config.paths.processing)
+    except BaseException:
+        owned.connection.close()
+        raise
+    return owned
+
+
+def _initialize_recovery(deps: RuntimeDeps, owned: OwnedConnection) -> None:
+    """在会话锁内固定旧历史边界，业务事务不得提前发生。"""
+    from contextlib import closing
+
+    with closing(owned.connection.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:
+        deps.recovery_max_event_id = int(cursor.fetchone()[0])
+    if deps.work_files is not None:
+        deps.work_files.initialize(owned)
 
 
 def _clock_policy_factory(config: ConfigSnapshot) -> Callable[[Any], ClockCheckInput]:
@@ -251,6 +325,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
     from camctl.bootstrap.obtain_assembly import (
         obtain_flow, session_obtain_assembly,
     )
+    from camctl.bootstrap.recovery_logging import recovery_diagnostics_logger
     from camctl.devices.drivers.runtime import current_registry
     from camctl.reporting.maintenance import MaintenanceLimits
     from camctl.reporting.supervisor import WorkerSupervisor
@@ -260,10 +335,18 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         limits=MaintenanceLimits.defaults(),
         lock_path=str(report_lock_path(deps.state_db)),
     )
-    staging = Path(deps.config.paths.staging).expanduser().resolve()
-    ready = Path(deps.config.paths.ready).expanduser().resolve()
-    processing = Path(deps.config.paths.processing).expanduser().resolve()
+    staging = Path(deps.config.paths.staging)
+    ready = Path(deps.config.paths.ready)
+    processing = Path(deps.config.paths.processing)
     drivers = current_registry()
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from camctl.outputs.work_files import WorkFileLimits
+    deps.work_files = WorkFileRuntime(
+        staging=staging, limits=WorkFileLimits(
+            batch_size=deps.config.cleanup.work_file_batch_size,
+            limit_per_run=deps.config.cleanup.work_file_limit_per_run))
+    recovery_logger = (None if deps.log_runtime is None else
+                       recovery_diagnostics_logger(deps.log_runtime.channel))
     from camctl.bootstrap.motor_assembly import motor_flow
     from camctl.motor.notification import NotificationWriter
     writer = deps.host_notifications
@@ -283,7 +366,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
         "cancel": cancel_flow(ready=ready, processing=processing,
-                              motor_permits=deps.motor_permits),
+                              motor_permits=deps.motor_permits,
+                              work_files=deps.work_files),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
@@ -292,6 +376,14 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             drivers=drivers,
             staging=staging,
             wait_config=execution_wait_config,
+            pending_call_results=deps.capture_call_results,
+            recording_anchors=deps.capture_recording_anchors,
+            retry_wait_gate=deps.capture_retry_gate,
+            recovery_boundary=deps.recovery_boundary,
+            recovery_max_event_id=lambda: deps.recovery_max_event_id,
+            on_recovery_diagnostic=recovery_logger,
+            file_executor=deps.work_files.executor,
+            segment_size=deps.config.copy.segment_size_bytes,
         )),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
@@ -300,6 +392,14 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             drivers=drivers,
             staging=staging,
             wait_config=execution_wait_config,
+            pending_call_results=deps.capture_call_results,
+            recording_anchors=deps.capture_recording_anchors,
+            retry_wait_gate=deps.capture_retry_gate,
+            recovery_boundary=deps.recovery_boundary,
+            recovery_max_event_id=lambda: deps.recovery_max_event_id,
+            on_recovery_diagnostic=recovery_logger,
+            file_executor=deps.work_files.executor,
+            segment_size=deps.config.copy.segment_size_bytes,
         )),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
         # 推进；拷贝段大小取自 copy 配置。
@@ -310,6 +410,10 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             ready=ready,
             processing=processing,
             segment_size=deps.config.copy.segment_size_bytes,
+            recovery_boundary=deps.recovery_boundary,
+            recovery_max_event_id=lambda: deps.recovery_max_event_id,
+            on_recovery_diagnostic=recovery_logger,
+            file_executor=deps.work_files.executor,
         )),
         # 清理推进：删除与查询端口按设备声明解析，尝试上限取自
         # cleanup 配置；主机派生成品经 staging 工作根本地删除。
@@ -320,6 +424,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             max_query_attempts=deps.config.cleanup.max_query_attempts,
             staging=staging,
         )),
+        "work_files": deps.work_files.flow,
     }
     return flows, supervisor
 
@@ -343,6 +448,16 @@ async def execute_command(
     """
     from camctl.bootstrap.application import query_work_facts
 
+    if deps.startup_error is not None:
+        if deps.log_runtime is not None:
+            from camctl.logging_runtime.lifecycle import close_logging
+
+            try:
+                await _emit_session_error(deps, f"{deps.mode.value} 会话失败: {deps.startup_error.reason}")
+            finally:
+                await close_logging(deps.log_runtime)
+        return deps.startup_error
+
     failure_log, copy_request_factory = _failure_log_wiring(deps)
     supervisor: Any = None
     restricted_supervisor: Any = None
@@ -365,6 +480,7 @@ async def execute_command(
             report_flow,
             winddown_flow,
         )
+        from camctl.bootstrap.recovery_logging import recovery_diagnostics_logger
         from camctl.devices.drivers.runtime import current_registry
         from camctl.reporting.maintenance import MaintenanceLimits
         from camctl.reporting.supervisor import WorkerSupervisor
@@ -374,15 +490,15 @@ async def execute_command(
             limits=MaintenanceLimits.defaults(),
             lock_path=str(report_lock_path(deps.state_db)),
         )
-        staging = Path(deps.config.paths.staging).expanduser().resolve()
-        ready = Path(deps.config.paths.ready).expanduser().resolve()
-        processing = Path(deps.config.paths.processing).expanduser().resolve()
+        staging = Path(deps.config.paths.staging)
+        ready = Path(deps.config.paths.ready)
+        processing = Path(deps.config.paths.processing)
         overrides.update(
             flows=flows,
             restricted_flows={
                 "cancel": cancel_flow(
                     ready=ready, processing=processing, unscheduled_only=True,
-                    motor_permits=deps.motor_permits),
+                    motor_permits=deps.motor_permits, work_files=deps.work_files),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
                     capture_factory=session_capture_assembly(
@@ -390,7 +506,14 @@ async def execute_command(
                         drivers=current_registry(),
                         staging=staging,
                         wait_config=execution_wait_config,
+                        pending_call_results=deps.capture_call_results,
+                        recording_anchors=deps.capture_recording_anchors,
+                        retry_wait_gate=deps.capture_retry_gate,
                         media_enabled=False,
+                        recovery_boundary=deps.recovery_boundary,
+                        recovery_max_event_id=lambda: deps.recovery_max_event_id,
+                        on_recovery_diagnostic=(None if deps.log_runtime is None else
+                            recovery_diagnostics_logger(deps.log_runtime.channel)),
                     ),
                     wait_cap_s=deps.config.clock.recovery_wait_cap_s,
                 ),
@@ -414,7 +537,7 @@ async def execute_command(
         mode=deps.mode,
         catalog=deps.catalog,
         clock=SystemClock(),
-        open_connection=lambda: _open_connection(deps.state_db),
+        open_connection=lambda: _open_runtime_connection(deps),
         acceptance_repository=AcceptanceRepository(),
         session_repository=SessionRepository(),
         paths=SessionPaths(
@@ -427,12 +550,13 @@ async def execute_command(
         notifier=deps.notifier,
         failure_log=failure_log,
         copy_request_factory=copy_request_factory,
+        on_session_open=lambda owned: _initialize_recovery(deps, owned),
+        local_work=deps.work_files,
         **overrides,
     )
     outcome: SessionOutcome | None = None
     try:
         outcome = await run_session(context, source)
-        return outcome
     except Exception as error:
         await _emit_session_error(deps, f"{type(error).__name__}: {error}")
         raise
@@ -442,14 +566,64 @@ async def execute_command(
             await _emit_session_error(
                 deps, f"{deps.mode.value} 会话失败: {outcome.reason}"
             )
-        if supervisor is not None:
-            await supervisor.stop()
-        if restricted_supervisor is not None:
-            await restricted_supervisor.stop()
-        if deps.log_runtime is not None:
-            from camctl.logging_runtime.lifecycle import close_logging
+        async def stop_worker(worker):
+            nonlocal outcome
+            if worker is None:
+                return
+            stopped = await worker.stop()
+            if stopped.state_failure is not None:
+                if outcome is not None:
+                    outcome = _shutdown_state_outcome(outcome, stopped.state_failure)
+                await _emit_session_error(deps, stopped.state_failure.error_message)
+            elif stopped.configuration_failure is not None:
+                if outcome is not None:
+                    outcome = _shutdown_configuration_outcome(outcome, stopped.configuration_failure)
+                await _emit_session_error(deps, stopped.configuration_failure.error_message)
 
-            await close_logging(deps.log_runtime)
+        try:
+            try:
+                await stop_worker(supervisor)
+            finally:
+                await stop_worker(restricted_supervisor)
+        finally:
+            if deps.log_runtime is not None:
+                from camctl.logging_runtime.lifecycle import close_logging
+
+                await close_logging(deps.log_runtime)
+    return outcome
+
+
+def _shutdown_state_outcome(
+    outcome: SessionOutcome, failure: ResultFailureMessage,
+) -> SessionOutcome:
+    """收场的状态库错误主导普通报告错误，其他已有致命错误保持并附加诊断。"""
+    details = {"stage": "shutdown",
+               "message": f"{failure.error_code}: {failure.error_message}"}
+    if outcome.succeeded:
+        return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
+    previous = dict(outcome.details)
+    secondary = list(previous.pop("secondary_errors", ()))
+    if outcome.reason == "report_error":
+        details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
+        return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
+    previous["secondary_errors"] = [*secondary, {"reason": "state_db_error", "details": details}]
+    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous)
+
+
+def _shutdown_configuration_outcome(
+    outcome: SessionOutcome, failure: ResultFailureMessage,
+) -> SessionOutcome:
+    """配置前提错误主导普通报告错误，保留已有致命主错误及诊断。"""
+    details = {"stage": "shutdown", "message": failure.error_message}
+    if outcome.succeeded:
+        return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
+    previous = dict(outcome.details)
+    secondary = list(previous.pop("secondary_errors", ()))
+    if outcome.reason == "report_error":
+        details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
+        return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
+    previous["secondary_errors"] = [*secondary, {"reason": "configuration_error", "details": details}]
+    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous)
 
 
 def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体

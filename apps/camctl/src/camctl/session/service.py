@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping, Protocol
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
@@ -22,7 +22,8 @@ from camctl.acceptance.notification import notify_acceptance
 from camctl.acceptance.service import AcceptanceResult, CommandMode, accept_input
 from camctl.contracts.clock import ClockPort
 from camctl.contracts.values import OperationKey, new_operation_key
-from camctl.persistence.models import DbOutcomeKind
+from camctl.devices.bindings import DeviceConfigurationError
+from camctl.persistence.models import DbOutcomeKind, DirectoryBindingError
 from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
 from camctl.session.clock import (
     ClockBecameUntrusted,
@@ -58,6 +59,14 @@ class SessionRepositoryPort(Protocol):
     def close_admission(self, command, key: OperationKey, owned: OwnedConnection): ...
 
     def update_lower_bound(self, check, key: OperationKey, owned: OwnedConnection): ...
+
+
+class LocalWorkPort(Protocol):
+    """本次已经开始的实际本地责任，不替代持久化工作事实。"""
+
+    def required_settlements(self) -> int: ...
+
+    async def settle(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -106,6 +115,10 @@ class SessionContext:
     wake: Any = None
     #: 外部输入感知的轮询上限（秒）；部署目标为 0.5 秒量级。
     poll_interval_s: float = 0.5
+    #: run 取得会话锁并可靠打开状态库后，业务事务前固定恢复输入。
+    on_session_open: Callable[[OwnedConnection], None] | None = None
+    #: 实际文件调用、结果保存和独立连接关闭均完成后才结束的责任。
+    local_work: LocalWorkPort | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.poll_interval_s, (int, float)) or (
@@ -147,7 +160,7 @@ async def _submit_session(
         return _outcome_error("input_missing", {"reason": "submit 需要计划输入文件"})
     try:
         owned = context.open_connection()
-    except RuntimeLibraryError as error:
+    except (RuntimeLibraryError, DirectoryBindingError) as error:
         # 本进程运行库不满足部署要求：配置环境问题，不是状态库数据问题。
         return _outcome_error("configuration_error", {"error": str(error)})
     except Exception as error:
@@ -186,18 +199,26 @@ async def _run_session(
     session_lease: SessionLease | None = None
     admission_lease: AdmissionLease | None = None
     owned: OwnedConnection | None = None
-    try:
+    local_errors: list[Exception] = []
+
+    async def drive() -> SessionOutcome:
+        nonlocal session_lease, admission_lease, owned
         try:
             session_lease = context.acquire_session()
         except Exception as error:
             return _outcome_error("state_db_error", {"error": f"会话锁取得失败: {error}"})
         try:
             owned = context.open_connection()
-        except RuntimeLibraryError as error:
+        except (RuntimeLibraryError, DirectoryBindingError) as error:
             # 同 submit：运行库不满足部署要求归配置错误，先于业务库打开拒绝。
             return _outcome_error("configuration_error", {"error": str(error)})
         except Exception as error:
             return _outcome_error("state_db_error", {"error": str(error)})
+        if context.on_session_open is not None:
+            try:
+                context.on_session_open(owned)
+            except Exception as error:
+                return _outcome_error("state_db_error", {"error": str(error)})
         if source is not None:
             try:
                 await accept_input(
@@ -229,31 +250,133 @@ async def _run_session(
         while True:
             try:
                 fatal = await _drive_flows(context)
-            except ClockBecameUntrusted:
+            except ClockBecameUntrusted as clock_error:
+                try:
+                    await _settle_local_work(context)
+                except Exception as error:
+                    local_errors.append(error)
+                    # 收场结果不能可靠保存后，受限工作也不能继续使用
+                    # 状态库；接纳及会话锁留到统一的实际收场结束。
+                    return _outcome_error(
+                        "clock_invalid", {"error": str(clock_error)})
                 admission_lease.close()
                 admission_lease = None
                 return await _restricted_session(context)
+            except (DirectoryBindingError, DeviceConfigurationError) as error:
+                return _outcome_error("configuration_error", {"error": str(error)})
             if fatal is not None:
                 # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
                 return _outcome_error("state_db_error", {"error": fatal})
             try:
-                decision = classify_work(context.facts_query(owned.connection))
+                decision = classify_work(_run_work_facts(context, owned.connection))
             except Exception as error:
                 return _outcome_error("state_db_error", {"error": str(error)})
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
+                try:
+                    await _settle_local_work(context, stop_new=False)
+                except Exception as error:
+                    local_errors.append(error)
+                    # 收场前提失效后不继续关闭事务；保留原退出分类，
+                    # 最终结果统一附加本地收场的真实诊断。
+                    return (_outcome_error("report_error")
+                            if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR
+                            else SessionOutcome(succeeded=True))
                 outcome = await _try_close(context, owned, admission_lease)
                 if outcome is not None:
                     return outcome
                 # 关闭事务观察到新工作：继续推进，不释放接纳。
             await _wait_for_more_work(context, owned)
+
+    outcome: SessionOutcome | None = None
+    original: BaseException | None = None
+    try:
+        try:
+            outcome = await drive()
+        except BaseException as error:
+            original = error
+        try:
+            await _settle_local_work(context)
+        except BaseException as error:
+            if isinstance(error, Exception):
+                if not any(error is saved for saved in local_errors):
+                    local_errors.append(error)
+            elif original is None:
+                original = error
+            else:
+                # 后续取消只改变收场等待，原取消仍是传播对象；
+                # 实际结果保存失败的诊断须随原异常一起保留。
+                for note in getattr(error, "__notes__", ()):
+                    if note not in getattr(original, "__notes__", ()):
+                        original.add_note(note)
+        if original is not None:
+            for error in local_errors:
+                original.add_note(f"本地责任收场失败: {type(error).__name__}: {error}")
+            raise original
+        assert outcome is not None
+        for error in local_errors:
+            outcome = _local_state_outcome(outcome, error)
+        return outcome
     finally:
-        # 收尾次序：释放接纳与会话句柄后关闭数据库连接。
+        # 已开始的本地责任先完成实际结果、保存及独立连接关闭。
         if admission_lease is not None:
             admission_lease.close()
         if session_lease is not None:
             session_lease.close()
         if owned is not None:
             owned.connection.close()
+
+
+def _run_work_facts(context: SessionContext, connection: Any) -> WorkFacts:
+    """只为正常 run 补入本次已开始的实际收场，持久化未知保持。"""
+    facts = context.facts_query(connection)
+    if context.local_work is None or facts.required_settlements is None:
+        return facts
+    pending = context.local_work.required_settlements()
+    if isinstance(pending, bool) or not isinstance(pending, int) or pending < 0:
+        raise StateDbFailure("本地实际责任数量不可可靠核实")
+    return replace(facts, required_settlements=facts.required_settlements + pending)
+
+
+async def _settle_local_work(context: SessionContext, *, stop_new: bool = True) -> None:
+    """重复取消只取消等待；同一个拥有者始终继续消费实际结果。"""
+    if context.local_work is None:
+        return
+    if stop_new:
+        stop = getattr(context.local_work, "stop_new_work", None)
+        if stop is not None:
+            stop()
+    task = asyncio.create_task(context.local_work.settle())
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            await asyncio.shield(task)
+            break
+        except asyncio.CancelledError as error:
+            if task.done() and task.cancelled():
+                raise
+            if cancellation is None:
+                cancellation = error
+        except Exception as error:
+            if cancellation is not None:
+                cancellation.add_note(f"本地责任收场失败: {type(error).__name__}: {error}")
+                raise cancellation from error
+            raise
+    if cancellation is not None:
+        raise cancellation
+
+
+def _local_state_outcome(outcome: SessionOutcome, error: Exception) -> SessionOutcome:
+    """本地收场错误主导普通成功或报告失败，保留已有致命主错误。"""
+    details = {"stage": "shutdown", "message": f"{type(error).__name__}: {error}"}
+    if outcome.succeeded:
+        return _outcome_error("state_db_error", details)
+    previous = dict(outcome.details)
+    secondary = list(previous.pop("secondary_errors", ()))
+    if outcome.reason == "report_error":
+        details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
+        return _outcome_error("state_db_error", details)
+    previous["secondary_errors"] = [*secondary, {"reason": "state_db_error", "details": details}]
+    return _outcome_error(outcome.reason, previous)
 
 
 async def _drive_flows(context: SessionContext) -> str | None:
@@ -268,6 +391,10 @@ async def _drive_flows(context: SessionContext) -> str | None:
         try:
             await flow(context)
         except ClockBecameUntrusted:
+            raise
+        except (DirectoryBindingError, DeviceConfigurationError) as error:
+            if name == "report":
+                await _trigger_failure_log(context, error)
             raise
         except StateDbFailure as error:
             if name == "report":
@@ -302,7 +429,7 @@ async def _try_close(
     try:
         outcome = context.session_repository.close_admission(
             CloseAdmission(
-                facts_query=context.facts_query,
+                facts_query=lambda connection: _run_work_facts(context, connection),
                 release_admission=admission_lease.close,
             ),
             new_operation_key(),
@@ -379,6 +506,8 @@ async def _restricted_session(context: SessionContext) -> SessionOutcome:
     for name, flow in context.restricted_flows.items():
         try:
             await flow(context)
+        except (DirectoryBindingError, DeviceConfigurationError) as error:
+            return _outcome_error("configuration_error", {"error": str(error)})
         except Exception as error:
             # 期间的状态库等会话错误保留为实际主错误，不再执行
             # 依赖已失效条件的报告工作。
@@ -389,6 +518,8 @@ async def _restricted_session(context: SessionContext) -> SessionOutcome:
             await context.once_report(context)
         except ClockBecameUntrusted:
             raise
+        except (DirectoryBindingError, DeviceConfigurationError) as error:
+            return _outcome_error("configuration_error", {"error": str(error)})
         except StateDbFailure as error:
             return _outcome_error("state_db_error", {"error": str(error)})
         except Exception:

@@ -51,6 +51,9 @@ from camctl.capture.processing import (
     SourceFileSave,
 )
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
+from camctl.capture.results import (
+    ActivityFacts, ActivityState, OccupancyState, ReleaseDecision, decide_release,
+)
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
@@ -72,15 +75,24 @@ from camctl.outputs.catalog import (
     validate_output_registration,
 )
 from camctl.operations.attempts import (
+    AttemptConfig,
     AttemptFinish,
     FinishAttemptResult,
+    RunOutcome,
+    StaleRunFinish,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture_facts import (
     include_start_facts, load_start_facts, release_basis_holds,
     unstarted_events, verify_unstarted_final,
 )
-from camctl.persistence.repositories.operations import FinishAttemptCommand
+from camctl.persistence.repositories.operations import (
+    FinishAttemptCommand, _FinishStaleRunsCommand, _RETRY_WAIT_EVENT,
+)
+from camctl.persistence.repositories.scheduling import (
+    ExpireActionCommand, ExpireActionRequest, ExpireOutcome,
+)
+from camctl.operations.models import EffectState, ErrorValue
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
@@ -111,6 +123,10 @@ _ATTEMPT_RESULT_EVENT = 12
 _RUN_END_EVENT = 10
 
 _RUN_STATUS = enum_for("operation_runs.status")
+_RUN_KIND = enum_for("operation_runs.kind")
+_QUERY_PURPOSE = enum_for("operation_runs.query_purpose")
+_ATTEMPT_STATUS = enum_for("operation_attempts.status")
+_ACTIVITY_STATE = enum_for("device_activities.activity_state")
 
 #: DEVICE_OBSERVED 的 OBSERVE 与 RELEASE 分支。
 _ACTIVITY_OBSERVE_EVENT = 13
@@ -264,6 +280,54 @@ class FinishCanceledCapture:
             raise TypeError("未启动收场标记必须是布尔值")
         if self.unstarted and (self.drafts or self.catalog_facts is not None):
             raise ValueError("未启动收场不登记拍摄产物")
+
+
+@dataclass(frozen=True)
+class FinishBindingFailure:
+    """原设备绑定异常时，拍摄结果与必要流程共同结束的完整输入。"""
+
+    action_id: int
+    occurred_at: int
+    failure: RecordingFailure
+    canceled: bool = False
+    stop_config: AttemptConfig | None = None
+    responsibility_keys: tuple[str, ...] = ()
+    check_config: AttemptConfig | None = None
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        if self.failure.code != "device_binding_unavailable":
+            raise ValueError("绑定失败事务只保存设备绑定异常")
+        validate_error_details(self.failure.code, self.failure.details)
+        if not isinstance(self.canceled, bool):
+            raise TypeError("取消分支必须是布尔值")
+        if (not isinstance(self.responsibility_keys, tuple)
+                or any(not isinstance(key, str) or not key for key in self.responsibility_keys)
+                or len(set(self.responsibility_keys)) != len(self.responsibility_keys)):
+            raise ValueError("绑定失败的责任集合必须是互不重复的非空责任键")
+
+
+@dataclass(frozen=True)
+class FinishResidualBindingFailure:
+    """原残留绑定失败的固定责任，及适用的新触发动作失败。"""
+
+    action_id: int | None
+    activity_id: int
+    occurred_at: int
+    failure: RecordingFailure
+    responsibility_keys: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.action_id is not None:
+            ObjectId(self.action_id)
+        ObjectId(self.activity_id)
+        if self.failure.code != "device_binding_unavailable":
+            raise ValueError("原残留绑定事务必须提供原设备绑定错误")
+        validate_error_details(self.failure.code, self.failure.details)
+        if (not isinstance(self.responsibility_keys, tuple) or not self.responsibility_keys
+                or any(not isinstance(key, str) or not key for key in self.responsibility_keys)
+                or len(set(self.responsibility_keys)) != len(self.responsibility_keys)):
+            raise ValueError("原残留绑定事务必须固定互不重复的非空责任键")
 
 
 class FinishDisposition(Enum):
@@ -566,7 +630,7 @@ class FinishCaptureCommand:
         self._ranges: dict[tuple[str, str], set[int]] = {}
         self._origin_members: dict[tuple[str, int], tuple[int, ...]] = {}
 
-    def plan(self, scope) -> CommandPlan:
+    def plan(self, scope, *, start_result_events=()) -> CommandPlan:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
@@ -595,12 +659,13 @@ class FinishCaptureCommand:
                 f" cancel_requested={action['cancel_requested']}")
         unstarted = None
         if self._unstarted:
-            unstarted = load_start_facts(connection, action)
+            original_start = load_start_facts(connection, action)
+            unstarted = load_start_facts(connection, action, result_events=start_result_events)
             if not unstarted.not_started:
                 raise ConsistencyError("本地取消收场缺少可靠未启动依据")
             if unstarted.run is not None and unstarted.run["status"] in (1, 2):
                 raise ConsistencyError("本地取消收场前普通启动责任必须已随取消结束")
-            include_start_facts(unstarted, self._state, self._owners)
+            include_start_facts(original_start, self._state, self._owners)
         action_status = _ACTION_SUCCEEDED
         error_id: int | None = None
         error_details: dict[str, Any] | None = None
@@ -1554,6 +1619,35 @@ class _RepairSuccessCommand(_MediaProcessingCommand):
 class CaptureRepository:
     """采集完成终态事务的 SQLite 仓储。"""
 
+    def finish_start_result(
+        self, finish: AttemptFinish, observation: ActivityObservationSave | None,
+        key: OperationKey, owned: OwnedConnection,
+        *, start_finish: StaleRunFinish | None = None,
+        action_finish: FinishCapture | FinishCanceledCapture | None = None,
+        expiration: ExpireActionRequest | None = None,
+    ) -> DbOutcome[FinishAttemptResult]:
+        """原启动或启动核实结果与派生活动、START 收场共同保存。"""
+        receipt = commit_operation(
+            _FinishStartResultCommand(
+                finish, observation, start_finish, action_finish, expiration, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def close_start(
+        self, finish: StaleRunFinish, action_finish: FinishCapture,
+        key: OperationKey, owned: OwnedConnection,
+    ) -> DbOutcome[None]:
+        """没有新调用结果时，共同结束原 START 责任与动作。"""
+        receipt = commit_operation(_CloseStartCommand(finish, action_finish, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=None)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def save_emergency(
         self,
         *,
@@ -1602,6 +1696,30 @@ class CaptureRepository:
     ) -> DbOutcome[CaptureResult]:
         receipt = commit_operation(
             FinishCaptureCommand(command, key, canceled=True), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def finish_binding_failure(
+        self, command: FinishBindingFailure, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CaptureResult]:
+        """同事务保存绑定失败、适用流程收场和拍摄／计划终态。"""
+        receipt = commit_operation(_FinishBindingFailureCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def finish_residual_binding_failure(
+        self, command: FinishResidualBindingFailure, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CaptureResult | None]:
+        """共同保存原残留流程失败及适用的匹配触发动作失败。"""
+        receipt = commit_operation(_FinishResidualBindingFailureCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -2135,7 +2253,7 @@ class _ActivityReleaseCommand:
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
-    def plan(self, scope) -> CommandPlan:
+    def plan(self, scope, *, activity_result_events=()) -> CommandPlan:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
@@ -2144,24 +2262,47 @@ class _ActivityReleaseCommand:
         facts = load_activity_of_action(connection, command.action_id)
         activity_id = facts["id"]
         self._state["device_activities"] = {activity_id: facts}
+        projected = dict(facts)
+        concluded = set()
+        for event in activity_result_events:
+            for change in event.rows:
+                if change.table == "device_activities" and change.row_id == activity_id:
+                    projected.update(change.after.values)
+                elif (change.table == "operation_attempts"
+                      and change.after.values.get("status") in {
+                          int(member) for member in _ATTEMPT_STATUS
+                          if member is not _ATTEMPT_STATUS.RUNNING}):
+                    concluded.add(change.row_id)
         if facts["occupancy_state"] == 2:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
                 read_only=True,
                 result=ActivityReleaseResult(outcome=ReleaseOutcome.ALREADY))
-        if not release_basis_holds(facts):
+        query = ("SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+                 " WHERE t.status=? AND r.activity_id=?")
+        params = (int(_ATTEMPT_STATUS.RUNNING), activity_id)
+        if concluded:
+            query += f" AND t.id NOT IN ({','.join('?' for _ in concluded)})"
+            params += tuple(concluded)
+        with closing(connection.execute(query + " LIMIT 1", params)) as cursor:
+            unresolved = cursor.fetchone() is not None
+        decision = decide_release(ActivityFacts(
+            activity_state=ActivityState[
+                _ACTIVITY_STATE(projected["activity_state"]).name],
+            occupancy_state=OccupancyState.HELD,
+            completion_evidence=release_basis_holds(projected),
+            unresolved_calls=unresolved,
+            file_ownership_resolved=(projected["ownership_mode"] != 2
+                                     or projected["baseline_state"] == 3)))
+        if decision is not ReleaseDecision.RELEASE:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
                 read_only=True,
                 result=ActivityReleaseResult(
                     outcome=ReleaseOutcome.REJECTED,
-                    reason="conditions_unmet"))
-        if facts["ownership_mode"] == 2 and facts["baseline_state"] != 3:
-            return CommandPlan(
-                events=(), owners=self._owners, state_rows=self._state,
-                read_only=True,
-                result=ActivityReleaseResult(
-                    outcome=ReleaseOutcome.REJECTED, reason="scope_limited"))
+                    reason=("scope_limited" if decision is ReleaseDecision.KEEP_HELD_OWNERSHIP
+                            else "calls_unsettled" if decision is ReleaseDecision.KEEP_HELD_CALLS
+                            else "conditions_unmet")))
 
         allocation = scope.allocate(1)
         self._owners[("device_activities", activity_id)] = (
@@ -2578,6 +2719,658 @@ class _CompositeScope:
             first_event_id=first,
             last_event_id=first + event_count - 1,
         )
+
+
+class _FinishStartResultCommand:
+    """沿原尝试原子保存启动事实，不生成新的调用或业务观察。"""
+
+    def __init__(self, finish, observation, start_finish, action_finish, expiration, key) -> None:
+        self._finish = finish
+        self._observation = observation
+        self._start_finish = start_finish
+        self._action_finish = action_finish
+        self._expiration = expiration
+        self._key = key
+
+    def _verify(self, connection):
+        run = row_facts(connection, "operation_runs", self._finish.ticket.run_id)
+        if run is None or not (run["kind"] == int(_RUN_KIND.START) or (
+                run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
+                and run["query_purpose"] == int(_QUERY_PURPOSE.START_CONFIRMATION))):
+            raise TransactionError("启动结果只接受 START 或 START_CONFIRMATION 原尝试")
+        if self._observation is not None:
+            if self._observation.action_id != run["action_id"]:
+                raise TransactionError("启动结果与活动观察必须归同一动作")
+            outcome = self._finish.outcome.outcome
+            if self._observation.started_at is not None and outcome.effect.value != "confirmed":
+                raise TransactionError("启动确认时刻必须由可靠确认结果承载")
+        if self._start_finish is not None and (
+                run["kind"] != int(_RUN_KIND.QUERY_ACTIVITY)
+                or self._start_finish.responsibility_keys != (f"start/{run['action_id']}",)):
+            raise TransactionError("启动核实只共同收场其原 START 责任")
+        if self._action_finish is not None and self._action_finish.action_id != run["action_id"]:
+            raise TransactionError("启动结果与动作终态必须归同一动作")
+        if self._expiration is not None and (
+                self._expiration.action_id != run["action_id"]
+                or run["kind"] != int(_RUN_KIND.START)
+                or self._action_finish is not None):
+            raise TransactionError("启动结果的过期责任必须属于原 START 且不含另一动作终态")
+        return run
+
+    def _action_command(self):
+        return FinishCaptureCommand(
+            self._action_finish, self._key,
+            canceled=isinstance(self._action_finish, FinishCanceledCapture))
+
+    def plan(self, scope):
+        self._verify(scope.connection)
+        saved = saved_transaction_events(scope.connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        finish = FinishAttemptCommand(self._finish, self._key).plan(sub)
+        if finish.read_only:
+            return finish
+        plans = [finish]
+        if self._observation is not None:
+            plans.append(_ActivityObserveCommand(self._observation, self._key).plan(sub))
+        if self._start_finish is not None:
+            plans.append(_FinishStaleRunsCommand(self._start_finish, self._key).plan(sub))
+        if self._action_finish is not None:
+            prior_events = tuple(event for plan in plans for event in plan.events)
+            plans.append(self._action_command().plan(sub, start_result_events=prior_events))
+        if self._expiration is not None:
+            prior_events = tuple(event for plan in plans for event in plan.events)
+            expire = ExpireActionCommand(self._expiration, self._key).plan(
+                sub, start_result_events=prior_events)
+            if expire.result.outcome is not ExpireOutcome.EXPIRED:
+                raise TransactionError("原启动结果不满足共同过期的可靠资格")
+            plans.append(expire)
+        if (isinstance(self._action_finish, FinishCapture)
+                and self._action_finish.failure is not None
+                and self._finish.outcome.outcome.effect is EffectState.NO_EFFECT):
+            prior_events = tuple(event for plan in plans for event in plan.events)
+            action = row_facts(scope.connection, "actions", self._action_finish.action_id)
+            if load_start_facts(scope.connection, action, result_events=prior_events).not_started:
+                plans.append(_ActivityReleaseCommand(ActivityReleaseSave(
+                    action["id"], self._finish.occurred_at), self._key).plan(
+                        sub, activity_result_events=prior_events))
+        events = tuple(event for plan in plans for event in plan.events)
+        scope.allocate(len(events))
+        return CommandPlan(
+            events=events,
+            owners={member: owner for plan in plans for member, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            result=finish.result)
+
+    def _reuse(self, scope, saved):
+        # 原结果段始终在前；后续活动和 START 段按明确责任分开核对。
+        cut = 1
+        if len(saved) > 1 and saved[1]["type"] in (_RETRY_WAIT_EVENT, _RUN_END_EVENT):
+            cut = 2
+        plans = [FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])]
+        if self._observation is not None:
+            if cut >= len(saved) or saved[cut]["type"] != _ACTIVITY_OBSERVE_EVENT:
+                raise TransactionError("原启动结果缺少对应活动观察")
+            observe = _ActivityObserveCommand(self._observation, self._key)
+            observe._activity_id = load_activity_of_action(
+                scope.connection, self._observation.action_id)["id"]
+            plans.append(observe._reuse(saved[cut:cut + 1]))
+            cut += 1
+        if self._start_finish is not None:
+            end = len(saved)
+            if self._action_finish is not None:
+                end = next((index for index in range(cut, len(saved))
+                            if saved[index]["type"] == _ACTION_FINISHED_EVENT), len(saved))
+            plans.append(_FinishStaleRunsCommand(
+                self._start_finish, self._key)._reuse(scope, saved[cut:end]))
+            cut = end
+        if self._action_finish is not None:
+            release = (isinstance(self._action_finish, FinishCapture)
+                       and self._action_finish.failure is not None
+                       and self._finish.outcome.outcome.effect is EffectState.NO_EFFECT
+                       and (saved[-1]["type"], saved[-1]["reason"]) == (
+                           _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON))
+            end = len(saved) - int(release)
+            plans.append(self._action_command()._reuse(scope.connection, saved[cut:end]))
+            if release:
+                plans.append(_ActivityReleaseCommand(ActivityReleaseSave(
+                    self._action_finish.action_id, self._finish.occurred_at), self._key)._reuse(
+                        scope, saved[end:]))
+            cut = len(saved)
+        if self._expiration is not None:
+            plans.append(ExpireActionCommand(self._expiration, self._key)._reuse(scope, saved[cut:]))
+            cut = len(saved)
+        if cut != len(saved):
+            raise TransactionError("原启动结果包含与本次输入无关的事实")
+        return CommandPlan(
+            events=(), owners={member: owner for plan in plans for member, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            read_only=True, result=plans[0].result)
+
+
+class _CloseStartCommand:
+    def __init__(self, finish, action_finish, key):
+        self._finish, self._action_finish, self._key = finish, action_finish, key
+
+    def plan(self, scope):
+        action = row_facts(scope.connection, "actions", self._action_finish.action_id)
+        if action is None or f"start/{action['id']}" not in self._finish.responsibility_keys:
+            raise TransactionError("启动收场必须包含原动作 START 责任")
+        if self._finish.status is RunOutcome.FAILED:
+            if not load_start_facts(scope.connection, action).not_started:
+                raise TransactionError("确定启动失败需要全部原尝试可靠无效果")
+        saved = saved_transaction_events(scope.connection, self._key)
+        end = _FinishStaleRunsCommand(self._finish, self._key)
+        finish = FinishCaptureCommand(self._action_finish, self._key)
+        if saved is not None:
+            cut = next((index for index, event in enumerate(saved)
+                        if event["type"] == _ACTION_FINISHED_EVENT), len(saved))
+            release = (self._finish.status is RunOutcome.FAILED
+                       and (saved[-1]["type"], saved[-1]["reason"]) == (
+                           _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON))
+            finish_end = len(saved) - int(release)
+            plans = [end._reuse(scope, saved[:cut]),
+                     finish._reuse(scope.connection, saved[cut:finish_end])]
+            if release:
+                plans.append(_ActivityReleaseCommand(ActivityReleaseSave(
+                    action["id"], self._finish.occurred_at), self._key)._reuse(
+                        scope, saved[finish_end:]))
+        else:
+            sub = _CompositeScope(scope, scope.max_event_id + 1)
+            plans = [end.plan(sub), finish.plan(sub)]
+            if self._finish.status is RunOutcome.FAILED:
+                prior_events = tuple(event for plan in plans for event in plan.events)
+                plans.append(_ActivityReleaseCommand(ActivityReleaseSave(
+                    action["id"], self._finish.occurred_at), self._key).plan(
+                        sub, activity_result_events=prior_events))
+            scope.allocate(sum(len(plan.events) for plan in plans))
+        return CommandPlan(
+            events=tuple(event for plan in plans for event in plan.events),
+            owners={member: owner for plan in plans for member, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            read_only=saved is not None, result=None)
+
+
+class _FinishBindingFailureCommand:
+    """保存拍摄绑定异常的动作结果与相关设备责任，不改写调用事实。"""
+
+    def __init__(self, request: FinishBindingFailure, key: OperationKey) -> None:
+        self._request = request
+        self._key = key
+
+    def _capture_command(self) -> FinishCaptureCommand:
+        request = self._request
+        if request.canceled:
+            return FinishCaptureCommand(
+                FinishCanceledCapture(request.action_id, request.occurred_at),
+                self._key, canceled=True)
+        return FinishCaptureCommand(FinishCapture(
+            request.action_id, (), OutputCatalogFacts(
+                action_id=request.action_id, ownership_confirmed=True),
+            request.occurred_at, failure=request.failure), self._key)
+
+    def _error(self) -> ErrorValue:
+        return ErrorValue(
+            "device_binding_unavailable", "execution", self._request.failure.details)
+
+    def _verify_binding(self, action) -> None:
+        details = self._request.failure.details
+        if (details["device_id"] != action["device_id"]
+                or details["expected_driver_id"] != action["driver_id"]):
+            raise TransactionError("绑定失败输入与原动作设备身份不符")
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        request = self._request
+        action = row_facts(connection, "actions", request.action_id)
+        if action is None:
+            raise TransactionError("绑定失败动作不存在")
+        self._verify_binding(action)
+        if action["status"] in _ACTION_TERMINAL:
+            return self._capture_command()._recover(connection, action)
+        if bool(action["cancel_requested"]) != request.canceled:
+            raise TransactionError("绑定失败的取消分支与原动作事实不符")
+        with closing(connection.execute(
+            "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
+            " WHERE r.action_id = ? AND t.status = 1 LIMIT 1", (request.action_id,),
+        )) as cursor:
+            if cursor.fetchone() is not None:
+                raise TransactionError("原调用尚未保存可靠结束结果，不能用绑定失败代替调用收场")
+        facts = load_start_facts(connection, action)
+        with closing(connection.execute(
+            "SELECT responsibility_key FROM operation_runs WHERE action_id = ?"
+            " AND kind IN (1, 2, 3, 6, 7) AND status IN (1, 2)"
+            " AND (kind != 6 OR query_purpose != 5) ORDER BY id", (request.action_id,),
+        )) as cursor:
+            responsibilities = tuple(row[0] for row in cursor.fetchall())
+        if set(responsibilities) != set(request.responsibility_keys):
+            raise TransactionError("绑定失败的固定责任集合与事务内未完成责任不符")
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        capture_plan = self._capture_command().plan(sub)
+        if capture_plan.read_only:
+            return capture_plan
+        plans = [capture_plan]
+        if responsibilities:
+            plans.append(_FinishStaleRunsCommand(StaleRunFinish(
+                responsibilities, RunOutcome.FAILED, request.occurred_at,
+                self._error()), self._key).plan(sub))
+        plans.extend(self._read_business_plans(sub, action))
+        if request.canceled and facts.activity is not None:
+            with closing(connection.execute(
+                "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+                (f"stop/{request.action_id}",),
+            )) as cursor:
+                has_stop = cursor.fetchone() is not None
+            next_run_id = _next_id(connection, "operation_runs")
+            if (not has_stop and not facts.not_started
+                    and facts.activity["activity_state"] != 3
+                    and facts.activity["stop_supported"] == 1):
+                plans.append(self._new_failed_run(
+                    sub, action, facts.activity, next_run_id, int(_RUN_KIND.STOP)))
+                next_run_id += 1
+            if action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE) and not facts.not_started:
+                with closing(connection.execute(
+                    "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+                    (f"results/{facts.activity['id']}",),
+                )) as cursor:
+                    has_results = cursor.fetchone() is not None
+                if not has_results:
+                    plans.append(self._new_failed_run(
+                        sub, action, facts.activity, next_run_id, int(_RUN_KIND.CHECK_CAPTURE_RESULTS)))
+        events = tuple(event for plan in plans for event in plan.events)
+        allocation = scope.allocate(len(events))
+        if (events[0].event_id != allocation.first_event_id
+                or events[-1].event_id != allocation.last_event_id):
+            raise TransactionError("绑定失败复合事务的事件范围不连续")
+        ranges = {}
+        for plan in plans:
+            for identity, values in plan.read_coverage.ranges.items():
+                ranges.setdefault(identity, set()).update(values)
+        return CommandPlan(
+            events=events,
+            owners={owner: target for plan in plans for owner, target in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            read_coverage=ReadCoverage(ranges), result=capture_plan.result)
+
+    def _read_business_plans(self, scope, action):
+        """原读取实际结果可靠后，绑定失败共同结束内部处理与机会。"""
+        from camctl.outputs.slots import SlotOutcome, SlotRequest
+        from camctl.persistence.repositories.outputs import _SlotChangeCommand, _SLOT_RELEASE
+
+        request = self._request
+        rows = scope.connection.execute(
+            "SELECT c.id,c.processing_id FROM file_copies c JOIN recording_processing p ON p.id=c.processing_id"
+            " JOIN operation_runs r ON r.copy_id=c.id WHERE p.action_id=? AND r.kind=3 ORDER BY c.id",
+            (request.action_id,)).fetchall()
+        plans = []
+        for copy_id, processing_id in rows:
+            unfinished = scope.connection.execute(
+                "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+                " WHERE r.copy_id=? AND (t.status=1 OR t.result_json IS NULL) LIMIT 1", (copy_id,)).fetchone()
+            if unfinished is not None:
+                raise TransactionError("原内部读取未可靠结束，不能解除保护")
+            processing = row_facts(scope.connection, "recording_processing", processing_id)
+            processing_command = _ProcessingCommand()
+            processing_command._state = {"recording_processing": {processing_id: processing}}
+            processing_command._claim(processing)
+            for event_type, reason, row in self._read_binding_changes(processing, action):
+                plans.append(processing_command._emit(scope, event_type, reason, row, request.occurred_at))
+            slot = _SlotChangeCommand(SlotRequest(copy_id, request.occurred_at), _SLOT_RELEASE, self._key)
+            copy = slot._load_copy(scope.connection)
+            source = slot._load_source(scope.connection, copy)
+            device_id = slot._source_device(scope.connection, source)
+            run = slot._load_run(scope.connection, copy_id)
+            slot._load_attempts(scope.connection, run["id"])
+            if copy["slot_device_id"] is not None:
+                if copy["slot_device_id"] != device_id:
+                    raise TransactionError("原内部读取机会不属于原绑定设备")
+                plans.append(slot._save(scope, copy, device_id, None, SlotOutcome.RELEASED))
+        return plans
+
+    def _read_binding_changes(self, processing, action):
+        """以原处理状态确定绑定失败负责的全部检查、修复变化。"""
+        from camctl.capture.processing import (
+            CheckPhase, MediaObservation, ProcessingError, RepairBasis,
+            RepairDecisionChoice, RepairReason,
+        )
+        error = ProcessingError("device_binding_unavailable", "execution", self._request.failure.details)
+        changes = []
+        if processing["check_decision"] == 3 and processing["check_state"] in (1, 2):
+            changes.append((_RECORDING_PROCESSED_EVENT, _PROCESSED_CHECK_REASON,
+                _update("recording_processing", processing["id"],
+                    {"check_state": processing["check_state"], "media_json": processing["media_json"]},
+                    {"check_state": CheckPhase.FAILED.value,
+                     "media_json": MediaObservation(CheckPhase.FAILED, error=error).as_json()})))
+        if processing["repair_state"] == 1:
+            changes.append((_RECORDING_DECIDED_EVENT, _DECIDED_REPAIR_REASON,
+                _update("recording_processing", processing["id"],
+                    {"repair_state": processing["repair_state"], "repair_basis_json": processing["repair_basis_json"]},
+                    {"repair_state": RepairDecisionChoice.NOT_NEEDED.value,
+                     "repair_basis_json": RepairBasis(RepairReason.NO_USABLE_INPUT,
+                         action["execution_spec_json"]["target_duration_ms"]).as_json()})))
+        elif processing["repair_state"] in (3, 4):
+            changes.append((_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON,
+                _update("recording_processing", processing["id"],
+                    {"repair_state": processing["repair_state"], "repair_error_json": processing["repair_error_json"]},
+                    {"repair_state": RepairOutcome.FAILED.value, "repair_error_json": error.as_json()})))
+        return changes
+
+    def _reuse_read_business(self, scope, saved, events, action):
+        """从原事务前完整 H 重建 READ 变化组并精确核实全部正文。"""
+        from camctl.outputs.slots import SlotRequest
+        from camctl.persistence.repositories.outputs import _SlotChangeCommand, _SLOT_RELEASE, _SLOT_REASON
+
+        connection = scope.connection
+        transaction = saved[0]["transaction"]
+        previous = read_transaction_range(connection, transaction.txn_id - 1) if transaction.txn_id > 1 else None
+        boundary = HistoryBoundary(previous.txn_id, previous.last_event_id) if previous else HistoryBoundary(0, 0)
+        current = HistoryBoundary(scope.max_txn_id, scope.max_event_id)
+
+        def original(table, facts, owner):
+            if facts is None:
+                raise ConsistencyError("原内部读取关联记录缺失")
+            columns = business_columns(table)
+            return {**facts, **read_row_values_at_boundary(connection, owner=owner, table=table,
+                row_id=facts["id"], columns=columns, current_values=facts,
+                boundary=boundary, current_boundary=current)}
+
+        owner = ("action", action["id"])
+        original_action = original("actions", action, owner)
+        if bool(original_action["cancel_requested"]) != self._request.canceled:
+            raise TransactionError("原绑定失败的取消输入与原 H 不同")
+        copies = connection.execute(
+            "SELECT c.id FROM file_copies c JOIN recording_processing p ON p.id=c.processing_id"
+            " JOIN operation_runs r ON r.copy_id=c.id WHERE p.action_id=? AND r.kind=3 ORDER BY c.id",
+            (action["id"],)).fetchall()
+        expected = []
+        for (copy_id,) in copies:
+            slot = _SlotChangeCommand(SlotRequest(copy_id, self._request.occurred_at), _SLOT_RELEASE, self._key)
+            copy = original("file_copies", slot._load_copy(connection), owner)
+            processing = original("recording_processing",
+                row_facts(connection, "recording_processing", copy["processing_id"]), owner)
+            source = original("device_files", slot._load_source(connection, copy),
+                ("device_file", copy["source_device_file_id"]))
+            observer = original("actions", row_facts(connection, "actions", source["observer_action_id"]),
+                ("action", source["observer_action_id"]))
+            origin = original("actions", row_facts(connection, "actions", source["source_action_id"]),
+                ("action", source["source_action_id"]))
+            target = original("intermediate_files", row_facts(connection, "intermediate_files", copy["target_file_id"]),
+                ("intermediate_file", copy["target_file_id"]))
+            run = original("operation_runs", slot._load_run(connection, copy_id), owner)
+            if (copy["delivery_id"] is not None or processing["action_id"] != action["id"]
+                    or run["action_id"] != action["id"] or run["kind"] != 3 or run["copy_id"] != copy_id
+                    or run["responsibility_key"] != f"read/{copy_id}"
+                    or source["id"] != processing["source_device_file_id"]
+                    or target["owner_action_id"] != action["id"] or target["owner_delivery_id"] is not None
+                    or (observer["device_id"], observer["driver_id"]) != (origin["device_id"], origin["driver_id"])
+                    or (origin["device_id"], origin["driver_id"]) != (action["device_id"], action["driver_id"])):
+                raise TransactionError("原 H 的内部读取归属、文件或设备身份不符")
+            slot._load_attempts(connection, run["id"])
+            for attempt in slot._state["operation_attempts"].values():
+                attempt = original("operation_attempts", attempt, owner)
+                if attempt["run_id"] != run["id"] or attempt["status"] == 1 or attempt["result_json"] is None:
+                    raise TransactionError("原 H 的内部读取实际调用未可靠结束")
+            expected.extend(self._read_binding_changes(processing, original_action))
+            if copy["slot_device_id"] is not None:
+                if copy["slot_device_id"] != origin["device_id"]:
+                    raise TransactionError("原 H 的读取机会不属于原来源设备")
+                expected.append((22, _SLOT_REASON, _update("file_copies", copy_id,
+                    {"slot_device_id": copy["slot_device_id"]}, {"slot_device_id": None})))
+        if len(events) != len(expected):
+            raise TransactionError("原绑定失败的内部读取事件组不完整")
+        for event, (event_type, reason, row) in zip(events, expected):
+            body = {"reason": reason, "evidence": {}, "rows": [{
+                "table": row.table, "id": row.row_id,
+                "before": {"exists": row.before.exists, "values": dict(row.before.values)},
+                "after": {"exists": row.after.exists, "values": dict(row.after.values)}}]}
+            if (event["type"] != event_type or event["reason"] != reason
+                    or event["occurred_at"] != self._request.occurred_at or not json_equal(event["body"], body)):
+                raise TransactionError("原绑定失败的内部读取完整事实与原 H 或重送输入不同")
+
+    def _new_run_values(self, action, activity, kind) -> dict:
+        request = self._request
+        if kind == int(_RUN_KIND.STOP):
+            config = request.stop_config
+            responsibility = f"stop/{action['id']}"
+        elif kind == int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+            config = request.check_config
+            responsibility = f"results/{activity['id']}"
+        else:
+            raise TransactionError("绑定失败只能新建必要停止或结果核实责任")
+        if config is None:
+            raise TransactionError("零尝试必要责任缺少本次采用配置")
+        return {
+            "action_id": action["id"], "delivery_id": None,
+            "kind": kind, "query_purpose": None,
+            "responsibility_key": responsibility,
+            "activity_id": activity["id"], "copy_id": None,
+            "cleanup_item_id": None, "session_key": None,
+            "status": 1, "attempts_used": 0,
+            "max_attempts_used": config.max_attempts,
+            "timeout_s_json": config.timeout_s,
+            "retry_interval_s_json": config.retry_interval_s,
+            "retry_wait_required": 0, "error_json": None,
+        }
+
+    def _new_failed_run(self, scope, action, activity, run_id, kind) -> CommandPlan:
+        request = self._request
+        values = self._new_run_values(action, activity, kind)
+        allocation = scope.allocate(2)
+        return CommandPlan(events=(
+            _envelope(allocation.first_event_id, allocation.txn_id, 10, 1,
+                      (_row("operation_runs", run_id, values),), request.occurred_at),
+            _envelope(allocation.first_event_id + 1, allocation.txn_id, 10, 3,
+                      (_update("operation_runs", run_id,
+                               {"status": 1, "error_json": None},
+                               {"status": 4, "error_json": {
+                                   "code": self._error().code, "stage": self._error().stage,
+                                   "details": dict(self._error().details)}}),), request.occurred_at),
+        ), owners={("operation_runs", run_id): ("action", action["id"])},
+            state_rows={"actions": {action["id"]: action},
+                        "device_activities": {activity["id"]: activity}})
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        request = self._request
+        connection = scope.connection
+        action = row_facts(connection, "actions", request.action_id)
+        if action is None:
+            raise ConsistencyError("原绑定失败动作不存在")
+        self._verify_binding(action)
+        split = next((index for index, event in enumerate(saved)
+                      if event["type"] not in (8, 9)), len(saved))
+        capture_events, responsibility_events = saved[:split], saved[split:]
+        flow_events = [event for event in responsibility_events if event["type"] == 10]
+        read_events = [event for event in responsibility_events if event["type"] != 10]
+        # 检查、修复和机会释放必须连续，且位于原流程结束之后、新必要流程之前。
+        if read_events:
+            first = responsibility_events.index(read_events[0])
+            last = responsibility_events.index(read_events[-1])
+            if (responsibility_events[first:last + 1] != read_events
+                    or any(event["reason"] != 3 for event in responsibility_events[:first])):
+                raise TransactionError("原绑定失败的内部读取事件顺序不符")
+        self._reuse_read_business(scope, saved, read_events, action)
+        if [event["type"] for event in capture_events] not in ([8], [8, 9]):
+            raise TransactionError("原绑定失败事务的动作和计划事件组不符")
+        capture_plan = self._capture_command()._reuse(connection, capture_events)
+        plans = [capture_plan]
+        finished_keys = set()
+        created_keys = set()
+        for event in flow_events:
+            if (event["type"] != 10 or event["reason"] not in (1, 3)
+                    or event["occurred_at"] != request.occurred_at):
+                raise TransactionError("原绑定失败事务包含不同责任或事实时刻")
+            rows = event["body"]["rows"]
+            if len(rows) != 1 or rows[0]["table"] != "operation_runs":
+                raise TransactionError("原绑定失败事务的流程事件必须恰更新一条流程")
+            run = row_facts(connection, "operation_runs", rows[0]["id"])
+            if (run is None or run["action_id"] != request.action_id
+                    or run["kind"] not in (1, 2, 3, 6, 7)
+                    or (run["kind"] == 6 and run["query_purpose"] == 5)):
+                raise TransactionError("原绑定失败流程的实际责任与输入不符")
+            if event["reason"] == 1:
+                if (not request.canceled or run["kind"] not in (
+                        int(_RUN_KIND.STOP), int(_RUN_KIND.CHECK_CAPTURE_RESULTS))
+                        or (run["kind"] == int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+                            and action["type"] != int(_ACTION_TYPE.CAMERA_TIMELAPSE))):
+                    raise TransactionError("原零尝试必要责任与取消分支不符")
+                activity = row_facts(connection, "device_activities", run["activity_id"])
+                if activity is None or activity["action_id"] != request.action_id:
+                    raise TransactionError("原零尝试必要责任与目标活动不符")
+                values = rows[0]["after"]["values"]
+                if (rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]
+                        or not json_equal(values, self._new_run_values(action, activity, run["kind"]))):
+                    raise TransactionError("原零尝试必要责任或配置与重送输入不同")
+                if run["responsibility_key"] in created_keys:
+                    raise TransactionError("绑定失败事务不能重复建立同一必要责任")
+                created_keys.add(run["responsibility_key"])
+                continue
+            key = run["responsibility_key"]
+            if key in finished_keys:
+                raise TransactionError("绑定失败事务不能重复结束同一责任")
+            expected_error = {
+                "code": self._error().code, "stage": self._error().stage,
+                "details": dict(self._error().details),
+            }
+            if not json_equal(rows[0]["after"]["values"].get("error_json"), expected_error):
+                raise TransactionError("原绑定失败的流程错误与重送输入不同")
+            finished_keys.add(key)
+            plans.append(_FinishStaleRunsCommand(StaleRunFinish(
+                (run["responsibility_key"],), RunOutcome.FAILED,
+                request.occurred_at, self._error()), self._key)._reuse(scope, [event]))
+        expected_keys = set(request.responsibility_keys)
+        if created_keys & expected_keys:
+            raise TransactionError("原事务新建的必要责任不属于此前固定责任集合")
+        expected_keys.update(created_keys)
+        if finished_keys != expected_keys:
+            raise TransactionError("原绑定失败事务的完整责任集合与重送输入不同")
+        if request.canceled and not flow_events:
+            raise TransactionError("绑定异常的取消终态缺少必要流程失败事实")
+        return CommandPlan(events=(),
+            owners={owner: target for plan in plans for owner, target in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            read_only=True, result=capture_plan.result)
+
+
+class _FinishResidualBindingFailureCommand:
+    """残留流程归原活动，新触发动作的冲突失败归自身，整组提交。"""
+
+    def __init__(self, request: FinishResidualBindingFailure, key: OperationKey) -> None:
+        self._request = request
+        self._key = key
+
+    def _target(self, connection):
+        request = self._request
+        activity = row_facts(connection, "device_activities", request.activity_id)
+        owner = None if activity is None else row_facts(connection, "actions", activity["action_id"])
+        details = request.failure.details
+        if (owner is None or details["device_id"] != owner["device_id"]
+                or details["expected_driver_id"] != owner["driver_id"]):
+            raise TransactionError("原残留绑定错误与活动所属设备及驱动不符")
+        return activity, owner
+
+    def _capture_command(self, owner):
+        request = self._request
+        return FinishCaptureCommand(FinishCapture(
+            request.action_id, (), OutputCatalogFacts(request.action_id, True),
+            request.occurred_at, RecordingFailure("device_activity_unresolved", {
+                "activity_id": str(request.activity_id), "device_id": owner["device_id"]})), self._key)
+
+    def _error(self):
+        return ErrorValue("device_binding_unavailable", "execution", self._request.failure.details)
+
+    def _run(self, connection, run_id):
+        run = row_facts(connection, "operation_runs", run_id)
+        if (run is None or run["activity_id"] != self._request.activity_id
+                or not (run["kind"] == 8 or (run["kind"] == 6 and run["query_purpose"] == 5))):
+            raise TransactionError("原残留绑定事务包含不同活动或不适用的流程责任")
+        return run
+
+    def plan(self, scope):
+        request = self._request
+        connection = scope.connection
+        activity, owner = self._target(connection)
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved, owner)
+        if (owner["status"] not in _ACTION_TERMINAL
+                or activity["activity_state"] != 2 or activity["occupancy_state"] != 1):
+            raise TransactionError("原残留绑定失败要求已结束动作仍保持执行中占用")
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE activity_id = ? AND status IN (1, 2)"
+            " AND (kind = 8 OR (kind = 6 AND query_purpose = 5)) ORDER BY id",
+            (request.activity_id,),
+        )) as cursor:
+            runs = [self._run(connection, int(row[0])) for row in cursor.fetchall()]
+        if (not any(run["kind"] == 8 for run in runs)
+                or {run["responsibility_key"] for run in runs} != set(request.responsibility_keys)):
+            raise TransactionError("原残留绑定失败的完整责任集合与事务内事实不符")
+        ids = tuple(run["id"] for run in runs)
+        marks = ",".join("?" for _ in ids)
+        with closing(connection.execute(
+            f"SELECT 1 FROM operation_attempts WHERE run_id IN ({marks}) AND status = 1 LIMIT 1", ids,
+        )) as cursor:
+            if cursor.fetchone() is not None:
+                raise TransactionError("原残留调用未取得结束结果，不能提前保存绑定失败")
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        plans = []
+        if request.action_id is not None:
+            trigger = row_facts(connection, "actions", request.action_id)
+            if (trigger is None or trigger["device_id"] != owner["device_id"]
+                    or trigger["status"] != _ACTION_RUNNING or trigger["cancel_requested"]):
+                raise TransactionError("原残留占用失败要求同设备仍有效的执行中触发动作")
+            plans.append(self._capture_command(owner).plan(sub))
+        plans.append(_FinishStaleRunsCommand(StaleRunFinish(
+            request.responsibility_keys, RunOutcome.FAILED, request.occurred_at, self._error()),
+            self._key).plan(sub))
+        events = tuple(event for plan in plans for event in plan.events)
+        allocation = scope.allocate(len(events))
+        if (events[0].event_id != allocation.first_event_id
+                or events[-1].event_id != allocation.last_event_id):
+            raise TransactionError("原残留绑定复合事务的事件范围不连续")
+        return CommandPlan(
+            events=events, owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            result=plans[0].result if request.action_id is not None else None)
+
+    def _reuse(self, scope, saved, owner):
+        request = self._request
+        plans = []
+        if request.action_id is None:
+            flow_events = saved
+        else:
+            cut = next((i for i, event in enumerate(saved) if event["type"] == 10), len(saved))
+            action_events, flow_events = saved[:cut], saved[cut:]
+            if [event["type"] for event in action_events] not in ([8], [8, 9]):
+                raise TransactionError("原残留绑定失败的动作及计划段与请求不同")
+            plans.append(self._capture_command(owner)._reuse(scope.connection, action_events))
+        keys = set()
+        expected_error = {"code": self._error().code, "stage": self._error().stage,
+                          "details": dict(self._error().details)}
+        for event in flow_events:
+            if (event["type"] != 10 or event["reason"] != 3
+                    or event["occurred_at"] != request.occurred_at):
+                raise TransactionError("原残留绑定失败包含不同事件或事实时刻")
+            rows = event["body"]["rows"]
+            if len(rows) != 1 or rows[0]["table"] != "operation_runs":
+                raise TransactionError("原残留流程结束必须恰更新一项固定责任")
+            run = self._run(scope.connection, rows[0]["id"])
+            if (run["responsibility_key"] in keys
+                    or not json_equal(rows[0]["after"]["values"].get("error_json"), expected_error)):
+                raise TransactionError("原残留责任重复或绑定错误与重送输入不同")
+            keys.add(run["responsibility_key"])
+            plans.append(_FinishStaleRunsCommand(StaleRunFinish(
+                (run["responsibility_key"],), RunOutcome.FAILED,
+                request.occurred_at, self._error()), self._key)._reuse(scope, [event]))
+        if keys != set(request.responsibility_keys):
+            raise TransactionError("原残留绑定失败的完整责任集合与重送输入不同")
+        return CommandPlan(
+            events=(), owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)), read_only=True,
+            result=plans[0].result if request.action_id is not None else None)
 
 
 class _FinishResultCheckCommand:

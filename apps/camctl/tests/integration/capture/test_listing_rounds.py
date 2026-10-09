@@ -30,6 +30,7 @@ from .test_capture_contract import (
     _seed_processing,
     _seed_stopped_recording,
     _value,
+    ResultsDouble,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -40,7 +41,7 @@ _IMMEDIATE_CHECK = AttemptConfig(
     max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("0"))
 
 
-class _FlakyResults:
+class _FlakyResults(ResultsDouble):
     """结果列举替身：前 failures 次调用抛通信错误，之后返回编排文件。"""
 
     def __init__(self, files_by_action: dict[int, tuple],

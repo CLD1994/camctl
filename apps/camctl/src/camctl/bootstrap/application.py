@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from camctl.bootstrap.config import ConfigDefaults, ConfigError, ConfigSnapshot, load_config
+from camctl.persistence.runtime import DirectoryBindingError, configured_directory_binding
 
 __all__ = [
     "CapabilityCatalog",
@@ -52,6 +53,11 @@ class ConfigAdapter:
             field.name: self._expand(getattr(config.paths, field.name))
             for field in fields(config.paths)
         }
+        for name in ("staging", "ready", "processing"):
+            try:
+                paths[name] = configured_directory_binding(paths[name], name)
+            except DirectoryBindingError as error:
+                raise ConfigError(str(error)) from error
         return replace(config, paths=replace(config.paths, **paths))
 
     def _expand(self, raw: str) -> str:
@@ -115,6 +121,9 @@ def query_work_facts(connection) -> "WorkFacts":
         " WHERE status = 1 OR (status = 2 AND type <> 7)")
     settlements = scalar(
         "SELECT COUNT(*) FROM operation_runs WHERE status IN (1, 2)")
+    settlements += scalar(
+        "SELECT COUNT(*) FROM actions WHERE type = 7 AND status = 2"
+        " AND cancel_requested = 1")
     acknowledged = scalar(
         "SELECT acknowledged_wm FROM runtime_state WHERE id = 1")
     # 已接手边界：任意状态报告的最大覆盖水位；失败尝试也覆盖其范围，
@@ -133,9 +142,9 @@ def query_work_facts(connection) -> "WorkFacts":
     # 继续驱动保存，不把未保存的本地处理解释为已完成。
     unsettled_local = _row_exists(
         connection,
-        "SELECT 1 FROM state_syncs s WHERE s.status = 1"
+        "SELECT 1 FROM state_syncs s WHERE s.status IN (1, 2)"
         " AND s.local_report_id IS NULL AND s.action_id IN"
-        " (SELECT id FROM actions WHERE status = 2)"
+        " (SELECT id FROM actions WHERE status = 2 AND cancel_requested = 0)"
         " AND EXISTS(SELECT 1 FROM reports r WHERE r.status = 4"
         " AND r.from_wm <= s.from_wm"
         " AND r.frozen_event_id >= s.started_boundary_event_id) LIMIT 1")

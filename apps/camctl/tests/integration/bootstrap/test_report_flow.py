@@ -30,7 +30,6 @@ from camctl.reporting.policy import (
 )
 
 from ..acceptance.test_acceptance import Catalog
-from ..persistence.test_runtime import _create_valid_database
 
 register_report_guards()
 register_sync_guard()
@@ -202,7 +201,7 @@ class TestReportFlowClosure:
     ) -> None:
         cfg = _config_for(tmp_path)
         db_path = Path(cfg.paths.state_db)
-        _create_valid_database(db_path)
+        assert initialize_state(cfg, db_path).outcome is InitOutcome.CREATED
         owned = open_existing(db_path, DbOpenMode.EXISTING_RW, DbConfig())
         try:
             await _accept(owned, tmp_path, "1")

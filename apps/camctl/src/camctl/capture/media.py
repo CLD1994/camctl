@@ -37,10 +37,11 @@ from camctl.capture.processing import (
     repair_basis_from_check,
 )
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ObjectId
+from camctl.contracts.values import ConsistencyError, ObjectId, new_operation_key
 from camctl.host_files.media import MediaArtifact, MediaProbe
 from camctl.host_files.models import FilePurpose, FileRef
-from camctl.host_files.tasks import FileTaskResult
+from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId, FileTaskResult
+from camctl.session.supervision import Supervisor
 from camctl.outputs.work_files import (
     ACTION_WORK_FILE_DELETE_FAILED,
     WorkFileCleanupError,
@@ -78,6 +79,7 @@ __all__ = [
     "execute_check",
     "execute_discard",
     "execute_repair",
+    "require_saved_media_result",
     "repair_decision_from_check",
     "repair_error_from_artifact",
 ]
@@ -371,6 +373,44 @@ class CheckContext:
     tools: MediaTools
     saves: ProcessingSaves
     occurred_at: int
+    executor: FileTaskExecutor | None = None
+
+
+class _MediaSaveFailure(ConsistencyError):
+    """保留公开阶段结果，同时让实际拥有者取得原保存诊断。"""
+
+    def __init__(self, step):
+        self.step = step
+        super().__init__(f"媒体业务保存未可靠完成（{step.phase.value}）: {step.error}")
+
+
+def require_saved_media_result(step):
+    """媒体保存拒绝或未知必须停止依赖状态库的消费者。"""
+    failed = (
+        CheckExecutionPhase.START_REJECTED, CheckExecutionPhase.START_UNKNOWN,
+        CheckExecutionPhase.RESULT_REJECTED, CheckExecutionPhase.RESULT_UNKNOWN,
+        CheckExecutionPhase.DECISION_REJECTED, CheckExecutionPhase.DECISION_UNKNOWN,
+        RepairExecutionPhase.START_REJECTED, RepairExecutionPhase.START_UNKNOWN,
+        RepairExecutionPhase.COMPLETE_REJECTED, RepairExecutionPhase.COMPLETE_UNKNOWN,
+        RepairExecutionPhase.FAILED_REJECTED, RepairExecutionPhase.FAILED_UNKNOWN,
+    )
+    if step.phase in failed:
+        raise _MediaSaveFailure(step)
+    return step
+
+
+async def _owned_media_result(context, files, stage, body):
+    executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
+
+    async def operation(_control):
+        return require_saved_media_result(await body())
+
+    try:
+        return await executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"{stage}/{context.processing.processing_id}/{new_operation_key()}"),
+            files, stage, "媒体实际结果及原业务保存", operation, resources=("state_db",)))
+    except _MediaSaveFailure as error:
+        return error.step
 
 
 async def execute_check(context: CheckContext) -> CheckStep:
@@ -379,6 +419,11 @@ async def execute_check(context: CheckContext) -> CheckStep:
     检查决定不是需要检查、或检查已终态时按恢复入口处理；运行阶
     段保存被拒或未知时不启动工具；任务未取得观察不保存终态结论。
     """
+    return await _owned_media_result(context, (context.input_file.file_id,), "media_check",
+                                    lambda: _execute_check(context))
+
+
+async def _execute_check(context: CheckContext) -> CheckStep:
     status = context.processing
     if status.check_decision != int(_CHECK_DECISION.REQUIRED):
         return CheckStep(CheckExecutionPhase.NOT_REQUIRED)
@@ -486,6 +531,7 @@ class RepairContext:
     tools: MediaTools
     saves: ProcessingSaves
     occurred_at: int
+    executor: FileTaskExecutor | None = None
 
 
 async def execute_repair(context: RepairContext) -> RepairStep:
@@ -524,6 +570,13 @@ async def execute_repair(context: RepairContext) -> RepairStep:
 
     output_ref = FileRef(output.file_id, FilePurpose.REPAIR_OUTPUT,
                          output.relative_path, context.input_file.root)
+    return await _owned_media_result(context,
+        (context.input_file.file_id, output_ref.file_id), "media_repair",
+        lambda: _execute_repair(context, output, output_ref))
+
+
+async def _execute_repair(context, output, output_ref) -> RepairStep:
+    status = context.processing
     # 裁剪时长来自已保存的目标时长（修复决定依据），不使用本次运行
     # 的其他时值；适配层负责翻译为无重新编码的工具参数。
     result = await context.tools.repair(

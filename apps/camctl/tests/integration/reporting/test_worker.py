@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -65,6 +66,8 @@ def _job(db_path: Path, instance_id: str, report, tmp_path: Path,
         instance_id=instance_id,
         db_path=str(db_path),
         staging_path=str(tmp_path / "staging" / name),
+        staging_root="/srv/camctl/staging", ready_root="/srv/camctl/ready",
+        processing_root="/srv/camctl/processing",
         entity_batch_size=16,
         event_batch_size=128,
         busy_timeout_ms=9000,
@@ -76,6 +79,36 @@ def _job(db_path: Path, instance_id: str, report, tmp_path: Path,
 def _limits() -> MaintenanceLimits:
     return MaintenanceLimits(
         startup_seconds=20.0, total_seconds=60.0, stop_grace_seconds=10.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["staging_root", "ready_root", "processing_root"])
+async def test_worker_rejects_each_changed_binding_before_staging(frozen_report, changed):
+    db_path, instance_id, report, home = frozen_report
+    job = _job(db_path, instance_id, report, home, **{changed: str(home / "changed")})
+
+    result = run_job(job)
+
+    assert result.error_kind is ErrorKind.REPORT
+    assert result.error_code == "configuration_error"
+    assert changed.removesuffix("_root") in result.error_message
+    assert str(home / "changed") in result.error_message
+    assert not Path(job.staging_path).exists()
+    assert not (home / "staging").exists()
+    assert not (home / "changed").exists()
+
+
+@pytest.mark.asyncio
+async def test_worker_keeps_missing_database_as_state_error(frozen_report):
+    db_path, instance_id, report, home = frozen_report
+    job = replace(_job(db_path, instance_id, report, home), db_path=str(home / "missing.db"))
+
+    result = run_job(job)
+
+    assert result.error_kind is ErrorKind.STATE
+    assert result.error_code == "DatabaseMissingError"
+    assert not (home / "missing.db").exists()
+    assert not (home / "staging").exists()
 
 
 @pytest.mark.asyncio

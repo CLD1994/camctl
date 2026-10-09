@@ -10,10 +10,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, runtime_checkable
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
 
 from camctl.devices.bindings import DeviceBinding
-from camctl.devices.evidence import DeviceObservation
+from camctl.devices.evidence import DeviceObservation, OPERATIONS
+
+if TYPE_CHECKING:
+    from camctl.operations.models import AttemptTicket, CallOutcome
 
 __all__ = [
     "DriverDeclaration",
@@ -47,15 +51,28 @@ class DriverDeclaration:
     digest_supported: bool
     delete_supported: bool
     capture_read_parallel_supported: bool = False
+    #: 逐操作声明普通前台命令的恢复假设；缺省不授权恢复。
+    adb_foreground_recovery_operations: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        operations = self.adb_foreground_recovery_operations
+        if not isinstance(operations, frozenset) or not operations <= OPERATIONS:
+            raise ValueError("前台命令恢复适用范围必须是已登记操作的 frozenset")
 
 
 @dataclass(frozen=True)
 class ControlRequest:
-    """一次单次操作的输入：操作名、原绑定与已确认的参数。"""
+    """单次操作的输入：原绑定、参数、已提交尝试与本次调用期限。
+
+    元数据控制调用的 timeout_s 交给实际受管调用计时，不限制后续
+    收场时间。摘要等没有此类期限的操作可以省略该值。
+    """
 
     operation: str
     binding: DeviceBinding
     params: Mapping[str, Any]
+    ticket: AttemptTicket | None = None
+    timeout_s: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +85,26 @@ class DeviceCallResult:
 
     observations: tuple[DeviceObservation, ...]
     error: Mapping[str, Any] | None
+    #: 受管调用的完整权威结果；观察和错误是兼容业务端口的同源视图。
+    outcome: CallOutcome | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome is not None:
+            if (self.observations != self.outcome.observations
+                    or self.error != self._error_view(self.outcome)):
+                raise ValueError("设备端口的观察及错误必须与完整调用结果一致")
+
+    @staticmethod
+    def _error_view(outcome: CallOutcome) -> Mapping[str, Any] | None:
+        if outcome.error is None:
+            return None
+        return {"code": outcome.error.code, "stage": outcome.error.stage,
+                "details": dict(outcome.error.details)}
+
+    @classmethod
+    def from_outcome(cls, outcome: CallOutcome) -> DeviceCallResult:
+        """保留原效果、收场、错误详情和调用信息，不重新解释结果。"""
+        return cls(outcome.observations, cls._error_view(outcome), outcome)
 
 
 @runtime_checkable
@@ -119,7 +156,8 @@ class ReadDriver(Protocol):
     declaration: DriverDeclaration
 
     async def open_read(
-        self, source: "object", offset: int, ticket: "object"
+        self, source: "object", offset: int, ticket: "object", *,
+        idle_timeout_s: Decimal,
     ) -> "object":
         ...
 

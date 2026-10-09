@@ -12,22 +12,29 @@ from __future__ import annotations
 
 from contextlib import closing
 from decimal import Decimal
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from enum import Enum
 from typing import Any, Mapping, Protocol
 
-from camctl.contracts.enums import enum_for
+from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
+from camctl.history.decoding import decode_event_row
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
+from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import (
     ConsistencyError, MAX_OBJECT_ID, ObjectId, OperationKey, UtcMicros, parse_object_id,
 )
+from camctl.devices.bindings import BindingResult, binding_failure_details
 from camctl.history.reads import ReadCoverage
+from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
     PathRuleError, object_file_name, relative_file_path, validate_relative_file_path,
 )
-from camctl.operations.attempts import AttemptTarget, OperationKind, operation_responsibility_key
+from camctl.operations.attempts import (
+    AttemptTarget, OperationKind, RunOutcome, StaleRunFinish, operation_responsibility_key)
+from camctl.operations.models import ErrorValue
+from camctl.persistence.repositories.operations import _FinishStaleRunsCommand
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.cleanup_flow import (
     CancelCleanupItem,
@@ -98,15 +105,18 @@ from camctl.outputs.sources import (
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
+    TransactionAllocations,
     commit_operation,
     event_envelope as _envelope,
     next_row_id,
     row_change as _row,
     row_facts,
     saved_transaction_events,
+    read_transaction_range,
     update_change as _update,
 )
 from camctl.contracts.workflow_errors import (
@@ -1903,6 +1913,7 @@ class _GrantFileCommand:
             return self._reuse(connection, saved)
         command = self._command
         action, source_file, output, device_id = self._load_inputs(connection)
+        binding_failure = self._binding_failure(source_file)
         existing = self._existing_preparation(connection, source_file, device_id)
         if not _read_owner_eligible(action):
             return self._wait("action_not_eligible")
@@ -1943,7 +1954,28 @@ class _GrantFileCommand:
                 return self._wait("business_order")
             self._read_coverage = reads.read_coverage()
 
+        if binding_failure is not None:
+            if command.item_id is None:
+                raise ConsistencyError("内部输入的绑定失败须由所属处理责任保存")
+            return self._reject_item(scope, item_error_id(
+                "obtain_items", "device_binding_unavailable"), binding_failure)
+
         return self._grant(scope, source_file)
+
+    def _binding_failure(self, source_file) -> dict | None:
+        result = self._command.binding_result
+        if result is None:
+            return None
+        observer = self._state["actions"].get(source_file.get("observer_action_id"))
+        if observer is None or (observer["device_id"], observer["driver_id"]) != (
+                result.binding.device_id, result.binding.driver_id):
+            raise TransactionError("读取候选的绑定核对与原文件观察者身份不同")
+        details = binding_failure_details(result)
+        if details is not None:
+            validate_error_details("device_binding_unavailable", details)
+            if details["reason"] == "mismatch" and details.get("actual_driver_id") == observer["driver_id"]:
+                raise TransactionError("驱动不一致必须采用不同的实际驱动")
+        return details
 
     # ---- 资格核对 ----
 
@@ -2511,9 +2543,14 @@ class _GrantFileCommand:
         if (not row["before"]["exists"] or not row["after"]["exists"]
                 or not json_equal(row["before"]["values"], before)
                 or set(after) != set(before) or after["status"] != int(_ITEM_STATUS.FAILED)
-                or after["error_code"] not in (_OUTPUT_UNAVAILABLE_CODE, _OUTPUT_CLEANUP_STARTED_CODE)):
+                or after["error_code"] not in (_OUTPUT_UNAVAILABLE_CODE, _OUTPUT_CLEANUP_STARTED_CODE,
+                    item_error_id("obtain_items", "device_binding_unavailable"))):
             raise ConsistencyError("原事务不是已选中产物的建档前拒绝")
         _, source, output, device = self._load_inputs(connection)
+        details = self._binding_failure(source)
+        if after["error_code"] == item_error_id("obtain_items", "device_binding_unavailable"):
+            if details is None or not json_equal(after["error_details_json"], details):
+                raise TransactionError("原读取绑定失败与重送核对输入不同")
         item = self._state["obtain_items"][command.item_id]
         _validate_obtain_error({**item, **after}, output["source_action_id"])
         if (self._existing_preparation(connection, source, device) is not None
@@ -3992,10 +4029,281 @@ class FailReadDelivery:
 
     delivery_id: int
     occurred_at: int
+    checksum_mismatch: bool = False
 
     def __post_init__(self) -> None:
         ObjectId(self.delivery_id)
         UtcMicros(self.occurred_at)
+        if type(self.checksum_mismatch) is not bool:
+            raise TypeError("摘要不一致分区必须是布尔值")
+
+
+@dataclass(frozen=True)
+class FailReadBinding:
+    """原读取已实际结束后，原设备异常导致独立交付无法继续准备。"""
+
+    copy_id: int
+    source_device_file_id: int
+    binding_result: BindingResult
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.copy_id)
+        ObjectId(self.source_device_file_id)
+        UtcMicros(self.occurred_at)
+        if not isinstance(self.binding_result, BindingResult):
+            raise TypeError("读取绑定失败必须携带 BindingResult")
+        if binding_failure_details(self.binding_result) is None:
+            raise ValueError("匹配绑定不能作为读取绑定失败")
+
+
+@dataclass(frozen=True)
+class FailCleanupBinding:
+    """原清理调用已结束后的逐项绑定失败，固定适用未完成责任。"""
+
+    item_id: int
+    source_device_file_id: int
+    binding_result: BindingResult
+    responsibility_keys: tuple[str, ...]
+    occurred_at: int
+    canceled: bool = False
+
+    def __post_init__(self) -> None:
+        ObjectId(self.item_id)
+        ObjectId(self.source_device_file_id)
+        UtcMicros(self.occurred_at)
+        if not isinstance(self.binding_result, BindingResult):
+            raise TypeError("清理绑定失败必须携带 BindingResult")
+        if binding_failure_details(self.binding_result) is None:
+            raise ValueError("匹配绑定不能作为清理绑定失败")
+        if (not isinstance(self.responsibility_keys, tuple)
+                or len(set(self.responsibility_keys)) != len(self.responsibility_keys)
+                or any(key not in (f"delete/{self.item_id}", f"exists/{self.item_id}")
+                       for key in self.responsibility_keys)):
+            raise ValueError("清理绑定失败只拥有原成员的删除与查询责任")
+        if not isinstance(self.canceled, bool):
+            raise TypeError("取消分支必须是布尔值")
+
+
+def _load_binding_facts(connection, file_id, result, state) -> dict:
+    """从原观察者与来源动作核对稳定设备身份，保留完整关联事实。"""
+    def required(table, identity):
+        facts = row_facts(connection, table, identity)
+        if facts is None:
+            raise ConsistencyError(f"绑定失败的原记录缺失: {table}#{identity}")
+        state.setdefault(table, {})[identity] = facts
+        return facts
+
+    source = required("device_files", file_id)
+    observer = required("actions", source["observer_action_id"])
+    origin = required("actions", source["source_action_id"])
+    binding = (observer["device_id"], observer["driver_id"])
+    if (binding != (origin["device_id"], origin["driver_id"])
+            or binding != (result.binding.device_id, result.binding.driver_id)):
+        raise TransactionError("绑定失败输入与原文件观察者或来源身份不同")
+    details = binding_failure_details(result)
+    if details is None:
+        raise TransactionError("匹配绑定不能保存为失败")
+    validate_error_details("device_binding_unavailable", details)
+    if details["reason"] == "mismatch" and details.get("actual_driver_id") == binding[1]:
+        raise TransactionError("驱动不一致必须采用不同的实际驱动")
+    return details
+
+
+class _ReadBindingFailCommand(_DeliveryPublicationMixin):
+    """交付、原读取流程、源保护和机会的同事务绑定失败收场。"""
+
+    _TABLES = (*_DeliveryPublicationMixin._TABLES,
+               "obtain_items", "obtain_source_selections", "action_dependencies",
+               "outputs", "device_files", "operation_runs", "operation_attempts")
+
+    def __init__(self, command: FailReadBinding, key: OperationKey) -> None:
+        self._command, self._key = command, key
+        self._reset_state()
+
+    def _facts(self, connection):
+        command = self._command
+        copy = row_facts(connection, "file_copies", command.copy_id)
+        if (copy is None or copy["delivery_id"] is None
+                or copy["source_device_file_id"] != command.source_device_file_id):
+            raise TransactionError("读取绑定失败必须指向原设备交付拷贝")
+        delivery, loaded_copy = self._load_delivery(connection, copy["delivery_id"])
+        if loaded_copy["id"] != command.copy_id:
+            raise ConsistencyError("交付的唯一拷贝与失败输入不同")
+        copy = loaded_copy
+        action = self._owner_action(connection, delivery)
+        self._load_target(connection, copy)
+        details = _load_binding_facts(connection, command.source_device_file_id,
+                                     command.binding_result, self._state)
+        with closing(connection.execute(
+            "SELECT id FROM obtain_items WHERE delivery_id=?", (delivery["id"],),
+        )) as cursor:
+            item_ids = cursor.fetchall()
+        if len(item_ids) != 1:
+            raise ConsistencyError("失败交付必须属于唯一取回项")
+        item = row_facts(connection, "obtain_items", item_ids[0][0])
+        output = row_facts(connection, "outputs", delivery["output_id"])
+        if (item is None or output is None or item["output_id"] != output["id"]
+                or output["device_file_id"] != command.source_device_file_id):
+            raise ConsistencyError("失败交付、取回项、产物及原文件关联不一致")
+        self._state["obtain_items"][item["id"]] = item
+        self._state["outputs"][output["id"]] = output
+        selection = row_facts(connection, "obtain_source_selections", item["selection_id"])
+        if selection is None:
+            raise ConsistencyError("原取回项的来源选择缺失")
+        dependency = row_facts(connection, "action_dependencies", selection["dependency_id"])
+        if (dependency is None or dependency["action_id"] != action["id"]
+                or dependency["depends_on_action_id"] != output["source_action_id"]):
+            raise ConsistencyError("原取回项的选择、依赖及来源归属不一致")
+        self._state["obtain_source_selections"][selection["id"]] = selection
+        self._state["action_dependencies"][dependency["id"]] = dependency
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE copy_id=?", (copy["id"],),
+        )) as cursor:
+            run_ids = cursor.fetchall()
+        if len(run_ids) != 1:
+            raise ConsistencyError("原交付拷贝必须具有唯一读取流程")
+        run = row_facts(connection, "operation_runs", run_ids[0][0])
+        if (run is None or run["kind"] != int(_RUN_KIND.READ_FILE)
+                or run["action_id"] != action["id"]
+                or run["responsibility_key"] != f"read/{copy['id']}"):
+            raise ConsistencyError("原读取流程身份与交付拷贝不一致")
+        self._state["operation_runs"][run["id"]] = run
+        with closing(connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id=? ORDER BY id", (run["id"],),
+        )) as cursor:
+            attempt_ids = cursor.fetchall()
+        for (identity,) in attempt_ids:
+            attempt = row_facts(connection, "operation_attempts", identity)
+            if attempt is None:
+                raise ConsistencyError("原读取尝试记录缺失")
+            self._state["operation_attempts"][identity] = attempt
+        self._coverage = ReadCoverage({
+            ("operation_runs", "copy_id"): {copy["id"]},
+            ("operation_attempts", "run_id"): {run["id"]}})
+        self._owners.update({
+            ("operation_runs", run["id"]): ("delivery", delivery["id"]),
+            ("obtain_items", item["id"]): ("action", action["id"]),
+            ("file_copies", copy["id"]): ("delivery", delivery["id"])})
+        return copy, delivery, action, item, run, details
+
+    def plan(self, scope) -> CommandPlan:
+        saved = saved_transaction_events(scope.connection, self._key)
+        facts = self._facts(scope.connection)
+        if saved is not None:
+            return self._reuse(scope, saved, facts)
+        copy, delivery, action, item, run, details = facts
+        if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
+            return self._decision(FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
+        if (delivery["status"] not in (1, 2) or not _read_owner_eligible(action)
+                or not self._run_can_close(run, details) or item["source_dependency"] != 1):
+            raise TransactionError("绑定失败不能重开原交付或读取终态")
+        if any(attempt["status"] == 1 or attempt["result_json"] is None
+               for attempt in self._state["operation_attempts"].values()):
+            raise TransactionError("原读取没有可靠结束结果，不能解除保护或机会")
+        specs = self._specs(facts)
+        allocation = scope.allocate(len(specs))
+        return CommandPlan(events=tuple(_envelope(
+            allocation.first_event_id + index, allocation.txn_id, kind, reason, (row,), self._command.occurred_at)
+            for index, (kind, reason, row) in enumerate(specs)), owners=self._owners,
+            state_rows=self._state, read_coverage=self._coverage,
+            result=FailureSaveOutcome(FailureSaveDisposition.SAVED))
+
+    def _specs(self, facts):
+        """原业务事实决定完整变化组，未变化列由 _update 统一省略。"""
+        copy, delivery, _action, item, run, details = facts
+        failure = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
+        specs = [
+            (_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON, _update(
+                "deliveries", delivery["id"], {"status": delivery["status"], "error_json": delivery["error_json"]},
+                {"status": 6, "error_json": failure})),
+        ]
+        if run["status"] in (1, 2):
+            specs.append((10, 3, _update("operation_runs", run["id"],
+                {"status": run["status"], "retry_wait_required": run["retry_wait_required"], "error_json": run["error_json"]},
+                {"status": 4, "retry_wait_required": 0, "error_json": failure})))
+        specs.append((_READ_PERMISSION_EVENT, _RELEASE_REASON, _update(
+            "obtain_items", item["id"], {"source_dependency": 1}, {"source_dependency": 0})))
+        if copy["slot_device_id"] is not None:
+            specs.append((_COPY_CHANGED_EVENT, _SLOT_REASON, _update(
+                "file_copies", copy["id"], {"slot_device_id": copy["slot_device_id"]}, {"slot_device_id": None})))
+        return specs
+
+    @staticmethod
+    def _run_can_close(run, details):
+        return run["status"] in (1, 2) or (run["status"] == 4 and run["retry_wait_required"] == 0
+            and run["error_json"] == {"code": "device_binding_unavailable", "stage": "execution", "details": details})
+
+    def _reuse(self, scope, saved, facts) -> CommandPlan:
+        """倒放至原 F 前的完整 H，重建并核实原完整 READ 绑定组。"""
+        copy, delivery, action, item, run, details = facts
+        transaction = saved[0]["transaction"]
+        prior = read_transaction_range(scope.connection, transaction.txn_id - 1) if transaction.txn_id > 1 else None
+        boundary = HistoryBoundary(prior.txn_id, prior.last_event_id) if prior else HistoryBoundary(0, 0)
+        current = HistoryBoundary(scope.max_txn_id, scope.max_event_id)
+        action_owner = ("action", action["id"])
+        delivery_owner = ("delivery", delivery["id"])
+        for table, rows in self._state.items():
+            for identity, row in rows.items():
+                if table in ("deliveries", "file_copies", "operation_runs", "operation_attempts"):
+                    owner = delivery_owner
+                elif table == "actions":
+                    owner = ("action", identity)
+                elif table == "device_files":
+                    owner = ("device_file", identity)
+                elif table == "intermediate_files":
+                    owner = ("intermediate_file", identity)
+                elif table == "outputs":
+                    owner = ("output", identity)
+                elif table in ("obtain_items", "obtain_source_selections", "action_dependencies"):
+                    owner = action_owner
+                else:
+                    raise ConsistencyError("原读取绑定组包含未定义历史归属的关联表")
+                row.update(read_row_values_at_boundary(scope.connection, owner=owner,
+                    table=table, row_id=identity, columns=business_columns(table), current_values=row,
+                    boundary=boundary, current_boundary=current))
+        if (copy["delivery_id"] != delivery["id"] or copy["source_device_file_id"] != self._command.source_device_file_id
+                or delivery["action_id"] != action["id"] or item["delivery_id"] != delivery["id"]
+                or item["output_id"] != delivery["output_id"] or run["copy_id"] != copy["id"]
+                or run["action_id"] != action["id"] or run["kind"] != int(_RUN_KIND.READ_FILE)
+                or run["responsibility_key"] != f"read/{copy['id']}"):
+            raise TransactionError("原 H 的读取绑定组归属和原责任不符")
+        source = self._state["device_files"][copy["source_device_file_id"]]
+        observer = self._state["actions"][source["observer_action_id"]]
+        origin = self._state["actions"][source["source_action_id"]]
+        output = self._state["outputs"][delivery["output_id"]]
+        selection = self._state["obtain_source_selections"][item["selection_id"]]
+        dependency = self._state["action_dependencies"][selection["dependency_id"]]
+        target = self._state["intermediate_files"][copy["target_file_id"]]
+        binding = self._command.binding_result.binding
+        if ((observer["device_id"], observer["driver_id"]) != (origin["device_id"], origin["driver_id"])
+                or (origin["device_id"], origin["driver_id"]) != (binding.device_id, binding.driver_id)
+                or output["device_file_id"] != source["id"] or output["source_action_id"] != origin["id"]
+                or dependency["action_id"] != action["id"] or dependency["depends_on_action_id"] != origin["id"]
+                or target["owner_delivery_id"] != delivery["id"] or target["owner_action_id"] is not None
+                or target["purpose"] != int(_PURPOSE.DELIVERY_COPY)
+                or (copy["slot_device_id"] is not None and copy["slot_device_id"] != binding.device_id)):
+            raise TransactionError("原 H 的来源、目标、依赖或机会与原绑定归属不同")
+        if (delivery["status"] not in (1, 2) or not _read_owner_eligible(action)
+                or not self._run_can_close(run, details) or item["source_dependency"] != 1
+                or copy["verification_state"] in (3, 5)):
+            raise TransactionError("原 H 不属于读取绑定失败的未完成分区")
+        if any(attempt["run_id"] != run["id"] or attempt["status"] == 1 or attempt["result_json"] is None
+               for attempt in self._state["operation_attempts"].values()):
+            raise TransactionError("原 H 的实际读取没有可靠结束结果")
+        specs = self._specs(facts)
+        if len(saved) != len(specs):
+            raise TransactionError("原读取绑定失败的完整事件组不同")
+        for event, (event_type, reason, row) in zip(saved, specs):
+            body = {"reason": reason, "evidence": {}, "rows": [{
+                "table": row.table, "id": row.row_id,
+                "before": {"exists": row.before.exists, "values": dict(row.before.values)},
+                "after": {"exists": row.after.exists, "values": dict(row.after.values)}}]}
+            if (event["type"] != event_type or event["reason"] != reason
+                    or event["occurred_at"] != self._command.occurred_at
+                    or not json_equal(event["body"], body)):
+                raise TransactionError("原读取绑定失败的完整正文与原 H 或重送输入不同")
+        return self._decision(FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
 
 
 class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
@@ -4008,7 +4316,8 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
 
     _TABLES = (
         "deliveries", "file_copies", "actions", "intermediate_files",
-        "operation_runs", "operation_attempts",
+        "operation_runs", "operation_attempts", "obtain_items", "device_files",
+        "outputs", "obtain_source_selections", "action_dependencies",
     )
 
     def __init__(self, command: FailReadDelivery, key: OperationKey) -> None:
@@ -4036,26 +4345,77 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
                 f"交付状态不属于读取失败的保存范围: {status!r}")
         run = self._load_read_run(connection, copy["id"])
         self._require_read_finished(connection, run)
-        failure = DeliveryFailure(
-            code="read_attempts_exhausted",
-            stage=registered_error("read_attempts_exhausted")["stage"],
-            details={
+        with closing(connection.execute(
+            "SELECT id FROM obtain_items WHERE delivery_id=?", (delivery["id"],),
+        )) as cursor:
+            identities = cursor.fetchall()
+        if len(identities) != 1:
+            raise ConsistencyError("读取耗尽交付必须属于唯一取回项")
+        item = row_facts(connection, "obtain_items", identities[0][0])
+        if item is None or item["output_id"] != delivery["output_id"] or item["source_dependency"] != 1:
+            raise ConsistencyError("读取耗尽交付的原取回项及源依赖不一致")
+        self._state["obtain_items"][item["id"]] = item
+        self._owners[("obtain_items", item["id"])] = ("action", delivery["action_id"])
+        self._owners[("file_copies", copy["id"])] = ("delivery", delivery["id"])
+        output = row_facts(connection, "outputs", item["output_id"])
+        selection = row_facts(connection, "obtain_source_selections", item["selection_id"])
+        if output is None or selection is None:
+            raise ConsistencyError("读取耗尽的原取回项缺少产物或来源选择")
+        dependency = row_facts(connection, "action_dependencies", selection["dependency_id"])
+        if (dependency is None or dependency["action_id"] != delivery["action_id"]
+                or dependency["depends_on_action_id"] != output["source_action_id"]):
+            raise ConsistencyError("读取耗尽交付的来源选择与原动作依赖不一致")
+        self._state["outputs"][output["id"]] = output
+        self._state["obtain_source_selections"][selection["id"]] = selection
+        self._state["action_dependencies"][dependency["id"]] = dependency
+        if copy["source_device_file_id"] is not None:
+            source = row_facts(connection, "device_files", copy["source_device_file_id"])
+            if source is None:
+                raise ConsistencyError("读取耗尽缺少原来源文件")
+            self._state["device_files"][source["id"]] = source
+            for action_id in (source["observer_action_id"], source["source_action_id"]):
+                action = row_facts(connection, "actions", action_id)
+                if action is None:
+                    raise ConsistencyError("读取耗尽缺少原来源动作")
+                self._state["actions"][action_id] = action
+        if self._command.checksum_mismatch:
+            if (copy["verification_state"] != int(_VERIFICATION.MISMATCHED)
+                    or copy["committed_bytes"] != copy["source_size"]
+                    or copy["source_sha256"] is None or copy["target_sha256"] is None
+                    or copy["source_sha256"] == copy["target_sha256"]
+                    or copy["recopies_used"] < copy["max_recopies_used"]):
+                raise ConsistencyError("摘要不一致失败必须核对可靠比较和本次重拷耗尽事实")
+            code = "checksum_mismatch"
+            details = {"max_recopies": copy["max_recopies_used"], "recopies_used": copy["recopies_used"]}
+        else:
+            code = "read_attempts_exhausted"
+            details = {
                 "max_read_attempts": int(run["max_attempts_used"]),
                 "attempts_used": int(run["attempts_used"]),
-            },
-        )
+            }
+        if run["error_json"] is None or run["error_json"]["code"] != code:
+            raise ConsistencyError("所属交付失败必须沿原读取流程的可靠最终错误")
+        failure = DeliveryFailure(code=code, stage=registered_error(code)["stage"], details=details)
         row = _update(
             "deliveries", delivery["id"],
             {"status": status, "error_json": None},
             {"status": int(_DELIVERY_STATUS.FAILED),
              "error_json": failure.as_json()},
         )
+        specs = [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON, (row,)),
+                 (_READ_PERMISSION_EVENT, _RELEASE_REASON, (_update(
+                     "obtain_items", item["id"], {"source_dependency": 1}, {"source_dependency": 0}),))]
+        if copy["slot_device_id"] is not None:
+            specs.append((_COPY_CHANGED_EVENT, _SLOT_REASON, (_update(
+                "file_copies", copy["id"], {"slot_device_id": copy["slot_device_id"]},
+                {"slot_device_id": None}),)))
         events = self._envelopes(
-            scope, [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON, (row,))],
+            scope, specs,
             self._command.occurred_at,
         )
         return CommandPlan(
             events=events, owners=self._owners, state_rows=self._state,
+            read_coverage=self._coverage,
             result=FailureSaveOutcome(FailureSaveDisposition.SAVED),
         )
 
@@ -4071,6 +4431,9 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
         if run is None:
             raise ConsistencyError(f"读取流程记录缺失: {identities[0][0]}")
         self._state["operation_runs"][run["id"]] = run
+        self._coverage = ReadCoverage({
+            ("operation_runs", "copy_id"): {copy_id},
+            ("operation_attempts", "run_id"): {run["id"]}})
         self._owners[("operation_runs", run["id"])] = ("action", run["action_id"])
         return run
 
@@ -4082,25 +4445,34 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
             raise ConsistencyError(
                 f"读取流程未按失败终态收场: {run['status']!r}")
         with closing(connection.execute(
-            "SELECT id FROM operation_attempts WHERE run_id = ?"
-            " AND status = ?", (run["id"], int(_ATTEMPT_STATUS.RUNNING)),
+            "SELECT id FROM operation_attempts WHERE run_id = ?", (run["id"],),
         )) as cursor:
             active = cursor.fetchall()
         for identity in active:
             attempt = row_facts(connection, "operation_attempts", identity[0])
             if attempt is not None:
                 self._state["operation_attempts"][identity[0]] = attempt
-        if active:
-            raise ConsistencyError("读取仍有在途尝试，不能保存终局失败")
+        if any(attempt["status"] == int(_ATTEMPT_STATUS.RUNNING) or attempt["result_json"] is None
+               for attempt in self._state["operation_attempts"].values()):
+            raise ConsistencyError("读取仍有未保存结束结果的尝试，不能保存终局失败")
 
     def _reuse(self, saved: list[dict]) -> CommandPlan:
         """原键恢复首次读取耗尽失败响应。"""
         types = [(event["type"], event["reason"]) for event in saved]
-        if types != [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON)]:
+        required = [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON),
+                    (_READ_PERMISSION_EVENT, _RELEASE_REASON)]
+        if types[:2] != required or types[2:] not in ([], [(_COPY_CHANGED_EVENT, _SLOT_REASON)]):
             raise TransactionError(
                 "操作身份已用于其他阶段，不能作为读取耗尽失败重送")
-        if saved[0]["occurred_at"] != self._command.occurred_at:
+        if any(event["occurred_at"] != self._command.occurred_at for event in saved):
             raise TransactionError("读取耗尽失败的事实时刻与原事务不同")
+        rows = saved[0]["body"]["rows"]
+        if len(rows) != 1 or rows[0]["table"] != "deliveries" or rows[0]["id"] != self._command.delivery_id:
+            raise TransactionError("读取耗尽失败的交付身份与原事务不同")
+        expected_code = "checksum_mismatch" if self._command.checksum_mismatch else "read_attempts_exhausted"
+        error = rows[0]["after"]["values"].get("error_json")
+        if not isinstance(error, dict) or error.get("code") != expected_code:
+            raise TransactionError("读取失败的所属错误与原事务不同")
         return self._decision(
             FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
 
@@ -4199,6 +4571,57 @@ class _WorkFileMixin:
             result=result, read_only=read_only,
         )
 
+    def _saved_file_row(self, saved, scope, *, before_columns, after_values):
+        """原键必须属于同一文件的完整更新，不采用当前可变状态。"""
+        rows = saved[0]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "intermediate_files"
+                or rows[0]["id"] != self._request.file_id
+                or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]
+                or not set(rows[0]["before"]["values"]) <= set(before_columns)
+                or set(rows[0]["before"]["values"]) != set(rows[0]["after"]["values"])):
+            raise TransactionError("原清理事务的文件身份、阶段或保存输入不同")
+        transaction = saved[0]["transaction"]
+        current = row_facts(scope.connection, "intermediate_files", self._request.file_id)
+        if current is None:
+            raise ConsistencyError("原清理文件的可靠当前行缺失")
+        original_after = read_row_values_at_boundary(
+            scope.connection, owner=("intermediate_file", self._request.file_id),
+            table="intermediate_files", row_id=self._request.file_id,
+            columns=frozenset(before_columns), current_values=current,
+            boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+        if not json_equal(original_after, after_values):
+            raise TransactionError("原清理事务的文件身份、阶段或保存输入不同")
+        # 历史仅记录真实变化；没有变化的错误空值也必须沿原 H 核实。
+        return {**rows[0], "before": {"exists": True, "values": {
+            **original_after, **rows[0]["before"]["values"]}},
+            "after": {"exists": True, "values": original_after}}
+
+    def _original_cursor(self, connection, first_event_id):
+        """从原完整事务之前的不可变游标事实取得原位置。"""
+        entity_type = load_enum_registry()["history_objects"]["runtime_state"]["id"]
+        with closing(connection.execute(
+            "SELECT e.id, e.transaction_id, e.event_type, e.event_version,"
+            " e.occurred_at, e.clock_status, e.change_seq, e.body_json"
+            " FROM entity_event_links l JOIN history_events e ON e.id = l.event_id"
+            " WHERE l.entity_type = ? AND l.entity_id = 1 AND l.event_id < ?"
+            " AND e.event_type = ? ORDER BY l.event_id DESC LIMIT 1",
+            (entity_type, first_event_id, _CLEANUP_CURSOR_EVENT),
+        )) as cursor:
+            stored = cursor.fetchone()
+        if stored is None:
+            return None
+        event = decode_event_row(stored)
+        transaction = read_transaction_range(connection, event.transaction_id)
+        if not transaction.first_event_id <= event.event_id <= transaction.last_event_id:
+            raise ConsistencyError("原清理游标事件不属于可靠完整事务")
+        if (event.reason != _CURSOR_CHECKED_REASON or len(event.rows) != 1
+                or event.rows[0].table != "runtime_state" or event.rows[0].row_id != 1
+                or not event.rows[0].before.exists or not event.rows[0].after.exists
+                or set(event.rows[0].after.values) != {"cleanup_cursor_file_id"}):
+            raise ConsistencyError("原清理游标事件的阶段或身份不符")
+        return event.rows[0].after.values["cleanup_cursor_file_id"]
+
 
 class _RetentionReleaseCommand(_WorkFileMixin):
     """释放保留状态事务命令。
@@ -4219,7 +4642,7 @@ class _RetentionReleaseCommand(_WorkFileMixin):
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(saved, scope)
         file = self._load_file(connection, self._request.file_id)
         retention = file["retention_state"]
         if retention == int(_RETENTION.RELEASABLE):
@@ -4259,13 +4682,21 @@ class _RetentionReleaseCommand(_WorkFileMixin):
             result=RetentionReleaseOutcome(RetentionDisposition.RELEASED),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
+    def _reuse(self, saved: list[dict], scope) -> CommandPlan:
         """原键恢复首次释放响应。"""
         types = [(event["type"], event["reason"]) for event in saved]
         if types != [(_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON)]:
             raise TransactionError("操作身份已用于其他阶段，不能作为释放重送")
         if saved[0]["occurred_at"] != self._request.occurred_at:
             raise TransactionError("释放的事实时刻与原事务不同")
+        row = self._saved_file_row(saved, scope,
+            before_columns=("retention_state", "cleanup_state"),
+            after_values={"retention_state": int(_RETENTION.RELEASABLE),
+                          "cleanup_state": int(_FILE_CLEANUP.PENDING)})
+        if (row["before"]["values"]["retention_state"] not in
+                (int(_RETENTION.REQUIRED), int(_RETENTION.HANDED_OFF))
+                or row["before"]["values"]["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)):
+            raise TransactionError("原事务不是保留释放阶段")
         return self._decision(
             RetentionReleaseOutcome(RetentionDisposition.ALREADY),
             read_only=True)
@@ -4285,7 +4716,7 @@ class _CleanupIntentCommand(_WorkFileMixin):
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(saved, scope)
         file = self._load_file(connection, self._request.file_id)
         if file["retention_state"] != int(_RETENTION.RELEASABLE):
             raise ConsistencyError(
@@ -4318,13 +4749,18 @@ class _CleanupIntentCommand(_WorkFileMixin):
             result=CleanupIntentOutcome(CleanupIntentDisposition.SAVED),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
+    def _reuse(self, saved: list[dict], scope) -> CommandPlan:
         """原键恢复首次意图响应。"""
         types = [(event["type"], event["reason"]) for event in saved]
         if types != [(_INTERMEDIATE_FILE_EVENT, _CLEANUP_INTENT_REASON)]:
             raise TransactionError("操作身份已用于其他阶段，不能作为清理意图重送")
         if saved[0]["occurred_at"] != self._request.occurred_at:
             raise TransactionError("清理意图的事实时刻与原事务不同")
+        row = self._saved_file_row(saved, scope, before_columns=("cleanup_state",),
+            after_values={"cleanup_state": int(_FILE_CLEANUP.RUNNING)})
+        if row["before"]["values"]["cleanup_state"] not in (
+                int(_FILE_CLEANUP.PENDING), int(_FILE_CLEANUP.FAILED), int(_FILE_CLEANUP.UNKNOWN)):
+            raise TransactionError("原事务不是清理意图阶段")
         return self._decision(
             CleanupIntentOutcome(CleanupIntentDisposition.ALREADY),
             read_only=True)
@@ -4348,7 +4784,7 @@ class _CleanupResultCommand(_WorkFileMixin):
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(saved, scope)
         file = self._load_file(connection, self._request.file_id)
         if file["retention_state"] != int(_RETENTION.RELEASABLE):
             raise ConsistencyError(
@@ -4388,6 +4824,9 @@ class _CleanupResultCommand(_WorkFileMixin):
             _envelope(
                 allocation.first_event_id + index, allocation.txn_id,
                 event_type, reason, rows, self._request.occurred_at,
+                evidence=({"cleanup_request": {
+                    "advance_cursor": self._request.advance_cursor}}
+                    if event_type == _INTERMEDIATE_FILE_EVENT else None),
             )
             for index, (event_type, reason, rows) in enumerate(specs)
         )
@@ -4396,7 +4835,7 @@ class _CleanupResultCommand(_WorkFileMixin):
             result=CleanupResultSaveOutcome(CleanupResultDisposition.SAVED),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
+    def _reuse(self, saved: list[dict], scope) -> CommandPlan:
         """原键恢复首次结果响应；游标推进可选共存。"""
         types = [(event["type"], event["reason"]) for event in saved]
         expected = [
@@ -4405,8 +4844,39 @@ class _CleanupResultCommand(_WorkFileMixin):
         ]
         if types != expected and types != expected[:1]:
             raise TransactionError("操作身份已用于其他阶段，不能作为清理结果重送")
-        if saved[0]["occurred_at"] != self._request.occurred_at:
+        if any(event["occurred_at"] != self._request.occurred_at for event in saved):
             raise TransactionError("清理结果的事实时刻与原事务不同")
+        request = saved[0]["body"]["evidence"].get("cleanup_request")
+        if (not isinstance(request, Mapping) or set(request) != {"advance_cursor"}
+                or type(request["advance_cursor"]) is not bool):
+            raise ConsistencyError("原清理结果缺少可靠的布尔申请输入")
+        if request["advance_cursor"] is not self._request.advance_cursor:
+            raise TransactionError("原清理结果的游标申请输入与重送不同")
+        after = {"cleanup_state": (
+            int(_FILE_CLEANUP.COMPLETED) if self._request.outcome is WorkFileOutcome.COMPLETED
+            else int(_FILE_CLEANUP.FAILED)), "last_error_json": (
+            None if self._request.error is None else self._request.error.as_json())}
+        row = self._saved_file_row(saved, scope,
+            before_columns=("cleanup_state", "last_error_json"), after_values=after)
+        if row["before"]["values"]["cleanup_state"] not in (
+                int(_FILE_CLEANUP.PENDING), int(_FILE_CLEANUP.RUNNING),
+                int(_FILE_CLEANUP.FAILED), int(_FILE_CLEANUP.UNKNOWN)):
+            raise TransactionError("原事务不是清理结果阶段")
+        original_cursor = self._original_cursor(
+            scope.connection, saved[0]["transaction"].first_event_id)
+        cursor_changed = self._request.advance_cursor and original_cursor != self._request.file_id
+        expected_types = expected if cursor_changed else expected[:1]
+        if types != expected_types:
+            raise TransactionError("原清理结果的完整游标责任集合与重送输入不同")
+        if cursor_changed:
+            rows = saved[1]["body"]["rows"]
+            if (len(rows) != 1 or rows[0]["table"] != "runtime_state" or rows[0]["id"] != 1
+                    or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]
+                    or not json_equal(rows[0]["before"]["values"],
+                                      {"cleanup_cursor_file_id": original_cursor})
+                    or not json_equal(rows[0]["after"]["values"],
+                                      {"cleanup_cursor_file_id": self._request.file_id})):
+                raise TransactionError("原清理结果的游标身份、原位置或结果不同")
         return self._decision(
             CleanupResultSaveOutcome(CleanupResultDisposition.ALREADY),
             read_only=True)
@@ -4455,6 +4925,13 @@ class _CleanupCheckedCommand(_WorkFileMixin):
             raise TransactionError("操作身份已用于其他阶段，不能作为游标推进重送")
         if saved[0]["occurred_at"] != self._request.occurred_at:
             raise TransactionError("游标推进的事实时刻与原事务不同")
+        rows = saved[0]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "runtime_state" or rows[0]["id"] != 1
+                or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]
+                or set(rows[0]["before"]["values"]) != {"cleanup_cursor_file_id"}
+                or not json_equal(rows[0]["after"]["values"],
+                                  {"cleanup_cursor_file_id": self._request.file_id})):
+            raise TransactionError("原游标事务的检查文件身份不同")
         return self._decision(
             CleanupCheckedOutcome(CleanupCheckedDisposition.ALREADY),
             read_only=True)
@@ -4588,6 +5065,271 @@ class ObtainFinishResult:
     prepared: int
     failed: int
     disposition: ObtainFinishDisposition = ObtainFinishDisposition.SAVED
+
+
+@dataclass(frozen=True)
+class SettleCanceledObtain:
+    """取消已生效取回的固定成员及一次有限收场时刻。"""
+
+    action_id: int
+    occurred_at: int
+    item_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+        if not isinstance(self.item_ids, tuple):
+            raise TypeError("取消取回的固定成员必须使用元组")
+        for identity in self.item_ids:
+            ObjectId(identity)
+        if tuple(sorted(set(self.item_ids))) != self.item_ids:
+            raise ValueError("取消取回的固定成员必须按身份升序且不重复")
+
+
+@dataclass(frozen=True)
+class CanceledObtainSettlement:
+    """原持久化责任是否已收场，以及本次必要的首次文件责任。"""
+
+    complete: bool
+    file_ids: tuple[int, ...] = ()
+
+
+class _SettleCanceledObtainCommand:
+    """同事务保存取消结果、原读取流程、源保护与读取机会的结束。"""
+
+    _TABLES = ("actions", "plans", "action_dependencies", "obtain_source_selections",
+               "obtain_items", "deliveries", "file_copies", "intermediate_files",
+               "operation_runs", "operation_attempts", "outputs", "device_files")
+
+    def __init__(self, command: SettleCanceledObtain, key: OperationKey):
+        if not isinstance(command, SettleCanceledObtain):
+            raise TypeError("取消取回收场必须使用 SettleCanceledObtain")
+        self._command, self._key = command, key
+        self._state = {table: {} for table in self._TABLES}
+        self._owners = {}
+        self._ranges: dict = {}
+        self._members = []
+
+    def _load(self, connection, table, identity, owner=None):
+        facts = row_facts(connection, table, identity)
+        if facts is None:
+            raise ConsistencyError(f"取消取回的原责任记录缺失: {table}#{identity}")
+        self._state[table][identity] = facts
+        if owner is not None:
+            self._owners[(table, identity)] = owner
+        return facts
+
+    def _ids(self, connection, table, column, identity):
+        with closing(connection.execute(
+            f"SELECT id FROM {table} WHERE {column}=? ORDER BY id", (identity,),
+        )) as cursor:
+            return tuple(row[0] for row in cursor.fetchall())
+
+    def _facts(self, connection):
+        action_id = self._command.action_id
+        action = self._load(connection, "actions", action_id, ("action", action_id))
+        if action["type"] != _OBTAIN_TYPE:
+            raise TransactionError("取消取回输入必须指向原取回动作")
+        self._load(connection, "plans", action["plan_id"], ("plan", action["plan_id"]))
+        for identity in self._ids(connection, "actions", "plan_id", action["plan_id"]):
+            self._load(connection, "actions", identity, ("action", identity))
+        member_ids = []
+        for dependency_id in self._ids(connection, "action_dependencies", "action_id", action_id):
+            self._load(connection, "action_dependencies", dependency_id, ("action", action_id))
+            for selection_id in self._ids(connection, "obtain_source_selections", "dependency_id", dependency_id):
+                self._load(connection, "obtain_source_selections", selection_id, ("action", action_id))
+                for item_id in self._ids(connection, "obtain_items", "selection_id", selection_id):
+                    item = self._load(connection, "obtain_items", item_id, ("action", action_id))
+                    member_ids.append(item_id)
+                    if item["delivery_id"] is None:
+                        self._members.append((item_id, None, None, None))
+                        continue
+                    delivery_id = item["delivery_id"]
+                    owner = ("delivery", delivery_id)
+                    delivery = self._load(connection, "deliveries", delivery_id, owner)
+                    if (delivery["action_id"] != action_id or delivery["output_id"] != item["output_id"]):
+                        raise ConsistencyError("取消取回的原成员与交付归属不一致")
+                    copies = self._ids(connection, "file_copies", "delivery_id", delivery_id)
+                    if len(copies) != 1:
+                        raise ConsistencyError("取消取回的原交付必须对应唯一拷贝")
+                    copy = self._load(connection, "file_copies", copies[0], owner)
+                    target = self._load(connection, "intermediate_files", copy["target_file_id"])
+                    if target["owner_delivery_id"] != delivery_id:
+                        raise ConsistencyError("取消取回的原副本与交付归属不一致")
+                    output = self._load(connection, "outputs", delivery["output_id"])
+                    dependency = self._state["action_dependencies"][dependency_id]
+                    if (dependency["depends_on_action_id"] != output["source_action_id"]
+                            or output["device_file_id"] != copy["source_device_file_id"]
+                            or output["intermediate_file_id"] != copy["source_intermediate_file_id"]):
+                        raise ConsistencyError("取消取回的原来源、产物与副本关联不一致")
+                    try:
+                        validate_relative_file_path(_target_purpose_model(copy, target),
+                                                    target["id"], target["relative_path"])
+                    except PathRuleError as error:
+                        raise ConsistencyError("取消取回的原副本路径不可定位") from error
+                    if copy["source_device_file_id"] is not None:
+                        source = self._load(connection, "device_files", copy["source_device_file_id"])
+                        self._load(connection, "actions", source["observer_action_id"])
+                        self._load(connection, "actions", source["source_action_id"])
+                    else:
+                        self._load(connection, "intermediate_files", copy["source_intermediate_file_id"])
+                    run_ids = self._ids(connection, "operation_runs", "copy_id", copy["id"])
+                    if len(run_ids) != 1:
+                        raise ConsistencyError("取消取回的原拷贝必须具有唯一读取流程")
+                    run = self._load(connection, "operation_runs", run_ids[0], owner)
+                    if (run["kind"] != int(_RUN_KIND.READ_FILE) or run["action_id"] != action_id
+                            or run["responsibility_key"] != f"read/{copy['id']}"):
+                        raise ConsistencyError("取消取回的原读取身份与拷贝不一致")
+                    for identity in self._ids(connection, "operation_attempts", "run_id", run["id"]):
+                        self._load(connection, "operation_attempts", identity, owner)
+                    self._ranges.setdefault(("operation_runs", "copy_id"), set()).add(copy["id"])
+                    self._ranges.setdefault(("operation_attempts", "run_id"), set()).add(run["id"])
+                    self._members.append((item_id, delivery_id, copy["id"], run["id"]))
+        if tuple(sorted(member_ids)) != self._command.item_ids:
+            raise TransactionError("取消取回的固定成员集合与原持久化集合不同")
+        self._members.sort()
+        return action
+
+    def _decision(self, result):
+        return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+            read_only=True, read_coverage=ReadCoverage(self._ranges), result=result)
+
+    def _templates(self):
+        action = self._state["actions"][self._command.action_id]
+        if action["status"] in _ACTION_TERMINAL:
+            return (), CanceledObtainSettlement(True)
+        if not action["cancel_requested"]:
+            raise TransactionError("取回取消尚未生效，不能结束原责任")
+        if action["status"] != int(_ACTION_STATUS.RUNNING):
+            raise TransactionError("取消取回的目标不在执行中")
+        # 持久化原意图没有结束结果时保留保护；本命令没有实际
+        # 调用的拥有者，也不从会话重启推出读取已停止。
+        if any(attempt["status"] == 1 or attempt["result_json"] is None
+               for attempt in self._state["operation_attempts"].values()):
+            return (), CanceledObtainSettlement(False)
+        if any(delivery["status"] == int(_DELIVERY_STATUS.PUBLISHING)
+               for delivery in self._state["deliveries"].values()):
+            return (), CanceledObtainSettlement(False)
+        templates, first_files = [], []
+        for item_id, delivery_id, copy_id, run_id in self._members:
+            item = self._state["obtain_items"][item_id]
+            if delivery_id is None:
+                if item["status"] in (int(_ITEM_STATUS.UNRESOLVED), int(_ITEM_STATUS.SELECTED)):
+                    templates.append((_READ_PERMISSION_EVENT, 5, (_update("obtain_items", item_id,
+                        {"status": item["status"]}, {"status": int(_ITEM_STATUS.CANCELED)}),)))
+                elif item["status"] not in (int(_ITEM_STATUS.FAILED), int(_ITEM_STATUS.CANCELED)):
+                    raise ConsistencyError("未建档取回项的原状态不可解释")
+                continue
+            delivery = self._state["deliveries"][delivery_id]
+            copy, run = self._state["file_copies"][copy_id], self._state["operation_runs"][run_id]
+            if delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHED), int(_DELIVERY_STATUS.WITHDRAWN)):
+                continue
+            new_responsibility = delivery["status"] not in (int(_DELIVERY_STATUS.FAILED), int(_DELIVERY_STATUS.CANCELED))
+            if new_responsibility:
+                templates.append((_DELIVERY_CHANGED_EVENT, 6, (_update("deliveries", delivery_id,
+                    {"status": delivery["status"]}, {"status": int(_DELIVERY_STATUS.CANCELED)}),)))
+            if run["status"] not in _RUN_TERMINAL:
+                templates.append((_OPERATION_CONFIGURED_EVENT, 3, (_update("operation_runs", run_id,
+                    {"status": run["status"], "retry_wait_required": run["retry_wait_required"], "error_json": run["error_json"]},
+                    {"status": int(_RUN_STATUS.CANCELED), "retry_wait_required": 0, "error_json": None}),)))
+                new_responsibility = True
+            elif run["retry_wait_required"] != 0:
+                raise ConsistencyError("原终态读取流程仍有重试责任")
+            if item["source_dependency"]:
+                templates.append((_READ_PERMISSION_EVENT, _RELEASE_REASON, (_update("obtain_items", item_id,
+                    {"source_dependency": 1}, {"source_dependency": 0}),)))
+                new_responsibility = True
+            if copy["slot_device_id"] is not None:
+                templates.append((_COPY_CHANGED_EVENT, _SLOT_REASON, (_update("file_copies", copy_id,
+                    {"slot_device_id": copy["slot_device_id"]}, {"slot_device_id": None}),)))
+                new_responsibility = True
+            if new_responsibility:
+                first_files.append(copy["target_file_id"])
+        templates.append((_ACTION_FINISHED_EVENT, 4, (_update("actions", action["id"],
+            {"status": action["status"]}, {"status": int(_ACTION_STATUS.CANCELED)}),)))
+        plan = self._state["plans"][action["plan_id"]]
+        siblings = {identity: facts for identity, facts in self._state["actions"].items()
+                    if facts["plan_id"] == action["plan_id"]}
+        if plan["status"] in (1, 2) and plan_complete(siblings, action["id"]):
+            templates.append((_PLAN_STATUS_EVENT, 2, (_update("plans", plan["id"],
+                {"status": plan["status"]}, {"status": _PLAN_COMPLETE}),)))
+        return tuple(templates), CanceledObtainSettlement(True, tuple(sorted(first_files)))
+
+    def plan(self, scope):
+        saved = saved_transaction_events(scope.connection, self._key)
+        action = self._facts(scope.connection)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        if action["status"] == int(_ACTION_STATUS.CANCELED):
+            # 新连接按原完整取消组恢复必要文件范围，而不是把全部
+            # 历史失败文件接入任意取消请求的首次责任。
+            return self._recover_terminal(scope)
+        templates, result = self._templates()
+        if not templates:
+            return self._decision(result)
+        allocation = scope.allocate(len(templates))
+        events = tuple(_envelope(allocation.first_event_id + index, allocation.txn_id,
+            kind, reason, rows, self._command.occurred_at)
+            for index, (kind, reason, rows) in enumerate(templates))
+        return CommandPlan(events=events, owners=self._owners, state_rows=self._state,
+            read_coverage=ReadCoverage(self._ranges), result=result)
+
+    def _restore_before(self, scope, saved):
+        transaction = saved[0]["transaction"]
+        prior = read_transaction_range(scope.connection, transaction.txn_id - 1) if transaction.txn_id > 1 else None
+        boundary = HistoryBoundary(0, 0) if prior is None else HistoryBoundary(prior.txn_id, prior.last_event_id)
+        current = HistoryBoundary(scope.max_txn_id, scope.max_event_id)
+        restored = set()
+        for event in saved:
+            if event["occurred_at"] != self._command.occurred_at:
+                raise TransactionError("取消取回的原事实时刻不同")
+            for row in event["body"]["rows"]:
+                identity = (row["table"], row["id"])
+                if identity in restored:
+                    continue
+                if (identity not in self._owners or not row["before"]["exists"]
+                        or not row["after"]["exists"]):
+                    raise TransactionError("原取消取回组包含不同归属或阶段的责任")
+                values = self._state[identity[0]][identity[1]]
+                # 原事件表达变化列；流程身份和成员关联是首次确定后
+                # 不变的事实，其余拟更新列在原完整边界恢复。
+                columns = frozenset(row["before"]["values"])
+                values.update(read_row_values_at_boundary(scope.connection,
+                    owner=self._owners[identity], table=identity[0], row_id=identity[1],
+                    columns=columns, current_values=values, boundary=boundary, current_boundary=current))
+                restored.add(identity)
+
+    def _reuse(self, scope, saved):
+        self._restore_before(scope, saved)
+        templates, result = self._templates()
+        if not result.complete or len(saved) != len(templates):
+            raise TransactionError("原取消取回事务缺少完整责任集合")
+        for event, (kind, reason, rows) in zip(saved, templates):
+            expected = [{"table": row.table, "id": row.row_id,
+                "before": {"exists": row.before.exists, "values": dict(row.before.values)},
+                "after": {"exists": row.after.exists, "values": dict(row.after.values)}} for row in rows]
+            if (event["type"] != kind or event["reason"] != reason
+                    or event["body"]["evidence"] != {}
+                    or not json_equal(event["body"]["rows"], expected)):
+                raise TransactionError("原取消取回的身份、阶段或完整输入不同")
+        return self._decision(result)
+
+    def _recover_terminal(self, scope):
+        # ACTION_OUTCOME 的独立取消事实唯一表达此目标首次终态。
+        with closing(scope.connection.execute(
+            "SELECT t.operation_key FROM history_transactions t JOIN history_events e ON e.transaction_id=t.id"
+            " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=4"
+            " AND EXISTS (SELECT 1 FROM json_each(e.body_json,'$.rows') r"
+            " WHERE json_extract(r.value,'$.table')='actions' AND json_extract(r.value,'$.id')=?)"
+            " ORDER BY e.id LIMIT 1", (_ACTION_FINISHED_EVENT, self._command.action_id),
+        )) as cursor:
+            original = cursor.fetchone()
+        if original is None:
+            return self._decision(CanceledObtainSettlement(True))
+        saved = saved_transaction_events(scope.connection, OperationKey(original[0]))
+        assert saved is not None
+        self._command = replace(self._command, occurred_at=saved[0]["occurred_at"])
+        return self._reuse(scope, saved)
 
 
 class _FinishObtainCommand:
@@ -4860,6 +5602,12 @@ class OutputsRepository:
         receipt = commit_operation(_FinishObtainCommand(command, key), key, owned)
         return _outcome_of(receipt)
 
+    def settle_canceled_obtain(
+        self, command: SettleCanceledObtain, key: OperationKey, owned: OwnedConnection,
+    ) -> DbOutcome[CanceledObtainSettlement]:
+        receipt = commit_operation(_SettleCanceledObtainCommand(command, key), key, owned)
+        return _outcome_of(receipt)
+
     def fix_selection(
         self, command: FixSelection, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SelectionSaved]:
@@ -4923,6 +5671,11 @@ class OutputsRepository:
         receipt = commit_operation(
             _ReadDeliveryFailCommand(command, key), key, owned)
         return _outcome_of(receipt)
+
+    def fail_read_binding(
+        self, command: FailReadBinding, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[FailureSaveOutcome]:
+        return _outcome_of(commit_operation(_ReadBindingFailCommand(command, key), key, owned))
 
     def load_delivery_state(
         self, delivery_id: int, owned: OwnedConnection
@@ -5025,6 +5778,12 @@ class OutputsRepository:
         receipt = commit_operation(_FailCleanupItemCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
+    def fail_cleanup_binding(
+        self, command: FailCleanupBinding, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[CleanupItemSaved]:
+        return self._cleanup_item_outcome(commit_operation(
+            _CleanupBindingFailCommand(command, key), key, owned))
+
     def advance_withdrawal(
         self, command: AdvanceWithdrawal, key: OperationKey,
         owned: OwnedConnection,
@@ -5088,19 +5847,30 @@ class OutputsRepository:
         if limit <= 0:
             return ()
         with closing(owned.connection.execute(
-            "SELECT id FROM intermediate_files"
-            " WHERE retention_state = 2 AND cleanup_state <> 4"
-            " AND id > ? AND id <= ? ORDER BY id LIMIT ?",
+            "SELECT f.id " + _cleanup_candidate_source()
+            + " AND f.id > ? AND f.id <= ? ORDER BY f.id LIMIT ?",
             (after_id, ceiling, limit),
         )) as cursor:
             return tuple(int(row[0]) for row in cursor.fetchall())
 
     def max_cleanup_candidate_id(self, owned: OwnedConnection) -> int:
         with closing(owned.connection.execute(
-            "SELECT MAX(id) FROM intermediate_files"
-            " WHERE retention_state = 2 AND cleanup_state <> 4",
+            "SELECT MAX(f.id) " + _cleanup_candidate_source(),
         )) as cursor:
             return int(cursor.fetchone()[0] or 0)
+
+
+def _cleanup_candidate_source() -> str:
+    """已释放责任及归属终态的 REQUIRED 文件共用候选规则。"""
+    actions = ",".join(str(value) for value in _ACTION_TERMINAL)
+    deliveries = ",".join(str(value) for value in sorted(_WorkFileMixin._TERMINAL_DELIVERIES))
+    return (
+        "FROM intermediate_files f LEFT JOIN actions a ON a.id = f.owner_action_id"
+        " LEFT JOIN deliveries d ON d.id = f.owner_delivery_id WHERE ("
+        f"(f.retention_state = {int(_RETENTION.RELEASABLE)}"
+        f" AND f.cleanup_state <> {int(_FILE_CLEANUP.COMPLETED)}) OR"
+        f" (f.retention_state = {int(_RETENTION.REQUIRED)}"
+        f" AND (a.status IN ({actions}) OR d.status IN ({deliveries}))))")
 
 
 def _outcome_of(receipt) -> DbOutcome:
@@ -5276,6 +6046,11 @@ def _source_selection_guard(event, context) -> None:
 
 def _intermediate_guard(event, context) -> None:
     """中间文件建档与字节事实守卫：用途互斥、初始状态固定。"""
+    if event.event_type == _INTERMEDIATE_FILE_EVENT and event.reason == _CLEANUP_RESULT_REASON:
+        request = event.evidence.get("cleanup_request")
+        if (not isinstance(request, Mapping) or set(request) != {"advance_cursor"}
+                or type(request["advance_cursor"]) is not bool):
+            raise EventValidationError("清理结果必须保存精确布尔 advance_cursor 申请")
     if event.event_type == _INTERMEDIATE_FILE_EVENT and event.reason == 1:
         for row in event.rows:
             if row.table != "intermediate_files" or row.before.exists:
@@ -5710,6 +6485,17 @@ def _obtain_member_guard(event, context) -> None:
         raise EventValidationError("取回成员的真实产物必须属于固定来源")
     if explicit and output_id != item["requested_output_id"]:
         raise EventValidationError("显式成员的真实产物必须等于原请求 ID")
+    if event.reason == _REJECT_REASON and row.after.values.get("error_code") == item_error_id(
+            "obtain_items", "device_binding_unavailable"):
+        file_id = output.get("device_file_id")
+        if file_id is None:
+            raise EventValidationError("主机产物不能保存设备绑定失败")
+        file = _required_current_facts(context, "device_files", file_id)
+        observer = _required_current_facts(context, "actions", file["observer_action_id"])
+        details = row.after.values["error_details_json"]
+        if (details.get("device_id"), details.get("expected_driver_id")) != (
+                observer["device_id"], observer["driver_id"]):
+            raise EventValidationError("取回绑定失败必须指向原文件观察者")
 
 
 def _slot_run(context, copy_id: int) -> dict[str, Any]:
@@ -5875,6 +6661,17 @@ def _read_permission_guard(event, context) -> None:
             if len(copies) != 1:
                 raise EventValidationError("解除源依赖必须对应唯一交付拷贝")
             copy = copies[0]
+            if delivery.get("status") in (6, 7):
+                runs = context.complete_rows("operation_runs", "copy_id", copy["id"])
+                if not runs or any(run.get("status") not in _RUN_TERMINAL
+                                   or run.get("retry_wait_required") != 0 for run in runs.values()):
+                    raise EventValidationError("最终失败或取消后解除源保护要求读取及后续重试已结束")
+                for run in runs.values():
+                    attempts = context.complete_rows("operation_attempts", "run_id", run["id"])
+                    if any(attempt.get("status") == 1 or attempt.get("result_json") is None
+                           for attempt in attempts.values()):
+                        raise EventValidationError("读取没有可靠结束结果，不能解除源保护")
+                continue
             if copy.get("verification_state") not in (
                 int(_VERIFICATION.MATCHED),
                 int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE),
@@ -7097,7 +7894,10 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                 self._owners[(table, row_id)] = owner
             events.append(_envelope(
                 next_event_id, allocation.txn_id, event_type, reason, rows,
-                command.occurred_at))
+                command.occurred_at,
+                evidence=({"cleanup_request": {"advance_cursor": False}}
+                    if event_type == _INTERMEDIATE_FILE_EVENT
+                    and reason == _CLEANUP_RESULT_REASON else None)))
             next_event_id += 1
         succeed_event_id = next_event_id
         before = {
@@ -7259,9 +8059,9 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
         connection = scope.connection
         command = self._command
         saved = saved_transaction_events(connection, self._key)
-        if saved is not None:
-            return self._verify_and_reuse(saved)
         item = self._load_item(connection, command.item_id)
+        if saved is not None:
+            return self._verify_and_reuse(saved, item)
         action = self._state["actions"][item["action_id"]]
         if action["target_selection_state"] != _TARGET_FIXED:
             raise ConsistencyError("成员取消要求目标集合已固定")
@@ -7275,6 +8075,12 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
                 read_only=True,
                 result=CleanupItemSaved(
                     CleanupItemDisposition.ALREADY, command.item_id))
+        with closing(connection.execute(
+            "SELECT 1 FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+            " WHERE r.cleanup_item_id=? AND (a.status=1 OR a.result_json IS NULL) LIMIT 1",
+            (command.item_id,))) as cursor:
+            if cursor.fetchone() is not None:
+                raise TransactionError("原删除或查询没有可靠结束结果，不能结束取消成员")
         error_id = None
         details = None
         if item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING):
@@ -7289,6 +8095,13 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
             error_id = item_error_id("cleanup_items", command.code)
             validate_error_details(command.code, command.details)
             details = dict(command.details)
+            if details.get("output_id") != str(item["output_id"]):
+                raise TransactionError("取消收场错误必须属于原清理成员的产物")
+            from camctl.outputs.cleanup_flow import _output_delete_facts
+            facts = _output_delete_facts(connection, item["output_id"])
+            expected = "file_delete_failed" if facts["confirmed_present_after"] else "delete_unconfirmed"
+            if facts["file_absent"] or command.code != expected:
+                raise TransactionError("取消收场错误与原删除和查询的可靠事实不符")
             after_restriction = int(_CLEANUP_RESTRICTION.IRREVERSIBLE)
         elif item["status"] in (int(_CLEANUP_ITEM_STATUS.UNRESOLVED),
                                 int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)):
@@ -7361,20 +8174,209 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
         )) as cursor:
             return cursor.fetchone() is not None
 
-    def _verify_and_reuse(self, saved):
-        if [(event["type"], event["reason"]) for event in saved][0] != (24, 5):
+    def _verify_and_reuse(self, saved, item):
+        command = self._command
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds not in ([(24, 5)], [(24, 5), (_OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON)]):
             raise TransactionError("原事务不是清理取消，不能作为重送核实")
-        if saved[0]["occurred_at"] != self._command.occurred_at:
+        if any(event["occurred_at"] != command.occurred_at for event in saved):
             raise TransactionError("清理取消的事实时刻与原事务不同")
-        row = saved[0]["body"]["rows"][0]
-        if row["table"] != "cleanup_items" or row["id"] != self._command.item_id:
+        rows = saved[0]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "cleanup_items" or rows[0]["id"] != command.item_id
+                or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]):
             raise TransactionError("原清理取消属于其他成员")
+        row = rows[0]
+        prior_status = row["before"]["values"].get("status")
+        restrictions = {
+            int(_CLEANUP_ITEM_STATUS.UNRESOLVED): int(_CLEANUP_RESTRICTION.NOT_ESTABLISHED),
+            int(_CLEANUP_ITEM_STATUS.PENDING_DELETE): int(_CLEANUP_RESTRICTION.RELEASED),
+            int(_CLEANUP_ITEM_STATUS.DELETING): int(_CLEANUP_RESTRICTION.IRREVERSIBLE),
+        }
+        if prior_status not in restrictions:
+            raise TransactionError("原清理取消的处理分支不可解释")
+        error_id, details = None, None
+        if prior_status == int(_CLEANUP_ITEM_STATUS.DELETING):
+            if command.code not in self._SETTLEMENT_CODES:
+                raise TransactionError("原删除收场不能复用未发出删除的取消输入")
+            validate_error_details(command.code, command.details)
+            details = dict(command.details)
+            if details.get("output_id") != str(item["output_id"]):
+                raise TransactionError("原清理取消的产物输入不同")
+            error_id = item_error_id("cleanup_items", command.code)
+        elif command.code is not None or command.details is not None:
+            raise TransactionError("原未发出删除的取消输入不携带错误")
+        # 历史更新只记录变化列；不可逆限制和空 outcome 保持时不重复编码。
+        expected_before = {"status": prior_status, "final_event_id": None}
+        expected_after = {"status": int(_CLEANUP_ITEM_STATUS.CANCELED),
+                          "final_event_id": saved[0]["event_id"]}
+        if prior_status == int(_CLEANUP_ITEM_STATUS.DELETING):
+            expected_before.update(error_code=None, error_details_json=None)
+            expected_after.update(error_code=error_id, error_details_json=details)
+        elif prior_status == int(_CLEANUP_ITEM_STATUS.PENDING_DELETE):
+            expected_before["restriction_state"] = int(_CLEANUP_RESTRICTION.ACTIVE)
+            expected_after["restriction_state"] = int(_CLEANUP_RESTRICTION.RELEASED)
+        if (not json_equal(row["before"]["values"], expected_before)
+                or not json_equal(row["after"]["values"], expected_after)
+                or item["status"] != int(_CLEANUP_ITEM_STATUS.CANCELED)
+                or item["restriction_state"] != restrictions[prior_status]
+                or item["outcome"] is not None or item["final_event_id"] != saved[0]["event_id"]
+                or item["error_code"] != error_id or not json_equal(item["error_details_json"], details)):
+            raise TransactionError("清理取消的原键输入与完整结果不同")
+        if len(saved) == 2:
+            projection = saved[1]["body"]["rows"]
+            if (len(projection) != 1 or projection[0]["table"] != "outputs"
+                    or projection[0]["id"] != item["output_id"]
+                    or not projection[0]["before"]["exists"] or not projection[0]["after"]["exists"]):
+                raise TransactionError("原清理取消的产物投影属于其他目标")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
             result=CleanupItemSaved(
                 CleanupItemDisposition.ALREADY, self._command.item_id))
 
+
+
+class _CleanupBindingScope:
+    """成员与伴随流程共享事务开始状态，按顺序切分事件编号。"""
+
+    def __init__(self, parent):
+        self.connection = parent.connection
+        self.max_event_id, self.max_txn_id = parent.max_event_id, parent.max_txn_id
+        self._next = parent.max_event_id + 1
+
+    def allocate(self, count):
+        first = self._next
+        self._next += count
+        return TransactionAllocations(self.max_txn_id + 1, first, self._next - 1)
+
+
+def _merge_cleanup_binding_plans(plans, *, read_only=False, coverage=None):
+    state, owners = {}, {}
+    for plan in plans:
+        owners.update(plan.owners)
+        for table, rows in plan.state_rows.items():
+            target = state.setdefault(table, {})
+            for identity, facts in rows.items():
+                previous = target.setdefault(identity, {})
+                if any(column in previous and not json_equal(previous[column], value)
+                       for column, value in facts.items()):
+                    raise TransactionError("清理复合事务的同一原记录事实矛盾")
+                target[identity] = {**previous, **facts}
+    return CommandPlan(events=tuple(event for plan in plans for event in plan.events),
+        owners=owners, state_rows=state, result=plans[0].result, read_only=read_only,
+        read_coverage=coverage or ReadCoverage())
+
+
+class _CleanupBindingFailCommand(_CleanupItemCommandMixin):
+    """原成员、删除限制、产物投影与未完成流程的共同绑定失败。"""
+
+    def __init__(self, command: FailCleanupBinding, key: OperationKey):
+        self._command, self._key = command, key
+        self._state, self._owners = {}, {}
+
+    def _facts(self, connection):
+        command = self._command
+        item = self._load_item(connection, command.item_id)
+        output = self._state["outputs"].get(item["output_id"])
+        if output is None or output["device_file_id"] != command.source_device_file_id:
+            raise TransactionError("清理绑定失败必须指向原成员的设备源文件")
+        details = _load_binding_facts(connection, command.source_device_file_id,
+                                     command.binding_result, self._state)
+        self._load_delete_basis(connection, command.item_id)
+        return item, details
+
+    def _member_command(self, item, details):
+        command = self._command
+        if command.canceled:
+            return _CancelCleanupItemCommand(CancelCleanupItem(
+                command.item_id, command.occurred_at, "delete_unconfirmed",
+                {"output_id": str(item["output_id"])}), self._key)
+        return _FailCleanupItemCommand(FailCleanupItem(
+            command.item_id, "device_binding_unavailable", details, command.occurred_at), self._key)
+
+    def _flow_command(self, details):
+        return _FinishStaleRunsCommand(StaleRunFinish(
+            self._command.responsibility_keys, RunOutcome.FAILED, self._command.occurred_at,
+            ErrorValue("device_binding_unavailable", "execution", details)), self._key)
+
+    def plan(self, scope):
+        saved = saved_transaction_events(scope.connection, self._key)
+        item, details = self._facts(scope.connection)
+        if saved is not None:
+            return self._reuse(scope, saved, item, details)
+        if item["status"] in (4, 5, 6):
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state, read_only=True,
+                               result=CleanupItemSaved(CleanupItemDisposition.ALREADY, item["id"]))
+        action = self._state["actions"][item["action_id"]]
+        if bool(action["cancel_requested"]) != self._command.canceled:
+            raise TransactionError("清理绑定失败的取消分支与原动作不同")
+        runs = self._state["operation_runs"]
+        open_keys = {run["responsibility_key"] for run in runs.values() if run["status"] in (1, 2)}
+        if open_keys != set(self._command.responsibility_keys):
+            raise TransactionError("原成员的未完成责任集合与绑定失败输入不同")
+        if self._command.canceled and not open_keys:
+            raise TransactionError("取消未知删除无开放责任时使用原取消输入，不采用绑定失败")
+        if any(attempt["status"] == 1 or attempt["result_json"] is None
+               for attempt in self._state["operation_attempts"].values()):
+            raise TransactionError("原清理调用没有可靠结束结果，不能用绑定失败代替收场")
+        sub = _CleanupBindingScope(scope)
+        member = self._member_command(item, details).plan(sub)
+        plans = [member]
+        if open_keys:
+            plans.append(self._flow_command(details).plan(sub))
+        merged = _merge_cleanup_binding_plans(plans)
+        allocation = scope.allocate(len(merged.events))
+        if (merged.events[0].event_id != allocation.first_event_id
+                or merged.events[-1].event_id != allocation.last_event_id):
+            raise TransactionError("清理绑定失败的事件组编号不连续")
+        merged_state = _merge_cleanup_binding_plans([
+            CommandPlan(events=(), owners=self._owners, state_rows=self._state, result=member.result), merged])
+        return replace(merged_state, events=merged.events)
+
+    def _reuse(self, scope, saved, item, details):
+        command = self._command
+        reason = 5 if command.canceled else 4
+        if (not saved or (saved[0]["type"], saved[0]["reason"]) != (24, reason)
+                or any(event["occurred_at"] != command.occurred_at for event in saved)):
+            raise TransactionError("原清理绑定失败的成员分支或时间不同")
+        rows = saved[0]["body"]["rows"]
+        expected_details = {"output_id": str(item["output_id"])} if command.canceled else details
+        expected_code = item_error_id("cleanup_items", "delete_unconfirmed" if command.canceled else "device_binding_unavailable")
+        if (len(rows) != 1 or rows[0]["table"] != "cleanup_items" or rows[0]["id"] != command.item_id
+                or rows[0]["after"]["values"].get("error_code") != expected_code
+                or not json_equal(rows[0]["after"]["values"].get("error_details_json"), expected_details)):
+            raise TransactionError("原清理绑定失败的成员输入不同")
+        split = 1
+        if len(saved) > 1 and saved[1]["type"] == _OUTPUT_REGISTERED_EVENT:
+            event = saved[1]
+            rows = event["body"]["rows"]
+            if (event["reason"] != _OUTPUT_OBSERVATION_REASON or len(rows) != 1
+                    or rows[0]["table"] != "outputs" or rows[0]["id"] != item["output_id"]):
+                raise TransactionError("原清理绑定失败的投影不属于本产物")
+            split = 2
+        member_command = self._member_command(item, details)
+        member = (member_command._verify_and_reuse(saved[:split], item) if command.canceled
+                  else member_command._verify_and_reuse(saved[:split]))
+        flow_events = saved[split:]
+        expected_error = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
+        keys = []
+        for event in flow_events:
+            rows = event["body"]["rows"]
+            if (event["type"], event["reason"]) != (10, 3) or len(rows) != 1 or rows[0]["table"] != "operation_runs":
+                raise TransactionError("原清理绑定失败包含其他流程事件")
+            run = self._state["operation_runs"].get(rows[0]["id"])
+            if run is None or run["cleanup_item_id"] != command.item_id:
+                raise TransactionError("原绑定失败的流程不属于本成员")
+            if not json_equal(rows[0]["after"]["values"], {
+                    "status": 4, "retry_wait_required": 0, "error_json": expected_error}):
+                raise TransactionError("原清理绑定失败的流程结果或采用输入不同")
+            keys.append(run["responsibility_key"])
+        if len(set(keys)) != len(keys) or set(keys) != set(command.responsibility_keys):
+            raise TransactionError("原清理绑定失败的完整责任集合不同")
+        plans = [member]
+        if flow_events:
+            plans.append(self._flow_command(details)._reuse(scope, flow_events))
+        return _merge_cleanup_binding_plans(plans, read_only=True)
 
 
 class _FinishCleanupActionCommand:
@@ -7748,14 +8750,7 @@ class _FinishCanceledCleanupCommand:
 
 
 class _AdvanceWithdrawalCommand:
-    """推进一份交付的撤回责任（DELIVERY_CHANGED.WITHDRAW）。
-
-    按可靠位置观察保存撤回完成、不可撤回、失败或未知；ready 撤回
-    与撤回明细、交付终态同事务提交。processing 不可撤回不删除交付
-    事实。
-    """
-
-    _FAILED_ITEM_ERRORS = {"withdrawal_failed": 1, "withdrawal_unconfirmed": 2}
+    """交付独立撤回与全部必要等待明细在同一事实中结束。"""
 
     def __init__(self, command: AdvanceWithdrawal, key: OperationKey) -> None:
         if not isinstance(command, AdvanceWithdrawal):
@@ -7764,136 +8759,171 @@ class _AdvanceWithdrawalCommand:
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
+        self._items: list[dict] = []
+
+    def _creation(self, scope, item, owner):
+        """无独立元字段的明细沿实际原拥有者核实唯一创建事实。"""
+        ref_type = load_enum_registry()["history_objects"][owner[0]]["id"]
+        with closing(scope.connection.execute(
+            "SELECT e.id,e.transaction_id,e.event_type,e.event_version,e.occurred_at,"
+            " e.clock_status,e.change_seq,e.body_json FROM entity_event_links l"
+            " JOIN history_events e ON e.id=l.event_id"
+            " WHERE l.entity_type=? AND l.entity_id=? AND EXISTS ("
+            " SELECT 1 FROM json_each(e.body_json,'$.rows') r"
+            " WHERE json_extract(r.value,'$.table')='cancel_delivery_items'"
+            " AND json_extract(r.value,'$.id')=?"
+            " AND json_extract(r.value,'$.before.exists')=0"
+            " AND json_extract(r.value,'$.after.exists')=1) ORDER BY e.id LIMIT 2",
+            (ref_type, owner[1], item["id"]),
+        )) as cursor:
+            stored = cursor.fetchall()
+        if len(stored) != 1:
+            raise ConsistencyError("撤回明细缺少原拥有者的唯一创建事实")
+        event = decode_event_row(stored[0])
+        created = [row for row in event.rows if row.table == "cancel_delivery_items"
+                   and row.row_id == item["id"] and not row.before.exists and row.after.exists]
+        if (len(created) != 1 or any(created[0].after.values.get(name) != item[name]
+                for name in ("cancel_item_id", "delivery_id"))):
+            raise ConsistencyError("撤回明细创建事实与当前原关联不同")
+        transaction = read_transaction_range(scope.connection, event.transaction_id)
+        if not transaction.first_event_id <= event.event_id <= transaction.last_event_id <= scope.max_event_id:
+            raise ConsistencyError("撤回明细创建事实不属于可靠完整事务")
+        return transaction
+
+    def _load(self, scope, boundary=None):
+        connection = scope.connection
+        delivery = row_facts(connection, "deliveries", self._command.delivery_id)
+        if delivery is None:
+            raise ConsistencyError(f"交付不存在: {self._command.delivery_id}")
+        self._state = {"deliveries": {delivery["id"]: delivery},
+                       "cancel_delivery_items": {}, "cancel_items": {}}
+        self._owners[("deliveries", delivery["id"])] = ("delivery", delivery["id"])
+
+        def original(table, facts, owner, columns):
+            if boundary is not None:
+                facts.update(read_row_values_at_boundary(connection,
+                    owner=owner, table=table, row_id=facts["id"], columns=frozenset(columns),
+                    current_values=facts, boundary=boundary,
+                    current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id)))
+
+        original("deliveries", delivery, ("delivery", delivery["id"]),
+                 ("status", "withdrawal_state", "withdrawal_error_json"))
+        with closing(connection.execute(
+            "SELECT c.id,ci.action_id FROM cancel_delivery_items c"
+            " JOIN cancel_items ci ON ci.id=c.cancel_item_id"
+            " WHERE c.delivery_id=? ORDER BY c.id", (delivery["id"],),
+        )) as cursor:
+            identities = cursor.fetchall()
+        self._items = []
+        for item_id, owner_id in identities:
+            item = row_facts(connection, "cancel_delivery_items", int(item_id))
+            if item is None:
+                raise ConsistencyError("原交付撤回明细缺失")
+            owner = ("action", int(owner_id))
+            if boundary is not None:
+                creation = self._creation(scope, item, owner)
+                if creation.last_event_id > boundary.last_event_id:
+                    # 创建晚于原 H 是明确不存在的依据。仍沿当前 C
+                    # 核实其目录及创建后的原值，不把历史错误当不存在。
+                    initial = read_row_values_at_boundary(connection, owner=owner,
+                        table="cancel_delivery_items", row_id=item["id"],
+                        columns=frozenset(("status", "error_code", "error_details_json")),
+                        current_values=item, boundary=HistoryBoundary(creation.txn_id, creation.last_event_id),
+                        current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+                    if initial != {"status": 1, "error_code": None, "error_details_json": None}:
+                        raise ConsistencyError("后到撤回明细的原创建状态不完整")
+                    continue
+            original("cancel_delivery_items", item, owner,
+                     ("status", "error_code", "error_details_json"))
+            if item["status"] != 1:
+                continue
+            parent = row_facts(connection, "cancel_items", item["cancel_item_id"])
+            if parent is None or parent["target_action_id"] != delivery["action_id"]:
+                raise ConsistencyError("原交付撤回明细与取消目标不一致")
+            self._state["cancel_items"][parent["id"]] = parent
+            self._state["cancel_delivery_items"][item["id"]] = item
+            self._owners[("cancel_delivery_items", item["id"])] = owner
+            self._items.append(item)
+        return delivery
+
+    def _rows(self, delivery):
+        command, state = self._command, delivery["withdrawal_state"]
+        if command.choice is WithdrawalChoice.REQUESTED:
+            if state != int(_WITHDRAWAL.NOT_REQUESTED):
+                return ()
+            return (_update("deliveries", delivery["id"], {"withdrawal_state": state},
+                            {"withdrawal_state": int(_WITHDRAWAL.PENDING)}),)
+        choice_states = {WithdrawalChoice.WITHDRAWN: _WITHDRAWAL.WITHDRAWN,
+                         WithdrawalChoice.NOT_RETRACTABLE: _WITHDRAWAL.NOT_RETRACTABLE,
+                         WithdrawalChoice.FAILED: _WITHDRAWAL.FAILED,
+                         WithdrawalChoice.UNKNOWN: _WITHDRAWAL.UNKNOWN}
+        result_state = int(choice_states[command.choice])
+        failed = command.choice in (WithdrawalChoice.FAILED, WithdrawalChoice.UNKNOWN)
+        rows = []
+        if state == int(_WITHDRAWAL.PENDING):
+            before, after = {"withdrawal_state": state}, {"withdrawal_state": result_state}
+            if command.choice is WithdrawalChoice.WITHDRAWN:
+                before["status"], after["status"] = delivery["status"], int(_DELIVERY_STATUS.WITHDRAWN)
+            if failed:
+                before["withdrawal_error_json"] = delivery["withdrawal_error_json"]
+                after["withdrawal_error_json"] = dict(command.error)
+            rows.append(_update("deliveries", delivery["id"], before, after))
+        elif state == result_state:
+            # 新请求采用原交付责任，不改写已结束的实际结果。
+            if not json_equal(delivery["withdrawal_error_json"], command.error):
+                raise TransactionError("后到撤回请求采用的原错误依据不同")
+        else:
+            return ()
+        if command.choice is WithdrawalChoice.WITHDRAWN:
+            item_status, code, details = 2, None, None
+        elif command.choice is WithdrawalChoice.NOT_RETRACTABLE:
+            item_status, code, details = 3, None, None
+        else:
+            name = ("delivery_withdrawal_failed" if command.choice is WithdrawalChoice.FAILED
+                    else "delivery_position_unconfirmed")
+            item_status, code = 4, item_error_id("cancel_delivery_items", name)
+            details = {"delivery_id": str(delivery["id"])}
+            validate_error_details(name, details)
+        for item in self._items:
+            rows.append(_update("cancel_delivery_items", item["id"],
+                {"status": item["status"], "error_code": item["error_code"],
+                 "error_details_json": item["error_details_json"]},
+                {"status": item_status, "error_code": code, "error_details_json": details}))
+        return tuple(rows)
 
     def plan(self, scope) -> CommandPlan:
-        connection = scope.connection
-        command = self._command
-        saved = saved_transaction_events(connection, self._key)
+        saved = saved_transaction_events(scope.connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
-        delivery = row_facts(connection, "deliveries", command.delivery_id)
-        if delivery is None:
-            raise ConsistencyError(f"交付不存在: {command.delivery_id}")
-        self._state["deliveries"] = {command.delivery_id: dict(delivery)}
-        # 报告关联解析沿撤回明细→取消成员/交付取事实。
-        self._state.setdefault("cancel_delivery_items", {})
-        self._state.setdefault("cancel_items", {})
-        state = delivery["withdrawal_state"]
-        choice = command.choice
-        rows: list = []
-        if choice is WithdrawalChoice.REQUESTED:
-            if state != int(_WITHDRAWAL.NOT_REQUESTED):
-                return self._already()
-            delivery_row = _update(
-                "deliveries", command.delivery_id,
-                {"withdrawal_state": state},
-                {"withdrawal_state": int(_WITHDRAWAL.PENDING)})
-            rows.append(delivery_row)
-        else:
-            if state != int(_WITHDRAWAL.PENDING):
-                return self._already()
-            status = delivery["status"]
-            if choice is WithdrawalChoice.WITHDRAWN:
-                after_state = int(_WITHDRAWAL.WITHDRAWN)
-                delivery_row = _update(
-                    "deliveries", command.delivery_id,
-                    {"withdrawal_state": state, "status": status},
-                    {"withdrawal_state": after_state,
-                     "status": int(_DELIVERY_STATUS.WITHDRAWN)})
-            elif choice is WithdrawalChoice.NOT_RETRACTABLE:
-                after_state = int(_WITHDRAWAL.NOT_RETRACTABLE)
-                delivery_row = _update(
-                    "deliveries", command.delivery_id,
-                    {"withdrawal_state": state},
-                    {"withdrawal_state": after_state})
-            elif choice is WithdrawalChoice.FAILED:
-                after_state = int(_WITHDRAWAL.FAILED)
-                delivery_row = _update(
-                    "deliveries", command.delivery_id,
-                    {"withdrawal_state": state,
-                     "withdrawal_error_json": None},
-                    {"withdrawal_state": after_state,
-                     "withdrawal_error_json": dict(command.error)})
-            else:
-                after_state = int(_WITHDRAWAL.UNKNOWN)
-                delivery_row = _update(
-                    "deliveries", command.delivery_id,
-                    {"withdrawal_state": state,
-                     "withdrawal_error_json": None},
-                    {"withdrawal_state": after_state,
-                     "withdrawal_error_json": dict(command.error)})
-            rows.append(delivery_row)
-            item = self._pending_item(connection)
-            if item is not None:
-                if choice is WithdrawalChoice.WITHDRAWN:
-                    item_after = 2
-                    error = None
-                elif choice is WithdrawalChoice.NOT_RETRACTABLE:
-                    item_after = 3
-                    error = None
-                else:
-                    item_after = 4
-                    error = (self._FAILED_ITEM_ERRORS.get(
-                        "withdrawal_failed")
-                        if choice is WithdrawalChoice.FAILED
-                        else self._FAILED_ITEM_ERRORS.get(
-                            "withdrawal_unconfirmed"))
-                before = {"status": 1, "error_code": None,
-                          "error_details_json": None}
-                after = {"status": item_after, "error_code": error,
-                         "error_details_json": (
-                             dict(command.error) if error is not None
-                             else None)}
-                rows.append(_update(
-                    "cancel_delivery_items", item["id"], before, after))
-                self._owners[("cancel_delivery_items", item["id"])] = (
-                    "action", item["action_owner_id"])
-        self._owners[("deliveries", command.delivery_id)] = (
-            "delivery", command.delivery_id)
+            return self._reuse(scope, saved)
+        delivery = self._load(scope)
+        rows = self._rows(delivery)
+        if not rows:
+            return self._already()
         allocation = scope.allocate(1)
-        event = _envelope(
-            allocation.first_event_id, allocation.txn_id,
-            _DELIVERY_CHANGED_EVENT, 7, tuple(rows), command.occurred_at)
-        return CommandPlan(
-            events=(event,), owners=self._owners, state_rows=self._state,
-            result=CleanupItemSaved(
-                CleanupItemDisposition.SAVED, command.delivery_id))
-
-    def _pending_item(self, connection):
-        with closing(connection.execute(
-            "SELECT c.id, c.cancel_item_id, ci.action_id"
-            " FROM cancel_delivery_items c"
-            " JOIN cancel_items ci ON ci.id = c.cancel_item_id"
-            " WHERE c.delivery_id = ? AND c.status = 1",
-            (self._command.delivery_id,),
-        )) as cursor:
-            row = cursor.fetchone()
-        if row is None:
-            return None
-        owner_row = row_facts(
-            connection, "cancel_items", int(row[1]))
-        if owner_row is not None:
-            self._state["cancel_items"][int(row[1])] = owner_row
-        item = row_facts(connection, "cancel_delivery_items", int(row[0]))
-        if item is None:
-            return None
-        self._state.setdefault("cancel_delivery_items", {})[item["id"]] = item
-        item["action_owner_id"] = int(row[2])
-        return item
+        event = _envelope(allocation.first_event_id, allocation.txn_id,
+            _DELIVERY_CHANGED_EVENT, 7, rows, self._command.occurred_at)
+        return CommandPlan(events=(event,), owners=self._owners, state_rows=self._state,
+            result=CleanupItemSaved(CleanupItemDisposition.SAVED, self._command.delivery_id))
 
     def _already(self) -> CommandPlan:
-        return CommandPlan(
-            events=(), owners=self._owners, state_rows=self._state,
-            read_only=True,
-            result=CleanupItemSaved(
-                CleanupItemDisposition.ALREADY, self._command.delivery_id))
+        return CommandPlan(events=(), owners=self._owners, state_rows=self._state, read_only=True,
+            result=CleanupItemSaved(CleanupItemDisposition.ALREADY, self._command.delivery_id))
 
-    def _reuse(self, saved) -> CommandPlan:
-        kinds = [(event["type"], event["reason"]) for event in saved]
-        if kinds != [(_DELIVERY_CHANGED_EVENT, 7)]:
-            raise TransactionError("原事务不是撤回推进，不能作为重送核实")
-        if saved[0]["occurred_at"] != self._command.occurred_at:
-            raise TransactionError("撤回推进的事实时刻与原事务不同")
+    def _reuse(self, scope, saved) -> CommandPlan:
+        if (len(saved) != 1 or (saved[0]["type"], saved[0]["reason"]) != (_DELIVERY_CHANGED_EVENT, 7)
+                or saved[0]["occurred_at"] != self._command.occurred_at
+                or saved[0]["body"]["evidence"] != {}):
+            raise TransactionError("原事务不是相同时刻的完整撤回推进")
+        transaction = saved[0]["transaction"]
+        prior = read_transaction_range(scope.connection, transaction.txn_id - 1) if transaction.txn_id > 1 else None
+        boundary = HistoryBoundary(0, 0) if prior is None else HistoryBoundary(prior.txn_id, prior.last_event_id)
+        delivery = self._load(scope, boundary)
+        rows = self._rows(delivery)
+        expected = [{"table": row.table, "id": row.row_id,
+            "before": {"exists": row.before.exists, "values": dict(row.before.values)},
+            "after": {"exists": row.after.exists, "values": dict(row.after.values)}} for row in rows]
+        if not expected or not json_equal(saved[0]["body"]["rows"], expected):
+            raise TransactionError("原撤回事务的交付、分支、错误或完整等待集合不同")
         return self._already()
 
 

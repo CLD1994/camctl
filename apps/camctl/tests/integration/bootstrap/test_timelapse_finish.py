@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+
 import asyncio
 import time
 from decimal import Decimal
@@ -88,6 +90,7 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
+        RESULT_FILES_CONTRACT,
         EvidenceContract(type="stop_returned", version=1, operation="stop",
                          fields=frozenset()),
         EvidenceContract(type="stop_confirmed", version=1, operation="stop",
@@ -413,7 +416,7 @@ class TestTimelapseCheckRounds:
         deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         driver = _ActivityDriver()
 
-        class _FlakyResults:
+        class _FlakyResults(ResultsDouble):
             """第一轮列举抛错，之后返回完整结果。"""
 
             def __init__(self) -> None:

@@ -7,12 +7,16 @@
 from __future__ import annotations
 
 import enum
+from sqlite3 import Error as DatabaseAccessError
 from dataclasses import dataclass
 from typing import Any, Callable, Generic, TypeVar
 
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import OperationKey
-from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.runtime import DirectoryBindingError, OwnedConnection
+
+# 数据访问及部署绑定错误作为持久化端口的结果类型公开。业务层
+# 可以识别这些错误，不需要依赖 SQLite 或连接创建模块。
 
 T = TypeVar("T")
 

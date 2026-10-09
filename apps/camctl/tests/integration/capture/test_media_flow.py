@@ -61,10 +61,10 @@ class ReadDriverDouble:
         self.content = content
         self.opens: list[tuple[object, int]] = []
 
-    async def open_read(self, source: SourceFile, offset: int, ticket):
+    async def open_read(self, source: SourceFile, offset: int, ticket, *, idle_timeout_s):
         self.opens.append((source, offset))
         return ReadSession(
-            source, offset, _Stream(self.content[offset:]), Decimal("10"))
+            source, offset, _Stream(self.content[offset:]), idle_timeout_s)
 
 
 class ProbeTools:
@@ -112,9 +112,35 @@ def _flow(pipeline, driver, tools) -> MediaFlow:
 
 class TestDriverReadSessions:
     async def test_opens_session_by_completed_file_facts(self, pipeline):
+        from camctl.contracts.values import new_operation_key
+        from camctl.operations.attempts import (
+            AttemptConfig, AttemptIntent, AttemptTarget, OperationKind,
+        )
+        from camctl.outputs.qualification import FileCandidate, OperationConfig
+        from camctl.persistence.models import DbOutcomeKind
+        from camctl.persistence.repositories.operations import OperationRepository
+        from camctl.persistence.repositories.outputs import OutputsRepository, SlotRequest
+
         owned = pipeline[0]
         driver = ReadDriverDouble(_CONTENT)
-        sessions = DriverReadSessions(owned, driver, ticket=None)
+        repository = OutputsRepository()
+        now = 1_750_000_100_000_000
+        granted = repository.grant_file(FileCandidate(
+            action_id=1, item_id=None, processing_id=1, output_id=None,
+            source_device_file_id=11, target_extension="mp4", delivery_extension=None,
+            delivery_display_name=None,
+            config=OperationConfig(3, Decimal("10"), Decimal("0")), occurred_at=now),
+            new_operation_key(), owned)
+        assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+        copy_id = granted.value.copy_id
+        slot = repository.grant_read_slot(SlotRequest(copy_id, now), new_operation_key(), owned)
+        assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+        begun = OperationRepository().begin_attempt(AttemptIntent(
+            "read", 1, OperationKind.READ_FILE, AttemptTarget(copy_id=copy_id), None,
+            AttemptConfig(3, Decimal("10"), Decimal("0")), now, copy_round=1),
+            new_operation_key(), owned)
+        assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
+        sessions = DriverReadSessions(owned, driver, ticket=begun.value.ticket)
         session = await sessions.open_session(11, 4)
         assert session.position() == 4
         source, offset = driver.opens[0]
@@ -232,9 +258,9 @@ class _FlakyReadDriver:
     def __init__(self) -> None:
         self.opens = 0
 
-    async def open_read(self, source: SourceFile, offset: int, ticket):
+    async def open_read(self, source: SourceFile, offset: int, ticket, *, idle_timeout_s):
         self.opens += 1
-        return ReadSession(source, offset, _FailingStream(), Decimal("10"))
+        return ReadSession(source, offset, _FailingStream(), idle_timeout_s)
 
 
 class TestCopyRetryInterval:

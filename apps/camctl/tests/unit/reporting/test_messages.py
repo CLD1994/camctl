@@ -36,6 +36,8 @@ def _job(**overrides) -> JobMessage:
         instance_id=_INSTANCE,
         db_path="/var/lib/camctl/state.db",
         staging_path="/var/lib/camctl/staging/reports/report-1.json",
+        staging_root="/var/lib/camctl/staging", ready_root="/var/lib/camctl/ready",
+        processing_root="/var/lib/camctl/processing",
         entity_batch_size=32,
         event_batch_size=256,
         busy_timeout_ms=9000,
@@ -57,6 +59,17 @@ def _success(**overrides) -> ResultSuccessMessage:
 
 
 class TestRoundTrip:
+    def test_job_wire_preserves_current_directory_binding(self) -> None:
+        payload = json.loads(encode_message(_job()))
+        binding = {"staging_root": "/deployment/staging", "ready_root": "/deployment/ready",
+                   "processing_root": "/deployment/processing"}
+        payload.update(binding)
+
+        decoded = decode_message(json.dumps(payload).encode("utf-8"))
+
+        assert {name: getattr(decoded, name) for name in binding} == binding
+        assert json.loads(encode_message(decoded)) == payload
+
     @pytest.mark.parametrize("message", [
         ReadyMessage(),
         ShutdownMessage(),

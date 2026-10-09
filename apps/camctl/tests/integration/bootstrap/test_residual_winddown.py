@@ -12,6 +12,8 @@ execute_command）同契约驱动、查询与停止端口替身组合：录像�
 
 from __future__ import annotations
 
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+
 import asyncio
 import contextlib
 import sqlite3
@@ -89,6 +91,7 @@ _EVIDENCE = EvidenceRegistry(
                          identity_field="activity_id"),
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
+        RESULT_FILES_CONTRACT,
     )
 )
 
