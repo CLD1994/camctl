@@ -103,9 +103,12 @@ def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
 
 def _resume_recording_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     """核实已形成的原录像申请，取消入口不取得新的 READ 业务资格。"""
-    from camctl.capture.handlers import resume_recording_results
+    from camctl.capture.handlers import resume_canceled_recording_results, resume_recording_results
 
     resume_recording_results(owned,
+        pending_recording_results=deps.capture_recording_results,
+        retry_gate=deps.capture_retry_gate)
+    resume_canceled_recording_results(owned,
         pending_recording_results=deps.capture_recording_results,
         retry_gate=deps.capture_retry_gate)
 

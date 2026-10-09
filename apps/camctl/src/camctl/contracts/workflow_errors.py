@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Mapping
+from typing import Any, Mapping
 
 from camctl.resources import resource_bytes
 from camctl.contracts.json_values import parse_exact_json
@@ -94,6 +94,29 @@ def validate_error_details(code: str, details) -> None:
     errors = validation_errors(_details_validator(code), details)
     if errors:
         raise ValueError(f"公共错误 {code} 的详情不符合登记结构: {errors[0].message}")
+
+
+def validate_public_error(value: Mapping[str, Any]) -> None:
+    """验证公共错误结构和已登记含义；完整未知驱动错误保持开放。"""
+    if not isinstance(value, Mapping):
+        raise ValueError("公共错误必须是对象")
+    # Mapping 是保存端口的输入类型；校验副本不改变调用方持有的事实。
+    document = dict(value)
+    if isinstance(document.get("details"), Mapping):
+        document["details"] = dict(document["details"])
+    validator = create_validator({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "status-report.schema.json#/$defs/error",
+    })
+    errors = validation_errors(validator, document)
+    if errors:
+        raise ValueError(f"公共错误结构不符合契约: {errors[0].message}")
+    code = document["code"]
+    spec = _registry()["codes"].get(code)
+    if spec is not None:
+        if document["stage"] != spec["stage"]:
+            raise ValueError(f"公共错误 {code} 的阶段不符合登记: {document['stage']!r}")
+        validate_error_details(code, document["details"])
 
 
 def item_error_id(table: str, name: str) -> int:

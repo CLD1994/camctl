@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from camctl.capture.handlers import CaptureRuntime, DeviceControlPort, _control_call, capture_handler
 from camctl.capture.residual import pass_residual_gate
+from camctl.contracts.enums import enum_for
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.scheduling import (
@@ -14,7 +15,7 @@ from camctl.scheduling.rules import LaunchWindow
 pytestmark = pytest.mark.asyncio
 
 
-def _runtime(mocker, *, now=100):
+def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime = mocker.create_autospec(CaptureRuntime, instance=True)
     runtime.pending_read_results = {}
     runtime.pending_read_business = {}
@@ -36,7 +37,8 @@ def _runtime(mocker, *, now=100):
     runtime.action.return_value = {
         "id": 2, "device_id": "cam-1", "status": 2, "cancel_requested": 0,
         "scheduled_at": 100, "max_delay_ms": 1,
-        "type": 2, "effective_params_json": {"type": "ordinary", "duration_s": 60},
+        "type": int(enum_for("actions.type")[action_type.upper()]),
+        "effective_params_json": {"type": "ordinary", "duration_s": 60},
         "execution_spec_json": {"target_duration_ms": 60000},
     }
     return runtime
@@ -46,7 +48,7 @@ def _runtime(mocker, *, now=100):
     "camera_take_photo", "camera_record", "camera_timelapse",
 ])
 async def test_first_control_waits_without_grant_or_device_call(mocker, action_type):
-    runtime = _runtime(mocker)
+    runtime = _runtime(mocker, action_type=action_type)
     mocker.patch("camctl.capture.residual.pass_residual_gate", return_value=False)
     await capture_handler(action_type)(2, runtime)
     runtime.grant.assert_not_called()
@@ -134,12 +136,18 @@ async def test_valid_trigger_keeps_existing_gate_conditions(mocker, status, now)
     "camera_take_photo", "camera_record", "camera_timelapse",
 ])
 async def test_unstarted_cancel_finishes_locally_without_device_control(mocker, action_type):
-    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.repositories.capture import CaptureRepository, CaptureResult
 
-    runtime = _runtime(mocker)
+    runtime = _runtime(mocker, action_type=action_type)
     runtime.action.return_value["cancel_requested"] = 1
     runtime.capture = mocker.create_autospec(CaptureRepository, instance=True)
-    runtime.capture.finish_canceled_capture.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    runtime.capture.finish_canceled_capture.return_value = DbOutcome(
+        DbOutcomeKind.COMPLETED, CaptureResult(action_status=6, plan_status=1, output_ids=()))
+    runtime.capture.canceled_recording_results.return_value = ()
+    runtime.pending_recording_results = {}
+    runtime.retry_gate = None
+    runtime.resume_recording_results.side_effect = lambda identity: CaptureRuntime.resume_recording_results(
+        runtime, identity)
     mocker.patch("camctl.capture.handlers._settle_input_read_runs")
     await capture_handler(action_type)(2, runtime)
     runtime.capture.finish_canceled_capture.assert_called_once()

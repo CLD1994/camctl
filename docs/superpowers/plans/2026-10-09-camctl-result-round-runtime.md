@@ -508,15 +508,23 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 
 #### 任务二：取消拥有者结束原录像 RESULTS
 
-2026-10-09 的只读源代码核对发现另一条独立责任缺口：`_advance_canceled_capture` 对录像调用 `_finish_canceled_capture`；后者只保存 `FinishCanceledCapture` 并收场内部 READ。`CaptureRepository.finish_canceled_capture` 只执行取消模式的 `FinishCaptureCommand`，没有结束原录像 RESULTS。`TargetSettlement._settle_capture` 仅对已启动延时摄影等待 RESULTS，录像目标因此可能已为 CANCELED、取消请求已成功，而原 RESULTS 仍 ACTIVE、retry 为 1。尚未执行这一分区的公开反例；此项是源代码证据，不记行为红或完成。
+2026-10-09，root 的 `/tmp/camctl-goal-canceled-recording-results-red.log` 为 6 failed、4.00s。公开取消已经生效，实际 handler、普通 scheduling、受限 winddown 分别保存动作 CANCELED，随后真实 cancel flow 成功；原 RESULTS 仍 ACTIVE、retry 为 1。各入口分别覆盖无普通 holder 及实际 COMMIT 前 UNKNOWN 后可靠退役的普通 holder，原尝试、媒体、文件及全部外部调用守恒断言通过，仅原 run 最终收场断言失败。
+
+以下实现分工是按实际代码确定的建议，不改变正式行为。先为 `finish_canceled_capture` 的录像分支组合原取消动作事务与可选原 RESULTS 的 CANCELED 事件；沿原活动核对唯一责任，无 run 不建立，已有终态保持。复用现有 `FinishCanceledCapture` 完整输入和共享 `PendingRecordingResults`，按请求类型派发普通或取消保存。先核普通原键、可靠退役后才形成取消申请；取消申请在第一次仓储调用前固定自身 key、T1 和完整输入，UNKNOWN／回滚时保留，handler 与所有默认入口在终态过滤前核实。
+
+已保存动作 CANCELED、同会话没有 holder 而原 run 仍 PENDING／ACTIVE 时，默认前置按持久责任发现该项。新申请固定原动作取消事件的 `occurred_at`，使用新 key；这是补存已生效的用途结束事实，不声称恢复丢失的旧申请。无需取得当前时钟、驱动、RESULTS、READ 或媒体资格。取消汇总独立核对原 RESULTS 尝试：run 可先保存 CANCELED，但实际调用或结果保存尚未结束时不得汇总成功。正式 `operation-fields.md` 允许这种 run 终态与 attempt 在途组合，不能额外要求所有尝试已结束才允许用途取消。
+
+后续步骤依次为：六项有效红的共同事务修复；COMMIT 前后 UNKNOWN 的实际消费者恢复；终态过滤及 fresh Owned 的持久责任发现；无 run、已有最终结果、在途尝试控制分区；原普通核实／取消／READ 默认消费者回归。每组以根独占真实运行记录结论，不从六项通过推定所有恢复分区完成。
+
+任务二使用上述六项公开反例验证取消动作、原 RESULTS 用途和取消请求之间的责任，不能以动作 CANCELED 单独证明原调用已经结束。
 
 正式规则要求用途因取消而不再承担核实责任时，原 run 保存 CANCELED、retry 为 0；原实际尝试、次数和文件观察保持。已有任何 run 终态均保持，不能将已存 SUCCEEDED／FAILED／UNCONFIRMED 改成 CANCELED。普通申请退役只解除旧申请的阻塞，不能完成此责任，也不能凭此使取消请求成功。
 
 | 原录像 RESULTS 事实 | 取消拥有者的处理 |
 | --- | --- |
 | 原活动尚未建立 RESULTS，且没有已开始调用或未保存结果 | 不为形式完整新建 RESULTS。 |
-| 原 RESULTS PENDING／ACTIVE，已开始尝试均实际结束并可靠保存，取消已经生效且用途已放弃 | 沿原 action／activity／run 结束为 CANCELED，共同清除 retry；次数、配置、原尝试和实际观察不变，不新查询文件。 |
-| 原 RESULTS 调用仍在执行，或实际结果／保存责任未确认 | 保存并核实原实际结果，保留责任；不能伪造尝试失败、提前结束必要保存或借退役跳过。 |
+| 原 RESULTS PENDING／ACTIVE，取消已经生效且用途已放弃 | 沿原 action／activity／run 结束为 CANCELED，共同清除 retry；次数、配置、原尝试和实际观察不变，不新查询文件。 |
+| 原 RESULTS 调用仍在执行，或实际结果／保存责任未确认，run 可以已经 CANCELED | 保存并核实原实际结果，保留责任，取消请求继续等待；不能伪造尝试失败、提前结束必要保存或借退役跳过。 |
 | 原 RESULTS 已有最终结果，包括 UNCONFIRMED | 保留原最终结果、错误、配置与次数；迟到尝试仅保存其实际结果，不重开或覆盖原 run。 |
 | 原 run 身份、历史或保存结果不可靠 | 按状态库错误停止，保留原取消及保存责任，不汇总取消成功。 |
 
@@ -526,7 +534,21 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 - [ ] 断言旧普通 F 未提交且已退役，原 run 同一身份变为 CANCELED／retry=0，原尝试、T0、次数、配置、媒体与文件观察保持，零新增 RESULTS／READ／工具调用，取消请求等待适用责任可靠结束再完成。直接取消但没有 ordinary holder 的同类世界也应覆盖，以区分旧取消缺口与本任务退役引入的回归。
 - [ ] root 取得有效红后，核原已保存 attempt／run 终态控制分区、保存前／后 UNKNOWN、同会话与 fresh Owned 恢复，再授权取消 run 生产修改；此前保留任务二为未完成，不将其绿色前提假定成立。
 
-本节的任务一按已授权范围实施；任务二保留为下一步独立有效反例及实现任务。二者分别记录门禁、审查和提交范围。第一版普通延时集合结束、raw READ 技术校验、READ 取消前置及 v2 不在本节范围内。
+任务二的完整输入核验还有一项静态缺口，尚无行为红：`_FinishCanceledCaptureCommand._reuse` 将 `unstarted` 核验交给 `FinishCaptureCommand._reuse`，而后者只在重送输入为 `unstarted=True` 时验证可靠未启动。原合法未启动取消申请 G 已提交后，用相同 action、key、T1 将 `unstarted` 改为 False，会跳过该核验；原取消事件及无产物输入仍满足其余复用条件。这个限制来自原公共完成命令，新取消 wrapper 继续使用它；当前已启动录像的 COMMIT 前后 UNKNOWN 恢复不能证明未启动标记的完整输入核验。
+
+最窄公开前置为：真实受理录像动作，公开 `start_action` 将业务转为执行中，但不授予设备启动、不建立实际启动尝试；通过取消仓储公开开始、固定并以 PRE_START 生效取消；实际取消拥有者形成 `FinishCanceledCapture(unstarted=True)`，记录其 G／T1／完整输入。保存或 COMMIT 后响应未知时关闭原连接，以 fresh Owned 核实原 G；同键仅改变 `unstarted`，其余输入和目标保持，观察当前复用行为，再核原 True 输入合法重送、历史与终态不变。前提不得使用 SQL 改业务状态，也不得伪造 End、活动或设备结果。反向 False→True 须从公开合法事实另行构造，不能拿已经确认启动的世界代替合法未启动输入。
+
+下一阶段先界定 `unstarted` 是原请求身份的一部分，还是只提供派生的执行资格证明，再确定可证伪预期及最窄核验方式。若属于身份，应在原 G 的共同输入核验边界可靠固定并核原值；若属于派生证明，应明确同键复用时核对原事实的规则。不能从当前 `not_started` 或某条释放事件推测首次请求的布尔值，不能为通过局部用例临时补历史字段。需要新 history evidence 时，先提出具体方案并完成登记决策。影响范围为取消公共仓储、无 RESULTS run 的未启动录像和共享 G replay；修复后审计同样使用 `FinishCaptureCommand` 的完成入口与改变输入保护。此项不修改原 attempt，不新增 RESULT／READ／媒体端口资格，行为红、正式字段方案和实现仍未完成。
+
+本节分别记录任务一和任务二的验证范围；任务二仍有上述未启动输入身份缺口。第一版普通延时集合结束、raw READ 技术校验、READ 取消前置及 v2 不在本节范围内。
+
+#### 取消恢复任务二的当前验证与提交范围
+
+2026-10-09，Linux 开发容器、Python 3.11.16：`/tmp/camctl-goal-recording-read-final-bootstrap.log` 为 70 passed、39.72s，覆盖共同取消事务、五个默认入口的 COMMIT 前后 UNKNOWN、无会话申请的持久责任发现、在途尝试等待、原普通申请及 READ 恢复。另五项有效反例证明迟到实际 RESULTS 保存会更新 action 的 `last_event_id`；持久责任发现通过实体历史关联取得唯一 ACTION_FINISHED 取消事件及其原时刻，不能把最后拥有记录当作动作取消事件。
+
+全量单元在最后一次持久发现修改之前为 3717 passed、1 skipped、2 warnings，日志为 `/tmp/camctl-goal-cancel-and-errors-unit-green.log`；不将此记录声明为最后修改后的完整门禁。较宽 capture 检查为 106 passed、3 failed，均涉及仍待确定的 UNSATISFIED 错误详情。cancellation 检查为 101 passed、2 failed，两个入口缺少 `withdrawal_execute`；用修改前 settlement 模块单独运行同两项仍失败，此对照不代表旧版本全量验收。
+
+用户授权将全部当前变更合并为本地 WIP 快照，包括未完成项，不为提交拆分或历史整理追加门禁。新 `test_result_exhaustion_save_recovery.py` 的四项 photo/timelapse × COMMIT 前后 UNKNOWN 候选尚未运行；下一步核实有限耗尽申请的原 request、key、T1 保存责任。此快照不代表任务二、capture 或完整 apps/camctl 已完成。
 
 
 #### 取消恢复任务一的当前验证与提交范围

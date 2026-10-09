@@ -23,6 +23,7 @@ from camctl.capture.models import (
 )
 from camctl.capture.handlers import CaptureRuntime, capture_handler
 from camctl.contracts.values import new_operation_key
+from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.operations.attempts import (
     AttemptConfig,
@@ -73,6 +74,12 @@ pytestmark = pytest.mark.asyncio
 _NOW = 1_750_000_000_000_000
 
 _RESULT_CONTRACT = "task_scope_files"
+
+
+def _unconfirmed_error():
+    code = "capture_result_unconfirmed"
+    return {"code": code, "stage": registered_error(code)["stage"],
+            "details": {"activity_id": "1", "reason": "outputs_unknown"}}
 
 
 def _environment(
@@ -361,8 +368,8 @@ class TestResultSetConfirmation:
                 contract=_RESULT_CONTRACT,
                 observation={"reason": "listing_failed"},
                 capture={"status": "unconfirmed",
-                         "error": {"code": "result_unconfirmed"}},
-                error={"code": "result_unconfirmed"},
+                         "error": _unconfirmed_error()},
+                error=_unconfirmed_error(),
             ))
             assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
             row = _value(
@@ -375,7 +382,7 @@ class TestResultSetConfirmation:
             assert json.loads(row[2])["status"] == "unconfirmed"
             assert row[3] == 1
             assert row[4] is None
-            assert json.loads(row[5]) == {"code": "result_unconfirmed"}
+            assert json.loads(row[5]) == _unconfirmed_error()
         finally:
             owned.connection.close()
 
@@ -619,8 +626,8 @@ class TestCloseResultCheckUnconfirmed:
             contract=_RESULT_CONTRACT,
             observation={"reason": "attempts_exhausted"},
             capture={"status": "unconfirmed",
-                     "error": {"code": "result_unconfirmed"}},
-            error={"code": "result_unconfirmed"},
+                     "error": _unconfirmed_error()},
+            error=_unconfirmed_error(),
         )
 
     async def test_budget_exhausted_closes_run_and_result_set(
@@ -644,7 +651,7 @@ class TestCloseResultCheckUnconfirmed:
                 " completion_evidence_json, json_extract(capture_json, '$.status'),"
                 " json_extract(last_error_json, '$.code')"
                 " FROM device_activities WHERE id = 1")
-            assert row == (4, 1, None, "unconfirmed", "result_unconfirmed")
+            assert row == (4, 1, None, "unconfirmed", "capture_result_unconfirmed")
             events = owned.connection.execute(
                 "SELECT transaction_id, event_type FROM history_events"
                 " WHERE id > 1 ORDER BY id").fetchall()
@@ -677,8 +684,8 @@ class TestCloseResultCheckUnconfirmed:
                     contract=_RESULT_CONTRACT,
                     observation={"reason": "other"},
                     capture={"status": "unconfirmed",
-                             "error": {"code": "result_unconfirmed"}},
-                    error={"code": "result_unconfirmed"},
+                             "error": _unconfirmed_error()},
+                    error=_unconfirmed_error(),
                 ), key, owned)
             assert other.kind is DbOutcomeKind.ROLLED_BACK
             assert "重送" in str(other.error)

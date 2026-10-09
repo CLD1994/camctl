@@ -114,6 +114,26 @@ class TargetSettlement:
                     raise ConsistencyError("取消拍摄终态缺少可靠无需停止或停止结束依据")
         elif not (facts.not_started or (facts.activity is not None and facts.activity["activity_state"] == 3)):
             raise ConsistencyError("取消拍摄终态缺少可靠无需停止或停止结束依据")
+        if action["type"] == 2:
+            with closing(connection.execute(
+                "SELECT id,kind,action_id,activity_id,status FROM operation_runs"
+                " WHERE action_id=? AND kind=? ORDER BY id",
+                (target_action_id, int(_KIND.CHECK_CAPTURE_RESULTS)),
+            )) as cursor:
+                rows = cursor.fetchall()
+            if rows:
+                if (len(rows) != 1 or facts.activity is None or rows[0][1:4] !=
+                        (int(_KIND.CHECK_CAPTURE_RESULTS), target_action_id, facts.activity["id"])):
+                    raise ConsistencyError("录像取消的原核实责任与活动不符")
+                run_id, _kind, _action, _activity, result_status = rows[0]
+                if result_status in (int(_RUN.PENDING), int(_RUN.ACTIVE)):
+                    return SettlementOutcome(complete=False)
+                with closing(connection.execute(
+                    "SELECT 1 FROM operation_attempts WHERE run_id=?"
+                    " AND (status=1 OR result_json IS NULL) LIMIT 1", (run_id,),
+                )) as cursor:
+                    if cursor.fetchone() is not None:
+                        return SettlementOutcome(complete=False)
         if action["type"] == 3 and not facts.not_started:
             if facts.activity is None:
                 raise ConsistencyError("取消延时摄影缺少原活动及必要文件核实责任")

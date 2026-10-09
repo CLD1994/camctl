@@ -130,7 +130,7 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 
 2026-10-09，Linux 开发容器、Python 3.11.16：root 独占运行新单元文件，`/tmp/camctl-goal-result-errors-unit-red.log` 为 26 failed、4 passed、0.10s；不完整结构、登记阶段和详情均未被拒绝，完整登记值及未知驱动值保真控制通过。真实组件文件 `/tmp/camctl-goal-result-errors-history-red.log` 为 4 failed、2.34s；photo/timelapse 与独立 activity ID 四项的公开启动、两轮实际结果、次数耗尽、动作失败及正式动作错误全部通过，活动核实错误仍只有 `code: result_unconfirmed`。这些有效红允许实施已确定的共同结构验证和耗尽构造；UNKNOWN 保存责任及报告生成还未验证。
 
-当前交付可执行计划与首批测试候选，生产未修改，pytest 未执行。UNCONFIRMED、公共形状、未知完整驱动错误保真和历史实例 STATE 分类有正式依据；非空 UNSATISFIED 错误 reason、必要检查失败映射及应急错误身份仍需决策或反例核验。RESULTS v2、历史格式迁移、完整媒体失败优先阶段、真实设备与物理断电验收不属于本计划完成声明。
+UNCONFIRMED、公共形状、未知完整驱动错误保真和历史实例 STATE 分类有正式依据；非空 UNSATISFIED 错误 reason、必要检查失败映射及应急错误身份仍需决策或反例核验。RESULTS v2、历史格式迁移、完整媒体失败优先阶段、真实设备与物理断电验收不属于本计划完成声明。实施与验证范围见下文。
 
 ### 首批测试候选（2026-10-09）
 
@@ -138,4 +138,12 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 
 已新增 `tests/integration/capture/test_result_error_history.py` 的四项候选：公开 photo/timelapse × action/activity 同 ID 或不同 ID。真实受理、调度、START 和两轮 typed v1 RESULTS 保存完整 OTHER 文件；缺必需类别但集合未定继续有限核实，随后预算耗尽。断言活动核实错误完整且指真实 activity、原 Outcome/attempts/文件/历史前缀保持，不增加设备或 RESULTS 调用，不从 v1 推定集合已结束。没有借正常 v1 成功路径准备条件。
 
-三十四项仅完成 AST、独立 Python 导入及补丁格式检查，未运行 pytest，不能登记为有效红或绿色。首批文件已冻结交根独占验证；compound/耗尽消费者 UNKNOWN 矩阵、事件守卫反例及报告生成阶段尚未准备。本次只有新测试及本计划修改，生产保持不变。
+首批三十四项由根 Agent 独占验证，红灯及后续实施证据见下文。compound/耗尽消费者 UNKNOWN 矩阵、事件守卫及报告生成阶段单独验证。
+
+### 公共验证的实施与红灯依据
+
+根 Agent 独占运行的 `/tmp/camctl-goal-result-errors-unit-red.log` 为 26 failed、4 passed、0.10s；二十六项均为应拒绝输入没有抛出 ValueError，四项完整已登记/未知错误的保真通过。`/tmp/camctl-goal-result-errors-history-red.log` 为 4 failed、2.34s；公开前置、两轮原完整输入、有限耗尽及动作最终错误均通过，四项都在活动 last_error 仅为 `{code: result_unconfirmed}` 的断言失败。此证据只授权相应已确定分区，不覆盖 UNKNOWN 或报告生成。
+
+共同验证已接入 `contracts/workflow_errors.py::validate_public_error`，通过既有精确校验器和本地注册表引用正式 `status-report.schema.json#/$defs/error`，登记码额外核唯一 stage 与 details Schema。完整未知码只校验公共结构；输入原值不改写。`ResultSetSave` 的 capture.error 与 error 复用该入口；原阶段、依据与时间规则保持。事件守卫和报告尚未修改；耗尽构造由根 Agent 独立维护。
+
+2026-10-09，Linux 开发容器、Python 3.11.16：根独占复验公共结构单元为 30 passed、0.15s，四项公开耗尽组件为 4 passed、2.24s。耗尽错误使用正式 `capture_result_unconfirmed`、`stage=execution`、实际 activity ID 和 `reason=outputs_unknown`。较宽 capture 检查为 106 passed、3 failed；三项 UNSATISFIED 输入仍缺正式完整错误，所需分类正在等待用户决策，不能为使门禁通过自行选择 reason。新的四项耗尽保存 UNKNOWN 候选尚未执行，事件守卫、报告及历史 STATE 分类仍未闭合。用户授权将这些未完成项一并保存为本地 WIP 快照。

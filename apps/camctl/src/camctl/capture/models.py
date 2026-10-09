@@ -19,6 +19,7 @@ from camctl.contracts.values import (
     seconds_to_duration_ms,
 )
 from camctl.contracts.json_values import is_json_integer
+from camctl.contracts.workflow_errors import validate_public_error
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 
 __all__ = [
@@ -292,6 +293,7 @@ def _capture_result(name: str, value, phase: ResultSetPhase) -> None:
             raise ValueError(f"{name} 的完成状态不携带错误成员")
         if not isinstance(error, Mapping):
             raise ValueError(f"{name} 的错误必须是对象: {error!r}")
+        validate_public_error(error)
     elif expected != "completed":
         raise ValueError(f"{name} 的状态 {expected!r} 必须携带错误成员")
     members = set(value) - {"status", "error", "captured_count", "elapsed_s"}
@@ -387,6 +389,8 @@ class ResultSetSave:
                 raise ValueError("无法确认分支不判定采集结果")
             if self.error is not None and not isinstance(self.error, Mapping):
                 raise ValueError("核实错误必须是对象")
+        if self.error is not None:
+            validate_public_error(self.error)
 
 
 @dataclass(frozen=True)

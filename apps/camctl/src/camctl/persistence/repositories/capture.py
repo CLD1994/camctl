@@ -1729,12 +1729,50 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def canceled_recording_results(
+        self, owned: OwnedConnection, action_id: int | None = None,
+    ) -> tuple[FinishCanceledCapture, ...]:
+        """发现已取消录像仍未结束的原核实用途，不取得设备资格。"""
+        condition = "" if action_id is None else " AND a.id=?"
+        params = () if action_id is None else (action_id,)
+        with closing(owned.connection.execute(
+            "SELECT a.id FROM actions a"
+            " WHERE a.type=? AND a.status=?"
+            " AND EXISTS (SELECT 1 FROM operation_runs r WHERE r.action_id=a.id"
+            " AND r.kind=? AND r.status IN (?,?))" + condition + " ORDER BY a.id",
+            (int(_ACTION_TYPE.CAMERA_RECORD), _ACTION_CANCELED,
+             int(_RUN_KIND.CHECK_CAPTURE_RESULTS), int(_RUN_STATUS.PENDING),
+             int(_RUN_STATUS.ACTIVE), *params),
+        )) as cursor:
+            identities = tuple(row[0] for row in cursor.fetchall())
+        requests = []
+        owner_type = load_enum_registry()["history_objects"]["action"]["id"]
+        for identity in identities:
+            with closing(owned.connection.execute(
+                "SELECT e.body_json,e.occurred_at FROM entity_event_links l"
+                " JOIN history_events e ON e.id=l.event_id"
+                " WHERE l.entity_type=? AND l.entity_id=? AND e.event_type=? ORDER BY e.id",
+                (owner_type, identity, _ACTION_FINISHED_EVENT),
+            )) as cursor:
+                events = cursor.fetchall()
+            if len(events) != 1:
+                raise ConsistencyError("已取消录像缺少唯一的最终动作历史")
+            body_json, occurred_at = events[0]
+            body = parse_exact_json(body_json)
+            rows = body.get("rows", [])
+            if (body.get("reason") != 4 or len(rows) != 1
+                    or rows[0].get("table") != "actions" or rows[0].get("id") != identity
+                    or rows[0].get("after", {}).get("values", {}).get("status") != _ACTION_CANCELED):
+                raise ConsistencyError("已取消录像的最终动作历史不符")
+            requests.append(FinishCanceledCapture(identity, occurred_at))
+        return tuple(requests)
+
     def finish_canceled_capture(
         self, command: FinishCanceledCapture, key: OperationKey,
         owned: OwnedConnection
     ) -> DbOutcome[CaptureResult]:
         receipt = commit_operation(
-            FinishCaptureCommand(command, key, canceled=True), key, owned)
+            _FinishCanceledCaptureCommand(command, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -3583,6 +3621,96 @@ def _unconfirmed_run_error(activity_id: int) -> dict[str, Any]:
     }
     validate_error_details(code, details)
     return {"code": code, "stage": spec["stage"], "details": details}
+
+
+class _FinishCanceledCaptureCommand:
+    """录像取消终态与放弃的原核实用途在同一事务保存。"""
+
+    def __init__(self, request: FinishCanceledCapture, key: OperationKey) -> None:
+        self._request, self._key = request, key
+
+    def _run(self, connection):
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE action_id=? AND kind=? ORDER BY id",
+            (self._request.action_id, int(_RUN_KIND.CHECK_CAPTURE_RESULTS)),
+        )) as cursor:
+            rows = cursor.fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ConsistencyError("录像取消存在多个原结果核实责任")
+        return _result_run_of_action(connection, self._request.action_id)
+
+    def _end(self, run):
+        return _FinishStaleRunsCommand(StaleRunFinish(
+            (run["responsibility_key"],), RunOutcome.CANCELED,
+            self._request.occurred_at), self._key)
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        request = self._request
+        action = row_facts(connection, "actions", request.action_id)
+        if action is None:
+            raise TransactionError("取消收场动作不存在")
+        capture = FinishCaptureCommand(request, self._key, canceled=True)
+        if action["type"] != int(_ACTION_TYPE.CAMERA_RECORD):
+            return capture.plan(scope)
+        if request.drafts or request.catalog_facts is not None:
+            raise TransactionError("录像取消放弃内容，不登记正式产物")
+        run = self._run(connection)
+        if saved is not None:
+            return self._reuse(scope, saved, capture, action, run)
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        plans = [capture.plan(sub)]
+        if run is not None and run["status"] in (
+                int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+            plans.append(self._end(run).plan(sub))
+        events = tuple(event for plan in plans for event in plan.events)
+        if not events:
+            return plans[0]
+        scope.allocate(len(events))
+        ranges = {}
+        for plan in plans:
+            for identity, members in plan.read_coverage.ranges.items():
+                ranges.setdefault(identity, set()).update(members)
+        return CommandPlan(
+            events=events,
+            owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            read_coverage=ReadCoverage(ranges), result=plans[0].result)
+
+    def _reuse(self, scope, saved, capture, action, run) -> CommandPlan:
+        flow_events = [event for event in saved if event["type"] == _RUN_END_EVENT]
+        capture_events = saved[:-1] if flow_events else saved
+        if (len(flow_events) > 1 or (flow_events and saved[-1] is not flow_events[0])
+                or any(event["occurred_at"] != self._request.occurred_at for event in saved)
+                or any(event["type"] not in (
+                    _ACTION_FINISHED_EVENT, _ACTIVITY_OBSERVE_EVENT, _PLAN_STATUS_EVENT,
+                ) for event in capture_events)):
+            raise TransactionError("原录像取消收场的完整事件段与申请不同")
+        if capture_events:
+            result = capture._reuse(scope.connection, capture_events)
+        else:
+            if not flow_events:
+                raise TransactionError("原录像取消收场缺少事实")
+            result = capture._recover(scope.connection, action)
+            if self._request.unstarted:
+                verify_unstarted_final(scope.connection, action)
+        if flow_events:
+            rows = flow_events[0]["body"]["rows"]
+            if (run is None or len(rows) != 1 or rows[0]["table"] != "operation_runs"
+                    or rows[0]["id"] != run["id"]
+                    or run["status"] != int(_RUN_STATUS.CANCELED)):
+                raise TransactionError("原录像取消收场的核实责任与申请不同")
+            end = self._end(run)._reuse(scope, flow_events)
+            state = _merged_state_rows(result.state_rows, end.state_rows)
+        else:
+            if run is not None and run["status"] in (
+                    int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+                raise TransactionError("原录像取消收场缺少用途结束事实")
+            state = result.state_rows
+        return replace(result, state_rows=state, read_only=True)
 
 
 class _FinishRecordingResultsCommand:
