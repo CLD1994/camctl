@@ -13,6 +13,7 @@ import {
   setPreviewIntent,
   coordinatePreviews,
   copyDraftAction,
+  initializePreviewMetadata,
   type CapabilityState,
 } from "../shared/automatic-previews";
 import {
@@ -24,6 +25,8 @@ import {
   appendDraftAction,
   pointer,
   valueAt,
+  pointerPath,
+  checkActionListChange,
   resolveField,
   localToUtc,
   utcToLocal,
@@ -31,6 +34,7 @@ import {
   type EditObject,
 } from "./editing";
 import { DraftSession } from "./session";
+import { ActionUiIdentity } from "./action-ui-identity";
 import { actionLabel, Issues, ErrorBox } from "./common";
 import { Field, JsonField } from "./Fields";
 import { BuiltinFields } from "./BuiltinFields";
@@ -69,17 +73,63 @@ export function Editor(props: Props) {
   const [copyError, setCopyError] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const content = session.content;
+  const [actionIdentity] = useState(() => new ActionUiIdentity(content));
+  let identityProblem = "";
+  try {
+    actionIdentity.update(content);
+  } catch (error) {
+    identityProblem = (error as Error).message;
+  }
+  if (
+    !identityProblem &&
+    [...collapsed].some((key) => !actionIdentity.keys.includes(key))
+  )
+    setCollapsed(
+      new Set(
+        [...collapsed].filter((key) => actionIdentity.keys.includes(key)),
+      ),
+    );
   const intent = previewIntent(content);
   const previewIssues = coordinatePreviews(
     content,
     props.capabilityState,
   ).issues;
-  const identity = (index: number) =>
-    content.automaticPreviews?.actions[index]?.id ?? String(index);
-  const change = (next: DraftContent) => {
+  const identity = (index: number) => actionIdentity.keys[index];
+  const change = (
+    next: DraftContent,
+    operation?: Parameters<ActionUiIdentity["update"]>[1],
+    binding?: DraftContent,
+  ) => {
     setCopyError("");
-    session.edit(next);
+    actionIdentity.update(
+      next,
+      operation,
+      () => {
+        session.edit(next);
+        return session.content;
+      },
+      binding,
+    );
+    setCollapsed(
+      (current) =>
+        new Set(
+          [...current].filter((key) => actionIdentity.keys.includes(key)),
+        ),
+    );
     session.schedule();
+  };
+  const choosePreviewIntent = (selected: "enabled" | "disabled") => {
+    const namespace = crypto.randomUUID();
+    const prepared = content.automaticPreviews
+      ? content
+      : initializePreviewMetadata(content, selected, namespace);
+    // 首次显式选择给原位置绑定共享规则创建的身份，再跟踪协调后的增删。
+    change(
+      setPreviewIntent(prepared, selected, namespace, props.capabilityState)
+        .content,
+      undefined,
+      prepared,
+    );
   };
   let plan: ReturnType<typeof parseDraft> | undefined;
   let problem = "";
@@ -128,11 +178,12 @@ export function Editor(props: Props) {
         appendDraftAction(content, {
           name: `动作 ${plan.actions.length + 1}`,
         }),
+        "append",
       );
     }
   };
   const remove = (index: number) => {
-    change(removeAction(content, index));
+    change(removeAction(content, index), { remove: index });
   };
   return (
     <section className="panel editor">
@@ -161,6 +212,7 @@ export function Editor(props: Props) {
         </div>
       </div>
       <ErrorBox error={copyError} />
+      <ErrorBox error={identityProblem} />
       <div className="save-line">
         <span data-testid="save-status" role="status">
           {session.deletionState === "deleting"
@@ -213,7 +265,7 @@ export function Editor(props: Props) {
           此草稿正在核实一次后续追加；请从上方返回核实，当前内容暂为只读。
         </p>
       )}
-      <SelectFieldset disabled={busy || !session.editable}>
+      <SelectFieldset disabled={busy || !session.editable || !!identityProblem}>
         <section className="notice" aria-label="自动获取预览文件">
           <strong data-testid="preview-intent">
             自动预览
@@ -226,31 +278,13 @@ export function Editor(props: Props) {
           <div className="button-row">
             <button
               disabled={intent === "enabled"}
-              onClick={() =>
-                change(
-                  setPreviewIntent(
-                    content,
-                    "enabled",
-                    crypto.randomUUID(),
-                    props.capabilityState,
-                  ).content,
-                )
-              }
+              onClick={() => choosePreviewIntent("enabled")}
             >
               开启自动预览
             </button>
             <button
               disabled={intent === "disabled"}
-              onClick={() =>
-                change(
-                  setPreviewIntent(
-                    content,
-                    "disabled",
-                    crypto.randomUUID(),
-                    props.capabilityState,
-                  ).content,
-                )
-              }
+              onClick={() => choosePreviewIntent("disabled")}
             >
               关闭自动预览
             </button>
@@ -294,7 +328,7 @@ export function Editor(props: Props) {
                     )
                   )
                     return;
-                  change(editPlanText(content, e.target.value, true));
+                  change(editPlanText(content, e.target.value, true), "reset");
                 }}
               />
             </label>
@@ -305,8 +339,9 @@ export function Editor(props: Props) {
               </p>
             )}
           </>
-        ) : plan ? (
-          <>
+        ) : null}
+        {plan && !identityProblem ? (
+          <div hidden={json}>
             <label className="field">
               <span>
                 计划名称 <span className="required">必填</span>
@@ -385,7 +420,7 @@ export function Editor(props: Props) {
                   remove={() => remove(index)}
                   copy={() => {
                     try {
-                      change(copyDraftAction(content, index));
+                      change(copyDraftAction(content, index), "append");
                     } catch (error) {
                       setCopyError(
                         `动作复制未完成：${(error as Error).message}`,
@@ -402,18 +437,18 @@ export function Editor(props: Props) {
                   }
                 />
               ) : (
-                <div className="notice error" key={index}>
+                <div className="notice error" key={identity(index)}>
                   动作 {index + 1} 不是对象，请在整份 JSON 中修正。
                   <button onClick={() => remove(index)}>删除此动作</button>
                 </div>
               ),
             )}
-          </>
+          </div>
         ) : (
-          <>
+          <div hidden={json}>
             <ErrorBox error={problem} />
             <p>原始输入已保留。请切换到整份计划 JSON 继续编辑。</p>
-          </>
+          </div>
         )}
       </SelectFieldset>
       <Issues issues={issues} />
@@ -468,15 +503,29 @@ function PendingInput({
   path: string;
   value: { kind: "number" | "json"; text: string };
   content: DraftContent;
-  change: (content: DraftContent) => void;
+  change: (content: DraftContent, operation?: "reset") => void;
 }) {
   const [error, setError] = useState("");
-  const parts = path
-    .slice(1)
-    .split("/")
-    .map((p) => p.replace(/~1/g, "/").replace(/~0/g, "~"));
   const apply = (omit: boolean) => {
     try {
+      const parts = pointerPath(path);
+      if (parts.length === 1 && parts[0] === "actions") {
+        checkActionListChange(content, omit ? undefined : value.text);
+        if (
+          !window.confirm(
+            `${omit ? "移除" : "替换"}整组动作将清除动作身份、自动预览和其他动作类型编辑资料，以及动作集合内的未完成输入。自动预览将变为尚未设置，集合外的输入继续保留。是否继续？`,
+          )
+        )
+          return;
+        change(
+          omit
+            ? setValue(content, parts, undefined, true, false, undefined, true)
+            : editValue(content, parts, value.text, value.kind, true),
+          "reset",
+        );
+        setError("");
+        return;
+      }
       change(
         omit
           ? setValue(content, parts, undefined, true)

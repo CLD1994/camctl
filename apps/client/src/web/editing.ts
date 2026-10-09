@@ -1,5 +1,6 @@
 import {
   parseJson,
+  parseClientJson,
   cloneClientJson,
   stringifyJson,
   rememberNumberToken,
@@ -41,6 +42,62 @@ export function pointer(path: Path): string {
       .map((p) => String(p).replace(/~/g, "~0").replace(/\//g, "~1"))
       .join("/")
   );
+}
+/** JSON Pointer 只解码标准转义；无效路径不猜测对应字段。 */
+export function pointerPath(value: string): Path {
+  if (value === "") return [];
+  if (!value.startsWith("/") || /~(?:[^01]|$)/.test(value))
+    throw new Error("未完成输入路径不是有效的 JSON Pointer，请保留原文核对");
+  return value
+    .slice(1)
+    .split("/")
+    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+function prepareActionListChange(content: DraftContent, text?: string) {
+  if (Object.hasOwn(content.pending ?? {}, ""))
+    throw new Error("整个计划仍有未完成输入，请先修正该祖先输入");
+  const root = parseClientJson(content.text);
+  if (!isObject(root))
+    throw new Error("当前计划正文不是可解释的对象，不能替换动作列表");
+  const actions = text === undefined ? undefined : parseClientJson(text);
+  if (text !== undefined && !Array.isArray(actions))
+    throw new Error("动作列表修正必须是 JSON 数组，原输入已保留");
+  return { root, actions };
+}
+/** UI 先验证资格，再取得确认；此检查不写入任何内容或资料。 */
+export function checkActionListChange(
+  content: DraftContent,
+  text?: string,
+): void {
+  prepareActionListChange(content, text);
+}
+function replaceActionList(
+  content: DraftContent,
+  text: string | undefined,
+  confirmed: boolean,
+): DraftContent {
+  const { root, actions } = prepareActionListChange(content, text);
+  if (!confirmed)
+    throw new Error(
+      "替换或移除整组动作需要确认清除动作身份、自动预览和其他类型编辑资料",
+    );
+  if (text === undefined) delete root.actions;
+  else root.actions = actions;
+  const pending = Object.fromEntries(
+    Object.entries(content.pending ?? {}).filter(([key]) => {
+      try {
+        return pointerPath(key)[0] !== "actions";
+      } catch {
+        return true;
+      } // 未知路径保持原文，不扩大清理范围。
+    }),
+  );
+  const {
+    automaticPreviews: _preview,
+    actionVariants: _variants,
+    ...rest
+  } = content;
+  return { ...rest, text: stringifyJson(root, 2), pending };
 }
 export function pendingBlocks(content: DraftContent, path: Path): boolean {
   const current = pointer(path);
@@ -113,7 +170,19 @@ export function setValue(
   omit = false,
   replace = false,
   numberToken?: string,
+  confirmActionList = false,
 ): DraftContent {
+  if (path.length === 1 && path[0] === "actions") {
+    if (!omit && !Array.isArray(value)) {
+      checkActionListChange(content);
+      throw new Error("动作列表修正必须是 JSON 数组，原输入已保留");
+    }
+    return replaceActionList(
+      content,
+      omit ? undefined : stringifyJson(value),
+      confirmActionList,
+    );
+  }
   if (!omit && !replace && pendingBlocks(content, path))
     throw new Error("此路径存在尚未解决的输入，请先逐项修正或明确省略");
   path = resolvePath(parseDraft(content), path);
@@ -228,7 +297,10 @@ export function editValue(
   path: Path,
   text: string,
   kind: "number" | "json",
+  confirmActionList = false,
 ): DraftContent {
+  if (path.length === 1 && path[0] === "actions")
+    return replaceActionList(content, text, confirmActionList);
   if (pendingBlocks(content, path))
     throw new Error("父级 JSON 无法表示未完成的子字段，请先修正具体路径");
   const unfinished = (current: DraftContent): DraftContent => ({
