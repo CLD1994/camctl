@@ -310,6 +310,16 @@ export function BuiltinFields({
                           </SelectItem>
                         )}
                     </Select>
+                    {params &&
+                      Object.hasOwn(params, "filter") &&
+                      params.filter !== "default" &&
+                      params.filter !== "preview" && (
+                        <small className="danger-text">
+                          原值{" "}
+                          {displayJsonValue(params, "filter", params.filter)}
+                          。筛选支持 default 或 preview；也可以明确选择不填写。
+                        </small>
+                      )}
                   </label>
                   {params && Object.hasOwn(params, "purpose") && (
                     <p className="muted">

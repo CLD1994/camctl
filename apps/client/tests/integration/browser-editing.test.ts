@@ -1,6 +1,7 @@
 import { validatePlan } from "../../src/shared/plan";
 import { validateParams } from "../../src/shared/capabilities";
 import { stringifyJson, parseJson } from "../../src/shared/json";
+import { parseDraft } from "../../src/web/editing";
 import { choose, readOptions } from "./select-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
@@ -1698,6 +1699,12 @@ it.each([
       "不适用字段",
     );
     await check(page.getByLabel("取回筛选")).toBeVisible();
+    await check(
+      page
+        .locator("label.field")
+        .filter({ has: page.getByLabel("取回筛选") })
+        .locator(".danger-text"),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
     expect(
       JSON.parse(await page.getByLabel("动作参数 JSON").inputValue()),
@@ -1738,6 +1745,12 @@ it("精确列表与筛选转换须明确选择，原非法组合和自动用途�
   await page.reload();
   await page.getByTestId("draft-open-button").click();
   await check(page.locator(".builtin-parameters")).toContainText("组合");
+  await check(
+    page
+      .locator("label.field")
+      .filter({ has: page.getByLabel("取回筛选") })
+      .locator(".danger-text"),
+  ).toHaveCount(0);
   expect(
     JSON.parse(app.draft(draft.id).content.text).actions[0].params,
   ).toEqual(params);
@@ -1758,6 +1771,79 @@ it("精确列表与筛选转换须明确选择，原非法组合和自动用途�
       purpose: "auto_preview",
     });
 }, 20000);
+
+it.each([
+  '"future_filter"',
+  "null",
+  "false",
+  "1.0000000000000001",
+  '{"html":"<strong>筛选原值</strong>","nested":[false,null]}',
+  '[false,{"value":"unknown"}]',
+])(
+  "非法取回筛选在字段旁展示原 JSON 与原因，查看和重开不转换 %s",
+  async (filterJson) => {
+    const { page, app } = await setup();
+    const paramsText = `{"source":{"action_instance_id":"7"},"filter":${filterJson},"purpose":"manual","output_ids":["4"],"extra":"保留"}`;
+    const draft = app.createDraft({
+      text: `{"name":"筛选原值","actions":[{"name":"取回","type":"obtain_action_outputs","params":${paramsText}}]}`,
+      actionVariants: {
+        "0": [
+          {
+            type: "camera_record",
+            fields: { params: { n: 1 } },
+            fieldsText: '{"params":{"n":1.0000000000000001}}',
+            pending: { "/policy/max_delay_ms": { kind: "number", text: "1e" } },
+          },
+        ],
+      },
+    });
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    const field = page
+      .locator("label.field")
+      .filter({ has: page.getByLabel("取回筛选") });
+    const diagnosis = field.locator(".danger-text");
+    await check(diagnosis).toContainText(filterJson);
+    for (const value of ["default", "preview"])
+      await check(diagnosis).toContainText(value);
+    await check(field.locator("strong, script")).toHaveCount(0);
+    expect(app.draft(draft.id).content).toEqual(draft.content);
+    await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+    expect(
+      stringifyJson(
+        parseJson(await page.getByLabel("动作参数 JSON").inputValue()),
+      ),
+    ).toBe(paramsText);
+    await page.getByRole("button", { name: "参数表单", exact: true }).click();
+    await page.getByLabel("动作名称", { exact: true }).fill("改名取回");
+    await check(page.getByTestId("save-status")).toContainText("已保存");
+    expect(
+      stringifyJson(parseDraft(app.draft(draft.id).content).actions[0].params),
+    ).toBe(paramsText);
+    expect(app.draft(draft.id).content.actionVariants).toEqual(
+      draft.content.actionVariants,
+    );
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await check(diagnosis).toContainText(filterJson);
+    await choose(page.getByLabel("取回筛选"), "preview");
+    await check
+      .poll(
+        () => JSON.parse(app.draft(draft.id).content.text).actions[0].params,
+      )
+      .toEqual({
+        source: { action_instance_id: "7" },
+        filter: "preview",
+        purpose: "manual",
+        extra: "保留",
+      });
+    expect(app.draft(draft.id).content.actionVariants).toEqual(
+      draft.content.actionVariants,
+    );
+    await check(diagnosis).toHaveCount(0);
+  },
+  20000,
+);
 
 it.each([
   { source: { action_name: "拍摄" }, output_ids: ["4"], purpose: "manual" },
