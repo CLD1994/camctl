@@ -590,6 +590,85 @@ function parse(value: unknown, text = JSON.stringify(value)) {
     bytes,
   );
 }
+describe("名称来源与结果身份", () => {
+  const kinds = [
+    "delivery",
+    "failure-source",
+    "failure-output",
+    "no_outputs",
+    "output_not_found",
+    "output_source_mismatch",
+  ] as const;
+  function referenced(kind: (typeof kinds)[number], sourceId = "9") {
+    const r = report();
+    const a = r.plans![0].actions![1];
+    a.input_params = { source: { action_name: "录像" } };
+    if (kind === "delivery") {
+      a.deliveries![0].source_action_instance_id = sourceId;
+      a.deliveries![0].output_id = "8";
+    } else {
+      delete a.deliveries;
+      a.status = "failed";
+      a.error = error;
+      if (kind === "output_not_found" || kind === "output_source_mismatch")
+        a.input_params = { source: { action_name: "录像" }, output_ids: ["8"] };
+      a.result = {
+        failures: [
+          {
+            source_action_instance_id: sourceId,
+            ...(kind === "failure-output" ? { output_id: "8" } : {}),
+            error: {
+              code:
+                kind === "failure-source" || kind === "failure-output"
+                  ? "future_code"
+                  : kind,
+              stage: "output_selection",
+              details:
+                kind === "output_not_found" || kind === "output_source_mismatch"
+                  ? { requested_output_id: "8" }
+                  : {},
+            },
+          },
+        ],
+      };
+    }
+    return r;
+  }
+  it.each(kinds)("%s 的结果来源缺席时仍拒绝已知名称身份矛盾", (kind) => {
+    expect(() => validateReport(referenced(kind))).toThrow();
+  });
+  it.each(kinds)("%s 的名称与结果来源均未知时保留引用", (kind) => {
+    const r = referenced(kind);
+    r.plans![0].actions!.shift();
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  it.each(kinds)("%s 的名称与结果来源身份一致时允许", (kind) => {
+    expect(() => validateReport(referenced(kind, "1"))).not.toThrow();
+  });
+  for (const boundary of ["earlier", "same", "later", "gap"] as const) {
+    it.each(kinds)(`${boundary} 名称晚到后拒绝 %s 的身份矛盾`, (kind) => {
+      const old = referenced(kind);
+      old.plans![0].actions!.shift();
+      validateReport(old);
+      const next = report();
+      next.report_id = "2";
+      next.from_wm = boundary === "gap" ? 25 : 0;
+      next.to_wm = boundary === "earlier" ? 10 : boundary === "same" ? 20 : 30;
+      next.plans![0].actions = [camera()];
+      expect(() => validateReportAgainstHistory(old, next)).toThrow();
+    });
+    it.each(kinds)(`${boundary} 名称晚到后允许 %s 的相同身份`, (kind) => {
+      const old = referenced(kind, "1");
+      old.plans![0].actions!.shift();
+      const next = report();
+      next.report_id = "2";
+      next.from_wm = boundary === "gap" ? 25 : 0;
+      next.to_wm = boundary === "earlier" ? 10 : boundary === "same" ? 20 : 30;
+      next.plans![0].actions = [camera()];
+      expect(() => validateReportAgainstHistory(old, next)).not.toThrow();
+    });
+  }
+});
 describe("parseReport", () => {
   it("接受完整报告且不依赖当前能力说明", () =>
     expect(parse(report())).toEqual(report()));

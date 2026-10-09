@@ -145,6 +145,12 @@ function associations(index: Index) {
       "取回缺少已受理来源",
     );
     const source = params.source;
+    const named = namedSource(owner);
+    if (named)
+      requireFact(
+        sourceId === named.value.action_instance_id,
+        "取回项目与本计划已知名称来源的身份不一致",
+      );
     if (typeof source.action_instance_id === "string")
       requireFact(
         sourceId === source.action_instance_id,

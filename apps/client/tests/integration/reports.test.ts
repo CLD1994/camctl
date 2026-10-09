@@ -236,6 +236,84 @@ function deliveryFailureHistory(
   validateReport(r);
   return r;
 }
+it.each(["delivery", "failure"] as const)(
+  "%s 名称关联晚到矛盾拒绝原子导入，修正后可重试",
+  (kind) => {
+    const { app } = setup();
+    const first = mappedReport(Buffer.from("unused"));
+    first.to_wm = 10;
+    const c = first.plans![0].actions![0];
+    const a = first.plans![0].actions![1];
+    a.input_params = { source: { action_name: c.name } };
+    if (kind === "delivery") {
+      a.deliveries![0].source_action_instance_id = "999";
+      a.deliveries![0].output_id = "900";
+    } else {
+      delete a.deliveries;
+      a.status = "failed";
+      a.error = {
+        code: "obtain_items_failed",
+        stage: "execution",
+        details: {},
+      };
+      a.result = {
+        failures: [
+          {
+            source_action_instance_id: "999",
+            error: {
+              code: "no_outputs",
+              stage: "output_selection",
+              details: {},
+            },
+          },
+        ],
+      };
+    }
+    first.plans![0].actions = [a];
+    const initial = reportInput(first);
+    app.applyReports([initial]);
+    expect(app.store.get<ImportFile>("imports", initial.file.id)?.status).toBe(
+      "accepted",
+    );
+    const before = app.snapshot();
+    const next: StatusReport = {
+      report_id: "2",
+      from_wm: 10,
+      to_wm: 20,
+      plans: [{ ...first.plans![0], actions: [c] }],
+    };
+    const invalid = reportInput(next);
+    app.applyReports([invalid]);
+    expect(app.store.get<ImportFile>("imports", invalid.file.id)?.status).toBe(
+      "failed",
+    );
+    expect(app.store.report("2")).toBeUndefined();
+    expect(app.store.reports()).toHaveLength(1);
+    expect(app.snapshot()).toEqual(before);
+    expect(app.state()).toMatchObject({
+      coverage: 10,
+      ackId: "1",
+      gapTarget: null,
+    });
+    expect(Buffer.from(app.store.report("1")!.bytes)).toEqual(initial.bytes);
+    const corrected = structuredClone(next);
+    const actual = corrected.plans![0].actions![0];
+    actual.action_instance_id = "999";
+    for (const output of actual.outputs ?? [])
+      output.source_action_instance_id = "999";
+    const retry = reportInput(corrected);
+    app.applyReports([retry]);
+    expect(app.store.get<ImportFile>("imports", retry.file.id)?.status).toBe(
+      "accepted",
+    );
+    expect(app.state()).toMatchObject({
+      coverage: 20,
+      ackId: "2",
+      gapTarget: null,
+    });
+    expect(Buffer.from(app.store.report("2")!.bytes)).toEqual(retry.bytes);
+  },
+);
 it.each(["earlier", "same", "later", "gap"] as const)(
   "交付错误关联：%s 的不同最终错误不改变已保存事实",
   (kind) => {
