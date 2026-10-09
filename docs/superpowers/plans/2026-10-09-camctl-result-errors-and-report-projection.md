@@ -285,3 +285,34 @@ Linux 开发容器、Python 3.11.16。模型与事件守卫复用 `validate_capt
 相关 capture 七文件的 `/tmp/camctl-goal-result-guards-related-capture.log` 为 81 passed、8 failed、27.34s。三项分别位于 `test_result_confirmation`、`test_result_consumer_saves`、`test_result_file_recovery`，使用不完整 UNSATISFIED 错误；其正式 reason 仍未决定。另五项位于 `test_emergency`：零尝试未发令、后续会话保留错误的两种最终结果、停止未确认的补记和未确认后的占用；真实应急生产错误缺 details，现被共同守卫拒绝。应急错误正式身份与详情仍等待决策，不能把这些失败改为空详情或宣称应急链路已通过。
 
 本阶段只完成已确定的活动结果结构、事务资源退出和原判定响应恢复。原申请输入身份、UNSATISFIED 生产与应急错误登记继续按各自决策推进；RESULTS v2、完整采集业务与全部组件验收仍未完成。当前全部变更按用户授权整体提交，本阶段不增加 Git 拆分或推送要求。
+
+## 录像有限核实流程的完整申请
+
+阶段起点为 `305e727`。录像的 RESULTS 次数耗尽时，`_advance_recording_outcome` 直接构造 `ResultRunClose`，取得新 key 后调用 `close_unconfirmed_result_run`；UNKNOWN 之后没有保存这份完整申请。已有 `PendingResultCheckClose` 与默认恢复前缀只涵盖 ResultSetSave。直接仓储的原键重送测试证明接口可复用，却没有证明实际处理器持有原 key 和决定时刻。
+
+本阶段保持[原键保存规则](../../camctl/database/history-formats.md#历史事务与事件字段)、[已提交结果边界](../../camctl/persistence-runtime.md#已提交结果与当前状态的边界)以及本计划有限耗尽恢复模型。录像耗尽只把原核实用途收场为 UNCONFIRMED，不写采集结果或集合结论；原调用结果、次数、文件、停止事实和后续动作结果保持各自责任。决定一旦形成，当前动作状态、取消或设备绑定不能让拥有者跳过这份原保存责任；可靠前不进入后续业务资格或设备装配。
+
+| 会话是否持有原申请与原 G 的可靠状态 | 恢复行为 | 响应与后续责任 |
+| --- | --- | --- |
+| 持有原申请，原 G 已可靠存在 | 原 request、key、决定时刻核实该完整事务，不执行新 RESULTS、START 或 STOP。 | 使用原事务已保存的流程收场；可靠后移除申请并清除原核实等待，再判断后续业务资格。 |
+| 持有原申请，原 G 可靠缺失且不会迟到提交 | 沿用原 request、key 和决定时刻重送，不重新构造决定。 | 可靠前保留申请，不保存依赖的动作终态或建立媒体处理；保存成功才释放申请。 |
+| 持有原申请，核实或重送仍为 UNKNOWN／ROLLED_BACK | 保留同一申请，默认入口按既有 StateDbFailure 停止本次候选。 | 不查询新业务钟、不进入候选、factory 或新调用；不清除原等待。 |
+| 没有会话申请，持久原流程已 UNCONFIRMED | 从可靠的流程及实际文件事实继续适用业务收尾。 | 不声称恢复已丢失的旧 key，不重新列举；普通重启按持久事实恢复。 |
+
+ResultRunClose 仓储的正常完整响应为 COMPLETED 且 value=None；这表示该接口没有业务返回模型，不能按照片／延时的 ResultSetSave 规则误拒。ResultSetSave 仍要求其原完整响应非空。建议在既有 pending_result_closes 集合中用有约束的请求联合类型区分两端口，并复用已接入普通、残留、受限、取消和受限取消的恢复前缀；内部类型与辅助函数名称是建议，不新增持久格式或依赖字段。
+
+预计修改生产 `capture/handlers.py` 的申请类型、共同恢复和录像耗尽形成点；既有 `bootstrap/lifecycle.py` 及 `capture_assembly.py` 的同一集合接线需要实际复核，只有发现未覆盖时才修改。反例分别放 capture 的真实处理器恢复与 bootstrap 的默认恢复目录，不把数据库集成测试放在 unit。
+
+- [ ] 建立真实公开录像受理、START、STOP、完整 OTHER 文件或未完成 VIDEO 及一次 RESULTS 后预算耗尽的前置。完整 VIDEO 不作为耗尽前提，因为它可以满足录像文件要求并转入媒体或成功处理。实际仓储首写取得 COMMIT 前／后 UNKNOWN，关闭旧连接后以 fresh Owned 确认原 G。测试 spy 只控制 COMMIT 协议故障，不能因预期 holder 尚不存在而阻止第一次真实保存。
+- [ ] 直接处理器恢复分别核原申请、key、决定时刻、原实际次数和文件；原 G 可靠之前没有依赖动作收尾，可靠后不增加任何设备调用。另核没有会话申请的持久 UNCONFIRMED 恢复，不能为这种重启伪造旧申请。
+- [ ] 在五个默认入口分别覆盖 COMMIT 前／后。恢复到业务钟或候选之前检查原 G、原申请释放和原等待清除；再次 UNKNOWN／ROLLED_BACK 时原申请仍持有，factory、业务候选和设备调用保持未触发。
+- [ ] 根确认有效红后实现共同请求分类与录像耗尽持有。既有 ResultSetSave 的非空响应检查、原事务失败分类及恢复顺序保持；不通过类型默认值将缺响应解释为成功。
+- [ ] 根按目录独占运行新反例、既有照片／延时耗尽与录像原键门禁及全量单元，独立核源码、原 H 和调用次数。阶段完成后整体提交当前变更，未决错误身份与普通集合结束继续分别推进。
+
+动作终态、取消及绑定变化的真实前置和后续业务资格由独立源码审查核实；遇到正式契约未覆盖的相互竞争结果时，只停止该分区，不能把原申请静默退役或改成新的决定。
+
+### 录像原申请的反例快照（2026-10-09）
+
+根独占运行，环境为 Linux 开发容器、Python 3.11.16。`/tmp/camctl-goal-record-run-close-unit-red.log` 为 5 failed、9 passed、0.37s；共同恢复把 ResultRunClose 送到 ResultSetSave 端口，正常的空业务响应尚不能释放录像申请。`/tmp/camctl-goal-record-run-close-bootstrap-red.log` 为 22 failed、2 passed、12.74s；五个默认入口没有核原申请，直接录像重入在原 COMMIT 缺失时换 key 和时刻，原 COMMIT 已存在时没有确认旧申请。两个无会话 holder 的持久 UNCONFIRMED 控制通过。所有公开受理、START、STOP、实际 RESULTS 和首次保存故障前置均已完成，不把准备或导入错误计为行为反例。
+
+按用户要求，当前计划及测试整体保存为本地快照；生产修复尚未实施，这次提交不表示上述门禁通过。
