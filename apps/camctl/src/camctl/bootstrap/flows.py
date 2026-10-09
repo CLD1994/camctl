@@ -41,15 +41,20 @@ __all__ = ["capture_flow", "cancel_flow", "report_flow", "residual_flow",
            "winddown_flow"]
 
 
-def residual_flow(capture_factory, *, resume_media_results=None, resume_file_observations=None):
+def residual_flow(capture_factory, *, resume_media_results=None, resume_file_observations=None,
+                  resume_read_results=None):
     """残留收场推进流程；实现见 camctl.capture.residual。"""
     return _residual_flow_impl(capture_factory, resume_media_results=resume_media_results,
-                               resume_file_observations=resume_file_observations)
+                               resume_file_observations=resume_file_observations,
+                               resume_read_results=resume_read_results)
 
 
-async def _resume_actual_file_facts(owned, resume_file_observations, resume_media_results):
+async def _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
+                                   resume_read_results=None):
     """已有文件与媒体事实先保存；失败保留各自责任并停止业务步骤。"""
     try:
+        if resume_read_results is not None:
+            resume_read_results(owned)
         if resume_file_observations is not None:
             resume_file_observations(owned)
         if resume_media_results is not None:
@@ -100,7 +105,7 @@ def _ready_device_groups(
 
 
 def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None,
-                 resume_file_observations=None) -> Callable[[Any], Any]:
+                 resume_file_observations=None, resume_read_results=None) -> Callable[[Any], Any]:
     """构造推进拍摄工作的调度程序。
 
     capture_factory 接收本轮流量的数据库连接与设备身份，返回该设
@@ -112,7 +117,8 @@ def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_res
     async def flow(context: Any) -> None:
         owned = context.open_connection()
         try:
-            await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results)
+            await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
+                                            resume_read_results)
             now = context.clock.utc_micros()
             scheduling = SchedulingRepository()
             for (action_id, device_id, scheduled_at,
@@ -197,6 +203,7 @@ def winddown_flow(
     sleep: Callable[[float], Any] = asyncio.sleep,
     resume_media_results=None,
     resume_file_observations=None,
+    resume_read_results=None,
 ) -> Callable[[Any], Any]:
     """构造时钟异常会话的录像保守收场流程。
 
@@ -213,7 +220,8 @@ def winddown_flow(
 
         owned = context.open_connection()
         try:
-            await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results)
+            await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
+                                            resume_read_results)
             with closing(owned.connection.execute(
                     "SELECT id FROM actions"
                     " WHERE type = 2 AND status = 2"

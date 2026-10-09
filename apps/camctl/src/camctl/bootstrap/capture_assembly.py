@@ -370,6 +370,10 @@ def session_capture_assembly(
     retry_wait_gate: RetryWaitGate | None = None,
     pending_media_results: dict | None = None,
     pending_file_observations: dict[tuple[int, str], PendingFileObservation] | None = None,
+    continuing_read_tickets: dict | None = None,
+    pending_read_results: dict | None = None,
+    pending_read_business: dict | None = None,
+    pending_read_ends: dict | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
@@ -388,6 +392,8 @@ def session_capture_assembly(
     独立使用本工厂时，未传入集合则为其创建一份。
     recording_anchors 与 retry_wait_gate 保留同会话原结果的单调计时
     依据；三个生产工厂从会话接收同一对象，接手保存不会重新计时。
+    四个 READ 集合保留原实际结束、完整申请及续传身份；默认三个工厂
+    从同一会话接收，受限工厂不因持有这些原事实装配媒体链。
     """
 
     anchors = {} if recording_anchors is None else recording_anchors
@@ -395,10 +401,10 @@ def session_capture_assembly(
     timelapse_deadlines: dict[int, int] = {}
     pending_start_results = {} if pending_call_results is None else pending_call_results
     file_observations = {} if pending_file_observations is None else pending_file_observations
-    continuing_read_tickets: dict = {}
-    pending_read_results: dict = {}
-    pending_read_business: dict = {}
-    pending_read_ends: dict = {}
+    continuing_read_tickets = {} if continuing_read_tickets is None else continuing_read_tickets
+    pending_read_results = {} if pending_read_results is None else pending_read_results
+    pending_read_business = {} if pending_read_business is None else pending_read_business
+    pending_read_ends = {} if pending_read_ends is None else pending_read_ends
     media_results = {} if pending_media_results is None else pending_media_results
     retry_gate = RetryWaitGate() if retry_wait_gate is None else retry_wait_gate
     roots = BoundDirectories(staging=staging)

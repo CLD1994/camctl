@@ -1813,7 +1813,7 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
             context, action_id, RunOutcome.UNCONFIRMED,
             error=ErrorValue(code="result_unconfirmed", stage="device"))
         _finish_capture(context, action_id, saved.entries, FileKind.PHOTO, registered=registered,
-                        failure=_unconfirmed_failure(action_id))
+                        failure=_unconfirmed_failure(context, action_id))
         return
     entries = listing.entries
     ticket = None if listing.already_saved else listing.ticket
@@ -2457,23 +2457,37 @@ async def _advance_recording_outcome(
         if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
             # 在途或本轮列举失败：已保存实际结果与重试等待。
             return
-        if listing.phase is ListingPhase.EXHAUSTED:
-            # 录像活动不适用集合结论：仅核实流程按公共错误结构收场。
-            receipt = context.capture.close_unconfirmed_result_run(
-                ResultRunClose(
-                    action_id=action_id, occurred_at=context.wall_us()),
-                new_operation_key(), context.owned)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-            _finish_capture(context, action_id, (), FileKind.VIDEO,
-                            failure=_unconfirmed_failure(action_id))
+        unconfirmed = (listing.phase is ListingPhase.CLOSED
+            and row_facts(context.owned.connection, "operation_runs", listing.ticket.run_id)["status"]
+                == int(enum_for("operation_runs.status").UNCONFIRMED))
+        if listing.phase is ListingPhase.EXHAUSTED or unconfirmed:
+            saved = listing if unconfirmed else _saved_result_listing(context, action_id)
+            registered = _register_listing(context, action_id, saved)
+            if not unconfirmed:
+                # 录像仅收场核实责任，不生成延时摄影的集合结论。
+                receipt = context.capture.close_unconfirmed_result_run(
+                    ResultRunClose(
+                        action_id=action_id, occurred_at=context.wall_us()),
+                    new_operation_key(), context.owned)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            _finish_capture(context, action_id, saved.entries, FileKind.VIDEO,
+                            registered=registered, failure=_unconfirmed_failure(context, action_id))
             return
         entries = listing.entries
         ticket = None if listing.already_saved else listing.ticket
         registered = _register_listing(context, action_id, listing)
+        metadata = _result_file_metadata(context, listing.ticket)
+        metadata.update((entry.identity, entry) for entry in listing.entries)
+        entries, registered_files = _registered_result_files(context, action_id, metadata)
+        registered = tuple(registered_files[entry.identity] for entry in entries)
+    files = assess_capture_files(
+        CaptureFileSet(files=tuple(file for file, _ in registered), set_finalized=False),
+        ProductRequirements(required_kinds=frozenset({FileKind.VIDEO})),
+    )
     source_file_id = next(
         (file_id for (file, file_id), entry in zip(registered, entries)
          if entry.complete and entry.kind is FileKind.VIDEO), None)
-    if cached is None and context.listing_cache is not None and (
+    if cached is None and files.is_complete and context.listing_cache is not None and (
             row[6] is not None or source_file_id is not None):
         # 完整原片已归属且媒体链推进中：已保存观察足以继续装载，等
         # 待装配不再重复列举；产物未齐的列举每轮重新观察文件到达。
@@ -2505,7 +2519,8 @@ async def _advance_recording_outcome(
         target_duration_ms=_target_duration_ms(action),
     )
     result = decide_recording_result(facts)
-    if result.kind.value in ("succeeded", "failed"):
+    if result.kind.value == "failed" or (
+            result.kind.value == "succeeded" and files.is_complete):
         if ticket is not None:
             # 承载结论的轮次以可靠结果收场核实责任。
             _finish_listing_result(context, listing,
@@ -2638,7 +2653,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         # 有限轮次用尽：核实责任与无法确认结论同事务收场。
         _close_check_unconfirmed(context, action_id)
         _finish_capture(context, action_id, (), FileKind.VIDEO,
-                        failure=_unconfirmed_failure(action_id))
+                        failure=_unconfirmed_failure(context, action_id))
         return
     # v1 文件观察分别证明归属与单文件事实，不提供集合确定依据。
     # 真实未确定分区保存原本轮与已取得文件，下一检查仍沿原有限责任。
@@ -2837,11 +2852,11 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                               registered_files=listing.registered_files)
 
 
-def _unconfirmed_failure(action_id: int) -> RecordingFailure:
+def _unconfirmed_failure(runtime: CaptureRuntime, action_id: int) -> RecordingFailure:
     """有限核实耗尽后的动作失败：产物结果无法确认。"""
     return RecordingFailure(
         code="capture_result_unconfirmed",
-        details={"activity_id": str(action_id), "reason": "outputs_unknown"})
+        details={"activity_id": str(_activity_id_of(runtime, action_id)), "reason": "outputs_unknown"})
 
 
 def _held_listing(runtime: CaptureRuntime, ticket: AttemptTicket) -> ListingRound | None:
@@ -2992,11 +3007,7 @@ async def _finish_timelapse_conclusion(
     else:
         _finish_capture(
             runtime, action_id, entries, FileKind.VIDEO, registered=registered,
-            failure=RecordingFailure(
-                code="capture_result_unconfirmed",
-                details={
-                    "activity_id": str(action_id),
-                    "reason": "outputs_unknown"}))
+            failure=_unconfirmed_failure(runtime, action_id))
 
 
 def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:

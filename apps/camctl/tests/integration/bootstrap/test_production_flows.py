@@ -258,19 +258,34 @@ class TestRestrictedSessionProductionWinddown:
         cfg = _config(home, wait_cap_s="1")
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+
+        class ConfiguredRecordCatalog(_RecordCatalog):
+            def driver_id(self, device_id):
+                if not self.device_exists(device_id):
+                    return None
+                return cfg.devices[device_id]["driver"]
+
+        catalog = ConfiguredRecordCatalog()
+        driver_id = cfg.devices["cam-1"]["driver"]
         driver = _ProductionDriver({})
-        register_drivers(_entry_for_driver("production-double", driver))
+        register_drivers(_entry_for_driver(driver_id, driver))
         await _submit_plan(
-            tmp_path, cfg, _RecordCatalog(),
+            tmp_path, cfg, catalog,
             _record_plan("1", _future_schedule(1)))
         db = Path(cfg.paths.state_db)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=_RecordCatalog())
+        assert _scalar(db, "SELECT driver_id FROM actions WHERE id = 1") == (
+            "production-double",)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
         task = asyncio.create_task(execute_command(deps, None))
         try:
             await _await_query(
                 db,
                 "SELECT started_at IS NOT NULL FROM device_activities"
                 " WHERE id = 1", (1,))
+            assert driver.calls == [("control", "start_recording")]
+            assert _scalar(
+                db, "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'start/1'") == (3, 1)
         finally:
             await _cancel(task)
         close_runtime(deps)
@@ -280,7 +295,7 @@ class TestRestrictedSessionProductionWinddown:
         driver._files[1] = [_entry("clip-1", size=4096)]
         restricted = _config(home, min_plausible="2030-01-01", wait_cap_s="1")
         restricted_deps = build_runtime(
-            CommandMode.RUN, restricted, catalog=_RecordCatalog())
+            CommandMode.RUN, restricted, catalog=catalog)
         try:
             outcome = await asyncio.wait_for(
                 asyncio.ensure_future(
@@ -290,11 +305,18 @@ class TestRestrictedSessionProductionWinddown:
         assert outcome.succeeded is False
         assert outcome.reason == "clock_invalid"
         # 保守窗口取上限 1 秒后按原预算停止，录像确认停止。
-        assert ("stop", "stop_recording") in driver.calls
-        assert ("result", "1") in driver.calls
+        assert driver.calls == [
+            ("control", "start_recording"),
+            ("stop", "stop_recording"),
+            ("result", "1"),
+        ]
         assert _scalar(
             db, "SELECT status, attempts_used FROM operation_runs"
             " WHERE responsibility_key = 'stop/1'") == (3, 1)
+        assert _scalar(
+            db, "SELECT status, attempts_used, retry_wait_required"
+            " FROM operation_runs WHERE responsibility_key = 'results/1'"
+            ) == (2, 1, 1)
         # 等待阶段已保存：计时证据不足的检查决定 REQUIRED 并关联原片。
         assert _scalar(
             db, "SELECT check_decision, source_device_file_id"

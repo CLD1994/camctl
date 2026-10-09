@@ -326,9 +326,21 @@ class TestNormalStopAtTarget:
                 " FROM device_activities WHERE id = 1") == (3, 2)
             # 结果尚未列举：动作保持执行中等待产物核实。
             assert _scalar(db, "SELECT status FROM actions WHERE id = 1") == (2,)
-            # 迟到的完整结果：控制完成即成功依据，终态与产物登记。
+            await _await_query(
+                db,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'",
+                (2, 1, 1))
+            assert results.calls == [1]
+            # 原空列表已保存重试等待；单调钟到间隔后核实迟到原片。
             results.files_by_action[1] = (_entry("clip-1"),)
+            clock["ns"] += 3_000_000_000
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            assert results.calls == [1, 1]
+            assert stopper.calls == ["stop_recording"]
+            assert _scalar(
+                db, "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'results/1'") == (3, 2)
             output = _scalar(
                 db, "SELECT kind, device_file_id FROM outputs"
                 " WHERE source_action_id = 1")

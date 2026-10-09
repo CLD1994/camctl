@@ -689,40 +689,65 @@ class TestCloseResultCheckUnconfirmed:
 class TestConclusionRecovery:
     """结论已保存而动作未收场的中断窗口：用原结果完成收尾。"""
 
-    def _concluded(self, tmp_path: Path, *, result_set_state: int,
-                   completion_basis: int, capture: str) -> object:
-        owned = _environment(tmp_path)
-        outcome = 1 if result_set_state == 3 else 3
-        evidence = (json.dumps({
-            "method": "time_and_outputs",
-            "observation": {"files": ["sequence-1"]},
-        }) if completion_basis == 3 else None)
-        owned.connection.execute(
-            "UPDATE device_activities SET result_set_state = ?,"
-            " completion_basis = ?, capture_json = ?, result_check_json = ?,"
-            " completion_evidence_json = ?, wait_completed_event_id = 1"
-            " WHERE id = 1",
-            (result_set_state, completion_basis, capture,
-             json.dumps({"contract": _RESULT_CONTRACT, "outcome": outcome,
-                         "observation": {"files": ["sequence-1"]}}),
-             evidence))
-        # 已确认的启动事实：处理器不再发起启动调用。
-        owned.connection.execute(
-            "INSERT INTO operation_runs (id, action_id, delivery_id, kind,"
-            " query_purpose, responsibility_key, activity_id, copy_id,"
-            " cleanup_item_id, session_key, status, attempts_used,"
-            " max_attempts_used, timeout_s_json, retry_interval_s_json,"
-            " retry_wait_required, error_json)"
-            " VALUES (50, 1, NULL, 1, NULL, 'start/1', 1, NULL, NULL, NULL,"
-            " 3, 1, 1, '10', '1', 0, NULL)")
-        owned.connection.execute(
-            "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
-            " intent_event_id, result_event_id, max_attempts_used, effect_state,"
-            " result_json) VALUES (51, 50, 1, 2, 1, 1, 1, 3, '{}')")
-        owned.connection.commit()
-        return owned
+    async def _concluded(self, tmp_path: Path, *, satisfied: bool, independent_activity: bool):
+        from dataclasses import replace
+        from camctl.capture.handlers import (
+            _close_check_unconfirmed, _finish_listing_result,
+            _listing_round, _register_listing,
+        )
+        from camctl.capture.timelapse import WaitKind, WaitPlan
+        from camctl.persistence.repositories.timelapse import ScheduleWait
 
-    async def _advance(self, owned, files: dict) -> None:
+        from .result_consumer_fixtures import consumer_world
+
+        owned, runtime, action_id, _ = await consumer_world(
+            tmp_path, "timelapse", independent_activity=independent_activity)
+        activity_id, = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
+        runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
+        scheduled = runtime.timelapse.schedule_wait(ScheduleWait(
+            action_id, WaitPlan(WaitKind.WAIT_THEN_CHECK,
+                               check_at_utc=_NOW + 600_000_000),
+            driver_margin_ms=0, extra_wait_ms=0, occurred_at=_NOW),
+            new_operation_key(), owned)
+        assert scheduled.kind is DbOutcomeKind.COMPLETED, scheduled.error
+        waited = runtime.timelapse.complete_wait(
+            WaitCompletedSave(action_id, runtime.wall_us()), new_operation_key(), owned)
+        assert waited.kind is DbOutcomeKind.COMPLETED, waited.error
+        results = ResultsDouble({activity_id: (_entry("clip-1"),)})
+        runtime.results = results
+        listing = await _listing_round(runtime, action_id)
+        _register_listing(runtime, action_id, listing)
+        if satisfied:
+            # 本用例消费独立保存的正式结论。v1 只承载文件输入，
+            # 不由其条目、大小或扫描次数推导集合已经确定。
+            _finish_listing_result(runtime, listing, end_run=RunOutcome.SUCCEEDED,
+                                   result_set=replace(_satisfied(waited.value.event_id),
+                                                      action_id=action_id,
+                                                      occurred_at=listing.occurred_at))
+            fact = owned.connection.execute(
+                "SELECT occurred_at,body_json FROM history_events ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            assert fact[0] == listing.occurred_at
+            activity_row, = json.loads(fact[1])["rows"]
+            assert activity_row["table"] == "device_activities"
+            saved_evidence = activity_row["after"]["values"]["completion_evidence_json"]
+            assert saved_evidence["wait_completed_event_id"] == waited.value.event_id
+        else:
+            _finish_listing_result(runtime, listing, retry_wait=True)
+            _close_check_unconfirmed(runtime, action_id)
+        assert runtime.action(action_id)["status"] == 2
+        original = owned.connection.execute(
+            "SELECT id,run_id,attempt_no,status,result_event_id,result_json,error_json"
+            " FROM operation_attempts ORDER BY id").fetchall()
+        path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+        metadata = owned.metadata
+        owned.connection.close()
+        reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+        assert reopened.metadata == metadata
+        return reopened, original, action_id, activity_id
+
+    async def _advance(self, owned, files: dict, action_id: int = 1) -> CaptureRuntime:
         from camctl.capture.timelapse import CaptureWaitConfig
         from camctl.scheduling.rules import LaunchWindow
 
@@ -743,51 +768,62 @@ class TestConclusionRecovery:
             wait_config=lambda params: CaptureWaitConfig(
                 target_duration_ms=600_000, driver_margin_ms=0),
         )
-        await capture_handler("camera_timelapse")(1, runtime)
+        await capture_handler("camera_timelapse")(action_id, runtime)
+        return runtime
 
+    @pytest.mark.parametrize("independent_activity", [False, True])
     async def test_satisfied_conclusion_finishes_without_new_round(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, independent_activity: bool) -> None:
         """满足结论保存后的中断：直接收尾，不重开核实轮次。"""
-        owned = self._concluded(
-            tmp_path, result_set_state=3, completion_basis=3,
-            capture='{"status": "completed"}')
+        owned, original, action_id, activity_id = await self._concluded(
+            tmp_path, satisfied=True, independent_activity=independent_activity)
         try:
-            await self._advance(owned, {1: (_entry("sequence-1"),)})
+            runtime = await self._advance(owned, {}, action_id)
+            assert runtime.results.calls == []
             assert _value(
-                owned, "SELECT status FROM actions WHERE id = 1") == (3,)
+                owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
             assert _value(
                 owned, "SELECT occupancy_state FROM device_activities"
-                " WHERE id = 1") == (2,)
+                " WHERE id=?", activity_id) == (2,)
             assert _value(
                 owned, "SELECT COUNT(*) FROM outputs"
-                " WHERE source_action_id = 1") == (1,)
+                " WHERE source_action_id=?", action_id) == (1,)
             assert _value(
                 owned, "SELECT COUNT(*) FROM operation_runs"
-                " WHERE responsibility_key = 'results/1'") == (0,)
+                " WHERE responsibility_key=?", f"results/{activity_id}") == (1,)
+            assert owned.connection.execute(
+                "SELECT id,run_id,attempt_no,status,result_event_id,result_json,error_json"
+                " FROM operation_attempts ORDER BY id").fetchall() == original
         finally:
             owned.connection.close()
 
+    @pytest.mark.parametrize("independent_activity", [False, True])
     async def test_unconfirmed_conclusion_fails_with_registered_error(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, independent_activity: bool) -> None:
         """无法确认结论保存后的中断：按登记错误收场失败终态。"""
-        owned = self._concluded(
-            tmp_path, result_set_state=4, completion_basis=1,
-            capture='{"status": "unconfirmed",'
-                    ' "error": {"code": "result_unconfirmed"}}')
+        owned, original, action_id, activity_id = await self._concluded(
+            tmp_path, satisfied=False, independent_activity=independent_activity)
         try:
-            await self._advance(owned, {1: (_entry("sequence-1"),)})
+            runtime = await self._advance(owned, {}, action_id)
+            assert runtime.results.calls == []
             failure = _value(
                 owned,
                 "SELECT status, error_code,"
                 " json_extract(error_details_json, '$.reason')"
-                " FROM actions WHERE id = 1")
+                " FROM actions WHERE id=?", action_id)
             assert failure == (4, 12, "outputs_unknown")
+            assert _value(owned,
+                "SELECT json_extract(error_details_json, '$.activity_id')"
+                " FROM actions WHERE id=?", action_id) == (str(activity_id),)
             # 失败仍保留已列举的完整且归属明确的文件。
             assert _value(
                 owned, "SELECT COUNT(*) FROM outputs") == (1,)
             assert _value(
                 owned, "SELECT occupancy_state FROM device_activities"
-                " WHERE id = 1") == (1,)
+                " WHERE id=?", activity_id) == (1,)
+            assert owned.connection.execute(
+                "SELECT id,run_id,attempt_no,status,result_event_id,result_json,error_json"
+                " FROM operation_attempts ORDER BY id").fetchall() == original
         finally:
             owned.connection.close()
 

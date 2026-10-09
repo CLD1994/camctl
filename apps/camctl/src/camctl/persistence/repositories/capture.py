@@ -3449,20 +3449,11 @@ class _CloseResultCheckCommand:
         command = self._command
         if command.phase is not ResultSetPhase.UNCONFIRMED:
             raise TransactionError("耗尽收场只保存无法确认的集合结论")
-        with closing(connection.execute(
-            "SELECT id FROM operation_runs WHERE responsibility_key = ?",
-            (f"results/{command.action_id}",),
-        )) as cursor:
-            found = cursor.fetchone()
-        if found is None:
-            raise ConsistencyError(
-                f"活动 {command.action_id} 没有结果核实流程可收场")
-        run_facts = row_facts(connection, "operation_runs", int(found[0]))
-        assert run_facts is not None
+        run_facts = _result_run_of_action(connection, command.action_id)
         if run_facts["status"] not in (1, 2):
             raise ConsistencyError("已结束的核实流程不能再次收场")
         self._state["operation_runs"] = {run_facts["id"]: run_facts}
-        error = self._run_error()
+        error = self._run_error(connection)
         # 流程收场与集合结论共用一次总分配的两个事件段。
         allocation = scope.allocate(2)
         sub = _CompositeScope(scope, allocation.first_event_id)
@@ -3494,9 +3485,10 @@ class _CloseResultCheckCommand:
             result=confirm_plan.result,
         )
 
-    def _run_error(self) -> dict[str, Any]:
+    def _run_error(self, connection) -> dict[str, Any]:
         """按登记的公共错误结构构造流程错误（有限核实后结果未知）。"""
-        return _unconfirmed_run_error(self._command.action_id)
+        return _unconfirmed_run_error(
+            load_activity_of_action(connection, self._command.action_id)["id"])
 
     def _reuse(self, connection, saved) -> CommandPlan:
         command = self._command
@@ -3513,7 +3505,7 @@ class _CloseResultCheckCommand:
         values = rows[0]["after"]["values"]
         if (values.get("status") != int(_RUN_STATUS.UNCONFIRMED)
                 or values.get("retry_wait_required") != 0
-                or not json_equal(values.get("error_json"), self._run_error())):
+                or not json_equal(values.get("error_json"), self._run_error(connection))):
             raise TransactionError("耗尽收场的重送输入与原事务不同")
         confirm_plan = _ResultSetConfirmCommand(
             command, self._key)._reuse(connection, saved[1:])
@@ -3526,12 +3518,28 @@ class _CloseResultCheckCommand:
         )
 
 
-def _unconfirmed_run_error(action_id: int) -> dict[str, Any]:
+def _result_run_of_action(connection, action_id: int) -> dict[str, Any]:
+    """以动作关联的实际活动定位原核实责任，不混用两者的编号。"""
+    activity = load_activity_of_action(connection, action_id)
+    with closing(connection.execute(
+        "SELECT id FROM operation_runs WHERE responsibility_key=?",
+        (f"results/{activity['id']}",),
+    )) as cursor:
+        found = cursor.fetchone()
+    facts = None if found is None else row_facts(connection, "operation_runs", int(found[0]))
+    if (facts is None or facts["action_id"] != action_id
+            or facts["activity_id"] != activity["id"]
+            or facts["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)):
+        raise ConsistencyError(f"动作 {action_id} 缺少所属活动的原结果核实流程")
+    return facts
+
+
+def _unconfirmed_run_error(activity_id: int) -> dict[str, Any]:
     """按登记的公共错误结构构造核实流程错误（有限轮次后结果未知）。"""
     code = "capture_result_unconfirmed"
     spec = registered_error(code)
     details = {
-        "activity_id": str(action_id),
+        "activity_id": str(activity_id),
         "reason": "outputs_unknown",
     }
     validate_error_details(code, details)
@@ -3558,18 +3566,9 @@ class _ResultRunCloseCommand:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(connection, saved)
         command = self._command
-        with closing(connection.execute(
-            "SELECT id FROM operation_runs WHERE responsibility_key = ?",
-            (f"results/{command.action_id}",),
-        )) as cursor:
-            found = cursor.fetchone()
-        if found is None:
-            raise ConsistencyError(
-                f"活动 {command.action_id} 没有结果核实流程可收场")
-        run_facts = row_facts(connection, "operation_runs", int(found[0]))
-        assert run_facts is not None
+        run_facts = _result_run_of_action(connection, command.action_id)
         if run_facts["status"] not in (1, 2):
             raise ConsistencyError("已结束的核实流程不能再次收场")
         self._state["operation_runs"] = {run_facts["id"]: run_facts}
@@ -3584,7 +3583,7 @@ class _ResultRunCloseCommand:
             {
                 "status": int(_RUN_STATUS.UNCONFIRMED),
                 "retry_wait_required": 0,
-                "error_json": _unconfirmed_run_error(command.action_id),
+                "error_json": _unconfirmed_run_error(run_facts["activity_id"]),
             },
         )
         self._owners[("operation_runs", run_facts["id"])] = (
@@ -3596,7 +3595,7 @@ class _ResultRunCloseCommand:
         return CommandPlan(
             events=(event,), owners=self._owners, state_rows=self._state)
 
-    def _reuse(self, saved) -> CommandPlan:
+    def _reuse(self, connection, saved) -> CommandPlan:
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
         if types != [(_RUN_END_EVENT, 3)]:
@@ -3608,11 +3607,14 @@ class _ResultRunCloseCommand:
                 or not rows[0]["after"]["exists"]):
             raise TransactionError("原收场缺少流程事实")
         values = rows[0]["after"]["values"]
+        run = _result_run_of_action(connection, command.action_id)
+        if rows[0]["id"] != run["id"]:
+            raise TransactionError("核实收场的原流程与所属活动不同")
         if (values.get("status") != int(_RUN_STATUS.UNCONFIRMED)
                 or values.get("retry_wait_required") != 0
                 or not json_equal(
                     values.get("error_json"),
-                    _unconfirmed_run_error(command.action_id))):
+                    _unconfirmed_run_error(run["activity_id"]))):
             raise TransactionError("核实收场的重送输入与原事务不同")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,

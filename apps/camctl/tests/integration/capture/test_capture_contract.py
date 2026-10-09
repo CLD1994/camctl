@@ -663,27 +663,79 @@ class TestInterruptionRecovery:
             self, tmp_path: Path):
         from dataclasses import replace
 
-        from ..operations.test_result_reuse import _FaultConnection
+        from camctl.contracts.values import ConsistencyError
+        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+        from camctl.persistence.transaction import saved_transaction_events
 
-        owned = _environment(tmp_path, _PHOTO)
-        runtime = _runtime(
-            owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+        from ..operations.test_result_reuse import _FaultConnection
+        from .result_consumer_fixtures import consumer_world
+        from .test_result_consumer_saves import _actual, _assert_actual_saved, _result_port
+        from .test_result_file_recovery import FileObservationSpy, _fresh_runtime
+
+        owned, runtime, action_id, handler = await consumer_world(tmp_path, "photo")
+        actual = _actual(action_id, with_files=True, complete=True)
+        actual.observations[0].data["entries"][0]["kind"] = "photo"
+        results_driver = _result_port(runtime, actual)
+        spy = FileObservationSpy()
+        runtime.capture = spy
+        original_wall = runtime.wall_us()
+        original_monotonic = runtime.monotonic_ns()
+        path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+        metadata = owned.metadata
         runtime.owned = replace(
             owned, connection=_FaultConnection(owned.connection, "INSERT INTO device_files"))
         try:
-            await capture_handler("camera_take_photo")(11, runtime)
-        except Exception:
-            pass  # 文件登记失败的注入故障；此处只核对回滚与未终态。
-        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
-        before_attempts = _value(
-            owned, "SELECT COUNT(*) FROM operation_attempts")[0]
-        recovery = _runtime(
-            owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
-        await capture_handler("camera_take_photo")(11, recovery)
-        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
-        # 重入不重复调用设备，也不重复登记产物。
-        assert _value(owned, "SELECT COUNT(*) FROM operation_attempts")[0] == before_attempts
-        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+            with pytest.raises(ConsistencyError):
+                await capture_handler(handler)(action_id, runtime)
+            assert len(spy.requests) == 2 and spy.requests[1] == spy.requests[0]
+            pending, = runtime.pending_start_results.values()
+            ticket, result_key = pending.finish.ticket, pending.key
+            assert pending.finish.outcome.outcome is actual
+            assert pending.finish.occurred_at == original_wall
+            assert pending.returned_ns == original_monotonic
+            file_pending = runtime.pending_file_observations[(action_id, "original")]
+            assert file_pending.entries == pending.result_listing
+            request, file_key = spy.requests[0]
+            assert file_pending.command is request and file_pending.key == file_key
+            assert request.occurred_at == original_wall and request.locator == {"path": "/DCIM/original.mp4"}
+            assert saved_transaction_events(owned.connection, file_key) is None
+            assert _value(owned, "SELECT COUNT(*) FROM device_files") == (0,)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
+            before_attempts = owned.connection.execute(
+                "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
+            assert len(before_attempts) == 2
+
+            owned.connection.close()
+            owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+            assert owned.metadata == metadata
+            recovery = _fresh_runtime(owned, runtime)
+            recovery.capture = spy
+            recovery.wall_us = lambda: original_wall + 5_000_000
+            assert recovery.pending_start_results is runtime.pending_start_results
+            assert recovery.pending_file_observations is runtime.pending_file_observations
+            assert recovery.retry_gate is runtime.retry_gate
+            original_held = recovery.pending_start_results[(ticket.run_id, ticket.attempt_id)]
+            assert original_held is pending and original_held.key == result_key
+
+            await capture_handler(handler)(action_id, recovery)
+
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
+            assert owned.connection.execute(
+                "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall() == before_attempts
+            assert len(spy.requests) == 3 and all(value == (request, file_key) for value in spy.requests)
+            saved_file = saved_transaction_events(owned.connection, file_key)
+            assert saved_file is not None and saved_file[0]["occurred_at"] == original_wall
+            saved_result = saved_transaction_events(owned.connection, result_key)
+            assert saved_result is not None and saved_result[0]["occurred_at"] == original_wall
+            _assert_actual_saved(owned, action_id, actual)
+            results_driver.list_results.assert_awaited_once()
+            runtime.driver.control.assert_awaited_once()
+            assert not recovery.pending_start_results and not recovery.pending_file_observations
+            assert _value(owned, "SELECT source_action_id,presence_state,completion_state,size_bytes"
+                          " FROM device_files") == (action_id, 2, 3, 41)
+            assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
+        finally:
+            owned.connection.close()
 
     async def test_history_bytes_stable_after_terminal_redispatch(
             self, tmp_path: Path):

@@ -128,6 +128,46 @@
 
 root 独占 `/tmp/camctl-goal-recovery-phase-bootstrap.log` 为 108 passed、57.69s，包含上述普通读取两项、原实际读取结束／摘要／绑定十五项，以及文件、媒体、取消和目录装配分区。内部输入模块另包含在最终 capture 定向 107 项中。两组绿色不证明默认三工厂已经交接所有原 READ 持有物。
 
-`session_capture_assembly` 的 `continuing_read_tickets`、`pending_read_results`、`pending_read_business` 和 `pending_read_ends` 在每次创建工厂时分别建立。单一工厂内多个 runtime 共用它们，但 `lifecycle.py` 的普通、残留和受限工厂没有共同会话权威来源。这一接缝尚未实现和验收，后续须先构造真实合法转换及保存故障，再在共同责任边界接线。
+`session_capture_assembly` 的 `continuing_read_tickets`、`pending_read_results`、`pending_read_business` 和 `pending_read_ends` 在独立使用工厂时由该工厂拥有；默认装配从同一 `RuntimeDeps` 会话注入。普通、残留和受限入口共享原事实及完整申请，但共享持有集合不自动授予相应入口新的设备或媒体执行资格。首批完整申请保存责任已经接线并通过根 15 项门禁；持续保存失败、raw End 技术校验及其他未完成分区见 RD4。
 
 后续门禁须证明普通入口已实际取得原 End、结果及原业务申请后，后继入口用 fresh Owned 接手原保存责任。原 ticket、完整申请、key、已用次数、轮次、进度和源保护保持；不允许新读取、摘要获取、媒体检查／修复或凭字节数补造 End。业务主动停止仍使用已登记的 UNKNOWN/read_stopped 与 CANCELED 组合；完整实际返回但缺必要源摘要且绑定异常，仍使用实际 SUCCEEDED 与所属 binding failure 组合。原子提交前后、原结果可靠但业务未保存、业务终态及迟到取消须分别建模。仅验证四个字典对象相同不能替代真实消费者验收。
+
+### RD4 默认入口交接原 READ 保存责任
+
+普通 `capture_flow`、残留 `residual_flow` 和受限 `winddown_flow` 都会取得本轮独立连接。它们先保存同一会话已经取得的 READ 事实，再筛选当前业务候选；是否仍有可推进的录像、设备绑定是否匹配、当前驱动是否仍提供媒体能力，不决定原申请是否需要核实。原事实来自实际任务拥有者，持有物只能在同一个 `RuntimeDeps` 会话内交接；新进程没有这些持有物时，仍按原固定 H、host 边界和驱动恢复契约处理。
+
+本阶段的正式规则来自本计划上述原结果优先矩阵及 [file-copy.md 的实际读取结束分区](../../architecture/file-copy.md)。下表分开表达实际源结束、完整结果申请和后续独立业务申请。原 `ReadEnd` 的实际时刻与完整 `AttemptFinish` 首次确定时的 `occurred_at` 各自保留；重送不能重新取钟或把后来的业务取消回填到较早的实际结束时刻。
+
+| 持有物与可靠历史 | 默认入口的原责任 | 后续资格与本阶段边界 |
+| --- | --- | --- |
+| 没有原 READ 持有物 | 不创建 READ 保存范围，不为了准备阶段新增设备、copy 或 operations 依赖。 | 普通、残留和受限各自按原流程推进。 |
+| 实际源任务仍未结束 | 保留原实际拥有者、ticket、slot 和源保护，等待真实结束。 | 不重开 source，不按等待取消制造业务取消。 |
+| 实际主动停止且字节不完整，尚待核对业务取消 | 保留原 `PendingStoppedRead`、原 ticket 和原 key；按原可靠取消事实准备结果。 | 业务取消已生效时 UNKNOWN/read_stopped + 原 run CANCELED；没有业务取消时保留原尝试，不补造 SUCCEEDED。 |
+| 已持有 clean 完整 End，但完整 Finish 尚未确定，仍缺必要源 SHA | 保留原 End、原设备声明及未取得摘要事实；不能从 C=N 形成成功副本。 | 绑定 missing/mismatch 时按已登记矩阵取得 actual SUCCEEDED + binding FAILED；匹配时是否继续获取输入仍受该入口原执行资格约束。受限入口不新增 source/digest/check/repair。 |
+| 已持有 clean 完整 End，必要源摘要已可靠取得或原声明 UNSUPPORTED，技术校验未结束 | 保留原本地续接责任、End 与输入，不先制造完整 Finish。 | 原技术校验与后续媒体检查／修复分开；受限技术校验资格需要独立核定，不以本阶段 prepared-Finish 门禁授予。 |
+| 已形成完整 Finish，第一次保存回滚或 COMMIT 未知，尚无可靠 F | 在 fresh Owned 用同一完整 Finish、原 key、原 occurred_at 核实或提交原组；失败仍持有它并停止业务筛选。 | 不以 UNKNOWN 恢复覆盖原实际结果，不新增 source/digest/check/repair；原结果可靠前不提交依赖 child。 |
+| 已形成完整 Finish，原 F 已 COMMIT 但响应 UNKNOWN | 先核实同一原组；原 run 和 attempt 的已有终态保持，之后才处理原独立收场责任。 | 不因当前投影已终态或普通 candidate 消失而跳过原 key 核实。 |
+| 原 Finish 已可靠保存，独立 slot 释放申请首次保存回滚或 COMMIT 未知 | fresh Owned 重送 `PendingReadBusiness` 的原完整申请与 key；同一原 F 的结果／次数／字节不变。 | 不重新形成 slot 申请，不依赖媒体链是否装配，不新增媒体任务。 |
+| 原 Finish 和独立申请均已可靠 COMMIT，响应 UNKNOWN 后业务公开取消并进入终态 | 核实已提交的原 key，保留已经生效的取消和所有既有终态。 | 没有新的业务候选也须消费原保存责任；零新调用、零重写事实和零重新计数。 |
+| 完整 child 在新取消生效前已经形成，但其 F 尚不存在或仍未知，原请求与新取消约束冲突 | 停止该分区并保留完整原申请和原 key。 | 本阶段不决定如何退役或重形成申请；不得更换 key、改 canceled 输入或放宽 terminal guard。 |
+| 字节完整但没有可靠原 End，或原 ticket／所属申请／历史无法解释 | 按既有恢复资格或诊断保留责任。 | 不把 C=N、MATCHED 或业务终态当成实际 clean End，不选择 RESULTS v2 未决语义。 |
+
+装配涉及两个责任：四个 READ 集合以同一会话为权威来源；默认流程在业务候选筛选前核实已经形成的原申请，不依赖是否构造原 READ runtime 或当前设备端口是否可用。字段名、是否采用统一 holder 类型及具体 helper 属于实现建议，完整输入与原组核实是硬性要求。`media_flow.py`／`outputs.read_attempts.py` 的共同保存责任由读取分工提出候选；`capture_assembly.py`、`lifecycle.py`、`flows.py` 和残留入口的接线由根 Agent 协调，不允许独立覆盖相邻分工。
+
+第一阶段组件门禁使用真实受理、START／STOP、活动结束、文件归属与写完历史，真实 `ReadSession` 返回实际 clean End；由普通默认工厂取得第一个原 ticket 和完整结果。只隔离主会话循环及设备／工具边界，保留 `execute_command` 的三个默认 factory 和实际 flow。COMMIT 故障必须落到原目标事务：提交前应无该原 key 历史，提交后 UNKNOWN 应已有完整原组，之后关闭连接并由另一个默认入口取得 fresh Owned。
+
+- [x] `Finish` COMMIT 前／后 UNKNOWN × 普通／残留／受限入口：同一原 Finish、key、occurred_at 可靠保存；原 ticket、次数、字节、轮次及业务处理状态保持，零新 source/digest/check/repair。普通和受限 ACTIVE 分区在原保存之后、业务候选筛选之前用协作者边界探针截停；不把此截停解释为普通入口以后也不能推进合格工作。
+- [x] 原 Finish 已 reliable，slot child COMMIT 前／后 UNKNOWN × 三入口：重送原完整 `SlotRequest`／key，不重复 Finish，不新建 slot 责任，原机会正确释放。
+- [x] slot child 已 COMMIT 但响应 UNKNOWN，随后通过公开取消与收场使原动作终态 × 三入口：原 key 仍核实，实际 READ 和业务终态均保持，所有候选已消失也不得跳过保存。COMMIT 前 child 后新取消分区暂不实现。
+- [x] 再次保存仍 UNKNOWN／回滚时，不执行候选筛选或其他设备／媒体步骤，原 holder 留待下一轮；故障源在真实 repository 端口，不用字典同一性代替消费者行为。首批六项分别验证原 Finish 核实门与 slot child 保存门，不覆盖全部错误与持有物的交叉组合。
+- [x] 根 Agent 独占确认九项有效行为红后实施共同 helper 与默认接线；修正六项提交前夹具后，十五项恢复与六项保存门验收通过。bootstrap、capture 分进程回归，范围见下述记录。
+
+上述前三矩阵共 15 项是首批候选，不覆盖 raw End 的技术校验、未结束实际拥有者、continuing ticket 的零新次数续传、普通主动取消停止及 missingSHA 组合在跨工厂下的全部恢复。后续须沿已批准原状态表补这些独立分区；需要新增入口资格时先给完整证据，不能由 15 项绿色推导 RD4 全部完成。原键核实后 holder 的释放由原保存责任负责；不能因工厂返回 None 或进度投影已经终局就丢弃它。
+
+2026-10-09，Linux 容器、Python 3.11.16：`/tmp/camctl-goal-read-default-consumers-red.log` 的 9 项 COMMIT 后 UNKNOWN 行为红覆盖三个入口的完整 Finish、slot 申请和已取消终态；真实公开前置及实际 ReadEnd 均成立。另 6 项提交前夹具需要在关闭 UNKNOWN 原连接后，用 fresh Owned 判断原 key 是否存在，不能把原连接可见的未提交历史当成可靠 F。真实 COMMIT 命中计数、原连接事务状态及新连接的原 attempt／slot 状态共同验证该故障分区，不删减前置断言。
+
+`resume_prepared_internal_reads` 仅消费完整 `PendingReadResult` 和已形成的 `PendingReadBusiness`，四个集合由默认三工厂共享。三个流程先保存原申请，保存失败按 `StateDbFailure` 停止，不执行业务候选筛选；原 Finish 首次确定的时刻用于其 slot 释放申请，不读取当前墙钟。根 `/tmp/camctl-goal-read-default-consumers-green-1.log` 的上述 9 项通过；关闭 UNKNOWN 原连接再观测可靠 F 后，根 `/tmp/camctl-goal-read-default-consumers-green-2.log` 全部 15 passed、8.40s。6 项提交前分区是修正夹具后的首次验收覆盖，不将原可见性失败计作有效业务红。部署解释器编译和补丁格式检查通过。
+
+`test_read_default_save_gate.py` 的后续 6 项通过最终组合门禁：三个入口各覆盖已提交原 Finish 的完整组查询失败且回滚响应丢失（实际 `OperationRepository` 返回 UNKNOWN），以及原 slot 投影失败并可靠回滚（实际 `OutputsRepository` 返回已确认回滚的保存失败结果）。两者均在 fresh Owned 查询可靠 F，重送原完整 request／key，保留原 holder，原源读取及媒体调用不增加，也不进入候选查询、工厂或业务墙钟。这 6 项没有把两个错误和两种 holder 的全部交叉组合都覆盖；它们分别证伪完整 Finish 核实门和独立 child 保存门的停止责任。取消入口接入、raw End 技术校验及迟到取消冲突不在此生产范围。
+
+2026-10-09，Linux 容器、Python 3.11.16：根 Agent 的 `/tmp/camctl-goal-read-recording-bootstrap-final.log` 为 155 passed、92.60s，包含上述二十一项默认入口反例，以及原读取执行、必要摘要与原 End 绑定、文件前置保存、媒体保存／取消／本地收场、正常录像停止和受限默认装配。独立只读审查核对三个入口的原申请优先、失败停止、slot 原时刻及原键核实；提交前夹具问题经真实关闭重开修正后复验。capture 相关定向门禁为 138 passed，新增活动身份结论恢复与原媒体接线另有 26 passed；全单元为 3687 passed、1 skipped、2 个既有 warning。上述软件证据不证明 raw End 技术校验、continuing ticket、missingSHA 在跨工厂下的完整恢复，不决定晚取消预成 child 的状态语义，也不覆盖取消入口和真实设备验收。

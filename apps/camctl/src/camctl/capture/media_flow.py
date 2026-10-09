@@ -16,6 +16,7 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from camctl.capture.files import FileChecksumSave
@@ -73,7 +74,8 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.outputs.read_attempts import (
-    acquire_read_attempt, forget_read_result, hold_read_result, run_owned_read, save_read_result,
+    PendingReadResult, acquire_read_attempt, forget_read_result, hold_read_result,
+    retry_read_business, run_owned_read, save_read_result,
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind as _DbOutcomeKind
@@ -646,6 +648,27 @@ def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep) -> None:
     _save_internal_read_and_settle(flow, pending)
 
 
+def resume_prepared_internal_reads(
+    owned: OwnedConnection, *, pending_read_results: dict,
+    pending_read_business: dict, pending_read_ends: dict,
+    continuing_read_tickets: dict,
+) -> None:
+    """默认入口只核实原完整 READ 申请，不取得新设备或媒体执行资格。"""
+    prepared = tuple(pending for pending in pending_read_results.values()
+                     if isinstance(pending, PendingReadResult))
+    if not prepared and not pending_read_business:
+        return
+    scope = SimpleNamespace(
+        owned=owned, operations=OperationRepository(),
+        pending_read_results=pending_read_results, pending_read_business=pending_read_business,
+        pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets)
+    for pending in prepared:
+        # 完整输入首次确定的原时刻承担其独立收场，重送不读取当前墙钟。
+        scope.occurred_at = lambda original=pending.finish.occurred_at: original
+        _save_internal_read_and_settle(scope, pending)
+    retry_read_business(scope)
+
+
 def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
     pending = save_read_result(flow, pending)
     if pending is None:
@@ -669,7 +692,7 @@ def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
         # 不继续持有 Finish，以免该释放重送后再次生成另一申请。
         forget_read_result(flow, pending)
         save_read_business(flow, int(ticket.target_id), "release_read_slot",
-            SlotRequest(int(ticket.target_id), flow.occurred_at()), OutputsRepository().release_read_slot)
+            SlotRequest(int(ticket.target_id), pending.finish.occurred_at), OutputsRepository().release_read_slot)
         return
     forget_read_result(flow, pending)
 

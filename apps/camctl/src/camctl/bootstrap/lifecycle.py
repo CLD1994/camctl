@@ -80,6 +80,22 @@ class RuntimeDeps:
     capture_retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
     #: 本会话已经取得的媒体原申请；保存核实不依赖当前驱动能力。
     capture_media_results: dict = field(default_factory=dict)
+    #: 四个 READ 集合保留本会话原实际结束、完整保存申请和续传身份。
+    capture_read_results: dict = field(default_factory=dict)
+    capture_read_business: dict = field(default_factory=dict)
+    capture_read_ends: dict = field(default_factory=dict)
+    capture_continuing_reads: dict = field(default_factory=dict)
+
+
+def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
+    """只保存原完整 READ 输入；受限入口也不依赖媒体或当前设备端口。"""
+    from camctl.capture.media_flow import resume_prepared_internal_reads
+
+    resume_prepared_internal_reads(owned,
+        pending_read_results=deps.capture_read_results,
+        pending_read_business=deps.capture_read_business,
+        pending_read_ends=deps.capture_read_ends,
+        continuing_read_tickets=deps.capture_continuing_reads)
 
 
 def _default_catalog(config: ConfigSnapshot):
@@ -354,6 +370,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
     resume_files = partial(resume_file_observations,
         pending_file_observations=deps.capture_file_observations,
         pending_call_results=deps.capture_call_results)
+    resume_reads = partial(_resume_read_requests, deps)
     recovery_logger = (None if deps.log_runtime is None else
                        recovery_diagnostics_logger(deps.log_runtime.channel))
     from camctl.bootstrap.motor_assembly import motor_flow
@@ -390,6 +407,10 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_call_results=deps.capture_call_results,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
+            pending_read_results=deps.capture_read_results,
+            pending_read_business=deps.capture_read_business,
+            pending_read_ends=deps.capture_read_ends,
+            continuing_read_tickets=deps.capture_continuing_reads,
             recording_anchors=deps.capture_recording_anchors,
             retry_wait_gate=deps.capture_retry_gate,
             recovery_boundary=deps.recovery_boundary,
@@ -398,7 +419,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
         ), resume_media_results=deps.work_files.resume_media_results,
-           resume_file_observations=resume_files),
+           resume_file_observations=resume_files, resume_read_results=resume_reads),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
         "residual": residual_flow(session_capture_assembly(
@@ -409,6 +430,10 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_call_results=deps.capture_call_results,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
+            pending_read_results=deps.capture_read_results,
+            pending_read_business=deps.capture_read_business,
+            pending_read_ends=deps.capture_read_ends,
+            continuing_read_tickets=deps.capture_continuing_reads,
             recording_anchors=deps.capture_recording_anchors,
             retry_wait_gate=deps.capture_retry_gate,
             recovery_boundary=deps.recovery_boundary,
@@ -417,7 +442,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
         ), resume_media_results=deps.work_files.resume_media_results,
-           resume_file_observations=resume_files),
+           resume_file_observations=resume_files, resume_read_results=resume_reads),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
         # 推进；拷贝段大小取自 copy 配置。
         "obtain": obtain_flow(session_obtain_assembly(
@@ -514,6 +539,7 @@ async def execute_command(
         resume_files = partial(resume_file_observations,
             pending_file_observations=deps.capture_file_observations,
             pending_call_results=deps.capture_call_results)
+        resume_reads = partial(_resume_read_requests, deps)
         overrides.update(
             flows=flows,
             restricted_flows={
@@ -532,6 +558,10 @@ async def execute_command(
                         pending_call_results=deps.capture_call_results,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
+                        pending_read_results=deps.capture_read_results,
+                        pending_read_business=deps.capture_read_business,
+                        pending_read_ends=deps.capture_read_ends,
+                        continuing_read_tickets=deps.capture_continuing_reads,
                         recording_anchors=deps.capture_recording_anchors,
                         retry_wait_gate=deps.capture_retry_gate,
                         media_enabled=False,
@@ -544,6 +574,7 @@ async def execute_command(
                     wait_cap_s=deps.config.clock.recovery_wait_cap_s,
                     resume_media_results=deps.work_files.resume_media_results,
                     resume_file_observations=resume_files,
+                    resume_read_results=resume_reads,
                 ),
             },
             once_report=report_flow(
