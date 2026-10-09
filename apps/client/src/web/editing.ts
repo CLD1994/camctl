@@ -1,4 +1,9 @@
-import { parseJson } from "../shared/json";
+import {
+  parseJson,
+  cloneClientJson,
+  stringifyJson,
+  rememberNumberToken,
+} from "../shared/json";
 import { isObject } from "../shared/validation";
 import type { DraftContent, ExportedRequest } from "../server/models";
 import type { ReportPlan } from "../shared/types";
@@ -56,6 +61,7 @@ export function setValue(
   value: unknown,
   omit = false,
   replace = false,
+  numberToken?: string,
 ): DraftContent {
   if (!omit && !replace && pendingBlocks(content, path))
     throw new Error("此路径存在尚未解决的输入，请先逐项修正或明确省略");
@@ -78,18 +84,19 @@ export function setValue(
   if (omit) delete target[key];
   else
     Object.defineProperty(target, key, {
-      value: structuredClone(value),
+      value: cloneClientJson(value),
       writable: true,
       enumerable: true,
       configurable: true,
     });
+  rememberNumberToken(target, key, omit ? undefined : numberToken);
   const p = pointer(path);
   const pending = Object.fromEntries(
     Object.entries(content.pending ?? {}).filter(
       ([key]) => key !== p && !key.startsWith(p + "/"),
     ),
   );
-  return { ...content, text: JSON.stringify(root, null, 2), pending };
+  return { ...content, text: stringifyJson(root, 2), pending };
 }
 export function editValue(
   content: DraftContent,
@@ -127,7 +134,14 @@ export function editValue(
       pending: { ...content.pending, [pointer(path)]: { kind, text } },
     };
   }
-  return setValue(content, path, value);
+  return setValue(
+    content,
+    path,
+    value,
+    false,
+    false,
+    typeof value === "number" ? text.trim() : undefined,
+  );
 }
 export function removeAction(
   content: DraftContent,
@@ -156,7 +170,7 @@ export function removeAction(
   );
   return {
     ...content,
-    text: JSON.stringify(root, null, 2),
+    text: stringifyJson(root, 2),
     pending,
     ...(content.actionVariants ? { actionVariants } : {}),
   };
@@ -166,8 +180,8 @@ export function appendDraftAction(
   action: EditObject,
 ): DraftContent {
   const root = parseDraft(content);
-  root.actions.push(structuredClone(action));
-  return { ...content, text: JSON.stringify(root, null, 2) };
+  root.actions.push(cloneClientJson(action));
+  return { ...content, text: stringifyJson(root, 2) };
 }
 export function resolveField(
   field: unknown,

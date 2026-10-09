@@ -15,6 +15,9 @@ import {
 } from "./models";
 import {
   parseJson,
+  parseClientJson,
+  stringifyJson,
+  exactJsonIdentity,
   motorInputTexts,
   type MotorInputText,
   MOTOR_ORIGINAL_INPUT_FIELDS,
@@ -201,7 +204,8 @@ export class Application {
             !object(variant.fields) ||
             !object(variant.pending) ||
             Object.keys(variant).some(
-              (key) => !["type", "fields", "pending"].includes(key),
+              (key) =>
+                !["type", "fields", "fieldsText", "pending"].includes(key),
             ) ||
             Object.keys(variant.fields).some((key) =>
               [...DRAFT_COMMON_ACTION_FIELDS, "type"].includes(key),
@@ -219,6 +223,19 @@ export class Application {
             )
           )
             fail();
+          if (variant.fieldsText !== undefined) {
+            try {
+              if (typeof variant.fieldsText !== "string") fail();
+              const fields = parseClientJson(variant.fieldsText!);
+              if (
+                !object(fields) ||
+                exactJsonIdentity(fields) !== exactJsonIdentity(variant.fields)
+              )
+                fail();
+            } catch {
+              fail();
+            }
+          }
         }
       }
     }
@@ -312,7 +329,7 @@ export class Application {
     if (!object(value))
       throw new AppError("invalid_plan", "计划必须是 JSON 对象");
     // 请求身份和生成时间属于首次导出，由后端分配，编辑意图不包含这些字段。
-    const plan = { ...value, request_id: "validation", created_at: utc() };
+    const plan = { ...value, request_id: "1", created_at: utc() };
     const issues = validatePlan(plan, this.capabilities.active, {
       reports: this.store.reports(),
       coverage: this.coverage(),
@@ -401,10 +418,19 @@ export class Application {
   }): Preset {
     if (typeof input.name !== "string" || !input.name.trim())
       throw new AppError("invalid_preset", "请填写预设名称");
+    let params: unknown;
+    try {
+      params = parseJson(stringifyJson(input.params));
+    } catch (error) {
+      throw new AppError(
+        "invalid_preset",
+        `预设参数不属于合法公共 JSON：${errorMessage(error)}`,
+      );
+    }
     const issues = validateParams(
       input.deviceId,
       input.actionType,
-      input.params,
+      params,
       this.capabilities.active,
     );
     if (issues.length)
@@ -421,6 +447,7 @@ export class Application {
       }
       const preset: Preset = {
         ...input,
+        params,
         id: input.id ?? randomUUID(),
         updatedAt: utc(),
       };
@@ -452,9 +479,8 @@ export class Application {
     const base = name;
     let n = 2;
     while (names.has(name)) name = `${base} ${n++}`;
-    const text = JSON.stringify(
+    const text = stringifyJson(
       { ...parsed, actions: [...parsed.actions, { ...action, name }] },
-      null,
       2,
     );
     return this.saveDraft(id, revision, { ...draft.content, text });

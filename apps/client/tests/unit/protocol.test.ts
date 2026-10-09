@@ -47,9 +47,9 @@ const record = () => ({
   policy: { max_delay_ms: 0 },
 });
 const plan = (actions: unknown[] = [record()]) => ({
-  request_id: "req1",
+  request_id: "1",
   name: "计划",
-  created_at: "0001-01-01 00:00:00.000001",
+  created_at: "0001-01-01 00:00:00",
   actions,
 });
 describe("parseJson", () => {

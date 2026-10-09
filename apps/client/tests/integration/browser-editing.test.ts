@@ -63,6 +63,60 @@ async function setup(capabilityText?: string) {
   await page.getByTestId("initialize-button").click();
   return { page, app, directory };
 }
+it("相机数字与参数 JSON 保留原词元且预设不会接受舍入后的整数", async () => {
+  const token = "1.0000000000000001";
+  const { page, app } = await setup(
+    JSON.stringify({
+      devices: [
+        {
+          device_id: "cam",
+          driver_id: "demo",
+          actions: [
+            {
+              type: "camera_record",
+              parameter_types: [
+                {
+                  type: "fixed",
+                  name: "固定",
+                  description: "测试",
+                  preview_supported: false,
+                  schema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
+                    type: "object",
+                    required: ["type"],
+                    additionalProperties: false,
+                    properties: {
+                      type: { const: "fixed" },
+                      value: { type: "integer", title: "数值" },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  app.createDraft({
+    text: `{"name":"精确输入","actions":[{"name":"拍摄","type":"camera_record","device_id":"cam","scheduled_at":"2026-10-10 00:00:00","params":{"type":"fixed","value":${token}},"policy":{"max_delay_ms":0}}]}`,
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(page.getByLabel("数值 (value)", { exact: true })).toHaveValue(
+    token,
+  );
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await check(page.getByLabel("参数 JSON 文本", { exact: true })).toHaveValue(
+    new RegExp(token.replaceAll(".", "\\.")),
+  );
+  await page.getByText("拍摄参数预设", { exact: true }).click();
+  await page.getByLabel("预设名称", { exact: true }).fill("非法整数");
+  await check(
+    page.getByRole("button", { name: "保存为新预设", exact: true }),
+  ).toBeDisabled();
+  expect(app.store.all("presets")).toEqual([]);
+}, 20000);
 it("电机表单与 JSON 共用位置，保存恢复后导出并展示通知成功", async () => {
   const { page, app } = await setup('{"devices":[]}');
   await page.getByTestId("new-draft-button").click();

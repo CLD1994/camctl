@@ -3,6 +3,7 @@ import { DRAFT_COMMON_ACTION_FIELDS } from "../server/models";
 import { isObject } from "../shared/validation";
 import { parseDraft, pointer } from "./editing";
 import { sameValue } from "./parameter-options";
+import { parseClientJson, stringifyJson } from "../shared/json";
 
 const commonFields: readonly string[] = DRAFT_COMMON_ACTION_FIELDS;
 
@@ -38,6 +39,7 @@ export function switchActionType(
     ),
     pending: {},
   };
+  saved.fieldsText = stringifyJson(saved.fields);
   for (const [key, value] of Object.entries(pending)) {
     if (!key.startsWith(prefix + "/")) continue;
     const relative = key.slice(prefix.length);
@@ -58,7 +60,9 @@ export function switchActionType(
       Object.entries(action).filter(([key]) => commonFields.includes(key)),
     ),
     ...(type === undefined ? {} : { type }),
-    ...structuredClone(restored?.fields ?? {}),
+    ...(restored?.fieldsText === undefined
+      ? structuredClone(restored?.fields ?? {})
+      : (parseClientJson(restored.fieldsText) as Record<string, unknown>)),
   };
   for (const [key, value] of Object.entries(restored?.pending ?? {}))
     pending[prefix + key] = structuredClone(value);
@@ -76,7 +80,7 @@ export function switchActionType(
   else delete actionVariants[index];
   return {
     ...content,
-    text: JSON.stringify(root, null, 2),
+    text: stringifyJson(root, 2),
     pending,
     actionVariants,
   };

@@ -90,7 +90,7 @@ export function Editor(props: Props) {
         ...validatePlan(
           {
             ...value,
-            request_id: "validation",
+            request_id: "1",
             created_at: "2026-01-01 00:00:00",
           },
           capabilities,
@@ -464,6 +464,10 @@ function ActionEditor(
   const save = async (update: boolean) => {
     if (hasPending) {
       setError("参数尚未完成，请先修正当前输入");
+      return;
+    }
+    if (currentParamsIssues.length) {
+      setError("参数校验未通过，请先修正当前输入");
       return;
     }
     if (update && !selected) {

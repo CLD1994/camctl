@@ -10,6 +10,7 @@ import {
   type Path,
 } from "./editing";
 import { sameValue, optionLabel } from "./parameter-options";
+import { displayNumber, stringifyJson } from "../shared/json";
 export function JsonField({
   content,
   path,
@@ -36,8 +37,7 @@ export function JsonField({
         spellCheck={false}
         readOnly={pendingBlocks(content, path)}
         value={
-          pending?.text ??
-          (value === undefined ? "" : JSON.stringify(value, null, 2))
+          pending?.text ?? (value === undefined ? "" : stringifyJson(value, 2))
         }
         onChange={(e) => {
           change(editValue(content, path, e.target.value, "json"));
@@ -126,7 +126,7 @@ export function Field({
               readOnly={pendingBlocks(content, path)}
               value={
                 pending?.text ??
-                (value === undefined ? "" : JSON.stringify(value, null, 2))
+                (value === undefined ? "" : stringifyJson(value, 2))
               }
               onChange={(e) =>
                 change(editValue(content, path, e.target.value, "json"))
@@ -205,7 +205,16 @@ export function Field({
               readOnly={pendingBlocks(content, path)}
               inputMode="decimal"
               value={
-                pending?.text ?? (value === undefined ? "" : String(value))
+                pending?.text ??
+                (value === undefined
+                  ? ""
+                  : typeof value === "number"
+                    ? displayNumber(
+                        valueAt(root, path.slice(0, -1)),
+                        path.at(-1)!,
+                        value,
+                      )
+                    : String(value))
               }
               onChange={(e) =>
                 change(editValue(content, path, e.target.value, "number"))
@@ -217,7 +226,7 @@ export function Field({
               readOnly={pendingBlocks(content, path)}
               value={
                 pending?.text ??
-                (value === undefined ? "" : JSON.stringify(value, null, 2))
+                (value === undefined ? "" : stringifyJson(value, 2))
               }
               onChange={(e) =>
                 change(editValue(content, path, e.target.value, "json"))

@@ -9,6 +9,8 @@ export interface DraftContent {
 export interface ActionVariant {
   type?: unknown;
   fields: Record<string, unknown>;
+  /** 存在时为字段的权威 JSON 原文，fields 为兼容投影；不得失败回退。 */
+  fieldsText?: string;
   /** 相对于动作对象的 JSON Pointer。 */
   pending: NonNullable<DraftContent["pending"]>;
 }

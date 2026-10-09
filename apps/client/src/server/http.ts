@@ -9,6 +9,7 @@ import { AppError, errorMessage } from "./models";
 import { DataError } from "./database";
 import { byteRange } from "./range";
 import { RequestLifecycle } from "./lifecycle";
+import { parseClientJson } from "../shared/json";
 
 export function createHttpApp(
   application: Application,
@@ -60,7 +61,17 @@ export function createHttpApp(
       res.json(await files.upload(String(req.params.id), req)),
     ),
   );
-  app.use(express.json({ limit: "32mb" }));
+  app.use(express.text({ type: "application/json", limit: "32mb" }));
+  app.use((req, _res, next) => {
+    if (typeof req.body === "string") {
+      try {
+        req.body = parseClientJson(req.body);
+      } catch (error) {
+        return next(new AppError("invalid_json", errorMessage(error)));
+      }
+    }
+    next();
+  });
   app.use((_req, res, next) => {
     if (requests.stopping)
       return res

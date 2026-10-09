@@ -1,7 +1,7 @@
 import type { Application } from "../server/application";
 import type { Draft, Video } from "../server/models";
 import type { Issue } from "../shared/types";
-import { parseJson } from "../shared/json";
+import { parseClientJson } from "../shared/json";
 export type ClientState = ReturnType<Application["state"]> & {
   videos?: Video[];
   workerError?: string | null;
@@ -36,7 +36,7 @@ export async function api<T>(
   });
   const value = await response
     .text()
-    .then((text) => parseJson(text) as any)
+    .then((text) => parseClientJson(text) as any)
     .catch(() => {
       throw new HttpError(
         "result_unconfirmed",

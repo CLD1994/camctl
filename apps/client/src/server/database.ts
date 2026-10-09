@@ -8,7 +8,7 @@ import {
   closeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { parseJson } from "../shared/json";
+import { parseJson, parseClientJson } from "../shared/json";
 import { isCanonicalId, isPositive, isUint } from "../shared/validation";
 import { validateReport } from "../domain/reports";
 import type { StatusReport } from "../shared/types";
@@ -180,13 +180,13 @@ export class Store {
     const row = this.db()
       .prepare("SELECT value FROM records WHERE namespace=? AND id=?")
       .get(namespace, id);
-    return row ? (parseJson(row.value as string) as T) : undefined;
+    return row ? (parseClientJson(row.value as string) as T) : undefined;
   }
   all<T>(namespace: string): T[] {
     return this.db()
       .prepare("SELECT value FROM records WHERE namespace=? ORDER BY rowid")
       .all(namespace)
-      .map((row) => parseJson(row.value as string) as T);
+      .map((row) => parseClientJson(row.value as string) as T);
   }
   set(namespace: string, id: string, value: unknown): void {
     this.db()
