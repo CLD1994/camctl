@@ -23,6 +23,7 @@ import {
   previewIntent,
 } from "../../src/shared/automatic-previews";
 import type { DraftContent } from "../../src/server/models";
+import { choose } from "./select-support";
 
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
@@ -118,6 +119,119 @@ async function setup(content = original()) {
   await page.getByTestId("draft-open-button").click();
   return { application, page, draft };
 }
+
+it.each(["{", "[]", "null", "ambiguous"])(
+  "类型恢复%s拒绝由Editor呈现，保留正文pending资料与组件状态",
+  async (failure) => {
+    const input = original();
+    input.pending = {
+      "/actions/0/params/count": { kind: "number", text: "1e" },
+    };
+    input.actionVariants = {
+      "0": [
+        {
+          type: "report_status",
+          fields: { params: { scope: "full" } },
+          pending: {},
+        },
+      ],
+    };
+    if (failure === "ambiguous")
+      input.actionVariants["0"].push({
+        type: "report_status",
+        fields: { params: { scope: "since", after_report_id: "1" } },
+        pending: {},
+      });
+    const { page, application, draft } = await setup(input);
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    if (failure !== "ambiguous") {
+      // 此 fault 注入只验证 Editor 接纳到损坏恢复原文后的拒绝呈现；服务器仍保存合法完整记录。
+      await page.route("**/api/state", async (route) => {
+        const response = await route.fetch(),
+          state = await response.json();
+        state.drafts.find(
+          (item: { id: string }) => item.id === draft.id,
+        ).content.actionVariants["0"][0].fieldsText = failure;
+        await route.fulfill({ response, json: state });
+      });
+      await page.reload();
+      await page.getByTestId("draft-open-button").click();
+    }
+    await mark(page, "B");
+    await card(page, "A")
+      .getByRole("button", { name: "参数 JSON", exact: true })
+      .click();
+    let writes = 0;
+    await page.route("**/api/drafts/*", async (route) => {
+      if (route.request().method() === "PUT") writes++;
+      await route.continue();
+    });
+    const selectRejectedType = async () => {
+      await card(page, "A").getByLabel("动作类型", { exact: true }).click();
+      await page
+        .getByRole("listbox")
+        .locator('[role="option"][data-value="report_status"]')
+        .click();
+    };
+    await selectRejectedType();
+    await browserExpect(card(page, "A").getByRole("alert")).toBeVisible();
+    await browserExpect(
+      card(page, "A").getByRole("button", { name: "参数表单", exact: true }),
+    ).toBeVisible();
+    await browserExpect(
+      card(page, "A").getByLabel("动作类型", { exact: true }),
+    ).toHaveAttribute("data-value", "camera_record");
+    await browserExpect(
+      page.getByLabel("未完成输入 /actions/0/params/count"),
+    ).toHaveValue("1e");
+    await retained(page, "B");
+    expect(application.draft(draft.id).content).toEqual(draft.content);
+    expect(application.draft(draft.id).revision).toBe(1);
+    expect(writes).toBe(0);
+    expect(pageErrors).toEqual([]);
+    // 同一候选仍存在，第二次选择仍准确拒绝。
+    await selectRejectedType();
+    await browserExpect(card(page, "A").getByRole("alert")).toBeVisible();
+    expect(pageErrors).toEqual([]);
+  },
+);
+it("真实类型选择保存直属原数字并恢复，其他动作局部状态保持", async () => {
+  const input = original();
+  input.text = input.text.replace(
+    '"params":{"type":"demo_fixed"}',
+    '"params":1e-999,"extra":1.0000000000000001',
+  );
+  const { page, application, draft } = await setup(input);
+  await mark(page, "B");
+  await choose(
+    card(page, "A").getByLabel("动作类型", { exact: true }),
+    "report_status",
+  );
+  await browserExpect
+    .poll(
+      () =>
+        application.draft(draft.id).content.actionVariants?.["0"]?.[0]
+          .fieldsText,
+    )
+    .toContain('"params":1e-999');
+  expect(
+    application.draft(draft.id).content.actionVariants!["0"][0].fieldsText,
+  ).toContain('"extra":1.0000000000000001');
+  await retained(page, "B");
+  await mark(page, "B");
+  await choose(
+    card(page, "A").getByLabel("动作类型", { exact: true }),
+    "camera_record",
+  );
+  await browserExpect
+    .poll(() => application.draft(draft.id).content.text)
+    .toContain('"params": 1e-999');
+  expect(application.draft(draft.id).content.text).toContain(
+    '"extra": 1.0000000000000001',
+  );
+  await retained(page, "B");
+});
 
 it.each([
   "missing",

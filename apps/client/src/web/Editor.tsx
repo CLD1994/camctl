@@ -592,6 +592,7 @@ function ActionEditor(
     [presetName, setPresetName] = useState(""),
     [notice, setNotice] = useFeedback("action", 3000),
     [error, setError] = useState(""),
+    [typeError, setTypeError] = useState(""),
     [savingPreset, setSavingPreset] = useState(false);
   const put = (key: string, value: unknown, omit = false) =>
     change(setValue(content, [...base, key], value, omit));
@@ -687,6 +688,7 @@ function ActionEditor(
         </div>
       </div>
       <div hidden={props.collapsed}>
+        <ErrorBox error={typeError} />
         <div className="form-grid">
           <label className="field">
             <span>
@@ -707,12 +709,23 @@ function ActionEditor(
               value={typeof action.type === "string" ? action.type : ""}
               disabled={!canSwitchActionType(content, index)}
               onValueChange={(selectedValue) => {
-                change(
-                  switchActionType(content, index, selectedValue || undefined),
-                );
-                setJson(false);
-                setError("");
-                setNotice("");
+                try {
+                  change(
+                    switchActionType(
+                      content,
+                      index,
+                      selectedValue || undefined,
+                    ),
+                  );
+                  setTypeError("");
+                  setJson(false);
+                  setError("");
+                  setNotice("");
+                } catch (error) {
+                  setTypeError(
+                    `动作类型切换未完成：${error instanceof Error ? error.message : String(error)}`,
+                  );
+                }
               }}
             >
               <SelectItem value="">请选择动作类型</SelectItem>

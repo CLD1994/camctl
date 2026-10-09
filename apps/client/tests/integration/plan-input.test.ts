@@ -11,14 +11,27 @@ import {
   parseJson,
   parseClientJson,
   stringifyJson,
+  cloneClientJson,
 } from "../../src/shared/json";
 import { validatePlan } from "../../src/shared/plan";
 import { validateParams } from "../../src/shared/capabilities";
 import { createValidator } from "../../src/shared/validation";
 import { setValue } from "../../src/web/editing";
-import type { ExportedRequest, Preset } from "../../src/server/models";
+import type {
+  Draft,
+  DraftContent,
+  ExportedRequest,
+  Preset,
+} from "../../src/server/models";
 import { reportInput, mappedReport } from "./fixtures";
 import { switchActionType } from "../../src/web/action-drafts";
+import { DraftSession } from "../../src/web/session";
+import {
+  copyDraftAction,
+  coordinatePreviews,
+  initializePreviewMetadata,
+  previewIntent,
+} from "../../src/shared/automatic-previews";
 
 const clean: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -496,4 +509,274 @@ it("预设写入失败保留已有预设且不留下新预设", () => {
   );
   expect(() => app.savePreset(input)).toThrow("write rejected");
   expect(stringifyJson(app.store.all("presets"))).toBe(prior);
+});
+
+function httpSession(draft: Draft, base: string) {
+  return new DraftSession(
+    draft,
+    {
+      save: async (id, revision, value) => {
+        const response = await fetch(`${base}/drafts/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: stringifyJson({ revision, content: value }),
+        });
+        const result = parseClientJson(await response.text());
+        if (!response.ok) throw Error((result as { message: string }).message);
+        return result as Draft;
+      },
+      read: async (id) => {
+        const state = parseClientJson(
+          await (await fetch(`${base}/state`)).text(),
+        ) as { drafts: Draft[] };
+        return state.drafts.find((item) => item.id === id)!;
+      },
+    },
+    () => {},
+  );
+}
+it.each(["1.0000000000000001", "1e-999"])(
+  "类型直属数值%s随Session/HTTP/SQLite保存重开及恢复，停用非法不阻当前导出",
+  async (token) => {
+    let app = setup(),
+      base = await http(app);
+    const original: DraftContent = {
+      text: `{"name":"计划","actions":[{"name":"拍摄","type":"camera_record","scheduled_at":"${time}","params":${token},"extra":${token}}]}`,
+    };
+    const draft = app.createDraft(original),
+      session = httpSession(draft, base);
+    const switched = setValue(
+      switchActionType(draft.content, 0, "report_status"),
+      ["actions", 0, "params"],
+      { scope: "full" },
+    );
+    session.edit(switched);
+    await session.flush();
+    expect(session.saved).toBe(true);
+    expect(app.draft(draft.id).revision).toBe(2);
+    expect(app.draft(draft.id).content.actionVariants!["0"][0].fieldsText).toBe(
+      `{"params":${token},"extra":${token}}`,
+    );
+    expect(app.draft(draft.id).lastWrite!.input).toEqual(switched);
+    app = reopen(app);
+    base = await http(app);
+    const state = parseClientJson(
+      await (await fetch(`${base}/state`)).text(),
+    ) as { drafts: Draft[] };
+    const recovered = state.drafts.find((item) => item.id === draft.id)!;
+    expect(
+      stringifyJson(recovered.content.actionVariants!["0"][0].fields),
+    ).toBe(`{"params":${token},"extra":${token}}`);
+    const exported = await fetch(`${base}/drafts/${draft.id}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: stringifyJson({
+        revision: recovered.revision,
+        content: recovered.content,
+        capabilityVersion: app.capabilities.version,
+      }),
+    });
+    expect(exported.status).toBe(200);
+    const request = parseClientJson(await exported.text()) as ExportedRequest;
+    expect(request.body.actions).toEqual([
+      {
+        name: "拍摄",
+        type: "report_status",
+        scheduled_at: time,
+        params: { scope: "full" },
+      },
+    ]);
+    const copy = app.copyDraft(draft.id),
+      restored = switchActionType(copy.content, 0, "camera_record");
+    expect(restored.text).toContain(`"params": ${token}`);
+    expect(restored.text).toContain(`"extra": ${token}`);
+    const restoredSession = httpSession(copy, base);
+    restoredSession.edit(restored);
+    await restoredSession.flush();
+    const denied = await fetch(`${base}/drafts/${copy.id}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: stringifyJson({
+        revision: restoredSession.revision,
+        content: restoredSession.content,
+        capabilityVersion: app.capabilities.version,
+      }),
+    });
+    expect(denied.status).toBe(400);
+    expect(
+      (parseClientJson(await denied.text()) as { code: string }).code,
+    ).toBe("invalid_plan");
+    expect(app.store.all("requests")).toHaveLength(1);
+    app = reopen(app);
+    expect(app.draft(copy.id).content.text).toContain(token);
+    expect(app.draft(draft.id).content.actionVariants!["0"][0].fieldsText).toBe(
+      `{"params":${token},"extra":${token}}`,
+    );
+  },
+);
+it.each([true, false])(
+  "已有停用类型原文%s在HTTP保存及SQLite重开后恢复直属字段",
+  async (hasText) => {
+    let app = setup(),
+      base = await http(app);
+    const input: DraftContent = {
+      text: `{"name":"计划","actions":[{"name":"A","type":"report_status","scheduled_at":"${time}","params":{"scope":"full"}}]}`,
+      actionVariants: {
+        "0": [
+          {
+            type: "camera_record",
+            fields: { params: 1, extra: 0 },
+            ...(hasText
+              ? { fieldsText: '{"params":1.0000000000000001,"extra":1e-999}' }
+              : {}),
+            pending: {},
+          },
+        ],
+      },
+    };
+    const draft = app.createDraft(),
+      session = httpSession(draft, base);
+    session.edit(input);
+    await session.flush();
+    app = reopen(app);
+    base = await http(app);
+    const state = parseClientJson(
+      await (await fetch(`${base}/state`)).text(),
+    ) as { drafts: Draft[] };
+    const recovered = state.drafts.find((item) => item.id === draft.id)!;
+    const restored = switchActionType(recovered.content, 0, "camera_record");
+    expect(restored.text).toContain(
+      hasText ? '"params": 1.0000000000000001' : '"params": 1',
+    );
+    expect(restored.text).toContain(hasText ? '"extra": 1e-999' : '"extra": 0');
+    if (!hasText) {
+      expect(restored.text).not.toContain("1.0000000000000001");
+      expect(restored.text).not.toContain("1e-999");
+    }
+    expect(recovered.content.actionVariants!["0"][0].fieldsText).toBe(
+      input.actionVariants!["0"][0].fieldsText,
+    );
+  },
+);
+it("复制动作和能力协调不会丢停用类型的直属字段或type数字证据", () => {
+  const app = setup();
+  const original = {
+    text: `{"name":"计划","actions":[{"name":"A","type":1e-999,"scheduled_at":"${time}","params":1.0000000000000001}]}`,
+  };
+  const switched = switchActionType(original, 0, "report_status");
+  const tagged = initializePreviewMetadata(switched, "disabled", "n");
+  const copied = copyDraftAction(tagged, 0);
+  const coordinated = coordinatePreviews(copied, app.capabilities).content;
+  expect(previewIntent(coordinated)).toBe("disabled");
+  for (const index of ["0", "1"]) {
+    const saved = coordinated.actionVariants![index][0];
+    expect(stringifyJson(saved)).toContain('"type":1e-999');
+    expect(saved.fieldsText).toBe('{"params":1.0000000000000001}');
+  }
+});
+it("能力移除中间自动项时停用资料移位仍保留直属字段和type数字事实", () => {
+  const app = setup();
+  const inactive = switchActionType(
+    {
+      text: '{"actions":[{"name":"B","type":1e-999,"params":1.0000000000000001}]}',
+    },
+    0,
+    "report_status",
+  );
+  const source = (parseClientJson(content().text) as { actions: object[] })
+    .actions[0];
+  const input: DraftContent = {
+    text: stringifyJson({
+      name: "计划",
+      actions: [source, { name: "B", type: "report_status" }],
+    }),
+    actionVariants: { "1": inactive.actionVariants!["0"] },
+  };
+  const coordinated = coordinatePreviews(
+    initializePreviewMetadata(input, "enabled", "n"),
+    app.capabilities,
+  ).content;
+  const root = parseClientJson(coordinated.text) as { actions: object[] };
+  root.actions = [root.actions[0], root.actions[2], root.actions[1]];
+  coordinated.text = stringifyJson(root);
+  const ids = coordinated.automaticPreviews!.actions;
+  coordinated.automaticPreviews!.actions = [ids[0], ids[2], ids[1]];
+  coordinated.actionVariants = { "2": coordinated.actionVariants!["1"] };
+  const unsupported = cloneClientJson(app.capabilities);
+  unsupported.active!.devices[0].actions[0].parameter_types[0].preview_supported = false;
+  const next = coordinatePreviews(coordinated, unsupported).content;
+  expect(
+    (parseClientJson(next.text) as { actions: { name: string }[] }).actions.map(
+      (a) => a.name,
+    ),
+  ).toEqual(["拍摄", "B"]);
+  expect(Object.keys(next.actionVariants!)).toEqual(["1"]);
+  expect(stringifyJson(next.actionVariants!["1"][0])).toContain(
+    '"type":1e-999',
+  );
+  expect(next.actionVariants!["1"][0].fieldsText).toBe(
+    '{"params":1.0000000000000001}',
+  );
+  expect(previewIntent(next)).toBe("enabled");
+});
+it("类型切换保存的数据库写入失败保留旧完整记录及页面输入", async () => {
+  const app = setup(),
+    base = await http(app);
+  const original = {
+    text: `{"name":"计划","actions":[{"name":"A","type":"camera_record","params":1e-999}]}`,
+  };
+  const draft = app.createDraft(original),
+    session = httpSession(draft, base),
+    next = switchActionType(draft.content, 0, "report_status");
+  const before = stringifyJson(app.draft(draft.id)),
+    set = app.store.set.bind(app.store);
+  vi.spyOn(app.store, "set").mockImplementation((kind, id, value) => {
+    if (kind === "drafts") throw Error("write rejected");
+    return set(kind, id, value);
+  });
+  session.edit(next);
+  await expect(session.flush()).rejects.toThrow();
+  expect(session.saved).toBe(false);
+  expect(session.content).toEqual(next);
+  expect(session.content.actionVariants!["0"][0].fieldsText).toBe(
+    '{"params":1e-999}',
+  );
+  expect(stringifyJson(app.draft(draft.id))).toBe(before);
+  expect(app.store.all("requests")).toEqual([]);
+});
+it("停用type的原词元经HTTP和SQLite重开后仍区分裸零，复制保持旧候选", async () => {
+  let app = setup(),
+    base = await http(app);
+  const draft = app.createDraft({
+    text: `{"name":"计划","actions":[{"name":"A","type":1e-999,"scheduled_at":"${time}","params":false}]}`,
+  });
+  const session = httpSession(draft, base),
+    switched = switchActionType(draft.content, 0, "report_status");
+  session.edit(switched);
+  await session.flush();
+  app = reopen(app);
+  base = await http(app);
+  const state = parseClientJson(
+    await (await fetch(`${base}/state`)).text(),
+  ) as { drafts: Draft[] };
+  const recovered = state.drafts.find((item) => item.id === draft.id)!;
+  expect(stringifyJson(recovered.content.actionVariants!["0"][0])).toContain(
+    '"type":1e-999',
+  );
+  const selected = switchActionType(recovered.content, 0, 0);
+  expect(
+    (parseClientJson(selected.text) as { actions: unknown[] }).actions[0],
+  ).toEqual({ name: "A", scheduled_at: time, type: 0 });
+  expect(stringifyJson(selected.actionVariants!["0"][0])).toContain(
+    '"type":1e-999',
+  );
+  const second = httpSession(recovered, base);
+  second.edit(selected);
+  await second.flush();
+  app = reopen(app);
+  const copied = app.copyDraft(draft.id);
+  expect(stringifyJson(copied.content.actionVariants!["0"][0])).toContain(
+    '"type":1e-999',
+  );
+  expect(copied.content.actionVariants!["0"][0].fields.params).toBe(false);
 });
