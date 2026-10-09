@@ -407,6 +407,7 @@ def session_capture_assembly(
     pending_read_business: dict | None = None,
     pending_read_ends: dict | None = None,
     pending_baselines: dict | None = None,
+    pending_result_scans: dict | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
@@ -439,6 +440,7 @@ def session_capture_assembly(
     result_closes = {} if pending_result_closes is None else pending_result_closes
     file_observations = {} if pending_file_observations is None else pending_file_observations
     baselines = {} if pending_baselines is None else pending_baselines
+    result_scans = {} if pending_result_scans is None else pending_result_scans
     continuing_read_tickets = {} if continuing_read_tickets is None else continuing_read_tickets
     pending_read_results = {} if pending_read_results is None else pending_read_results
     pending_read_business = {} if pending_read_business is None else pending_read_business
@@ -477,6 +479,7 @@ def session_capture_assembly(
             pending_result_closes=result_closes,
             pending_file_observations=file_observations,
             pending_baselines=baselines,
+            pending_result_scans=result_scans,
             retry_gate=retry_gate,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
@@ -563,6 +566,7 @@ def session_capture_assembly(
             pending_result_closes=result_closes,
             pending_file_observations=file_observations,
             pending_baselines=baselines, baseline_directory=directory_port,
+            pending_result_scans=result_scans,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
             on_recovery_diagnostic=on_recovery_diagnostic,

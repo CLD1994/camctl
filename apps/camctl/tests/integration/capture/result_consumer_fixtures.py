@@ -92,7 +92,7 @@ def returned(operation, observation, activity_id):
     )
 
 
-async def consumer_world(tmp_path, consumer, *, independent_activity=False):
+async def consumer_world(tmp_path, consumer, *, independent_activity=False, catalog=None):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
     cfg = _config(tmp_path)
     path = Path(cfg.paths.state_db)
@@ -112,7 +112,7 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False):
     try:
         accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("results.json", {
             "request_id": "1", "created_at": instant, "name": "产物核实", "actions": actions,
-        }), ResultCatalog(), CommandMode.RUN, _NOW), new_operation_key(), owned)
+        }), ResultCatalog() if catalog is None else catalog, CommandMode.RUN, _NOW), new_operation_key(), owned)
         assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
         scheduling = SchedulingRepository()
         for save, request in (

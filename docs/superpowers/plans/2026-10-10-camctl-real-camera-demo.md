@@ -181,6 +181,8 @@ assert result_attempts_after_last_page == result_attempts_after_first_page
 
 ## T6 录像与延时摄影的正常收尾及原决定恢复
 
+阶段验证（2026-10-10，容器 Python 3.11.16）：同一 RESULTS 尝试逐页读取并可靠保存，关闭流程后从原页范围消费；原页回执未知先核实原键。录像与 `DEVICE + TIME_AND_OUTPUTS` 延时摄影已接入集合确定、类别及固定格式和数量要求，明确空集合和不合格产物保存已登记的公共错误。文件归属使用原固定基准或任务范围；跨页预览在原片归属保存后配对；后轮读取失败不抹去前轮已经确认完成的文件。2166 项相关单元、97 项页与基准专项集成、2 项 bootstrap 共同恢复集成通过。这是阶段提交依据，T6 仍待接入另外两种合法延时完成组合、其余共有消费入口和恢复矩阵，并运行 capture、bootstrap、reporting 完整门禁；T5/T6 尚不标为整体完成。
+
 **建议文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py`、`capture/recording.py`、`persistence/repositories/capture.py`；补充 `apps/camctl/tests/integration/capture/test_capture_contract.py`、`test_timelapse_wait_runtime.py`、`test_result_confirmation.py`、`test_result_error_history.py`，以及 bootstrap 的 `test_timelapse_finish.py`、`test_recording_stop.py`。
 
 **接口：** 消费 T5 `list_page`、可靠页范围及 assessment，轮次拥有者组织读取、保存及最后关闭，接入 `_confirm_timelapse_results` 或等价共同边界。沿用 `finish_result_check(AttemptFinish, ResultSetSave, key, owned)`、`confirm_result_set(ResultSetSave, key, owned)` 和 `CaptureRuntime.save_capture_completion`；原调用、采集结论、必要文件事实、正式产物及终态按规定共同提交。`PendingCaptureCompletion` 等原申请拥有者先于依赖新配置或新设备调用恢复。

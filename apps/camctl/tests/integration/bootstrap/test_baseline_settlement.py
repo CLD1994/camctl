@@ -34,7 +34,7 @@ async def test_common_resume_closes_terminal_preparation_after_original_page(own
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     assert owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (1,)
     deps = SimpleNamespace(capture_baselines=runtime.pending_baselines, capture_result_closes={},
-                           capture_completions={}, capture_retry_gate=None)
+                           capture_completions={}, capture_retry_gate=None, capture_result_scans={})
     _resume_capture_requests(deps, owned)
     assert owned.connection.execute("SELECT occupancy_state,activity_state FROM device_activities").fetchone() == (2, 1)
     assert runtime.pending_baselines == {} and len(runtime.baseline_directory.calls) == 1

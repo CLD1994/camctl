@@ -1739,6 +1739,22 @@ class CaptureRepository:
         from .result_pages import read_pages
         return read_pages(ticket, cursor, batch, owned)
 
+    def read_result_page(self, ref, owned: OwnedConnection):
+        from .result_pages import read_page
+        return read_page(ref, owned)
+
+    def read_last_result_page(self, ticket, owned: OwnedConnection):
+        from .result_pages import read_last_page
+        return read_last_page(ticket, owned)
+
+    def read_result_file_input(self, ref, identity: str, owned: OwnedConnection):
+        from .result_pages import read_file_input
+        return read_file_input(ref, identity, owned)
+
+    def read_result_sources(self, ticket, cursor, batch: int, owned: OwnedConnection):
+        from .result_pages import read_source_inputs
+        return read_source_inputs(ticket, cursor, batch, owned)
+
     def read_baseline(self, ref: BaselineRef, cursor: int | None, batch: int,
                       owned: OwnedConnection) -> Page[BaselineChunk, int]:
         from .baseline import read_chunks

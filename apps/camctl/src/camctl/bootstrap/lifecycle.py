@@ -82,6 +82,8 @@ class RuntimeDeps:
     capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
     #: 基准准备及原页保存由本会话持有，普通、残留与受限工厂共用。
     capture_baselines: dict = field(default_factory=dict)
+    #: 原结果页保存申请由普通、残留和受限工厂共享。
+    capture_result_scans: dict = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
     capture_recording_anchors: dict[int, tuple[int, int]] = field(default_factory=dict)
     #: 已保存等待的原返回锚点；由流程行与剩余预算判定适用性。
@@ -114,6 +116,7 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     )
     from types import SimpleNamespace
     from camctl.capture.baseline import PreparationPhase, resume_baseline_save, resume_baseline_settlement
+    from camctl.capture.result_scans import resume_result_page_saves
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories.capture import CaptureRepository
 
@@ -123,6 +126,8 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
         result = resume_baseline_save(action_id, runtime=runtime)
         if result is not None and result.phase is PreparationPhase.PENDING:
             raise ConsistencyError(f"原基准保存仍未可靠完成: {result.database_error}")
+
+    resume_result_page_saves(owned, pending_scans=deps.capture_result_scans, repository=runtime.capture)
 
     resume_result_check_closes(owned,
         pending_result_closes=deps.capture_result_closes,
@@ -465,6 +470,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_capture_completions=deps.capture_completions,
             pending_result_closes=deps.capture_result_closes,
             pending_baselines=deps.capture_baselines,
+            pending_result_scans=deps.capture_result_scans,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -491,6 +497,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_capture_completions=deps.capture_completions,
             pending_result_closes=deps.capture_result_closes,
             pending_baselines=deps.capture_baselines,
+            pending_result_scans=deps.capture_result_scans,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -623,6 +630,7 @@ async def execute_command(
                         pending_capture_completions=deps.capture_completions,
                         pending_result_closes=deps.capture_result_closes,
                         pending_baselines=deps.capture_baselines,
+                        pending_result_scans=deps.capture_result_scans,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
                         pending_read_results=deps.capture_read_results,

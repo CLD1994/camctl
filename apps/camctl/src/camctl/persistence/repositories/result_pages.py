@@ -1,11 +1,13 @@
 """结果页保留原完整实际结果，页范围与首次文件发现共同提交。"""
 from contextlib import closing
+from dataclasses import replace
 
 from camctl.capture.files import FileObservationSave, file_identity_key
 from camctl.capture.result_inputs import page_from_outcome, saved_outcome
 from camctl.capture.result_pages import ResultPageSave, ResultPageRef, SavedResultPage, result_page_input
 from camctl.contracts.enums import enum_for
-from camctl.contracts.json_values import json_equal
+from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.capture.results import CaptureFile
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.devices.bindings import DeviceBinding
@@ -28,6 +30,7 @@ _PAYLOAD_FIELDS = {"run_id", "attempt_no", "activity_id", "page_no", "cursor", "
 _OWNERSHIP = enum_for("device_activities.ownership_mode")
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _RUN_KIND = enum_for("operation_runs.kind")
+_ROLE = enum_for("device_files.role")
 
 
 class _BaselineCursor:
@@ -247,6 +250,109 @@ def read_pages(ticket, cursor, batch, owned):
             raise ConsistencyError("结果页末引用没有原连续事实")
         return Page(tuple(pages), None)
     return Page(tuple(pages[:batch]), pages[batch - 1].ref.event_id)
+
+
+def read_page(ref, owned):
+    """核对原可靠页引用，只读取它的实际历史输入。"""
+    if not isinstance(ref, ResultPageRef):
+        raise TypeError("单页读取要求完整原 ResultPageRef")
+    ObjectId(ref.event_id)
+    _, attempt, _, _ = _load(owned.connection, ref.ticket)
+    first, last = attempt["result_first_page_event_id"], attempt["result_last_page_event_id"]
+    if first is None or last is None or not first <= ref.event_id <= last:
+        raise ConsistencyError("结果页引用不在原尝试可靠范围内")
+    saved, _ = _at(owned.connection, ref.event_id)
+    if saved.ref != ref:
+        raise ConsistencyError("结果页引用改变原票据、批次或后续游标")
+    return saved
+
+
+def read_last_page(ticket, owned):
+    """原尝试的可靠末页；无分页输入与不完整引用分别处理。"""
+    _, attempt, _, _ = _load(owned.connection, ticket)
+    first, last = attempt["result_first_page_event_id"], attempt["result_last_page_event_id"]
+    if first is None and last is None:
+        return None
+    if first is None or last is None or first > last:
+        raise ConsistencyError("结果页首末引用无效")
+    saved, _ = _at(owned.connection, last)
+    if saved.ref.ticket != ticket:
+        raise ConsistencyError("结果页末引用不属于原尝试")
+    return read_page(saved.ref, owned)
+
+
+def read_file_input(last_ref, identity, owned):
+    """从原页范围查找一个差集成员，不装载全部文件元数据。"""
+    last = read_page(last_ref, owned)
+    _, attempt, _, _ = _load(owned.connection, last_ref.ticket)
+    with closing(owned.connection.execute(
+            "SELECT DISTINCT e.id FROM history_events e,"
+            " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
+            " WHERE e.id>=? AND e.id<=? AND e.event_type=?"
+            " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
+            " AND json_extract(f.value,'$[0]')=? ORDER BY e.id LIMIT 2",
+            (attempt["result_first_page_event_id"], last.ref.event_id, _TYPE, attempt["id"], identity))) as reader:
+        found = reader.fetchall()
+    if len(found) != 1:
+        raise ConsistencyError("配对原片必须唯一属于原结果页范围")
+    saved, _ = _at(owned.connection, found[0][0])
+    file_id = dict(saved.file_ids)[identity]
+    entry = next(item for item in saved.page.entries if item.identity == identity)
+    return entry, file_id
+
+
+def read_source_inputs(ticket, cursor, batch, owned):
+    """跨原核实轮次分页读取已确认来源文件及其最后实际元数据。"""
+    if type(batch) is not int or not 1 <= batch <= 128:
+        raise ValueError("来源文件批次必须为 1—128")
+    if cursor is not None:
+        ObjectId(cursor)
+    _, _, action, _ = _load(owned.connection, ticket)
+    with closing(owned.connection.execute(
+            "SELECT id FROM device_files WHERE source_action_id=? AND id>? ORDER BY id LIMIT ?",
+            (action["id"], cursor or 0, batch + 1))) as reader:
+        identifiers = [row[0] for row in reader]
+    items = []
+    for file_id in identifiers[:batch]:
+        facts = row_facts(owned.connection, "device_files", file_id)
+        identity = parse_exact_json(facts["identity_key"])
+        if (not isinstance(identity, list) or len(identity) != 3
+                or identity[:2] != [action["device_id"], action["driver_id"]]):
+            raise ConsistencyError("原来源文件的身份与固定绑定不符")
+        with closing(owned.connection.execute(
+                "SELECT DISTINCT e.id FROM history_events e,"
+                " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
+                " WHERE e.event_type=? AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
+                " AND json_extract(f.value,'$[1]')=? ORDER BY e.id DESC LIMIT 1",
+                (_TYPE, ticket.run_id, file_id))) as reader:
+            row = reader.fetchone()
+        if row is None:
+            raise ConsistencyError("已确认来源文件缺少原已保存 RESULTS 页元数据")
+        saved, _ = _at(owned.connection, row[0])
+        if (saved.ref.ticket.run_id != ticket.run_id or (identity[2], file_id) not in saved.file_ids):
+            raise ConsistencyError("来源文件的原页输入与物理身份不符")
+        entry = next(item for item in saved.page.entries if item.identity == identity[2])
+        if not json_equal(entry.locator, facts["locator_json"]):
+            raise ConsistencyError("原 RESULTS 定位与来源文件事实矛盾")
+        ownership = facts["ownership_evidence_json"]
+        if not isinstance(ownership, dict) or not isinstance(ownership.get("observation"), dict):
+            raise ConsistencyError("来源文件缺少可靠归属依据")
+        complete = facts["completion_state"] == 3
+        if complete and not isinstance(facts["completion_evidence_json"], dict):
+            raise ConsistencyError("来源文件缺少可靠完成依据")
+        paired_id = facts["original_device_file_id"]
+        if paired_id is not None:
+            original = row_facts(owned.connection, "device_files", paired_id)
+            if (original is None or original["source_action_id"] != action["id"] or original["role"] != int(_ROLE.ORIGINAL)
+                    or facts["role"] != int(_ROLE.PREVIEW) or entry.paired_identity != parse_exact_json(original["identity_key"])[2]):
+                raise ConsistencyError("来源文件的原配对与可靠同源原片不符")
+        elif entry.paired_identity is not None:
+            raise ConsistencyError("来源文件的原配对尚未可靠保存")
+        entry = replace(entry, complete=complete, size_bytes=facts["size_bytes"] if complete else None)
+        file = CaptureFile(entry.identity, entry.kind, complete, ownership_confirmed=True,
+            format_id=entry.format_id, pairing_confirmed=True if paired_id is not None else None)
+        items.append((entry, file, file_id))
+    return Page(tuple(items), identifiers[batch - 1] if len(identifiers) > batch else None)
 
 
 class SaveResultPageCommand:
