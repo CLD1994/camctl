@@ -12,15 +12,10 @@ import enum
 import os
 import sqlite3
 from dataclasses import dataclass
-from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
 from camctl.persistence.runtime import StateDatabaseError
-
-#: 目录树扫描的单批条目数上限：分批消费目录项，不无界积累。
-_SCAN_BATCH = 256
-
 
 @dataclass(frozen=True)
 class SwitchFacts:
@@ -98,8 +93,8 @@ def scan_directory_tree(root: Path, *, required: bool) -> str | None:
     """核对目录树内没有文件、符号链接或无法识别的对象。
 
     required 为真时目录必须存在且可检查；为假时允许不存在（新目
-    录可由切换的准备步骤创建）。目录项按固定批次读取，遇到首个
-    阻止项即返回诊断；纯空目录树通过。
+    录可由切换的准备步骤创建）。逐项深度优先读取，只保留当前祖
+    先目录的迭代器，遇到首个阻止项即返回诊断；纯空目录树通过。
     """
     try:
         if root.is_symlink():
@@ -110,26 +105,27 @@ def scan_directory_tree(root: Path, *, required: bool) -> str | None:
             return None
         if not root.is_dir():
             return f"路径已被非目录对象占用: {root}"
-        pending = [root]
-        while pending:
-            current = pending.pop()
-            try:
-                with os.scandir(current) as entries:
-                    while True:
-                        batch = list(islice(entries, _SCAN_BATCH))
-                        if not batch:
-                            break
-                        for entry in batch:
-                            if entry.is_symlink():
-                                return f"存在符号链接对象: {entry.path}"
-                            if entry.is_dir(follow_symlinks=False):
-                                pending.append(Path(entry.path))
-                                continue
-                            if entry.is_file(follow_symlinks=False):
-                                return f"仍存在文件: {entry.path}"
-                            return f"存在无法识别的对象: {entry.path}"
-            except OSError as error:
-                return f"目录不能可靠检查: {current}: {error}"
+        active = [(root, os.scandir(root))]
+        try:
+            while active:
+                current, entries = active[-1]
+                try:
+                    entry = next(entries, None)
+                    if entry is None:
+                        active.pop()[1].close()
+                    elif entry.is_symlink():
+                        return f"存在符号链接对象: {entry.path}"
+                    elif entry.is_dir(follow_symlinks=False):
+                        active.append((Path(entry.path), os.scandir(entry.path)))
+                    elif entry.is_file(follow_symlinks=False):
+                        return f"仍存在文件: {entry.path}"
+                    else:
+                        return f"存在无法识别的对象: {entry.path}"
+                except OSError as error:
+                    return f"目录不能可靠检查: {current}: {error}"
+        finally:
+            for _, entries in reversed(active):
+                entries.close()
         return None
     except OSError as error:
         return f"目录不能可靠检查: {root}: {error}"
@@ -238,7 +234,13 @@ def classify_commit_observation(
 
 
 class SwitchCommitError(StateDatabaseError):
-    """绑定保存事务未能可靠完成；原绑定未被证明已经改变。"""
+    """绑定保存或核验失败；observation 为可靠重读结果，无结果时为 None。"""
+
+    def __init__(
+        self, message: str, *, observation: SwitchCommitObservation | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.observation = observation
 
 
 def switch_directory_binding(
@@ -248,7 +250,7 @@ def switch_directory_binding(
 
     提交确认后重读核实整体为新值；提交异常时尽力回滚并按重读的
     完整绑定分类结果。重新核对发现责任、绑定变化、数据库错误或
-    混合组合时抛出 SwitchCommitError，由调用方按保持原绑定报告。
+    混合组合时抛出 SwitchCommitError；调用方只能按可靠重读结果说明绑定。
     """
     old_tuple = tuple(old_binding)
     new_tuple = tuple(new_binding)
@@ -275,18 +277,22 @@ def switch_directory_binding(
         if cursor.rowcount != 1:
             raise SwitchCommitError("原绑定核对失败，未保存新绑定")
         connection.execute("COMMIT")
-    except sqlite3.Error as error:
-        _try_rollback(connection)
-        observation = _observe_binding(connection, old_tuple, new_tuple)
-        raise SwitchCommitError(
-            f"绑定保存事务失败: {error}；重读判定 {observation.value}") from error
     except SwitchCommitError:
         _try_rollback(connection)
         raise
+    except (sqlite3.Error, StateDatabaseError) as error:
+        _try_rollback(connection)
+        observation = _observe_binding(connection, old_tuple, new_tuple)
+        if observation is SwitchCommitObservation.COMPLETED:
+            return observation
+        raise SwitchCommitError(
+            f"绑定保存事务失败: {error}；重读判定 {observation.value}",
+            observation=observation) from error
     observation = _observe_binding(connection, old_tuple, new_tuple)
     if observation is not SwitchCommitObservation.COMPLETED:
         raise SwitchCommitError(
-            f"绑定保存后重读结果异常: {observation.value}")
+            f"绑定保存后重读结果异常: {observation.value}",
+            observation=observation)
     return observation
 
 
@@ -305,6 +311,8 @@ def _observe_binding(
 ) -> SwitchCommitObservation:
     """重读保存的三路径并按完整绑定分类；不可读时报告错误。"""
     try:
+        if connection.in_transaction:
+            raise SwitchCommitError("绑定保存事务尚未结束，不能用未提交值确认结果")
         row = connection.execute(
             "SELECT staging_path, ready_path, processing_path"
             " FROM database_metadata WHERE id = 1").fetchone()

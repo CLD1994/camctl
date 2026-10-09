@@ -20,6 +20,7 @@ from camctl.history.initial_state import runtime_state_values
 from camctl.resources import resource_bytes
 from camctl.persistence.directory_switch import (
     SwitchCommitError,
+    SwitchCommitObservation,
     canonical_to_path,
     check_atomic_move_support,
     check_distinct_roots,
@@ -33,6 +34,7 @@ from camctl.persistence.runtime import (
     DbConfig,
     DbOpenMode,
     StateDatabaseError,
+    canonical_directory_binding,
     ensure_runtime_library,
     open_existing,
     verify_directory_binding,
@@ -68,11 +70,7 @@ def _canonical_binding(path: Path) -> str:
     绝对路径的约束；同一约定用于保存与核对，切换判定不受影响。
     部署到目标机时此映射为恒等（见台账裁决）。
     """
-    resolved = path.resolve()
-    if os.name != "nt":
-        return str(resolved)
-    posix = resolved.as_posix()
-    return "/" + posix[0].lower() + posix[1:]
+    return canonical_directory_binding(path)
 
 
 class InitOutcome(enum.Enum):
@@ -166,9 +164,10 @@ def initialize_state(config, state_db: Path) -> InitResult:
     except StateDatabaseError as error:
         return InitResult(InitOutcome.FAILED, f"运行库条件不满足: {error}", error)
 
-    staging = Path(config.paths.staging).resolve()
-    ready = Path(config.paths.ready).resolve()
-    processing = Path(config.paths.processing).resolve()
+    # 保留目录对象本身；实际别名在 check_distinct_roots 中核对。
+    staging = Path(os.path.abspath(config.paths.staging))
+    ready = Path(os.path.abspath(config.paths.ready))
+    processing = Path(os.path.abspath(config.paths.processing))
     state_db = Path(state_db).resolve()
 
     alias = check_distinct_roots((staging, ready, processing))
@@ -296,9 +295,12 @@ def _attempt_directory_switch(
     try:
         switch_directory_binding(owned, old_binding, binding)
     except SwitchCommitError as error:
-        # 原绑定仍有效；新准备的空目录可以保留，重新执行时重新核对。
+        if error.observation is SwitchCommitObservation.NOT_COMPLETED:
+            detail = f"绑定保存未完成，原绑定仍有效: {error}"
+        else:
+            detail = f"绑定保存结果未能可靠确认，须重新核对完整绑定: {error}"
         return InitResult(
-            InitOutcome.FAILED, f"绑定保存未完成，原绑定仍有效: {error}", error)
+            InitOutcome.FAILED, detail, error)
     return InitResult(InitOutcome.SWITCHED, f"已切换目录绑定: {state_db}")
 
 

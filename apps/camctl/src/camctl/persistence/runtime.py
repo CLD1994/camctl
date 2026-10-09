@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from camctl.resources import resource_bytes
@@ -152,6 +154,25 @@ def expected_table_names() -> frozenset[str]:
     return frozenset(names)
 
 
+def canonical_directory_binding(path: Path) -> str:
+    """按主机路径规则规范绝对绑定文本，不解析软链接目标。"""
+    normalized = Path(os.path.abspath(path))
+    if os.name != "nt":
+        return str(normalized)
+    posix = normalized.as_posix()
+    return "/" + posix[0].lower() + posix[1:]
+
+
+def configured_directory_binding(raw: str, field: str) -> str:
+    """配置目录先证明绝对且不含 NUL，再规范绑定文本。"""
+    if not isinstance(raw, str) or not raw or "\x00" in raw:
+        raise DirectoryBindingError(f"paths.{field} 必须是非空且不含 NUL 的绝对目录路径: {raw!r}")
+    path = Path(raw)
+    if not path.is_absolute():
+        raise DirectoryBindingError(f"paths.{field} 必须是绝对目录路径: {raw!r}")
+    return canonical_directory_binding(path)
+
+
 def verify_directory_binding(
     metadata: DatabaseMetadata,
     staging: str,
@@ -161,9 +182,12 @@ def verify_directory_binding(
     """核对本次配置目录与数据库保存的绑定。"""
     actual = (metadata.staging_path, metadata.ready_path, metadata.processing_path)
     configured = (staging, ready, processing)
-    if actual != configured:
+    changed = [f"{name}: 数据库原路径 {old!r}，本次配置新路径 {new!r}"
+               for name, old, new in zip(("staging", "ready", "processing"), actual, configured)
+               if old != new]
+    if changed:
         raise DirectoryBindingError(
-            f"配置目录与数据库绑定不一致: 配置 {configured}，数据库 {actual}"
+            "配置目录与数据库绑定不一致: " + "; ".join(changed)
         )
 
 

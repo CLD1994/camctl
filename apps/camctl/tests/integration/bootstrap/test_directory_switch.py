@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,32 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from .test_initialization import _STAGING_SUBDIRS, _config, _dump
 
 _SHA256 = "a" * 64
+
+
+class _CommitThenError:
+    """真实提交已完成，但调用者未取得成功返回；可另使重读失效。"""
+
+    def __init__(self, inner, *, lose_observation: bool = False) -> None:
+        self.inner = inner
+        self.committed = False
+        self.lose_observation = lose_observation
+
+    def execute(self, sql: str, *args):
+        statement = sql.strip().upper()
+        if self.committed and self.lose_observation and statement.startswith("SELECT"):
+            raise sqlite3.OperationalError("injected observation failure")
+        result = self.inner.execute(sql, *args)
+        if statement == "COMMIT":
+            self.committed = True
+            raise sqlite3.OperationalError("injected loss after durable commit")
+        return result
+
+    def close(self):
+        self.inner.close()
+
+    @property
+    def in_transaction(self):
+        return self.inner.in_transaction
 
 
 def _seed_liabilities(state_db: Path) -> None:
@@ -86,6 +113,46 @@ def _seed_liabilities(state_db: Path) -> None:
 
 
 class TestScanDirectoryTree:
+    def test_sibling_directories_do_not_accumulate_unbounded_pending_work(
+            self, tmp_path: Path, monkeypatch) -> None:
+        root = tmp_path / "ready"
+        root.mkdir()
+        for index in range(600):
+            (root / str(index)).mkdir()
+        original_scandir = os.scandir
+        outstanding = set()
+        peak = 0
+
+        class TrackedEntries:
+            def __init__(self, path):
+                outstanding.discard(str(path))
+                self.inner = original_scandir(path)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+            def close(self):
+                self.inner.close()
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                nonlocal peak
+                entry = next(self.inner)
+                if entry.is_dir(follow_symlinks=False):
+                    outstanding.add(entry.path)
+                    peak = max(peak, len(outstanding))
+                return entry
+
+        monkeypatch.setattr("camctl.persistence.directory_switch.os.scandir", TrackedEntries)
+        assert scan_directory_tree(root, required=True) is None
+        assert not outstanding
+        assert peak <= 256
+
     def test_missing_required_directory_blocks(self, tmp_path: Path) -> None:
         blocked = scan_directory_tree(tmp_path / "absent", required=True)
         assert blocked is not None
@@ -171,6 +238,56 @@ class TestLoadSwitchFacts:
 
 
 class TestSwitchDirectoryBinding:
+    def test_uncommitted_new_binding_cannot_confirm_success(self, tmp_path: Path) -> None:
+        cfg = _config(tmp_path)
+        state_db = Path(cfg.paths.state_db)
+        assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+        moved = _config(tmp_path, prefix="new-")
+        new_binding = tuple(_canonical_binding(Path(value)) for value in (
+            moved.paths.staging, moved.paths.ready, moved.paths.processing))
+        owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+
+        class UnconfirmedTransaction(_CommitThenError):
+            def execute(self, sql, *args):
+                if sql.strip().upper() in ("COMMIT", "ROLLBACK"):
+                    raise sqlite3.OperationalError("injected unfinished transaction")
+                return self.inner.execute(sql, *args)
+
+        old_binding = (owned.metadata.staging_path, owned.metadata.ready_path,
+                       owned.metadata.processing_path)
+        try:
+            with pytest.raises(SwitchCommitError) as caught:
+                switch_directory_binding(
+                    replace(owned, connection=UnconfirmedTransaction(owned.connection)),
+                    old_binding, new_binding)
+            assert caught.value.observation is None
+            with sqlite3.connect(state_db) as reader:
+                assert tuple(reader.execute(
+                    "SELECT staging_path, ready_path, processing_path FROM database_metadata"
+                ).fetchone()) == old_binding
+        finally:
+            owned.connection.close()
+
+    def test_commit_error_with_new_binding_returns_completed(self, tmp_path: Path) -> None:
+        cfg = _config(tmp_path)
+        state_db = Path(cfg.paths.state_db)
+        assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+        moved = _config(tmp_path, prefix="new-")
+        new_binding = tuple(_canonical_binding(Path(value)) for value in (
+            moved.paths.staging, moved.paths.ready, moved.paths.processing))
+        owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            old_binding = (owned.metadata.staging_path, owned.metadata.ready_path,
+                           owned.metadata.processing_path)
+            injected = replace(owned, connection=_CommitThenError(owned.connection))
+            assert switch_directory_binding(injected, old_binding, new_binding) is (
+                SwitchCommitObservation.COMPLETED)
+            assert tuple(owned.connection.execute(
+                "SELECT staging_path, ready_path, processing_path FROM database_metadata"
+            ).fetchone()) == new_binding
+        finally:
+            owned.connection.close()
+
     def test_switch_commits_three_paths_together(self, tmp_path: Path) -> None:
         cfg = _config(tmp_path)
         state_db = Path(cfg.paths.state_db)
@@ -227,6 +344,10 @@ class TestSwitchDirectoryBinding:
 
             def close(self):
                 return self._inner.close()
+
+            @property
+            def in_transaction(self):
+                return self._inner.in_transaction
 
         from types import SimpleNamespace
 
@@ -293,6 +414,100 @@ def _config_roots(tmp_path: Path, staging: str, ready: str, processing: str):
 
 
 class TestInitializeStateDirectorySwitch:
+    def test_transaction_responsibility_read_error_returns_failed_and_rolls_back(
+            self, tmp_path: Path, monkeypatch) -> None:
+        cfg = _config(tmp_path)
+        state_db = Path(cfg.paths.state_db)
+        assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+        before = _dump(state_db)
+        connections = []
+
+        class ResponsibilityReadError:
+            def __init__(self, inner):
+                self.inner = inner
+                self.closed_in_transaction = None
+
+            def execute(self, sql, *args):
+                if self.inner.in_transaction and sql.startswith("SELECT COUNT(*)"):
+                    raise sqlite3.OperationalError("injected responsibility read error")
+                return self.inner.execute(sql, *args)
+
+            @property
+            def in_transaction(self):
+                return self.inner.in_transaction
+
+            def close(self):
+                self.closed_in_transaction = self.inner.in_transaction
+                self.inner.close()
+
+        def wrapped_open(*args, **kwargs):
+            owned = open_existing(*args, **kwargs)
+            wrapper = ResponsibilityReadError(owned.connection)
+            connections.append(wrapper)
+            return replace(owned, connection=wrapper)
+
+        monkeypatch.setattr("camctl.persistence.initialization.open_existing", wrapped_open)
+        result = initialize_state(_config(tmp_path, prefix="new-"), state_db)
+        assert result.outcome is InitOutcome.FAILED
+        assert isinstance(result.error, SwitchCommitError)
+        assert result.error.observation is SwitchCommitObservation.NOT_COMPLETED
+        assert connections[0].closed_in_transaction is False
+        assert _dump(state_db) == before
+
+    @pytest.mark.parametrize("lose_observation", [False, True])
+    def test_actual_commit_result_controls_init_outcome(
+            self, tmp_path: Path, monkeypatch, lose_observation: bool) -> None:
+        cfg = _config(tmp_path)
+        state_db = Path(cfg.paths.state_db)
+        assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+        moved = _config(tmp_path, prefix="new-")
+        original_open = open_existing
+
+        def injected_open(*args, **kwargs):
+            owned = original_open(*args, **kwargs)
+            return replace(owned, connection=_CommitThenError(
+                owned.connection, lose_observation=lose_observation))
+
+        monkeypatch.setattr("camctl.persistence.initialization.open_existing", injected_open)
+        outcome = initialize_state(moved, state_db)
+        if lose_observation:
+            assert outcome.outcome is InitOutcome.FAILED
+            assert "原绑定仍有效" not in outcome.detail
+        else:
+            assert outcome.outcome is InitOutcome.SWITCHED, outcome.detail
+        with sqlite3.connect(state_db) as connection:
+            assert tuple(connection.execute(
+                "SELECT staging_path, ready_path, processing_path FROM database_metadata"
+            ).fetchone()) == tuple(_canonical_binding(Path(value)) for value in (
+                moved.paths.staging, moved.paths.ready, moved.paths.processing))
+
+    @pytest.mark.skipif(os.name == "nt", reason="需要创建真实符号链接对象")
+    @pytest.mark.parametrize("root_name", ["staging", "ready", "processing"])
+    @pytest.mark.parametrize("dangling", [False, True])
+    @pytest.mark.parametrize("existing", [False, True])
+    def test_configured_root_symlink_is_rejected(
+            self, tmp_path: Path, root_name: str, dangling: bool, existing: bool) -> None:
+        cfg = _config(tmp_path)
+        state_db = Path(cfg.paths.state_db)
+        if existing:
+            assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+            before = _dump(state_db)
+        candidate = _config(tmp_path, prefix="new-" if existing else "")
+        target = tmp_path / "linked-target"
+        if not dangling:
+            target.mkdir()
+        link = Path(getattr(candidate.paths, root_name))
+        link.symlink_to(target, target_is_directory=True)
+
+        result = initialize_state(candidate, state_db)
+
+        assert result.outcome is InitOutcome.FAILED, result.detail
+        assert link.is_symlink()
+        if existing:
+            assert _dump(state_db) == before
+        else:
+            assert not state_db.exists()
+
     def test_clean_history_switches_and_preserves_identity(
             self, tmp_path: Path) -> None:
         cfg = _config(tmp_path)
@@ -461,7 +676,8 @@ class TestInitializeStateDirectorySwitch:
 
         def failing_switch(owned, old_binding, new_binding):
             raise SwitchCommitError(
-                "绑定保存事务失败: injected；重读判定 not_completed")
+                "绑定保存事务失败: injected；重读判定 not_completed",
+                observation=SwitchCommitObservation.NOT_COMPLETED)
 
         monkeypatch.setattr(
             "camctl.persistence.initialization.switch_directory_binding",
