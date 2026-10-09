@@ -148,6 +148,7 @@ from camctl.persistence.repositories.capture import (
     FinishBindingFailure,
     FinishCanceledCapture,
     FinishCapture,
+    FinishRecordingResults,
 )
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import (
@@ -252,6 +253,36 @@ class PendingCallResult:
 
 # 启动装配和既有调用方使用同一个公共责任集合。
 PendingStartResult = PendingCallResult
+
+
+@dataclass(frozen=True)
+class PendingRecordingResults:
+    """原录像收场决定的完整输入；核实保存沿用原 key 和 T1。"""
+
+    key: OperationKey
+    request: FinishRecordingResults
+
+
+def resume_recording_results(
+    owned, *, pending_recording_results: dict[int, PendingRecordingResults],
+    action_id: int | None = None, capture: CaptureRepository | None = None,
+    retry_gate: RetryWaitGate | None = None,
+) -> None:
+    """仅核实已持有的完整录像收场申请，不取得时钟或设备端口。"""
+    repository = CaptureRepository() if capture is None else capture
+    for identity, pending in tuple(pending_recording_results.items()):
+        if action_id is not None and identity != action_id:
+            continue
+        receipt = repository.finish_recording_results(pending.request, pending.key, owned)
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(
+                f"原录像核实收场未可靠保存，完整申请仍持有: {receipt.error}")
+        if retry_gate is not None:
+            run = row_facts(owned.connection, "operation_runs", pending.request.run_id)
+            if run is None:
+                raise ConsistencyError("已保存录像收场缺少原核实责任")
+            retry_gate.cleared(run["responsibility_key"])
+        del pending_recording_results[identity]
 
 
 @dataclass(frozen=True)
@@ -487,6 +518,8 @@ class CaptureRuntime(_FileObservationSaves):
     recovery_evidence_for: Callable[[DeviceBinding, str], Any] | None = None
     #: 会话装配共享，未核实的实际结果不能由 UNKNOWN 恢复覆盖。
     pending_start_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
+    #: 已形成的录像本地收场申请独立于原调用尝试和当前设备资格。
+    pending_recording_results: dict[int, PendingRecordingResults] = field(default_factory=dict)
     pending_read_results: dict = field(default_factory=dict)
     pending_read_business: dict = field(default_factory=dict)
     pending_read_ends: dict = field(default_factory=dict)
@@ -513,6 +546,12 @@ class CaptureRuntime(_FileObservationSaves):
         if facts is None:
             raise LookupError(f"动作不存在: {action_id}")
         return facts
+
+    def resume_recording_results(self, action_id: int) -> None:
+        """先核原完整收场申请，动作已有终态也不跳过原事务。"""
+        resume_recording_results(self.owned,
+            pending_recording_results=self.pending_recording_results,
+            action_id=action_id, capture=self.capture, retry_gate=self.retry_gate)
 
     def last_attempt(self, responsibility: str):
         """读取该责任的最近尝试：状态、效果与意图事实时刻。"""
@@ -1362,7 +1401,7 @@ def _settle_start_without_sent_at(
             runtime, action["id"], (), FileKind.VIDEO,
             failure=RecordingFailure(
                 code="capture_failed",
-                details={"activity_id": str(action["id"]),
+                details={"activity_id": str(activity_id),
                          "reason": "device_failed"}))
         return True
     _settle_open_start(
@@ -1372,7 +1411,7 @@ def _settle_start_without_sent_at(
         runtime, action["id"], (), FileKind.VIDEO,
         failure=RecordingFailure(
             code="capture_result_unconfirmed",
-            details={"activity_id": str(action["id"]),
+            details={"activity_id": str(activity_id),
                      "reason": "start_unknown"}))
     return True
 
@@ -1576,6 +1615,7 @@ def _finish_capture(
     runtime: CaptureRuntime, action_id: int, entries: tuple[ObservedFile, ...],
     required: FileKind, *, failure: RecordingFailure | None = None,
     registered=None, repair_file_id: int | None = None,
+    results_run_id: int | None = None,
 ) -> HandlerOutcome:
     """C6 核实产物集合并保存终态；失败保留完整且归属明确的文件。
 
@@ -1602,16 +1642,26 @@ def _finish_capture(
             ),)
     if failure is None and not assessment.is_complete:
         return HandlerOutcome("files_incomplete", str(assessment.missing_kinds))
-    receipt = runtime.capture.finish_capture(
-        FinishCapture(
-            action_id=action_id,
-            drafts=drafts,
-            catalog_facts=OutputCatalogFacts(
-                action_id=action_id, ownership_confirmed=True),
-            occurred_at=runtime.wall_us(),
-            failure=failure,
-        ), new_operation_key(), runtime.owned)
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    command = FinishCapture(
+        action_id=action_id,
+        drafts=drafts,
+        catalog_facts=OutputCatalogFacts(
+            action_id=action_id, ownership_confirmed=True),
+        occurred_at=runtime.wall_us(),
+        failure=failure,
+    )
+    key = new_operation_key()
+    if results_run_id is None:
+        receipt = runtime.capture.finish_capture(command, key, runtime.owned)
+    else:
+        if action_id in runtime.pending_recording_results:
+            raise ConsistencyError("原录像核实收场仍待保存，不能替换完整申请")
+        runtime.pending_recording_results[action_id] = PendingRecordingResults(
+            key, FinishRecordingResults(command, results_run_id))
+        runtime.resume_recording_results(action_id)
+        receipt = None
+    if receipt is not None and receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"拍摄终态未可靠保存: {receipt.error}")
     _settle_input_read_runs(
         runtime, action_id,
         RunOutcome.SUCCEEDED if failure is None else RunOutcome.FAILED,
@@ -1869,7 +1919,8 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
             context, action_id, entries, FileKind.PHOTO, registered=registered,
             failure=RecordingFailure(
                 code="capture_failed",
-                details={"activity_id": str(action_id), "reason": "device_failed"}))
+                details={"activity_id": str(_activity_id_of(context, action_id)),
+                         "reason": "device_failed"}))
     elif ticket is not None:
         # 其余分区（等待响应、取消保留、未知无停止）：本轮成功结果与
         # 重试等待共同保存，等待下次推进或取消收场。
@@ -2022,6 +2073,7 @@ async def _resume_internal_read_results(runtime):
 
 
 async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
+    context.resume_recording_results(action_id)
     context.resume_file_observations(action_id)
     await _resume_internal_read_results(context)
     context.resume_start_results(action_id)
@@ -2521,6 +2573,13 @@ async def _advance_recording_outcome(
     result = decide_recording_result(facts)
     if result.kind.value == "failed" or (
             result.kind.value == "succeeded" and files.is_complete):
+        results_run_id = None
+        if ticket is None and files.is_complete:
+            original = _original_ticket(
+                context, f"results/{_activity_id_of(context, action_id)}", "result")
+            if original is None:
+                raise ConsistencyError("完整录像文件缺少原结果核实责任")
+            results_run_id = original.run_id
         if ticket is not None:
             # 承载结论的轮次以可靠结果收场核实责任。
             _finish_listing_result(context, listing,
@@ -2530,10 +2589,12 @@ async def _advance_recording_outcome(
                 context, action_id, entries, FileKind.VIDEO,
                 registered=registered,
                 repair_file_id=int(row[5]) if row[4] == int(
-                    _REPAIR_STATE.SUCCEEDED) and row[5] is not None else None)
+                    _REPAIR_STATE.SUCCEEDED) and row[5] is not None else None,
+                results_run_id=results_run_id)
         else:
             _finish_capture(context, action_id, entries, FileKind.VIDEO,
-                            registered=registered, failure=result.failure)
+                            registered=registered, failure=result.failure,
+                            results_run_id=results_run_id)
     elif ticket is not None:
         # 终局依据尚不齐备：本轮成功结果与重试等待共同保存。
         _finish_listing_result(context, listing, retry_wait=True)
@@ -3003,7 +3064,8 @@ async def _finish_timelapse_conclusion(
             runtime, action_id, entries, FileKind.VIDEO, registered=registered,
             failure=RecordingFailure(
                 code="capture_failed",
-                details={"activity_id": str(action_id), "reason": "no_outputs"}))
+                details={"activity_id": str(_activity_id_of(runtime, action_id)),
+                         "reason": "no_outputs"}))
     else:
         _finish_capture(
             runtime, action_id, entries, FileKind.VIDEO, registered=registered,

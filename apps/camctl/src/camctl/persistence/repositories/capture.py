@@ -34,9 +34,14 @@ from camctl.capture.files import (
     OwnershipSave,
     file_identity_key,
 )
-from camctl.capture.media import RecordingFailure
+from camctl.capture.media import (
+    RecordingFailure, RecordingOutcomeFacts, RecordingResultKind,
+    decide_recording_result,
+)
+from camctl.capture.result_inputs import files_from_outcome, saved_outcome
 from camctl.capture.processing import (
     CheckDecisionSave,
+    CheckReason,
     CheckResultSave,
     DiscardPhase,
     DiscardProgressSave,
@@ -49,10 +54,11 @@ from camctl.capture.processing import (
     RepairStart,
     RepairSuccess,
     SourceFileSave,
+    saved_check_duration,
 )
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
 from camctl.capture.results import (
-    ActivityFacts, ActivityState, OccupancyState, ReleaseDecision, decide_release,
+    ActivityFacts, ActivityState, FileKind, OccupancyState, ReleaseDecision, decide_release,
 )
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
@@ -92,7 +98,7 @@ from camctl.persistence.repositories.operations import (
 from camctl.persistence.repositories.scheduling import (
     ExpireActionCommand, ExpireActionRequest, ExpireOutcome,
 )
-from camctl.operations.models import EffectState, ErrorValue
+from camctl.operations.models import AttemptTicket, EffectState, ErrorValue
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
@@ -200,6 +206,8 @@ _LIFECYCLE_REASON = 2
 _RETENTION = enum_for("intermediate_files.retention_state")
 _PURPOSE = enum_for("intermediate_files.purpose")
 _FILE_CLEANUP = enum_for("intermediate_files.cleanup_state")
+_CHECK_DECISION = enum_for("recording_processing.check_decision")
+_CHECK_STATE = enum_for("recording_processing.check_state")
 _REPAIR_STATE = enum_for("recording_processing.repair_state")
 
 #: RECORDING_DECIDED 的三个分支。
@@ -256,6 +264,23 @@ class FinishCapture:
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
+
+
+@dataclass(frozen=True)
+class FinishRecordingResults:
+    """原录像文件核实已结束调用后的共同收场输入。
+
+    capture 保存完整的动作与产物申请，run_id 固定原活动的唯一
+    RESULTS 身份。原尝试已经保存，不再次提交或修改尝试结果。
+    """
+
+    capture: FinishCapture
+    run_id: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.capture, FinishCapture):
+            raise TypeError("录像核实收场必须携带完整 FinishCapture")
+        ObjectId(self.run_id)
 
 
 @dataclass(frozen=True)
@@ -1684,6 +1709,19 @@ class CaptureRepository:
         self, command: FinishCapture, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CaptureResult]:
         receipt = commit_operation(FinishCaptureCommand(command, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def finish_recording_results(
+        self, request: FinishRecordingResults, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[CaptureResult]:
+        """已保存原轮次后，共同结束录像核实责任、动作与产物。"""
+        receipt = commit_operation(
+            _FinishRecordingResultsCommand(request, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -3544,6 +3582,206 @@ def _unconfirmed_run_error(activity_id: int) -> dict[str, Any]:
     }
     validate_error_details(code, details)
     return {"code": code, "stage": spec["stage"], "details": details}
+
+
+class _FinishRecordingResultsCommand:
+    """已保存真实轮次后的原核实责任与录像终态共同提交。"""
+
+    def __init__(self, request: FinishRecordingResults, key: OperationKey) -> None:
+        if not isinstance(request, FinishRecordingResults):
+            raise TypeError("录像核实收场申请必须使用 FinishRecordingResults")
+        self._request, self._key = request, key
+
+    def _identity(self, connection):
+        capture = self._request.capture
+        action = row_facts(connection, "actions", capture.action_id)
+        if action is None or action["type"] != int(_ACTION_TYPE.CAMERA_RECORD):
+            raise TransactionError("录像核实收场必须属于原录像动作")
+        run = _result_run_of_action(connection, capture.action_id)
+        if run["id"] != self._request.run_id:
+            raise TransactionError("录像核实收场的原流程与活动身份不符")
+        if (not isinstance(capture.catalog_facts, OutputCatalogFacts)
+                or capture.catalog_facts.action_id != capture.action_id
+                or capture.catalog_facts.ownership_confirmed is not True
+                or any(draft.file_complete is not True or draft.sha256 is not None
+                       for draft in capture.drafts)):
+            raise TransactionError("录像核实收场要求原完整文件登记申请")
+        validate_output_registration(capture.drafts, capture.catalog_facts)
+        return action, run
+
+    def _ready(self, connection, action, run) -> None:
+        with closing(connection.execute(
+            "SELECT 1 FROM operation_attempts WHERE run_id=? AND status=? LIMIT 1",
+            (run["id"], int(_ATTEMPT_STATUS.RUNNING)),
+        )) as cursor:
+            if cursor.fetchone() is not None:
+                raise TransactionError("原录像核实调用尚未保存实际结束，不能收场")
+        metadata = {}
+        with closing(connection.execute(
+            "SELECT attempt_no,status,effect_state,result_json,error_json"
+            " FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (run["id"],),
+        )) as cursor:
+            for number, status, effect, result_json, error_json in cursor:
+                if result_json is None:
+                    raise TransactionError("原录像核实尝试缺少已保存实际结果")
+                actual = saved_outcome(status, effect, parse_exact_json(result_json),
+                    None if error_json is None else parse_exact_json(error_json))
+                if any(value.type == "result_files_listed" for value in actual.observations):
+                    ticket = AttemptTicket(number, "result", str(run["activity_id"]),
+                                           run["responsibility_key"], run["id"])
+                    metadata.update((entry.identity, entry) for entry in files_from_outcome(ticket, actual))
+        with closing(connection.execute(
+            "SELECT id FROM device_files WHERE source_action_id=? ORDER BY id", (action["id"],),
+        )) as cursor:
+            files = [row_facts(connection, "device_files", row[0]) for row in cursor.fetchall()]
+        identities = set()
+        for file in files:
+            identity = parse_exact_json(file["identity_key"])
+            entry = metadata.get(identity[2]) if isinstance(identity, list) and len(identity) == 3 else None
+            if (entry is None or identity[:2] != [action["device_id"], action["driver_id"]]
+                    or not json_equal(entry.locator, file["locator_json"])
+                    or file["completion_state"] != int(_FILE_COMPLETION.COMPLETE)
+                    or file["ownership_evidence_json"] is None
+                    or file["completion_evidence_json"] is None):
+                raise TransactionError("录像核实收场缺少原可靠完整文件依据")
+            identities.add(entry.identity)
+        if (identities != set(metadata)
+                or not any(entry.kind is FileKind.VIDEO for entry in metadata.values())
+                or {file["id"] for file in files} != {
+                    draft.file.device_file_id for draft in self._request.capture.drafts
+                    if draft.file.device_file_id is not None}):
+            raise TransactionError("录像核实收场的文件输入尚未满足全部登记要求")
+        with closing(connection.execute(
+            "SELECT id FROM recording_processing WHERE action_id=?", (action["id"],),
+        )) as cursor:
+            found = cursor.fetchone()
+        processing = None if found is None else row_facts(connection, "recording_processing", found[0])
+        if (processing is None or processing["check_decision"] == int(_CHECK_DECISION.UNDETERMINED)
+                or (processing["check_decision"] == int(_CHECK_DECISION.REQUIRED)
+                    and processing["check_state"] in (
+                        int(_CHECK_STATE.NOT_PERFORMED), int(_CHECK_STATE.RUNNING)))
+                or processing["repair_state"] in (int(_REPAIR_STATE.PENDING), int(_REPAIR_STATE.RUNNING))):
+            raise TransactionError("录像核实收场前适用媒体处理必须已经结束")
+        spec = action["execution_spec_json"]
+        target = spec.get("target_duration_ms") if isinstance(spec, Mapping) else None
+        basis = processing["check_basis_json"]
+        if (isinstance(target, bool) or not isinstance(target, int) or target <= 0
+                or not isinstance(basis, Mapping) or basis.get("target_duration_ms") != target):
+            raise ConsistencyError("原录像检查依据与固定目标时长不一致")
+        source_id = processing["source_device_file_id"]
+        if processing["check_decision"] == int(_CHECK_DECISION.REQUIRED):
+            source = next((file for file in files if file["id"] == source_id), None)
+            if (source is None or source["role"] != int(_FILE_ROLE.ORIGINAL)
+                    or metadata[parse_exact_json(source["identity_key"])[2]].kind is not FileKind.VIDEO):
+                raise TransactionError("原录像媒体结果缺少同动作的完整原片来源")
+        media = processing["media_json"]
+        result = decide_recording_result(RecordingOutcomeFacts(
+            processing_id=processing["id"],
+            control_complete=(processing["check_decision"] == int(_CHECK_DECISION.NOT_NEEDED)
+                and basis.get("reason") in (
+                    CheckReason.CONTINUOUS_CONTROL_COMPLETE.value,
+                    CheckReason.EXCESS_DURATION_CHECK.value)),
+            check_decision=processing["check_decision"],
+            check_state=processing["check_state"],
+            check_duration_s=(saved_check_duration(media)
+                if processing["check_state"] == int(_CHECK_STATE.COMPLETED) else None),
+            check_issues=bool(media.get("issues")) if isinstance(media, Mapping) else False,
+            input_unavailable=False,
+            repair_state=processing["repair_state"], target_duration_ms=target))
+        failure = self._request.capture.failure
+        if (result.kind is RecordingResultKind.PENDING
+                or (result.failure is None) != (failure is None)
+                or (failure is not None and (
+                    result.failure.code != failure.code
+                    or not json_equal(result.failure.details, failure.details)))):
+            raise TransactionError("录像收场申请与原已保存媒体和控制结果不一致")
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        action, run = self._identity(connection)
+        if saved is not None:
+            return self._reuse(scope, saved, run)
+        capture = FinishCaptureCommand(self._request.capture, self._key)
+        if action["status"] in _ACTION_TERMINAL:
+            # 已有终态只恢复原登记，不重新关闭普通核实责任。
+            return capture.plan(scope)
+        self._ready(connection, action, run)
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        plans = [capture.plan(sub)]
+        if run["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+            plans.append(_FinishStaleRunsCommand(StaleRunFinish(
+                (run["responsibility_key"],), RunOutcome.SUCCEEDED,
+                self._request.capture.occurred_at), self._key).plan(sub))
+        events = tuple(event for plan in plans for event in plan.events)
+        allocation = scope.allocate(len(events))
+        if (events[0].event_id != allocation.first_event_id
+                or events[-1].event_id != allocation.last_event_id):
+            raise TransactionError("录像核实共同收场的事件范围不连续")
+        ranges = {}
+        for plan in plans:
+            for identity, values in plan.read_coverage.ranges.items():
+                ranges.setdefault(identity, set()).update(values)
+        return CommandPlan(
+            events=events,
+            owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
+            read_coverage=ReadCoverage(ranges), result=plans[0].result)
+
+    def _reuse(self, scope, saved, run) -> CommandPlan:
+        capture = self._request.capture
+        flow_events = [event for event in saved if event["type"] == _RUN_END_EVENT]
+        capture_events = saved[:-1] if flow_events else saved
+        if (len(flow_events) > 1 or (flow_events and saved[-1] is not flow_events[0])
+                or any(event["occurred_at"] != capture.occurred_at for event in saved)
+                or any(event["type"] not in (
+                    _ACTION_FINISHED_EVENT, _OUTPUT_REGISTERED_EVENT,
+                    _INTERMEDIATE_FILE_EVENT, _PLAN_STATUS_EVENT,
+                ) for event in capture_events)):
+            raise TransactionError("原录像核实共同收场的完整事件段与申请不同")
+        capture_plan = FinishCaptureCommand(capture, self._key)._reuse(scope.connection, capture_events)
+        state = {"operation_runs": {run["id"]: run}}
+        if flow_events:
+            event = flow_events[0]
+            rows = event["body"]["rows"]
+            if (event["reason"] != 3 or len(rows) != 1
+                    or rows[0]["table"] != "operation_runs" or rows[0]["id"] != run["id"]
+                    or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]
+                    or rows[0]["after"]["values"].get("status") != int(_RUN_STATUS.SUCCEEDED)
+                    or rows[0]["after"]["values"].get("retry_wait_required") != 0
+                    or rows[0]["after"]["values"].get("error_json") is not None
+                    or run["status"] != int(_RUN_STATUS.SUCCEEDED)
+                    or run["retry_wait_required"] != 0 or run["error_json"] is not None):
+                raise TransactionError("原录像核实收场的责任或最终结果与申请不同")
+        elif run["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+            raise TransactionError("原录像核实共同收场缺少流程结束事件")
+        originals = {}
+        origins = set()
+        outputs = {}
+        for event in capture_events:
+            if event["type"] != _OUTPUT_REGISTERED_EVENT:
+                continue
+            for row in event["body"]["rows"]:
+                values = row["after"]["values"]
+                if row["table"] == "outputs":
+                    outputs[(values["kind"], values["device_file_id"], values["intermediate_file_id"])] = row["id"]
+                    if values["kind"] == _KIND_CODES[OutputKind.ORIGINAL]:
+                        originals[values["device_file_id"]] = row["id"]
+                elif row["table"] == "output_origins":
+                    origins.add((values["output_id"], values["original_output_id"]))
+        expected_origins = set()
+        for draft in capture.drafts:
+            if draft.kind is OutputKind.ORIGINAL:
+                continue
+            original = draft.original_output_id if draft.original_output_id is not None else originals[draft.original_batch_file_id]
+            identity = (_KIND_CODES[draft.kind], draft.file.device_file_id, draft.file.intermediate_file_id)
+            expected_origins.add((outputs[identity], original))
+        if origins != expected_origins:
+            raise TransactionError("原录像核实登记的全部原片关联与申请不同")
+        return CommandPlan(
+            events=(), owners=capture_plan.owners,
+            state_rows=_merged_state_rows(capture_plan.state_rows, state),
+            read_only=True, result=capture_plan.result)
 
 
 class _ResultRunCloseCommand:

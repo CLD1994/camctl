@@ -298,7 +298,7 @@ root 新鲜日志 `/tmp/camctl-goal-recovery-fixture-red.log` 证明旧中断用
 
 ### 后续阶段：媒体等待后的核实收场与明确失败入口核验
 
-本阶段未实施。正式规则来源是[录像成功标准](../../architecture/camera-recording.md#录像成功标准)、[录像动作的结束时点](../../architecture/camera-recording.md#录像动作的结束时点)、[一次查询结束与整项核实结束](../../camctl/database/operation-fields.md#一次查询结束与整项核实结束)、[产物核实轮次](../../camctl/database/operation-fields.md#产物结果核实的责任与轮次)、[配置与历史的共同保存](../../camctl/database/operation-fields.md#查询和结果核实怎样保存配置与历史)和[查询与产物核实配置](../../architecture/configuration.md#状态查询与产物核实的配置)。这些规则要求可靠结果足以满足责任时沿原责任收场，保持已结束尝试；明确媒体错误采用既有录像失败判定，必要媒体处理未结束时保持待定。具体接口与文件划分仍是实施建议。
+本阶段已建立公开组件反例，生产与保存故障验证继续推进。正式规则来源是[录像成功标准](../../architecture/camera-recording.md#录像成功标准)、[录像动作的结束时点](../../architecture/camera-recording.md#录像动作的结束时点)、[一次查询结束与整项核实结束](../../camctl/database/operation-fields.md#一次查询结束与整项核实结束)、[产物核实轮次](../../camctl/database/operation-fields.md#产物结果核实的责任与轮次)、[配置与历史的共同保存](../../camctl/database/operation-fields.md#查询和结果核实怎样保存配置与历史)和[查询与产物核实配置](../../architecture/configuration.md#状态查询与产物核实的配置)。这些规则要求可靠结果足以满足责任时沿原责任收场，保持已结束尝试；明确媒体错误采用既有录像失败判定，必要媒体处理未结束时保持待定。具体接口与文件划分仍是实施建议。
 
 只读审查分别记录两个问题，不能合并为一个已确认生产故障：
 
@@ -327,6 +327,29 @@ root 新鲜日志 `/tmp/camctl-goal-recovery-fixture-red.log` 证明旧中断用
 建议新增 `apps/camctl/tests/integration/capture/test_record_media_result_settlement.py`，独立验证真实仓储与录像消费者。生产预估涉及 `capture/handlers.py::_advance_recording_outcome`、必要的 `operations/attempts.py` 类型和 `persistence/repositories/capture.py` 事务入口；只有新增后续申请确需跨 runtime 持有时，才评估对应共同集合及 bootstrap 接线。不得顺带修改照片、READ／WF 的既有守卫、v1 观察格式或未决 v2。
 
 #### 任务一：媒体等待后原 ACTIVE 核实责任的收场
+
+2026-10-09，Linux 容器、Python 3.11.16：root 的 `/tmp/camctl-goal-media-settlement-red-2.log` 为 4 failed、2.56s。公开受理、实际 START／STOP、完整文件和真实 READ 已保存；工具第一次未执行，随后返回 61 秒或 5 秒的真实检查观察。同一 runtime 和真正重开 Owned／runtime 两种入口都保存了正确业务终态、完整原片且零新增设备调用，原尝试和历史前缀保持；唯一失败是原 RESULTS 仍为 ACTIVE、retry 为 1。首次日志因测试查询不存在的历史列失败，不计行为红。
+
+只读核对 `operation-fields.md` 与 `transactions.md` 后，完整可靠文件且合法媒体终局的两个分区具有唯一结果：RESULTS 为 `SUCCEEDED`、无流程错误，业务按原媒体判定成功或失败。root 允许新增内部窄复合请求 `FinishRecordingResults(capture: FinishCapture, run_id: int)` 与 `finish_recording_results`，共同保存原流程结束、动作及适用产物；具体实现仍可调整。原尝试已保存的 retry 处分不改。后续申请使用新 key 和 T1，必须核唯一 action／activity／run、原调用已实际结束、文件与媒体资格，并在重送时核完整复合输入。已有 run 终态保持，取消与业务终态按原保存优先级处理。现有通用 `_reuse` 未核的同批原片关联与 responsibility key，不能替代新复合分区的完整输入核实。
+
+root 的 `/tmp/camctl-goal-media-settlement-save-red-2.log` 为 4 failed、10 passed、8.22s：共同事务四项和原键改变 run、action、T1、归属资格、完成资格及摘要的六项通过。四个提交前／后 UNKNOWN × 媒体成功／失败分区均使用真实 COMMIT 故障代理，关闭原连接后由 fresh Owned 证明原 key 的可靠保存状态。提交前重入生成了新 T1／key，提交后因已有业务终态遗漏原 key 核实；因此完整请求的持有与恢复尚未闭合。首次保存故障日志只先暴露旧 AssertionError；第二次测试继续核原可靠事务与恢复，并保留最终必须报告 ConsistencyError 的断言，不放宽通过条件。
+
+#### 当前交付范围与验证
+
+后续收场请求在首次仓储写入前保存为 `PendingRecordingResults(key, request)`，原 key、完整 `FinishRecordingResults` 与 T1 保持；原 AttemptFinish 的 T0、实际结果和 retry 处分不改。`CaptureRuntime`、默认普通／残留／受限工厂共用同一会话集合。`_record_handler` 在取消、绑定和终态判断前核原请求；三个默认入口在读取候选和构造 runtime 前，通过现有保存前缀调用纯仓储恢复，不取得新时刻或设备、媒体资格。只有可靠保存完成才清除 holder 与原 retry gate。
+
+复合仓储同时核原 action／activity／RESULTS、完整文件、源文件和适用媒体终局，沿原 `check_basis` 解释控制依据，调用公共 `decide_recording_result` 判定业务结果。请求的 failure 必须与该判定的 code／details 一致；媒体失败不改变完整文件核实的 `SUCCEEDED`。根新增两项首次申请反例 `/tmp/camctl-goal-media-settlement-business-red.log` 为 2 failed、1.49s，证明 5 秒原片不能提交业务成功，61 秒原片不能提交 `recording_too_short`；它们与原键重送改变输入的六项分别覆盖首次决定和已保存身份。
+
+默认入口的新三项由真实普通工厂产生原请求与提交后 UNKNOWN，关闭原连接后确认动作已终态，再分别调用普通、残留和受限 flow。`/tmp/camctl-goal-recording-default-settlement-red.log` 为 3 failed、2.13s，均遗漏原 key 核实；前置接线后，在原候选不再包含动作且没有构造新 factory 的情况下完成同一完整请求与 key 的核实。
+
+2026-10-09，Linux 容器、Python 3.11.16，root 前台独占且 capture 与 bootstrap 分进程执行：
+
+- `/tmp/camctl-goal-media-settlement-capture-green.log` 为 46 passed、20.75s。组成是新媒体十六项（普通收场四项、COMMIT 前后 UNKNOWN 四项、原键六种输入变化、首次业务输入相反两项）、活动身份四项、录像轮次及原键十七项、媒体接线五项、正式结论恢复四项。
+- `/tmp/camctl-goal-recording-settlement-bootstrap-green.log` 为 50 passed、36.93s。组成是新默认入口三项、既有默认 READ 交接十五项与保存门六项、媒体原申请十二项、媒体取消保存顺序四项、本地媒体收场六项、正常停止四项。
+- `/tmp/camctl-goal-recording-settlement-unit.log` 为 3687 passed、1 skipped、2 warnings、7.74s。两个 warning 是既有同步测试的 asyncio 标记，分别位于 `unit/devices/test_read_session.py` 和 `unit/operations/test_process.py`。
+- 全 capture 回归 `/tmp/camctl-goal-recording-settlement-capture-full.log` 为 457 passed、2 failed、82.83s。失败仍是 `TestTimelapseHandler::test_send_wait_then_finish` 与 `test_backward_wall_clock_change_does_not_extend_current_session_wait`，正常集合成功语义属于未确定的结果格式范围；本次未新增失败，也不把整个目录声明为通过。
+
+独立只读审查核对新源文件、原 run 身份、原尝试守恒、共同事务、实际媒体判定、完整请求的保存失败与恢复及默认保存前缀，有限范围内未发现阻断项。取消入口尚未接入录像申请的保存前缀；原后续事务不存在而取消先保存的相遇分区、默认入口提交前／媒体失败／持续保存拒绝、复合预览或修复产物关联重送仍须独立验证。任务二的明确媒体失败优先路径、完整 VIDEO 加未完成 OTHER 的新媒体控制分区、原 raw READ End 与 v2 均未在此范围内完成。上述绿色不作为整个媒体核实计划完成的依据。
 
 - [ ] 读取上述正式规则、`AttemptFinish`／`RunFinish`／`StaleRunFinish` 及其真实事务守卫，记录独立结束入口能否同时覆盖 RESULTS、适用动作与产物。如果状态映射或事务成员没有唯一正式依据，先报告未决，停止生产设计。
 - [ ] 沿公开 Acceptance、Scheduling、实际 START／STOP、活动结束及正式处理仓储建立需要媒体处理的录像。可复用 `media_retry_fixtures.py::media_pipeline` 的完整历史方式，不能直接修改 processing 状态或移除守卫。使用真实媒体端口与受接口约束的工具替身，让完整 VIDEO 的第一轮 RESULTS 已保存、媒体仍 PENDING；另设完整 VIDEO 加未完成 OTHER 的文件控制分区。
@@ -385,7 +408,7 @@ root 的实现将定位收敛到 `persistence/repositories/capture.py::_result_r
 - [x] `test_record_result_retry.py::test_result_budget_close_uses_original_activity_on_resend` 新增照片／延时摄影／录像乘同编号／独立活动六个公开组件分区。真实 `_listing_round` 保存原尝试和 retry 后，使用原 T0 与单个预算收场 key；断言真实活动错误、同 key 复用完成、改变 T0 拒绝、历史与原尝试守恒、一次 RESULTS。这六项属于新增首次覆盖，不能记录为六项既有红绿循环。
 - [x] 六项首次覆盖通过；`/tmp/camctl-goal-read-recording-capture-target.log` 为 138 passed、52.94s，覆盖录像文件门槛、预算、原身份重送、结论恢复、照片有限核实、原 RESULTS 与文件事实、媒体原申请及输入取得。直接仓储六项不等于全部拍摄消费者或恢复收场已经通过。
 - [x] 已保存 UNCONFIRMED 后的延时摄影本地业务收场补入独立活动反例：公开建立活动、正式原文件与未确认结论，fresh Owned 后零新查询，核原 run／尝试不变和动作错误里的实际 activity。`/tmp/camctl-goal-conclusion-activity-red.log` 为 1 failed、3 passed、2.27s，确认独立活动的业务错误编号不符；该消费者复用原活动错误构造后，`/tmp/camctl-goal-record-final-narrow.log` 为 26 passed、10.55s，包含四项同编号／独立活动的正式结论恢复、十七项录像核实及五项原媒体接线。
-- [ ] 后续独立审计同一 CLOSED 结论消费者的明确不满足错误及照片明确失败入口，分别核真实活动错误字段。它们不是本次预算定位或六项首次覆盖的完成证据，不为此扩展 v1／v2 或已批准故障模型。
+- [ ] 剩余四处启动／照片／CLOSED 明确失败错误按下述独立组件矩阵核实真实活动字段；它们不是预算定位或六项首次覆盖的完成证据。
 
 最窄验收命令由 root 独占执行：
 
@@ -395,6 +418,38 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 ```
 
 本段完成范围是两个预算仓储入口的原责任身份定位和已核验的直接预算错误；原文件与尝试保存、动作后续收场、媒体等待后的独立 RunFinish、普通延时摄影集合完成分别沿各自阶段验收。生产与测试由 root 维护，本次独立审查只追加计划。
+
+#### 剩余四个失败分支的实际活动身份
+
+本阶段只核对错误对象身份。规则来源是本节的动作／活动关联、[录像启动事实](../../architecture/camera-recording.md#录像启动的历史事实)、[延时摄影的发送与等待](../../architecture/camera-capture.md#命令返回含义与等待起点)、[产物完成依据](../../architecture/camera-capture.md#文件完成依据与产物检查)和公共 `protocol/errors/workflow-codes.json` 中的既有错误定义。原错误 code、reason、动作失败语义和实际调用结果均保持，目标是让 `details.activity_id` 指向实际 activity，而不是保存这些错误的 action。
+
+`test_capture_failure_activity_identity.py` 作为唯一新增组件测试文件，同时容纳此矩阵所需的公开前提。测试受理一个报告动作和一个拍摄动作，使拍摄 action 为 2、activity 为 1；随后公开观察窗口和开始动作，由真实 `_control_call` 与受 `ControlDriver` 约束的替身产生 START 返回。已保存 START 不再改写。第三、四分区经真实 `DriverResultListing` 消费原完整 `CallOutcome`，文件登记与业务终态使用真实仓储。
+
+| 生产分支与有效输入 | 原错误与失败语义 | 原事实与恢复断言 |
+| --- | --- | --- |
+| `_settle_start_without_sent_at` 的 FAILED 分支：延时 START 实际 FAILED、效果 UNKNOWN、无确认观察，活动没有 sent_at | 动作 FAILED，`capture_failed`（公共动作错误 13），reason 为 `device_failed`；保持实际通信错误和启动 run 的既有 FAILED。 | 错误 activity 为 1；原 START 尝试全文、时刻与历史保持；不执行第二次 START 或首次 RESULTS，不补发送时间，不释放未知占用。 |
+| 同 helper 的未确认分支：START 实际 SUCCEEDED，但效果 UNKNOWN、没有 timelapse_sent 观察且没有 sent_at | 动作 FAILED，`capture_result_unconfirmed`（12），reason 为 `start_unknown`；原开放 START 按既有规则 UNCONFIRMED，原成功调用不改为失败尝试。 | 错误 activity 为 1；保持实际成功响应、UNKNOWN 效果和退出信息；零新调用和尝试，原发送时间仍为空，占用保持。此输入不是伪造的 RUNNING 调用，也不替换原 Outcome。 |
+| `_photo_handler` 的 FAILED_KEEP_FILES 分支：照片实际 START FAILED、效果 UNKNOWN，随后 RESULTS 带真实完整 PHOTO | 动作 FAILED，`capture_failed`（13），reason 为 `device_failed`；真实完整且可靠归属的文件成为正式产物，已有通信失败不被文件成功覆盖。 | 错误 activity 为 1；第一次 RESULTS ticket 目标为 1，原 START 与 RESULTS 内容保持，文件归属 action 2；终态重入零第二次列举／启动和新历史。 |
+| `_finish_timelapse_conclusion` 的明确不满足分支：实际 START、正式等待完成、原 RESULTS 文件已保存，独立正式 ResultSetSave 为 UNSATISFIED | 动作 FAILED，`capture_failed`（13），reason 为 `no_outputs`；不改正式结论、原 run 或其尝试，仍保留符合规则的完整文件。 | fresh Owned／runtime 消费原已保存结论，零新设备查询；错误 activity 为 1、产物归属 action 2；原完整尝试、T0、结论及历史前缀保持。独立结论与原返回共同保存，不由 v1 推导集合结束。 |
+
+机械执行步骤如下，测试准备错误不作为行为红：
+
+- [x] 实际读取根规则、测试守卫、四个消费分支及公共错误定义，核清上述四个输入和机器错误值；测试通过改变错误中的活动目标，可以独立证伪编号混用。
+- [x] 新文件显式注册 acceptance、window、operation、capture、outputs 和 timelapse 守卫，沿公开事务建立前提。无发送时刻的两个用例在 START 已可靠保存后 snapshot 全部 `operation_attempts` 与历史，再真正关闭、重开 Owned 并核 metadata，最后调用真实延时 handler。
+- [x] 照片用例保存实际失败 START 后，提供一次真实完整 PHOTO 列举；核原尝试和历史前缀、真实文件完成／产物关系，再重开连接验证终态重入无副作用。延时用例经正式 ScheduleWait／WaitCompletedSave 建立等待完成，再以原 listing T0、原结果 key 保存 UNSATISFIED／known_failure 与尝试；新 runtime 仅本地收场。
+- [x] 新模块在部署解释器的独立 Python 进程实际导入成功，未调用 fixture 或测试 case；`git diff --check` 通过。此项只证明准备可导入，不是四项行为红或绿色。
+- [x] root 独占执行四项，核对错误 code／reason 已正确而实际活动编号仍为 2，或明确指出其他真实业务失败。若 fixture、导入或守卫错误先失败，先修前提并复跑；四个编号错误分别取得有效红后才授权生产。
+- [x] 授权后仅在四个错误构造的共同身份边界使用原 `_activity_id_of`，保持原错误结构、原因、原 Outcome、动作结果、文件保留和占用语义；不得新增错误字段、改写既有 START／RESULTS、重查设备或推断 v1 集合结束。执行者不自行改其他业务分支。
+- [x] root 独占复验新四项及既有预算身份／正式结论恢复，核原尝试与原历史不可变、动作错误和历史 owner 分别指 activity／action。静态审计相同错误对象的其余构造点；若发现其他可达身份混用，另列准确分区和有效反例，不扩大 v2 或故障模型。
+- [x] 独立 review 核对每个有效红、实际窄 diff 和绿色范围，root 更新证据并纳入当前统一提交范围。
+
+新增四项的准确门禁为：
+
+```sh
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_capture_failure_activity_identity.py -q
+```
+
+2026-10-09，Linux 容器、Python 3.11.16：首轮 `/tmp/camctl-goal-failure-activity-red.log` 的照片和 CLOSED 分区为有效身份红；两个 START 分区因测试未包含已登记 `format_version: 1` 而先失败，不计行为红。补齐完整输入断言后，root 的 `/tmp/camctl-goal-failure-activity-red-2.log` 为四项有效活动身份错误，4 failed、2.16s。生产四处错误仅取得实际 activity。root 的 `/tmp/camctl-goal-failure-activity-green.log` 为 25 passed、11.84s，包含新四项、录像轮次与原键重送十七项及正式结论恢复四项；原尝试、文件与历史保持验证通过。独立审查继续核相同身份不变量，不将此范围扩大为全部媒体或 READ 恢复完成。
 
 2026-10-09，Linux 容器、Python 3.11.16：录像八项文件反例在 `/tmp/camctl-goal-record-result-red.log` 均因原责任提前结束失败；首轮录像／照片组合 `/tmp/camctl-goal-record-result-green-1.log` 为 17 passed、8.30s。正常录像停止与受限默认装配 `/tmp/camctl-goal-recording-stop-green-1.log` 为 5 passed、13.96s。公开结论恢复的事实时刻沿原 listing T0，完成依据引用真实等待完成事件；同会话中断恢复保留原调用、文件申请及 key。
 

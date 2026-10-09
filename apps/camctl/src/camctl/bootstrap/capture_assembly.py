@@ -26,7 +26,7 @@ from camctl.capture.handlers import (
     CaptureRuntime,
     ListedResult,
     ObservedFile,
-    PendingCallResult, PendingFileObservation,
+    PendingCallResult, PendingFileObservation, PendingRecordingResults,
     ResultFilesPort,
     SessionRecordingState,
 )
@@ -366,6 +366,7 @@ def session_capture_assembly(
     on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None,
     file_executor: FileTaskExecutor | None = None,
     pending_call_results: dict[tuple[int, int], PendingCallResult] | None = None,
+    pending_recording_results: dict[int, PendingRecordingResults] | None = None,
     recording_anchors: dict[int, tuple[int, int]] | None = None,
     retry_wait_gate: RetryWaitGate | None = None,
     pending_media_results: dict | None = None,
@@ -400,6 +401,7 @@ def session_capture_assembly(
     listings: dict[int, tuple[tuple, tuple]] = {}
     timelapse_deadlines: dict[int, int] = {}
     pending_start_results = {} if pending_call_results is None else pending_call_results
+    recording_results = {} if pending_recording_results is None else pending_recording_results
     file_observations = {} if pending_file_observations is None else pending_file_observations
     continuing_read_tickets = {} if continuing_read_tickets is None else continuing_read_tickets
     pending_read_results = {} if pending_read_results is None else pending_read_results
@@ -435,6 +437,7 @@ def session_capture_assembly(
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
+            pending_recording_results=recording_results,
             pending_file_observations=file_observations,
             retry_gate=retry_gate,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
@@ -514,6 +517,7 @@ def session_capture_assembly(
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
+            pending_recording_results=recording_results,
             pending_file_observations=file_observations,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,

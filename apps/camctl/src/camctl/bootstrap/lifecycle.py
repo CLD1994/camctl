@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 if TYPE_CHECKING:
-    from camctl.capture.handlers import PendingCallResult, PendingFileObservation
+    from camctl.capture.handlers import PendingCallResult, PendingFileObservation, PendingRecordingResults
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.service import CommandMode
@@ -72,6 +72,8 @@ class RuntimeDeps:
     work_files: Any = None
     #: 原 await 拥有者的实际结果；普通、残留与受限工厂共用同一集合。
     capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
+    #: 录像原尝试可靠保存后形成的完整本地终态申请，三种工厂共用。
+    capture_recording_results: dict[int, PendingRecordingResults] = field(default_factory=dict)
     #: 文件发现及其派生事实具有独立生命周期，三种工厂共用。
     capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
@@ -88,7 +90,8 @@ class RuntimeDeps:
 
 
 def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
-    """只保存原完整 READ 输入；受限入口也不依赖媒体或当前设备端口。"""
+    """候选读取前保存原 READ 与录像终态申请，不取得当前设备资格。"""
+    from camctl.capture.handlers import resume_recording_results
     from camctl.capture.media_flow import resume_prepared_internal_reads
 
     resume_prepared_internal_reads(owned,
@@ -96,6 +99,9 @@ def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
         pending_read_business=deps.capture_read_business,
         pending_read_ends=deps.capture_read_ends,
         continuing_read_tickets=deps.capture_continuing_reads)
+    resume_recording_results(owned,
+        pending_recording_results=deps.capture_recording_results,
+        retry_gate=deps.capture_retry_gate)
 
 
 def _default_catalog(config: ConfigSnapshot):
@@ -405,6 +411,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             staging=staging,
             wait_config=execution_wait_config,
             pending_call_results=deps.capture_call_results,
+            pending_recording_results=deps.capture_recording_results,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -428,6 +435,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             staging=staging,
             wait_config=execution_wait_config,
             pending_call_results=deps.capture_call_results,
+            pending_recording_results=deps.capture_recording_results,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -556,6 +564,7 @@ async def execute_command(
                         staging=staging,
                         wait_config=execution_wait_config,
                         pending_call_results=deps.capture_call_results,
+                        pending_recording_results=deps.capture_recording_results,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
                         pending_read_results=deps.capture_read_results,
