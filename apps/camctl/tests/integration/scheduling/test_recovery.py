@@ -226,12 +226,18 @@ class TestReleaseOccupancy:
             owned, "SELECT occupancy_state FROM device_activities"
             " WHERE id = 1") == (1,)
 
-        # 归属固定后同一入口可以释放。
+        # 启动前基准固定仍不证明本次输出已经确定。
         connection.execute(
             "UPDATE device_activities SET baseline_state = 3 WHERE id = 1")
         connection.commit()
         again = _release(owned, 1)
-        assert again.value.outcome is ReleaseOutcome.RELEASED
+        assert again.value.outcome is ReleaseOutcome.REJECTED
+        assert again.value.reason == "scope_limited"
+        # 当前范围的集合结论已可靠确定后才解除范围限制。
+        connection.execute(
+            "UPDATE device_activities SET result_set_state=3,result_check_json='{}' WHERE id=1")
+        connection.commit()
+        assert _release(owned, 1).value.outcome is ReleaseOutcome.RELEASED
 
     async def test_already_released_is_idempotent(self, owned):
         connection = owned.connection

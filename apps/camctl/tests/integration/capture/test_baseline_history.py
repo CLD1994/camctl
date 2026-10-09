@@ -28,10 +28,10 @@ from ..scheduling.test_start_action import _SCHEDULED, _accept_plan, _start, own
 pytestmark = pytest.mark.asyncio
 
 
-async def _activity(owned, tmp_path, *, request_id="42"):
+async def _activity(owned, tmp_path, *, request_id="42", device_id="cam-1"):
     body = _plan_body(request_id=request_id)
-    body["actions"][0].update(type="camera_timelapse", params=_params("dji-action6", "camera_timelapse"))
-    await _accept_plan(owned, tmp_path, body, _catalog("dji-action6"))
+    body["actions"][0].update(type="camera_timelapse", device_id=device_id, params=_params("dji-action6", "camera_timelapse"))
+    await _accept_plan(owned, tmp_path, body, _catalog("dji-action6", device_id=device_id))
     action_id = owned.connection.execute("SELECT MAX(id) FROM actions").fetchone()[0]
     result = _start(owned, action_id, now=_SCHEDULED)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
@@ -131,11 +131,11 @@ async def test_wrong_fixed_counts_do_not_fix_partial_baseline(owned, tmp_path):
 async def test_recollection_excludes_old_range_and_interleaved_activity(owned, tmp_path):
     activity_id = await _activity(owned, tmp_path)
     old = _append(owned, activity_id, _entries("old"))
-    other = await _activity(owned, tmp_path, request_id="43")
-    other_saved = _append(owned, other, _entries("other"))
+    other = await _activity(owned, tmp_path, request_id="43", device_id="cam-2")
+    other_saved = _append(owned, other, _entries("other", device="cam-2"))
     first = _append(owned, activity_id, _entries("a"))
     assert all(result.kind is DbOutcomeKind.COMPLETED for result in (old, other_saved, first))
-    assert _append(owned, other, _entries("other2"), chunk_no=2).kind is DbOutcomeKind.COMPLETED
+    assert _append(owned, other, _entries("other2", device="cam-2"), chunk_no=2).kind is DbOutcomeKind.COMPLETED
     last = _append(owned, activity_id, _entries("b"), chunk_no=2)
     fixed = _fix(owned, activity_id, chunks=2, entries=2)
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error

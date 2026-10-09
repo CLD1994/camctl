@@ -29,7 +29,7 @@ class DeviceFacts:
     device_id: str
     #: 已到时间的拍摄动作（未取消、执行中）。
     due_captures: tuple[int, ...]
-    #: 仍有占用中拍摄活动的动作（非终态）。
+    #: 未结束且仍持占用的拍摄活动，包括所属动作已有终态的活动。
     held_captures: tuple[int, ...]
     #: 未持有读取机会且所属动作合格的读取工作（交付拷贝）。
     grantable_reads: tuple[int, ...]
@@ -111,6 +111,7 @@ def plan_device_work(
         " JOIN device_activities d ON d.action_id = a.id"
         " WHERE a.status = 2 AND a.cancel_requested = 0"
         " AND a.type IN (1, 2, 3) AND a.scheduled_at <= ?"
+        " AND d.activity_state <> 3"
         " AND d.occupancy_state = ?"
         " ORDER BY a.device_id, a.plan_id, a.input_index", (now_us, _OCCUPIED),
     )) as cursor:
@@ -120,7 +121,7 @@ def plan_device_work(
     with closing(connection.execute(
         "SELECT a.device_id, a.id FROM actions a"
         " JOIN device_activities d ON d.action_id = a.id"
-        " WHERE a.status = 2 AND d.activity_state <> 3"
+        " WHERE d.activity_state <> 3"
         " AND d.occupancy_state = ?"
         " ORDER BY a.device_id, a.id", (_OCCUPIED,),
     )) as cursor:

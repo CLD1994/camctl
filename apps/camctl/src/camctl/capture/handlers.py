@@ -111,6 +111,7 @@ from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
+from camctl.devices.directory import DirectoryReader
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.operations.attempts import (
     AttemptConfig,
@@ -153,7 +154,7 @@ from camctl.persistence.repositories.capture import (
 )
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import (
-    ExpireActionRequest, GrantRequest, SchedulingRepository,
+    ExpireActionRequest, ExpireOutcome, GrantRequest, SchedulingRepository,
 )
 from camctl.persistence.repositories.timelapse import ScheduleWait, TimelapseRepository
 from camctl.persistence.transaction import row_facts
@@ -294,7 +295,7 @@ class StopCloseRequest:
 
 CaptureCompletionRequest = (
     FinishCapture | FinishRecordingResults | FinishCanceledCapture | FinishBindingFailure
-    | StartCloseRequest | StopCloseRequest
+    | StartCloseRequest | StopCloseRequest | ExpireActionRequest
 )
 
 
@@ -312,7 +313,7 @@ class PendingCaptureCompletion:
             return self.request.action_finish.action_id
         if isinstance(self.request, FinishRecordingResults):
             return self.request.capture.action_id
-        if isinstance(self.request, (FinishCapture, FinishCanceledCapture, FinishBindingFailure, StopCloseRequest)):
+        if isinstance(self.request, (FinishCapture, FinishCanceledCapture, FinishBindingFailure, StopCloseRequest, ExpireActionRequest)):
             return self.request.action_id
         raise ConsistencyError("原拍摄完整申请类型无效")
 
@@ -353,9 +354,11 @@ def resume_result_check_closes(
         del pending_result_closes[identity]
 
 
-def _write_capture_completion(owned, pending: PendingCaptureCompletion, repository: CaptureRepository):
+def _write_capture_completion(owned, pending: PendingCaptureCompletion, repository: CaptureRepository, scheduling=None):
     """按申请类型保存原成员；STOP 与动作分别沿各自原键保存。"""
     request = pending.request
+    if isinstance(request, ExpireActionRequest):
+        return (SchedulingRepository() if scheduling is None else scheduling).expire_action(request, pending.key, owned)
     if isinstance(request, StartCloseRequest):
         return repository.close_start(request.finish, request.action_finish, pending.key, owned)
     if isinstance(request, StopCloseRequest):
@@ -378,6 +381,7 @@ def resume_capture_completions(
     owned, *, pending_capture_completions: dict[int, PendingCaptureCompletion],
     action_id: int | None = None, capture: CaptureRepository | None = None,
     retry_gate: RetryWaitGate | None = None,
+    scheduling: SchedulingRepository | None = None,
 ) -> None:
     """核实已持有的完整拍摄申请，不取得时钟或设备端口。"""
     repository = CaptureRepository() if capture is None else capture
@@ -391,10 +395,15 @@ def resume_capture_completions(
         stop_close = isinstance(pending.request, StopCloseRequest)
         stop_only = stop_close and pending.request.action_finish is None
         if pending.input_reads is None:
-            receipt = _write_capture_completion(owned, pending, repository)
+            receipt = _write_capture_completion(owned, pending, repository, scheduling)
             if receipt.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(
                     f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}")
+            if isinstance(pending.request, ExpireActionRequest):
+                if receipt.value is None or receipt.value.outcome is not ExpireOutcome.EXPIRED:
+                    raise ConsistencyError("原准备后过期申请未取得可靠过期结果")
+                del pending_capture_completions[identity]
+                continue
             if not start_close and not stop_only:
                 if receipt.value is None:
                     raise ConsistencyError("原拍摄收场缺少可靠处理结果")
@@ -739,6 +748,24 @@ class CaptureRuntime(_FileObservationSaves):
     file_executor: Any = None
     #: 原文件发现写入前持有，普通、残留与受限工厂共用。
     pending_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
+    #: 目录准备与原保存申请跨推进轮次保留，独立于驱动资格。
+    pending_baselines: dict = field(default_factory=dict)
+    baseline_directory: DirectoryReader | None = None
+
+    @property
+    def baseline_timeout_s(self):
+        return self.check_config.timeout_s
+
+    async def prepare_baseline(self, action_id):
+        """通过共同准备边界取得原基准，完成后仍由授予事务核验。"""
+        from camctl.capture.baseline import prepare_baseline
+        return await prepare_baseline(action_id, _activity_id_of(self, action_id), runtime=self)
+
+    def resume_baselines(self, action_id):
+        from camctl.capture.baseline import PreparationPhase, resume_baseline_settlement
+        result = resume_baseline_settlement(action_id, runtime=self)
+        if result is not None and result.phase is PreparationPhase.PENDING:
+            raise ConsistencyError(f"原基准保存未可靠完成: {result.database_error}")
 
     def record_recovery_diagnostic(self, diagnostic: RecoveryDiagnostic) -> None:
         if diagnostic == self.last_recovery_diagnostic:
@@ -763,7 +790,8 @@ class CaptureRuntime(_FileObservationSaves):
         """先核原完整收场申请，动作已有终态也不跳过原事务。"""
         resume_capture_completions(self.owned,
             pending_capture_completions=self.pending_capture_completions,
-            action_id=action_id, capture=self.capture, retry_gate=self.retry_gate)
+            action_id=action_id, capture=self.capture, retry_gate=self.retry_gate,
+            scheduling=self.scheduling)
         resume_canceled_recording_results(self.owned,
             pending_capture_completions=self.pending_capture_completions,
             action_id=action_id, capture=self.capture, retry_gate=self.retry_gate)
@@ -1173,6 +1201,9 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
 
         if not await pass_residual_gate(runtime, action):
             return HandlerOutcome("not_granted")
+    prepared = await _baseline_before_control(runtime, action)
+    if prepared is not None:
+        return prepared
     ticket, reason = runtime.grant(action)
     if ticket is None:
         return HandlerOutcome("not_granted", reason)
@@ -1180,6 +1211,7 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         operation=operation,
         binding=_binding(action),
         params=action["effective_params_json"],
+        ticket=ticket, timeout_s=Decimal("30"),
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
     # 返回时取得事实时间；结果事务和日志耗时不能改变设备返回锚点。
@@ -1341,6 +1373,40 @@ def _prepare_held_start_result(runtime, pending):
     raise ConsistencyError("原调用结果缺少合法的启动准备责任")
 
 
+async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOutcome | None:
+    """两个拍摄入口共用准备；准备结束后重新检查取消与原窗口。"""
+    from camctl.capture.baseline import PreparationPhase
+    from camctl.scheduling.rules import WindowPhase, window_phase
+
+    result = await runtime.prepare_baseline(action["id"])
+    if result.phase is PreparationPhase.PENDING:
+        if result.database_error is not None:
+            raise ConsistencyError(f"基准保存未可靠完成: {result.database_error}")
+        return HandlerOutcome("not_granted", "baseline_pending")
+    current = runtime.action(action["id"])
+    if current["status"] in _ACTION_TERMINAL:
+        runtime.resume_baselines(action["id"])
+        return HandlerOutcome("not_granted", "terminal")
+    if current["cancel_requested"]:
+        _finish_canceled_capture(runtime, action["id"], unstarted=True)
+        return HandlerOutcome("not_granted", "canceled")
+    if result.phase is PreparationPhase.FAILED:
+        activity_id = _activity_id_of(runtime, action["id"])
+        runtime.save_capture_completion(FinishCapture(action["id"], (),
+            OutputCatalogFacts(action["id"], True), runtime.wall_us(),
+            RecordingFailure("capture_failed", {"activity_id": str(activity_id),
+                                                 "reason": "baseline_read_failed"}),
+            baseline_error=result.error))
+        runtime.pending_baselines.pop(action["id"], None)
+        return HandlerOutcome("call_failed", "baseline_read_failed")
+    now = runtime.wall_us()
+    if window_phase(runtime.window_of(current), now) is WindowPhase.AFTER_WINDOW:
+        runtime.save_capture_completion(ExpireActionRequest(action["id"], now, now, preparation_resolved=True))
+        runtime.resume_baselines(action["id"])
+        return HandlerOutcome("not_granted", "window_ended")
+    return None
+
+
 async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
     """将真实控制端口适配到一次启动骨架，事实时间先于保存。"""
     if runtime.last_attempt(f"start/{action['id']}") is None:
@@ -1348,6 +1414,10 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
 
         if not await pass_residual_gate(runtime, action):
             return HandlerOutcome("not_granted")
+
+    prepared = await _baseline_before_control(runtime, action)
+    if prepared is not None:
+        return prepared
 
     class Grants:
         def grant(self, request):
@@ -1749,9 +1819,15 @@ async def _stop_call(runtime: CaptureRuntime, action,
 def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
                              unstarted: bool = False) -> None:
     """取消终态：放弃内容，不登记正式产物。"""
+    pending = runtime.pending_baselines.get(action_id)
+    preparation_resolved = (unstarted and (pending is None
+                            or (not pending.in_call and pending.saves.pending is None and pending.error is None)))
     runtime.save_capture_completion(
         FinishCanceledCapture(
-            action_id=action_id, occurred_at=runtime.wall_us(), unstarted=unstarted))
+            action_id=action_id, occurred_at=runtime.wall_us(), unstarted=unstarted,
+            preparation_resolved=preparation_resolved))
+    if unstarted:
+        runtime.resume_baselines(action_id)
 
 
 def _settle_unstarted_attempt(runtime: CaptureRuntime, action, attempt) -> bool:
@@ -2062,6 +2138,7 @@ def _handle_binding_failure(
                 f"拍摄绑定失败的完整事务未完成（{receipt.kind.value}）: {receipt.error}")
     else:
         runtime.save_capture_completion(request)
+    runtime.resume_baselines(action["id"])
     runtime.timelapse_deadlines.pop(action["id"], None)
     return True
 
@@ -2371,6 +2448,7 @@ async def _resume_internal_read_results(runtime):
 async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_result_check_closes(action_id)
     context.resume_capture_completions(action_id)
+    context.resume_baselines(action_id)
     context.resume_file_observations(action_id)
     await _resume_internal_read_results(context)
     context.resume_start_results(action_id)
@@ -2912,6 +2990,7 @@ async def _advance_recording_outcome(
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_capture_completions(action_id)
+    context.resume_baselines(action_id)
     context.resume_result_check_closes(action_id)
     context.resume_file_observations(action_id)
     action = context.action(action_id)

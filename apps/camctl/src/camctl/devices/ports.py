@@ -53,6 +53,8 @@ class DriverDeclaration:
     capture_read_parallel_supported: bool = False
     #: 逐操作声明普通前台命令的恢复假设；缺省不授权恢复。
     adb_foreground_recovery_operations: frozenset[str] = frozenset()
+    #: 启动前完整目录准备，独立于任务结果列举能力。
+    directory_supported: bool = False
 
     def __post_init__(self) -> None:
         operations = self.adb_foreground_recovery_operations

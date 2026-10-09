@@ -97,6 +97,10 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 
 `evidence` 只保存不能由行变更完整表达的依据。公共成员为 `attempt_id`（正整数，实际操作结果的尝试身份）、`observation`（驱动或工具返回的结构化保证与数据）和 `input_key`（本次输入处理的 32 位十六进制身份）；各分支允许的公共成员及专属成员统一在 [事件转换规则的 JSON 文件](event-transitions.json)登记。未登记的成员不能写入。缺少必要证据时不能写入对应事实；没有额外依据时使用 `{}`。依据仅引用某个对象，不使该对象自动成为变化对象。
 
+可靠未派发的基准准备已经解除时，`ACTION_FINISHED.FAIL/EXPIRE/CANCEL` 与适用的 `DEVICE_OBSERVED.RELEASE` 可以保存 `preparation_resolved: true`。拥有者必须先确认实际目录调用完成收场，且原页保存申请已经可靠解决；尚未调用目录时，须确认不存在在途准备调用和原保存申请。该事实允许取消、过期或目录读取失败后的 `COLLECTING` 活动释放占用，不说明设备已经结束，不补造空基准或结果集合。省略成员表示没有这项额外依据；不保存 `false`。原键重送核对成员有无及取值，不把当前基准状态反推为原输入。
+
+准备收场时已有动作终态，实际目录错误通过 `DEVICE_OBSERVED.OBSERVE` 保存到原活动的 `last_error_json`，与适用释放共同提交。释放分支携带错误时，登记 `preparation_error: {code, stage, details}`，并须同时携带 `preparation_resolved: true`。该成员保存原完整错误输入，使原键核实不依赖当前活动错误；原错误已经相同则省略重复观察，仍保留释放输入。省略成员表示原释放申请没有错误输入，不等同于事后省略错误。
+
 非电机目标的 `CANCEL_CHANGED.APPLY` 使用专属成员 `cancel_request` 保存原取消申请，结构恰好为 `{"item_id": 正整数, "mode": 字符串, "occurred_at": UTC 微秒整数}`。`mode` 为 `pre_start`、`with_stop`、`terminal` 或 `already`；成员身份、模式及时间须与本事件实际处理的目标和分支一致。原操作键重送逐字段核对这项输入，不通过后续投影或行变化反推原申请。电机目标沿用该分支已登记的 `motor_request` 和适用的 `motor_permit`，不同时保存两份申请身份。该证据不改变动作、同步或成员状态转换，也不进入对外报告。
 
 `INTERMEDIATE_FILE_CHANGED.CLEANUP_RESULT` 必须使用专属成员 `cleanup_request` 保存原清理结果申请中的游标输入，结构恰好为 `{"advance_cursor": 布尔值}`。原文件身份、结果、错误和时刻由同一结果事件表达。自动历史清理保存 `true`，单文件首次清理和显式主机清理保存 `false`。原游标已经指向目标文件时不产生重复位置变化，结果事件仍保存原布尔输入；原操作键重送逐项核对该输入和完整事件组，不能把 `true` 与 `false` 相互替代。该输入不改变文件清理或游标的状态转换，也不进入对外报告。

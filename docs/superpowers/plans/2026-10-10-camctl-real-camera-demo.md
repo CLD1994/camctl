@@ -137,12 +137,12 @@ T3 软件验证（2026-10-10，容器，Python 3.11.16）：目录解释单元 2
 
 **接口：** 消费 T1 固定任务事实、T2 基准仓储、T3 目录端口。建议 `async prepare_baseline(action_id: int, activity_id: int, *, runtime: CaptureRuntime) -> BaselinePreparation`，结果枚举区分 READY、FAILED、PENDING；FAILED 含实际读取错误，PENDING 含原保存责任。保留 `start_action(request: StartActionRequest, key, owned)` 和 `grant_start(request: GrantRequest, key, owned)` 的现有返回契约，新增共同守卫，不让具体处理器绕过。
 
-- [ ] **先写失败测试：** `test_baseline_read_failure_consumes_no_start` 在两种拍摄入口断言动作失败、原错误保留、START 次数为 0、启动命令未调用。`test_fixed_baseline_and_intent_precede_dispatch` 断言最后可靠固定和原意图都成功后才派发；这是副作用契约，可以断言顺序。
-- [ ] **运行红灯：** `P apps/camctl/tests/integration/capture/test_baseline_start.py -q`，确认失败来自缺失准备或事务守卫。
-- [ ] **实现资格到派发的交接：** 按现有排序检查到时、窗口、取消及设备/输出范围资格；只为取得资格的候选建立准备活动，避免所有等待候选先占用导致互锁。活动可靠建立后才追加基准。`BASELINE_COMPARISON` 初始为 `COLLECTING`，独立范围保持原合法声明；grant 的最后事务检查可靠 FIXED 及未变的活动、范围和占用，再保存意图/次数。准备后重查窗口与取消，不延长窗口。
-- [ ] **实现失败与恢复：** 中间页读取明确失败同样结束动作；本地调用完成收场和准备责任解决后按可靠未派发释放，不伪造 `ENDED`。保存未知先恢复原申请；已有固定基准直接复用；已派发/可能派发不得重收或再次启动。覆盖数据库失败、准备后取消/窗口过期、基准固定后重启、派发后关联保存前重启。
-- [ ] **统一占用消费者：** 审计 `current_start_holder`、候选授予、结果/文件调度与全部释放入口；终态和 `ENDED` 不跳过 `HELD` 活动。释放还须检查准备、归属及集合限制；可靠未派发不用等待不存在的产物。测试同设备冲突阻塞、不同设备推进、兼容读取继续及非兼容读取让路，不新增全局设备串行锁。
-- [ ] **运行绿灯并提交：** 顺序运行 capture、scheduling、outputs、bootstrap 集成目录。两种入口均不能绕过最后事务守卫，未完成调用责任不会随占用释放消失。提交本项，形成“基准后启动”门禁。
+- [x] **先写失败测试：** `test_baseline_read_failure_consumes_no_start` 在两种拍摄入口断言动作失败、原错误保留、START 次数为 0、启动命令未调用。`test_fixed_baseline_and_intent_precede_dispatch` 断言最后可靠固定和原意图都成功后才派发；这是副作用契约，可以断言顺序。
+- [x] **运行红灯：** `P apps/camctl/tests/integration/capture/test_baseline_start.py -q`，确认失败来自缺失准备或事务守卫。
+- [x] **实现资格到派发的交接：** 按现有排序检查到时、窗口、取消及设备/输出范围资格；只为取得资格的候选建立准备活动，避免所有等待候选先占用导致互锁。活动可靠建立后才追加基准。`BASELINE_COMPARISON` 初始为 `COLLECTING`，独立范围保持原合法声明；grant 的最后事务检查可靠 FIXED 及未变的活动、范围和占用，再保存意图/次数。准备后重查窗口与取消，不延长窗口。
+- [x] **实现失败与恢复：** 中间页读取明确失败同样结束动作；本地调用完成收场和准备责任解决后按可靠未派发释放，不伪造 `ENDED`。保存未知先恢复原申请；已有固定基准直接复用；已派发/可能派发不得重收或再次启动。覆盖数据库失败、准备后取消/窗口过期、基准固定后重启、派发后关联保存前重启。
+- [x] **统一占用消费者：** 审计 `current_start_holder`、候选授予、结果/文件调度与全部释放入口；终态和 `ENDED` 不跳过 `HELD` 活动。释放还须检查准备、归属及集合限制；可靠未派发不用等待不存在的产物。测试同设备冲突阻塞、不同设备推进、兼容读取继续及非兼容读取让路，不新增全局设备串行锁。
+- [x] **运行绿灯并提交：** 顺序运行 capture、scheduling、outputs、bootstrap 集成目录。两种入口均不能绕过最后事务守卫，未完成调用责任不会随占用释放消失。提交本项，形成“基准后启动”门禁。
 
 ```python
 assert failed_action["status"] == enum_for("actions.status").FAILED
@@ -150,6 +150,12 @@ assert start_attempt_count == 0
 assert start_command_calls == []
 assert saved_read_error == original_read_error
 ```
+
+### T4 基准读取失败的公开原因
+
+基准读取失败采用 `capture_failed.details.reason=baseline_read_failed`，stage 为 `execution`，活动身份及完整内部错误遵守[文件归属规格](../../architecture/camera-capture.md#本次任务的文件归属)和[公共错误登记](../../../protocol/errors/workflow-codes.json)。两种拍摄入口均须覆盖首批、中间批失败、实际活动身份、原错误保留及原申请提交未知恢复。
+
+T4 软件验证（2026-10-10，容器，Python 3.11.16）：两种拍摄入口覆盖基准读取失败零 START、固定及意图先于派发、原页和原终态申请提交未知、准备取消及过期、终态后实际错误保留、范围资格和跨设备推进。单元目录 2117 项、scheduling 集成 133 项、基准专项 56 项及文件调度专项 5 项通过。完整 capture、outputs、bootstrap 目录分别为 687 项通过／11 项失败、1833 项通过／5 项失败／2 项跳过、878 项通过／6 项失败／1 项跳过；失败均已在修改前源码逐项复现。延时和结果正常收尾由 T5/T6 继续完成，其余应急与读取预算问题留在原责任计划，不将这些目录声明为全绿。准备释放证据及基准错误公开原因已正式登记；真实相机仍未激活。
 
 ## T5 分页结果、完成依据与必要检查
 

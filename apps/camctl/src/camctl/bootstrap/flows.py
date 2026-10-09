@@ -126,68 +126,64 @@ def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_res
                                             resume_read_results)
             now = context.clock.utc_micros()
             scheduling = SchedulingRepository()
-            for (action_id, device_id, scheduled_at,
-                 max_delay_ms) in _due_pending_actions(owned.connection, now):
-                if now > scheduled_at + max_delay_ms * 1000:
-                    # 窗口外仍未派发：按持久化观察区分错过与耗尽。
-                    outcome = scheduling.expire_action(
-                        ExpireActionRequest(
-                            action_id=action_id,
-                            trusted_wall_now=now,
-                            occurred_at=now,
-                        ),
-                        new_operation_key(),
-                        owned,
-                    )
-                    if outcome.kind is not DbOutcomeKind.COMPLETED:
-                        raise StateDbFailure(
-                            f"动作过期事务未完成（{outcome.kind.value}）:"
-                            f" {outcome.error}")
-                    continue
-                # 窗口内检查到动作：先保存首次观察，再判断开始资格。
-                observation = scheduling.observe_window(
-                    ObserveWindowRequest(
-                        action_id=action_id,
-                        trusted_wall_now=now,
-                        occurred_at=now,
-                    ),
-                    new_operation_key(),
-                    owned,
-                )
-                if observation.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(
-                        f"窗口观察事务未完成（{observation.kind.value}）:"
-                        f" {observation.error}")
-                # 开始前的残留门：设备上有已结束动作留下的执行中活动
-                # 时，按需查询并推进残留收场；未解除前动作保持待执行。
-                runtime = capture_factory(owned, device_id)
-                if runtime is not None:
-                    from camctl.capture.residual import pass_residual_gate
-                    if not await pass_residual_gate(
-                            runtime, runtime.action(action_id)):
-                        continue
-                outcome = scheduling.start_action(
-                    StartActionRequest(
-                        action_id=action_id,
-                        trusted_wall_now=now,
-                        occurred_at=now,
-                    ),
-                    new_operation_key(),
-                    owned,
-                )
-                if outcome.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(
-                        f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
-            descriptors: Iterable = ready_capture_actions(owned.connection, now)
-            for device_id, group in _ready_device_groups(
-                    owned.connection, descriptors):
-                runtime = capture_factory(owned, device_id)
-                if runtime is None:
-                    continue
-                outcomes = await dispatch_ready(runtime, group)
-                for action_id, outcome in outcomes:
-                    if isinstance(outcome, BaseException):
-                        raise outcome
+            pending: dict[str, list] = {}
+            for action_id, device_id, scheduled_at, max_delay_ms in _due_pending_actions(owned.connection, now):
+                pending.setdefault(device_id, []).append((action_id, scheduled_at, max_delay_ms))
+            device_ids = dict.fromkeys(pending)
+            for device_id, _ in _ready_device_groups(owned.connection, ready_capture_actions(owned.connection, now)):
+                device_ids[device_id] = None
+            first_error: BaseException | None = None
+
+            async def advance_device(device_id):
+                nonlocal first_error
+                if first_error is not None:
+                    return
+                try:
+                    runtime = capture_factory(owned, device_id)
+                    for action_id, scheduled_at, max_delay_ms in pending.get(device_id, ()):
+                        if first_error is not None:
+                            return
+                        current = context.clock.utc_micros()
+                        if current > scheduled_at + max_delay_ms * 1000:
+                            outcome = scheduling.expire_action(
+                                ExpireActionRequest(action_id, current, current), new_operation_key(), owned)
+                            if outcome.kind is not DbOutcomeKind.COMPLETED:
+                                raise StateDbFailure(f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
+                            continue
+                        observation = scheduling.observe_window(
+                            ObserveWindowRequest(action_id, current, current), new_operation_key(), owned)
+                        if observation.kind is not DbOutcomeKind.COMPLETED:
+                            raise StateDbFailure(f"窗口观察事务未完成（{observation.kind.value}）: {observation.error}")
+                        if runtime is not None:
+                            from camctl.capture.residual import pass_residual_gate
+                            if not await pass_residual_gate(runtime, runtime.action(action_id)):
+                                continue
+                        # 执行前查询可能等待；建立准备活动时重新使用实际窗口时刻。
+                        current = context.clock.utc_micros()
+                        outcome = scheduling.start_action(
+                            StartActionRequest(action_id, current, current), new_operation_key(), owned)
+                        if outcome.kind is not DbOutcomeKind.COMPLETED:
+                            raise StateDbFailure(f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
+                    if runtime is None or first_error is not None:
+                        return
+                    group = ready_capture_actions(owned.connection, context.clock.utc_micros(), device_id=device_id)
+                    for action_id, outcome in await dispatch_ready(runtime, group):
+                        if isinstance(outcome, BaseException):
+                            raise outcome
+                except BaseException as error:
+                    if first_error is None and not isinstance(error, asyncio.CancelledError):
+                        first_error = error
+                    raise
+
+            try:
+                # 每设备最多一个推进任务；异常退出等待所有在途协作者实际收场。
+                async with asyncio.TaskGroup() as tasks:
+                    for device_id in device_ids:
+                        tasks.create_task(advance_device(device_id))
+            except BaseExceptionGroup as group:
+                if first_error is not None:
+                    raise first_error from group
+                raise
         except (sqlite3.Error, ConsistencyError) as error:
             raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
         finally:

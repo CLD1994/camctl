@@ -1,6 +1,7 @@
 """拍摄分发在执行前提失效时停止同一批动作。"""
 
 import sqlite3
+import asyncio
 from unittest.mock import create_autospec
 
 import pytest
@@ -17,6 +18,7 @@ from camctl.scheduling.service import ActionDescriptor
     sqlite3.OperationalError("状态查询不可用"),
     ConsistencyError("原责任事实不一致"),
     DeviceConfigurationError("本次设备声明不可可靠解释"),
+    asyncio.CancelledError(),
 ])
 async def test_dispatch_prerequisite_failure_stops_remaining_actions(monkeypatch, failure):
     runtime = create_autospec(CaptureRuntime, instance=True, spec_set=True)

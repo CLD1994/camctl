@@ -215,3 +215,20 @@ def test_parallel_declaration_keeps_reads_alongside_captures(pipeline):
     serial = plan_device_work(owned.connection, _NOW)
     by_serial = {work.device_id: work for work in serial}
     assert by_serial["cam-1"].grant_reads == ()
+
+
+def test_ended_activity_with_held_scope_allows_completed_source_read(pipeline):
+    pipeline.connection.execute(
+        "UPDATE device_activities SET activity_state=3,dispatch_state=3 WHERE action_id=11")
+    pipeline.connection.commit()
+    work = {item.device_id: item for item in plan_device_work(pipeline.connection, _NOW)}["cam-1"]
+    assert work.dispatch_captures == () and work.yield_reads == ()
+    assert work.resume_reads == (40,)
+
+
+def test_terminal_action_with_unresolved_activity_still_blocks_incompatible_read(pipeline):
+    pipeline.connection.execute("UPDATE actions SET status=6,cancel_requested=1 WHERE id=11")
+    pipeline.connection.execute("UPDATE device_activities SET dispatch_state=2 WHERE action_id=11")
+    pipeline.connection.commit()
+    work = {item.device_id: item for item in plan_device_work(pipeline.connection, _NOW)}["cam-1"]
+    assert work.grant_reads == () and work.resume_reads == ()

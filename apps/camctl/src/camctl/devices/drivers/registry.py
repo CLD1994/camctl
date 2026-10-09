@@ -73,7 +73,7 @@ class DriverRegistry:
         return self._entries.get(driver_id)
 
 
-#: 操作名到 DriverDeclaration 声明成员的映射；与 ports.py 七类端口一致。
+#: 普通操作及目录准备端口对应的声明；目录准备不建立普通尝试。
 _DECLARATION_MEMBERS: Mapping[str, str] = {
     "control": "control_supported",
     "stop": "stop_supported",
@@ -82,6 +82,7 @@ _DECLARATION_MEMBERS: Mapping[str, str] = {
     "read": "read_supported",
     "digest": "digest_supported",
     "delete": "delete_supported",
+    "directory": "directory_supported",
 }
 
 

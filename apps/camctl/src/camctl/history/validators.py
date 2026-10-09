@@ -448,6 +448,15 @@ def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
     elif member == "entries":
         if not isinstance(value, list):
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
+    elif member == "preparation_resolved":
+        if value is not True:
+            _fail(f"事件 {event_id} 的 evidence.preparation_resolved 只能为实际可靠的 true")
+    elif member == "preparation_error":
+        if (not isinstance(value, Mapping) or set(value) != {"code", "stage", "details"}
+                or not isinstance(value["code"], str) or not value["code"]
+                or not isinstance(value["stage"], str) or not value["stage"]
+                or not isinstance(value["details"], Mapping)):
+            _fail(f"事件 {event_id} 的 evidence.preparation_error 必须是完整实际错误")
 
 
 def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[str, Any]]:

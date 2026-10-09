@@ -23,6 +23,7 @@ from camctl.contracts.json_values import is_json_integer
 from camctl.contracts.enums import enum_for
 from camctl.contracts.workflow_errors import validate_public_error
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
+from camctl.operations.models import ErrorValue
 
 __all__ = [
     "ActivityCapabilities",
@@ -282,16 +283,23 @@ class ActivityObservationSave:
 class ActivityReleaseSave:
     """一次占用释放申请的输入（DEVICE_OBSERVED.RELEASE）。
 
-    释放判定由事务按统一占用规则完成；命令只携带活动身份与事实
-    时刻。
+    释放判定由事务按统一占用规则完成。preparation_resolved 表达
+    原准备调用及保存责任已经实际解除，不替代可靠未派发依据。
     """
 
     action_id: int
     occurred_at: int
+    preparation_resolved: bool = False
+    preparation_error: ErrorValue | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
         UtcMicros(self.occurred_at)
+        if type(self.preparation_resolved) is not bool:
+            raise TypeError("准备收场依据必须是布尔值")
+        if self.preparation_error is not None and (
+                not self.preparation_resolved or not isinstance(self.preparation_error, ErrorValue)):
+            raise ValueError("实际准备错误只能随可靠准备收场保存")
 
 
 @dataclass(frozen=True)

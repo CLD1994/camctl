@@ -51,6 +51,7 @@ from camctl.operations.models import (
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
+from camctl.scheduling.resources import baseline_start_reason, capture_scope_blocked
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
@@ -453,6 +454,11 @@ class BeginAttemptCommand:
             intent.query_purpose,
             self._state,
         )
+        if intent.kind is OperationKind.START:
+            activity = self._state["device_activities"][intent.target.activity_id]
+            if capture_scope_blocked(connection, action["device_id"], action["id"],
+                                     activity["ownership_mode"], activity["output_scope_json"]):
+                return self._rejected("device_busy")
 
         found = _find_responsibility(connection, intent)
         run_facts = (
@@ -1500,6 +1506,15 @@ def _attempt_intent_guard(event, context) -> None:
     elif attempt_no != 1:
         _fail("首次建立的流程必须从第 1 次尝试开始")
     kind = run_after.get("kind")
+    if kind == int(_RUN_KIND.START):
+        activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
+        action = _guard_facts(context, "actions", run_after.get("action_id"))
+        try:
+            preparation_reason = baseline_start_reason(activity, action)
+        except ConsistencyError as error:
+            raise EventValidationError(str(error)) from error
+        if preparation_reason is not None:
+            _fail(f"启动意图的基准准备未完成: {preparation_reason}")
     copy_round = attempts[0].after.values.get("copy_round")
     if kind == int(_RUN_KIND.READ_FILE):
         if (

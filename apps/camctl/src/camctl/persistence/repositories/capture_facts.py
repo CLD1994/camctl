@@ -126,10 +126,12 @@ def release_basis_holds(facts: Mapping[str, Any]) -> bool:
             or facts.get("completion_basis") == 3)
 
 
-def occupancy_release_allowed(facts: Mapping[str, Any]) -> bool:
+def occupancy_release_allowed(facts: Mapping[str, Any], *, unstarted: bool = False,
+                              preparation_resolved: bool = False) -> bool:
     """释放依据与输出范围限制都满足，且占用尚未释放。"""
     return (facts["occupancy_state"] == 1 and release_basis_holds(facts)
-            and (facts["ownership_mode"] != 2 or facts["baseline_state"] == 3))
+            and (facts["ownership_mode"] != 2 or (unstarted and preparation_resolved)
+                 or (facts["baseline_state"] == 3 and facts["result_set_state"] == 3)))
 
 
 def start_finish_event(run: Mapping[str, Any] | None, status: int, occurred_at: int):
@@ -146,7 +148,8 @@ def start_finish_event(run: Mapping[str, Any] | None, status: int, occurred_at: 
 
 
 def unstarted_events(facts: StartFacts, occurred_at: int, *,
-                     run_status: int | None, release: bool = True):
+                     run_status: int | None, release: bool = True,
+                     preparation_resolved: bool = False):
     """把已证明无启动效果的派发结论、责任结束和适用释放组合成事件。"""
     if not facts.not_started:
         raise ConsistencyError("本地终止缺少可靠未启动依据")
@@ -162,10 +165,12 @@ def unstarted_events(facts: StartFacts, occurred_at: int, *,
         if finish is not None:
             events.append(finish)
     if activity is not None and release and occupancy_release_allowed(
-            {**activity, "dispatch_state": facts.dispatch_state}):
+            {**activity, "dispatch_state": facts.dispatch_state}, unstarted=True,
+            preparation_resolved=preparation_resolved or activity["baseline_state"] == 3):
         events.append(event_envelope(0, 0, 13, 3, (update_change(
             "device_activities", activity["id"],
-            {"occupancy_state": 1}, {"occupancy_state": 2}),), occurred_at))
+            {"occupancy_state": 1}, {"occupancy_state": 2}),), occurred_at,
+            evidence={"preparation_resolved": True} if preparation_resolved else {}))
     return events
 
 
@@ -177,14 +182,18 @@ def include_start_facts(facts: StartFacts, state, owners) -> None:
             owners[(table, row["id"])] = ("action", row["action_id"])
 
 
-def verify_unstarted_final(connection, action, saved=(), *, released=True) -> None:
+def verify_unstarted_final(connection, action, saved=(), *, released=True,
+                           preparation_error=None) -> None:
     """核实本地终止的当前可靠结果与新增事件的身份、字段和终态。"""
     facts = load_start_facts(connection, action)
     if not facts.not_started:
         raise ConsistencyError("本地终止的原未启动依据不可靠")
     if facts.run is not None and facts.run["status"] in (int(_RUN.PENDING), int(_RUN.ACTIVE)):
         raise ConsistencyError("本地终止仍有普通启动责任")
-    if released and facts.activity is not None and occupancy_release_allowed(facts.activity):
+    preparation_resolved = (preparation_error is not None or any(
+        event["body"]["evidence"].get("preparation_resolved") is True for event in saved))
+    if released and facts.activity is not None and occupancy_release_allowed(facts.activity, unstarted=True,
+            preparation_resolved=preparation_resolved or facts.activity["baseline_state"] == 3):
         raise ConsistencyError("本地终止缺少适用的占用释放")
     for event in saved:
         kind = event["type"], event["reason"]
@@ -197,6 +206,7 @@ def verify_unstarted_final(connection, action, saved=(), *, released=True) -> No
         original = facts.run if kind == (10, 3) else facts.activity
         table = "operation_runs" if kind == (10, 3) else "device_activities"
         columns = ({"status", "retry_wait_required", "error_json"} if kind == (10, 3)
+                   else {"last_error_json"} if kind == (13, 2) and preparation_error is not None
                    else {"dispatch_state"} if kind == (13, 2) else {"occupancy_state"})
         if (original is None or row["table"] != table or row["id"] != original["id"]
                 or set(row["after"]["values"]) - columns

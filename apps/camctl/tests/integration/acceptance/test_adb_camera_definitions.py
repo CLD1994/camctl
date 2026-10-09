@@ -19,7 +19,7 @@ from .test_fields import _action_facts
 pytestmark = pytest.mark.asyncio
 
 
-def _catalog(driver, *, duration_default=None):
+def _catalog(driver, *, duration_default=None, device_id="cam-1", baseline=True):
     """候选 Schema 复用生产定义；替身显式提供软件测试所需的结束契约。"""
     def task(params):
         action_type = "camera_record" if params["type"].endswith("_record") else "camera_timelapse"
@@ -30,7 +30,7 @@ def _catalog(driver, *, duration_default=None):
             fixed = replace(fixed, duration_based=True, wait_after_send=True, end_control=EndControl.DEVICE,
                             start_return_meaning=StartReturn.SENT, completion_mode=CompletionMode.TIME_AND_OUTPUTS,
                             result_wait_margin_s=0)
-        return fixed
+        return fixed if baseline else replace(fixed, ownership_mode=None, output_scope=None)
     capabilities = [replace(cap, task_factory=task) for cap in definitions.candidate_capabilities(driver)]
     if duration_default is not None:
         record = next(cap for cap in capabilities if cap.action_type == "camera_record")
@@ -38,7 +38,7 @@ def _catalog(driver, *, duration_default=None):
         schema["required"].remove("duration_s")
         capabilities = [replace(cap, schema=schema, defaults={"duration_s": duration_default})
                         if cap is record else cap for cap in capabilities]
-    config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": driver}}}, ConfigDefaults())
+    config = load_config({"devices": {device_id: {"kind": "camera", "driver": driver}}}, ConfigDefaults())
     return build_catalog(config, DriverDefinitions({driver: DriverDefinition(driver,
         {cap.action_type: (cap,) for cap in capabilities})}))
 

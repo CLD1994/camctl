@@ -80,6 +80,8 @@ class RuntimeDeps:
     capture_result_closes: dict[int, PendingResultCheckClose] = field(default_factory=dict)
     #: 文件发现及其派生事实具有独立生命周期，三种工厂共用。
     capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
+    #: 基准准备及原页保存由本会话持有，普通、残留与受限工厂共用。
+    capture_baselines: dict = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
     capture_recording_anchors: dict[int, tuple[int, int]] = field(default_factory=dict)
     #: 已保存等待的原返回锚点；由流程行与剩余预算判定适用性。
@@ -110,6 +112,17 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     from camctl.capture.handlers import (
         resume_canceled_recording_results, resume_capture_completions, resume_result_check_closes,
     )
+    from types import SimpleNamespace
+    from camctl.capture.baseline import PreparationPhase, resume_baseline_save, resume_baseline_settlement
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories.capture import CaptureRepository
+
+    runtime = SimpleNamespace(owned=owned, capture=CaptureRepository(), pending_baselines=deps.capture_baselines,
+                              wall_us=lambda: SystemClock().utc_micros())
+    for action_id in tuple(deps.capture_baselines):
+        result = resume_baseline_save(action_id, runtime=runtime)
+        if result is not None and result.phase is PreparationPhase.PENDING:
+            raise ConsistencyError(f"原基准保存仍未可靠完成: {result.database_error}")
 
     resume_result_check_closes(owned,
         pending_result_closes=deps.capture_result_closes,
@@ -120,6 +133,10 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     resume_canceled_recording_results(owned,
         pending_capture_completions=deps.capture_completions,
         retry_gate=deps.capture_retry_gate)
+    for action_id in tuple(deps.capture_baselines):
+        result = resume_baseline_settlement(action_id, runtime=runtime)
+        if result is not None and result.phase is PreparationPhase.PENDING:
+            raise ConsistencyError(f"原准备收场仍未可靠保存: {result.database_error}")
 
 
 def _resume_normal_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
@@ -447,6 +464,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_call_results=deps.capture_call_results,
             pending_capture_completions=deps.capture_completions,
             pending_result_closes=deps.capture_result_closes,
+            pending_baselines=deps.capture_baselines,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -472,6 +490,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_call_results=deps.capture_call_results,
             pending_capture_completions=deps.capture_completions,
             pending_result_closes=deps.capture_result_closes,
+            pending_baselines=deps.capture_baselines,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -603,6 +622,7 @@ async def execute_command(
                         pending_call_results=deps.capture_call_results,
                         pending_capture_completions=deps.capture_completions,
                         pending_result_closes=deps.capture_result_closes,
+                        pending_baselines=deps.capture_baselines,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
                         pending_read_results=deps.capture_read_results,

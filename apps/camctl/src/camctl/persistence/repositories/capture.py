@@ -268,9 +268,19 @@ class FinishCapture:
     catalog_facts: OutputCatalogFacts
     occurred_at: int
     failure: RecordingFailure | None = None
+    #: 可靠未派发的基准读取失败；完整原错误与终态共同保存。
+    baseline_error: ErrorValue | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
+        if (self.failure is not None and self.failure.code == "capture_failed"
+                and self.failure.details.get("reason") == "baseline_read_failed" and self.baseline_error is None):
+            raise ValueError("基准失败申请缺少实际读取错误")
+        if self.baseline_error is not None:
+            if (not isinstance(self.baseline_error, ErrorValue) or self.drafts
+                    or self.failure is None or self.failure.code != "capture_failed"
+                    or self.failure.details.get("reason") != "baseline_read_failed"):
+                raise ValueError("基准失败申请要求实际错误、专属失败原因且无产物")
 
 
 @dataclass(frozen=True)
@@ -305,6 +315,7 @@ class FinishCanceledCapture:
     catalog_facts: OutputCatalogFacts | None = None
     #: 可靠未启动的本地收场：事务内复核原尝试，与适用占用释放共同保存。
     unstarted: bool = False
+    preparation_resolved: bool = False
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
@@ -312,6 +323,8 @@ class FinishCanceledCapture:
             raise TypeError("未启动收场标记必须是布尔值")
         if self.unstarted and (self.drafts or self.catalog_facts is not None):
             raise ValueError("未启动收场不登记拍摄产物")
+        if type(self.preparation_resolved) is not bool or (self.preparation_resolved and not self.unstarted):
+            raise ValueError("准备收场依据只适用于可靠未启动的取消")
 
 
 @dataclass(frozen=True)
@@ -675,7 +688,9 @@ class FinishCaptureCommand:
     def __init__(self, command, key: OperationKey, *,
                  canceled: bool = False) -> None:
         self._canceled = canceled
-        self._unstarted = canceled and command.unstarted
+        self._baseline_error = None if canceled else command.baseline_error
+        self._unstarted = (canceled and command.unstarted) or self._baseline_error is not None
+        self._preparation_resolved = (command.preparation_resolved if canceled else self._baseline_error is not None)
         self._failure = None if canceled else command.failure
         self._command = command
         self._key = key
@@ -719,6 +734,11 @@ class FinishCaptureCommand:
                 raise ConsistencyError("本地取消收场缺少可靠未启动依据")
             if unstarted.run is not None and unstarted.run["status"] in (1, 2):
                 raise ConsistencyError("本地取消收场前普通启动责任必须已随取消结束")
+            if self._baseline_error is not None:
+                if (unstarted.attempts_used != 0 or unstarted.activity is None
+                        or unstarted.activity["ownership_mode"] != 2
+                        or str(unstarted.activity["id"]) != self._failure.details.get("activity_id")):
+                    raise ConsistencyError("基准读取失败必须使用原基准活动且 START 为 0")
             include_start_facts(original_start, self._state, self._owners)
         action_status = _ACTION_SUCCEEDED
         error_id: int | None = None
@@ -806,11 +826,20 @@ class FinishCaptureCommand:
                 0, 0, _ACTION_FINISHED_EVENT, action_reason,
                 (action_row,),
                 command.occurred_at,
+                evidence={"preparation_resolved": True} if self._preparation_resolved else {},
             )
         ]
         if unstarted is not None:
+            if self._baseline_error is not None:
+                error = self._baseline_error
+                templates.append(_envelope(0, 0, _ACTIVITY_OBSERVE_EVENT, 2,
+                    (_update("device_activities", unstarted.activity["id"],
+                        {"last_error_json": unstarted.activity["last_error_json"]},
+                        {"last_error_json": {"code": error.code, "stage": error.stage,
+                                             "details": dict(error.details)}}),), command.occurred_at))
             templates.extend(unstarted_events(
-                unstarted, command.occurred_at, run_status=None))
+                unstarted, command.occurred_at, run_status=None,
+                preparation_resolved=self._preparation_resolved))
         next_origin_id = _next_id(connection, "output_origins")
         # 原片先进入当前事件事实，派生关系按显式引用解析；结果保持输入次序。
         promoted_files: list[int] = []
@@ -923,12 +952,22 @@ class FinishCaptureCommand:
             action = row_facts(connection, "actions", command.action_id)
             if action is None:
                 raise ConsistencyError("原本地取消动作不存在")
-            verify_unstarted_final(connection, action, saved)
+            verify_unstarted_final(connection, action, saved, preparation_error=self._baseline_error)
+            if self._baseline_error is not None:
+                error = self._baseline_error
+                error_events = [event for event in saved if (event["type"], event["reason"]) == (13, 2)]
+                if (len(error_events) != 1 or not json_equal(
+                        error_events[0]["body"]["rows"][0]["after"]["values"].get("last_error_json"),
+                        {"code": error.code, "stage": error.stage, "details": dict(error.details)})):
+                    raise TransactionError("原基准失败事务的完整读取错误与输入不符")
         types = [(event["type"], event["reason"]) for event in saved]
         if not types or types[0][0] != _ACTION_FINISHED_EVENT:
             raise TransactionError("原事务不是完成登记，不能作为重送核实")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("完成登记的事实时刻与原事务不同")
+        if (saved[0]["body"]["evidence"].get("preparation_resolved", False)
+                != self._preparation_resolved):
+            raise TransactionError("原完成申请的准备收场依据与重送输入不符")
         action_row = saved[0]["body"]["rows"][0]
         if action_row["table"] != "actions" or action_row["id"] != command.action_id:
             raise TransactionError("原完成登记属于其他动作")
@@ -2412,14 +2451,21 @@ class _ActivityReleaseCommand:
             params += tuple(concluded)
         with closing(connection.execute(query + " LIMIT 1", params)) as cursor:
             unresolved = cursor.fetchone() is not None
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise ConsistencyError("占用释放缺少所属动作")
+        self._state["actions"] = {action["id"]: action}
+        unstarted = (command.preparation_resolved and action["status"] in _ACTION_TERMINAL
+                     and load_start_facts(connection, action, result_events=activity_result_events).not_started)
         decision = decide_release(ActivityFacts(
             activity_state=ActivityState[
                 _ACTIVITY_STATE(projected["activity_state"]).name],
             occupancy_state=OccupancyState.HELD,
             completion_evidence=release_basis_holds(projected),
             unresolved_calls=unresolved,
-            file_ownership_resolved=(projected["ownership_mode"] != 2
-                                     or projected["baseline_state"] == 3)))
+            file_ownership_resolved=(projected["ownership_mode"] != 2 or unstarted
+                                     or (projected["baseline_state"] == 3
+                                         and projected["result_set_state"] == 3))))
         if decision is not ReleaseDecision.RELEASE:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
@@ -2430,30 +2476,52 @@ class _ActivityReleaseCommand:
                             else "calls_unsettled" if decision is ReleaseDecision.KEEP_HELD_CALLS
                             else "conditions_unmet")))
 
-        allocation = scope.allocate(1)
+        error = command.preparation_error
+        error_value = None if error is None else {"code": error.code, "stage": error.stage, "details": dict(error.details)}
+        error_changed = error_value is not None and not json_equal(facts["last_error_json"], error_value)
+        allocation = scope.allocate(2 if error_changed else 1)
         self._owners[("device_activities", activity_id)] = (
             "action", facts["action_id"])
         row = _update(
             "device_activities", activity_id,
             {"occupancy_state": 1}, {"occupancy_state": 2})
         event = _envelope(
-            allocation.first_event_id, allocation.txn_id,
+            allocation.last_event_id, allocation.txn_id,
             _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON,
             (row,), command.occurred_at)
+        if command.preparation_resolved:
+            event = replace(event, evidence={"preparation_resolved": True})
+        if error_value is not None:
+            event = replace(event, evidence={**event.evidence, "preparation_error": error_value})
+        events = []
+        if error_changed:
+            events.append(_envelope(allocation.first_event_id, allocation.txn_id,
+                _ACTIVITY_OBSERVE_EVENT, 2,
+                (_update("device_activities", activity_id,
+                    {"last_error_json": facts["last_error_json"]}, {"last_error_json": error_value}),),
+                command.occurred_at))
+        events.append(event)
         return CommandPlan(
-            events=(event,), owners=self._owners, state_rows=self._state,
+            events=tuple(events), owners=self._owners, state_rows=self._state,
             result=ActivityReleaseResult(outcome=ReleaseOutcome.RELEASED))
 
     def _reuse(self, scope, saved) -> CommandPlan:
         """原键重送：核实原释放分支与输入后恢复首次响应。"""
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
-        if types != [(_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON)]:
+        if types not in ([(_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON)],
+                         [(_ACTIVITY_OBSERVE_EVENT, 2), (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON)]):
             raise TransactionError("操作身份已用于其他事务，不能作为占用释放重送")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("占用释放的事实时刻与原事务不同")
+        if saved[-1]["body"]["evidence"].get("preparation_resolved", False) != command.preparation_resolved:
+            raise TransactionError("原释放申请的准备收场依据与重送输入不符")
+        error = command.preparation_error
+        expected_error = None if error is None else {"code": error.code, "stage": error.stage, "details": dict(error.details)}
+        if not json_equal(saved[-1]["body"]["evidence"].get("preparation_error"), expected_error):
+            raise TransactionError("原准备收场的完整错误与重送输入不符")
         facts = load_activity_of_action(scope.connection, command.action_id)
-        row = saved[0]["body"]["rows"][0]
+        row = saved[-1]["body"]["rows"][0]
         if (row["table"] != "device_activities"
                 or row["id"] != facts["id"]):
             raise TransactionError("原占用释放属于其他活动")
@@ -5021,8 +5089,18 @@ def _release_guard(event, context) -> None:
         if not release_basis_holds(facts):
             raise EventValidationError(
                 "占用释放缺少活动结束、未派发或完成依据")
-        if facts.get("ownership_mode") == 2 and facts.get("baseline_state") != 3:
-            raise EventValidationError("输出范围归属未固定不得释放占用")
+        action = context.state_rows.get("actions", {}).get(facts.get("action_id"), {})
+        if "preparation_resolved" in event.evidence and event.evidence["preparation_resolved"] is not True:
+            raise EventValidationError("准备收场依据必须是实际可靠的 true")
+        if "preparation_error" in event.evidence and event.evidence.get("preparation_resolved") is not True:
+            raise EventValidationError("实际准备错误必须与准备收场共同保存")
+        unstarted = ((event.evidence.get("preparation_resolved") is True or facts.get("baseline_state") == 3)
+                     and action.get("status") in _ACTION_TERMINAL
+                     and facts.get("dispatch_state") in (1, 4)
+                     and facts.get("activity_state") == 1 and facts.get("started_at") is None)
+        if (facts.get("ownership_mode") == 2 and not unstarted
+                and (facts.get("baseline_state") != 3 or facts.get("result_set_state") != 3)):
+            raise EventValidationError("原输出范围的归属及集合未确定不得释放占用")
 
 
 def _result_check_guard(event, context) -> None:
