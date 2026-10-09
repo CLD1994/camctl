@@ -390,3 +390,236 @@ it("追加遇能力变化未提交后以同目标的新可靠版本重试", asyn
     JSON.parse(operation.result!.content.text).actions.map((a: any) => a.name),
   ).toEqual(["拍摄", "报告"]);
 });
+import { linked } from "../helpers/preview-renaming";
+import { editValue, setValue } from "../../src/web/editing";
+import { sameContent } from "../../src/shared/automatic-previews";
+it.each(["B", "", 42, null, undefined, "pending"])(
+  "局部名称恢复经过保存重开和复制后能够首次导出 %s",
+  (temporary) => {
+    const app = setup(),
+      initial = linked(),
+      root = JSON.parse(initial.text);
+    root.actions[4].params.source.action_name = "B";
+    initial.text = JSON.stringify(root);
+    let d = app.createDraft(initial);
+    const content =
+      temporary === "pending"
+        ? editValue(d.content, ["actions", 0, "name"], '"unfinished', "json")
+        : setValue(
+            d.content,
+            ["actions", 0, "name"],
+            temporary,
+            temporary === undefined,
+          );
+    d = app.saveDraft(d.id, d.revision, content);
+    expect(d.lastWrite!.input).toEqual(content);
+    expect(() => app.exportDraft(d.id, d.revision, d.content)).toThrow();
+    expect(app.store.all("requests")).toHaveLength(0);
+    app.reloadCapabilities();
+    expect(sameContent(app.draft(d.id).content, content)).toBe(true);
+    app.store.close();
+    const reopened = new Application(app.store.directory, { next: () => 101n });
+    apps.push(reopened);
+    const current = reopened.draft(d.id);
+    const copies = [
+      current,
+      reopened.copyDraft(current.id),
+      reopened.createDraft(current.content),
+    ];
+    for (const copy of copies) {
+      const recovered = editValue(
+        copy.content,
+        ["actions", "0", "name"],
+        '"C"',
+        "json",
+      );
+      const saved = reopened.saveDraft(copy.id, copy.revision, recovered);
+      const actions = JSON.parse(saved.content.text).actions;
+      expect(
+        actions.slice(2).map((a: any) => a.params.source.action_name),
+      ).toEqual(["C", "B", "B"]);
+      expect(saved.content.automaticPreviews!.actions[2].id).toBe(
+        copy.content.automaticPreviews!.actions[2].id,
+      );
+      expect(saved.content.automaticPreviews!.actions[2].rename!.sourceId).toBe(
+        copy.content.automaticPreviews!.actions[0].id,
+      );
+    }
+    const final = reopened.draft(copies[2].id),
+      fixed = reopened.exportDraft(final.id, final.revision, final.content);
+    expect((fixed.body.actions as any[])[2].params.source.action_name).toBe(
+      "C",
+    );
+    expect(fixed.body).not.toHaveProperty("automaticPreviews");
+    expect(reopened.downloadRequest(fixed.id)).toEqual(fixed.body);
+  },
+);
+it.each(["source", "purpose", "duplicate"])(
+  "矛盾或自动未完成输入经过名称修正仍拒绝导出 %s",
+  (kind) => {
+    const app = setup(),
+      d = app.createDraft(linked());
+    let content = setValue(d.content, ["actions", 0, "name"], "B");
+    if (kind === "source")
+      content = setValue(
+        content,
+        ["actions", 2, "params", "source", "action_name"],
+        "外部",
+      );
+    if (kind === "purpose")
+      content.pending = {
+        "/actions/2/params/purpose": { kind: "json", text: '"man' },
+      };
+    if (kind === "duplicate")
+      content.automaticPreviews!.actions[3].sourceId =
+        content.automaticPreviews!.actions[0].id;
+    content = setValue(content, ["actions", "0", "name"], "C");
+    const saved = app.saveDraft(d.id, d.revision, content);
+    expect(() =>
+      app.exportDraft(saved.id, saved.revision, saved.content),
+    ).toThrow();
+    expect(app.store.all("requests")).toHaveLength(0);
+    if (kind === "purpose")
+      expect(saved.content.pending).toEqual(content.pending);
+  },
+);
+it("新增改名依据参与保存格式校验及完整导出版本比较", () => {
+  const app = setup(),
+    d = app.createDraft(linked());
+  const content = setValue(d.content, ["actions", 0, "name"], "C");
+  const malformed = structuredClone(content);
+  (malformed.automaticPreviews!.actions[2].rename as any).pending = "yes";
+  expect(() => app.saveDraft(d.id, d.revision, malformed)).toThrowError(
+    expect.objectContaining({ code: "invalid_content" }),
+  );
+  const saved = app.saveDraft(d.id, d.revision, content),
+    other = structuredClone(saved.content);
+  other.automaticPreviews!.actions[2].rename!.pending = true;
+  expect(() => app.exportDraft(saved.id, saved.revision, other)).toThrowError(
+    expect.objectContaining({ code: "content_conflict" }),
+  );
+  expect(app.store.all("requests")).toHaveLength(0);
+});
+it("时间和类型的Pointer恢复仍由共享协调处理", () => {
+  const app = setup(),
+    d = app.createDraft(linked());
+  const time = editValue(
+    d.content,
+    ["actions", "0", "scheduled_at"],
+    '"2026-10-11 01:00:00"',
+    "json",
+  );
+  const saved = app.saveDraft(d.id, d.revision, time);
+  expect(JSON.parse(saved.content.text).actions[2].scheduled_at).toBe(
+    "2026-10-11 01:00:00",
+  );
+  const unknown = editValue(
+    saved.content,
+    ["actions", "0", "type"],
+    '"future_camera"',
+    "json",
+  );
+  const preserved = app.saveDraft(saved.id, saved.revision, unknown);
+  expect(JSON.parse(preserved.content.text).actions).toHaveLength(5);
+  const known = editValue(
+    preserved.content,
+    ["actions", "0", "type"],
+    '"report_status"',
+    "json",
+  );
+  const removed = app.saveDraft(preserved.id, preserved.revision, known);
+  expect(
+    JSON.parse(removed.content.text).actions.map((a: any) => a.name),
+  ).toEqual(["A", "B", "自动B", "手动"]);
+});
+it("未知保存保留原始改名依据并在重读后确认同一提交", async () => {
+  const { DraftSession } = await import("../../src/web/session");
+  const app = setup(),
+    draft = app.createDraft(linked());
+  let readable = false;
+  const session = new DraftSession(
+    draft,
+    {
+      save: async (id, revision, content) => {
+        app.saveDraft(id, revision, content);
+        throw Error("响应丢失");
+      },
+      read: async () => {
+        if (!readable) throw Error("离线");
+        return app.draft(draft.id);
+      },
+    },
+    () => {},
+  );
+  const original = setValue(draft.content, ["actions", 0, "name"], "B");
+  session.edit(original);
+  await expect(session.flush()).rejects.toThrow();
+  expect(session.content).toEqual(original);
+  expect(session.saved).toBe(false);
+  const actual = app.draft(draft.id);
+  expect(actual.lastWrite!.input).toEqual(original);
+  app.reloadCapabilities();
+  readable = true;
+  await session.flush();
+  expect(session.saved).toBe(true);
+  session.edit(setValue(session.content, ["actions", "0", "name"], "C"));
+  await session.flush();
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[2].params.source
+      .action_name,
+  ).toBe("C");
+});
+it("固定原请求复制保留可靠依据并重映射身份", () => {
+  const app = setup(),
+    c = linked(),
+    root = JSON.parse(c.text);
+  root.actions[4].params.source.action_name = "B";
+  c.text = JSON.stringify(root);
+  const draft = app.createDraft(c),
+    saved = app.saveDraft(
+      draft.id,
+      draft.revision,
+      setValue(draft.content, ["actions", 0, "name"], "C"),
+    );
+  const fixed = app.exportDraft(saved.id, saved.revision, saved.content),
+    copy = app.copyRequest(fixed.id);
+  const changed = setValue(copy.content, ["actions", "0", "name"], "D");
+  expect(JSON.parse(changed.text).actions[2].params.source.action_name).toBe(
+    "D",
+  );
+  expect(changed.automaticPreviews!.actions[2].rename!.automaticId).toBe(
+    changed.automaticPreviews!.actions[2].id,
+  );
+  expect(changed.automaticPreviews!.actions[2].id).not.toBe(
+    saved.content.automaticPreviews!.actions[2].id,
+  );
+  expect(
+    (app.downloadRequest(fixed.id).actions as any[])[2].params.source
+      .action_name,
+  ).toBe("C");
+});
+it("待恢复来源复制为独立拍摄，保留原自动归属", () => {
+  const app = setup(),
+    d = app.createDraft(linked());
+  const pending = app.saveDraft(
+    d.id,
+    d.revision,
+    setValue(d.content, ["actions", 0, "name"], "B"),
+  );
+  const copy = app.copyAction(pending.id, pending.revision, 0),
+    actions = JSON.parse(copy.content.text).actions;
+  expect(actions.map((a: any) => a.name)).toEqual([
+    "B",
+    "B",
+    "自动A",
+    "自动B",
+    "手动",
+    "B 2",
+    "B 2预览",
+  ]);
+  expect(actions[2].params.source.action_name).toBe("A");
+  expect(actions[6].params.source.action_name).toBe("B 2");
+  expect(copy.content.automaticPreviews!.actions[6].sourceId).toBe(
+    copy.content.automaticPreviews!.actions[5].id,
+  );
+});

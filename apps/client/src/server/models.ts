@@ -4,7 +4,17 @@ export interface PreviewMetadata {
   intent: PreviewIntent;
   namespace: string;
   next: number;
-  actions: Array<{ id: string; sourceId?: string }>;
+  actions: Array<{
+    id: string;
+    sourceId?: string;
+    /** 此自动身份与 sourceId 的可靠协议投影；pending 只由局部名称编辑产生。 */
+    rename?: {
+      sourceId: string;
+      automaticId: string;
+      actionName: string;
+      pending: boolean;
+    };
+  }>;
 }
 export interface DraftContent {
   text: string;

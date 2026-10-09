@@ -55,7 +55,14 @@ export function validPreviewMetadata(value: unknown): value is PreviewMetadata {
         isObject(a) &&
         typeof a.id === "string" &&
         a.id.length > 0 &&
-        (a.sourceId === undefined || typeof a.sourceId === "string"),
+        (a.sourceId === undefined || typeof a.sourceId === "string") &&
+        (a.rename === undefined ||
+          (typeof a.sourceId === "string" &&
+            isObject(a.rename) &&
+            typeof a.rename.sourceId === "string" &&
+            typeof a.rename.automaticId === "string" &&
+            isName(a.rename.actionName) &&
+            typeof a.rename.pending === "boolean")),
     ) &&
     new Set(value.actions.map((a) => a.id)).size === value.actions.length
   );
@@ -74,11 +81,18 @@ function reliableLinks(
   const names = root.actions.map((a) => a.name),
     byId = new Map(metadata.actions.map((entry, i) => [entry.id, i])),
     links = new Map<string, number>();
+  if (
+    Object.keys(content.pending ?? {}).some((p) => p === "" || p === "/actions")
+  )
+    return undefined;
+  const waiting = new Set(
+    metadata.actions.filter((a) => a.rename?.pending).map((a) => a.sourceId),
+  );
   for (let i = 0; i < root.actions.length; i++) {
     const a = root.actions[i],
       entry = metadata.actions[i];
     if (!automatic(a)) {
-      if (entry.sourceId) return undefined;
+      if (entry.sourceId || entry.rename) return undefined;
       continue;
     }
     const prefix = "/actions/" + i;
@@ -91,11 +105,24 @@ function reliableLinks(
     const source = entry.sourceId ? byId.get(entry.sourceId) : undefined;
     if (
       source === undefined ||
-      names.filter((n) => n === root.actions[source].name).length !== 1 ||
       !isObject(a.params) ||
       !isObject(a.params.source) ||
       Object.keys(a.params.source).length !== 1 ||
-      a.params.source.action_name !== root.actions[source].name ||
+      !isName(a.params.source.action_name) ||
+      (entry.rename
+        ? entry.rename.sourceId !== entry.sourceId ||
+          entry.rename.automaticId !== entry.id ||
+          a.params.source.action_name !== entry.rename.actionName ||
+          (!entry.rename.pending &&
+            a.params.source.action_name !== root.actions[source].name)
+        : a.params.source.action_name !== root.actions[source].name) ||
+      (!entry.rename?.pending &&
+        names.some(
+          (n, j) =>
+            j !== source &&
+            n === root.actions[source].name &&
+            (!entry.rename || !waiting.has(metadata.actions[j].id)),
+        )) ||
       links.has(entry.sourceId!)
     )
       return undefined;
@@ -254,6 +281,13 @@ export function coordinatePreviews(
     const autoIndex = links.get(entry.id);
     const prefix = `/actions/${i}`;
     if (
+      autoIndex !== undefined &&
+      metadata.actions[autoIndex].rename?.pending
+    ) {
+      issues.push(`动作 ${a.name} 的局部改名尚待完成`);
+      continue;
+    }
+    if (
       Object.keys(content.pending ?? {}).some(
         (p) =>
           p === prefix ||
@@ -366,6 +400,17 @@ export function copyDraftContent(
     namespace,
     next: old.actions.length,
     actions: old.actions.map((a) => ({
+      ...a,
+      ...(a.rename
+        ? {
+            rename: {
+              ...a.rename,
+              sourceId: ids.get(a.rename.sourceId) ?? `${namespace}:missing`,
+              automaticId:
+                ids.get(a.rename.automaticId) ?? `${namespace}:missing`,
+            },
+          }
+        : {}),
       id: ids.get(a.id)!,
       ...(a.sourceId
         ? { sourceId: ids.get(a.sourceId) ?? `${namespace}:missing` }
@@ -427,31 +472,48 @@ export function copyDraftAction(
       };
   return next;
 }
-/** 显式局部改名使用原关联核实后更新引用，不按新名称猜配。 */
+/** 局部名称编辑先核对保存投影；暂时非法时保留原归属，恢复后原子更新。 */
 export function renamePreviewSources(
   content: DraftContent,
   index: number,
   name: unknown,
 ): DraftContent {
-  if (previewIntent(content) !== "enabled" || typeof name !== "string")
-    return content;
+  if (previewIntent(content) !== "enabled") return content;
   const root = plan(content),
-    meta = content.automaticPreviews!;
-  if (!reliableLinks(content, root) || !root.actions[index]) return content;
-  const id = meta.actions[index].id,
-    oldName = root.actions[index].name;
-  meta.actions.forEach((entry, i) => {
-    const a = root.actions[i];
-    if (
-      entry.sourceId === id &&
-      automatic(a) &&
-      isObject(a.params) &&
-      isObject(a.params.source) &&
-      a.params.source.action_name === oldName
-    )
-      a.params.source.action_name = name;
-  });
-  return { ...content, text: stringifyJson(root, 2) };
+    links = reliableLinks(content, root);
+  if (!links || !root.actions[index]) return content;
+  const next = cloneClientJson(content),
+    meta = next.automaticPreviews!;
+  // 首次局部编辑只从严格旧图建立依据；已有依据已由 reliableLinks 核实。
+  for (const [sourceId, i] of links) {
+    const entry = meta.actions[i];
+    if (!entry.rename)
+      entry.rename = {
+        sourceId,
+        automaticId: entry.id,
+        actionName: (
+          root.actions[i].params as { source: { action_name: string } }
+        ).source.action_name,
+        pending: false,
+      };
+  }
+  const autoIndex = links.get(meta.actions[index].id);
+  if (autoIndex === undefined) return content;
+  const proof = meta.actions[autoIndex].rename!;
+  if (
+    !isName(name) ||
+    root.actions.some((a, i) => i !== index && a.name === name)
+  ) {
+    proof.pending = true;
+  } else {
+    (
+      root.actions[autoIndex].params as { source: { action_name: string } }
+    ).source.action_name = name;
+    proof.actionName = name;
+    proof.pending = false;
+  }
+  next.text = stringifyJson(root, 2);
+  return next;
 }
 export function removeContentAction(
   content: DraftContent,
@@ -472,8 +534,7 @@ export function removeContentAction(
         entry.sourceId === id &&
         automatic(a) &&
         isObject(a.params) &&
-        isObject(a.params.source) &&
-        a.params.source.action_name === root.actions[index]?.name
+        isObject(a.params.source)
       )
         removed.add(i);
     });

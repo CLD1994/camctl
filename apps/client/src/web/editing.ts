@@ -66,6 +66,36 @@ export function valueAt(value: unknown, path: Path): unknown {
     value,
   );
 }
+/** 数组位置只接受现存规范索引；对象成员始终保留原键。 */
+function resolvePath(root: EditObject, path: Path): Path {
+  let current: unknown = root;
+  return path.map((part, depth) => {
+    let key = part;
+    if (Array.isArray(current)) {
+      if (
+        (typeof part === "string" && !/^(0|[1-9][0-9]*)$/.test(part)) ||
+        !Number.isSafeInteger(Number(part)) ||
+        Number(part) < 0 ||
+        Number(part) >= current.length ||
+        !Object.hasOwn(current, part)
+      )
+        throw new Error("数组路径没有对应的现存位置");
+      key = Number(part);
+      if (
+        depth === 1 &&
+        depth < path.length - 1 &&
+        path[0] === "actions" &&
+        !isObject(current[key])
+      )
+        throw new Error("动作路径没有对应的对象");
+    }
+    current =
+      current !== null && typeof current === "object"
+        ? (current as EditObject)[key]
+        : undefined;
+    return key;
+  });
+}
 export function setValue(
   content: DraftContent,
   path: Path,
@@ -76,14 +106,14 @@ export function setValue(
 ): DraftContent {
   if (!omit && !replace && pendingBlocks(content, path))
     throw new Error("此路径存在尚未解决的输入，请先逐项修正或明确省略");
+  path = resolvePath(parseDraft(content), path);
   if (
     path.length === 3 &&
     path[0] === "actions" &&
     typeof path[1] === "number" &&
-    path[2] === "name" &&
-    !omit
+    path[2] === "name"
   )
-    content = renamePreviewSources(content, path[1], value);
+    content = renamePreviewSources(content, path[1], omit ? undefined : value);
   const root = parseDraft(content);
   let target: EditObject = root;
   for (const part of path.slice(0, -1)) {
@@ -191,6 +221,7 @@ export function editValue(
 ): DraftContent {
   if (pendingBlocks(content, path))
     throw new Error("父级 JSON 无法表示未完成的子字段，请先修正具体路径");
+  path = resolvePath(parseDraft(content), path);
   let value: unknown;
   try {
     const root = parseDraft(content);
@@ -214,6 +245,13 @@ export function editValue(
     )
       throw new Error("数字尚未完成");
   } catch {
+    if (
+      path.length === 3 &&
+      path[0] === "actions" &&
+      typeof path[1] === "number" &&
+      path[2] === "name"
+    )
+      content = renamePreviewSources(content, path[1], undefined);
     return {
       ...content,
       pending: { ...content.pending, [pointer(path)]: { kind, text } },

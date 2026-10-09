@@ -667,3 +667,108 @@ it("能力版本变化后后续追加从最新观察准备重试", async () => {
   ).toHaveLength(1);
   expect(application.store.all("drafts")).toHaveLength(1);
 }, 20000);
+import { linked } from "../helpers/preview-renaming";
+it("真实PendingInput名称恢复及普通名称重名恢复可以保存后导出", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const parameter = application.capabilities
+    .active!.devices[0].actions.find((a) => a.type === "camera_record")!
+    .parameter_types.find((p) => p.type === "demo_fixed")!;
+  parameter.preview_supported = true;
+  const c = linked(),
+    root = JSON.parse(c.text);
+  for (const action of root.actions.slice(0, 2)) {
+    action.device_id = "demo_cam0";
+    action.params = { type: "demo_fixed" };
+  }
+  root.actions[4].params.source.action_name = "B";
+  c.text = JSON.stringify(root);
+  c.pending = { "/actions/0/name": { kind: "json", text: '"unfinished' } };
+  const d = application.createDraft(c),
+    id = d.content.automaticPreviews!.actions[2].id;
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await page
+    .getByLabel("未完成输入 /actions/0/name", { exact: true })
+    .fill('"C"');
+  await page
+    .getByRole("button", { name: "应用修正 /actions/0/name", exact: true })
+    .click();
+  await browserExpect
+    .poll(
+      () =>
+        JSON.parse(application.draft(d.id).content.text).actions[2].params
+          .source.action_name,
+    )
+    .toBe("C");
+  const first = page.locator(".action-card").first();
+  await first.getByLabel("动作名称", { exact: true }).fill("B");
+  await browserExpect
+    .poll(
+      () => JSON.parse(application.draft(d.id).content.text).actions[0].name,
+    )
+    .toBe("B");
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await page
+    .locator(".action-card")
+    .first()
+    .getByLabel("动作名称", { exact: true })
+    .fill("D");
+  const download = page.waitForEvent("download");
+  await page.getByTestId("export-button").click();
+  const body = JSON.parse(
+    readFileSync((await (await download).path())!, "utf8"),
+  );
+  expect(
+    body.actions.slice(2).map((a: any) => a.params.source.action_name),
+  ).toEqual(["D", "B", "B"]);
+  expect(application.draft(d.id).content.automaticPreviews!.actions[2].id).toBe(
+    id,
+  );
+  expect(body).not.toHaveProperty("automaticPreviews");
+}, 20000);
+it.each([
+  ["scheduled_at", "2026-10-11 01:00:00", 5],
+  ["type", "future_camera", 5],
+  ["type", "report_status", 4],
+] as const)(
+  "真实PendingInput的Pointer恢复 %s=%s",
+  async (field, value, count) => {
+    const { page, application } = await setup();
+    await page.getByTestId("initialize-button").click();
+    application.capabilities
+      .active!.devices[0].actions.find((a) => a.type === "camera_record")!
+      .parameter_types.find((p) => p.type === "demo_fixed")!.preview_supported =
+      true;
+    const c = linked(),
+      root = JSON.parse(c.text);
+    for (const a of root.actions.slice(0, 2)) {
+      a.device_id = "demo_cam0";
+      a.params = { type: "demo_fixed" };
+    }
+    c.text = JSON.stringify(root);
+    const path = `/actions/0/${field}`;
+    c.pending = { [path]: { kind: "json", text: '"unfinished' } };
+    const d = application.createDraft(c);
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await page
+      .getByLabel(`未完成输入 ${path}`, { exact: true })
+      .fill(JSON.stringify(value));
+    await page
+      .getByRole("button", { name: `应用修正 ${path}`, exact: true })
+      .click();
+    await browserExpect
+      .poll(
+        () =>
+          JSON.parse(application.draft(d.id).content.text).actions[0][field],
+      )
+      .toBe(value);
+    const actual = JSON.parse(application.draft(d.id).content.text).actions;
+    expect(actual).toHaveLength(count);
+    if (field === "scheduled_at") expect(actual[2].scheduled_at).toBe(value);
+    expect(application.draft(d.id).content.pending).toEqual({});
+  },
+  20000,
+);
