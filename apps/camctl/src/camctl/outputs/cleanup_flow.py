@@ -21,7 +21,7 @@ from typing import Any, Callable
 
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
-from camctl.operations.attempts import RetryWaitGate
+from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 
 __all__ = [
     "CancelCleanupItem",
@@ -497,7 +497,7 @@ def _attempts_used(connection, responsibility_key: str) -> int:
 
 
 def _retry_wait_step(runtime: CleanupRuntime, responsibility: str,
-                     interval_s, phase: str) -> CleanupStep | None:
+                     config: AttemptConfig, phase: str) -> CleanupStep | None:
     """开始新尝试前的间隔门槛；允许开始时返回 None。
 
     以责任链保存的重试等待标志与累计次数为权威：首次尝试不预先
@@ -505,7 +505,7 @@ def _retry_wait_step(runtime: CleanupRuntime, responsibility: str,
     本次配置的间隔到时才放行。
     """
     row = runtime.owned.connection.execute(
-        "SELECT attempts_used, retry_wait_required, max_attempts_used"
+        "SELECT attempts_used, retry_wait_required"
         " FROM operation_runs WHERE responsibility_key = ?",
         (responsibility,)).fetchone()
     if row is None:
@@ -514,12 +514,40 @@ def _retry_wait_step(runtime: CleanupRuntime, responsibility: str,
         responsibility,
         attempts_used=int(row[0]),
         retry_wait_required=int(row[1]) == 1,
-        max_attempts_used=int(row[2]),
-        interval_s=interval_s,
+        max_attempts_used=config.max_attempts,
+        interval_s=config.retry_interval_s,
         now_ns=runtime.monotonic_ns())
     if remaining is None:
         return None
     return CleanupStep(phase, f"{remaining}s")
+
+
+def _query_retry_wait_step(
+        runtime: CleanupRuntime, item_id: int) -> CleanupStep | None:
+    """新删除后的首次核实即时开始，失败查询的重试才等待间隔。
+
+    同一产物可以由不同清理成员删除。以该产物最新删除意图与本成员
+    最新查询意图的保存顺序判定阶段，不能把上一轮的查询等待沿用到
+    新删除后的首次核实；查询预算仍归原成员的查询流程。
+    """
+    from camctl.contracts.enums import enum_for
+
+    responsibility = f"exists/{item_id}"
+    delete_kind = int(enum_for("operation_runs.kind").DELETE_FILE)
+    delete_intent, query_intent = runtime.owned.connection.execute(
+        "SELECT MAX(CASE WHEN r.kind = ? THEN a.intent_event_id END),"
+        " MAX(CASE WHEN r.responsibility_key = ? THEN a.intent_event_id END)"
+        " FROM operation_attempts a"
+        " JOIN operation_runs r ON a.run_id = r.id"
+        " JOIN cleanup_items c ON r.cleanup_item_id = c.id"
+        " WHERE c.output_id = (SELECT output_id FROM cleanup_items WHERE id = ?)",
+        (delete_kind, responsibility, item_id)).fetchone()
+    if (query_intent is None
+            or (delete_intent is not None and delete_intent > query_intent)):
+        runtime.retry_gate.cleared(responsibility)
+        return None
+    return _retry_wait_step(
+        runtime, responsibility, runtime.query_config, "query_retry_wait")
 
 
 def _exhaustion_details(
@@ -716,9 +744,7 @@ async def _verify_before_delete(
     from camctl.persistence.models import DbOutcomeKind
 
     connection = runtime.owned.connection
-    waiting = _retry_wait_step(
-        runtime, f"exists/{item_id}",
-        runtime.query_config.retry_interval_s, "query_retry_wait")
+    waiting = _query_retry_wait_step(runtime, item_id)
     if waiting is not None:
         return waiting
     ticket = _begin_query_attempt(runtime, item_id, action_id)
@@ -771,7 +797,7 @@ async def _delete_once(
     occurred = runtime.occurred_at()
     waiting = _retry_wait_step(
         runtime, f"delete/{item_id}",
-        runtime.delete_config.retry_interval_s, "delete_retry_wait")
+        runtime.delete_config, "delete_retry_wait")
     if waiting is not None:
         return waiting
     intent = AttemptIntent(
@@ -826,9 +852,8 @@ async def _delete_once(
     if finish.kind is not DbOutcomeKind.COMPLETED:
         return CleanupStep("finish_rejected", str(finish.error))
     if not absent:
-        # 删除效果未知：保存了重试等待，登记间隔锚点。
-        runtime.retry_gate.established(
-            f"delete/{item_id}", runtime.monotonic_ns())
+        # 先核实删除效果，确认仍在后才开始删除重试间隔。
+        runtime.retry_gate.cleared(f"delete/{item_id}")
     if absent:
         choice = (CleanupOutcomeChoice.DELETED if not errored
                   else CleanupOutcomeChoice.ABSENCE_CONFIRMED)
@@ -855,9 +880,7 @@ async def _verify_after_delete(
     from camctl.operations.attempts import RunOutcome
     from camctl.persistence.models import DbOutcomeKind
 
-    waiting = _retry_wait_step(
-        runtime, f"exists/{item_id}",
-        runtime.query_config.retry_interval_s, "query_retry_wait")
+    waiting = _query_retry_wait_step(runtime, item_id)
     if waiting is not None:
         return waiting
     ticket = _begin_query_attempt(runtime, item_id, action_id)
@@ -1085,10 +1108,16 @@ async def _run_query(runtime: CleanupRuntime, ticket, item_id: int) -> bool | No
             # 流程继续，不终局的轮次建立重试等待，否则流程被锁死。
             retry_wait=present is not False),
         new_operation_key(), runtime.owned)
-    if present is not False and finish.kind is DbOutcomeKind.COMPLETED:
-        # 保存了重试等待：登记查询间隔锚点。
-        runtime.retry_gate.established(
-            f"exists/{item_id}", runtime.monotonic_ns())
+    if finish.kind is DbOutcomeKind.COMPLETED:
+        if present is None:
+            runtime.retry_gate.established(
+                f"exists/{item_id}", runtime.monotonic_ns())
+        else:
+            runtime.retry_gate.cleared(f"exists/{item_id}")
+            if present:
+                # 必要查询已结束且在场事实已保存，现在才开始删除间隔。
+                runtime.retry_gate.established(
+                    f"delete/{item_id}", runtime.monotonic_ns())
     return present
 
 

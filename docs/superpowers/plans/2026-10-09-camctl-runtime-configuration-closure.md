@@ -362,3 +362,48 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 ## 状态与剩余范围
 
 2026-10-09，Linux 容器、Python 3.11.16：已明确字段的加载校验与发送后等待接线已有窄门禁。配置加载相关单元 133 项通过；等待装配与结果列举单元 14 项通过；真实等待处理 6 项通过；capture 组件集成 259 项通过。录像启动、停止和结果核实的当前预算装配及启动授予保存另有 7 项单元通过；这项结果只验证配置交付，不证明安全重试或实际调用计时。日常入口绑定、逐设备失败、录像调用预算与期限、完整两次会话组合尚未收齐门禁，按 RC0—RC5 继续实施。软件组合使用受契约约束的设备替身，真实设备、目标 ARM64 性能与物理断电单独验收。
+
+## Task 1: 清理重试阶段与本次额度
+
+本任务落实 RC3 中已有的删除、查询重试及配置变化契约，不增加第一版业务范围。正式依据为[设备清理调用](../../architecture/configuration.md#设备文件删除与查询的计时)。
+
+**预计文件：** 修改 `apps/camctl/src/camctl/outputs/cleanup_flow.py`；新增组件集成 `apps/camctl/tests/integration/outputs/test_cleanup_retry_phases.py`。沿用 `AttemptConfig`、`RetryWaitGate` 和已有尝试意图顺序，不改变驱动接口、状态库格式或流程身份。
+
+**输入与输出：** `delete_source_file(runtime, item_id)` 消费本次删除／查询配置、成员和目标产物的可靠事实，返回已有 `CleanupStep`。等待期间不新增尝试；具备资格后沿原流程累计次数；达到本次上限立即进入既有耗尽事务。新尝试保存本次配置，已有历史保持原值。
+
+以下分类在已有终态、取消、绑定、在途调用及可靠保存资格判定之后适用。查询和删除预算分别判断；删除预算耗尽不跳过未知删除的必要核实。
+
+| 可靠事实与需要执行的操作 | 时间门槛与结果 |
+| --- | --- |
+| 尚无删除尝试，需要首次删除 | 不等待重试间隔。 |
+| 新删除之后尚无本成员核实尝试，需要首次查询 | 根据保存的意图顺序识别本次核实，清除旧查询时间锚点，不等待上一轮查询间隔；原查询次数保持。 |
+| 本次查询没有可靠在场结论，需要再次查询，且本次预算有余 | 保存结果后建立查询时间锚点；跨运行从本次首次具备资格时按本次间隔重新计时。 |
+| 查询可靠确认文件仍在，允许再次删除 | 必要查询返回并可靠保存后建立删除时间锚点；查询耗时不计入删除间隔。原查询流程仍允许后续删除后的新核实。 |
+| 对应累计次数达到或超过本次上限 | 不等待时间门槛，交给意图事务按本次上限拒绝，并保存所属耗尽结论。 |
+| 删除可靠完成或查询可靠确认缺席 | 沿已有成员终态和伴随流程收场，不新增重试。 |
+
+**实施步骤与验收：** 以下命令从仓库根执行，解释器为已核实的 Python 3.11.16。所有 pytest 前台独占、按目录顺序运行。
+
+- [x] 先写查询耗时 5 秒／删除间隔 3 秒、新删除后的首次核实、同库重开后上限由 1 调为 3 或由 3 调为 1 的 6 项反例。运行 `PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/outputs/test_cleanup_retry_phases.py -q`，结果为 6 项行为断言失败；诊断见 `/tmp/camctl-goal-cleanup-phases-red.log`。
+- [x] `_retry_wait_step(runtime, responsibility, config: AttemptConfig, phase)` 使用本次上限和间隔；首次核实从既有意图顺序识别，未知删除不提前启动删除间隔；可靠在场后再建立删除锚点。保留流程的 `retry_wait_required`，不能以清除该标志使后续核实失去资格。
+- [x] 同命令运行新增文件，预期 6 项通过；核对原流程身份、累计次数和不可变历史前缀。
+- [x] 顺序运行 `integration/outputs` 全目录、`integration/bootstrap/test_cleanup_flow.py` 和 `tests/unit`，命令统一为 `PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest <路径> -q`。预期受影响组件与单元门禁通过；任何失败单独定位、记录，不能把旧的其他目录失败当作通过。全目录存在下述 5 项基线失败，本项只记录检查已执行。
+- [x] 独立审阅本阶段变更、必要核实前后的时间门槛、配置上调／下调、共享产物事实及取消入口。运行 `node scripts/check-doc-links.mjs` 和 `git diff --check`，记录实际范围与未完成事项，然后按用户授权统一提交本阶段本地变更。
+
+**执行优先级：** 用户已授权持续实现和阶段性统一提交；不重复要求实施方法或提交许可。仓库的按目录独占测试规则优先于 skill 的单进程全仓测试建议，根测试规范的受约束替身策略优先于 skill 的默认真实协作者偏好。验收只证明本任务，不表示 RC3、RC5 或第一版整体完成。
+
+### Task 1 验证记录与剩余责任
+
+2026-10-09，Linux 容器、Python 3.11.16。新增反例为 6 项有效失败，实施后 6 项通过（0.79 秒）；`integration/outputs` 为 1831 项通过、5 项失败、2 项跳过（176.86 秒）；默认生产装配的清理组合为 7 项通过（6.97 秒）；全部单元为 3925 项通过、1 项跳过及 2 项既有异步标记警告（9.33 秒）。本地文件链接 3569 项通过；新增清理规格链接的标题锚点已单独核对。诊断分别保存在 `/tmp/camctl-goal-cleanup-phases-{green,outputs,bootstrap,unit-final,docs}.log`。
+
+输出目录的失败节点如下。用提交 `89fb0b4` 的独立源码副本运行这些节点，同样得到 5 项失败（0.88 秒），节点和异常断言逐项一致；诊断为 `/tmp/camctl-goal-cleanup-phases-baseline-read.log`。不能据此把输出全目录记为通过。
+
+- `test_copy_complete.py::test_read_budget_independent_from_recopy`：读取耗尽事务拒绝缺少原明确失败的输入。
+- `test_copy_resume.py::test_failed_attempt_requires_new_legal_attempt[delivery]` 及 `[internal]`：同样的读取耗尽输入被拒绝。
+- `test_copy_segments.py::test_resume_read_guard_rejects_non_read_flow[delivery]` 及 `[internal]`：实际首个校验阶段为 `CONFIGURE`，用例预期 `RESUME_READ`。
+
+独立只读审阅未发现本阶段新增的严重缺陷或主要缺陷。删除意图按同一产物全部成员读取，查询意图和预算仍归本成员；这是已有产物共享规则的实现方式。直接组合“另一成员执行新删除，原成员立即核实”的测试尚缺，作为非阻断覆盖建议保留；六项新增用例不宣称覆盖这一组合。
+
+原有 `_run_query` 在查询结果事务未得到 `COMPLETED` 时仍返回设备观察；三个消费者 `_verify_before_delete`、`_verify_after_delete`、`_settle_canceling_member` 可能继续推进。这项可靠保存责任仍需闭合，本任务只在保存完成时更新计时锚点，不声明该问题得到修复。后续需先以在场／缺席／未知观察及保存完成／拒绝／结果未知的矩阵证伪，再保留原完整保存输入和票据，不能把保存失败解释为普通查询未知。
+
+**阶段裁决：** 依用户的统一提交授权提交本阶段，同时明确保留基线读取失败、原查询保存责任及跨成员测试缺口。代价是第一版整体和 RC3／RC5 仍不可声明通过；本任务的清理计时证据不能替代两次真实 CLI 会话、历史回放及报告组合验收。完整第一版范围由有效业务规格确定，新增缺陷的实施拆分不增加完成度的分母。
