@@ -123,7 +123,8 @@ async def test_closed_result_consumers_use_saved_input_without_device_query(tmp_
                 action_id=action_id, occurred_at=runtime.wall_us(),
                 phase=ResultSetPhase.UNSATISFIED, contract="task_scope_files",
                 observation={"reason": "known_failure"},
-                capture={"status": "failed", "error": {"code": "capture_unsatisfied"}},
+                capture={"status": "failed", "error": {"code": "capture_failed", "stage": "execution",
+                    "details": {"activity_id": str(action_id), "reason": "invalid_outputs"}}},
                 evidence={"method": "known_failure", "observation": {"reason": "known_failure"}},
             ), new_operation_key(), owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error

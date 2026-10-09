@@ -16,7 +16,7 @@ from camctl.capture.models import ActivityConcludeSave
 from camctl.capture.processing import (
     CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason, SourceFileSave,
 )
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
@@ -49,6 +49,7 @@ _EVIDENCE = EvidenceRegistry((
     EvidenceContract("stop_confirmed", 1, "stop", frozenset({"activity_id"}), identity_field="activity_id"),
     EvidenceContract("results_returned", 1, "result", frozenset()),
     RESULT_FILES_CONTRACT,
+    RESULT_PAGE_CONTRACT,
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("file_digest", 1, "digest", frozenset({"file_id", "sha256"}), identity_field="file_id"),
 ))

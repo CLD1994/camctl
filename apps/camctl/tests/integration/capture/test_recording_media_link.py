@@ -50,7 +50,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.scheduling.rules import LaunchWindow
 
 from ..persistence.test_runtime import _create_valid_database
-from .test_capture_contract import DriverDouble, ResultsDouble, _EVIDENCE, _entry
+from .test_capture_contract import DriverDouble, ResultsDouble, _PAGE_EVIDENCE, _entry
 from .test_media_flow import ReadDriverDouble, _Digest, _Stream
 
 register_operation_guards()
@@ -106,7 +106,7 @@ def _runtime(owned, files, media=None) -> CaptureRuntime:
         timelapse=TimelapseRepository(),
         driver=DriverDouble(),
         results=ResultsDouble(files),
-        evidence=_EVIDENCE,
+        evidence=_PAGE_EVIDENCE,
         wall_us=lambda: _NOW,
         monotonic_ns=lambda: 5_000_000_000,
         window_of=lambda action: LaunchWindow(

@@ -4086,7 +4086,10 @@ class _FinishRecordingResultsCommand:
         validate_output_registration(capture.drafts, capture.catalog_facts)
         return action, run
 
-    def _ready(self, connection, action, run) -> None:
+    def _ready(self, scope, action, run) -> None:
+        from .result_pages import read_last_page, read_pages
+
+        connection = scope.connection
         with closing(connection.execute(
             "SELECT 1 FROM operation_attempts WHERE run_id=? AND status=? LIMIT 1",
             (run["id"], int(_ATTEMPT_STATUS.RUNNING)),
@@ -4106,7 +4109,26 @@ class _FinishRecordingResultsCommand:
                 if any(value.type == "result_files_listed" for value in actual.observations):
                     ticket = AttemptTicket(number, "result", str(run["activity_id"]),
                                            run["responsibility_key"], run["id"])
-                    metadata.update((entry.identity, entry) for entry in files_from_outcome(ticket, actual))
+                    last = read_last_page(ticket, scope)
+                    if last is None:
+                        metadata.update((entry.identity, entry) for entry in files_from_outcome(ticket, actual))
+                        continue
+                    if last.page.outcome != actual:
+                        raise TransactionError("录像核实收场改变原可靠末页的实际结果")
+                    if number == run["attempts_used"] and (
+                            not last.page.scan_complete or not last.page.set_finalized
+                            or actual.error is not None):
+                        raise TransactionError("录像核实收场缺少原完整集合保证")
+                    page_cursor = None
+                    while True:
+                        pages = read_pages(ticket, page_cursor, 1, scope)
+                        for saved in pages.items:
+                            accepted = dict(saved.file_ids)
+                            metadata.update((entry.identity, entry) for entry in saved.page.entries
+                                            if entry.identity in accepted)
+                        if pages.next_cursor is None:
+                            break
+                        page_cursor = pages.next_cursor
         with closing(connection.execute(
             "SELECT id FROM device_files WHERE source_action_id=? ORDER BY id", (action["id"],),
         )) as cursor:
@@ -4196,7 +4218,7 @@ class _FinishRecordingResultsCommand:
                 result=CaptureResult(action["status"], plan["status"], output_ids,
                     FinishDisposition.RETIRED))
         capture = FinishCaptureCommand(self._request.capture, self._key)
-        self._ready(connection, action, run)
+        self._ready(scope, action, run)
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         plans = [capture.plan(sub)]
         if run["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):

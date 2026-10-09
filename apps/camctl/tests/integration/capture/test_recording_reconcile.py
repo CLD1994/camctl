@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import json
 from decimal import Decimal
@@ -65,6 +65,7 @@ _EVIDENCE = EvidenceRegistry(
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
         RESULT_FILES_CONTRACT,
+        RESULT_PAGE_CONTRACT,
         EvidenceContract(type="stop_returned", version=1, operation="stop",
                          fields=frozenset()),
         EvidenceContract(type="stop_confirmed", version=1, operation="stop",

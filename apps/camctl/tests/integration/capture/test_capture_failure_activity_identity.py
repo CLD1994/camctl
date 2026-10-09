@@ -248,7 +248,7 @@ async def test_closed_unsatisfied_timelapse_reports_actual_activity_without_quer
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "timelapse", independent_activity=True)
     assert action_id == 2
-    actual = _file_outcome("video")
+    actual = _file_outcome("photo")
     driver = _result_port(runtime, actual)
     try:
         scheduled = runtime.timelapse.schedule_wait(ScheduleWait(
@@ -264,7 +264,8 @@ async def test_closed_unsatisfied_timelapse_reports_actual_activity_without_quer
             result_set=ResultSetSave(
                 2, listing.occurred_at, ResultSetPhase.UNSATISFIED,
                 contract="task_scope_files", observation={"reason": "known_failure"},
-                capture={"status": "failed", "error": {"code": "capture_unsatisfied"}},
+                capture={"status": "failed", "error": {"code": "capture_failed", "stage": "execution",
+                    "details": {"activity_id": "1", "reason": "invalid_outputs"}}},
                 evidence={"method": "known_failure", "observation": {"reason": "known_failure"}},
             ))
         assert runtime.action(2)["status"] == 2
@@ -276,7 +277,7 @@ async def test_closed_unsatisfied_timelapse_reports_actual_activity_without_quer
         owned, resumed = _reopen(owned, runtime)
         await capture_handler(handler)(2, resumed)
 
-        _assert_failure(owned, code=13, reason="no_outputs")
+        _assert_failure(owned, code=13, reason="invalid_outputs")
         assert _attempts(owned) == original_attempts
         assert _history(owned)[:len(original_history)] == original_history
         assert owned.connection.execute(

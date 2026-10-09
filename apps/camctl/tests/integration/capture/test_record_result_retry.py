@@ -14,7 +14,7 @@ from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcomeKind
 
 from .result_consumer_fixtures import consumer_world
-from .test_capture_contract import ResultsDouble, _entry
+from .test_capture_contract import ResultsDouble, _entry, _PAGE_EVIDENCE
 from .test_result_consumer_saves import _actual, _result_port
 
 pytestmark = pytest.mark.asyncio
@@ -64,7 +64,8 @@ async def test_record_rechecks_unfinished_files_in_same_results_run(
     clock = [65_000_000_000]
     runtime.monotonic_ns = lambda: clock[0]
     runtime.check_config = AttemptConfig(3, Decimal("1.25"), Decimal("3"))
-    runtime.results = ResultsDouble({activity_id: first_files})
+    runtime.results = ResultsDouble({activity_id: first_files}, set_finalized=False)
+    runtime.evidence = _PAGE_EVIDENCE
     advance = capture_handler(handler)
     try:
         await advance(action_id, runtime)
@@ -77,14 +78,17 @@ async def test_record_rechecks_unfinished_files_in_same_results_run(
         assert original[0][1:4] == (1, 2, 3)
         assert original[0][-1] is None
         original_observation = json.loads(original[0][-2])["observations"][0]
-        assert original_observation["version"] == 1
-        assert set(original_observation["data"]) == {"activity_id", "entries"}
+        assert original_observation["version"] == 2
+        assert set(original_observation["data"]) == {"activity_id", "entries", "cursor",
+            "next_cursor", "set_finalized", "completion_evidence"}
+        assert original_observation["data"]["set_finalized"] is False
         assert owned.connection.execute(
             "SELECT activity_state,occupancy_state,result_check_json"
             " FROM device_activities WHERE id=?", (activity_id,)
         ).fetchone() == (3, 2, None)
 
         runtime.results.files_by_action[activity_id] = (_entry("clip"),)
+        runtime.results.set_finalized = True
         clock[0] += 2_999_999_999
         await advance(action_id, runtime)
         assert runtime.results.calls == [activity_id]
@@ -219,15 +223,14 @@ async def test_record_later_failed_result_preserves_original_files_and_error(
             "details": {"received_bytes": 23},
         }
 
-        if not with_video:
-            assert runtime.action(action_id)["status"] == 2
-            assert _result_run(owned, activity_id) == (first_run[0], 2, 2, 1)
-            await advance(action_id, runtime)
+        # 实际读取错误与完整单文件均保留；v1 没有集合保证，预算
+        # 耗尽按无法确认结束，不能把后来出现的视频当成完整集合。
+        assert runtime.action(action_id)["status"] == 2
+        assert _result_run(owned, activity_id) == (first_run[0], 2, 2, 1)
+        await advance(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == (3 if with_video else 4)
-        assert _result_run(owned, activity_id) == (
-            first_run[0], 3 if with_video else 6, 2, 0,
-        )
+        assert runtime.action(action_id)["status"] == 4
+        assert _result_run(owned, activity_id) == (first_run[0], 6, 2, 0)
         assert _output_identities(owned, action_id) == (
             ("auxiliary", "original") if with_video else ("auxiliary",)
         )

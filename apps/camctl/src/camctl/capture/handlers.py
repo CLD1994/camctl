@@ -2374,6 +2374,13 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
         # 其余分区（等待响应、取消保留、未知无停止）：本轮成功结果与
         # 重试等待共同保存，等待下次推进或取消收场。
         _finish_listing_result(context, listing, retry_wait=True)
+    elif listing.already_saved and not action["cancel_requested"]:
+        # 原核实责任已结束，未知集合不能重新取得额度，也不能成为
+        # 成功；保存无法确认的业务结果，保留独立完整文件。
+        _settle_open_start(context, action_id, RunOutcome.UNCONFIRMED,
+                          error=ErrorValue(code="result_unconfirmed", stage="device"))
+        _finish_capture(context, action_id, entries, FileKind.PHOTO, registered=registered,
+                        failure=_unconfirmed_failure(context, action_id))
 
 
 def _original_ticket(runtime: CaptureRuntime, responsibility: str, operation: str):
@@ -3069,6 +3076,11 @@ async def _advance_recording_outcome(
     elif ticket is not None:
         # 终局依据尚不齐备：本轮成功结果与重试等待共同保存。
         _finish_listing_result(context, listing, retry_wait=True)
+    elif (result.kind.value == "succeeded" and listing.already_saved
+            and row_facts(context.owned.connection, "operation_runs", listing.ticket.run_id)["status"]
+                not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))):
+        _finish_capture(context, action_id, entries, FileKind.VIDEO, registered=registered,
+                        failure=_unconfirmed_failure(context, action_id))
 
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
@@ -3645,8 +3657,10 @@ async def _finish_timelapse_conclusion(
     if activity_state == 3 or (state == 3 and basis == 3):
         _release_occupancy(runtime, action_id)
     if state == 3 and basis in (2, 3):
+        # 原 RESULT_SET_CONFIRMED 已经可靠保存完整且满足的集合；
+        # 恢复沿该结论收尾，不要求旧列举响应再次提供集合保证。
         _finish_capture(runtime, action_id, entries, FileKind.VIDEO, registered=registered,
-                        set_finalized=_listing_finalized(listing))
+                        set_finalized=True)
     elif state == 3:
         error = None if capture is None else capture.get("error")
         if not isinstance(error, Mapping) or set(error) != {"code", "stage", "details"}:

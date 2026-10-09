@@ -187,7 +187,9 @@ assert result_attempts_after_last_page == result_attempts_after_first_page
 
 单张拍摄及取消收尾的阶段实现（2026-10-10，容器 Python 3.11.16）：单张拍摄消费原可靠页及全部已确认来源文件，以明确集合保证区分成功、确定空集合、不合格产物和继续核实。原读取错误先按原键保存，后续新轮次取得完整集合才形成成功。取消延时摄影保留设备保证已完成的文件，不要求正常目标等待到期；列举错误继续消耗原有限预算，实际停止与文件完成分别保存。相关 capture 专项 104 项、全部单元 4173 项通过（1 项跳过、2 项既有 warning）。reporting 完整目录 367 项通过，正常单张拍摄可收尾并生成报告。
 
-该阶段扩大 capture 完整目录曾取得 708 项通过、62 项失败；与 T5 的失败节点对照新增 16 项、解除 8 项。新增节点涉及分页取消等待前置、测试替身初始化及恢复断言，随后均在上述专项验证中通过。完整目录尚未重新验证，剩余合法延时组合、媒体共有消费及历史结果测试继续由 T6 处理；独立应急问题仍留原责任计划，不声明 capture 目录全绿。
+该阶段扩大 capture 完整目录曾取得 708 项通过、62 项失败；与 T5 的失败节点对照新增 16 项、解除 8 项。新增节点涉及分页取消等待前置、测试替身初始化及恢复断言，其中 15 项在第三阶段专项验证中通过，剩余一项缺少合法的固定延时执行定义，在第四阶段补齐后通过。
+
+T6 第四阶段软件验证（2026-10-10，容器，Python 3.11.16）：原媒体收尾按原票据读取可靠 v2 页及已归属文件，继续核对原片、媒体结论和完整收尾申请；已保存集合结论及 CLOSED 原责任分别沿原事实恢复。专项 123 项通过，全部单元 4173 项通过、1 项跳过，保留两项既有 asyncio 警告。capture 完整目录 765 项通过、5 项失败；五项均属于此前已复现的独立应急收场错误格式问题，继续按原责任计划跟踪。合法延时启动返回及主机计时组合、新页恢复矩阵和 bootstrap 装配门禁仍待 T6 完成，不据此声明 T6 或 capture 目录全绿。
 
 **建议文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py`、`capture/recording.py`、`persistence/repositories/capture.py`；补充 `apps/camctl/tests/integration/capture/test_capture_contract.py`、`test_timelapse_wait_runtime.py`、`test_result_confirmation.py`、`test_result_error_history.py`，以及 bootstrap 的 `test_timelapse_finish.py`、`test_recording_stop.py`。
 
