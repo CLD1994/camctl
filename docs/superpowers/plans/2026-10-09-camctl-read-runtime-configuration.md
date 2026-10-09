@@ -238,3 +238,9 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 root 的 `/tmp/camctl-goal-read-raw-binding-observer-green.log` 为 41 passed、22.96s：原观察者等于来源及不同观察者两个合法分区的 normal/residual × missing/mismatch 共八项，既有默认消费者十五项、保存门六项、必要源摘要十二项。此前四项观察者误拒和两项旧断言均在该范围内通过。这个结果不证明新的 raw 分类首次形成 Finish／所属失败 child 的 COMMIT 前后 UNKNOWN，也不证明全部排除矩阵；这些仍按 RD4 追加步骤推进。
 
 独立只读审查实际 source／observer 校验、原 held End 的保证范围、Finish 与 child 的持有／保存次序及默认装配，有限范围内未发现阻断项。更正生产后 root 的 `/tmp/camctl-goal-read-source-owner-unit.log` 为 3687 passed、1 skipped、2 warnings、7.75s；两条 warning 仍是既有同步测试的 asyncio 标记。该 source／observer 阶段纳入下一次本地统一提交，后续保存故障和排除矩阵保持未完成。
+
+2026-10-09，`ded3592` 后的保存故障候选分为两个 bootstrap 组件文件。`test_read_default_raw_binding_recovery.py` 的八项覆盖 normal/residual × Finish/所属失败 child × COMMIT 前后 UNKNOWN；原 End 由实际默认 factory 取得，默认入口首次形成完整 Finish 与 child，真实仓储 COMMIT 故障命中后关闭原连接，再由 fresh Owned 核对两项原事务是否可靠存在。下一实际入口在候选边界前核原完整申请、独立 key 与 T1；child 已提交导致动作终态也先核原键。`test_read_default_raw_binding_save_gate.py` 的四项覆盖两个入口分别连续两轮 Finish 历史核实 UNKNOWN，以及所属 child 的检查投影真实失败并可靠回滚；每轮保留原申请与责任，禁止候选和新设备／媒体调用，核全部原字节、轮次、次数、摘要缺失、未校验事实、来源与工作文件守恒。两文件已通过导入及 diffcheck；实际故障有效性和十二项运行结果待根独占验证，尚不构成通过证据。取消／终态、MATCHED、reliableSHA／UNSUPPORTED 的 raw 排除矩阵仍未追加，受限与晚取消预成 child 等原未决范围保持。
+
+root 的 `/tmp/camctl-goal-read-binding-recovery-gate.log` 为 10 passed、2 failed、6.87s：八项 COMMIT 前后 UNKNOWN 恢复和两项连续 Finish UNKNOWN 保存门通过；两项 child 回滚在实际入口已经抛出 StateDbFailure 后，被事后替换的类方法 spy 未观察到回执，尚未运行完保存门断言。原 child 保存的是首次确定的 bound method，不能通过后来替换类方法观察该回调，也不能为测试替换原申请的回调身份。测试在原方法实际使用的事务边界透传记录 WriteReceipt，核原 key、可靠回滚、实际投影异常对象与 ROLLBACK 命中，继续保留原完整 holder／request／T1 与两轮 fresh Owned 检查。该测试可观察性修改待根重跑，不把此次两项失败记为生产缺陷或完整保存门通过。
+
+root 的 `/tmp/camctl-goal-read-binding-recovery-green.log` 为 12 passed、6.77s。上述八项 UNKNOWN 恢复及四项连续保存门均完成实际验证；测试观察点调整没有改变原申请或生产代码。取消／终态、MATCHED、reliableSHA／UNSUPPORTED 的 raw 排除矩阵及其他原未决范围继续保留。
