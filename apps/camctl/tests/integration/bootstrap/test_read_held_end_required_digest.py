@@ -304,8 +304,13 @@ async def test_internal_held_end_reliable_sha_and_saved_results_continue_local_c
         assert "error" not in parse_exact_json(media)
         assert recording.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (
             int(enum_for("actions.status").SUCCEEDED),)
-        assert recording.owned.connection.execute(
+        settled_results = recording.owned.connection.execute(
             "SELECT r.status,t.result_event_id,t.result_json FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
-            " WHERE r.kind=7 ORDER BY t.id DESC LIMIT 1").fetchone() == original_results
+            " WHERE r.kind=7 ORDER BY t.id DESC LIMIT 1").fetchone()
+        # 单原片的可靠结果已经满足录制要求，RESULTS 与录像终态共同结束；
+        # 原轮次的实际观察和结果事件保持，不重写为另一个尝试结果。
+        assert settled_results is not None
+        assert settled_results[0] == int(enum_for("operation_runs.status").SUCCEEDED)
+        assert settled_results[1:] == original_results[1:]
     finally:
         recording.owned.connection.close()

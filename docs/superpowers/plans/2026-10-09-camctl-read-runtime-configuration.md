@@ -231,3 +231,10 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 独立追踪文件权威来源发现，新 classifier 将首次观察者与拍摄来源当作同一动作，违反 `file-fields.md` 的独立身份规则。公开受理观察者 B、实际 FileObservationSave、原来源 A 的 OwnershipSave／SourceFileSave 和真实 READ 建立四项反例；root 的 `/tmp/camctl-goal-read-distinct-observer-red.log` 为 4 failed、4 deselected、2.47s，均在前置分类错误拒绝合法归属。该生产候选与有效失败测试一起纳入统一 checkpoint，修复尚未完成；不得以首四项绿色声明 RD4 完成。
 
 共享 helper 回归 `/tmp/camctl-goal-read-raw-binding-bootstrap-gate.log` 为 35 passed、2 failed、20.48s。失败均为 `test_internal_held_end_reliable_sha_and_saved_results_continue_local_check` 的 missing/mismatch 分区：实际 READ、媒体检查、动作成功及原 RESULTS 尝试保持，原 RESULTS run 在共同终态时从 ACTIVE 变为 SUCCEEDED，而旧断言要求整份查询结果包括 ACTIVE 不变。需要沿原轮次与整体流程分工核对并更新该断言，不能为了保留测试旧预期重新留下 ACTIVE 责任。UNKNOWN、排除反例、取消、直接修复和多副本完整矩阵仍按本计划未完成任务处理。
+
+
+2026-10-09，root 在统一 WIP checkpoint `765e0be` 后继续核实上述四项有效失败。classifier 使用可靠 `source_action_id` 核对拍摄来源，分别核首次观察者的固定设备／驱动，不要求两者为同一个动作；原 ticket、内部 copy、完整 End 和必要摘要条件继续保持。reliableSHA 的两项断言分别验证原 RESULTS attempt 的事件和完整 JSON 不变，以及原 RESULTS run 在结果满足要求时依法结束为 SUCCEEDED。
+
+root 的 `/tmp/camctl-goal-read-raw-binding-observer-green.log` 为 41 passed、22.96s：原观察者等于来源及不同观察者两个合法分区的 normal/residual × missing/mismatch 共八项，既有默认消费者十五项、保存门六项、必要源摘要十二项。此前四项观察者误拒和两项旧断言均在该范围内通过。这个结果不证明新的 raw 分类首次形成 Finish／所属失败 child 的 COMMIT 前后 UNKNOWN，也不证明全部排除矩阵；这些仍按 RD4 追加步骤推进。
+
+独立只读审查实际 source／observer 校验、原 held End 的保证范围、Finish 与 child 的持有／保存次序及默认装配，有限范围内未发现阻断项。更正生产后 root 的 `/tmp/camctl-goal-read-source-owner-unit.log` 为 3687 passed、1 skipped、2 warnings、7.75s；两条 warning 仍是既有同步测试的 asyncio 标记。该 source／observer 阶段纳入下一次本地统一提交，后续保存故障和排除矩阵保持未完成。

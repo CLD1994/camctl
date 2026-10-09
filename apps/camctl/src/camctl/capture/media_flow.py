@@ -696,18 +696,21 @@ def resume_binding_internal_read_ends(
     for copy_id, held in tuple(pending_read_ends.items()):
         row = owned.connection.execute(
             "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,"
-            "r.kind,c.delivery_id,f.observer_action_id FROM file_copies c"
+            "r.kind,c.delivery_id,f.source_action_id,ob.device_id,ob.driver_id FROM file_copies c"
             " JOIN recording_processing p ON p.id=c.processing_id"
             " JOIN actions a ON a.id=p.action_id JOIN operation_runs r ON r.copy_id=c.id"
-            " JOIN device_files f ON f.id=c.source_device_file_id WHERE c.id=?", (copy_id,)).fetchone()
+            " JOIN device_files f ON f.id=c.source_device_file_id"
+            " JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=?", (copy_id,)).fetchone()
         if row is None:
             raise ConsistencyError("原内部读取结束缺少处理、源观察者与动作归属")
-        action_id, device_id, driver_id, status, canceled, run_id, read_status, kind, delivery_id, observer = row
+        (action_id, device_id, driver_id, status, canceled, run_id, read_status,
+         kind, delivery_id, source_action_id, observer_device_id, observer_driver_id) = row
         # 不给取消、已有终态或其他原责任建立新的业务决定。
         if status != int(action_status.RUNNING) or canceled or read_status != int(run_status.ACTIVE):
             continue
         if (run_id != held.ticket.run_id or kind != int(run_kind.READ_FILE)
-                or delivery_id is not None or observer != action_id):
+                or delivery_id is not None or source_action_id != action_id
+                or (observer_device_id, observer_driver_id) != (device_id, driver_id)):
             raise ConsistencyError("原内部读取结束与拍摄处理责任不符")
         facts = OutputsRepository().load_copy_state(copy_id, owned)
         if (facts.committed_bytes != facts.source_size
