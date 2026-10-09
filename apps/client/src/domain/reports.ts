@@ -30,6 +30,7 @@ import type {
   ObtainResult,
   DeleteResult,
   CancelResult,
+  ObtainFailure,
 } from "../shared/status-report.generated";
 
 const validate: ValidateFunction<StatusReport> =
@@ -107,7 +108,32 @@ function indexReport(report: StatusReport): Index {
   }
   return index;
 }
+function failureIdentity(item: ObtainFailure): string {
+  const requested = item.error.details.requested_output_id;
+  return JSON.stringify([
+    item.source_action_instance_id,
+    item.output_id ?? null,
+    item.delivery_id ?? null,
+    typeof requested === "string" ? requested : null,
+  ]);
+}
 function associations(index: Index) {
+  const names = new Map<
+    string,
+    Map<string, { parent: string; value: ReportAction }>
+  >();
+  for (const owner of index.actions.values()) {
+    if (!names.has(owner.parent)) names.set(owner.parent, new Map());
+    names.get(owner.parent)!.set(owner.value.name, owner);
+  }
+  const namedSource = (owner: { parent: string; value: ReportAction }) => {
+    const params = owner.value.input_params;
+    return isObject(params) &&
+      isObject(params.source) &&
+      typeof params.source.action_name === "string"
+      ? names.get(owner.parent)?.get(params.source.action_name)
+      : undefined;
+  };
   const selected = (
     owner: { parent: string; value: ReportAction },
     sourceId: string,
@@ -140,6 +166,14 @@ function associations(index: Index) {
             known.value.group === source.group,
           "取回项目不符合来源计划或组",
         );
+      if (
+        source.current_plan === true ||
+        typeof source.plan_instance_id === "string"
+      )
+        requireFact(
+          known.parent === (source.plan_instance_id ?? owner.parent),
+          "产物项目超出来源计划",
+        );
     }
     if (outputId !== undefined && Array.isArray(params.output_ids))
       requireFact(
@@ -148,18 +182,17 @@ function associations(index: Index) {
       );
   };
   for (const { value: output } of index.outputs.values()) {
-    if (output.derived_from_output_id !== undefined) {
-      requireFact(
-        output.derived_from_output_id !== output.output_id,
-        "产物不能由自身派生",
-      );
-      const source = index.outputs.get(output.derived_from_output_id)?.value;
+    const originalId =
+      output.preview_of_output_id ?? output.derived_from_output_id;
+    if (originalId !== undefined) {
+      requireFact(originalId !== output.output_id, "产物不能由自身派生");
+      const source = index.outputs.get(originalId)?.value;
       if (source)
         requireFact(
           source.kind === "original" &&
             source.source_action_instance_id ===
               output.source_action_instance_id,
-          "修复产物必须派生自同一动作的原片",
+          "预览或修复产物必须关联同一动作的原文件",
         );
     }
   }
@@ -193,18 +226,73 @@ function associations(index: Index) {
   }
   for (const owner of index.actions.values()) {
     const action = owner.value;
+    const admission =
+      action.status === "failed" && action.error?.stage === "admission";
+    if (
+      !admission &&
+      (action.type === "obtain_action_outputs" ||
+        action.type === "delete_action_outputs")
+    ) {
+      const params = action.input_params;
+      if (isObject(params) && isObject(params.source)) {
+        const source = params.source;
+        if (typeof source.action_instance_id === "string")
+          selected(owner, source.action_instance_id);
+        if (typeof source.action_name === "string") {
+          const known = namedSource(owner);
+          if (known) selected(owner, known.value.action_instance_id);
+        }
+      }
+    }
+    if (action.automation?.source_action_instance_id !== undefined) {
+      const named = namedSource(owner);
+      if (named)
+        requireFact(
+          named.value.action_instance_id ===
+            action.automation.source_action_instance_id,
+          "自动预览实例引用与已知名称来源不一致",
+        );
+      const known = index.actions.get(
+        action.automation.source_action_instance_id,
+      );
+      if (known) {
+        requireFact(
+          known.parent === owner.parent && isCameraAction(known.value.type),
+          "自动预览来源必须是本计划的拍摄动作",
+        );
+        if (!admission) selected(owner, known.value.action_instance_id);
+      }
+    }
+    if (
+      action.type === "delete_action_outputs" &&
+      action.result &&
+      isObject(action.input_params) &&
+      isObject(action.input_params.source)
+    )
+      for (const item of (action.result as unknown as DeleteResult).items) {
+        const output = index.outputs.get(item.output_id);
+        if (output) selected(owner, output.parent);
+      }
     if (action.type === "obtain_action_outputs" && action.result) {
       const seen = new Set<string>();
       for (const failure of (action.result as unknown as ObtainResult)
         .failures) {
         selected(owner, failure.source_action_instance_id, failure.output_id);
-        // 显式 ID 失败按请求标识区分，不因实体关联相同而合并。
-        const details = (failure.error as { details?: unknown }).details;
-        const requested =
-          isObject(details) && typeof details.requested_output_id === "string"
-            ? details.requested_output_id
-            : "";
-        const identity = `${failure.source_action_instance_id}/${failure.output_id ?? ""}/${failure.delivery_id ?? ""}/${requested}`;
+        if (
+          failure.error.code === "output_not_found" ||
+          failure.error.code === "output_source_mismatch"
+        ) {
+          const requested = failure.error.details.requested_output_id;
+          requireFact(
+            isCanonicalId(requested) &&
+              failure.output_id === undefined &&
+              failure.delivery_id === undefined,
+            "无效请求产物必须保留请求 ID 且不建立实体关联",
+          );
+          selected(owner, failure.source_action_instance_id, requested);
+        }
+        // 同份报告与历史比较使用相同身份，保留多个无效请求 ID。
+        const identity = failureIdentity(failure);
         requireFact(!seen.has(identity), "取回失败项重复");
         seen.add(identity);
         const output = failure.output_id
@@ -236,31 +324,52 @@ function associations(index: Index) {
           "取消缺少已受理目标",
         );
         const target = action.input_params.target;
-        if (typeof target.action_instance_id === "string")
-          requireFact(
-            target.action_instance_id === item.action_instance_id,
-            "取消结果超出动作目标",
-          );
-        const known = index.actions.get(item.action_instance_id);
-        if (known) {
-          if (typeof target.plan_instance_id === "string")
-            requireFact(
-              target.plan_instance_id === known.parent,
-              "取消结果超出计划目标",
-            );
+        const directTarget = (id: string): boolean | undefined => {
+          if (typeof target.action_instance_id === "string")
+            return target.action_instance_id === id;
+          const candidate = index.actions.get(id);
+          if (!candidate) return undefined;
+          if (
+            typeof target.plan_instance_id === "string" &&
+            target.plan_instance_id !== candidate.parent
+          )
+            return false;
           if (typeof target.group === "string")
-            requireFact(
-              isName(known.value.group) &&
-                target.group === known.value.group &&
-                known.value.type !== "obtain_action_outputs",
-              "取消结果超出组目标",
+            return (
+              candidate.value.type !== "obtain_action_outputs" &&
+              candidate.value.group === target.group
             );
-          const plan = index.plans.get(known.parent);
-          if (plan && typeof target.request_id === "string")
+          if (typeof target.request_id === "string") {
+            const plan = index.plans.get(candidate.parent);
+            return plan ? plan.request_id === target.request_id : undefined;
+          }
+          return true;
+        };
+        const known = index.actions.get(item.action_instance_id);
+        if (directTarget(item.action_instance_id) === false && known) {
+          requireFact(
+            known.value.type === "obtain_action_outputs" &&
+              known.value.automation?.purpose === "auto_preview",
+            "取消结果超出直接目标且没有自动预览关联",
+          );
+          const sourceId =
+            known.value.automation.source_action_instance_id ??
+            namedSource(known)?.value.action_instance_id;
+          if (sourceId !== undefined) {
             requireFact(
-              target.request_id === plan.request_id,
-              "取消结果超出请求目标",
+              directTarget(sourceId) !== false,
+              "自动预览的拍摄超出取消范围",
             );
+            const sourceItem = (
+              action.result as unknown as CancelResult
+            ).items.find(
+              (candidate) => candidate.action_instance_id === sourceId,
+            );
+            requireFact(
+              sourceItem?.error?.code !== "task_cancel_unsupported",
+              "拒绝取消的拍摄不能联动自动预览",
+            );
+          }
         }
         for (const withdrawal of item.withdrawals ?? []) {
           const delivery = index.deliveries.get(withdrawal.delivery_id);
@@ -387,19 +496,23 @@ function ownFacts(report: StatusReport) {
         requireFact(terminal(action.status), "已完成计划包含未终态动作");
       if (plan.status === "pending")
         requireFact(
-          action.status === "pending" ||
-            (action.status === "failed" &&
-              (action.error as { stage?: string } | undefined)?.stage ===
-                "admission"),
+          (action.status === "pending" ||
+            admission ||
+            action.status === "canceled" ||
+            action.status === "expired") &&
+            !action.outputs?.length &&
+            !action.deliveries?.length &&
+            action.device_execution === undefined &&
+            (action.result === undefined ||
+              (action.type === "camera_record" &&
+                (action.result as CameraResult).check === undefined &&
+                (action.result as CameraResult).repair === undefined &&
+                ((action.result as CameraResult).discard_cleanup ===
+                  undefined ||
+                  (action.result as CameraResult).discard_cleanup?.status ===
+                    "not_needed"))),
           "未执行计划包含已开始动作",
         );
-      if (action.expiration_reason === "window_missed")
-        requireFact(
-          action.status === "pending",
-          "错过启动窗口不应已有执行事实",
-        );
-      if (action.expiration_reason === "window_exhausted")
-        requireFact(action.status !== "pending", "启动窗口耗尽须已有执行事实");
       // 设备执行提示只属于已终态的拍摄动作。
       if (action.device_execution !== undefined)
         requireFact(
@@ -640,12 +753,7 @@ function actionResultHistory(before: ReportAction, after: ReportAction) {
   if (before.type === "obtain_action_outputs") {
     const old = (before.result as ObtainResult | undefined)?.failures ?? [];
     const next = (after.result as ObtainResult | undefined)?.failures ?? [];
-    const key = (item: ObtainResult["failures"][number]) =>
-      JSON.stringify([
-        item.source_action_instance_id,
-        item.output_id ?? null,
-        item.delivery_id ?? null,
-      ]);
+    const key = failureIdentity;
     const known = new Map(next.map((item) => [key(item), item]));
     for (const failure of old)
       requireFact(
@@ -701,6 +809,12 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
     const before = old.actions.get(id);
     if (!before) continue;
     requireFact(before.parent === action.parent, "动作所属计划改变");
+    if (before.value.automation?.source_action_instance_id !== undefined)
+      requireFact(
+        before.value.automation.source_action_instance_id ===
+          action.value.automation?.source_action_instance_id,
+        "自动预览已确认来源不可改变",
+      );
     unchanged(
       before.value,
       action.value,
@@ -738,7 +852,12 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
       unchanged(
         before.value,
         output.value,
-        ["source_action_instance_id", "kind", "derived_from_output_id"],
+        [
+          "source_action_instance_id",
+          "kind",
+          "derived_from_output_id",
+          "preview_of_output_id",
+        ],
         "产物",
       );
       if (advancing) {

@@ -73,6 +73,516 @@ const report = (): StatusReport => ({
     },
   ],
 });
+function previewReport(): StatusReport {
+  const r = report();
+  r.plans![0].actions![0].outputs!.push({
+    ...output("3"),
+    kind: "preview",
+    preview_of_output_id: "1",
+  });
+  return r;
+}
+function linkedCancellation(target: unknown): StatusReport {
+  const r = report();
+  r.plans![0].actions![0].group = "采集";
+  const auto = r.plans![0].actions![1];
+  auto.input_params = {
+    source: { action_name: "录像" },
+    filter: "preview",
+    purpose: "auto_preview",
+  };
+  auto.automation = { purpose: "auto_preview", source_action_instance_id: "1" };
+  r.plans!.push({
+    plan_instance_id: "2",
+    request_id: "2",
+    created_at: "2026-01-01 00:00:00",
+    name: "取消计划",
+    status: "completed",
+    actions: [
+      {
+        action_instance_id: "7",
+        name: "取消",
+        type: "cancel_task",
+        input_params: { target },
+        status: "succeeded",
+        result: {
+          items: [
+            {
+              action_instance_id: "1",
+              status: "succeeded",
+              outcome: "already_terminal",
+            },
+            {
+              action_instance_id: "2",
+              status: "succeeded",
+              outcome: "already_terminal",
+            },
+          ],
+        },
+      },
+    ],
+  });
+  return r;
+}
+describe("公共报告状态与关联闭合", () => {
+  const sourceCases = [
+    { mode: "action", source: { action_instance_id: "1" } },
+    { mode: "name", source: { action_name: "录像" } },
+    { mode: "group", source: { group: "采集" } },
+    { mode: "plan-group", source: { plan_instance_id: "1", group: "采集" } },
+    { mode: "current-plan", source: { current_plan: true } },
+    { mode: "plan", source: { plan_instance_id: "1" } },
+  ];
+  it.each(sourceCases)("六种取回来源接受已知匹配 $mode", ({ source }) => {
+    const r = report();
+    r.plans![0].actions![0].group = "采集";
+    r.plans![0].actions![1].input_params = { source };
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  for (const boundary of ["earlier", "same", "later"] as const)
+    it.each(sourceCases)(
+      `${boundary} 晚到的匹配来源允许关联 $mode`,
+      ({ source }) => {
+        const old = report();
+        old.plans![0].actions = [obtain()];
+        old.plans![0].actions[0].input_params = { source };
+        const next = report();
+        next.report_id = "2";
+        next.to_wm =
+          boundary === "earlier" ? 10 : boundary === "same" ? 20 : 30;
+        next.plans![0].actions = [camera()];
+        next.plans![0].actions[0].group = "采集";
+        expect(() => validateReportAgainstHistory(old, next)).not.toThrow();
+      },
+    );
+  it("自动预览来源缺席时保留取消关联，来源晚到后核验组归属", () => {
+    const old = linkedCancellation({ plan_instance_id: "1", group: "采集" });
+    old.plans![0].actions!.shift();
+    expect(() => validateReport(old)).not.toThrow();
+    const next = report();
+    next.report_id = "2";
+    next.from_wm = 20;
+    next.to_wm = 30;
+    next.plans![0].actions = [camera()];
+    next.plans![0].actions[0].group = "其他组";
+    expect(() => mergeReport(old, next)).toThrow();
+  });
+  for (const boundary of ["earlier", "same", "later", "gap"] as const)
+    it.each(sourceCases)(
+      `${boundary} 晚到来源拒绝已知矛盾 $mode`,
+      ({ source, mode }) => {
+        const old = report();
+        old.plans![0].actions = [obtain()];
+        old.plans![0].actions[0].input_params = { source };
+        expect(() => validateReport(old)).not.toThrow();
+        const next = report();
+        next.report_id = "2";
+        next.to_wm =
+          boundary === "earlier" ? 10 : boundary === "same" ? 20 : 30;
+        next.from_wm = boundary === "gap" ? 25 : 0;
+        const c = camera();
+        c.group = "其他组";
+        if (mode === "action") {
+          c.type = "motor_control";
+          delete c.device_id;
+          delete c.effective_params;
+          delete c.outputs;
+          c.input_params = { position: 1 };
+        }
+        if (mode === "name") c.name = "另一动作";
+        next.plans![0].actions = [c];
+        if (
+          mode === "current-plan" ||
+          mode === "plan" ||
+          mode === "plan-group"
+        ) {
+          next.plans![0].plan_instance_id = "2";
+          next.plans![0].request_id = "2";
+        }
+        expect(() => validateReportAgainstHistory(old, next)).toThrow();
+      },
+    );
+  for (const boundary of ["earlier", "same", "later", "gap"] as const)
+    it.each([
+      { action_name: "另一动作" },
+      { action_instance_id: "9" },
+      { current_plan: true },
+      { plan_instance_id: "9" },
+    ])(`${boundary} 范围清理在产物晚到后拒绝归属矛盾 %#`, (source) => {
+      const old = report();
+      old.plans![0].actions = [
+        {
+          action_instance_id: "6",
+          name: "清理",
+          type: "delete_action_outputs",
+          scheduled_at: "2026-01-01 00:00:00",
+          input_params: { source },
+          status: "succeeded",
+          result: {
+            items: [
+              { output_id: "1", status: "succeeded", outcome: "deleted" },
+            ],
+          },
+        },
+      ];
+      expect(() => validateReport(old)).not.toThrow();
+      const next = report();
+      next.report_id = "2";
+      next.to_wm = boundary === "earlier" ? 10 : boundary === "same" ? 20 : 30;
+      next.from_wm = boundary === "gap" ? 25 : 0;
+      next.plans![0].actions = [camera()];
+      if ("current_plan" in source) {
+        next.plans![0].plan_instance_id = "2";
+        next.plans![0].request_id = "2";
+      }
+      expect(() => validateReportAgainstHistory(old, next)).toThrow();
+    });
+  it("自动预览实例引用不能与已知同名来源矛盾", () => {
+    const r = linkedCancellation({ action_instance_id: "1" });
+    r.plans = [r.plans![0]];
+    r.plans[0].actions![1].automation!.source_action_instance_id = "9";
+    expect(() => validateReport(r)).toThrow();
+  });
+  it("没有实例引用的自动预览仍检查已知拍摄的取消范围", () => {
+    const r = linkedCancellation({ action_instance_id: "9" });
+    delete r.plans![0].actions![1].automation!.source_action_instance_id;
+    r.plans![1].actions![0].result = {
+      items: [
+        {
+          action_instance_id: "2",
+          status: "succeeded",
+          outcome: "already_terminal",
+        },
+      ],
+    };
+    expect(() => validateReport(r)).toThrow();
+  });
+  it.each([
+    "obtain_action_outputs",
+    "delete_action_outputs",
+    "cancel_task",
+  ] as const)("pending 计划拒绝 %s 的空执行结果", (type) => {
+    const r = report();
+    r.plans![0].status = "pending";
+    r.plans![0].actions = [
+      {
+        action_instance_id: "6",
+        name: "已取消",
+        type,
+        status: "canceled",
+        scheduled_at: "2026-01-01 00:00:00",
+        input_params:
+          type === "obtain_action_outputs"
+            ? { source: { action_instance_id: "1" } }
+            : type === "delete_action_outputs"
+              ? { output_ids: ["1"] }
+              : { target: { action_instance_id: "1" } },
+        result:
+          type === "obtain_action_outputs" ? { failures: [] } : { items: [] },
+      },
+    ];
+    expect(() => validateReport(r)).toThrow();
+  });
+  it("pending 计划保留无需处理录像内容的执行前取消", () => {
+    const r = report();
+    r.plans![0].status = "pending";
+    const c = camera();
+    c.status = "canceled";
+    delete c.outputs;
+    c.result = { discard_cleanup: { status: "not_needed" } };
+    r.plans![0].actions = [c];
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  it.each(["output_not_found", "output_source_mismatch"])(
+    "%s 不建立虚构产物关联",
+    (code) => {
+      const r = report();
+      const a = r.plans![0].actions![1];
+      a.status = "failed";
+      a.error = error;
+      delete a.deliveries;
+      a.input_params = {
+        source: { action_instance_id: "1" },
+        output_ids: ["8"],
+      };
+      a.result = {
+        failures: [
+          {
+            source_action_instance_id: "1",
+            output_id: "8",
+            error: {
+              code,
+              stage: "execution",
+              details: { requested_output_id: "8" },
+            },
+          },
+        ],
+      };
+      expect(() => validateReport(r)).toThrow();
+    },
+  );
+  it("无效产物失败的请求 ID 必须属于原筛选列表", () => {
+    const r = report();
+    const a = r.plans![0].actions![1];
+    a.status = "failed";
+    a.error = error;
+    delete a.deliveries;
+    a.input_params = { source: { action_instance_id: "1" }, output_ids: ["8"] };
+    a.result = {
+      failures: [
+        {
+          source_action_instance_id: "1",
+          error: {
+            code: "output_not_found",
+            stage: "execution",
+            details: { requested_output_id: "9" },
+          },
+        },
+      ],
+    };
+    expect(() => validateReport(r)).toThrow();
+  });
+  it.each(["earlier", "same", "later"] as const)(
+    "%s 报告不能改变自动取回的固定来源",
+    (boundary) => {
+      const old = linkedCancellation({ action_instance_id: "1" });
+      old.plans = [old.plans![0]];
+      const next = structuredClone(old);
+      next.report_id = "2";
+      next.to_wm = boundary === "earlier" ? 10 : boundary === "same" ? 20 : 30;
+      next.plans![0].actions![1].automation!.source_action_instance_id = "9";
+      expect(() => validateReportAgainstHistory(old, next)).toThrow();
+    },
+  );
+  it.each([
+    "camera_record",
+    "camera_take_photo",
+    "camera_timelapse",
+    "motor_control",
+  ] as const)("%s 接受两种过期原因而不补造执行", (type) => {
+    for (const reason of ["window_missed", "window_exhausted"] as const) {
+      const r = report();
+      const action = camera();
+      action.type = type;
+      action.status = "expired";
+      action.expiration_reason = reason;
+      delete action.outputs;
+      if (type === "motor_control") {
+        delete action.device_id;
+        delete action.effective_params;
+        action.input_params = { position: 1 };
+      }
+      r.plans![0].actions = [action];
+      expect(() => validateReport(r)).not.toThrow();
+    }
+  });
+  it.each(["canceled", "expired"] as const)(
+    "pending 计划接受执行前 %s 与待执行动作共存",
+    (status) => {
+      const r = report();
+      r.plans![0].status = "pending";
+      const action = camera();
+      action.status = status;
+      delete action.outputs;
+      if (status === "expired") action.expiration_reason = "window_exhausted";
+      const waiting = camera();
+      waiting.action_instance_id = "3";
+      waiting.name = "待拍摄";
+      waiting.status = "pending";
+      delete waiting.outputs;
+      r.plans![0].actions = [action, waiting];
+      expect(() => validateReport(r)).not.toThrow();
+    },
+  );
+  it.each(["running", "succeeded", "failed"] as const)(
+    "pending 计划拒绝明确的 %s 执行事实",
+    (status) => {
+      const r = report();
+      r.plans![0].status = "pending";
+      r.plans![0].actions = [camera()];
+      r.plans![0].actions[0].status = status;
+      if (status === "failed") r.plans![0].actions[0].error = error;
+      expect(() => validateReport(r)).toThrow();
+    },
+  );
+  it.each([
+    { action_instance_id: "1" },
+    { plan_instance_id: "1", group: "采集" },
+  ])("取消直接目标允许自动预览联动 %#", (target) =>
+    expect(() => validateReport(linkedCancellation(target))).not.toThrow(),
+  );
+  it("拍摄拒绝取消时不能作为预览联动依据", () => {
+    const r = linkedCancellation({ action_instance_id: "1" });
+    const cancel = r.plans![1].actions![0];
+    cancel.status = "failed";
+    cancel.error = error;
+    cancel.result = {
+      items: [
+        {
+          action_instance_id: "1",
+          status: "failed",
+          error: {
+            code: "task_cancel_unsupported",
+            stage: "execution",
+            details: {},
+          },
+        },
+        {
+          action_instance_id: "2",
+          status: "succeeded",
+          outcome: "already_terminal",
+        },
+      ],
+    };
+    expect(() => validateReport(r)).toThrow();
+  });
+  it.each([
+    { plan_instance_id: "1" },
+    { request_id: "1" },
+    { action_instance_id: "2" },
+  ])("自动取回属于直接目标时独立处理 %#", (target) => {
+    const r = linkedCancellation(target);
+    r.plans![1].actions![0].result = {
+      items: [
+        {
+          action_instance_id: "2",
+          status: "succeeded",
+          outcome: "already_terminal",
+        },
+      ],
+    };
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  it.each([{ current_plan: true }, { plan_instance_id: "1" }])(
+    "计划取回拒绝其他计划的已知来源 %#",
+    (source) => {
+      const r = report();
+      const c = r.plans![0].actions!.shift()!;
+      r.plans![0].actions![0].input_params = { source };
+      r.plans!.push({
+        ...r.plans![0],
+        plan_instance_id: "2",
+        request_id: "2",
+        actions: [c],
+      });
+      expect(() => validateReport(r)).toThrow();
+    },
+  );
+  it.each([
+    { action_name: "另一动作" },
+    { action_instance_id: "8" },
+    { current_plan: true },
+    { plan_instance_id: "8" },
+  ])("范围清理拒绝已知范围外产物 %#", (source) => {
+    const r = report();
+    r.plans![0].actions!.push({
+      action_instance_id: "6",
+      name: "清理",
+      type: "delete_action_outputs",
+      scheduled_at: "2026-01-01 00:00:00",
+      input_params: { source },
+      status: "succeeded",
+      result: {
+        items: [{ output_id: "1", status: "succeeded", outcome: "deleted" }],
+      },
+    });
+    if ("current_plan" in source) {
+      const c = r.plans![0].actions!.shift()!;
+      r.plans!.push({
+        ...r.plans![0],
+        plan_instance_id: "2",
+        request_id: "2",
+        actions: [c],
+      });
+    }
+    expect(() => validateReport(r)).toThrow();
+  });
+  it.each(["self", "non-original", "other-action"] as const)(
+    "预览拒绝 %s 原文件关联",
+    (kind) => {
+      const r = previewReport();
+      const preview = r.plans![0].actions![0].outputs![1];
+      if (kind === "self") preview.preview_of_output_id = "3";
+      if (kind === "non-original") {
+        const second = { ...preview, output_id: "4" };
+        r.plans![0].actions![0].outputs!.push(second);
+        preview.preview_of_output_id = "4";
+      }
+      if (kind === "other-action") {
+        const c = camera();
+        c.action_instance_id = "9";
+        c.name = "其他拍摄";
+        c.outputs = [{ ...output("4"), source_action_instance_id: "9" }];
+        r.plans![0].actions!.push(c);
+        preview.preview_of_output_id = "4";
+      }
+      expect(() => validateReport(r)).toThrow();
+    },
+  );
+  it.each(["earlier", "same", "later"] as const)(
+    "%s 报告不能改变预览原文件关系",
+    (boundary) => {
+      const old = previewReport();
+      const next = previewReport();
+      next.report_id = "2";
+      next.to_wm = boundary === "earlier" ? 10 : boundary === "same" ? 20 : 30;
+      next.plans![0].actions![0].outputs = [
+        { ...output("3"), kind: "preview", preview_of_output_id: "4" },
+      ];
+      expect(() => validateReportAgainstHistory(old, next)).toThrow();
+    },
+  );
+  it("未知预览原文件保留引用，晚到矛盾被拒绝", () => {
+    const old = previewReport();
+    old.plans![0].actions![0].outputs!.shift();
+    expect(() => validateReport(old)).not.toThrow();
+    const next = report();
+    next.report_id = "2";
+    next.from_wm = 20;
+    next.to_wm = 30;
+    next.plans![0].actions![0].outputs = [
+      { ...output(), kind: "preview", preview_of_output_id: "8" },
+    ];
+    next.plans![0].actions = [next.plans![0].actions![0]];
+    expect(() => mergeReport(old, next)).toThrow();
+  });
+  it("同源多个无效请求产物的失败在新水位完整保留", () => {
+    const old = report();
+    const a = old.plans![0].actions![1];
+    a.status = "failed";
+    a.error = error;
+    delete a.deliveries;
+    a.input_params = {
+      source: { action_instance_id: "1" },
+      output_ids: ["8", "9"],
+    };
+    a.result = {
+      failures: [
+        {
+          source_action_instance_id: "1",
+          error: {
+            code: "output_not_found",
+            stage: "execution",
+            details: { requested_output_id: "8" },
+          },
+        },
+        {
+          source_action_instance_id: "1",
+          error: {
+            code: "output_not_found",
+            stage: "execution",
+            details: { requested_output_id: "9" },
+          },
+        },
+      ],
+    };
+    const next = structuredClone(old);
+    next.report_id = "2";
+    next.from_wm = 20;
+    next.to_wm = 30;
+    expect(() => mergeReport(old, next)).not.toThrow();
+  });
+});
 function parse(value: unknown, text = JSON.stringify(value)) {
   const bytes = new TextEncoder().encode(text);
   return parseReport(

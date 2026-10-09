@@ -24,8 +24,183 @@ function setup() {
     app.store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { app, files };
+  return { app, files, dir };
 }
+function pendingLifecycleReport(status: "canceled" | "expired"): StatusReport {
+  const r = mappedReport(Buffer.from("unused"));
+  r.to_wm = 10;
+  const plan = r.plans![0];
+  plan.status = "pending";
+  const c = plan.actions![0];
+  c.status = status;
+  delete c.outputs;
+  delete c.result;
+  delete c.error;
+  delete c.device_execution;
+  if (status === "expired") c.expiration_reason = "window_missed";
+  const waiting = structuredClone(c);
+  waiting.action_instance_id = "999";
+  waiting.name = "待拍摄";
+  waiting.status = "pending";
+  delete waiting.expiration_reason;
+  plan.actions = [c, waiting];
+  return r;
+}
+it.each(["canceled", "expired"] as const)(
+  "执行前 %s 的报告保存原文、覆盖并在重启后保留",
+  (status) => {
+    const { app, dir } = setup();
+    const input = reportInput(pendingLifecycleReport(status));
+    app.applyReports([input]);
+    expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
+      "accepted",
+    );
+    expect(Buffer.from(app.store.report("1")!.bytes)).toEqual(input.bytes);
+    expect(app.snapshot().plans![0].status).toBe("pending");
+    expect(app.state()).toMatchObject({ coverage: 10, ackId: "1" });
+    app.store.close();
+    const restarted = new Application(dir);
+    try {
+      expect(
+        restarted.snapshot().plans![0].actions!.map((a) => a.status),
+      ).toEqual([status, "pending"]);
+      expect(restarted.state()).toMatchObject({ coverage: 10, ackId: "1" });
+      expect(Buffer.from(restarted.store.report("1")!.bytes)).toEqual(
+        input.bytes,
+      );
+    } finally {
+      restarted.store.close();
+    }
+  },
+);
+it.each(["earlier", "same", "later", "gap"] as const)(
+  "计划取回来源晚到的 %s 矛盾不保存报告、不推进确认",
+  (boundary) => {
+    const { app } = setup();
+    const first = mappedReport(Buffer.from("unused"));
+    first.to_wm = 10;
+    const c = first.plans![0].actions![0];
+    const obtain = first.plans![0].actions![1];
+    obtain.input_params = { source: { current_plan: true } };
+    first.plans![0].actions = [obtain];
+    app.applyReports([reportInput(first)]);
+    const before = app.snapshot();
+    const next: StatusReport = {
+      report_id: "2",
+      from_wm: boundary === "gap" ? 15 : 0,
+      to_wm: boundary === "earlier" ? 5 : boundary === "same" ? 10 : 20,
+      plans: [
+        {
+          ...first.plans![0],
+          plan_instance_id: "999",
+          request_id: "999",
+          actions: [c],
+        },
+      ],
+    };
+    const input = reportInput(next);
+    app.applyReports([input]);
+    expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
+      "failed",
+    );
+    expect(app.store.report("2")).toBeUndefined();
+    expect(app.snapshot()).toEqual(before);
+    expect(app.state()).toMatchObject({
+      coverage: 10,
+      ackId: "1",
+      gapTarget: null,
+    });
+  },
+);
+it("状态报告保存后事务失败会回滚原文、投影、覆盖与接收结果", () => {
+  const { app } = setup();
+  app.applyReports([reportInput(pendingLifecycleReport("expired"))]);
+  const next = pendingLifecycleReport("expired");
+  next.report_id = "2";
+  next.from_wm = 10;
+  next.to_wm = 20;
+  const input = reportInput(next);
+  app.store.set("imports", input.file.id, input.file);
+  const before = app.snapshot();
+  const save = app.store.saveReport.bind(app.store);
+  const failure = vi
+    .spyOn(app.store, "saveReport")
+    .mockImplementation((...args) => {
+      save(...args);
+      throw new DataError("保存故障");
+    });
+  expect(() => app.applyReports([input])).toThrow(DataError);
+  failure.mockRestore();
+  expect(app.store.report("2")).toBeUndefined();
+  expect(app.snapshot()).toEqual(before);
+  expect(app.store.get<ImportFile>("imports", input.file.id)?.status).toBe(
+    "received",
+  );
+  expect(app.state()).toMatchObject({ coverage: 10, ackId: "1" });
+  app.applyReports([input]);
+  expect(app.state()).toMatchObject({ coverage: 20, ackId: "2" });
+});
+it("多个无效请求产物失败经连续报告、旧报告和重启完整保留", () => {
+  const { app, dir } = setup();
+  const first = mappedReport(Buffer.from("unused"));
+  first.to_wm = 10;
+  const c = first.plans![0].actions![0];
+  const obtain = first.plans![0].actions![1];
+  obtain.status = "failed";
+  obtain.error = {
+    code: "obtain_items_failed",
+    stage: "execution",
+    details: {},
+  };
+  delete obtain.deliveries;
+  obtain.input_params = {
+    source: { action_instance_id: c.action_instance_id },
+    output_ids: ["900", "901"],
+  };
+  obtain.result = {
+    failures: ["900", "901"].map((id) => ({
+      source_action_instance_id: c.action_instance_id,
+      error: {
+        code: "output_not_found",
+        stage: "output_selection",
+        details: { requested_output_id: id },
+      },
+    })),
+  };
+  const next = structuredClone(first);
+  next.report_id = "2";
+  next.from_wm = 10;
+  next.to_wm = 20;
+  const inputs = [reportInput(first), reportInput(next)];
+  app.applyReports(inputs);
+  expect(
+    inputs.map((i) => app.store.get<ImportFile>("imports", i.file.id)?.status),
+  ).toEqual(["accepted", "accepted"]);
+  app.applyReports([reportInput(first)]);
+  const old = structuredClone(first);
+  old.report_id = "3";
+  app.applyReports([reportInput(old)]);
+  expect(app.state()).toMatchObject({ coverage: 20, ackId: "2" });
+  expect(app.snapshot().plans![0].actions![1].result?.failures).toHaveLength(2);
+  app.store.close();
+  const restarted = new Application(dir);
+  try {
+    const failures = restarted.snapshot().plans![0].actions![1].result
+      ?.failures as Array<{
+      error: { details: { requested_output_id: string } };
+    }>;
+    expect(failures.map((f) => f.error.details.requested_output_id)).toEqual([
+      "900",
+      "901",
+    ]);
+    expect(restarted.state()).toMatchObject({ coverage: 20, ackId: "2" });
+    expect(Buffer.from(restarted.store.report("2")!.bytes)).toEqual(
+      inputs[1].bytes,
+    );
+  } finally {
+    restarted.store.close();
+  }
+});
 function deliveryFailureHistory(
   status: Delivery["status"] = "failed",
   code = "final-copy-error",
