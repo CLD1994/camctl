@@ -264,6 +264,23 @@ stderr、日志及最终错误消息只用于诊断。主程序不据此接手�
 
 本次实际使用[本地 ADB 终止宽限](../../architecture/configuration.md#本地-adb-客户端的终止宽限)时，所属 `settlement.evidence.data` 包含 `terminate_grace_s`，保存本次采用的精确 JSON 秒数。该成员只适用于声明了本地终止处理的证据类型；其他证据类型不因主机配置存在就填写它。恢复未取得原终止处理记录时，不用当前配置补造原值；实际终止信号及退出结果分别按已知事实保存。
 
+### 结果文件观察的分页格式
+
+`result_files_listed/v1` 只包含原活动的规范十进制字符串 `activity_id` 和 `entries` 数组，不证明扫描结束或集合确定。`result_files_listed/v2` 恰好包含下表成员；一次调用最多返回 128 个条目。每批保持独立的实际 `CallOutcome`、错误、收场和调用信息，核实轮次沿同一个 RESULTS 尝试计数。
+
+| 成员 | 含义与约束 |
+| --- | --- |
+| `activity_id` | 原活动的规范十进制字符串，与原 RESULTS 票据目标精确相同 |
+| `entries` | 本次实际取得的文件数组；合法空页可以仍有后续页 |
+| `cursor` | 本次请求的原游标；首批为 JSON `null` |
+| `next_cursor` | 下一批游标；JSON `null` 明确表示本次扫描没有后续页，不证明集合已经确定 |
+| `set_finalized` | JSON 布尔值，表示驱动按任务契约取得的集合确定保证；有后续页时必须为 `false` |
+| `completion_evidence` | JSON `null` 或恰好包含 `type`、`version`、`data` 的实际设备完成观察；身份须关联原活动，含义由原驱动登记校验，等待假设不写入该成员 |
+
+目录游标恰好包含 `device_id`、`driver_id`、`directories`、`directory_index`、`after_path`，保持原绑定和完整目录范围，目录索引及路径遵守目录分页端口。后续游标须推进，不能返回同一游标。文件条目保留稳定身份、定位、写完状态、大小、类别及适用元数据；`format_id` 是驱动声明的非空格式标识或 JSON `null`，不由 PHOTO 类别推定具体格式。
+
+没有文件观察的错误保存真实空观察，不能解释为成功读取空目录。扫描中断或读取错误时，已经取得的文件和保证仍保留，但这次扫描不提供完整扫描依据；新轮次不拼接旧扫描形成完整集合。扫描完整、集合确定、设备完成、文件归属和单个文件写完分别核对。实时解释与原历史恢复使用同一格式登记和编解码器。
+
 ### 第一版 ADB 运行假设的结果记录
 
 删除调用超时，本地 ADB 客户端已经退出并完成资源清理，但没有可靠删除结果时，尝试保存 `FAILED`、超时错误和 `UNKNOWN` 效果。`result_json.settlement.basis` 为 `assumed`，`settlement.evidence.type` 为 `adb_foreground_assumption`，`version` 为 `1`。该类型及版本对应[第一版普通前台命令运行假设](../../architecture/adb-execution.md#第一版普通前台命令的运行假设)，适用于本次运行中完成本地收场的调用；运行假设的适用条件由驱动规格、实现及测试保证。

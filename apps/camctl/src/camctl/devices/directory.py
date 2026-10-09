@@ -28,6 +28,19 @@ class DirectoryCursor:
             if not identity.path.startswith(roots[index] + "/"):
                 raise ValueError("目录游标不属于原目录")
 
+    def as_json(self) -> dict:
+        return {"device_id": self.binding.device_id, "driver_id": self.binding.driver_id,
+                "directories": list(self.directories), "directory_index": self.directory_index,
+                "after_path": self.after_path}
+
+    @classmethod
+    def from_json(cls, value) -> "DirectoryCursor":
+        if (not isinstance(value, dict) or set(value) != {"device_id", "driver_id", "directories", "directory_index", "after_path"}
+                or not isinstance(value["directories"], list)):
+            raise ValueError("目录游标必须包含完整登记成员")
+        return cls(DeviceBinding(value["device_id"], value["driver_id"]),
+                   tuple(value["directories"]), value["directory_index"], value["after_path"])
+
 
 @dataclass(frozen=True)
 class DirectoryRequest:

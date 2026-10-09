@@ -187,11 +187,17 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
         if spec:
             raise ValueError("拍照执行定义必须是空对象")
         return {}
+    products = {}
+    if "product_rules" in spec:
+        from camctl.capture.results import ProductRule
+        if not isinstance(spec["product_rules"], list):
+            raise ValueError("必要产物规则必须保存为 JSON 数组")
+        products = {"product_rules": [ProductRule.from_json(value).as_json() for value in spec["product_rules"]]}
     if action_type == "camera_record":
         ownership = _ownership(spec)
-        if set(spec) != {"target_duration_ms", *ownership}:
+        if set(spec) != {"target_duration_ms", *ownership, *products}:
             raise ValueError("录像定义必须保存目标时长及适用的归属声明")
-        return {"target_duration_ms": _integer(spec["target_duration_ms"], 1), **ownership}
+        return {"target_duration_ms": _integer(spec["target_duration_ms"], 1), **ownership, **products}
     if action_type != "camera_timelapse":
         raise ValueError("动作类型不是拍摄动作")
     required = {"duration_based", "wait_after_send", "end_control", "stop_supported", "start_return_meaning", "completion_mode"}
@@ -201,12 +207,12 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
         if not isinstance(spec[key], bool):
             raise ValueError(f"{key} 必须是 JSON 布尔值")
     ownership = _ownership(spec)
-    result = {**spec, **ownership}
+    result = {**spec, **ownership, **products}
     end = EndControl(_integer(spec["end_control"], 1))
     start = StartReturn(_integer(spec["start_return_meaning"], 1))
     completion = CompletionMode(_integer(spec["completion_mode"], 1))
     result.update(end_control=int(end), start_return_meaning=int(start), completion_mode=int(completion))
-    expected = set(required) | set(ownership)
+    expected = set(required) | set(ownership) | set(products)
     if spec["duration_based"]:
         expected.add("target_duration_ms")
     if spec["wait_after_send"]:
@@ -235,14 +241,15 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
     ownership = {}
     if task.ownership_mode is not None or task.output_scope is not None:
         ownership = {"ownership_mode": task.ownership_mode, "output_scope": task.output_scope}
+    products = {} if task.product_rules is None else {"product_rules": deepcopy(list(task.product_rules))}
     if action_type == "camera_record":
         if task.stop_supported is not True:
             raise ValueError("录像任务必须明确具备 stop_supported")
-        return validate_capture_spec(action_type, {"target_duration_ms": seconds_to_duration_ms(task.target_duration_s), **ownership})
+        return validate_capture_spec(action_type, {"target_duration_ms": seconds_to_duration_ms(task.target_duration_s), **ownership, **products})
     spec = {"duration_based": task.duration_based, "wait_after_send": task.wait_after_send,
             "end_control":task.end_control, "stop_supported":task.stop_supported,
             "start_return_meaning":task.start_return_meaning, "completion_mode":task.completion_mode,
-            **ownership}
+            **ownership, **products}
     if task.target_duration_s is not None:
         spec["target_duration_ms"] = seconds_to_duration_ms(task.target_duration_s)
     if task.result_wait_margin_s is not None:
