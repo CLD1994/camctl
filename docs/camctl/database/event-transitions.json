@@ -7396,6 +7396,7 @@
             "plan_aggregate"
           ],
           "evidence": [
+            "cancel_request",
             "motor_permit",
             "motor_request"
           ]
@@ -7681,7 +7682,9 @@
             "report_impact",
             "intermediate"
           ],
-          "evidence": []
+          "evidence": [
+            "cleanup_request"
+          ]
         }
       }
     },
