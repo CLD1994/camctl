@@ -1,4 +1,6 @@
 """首次拍摄控制重新核对残留，尚未派发的等待遵守启动窗口。"""
+import sqlite3
+
 import pytest
 from decimal import Decimal
 
@@ -29,6 +31,10 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
         DbOutcomeKind.COMPLETED,
         value=ExpireActionResult(ExpireOutcome.EXPIRED, expiration_reason=2))
     runtime.owned = mocker.Mock()
+    runtime.owned.connection = mocker.create_autospec(sqlite3.Connection, instance=True)
+    cursor = mocker.create_autospec(sqlite3.Cursor, instance=True)
+    cursor.fetchone.return_value = None
+    runtime.owned.connection.execute.return_value = cursor
     runtime.binding_check = None
     runtime.timelapse_deadlines = {}
     runtime.start_config = AttemptConfig(3, Decimal("10"), Decimal("3"))

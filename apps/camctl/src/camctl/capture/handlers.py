@@ -189,6 +189,9 @@ _ACTION_TERMINAL = (3, 4, 5, 6)
 
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _ACTION_TYPE = enum_for("actions.type")
+_RUN_STATUS = enum_for("operation_runs.status")
+_ACTIVITY_STATE = enum_for("device_activities.activity_state")
+_RESULT_SET_STATE = enum_for("device_activities.result_set_state")
 _EFFECT_STATE = enum_for("operation_attempts.effect_state")
 _DISPATCH_STATE = enum_for("device_activities.dispatch_state")
 _CHECK_DECISION = enum_for("recording_processing.check_decision")
@@ -1781,10 +1784,82 @@ def _target_duration_ms(action: Mapping[str, Any]) -> int:
     return duration
 
 
+def _closed_capture_is_local(
+    runtime: CaptureRuntime, action: Mapping[str, Any],
+) -> bool:
+    """原有限核实已结束且无需设备操作时，按原事实继续业务收尾。"""
+    if action["type"] not in (
+            int(_ACTION_TYPE.CAMERA_TAKE_PHOTO), int(_ACTION_TYPE.CAMERA_TIMELAPSE)):
+        return False
+    with closing(runtime.owned.connection.execute(
+        "SELECT id,result_set_state,activity_state,sent_at,wait_completed_event_id"
+        " FROM device_activities WHERE action_id=?", (action["id"],),
+    )) as cursor:
+        activity = cursor.fetchone()
+    if activity is None or activity[1] != int(_RESULT_SET_STATE.UNCONFIRMED):
+        return False
+    with closing(runtime.owned.connection.execute(
+        "SELECT action_id,activity_id,kind,status FROM operation_runs"
+        " WHERE responsibility_key=?", (f"results/{activity[0]}",),
+    )) as cursor:
+        results = cursor.fetchone()
+    if (results is None or results[:3] != (
+            action["id"], activity[0], int(_RUN_KIND.CHECK_CAPTURE_RESULTS))):
+        raise ConsistencyError("已保存无法确认结论缺少原 RESULTS 责任")
+    if results[3] != int(_RUN_STATUS.UNCONFIRMED):
+        return False
+
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+
+    start = load_start_facts(runtime.owned.connection, action)
+    if start.run is None or start.attempts_used == 0 or start.not_started:
+        raise ConsistencyError("已结束 RESULTS 缺少原已执行启动事实")
+    with closing(runtime.owned.connection.execute(
+        "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " WHERE r.action_id=? AND t.status=? LIMIT 1",
+        (action["id"], int(_ATTEMPT_STATUS.RUNNING)),
+    )) as cursor:
+        if cursor.fetchone() is not None:
+            return False
+    with closing(runtime.owned.connection.execute(
+        "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " WHERE r.action_id=? AND t.result_event_id IS NULL LIMIT 1", (action["id"],),
+    )) as cursor:
+        if cursor.fetchone() is not None:
+            raise ConsistencyError("本地拍摄收尾缺少原实际调用结果")
+    if action["type"] == int(_ACTION_TYPE.CAMERA_TAKE_PHOTO):
+        return True
+    if not action["cancel_requested"]:
+        if activity[3] is None or activity[4] is None:
+            raise ConsistencyError("已结束延时核实缺少原发送或等待完成事实")
+        return True
+
+    with closing(runtime.owned.connection.execute(
+        "SELECT action_id,activity_id,kind,status FROM operation_runs"
+        " WHERE responsibility_key=?", (f"stop/{action['id']}",),
+    )) as cursor:
+        stop = cursor.fetchone()
+    ended = activity[2] == int(_ACTIVITY_STATE.ENDED)
+    if stop is None:
+        return ended
+    if stop[:3] != (action["id"], activity[0], int(_RUN_KIND.STOP)):
+        raise ConsistencyError("取消延时收尾的原 STOP 身份不符")
+    if ended:
+        return True
+    if stop[3] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+        return False
+    if stop[3] in (int(_RUN_STATUS.SUCCEEDED), int(_RUN_STATUS.FAILED),
+                   int(_RUN_STATUS.UNCONFIRMED)):
+        return True
+    raise ConsistencyError("取消延时收尾缺少适用的原 STOP 结束结果")
+
+
 def _handle_binding_failure(
     runtime: CaptureRuntime, action: Mapping[str, Any],
 ) -> bool:
     """异常绑定不产生新调用；原结果可靠保存后共同保存业务收场。"""
+    if _closed_capture_is_local(runtime, action):
+        return False
     if runtime.binding_check is None:
         return False
     binding_result = runtime.binding_check(_binding(action))
@@ -2806,8 +2881,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     if listing.phase is ListingPhase.EXHAUSTED:
         # 有限轮次用尽：核实责任与无法确认结论同事务收场。
         _close_check_unconfirmed(context, action_id)
-        _finish_capture(context, action_id, (), FileKind.VIDEO,
-                        failure=_unconfirmed_failure(context, action_id))
+        await _finish_timelapse_conclusion(context, action_id)
         return
     # v1 文件观察分别证明归属与单文件事实，不提供集合确定依据。
     # 真实未确定分区保存原本轮与已取得文件，下一检查仍沿原有限责任。
