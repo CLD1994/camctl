@@ -2,7 +2,7 @@
 
 来源：`tmp/相机控制-tmp.xlsx`，工作表 `Sheet1`。本文件按设备和任务整理会议记录、任务要求、厂商命令及待核实事项。[原文转录](camera-control-source.md)保留全部非空单元格、图片、删除线和来源位置。
 
-原表使用 `Action`、`Action6`，以及 `OSMO 360`、`OSMO360II`、`OSMO 360 II` 等名称。本稿分别以“Action / Action6”和“OSMO 360 / 360 II”作为分组标题；名称是否对应同一具体硬件及固件版本，原表没有给出完整说明。
+原表使用 `Action`、`Action6`，以及 `OSMO 360`、`OSMO360II`、`OSMO 360 II` 等名称。`Action` 和 `Action6` 均指 Action6；各 OSMO 360 名称均指 OSMO 360 II。本稿沿用原表分组名称，不将不同称呼解释为不同型号。设备固件版本及命令适用范围仍须通过实际接入核实。
 
 ## 阅读约定
 

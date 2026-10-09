@@ -38,7 +38,7 @@
 
 保存恢复另有需要机械核实的接缝：`_finish_listing_result` 已将 compound ResultSetSave 放入原 RESULTS holder；耗尽的 `_close_check_unconfirmed` 则现场取得时刻/key 后直接调用仓储，没有对应会话 holder。仓储 `_CloseResultCheckCommand` 支持完整原键重送，并不证明消费者保留了申请。任务一的 UNKNOWN 反例必须同时覆盖这两个来源；若耗尽申请确实丢失，根 Agent 须先确认有效红再批准共享保存责任，不能以仓储重送绿色替代真实入口恢复。
 
-## 错误含义的确定分区与待决策分区
+## 错误含义的分区
 
 下表只描述错误依据，不改变原调用 Outcome、集合结论或业务终态。
 
@@ -46,13 +46,13 @@
 | --- | --- | --- |
 | 原有限 RESULTS 预算耗尽，仍不能确认产物要求 | `capture_result_unconfirmed`，登记阶段 `execution`，`details` 为真实活动 ID 和 `reason: outputs_unknown`。 | 可以实施；activity ID 不能用 action ID 代替。capture 与 last_error 如表达同一核实错误，应使用同一完整值。 |
 | 驱动已提供明确的采集失败错误 | 原驱动 code、实际 stage、完整 details 保持；动作最终错误按已有拍摄失败规则另行构造。 | 可以实施结构验证和保真；不得用最后一个驱动错误替代独立的集合结论。 |
-| 正式独立依据确认集合结束、归属范围可靠且本次没有任何要求的产物 | `capture_failed` 的 `no_outputs` 原因已有明确缺少产物的业务依据，阶段从登记读取。 | 必须有可靠空集合结论；空 v1 entries、列举失败或尚未确认的归属不能作为该依据。 |
-| 正式独立依据确认集合，已有部分文件，但缺必需类别或数量不符 | 保存具体未满足规则和保留条件明确的文件；现有登记包含 `invalid_outputs`，但正式规则与评估模型未给出该分区到 reason 的唯一映射。 | 待决策：是否使用既有 `invalid_outputs`、如何区分无要求产物与存在部分要求产物，以及是否需要详情表达缺少规则。不得自行填写 `no_outputs` 或扩登记字段。 |
-| 集合和归属确定，但其他必要文件检查不通过 | 原具体检查依据必须保留；不能只由 `assessment.is_complete == False` 选择统一错误。 | 待决策：逐项检查失败与部分文件缺失的错误映射，以及驱动原错误和框架采集错误的关系。 |
+| 正式独立依据确认集合结束、归属及写入完成依据充分且本次任务文件集合为空 | `capture_failed`，原因 `no_outputs`，阶段从登记读取。 | 必须有可靠空集合结论；空 v1 entries、列举失败或尚未确认的归属不能作为该依据。 |
+| 正式独立依据确认集合，归属及写入完成依据充分，集合非空，但缺必需类别或数量不符 | `capture_failed`，原因 `invalid_outputs`；内部保存具体未满足规则，保留条件明确的文件。 | 按[产物检查的错误表达](../../architecture/camera-capture.md#产物检查的错误表达)实施；details 使用真实活动 ID，不扩登记字段。 |
+| 集合和归属及写入完成确定，集合非空，但其他必要文件检查明确不通过 | `capture_failed`，原因 `invalid_outputs`；原具体检查依据必须保留。 | 不能只由 `assessment.is_complete == False` 分类；先排除事实未确认和读取错误，原驱动错误按其独立责任保存。 |
 | 文件或集合依据未确定、文件信息读取失败 | 保持实际错误与未确认事实，在适用预算内继续，耗尽后按首行处理。 | 不生成 UNSATISFIED/KNOWN_FAILURE，不推断缺少产物。 |
 | 原集合结论或动作终态已经可靠保存 | 保持原事实；报告重建只解释对应 H。 | 不改原 key 的申请，不覆盖原 Outcome，不重新列举。 |
 
-`assess_capture_files` 只输出完整性、`explicitly_unmet`、缺少类别和未完成事实，没有输出错误 reason。其 `explicitly_unmet` 依赖独立的 `set_finalized`，当前 v1 普通路径不能从条目补该值。UNSATISFIED 待决策项只阻塞其错误生产与对应业务 fixture 修正，不阻塞已经确定的 UNCONFIRMED 和纯公共结构验证。不能把旧 `_finish_timelapse_conclusion` 的统一 `no_outputs` 分支视为正式映射来源。
+`assess_capture_files` 只输出完整性、`explicitly_unmet`、缺少类别和未完成事实，没有输出错误 reason。其 `explicitly_unmet` 依赖独立的 `set_finalized`，当前 v1 普通路径不能从条目补该值。UNSATISFIED 的错误映射依据上述正式规则实施；错误生产与对应业务 fixture 修正尚待执行，不表示集合完成能力已接通。UNCONFIRMED 和纯公共结构验证保持已有契约，不能把旧 `_finish_timelapse_conclusion` 的统一 `no_outputs` 分支视为正式映射来源。
 
 ## 公共结构、投影及失败矩阵
 
@@ -78,7 +78,7 @@
 
 ## 任务一：确定构造与保存边界
 
-**预估文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py` 的公共耗尽构造，`capture/models.py` 与仓储结果守卫；共用验证建议放在 `contracts/workflow_errors.py`。新增 `apps/camctl/tests/unit/capture/test_result_error_contract.py` 和 `apps/camctl/tests/integration/capture/test_result_error_history.py`。未决 UNSATISFIED 生产函数暂不修改。
+**预估文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py` 的公共耗尽构造，`capture/models.py` 与仓储结果守卫；共用验证建议放在 `contracts/workflow_errors.py`。新增 `apps/camctl/tests/unit/capture/test_result_error_contract.py` 和 `apps/camctl/tests/integration/capture/test_result_error_history.py`。UNSATISFIED 生产函数按任务三的正式错误分区单独实施。
 
 **接口建议：** `validate_public_error(value: Mapping[str, Any]) -> None` 复用 `status-report.schema.json#/$defs/error` 和现有本地 Schema 注册表，验证完整形状；登记码附加检查正式 stage/details，未知码保留开放行为。返回值不重构、不标准化原错误。输入模型按现行 ValueError 约定拒绝，事件守卫转换为现有 EventValidationError；不改变 DbOutcome 协议。
 
@@ -88,9 +88,9 @@
 - [ ] 写真实组件 `test_finite_results_exhaustion_saves_complete_activity_error`，参数化 photo/timelapse 与 action/activity 是否不同。复用公开 `consumer_world` 的 Acceptance、调度、真实 START 和 typed RESULTS，设置有界预算与可控等待；耗尽后核正式完整核实错误、原实际 Outcome、文件及累计尝试守恒。不能直接 SQL 写动作/集合状态。
 - [ ] 在同文件写公共保存重送反例：原完整 ResultSetSave/key/T1 在 COMMIT 前后 UNKNOWN 后关闭原连接，fresh Owned 核实可靠 F，再原键重送。核历史完整组最多一份、首次响应与错误不变、零额外设备调用。该步骤沿现有责任 holder，不把新错误格式伪装成另一实际返回。
 - [ ] 对上述两类来源分别从实际消费者触发故障；耗尽来源至少覆盖 photo/timelapse，再从正常默认入口消费共享责任。若需要新增 holder，建议保存完整 ResultSetSave、原 key 与首次 response，并由同会话 RuntimeDeps/三 factory 共享；仅重送已形成申请的前置保存不取得新的受限或取消业务资格。原请求可靠完成前不保存依赖终态；UNKNOWN/回滚保持申请并按 StateDbFailure 停止候选。具体集合和回调接线须依据有效反例由根协调，不自行扩大 flow 资格。
-- [ ] 用合法 UNCONFIRMED 申请加完整错误建立仓储组件前提，控制事件输入的公共结构使守卫成为被测边界；拒绝后无半组历史/投影。待决策 UNSATISFIED 用例不靠更换假码提前获得绿色。
+- [ ] 用合法 UNCONFIRMED 申请加完整错误建立仓储组件前提，控制事件输入的公共结构使守卫成为被测边界；拒绝后无半组历史/投影。UNSATISFIED 用例使用正式错误分区，不靠更换假码获得绿色。
 - [ ] 根确认实际红后，仅修已确定构造、共同验证和守卫。按新规范修受影响旧 typed fixture 的合法输入；不删除原业务预期。
-- [ ] 审计全部 `_close_check_unconfirmed` 调用及结果集合直接保存入口，列出 UNKNOWN/终态未覆盖分区。未决 UNSATISFIED 单独提交状态表供决策后才能推进。
+- [ ] 审计全部 `_close_check_unconfirmed` 调用及结果集合直接保存入口，列出 UNKNOWN/终态未覆盖分区。UNSATISFIED 按任务三审计完整状态分类及恢复消费。
 
 ## 任务二：固定 H 的解释与报告分类
 
@@ -134,9 +134,9 @@
 
 `/tmp/camctl-goal-historical-json-flow-gate.log` 为 6 passed、5.76s，包含两项新真实组合与既有报告 flow 四项。STATE 分区保留整个原报告登记和全部历史、删除半成品、不发布、不调用后续 flow，监督方可靠回收工作者；REPORT 分区实际到达 fsync 故障，可靠追加报告失败历史并继续后续 flow，原 H、水位、未发布事实及设备调用保持。此场景的 flow 之前没有其他业务 flow；发现 STATE 不撤销此前已完成的合法事务。
 
-## 任务三：未决语义与同类入口交接
+## 任务三：结果失败语义与同类入口交接
 
-- [ ] 根与用户/正式规格维护者确定非空 UNSATISFIED 的 reason 分区；最少覆盖仅 OTHER、缺一类必需产物、数量不符和其他必要检查失败，以及明确驱动失败与文件同时存在。详情是否需要扩展属于公共协议决定，不能由实施者添加字段。
+- [x] 非空 UNSATISFIED 的 reason 分区登记于[产物检查的错误表达](../../architecture/camera-capture.md#产物检查的错误表达)：只有 OTHER、缺一类必需产物、数量不符和其他必要检查明确失败使用 `invalid_outputs`；可靠空集合使用 `no_outputs`。明确驱动失败优先按其独立责任处理，详情保持现有公共登记；具体未满足规则内部保存。2026-10-10 完成规格登记，生产构造和对应反例尚待实施。
 - [ ] 决策写入责任规格后，分别对 `_confirm_timelapse_results` 的 KNOWN_FAILURE 构造和 `_finish_timelapse_conclusion` 恢复消费写真实公开历史反例。只有独立正式集合依据才能建立该前提；保留符合条件文件，零新 listing，原 attempt 不变。
 - [ ] 审计应急补记缺 details 的构造及活动错误的正式公开身份；先建立原应急资格和公开报告可达分区，再确认反例。没有正式身份映射时只报告，不补猜测的公共阶段或公开内部码。
 - [ ] 汇报已闭合分区与未闭合分区；不得由 UNCONFIRMED 和形状测试绿色声明所有采集错误或报告恢复完成。
@@ -159,7 +159,7 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 
 2026-10-09，Linux 开发容器、Python 3.11.16：root 独占运行新单元文件，`/tmp/camctl-goal-result-errors-unit-red.log` 为 26 failed、4 passed、0.10s；不完整结构、登记阶段和详情均未被拒绝，完整登记值及未知驱动值保真控制通过。真实组件文件 `/tmp/camctl-goal-result-errors-history-red.log` 为 4 failed、2.34s；photo/timelapse 与独立 activity ID 四项的公开启动、两轮实际结果、次数耗尽、动作失败及正式动作错误全部通过，活动核实错误仍只有 `code: result_unconfirmed`。这些有效红允许实施已确定的共同结构验证和耗尽构造；UNKNOWN 保存责任及报告生成还未验证。
 
-UNCONFIRMED、公共形状、未知完整驱动错误保真和历史实例 STATE 分类有正式依据；非空 UNSATISFIED 错误 reason、必要检查失败映射及应急错误身份仍需决策或反例核验。RESULTS v2、历史格式迁移、完整媒体失败优先阶段、真实设备与物理断电验收不属于本计划完成声明。实施与验证范围见下文。
+UNCONFIRMED、公共形状、未知完整驱动错误保真和历史实例 STATE 分类有正式依据；非空 UNSATISFIED 的错误 reason 和必要检查失败映射已登记于责任规格，其生产与恢复仍需反例及实施。应急错误身份仍需独立决策或核验。结果集合完成能力、历史格式迁移、完整媒体失败优先阶段、真实设备与物理断电验收不属于本计划完成声明。实施与验证范围见下文。
 
 ### 首批测试候选（2026-10-09）
 
@@ -243,7 +243,7 @@ Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 fai
 1. 根独占运行纯守卫反例。通过正式注册取得独立语义的活动、结果守卫，内存资源隔离公共 Schema，覆盖七个分支、新建空值、保留的非法错误、五个采集状态、两个错误位置及规则错误分类。先证明非法实例被旧守卫接受，不将资源或新接口导入错误计为有效红。
 2. 真实受理、调度和设备 START 形成合法前提。合法 ResultSetSave 构造后修改调用方仍持有的嵌套字典，分别经三个公共保存入口验证缺 stage、登记 stage 错误和登记 details 错误。拒绝为 ROLLED_BACK，原 H、投影、流程、尝试及设备调用保持，没有半组历史。另核合法错误与允许空值、原 key 重送和原输入保持。
 3. 建议把内部 capture 对象的共同验证放在原模型责任边界，由模型输入与活动守卫复用；内部函数和类型命名是实现建议。结果守卫核新 capture 与所属结论分区。业务错误验证复用现有 validate_public_error，并先排除 SchemaRuleError；不放宽登记或吞掉实例错误。
-4. 横切审计实际错误生产者与全部活动分支。正常 START、STOP、残留与绑定收场没有新活动错误生产；已有完整有限 RESULTS 耗尽错误继续通过。UNSATISFIED 的错误 reason 及应急两个框架错误的正式身份仍待决定，不能猜测或仅补空详情。应急省略活动行时仍可能创建带错误的流程，活动守卫不代替其独立生产与组合责任。
+4. 横切审计实际错误生产者与全部活动分支。正常 START、STOP、残留与绑定收场没有新活动错误生产；已有完整有限 RESULTS 耗尽错误继续通过。UNSATISFIED 的错误 reason 按任务三的正式分区实施；应急两个框架错误的正式身份仍待决定，不能猜测或仅补空详情。应急省略活动行时仍可能创建带错误的流程，活动守卫不代替其独立生产与组合责任。
 5. 根顺序运行单元、capture 的新事务门禁与已有有限耗尽恢复门禁，必要时核相应 history 消费者。阶段报告区分守卫、生产者与历史重放的覆盖；按用户要求整体提交，不以未决分区或未执行候选宣称完整目标完成。
 
 新守卫反例已经保存于 `cc52d20`。根独占的纯守卫有效红为 71 failed、28 passed；三个公开入口的十八项修改后错误实例全部被旧事务错误接受。资源故障在旧守卫下没有触发，不算事务退出路径的有效红。接入共同校验后，资源故障实际发生于 BEGIN 之后的结果守卫；两个真实组件反例分别确认同一 Owned 仍在事务中，以及回滚失败分区没有返回 UNKNOWN。
@@ -325,4 +325,4 @@ Linux 开发容器、Python 3.11.16。根独占的新单元 `/tmp/camctl-goal-re
 
 独立只读审查核原申请不替换、失败后不释放、可靠后清等待、三个工厂共享集合和五入口的候选前顺序，未发现该阶段新增阻断。动作终态、取消与绑定筛选的静态顺序已核；这不等于所有相互竞争状态均已有运行反例。
 
-后续独立缺口仍保留：耗尽后 `_finish_capture` 的普通 FinishCapture 保存遇到 UNKNOWN 时没有同类完整申请责任；ResultRunClose 公共端口尚未校验动作只适用于录像。photo/timelapse 可靠 CLOSED 后的本地文件收尾与失效绑定也需独立修复。上述项目不作为本阶段完成声明。全量 capture 目录没有在此阶段重跑或宣称通过；上一阶段记录的 UNSATISFIED 与应急错误身份分区仍等待决策。
+后续独立缺口仍保留：耗尽后 `_finish_capture` 的普通 FinishCapture 保存遇到 UNKNOWN 时没有同类完整申请责任；ResultRunClose 公共端口尚未校验动作只适用于录像。photo/timelapse 可靠 CLOSED 后的本地文件收尾与失效绑定也需独立修复。上述项目不作为本阶段完成声明。全量 capture 目录没有在此阶段重跑或宣称通过；UNSATISFIED 的错误映射按任务三推进生产与反例，应急错误身份继续独立决策。
