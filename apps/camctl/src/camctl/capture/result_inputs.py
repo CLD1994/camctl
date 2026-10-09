@@ -14,6 +14,8 @@ from camctl.operations.models import (
     EvidenceValue, Settlement, SettlementBasis,
 )
 
+from camctl.operations.result_format import read_result_document
+
 RESULT_LISTED_TYPE = "result_files_listed"
 RESULT_LISTED_VERSION = 1
 RESULT_FILES_CONTRACT = EvidenceContract(
@@ -76,6 +78,8 @@ def page_from_outcome(ticket: AttemptTicket, outcome: CallOutcome, *,
     if len(listed) != 1:
         raise ConsistencyError("一次结果页必须具有一份文件观察")
     value = listed[0]
+    if type(value.version) is not int:
+        raise ConsistencyError("结果文件观察版本必须是登记整数")
     contract = RESULT_FILES_CONTRACT if value.version == 1 else RESULT_PAGE_CONTRACT
     validate_observation(value, contract, expected_identity=ticket.target_id)
     if set(value.data) != contract.fields or not isinstance(value.data["entries"], (list, tuple)):
@@ -167,26 +171,6 @@ def files_from_outcome(ticket: AttemptTicket, outcome: CallOutcome) -> tuple[Obs
 def saved_outcome(status: int, effect: int, result: Mapping, error: Mapping | None) -> CallOutcome:
     """恢复原外层结果；状态与错误仍来自原尝试，不生成成功结果。"""
     try:
-        if result["format_version"] != 1:
-            raise ValueError("结果外层版本不支持")
-        settlement = result["settlement"]
-        evidence = settlement["evidence"]
-        info = result.get("call_info")
-        call_info = None
-        if info is not None:
-            local = info.get("local_exit", {})
-            call_info = CallInfo(local_exit_code=local.get("exit_code"),
-                                 local_signal=local.get("signal"),
-                                 remote_exit_code=info.get("remote_exit_code"))
-        return CallOutcome(
-            status=AttemptStatus(enum_for("operation_attempts.status")(status).name.lower()),
-            effect=EffectState(enum_for("operation_attempts.effect_state")(effect).name.lower()),
-            error=None if error is None else ErrorValue(error["code"], error["stage"], error.get("details", {})),
-            settlement=Settlement(SettlementBasis(settlement["basis"]),
-                EvidenceValue(evidence["type"], evidence["version"], evidence["data"])),
-            observations=tuple(DeviceObservation(value["type"], value["version"], value["data"])
-                               for value in result["observations"]),
-            call_info=call_info,
-        )
+        return read_result_document(status, effect, result, error)
     except (KeyError, TypeError, ValueError) as failure:
         raise ConsistencyError("已保存 RESULTS 完整结果不可解释") from failure

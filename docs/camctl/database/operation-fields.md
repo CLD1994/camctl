@@ -157,6 +157,8 @@ SQL 负责列值、空值组合、责任键格式及唯一性。保存事件的�
 
 普通尝试的 `intent_event_id` 必填，指向派发前意图及额度提交的事件；应急尝试该列为空，按[最终补记](#应急停止的最终补记)保存。`result_event_id` 在没有可靠结束结果时为空，有结果后指向保存该结束结果的事件，结束后保持。每条尝试保存实际执行时使用的 `max_attempts_used`、`timeout_s_json`、`retry_interval_s_json`。恢复原读取尝试时后续调用可以采用新配置，应用层将新依据写入该尝试并保留变更历史，不能改动已结束尝试的依据。
 
+`CHECK_CAPTURE_RESULTS` 的 `result_first_page_event_id`、`result_last_page_event_id` 指向本次尝试已可靠保存的首末结果页。没有页时两列共同为空；首次页共同建立范围，后续页保持首引用并推进末引用。范围中每页保留完整实际结果，尝试仍可为 `RUNNING`；页读取、原游标和基准比较位置遵守[结果页的分批记录](history-formats.md#结果页的分批记录)。其他操作两列为空，不将多次实际页调用合成为一次本地或远端退出。
+
 | `status` | 结果与错误 | `effect_state` 的含义 |
 | --- | --- | --- |
 | `RUNNING` | `result_event_id`、`result_json`、`error_json` 均为空，可能只有已保存意图 | `UNKNOWN`，不能证明命令已经发出或没有发出 |

@@ -675,6 +675,8 @@ def register_capture_guards() -> None:
     register_guard("result_check", _result_check_guard)
     from .baseline import register_baseline_guard
     register_baseline_guard()
+    from .result_pages import register_result_page_guard
+    register_result_page_guard()
 
 
 class FinishCaptureCommand:
@@ -1727,6 +1729,15 @@ class CaptureRepository:
     def baseline_ref(self, activity_id: int, owned: OwnedConnection) -> BaselineRef:
         from .baseline import read_reference
         return read_reference(activity_id, owned)
+
+    def save_result_page(self, request, key: OperationKey, owned: OwnedConnection):
+        from .result_pages import SaveResultPageCommand
+        receipt = commit_operation(SaveResultPageCommand(request, key), key, owned)
+        return DbOutcome(kind=DbOutcomeKind(receipt.kind), value=receipt.result, error=receipt.error)
+
+    def read_result_pages(self, ticket, cursor: int | None, batch: int, owned: OwnedConnection):
+        from .result_pages import read_pages
+        return read_pages(ticket, cursor, batch, owned)
 
     def read_baseline(self, ref: BaselineRef, cursor: int | None, batch: int,
                       owned: OwnedConnection) -> Page[BaselineChunk, int]:
@@ -4201,6 +4212,28 @@ def _observer_binding(action) -> tuple[str, str]:
     return device, driver
 
 
+def file_discovery_row(command: FileObservationSave, file_id: int, identity_key: str):
+    """共同构造首次发现的未知文件行，不提前确认归属或完成。"""
+    return _row("device_files", file_id, {
+        "observer_action_id": command.observer_action_id,
+        "source_action_id": None,
+        "identity_key": identity_key,
+        "locator_json": dict(command.locator),
+        "ownership_evidence_json": None,
+        "original_name": command.original_name,
+        "media_type": command.media_type,
+        "role": int(_FILE_ROLE.UNDETERMINED),
+        "original_device_file_id": None,
+        "pairing_evidence_json": None,
+        "presence_state": int(_FILE_PRESENCE.UNKNOWN),
+        "completion_state": int(_FILE_COMPLETION.UNKNOWN),
+        "completion_evidence_json": None,
+        "size_bytes": None,
+        "checksum_support": int(_FILE_CHECKSUM.UNDETERMINED),
+        "sha256": None,
+        "last_error_json": None,
+    })
+
 class _FileCreateCommand:
     """登记一次设备文件发现（DEVICE_FILE_OBSERVED.CREATE）。
 
@@ -4244,25 +4277,7 @@ class _FileCreateCommand:
                 result=ObservationOutcome(ObservationDisposition.ALREADY, file_id),
             )
         file_id = _next_id(connection, "device_files")
-        row = _row("device_files", file_id, {
-            "observer_action_id": command.observer_action_id,
-            "source_action_id": None,
-            "identity_key": identity_key,
-            "locator_json": dict(command.locator),
-            "ownership_evidence_json": None,
-            "original_name": command.original_name,
-            "media_type": command.media_type,
-            "role": int(_FILE_ROLE.UNDETERMINED),
-            "original_device_file_id": None,
-            "pairing_evidence_json": None,
-            "presence_state": int(_FILE_PRESENCE.UNKNOWN),
-            "completion_state": int(_FILE_COMPLETION.UNKNOWN),
-            "completion_evidence_json": None,
-            "size_bytes": None,
-            "checksum_support": int(_FILE_CHECKSUM.UNDETERMINED),
-            "sha256": None,
-            "last_error_json": None,
-        })
+        row = file_discovery_row(command, file_id, identity_key)
         self._owners[("device_files", file_id)] = ("device_file", file_id)
         # 公开投影路由从文件行走到产物表；新发现尚无产物，装配空范围。
         self._state.setdefault("device_files", {})[file_id] = dict(row.after.values)
@@ -4839,6 +4854,8 @@ class SaveEmergencyCommand:
                     "copy_round": None,
                     "intent_event_id": None,
                     "result_event_id": first_id,
+                    "result_first_page_event_id": None,
+                    "result_last_page_event_id": None,
                     "max_attempts_used": record.max_attempts,
                     "timeout_s_json": self._timeout_s,
                     "retry_interval_s_json": self._retry_interval_s,

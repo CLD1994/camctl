@@ -159,6 +159,8 @@ T4 软件验证（2026-10-10，容器，Python 3.11.16）：两种拍摄入口�
 
 ## T5 分页结果、完成依据与必要检查
 
+实施状态（2026-10-10，容器 Python 3.11.16）：结果页解释、必要产物检查、原页拥有者及历史保存已接入。页和首次文件发现共同提交，基准差集按已保存位置分批比较；页范围分别保留每次实际返回，不增加轮内预算。原页提交未知后可关闭连接，再核实原完整申请。结果消费和动作收尾仍待 T6 接线，T5 暂不标为整体完成。扩大运行 capture 目录取得 676 项通过、54 项失败，其中 11 项与 T4 失败节点一致，43 项涉及集合确定约束下尚未接入的原拍摄及媒体消费者；继续按 T6 的正常结果和恢复矩阵验证。
+
 **建议文件：** 修改 `apps/camctl/src/camctl/capture/result_inputs.py`、`capture/results.py`、`bootstrap/capture_assembly.py`、`persistence/repositories/capture.py` 及证据登记；新增 `apps/camctl/tests/unit/capture/test_result_pages.py`、`test_product_checks.py`，补充 `apps/camctl/tests/integration/capture/test_result_file_recovery.py`。需要新内部格式时，同步责任规格和具名守卫后才写入。
 
 **接口：** 保留 `ResultDriver.list_results(request: ControlRequest, batch: int) -> DeviceCallResult`，游标放在 request 的驱动参数中。建议 `ResultPage(entries: tuple[ObservedFile, ...], next_cursor: DirectoryCursor | None, set_finalized: bool, completion_evidence: DeviceObservation | None, outcome: CallOutcome)`，以及 `DriverResultListing.list_page(ticket: AttemptTicket, *, cursor: DirectoryCursor | None, timeout_s: Decimal) -> ResultPage`。每次调用返回一页，T6 的轮次拥有者沿原票据保存该页后才读取下一页；现有 `list_round` 的 v1 兼容输入不提供集合确定。完成依据与扫描是否结束是两个独立维度；`completion_evidence` 仅保存实际设备观察，等待假设由框架按固定契约及原等待事实形成独立依据。

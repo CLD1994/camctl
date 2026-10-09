@@ -48,6 +48,7 @@ from camctl.operations.models import (
     SettlementBasis,
     ValidatedOutcome,
 )
+from camctl.operations.result_format import result_document, error_document as _error_json
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
@@ -512,6 +513,8 @@ class BeginAttemptCommand:
                 "status": int(_ATTEMPT_STATUS.RUNNING),
                 "intent_event_id": event_id,
                 "result_event_id": None,
+                "result_first_page_event_id": None,
+                "result_last_page_event_id": None,
                 "max_attempts_used": intent.config.max_attempts,
                 "timeout_s_json": intent.config.timeout_s,
                 "retry_interval_s_json": intent.config.retry_interval_s,
@@ -729,45 +732,7 @@ class BeginAttemptCommand:
 
 
 def _result_json(validated: ValidatedOutcome) -> dict:
-    """按统一外层结构编码结束结果；状态、错误及效果由行列保存。"""
-    outcome = validated.outcome
-    settlement = outcome.settlement
-    assert settlement is not None
-    document = {
-        "format_version": outcome.format_version,
-        "settlement": {
-            "basis": settlement.basis.value,
-            "evidence": {
-                "type": settlement.evidence.type,
-                "version": settlement.evidence.version,
-                "data": dict(settlement.evidence.data),
-            },
-        },
-        "observations": [
-            {
-                "type": observation.type,
-                "version": observation.version,
-                "data": dict(observation.data),
-            }
-            for observation in outcome.observations
-        ],
-    }
-    if outcome.call_info is not None:
-        call_info: dict[str, Any] = {}
-        if outcome.call_info.local_exit_code is not None:
-            call_info["local_exit"] = {"exit_code": outcome.call_info.local_exit_code}
-        elif outcome.call_info.local_signal is not None:
-            call_info["local_exit"] = {"signal": outcome.call_info.local_signal}
-        if outcome.call_info.remote_exit_code is not None:
-            call_info["remote_exit_code"] = outcome.call_info.remote_exit_code
-        document["call_info"] = call_info
-    return document
-
-
-def _error_json(error) -> dict | None:
-    if error is None:
-        return None
-    return {"code": error.code, "stage": error.stage, "details": dict(error.details)}
+    return result_document(validated.outcome)
 
 
 def _verify_result_ticket(finish: AttemptFinish, run: Mapping[str, Any], attempt: Mapping[str, Any]) -> None:

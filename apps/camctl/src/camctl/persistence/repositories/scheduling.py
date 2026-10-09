@@ -908,6 +908,8 @@ class GrantStartCommand:
                 "status": int(_ATTEMPT_STATUS.RUNNING),
                 "intent_event_id": event_id,
                 "result_event_id": None,
+                "result_first_page_event_id": None,
+                "result_last_page_event_id": None,
                 "max_attempts_used": request.config.max_attempts,
                 "timeout_s_json": request.config.timeout_s,
                 "retry_interval_s_json": request.config.retry_interval_s,

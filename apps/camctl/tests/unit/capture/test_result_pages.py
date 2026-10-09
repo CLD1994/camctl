@@ -8,6 +8,9 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor
 from camctl.devices.evidence import DeviceObservation
 from camctl.operations.models import AttemptTicket, CallOutcome, AttemptStatus, ErrorValue
+from camctl.operations.models import EffectState, Settlement, SettlementBasis, EvidenceValue
+from camctl.operations.result_format import result_document
+from copy import deepcopy
 
 _TICKET = AttemptTicket(1, "result", "71", "results/71", 9)
 _BINDING = DeviceBinding("cam-1", "dji-action6")
@@ -68,9 +71,13 @@ def test_invalid_identity_or_registered_members_are_rejected(member, value):
         _page(outcome)
 
 
-def test_unknown_version_is_rejected():
+@pytest.mark.parametrize("version", [3, True])
+def test_unknown_version_is_rejected(version):
     outcome = _outcome()
-    outcome = replace(outcome, observations=(replace(outcome.observations[0], version=3),))
+    outcome = replace(outcome, observations=(replace(outcome.observations[0], version=version),))
+    if version is True:
+        outcome.observations[0].data.clear()
+        outcome.observations[0].data.update(activity_id="71", entries=[])
     with pytest.raises((ValueError, result_inputs.ConsistencyError)):
         _page(outcome)
 
@@ -112,3 +119,30 @@ def test_partial_error_keeps_files_and_full_actual_result():
     page = _page(actual)
     assert page.outcome is actual and page.entries[0].identity == "/DCIM/a.mp4"
     assert page.set_finalized and not page.scan_complete
+
+
+@pytest.mark.parametrize("case", ["version_bool", "extra_result", "extra_settlement", "extra_info",
+                                 "evidence_version", "observation_version", "missing_error", "success_error"])
+def test_saved_actual_result_rejects_unknown_members_and_inconsistent_states(case):
+    actual = replace(_outcome(finalized=True), effect=EffectState.CONFIRMED,
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})))
+    document = deepcopy(result_document(actual))
+    status, error = 2, None
+    if case == "version_bool":
+        document["format_version"] = True
+    elif case == "extra_result":
+        document["extra"] = 1
+    elif case == "extra_settlement":
+        document["settlement"]["extra"] = 1
+    elif case == "extra_info":
+        document["call_info"] = {"extra": 1}
+    elif case == "evidence_version":
+        document["settlement"]["evidence"]["version"] = True
+    elif case == "observation_version":
+        document["observations"][0]["version"] = True
+    elif case == "missing_error":
+        status = 3
+    else:
+        error = {"code": "read_failed", "stage": "device", "details": {}}
+    with pytest.raises(result_inputs.ConsistencyError):
+        result_inputs.saved_outcome(status, 2, document, error)
