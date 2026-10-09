@@ -1684,6 +1684,8 @@ def _catalog_drafts(
     file_ids = {
         entry.identity: file_id
         for (_, file_id), entry in zip(registered, entries)}
+    complete_originals = {entry.identity for entry in entries
+                          if entry.complete and entry.paired_identity is None}
     drafts = []
     for (_, file_id), entry in zip(registered, entries):
         if not entry.complete:
@@ -1694,6 +1696,8 @@ def _catalog_drafts(
                 file=FileReference(device_file_id=file_id),
                 file_complete=True))
         else:
+            if entry.paired_identity not in complete_originals:
+                continue
             drafts.append(OutputDraft(
                 kind=OutputKind.PREVIEW,
                 file=FileReference(device_file_id=file_id),
@@ -1978,11 +1982,51 @@ def _binding_failure_request(runtime, action, details, *, excluded_run_id=None):
         " AND (kind != 6 OR query_purpose != 5) ORDER BY id", (action["id"],),
     )) as cursor:
         responsibilities = tuple(row[1] for row in cursor.fetchall() if row[0] != excluded_run_id)
+    drafts = _binding_failure_files(runtime, action)
     return FinishBindingFailure(
         action_id=action["id"], occurred_at=runtime.wall_us(),
         failure=RecordingFailure(code="device_binding_unavailable", details=details),
         canceled=bool(action["cancel_requested"]), stop_config=runtime.stop_config,
-        responsibility_keys=responsibilities, check_config=runtime.check_config)
+        responsibility_keys=responsibilities, check_config=runtime.check_config,
+        drafts=drafts, catalog_facts=(OutputCatalogFacts(action["id"], True) if drafts else None))
+
+
+def _binding_failure_files(runtime: CaptureRuntime, action) -> tuple[OutputDraft, ...]:
+    """照片和延时摄影按原实际 RESULTS 保留文件，当前绑定不解释原观察。"""
+    if action["type"] not in (int(_ACTION_TYPE.CAMERA_TAKE_PHOTO), int(_ACTION_TYPE.CAMERA_TIMELAPSE)):
+        return ()
+    connection = runtime.owned.connection
+    with closing(connection.execute(
+        "SELECT id,activity_id,responsibility_key FROM operation_runs"
+        " WHERE action_id=? AND kind=? ORDER BY id",
+        (action["id"], int(_RUN_KIND.CHECK_CAPTURE_RESULTS)),
+    )) as cursor:
+        runs = cursor.fetchall()
+    with closing(connection.execute(
+        "SELECT 1 FROM device_files WHERE source_action_id=? LIMIT 1", (action["id"],),
+    )) as cursor:
+        has_files = cursor.fetchone() is not None
+    if not runs:
+        if has_files:
+            raise ConsistencyError("原拍摄文件缺少可靠 RESULTS 责任，不能按空产物结束")
+        return ()
+    if len(runs) != 1:
+        raise ConsistencyError("原拍摄 RESULTS 责任不唯一")
+    run_id, activity_id, responsibility = runs[0]
+    if (activity_id != _activity_id_of(runtime, action["id"])
+            or responsibility != f"results/{activity_id}"):
+        raise ConsistencyError("原 RESULTS 责任与拍摄活动身份不符")
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_attempts WHERE run_id=? LIMIT 1", (run_id,),
+    )) as cursor:
+        has_attempts = cursor.fetchone() is not None
+    if not has_attempts:
+        if has_files:
+            raise ConsistencyError("原拍摄文件缺少可靠 RESULTS 实际输入，不能按空产物结束")
+        return ()
+    listing = _saved_result_listing(runtime, action["id"])
+    registered = _register_listing(runtime, action["id"], listing)
+    return _catalog_drafts(registered, listing.entries)
 
 
 async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:

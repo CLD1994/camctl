@@ -321,6 +321,8 @@ class FinishBindingFailure:
     stop_config: AttemptConfig | None = None
     responsibility_keys: tuple[str, ...] = ()
     check_config: AttemptConfig | None = None
+    drafts: tuple[OutputDraft, ...] = ()
+    catalog_facts: OutputCatalogFacts | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
@@ -333,6 +335,23 @@ class FinishBindingFailure:
                 or any(not isinstance(key, str) or not key for key in self.responsibility_keys)
                 or len(set(self.responsibility_keys)) != len(self.responsibility_keys)):
             raise ValueError("绑定失败的责任集合必须是互不重复的非空责任键")
+        if not isinstance(self.drafts, tuple):
+            raise TypeError("绑定失败的产物草稿必须是元组")
+        if not self.drafts:
+            if self.catalog_facts is not None:
+                raise ValueError("无产物的绑定失败申请不携带目录事实")
+            return
+        if (not isinstance(self.catalog_facts, OutputCatalogFacts)
+                or self.catalog_facts.action_id != self.action_id
+                or self.catalog_facts.ownership_confirmed is not True):
+            raise ValueError("绑定失败的产物目录必须确认原动作归属")
+        if any(not isinstance(draft, OutputDraft)
+               or draft.kind not in (OutputKind.ORIGINAL, OutputKind.PREVIEW)
+               or draft.file.device_file_id is None
+               or draft.file_complete is not True or draft.sha256 is not None
+               for draft in self.drafts):
+            raise ValueError("绑定失败的产物必须使用原可靠完整设备文件")
+        validate_output_registration(self.drafts, self.catalog_facts)
 
 
 @dataclass(frozen=True)
@@ -2995,10 +3014,11 @@ class _FinishBindingFailureCommand:
         request = self._request
         if request.canceled:
             return FinishCaptureCommand(
-                FinishCanceledCapture(request.action_id, request.occurred_at),
+                FinishCanceledCapture(request.action_id, request.occurred_at,
+                                      request.drafts, request.catalog_facts),
                 self._key, canceled=True)
         return FinishCaptureCommand(FinishCapture(
-            request.action_id, (), OutputCatalogFacts(
+            request.action_id, request.drafts, request.catalog_facts or OutputCatalogFacts(
                 action_id=request.action_id, ownership_confirmed=True),
             request.occurred_at, failure=request.failure), self._key)
 
@@ -3272,9 +3292,16 @@ class _FinishBindingFailureCommand:
         if action is None:
             raise ConsistencyError("原绑定失败动作不存在")
         self._verify_binding(action)
-        split = next((index for index, event in enumerate(saved)
-                      if event["type"] not in (8, 9)), len(saved))
+        if not saved or saved[0]["type"] != _ACTION_FINISHED_EVENT:
+            raise TransactionError("原绑定失败事务缺少首位动作终态事件")
+        split = 1
+        while split < len(saved) and saved[split]["type"] == _OUTPUT_REGISTERED_EVENT:
+            split += 1
+        if split < len(saved) and saved[split]["type"] == _PLAN_STATUS_EVENT:
+            split += 1
         capture_events, responsibility_events = saved[:split], saved[split:]
+        if any(event["occurred_at"] != request.occurred_at for event in capture_events):
+            raise TransactionError("原绑定失败的产物和终态事实时刻与重送输入不同")
         flow_events = [event for event in responsibility_events if event["type"] == 10]
         read_events = [event for event in responsibility_events if event["type"] != 10]
         # 检查、修复和机会释放必须连续，且位于原流程结束之后、新必要流程之前。
@@ -3285,8 +3312,7 @@ class _FinishBindingFailureCommand:
                     or any(event["reason"] != 3 for event in responsibility_events[:first])):
                 raise TransactionError("原绑定失败的内部读取事件顺序不符")
         self._reuse_read_business(scope, saved, read_events, action)
-        if [event["type"] for event in capture_events] not in ([8], [8, 9]):
-            raise TransactionError("原绑定失败事务的动作和计划事件组不符")
+        self._reuse_catalog(capture_events)
         capture_plan = self._capture_command()._reuse(connection, capture_events)
         plans = [capture_plan]
         finished_keys = set()
@@ -3341,10 +3367,60 @@ class _FinishBindingFailureCommand:
             raise TransactionError("原绑定失败事务的完整责任集合与重送输入不同")
         if request.canceled and not flow_events:
             raise TransactionError("绑定异常的取消终态缺少必要流程失败事实")
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError("原绑定失败动作的父计划不存在")
+        transaction = saved[0]["transaction"]
+        original_plan = read_row_values_at_boundary(
+            connection, owner=("plan", plan["id"]), table="plans", row_id=plan["id"],
+            columns=frozenset({"status"}), current_values=plan,
+            boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
         return CommandPlan(events=(),
             owners={owner: target for plan in plans for owner, target in plan.owners.items()},
             state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
-            read_only=True, result=capture_plan.result)
+            read_only=True, result=replace(capture_plan.result, plan_status=original_plan["status"]))
+
+    def _reuse_catalog(self, events) -> None:
+        """原产物 ID 的分配顺序和全部来源关联共同核实完整草稿。"""
+        outputs, origins = [], []
+        for event in events:
+            if event["type"] != _OUTPUT_REGISTERED_EVENT:
+                continue
+            rows = event["body"]["rows"]
+            output_rows = [row for row in rows if row["table"] == "outputs"]
+            if (event["reason"] not in (_KIND_CODES[OutputKind.ORIGINAL], _KIND_CODES[OutputKind.PREVIEW])
+                    or len(output_rows) != 1
+                    or any(row["table"] not in ("outputs", "output_origins")
+                           or row["before"]["exists"] or not row["after"]["exists"] for row in rows)):
+                raise TransactionError("原绑定失败的产物事件不是完整登记")
+            output = output_rows[0]
+            values = output["after"]["values"]
+            if values["source_action_id"] != self._request.action_id or values["kind"] != event["reason"]:
+                raise TransactionError("原绑定失败产物属于其他动作或种类")
+            outputs.append((output["id"], values["kind"], values["device_file_id"],
+                            values["intermediate_file_id"]))
+            for row in rows:
+                if row["table"] == "output_origins":
+                    link = row["after"]["values"]
+                    if link["output_id"] != output["id"]:
+                        raise TransactionError("原绑定失败的来源关联属于其他产物")
+                    origins.append((link["output_id"], link["original_output_id"]))
+        outputs.sort()
+        expected = [(_KIND_CODES[draft.kind], draft.file.device_file_id, None)
+                    for draft in self._request.drafts]
+        if [output[1:] for output in outputs] != expected:
+            raise TransactionError("原绑定失败产物的完整输入或分配顺序与重送不同")
+        batch = {draft.file.device_file_id: output[0]
+                 for draft, output in zip(self._request.drafts, outputs)
+                 if draft.kind is OutputKind.ORIGINAL}
+        expected_origins = {
+            (output[0], draft.original_output_id if draft.original_output_id is not None
+             else batch[draft.original_batch_file_id])
+            for draft, output in zip(self._request.drafts, outputs)
+            if draft.kind is OutputKind.PREVIEW}
+        if len(origins) != len(expected_origins) or set(origins) != expected_origins:
+            raise TransactionError("原绑定失败的完整产物配对与重送输入不同")
 
 
 class _FinishResidualBindingFailureCommand:

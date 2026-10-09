@@ -17,6 +17,7 @@ from camctl.capture.handlers import CaptureRuntime, ListedResult, capture_handle
 from camctl.capture.recording import RecordingState
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
+from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
 from camctl.operations.models import (
@@ -215,12 +216,27 @@ def _environment(tmp_path: Path, actions):
     connection.execute(
         "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
         " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})))
+        " VALUES (1, 1, 1, 1, ?, 2, 1, ?)",
+        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": [{
+            "table": "plans", "id": 1,
+            "before": {"exists": False, "values": {}},
+            "after": {"exists": True, "values": {
+                "request_id": 4242, "name": "seed", "created_at": _NOW, "status": 1}},
+        }]})))
     connection.execute(
         "INSERT INTO plans (id, request_id, name, created_at, status,"
         " created_event_id, last_event_id, change_count)"
         " VALUES (1, 4242, 'seed', ?, 1, 1, 1, 1)", (_NOW,))
+    plan_type = load_enum_registry()["history_objects"]["plan"]["id"]
+    connection.execute(
+        "INSERT INTO entity_event_links (entity_type,entity_id,event_id,change_count)"
+        " VALUES (?,1,1,1)", (plan_type,))
+    connection.execute(
+        "INSERT INTO report_entity_changes (entity_type,entity_id,event_id,change_seq)"
+        " VALUES (?,1,1,1)", (plan_type,))
+    connection.execute(
+        "INSERT INTO entity_snapshot_progress (entity_type,entity_id,current_change_count,"
+        " snapshot_change_count,latest_snapshot_id) VALUES (?,1,1,0,NULL)", (plan_type,))
     for action_id, action_type in actions:
         _seed_action(connection, action_id, action_type)
         _seed_activity(connection, action_id)

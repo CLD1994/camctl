@@ -211,7 +211,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 | 原文件、预览配对及实际输入 | 继续由既有 `_saved_result_listing`、`_registered_result_files`、`validate_observed_pairings` 及目录事务核对；本阶段没有新增预览配对组合证据。 |
 | 有限 STOP 已 FAILED／UNCONFIRMED，活动尚未确认结束 | 资格按明确原流程状态判定，原未知和占用保持；源码已独立核对，本阶段未新增该分区的正向重启矩阵。 |
 | 活动 ENDED，但原 STOP 仍 PENDING／ACTIVE | 可以消费已有本地文件，原开放 STOP 不被补造为成功；取消发起者的汇总责任仍待闭合。 |
-| 仍需 STOP、绑定 missing/mismatch，已有完整文件 | 必要停止按绑定错误结束的资格已验证；`FinishBindingFailure` 的完整产物登记仍须独立实施和验收。 |
+| 仍需 STOP、绑定 missing/mismatch，已有完整文件 | 必要停止按绑定错误结束的资格已验证；完整产物登记与严格原键恢复由[绑定文件计划](2026-10-09-camctl-binding-failure-retained-files.md#实施与验证记录2026-10-09)独立实施和验收，本阶段范围保持。 |
 | 普通 `FinishCapture` 保存 UNKNOWN | 完整申请、原 key 和决定时刻的持有仍是独立缺口。 |
 | UNSATISFIED、应急错误身份、RESULTS v2 和结果申请身份登记 | 按各自计划与未决语义推进；本阶段不改变格式或选择未定 reason。 |
 
