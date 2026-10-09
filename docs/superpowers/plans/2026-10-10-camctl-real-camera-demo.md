@@ -74,11 +74,11 @@ P() {
 
 **接口：** 消费 `ActionCapability` 和 `CaptureTaskFactory.__call__(effective_params) -> CaptureTask`。建议提供 `candidate_capabilities(driver_id: str) -> tuple[ActionCapability, ...]`、`settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValue]) -> tuple[tuple[str, ...], ...]`、`start_for(driver_id: str, action_type: str, params: Mapping[str, JsonValue]) -> tuple[str, ...]`；新增名字只在驱动内部使用。`CaptureTask` 补充归属方式和非空输出范围，固定执行定义保存该声明，实际基准不写入执行定义。
 
-- [ ] **先写失败测试：** 合法参数经能力 Schema 与受理获得相同生效值；测试每个离散选项及互斥分支。录像 10 秒固定为 `target_duration_ms == 10000`，不从资料的 5—20 秒样例建立时长上限。命令预期独立取自[交接资料](../../hardware/camera-control-handoff.md)，例如 Action6 ISO 800 的 argv 末两项为 `("2a", "06")`，不能由编码器生成测试预期。
-- [ ] **运行红灯：** `P apps/camctl/tests/unit/devices/test_adb_camera_parameters.py apps/camctl/tests/unit/devices/test_adb_camera_commands.py -q`，确认目标映射或任务事实尚不成立。
-- [ ] **实现同源定义：** 精确查询已给出的完整字面量，不推导任意编码。Action6 覆盖 8K/4K30、三种 FOV、两种增稳、M/Auto、六种 ISO、固定快门/WB、三个 Auto EV、光圈及码率候选；延时逐个覆盖三组完整间隔/时长及视频、RAW、JPEG输出。OSMO 覆盖全景 8K30、M/Auto、已有曝光/码率及全部完整延时组合。手动曝光与 Auto 选项按[参数规则](../../architecture/camera-parameters.md)互斥，不作笛卡尔积扩张。
-- [ ] **区分候选与契约：** 划线项、未说明输出的载荷、FOV 适用范围、90 分钟缺命令、25 秒/100 分钟与 2 小时冲突保留待设备核实；不导出猜测选项。OSMO 无增稳调节或光圈命令不生成设置。Action6 未提供延时停止命令，录像停止不能自动用于延时。任务必要类别、格式和数量规则使用驱动声明，不以间隔除时长补造数量。
-- [ ] **运行绿灯并提交：** 上述单元测试通过；顺序运行 `P apps/camctl/tests/integration/acceptance -q`，验证冻结定义、显式值/缺省值及原请求重送。提交本项定义和测试。
+- [x] **先写失败测试：** 合法参数经能力 Schema 与受理获得相同生效值；测试每个离散选项及互斥分支。录像 10 秒固定为 `target_duration_ms == 10000`，不从资料的 5—20 秒样例建立时长上限。命令预期独立取自[交接资料](../../hardware/camera-control-handoff.md)，例如 Action6 ISO 800 的 argv 末两项为 `("2a", "06")`，不能由编码器生成测试预期。
+- [x] **运行红灯：** `P apps/camctl/tests/unit/devices/test_adb_camera_parameters.py apps/camctl/tests/unit/devices/test_adb_camera_commands.py -q`，确认目标映射或任务事实尚不成立。
+- [x] **实现同源定义：** 精确查询已给出的完整字面量，不推导任意编码。Action6 覆盖 8K/4K30、三种 FOV、两种增稳、M/Auto、六种 ISO、固定快门/WB、三个 Auto EV、光圈及码率候选；延时逐个覆盖三组完整间隔/时长及视频、RAW、JPEG输出。OSMO 覆盖全景 8K30、M/Auto、已有曝光/码率及全部完整延时组合。手动曝光与 Auto 选项按[参数规则](../../architecture/camera-parameters.md)互斥，不作笛卡尔积扩张。
+- [x] **区分候选与契约：** 划线项、未说明输出的载荷、FOV 适用范围、90 分钟缺命令、25 秒/100 分钟与 2 小时冲突保留待设备核实；不导出猜测选项。OSMO 无增稳调节或光圈命令不生成设置。Action6 未提供延时停止命令，录像停止不能自动用于延时。任务必要类别、格式和数量规则使用驱动声明，不以间隔除时长补造数量。
+- [x] **运行绿灯并提交：** 上述单元测试通过；顺序运行 `P apps/camctl/tests/integration/acceptance -q`，验证冻结定义、显式值/缺省值及原请求重送。提交本项定义和测试。
 
 建议测试中的关键断言如下；各任务的测试 fixture 提供实际输入和边界替身，不另建通用测试框架：
 
@@ -87,6 +87,8 @@ assert recording_spec["target_duration_ms"] == 10000
 assert iso_800_command[-2:] == ("2a", "06")
 assert admitted_effective_params == described_valid_params
 ```
+
+T1 软件验证（2026-10-10，容器，Python 3.11.16）：devices、capture、acceptance 单元目录共 930 项通过；acceptance 组件集成目录独占执行通过。候选 Schema 未登记到正常驱动目录，结束和响应契约由测试替身单独提供。实际目录准备与必要产物检查分别由 T4、T5 接线。
 
 ## T2 分批基准的保存、固定与读取
 

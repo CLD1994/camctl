@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -19,6 +20,7 @@ from camctl.contracts.values import (
     seconds_to_duration_ms,
 )
 from camctl.contracts.json_values import is_json_integer
+from camctl.contracts.enums import enum_for
 from camctl.contracts.workflow_errors import validate_public_error
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 
@@ -59,7 +61,7 @@ def activity_capabilities(
 
     单张拍摄以成功返回为完成依据；录像必须支持停止，完成由停止
     与产物集合判定；延时摄影沿用受理时固定任务契约中的同一能力
-    声明。第一版驱动无中途状态查询，输出范围均为任务独立范围。
+    声明。归属声明与范围来自固定定义，实际基准由执行历史保存。
     """
     if action_type == "camera_take_photo":
         validate_capture_spec(action_type, spec)
@@ -69,12 +71,13 @@ def activity_capabilities(
             completion_mode=int(CompletionMode.DEVICE_EVIDENCE),
             ownership_mode=1, output_scope_json={})
     if action_type == "camera_record":
-        validate_capture_spec(action_type, spec)
+        validated = validate_capture_spec(action_type, spec)
         return ActivityCapabilities(
             state_query_supported=0, stop_supported=1, safe_repeat_stop=1,
             start_return_meaning=int(StartReturn.STARTED),
             completion_mode=int(CompletionMode.TIME_AND_OUTPUTS),
-            ownership_mode=1, output_scope_json={})
+            ownership_mode=validated.get("ownership_mode", 1),
+            output_scope_json=deepcopy(validated.get("output_scope", {})))
     if action_type == "camera_timelapse":
         validated = validate_capture_spec(action_type, spec)
         stop = 1 if validated["stop_supported"] else 0
@@ -83,7 +86,8 @@ def activity_capabilities(
             safe_repeat_stop=stop,
             start_return_meaning=validated["start_return_meaning"],
             completion_mode=validated["completion_mode"],
-            ownership_mode=1, output_scope_json={})
+            ownership_mode=validated.get("ownership_mode", 1),
+            output_scope_json=deepcopy(validated.get("output_scope", {})))
     raise ValueError(f"非拍摄动作不推导设备活动能力: {action_type!r}")
 
 _CAMERA_TYPES = frozenset(
@@ -137,6 +141,43 @@ def _integer(value, minimum=0):
     return int(value)
 
 
+_OWNERSHIP_FIELDS = frozenset({"ownership_mode", "output_scope"})
+
+
+def _ownership(spec: dict) -> dict:
+    """归属字段成对出现；范围必须是非空精确 JSON 对象。"""
+    if not _OWNERSHIP_FIELDS.intersection(spec):
+        return {}
+    if not _OWNERSHIP_FIELDS <= set(spec):
+        raise ValueError("归属方式和输出范围必须共同声明")
+    mode = enum_for("device_activities.ownership_mode")(_integer(spec["ownership_mode"], 1))
+    scope = spec["output_scope"]
+    if not isinstance(scope, dict) or not scope:
+        raise ValueError("输出范围必须是非空 JSON 对象")
+
+    def check(value):
+        if value is None or isinstance(value, (bool, int)):
+            return
+        if isinstance(value, str):
+            value.encode("utf-8")
+            return
+        if isinstance(value, Decimal) and value.is_finite():
+            return
+        if isinstance(value, list):
+            for item in value:
+                check(item)
+            return
+        if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+            for key, item in value.items():
+                check(key)
+                check(item)
+            return
+        raise ValueError("输出范围包含非 JSON 值")
+
+    check(scope)
+    return {"ownership_mode": int(mode), "output_scope": deepcopy(scope)}
+
+
 def validate_capture_spec(action_type: str, spec: Any) -> dict:
     """验证已保存的拍摄结构；不读取参数默认值或设备配置。"""
     if not isinstance(spec, dict):
@@ -146,9 +187,10 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
             raise ValueError("拍照执行定义必须是空对象")
         return {}
     if action_type == "camera_record":
-        if set(spec) != {"target_duration_ms"}:
-            raise ValueError("录像定义必须只保存 target_duration_ms")
-        return {"target_duration_ms": _integer(spec["target_duration_ms"], 1)}
+        ownership = _ownership(spec)
+        if set(spec) != {"target_duration_ms", *ownership}:
+            raise ValueError("录像定义必须保存目标时长及适用的归属声明")
+        return {"target_duration_ms": _integer(spec["target_duration_ms"], 1), **ownership}
     if action_type != "camera_timelapse":
         raise ValueError("动作类型不是拍摄动作")
     required = {"duration_based", "wait_after_send", "end_control", "stop_supported", "start_return_meaning", "completion_mode"}
@@ -157,12 +199,13 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
     for key in ("duration_based", "wait_after_send", "stop_supported"):
         if not isinstance(spec[key], bool):
             raise ValueError(f"{key} 必须是 JSON 布尔值")
-    result = dict(spec)
+    ownership = _ownership(spec)
+    result = {**spec, **ownership}
     end = EndControl(_integer(spec["end_control"], 1))
     start = StartReturn(_integer(spec["start_return_meaning"], 1))
     completion = CompletionMode(_integer(spec["completion_mode"], 1))
     result.update(end_control=int(end), start_return_meaning=int(start), completion_mode=int(completion))
-    expected = set(required)
+    expected = set(required) | set(ownership)
     if spec["duration_based"]:
         expected.add("target_duration_ms")
     if spec["wait_after_send"]:
@@ -188,13 +231,17 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
         return validate_capture_spec(action_type, {})
     if not isinstance(task, CaptureTask) or task.action_type != action_type:
         raise ValueError("驱动未提供对应动作的固定拍摄任务")
+    ownership = {}
+    if task.ownership_mode is not None or task.output_scope is not None:
+        ownership = {"ownership_mode": task.ownership_mode, "output_scope": task.output_scope}
     if action_type == "camera_record":
         if task.stop_supported is not True:
             raise ValueError("录像任务必须明确具备 stop_supported")
-        return validate_capture_spec(action_type, {"target_duration_ms": seconds_to_duration_ms(task.target_duration_s)})
+        return validate_capture_spec(action_type, {"target_duration_ms": seconds_to_duration_ms(task.target_duration_s), **ownership})
     spec = {"duration_based": task.duration_based, "wait_after_send": task.wait_after_send,
             "end_control":task.end_control, "stop_supported":task.stop_supported,
-            "start_return_meaning":task.start_return_meaning, "completion_mode":task.completion_mode}
+            "start_return_meaning":task.start_return_meaning, "completion_mode":task.completion_mode,
+            **ownership}
     if task.target_duration_s is not None:
         spec["target_duration_ms"] = seconds_to_duration_ms(task.target_duration_s)
     if task.result_wait_margin_s is not None:
