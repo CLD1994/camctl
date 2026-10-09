@@ -170,11 +170,51 @@ def _value(owned, sql: str, *params):
 
 
 def _settlement(owned):
+    from unittest.mock import create_autospec
+
+    from camctl.contracts.enums import enum_for
+    from camctl.host_files.handoff import (
+        HandoffIdentity, WithdrawResult, WithdrawStage, withdraw_file,
+    )
+    from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
+
+    outputs = OutputsRepository()
+    states = enum_for("deliveries.withdrawal_state")
+    # 本矩阵只控制实际 ready 删除；撤回请求、结果与等待明细仍由
+    # 真实仓储保存。实际文件与归属协作见 test_target_types。
+    remove_ready = create_autospec(
+        withdraw_file, spec_set=True,
+        return_value=WithdrawResult(WithdrawStage.WITHDRAWN, None))
+
+    def save(delivery_id, choice):
+        result = outputs.advance_withdrawal(
+            AdvanceWithdrawal(delivery_id, choice, _TICK),
+            new_operation_key(), owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+
+    async def execute_withdrawal(delivery_id):
+        name, state = _value(
+            owned, "SELECT file_name,withdrawal_state FROM deliveries WHERE id=?",
+            delivery_id)
+        if state == int(states.NOT_REQUESTED):
+            save(delivery_id, WithdrawalChoice.REQUESTED)
+            state = int(states.PENDING)
+        if state == int(states.PENDING):
+            actual = await remove_ready(
+                HandoffIdentity(Path(owned.metadata.ready_path), name))
+            assert actual.stage is WithdrawStage.WITHDRAWN
+        else:
+            # 后到的请求采用原可靠结果，不再次执行 ready 删除。
+            assert state == int(states.WITHDRAWN), state
+        save(delivery_id, WithdrawalChoice.WITHDRAWN)
+        return True
+
     return TargetSettlement(
-        owned=owned, outputs=OutputsRepository(),
+        owned=owned, outputs=outputs,
         cancellations=CancellationRepository(),
         withdrawal_positions=lambda delivery_id: "ready",
-        occurred_at=lambda: _TICK)
+        occurred_at=lambda: _TICK,
+        withdrawal_execute=execute_withdrawal)
 
 
 def _runtime(owned):

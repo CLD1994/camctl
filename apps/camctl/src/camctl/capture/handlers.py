@@ -264,6 +264,35 @@ class PendingRecordingResults:
     request: FinishRecordingResults | FinishCanceledCapture
 
 
+@dataclass(frozen=True)
+class PendingResultCheckClose:
+    """有限核实耗尽的完整决定；保存恢复沿用原 key 和 T1。"""
+
+    key: OperationKey
+    request: ResultSetSave
+
+
+def resume_result_check_closes(
+    owned, *, pending_result_closes: dict[int, PendingResultCheckClose],
+    action_id: int | None = None, capture: CaptureRepository | None = None,
+    retry_gate: RetryWaitGate | None = None,
+) -> None:
+    """只核已形成的耗尽申请，不取得新的设备或业务资格。"""
+    repository = CaptureRepository() if capture is None else capture
+    for identity, pending in tuple(pending_result_closes.items()):
+        if action_id is not None and identity != action_id:
+            continue
+        if pending.request.action_id != identity:
+            raise ConsistencyError("原核实耗尽申请与所属动作不一致")
+        receipt = repository.close_result_check_unconfirmed(pending.request, pending.key, owned)
+        if receipt.kind is not DbOutcomeKind.COMPLETED or receipt.value is None:
+            raise ConsistencyError(f"原核实耗尽申请未可靠保存，完整申请仍持有: {receipt.error}")
+        if retry_gate is not None:
+            activity = _activity_id_of_connection(owned.connection, identity)
+            retry_gate.cleared(f"results/{activity}")
+        del pending_result_closes[identity]
+
+
 def resume_recording_results(
     owned, *, pending_recording_results: dict[int, PendingRecordingResults],
     action_id: int | None = None, capture: CaptureRepository | None = None,
@@ -550,6 +579,8 @@ class CaptureRuntime(_FileObservationSaves):
     pending_start_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
     #: 已形成的录像本地收场申请独立于原调用尝试和当前设备资格。
     pending_recording_results: dict[int, PendingRecordingResults] = field(default_factory=dict)
+    #: 没有新尝试承载的有限耗尽决定，由三个拍摄工厂共用。
+    pending_result_closes: dict[int, PendingResultCheckClose] = field(default_factory=dict)
     pending_read_results: dict = field(default_factory=dict)
     pending_read_business: dict = field(default_factory=dict)
     pending_read_ends: dict = field(default_factory=dict)
@@ -576,6 +607,12 @@ class CaptureRuntime(_FileObservationSaves):
         if facts is None:
             raise LookupError(f"动作不存在: {action_id}")
         return facts
+
+    def resume_result_check_closes(self, action_id: int) -> None:
+        """新业务判断之前核原耗尽事务，保存失败时保留原完整申请。"""
+        resume_result_check_closes(self.owned,
+            pending_result_closes=self.pending_result_closes, action_id=action_id,
+            capture=self.capture, retry_gate=self.retry_gate)
 
     def resume_recording_results(self, action_id: int) -> None:
         """先核原完整收场申请，动作已有终态也不跳过原事务。"""
@@ -1503,9 +1540,12 @@ def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
 
 def _activity_id_of(runtime: CaptureRuntime, action_id: int) -> int:
     """查询动作的唯一设备活动主键；动作与活动的主键不重合。"""
-    from contextlib import closing
+    return _activity_id_of_connection(runtime.owned.connection, action_id)
 
-    with closing(runtime.owned.connection.execute(
+
+def _activity_id_of_connection(connection, action_id: int) -> int:
+    """原保存恢复只从状态库读取所属活动，不装配设备端口。"""
+    with closing(connection.execute(
         "SELECT id FROM device_activities WHERE action_id = ?", (action_id,),
     )) as cursor:
         found = cursor.fetchone()
@@ -1864,6 +1904,7 @@ def _binding_failure_request(runtime, action, details, *, excluded_run_id=None):
 
 
 async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
+    context.resume_result_check_closes(action_id)
     context.resume_file_observations(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
@@ -2114,6 +2155,7 @@ async def _resume_internal_read_results(runtime):
 
 
 async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
+    context.resume_result_check_closes(action_id)
     context.resume_recording_results(action_id)
     context.resume_file_observations(action_id)
     await _resume_internal_read_results(context)
@@ -2434,6 +2476,7 @@ async def advance_winddown(
     已确认时不重复停止：取消则收终态，否则保存等待阶段；启动未
     确认、在途停止、预算耗尽及本会话锚点分别归各自责任链。
     """
+    context.resume_result_check_closes(action_id)
     context.resume_recording_results(action_id)
     context.resume_file_observations(action_id)
     action = context.action(action_id)
@@ -2643,6 +2686,7 @@ async def _advance_recording_outcome(
 
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
+    context.resume_result_check_closes(action_id)
     context.resume_file_observations(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
@@ -2861,12 +2905,15 @@ def _begin_check_round(runtime: CaptureRuntime, action_id: int):
 
 def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int) -> None:
     """预算耗尽：核实流程与无法确认的集合结论同事务收场。"""
+    if action_id in runtime.pending_result_closes:
+        runtime.resume_result_check_closes(action_id)
+        return
     code = "capture_result_unconfirmed"
     error = {"code": code, "stage": registered_error(code)["stage"],
              "details": {"activity_id": str(_activity_id_of(runtime, action_id)),
                          "reason": "outputs_unknown"}}
-    receipt = runtime.capture.close_result_check_unconfirmed(
-        ResultSetSave(
+    runtime.pending_result_closes[action_id] = PendingResultCheckClose(
+        new_operation_key(), ResultSetSave(
             action_id=action_id,
             occurred_at=runtime.wall_us(),
             phase=ResultSetPhase.UNCONFIRMED,
@@ -2874,8 +2921,8 @@ def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int) -> None:
             observation={"reason": "attempts_exhausted"},
             capture={"status": "unconfirmed", "error": error},
             error=error,
-        ), new_operation_key(), runtime.owned)
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        ))
+    runtime.resume_result_check_closes(action_id)
 
 
 class ListingPhase(Enum):

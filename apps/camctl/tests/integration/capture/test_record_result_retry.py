@@ -267,11 +267,12 @@ async def test_result_budget_close_uses_original_activity_on_resend(
             command = ResultRunClose(action_id, listing.occurred_at)
             save = runtime.capture.close_unconfirmed_result_run
         else:
+            error = {"code": "capture_result_unconfirmed", "stage": "execution",
+                     "details": {"activity_id": str(activity_id), "reason": "outputs_unknown"}}
             command = ResultSetSave(
                 action_id, listing.occurred_at, ResultSetPhase.UNCONFIRMED,
                 contract="task_scope_files", observation={"reason": "attempts_exhausted"},
-                capture={"status": "unconfirmed", "error": {"code": "result_unconfirmed"}},
-                error={"code": "result_unconfirmed"})
+                capture={"status": "unconfirmed", "error": error}, error=error)
             save = runtime.capture.close_result_check_unconfirmed
         key = new_operation_key()
         first = save(command, key, owned)

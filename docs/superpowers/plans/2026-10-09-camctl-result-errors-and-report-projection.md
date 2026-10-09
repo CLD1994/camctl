@@ -147,3 +147,31 @@ UNCONFIRMED、公共形状、未知完整驱动错误保真和历史实例 STATE
 共同验证已接入 `contracts/workflow_errors.py::validate_public_error`，通过既有精确校验器和本地注册表引用正式 `status-report.schema.json#/$defs/error`，登记码额外核唯一 stage 与 details Schema。完整未知码只校验公共结构；输入原值不改写。`ResultSetSave` 的 capture.error 与 error 复用该入口；原阶段、依据与时间规则保持。事件守卫和报告尚未修改；耗尽构造由根 Agent 独立维护。
 
 2026-10-09，Linux 开发容器、Python 3.11.16：根独占复验公共结构单元为 30 passed、0.15s，四项公开耗尽组件为 4 passed、2.24s。耗尽错误使用正式 `capture_result_unconfirmed`、`stage=execution`、实际 activity ID 和 `reason=outputs_unknown`。较宽 capture 检查为 106 passed、3 failed；三项 UNSATISFIED 输入仍缺正式完整错误，所需分类正在等待用户决策，不能为使门禁通过自行选择 reason。新的四项耗尽保存 UNKNOWN 候选尚未执行，事件守卫、报告及历史 STATE 分类仍未闭合。用户授权将这些未完成项一并保存为本地 WIP 快照。
+
+### 有限耗尽申请的保存与恢复
+
+2026-10-09，根独占 `/tmp/camctl-goal-exhaustion-save-red.log` 为 4 failed、2.45s。photo/timelapse 的真实 COMMIT 前 UNKNOWN、关闭旧连接与 fresh Owned 前提通过，但下一次消费者重形成 request/key/T1；COMMIT 后 UNKNOWN 的两项则在可靠原 G 已存在时不核原键，直接继续业务。原实际 START、RESULTS 尝试和 OTHER 文件保持，故这四项是消费者保存责任缺失的有效反例。
+
+建议新增独立 `PendingResultCheckClose(key, request: ResultSetSave)`，用于无新尝试承载的有限耗尽决定；不复用 AttemptFinish 或普通录像终态请求。首次调用仓储之前固定完整输入、key 和 T1，同会话 RuntimeDeps 与三个拍摄工厂共用集合。纯恢复只调用原 `close_result_check_unconfirmed`，不取得当前时钟、设备或新集合结论；收到可靠完整响应后清理对应等待并释放申请。handler 和默认五入口均先核已有申请，再读取新业务资格或筛选终态。此阶段不增加持久历史字段；进程退出后无会话申请时继续按持久核实事实恢复。
+
+| 原申请及实际保存结果 | 恢复行为与依赖业务 |
+| --- | --- |
+| 申请仍持有，原事务可靠存在 | 使用原完整输入、key、T1 核实并复用；完成前不保存依赖终态，动作终态或绑定变化不能跳过原键。 |
+| 申请仍持有，原事务可靠缺失且不会迟到提交 | 使用同一申请重送，不增加设备调用或实际尝试；可靠前保留责任。 |
+| 原读取、重送或完整响应不可靠 | 保留申请并停止候选；默认入口按 StateDbFailure 传播。不得改原错误结构、key 或决定时刻。 |
+| 申请可靠完成且响应完整 | 移除申请并清除原核实等待；后续业务仍按动作实际取消、终态与绑定资格执行。 |
+| 没有会话申请，持久原结论已保存 | 使用持久原结论继续适用收场，不声称恢复丢失的旧 key，不重列举。 |
+
+实施顺序为局部完整申请和实际消费者四项复验、默认共享前缀的独立反例、三个工厂及五入口接线、相关正常与取消回归。模块名称与集合组织是建议，行为表是已确定契约；不以四项绿色证明默认前缀或整个结果处理已完成。
+
+### 有限耗尽恢复的阶段验证（2026-10-09）
+
+Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 failed、2.45s 转为 4 passed、2.27s。默认普通入口在当前钟之前遗漏原键核实的反例为 1 failed、0.81s，接线后 1 passed、0.80s。扩展默认矩阵为 30 passed、14.25s：photo/timelapse × COMMIT 前后 × 五入口二十项，以及五入口再次 UNKNOWN／ROLLED_BACK 十项。首次保存前持有完整申请；fresh Owned 下核原事务；可靠前不筛选候选、不装配 factory，失败保持同一申请并传播 StateDbFailure；可靠后释放申请。
+
+`/tmp/camctl-goal-exhaustion-capture-final-targeted.log` 为 14 passed、6.51s，覆盖新耗尽消费者、完整错误与原活动身份的保存重送。四项旧 UNCONFIRMED fixture 补完整正式错误后通过，保留原 key／时刻变化拒绝及不可变历史断言。`/tmp/camctl-goal-exhaustion-related-bootstrap.log` 为 70 passed、39.52s，原录像取消、持久发现、在途等待、原普通申请和 READ 恢复保持。取消完整目录 `/tmp/camctl-goal-withdrawal-fixture-cancellation-gate.log` 为 103 passed、8.56s：原两项测试装配真实撤回仓储及受实际文件接口约束的替身，可靠保存所有等待结果后才完成；默认生产撤回装配没有修改。
+
+完整 capture 目录 `/tmp/camctl-goal-exhaustion-holder-capture-gate.log` 为 456 passed、11 failed、86.18s，发生在上述旧 fixture 修正之前。逐项核实为：四项 `test_record_result_retry::test_result_budget_close_uses_original_activity_on_resend` 使用旧不完整 UNCONFIRMED 输入，现已通过局部复验；四项 UNSATISFIED 输入分别位于 `test_capture_failure_activity_identity`、`test_result_confirmation`、`test_result_consumer_saves` 和 `test_result_file_recovery`，对应 reason 仍待决策；`test_capture_contract::test_send_wait_then_finish` 与 `test_timelapse_wait_runtime::test_backward_wall_clock_change_does_not_extend_current_session_wait` 依赖 v1 普通集合可立即成功的旧预期，尚未有可靠集合结束契约；`test_recording_finish::test_canceled_finish_registers_complete_files` 用录像动作期待保留取消产物，与录像取消放弃内容的规则不一致，需另核其业务前提。本阶段不删除这些测试、不选择未决语义，也不宣称完整目录已通过。
+
+独立只读评审核三处生产改动、原仓储 key-first、完整响应、三个工厂共享、四个 handler 和默认五入口，未发现此次改动的生产阻断。公开业务终态或绑定失效后仍有耗尽申请的行为矩阵尚未新增实际反例；事件守卫、固定 H 报告分类及未决 UNSATISFIED 仍未闭合。录像 `close_unconfirmed_result_run` 的现场原申请也需单独核实，不由 ResultSetSave 这三处调用的覆盖替代。取消延时耗尽后文件保留的原有路径差异见[核实轮次计划](2026-10-09-camctl-result-round-runtime.md#取消延时摄影耗尽后的文件登记)。
+
+最后接线后的全量单元 `/tmp/camctl-goal-exhaustion-final-unit.log` 为 3717 passed、1 skipped、2 warnings、7.80s。两个 warning 来自既有同步测试的 asyncio 标记。阶段 checkpoint 按用户授权保存全部当前工作，不为 Git 历史拆分追加验证；完整 app 目标保持，下一步按取消延时文件保留模型推进。

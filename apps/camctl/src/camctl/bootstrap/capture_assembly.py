@@ -26,7 +26,7 @@ from camctl.capture.handlers import (
     CaptureRuntime,
     ListedResult,
     ObservedFile,
-    PendingCallResult, PendingFileObservation, PendingRecordingResults,
+    PendingCallResult, PendingFileObservation, PendingRecordingResults, PendingResultCheckClose,
     ResultFilesPort,
     SessionRecordingState,
 )
@@ -367,6 +367,7 @@ def session_capture_assembly(
     file_executor: FileTaskExecutor | None = None,
     pending_call_results: dict[tuple[int, int], PendingCallResult] | None = None,
     pending_recording_results: dict[int, PendingRecordingResults] | None = None,
+    pending_result_closes: dict[int, PendingResultCheckClose] | None = None,
     recording_anchors: dict[int, tuple[int, int]] | None = None,
     retry_wait_gate: RetryWaitGate | None = None,
     pending_media_results: dict | None = None,
@@ -391,6 +392,7 @@ def session_capture_assembly(
     数据库边界；恢复适用声明和证据按原动作的驱动登记取得。
     pending_call_results 由会话拥有，普通、残留和受限工厂共用；
     独立使用本工厂时，未传入集合则为其创建一份。
+    pending_result_closes 共用有限耗尽的原完整申请，保存恢复不重新决定时刻。
     recording_anchors 与 retry_wait_gate 保留同会话原结果的单调计时
     依据；三个生产工厂从会话接收同一对象，接手保存不会重新计时。
     四个 READ 集合保留原实际结束、完整申请及续传身份；默认三个工厂
@@ -402,6 +404,7 @@ def session_capture_assembly(
     timelapse_deadlines: dict[int, int] = {}
     pending_start_results = {} if pending_call_results is None else pending_call_results
     recording_results = {} if pending_recording_results is None else pending_recording_results
+    result_closes = {} if pending_result_closes is None else pending_result_closes
     file_observations = {} if pending_file_observations is None else pending_file_observations
     continuing_read_tickets = {} if continuing_read_tickets is None else continuing_read_tickets
     pending_read_results = {} if pending_read_results is None else pending_read_results
@@ -438,6 +441,7 @@ def session_capture_assembly(
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
             pending_recording_results=recording_results,
+            pending_result_closes=result_closes,
             pending_file_observations=file_observations,
             retry_gate=retry_gate,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
@@ -518,6 +522,7 @@ def session_capture_assembly(
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
             pending_recording_results=recording_results,
+            pending_result_closes=result_closes,
             pending_file_observations=file_observations,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,

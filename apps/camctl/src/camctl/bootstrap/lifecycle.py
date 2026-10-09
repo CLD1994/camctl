@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 if TYPE_CHECKING:
-    from camctl.capture.handlers import PendingCallResult, PendingFileObservation, PendingRecordingResults
+    from camctl.capture.handlers import (
+        PendingCallResult, PendingFileObservation, PendingRecordingResults, PendingResultCheckClose,
+    )
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.service import CommandMode
@@ -74,6 +76,8 @@ class RuntimeDeps:
     capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
     #: 录像原尝试可靠保存后形成的完整本地终态申请，三种工厂共用。
     capture_recording_results: dict[int, PendingRecordingResults] = field(default_factory=dict)
+    #: 有限核实耗尽的原完整决定，独立于设备返回和录像终态申请。
+    capture_result_closes: dict[int, PendingResultCheckClose] = field(default_factory=dict)
     #: 文件发现及其派生事实具有独立生命周期，三种工厂共用。
     capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
@@ -90,7 +94,7 @@ class RuntimeDeps:
 
 
 def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
-    """候选读取前保存原 READ 与录像终态申请，不取得当前设备资格。"""
+    """候选读取前保存原 READ、有限耗尽及录像申请，不取得设备资格。"""
     from camctl.capture.media_flow import resume_prepared_internal_reads
 
     resume_prepared_internal_reads(owned,
@@ -102,9 +106,14 @@ def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
 
 
 def _resume_recording_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
-    """核实已形成的原录像申请，取消入口不取得新的 READ 业务资格。"""
-    from camctl.capture.handlers import resume_canceled_recording_results, resume_recording_results
+    """核实已有核实收场申请，取消入口不取得新的 READ 业务资格。"""
+    from camctl.capture.handlers import (
+        resume_canceled_recording_results, resume_recording_results, resume_result_check_closes,
+    )
 
+    resume_result_check_closes(owned,
+        pending_result_closes=deps.capture_result_closes,
+        retry_gate=deps.capture_retry_gate)
     resume_recording_results(owned,
         pending_recording_results=deps.capture_recording_results,
         retry_gate=deps.capture_retry_gate)
@@ -437,6 +446,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             wait_config=execution_wait_config,
             pending_call_results=deps.capture_call_results,
             pending_recording_results=deps.capture_recording_results,
+            pending_result_closes=deps.capture_result_closes,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -461,6 +471,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             wait_config=execution_wait_config,
             pending_call_results=deps.capture_call_results,
             pending_recording_results=deps.capture_recording_results,
+            pending_result_closes=deps.capture_result_closes,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -591,6 +602,7 @@ async def execute_command(
                         wait_config=execution_wait_config,
                         pending_call_results=deps.capture_call_results,
                         pending_recording_results=deps.capture_recording_results,
+                        pending_result_closes=deps.capture_result_closes,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
                         pending_read_results=deps.capture_read_results,

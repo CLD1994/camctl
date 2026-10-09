@@ -560,3 +560,25 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 `/tmp/camctl-goal-recording-cancel-checkpoint-bootstrap.log` 为 34 passed、19.68s：原 F 已提交后 UNKNOWN 的五入口，以及五入口中原键读取错误后可靠回滚／继续 UNKNOWN，共十五项；F 未提交后仅受理取消、取消已生效、目标已取消的五入口组合，共十五项；媒体原申请与取消保存顺序四项。未提交且只受理取消时，原 F／T1 仍共同保存 RESULTS SUCCEEDED、原片及动作成功；已生效取消时退役不写新历史。候选边界反例只证明前置恢复，不证明任务二的实际取消拥有者已经关闭 RESULTS。
 
 `/tmp/camctl-goal-recording-cancel-checkpoint-capture.log` 为 16 passed、9.30s，原媒体共同事务、首次业务判定、原键输入变化及 COMMIT 前后恢复保持。`/tmp/camctl-goal-bulk-checkpoint-unit.log` 为 3687 passed、1 skipped、2 warnings、7.72s。两个 warning 来自既有同步测试的 asyncio 标记。本次统一保存当前所有本地工作，READ 尚未完成反例与实现一起纳入 checkpoint；不宣称完整 READ、bootstrap 或全部拍摄计划通过。任务二继续独立推进。
+
+### 取消延时摄影耗尽后的文件登记
+
+正式依据为[取消、失败与文件保留](../../architecture/camera-capture.md#取消失败与文件保留)：有限处理结束后，已经拍完、确认属于本动作且写入完成的文件须与取消终态共同登记；集合未确定不取消这些文件的独立资格。录像取消放弃内容遵守自身规则，不套用本节。
+
+当前只读审查发现 `_close_canceled_timelapse` 的 EXHAUSTED 分支保存核实 UNCONFIRMED 后直接取消，没有传 drafts；同一结论已可靠保存后重入 CLOSED 分支却沿原文件登记 drafts。此差异在 `9ad78be` 已存在，不属于有限耗尽 holder 改动引入的回归，尚未运行专门行为反例。后续按以下模型建立反例及实现，不能由源码判断直接宣称修复。
+
+| 原保存与目标状态 | 文件事实 | 必须执行的行为 |
+| --- | --- | --- |
+| 耗尽申请仍持有，原键读取或保存不可靠 | 任意 | 保留完整申请，停止取消终态及产物提交；不能查询设备补输入。 |
+| 原事务可靠缺失且不会迟到提交 | 任意 | 原 key／T1 重送，可靠之前停止依赖业务。 |
+| 耗尽结论可靠完成，取消已生效且动作未终态 | 有已拍完、确认归属且写入完成的文件 | 消费持久原文件；各合法原片与 canceled 同事务登记，不增加 RESULTS。 |
+| 同上 | 没有满足登记条件的文件 | 保存取消终态及实际诊断，不创建虚构产物，不把未知解释为不存在。 |
+| 动作已经终态 | 任意 | 保持原终态与产物；仍有会话申请时先核原 key，不补登记后来文件。 |
+
+建议实施步骤如下，内部函数组织可以按真实数据流调整。
+
+1. 复用公开 timelapse 消费者、实际 START／适用 STOP 与 typed v1 完整文件保存，建立取消已经生效、集合仍未确定且有限 RESULTS 次数用尽的真实前置。覆盖可登记的 PHOTO／VIDEO、无符合条件文件、未完成文件；不同文件事实的预期独立推导，不写 SQL 改业务状态，不伪造集合结束。
+2. 对相同原事实分别测试 close 直接成功、COMMIT 前 UNKNOWN、COMMIT 后 UNKNOWN、可靠 close 后关闭重开且没有会话 holder。有效红应是合法正式产物缺失或不同，不能是 fixture、驱动证据或状态守卫错误；后三项只在原连接关闭、原事务不会迟到提交后重送。
+3. 取得有效红后，将 EXHAUSTED 和持久 CLOSED／UNCONFIRMED 的取消收尾统一到原文件事实消费者。原 close key／T1、Outcome、attempts、配置和历史前缀保持；实际需要停止时仍沿原责任推进，恢复不新增设备调用或结果查询。未可靠 close 时不能提交依赖取消事务；产物与 canceled 始终共同保存。
+4. 验证四种保存分区得到相同合法产物和 canceled，重复恢复不重复登记；无合格文件及已有终态保持规则。随后审计 `_close_canceled_timelapse`、`_finish_canceled_capture`、普通 timelapse 的已保存结论消费，以及同类 photo 文件保留入口。录像取消不登记产物的独立行为须有控制分区。
+5. 根独占部署 Python 3.11 的局部反例及相关 capture／默认取消回归，独立核实际 diff 与证据，按用户授权合并当前阶段工作为本地 checkpoint。未决普通集合结束、UNSATISFIED reason 和完整 app 验收继续分别跟踪。
