@@ -51,7 +51,8 @@ from camctl.capture.processing import (
     SourceFileSave,
 )
 from camctl.capture.recovery import EmergencyOutcome, EmergencyRecord, RecordStatus
-from camctl.contracts.enums import enum_for
+from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
+from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.contracts.workflow_errors import (
@@ -59,6 +60,7 @@ from camctl.contracts.workflow_errors import (
     validate_error_details,
 )
 from camctl.history.reads import ReadCoverage
+from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import relative_file_path
@@ -80,6 +82,7 @@ from camctl.persistence.repositories.capture_facts import (
 )
 from camctl.persistence.repositories.operations import FinishAttemptCommand
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionAllocations,
@@ -89,6 +92,7 @@ from camctl.persistence.transaction import (
     next_row_id as _next_id,
     row_change as _row,
     row_facts,
+    read_transaction_range,
     saved_transaction_events,
     update_change as _update,
 )
@@ -1090,6 +1094,67 @@ class _ProcessingCommand:
         return self._decision(ProcessingDisposition.ALREADY, read_only=True)
 
 
+class _MediaProcessingCommand(_ProcessingCommand):
+    """媒体申请在原完整边界上生成并核实同一事实组。"""
+
+    def _saved_processing(self, scope, saved, kinds):
+        if [(event["type"], event["reason"]) for event in saved] != kinds:
+            raise TransactionError("操作身份已用于不同媒体阶段")
+        if any(event["occurred_at"] != self._request.occurred_at for event in saved):
+            raise TransactionError("媒体申请的原事实时刻不同")
+        rows = [row for event in saved for row in event["body"]["rows"]
+                if row["table"] == "recording_processing"]
+        if len(rows) != 1 or rows[0]["id"] != self._request.processing_id:
+            raise TransactionError("原媒体申请属于不同处理记录")
+        transaction = saved[0]["transaction"]
+        previous = read_transaction_range(scope.connection, transaction.txn_id - 1) if transaction.txn_id > 1 else None
+        self._original_boundary = HistoryBoundary(previous.txn_id, previous.last_event_id) if previous else HistoryBoundary(0, 0)
+        processing = self._load_processing(scope.connection, self._request.processing_id)
+        self._claim(processing)
+        return self._original_row(scope, "recording_processing", processing["id"],
+                                  ("action", processing["action_id"]))
+
+    def _original_row(self, scope, table, row_id, owner, *, boundary=None):
+        facts = self._load_row(scope.connection, table, row_id)
+        facts.update(read_row_values_at_boundary(scope.connection, owner=owner,
+            table=table, row_id=row_id, columns=business_columns(table), current_values=facts,
+            boundary=self._original_boundary if boundary is None else boundary,
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id)))
+        return facts
+
+    def _save_specs(self, scope, specs, result=None):
+        allocation = scope.allocate(len(specs))
+        events = tuple(_envelope(allocation.first_event_id + index, allocation.txn_id,
+            kind, reason, rows, self._request.occurred_at)
+            for index, (kind, reason, rows) in enumerate(specs))
+        return CommandPlan(events=events, owners=self._owners, state_rows=self._state,
+            result=result if result is not None else ProcessingOutcome(ProcessingDisposition.SAVED))
+
+    def _reuse_specs(self, scope, saved, specs, result=None):
+        if len(saved) != len(specs):
+            raise TransactionError("原媒体事务没有完整阶段事实")
+        registry = load_enum_registry()["history_objects"]
+        for event, (kind, reason, rows) in zip(saved, specs):
+            expected = [{"table": row.table, "id": row.row_id,
+                "before": {"exists": row.before.exists, "values": dict(row.before.values)},
+                "after": {"exists": row.after.exists, "values": dict(row.after.values)}} for row in rows]
+            if (event["type"] != kind or event["reason"] != reason
+                    or event["body"]["evidence"] != {}
+                    or not json_equal(event["body"]["rows"], expected)):
+                raise TransactionError("原媒体事务的完整申请、阶段或文件身份不同")
+            expected_owners = {(registry[owner[0]]["id"], owner[1])
+                for row in rows for owner in (self._owners[(row.table, row.row_id)],)}
+            with closing(scope.connection.execute(
+                "SELECT entity_type,entity_id FROM entity_event_links WHERE event_id=?",
+                (event["event_id"],))) as cursor:
+                actual_owners = set(cursor.fetchall())
+            if actual_owners != expected_owners:
+                raise ConsistencyError("原媒体事务的对象目录归属不完整")
+        return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+            read_only=True, result=result if result is not None else
+            ProcessingOutcome(ProcessingDisposition.ALREADY))
+
+
 class _CheckDecisionCommand(_ProcessingCommand):
     """固定原片检查决定：UNDETERMINED 一次固定，不因重送重算。"""
 
@@ -1125,7 +1190,7 @@ class _CheckDecisionCommand(_ProcessingCommand):
             row, request.occurred_at)
 
 
-class _RepairDecisionCommand(_ProcessingCommand):
+class _RepairDecisionCommand(_MediaProcessingCommand):
     """固定修复决定：UNDETERMINED 一次固定，保存后配置变化不重算。"""
 
     def __init__(self, request: RepairDecisionSave, key: OperationKey) -> None:
@@ -1140,14 +1205,18 @@ class _RepairDecisionCommand(_ProcessingCommand):
         request = self._request
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(
-                saved, _RECORDING_DECIDED_EVENT, _DECIDED_REPAIR_REASON,
-                request.occurred_at)
+            processing = self._saved_processing(scope, saved,
+                [(_RECORDING_DECIDED_EVENT, _DECIDED_REPAIR_REASON)])
+            return self._reuse_specs(scope, saved, self._specs(processing))
         processing = self._load_processing(connection, request.processing_id)
+        self._claim(processing)
+        return self._save_specs(scope, self._specs(processing))
+
+    def _specs(self, processing):
+        request = self._request
         if processing["repair_state"] != 1:
             raise ConsistencyError(
                 f"修复决定已固定，不重新判断: {processing['repair_state']!r}")
-        self._claim(processing)
         row = _update(
             "recording_processing", processing["id"],
             {"repair_state": processing["repair_state"],
@@ -1155,9 +1224,7 @@ class _RepairDecisionCommand(_ProcessingCommand):
             {"repair_state": request.decision.value,
              "repair_basis_json": request.basis.as_json()},
         )
-        return self._emit(
-            scope, _RECORDING_DECIDED_EVENT, _DECIDED_REPAIR_REASON,
-            row, request.occurred_at)
+        return ((_RECORDING_DECIDED_EVENT, _DECIDED_REPAIR_REASON, (row,)),)
 
 
 class _SourceFileCommand(_ProcessingCommand):
@@ -1203,7 +1270,7 @@ class _SourceFileCommand(_ProcessingCommand):
             row, request.occurred_at)
 
 
-class _CheckResultCommand(_ProcessingCommand):
+class _CheckResultCommand(_MediaProcessingCommand):
     """保存检查执行阶段及公共媒体观察；只有 REQUIRED 决定可执行。"""
 
     def __init__(self, request: CheckResultSave, key: OperationKey) -> None:
@@ -1218,17 +1285,21 @@ class _CheckResultCommand(_ProcessingCommand):
         request = self._request
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(
-                saved, _RECORDING_PROCESSED_EVENT, _PROCESSED_CHECK_REASON,
-                request.occurred_at)
+            processing = self._saved_processing(scope, saved,
+                [(_RECORDING_PROCESSED_EVENT, _PROCESSED_CHECK_REASON)])
+            return self._reuse_specs(scope, saved, self._specs(processing))
         processing = self._load_processing(connection, request.processing_id)
+        self._claim(processing)
+        return self._save_specs(scope, self._specs(processing))
+
+    def _specs(self, processing):
+        request = self._request
         if processing["check_decision"] != 3:
             raise ConsistencyError(
                 f"检查决定未固定为需要检查: {processing['check_decision']!r}")
         if processing["check_state"] not in (1, 2):
             raise ConsistencyError(
                 f"检查阶段已终结，不再保存结果: {processing['check_state']!r}")
-        self._claim(processing)
         row = _update(
             "recording_processing", processing["id"],
             {"check_state": processing["check_state"],
@@ -1236,18 +1307,10 @@ class _CheckResultCommand(_ProcessingCommand):
             {"check_state": request.media.phase.value,
              "media_json": request.media.as_json()},
         )
-        allocation = scope.allocate(1)
-        event = _envelope(
-            allocation.first_event_id, allocation.txn_id,
-            _RECORDING_PROCESSED_EVENT, _PROCESSED_CHECK_REASON, (row,),
-            request.occurred_at,
-        )
-        return CommandPlan(
-            events=(event,), owners=self._owners, state_rows=self._state,
-            result=ProcessingOutcome(ProcessingDisposition.SAVED))
+        return ((_RECORDING_PROCESSED_EVENT, _PROCESSED_CHECK_REASON, (row,)),)
 
 
-class _RepairResultCommand(_ProcessingCommand):
+class _RepairResultCommand(_MediaProcessingCommand):
     """保存修复执行阶段及结果；成功必须指向完整修复输出。"""
 
     def __init__(self, request: RepairResultSave, key: OperationKey) -> None:
@@ -1262,42 +1325,46 @@ class _RepairResultCommand(_ProcessingCommand):
         request = self._request
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(
-                saved, _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON,
-                request.occurred_at)
+            processing = self._saved_processing(scope, saved,
+                [(_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)])
+            plan = self._reuse_specs(scope, saved, self._specs(processing))
+            if request.phase is RepairOutcome.SUCCEEDED:
+                output = self._original_row(scope, "intermediate_files", request.output_file_id,
+                    ("intermediate_file", request.output_file_id))
+                self._verify_output(processing, output)
+            return plan
         processing = self._load_processing(connection, request.processing_id)
+        if request.phase is RepairOutcome.SUCCEEDED:
+            self._verify_output(processing,
+                self._load_row(connection, "intermediate_files", request.output_file_id))
+        self._claim(processing)
+        return self._save_specs(scope, self._specs(processing))
+
+    @staticmethod
+    def _verify_output(processing, output):
+        if output["purpose"] != int(_FILE_PURPOSE.REPAIR_OUTPUT):
+            raise ConsistencyError(f"修复成功必须指向修复输出文件: {output['purpose']!r}")
+        if output["owner_action_id"] != processing["action_id"]:
+            raise ConsistencyError("修复输出属于其他动作")
+        if output["size_bytes"] is None or output["sha256"] is None:
+            raise ConsistencyError("修复输出缺少完整字节事实")
+
+    def _specs(self, processing):
+        request = self._request
         if processing["repair_state"] not in (3, 4):
             raise ConsistencyError(
                 f"修复尚未取得执行决定或已终结: {processing['repair_state']!r}")
         before: dict[str, Any] = {"repair_state": processing["repair_state"]}
         after: dict[str, Any] = {"repair_state": request.phase.value}
         if request.phase is RepairOutcome.SUCCEEDED:
-            output = self._load_row(
-                connection, "intermediate_files", request.output_file_id)
-            if output["purpose"] != int(_FILE_PURPOSE.REPAIR_OUTPUT):
-                raise ConsistencyError(
-                    f"修复成功必须指向修复输出文件: {output['purpose']!r}")
-            if output["owner_action_id"] != processing["action_id"]:
-                raise ConsistencyError("修复输出属于其他动作")
-            if output["size_bytes"] is None or output["sha256"] is None:
-                raise ConsistencyError("修复输出缺少完整字节事实")
             before["repair_output_file_id"] = processing["repair_output_file_id"]
             after["repair_output_file_id"] = request.output_file_id
         elif request.phase is RepairOutcome.FAILED:
             before["repair_error_json"] = processing["repair_error_json"]
             after["repair_error_json"] = request.error.as_json()
-        self._claim(processing)
         row = _update(
             "recording_processing", processing["id"], before, after)
-        allocation = scope.allocate(1)
-        event = _envelope(
-            allocation.first_event_id, allocation.txn_id,
-            _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON, (row,),
-            request.occurred_at,
-        )
-        return CommandPlan(
-            events=(event,), owners=self._owners, state_rows=self._state,
-            result=ProcessingOutcome(ProcessingDisposition.SAVED))
+        return ((_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON, (row,)),)
 
 
 class _DiscardProgressCommand(_ProcessingCommand):
@@ -1343,7 +1410,7 @@ class _DiscardProgressCommand(_ProcessingCommand):
             result=ProcessingOutcome(ProcessingDisposition.SAVED))
 
 
-class _RepairStartCommand(_ProcessingCommand):
+class _RepairStartCommand(_MediaProcessingCommand):
     """登记修复输出文件并进入修复执行；路径登记与运行阶段同事务。
 
     创建文件前先登记路径和责任；修复输出自创建起使用 derived/
@@ -1362,13 +1429,38 @@ class _RepairStartCommand(_ProcessingCommand):
         request = self._request
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            processing = self._saved_processing(scope, saved,
+                [(_INTERMEDIATE_FILE_EVENT, 1),
+                 (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)])
+            created = saved[0]["body"]["rows"]
+            if len(created) != 1 or created[0]["table"] != "intermediate_files":
+                raise TransactionError("原媒体登记没有唯一修复输出")
+            file_id = created[0]["id"]
+            transaction = saved[0]["transaction"]
+            output = self._original_row(scope, "intermediate_files", file_id,
+                ("intermediate_file", file_id),
+                boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id))
+            specs, relative_path = self._specs(processing, file_id)
+            self._owners[("intermediate_files", file_id)] = ("intermediate_file", file_id)
+            plan = self._reuse_specs(scope, saved, specs, RepairOutputFile(
+                ProcessingDisposition.ALREADY, file_id, relative_path))
+            if any(not json_equal(output[name], value)
+                   for name, value in specs[0][2][0].after.values.items()):
+                raise ConsistencyError("原修复输出的登记事实与可靠历史不符")
+            return plan
         processing = self._load_processing(connection, request.processing_id)
+        self._claim(processing)
+        file_id = _next_id(connection, "intermediate_files")
+        specs, relative_path = self._specs(processing, file_id)
+        self._owners[("intermediate_files", file_id)] = ("intermediate_file", file_id)
+        return self._save_specs(scope, specs, RepairOutputFile(
+            ProcessingDisposition.SAVED, file_id, relative_path))
+
+    def _specs(self, processing, file_id):
+        request = self._request
         if processing["repair_state"] != int(_REPAIR_STATE.PENDING):
             raise ConsistencyError(
                 f"修复尚未取得待执行决定: {processing['repair_state']!r}")
-        self._claim(processing)
-        file_id = _next_id(connection, "intermediate_files")
         relative_path = relative_file_path(
             FilePurpose.REPAIR_OUTPUT, file_id, request.extension)
         file_row = _row(
@@ -1391,43 +1483,11 @@ class _RepairStartCommand(_ProcessingCommand):
             {"repair_state": processing["repair_state"]},
             {"repair_state": int(_REPAIR_STATE.RUNNING)},
         )
-        self._owners[("intermediate_files", file_id)] = (
-            "intermediate_file", file_id)
-        allocation = scope.allocate(2)
-        events = (
-            _envelope(
-                allocation.first_event_id, allocation.txn_id,
-                _INTERMEDIATE_FILE_EVENT, 1, (file_row,), request.occurred_at),
-            _envelope(
-                allocation.first_event_id + 1, allocation.txn_id,
-                _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON,
-                (processing_row,), request.occurred_at),
-        )
-        return CommandPlan(
-            events=events, owners=self._owners, state_rows=self._state,
-            result=RepairOutputFile(
-                ProcessingDisposition.SAVED, file_id, relative_path))
-
-    def _reuse(self, saved) -> CommandPlan:
-        """原键恢复首次登记响应：文件身份与路径取自原事务正文。"""
-        types = [(event["type"], event["reason"]) for event in saved]
-        if types != [(_INTERMEDIATE_FILE_EVENT, 1),
-                     (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)]:
-            raise TransactionError("操作身份已用于其他阶段，不能作为修复输出登记重送")
-        if saved[0]["occurred_at"] != self._request.occurred_at:
-            raise TransactionError("修复输出登记的事实时刻与原事务不同")
-        created = saved[0]["body"]["rows"][0]
-        if created["table"] != "intermediate_files":
-            raise ConsistencyError("原事务的修复输出登记行不解释")
-        return CommandPlan(
-            events=(), owners=self._owners, state_rows=self._state,
-            read_only=True,
-            result=RepairOutputFile(
-                ProcessingDisposition.ALREADY, created["id"],
-                created["after"]["values"]["relative_path"]))
+        return ((_INTERMEDIATE_FILE_EVENT, 1, (file_row,)),
+                (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON, (processing_row,))), relative_path
 
 
-class _RepairSuccessCommand(_ProcessingCommand):
+class _RepairSuccessCommand(_MediaProcessingCommand):
     """保存修复输出完整字节并固定修复成功；字节与终态同事务。
 
     事件先保存字节事实再保存成功终态，守卫从同事务先行事件复核
@@ -1446,13 +1506,28 @@ class _RepairSuccessCommand(_ProcessingCommand):
         request = self._request
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            processing = self._saved_processing(scope, saved,
+                [(_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON),
+                 (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)])
+            rows = saved[0]["body"]["rows"]
+            if (len(rows) != 1 or rows[0]["table"] != "intermediate_files"
+                    or rows[0]["id"] != request.output_file_id):
+                raise TransactionError("原修复成功属于不同输出文件")
+            output = self._original_row(scope, "intermediate_files", request.output_file_id,
+                ("intermediate_file", request.output_file_id))
+            self._owners[("intermediate_files", output["id"])] = ("intermediate_file", output["id"])
+            return self._reuse_specs(scope, saved, self._specs(processing, output))
         processing = self._load_processing(connection, request.processing_id)
+        output = self._load_row(connection, "intermediate_files", request.output_file_id)
+        self._claim(processing)
+        self._owners[("intermediate_files", output["id"])] = ("intermediate_file", output["id"])
+        return self._save_specs(scope, self._specs(processing, output))
+
+    def _specs(self, processing, output):
+        request = self._request
         if processing["repair_state"] != int(_REPAIR_STATE.RUNNING):
             raise ConsistencyError(
                 f"修复不在执行中，不能固定成功: {processing['repair_state']!r}")
-        output = self._load_row(
-            connection, "intermediate_files", request.output_file_id)
         if output["purpose"] != int(_PURPOSE.REPAIR_OUTPUT):
             raise ConsistencyError(
                 f"修复成功必须指向修复输出文件: {output['purpose']!r}")
@@ -1460,9 +1535,6 @@ class _RepairSuccessCommand(_ProcessingCommand):
             raise ConsistencyError("修复输出属于其他动作")
         if output["size_bytes"] is not None or output["sha256"] is not None:
             raise ConsistencyError("修复输出已保存完整字节事实")
-        self._claim(processing)
-        self._owners[("intermediate_files", output["id"])] = (
-            "intermediate_file", output["id"])
         file_row = _update(
             "intermediate_files", output["id"],
             {"size_bytes": output["size_bytes"], "sha256": output["sha256"]},
@@ -1475,29 +1547,8 @@ class _RepairSuccessCommand(_ProcessingCommand):
             {"repair_state": int(_REPAIR_STATE.SUCCEEDED),
              "repair_output_file_id": request.output_file_id},
         )
-        allocation = scope.allocate(2)
-        events = (
-            _envelope(
-                allocation.first_event_id, allocation.txn_id,
-                _INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON, (file_row,),
-                request.occurred_at),
-            _envelope(
-                allocation.first_event_id + 1, allocation.txn_id,
-                _RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON,
-                (processing_row,), request.occurred_at),
-        )
-        return CommandPlan(
-            events=events, owners=self._owners, state_rows=self._state,
-            result=ProcessingOutcome(ProcessingDisposition.SAVED))
-
-    def _reuse(self, saved) -> CommandPlan:
-        types = [(event["type"], event["reason"]) for event in saved]
-        if types != [(_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON),
-                     (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)]:
-            raise TransactionError("操作身份已用于其他阶段，不能作为修复成功重送")
-        if saved[0]["occurred_at"] != self._request.occurred_at:
-            raise TransactionError("修复成功的事实时刻与原事务不同")
-        return self._decision(ProcessingDisposition.ALREADY, read_only=True)
+        return ((_INTERMEDIATE_FILE_EVENT, _LIFECYCLE_REASON, (file_row,)),
+                (_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON, (processing_row,)))
 
 
 class CaptureRepository:

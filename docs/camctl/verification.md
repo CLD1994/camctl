@@ -112,6 +112,16 @@ Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、�
 
 目标 TX2／ARM64 安装、真实主程序和电机、单位与业务范围、目标机性能以及物理断电仍由下节部署交接负责。进程中断测试不构成物理断电证据。客户端原数往返要求 Node 和浏览器支持原生 `JSON.rawJSON`／`JSON.isRawJSON`，其他浏览器与本次增量的 Windows 验证尚未执行。
 
+## 媒体原申请核实验证（2026-10-09）
+
+环境为 Linux x86_64 开发容器、CPython 3.11.16、SQLite 3.53.1。验证对象是检查结果、修复决定、修复结果、修复输出登记及修复输出完整字节的五个保存入口，生产实现位于 [CaptureRepository](../../apps/camctl/src/camctl/persistence/repositories/capture.py)。历史事务、操作键及完整边界的记录规则见[历史格式](database/history-formats.md#历史事务与事件字段)。
+
+[原申请核实集成测试](../../apps/camctl/tests/integration/capture/test_media_original_request.py)使用公开受理、调度、真实 START／STOP 处理器与受设备接口约束的替身建立历史，再通过公开事务保存文件归属、完成事实及处理决定。25 项验证覆盖原键重入、改变处理身份、时刻、媒体观察、修复决定及依据、错误、阶段、输出扩展名、完整字节与摘要的拒绝，并覆盖检查开始键被用于结束观察，以及原对象目录关联缺失。后续检查完成、修复完成及正式产物登记之后，另核实原键仍依据原完整边界返回原结果。原申请核实前后比较完整数据库内容，确认复用和拒绝均不增加或改写事实。
+
+本阶段在只包含提交候选及其已提交前置的独立快照中验证；整个 capture 组件集成目录 278 项通过，单元测试 3585 项通过、1 项跳过。命令分别为 `pytest apps/camctl/tests/integration/capture -q` 和 `pytest apps/camctl/tests/unit -q`，均使用上述 Python 3.11 环境，顺序执行。保留的两条警告来自既有同步测试的 asyncio 标记。
+
+此证据覆盖仓储原申请核实，不覆盖实际媒体结果在默认正常、残留或受限运行入口之间的恢复接线，也不证明真实视频工具或相机能力。工作文件维护和这些消费者的实施进度由[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#分模块审查进度)跟踪。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。
