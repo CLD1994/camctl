@@ -49,25 +49,28 @@ def _assessment(
 
 
 class TestDeclaredCompletion:
-    async def test_photo_uses_declared_completion(self) -> None:
-        """完成后返回契约用响应证据；只发送契约用产物核实。"""
-        returned = decide_photo(
+    @pytest.mark.parametrize("response_completed,complete,completion,expected", [
+        (True, False, PhotoCompletion.COMPLETED_ON_RETURN, PhotoDecision.VERIFY_RESULTS),
+        (False, True, PhotoCompletion.SENT_ONLY, PhotoDecision.REGISTER_SUCCESS),
+        (False, False, PhotoCompletion.SENT_ONLY, PhotoDecision.VERIFY_RESULTS),
+    ])
+    async def test_photo_uses_declared_completion(
+            self, response_completed, complete, completion, expected) -> None:
+        """完成响应与文件依据分别满足所属契约。"""
+        decision = decide_photo(
+            _state(response_completed=response_completed),
+            _assessment(complete=complete),
+            completion,
+        )
+        assert decision is expected
+
+    async def test_complete_response_and_complete_files_allow_success(self) -> None:
+        decision = decide_photo(
             _state(response_completed=True),
-            _assessment(complete=False),
+            _assessment(complete=True),
             PhotoCompletion.COMPLETED_ON_RETURN,
         )
-        assert returned is PhotoDecision.REGISTER_SUCCESS
-
-        sent_only = decide_photo(
-            _state(), _assessment(complete=True), PhotoCompletion.SENT_ONLY
-        )
-        assert sent_only is PhotoDecision.REGISTER_SUCCESS
-
-        # 只发送契约没有响应完成概念：响应未完成不判成功也不判失败。
-        waiting = decide_photo(
-            _state(), _assessment(complete=False), PhotoCompletion.SENT_ONLY
-        )
-        assert waiting is PhotoDecision.VERIFY_RESULTS
+        assert decision is PhotoDecision.REGISTER_SUCCESS
 
     async def test_completion_evidence_is_not_invented(self) -> None:
         """完成后返回契约未取得完成响应：继续等待，不因文件齐而成功。"""

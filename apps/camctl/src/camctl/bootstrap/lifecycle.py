@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
@@ -326,6 +327,7 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
     from camctl.bootstrap.flows import (
         cancel_flow, capture_flow, report_flow, residual_flow,
     )
+    from camctl.capture.handlers import resume_file_observations
     from camctl.bootstrap.obtain_assembly import (
         obtain_flow, session_obtain_assembly,
     )
@@ -349,6 +351,9 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         staging=staging, pending_media_results=deps.capture_media_results, limits=WorkFileLimits(
             batch_size=deps.config.cleanup.work_file_batch_size,
             limit_per_run=deps.config.cleanup.work_file_limit_per_run))
+    resume_files = partial(resume_file_observations,
+        pending_file_observations=deps.capture_file_observations,
+        pending_call_results=deps.capture_call_results)
     recovery_logger = (None if deps.log_runtime is None else
                        recovery_diagnostics_logger(deps.log_runtime.channel))
     from camctl.bootstrap.motor_assembly import motor_flow
@@ -372,7 +377,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         "cancel": cancel_flow(ready=ready, processing=processing,
                               motor_permits=deps.motor_permits,
                               work_files=deps.work_files,
-                              resume_media_results=deps.work_files.resume_media_results),
+                              resume_media_results=deps.work_files.resume_media_results,
+                              resume_file_observations=resume_files),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
@@ -391,7 +397,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             on_recovery_diagnostic=recovery_logger,
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
-        ), resume_media_results=deps.work_files.resume_media_results),
+        ), resume_media_results=deps.work_files.resume_media_results,
+           resume_file_observations=resume_files),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
         "residual": residual_flow(session_capture_assembly(
@@ -409,7 +416,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             on_recovery_diagnostic=recovery_logger,
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
-        ), resume_media_results=deps.work_files.resume_media_results),
+        ), resume_media_results=deps.work_files.resume_media_results,
+           resume_file_observations=resume_files),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
         # 推进；拷贝段大小取自 copy 配置。
         "obtain": obtain_flow(session_obtain_assembly(
@@ -489,6 +497,7 @@ async def execute_command(
             report_flow,
             winddown_flow,
         )
+        from camctl.capture.handlers import resume_file_observations
         from camctl.bootstrap.recovery_logging import recovery_diagnostics_logger
         from camctl.devices.drivers.runtime import current_registry
         from camctl.reporting.maintenance import MaintenanceLimits
@@ -502,13 +511,17 @@ async def execute_command(
         staging = Path(deps.config.paths.staging)
         ready = Path(deps.config.paths.ready)
         processing = Path(deps.config.paths.processing)
+        resume_files = partial(resume_file_observations,
+            pending_file_observations=deps.capture_file_observations,
+            pending_call_results=deps.capture_call_results)
         overrides.update(
             flows=flows,
             restricted_flows={
                 "cancel": cancel_flow(
                     ready=ready, processing=processing, unscheduled_only=True,
                     motor_permits=deps.motor_permits, work_files=deps.work_files,
-                    resume_media_results=deps.work_files.resume_media_results),
+                    resume_media_results=deps.work_files.resume_media_results,
+                    resume_file_observations=resume_files),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
                     capture_factory=session_capture_assembly(
@@ -530,6 +543,7 @@ async def execute_command(
                     ),
                     wait_cap_s=deps.config.clock.recovery_wait_cap_s,
                     resume_media_results=deps.work_files.resume_media_results,
+                    resume_file_observations=resume_files,
                 ),
             },
             once_report=report_flow(

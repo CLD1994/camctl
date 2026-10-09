@@ -116,8 +116,8 @@ def _value(owned, sql: str, *params):
 pytestmark = pytest.mark.asyncio
 
 
-async def test_photo_grant_and_completion_by_return(tmp_path: Path) -> None:
-    """照片共用拍摄设备竞争；完成后返回契约以响应保存成功。"""
+async def test_photo_return_waits_for_file_verification(tmp_path: Path) -> None:
+    """拍照调用成功后，尚未确认的文件继续核实。"""
     owned = _environment(tmp_path)
     scheduling = SchedulingRepository()
     operations = OperationRepository()
@@ -185,7 +185,7 @@ async def test_photo_grant_and_completion_by_return(tmp_path: Path) -> None:
             CaptureAssessment(complete=False),
             PhotoCompletion.COMPLETED_ON_RETURN,
         )
-        assert decision is PhotoDecision.REGISTER_SUCCESS
+        assert decision is PhotoDecision.VERIFY_RESULTS
     finally:
         owned.connection.close()
 

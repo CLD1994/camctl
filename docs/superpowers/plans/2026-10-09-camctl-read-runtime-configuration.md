@@ -121,3 +121,13 @@
 函数拆分及新增测试文件属于建议；状态矩阵、权威输入与失败／恢复规则是实施门槛。读取分工维护 `devices/ports.py` 的读取端口、`repositories/operations.py` 的原 READ `CONFIGURE` 窄段、`capture/media_flow.py` 的读取责任和 `_media_flow_with` 的相应装配；普通结果复合事务与共享文件执行器分别由其责任分工维护，开始修改相邻段前协调。具体设备联调、性能与物理断电不由本计划的软件门禁替代。
 
 2026-10-09，Linux 容器、Python 3.11.16：本计划已追踪现有生产数据流和正式状态空间。RC2 的逐项绑定 13 项及读取事务 10 项已经独立通过；这些证据不覆盖本计划的读取配置、内部 ticket、原尝试续传或所有恢复分支。后续门禁由根 Agent 独占运行并按实际范围记录。
+
+### 实际 End 与默认工厂交接的后续范围
+
+2026-10-09，root 核实读取输入与装配测试后，内部 VERIFY 重入使用原 `wait_stopped()` 实际返回的 clean `ReadEnd`。测试检查 stopped、实际完整字节及原对象身份，再证明不重开源会话和本地完整内容。普通读取让路与并行用例按原录像 action 关联实际 activity，再提供对应 RESULTS 输入，动作和活动主键不相等。让路边界由实际 STOP、活动 ENDED、占用 RELEASED、读取意图及结果的原历史证明；同一排期下的较早取回计划先于录像内部拷贝，内部用途不取得额外优先级。排序规则仍由[多个候选文件的选择顺序](../../architecture/file-copy.md#多个候选文件的选择顺序)完整定义。
+
+root 独占 `/tmp/camctl-goal-recovery-phase-bootstrap.log` 为 108 passed、57.69s，包含上述普通读取两项、原实际读取结束／摘要／绑定十五项，以及文件、媒体、取消和目录装配分区。内部输入模块另包含在最终 capture 定向 107 项中。两组绿色不证明默认三工厂已经交接所有原 READ 持有物。
+
+`session_capture_assembly` 的 `continuing_read_tickets`、`pending_read_results`、`pending_read_business` 和 `pending_read_ends` 在每次创建工厂时分别建立。单一工厂内多个 runtime 共用它们，但 `lifecycle.py` 的普通、残留和受限工厂没有共同会话权威来源。这一接缝尚未实现和验收，后续须先构造真实合法转换及保存故障，再在共同责任边界接线。
+
+后续门禁须证明普通入口已实际取得原 End、结果及原业务申请后，后继入口用 fresh Owned 接手原保存责任。原 ticket、完整申请、key、已用次数、轮次、进度和源保护保持；不允许新读取、摘要获取、媒体检查／修复或凭字节数补造 End。业务主动停止仍使用已登记的 UNKNOWN/read_stopped 与 CANCELED 组合；完整实际返回但缺必要源摘要且绑定异常，仍使用实际 SUCCEEDED 与所属 binding failure 组合。原子提交前后、原结果可靠但业务未保存、业务终态及迟到取消须分别建模。仅验证四个字典对象相同不能替代真实消费者验收。

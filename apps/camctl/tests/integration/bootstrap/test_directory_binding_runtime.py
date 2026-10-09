@@ -13,7 +13,7 @@ import pytest
 
 from camctl.bootstrap.config import ConfigDefaults, ConfigError, load_config
 from camctl.bootstrap.application import ConfigAdapter
-from camctl.bootstrap.flows import report_flow
+from camctl.bootstrap import lifecycle
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
@@ -212,12 +212,17 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
 
     supervisor.generate.side_effect = reject
     supervisor.stop.return_value = WorkerShutdown(exitcode=0, forced=False)
-    flow = report_flow(
-        state_db=deps.state_db, staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
-        processing=Path(cfg.paths.processing), history=cfg.history, database=cfg.database,
-        supervisor=supervisor)
-    mocker.patch("camctl.bootstrap.lifecycle._report_assembly",
-                 return_value=({"report": flow, "device": device}, supervisor))
+    original_assembly = lifecycle._report_assembly
+
+    def assemble(runtime_deps, failure_log):
+        flows, report_supervisor = original_assembly(runtime_deps, failure_log)
+        return {
+            "report": flows["report"],
+            "device": device,
+            **{name: flow for name, flow in flows.items() if name != "report"},
+        }, report_supervisor
+
+    mocker.patch("camctl.bootstrap.lifecycle._report_assembly", side_effect=assemble)
     mocker.patch("camctl.reporting.supervisor.WorkerSupervisor", return_value=supervisor)
     if restricted:
         mocker.patch("camctl.bootstrap.lifecycle._clock_policy_factory", return_value=lambda _connection:

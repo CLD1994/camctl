@@ -166,3 +166,72 @@ root 前台独占共同消费者门禁，`/tmp/camctl-goal-results-consumers-cur
 5. 元数据装载沿正常有效状态库的正式投影读取边界核验原 run、活动与已保存尝试关联。具体新增历史正文或引用校验须先由正式资料和实际保证范围定义，不增加任意外部 SQL 篡改假设。
 
 bootstrap 十六项需按对应业务责任继续定位：两项报告配置错误在 `deps.work_files=None` 时读取 callback；分发物替身没有提供完整真实 RESULTS 返回；其余录像、取回协作、受限启动与延时分支目前以超时或已失败业务状态暴露，未逐项证明其根因。它们与 default 文件前置保存以及未决集合成功不能混写成同一缺陷，必须保留当前日志及逐项证据。
+
+### 照片文件齐备的有限核实
+
+本步骤落实既有“采集完成响应不自动证明文件已经写完”和原 `results/<activity_id>` 有限轮次规则，不改变 v1 集合格式。`decide_photo` 的完成响应证明采集已结束，文件评估证明现有任务所需的文件已经齐备。两项共同满足时才允许普通成功收场；动作终态、取消和明确调用失败仍优先使用原分区。
+
+| 普通照片的完成依据 | 必要文件评估 | 下一步 |
+| --- | --- | --- |
+| 完成后返回契约尚未取得完成响应 | 任意 | 等待原响应，不用文件替代采集完成证据。 |
+| 已取得完成响应 | 文件为空、缺少必需照片类别或仍有未完成文件 | 保存本轮实际 RESULTS 与重试等待；保留原流程和次数，间隔到达且有额度后登记新尝试。 |
+| 已取得完成响应 | 必需类别、归属与写入完成均满足现有评估 | 结束核实并登记正式产物及动作成功，不再访问设备。 |
+| 只发送契约 | 必要文件尚未满足现有评估 | 继续原有限核实，不伪造完成响应。 |
+| 只发送契约 | 必要文件满足现有评估 | 使用原文件依据继续正常收场，不增加停止或录像计时。 |
+| 原有限核实预算用尽，仍未满足要求 | 已有任意可靠文件事实 | 原责任以无法确认结束，动作失败；保留此前完整且可靠归属的实际文件，不重新查询或重置额度。 |
+
+建议在现有纯判定与 `_photo_handler` 完成本修复，复用 `assess_capture_files` 判定必需照片类别、归属和写入完成，避免两个地方各维护一套齐备条件。
+
+- [x] 为完成响应与文件评估的两个独立维度增加窄单元反例；用公开受理和实际 START 构造空列表、缺少照片类别、未写完到写完、预算耗尽的组件反例。测试逐轮保存真实 v1 输入，不直接修改流程或终态投影。
+- [x] root 按测试目录独占确认有效红，失败落在提前关闭 RESULTS、丢失前轮可靠文件或预算结论后的业务收场，不以缺少测试前提代替行为失败。
+- [x] 纯判定保留完成响应等待分区，文件不齐时返回继续核实；处理器使用共同评估并保存原结果等待。下一轮沿原责任新增尝试，原结束尝试的完整输入保持。
+- [x] 预算结束先装载原已保存 RESULTS 和可靠文件事实，再沿已有无法确认及失败事务收场。仅完整且归属可靠的文件登记为可用产物。
+- [x] 空列表恢复用例按现行重试间隔和新轮次计数验证；没有不保存意图的直接列举，也不重开 CLOSED 责任。
+- [x] 运行照片定向、既有 RESULTS 文件责任测试及完整单元目录，记录范围和仍失败的验收项。检查点提交由 root 统一执行。
+
+`_photo_handler` 使用共同文件评估及原 RESULTS 元数据，合并前轮仍有效的文件。`_result_file_metadata` 与 CLOSED 装载共用同一原流程的已保存输入，当前实际条目只补入当前消费者评估，不替换原 Outcome。预算耗尽时装载可靠文件；已有 CLOSED/UNCONFIRMED 结论只继续所属业务失败收场，不重开或重复保存该结论。实际失败结果没有文件观察时，完整错误与未知文件情况保持，不能解释为已确认空集合；没有可解释结果且缺少原文件输入时仍诊断。
+
+2026-10-09，Linux x86_64、Python 3.11.16、SQLite 3.53.1：单元反例日志 `/tmp/camctl-goal-photo-unit-red.log` 为 1 failed、10 passed；初始公开照片矩阵日志 `/tmp/camctl-goal-photo-copy-red.log` 包含五个有效照片失败及一项读取结束前提失败。后续预算实际错误日志 `/tmp/camctl-goal-photo-errors-red.log` 为 1 failed、5 passed；原结论后业务收场日志 `/tmp/camctl-goal-photo-conclusion-red.log` 为 2 failed、6 passed。
+
+root 最终独占 `/tmp/camctl-goal-recovery-phase-capture-final.log` 为 107 passed、46.11s，覆盖照片新九项、照片原执行链、内部读取输入、RESULTS 原结果保存／文件四阶段／元数据与媒体原申请。完整单元最终 `/tmp/camctl-goal-recovery-phase-unit-final.log` 为 3687 passed、1 skipped、两项既有 asyncio 标记警告，7.92s。
+
+完整 capture 目录较早日志 `/tmp/camctl-goal-recovery-phase-capture.log` 为 414 passed、6 failed、64.08s。其中完成响应但未核实文件的判定用例已经采用正式继续核实分区，并在最终定向门禁通过；其余两项延时普通成功、原文件未知保存后恢复及两项结论输入准备尚未闭合。上述定向证据不代表完整 capture、完整 bootstrap 或整项第一版实现通过。
+
+### 默认流程对原文件事实的前置保存
+
+`RuntimeDeps.capture_file_observations` 持有已取得文件观察的完整发现申请、原 key、首次响应及尚未完成的在场、归属、完成申请。默认流程每次打开新的 Owned 连接后，先接手这个集合，再检查时钟、动作状态、当前设备或绑定以及本次取消资格。保存已有事实不依赖 `capture_factory` 的设备解析，也不要求原动作仍可被 dispatch。
+
+| 原文件阶段与当前业务事实 | 前置步骤 | 后续业务处理 |
+| --- | --- | --- |
+| 所选阶段 COMMIT 已完成，但执行者未取得可靠响应；原动作后来经公开取消进入终态 | 新连接沿原完整申请和 key 只读核实首次事务，继续尚未保存的原文件事实，保留原 T0。 | 原动作、取消和 RESULTS 终态保持；不能查询设备或产生新尝试。 |
+| 所选阶段 COMMIT 未完成；默认取消尚未生效 | 新连接沿原申请和 key 保存已有实际事实，各子阶段可靠完成后才允许取消入口继续。 | `ApplyCancelTarget` 在前置保存之后执行，不能先造终态再保存未提交事实。 |
+| 原请求仍 UNKNOWN 或被仓储拒绝 | 保留原 holder、申请、key、可靠首次响应和已完成子阶段；报 STATE 并停止依赖步骤。 | 不执行取消生效、设备派发或新的 RESULTS，不能用新 key 从头登记。 |
+| 当前绑定缺失、配置不匹配或时钟仅允许受限收场，但有原待存文件事实 | 仍先保存原文件事实，不创建或解析驱动。 | 后续设备和业务资格沿各自既有规则判断。 |
+| 集合为空或全部事实已可靠保存 | 不增加文件事件或设备操作。 | 正常继续该入口的既有流程。 |
+
+执行步骤如下：
+
+1. 在 `bootstrap/test_file_fact_consumers.py` 沿公开受理、调度、真实 START／STOP 和完整实际 RESULTS 返回建立前提；原文件四阶段分别在真实 SQLite COMMIT 前后返回未知。保留同一会话集合并真正关闭、重开状态库，核对 metadata；不得直接修改动作终态或文件投影。
+2. 覆盖 normal、residual、restricted 的四阶段终态后接手，以及 cancel 的四阶段提交前／后顺序。取消终态由公开取消与拍摄收场形成；提交前保持 ACTIVE，由 default cancel 实际生效。用缺失驱动及受限时间证明保存独立于当前设备资格，验证原命令、key、T0、首次响应和完整最终文件事实；设备及 RESULTS 调用次数保持。
+3. root 独占确认有效红后，在共同原文件保存 helper 增加只需 Owned、共享 holder 和原仓储的前置接手入口。不得依赖 CaptureRuntime 的驱动构造，不处分 raw RESULTS 或推进普通业务。现有 `_register_observed` 的逐阶段原 key 核实继续复用。
+4. normal scheduling、residual、restricted winddown、normal／restricted cancel 均在打开连接后、任何业务筛选及 `ApplyCancelTarget` 前注入同一保存入口。保留 WF／READ 的最新参数、callback 和责任集合，空集合也共用原对象。
+5. 持续 UNKNOWN／拒绝分别验证原持有物仍保留、STATE 与零取消生效；单次提交前／后故障恢复验证仅完成必要子阶段。root 分目录执行新矩阵及相关 bootstrap、capture 门禁后独立 review，执行者不运行 pytest 或提交。
+
+原 v1 集合结束、照片齐备模型和历史正文校验属于各自范围，前置文件保存不替代这些契约。
+
+前置保存反例由 root 独占确认，`/tmp/camctl-goal-file-default-consumers-red.log` 为 28 failed、14.43s。正常和取消入口在原责任尚未保存时读取业务墙钟，残留与受限入口直接筛掉已终态对象，没有追加原 key 核实；公开历史、故障和重开前提均已完成。该范围只证明独立文件保存责任，不据此认定完整录像 RESULTS 处分闭合。
+
+root 授权后，既有逐阶段文件保存方法集中到 `handlers.py` 的 `_FileObservationSaves`，`CaptureRuntime` 继续共用这些方法。独立 `resume_file_observations` 只接收 fresh Owned、原文件集合和原调用结果集合，逐原动作保存已取得事实，不构造驱动或取得新时刻。`lifecycle.py` 为 normal、residual、restricted winddown 及 normal／restricted cancel 注入同一集合的前置 callback；`flows.py` 与 `capture/residual.py` 在打开连接后，先执行文件 callback，再执行已有媒体 callback，随后才进入业务筛选。两类 callback 的状态错误保留原责任并报 `StateDbFailure`。
+
+四个生产模块实际导入和 `git diff --check` 通过。root 独占二十八项门禁 `/tmp/camctl-goal-file-default-consumers-green-1.log` 为 28 passed、15.02s。文件前置保存、照片状态机、普通 RESULTS 处分和未决分页分别按各自范围验收。
+
+独立静态审查后，`test_file_fact_consumers.py` 追加受限取消入口的验收，主矩阵增加四阶段乘 COMMIT 前／后八项，UNKNOWN／拒绝矩阵增加四阶段乘两种失败八项，总数为四十四项。未排期取消仍由公开受理产生，受限入口使用实际 `context.restricted_flows['cancel']`；与普通取消共用原请求、key、T0、Apply 顺序及业务／RESULTS 守恒断言。生产接线保持不变，追加十六项属于首次覆盖验证，不记录为已有有效红绿循环。
+
+root 独占装配组合 `/tmp/camctl-goal-recovery-phase-bootstrap.log` 为 108 passed、57.69s，包含四十四项文件矩阵、目录绑定、媒体原申请／取消／退出、读取摘要／绑定以及两项普通读取让路／并行。独立静态审查检查了真实接线、原文件保存方法和 `CaptureRuntime` 字段，未发现剩余确认缺陷；补充的受限取消及照片前轮文件与后轮错误组合均在最终门禁通过。这些证据不包括目标 ARM64、真实设备或物理断电验收，也不表示所有默认工厂的 READ 持有集合已经共享。
+
+本阶段最窄复验入口如下，两个集成目录分别执行：
+
+```sh
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_photo_result_retry.py -q
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/bootstrap/test_file_fact_consumers.py -q
+```

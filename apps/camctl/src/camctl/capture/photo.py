@@ -99,7 +99,8 @@ def decide_photo(
         return PhotoDecision.NOT_DISPATCHED_CANCELED
     if completion is PhotoCompletion.COMPLETED_ON_RETURN:
         if state.response_completed:
-            return PhotoDecision.REGISTER_SUCCESS
+            return (PhotoDecision.REGISTER_SUCCESS if result.complete
+                    else PhotoDecision.VERIFY_RESULTS)
         return PhotoDecision.WAIT_RESPONSE
     if result.complete:
         return PhotoDecision.REGISTER_SUCCESS

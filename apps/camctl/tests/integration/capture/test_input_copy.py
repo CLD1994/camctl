@@ -297,7 +297,7 @@ async def test_full_input_copy_pipeline(pipeline) -> None:
 
 @pytest.mark.asyncio
 async def test_verify_only_reentry_skips_session(pipeline) -> None:
-    """字节已全部保存但收尾未执行：恢复入口不开会话直接完成。"""
+    """原实际 clean End 已持有：重入只完成本地校验，不重开源会话。"""
     owned, roots, sessions, copies, context = pipeline
     qualification = copies.repository.grant_file(
         FileCandidate(
@@ -317,14 +317,18 @@ async def test_verify_only_reentry_skips_session(pipeline) -> None:
                 break
     finally:
         session.request_stop()
-        await session.wait_stopped()
+        end = await session.wait_stopped()
+    assert end.stopped is True and end.error is None
+    assert end.bytes_read == len(_CONTENT)
     driven = list(sessions.opens)
     assert driven == [0]
 
-    step = await obtain_recording_input(context())
+    step = await obtain_recording_input(context(read_end=end))
     assert step.phase is InputPhase.INPUT_READY, step.error
+    assert step.read_end is end
     assert sessions.opens == driven
     assert _copy_row(owned, copy_id)[1] == 3
+    assert (roots.staging / step.input_file.relative_path).read_bytes() == _CONTENT
 
 
 # ---- 资格等待 ----

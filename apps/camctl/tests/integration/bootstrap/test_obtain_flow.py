@@ -4,7 +4,7 @@
 来源解析、选择固定、读取资格建档，读取在设备空闲轮次经真实机会
 事务与尝试预算推进到发布；显式实例不存在按来源解析失败保存动
 作终态；读取持续失败耗尽预算后交付终局失败；设备被到时录像占用
-时读取让路，录像终态后继续推进。
+时读取让路，录像活动结束并释放占用后继续推进。
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ from camctl.bootstrap.obtain_assembly import (
     obtain_flow, session_obtain_assembly)
 from camctl.capture.handlers import ObservedFile
 from camctl.capture.results import FileKind
+from camctl.contracts.enums import enum_for
 from camctl.devices.drivers.registry import (
     DriverEntry, DriverRegistry, DriverStatus)
 from camctl.devices.evidence import (
@@ -40,6 +41,8 @@ from camctl.devices.evidence import (
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.host_files.media import ProbeRequest, RepairRequest
+from camctl.history.decoding import decode_event_row
+from camctl.history.events import load_event_registry
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.capture.timelapse import CaptureWaitConfig
 
@@ -588,7 +591,7 @@ class TestObtainExecutionLink:
         close_runtime(deps)
 
     async def test_obtain_read_yields_to_recording(self, tmp_path: Path) -> None:
-        """到时录像占用设备时读取让路；录像终态后读取继续推进。"""
+        """录像活动占用设备时读取让路；实际结束并释放占用后按统一排序读取。"""
         cfg = _config(tmp_path)
         assert initialize_state(
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
@@ -623,8 +626,10 @@ class TestObtainExecutionLink:
             await asyncio.sleep(0.4)
             # 让路：录像执行期间没有打开过读取会话。
             assert driver.read_calls == []
-            started_at = _scalar(
-                db, "SELECT started_at FROM device_activities WHERE id=1")[0]
+            record_action, record_activity, started_at = _scalar(
+                db, "SELECT a.id, da.id, da.started_at FROM device_activities da"
+                " JOIN actions a ON a.id=da.action_id WHERE a.name='record'")
+            assert record_activity != record_action
         finally:
             await _cancel(task)
             close_runtime(deps)
@@ -633,7 +638,7 @@ class TestObtainExecutionLink:
         deadline = started_at + int(3.2 * 1_000_000)
         while time.time() * 1_000_000 < deadline:
             await asyncio.sleep(0.05)
-        results.files_by_action[3] = (
+        results.files_by_action[record_activity] = (
             _record_entry("clip-1", "VID_0001.mp4", _RECORD_CONTENT),)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
         clock = {"ns": time.monotonic_ns()}
@@ -648,10 +653,101 @@ class TestObtainExecutionLink:
             assert delivery[1] == 5, delivery
             ready_file = Path(cfg.paths.ready) / f"{delivery[0]}.jpg"
             assert ready_file.read_bytes() == _PHOTO_CONTENT
-            # 录像原片的媒体链拷贝与取回读取共用读取端口；让路后的
-            # 取回读取按录像终态后的推进顺序最后发生。
+            # file-copy 的统一排序使用发起拷贝的动作；同计划时刻下，
+            # 较早受理的取回计划排在录像内部拷贝前，内部用途无额外优先级。
             reads = [json.loads(call)[-1] for call in driver.read_calls]
-            assert reads[-1] == "shot-1" and "clip-1" in reads, reads
+            assert reads == ["shot-1", "clip-1"], reads
+
+            with sqlite3.connect(db) as connection:
+                events = {
+                    event.event_id: event
+                    for event in map(decode_event_row, connection.execute(
+                        "SELECT id,transaction_id,event_type,event_version,"
+                        " occurred_at,clock_status,change_seq,body_json"
+                        " FROM history_events ORDER BY id"))}
+                registry = load_event_registry()["events"]
+
+                def transition(name, branch, table, row_id, column, before, after):
+                    spec = registry[name]
+                    matches = [event.event_id for event in events.values()
+                               if event.event_type == spec["id"]
+                               and event.reason == spec["branches"][branch]["reason"]
+                               and any(change.table == table and change.row_id == row_id
+                                       and change.before.exists and change.after.exists
+                                       and column in change.before.values
+                                       and change.before.values.get(column) == before
+                                       and column in change.after.values
+                                       and change.after.values[column] == after
+                                       for change in event.rows)]
+                    assert len(matches) == 1, (name, branch, row_id, matches)
+                    return matches[0]
+
+                def actual_attempt(kind, action_id, *, activity_id=None, copy_id=None):
+                    rows = connection.execute(
+                        "SELECT t.id,t.intent_event_id,t.result_event_id"
+                        " FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+                        " WHERE r.kind=? AND r.action_id=?"
+                        " AND r.activity_id IS ? AND r.copy_id IS ?",
+                        (kind, action_id, activity_id, copy_id)).fetchall()
+                    assert len(rows) == 1, rows
+                    attempt_id, intent_id, result_id = rows[0]
+                    intent, result = events[intent_id], events[result_id]
+                    assert intent.event_type == registry["ATTEMPT_STARTED"]["id"]
+                    assert any(change.table == "operation_attempts"
+                               and change.row_id == attempt_id for change in intent.rows)
+                    assert result.event_type == registry["ATTEMPT_RESULT"]["id"]
+                    assert result.reason == registry["ATTEMPT_RESULT"]["branches"]["SUCCEED"]["reason"]
+                    changes = [change for change in result.rows
+                               if change.table == "operation_attempts"
+                               and change.row_id == attempt_id]
+                    assert len(changes) == 1, changes
+                    values = changes[0].after.values
+                    assert values["status"] == enum_for("operation_attempts.status").SUCCEEDED
+                    outcome = values["result_json"]
+                    assert outcome["settlement"]["basis"] == "observed"
+                    return intent_id, result_id, outcome
+
+                photo_copy, photo_observer = connection.execute(
+                    "SELECT c.id,df.observer_action_id FROM file_copies c"
+                    " JOIN device_files df ON df.id=c.source_device_file_id"
+                    " WHERE c.delivery_id=?", (delivery[0],)).fetchone()
+                internal_copy, = connection.execute(
+                    "SELECT c.id FROM file_copies c JOIN recording_processing p"
+                    " ON p.id=c.processing_id WHERE p.action_id=?",
+                    (record_action,)).fetchone()
+                device_id, = connection.execute(
+                    "SELECT device_id FROM actions WHERE id=?", (photo_observer,)).fetchone()
+                kinds = enum_for("operation_runs.kind")
+                _, stopped, stop_outcome = actual_attempt(
+                    kinds.STOP, record_action, activity_id=record_activity)
+                assert {"type": "stop_confirmed", "version": 1,
+                        "data": {"activity_id": str(record_activity)}} in stop_outcome["observations"]
+                ended = transition(
+                    "DEVICE_OBSERVED", "OBSERVE", "device_activities", record_activity,
+                    "activity_state", enum_for("device_activities.activity_state").ACTIVE,
+                    enum_for("device_activities.activity_state").ENDED)
+                released = transition(
+                    "DEVICE_OBSERVED", "RELEASE", "device_activities", record_activity,
+                    "occupancy_state", enum_for("device_activities.occupancy_state").HELD,
+                    enum_for("device_activities.occupancy_state").RELEASED)
+                grab_action, = connection.execute(
+                    "SELECT action_id FROM deliveries WHERE id=?", (delivery[0],)).fetchone()
+                photo_intent, photo_result, photo_outcome = actual_attempt(
+                    kinds.READ_FILE, grab_action, copy_id=photo_copy)
+                internal_intent, _, internal_outcome = actual_attempt(
+                    kinds.READ_FILE, record_action, copy_id=internal_copy)
+                assert (photo_outcome["settlement"]["evidence"]["type"]
+                        == internal_outcome["settlement"]["evidence"]["type"]
+                        == "read_returned")
+                photo_release = transition(
+                    "COPY_CHANGED", "SLOT", "file_copies", photo_copy,
+                    "slot_device_id", device_id, None)
+                internal_grant = transition(
+                    "COPY_CHANGED", "SLOT", "file_copies", internal_copy,
+                    "slot_device_id", None, device_id)
+                # 用原历史及 attempt 引用证明实际设备边界，不从最终投影推断 End。
+                assert stopped < ended <= released < photo_intent < photo_result
+                assert photo_result < photo_release < internal_grant < internal_intent
         finally:
             await _cancel(task)
         close_runtime(deps)
@@ -738,6 +834,10 @@ class TestObtainExecutionLink:
                 " WHERE action_id ="
                 " (SELECT id FROM actions WHERE name='record')", (1,))
             assert len(driver.read_calls) == 1, driver.read_calls
+            record_action, record_activity = _scalar(
+                db, "SELECT a.id, da.id FROM device_activities da"
+                " JOIN actions a ON a.id=da.action_id WHERE a.name='record'")
+            assert record_activity != record_action
             scenario_clock.advance(600_000)
             # 声明并行：重试不为执行中的录像让路，在录像终态前完成
             # 拷贝、校验与发布。
@@ -756,7 +856,7 @@ class TestObtainExecutionLink:
             close_runtime(deps)
         # 同一时钟越过启动加目标加余量，第二会话继续原录像结算。
         scenario_clock.advance(3_200_000)
-        results.files_by_action[3] = (
+        results.files_by_action[record_activity] = (
             _record_entry("clip-1", "VID_0001.mp4", _RECORD_CONTENT),)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
         task = _run_session(

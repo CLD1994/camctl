@@ -364,17 +364,22 @@ class TestPhotoHandler:
         owned = _environment(tmp_path, _PHOTO)
         try:
             runtime = _runtime(owned, files={})
+            now = [5_000_000_000]
+            runtime.monotonic_ns = lambda: now[0]
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
             # 启动调用与首轮核实（可靠返回但产物暂不齐备）各占一次尝试。
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
-            # 产物暂不齐备：第二次推进不重复调用设备，可靠列举轮次已
-            # 收场核实责任，迟到结果经直接列举消费。
+            # 产物暂不齐备：间隔未到不再查询，到时沿同一责任登记新轮次。
             runtime.results.files_by_action[11] = (
                 _entry("shot-1", kind=ResultFileKind.PHOTO),)
             await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
+            now[0] += 3_000_000_000
+            await capture_handler("camera_take_photo")(11, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (3,)
             # 终态后再次推进不产生新事实。
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)

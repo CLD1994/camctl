@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -41,6 +42,7 @@ from camctl.scheduling.rules import WindowPhase, window_phase
 from camctl.persistence.repositories.operations import (
     _ATTEMPT_STATUS, _EFFECT_STATE,
 )
+from camctl.session.service import StateDbFailure
 
 __all__ = [
     "ResidualCandidate",
@@ -588,7 +590,8 @@ async def _confirm_by_query(
     return True
 
 
-def residual_flow(capture_factory: Any, *, resume_media_results=None) -> Any:
+def residual_flow(capture_factory: Any, *, resume_media_results=None,
+                   resume_file_observations=None) -> Any:
     """构造无人驱动的残留收场推进流程。
 
     触发动作取消或启动窗口耗尽后，已建立的收场流程不再由执行前检
@@ -604,8 +607,13 @@ def residual_flow(capture_factory: Any, *, resume_media_results=None) -> Any:
 
         owned = context.open_connection()
         try:
-            if resume_media_results is not None:
-                await resume_media_results(owned)
+            try:
+                if resume_file_observations is not None:
+                    resume_file_observations(owned)
+                if resume_media_results is not None:
+                    await resume_media_results(owned)
+            except (sqlite3.Error, ConsistencyError) as error:
+                raise StateDbFailure(f"原文件事实未可靠保存: {error}") from error
             await _recover_old_attempts(owned, capture_factory)
             _settle_orphan_queries(context, owned, OperationRepository())
             with closing(owned.connection.execute(
