@@ -183,6 +183,10 @@ assert result_attempts_after_last_page == result_attempts_after_first_page
 
 阶段验证（2026-10-10，容器 Python 3.11.16）：同一 RESULTS 尝试逐页读取并可靠保存，关闭流程后从原页范围消费；原页回执未知先核实原键。录像与 `DEVICE + TIME_AND_OUTPUTS` 延时摄影已接入集合确定、类别及固定格式和数量要求，明确空集合和不合格产物保存已登记的公共错误。文件归属使用原固定基准或任务范围；跨页预览在原片归属保存后配对；后轮读取失败不抹去前轮已经确认完成的文件。2166 项相关单元、97 项页与基准专项集成、2 项 bootstrap 共同恢复集成通过。这是阶段提交依据，T6 仍待接入另外两种合法延时完成组合、其余共有消费入口和恢复矩阵，并运行 capture、bootstrap、reporting 完整门禁；T5/T6 尚不标为整体完成。
 
+设备完成依据的阶段实现（2026-10-10，容器 Python 3.11.16）：`DEVICE + DEVICE_EVIDENCE` 消费任一原可靠结果页的实际完成观察，与原调用结果及适用集合结论共同保存。读取错误、未知集合或未知文件格式不丢失真实结束；后轮可以沿用原完成观察。确定空集合及不合格文件保留设备结束并保存正确失败，按剩余限制释放。原完整保存申请跨连接恢复，改变完成依据或省略原页引用的原键重送被拒绝；正向、逆向和快照恢复得到一致活动事实。该阶段的相关单元 2166 项和 capture 专项 92 项通过，仍待主机定时结束、启动返回已完成及其余共有消费入口。
+
+该阶段扩大 reporting 目录为 366 项通过、1 项失败。失败的报告生成用例在阶段起点 `38fa5be` 独立源码副本中复现；其单张拍摄准备使用尚未接入集合确定的旧消费路径，计划因此仍为运行中。该问题由 T6 的共有消费者接线继续处理，未把 reporting 目录报告为通过。
+
 **建议文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py`、`capture/recording.py`、`persistence/repositories/capture.py`；补充 `apps/camctl/tests/integration/capture/test_capture_contract.py`、`test_timelapse_wait_runtime.py`、`test_result_confirmation.py`、`test_result_error_history.py`，以及 bootstrap 的 `test_timelapse_finish.py`、`test_recording_stop.py`。
 
 **接口：** 消费 T5 `list_page`、可靠页范围及 assessment，轮次拥有者组织读取、保存及最后关闭，接入 `_confirm_timelapse_results` 或等价共同边界。沿用 `finish_result_check(AttemptFinish, ResultSetSave, key, owned)`、`confirm_result_set(ResultSetSave, key, owned)` 和 `CaptureRuntime.save_capture_completion`；原调用、采集结论、必要文件事实、正式产物及终态按规定共同提交。`PendingCaptureCompletion` 等原申请拥有者先于依赖新配置或新设备调用恢复。

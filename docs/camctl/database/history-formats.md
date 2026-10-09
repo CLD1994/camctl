@@ -97,6 +97,8 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 
 `evidence` 只保存不能由行变更完整表达的依据。公共成员为 `attempt_id`（正整数，实际操作结果的尝试身份）、`observation`（驱动或工具返回的结构化保证与数据）和 `input_key`（本次输入处理的 32 位十六进制身份）；各分支允许的公共成员及专属成员统一在 [事件转换规则的 JSON 文件](event-transitions.json)登记。未登记的成员不能写入。缺少必要证据时不能写入对应事实；没有额外依据时使用 `{}`。依据仅引用某个对象，不使该对象自动成为变化对象。
 
+由结果页取得的设备结束事实使用 `DEVICE_OBSERVED.OBSERVE` 的公共 `observation` 成员。其结构为 `{result_page_event_id, completion_evidence}`：前者指向原 RESULTS 尝试可靠页范围中的实际页，后者保存该页原 `{type, version, data}` 完成观察。设备观察事件的事实时刻沿用该页实际返回时刻，集合结论继续使用其自身原时刻。写入及原键重送核对原页、原活动、完整观察和原时刻；恢复读取已保存的依据，不访问设备补齐或用本次配置重新解释。
+
 可靠未派发的基准准备已经解除时，`ACTION_FINISHED.FAIL/EXPIRE/CANCEL` 与适用的 `DEVICE_OBSERVED.RELEASE` 可以保存 `preparation_resolved: true`。拥有者必须先确认实际目录调用完成收场，且原页保存申请已经可靠解决；尚未调用目录时，须确认不存在在途准备调用和原保存申请。该事实允许取消、过期或目录读取失败后的 `COLLECTING` 活动释放占用，不说明设备已经结束，不补造空基准或结果集合。省略成员表示没有这项额外依据；不保存 `false`。原键重送核对成员有无及取值，不把当前基准状态反推为原输入。
 
 准备收场时已有动作终态，实际目录错误通过 `DEVICE_OBSERVED.OBSERVE` 保存到原活动的 `last_error_json`，与适用释放共同提交。释放分支携带错误时，登记 `preparation_error: {code, stage, details}`，并须同时携带 `preparation_resolved: true`。该成员保存原完整错误输入，使原键核实不依赖当前活动错误；原错误已经相同则省略重复观察，仍保留释放输入。省略成员表示原释放申请没有错误输入，不等同于事后省略错误。

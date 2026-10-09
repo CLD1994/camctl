@@ -49,6 +49,7 @@ from camctl.capture.result_inputs import (
 from camctl.capture.result_scans import (
     PendingResultScan, SavedResultEntries, SourceResultEntries, RegisteredSourceFiles, advance_result_scan,
 )
+from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.photo import (
     CaptureAssessment,
     PhotoCompletion,
@@ -189,6 +190,7 @@ _DEVICE_GUARANTEE = 1
 #: 第一版任务范围列举的结果规则标识与采集判定方法。
 _RESULT_CONTRACT = "task_scope_files"
 _TIME_AND_OUTPUTS_METHOD = "time_and_outputs"
+_DEVICE_EVIDENCE_METHOD = "device_evidence"
 _KNOWN_FAILURE_METHOD = "known_failure"
 
 _ACTION_TERMINAL = (3, 4, 5, 6)
@@ -258,6 +260,7 @@ class PendingCallResult:
     result_listing: tuple[ObservedFile, ...] | SavedResultEntries | None = None
     result_disposition_ready: bool = True
     result_set: ResultSetSave | None = None
+    completion_page: ResultPageRef | None = None
     result_registered_files: Mapping[str, tuple[CaptureFile, int]] | None = None
 
 
@@ -905,11 +908,12 @@ class CaptureRuntime(_FileObservationSaves):
             raise ConsistencyError("原调用结果缺少所属流程")
         if not pending.result_disposition_ready:
             raise ConsistencyError("原 RESULTS 仍持有，所属消费者尚未确定结果处置")
-        if pending.result_set is not None:
+        if pending.result_set is not None or pending.completion_page is not None:
             if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
                 raise ConsistencyError("集合结论必须使用原 RESULTS 责任")
             return self.capture.finish_result_check(
-                pending.finish, pending.result_set, pending.key, self.owned)
+                pending.finish, pending.result_set, pending.key, self.owned,
+                completion_page=pending.completion_page)
         is_start = run["kind"] == int(_RUN_KIND.START) or (
             run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
             and run["query_purpose"] == int(_QUERY_PURPOSE.START_CONFIRMATION))
@@ -3062,6 +3066,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_baselines(action_id)
     context.resume_result_check_closes(action_id)
     context.resume_file_observations(action_id)
+    context.resume_start_results(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         context.timelapse_deadlines.pop(action_id, None)
@@ -3104,7 +3109,8 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         if context.action(action_id)["status"] in _ACTION_TERMINAL:
             context.timelapse_deadlines.pop(action_id, None)
         return
-    if _settle_start_without_sent_at(context, action, attempt):
+    wait_after_send = action["execution_spec_json"]["wait_after_send"]
+    if wait_after_send and _settle_start_without_sent_at(context, action, attempt):
         # 可能派发但没有可靠发送时间：无法计算等待锚点，不重复启
         # 动、不补造时间，按无法核实收场。
         context.timelapse_deadlines.pop(action_id, None)
@@ -3116,10 +3122,10 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         (action_id,),
     )) as cursor:
         activity = cursor.fetchone()
-    if activity is None or activity[0] is None:
+    if activity is None or (wait_after_send and activity[0] is None):
         # 发送事实（sent_at）由活动观察边界保存；尚未保存时等待。
         return
-    if activity[4] is None:
+    if wait_after_send and activity[4] is None:
         config = context.wait_config(action)
         check_at = activity[0] + (
             config.target_duration_ms + config.driver_margin_ms
@@ -3158,7 +3164,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
                     f"延时等待安排事务未完成（{receipt.kind.value}）: {receipt.error}")
         if context.monotonic_ns() < context.timelapse_deadlines[action_id]:
             return
-    wait_event_id = _complete_timelapse_wait(context, action_id)
+    wait_event_id = _complete_timelapse_wait(context, action_id) if wait_after_send else None
     context.timelapse_deadlines.pop(action_id, None)
     concluded = activity[5] in (3, 4)
     if concluded:
@@ -3179,7 +3185,12 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     assessment = assess_capture_files(
         CaptureFileSet(files=(file for file, _ in registered), set_finalized=_listing_finalized(listing)),
         _product_requirements(action, FileKind.VIDEO))
-    if assessment.is_complete or assessment.explicitly_unmet:
+    completion_ready = (wait_after_send and wait_event_id is not None
+        and action["execution_spec_json"]["completion_mode"] == int(
+            enum_for("device_activities.completion_mode").TIME_AND_OUTPUTS))
+    completion_ready = (completion_ready or listing.completion_evidence is not None
+        or context.capture.read_result_completion(action_id, context.owned) is not None)
+    if completion_ready and (assessment.is_complete or assessment.explicitly_unmet):
         _confirm_timelapse_results(context, action_id, assessment, listing.entries, wait_event_id, listing)
         await _finish_timelapse_conclusion(context, action_id)
     else:
@@ -3325,6 +3336,7 @@ class ListingRound:
     scan_complete: bool = False
     set_finalized: bool = False
     completion_evidence: Any = None
+    completion_page: ResultPageRef | None = None
 
 
 def _registered_result_files(runtime: CaptureRuntime, action_id: int,
@@ -3428,14 +3440,17 @@ def _held_listing(runtime: CaptureRuntime, ticket: AttemptTicket) -> ListingRoun
     if isinstance(entries, SavedResultEntries):
         entries = SavedResultEntries(runtime.capture, runtime.owned, entries.last_ref)
         page = entries.last_page
+        completion = entries.completion_page
     else:
         page = None
+        completion = None
     return ListingRound(ListingPhase.LISTED, entries, ticket,
                         pending.finish.outcome.outcome, pending.finish.occurred_at,
                         pending.returned_ns, registered_files=pending.result_registered_files,
                         scan_complete=False if page is None else page.scan_complete,
                         set_finalized=False if page is None else page.set_finalized,
-                        completion_evidence=None if page is None else page.completion_evidence)
+                        completion_evidence=None if completion is None else completion.page.completion_evidence,
+                        completion_page=None if completion is None else completion.ref)
 
 
 def _uses_result_pages(runtime: CaptureRuntime) -> bool:
@@ -3498,9 +3513,11 @@ def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRou
         if last.page.outcome != actual or last.occurred_at != row[9]:
             raise ConsistencyError("RESULTS 结束记录改变原末页实际返回或时刻")
         entries = SavedResultEntries(runtime.capture, runtime.owned, last.ref)
+        completion = entries.completion_page
         return ListingRound(ListingPhase.CLOSED, entries, ticket, actual, row[9], None, True,
             scan_complete=last.page.scan_complete, set_finalized=last.page.set_finalized,
-            completion_evidence=last.page.completion_evidence)
+            completion_evidence=None if completion is None else completion.page.completion_evidence,
+            completion_page=None if completion is None else completion.ref)
     metadata = _result_file_metadata(runtime, ticket)
     previous, registered = _registered_result_files(runtime, action_id, metadata)
     previous_by_identity = {entry.identity: entry for entry in previous}
@@ -3535,9 +3552,15 @@ def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
         raise ConsistencyError("RESULTS 原返回及其保存责任不可替换")
     finish = replace(pending.finish, retry_wait=retry_wait,
                      run_finish=None if end_run is None else RunFinish(end_run))
+    completion_page = pending.completion_page
+    if not pending.result_disposition_ready and listing.completion_page is not None:
+        activity = row_facts(runtime.owned.connection, "device_activities", int(ticket.target_id))
+        if activity["activity_state"] != 3:
+            completion_page = listing.completion_page
     if pending.result_disposition_ready and (pending.finish != finish or pending.result_set != result_set):
         raise ConsistencyError("RESULTS 原 key 的已确定处置不可改变")
-    pending = replace(pending, finish=finish, result_set=result_set, result_disposition_ready=True)
+    pending = replace(pending, finish=finish, result_set=result_set,
+                      completion_page=completion_page, result_disposition_ready=True)
     runtime.pending_start_results[identity] = pending
     runtime.save_held_result(ticket)
 
@@ -3593,16 +3616,17 @@ async def _finish_timelapse_conclusion(
     输入缺失或不可解释时保留诊断，不访问设备补写。
     """
     with closing(runtime.owned.connection.execute(
-        "SELECT result_set_state, completion_basis, capture_json FROM device_activities"
+        "SELECT result_set_state, completion_basis, capture_json, activity_state FROM device_activities"
         " WHERE action_id = ?", (action_id,),
     )) as cursor:
-        state, basis, capture_json = cursor.fetchone()
+        state, basis, capture_json, activity_state = cursor.fetchone()
     listing = _saved_result_listing(runtime, action_id)
     entries = listing.entries
     registered = _register_listing(runtime, action_id, listing)
     capture = None if capture_json is None else parse_exact_json(capture_json)
-    if state == 3 and basis in (2, 3):
+    if activity_state == 3 or (state == 3 and basis == 3):
         _release_occupancy(runtime, action_id)
+    if state == 3 and basis in (2, 3):
         _finish_capture(runtime, action_id, entries, FileKind.VIDEO, registered=registered,
                         set_finalized=_listing_finalized(listing))
     elif state == 3:
@@ -3637,7 +3661,7 @@ def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:
 
 def _confirm_timelapse_results(
     runtime: CaptureRuntime, action_id: int, assessment, entries,
-    wait_event_id: int, listing: ListingRound,
+    wait_event_id: int | None, listing: ListingRound,
 ) -> None:
     """把本轮结果集合核实结论与尝试结束、流程收场共同保存。
 
@@ -3655,6 +3679,17 @@ def _confirm_timelapse_results(
     else:
         observation = {"files": sorted(entry.identity for entry in entries)}
     if assessment.is_complete:
+        if listing.completion_evidence is not None:
+            actual = listing.completion_evidence
+            completion = {"method": _DEVICE_EVIDENCE_METHOD,
+                "observation": {"result_page_event_id": listing.completion_page.event_id,
+                    "completion_evidence": {"type": actual.type, "version": actual.version,
+                                            "data": dict(actual.data)}}}
+        else:
+            completion = runtime.capture.read_result_completion(action_id, runtime.owned)
+            if completion is None:
+                completion = {"method": _TIME_AND_OUTPUTS_METHOD,
+                    "wait_completed_event_id": wait_event_id, "observation": observation}
         command = ResultSetSave(
             action_id=action_id,
             occurred_at=listing.occurred_at,
@@ -3662,11 +3697,7 @@ def _confirm_timelapse_results(
             contract=contract,
             observation=observation,
             capture={"status": "completed"},
-            evidence={
-                "method": _TIME_AND_OUTPUTS_METHOD,
-                "wait_completed_event_id": wait_event_id,
-                "observation": observation,
-            })
+            evidence=completion)
     else:
         missing = sorted(str(kind.value) for kind in assessment.missing_kinds)
         failure = _output_failure(runtime, action_id, assessment)

@@ -117,6 +117,12 @@ class SavedResultEntries:
     def last_page(self):
         return self.repository.read_result_page(self.last_ref, self.owned).page
 
+    @property
+    def completion_page(self):
+        """完成观察可以来自任一可靠页，不要求末页重复提供。"""
+        return next((saved for saved in self.pages()
+                     if saved.page.completion_evidence is not None), None)
+
     def __iter__(self):
         for saved in self.pages():
             identities = {identity for identity, _ in saved.file_ids}

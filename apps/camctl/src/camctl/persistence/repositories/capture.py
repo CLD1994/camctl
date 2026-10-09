@@ -44,6 +44,7 @@ from camctl.capture.media import (
     decide_recording_result,
 )
 from camctl.capture.result_inputs import files_from_outcome, saved_outcome
+from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.processing import (
     CheckDecisionSave,
     CheckReason,
@@ -182,7 +183,7 @@ _ACTIVITY_DISPATCH_NEXT = {
     4: frozenset({2}),
 }
 _ACTIVITY_STATE_NEXT = {
-    1: frozenset({2}),
+    1: frozenset({2, 3}),
     2: frozenset({3}),
 }
 
@@ -1755,6 +1756,37 @@ class CaptureRepository:
         from .result_pages import read_source_inputs
         return read_source_inputs(ticket, cursor, batch, owned)
 
+    def read_result_completion(self, action_id: int, owned: OwnedConnection):
+        """读取原可靠结束观察；后轮没有重复提供依据时仍沿用原事实。"""
+        from .result_pages import _at
+
+        activity = load_activity_of_action(owned.connection, action_id)
+        if activity["activity_state"] != 3:
+            return None
+        with closing(owned.connection.execute(
+            "SELECT h.occurred_at,h.body_json FROM entity_event_links l"
+            " JOIN history_events h ON h.id=l.event_id"
+            " WHERE l.entity_type=1 AND l.entity_id=? AND h.event_type=?"
+            " AND json_extract(h.body_json,'$.reason')=?"
+            " AND json_extract(h.body_json,'$.evidence.observation.result_page_event_id') IS NOT NULL"
+            " AND EXISTS (SELECT 1 FROM json_each(h.body_json,'$.rows') r"
+            " WHERE json_extract(r.value,'$.table')='device_activities'"
+            " AND json_extract(r.value,'$.id')=?"
+            " AND json_extract(r.value,'$.after.values.activity_state')=3)"
+            " ORDER BY h.id DESC LIMIT 1",
+            (action_id, _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON, activity["id"]),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        observation = parse_exact_json(row[1])["evidence"]["observation"]
+        saved, _ = _at(owned.connection, observation["result_page_event_id"])
+        original, _, occurred_at, expected = _ResultPageCompletionCommand(
+            saved.ref.ticket, saved.ref)._source(owned.connection)
+        if original["id"] != activity["id"] or occurred_at != row[0] or not json_equal(observation, expected):
+            raise ConsistencyError("原设备结束观察与完成页、活动或事实时刻不符")
+        return {"method": _DEVICE_EVIDENCE_METHOD, "observation": expected}
+
     def read_baseline(self, ref: BaselineRef, cursor: int | None, batch: int,
                       owned: OwnedConnection) -> Page[BaselineChunk, int]:
         from .baseline import read_chunks
@@ -2096,11 +2128,13 @@ class CaptureRepository:
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
     def finish_result_check(
-        self, finish: AttemptFinish, confirm: ResultSetSave,
-        key: OperationKey, owned: OwnedConnection,
+        self, finish: AttemptFinish, confirm: ResultSetSave | None,
+        key: OperationKey, owned: OwnedConnection, *,
+        completion_page: ResultPageRef | None = None,
     ) -> DbOutcome[ResultCheckOutcome]:
         receipt = commit_operation(
-            _FinishResultCheckCommand(finish, confirm, key), key, owned)
+            _FinishResultCheckCommand(finish, confirm, key,
+                                      completion_page=completion_page), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -2741,11 +2775,13 @@ class _ResultSetConfirmCommand:
     求活动已经结束。录像活动不适用本命令。
     """
 
-    def __init__(self, command: ResultSetSave, key: OperationKey) -> None:
+    def __init__(self, command: ResultSetSave, key: OperationKey, *,
+                 ended_activity: int | None = None) -> None:
         if not isinstance(command, ResultSetSave):
             raise TypeError("结果集合核实申请必须使用 ResultSetSave")
         self._command = command
         self._key = key
+        self._ended_activity = ended_activity
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
@@ -2781,7 +2817,12 @@ class _ResultSetConfirmCommand:
                 "outcome": outcome,
                 "observation": dict(command.observation),
             }
-        basis, evidence = self._basis_after(facts)
+        basis_facts = facts
+        if self._ended_activity is not None:
+            if self._ended_activity != activity_id:
+                raise ConsistencyError("同事务设备结束不属于本结果活动")
+            basis_facts = {**facts, "activity_state": 3}
+        basis, evidence = self._basis_after(basis_facts)
         if basis != facts["completion_basis"]:
             before["completion_basis"] = facts["completion_basis"]
             after["completion_basis"] = basis
@@ -2872,6 +2913,8 @@ class _ResultSetConfirmCommand:
         pairs = (
             ("result_check_json", expected_check),
             ("capture_json", None if command.capture is None else dict(command.capture)),
+            ("completion_evidence_json",
+             None if command.evidence is None else dict(command.evidence)),
             ("last_error_json",
              None if command.error is None else dict(command.error)),
         )
@@ -2900,10 +2943,10 @@ class _ResultSetConfirmCommand:
 
 @dataclass(frozen=True)
 class ResultCheckOutcome:
-    """一轮核实结论事务的结果：尝试结束与集合结论。"""
+    """原尝试可靠结束；没有集合结论时该责任继续有限核实。"""
 
     finish: FinishAttemptResult
-    result_set: ResultSetOutcome
+    result_set: ResultSetOutcome | None
 
 
 def _merged_state_rows(*states) -> dict[str, dict[int, dict[str, Any]]]:
@@ -3663,58 +3706,149 @@ class _FinishResidualBindingFailureCommand:
             result=plans[0].result if request.action_id is not None else None)
 
 
+class _ResultPageCompletionCommand:
+    """只消费原尝试可靠页中的完成观察，保存设备实际结束。"""
+
+    def __init__(self, ticket: AttemptTicket, ref: ResultPageRef) -> None:
+        self._ticket, self._ref = ticket, ref
+
+    def _source(self, connection):
+        from .result_pages import _at, _load
+
+        ticket, ref = self._ticket, self._ref
+        if not isinstance(ref, ResultPageRef) or ref.ticket != ticket:
+            raise ConsistencyError("设备完成依据改变原结果尝试")
+        _, attempt, action, activity = _load(connection, ticket)
+        first, last = attempt["result_first_page_event_id"], attempt["result_last_page_event_id"]
+        if first is None or last is None or not first <= ref.event_id <= last:
+            raise ConsistencyError("设备完成依据不在原可靠页范围内")
+        saved, _ = _at(connection, ref.event_id)
+        actual = saved.page.completion_evidence
+        if saved.ref != ref or actual is None:
+            raise ConsistencyError("原结果页没有可用的实际设备完成观察")
+        if activity["dispatch_state"] in (1, 4):
+            raise ConsistencyError("可靠未启动的活动不能保存设备完成")
+        observation = {"result_page_event_id": ref.event_id,
+            "completion_evidence": {"type": actual.type, "version": actual.version,
+                                    "data": dict(actual.data)}}
+        return activity, action, saved.occurred_at, observation
+
+    def plan(self, scope) -> CommandPlan:
+        activity, action, occurred_at, observation = self._source(scope.connection)
+        if 3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset()):
+            raise ConsistencyError("原设备结束已经保存，不再次承载结束输入")
+        allocation = scope.allocate(1)
+        event = _envelope(allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+            (_update("device_activities", activity["id"],
+                {"activity_state": activity["activity_state"]}, {"activity_state": 3}),),
+            occurred_at, evidence={"observation": observation})
+        return CommandPlan(events=(event,),
+            owners={("device_activities", activity["id"]): ("action", action["id"])},
+            state_rows={"device_activities": {activity["id"]: activity},
+                        "actions": {action["id"]: action}}, result=activity["id"])
+
+    def reuse(self, scope, saved) -> CommandPlan:
+        activity, action, occurred_at, observation = self._source(scope.connection)
+        if len(saved) != 1:
+            raise TransactionError("原结果设备观察事件组成不同")
+        event = saved[0]
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)
+                or event["occurred_at"] != occurred_at
+                or not json_equal(event["body"]["evidence"], {"observation": observation})
+                or len(rows) != 1 or rows[0]["table"] != "device_activities"
+                or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], {"activity_state": 3})):
+            raise TransactionError("设备完成重送改变原可靠页、观察或时刻")
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
+                           result=activity["id"])
+
+
 class _FinishResultCheckCommand:
-    """一轮核实结论与尝试结束、流程收场同事务提交的命令。
+    """原设备完成观察、适用集合结论与原尝试结果共同提交。
 
     结论依据与承载它的列举轮次原子保存：任一侧输入被拒整组回滚，
     不留下已结束而无结论的轮次；重送按原事务分段恢复。
     """
 
-    def __init__(self, finish: AttemptFinish, confirm: ResultSetSave,
-                 key: OperationKey) -> None:
+    def __init__(self, finish: AttemptFinish, confirm: ResultSetSave | None,
+                 key: OperationKey, *, completion_page: ResultPageRef | None = None) -> None:
         self._finish = finish
         self._confirm = confirm
         self._key = key
+        self._completion_page = completion_page
+        if confirm is None and completion_page is None:
+            raise TypeError("结果复合保存必须携带设备完成或集合结论")
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
             return self._reuse(scope, saved)
-        # 一次总分配覆盖尝试结果、流程收场与集合结论三个事件。
-        allocation = scope.allocate(3)
+        run = row_facts(connection, "operation_runs", self._finish.ticket.run_id)
+        if run is None or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+            raise ConsistencyError("结果复合保存必须属于原结果核实流程")
+        if self._confirm is not None and self._confirm.action_id != run["action_id"]:
+            raise ConsistencyError("集合结论与原结果尝试所属动作不同")
+        count = 1 + int(run["status"] in (1, 2)
+            and (self._finish.retry_wait or self._finish.run_finish is not None))
+        allocation = scope.allocate(count + int(self._completion_page is not None)
+                                    + int(self._confirm is not None))
         sub = _CompositeScope(scope, allocation.first_event_id)
         finish_plan = FinishAttemptCommand(self._finish, self._key).plan(sub)
         if finish_plan.read_only:
             raise TransactionError("结论轮次的尝试已结束，不能再次携带结论提交")
-        confirm_plan = _ResultSetConfirmCommand(self._confirm, self._key).plan(sub)
+        plans = [finish_plan]
+        ended_activity = None
+        if self._completion_page is not None:
+            end_plan = _ResultPageCompletionCommand(
+                self._finish.ticket, self._completion_page).plan(sub)
+            plans.append(end_plan)
+            ended_activity = end_plan.result
+        confirm_plan = None
+        if self._confirm is not None:
+            confirm_plan = _ResultSetConfirmCommand(self._confirm, self._key,
+                ended_activity=ended_activity).plan(sub)
+            plans.append(confirm_plan)
         return CommandPlan(
-            events=(*finish_plan.events, *confirm_plan.events),
-            owners={**finish_plan.owners, **confirm_plan.owners},
-            state_rows=_merged_state_rows(
-                finish_plan.state_rows, confirm_plan.state_rows),
+            events=tuple(event for plan in plans for event in plan.events),
+            owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
             result=ResultCheckOutcome(
-                finish=finish_plan.result, result_set=confirm_plan.result),
+                finish=finish_plan.result,
+                result_set=None if confirm_plan is None else confirm_plan.result),
         )
 
     def _reuse(self, scope, saved) -> CommandPlan:
         types = [(event["type"], event["reason"]) for event in saved]
-        if (len(types) != 3 or types[0][0] != _ATTEMPT_RESULT_EVENT
-                or types[1] != (_RUN_END_EVENT, 3)
-                or types[2][0] != _RESULT_SET_EVENT):
+        finish_count = 1 + int(len(types) > 1
+            and types[1][0] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
+        if (not types or types[0][0] != _ATTEMPT_RESULT_EVENT
+                or len(types) != finish_count + int(self._completion_page is not None)
+                                      + int(self._confirm is not None)):
             raise TransactionError("操作身份已用于其他事务，不能作为核实结论重送")
         finish_plan = FinishAttemptCommand(
-            self._finish, self._key)._reuse(scope, saved[:2])
-        confirm_plan = _ResultSetConfirmCommand(
-            self._confirm, self._key)._reuse(scope, saved[2:])
+            self._finish, self._key)._reuse(scope, saved[:finish_count])
+        plans = [finish_plan]
+        offset = finish_count
+        if self._completion_page is not None:
+            plans.append(_ResultPageCompletionCommand(self._finish.ticket,
+                self._completion_page).reuse(scope, saved[offset:offset + 1]))
+            offset += 1
+        confirm_plan = None
+        if self._confirm is not None:
+            confirm_plan = _ResultSetConfirmCommand(
+                self._confirm, self._key)._reuse(scope, saved[offset:])
+            plans.append(confirm_plan)
         return CommandPlan(
             events=(),
-            owners={**finish_plan.owners, **confirm_plan.owners},
-            state_rows=_merged_state_rows(
-                finish_plan.state_rows, confirm_plan.state_rows),
+            owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
             read_only=True,
             result=ResultCheckOutcome(
-                finish=finish_plan.result, result_set=confirm_plan.result),
+                finish=finish_plan.result,
+                result_set=None if confirm_plan is None else confirm_plan.result),
         )
 
 
@@ -5061,8 +5195,8 @@ def _activity_guard(event, context) -> None:
         before_state = row.before.values.get("activity_state")
         after_state = row.after.values.get("activity_state")
         if after_state == 3 and before_state != 3:
-            # 活动结束必须由本事务的可靠停止事实承载；同事件创建的
-            # 最终流程行即为该事实。
+            # 实际停止或原结果页的完成观察承载设备结束；本地退出
+            # 和目录扫描结束均不构成该依据。
             stopped = any(
                 row.table == "operation_runs"
                 and not row.before.exists
@@ -5073,8 +5207,24 @@ def _activity_guard(event, context) -> None:
             stopped = stopped or any(
                 values.get("status") == 3 for values in runs.values()
             )
-            if not stopped:
-                raise EventValidationError("活动结束缺少可靠停止事实")
+            observation = event.evidence.get("observation")
+            completed = False
+            if isinstance(observation, Mapping) and "result_page_event_id" in observation:
+                actual = observation.get("completion_evidence")
+                completed = (
+                    set(observation) == {"result_page_event_id", "completion_evidence"}
+                    and is_json_integer(observation["result_page_event_id"])
+                    and 0 < observation["result_page_event_id"] < event.event_id
+                    and isinstance(actual, Mapping)
+                    and set(actual) == {"type", "version", "data"}
+                    and isinstance(actual["type"], str) and bool(actual["type"])
+                    and is_json_integer(actual["version"]) and actual["version"] > 0
+                    and isinstance(actual["data"], Mapping)
+                    and actual["data"].get("activity_id") == str(row.row_id))
+                if not completed:
+                    raise EventValidationError("结果页完成观察不属于原活动或可靠先前页")
+            if not stopped and not completed:
+                raise EventValidationError("活动结束缺少可靠停止或设备完成事实")
         basis_before = row.before.values.get("completion_basis")
         basis_after = row.after.values.get("completion_basis")
         capture_columns = (
