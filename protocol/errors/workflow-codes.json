@@ -690,6 +690,28 @@
         "additionalProperties": false
       }
     },
+    "checksum_mismatch": {
+      "stage": "source_read",
+      "description": "完整主机副本与固定源文件的摘要不一致，新增整片重拷的预算已耗尽；本次拷贝最终失败，不据此判断源文件损坏。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "max_recopies": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recopies_used": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_recopies",
+          "recopies_used"
+        ],
+        "additionalProperties": false
+      }
+    },
     "delete_attempts_exhausted": {
       "stage": "cleanup",
       "description": "删除预算耗尽。",
