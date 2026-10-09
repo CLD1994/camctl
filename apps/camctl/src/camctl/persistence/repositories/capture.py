@@ -106,7 +106,7 @@ from camctl.persistence.repositories.operations import (
 from camctl.persistence.repositories.scheduling import (
     ExpireActionCommand, ExpireActionRequest, ExpireOutcome,
 )
-from camctl.operations.models import AttemptTicket, EffectState, ErrorValue
+from camctl.operations.models import AttemptStatus, AttemptTicket, EffectState, ErrorValue
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
@@ -1768,7 +1768,8 @@ class CaptureRepository:
             " JOIN history_events h ON h.id=l.event_id"
             " WHERE l.entity_type=1 AND l.entity_id=? AND h.event_type=?"
             " AND json_extract(h.body_json,'$.reason')=?"
-            " AND json_extract(h.body_json,'$.evidence.observation.result_page_event_id') IS NOT NULL"
+            " AND (json_extract(h.body_json,'$.evidence.observation.result_page_event_id') IS NOT NULL"
+            " OR json_extract(h.body_json,'$.evidence.observation.start_result_event_id') IS NOT NULL)"
             " AND EXISTS (SELECT 1 FROM json_each(h.body_json,'$.rows') r"
             " WHERE json_extract(r.value,'$.table')='device_activities'"
             " AND json_extract(r.value,'$.id')=?"
@@ -1780,6 +1781,13 @@ class CaptureRepository:
         if row is None:
             return None
         observation = parse_exact_json(row[1])["evidence"]["observation"]
+        if "start_result_event_id" in observation:
+            original, occurred_at = _CompletedStartReturnCommand.source(
+                owned.connection, observation["start_result_event_id"])
+            if (set(observation) != {"start_result_event_id"}
+                    or original["id"] != activity["id"] or occurred_at != row[0]):
+                raise ConsistencyError("原完成返回与设备结束观察的活动或时刻不符")
+            return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
         saved, _ = _at(owned.connection, observation["result_page_event_id"])
         original, _, occurred_at, expected = _ResultPageCompletionCommand(
             saved.ref.ticket, saved.ref)._source(owned.connection)
@@ -2997,6 +3005,100 @@ class _CompositeScope:
         )
 
 
+class _CompletedStartReturnCommand:
+    """原成功完成返回承载设备结束，产物齐备由后续核实负责。"""
+
+    def __init__(self, finish, result_event_id) -> None:
+        self._finish, self._result_event_id = finish, result_event_id
+
+    @staticmethod
+    def applies(connection, finish) -> bool:
+        run = row_facts(connection, "operation_runs", finish.ticket.run_id)
+        if run is None or run["kind"] != int(_RUN_KIND.START):
+            return False
+        action = row_facts(connection, "actions", run["action_id"])
+        activity = load_activity_of_action(connection, run["action_id"])
+        return _CompletedStartReturnCommand._confirms(run, action, activity, finish.outcome.outcome)
+
+    @staticmethod
+    def _confirms(run, action, activity, actual):
+        return (action["type"] == 3 and activity["start_return_meaning"] == 3
+                and action["execution_spec_json"]["start_return_meaning"] == 3
+                and run["kind"] == int(_RUN_KIND.START)
+                and actual.status is AttemptStatus.SUCCEEDED
+                and actual.effect is EffectState.CONFIRMED and actual.error is None)
+
+    @staticmethod
+    def source(connection, result_event_id):
+        """仅沿实际结果事件读取原票据及固定契约，不访问新驱动。"""
+        if not is_json_integer(result_event_id) or result_event_id <= 0:
+            raise ConsistencyError("完成返回必须引用实际结果事件")
+        with closing(connection.execute(
+            "SELECT event_type,occurred_at,body_json FROM history_events WHERE id=?",
+            (result_event_id,),
+        )) as cursor:
+            event = cursor.fetchone()
+        if event is None or event[0] != _ATTEMPT_RESULT_EVENT:
+            raise ConsistencyError("完成返回引用的事件不是原尝试结果")
+        rows = parse_exact_json(event[2])["rows"]
+        originals = [value for value in rows if value["table"] == "operation_attempts"]
+        if len(originals) != 1:
+            raise ConsistencyError("完成返回必须属于一个具体原尝试")
+        original, = originals
+        attempt = row_facts(connection, "operation_attempts", original["id"])
+        if attempt is None or attempt["result_event_id"] != result_event_id:
+            raise ConsistencyError("完成返回缺少原实际结果尝试")
+        run = row_facts(connection, "operation_runs", attempt["run_id"])
+        activity = load_activity_of_action(connection, run["action_id"])
+        actual = saved_outcome(attempt["status"], attempt["effect_state"],
+                               attempt["result_json"], attempt["error_json"])
+        action = row_facts(connection, "actions", run["action_id"])
+        if (run["activity_id"] != activity["id"]
+                or run["responsibility_key"] != f"start/{run['action_id']}"
+                or not _CompletedStartReturnCommand._confirms(run, action, activity, actual)):
+            raise ConsistencyError("原结果没有固定完成返回保证")
+        if any(not json_equal(original["after"]["values"].get(name), attempt[name])
+                for name in ("status", "effect_state", "result_json", "error_json")):
+            raise ConsistencyError("完成返回的原结果与原尝试事实不符")
+        return activity, event[1]
+
+    def plan(self, scope):
+        run = row_facts(scope.connection, "operation_runs", self._finish.ticket.run_id)
+        activity = load_activity_of_action(scope.connection, run["action_id"])
+        if (not self.applies(scope.connection, self._finish)
+                or 3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset())):
+            raise ConsistencyError("原 START 不具备新的设备完成返回事实")
+        allocation = scope.allocate(1)
+        event = _envelope(allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+            (_update("device_activities", activity["id"],
+                {"activity_state": activity["activity_state"]}, {"activity_state": 3}),),
+            self._finish.occurred_at,
+            evidence={"observation": {"start_result_event_id": self._result_event_id}})
+        return CommandPlan(events=(event,),
+            owners={("device_activities", activity["id"]): ("action", run["action_id"])},
+            state_rows={"device_activities": {activity["id"]: activity},
+                        "operation_runs": {run["id"]: run},
+                        "actions": {run["action_id"]: row_facts(scope.connection, "actions", run["action_id"])}},
+            result=activity["id"])
+
+    def reuse(self, scope, saved):
+        activity, occurred_at = self.source(scope.connection, self._result_event_id)
+        expected = {"observation": {"start_result_event_id": self._result_event_id}}
+        if len(saved) != 1:
+            raise TransactionError("原 START 完成观察事件组成不同")
+        event = saved[0]
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)
+                or occurred_at != event["occurred_at"] or occurred_at != self._finish.occurred_at
+                or not json_equal(event["body"]["evidence"], expected)
+                or len(rows) != 1 or rows[0]["table"] != "device_activities"
+                or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], {"activity_state": 3})):
+            raise TransactionError("原 START 完成重送改变活动、原结果或事实时刻")
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=activity["id"])
+
+
 class _FinishStartResultCommand:
     """沿原尝试原子保存启动事实，不生成新的调用或业务观察。"""
 
@@ -3050,6 +3152,9 @@ class _FinishStartResultCommand:
         plans = [finish]
         if self._observation is not None:
             plans.append(_ActivityObserveCommand(self._observation, self._key).plan(sub))
+        if _CompletedStartReturnCommand.applies(scope.connection, self._finish):
+            plans.append(_CompletedStartReturnCommand(
+                self._finish, finish.events[0].event_id).plan(sub))
         if self._start_finish is not None:
             plans.append(_FinishStaleRunsCommand(self._start_finish, self._key).plan(sub))
         if self._action_finish is not None:
@@ -3092,6 +3197,10 @@ class _FinishStartResultCommand:
             observe._activity_id = load_activity_of_action(
                 scope.connection, self._observation.action_id)["id"]
             plans.append(observe._reuse(saved[cut:cut + 1]))
+            cut += 1
+        if _CompletedStartReturnCommand.applies(scope.connection, self._finish):
+            plans.append(_CompletedStartReturnCommand(
+                self._finish, saved[0]["event_id"]).reuse(scope, saved[cut:cut + 1]))
             cut += 1
         if self._start_finish is not None:
             end = len(saved)
@@ -5245,6 +5354,23 @@ def _activity_guard(event, context) -> None:
                     and actual["data"].get("activity_id") == str(row.row_id))
                 if not completed:
                     raise EventValidationError("结果页完成观察不属于原活动或可靠先前页")
+            if isinstance(observation, Mapping) and "start_result_event_id" in observation:
+                facts = context.state_rows.get("device_activities", {}).get(row.row_id, {})
+                result_id = observation["start_result_event_id"]
+                completed = (set(observation) == {"start_result_event_id"}
+                    and is_json_integer(result_id) and 0 < result_id < event.event_id
+                    and facts.get("start_return_meaning") == 3
+                    and any(attempt.get("result_event_id") == result_id
+                        and attempt.get("status") == int(_ATTEMPT_STATUS.SUCCEEDED)
+                        and attempt.get("effect_state") == int(enum_for("operation_attempts.effect_state").CONFIRMED)
+                        and attempt.get("error_json") is None
+                        and any(run.get("kind") == int(_RUN_KIND.START)
+                            and run.get("action_id") == facts.get("action_id")
+                            and run.get("activity_id") == row.row_id
+                            and run.get("id") == attempt.get("run_id") for run in runs.values())
+                        for attempt in context.state_rows.get("operation_attempts", {}).values()))
+                if not completed:
+                    raise EventValidationError("完成返回缺少原活动的可靠成功 START 结果")
             if not stopped and not completed:
                 raise EventValidationError("活动结束缺少可靠停止或设备完成事实")
         basis_before = row.before.values.get("completion_basis")

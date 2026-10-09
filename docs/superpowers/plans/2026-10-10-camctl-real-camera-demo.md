@@ -191,6 +191,10 @@ assert result_attempts_after_last_page == result_attempts_after_first_page
 
 T6 第四阶段软件验证（2026-10-10，容器，Python 3.11.16）：原媒体收尾按原票据读取可靠 v2 页及已归属文件，继续核对原片、媒体结论和完整收尾申请；已保存集合结论及 CLOSED 原责任分别沿原事实恢复。专项 123 项通过，全部单元 4173 项通过、1 项跳过，保留两项既有 asyncio 警告。capture 完整目录 765 项通过、5 项失败；五项均属于此前已复现的独立应急收场错误格式问题，继续按原责任计划跟踪。合法延时启动返回及主机计时组合、新页恢复矩阵和 bootstrap 装配门禁仍待 T6 完成，不据此声明 T6 或 capture 目录全绿。
 
+T6 第五阶段软件验证（2026-10-10，容器，Python 3.11.16）：延时启动按固定返回含义消费原类型化成功效果，实际结果、派发观察及适用计时锚点由同一保存拥有者保留。`COMPLETED` 的可靠成功返回与原实际结束共同保存，通过具体 START 结果事件读取原完成保证；发送与开始时刻没有事实则为空，文件格式或集合未知仍继续有限核实。正常视频、确定空集合、不合格类别、未知格式、原键改变输入拒绝、提交未知跨连接恢复及历史三路径已覆盖，相关 capture 专项 126 项通过。完整 capture 目录 775 项通过、5 项既有应急失败，没有新增失败；全部单元 4173 项通过、1 项跳过，保留两项既有 asyncio 警告，reporting 完整目录 367 项通过。
+
+T6 剩余契约接缝：主机计时延时丢失连续计时依据后的停止和失败分区尚待确定；原生 START 等到采集完成才返回时，正式规格要求匹配调用期限，但尚无配置来源或派生规则。当前短控制调用期限不能作为长任务的完整交付依据。这两项分别属于既有主机计时恢复及调用契约，不启用尚未完整的具体设备能力。分页中断后的旧调用恢复、bootstrap 装配与最终跨组件门禁继续按本计划完成。
+
 **建议文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py`、`capture/recording.py`、`persistence/repositories/capture.py`；补充 `apps/camctl/tests/integration/capture/test_capture_contract.py`、`test_timelapse_wait_runtime.py`、`test_result_confirmation.py`、`test_result_error_history.py`，以及 bootstrap 的 `test_timelapse_finish.py`、`test_recording_stop.py`。
 
 **接口：** 消费 T5 `list_page`、可靠页范围及 assessment，轮次拥有者组织读取、保存及最后关闭，接入 `_confirm_timelapse_results` 或等价共同边界。沿用 `finish_result_check(AttemptFinish, ResultSetSave, key, owned)`、`confirm_result_set(ResultSetSave, key, owned)` 和 `CaptureRuntime.save_capture_completion`；原调用、采集结论、必要文件事实、正式产物及终态按规定共同提交。`PendingCaptureCompletion` 等原申请拥有者先于依赖新配置或新设备调用恢复。

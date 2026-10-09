@@ -982,10 +982,16 @@ class CaptureRuntime(_FileObservationSaves):
                 if pending.confirmation_anchor_ns is not None:
                     action_id = self.action_id_of_ticket(ticket)
                     action = self.action(action_id)
-                    _recording_port(self).anchor_confirmed(
-                        action_id, pending.confirmation_anchor_ns,
-                        recording_stop_target(pending.confirmation_anchor_ns,
-                                              _target_duration_ms(action)))
+                    if action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE):
+                        config = self.wait_config(action)
+                        self.timelapse_deadlines[action_id] = pending.confirmation_anchor_ns + (
+                            config.target_duration_ms + config.driver_margin_ms
+                            + config.extra_wait_ms) * 1_000_000
+                    else:
+                        _recording_port(self).anchor_confirmed(
+                            action_id, pending.confirmation_anchor_ns,
+                            recording_stop_target(pending.confirmation_anchor_ns,
+                                                  _target_duration_ms(action)))
                 del self.pending_start_results[identity]
                 self.pending_result_scans.pop(identity, None)
                 return
@@ -1243,20 +1249,40 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         ticket=ticket, timeout_s=Decimal("30"),
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
+    if result.outcome is not None:
+        confirmed = outcome.effect is EffectState.CONFIRMED
     # 返回时取得事实时间；结果事务和日志耗时不能改变设备返回锚点。
+    returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     captured_facts = None
-    if activity_facts is not None and result.error is None:
+    anchor = None
+    if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+            and outcome.status is AttemptStatus.SUCCEEDED and outcome.error is None and confirmed):
+        meaning = action["execution_spec_json"]["start_return_meaning"]
+        captured_facts = {}
+        if meaning == int(StartReturn.SENT):
+            captured_facts["sent_at"] = returned_at
+            if action["execution_spec_json"]["wait_after_send"]:
+                anchor = returned_ns
+        elif meaning == int(StartReturn.STARTED):
+            captured_facts.update(started_at=returned_at, activity_state=int(_ACTIVITY_STATE.ACTIVE))
+    elif activity_facts is not None and result.error is None:
         captured_facts = (activity_facts(confirmed) if callable(activity_facts)
                           else activity_facts)
+    observation = None if captured_facts is None else ActivityObservationSave(
+        action_id=action["id"], occurred_at=returned_at,
+        dispatch_state=int(_DISPATCH_STATE.SUCCESS_RETURNED), **captured_facts)
     try:
         if result.error is not None:
             runtime.finish(
                 ticket, outcome, end_run=RunOutcome.FAILED,
-                run_error=outcome.error)
+                run_error=outcome.error, occurred_at=returned_at, returned_ns=returned_ns)
         elif confirmed:
-            runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
+            runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                activity=observation, occurred_at=returned_at, returned_ns=returned_ns,
+                confirmation_anchor_ns=anchor)
         else:
-            runtime.finish(ticket, outcome)
+            runtime.finish(ticket, outcome, activity=observation,
+                occurred_at=returned_at, returned_ns=returned_ns)
     except OutcomeValidationError:
         # 观察与收场依据不符合登记契约：该结果整体不可采纳，不落
         # 库、不保存派发成功事实，按调用失败保存尝试终局。
@@ -1267,13 +1293,8 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
             confirmed_observation)
         runtime.finish(
             ticket, rejected, end_run=RunOutcome.FAILED,
-            run_error=rejected.error)
+            run_error=rejected.error, occurred_at=returned_at, returned_ns=returned_ns)
         return HandlerOutcome("call_failed", "invalid_device_result")
-    if captured_facts is not None:
-        # 调用已可靠返回：派发状态推进到成功返回。
-        facts = {"dispatch_state": int(_DISPATCH_STATE.SUCCESS_RETURNED),
-                 **captured_facts}
-        _save_activity(runtime, action["id"], **facts)
     if result.error is not None:
         return HandlerOutcome("call_failed", "device_error")
     return HandlerOutcome("confirmed" if confirmed else "sent")
@@ -3101,28 +3122,13 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
             _finish_canceled_capture(context, action_id, unstarted=True)
             context.timelapse_deadlines.pop(action_id, None)
             return
-        send_anchor = None
-
-        def sent_facts(confirmed):
-            nonlocal send_anchor
-            if not confirmed:
-                return {}
-            send_anchor = context.monotonic_ns()
-            return {"sent_at": context.wall_us()}
-
         step = await _control_call(
-            context, action, "start_timelapse", "timelapse_sent",
-            activity_facts=sent_facts)
+            context, action, "start_timelapse", "timelapse_sent")
         if step.phase not in ("confirmed", "sent", "call_failed"):
             return
         attempt = context.last_attempt(f"start/{action_id}")
         if attempt is None:
             return
-        if send_anchor is not None:
-            config = context.wait_config(action)
-            context.timelapse_deadlines[action_id] = send_anchor + (
-                config.target_duration_ms + config.driver_margin_ms
-                + config.extra_wait_ms) * 1_000_000
     if _settle_unstarted_attempt(context, action, attempt):
         context.timelapse_deadlines.pop(action_id, None)
         return
