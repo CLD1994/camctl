@@ -16,7 +16,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.history.changes import ChangeDerivationError, event_report_targets
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import BaselineRangeRead, ReadCoverage
 from camctl.history.events import (
     EventEnvelope,
     HistoryEventError,
@@ -56,6 +56,7 @@ class EventContext:
     state_rows: Mapping[str, Mapping[int, Mapping[str, Any]]]
     transaction_rows: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None
     read_coverage: ReadCoverage = field(default_factory=ReadCoverage)
+    baseline_reads: Mapping[int, BaselineRangeRead] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；
@@ -438,9 +439,12 @@ def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
     elif member == "observation":
         if not isinstance(value, Mapping):
             _fail(f"事件 {event_id} 的 evidence.observation 必须是结构化对象")
-    elif member in ("activity_id", "chunk_no", "chunk_count", "entry_count"):
+    elif member in ("activity_id", "chunk_no"):
         if not is_json_integer(value) or value <= 0:
             _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
+    elif member in ("chunk_count", "entry_count"):
+        if not is_json_integer(value) or value < 0:
+            _fail(f"事件 {event_id} 的 evidence.{member} 必须是非负整数")
     elif member == "entries":
         if not isinstance(value, list):
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")

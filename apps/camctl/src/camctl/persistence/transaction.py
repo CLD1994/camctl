@@ -37,7 +37,7 @@ from camctl.history.events import (
     changeable_columns,
     load_event_registry,
 )
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import BaselineRangeRead, ReadCoverage
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -83,6 +83,7 @@ class CommandPlan:
     complete_result: Callable[[sqlite3.Connection, Any], Any] | None = None
     #: 本写事务已完整读取的身份等值范围；匹配行由 state_rows 提供。
     read_coverage: ReadCoverage = field(default_factory=ReadCoverage)
+    baseline_reads: Mapping[int, BaselineRangeRead] = field(default_factory=dict)
 
 
 class TransactionScope:
@@ -463,6 +464,7 @@ def commit_operation(
                 state_rows=validation_state,
                 transaction_rows=working,
                 read_coverage=plan.read_coverage,
+                baseline_reads=plan.baseline_reads,
             )
             validated.append(validate_event(event, context))
             _apply_rows(validation_state, (event,))

@@ -96,11 +96,11 @@ T1 软件验证（2026-10-10，容器，Python 3.11.16）：devices、capture、
 
 **接口：** 建议 `CaptureRepository.append_baseline(request: BaselineChunkSave, key: OperationKey, owned: OwnedConnection) -> DbOutcome[BaselineChunkResult]`、`fix_baseline(request: BaselineFixSave, key: OperationKey, owned: OwnedConnection) -> DbOutcome[BaselineRef]`、`read_baseline(ref: BaselineRef, cursor: int | None, batch: int) -> Page[BaselineChunk, int]`。`BaselineChunkSave` 保存活动 ID、批号、1—128 个身份及原时刻；`BaselineChunkResult` 返回原活动、批号和实际事件 ID；`BaselineChunk` 是一个完整历史批次，含事件 ID、批号和身份项，读取游标为事件 ID，batch 限定批次数，不在同一事件的成员中间截页。`BaselineFixSave` 保存活动 ID、计数及原时刻；`BaselineRef` 保存活动 ID、固定状态、首尾事件及计数。与现有仓储一样，key 和 owned 使用现有类型，不新增同义类型。
 
-- [ ] **先写失败测试：** `test_fixed_empty_differs_from_collecting` 断言可靠空基准为 `FIXED`、两个引用为 `None`、计数为 0；收集中读取不能返回相同“空基准”。另测 128/129 项批界、批号缺口、重复或乱序身份、其他活动混入、旧收集范围排除、固定后替换拒绝以及原键改变输入拒绝。
-- [ ] **运行红灯：** `P apps/camctl/tests/integration/capture/test_baseline_history.py -q`，核对目标写入和读取行为的失败。
-- [ ] **实现事务生产者和读取：** 活动必须已可靠存在，归属方式和范围匹配，收集期间占用为 `HELD`；完整连续范围才可固定。空基准用 `FIX_EMPTY`，不追加空批次。分页只读该活动当前收集的历史范围；条目不创建 `device_files`。固定后不可替换，未派发的未固定重收按原历史规则换范围并保留旧历史。
-- [ ] **实现新增基准申请的保存交接：** 复用现有完整申请拥有者模式，保留完整 chunk/fix 申请、key、时刻；原结果可靠前不读下一页、不固定、不授予启动。测试“追加已提交但返回未知”及“固定已提交但返回未知”，原键重送只产生原事实；不得生成第二套申请。
-- [ ] **运行绿灯并提交：** 新用例通过后顺序运行 capture、history 两个集成目录，各自一个 pytest 进程；验证正向、逆向和快照恢复在同边界得到同一基准。提交仓储、守卫及测试。
+- [x] **先写失败测试：** `test_fixed_empty_differs_from_collecting` 断言可靠空基准为 `FIXED`、两个引用为 `None`、计数为 0；收集中读取不能返回相同“空基准”。另测 128/129 项批界、批号缺口、重复或乱序身份、其他活动混入、旧收集范围排除、固定后替换拒绝以及原键改变输入拒绝。
+- [x] **运行红灯：** `P apps/camctl/tests/integration/capture/test_baseline_history.py -q`，核对目标写入和读取行为的失败。
+- [x] **实现事务生产者和读取：** 活动必须已可靠存在，归属方式和范围匹配，收集期间占用为 `HELD`；完整连续范围才可固定。空基准用 `FIX_EMPTY`，不追加空批次。分页只读该活动当前收集的历史范围；条目不创建 `device_files`。固定后不可替换，未派发的未固定重收按原历史规则换范围并保留旧历史。
+- [x] **实现新增基准申请的保存交接：** 复用现有完整申请拥有者模式，保留完整 chunk/fix 申请、key、时刻；原结果可靠前不读下一页、不固定、不授予启动。测试“追加已提交但返回未知”及“固定已提交但返回未知”，原键重送只产生原事实；不得生成第二套申请。
+- [x] **运行绿灯并提交：** 新用例通过后顺序运行 capture、history 两个集成目录，各自一个 pytest 进程；验证正向、逆向和快照恢复在同边界得到同一基准。提交仓储、守卫及测试。
 
 ```python
 assert fixed_empty["baseline_state"] == enum_for("device_activities.baseline_state").FIXED
@@ -108,6 +108,8 @@ assert fixed_empty["baseline_first_event_id"] is None
 assert fixed_empty["baseline_last_event_id"] is None
 assert original_key_resend.event_id == first_save.event_id
 ```
+
+T2 软件验证（2026-10-10，容器，Python 3.11.16）：新增基准集成 21 项通过；相关单元目录 1607 项通过，回执交接补充 6 项通过；调度回归及事件覆盖登记检查通过。capture 目录 665 项通过、11 项失败，history 目录 196 项通过、9 项失败；全部失败在 T1 提交的独立源码副本中同样复现。T2 门禁采用基准专项、调度和独立历史三路径验证，未把目录回归报告为全绿。延时收尾和产物错误由 T5/T6 承接；独立应急错误和原有快照一致性失败仍按各自责任计划跟踪。
 
 ## T3 受管 ADB、目录与文件适配
 

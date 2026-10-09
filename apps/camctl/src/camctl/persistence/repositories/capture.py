@@ -25,6 +25,10 @@ from camctl.capture.models import (
     ResultSetSave,
     validate_capture_result,
 )
+from camctl.capture.baseline_models import (
+    BaselineChunk, BaselineChunkResult, BaselineChunkSave, BaselineFixSave, BaselineRef,
+)
+from camctl.contracts.pages import Page
 from camctl.capture.files import (
     FileChecksumSave,
     FileCompletionSave,
@@ -656,6 +660,8 @@ def register_capture_guards() -> None:
     register_guard("activity", _activity_guard)
     register_guard("release", _release_guard)
     register_guard("result_check", _result_check_guard)
+    from .baseline import register_baseline_guard
+    register_baseline_guard()
 
 
 class FinishCaptureCommand:
@@ -1666,6 +1672,27 @@ class _RepairSuccessCommand(_MediaProcessingCommand):
 
 class CaptureRepository:
     """采集完成终态事务的 SQLite 仓储。"""
+
+    def append_baseline(self, request: BaselineChunkSave, key: OperationKey,
+                        owned: OwnedConnection) -> DbOutcome[BaselineChunkResult]:
+        from .baseline import AppendBaselineCommand
+        receipt = commit_operation(AppendBaselineCommand(request, key), key, owned)
+        return DbOutcome(kind=DbOutcomeKind(receipt.kind), value=receipt.result, error=receipt.error)
+
+    def fix_baseline(self, request: BaselineFixSave, key: OperationKey,
+                     owned: OwnedConnection) -> DbOutcome[BaselineRef]:
+        from .baseline import FixBaselineCommand
+        receipt = commit_operation(FixBaselineCommand(request, key), key, owned)
+        return DbOutcome(kind=DbOutcomeKind(receipt.kind), value=receipt.result, error=receipt.error)
+
+    def baseline_ref(self, activity_id: int, owned: OwnedConnection) -> BaselineRef:
+        from .baseline import read_reference
+        return read_reference(activity_id, owned)
+
+    def read_baseline(self, ref: BaselineRef, cursor: int | None, batch: int,
+                      owned: OwnedConnection) -> Page[BaselineChunk, int]:
+        from .baseline import read_chunks
+        return read_chunks(ref, cursor, batch, owned)
 
     def finish_start_result(
         self, finish: AttemptFinish, observation: ActivityObservationSave | None,

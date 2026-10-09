@@ -286,7 +286,10 @@ class StartActionCommand:
             "completion_mode": capabilities.completion_mode,
             "ownership_mode": capabilities.ownership_mode,
             "output_scope_json": capabilities.output_scope_json,
-            "baseline_state": 1,
+            "baseline_state": int(
+                enum_for("device_activities.baseline_state").COLLECTING
+                if capabilities.ownership_mode == enum_for("device_activities.ownership_mode").BASELINE_COMPARISON
+                else enum_for("device_activities.baseline_state").NOT_REQUIRED),
             "baseline_first_event_id": None,
             "baseline_last_event_id": None,
             "dispatch_state": int(_DISPATCH_STATE.NOT_DISPATCHED),

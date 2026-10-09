@@ -8,6 +8,22 @@ from camctl.contracts.values import ObjectId
 
 
 @dataclass(frozen=True)
+class BaselineRangeRead:
+    """同一写事务读取的基准历史范围摘要，不缓存完整目录。
+
+    追加只需首尾及上一批身份；固定读取完整连续范围并填入计数。
+    complete 区分这两种读取，不能用局部摘要验证总计数。
+    """
+
+    first_event_id: int | None
+    last_event_id: int | None
+    chunk_count: int
+    entry_count: int | None
+    last_identity: tuple[str, str, str] | None
+    complete: bool
+
+
+@dataclass(frozen=True)
 class ReadCoverage:
     """以 (表, 查询列) 对应的正整数值集合声明完整读取范围。
 
