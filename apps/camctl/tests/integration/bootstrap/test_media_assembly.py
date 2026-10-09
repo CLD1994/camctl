@@ -4,8 +4,8 @@
 止端口、读取会话与源端摘要都按登记项静态声明取得，媒体链随读取
 声明构造（未声明读取的处理行保持等待），异常多录余量取自设备本
 地配置；结果列举端口由部署注入。跨会话恢复的异常多录经真实会话
-推进对账、停止、原片拷贝、摘要比较与修复登记；驱动未登记时本轮
-不推进。
+推进对账、停止、原片拷贝、摘要比较与修复登记；必需驱动实现未登
+记时会话按配置错误退出，保留原动作与绑定，不发起设备操作。
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ from .test_recording_stop import (
 
 pytestmark = pytest.mark.asyncio
 
-#: 录像与取消链五契约加源端摘要契约的登记证据。
+#: 驱动控制、结果列举、读取结束与源端摘要的登记证据。
 _EVIDENCE = EvidenceRegistry(
     (
         EvidenceContract(type="operation_returned", version=1, operation="control",
@@ -69,6 +69,8 @@ _EVIDENCE = EvidenceRegistry(
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
         RESULT_FILES_CONTRACT,
+        EvidenceContract(type="read_returned", version=1, operation="read",
+                         fields=frozenset()),
         EvidenceContract(type="file_digest", version=1, operation="digest",
                          fields=frozenset({"file_id", "sha256"}),
                          identity_field="file_id"),
@@ -389,8 +391,8 @@ class TestUndeclaredReadKeepsWaiting:
             ) == (0,)
 
 
-class TestUnregisteredDriverKeepsAction:
-    async def test_missing_registry_entry_does_not_dispatch(
+class TestMissingDriverDefinition:
+    async def test_missing_registry_entry_ends_session_without_dispatch(
             self, tmp_path: Path) -> None:
         home = tmp_path / "unregistered"
         home.mkdir()
@@ -406,22 +408,32 @@ class TestUnregisteredDriverKeepsAction:
         driver = _SessionDriver(_CONTENT)
         clock = {"ns": time.monotonic_ns()}
         results = ResultsDouble({})
-        # 登记为空：动作开始事务照常推进，但没有运行时可派发。
+        binding_before = _scalar(
+            db, "SELECT device_id, driver_id, effective_params_json"
+            " FROM actions WHERE id = 1")
+        # 动作绑定仍匹配，但运行所需的驱动定义不可加载。
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
             cfg, DriverRegistry(), results, tools_dir, clock))
         try:
-            await _await_query(
-                db, "SELECT status FROM actions WHERE id = 1", (2,))
-            await asyncio.sleep(0.5)
+            outcome = await asyncio.wait_for(task, timeout=15)
         finally:
             await _cancel(task)
             close_runtime(deps)
+        assert outcome.succeeded is False
+        assert outcome.reason == "configuration_error"
+        assert "cam-1" in str(outcome.details) and "camctl-adb" in str(outcome.details)
         assert driver.calls == []
-        # 开始事务已登记活动，但没有运行时派发：活动保持未启动。
         assert _scalar(
-            db, "SELECT started_at IS NULL FROM device_activities"
-            " WHERE action_id = 1") == (1,)
+            db, "SELECT status, execution_started FROM actions WHERE id = 1") == (1, 0)
+        assert _scalar(
+            db, "SELECT device_id, driver_id, effective_params_json"
+            " FROM actions WHERE id = 1") == binding_before
+        assert _scalar(
+            db, "SELECT COUNT(*) FROM device_activities WHERE action_id = 1") == (0,)
+        assert _scalar(
+            db, "SELECT COUNT(*) FROM operation_runs WHERE action_id = 1") == (0,)
+        assert _scalar(db, "SELECT COUNT(*) FROM operation_attempts") == (0,)
 
 
 class TestRetryIntervalInjection:

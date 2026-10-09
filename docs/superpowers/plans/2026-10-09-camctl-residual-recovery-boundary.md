@@ -43,4 +43,14 @@
 
 上述 bootstrap 范围仅为 `tests/integration/bootstrap/` 中的 `test_read_default_save_gate.py`、`test_media_saved_result_consumers.py`、`test_file_fact_consumers.py`、`test_result_exhaustion_default_recovery.py`、`test_read_default_consumers.py`、`test_residual_winddown.py` 和 `test_restricted_winddown.py`，不是整个 bootstrap 目录。共同命令前缀为 `PYTHONPATH=/workspaces/camctl/apps/camctl/src apps/camctl/.venv/bin/python -m pytest`，后接上述七个完整文件路径与 `-q`。单独基线节点为 `test_restricted_winddown.py::TestNormalSessionResumesProgress::test_normal_session_continues_post_processing`。
 
-独立只读审查实际生产 diff、资格接线、异常转换范围及无回调消费者后，未发现此次迁移的生产阻断。录像后处理的既有超时继续单独定位；结果保存事件守卫、未决集合语义及完整 apps/camctl 目标仍未完成。此记录不声明所有软件回归均已通过。
+独立只读审查实际生产 diff、资格接线、异常转换范围及无回调消费者后，未发现此次迁移的生产阻断。录像后处理的既有超时已由下方独立测试驱动修正关闭；结果保存事件守卫、未决集合语义及完整 apps/camctl 目标仍未完成。此记录不声明所有软件回归均已通过。
+
+## 媒体读取证据与缺驱动定义的门禁
+
+2026-10-09，同一开发容器及 Python 3.11.16。原录像后处理已经实际取得 clean ReadEnd、完成本地副本并核实双端摘要；下一步保存 READ 尝试结束时，测试共享驱动的证据登记缺少 `read_returned`，因此 `validate_outcome` 拒绝。装配实际使用 `DriverEntry.evidence`，不会自动采用 MediaFlow 的默认登记。仅补齐 `test_media_assembly.py` 的同形读取结束契约，保留真实 ReadSession、拥有者结束、文件和原成功断言。
+
+根独占 `test_media_assembly.py` 与 `test_restricted_winddown.py` 的 `/tmp/camctl-goal-media-read-evidence-gate.log` 为 10 passed、1 failed，41.49s。原 `test_normal_session_continues_post_processing` 已通过；另一个失败使用空 DriverRegistry，其路径不读取本次补齐的共享证据。
+
+该空登记场景中，设备声明和原绑定均存在，但执行所需驱动实现不可取得。按[原驱动保存与运行](../../camctl/database/plans-actions.md#拍摄动作的驱动绑定)和[动作最终错误选择](../../camctl/database/action-errors.md#选择顺序)，会话配置前提失败不转为动作失败。真实会话在保存首次窗口观察后、开始动作前返回 `configuration_error`；活动、设备意图和尝试尚未创建。对应测试直接等待实际会话结果，核设备与驱动诊断、原绑定与生效定义保持、`execution_started=0`，以及无活动、流程和尝试。
+
+修正节点 `test_media_assembly.py::TestMissingDriverDefinition::test_missing_registry_entry_ends_session_without_dispatch` 的首次 `/tmp/camctl-goal-media-missing-driver-gate.log` 为 1 passed、2.48s；最后补齐诊断、执行标记和尝试断言后，`/tmp/camctl-goal-media-missing-driver-final-gate.log` 为 1 passed、2.45s。已通过的另十项未重复执行。两项修改均限定在测试契约和验证记录；不要求仅回放历史或重建报告时安装旧驱动。
