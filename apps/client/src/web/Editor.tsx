@@ -1,6 +1,6 @@
 import { Select, SelectItem, SelectFieldset } from "./Select";
 import { isCameraAction } from "../shared/actions";
-import { useState } from "react";
+import { useState, useLayoutEffect } from "react";
 import { useFeedback } from "./feedback";
 import type { DraftContent, Preset } from "../server/models";
 import type { Capabilities, Issue, ParameterType } from "../shared/types";
@@ -74,6 +74,13 @@ export function Editor(props: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const content = session.content;
   const [actionIdentity] = useState(() => new ActionUiIdentity(content));
+  useLayoutEffect(
+    () =>
+      session.bindAppendView((transition) =>
+        actionIdentity.prepareAppend(transition),
+      ),
+    [session, actionIdentity],
+  );
   let identityProblem = "";
   try {
     actionIdentity.update(content);
@@ -101,14 +108,16 @@ export function Editor(props: Props) {
     binding?: DraftContent,
   ) => {
     setCopyError("");
+    const prepared = session.prepareEdit(next);
     actionIdentity.update(
       next,
       operation,
       () => {
-        session.edit(next);
+        session.commitEdit(prepared);
         return session.content;
       },
       binding,
+      prepared.content,
     );
     setCollapsed(
       (current) =>

@@ -456,6 +456,7 @@ it("父JSON只读保留未完成路径，Schema没有控件时仍能明确修正
 }, 20000);
 it("保存回执和首次核实均丢失后能保存更新输入", async () => {
   const { app, page } = await setup();
+  page.on("dialog", (dialog) => dialog.accept());
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
   let offline = false,
@@ -482,6 +483,7 @@ it("保存回执和首次核实均丢失后能保存更新输入", async () => {
 }, 20000);
 it("导出回执和即时核实丢失期间锁定编辑，随后轮询恢复原记录", async () => {
   const { app, page } = await setup();
+  page.on("dialog", (dialog) => dialog.accept());
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
   await page.getByTestId("draft-json-input").fill(text("固定请求"));

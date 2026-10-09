@@ -1,5 +1,10 @@
 import type { DraftContent } from "../server/models";
-import { validPreviewMetadata } from "../shared/automatic-previews";
+import {
+  validPreviewMetadata,
+  sameContent,
+} from "../shared/automatic-previews";
+import { cloneClientJson } from "../shared/json";
+import type { VerifiedAppend } from "./followup";
 import { parseDraft } from "./editing";
 
 type PositionChange = "preserve" | "append" | "reset" | { remove: number };
@@ -25,6 +30,7 @@ function structure(content: DraftContent) {
 export class ActionUiIdentity {
   private sequence = 0;
   private previous?: ReturnType<typeof structure>;
+  private content?: DraftContent;
   keys: string[] = [];
   constructor(content?: DraftContent) {
     if (content) this.update(content, "reset");
@@ -32,21 +38,18 @@ export class ActionUiIdentity {
   update(
     content: DraftContent,
     operation?: PositionChange,
-    accept?: () => DraftContent,
+    accept?: () => void,
     binding?: DraftContent,
+    actual = content,
   ) {
     if (accept) {
       // 先在独立视图中校验映射；接纳拒绝时不改变现有键、折叠或中间身份。
-      const prepared = new ActionUiIdentity();
-      prepared.sequence = this.sequence;
-      prepared.previous = this.previous;
-      prepared.keys = [...this.keys];
+      const prepared = this.copy();
       if (binding) prepared.update(binding, "preserve");
       prepared.update(content, operation);
-      prepared.update(accept());
-      this.sequence = prepared.sequence;
-      this.previous = prepared.previous;
-      this.keys = prepared.keys;
+      prepared.update(actual);
+      accept();
+      this.adopt(prepared);
       return;
     }
     const next = structure(content);
@@ -55,6 +58,7 @@ export class ActionUiIdentity {
         this.keys = [];
         this.previous = undefined;
       }
+      this.content = cloneClientJson(content);
       return;
     }
     const old = this.previous;
@@ -79,5 +83,50 @@ export class ActionUiIdentity {
     }
     this.keys = keys;
     this.previous = next;
+    this.content = cloneClientJson(content);
+  }
+  private copy() {
+    const prepared = new ActionUiIdentity();
+    prepared.sequence = this.sequence;
+    prepared.previous = this.previous;
+    prepared.keys = [...this.keys];
+    prepared.content = this.content;
+    return prepared;
+  }
+  private adopt(prepared: ActionUiIdentity) {
+    this.sequence = prepared.sequence;
+    this.previous = prepared.previous;
+    this.keys = prepared.keys;
+    this.content = prepared.content;
+  }
+  prepareAppend(transition: VerifiedAppend): () => void {
+    if (!this.content || !sameContent(this.content, transition.origin.content))
+      throw Error("追加基线与当前动作视图不一致");
+    const prepared = this.copy();
+    const derived = (next: DraftContent) => {
+      const nextStructure = structure(next);
+      if (
+        !sameContent(prepared.content!, next) &&
+        !(prepared.previous?.ids && nextStructure?.ids)
+      )
+        throw Error("已追加实际版本的派生结构没有可靠身份映射");
+      prepared.update(next);
+    };
+    for (const change of transition.baselineChanges)
+      derived(change.actual.content);
+    if (
+      !sameContent(prepared.content!, transition.baseline.content) ||
+      prepared.previous?.count !== transition.index
+    )
+      throw Error("追加位置与已核实基线链不一致");
+    prepared.update(transition.appended, "append");
+    // 派生变化必须由独立 ID 解释；完整相等只用于版本绑定，不用于猜测动作身份。
+    for (const next of [
+      transition.expected.content,
+      transition.actual.content,
+    ]) {
+      derived(next);
+    }
+    return () => this.adopt(prepared);
   }
 }

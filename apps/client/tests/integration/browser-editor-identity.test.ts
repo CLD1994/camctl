@@ -118,6 +118,151 @@ async function setup(content = original()) {
   await page.getByTestId("draft-open-button").click();
   return { application, page, draft };
 }
+
+it.each([
+  "missing",
+  "reliable",
+  "lost",
+  "unknown",
+  "retry",
+  "capability-conflict",
+])("共同同步追加到仍挂载的%s目标，保持原组件状态", async (scenario) => {
+  const input =
+    scenario === "reliable"
+      ? initializePreviewMetadata(original(), "disabled", "stable")
+      : original();
+  const { page, application, draft } = await setup(input);
+  let requests = 0,
+    offline = false;
+  await page.route("**/api/state", (route) =>
+    offline ? route.abort() : route.continue(),
+  );
+  await page.route("**/api/drafts/*/actions", async (route) => {
+    requests++;
+    if (
+      (scenario === "retry" || scenario === "capability-conflict") &&
+      requests === 1
+    ) {
+      if (scenario === "capability-conflict") {
+        application.reloadCapabilities();
+        await route.continue();
+      } else await route.fulfill({ status: 500, json: { error: "未提交" } });
+    } else if (scenario === "lost" || scenario === "unknown") {
+      await route.fetch();
+      offline = scenario === "unknown";
+      await route.abort();
+    } else await route.continue();
+  });
+  await mark(page, "B");
+  await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
+  await page.getByLabel("目标草稿").click();
+  await page
+    .getByRole("listbox")
+    .locator(`[role="option"][data-value="${draft.id}"]`)
+    .click();
+  await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+  if (scenario === "unknown") {
+    await browserExpect(
+      page.getByRole("button", { name: "重新核实追加结果", exact: true }),
+    ).toBeVisible();
+    await browserExpect(
+      card(page, "B").getByRole("button", { name: "展开动作", exact: true }),
+    ).toHaveAttribute("aria-expanded", "false");
+    offline = false;
+    await page
+      .getByRole("button", { name: "重新核实追加结果", exact: true })
+      .click();
+  }
+  if (scenario === "retry" || scenario === "capability-conflict") {
+    await browserExpect(
+      page.getByRole("button", { name: "重试同一目标追加", exact: true }),
+    ).toBeVisible();
+    expect(application.draft(draft.id).content).toEqual(input);
+    await browserExpect(
+      card(page, "B").getByRole("button", { name: "展开动作", exact: true }),
+    ).toHaveAttribute("aria-expanded", "false");
+    if (scenario === "capability-conflict")
+      await page.waitForResponse(
+        async (response) =>
+          response.url().endsWith("/api/state") &&
+          (await response.json()).capabilities.version ===
+            application.capabilities.version,
+      );
+    await page
+      .getByRole("button", { name: "重试同一目标追加", exact: true })
+      .click();
+  }
+  await browserExpect(page.getByRole("dialog")).toBeHidden();
+  await browserExpect(page.locator(".action-card")).toHaveCount(4);
+  await retained(page, "B");
+  await browserExpect(
+    card(page, "状态同步").getByRole("button", {
+      name: "收起动作",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-expanded", "true");
+  await browserExpect(page.locator(".editor > fieldset")).toBeEnabled();
+  const actual = application.draft(draft.id)!;
+  expect(
+    JSON.parse(actual.content.text).actions.map(
+      (a: { name: string }) => a.name,
+    ),
+  ).toEqual(["A", "B", "C", "状态同步"]);
+  if (scenario === "reliable") {
+    expect(previewIntent(actual.content)).toBe("disabled");
+    expect(actual.content.automaticPreviews!.actions.slice(0, 3)).toEqual(
+      draft.content.automaticPreviews!.actions,
+    );
+  } else expect(actual.content.automaticPreviews).toBeUndefined();
+  expect(requests).toBe(
+    scenario === "retry" || scenario === "capability-conflict" ? 2 : 1,
+  );
+  await mark(page, "B");
+  await page.waitForResponse((response) =>
+    response.url().endsWith("/api/state"),
+  );
+  await page.waitForResponse((response) =>
+    response.url().endsWith("/api/state"),
+  );
+  await retained(page, "B");
+  await browserExpect(page.locator(".action-card")).toHaveCount(4);
+});
+it("共同追加的缺项资料准备拒绝，保留正文与原组件状态且没有追加POST", async () => {
+  const input = initializePreviewMetadata(original(), "disabled", "partial");
+  input.automaticPreviews!.actions.pop();
+  const { page, application, draft } = await setup(input);
+  let requests = 0;
+  await page.route("**/api/drafts/*/actions", async (route) => {
+    requests++;
+    await route.continue();
+  });
+  await mark(page, "B");
+  await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
+  await page.getByLabel("目标草稿").click();
+  await page
+    .getByRole("listbox")
+    .locator(`[role="option"][data-value="${draft.id}"]`)
+    .click();
+  await page.getByRole("button", { name: "加入草稿", exact: true }).click();
+  await browserExpect(
+    page.getByRole("button", { name: "重试准备目标草稿", exact: true }),
+  ).toBeVisible();
+  await browserExpect(page.getByRole("dialog")).toContainText("身份");
+  await page.getByRole("button", { name: "返回", exact: true }).click();
+  await browserExpect(
+    card(page, "B").getByRole("button", { name: "展开动作", exact: true }),
+  ).toHaveAttribute("aria-expanded", "false");
+  await browserExpect(
+    card(page, "B").getByRole("button", {
+      name: "参数表单",
+      exact: true,
+      includeHidden: true,
+    }),
+  ).toHaveCount(1);
+  expect(application.draft(draft.id).content).toEqual(draft.content);
+  expect(application.draft(draft.id).revision).toBe(1);
+  expect(requests).toBe(0);
+});
 it.each(["missing", "partial"])(
   "删除前项保持原动作组件状态，%s资料不被补建",
   async (metadata) => {

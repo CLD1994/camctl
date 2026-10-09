@@ -392,8 +392,14 @@ export function App() {
       if (pending.operation.result) {
         const updated = pending.operation.result,
           session = getSession(updated);
-        session.unlockAppend();
-        session.accept(updated);
+        try {
+          session.acceptAppend(pending.operation.transition!);
+          pending.operation.acceptanceSucceeded();
+        } catch (error) {
+          pending.operation.acceptanceFailed(error);
+          await refresh();
+          return;
+        }
         openDraft(updated);
         setFollow(undefined);
         setActiveFollow(undefined);
@@ -989,12 +995,14 @@ function FollowupDialog({
                 )}
               </pre>
             </details>
-            {operation.actual && operation.phase === "conflict" && (
-              <details>
-                <summary>查看实际草稿记录</summary>
-                <pre>{JSON.stringify(operation.actual, null, 2)}</pre>
-              </details>
-            )}
+            {operation.actual &&
+              (operation.phase === "conflict" ||
+                operation.phase === "acceptance_failed") && (
+                <details>
+                  <summary>查看实际草稿记录</summary>
+                  <pre>{JSON.stringify(operation.actual, null, 2)}</pre>
+                </details>
+              )}
             <div className="button-row end">
               <button disabled={busy} onClick={close}>
                 返回
@@ -1010,14 +1018,16 @@ function FollowupDialog({
                     submit(operation.targetId ?? "new", operation.action)
                   }
                 >
-                  {operation.phase === "unknown" ||
-                  operation.phase === "conflict"
-                    ? "重新核实追加结果"
-                    : operation.phase === "not_appended"
-                      ? "重试同一目标追加"
-                      : operation.phase === "target"
-                        ? "重试准备目标草稿"
-                        : "重新创建并追加"}
+                  {operation.phase === "acceptance_failed"
+                    ? "重试接纳实际结果"
+                    : operation.phase === "unknown" ||
+                        operation.phase === "conflict"
+                      ? "重新核实追加结果"
+                      : operation.phase === "not_appended"
+                        ? "重试同一目标追加"
+                        : operation.phase === "target"
+                          ? "重试准备目标草稿"
+                          : "重新创建并追加"}
                 </button>
               )}
             </div>

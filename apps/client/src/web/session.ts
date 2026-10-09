@@ -1,10 +1,13 @@
-import { cloneClientJson } from "../shared/json";
+import { cloneClientJson, stringifyJson } from "../shared/json";
 import {
   sameContent,
   coordinatePreviews,
   type CapabilityState,
+  appendContentAction,
 } from "../shared/automatic-previews";
 import type { Draft, DraftContent } from "../server/models";
+import { classifyAppend, type VerifiedAppend } from "./followup";
+import { parseDraft } from "./editing";
 export interface DraftTransport {
   save(id: string, revision: number, content: DraftContent): Promise<Draft>;
   read(id: string): Promise<Draft>;
@@ -39,6 +42,8 @@ export class DraftSession {
   private timer?: ReturnType<typeof setTimeout>;
   private deletionFailure = "";
   private capabilities?: CapabilityState;
+  private appendView?: (transition: VerifiedAppend) => () => void;
+  private acceptedAppend?: VerifiedAppend;
   constructor(
     readonly draft: Draft,
     private transport: DraftTransport,
@@ -119,12 +124,21 @@ export class DraftSession {
     );
   }
   edit(content: DraftContent) {
+    this.commitEdit(this.prepareEdit(content));
+  }
+  prepareEdit(content: DraftContent) {
     if (!this.editable) throw new Error("此草稿的导出状态尚未确认或已经只读");
-    this.content = cloneClientJson(
+    const actual = cloneClientJson(
       this.capabilities
         ? coordinatePreviews(content, this.capabilities).content
         : content,
     );
+    return { content: actual, version: this.version };
+  }
+  commitEdit(prepared: { content: DraftContent; version: number }) {
+    if (!this.editable || prepared.version !== this.version)
+      throw Error("草稿状态已改变，不能接纳本次编辑");
+    this.content = cloneClientJson(prepared.content);
     this.version++;
     this.error = "";
     this.changed();
@@ -404,6 +418,98 @@ export class DraftSession {
     this.pendingWrite = undefined;
     this.error = "";
     this.conflict = undefined;
+    this.changed();
+  }
+  bindAppendView(prepare: (transition: VerifiedAppend) => () => void) {
+    this.appendView = prepare;
+    return () => {
+      if (this.appendView === prepare) this.appendView = undefined;
+    };
+  }
+  acceptAppend(input: VerifiedAppend) {
+    const transition = cloneClientJson(input),
+      { origin, baseline, actual } = transition;
+    if (
+      this.acceptedAppend &&
+      stringifyJson(this.acceptedAppend) === stringifyJson(transition)
+    )
+      return;
+    if (
+      origin.id !== this.draft.id ||
+      baseline.id !== this.draft.id ||
+      actual.id !== this.draft.id ||
+      origin.revision !== this.revision ||
+      !sameContent(origin.content, this.content) ||
+      !sameContent(origin.content, this.baseline)
+    )
+      throw Error("追加目标或完整基线版本与当前草稿不一致");
+    if (
+      this.exportState !== "editable" ||
+      this.deletionState !== "idle" ||
+      this.saving ||
+      this.pendingWrite ||
+      !this.saved
+    )
+      throw Error("当前草稿状态不能接纳追加结果");
+    let prior = origin;
+    for (const change of transition.baselineChanges) {
+      if (
+        change.actual.revision <= prior.revision ||
+        classifyAppend(
+          prior,
+          transition.action,
+          change.actual,
+          undefined,
+          change.capabilities,
+        ) !== "baseline"
+      )
+        throw Error("追加准备的基线派生版本链不可靠");
+      prior = change.actual;
+    }
+    if (
+      prior.revision !== baseline.revision ||
+      prior.id !== baseline.id ||
+      !sameContent(prior.content, baseline.content)
+    )
+      throw Error("追加准备的基线版本链未闭合");
+    if (
+      transition.index !== parseDraft(baseline.content).actions.length ||
+      !sameContent(
+        appendContentAction(baseline.content, transition.action, true),
+        transition.appended,
+      ) ||
+      transition.expected.capabilityVersion !==
+        transition.preparedCapabilities?.version ||
+      !sameContent(
+        transition.preparedCapabilities
+          ? coordinatePreviews(
+              transition.appended,
+              transition.preparedCapabilities,
+            ).content
+          : transition.appended,
+        transition.expected.content,
+      ) ||
+      classifyAppend(
+        baseline,
+        transition.action,
+        actual,
+        transition.expected,
+        transition.capabilities,
+      ) !== "appended"
+    )
+      throw Error("实际记录没有匹配固定追加转换");
+    const commitView = this.appendView?.(transition);
+    // 所有校验和副本计算均已结束；以下提交不调用可拒绝的映射检查。
+    this.content = cloneClientJson(actual.content);
+    this.baseline = cloneClientJson(actual.content);
+    this.revision = actual.revision;
+    this.version++;
+    this.confirmedVersion = this.version;
+    this.error = "";
+    this.conflict = undefined;
+    this.acceptedAppend = transition;
+    commitView?.();
+    this.appendLocked = false;
     this.changed();
   }
 }
