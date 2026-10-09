@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,11 +33,109 @@ afterEach(() => {
 const content = {
   text: JSON.stringify({
     name: "同步",
-    actions: [{ name: "完整同步", type: "report_status", params: { scope: "full" } }],
+    actions: [
+      { name: "完整同步", type: "report_status", params: { scope: "full" } },
+    ],
   }),
 };
 
 describe("导出与请求身份", () => {
+  it.each([0, 2])(
+    "确认 %i 次占用后查询失败立即终止且保持旧数据",
+    (conflicts) => {
+      const app = setup(new SequenceRandom([11n, 1n, 2n, 3n, 4n]));
+      const fixedDraft = app.createDraft(content);
+      const fixed = app.exportDraft(
+        fixedDraft.id,
+        fixedDraft.revision,
+        fixedDraft.content,
+      );
+      // 已占用候选来自真实 Store，只有指定查询失败由替身注入。
+      for (let i = 1; i <= conflicts; i++)
+        app.store.set("requests", String(i), {
+          ...fixed,
+          id: String(i),
+          draftId: `seed-${i}`,
+          body: { ...fixed.body, request_id: String(i) },
+        });
+      const draft = app.createDraft(content);
+      const oldRequests = app.store.all("requests");
+      const get = app.store.get.bind(app.store);
+      const queried: string[] = [];
+      const spy = vi
+        .spyOn(app.store, "get")
+        .mockImplementation(
+          <T>(namespace: string, id: string): T | undefined => {
+            if (namespace === "requests") {
+              queried.push(id);
+              if (queried.length === conflicts + 1)
+                throw new Error("身份索引读取中断 task6");
+            }
+            return get<T>(namespace, id);
+          },
+        );
+      try {
+        expect(() =>
+          app.exportDraft(draft.id, draft.revision, draft.content),
+        ).toThrowError(
+          expect.objectContaining({
+            code: "request_id_fault",
+            message: expect.stringContaining("身份索引读取中断 task6"),
+          }),
+        );
+      } finally {
+        spy.mockRestore();
+      }
+      expect(queried).toEqual(conflicts ? ["1", "2", "3"] : ["1"]);
+      expect(app.store.all("requests")).toEqual(oldRequests);
+      expect(app.draft(draft.id)).toEqual(draft);
+      expect(app.request(fixed.id)).toEqual(fixed);
+    },
+  );
+
+  it("已有固定请求重试不分配新身份也不查询候选使用情况", () => {
+    const random = new SequenceRandom([11n]);
+    const app = setup(random);
+    const draft = app.createDraft(content);
+    const fixed = app.exportDraft(draft.id, draft.revision, draft.content);
+    const next = vi.spyOn(random, "next").mockImplementation(() => {
+      throw new Error("不得重新抽号");
+    });
+    const get = app.store.get.bind(app.store);
+    const lookup = vi
+      .spyOn(app.store, "get")
+      .mockImplementation(<T>(namespace: string, id: string): T | undefined => {
+        if (namespace === "requests" && id !== fixed.id)
+          throw new Error("不得查询候选");
+        return get<T>(namespace, id);
+      });
+    try {
+      expect(app.exportDraft(draft.id, 0, { text: "bad" }, null)).toEqual(
+        fixed,
+      );
+      expect(app.downloadRequest(fixed.id)).toEqual(fixed.body);
+      expect(app.store.all("requests")).toEqual([fixed]);
+    } finally {
+      lookup.mockRestore();
+      next.mockRestore();
+    }
+  });
+
+  it("随机源自身失败保留错误且不保存请求或导出标记", () => {
+    const failure = new Error("系统随机源暂不可用 task6");
+    const app = setup({
+      next() {
+        throw failure;
+      },
+    });
+    const draft = app.createDraft(content);
+    expect(() =>
+      app.exportDraft(draft.id, draft.revision, draft.content),
+    ).toThrow(failure);
+    expect(app.store.all("requests")).toEqual([]);
+    expect(app.draft(draft.id)).toEqual(draft);
+  });
+
   it("导出正文的创建时间符合公共协议秒级格式", () => {
     const app = setup(new SequenceRandom([31n]));
     const exported = app.exportDraft(app.createDraft(content).id, 1, content);
@@ -134,7 +232,11 @@ describe("导出与请求身份", () => {
       };
       recovered.store.set("requests", id, seed);
     }
-    const ok = recovered.exportDraft(recovered.createDraft(content).id, 1, content);
+    const ok = recovered.exportDraft(
+      recovered.createDraft(content).id,
+      1,
+      content,
+    );
     expect(ok.id).toBe("33");
   });
 });

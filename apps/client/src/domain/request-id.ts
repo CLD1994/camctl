@@ -6,6 +6,7 @@
  * 时有限重选，重选耗尽返回导出错误——不返回默认 ID。
  */
 
+import { randomBytes } from "node:crypto";
 import { isCanonicalId } from "../shared/validation";
 
 export const MAX_REQUEST_ID = 9_223_372_036_854_775_807n;
@@ -59,10 +60,6 @@ export async function newRequestId(
 /** Node crypto 随机源：63 位均匀随机后取正。 */
 export class CryptoRandomSource implements RandomSource {
   next(): bigint {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const { randomBytes } = require("node:crypto") as {
-      randomBytes: (size: number) => Buffer;
-    };
     const buffer = randomBytes(8);
     let value = 0n;
     for (const byte of buffer) {
