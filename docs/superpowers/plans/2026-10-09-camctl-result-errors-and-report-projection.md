@@ -98,8 +98,8 @@
 
 **输入输出：** 消费任务一实际保存的公共历史、`ReportingRepository.freeze_report` 的真实报告登记和原 `GenerationSpec`。对不合法历史实例返回既有状态前提异常，worker 的 `ResultFailureMessage.error_kind` 为 STATE；输出合法报告时 code/stage/details 完整，原未知错误不改写。
 
-- [ ] 写 `test_result_error_generates_schema_valid_report`：公开历史先达到有限核实失败终态，再真实冻结和生成报告。核 `device_execution.status=end_unconfirmed`、其完整核实错误及动作最终错误各自来源；调用真实公共 Schema。报告不增加公开 attempts、内部预算或额外错误成员。
-- [ ] 写 `test_frozen_result_error_regeneration_is_identical`：保存首次字节和摘要，关闭重开 Owned，再发生合法后续业务变化，按同 report ID/H、水位重建；字节与摘要相同、无额外设备/RESULTS、原历史前缀保持。
+- [x] `test_exhausted_results_generate_schema_valid_public_errors`：公开历史先达到有限核实失败终态，再真实冻结和生成报告。按 H 时的实际活动状态核 photo 的 `still_running` 与 timelapse 的 `end_unconfirmed`，分别核设备执行错误和动作最终错误的完整来源；调用真实公共 Schema。报告不增加公开 attempts、内部预算或额外错误成员。
+- [x] `test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen`：保存首次字节和摘要，关闭重开 Owned，再发生合法后续业务变化，按同 report ID/H、水位重建；字节与摘要相同、无额外设备/RESULTS、原历史前缀保持。
 - [ ] 写纯单元 `test_historical_error_shape_is_state_failure`：用受真实 HistoryRepository 返回形状约束的替身提供不完整 H 字段，核投影/生成边界抛状态前提异常并保留字段路径；不通过 SQL 修改不可变正文制造条件。
 - [ ] 写真实报告组件 `test_uninterpretable_frozen_error_stops_without_publish`：公共历史与冻结登记均真实，只在稳定历史读取端口返回不合法原字段。核无完整 staging/ready 发布、原 report 登记和 H 保持；worker/flow 返回 STATE，候选和设备操作不继续。不能只测 `classify_worker_error` 而省去实际 Schema 与保存边界。
 - [ ] 写控制分区 `test_output_io_error_remains_report_failure` 和普通 ValueError 分类回归：合法原历史经过真实生成，稳定文件端口控制 OSError；原报告责任保留、REPORT 分类保持，不误判 STATE。
@@ -115,12 +115,13 @@
 
 ## 根 Agent 独占门禁
 
-以下新文件为预估名称，创建后命令须与实际文件一致；当前没有运行记录。
+集成测试按各责任目录分开运行，实际结果在下文记录。
 
 ```sh
 PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/unit/capture/test_result_error_contract.py -q
-PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_result_error_history.py apps/camctl/tests/integration/reporting/test_result_error_generation.py -q
-PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_result_confirmation.py apps/camctl/tests/integration/capture/test_result_consumer_saves.py apps/camctl/tests/integration/capture/test_result_file_recovery.py apps/camctl/tests/integration/reporting -q
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_result_error_history.py -q
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_result_confirmation.py apps/camctl/tests/integration/capture/test_result_consumer_saves.py apps/camctl/tests/integration/capture/test_result_file_recovery.py -q
+PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/reporting -q
 PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/unit -q
 ```
 
@@ -175,3 +176,9 @@ Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 fai
 独立只读评审核三处生产改动、原仓储 key-first、完整响应、三个工厂共享、四个 handler 和默认五入口，未发现此次改动的生产阻断。公开业务终态或绑定失效后仍有耗尽申请的行为矩阵尚未新增实际反例；事件守卫、固定 H 报告分类及未决 UNSATISFIED 仍未闭合。录像 `close_unconfirmed_result_run` 的现场原申请也需单独核实，不由 ResultSetSave 这三处调用的覆盖替代。取消延时耗尽后文件保留的原有路径差异见[核实轮次计划](2026-10-09-camctl-result-round-runtime.md#取消延时摄影耗尽后的文件登记)。
 
 最后接线后的全量单元 `/tmp/camctl-goal-exhaustion-final-unit.log` 为 3717 passed、1 skipped、2 warnings、7.80s。两个 warning 来自既有同步测试的 asyncio 标记。阶段 checkpoint 按用户授权保存全部当前工作，不为 Git 历史拆分追加验证；完整 app 目标保持，下一步按取消延时文件保留模型推进。
+
+### 合法核实错误的真实报告生成
+
+2026-10-09，Linux 开发容器、Python 3.11.16：根独占 `/tmp/camctl-goal-result-error-generation-gate.log` 为 3 passed、1.97s。公开 photo 和 timelapse 的实际 START、两轮 typed v1 RESULTS、有限耗尽及失败终态均由真实消费者保存，报告经真实 `freeze_report`、`generate_report_file` 和公共 Schema 校验。两处错误分别追溯到动作和设备活动；photo 的原活动为 ACTIVE，报告为 `still_running`，timelapse 的原活动为 UNKNOWN，报告为 `end_unconfirmed`。独立 action/activity 身份采用实际活动编号，没有用集合未确定推断设备已经停止。
+
+重建场景关闭原连接，在 fresh Owned 上公开受理后续合法计划，按原 report ID、H 和水位重新生成。字节、摘要和大小相同，原 H 前缀逐行保持，设备与 RESULTS 调用没有增加。这三项只证明合法核实错误和固定 H 重建；不完整历史的 STATE 分类、文件错误的 REPORT 控制分区、事件守卫及未决 UNSATISFIED 仍未完成。

@@ -565,7 +565,9 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 
 正式依据为[取消、失败与文件保留](../../architecture/camera-capture.md#取消失败与文件保留)：有限处理结束后，已经拍完、确认属于本动作且写入完成的文件须与取消终态共同登记；集合未确定不取消这些文件的独立资格。录像取消放弃内容遵守自身规则，不套用本节。
 
-当前只读审查发现 `_close_canceled_timelapse` 的 EXHAUSTED 分支保存核实 UNCONFIRMED 后直接取消，没有传 drafts；同一结论已可靠保存后重入 CLOSED 分支却沿原文件登记 drafts。此差异在 `9ad78be` 已存在，不属于有限耗尽 holder 改动引入的回归，尚未运行专门行为反例。后续按以下模型建立反例及实现，不能由源码判断直接宣称修复。
+最初的只读审查发现 `_close_canceled_timelapse` 的 EXHAUSTED 分支保存核实 UNCONFIRMED 后直接取消，没有传 drafts；同一结论已可靠保存后重入 CLOSED 分支却沿原文件登记 drafts。此差异在 `9ad78be` 已存在，不属于有限耗尽 holder 改动引入的回归。行为反例和实施结果见下文。
+
+2026-10-09，Linux 开发容器、Python 3.11.16：根独占 `/tmp/camctl-goal-cancel-timelapse-exhaustion-red.log` 为 1 failed、1 passed、1.38s。公开 timelapse 的实际一轮 typed v1 PHOTO、有限预算、公共取消和实际 STOP 均可靠保存；直接 EXHAUSTED 分支在 CANCELED、原 UNCONFIRMED run、尝试／文件／历史守恒与零重复调用之后，仅缺正式产物。可靠 close 后重开且没有会话申请的 CLOSED 控制通过。这是一项已存在的文件保留缺陷，不是保存 holder 引入的回归。
 
 | 原保存与目标状态 | 文件事实 | 必须执行的行为 |
 | --- | --- | --- |
@@ -582,3 +584,15 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 3. 取得有效红后，将 EXHAUSTED 和持久 CLOSED／UNCONFIRMED 的取消收尾统一到原文件事实消费者。原 close key／T1、Outcome、attempts、配置和历史前缀保持；实际需要停止时仍沿原责任推进，恢复不新增设备调用或结果查询。未可靠 close 时不能提交依赖取消事务；产物与 canceled 始终共同保存。
 4. 验证四种保存分区得到相同合法产物和 canceled，重复恢复不重复登记；无合格文件及已有终态保持规则。随后审计 `_close_canceled_timelapse`、`_finish_canceled_capture`、普通 timelapse 的已保存结论消费，以及同类 photo 文件保留入口。录像取消不登记产物的独立行为须有控制分区。
 5. 根独占部署 Python 3.11 的局部反例及相关 capture／默认取消回归，独立核实际 diff 与证据，按用户授权合并当前阶段工作为本地 checkpoint。未决普通集合结束、UNSATISFIED reason 和完整 app 验收继续分别跟踪。
+
+#### 文件保留的实施与阶段门禁
+
+2026-10-09，Linux 开发容器、Python 3.11.16：`_close_canceled_timelapse` 在 EXHAUSTED 时先可靠保存原耗尽决定，再装载 `_saved_result_listing`，与已有 CLOSED 分支共用持久文件登记及取消终态事务。该 listing 已保存，后续列举完成入口不把原 UNCONFIRMED run 改成 SUCCEEDED；原尝试、错误和次数保持。
+
+`/tmp/camctl-goal-cancel-timelapse-exhaustion-green.log` 为 14 passed、7.58s：完整 PHOTO／VIDEO × 四种保存恢复分区八项；空观察与未完成文件 × direct／无会话申请重启四项；前轮完整文件、末轮 FAILED 且无文件观察 × 两个分区两项。UNKNOWN 保留原 request／key／T1，关闭旧连接后以 fresh Owned 核原事务再恢复；只有可靠 close 后的重启分区没有会话申请。全部核原 attempts／文件／历史前缀、零重复 RESULTS／STOP／control、产物与 CANCELED 同事务，以及终态重复推进只读。
+
+`/tmp/camctl-goal-cancel-output-fixture-gate.log` 的整个 `test_recording_finish.py` 为 10 passed、1.62s。旧文件保留用例使用真实 timelapse 前置，保留原键及新键恢复、产物身份及同事务断言；独立录像控制拒绝 drafts、取消时不登记产物，源文件事实保持。`/tmp/camctl-goal-cancel-timelapse-files-unit.log` 为 3717 passed、1 skipped、2 warnings、7.81s；两个 warning 仍来自既有同步测试的 asyncio 标记。
+
+`/tmp/camctl-goal-cancel-timelapse-related-capture.log` 为 41 passed、5.24s，覆盖已保存取消结果消费、末轮报错前文件恢复、迟到 START 和录像开始查询取消。合法核实错误另经三项真实报告生成与固定 H 重建验证，范围见[报告投影计划](2026-10-09-camctl-result-errors-and-report-projection.md#合法核实错误的真实报告生成)。
+
+独立只读审查核这五行生产改动、实际文件消费者和十四项候选结构，未发现该修复的生产阻断。此门禁只闭合有限耗尽决定可靠前后、文件资格和取消登记之间的差异；取消终态申请自身的保存 UNKNOWN、普通集合结束、UNSATISFIED、事件守卫及完整报告链仍按各自计划推进，不由此推定已完成。

@@ -361,29 +361,71 @@ async def test_canceled_finish_reuse_and_recovery(tmp_path: Path) -> None:
         owned.connection.close()
 
 
-async def test_canceled_finish_registers_complete_files(tmp_path: Path) -> None:
-    """可停止任务的取消收场：已拍完文件登记为正式产物，与取消终态同事务。
+async def _complete_files_then_cancel(tmp_path: Path, consumer: str):
+    from unittest.mock import create_autospec
 
-    取消事实不证明设备已停止；只有已确认归属且写入完成的文件成为
-    可取回产物，动作仍按取消终态收场。
-    """
-    owned = _environment(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "UPDATE actions SET cancel_requested = 1 WHERE id = 1")
-    connection.commit()
+    from camctl.capture.handlers import (
+        _finish_listing_result, _listing_round, _register_listing, _stop_call,
+    )
+    from camctl.capture.models import ActivityConcludeSave
+    from camctl.devices.ports import DeviceCallResult, StopDriver
+
+    from ..bootstrap.test_recording_results_cancellation import _apply_cancellation
+    from .result_consumer_fixtures import consumer_world, returned
+    from .test_capture_contract import ResultsDouble, _entry
+
+    owned, runtime, action_id, _handler = await consumer_world(tmp_path, consumer)
+    try:
+        activity_id, = _value(
+            owned, "SELECT id FROM device_activities WHERE action_id=?", action_id)
+        runtime.results = ResultsDouble({activity_id: (_entry("complete-file"),)})
+        listing = await _listing_round(runtime, action_id)
+        registered = _register_listing(runtime, action_id, listing)
+        _finish_listing_result(runtime, listing)
+        (_file, file_id), = registered
+        assert _value(owned,
+            "SELECT source_action_id,presence_state,completion_state,size_bytes"
+            " FROM device_files WHERE id=?", file_id) == (action_id, 2, 3, 4096)
+        assert runtime.results.calls == [activity_id]
+        if consumer == "timelapse":
+            stopper = create_autospec(StopDriver, instance=True)
+            stopper.stop.return_value = DeviceCallResult.from_outcome(
+                returned("stop", "stop_confirmed", activity_id))
+            runtime.stopper = stopper
+            stopped = await _stop_call(runtime, runtime.action(action_id), "stop_timelapse")
+            assert stopped.phase == "confirmed", stopped
+            concluded = runtime.capture.conclude_activity(
+                ActivityConcludeSave(action_id, runtime.wall_us()),
+                new_operation_key(), owned)
+            assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
+        # consumer_world 的单动作受理对应此公共取消 helper 的原目标。
+        assert action_id == 1
+        _apply_cancellation(owned, terminal=False)
+        assert _value(owned, "SELECT status,cancel_requested FROM actions WHERE id=?",
+                      action_id) == (2, 1)
+        return owned, action_id, file_id, runtime.wall_us()
+    except BaseException:
+        owned.connection.close()
+        raise
+
+
+async def test_canceled_finish_registers_complete_files(tmp_path: Path) -> None:
+    """延时摄影取消保留已确认完整文件，产物与取消终态原子登记。"""
+    owned, action_id, file_id, occurred_at = await _complete_files_then_cancel(
+        tmp_path, "timelapse")
     repository = CaptureRepository()
     try:
+        boundary, = _value(owned, "SELECT MAX(id) FROM history_events")
         command = FinishCanceledCapture(
-            action_id=1,
-            occurred_at=_NOW,
-            drafts=(_original_draft(11),),
+            action_id=action_id,
+            occurred_at=occurred_at,
+            drafts=(_original_draft(file_id),),
             catalog_facts=OutputCatalogFacts(
-                action_id=1, ownership_confirmed=True),
+                action_id=action_id, ownership_confirmed=True),
         )
+        key = new_operation_key()
         outcome = repository.finish_canceled_capture(
-            command, new_operation_key(), owned)
+            command, key, owned)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         assert outcome.value.action_status == 6
         assert outcome.value.plan_status == 3
@@ -393,24 +435,58 @@ async def test_canceled_finish_registers_complete_files(tmp_path: Path) -> None:
             "SELECT kind, device_file_id, availability, source_action_id"
             " FROM outputs WHERE id = ?",
             outcome.value.output_ids[0])
-        assert output == (1, 11, 1, 1)
-        assert _value(owned, "SELECT status FROM actions WHERE id = 1")[0] == 6
+        assert output == (1, file_id, 1, action_id)
+        assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id)[0] == 6
         # 取消终态与产物登记同事务保存：本命令的全部事件共用一个事务号。
         txns = {row[0] for row in owned.connection.execute(
             "SELECT DISTINCT transaction_id FROM history_events"
-            " WHERE id > 1").fetchall()}
+            " WHERE id > ?", (boundary,)).fetchall()}
         assert len(txns) == 1
         # 同键重送恢复首次结果与产物身份。
         again = repository.finish_canceled_capture(
-            command, new_operation_key(), owned)
+            command, key, owned)
         assert again.kind is DbOutcomeKind.COMPLETED, again.error
         assert again.value.disposition is FinishDisposition.ALREADY
         assert again.value.output_ids == outcome.value.output_ids
+        new_key = repository.finish_canceled_capture(
+            command, new_operation_key(), owned)
+        assert new_key.kind is DbOutcomeKind.COMPLETED, new_key.error
+        assert new_key.value.disposition is FinishDisposition.ALREADY
+        assert new_key.value.output_ids == outcome.value.output_ids
         # 与既有登记不一致的新键输入（空草稿）不能改写首次产物集合。
         discard = repository.finish_canceled_capture(
-            FinishCanceledCapture(action_id=1, occurred_at=_NOW + 1),
+            FinishCanceledCapture(action_id=action_id, occurred_at=occurred_at + 1),
             new_operation_key(), owned)
         assert discard.kind is DbOutcomeKind.ROLLED_BACK
+    finally:
+        owned.connection.close()
+
+
+async def test_canceled_record_finish_discards_complete_files(tmp_path: Path) -> None:
+    """录像取消放弃内容，拒绝产物草稿并保留原完整文件事实。"""
+    owned, action_id, file_id, occurred_at = await _complete_files_then_cancel(
+        tmp_path, "record")
+    repository = CaptureRepository()
+    try:
+        files = owned.connection.execute("SELECT * FROM device_files ORDER BY id").fetchall()
+        history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
+        rejected = repository.finish_canceled_capture(FinishCanceledCapture(
+            action_id, occurred_at, drafts=(_original_draft(file_id),),
+            catalog_facts=OutputCatalogFacts(action_id, ownership_confirmed=True)),
+            new_operation_key(), owned)
+        assert rejected.kind is DbOutcomeKind.ROLLED_BACK, rejected.error
+        assert owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall() == history
+        assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
+        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (0,)
+
+        result = repository.finish_canceled_capture(
+            FinishCanceledCapture(action_id, occurred_at), new_operation_key(), owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.action_status == 6
+        assert result.value.output_ids == ()
+        assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (6,)
+        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (0,)
+        assert owned.connection.execute("SELECT * FROM device_files ORDER BY id").fetchall() == files
     finally:
         owned.connection.close()
 

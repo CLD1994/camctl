@@ -2861,7 +2861,7 @@ async def _close_canceled_timelapse(
 
     收尾列举按 results 责任的有限轮次推进：本轮失败保存实际结果
     与重试等待并保留取消待收场事实；预算耗尽时集合结论按无法确
-    认收场，取消终态优先，不登记产物。
+    认收场。已经可靠归属且写入完成的文件仍与取消终态共同登记。
     """
     listing = await _listing_round(context, action_id)
     if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
@@ -2869,8 +2869,7 @@ async def _close_canceled_timelapse(
         return
     if listing.phase is ListingPhase.EXHAUSTED:
         _close_check_unconfirmed(context, action_id)
-        _finish_canceled_capture(context, action_id)
-        return
+        listing = _saved_result_listing(context, action_id)
     entries = listing.entries
     _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED)
     registered = _register_listing(context, action_id, listing)
