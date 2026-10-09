@@ -22,6 +22,7 @@ import pytest
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
 from camctl.devices.catalog import (
     ActionCapability, DriverDefinition, DriverDefinitions, build_catalog,
 )
@@ -66,6 +67,7 @@ _PRODUCTION_EVIDENCE = EvidenceRegistry((
     EvidenceContract(type="result_files_listed", version=1, operation="result",
                      fields=frozenset({"activity_id", "entries"}),
                      identity_field="activity_id"),
+    RESULT_PAGE_CONTRACT,
     EvidenceContract(type="results_returned", version=1, operation="result",
                      fields=frozenset()),
 ))
@@ -114,8 +116,10 @@ class _ProductionDriver:
             effect=EffectState.CONFIRMED,
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation(
-                type="result_files_listed", version=1,
-                data={"activity_id": identity, "entries": entries}),)))
+                type="result_files_listed", version=2,
+                data={"activity_id": identity, "entries": entries,
+                      "cursor": request.params.get("cursor"), "next_cursor": None,
+                      "set_finalized": True, "completion_evidence": None}),)))
 
 
 def _entry(identity: str, *, kind: str = "video", size: int = 4096) -> dict:

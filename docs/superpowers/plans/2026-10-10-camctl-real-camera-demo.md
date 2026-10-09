@@ -195,6 +195,8 @@ T6 第五阶段软件验证（2026-10-10，容器，Python 3.11.16）：延时�
 
 T6 剩余契约接缝：主机计时延时丢失连续计时依据后的停止和失败分区尚待确定；原生 START 等到采集完成才返回时，正式规格要求匹配调用期限，但尚无配置来源或派生规则。当前短控制调用期限不能作为长任务的完整交付依据。这两项分别属于既有主机计时恢复及调用契约，不启用尚未完整的具体设备能力。分页中断后的旧调用恢复、bootstrap 装配与最终跨组件门禁继续按本计划完成。
 
+T6 bootstrap 正常装配验证（2026-10-10，容器，Python 3.11.16）：经驱动登记及默认生产流程的延时成功入口、延时等待与结果收尾、录像到期停止、停止重试及取消共 14 项通过。软件契约替身使用正式 v2 集合保证；录像第一轮尚未齐备的目录明确为未确定，取得完整结果后才提供确定保证。原驱动控制、结果适配、状态库和会话推进均使用真实组件，这项验证不代表具体相机响应已核验。bootstrap 完整目录及四条 C host 演示仍待后续门禁。
+
 **建议文件：** 修改 `apps/camctl/src/camctl/capture/handlers.py`、`capture/recording.py`、`persistence/repositories/capture.py`；补充 `apps/camctl/tests/integration/capture/test_capture_contract.py`、`test_timelapse_wait_runtime.py`、`test_result_confirmation.py`、`test_result_error_history.py`，以及 bootstrap 的 `test_timelapse_finish.py`、`test_recording_stop.py`。
 
 **接口：** 消费 T5 `list_page`、可靠页范围及 assessment，轮次拥有者组织读取、保存及最后关闭，接入 `_confirm_timelapse_results` 或等价共同边界。沿用 `finish_result_check(AttemptFinish, ResultSetSave, key, owned)`、`confirm_result_set(ResultSetSave, key, owned)` 和 `CaptureRuntime.save_capture_completion`；原调用、采集结论、必要文件事实、正式产物及终态按规定共同提交。`PendingCaptureCompletion` 等原申请拥有者先于依赖新配置或新设备调用恢复。
