@@ -23,6 +23,7 @@ from camctl.capture.models import (
     ResultRunClose,
     ResultSetPhase,
     ResultSetSave,
+    validate_capture_result,
 )
 from camctl.capture.files import (
     FileChecksumSave,
@@ -63,10 +64,12 @@ from camctl.capture.results import (
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
+from camctl.contracts.schemas import SchemaRuleError
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.contracts.workflow_errors import (
     registered_error,
     validate_error_details,
+    validate_public_error,
 )
 from camctl.history.reads import ReadCoverage
 from camctl.history.events import business_columns
@@ -2612,7 +2615,7 @@ class _ResultSetConfirmCommand:
         activity_id = facts["id"]
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(connection, saved)
+            return self._reuse(scope, saved)
         action = row_facts(connection, "actions", facts["action_id"])
         if action is None:
             raise ConsistencyError(f"活动所属动作不存在: {facts['action_id']}")
@@ -2703,8 +2706,9 @@ class _ResultSetConfirmCommand:
             return None
         return None if command.error is None else dict(command.error)
 
-    def _reuse(self, connection, saved) -> CommandPlan:
+    def _reuse(self, scope, saved) -> CommandPlan:
         """原键重送：核实原分支与输入后恢复首次结果。"""
+        connection = scope.connection
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
         reason = _RESULT_PHASE_TARGETS[command.phase][0]
@@ -2712,8 +2716,8 @@ class _ResultSetConfirmCommand:
             raise TransactionError("操作身份已用于其他事务，不能作为结果核实重送")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("结果核实的事实时刻与原事务不同")
-        activity_id = load_activity_of_action(
-            connection, command.action_id)["id"]
+        facts = load_activity_of_action(connection, command.action_id)
+        activity_id = facts["id"]
         row = saved[0]["body"]["rows"][0]
         if (row["table"] != "device_activities"
                 or row["id"] != activity_id):
@@ -2733,13 +2737,24 @@ class _ResultSetConfirmCommand:
         for column, value in pairs:
             if column in values and not json_equal(values.get(column), value):
                 raise TransactionError("结果核实的重送输入与原事务不同")
+        if "completion_basis" in values:
+            basis = values["completion_basis"]
+        else:
+            transaction = saved[0]["transaction"]
+            restored = read_row_values_at_boundary(
+                connection, owner=("action", facts["action_id"]),
+                table="device_activities", row_id=activity_id,
+                columns=frozenset({"completion_basis"}), current_values=facts,
+                boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+                current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+            basis = restored["completion_basis"]
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
             result=ResultSetOutcome(
                 ResultSetDisposition.ALREADY,
                 values["result_set_state"],
-                values.get("completion_basis")))
+                basis))
 
 
 @dataclass(frozen=True)
@@ -3493,7 +3508,7 @@ class _FinishResultCheckCommand:
         finish_plan = FinishAttemptCommand(
             self._finish, self._key)._reuse(scope, saved[:2])
         confirm_plan = _ResultSetConfirmCommand(
-            self._confirm, self._key)._reuse(scope.connection, saved[2:])
+            self._confirm, self._key)._reuse(scope, saved[2:])
         return CommandPlan(
             events=(),
             owners={**finish_plan.owners, **confirm_plan.owners},
@@ -3522,7 +3537,7 @@ class _CloseResultCheckCommand:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(connection, saved)
+            return self._reuse(scope, saved)
         command = self._command
         if command.phase is not ResultSetPhase.UNCONFIRMED:
             raise TransactionError("耗尽收场只保存无法确认的集合结论")
@@ -3567,7 +3582,8 @@ class _CloseResultCheckCommand:
         return _unconfirmed_run_error(
             load_activity_of_action(connection, self._command.action_id)["id"])
 
-    def _reuse(self, connection, saved) -> CommandPlan:
+    def _reuse(self, scope, saved) -> CommandPlan:
+        connection = scope.connection
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
         if types != [(_RUN_END_EVENT, 3),
@@ -3585,7 +3601,7 @@ class _CloseResultCheckCommand:
                 or not json_equal(values.get("error_json"), self._run_error(connection))):
             raise TransactionError("耗尽收场的重送输入与原事务不同")
         confirm_plan = _ResultSetConfirmCommand(
-            command, self._key)._reuse(connection, saved[1:])
+            command, self._key)._reuse(scope, saved[1:])
         return CommandPlan(
             events=(),
             owners=confirm_plan.owners,
@@ -4804,6 +4820,28 @@ def _verify_stop_observation(observation, run_values: Mapping[str, Any]) -> None
         raise EventValidationError("停止依据必须指向本补记的目标活动")
 
 
+def _validate_activity_result(row, context) -> None:
+    """核实活动实际 after，省略的变化列沿用可靠原值。"""
+    facts = (
+        dict(context.state_rows.get("device_activities", {}).get(row.row_id, {}))
+        if row.before.exists else {})
+    facts.update(row.before.values)
+    facts.update(row.after.values)
+    try:
+        missing = {"capture_json", "last_error_json"} - facts.keys()
+        if missing:
+            raise ValueError(f"活动缺少可靠结果字段: {sorted(missing)}")
+        if facts["capture_json"] is not None:
+            validate_capture_result(facts["capture_json"])
+        if facts["last_error_json"] is not None:
+            validate_public_error(facts["last_error_json"])
+    except SchemaRuleError:
+        raise
+    except ValueError as error:
+        raise EventValidationError(
+            f"设备活动#{row.row_id}的采集结果或错误无效: {error}") from error
+
+
 def _activity_guard(event, context) -> None:
     """活动状态守卫：结束不由路径、超时或本地退出补造。
 
@@ -4811,7 +4849,10 @@ def _activity_guard(event, context) -> None:
     定依据；确定判定只能从待定初始化一次并同事务携带依据。
     """
     for row in event.rows:
-        if row.table != "device_activities" or not row.before.exists:
+        if row.table != "device_activities" or not row.after.exists:
+            continue
+        _validate_activity_result(row, context)
+        if not row.before.exists:
             continue
         before_state = row.before.values.get("activity_state")
         after_state = row.after.values.get("activity_state")
@@ -4845,6 +4886,8 @@ def _activity_guard(event, context) -> None:
                     f"采集判定列要求动作事实: actions#{action_id}")
             if action.get("type") == 2:
                 raise EventValidationError("录像活动不得携带采集结果或判定依据")
+            if not is_json_integer(action.get("type")) or action["type"] not in (1, 3):
+                raise EventValidationError("采集判定列要求可靠的照片或延时摄影动作类型")
         if basis_after != basis_before and basis_after in (2, 3, 4):
             if basis_before not in (None, 1):
                 raise EventValidationError("采集判定已确定，不能再改判")
@@ -4918,3 +4961,13 @@ def _result_check_guard(event, context) -> None:
             or check.get("outcome") != expected[1]
             or not isinstance(check.get("observation"), Mapping)):
         raise EventValidationError("结果集合核实依据的结构或判定编码非法")
+    capture = row.after.values.get("capture_json")
+    if capture is not None:
+        phase = next(phase for phase, target in _RESULT_PHASE_TARGETS.items()
+                     if target[0] == event.reason)
+        try:
+            validate_capture_result(capture, phase=phase)
+        except SchemaRuleError:
+            raise
+        except ValueError as error:
+            raise EventValidationError(f"新采集结果与集合结论不符: {error}") from error

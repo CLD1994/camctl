@@ -20,6 +20,7 @@ from camctl.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import BoundaryError, HistoryBoundary, TransactionRange
 from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.contracts.schemas import SchemaRuleError
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.history.changes import (
     ChangeDerivationError,
@@ -395,6 +396,8 @@ def commit_operation(
         )
         try:
             plan = command.plan(scope)
+        except SchemaRuleError:
+            raise
         except Exception as error:
             # 命令执行期意外失败：整组不提交，按回滚或未知分类。
             return _rollback_or_unknown(connection, True, error)
@@ -407,6 +410,8 @@ def commit_operation(
                     plan.complete_result(connection, plan.result)
                     if plan.complete_result else plan.result
                 )
+            except SchemaRuleError:
+                raise
             except Exception as error:
                 return _rollback_or_unknown(connection, True, error)
             connection.execute("ROLLBACK")
@@ -544,6 +549,8 @@ def commit_operation(
                 plan.complete_result(connection, plan.result)
                 if plan.complete_result else plan.result
             )
+        except SchemaRuleError:
+            raise
         except Exception as error:
             return _rollback_or_unknown(connection, True, error)
         committing = True
@@ -556,6 +563,11 @@ def commit_operation(
             ),
             change_set=change_set,
         )
+    except SchemaRuleError as error:
+        receipt = _rollback_or_unknown(connection, begun, error)
+        if receipt.kind == "unknown":
+            return receipt
+        raise
     except (TransactionError, ConsistencyError, EventValidationError, ChangeDerivationError) as error:
         return _rollback_or_unknown(connection, begun, error)
     except sqlite3.Error as error:

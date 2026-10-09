@@ -17,7 +17,7 @@ import pytest
 from camctl.capture.handlers import (
     ListingPhase, _listing_round, _register_listing, capture_handler,
 )
-from camctl.capture.models import ResultSetPhase, ResultSetSave
+from camctl.capture.models import ActivityConcludeSave, ResultSetPhase, ResultSetSave
 from camctl.contracts.values import new_operation_key
 from camctl.contracts import workflow_errors
 from camctl.contracts.schemas import SchemaRuleError
@@ -31,11 +31,14 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
+from camctl.persistence.repositories.capture import (
+    CaptureRepository, _ResultSetConfirmCommand, register_capture_guards,
+)
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.timelapse import register_timelapse_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.transaction import commit_operation
 
 from .result_consumer_fixtures import consumer_world
 from .test_result_consumer_saves import _result_port
@@ -283,17 +286,90 @@ async def test_allowed_null_capture_and_error_remain_null_on_original_key_replay
         first = world.save(world.command, key)
 
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        original_result = _result_set_value(first, entry)
+        assert original_result.completion_basis == 1
         assert world.owned.connection.execute(
             "SELECT result_set_state,capture_json,last_error_json FROM device_activities WHERE id=?",
             (world.activity_id,)).fetchone() == (4, None, None)
         saved = _database_facts(world.owned)
         replay = world.save(world.command, key)
         assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
-        assert _result_set_value(replay, entry).result_set_state == 4
+        recovered = _result_set_value(replay, entry)
+        assert recovered.result_set_state == 4
+        assert recovered.completion_basis == original_result.completion_basis
         assert _database_facts(world.owned) == saved
         assert world.calls() == calls
     finally:
         world.owned.connection.close()
+
+
+async def test_begin_original_key_replay_recovers_basis_before_later_completion(tmp_path):
+    """重开后重送开始申请，返回原判定，不使用后来完成的当前判定。"""
+    owned, runtime, action_id, _handler = await consumer_world(
+        tmp_path, "photo", independent_activity=True)
+    try:
+        repository = CaptureRepository()
+        database_path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+        activity_id, = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
+        assert action_id != activity_id
+        calls = tuple(runtime.driver.mock_calls)
+        attempt_id, result_json = owned.connection.execute(
+            "SELECT t.id,t.result_json FROM operation_attempts t"
+            " JOIN operation_runs r ON r.id=t.run_id"
+            " WHERE r.responsibility_key=? AND r.status=3 AND t.status=2"
+            " AND t.result_event_id IS NOT NULL ORDER BY t.attempt_no DESC LIMIT 1",
+            (f"start/{action_id}",)).fetchone()
+        photo_observation = next(observation for observation in json.loads(result_json)["observations"]
+                                 if observation["type"] == "photo_taken")
+        assert photo_observation["data"]["activity_id"] == str(activity_id)
+        concluded = repository.conclude_activity(
+            ActivityConcludeSave(action_id, runtime.wall_us()), new_operation_key(), owned)
+        assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
+        assert owned.connection.execute(
+            "SELECT activity_state,result_set_state,completion_basis"
+            " FROM device_activities WHERE id=?", (activity_id,)).fetchone() == (3, 1, 1)
+        begin = ResultSetSave(action_id, runtime.wall_us(), ResultSetPhase.BEGIN)
+        original_begin = deepcopy(begin)
+        begin_key = new_operation_key()
+
+        first = repository.confirm_result_set(begin, begin_key, owned)
+
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        assert (first.value.result_set_state, first.value.completion_basis) == (2, 1)
+        complete = ResultSetSave(
+            action_id, runtime.wall_us(), ResultSetPhase.COMPLETE,
+            contract="photo_device_evidence", observation={"capture": photo_observation},
+            capture={"status": "completed"}, evidence={
+                "method": "device_evidence", "attempt_id": attempt_id,
+                "observation": photo_observation})
+        later = repository.confirm_result_set(complete, new_operation_key(), owned)
+        assert later.kind is DbOutcomeKind.COMPLETED, later.error
+        assert (later.value.result_set_state, later.value.completion_basis) == (3, 2)
+        saved = _database_facts(owned)
+        history_head, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
+        assert tuple(runtime.driver.mock_calls) == calls
+        owned.connection.close()
+        reopened = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            assert reopened.connection.execute(
+                "SELECT result_set_state,completion_basis FROM device_activities WHERE id=?",
+                (activity_id,)).fetchone() == (3, 2)
+
+            replay = repository.confirm_result_set(begin, begin_key, reopened)
+
+            assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
+            assert (replay.value.result_set_state, replay.value.completion_basis) == (2, 1)
+            assert replay.value.disposition.value == "already"
+            assert _database_facts(reopened) == saved
+            assert reopened.connection.execute(
+                "SELECT MAX(id) FROM history_events").fetchone() == (history_head,)
+            assert tuple(runtime.driver.mock_calls) == calls
+            assert begin == original_begin
+        finally:
+            reopened.connection.close()
+    finally:
+        owned.connection.close()
 
 
 def _clear_error_resources():
@@ -350,23 +426,26 @@ class _RollbackFailure:
         return getattr(self.connection, name)
 
 
-async def test_schema_rule_failure_after_begin_releases_public_owned_transaction(tmp_path, monkeypatch):
-    world = await _world(tmp_path, "confirm_result_set")
+@pytest.mark.parametrize("entry", ["confirm_result_set", "close_result_check_unconfirmed"])
+async def test_schema_rule_failure_after_begin_releases_public_owned_transaction(tmp_path, monkeypatch, entry):
+    world = await _world(tmp_path, entry)
     try:
         before = _database_facts(world.owned)
         calls = world.calls()
         failure, hits = _resource_failure(monkeypatch, world.owned.connection)
 
         with pytest.raises(SchemaRuleError) as raised:
-            world.save(world.command, new_operation_key())
+            returned = world.save(world.command, new_operation_key())
+            pytest.fail(f"资源故障没有原样传播: {returned!r}; 实际资源调用={hits!r}")
 
         assert raised.value.__cause__ is failure
         assert len(hits) == 1 and hits[0][0] is True, hits
         assert "commit_operation" in hits[0][1]
-        # 当前校验也可能先由报告影响派生执行。记录实际位置，不能
-        # 把事务内核的反例冒充活动守卫自身的行为红。
+        # close 的流程错误在 command.plan 中读取登记；confirm 的
+        # 实际校验可能先由报告影响派生执行。分别记录触发位置，不能
+        # 把这些事务退出路径冒充活动守卫自身的行为红。
         assert any(name in hits[0][1] for name in (
-            "_activity_guard", "_result_check_guard", "project_public")), hits
+            "_activity_guard", "_result_check_guard", "project_public", "_run_error")), hits
         assert world.owned.connection.in_transaction is False
         assert _database_facts(world.owned) == before
         assert world.calls() == calls
@@ -375,8 +454,9 @@ async def test_schema_rule_failure_after_begin_releases_public_owned_transaction
         world.owned.connection.close()
 
 
-async def test_schema_rule_failure_and_failed_rollback_return_unknown_with_both_diagnostics(tmp_path, monkeypatch):
-    world = await _world(tmp_path, "confirm_result_set")
+@pytest.mark.parametrize("entry", ["confirm_result_set", "close_result_check_unconfirmed"])
+async def test_schema_rule_failure_and_failed_rollback_return_unknown_with_both_diagnostics(tmp_path, monkeypatch, entry):
+    world = await _world(tmp_path, entry)
     connection = world.owned.connection
     try:
         before = _database_facts(world.owned)
@@ -409,3 +489,68 @@ async def test_schema_rule_failure_and_failed_rollback_return_unknown_with_both_
     finally:
         _clear_error_resources()
         connection.close()
+
+
+class _CompleteResultCommand:
+    """在 AtomicCommand.plan 边界给真实结果核实计划添加响应回调。"""
+
+    def __init__(self, command, key, callback, *, read_only):
+        self.delegate = _ResultSetConfirmCommand(command, key)
+        self.callback = callback
+        self.read_only = read_only
+        self.plans = []
+
+    def plan(self, scope):
+        actual = self.delegate.plan(scope)
+        assert actual.read_only is self.read_only
+        assert bool(actual.events) == (not self.read_only)
+        self.plans.append(actual)
+        return replace(actual, complete_result=self.callback)
+
+
+@pytest.mark.parametrize("read_only", [False, True], ids=["write-result", "read-only-result"])
+async def test_complete_result_schema_failure_releases_owned_transaction(tmp_path, monkeypatch, read_only):
+    """验证通用 complete_result 协议；capture 当前没有该生产回调。"""
+    world = await _world(tmp_path, "confirm_result_set")
+    try:
+        key = new_operation_key()
+        if read_only:
+            original = world.save(world.command, key)
+            assert original.kind is DbOutcomeKind.COMPLETED, original.error
+        before = _database_facts(world.owned)
+        calls = world.calls()
+        callback_calls, faults = [], []
+        error = deepcopy(world.command.error)
+
+        def complete_result(connection, result):
+            callback_calls.append((connection is world.owned.connection, connection.in_transaction,
+                                   result, _database_facts(world.owned)))
+            failure, hits = _resource_failure(monkeypatch, connection)
+            faults.append((failure, hits))
+            # 故障只在回调中启用。此前真实 planner、事件守卫、历史和
+            # 投影写入均使用合法资源，不改变真实计划的事件或响应。
+            workflow_errors.validate_public_error(error)
+            raise AssertionError("真实错误校验必须遭遇包资源故障")
+
+        command = _CompleteResultCommand(world.command, key, complete_result, read_only=read_only)
+
+        with pytest.raises(SchemaRuleError) as raised:
+            returned = commit_operation(command, key, world.owned)
+            pytest.fail(
+                f"完整响应资源故障没有原样传播: {returned!r}; "
+                f"回调次数={len(callback_calls)}, 实际资源故障={faults!r}")
+
+        assert len(command.plans) == len(callback_calls) == len(faults) == 1
+        assert callback_calls[0][:2] == (True, True)
+        assert callback_calls[0][2] is command.plans[0].result
+        assert (callback_calls[0][3] == before) is read_only
+        failure, hits = faults[0]
+        assert raised.value.__cause__ is failure
+        assert len(hits) == 1 and hits[0][0] is True, hits
+        assert "complete_result" in hits[0][1] and "validate_public_error" in hits[0][1], hits
+        assert world.owned.connection.in_transaction is False
+        assert _database_facts(world.owned) == before
+        assert world.calls() == calls
+    finally:
+        _clear_error_resources()
+        world.owned.connection.close()

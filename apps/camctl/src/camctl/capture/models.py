@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -30,10 +30,12 @@ __all__ = [
     "CaptureCompletion",
     "CaptureDefinition",
     "CaptureInput",
+    "CaptureResultStatus",
     "ResultSetPhase",
     "ResultSetSave",
     "WaitCompletedSave",
     "activity_capabilities",
+    "validate_capture_result",
 ]
 
 
@@ -270,45 +272,71 @@ class ResultSetPhase(Enum):
     BEGIN = "begin"
 
 
+class CaptureResultStatus(str, Enum):
+    """采集阶段的内部结果状态，不从动作终态推定。"""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    UNCONFIRMED = "unconfirmed"
+
+
 #: 结论分支要求的采集状态（operation-fields.md#设备活动字段）。
 _PHASE_CAPTURE_STATUS = {
-    ResultSetPhase.COMPLETE: "completed",
-    ResultSetPhase.UNSATISFIED: "failed",
-    ResultSetPhase.UNCONFIRMED: "unconfirmed",
+    ResultSetPhase.COMPLETE: CaptureResultStatus.COMPLETED,
+    ResultSetPhase.UNSATISFIED: CaptureResultStatus.FAILED,
+    ResultSetPhase.UNCONFIRMED: CaptureResultStatus.UNCONFIRMED,
 }
 
 
-def _capture_result(name: str, value, phase: ResultSetPhase) -> None:
-    """采集结果只保存必填状态与驱动可靠提供的成员。"""
+def validate_capture_result(
+    value, *, phase: ResultSetPhase | None = None,
+) -> None:
+    """核实原采集结果的状态、错误与精确数值，不修改输入。
+
+    可选次数和秒数未知时省略；显式空值不能替代未知成员。
+    指定结果集合结论时，采集状态还须与该分区一致。
+    """
     if not isinstance(value, Mapping):
-        raise ValueError(f"{name} 必须是对象: {value!r}")
-    status = value.get("status")
-    expected = _PHASE_CAPTURE_STATUS[phase]
-    if status != expected:
-        raise ValueError(
-            f"{name} 的状态与结论不符: 期望 {expected!r}, 实际 {status!r}")
+        raise ValueError(f"采集结果必须是对象: {value!r}")
+    raw_status = value.get("status")
+    if not isinstance(raw_status, str):
+        raise ValueError(f"采集结果缺少合法状态: {raw_status!r}")
+    try:
+        status = CaptureResultStatus(raw_status)
+    except ValueError as error:
+        raise ValueError(f"采集结果状态未登记: {raw_status!r}") from error
+    if phase is not None:
+        if not isinstance(phase, ResultSetPhase) or phase is ResultSetPhase.BEGIN:
+            raise ValueError(f"采集结果只适用于结果集合结论: {phase!r}")
+        expected = _PHASE_CAPTURE_STATUS[phase]
+        if status is not expected:
+            raise ValueError(
+                f"采集结果的状态与结论不符: 期望 {expected.value!r}, 实际 {raw_status!r}")
+    needs_error = status in (CaptureResultStatus.FAILED, CaptureResultStatus.UNCONFIRMED)
     if "error" in value:
         error = value["error"]
-        if expected == "completed":
-            raise ValueError(f"{name} 的完成状态不携带错误成员")
+        if not needs_error:
+            raise ValueError(f"采集结果的状态 {status.value!r} 不携带错误成员")
         if not isinstance(error, Mapping):
-            raise ValueError(f"{name} 的错误必须是对象: {error!r}")
+            raise ValueError(f"采集结果的错误必须是对象: {error!r}")
         validate_public_error(error)
-    elif expected != "completed":
-        raise ValueError(f"{name} 的状态 {expected!r} 必须携带错误成员")
+    elif needs_error:
+        raise ValueError(f"采集结果的状态 {status.value!r} 必须携带错误成员")
     members = set(value) - {"status", "error", "captured_count", "elapsed_s"}
     if members:
-        raise ValueError(f"{name} 携带未知成员: {sorted(members)}")
-    count = value.get("captured_count")
-    if count is not None and (isinstance(count, bool) or not is_json_integer(count)
-                              or not 0 <= count <= 9007199254740991):
-        raise ValueError(f"{name} 的采集次数必须是安全整数: {count!r}")
-    elapsed = value.get("elapsed_s")
-    if elapsed is not None:
-        if isinstance(elapsed, bool) or not isinstance(elapsed, (int, float)):
-            raise ValueError(f"{name} 的时长必须是数字: {elapsed!r}")
-        if not math.isfinite(elapsed) or elapsed < 0:
-            raise ValueError(f"{name} 的时长必须有限非负: {elapsed!r}")
+        raise ValueError(f"采集结果携带未知成员: {members!r}")
+    if "captured_count" in value:
+        count = value["captured_count"]
+        if not is_json_integer(count) or not 0 <= count <= 9007199254740991:
+            raise ValueError(f"采集结果的采集次数必须是安全整数: {count!r}")
+    if "elapsed_s" in value:
+        elapsed = value["elapsed_s"]
+        if isinstance(elapsed, bool) or not isinstance(elapsed, (int, Decimal)):
+            raise ValueError(f"采集结果的时长必须是精确数字: {elapsed!r}")
+        if (isinstance(elapsed, Decimal) and not elapsed.is_finite()) or elapsed < 0:
+            raise ValueError(f"采集结果的时长必须有限非负: {elapsed!r}")
 
 
 def _evidence_object(name: str, value) -> None:
@@ -375,7 +403,7 @@ class ResultSetSave:
         if not isinstance(self.observation, Mapping):
             raise ValueError("结论分支必须携带结构化依据")
         if self.capture is not None:
-            _capture_result("采集结果", self.capture, self.phase)
+            validate_capture_result(self.capture, phase=self.phase)
         if self.phase is ResultSetPhase.COMPLETE:
             _evidence_object("采集判定依据", self.evidence)
             if self.error is not None:

@@ -232,7 +232,7 @@ Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 fai
 | `capture_json=None`、`last_error_json=None`，所属分区允许没有结果或错误 | 保持合法空值；不补造事实。 |
 | 非空 capture，status 为 running、completed 或 canceled | `error` 成员省略；保留驱动可靠提供的次数及秒数。 |
 | 非空 capture，status 为 failed 或 unconfirmed | 必须有完整公共 error；保留其真实阶段、详情与指向。 |
-| capture 状态与结果结论分区不符 | 拒绝；COMPLETE、UNSATISFIED、UNCONFIRMED 的新采集结果分别是 completed、failed、unconfirmed。 |
+| 本次新写入的 capture 状态与结果结论分区不符 | 拒绝；COMPLETE、UNSATISFIED、UNCONFIRMED 的新采集结果分别是 completed、failed、unconfirmed。结论没有新写入 capture 时保留原采集事实。 |
 | 非空 capture 携带未知成员；次数不是安全整数、秒数不是有限非负数，或使用 null 代替未知可选值 | 拒绝；未知次数和秒数使用成员省略。 |
 | 两处任一非空 error 缺成员、类型非法、空 code/stage、额外顶层成员，或登记 stage/details 不符 | 转为带 cause 的 EventValidationError，整个事务可靠回滚。 |
 | 两处完整登记错误或完整未知驱动错误 | 保持全部原值，不重命名、不标准化，不将未知码降为错误。 |
@@ -246,4 +246,42 @@ Linux 开发容器、Python 3.11.16。根独占的真实消费者四项由 4 fai
 4. 横切审计实际错误生产者与全部活动分支。正常 START、STOP、残留与绑定收场没有新活动错误生产；已有完整有限 RESULTS 耗尽错误继续通过。UNSATISFIED 的错误 reason 及应急两个框架错误的正式身份仍待决定，不能猜测或仅补空详情。应急省略活动行时仍可能创建带错误的流程，活动守卫不代替其独立生产与组合责任。
 5. 根顺序运行单元、capture 的新事务门禁与已有有限耗尽恢复门禁，必要时核相应 history 消费者。阶段报告区分守卫、生产者与历史重放的覆盖；按用户要求整体提交，不以未决分区或未执行候选宣称完整目标完成。
 
-当前新守卫与事务反例尚未编写或执行；应急身份问题已单独提交用户决策。该未决事项只停止其错误生产与正式登记的相关实施。
+新守卫反例已经保存于 `cc52d20`。根独占的纯守卫有效红为 71 failed、28 passed；三个公开入口的十八项修改后错误实例全部被旧事务错误接受。资源故障在旧守卫下没有触发，不算事务退出路径的有效红。接入共同校验后，资源故障实际发生于 BEGIN 之后的结果守卫；两个真实组件反例分别确认同一 Owned 仍在事务中，以及回滚失败分区没有返回 UNKNOWN。
+
+### 事务资源错误与原响应恢复
+
+SchemaRuleError 说明规则或包资源自身无法解释，不能作为非法实例降为 EventValidationError。事务内核必须对该异常释放自己的事务责任；行为分类如下。
+
+| 资源故障时的事务与回滚结果 | 必须观察到的结果 |
+| --- | --- |
+| BEGIN 尚未成功 | 传播原 SchemaRuleError，不声称存在已开启事务。 |
+| BEGIN 已成功，ROLLBACK 可靠成功 | 同一 Owned 不再处于事务中，历史与投影全部保持；传播原 SchemaRuleError，保留原异常和 cause。 |
+| BEGIN 已成功，ROLLBACK 遇到 SQLite 错误 | 返回既有 UNKNOWN，诊断保留资源错误及回滚错误；停止使用原连接，不能声称可靠回滚。 |
+
+建议在 `commit_operation` 的既有异常出口增加窄 SchemaRuleError 分支，复用现有回滚分类；不扩大普通业务拒绝、提交未知或会话分类。命令 plan、只读完整响应和写入完整响应三个内部通用 catch 必须先让 SchemaRuleError 到达共同出口，其余异常维持既有分类。真实 close 命令在 plan 的流程错误登记读取可触发同一资源故障，因此不能只核 guard 阶段。先运行实际包资源故障反例及稳定完整响应回调的两个协议分区，再实现相应退出路径；可靠分区核同一连接和全部表，UNKNOWN 分区关闭原连接后以 fresh Owned 核可靠事实。完整响应回调控制只证明通用事务接口，不声称实际拍摄命令已使用这种回调。
+
+合法错误控制另外发现原键响应缺失：UNCONFIRMED 和 BEGIN 保留 `completion_basis` 时，变化正文省略该列，现重送却把省略解释为 None。正式原键契约要求返回原提交结果；建议使用现有 `read_row_values_at_boundary` 恢复原完整事务结束时的单列值。direct、finish 和 close 共同使用可靠 scope 的 C 和原事务 H；恢复失败明确停止，不补默认值，不读当前值作为原响应，也不把未变化列写入事件。验收覆盖三个入口的原响应相等，以及 BEGIN 后另一事务改变判定、关闭原连接再重送 BEGIN，仍返回原判定。
+
+### 结果申请输入身份的未决范围
+
+共同重送只比较原变化正文中出现的 capture/error，未比较 evidence。`capture=None` 表示保留原值，与显式提供同一 capture 可以形成相同变化正文；判定不变时，原 evidence 也未必出现。该信息不能从行变化完整反推，属于独立于原响应恢复的输入身份记录问题。
+
+建议在三个结论分区正式登记内部 `evidence.result_set_request={capture, evidence}`，两成员必填，分别保存原输入对象或 null；BEGIN 无这两项输入，不需要新增记录。`last_error_json` 始终保存本申请要求的值，可从原 H 精确恢复后核对；contract、observation 和分区继续从原核实事实核对。首次保存和原键重送不得改动原对象、key、时刻或实际观察。此项需要正式格式决策后实施，不能用当前投影、默认值或“相同效果”代替原输入相等。
+
+应急身份和结果申请输入身份的正式登记分别等待用户决策；只停止相关格式和生产者修改，已确定的守卫、事务退出与原响应恢复继续实施。
+
+### 守卫、事务退出与原响应的阶段验证（2026-10-09）
+
+Linux 开发容器、Python 3.11.16。模型与事件守卫复用 `validate_capture_result`，五种状态集中在 `CaptureResultStatus`；检查实际 after 的两处错误，不改原值。次数仍限定安全整数，秒数按[精确 JSON 规则](../../camctl/data-types.md#精确-json-与配置适配)接受 int 或有限 Decimal，成员省略与显式 null 分开。原动作类型的适用性检查保留其原检查范围，本阶段没有将 CREATE 或未变化判定列的全部组合宣称闭合。
+
+根独占的 `/tmp/camctl-goal-result-guards-unit-red-valid.log` 为 71 failed、28 passed、0.51s；接入后 `/tmp/camctl-goal-result-guards-unit-final.log` 为 99 passed、0.29s。七活动分支、两个错误位置、新建和原值合并、完整登记与未知驱动错误、五种状态、精确数值、结论匹配和资源分类均由纯内存单元验证。
+
+三个公开保存入口的十八项修改后非法实例由错误接受转为整组回滚。两个最初资源控制在接入守卫后才取得 BEGIN 后的有效红；扩展 close 的命令计划及两个完整响应回调后，`/tmp/camctl-goal-result-guards-inner-schema-red-diagnostics.log` 为 3 failed、1 passed、2.23s。失败均显示真实 SchemaRuleError 被返回为 ROLLED_BACK，而非原样传播；资源读取实际在事务中发生。三个内层捕获现在让该异常到达共同出口，由共同出口执行一次回滚；可靠时保留原异常，失败时返回 UNKNOWN 并保留两层诊断。
+
+原响应控制首次六项失败都为判定省略后返回 None。补充允许空值和 fresh Owned 的 BEGIN 后判定变化反例，`/tmp/camctl-goal-result-guards-original-basis-red.log` 为 4 failed、26 deselected、2.10s；所有合法前置已完成，旧 BEGIN 重送仍缺原判定。共同响应恢复使用原完整事务 H；正文明确包含判定时使用原值，省略时以现有边界读取恢复单列，不改变事件格式。
+
+最终 `/tmp/camctl-goal-result-guards-transaction-full-final.log` 为 34 passed、15.93s，包含三入口整组回滚、合法错误与空值、原响应保真、后续判定变化及重开、真实资源错误的可靠回滚和 UNKNOWN、两种完整响应回调。`/tmp/camctl-goal-result-guards-persistence-final.log` 为 36 passed、0.98s，核既有事务、完整原键读取和提交未知恢复。`/tmp/camctl-goal-result-guards-contracts-gate.log` 为 190 passed、3.31s；最终全量单元 `/tmp/camctl-goal-result-guards-final-all-unit.log` 为 3883 passed、1 skipped、2 warnings、8.60s，两个 warning 来自既有同步测试的 asyncio 标记。独立源码审查核七分支、真实上下文、三个响应调用、完整 H/C、单次回滚与普通异常分类，未发现该阶段新增生产阻断。
+
+相关 capture 七文件的 `/tmp/camctl-goal-result-guards-related-capture.log` 为 81 passed、8 failed、27.34s。三项分别位于 `test_result_confirmation`、`test_result_consumer_saves`、`test_result_file_recovery`，使用不完整 UNSATISFIED 错误；其正式 reason 仍未决定。另五项位于 `test_emergency`：零尝试未发令、后续会话保留错误的两种最终结果、停止未确认的补记和未确认后的占用；真实应急生产错误缺 details，现被共同守卫拒绝。应急错误正式身份与详情仍等待决策，不能把这些失败改为空详情或宣称应急链路已通过。
+
+本阶段只完成已确定的活动结果结构、事务资源退出和原判定响应恢复。原申请输入身份、UNSATISFIED 生产与应急错误登记继续按各自决策推进；RESULTS v2、完整采集业务与全部组件验收仍未完成。当前全部变更按用户授权整体提交，本阶段不增加 Git 拆分或推送要求。
