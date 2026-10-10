@@ -106,7 +106,7 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 python .\action6_record_probe.py --capture timelapse --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
 ```
 
-脚本遵循[原表列出的准备与设置顺序](camera-control-handoff.md#原表列出的准备与设置顺序)：先进入延时模式、设置 4K/30 fps，再以完整 `6c` 负载设置间隔和时长，然后设置 Auto，最后再次发送完整 `6c` 负载选择仅视频。五项设置分别保存到 `01-mode`、`02-resolution`、`03-timing`、`04-exposure`、`05-output`。之后保存内置和 SD 两个 DCIM 范围的启动前目录，再发送一次 START。目录不存在与可靠空目录分别记录；路径不是目录、读取失败或两个范围均不存在时不启动。延时设置仍使用预期 `00` 样式作诊断检查，不能据此登记设置或启动已经生效。
+脚本遵循[原表列出的准备与设置顺序](camera-control-handoff.md#原表列出的准备与设置顺序)：先进入延时模式、设置 4K/30 fps，再发送一次完整 `6c` 负载，同时设置间隔、时长和仅视频输出，然后设置 Auto。四项设置分别保存到 `01-mode`、`02-resolution`、`03-timing`、`04-exposure`。之后保存内置和 SD 两个 DCIM 范围的启动前目录，再发送一次 START。目录不存在与可靠空目录分别记录；路径不是目录、读取失败或两个范围均不存在时不启动。延时设置仍使用预期 `00` 样式作诊断检查，不能据此登记设置或启动已经生效。
 
 相机和电脑保持供电及连接，电脑保持唤醒。脚本从 START 调用发起计主机单调时间，到所选时长后采样，默认 1800 秒；如果启动调用本身阻塞超过该时间，则返回后直接采样。每次实际调用保存 UTC 发起及返回时刻；`capture-observation.json` 另存调用耗时、距发起的主机间隔、后目录采样时刻，以及 `requested_params`、`preset_payload`、`preset_basis`。这些时刻和要求不替代设备实际开始、自然结束或最终处理完成的观察。
 
@@ -126,7 +126,7 @@ python .\action6_record_probe.py --capture timelapse --timelapse-duration-s 30 -
 
 候选编码依据是原表三个 Action6 完整负载中的低位字节：从零计数的偏移 5、6 分别为 `18 15`、`70 17`、`08 07`，按小端整数解释得到 5400、6000、1800，分别对应 90、100、30 分钟。因此试验只将原预设的这两个字节替换为所选秒数，其余字节原样保留，包括 Action6 的第 17 字节。这是编码推断，不能据此确定完整字段宽度或秒级值的实际效力。
 
-| 时长 | 两次 `6c` 设置使用的完整负载 | 保存的 `preset_basis` |
+| 时长 | 完整预设负载 | 保存的 `preset_basis` |
 | --- | --- | --- |
 | 原预设 1800 秒 | `0400005000080700000000000000000000` | `source_example` |
 | 实验 30 秒 | `04000050001e0000000000000000000000` | `experimental_duration` |

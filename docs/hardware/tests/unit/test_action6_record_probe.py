@@ -98,13 +98,12 @@ class TimelapseSettingsChecks(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 probe.timelapse_payload(value)
 
-    def test_auto_sequence_sets_timing_before_exposure_and_output(self):
+    def test_auto_sequence_sets_complete_preset_once_before_exposure(self):
         self.assertEqual(probe.timelapse_settings(30), (
             ('01-mode', 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02'),
             ('02-resolution', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000'),
             ('03-timing', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000050001e0000000000000000000000'),
             ('04-exposure', 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100'),
-            ('05-output', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000050001e0000000000000000000000'),
         ))
 
 

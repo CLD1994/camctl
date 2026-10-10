@@ -88,13 +88,12 @@ def timelapse_metadata(duration_s: int) -> dict:
 
 def timelapse_settings(duration_s: int) -> tuple[tuple[str, str], ...]:
     preset = "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c " + timelapse_payload(duration_s)
-    # 按原表顺序：间隔与时长、Auto、输出组合；两次设置均发送完整负载。
+    # 完整预设一次配置间隔、持续时间和输出组合，随后设置 Auto 曝光。
     return (
         ("01-mode", "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02"),
         ("02-resolution", "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000"),
         ("03-timing", preset),
         ("04-exposure", "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100"),
-        ("05-output", preset),
     )
 
 

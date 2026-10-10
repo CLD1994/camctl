@@ -57,6 +57,7 @@ def test_osmo_manual_settings_keep_own_flags_and_no_unprovided_adjustments():
 
 
 @pytest.mark.parametrize("driver, interval, duration, outputs, exposure, payload", [
+    ("dji-action6", 30, 5400, "video", {"mode": "manual", "iso": 800}, "0400002c01181500000000000000000000"),
     ("dji-action6", 30, 5400, "video_raw", {"mode": "manual", "iso": 800}, "0400032c01181500000000000000000000"),
     ("dji-action6", 30, 5400, "video_jpeg", {"mode": "manual", "iso": 800}, "0400022c01181500000000000000000000"),
     ("dji-action6", 25, 6000, "video", {"mode": "auto"}, "040000fa00701700000000000000000000"),
@@ -79,32 +80,35 @@ def test_timelapse_uses_full_given_payload(driver, interval, duration, outputs, 
     params = {"type": "action6_timelapse" if driver == "dji-action6" else "osmo360ii_timelapse",
               "interval_s": interval, "duration_s": duration, "outputs": outputs, "exposure": exposure}
     settings = commands.settings_for(driver, "camera_timelapse", params)
-    assert settings[-1] == ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "6c", payload)
+    preset_position = 2 if driver == "dji-action6" else -1
+    assert settings[preset_position] == ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "6c", payload)
     if driver == "dji-osmo360-ii" and exposure["mode"] == "auto":
         assert ("8e", "010100000100") in [cmd[-2:] for cmd in settings]
         assert ("1e", "0000") in [cmd[-2:] for cmd in settings]
 
 
-@pytest.mark.parametrize("interval, duration, outputs, exposure, timing, output", [
+@pytest.mark.parametrize("interval, duration, outputs, exposure, payload", [
+    (30, 5400, "video", {"mode": "manual", "iso": 800},
+     "0400002c01181500000000000000000000"),
     (30, 5400, "video_raw", {"mode": "manual", "iso": 800},
-     "0400002c01181500000000000000000000", "0400032c01181500000000000000000000"),
+     "0400032c01181500000000000000000000"),
     (30, 5400, "video_jpeg", {"mode": "manual", "iso": 800},
-     "0400002c01181500000000000000000000", "0400022c01181500000000000000000000"),
+     "0400022c01181500000000000000000000"),
     (25, 6000, "video", {"mode": "auto"},
-     "040000fa00701700000000000000000000", "040000fa00701700000000000000000000"),
+     "040000fa00701700000000000000000000"),
     (25, 6000, "video_raw", {"mode": "auto"},
-     "040000fa00701700000000000000000000", "040003fa00701700000000000000000000"),
+     "040003fa00701700000000000000000000"),
     (25, 6000, "video_jpeg", {"mode": "auto"},
-     "040000fa00701700000000000000000000", "040002fa00701700000000000000000000"),
+     "040002fa00701700000000000000000000"),
     (8, 1800, "video", {"mode": "auto"},
-     "0400005000080700000000000000000000", "0400005000080700000000000000000000"),
+     "0400005000080700000000000000000000"),
     (8, 1800, "video_raw", {"mode": "auto"},
-     "0400005000080700000000000000000000", "0400035000080700000000000000000000"),
+     "0400035000080700000000000000000000"),
     (8, 1800, "video_jpeg", {"mode": "auto"},
-     "0400005000080700000000000000000000", "0400025000080700000000000000000000"),
+     "0400025000080700000000000000000000"),
 ])
-def test_action_timelapse_preserves_complete_source_setting_order(
-        interval, duration, outputs, exposure, timing, output):
+def test_action_timelapse_applies_selected_full_preset_once_before_exposure(
+        interval, duration, outputs, exposure, payload):
     params = {"type": "action6_timelapse", "interval_s": interval,
               "duration_s": duration, "outputs": outputs, "exposure": exposure}
     exposure_commands = (
@@ -119,9 +123,8 @@ def test_action_timelapse_preserves_complete_source_setting_order(
     expected = (
         "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
         "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
-        f"dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c {timing}",
+        f"dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c {payload}",
         *exposure_commands,
-        f"dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c {output}",
     )
     assert commands.settings_for("dji-action6", "camera_timelapse", params) == tuple(
         tuple(shlex.split(command)) for command in expected)
@@ -150,7 +153,8 @@ def test_uncertain_commands_remain_named_candidates():
     assert any(item.command[-1] == "040000fa00201c000000000000000000" and item.reason for item in pending)
     assert any(item.command[-1] == "010109000100" and item.reason for item in pending)
     pending = commands.pending_commands("dji-action6")
-    assert any(item.command[-1] == "0400002c01181500000000000000000000" and item.reason for item in pending)
+    assert not any(item.command[-2] == "6c" for item in pending)
+    assert any(item.command[-1] == "9001" and item.reason for item in pending)
 
 
 def test_command_lookup_rejects_unknown_binding_and_unvalidated_parameters():

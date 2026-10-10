@@ -233,6 +233,21 @@ class ProbeIntegration(unittest.TestCase):
         self.assertTrue((original / "capture-observation.json").is_file())
         return original
 
+    def seed_five_setting_capture(self, duration_s):
+        controls = self.expected_short_controls(duration_s)
+        labels = ("01-mode", "02-resolution", "03-timing", "04-exposure", "05-output")
+        commands = controls[:-1] + [controls[2]]
+        settings = tuple(zip(labels, commands))
+        with patch.object(self.probe, "timelapse_settings", return_value=settings):
+            original = self.seed_original(duration_s)
+        metadata = json.loads((original / "05-output" / "call.json").read_text())
+        self.assertEqual(shlex_command(metadata["argv"][1:]), controls[2])
+        self.assertEqual(metadata["returncode"], 0)
+        self.assertEqual((original / "05-output" / "stdout.bin").read_bytes(),
+                         b"Resp message, len = 1, data:\n  00\n")
+        self.assertEqual((original / "05-output" / "stderr.bin").read_bytes(), b"")
+        return original
+
     def trace(self):
         path = self.workspace / "trace.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
@@ -250,7 +265,6 @@ class ProbeIntegration(unittest.TestCase):
             "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
             preset,
             "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
-            preset,
             TIMELAPSE_START,
         ]
 
@@ -301,7 +315,7 @@ class ProbeIntegration(unittest.TestCase):
         expected = self.expected_short_controls(duration_s)
         self.assertEqual(self.control_commands(), expected)
         self.assertEqual(self.sleep_calls, [duration_s])
-        labels = ("01-mode", "02-resolution", "03-timing", "04-exposure", "05-output")
+        labels = ("01-mode", "02-resolution", "03-timing", "04-exposure")
         for label, command in zip(labels, expected):
             with self.subTest(label=label):
                 metadata = json.loads((original / label / "call.json").read_text())
@@ -309,6 +323,7 @@ class ProbeIntegration(unittest.TestCase):
                 self.assertEqual(metadata["returncode"], 0)
                 self.assertEqual((original / label / "stdout.bin").read_bytes(),
                                  b"Resp message, len = 1, data:\n  00\n")
+        self.assertFalse((original / "05-output").exists())
         expected_params = {"resolution": "4k30", "exposure": "auto", "interval_s": 8,
                            "duration_s": duration_s, "outputs": "video"}
         observation = json.loads((original / "capture-observation.json").read_text())
@@ -330,7 +345,7 @@ class ProbeIntegration(unittest.TestCase):
     def test_10_second_capture_keeps_complete_source_order_and_experiment_metadata(self):
         self.assert_short_capture(10)
 
-    def test_original_duration_keeps_source_example_basis_and_two_full_presets(self):
+    def test_original_duration_keeps_source_example_basis_and_one_full_preset(self):
         original = self.seed_original()
         commands = self.control_commands()
         expected_preset = "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400005000080700000000000000000000"
@@ -339,9 +354,9 @@ class ProbeIntegration(unittest.TestCase):
             "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
             expected_preset,
             "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
-            expected_preset,
             TIMELAPSE_START,
         ])
+        self.assertFalse((original / "05-output").exists())
         observation = json.loads((original / "capture-observation.json").read_text())
         self.assertEqual(observation["requested_params"]["duration_s"], 1800)
         self.assertEqual(observation["preset_payload"], "0400005000080700000000000000000000")
@@ -352,7 +367,7 @@ class ProbeIntegration(unittest.TestCase):
 
     def test_each_setting_failure_stops_before_start_and_keeps_raw_call(self):
         expected = self.expected_short_controls(30)
-        labels = ("01-mode", "02-resolution", "03-timing", "04-exposure", "05-output")
+        labels = ("01-mode", "02-resolution", "03-timing", "04-exposure")
         for step, label in enumerate(labels, 1):
             for failure in ("exit", "stderr", "nonzero_ack", "truncated_ack"):
                 with self.subTest(step=label, failure=failure):
@@ -398,7 +413,7 @@ class ProbeIntegration(unittest.TestCase):
         self.assertFalse((original / "12-start").exists())
 
     def test_short_start_failure_is_attempted_once_without_stop_or_wait(self):
-        self.set_state(control_failure_at=6, control_failure="nonzero_ack")
+        self.set_state(control_failure_at=5, control_failure="nonzero_ack")
         with self.assertRaises(RuntimeError) as caught:
             self.invoke("--capture", "timelapse", "--timelapse-duration-s", 30)
         self.assertIn("e3", str(caught.exception))
@@ -426,6 +441,38 @@ class ProbeIntegration(unittest.TestCase):
         self.assertEqual(self.control_commands(self.trace()[prior:]), [])
         self.assertEqual(self.sleep_calls, [])
         self.assertEqual(self.snapshot(original), before)
+
+    def assert_five_setting_capture_observation(self, duration_s):
+        original = self.seed_five_setting_capture(duration_s)
+        before = self.snapshot(original)
+        self.add_video()
+        prior = len(self.trace())
+        self.sleep_calls.clear()
+        self.invoke("--observe", original)
+        observation, = original.glob("observation-*")
+        summary = self.read_summary(observation)
+        self.assertEqual(summary["params"], {"resolution": "4k30", "exposure": "auto",
+                                          "interval_s": 8, "duration_s": duration_s, "outputs": "video"})
+        self.assertEqual(summary["preset_basis"], "experimental_duration")
+        self.assertEqual(summary["videos"][0]["source"], VIDEO)
+        self.assertEqual(summary["video_checks"], "complete")
+        self.assert_unknown_completion(summary)
+        observed = json.loads((observation / "capture-observation.json").read_text())
+        self.assertEqual(observed["original_capture_observation"],
+                         json.loads(before["capture-observation.json"]))
+        calls = self.trace()[prior:]
+        self.assertEqual(self.control_commands(calls), [])
+        commands = [shlex_command(args) for args in calls
+                    if args[:4] == ["-s", SERIAL, "shell", "-T"]]
+        self.assertFalse(any("simulate_device" in command or "rm " in command for command in commands))
+        self.assertEqual(self.sleep_calls, [])
+        self.assertEqual(self.snapshot(original), before)
+
+    def test_observe_five_setting_30_second_capture_preserves_original_request(self):
+        self.assert_five_setting_capture_observation(30)
+
+    def test_observe_five_setting_10_second_capture_preserves_original_request(self):
+        self.assert_five_setting_capture_observation(10)
 
     def test_observe_without_new_files_does_not_wait_or_mutate_original(self):
         original = self.seed_original()

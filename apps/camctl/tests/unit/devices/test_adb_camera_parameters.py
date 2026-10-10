@@ -96,10 +96,15 @@ def test_osmo_record_rejects_unopened_settings(field, value):
 
 
 @pytest.mark.parametrize("driver, interval, duration, outputs, exposure", [
+    ("dji-action6", 30, 5400, "video", {"mode": "manual", "iso": 800}),
     ("dji-action6", 30, 5400, "video_raw", {"mode": "manual", "iso": 800}),
     ("dji-action6", 30, 5400, "video_jpeg", {"mode": "manual", "iso": 800}),
     ("dji-action6", 25, 6000, "video", {"mode": "auto"}),
+    ("dji-action6", 25, 6000, "video_raw", {"mode": "auto"}),
+    ("dji-action6", 25, 6000, "video_jpeg", {"mode": "auto"}),
     ("dji-action6", 8, 1800, "video", {"mode": "auto"}),
+    ("dji-action6", 8, 1800, "video_raw", {"mode": "auto"}),
+    ("dji-action6", 8, 1800, "video_jpeg", {"mode": "auto"}),
     ("dji-osmo360-ii", 30, 600, "video", {"mode": "manual", "iso": 800}),
     ("dji-osmo360-ii", 40, 18000, "video", {"mode": "auto"}),
     ("dji-osmo360-ii", 8, 1800, "video", {"mode": "auto"}),
@@ -113,7 +118,7 @@ def test_timelapse_accepts_only_documented_complete_combinations(driver, interva
 
 
 @pytest.mark.parametrize("driver, interval, duration, outputs, exposure", [
-    ("dji-action6", 30, 5400, "video", {"mode": "manual", "iso": 800}),
+    ("dji-action6", 30, 5400, "video", {"mode": "manual", "iso": 400}),
     ("dji-action6", 25, 1800, "video", {"mode": "auto"}),
     ("dji-action6", 8, 1800, "video_raw", {"mode": "manual", "iso": 800}),
     ("dji-osmo360-ii", 30, 5400, "video", {"mode": "manual", "iso": 800}),

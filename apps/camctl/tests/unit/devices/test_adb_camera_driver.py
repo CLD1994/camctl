@@ -29,13 +29,12 @@ EVIDENCE = EvidenceRegistry((RETURNED, ASSUMED, SETTING, STARTED, PREVENTED))
 ACTION6_MANUAL_TIMELAPSE_SCRIPTS = (
     "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400002c01181500000000000000000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400032c01181500000000000000000000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0400",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2a 06",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 28 013C8000",
     "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400032c01181500000000000000000000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
 )
 
@@ -129,7 +128,7 @@ async def test_action6_timelapse_applies_full_manual_sequence_before_one_start()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("setting_number", range(1, 10))
+@pytest.mark.parametrize("setting_number", range(1, 9))
 async def test_action6_timelapse_unconfirmed_setting_preserves_error_and_blocks_later_commands(setting_number):
     transport = Transport(fail_at=setting_number)
     result = await _driver(CameraModel.ACTION6, transport).control(_timelapse_request())
@@ -147,7 +146,7 @@ async def test_action6_timelapse_unconfirmed_setting_preserves_error_and_blocks_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reason", ["canceled", "window_ended"])
 @pytest.mark.parametrize("completed_settings", [2, 3])
-async def test_action6_timelapse_eligibility_lost_before_or_after_timing_blocks_later_commands(reason, completed_settings):
+async def test_action6_timelapse_eligibility_lost_before_or_after_preset_blocks_later_commands(reason, completed_settings):
     transport = Transport()
     request = _timelapse_request(check=lambda: reason if len(transport.calls) == completed_settings else None)
     result = await _driver(CameraModel.ACTION6, transport).control(request)
@@ -167,7 +166,7 @@ async def test_action6_timelapse_eligibility_lost_before_or_after_timing_blocks_
     (2, [Decimal("20"), Decimal("15")]),
     (3, [Decimal("20"), Decimal("15"), Decimal("10")]),
 ])
-async def test_action6_timelapse_deadline_exhausted_before_or_after_timing_blocks_later_commands(completed_settings, expected_timeouts):
+async def test_action6_timelapse_deadline_exhausted_before_or_after_preset_blocks_later_commands(completed_settings, expected_timeouts):
     now = [0]
     def advance_clock(count):
         now[0] = 20_000_000_000 if count == completed_settings else now[0] + 5_000_000_000
@@ -187,7 +186,7 @@ async def test_action6_timelapse_deadline_exhausted_before_or_after_timing_block
 
 @pytest.mark.asyncio
 async def test_action6_timelapse_unknown_start_is_not_repeated_or_followed_by_stop():
-    transport = Transport(fail_at=10)
+    transport = Transport(fail_at=9)
     result = await _driver(CameraModel.ACTION6, transport).control(_timelapse_request())
 
     scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]

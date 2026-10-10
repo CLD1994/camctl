@@ -51,16 +51,11 @@ ACTION_BITRATE = {"standard": ("simulate_device", "-s", "bitrate", "1"),
 OSMO_ISO = {800: _cmd("2A", "06", test=True, reply=True)}
 OSMO_EV = {0: _cmd("2e", "10")}
 
-# 曝光前设置间隔与持续时间；输出选择在曝光设置后另行发送。
-ACTION_TIMELAPSE_TIMING = {
-    (30, 5400): _cmd("6c", "0400002c01181500000000000000000000"),
-    (25, 6000): _cmd("6c", "040000fa00701700000000000000000000"),
-    (8, 1800): _cmd("6c", "0400005000080700000000000000000000"),
-}
-
 
 @dataclass(frozen=True)
 class TimelapsePreset:
+    """同时配置间隔、持续时间和输出类型的完整候选命令。"""
+
     interval_s: int
     duration_s: int
     outputs: OutputSelection
@@ -70,12 +65,13 @@ class TimelapsePreset:
 
 TIMELAPSE_PRESETS = {
     CameraModel.ACTION6: (
+        TimelapsePreset(30, 5400, OutputSelection.VIDEO, "manual", _cmd("6c", "0400002c01181500000000000000000000")),
         TimelapsePreset(30, 5400, OutputSelection.VIDEO_RAW, "manual", _cmd("6c", "0400032c01181500000000000000000000")),
         TimelapsePreset(30, 5400, OutputSelection.VIDEO_JPEG, "manual", _cmd("6c", "0400022c01181500000000000000000000")),
-        TimelapsePreset(25, 6000, OutputSelection.VIDEO, "auto", ACTION_TIMELAPSE_TIMING[25, 6000]),
+        TimelapsePreset(25, 6000, OutputSelection.VIDEO, "auto", _cmd("6c", "040000fa00701700000000000000000000")),
         TimelapsePreset(25, 6000, OutputSelection.VIDEO_RAW, "auto", _cmd("6c", "040003fa00701700000000000000000000")),
         TimelapsePreset(25, 6000, OutputSelection.VIDEO_JPEG, "auto", _cmd("6c", "040002fa00701700000000000000000000")),
-        TimelapsePreset(8, 1800, OutputSelection.VIDEO, "auto", ACTION_TIMELAPSE_TIMING[8, 1800]),
+        TimelapsePreset(8, 1800, OutputSelection.VIDEO, "auto", _cmd("6c", "0400005000080700000000000000000000")),
         TimelapsePreset(8, 1800, OutputSelection.VIDEO_RAW, "auto", _cmd("6c", "0400035000080700000000000000000000")),
         TimelapsePreset(8, 1800, OutputSelection.VIDEO_JPEG, "auto", _cmd("6c", "0400025000080700000000000000000000")),
     ),
@@ -105,8 +101,7 @@ def pending_commands(driver_id: str) -> tuple[PendingCommand, ...]:
     if model is CameraModel.ACTION6:
         return (PendingCommand(ACTION_APERTURE["f4.0"], "光圈命令有删除线，效力待核实"),
                 *(PendingCommand(command, "码率命令有删除线，效力待核实") for command in ACTION_BITRATE.values()),
-                PendingCommand(start_for(model, "camera_record"), "启动命令有删除线，效力待核实"),
-                PendingCommand(ACTION_TIMELAPSE_TIMING[30, 5400], "未说明输出类别"))
+                PendingCommand(start_for(model, "camera_record"), "启动命令有删除线，效力待核实"))
     return (PendingCommand(_cmd("8e", "010109000102"), "FOV 在全景模式中的适用范围未知"),
             PendingCommand(_cmd("8e", "010109000101"), "FOV 在全景模式中的适用范围未知"),
             PendingCommand(_cmd("8e", "010109000100"), "FOV 在全景模式中的适用范围未知"),
@@ -182,8 +177,7 @@ def settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValu
         exposure_settings = (_action_manual(800) if preset.exposure_mode == "manual"
                              else (_cmd("0x1e", "0100", test=True),))
         return (_cmd("e1", "02", test=True), ACTION_RESOLUTIONS["4k30"],
-                ACTION_TIMELAPSE_TIMING[preset.interval_s, preset.duration_s],
-                *exposure_settings, preset.command)
+                preset.command, *exposure_settings)
     exposure_settings = (_osmo_manual(800) if preset.exposure_mode == "manual" else
                          (_cmd("8e", "010100000100"), _cmd("1e", "0000")))
     return (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "3b"),
