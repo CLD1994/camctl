@@ -1,5 +1,6 @@
 """命令预期独立抄自交接表，保留参数大小写和前缀。"""
 from decimal import Decimal
+import shlex
 
 import pytest
 
@@ -82,6 +83,48 @@ def test_timelapse_uses_full_given_payload(driver, interval, duration, outputs, 
     if driver == "dji-osmo360-ii" and exposure["mode"] == "auto":
         assert ("8e", "010100000100") in [cmd[-2:] for cmd in settings]
         assert ("1e", "0000") in [cmd[-2:] for cmd in settings]
+
+
+@pytest.mark.parametrize("interval, duration, outputs, exposure, timing, output", [
+    (30, 5400, "video_raw", {"mode": "manual", "iso": 800},
+     "0400002c01181500000000000000000000", "0400032c01181500000000000000000000"),
+    (30, 5400, "video_jpeg", {"mode": "manual", "iso": 800},
+     "0400002c01181500000000000000000000", "0400022c01181500000000000000000000"),
+    (25, 6000, "video", {"mode": "auto"},
+     "040000fa00701700000000000000000000", "040000fa00701700000000000000000000"),
+    (25, 6000, "video_raw", {"mode": "auto"},
+     "040000fa00701700000000000000000000", "040003fa00701700000000000000000000"),
+    (25, 6000, "video_jpeg", {"mode": "auto"},
+     "040000fa00701700000000000000000000", "040002fa00701700000000000000000000"),
+    (8, 1800, "video", {"mode": "auto"},
+     "0400005000080700000000000000000000", "0400005000080700000000000000000000"),
+    (8, 1800, "video_raw", {"mode": "auto"},
+     "0400005000080700000000000000000000", "0400035000080700000000000000000000"),
+    (8, 1800, "video_jpeg", {"mode": "auto"},
+     "0400005000080700000000000000000000", "0400025000080700000000000000000000"),
+])
+def test_action_timelapse_preserves_complete_source_setting_order(
+        interval, duration, outputs, exposure, timing, output):
+    params = {"type": "action6_timelapse", "interval_s": interval,
+              "duration_s": duration, "outputs": outputs, "exposure": exposure}
+    exposure_commands = (
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0400",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2a 06",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 28 013C8000",
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
+    ) if exposure["mode"] == "manual" else (
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
+    )
+    expected = (
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
+        f"dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c {timing}",
+        *exposure_commands,
+        f"dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c {output}",
+    )
+    assert commands.settings_for("dji-action6", "camera_timelapse", params) == tuple(
+        tuple(shlex.split(command)) for command in expected)
 
 
 @pytest.mark.parametrize("driver, action, control, suffix", [
