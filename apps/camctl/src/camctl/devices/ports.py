@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, runtime_checkable
 
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, OPERATIONS
@@ -75,6 +75,8 @@ class ControlRequest:
     params: Mapping[str, Any]
     ticket: AttemptTicket | None = None
     timeout_s: Decimal | None = None
+    #: 多步启动在新设备派发前调用；None 返回值表示仍有原业务资格。
+    dispatch_check: Callable[[], str | None] | None = None
 
 
 @dataclass(frozen=True)

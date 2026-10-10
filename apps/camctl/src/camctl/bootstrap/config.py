@@ -518,6 +518,13 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
         _require_nonempty_str(declaration.get("kind"), f"devices.{device_id}.kind")
         _require_nonempty_str(declaration.get("driver"), f"devices.{device_id}.driver")
         normalized = dict(declaration)
+        if "adb" in normalized:
+            adb = _take(normalized["adb"], f"devices.{device_id}.adb", ("serial",))
+            serial = adb.get("serial")
+            _require_nonempty_str(serial, f"devices.{device_id}.adb.serial")
+            if serial.startswith("-") or "\0" in serial:
+                raise ConfigError(f"devices.{device_id}.adb.serial 必须是明确的 ADB serial")
+            normalized["adb"] = dict(adb)
         if "recording" in normalized:
             normalized["recording"] = _validated_recording(
                 device_id, normalized["recording"])

@@ -229,6 +229,24 @@ def _photo_driver() -> dict:
     }
 
 
+@pytest.mark.parametrize("model", ["dji-action6", "dji-osmo360-ii"])
+def test_installed_and_checkout_cli_have_same_pending_camera_catalog(installed, model):
+    config = installed.deploy / f"{model}.toml"
+    config.write_text(f'[devices.cam-1]\nkind = "camera"\ndriver = "{model}"\n'
+                      '[devices.cam-1.adb]\nserial = "explicit-serial"\n', encoding="utf-8")
+    args = ["-m", "camctl", "describe", "--config", str(config)]
+    packaged = _run([str(installed.python), *args], cwd=installed.deploy, env=_clean_environment())
+    checkout_environment = _clean_environment()
+    checkout_environment["PYTHONPATH"] = str(PROJECT_DIR / "src")
+    checkout = _run([sys.executable, *args], cwd=installed.deploy, env=checkout_environment)
+    document = json.loads(packaged.stdout)
+    assert document == json.loads(checkout.stdout)
+    assert document["devices"] == [{"device_id": "cam-1", "driver_id": model, "actions": []}]
+    with zipfile.ZipFile(installed.wheel) as archive:
+        assert "camctl/devices/drivers/adb_cameras/registration.py" in archive.namelist()
+        assert "camctl/devices/drivers/adb_cameras/driver.py" in archive.namelist()
+
+
 def test_distribution_works_outside_repository(installed: _Installed) -> None:
     """安装后的发行物独立完成 init/describe/submit 与设备替身 run。"""
     # 安装来源：包来自安装环境，不经源码仓库；包资源自包含可读。

@@ -1268,6 +1268,15 @@ def _save_activity(runtime: CaptureRuntime, action_id: int, **facts) -> None:
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
+def _capture_dispatch_check(runtime, action_id):
+    """每次新设备派发前重新读取当前取消和原动作窗口。"""
+    from camctl.scheduling.resources import recheck_dispatch
+
+    current = runtime.action(action_id)
+    return recheck_dispatch(canceled=bool(current["cancel_requested"]),
+        window=runtime.window_of(current), trusted_wall_now=runtime.wall_us()).reason
+
+
 async def _control_call(runtime: CaptureRuntime, action, operation: str,
                         confirmed_observation: str,
                         activity_facts=None) -> HandlerOutcome:
@@ -1296,6 +1305,7 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         binding=_binding(action),
         params=action["effective_params_json"],
         ticket=ticket, timeout_s=_start_call_timeout(action),
+        dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
     if result.outcome is not None:
@@ -1323,11 +1333,17 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     observation = None if captured_facts is None else ActivityObservationSave(
         action_id=action["id"], occurred_at=returned_at,
         dispatch_state=int(_DISPATCH_STATE.SUCCESS_RETURNED), **captured_facts)
+    if outcome.effect is EffectState.NO_EFFECT:
+        observation = ActivityObservationSave(action["id"], returned_at,
+            dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED
+                if outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+                else _DISPATCH_STATE.REJECTED_WITHOUT_EFFECT))
     try:
         if result.error is not None:
             runtime.finish(
                 ticket, outcome, end_run=RunOutcome.FAILED,
-                run_error=outcome.error, occurred_at=returned_at, returned_ns=returned_ns)
+                run_error=outcome.error, activity=observation,
+                occurred_at=returned_at, returned_ns=returned_ns)
         elif confirmed:
             runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
                 activity=observation, occurred_at=returned_at, returned_ns=returned_ns,
@@ -1375,7 +1391,9 @@ def _prepare_recording_start_result(runtime, pending, preparation):
     elif outcome.effect is EffectState.NO_EFFECT:
         observation = ActivityObservationSave(
             action_id, dispatch.confirmed_at,
-            dispatch_state=int(_DISPATCH_STATE.REJECTED_WITHOUT_EFFECT))
+            dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED
+                if outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+                else _DISPATCH_STATE.REJECTED_WITHOUT_EFFECT))
     failure = None
     expiration = None
     end_run = RunOutcome.SUCCEEDED if dispatch.confirmed else None
@@ -1537,7 +1555,8 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
         async def start(self, ticket):
             result = await runtime.driver.control(ControlRequest(
                 "start_recording", _binding(action), action["effective_params_json"],
-                ticket=ticket, timeout_s=runtime.start_config.timeout_s))
+                ticket=ticket, timeout_s=runtime.start_config.timeout_s,
+                dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"])))
             received_at, anchor_ns = runtime.wall_us(), runtime.monotonic_ns()
             outcome, confirmed = _operation_outcome(result, "start_confirmed")
             self.dispatch = StartDispatch(
@@ -3288,6 +3307,7 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         attempt = context.last_attempt(f"start/{action_id}")
         if attempt is None:
             return
+        action = context.action(action_id)
     if _settle_unstarted_attempt(context, action, attempt):
         context.timelapse_deadlines.pop(action_id, None)
         return

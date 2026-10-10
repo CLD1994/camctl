@@ -24,7 +24,7 @@ register_cancellation_guards()
 pytestmark = pytest.mark.asyncio
 
 
-def _cancel(owned, action_id, *, origin_id=50, mode=CancelApplyMode.WITH_STOP):
+def _cancel(owned, action_id, *, origin_id=50, mode=CancelApplyMode.WITH_STOP, occurred_at=_NOW):
     from camctl.persistence.transaction import row_facts
 
     origin = row_facts(owned.connection, "actions", action_id)
@@ -38,7 +38,7 @@ def _cancel(owned, action_id, *, origin_id=50, mode=CancelApplyMode.WITH_STOP):
         "INSERT INTO cancel_items (id, action_id, target_action_id, selection_basis,"
         " status, cancellation_effect) VALUES (?, ?, ?, 1, 1, 1)", (origin_id + 41, origin_id, action_id))
     result = CancellationRepository().apply_cancel_target(
-        ApplyCancelTarget(origin_id + 41, mode, _NOW), new_operation_key(), owned)
+        ApplyCancelTarget(origin_id + 41, mode, occurred_at), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
 
 

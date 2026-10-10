@@ -6,10 +6,14 @@ import hashlib
 import os
 import shlex
 import sys
+import time
 
 import pytest
 
 from camctl.devices.bindings import DeviceBinding
+from camctl.devices.drivers.adb_cameras.commands import CameraModel
+from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
+from camctl.devices.ports import ControlRequest
 from camctl.devices.drivers.adb_cameras.filesystem import (
     AdbFilesystem, DirectoryRequest, ShellFileTools,
 )
@@ -18,6 +22,7 @@ from camctl.devices.file_identity import FileIdentity
 from camctl.devices.read_session import SourceFile
 from camctl.operations.models import AttemptTicket
 from camctl.operations.process import LocalExit, RawToolOutcome, ToolSpec
+from .adb_camera_fixtures import software_contract
 
 pytestmark = pytest.mark.asyncio
 BINDING = DeviceBinding("cam-1", "dji-action6")
@@ -133,6 +138,39 @@ async def test_metadata_and_source_digest_come_from_remote_tool(tmp_path):
     assert metadata.error is digest.error is None
     assert metadata.value == 21
     assert digest.value == hashlib.sha256(b"remote source content").hexdigest()
+
+
+async def test_concrete_driver_file_ports_preserve_original_identity_and_content(tmp_path):
+    content = b"camera-source" * 100000
+    path, other = tmp_path / "source ' \n.mp4", tmp_path / "keep.mp4"
+    path.write_bytes(content)
+    other.write_bytes(b"keep")
+    channel = LocalAdbChannel()
+    driver = AdbCameraDriver(software_contract(CameraModel.ACTION6), {
+        "cam-1": {"driver": CameraModel.ACTION6, "adb": {"serial": "serial-1"}}}, channel,
+        terminate_grace_s=Decimal("1"), monotonic_ns=time.monotonic_ns)
+    directory = await driver.read_directory(DirectoryRequest(BINDING, (str(tmp_path),), None, 128, Decimal("5")), stop=Stop())
+    assert directory.error is None and {entry.path for entry in directory.page.items} == {str(path), str(other)}
+    locator = _identity(path).as_json()
+    digest = await driver.digest(ControlRequest("digest", BINDING, {"file_id": "9", "size_bytes": len(content), "locator": locator}))
+    assert digest.error is None and digest.observations[0].data == {
+        "file_id": "9", "sha256": hashlib.sha256(content).hexdigest()}
+    session = await driver.open_read(SourceFile("9", locator, len(content)), 65535,
+        AttemptTicket(1, "read", "9", "copy/9", 1), idle_timeout_s=Decimal("5"))
+    chunks = bytearray()
+    while True:
+        chunk = await asyncio.to_thread(session.read_chunk, 65536)
+        assert chunk.error is None
+        chunks.extend(chunk.data or b"")
+        if chunk.eof:
+            break
+    end = await session.wait_stopped()
+    assert end.stopped and end.error is None and chunks == content[65535:]
+    assert path.read_bytes() == content
+    deleted = await driver.delete(ControlRequest("delete_file", BINDING, {"locator": locator},
+        AttemptTicket(1, "delete", "12", "delete/12", 2), Decimal("5")))
+    assert deleted.error is None and deleted.observations[0].data == {"cleanup_item_id": "12"}
+    assert not path.exists() and other.read_bytes() == b"keep"
 
 
 async def test_missing_source_retains_access_error_without_host_digest(tmp_path):
