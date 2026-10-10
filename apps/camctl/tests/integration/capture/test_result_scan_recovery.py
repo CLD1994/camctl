@@ -50,7 +50,7 @@ def _resumed(owned, runtime, horizon):
     return resumed
 
 
-async def _interrupted(tmp_path, *, maximum=1, terminal=False,
+async def _interrupted(tmp_path, *, maximum=1, terminal=False, finalized=None,
                        consumer="record", completion=False, first_entries=None):
     owned, runtime, action_id, handler = await consumer_world(tmp_path, consumer,
         catalog=DeviceCompletionCatalog() if completion else None)
@@ -64,7 +64,8 @@ async def _interrupted(tmp_path, *, maximum=1, terminal=False,
             entered.set()
             await asyncio.Future()
         actual = _actual(request.ticket, entries=entries,
-            next_cursor=None if terminal else _CURSOR, finalized=terminal)
+            next_cursor=None if terminal else _CURSOR,
+            finalized=terminal if finalized is None else finalized)
         if completion:
             observed, = actual.observations
             actual = replace(actual, observations=(DeviceObservation(observed.type, observed.version,
@@ -354,5 +355,88 @@ async def test_saved_terminal_page_reuses_actual_return_and_time_without_query(t
         assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3,)
         assert runtime.capture.read_result_page(original.ref, owned) == original
         assert driver.list_results.await_count == 1
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("first,consumer", [
+    ("partial", "photo"), ("partial", "record"), ("partial", "timelapse"), ("partial", "cancel"),
+    ("returned", "photo"), ("returned", "record"), ("returned", "timelapse"),
+])
+async def test_new_round_interrupted_before_first_return_keeps_previous_v2_files(tmp_path, first, consumer):
+    owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path,
+        consumer=consumer, maximum=2, terminal=first == "returned", finalized=False)
+    entered = asyncio.Event()
+    async def unread(request, batch):
+        assert request.ticket.run_id == original.ref.ticket.run_id
+        assert request.ticket.attempt_id == 2 and "cursor" not in request.params
+        entered.set()
+        await asyncio.Future()
+    driver.list_results.side_effect = unread
+    async def advance():
+        # 完整实际返回但集合未定的旧轮先交还消费者；下一次推进开新轮。
+        for _ in range(2):
+            await capture_handler(handler)(action_id, runtime)
+            assert runtime.action(action_id)["status"] == 2
+    path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    try:
+        task = asyncio.create_task(advance())
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert owned.connection.execute("SELECT attempt_no,result_first_page_event_id FROM operation_attempts"
+            " WHERE run_id=? ORDER BY attempt_no", (original.ref.ticket.run_id,)).fetchall() == [
+                (1, original.ref.event_id), (2, None)]
+        horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+        owned.connection.close()
+        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+        resumed = _resumed(owned, runtime, horizon)
+        await capture_handler(handler)(action_id, resumed)
+        assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?",
+            (original.ref.ticket.run_id,)).fetchone() == (2,)
+        assert owned.connection.execute("SELECT attempt_no,status FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
+            (original.ref.ticket.run_id,)).fetchall() == [
+                (1, int(enum_for("operation_attempts.status").UNKNOWN) if first == "partial" else 2),
+                (2, int(enum_for("operation_attempts.status").UNKNOWN))]
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (
+            int(enum_for("actions.status").CANCELED) if consumer == "cancel" else 4,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs WHERE source_action_id=?", (action_id,)).fetchone() == (1,)
+        assert owned.connection.execute("SELECT source_action_id,completion_state FROM device_files").fetchone() == (action_id, 3)
+        assert resumed.capture.read_result_page(original.ref, owned) == original
+        assert driver.list_results.await_count == (3 if first == "partial" else 2)
+    finally:
+        owned.connection.close()
+
+
+async def test_committed_attempt_without_file_facts_restores_pages_before_new_query(tmp_path):
+    class InterruptedFileSave(CaptureRepository):
+        def save_file_ownership(self, request, key, owned):
+            raise ConsistencyError("原文件事实保存前中断")
+    owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path, maximum=2)
+    path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    runtime.capture = InterruptedFileSave()
+    try:
+        with pytest.raises(ConsistencyError):
+            await asyncio.wait_for(capture_handler(handler)(action_id, runtime), 5)
+        assert owned.connection.execute("SELECT status FROM operation_attempts WHERE run_id=?",
+            (original.ref.ticket.run_id,)).fetchone() == (int(enum_for("operation_attempts.status").UNKNOWN),)
+        assert owned.connection.execute("SELECT source_action_id FROM device_files").fetchone() == (None,)
+        owned.connection.close()
+        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+        resumed = _resumed(owned, runtime, runtime.recovery_max_event_id)
+        async def complete(request, batch):
+            assert request.ticket.attempt_id == 2
+            assert owned.connection.execute("SELECT source_action_id,completion_state FROM device_files").fetchone() == (action_id, 3)
+            return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_entry("a")], finalized=True))
+        driver.list_results.side_effect = complete
+        resumed.results = DriverResultListing(driver, _BINDING, resumed.evidence)
+        await capture_handler(handler)(action_id, resumed)
+        assert owned.connection.execute("SELECT status FROM actions").fetchone() == (3,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (1,)
+        assert resumed.capture.read_result_page(original.ref, owned) == original
+        assert driver.list_results.await_count == 3
     finally:
         owned.connection.close()

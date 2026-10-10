@@ -3629,6 +3629,22 @@ def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRou
             set_finalized=False if partial_recovery else last.page.set_finalized,
             completion_evidence=None if completion is None else completion.page.completion_evidence,
             completion_page=None if completion is None else completion.ref)
+    if not actual.observations:
+        # 新轮首批尚未返回时，原文件子责任仍属于前轮可靠页。
+        # 这些页只用于文件事实，不构成本轮完整扫描或集合保证。
+        with closing(runtime.owned.connection.execute(
+            "SELECT attempt_no FROM operation_attempts WHERE run_id=? AND attempt_no<?"
+            " AND result_last_page_event_id IS NOT NULL ORDER BY attempt_no DESC LIMIT 1",
+            (ticket.run_id, ticket.attempt_id))) as cursor:
+            previous = cursor.fetchone()
+        if previous is not None:
+            previous_ticket = replace(ticket, attempt_id=previous[0])
+            source = runtime.capture.read_last_result_page(previous_ticket, runtime.owned)
+            if source is None:
+                raise ConsistencyError("原文件责任缺少已保存的前轮结果页")
+            return ListingRound(ListingPhase.CLOSED,
+                SavedResultEntries(runtime.capture, runtime.owned, source.ref),
+                ticket, actual, row[9], None, True)
     metadata = _result_file_metadata(runtime, ticket)
     previous, registered = _registered_result_files(runtime, action_id, metadata)
     previous_by_identity = {entry.identity: entry for entry in previous}
@@ -3701,6 +3717,17 @@ async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRoun
             return ListingRound(ListingPhase.IN_FLIGHT)
         # 原页发现的文件可能尚未保存归属或完成事实，必须先消费。
         _register_listing(runtime, action_id, _saved_result_listing(runtime, action_id))
+    elif in_flight is not None:
+        # 原尝试已经结束时，分页文件子责任仍可能尚未可靠保存。
+        # 先恢复这些原事实，再允许新轮取得设备结果。
+        ticket = _original_ticket(runtime, responsibility, "result")
+        with closing(runtime.owned.connection.execute(
+            "SELECT 1 FROM operation_attempts WHERE run_id=?"
+            " AND result_last_page_event_id IS NOT NULL LIMIT 1",
+            (ticket.run_id,))) as cursor:
+            has_pages = cursor.fetchone() is not None
+        if has_pages:
+            _register_listing(runtime, action_id, _saved_result_listing(runtime, action_id))
     if runtime.retry_wait_remaining(responsibility, runtime.check_config.retry_interval_s,
                                     maximum=runtime.check_config.max_attempts) is not None:
         return ListingRound(ListingPhase.RETRY_WAIT)
