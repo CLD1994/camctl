@@ -406,7 +406,7 @@ uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests
 
 **建议文件：** 修改 `apps/client/src/shared/types.ts`、`capabilities.ts`、`protocol-validation.ts`；新增 `shared/json-pointer.ts`、`shared/video-size-estimate.ts`、`tests/unit/video-estimate-fixtures.ts`、`tests/unit/video-size-estimate.test.ts`、`tests/unit/json-pointer.test.ts`、`tests/integration/video-estimate-capabilities.test.ts`；复用或扩展 `tests/unit/protocol.test.ts` 中的既有加载回归及 `capture.test.ts` 中的拍摄回归。
 
-- [ ] 先用完整内存能力文档写单元测试，不在单元测试读取共同文件。下列测试构造器放在 `tests/unit/video-estimate-fixtures.ts` 并导出；它只为本函数提供输入，不维护另一份协议字段规则。
+- [x] 先用完整内存能力文档写单元测试，不在单元测试读取共同文件。下列测试构造器放在 `tests/unit/video-estimate-fixtures.ts` 并导出；它只为本函数提供输入，不维护另一份协议字段规则。
 
 ```ts
 import { loadCapabilities } from "../../src/shared/capabilities";
@@ -465,8 +465,8 @@ it("能力复制保留非整数帧数的原始词元并整份拒绝", () => {
 });
 ```
 
-- [ ] 工作目录为 `apps/client`，运行 `pnpm exec vitest run tests/unit/video-size-estimate.test.ts`，确认现有加载拒绝新字段或新增估算器尚未实现产生预期失败。
-- [ ] 注册根能力 Schema 到 `createProtocolValidator()`，使用该 Schema 执行完整外层结构校验，再做现有唯一性、参数 Schema 版本/引用/类型关联检查。移除被根 Schema 覆盖的手写外层完整字段清单；不要放宽其他字段。用 `cloneClientJson` 代替会丢词元的 `structuredClone`，或在克隆前完成等价精确校验并保留后续计算证据。
+- [x] 工作目录为 `apps/client`，运行 `pnpm exec vitest run tests/unit/video-size-estimate.test.ts`，确认现有加载拒绝新字段或新增估算器尚未实现产生预期失败。
+- [x] 注册根能力 Schema 到 `createProtocolValidator()`，使用该 Schema 执行完整外层结构校验，再做现有唯一性、参数 Schema 版本/引用/类型关联检查。移除被根 Schema 覆盖的手写外层完整字段清单；不要放宽其他字段。用 `cloneClientJson` 代替会丢词元的 `structuredClone`，或在克隆前完成等价精确校验并保留后续计算证据。
 
 ```ts
 // protocol-validation.ts，先登记既有资源再编译能力入口。
@@ -485,7 +485,7 @@ if (!check(copy)) throw new Error(validator.errorsText(check.errors));
 
 复用现有精确 `integer` 关键字，因此常量与查表中的 `frames` 校验仍有原父容器。非法路径由根 Schema 拒绝；不把参数路径缺失或表覆盖不全作为能力定义错误。
 
-- [ ] 实现标准指针解码与自身成员读取。可以将 `web/editing.ts` 的解码放入共享边界后重新导出；若不移动，仍须复用同一解码规则。不要直接以现有 `valueAt` 读取数组，因为它会读到 `length`。建议读取核心如下，解码还须先拒绝空路径、片段和非法 `~` 转义：
+- [x] 实现标准指针解码与自身成员读取。可以将 `web/editing.ts` 的解码放入共享边界后重新导出；若不移动，仍须复用同一解码规则。不要直接以现有 `valueAt` 读取数组，因为它会读到 `length`。建议读取核心如下，解码还须先拒绝空路径、片段和非法 `~` 转义：
 
 ```ts
 // segments 为已经验证并解码的 string[]；root 与 pointer 来自函数输入。
@@ -506,8 +506,8 @@ for (const [index, key] of segments.entries()) {
 
 单元测试分别验证 `/`、`/a~1b/~0x/0`、对象的 `"01"` 成员、数组合法0及非法 `01`/`-`/`length`/越界/空洞、自身 `__proto__` 成员、原型成员不可读取。合法语法不要求当前值存在；缺失与显式 `null` 分开。
 
-- [ ] 实现 `estimateVideoAction`：先判断视频动作，再按设备/动作/参数类型精确选择；无元数据先返回 `not_provided`；随后 `validateParams` 校验完整当前 `params`，不注入默认值；最后读取码率和数量。查表只接受字符串并执行 `Object.hasOwn(values, option)`。不存在、类型非法、表项缺失和计算失败分别返回对应原因及参数路径。
-- [ ] 为三种方法实现计算。普通时长为 `seconds`，预计帧数方法为 `frames / playback_fps`，间隔方法为 `capture_seconds / interval_seconds / playback_fps`；后者不取整。检查每个必要数值及输出为正且有限；读取帧数时同时检查 `originalNumberToken(parent, key, value)` 和 `mathematicalInteger`，无词元时才使用已知内存数字的整数判定。显示格式化独立于计算，采用 MB/GB，极小正数可显示为 `<0.01 MB`，不能显示为 `0 MB`。
+- [x] 实现 `estimateVideoAction`：先判断视频动作，再按设备/动作/参数类型精确选择；无元数据先返回 `not_provided`；随后 `validateParams` 校验完整当前 `params`，不注入默认值；最后读取码率和数量。查表只接受字符串并执行 `Object.hasOwn(values, option)`。不存在、类型非法、表项缺失和计算失败分别返回对应原因及参数路径。
+- [x] 为三种方法实现计算。普通时长为 `seconds`，预计帧数方法为 `frames / playback_fps`，间隔方法为 `capture_seconds / interval_seconds / playback_fps`；后者不取整。检查每个必要数值及输出为正且有限；读取帧数时同时检查 `originalNumberToken(parent, key, value)` 和 `mathematicalInteger`，无词元时才使用已知内存数字的整数判定。显示格式化独立于计算，采用 MB/GB，极小正数可显示为 `<0.01 MB`，不能显示为 `0 MB`。
 
 ```ts
 // 经引用与数值检查后才运行；seconds 和 mb 均必须通过正的有限数检查。
@@ -518,9 +518,9 @@ if (![playbackSeconds, mb, sizeBytes].every(v => Number.isFinite(v) && v > 0))
 return { kind: "ready", bitrateMbps, playbackSeconds, sizeBytes };
 ```
 
-- [ ] 补齐纯函数分区，不用被测函数生成期望：录像 `130 × 60 / 8 = 975 MB`；延时 `6000 / 25 / 30 = 8 秒、175 MB`；非整除 `10 / 3 / 30 = 1/9 秒`；帧数 `240 / 30 = 8 秒`；小数 Mbps；直接成片时长的延时；全部数量来源。覆盖完整参数 Schema 的条件分支、可选值省略且带 `default`、显式 `null`/零/空字符串、查表大小写/空白/原型名、同名类型跨设备/动作、有限输入计算溢出或下溢。结果无效时不能携带可渲染的旧数字。
-- [ ] 在 `tests/integration/video-estimate-capabilities.test.ts` 读取共同 `cases.json`，通过真实 `parseJson` → `loadCapabilities` 验证每个 `load_valid`；合法演示的真实参数校验与估算结果也须通过。无效条目必须拒绝整份目录，后端 `Application` 保留旧说明和诊断的行为复用既有整份重载规则。
-- [ ] 在 `apps/client` 运行以下命令，结构与旧功能回归一并通过：
+- [x] 补齐纯函数分区，不用被测函数生成期望：录像 `130 × 60 / 8 = 975 MB`；延时 `6000 / 25 / 30 = 8 秒、175 MB`；非整除 `10 / 3 / 30 = 1/9 秒`；帧数 `240 / 30 = 8 秒`；小数 Mbps；直接成片时长的延时；全部数量来源。覆盖完整参数 Schema 的条件分支、可选值省略且带 `default`、显式 `null`/零/空字符串、查表大小写/空白/原型名、同名类型跨设备/动作、有限输入计算溢出或下溢。结果无效时不能携带可渲染的旧数字。
+- [x] 在 `tests/integration/video-estimate-capabilities.test.ts` 读取共同 `cases.json`，通过真实 `parseJson` → `loadCapabilities` 验证每个 `load_valid`；合法演示的真实参数校验与估算结果也须通过。无效条目必须拒绝整份目录，后端 `Application` 保留旧说明和诊断的行为复用既有整份重载规则。
+- [x] 在 `apps/client` 运行以下命令，结构与旧功能回归一并通过：
 
 ```powershell
 pnpm exec vitest run tests/unit/video-size-estimate.test.ts tests/unit/json-pointer.test.ts tests/unit/protocol.test.ts tests/unit/capture.test.ts
@@ -528,7 +528,7 @@ pnpm exec vitest run tests/integration/video-estimate-capabilities.test.ts tests
 pnpm run typecheck
 ```
 
-- [ ] 审计所有元数据读取点、复制点和共享路径调用者；独立评审精度、作用域和无默认值分区，提交本任务变更，建议提交信息为 `feat: 计算拍摄视频大小估算`。
+- [x] 审计所有元数据读取点、复制点和共享路径调用者；独立评审精度、作用域和无默认值分区，提交本任务变更，建议提交信息为 `feat: 计算拍摄视频大小估算`。
 
 ## 任务 4：编辑状态、能力观察和界面展示
 

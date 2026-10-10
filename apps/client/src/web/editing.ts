@@ -6,6 +6,8 @@ import {
   rememberNumberToken,
 } from "../shared/json";
 import { isObject } from "../shared/validation";
+export { decodeJsonPointer as pointerPath } from "../shared/json-pointer";
+import { decodeJsonPointer as pointerPath } from "../shared/json-pointer";
 import type { DraftContent, ExportedRequest } from "../server/models";
 import type { ReportPlan } from "../shared/types";
 import {
@@ -42,16 +44,6 @@ export function pointer(path: Path): string {
       .map((p) => String(p).replace(/~/g, "~0").replace(/\//g, "~1"))
       .join("/")
   );
-}
-/** JSON Pointer 只解码标准转义；无效路径不猜测对应字段。 */
-export function pointerPath(value: string): Path {
-  if (value === "") return [];
-  if (!value.startsWith("/") || /~(?:[^01]|$)/.test(value))
-    throw new Error("未完成输入路径不是有效的 JSON Pointer，请保留原文核对");
-  return value
-    .slice(1)
-    .split("/")
-    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
 }
 function prepareActionListChange(content: DraftContent, text?: string) {
   if (Object.hasOwn(content.pending ?? {}, ""))
