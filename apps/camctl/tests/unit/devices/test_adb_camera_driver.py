@@ -85,9 +85,9 @@ async def test_control_applies_settings_before_one_actual_start(model):
     request = _request(model)
     result = await _driver(model, transport).control(request)
     expected = (*settings_for(model, "camera_record", request.params), start_for(model, "camera_record"))
-    scripts = [shlex.split(call.argv[4])[2] for call in transport.calls]
+    scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
     assert scripts == [shlex.join(command) for command in expected]
-    assert all(call.argv[:4] == ("adb", "-s", "serial-1", "exec-out") for call in transport.calls)
+    assert all(call.argv[:5] == ("adb", "-s", "serial-1", "shell", "-T") for call in transport.calls)
     assert result.outcome.status is AttemptStatus.SUCCEEDED
     assert result.outcome.effect is EffectState.CONFIRMED
     assert result.observations == (DeviceObservation("start_confirmed", 1, {"activity_id": "7"}),)

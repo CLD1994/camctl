@@ -63,7 +63,7 @@ class AdbCameraDriver:
             raise CapabilityNotDeclaredError(f"驱动未声明 {kind.value} 响应契约")
         command = factory(request, serial, argv, batch)
         if (command.binding != request.binding or command.operation != request.ticket.operation
-                or command.argv[:4] != ("adb", "-s", serial, "exec-out")
+                or command.argv[:5] != ("adb", "-s", serial, "shell", "-T")
                 or (argv is not None and command.argv != argv)
                 or command.evidence is not self.contract.evidence):
             raise ValueError("命令映射改变原绑定、操作、命令或证据登记")

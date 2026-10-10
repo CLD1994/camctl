@@ -138,10 +138,23 @@ Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、�
 | `shell -T` 执行上述脚本 | 本地退出码为 `7`，两个标记分别进入 stdout、stderr | 本次受控退出码正确传回，两个输出流分开 |
 | `shell -T` 输出七个已知字节 `00 01 0a 0d 7f 80 ff`，并另输出 stderr 标记 | 本地退出码为 `0`；stdout 为 `00 01 0d 0a 0d 7f 80 ff`；stderr 标记正确 | LF 被扩展为 CRLF，原始字节比较失败；该 Windows 输出不能作为原样媒体字节 |
 | `exec-out` 执行同一字节脚本 | 本地退出码为 `0`；stdout 为原七个字节与 stderr 标记的拼接；stderr 为空 | 测试字节原样保留，输出流仍然合并；不补造远端退出事实 |
+| 目录分页中的 `awk`，以及单独将 `a\0b\0` 交给同一 `RS`、`ORS` 设置 | 目录帧缺少完整路径和末尾 NUL；受控输入得到 `aEND`，本地退出码均为 `0`，stderr 均为空 | 相机 `awk` 的这组 NUL 处理不满足目录帧契约；退出 `0` 不证明响应完整 |
+| 将 `a\0b\0` 交给 `IFS= read -r -d ''` 循环，并逐项用 `printf` 输出 | 本地退出码为 `0`；stdout 精确为 `61 00 62 00`；stderr 为空 | 相机已有 shell 支持本次受控 NUL 记录读取；完整目录分页仍待核实 |
 
 内置 `/mnt/media_rw/emulated/DCIM` 是实际存在的目录；当次原始 `find -print0` 输出包含七条路径（两个 MP4、两个 LRF、三个 JPG），NUL 分隔且有末尾分隔符。SD 候选目录 `/mnt/media_rw/sd/DCIM` 明确不存在，不能按可用空目录处理。所列工具均能找到，其所需选项、正式分页、文件长度、摘要和完整读取尚未核实。
 
 上述结果不证明拍摄启动、停止、文件写完或本次产物集合齐备，也不代替 OSMO 360 II 和 ARM Linux 的核验。驱动通道、实际控制响应、固件及完整设备验收继续由[双相机实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
+
+文件工具适配验证（2026-10-10，Linux x86_64 容器，Python 3.11.16）：共享调用使用 `shell -T`，保留远端退出和独立 stderr；目录脚本通过排序中的私有游标记录定位，再按 NUL 读取路径，只有读到私有结束记录才输出 `END`。测试替身在 ADB 通道边界使用支持该 shell 接口的 Bash 执行原脚本，文件访问、受管进程及帧解析均使用生产实现。
+
+| 软件验证范围 | 实际结果 |
+| --- | --- |
+| 全部单元测试 | 4263 项通过、1 项跳过；2 条既有 asyncio 标记警告 |
+| devices 组件集成完整目录 | 93 项通过；覆盖六种游标分区、空目录、页容量边界、特殊文件名，以及列举、排序和记录读取失败 |
+| bootstrap 的 `test_tool_cancellation.py`、`test_recording_stop.py`、`test_timelapse_finish.py` | 16 项通过；覆盖实际工具收场、录像停止与延时完成 |
+| 根 `test_real_camera_demo_roundtrip.py` 与 `test_camctl_c_module_roundtrip.py` | 四条双相机软件演示链和三条原 C host 链共同运行，7 项通过 |
+
+本次软件门禁不替代真机分页和 ARM Linux 字节核验；候选相机能力仍未启用。诊断保存在工作区忽略的 `.superpowers/sdd/2026-10-10-camctl-real-camera-demo/t9-*.log`。
 
 ## 部署交接与待核验项
 

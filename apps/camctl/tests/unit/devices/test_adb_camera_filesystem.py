@@ -92,8 +92,8 @@ def test_shell_command_preserves_one_remote_script_argument():
     script = "printf '%s' " + shlex.quote("a 'quote'\nline; literal")
     argv = shell_argv("serial-1", script)
     assert argv[:3] == ("adb", "-s", "serial-1")
-    assert argv[3] == "exec-out"
-    assert shlex.split(argv[4]) == ["sh", "-c", script]
+    assert argv[3:5] == ("shell", "-T")
+    assert shlex.split(argv[5]) == ["sh", "-c", script]
 
 
 @pytest.mark.parametrize("serial", [None, "", "-invalid", "a\0b"])

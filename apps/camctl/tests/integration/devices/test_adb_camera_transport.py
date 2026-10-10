@@ -16,7 +16,7 @@ from camctl.devices.drivers.adb_cameras.commands import CameraModel
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.ports import ControlRequest
 from camctl.devices.drivers.adb_cameras.filesystem import (
-    AdbFilesystem, DirectoryRequest, ShellFileTools,
+    AdbFilesystem, DirectoryCursor, DirectoryRequest, ShellFileTools,
 )
 from camctl.devices.drivers.adb_cameras.transport import AdbTransport
 from camctl.devices.file_identity import FileIdentity
@@ -50,10 +50,11 @@ class LocalAdbChannel:
 
     async def _run(self, spec, stop, stdout_sink=None):
         self.calls.append(spec)
-        assert spec.argv[:4] == ("adb", "-s", "serial-1", "exec-out")
-        remote = shlex.split(spec.argv[4])
+        assert spec.argv[:5] == ("adb", "-s", "serial-1", "shell", "-T")
+        remote = shlex.split(spec.argv[5])
         assert remote[:2] == ["sh", "-c"] and len(remote) == 3
-        local = replace(spec, argv=tuple(remote))
+        # 相机已核实的 sh 支持 read -d；容器 dash 不支持，以已有 Bash 执行原脚本。
+        local = replace(spec, argv=("bash", *remote[1:]))
         if stdout_sink is not None:
             return await AdbTransport().run_stream(local, stop, stdout_sink)
         return await AdbTransport().run(local, stop)
@@ -107,7 +108,8 @@ async def test_recursive_paging_preserves_old_new_and_special_paths(tmp_path):
     empty.mkdir(); root.mkdir()
     (root / "new-dir").mkdir()
     paths = [root / "old.mp4", root / "a 'quoted'.DNG", root / "b\nnewline.jpg",
-             root / "new-dir" / "new.mp4"]
+             root / "c\rreturn.jpg", root / "d\\backslash * ?.jpg",
+             root / "e trailing \t", root / "new-dir" / "new.mp4"]
     for path in paths:
         path.write_bytes(b"data")
     fs = _filesystem()
@@ -126,12 +128,87 @@ async def test_recursive_paging_preserves_old_new_and_special_paths(tmp_path):
     assert all(len(page.items) <= 2 for page in pages)
 
 
+@pytest.mark.parametrize("after, names, more", [
+    (None, ["a.mp4", "b.mp4"], True),
+    ("0.mp4", ["a.mp4", "b.mp4"], True),
+    ("a.mp4", ["b.mp4", "c.mp4"], True),
+    ("bb.mp4", ["c.mp4", "d.mp4"], False),
+    ("d.mp4", [], False),
+    ("z.mp4", [], False),
+])
+async def test_directory_paging_with_awk_that_cannot_preserve_nul(tmp_path, monkeypatch, after, names, more):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    awk = tools / "awk"
+    # 隔离设备工具边界，复现实机输入/输出字符串在首个 NUL 截断的返回。
+    awk.write_text(f"#!{sys.executable}\nimport pathlib, sys\n"
+                   "data = pathlib.Path(sys.argv[-1]).read_bytes()\n"
+                   "sys.stdout.buffer.write(data.split(b'\\0', 1)[0] + b'END')\n")
+    awk.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tools) + os.pathsep + os.environ["PATH"])
+    root = tmp_path / "files"
+    root.mkdir()
+    for name in ("a.mp4", "b.mp4", "c.mp4", "d.mp4"):
+        (root / name).write_bytes(b"source")
+    cursor = None if after is None else DirectoryCursor(BINDING, (str(root),), 0, str(root / after))
+    result = await _filesystem().read_directory(
+        DirectoryRequest(BINDING, (str(root),), cursor, 2, Decimal("5")), stop=Stop())
+    assert result.error is None, result.error
+    assert [entry.path for entry in result.page.items] == [str(root / name) for name in names]
+    if more:
+        assert result.page.next_cursor == DirectoryCursor(BINDING, (str(root),), 0, str(root / names[-1]))
+    else:
+        assert result.page.next_cursor is None
+
+
 async def test_directory_tool_failure_is_not_a_reliable_empty_page(tmp_path):
     result = await _filesystem().read_directory(
         DirectoryRequest(BINDING, (str(tmp_path / "missing"),), None, 128, Decimal("5")), stop=Stop())
     assert result.page is None and result.error is not None
     assert result.outcome.exit.exit_code != 0
     assert result.outcome.stderr
+
+
+@pytest.mark.parametrize("readable_records", [0, 1])
+async def test_directory_record_read_failure_is_not_a_reliable_end(tmp_path, monkeypatch, readable_records):
+    root = tmp_path / "files"
+    root.mkdir()
+    (root / "a.mp4").write_bytes(b"source")
+    shell_environment = tmp_path / "shell-environment"
+    shell_environment.write_text(
+        "read_count=0\nread() {\n"
+        f"    if [ \"$read_count\" -ge {readable_records} ]; then\n"
+        "        printf 'record read failed' >&2; return 7\n"
+        "    fi\n"
+        "    read_count=$((read_count + 1))\n"
+        "    builtin read \"$@\"\n}\n")
+    # 在 shell 的记录读取边界注入明确失败，保留真实脚本、进程及两个输出通道。
+    monkeypatch.setenv("BASH_ENV", str(shell_environment))
+    result = await _filesystem().read_directory(
+        DirectoryRequest(BINDING, (str(root),), None, 2, Decimal("5")), stop=Stop())
+    assert result.page is None and result.error is not None
+    assert result.outcome.exit.exit_code == 7
+    assert result.outcome.stderr == b"record read failed"
+
+
+async def test_directory_sort_failure_keeps_actual_exit_and_diagnostic(tmp_path, monkeypatch):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    sort = tools / "sort"
+    sort.write_text(f"#!{sys.executable}\nimport sys\n"
+                    "sys.stdout.buffer.write(b'partial')\n"
+                    "sys.stderr.buffer.write(b'sort failed')\n"
+                    "sys.exit(9)\n")
+    sort.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tools) + os.pathsep + os.environ["PATH"])
+    root = tmp_path / "files"
+    root.mkdir()
+    (root / "a.mp4").write_bytes(b"source")
+    result = await _filesystem().read_directory(
+        DirectoryRequest(BINDING, (str(root),), None, 2, Decimal("5")), stop=Stop())
+    assert result.page is None and result.error is not None
+    assert result.outcome.exit.exit_code == 9
+    assert result.outcome.stderr == b"sort failed"
 
 
 async def test_metadata_and_source_digest_come_from_remote_tool(tmp_path):

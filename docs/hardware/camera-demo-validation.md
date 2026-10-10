@@ -29,7 +29,7 @@ py -3.11 collect_call.py action6/001-adb-version adb version
 py -3.11 collect_call.py action6/002-devices adb devices -l
 py -3.11 collect_call.py action6/003-model adb -s <serial> shell getprop ro.product.model
 py -3.11 collect_call.py action6/004-firmware adb -s <serial> shell getprop ro.build.display.id
-py -3.11 collect_call.py action6/005-tools adb -s <serial> shell 'for t in dji_mb_ctrl simulate_device sh mktemp find sort awk stat sha256sum dd rm test printf trap; do echo TOOL=$t; command -v $t || echo NOT_FOUND; done'
+py -3.11 collect_call.py action6/005-tools adb -s <serial> shell 'for t in dji_mb_ctrl simulate_device sh mktemp find sort stat sha256sum dd rm test printf trap read; do echo TOOL=$t; command -v $t || echo NOT_FOUND; done'
 ```
 
 将 `<serial>` 替换为实际设备标识；OSMO 的资料使用另一个目录。`getprop` 返回空值时，在观察记录中保存界面上显示的型号和固件，不补写推测值。工具存在只证明能找到该程序，其所需选项仍须实际核实。
@@ -51,7 +51,9 @@ py -3.11 collect_call.py action6/010-before-internal adb -s <serial> shell 'find
 py -3.11 collect_call.py action6/011-before-sd adb -s <serial> shell 'find /mnt/media_rw/sd/DCIM -type f -print0'
 ```
 
-远端 `find -print0` 使用 NUL 分隔，可以表达文件名中的空格、换行等字符；本地收到的路径字节是否原样保留，仍须按上节核实实际通道，不通过逐行文本代替原始路径。正式驱动的目录适配还需要核实 `sort -z`、`awk` 的 NUL 输入、`stat -c %s`、`sha256sum` 和 `dd` 的实际调用结果；缺少工具或选项时保留错误，供适配实现选择设备已有的工具组合。
+远端 `find -print0` 使用 NUL 分隔，可以表达文件名中的空格、换行等字符；本地收到的路径字节是否原样保留，仍须按上节核实实际通道，不通过逐行文本代替原始路径。正式驱动的目录适配使用 `sort -z` 和相机 shell 的 `IFS= read -r -d ''`；还需要核实 `stat -c %s`、`sha256sum` 和 `dd` 的实际调用结果。缺少工具或选项时保留错误，供适配实现选择设备已有的工具组合。
+
+分页试验直接使用具体文件适配生成的脚本，通过 `shell -T` 执行。核对版本头 `CAMCTL-DIRECTORY/1`、NUL 分隔路径、`MORE` 或 `END` 及末尾 NUL；后续页使用上页最后一个文件路径作为游标，直到收到 `END`。完整分页结果须与同一静止目录的原始列举一致；只收到首页不能证明全部文件已列出。
 
 ## 录像资料
 

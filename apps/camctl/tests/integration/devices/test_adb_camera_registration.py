@@ -108,7 +108,7 @@ async def test_driver_ports_use_original_ticket_and_explicit_capabilities(model,
         assert not calls
         return
     result = await (driver.stop(request) if operation == "stop" else driver.list_results(request, 128))
-    assert len(calls) == 1 and calls[0].argv[:4] == ("adb", "-s", "serial-1", "exec-out")
+    assert len(calls) == 1 and calls[0].argv[:5] == ("adb", "-s", "serial-1", "shell", "-T")
     assert calls[0].timeout_s == Decimal("5")
     assert result.outcome.effect is EffectState.CONFIRMED
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED

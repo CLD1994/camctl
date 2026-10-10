@@ -73,19 +73,41 @@ class ShellFileTools:
 
     def directory_script(self, root, after, batch):
         # 各命令分别检查退出；不能从管道最后一段的成功推断 find 成功。
-        select = ('BEGIN { RS="\\0"; ORS="\\0"; after=ENVIRON["CAMCTL_AFTER"]; '
-                  'batch=ENVIRON["CAMCTL_BATCH"]+0 } '
-                  '{ if (length($0) && (!length(after) || $0 > after)) { '
-                  'if (n < batch) { print $0; n++ } else { more=1; exit } } } '
-                  'END { print (more ? "MORE" : "END") }')
         return '\n'.join((
             'tmp=$(mktemp) || exit $?',
             'trap \'rm -f -- "$tmp" "$tmp.sorted"\' 0',
             f'find {shlex.quote(root)} -type f -print0 > "$tmp" || exit $?',
+            f'after={shlex.quote(after or "")}',
+            # 将游标一起排序，即使原文件已不存在，也能确定严格晚于游标的记录。
+            'seen_after=1',
+            'if [ -n "$after" ]; then',
+            '    seen_after=0',
+            '    printf \'%s\\000\' "$after" >> "$tmp" || exit $?',
+            'fi',
             'LC_ALL=C sort -z -- "$tmp" > "$tmp.sorted" || exit $?',
-            "printf 'CAMCTL-DIRECTORY/1\\000'",
-            f'CAMCTL_AFTER={shlex.quote(after or "")} CAMCTL_BATCH={batch} LC_ALL=C '
-            f'awk {shlex.quote(select)} "$tmp.sorted"',
+            # 空记录是私有结束标记；读取失败或意外 EOF 不能证明目录已读完。
+            'printf \'\\000\' >> "$tmp.sorted" || exit $?',
+            "printf 'CAMCTL-DIRECTORY/1\\000' || exit $?",
+            'count=0',
+            'while :; do',
+            "    IFS= read -r -d '' path || exit $?",
+            '    if [ -z "$path" ]; then',
+            '        [ "$seen_after" -eq 1 ] || exit 1',
+            "        printf 'END\\000' || exit $?",
+            '        break',
+            '    fi',
+            '    if [ "$path" = "$after" ]; then',
+            '        seen_after=1',
+            '        continue',
+            '    fi',
+            '    [ "$seen_after" -eq 1 ] || continue',
+            f'    if [ "$count" -ge {batch} ]; then',
+            "        printf 'MORE\\000' || exit $?",
+            '        break',
+            '    fi',
+            '    printf \'%s\\000\' "$path" || exit $?',
+            '    count=$((count + 1))',
+            'done < "$tmp.sorted"',
         ))
 
     def metadata_script(self, path):

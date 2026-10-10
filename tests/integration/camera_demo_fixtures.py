@@ -185,9 +185,9 @@ class WorldTransport:
         self.world = world
 
     def _script(self, spec):
-        assert spec.argv[:2] == ("adb", "-s") and spec.argv[3] == "exec-out"
+        assert spec.argv[:2] == ("adb", "-s") and spec.argv[3:5] == ("shell", "-T")
         assert spec.argv[2] in self.world.spec["devices"]
-        words = shlex.split(spec.argv[4])
+        words = shlex.split(spec.argv[5])
         assert words[:2] == ["sh", "-c"] and len(words) == 3
         return words[2]
 
@@ -197,7 +197,8 @@ class WorldTransport:
         if request is not None:
             output = self.world.call(spec.argv[2], *request)
             return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
-        local = replace(spec, argv=("sh", "-c", self._local_script(script)))
+        # 使用支持已核实 read -d 接口的 Bash，执行具体适配生成的原脚本。
+        local = replace(spec, argv=("bash", "-c", self._local_script(script)))
         raw = await AdbTransport().run(local, stop)
         if raw.output is not None and raw.output.startswith(b"CAMCTL-DIRECTORY/1\0"):
             raw = replace(raw, output=raw.output.replace(str(self.world.root).encode(), b""))
@@ -217,7 +218,7 @@ class WorldTransport:
                 (self.world.gates / "read-started").touch()
                 while not (self.world.gates / "release-read").exists():
                     await asyncio.sleep(0.01)
-        return await AdbTransport().run_stream(replace(spec, argv=("sh", "-c", self._local_script(script))), stop, gated_sink)
+        return await AdbTransport().run_stream(replace(spec, argv=("bash", "-c", self._local_script(script))), stop, gated_sink)
 
 
 def _contract(model, world):
@@ -250,7 +251,7 @@ def _contract(model, world):
     def factory(kind):
         def build(request, serial, argv, batch):
             argv = argv or shell_argv(serial, "software-results")
-            script = shlex.split(argv[4])[2]
+            script = shlex.split(argv[5])[2]
             world.requests[(serial, script)] = (request, kind, batch)
             op = request.ticket.operation
             return DeviceCommand(op, argv, request.binding, request.timeout_s, Decimal("1"), evidence,

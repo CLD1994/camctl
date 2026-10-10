@@ -18,4 +18,4 @@ def shell_argv(serial, script):
         raise ValueError("ADB 调用需要本次配置的明确 serial")
     if not isinstance(script, str) or not script or "\0" in script:
         raise ValueError("远端脚本必须是非空且不含 NUL 的文本")
-    return ("adb", "-s", serial, "exec-out", "sh -c " + shlex.quote(script))
+    return ("adb", "-s", serial, "shell", "-T", "sh -c " + shlex.quote(script))
