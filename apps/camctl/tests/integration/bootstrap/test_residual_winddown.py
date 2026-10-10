@@ -358,7 +358,8 @@ def _tracewrap(name, flow):
 
 def _run_session(deps, cfg, factory, *, trace=False):
     scheduling = capture_flow(factory)
-    residual = residual_flow(factory)
+    residual = residual_flow(factory, owns_device=scheduling.owns_device)
+    deps.background_flows = (scheduling,)
     if trace:
         scheduling = _tracewrap("scheduling", scheduling)
         residual = _tracewrap("residual", residual)

@@ -167,7 +167,9 @@ async def _save_photos(cfg, owned, context, driver):
         devices=cfg.devices, drivers=_registry(driver), results=results,
         staging=Path(cfg.paths.staging), wall_us=lambda: _NOW, monotonic_ns=lambda: 0,
         wait_config=lambda _action: CaptureWaitConfig(target_duration_ms=1000, driver_margin_ms=0))
-    await capture_flow(factory)(context)
+    capture = capture_flow(factory)
+    await capture(context)
+    await capture.settle()
     assert owned.connection.execute("SELECT status FROM actions ORDER BY id").fetchall() == [(3,), (3,)]
     assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
 
