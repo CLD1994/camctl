@@ -129,8 +129,8 @@ export declare function estimateDraftAction(
 
 **建议文件：** 修改 `protocol/schemas/capabilities.schema.json`、`scripts/check-protocol.mjs`、`scripts/check-protocol.test.mjs`、`protocol/README.md`、`docs/architecture/capabilities.md`；新增 `protocol/examples/video-size-estimate/capabilities.json`、`cases.json`、`README.md`。
 
-- [ ] 在 `cases.json` 保存数组条目，结构为 `{ "name": string, "json": string, "schema_valid": boolean, "encode_valid": boolean, "load_valid": boolean }`。`json` 为完整能力文档的原始文本，保留精确小数、指数和重复键反例；预期从规格独立给出。`schema_valid` 指普通解析后的外层结构检查；`encode_valid` 指 Python 精确解析与整份编码检查；`load_valid` 指客户端精确解析、外层结构和全部加载语义检查。合法整份演示文件包含批准设计中的录像与延时参数类型，并另外覆盖码率 `from` 和 `timelapse_frames`；所有数字明确用于虚构演示。
-- [ ] 增加结构规格测试，并先运行以确认新字段在现有 Schema 下被拒绝。结构测试只断言 `schema_valid`；任务 2检查 `encode_valid`，任务 3检查 `load_valid`。参数 Schema 的关联与唯一性在 Python 的 Catalog 导出链检查，在客户端加载链检查，不能把任意外部文档通过 Python 编码函数等同于经过 Catalog。不要把结构检查脚本的通过称为生产加载通过。
+- [x] 在 `cases.json` 保存数组条目，结构为 `{ "name": string, "json": string, "schema_valid": boolean, "encode_valid": boolean, "load_valid": boolean }`。`json` 为完整能力文档的原始文本，保留精确小数、指数和重复键反例；预期从规格独立给出。`schema_valid` 指普通解析后的外层结构检查；`encode_valid` 指 Python 精确解析与整份编码检查；`load_valid` 指客户端精确解析、外层结构和全部加载语义检查。合法整份演示文件包含批准设计中的录像与延时参数类型，并另外覆盖码率 `from` 和 `timelapse_frames`；所有数字明确用于虚构演示。
+- [x] 增加结构规格测试，并先运行以确认新字段在现有 Schema 下被拒绝。结构测试只断言 `schema_valid`；任务 2检查 `encode_valid`，任务 3检查 `load_valid`。参数 Schema 的关联与唯一性在 Python 的 Catalog 导出链检查，在客户端加载链检查，不能把任意外部文档通过 Python 编码函数等同于经过 Catalog。不要把结构检查脚本的通过称为生产加载通过。
 
 ```js
 // scripts/check-protocol.mjs 中已登记全部根 Schema 的 ajv 可直接使用。
@@ -146,7 +146,7 @@ for (const entry of estimateCases) {
 
 工作目录为仓库根，失败命令为 `node scripts/check-protocol.mjs`；新增合法条目的结构应失败，已有报告摘要和计划样例不能失败。
 
-- [ ] 在既有能力 Schema 的 `$defs` 中定义格式。下面的定义分别表达三个数量来源和三种时长方法，每个对象均填写精确的 `required` 与 `additionalProperties: false`。`frames` 分支中的常量和查表成员引用正整数定义，其他位置引用正数定义。
+- [x] 在既有能力 Schema 的 `$defs` 中定义格式。下面的定义分别表达三个数量来源和三种时长方法，每个对象均填写精确的 `required` 与 `additionalProperties: false`。`frames` 分支中的常量和查表成员引用正整数定义，其他位置引用正数定义。
 
 ```json
 {
@@ -241,7 +241,7 @@ for (const entry of estimateCases) {
 
 每个数量来源的三个分支分别为 `{source: "constant", value}`、`{source: "parameter", path}`、`{source: "lookup", path, values}`；`source` 使用 `const`，`path` 复用指针定义，查表为非空对象。参数引用的取值类型由任务 3在当前 `params` 上检查。不能要求路径命中 Schema `required`，不能要求查表覆盖全部合法选项。
 
-- [ ] 将字段作为 `parameter_type.properties` 的可选成员添加，不加入该对象的 `required`。在动作层限制只有 `camera_record` 和 `camera_timelapse` 可以声明；`camera_take_photo` 的各参数类型出现该字段时拒绝整份文档。保留既有公共 `$ref`、必填字段和空目录语义。
+- [x] 将字段作为 `parameter_type.properties` 的可选成员添加，不加入该对象的 `required`。在动作层限制只有 `camera_record` 和 `camera_timelapse` 可以声明；`camera_take_photo` 的各参数类型出现该字段时拒绝整份文档。保留既有公共 `$ref`、必填字段和空目录语义。
 
 ```json
 {
@@ -253,7 +253,7 @@ for (const entry of estimateCases) {
 }
 ```
 
-- [ ] 共同用例至少覆盖以下完整分区。所有出现的非法常量放入所有相关来源位置，不只验证固定码率。
+- [x] 共同用例至少覆盖以下完整分区。所有出现的非法常量放入所有相关来源位置，不只验证固定码率。
 
 | 分区 | 预期 |
 | --- | --- |
@@ -265,9 +265,9 @@ for (const entry of estimateCases) {
 | 路径为 `"/"`、`"/a~1b/~0x/0"`；部分查表；合法路径引用省略的可选参数 | 声明有效，当前参数能否估算另判。 |
 | 照片动作声明估算；重复对象成员；同一作用域重复标识 | 真实加载拒绝；不同设备或动作的同名类型有效。 |
 
-- [ ] 更新能力说明责任专题，定义可选字段、整份失败、用途和适用动作，并引用批准设计的公式与完整状态分类。其他专题只引用对应规则；共同样例 README 明确结构检查与真实加载的边界。
-- [ ] 从仓库根依次运行 `node scripts/check-protocol.mjs`、`node --test scripts/check-protocol.test.mjs`、`node scripts/check-doc-links.mjs`。预期结构正反例与已有协议检查通过，链接检查无新增缺失路径。
-- [ ] 独立评审 Schema 与共同预期的每个分区，提交本任务文件，建议提交信息为 `feat: 定义视频大小估算能力格式`。
+- [x] 更新能力说明责任专题，定义可选字段、整份失败、用途和适用动作，并引用批准设计的公式与完整状态分类。其他专题只引用对应规则；共同样例 README 明确结构检查与真实加载的边界。
+- [x] 从仓库根依次运行 `node scripts/check-protocol.mjs`、`node --test scripts/check-protocol.test.mjs`、`node scripts/check-doc-links.mjs`。预期结构正反例与已有协议检查通过，链接检查无新增缺失路径。
+- [x] 独立评审 Schema 与共同预期的每个分区，提交本任务文件，建议提交信息为 `feat: 定义视频大小估算能力格式`。
 
 ## 任务 2：Python 同源导出和完整失败边界
 

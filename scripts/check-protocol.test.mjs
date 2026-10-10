@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as checker from './check-protocol.mjs';
+import { readFile } from 'node:fs/promises';
+
+const estimateCases = JSON.parse(await readFile(new URL('../protocol/examples/video-size-estimate/cases.json', import.meta.url), 'utf8'));
+for (const entry of estimateCases) {
+  test(`视频大小估算能力结构：${entry.name}`, () => {
+    assert.equal(checker.checkCapabilityStructure(entry.json), entry.schema_valid);
+  });
+}
 
 // 预期独立于共享夹具，检验检查器不会把二进制浮点舍入误认作合法整数。
 test('协议检查器精确处理位置 token 和受理层次', () => {
