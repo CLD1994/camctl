@@ -1,7 +1,7 @@
 import type { Application } from "../server/application";
 import type { Draft, Video } from "../server/models";
 import type { Issue } from "../shared/types";
-import { parseJson } from "../shared/json";
+import { parseClientJson, stringifyJson } from "../shared/json";
 export type ClientState = ReturnType<Application["state"]> & {
   videos?: Video[];
   workerError?: string | null;
@@ -25,7 +25,7 @@ export async function api<T>(
     method,
     headers:
       body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : stringifyJson(body),
     cache: "no-store",
     signal: AbortSignal.timeout(30000),
   }).catch((error: unknown) => {
@@ -36,7 +36,7 @@ export async function api<T>(
   });
   const value = await response
     .text()
-    .then((text) => parseJson(text) as any)
+    .then((text) => parseClientJson(text) as any)
     .catch(() => {
       throw new HttpError(
         "result_unconfirmed",
@@ -52,8 +52,11 @@ export async function api<T>(
     );
   return value as T;
 }
-export async function readDraft(id: string): Promise<Draft> {
-  const state = await api<ClientState>("/state");
+export async function readDraft(
+  id: string,
+  readState: () => Promise<ClientState>,
+): Promise<Draft> {
+  const state = await readState();
   const draft = state.drafts?.find((d) => d.id === id);
   if (!draft) throw new Error("无法读取草稿的保存结果");
   return draft;

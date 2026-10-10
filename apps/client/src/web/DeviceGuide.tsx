@@ -158,6 +158,20 @@ function TaskGuide({
                       未填写时的默认值说明：{optionLabel(schema.default)}。
                     </span>
                   )}
+                  {catalog.kind === "independent" &&
+                    catalog.fields.some((field) => field.name === name) && (
+                      <span>
+                        {" "}
+                        允许值：
+                        {catalog.fields
+                          .find((field) => field.name === name)!
+                          .values.map((value, index, values) =>
+                            optionLabel(value, values, index),
+                          )
+                          .join("、") || "没有允许值"}
+                        。
+                      </span>
+                    )}
                 </dd>
               </div>
             ))}
@@ -211,6 +225,11 @@ function TaskGuide({
                 </p>
               </div>
             )
+          ) : catalog.kind === "independent" ? (
+            <p className="notice">
+              各项设置分别按自己的规则填写。已列出允许值的字段可在计划表单中选择；其他字段按普通控件或
+              JSON 填写。完成后仍需检查整份参数。
+            </p>
           ) : (
             <p className="notice">
               此任务包含复杂参数，请在计划的参数 JSON

@@ -22,6 +22,7 @@ devices[]
             description
             preview_supported
             schema
+            video_size_estimate（可选）
 ```
 
 | 所在对象 | 字段 | 类型与含义 |
@@ -37,6 +38,7 @@ devices[]
 | 参数类型 | `description` | 必填非空字符串，说明拍摄任务、固定设置及必要的使用条件 |
 | 参数类型 | `preview_supported` | 必填布尔值，明确该参数类型是否支持预览 |
 | 参数类型 | `schema` | 必填对象，该参数类型的完整 JSON Schema，校验对象为动作的整个 `params` |
+| 参数类型 | `video_size_estimate` | 可选对象，声明目标拍摄视频的参考码率与成片时长计算依据 |
 
 第一版的外层对象使用表中字段。必填字段缺失、值为 `null`、类型不符或出现未定义的外层字段，均属于说明格式错误。`schema` 内部按 JSON Schema 解释，不套用外层对象的字段清单。JSON 对象出现重复键也属于格式错误，不能依赖解析器取最后一个值。
 
@@ -94,6 +96,24 @@ devices[]
 使用必填布尔字段 `preview_supported`，由[能力说明 Schema](../../protocol/schemas/capabilities.schema.json)定义。`true` 表示支持，`false` 表示明确不支持；缺失、`null` 或错误类型均为能力定义错误，不默认成 `false`。来源是驱动权威定义，预览声明随整份能力说明导出、校验和启用，同一设备同一动作的不同参数类型可以不同。
 
 照片预览为图片，录像预览为低分辨率视频；声明不证明本次已生成预览，也不代替原文件配对、完成和大小证据。内部受理历史保存当时的参数类型及支持依据，历史不随当前配置改变。报告保留原请求，并按[预览与范围选择的报告契约](report-format.md#预览与范围选择的报告契约)表达自动预览展示关系、产物、交付及实际失败。已有演示设备显式声明不支持，新[预览能力样例](../../protocol/examples/workflows/capabilities.json)仅为演示声明支持，均不代表实际相机能力。
+
+## 参数类型的视频大小估算
+
+驱动可以为 `camera_record` 或 `camera_timelapse` 的参数类型提供 `video_size_estimate`，用于客户端根据当前拍摄参数显示目标视频的大致大小。声明不包含额外预览视频或独立照片，不能用于动作完成判定，也不进入执行计划、生效参数、状态报告或客户端持久化资料。`camera_take_photo` 不接受此字段。
+
+该对象恰好包含 `bitrate_mbps` 和 `duration`，结构由[能力说明 Schema](../../protocol/schemas/capabilities.schema.json)统一定义。`bitrate_mbps` 可以是固定正数、仅含 `from` 的参数引用，或含 `by` 与非空 `values` 的选项查表。`duration.method` 选择 `direct`、`timelapse_frames` 或 `timelapse_interval`；各数量使用 `constant`、`parameter` 或 `lookup` 来源，常量和表值均须为正的有限 JSON 数字，预计成片帧数还须按原始数学值为整数。字符串与布尔值不能转换为数字。
+
+引用路径相对于完整 `action.params`，使用以 `/` 开头的 JSON Pointer（JSON 指针），只读取当前参数自身的成员。空路径、URI 片段形式及无效转义属于能力定义错误。路径可以引用可选参数；客户端不从 Schema 的 `default` 补齐当前省略的值。查表可以只覆盖部分合法选项，未覆盖的选择不使声明失效。
+
+| 条件 | 导出、加载或当前估算结果 |
+| --- | --- |
+| 完全省略 `video_size_estimate` | 参数类型仍有效；客户端显示未提供估算信息。 |
+| 声明存在且结构、成员、路径与数值均合法 | 声明随整份能力说明导出和加载；能否估算再由当前参数决定。 |
+| 声明为 `null`、结构不完整、混合互斥形式、含未知成员或方法、路径语法错误、常量或表值非法 | 整份导出或加载失败，不能删除估算字段后启用其余内容。 |
+| 照片动作的参数类型出现声明 | 整份导出或加载失败。 |
+| 声明有效，但当前省略被引用的可选参数或选择没有对应表项 | 当前无法估算；计划仍按既有参数与业务规则判断能否导出。 |
+
+码率单位、三种成片时长公式、十进制大小单位、完整估算状态分类及能力重载行为见[视频大小估算设计](../superpowers/specs/2026-10-10-video-size-estimate-design.md)。[共同样例](../../protocol/examples/video-size-estimate/README.md)提供完整虚构能力说明及保留原始数字和重复键的交接文本；参考值不代表真实设备测量。驱动须让任务说明中的参考值和估算声明来自同一份权威定义。
 
 ## 客户端选择与校验
 

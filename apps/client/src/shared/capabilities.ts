@@ -1,25 +1,11 @@
-import { isCameraAction } from "./actions";
+import { cloneClientJson } from "./json";
+import { createProtocolValidator } from "./protocol-validation";
 import type { ValidateFunction } from "ajv";
 import type { Capabilities, Issue, ParameterType } from "./types";
 import { createValidator, DIALECT, isObject, schemaIssues } from "./validation";
+import { visitSchemaNodes } from "./schema-nodes";
 
 const compiled = new WeakMap<object, ValidateFunction>();
-function exact(
-  value: unknown,
-  fields: string[],
-  path: string,
-): asserts value is Record<string, unknown> {
-  if (
-    !isObject(value) ||
-    fields.some((f) => !Object.hasOwn(value, f)) ||
-    Object.keys(value).some((f) => !fields.includes(f))
-  )
-    throw new Error(`${path} 字段不完整或包含未知字段`);
-}
-function nonempty(value: unknown, path: string): asserts value is string {
-  if (typeof value !== "string" || !value.length)
-    throw new Error(`${path} 必须是非空字符串`);
-}
 function unique(values: Set<string>, value: string, path: string) {
   if (values.has(value)) throw new Error(`${path} 标识重复：${value}`);
   values.add(value);
@@ -27,50 +13,22 @@ function unique(values: Set<string>, value: string, path: string) {
 function validateSchemaResources(
   schema: Record<string, unknown>,
   validator: ReturnType<typeof createValidator>,
-  root = true,
 ) {
-  // 使用校验器已注册词汇，包含仅作说明的标准关键词，不另维护完整清单。
-  for (const keyword of Object.keys(schema))
-    if (!Object.hasOwn(validator.RULES.keywords, keyword))
-      throw new Error(`Schema 关键词不支持：${keyword}`);
-  if (
-    typeof schema.format === "string" &&
-    !Object.hasOwn(validator.formats, schema.format)
-  )
-    throw new Error(`Schema 格式不支持：${schema.format}`);
-  if ((root || Object.hasOwn(schema, "$id")) && schema.$schema !== DIALECT)
-    throw new Error("Schema 资源必须声明 Draft 2020-12");
-  if (Object.hasOwn(schema, "$schema") && schema.$schema !== DIALECT)
-    throw new Error("Schema 版本不支持");
-  const single = [
-    "$defs",
-    "properties",
-    "patternProperties",
-    "dependentSchemas",
-  ];
-  for (const key of single)
-    if (isObject(schema[key]))
-      for (const child of Object.values(schema[key]))
-        if (isObject(child)) validateSchemaResources(child, validator, false);
-  for (const key of [
-    "items",
-    "additionalProperties",
-    "unevaluatedProperties",
-    "contains",
-    "not",
-    "if",
-    "then",
-    "else",
-    "propertyNames",
-    "unevaluatedItems",
-    "contentSchema",
-  ])
-    if (isObject(schema[key]))
-      validateSchemaResources(schema[key], validator, false);
-  for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"])
-    if (Array.isArray(schema[key]))
-      for (const child of schema[key])
-        if (isObject(child)) validateSchemaResources(child, validator, false);
+  visitSchemaNodes(schema, (schema, root) => {
+    // 使用校验器已注册词汇，包含仅作说明的标准关键词，不另维护完整清单。
+    for (const keyword of Object.keys(schema))
+      if (!Object.hasOwn(validator.RULES.keywords, keyword))
+        throw new Error(`Schema 关键词不支持：${keyword}`);
+    if (
+      typeof schema.format === "string" &&
+      !Object.hasOwn(validator.formats, schema.format)
+    )
+      throw new Error(`Schema 格式不支持：${schema.format}`);
+    if ((root || Object.hasOwn(schema, "$id")) && schema.$schema !== DIALECT)
+      throw new Error("Schema 资源必须声明 Draft 2020-12");
+    if (Object.hasOwn(schema, "$schema") && schema.$schema !== DIALECT)
+      throw new Error("Schema 版本不支持");
+  });
 }
 function compile(parameter: ParameterType): ValidateFunction {
   const validator = createValidator();
@@ -90,46 +48,25 @@ function compile(parameter: ParameterType): ValidateFunction {
   return validate;
 }
 export function loadCapabilities(value: unknown): Capabilities {
-  value = structuredClone(value);
-  exact(value, ["devices"], "能力说明");
-  if (!Array.isArray(value.devices)) throw new Error("devices 必须是数组");
+  const copy = cloneClientJson(value);
+  const validator = createProtocolValidator();
+  const check = validator.getSchema("capabilities.schema.json")!;
+  if (!check(copy)) throw new Error(validator.errorsText(check.errors));
+  const capabilities = copy as Capabilities;
   const deviceIds = new Set<string>();
-  for (const device of value.devices) {
-    exact(device, ["device_id", "driver_id", "actions"], "设备");
-    nonempty(device.device_id, "device_id");
-    nonempty(device.driver_id, "driver_id");
+  for (const device of capabilities.devices) {
     unique(deviceIds, device.device_id, "设备");
-    if (!Array.isArray(device.actions)) throw new Error("actions 必须是数组");
     const actions = new Set<string>();
     for (const action of device.actions) {
-      exact(action, ["type", "parameter_types"], "拍摄动作");
-      nonempty(action.type, "动作 type");
       unique(actions, action.type, "动作");
-      if (!isCameraAction(action.type))
-        throw new Error(`本版不支持拍摄动作 ${action.type}`);
-      if (
-        !Array.isArray(action.parameter_types) ||
-        !action.parameter_types.length
-      )
-        throw new Error("parameter_types 必须非空");
       const types = new Set<string>();
       for (const parameter of action.parameter_types) {
-        exact(
-          parameter,
-          ["type", "name", "description", "preview_supported", "schema"],
-          "参数类型",
-        );
-        for (const field of ["type", "name", "description"])
-          nonempty(parameter[field], field);
-        if (typeof parameter.preview_supported !== "boolean")
-          throw new Error("preview_supported 必须是布尔值");
-        unique(types, parameter.type as string, "参数类型");
-        if (!isObject(parameter.schema)) throw new Error("schema 必须是对象");
-        compile(parameter as unknown as ParameterType);
+        unique(types, parameter.type, "参数类型");
+        compile(parameter);
       }
     }
   }
-  return value as unknown as Capabilities;
+  return capabilities;
 }
 export function validateParams(
   deviceId: string,

@@ -9,6 +9,8 @@ import { download } from "./api";
 import type { PlanRecord } from "./editing";
 import { utcToLocal } from "./editing";
 import { Badge, Facts, Empty } from "./common";
+import { stringifyJson } from "../shared/json";
+import { resultActionRows } from "./result-model";
 export type Followup = {
   action: Record<string, unknown>;
   summary: string;
@@ -36,6 +38,7 @@ export function RecordDetail({
 }: Props) {
   const { request, plan } = record;
   const [expanded, setExpanded] = useState(true);
+  const [allActions, setAllActions] = useState(false);
   const allPlans = state.snapshot?.plans ?? [];
   const diagnostics =
     state.snapshot?.plan_file_diagnostics?.filter(
@@ -79,7 +82,7 @@ export function RecordDetail({
           <div>
             <small>主机报告</small>
             <strong>
-              {plan ? "已取得受理与执行依据" : "尚无计划执行依据"}
+              {plan ? "已取得计划受理及报告状态" : "尚无计划执行依据"}
             </strong>
             {plan && <span>{plan.plan_instance_id}</span>}
           </div>
@@ -128,23 +131,65 @@ export function RecordDetail({
           <>
             <div className="section-head">
               <h3>执行与结果</h3>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  follow({
-                    action: {
-                      name: `取消 ${plan.name}`,
-                      type: "cancel_task",
-                      params: {
-                        target: { plan_instance_id: plan.plan_instance_id },
+              <div className="button-row">
+                <button
+                  aria-pressed={allActions}
+                  onClick={() => setAllActions(!allActions)}
+                >
+                  {allActions ? "按拍摄归并自动取回" : "查看全部动作"}
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    follow({
+                      action: {
+                        name: `取回 ${plan.name}`,
+                        type: "obtain_action_outputs",
+                        params: {
+                          source: { plan_instance_id: plan.plan_instance_id },
+                        },
                       },
-                    },
-                    summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
-                  })
-                }
-              >
-                准备取消计划
-              </button>
+                      summary: `取回计划 ${plan.name} · ${plan.plan_instance_id} 的默认产物：排除预览，优先对应修复成品`,
+                    })
+                  }
+                >
+                  准备取回计划默认产物
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    follow({
+                      action: {
+                        name: `清理 ${plan.name}`,
+                        type: "delete_action_outputs",
+                        params: {
+                          source: { plan_instance_id: plan.plan_instance_id },
+                        },
+                      },
+                      summary: `清理计划 ${plan.name} · ${plan.plan_instance_id} 的全部正式源产物，包括原文件、预览和修复成品；不包含仅取回的其他计划产物，不清理客户端副本`,
+                    })
+                  }
+                >
+                  准备清理计划全部源产物
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    follow({
+                      action: {
+                        name: `取消 ${plan.name}`,
+                        type: "cancel_task",
+                        params: {
+                          target: { plan_instance_id: plan.plan_instance_id },
+                        },
+                      },
+                      summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
+                    })
+                  }
+                >
+                  准备取消计划
+                </button>
+              </div>
             </div>
             {plan.status === "completed" && (
               <p className="notice">
@@ -152,22 +197,27 @@ export function RecordDetail({
               </p>
             )}
             <Suspense fallback={<p>正在加载动作摘要…</p>}>
-              {plan.actions?.map((action) => (
-                <ActionResult
-                  key={action.action_instance_id}
-                  action={action}
-                  motorInputText={
-                    state.motorInputTexts?.[action.action_instance_id]
-                  }
-                  active={expanded}
-                  plan={plan}
-                  allPlans={allPlans}
-                  videos={state.videos ?? []}
-                  follow={follow}
-                  run={run}
-                  open={open}
-                />
-              ))}
+              {resultActionRows(plan, allActions).map(
+                ({ action, source, association }) => (
+                  <ActionResult
+                    key={action.action_instance_id}
+                    action={action}
+                    source={source}
+                    merged={!!source && !allActions}
+                    association={association}
+                    motorInputText={
+                      state.motorInputTexts?.[action.action_instance_id]
+                    }
+                    active={expanded}
+                    plan={plan}
+                    allPlans={allPlans}
+                    videos={state.videos ?? []}
+                    follow={follow}
+                    run={run}
+                    open={open}
+                  />
+                ),
+              )}
             </Suspense>
             {!plan.actions?.length && <Empty>报告尚未提供动作明细。</Empty>}
           </>
@@ -177,13 +227,13 @@ export function RecordDetail({
         {request && (
           <details className="advanced">
             <summary>查看固定原请求 JSON</summary>
-            <pre>{JSON.stringify(request.body, null, 2)}</pre>
+            <pre>{stringifyJson(request.body, 2)}</pre>
           </details>
         )}
         {plan && (
           <details className="advanced">
             <summary>查看合并后的报告计划 JSON</summary>
-            <pre>{JSON.stringify(plan, null, 2)}</pre>
+            <pre>{stringifyJson(plan, 2)}</pre>
           </details>
         )}
       </div>

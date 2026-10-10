@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { CryptoRandomSource, type RandomSource } from "../domain/request-id";
+import {
+  CryptoRandomSource,
+  MAX_REQUEST_ID,
+  MAX_ID_RESELECTIONS,
+  type RandomSource,
+} from "../domain/request-id";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Store } from "./database";
@@ -15,13 +20,33 @@ import {
 } from "./models";
 import {
   parseJson,
+  parseClientJson,
+  stringifyJson,
+  exactJsonIdentity,
   motorInputTexts,
   type MotorInputText,
   MOTOR_ORIGINAL_INPUT_FIELDS,
+  cloneClientJson,
 } from "../shared/json";
+import {
+  coordinatePreviews,
+  initializePreviewMetadata,
+  copyDraftContent,
+  validPreviewMetadata,
+  sameContent,
+  appendContentAction,
+  copyDraftAction,
+  type CapabilityState,
+} from "../shared/automatic-previews";
+import { isCameraAction } from "../shared/actions";
 import { loadCapabilities, validateParams } from "../shared/capabilities";
 import { validatePlan } from "../shared/plan";
-import type { Capabilities, StatusReport } from "../shared/types";
+import {
+  checkParameterVariants,
+  checkParameterVariantLocations,
+  checkActiveParameterVariant,
+} from "../shared/parameter-variants";
+import type { StatusReport } from "../shared/types";
 import {
   mergeReport,
   parseReport,
@@ -45,17 +70,16 @@ function allocateRequestId(
   random: RandomSource,
   used: (id: string) => boolean,
 ): string {
-  const MAX_RESELECTIONS = 8;
-  for (let attempt = 0; attempt <= MAX_RESELECTIONS; attempt += 1) {
+  for (let attempt = 0; attempt <= MAX_ID_RESELECTIONS; attempt += 1) {
     const candidate = random.next();
-    if (candidate < 1n || candidate > 9_223_372_036_854_775_807n) {
+    if (candidate < 1n || candidate > MAX_REQUEST_ID) {
       throw new AppError("request_id_fault", "随机源产生越界请求身份");
     }
     if (!used(candidate.toString(10))) return candidate.toString(10);
   }
   throw new AppError(
     "request_id_fault",
-    `请求身份重选耗尽（${MAX_RESELECTIONS + 1} 次冲突）`,
+    `请求身份重选耗尽（${MAX_ID_RESELECTIONS + 1} 次冲突）`,
   );
 }
 
@@ -124,11 +148,12 @@ export class Application {
     this.motorInputsReady = true;
   }
   readonly store: Store;
-  capabilities: {
-    active: Capabilities | null;
-    error: string | null;
-    generation: number;
-  } = { active: null, error: null, generation: 0 };
+  capabilities: CapabilityState = {
+    active: null,
+    error: null,
+    generation: 0,
+    version: randomUUID(),
+  };
   private readonly random: RandomSource;
   constructor(
     directory: string,
@@ -139,6 +164,7 @@ export class Application {
     this.reloadCapabilities();
   }
   reloadCapabilities() {
+    let next: CapabilityState;
     try {
       const active = loadCapabilities(
         parseJson(
@@ -149,14 +175,34 @@ export class Application {
           ),
         ),
       );
-      this.capabilities = {
+      next = {
         active,
         error: null,
         generation: this.capabilities.generation + 1,
+        version: randomUUID(),
       };
     } catch (error) {
       this.capabilities = { ...this.capabilities, error: errorMessage(error) };
+      return this.capabilities;
     }
+    // 数据库故障不属于能力加载失败，也不允许以空库替代。
+    const startup = this.store.status();
+    if (startup.state === "ready")
+      this.store.transaction(() => {
+        for (const draft of this.store.all<Draft>("drafts")) {
+          this.checkContent(draft.content);
+          if (draft.exportedRequestId) continue;
+          const content = coordinatePreviews(draft.content, next).content;
+          if (!sameContent(content, draft.content))
+            this.store.set("drafts", draft.id, {
+              ...draft,
+              content,
+              revision: draft.revision + 1,
+              updatedAt: utc(),
+            });
+        }
+      });
+    this.capabilities = next;
     return this.capabilities;
   }
   draft(id: string): Draft {
@@ -172,6 +218,11 @@ export class Application {
   private checkContent(content: DraftContent) {
     if (!object(content) || typeof content.text !== "string")
       throw new AppError("invalid_content", "草稿必须包含编辑文本");
+    if (
+      content.automaticPreviews !== undefined &&
+      !validPreviewMetadata(content.automaticPreviews)
+    )
+      throw new AppError("invalid_content", "自动预览编辑资料格式不正确");
     if (
       content.pending !== undefined &&
       (!object(content.pending) ||
@@ -201,7 +252,14 @@ export class Application {
             !object(variant.fields) ||
             !object(variant.pending) ||
             Object.keys(variant).some(
-              (key) => !["type", "fields", "pending"].includes(key),
+              (key) =>
+                ![
+                  "type",
+                  "fields",
+                  "fieldsText",
+                  "pending",
+                  "parameterVariants",
+                ].includes(key),
             ) ||
             Object.keys(variant.fields).some((key) =>
               [...DRAFT_COMMON_ACTION_FIELDS, "type"].includes(key),
@@ -219,16 +277,97 @@ export class Application {
             )
           )
             fail();
+          if (variant.parameterVariants !== undefined) {
+            try {
+              checkParameterVariants(variant.parameterVariants);
+            } catch {
+              fail();
+            }
+          }
+          if (variant.fieldsText !== undefined) {
+            try {
+              if (typeof variant.fieldsText !== "string") fail();
+              const fields = parseClientJson(variant.fieldsText!);
+              if (
+                !object(fields) ||
+                exactJsonIdentity(fields) !== exactJsonIdentity(variant.fields)
+              )
+                fail();
+            } catch {
+              fail();
+            }
+          }
+          if (variant.parameterVariants !== undefined) {
+            try {
+              const fields =
+                variant.fieldsText === undefined
+                  ? variant.fields
+                  : parseClientJson(variant.fieldsText);
+              checkActiveParameterVariant(
+                variant.parameterVariants,
+                fields as Record<string, unknown>,
+              );
+            } catch {
+              fail();
+            }
+          }
         }
+      }
+    }
+    if (content.parameterVariants !== undefined) {
+      try {
+        if (!object(content.parameterVariants))
+          throw Error("参数类型资料必须是动作位置映射");
+        for (const [index, variants] of Object.entries(
+          content.parameterVariants,
+        )) {
+          if (
+            !/^(0|[1-9]\d*)$/.test(index) ||
+            !Number.isSafeInteger(Number(index))
+          )
+            throw Error("参数类型资料动作位置不正确");
+          checkParameterVariants(variants);
+        }
+      } catch {
+        throw new AppError("invalid_content", "参数类型编辑资料格式不正确");
+      }
+    }
+    // 无法解析的正文仍可作为编辑原文保存；可解释时不能保存悬空的新资料位置。
+    let root: unknown;
+    try {
+      root = parseClientJson(content.text);
+    } catch {
+      return;
+    }
+    if (object(root) && Array.isArray(root.actions)) {
+      try {
+        checkParameterVariantLocations(content, root.actions);
+        for (const [index, variants] of Object.entries(
+          content.parameterVariants ?? {},
+        )) {
+          const action = root.actions[Number(index)];
+          if (object(action)) checkActiveParameterVariant(variants, action);
+        }
+      } catch {
+        throw new AppError(
+          "invalid_content",
+          "参数类型编辑资料的动作归属不正确",
+        );
       }
     }
   }
   createDraft(
-    content: DraftContent = {
-      text: JSON.stringify({ name: "新计划", actions: [] }, null, 2),
-    },
+    content: DraftContent = initializePreviewMetadata(
+      { text: JSON.stringify({ name: "新计划", actions: [] }, null, 2) },
+      "enabled",
+      randomUUID(),
+    ),
   ): Draft {
     this.checkContent(content);
+    content = coordinatePreviews(
+      copyDraftContent(content, randomUUID()),
+      this.capabilities,
+    ).content;
     const now = utc();
     const d: Draft = {
       id: randomUUID(),
@@ -256,11 +395,20 @@ export class Application {
           "草稿已发生变化，请重新打开并核对当前输入",
           409,
         );
+      const coordinated = coordinatePreviews(
+        content,
+        this.capabilities,
+      ).content;
       const updated = {
         ...d,
-        content,
+        content: coordinated,
         revision: d.revision + 1,
         updatedAt: utc(),
+        lastWrite: {
+          revision: d.revision + 1,
+          input: cloneClientJson(content),
+          content: coordinated,
+        },
       };
       this.store.set("drafts", id, updated);
       return updated;
@@ -296,7 +444,7 @@ export class Application {
     const state = this.store.businessState();
     return selectSyncReport(state.reports, state.coverage);
   }
-  validateContent(content: DraftContent) {
+  validateContent(content: DraftContent, capabilities = this.capabilities) {
     this.checkContent(content);
     if (Object.keys(content.pending ?? {}).length)
       throw new AppError(
@@ -311,9 +459,18 @@ export class Application {
     }
     if (!object(value))
       throw new AppError("invalid_plan", "计划必须是 JSON 对象");
+    if (
+      (capabilities.error || !capabilities.active) &&
+      Array.isArray(value.actions) &&
+      value.actions.some((a) => object(a) && isCameraAction(a.type))
+    )
+      throw new AppError(
+        "capabilities_unavailable",
+        "本计划需要可靠的能力说明，当前说明加载失败或不可用",
+      );
     // 请求身份和生成时间属于首次导出，由后端分配，编辑意图不包含这些字段。
-    const plan = { ...value, request_id: "validation", created_at: utc() };
-    const issues = validatePlan(plan, this.capabilities.active, {
+    const plan = { ...value, request_id: "1", created_at: utc() };
+    const issues = validatePlan(plan, capabilities.active, {
       reports: this.store.reports(),
       coverage: this.coverage(),
     });
@@ -325,6 +482,7 @@ export class Application {
     id: string,
     revision: number,
     content: DraftContent,
+    capabilityVersion: string | null | undefined = this.capabilities.version,
   ): ExportedRequest {
     return this.store.transaction(() => {
       const draft = this.draft(id);
@@ -335,13 +493,48 @@ export class Application {
           "草稿已发生变化，请核对后重新导出",
           409,
         );
-      const value = this.validateContent(content);
+      if (!sameContent(draft.content, content))
+        throw new AppError(
+          "content_conflict",
+          "完整草稿内容与保存版本不一致",
+          409,
+        );
+      const capabilities = this.capabilities;
+      if (
+        typeof capabilityVersion !== "string" ||
+        capabilityVersion !== capabilities.version
+      )
+        throw new AppError(
+          "capabilities_changed",
+          "能力说明已经变化，请重新核对草稿",
+          409,
+        );
+      const coordinated = coordinatePreviews(content, capabilities);
+      if (!sameContent(content, coordinated.content))
+        throw new AppError(
+          "content_conflict",
+          "自动预览需要重新协调和保存",
+          409,
+        );
+      const value = this.validateContent(content, capabilities);
+      if (
+        coordinated.issues.length &&
+        content.automaticPreviews?.intent !== "unset"
+      )
+        throw new AppError(
+          "invalid_preview_metadata",
+          "自动预览关联尚不能可靠确认",
+          400,
+          coordinated.issues,
+        );
       const requestId = allocateRequestId(this.random, (id) => {
         try {
           return this.store.get<ExportedRequest>("requests", id) !== undefined;
-        } catch {
-          // 查询失败不能当作身份未使用，按已占用继续重选。
-          return true;
+        } catch (error) {
+          throw new AppError(
+            "request_id_fault",
+            `请求身份查询失败：${errorMessage(error)}`,
+          );
         }
       });
       const now = utc();
@@ -357,6 +550,7 @@ export class Application {
         body: { ...intent, request_id: requestId, created_at: now },
         exportedAt: now,
         handedAt: null,
+        copyContent: cloneClientJson(content),
       };
       this.store.set("requests", requestId, record);
       this.store.set("drafts", id, {
@@ -377,9 +571,24 @@ export class Application {
       : { ...request.body, last_report_id: ack };
   }
   copyRequest(id: string): Draft {
-    const { request_id, created_at, last_report_id, ...intent } =
-      this.request(id).body;
-    return this.createDraft({ text: JSON.stringify(intent, null, 2) });
+    const original = this.request(id);
+    const { request_id, created_at, last_report_id, ...intent } = original.body;
+    return this.createDraft({
+      text: stringifyJson(intent, 2),
+      ...(original.copyContent?.automaticPreviews
+        ? { automaticPreviews: original.copyContent.automaticPreviews }
+        : {}),
+    });
+  }
+  copyDraft(id: string): Draft {
+    return this.createDraft(this.draft(id).content);
+  }
+  copyAction(id: string, revision: number, index: number): Draft {
+    return this.saveDraft(
+      id,
+      revision,
+      copyDraftAction(this.draft(id).content, index),
+    );
   }
   markHandoff(id: string, marked: boolean): ExportedRequest {
     return this.store.transaction(() => {
@@ -401,10 +610,19 @@ export class Application {
   }): Preset {
     if (typeof input.name !== "string" || !input.name.trim())
       throw new AppError("invalid_preset", "请填写预设名称");
+    let params: unknown;
+    try {
+      params = parseJson(stringifyJson(input.params));
+    } catch (error) {
+      throw new AppError(
+        "invalid_preset",
+        `预设参数不属于合法公共 JSON：${errorMessage(error)}`,
+      );
+    }
     const issues = validateParams(
       input.deviceId,
       input.actionType,
-      input.params,
+      params,
       this.capabilities.active,
     );
     if (issues.length)
@@ -421,6 +639,7 @@ export class Application {
       }
       const preset: Preset = {
         ...input,
+        params,
         id: input.id ?? randomUUID(),
         updatedAt: utc(),
       };
@@ -439,25 +658,26 @@ export class Application {
     id: string,
     revision: number,
     action: Record<string, unknown>,
+    expectedContent?: DraftContent,
+    capabilityVersion?: string,
   ): Draft {
     const draft = this.draft(id);
-    const parsed = parseJson(draft.content.text);
-    if (!object(parsed) || !Array.isArray(parsed.actions))
+    if (
+      capabilityVersion !== undefined &&
+      capabilityVersion !== this.capabilities.version
+    )
+      throw new AppError("capabilities_changed", "能力说明已经变化", 409);
+    const content = coordinatePreviews(
+      appendContentAction(draft.content, action, true),
+      this.capabilities,
+    ).content;
+    if (expectedContent && !sameContent(content, expectedContent))
       throw new AppError(
-        "invalid_draft",
-        "请先修正草稿 JSON 和动作列表，原输入已保留",
+        "content_conflict",
+        "追加的完整预期与当前依据不一致",
+        409,
       );
-    const names = new Set(parsed.actions.filter(object).map((a) => a.name));
-    let name = String(action.name ?? "后续动作");
-    const base = name;
-    let n = 2;
-    while (names.has(name)) name = `${base} ${n++}`;
-    const text = JSON.stringify(
-      { ...parsed, actions: [...parsed.actions, { ...action, name }] },
-      null,
-      2,
-    );
-    return this.saveDraft(id, revision, { ...draft.content, text });
+    return this.saveDraft(id, revision, content);
   }
   applyReports(inputs: Array<{ file: ImportFile; bytes: Uint8Array }>): void {
     this.store.businessState();

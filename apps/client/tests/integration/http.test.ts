@@ -118,10 +118,22 @@ it("HTTP 显式初始化后保存并导出计划", async () => {
   });
   const d = await created.json();
   expect(created.status).toBe(201);
-  const exported = await fetch(`${base}/api/drafts/${d.id}/export`, {
+  const missingVersion = await fetch(`${base}/api/drafts/${d.id}/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content, revision: d.revision }),
+  });
+  expect(missingVersion.status).toBe(409);
+  const observation = await (await fetch(base + "/api/state")).json();
+  expect(observation.requests).toEqual([]);
+  const exported = await fetch(`${base}/api/drafts/${d.id}/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content,
+      revision: d.revision,
+      capabilityVersion: observation.capabilities.version,
+    }),
   });
   expect(exported.status).toBe(200);
   const r = await exported.json();

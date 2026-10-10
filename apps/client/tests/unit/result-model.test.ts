@@ -1,5 +1,6 @@
 import { it, expect } from "vitest";
 import { resultProducts, resultNotes } from "../../src/web/result-model";
+import * as model from "../../src/web/result-model";
 import type {
   ReportAction,
   ReportPlan,
@@ -47,6 +48,55 @@ const plans = [
 const videos = [
   { id: "v2", fileName: "d2.png", status: "verified" },
 ] as Video[];
+it.each([
+  ["pending", undefined, "尚未"],
+  ["running", undefined, "开始处理"],
+  ["failed", "admission", "未执行"],
+  ["failed", "execution", "execution"],
+  ["failed", "future_stage", "future_stage"],
+  ["canceled", undefined, "未提供开始经历"],
+  ["expired", undefined, "未提供开始经历"],
+])("执行经历按公开事实展示 %s %s", (status, stage, fact) => {
+  const action = {
+    ...capture,
+    status,
+    outputs: undefined,
+    ...(stage ? { error: { code: "future_code", stage, details: {} } } : {}),
+  } as ReportAction;
+  expect(model.executionText(action)).toContain(fact);
+  expect(model.executionText(action)).not.toContain("设备已");
+});
+it.each(["window_missed", "window_exhausted"] as const)(
+  "过期 %s 不补造开始或设备调用",
+  (expiration_reason) => {
+    expect(
+      model.executionText({
+        ...capture,
+        outputs: undefined,
+        status: "expired",
+        expiration_reason,
+      }),
+    ).toContain("未提供开始经历");
+  },
+);
+it("受理错误说明不伪装为执行失败并保留输入诊断", () => {
+  const text = model.actionIssueText({
+    ...capture,
+    status: "failed",
+    error: {
+      code: "action_validation_failed",
+      stage: "admission",
+      details: { message: "位置数值错误" },
+    },
+  });
+  expect(text).toContain("受理");
+  expect(text).toContain("未执行");
+  expect(text).toContain("位置数值错误");
+});
+it("取消动作有实际产物时保留该事实，不声称报告没有执行依据", () => {
+  expect(model.executionText(capture)).toContain("已报告");
+  expect(model.executionText(capture)).not.toContain("未提供开始经历");
+});
 it("拍摄按产物聚合多次交付，取消不隐藏图片", () => {
   const rows = resultProducts(capture, plans, videos);
   expect(rows).toHaveLength(1);
@@ -101,7 +151,11 @@ it("本地文件核验失败标记注意并计数", () => {
   expect(rows[0].problems).toBe(1);
 });
 it("部分产物被保留清理时其余产物仍全部列出", () => {
-  const kept: Output = { ...output, output_id: "o2", cleanup: { status: "canceled" } };
+  const kept: Output = {
+    ...output,
+    output_id: "o2",
+    cleanup: { status: "canceled" },
+  };
   const action = { ...capture, outputs: [output, kept] } as ReportAction;
   const rows = resultProducts(action, [], []);
   expect(rows.map((r) => r.id)).toEqual(["o1", "o2"]);
@@ -143,7 +197,9 @@ it("设备结束未确认或仍在运行都以自然语言提示", () => {
     device_execution: { status: "still_running" },
   } as ReportAction;
   expect(
-    resultNotes(unconfirmed).some((n) => n.error && n.text.includes("尚未确认")),
+    resultNotes(unconfirmed).some(
+      (n) => n.error && n.text.includes("尚未确认"),
+    ),
   ).toBe(true);
   expect(
     resultNotes(running).some((n) => n.error && n.text.includes("仍在执行")),

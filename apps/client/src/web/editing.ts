@@ -1,26 +1,83 @@
-import { parseJson } from "../shared/json";
+import {
+  parseJson,
+  parseClientJson,
+  cloneClientJson,
+  stringifyJson,
+  rememberNumberToken,
+  originalNumberToken,
+} from "../shared/json";
 import { isObject } from "../shared/validation";
+export { decodeJsonPointer as pointerPath } from "../shared/json-pointer";
+import { decodeJsonPointer as pointerPath } from "../shared/json-pointer";
 import type { DraftContent, ExportedRequest } from "../server/models";
 import type { ReportPlan } from "../shared/types";
+import {
+  replaceParameterValue,
+  switchParameterType,
+} from "../shared/parameter-variants";
+import { replaceActionValue, switchActionType } from "./action-drafts";
+import { parseDraft, pointer, requireDraftRoot } from "../shared/draft-plan";
+export { parseDraft, pointer } from "../shared/draft-plan";
+import {
+  appendContentAction,
+  removeContentAction,
+  renamePreviewSources,
+} from "../shared/automatic-previews";
+import {
+  sources,
+  cleanupModes,
+  targets,
+  type Mode,
+} from "../shared/action-params";
 
 export type Path = Array<string | number>;
 export type EditObject = Record<string, any>;
-export function parseDraft(
-  content: DraftContent,
-): EditObject & { actions: EditObject[] } {
-  const value = parseJson(content.text);
-  if (!isObject(value) || !Array.isArray(value.actions))
-    throw new Error("计划必须是对象，并包含 actions 数组。请在 JSON 中修正。");
-  return value as EditObject & { actions: EditObject[] };
+function prepareActionListChange(content: DraftContent, text?: string) {
+  if (Object.hasOwn(content.pending ?? {}, ""))
+    throw new Error("整个计划仍有未完成输入，请先修正该祖先输入");
+  const root = parseClientJson(content.text);
+  if (!isObject(root))
+    throw new Error("当前计划正文不是可解释的对象，不能替换动作列表");
+  const actions = text === undefined ? undefined : parseClientJson(text);
+  if (text !== undefined && !Array.isArray(actions))
+    throw new Error("动作列表修正必须是 JSON 数组，原输入已保留");
+  return { root, actions };
 }
-export function pointer(path: Path): string {
-  if (!path.length) return "";
-  return (
-    "/" +
-    path
-      .map((p) => String(p).replace(/~/g, "~0").replace(/\//g, "~1"))
-      .join("/")
+/** UI 先验证资格，再取得确认；此检查不写入任何内容或资料。 */
+export function checkActionListChange(
+  content: DraftContent,
+  text?: string,
+): void {
+  prepareActionListChange(content, text);
+}
+function replaceActionList(
+  content: DraftContent,
+  text: string | undefined,
+  confirmed: boolean,
+): DraftContent {
+  const { root, actions } = prepareActionListChange(content, text);
+  if (!confirmed)
+    throw new Error(
+      "替换或移除整组动作需要确认清除动作身份、自动预览和其他类型编辑资料",
+    );
+  if (text === undefined) delete root.actions;
+  else root.actions = actions;
+  const pending = Object.fromEntries(
+    Object.entries(content.pending ?? {}).filter(([key]) => {
+      try {
+        return pointerPath(key)[0] !== "actions";
+      } catch {
+        return true;
+      } // 未知路径保持原文，不扩大清理范围。
+    }),
   );
+  const {
+    automaticPreviews: _preview,
+    actionVariants: _variants,
+    parameterVariants: _parameters,
+    ...rest
+  } = content;
+  return { ...rest, text: stringifyJson(root, 2), pending };
 }
 export function pendingBlocks(content: DraftContent, path: Path): boolean {
   const current = pointer(path);
@@ -37,8 +94,15 @@ export function editPlanText(
 ): DraftContent {
   if (Object.keys(content.pending ?? {}).length)
     throw new Error("请先修正或明确省略未完成输入，再编辑整份 JSON");
-  if (Object.keys(content.actionVariants ?? {}).length && !replaceVariants)
-    throw new Error("整份计划替换需要确认清除其他动作类型的编辑内容");
+  if (
+    (content.automaticPreviews ||
+      Object.keys(content.actionVariants ?? {}).length ||
+      Object.keys(content.parameterVariants ?? {}).length) &&
+    !replaceVariants
+  )
+    throw new Error(
+      "整份计划替换需要确认清除自动预览资料及其他动作类型的编辑内容",
+    );
   return { text, pending: {} };
 }
 export function valueAt(value: unknown, path: Path): unknown {
@@ -50,16 +114,134 @@ export function valueAt(value: unknown, path: Path): unknown {
     value,
   );
 }
+/** 数组位置只接受现存规范索引；对象成员始终保留原键。 */
+function resolvePath(root: EditObject, path: Path): Path {
+  let current: unknown = root;
+  return path.map((part, depth) => {
+    let key = part;
+    if (Array.isArray(current)) {
+      if (
+        (typeof part === "string" && !/^(0|[1-9][0-9]*)$/.test(part)) ||
+        !Number.isSafeInteger(Number(part)) ||
+        Number(part) < 0 ||
+        Number(part) >= current.length ||
+        !Object.hasOwn(current, part)
+      )
+        throw new Error("数组路径没有对应的现存位置");
+      key = Number(part);
+      if (
+        depth === 1 &&
+        depth < path.length - 1 &&
+        path[0] === "actions" &&
+        !isObject(current[key])
+      )
+        throw new Error("动作路径没有对应的对象");
+    }
+    current =
+      current !== null && typeof current === "object"
+        ? (current as EditObject)[key]
+        : undefined;
+    return key;
+  });
+}
 export function setValue(
   content: DraftContent,
   path: Path,
   value: unknown,
   omit = false,
   replace = false,
+  numberToken?: string,
+  confirmActionList = false,
 ): DraftContent {
+  if (path.length === 1 && path[0] === "actions") {
+    if (!omit && !Array.isArray(value)) {
+      checkActionListChange(content);
+      throw new Error("动作列表修正必须是 JSON 数组，原输入已保留");
+    }
+    return replaceActionList(
+      content,
+      omit ? undefined : stringifyJson(value),
+      confirmActionList,
+    );
+  }
   if (!omit && !replace && pendingBlocks(content, path))
     throw new Error("此路径存在尚未解决的输入，请先逐项修正或明确省略");
+  path = resolvePath(parseDraft(content), path);
+  if (path[0] === "actions" && typeof path[1] === "number") {
+    if (path.length === 2)
+      return replaceActionValue(content, path[1], value, omit, numberToken);
+    if (path.length >= 3 && path[2] === "type") {
+      const {
+        content: pending,
+        type,
+        token,
+      } = prepareTypeEdit(
+        content,
+        path,
+        path.slice(0, 3),
+        value,
+        omit,
+        numberToken,
+      );
+      return switchActionType(pending, path[1], type, token);
+    }
+  }
+  if (
+    path[0] === "actions" &&
+    typeof path[1] === "number" &&
+    path[2] === "params"
+  ) {
+    if (path.length === 3)
+      return replaceParameterValue(content, path[1], value, omit, numberToken);
+    if (path.length >= 4 && path[3] === "type") {
+      // 成功应用类型字段自己的原文与转换一起提交，其他输入仍参与资格检查。
+      const {
+        content: prepared,
+        type,
+        token,
+      } = prepareTypeEdit(
+        content,
+        path,
+        path.slice(0, 4),
+        value,
+        omit,
+        numberToken,
+      );
+      return switchParameterType(prepared, path[1], type, token);
+    }
+  }
+  if (
+    path.length === 3 &&
+    path[0] === "actions" &&
+    typeof path[1] === "number" &&
+    path[2] === "name"
+  )
+    content = renamePreviewSources(content, path[1], omit ? undefined : value);
   const root = parseDraft(content);
+  applyPath(root, path, value, omit, numberToken);
+  const targetPath = path.map(String);
+  const pending = Object.fromEntries(
+    Object.entries(content.pending ?? {}).filter(([key]) => {
+      try {
+        const inputPath = pointerPath(key);
+        return !(
+          targetPath.length <= inputPath.length &&
+          targetPath.every((part, index) => part === inputPath[index])
+        );
+      } catch {
+        return true; // 无法归属的输入资料保持原文。
+      }
+    }),
+  );
+  return { ...content, text: stringifyJson(root, 2), pending };
+}
+function applyPath(
+  root: EditObject,
+  path: Path,
+  value: unknown,
+  omit: boolean,
+  numberToken?: string,
+) {
   let target: EditObject = root;
   for (const part of path.slice(0, -1)) {
     if (
@@ -78,30 +260,157 @@ export function setValue(
   if (omit) delete target[key];
   else
     Object.defineProperty(target, key, {
-      value: structuredClone(value),
+      value: cloneClientJson(value),
       writable: true,
       enumerable: true,
       configurable: true,
     });
-  const p = pointer(path);
+  rememberNumberToken(target, key, omit ? undefined : numberToken);
+}
+function prepareTypeEdit(
+  content: DraftContent,
+  path: Path,
+  identityPath: Path,
+  value: unknown,
+  omit: boolean,
+  numberToken?: string,
+) {
+  const prepared = consumeOwnInput(content, path),
+    identity = identityPath.map(String);
+  for (const key of Object.keys(prepared.pending ?? {})) {
+    const input = pointerPath(key);
+    const ancestor =
+      input.length <= identity.length &&
+      input.every((part, i) => part === identity[i]);
+    const descendant =
+      identity.length <= input.length &&
+      identity.every((part, i) => part === input[i]);
+    if (ancestor || descendant)
+      throw Error("类型身份仍有其他未完成输入，暂不能修正");
+  }
+  const root = parseDraft(content);
+  applyPath(root, path, value, omit, numberToken);
+  const owner = valueAt(root, identityPath.slice(0, -1)),
+    key = identityPath.at(-1)!;
+  const type = valueAt(root, identityPath);
+  // clone 将明确省略的数组位置形成实际 JSON null，同时保留嵌套原数字事实。
+  return {
+    content: prepared,
+    type: cloneClientJson(type),
+    token: originalNumberToken(owner, key, type),
+  };
+}
+function consumeOwnInput(content: DraftContent, path: Path): DraftContent {
+  let changed = false;
+  const target = path.map(String);
   const pending = Object.fromEntries(
-    Object.entries(content.pending ?? {}).filter(
-      ([key]) => key !== p && !key.startsWith(p + "/"),
-    ),
+    Object.entries(content.pending ?? {}).filter(([key]) => {
+      try {
+        const parts = pointerPath(key),
+          own =
+            parts.length === target.length &&
+            target.every((part, i) => part === parts[i]);
+        if (own) changed = true;
+        return !own;
+      } catch {
+        return true;
+      }
+    }),
   );
-  return { ...content, text: JSON.stringify(root, null, 2), pending };
+  return changed ? { ...content, pending } : content;
+}
+function requireCompleteParams(content: DraftContent, path: Path): void {
+  const prefix = pointer(path);
+  if (
+    Object.keys(content.pending ?? {}).some(
+      (k) =>
+        k === prefix ||
+        k.startsWith(prefix + "/") ||
+        prefix.startsWith(k + "/"),
+    )
+  )
+    throw new Error("请先修正或放弃未完成输入，再切换参数模式");
+  const params = valueAt(parseDraft(content), path);
+  if (params !== undefined && !isObject(params))
+    throw new Error("参数原值不是对象，请通过 JSON 修正或明确重新填写");
+}
+/** 用户明确选择范围后才替换引用；其他字段与编辑资料保持原值。 */
+export function changeBuiltinMode(
+  content: DraftContent,
+  path: Path,
+  type: "obtain_action_outputs" | "delete_action_outputs" | "cancel_task",
+  id: Mode["id"],
+): DraftContent {
+  requireCompleteParams(content, path);
+  const modes =
+    type === "delete_action_outputs"
+      ? cleanupModes
+      : type === "cancel_task"
+        ? targets
+        : sources;
+  const mode = modes.find((m) => m.id === id);
+  if (!mode) throw new Error("此动作不支持该界面模式");
+  if (type === "delete_action_outputs" && id === "output_ids") {
+    const next = setValue(content, [...path, "source"], undefined, true);
+    return setValue(next, [...path, "output_ids"], []);
+  }
+  let next = setValue(
+    content,
+    [...path, type === "cancel_task" ? "target" : "source"],
+    {
+      ...Object.fromEntries(Object.keys(mode.fields).map((key) => [key, ""])),
+      ...mode.constants,
+    },
+  );
+  if (
+    type === "delete_action_outputs" ||
+    (type === "obtain_action_outputs" && id !== "action_instance_id")
+  )
+    next = setValue(next, [...path, "output_ids"], undefined, true);
+  return next;
+}
+/** 精确列表与显式筛选的互斥转换由用户选择，不在显示参数时执行。 */
+export function changeObtainSelection(
+  content: DraftContent,
+  path: Path,
+  selection: "exact" | "default" | "preview" | "implicit",
+): DraftContent {
+  requireCompleteParams(content, path);
+  if (selection === "exact") {
+    const next = setValue(content, [...path, "filter"], undefined, true);
+    return setValue(next, [...path, "output_ids"], []);
+  }
+  if (selection === "implicit")
+    return setValue(content, [...path, "filter"], undefined, true);
+  const next = setValue(content, [...path, "output_ids"], undefined, true);
+  return setValue(next, [...path, "filter"], selection);
 }
 export function editValue(
   content: DraftContent,
   path: Path,
   text: string,
   kind: "number" | "json",
+  confirmActionList = false,
 ): DraftContent {
+  if (path.length === 1 && path[0] === "actions")
+    return replaceActionList(content, text, confirmActionList);
   if (pendingBlocks(content, path))
     throw new Error("父级 JSON 无法表示未完成的子字段，请先修正具体路径");
+  const unfinished = (current: DraftContent): DraftContent => ({
+    ...current,
+    pending: { ...current.pending, [pointer(path)]: { kind, text } },
+  });
+  let parsed: unknown;
+  // 容器不可解析与已经确定的无效路径分开：前者只能保存原文，后者必须报错。
+  try {
+    parsed = parseJson(content.text);
+  } catch {
+    return unfinished(content);
+  }
+  const root = requireDraftRoot(parsed);
+  path = resolvePath(root, path);
   let value: unknown;
   try {
-    const root = parseDraft(content);
     const motor =
       path[0] === "actions" &&
       typeof path[1] === "number" &&
@@ -122,52 +431,35 @@ export function editValue(
     )
       throw new Error("数字尚未完成");
   } catch {
-    return {
-      ...content,
-      pending: { ...content.pending, [pointer(path)]: { kind, text } },
-    };
+    if (
+      path.length === 3 &&
+      path[0] === "actions" &&
+      typeof path[1] === "number" &&
+      path[2] === "name"
+    )
+      content = renamePreviewSources(content, path[1], undefined);
+    return unfinished(content);
   }
-  return setValue(content, path, value);
+  return setValue(
+    content,
+    path,
+    value,
+    false,
+    false,
+    typeof value === "number" ? text.trim() : undefined,
+  );
 }
 export function removeAction(
   content: DraftContent,
   index: number,
 ): DraftContent {
-  const root = parseDraft(content);
-  root.actions.splice(index, 1);
-  const pending: NonNullable<DraftContent["pending"]> = {};
-  for (const [key, value] of Object.entries(content.pending ?? {})) {
-    const match = /^\/actions\/(\d+)(\/.*)?$/.exec(key);
-    if (!match) {
-      pending[key] = value;
-      continue;
-    }
-    const n = Number(match[1]);
-    if (n === index) continue;
-    pending[`/actions/${n > index ? n - 1 : n}${match[2] ?? ""}`] = value;
-  }
-  const actionVariants = Object.fromEntries(
-    Object.entries(content.actionVariants ?? {})
-      .filter(([key]) => Number(key) !== index)
-      .map(([key, value]) => [
-        String(Number(key) > index ? Number(key) - 1 : Number(key)),
-        value,
-      ]),
-  );
-  return {
-    ...content,
-    text: JSON.stringify(root, null, 2),
-    pending,
-    ...(content.actionVariants ? { actionVariants } : {}),
-  };
+  return removeContentAction(content, index);
 }
 export function appendDraftAction(
   content: DraftContent,
   action: EditObject,
 ): DraftContent {
-  const root = parseDraft(content);
-  root.actions.push(structuredClone(action));
-  return { ...content, text: JSON.stringify(root, null, 2) };
+  return appendContentAction(content, action);
 }
 export function resolveField(
   field: unknown,
@@ -175,7 +467,9 @@ export function resolveField(
   seen = new Set<string>(),
 ): Record<string, unknown> {
   if (!isObject(field)) return {};
-  const { $ref, ...own } = field;
+  const own = cloneClientJson(field);
+  const $ref = own.$ref;
+  delete own.$ref;
   if (typeof $ref !== "string") return own;
   if (!$ref.startsWith("#/") || seen.has($ref)) return own;
   const target = $ref
@@ -188,7 +482,17 @@ export function resolveField(
           : undefined,
       root,
     );
-  return { ...resolveField(target, root, new Set([...seen, $ref])), ...own };
+  const resolved = resolveField(target, root, new Set([...seen, $ref]));
+  for (const key of Object.keys(own)) {
+    Object.defineProperty(resolved, key, {
+      value: own[key],
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    rememberNumberToken(resolved, key, originalNumberToken(own, key, own[key]));
+  }
+  return resolved;
 }
 export function localToUtc(input: string): string | undefined {
   if (!input) return undefined;

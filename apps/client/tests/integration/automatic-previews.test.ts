@@ -1,0 +1,775 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Application } from "../../src/server/application";
+import { initializePreviewMetadata } from "../../src/shared/automatic-previews";
+const apps: Application[] = [],
+  dirs: string[] = [];
+const catalog = (support = true) => ({
+  devices: [
+    {
+      device_id: "cam",
+      driver_id: "test",
+      actions: [
+        {
+          type: "camera_record",
+          parameter_types: [
+            {
+              type: "photo",
+              name: "照片",
+              description: "照片",
+              preview_supported: support,
+              schema: {
+                $schema: "https://json-schema.org/draft/2020-12/schema",
+                type: "object",
+                required: ["type"],
+                properties: { type: { const: "photo" } },
+                additionalProperties: false,
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+const capture = {
+  name: "拍摄",
+  type: "camera_record",
+  device_id: "cam",
+  scheduled_at: "2026-10-10 01:00:00",
+  params: { type: "photo" },
+  policy: { max_delay_ms: 0 },
+};
+const input = () =>
+  initializePreviewMetadata(
+    { text: JSON.stringify({ name: "计划", actions: [capture] }) },
+    "enabled",
+    "original",
+  );
+function setup() {
+  const directory = mkdtempSync(join(tmpdir(), "client-previews-"));
+  dirs.push(directory);
+  writeFileSync(
+    join(directory, "device-capabilities.json"),
+    JSON.stringify(catalog()),
+  );
+  const app = new Application(directory, { next: () => 100n });
+  apps.push(app);
+  app.store.initialize();
+  return app;
+}
+afterEach(() => {
+  apps.splice(0).forEach((a) => a.store.close());
+  dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true }));
+});
+it("空白默认开启，外部正文保持尚未设置，保存独立协调", () => {
+  const app = setup();
+  expect(app.createDraft().content.automaticPreviews?.intent).toBe("enabled");
+  const external = app.createDraft({
+    text: JSON.stringify({ name: "外部", actions: [capture] }),
+  });
+  expect(external.content.automaticPreviews).toBeUndefined();
+  const draft = app.createDraft(input());
+  expect(JSON.parse(draft.content.text).actions).toHaveLength(2);
+  const saved = app.saveDraft(draft.id, draft.revision, {
+    ...input(),
+    automaticPreviews: { ...input().automaticPreviews!, intent: "disabled" },
+  });
+  expect(JSON.parse(saved.content.text).actions).toHaveLength(1);
+});
+it("重载协调所有未导出草稿并持久化，原请求和复制资料固定", () => {
+  const app = setup(),
+    one = app.createDraft(input()),
+    two = app.createDraft(input());
+  const fixed = app.exportDraft(
+    one.id,
+    one.revision,
+    one.content,
+    app.capabilities.version,
+  );
+  writeFileSync(
+    join(app.store.directory, "device-capabilities.json"),
+    JSON.stringify(catalog(false)),
+  );
+  app.reloadCapabilities();
+  expect(JSON.parse(app.draft(two.id).content.text).actions).toHaveLength(1);
+  expect(app.draft(two.id).revision).toBe(2);
+  expect(app.request(fixed.id).copyContent?.automaticPreviews?.intent).toBe(
+    "enabled",
+  );
+  expect(app.request(fixed.id).body.actions).toHaveLength(2);
+  expect(app.request(fixed.id).body).not.toHaveProperty("automaticPreviews");
+  app.store.close();
+  const reopened = new Application(app.store.directory, { next: () => 101n });
+  apps.push(reopened);
+  expect(reopened.draft(two.id).revision).toBe(2);
+  const copy = reopened.copyRequest(fixed.id);
+  expect(copy.content.automaticPreviews?.intent).toBe("enabled");
+  expect(copy.content.automaticPreviews?.namespace).not.toBe(
+    one.content.automaticPreviews?.namespace,
+  );
+});
+it("失败加载保留关联且阻止依赖能力的首次导出，同 generation 的跨重启版本不可复用", () => {
+  const app = setup(),
+    d = app.createDraft(input()),
+    version = app.capabilities.version;
+  writeFileSync(join(app.store.directory, "device-capabilities.json"), "{");
+  app.reloadCapabilities();
+  expect(app.draft(d.id).content).toEqual(d.content);
+  expect(() =>
+    app.exportDraft(d.id, d.revision, d.content, version),
+  ).toThrowError(expect.objectContaining({ code: "capabilities_unavailable" }));
+  writeFileSync(
+    join(app.store.directory, "device-capabilities.json"),
+    JSON.stringify(catalog(false)),
+  );
+  app.store.close();
+  const reopened = new Application(app.store.directory, { next: () => 101n });
+  apps.push(reopened);
+  const current = reopened.draft(d.id);
+  expect(reopened.capabilities.version).not.toBe(version);
+  expect(() =>
+    reopened.exportDraft(
+      current.id,
+      current.revision,
+      current.content,
+      version,
+    ),
+  ).toThrowError(expect.objectContaining({ code: "capabilities_changed" }));
+});
+it("导出只接受完整保存版本，事务失败不保存请求或复制资料", () => {
+  const app = setup(),
+    d = app.createDraft(input());
+  expect(() =>
+    app.exportDraft(
+      d.id,
+      d.revision,
+      {
+        ...d.content,
+        automaticPreviews: { ...d.content.automaticPreviews!, intent: "unset" },
+      },
+      app.capabilities.version,
+    ),
+  ).toThrowError(expect.objectContaining({ code: "content_conflict" }));
+  const set = app.store.set.bind(app.store);
+  vi.spyOn(app.store, "set").mockImplementation((ns, id, value) => {
+    if (ns === "drafts") throw Error("写库失败");
+    set(ns, id, value);
+  });
+  expect(() =>
+    app.exportDraft(d.id, d.revision, d.content, app.capabilities.version),
+  ).toThrow("写库失败");
+  expect(app.store.all("requests")).toEqual([]);
+  expect(app.draft(d.id).exportedRequestId).toBeUndefined();
+});
+
+it("能力加载故障不阻止不依赖设备的开启草稿导出", () => {
+  const app = setup();
+  const c = initializePreviewMetadata(
+    {
+      text: JSON.stringify({
+        name: "同步",
+        actions: [
+          { name: "同步", type: "report_status", params: { scope: "full" } },
+        ],
+      }),
+    },
+    "enabled",
+    "sync",
+  );
+  const d = app.createDraft(c);
+  writeFileSync(join(app.store.directory, "device-capabilities.json"), "{");
+  app.reloadCapabilities();
+  expect(
+    app.exportDraft(d.id, d.revision, d.content, app.capabilities.version).body
+      .actions,
+  ).toHaveLength(1);
+});
+it("能力派生保留原始写入依据，后端追加拒绝错误完整预期", () => {
+  const app = setup(),
+    d = app.createDraft(input());
+  const user = {
+    ...d.content,
+    text: d.content.text.replace('"计划"', '"用户计划"'),
+  };
+  const saved = app.saveDraft(d.id, d.revision, user);
+  writeFileSync(
+    join(app.store.directory, "device-capabilities.json"),
+    JSON.stringify(catalog(false)),
+  );
+  app.reloadCapabilities();
+  const actual = app.draft(d.id);
+  expect(actual.lastWrite).toEqual({
+    revision: 2,
+    input: user,
+    content: saved.content,
+  });
+  expect(actual.revision).toBe(3);
+  expect(() =>
+    app.appendAction(
+      d.id,
+      actual.revision,
+      { name: "报告", type: "report_status" },
+      {
+        ...actual.content,
+        automaticPreviews: {
+          ...actual.content.automaticPreviews!,
+          intent: "disabled",
+        },
+      },
+      app.capabilities.version,
+    ),
+  ).toThrowError(expect.objectContaining({ code: "content_conflict" }));
+  expect(app.draft(d.id)).toEqual(actual);
+});
+it("复制动作和草稿使用独立身份，未完成资料保持对应", () => {
+  const app = setup(),
+    d = app.createDraft(input());
+  const copied = app.copyAction(d.id, d.revision, 0);
+  expect(
+    JSON.parse(copied.content.text).actions.map((a: any) => a.name),
+  ).toEqual(["拍摄", "拍摄预览", "拍摄 2", "拍摄 2预览"]);
+  const other = app.copyDraft(d.id);
+  expect(other.content.automaticPreviews?.intent).toBe("enabled");
+  expect(
+    other.content.automaticPreviews?.actions.every(
+      (a) =>
+        !copied.content.automaticPreviews!.actions.some((b) => a.id === b.id),
+    ),
+  ).toBe(true);
+});
+
+it("复制原请求使用固定业务正文并继承开关，不复制输入中的旧请求身份", () => {
+  const app = setup(),
+    c = input();
+  c.text = c.text.replace(
+    '"name":"计划"',
+    '"request_id":"17","created_at":"2026-01-01 00:00:00","name":"计划"',
+  );
+  const d = app.createDraft(c),
+    r = app.exportDraft(d.id, d.revision, d.content, app.capabilities.version),
+    copy = app.copyRequest(r.id);
+  expect(JSON.parse(copy.content.text)).not.toHaveProperty("request_id");
+  expect(JSON.parse(copy.content.text)).not.toHaveProperty("created_at");
+  expect(copy.content.automaticPreviews?.intent).toBe("enabled");
+});
+it("重载写库失败回滚全部草稿且不发布新能力版本", () => {
+  const app = setup(),
+    a = app.createDraft(input()),
+    b = app.createDraft(input()),
+    k = app.capabilities;
+  writeFileSync(
+    join(app.store.directory, "device-capabilities.json"),
+    JSON.stringify(catalog(false)),
+  );
+  const set = app.store.set.bind(app.store);
+  let writes = 0;
+  vi.spyOn(app.store, "set").mockImplementation((ns, id, value) => {
+    if (ns === "drafts" && ++writes === 2) throw Error("写库失败");
+    set(ns, id, value);
+  });
+  expect(() => app.reloadCapabilities()).toThrow("写库失败");
+  expect(app.capabilities).toBe(k);
+  expect(app.draft(a.id)).toEqual(a);
+  expect(app.draft(b.id)).toEqual(b);
+});
+it("保存响应丢失后真实重载保留可靠提交依据供会话核实", async () => {
+  const { DraftSession } = await import("../../src/web/session");
+  const app = setup(),
+    d = app.createDraft(input());
+  const session = new DraftSession(
+    d,
+    {
+      save: async (id, revision, content) => {
+        app.saveDraft(id, revision, content);
+        writeFileSync(
+          join(app.store.directory, "device-capabilities.json"),
+          JSON.stringify(catalog(false)),
+        );
+        app.reloadCapabilities();
+        session.observe(app.draft(id), undefined, app.capabilities);
+        throw Error("响应丢失");
+      },
+      read: async () => app.draft(d.id),
+    },
+    () => {},
+  );
+  session.edit({
+    ...d.content,
+    text: d.content.text.replace('"计划"', '"修改"'),
+  });
+  await session.flush();
+  expect(session.saved).toBe(true);
+  expect(session.revision).toBe(3);
+  expect(JSON.parse(session.content.text).actions).toHaveLength(1);
+  expect(session.content.text).toContain("修改");
+});
+
+it("追加响应丢失后重载通过固定完整预期与原始提交依据核实", async () => {
+  const { FollowOperation } = await import("../../src/web/followup");
+  const app = setup(),
+    d = app.createDraft(input());
+  const operation = new FollowOperation(
+    d.id,
+    { name: "报告", type: "report_status", params: { scope: "full" } },
+    {
+      capabilities: () => app.capabilities,
+      create: async () => {
+        throw Error("不应创建目标");
+      },
+      prepare: async () => app.draft(d.id),
+      append: async (id, revision, action, expected) => {
+        app.appendAction(
+          id,
+          revision,
+          action,
+          expected!.content,
+          expected!.capabilityVersion,
+        );
+        writeFileSync(
+          join(app.store.directory, "device-capabilities.json"),
+          JSON.stringify(catalog(false)),
+        );
+        app.reloadCapabilities();
+        throw Error("响应丢失");
+      },
+      read: async () => app.draft(d.id),
+    },
+  );
+  await operation.advance();
+  expect(operation.phase).toBe("done");
+  expect(operation.result?.revision).toBe(3);
+  expect(
+    JSON.parse(operation.result!.content.text).actions.map((a: any) => a.name),
+  ).toEqual(["拍摄", "报告"]);
+});
+
+it("追加遇能力变化未提交后以同目标的新可靠版本重试", async () => {
+  const { FollowOperation } = await import("../../src/web/followup");
+  const app = setup(),
+    d = app.createDraft(input());
+  let first = true;
+  const operation = new FollowOperation(
+    d.id,
+    { name: "报告", type: "report_status", params: { scope: "full" } },
+    {
+      capabilities: () => app.capabilities,
+      create: async () => {
+        throw Error("不应创建目标");
+      },
+      prepare: async () => app.draft(d.id),
+      append: async (id, revision, action, expected) => {
+        if (first) {
+          first = false;
+          writeFileSync(
+            join(app.store.directory, "device-capabilities.json"),
+            JSON.stringify(catalog(false)),
+          );
+          app.reloadCapabilities();
+        }
+        return app.appendAction(
+          id,
+          revision,
+          action,
+          expected!.content,
+          expected!.capabilityVersion,
+        );
+      },
+      read: async () => app.draft(d.id),
+    },
+  );
+  await operation.advance();
+  expect(operation.phase).toBe("not_appended");
+  expect(operation.targetId).toBe(d.id);
+  await operation.advance();
+  expect(operation.phase).toBe("done");
+  expect(operation.result?.id).toBe(d.id);
+  expect(
+    JSON.parse(operation.result!.content.text).actions.map((a: any) => a.name),
+  ).toEqual(["拍摄", "报告"]);
+});
+import { linked } from "../helpers/preview-renaming";
+import { editValue, setValue, removeAction } from "../../src/web/editing";
+import { sameContent } from "../../src/shared/automatic-previews";
+it.each(["B", "", 42, null, undefined, "pending"])(
+  "局部名称恢复经过保存重开和复制后能够首次导出 %s",
+  (temporary) => {
+    const app = setup(),
+      initial = linked(),
+      root = JSON.parse(initial.text);
+    root.actions[4].params.source.action_name = "B";
+    initial.text = JSON.stringify(root);
+    let d = app.createDraft(initial);
+    const content =
+      temporary === "pending"
+        ? editValue(d.content, ["actions", 0, "name"], '"unfinished', "json")
+        : setValue(
+            d.content,
+            ["actions", 0, "name"],
+            temporary,
+            temporary === undefined,
+          );
+    d = app.saveDraft(d.id, d.revision, content);
+    expect(d.lastWrite!.input).toEqual(content);
+    expect(() => app.exportDraft(d.id, d.revision, d.content)).toThrow();
+    expect(app.store.all("requests")).toHaveLength(0);
+    app.reloadCapabilities();
+    expect(sameContent(app.draft(d.id).content, content)).toBe(true);
+    app.store.close();
+    const reopened = new Application(app.store.directory, { next: () => 101n });
+    apps.push(reopened);
+    const current = reopened.draft(d.id);
+    const copies = [
+      current,
+      reopened.copyDraft(current.id),
+      reopened.createDraft(current.content),
+    ];
+    for (const copy of copies) {
+      const recovered = editValue(
+        copy.content,
+        ["actions", "0", "name"],
+        '"C"',
+        "json",
+      );
+      const saved = reopened.saveDraft(copy.id, copy.revision, recovered);
+      const actions = JSON.parse(saved.content.text).actions;
+      expect(
+        actions.slice(2).map((a: any) => a.params.source.action_name),
+      ).toEqual(["C", "B", "B"]);
+      expect(saved.content.automaticPreviews!.actions[2].id).toBe(
+        copy.content.automaticPreviews!.actions[2].id,
+      );
+      expect(saved.content.automaticPreviews!.actions[2].rename!.sourceId).toBe(
+        copy.content.automaticPreviews!.actions[0].id,
+      );
+    }
+    const final = reopened.draft(copies[2].id),
+      fixed = reopened.exportDraft(final.id, final.revision, final.content);
+    expect((fixed.body.actions as any[])[2].params.source.action_name).toBe(
+      "C",
+    );
+    expect(fixed.body).not.toHaveProperty("automaticPreviews");
+    expect(reopened.downloadRequest(fixed.id)).toEqual(fixed.body);
+  },
+);
+it.each(["source", "purpose", "duplicate"])(
+  "矛盾或自动未完成输入经过名称修正仍拒绝导出 %s",
+  (kind) => {
+    const app = setup(),
+      d = app.createDraft(linked());
+    let content = setValue(d.content, ["actions", 0, "name"], "B");
+    if (kind === "source")
+      content = setValue(
+        content,
+        ["actions", 2, "params", "source", "action_name"],
+        "外部",
+      );
+    if (kind === "purpose")
+      content.pending = {
+        "/actions/2/params/purpose": { kind: "json", text: '"man' },
+      };
+    if (kind === "duplicate")
+      content.automaticPreviews!.actions[3].sourceId =
+        content.automaticPreviews!.actions[0].id;
+    content = setValue(content, ["actions", "0", "name"], "C");
+    const saved = app.saveDraft(d.id, d.revision, content);
+    expect(() =>
+      app.exportDraft(saved.id, saved.revision, saved.content),
+    ).toThrow();
+    expect(app.store.all("requests")).toHaveLength(0);
+    if (kind === "purpose")
+      expect(saved.content.pending).toEqual(content.pending);
+  },
+);
+it("新增改名依据参与保存格式校验及完整导出版本比较", () => {
+  const app = setup(),
+    d = app.createDraft(linked());
+  const content = setValue(d.content, ["actions", 0, "name"], "C");
+  const malformed = structuredClone(content);
+  (malformed.automaticPreviews!.actions[2].rename as any).pending = "yes";
+  expect(() => app.saveDraft(d.id, d.revision, malformed)).toThrowError(
+    expect.objectContaining({ code: "invalid_content" }),
+  );
+  const saved = app.saveDraft(d.id, d.revision, content),
+    other = structuredClone(saved.content);
+  other.automaticPreviews!.actions[2].rename!.pending = true;
+  expect(() => app.exportDraft(saved.id, saved.revision, other)).toThrowError(
+    expect.objectContaining({ code: "content_conflict" }),
+  );
+  expect(app.store.all("requests")).toHaveLength(0);
+});
+it("时间和类型的Pointer恢复仍由共享协调处理", () => {
+  const app = setup(),
+    d = app.createDraft(linked());
+  const time = editValue(
+    d.content,
+    ["actions", "0", "scheduled_at"],
+    '"2026-10-11 01:00:00"',
+    "json",
+  );
+  const saved = app.saveDraft(d.id, d.revision, time);
+  expect(JSON.parse(saved.content.text).actions[2].scheduled_at).toBe(
+    "2026-10-11 01:00:00",
+  );
+  const unknown = editValue(
+    saved.content,
+    ["actions", "0", "type"],
+    '"future_camera"',
+    "json",
+  );
+  const preserved = app.saveDraft(saved.id, saved.revision, unknown);
+  expect(JSON.parse(preserved.content.text).actions).toHaveLength(5);
+  const known = editValue(
+    preserved.content,
+    ["actions", "0", "type"],
+    '"report_status"',
+    "json",
+  );
+  const removed = app.saveDraft(preserved.id, preserved.revision, known);
+  expect(
+    JSON.parse(removed.content.text).actions.map((a: any) => a.name),
+  ).toEqual(["A", "B", "自动B", "手动"]);
+});
+it("未知保存保留原始改名依据并在重读后确认同一提交", async () => {
+  const { DraftSession } = await import("../../src/web/session");
+  const app = setup(),
+    draft = app.createDraft(linked());
+  let readable = false;
+  const session = new DraftSession(
+    draft,
+    {
+      save: async (id, revision, content) => {
+        app.saveDraft(id, revision, content);
+        throw Error("响应丢失");
+      },
+      read: async () => {
+        if (!readable) throw Error("离线");
+        return app.draft(draft.id);
+      },
+    },
+    () => {},
+  );
+  const original = setValue(draft.content, ["actions", 0, "name"], "B");
+  session.edit(original);
+  await expect(session.flush()).rejects.toThrow();
+  expect(session.content).toEqual(original);
+  expect(session.saved).toBe(false);
+  const actual = app.draft(draft.id);
+  expect(actual.lastWrite!.input).toEqual(original);
+  app.reloadCapabilities();
+  readable = true;
+  await session.flush();
+  expect(session.saved).toBe(true);
+  session.edit(setValue(session.content, ["actions", "0", "name"], "C"));
+  await session.flush();
+  expect(
+    JSON.parse(app.draft(draft.id).content.text).actions[2].params.source
+      .action_name,
+  ).toBe("C");
+});
+it("固定原请求复制保留可靠依据并重映射身份", () => {
+  const app = setup(),
+    c = linked(),
+    root = JSON.parse(c.text);
+  root.actions[4].params.source.action_name = "B";
+  c.text = JSON.stringify(root);
+  const draft = app.createDraft(c),
+    saved = app.saveDraft(
+      draft.id,
+      draft.revision,
+      setValue(draft.content, ["actions", 0, "name"], "C"),
+    );
+  const fixed = app.exportDraft(saved.id, saved.revision, saved.content),
+    copy = app.copyRequest(fixed.id);
+  const changed = setValue(copy.content, ["actions", "0", "name"], "D");
+  expect(JSON.parse(changed.text).actions[2].params.source.action_name).toBe(
+    "D",
+  );
+  expect(changed.automaticPreviews!.actions[2].rename!.automaticId).toBe(
+    changed.automaticPreviews!.actions[2].id,
+  );
+  expect(changed.automaticPreviews!.actions[2].id).not.toBe(
+    saved.content.automaticPreviews!.actions[2].id,
+  );
+  expect(
+    (app.downloadRequest(fixed.id).actions as any[])[2].params.source
+      .action_name,
+  ).toBe("C");
+});
+it("待恢复来源复制为独立拍摄，保留原自动归属", () => {
+  const app = setup(),
+    d = app.createDraft(linked());
+  const pending = app.saveDraft(
+    d.id,
+    d.revision,
+    setValue(d.content, ["actions", 0, "name"], "B"),
+  );
+  const copy = app.copyAction(pending.id, pending.revision, 0),
+    actions = JSON.parse(copy.content.text).actions;
+  expect(actions.map((a: any) => a.name)).toEqual([
+    "B",
+    "B",
+    "自动A",
+    "自动B",
+    "手动",
+    "B 2",
+    "B 2预览",
+  ]);
+  expect(actions[2].params.source.action_name).toBe("A");
+  expect(actions[6].params.source.action_name).toBe("B 2");
+  expect(copy.content.automaticPreviews!.actions[6].sourceId).toBe(
+    copy.content.automaticPreviews!.actions[5].id,
+  );
+});
+it.each(["reopen", "copy", "recovery"])(
+  "其他动作消除冲突经过保存重开及复制仍能导出 %s",
+  (mode) => {
+    for (const operation of ["rename", "remove"]) {
+      const app = setup(),
+        initial = linked(),
+        root = JSON.parse(initial.text);
+      root.actions[4].params.source = { action_instance_id: "999" };
+      initial.text = JSON.stringify(root);
+      let d = app.createDraft(initial);
+      d = app.saveDraft(
+        d.id,
+        d.revision,
+        setValue(d.content, ["actions", 0, "name"], "B"),
+      );
+      app.store.close();
+      const reopened = new Application(app.store.directory, {
+        next: () => 101n,
+      });
+      apps.push(reopened);
+      d =
+        mode === "copy"
+          ? reopened.copyDraft(d.id)
+          : mode === "recovery"
+            ? reopened.createDraft(reopened.draft(d.id).content)
+            : reopened.draft(d.id);
+      const before = d.content.automaticPreviews!.actions[2];
+      const edited =
+        operation === "rename"
+          ? setValue(d.content, ["actions", "1", "name"], "C")
+          : removeAction(d.content, 1);
+      const saved = reopened.saveDraft(d.id, d.revision, edited),
+        meta = saved.content.automaticPreviews!,
+        auto = meta.actions.findIndex((a) => a.id === before.id);
+      expect(
+        JSON.parse(saved.content.text).actions[auto].params.source.action_name,
+      ).toBe("B");
+      expect(meta.actions[auto].sourceId).toBe(before.sourceId);
+      expect(meta.actions[auto].rename!.pending).toBe(false);
+      const fixed = reopened.exportDraft(
+        saved.id,
+        saved.revision,
+        saved.content,
+      );
+      expect(
+        (fixed.body.actions as any[])[auto].params.source.action_name,
+      ).toBe("B");
+      expect(fixed.body).not.toHaveProperty("automaticPreviews");
+      const copy = reopened.copyRequest(fixed.id),
+        changed = setValue(copy.content, ["actions", 0, "name"], "D");
+      expect(
+        JSON.parse(changed.text).actions[auto].params.source.action_name,
+      ).toBe("D");
+      expect(
+        (reopened.downloadRequest(fixed.id).actions as any[])[auto].params
+          .source.action_name,
+      ).toBe("B");
+    }
+  },
+);
+it("成功重载明确不支持时移除等待改名的自动项，失败加载仅保留", () => {
+  const app = setup();
+  let d = app.createDraft(linked());
+  d = app.saveDraft(
+    d.id,
+    d.revision,
+    setValue(d.content, ["actions", 0, "name"], "B"),
+  );
+  writeFileSync(join(app.store.directory, "device-capabilities.json"), "{");
+  app.reloadCapabilities();
+  expect(app.draft(d.id).content).toEqual(d.content);
+  writeFileSync(
+    join(app.store.directory, "device-capabilities.json"),
+    JSON.stringify(catalog(false)),
+  );
+  app.reloadCapabilities();
+  const current = app.draft(d.id);
+  expect(
+    JSON.parse(current.content.text).actions.map((a: any) => a.name),
+  ).toEqual(["B", "B", "手动"]);
+  expect(current.lastWrite!.input).toEqual(d.lastWrite!.input);
+  expect(() =>
+    app.exportDraft(current.id, current.revision, current.content),
+  ).toThrow();
+  expect(app.store.all("requests")).toHaveLength(0);
+});
+it.each([{ other: null }, { other: [] }, { other: 42 }, { other: "syntax" }])(
+  "未知关联的新字段文本可以保存重开 $other",
+  ({ other }) => {
+    const app = setup();
+    let d = app.createDraft(linked()),
+      content = setValue(d.content, ["actions", 0, "name"], "B");
+    const root = JSON.parse(content.text);
+    root.actions[1] = other;
+    content.text =
+      other === "syntax" ? '{"actions":[{"name":"A"}' : JSON.stringify(root);
+    const input = editValue(
+      content,
+      ["actions", "0", "name"],
+      '"new unfinished',
+      "json",
+    );
+    d = app.saveDraft(d.id, d.revision, input);
+    app.store.close();
+    const reopened = new Application(app.store.directory, { next: () => 101n });
+    apps.push(reopened);
+    expect(reopened.draft(d.id).content).toEqual(input);
+    expect(reopened.draft(d.id).content.text).toBe(content.text);
+    expect(reopened.draft(d.id).content.automaticPreviews).toEqual(
+      content.automaticPreviews,
+    );
+    expect(() => reopened.exportDraft(d.id, d.revision, input)).toThrow();
+    expect(reopened.store.all("requests")).toHaveLength(0);
+  },
+);
+it("其他动作恢复后未知保存以原始input核实，而非后端协调结果替换依据", async () => {
+  const { DraftSession } = await import("../../src/web/session");
+  const app = setup();
+  let d = app.createDraft(linked());
+  d = app.saveDraft(
+    d.id,
+    d.revision,
+    setValue(d.content, ["actions", 0, "name"], "B"),
+  );
+  const original = setValue(d.content, ["actions", 1, "name"], "C");
+  const session = new DraftSession(
+    d,
+    {
+      save: async (id, revision, input) => {
+        app.saveDraft(id, revision, input);
+        throw Error("响应丢失");
+      },
+      read: async () => app.draft(d.id),
+    },
+    () => {},
+  );
+  session.edit(original);
+  await session.flush();
+  const actual = app.draft(d.id);
+  expect(session.saved).toBe(true);
+  expect(actual.lastWrite!.input).toEqual(original);
+  expect(
+    JSON.parse(actual.lastWrite!.input.text).actions[2].params.source
+      .action_name,
+  ).toBe("A");
+  expect(
+    JSON.parse(actual.content.text).actions[2].params.source.action_name,
+  ).toBe("B");
+  expect(session.content).toEqual(actual.content);
+});

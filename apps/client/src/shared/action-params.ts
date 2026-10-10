@@ -3,18 +3,7 @@ import type { ValidateFunction } from "ajv";
 import type { ActionType, Issue } from "./types";
 import planSchema from "../../../../protocol/schemas/plan.schema.json";
 import { createProtocolValidator } from "./protocol-validation";
-import { isCanonicalId, isUint, schemaIssues } from "./validation";
-
-export const builtinFields: Record<
-  Exclude<ActionType, CameraActionType>,
-  readonly string[]
-> = {
-  motor_control: ["position"],
-  obtain_action_outputs: ["source", "output_ids"],
-  delete_action_outputs: ["output_ids"],
-  cancel_task: ["target"],
-  report_status: ["scope", "after_report_id"],
-};
+import { isCanonicalId, isUint, isObject } from "./validation";
 
 export function isSyncBasis(
   report: { report_id: string; to_wm: number },
@@ -28,7 +17,20 @@ export function isSyncBasis(
   );
 }
 
-type Mode = { id: string; label: string; fields: Record<string, string> };
+export type Mode = {
+  id:
+    | "action_name"
+    | "group"
+    | "action_instance_id"
+    | "plan_group"
+    | "current_plan"
+    | "plan_instance_id"
+    | "request_id"
+    | "output_ids";
+  label: string;
+  fields: Record<string, string>;
+  constants?: Record<string, unknown>;
+};
 export const sources: Mode[] = [
   {
     id: "action_name",
@@ -46,7 +48,37 @@ export const sources: Mode[] = [
     label: "指定计划实例中的组",
     fields: { plan_instance_id: "来源计划实例 ID", group: "来源组" },
   },
+  {
+    id: "current_plan",
+    label: "当前整个计划",
+    fields: {},
+    constants: { current_plan: true },
+  },
+  {
+    id: "plan_instance_id",
+    label: "指定整个计划",
+    fields: { plan_instance_id: "来源计划实例 ID" },
+  },
 ];
+export const cleanupModes: Mode[] = [
+  { id: "output_ids", label: "精确产物列表", fields: {} },
+  ...sources.filter((m) => m.id !== "group" && m.id !== "plan_group"),
+];
+
+/** 只识别引用的字段形状，值是否合法仍由协议校验判断。 */
+export function referenceMode(
+  reference: unknown,
+  modes: readonly Mode[],
+): Mode | undefined {
+  if (!isObject(reference)) return undefined;
+  return modes.find((m) => {
+    const keys = [...Object.keys(m.fields), ...Object.keys(m.constants ?? {})];
+    return (
+      keys.length === Object.keys(reference).length &&
+      keys.every((k) => Object.hasOwn(reference, k))
+    );
+  });
+}
 export const targets: Mode[] = [
   {
     id: "request_id",
@@ -78,6 +110,46 @@ const paramDefs = {
   cancel_task: "cancel_params",
   report_status: "report_params",
 } as const;
+
+/** 读取参数对象的声明字段并集；组合合法性由完整 Schema 判断。 */
+function declaredFields(schema: unknown, seen = new Set<string>()): string[] {
+  if (!isObject(schema)) return [];
+  const keys = isObject(schema.properties)
+    ? Object.keys(schema.properties)
+    : [];
+  if (
+    typeof schema.$ref === "string" &&
+    schema.$ref.startsWith("#/$defs/") &&
+    !seen.has(schema.$ref)
+  ) {
+    const name = schema.$ref.slice("#/$defs/".length);
+    keys.push(
+      ...declaredFields(
+        (planSchema.$defs as Record<string, unknown>)[name],
+        new Set([...seen, schema.$ref]),
+      ),
+    );
+  }
+  for (const keyword of ["oneOf", "anyOf", "allOf"])
+    if (Array.isArray(schema[keyword]))
+      for (const branch of schema[keyword])
+        keys.push(...declaredFields(branch, seen));
+  return [...new Set(keys)];
+}
+const parameterSchemas = createProtocolValidator();
+export const builtinFields = Object.fromEntries(
+  Object.entries(paramDefs).map(([type, def]) => {
+    // 公共注册器负责跨文档引用；这里只读取解析后的当前参数字段。
+    const parameters = parameterSchemas.getSchema(
+      `plan.schema.json#/$defs/${def}`,
+    );
+    if (!parameters) throw new Error(`公共参数定义未登记：${def}`);
+    return [type, declaredFields(parameters.schema)];
+  }),
+) as unknown as Record<
+  Exclude<ActionType, CameraActionType>,
+  readonly string[]
+>;
 
 let compiledParams: Map<string, ValidateFunction> | undefined;
 function paramValidators() {

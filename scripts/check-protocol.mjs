@@ -21,6 +21,13 @@ const validate = (schema, value, label) => {
   assert(check(value), `${label}: ${ajv.errorsText(check.errors, { separator: '\n' })}`);
 };
 
+// 这里只判断普通 JSON 解析后的外层结构；精确数字、重复键及加载语义由组件负责。
+export function checkCapabilityStructure(text) {
+  let value;
+  try { value = JSON.parse(text); } catch { return false; }
+  return Boolean(ajv.getSchema('capabilities.schema.json')(value));
+}
+
 // 原始 token 的精确十进制分类仅适配本项目的有界整数规则；JSON 语法由已有解析库处理。
 function boundedInteger(token, minimum, maximum) {
   const match = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?$/.exec(token);
@@ -140,6 +147,10 @@ function checkErrors(value, label) {
 }
 async function main() {
   const examples = join(root, 'protocol/examples');
+  const estimateCases = await json(join(examples, 'video-size-estimate/cases.json'));
+  for (const entry of estimateCases) {
+    assert.equal(checkCapabilityStructure(entry.json), entry.schema_valid, `${entry.name}: 能力结构`);
+  }
   let reports = 0, plans = 0, capabilities = 0;
   for (const file of (await readdir(examples, { recursive: true })).filter(f => f.endsWith('.json'))) {
     const absolute = join(examples, file);
@@ -217,6 +228,7 @@ async function main() {
     }
   }
   console.log(`电机共同夹具通过：${motorCases.length} 个精确输入、受理层次与报告正反例。`);
+  console.log(`视频大小估算共同夹具通过：${estimateCases.length} 个能力结构正反例；精确编码与整份加载由组件验收。`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

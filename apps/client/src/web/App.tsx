@@ -1,4 +1,6 @@
 import { Select, SelectItem, SelectFieldset } from "./Select";
+import { Dialog } from "@base-ui/react/dialog";
+import { Tabs } from "@base-ui/react/tabs";
 import { useEffect, useRef, useState, useReducer } from "react";
 import type {
   Draft,
@@ -8,16 +10,18 @@ import type {
 } from "../server/models";
 import {
   api,
-  readDraft,
+  readDraft as readObservedDraft,
   download,
   upload,
   HttpError,
   type ClientState,
 } from "./api";
-import { DraftSession, sameContent } from "./session";
+import { DraftSession, sameContent, prepareSessionsForReload } from "./session";
 import { FollowOperation } from "./followup";
 import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
+import type { EstimateReloadPhase } from "./video-estimate-state";
+import { StateObservations } from "./state-observations";
 import { DeviceGuide } from "./DeviceGuide";
 import { useFeedback } from "./feedback";
 import { RecordDetail, type Followup } from "./Records";
@@ -37,45 +41,79 @@ export function App() {
     [activeFollow, setActiveFollow] = useState<PendingFollow>(),
     [followOperations, setFollowOperations] = useState<PendingFollow[]>([]);
   const [error, setError] = useFeedback(page);
+  const [estimateReloadPhase, setEstimateReloadPhase] =
+    useState<EstimateReloadPhase>("idle");
   const [notice, setNotice] = useFeedback(page, 3000);
+  const followEntry = useRef<HTMLElement | null>(null),
+    followDestination = useRef(false),
+    draftTab = useRef<HTMLElement | null>(null),
+    plansNav = useRef<HTMLButtonElement | null>(null);
+  const captureFollowEntry = () => {
+    followEntry.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    followDestination.current = false;
+  };
   const startFollow = (input: Followup) => {
+    captureFollowEntry();
     setActiveFollow(undefined);
     setFollow(input);
   };
   const [, render] = useReducer((n) => n + 1, 0),
     sessions = useRef(new Map<string, DraftSession>()),
     deletedDrafts = useRef(new Set<string>()),
+    capabilityObservation = useRef<ClientState["capabilities"] | undefined>(
+      undefined,
+    ),
     mounted = useRef(true),
+    operationBusy = useRef(false),
+    reloadPaused = useRef(false),
     refreshing = useRef<Promise<ClientState> | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}),
     [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
-  const refresh = async () => {
-    if (refreshing.current) return refreshing.current;
-    const exportTokens = new Map(
-      [...sessions.current].map(([id, session]) => [
-        id,
-        session.exportState === "unknown" ? session.exportToken : undefined,
-      ]),
-    );
-    const request = api<ClientState>("/state")
-      .then((value) => {
-        if (value.drafts)
-          value = {
-            ...value,
-            drafts: value.drafts.filter(
-              (d) => !deletedDrafts.current.has(d.id),
-            ),
-          };
-        if (mounted.current) {
+  const [observations] = useState(
+    () =>
+      new StateObservations(
+        () => api<ClientState>("/state"),
+        () =>
+          new Map(
+            [...sessions.current].map(([id, session]) => [
+              id,
+              session.exportState === "unknown"
+                ? session.exportToken
+                : undefined,
+            ]),
+          ),
+        (value, exportTokens) => {
+          if (!mounted.current) return;
+          if (value.drafts)
+            value = {
+              ...value,
+              drafts: value.drafts.filter(
+                (d) => !deletedDrafts.current.has(d.id),
+              ),
+            };
+          capabilityObservation.current = value.capabilities;
           for (const draft of value.drafts ?? [])
             sessions.current
               .get(draft.id)
-              ?.observe(draft, exportTokens.get(draft.id));
+              ?.observe(draft, exportTokens.get(draft.id), value.capabilities);
           setState(value);
           setConnection("");
-        }
-        return value;
-      })
+        },
+        setEstimateReloadPhase,
+      ),
+  );
+  const readState = () => observations.read();
+  const readDraft = (id: string) => readObservedDraft(id, readState);
+  const refresh = async (duringReload = false) => {
+    if (reloadPaused.current && !duringReload) {
+      if (refreshing.current) return refreshing.current;
+      throw Error("能力重载正在协调状态观察");
+    }
+    if (refreshing.current) return refreshing.current;
+    const request = readState()
       .catch((e) => {
         if (mounted.current) setConnection((e as Error).message);
         throw e;
@@ -89,7 +127,9 @@ export function App() {
   useEffect(() => {
     mounted.current = true;
     void refresh().catch(() => {});
-    const timer = setInterval(() => void refresh().catch(() => {}), 900);
+    const timer = setInterval(() => {
+      if (!reloadPaused.current) void refresh().catch(() => {});
+    }, 900);
     const leave = (e: BeforeUnloadEvent) => {
       if ([...sessions.current.values()].some((s) => !s.saved)) {
         e.preventDefault();
@@ -118,6 +158,7 @@ export function App() {
         },
       );
       sessions.current.set(draft.id, s);
+      s.coordinate(capabilityObservation.current);
     }
     return s;
   };
@@ -129,13 +170,56 @@ export function App() {
     setError("");
   };
   const run = (fn: () => Promise<void>) => {
-    if (busy) return;
+    if (operationBusy.current) return;
+    operationBusy.current = true;
     setBusy(true);
     setError("");
     setNotice("");
     void fn()
       .catch((e) => setError((e as Error).message))
-      .finally(() => setBusy(false));
+      .finally(() => {
+        operationBusy.current = false;
+        setBusy(false);
+      });
+  };
+  const reloadCapabilities = async () => {
+    observations.beginReload();
+    reloadPaused.current = true;
+    let started = false;
+    try {
+      // 已发的轮询先结束；其后只有本次流程可以启动下一份状态观察。
+      await observations.settle();
+      await prepareSessionsForReload(
+        [...sessions.current.values()],
+        async () => {
+          await refresh(true);
+        },
+      );
+      started = true;
+      observations.postStarted();
+      try {
+        await api("/capabilities/reload", "POST", {});
+      } finally {
+        observations.postEnded();
+      }
+      const latest = await refresh(true);
+      setNotice(
+        latest.capabilities.error
+          ? "本次加载未成功，请查看诊断"
+          : "能力说明已重新加载，未导出草稿已按自动预览意图协调",
+      );
+    } catch (error) {
+      if (!started) {
+        observations.preparationFailed();
+        throw Error(
+          `保存或状态核实未完成，尚未开始能力重载：${(error as Error).message}`,
+        );
+      }
+      observations.reloadFailed();
+      throw Error(`能力重载已发起，结果尚待核实：${(error as Error).message}`);
+    } finally {
+      reloadPaused.current = false;
+    }
   };
   const create = async () => {
     const draft = await api<Draft>("/drafts", "POST", {});
@@ -159,7 +243,7 @@ export function App() {
     run(async () => {
       const id = session.draft.id;
       const read = async () => {
-        const latest = await api<ClientState>("/state");
+        const latest = await readState();
         if (latest.startup.state !== "ready" || !Array.isArray(latest.drafts))
           throw new Error("无法可靠读取草稿列表");
         return latest.drafts.find((d) => d.id === id);
@@ -196,13 +280,14 @@ export function App() {
     run(async () => {
       if (!current) return;
       let record: ExportedRequest;
+      current.coordinate(capabilityObservation.current);
       await current.flush();
-      current.beginExport();
+      const snapshot = current.beginExport(capabilityObservation.current);
       try {
         record = await api<ExportedRequest>(
           `/drafts/${current.draft.id}/export`,
           "POST",
-          { revision: current.revision, content: current.content },
+          snapshot,
         );
       } catch (e) {
         if (e instanceof HttpError && e.status >= 400 && e.status < 500) {
@@ -212,14 +297,13 @@ export function App() {
         current.exportUnknown();
         const actual = await current.checkExport();
         if (!actual.exportedRequestId) throw e;
-        const latest = await api<ClientState>("/state");
+        const latest = await readState();
         const existing = latest.requests?.find(
           (r) => r.id === actual.exportedRequestId,
         );
         if (!existing)
           throw new Error("已导出，但原请求暂时无法读取，请恢复连接后打开记录");
         record = existing;
-        setState(latest);
       }
       current.confirmExport(record.id);
       setState((old) =>
@@ -247,8 +331,8 @@ export function App() {
         await refresh();
         setNotice(marked ? "递交标记已保存" : "递交标记已清除");
       } catch (e) {
-        const latest = await api<ClientState>("/state");
-        setState(latest);
+        const latest = await readState();
+
         const actual = latest.requests?.find((r) => r.id === id);
         if (!actual || Boolean(actual.handedAt) !== marked) throw e;
         setNotice("已按保存记录确认递交标记");
@@ -257,6 +341,19 @@ export function App() {
   const copy = (id: string) =>
     run(async () => {
       const draft = await api<Draft>(`/requests/${id}/copy`, "POST", {});
+      openDraft(draft);
+      await refresh();
+    });
+  const copyDraft = () =>
+    run(async () => {
+      if (!current) return;
+      await current.flush();
+      if (!current.saved) throw Error("请先核实草稿保存状态");
+      const draft = await api<Draft>(
+        `/drafts/${current.draft.id}/copy`,
+        "POST",
+        {},
+      );
       openDraft(draft);
       await refresh();
     });
@@ -295,6 +392,7 @@ export function App() {
       const pending = activeFollow ?? {
         follow: follow!,
         operation: new FollowOperation(destination, action, {
+          capabilities: () => capabilityObservation.current,
           create: () => api<Draft>("/drafts", "POST", {}),
           prepare: async (id) => {
             const initial = await readDraft(id),
@@ -313,8 +411,12 @@ export function App() {
             session.lockAppend();
             return actual;
           },
-          append: (id, revision, action) =>
-            api<Draft>(`/drafts/${id}/actions`, "POST", { revision, action }),
+          append: (id, revision, action, expected) =>
+            api<Draft>(`/drafts/${id}/actions`, "POST", {
+              revision,
+              action,
+              expected,
+            }),
           read: readDraft,
         }),
       };
@@ -326,8 +428,15 @@ export function App() {
       if (pending.operation.result) {
         const updated = pending.operation.result,
           session = getSession(updated);
-        session.unlockAppend();
-        session.accept(updated);
+        try {
+          session.acceptAppend(pending.operation.transition!);
+          pending.operation.acceptanceSucceeded();
+        } catch (error) {
+          pending.operation.acceptanceFailed(error);
+          await refresh();
+          return;
+        }
+        followDestination.current = true;
         openDraft(updated);
         setFollow(undefined);
         setActiveFollow(undefined);
@@ -372,7 +481,7 @@ export function App() {
       } catch (e) {
         setUploadErrors((old) => ({ ...old, [item.id]: (e as Error).message }));
         try {
-          const latest = await api<ClientState>("/state");
+          const latest = await readState();
           const actual = latest.imports?.find((f) => f.id === item.id);
           if (actual?.status === "uploading")
             await api(`/imports/${item.id}/fail`, "POST", {
@@ -460,6 +569,115 @@ export function App() {
     ),
     records = recordsFor(state.requests ?? [], state.snapshot?.plans ?? []),
     record = records.find((r) => r.id === recordId);
+  const planContent = (
+    <div className="content-grid">
+      <section className="panel list-panel">
+        <div className="section-head">
+          <h2>{tab === "drafts" ? "草稿" : "计划记录"}</h2>
+          {tab === "drafts" && (
+            <button
+              className="primary"
+              data-testid="new-draft-button"
+              disabled={busy}
+              onClick={() => run(create)}
+            >
+              新建草稿
+            </button>
+          )}
+        </div>
+        {tab === "drafts" ? (
+          drafts.length ? (
+            drafts.map((d) => (
+              <button
+                className={`list-item ${selected === d.id ? "selected" : ""}`}
+                data-testid="draft-open-button"
+                key={d.id}
+                onClick={() => openDraft(d)}
+              >
+                <strong>
+                  {draftName(
+                    sessions.current.get(d.id)?.content.text ?? d.content.text,
+                  )}
+                </strong>
+                <span>更新于 {utcToLocal(d.updatedAt).replace("T", " ")}</span>
+              </button>
+            ))
+          ) : (
+            <Empty>从一份新草稿开始。未完成的输入也会自动保存。</Empty>
+          )
+        ) : records.length ? (
+          records.map((r) => (
+            <button
+              className={`list-item ${recordId === r.id ? "selected" : ""}`}
+              data-testid="record-open-button"
+              key={r.id}
+              onClick={() => openRecord(r.id)}
+            >
+              <strong>
+                {r.plan?.name ?? String(r.request?.body.name ?? r.id)}
+              </strong>
+              <span>{r.plan ? "主机已提供结果" : "已导出，等待报告"}</span>
+              <small>{r.id}</small>
+            </button>
+          ))
+        ) : (
+          <Empty>导出计划或导入报告后，可在这里查看记录。</Empty>
+        )}
+      </section>
+      {tab === "drafts" ? (
+        current && !current.exportedRequestId ? (
+          <Editor
+            key={selected}
+            session={current}
+            capabilities={state.capabilities.active}
+            capabilityState={state.capabilities}
+            estimateReloadPhase={estimateReloadPhase}
+            presets={state.presets ?? []}
+            reports={state.reports ?? []}
+            coverage={state.coverage ?? 0}
+            busy={busy}
+            onExport={exportDraft}
+            onDelete={() => removeDraft(current)}
+            onCopy={copyDraft}
+            checkDeletion={() => removeDraft(current, true)}
+            checkExport={() =>
+              run(async () => {
+                await refresh();
+                if (current.exportState === "unknown")
+                  throw Error(current.error);
+              })
+            }
+            savePreset={savePreset}
+          />
+        ) : (
+          <section className="panel welcome">
+            <span className="welcome-mark">▤</span>
+            <h2>把下一次拍摄安排好</h2>
+            <p>
+              新建或打开草稿，填写动作与参数。导出后，固定原请求和后续执行结果都保存在计划记录中。
+            </p>
+          </section>
+        )
+      ) : record ? (
+        <RecordDetail
+          key={record.id}
+          record={record}
+          state={state}
+          busy={busy}
+          run={run}
+          copy={copy}
+          handoff={handoff}
+          follow={startFollow}
+          open={openRecord}
+        />
+      ) : (
+        <section className="panel welcome">
+          <h2>查看一份计划记录</h2>
+          <p>选择记录，查看交接、动作结果、产物和本地视频。</p>
+        </section>
+      )}
+    </div>
+  );
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -468,6 +686,7 @@ export function App() {
         </div>
         <nav aria-label="主要入口">
           <button
+            ref={plansNav}
             data-testid="nav-plans"
             aria-current={page === "plans" ? "page" : undefined}
             onClick={() => setPage("plans")}
@@ -509,6 +728,7 @@ export function App() {
                   <button
                     disabled={busy}
                     onClick={() => {
+                      captureFollowEntry();
                       setActiveFollow(item);
                       setFollow(item.follow);
                     }}
@@ -543,9 +763,10 @@ export function App() {
         </header>
         <ErrorBox
           error={
-            connection
+            error ||
+            (connection
               ? `无法取得最新状态：${connection}。下方保留此前读取的结果。`
-              : error
+              : "")
           }
         />
         {notice && (
@@ -570,10 +791,12 @@ export function App() {
                   value={session.recoveryContent!.text}
                 />
                 <Facts value={session.recoveryContent!.pending} />
-                {Object.keys(session.recoveryContent!.actionVariants ?? {})
-                  .length > 0 && (
+                {(Object.keys(session.recoveryContent!.actionVariants ?? {})
+                  .length > 0 ||
+                  Object.keys(session.recoveryContent!.parameterVariants ?? {})
+                    .length > 0) && (
                   <p>
-                    同时保留了其他动作类型的编辑内容，保存为新草稿后可切换查看。
+                    同时保留了其他动作类型或参数类型的编辑内容，保存为新草稿后可切换查看。
                   </p>
                 )}
                 <button
@@ -617,25 +840,21 @@ export function App() {
           </div>
         )}
         {page === "plans" && (
-          <>
+          <Tabs.Root
+            value={tab}
+            onValueChange={(value) => {
+              if (value === "drafts" || value === "records") setTab(value);
+            }}
+          >
             <div className="plan-tools">
-              <div role="tablist" aria-label="计划分类">
-                <button
-                  role="tab"
-                  aria-selected={tab === "drafts"}
-                  onClick={() => setTab("drafts")}
-                >
+              <Tabs.List aria-label="计划分类" activateOnFocus>
+                <Tabs.Tab value="drafts" ref={draftTab}>
                   草稿 <span>{drafts.length}</span>
-                </button>
-                <button
-                  role="tab"
-                  data-testid="tab-records"
-                  aria-selected={tab === "records"}
-                  onClick={() => setTab("records")}
-                >
+                </Tabs.Tab>
+                <Tabs.Tab value="records" data-testid="tab-records">
                   计划记录 <span>{records.length}</span>
-                </button>
-              </div>
+                </Tabs.Tab>
+              </Tabs.List>
               <button
                 disabled={busy}
                 onClick={() =>
@@ -649,115 +868,13 @@ export function App() {
                 准备状态同步
               </button>
             </div>
-            <div className="content-grid">
-              <section className="panel list-panel">
-                <div className="section-head">
-                  <h2>{tab === "drafts" ? "草稿" : "计划记录"}</h2>
-                  {tab === "drafts" && (
-                    <button
-                      className="primary"
-                      data-testid="new-draft-button"
-                      disabled={busy}
-                      onClick={() => run(create)}
-                    >
-                      新建草稿
-                    </button>
-                  )}
-                </div>
-                {tab === "drafts" ? (
-                  drafts.length ? (
-                    drafts.map((d) => (
-                      <button
-                        className={`list-item ${selected === d.id ? "selected" : ""}`}
-                        data-testid="draft-open-button"
-                        key={d.id}
-                        onClick={() => openDraft(d)}
-                      >
-                        <strong>
-                          {draftName(
-                            sessions.current.get(d.id)?.content.text ??
-                              d.content.text,
-                          )}
-                        </strong>
-                        <span>
-                          更新于 {utcToLocal(d.updatedAt).replace("T", " ")}
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <Empty>从一份新草稿开始。未完成的输入也会自动保存。</Empty>
-                  )
-                ) : records.length ? (
-                  records.map((r) => (
-                    <button
-                      className={`list-item ${recordId === r.id ? "selected" : ""}`}
-                      data-testid="record-open-button"
-                      key={r.id}
-                      onClick={() => openRecord(r.id)}
-                    >
-                      <strong>
-                        {r.plan?.name ?? String(r.request?.body.name ?? r.id)}
-                      </strong>
-                      <span>
-                        {r.plan ? "主机已提供结果" : "已导出，等待报告"}
-                      </span>
-                      <small>{r.id}</small>
-                    </button>
-                  ))
-                ) : (
-                  <Empty>导出计划或导入报告后，可在这里查看记录。</Empty>
-                )}
-              </section>
-              {tab === "drafts" ? (
-                current && !current.exportedRequestId ? (
-                  <Editor
-                    key={selected}
-                    session={current}
-                    capabilities={state.capabilities.active}
-                    presets={state.presets ?? []}
-                    reports={state.reports ?? []}
-                    coverage={state.coverage ?? 0}
-                    busy={busy}
-                    onExport={exportDraft}
-                    onDelete={() => removeDraft(current)}
-                    checkDeletion={() => removeDraft(current, true)}
-                    checkExport={() =>
-                      run(async () => {
-                        await current.checkExport();
-                        await refresh();
-                      })
-                    }
-                    savePreset={savePreset}
-                  />
-                ) : (
-                  <section className="panel welcome">
-                    <span className="welcome-mark">▤</span>
-                    <h2>把下一次拍摄安排好</h2>
-                    <p>
-                      新建或打开草稿，填写动作与参数。导出后，固定原请求和后续执行结果都保存在计划记录中。
-                    </p>
-                  </section>
-                )
-              ) : record ? (
-                <RecordDetail
-                  key={record.id}
-                  record={record}
-                  state={state}
-                  busy={busy}
-                  run={run}
-                  copy={copy}
-                  handoff={handoff}
-                  follow={startFollow}
-                  open={openRecord}
-                />
-              ) : (
-                <section className="panel welcome">
-                  <h2>查看一份计划记录</h2>
-                  <p>选择记录，查看交接、动作结果、产物和本地视频。</p>
-                </section>
-              )}
-            </div>
-          </>
+            <Tabs.Panel value="drafts" keepMounted>
+              {tab === "drafts" && planContent}
+            </Tabs.Panel>
+            <Tabs.Panel value="records" keepMounted>
+              {tab === "records" && planContent}
+            </Tabs.Panel>
+          </Tabs.Root>
         )}
         {page === "import" && (
           <ImportPage
@@ -784,24 +901,7 @@ export function App() {
                 <h2>设备说明管理</h2>
                 <p>手工替换说明文件后，重新加载以检查并启用。</p>
               </div>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    const capabilities = await api<ClientState["capabilities"]>(
-                      "/capabilities/reload",
-                      "POST",
-                      {},
-                    );
-                    setState((old) => (old ? { ...old, capabilities } : old));
-                    setNotice(
-                      capabilities.error
-                        ? "本次加载未成功，请查看诊断"
-                        : "能力说明已重新加载；草稿内容保持，按新规则检查",
-                    );
-                  })
-                }
-              >
+              <button disabled={busy} onClick={() => run(reloadCapabilities)}>
                 重新加载能力说明
               </button>
             </div>
@@ -818,6 +918,14 @@ export function App() {
           drafts={drafts}
           busy={busy}
           close={() => setFollow(undefined)}
+          finalFocus={() => {
+            const entry = followEntry.current;
+            return !followDestination.current &&
+              entry?.isConnected &&
+              !entry.closest("[hidden], [inert]")
+              ? entry
+              : (draftTab.current ?? plansNav.current);
+          }}
           submit={addFollow}
           operation={activeFollow?.operation}
           viewTarget={() =>
@@ -829,6 +937,7 @@ export function App() {
                 setTab("drafts");
                 await refresh();
               }
+              followDestination.current = true;
               setFollow(undefined);
             })
           }
@@ -878,6 +987,7 @@ function FollowupDialog({
   submit,
   operation,
   viewTarget,
+  finalFocus,
 }: {
   follow: Followup;
   drafts: Draft[];
@@ -886,6 +996,7 @@ function FollowupDialog({
   submit: (id: string, action: Record<string, unknown>) => void;
   operation?: FollowOperation;
   viewTarget: () => void;
+  finalFocus: () => HTMLElement | null;
 }) {
   const [target, setTarget] = useState("new"),
     [name, setName] = useState(String(follow.action.name)),
@@ -911,130 +1022,150 @@ function FollowupDialog({
     };
   }, [full, follow.sync]);
   return (
-    <div className="modal-backdrop">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="follow-title"
-        className="modal panel"
-      >
-        <h2 id="follow-title">将后续动作加入草稿</h2>
-        <p>{follow.summary}</p>
-        {operation ? (
-          <>
-            <ErrorBox error={operation.error} />
-            {operation.targetId && (
-              <p className="identifier">固定目标：{operation.targetId}</p>
-            )}
-            <details>
-              <summary>查看本次固定动作与追加基线</summary>
-              <pre>
-                {JSON.stringify(
-                  { action: operation.action, baseline: operation.baseline },
-                  null,
-                  2,
-                )}
-              </pre>
-            </details>
-            {operation.actual && operation.phase === "conflict" && (
-              <details>
-                <summary>查看实际草稿记录</summary>
-                <pre>{JSON.stringify(operation.actual, null, 2)}</pre>
-              </details>
-            )}
-            <div className="button-row end">
-              <button disabled={busy} onClick={close}>
-                返回
-              </button>
-              <button disabled={busy} onClick={viewTarget}>
-                {operation.targetId ? "查看目标草稿" : "查看实际草稿列表"}
-              </button>
-              {operation.phase !== "creation_unknown" && (
-                <button
-                  className="primary"
-                  disabled={busy || operation.inProgress}
-                  onClick={() =>
-                    submit(operation.targetId ?? "new", operation.action)
-                  }
-                >
-                  {operation.phase === "unknown" ||
-                  operation.phase === "conflict"
-                    ? "重新核实追加结果"
-                    : operation.phase === "not_appended"
-                      ? "重试同一目标追加"
-                      : operation.phase === "target"
-                        ? "重试准备目标草稿"
-                        : "重新创建并追加"}
-                </button>
-              )}
-            </div>
-          </>
-        ) : (
-          <SelectFieldset disabled={busy}>
-            <label className="field">
-              动作名称
-              <input value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            {follow.sync && (
+    <Dialog.Root
+      open
+      modal
+      disablePointerDismissal
+      onOpenChange={(open, details) => {
+        if (open) return;
+        if (busy) details.cancel();
+        else close();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Viewport className="modal-backdrop">
+          <Dialog.Popup
+            className="modal panel"
+            initialFocus
+            finalFocus={finalFocus}
+          >
+            <Dialog.Title>将后续动作加入草稿</Dialog.Title>
+            <Dialog.Description>{follow.summary}</Dialog.Description>
+            {operation ? (
               <>
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={full}
-                    onChange={(e) => setFull(e.target.checked)}
-                  />
-                  重新获取完整状态
-                </label>
-                {params ? (
-                  <p className="notice">
-                    {params.scope === "full"
-                      ? "将获取完整状态；没有可用起点或已主动选择完整同步。"
-                      : `将从已完整保存的报告 ${params.after_report_id} 之后补齐。`}
-                  </p>
-                ) : (
-                  <p>正在取得可靠同步起点…</p>
+                <ErrorBox error={operation.error} />
+                {operation.targetId && (
+                  <p className="identifier">固定目标：{operation.targetId}</p>
                 )}
-                <ErrorBox error={error} />
+                <details>
+                  <summary>查看本次固定动作与追加基线</summary>
+                  <pre>
+                    {JSON.stringify(
+                      {
+                        action: operation.action,
+                        baseline: operation.baseline,
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+                {operation.actual &&
+                  (operation.phase === "conflict" ||
+                    operation.phase === "acceptance_failed") && (
+                    <details>
+                      <summary>查看实际草稿记录</summary>
+                      <pre>{JSON.stringify(operation.actual, null, 2)}</pre>
+                    </details>
+                  )}
+                <div className="button-row end">
+                  <Dialog.Close disabled={busy}>返回</Dialog.Close>
+                  <button disabled={busy} onClick={viewTarget}>
+                    {operation.targetId ? "查看目标草稿" : "查看实际草稿列表"}
+                  </button>
+                  {operation.phase !== "creation_unknown" && (
+                    <button
+                      className="primary"
+                      disabled={busy || operation.inProgress}
+                      onClick={() =>
+                        submit(operation.targetId ?? "new", operation.action)
+                      }
+                    >
+                      {operation.phase === "acceptance_failed"
+                        ? "重试接纳实际结果"
+                        : operation.phase === "unknown" ||
+                            operation.phase === "conflict"
+                          ? "重新核实追加结果"
+                          : operation.phase === "not_appended"
+                            ? "重试同一目标追加"
+                            : operation.phase === "target"
+                              ? "重试准备目标草稿"
+                              : "重新创建并追加"}
+                    </button>
+                  )}
+                </div>
               </>
+            ) : (
+              <SelectFieldset disabled={busy}>
+                <label className="field">
+                  动作名称
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </label>
+                {follow.sync && (
+                  <>
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={full}
+                        onChange={(e) => setFull(e.target.checked)}
+                      />
+                      重新获取完整状态
+                    </label>
+                    {params ? (
+                      <p className="notice">
+                        {params.scope === "full"
+                          ? "将获取完整状态；没有可用起点或已主动选择完整同步。"
+                          : `将从已完整保存的报告 ${params.after_report_id} 之后补齐。`}
+                      </p>
+                    ) : (
+                      <p>正在取得可靠同步起点…</p>
+                    )}
+                    <ErrorBox error={error} />
+                  </>
+                )}
+                <label className="field">
+                  目标草稿
+                  <Select
+                    aria-label="目标草稿"
+                    value={target}
+                    onValueChange={(selectedValue) => setTarget(selectedValue)}
+                  >
+                    <SelectItem value="new">新建一份草稿</SelectItem>
+                    {drafts.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {draftName(d.content.text)} · {d.id.slice(0, 8)}
+                      </SelectItem>
+                    ))}
+                  </Select>
+                </label>
+                <p className="muted">
+                  保留已有动作；执行时间由你在草稿中明确填写。源对象的状态继续以主机报告为准。
+                </p>
+                <div className="button-row end">
+                  <Dialog.Close disabled={busy}>返回</Dialog.Close>
+                  <button
+                    className="primary"
+                    disabled={!name || !!error || (follow.sync && !params)}
+                    onClick={() =>
+                      submit(target, {
+                        ...follow.action,
+                        name,
+                        ...(follow.sync ? { params } : {}),
+                      })
+                    }
+                  >
+                    加入草稿
+                  </button>
+                </div>
+              </SelectFieldset>
             )}
-            <label className="field">
-              目标草稿
-              <Select
-                aria-label="目标草稿"
-                value={target}
-                onValueChange={(selectedValue) => setTarget(selectedValue)}
-              >
-                <SelectItem value="new">新建一份草稿</SelectItem>
-                {drafts.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {draftName(d.content.text)} · {d.id.slice(0, 8)}
-                  </SelectItem>
-                ))}
-              </Select>
-            </label>
-            <p className="muted">
-              保留已有动作；执行时间由你在草稿中明确填写。源对象的状态继续以主机报告为准。
-            </p>
-            <div className="button-row end">
-              <button onClick={close}>返回</button>
-              <button
-                className="primary"
-                disabled={!name || !!error || (follow.sync && !params)}
-                onClick={() =>
-                  submit(target, {
-                    ...follow.action,
-                    name,
-                    ...(follow.sync ? { params } : {}),
-                  })
-                }
-              >
-                加入草稿
-              </button>
-            </div>
-          </SelectFieldset>
-        )}
-      </section>
-    </div>
+          </Dialog.Popup>
+        </Dialog.Viewport>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 function ImportPage({

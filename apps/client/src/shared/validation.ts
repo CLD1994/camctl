@@ -2,6 +2,7 @@ import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import type { ErrorObject } from "ajv";
 import type { Issue } from "./types";
+import { mathematicalInteger, originalNumberToken } from "./json";
 
 export const DIALECT = "https://json-schema.org/draft/2020-12/schema";
 export const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -25,7 +26,7 @@ export const isName = (value: unknown): value is string =>
 export function isTimestamp(value: unknown): value is string {
   if (
     typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/.test(value) ||
+    !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ||
     /[\r\n]/.test(value)
   )
     return false;
@@ -58,6 +59,39 @@ export function createValidator() {
     coerceTypes: false,
     removeAdditional: false,
     useDefaults: false,
+    passContext: true,
+  });
+  // Ajv 继续负责原生类型与 Schema 分支；此关键词只追加原词元整数性。
+  ajv.removeKeyword("type");
+  ajv.addKeyword({
+    keyword: "type",
+    schemaType: ["string", "array"],
+    errors: false,
+    validate(
+      this: { numberToken?: string } | undefined,
+      schema: string | string[],
+      data: unknown,
+      _parentSchema: unknown,
+      context?: { parentData?: unknown; parentDataProperty?: string | number },
+    ) {
+      const types = Array.isArray(schema) ? schema : [schema];
+      if (
+        typeof data !== "number" ||
+        !Number.isInteger(data) ||
+        !types.includes("integer") ||
+        types.includes("number")
+      )
+        return true;
+      const token =
+        context?.parentData === undefined
+          ? this?.numberToken
+          : originalNumberToken(
+              context.parentData,
+              context.parentDataProperty!,
+              data,
+            );
+      return token === undefined || mathematicalInteger(token);
+    },
   });
   addFormats(ajv);
   return ajv;
@@ -65,6 +99,7 @@ export function createValidator() {
 export function schemaIssues(
   errors: ErrorObject[] | null | undefined,
   prefix = "",
+  pointerPrefix = prefix ? `/${prefix}` : "",
 ): Issue[] {
   return (errors ?? []).map((error) => {
     const segments = error.instancePath
@@ -86,6 +121,17 @@ export function schemaIssues(
       path,
       code: `schema_${error.keyword}`,
       message: `${path || "输入"}：${error.message ?? "不符合规则"}`,
+      pointer:
+        pointerPrefix +
+        segments
+          .map((s) => `/${s.replace(/~/g, "~0").replace(/\//g, "~1")}`)
+          .join(""),
+      schema: {
+        instancePath: pointerPrefix + error.instancePath,
+        schemaPath: error.schemaPath,
+        keyword: error.keyword,
+        params: { ...error.params },
+      },
     };
   });
 }

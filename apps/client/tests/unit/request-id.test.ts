@@ -10,7 +10,11 @@ import {
   type RandomSource,
   type RequestIdLookup,
 } from "../../src/domain/request-id";
-import { formatProtocolTime, isUtcText, utcTextFromDate } from "../../src/domain/protocol-time";
+import {
+  formatProtocolTime,
+  isUtcText,
+  utcTextFromDate,
+} from "../../src/domain/protocol-time";
 
 class SequenceRandom implements RandomSource {
   constructor(private readonly values: bigint[]) {}
@@ -24,7 +28,10 @@ class SequenceRandom implements RandomSource {
 }
 
 class SetLookup implements RequestIdLookup {
-  constructor(private readonly used: Set<bigint>, private readonly fail = false) {}
+  constructor(
+    private readonly used: Set<bigint>,
+    private readonly fail = false,
+  ) {}
   async isUsed(id: bigint): Promise<boolean> {
     if (this.fail) {
       throw new Error("查询失败");
@@ -64,12 +71,55 @@ describe("请求身份分配", () => {
     ).rejects.toThrow(/不能当作未使用/);
   });
 
+  it.each([0, 2])(
+    "确认 %i 次冲突后查询失败保留错误依据并停止重选",
+    async (conflicts) => {
+      const queried: bigint[] = [];
+      const lookup: RequestIdLookup = {
+        async isUsed(id) {
+          queried.push(id);
+          if (queried.length === conflicts + 1)
+            throw new Error("身份索引读取中断 task6");
+          return true;
+        },
+      };
+      await expect(
+        newRequestId(new SequenceRandom([1n, 2n, 3n, 4n]), lookup),
+      ).rejects.toThrow("身份索引读取中断 task6");
+      expect(queried).toEqual(conflicts ? [1n, 2n, 3n] : [1n]);
+    },
+  );
+
+  it("随机源自身失败保留原错误且不查询候选", async () => {
+    const failure = new Error("系统随机源暂不可用 task6");
+    const queried: bigint[] = [];
+    await expect(
+      newRequestId(
+        {
+          next() {
+            throw failure;
+          },
+        },
+        {
+          async isUsed(id) {
+            queried.push(id);
+            return false;
+          },
+        },
+      ),
+    ).rejects.toBe(failure);
+    expect(queried).toEqual([]);
+  });
+
   it("越界身份拒绝", async () => {
     await expect(
       newRequestId(new SequenceRandom([0n]), new SetLookup(new Set())),
     ).rejects.toThrow(/越界/);
     await expect(
-      newRequestId(new SequenceRandom([MAX_REQUEST_ID + 1n]), new SetLookup(new Set())),
+      newRequestId(
+        new SequenceRandom([MAX_REQUEST_ID + 1n]),
+        new SetLookup(new Set()),
+      ),
     ).rejects.toThrow(/越界/);
   });
 
@@ -93,7 +143,9 @@ describe("请求身份分配", () => {
 
 describe("公共时间格式", () => {
   it("合法时间原样输出", () => {
-    expect(formatProtocolTime("2026-01-15 08:00:00")).toBe("2026-01-15 08:00:00");
+    expect(formatProtocolTime("2026-01-15 08:00:00")).toBe(
+      "2026-01-15 08:00:00",
+    );
     expect(isUtcText("2026-01-15 08:00:00")).toBe(true);
   });
 

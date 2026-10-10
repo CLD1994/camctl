@@ -7,9 +7,110 @@ import type {
 import type { Video } from "../server/models";
 import { mediaGroup } from "../shared/media";
 import { isObject } from "../shared/validation";
+import { isCameraAction } from "../shared/actions";
+
+export interface ResultActionRow {
+  action: ReportAction;
+  source?: ReportAction;
+  association?: string;
+}
+/** 只消费可靠报告关系；平铺同级组件，使归并和全部视图保持动作身份。 */
+export function resultActionRows(
+  plan: ReportPlan,
+  all = false,
+): ResultActionRow[] {
+  const actions = plan.actions ?? [];
+  const index = new Map(
+    actions.map((action) => [action.action_instance_id, action]),
+  );
+  const rows = actions.map((action): ResultActionRow => {
+    if (action.automation?.purpose !== "auto_preview")
+      return {
+        action,
+        ...(isObject(action.input_params) &&
+        action.input_params.purpose === "auto_preview"
+          ? { association: "自动取回关联尚未确认" }
+          : {}),
+      };
+    const id = action.automation.source_action_instance_id;
+    if (!id) return { action, association: "自动取回关联尚未确认" };
+    const source = index.get(id);
+    if (!source)
+      return { action, association: `等待来源动作 ${id} 的报告明细` };
+    if (!isCameraAction(source.type))
+      throw Error("自动预览报告来源不是拍摄动作");
+    return { action, source };
+  });
+  if (all) return rows;
+  const associated = new Map<string, ResultActionRow[]>();
+  for (const row of rows)
+    if (row.source) {
+      const id = row.source.action_instance_id;
+      const group = associated.get(id) ?? [];
+      group.push(row);
+      associated.set(id, group);
+    }
+  return rows
+    .filter((r) => !r.source)
+    .flatMap((row) => [
+      row,
+      ...(associated.get(row.action.action_instance_id) ?? []),
+    ]);
+}
+
+export function automaticResult(
+  action: ReportAction,
+  plans: ReportPlan[],
+  videos: Video[],
+) {
+  const products = resultProducts(action, plans, videos);
+  const stages = new Map<Delivery["status"], number>();
+  const local = new Map<Video["status"], number>();
+  let waitingPublished = 0;
+  for (const { deliveries } of products)
+    for (const { delivery, video } of deliveries) {
+      stages.set(delivery.status, (stages.get(delivery.status) ?? 0) + 1);
+      if (video) local.set(video.status, (local.get(video.status) ?? 0) + 1);
+      else if (delivery.status === "published") waitingPublished++;
+    }
+  return {
+    products,
+    ready: products.filter((p) => p.state === "ready").length,
+    repaired: products.filter(
+      (p) => p.state === "ready" && p.output?.kind === "repaired",
+    ).length,
+    problems: products.reduce((sum, p) => sum + p.problems, 0),
+    stages: [...stages].map(([status, count]) => ({ status, count })),
+    local: [...local].map(([status, count]) => ({ status, count })),
+    waitingPublished,
+    notes: resultNotes(action),
+  };
+}
+
+/** 展示报告给出的处理状态和阶段，不从终态推断设备调用。 */
+export function executionText(action: ReportAction): string {
+  if (action.status === "pending") return "动作尚未进入执行";
+  if (action.status === "running")
+    return "动作已开始处理；具体进度以报告结果为准";
+  if (action.status === "failed")
+    return action.error?.stage === "admission"
+      ? "受理校验失败，动作未执行"
+      : `动作失败，报告阶段：${action.error?.stage ?? "未提供"}；执行经历以具体结果为准`;
+  if (action.status === "succeeded")
+    return "动作已成功结束；完成依据见具体结果";
+  const status = action.status === "canceled" ? "动作已取消" : "动作已过期";
+  return action.result ||
+    action.outputs?.length ||
+    action.deliveries?.length ||
+    action.device_execution
+    ? `${status}；已报告的结果、产物和设备执行情况分别保留`
+    : `${status}；报告未提供开始经历`;
+}
 
 export function actionIssueText(action: ReportAction): string | undefined {
   const issue = action.error;
+  if (issue?.stage === "admission")
+    return `受理校验失败，未执行${typeof issue.details?.message === "string" ? `：${issue.details.message}` : "，展开查看输入问题"}`;
   if (action.type === "motor_control") {
     if (issue?.code === "motor_channel_unavailable")
       return "通知通道不可用，未开始发送控制通知";
@@ -21,7 +122,7 @@ export function actionIssueText(action: ReportAction): string | undefined {
   return issue
     ? typeof issue.details?.message === "string"
       ? issue.details.message
-      : "执行遇到问题，展开查看原因"
+      : `动作失败（${issue.code}，阶段：${issue.stage}），展开查看原因`
     : action.expiration_reason
       ? "已超过允许启动的时间范围"
       : undefined;
@@ -81,6 +182,8 @@ export interface Product {
   id: string;
   name: string;
   output?: Output;
+  original?: { id: string; output?: Output };
+  hasRepaired?: boolean;
   mediaType?: string;
   group: "image" | "video" | "other";
   state: "ready" | "attention" | "waiting";
@@ -100,14 +203,29 @@ export function resultProducts(
       .map((o) => [o.output_id, o]),
   );
   for (const o of action.outputs ?? []) outputs.set(o.output_id, o);
+  const repairedOriginals = new Set(
+    [...outputs.values()]
+      .filter((o) => o.kind === "repaired")
+      .map((o) => o.derived_from_output_id),
+  );
   const rows = new Map<string, Product>();
   const add = (id: string, name?: string) => {
     let row = rows.get(id);
     if (row) return row;
     const output = outputs.get(id);
+    const originalId =
+      output?.kind === "preview"
+        ? output.preview_of_output_id
+        : output?.kind === "repaired"
+          ? output.derived_from_output_id
+          : undefined;
     row = {
       id,
       output,
+      original: originalId
+        ? { id: originalId, output: outputs.get(originalId) }
+        : undefined,
+      hasRepaired: !!originalId && repairedOriginals.has(originalId),
       name: output?.original_name ?? name ?? "未命名文件",
       mediaType: output?.media_type,
       group: mediaGroup(output?.media_type),
@@ -153,13 +271,18 @@ export function resultProducts(
   for (const row of rows.values()) {
     row.problems = row.deliveries.filter(
       (d) =>
-        d.delivery.status === "failed" ||
+        ["failed", "canceled", "withdrawn"].includes(d.delivery.status) ||
         d.video?.status === "mismatch" ||
         d.video?.status === "unavailable",
     ).length;
     row.state = row.deliveries.some((d) => d.video?.status === "verified")
       ? "ready"
-      : row.problems
+      : row.deliveries.some(
+            (d) =>
+              d.delivery.status === "failed" ||
+              d.video?.status === "mismatch" ||
+              d.video?.status === "unavailable",
+          )
         ? "attention"
         : "waiting";
   }

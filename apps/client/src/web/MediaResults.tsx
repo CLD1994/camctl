@@ -306,6 +306,7 @@ function ProductCard({
         />
         <strong>{p.name}</strong>
       </label>
+      <ProductRelation product={p} />
       <p className="product-state">
         {p.state === "ready"
           ? "已收到 · 核验通过"
@@ -456,6 +457,32 @@ function ProductCard({
     </article>
   );
 }
+function ProductRelation({ product: p }: { product: Product }) {
+  if (!p.output) return <p>产物角色尚未确认 · {p.id}</p>;
+  return (
+    <p className="product-relation">
+      {p.output.kind === "original"
+        ? "原文件"
+        : p.output.kind === "preview"
+          ? "预览文件"
+          : "修复成品"}{" "}
+      · {p.id}
+      {p.original && (
+        <>
+          {" "}
+          · 对应原文件：{p.original.output?.original_name ?? p.original.id}
+          {!p.original.output && "（关联明细待补充）"}
+        </>
+      )}
+      {p.output.kind === "preview" && p.hasRepaired && (
+        <>；原片预览不代表修复结果。</>
+      )}
+      {p.output.kind === "repaired" && p.state === "ready" && (
+        <>；修复成品已收到。</>
+      )}
+    </p>
+  );
+}
 function ImageDialog({
   product,
   close,
@@ -508,6 +535,7 @@ function ImageDialog({
           关闭
         </button>
       </div>
+      {product && <ProductRelation product={product} />}
       {video && broken !== video.id ? (
         <img
           key={video.id}

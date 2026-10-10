@@ -1,0 +1,209 @@
+{
+  "devices": [
+    {
+      "device_id": "estimate_demo_cam0",
+      "driver_id": "fictional_estimate_camera",
+      "actions": [
+        {
+          "type": "camera_record",
+          "parameter_types": [
+            {
+              "type": "example_record",
+              "name": "演示：普通录像",
+              "description": "帧率固定为每秒30帧，可设置录像时长并选择码率档位。视频大小按档位对应的参考码率估算。",
+              "preview_supported": true,
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "example_record"
+                  },
+                  "bitrate_mode": {
+                    "title": "码率档位",
+                    "type": "string",
+                    "enum": [
+                      "standard",
+                      "high"
+                    ]
+                  },
+                  "duration_s": {
+                    "title": "录像时长",
+                    "description": "单位为秒。",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600
+                  }
+                },
+                "required": [
+                  "type",
+                  "bitrate_mode",
+                  "duration_s"
+                ],
+                "additionalProperties": false
+              },
+              "video_size_estimate": {
+                "bitrate_mbps": {
+                  "by": "/bitrate_mode",
+                  "values": {
+                    "standard": 95,
+                    "high": 130
+                  }
+                },
+                "duration": {
+                  "method": "direct",
+                  "seconds": {
+                    "source": "parameter",
+                    "path": "/duration_s"
+                  }
+                }
+              }
+            },
+            {
+              "type": "example_record_from",
+              "name": "演示：可调参考码率",
+              "description": "仅用于虚构演示。用户显式提供采用 Mbps 的参考码率与以秒计的成片时长。",
+              "preview_supported": true,
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "example_record_from"
+                  },
+                  "bitrate_mbps": {
+                    "title": "参考码率",
+                    "description": "单位为 Mbps。",
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "duration_s": {
+                    "title": "成片时长",
+                    "description": "单位为秒。",
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "type",
+                  "bitrate_mbps",
+                  "duration_s"
+                ],
+                "additionalProperties": false
+              },
+              "video_size_estimate": {
+                "bitrate_mbps": {
+                  "from": "/bitrate_mbps"
+                },
+                "duration": {
+                  "method": "direct",
+                  "seconds": {
+                    "source": "parameter",
+                    "path": "/duration_s"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "camera_timelapse",
+          "parameter_types": [
+            {
+              "type": "example_timelapse",
+              "name": "演示：按时长采集的延时摄影",
+              "description": "可设置采集持续时间和采集间隔。预计每次采集形成一帧成片，成片固定为每秒30帧，参考码率为175 Mbps。",
+              "preview_supported": true,
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "example_timelapse"
+                  },
+                  "capture_duration_s": {
+                    "title": "采集持续时间",
+                    "description": "单位为秒，表示采集过程的持续时间。",
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 86400
+                  },
+                  "interval_s": {
+                    "title": "采集间隔",
+                    "description": "单位为秒。",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60
+                  }
+                },
+                "required": [
+                  "type",
+                  "capture_duration_s",
+                  "interval_s"
+                ],
+                "additionalProperties": false
+              },
+              "video_size_estimate": {
+                "bitrate_mbps": 175,
+                "duration": {
+                  "method": "timelapse_interval",
+                  "capture_seconds": {
+                    "source": "parameter",
+                    "path": "/capture_duration_s"
+                  },
+                  "interval_seconds": {
+                    "source": "parameter",
+                    "path": "/interval_s"
+                  },
+                  "playback_fps": {
+                    "source": "constant",
+                    "value": 30
+                  }
+                }
+              }
+            },
+            {
+              "type": "example_timelapse_frames",
+              "name": "演示：按预计成片帧数的延时摄影",
+              "description": "仅用于虚构演示。预计成片帧数由用户提供，不表示独立照片数量；成片播放帧率固定为每秒30帧，参考码率为175 Mbps。",
+              "preview_supported": true,
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "example_timelapse_frames"
+                  },
+                  "frames": {
+                    "title": "预计成片帧数",
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "frames"
+                ],
+                "additionalProperties": false
+              },
+              "video_size_estimate": {
+                "bitrate_mbps": 175,
+                "duration": {
+                  "method": "timelapse_frames",
+                  "frames": {
+                    "source": "parameter",
+                    "path": "/frames"
+                  },
+                  "playback_fps": {
+                    "source": "constant",
+                    "value": 30
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

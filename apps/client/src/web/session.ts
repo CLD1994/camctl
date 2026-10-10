@@ -1,13 +1,18 @@
+import { cloneClientJson, stringifyJson } from "../shared/json";
+import {
+  sameContent,
+  coordinatePreviews,
+  type CapabilityState,
+  appendContentAction,
+} from "../shared/automatic-previews";
 import type { Draft, DraftContent } from "../server/models";
+import { classifyAppend, type VerifiedAppend } from "./followup";
+import { parseDraft } from "./editing";
 export interface DraftTransport {
   save(id: string, revision: number, content: DraftContent): Promise<Draft>;
   read(id: string): Promise<Draft>;
 }
-export const sameContent = (a: DraftContent, b: DraftContent) =>
-  a.text === b.text &&
-  JSON.stringify(a.pending ?? {}) === JSON.stringify(b.pending ?? {}) &&
-  JSON.stringify(a.actionVariants ?? {}) ===
-    JSON.stringify(b.actionVariants ?? {});
+export { sameContent } from "../shared/automatic-previews";
 type ExportState = "editable" | "exporting" | "unknown" | "exported";
 interface PendingWrite {
   revision: number;
@@ -36,13 +41,16 @@ export class DraftSession {
   private running?: Promise<void>;
   private timer?: ReturnType<typeof setTimeout>;
   private deletionFailure = "";
+  private capabilities?: CapabilityState;
+  private appendView?: (transition: VerifiedAppend) => () => void;
+  private acceptedAppend?: VerifiedAppend;
   constructor(
     readonly draft: Draft,
     private transport: DraftTransport,
     private changed: () => void,
   ) {
-    this.content = structuredClone(draft.content);
-    this.baseline = structuredClone(draft.content);
+    this.content = cloneClientJson(draft.content);
+    this.baseline = cloneClientJson(draft.content);
     this.revision = draft.revision;
     this.exportedRequestId = draft.exportedRequestId;
     if (draft.exportedRequestId) this.exportState = "exported";
@@ -90,7 +98,7 @@ export class DraftSession {
     if (actual) {
       this.observe(actual);
       if (!actual.exportedRequestId && actual.revision !== this.revision)
-        this.conflict = structuredClone(actual);
+        this.conflict = cloneClientJson(actual);
       this.changed();
       throw new Error(
         `草稿仍存在，删除未完成；请刷新页面核对后重试。${this.deletionFailure}`,
@@ -116,8 +124,21 @@ export class DraftSession {
     );
   }
   edit(content: DraftContent) {
+    this.commitEdit(this.prepareEdit(content));
+  }
+  prepareEdit(content: DraftContent) {
     if (!this.editable) throw new Error("此草稿的导出状态尚未确认或已经只读");
-    this.content = structuredClone(content);
+    const actual = cloneClientJson(
+      this.capabilities
+        ? coordinatePreviews(content, this.capabilities).content
+        : content,
+    );
+    return { content: actual, version: this.version };
+  }
+  commitEdit(prepared: { content: DraftContent; version: number }) {
+    if (!this.editable || prepared.version !== this.version)
+      throw Error("草稿状态已改变，不能接纳本次编辑");
+    this.content = cloneClientJson(prepared.content);
     this.version++;
     this.error = "";
     this.changed();
@@ -152,15 +173,8 @@ export class DraftSession {
       this.observe(actual);
       throw new Error("草稿已导出；未保存的输入已保留为可恢复内容");
     }
-    if (
-      actual.revision === pending.revision + 1 &&
-      sameContent(actual.content, pending.content)
-    ) {
-      this.revision = actual.revision;
-      this.baseline = structuredClone(actual.content);
-      this.confirmedVersion = pending.version;
-      this.pendingWrite = undefined;
-      this.conflict = undefined;
+    if (this.matchesWrite(actual, pending)) {
+      this.acceptWrite(actual, pending);
       return "saved";
     }
     if (
@@ -171,10 +185,47 @@ export class DraftSession {
       this.conflict = undefined;
       return "not_saved";
     }
-    this.conflict = structuredClone(actual);
+    this.conflict = cloneClientJson(actual);
     throw new Error(
       "保存记录与本次已知写入不一致；当前输入与后端记录均已保留，请核对冲突。",
     );
+  }
+  private matchesWrite(actual: Draft, pending: PendingWrite) {
+    if (actual.id !== this.draft.id || actual.exportedRequestId) return false;
+    if (
+      actual.revision === pending.revision + 1 &&
+      sameContent(actual.content, pending.content)
+    )
+      return true;
+    const evidence = actual.lastWrite;
+    return (
+      !!evidence &&
+      evidence.revision === pending.revision + 1 &&
+      actual.revision >= evidence.revision &&
+      sameContent(evidence.input, pending.content) &&
+      (sameContent(evidence.content, actual.content) ||
+        (!!this.capabilities &&
+          sameContent(
+            coordinatePreviews(evidence.content, this.capabilities).content,
+            actual.content,
+          )))
+    );
+  }
+  private acceptWrite(actual: Draft, pending: PendingWrite) {
+    const unchanged = this.version === pending.version;
+    this.revision = actual.revision;
+    this.baseline = cloneClientJson(actual.content);
+    if (unchanged) this.content = cloneClientJson(actual.content);
+    else if (this.capabilities)
+      this.content = coordinatePreviews(
+        this.content,
+        this.capabilities,
+      ).content;
+    this.confirmedVersion = sameContent(this.content, actual.content)
+      ? this.version
+      : pending.version;
+    this.pendingWrite = undefined;
+    this.conflict = undefined;
   }
   private async saveLoop() {
     this.error = "";
@@ -186,9 +237,9 @@ export class DraftSession {
         if (!this.editable) throw new Error("草稿不可继续保存，请核实导出结果");
         const pending: PendingWrite = {
           revision: this.revision,
-          content: structuredClone(this.content),
+          content: cloneClientJson(this.content),
           version: this.version,
-          baseline: structuredClone(this.baseline),
+          baseline: cloneClientJson(this.baseline),
         };
         this.pendingWrite = pending;
         try {
@@ -197,16 +248,9 @@ export class DraftSession {
             pending.revision,
             pending.content,
           );
-          if (
-            saved.revision !== pending.revision + 1 ||
-            !sameContent(saved.content, pending.content)
-          )
+          if (!this.matchesWrite(saved, pending))
             throw new Error("保存回执与提交内容不一致");
-          this.revision = saved.revision;
-          this.baseline = structuredClone(saved.content);
-          this.confirmedVersion = pending.version;
-          this.pendingWrite = undefined;
-          this.conflict = undefined;
+          this.acceptWrite(saved, pending);
         } catch (error) {
           const result = await this.verifyWrite();
           if (result === "not_saved") throw error;
@@ -221,16 +265,20 @@ export class DraftSession {
       this.changed();
     }
   }
-  beginExport() {
+  beginExport(capabilities = this.capabilities) {
     if (!this.editable || !this.saved) throw new Error("请先完成草稿保存");
     clearTimeout(this.timer);
     this.exportState = "exporting";
     this.exportToken++;
     this.exportSnapshot = {
       revision: this.revision,
-      content: structuredClone(this.content),
+      content: cloneClientJson(this.content),
     };
     this.changed();
+    return {
+      ...cloneClientJson(this.exportSnapshot),
+      capabilityVersion: capabilities?.version,
+    };
   }
   exportUnknown() {
     if (this.exportedRequestId) return;
@@ -257,14 +305,20 @@ export class DraftSession {
     this.recoveryContent = undefined;
     this.changed();
   }
-  observe(actual: Draft, unexportedToken?: number) {
+  observe(
+    actual: Draft,
+    unexportedToken?: number,
+    capabilities?: CapabilityState,
+  ) {
     if (actual.id !== this.draft.id) return;
+    if (actual.revision < this.revision) return;
+    if (capabilities) this.capabilities = capabilities;
     if (actual.exportedRequestId) {
       if (
         !sameContent(this.content, actual.content) &&
         this.recoveredVersion !== this.version
       )
-        this.recoveryContent = structuredClone(this.content);
+        this.recoveryContent = cloneClientJson(this.content);
       else this.confirmedVersion = this.version;
       this.pendingWrite = undefined;
       this.confirmExport(actual.exportedRequestId);
@@ -281,11 +335,70 @@ export class DraftSession {
         sameContent(actual.content, expected.content)
       )
         this.exportFailed();
-      else {
-        this.conflict = structuredClone(actual);
-        this.error = "导出结果与已知草稿基线不一致，请核对后端记录。";
+      else if (
+        expected &&
+        capabilities &&
+        actual.revision > expected.revision &&
+        sameContent(
+          coordinatePreviews(expected.content, capabilities).content,
+          actual.content,
+        )
+      ) {
+        this.exportFailed();
+        this.observe(actual, undefined, capabilities);
+      } else {
+        this.conflict = cloneClientJson(actual);
+        this.error = capabilities
+          ? "导出结果与已知草稿基线不一致，请核对后端记录。"
+          : "导出核实还需要同次能力与草稿观察，当前输入已保留。";
         this.changed();
       }
+      return;
+    }
+    if (!this.editable || this.saving || this.pendingWrite) return;
+    if (
+      actual.revision === this.revision &&
+      sameContent(actual.content, this.baseline)
+    ) {
+      this.coordinate(capabilities);
+      return;
+    }
+    if (
+      actual.revision > this.revision &&
+      capabilities &&
+      sameContent(
+        coordinatePreviews(this.baseline, capabilities).content,
+        actual.content,
+      )
+    ) {
+      const local = cloneClientJson(this.content);
+      const clean = sameContent(local, this.baseline);
+      this.revision = actual.revision;
+      this.baseline = cloneClientJson(actual.content);
+      this.content = clean
+        ? cloneClientJson(actual.content)
+        : coordinatePreviews(local, capabilities).content;
+      this.version++;
+      if (sameContent(this.content, this.baseline))
+        this.confirmedVersion = this.version;
+      this.error = "";
+      this.conflict = undefined;
+      if (!this.saved) this.schedule();
+      this.changed();
+      return;
+    }
+    this.conflict = cloneClientJson(actual);
+    this.error = "后端草稿与已确认基线不一致；当前输入和后端内容均已保留。";
+    this.changed();
+  }
+  coordinate(capabilities = this.capabilities) {
+    if (capabilities) this.capabilities = capabilities;
+    if (!capabilities || !this.editable || this.saving || this.pendingWrite)
+      return;
+    const next = coordinatePreviews(this.content, capabilities).content;
+    if (!sameContent(next, this.content)) {
+      this.edit(next);
+      this.schedule();
     }
   }
   async checkExport() {
@@ -295,8 +408,8 @@ export class DraftSession {
     return actual;
   }
   accept(draft: Draft) {
-    this.content = structuredClone(draft.content);
-    this.baseline = structuredClone(draft.content);
+    this.content = cloneClientJson(draft.content);
+    this.baseline = cloneClientJson(draft.content);
     this.revision = draft.revision;
     this.version++;
     this.confirmedVersion = this.version;
@@ -306,5 +419,122 @@ export class DraftSession {
     this.error = "";
     this.conflict = undefined;
     this.changed();
+  }
+  bindAppendView(prepare: (transition: VerifiedAppend) => () => void) {
+    this.appendView = prepare;
+    return () => {
+      if (this.appendView === prepare) this.appendView = undefined;
+    };
+  }
+  acceptAppend(input: VerifiedAppend) {
+    const transition = cloneClientJson(input),
+      { origin, baseline, actual } = transition;
+    if (
+      this.acceptedAppend &&
+      stringifyJson(this.acceptedAppend) === stringifyJson(transition)
+    )
+      return;
+    if (
+      origin.id !== this.draft.id ||
+      baseline.id !== this.draft.id ||
+      actual.id !== this.draft.id ||
+      origin.revision !== this.revision ||
+      !sameContent(origin.content, this.content) ||
+      !sameContent(origin.content, this.baseline)
+    )
+      throw Error("追加目标或完整基线版本与当前草稿不一致");
+    if (
+      this.exportState !== "editable" ||
+      this.deletionState !== "idle" ||
+      this.saving ||
+      this.pendingWrite ||
+      !this.saved
+    )
+      throw Error("当前草稿状态不能接纳追加结果");
+    let prior = origin;
+    for (const change of transition.baselineChanges) {
+      if (
+        change.actual.revision <= prior.revision ||
+        classifyAppend(
+          prior,
+          transition.action,
+          change.actual,
+          undefined,
+          change.capabilities,
+        ) !== "baseline"
+      )
+        throw Error("追加准备的基线派生版本链不可靠");
+      prior = change.actual;
+    }
+    if (
+      prior.revision !== baseline.revision ||
+      prior.id !== baseline.id ||
+      !sameContent(prior.content, baseline.content)
+    )
+      throw Error("追加准备的基线版本链未闭合");
+    if (
+      transition.index !== parseDraft(baseline.content).actions.length ||
+      !sameContent(
+        appendContentAction(baseline.content, transition.action, true),
+        transition.appended,
+      ) ||
+      transition.expected.capabilityVersion !==
+        transition.preparedCapabilities?.version ||
+      !sameContent(
+        transition.preparedCapabilities
+          ? coordinatePreviews(
+              transition.appended,
+              transition.preparedCapabilities,
+            ).content
+          : transition.appended,
+        transition.expected.content,
+      ) ||
+      classifyAppend(
+        baseline,
+        transition.action,
+        actual,
+        transition.expected,
+        transition.capabilities,
+      ) !== "appended"
+    )
+      throw Error("实际记录没有匹配固定追加转换");
+    const commitView = this.appendView?.(transition);
+    // 所有校验和副本计算均已结束；以下提交不调用可拒绝的映射检查。
+    this.content = cloneClientJson(actual.content);
+    this.baseline = cloneClientJson(actual.content);
+    this.revision = actual.revision;
+    this.version++;
+    this.confirmedVersion = this.version;
+    this.error = "";
+    this.conflict = undefined;
+    this.acceptedAppend = transition;
+    commitView?.();
+    this.appendLocked = false;
+    this.changed();
+  }
+}
+
+/** 调用方在此期间阻止新的编辑、导出、追加和删除，再发起能力重载。 */
+export async function prepareSessionsForReload(
+  sessions: DraftSession[],
+  observe: () => Promise<void>,
+) {
+  try {
+    if (sessions.some((s) => s.exportState === "unknown")) await observe();
+    for (const session of sessions) {
+      if (
+        session.deletionState === "deleted" ||
+        session.exportState === "exported"
+      )
+        continue;
+      if (!session.editable)
+        throw Error(`草稿 ${session.draft.id} 的操作结果尚未核实`);
+      await session.flush();
+      if (!session.saved) throw Error(`草稿 ${session.draft.id} 尚未可靠保存`);
+    }
+  } catch (error) {
+    throw Error(
+      `草稿保存或操作核实未完成，尚未开始能力重载：${(error as Error).message}`,
+    );
   }
 }

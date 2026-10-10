@@ -57,7 +57,34 @@
         "type",
         "parameter_types"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "camera_take_photo"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parameter_types": {
+                "items": {
+                  "not": {
+                    "required": [
+                      "video_size_estimate"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "parameter_type": {
       "type": "object",
@@ -76,6 +103,9 @@
         },
         "schema": {
           "type": "object"
+        },
+        "video_size_estimate": {
+          "$ref": "#/$defs/video_size_estimate"
         }
       },
       "required": [
@@ -84,6 +114,257 @@
         "description",
         "preview_supported",
         "schema"
+      ],
+      "additionalProperties": false
+    },
+    "positive_number": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "positive_integer": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "estimate_pointer": {
+      "type": "string",
+      "pattern": "^/(?:[^~]|~[01])*$"
+    },
+    "bitrate_mbps": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/positive_number"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/estimate_pointer"
+            }
+          },
+          "required": [
+            "from"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "by": {
+              "$ref": "#/$defs/estimate_pointer"
+            },
+            "values": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/positive_number"
+              }
+            }
+          },
+          "required": [
+            "by",
+            "values"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "estimate_quantity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "constant"
+            },
+            "value": {
+              "$ref": "#/$defs/positive_number"
+            }
+          },
+          "required": [
+            "source",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "parameter"
+            },
+            "path": {
+              "$ref": "#/$defs/estimate_pointer"
+            }
+          },
+          "required": [
+            "source",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "lookup"
+            },
+            "path": {
+              "$ref": "#/$defs/estimate_pointer"
+            },
+            "values": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/positive_number"
+              }
+            }
+          },
+          "required": [
+            "source",
+            "path",
+            "values"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "estimate_frame_quantity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "constant"
+            },
+            "value": {
+              "$ref": "#/$defs/positive_integer"
+            }
+          },
+          "required": [
+            "source",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "parameter"
+            },
+            "path": {
+              "$ref": "#/$defs/estimate_pointer"
+            }
+          },
+          "required": [
+            "source",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "lookup"
+            },
+            "path": {
+              "$ref": "#/$defs/estimate_pointer"
+            },
+            "values": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/positive_integer"
+              }
+            }
+          },
+          "required": [
+            "source",
+            "path",
+            "values"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "estimate_duration": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "direct"
+            },
+            "seconds": {
+              "$ref": "#/$defs/estimate_quantity"
+            }
+          },
+          "required": [
+            "method",
+            "seconds"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "timelapse_frames"
+            },
+            "frames": {
+              "$ref": "#/$defs/estimate_frame_quantity"
+            },
+            "playback_fps": {
+              "$ref": "#/$defs/estimate_quantity"
+            }
+          },
+          "required": [
+            "method",
+            "frames",
+            "playback_fps"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "timelapse_interval"
+            },
+            "capture_seconds": {
+              "$ref": "#/$defs/estimate_quantity"
+            },
+            "interval_seconds": {
+              "$ref": "#/$defs/estimate_quantity"
+            },
+            "playback_fps": {
+              "$ref": "#/$defs/estimate_quantity"
+            }
+          },
+          "required": [
+            "method",
+            "capture_seconds",
+            "interval_seconds",
+            "playback_fps"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "video_size_estimate": {
+      "type": "object",
+      "properties": {
+        "bitrate_mbps": {
+          "$ref": "#/$defs/bitrate_mbps"
+        },
+        "duration": {
+          "$ref": "#/$defs/estimate_duration"
+        }
+      },
+      "required": [
+        "bitrate_mbps",
+        "duration"
       ],
       "additionalProperties": false
     }

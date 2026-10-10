@@ -8,7 +8,7 @@ import {
   closeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { parseJson } from "../shared/json";
+import { parseJson, parseClientJson, stringifyJson } from "../shared/json";
 import { isCanonicalId, isPositive, isUint } from "../shared/validation";
 import { validateReport } from "../domain/reports";
 import type { StatusReport } from "../shared/types";
@@ -180,20 +180,20 @@ export class Store {
     const row = this.db()
       .prepare("SELECT value FROM records WHERE namespace=? AND id=?")
       .get(namespace, id);
-    return row ? (parseJson(row.value as string) as T) : undefined;
+    return row ? (parseClientJson(row.value as string) as T) : undefined;
   }
   all<T>(namespace: string): T[] {
     return this.db()
       .prepare("SELECT value FROM records WHERE namespace=? ORDER BY rowid")
       .all(namespace)
-      .map((row) => parseJson(row.value as string) as T);
+      .map((row) => parseClientJson(row.value as string) as T);
   }
   set(namespace: string, id: string, value: unknown): void {
     this.db()
       .prepare(
         "INSERT INTO records(namespace,id,value) VALUES(?,?,?) ON CONFLICT(namespace,id) DO UPDATE SET value=excluded.value",
       )
-      .run(namespace, id, JSON.stringify(value));
+      .run(namespace, id, stringifyJson(value));
   }
   remove(namespace: string, id: string): void {
     this.db()

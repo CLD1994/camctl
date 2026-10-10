@@ -9,6 +9,11 @@ import { AppError, errorMessage } from "./models";
 import { DataError } from "./database";
 import { byteRange } from "./range";
 import { RequestLifecycle } from "./lifecycle";
+import {
+  parseClientJson,
+  preservingJsonReplacer,
+  stringifyJson,
+} from "../shared/json";
 
 export function createHttpApp(
   application: Application,
@@ -17,6 +22,7 @@ export function createHttpApp(
 ) {
   const app = express();
   app.disable("x-powered-by");
+  app.set("json replacer", preservingJsonReplacer);
   const tracked =
     (
       handler: (
@@ -60,7 +66,17 @@ export function createHttpApp(
       res.json(await files.upload(String(req.params.id), req)),
     ),
   );
-  app.use(express.json({ limit: "32mb" }));
+  app.use(express.text({ type: "application/json", limit: "32mb" }));
+  app.use((req, _res, next) => {
+    if (typeof req.body === "string") {
+      try {
+        req.body = parseClientJson(req.body);
+      } catch (error) {
+        return next(new AppError("invalid_json", errorMessage(error)));
+      }
+    }
+    next();
+  });
   app.use((_req, res, next) => {
     if (requests.stopping)
       return res
@@ -115,6 +131,7 @@ export function createHttpApp(
         String(req.params.id),
         req.body.revision,
         req.body.content,
+        req.body.capabilityVersion ?? null,
       ),
     ),
   );
@@ -124,6 +141,20 @@ export function createHttpApp(
         String(req.params.id),
         req.body.revision,
         req.body.action,
+        req.body.expected?.content,
+        req.body.expected?.capabilityVersion,
+      ),
+    ),
+  );
+  app.post("/api/drafts/:id/copy", (req, res) =>
+    res.status(201).json(application.copyDraft(String(req.params.id))),
+  );
+  app.post("/api/drafts/:id/actions/:index/copy", (req, res) =>
+    res.json(
+      application.copyAction(
+        String(req.params.id),
+        req.body.revision,
+        Number(req.params.index),
       ),
     ),
   );
@@ -135,11 +166,8 @@ export function createHttpApp(
     res
       .type("application/json")
       .send(
-        JSON.stringify(
-          application.downloadRequest(String(req.params.id)),
-          null,
-          2,
-        ) + "\n",
+        stringifyJson(application.downloadRequest(String(req.params.id)), 2) +
+          "\n",
       );
   });
   app.post("/api/requests/:id/copy", (req, res) =>
