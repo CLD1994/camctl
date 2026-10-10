@@ -57,6 +57,24 @@ py -3.11 collect_call.py action6/011-before-sd adb -s <serial> shell 'find /mnt/
 
 ## 录像资料
 
+### Action6 的统一诊断脚本
+
+[action6_record_probe.py](action6_record_probe.py) 使用 Python 3.11，在一次执行中重新进入普通录像模式，依次发送 4K/30 fps、Pro 开启、Auto 曝光、5200 K 白平衡、0 EV、D-Log M、Wide、关闭增稳及高码率命令，然后试录、停止、列出新增文件、拉取新增 MP4、核对源端与副本的长度和 SHA-256，并保存 `ffprobe` 的实际媒体信息。光圈的命令与返回仍需资料方说明，诊断脚本将光圈标为未确认；它不替代包含光圈要求的完整预设验收。
+
+将脚本与 [collect_call.py](collect_call.py) 放在 Windows 的 `platform-tools` 目录，使用现有 Python 3.11 环境执行。明确指定相机 serial 和已安装的 `ffprobe`；例如：
+
+```powershell
+python .\action6_record_probe.py --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
+```
+
+每次执行使用新的 `action6/record-probe-<UTC 时间>` 目录，每项调用分别保留 `call.json`、`stdout.bin` 和 `stderr.bin`。脚本检查真正的工具退出码；`dji_mb_ctrl` 必须返回唯一完整的单字节 `00`，非 `00`、缺失、多段、不完整响应或非预期 stderr 都会使脚本报错并停止。已经发送的设置保留实际效果，不自动撤销或重试。START 已经尝试时，脚本在收场阶段发送一次 STOP，再结束本次试验。
+
+`simulate_device` 只核对已有样例中的属性匹配和服务连接、注册日志，码率生效仍标为未确认。十秒从启动调用返回后计算；没有实际开始、结束观察时，不把这段主机等待认作十秒有效视频。成功执行只证明本次诊断步骤及副本一致性检查完成，`summary.json` 保留实际媒体属性；设置生效、全部产物写完、驱动启用和 ARM Linux 完整验收继续按相应设备契约核实。
+
+脚本响应检查的单元测试可在容器中使用 `apps/camctl/.venv/bin/python -m unittest discover -s docs/hardware/tests/unit` 执行；测试使用采集样式和故障输入，不连接相机。
+
+### 原始调用与设备观察
+
 从交接资料中选择该相机的一套完整录像设置，逐条执行并分别保存调用结果。互斥选项只选择一项，不依次执行整张候选命令表。记录自动或手动曝光、分辨率及对应的固定设置；Action6 的画面、增稳、光圈和码率分别记录实际选择。
 
 每条设备侧设置命令通过 `collect_call.py <独立目录> adb -s <serial> shell <命令及参数>` 执行。设置明确失败时先保存该结果，结束这次试验，不继续启动。
