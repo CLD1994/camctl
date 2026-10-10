@@ -52,8 +52,11 @@ export async function api<T>(
     );
   return value as T;
 }
-export async function readDraft(id: string): Promise<Draft> {
-  const state = await api<ClientState>("/state");
+export async function readDraft(
+  id: string,
+  readState: () => Promise<ClientState>,
+): Promise<Draft> {
+  const state = await readState();
   const draft = state.drafts?.find((d) => d.id === id);
   if (!draft) throw new Error("无法读取草稿的保存结果");
   return draft;

@@ -37,6 +37,11 @@ import { DraftSession } from "./session";
 import { ActionUiIdentity } from "./action-ui-identity";
 import { actionLabel, Issues, ErrorBox } from "./common";
 import { Field, JsonField } from "./Fields";
+import {
+  estimateDraftAction,
+  type EstimateReloadPhase,
+} from "./video-estimate-state";
+import { VideoSizeEstimate } from "./VideoSizeEstimate";
 import { BuiltinFields } from "./BuiltinFields";
 import { presentIssue } from "./validation-presentation";
 import {
@@ -56,6 +61,7 @@ interface Props {
   session: DraftSession;
   capabilities: Capabilities | null;
   capabilityState: CapabilityState;
+  estimateReloadPhase: EstimateReloadPhase;
   presets: Preset[];
   reports: Array<{ report_id: string; to_wm: number }>;
   coverage: number;
@@ -1044,6 +1050,14 @@ function ActionEditor(
                 参数 JSON 尚未完成，请在上方修正后继续使用表单。
               </p>
             )}
+            <VideoSizeEstimate
+              result={estimateDraftAction(
+                content,
+                index,
+                props.capabilityState,
+                props.estimateReloadPhase,
+              )}
+            />
             <details className="preset-box">
               <summary>拍摄参数预设</summary>
               <p className="muted">

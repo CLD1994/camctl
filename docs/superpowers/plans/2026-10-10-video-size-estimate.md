@@ -538,7 +538,7 @@ pnpm run typecheck
 
 **建议文件：** 新增 `apps/client/src/web/video-estimate-state.ts`、`VideoSizeEstimate.tsx`、`tests/unit/video-estimate-state.test.ts`、`tests/integration/browser-video-estimate.test.ts`；修改 `Editor.tsx`、`App.tsx`、`style.css`。共享路径抽取确有需要时修改 `editing.ts` 并保持已有调用语义；不借此重构整个编辑器。
 
-- [ ] 先把批准设计的有序表转成适配层测试。下面的决策表自上而下，后一行只在此前未命中时适用；非视频动作隐藏优先于其他状态，能力不可用优先于相关未完成输入。
+- [x] 先把批准设计的有序表转成适配层测试。下面的决策表自上而下，后一行只在此前未命中时适用；非视频动作隐藏优先于其他状态，能力不可用优先于相关未完成输入。
 
 | 条件 | 结果和下一步 |
 | --- | --- |
@@ -556,7 +556,7 @@ pnpm run typecheck
 
 无关公共字段的问题不单独阻止估算。未完成路径必须按解码后的段和实际结构分类，不能只做字符串前缀判断：对象键 `"01"` 与数组位置不同；`/actions/0/params2` 不属于 `/actions/0/params`；当前参数内任何未完成输入都阻止估算，即使没有直接被公式引用。
 
-- [ ] 在内存草稿测试中给出相关与无关输入的最小反例，先运行确认适配层尚未实现的失败。测试能力复用任务 3产出的 `tests/unit/video-estimate-fixtures.ts`，只读内存输入。
+- [x] 在内存草稿测试中给出相关与无关输入的最小反例，先运行确认适配层尚未实现的失败。测试能力复用任务 3产出的 `tests/unit/video-estimate-fixtures.ts`，只读内存输入。
 
 ```ts
 import type { DraftContent } from "../../src/server/models";
@@ -588,13 +588,14 @@ it.each(["/name", "/actions/0/scheduled_at", "/actions/0/policy",
 
 增加非法转义、非规范数组位置、已删除动作位置和无法解析正文分支，分别断言输入原文保持、状态确定且没有数值。组合条件验证优先级：无元数据与参数非法同时出现、能力不可用与 pending 同时出现、相关与无法解释路径同时出现、明确非视频动作与全局重载同时出现。
 
-- [ ] 工作目录 `apps/client`，运行 `pnpm exec vitest run tests/unit/video-estimate-state.test.ts`。随后实现只读适配层：从一次调用的内容和能力观察读取，不缓存上次成功结果，不调用 `edit`、`save`、预览协调或持久化。非法完整正文返回明确输入原因并保留原文，不抛错击穿页面。
-- [ ] 在 `App.tsx` 增加可触发渲染的估算重载阶段，传给 Editor；不能以现有 `busy` 代替，因为它覆盖所有操作，也不能只用不触发渲染的 `reloadPaused` ref。保持现有“结束已发观察 → 保存所有会话 → 发重载 → 新观察”的顺序。
+- [x] 工作目录 `apps/client`，运行 `pnpm exec vitest run tests/unit/video-estimate-state.test.ts`。随后实现只读适配层：从一次调用的内容和能力观察读取，不缓存上次成功结果，不调用 `edit`、`save`、预览协调或持久化。非法完整正文返回明确输入原因并保留原文，不抛错击穿页面。
+- [x] 在 `App.tsx` 增加可触发渲染的估算重载阶段，传给 Editor；不能以现有 `busy` 代替，因为它覆盖所有操作，也不能只用不触发渲染的 `reloadPaused` ref。保持现有“结束已发观察 → 保存所有会话 → 发重载 → 新观察”的顺序。
 
 | 事件 | 估算阶段 |
 | --- | --- |
 | 开始准备重载 | `updating`，先撤下旧数值。 |
-| 保存准备失败，尚未发 POST | 回到 `idle`，按原观察与当前保留输入重算；保存错误照常呈现。 |
+| 从 `idle` 开始准备后失败，尚未发 POST | 回到 `idle`，按原观察与当前保留输入重算；保存错误照常呈现。 |
+| 从 `unconfirmed` 再次准备后失败，尚未发新 POST | 保留前次未核实责任和请求结束事实，回到 `unconfirmed`；后续新发的合格观察仍可确认，保存错误照常呈现。 |
 | POST 已结束且新的 `/state` 观察成功 | 接受完整观察，再进入 `idle`；按其 `active` 和 `error` 判定。 |
 | POST 或之后的观察丢失，请求结果待核实 | `unconfirmed`，保留暂停。 |
 | 待核实期间新的 `/state` 观察失败 | 保持 `unconfirmed`。 |
@@ -614,7 +615,7 @@ if (observationEpoch === currentReloadEpoch && startedAfterRequestEnded) {
 // 不以 run() 的 busy=false 或 reloadPaused=false 清除估算暂停。
 ```
 
-- [ ] 实现 `VideoSizeEstimate` 只读组件，参数为 `VideoEstimate`；在 CameraFields 参数表单与参数 JSON 的共同外层展示。`ready` 显示“预计视频大小”、约数、十进制单位、预计成片秒数、参考 Mbps 和近似说明；无法估算显示原因及相应 Schema 标题/路径。更改尺寸或编辑模式不触发保存。
+- [x] 实现 `VideoSizeEstimate` 只读组件，参数为 `VideoEstimate`；在 CameraFields 参数表单与参数 JSON 的共同外层展示。`ready` 显示“预计视频大小”、约数、十进制单位、预计成片秒数、参考 Mbps 和近似说明；无法估算显示原因及相应 Schema 标题/路径。更改尺寸或编辑模式不触发保存。
 
 ```tsx
 // 展示骨架；原因文案由结果事实生成，不暴露 duration/source 内部结构。
@@ -630,7 +631,7 @@ if (result.kind === "ready") return <div role="status">
 
 秒数和 Mbps 同样在显示时合理舍入，不改计算值。浏览器断言事实、结构和单位，不在多个层逐字绑定阅读文案。
 
-- [ ] 新建浏览器集成测试，复用 `browser-validation.test.ts` 的真实 Application、临时目录、HTTP 服务、RequestLifecycle 和 Playwright 装配模式，使用任务 1的虚构能力文件；临时文件只属于当前测试并在结束时关闭服务后清理。使用条件、事件或响应门同步，不用随机 sleep。以下完整装配与用例放在 `browser-video-estimate.test.ts`；`video-size-estimate` 定位展示区域，`video-size-value` 只在有效数值存在时出现。
+- [x] 新建浏览器集成测试，复用 `browser-validation.test.ts` 的真实 Application、临时目录、HTTP 服务、RequestLifecycle 和 Playwright 装配模式，使用任务 1的虚构能力文件；临时文件只属于当前测试并在结束时关闭服务后清理。使用条件、事件或响应门同步，不用随机 sleep。以下完整装配与用例放在 `browser-video-estimate.test.ts`；`video-size-estimate` 定位展示区域，`video-size-value` 只在有效数值存在时出现。
 
 ```ts
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
@@ -713,10 +714,10 @@ it("重载响应丢失时暂停，后续观察核实保留的旧说明后恢复"
 });
 ```
 
-- [ ] 浏览器回归按以下入口分别验证：表单填写；参数 JSON 有效→无效→修正；应用预设；设备/参数类型/动作类型切换；动作插入与删除后的身份位置；草稿关闭重开；能力首次不可用、成功替换、失败保留旧说明、响应丢失后观察恢复。为重载前观察设置延迟门，证明晚到的旧观察不解除暂停。
-- [ ] 从 Browser 层拦截 `/api/drafts/:id` 写请求，并比较真实 `app.draft(id)` 的 `revision/content`：计算、显示、折叠和切换表单/JSON本身无新增写入，自动预览资料保持原事实。用户真实编辑和既有能力协调仍可按原规则写入，测试必须分别计数，不能把所有保存都禁止。
-- [ ] 通过真实 HTTP 发送带原始数字词元的能力和参数：非法小数帧常量不能启用；合法声明引用当前非整数帧参数时无法估算；修正为数学整数后恢复。审计 server JSON replacer 与 `api.ts` 的 `parseClientJson`，不在中途用 `response.json()` 或普通 `JSON.stringify()` 丢失证据。
-- [ ] 在 `apps/client` 运行以下命令：
+- [x] 浏览器回归按以下入口分别验证：表单填写；参数 JSON 有效→无效→修正；应用预设；设备/参数类型/动作类型切换；动作插入与删除后的身份位置；草稿关闭重开；能力首次不可用、成功替换、失败保留旧说明、响应丢失后观察恢复。为重载前观察设置延迟门，证明晚到的旧观察不解除暂停。
+- [x] 从 Browser 层拦截 `/api/drafts/:id` 写请求，并比较真实 `app.draft(id)` 的 `revision/content`：计算、显示、折叠和切换表单/JSON本身无新增写入，自动预览资料保持原事实。用户真实编辑和既有能力协调仍可按原规则写入，测试必须分别计数，不能把所有保存都禁止。
+- [x] 通过真实 HTTP 发送带原始数字词元的能力和参数：非法小数帧常量不能启用；合法声明引用当前非整数帧参数时无法估算；修正为数学整数后恢复。审计 server JSON replacer 与 `api.ts` 的 `parseClientJson`，不在中途用 `response.json()` 或普通 `JSON.stringify()` 丢失证据。
+- [x] 在 `apps/client` 运行以下命令：
 
 ```powershell
 pnpm exec vitest run tests/unit/video-estimate-state.test.ts tests/unit/preview-reload.test.ts tests/unit/web-session.test.ts
@@ -724,7 +725,7 @@ pnpm run build
 pnpm exec vitest run tests/integration/browser-video-estimate.test.ts tests/integration/browser-editing.test.ts tests/integration/browser-editor-identity.test.ts tests/integration/browser-previews.test.ts tests/integration/browser-validation.test.ts
 ```
 
-- [ ] 逐项审计决定表、事件表、所有刷新与切换入口及未完成输入路径；独立评审数值撤下、恢复和写入次数，提交本任务变更，建议提交信息为 `feat: 在拍摄参数编辑中展示视频大小估算`。
+- [x] 逐项审计决定表、事件表、所有刷新与切换入口及未完成输入路径；独立评审数值撤下、恢复和写入次数，提交本任务变更，建议提交信息为 `feat: 在拍摄参数编辑中展示视频大小估算`。
 
 ## 任务 5：真实交接闭环、文档和最终门禁
 

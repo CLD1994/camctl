@@ -10,7 +10,7 @@ import type {
 } from "../server/models";
 import {
   api,
-  readDraft,
+  readDraft as readObservedDraft,
   download,
   upload,
   HttpError,
@@ -20,6 +20,8 @@ import { DraftSession, sameContent, prepareSessionsForReload } from "./session";
 import { FollowOperation } from "./followup";
 import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
+import type { EstimateReloadPhase } from "./video-estimate-state";
+import { StateObservations } from "./state-observations";
 import { DeviceGuide } from "./DeviceGuide";
 import { useFeedback } from "./feedback";
 import { RecordDetail, type Followup } from "./Records";
@@ -39,6 +41,8 @@ export function App() {
     [activeFollow, setActiveFollow] = useState<PendingFollow>(),
     [followOperations, setFollowOperations] = useState<PendingFollow[]>([]);
   const [error, setError] = useFeedback(page);
+  const [estimateReloadPhase, setEstimateReloadPhase] =
+    useState<EstimateReloadPhase>("idle");
   const [notice, setNotice] = useFeedback(page, 3000);
   const followEntry = useRef<HTMLElement | null>(null),
     followDestination = useRef(false),
@@ -68,28 +72,28 @@ export function App() {
     refreshing = useRef<Promise<ClientState> | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}),
     [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
-  const refresh = async (duringReload = false) => {
-    if (reloadPaused.current && !duringReload) {
-      if (refreshing.current) return refreshing.current;
-      throw Error("能力重载正在协调状态观察");
-    }
-    if (refreshing.current) return refreshing.current;
-    const exportTokens = new Map(
-      [...sessions.current].map(([id, session]) => [
-        id,
-        session.exportState === "unknown" ? session.exportToken : undefined,
-      ]),
-    );
-    const request = api<ClientState>("/state")
-      .then((value) => {
-        if (value.drafts)
-          value = {
-            ...value,
-            drafts: value.drafts.filter(
-              (d) => !deletedDrafts.current.has(d.id),
-            ),
-          };
-        if (mounted.current) {
+  const [observations] = useState(
+    () =>
+      new StateObservations(
+        () => api<ClientState>("/state"),
+        () =>
+          new Map(
+            [...sessions.current].map(([id, session]) => [
+              id,
+              session.exportState === "unknown"
+                ? session.exportToken
+                : undefined,
+            ]),
+          ),
+        (value, exportTokens) => {
+          if (!mounted.current) return;
+          if (value.drafts)
+            value = {
+              ...value,
+              drafts: value.drafts.filter(
+                (d) => !deletedDrafts.current.has(d.id),
+              ),
+            };
           capabilityObservation.current = value.capabilities;
           for (const draft of value.drafts ?? [])
             sessions.current
@@ -97,9 +101,19 @@ export function App() {
               ?.observe(draft, exportTokens.get(draft.id), value.capabilities);
           setState(value);
           setConnection("");
-        }
-        return value;
-      })
+        },
+        setEstimateReloadPhase,
+      ),
+  );
+  const readState = () => observations.read();
+  const readDraft = (id: string) => readObservedDraft(id, readState);
+  const refresh = async (duringReload = false) => {
+    if (reloadPaused.current && !duringReload) {
+      if (refreshing.current) return refreshing.current;
+      throw Error("能力重载正在协调状态观察");
+    }
+    if (refreshing.current) return refreshing.current;
+    const request = readState()
       .catch((e) => {
         if (mounted.current) setConnection((e as Error).message);
         throw e;
@@ -169,11 +183,12 @@ export function App() {
       });
   };
   const reloadCapabilities = async () => {
+    observations.beginReload();
     reloadPaused.current = true;
     let started = false;
     try {
       // 已发的轮询先结束；其后只有本次流程可以启动下一份状态观察。
-      if (refreshing.current) await refreshing.current;
+      await observations.settle();
       await prepareSessionsForReload(
         [...sessions.current.values()],
         async () => {
@@ -181,7 +196,12 @@ export function App() {
         },
       );
       started = true;
-      await api("/capabilities/reload", "POST", {});
+      observations.postStarted();
+      try {
+        await api("/capabilities/reload", "POST", {});
+      } finally {
+        observations.postEnded();
+      }
       const latest = await refresh(true);
       setNotice(
         latest.capabilities.error
@@ -189,10 +209,13 @@ export function App() {
           : "能力说明已重新加载，未导出草稿已按自动预览意图协调",
       );
     } catch (error) {
-      if (!started)
+      if (!started) {
+        observations.preparationFailed();
         throw Error(
           `保存或状态核实未完成，尚未开始能力重载：${(error as Error).message}`,
         );
+      }
+      observations.reloadFailed();
       throw Error(`能力重载已发起，结果尚待核实：${(error as Error).message}`);
     } finally {
       reloadPaused.current = false;
@@ -220,7 +243,7 @@ export function App() {
     run(async () => {
       const id = session.draft.id;
       const read = async () => {
-        const latest = await api<ClientState>("/state");
+        const latest = await readState();
         if (latest.startup.state !== "ready" || !Array.isArray(latest.drafts))
           throw new Error("无法可靠读取草稿列表");
         return latest.drafts.find((d) => d.id === id);
@@ -274,14 +297,13 @@ export function App() {
         current.exportUnknown();
         const actual = await current.checkExport();
         if (!actual.exportedRequestId) throw e;
-        const latest = await api<ClientState>("/state");
+        const latest = await readState();
         const existing = latest.requests?.find(
           (r) => r.id === actual.exportedRequestId,
         );
         if (!existing)
           throw new Error("已导出，但原请求暂时无法读取，请恢复连接后打开记录");
         record = existing;
-        setState(latest);
       }
       current.confirmExport(record.id);
       setState((old) =>
@@ -309,8 +331,8 @@ export function App() {
         await refresh();
         setNotice(marked ? "递交标记已保存" : "递交标记已清除");
       } catch (e) {
-        const latest = await api<ClientState>("/state");
-        setState(latest);
+        const latest = await readState();
+
         const actual = latest.requests?.find((r) => r.id === id);
         if (!actual || Boolean(actual.handedAt) !== marked) throw e;
         setNotice("已按保存记录确认递交标记");
@@ -459,7 +481,7 @@ export function App() {
       } catch (e) {
         setUploadErrors((old) => ({ ...old, [item.id]: (e as Error).message }));
         try {
-          const latest = await api<ClientState>("/state");
+          const latest = await readState();
           const actual = latest.imports?.find((f) => f.id === item.id);
           if (actual?.status === "uploading")
             await api(`/imports/${item.id}/fail`, "POST", {
@@ -609,6 +631,7 @@ export function App() {
             session={current}
             capabilities={state.capabilities.active}
             capabilityState={state.capabilities}
+            estimateReloadPhase={estimateReloadPhase}
             presets={state.presets ?? []}
             reports={state.reports ?? []}
             coverage={state.coverage ?? 0}
