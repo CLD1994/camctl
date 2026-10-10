@@ -14,6 +14,8 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Awaitable, Callable, Literal, Protocol, runtime_checkable
 
+from camctl.operations.owned_calls import current_call_scope
+
 __all__ = [
     "LocalExit",
     "ManagedProcess",
@@ -24,6 +26,7 @@ __all__ = [
     "ToolError",
     "ToolSpec",
     "ToolStartError",
+    "ToolCallCancelled",
     "execute_tool",
     "spawn_subprocess",
 ]
@@ -153,12 +156,58 @@ class ManagedProcess(Protocol):
 Spawner = Callable[[ToolSpec], Awaitable[ManagedProcess]]
 
 
+class ToolCallCancelled(asyncio.CancelledError):
+    """等待取消后的原实际结果；仅未接入业务拥有范围的调用者使用。"""
+
+    def __init__(self, outcome: RawToolOutcome):
+        super().__init__("工具等待取消，实际调用已收场")
+        self.outcome = outcome
+
+
 async def execute_tool(
     spec: ToolSpec,
     *,
     stop: StopSignal,
     spawner: Spawner | None = None,
     stdout_sink: Callable[[bytes], Awaitable[None]] | None = None,
+) -> RawToolOutcome:
+    """取消等待时沿同一次调用收场，并交接原实际结果。"""
+    scope = current_call_scope()
+    if scope is not None:
+        scope.checkpoint()
+    wait_cancel = asyncio.Event()
+    actual = asyncio.create_task(_execute_tool(
+        spec, stop=stop, wait_cancel=wait_cancel, spawner=spawner, stdout_sink=stdout_sink))
+    interrupted = None
+    while True:
+        try:
+            outcome = await asyncio.shield(actual)
+            break
+        except asyncio.CancelledError as error:
+            if actual.cancelled():
+                raise
+            if interrupted is None:
+                interrupted = error
+            wait_cancel.set()
+        except BaseException as error:
+            if interrupted is not None:
+                if scope is not None:
+                    scope.interrupted = interrupted
+                    # 尚未启动等实际错误仍交给原消费者按其类型处理和保存。
+                    raise
+                raise interrupted from error
+            raise
+    if interrupted is not None:
+        if scope is None:
+            raise ToolCallCancelled(outcome) from interrupted
+        # 原消费者继续解释、持有和保存这一份结果；范围退出再传播取消。
+        scope.interrupted = interrupted
+    return outcome
+
+
+async def _execute_tool(
+    spec: ToolSpec, *, stop: StopSignal, wait_cancel: asyncio.Event, spawner: Spawner | None,
+    stdout_sink: Callable[[bytes], Awaitable[None]] | None,
 ) -> RawToolOutcome:
     """执行一次受管工具调用并等待实际收场。
 
@@ -184,6 +233,8 @@ async def execute_tool(
         watch.add(timeout_task)
     stop_task = asyncio.ensure_future(stop.requested())
     watch.add(stop_task)
+    cancel_task = asyncio.create_task(wait_cancel.wait())
+    watch.add(cancel_task)
 
     try:
         done, _ = await asyncio.wait(watch, return_when=asyncio.FIRST_COMPLETED)
@@ -197,7 +248,7 @@ async def execute_tool(
         if exit_task not in done:
             if timeout_task is not None and timeout_task in done:
                 error = "timeout"
-            elif stop_task in done:
+            elif stop_task in done or cancel_task in done:
                 error = "cancelled"
             else:
                 error = "output_failed"
@@ -221,7 +272,7 @@ async def execute_tool(
             stderr=process.stderr,
         )
     finally:
-        watchers = [stop_task, failure_task] + ([timeout_task] if timeout_task is not None else [])
+        watchers = [stop_task, cancel_task, failure_task] + ([timeout_task] if timeout_task is not None else [])
         for watcher in watchers:
             watcher.cancel()
         await asyncio.gather(*watchers, return_exceptions=True)

@@ -15,6 +15,7 @@ from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import DeviceCallResult
 from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.validation import validate_outcome
+from camctl.operations.owned_calls import current_call_scope
 from .commands import settings_for, start_for, stop_for
 from .contracts import CameraCall
 from .filesystem import AdbFilesystem
@@ -110,6 +111,13 @@ class AdbCameraDriver:
                     or outcome.effect is not EffectState.CONFIRMED):
                 failed = replace(outcome, status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
                     error=outcome.error or ErrorValue("camera_settings_unconfirmed", "device_settings"))
+                validate_outcome(request.ticket, failed, self.contract.evidence)
+                return DeviceCallResult.from_outcome(failed)
+            scope = current_call_scope()
+            if scope is not None and scope.interrupted is not None:
+                # 当前设置实际已返回，但原等待取消后不派发下一设置或 START。
+                failed = replace(outcome, status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+                    error=ErrorValue("transport_cancelled", "transport"))
                 validate_outcome(request.ticket, failed, self.contract.evidence)
                 return DeviceCallResult.from_outcome(failed)
         raise AssertionError("相机启动组合没有实际启动步骤")

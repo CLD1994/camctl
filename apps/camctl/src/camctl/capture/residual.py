@@ -34,6 +34,7 @@ from camctl.operations.attempts import (
     StaleRunFinish,
 )
 from camctl.operations.models import ErrorValue
+from camctl.operations.owned_calls import owned_tool_call
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import ExpireActionRequest
 from camctl.persistence.repositories.capture import FinishResidualBindingFailure, RecordingFailure
@@ -307,6 +308,7 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
     return await _preflight_check(runtime, trigger, candidate)
 
 
+@owned_tool_call
 async def _preflight_check(
     runtime: Any, trigger: Mapping[str, Any], candidate: ResidualCandidate
 ) -> bool:
@@ -441,6 +443,7 @@ async def _advance_winddown(
     await _stop_residual(runtime, trigger_id, candidate)
 
 
+@owned_tool_call
 async def _stop_residual(
     runtime: Any, trigger_id: int, candidate: ResidualCandidate,
 ) -> None:
@@ -524,6 +527,7 @@ def _stop_error(candidate: ResidualCandidate, run_id: int):
                  "operation_run_id": str(run_id)})
 
 
+@owned_tool_call
 async def _confirm_by_query(
     runtime: Any, trigger_id: int, candidate: ResidualCandidate,
 ) -> bool:

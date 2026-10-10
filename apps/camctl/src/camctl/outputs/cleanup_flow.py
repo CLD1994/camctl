@@ -22,6 +22,7 @@ from typing import Any, Callable
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
+from camctl.operations.owned_calls import owned_tool_call, check_call_interruption
 
 __all__ = [
     "CancelCleanupItem",
@@ -780,6 +781,7 @@ async def _verify_before_delete(
     return CleanupStep("query_unknown")
 
 
+@owned_tool_call
 async def _delete_once(
         runtime: CleanupRuntime, item_id: int, action_id: int,
         output_id: int) -> CleanupStep:
@@ -866,6 +868,7 @@ async def _delete_once(
         if rejected is not None:
             return CleanupStep("companion_rejected", rejected)
         return CleanupStep("succeeded", choice.name)
+    check_call_interruption()
     # 在途调用已结束：取消若在此期间生效，按实际结论收场。
     if _cancel_requested(runtime.owned.connection, action_id):
         return await _settle_canceling_member(runtime, item_id, output_id)
@@ -1075,6 +1078,7 @@ def _begin_query_attempt(runtime: CleanupRuntime, item_id: int, action_id: int):
         new_operation_key(), runtime.owned)
 
 
+@owned_tool_call
 async def _run_query(runtime: CleanupRuntime, ticket, item_id: int) -> bool | None:
     """执行查询调用并保存尝试结果；返回可靠在场事实或 None。"""
     from camctl.contracts.values import new_operation_key

@@ -9,6 +9,7 @@ from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPag
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
 from camctl.operations.models import AttemptTicket, ValidatedOutcome
+from camctl.operations.owned_calls import check_call_interruption
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 
@@ -72,6 +73,7 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
             if pending.finished:
                 return True
             pending.page_no += 1
+        check_call_interruption()
         pending.in_call = True
         try:
             page = await runtime.results.list_page(pending.ticket, cursor=pending.cursor,

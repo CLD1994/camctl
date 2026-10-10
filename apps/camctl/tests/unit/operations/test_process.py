@@ -141,6 +141,67 @@ async def test_already_exited_sends_no_signal() -> None:
     assert outcome.exit == LocalExit(exit_code=0)
 
 
+@pytest.mark.parametrize("phase", ["running", "spawn", "output", "terminating"])
+async def test_coroutine_cancel_waits_original_process_and_output_and_keeps_outcome(phase):
+    spawned, spawn_release, output_release = (asyncio.Event() for _ in range(3))
+
+    class HeldProcess(FakeProcess):
+        async def wait_output(self):
+            await output_release.wait()
+
+    process = HeldProcess(b"original output")
+    process.stderr = b"original stderr"
+    stop = FakeStop()
+
+    async def spawn(spec):
+        spawned.set()
+        if phase == "spawn":
+            await spawn_release.wait()
+        return process
+
+    if phase == "output":
+        process.exit(exit_code=0)
+    task = asyncio.create_task(execute_tool(
+        _spec(grace=Decimal("0.01")), stop=stop, spawner=spawn))
+    try:
+        await spawned.wait()
+        if phase == "terminating":
+            stop.request()
+            await _within(lambda: process.terminate_requests == 1)
+        task.cancel()
+        await _within(lambda: task.done() or phase == "spawn" or
+                      phase == "output" or process.terminate_requests == 1)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert not task.done()
+        spawn_release.set()
+        if phase != "output":
+            await _within(lambda: process.kill_requests == 1)
+            assert process.terminate_requests == 1
+            task.cancel()
+            assert not task.done()
+            process.exit(signal=9)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert not task.done()
+        output_release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        raw = caught.value.outcome
+        assert raw.output == b"original output" and raw.stderr == b"original stderr"
+        if phase == "output":
+            assert raw.exit == LocalExit(exit_code=0) and raw.error is None
+            assert process.terminate_requests == process.kill_requests == 0
+        else:
+            assert raw.exit == LocalExit(signal=9) and raw.error == "cancelled"
+            assert process.terminate_requests == process.kill_requests == 1
+    finally:
+        spawn_release.set()
+        process.exit(exit_code=0)
+        output_release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_grace_exit_continues_without_kill() -> None:
     process = FakeProcess()
     stop = FakeStop()

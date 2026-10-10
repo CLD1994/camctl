@@ -21,6 +21,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
+from camctl.operations.owned_calls import owned_tool_call
+
 from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
@@ -1277,6 +1279,7 @@ def _capture_dispatch_check(runtime, action_id):
         window=runtime.window_of(current), trusted_wall_now=runtime.wall_us()).reason
 
 
+@owned_tool_call
 async def _control_call(runtime: CaptureRuntime, action, operation: str,
                         confirmed_observation: str,
                         activity_facts=None) -> HandlerOutcome:
@@ -1493,6 +1496,7 @@ def _prepare_held_start_result(runtime, pending):
     raise ConsistencyError("原调用结果缺少合法的启动准备责任")
 
 
+@owned_tool_call
 async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOutcome | None:
     """两个拍摄入口共用准备；准备结束后重新检查取消与原窗口。"""
     from camctl.capture.baseline import PreparationPhase
@@ -1527,6 +1531,7 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
     return None
 
 
+@owned_tool_call
 async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
     """将真实控制端口适配到一次启动骨架，事实时间先于保存。"""
     if runtime.last_attempt(f"start/{action['id']}") is None:
@@ -1876,6 +1881,7 @@ def _activity_id_of_connection(connection, action_id: int) -> int:
     return int(found[0])
 
 
+@owned_tool_call
 async def _stop_call(runtime: CaptureRuntime, action,
                      operation: str = "stop_recording") -> HandlerOutcome:
     """按原停止预算发起一次设备停止调用并保存尝试结果。
@@ -2529,6 +2535,7 @@ def _close_record_start(runtime, action, *, exhausted: bool, query_key: str | No
                       failure=failure)))
 
 
+@owned_tool_call
 async def _confirm_record_start(runtime, action, facts):
     """未知启动沿同一独立查询责任有限核实；空闲不证明从未启动。"""
     activity = facts.activity
@@ -3887,6 +3894,7 @@ def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
     runtime.save_held_result(ticket)
 
 
+@owned_tool_call
 async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRound:
     """同一活动的有限核实；实际返回先持有，消费者随后确定真实处置。"""
     runtime.resume_file_observations(action_id)

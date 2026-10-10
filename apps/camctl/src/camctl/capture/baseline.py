@@ -12,6 +12,7 @@ from camctl.contracts.values import ConsistencyError, OperationKey, new_operatio
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest
 from camctl.operations.models import ErrorValue
+from camctl.operations.owned_calls import check_call_interruption
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import row_facts
 
@@ -156,6 +157,7 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
     if runtime.baseline_directory is None:
         return BaselinePreparation(PreparationPhase.PENDING)
     while True:
+        check_call_interruption()
         from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
         current = row_facts(runtime.owned.connection, "actions", action_id)
         window = LaunchWindow(current["scheduled_at"], current["scheduled_at"] + current["max_delay_ms"] * 1000)
