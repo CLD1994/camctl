@@ -48,6 +48,15 @@ def expect_ack(stdout: bytes) -> None:
         raise RuntimeError(f"设备响应为 {payload.hex()}，预期为单字节 00；具体含义尚未确定")
 
 
+def assess_copy(source_before: tuple[int, str], source_after: tuple[int, str],
+                local: tuple[int, str]) -> dict[str, bool]:
+    return {
+        "size_observation_changed": source_before[0] != source_after[0],
+        "digest_observation_changed": source_before[1] != source_after[1],
+        "matches_source_after": local == source_after,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="重新配置 Action6，试录十秒并核对视频副本")
     parser.add_argument("--adb", default="./adb.exe")
@@ -101,6 +110,16 @@ def main() -> None:
             raise RuntimeError(f"{label} 的目录记录无效")
         return set(paths)
 
+    def source_facts(label, quoted):
+        size_raw = shell(label + "-size", f"test -f {quoted} && LC_ALL=C stat -c %s -- {quoted}")
+        if not re.fullmatch(rb"[0-9]+\s*", size_raw) or int(size_raw) <= 0:
+            raise RuntimeError(f"{label} 的源文件长度无效：{size_raw!r}")
+        digest_raw = shell(label + "-digest", f"LC_ALL=C sha256sum < {quoted}")
+        digest_match = re.fullmatch(rb"([0-9a-f]{64})\s+-\s*", digest_raw)
+        if digest_match is None:
+            raise RuntimeError(f"{label} 的源端摘要格式异常：{digest_raw!r}")
+        return {"bytes": int(size_raw), "sha256": digest_match[1].decode("ascii")}
+
     # 先验证本地主机工具可运行，之后才改变相机设置。
     run("00-ffprobe-version", [args.ffprobe, "-version"])
     for label, script in SETTINGS:
@@ -131,21 +150,25 @@ def main() -> None:
         source = raw_path.decode("utf-8")
         quoted = shlex.quote(source)
         prefix = f"video-{index:02d}"
-        size_raw = shell(prefix + "-size", f"test -f {quoted} && LC_ALL=C stat -c %s -- {quoted}")
-        if not re.fullmatch(rb"[0-9]+\s*", size_raw) or int(size_raw) <= 0:
-            raise RuntimeError(f"{source} 的源文件长度无效：{size_raw!r}")
-        size = int(size_raw)
-        digest_raw = shell(prefix + "-digest", f"LC_ALL=C sha256sum < {quoted}")
-        digest_match = re.fullmatch(rb"([0-9a-f]{64})\s+-\s*", digest_raw)
-        if digest_match is None:
-            raise RuntimeError(f"{source} 的源端摘要格式异常：{digest_raw!r}")
-        digest = digest_match[1].decode("ascii")
+        source_before = source_facts(prefix, quoted)
         local = (base / (prefix + ".mp4")).resolve()
         run(prefix + "-pull", [args.adb, "-s", args.serial, "pull", source, str(local)], allow_stderr=True)
         with local.open("rb") as content:
             local_digest = hashlib.file_digest(content, "sha256").hexdigest()
-        if local.stat().st_size != size or local_digest != digest:
-            raise RuntimeError(f"{local} 与已采集的源文件长度或 SHA-256 不一致")
+        local_facts = {"bytes": local.stat().st_size, "sha256": local_digest}
+        source_after = source_facts(prefix + "-after", quoted)
+        assessment = assess_copy((source_before["bytes"], source_before["sha256"]),
+                                 (source_after["bytes"], source_after["sha256"]),
+                                 (local_facts["bytes"], local_facts["sha256"]))
+        copy_record = {"source": source, "local": str(local), "source_before": source_before,
+                       "source_after": source_after, "local_facts": local_facts, **assessment}
+        copy_file = base / (prefix + "-copy.json")
+        copy_file.write_text(json.dumps(copy_record, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not assessment["matches_source_after"]:
+            raise RuntimeError(
+                f"{local} 与下载后源观测不一致：副本={local_facts}；源={source_after}；"
+                f"比对记录：{copy_file.resolve()}"
+            )
         probe_raw = run(prefix + "-ffprobe", [args.ffprobe, "-v", "error", "-show_entries",
             "stream=codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate,duration:format=format_name,duration,size",
             "-of", "json", str(local)])
@@ -154,8 +177,8 @@ def main() -> None:
         duration = Decimal(media.get("format", {}).get("duration", "NaN"))
         if not streams or not duration.is_finite() or duration <= 0:
             raise RuntimeError(f"{local} 未取得视频流或有效容器时长")
-        summaries.append({"source": source, "local": str(local), "bytes": size,
-                          "sha256": digest, "duration_s": str(duration), "video_streams": streams})
+        summaries.append({**copy_record, **local_facts,
+                          "duration_s": str(duration), "video_streams": streams})
 
     summary = {"new_files": [path.decode("utf-8") for path in new_files], "videos": summaries,
                "aperture": "unconfirmed", "bitrate_effect": "unconfirmed"}
