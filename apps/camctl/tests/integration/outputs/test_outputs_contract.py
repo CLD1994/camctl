@@ -78,7 +78,7 @@ from camctl.scheduling.rules import LaunchWindow
 
 from unit.acceptance.helpers import StubCatalog
 
-from ..capture.test_capture_contract import ResultsDouble, _EVIDENCE, _entry
+from ..capture.test_capture_contract import ResultsDouble, _PAGE_EVIDENCE, _entry
 from ..history.test_report_scope import _ActivityDriver
 from ..persistence.test_runtime import _create_valid_database
 from .test_copy_complete import _FixedDigest
@@ -186,7 +186,7 @@ def _capture_runtime(owned, photo_action: int) -> CaptureRuntime:
         driver=_ActivityDriver(activity_target=str(photo_action)),
         results=ResultsDouble({photo_action: (_entry(
             "shot-1", size=len(_CONTENT), kind=ResultFileKind.PHOTO),)}),
-        evidence=_EVIDENCE,
+        evidence=_PAGE_EVIDENCE,
         wall_us=_now_us,
         monotonic_ns=time.monotonic_ns,
         window_of=lambda action: LaunchWindow(
