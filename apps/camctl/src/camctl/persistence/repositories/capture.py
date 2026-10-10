@@ -77,6 +77,8 @@ from camctl.contracts.workflow_errors import (
     validate_error_details,
     validate_public_error,
 )
+from camctl.devices.recording_completion import completed_file_wait_source, is_completed_file_wait
+from camctl.history.decoding import decode_event_row
 from camctl.history.reads import ReadCoverage
 from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
@@ -1746,9 +1748,18 @@ class CaptureRepository:
         from .result_pages import read_page
         return read_page(ref, owned)
 
+    def read_result_page_at(self, event_id: int, owned: OwnedConnection):
+        """按历史事件读取可靠原页，不执行新的设备结果调用。"""
+        from .result_pages import read_page_at
+        return read_page_at(event_id, owned)
+
     def read_last_result_page(self, ticket, owned: OwnedConnection):
         from .result_pages import read_last_page
         return read_last_page(ticket, owned)
+
+    def read_confirmed_stop(self, result_event_id: int, owned: OwnedConnection):
+        """读取原停止结果的一致活动与时刻，不重新调用设备。"""
+        return _CaptureStopCommand.source(owned.connection, result_event_id)
 
     def read_result_file_input(self, ref, identity: str, owned: OwnedConnection, *, allow_missing=False):
         from .result_pages import read_file_input
@@ -3105,29 +3116,42 @@ class _CaptureStopCommand:
     def source(connection, result_event_id):
         if not is_json_integer(result_event_id) or result_event_id <= 0:
             raise ConsistencyError("拍摄停止须引用原实际结果事件")
-        with closing(connection.execute(
-            "SELECT event_type,occurred_at,body_json FROM history_events WHERE id=?",
-            (result_event_id,),
-        )) as cursor:
-            event = cursor.fetchone()
-        if event is None or event[0] != _ATTEMPT_RESULT_EVENT:
+        event = _history_source_event({"history_events": {
+            result_event_id: _history_source_row(connection, result_event_id)}}, result_event_id)
+        if event.event_type != _ATTEMPT_RESULT_EVENT:
             raise ConsistencyError("拍摄停止引用的事件不是实际结果")
-        rows = [row for row in parse_exact_json(event[2])["rows"] if row["table"] == "operation_attempts"]
+        rows = [row for row in event.rows if row.table == "operation_attempts"]
         if len(rows) != 1:
             raise ConsistencyError("拍摄停止结果须属于一个原尝试")
         original, = rows
-        attempt = row_facts(connection, "operation_attempts", original["id"])
+        attempt = row_facts(connection, "operation_attempts", original.row_id)
         if attempt is None or attempt["result_event_id"] != result_event_id:
             raise ConsistencyError("拍摄停止缺少原实际结果尝试")
         run = row_facts(connection, "operation_runs", attempt["run_id"])
         action = row_facts(connection, "actions", run["action_id"])
         activity = load_activity_of_action(connection, action["id"])
+        return _CaptureStopCommand.source_from_rows(event, {
+            "operation_attempts": {attempt["id"]: attempt}, "operation_runs": {run["id"]: run},
+            "actions": {action["id"]: action}, "device_activities": {activity["id"]: activity}})
+
+    @staticmethod
+    def source_from_rows(event, state):
+        """数据库读取及事件守卫复用同一原停止事实核验。"""
+        rows = [row for row in event.rows if row.table == "operation_attempts"]
+        if event.event_type != _ATTEMPT_RESULT_EVENT or len(rows) != 1:
+            raise ConsistencyError("拍摄停止引用的事件不是单次实际结果")
+        original, = rows
+        attempt = _source_fact(state, "operation_attempts", original.row_id)
+        run = _source_fact(state, "operation_runs", attempt["run_id"])
+        action = _source_fact(state, "actions", run["action_id"])
+        activity = _source_fact(state, "device_activities", run["activity_id"])
         actual = saved_outcome(attempt["status"], attempt["effect_state"], attempt["result_json"], attempt["error_json"])
-        if (not _CaptureStopCommand._confirms(run, action, activity, actual)
-                or any(not json_equal(original["after"]["values"].get(name), attempt[name])
+        if (attempt["result_event_id"] != event.event_id or activity["action_id"] != action["id"]
+                or not _CaptureStopCommand._confirms(run, action, activity, actual)
+                or any(not json_equal(original.after.values.get(name), attempt[name])
                     for name in ("status", "effect_state", "result_json", "error_json"))):
             raise ConsistencyError("原结果没有一致的拍摄停止确认")
-        return activity, event[1]
+        return activity, event.occurred_at
 
     def _observation(self, result_event_id):
         observation = {"stop_result_event_id": result_event_id}
@@ -5001,6 +5025,170 @@ class _FileOwnershipCommand:
                 ObservationDisposition.ALREADY, command.file_id))
 
 
+_HISTORY_SOURCE_COLUMNS = ("id", "transaction_id", "event_type", "event_version", "occurred_at",
+                           "clock_status", "change_seq", "body_json")
+
+
+def _history_source_row(connection, event_id):
+    """只复制引用的一条不可变原历史输入，不读取完整历史。"""
+    with closing(connection.execute(
+        "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
+        " FROM history_events WHERE id=?", (event_id,))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError("文件完成引用的原历史事实不存在")
+    boundary = read_transaction_range(connection, row[1])
+    if not boundary.first_event_id <= row[0] <= boundary.last_event_id:
+        raise ConsistencyError("文件完成原历史不属于完整事务范围")
+    return dict(zip(_HISTORY_SOURCE_COLUMNS, row))
+
+
+def _history_source_event(state, event_id):
+    stored = state.get("history_events", {}).get(event_id)
+    if (not isinstance(stored, Mapping) or set(stored) != set(_HISTORY_SOURCE_COLUMNS)
+            or not json_equal(stored.get("id"), event_id)):
+        raise ConsistencyError("文件完成缺少所引用的完整原历史输入")
+    return decode_event_row(tuple(stored[name] for name in _HISTORY_SOURCE_COLUMNS))
+
+
+def _source_fact(state, table, identity):
+    if not is_json_integer(identity) or identity <= 0:
+        raise ConsistencyError("原文件完成事实的关联身份无效")
+    facts = state.get(table, {}).get(identity)
+    if not isinstance(facts, Mapping) or not json_equal(facts.get("id"), identity):
+        raise ConsistencyError(f"文件完成缺少原关联事实: {table}#{identity}")
+    return facts
+
+
+def _verify_record_result_page(saved, page_event, action, activity, state):
+    run = _source_fact(state, "operation_runs", saved.ref.ticket.run_id)
+    attempt = _source_fact(state, "operation_attempts", page_event.evidence["attempt_id"])
+    first, last = attempt["result_first_page_event_id"], attempt["result_last_page_event_id"]
+    if (action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+            or saved.ref.ticket.target_id != str(activity["id"])
+            or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+            or run["action_id"] != action["id"] or run["activity_id"] != activity["id"]
+            or run["responsibility_key"] != f"results/{activity['id']}"
+            or attempt["run_id"] != run["id"] or attempt["attempt_no"] != saved.ref.ticket.attempt_id
+            or not is_json_integer(first) or not is_json_integer(last)
+            or not first <= page_event.event_id <= last):
+        raise ConsistencyError("完成文件的原结果页与动作、活动或可靠页范围不符")
+
+
+def _verify_stop_wait_file(facts, evidence, size, state, *, event_id=None):
+    """原页中的单文件完成与原 STOP、固定等待规则共同提供假设依据。"""
+    from .result_pages import _decode
+
+    if not isinstance(evidence, Mapping) or set(evidence) != {
+            "basis", "observation", "activity_id", "result_page_event_id", "stop_result_event_id"}:
+        raise ConsistencyError("停止后等待完成依据必须具有完整且固定的成员")
+    for field in ("activity_id", "result_page_event_id", "stop_result_event_id"):
+        ObjectId(evidence[field])
+    if evidence["basis"] != int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT):
+        raise ConsistencyError("文件完成未使用停止后等待依据")
+    page_event = _history_source_event(state, evidence["result_page_event_id"])
+    stop_event = _history_source_event(state, evidence["stop_result_event_id"])
+    if (stop_event.event_id >= page_event.event_id
+            or (event_id is not None and page_event.event_id >= event_id)):
+        raise ConsistencyError("文件完成不能引用停止前或尚未可靠保存的结果页")
+    saved, _ = _decode(page_event)
+    activity = _source_fact(state, "device_activities", evidence["activity_id"])
+    action = _source_fact(state, "actions", activity["action_id"])
+    observer = _source_fact(state, "actions", facts["observer_action_id"])
+    _verify_record_result_page(saved, page_event, action, activity, state)
+    wait_ms = action["execution_spec_json"].get("file_completion_wait_ms")
+    if not is_json_integer(wait_ms) or wait_ms <= 0:
+        raise ConsistencyError("录像没有固定的停止后文件完成等待规则")
+    stopped, _ = _CaptureStopCommand.source_from_rows(stop_event, state)
+    if stopped["id"] != activity["id"] or stopped["action_id"] != action["id"]:
+        raise ConsistencyError("完成文件的原 STOP 与录像活动、动作不符")
+    identity = parse_exact_json(facts["identity_key"])
+    binding = _capture_binding(action)
+    if (not isinstance(identity, list) or len(identity) != 3
+            or identity[:2] != list(binding) or _capture_binding(observer) != binding
+            or facts["source_action_id"] != action["id"]
+            or (identity[2], facts["id"]) not in saved.file_ids):
+        raise ConsistencyError("完成文件的原身份、来源或固定绑定与结果页不符")
+    entries = [entry for entry in saved.page.entries if entry.identity == identity[2]]
+    if len(entries) != 1:
+        raise ConsistencyError("完成文件缺少唯一的原结果页观察")
+    entry, = entries
+    if (not entry.complete or entry.size_bytes is None or not json_equal(entry.size_bytes, size)
+            or not json_equal(entry.evidence, evidence["observation"])
+            or not json_equal(entry.locator, facts["locator_json"])):
+        raise ConsistencyError("完成文件与原页的完整观察、长度或定位不符")
+    settlement = saved.page.outcome.settlement
+    completion = None if settlement is None else settlement.evidence.data.get("file_completion")
+    if not is_completed_file_wait(completion, activity_id=str(activity["id"]),
+            stop_result_event_id=stop_event.event_id, required_wait_ms=wait_ms):
+        raise ConsistencyError("完成文件的原页缺少匹配且满足要求的实际等待")
+    data = settlement.evidence.data
+    source = None
+    source_id = data.get("file_completion_source_page_event_id")
+    if source_id is not None:
+        ObjectId(source_id)
+        source_event = _history_source_event(state, source_id)
+        original, _ = _decode(source_event)
+        _verify_record_result_page(original, source_event, action, activity, state)
+        original_settlement = original.page.outcome.settlement
+        source = {"event_id": source_event.event_id, "activity_id": original.ref.ticket.target_id,
+                  "data": None if original_settlement is None else original_settlement.evidence.data}
+    try:
+        completed_file_wait_source(data, page_event_id=page_event.event_id,
+            activity_id=str(activity["id"]), stop_result_event_id=stop_event.event_id,
+            required_wait_ms=wait_ms, source_page=source)
+    except ValueError as error:
+        raise ConsistencyError("文件完成复用的等待没有匹配的原实际等待页") from error
+
+
+def _load_stop_wait_file_sources(scope, facts, evidence, state):
+    """装入文件页、原 STOP 及至多一条原等待页，供保存和守卫共同消费。"""
+    from .result_pages import _at, read_page
+
+    connection = scope.connection
+    saved, _ = _at(connection, evidence["result_page_event_id"])
+    read_page(saved.ref, scope)
+    pages = [saved]
+    settlement = saved.page.outcome.settlement
+    source_id = None if settlement is None else settlement.evidence.data.get("file_completion_source_page_event_id")
+    if source_id is not None:
+        ObjectId(source_id)
+        pages.append(CaptureRepository().read_result_page_at(source_id, scope))
+    stopped, _ = _CaptureStopCommand.source(connection, evidence["stop_result_event_id"])
+    events = state.setdefault("history_events", {})
+    for original_id in (*(page.ref.event_id for page in pages), evidence["stop_result_event_id"]):
+        events[original_id] = _history_source_row(connection, original_id)
+    stop_event = _history_source_event(state, evidence["stop_result_event_id"])
+    stop_attempt_id, = (row.row_id for row in stop_event.rows if row.table == "operation_attempts")
+    page_attempts = (_history_source_event(state, page.ref.event_id).evidence["attempt_id"] for page in pages)
+    for attempt_id in (*page_attempts, stop_attempt_id):
+        attempt = row_facts(connection, "operation_attempts", attempt_id)
+        if attempt is None:
+            raise ConsistencyError("文件完成缺少原操作尝试")
+        state.setdefault("operation_attempts", {})[attempt_id] = attempt
+        run = row_facts(connection, "operation_runs", attempt["run_id"])
+        if run is None:
+            raise ConsistencyError("文件完成缺少原操作流程")
+        state.setdefault("operation_runs", {})[run["id"]] = run
+    activity = row_facts(connection, "device_activities", evidence["activity_id"])
+    if activity is None:
+        raise ConsistencyError("文件完成缺少原录像活动")
+    state.setdefault("device_activities", {}).update({activity["id"]: activity, stopped["id"]: stopped})
+    for action_id in (activity["action_id"], facts["observer_action_id"], stopped["action_id"]):
+        action = row_facts(connection, "actions", action_id)
+        if action is None:
+            raise ConsistencyError("文件完成缺少原拍摄动作")
+        state.setdefault("actions", {})[action_id] = action
+
+
+def _wait_record_file(facts, state):
+    """已归属或最初观察者的固定定义识别需单独等待的录像文件。"""
+    action_id = facts["source_action_id"] or facts["observer_action_id"]
+    action = _source_fact(state, "actions", action_id)
+    return (action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+            and "file_completion_wait_ms" in action["execution_spec_json"])
+
+
 class _FileCompleteCommand:
     """保存一次文件形成状态（DEVICE_FILE_OBSERVED.COMPLETE）。
 
@@ -5020,10 +5208,17 @@ class _FileCompleteCommand:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(scope, saved)
         command = self._command
         facts = self._load(connection, command.file_id)
         current = facts["completion_state"]
+        if (command.state == int(_FILE_COMPLETION.COMPLETE)
+                and command.basis == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)):
+            _load_stop_wait_file_sources(scope, facts, command.completion_evidence(), self._state)
+            prospective = {**facts, "locator_json": facts["locator_json"]
+                if command.locator is None else dict(command.locator)}
+            _verify_stop_wait_file(prospective, command.completion_evidence(), command.size_bytes, self._state,
+                                  event_id=scope.max_event_id + 1)
         if (command.state == current
                 and command.state == int(_FILE_COMPLETION.COMPLETE)):
             # 重复列举再次观察到同一完成事实：长度一致按已确认处
@@ -5038,6 +5233,10 @@ class _FileCompleteCommand:
                 read_only=True,
                 result=ObservationOutcome(
                     ObservationDisposition.ALREADY, command.file_id))
+        if (command.state == int(_FILE_COMPLETION.COMPLETE)
+                and command.basis != int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)
+                and _wait_record_file(facts, self._state)):
+            raise ConsistencyError("停止后等待的录像文件首次完成必须使用原停止与等待依据")
         allowed = _FILE_COMPLETION_NEXT.get(current, frozenset())
         if command.state not in allowed:
             raise ConsistencyError(
@@ -5077,7 +5276,8 @@ class _FileCompleteCommand:
         allocation = scope.allocate(1)
         event = _envelope(
             allocation.first_event_id, allocation.txn_id,
-            _DEVICE_FILE_EVENT, _FILE_COMPLETE_REASON, (row,), command.occurred_at)
+            _DEVICE_FILE_EVENT, _FILE_COMPLETE_REASON, (row,), command.occurred_at,
+            evidence={"completion_request": command.completion_request()})
         return CommandPlan(
             events=(event,), owners=self._owners, state_rows=self._state,
             result=ObservationOutcome(
@@ -5088,10 +5288,17 @@ class _FileCompleteCommand:
         if facts is None:
             raise ConsistencyError(f"设备文件不存在: {file_id}")
         self._state.setdefault("device_files", {})[file_id] = facts
+        for action_id in (facts["observer_action_id"], facts["source_action_id"]):
+            if action_id is None:
+                continue
+            action = row_facts(connection, "actions", action_id)
+            if action is None:
+                raise ConsistencyError("文件形成状态缺少原拍摄动作")
+            self._state.setdefault("actions", {})[action_id] = action
         _load_related_outputs(connection, self._state, file_id)
         return facts
 
-    def _reuse(self, saved) -> CommandPlan:
+    def _reuse(self, scope, saved) -> CommandPlan:
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
         if types != [(_DEVICE_FILE_EVENT, _FILE_COMPLETE_REASON)]:
@@ -5101,12 +5308,23 @@ class _FileCompleteCommand:
         row = saved[0]["body"]["rows"][0]
         if row["table"] != "device_files" or row["id"] != command.file_id:
             raise TransactionError("原形成状态属于其他文件")
-        after = row["after"]["values"]
-        if (after.get("completion_state") != command.state
-                or not json_equal(after.get("size_bytes"), command.size_bytes)
-                or not json_equal(after.get("completion_evidence_json"),
+        request = saved[0]["body"]["evidence"].get("completion_request")
+        if request is None:
+            raise TransactionError("原形成状态没有完整元信息申请，不能推测重送输入")
+        if not json_equal(request, command.completion_request()):
+            raise TransactionError("形成状态的重送改变了原元信息申请")
+        current = self._load(scope.connection, command.file_id)
+        transaction = saved[0]["transaction"]
+        after = read_row_values_at_boundary(scope.connection, owner=("device_file", command.file_id),
+            table="device_files", row_id=command.file_id,
+            columns=frozenset({"completion_state", "size_bytes", "completion_evidence_json", "last_error_json"}),
+            current_values=current, boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+        if (not json_equal(after["completion_state"], command.state)
+                or not json_equal(after["size_bytes"], command.size_bytes)
+                or not json_equal(after["completion_evidence_json"],
                                   command.completion_evidence())
-                or not json_equal(after.get("last_error_json"),
+                or not json_equal(after["last_error_json"],
                                   None if command.error is None else dict(command.error))):
             raise TransactionError("形成状态的重送输入与原事务不同")
         return CommandPlan(
@@ -5134,6 +5352,30 @@ def _current_file_facts(context, row) -> Mapping[str, Any]:
     return facts
 
 
+def _completion_request_guard(event, row, facts) -> None:
+    """新事件保留完整原输入，投影仍只记录实际改变的元信息列。"""
+    if "completion_request" not in event.evidence:
+        # 旧事件只提供实际变化，仍按既有结构读取及回放。
+        return
+    request = event.evidence["completion_request"]
+    if not isinstance(request, Mapping) or set(request) != {"locator", "original_name", "media_type"}:
+        raise EventValidationError("文件形成状态的原元信息申请成员不完整")
+    for name, column in (("locator", "locator_json"), ("original_name", "original_name"),
+                         ("media_type", "media_type")):
+        value = request[name]
+        if value is not None:
+            if name == "locator":
+                valid = isinstance(value, Mapping)
+            else:
+                valid = isinstance(value, str) and bool(value)
+            if not valid:
+                raise EventValidationError("文件形成状态的原元信息申请类型无效")
+        changed = value is not None and not json_equal(value, facts[column])
+        if (changed != (column in row.after.values)
+                or (changed and not json_equal(row.after.values[column], value))):
+            raise EventValidationError("文件形成状态的原元信息申请与实际变化不一致")
+
+
 def _device_file_guard(event, context) -> None:
     """DEVICE_FILE_OBSERVED 五分支：身份、来源、配对与完成事实核对。
 
@@ -5146,10 +5388,11 @@ def _device_file_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "device_files":
             continue
-        _device_file_row_guard(event.reason, row, context)
+        _device_file_row_guard(event, row, context)
 
 
-def _device_file_row_guard(reason: int, row, context) -> None:
+def _device_file_row_guard(event, row, context) -> None:
+    reason = event.reason
     if reason == _FILE_CREATE_REASON:
         if row.before.exists:
             raise EventValidationError("文件发现必须是创建行")
@@ -5227,17 +5470,20 @@ def _device_file_row_guard(reason: int, row, context) -> None:
     facts = _current_file_facts(context, row)
     after = row.after.values
     if reason == _FILE_COMPLETE_REASON:
+        _completion_request_guard(event, row, facts)
         current = facts.get("completion_state")
         state = after.get("completion_state")
         if state not in _FILE_COMPLETION_NEXT.get(current, frozenset()):
             raise EventValidationError(
                 f"文件形成状态不能从 {current!r} 推进到 {state!r}")
+        observed = {**facts, **after}
         if state == int(_FILE_COMPLETION.COMPLETE):
-            size = after.get("size_bytes")
+            size = observed.get("size_bytes")
             if not is_json_integer(size) or size < 0:
                 raise EventValidationError(f"完成状态必须携带非负完整大小: {size!r}")
-            evidence = after.get("completion_evidence_json")
+            evidence = observed.get("completion_evidence_json")
             if (not isinstance(evidence, dict)
+                    or not is_json_integer(evidence.get("basis"))
                     or evidence.get("basis") not in (
                         int(member) for member in _COMPLETION_BASIS)):
                 raise EventValidationError("完成状态缺少登记依据")
@@ -5247,10 +5493,18 @@ def _device_file_row_guard(reason: int, row, context) -> None:
                     and (not is_json_integer(evidence.get("activity_id"))
                          or not is_json_integer(evidence.get("wait_completed_event_id")))):
                 raise EventValidationError("等待与产物契约依据必须引用任务及等待完成事件")
-        elif after.get("size_bytes") is not None:
+            try:
+                if evidence["basis"] == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT):
+                    _verify_stop_wait_file(observed, evidence, size, context.state_rows, event_id=event.event_id)
+                elif (evidence["basis"] != int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)
+                        and _wait_record_file(facts, context.state_rows)):
+                    raise ConsistencyError("停止后等待的录像文件首次完成必须使用原停止与等待依据")
+            except (ConsistencyError, ValueError, KeyError, TypeError) as error:
+                raise EventValidationError("文件完成的原停止与等待依据不一致") from error
+        elif observed.get("size_bytes") is not None:
             raise EventValidationError("只有完成状态携带完整大小")
         if state == int(_FILE_COMPLETION.UNCONFIRMED):
-            if not isinstance(after.get("last_error_json"), dict):
+            if not isinstance(observed.get("last_error_json"), dict):
                 raise EventValidationError("未确认状态必须携带实际失败证据")
         return
 

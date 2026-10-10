@@ -16,6 +16,7 @@ result 端口构造生产适配（DriverResultListing），注入 results 时整
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -267,7 +268,8 @@ class DriverResultListing:
             self._files_from_result(result, ticket.target_id), result.outcome)
 
     async def list_page(self, ticket: AttemptTicket, *, cursor: DirectoryCursor | None,
-                        timeout_s: Decimal, output_scope: Mapping | None = None) -> ResultPage:
+                        timeout_s: Decimal, output_scope: Mapping | None = None,
+                        completion_context: Mapping | None = None) -> ResultPage:
         """一次页调用保持原票据和期限，不在驱动适配层循环或重试。"""
         if (ticket.operation != "result" or ticket.target_id is None
                 or ticket.responsibility_key != f"results/{ticket.target_id}"):
@@ -278,7 +280,9 @@ class DriverResultListing:
                 raise ValueError("结果游标与原设备绑定不符")
             params["cursor"] = cursor.as_json()
         if output_scope is not None:
-            params["output_scope"] = dict(output_scope)
+            params["output_scope"] = deepcopy(dict(output_scope))
+        if completion_context is not None:
+            params["completion_context"] = deepcopy(dict(completion_context))
         request = ControlRequest("result", self._binding, params, ticket=ticket, timeout_s=timeout_s)
         result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
         if result.outcome is None:

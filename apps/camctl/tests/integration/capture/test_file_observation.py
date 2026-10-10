@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -362,6 +363,67 @@ class TestOwnershipConfirmation:
 
 
 class TestCompletionFacts:
+    def test_writing_to_complete_with_unchanged_evidence_keeps_original_key_facts(self, tmp_path):
+        owned = _environment(tmp_path)
+        try:
+            repository = CaptureRepository()
+            file_id = _created_file(owned, repository)
+            writing = FileCompletionSave(file_id, 2, _NOW, basis=1, observation={"device_contract": "files"})
+            writing_key = new_operation_key()
+            first = repository.save_file_completion(writing, writing_key, owned)
+            assert first.kind is DbOutcomeKind.COMPLETED, first.error
+            complete = replace(writing, state=3, size_bytes=8)
+            complete_key = new_operation_key()
+            saved = repository.save_file_completion(complete, complete_key, owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            body = json.loads(owned.connection.execute(
+                "SELECT body_json FROM history_events ORDER BY id DESC LIMIT 1").fetchone()[0])
+            assert "completion_evidence_json" not in body["rows"][0]["after"]["values"]
+            count = owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0]
+            for command, key in ((complete, complete_key), (writing, writing_key)):
+                reused = repository.save_file_completion(command, key, owned)
+                assert reused.kind is DbOutcomeKind.COMPLETED, reused.error
+                changed = repository.save_file_completion(
+                    replace(command, observation={"device_contract": "changed"}), key, owned)
+                assert changed.kind is DbOutcomeKind.ROLLED_BACK, changed.error
+            assert _row(owned, file_id)["completion_state"] == 3
+            assert owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0] == count
+        finally:
+            owned.connection.close()
+
+    @pytest.mark.parametrize("state,values", [
+        (2, {}), (3, {"basis": 1, "observation": {"stopped": True}, "size_bytes": 8}),
+        (4, {"error": {"reason": "not_confirmed"}}),
+    ])
+    @pytest.mark.parametrize("provide_metadata", [False, True])
+    @pytest.mark.parametrize("field", ["locator", "original_name", "media_type"])
+    def test_original_key_preserves_complete_optional_input_in_every_state(
+            self, tmp_path, state, values, provide_metadata, field):
+        owned = _environment(tmp_path)
+        try:
+            repository = CaptureRepository()
+            file_id = _created_file(owned, repository)
+            metadata = {"locator": {"path": "/DCIM/original.mp4"},
+                        "original_name": "original.mp4", "media_type": "video/mp4"}
+            original_input = metadata if provide_metadata else dict.fromkeys(metadata)
+            command = FileCompletionSave(file_id, state, _NOW, **values, **original_input)
+            key = new_operation_key()
+            first = repository.save_file_completion(command, key, owned)
+            assert first.kind is DbOutcomeKind.COMPLETED, first.error
+            body = json.loads(owned.connection.execute(
+                "SELECT body_json FROM history_events ORDER BY id DESC LIMIT 1").fetchone()[0])
+            assert body["evidence"] == {"completion_request": original_input}
+            assert not {"locator_json", "original_name", "media_type"} & body["rows"][0]["after"]["values"].keys()
+            again = repository.save_file_completion(command, key, owned)
+            assert again.kind is DbOutcomeKind.COMPLETED, again.error
+            history_before = owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0]
+            changed = replace(command, **{field: None if provide_metadata else metadata[field]})
+            receipt = repository.save_file_completion(changed, key, owned)
+            assert receipt.kind is DbOutcomeKind.ROLLED_BACK, receipt.error
+            assert owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0] == history_before
+        finally:
+            owned.connection.close()
+
     def test_device_guarantee_completion_saves_size_and_evidence(self, tmp_path: Path):
         owned = _environment(tmp_path)
         try:

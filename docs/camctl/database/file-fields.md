@@ -21,7 +21,21 @@
 | `COMPLETE` | `size_bytes` 与完成依据都必填 | 文件已固定且完整大小可靠，后续不因删除清除这些事实 |
 | `UNCONFIRMED` | 未确认的完整大小为空，实际失败证据及 `last_error_json` 必填 | 有限核实结束仍无法确认，不能按完整文件读取 |
 
-完成依据使用 `basis`（`DEVICE_GUARANTEE` 表示设备保证，`TIME_AND_OUTPUTS` 表示等待与产物契约）和 `observation`；采用 `TIME_AND_OUTPUTS` 时另填 `activity_id`、`wait_completed_event_id`，必须引用已保存的等待完成与对应任务。文件已经完成后不得倒退成正在写入；后续身份或固定内容矛盾按文件错误处理，保留原事实。
+完成依据使用 `basis` 和 `observation`，其中 `observation` 保留对应文件的实际结构化观察。
+
+| `basis` | 适用条件与引用 |
+| --- | --- |
+| `DEVICE_GUARANTEE` | 驱动提供设备保证；不填写等待引用。普通录像执行定义没有文件完成等待要求时，沿用此规则 |
+| `TIME_AND_OUTPUTS` | 等待与产物契约提供完成依据；另填 `activity_id`、`wait_completed_event_id`，引用对应任务已保存的等待完成事实 |
+| `STOP_RETURN_AND_WAIT` | 普通录像的可靠 STOP 返回与实际完成等待共同提供运行假设依据；另填 `activity_id`、`result_page_event_id`、`stop_result_event_id`，引用原活动、包含该文件观察的可靠结果页和原停止结果 |
+
+`STOP_RETURN_AND_WAIT` 的证据对象恰好包含 `basis`、`observation` 及表中的三个引用，不包含 `wait_completed_event_id`。原结果页必须属于同一动作、活动及固定设备绑定，并包含同一文件身份的完整观察和一致长度。页内保存的 `settlement.evidence.data.file_completion` 必须匹配原活动、原 STOP 和动作首次固定的 `file_completion_wait_ms`，且实际单调钟等待达到要求、`completed` 为 `true`。页内若复用此前完成的等待，`file_completion_source_page_event_id` 必须直接引用同活动中较早、真正执行该等待的可靠页；真正执行等待的页必须晚于原 STOP，原页自身不能再引用其他等待页，两个页的七项等待事实必须完全一致。最终保存的文件定位须与该文件在原结果页中的定位一致。文件完成等待的原事实格式见[历史格式](history-formats.md#停止后文件完成等待的记录)。这段等待表达主机运行假设，不生成设备已经观察到文件写完的记录。
+
+结果页的调用错误可以与已经取得的可靠单文件事实并存。例如，第二份视频的元数据读取失败时，第一份视频的完整观察和已完成等待仍可保存；该页不因此取得完整集合保证。单文件未确认完整、长度未知或不一致、等待未完成、原事实未可靠保存及引用不匹配时，不能登记该文件为 `COMPLETE`。具有文件完成等待要求的录像首次完成文件时只能采用 `STOP_RETURN_AND_WAIT`。
+
+文件已经完成后不得倒退成正在写入。重复观察同一长度时保留原完成依据；新提供的 `STOP_RETURN_AND_WAIT` 依据仍须核对原页、原 STOP 和固定要求。历史恢复沿原依据还原状态，不重新调用设备或等待，也不采用新的运行配置。后续身份或固定内容矛盾按文件错误处理，保留原事实。
+
+每次新保存形成状态时，事件的 `evidence.completion_request` 恰好保存原可选输入 `locator`、`original_name`、`media_type`，未提供的输入也明确保存为 `null`。申请与已有元信息相同的值仍合法，事件行只保存实际改变的字段。原键重送逐项比较原输入，并按原完整事务后的状态核对形成状态、完整大小、完成依据和实际错误；不能从未改变的列猜测申请者省略了输入。旧事件没有 `completion_request` 时仍可读取和回放；原键缺少完整输入时不能补造重送依据。
 
 `role` 为 `UNDETERMINED`、`ORIGINAL`、`PREVIEW`，保存驱动可靠确认的任务内用途，尚未确认时为 `UNDETERMINED`。预览的 `original_device_file_id` 与 `pairing_evidence_json` 同时有值或同时为空；后者包含 `method` 和 `observation`，其中 `method` 采用 `DRIVER_PAIRING` 对应的整数，表示驱动配对证据。用途已知但尚未可靠配对时，保留预览及空引用，不能任取一个原文件配对。原文件和未知用途文件不填写这两个字段；配对两端必须属于同一任务且原文件用途为 `ORIGINAL`。原文件与预览分别登记正式产物时，事务从这些可靠事实建立 `output_origins`；产物关系与设备观察各自保存其生命周期事实，不允许二者矛盾。该设计使设备先生成多份文件、框架稍后登记产物的过程可以恢复，不依赖一份内存文件清单。
 

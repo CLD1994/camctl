@@ -196,9 +196,12 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
         products = {"product_rules": [ProductRule.from_json(value).as_json() for value in spec["product_rules"]]}
     if action_type == "camera_record":
         ownership = _ownership(spec)
-        if set(spec) != {"target_duration_ms", *ownership, *products}:
+        completion_wait = ({"file_completion_wait_ms": _integer(spec["file_completion_wait_ms"], 1)}
+                           if "file_completion_wait_ms" in spec else {})
+        if set(spec) != {"target_duration_ms", *ownership, *products, *completion_wait}:
             raise ValueError("录像定义必须保存目标时长及适用的归属声明")
-        return {"target_duration_ms": _integer(spec["target_duration_ms"], 1), **ownership, **products}
+        return {"target_duration_ms": _integer(spec["target_duration_ms"], 1),
+                **ownership, **products, **completion_wait}
     if action_type != "camera_timelapse":
         raise ValueError("动作类型不是拍摄动作")
     required = {"duration_based", "wait_after_send", "end_control", "stop_supported", "start_return_meaning", "completion_mode"}
@@ -253,7 +256,11 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
     if action_type == "camera_record":
         if task.stop_supported is not True:
             raise ValueError("录像任务必须明确具备 stop_supported")
-        return validate_capture_spec(action_type, {"target_duration_ms": seconds_to_duration_ms(task.target_duration_s), **ownership, **products})
+        completion_wait = ({} if task.file_completion_wait_s is None else {
+            "file_completion_wait_ms": seconds_to_duration_ms(task.file_completion_wait_s)})
+        return validate_capture_spec(action_type, {
+            "target_duration_ms": seconds_to_duration_ms(task.target_duration_s),
+            **ownership, **products, **completion_wait})
     spec = {"duration_based": task.duration_based, "wait_after_send": task.wait_after_send,
             "end_control":task.end_control, "stop_supported":task.stop_supported,
             "start_return_meaning":task.start_return_meaning, "completion_mode":task.completion_mode,

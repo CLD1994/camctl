@@ -48,7 +48,11 @@ def _record_schema(model: CameraModel, parameter_type: str) -> dict:
                            "exposure": _exposure(ACTION_ISO, ACTION_EV)})
     else:
         properties["exposure"] = _exposure(OSMO_ISO, OSMO_EV)
-    return _object(properties)
+    required = list(properties)
+    if model is CameraModel.ACTION6:
+        required.remove("aperture")
+        required.remove("bitrate")
+    return _object(properties, required)
 
 
 def _timelapse_schema(model: CameraModel, parameter_type: str) -> dict:
@@ -75,9 +79,12 @@ def candidate_capabilities(driver_id: str) -> tuple[ActionCapability, ...]:
     timelapse = _timelapse_schema(model, timelapse_type)
     for schema in (record, timelapse):
         schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    record_description = "手动曝光固定快门 1/60 秒；两种曝光均固定白平衡 5200 K。调用响应待设备核实。"
+    if model is CameraModel.ACTION6:
+        record_description += "省略 aperture 或 bitrate 时不发送对应设置，保留设备已有值；显式提供时执行对应设置。"
     return (
         ActionCapability("camera_record", record_type, "普通录像候选参数",
-                         "手动曝光固定快门 1/60 秒；两种曝光均固定白平衡 5200 K。调用响应待设备核实。",
+                         record_description,
                          False, record, {}),
         ActionCapability("camera_timelapse", timelapse_type, "原生延时摄影候选参数",
                          "仅接受资料给出的完整组合；正常结束及文件写完依据待设备核实。",

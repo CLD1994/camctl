@@ -5,9 +5,10 @@ from decimal import Decimal
 from typing import Mapping
 
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
-from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner
+from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner, SavedResultPage
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
+from camctl.devices.recording_completion import completed_file_wait_source
 from camctl.operations.models import AttemptTicket, ValidatedOutcome
 from camctl.operations.owned_calls import check_call_interruption
 from camctl.operations.validation import validate_outcome
@@ -21,6 +22,7 @@ class PendingResultScan:
     ticket: AttemptTicket
     output_scope: Mapping | None
     timeout_s: Decimal
+    completion_context: Mapping | None = None
     page_no: int = 1
     cursor: DirectoryCursor | None = None
     saves: ResultPageSaveOwner = field(default_factory=ResultPageSaveOwner)
@@ -37,6 +39,7 @@ class PendingResultScan:
         if not isinstance(self.timeout_s, Decimal) or not self.timeout_s.is_finite() or self.timeout_s <= 0:
             raise ValueError("结果扫描必须使用本尝试已采用的有限正时限")
         self.output_scope = deepcopy(self.output_scope)
+        self.completion_context = deepcopy(self.completion_context)
 
 
 def resume_result_page_saves(owned, *, pending_scans, repository):
@@ -65,6 +68,8 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
                 raise ConsistencyError(f"原结果页保存未完成（{receipt.kind.value}）: {receipt.error}")
             page = page_from_outcome(original.ticket, original.outcome.outcome, cursor=original.cursor)
             pending.last_ref = pending.saves.take()
+            _retain_completed_wait(pending, SavedResultPage(pending.last_ref, page, original.occurred_at),
+                runtime=runtime)
             pending.last_outcome = original.outcome
             pending.last_cursor = original.cursor
             pending.occurred_at = original.occurred_at
@@ -77,7 +82,8 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
         pending.in_call = True
         try:
             page = await runtime.results.list_page(pending.ticket, cursor=pending.cursor,
-                timeout_s=pending.timeout_s, output_scope=pending.output_scope)
+                timeout_s=pending.timeout_s, output_scope=pending.output_scope,
+                completion_context=deepcopy(pending.completion_context))
             # 实际返回立即成为原申请；保存未知不再取时钟或执行列举。
             occurred_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
             if not isinstance(page, ResultPage):
@@ -92,6 +98,42 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
             raise
         finally:
             pending.in_call = False
+
+
+def completed_wait_from_page(saved: SavedResultPage, context, *, repository, owned) -> dict | None:
+    """可靠复制页仍返回真正执行等待的原页，引用错误停止继续复用。"""
+    if context is None or saved.page.outcome.settlement is None:
+        return None
+    if saved.ref.ticket.target_id != context["activity_id"]:
+        raise ConsistencyError("等待事实的可靠结果页属于其他活动")
+    data = saved.page.outcome.settlement.evidence.data
+    source_id = data.get("file_completion_source_page_event_id")
+    source_page = None
+    try:
+        if source_id is not None:
+            source = repository.read_result_page_at(source_id, owned)
+            source_data = (None if source.page.outcome.settlement is None else
+                source.page.outcome.settlement.evidence.data)
+            source_page = {"event_id": source.ref.event_id,
+                "activity_id": source.ref.ticket.target_id, "data": source_data}
+        actual_source = completed_file_wait_source(data,
+            page_event_id=saved.ref.event_id, activity_id=context["activity_id"],
+            stop_result_event_id=context["stop_result_event_id"],
+            required_wait_ms=context["file_completion_wait_ms"], source_page=source_page)
+    except ValueError as error:
+        raise ConsistencyError(f"结果页的完成等待来源无效: {error}") from error
+    if actual_source is None:
+        return None
+    return {"result_page_event_id": actual_source, "evidence": deepcopy(data["file_completion"])}
+
+
+def _retain_completed_wait(pending: PendingResultScan, saved: SavedResultPage, *, runtime) -> None:
+    """后续页沿用原实际等待来源，文件集合完成仍独立判定。"""
+    completion = completed_wait_from_page(saved, pending.completion_context,
+        repository=runtime.capture, owned=runtime.owned)
+    if completion is None:
+        return
+    pending.completion_context = {**pending.completion_context, "prior_completion": completion}
 
 
 class SavedResultEntries:

@@ -1,14 +1,8 @@
 # 使用同一运行账户的 $HOME/.camctl 默认状态库和交接目录。
-# 从 adb devices -l 取得实际 serial，分别替换下列值。
+# 从 adb devices -l 取得 Action6 的实际 serial，替换下列值。
 # 尚未核实的设备响应和结束契约不会因填写配置而变为可执行能力。
 [devices.action6]
 kind = "camera"
 driver = "dji-action6"
 [devices.action6.adb]
 serial = "REPLACE_ACTION6_SERIAL"
-
-[devices.osmo360ii]
-kind = "camera"
-driver = "dji-osmo360-ii"
-[devices.osmo360ii.adb]
-serial = "REPLACE_OSMO360II_SERIAL"

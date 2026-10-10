@@ -1,6 +1,7 @@
 """结果列举的一次真实调用保持原票据、期限和完整结果。"""
 
 from decimal import Decimal
+from copy import deepcopy
 from unittest.mock import create_autospec
 
 import pytest
@@ -105,3 +106,38 @@ async def test_result_page_uses_original_ticket_cursor_and_single_call_limit():
     assert request.ticket is _TICKET and request.timeout_s == Decimal("1.25")
     assert request.params == {"activity_id": "71", "cursor": cursor.as_json()}
     driver.list_results.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_result_page_passes_frozen_completion_context_to_original_driver_request():
+    from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
+    context = {"activity_id": "71", "stop_result_event_id": 7,
+        "stop_returned_at_us": 1_750_000_000_000_000,
+        "stop_response": {"status": 2, "effect_state": 2, "error": None,
+            "result": {"format_version": 1, "settlement": {"basis": 1,
+                "evidence": {"type": "stop_returned", "version": 1, "data": {}}},
+                "observations": [{"type": "stop_confirmed", "version": 1,
+                    "data": {"activity_id": "71"}}]}},
+        "file_completion_wait_ms": 5000, "prior_completion": None}
+    frozen = deepcopy(context)
+    original = CallOutcome(effect=EffectState.CONFIRMED, settlement=Settlement(
+        SettlementBasis.ASSUMED, EvidenceValue("adb_foreground_assumption", 1,
+            {"terminate_grace_s": Decimal("0.25")})),
+        observations=(DeviceObservation("result_files_listed", 2, {
+            "activity_id": "71", "entries": [], "cursor": None,
+            "next_cursor": None, "set_finalized": True, "completion_evidence": None}),))
+    registry = EvidenceRegistry((RESULT_PAGE_CONTRACT,
+        _REGISTRY.contract("adb_foreground_assumption", 1)))
+    driver = create_autospec(ResultDriver, instance=True)
+
+    async def read(request, batch):
+        context["stop_response"]["result"]["observations"].clear()
+        return DeviceCallResult.from_outcome(original)
+
+    driver.list_results.side_effect = read
+    page = await DriverResultListing(driver, _BINDING, registry).list_page(
+        _TICKET, cursor=None, timeout_s=Decimal("10"), completion_context=context)
+
+    assert page.outcome is original
+    request, _ = driver.list_results.call_args.args
+    assert request.params == {"activity_id": "71", "completion_context": frozen}

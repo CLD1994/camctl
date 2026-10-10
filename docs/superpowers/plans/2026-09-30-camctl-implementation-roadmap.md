@@ -18,7 +18,7 @@ apps/camctl 的 Python 包、命令入口和业务模块按后文阶段推进。
 
 软件集成使用真实 Python 包、SQLite、文件系统、线程、进程、客户端和 C 模块，设备响应由受驱动契约约束的替身提供。ARM64 环境安装、真实相机、目标主机性能及物理断电持久性另列部署联调，不作为软件集成测试的运行前提。
 
-Action6 与 OSMO 360 II 的录像和原生延时摄影由[双相机演示实施计划](2026-10-10-camctl-real-camera-demo.md#既有任务归属与接入增量)编排接入。该计划消费 devices D1—D5、capture C1—C6、scheduling Q4/Q6、结果核实和错误专项、integration I5 及 bootstrap B7 的既有交付，补齐具体驱动、目录基准生产路径、正常结果收尾和四条演示链。原任务细项状态仍由对应责任计划维护，双相机接入门禁和最后 ARM Linux 真机验收由接入计划跟踪。
+Action6 与 OSMO 360 II 的录像和原生延时摄影由[相机接入实施计划](2026-10-10-camctl-real-camera-demo.md#既有任务归属与接入增量)编排。该计划消费 devices D1—D5、capture C1—C6、scheduling Q4/Q6、结果核实和错误专项、integration I5 及 bootstrap B7 的既有交付，补齐具体驱动、目录基准生产路径、正常结果收尾和双相机四条软件链。当前 ARM Linux 真机演示通过 C host 完成 Action6 普通录像、独立取回、文件领取及报告确认；其能力启用门禁和后续相机、延时任务的接入条件由[接入计划 T9](2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。原任务细项状态仍由对应责任计划维护。
 
 公共计划、动作、设备状态和报告模型保持设备无关。第一版 MCU 仅遵守[接口预留与不支持动作的受理规则](../../architecture/mcu-actions.md)，不增加实际通信工作或运行依赖。
 

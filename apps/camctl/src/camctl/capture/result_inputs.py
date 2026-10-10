@@ -6,7 +6,8 @@ from typing import Any, Mapping
 from camctl.capture.results import FileKind
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
-from camctl.devices.evidence import DeviceObservation, EvidenceContract, validate_observation
+from camctl.devices.evidence import (DeviceObservation, EvidenceContract, RESULT_LISTED_TYPE, RESULT_LISTED_VERSION,
+                                    RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT, validate_observation)
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor
 from camctl.operations.models import (
@@ -15,17 +16,6 @@ from camctl.operations.models import (
 )
 
 from camctl.operations.result_format import read_result_document
-
-RESULT_LISTED_TYPE = "result_files_listed"
-RESULT_LISTED_VERSION = 1
-RESULT_FILES_CONTRACT = EvidenceContract(
-    RESULT_LISTED_TYPE, RESULT_LISTED_VERSION, "result",
-    frozenset({"activity_id", "entries"}), identity_field="activity_id")
-RESULT_PAGE_CONTRACT = EvidenceContract(
-    RESULT_LISTED_TYPE, 2, "result",
-    frozenset({"activity_id", "entries", "cursor", "next_cursor", "set_finalized", "completion_evidence"}),
-    identity_field="activity_id")
-
 
 @dataclass(frozen=True)
 class ObservedFile:

@@ -40,6 +40,7 @@ _BASELINE_DIFFERENCE = int(_OWNERSHIP_METHOD.BASELINE_DIFFERENCE)
 _DRIVER_TASK_ASSOCIATION = int(_OWNERSHIP_METHOD.DRIVER_TASK_ASSOCIATION)
 _DEVICE_GUARANTEE = int(_COMPLETION_BASIS.DEVICE_GUARANTEE)
 _TIME_AND_OUTPUTS = int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
+_STOP_RETURN_AND_WAIT = int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)
 _DRIVER_PAIRING = int(_PAIRING_METHOD.DRIVER_PAIRING)
 _ORIGINAL = int(_FILE_ROLE.ORIGINAL)
 _PREVIEW = int(_FILE_ROLE.PREVIEW)
@@ -199,6 +200,8 @@ class FileCompletionSave:
     locator: Mapping[str, Any] | None = None
     original_name: str | None = None
     media_type: str | None = None
+    result_page_event_id: int | None = None
+    stop_result_event_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.file_id)
@@ -208,7 +211,7 @@ class FileCompletionSave:
         _timestamp(self.occurred_at)
         if state == _COMPLETE:
             basis = _member(_COMPLETION_BASIS, "完成依据", self.basis or 0)
-            if basis not in (_DEVICE_GUARANTEE, _TIME_AND_OUTPUTS):
+            if basis not in (_DEVICE_GUARANTEE, _TIME_AND_OUTPUTS, _STOP_RETURN_AND_WAIT):
                 raise ValueError(f"完成依据不合法: {self.basis!r}")
             _mapping("完成观察依据", self.observation, required=True)
             if (isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int)
@@ -219,14 +222,27 @@ class FileCompletionSave:
                     raise ValueError("等待与产物契约依据必须引用任务及等待完成事件")
                 ObjectId(self.activity_id)
                 ObjectId(self.wait_completed_event_id)
+                if self.result_page_event_id is not None or self.stop_result_event_id is not None:
+                    raise ValueError("等待与产物契约依据不携带停止后等待引用")
+            elif basis == _STOP_RETURN_AND_WAIT:
+                if any(value is None for value in (
+                        self.activity_id, self.result_page_event_id, self.stop_result_event_id)):
+                    raise ValueError("停止后等待依据必须引用原活动、结果页和停止结果")
+                for value in (self.activity_id, self.result_page_event_id, self.stop_result_event_id):
+                    ObjectId(value)
+                if self.wait_completed_event_id is not None:
+                    raise ValueError("停止后等待依据不引用延时等待完成事件")
             elif self.activity_id is not None or self.wait_completed_event_id is not None:
                 raise ValueError("只有等待与产物契约依据引用任务及等待完成事件")
+            elif self.result_page_event_id is not None or self.stop_result_event_id is not None:
+                raise ValueError("设备保证依据不携带停止后等待引用")
             if self.error is not None:
                 raise ValueError("完成状态不携带失败证据")
         else:
             if self.size_bytes is not None:
                 raise ValueError("只有完成状态携带完整大小")
-            if self.activity_id is not None or self.wait_completed_event_id is not None:
+            if (self.activity_id is not None or self.wait_completed_event_id is not None
+                    or self.result_page_event_id is not None or self.stop_result_event_id is not None):
                 raise ValueError("只有等待与产物契约依据引用任务及等待完成事件")
             if state == _WRITING:
                 if self.basis is not None:
@@ -255,7 +271,18 @@ class FileCompletionSave:
         if self.basis == _TIME_AND_OUTPUTS:
             document["activity_id"] = self.activity_id
             document["wait_completed_event_id"] = self.wait_completed_event_id
+        elif self.basis == _STOP_RETURN_AND_WAIT:
+            document.update(activity_id=self.activity_id, result_page_event_id=self.result_page_event_id,
+                            stop_result_event_id=self.stop_result_event_id)
         return document
+
+    def completion_request(self) -> dict[str, Any]:
+        """保留原可选输入；同值申请与未提供输入仍是不同的申请。"""
+        return {
+            "locator": None if self.locator is None else dict(self.locator),
+            "original_name": self.original_name,
+            "media_type": self.media_type,
+        }
 
 
 @dataclass(frozen=True)

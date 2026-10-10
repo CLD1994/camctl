@@ -66,7 +66,7 @@ Janus 负责等待机制，项目只适配接纳规则、来源路由、结果�
 
 ## 设备证据与联调输入
 
-Action6 与 OSMO 360 II 按[双相机资料采集与完整演示验收](../hardware/camera-demo-validation.md)取得原始响应及观察记录；该流程同时提供从已安装 camctl 提取计划样例、明确 serial、导出能力、通过 C host 拍摄与独立取回的步骤。两款相机的软件门禁和真实设备门禁分别由[双相机实施计划 T8、T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)登记。
+相机接入按[资料采集与 Action6 录像演示](../hardware/camera-demo-validation.md)取得原始响应及观察记录。正式演示通过已安装 camctl 和 C host 完成 Action6 普通录像、独立取回、文件领取及报告确认；采集器和诊断脚本只提供设备资料，不代替这条业务链。双相机四条软件链的实际验证范围由[实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)登记，当前真机范围、后续设备接入条件及能力启用门禁由[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
 
 本节是单独设备联调的证据清单，不是第一版软件集成测试的环境要求或通过门槛。软件集成测试以受接口契约约束的设备替身提供响应；具体设备和现场负载到位后，再安排真实协议、性能与存储测量。
 

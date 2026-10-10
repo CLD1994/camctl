@@ -47,6 +47,6 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 - [请求与会话](../architecture/protocol-session.md)：接纳、会话接管和退出检查。
 - [本地配置](../architecture/configuration.md)与[初始化](../architecture/initialization.md)：默认值、生效范围和显式建库。
 - [部署联调样例](../architecture/deployment-example.md)：串联配置、初始化、能力说明、输入和报告确认。
-- [双相机样例与资料采集](../hardware/camera-demo-validation.md)：从安装包提取四条演示计划、配置和生成器，通过 C host 拍摄、独立取回及确认报告，并在 Windows 采集设备资料、在 ARM Linux 验收。
+- [Action6 录像演示与相机资料采集](../hardware/camera-demo-validation.md)：从安装包提取配置和计划生成器，通过 C host 完成 Action6 普通录像、独立取回、文件领取及报告确认；Windows 用于资料采集，完整演示在 ARM Linux 验收。后续相机和延时接入由对应计划跟踪。
 - [C 接入模块](../host-demo/design.md)：主程序管理 CLI 进程及领取文件的责任。
 - [电机控制动作](../architecture/motor-control.md)与[主程序通知协议](../../protocol/host-notifications.md)：有效窗口、发送意图、单向通知及不重发的恢复责任。

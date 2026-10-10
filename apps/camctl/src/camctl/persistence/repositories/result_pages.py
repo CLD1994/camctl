@@ -267,6 +267,13 @@ def read_page(ref, owned):
     return saved
 
 
+def read_page_at(event_id, owned):
+    """原事件解码取得票据，再复用单页读取的可靠范围校验。"""
+    ObjectId(event_id)
+    saved, _ = _at(owned.connection, event_id)
+    return read_page(saved.ref, owned)
+
+
 def read_last_page(ticket, owned):
     """原尝试的可靠末页；无分页输入与不完整引用分别处理。"""
     _, attempt, _, _ = _load(owned.connection, ticket)

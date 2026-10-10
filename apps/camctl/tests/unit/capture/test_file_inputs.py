@@ -127,6 +127,41 @@ class TestFileCompletionSave:
         with pytest.raises(ValueError):
             self._save(basis=1, observation={"w": 1}, size_bytes=10, activity_id=11)
 
+    def test_stop_return_and_wait_keeps_original_result_and_stop_references(self):
+        observation = {"identity": "/DCIM/a.mp4", "complete": True, "size_bytes": 10}
+        save = self._save(basis=3, observation=observation, size_bytes=10,
+                          activity_id=11, result_page_event_id=9, stop_result_event_id=7)
+        assert save.completion_evidence() == {
+            "basis": 3, "observation": observation, "activity_id": 11,
+            "result_page_event_id": 9, "stop_result_event_id": 7,
+        }
+
+    @pytest.mark.parametrize("changes", [
+        {"activity_id": None}, {"activity_id": True},
+        {"result_page_event_id": None}, {"result_page_event_id": True},
+        {"stop_result_event_id": None}, {"stop_result_event_id": 0},
+        {"wait_completed_event_id": 5}, {"state": 2, "size_bytes": None},
+        {"state": 4, "size_bytes": None, "error": {"reason": "unknown"}},
+    ])
+    def test_stop_return_and_wait_rejects_missing_or_inapplicable_references(self, changes):
+        arguments = dict(basis=3, observation={"complete": True}, size_bytes=10,
+                         activity_id=11, result_page_event_id=9, stop_result_event_id=7)
+        arguments.update(changes)
+        with pytest.raises(ValueError):
+            self._save(**arguments)
+
+    @pytest.mark.parametrize("basis,field", [(1, "result_page_event_id"),
+                                             (1, "stop_result_event_id"),
+                                             (2, "result_page_event_id"),
+                                             (2, "stop_result_event_id")])
+    def test_other_completion_bases_reject_stop_wait_references(self, basis, field):
+        arguments = dict(basis=basis, observation={"complete": True}, size_bytes=10)
+        if basis == 2:
+            arguments.update(activity_id=11, wait_completed_event_id=5)
+        arguments[field] = 7
+        with pytest.raises(ValueError):
+            self._save(**arguments)
+
     def test_writing_optionally_carries_guarantee_evidence(self):
         save = self._save(state=2, basis=1, observation={"growing": True})
         assert save.completion_evidence()["basis"] == 1

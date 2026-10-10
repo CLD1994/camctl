@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -51,6 +52,7 @@ from camctl.capture.result_inputs import (
 )
 from camctl.capture.result_scans import (
     PendingResultScan, SavedResultEntries, SourceResultEntries, RegisteredSourceFiles, advance_result_scan,
+    completed_wait_from_page,
 )
 from camctl.capture.result_pages import ResultPageRef, OutputSetFinalizationSave
 from camctl.capture.photo import (
@@ -122,6 +124,7 @@ from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failur
 from camctl.devices.directory import DirectoryReader
 from camctl.devices.evidence import EvidenceError
 from camctl.devices.ports import ControlRequest, DeviceCallResult
+from camctl.devices.recording_completion import is_completed_file_wait
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptFinish,
@@ -540,6 +543,8 @@ class FileRegistration:
     completion_basis: int = _DEVICE_GUARANTEE
     completion_activity_id: int | None = None
     wait_completed_event_id: int | None = None
+    result_page_event_id: int | None = None
+    stop_result_event_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -691,7 +696,8 @@ class ResultFilesPort(Protocol):
     async def list_round(self, ticket: AttemptTicket, *, timeout_s: Decimal) -> ListedResult: ...
 
     async def list_page(self, ticket: AttemptTicket, *, cursor, timeout_s: Decimal,
-                        output_scope: Mapping | None = None) -> ResultPage: ...
+                        output_scope: Mapping | None = None,
+                        completion_context: Mapping | None = None) -> ResultPage: ...
 
 
 class RecordingStatePort(Protocol):
@@ -1209,6 +1215,11 @@ class SessionRecordingState:
                 and stop_run[4] == int(_EFFECT_STATE.CONFIRMED))
         anchor = self._anchors.get(action_id)
         stop_target = anchor[1] if anchor is not None else None
+        file_complete = stop_confirmed
+        if "file_completion_wait_ms" in action["execution_spec_json"]:
+            completion = _record_file_completion_context(runtime, action_id)
+            file_complete = (stop_confirmed and completion is not None
+                             and completion["prior_completion"] is not None)
         return RecordingState(
             action_terminal=action["status"] in _ACTION_TERMINAL,
             started_confirmed=started,
@@ -1216,7 +1227,7 @@ class SessionRecordingState:
             stop_target_ns=stop_target,
             monotonic_now_ns=self._runtime.monotonic_ns(),
             stop_confirmed=stop_confirmed,
-            file_complete_guaranteed=stop_confirmed,
+            file_complete_guaranteed=file_complete,
             stop_attempts_used=used,
             stop_max_attempts=maximum,
             stop_in_flight=in_flight,
@@ -1727,6 +1738,8 @@ def _register_observed(
                     basis=registration.completion_basis,
                     activity_id=registration.completion_activity_id,
                     wait_completed_event_id=registration.wait_completed_event_id,
+                    result_page_event_id=registration.result_page_event_id,
+                    stop_result_event_id=registration.stop_result_event_id,
                     observation=entry.evidence,
                     size_bytes=entry.size_bytes,
                 ))
@@ -2887,6 +2900,76 @@ def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | None:
     return None if row is None else int(row[0])
 
 
+def _record_file_completion_context(runtime: CaptureRuntime, action_id: int) -> dict | None:
+    """原 START/STOP 均可靠时，冻结 RESULT 采用的停止与等待依据。"""
+    action = runtime.action(action_id)
+    wait_ms = action["execution_spec_json"].get("file_completion_wait_ms")
+    if action["type"] != int(_ACTION_TYPE.CAMERA_RECORD) or wait_ms is None:
+        return None
+    start = runtime.last_attempt(f"start/{action_id}")
+    if (start is None or start[0] == int(_ATTEMPT_STATUS.RUNNING)
+            or start[1] != int(_EFFECT_STATE.CONFIRMED)):
+        return None
+    activity_id = _activity_id_of(runtime, action_id)
+    with closing(runtime.owned.connection.execute(
+        "SELECT r.kind,r.action_id,r.activity_id,a.status,a.effect_state,"
+        " a.result_event_id,a.error_json,a.result_json FROM operation_runs r"
+        " JOIN operation_attempts a ON a.run_id=r.id"
+        " WHERE r.responsibility_key=? ORDER BY a.id DESC LIMIT 1",
+        (f"stop/{action_id}",),
+    )) as cursor:
+        stopped = cursor.fetchone()
+    if (stopped is None or stopped[3] == int(_ATTEMPT_STATUS.RUNNING)
+            or stopped[4] != int(_EFFECT_STATE.CONFIRMED)):
+        return None
+    if (stopped[0] != int(_RUN_KIND.STOP) or stopped[1] != action_id
+            or stopped[2] != activity_id or stopped[5] is None):
+        raise ConsistencyError("原停止结果与录像动作、活动或停止责任不符")
+    original, occurred_at = runtime.capture.read_confirmed_stop(stopped[5], runtime.owned)
+    if original["id"] != activity_id or original["action_id"] != action_id:
+        raise ConsistencyError("原停止确认改变了录像活动或固定设备绑定")
+    context = {
+        "activity_id": str(activity_id), "stop_result_event_id": int(stopped[5]),
+        "stop_returned_at_us": int(occurred_at),
+        "stop_response": {"status": int(stopped[3]), "effect_state": int(stopped[4]),
+            "error": None if stopped[6] is None else parse_exact_json(stopped[6]),
+            "result": parse_exact_json(stopped[7])},
+        "file_completion_wait_ms": wait_ms, "prior_completion": None,
+    }
+    context["prior_completion"] = _prior_record_file_completion(runtime, action_id, context)
+    return context
+
+
+def _prior_record_file_completion(runtime: CaptureRuntime, action_id: int, context: dict) -> dict | None:
+    """沿同活动可靠 RESULT 页读取完成等待；每次只保留一批和一个依据。"""
+    activity_id = int(context["activity_id"])
+    responsibility = f"results/{activity_id}"
+    with closing(runtime.owned.connection.execute(
+        "SELECT r.id,a.attempt_no FROM operation_runs r"
+        " JOIN operation_attempts a ON a.run_id=r.id"
+        " WHERE r.responsibility_key=? AND r.action_id=? AND r.activity_id=?"
+        " AND r.kind=? AND a.result_last_page_event_id IS NOT NULL"
+        " ORDER BY a.attempt_no DESC",
+        (responsibility, action_id, activity_id, int(_RUN_KIND.CHECK_CAPTURE_RESULTS)),
+    )) as attempts:
+        for run_id, attempt_no in attempts:
+            ticket = AttemptTicket(attempt_no, "result", str(activity_id), responsibility, run_id)
+            cursor, completion = None, None
+            while True:
+                pages = runtime.capture.read_result_pages(ticket, cursor, 32, runtime.owned)
+                for saved in pages.items:
+                    actual_wait = completed_wait_from_page(saved, context,
+                        repository=runtime.capture, owned=runtime.owned)
+                    if actual_wait is not None:
+                        completion = actual_wait
+                if pages.next_cursor is None:
+                    break
+                cursor = pages.next_cursor
+            if completion is not None:
+                return completion
+    return None
+
+
 def _recovered_control_facts(
     runtime: CaptureRuntime, action) -> RecoveredControlFacts:
     """恢复停止后控制完成依据判定的事实装载。"""
@@ -3072,9 +3155,9 @@ async def _advance_recording_outcome(
         return
     control_complete = decision.phase is RecordingPhase.CONTROL_COMPLETE
     if row[1] == int(_CHECK_DECISION.UNDETERMINED):
-        if not control_complete:
-            # 停止确认但文件完成未保证：需要检查的依据归跨会话对账
-            # 收场固定，不在此猜测计时证据不足。
+        if decision.phase not in (RecordingPhase.CONTROL_COMPLETE,
+                                  RecordingPhase.VERIFY_FILE_COMPLETE):
+            # 只有可靠停止后，原 START/STOP 的时刻才决定控制时长。
             return
         target_ms = _target_duration_ms(action)
         control = decide_recovered_control(_recovered_control_facts(context, action))
@@ -3143,6 +3226,9 @@ async def _advance_recording_outcome(
             metadata.update((entry.identity, entry) for entry in listing.entries)
             entries, registered_files = _registered_result_files(context, action_id, metadata)
             registered = tuple(registered_files[entry.identity] for entry in entries)
+    if "file_completion_wait_ms" in action["execution_spec_json"]:
+        state = _recording_port(context).recording_state(action_id)
+        control_complete = state.stop_confirmed and state.file_complete_guaranteed
     files = assess_capture_files(
         CaptureFileSet(files=(file for file, _ in registered), set_finalized=_listing_finalized(listing)),
         _product_requirements(action, FileKind.VIDEO),
@@ -3671,6 +3757,9 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
         baseline = activity["ownership_mode"] == int(enum_for("device_activities.ownership_mode").BASELINE_COMPARISON)
         method = int(enum_for("device_files.ownership_evidence_json.method").BASELINE_DIFFERENCE) if baseline else _TASK_SCOPE
         action = runtime.action(action_id)
+        record_wait = (action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+            and "file_completion_wait_ms" in action["execution_spec_json"])
+        stop_context = (_record_file_completion_context(runtime, action_id) if record_wait else None)
         uses_wait = (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
             and not action["cancel_requested"]
             and activity["completion_mode"] == int(enum_for("device_activities.completion_mode").TIME_AND_OUTPUTS))
@@ -3695,13 +3784,24 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                     pairs = {identity: pair for identity, pair in pairs.items() if pair is not None}
                 if not batch:
                     continue
+                if record_wait and any(entry.complete for entry in batch):
+                    settlement = saved.page.outcome.settlement
+                    completion = None if settlement is None else settlement.evidence.data.get("file_completion")
+                    if stop_context is None or not is_completed_file_wait(completion,
+                            activity_id=stop_context["activity_id"],
+                            stop_result_event_id=stop_context["stop_result_event_id"],
+                            required_wait_ms=stop_context["file_completion_wait_ms"]):
+                        raise ConsistencyError("完整录像文件缺少原可靠停止及已完成等待依据")
                 _register_observed(runtime, action_id, batch, occurred_at=saved.occurred_at,
                     registration=FileRegistration(pairing_files=pairs, ownership_method=method,
                     activity_id=activity["id"] if baseline else None,
-                    completion_basis=int(enum_for("device_files.completion_evidence_json.basis").TIME_AND_OUTPUTS)
+                    completion_basis=int(enum_for("device_files.completion_evidence_json.basis").STOP_RETURN_AND_WAIT)
+                        if record_wait else int(enum_for("device_files.completion_evidence_json.basis").TIME_AND_OUTPUTS)
                         if wait_event is not None else _DEVICE_GUARANTEE,
-                    completion_activity_id=activity["id"] if wait_event is not None else None,
-                    wait_completed_event_id=wait_event))
+                    completion_activity_id=activity["id"] if record_wait or wait_event is not None else None,
+                    wait_completed_event_id=wait_event,
+                    result_page_event_id=saved.ref.event_id if record_wait else None,
+                    stop_result_event_id=None if stop_context is None else stop_context["stop_result_event_id"]))
         return RegisteredSourceFiles(SourceResultEntries(runtime.capture, runtime.owned, listing.ticket))
     return _register_observed(runtime, action_id, listing.entries, occurred_at=listing.occurred_at,
                               registered_files=listing.registered_files)
@@ -3975,7 +4075,8 @@ async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRoun
     if _uses_result_pages(runtime):
         activity = row_facts(runtime.owned.connection, "device_activities", activity_id)
         pending = PendingResultScan(ticket, activity["output_scope_json"],
-                                    runtime.check_config.timeout_s)
+                                    runtime.check_config.timeout_s,
+                                    completion_context=_record_file_completion_context(runtime, action_id))
         runtime.pending_result_scans[(ticket.run_id, ticket.attempt_id)] = pending
         return await _continue_result_scan(runtime, pending)
     result = await runtime.results.list_round(ticket, timeout_s=runtime.check_config.timeout_s)

@@ -14,6 +14,8 @@
 
 `test_camctl_directory_switch.py` 使用真实 CLI 和 C 模块完成旧目录报告发布、领取与主程序清理，再由显式 `init` 切换三个绑定目录。新会话向新 `ready` 发布报告，重新配置的 C 模块从该目录领取至新 `processing`；测试核对原始字节、数据库身份及报告编号继续增长。组件内的目录切换测试另外验证历史、ACK、绑定提交中断和目录资格。
 
+`test_action6_builtin_demo_roundtrip.py` 在源码目录之外构建并独立安装 wheel 和锁定依赖，从安装包提取 Action6 录像预设，经真实 C host 完成十秒录像、独立取回、文件与报告领取、客户端导入及累计确认。它加载内置驱动，只在 ADB 进程边界提供受接口约束的响应和文件；测试核对 STOP 后的实际五秒等待、文件完成来源、原动作关联、源与副本摘要及源文件保留。这条链不连接真实相机，其媒体样例不证明设备的分辨率、帧率或时长，目标主机验收见[演示操作说明](../../docs/hardware/camera-demo-validation.md#arm-linux-的完整验收)。
+
 跨组件验收沿计划导出、模块交接路径、CLI 执行与报告发布、同步领取到 `processing`、客户端导入追踪业务结果，契约见[接入模块验收要求](../../docs/host-demo/design.md#验收要求)。报告同步主链已由真实客户端导出、真实 C 主程序递交与领取（WSL 构建的 host-demo）、camctl CLI 执行及客户端导入串联验证；录像、照片、延时摄影、取回、取消、清理等场景已全部经同一 C 模块递交链复验（`test_camctl_c_module_roundtrip.py`，带设备链经部署装配桥接入受契约约束的设备替身），会话恢复、媒体修复与日志副本等场景经 camctl CLI 直接驱动验证，命令与环境见[集成计划验证记录](../../docs/superpowers/plans/2026-09-30-camctl-integration.md)。剩余为真实第三方主程序接入及目标环境执行，边界见[部署交接与待核验项](../../docs/camctl/verification.md#部署交接与待核验项)与[模块验证记录](../../docs/host-demo/verification.md)。
 
 `test_camctl_motor_notifications.py` 构建真实 C 主程序替身，通过单参数回调观察位置，串联客户端导出、CLI 发送、报告领取／导入和累计确认。它还验证慢回调期间的 submit、下一次 run、相机共存，以及保存意图后和写入后中断时 host 的自动恢复。

@@ -231,7 +231,7 @@ def _photo_driver() -> dict:
 
 
 @pytest.mark.parametrize("model", ["dji-action6", "dji-osmo360-ii"])
-def test_installed_and_checkout_cli_have_same_pending_camera_catalog(installed, model):
+def test_installed_and_checkout_cli_have_same_camera_catalog(installed, model):
     config = installed.deploy / f"{model}.toml"
     config.write_text(f'[devices.cam-1]\nkind = "camera"\ndriver = "{model}"\n'
                       '[devices.cam-1.adb]\nserial = "explicit-serial"\n', encoding="utf-8")
@@ -242,7 +242,10 @@ def test_installed_and_checkout_cli_have_same_pending_camera_catalog(installed, 
     checkout = _run([sys.executable, *args], cwd=installed.deploy, env=checkout_environment)
     document = json.loads(packaged.stdout)
     assert document == json.loads(checkout.stdout)
-    assert document["devices"] == [{"device_id": "cam-1", "driver_id": model, "actions": []}]
+    assert document["devices"][0]["device_id"] == "cam-1"
+    assert document["devices"][0]["driver_id"] == model
+    assert [action["type"] for action in document["devices"][0]["actions"]] == (
+        ["camera_record"] if model == "dji-action6" else [])
     with zipfile.ZipFile(installed.wheel) as archive:
         assert "camctl/devices/drivers/adb_cameras/registration.py" in archive.namelist()
         assert "camctl/devices/drivers/adb_cameras/driver.py" in archive.namelist()
@@ -264,6 +267,9 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp
     from camctl.devices.drivers.adb_cameras.commands import CameraModel
     model = CameraModel.ACTION6 if stem.startswith("action6") else CameraModel.OSMO360II
     expected = recording_params(model) if stem.endswith("-record") else timelapse_params(model)
+    if stem == "action6-record":
+        expected.pop("aperture")
+        expected.pop("bitrate")
     deployment = Deployment(tmp_path, devices=False)
     spec = camera_spec(deployment, model, expected)
     initialized = installed.cli("init", "--config", str(deployment.config_path))
@@ -308,14 +314,14 @@ def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, tmp_path
 
 def test_installed_sample_rejects_unavailable_camera_before_writing_plan(installed, tmp_path):
     config = tmp_path / "pending.toml"
-    config.write_text('[devices.action6]\nkind="camera"\ndriver="dji-action6"\n'
-                      '[devices.action6.adb]\nserial="explicit-serial"\n')
+    config.write_text('[devices.osmo360ii]\nkind="camera"\ndriver="dji-osmo360-ii"\n'
+                      '[devices.osmo360ii.adb]\nserial="explicit-serial"\n')
     described = installed.cli("describe", "--config", str(config))
     assert described.returncode == 0, described.stderr
     capabilities = tmp_path / "pending.json"
     capabilities.write_text(described.stdout)
     target = tmp_path / "plan.json"
-    refused = subprocess.run([str(installed.python), str(_demo_generator(installed)), "action6-record",
+    refused = subprocess.run([str(installed.python), str(_demo_generator(installed)), "osmo360ii-record",
         "--capabilities", str(capabilities), "--output", str(target)],
         cwd=installed.deploy, env=_clean_environment(), capture_output=True, text=True, timeout=30)
     assert refused.returncode != 0

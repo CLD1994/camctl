@@ -134,6 +134,12 @@ class AdbCameraDriver:
         serial = self._request(request, "result")
         if type(batch) is not int or not 1 <= batch <= 128:
             raise ValueError("相机结果批量必须在 1 到 128 之间")
+        if callable(self.contract.result_reader):
+            result = await self.contract.result_reader(self, request, batch)
+            if result.outcome is None:
+                raise ValueError("结果读取缺少完整实际调用结果")
+            validate_outcome(request.ticket, result.outcome, self.contract.evidence)
+            return result
         return DeviceCallResult.from_outcome(await self._invoke(request, CameraCall.RESULT, serial, batch=batch))
 
     async def query_state(self, request):

@@ -4,12 +4,12 @@ from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Callable, Mapping
+from typing import Awaitable, Callable, Mapping, Any
 
 from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.drivers.registry import DriverStatus
 from camctl.devices.evidence import EvidenceError, EvidenceRegistry
-from camctl.devices.ports import ControlRequest, DriverDeclaration
+from camctl.devices.ports import ControlRequest, DriverDeclaration, DeviceCallResult
 from camctl.devices.tasks import CaptureTaskFactory
 from .commands import CameraModel
 from .definitions import candidate_capabilities
@@ -39,6 +39,7 @@ class CameraContract:
     status: DriverStatus = DriverStatus.DEVICE_VERIFICATION_PENDING
     capture_read_parallel_supported: bool = False
     recovery_operations: frozenset[str] = frozenset()
+    result_reader: Callable[[Any, ControlRequest, int], Awaitable[DeviceCallResult]] | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "task_factories", MappingProxyType(dict(self.task_factories)))
@@ -58,7 +59,7 @@ class CameraContract:
                                and self._has_evidence("dispatch_prevented", 1, "control")),
             stop_supported=callable(self.commands.get(CameraCall.STOP)),
             query_supported=callable(self.commands.get(CameraCall.QUERY)),
-            result_supported=(callable(self.commands.get(CameraCall.RESULT))
+            result_supported=((callable(self.commands.get(CameraCall.RESULT)) or callable(self.result_reader))
                               and self._has_evidence("result_files_listed", 2, "result")),
             read_supported=files, digest_supported=(files and callable(self.digest_timeout_s)
                                                     and self._has_evidence("file_digest", 1, "digest")),
@@ -79,7 +80,7 @@ class CameraContract:
             capabilities.append(replace(capability, task_factory=factory,
                 name=("普通录像参数" if capability.action_type == "camera_record" else "原生延时摄影参数")
                     if callable(factory) else capability.name,
-                description=(("手动曝光固定快门 1/60 秒；两种曝光均固定白平衡 5200 K。"
+                description=((capability.description.replace("调用响应待设备核实。", "")
                               if capability.action_type == "camera_record" else
                               "间隔、持续时间、产物和曝光须符合 Schema 列出的完整组合。")
                              if callable(factory) else capability.description)))

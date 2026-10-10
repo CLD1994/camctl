@@ -78,6 +78,45 @@ def test_record_requires_explicit_stop_capability():
         build_capture_spec("camera_record", CaptureTask("camera_record", target_duration_s=1))
 
 
+@pytest.mark.parametrize("seconds,milliseconds", [
+    (Decimal(".001"), 1), (Decimal("1.234"), 1234), (5, 5000),
+    (Decimal("9223372036854775.807"), 9223372036854775807),
+])
+def test_record_file_completion_wait_is_fixed_without_decimal_rounding(seconds, milliseconds):
+    task = CaptureTask("camera_record", target_duration_s=1, stop_supported=True,
+        file_completion_wait_s=seconds)
+    with localcontext() as context:
+        context.prec = 3
+        spec = build_capture_spec("camera_record", task)
+    assert spec == {"target_duration_ms": 1000, "file_completion_wait_ms": milliseconds}
+    assert validate_capture_spec("camera_record", spec) == spec
+
+
+@pytest.mark.parametrize("wait", [True, "5", 0, -1, Decimal(".0005"),
+    Decimal("NaN"), Decimal("Infinity"), Decimal("9223372036854775.808")])
+def test_record_rejects_file_completion_wait_that_cannot_be_positive_exact_milliseconds(wait):
+    task = CaptureTask("camera_record", target_duration_s=1, stop_supported=True,
+        file_completion_wait_s=wait)
+    with pytest.raises(ValueError):
+        build_capture_spec("camera_record", task)
+
+
+@pytest.mark.parametrize("wait", [None, True, "5000", 0, -1, Decimal("1.5"),
+    Decimal("NaN"), Decimal("Infinity"), 9223372036854775808])
+def test_saved_record_rejects_invalid_explicit_file_completion_wait(wait):
+    with pytest.raises(ValueError):
+        validate_capture_spec("camera_record", {
+            "target_duration_ms": 1000, "file_completion_wait_ms": wait})
+
+
+def test_record_without_file_completion_wait_preserves_stop_completion_contract():
+    assert validate_capture_spec("camera_record", {"target_duration_ms": 1000}) == {
+        "target_duration_ms": 1000}
+    assert build_capture_spec("camera_record", CaptureTask("camera_record",
+        target_duration_s=1, stop_supported=True, file_completion_wait_s=None)) == {
+            "target_duration_ms": 1000}
+
+
 def test_timelapse_spec_records_applicability_and_integer_enums():
     assert build_capture_spec("camera_timelapse", _task()) == {
         "target_duration_ms":1234, "duration_based":True, "wait_after_send":True,

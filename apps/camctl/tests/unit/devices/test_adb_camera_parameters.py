@@ -32,6 +32,80 @@ def test_candidate_schema_is_self_contained_and_accepts_recording(driver):
     assert cap.defaults == {}
 
 
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+def test_action_record_accepts_omitted_aperture_without_a_default(exposure):
+    params = {**recording_params(), "exposure": exposure}
+    del params["aperture"]
+    cap = capability("dji-action6", "camera_record")
+
+    validate_precise(cap.schema, params)
+
+    assert "aperture" not in params
+    assert cap.defaults == {}
+
+
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("aperture", [None, "f8"])
+def test_action_record_rejects_null_or_unknown_explicit_aperture(exposure, aperture):
+    params = {**recording_params(), "exposure": exposure, "aperture": aperture}
+
+    with pytest.raises(BodySchemaError):
+        validate_precise(capability("dji-action6", "camera_record").schema, params)
+
+
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("omit_aperture", [False, True])
+def test_action_record_accepts_omitted_bitrate_without_a_default(exposure, omit_aperture):
+    params = {**recording_params(), "exposure": exposure}
+    del params["bitrate"]
+    if omit_aperture:
+        del params["aperture"]
+    cap = capability("dji-action6", "camera_record")
+
+    validate_precise(cap.schema, params)
+
+    assert "bitrate" not in params
+    assert cap.defaults == {}
+
+
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("bitrate", [None, "ultra"])
+def test_action_record_rejects_null_or_unknown_explicit_bitrate(exposure, bitrate):
+    params = {**recording_params(), "exposure": exposure, "bitrate": bitrate}
+
+    with pytest.raises(BodySchemaError):
+        validate_precise(capability("dji-action6", "camera_record").schema, params)
+
+
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("field", [
+    "type", "duration_s", "resolution", "fov", "stabilization", "exposure",
+])
+def test_action_record_without_aperture_or_bitrate_still_requires_other_fields(exposure, field):
+    params = {**recording_params(), "exposure": exposure}
+    del params["aperture"]
+    del params["bitrate"]
+    del params[field]
+
+    with pytest.raises(BodySchemaError):
+        validate_precise(capability("dji-action6", "camera_record").schema, params)
+
+
 @pytest.mark.parametrize("duration", [Decimal("0.001"), 10, 60, Decimal("1.234")])
 def test_record_duration_uses_exact_milliseconds_without_example_limit(duration):
     params = {**recording_params(), "duration_s": duration}
@@ -88,7 +162,7 @@ def test_action_auto_compensation_candidates(ev):
 
 
 @pytest.mark.parametrize("field, value", [("fov", "wide"), ("aperture", "f2.8"),
-    ("stabilization", "off"), ("shutter", "1/60"), ("white_balance_k", 5200)])
+    ("stabilization", "off"), ("bitrate", "high"), ("shutter", "1/60"), ("white_balance_k", 5200)])
 def test_osmo_record_rejects_unopened_settings(field, value):
     with pytest.raises(BodySchemaError):
         validate_precise(capability("dji-osmo360-ii", "camera_record").schema,

@@ -628,6 +628,7 @@
 | --- | --- |
 | 1 | `DEVICE_GUARANTEE` |
 | 2 | `TIME_AND_OUTPUTS` |
+| 3 | `STOP_RETURN_AND_WAIT` |
 
 ### `device_files.pairing_evidence_json.method`
 

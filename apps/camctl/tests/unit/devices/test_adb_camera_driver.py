@@ -51,16 +51,17 @@ class Parser:
 
 
 class Transport:
-    def __init__(self, *, fail_at=None, after_call=None):
+    def __init__(self, *, fail_at=None, after_call=None, fail_output=b"UNKNOWN"):
         self.calls = []
         self.fail_at, self.after_call = fail_at, after_call
+        self.fail_output = fail_output
 
     async def run(self, spec, stop):
         self.calls.append(spec)
         if self.after_call is not None:
             self.after_call(len(self.calls))
         return RawToolOutcome(LocalExit(exit_code=0),
-            b"UNKNOWN" if len(self.calls) == self.fail_at else b"OK", None, None, stderr=b"")
+            self.fail_output if len(self.calls) == self.fail_at else b"OK", None, None, stderr=b"")
 
 
 def _params(model):
@@ -111,6 +112,109 @@ async def test_control_applies_settings_before_one_actual_start(model):
     assert result.outcome.status is AttemptStatus.SUCCEEDED
     assert result.outcome.effect is EffectState.CONFIRMED
     assert result.observations == (DeviceObservation("start_confirmed", 1, {"activity_id": "7"}),)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exposure, call_count", [
+    ({"mode": "manual", "iso": 800}, 12),
+    ({"mode": "auto", "compensation_ev": 0}, 11),
+])
+async def test_action6_record_omitted_aperture_reaches_one_start_without_adjusting_aperture(exposure, call_count):
+    request = _request()
+    params = {**request.params, "exposure": exposure}
+    del params["aperture"]
+    request = replace(request, params=params)
+    transport = Transport()
+
+    result = await _driver(CameraModel.ACTION6, transport).control(request)
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    start = ["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "02", "01"]
+    assert len(scripts) == call_count
+    assert scripts[-1] == start
+    assert scripts.count(start) == 1
+    assert not any(command[-2] == "0x26" for command in scripts)
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.outcome.effect is EffectState.CONFIRMED
+    assert result.observations == (DeviceObservation("start_confirmed", 1, {"activity_id": "7"}),)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exposure, aperture_call_number", [
+    ({"mode": "manual", "iso": 800}, 11),
+    ({"mode": "auto", "compensation_ev": 0}, 10),
+])
+@pytest.mark.parametrize("aperture, payload", [("f2.8", "1801"), ("f4.0", "9001")])
+@pytest.mark.parametrize("response", [b"UNKNOWN", b"e3"])
+async def test_action6_record_unconfirmed_explicit_aperture_blocks_start(
+        exposure, aperture_call_number, aperture, payload, response):
+    request = _request()
+    request = replace(request, params={**request.params, "exposure": exposure, "aperture": aperture})
+    transport = Transport(fail_at=aperture_call_number, fail_output=response)
+
+    result = await _driver(CameraModel.ACTION6, transport).control(request)
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    assert len(scripts) == aperture_call_number
+    assert scripts[-1] == ["dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "0x26", payload]
+    assert not any(command[-2:] == ["02", "01"] for command in scripts)
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.effect is EffectState.NO_EFFECT
+    assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": response.decode()}}
+    assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
+    assert result.outcome.call_info.local_exit_code == 0
+    assert not result.observations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exposure, call_count", [
+    ({"mode": "manual", "iso": 800}, 11),
+    ({"mode": "auto", "compensation_ev": 0}, 10),
+])
+async def test_action6_record_omitted_aperture_and_bitrate_reaches_one_start(exposure, call_count):
+    request = _request()
+    params = {**request.params, "exposure": exposure}
+    del params["aperture"]
+    del params["bitrate"]
+    transport = Transport()
+
+    result = await _driver(CameraModel.ACTION6, transport).control(replace(request, params=params))
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    start = ["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "02", "01"]
+    assert len(scripts) == call_count
+    assert scripts[-1] == start
+    assert scripts.count(start) == 1
+    assert not any(command[-2] == "0x26" or command[0] == "simulate_device" for command in scripts)
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.outcome.effect is EffectState.CONFIRMED
+    assert result.observations == (DeviceObservation("start_confirmed", 1, {"activity_id": "7"}),)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exposure, bitrate_call_number", [
+    ({"mode": "manual", "iso": 800}, 11),
+    ({"mode": "auto", "compensation_ev": 0}, 10),
+])
+@pytest.mark.parametrize("bitrate, value", [("standard", "1"), ("high", "2")])
+async def test_action6_record_unconfirmed_explicit_bitrate_blocks_start(exposure, bitrate_call_number, bitrate, value):
+    request = _request()
+    params = {**request.params, "exposure": exposure, "bitrate": bitrate}
+    del params["aperture"]
+    response = b"name [DeviceRecordRecSettingBitRate]\nlink to server rlt 0\nregister to server successs\n"
+    transport = Transport(fail_at=bitrate_call_number, fail_output=response)
+
+    result = await _driver(CameraModel.ACTION6, transport).control(replace(request, params=params))
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    assert len(scripts) == bitrate_call_number
+    assert scripts[-1] == ["simulate_device", "-s", "bitrate", value]
+    assert not any(command[-2:] == ["02", "01"] for command in scripts)
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.effect is EffectState.NO_EFFECT
+    assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": response.decode()}}
+    assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
+    assert not result.observations
 
 
 @pytest.mark.asyncio

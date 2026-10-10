@@ -157,10 +157,14 @@ def settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValu
             else:
                 exposure_settings = (_cmd("8e", "010100000101"), _cmd("1E", "0100"),
                                      _cmd("0x2c", "0634000000", test=True), ACTION_EV[exposure["compensation_ev"]])
+            aperture_settings = ((ACTION_APERTURE[params["aperture"]],)
+                                 if "aperture" in params else ())
+            bitrate_settings = ((ACTION_BITRATE[params["bitrate"]],)
+                                if "bitrate" in params else ())
             return (_cmd("0xe1", "01"), ACTION_RESOLUTIONS[params["resolution"]],
                     *exposure_settings, _cmd("42", "3d", test=True),
                     ACTION_FOV[params["fov"]], ACTION_STABILIZATION[params["stabilization"]],
-                    ACTION_APERTURE[params["aperture"]], ACTION_BITRATE[params["bitrate"]])
+                    *aperture_settings, *bitrate_settings)
         if exposure["mode"] == "manual":
             exposure_settings = _osmo_manual(exposure["iso"])
         else:

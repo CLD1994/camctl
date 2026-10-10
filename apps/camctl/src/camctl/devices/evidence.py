@@ -19,6 +19,10 @@ __all__ = [
     "EvidenceContract",
     "EvidenceError",
     "EvidenceRegistry",
+    "RESULT_LISTED_TYPE",
+    "RESULT_LISTED_VERSION",
+    "RESULT_FILES_CONTRACT",
+    "RESULT_PAGE_CONTRACT",
     "validate_observation",
 ]
 
@@ -68,6 +72,17 @@ class EvidenceContract:
             raise EvidenceError("观察数量上限必须为正整数")
         if self.identity_field is not None and self.identity_field not in self.fields:
             raise EvidenceError("身份成员必须属于 fields")
+
+
+RESULT_LISTED_TYPE = "result_files_listed"
+RESULT_LISTED_VERSION = 1
+RESULT_FILES_CONTRACT = EvidenceContract(
+    RESULT_LISTED_TYPE, RESULT_LISTED_VERSION, "result",
+    frozenset({"activity_id", "entries"}), identity_field="activity_id")
+RESULT_PAGE_CONTRACT = EvidenceContract(
+    RESULT_LISTED_TYPE, 2, "result",
+    frozenset({"activity_id", "entries", "cursor", "next_cursor", "set_finalized", "completion_evidence"}),
+    identity_field="activity_id")
 
 
 @dataclass(frozen=True)

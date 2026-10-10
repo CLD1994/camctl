@@ -9,12 +9,13 @@ from camctl.devices.drivers.registry import DriverEntry
 from camctl.devices.drivers.runtime import current_registry, register_drivers
 from .commands import CameraModel
 from .contracts import CameraContract
+from .action6_record import action6_record_contract
 from .driver import AdbCameraDriver
 from .transport import AdbTransport
 
 
-# 真实响应、结束和文件工具契约未补齐的相机只保留候选定义。
-_BUILTIN_CONTRACTS = tuple(CameraContract(model) for model in CameraModel)
+# 普通录像使用已声明的 Action6 运行假设；其他拍摄仍保留候选定义。
+_BUILTIN_CONTRACTS = (action6_record_contract(), CameraContract(CameraModel.OSMO360II))
 
 
 def builtin_camera_contracts():

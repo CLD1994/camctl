@@ -64,10 +64,11 @@ uv pip install \
 uv pip install \
   --python "$HOME/.camctl/venv/bin/python" \
   --no-deps \
+  --reinstall-package camctl \
   "$HOME/.camctl/packages/camctl-x.y.z-py3-none-any.whl"
 ```
 
-逐条确认命令成功后继续。`--require-hashes` 核对依赖文件哈希，`--no-deps` 使安装本体时沿用前一步的配套依赖。安装后入口为 `$HOME/.camctl/venv/bin/camctl`；运行时无需激活环境，也不依赖 uv。
+逐条确认命令成功后继续。`--require-hashes` 核对依赖文件哈希，`--no-deps` 使安装本体时沿用前一步的配套依赖，`--reinstall-package camctl` 确保同版本号的交付包也更新实际安装内容。安装后入口为 `$HOME/.camctl/venv/bin/camctl`；运行时无需激活环境，也不依赖 uv。
 
 已有 camctl 部署时，在停止相关 host 与 CLI 进程后再更新安装，保留原配置、状态库和历史。
 

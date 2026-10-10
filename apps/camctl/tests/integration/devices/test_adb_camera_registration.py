@@ -119,7 +119,7 @@ async def test_driver_ports_use_original_ticket_and_explicit_capabilities(model,
 
 
 @pytest.mark.parametrize("model", list(CameraModel))
-def test_fresh_cli_registers_pending_camera_without_device_io(tmp_path, model):
+def test_fresh_cli_registers_camera_without_device_io(tmp_path, model):
     config = tmp_path / "config.toml"
     config.write_text(f'[devices.cam-1]\nkind = "camera"\ndriver = "{model}"\n'
                       '[devices.cam-1.adb]\nserial = "explicit-serial"\n', encoding="utf-8")
@@ -128,8 +128,10 @@ def test_fresh_cli_registers_pending_camera_without_device_io(tmp_path, model):
     result = subprocess.run([sys.executable, "-m", "camctl", "describe", "--config", str(config)],
                             cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["devices"] == [
-        {"device_id": "cam-1", "driver_id": model, "actions": []}]
+    device = json.loads(result.stdout)["devices"][0]
+    assert device["device_id"] == "cam-1" and device["driver_id"] == model
+    assert [action["type"] for action in device["actions"]] == (
+        ["camera_record"] if model == CameraModel.ACTION6 else [])
 
 
 @pytest.mark.asyncio

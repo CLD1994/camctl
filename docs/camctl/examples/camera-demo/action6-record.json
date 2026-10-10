@@ -17,9 +17,7 @@
         },
         "resolution": "4k30",
         "fov": "wide",
-        "stabilization": "off",
-        "aperture": "f2.8",
-        "bitrate": "high"
+        "stabilization": "off"
       },
       "policy": {
         "max_delay_ms": 30000

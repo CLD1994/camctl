@@ -125,7 +125,8 @@ class ResultsDouble:
         self.calls: list[int] = []
         self.set_finalized = set_finalized
 
-    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None):
+    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
+                        completion_context=None):
         if cursor is not None:
             raise ValueError("替身单批完整集合没有后续游标")
         listed = await self.list_round(ticket, timeout_s=timeout_s)

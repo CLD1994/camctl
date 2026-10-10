@@ -572,7 +572,8 @@
       "contract": "file-fields.md#设备文件",
       "members": {
         "DEVICE_GUARANTEE": 1,
-        "TIME_AND_OUTPUTS": 2
+        "TIME_AND_OUTPUTS": 2,
+        "STOP_RETURN_AND_WAIT": 3
       }
     },
     "device_files.pairing_evidence_json.method": {

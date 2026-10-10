@@ -1,15 +1,14 @@
-# 双相机资料采集与完整演示验收
+# Action6 普通录像演示与相机资料采集
 
-本流程用于 Action6 和 OSMO 360 II。Windows 负责试验 ADB 命令并采集原始设备资料；完整部署验收在 ARM Linux 上完成。任务范围及完成依据见[双相机接入设计](../superpowers/specs/2026-10-10-camctl-real-camera-demo-design.md)，软件和设备门禁分别由[实施计划 T8、T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)跟踪。
+正式演示在 ARM Linux 上通过已安装 camctl 和 C host 控制 Action6，完成普通录像、正式产物登记、独立取回、文件领取和报告确认。Windows 负责试验 ADB 命令并采集原始设备资料；本文的采集器和诊断脚本用于取得这些资料。任务范围及完成依据见[相机接入设计](../superpowers/specs/2026-10-10-camctl-real-camera-demo-design.md)，双相机软件验证与当前真机门禁分别由[实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)和[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
 
-| 相机 | 录像 | 原生延时摄影 |
+| 当前真机演示 | 拍摄要求 | 后续交接 |
 | --- | --- | --- |
-| Action6 | 目标 10 秒，主机发送停止 | 间隔 8 秒，持续 30 分钟，仅视频 |
-| OSMO 360 II | 目标 10 秒，主机发送停止 | 间隔 30 秒，持续 10 分钟，仅视频 |
+| Action6 普通录像 | 目标 10 秒，主机发送停止 | 独立取回正式产物，经 C host 领取文件并确认报告 |
 
-设备试验先取得设置、启动、停止及文件访问的实际响应，确定每种返回能够证明什么。正式任务只使用 `camctl describe` 导出的完整能力；尚未具有响应或结束契约的任务保持候选状态。命令候选和相互约束见[相机控制交接资料](camera-control-handoff.md)。
+设备试验先取得设置、启动、停止及文件访问的实际响应，确定每种返回能够证明什么。正式演示前，先完成 Action6 普通录像的响应解释、停止与产物完成依据、文件访问契约，并在正常启动路径实际启用。正式任务只使用 `camctl describe` 导出的完整能力；配置和计划模板不能使候选任务变为可执行能力。命令候选和相互约束见[相机控制交接资料](camera-control-handoff.md)，具体启用及验收步骤由上述 T9 跟踪。
 
-## Windows 上先采集一款相机
+## Windows 上采集设备资料
 
 每款相机使用独立资料目录，记录机身型号、固件版本、使用内置存储还是 SD 卡，以及本次选择的完整参数。相机按键、手机应用和其他控制程序不另行拍摄。保留试验前已有文件，便于核对新文件的关联。
 
@@ -32,7 +31,7 @@ py -3.11 collect_call.py action6/004-firmware adb -s <serial> shell getprop ro.b
 py -3.11 collect_call.py action6/005-tools adb -s <serial> shell 'for t in dji_mb_ctrl simulate_device sh mktemp find sort stat sha256sum dd rm test printf trap read; do echo TOOL=$t; command -v $t || echo NOT_FOUND; done'
 ```
 
-将 `<serial>` 替换为实际设备标识；OSMO 的资料使用另一个目录。`getprop` 返回空值时，在观察记录中保存界面上显示的型号和固件，不补写推测值。工具存在只证明能找到该程序，其所需选项仍须实际核实。
+将 `<serial>` 替换为 Action6 的实际设备标识；后续采集其他相机时使用独立目录和对应绑定。`getprop` 返回空值时，在观察记录中保存界面上显示的型号和固件，不补写推测值。工具存在只证明能找到该程序，其所需选项仍须实际核实。
 
 ### 核对 ADB 返回和字节
 
@@ -83,7 +82,7 @@ python .\action6_record_probe.py --serial 123456789ABCDEF --ffprobe "C:\path\to\
 
 每条设备侧设置命令通过 `collect_call.py <独立目录> adb -s <serial> shell <命令及参数>` 执行。设置明确失败时先保存该结果，结束这次试验，不继续启动。
 
-两款相机的录像启动、停止候选分别为：
+Action6 普通录像的启动、停止候选为：
 
 ```powershell
 py -3.11 collect_call.py action6/020-record-start adb -s <serial> shell dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 02 01
@@ -96,7 +95,7 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 
 ## 延时摄影资料
 
-两款相机的预设验收分别选择表中的完整组合。Action6 使用 4K/30 fps、自动曝光、8 秒间隔、30 分钟和仅视频；OSMO 使用全景延时、8K/30 fps、手动曝光、30 秒间隔、10 分钟和仅视频。设置步骤和完整负载从[交接资料](camera-control-handoff.md#action--action6-静止延时摄影)及[OSMO 延时资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)取得。Action6 的秒级诊断使用下述实验候选，结果只用于定位启动和输出问题；原预设的真实时长验收仍按各自完整组合执行。
+延时摄影的设备接入条件和后续诊断目标由[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。Action6 延时诊断使用正常新机，OSMO 的试验以设备能够进入 ADB 为前提；这些任务不属于当前普通录像演示。OSMO 后续诊断要求为 5 秒间隔、持续 60 秒，完整负载、编码和设备支持须先核实，不能直接改写原表预设。原始完整组合仍见[Action6 延时资料](camera-control-handoff.md#action--action6-静止延时摄影)及[OSMO 延时资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)。下述 Action6 工具保留候选诊断和原记录只读复查的使用方法，试验结果只表达实际观察。
 
 ### Action6 原生延时的统一采集
 
@@ -193,7 +192,7 @@ OSMO 已有停止候选 `dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 00`。在需�
 
 ## 从安装包准备计划和配置
 
-先按[独立安装与主程序联调](../../apps/host-demo/docs/camctl-integration.md#一准备运行账户和交付文件)安装 Python 3.11、配套依赖、camctl wheel 和 host-demo。以下步骤使用已安装的程序，不要求目标机存在源码仓库。
+先按[独立安装与主程序联调](../../apps/host-demo/docs/camctl-integration.md#一准备运行账户和交付文件)在目标主机安装 Python 3.11、配套依赖、camctl wheel 和 host-demo，并准备可用的 ADB。在个人电脑按[客户端运行指南](../client/running.md)启动客户端，供后续导入报告和视频。以下主机步骤使用已安装的程序，不要求目标机存在源码仓库。
 
 在终端 B 从 camctl 包提取演示资源。提取目录为 `$HOME/.camctl/camera-demo`，已有同名文件会使操作失败，以便保留人工填写的 serial 和已经生成的计划。
 
@@ -214,7 +213,7 @@ print(root)
 PY
 ```
 
-在提取的 `config.toml` 中，将两款相机的 serial 分别替换为 `adb devices -l` 列出的实际标识。`device_id` 分别为 `action6` 和 `osmo360ii`；样例省略 `[paths]`，使用运行账户的默认部署目录。已有部署保留原配置，将设备项合并到实际使用的配置中。初始化、能力导出和 host 始终使用同一份配置：
+提取目录中同时保留 Action6 延时和 OSMO 的候选计划模板，供后续接入使用；当前演示使用 `action6-record`、`obtain` 和 `report-ack`。在提取的 `config.toml` 中，将 Action6 的 serial 替换为 `adb devices -l` 列出的实际标识，`device_id` 为 `action6`。配置只包含这款相机，不要求填写 OSMO 绑定；样例省略 `[paths]`，使用运行账户的默认部署目录。已有部署保留原配置，将 Action6 设备项合并到实际使用的配置中。初始化、能力导出和 host 始终使用同一份配置：
 
 ```bash
 "$HOME/.camctl/venv/bin/camctl" init --config "$HOME/.camctl/camera-demo/config.toml"
@@ -222,39 +221,79 @@ PY
   > "$HOME/.camctl/camera-demo/capabilities.json"
 ```
 
-`prepare-plan.py` 从安装包读取计划模板，生成新的正整数请求身份和 UTC 时间，并按刚导出的能力 Schema 校验拍摄参数。默认安排在生成后 10 秒开始，允许迟到 30 秒。每份生成计划提交前都重新生成；原键重送时继续使用原文件。若实际能力尚未包含该任务，生成器会拒绝生成。候选命令和样例存在不表示设备响应、结束方式和文件工具已核实；完成 T9 契约后再执行真机演示。
+`prepare-plan.py` 从安装包读取计划模板，生成新的正整数请求身份和 UTC 时间，并按刚导出的能力 Schema 校验拍摄参数。默认安排在生成后 10 秒开始，允许迟到 30 秒。每份新计划选择尚不存在的输出文件名并在提交前生成；原键重送时继续使用原文件。内置 Action6 驱动导出普通录像能力，其他拍摄候选等待各自设备接入。实际能力不支持计划时，生成器在写入前拒绝生成，不能用候选 Schema 代替实际 `describe`。
+
+Action6 录像模板按[参数规则](../architecture/camera-parameters.md)省略 `aperture` 和 `bitrate`，驱动保留相机原设置，不将实际值补写为用户要求。其他计划明确请求这些参数时，仍须执行设置；设置失败或未确认时停止后续设置和 START，保留实际错误。已有码率工具只提供服务日志，显式码率要求尚不能取得生效确认。
+
+普通录像使用[Action6 的运行假设](../architecture/camera-recording.md#action6-普通录像的运行假设)：正常设备下，完整 `00` 分别确认 START 已开始采集和 STOP 已结束采集；STOP 后实际等待 5 秒，再按文件已写完核实本次 MP4。数据库分别保留原始响应、固定等待规则和实际等待事实。等待不计入录像时长；等待或结果读取失败不重发已确认的 STOP。这组假设尚须在目标主机核验，不能将软件测试视为真实设备验证。
+
+上述命令展示首次部署。已有部署合并设备项后，将本节所有 `--config` 路径替换为实际沿用的配置；配置覆盖 `[paths]` 时，host 同时传入对应的 `--ready <绝对路径>` 和 `--processing <绝对路径>`，初始化和 CLI 使用同一状态库与交接目录。
 
 打开终端 A，运行 `"$HOME/.camctl/host/bin/host-demo" --config "$HOME/.camctl/camera-demo/config.toml"`。保持它运行，在终端 B 生成一份拍摄计划：
 
 ```bash
 "$HOME/.camctl/venv/bin/python" "$HOME/.camctl/camera-demo/prepare-plan.py" action6-record \
   --capabilities "$HOME/.camctl/camera-demo/capabilities.json" \
-  --output "$HOME/.camctl/camera-demo/capture.json"
+  --output "$HOME/.camctl/camera-demo/capture-plan.json"
 ```
 
-将生成器打印的 `submit <绝对路径>` 整行复制到终端 A。host 交互命令不展开 `$HOME` 或 `~`，路径外不加引号。其他三条链分别使用 `action6-timelapse`、`osmo360ii-record` 和 `osmo360ii-timelapse`，每次指定不同的输出文件。四份模板的时长与本文开头的表一致，延时预设保持其完整参数组合。
+将生成器打印的 `submit <绝对路径>` 整行复制到终端 A。host 交互命令不展开 `$HOME` 或 `~`，路径外不加引号。此计划要求 Action6 普通录像 10 秒；拍摄参数经本次实际能力说明校验。后续取回和报告确认各自生成并提交独立计划。
 
-拍摄结束后在终端 A 输入 `claim`，由客户端校验并可靠导入 `processing` 中的状态报告。从本次 `request_id` 对应计划中取得拍摄动作的 `action_instance_id`；拍摄动作应为 `succeeded`，正式产物应属于这个原动作。将此身份填入独立取回计划。下例中的 `123` 和 `456` 分别替换为原拍摄动作身份和客户端已经可靠导入的累计报告身份：
+拍摄结束后在终端 A 输入 `claim`，host 将待传文件移到 `processing`。将其中的状态报告保持原文件名和原始字节复制到个人电脑，在客户端“文件导入”中选择报告，等待导入成功。主机领取与客户端导入是两个独立步骤。
+
+沿用已有主机状态库时，新客户端可能尚无主机已经确认的历史。页面提示历史未补齐或“累计确认依据”暂无时，先通过客户端“准备状态同步”生成独立计划；需要全量补齐时选择“重新获取完整状态”。将导出的计划复制到主机，在终端 A 提交，再领取并导入补齐报告。客户端接受补齐报告后，才使用页面提供的累计确认依据继续取回和确认；缺口报告的身份不能用作 ACK。具体操作见[状态同步](../client/files-and-status.md#准备状态同步)。
+
+从本次 `request_id` 对应计划中取得拍摄动作的 `action_instance_id`；拍摄动作应为 `succeeded`，正式产物应属于这个原动作。将此身份填入独立取回计划，并从客户端页面的“累计确认依据”取得可靠接受的报告 ID。下例中的 `123` 和 `456` 分别替换为原拍摄动作身份和该报告 ID：
 
 ```bash
 "$HOME/.camctl/venv/bin/python" "$HOME/.camctl/camera-demo/prepare-plan.py" obtain \
   --source-action-id 123 --last-report-id 456 \
-  --output "$HOME/.camctl/camera-demo/obtain.json"
+  --output "$HOME/.camctl/camera-demo/obtain-plan.json"
 ```
 
-按打印的路径在终端 A 提交，等待取回结束并再次 `claim`。核对取回报告的 `deliveries` 与领取文件的文件名、长度及 SHA-256，并由客户端可靠导入报告。领取视频本身不确认报告；`last_report_id` 只采用客户端可靠保存的累计位置。用该位置生成最后的确认计划，再提交给 host：
+按打印的路径在终端 A 提交，等待取回结束并再次 `claim`。核对取回报告的 `deliveries` 与领取文件的文件名、长度及 SHA-256，再将报告和视频保持原名原字节递交到个人电脑，在客户端“文件导入”中选择它们并核对导入结果。领取视频本身不确认报告；`last_report_id` 只采用客户端可靠保存的累计位置。用更新后的“累计确认依据”生成最后的确认计划，再提交给 host：
 
 ```bash
 "$HOME/.camctl/venv/bin/python" "$HOME/.camctl/camera-demo/prepare-plan.py" report-ack \
-  --last-report-id 789 --output "$HOME/.camctl/camera-demo/report-ack.json"
+  --last-report-id 789 --output "$HOME/.camctl/camera-demo/report-ack-plan.json"
 ```
 
-将 `789` 替换为取回结束报告的累计身份。最后确认提交与 camctl 吸收确认的结果，保留本次计划、客户端导入凭据、最终报告及源文件信息。host 的 `logs` 命令用于查看 CLI 调用和收场；受理或执行失败以正式结果及报告中的错误为依据。
+将 `789` 替换为客户端此时显示的累计确认依据。最后核对 camctl 已吸收该确认。下面的只读检查使用默认状态库；已有部署将第一个路径替换为配置的实际 `state_db`，第二个路径替换为这份已成功导入报告的主机文件路径：
+
+```bash
+"$HOME/.camctl/venv/bin/python" - "$HOME/.camctl/state.db" \
+  "$HOME/.camctl/processing/status-report-实际文件名.json" <<'PY'
+import json
+import sqlite3
+import sys
+from contextlib import closing
+from pathlib import Path
+
+database = Path(sys.argv[1]).resolve(strict=True)
+report = json.loads(Path(sys.argv[2]).read_bytes())
+with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
+    watermark, = connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone()
+print("主机确认水位：", watermark, "；已导入报告水位：", report["to_wm"])
+print("累计确认已吸收" if watermark >= report["to_wm"] else "尚未吸收，请等待后复查")
+PY
+```
+
+保留本次计划、客户端导入凭据、最终报告及源文件信息。host 的 `logs` 命令用于查看 CLI 调用和收场；受理或执行失败以正式结果及报告中的错误为依据。
 
 ## ARM Linux 的完整验收
 
-在独立部署目录安装正式发行物，显式配置两款相机的驱动及本次 ADB 绑定，执行初始化并导出 `describe`。计划参数来自实际导出的能力。C host 提交四项真实时长拍摄；各次拍摄保存正式产物后，再提交独立的 `obtain_action_outputs`，按原动作实例选择产物。
+在独立部署目录安装已启用 Action6 普通录像契约的正式发行物，显式配置 Action6 的驱动及本次 ADB 绑定，执行初始化并导出 `describe`。计划参数来自实际导出的能力。通过 C host 依次提交 `action6-record`、`obtain` 和 `report-ack`：先完成真实目标时长为 10 秒的普通录像，保存正式产物，再用独立的 `obtain_action_outputs` 按原动作实例选择产物，最后确认已经可靠导入的报告。
 
-每条链分别核对拍摄与取回成功、产物属于原拍摄动作、完整交付发布到 `ready`、host 领取到 `processing`，以及领取文件的实际长度和 SHA-256 与源文件相符。领取并核验状态报告后提交累计报告 ACK，再核对确认水位。视频收到与报告确认分别记录；两种确认完成后，相机原片仍存在。
+核对拍摄与取回成功、产物属于原拍摄动作、完整交付发布到 `ready`、host 领取到 `processing`，以及领取文件的实际长度和 SHA-256 与源文件相符。领取并核验状态报告后提交累计报告 ACK，再核对确认水位。视频收到与报告确认分别记录；两种确认完成后，相机原片仍存在。
 
-验收记录包含日期、ARM Linux 主机与 ADB 环境、固件、实际生效参数、原任务的结束及文件完成依据、动作和产物关联、交付文件长度与摘要及报告结果。四条链分别使用表中的完整真实时长。软件替身的加速运行只用于容器协作验证，真实设备验收保持预设时长。
+在装有 `ffprobe` 的主机或个人电脑检查领取的 MP4，将下例路径替换为实际副本：
+
+```bash
+ffprobe -v error -show_entries \
+  'format=duration,size:stream=codec_type,codec_name,width,height,avg_frame_rate,duration' \
+  -of json /absolute/path/to/received.MP4
+```
+
+保存工具输出中的实际分辨率、帧率和时长，连同十秒控制目标、原 START／STOP 时刻及五秒等待记录核对。文件无法解析或媒体属性不符合要求时，保留实际结果并继续诊断，不从请求参数补写媒体属性。
+
+验收记录包含日期、ARM Linux 主机与 ADB 环境、固件、实际生效参数、原任务的结束及文件完成依据、动作和产物关联、交付文件长度与摘要及报告结果。省略的光圈和码率保持未指定，不补写相机设置值。软件替身的加速运行只用于容器协作验证，真实设备录像按完整 10 秒目标验收；既有双相机四条软件链的验证记录保留其原范围，不替代这条正式真机演示。

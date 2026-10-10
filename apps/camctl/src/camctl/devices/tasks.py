@@ -38,6 +38,7 @@ class CaptureTask:
     ownership_mode: int | None = None
     output_scope: dict[str, JsonValue] | None = None
     product_rules: tuple[Mapping[str, JsonValue], ...] | None = None
+    file_completion_wait_s: JsonValue = None
 
 
 class CaptureTaskFactory(Protocol):

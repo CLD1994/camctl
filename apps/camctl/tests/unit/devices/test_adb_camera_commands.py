@@ -8,6 +8,106 @@ from camctl.devices.drivers.adb_cameras import commands
 from .test_adb_camera_parameters import recording_params
 
 
+@pytest.mark.parametrize("exposure, exposure_commands", [
+    ({"mode": "manual", "iso": 800}, (
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0400",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2a 06",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 28 013C8000",
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
+    )),
+    ({"mode": "auto", "compensation_ev": 0}, (
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0100",
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2e 10",
+    )),
+])
+def test_action_record_omitted_aperture_sends_only_other_requested_settings(exposure, exposure_commands):
+    params = {**recording_params(), "resolution": "4k30", "exposure": exposure}
+    del params["aperture"]
+    expected = (
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 0xe1 01",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
+        *exposure_commands,
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 42 3d",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010109000101",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010108000100",
+        "simulate_device -s bitrate 2",
+    )
+
+    assert commands.settings_for("dji-action6", "camera_record", params) == tuple(
+        tuple(shlex.split(command)) for command in expected)
+
+
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("aperture, payload", [("f2.8", "1801"), ("f4.0", "9001")])
+def test_action_record_explicit_aperture_keeps_original_command_before_bitrate(exposure, aperture, payload):
+    params = {**recording_params(), "exposure": exposure, "aperture": aperture}
+
+    settings = commands.settings_for("dji-action6", "camera_record", params)
+
+    assert settings[-2:] == (
+        ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "0x26", payload),
+        ("simulate_device", "-s", "bitrate", "2"),
+    )
+
+
+@pytest.mark.parametrize("exposure, exposure_commands", [
+    ({"mode": "manual", "iso": 800}, (
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0400",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2a 06",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 28 013C8000",
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
+    )),
+    ({"mode": "auto", "compensation_ev": 0}, (
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0100",
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2e 10",
+    )),
+])
+@pytest.mark.parametrize("aperture, aperture_commands", [
+    (None, ()),
+    ("f2.8", ("dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x26 1801",)),
+])
+def test_action_record_omitted_bitrate_keeps_other_settings_without_simulation(
+        exposure, exposure_commands, aperture, aperture_commands):
+    params = {**recording_params(), "resolution": "4k30", "exposure": exposure}
+    del params["bitrate"]
+    if aperture is None:
+        del params["aperture"]
+    expected = (
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 0xe1 01",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
+        *exposure_commands,
+        "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 42 3d",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010109000101",
+        "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010108000100",
+        *aperture_commands,
+    )
+
+    assert commands.settings_for("dji-action6", "camera_record", params) == tuple(
+        tuple(shlex.split(command)) for command in expected)
+
+
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("bitrate, value", [("standard", "1"), ("high", "2")])
+def test_action_record_explicit_bitrate_keeps_original_simulation_command(exposure, bitrate, value):
+    params = {**recording_params(), "exposure": exposure, "bitrate": bitrate}
+
+    settings = commands.settings_for("dji-action6", "camera_record", params)
+
+    assert settings[-1] == ("simulate_device", "-s", "bitrate", value)
+
+
 @pytest.mark.parametrize("iso, payload", [(100, "03"), (200, "04"), (400, "05"),
                                         (800, "06"), (1600, "07"), (3200, "08")])
 def test_action_iso_command_is_exact(iso, payload):
