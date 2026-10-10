@@ -185,6 +185,8 @@ Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、�
 
 高码率候选 `simulate_device -s bitrate 2` 本地退出码为 `0`，stderr 为空。输出显示工具找到 `DeviceRecordRecSettingBitRate`、转换旧式通知、生成数据，并完成服务连接及注册，但没有提供设备码率生效确认。录像样例的全部设置命令均已取得原始返回，配置后的试录尚未进行，完整参数预设仍未通过设备核验。
 
+`dji_mb_ctrl -h` 输出通用 `Usage`，本地退出码为 `1`，stderr 为空；帮助没有定义 `e3` 或光圈命令的适用条件。光圈的现场条件、完整命令、三次响应及待补充信息已整理为[资料询问文档](../hardware/camera-control-questions.md#action6光圈设置返回-e3)，供后续向资料提供方确认。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。
