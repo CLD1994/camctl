@@ -81,6 +81,33 @@ class CopyChecks(unittest.TestCase):
         self.assertFalse(probe.assess_copy((10, 'a' * 64), (11, 'a' * 64), (10, 'a' * 64))['matches_source_after'])
 
 
+class TimelapseSettingsChecks(unittest.TestCase):
+    def test_original_preset_is_preserved(self):
+        self.assertEqual(probe.timelapse_payload(1800), '0400005000080700000000000000000000')
+
+    def test_thirty_second_candidate_is_complete(self):
+        payload = probe.timelapse_payload(30)
+        self.assertEqual(payload, '04000050001e0000000000000000000000')
+        self.assertEqual(len(bytes.fromhex(payload)), 17)
+
+    def test_ten_second_candidate_is_complete(self):
+        self.assertEqual(probe.timelapse_payload(10), '04000050000a0000000000000000000000')
+
+    def test_invalid_durations_are_rejected(self):
+        for value in (0, -1, 1801, True, 30.0, '30', None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                probe.timelapse_payload(value)
+
+    def test_auto_sequence_sets_timing_before_exposure_and_output(self):
+        self.assertEqual(probe.timelapse_settings(30), (
+            ('01-mode', 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02'),
+            ('02-resolution', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000'),
+            ('03-timing', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000050001e0000000000000000000000'),
+            ('04-exposure', 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100'),
+            ('05-output', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000050001e0000000000000000000000'),
+        ))
+
+
 class CaptureChecks(unittest.TestCase):
     def setUp(self):
         self.now = 100
@@ -114,6 +141,34 @@ class CaptureChecks(unittest.TestCase):
         self.assertIsInstance(result, dict)
         self.assertEqual(result['start_to_observation_s'], 1810)
         self.assertEqual(len(self.commands), 1)
+
+    def test_short_timelapse_samples_from_start_dispatch(self):
+        for seconds in (30, 10):
+            with self.subTest(seconds=seconds):
+                self.setUp()
+                result = probe.capture_once('timelapse', self.shell, duration_s=seconds,
+                                            clock=self.clock, sleep=self.sleep)
+                self.assertEqual(self.now, 100 + seconds)
+                self.assertEqual(self.sleeps, [seconds - 2])
+                self.assertEqual(result, {'start_call_elapsed_s': 2,
+                                          'start_to_observation_s': seconds})
+                self.assertEqual(self.commands, ['dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'])
+
+    def test_short_blocking_start_samples_without_extra_wait(self):
+        def shell(label, command, **kwargs):
+            self.commands.append(command)
+            self.now += 31
+        result = probe.capture_once('timelapse', shell, duration_s=30,
+                                    clock=self.clock, sleep=self.sleep)
+        self.assertEqual(self.sleeps, [])
+        self.assertEqual(result['start_to_observation_s'], 31)
+        self.assertEqual(self.commands, ['dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'])
+
+    def test_invalid_timelapse_duration_does_not_start(self):
+        with self.assertRaises(ValueError):
+            probe.capture_once('timelapse', self.shell, duration_s=0,
+                                clock=self.clock, sleep=self.sleep)
+        self.assertEqual(self.commands, [])
 
     def test_timelapse_start_error_keeps_actual_error_and_unknown_activity(self):
         def shell(label, command, **kwargs):
@@ -170,6 +225,14 @@ class DirectoryChecks(unittest.TestCase):
 
 
 class SampleChecks(unittest.TestCase):
+    def test_short_sample_preserves_requested_duration_and_unknown_device_facts(self):
+        result = probe.assess_sample('timelapse', set(), {b'/new.mp4'}, duration_s=30)
+        self.assertEqual(result['params'], {'resolution': '4k30', 'exposure': 'auto',
+                                          'interval_s': 8, 'duration_s': 30, 'outputs': 'video'})
+        self.assertEqual(result['preset_basis'], 'experimental_duration')
+        for fact in ('actual_start', 'natural_end', 'file_write_complete', 'output_set_finalized'):
+            self.assertEqual(result[fact], 'unknown')
+
     def test_no_new_paths_retains_unknown_device_facts(self):
         result = probe.assess_sample('timelapse', {b'/old.mp4'}, {b'/old.mp4'})
         self.assertEqual(result['sample_status'], 'no_new_mp4')
