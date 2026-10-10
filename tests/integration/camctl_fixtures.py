@@ -115,7 +115,8 @@ class Deployment:
                             'retry_interval_s = "0"',
                             "",
                             "[devices.cam-1.cleanup]",
-                            'retry_interval_s = "0"',
+                            'delete_retry_interval_s = "0"',
+                            'query_retry_interval_s = "0"',
                             "",
                         ]
                         if devices
