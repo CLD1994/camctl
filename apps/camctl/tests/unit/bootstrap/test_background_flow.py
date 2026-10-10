@@ -108,6 +108,67 @@ async def test_canceled_shutdown_waiter_does_not_cancel_actual_work():
     assert finished.is_set() and flow.required_settlements() == 0
 
 
+async def test_self_stop_preserves_original_error_from_actual_cleanup():
+    entered, release = asyncio.Event(), asyncio.Event()
+    failure = ValueError("original database save failed")
+
+    async def body(context):
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError as interrupted:
+            entered.set()
+            await release.wait()
+            raise interrupted from failure
+
+    flow = BackgroundFlow(body)
+    await flow(None)
+    flow.stop_new_work()
+    waiter = asyncio.create_task(flow.settle())
+    await entered.wait()
+    assert not waiter.done()
+    release.set()
+    with pytest.raises(ValueError) as caught:
+        await waiter
+    assert caught.value is failure
+    assert flow.required_settlements() == 0
+
+
+async def test_completed_error_remains_owned_if_shutdown_waiter_is_canceled():
+    release = asyncio.Event()
+    failure = ValueError("original result failed")
+
+    async def body(context):
+        await release.wait()
+        raise failure
+
+    flow = BackgroundFlow(body)
+    await flow(None)
+    waiter = asyncio.create_task(flow.settle())
+    await asyncio.sleep(0)
+    release.set()
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert flow.required_settlements() == 1
+    with pytest.raises(ValueError) as caught:
+        await flow.settle()
+    assert caught.value is failure
+    assert flow.required_settlements() == 0
+
+
+async def test_cancel_without_self_stop_keeps_original_cancellation():
+    interrupted = asyncio.CancelledError("original flow canceled")
+
+    async def body(context):
+        raise interrupted
+
+    flow = BackgroundFlow(body)
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await flow(None)
+    assert caught.value is interrupted
+    assert flow.required_settlements() == 0
+
+
 async def test_combined_shutdown_settles_all_owners_and_preserves_failure():
     class LocalWork:
         def required_settlements(self): ...

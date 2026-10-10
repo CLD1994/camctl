@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import sqlite3
 import threading
 
 import pytest
 
 from camctl.host_files.tasks import (
+    AsyncFileTask,
     FileTask,
     FileTaskError,
     FileTaskExecutor,
@@ -20,6 +22,7 @@ from camctl.host_files.tasks import (
     FileTaskResult,
 )
 from camctl.session.supervision import OwnedTask, Supervisor
+from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
 
 pytestmark = pytest.mark.asyncio
 
@@ -44,6 +47,61 @@ def _task(task_id: str, file_id: int, body) -> FileTask:
         business="copy",
         body=body,
     )
+
+
+async def test_background_stop_delivers_actual_save_error_after_source_and_connection_close(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"original source")
+    database = tmp_path / "state.db"
+    with sqlite3.connect(database) as setup:
+        setup.execute("CREATE TABLE requests (operation_key TEXT PRIMARY KEY)")
+        setup.execute("INSERT INTO requests VALUES ('original-key')")
+    executor = FileTaskExecutor(Supervisor())
+    entered, stopped, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    observations, failures = [], []
+
+    async def flow(_context):
+        connection = sqlite3.connect(database)
+        async def body(control):
+            try:
+                with source.open("rb") as reader:
+                    assert reader.read(3) == b"ori"
+                    entered.set()
+                    await control.requested()
+                    stopped.set()
+                    await release.wait()
+                observations.append("source_closed")
+                try:
+                    connection.execute("INSERT INTO requests VALUES ('original-key')")
+                except sqlite3.IntegrityError as error:
+                    failures.append(error)
+                    raise
+            finally:
+                observations.append("actual_body_ended")
+        try:
+            await executor.run_owned_async_file_task(
+                AsyncFileTask(FileTaskId("read-original"), (1,), "read", "原读取", body))
+        finally:
+            connection.close()
+            observations.append("connection_closed")
+
+    background = BackgroundFlow(flow)
+    await background(None)
+    await entered.wait()
+    background.stop_new_work()
+    waiter = asyncio.create_task(CombinedLocalWork((background,)).settle())
+    await stopped.wait()
+    assert not waiter.done() and executor.unfinished_files() == (1,)
+    assert observations == []
+    release.set()
+    with pytest.raises(sqlite3.IntegrityError) as caught:
+        await waiter
+    assert caught.value is failures[0]
+    assert observations == ["source_closed", "actual_body_ended", "connection_closed"]
+    assert executor.unfinished_files() == () and background.required_settlements() == 0
+    assert source.read_bytes() == b"original source"
+    with sqlite3.connect(database) as reopened:
+        assert reopened.execute("SELECT operation_key FROM requests").fetchall() == [("original-key",)]
 
 
 async def test_default_pool_runs_tasks_on_worker_threads() -> None:

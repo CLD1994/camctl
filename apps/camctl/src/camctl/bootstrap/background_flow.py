@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class _FlowResult:
+    error: BaseException | None = None
 
 
 class BackgroundFlow:
@@ -15,7 +21,27 @@ class BackgroundFlow:
 
     def _consume(self):
         task, self._task = self._task, None
-        return task.result()
+        try:
+            result = task.result()
+        except asyncio.CancelledError:
+            # 尚未进入执行体就被拥有者停止，没有已开始的实际责任。
+            if self._stopping:
+                return
+            raise
+        error = result.error
+        if isinstance(error, asyncio.CancelledError) and self._stopping:
+            # 文件拥有者将实际执行或保存失败作为原取消的结构化原因交付。
+            error = error.__cause__
+        if error is not None:
+            raise error
+
+    async def _run(self, context):
+        try:
+            await self._flow(context)
+            return _FlowResult()
+        except BaseException as error:
+            # shield 不传递内部取消异常；把原异常作为结果保存到消费时。
+            return _FlowResult(error)
 
     async def __call__(self, context):
         if self._task is not None:
@@ -24,7 +50,7 @@ class BackgroundFlow:
             return
         if self._stopping:
             return
-        self._task = asyncio.create_task(self._flow(context))
+        self._task = asyncio.create_task(self._run(context))
         # 只让执行体开始；实际等待及连接生命周期由原流程拥有。
         await asyncio.sleep(0)
         if self._task.done():
@@ -45,14 +71,15 @@ class BackgroundFlow:
         task = self._task
         if task is None:
             return
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            if not (self._stopping and task.cancelled()):
-                raise
-        finally:
-            if task.done() and self._task is task:
-                self._task = None
+        if not task.cancelled():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if not (task.cancelled() and not asyncio.current_task().cancelling()):
+                    raise
+        # 外部等待取消时不消费，即使原任务已经完成也保留未交付结果。
+        if self._task is task:
+            self._consume()
 
 
 class CombinedLocalWork:
