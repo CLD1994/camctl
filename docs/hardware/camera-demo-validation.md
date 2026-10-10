@@ -17,38 +17,11 @@
 
 ### 按原始字节保存每次调用
 
-以下采集器使用 Python 3.11 标准库。将代码保存为独立的 `collect_call.py`；其运行不依赖 camctl 源码目录。它只执行命令行明确提供的一次调用，并保存原始 stdout、stderr、退出状态及耗时。调用未返回时，设备观察可从另一终端或相机界面记录；不能因为采集器仍在等待而判断设备未开始。
+采集器使用 Python 3.11 标准库，其运行不依赖 camctl 源码目录。它只执行命令行明确提供的一次调用，并保存原始 stdout、stderr、退出状态及耗时。调用未返回时，设备观察可从另一终端或相机界面记录；不能因为采集器仍在等待而判断设备未开始。
 
-```python
-import json
-import subprocess
-import sys
-import time
-from datetime import datetime, timezone
-from pathlib import Path
+独立脚本为 [collect_call.py](collect_call.py)。将它复制到 Windows 的 `platform-tools` 目录。使用已创建的 Python 3.11 环境时，将下面命令中的 `py -3.11` 替换为 `.\.venv\Scripts\python.exe`，并将 `adb` 替换为 `.\adb.exe`。
 
-directory = Path(sys.argv[1])
-argv = sys.argv[2:]
-if not argv:
-    raise SystemExit("需要提供本次调用的完整 argv")
-directory.mkdir(parents=True, exist_ok=False)
-started_at = datetime.now(timezone.utc).isoformat()
-started_ns = time.monotonic_ns()
-with (directory / "stdout.bin").open("wb") as stdout, \
-        (directory / "stderr.bin").open("wb") as stderr:
-    result = subprocess.run(argv, stdout=stdout, stderr=stderr, check=False)
-metadata = {
-    "argv": argv,
-    "started_at": started_at,
-    "returned_at": datetime.now(timezone.utc).isoformat(),
-    "elapsed_ns": time.monotonic_ns() - started_ns,
-    "returncode": result.returncode,
-}
-(directory / "call.json").write_text(
-    json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-print(json.dumps(metadata, ensure_ascii=False))
-```
-
+每次调用的终端输出和 `call.json` 是元数据，其中 `returncode` 是被调用程序的退出码。该程序非零退出时，采集器仍能正常保存结果；Python 自身的退出码不代替被调用程序的退出码。原始响应分别保存在 `stdout.bin` 和 `stderr.bin`；查看文本时继续保留这两个原文件。
 在 PowerShell 中执行，例如：
 
 ```powershell
@@ -56,7 +29,7 @@ py -3.11 collect_call.py action6/001-adb-version adb version
 py -3.11 collect_call.py action6/002-devices adb devices -l
 py -3.11 collect_call.py action6/003-model adb -s <serial> shell getprop ro.product.model
 py -3.11 collect_call.py action6/004-firmware adb -s <serial> shell getprop ro.build.display.id
-py -3.11 collect_call.py action6/005-tools adb -s <serial> shell 'command -v dji_mb_ctrl simulate_device find sort awk stat sha256sum dd'
+py -3.11 collect_call.py action6/005-tools adb -s <serial> shell 'for t in dji_mb_ctrl simulate_device sh mktemp find sort awk stat sha256sum dd rm test printf trap; do echo TOOL=$t; command -v $t || echo NOT_FOUND; done'
 ```
 
 将 `<serial>` 替换为实际设备标识；OSMO 的资料使用另一个目录。`getprop` 返回空值时，在观察记录中保存界面上显示的型号和固件，不补写推测值。工具存在只证明能找到该程序，其所需选项仍须实际核实。
