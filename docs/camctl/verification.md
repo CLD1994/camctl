@@ -144,8 +144,11 @@ Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、�
 | `shell -T` 仅执行完整 `find -print0` 列举 | 本地退出码为 `255`；stdout 为 `528` 字节，八条路径及末尾 NUL 完整；stderr 为空 | 路径响应完整仍不能证明成功退出；本次 `255` 的原因未确定，保留失败记录 |
 | 在上述 `find` 后保存实际退出码，向 stderr 输出诊断标记，再以原退出码结束 | 本地退出码和诊断标记均为 `0`；stdout 与上次逐字节相同；stderr 为 `CAMCTL_FIND_EXIT=0\r\n` | 本次 `find` 正常结束且返回码正确传回；不据此补造上次调用的成功退出 |
 | 保持相机不拍摄，前后分别完整列举，其间以生产脚本自动读取全部分页 | 前后完整列举及三页分页均返回 `0`，各得到同样的八条路径；分页为 `3`、`3`、`2` 条，依次返回 `MORE`、`MORE`、`END`；完整列举只输出预期诊断标记，分页 stderr 均为空 | 本次目录的分页有序、没有遗漏或重复，与前后完整路径列表一致；只核验本次实际文件名和 Windows 通道 |
+| 对索引 `0006` 的 JPG 执行生产 `test -f` 与 `stat -c %s` 脚本 | 本地退出码为 `0`；stdout 为 `491520\r\n`，stderr 为空 | 本次文件存在，观察到的长度为 `491520` 字节；不据此判定文件写完 |
+| 对同一 JPG 执行生产 `sha256sum < 文件` 脚本 | 本地退出码为 `0`；stdout 包含 64 位小写十六进制摘要、两个空格、`-` 和 CRLF，stderr 为空 | 已取得该文件的源端 SHA-256；Windows 行尾不作为 ARM Linux 解析证据 |
+| 使用 `adb pull` 将同一 JPG 保存到独立本地目录 | 本地退出码为 `0`，stdout 为空；stderr 报告一个文件已下载、零个跳过；本地长度为 `491520` 字节，SHA-256 与源端相同 | 本次下载的完整副本与观察到的源文件一致；不代替生产 `dd` 读取和 ARM Linux 原始字节核验 |
 
-内置 `/mnt/media_rw/emulated/DCIM` 是实际存在的目录；最初的原始 `find -print0` 输出包含七条路径（两个 MP4、两个 LRF、三个 JPG），NUL 分隔且有末尾分隔符。后续三页累计列出八条路径，其中新增 JPG 的索引为 `0006`，用户说明其间误触了快门。静止目录比对取得同样的八条路径。SD 候选目录 `/mnt/media_rw/sd/DCIM` 明确不存在，不能按可用空目录处理。所列工具均能找到；文件长度、摘要和完整读取尚未核实。
+内置 `/mnt/media_rw/emulated/DCIM` 是实际存在的目录；最初的原始 `find -print0` 输出包含七条路径（两个 MP4、两个 LRF、三个 JPG），NUL 分隔且有末尾分隔符。后续三页累计列出八条路径，其中新增 JPG 的索引为 `0006`，用户说明其间误触了快门。静止目录比对取得同样的八条路径。SD 候选目录 `/mnt/media_rw/sd/DCIM` 明确不存在，不能按可用空目录处理。所列工具均能找到；生产 `dd` 读取及偏移选项仍待核实。
 
 上述结果不证明拍摄启动、停止、文件写完或本次产物集合齐备，也不代替 OSMO 360 II 和 ARM Linux 的核验。驱动通道、实际控制响应、固件及完整设备验收继续由[双相机实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
 
@@ -158,7 +161,7 @@ Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、�
 | bootstrap 的 `test_tool_cancellation.py`、`test_recording_stop.py`、`test_timelapse_finish.py` | 16 项通过；覆盖实际工具收场、录像停止与延时完成 |
 | 根 `test_real_camera_demo_roundtrip.py` 与 `test_camctl_c_module_roundtrip.py` | 四条双相机软件演示链和三条原 C host 链共同运行，7 项通过 |
 
-本次软件门禁与上述 Windows 分页实测分别记录；ARM Linux 的执行与字节核验仍待进行，候选相机能力未启用。诊断保存在工作区忽略的 `.superpowers/sdd/2026-10-10-camctl-real-camera-demo/t9-*.log`。
+本次软件门禁与上述 Windows 目录和文件访问实测分别记录；ARM Linux 的执行与字节核验仍待进行，候选相机能力未启用。诊断保存在工作区忽略的 `.superpowers/sdd/2026-10-10-camctl-real-camera-demo/t9-*.log`。
 
 ## 部署交接与待核验项
 
