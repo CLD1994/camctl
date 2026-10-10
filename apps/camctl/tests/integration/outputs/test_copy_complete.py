@@ -348,15 +348,23 @@ def test_exhausted_recopies_fail_without_new_round(complete_env):
 
 
 def test_read_budget_independent_from_recopy(complete_env):
-    """读取尝试耗尽不阻止重拷登记；新一轮读取仍按原预算拒绝。"""
+    """原额度 5 下三次失败仍可登记重拷；本次读取额度 3 拒绝新尝试。"""
     owned, roots, qualification = complete_env
     _seed_wrong_source_digest(owned, qualification.copy_id)
     run_id = _row(owned, "SELECT id FROM operation_runs WHERE responsibility_key=?",
         f"read/{qualification.copy_id}")[0]
     _seed_failed_attempts(owned, run_id, 3)
+    with closing(owned.connection.execute(
+        "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
+        (run_id,))) as cursor:
+        attempts_before = cursor.fetchall()
     step = _complete(owned, roots, qualification.copy_id)
     assert step.phase is CompletionPhase.RECOPY_REGISTERED
-    # 新一轮沿用原读取预算：已用 3 次后新增尝试被拒绝。
+    assert _row(owned, "SELECT round,recopies_used,max_recopies_used,committed_bytes"
+        " FROM file_copies WHERE id=?", qualification.copy_id) == (2, 1, 1, 0)
+    assert _row(owned, "SELECT attempts_used,max_attempts_used,retry_wait_required"
+        " FROM operation_runs WHERE id=?", run_id) == (3, 5, 1)
+    # 重拷只消耗重拷额度；新增读取按本次上限 3 与原已用 3 次比较。
     OutputsRepository().grant_read_slot(
         SlotRequest(qualification.copy_id, _NOW + 8), new_operation_key(), owned)
     intent = AttemptIntent(
@@ -369,6 +377,15 @@ def test_read_budget_independent_from_recopy(complete_env):
     denied = OperationRepository().begin_attempt(intent, new_operation_key(), owned)
     assert denied.kind is DbOutcomeKind.COMPLETED, denied.error
     assert denied.value.disposition is BeginDisposition.REJECTED
+    assert denied.value.reason == "budget_exhausted"
+    assert _row(owned, "SELECT attempts_used,max_attempts_used,status,retry_wait_required"
+        " FROM operation_runs WHERE id=?", run_id) == (3, 3, 4, 0)
+    assert _row(owned, "SELECT round,recopies_used FROM file_copies WHERE id=?",
+        qualification.copy_id) == (2, 1)
+    with closing(owned.connection.execute(
+        "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
+        (run_id,))) as cursor:
+        assert cursor.fetchall() == attempts_before
 
 
 def test_canceled_owner_neither_verifies_nor_recopies(complete_env):

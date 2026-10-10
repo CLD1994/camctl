@@ -10,17 +10,24 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 from camctl.host_files.models import BoundDirectories, FilePurpose
 from camctl.operations.attempts import (
-    AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
+    AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, BeginDisposition,
+    FinishDisposition, OperationKind, RunStatus,
 )
+from camctl.operations.models import (
+    AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement,
+    SettlementBasis,
+)
+from camctl.operations.validation import validate_outcome
 from camctl.outputs.copy import (
     AttemptPlan, CopyContext, CopyPreparationError, ResumeOutcome, TargetResetOutcome,
     TargetResetRequest, prepare_copy,
 )
 from camctl.outputs.qualification import QualificationOutcome
-from camctl.outputs.slots import SlotRequest
+from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import OperationRepository
@@ -94,17 +101,55 @@ def _seed_reset_pending(owned, copy_id: int) -> None:
 
 
 def _seed_failed_attempts(owned, run_id: int, count: int) -> None:
-    # 已明确失败的尝试属于历史；预算与重试规则由意图入口判断。
+    """原额度为 5 时保存真实失败及等待，供后续运行按新额度判定。"""
+    with closing(owned.connection.execute(
+        "SELECT r.action_id,r.copy_id,c.round,r.attempts_used FROM operation_runs r"
+        " JOIN file_copies c ON c.id=r.copy_id WHERE r.id=?", (run_id,))) as cursor:
+        action_id, copy_id, copy_round, attempts_used = cursor.fetchone()
+    assert attempts_used == 0
+    with closing(owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_attempts WHERE run_id=?", (run_id,))) as cursor:
+        assert cursor.fetchone() == (0,)
+    slot = OutputsRepository().grant_read_slot(
+        SlotRequest(copy_id, _NOW + 2), new_operation_key(), owned)
+    assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
+    assert slot.value.outcome in (SlotOutcome.GRANTED, SlotOutcome.HELD)
+    repository = OperationRepository()
+    evidence = EvidenceRegistry((
+        EvidenceContract("read_returned", 1, "read", frozenset()),))
     for no in range(1, count + 1):
-        owned.connection.execute(
-            "INSERT INTO operation_attempts (id, run_id, attempt_no, copy_round, status,"
-            " intent_event_id, result_event_id, max_attempts_used, timeout_s_json,"
-            " retry_interval_s_json, effect_state, result_json, error_json)"
-            " VALUES (?, ?, ?, 1, 3, 1, 1, 3, '10', '0', 2, NULL, ?)",
-            (900 + no, run_id, no, '{"reason": "seed"}'))
-    owned.connection.execute(
-        "UPDATE operation_runs SET attempts_used=? WHERE id=?", (count, run_id))
-    owned.connection.commit()
+        granted = repository.begin_attempt(AttemptIntent(
+            operation="read", action_id=action_id, kind=OperationKind.READ_FILE,
+            target=AttemptTarget(copy_id=copy_id), query_purpose=None,
+            config=AttemptConfig(5, Decimal("10"), Decimal("0")),
+            occurred_at=_NOW + 2, copy_round=copy_round,
+        ), new_operation_key(), owned)
+        assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+        assert granted.value.disposition is BeginDisposition.GRANTED
+        ticket = granted.value.ticket
+        assert ticket.run_id == run_id
+        with closing(owned.connection.execute(
+            "SELECT attempt_no FROM operation_attempts WHERE run_id=? AND status=1",
+            (run_id,))) as cursor:
+            assert cursor.fetchall() == [(no,)]
+        failed = CallOutcome(
+            status=AttemptStatus.FAILED, error=ErrorValue("device_error", "read"),
+            effect=EffectState.UNKNOWN,
+            settlement=Settlement(
+                SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})),
+        )
+        saved = repository.finish_attempt(AttemptFinish(
+            ticket, validate_outcome(ticket, failed, evidence), _NOW + 2,
+            retry_wait=True,
+        ), new_operation_key(), owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+        assert saved.value.disposition is FinishDisposition.SAVED
+        assert saved.value.attempt_status is AttemptStatus.FAILED
+        assert saved.value.run_status is RunStatus.ACTIVE
+    with closing(owned.connection.execute(
+        "SELECT attempts_used,max_attempts_used,retry_wait_required FROM operation_runs"
+        " WHERE id=?", (run_id,))) as cursor:
+        assert cursor.fetchone() == (count, 5, 1)
 
 
 def _context(owned, roots, occurred_at=_NOW + 1):
@@ -286,22 +331,34 @@ def test_in_flight_attempt_is_resumed_not_duplicated(copy_env):
 
 
 def test_failed_attempt_requires_new_legal_attempt(copy_env):
-    """已明确失败不能复活：只能经合法入口新增，预算耗尽被拒绝。"""
+    """原额度 5 下三次失败后，本次额度降为 3，不复活或新增尝试。"""
     owned, roots, first = copy_env
     _seed_failed_attempts(owned, first.run_id, 3)
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    with closing(owned.connection.execute(
+        "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
+        (first.run_id,))) as cursor:
+        attempts_before = cursor.fetchall()
+    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots, _NOW + 3)))
     assert step.attempt.plan is AttemptPlan.NEW_REQUIRED
     intent = AttemptIntent(
         operation="read", action_id=_run_action(owned, first.run_id),
         kind=OperationKind.READ_FILE,
         target=AttemptTarget(copy_id=first.copy_id), query_purpose=None,
-        config=AttemptConfig(3, Decimal("10"), Decimal("0")), occurred_at=_NOW + 2,
+        config=AttemptConfig(3, Decimal("10"), Decimal("0")), occurred_at=_NOW + 4,
         copy_round=1,
     )
     denied = OperationRepository().begin_attempt(intent, new_operation_key(), owned)
     assert denied.kind is DbOutcomeKind.COMPLETED, denied.error
     assert denied.value.disposition is BeginDisposition.REJECTED
     assert denied.value.reason == "budget_exhausted"
+    with closing(owned.connection.execute(
+        "SELECT attempts_used,max_attempts_used,status,retry_wait_required"
+        " FROM operation_runs WHERE id=?", (first.run_id,))) as cursor:
+        assert cursor.fetchone() == (3, 3, 4, 0)
+    with closing(owned.connection.execute(
+        "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
+        (first.run_id,))) as cursor:
+        assert cursor.fetchall() == attempts_before
 
 
 def test_attempts_of_earlier_round_do_not_resume(copy_env):
@@ -310,7 +367,7 @@ def test_attempts_of_earlier_round_do_not_resume(copy_env):
     owned.connection.execute(
         "UPDATE file_copies SET round=3, recopies_used=2 WHERE id=?", (first.copy_id,))
     owned.connection.commit()
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots, _NOW + 3)))
     assert step.attempt.plan is AttemptPlan.NEW_REQUIRED
 
 

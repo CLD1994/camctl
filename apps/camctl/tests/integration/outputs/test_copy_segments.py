@@ -17,7 +17,9 @@ import pytest
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.devices.read_session import ReadSession, SourceFile
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import (
+    EventContext, EventValidationError, validate_event, validate_event_structure,
+)
 from camctl.host_files.models import BoundDirectories
 from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, AttemptTicket, BeginDisposition,
@@ -403,13 +405,14 @@ def test_segment_guard_accepts_real_event(segment_env):
     context = EventContext(
         TransactionRange(2, 2, 2), dict(plan.owners), plan.state_rows,
         read_coverage=plan.read_coverage)
-    assert validate_event(plan.events[0], context).branch_name == "SEGMENT"
+    event, = plan.events
+    assert validate_event(event, context).branch_name == "SEGMENT"
 
 
 def test_segment_guard_rejects_empty_or_overflowing_advance(segment_env):
     owned, roots, first = segment_env
     plan = _segment_proposal(owned, first.copy_id, 0, 4)
-    event = plan.events[0]
+    event, = plan.events
     for after_value in (0, 11):
         row = event.rows[0]
         variant = replace(
@@ -491,7 +494,7 @@ def _in_flight_attempt(owned, first):
 
 
 def test_resume_read_saves_current_run_config(segment_env):
-    """重启后沿原在途尝试继续：本次运行的配置写入原尝试行。"""
+    """原流程与在途尝试共同保存本次配置，尝试身份和累计次数保持。"""
     owned, roots, first = segment_env
     ticket, run_id, attempt_row = _in_flight_attempt(owned, first)
     request = ReadResumeRequest(
@@ -499,18 +502,33 @@ def test_resume_read_saves_current_run_config(segment_env):
         config=AttemptConfig(5, Decimal("30"), Decimal("2")),
         occurred_at=_NOW + 5,
     )
-    outcome = OperationRepository().resume_read(request, new_operation_key(), owned)
+    key = new_operation_key()
+    outcome = OperationRepository().resume_read(request, key, owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     assert outcome.value.disposition is ReadResumeDisposition.APPLIED
-    assert owned.connection.execute(
+    with closing(owned.connection.execute(
         "SELECT max_attempts_used, timeout_s_json, retry_interval_s_json, status"
         " FROM operation_attempts WHERE id=?", (attempt_row,),
-    ).fetchone() == (5, "30", "2", 1)
-    with closing(owned.connection.execute(
-        "SELECT COUNT(*) FROM history_events WHERE event_type=12"
-        " AND json_extract(body_json, '$.reason')=4",
     )) as cursor:
-        assert cursor.fetchone()[0] == 1
+        assert cursor.fetchone() == (5, "30", "2", 1)
+    with closing(owned.connection.execute(
+        "SELECT max_attempts_used, timeout_s_json, retry_interval_s_json, status, attempts_used"
+        " FROM operation_runs WHERE id=?", (run_id,),
+    )) as cursor:
+        assert cursor.fetchone() == (5, "30", "2", 2, 1)
+    with closing(owned.connection.execute(
+        "SELECT COUNT(*), MIN(id), MIN(attempt_no) FROM operation_attempts WHERE run_id=?",
+        (run_id,),
+    )) as cursor:
+        assert cursor.fetchone() == (1, attempt_row, 1)
+    with closing(owned.connection.execute(
+        "SELECT event_type, json_extract(body_json, '$.reason'), occurred_at"
+        " FROM history_events WHERE transaction_id=("
+        " SELECT id FROM history_transactions WHERE operation_key=?)", (str(key),),
+    )) as cursor:
+        events = cursor.fetchall()
+    assert len(events) == 2
+    assert set(events) == {(10, 2, _NOW + 5), (12, 4, _NOW + 5)}
 
 
 def test_resume_read_same_config_is_read_only(segment_env):
@@ -559,11 +577,34 @@ def test_resume_read_key_recovers_first_response(segment_env):
     repository = OperationRepository()
     key = new_operation_key()
     first_outcome = repository.resume_read(request, key, owned)
+    assert first_outcome.kind is DbOutcomeKind.COMPLETED, first_outcome.error
     assert first_outcome.value.disposition is ReadResumeDisposition.APPLIED
     before = tuple(owned.connection.iterdump())
     again = repository.resume_read(request, key, owned)
     assert again.kind is DbOutcomeKind.COMPLETED, again.error
     assert again.value.disposition is ReadResumeDisposition.APPLIED
+    assert tuple(owned.connection.iterdump()) == before
+
+
+def test_resume_read_key_rejects_changed_time(segment_env):
+    """恢复配置的原键包含事实时间；改变时间不能复用已保存事务。"""
+    owned, roots, first = segment_env
+    ticket, _run_id, _attempt_row = _in_flight_attempt(owned, first)
+    request = ReadResumeRequest(
+        ticket=ticket,
+        config=AttemptConfig(5, Decimal("30"), Decimal("2")),
+        occurred_at=_NOW + 5,
+    )
+    repository = OperationRepository()
+    key = new_operation_key()
+    original = repository.resume_read(request, key, owned)
+    assert original.kind is DbOutcomeKind.COMPLETED, original.error
+    assert original.value.disposition is ReadResumeDisposition.APPLIED
+    before = tuple(owned.connection.iterdump())
+
+    changed = repository.resume_read(replace(request, occurred_at=_NOW + 6), key, owned)
+
+    assert changed.kind is DbOutcomeKind.ROLLED_BACK
     assert tuple(owned.connection.iterdump()) == before
 
 
@@ -583,14 +624,31 @@ def test_resume_read_guard_rejects_non_read_flow(segment_env):
         ).plan(TransactionScope(owned.connection, 1, 1))
     finally:
         owned.connection.rollback()
+    resume_event, = (
+        event for event in plan.events
+        if validate_event_structure(event)[:2] == ("ATTEMPT_RESULT", "RESUME_READ")
+    )
     context = EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), plan.state_rows,
-        read_coverage=plan.read_coverage)
-    assert validate_event(plan.events[0], context).branch_name == "RESUME_READ"
-    foreign = deepcopy(plan.state_rows)
+        TransactionRange(
+            resume_event.transaction_id,
+            min(event.event_id for event in plan.events),
+            max(event.event_id for event in plan.events)),
+        dict(plan.owners), deepcopy(plan.state_rows), read_coverage=plan.read_coverage)
+    # 当前事实只包含已校验并应用的前序事件，后续提案不提前参与判断。
+    for event in plan.events:
+        if event is resume_event:
+            break
+        validate_event(event, context)
+        for row in event.rows:
+            context.state_rows[row.table][row.row_id].update(row.after.values)
+    assert validate_event(resume_event, context).branch_name == "RESUME_READ"
+    foreign = deepcopy(context.state_rows)
     foreign["operation_runs"][run_id]["kind"] = 1
+    # 非 READ 流程的尝试归动作，保持归属合法以验证读取专属守卫。
+    foreign_owners = dict(context.owners)
+    for row in resume_event.rows:
+        foreign_owners[(row.table, row.row_id)] = (
+            "action", foreign["operation_runs"][run_id]["action_id"])
     with pytest.raises(EventValidationError):
         validate_event(
-            plan.events[0],
-            EventContext(TransactionRange(2, 2, 2), dict(plan.owners), foreign,
-                         read_coverage=plan.read_coverage))
+            resume_event, replace(context, state_rows=foreign, owners=foreign_owners))

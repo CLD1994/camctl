@@ -244,3 +244,21 @@ root 的 `/tmp/camctl-goal-read-raw-binding-observer-green.log` 为 41 passed、
 root 的 `/tmp/camctl-goal-read-binding-recovery-gate.log` 为 10 passed、2 failed、6.87s：八项 COMMIT 前后 UNKNOWN 恢复和两项连续 Finish UNKNOWN 保存门通过；两项 child 回滚在实际入口已经抛出 StateDbFailure 后，被事后替换的类方法 spy 未观察到回执，尚未运行完保存门断言。原 child 保存的是首次确定的 bound method，不能通过后来替换类方法观察该回调，也不能为测试替换原申请的回调身份。测试在原方法实际使用的事务边界透传记录 WriteReceipt，核原 key、可靠回滚、实际投影异常对象与 ROLLBACK 命中，继续保留原完整 holder／request／T1 与两轮 fresh Owned 检查。该测试可观察性修改待根重跑，不把此次两项失败记为生产缺陷或完整保存门通过。
 
 root 的 `/tmp/camctl-goal-read-binding-recovery-green.log` 为 12 passed、6.77s。上述八项 UNKNOWN 恢复及四项连续保存门均完成实际验证；测试观察点调整没有改变原申请或生产代码。取消／终态、MATCHED、reliableSHA／UNSUPPORTED 的 raw 排除矩阵及其他原未决范围继续保留。
+
+## 读取预算与续传事务的验证记录（2026-10-10）
+
+Linux 开发容器、Python 3.11.16。`test_copy_complete.py`、`test_copy_resume.py` 与 `test_copy_segments.py` 中的五项失败已独立复现，日志为 `/tmp/camctl-read-budget-red.log`。三个预算分区的前置只有手工写入的 FAILED 状态，缺少完整结束结果及重试等待；两个恢复守卫分区将事务的首个 CONFIGURE 事件当成 RESUME_READ。生产仓储在这些情况下执行的完整性检查符合既定契约。
+
+预算前置现在经正式意图和结果事务保存实际失败：原上限为 5，三次失败后责任仍处于等待状态；后续运行采用上限 3 时，新增读取被拒绝，原三份结果、累计次数及重拷轮次保持。普通交付和内部输入均经过这一前置。续传测试按正式事件身份定位 RESUME_READ，先校验并应用同事务的 CONFIGURE，再校验恢复事件；同时验证 run 和原 RUNNING attempt 采用同一配置、次数不变，以及原键拒绝改变事实时刻。非 READ 负例保持合法归属，使读取专属守卫直接验证流程种类。
+
+根 Agent 前台独占验证的结果如下，所有命令均使用 `PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest <路径> -q`。
+
+| 验证范围 | 实际结果与诊断 |
+| --- | --- |
+| 原五项及旧轮次不能续传的两个分区 | 7 passed；`/tmp/camctl-read-budget-green.log`。 |
+| 上述三个 outputs 文件 | 103 passed；`/tmp/camctl-read-budget-files.log`。 |
+| `integration/bootstrap/test_read_execution_runtime.py` | 48 passed；`/tmp/camctl-read-execution-runtime.log`。包含两入口的真实失败后额度变化、低额度下原在途续传、有限重拷及结果保存恢复。 |
+| `integration/outputs` 全目录 | 1840 passed、2 skipped；`/tmp/camctl-read-outputs-gate.log`。 |
+| 独立审阅后的 `test_copy_segments.py` | 41 passed；`/tmp/camctl-read-segments-final.log`。包含归属合法的 non-READ 反例与新增查询游标释放。 |
+
+独立审阅核对了失败前置的真实结果与等待责任、续传事件的前序状态、原身份及次数、正式归属和具名守卫顺序。这一工作包只调整测试及验证记录，没有修改生产规则。读取目录门禁通过不代替 RD0—RD4 的全部组合验收；raw End 排除矩阵、受限与取消入口、晚取消完整申请和跨工厂的其他原未完成分区继续由本计划跟踪。
