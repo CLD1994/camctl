@@ -37,6 +37,8 @@ register_capture_guards()
 
 _NOW = 1_750_000_000_000_000
 _SESSION = "a" * 32
+_NOT_ATTEMPTED_REASON = "未可靠取得停止配置，未开始应急尝试"
+_UNCONFIRMED_REASON = "有限停止处理已经结束，设备停止仍未确认"
 
 
 def _environment(tmp_path: Path):
@@ -182,6 +184,7 @@ async def test_zero_attempts_unknown_config_saves_not_attempted(tmp_path: Path) 
             outcome=EmergencyOutcome.NOT_ATTEMPTED,
             attempts_used=0,
             max_attempts=3,
+            reason=_NOT_ATTEMPTED_REASON,
         )
         outcome = CaptureRepository().save_emergency(
             session_key=_SESSION,
@@ -275,13 +278,16 @@ async def test_later_session_preserves_exact_old_error_and_omits_unchanged_activ
 
     owned = _environment(tmp_path)
     try:
-        first = _save(owned, EmergencyRecord(EmergencyOutcome.NOT_ATTEMPTED, 0, 3), ())
+        first = _save(owned, EmergencyRecord(
+            EmergencyOutcome.NOT_ATTEMPTED, 0, 3, reason=_NOT_ATTEMPTED_REASON), ())
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
         attempts = () if second_outcome is EmergencyOutcome.NOT_ATTEMPTED else (
             _attempt(status=4, error={"code": "timeout", "stage": "transport"}),)
         second = CaptureRepository().save_emergency(
             session_key="b" * 32, action_id=1, activity_id=1,
-            record=EmergencyRecord(second_outcome, len(attempts), 3), attempts=attempts,
+            record=EmergencyRecord(second_outcome, len(attempts), 3,
+                reason=_NOT_ATTEMPTED_REASON if second_outcome is EmergencyOutcome.NOT_ATTEMPTED
+                else _UNCONFIRMED_REASON), attempts=attempts,
             occurred_at=_NOW, key=new_operation_key(), owned=owned,
             timeout_s=Decimal("10"), retry_interval_s=Decimal("1"))
         assert second.kind is DbOutcomeKind.COMPLETED, second.error
@@ -293,9 +299,11 @@ async def test_later_session_preserves_exact_old_error_and_omits_unchanged_activ
         else:
             assert len(activities) == 1
             assert activities[0]["before"]["values"] == {
-                "last_error_json": {"code": "emergency_not_attempted", "stage": "emergency"}}
+                "last_error_json": {"code": "emergency_not_attempted", "stage": "emergency",
+                    "details": {"activity_id": "1", "reason": _NOT_ATTEMPTED_REASON}}}
             assert activities[0]["after"]["values"] == {
-                "last_error_json": {"code": "emergency_stop_unconfirmed", "stage": "emergency"}}
+                "last_error_json": {"code": "emergency_stop_unconfirmed", "stage": "emergency",
+                    "details": {"activity_id": "1", "reason": _UNCONFIRMED_REASON}}}
     finally:
         owned.connection.close()
 
@@ -353,7 +361,7 @@ async def test_stop_observation_only_with_stopped_outcome(tmp_path: Path) -> Non
             owned,
             EmergencyRecord(
                 EmergencyOutcome.NOT_ATTEMPTED, 0, 3,
-                stop_observation=_stop_observation()),
+                stop_observation=_stop_observation(), reason=_NOT_ATTEMPTED_REASON),
             (),
         )
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
@@ -422,7 +430,8 @@ async def test_unconfirmed_with_attempts_saves_unconfirmed(tmp_path: Path) -> No
     owned = _environment(tmp_path)
     try:
         record = EmergencyRecord(
-            outcome=EmergencyOutcome.UNCONFIRMED, attempts_used=2, max_attempts=2
+            outcome=EmergencyOutcome.UNCONFIRMED, attempts_used=2, max_attempts=2,
+            reason=_UNCONFIRMED_REASON,
         )
         outcome = _save(
             owned,
@@ -483,7 +492,8 @@ async def test_unrecorded_emergency_does_not_release(tmp_path: Path) -> None:
     owned = _environment(tmp_path)
     try:
         record = EmergencyRecord(
-            outcome=EmergencyOutcome.UNCONFIRMED, attempts_used=2, max_attempts=2
+            outcome=EmergencyOutcome.UNCONFIRMED, attempts_used=2, max_attempts=2,
+            reason=_UNCONFIRMED_REASON,
         )
         outcome = _save(
             owned, record,

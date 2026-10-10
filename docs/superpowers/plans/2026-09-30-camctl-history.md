@@ -216,3 +216,9 @@ H1/H2 每个已实现事件均有具名校验及原子目录；H3—H6 全部对
 ### H7 基准生产者验证（2026-10-10，容器）
 
 `BASELINE_CHUNK` 的 APPEND、FIX、FIX_EMPTY 由 CaptureRepository 生产；覆盖映射指向 `capture/test_baseline_history.py`，不再列入无生产者集合。基准专项 21 项通过，包含正向、逆向和快照恢复的同边界比较。history 目录 196 项通过、9 项失败；这些失败在 T1 提交的独立源码副本中复现，涉及独立应急错误结构与原有快照一致性检查。此次证据只闭合基准生产和恢复范围，不表示 H7 全部门禁通过。
+
+### H7 结果页验收映射与剩余证明（2026-10-11，容器）
+
+环境为 Python 3.11.16、SQLite 3.53.1。事件登记与验收映射一致性的反例取得 1 failed，确认 `_EVENT_COVERAGE` 遗漏 `RESULT_PAGE`。映射补入 [test_result_page_history.py](../../../apps/camctl/tests/integration/capture/test_result_page_history.py)，标记为不由综合剧本产生。该文件的二十个用例已经验证原键核实、两页共用一次原尝试、提交前后失败及 fresh Owned 恢复，也包含同一操作尝试在正向、逆向及快照路径的恢复。最终 history 完整目录取得 205 passed；对应 capture 完整目录取得 982 passed，实际命令见[软件验证记录](../../camctl/verification.md#应急错误与历史报告的软件验证2026-10-11)。
+
+- [ ] 在由真实结果页生产者创建的历史上，独立推导新文件、设备文件及页目录的完整对象成员，分别核对初始回放、快照正向恢复与当前投影逆向恢复。现有操作尝试行的三路径相等和映射锚点不能替代这一完整对象证明；完成后再核验 H7 的全部范围。

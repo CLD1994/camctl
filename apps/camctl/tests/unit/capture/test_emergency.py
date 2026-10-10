@@ -163,3 +163,97 @@ class TestEmergencyStop:
         assert RecordStatus.RECORDED.value == "recorded"
         assert RecordStatus.NOT_RECORDED.value == "not_recorded"
         assert RecordStatus.UNKNOWN.value == "unknown"
+
+    @pytest.mark.parametrize("overrides, facts", [
+        ({"process_can_handle": False}, ("进程", "处理")),
+        ({"session_fatal_error": False}, ("致命", "错误")),
+        ({"ownership_confirmed": False}, ("归属", "未确认")),
+        ({"exclusive_eligibility": False}, ("排他", "未确认")),
+        ({"driver_safe_repeat_stop": False}, ("安全", "停止", "未确认")),
+        ({"config_known": False}, ("配置", "未知")),
+    ])
+    async def test_not_attempted_keeps_actual_missing_condition(
+            self, overrides, facts) -> None:
+        """不足资格的实际事实进入诊断，不能只保存未尝试分类。"""
+        port = _StopPort()
+        record = await emergency_stop(
+            _facts(**overrides), EmergencyBudget(max_attempts=3), port,
+        )
+        assert record.outcome is EmergencyOutcome.NOT_ATTEMPTED
+        assert record.attempts_used == 0
+        assert port.calls == 0
+        reason = getattr(record, "reason", None)
+        assert isinstance(reason, str) and reason
+        assert all(fact in reason for fact in facts)
+
+    async def test_not_attempted_keeps_all_actual_missing_conditions(self) -> None:
+        record = await emergency_stop(
+            _facts(ownership_confirmed=False, exclusive_eligibility=False,
+                   config_known=False),
+            EmergencyBudget(max_attempts=3), _StopPort(),
+        )
+        reason = getattr(record, "reason", None)
+        assert isinstance(reason, str) and reason
+        assert all(fact in reason for fact in ("归属", "排他", "配置"))
+
+    async def test_unconfirmed_keeps_exhausted_budget_diagnosis(self) -> None:
+        """有限次数用完的汇总诊断与每次驱动错误分别表达。"""
+        record = await emergency_stop(
+            _facts(), EmergencyBudget(max_attempts=2), _StopPort(),
+        )
+        assert record.outcome is EmergencyOutcome.UNCONFIRMED
+        assert record.attempts_used == 2
+        reason = getattr(record, "reason", None)
+        assert isinstance(reason, str) and reason
+        assert "2" in reason and "耗尽" in reason
+
+    async def test_confirmed_stop_does_not_keep_failure_reason(self) -> None:
+        record = await emergency_stop(
+            _facts(), EmergencyBudget(max_attempts=3), _StopPort(confirmed_at=2),
+        )
+        assert record.outcome is EmergencyOutcome.STOPPED
+        assert getattr(record, "reason", None) is None
+
+    @pytest.mark.parametrize("used, outcome", [
+        (0, EmergencyOutcome.NOT_ATTEMPTED),
+        (1, EmergencyOutcome.UNCONFIRMED),
+    ])
+    async def test_unavailable_budget_stops_before_dispatch_and_keeps_actual_count(
+            self, used, outcome) -> None:
+        budget = EmergencyBudget(max_attempts=3)
+        if used:
+            assert budget.take() is True
+        port = _StopPort()
+        record = await emergency_stop(_facts(budget_available=False), budget, port)
+        assert port.calls == 0
+        assert record.outcome is outcome
+        assert record.attempts_used == used
+        reason = getattr(record, "reason", None)
+        assert isinstance(reason, str) and reason
+        assert "预算" in reason or "额度" in reason
+
+    async def test_ineligible_after_attempt_keeps_unconfirmed_and_actual_count(self) -> None:
+        budget = EmergencyBudget(max_attempts=3)
+        assert budget.take() is True
+        port = _StopPort()
+        record = await emergency_stop(_facts(ownership_confirmed=False), budget, port)
+        assert port.calls == 0
+        assert record.outcome is EmergencyOutcome.UNCONFIRMED
+        assert record.attempts_used == 1
+        reason = getattr(record, "reason", None)
+        assert isinstance(reason, str) and reason
+        assert "归属" in reason and "未确认" in reason
+
+    async def test_already_confirmed_keeps_attempts_used_before_confirmation(self) -> None:
+        budget = EmergencyBudget(max_attempts=3)
+        assert budget.take() is True
+        port = _StopPort()
+        observation = {"type": "stop_confirmed", "version": 1,
+                       "data": {"activity_id": "1"}}
+        record = await emergency_stop(
+            _facts(stop_confirmed=True, stop_observation=observation), budget, port)
+        assert port.calls == 0
+        assert record.outcome is EmergencyOutcome.STOPPED
+        assert record.attempts_used == 1
+        assert record.stop_observation == observation
+        assert getattr(record, "reason", None) is None

@@ -710,6 +710,7 @@ _EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
     "BASELINE_CHUNK": (False, ["apps/camctl/tests/integration/capture/test_baseline_history.py"]),
     "CAPTURE_WAIT_CHANGED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
     "RESULT_SET_CONFIRMED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
+    "RESULT_PAGE": (False, ["apps/camctl/tests/integration/capture/test_result_page_history.py"]),
     "DEVICE_FILE_OBSERVED": (True, ["apps/camctl/tests/integration/capture/test_file_observation.py"]),
     "RECORDING_DECIDED": (True, ["apps/camctl/tests/integration/capture/test_media_processing.py"]),
     "RECORDING_PROCESSED": (True, ["apps/camctl/tests/integration/capture/test_media_processing.py"]),

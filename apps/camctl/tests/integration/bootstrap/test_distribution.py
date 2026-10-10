@@ -339,6 +339,53 @@ def test_installed_sample_requires_valid_source_and_ack_ids(installed, tmp_path,
     assert not target.exists()
 
 
+def test_installed_emergency_errors_keep_registered_details(installed: _Installed) -> None:
+    """正式安装包保留两类应急错误登记，并拒绝不完整或无效的详情。"""
+    result = _probe(installed, """
+import sys
+from pathlib import Path
+from camctl.contracts import workflow_errors
+
+assert Path(workflow_errors.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+for code, reason in (
+    ("emergency_not_attempted", "会话退出前已无时间发起停止尝试"),
+    ("emergency_stop_unconfirmed", "停止请求的响应未知，仍无法确认目标活动已停止"),
+):
+    spec = workflow_errors.registered_error(code)
+    assert spec["stage"] == "emergency", code
+    assert "action_error_id" not in spec and "item_error_ids" not in spec, code
+    details_schema = spec["details_schema"]
+    assert details_schema["type"] == "object", code
+    assert set(details_schema["properties"]) == {"activity_id", "reason"}, code
+    assert set(details_schema["required"]) == {"activity_id", "reason"}, code
+    assert details_schema["additionalProperties"] is False, code
+
+    error = {
+        "code": code,
+        "stage": "emergency",
+        "details": {
+            "activity_id": "9223372036854775807",
+            "reason": reason,
+        },
+    }
+    workflow_errors.validate_public_error(error)
+    for invalid_details in (
+        {"activity_id": "9223372036854775807"},
+        {"activity_id": "0", "reason": "目标活动编号无效"},
+    ):
+        try:
+            workflow_errors.validate_public_error({
+                "code": code, "stage": "emergency", "details": invalid_details,
+            })
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{code} 接受了无效详情: {invalid_details!r}")
+print("validated")
+""")
+    assert result == "validated"
+
+
 def test_distribution_works_outside_repository(installed: _Installed) -> None:
     """安装后的发行物独立完成 init/describe/submit 与设备替身 run。"""
     # 安装来源：包来自安装环境，不经源码仓库；包资源自包含可读。

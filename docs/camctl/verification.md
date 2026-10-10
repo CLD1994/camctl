@@ -310,6 +310,29 @@ contracts 完整目录取得 `192 passed`，耗时 3.91 秒，覆盖实际模块
 
 本记录只证明包校验、上述执行通道、Python 安装和目标主机 C 构建。`init`、`describe`、十秒录像、实际五秒等待及文件完成、独立取回、host 领取、客户端导入和报告 ACK 尚未取得回传结果。完整真机业务链的验收及挂起状态由[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)跟踪，不能由部署准备结果声明演示成功。
 
+## 应急错误与历史报告的软件验证（2026-10-11）
+
+环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1。主执行者独占、顺序运行单元和各组件目录；设备调用使用受真实接口约束的替身。本次范围由[结果错误专项](../superpowers/plans/2026-10-09-camctl-result-errors-and-report-projection.md#应急错误登记与最终补记)维护。
+
+两类正式应急错误分别表达未开始停止尝试和已尝试但停止未确认，保存实际目标活动及原原因。纯编排保留已有次数；保存入口及事件守卫核对结果分区、完整公共错误、目标活动的相同错误和本会话固定配置。零尝试的未知配置不补值，有尝试须保存完整、相同且合法的配置。非法原因、内部次数类型、非有限或越界秒数、缺少配置及登记资源失败均按真实事务拒绝，测试核对整库事实未变及事务已退出。
+
+真实报告测试为两个错误分别生成仍运行、结束未确认和已结束的六个分区。活动前置经正式 START 和调用返回事实建立；报告分别保留相应设备情况或省略已结束的设备情况。后续会话保存可靠停止后，以新连接重建同一冻结 H，字节、长度和摘要保持，旧历史及原动作终态不变。仓库外实际构建、安装的 wheel 也携带这两项正式登记及详情约束。
+
+各行从仓库根目录执行，使用 `UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 pytest <验证对象> -q`；日志重定向到各自文件。最终结果如下：
+
+| 验证对象 | 实际结果 | 耗时与本机日志 |
+| --- | --- | --- |
+| `apps/camctl/tests/unit` | 4601 passed、1 skipped；2 条既有 asyncio 标记警告 | 12.06 秒；`/tmp/camctl-v1-emergency-all-unit-final.log` |
+| `apps/camctl/tests/integration/capture` | 982 passed | 347.85 秒；`/tmp/camctl-v1-emergency-capture-full-final.log` |
+| `apps/camctl/tests/integration/history` | 205 passed | 20.11 秒；`/tmp/camctl-v1-emergency-history-full.log` |
+| `apps/camctl/tests/integration/reporting` | 373 passed | 38.79 秒；`/tmp/camctl-v1-emergency-reporting-full.log` |
+| `apps/camctl/tests/integration/operations` | 200 passed | 10.55 秒；`/tmp/camctl-v1-emergency-operations-full.log` |
+| `apps/camctl/tests/integration/bootstrap/test_distribution.py` | 17 passed；本专项未重跑 bootstrap 全目录 | 21.08 秒；`/tmp/camctl-v1-emergency-distribution.log` |
+
+RESULT_PAGE 的事件验收映射指向实际结果页历史测试，未标为综合剧本已经产生。其二十项锚点验证通过不表示新文件、设备文件及页目录的完整对象成员已在三条历史路径按独立预期全部核验；这项剩余证明由[H7 结果页验证](../superpowers/plans/2026-09-30-camctl-history.md#h7-结果页验收映射与剩余证明2026-10-11容器)跟踪。
+
+本次完成错误登记、最终补记与上述软件验证。默认 bootstrap／session 尚未接入真实应急停止、有限尝试及最终补记，责任仍在[capture C7](../superpowers/plans/2026-09-30-camctl-capture.md#c7-有限安全收场与应急最终补记)。原键事务核实不等于默认会话已持有 UNKNOWN 保存的恢复责任。Action6 完整真机演示仍按[T9 挂起记录](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)等待恢复，本次软件通过不作为设备、ARM 运行或物理断电验收。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。

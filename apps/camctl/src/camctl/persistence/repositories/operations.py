@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import ChainMap
 from contextlib import closing
 from dataclasses import asdict
+from decimal import Decimal
 from typing import Any, Mapping
 
 from camctl.contracts.enums import decode_member, enum_for
@@ -1420,13 +1421,21 @@ def _check_config_numbers(values: Mapping[str, Any], where: str) -> None:
         _fail(f"{where} 的次数上限必须是正整数: {maximum!r}")
     timeout = values.get("timeout_s_json")
     if timeout is not None:
-        number = seconds_from_json(timeout)
-        if number is None or number <= 0:
+        try:
+            number = seconds_from_json(timeout)
+        except ValueError as cause:
+            raise EventValidationError(f"{where} 的 timeout_s 不是有效秒数") from cause
+        if (isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal))
+                or number is None or not number.is_finite() or number <= 0):
             _fail(f"{where} 的 timeout_s 必须为正秒数: {timeout!r}")
     interval = values.get("retry_interval_s_json")
     if interval is not None:
-        number = seconds_from_json(interval)
-        if number is None or number < 0:
+        try:
+            number = seconds_from_json(interval)
+        except ValueError as cause:
+            raise EventValidationError(f"{where} 的 retry_interval_s 不是有效秒数") from cause
+        if (isinstance(interval, bool) or not isinstance(interval, (int, Decimal))
+                or number is None or not number.is_finite() or number < 0):
             _fail(f"{where} 的 retry_interval_s 必须为非负秒数: {interval!r}")
 
 

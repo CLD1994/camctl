@@ -190,9 +190,10 @@ class EmergencyRecord:
 
     outcome: EmergencyOutcome
     attempts_used: int
-    max_attempts: int
+    max_attempts: int | None
     record_status: RecordStatus = RecordStatus.NOT_RECORDED
     stop_observation: Mapping[str, Any] | None = None
+    reason: str | None = None
 
 
 async def emergency_stop(
@@ -212,15 +213,33 @@ async def emergency_stop(
             raise ValueError("已确认停止的应急资格必须携带可靠停止依据")
         return EmergencyRecord(
             outcome=EmergencyOutcome.STOPPED,
-            attempts_used=0,
+            attempts_used=budget.attempts_used,
             max_attempts=budget.max_attempts,
             stop_observation=facts.stop_observation,
         )
     if decision is EmergencyDecision.INELIGIBLE_KEEP_DIAGNOSIS:
+        conditions = (
+            (facts.process_can_handle, "进程无法处理应急错误"),
+            (facts.session_fatal_error, "本次没有会话致命错误"),
+            (facts.ownership_confirmed, "目标活动归属未确认"),
+            (facts.exclusive_eligibility, "目标设备排他资格未确认"),
+            (facts.driver_safe_repeat_stop, "驱动安全重复停止能力未确认"),
+            (facts.config_known, "停止配置未知"),
+        )
         return EmergencyRecord(
-            outcome=EmergencyOutcome.NOT_ATTEMPTED,
-            attempts_used=0,
+            outcome=(EmergencyOutcome.UNCONFIRMED if budget.attempts_used
+                     else EmergencyOutcome.NOT_ATTEMPTED),
+            attempts_used=budget.attempts_used,
             max_attempts=budget.max_attempts,
+            reason="；".join(reason for confirmed, reason in conditions if not confirmed),
+        )
+    if decision is EmergencyDecision.BUDGET_EXHAUSTED_END:
+        return EmergencyRecord(
+            outcome=(EmergencyOutcome.UNCONFIRMED if budget.attempts_used
+                     else EmergencyOutcome.NOT_ATTEMPTED),
+            attempts_used=budget.attempts_used,
+            max_attempts=budget.max_attempts,
+            reason=f"本次应急停止额度不可用（已尝试 {budget.attempts_used}/{budget.max_attempts} 次）",
         )
     while True:
         if not budget.take():
@@ -228,6 +247,7 @@ async def emergency_stop(
                 outcome=EmergencyOutcome.UNCONFIRMED,
                 attempts_used=budget.attempts_used,
                 max_attempts=budget.max_attempts,
+                reason=f"本次应急停止额度已耗尽（{budget.attempts_used}/{budget.max_attempts} 次），仍未确认停止",
             )
         response = await port.stop()
         if getattr(response, "confirmed", False):

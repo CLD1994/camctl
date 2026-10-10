@@ -361,6 +361,48 @@
       },
       "action_error_id": 12
     },
+    "emergency_not_attempted": {
+      "stage": "emergency",
+      "description": "会话应急处理未能开始停止尝试，保留目标活动与实际未能尝试的原因。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "activity_id",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "emergency_stop_unconfirmed": {
+      "stage": "emergency",
+      "description": "会话应急处理已经尝试停止，有限处理结束后仍未确认停止。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "activity_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "activity_id",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
     "capture_failed": {
       "stage": "execution",
       "description": "启动前目录基准读取明确失败、采集明确失败，或结果不满足任务契约。",

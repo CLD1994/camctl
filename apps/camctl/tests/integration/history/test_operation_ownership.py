@@ -84,7 +84,8 @@ def _create_flow(world, branch):
     assert branch == "emergency_stop"
     saved = CaptureRepository().save_emergency(
         session_key="a" * 32, action_id=1, activity_id=1,
-        record=EmergencyRecord(EmergencyOutcome.UNCONFIRMED, 1, 3),
+        record=EmergencyRecord(EmergencyOutcome.UNCONFIRMED, 1, 3,
+                              reason="有限停止处理已经结束，设备停止仍未确认"),
         attempts=({
             "status": 4, "effect_state": 2,
             "result_json": {"format_version": 1, "settlement": {

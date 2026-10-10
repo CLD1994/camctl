@@ -105,6 +105,7 @@ from camctl.persistence.repositories.capture_facts import (
 )
 from camctl.persistence.repositories.operations import (
     FinishAttemptCommand, _FinishStaleRunsCommand, _RETRY_WAIT_EVENT,
+    _check_config_numbers,
 )
 from camctl.persistence.repositories.scheduling import (
     ExpireActionCommand, ExpireActionRequest, ExpireOutcome,
@@ -5595,14 +5596,29 @@ class SaveEmergencyCommand:
         self._state.setdefault("operation_attempts", {})
 
         record = self._record
+        if (not isinstance(record.outcome, EmergencyOutcome)
+                or isinstance(record.attempts_used, bool)
+                or not isinstance(record.attempts_used, int)
+                or record.attempts_used < 0):
+            raise TransactionError("应急结果及实际次数无效")
+        if record.max_attempts is not None and (
+                isinstance(record.max_attempts, bool)
+                or not isinstance(record.max_attempts, int) or record.max_attempts < 1):
+            raise TransactionError("已知应急上限必须是正整数")
+        if record.outcome is EmergencyOutcome.STOPPED:
+            if record.reason is not None:
+                raise TransactionError("停止成功的补记不携带失败原因")
+        elif not isinstance(record.reason, str) or not record.reason:
+            raise TransactionError("应急失败或未确认缺少实际原因")
         if len(self._attempts) != record.attempts_used:
             raise TransactionError(
                 f"补记尝试行数与实际次数不符: {len(self._attempts)}"
                 f" != {record.attempts_used}"
             )
-        if record.attempts_used > record.max_attempts:
+        if record.max_attempts is not None and record.attempts_used > record.max_attempts:
             raise TransactionError("实际次数超过本会话固定限额")
-        if record.attempts_used > 0 and not self._complete_config():
+        if record.attempts_used > 0 and (
+                record.max_attempts is None or not self._complete_config()):
             raise TransactionError("已有尝试的补记要求完整配置")
         stop_observation = record.stop_observation
         if record.outcome is EmergencyOutcome.STOPPED:
@@ -5630,14 +5646,14 @@ class SaveEmergencyCommand:
             if record.attempts_used == 0:
                 raise TransactionError("停止未确认且有尝试的补记要求次数大于 0")
             run_status = 6
-            run_error = {"code": "emergency_stop_unconfirmed", "stage": "emergency"}
+            run_error = _emergency_error("emergency_stop_unconfirmed", self._activity_id, record.reason)
             activity_after = activity["activity_state"]
             activity_error = run_error
         else:
             if record.attempts_used != 0:
                 raise TransactionError("未能尝试的补记不创建尝试行")
             run_status = 4
-            run_error = {"code": "emergency_not_attempted", "stage": "emergency"}
+            run_error = _emergency_error("emergency_not_attempted", self._activity_id, record.reason)
             activity_after = activity["activity_state"]
             activity_error = run_error
 
@@ -5719,6 +5735,14 @@ class SaveEmergencyCommand:
         return self._timeout_s is not None and self._retry_interval_s is not None
 
 
+def _emergency_error(code: str, activity_id: int, reason: str) -> dict:
+    """从正式登记构造完整错误，原因保持实际生产输入。"""
+    error = {"code": code, "stage": registered_error(code)["stage"],
+             "details": {"activity_id": str(activity_id), "reason": reason}}
+    validate_public_error(error)
+    return error
+
+
 def _emergency_guard(event, context) -> None:
     """应急补记的组合守卫：责任键、尝试归属、次数与结果组合。
 
@@ -5750,6 +5774,10 @@ def _emergency_guard(event, context) -> None:
         raise EventValidationError("应急责任键与会话及活动不符")
     if run_values.get("kind") != 9 or run_values.get("retry_wait_required") != 0:
         raise EventValidationError("应急流程必须是补记终态")
+    config_columns = ("max_attempts_used", "timeout_s_json", "retry_interval_s_json")
+    _check_config_numbers(run_values, f"operation_runs#{run_id}")
+    if attempts and any(run_values.get(column) is None for column in config_columns):
+        raise EventValidationError("已有应急尝试必须保存完整的固定配置")
     status = run_values.get("status")
     if status not in (3, 4, 6):
         raise EventValidationError("应急补记不保存进行中状态")
@@ -5757,6 +5785,19 @@ def _emergency_guard(event, context) -> None:
         raise EventValidationError("应急成功不携带流程错误")
     if status in (4, 6) and run_values.get("error_json") is None:
         raise EventValidationError("应急失败或未确认必须携带原因")
+    if status in (4, 6):
+        error = run_values["error_json"]
+        try:
+            validate_public_error(error)
+        except SchemaRuleError:
+            raise
+        except ValueError as cause:
+            raise EventValidationError("应急流程错误不符合公共契约") from cause
+        expected = "emergency_not_attempted" if status == 4 else "emergency_stop_unconfirmed"
+        if error["code"] != expected:
+            raise EventValidationError("应急错误与最终结果分区不符")
+        if error["details"]["activity_id"] != str(run_values.get("activity_id")):
+            raise EventValidationError("应急错误必须指向本流程的实际目标活动")
     if status == 6 and not attempts:
         raise EventValidationError("停止未确认的补记必须有实际尝试")
     if status == 4 and attempts:
@@ -5774,6 +5815,21 @@ def _emergency_guard(event, context) -> None:
             raise EventValidationError(
                 "停止成功的补记必须在尝试结果中保存指向目标活动的停止观察"
             )
+    activity_id = run_values.get("activity_id")
+    activity = (
+        dict(context.state_rows.get("device_activities", {}).get(activity_id, {}))
+        if context is not None else {}
+    )
+    for row in event.rows:
+        if row.table == "device_activities" and row.row_id == activity_id:
+            if not row.after.exists:
+                raise EventValidationError("应急补记不能删除目标活动")
+            activity.update(row.before.values)
+            activity.update(row.after.values)
+    if "last_error_json" not in activity:
+        raise EventValidationError("应急补记缺少可靠的目标活动错误")
+    if not json_equal(activity["last_error_json"], run_values.get("error_json")):
+        raise EventValidationError("应急流程与目标活动的完整错误不一致")
     numbers = [a.get("attempt_no") for a in attempts]
     if numbers != list(range(1, len(attempts) + 1)):
         raise EventValidationError("应急尝试必须从 1 连续编号")
@@ -5783,6 +5839,10 @@ def _emergency_guard(event, context) -> None:
     if maximum is not None and len(attempts) > maximum:
         raise EventValidationError("尝试次数超过本会话固定限额")
     for attempt in attempts:
+        _check_config_numbers(attempt, "应急尝试")
+        if any(not json_equal(attempt.get(column), run_values.get(column))
+               for column in config_columns):
+            raise EventValidationError("每条应急尝试必须采用本会话的相同固定配置")
         if attempt.get("run_id") != run_id:
             raise EventValidationError("应急尝试必须归属本次流程")
         if attempt.get("intent_event_id") is not None:
