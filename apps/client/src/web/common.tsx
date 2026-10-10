@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import type { Issue } from "../shared/types";
 import { isRawNumber } from "../shared/json";
+import {
+  presentIssue,
+  type IssuePresentation,
+} from "./validation-presentation";
 export const actionNames: Record<string, string> = {
   camera_take_photo: "单张拍摄",
   camera_timelapse: "延时摄影",
@@ -77,17 +81,15 @@ export function ErrorBox({ error }: { error: unknown }) {
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
-const issueHints: Record<string, string> = {
-  schema_required: "缺少必填字段",
-  schema_enum: "请选择规则允许的值",
-  schema_const: "参数组合或固定值不符合规则",
-  schema_type: "值类型不符合规则",
-  schema_if: "参数组合不符合规则",
-  schema_additionalProperties: "包含未开放的参数",
-  schema_minimum: "小于允许的最小值",
-  schema_maximum: "超过允许的最大值",
-};
-export function Issues({ issues }: { issues: Issue[] }) {
+export function Issues({
+  issues,
+  presentations,
+  onLocate,
+}: {
+  issues: Issue[];
+  presentations?: IssuePresentation[];
+  onLocate?: (index: number) => void;
+}) {
   return (
     <div
       data-testid="validation-issues"
@@ -100,12 +102,27 @@ export function Issues({ issues }: { issues: Issue[] }) {
           <ul>
             {issues.map((issue, i) => (
               <li key={i}>
-                <code>{issue.path || "计划"}</code> ·{" "}
-                {own(issueHints, issue.code) ?? issue.message}
-                <small>
-                  {issue.code}
-                  {own(issueHints, issue.code) ? ` · ${issue.message}` : ""}
-                </small>
+                {onLocate ? (
+                  <button
+                    className="inline validation-link"
+                    onClick={() => onLocate(i)}
+                  >
+                    {(presentations?.[i] ?? presentIssue(issue)).location}：
+                    {(presentations?.[i] ?? presentIssue(issue)).message}
+                  </button>
+                ) : (
+                  <span>
+                    {(presentations?.[i] ?? presentIssue(issue)).location}：
+                    {(presentations?.[i] ?? presentIssue(issue)).message}
+                  </span>
+                )}
+                <details>
+                  <summary>技术详情</summary>
+                  <small>
+                    <code>{issue.path || "计划"}</code> · {issue.code} ·{" "}
+                    {issue.message}
+                  </small>
+                </details>
               </li>
             ))}
           </ul>

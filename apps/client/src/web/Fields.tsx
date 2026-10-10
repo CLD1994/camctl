@@ -11,6 +11,7 @@ import {
 } from "./editing";
 import { sameValue, optionLabel } from "./parameter-options";
 import { displayNumber, displayJsonValue } from "../shared/json";
+import { ValidationControl } from "./Validation";
 export function JsonField({
   content,
   path,
@@ -32,26 +33,28 @@ export function JsonField({
       <span>
         {label} {required && <span className="required">必填</span>}
       </span>
-      <textarea
-        aria-label={label}
-        className="code-input compact"
-        spellCheck={false}
-        readOnly={pendingBlocks(content, path)}
-        value={
-          pending?.text ??
-          (value === undefined
-            ? ""
-            : displayJsonValue(
-                valueAt(root, path.slice(0, -1)),
-                path.at(-1)!,
-                value,
-                2,
-              ))
-        }
-        onChange={(e) => {
-          change(editValue(content, path, e.target.value, "json"));
-        }}
-      />
+      <ValidationControl path={path} json>
+        <textarea
+          aria-label={label}
+          className="code-input compact"
+          spellCheck={false}
+          readOnly={pendingBlocks(content, path)}
+          value={
+            pending?.text ??
+            (value === undefined
+              ? ""
+              : displayJsonValue(
+                  valueAt(root, path.slice(0, -1)),
+                  path.at(-1)!,
+                  value,
+                  2,
+                ))
+          }
+          onChange={(e) => {
+            change(editValue(content, path, e.target.value, "json"));
+          }}
+        />
+      </ValidationControl>
       {pending && (
         <small className="danger-text">
           JSON 尚未完成或存在重复键，原文将随草稿保存。
@@ -129,133 +132,145 @@ export function Field({
             {required && <span className="required">必填</span>}{" "}
             <small className="field-key">{name}</small>
           </span>
-          {unsupportedChoice ? (
-            <textarea
-              aria-label={label}
-              readOnly={pendingBlocks(content, path)}
-              value={
-                pending?.text ??
-                (value === undefined
-                  ? ""
-                  : displayJsonValue(
-                      valueAt(root, path.slice(0, -1)),
-                      path.at(-1)!,
-                      value,
-                      2,
-                    ))
-              }
-              onChange={(e) =>
-                change(editValue(content, path, e.target.value, "json"))
-              }
-            />
-          ) : enumeration ? (
-            <Select
-              aria-label={label}
-              disabled={choicesBlocked || pendingBlocks(content, path)}
-              value={
-                value === undefined
-                  ? ""
-                  : matched !== undefined && matched >= 0
-                    ? String(matched)
-                    : "invalid"
-              }
-              onValueChange={(selectedValue) =>
-                selectedValue === ""
-                  ? set(undefined, true)
-                  : set(enumeration[Number(selectedValue)])
-              }
-            >
-              <SelectItem value="">请选择</SelectItem>
-              {value !== undefined && matched === -1 && (
-                <SelectItem value="invalid" disabled>
-                  {optionLabel(value)}（待修正）
-                </SelectItem>
-              )}
-              {enumeration.map(
-                (v, i) =>
-                  (!allowed || allowed.some((a) => sameValue(a, v))) && (
-                    <SelectItem key={i} value={i}>
-                      {optionLabel(v)}
-                    </SelectItem>
-                  ),
-              )}
-            </Select>
-          ) : type === "boolean" ? (
-            <Select
-              aria-label={label}
-              disabled={pendingBlocks(content, path)}
-              value={
-                value === undefined
-                  ? ""
-                  : value === true
-                    ? "true"
-                    : value === false
-                      ? "false"
-                      : "invalid"
-              }
-              onValueChange={(selectedValue) =>
-                selectedValue === ""
-                  ? set(undefined, true)
-                  : set(selectedValue === "true")
-              }
-            >
-              <SelectItem value="">请选择</SelectItem>
-              <SelectItem value="true">是 · true</SelectItem>
-              <SelectItem value="false">否 · false</SelectItem>
-              {value !== undefined && typeof value !== "boolean" && (
-                <SelectItem value="invalid" disabled>
-                  {optionLabel(value)}（待修正）
-                </SelectItem>
-              )}
-            </Select>
-          ) : type === "string" ? (
-            <input
-              aria-label={label}
-              readOnly={pendingBlocks(content, path)}
-              value={typeof value === "string" ? value : ""}
-              onChange={(e) => set(e.target.value)}
-            />
-          ) : type === "number" || type === "integer" ? (
-            <input
-              aria-label={label}
-              readOnly={pendingBlocks(content, path)}
-              inputMode="decimal"
-              value={
-                pending?.text ??
-                (value === undefined
-                  ? ""
-                  : typeof value === "number"
-                    ? displayNumber(
+          <ValidationControl
+            path={path}
+            json={
+              unsupportedChoice ||
+              (!enumeration &&
+                type !== "boolean" &&
+                type !== "string" &&
+                type !== "number" &&
+                type !== "integer")
+            }
+          >
+            {unsupportedChoice ? (
+              <textarea
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                value={
+                  pending?.text ??
+                  (value === undefined
+                    ? ""
+                    : displayJsonValue(
                         valueAt(root, path.slice(0, -1)),
                         path.at(-1)!,
                         value,
-                      )
-                    : String(value))
-              }
-              onChange={(e) =>
-                change(editValue(content, path, e.target.value, "number"))
-              }
-            />
-          ) : (
-            <textarea
-              aria-label={label}
-              readOnly={pendingBlocks(content, path)}
-              value={
-                pending?.text ??
-                (value === undefined
-                  ? ""
-                  : displayJsonValue(
-                      valueAt(root, path.slice(0, -1)),
-                      path.at(-1)!,
-                      value,
-                      2,
-                    ))
-              }
-              onChange={(e) =>
-                change(editValue(content, path, e.target.value, "json"))
-              }
-            />
-          )}
+                        2,
+                      ))
+                }
+                onChange={(e) =>
+                  change(editValue(content, path, e.target.value, "json"))
+                }
+              />
+            ) : enumeration ? (
+              <Select
+                aria-label={label}
+                disabled={choicesBlocked || pendingBlocks(content, path)}
+                value={
+                  value === undefined
+                    ? ""
+                    : matched !== undefined && matched >= 0
+                      ? String(matched)
+                      : "invalid"
+                }
+                onValueChange={(selectedValue) =>
+                  selectedValue === ""
+                    ? set(undefined, true)
+                    : set(enumeration[Number(selectedValue)])
+                }
+              >
+                <SelectItem value="">请选择</SelectItem>
+                {value !== undefined && matched === -1 && (
+                  <SelectItem value="invalid" disabled>
+                    {optionLabel(value)}（待修正）
+                  </SelectItem>
+                )}
+                {enumeration.map(
+                  (v, i) =>
+                    (!allowed || allowed.some((a) => sameValue(a, v))) && (
+                      <SelectItem key={i} value={i}>
+                        {optionLabel(v)}
+                      </SelectItem>
+                    ),
+                )}
+              </Select>
+            ) : type === "boolean" ? (
+              <Select
+                aria-label={label}
+                disabled={pendingBlocks(content, path)}
+                value={
+                  value === undefined
+                    ? ""
+                    : value === true
+                      ? "true"
+                      : value === false
+                        ? "false"
+                        : "invalid"
+                }
+                onValueChange={(selectedValue) =>
+                  selectedValue === ""
+                    ? set(undefined, true)
+                    : set(selectedValue === "true")
+                }
+              >
+                <SelectItem value="">请选择</SelectItem>
+                <SelectItem value="true">是 · true</SelectItem>
+                <SelectItem value="false">否 · false</SelectItem>
+                {value !== undefined && typeof value !== "boolean" && (
+                  <SelectItem value="invalid" disabled>
+                    {optionLabel(value)}（待修正）
+                  </SelectItem>
+                )}
+              </Select>
+            ) : type === "string" ? (
+              <input
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                value={typeof value === "string" ? value : ""}
+                onChange={(e) => set(e.target.value)}
+              />
+            ) : type === "number" || type === "integer" ? (
+              <input
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                inputMode="decimal"
+                value={
+                  pending?.text ??
+                  (value === undefined
+                    ? ""
+                    : typeof value === "number"
+                      ? displayNumber(
+                          valueAt(root, path.slice(0, -1)),
+                          path.at(-1)!,
+                          value,
+                        )
+                      : String(value))
+                }
+                onChange={(e) =>
+                  change(editValue(content, path, e.target.value, "number"))
+                }
+              />
+            ) : (
+              <textarea
+                aria-label={label}
+                readOnly={pendingBlocks(content, path)}
+                value={
+                  pending?.text ??
+                  (value === undefined
+                    ? ""
+                    : displayJsonValue(
+                        valueAt(root, path.slice(0, -1)),
+                        path.at(-1)!,
+                        value,
+                        2,
+                      ))
+                }
+                onChange={(e) =>
+                  change(editValue(content, path, e.target.value, "json"))
+                }
+              />
+            )}
+          </ValidationControl>
         </label>
         {showRaw && (
           <small className="danger-text">

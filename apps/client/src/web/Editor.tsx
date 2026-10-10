@@ -1,6 +1,6 @@
 import { Select, SelectItem, SelectFieldset } from "./Select";
 import { isCameraAction } from "../shared/actions";
-import { useState, useLayoutEffect } from "react";
+import { useState, useLayoutEffect, useRef } from "react";
 import { useFeedback } from "./feedback";
 import type { DraftContent, Preset } from "../server/models";
 import type { Capabilities, Issue, ParameterType } from "../shared/types";
@@ -38,6 +38,12 @@ import { ActionUiIdentity } from "./action-ui-identity";
 import { actionLabel, Issues, ErrorBox } from "./common";
 import { Field, JsonField } from "./Fields";
 import { BuiltinFields } from "./BuiltinFields";
+import { presentIssue } from "./validation-presentation";
+import {
+  ValidationControl,
+  ValidationProvider,
+  type PresentedIssue,
+} from "./Validation";
 import { deviceOptions } from "./device-options";
 import { canSwitchActionType, switchActionType } from "./action-drafts";
 import {
@@ -72,6 +78,12 @@ export function Editor(props: Props) {
   const [json, setJson] = useState(false);
   const [copyError, setCopyError] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const editor = useRef<HTMLElement>(null);
+  const [focusTarget, setFocusTarget] = useState<{
+    path: string | null;
+    pending: boolean;
+    sequence: number;
+  }>();
   const content = session.content;
   const [actionIdentity] = useState(() => new ActionUiIdentity(content));
   useLayoutEffect(
@@ -194,285 +206,377 @@ export function Editor(props: Props) {
   const remove = (index: number) => {
     change(removeAction(content, index), { remove: index });
   };
+  const presentations: PresentedIssue[] = issues.map((issue) => ({
+    issue,
+    ...presentIssue(issue, plan, capabilities),
+  }));
+  const locate = (index: number) => {
+    const target = presentations[index];
+    const controls = Array.from(
+      editor.current?.querySelectorAll<HTMLElement>("[data-validation-path]") ??
+        [],
+    );
+    const pending = target.issue.code === "unfinished_input";
+    const controlPath = pending ? target.issue.path : target.target;
+    const matching =
+      controlPath === null
+        ? undefined
+        : (controls.find(
+            (control) =>
+              control.dataset.validationPath === controlPath &&
+              (control.dataset.validationPending === "true") === pending &&
+              (pending || control.dataset.validationPath !== ""),
+          ) ??
+          controls
+            .filter(
+              (control) =>
+                !pending &&
+                control.dataset.validationJson === "true" &&
+                control.dataset.validationPath &&
+                controlPath.startsWith(control.dataset.validationPath + "/"),
+            )
+            .sort(
+              (a, b) =>
+                b.dataset.validationPath!.length -
+                a.dataset.validationPath!.length,
+            )[0]);
+    const path = matching?.dataset.validationPath ?? null;
+    if (path !== null) {
+      setJson(false);
+      const parts = pending ? [] : pointerPath(path);
+      if (parts[0] === "actions" && /^(0|[1-9]\d*)$/.test(String(parts[1]))) {
+        const key = identity(Number(parts[1]));
+        setCollapsed((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
+      }
+    } else setJson(true);
+    setFocusTarget((current) => ({
+      path,
+      pending,
+      sequence: (current?.sequence ?? 0) + 1,
+    }));
+  };
+  useLayoutEffect(() => {
+    if (!focusTarget || !editor.current) return;
+    const control = Array.from(
+      editor.current.querySelectorAll<HTMLElement>("[data-validation-path]"),
+    ).find(
+      (candidate) =>
+        candidate.dataset.validationPath === (focusTarget.path ?? "") &&
+        (focusTarget.path === null
+          ? candidate.dataset.validationJson === "true" &&
+            candidate.dataset.validationPending !== "true"
+          : (candidate.dataset.validationPending === "true") ===
+            focusTarget.pending),
+    );
+    if (!control) return;
+    for (
+      let ancestor = control.parentElement;
+      ancestor && ancestor !== editor.current;
+      ancestor = ancestor.parentElement
+    ) {
+      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+    }
+    control.focus();
+    control.scrollIntoView({ block: "center" });
+  }, [focusTarget]);
   return (
-    <section className="panel editor">
-      <div className="section-head">
-        <div>
-          <p className="eyebrow">准备新的执行请求</p>
-          <h2>编辑草稿</h2>
-        </div>
-        <div className="button-row">
-          <button disabled={busy || !session.editable} onClick={props.onCopy}>
-            复制草稿
-          </button>
-          <button
-            className="quiet danger-text"
-            disabled={busy || !session.editable}
-            onClick={props.onDelete}
-          >
-            删除草稿
-          </button>
-          <button
-            data-testid="draft-json-toggle"
-            onClick={() => setJson(!json)}
-          >
-            {json ? "使用表单" : "整份计划 JSON"}
-          </button>
-        </div>
-      </div>
-      <ErrorBox error={copyError} />
-      <ErrorBox error={identityProblem} />
-      <div className="save-line">
-        <span data-testid="save-status" role="status">
-          {session.deletionState === "deleting"
-            ? "正在删除草稿…"
-            : session.deletionState === "unknown"
-              ? "删除结果尚未确认"
-              : session.error
-                ? `保存失败或未确认：${session.error}`
-                : session.saving
-                  ? "保存中…"
-                  : session.saved
-                    ? "已保存"
-                    : "等待保存…"}
-        </span>
-        {session.error && session.editable && (
-          <button
-            disabled={busy}
-            onClick={() => void session.flush().catch(() => {})}
-          >
-            重试保存
-          </button>
-        )}
-      </div>
-      {session.deletionState === "unknown" && (
-        <div className="notice warning">
-          <p>删除结果尚未确认，当前输入已保留。</p>
-          <button disabled={busy} onClick={props.checkDeletion}>
-            重新核实删除结果
-          </button>
-        </div>
-      )}
-      {session.exportState === "unknown" && (
-        <div className="notice warning">
-          <p>
-            导出结果尚未确认，输入已保留。请先核实原草稿，暂不能编辑、保存或追加。
-          </p>
-          <button disabled={busy} onClick={props.checkExport}>
-            重新核实导出结果
-          </button>
-        </div>
-      )}
-      {session.conflict && (
-        <details>
-          <summary>查看后端冲突记录</summary>
-          <pre>{stringifyJson(session.conflict, 2)}</pre>
-        </details>
-      )}
-      {session.appendLocked && (
-        <p className="notice">
-          此草稿正在核实一次后续追加；请从上方返回核实，当前内容暂为只读。
-        </p>
-      )}
-      <SelectFieldset disabled={busy || !session.editable || !!identityProblem}>
-        <section className="notice" aria-label="自动获取预览文件">
-          <strong data-testid="preview-intent">
-            自动预览
-            {intent === "enabled"
-              ? "已开启"
-              : intent === "disabled"
-                ? "已关闭"
-                : "尚未设置"}
-          </strong>
+    <ValidationProvider issues={presentations}>
+      <section className="panel editor" ref={editor}>
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">准备新的执行请求</p>
+            <h2>编辑草稿</h2>
+          </div>
           <div className="button-row">
-            <button
-              disabled={intent === "enabled"}
-              onClick={() => choosePreviewIntent("enabled")}
-            >
-              开启自动预览
+            <button disabled={busy || !session.editable} onClick={props.onCopy}>
+              复制草稿
             </button>
             <button
-              disabled={intent === "disabled"}
-              onClick={() => choosePreviewIntent("disabled")}
+              className="quiet danger-text"
+              disabled={busy || !session.editable}
+              onClick={props.onDelete}
             >
-              关闭自动预览
+              删除草稿
+            </button>
+            <button
+              data-testid="draft-json-toggle"
+              onClick={() => setJson(!json)}
+            >
+              {json ? "使用表单" : "整份计划 JSON"}
             </button>
           </div>
-          <p data-testid="preview-status">
-            {intent === "unset"
-              ? "保留全部显式动作；选择开启或关闭后按该意图维护。"
-              : intent === "disabled"
-                ? "手动取回仍独立保留。"
-                : previewIssues.length
-                  ? "部分自动预览关联待核实。"
-                  : content.automaticPreviews?.actions.some((a) => a.sourceId)
-                    ? "符合条件的拍摄由客户端维护自动取回。"
-                    : "当前没有适用动作；新增符合条件的拍摄后自动维护。"}
-          </p>
-          {previewIssues.map((message, i) => (
-            <p key={i} className="warning">
-              {message}
-            </p>
-          ))}
-        </section>
-        <PendingInputs content={content} change={change} />
-        {json ? (
-          <>
-            <label className="field">
-              <span>
-                计划 JSON 文本 <span className="required">必填</span>
-              </span>
-              <textarea
-                className="code-input"
-                data-testid="draft-json-input"
-                spellCheck={false}
-                readOnly={Object.keys(content.pending ?? {}).length > 0}
-                value={content.text}
-                onChange={(e) => {
-                  if (
-                    (content.automaticPreviews ||
-                      Object.keys(content.actionVariants ?? {}).length) &&
-                    !window.confirm(
-                      "替换整份计划 JSON 将清除自动预览意图、动作关联和其他动作类型暂存内容。确认后自动预览为尚未设置，并保存输入原文。是否继续？",
-                    )
-                  )
-                    return;
-                  change(editPlanText(content, e.target.value, true), "reset");
-                }}
-              />
-            </label>
-            {Object.keys(content.pending ?? {}).length > 0 && (
-              <p className="notice">
-                请先在“未完成输入”中修正或放弃各路径的输入。整份 JSON
-                暂为只读，保留原值与输入。
-              </p>
-            )}
-          </>
-        ) : null}
-        {plan && !identityProblem ? (
-          <div hidden={json}>
-            <label className="field">
-              <span>
-                计划名称 <span className="required">必填</span>
-              </span>
-              <input
-                aria-label="计划名称"
-                value={typeof plan.name === "string" ? plan.name : ""}
-                onChange={(e) =>
-                  change(setValue(content, ["name"], e.target.value))
-                }
-              />
-            </label>
-            <div className="section-head">
-              <h3>
-                动作 <span className="muted">{plan.actions.length}</span>
-              </h3>
-              <div className="button-row">
-                {!!plan.actions.length && (
-                  <>
-                    <button onClick={() => setCollapsed(new Set())}>
-                      全部展开
-                    </button>
-                    <button
-                      onClick={() =>
-                        setCollapsed(
-                          new Set(plan.actions.map((_, i) => identity(i))),
-                        )
-                      }
-                    >
-                      全部收起
-                    </button>
-                  </>
-                )}
-                <button onClick={add}>添加动作</button>
-              </div>
-            </div>
-            {!plan.actions.length && (
-              <p className="empty">
-                添加录像、取回、清理、取消或状态报告动作。
-              </p>
-            )}
-            {plan.actions.map((action, index) =>
-              isObject(action) &&
-              action.type === "obtain_action_outputs" &&
-              isObject(action.params) &&
-              action.params.purpose === "auto_preview" ? (
-                <details
-                  className="advanced"
-                  key={identity(index)}
-                  data-testid="derived-preview"
-                >
-                  <summary>
-                    自动取回 · {String(action.name ?? "未命名")} · 技术详情
-                  </summary>
-                  <p>自动预览动作由开关管理，完整内容随计划导出。</p>
-                  <pre>{stringifyJson(action, 2)}</pre>
-                </details>
-              ) : isObject(action) ? (
-                <ActionEditor
-                  key={identity(index)}
-                  {...props}
-                  content={content}
-                  index={index}
-                  action={action}
-                  change={change}
-                  collapsed={collapsed.has(identity(index))}
-                  toggle={() =>
-                    setCollapsed((current) => {
-                      const next = new Set(current);
-                      if (next.has(identity(index)))
-                        next.delete(identity(index));
-                      else next.add(identity(index));
-                      return next;
-                    })
-                  }
-                  remove={() => remove(index)}
-                  copy={() => {
-                    try {
-                      change(copyDraftAction(content, index), "append");
-                    } catch (error) {
-                      setCopyError(
-                        `动作复制未完成：${(error as Error).message}`,
-                      );
-                    }
-                  }}
-                  issueCount={
-                    issues.filter(
-                      (issue) =>
-                        issue.path === `actions[${index}]` ||
-                        issue.path.startsWith(`actions[${index}].`) ||
-                        issue.path.startsWith(`/actions/${index}/`),
-                    ).length
-                  }
-                />
-              ) : (
-                <div className="notice error" key={identity(index)}>
-                  动作 {index + 1} 不是对象，请在整份 JSON 中修正。
-                  <button onClick={() => remove(index)}>删除此动作</button>
-                </div>
-              ),
-            )}
-          </div>
-        ) : (
-          <div hidden={json}>
-            <ErrorBox error={problem} />
-            <p>原始输入已保留。请切换到整份计划 JSON 继续编辑。</p>
+        </div>
+        <ErrorBox error={copyError} />
+        <ErrorBox error={identityProblem} />
+        <Issues
+          issues={issues}
+          presentations={presentations}
+          onLocate={locate}
+        />
+        <div className="save-line">
+          <span data-testid="save-status" role="status">
+            {session.deletionState === "deleting"
+              ? "正在删除草稿…"
+              : session.deletionState === "unknown"
+                ? "删除结果尚未确认"
+                : session.error
+                  ? `保存失败或未确认：${session.error}`
+                  : session.saving
+                    ? "保存中…"
+                    : session.saved
+                      ? "已保存"
+                      : "等待保存…"}
+          </span>
+          {session.error && session.editable && (
+            <button
+              disabled={busy}
+              onClick={() => void session.flush().catch(() => {})}
+            >
+              重试保存
+            </button>
+          )}
+        </div>
+        {session.deletionState === "unknown" && (
+          <div className="notice warning">
+            <p>删除结果尚未确认，当前输入已保留。</p>
+            <button disabled={busy} onClick={props.checkDeletion}>
+              重新核实删除结果
+            </button>
           </div>
         )}
-      </SelectFieldset>
-      <Issues issues={issues} />
-      <div className="editor-footer">
-        <p>导出生成固定请求。下载后，请手工交给负责传输的部门。</p>
-        <button
-          className="primary"
-          data-testid="export-button"
-          disabled={busy || !session.editable}
-          onClick={props.onExport}
+        {session.exportState === "unknown" && (
+          <div className="notice warning">
+            <p>
+              导出结果尚未确认，输入已保留。请先核实原草稿，暂不能编辑、保存或追加。
+            </p>
+            <button disabled={busy} onClick={props.checkExport}>
+              重新核实导出结果
+            </button>
+          </div>
+        )}
+        {session.conflict && (
+          <details>
+            <summary>查看后端冲突记录</summary>
+            <pre>{stringifyJson(session.conflict, 2)}</pre>
+          </details>
+        )}
+        {session.appendLocked && (
+          <p className="notice">
+            此草稿正在核实一次后续追加；请从上方返回核实，当前内容暂为只读。
+          </p>
+        )}
+        <SelectFieldset
+          disabled={busy || !session.editable || !!identityProblem}
         >
-          {busy ? "正在处理…" : "校验并导出 JSON"}
-        </button>
-      </div>
-    </section>
+          <section className="notice" aria-label="自动获取预览文件">
+            <strong data-testid="preview-intent">
+              自动预览
+              {intent === "enabled"
+                ? "已开启"
+                : intent === "disabled"
+                  ? "已关闭"
+                  : "尚未设置"}
+            </strong>
+            <div className="button-row">
+              <button
+                disabled={intent === "enabled"}
+                onClick={() => choosePreviewIntent("enabled")}
+              >
+                开启自动预览
+              </button>
+              <button
+                disabled={intent === "disabled"}
+                onClick={() => choosePreviewIntent("disabled")}
+              >
+                关闭自动预览
+              </button>
+            </div>
+            <p data-testid="preview-status">
+              {intent === "unset"
+                ? "保留全部显式动作；选择开启或关闭后按该意图维护。"
+                : intent === "disabled"
+                  ? "手动取回仍独立保留。"
+                  : previewIssues.length
+                    ? "部分自动预览关联待核实。"
+                    : content.automaticPreviews?.actions.some((a) => a.sourceId)
+                      ? "符合条件的拍摄由客户端维护自动取回。"
+                      : "当前没有适用动作；新增符合条件的拍摄后自动维护。"}
+            </p>
+            {previewIssues.map((message, i) => (
+              <p key={i} className="warning">
+                {message}
+              </p>
+            ))}
+          </section>
+          <PendingInputs content={content} change={change} />
+          {json ? (
+            <>
+              <label className="field">
+                <span>
+                  计划 JSON 文本 <span className="required">必填</span>
+                </span>
+                <ValidationControl path={[]} json>
+                  <textarea
+                    className="code-input"
+                    data-testid="draft-json-input"
+                    spellCheck={false}
+                    readOnly={Object.keys(content.pending ?? {}).length > 0}
+                    value={content.text}
+                    onChange={(e) => {
+                      if (
+                        (content.automaticPreviews ||
+                          Object.keys(content.actionVariants ?? {}).length) &&
+                        !window.confirm(
+                          "替换整份计划 JSON 将清除自动预览意图、动作关联和其他动作类型暂存内容。确认后自动预览为尚未设置，并保存输入原文。是否继续？",
+                        )
+                      )
+                        return;
+                      change(
+                        editPlanText(content, e.target.value, true),
+                        "reset",
+                      );
+                    }}
+                  />
+                </ValidationControl>
+              </label>
+              {Object.keys(content.pending ?? {}).length > 0 && (
+                <p className="notice">
+                  请先在“未完成输入”中修正或放弃各路径的输入。整份 JSON
+                  暂为只读，保留原值与输入。
+                </p>
+              )}
+            </>
+          ) : null}
+          {plan && !identityProblem ? (
+            <div hidden={json}>
+              <label className="field">
+                <span>
+                  计划名称 <span className="required">必填</span>
+                </span>
+                <ValidationControl path={["name"]}>
+                  <input
+                    aria-label="计划名称"
+                    value={typeof plan.name === "string" ? plan.name : ""}
+                    onChange={(e) =>
+                      change(setValue(content, ["name"], e.target.value))
+                    }
+                  />
+                </ValidationControl>
+              </label>
+              <div className="section-head">
+                <h3>
+                  动作 <span className="muted">{plan.actions.length}</span>
+                </h3>
+                <div className="button-row">
+                  {!!plan.actions.length && (
+                    <>
+                      <button onClick={() => setCollapsed(new Set())}>
+                        全部展开
+                      </button>
+                      <button
+                        onClick={() =>
+                          setCollapsed(
+                            new Set(plan.actions.map((_, i) => identity(i))),
+                          )
+                        }
+                      >
+                        全部收起
+                      </button>
+                    </>
+                  )}
+                  <button onClick={add}>添加动作</button>
+                </div>
+              </div>
+              {!plan.actions.length && (
+                <p className="empty">
+                  添加录像、取回、清理、取消或状态报告动作。
+                </p>
+              )}
+              {plan.actions.map((action, index) =>
+                isObject(action) &&
+                action.type === "obtain_action_outputs" &&
+                isObject(action.params) &&
+                action.params.purpose === "auto_preview" ? (
+                  <details
+                    className="advanced"
+                    key={identity(index)}
+                    data-testid="derived-preview"
+                  >
+                    <summary>
+                      自动取回 · {String(action.name ?? "未命名")} · 技术详情
+                    </summary>
+                    <p>自动预览动作由开关管理，完整内容随计划导出。</p>
+                    <pre>{stringifyJson(action, 2)}</pre>
+                  </details>
+                ) : isObject(action) ? (
+                  <ActionEditor
+                    key={identity(index)}
+                    {...props}
+                    content={content}
+                    index={index}
+                    action={action}
+                    change={change}
+                    collapsed={collapsed.has(identity(index))}
+                    toggle={() =>
+                      setCollapsed((current) => {
+                        const next = new Set(current);
+                        if (next.has(identity(index)))
+                          next.delete(identity(index));
+                        else next.add(identity(index));
+                        return next;
+                      })
+                    }
+                    remove={() => remove(index)}
+                    copy={() => {
+                      try {
+                        change(copyDraftAction(content, index), "append");
+                      } catch (error) {
+                        setCopyError(
+                          `动作复制未完成：${(error as Error).message}`,
+                        );
+                      }
+                    }}
+                    issueCount={
+                      issues.filter(
+                        (issue) =>
+                          issue.path === `actions[${index}]` ||
+                          issue.path.startsWith(`actions[${index}].`) ||
+                          issue.path.startsWith(`/actions/${index}/`),
+                      ).length
+                    }
+                  />
+                ) : (
+                  <div className="notice error" key={identity(index)}>
+                    动作 {index + 1} 不是对象，请在整份 JSON 中修正。
+                    <button onClick={() => remove(index)}>删除此动作</button>
+                  </div>
+                ),
+              )}
+            </div>
+          ) : (
+            <div hidden={json}>
+              <ErrorBox error={problem} />
+              <p>原始输入已保留。请切换到整份计划 JSON 继续编辑。</p>
+            </div>
+          )}
+        </SelectFieldset>
+        <div className="editor-footer">
+          <p>导出生成固定请求。下载后，请手工交给负责传输的部门。</p>
+          <button
+            className="primary"
+            data-testid="export-button"
+            disabled={busy || !session.editable}
+            onClick={props.onExport}
+          >
+            {busy ? "正在处理…" : "校验并导出 JSON"}
+          </button>
+        </div>
+      </section>
+    </ValidationProvider>
   );
 }
 function PendingInputs({
@@ -549,19 +653,21 @@ function PendingInput({
     <div className="field">
       <label>
         {path}
-        <textarea
-          aria-label={`未完成输入 ${path}`}
-          value={value.text}
-          onChange={(e) =>
-            change({
-              ...content,
-              pending: {
-                ...content.pending,
-                [path]: { ...value, text: e.target.value },
-              },
-            })
-          }
-        />
+        <ValidationControl path={path} pending>
+          <textarea
+            aria-label={`未完成输入 ${path}`}
+            value={value.text}
+            onChange={(e) =>
+              change({
+                ...content,
+                pending: {
+                  ...content.pending,
+                  [path]: { ...value, text: e.target.value },
+                },
+              })
+            }
+          />
+        </ValidationControl>
       </label>
       <small>原文随草稿保存，点击应用修正后写入对应字段。</small>
       <div className="button-row">
@@ -694,82 +800,88 @@ function ActionEditor(
             <span>
               动作名称 <span className="required">必填</span>
             </span>
-            <input
-              aria-label="动作名称"
-              value={typeof action.name === "string" ? action.name : ""}
-              onChange={(e) => put("name", e.target.value)}
-            />
+            <ValidationControl path={[...base, "name"]}>
+              <input
+                aria-label="动作名称"
+                value={typeof action.name === "string" ? action.name : ""}
+                onChange={(e) => put("name", e.target.value)}
+              />
+            </ValidationControl>
           </label>
           <label className="field">
             <span>
               动作类型 <span className="required">必填</span>
             </span>
-            <Select
-              aria-label="动作类型"
-              value={typeof action.type === "string" ? action.type : ""}
-              disabled={!canSwitchActionType(content, index)}
-              onValueChange={(selectedValue) => {
-                try {
-                  change(
-                    switchActionType(
-                      content,
-                      index,
-                      selectedValue || undefined,
-                    ),
-                  );
-                  setTypeError("");
-                  setJson(false);
-                  setError("");
-                  setNotice("");
-                } catch (error) {
-                  setTypeError(
-                    `动作类型切换未完成：${error instanceof Error ? error.message : String(error)}`,
-                  );
-                }
-              }}
-            >
-              <SelectItem value="">请选择动作类型</SelectItem>
-              {action.type !== undefined &&
-                action.type !== "" &&
-                !options.actions.includes(action.type) && (
-                  <SelectItem disabled value={String(action.type)}>
-                    {String(action.type)}（当前不可用）
+            <ValidationControl path={[...base, "type"]}>
+              <Select
+                aria-label="动作类型"
+                value={typeof action.type === "string" ? action.type : ""}
+                disabled={!canSwitchActionType(content, index)}
+                onValueChange={(selectedValue) => {
+                  try {
+                    change(
+                      switchActionType(
+                        content,
+                        index,
+                        selectedValue || undefined,
+                      ),
+                    );
+                    setTypeError("");
+                    setJson(false);
+                    setError("");
+                    setNotice("");
+                  } catch (error) {
+                    setTypeError(
+                      `动作类型切换未完成：${error instanceof Error ? error.message : String(error)}`,
+                    );
+                  }
+                }}
+              >
+                <SelectItem value="">请选择动作类型</SelectItem>
+                {action.type !== undefined &&
+                  action.type !== "" &&
+                  !options.actions.includes(action.type) && (
+                    <SelectItem disabled value={String(action.type)}>
+                      {String(action.type)}（当前不可用）
+                    </SelectItem>
+                  )}
+                {options.actions.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {actionLabel(type)} · {type}
                   </SelectItem>
-                )}
-              {options.actions.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {actionLabel(type)} · {type}
-                </SelectItem>
-              ))}
-            </Select>
+                ))}
+              </Select>
+            </ValidationControl>
           </label>
           {showDevice && (
             <label className="field">
               <span>
                 目标设备 <span className="required">必填</span>
               </span>
-              <Select
-                aria-label="目标设备"
-                value={action.device_id ?? ""}
-                onValueChange={(selectedValue) =>
-                  put("device_id", selectedValue, selectedValue === "")
-                }
-              >
-                <SelectItem value="">请选择设备</SelectItem>
-                {action.device_id &&
-                  !options.devices.some(
-                    (d) => d.device_id === action.device_id,
-                  ) && (
-                    <SelectItem disabled value={action.device_id}>
-                      {action.device_id}（当前不可用）
+              <ValidationControl path={[...base, "device_id"]}>
+                <Select
+                  aria-label="目标设备"
+                  value={action.device_id ?? ""}
+                  onValueChange={(selectedValue) =>
+                    put("device_id", selectedValue, selectedValue === "")
+                  }
+                >
+                  <SelectItem value="">请选择设备</SelectItem>
+                  {action.device_id &&
+                    !options.devices.some(
+                      (d) => d.device_id === action.device_id,
+                    ) && (
+                      <SelectItem disabled value={action.device_id}>
+                        {action.device_id}（当前不可用）
+                      </SelectItem>
+                    )}
+                  {options.devices.map((d) => (
+                    <SelectItem key={d.device_id} value={d.device_id}>
+                      {d.device_id} · {d.driver_id}
                     </SelectItem>
-                  )}
-                {options.devices.map((d) => (
-                  <SelectItem key={d.device_id} value={d.device_id}>
-                    {d.device_id} · {d.driver_id}
-                  </SelectItem>
-                ))}
-              </Select>
+                  ))}
+                </Select>
+              </ValidationControl>
             </label>
           )}
           <label className="field">
@@ -788,17 +900,19 @@ function ActionEditor(
                 <small>可选，省略时尽快处理</small>
               )}
             </span>
-            <input
-              aria-label="执行时间"
-              type="datetime-local"
-              step="1"
-              value={utcToLocal(action.scheduled_at)}
-              onClick={(e) => e.currentTarget.showPicker?.()}
-              onChange={(e) => {
-                const value = localToUtc(e.target.value);
-                put("scheduled_at", value, value === undefined);
-              }}
-            />
+            <ValidationControl path={[...base, "scheduled_at"]}>
+              <input
+                aria-label="执行时间"
+                type="datetime-local"
+                step="1"
+                value={utcToLocal(action.scheduled_at)}
+                onClick={(e) => e.currentTarget.showPicker?.()}
+                onChange={(e) => {
+                  const value = localToUtc(e.target.value);
+                  put("scheduled_at", value, value === undefined);
+                }}
+              />
+            </ValidationControl>
             {Object.hasOwn(action, "scheduled_at") &&
               !utcToLocal(action.scheduled_at) && (
                 <small>
@@ -839,40 +953,42 @@ function ActionEditor(
                 <span>
                   参数类型 <span className="required">必填</span>
                 </span>
-                <Select
-                  aria-label="参数类型"
-                  value={
-                    isObject(action.params) &&
-                    typeof action.params.type === "string"
-                      ? action.params.type
-                      : ""
-                  }
-                  disabled={!!pending}
-                  onValueChange={(selectedValue) =>
-                    change(
-                      setValue(
-                        content,
-                        [...base, "params", "type"],
-                        selectedValue,
-                        selectedValue === "",
-                      ),
-                    )
-                  }
-                >
-                  <SelectItem value="">请选择参数类型</SelectItem>
-                  {isObject(action.params) &&
-                    typeof action.params.type === "string" &&
-                    !parameter && (
-                      <SelectItem disabled value={action.params.type}>
-                        {action.params.type}（当前不可用）
+                <ValidationControl path={[...base, "params", "type"]}>
+                  <Select
+                    aria-label="参数类型"
+                    value={
+                      isObject(action.params) &&
+                      typeof action.params.type === "string"
+                        ? action.params.type
+                        : ""
+                    }
+                    disabled={!!pending}
+                    onValueChange={(selectedValue) =>
+                      change(
+                        setValue(
+                          content,
+                          [...base, "params", "type"],
+                          selectedValue,
+                          selectedValue === "",
+                        ),
+                      )
+                    }
+                  >
+                    <SelectItem value="">请选择参数类型</SelectItem>
+                    {isObject(action.params) &&
+                      typeof action.params.type === "string" &&
+                      !parameter && (
+                        <SelectItem disabled value={action.params.type}>
+                          {action.params.type}（当前不可用）
+                        </SelectItem>
+                      )}
+                    {types.map((p) => (
+                      <SelectItem key={p.type} value={p.type}>
+                        {p.name}
                       </SelectItem>
-                    )}
-                  {types.map((p) => (
-                    <SelectItem key={p.type} value={p.type}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </Select>
+                    ))}
+                  </Select>
+                </ValidationControl>
               </label>
             </div>
             <Field

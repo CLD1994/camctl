@@ -30,6 +30,7 @@ import {
   type Path,
 } from "./editing";
 import { JsonField, Field } from "./Fields";
+import { ValidationControl } from "./Validation";
 import notificationSchema from "../../../../protocol/schemas/host-notification.schema.json";
 
 export function BuiltinFields({
@@ -177,30 +178,36 @@ export function BuiltinFields({
                       : "取消目标"}{" "}
                   <span className="required">必填</span>
                 </span>
-                <Select
-                  aria-label={
-                    type === "delete_action_outputs"
-                      ? "清理范围"
-                      : type === "obtain_action_outputs"
-                        ? "取回来源"
-                        : "取消目标"
-                  }
-                  value={mode?.id ?? ""}
-                  onValueChange={(selectedValue) => {
-                    const selected = modes.find((m) => m.id === selectedValue);
-                    if (!selected) return;
-                    change(changeBuiltinMode(content, path, type, selected.id));
-                  }}
-                >
-                  <SelectItem value="" disabled>
-                    请选择
-                  </SelectItem>
-                  {modes.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.label}
+                <ValidationControl path={[...path, referenceKey]}>
+                  <Select
+                    aria-label={
+                      type === "delete_action_outputs"
+                        ? "清理范围"
+                        : type === "obtain_action_outputs"
+                          ? "取回来源"
+                          : "取消目标"
+                    }
+                    value={mode?.id ?? ""}
+                    onValueChange={(selectedValue) => {
+                      const selected = modes.find(
+                        (m) => m.id === selectedValue,
+                      );
+                      if (!selected) return;
+                      change(
+                        changeBuiltinMode(content, path, type, selected.id),
+                      );
+                    }}
+                  >
+                    <SelectItem value="" disabled>
+                      请选择
                     </SelectItem>
-                  ))}
-                </Select>
+                    {modes.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </Select>
+                </ValidationControl>
               </label>
               {reference !== undefined && !mode && (
                 <div className="notice warning">
@@ -216,6 +223,7 @@ export function BuiltinFields({
                   {Object.entries(mode.fields).map(([key, label]) => (
                     <ReferenceField
                       key={key}
+                      path={[...path, referenceKey, key]}
                       label={label}
                       value={reference[key]}
                       parent={reference}
@@ -280,36 +288,38 @@ export function BuiltinFields({
                   </p>
                   <label className="field">
                     <span>取回筛选</span>
-                    <Select
-                      aria-label="取回筛选"
-                      value={
-                        params?.filter === undefined
-                          ? "implicit"
-                          : params.filter === "default" ||
-                              params.filter === "preview"
-                            ? params.filter
-                            : "invalid"
-                      }
-                      onValueChange={(v) => {
-                        if (
-                          v === "implicit" ||
-                          v === "default" ||
-                          v === "preview"
-                        )
-                          change(changeObtainSelection(content, path, v));
-                      }}
-                    >
-                      <SelectItem value="implicit">不填写筛选</SelectItem>
-                      <SelectItem value="default">默认产物</SelectItem>
-                      <SelectItem value="preview">预览产物</SelectItem>
-                      {params?.filter !== undefined &&
-                        params.filter !== "default" &&
-                        params.filter !== "preview" && (
-                          <SelectItem value="invalid" disabled>
-                            原筛选待修正
-                          </SelectItem>
-                        )}
-                    </Select>
+                    <ValidationControl path={[...path, "filter"]}>
+                      <Select
+                        aria-label="取回筛选"
+                        value={
+                          params?.filter === undefined
+                            ? "implicit"
+                            : params.filter === "default" ||
+                                params.filter === "preview"
+                              ? params.filter
+                              : "invalid"
+                        }
+                        onValueChange={(v) => {
+                          if (
+                            v === "implicit" ||
+                            v === "default" ||
+                            v === "preview"
+                          )
+                            change(changeObtainSelection(content, path, v));
+                        }}
+                      >
+                        <SelectItem value="implicit">不填写筛选</SelectItem>
+                        <SelectItem value="default">默认产物</SelectItem>
+                        <SelectItem value="preview">预览产物</SelectItem>
+                        {params?.filter !== undefined &&
+                          params.filter !== "default" &&
+                          params.filter !== "preview" && (
+                            <SelectItem value="invalid" disabled>
+                              原筛选待修正
+                            </SelectItem>
+                          )}
+                      </Select>
+                    </ValidationControl>
                     {params &&
                       Object.hasOwn(params, "filter") &&
                       params.filter !== "default" &&
@@ -398,26 +408,28 @@ export function BuiltinFields({
                 <span>
                   报告范围 <span className="required">必填</span>
                 </span>
-                <Select
-                  aria-label="报告范围"
-                  value={reportMode}
-                  onValueChange={(selectedValue) =>
-                    change(setValue(content, path, { scope: selectedValue }))
-                  }
-                >
-                  {reportMode === "invalid" && (
-                    <SelectItem value="invalid" disabled>
-                      原参数待修正
+                <ValidationControl path={[...path, "scope"]}>
+                  <Select
+                    aria-label="报告范围"
+                    value={reportMode}
+                    onValueChange={(selectedValue) =>
+                      change(setValue(content, path, { scope: selectedValue }))
+                    }
+                  >
+                    {reportMode === "invalid" && (
+                      <SelectItem value="invalid" disabled>
+                        原参数待修正
+                      </SelectItem>
+                    )}
+                    <SelectItem value="" disabled>
+                      请选择同步范围
                     </SelectItem>
-                  )}
-                  <SelectItem value="" disabled>
-                    请选择同步范围
-                  </SelectItem>
-                  <SelectItem value="full">完整同步</SelectItem>
-                  <SelectItem value="since" disabled={!basis.length}>
-                    从已保存报告之后补齐
-                  </SelectItem>
-                </Select>
+                    <SelectItem value="full">完整同步</SelectItem>
+                    <SelectItem value="since" disabled={!basis.length}>
+                      从已保存报告之后补齐
+                    </SelectItem>
+                  </Select>
+                </ValidationControl>
               </label>
               {reportMode === "" && (
                 <p className="notice warning">
@@ -429,45 +441,47 @@ export function BuiltinFields({
                   <span>
                     同步起点报告 <span className="required">必填</span>
                   </span>
-                  <Select
-                    aria-label="同步起点报告"
-                    value={
-                      params?.after_report_id === undefined
-                        ? ""
-                        : basis.some(
-                              (r) => r.report_id === params.after_report_id,
-                            )
-                          ? String(params.after_report_id)
-                          : "invalid"
-                    }
-                    onValueChange={(selectedValue) =>
-                      put(
-                        "after_report_id",
-                        selectedValue,
-                        selectedValue === "",
-                      )
-                    }
-                  >
-                    <SelectItem value="">请选择</SelectItem>
-                    {params?.after_report_id !== undefined &&
-                      !basis.some(
-                        (r) => r.report_id === params.after_report_id,
-                      ) && (
-                        <SelectItem value="invalid" disabled>
-                          {displayJsonValue(
-                            params,
-                            "after_report_id",
-                            params.after_report_id,
-                          )}
-                          （无可靠依据）
+                  <ValidationControl path={[...path, "after_report_id"]}>
+                    <Select
+                      aria-label="同步起点报告"
+                      value={
+                        params?.after_report_id === undefined
+                          ? ""
+                          : basis.some(
+                                (r) => r.report_id === params.after_report_id,
+                              )
+                            ? String(params.after_report_id)
+                            : "invalid"
+                      }
+                      onValueChange={(selectedValue) =>
+                        put(
+                          "after_report_id",
+                          selectedValue,
+                          selectedValue === "",
+                        )
+                      }
+                    >
+                      <SelectItem value="">请选择</SelectItem>
+                      {params?.after_report_id !== undefined &&
+                        !basis.some(
+                          (r) => r.report_id === params.after_report_id,
+                        ) && (
+                          <SelectItem value="invalid" disabled>
+                            {displayJsonValue(
+                              params,
+                              "after_report_id",
+                              params.after_report_id,
+                            )}
+                            （无可靠依据）
+                          </SelectItem>
+                        )}
+                      {basis.map((r) => (
+                        <SelectItem key={r.report_id} value={r.report_id}>
+                          报告 {r.report_id} · 已完整保存至 {r.to_wm}
                         </SelectItem>
-                      )}
-                    {basis.map((r) => (
-                      <SelectItem key={r.report_id} value={r.report_id}>
-                        报告 {r.report_id} · 已完整保存至 {r.to_wm}
-                      </SelectItem>
-                    ))}
-                  </Select>
+                      ))}
+                    </Select>
+                  </ValidationControl>
                 </label>
               )}
               {!basis.length && (
@@ -497,6 +511,7 @@ export function BuiltinFields({
 }
 
 function ReferenceField({
+  path,
   label,
   value,
   candidates,
@@ -504,6 +519,7 @@ function ReferenceField({
   parent,
   fieldKey,
 }: {
+  path: Path;
   label: string;
   value: unknown;
   candidates: string[];
@@ -517,12 +533,14 @@ function ReferenceField({
       <span>
         {label} <span className="required">必填</span>
       </span>
-      <input
-        aria-label={label}
-        list={candidates.length ? id : undefined}
-        value={typeof value === "string" ? value : ""}
-        onChange={(e) => change(e.target.value)}
-      />
+      <ValidationControl path={path}>
+        <input
+          aria-label={label}
+          list={candidates.length ? id : undefined}
+          value={typeof value === "string" ? value : ""}
+          onChange={(e) => change(e.target.value)}
+        />
+      </ValidationControl>
       {candidates.length > 0 && (
         <datalist id={id}>
           {candidates.map((v) => (
@@ -575,6 +593,7 @@ function OutputIds({
       {ids.map((id, index) => (
         <div className="form-grid" key={index}>
           <ReferenceField
+            path={[...path, index]}
             label={`产物 ID ${index + 1}`}
             value={id}
             parent={ids}

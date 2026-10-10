@@ -280,7 +280,11 @@ it.each([
       page.getByRole("button", { name: "重新核实追加结果", exact: true }),
     ).toBeVisible();
     await browserExpect(
-      card(page, "B").getByRole("button", { name: "展开动作", exact: true }),
+      card(page, "B").getByRole("button", {
+        name: "展开动作",
+        exact: true,
+        includeHidden: true,
+      }),
     ).toHaveAttribute("aria-expanded", "false");
     offline = false;
     await page
@@ -293,7 +297,11 @@ it.each([
     ).toBeVisible();
     expect(application.draft(draft.id).content).toEqual(input);
     await browserExpect(
-      card(page, "B").getByRole("button", { name: "展开动作", exact: true }),
+      card(page, "B").getByRole("button", {
+        name: "展开动作",
+        exact: true,
+        includeHidden: true,
+      }),
     ).toHaveAttribute("aria-expanded", "false");
     if (scenario === "capability-conflict")
       await page.waitForResponse(

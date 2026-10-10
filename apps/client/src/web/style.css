@@ -1,4 +1,5 @@
 :root {
+  --text-secondary: #52665a;
   font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
   color: #233c36;
   background: #f3f5f2;
@@ -45,7 +46,8 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
-summary:focus-visible {
+summary:focus-visible,
+.file-button:focus-within {
   outline: 3px solid #adc7a5;
   outline-offset: 2px;
 }
@@ -88,7 +90,7 @@ p {
 }
 small {
   font-size: 12px;
-  color: #6b7c73;
+  color: var(--text-secondary);
 }
 code,
 .identifier,
@@ -136,7 +138,7 @@ fieldset {
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 3px;
-  color: #78877b;
+  color: var(--text-secondary);
   margin-top: 1px;
 }
 .sidebar nav {
@@ -160,7 +162,7 @@ fieldset {
 }
 .sidebar-foot {
   margin-top: auto;
-  color: #6c7d70;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .sidebar-foot > span:last-child {
@@ -191,20 +193,20 @@ fieldset {
   margin-bottom: 28px;
 }
 .page-header p:not(.eyebrow) {
-  color: #6a7b72;
+  color: var(--text-secondary);
   margin: 0;
 }
 .eyebrow {
   font-size: 12px;
   letter-spacing: 2px;
   font-weight: 700;
-  color: #78917a;
+  color: var(--text-secondary);
   margin-bottom: 12px;
 }
 .connection {
   font-size: 12px;
   white-space: nowrap;
-  color: #738578;
+  color: var(--text-secondary);
   margin-top: 9px;
 }
 .panel {
@@ -246,7 +248,7 @@ fieldset {
   border: 0;
   border-radius: 0;
   padding: 10px 2px;
-  color: #7b897e;
+  color: var(--text-secondary);
 }
 [role="tab"][aria-selected="true"] {
   color: #205a47;
@@ -294,7 +296,7 @@ fieldset {
   overflow-wrap: anywhere;
 }
 .list-item span {
-  color: #7c897e;
+  color: var(--text-secondary);
   font-size: 12px;
   margin-top: 7px;
 }
@@ -308,7 +310,7 @@ fieldset {
 }
 .empty {
   padding: 24px 6px;
-  color: #7e8e82;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 .welcome {
@@ -322,7 +324,7 @@ fieldset {
 }
 .welcome p {
   max-width: 420px;
-  color: #79887d;
+  color: var(--text-secondary);
 }
 .welcome-mark {
   font-size: 38px;
@@ -332,7 +334,7 @@ fieldset {
 }
 .save-line {
   font-size: 12px;
-  color: #658170;
+  color: var(--text-secondary);
   padding: 7px 0 18px;
   display: flex;
   justify-content: space-between;
@@ -465,7 +467,7 @@ fieldset {
 }
 .guide-note {
   font-size: 12px;
-  color: #637568;
+  color: var(--text-secondary);
   margin: 12px 0 0;
 }
 .guide-device {
@@ -515,7 +517,7 @@ fieldset {
 .guide-description {
   font-size: 14px;
   line-height: 1.8;
-  color: #52665a;
+  color: var(--text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -539,7 +541,7 @@ fieldset {
 }
 .guide-fields dd {
   margin: 4px 0 0;
-  color: #697b6e;
+  color: var(--text-secondary);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -574,7 +576,7 @@ fieldset {
 .guide-technical {
   margin-top: 20px;
   font-size: 12px;
-  color: #687b6c;
+  color: var(--text-secondary);
 }
 .guide-technical pre {
   max-height: 360px;
@@ -663,7 +665,7 @@ fieldset {
   outline-offset: 2px;
 }
 .select-trigger[data-empty] {
-  color: #697c72;
+  color: var(--text-secondary);
 }
 .select-trigger:disabled {
   cursor: not-allowed;
@@ -778,7 +780,8 @@ fieldset {
   border: 0;
   background: transparent;
 }
-.danger-text {
+.danger-text,
+.field-error {
   color: #ae5148;
 }
 .inline {
@@ -807,7 +810,7 @@ fieldset {
 }
 .parameter-intro p {
   font-size: 12px;
-  color: #688060;
+  color: var(--text-secondary);
   margin: 7px 0 0;
 }
 .preset-box {
@@ -849,7 +852,7 @@ fieldset {
 }
 .validation small {
   display: block;
-  color: #9a8466;
+  color: inherit;
   overflow-wrap: anywhere;
 }
 .editor-footer {
@@ -863,14 +866,14 @@ fieldset {
 .editor-footer p {
   font-size: 12px;
   max-width: 260px;
-  color: #7d8a7c;
+  color: var(--text-secondary);
   margin: 0;
 }
 .editor-footer button {
   white-space: nowrap;
 }
 .muted {
-  color: #7b8c7e;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .notice {
@@ -908,7 +911,7 @@ fieldset {
   white-space: nowrap;
   font-size: 12px;
   background: #eaf0e7;
-  color: #65795d;
+  color: var(--text-secondary);
   border-radius: 5px;
   padding: 4px 8px;
 }
@@ -922,7 +925,7 @@ fieldset {
 }
 .identifier {
   font-size: 12px;
-  color: #869081;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 .evidence-grid {
@@ -945,7 +948,7 @@ fieldset {
 }
 .evidence-grid span {
   font-size: 12px;
-  color: #7b8b73;
+  color: var(--text-secondary);
 }
 .facts {
   margin: 10px 0;
@@ -959,7 +962,7 @@ fieldset {
   border-bottom: 1px solid #edf1e8;
 }
 .facts dt {
-  color: #829078;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 .facts dd {
@@ -1003,7 +1006,7 @@ details {
 }
 summary {
   cursor: pointer;
-  color: #718468;
+  color: var(--text-secondary);
 }
 details[open] > summary {
   margin-bottom: 12px;
@@ -1028,7 +1031,7 @@ details[open] > summary {
 }
 .drop-zone p {
   font-size: 13px;
-  color: #74876c;
+  color: var(--text-secondary);
 }
 .drop-zone small {
   display: block;
@@ -1077,7 +1080,7 @@ progress {
 .workspace-footer {
   margin-top: 26px;
   font-size: 12px;
-  color: #90a087;
+  color: var(--text-secondary);
 }
 .modal-backdrop {
   position: fixed;
@@ -1254,6 +1257,13 @@ progress {
   .section-head {
     gap: 10px;
   }
+  .editor > .section-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .editor > .section-head > .button-row {
+    margin: 0;
+  }
   .editor-footer {
     flex-direction: column;
     align-items: stretch;
@@ -1304,7 +1314,7 @@ progress {
 }
 .product-state {
   font-size: 0.85rem;
-  color: #526670;
+  color: var(--text-secondary);
 }
 .product-card video {
   width: 100%;
@@ -1374,7 +1384,7 @@ progress {
   overflow-wrap: anywhere;
 }
 .automatic-source {
-  color: #59725f;
+  color: var(--text-secondary);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
