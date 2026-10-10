@@ -3,6 +3,7 @@ import asyncio
 from dataclasses import replace
 from decimal import Decimal
 import hashlib
+import json
 import os
 import shlex
 import sys
@@ -64,6 +65,10 @@ def _filesystem(transport=None):
 
 def _identity(path):
     return FileIdentity(BINDING, str(path))
+
+
+def _source(path, size):
+    return SourceFile(json.dumps([BINDING.device_id, BINDING.driver_id, str(path)]), {"path": str(path)}, size)
 
 
 async def test_managed_transport_preserves_both_channels_and_process_group():
@@ -151,11 +156,13 @@ async def test_concrete_driver_file_ports_preserve_original_identity_and_content
         terminate_grace_s=Decimal("1"), monotonic_ns=time.monotonic_ns)
     directory = await driver.read_directory(DirectoryRequest(BINDING, (str(tmp_path),), None, 128, Decimal("5")), stop=Stop())
     assert directory.error is None and {entry.path for entry in directory.page.items} == {str(path), str(other)}
-    locator = _identity(path).as_json()
-    digest = await driver.digest(ControlRequest("digest", BINDING, {"file_id": "9", "size_bytes": len(content), "locator": locator}))
+    source = _source(path, len(content))
+    locator = source.locator
+    digest = await driver.digest(ControlRequest("digest", BINDING, {"file_id": "9", "identity_key": source.file_id,
+        "size_bytes": len(content), "locator": locator}))
     assert digest.error is None and digest.observations[0].data == {
         "file_id": "9", "sha256": hashlib.sha256(content).hexdigest()}
-    session = await driver.open_read(SourceFile("9", locator, len(content)), 65535,
+    session = await driver.open_read(source, 65535,
         AttemptTicket(1, "read", "9", "copy/9", 1), idle_timeout_s=Decimal("5"))
     chunks = bytearray()
     while True:
@@ -167,7 +174,7 @@ async def test_concrete_driver_file_ports_preserve_original_identity_and_content
     end = await session.wait_stopped()
     assert end.stopped and end.error is None and chunks == content[65535:]
     assert path.read_bytes() == content
-    deleted = await driver.delete(ControlRequest("delete_file", BINDING, {"locator": locator},
+    deleted = await driver.delete(ControlRequest("delete_file", BINDING, {"identity_key": source.file_id, "locator": locator},
         AttemptTicket(1, "delete", "12", "delete/12", 2), Decimal("5")))
     assert deleted.error is None and deleted.observations[0].data == {"cleanup_item_id": "12"}
     assert not path.exists() and other.read_bytes() == b"keep"
@@ -202,7 +209,7 @@ async def test_read_session_preserves_unaligned_offset_and_actual_end(tmp_path):
     path = tmp_path / "source ' \n.bin"
     path.write_bytes(content)
     fs = _filesystem()
-    source = SourceFile("9", _identity(path).as_json(), len(content))
+    source = _source(path, len(content))
     ticket = AttemptTicket(1, "read", "9", "copy/9", 1)
     session = await fs.open_read(source, 65535, ticket, idle_timeout_s=Decimal("5"))
     result = bytearray()
@@ -222,7 +229,7 @@ async def test_read_shorter_than_fixed_source_is_a_failure(tmp_path):
     path = tmp_path / "short"
     path.write_bytes(b"short")
     fs = _filesystem()
-    source = SourceFile("9", _identity(path).as_json(), 20)
+    source = _source(path, 20)
     session = await fs.open_read(source, 0, AttemptTicket(1, "read", "9", "copy/9", 1), idle_timeout_s=Decimal("5"))
     first = await asyncio.to_thread(session.read_chunk, 20)
     assert first.data == b"short" and not first.eof
@@ -254,7 +261,7 @@ async def test_stop_request_waits_for_actual_read_call_return(tmp_path):
 
     transport = HeldCall()
     fs = _filesystem(transport)
-    source = SourceFile("9", _identity(tmp_path / "source").as_json(), 100)
+    source = _source(tmp_path / "source", 100)
     session = await fs.open_read(source, 0, AttemptTicket(1, "read", "9", "copy/9", 1), idle_timeout_s=Decimal("5"))
     reading = asyncio.create_task(asyncio.to_thread(session.read_chunk, 10))
     try:

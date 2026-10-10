@@ -143,13 +143,13 @@ class AdbCameraDriver:
         return await self._filesystem(request.binding).read_directory(request, stop=stop)
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
-        identity = FileIdentity.from_json(dict(source.locator))
+        identity = FileIdentity.from_source(source.file_id, source.locator)
         return await self._filesystem(identity.binding).open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)
 
     async def digest(self, request):
         if not self.declaration.digest_supported:
             raise CapabilityNotDeclaredError("相机整片摘要契约尚未提供")
-        identity = FileIdentity.from_json(dict(request.params["locator"]))
+        identity = FileIdentity.from_source(request.params["identity_key"], request.params["locator"])
         if identity.binding != request.binding:
             raise ValueError("源摘要定位改变原文件绑定")
         filesystem = self._filesystem(request.binding)
@@ -168,7 +168,7 @@ class AdbCameraDriver:
 
     async def delete(self, request):
         serial = self._request(request, "delete")
-        identity = FileIdentity.from_json(dict(request.params["locator"]))
+        identity = FileIdentity.from_source(request.params["identity_key"], request.params["locator"])
         if identity.binding != request.binding:
             raise ValueError("删除定位改变原文件绑定")
         filesystem = self._filesystem(request.binding)

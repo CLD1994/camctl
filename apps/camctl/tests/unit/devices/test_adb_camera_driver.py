@@ -14,7 +14,6 @@ from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import ControlRequest
-from camctl.devices.file_identity import FileIdentity
 from camctl.operations.models import AttemptStatus, AttemptTicket, EffectState, ErrorValue, SettlementBasis
 from camctl.operations.process import LocalExit, RawToolOutcome
 
@@ -192,7 +191,8 @@ async def test_digest_uses_its_full_file_deadline_and_original_file_identity():
         transport, terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
     binding = DeviceBinding("cam-1", CameraModel.ACTION6)
     result = await driver.digest(ControlRequest("digest", binding, {
-        "file_id": "9", "size_bytes": 100_000_000, "locator": FileIdentity(binding, "/DCIM/source.mp4").as_json()}))
+        "file_id": "9", "identity_key": '["cam-1","dji-action6","/DCIM/source.mp4"]',
+        "size_bytes": 100_000_000, "locator": {"path": "/DCIM/source.mp4"}}))
     assert sizes == [100_000_000]
     assert transport.calls[0].timeout_s == Decimal("240")
     assert result.error is None and result.observations == (
@@ -211,5 +211,5 @@ async def test_invalid_digest_deadline_does_not_call_device(timeout):
     binding = DeviceBinding("cam-1", CameraModel.ACTION6)
     with pytest.raises(ValueError):
         await driver.digest(ControlRequest("digest", binding, {"file_id": "9", "size_bytes": 5,
-            "locator": FileIdentity(binding, "/DCIM/source.mp4").as_json()}))
+            "identity_key": '["cam-1","dji-action6","/DCIM/source.mp4"]', "locator": {"path": "/DCIM/source.mp4"}}))
     assert not transport.calls

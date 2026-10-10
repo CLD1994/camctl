@@ -180,9 +180,11 @@ class AdbFilesystem:
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
         if (not isinstance(source, SourceFile) or not isinstance(ticket, AttemptTicket)
-                or ticket.operation != "read" or ticket.target_id != source.file_id):
+                or ticket.operation != "read"):
             raise ValueError("读取必须使用原源文件及匹配的已提交尝试")
-        identity = FileIdentity.from_json(dict(source.locator))
+        # READ 票据目标是副本行号；源身份是原设备、驱动与稳定路径。
+        # 二者的关联由保存 copy/source 的装配和仓储核对。
+        identity = FileIdentity.from_source(source.file_id, source.locator)
         path = self._identity(identity)
         if type(offset) is not int or not 0 <= offset <= source.size_bytes:
             raise ValueError("读取偏移不在原固定长度范围内")

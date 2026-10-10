@@ -72,6 +72,8 @@ class RuntimeDeps:
     recovery_max_event_id: int | None = None
     #: 正常运行共用的文件实际拥有者及固定维护范围；submit 不装配。
     work_files: Any = None
+    #: 独立推进的取回流程；实际任务和连接在会话收场前交付。
+    background_flows: tuple[Any, ...] = ()
     #: 原 await 拥有者的实际结果；普通、残留与受限工厂共用同一集合。
     capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
     #: 拍摄完整终态及附属读取收尾申请，三种工厂共用。
@@ -540,6 +542,9 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         )),
         "work_files": deps.work_files.flow,
     }
+    from camctl.bootstrap.background_flow import BackgroundFlow
+    flows["obtain"] = BackgroundFlow(flows["obtain"])
+    deps.background_flows = (flows["obtain"],)
     return flows, supervisor
 
 
@@ -687,7 +692,7 @@ async def execute_command(
         failure_log=failure_log,
         copy_request_factory=copy_request_factory,
         on_session_open=lambda owned: _initialize_recovery(deps, owned),
-        local_work=deps.work_files,
+        local_work=_local_work(deps),
         **overrides,
     )
     outcome: SessionOutcome | None = None
@@ -727,6 +732,13 @@ async def execute_command(
 
                 await close_logging(deps.log_runtime)
     return outcome
+
+
+def _local_work(deps):
+    if deps.work_files is None:
+        return None
+    from camctl.bootstrap.background_flow import CombinedLocalWork
+    return CombinedLocalWork((*deps.background_flows, deps.work_files))
 
 
 def _shutdown_state_outcome(

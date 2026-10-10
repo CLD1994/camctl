@@ -24,3 +24,21 @@ def test_different_devices_never_share_identity():
     first = FileIdentity(DeviceBinding("cam-1", "dji-action6"), "/DCIM/a")
     other = FileIdentity(DeviceBinding("cam-2", "dji-action6"), "/DCIM/a")
     assert first != other
+
+
+def test_source_identity_recovers_original_binding_and_path_only_locator():
+    identity = FileIdentity.from_source('["cam-1","dji-action6","/DCIM/source.mp4"]', {"path": "/DCIM/source.mp4"})
+    assert identity == FileIdentity(DeviceBinding("cam-1", "dji-action6"), "/DCIM/source.mp4")
+
+
+@pytest.mark.parametrize("key,locator", [
+    ('["cam-1","dji-action6","/DCIM/source.mp4"]', {"path": "/DCIM/other.mp4"}),
+    ('["cam-1","dji-action6","/DCIM/source.mp4"]', {"path": "/DCIM/source.mp4", "device_id": "cam-1"}),
+    ('["cam-1","dji-action6"]', {"path": "/DCIM/source.mp4"}),
+    ('["cam-1","dji-action6",5]', {"path": "/DCIM/source.mp4"}),
+    ('["","dji-action6","/DCIM/source.mp4"]', {"path": "/DCIM/source.mp4"}),
+    ('invalid-json', {"path": "/DCIM/source.mp4"}),
+])
+def test_inconsistent_source_identity_is_rejected(key, locator):
+    with pytest.raises(ValueError):
+        FileIdentity.from_source(key, locator)
