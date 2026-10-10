@@ -34,6 +34,14 @@ py -3.11 collect_call.py action6/005-tools adb -s <serial> shell 'for t in dji_m
 
 将 `<serial>` 替换为实际设备标识；OSMO 的资料使用另一个目录。`getprop` 返回空值时，在观察记录中保存界面上显示的型号和固件，不补写推测值。工具存在只证明能找到该程序，其所需选项仍须实际核实。
 
+### 核对 ADB 返回和字节
+
+每款相机分别执行受控退出和字节探针：设备脚本向 stdout、stderr 各输出一个不同标记后以 `7` 退出，核对本地 ADB 的退出码和两个输出文件；另输出包含 NUL、LF、CR 及高位字节的已知序列，用 Python 的 `read_bytes()` 精确比较。`exec-out` 与 `shell -T` 分别采集，不从一种通道的结果推定另一种通道。
+
+采集器保存的是本地 ADB 程序实际输出的字节。ADB 可能合并设备输出、丢失远端退出码或转换行尾，因此本地退出 `0` 和采集器使用二进制文件都不能单独证明设备命令成功或设备字节原样保留。保存每次实际结果及其适用环境，原文件不作行尾替换。Action6 的 Windows 实测范围见[ADB 通道核验记录](../camctl/verification.md#action6-的-windows-adb-通道核验2026-10-10)。
+
+Windows 上取得完整媒体副本使用后文的 `adb pull` 和源端摘要核对。ARM Linux 部署仍须核实本机执行通道的退出、分流和原始字节，普通前台命令的适用条件见[ADB 调用返回契约](../architecture/adb-execution.md#第一版普通前台命令的运行假设)。
+
 ### 保存拍摄前目录
 
 相机通过自己的 Linux 工具列举原存储范围。Action6 分别核对 `/mnt/media_rw/emulated/DCIM` 和 `/mnt/media_rw/sd/DCIM`；OSMO 核对 `/mnt/media_rw/emulated/DCIM`。使用实际存在的存储范围，记录不存在或读取失败的原结果。
@@ -43,7 +51,7 @@ py -3.11 collect_call.py action6/010-before-internal adb -s <serial> shell 'find
 py -3.11 collect_call.py action6/011-before-sd adb -s <serial> shell 'find /mnt/media_rw/sd/DCIM -type f -print0'
 ```
 
-`stdout.bin` 中的 NUL 分隔保留文件名中的空格、换行等字符，不通过逐行文本代替原始路径。正式驱动的目录适配还需要核实 `sort -z`、`awk` 的 NUL 输入、`stat -c %s`、`sha256sum` 和 `dd` 的实际调用结果；缺少工具或选项时保留错误，供适配实现选择设备已有的工具组合。
+远端 `find -print0` 使用 NUL 分隔，可以表达文件名中的空格、换行等字符；本地收到的路径字节是否原样保留，仍须按上节核实实际通道，不通过逐行文本代替原始路径。正式驱动的目录适配还需要核实 `sort -z`、`awk` 的 NUL 输入、`stat -c %s`、`sha256sum` 和 `dd` 的实际调用结果；缺少工具或选项时保留错误，供适配实现选择设备已有的工具组合。
 
 ## 录像资料
 

@@ -128,6 +128,21 @@ Linux x86_64、CPython 3.11.16 上完成默认配置路径与真实 C 交接、�
 
 双相机的四条 C host 软件组合、Action6 RAW/JPEG 必要产物和安装后样例的增量验证见[双相机实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)。设备原始资料、安装后操作步骤及 ARM Linux 验收见[双相机资料采集](../hardware/camera-demo-validation.md)。测试 launcher 中的完整软件契约不使正式驱动的候选能力成为已支持能力；真实响应、结束和文件工具在 T9 核实后再验收正式发行物。
 
+## Action6 的 Windows ADB 通道核验（2026-10-10）
+
+本次由用户在 Windows PowerShell 中连接 Action6，使用 Python 3.11.15、ADB 1.0.41（platform-tools 37.0.1-15733141）和[独立采集器](../hardware/collect_call.py)保存本地 ADB 的实际 stdout、stderr、退出码与耗时。用户确认型号；固件版本尚未取得。Windows 仅用于设备资料采集，不是部署环境。
+
+| 调用与受控输入 | 实际结果 | 能够确定的范围 |
+| --- | --- | --- |
+| `exec-out` 执行同一脚本，分别向 stdout、stderr 输出不同标记后以 `7` 退出 | 本地退出码为 `0`，两个标记合并到 stdout，stderr 为空 | 此通道不提供本次远端退出码和独立 stderr；不能据本地 `0` 判定设备命令成功 |
+| `shell -T` 执行上述脚本 | 本地退出码为 `7`，两个标记分别进入 stdout、stderr | 本次受控退出码正确传回，两个输出流分开 |
+| `shell -T` 输出七个已知字节 `00 01 0a 0d 7f 80 ff`，并另输出 stderr 标记 | 本地退出码为 `0`；stdout 为 `00 01 0d 0a 0d 7f 80 ff`；stderr 标记正确 | LF 被扩展为 CRLF，原始字节比较失败；该 Windows 输出不能作为原样媒体字节 |
+| `exec-out` 执行同一字节脚本 | 本地退出码为 `0`；stdout 为原七个字节与 stderr 标记的拼接；stderr 为空 | 测试字节原样保留，输出流仍然合并；不补造远端退出事实 |
+
+内置 `/mnt/media_rw/emulated/DCIM` 是实际存在的目录；当次原始 `find -print0` 输出包含七条路径（两个 MP4、两个 LRF、三个 JPG），NUL 分隔且有末尾分隔符。SD 候选目录 `/mnt/media_rw/sd/DCIM` 明确不存在，不能按可用空目录处理。所列工具均能找到，其所需选项、正式分页、文件长度、摘要和完整读取尚未核实。
+
+上述结果不证明拍摄启动、停止、文件写完或本次产物集合齐备，也不代替 OSMO 360 II 和 ARM Linux 的核验。驱动通道、实际控制响应、固件及完整设备验收继续由[双相机实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。

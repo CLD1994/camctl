@@ -329,6 +329,8 @@ T8 的长读取用例已经证伪正常装配：取回流程等待整份设备�
 
 ## T9 设备事实补齐与 ARM Linux 完整验收
 
+设备采集进度（2026-10-10）：Action6 已取得工具存在性、内置目录原始输出，以及 Windows 上 `exec-out` 与 `shell -T` 的受控退出、分流和字节对照。实际结果与适用范围见[通道核验记录](../../camctl/verification.md#action6-的-windows-adb-通道核验2026-10-10)。正式分页、文件访问、实际控制响应、固件、OSMO 360 II 和 ARM Linux 验收继续本任务；候选能力尚未启用。
+
 **前置输入：** T8 交付后，由用户在 Windows 或目标主机获取实际资料，逐款补齐[设备输入清单](../specs/2026-10-10-camctl-real-camera-demo-design.md#最后阶段需要采集的设备资料)。此前 T1—T8 不依赖相机在线；缺少某款输入时只暂停该款的契约完成和真机验收。
 
 **建议文件：** 双相机驱动的实际响应解释器、T1 定义、命令测试和 device/capture 集成测试；更新 `docs/hardware/camera-control-handoff.md`、`camera-demo-validation.md`、`docs/camctl/integration-readiness.md` 和 `verification.md`。技术资料以实际适用固件和命令为范围，保密材料遵守根 AGENTS 的抽象记录边界。
