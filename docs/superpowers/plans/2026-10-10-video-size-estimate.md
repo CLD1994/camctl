@@ -36,7 +36,7 @@
 
 编制日期为 2026-10-10，工作区为 `C:\Users\84580\workspace\cld\camctl`，分支为 `codex/client-spec-sync`，代码基线为 `8b7de5660d71d86b02d465eb3c766753097ea9f0`。执行时重新观察实际工作区，不以该提交号替代当前文件。
 
-工作区还包含已授权的客户端界面修改，涉及 `App.tsx`、`Editor.tsx`、表单与校验组件、样式、浏览器测试及客户端文档。它们是实施输入，须结合当前文件继续；不能重置、覆盖或一起纳入本功能提交。若同一文件的变更交织，使用分块暂存，并检查暂存 diff。
+客户端界面交互已在本功能实施前独立提交为 `47ebddd`；2026-10-10 的完整验证为 1628 项通过，见[界面交互验证](../../client/verification.md#2026-10-10-界面交互验证)。该提交后的界面、表单、校验、样式、浏览器测试和文档是本功能的实施基线，执行时结合实际文件继续。
 
 2026-10-10 已核对 Node.js `v24.16.0`、pnpm `11.25.0`、uv `0.12.3` 和 `apps/camctl/.venv311/Scripts/python.exe` 的 Python `3.11.15`。实施前运行以下命令复核；环境不符时按部署规格调整环境，不能改用系统解释器扩大验证范围。
 
@@ -61,6 +61,8 @@ $env:UV_PROJECT_ENVIRONMENT = Join-Path (Get-Location) 'apps/camctl/.venv311'
 
 Python 同源导出与跨组件闭环由 Linux 开发环境中的 Agent 实施，负责任务 2，以及任务 5 中的 Python 部署替身、真实 CLI 交接、受理、执行、报告和对应文档门禁。Python 使用部署版本 3.11，并遵守测试目录的独占、顺序运行规则。客户端完成状态与跨组件完成状态分别记录。
 
+客户端任务 3、任务 4及任务 5中的客户端责任文档已经完成独立评审。客户端完整门禁在 `VITEST_MAX_WORKERS=2` 的命令环境下通过，实际结果与并发范围见[客户端验证记录](../../client/verification.md#2026-10-10-视频大小估算验证)。客户端整体评审待完成；任务 2及任务 5中的 Linux 实施、部署和跨组件验收继续保留待办。
+
 ## 文件责任与建议接口
 
 | 责任 | 现有入口与建议文件 | 提供给后续任务的结果 |
@@ -68,7 +70,7 @@ Python 同源导出与跨组件闭环由 Linux 开发环境中的 Agent 实施�
 | 公共格式和共同输入 | `protocol/schemas/capabilities.schema.json`；新增 `protocol/examples/video-size-estimate/`；`scripts/check-protocol.mjs` | 合法元数据结构、完整虚构能力文件、带原始 JSON 文本的正反例清单。 |
 | 驱动同源导出 | `apps/camctl/src/camctl/devices/catalog.py`；现有 CLI、资源与包测试 | `ActionCapability` 可携带估算声明；`describe` 只在整份有效时输出。 |
 | 客户端格式、引用和计算 | `apps/client/src/shared/types.ts`、`capabilities.ts`、`protocol-validation.ts`；建议新增 `json-pointer.ts`、`video-size-estimate.ts` | 已整体校验的能力目录；纯路径读取与纯估算结果。 |
-| 编辑状态和展示 | 建议新增 `apps/client/src/web/video-estimate-state.ts`、`VideoSizeEstimate.tsx`；修改 `Editor.tsx`、`App.tsx`、`style.css` | 从完整草稿和同次能力观察推导的展示状态；表单与 JSON 共用。 |
+| 编辑状态和展示 | `apps/client/src/web/video-estimate-state.ts`、`state-observations.ts`、`VideoSizeEstimate.tsx`；`Editor.tsx`、`App.tsx`、`api.ts`、`style.css` | 从完整草稿和同次能力观察推导的展示状态；全部完整状态读取共用发起资格和接纳次序，业务调用者保留自身原观察；表单与 JSON 共用。 |
 | 端到端交接 | 根 `tests/integration` 的 Python 部署替身和客户端驱动 | 真实 describe、客户端加载/计算/导出、CLI 受理和报告消费闭环。 |
 
 下面的类型是协调任务 3和4的建议，不另立机器协议。`CapabilityState` 复用 `src/shared/automatic-previews.ts`，`DraftContent` 复用 `src/server/models.ts`。
@@ -602,18 +604,7 @@ it.each(["/name", "/actions/0/scheduled_at", "/actions/0/policy",
 | 待核实期间请求结束后新发的 `/state` 观察成功 | 整体接受该观察，进入 `idle`。 |
 | 重载前、保存期间或请求尚未结束时发出的观察返回 | 可以按既有流程协调，但不能解除估算暂停。 |
 
-后端 `reloadCapabilities()` 和 `/state` 当前均同步执行；新观察确认的是实际启用快照，不为未知 POST 补造成功回执。失败不一定改变 `generation/version`，因此不能要求版本变化才恢复。建议用本地重载代次和观察发起阶段判断资格，不新增服务器重载状态机；成功或失败后的目录、诊断及草稿观察保持一份一致输入。
-
-```ts
-// 建议的解除暂停条件，变量在 App 的重载/refresh 协调中维护。
-// epoch 是本地重载代次；startedAfterRequestEnded 在发起观察时捕获。
-if (observationEpoch === currentReloadEpoch && startedAfterRequestEnded) {
-  setState(value); // value 包含同次观察中的草稿和完整能力状态。
-  setEstimateReloadPhase("idle");
-}
-// POST 已开始但结果未知：catch 设 unconfirmed；finally 只恢复轮询，
-// 不以 run() 的 busy=false 或 reloadPaused=false 清除估算暂停。
-```
+后端 `reloadCapabilities()` 和 `/state` 当前均同步执行；新观察确认的是实际启用快照，不为未知 POST 补造成功回执。失败不一定改变 `generation/version`，因此不能要求版本变化才恢复。最终客户端由 `state-observations.ts` 统一记录重载阶段、持续核实责任、请求结束事实、观察发起代次及成功接纳次序；`App.tsx` 的全部完整状态读取共用该边界，`api.ts` 的草稿读取从调用者原观察提取结果。较旧成功不覆盖较新成功，更晚失败不推进成功接纳次序，已经确认后不重新制造核实责任。目录、诊断及草稿始终来自同次成功观察，业务仍使用自身读取返回的原事实判定操作结果；没有新增服务器状态机或公共字段。以上模块划分记录最终实现，不将内部接口规定为正式协议。
 
 - [x] 实现 `VideoSizeEstimate` 只读组件，参数为 `VideoEstimate`；在 CameraFields 参数表单与参数 JSON 的共同外层展示。`ready` 显示“预计视频大小”、约数、十进制单位、预计成片秒数、参考 Mbps 和近似说明；无法估算显示原因及相应 Schema 标题/路径。更改尺寸或编辑模式不触发保存。
 
@@ -804,7 +795,7 @@ def test_estimate_survives_describe_and_stays_out_of_plan(tmp_path):
 - [ ] 增加延时场景，以 `timelapse_interval` 的虚构元数据经相同真实 describe 与客户端路径取得结果。可以使用采集持续时间3秒、间隔1秒、播放帧率30、码率175 Mbps，独立期望为0.1秒、2,187,500字节；同源虚构 Schema 与任务工厂明确接受和执行这组输入，不能声明6000秒而仍执行固定3秒。估算依据与最终文件事实分别断言。还需验证声明完全缺失、合法但未覆盖的查表选项都能按原规则导出；非法真实声明使 CLI 退出1、stdout为空，并使新的客户端加载失败而保留已启用说明。根替身的参数 Schema 当前只接受 `type`；需要查表参数或采集参数的场景，必须在同一虚构定义中显式添加对应 Schema，不能仅放宽 `additionalProperties`。
 - [ ] 经 `video_size_estimate_json` 的原文入口分别传入合法小数码率 `130.125`、合法帧数 `240.0`/`2.4e2` 及非法帧数 `1.00000000000000000001`。前者经真实 describe、客户端和 HTTP 仍保持正确判定；后者在 describe 退出1且 stdout为空，证明测试装配没有先舍入或清洗。
 - [ ] 从仓库根执行 `uv run --project apps/camctl --group test --python 3.11 pytest tests/integration/test_video_size_estimate.py -q`。本文件不申请 `host_demo` 夹具，不连接设备，不要求 WSL/C 编译；真实组件、真实文件、子进程与数据库都属于此集成层。
-- [ ] 更新客户端交互专题和设计实施状态，说明位置、近似单位、无法估算原因与重载暂停。把正式字段规则保留在能力格式专题，把实施进度留在本计划；不把虚构参考值记为真实设备依据。验证记录注明日期、Windows/Node/Python版本、命令、范围及实际结果。
+- [x] 更新客户端交互专题和设计实施状态，说明位置、近似单位、无法估算原因与重载暂停。把正式字段规则保留在能力格式专题，把实施进度留在本计划；不把虚构参考值记为真实设备依据。验证记录注明实际执行日期、环境与版本、命令、范围及结果，并明确 Linux 组件的待验边界。
 - [ ] 按以下顺序执行最终门禁；仅在新修改、失败或未解决问题出现时扩大或重复。Python 集成目录继续分别前台运行。
 
 ```powershell
