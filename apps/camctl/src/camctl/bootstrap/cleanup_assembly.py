@@ -20,14 +20,16 @@ from camctl.bootstrap.capture_assembly import (
     _DEFAULT_RETRY_INTERVAL_S,
     _device_seconds,
 )
-from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
+from camctl.devices.bindings import (
+    DeviceBinding, DeviceConfigurationError, binding_failure_details, check_binding)
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError, DriverRegistry, port_for)
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.outputs.cleanup_flow import (
-    CleanupRuntime, HostArtifactPort, LocalArtifactRequest, advance_cleanup)
+    CleanupRuntime, HostArtifactPort, LocalArtifactRequest,
+    PendingCleanupCompanion, PendingCleanupQuery, advance_cleanup)
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -103,6 +105,8 @@ def session_cleanup_assembly(
     staging: Path | None = None,
     monotonic_ns: Callable[[], int] | None = None,
     occurred_at: Callable[[], int] | None = None,
+    pending_queries: dict[tuple[int, int], PendingCleanupQuery] | None = None,
+    pending_companions: dict[int, PendingCleanupCompanion] | None = None,
 ) -> Callable[[Any], CleanupRuntime | None]:
     """构造会话级清理推进工厂：解析删除/查询协作者并组装运行时。
 
@@ -112,42 +116,57 @@ def session_cleanup_assembly(
     时钟读数缺省使用真实系统钟，测试可注入受控读数。
     """
     retry_gate = RetryWaitGate()
+    queries = pending_queries if pending_queries is not None else {}
+    companions = pending_companions if pending_companions is not None else {}
+    consumed_queries = {}
     monotonic = monotonic_ns if monotonic_ns is not None else time.monotonic_ns
     wall = occurred_at if occurred_at is not None \
         else (lambda: int(time.time() * 1_000_000))
 
     def factory(owned: Any) -> CleanupRuntime:
-        device_ports = {}
-        for device_id, declaration in devices.items():
-            if not isinstance(declaration, Mapping):
-                raise DeviceConfigurationError(f"设备声明不可可靠读取: {device_id}")
-            driver_id = declaration.get("driver")
-            entry = drivers.entry(driver_id) if isinstance(
-                driver_id, str) else None
-            if entry is None:
-                raise DeviceConfigurationError(f"本次设备驱动未登记: {device_id} driver={driver_id!r}")
-            try:
-                port_for(entry, "delete")
-                port_for(entry, "query")
-            except CapabilityNotDeclaredError:
-                continue
-            device_ports[device_id] = (
-                entry, AttemptConfig(
-                    max_attempts=max_delete_attempts,
-                    timeout_s=_device_seconds(
-                        declaration, "cleanup", "delete_timeout_s",
-                        _DEFAULT_TIMEOUT_S),
-                    retry_interval_s=_device_seconds(
-                        declaration, "cleanup", "delete_retry_interval_s",
-                        _DEFAULT_RETRY_INTERVAL_S)),
-                AttemptConfig(
-                    max_attempts=max_query_attempts,
-                    timeout_s=_device_seconds(
-                        declaration, "cleanup", "query_timeout_s",
-                        _DEFAULT_TIMEOUT_S),
-                    retry_interval_s=_device_seconds(
-                        declaration, "cleanup", "query_retry_interval_s",
-                        _DEFAULT_RETRY_INTERVAL_S)))
+        device_ports = None
+
+        def load_ports():
+            nonlocal device_ports
+            if device_ports is None:
+                device_ports = _device_ports()
+            return device_ports
+
+        def _device_ports():
+            assembled = {}
+            for device_id, declaration in devices.items():
+                if not isinstance(declaration, Mapping):
+                    raise DeviceConfigurationError(f"设备声明不可可靠读取: {device_id}")
+                driver_id = declaration.get("driver")
+                entry = drivers.entry(driver_id) if isinstance(driver_id, str) else None
+                if entry is None:
+                    raise DeviceConfigurationError(f"本次设备驱动未登记: {device_id} driver={driver_id!r}")
+                try:
+                    port_for(entry, "delete")
+                    port_for(entry, "query")
+                except CapabilityNotDeclaredError:
+                    continue
+                assembled[device_id] = (
+                    entry, AttemptConfig(
+                        max_attempts=max_delete_attempts,
+                        timeout_s=_device_seconds(declaration, "cleanup", "delete_timeout_s", _DEFAULT_TIMEOUT_S),
+                        retry_interval_s=_device_seconds(
+                            declaration, "cleanup", "delete_retry_interval_s", _DEFAULT_RETRY_INTERVAL_S)),
+                    AttemptConfig(
+                        max_attempts=max_query_attempts,
+                        timeout_s=_device_seconds(declaration, "cleanup", "query_timeout_s", _DEFAULT_TIMEOUT_S),
+                        retry_interval_s=_device_seconds(
+                            declaration, "cleanup", "query_retry_interval_s", _DEFAULT_RETRY_INTERVAL_S)))
+            return assembled
+
+        # 已提交查询也可能尚未交给成员；其本地处理先于当前驱动解析。
+        saved_query = owned.connection.execute(
+            "SELECT 1 FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+            " JOIN cleanup_items c ON c.id=r.cleanup_item_id"
+            " WHERE r.kind=5 AND c.status NOT IN (4,5,6)"
+            " AND a.result_event_id IS NOT NULL LIMIT 1").fetchone()
+        if not queries and not companions and saved_query is None:
+            load_ports()
         base = CleanupRuntime(
             owned=owned, outputs=OutputsRepository(), operations=OperationRepository(),
             driver=None, evidence=_LOCAL_EVIDENCE,
@@ -158,11 +177,16 @@ def session_cleanup_assembly(
             delete_config=AttemptConfig(max_delete_attempts, _DEFAULT_TIMEOUT_S, _DEFAULT_RETRY_INTERVAL_S),
             query_config=AttemptConfig(max_query_attempts, _DEFAULT_TIMEOUT_S, _DEFAULT_RETRY_INTERVAL_S),
             monotonic_ns=monotonic, retry_gate=retry_gate,
+            pending_queries=queries, pending_companions=companions,
+            consumed_queries=consumed_queries,
         )
 
         def for_item(item_id):
             binding = base.binding_of(item_id)
-            assembly = device_ports.get(binding.device_id) if binding is not None else None
+            if binding is None or binding_failure_details(check_binding(
+                    binding, SimpleNamespace(devices=devices))) is not None:
+                return base
+            assembly = load_ports().get(binding.device_id)
             if assembly is None:
                 return base
             entry, delete_config, query_config = assembly

@@ -333,6 +333,28 @@ RESULT_PAGE 的事件验收映射指向实际结果页历史测试，未标为�
 
 本次完成错误登记、最终补记与上述软件验证。默认 bootstrap／session 尚未接入真实应急停止、有限尝试及最终补记，责任仍在[capture C7](../superpowers/plans/2026-09-30-camctl-capture.md#c7-有限安全收场与应急最终补记)。原键事务核实不等于默认会话已持有 UNKNOWN 保存的恢复责任。Action6 完整真机演示仍按[T9 挂起记录](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)等待恢复，本次软件通过不作为设备、ARM 运行或物理断电验收。
 
+## 清理查询结果保存与恢复的软件验证（2026-10-11）
+
+环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1。验证对象是[清理查询结果保存与恢复阶段](../superpowers/plans/2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)。设备调用由受真实接口约束的替身提供；结果事务、连接更换和历史保存使用真实 SQLite 组件。
+
+查询实际返回后，会话先固定原完整结果、票据、数据库身份、唯一 key 和事实时刻。结果保存未可靠完成时，成员结果、普通删除和重试锚点不能消费该观察。连接更换只重送原申请；成员和伴随流程的保存责任分别保留。新会话从已提交的原结果及完整事务恢复观察，核对观察版本、结构和成员身份，不要求当前驱动重新解释原事实。集合恢复先完成原本地责任，再安排普通设备操作。
+
+主执行者独占、顺序执行以下命令，单元与集成分开。各行从仓库根使用 `UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 pytest <验证对象> -q`，输出重定向到对应日志。
+
+| 验证对象 | 实际结果 | 耗时与本机日志 |
+| --- | --- | --- |
+| `apps/camctl/tests/unit` | 4694 passed、1 skipped；2 条既有 asyncio 标记警告 | 13.21 秒；`/tmp/camctl-cleanup-final-unit-verified.log` |
+| `apps/camctl/tests/integration/outputs` | 1911 passed、2 skipped | 282.35 秒；`/tmp/camctl-cleanup-final-outputs.log` |
+| `apps/camctl/tests/integration/bootstrap` 首次全目录 | 957 passed、2 failed、1 skipped；未取得该目录单次全绿 | 742.23 秒；`/tmp/camctl-cleanup-final-bootstrap.log` |
+| bootstrap 的 `test_output_binding_cancellation.py`、`test_output_cleanup_recovery.py`、`test_cleanup_query_default_recovery.py` 最终复验 | 35 passed，包含全目录的两个失败分区 | 28.18 秒；`/tmp/camctl-cleanup-final-bootstrap-verified.log` |
+| 新增 outputs 文件及既有恢复、重试、计时和源文件清理组合 | 91 passed | 60.35 秒；`/tmp/camctl-cleanup-final-focus.log` |
+
+bootstrap 的两个失败分区涉及已保存未知查询、取消生效及当前绑定缺失或不匹配。有效契约要求先使用原未知结果完成成员和伴随流程，保持 `UNCONFIRMED/delete_unconfirmed`；当前绑定异常只阻止新的设备调用。最终专项精确验证原尝试、完整结果与事件、错误详情、源文件事实、零新增调用，以及取消结算前后的目标动作状态。全目录执行后生产代码保持相同，测试按上述契约验证；未再次执行全部 bootstrap 用例，不将专项结果表述为全目录的一次通过。
+
+静态检查取得 3754 个本地文件链接通过，修改文档的 242 个标题锚点均可解析，13 个修改 Python 文件通过 3.11 AST 检查；暂存及未暂存 diff 均通过空白检查。
+
+本次结果不证明相机、ARM64 运行、性能或物理断电行为。QUERY-only 的共同建档、取消与限制转换、成员及伴随仓储的完整原键证明和专项历史回放仍由[剩余责任](../superpowers/plans/2026-10-10-camctl-cleanup-query-result-closure.md#尚未完成的前置与核验)跟踪，完整清理计划及第一版均未完成。阶段提交后停止；下一项是[合并客户端分支并恢复 Action6 真机演示](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。

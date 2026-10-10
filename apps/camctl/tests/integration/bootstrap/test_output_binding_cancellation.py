@@ -1,5 +1,6 @@
 """实际删除结束后，清理取消的逐项结果与原操作键核实。"""
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from camctl.cancellation.settlement import TargetSettlement
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import item_error_id
-from camctl.devices.bindings import DeviceBinding, check_binding
+from camctl.devices.bindings import BindingStatus, DeviceBinding, check_binding
 from camctl.outputs.cleanup_flow import CancelCleanupItem
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.cancellation import CancellationRepository
@@ -75,16 +76,55 @@ async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, co
 
 
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
-async def test_canceled_cleanup_binding_failure_ends_original_open_runs(environment, change):
+async def test_canceled_cleanup_preserves_saved_unknown_results_after_binding_change(environment, change):
     cfg, owned, context, driver = environment
     output_id = await _pending_cleanup(environment)
     target, _origin, _cancel_item = _apply_cleanup_cancel(owned)
+    item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     attempts = tuple(owned.connection.execute(
         "SELECT * FROM operation_attempts WHERE run_id IN"
         " (SELECT id FROM operation_runs WHERE cleanup_item_id IS NOT NULL) ORDER BY id"))
+    original_calls = owned.connection.execute(
+        "SELECT r.kind,a.status,a.effect_state,a.result_event_id,a.result_json,a.error_json"
+        " FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+        " WHERE r.cleanup_item_id=? ORDER BY r.kind", (item_id,)).fetchall()
+    assert [row[:3] for row in original_calls] == [
+        (int(enum_for("operation_runs.kind").DELETE_FILE),
+         int(enum_for("operation_attempts.status").SUCCEEDED),
+         int(enum_for("operation_attempts.effect_state").UNKNOWN)),
+        (int(enum_for("operation_runs.kind").CHECK_FILE_EXISTS),
+         int(enum_for("operation_attempts.status").FAILED),
+         int(enum_for("operation_attempts.effect_state").UNKNOWN)),
+    ]
+    result_event_ids = tuple(row[3] for row in original_calls)
+    assert all(event_id is not None for event_id in result_event_ids)
+    result_events = tuple(owned.connection.execute(
+        "SELECT * FROM history_events WHERE id IN (?,?) ORDER BY id", result_event_ids))
+    assert len(result_events) == 2
+    for call, evidence_type in zip(original_calls, ("delete_returned", "file_presence")):
+        assert json.loads(call[4]) == {
+            "format_version": 1,
+            "settlement": {"basis": "observed", "evidence": {
+                "type": evidence_type, "version": 1, "data": {}}},
+            "observations": [],
+        }
+    assert original_calls[0][5] is None
+    assert json.loads(original_calls[1][5]) == {
+        "code": "device_error", "stage": "query", "details": {}}
+    calls_before = (tuple(driver.deletes), tuple(driver.queries))
+    assert len(driver.deletes) == len(driver.queries) == 1
     source_before = owned.connection.execute(
         "SELECT * FROM device_files WHERE id=(SELECT device_file_id FROM outputs WHERE id=?)", (output_id,)).fetchone()
+    binding_before = owned.connection.execute(
+        "SELECT a.device_id,a.driver_id FROM outputs o"
+        " JOIN device_files f ON f.id=o.device_file_id"
+        " JOIN actions a ON a.id=f.observer_action_id WHERE o.id=?", (output_id,)).fetchone()
+    assert binding_before == ("cam-a", "camctl-adb")
     current = _changed(cfg, change)
+    binding = check_binding(DeviceBinding(*binding_before), current)
+    assert binding.status is (BindingStatus.DEVICE_MISSING if change == "missing"
+                              else BindingStatus.DRIVER_MISMATCH)
+    assert binding.current_driver_id == (None if change == "missing" else "alternate-camera")
     factory = session_cleanup_assembly(
         devices=current.devices, drivers=_registry(driver), max_delete_attempts=3,
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
@@ -92,21 +132,45 @@ async def test_canceled_cleanup_binding_failure_ends_original_open_runs(environm
 
     await cleanup_flow(factory)(context)
 
-    assert len(driver.deletes) == len(driver.queries) == 1
+    assert (tuple(driver.deletes), tuple(driver.queries)) == calls_before
     assert tuple(owned.connection.execute(
         "SELECT * FROM operation_attempts WHERE run_id IN"
         " (SELECT id FROM operation_runs WHERE cleanup_item_id IS NOT NULL) ORDER BY id")) == attempts
-    assert owned.connection.execute("SELECT status,restriction_state,error_code FROM cleanup_items").fetchone() == (
+    assert tuple(owned.connection.execute(
+        "SELECT * FROM history_events WHERE id IN (?,?) ORDER BY id", result_event_ids)) == result_events
+    member = owned.connection.execute(
+        "SELECT status,restriction_state,error_code,error_details_json,final_event_id"
+        " FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+    assert member[:3] == (
         6, int(enum_for("cleanup_items.restriction_state").IRREVERSIBLE),
         item_error_id("cleanup_items", "delete_unconfirmed"))
-    assert owned.connection.execute(
-        "SELECT status,attempts_used,retry_wait_required FROM operation_runs"
-        " WHERE cleanup_item_id IS NOT NULL ORDER BY id").fetchall() == [(4, 1, 0), (4, 1, 0)]
+    assert json.loads(member[3]) == {"output_id": str(output_id)}
+    assert member[4] > max(result_event_ids)
+    runs = owned.connection.execute(
+        "SELECT responsibility_key,kind,status,attempts_used,retry_wait_required,error_json"
+        " FROM operation_runs WHERE cleanup_item_id=? ORDER BY kind", (item_id,)).fetchall()
+    unconfirmed = int(enum_for("operation_runs.status").UNCONFIRMED)
+    assert [row[:5] for row in runs] == [
+        (f"delete/{item_id}", int(enum_for("operation_runs.kind").DELETE_FILE), unconfirmed, 1, 0),
+        (f"exists/{item_id}", int(enum_for("operation_runs.kind").CHECK_FILE_EXISTS), unconfirmed, 1, 0),
+    ]
+    assert [json.loads(row[5]) for row in runs] == [
+        {"code": "delete_unconfirmed", "stage": "delete", "details": {}},
+        {"code": "delete_unconfirmed", "stage": "delete", "details": {}},
+    ]
     assert owned.connection.execute(
         "SELECT * FROM device_files WHERE id=(SELECT device_file_id FROM outputs WHERE id=?)", (output_id,)).fetchone() == source_before
+    assert owned.connection.execute(
+        "SELECT a.device_id,a.driver_id FROM outputs o"
+        " JOIN device_files f ON f.id=o.device_file_id"
+        " JOIN actions a ON a.id=f.observer_action_id WHERE o.id=?", (output_id,)).fetchone() == binding_before
+    assert owned.connection.execute(
+        "SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (2, 1)
     settled = await TargetSettlement(owned, OutputsRepository(), CancellationRepository(),
                                     lambda _: "unknown", lambda: _NOW).settle(target)
     assert settled.complete and settled.failed
+    assert owned.connection.execute(
+        "SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (6, 1)
 
 
 @pytest.mark.parametrize("change", ["code", "clear_error", "details", "item_id", "occurred_at"])
