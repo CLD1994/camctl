@@ -56,6 +56,10 @@ class BackgroundFlow:
         if self._task.done():
             self._consume()
 
+    def check_completed(self):
+        if self._task is not None and self._task.done():
+            self._consume()
+
     def required_settlements(self):
         # 已形成的失败也须交付，不能先被会话解释为空闲。
         return int(self._task is not None)
@@ -94,6 +98,12 @@ class CombinedLocalWork:
     def stop_new_work(self):
         for owner in self._owners:
             owner.stop_new_work()
+
+    def check_completed(self):
+        for owner in self._owners:
+            check = getattr(owner, "check_completed", None)
+            if check is not None:
+                check()
 
     async def settle(self):
         failures = []

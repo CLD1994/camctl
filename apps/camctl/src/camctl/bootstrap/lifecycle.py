@@ -72,7 +72,7 @@ class RuntimeDeps:
     recovery_max_event_id: int | None = None
     #: 正常运行共用的文件实际拥有者及固定维护范围；submit 不装配。
     work_files: Any = None
-    #: 独立推进的取回流程；实际任务和连接在会话收场前交付。
+    #: 独立推进的拍摄及取回流程；实际任务和连接在会话收场前交付。
     background_flows: tuple[Any, ...] = ()
     #: 原 await 拥有者的实际结果；普通、残留与受限工厂共用同一集合。
     capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
@@ -516,7 +516,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
         ), resume_media_results=deps.work_files.resume_media_results,
-           resume_file_observations=resume_files, resume_read_results=resume_reads),
+           resume_file_observations=resume_files, resume_read_results=resume_reads,
+           owns_device=lambda device: capture_owner.owns_device(device)),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
         # 推进；拷贝段大小取自 copy 配置。
         "obtain": obtain_flow(session_obtain_assembly(
@@ -543,8 +544,9 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         "work_files": deps.work_files.flow,
     }
     from camctl.bootstrap.background_flow import BackgroundFlow
+    capture_owner = flows["scheduling"]
     flows["obtain"] = BackgroundFlow(flows["obtain"])
-    deps.background_flows = (flows["obtain"],)
+    deps.background_flows = (capture_owner, flows["obtain"])
     return flows, supervisor
 
 
@@ -657,6 +659,7 @@ async def execute_command(
                     resume_media_results=deps.work_files.resume_media_results,
                     resume_file_observations=resume_files,
                     resume_read_results=resume_reads,
+                    owns_device=flows["scheduling"].owns_device,
                 ),
             },
             once_report=report_flow(
@@ -692,7 +695,7 @@ async def execute_command(
         failure_log=failure_log,
         copy_request_factory=copy_request_factory,
         on_session_open=lambda owned: _initialize_recovery(deps, owned),
-        local_work=_local_work(deps),
+        local_work=_local_work(deps, overrides["flows"]),
         **overrides,
     )
     outcome: SessionOutcome | None = None
@@ -734,11 +737,15 @@ async def execute_command(
     return outcome
 
 
-def _local_work(deps):
-    if deps.work_files is None:
-        return None
-    from camctl.bootstrap.background_flow import CombinedLocalWork
-    return CombinedLocalWork((*deps.background_flows, deps.work_files))
+def _local_work(deps, flows):
+    from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+    from camctl.bootstrap.flows import CaptureFlow
+    owners = list(deps.background_flows)
+    owners.extend(flow for flow in flows.values() if isinstance(flow, (BackgroundFlow, CaptureFlow)))
+    if deps.work_files is not None:
+        owners.append(deps.work_files)
+    owners = tuple({id(owner): owner for owner in owners}.values())
+    return CombinedLocalWork(owners) if owners else None
 
 
 def _shutdown_state_outcome(

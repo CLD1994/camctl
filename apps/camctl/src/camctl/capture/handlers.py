@@ -2401,12 +2401,21 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
             # 仅发送或未授予：没有可靠响应事实，等待下次推进。
             return
         attempt = context.last_attempt(f"start/{action_id}")
+        action = context.action(action_id)
     if _settle_unstarted_attempt(context, action, attempt):
         return
     listing = await _listing_round(context, action_id)
     if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
         # 在途或本轮列举失败：已保存实际结果与重试等待，下一轮重新核实。
         return
+    action = context.action(action_id)
+    if action["cancel_requested"]:
+        # 照片的公开取消只适用于可靠未启动；原核实返回仍真实保存。
+        if listing.phase is ListingPhase.LISTED:
+            _finish_listing_result(context, listing, end_run=RunOutcome.CANCELED)
+        if _settle_unstarted_attempt(context, action, attempt):
+            return
+        raise ConsistencyError("照片取消缺少可靠未启动依据")
     unconfirmed = (listing.phase is ListingPhase.CLOSED
         and row_facts(context.owned.connection, "operation_runs", listing.ticket.run_id)["status"]
             == int(enum_for("operation_runs.status").UNCONFIRMED))
@@ -3098,6 +3107,13 @@ async def _advance_recording_outcome(
         listing = _local_recording_listing(context, action)
         if listing is None:
             listing = await _listing_round(context, action_id)
+        action = context.action(action_id)
+        if action["cancel_requested"]:
+            # 原实际返回仍沿原票据保存，取消只终止后续核验及内容登记。
+            if listing.phase is ListingPhase.LISTED:
+                _finish_listing_result(context, listing)
+            _finish_canceled_capture(context, action_id)
+            return
         if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
             # 在途或本轮列举失败：已保存实际结果与重试等待。
             return
@@ -3150,6 +3166,11 @@ async def _advance_recording_outcome(
             await run_recording_media(
                 context.media, action_id, int(row[0]), source)
             row = _load_processing_row(context, action_id)
+            action = context.action(action_id)
+            if action["cancel_requested"]:
+                _finish_listing_result(context, listing)
+                _finish_canceled_capture(context, action_id)
+                return
     media_json = parse_exact_json(row[3]) if row[3] else None
     facts = RecordingOutcomeFacts(
         processing_id=int(row[0]),
@@ -3264,6 +3285,9 @@ def _unconfirmed_result_set(runtime, action_id, reason, occurred_at):
 async def _close_host_timer_failed(context, action_id, reason):
     """目标无法确认时有限核实文件，再沿原结论保存失败和完整产物。"""
     listing = await _listing_round(context, action_id)
+    if context.action(action_id)["cancel_requested"]:
+        await _timelapse_handler(action_id, context)
+        return
     if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
         return
     if listing.phase is ListingPhase.EXHAUSTED:
@@ -3329,6 +3353,10 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
             await _finish_timelapse_conclusion(context, action_id)
             return
         step = await _advance_host_timer(context, action, attempt)
+        action = context.action(action_id)
+        if action["cancel_requested"]:
+            await _advance_canceled_capture(context, action, attempt)
+            return
         if step is HostTimerPhase.WAITING:
             return
         if step is not HostTimerPhase.CONFIRMED:
@@ -3399,6 +3427,10 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         await _finish_timelapse_conclusion(context, action_id)
         return
     listing = await _listing_round(context, action_id)
+    if context.action(action_id)["cancel_requested"]:
+        # 原页及调用结果由 listing 拥有者保留，取消收场复用原轮次。
+        await _timelapse_handler(action_id, context)
+        return
     if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT,
                          ListingPhase.CLOSED):
         # 在途、本轮列举失败或责任已闭合：等待收尾轮次，不提交新意图。

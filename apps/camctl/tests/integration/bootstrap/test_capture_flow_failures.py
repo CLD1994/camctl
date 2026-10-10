@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from camctl.bootstrap.flows import capture_flow
+from camctl.bootstrap.background_flow import CombinedLocalWork
 from camctl.session.service import _drive_flows
 
 from ..capture.test_capture_contract import (
@@ -58,6 +59,7 @@ async def test_capture_state_failure_stops_later_device_flow(environment, fault)
             connection, directory, "missing", driver, ResultsDouble({}))),
                "next": next_device},
     )
+    context.local_work = CombinedLocalWork((context.flows["capture"],))
     try:
         before = tuple(owned.connection.iterdump())
 
@@ -90,8 +92,10 @@ async def test_saved_device_failure_allows_other_device_work(environment):
             connection, driver=driver, files={11: (_entry("photo", kind=FileKind.PHOTO),)})),
                "next": next_device},
     )
+    context.local_work = CombinedLocalWork((context.flows["capture"],))
     try:
         fatal = await _drive_flows(context)
+        await context.local_work.settle()
 
         assert fatal is None
         assert next_calls == ["called"]

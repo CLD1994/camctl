@@ -6,8 +6,53 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+from camctl.bootstrap.flows import CaptureFlow
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_capture_consumes_success_before_releasing_device_owner():
+    release = asyncio.Event()
+    async def body(context):
+        await release.wait()
+    owner = BackgroundFlow(body)
+    capture = CaptureFlow(None)
+    capture._devices["cam-1"] = owner
+    await owner(None)
+    release.set()
+    await asyncio.sleep(0)
+    assert capture.owns_device("cam-1") and capture.required_settlements() == 1
+    capture.check_completed()
+    assert not capture.owns_device("cam-1") and capture.required_settlements() == 0
+
+
+async def test_capture_completed_failure_stops_other_owner_and_keeps_actual_cleanup():
+    fail, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    failure = ValueError("original capture save failed")
+    async def first(context):
+        await fail.wait()
+        raise failure
+    async def second(context):
+        try:
+            await asyncio.Future()
+        finally:
+            cleaning.set()
+            await release.wait()
+    capture = CaptureFlow(None)
+    capture._devices = {"cam-1": BackgroundFlow(first), "cam-2": BackgroundFlow(second)}
+    for owner in capture._devices.values():
+        await owner(None)
+    fail.set()
+    await asyncio.sleep(0)
+    with pytest.raises(ValueError) as caught:
+        capture.check_completed()
+    assert caught.value is failure
+    await cleaning.wait()
+    assert capture.required_settlements() == 1
+    release.set()
+    await capture.settle()
+    await capture(object())  # 已停止，不再打开连接或派发设备工作。
+    assert capture.required_settlements() == 0
 
 
 async def test_running_flow_returns_to_scheduler_and_does_not_start_twice():
