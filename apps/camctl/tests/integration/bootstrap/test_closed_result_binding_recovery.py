@@ -100,7 +100,8 @@ async def test_default_capture_consumes_closed_unconfirmed_after_binding_change(
         before.connection.close()
 
     await flow(context)
-    assert len(opened) == len(runtimes) == 1
+    await flow.settle()
+    assert len(opened) == 2 and len(runtimes) == 1
     saved = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         _assert_local_finish(saved, world, methods)
@@ -109,7 +110,8 @@ async def test_default_capture_consumes_closed_unconfirmed_after_binding_change(
         saved.connection.close()
 
     await flow(context)
-    assert len(opened) == 2 and len(runtimes) == 1
+    await flow.settle()
+    assert len(opened) == 3 and len(runtimes) == 1
     repeated = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         _assert_local_finish(repeated, world, methods)

@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
 import time
@@ -91,6 +91,7 @@ _EVIDENCE = EvidenceRegistry(
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
         RESULT_FILES_CONTRACT,
+        RESULT_PAGE_CONTRACT,
         EvidenceContract(type="stop_returned", version=1, operation="stop",
                          fields=frozenset()),
         EvidenceContract(type="stop_confirmed", version=1, operation="stop",
@@ -420,6 +421,7 @@ class TestTimelapseCheckRounds:
             """第一轮列举抛错，之后返回完整结果。"""
 
             def __init__(self) -> None:
+                super().__init__({})
                 self.failed = False
 
             async def list_files(self, action_id: int) -> tuple:

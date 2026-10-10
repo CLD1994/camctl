@@ -9,11 +9,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from camctl.capture.handlers import CaptureRuntime, ListedResult, capture_handler
+from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT, page_from_outcome
 from camctl.capture.recording import RecordingState
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
@@ -48,8 +50,7 @@ register_timelapse_guards()
 
 _NOW = 1_750_000_000_000_000
 
-_EVIDENCE = EvidenceRegistry(
-    (
+_CONTRACTS = (
         EvidenceContract(type="operation_returned", version=1, operation="control",
                          fields=frozenset()),
         EvidenceContract(type="photo_taken", version=1, operation="control",
@@ -66,8 +67,9 @@ _EVIDENCE = EvidenceRegistry(
                          fields=frozenset()),
         EvidenceContract(type="stop_confirmed", version=1, operation="stop",
                          fields=frozenset({"activity_id"}), identity_field="activity_id"),
-    )
 )
+_EVIDENCE = EvidenceRegistry(_CONTRACTS)
+_PAGE_EVIDENCE = EvidenceRegistry((*_CONTRACTS, RESULT_PAGE_CONTRACT))
 
 
 class StopDouble:
@@ -116,11 +118,27 @@ class DriverDouble:
 
 
 class ResultsDouble:
-    """结果列举替身：返回编排的候选产物文件。"""
+    """受 v2 约束的任务范围替身，明确提供编排的全部文件集合。"""
 
-    def __init__(self, files_by_action: dict[int, tuple]) -> None:
+    def __init__(self, files_by_action: dict[int, tuple], *, set_finalized=True) -> None:
         self.files_by_action = files_by_action
         self.calls: list[int] = []
+        self.set_finalized = set_finalized
+
+    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None):
+        if cursor is not None:
+            raise ValueError("替身单批完整集合没有后续游标")
+        listed = await self.list_round(ticket, timeout_s=timeout_s)
+        observations = []
+        for observation in listed.outcome.observations:
+            if observation.type == "result_files_listed":
+                observations.append(DeviceObservation(observation.type, 2, {
+                    **observation.data, "cursor": None, "next_cursor": None,
+                    "set_finalized": self.set_finalized, "completion_evidence": None}))
+            else:
+                observations.append(observation)
+        actual = replace(listed.outcome, observations=tuple(observations))
+        return page_from_outcome(ticket, actual, cursor=cursor)
 
     async def list_files(self, action_id: int) -> tuple:
         self.calls.append(action_id)
@@ -264,6 +282,10 @@ _TIMELAPSE = ((13, 3),)
 def _seed_action(connection, action_id: int, action_type: int) -> None:
     """录像种子按受理约定保存执行定义（目标时长毫秒）。"""
     spec = '{"target_duration_ms": 60000}' if action_type == 2 else '{}'
+    if action_type == 3:
+        spec = json.dumps({"duration_based": True, "wait_after_send": True,
+            "end_control": 1, "stop_supported": True, "start_return_meaning": 1,
+            "completion_mode": 2, "target_duration_ms": 600000, "result_wait_margin_ms": 0})
     connection.execute(
         "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
         " scheduled_at, group_name, input_fields_json, effective_params_json,"
@@ -296,6 +318,8 @@ def _runtime(owned, *, driver=None, files=None, wall=None,
              stop_config=None) -> CaptureRuntime:
     from camctl.scheduling.rules import LaunchWindow
 
+    result_port = results if results is not None else ResultsDouble(files or {})
+
     return CaptureRuntime(
         owned=owned,
         scheduling=SchedulingRepository(),
@@ -303,8 +327,8 @@ def _runtime(owned, *, driver=None, files=None, wall=None,
         capture=CaptureRepository(),
         timelapse=TimelapseRepository(),
         driver=driver if driver is not None else DriverDouble(),
-        results=results if results is not None else ResultsDouble(files or {}),
-        evidence=_EVIDENCE,
+        results=result_port,
+        evidence=_PAGE_EVIDENCE if isinstance(result_port, ResultsDouble) else _EVIDENCE,
         wall_us=lambda: wall if wall is not None else _NOW,
         monotonic_ns=lambda: 5_000_000_000,
         window_of=lambda action: LaunchWindow(
@@ -380,6 +404,7 @@ class TestPhotoHandler:
         owned = _environment(tmp_path, _PHOTO)
         try:
             runtime = _runtime(owned, files={})
+            runtime.results.set_finalized = False
             now = [5_000_000_000]
             runtime.monotonic_ns = lambda: now[0]
             await capture_handler("camera_take_photo")(11, runtime)
@@ -393,6 +418,7 @@ class TestPhotoHandler:
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
             now[0] += 3_000_000_000
+            runtime.results.set_finalized = True
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (3,)
@@ -734,16 +760,29 @@ class TestInterruptionRecovery:
             assert original_held is pending and original_held.key == result_key
 
             await capture_handler(handler)(action_id, recovery)
-
-            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
+            _assert_actual_saved(owned, action_id, actual)
             assert owned.connection.execute(
                 "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall() == before_attempts
             assert len(spy.requests) == 3 and all(value == (request, file_key) for value in spy.requests)
+            # 原读取错误和无集合保证的输入不能证明成功；下一轮取得
+            # 明确的完整集合，再使用原文件事实收尾。
+            recovered_file = replace(_entry("original", kind=ResultFileKind.PHOTO, size=41),
+                                     locator={"path": "/DCIM/original.mp4"})
+            recovery.results = ResultsDouble({action_id: (recovered_file,)})
+            recovery.evidence = _PAGE_EVIDENCE
+            recovery.monotonic_ns = lambda: original_monotonic + 5_000_000_000
+            await capture_handler(handler)(action_id, recovery)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
+            attempts = owned.connection.execute(
+                "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
+            assert attempts[:-1] == before_attempts
+            assert attempts[-1][1:] == (ticket.run_id, ticket.attempt_id + 1)
             saved_file = saved_transaction_events(owned.connection, file_key)
             assert saved_file is not None and saved_file[0]["occurred_at"] == original_wall
             saved_result = saved_transaction_events(owned.connection, result_key)
             assert saved_result is not None and saved_result[0]["occurred_at"] == original_wall
-            _assert_actual_saved(owned, action_id, actual)
+            _assert_actual_saved(owned, action_id, actual, attempts_used=2)
             results_driver.list_results.assert_awaited_once()
             runtime.driver.control.assert_awaited_once()
             assert not recovery.pending_start_results and not recovery.pending_file_observations

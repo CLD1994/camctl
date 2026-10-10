@@ -214,10 +214,12 @@ class HostDemo:
     def stop(self) -> None:
         if self.proc is None:
             return
-        # 只处理本测试主程序创建的具体子进程组，随后让 C 模块完成回收。
+        # 先冻结主程序，避免清理旧 run 时自动补起新 run；再终止它
+        # 创建的具体执行组及主程序。该操作只用于测试进程收场。
         cleanup = "\n".join([
             "import os, signal, time",
             "from pathlib import Path",
+            f"os.kill({self._host_pid}, signal.SIGSTOP)",
             f"root = Path('/proc/{self._host_pid}/task')",
             "groups = set()",
             "if root.exists():",
@@ -230,6 +232,8 @@ class HostDemo:
             "for group in groups:",
             "    try: os.killpg(group, signal.SIGKILL)",
             "    except ProcessLookupError: pass",
+            f"os.kill({self._host_pid}, signal.SIGTERM)",
+            f"os.kill({self._host_pid}, signal.SIGCONT)",
             "deadline = time.monotonic() + 3",
             "while any(Path(f'/proc/{pid}').exists() for pid in groups) and time.monotonic() < deadline:",
             "    time.sleep(.01)",

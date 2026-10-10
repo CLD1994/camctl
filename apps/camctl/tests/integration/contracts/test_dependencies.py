@@ -194,7 +194,7 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
         # R4 适配器实现只依赖共享层、端口服务与自己包内的模块。
         own = next(p for p in ADAPTER_PREFIXES if _starts_with(name, (p,)))
         if (
-            _starts_with(target, FLOW_PREFIXES)
+            (_starts_with(target, FLOW_PREFIXES) and not _starts_with(target, PORT_PREFIXES))
             or _starts_with(target, ("camctl.persistence", "camctl.bootstrap"))
             or (
                 _starts_with(target, ADAPTER_PREFIXES)
@@ -332,6 +332,13 @@ class TestCheckerDetectsViolations:
             ),
         }
         assert _forbidden_edges(graph) == []
+
+    @pytest.mark.parametrize("source", ["camctl.devices.fake", "camctl.logging_runtime.fake"])
+    def test_adapter_may_use_declared_schema_port_but_not_acceptance_flow(self, source):
+        shared = _imported_modules(source, "from camctl.acceptance.schema import validate_precise, RuleError\n")
+        flow = _imported_modules(source, "from camctl.acceptance.service import accept_input\n")
+        assert _forbidden_edges({source: shared}) == []
+        assert _forbidden_edges({source: flow})
 
 
 class TestPureRulesMakeNoExternalCalls:

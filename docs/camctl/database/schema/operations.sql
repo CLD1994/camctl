@@ -60,6 +60,8 @@ CREATE TABLE operation_attempts (
     status INTEGER NOT NULL CHECK (status IN (1,2,3,4)),
     intent_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     result_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    result_first_page_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    result_last_page_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     max_attempts_used INTEGER NOT NULL CHECK (max_attempts_used > 0),
     timeout_s_json TEXT CHECK (timeout_s_json IS NULL OR (json_valid(timeout_s_json) AND json_type(timeout_s_json) IN ('integer','real'))),
     retry_interval_s_json TEXT CHECK (retry_interval_s_json IS NULL OR (json_valid(retry_interval_s_json) AND json_type(retry_interval_s_json) IN ('integer','real'))),
@@ -67,6 +69,8 @@ CREATE TABLE operation_attempts (
     result_json TEXT CHECK (result_json IS NULL OR (json_valid(result_json) AND json_type(result_json) = 'object')),
     error_json TEXT CHECK (error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')),
     UNIQUE (run_id, attempt_no),
+    CHECK ((result_first_page_event_id IS NULL) = (result_last_page_event_id IS NULL)),
+    CHECK (result_first_page_event_id IS NULL OR result_first_page_event_id <= result_last_page_event_id),
     -- 是否属于应急停止须在写事务内沿 run_id 核对；普通尝试仍必须有意图引用。
     CHECK (intent_event_id IS NOT NULL OR (status IN (2,3,4) AND copy_round IS NULL
         AND timeout_s_json IS NOT NULL AND retry_interval_s_json IS NOT NULL AND result_json IS NOT NULL)),
@@ -105,6 +109,7 @@ CREATE TABLE device_activities (
     completion_evidence_json TEXT CHECK (completion_evidence_json IS NULL OR (json_valid(completion_evidence_json) AND json_type(completion_evidence_json) = 'object')),
     result_set_state INTEGER NOT NULL CHECK (result_set_state IN (1,2,3,4)),
     result_check_json TEXT CHECK (result_check_json IS NULL OR (json_valid(result_check_json) AND json_type(result_check_json) = 'object')),
+    output_set_finalized_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     last_error_json TEXT CHECK (last_error_json IS NULL OR (json_valid(last_error_json) AND json_type(last_error_json) = 'object')),
     CHECK (safe_repeat_stop = 0 OR stop_supported = 1),
     CHECK ((baseline_first_event_id IS NULL) = (baseline_last_event_id IS NULL)),

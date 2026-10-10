@@ -707,7 +707,7 @@ _EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
     "ATTEMPT_STARTED": (False, ["apps/camctl/tests/integration/operations/test_attempts.py"]),
     "ATTEMPT_RESULT": (False, ["apps/camctl/tests/integration/operations/test_attempts.py"]),
     "DEVICE_OBSERVED": (False, ["apps/camctl/tests/integration/capture/test_capture_contract.py"]),
-    "BASELINE_CHUNK": (False, []),
+    "BASELINE_CHUNK": (False, ["apps/camctl/tests/integration/capture/test_baseline_history.py"]),
     "CAPTURE_WAIT_CHANGED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
     "RESULT_SET_CONFIRMED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
     "DEVICE_FILE_OBSERVED": (True, ["apps/camctl/tests/integration/capture/test_file_observation.py"]),
@@ -730,7 +730,7 @@ _EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
 }
 
 #: 无生产写入方的事件类型（登记先行；随接入核对，见事件契约审查）。
-_NO_PRODUCER_EVENTS = frozenset({"BASELINE_CHUNK"})
+_NO_PRODUCER_EVENTS: frozenset[str] = frozenset()
 
 
 async def test_event_coverage_map_is_complete() -> None:

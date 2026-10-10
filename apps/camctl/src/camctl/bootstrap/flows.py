@@ -1,11 +1,12 @@
 """部署装配提供的业务流程构造。
 
 每个流程是接在会话推进循环上的异步端口：接收会话上下文，每轮
-被驱动一次，自行管理所需连接与协作者。capture_flow 把到期拍
-摄工作推进一个事务批次：窗口内检查到的动作先保存首次观察，窗
+被驱动一次，自行管理所需连接与协作者。capture_flow 为每台设备
+保留跨轮推进任务及独立连接：窗口内检查到的动作先保存首次观察，窗
 口外仍未派发的动作保存过期终态，再把到期动作转入执行并登记设
 备活动，最后把执行中的到期动作交给能力处理器；处理器内部按
-已保存事实幂等推进，重复调度不产生重复副作用。report_flow
+已保存事实幂等推进，重复调度不产生重复副作用。长调用不阻塞其
+他设备下一轮推进，实际任务及保存责任交付后才关闭连接。report_flow
 每轮推进报告责任：开始到期的同步动作、补齐已覆盖但未保存的本
 地完成、冻结新的报告机会，并把进行中的报告推进到发布。
 cancel_flow 推进取消动作：正常会话按可信墙钟执行到期或未排期的取
@@ -36,20 +37,21 @@ from camctl.persistence.repositories.scheduling import (
     StartActionRequest,
 )
 from camctl.session.service import StateDbFailure
+from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
 
-__all__ = ["capture_flow", "cancel_flow", "report_flow", "residual_flow",
+__all__ = ["CaptureFlow", "capture_flow", "cancel_flow", "report_flow", "residual_flow",
            "winddown_flow"]
 
 
 def residual_flow(capture_factory, *, resume_media_results=None, resume_file_observations=None,
-                  resume_read_results=None):
+                  resume_read_results=None, owns_device=None):
     """残留收场推进流程；实现见 camctl.capture.residual。"""
     async def resume_actual_file_facts(owned):
         await _resume_actual_file_facts(
             owned, resume_file_observations, resume_media_results, resume_read_results)
 
     return _residual_flow_impl(
-        capture_factory, resume_actual_file_facts=resume_actual_file_facts)
+        capture_factory, resume_actual_file_facts=resume_actual_file_facts, owns_device=owns_device)
 
 
 async def _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
@@ -69,15 +71,17 @@ async def _resume_actual_file_facts(owned, resume_file_observations, resume_medi
 
 
 def _due_pending_actions(
-    connection: Any, now_us: int,
+    connection: Any, now_us: int, *, device_id: str | None = None,
 ) -> list[tuple[int, str, int, int]]:
     """从当前投影取到期拍摄动作及窗口事实：待执行、未取消且已到时间。"""
-    with closing(connection.execute(
-        "SELECT id, device_id, scheduled_at, max_delay_ms FROM actions"
+    query = ("SELECT id, device_id, scheduled_at, max_delay_ms FROM actions"
         " WHERE status = 1 AND cancel_requested = 0"
-        " AND type IN (1, 2, 3) AND scheduled_at <= ?"
-        " ORDER BY plan_id, input_index", (now_us,)
-    )) as cursor:
+        " AND type IN (1, 2, 3) AND scheduled_at <= ?")
+    parameters = (now_us,)
+    if device_id is not None:
+        query += " AND device_id=?"
+        parameters += (device_id,)
+    with closing(connection.execute(query + " ORDER BY plan_id, input_index", parameters)) as cursor:
         return [(int(row[0]), row[1], int(row[2]), int(row[3]))
                 for row in cursor.fetchall()]
 
@@ -109,91 +113,129 @@ def _ready_device_groups(
     return groups
 
 
-def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None,
-                 resume_file_observations=None, resume_read_results=None) -> Callable[[Any], Any]:
-    """构造推进拍摄工作的调度程序。
+class CaptureFlow:
+    """每设备持有一项跨轮任务，连接持续到原结果保存及交付完成。"""
 
-    capture_factory 接收本轮流量的数据库连接与设备身份，返回该设
-    备组装好的 CaptureRuntime；返回 None 表示该设备本轮不推进（如
-    驱动未登记），对应动作保持已保存状态等待后续会话。生产装配提
-    供真实驱动端口，集成测试注入受契约约束的替身。
-    """
+    def __init__(self, capture_factory, *, resume_media_results=None,
+                 resume_file_observations=None, resume_read_results=None):
+        self._factory = capture_factory
+        self._resume_media = resume_media_results
+        self._resume_files = resume_file_observations
+        self._resume_reads = resume_read_results
+        self._devices: dict[str, BackgroundFlow] = {}
+        self._stopping = False
 
-    async def flow(context: Any) -> None:
+    def owns_device(self, device_id):
+        owner = self._devices.get(device_id)
+        return owner is not None and owner.required_settlements() != 0
+
+    def required_settlements(self):
+        return sum(owner.required_settlements() for owner in self._devices.values())
+
+    def stop_new_work(self):
+        self._stopping = True
+        for owner in self._devices.values():
+            owner.stop_new_work()
+
+    def check_completed(self):
+        for device_id, owner in tuple(self._devices.items()):
+            try:
+                owner.check_completed()
+            except BaseException:
+                self.stop_new_work()
+                raise
+            if owner.required_settlements() == 0:
+                del self._devices[device_id]
+
+    async def settle(self):
+        try:
+            await CombinedLocalWork(tuple(self._devices.values())).settle()
+        finally:
+            self._devices = {device: owner for device, owner in self._devices.items()
+                             if owner.required_settlements() != 0}
+
+    async def __call__(self, context):
+        self.check_completed()
+        if self._stopping:
+            return
         owned = context.open_connection()
         try:
-            await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
-                                            resume_read_results)
+            await _resume_actual_file_facts(owned, self._resume_files, self._resume_media, self._resume_reads)
             now = context.clock.utc_micros()
-            scheduling = SchedulingRepository()
-            for (action_id, device_id, scheduled_at,
-                 max_delay_ms) in _due_pending_actions(owned.connection, now):
-                if now > scheduled_at + max_delay_ms * 1000:
-                    # 窗口外仍未派发：按持久化观察区分错过与耗尽。
-                    outcome = scheduling.expire_action(
-                        ExpireActionRequest(
-                            action_id=action_id,
-                            trusted_wall_now=now,
-                            occurred_at=now,
-                        ),
-                        new_operation_key(),
-                        owned,
-                    )
-                    if outcome.kind is not DbOutcomeKind.COMPLETED:
-                        raise StateDbFailure(
-                            f"动作过期事务未完成（{outcome.kind.value}）:"
-                            f" {outcome.error}")
-                    continue
-                # 窗口内检查到动作：先保存首次观察，再判断开始资格。
-                observation = scheduling.observe_window(
-                    ObserveWindowRequest(
-                        action_id=action_id,
-                        trusted_wall_now=now,
-                        occurred_at=now,
-                    ),
-                    new_operation_key(),
-                    owned,
-                )
-                if observation.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(
-                        f"窗口观察事务未完成（{observation.kind.value}）:"
-                        f" {observation.error}")
-                # 开始前的残留门：设备上有已结束动作留下的执行中活动
-                # 时，按需查询并推进残留收场；未解除前动作保持待执行。
-                runtime = capture_factory(owned, device_id)
-                if runtime is not None:
-                    from camctl.capture.residual import pass_residual_gate
-                    if not await pass_residual_gate(
-                            runtime, runtime.action(action_id)):
-                        continue
-                outcome = scheduling.start_action(
-                    StartActionRequest(
-                        action_id=action_id,
-                        trusted_wall_now=now,
-                        occurred_at=now,
-                    ),
-                    new_operation_key(),
-                    owned,
-                )
-                if outcome.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(
-                        f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
-            descriptors: Iterable = ready_capture_actions(owned.connection, now)
-            for device_id, group in _ready_device_groups(
-                    owned.connection, descriptors):
-                runtime = capture_factory(owned, device_id)
-                if runtime is None:
-                    continue
-                outcomes = await dispatch_ready(runtime, group)
-                for action_id, outcome in outcomes:
-                    if isinstance(outcome, BaseException):
-                        raise outcome
+            device_ids = dict.fromkeys(row[1] for row in _due_pending_actions(owned.connection, now))
+            for device_id, _ in _ready_device_groups(owned.connection, ready_capture_actions(owned.connection, now)):
+                device_ids[device_id] = None
         except (sqlite3.Error, ConsistencyError) as error:
             raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
         finally:
             owned.connection.close()
+        for device_id in device_ids:
+            self.check_completed()
+            if self._stopping:
+                return
+            owner = self._devices.get(device_id)
+            if owner is None:
+                async def advance(context, device_id=device_id):
+                    await self._advance_device(context, device_id)
+                owner = BackgroundFlow(advance)
+                self._devices[device_id] = owner
+            await owner(context)
 
-    return flow
+    async def _advance_device(self, context, device_id):
+        owned = context.open_connection()
+        try:
+            scheduling = SchedulingRepository()
+            runtime = self._factory(owned, device_id)
+            pending = _due_pending_actions(owned.connection, context.clock.utc_micros(), device_id=device_id)
+            for action_id, _, scheduled_at, max_delay_ms in pending:
+                if self._stopping:
+                    return
+                current = context.clock.utc_micros()
+                if current > scheduled_at + max_delay_ms * 1000:
+                    outcome = scheduling.expire_action(
+                        ExpireActionRequest(action_id, current, current), new_operation_key(), owned)
+                    if outcome.kind is not DbOutcomeKind.COMPLETED:
+                        raise StateDbFailure(f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
+                    continue
+                observation = scheduling.observe_window(
+                    ObserveWindowRequest(action_id, current, current), new_operation_key(), owned)
+                if observation.kind is not DbOutcomeKind.COMPLETED:
+                    raise StateDbFailure(f"窗口观察事务未完成（{observation.kind.value}）: {observation.error}")
+                if runtime is not None:
+                    from camctl.capture.residual import pass_residual_gate
+                    if not await pass_residual_gate(runtime, runtime.action(action_id)):
+                        continue
+                if self._stopping:
+                    return
+                # 执行前查询可能等待；建立准备活动时重新使用实际窗口时刻。
+                current = context.clock.utc_micros()
+                outcome = scheduling.start_action(
+                    StartActionRequest(action_id, current, current), new_operation_key(), owned)
+                if outcome.kind is not DbOutcomeKind.COMPLETED:
+                    raise StateDbFailure(f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
+            if runtime is None or self._stopping:
+                return
+            group = ready_capture_actions(owned.connection, context.clock.utc_micros(), device_id=device_id)
+            for action_id, outcome in await dispatch_ready(runtime, group):
+                if isinstance(outcome, BaseException):
+                    raise outcome
+        except Exception as error:
+            self._stopping = True
+            for other, owner in self._devices.items():
+                if other != device_id:
+                    owner.stop_new_work()
+            if isinstance(error, (sqlite3.Error, ConsistencyError)):
+                raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
+            raise
+        finally:
+            owned.connection.close()
+
+
+def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None,
+                 resume_file_observations=None, resume_read_results=None) -> CaptureFlow:
+    """构造按设备独立推进的拍摄拥有者；工厂返回 None 表示能力未装配。"""
+    return CaptureFlow(capture_factory, resume_media_results=resume_media_results,
+                       resume_file_observations=resume_file_observations, resume_read_results=resume_read_results)
 
 
 @dataclass(frozen=True)
@@ -209,6 +251,7 @@ def winddown_flow(
     resume_media_results=None,
     resume_file_observations=None,
     resume_read_results=None,
+    owns_device=None,
 ) -> Callable[[Any], Any]:
     """构造时钟异常会话的录像保守收场流程。
 
@@ -236,6 +279,8 @@ def winddown_flow(
             first_seen: dict[int, int] = {}
             for device_id, group in _ready_device_groups(
                     owned.connection, targets):
+                if owns_device is not None and owns_device(device_id):
+                    continue
                 runtime = capture_factory(owned, device_id)
                 if runtime is None:
                     continue

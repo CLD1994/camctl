@@ -38,6 +38,8 @@ from camctl.capture.media_flow import (
 )
 from camctl.capture.results import FileKind
 from camctl.capture.result_inputs import observed_file as _observed_file
+from camctl.capture.result_inputs import ResultPage, page_from_outcome
+from camctl.devices.directory import DirectoryCursor
 from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recovery_registry
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
@@ -264,6 +266,34 @@ class DriverResultListing:
         return ListedResult(
             self._files_from_result(result, ticket.target_id), result.outcome)
 
+    async def list_page(self, ticket: AttemptTicket, *, cursor: DirectoryCursor | None,
+                        timeout_s: Decimal, output_scope: Mapping | None = None) -> ResultPage:
+        """一次页调用保持原票据和期限，不在驱动适配层循环或重试。"""
+        if (ticket.operation != "result" or ticket.target_id is None
+                or ticket.responsibility_key != f"results/{ticket.target_id}"):
+            raise ValueError("结果列举要求原 RESULTS 活动票据")
+        params = {"activity_id": ticket.target_id}
+        if cursor is not None:
+            if cursor.binding != self._binding:
+                raise ValueError("结果游标与原设备绑定不符")
+            params["cursor"] = cursor.as_json()
+        if output_scope is not None:
+            params["output_scope"] = dict(output_scope)
+        request = ControlRequest("result", self._binding, params, ticket=ticket, timeout_s=timeout_s)
+        result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
+        if result.outcome is None:
+            raise ValueError("结果列举缺少完整实际调用结果")
+        validate_outcome(ticket, result.outcome, self._evidence)
+        page = page_from_outcome(ticket, result.outcome, cursor=cursor, binding=self._binding)
+        if page.completion_evidence is not None:
+            from camctl.devices.evidence import validate_observation
+            observed = page.completion_evidence
+            contract = self._evidence.contract(observed.type, observed.version)
+            if contract.operation != "result":
+                raise ValueError("结果页完成观察与本次操作类别不符")
+            validate_observation(observed, contract, expected_identity=ticket.target_id)
+        return page
+
     async def list_files(self, action_id: int) -> tuple[ObservedFile, ...]:
         self._evidence.contract(_RESULT_LISTED_TYPE, _RESULT_LISTED_VERSION)
         request = ControlRequest(
@@ -376,6 +406,8 @@ def session_capture_assembly(
     pending_read_results: dict | None = None,
     pending_read_business: dict | None = None,
     pending_read_ends: dict | None = None,
+    pending_baselines: dict | None = None,
+    pending_result_scans: dict | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
@@ -407,6 +439,8 @@ def session_capture_assembly(
     capture_completions = {} if pending_capture_completions is None else pending_capture_completions
     result_closes = {} if pending_result_closes is None else pending_result_closes
     file_observations = {} if pending_file_observations is None else pending_file_observations
+    baselines = {} if pending_baselines is None else pending_baselines
+    result_scans = {} if pending_result_scans is None else pending_result_scans
     continuing_read_tickets = {} if continuing_read_tickets is None else continuing_read_tickets
     pending_read_results = {} if pending_read_results is None else pending_read_results
     pending_read_business = {} if pending_read_business is None else pending_read_business
@@ -444,6 +478,8 @@ def session_capture_assembly(
             pending_capture_completions=capture_completions,
             pending_result_closes=result_closes,
             pending_file_observations=file_observations,
+            pending_baselines=baselines,
+            pending_result_scans=result_scans,
             retry_gate=retry_gate,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
@@ -472,6 +508,10 @@ def session_capture_assembly(
             query_port = port_for(entry, "query")
         except CapabilityNotDeclaredError:
             query_port = None
+        try:
+            directory_port = port_for(entry, "directory")
+        except CapabilityNotDeclaredError:
+            directory_port = None
         if results is not None:
             results_port: ResultFilesPort | None = results
         else:
@@ -525,6 +565,8 @@ def session_capture_assembly(
             pending_capture_completions=capture_completions,
             pending_result_closes=result_closes,
             pending_file_observations=file_observations,
+            pending_baselines=baselines, baseline_directory=directory_port,
+            pending_result_scans=result_scans,
             pending_read_results=pending_read_results, pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
             on_recovery_diagnostic=on_recovery_diagnostic,

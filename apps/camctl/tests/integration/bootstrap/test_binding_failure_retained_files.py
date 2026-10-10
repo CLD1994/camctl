@@ -130,7 +130,8 @@ async def test_canceled_timelapse_binding_failure_registers_retained_files_atomi
         clock=SimpleNamespace(utc_micros=lambda: now))
     flow = capture_flow(observed_factory)
     await flow(context)
-    assert len(opened) == len(runtimes) == 1
+    await flow.settle()
+    assert len(opened) == 2 and len(runtimes) == 1
     saved = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert saved.connection.execute(
@@ -182,7 +183,8 @@ async def test_canceled_timelapse_binding_failure_registers_retained_files_atomi
         saved.connection.close()
 
     await flow(context)
-    assert len(opened) == 2 and len(runtimes) == 1
+    await flow.settle()
+    assert len(opened) == 3 and len(runtimes) == 1
     repeated = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert tuple(repeated.connection.iterdump()) == before_repeat

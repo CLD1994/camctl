@@ -20,11 +20,16 @@ from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
     ActivityReleaseSave,
+    HostTimerStopSave,
     ResultRunClose,
     ResultSetPhase,
     ResultSetSave,
     validate_capture_result,
 )
+from camctl.capture.baseline_models import (
+    BaselineChunk, BaselineChunkResult, BaselineChunkSave, BaselineFixSave, BaselineRef,
+)
+from camctl.contracts.pages import Page
 from camctl.capture.files import (
     FileChecksumSave,
     FileCompletionSave,
@@ -40,6 +45,7 @@ from camctl.capture.media import (
     decide_recording_result,
 )
 from camctl.capture.result_inputs import files_from_outcome, saved_outcome
+from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.processing import (
     CheckDecisionSave,
     CheckReason,
@@ -92,7 +98,7 @@ from camctl.operations.attempts import (
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture_facts import (
-    include_start_facts, load_start_facts, release_basis_holds,
+    include_start_facts, load_start_facts, release_basis_holds, output_scope_resolved,
     unstarted_events, verify_unstarted_final,
 )
 from camctl.persistence.repositories.operations import (
@@ -101,7 +107,7 @@ from camctl.persistence.repositories.operations import (
 from camctl.persistence.repositories.scheduling import (
     ExpireActionCommand, ExpireActionRequest, ExpireOutcome,
 )
-from camctl.operations.models import AttemptTicket, EffectState, ErrorValue
+from camctl.operations.models import AttemptStatus, AttemptTicket, EffectState, ErrorValue
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
@@ -148,6 +154,7 @@ _RESULT_COMPLETE_REASON = 1
 _RESULT_UNSATISFIED_REASON = 2
 _RESULT_UNCONFIRMED_REASON = 3
 _RESULT_BEGIN_REASON = 4
+_RESULT_OUTPUTS_FINALIZED_REASON = 5
 
 #: 结论分支到（事件分支编号、目标核实状态、结果判定）的映射。
 _RESULT_PHASE_TARGETS = {
@@ -178,7 +185,7 @@ _ACTIVITY_DISPATCH_NEXT = {
     4: frozenset({2}),
 }
 _ACTIVITY_STATE_NEXT = {
-    1: frozenset({2}),
+    1: frozenset({2, 3}),
     2: frozenset({3}),
 }
 
@@ -264,9 +271,19 @@ class FinishCapture:
     catalog_facts: OutputCatalogFacts
     occurred_at: int
     failure: RecordingFailure | None = None
+    #: 可靠未派发的基准读取失败；完整原错误与终态共同保存。
+    baseline_error: ErrorValue | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
+        if (self.failure is not None and self.failure.code == "capture_failed"
+                and self.failure.details.get("reason") == "baseline_read_failed" and self.baseline_error is None):
+            raise ValueError("基准失败申请缺少实际读取错误")
+        if self.baseline_error is not None:
+            if (not isinstance(self.baseline_error, ErrorValue) or self.drafts
+                    or self.failure is None or self.failure.code != "capture_failed"
+                    or self.failure.details.get("reason") != "baseline_read_failed"):
+                raise ValueError("基准失败申请要求实际错误、专属失败原因且无产物")
 
 
 @dataclass(frozen=True)
@@ -301,6 +318,7 @@ class FinishCanceledCapture:
     catalog_facts: OutputCatalogFacts | None = None
     #: 可靠未启动的本地收场：事务内复核原尝试，与适用占用释放共同保存。
     unstarted: bool = False
+    preparation_resolved: bool = False
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
@@ -308,6 +326,8 @@ class FinishCanceledCapture:
             raise TypeError("未启动收场标记必须是布尔值")
         if self.unstarted and (self.drafts or self.catalog_facts is not None):
             raise ValueError("未启动收场不登记拍摄产物")
+        if type(self.preparation_resolved) is not bool or (self.preparation_resolved and not self.unstarted):
+            raise ValueError("准备收场依据只适用于可靠未启动的取消")
 
 
 @dataclass(frozen=True)
@@ -656,6 +676,10 @@ def register_capture_guards() -> None:
     register_guard("activity", _activity_guard)
     register_guard("release", _release_guard)
     register_guard("result_check", _result_check_guard)
+    from .baseline import register_baseline_guard
+    register_baseline_guard()
+    from .result_pages import register_result_page_guard
+    register_result_page_guard()
 
 
 class FinishCaptureCommand:
@@ -669,7 +693,9 @@ class FinishCaptureCommand:
     def __init__(self, command, key: OperationKey, *,
                  canceled: bool = False) -> None:
         self._canceled = canceled
-        self._unstarted = canceled and command.unstarted
+        self._baseline_error = None if canceled else command.baseline_error
+        self._unstarted = (canceled and command.unstarted) or self._baseline_error is not None
+        self._preparation_resolved = (command.preparation_resolved if canceled else self._baseline_error is not None)
         self._failure = None if canceled else command.failure
         self._command = command
         self._key = key
@@ -713,6 +739,11 @@ class FinishCaptureCommand:
                 raise ConsistencyError("本地取消收场缺少可靠未启动依据")
             if unstarted.run is not None and unstarted.run["status"] in (1, 2):
                 raise ConsistencyError("本地取消收场前普通启动责任必须已随取消结束")
+            if self._baseline_error is not None:
+                if (unstarted.attempts_used != 0 or unstarted.activity is None
+                        or unstarted.activity["ownership_mode"] != 2
+                        or str(unstarted.activity["id"]) != self._failure.details.get("activity_id")):
+                    raise ConsistencyError("基准读取失败必须使用原基准活动且 START 为 0")
             include_start_facts(original_start, self._state, self._owners)
         action_status = _ACTION_SUCCEEDED
         error_id: int | None = None
@@ -800,11 +831,20 @@ class FinishCaptureCommand:
                 0, 0, _ACTION_FINISHED_EVENT, action_reason,
                 (action_row,),
                 command.occurred_at,
+                evidence={"preparation_resolved": True} if self._preparation_resolved else {},
             )
         ]
         if unstarted is not None:
+            if self._baseline_error is not None:
+                error = self._baseline_error
+                templates.append(_envelope(0, 0, _ACTIVITY_OBSERVE_EVENT, 2,
+                    (_update("device_activities", unstarted.activity["id"],
+                        {"last_error_json": unstarted.activity["last_error_json"]},
+                        {"last_error_json": {"code": error.code, "stage": error.stage,
+                                             "details": dict(error.details)}}),), command.occurred_at))
             templates.extend(unstarted_events(
-                unstarted, command.occurred_at, run_status=None))
+                unstarted, command.occurred_at, run_status=None,
+                preparation_resolved=self._preparation_resolved))
         next_origin_id = _next_id(connection, "output_origins")
         # 原片先进入当前事件事实，派生关系按显式引用解析；结果保持输入次序。
         promoted_files: list[int] = []
@@ -917,12 +957,22 @@ class FinishCaptureCommand:
             action = row_facts(connection, "actions", command.action_id)
             if action is None:
                 raise ConsistencyError("原本地取消动作不存在")
-            verify_unstarted_final(connection, action, saved)
+            verify_unstarted_final(connection, action, saved, preparation_error=self._baseline_error)
+            if self._baseline_error is not None:
+                error = self._baseline_error
+                error_events = [event for event in saved if (event["type"], event["reason"]) == (13, 2)]
+                if (len(error_events) != 1 or not json_equal(
+                        error_events[0]["body"]["rows"][0]["after"]["values"].get("last_error_json"),
+                        {"code": error.code, "stage": error.stage, "details": dict(error.details)})):
+                    raise TransactionError("原基准失败事务的完整读取错误与输入不符")
         types = [(event["type"], event["reason"]) for event in saved]
         if not types or types[0][0] != _ACTION_FINISHED_EVENT:
             raise TransactionError("原事务不是完成登记，不能作为重送核实")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("完成登记的事实时刻与原事务不同")
+        if (saved[0]["body"]["evidence"].get("preparation_resolved", False)
+                != self._preparation_resolved):
+            raise TransactionError("原完成申请的准备收场依据与重送输入不符")
         action_row = saved[0]["body"]["rows"][0]
         if action_row["table"] != "actions" or action_row["id"] != command.action_id:
             raise TransactionError("原完成登记属于其他动作")
@@ -1667,6 +1717,158 @@ class _RepairSuccessCommand(_MediaProcessingCommand):
 class CaptureRepository:
     """采集完成终态事务的 SQLite 仓储。"""
 
+    def append_baseline(self, request: BaselineChunkSave, key: OperationKey,
+                        owned: OwnedConnection) -> DbOutcome[BaselineChunkResult]:
+        from .baseline import AppendBaselineCommand
+        receipt = commit_operation(AppendBaselineCommand(request, key), key, owned)
+        return DbOutcome(kind=DbOutcomeKind(receipt.kind), value=receipt.result, error=receipt.error)
+
+    def fix_baseline(self, request: BaselineFixSave, key: OperationKey,
+                     owned: OwnedConnection) -> DbOutcome[BaselineRef]:
+        from .baseline import FixBaselineCommand
+        receipt = commit_operation(FixBaselineCommand(request, key), key, owned)
+        return DbOutcome(kind=DbOutcomeKind(receipt.kind), value=receipt.result, error=receipt.error)
+
+    def baseline_ref(self, activity_id: int, owned: OwnedConnection) -> BaselineRef:
+        from .baseline import read_reference
+        return read_reference(activity_id, owned)
+
+    def save_result_page(self, request, key: OperationKey, owned: OwnedConnection):
+        from .result_pages import SaveResultPageCommand
+        receipt = commit_operation(SaveResultPageCommand(request, key), key, owned)
+        return DbOutcome(kind=DbOutcomeKind(receipt.kind), value=receipt.result, error=receipt.error)
+
+    def read_result_pages(self, ticket, cursor: int | None, batch: int, owned: OwnedConnection):
+        from .result_pages import read_pages
+        return read_pages(ticket, cursor, batch, owned)
+
+    def read_result_page(self, ref, owned: OwnedConnection):
+        from .result_pages import read_page
+        return read_page(ref, owned)
+
+    def read_last_result_page(self, ticket, owned: OwnedConnection):
+        from .result_pages import read_last_page
+        return read_last_page(ticket, owned)
+
+    def read_result_file_input(self, ref, identity: str, owned: OwnedConnection, *, allow_missing=False):
+        from .result_pages import read_file_input
+        return read_file_input(ref, identity, owned, allow_missing=allow_missing)
+
+    def read_result_sources(self, ticket, cursor, batch: int, owned: OwnedConnection):
+        from .result_pages import read_source_inputs
+        return read_source_inputs(ticket, cursor, batch, owned)
+
+    def read_result_completion(self, action_id: int, owned: OwnedConnection):
+        """读取原可靠结束观察；后轮没有重复提供依据时仍沿用原事实。"""
+        from .result_pages import _at
+
+        activity = load_activity_of_action(owned.connection, action_id)
+        if activity["activity_state"] != 3:
+            return None
+        with closing(owned.connection.execute(
+            "SELECT h.occurred_at,h.body_json FROM entity_event_links l"
+            " JOIN history_events h ON h.id=l.event_id"
+            " WHERE l.entity_type=1 AND l.entity_id=? AND h.event_type=?"
+            " AND json_extract(h.body_json,'$.reason')=?"
+            " AND (json_extract(h.body_json,'$.evidence.observation.result_page_event_id') IS NOT NULL"
+            " OR json_extract(h.body_json,'$.evidence.observation.start_result_event_id') IS NOT NULL"
+            " OR json_extract(h.body_json,'$.evidence.observation.stop_result_event_id') IS NOT NULL)"
+            " AND EXISTS (SELECT 1 FROM json_each(h.body_json,'$.rows') r"
+            " WHERE json_extract(r.value,'$.table')='device_activities'"
+            " AND json_extract(r.value,'$.id')=?"
+            " AND json_extract(r.value,'$.after.values.activity_state')=3)"
+            " ORDER BY h.id DESC LIMIT 1",
+            (action_id, _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON, activity["id"]),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            return self._read_ended_page_completion(action_id, activity["id"], owned)
+        observation = parse_exact_json(row[1])["evidence"]["observation"]
+        if "stop_result_event_id" in observation:
+            original, occurred_at = _CaptureStopCommand.source(
+                owned.connection, observation["stop_result_event_id"])
+            elapsed = observation.get("control_elapsed_ns")
+            try:
+                HostTimerStopSave(elapsed)
+            except ValueError as error:
+                raise ConsistencyError("原主机停止观察的控制时长无效") from error
+            action = row_facts(owned.connection, "actions", action_id)
+            if action["type"] == 2:
+                return None
+            expected_members = ({"stop_result_event_id", "control_elapsed_ns"}
+                if action["execution_spec_json"]["end_control"] == 2 else {"stop_result_event_id"})
+            if (set(observation) != expected_members
+                    or original["id"] != activity["id"] or occurred_at != row[0]
+                    or not json_equal(elapsed, activity["control_elapsed_ns"])):
+                raise ConsistencyError("原主机停止观察与活动、时刻或控制时长不符")
+            if elapsed is None or elapsed < action["execution_spec_json"]["target_duration_ms"] * 1_000_000:
+                return self._read_ended_page_completion(action_id, activity["id"], owned)
+            return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
+        if "start_result_event_id" in observation:
+            original, occurred_at = _CompletedStartReturnCommand.source(
+                owned.connection, observation["start_result_event_id"])
+            if (set(observation) != {"start_result_event_id"}
+                    or original["id"] != activity["id"] or occurred_at != row[0]):
+                raise ConsistencyError("原完成返回与设备结束观察的活动或时刻不符")
+            return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
+        saved, _ = _at(owned.connection, observation["result_page_event_id"])
+        original, _, occurred_at, expected = _ResultPageCompletionCommand(
+            saved.ref.ticket, saved.ref)._source(owned.connection)
+        if original["id"] != activity["id"] or occurred_at != row[0] or not json_equal(observation, expected):
+            raise ConsistencyError("原设备结束观察与完成页、活动或事实时刻不符")
+        return {"method": _DEVICE_EVIDENCE_METHOD, "observation": expected}
+
+    def _read_ended_page_completion(self, action_id, activity_id, owned):
+        """设备已结束后取得的目标保证仍由原可靠页承载，不再补写结束。"""
+        from .result_pages import _TYPE, _at
+
+        with closing(owned.connection.execute(
+            "SELECT h.id FROM entity_event_links l JOIN history_events h ON h.id=l.event_id"
+            " WHERE l.entity_type=1 AND l.entity_id=? AND h.event_type=?"
+            " AND json_extract(h.body_json,'$.evidence.result_page.activity_id')=?"
+            " AND EXISTS (SELECT 1 FROM json_each(h.body_json,"
+            " '$.evidence.result_page.outcome.result.observations') o"
+            " WHERE json_extract(o.value,'$.type')='result_files_listed'"
+            " AND json_extract(o.value,'$.version')=2"
+            " AND json_type(o.value,'$.data.completion_evidence')='object')"
+            " ORDER BY h.id DESC LIMIT 1", (action_id, _TYPE, activity_id),
+        )) as cursor:
+            found = cursor.fetchone()
+        if found is None:
+            return None
+        saved, _ = _at(owned.connection, found[0])
+        original, _, _, observation = _ResultPageCompletionCommand(
+            saved.ref.ticket, saved.ref)._source(owned.connection)
+        if original["id"] != activity_id:
+            raise ConsistencyError("已结束任务的原页保证属于其他活动")
+        return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
+
+    def read_baseline(self, ref: BaselineRef, cursor: int | None, batch: int,
+                      owned: OwnedConnection) -> Page[BaselineChunk, int]:
+        from .baseline import read_chunks
+        return read_chunks(ref, cursor, batch, owned)
+
+    def finish_capture_stop(self, finish, key, owned):
+        """停止确认保存实际结束；文件范围和采集目标分别核实。"""
+        receipt = commit_operation(_CaptureStopCommand(finish, None, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def finish_host_timer_stop(
+        self, finish: AttemptFinish, stop: HostTimerStopSave,
+        key: OperationKey, owned: OwnedConnection,
+    ) -> DbOutcome[FinishAttemptResult]:
+        """原 STOP 实际结果、实际结束和控制时长共同保存，不提前释放。"""
+        receipt = commit_operation(_CaptureStopCommand(finish, stop, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_start_result(
         self, finish: AttemptFinish, observation: ActivityObservationSave | None,
         key: OperationKey, owned: OwnedConnection,
@@ -2002,12 +2204,26 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def finalize_output_set(self, request, key, owned):
+        """沿原已保存 RESULTS 末页形成独立事实，不改写原调用结果。"""
+        receipt = commit_operation(_OutputSetFinalizedCommand(None, request.page,
+            occurred_at=request.occurred_at, key=key, action_id=request.action_id), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_result_check(
-        self, finish: AttemptFinish, confirm: ResultSetSave,
-        key: OperationKey, owned: OwnedConnection,
+        self, finish: AttemptFinish, confirm: ResultSetSave | None,
+        key: OperationKey, owned: OwnedConnection, *,
+        completion_page: ResultPageRef | None = None,
+        finalized_page: ResultPageRef | None = None,
     ) -> DbOutcome[ResultCheckOutcome]:
         receipt = commit_operation(
-            _FinishResultCheckCommand(finish, confirm, key), key, owned)
+            _FinishResultCheckCommand(finish, confirm, key,
+                                      completion_page=completion_page,
+                                      finalized_page=finalized_page), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -2385,14 +2601,20 @@ class _ActivityReleaseCommand:
             params += tuple(concluded)
         with closing(connection.execute(query + " LIMIT 1", params)) as cursor:
             unresolved = cursor.fetchone() is not None
+        action = row_facts(connection, "actions", command.action_id)
+        if action is None:
+            raise ConsistencyError("占用释放缺少所属动作")
+        self._state["actions"] = {action["id"]: action}
+        unstarted = (command.preparation_resolved and action["status"] in _ACTION_TERMINAL
+                     and load_start_facts(connection, action, result_events=activity_result_events).not_started)
         decision = decide_release(ActivityFacts(
             activity_state=ActivityState[
                 _ACTIVITY_STATE(projected["activity_state"]).name],
             occupancy_state=OccupancyState.HELD,
             completion_evidence=release_basis_holds(projected),
             unresolved_calls=unresolved,
-            file_ownership_resolved=(projected["ownership_mode"] != 2
-                                     or projected["baseline_state"] == 3)))
+            file_ownership_resolved=(projected["ownership_mode"] != 2 or unstarted
+                                     or output_scope_resolved(projected))))
         if decision is not ReleaseDecision.RELEASE:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
@@ -2403,30 +2625,52 @@ class _ActivityReleaseCommand:
                             else "calls_unsettled" if decision is ReleaseDecision.KEEP_HELD_CALLS
                             else "conditions_unmet")))
 
-        allocation = scope.allocate(1)
+        error = command.preparation_error
+        error_value = None if error is None else {"code": error.code, "stage": error.stage, "details": dict(error.details)}
+        error_changed = error_value is not None and not json_equal(facts["last_error_json"], error_value)
+        allocation = scope.allocate(2 if error_changed else 1)
         self._owners[("device_activities", activity_id)] = (
             "action", facts["action_id"])
         row = _update(
             "device_activities", activity_id,
             {"occupancy_state": 1}, {"occupancy_state": 2})
         event = _envelope(
-            allocation.first_event_id, allocation.txn_id,
+            allocation.last_event_id, allocation.txn_id,
             _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON,
             (row,), command.occurred_at)
+        if command.preparation_resolved:
+            event = replace(event, evidence={"preparation_resolved": True})
+        if error_value is not None:
+            event = replace(event, evidence={**event.evidence, "preparation_error": error_value})
+        events = []
+        if error_changed:
+            events.append(_envelope(allocation.first_event_id, allocation.txn_id,
+                _ACTIVITY_OBSERVE_EVENT, 2,
+                (_update("device_activities", activity_id,
+                    {"last_error_json": facts["last_error_json"]}, {"last_error_json": error_value}),),
+                command.occurred_at))
+        events.append(event)
         return CommandPlan(
-            events=(event,), owners=self._owners, state_rows=self._state,
+            events=tuple(events), owners=self._owners, state_rows=self._state,
             result=ActivityReleaseResult(outcome=ReleaseOutcome.RELEASED))
 
     def _reuse(self, scope, saved) -> CommandPlan:
         """原键重送：核实原释放分支与输入后恢复首次响应。"""
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
-        if types != [(_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON)]:
+        if types not in ([(_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON)],
+                         [(_ACTIVITY_OBSERVE_EVENT, 2), (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_RELEASE_REASON)]):
             raise TransactionError("操作身份已用于其他事务，不能作为占用释放重送")
         if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("占用释放的事实时刻与原事务不同")
+        if saved[-1]["body"]["evidence"].get("preparation_resolved", False) != command.preparation_resolved:
+            raise TransactionError("原释放申请的准备收场依据与重送输入不符")
+        error = command.preparation_error
+        expected_error = None if error is None else {"code": error.code, "stage": error.stage, "details": dict(error.details)}
+        if not json_equal(saved[-1]["body"]["evidence"].get("preparation_error"), expected_error):
+            raise TransactionError("原准备收场的完整错误与重送输入不符")
         facts = load_activity_of_action(scope.connection, command.action_id)
-        row = saved[0]["body"]["rows"][0]
+        row = saved[-1]["body"]["rows"][0]
         if (row["table"] != "device_activities"
                 or row["id"] != facts["id"]):
             raise TransactionError("原占用释放属于其他活动")
@@ -2491,7 +2735,7 @@ class _ActivityConcludeCommand:
             combined["activity_state"] = 3
         if not release_basis_holds(combined):
             return self._rejected("conditions_unmet")
-        if combined["ownership_mode"] == 2 and combined["baseline_state"] != 3:
+        if combined["ownership_mode"] == 2 and not output_scope_resolved(combined):
             return self._rejected("scope_limited")
 
         allocation = scope.allocate(2 if needs_ended else 1)
@@ -2619,11 +2863,13 @@ class _ResultSetConfirmCommand:
     求活动已经结束。录像活动不适用本命令。
     """
 
-    def __init__(self, command: ResultSetSave, key: OperationKey) -> None:
+    def __init__(self, command: ResultSetSave, key: OperationKey, *,
+                 ended_activity: int | None = None) -> None:
         if not isinstance(command, ResultSetSave):
             raise TypeError("结果集合核实申请必须使用 ResultSetSave")
         self._command = command
         self._key = key
+        self._ended_activity = ended_activity
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
@@ -2659,7 +2905,12 @@ class _ResultSetConfirmCommand:
                 "outcome": outcome,
                 "observation": dict(command.observation),
             }
-        basis, evidence = self._basis_after(facts)
+        basis_facts = facts
+        if self._ended_activity is not None:
+            if self._ended_activity != activity_id:
+                raise ConsistencyError("同事务设备结束不属于本结果活动")
+            basis_facts = {**facts, "activity_state": 3}
+        basis, evidence = self._basis_after(basis_facts)
         if basis != facts["completion_basis"]:
             before["completion_basis"] = facts["completion_basis"]
             after["completion_basis"] = basis
@@ -2750,6 +3001,8 @@ class _ResultSetConfirmCommand:
         pairs = (
             ("result_check_json", expected_check),
             ("capture_json", None if command.capture is None else dict(command.capture)),
+            ("completion_evidence_json",
+             None if command.evidence is None else dict(command.evidence)),
             ("last_error_json",
              None if command.error is None else dict(command.error)),
         )
@@ -2778,10 +3031,10 @@ class _ResultSetConfirmCommand:
 
 @dataclass(frozen=True)
 class ResultCheckOutcome:
-    """一轮核实结论事务的结果：尝试结束与集合结论。"""
+    """原尝试可靠结束；没有集合结论时该责任继续有限核实。"""
 
     finish: FinishAttemptResult
-    result_set: ResultSetOutcome
+    result_set: ResultSetOutcome | None
 
 
 def _merged_state_rows(*states) -> dict[str, dict[int, dict[str, Any]]]:
@@ -2830,6 +3083,213 @@ class _CompositeScope:
             first_event_id=first,
             last_event_id=first + event_count - 1,
         )
+
+
+class _CaptureStopCommand:
+    """停止确认承载实际结束；原时长输入与调用结果有共同保存身份。"""
+
+    def __init__(self, finish, stop, key):
+        if stop is not None and not isinstance(stop, HostTimerStopSave):
+            raise TypeError("主机停止事实必须使用 HostTimerStopSave")
+        self._finish, self._stop, self._key = finish, stop, key
+
+    @staticmethod
+    def _confirms(run, action, activity, actual):
+        return (run["kind"] == int(_RUN_KIND.STOP)
+                and run["activity_id"] == activity["id"]
+                and run["responsibility_key"] == f"stop/{action['id']}"
+                and action["type"] in (2, 3)
+                and actual.effect is EffectState.CONFIRMED)
+
+    @staticmethod
+    def source(connection, result_event_id):
+        if not is_json_integer(result_event_id) or result_event_id <= 0:
+            raise ConsistencyError("拍摄停止须引用原实际结果事件")
+        with closing(connection.execute(
+            "SELECT event_type,occurred_at,body_json FROM history_events WHERE id=?",
+            (result_event_id,),
+        )) as cursor:
+            event = cursor.fetchone()
+        if event is None or event[0] != _ATTEMPT_RESULT_EVENT:
+            raise ConsistencyError("拍摄停止引用的事件不是实际结果")
+        rows = [row for row in parse_exact_json(event[2])["rows"] if row["table"] == "operation_attempts"]
+        if len(rows) != 1:
+            raise ConsistencyError("拍摄停止结果须属于一个原尝试")
+        original, = rows
+        attempt = row_facts(connection, "operation_attempts", original["id"])
+        if attempt is None or attempt["result_event_id"] != result_event_id:
+            raise ConsistencyError("拍摄停止缺少原实际结果尝试")
+        run = row_facts(connection, "operation_runs", attempt["run_id"])
+        action = row_facts(connection, "actions", run["action_id"])
+        activity = load_activity_of_action(connection, action["id"])
+        actual = saved_outcome(attempt["status"], attempt["effect_state"], attempt["result_json"], attempt["error_json"])
+        if (not _CaptureStopCommand._confirms(run, action, activity, actual)
+                or any(not json_equal(original["after"]["values"].get(name), attempt[name])
+                    for name in ("status", "effect_state", "result_json", "error_json"))):
+            raise ConsistencyError("原结果没有一致的拍摄停止确认")
+        return activity, event[1]
+
+    def _observation(self, result_event_id):
+        observation = {"stop_result_event_id": result_event_id}
+        if self._stop is not None:
+            observation["control_elapsed_ns"] = self._stop.control_elapsed_ns
+        return observation
+
+    def plan(self, scope):
+        saved = saved_transaction_events(scope.connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        finish = self._finish
+        run = row_facts(scope.connection, "operation_runs", finish.ticket.run_id)
+        action = row_facts(scope.connection, "actions", run["action_id"])
+        activity = load_activity_of_action(scope.connection, action["id"])
+        if (not self._confirms(run, action, activity, finish.outcome.outcome)
+                or (action["type"] == 3 and action["execution_spec_json"]["end_control"]
+                    != (1 if self._stop is None else 2))
+                or (action["type"] == 2 and self._stop is not None)
+                or finish.run_finish is None or finish.run_finish.status is not RunOutcome.SUCCEEDED):
+            raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
+        if self._stop is None and (activity["dispatch_state"] in (1, 4)
+                or activity["activity_state"] == 3):
+            return FinishAttemptCommand(finish, self._key).plan(scope)
+        if (3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset())
+                or activity["control_elapsed_ns"] is not None):
+            raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        result = FinishAttemptCommand(finish, self._key).plan(sub)
+        if result.read_only:
+            raise ConsistencyError("已保存的普通 STOP 结果不能补写为共同停止事实")
+        before, after = {"activity_state": activity["activity_state"]}, {"activity_state": 3}
+        if self._stop is not None and self._stop.control_elapsed_ns is not None:
+            before["control_elapsed_ns"] = None
+            after["control_elapsed_ns"] = self._stop.control_elapsed_ns
+        allocation = sub.allocate(1)
+        ended = _envelope(allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+            (_update("device_activities", activity["id"], before, after),), finish.occurred_at,
+            evidence={"observation": self._observation(result.events[0].event_id)})
+        events = (*result.events, ended)
+        scope.allocate(len(events))
+        return CommandPlan(events=events,
+            owners={**result.owners, ("device_activities", activity["id"]): ("action", action["id"])},
+            state_rows=_merged_state_rows(result.state_rows, {
+                "device_activities": {activity["id"]: activity}, "actions": {action["id"]: action}}),
+            result=result.result)
+
+    def _reuse(self, scope, saved):
+        cut = 1 + int(len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
+        result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        if self._stop is None and len(saved) == cut:
+            return result
+        if len(saved) != cut + 1:
+            raise TransactionError("拍摄停止原保存缺少或增添伴随事实")
+        activity, occurred_at = self.source(scope.connection, saved[0]["event_id"])
+        event = saved[cut]
+        expected = {"activity_state": 3}
+        if self._stop is not None and self._stop.control_elapsed_ns is not None:
+            expected["control_elapsed_ns"] = self._stop.control_elapsed_ns
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)
+                or event["occurred_at"] != occurred_at or occurred_at != self._finish.occurred_at
+                or not json_equal(event["body"]["evidence"], {"observation": self._observation(saved[0]["event_id"])})
+                or len(rows) != 1 or rows[0]["table"] != "device_activities" or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], expected)):
+            raise TransactionError("拍摄停止重送改变原结果、结束时刻或控制时长")
+        return result
+
+
+class _CompletedStartReturnCommand:
+    """原成功完成返回承载设备结束，产物齐备由后续核实负责。"""
+
+    def __init__(self, finish, result_event_id) -> None:
+        self._finish, self._result_event_id = finish, result_event_id
+
+    @staticmethod
+    def applies(connection, finish) -> bool:
+        run = row_facts(connection, "operation_runs", finish.ticket.run_id)
+        if run is None or run["kind"] != int(_RUN_KIND.START):
+            return False
+        action = row_facts(connection, "actions", run["action_id"])
+        activity = load_activity_of_action(connection, run["action_id"])
+        return _CompletedStartReturnCommand._confirms(run, action, activity, finish.outcome.outcome)
+
+    @staticmethod
+    def _confirms(run, action, activity, actual):
+        return (action["type"] == 3 and activity["start_return_meaning"] == 3
+                and action["execution_spec_json"]["start_return_meaning"] == 3
+                and run["kind"] == int(_RUN_KIND.START)
+                and actual.status is AttemptStatus.SUCCEEDED
+                and actual.effect is EffectState.CONFIRMED and actual.error is None)
+
+    @staticmethod
+    def source(connection, result_event_id):
+        """仅沿实际结果事件读取原票据及固定契约，不访问新驱动。"""
+        if not is_json_integer(result_event_id) or result_event_id <= 0:
+            raise ConsistencyError("完成返回必须引用实际结果事件")
+        with closing(connection.execute(
+            "SELECT event_type,occurred_at,body_json FROM history_events WHERE id=?",
+            (result_event_id,),
+        )) as cursor:
+            event = cursor.fetchone()
+        if event is None or event[0] != _ATTEMPT_RESULT_EVENT:
+            raise ConsistencyError("完成返回引用的事件不是原尝试结果")
+        rows = parse_exact_json(event[2])["rows"]
+        originals = [value for value in rows if value["table"] == "operation_attempts"]
+        if len(originals) != 1:
+            raise ConsistencyError("完成返回必须属于一个具体原尝试")
+        original, = originals
+        attempt = row_facts(connection, "operation_attempts", original["id"])
+        if attempt is None or attempt["result_event_id"] != result_event_id:
+            raise ConsistencyError("完成返回缺少原实际结果尝试")
+        run = row_facts(connection, "operation_runs", attempt["run_id"])
+        activity = load_activity_of_action(connection, run["action_id"])
+        actual = saved_outcome(attempt["status"], attempt["effect_state"],
+                               attempt["result_json"], attempt["error_json"])
+        action = row_facts(connection, "actions", run["action_id"])
+        if (run["activity_id"] != activity["id"]
+                or run["responsibility_key"] != f"start/{run['action_id']}"
+                or not _CompletedStartReturnCommand._confirms(run, action, activity, actual)):
+            raise ConsistencyError("原结果没有固定完成返回保证")
+        if any(not json_equal(original["after"]["values"].get(name), attempt[name])
+                for name in ("status", "effect_state", "result_json", "error_json")):
+            raise ConsistencyError("完成返回的原结果与原尝试事实不符")
+        return activity, event[1]
+
+    def plan(self, scope):
+        run = row_facts(scope.connection, "operation_runs", self._finish.ticket.run_id)
+        activity = load_activity_of_action(scope.connection, run["action_id"])
+        if (not self.applies(scope.connection, self._finish)
+                or 3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset())):
+            raise ConsistencyError("原 START 不具备新的设备完成返回事实")
+        allocation = scope.allocate(1)
+        event = _envelope(allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+            (_update("device_activities", activity["id"],
+                {"activity_state": activity["activity_state"]}, {"activity_state": 3}),),
+            self._finish.occurred_at,
+            evidence={"observation": {"start_result_event_id": self._result_event_id}})
+        return CommandPlan(events=(event,),
+            owners={("device_activities", activity["id"]): ("action", run["action_id"])},
+            state_rows={"device_activities": {activity["id"]: activity},
+                        "operation_runs": {run["id"]: run},
+                        "actions": {run["action_id"]: row_facts(scope.connection, "actions", run["action_id"])}},
+            result=activity["id"])
+
+    def reuse(self, scope, saved):
+        activity, occurred_at = self.source(scope.connection, self._result_event_id)
+        expected = {"observation": {"start_result_event_id": self._result_event_id}}
+        if len(saved) != 1:
+            raise TransactionError("原 START 完成观察事件组成不同")
+        event = saved[0]
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)
+                or occurred_at != event["occurred_at"] or occurred_at != self._finish.occurred_at
+                or not json_equal(event["body"]["evidence"], expected)
+                or len(rows) != 1 or rows[0]["table"] != "device_activities"
+                or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], {"activity_state": 3})):
+            raise TransactionError("原 START 完成重送改变活动、原结果或事实时刻")
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=activity["id"])
 
 
 class _FinishStartResultCommand:
@@ -2885,6 +3345,9 @@ class _FinishStartResultCommand:
         plans = [finish]
         if self._observation is not None:
             plans.append(_ActivityObserveCommand(self._observation, self._key).plan(sub))
+        if _CompletedStartReturnCommand.applies(scope.connection, self._finish):
+            plans.append(_CompletedStartReturnCommand(
+                self._finish, finish.events[0].event_id).plan(sub))
         if self._start_finish is not None:
             plans.append(_FinishStaleRunsCommand(self._start_finish, self._key).plan(sub))
         if self._action_finish is not None:
@@ -2927,6 +3390,10 @@ class _FinishStartResultCommand:
             observe._activity_id = load_activity_of_action(
                 scope.connection, self._observation.action_id)["id"]
             plans.append(observe._reuse(saved[cut:cut + 1]))
+            cut += 1
+        if _CompletedStartReturnCommand.applies(scope.connection, self._finish):
+            plans.append(_CompletedStartReturnCommand(
+                self._finish, saved[0]["event_id"]).reuse(scope, saved[cut:cut + 1]))
             cut += 1
         if self._start_finish is not None:
             end = len(saved)
@@ -3541,58 +4008,247 @@ class _FinishResidualBindingFailureCommand:
             result=plans[0].result if request.action_id is not None else None)
 
 
+class _ResultPageCompletionCommand:
+    """只消费原尝试可靠页中的完成观察，保存设备实际结束。"""
+
+    def __init__(self, ticket: AttemptTicket, ref: ResultPageRef) -> None:
+        self._ticket, self._ref = ticket, ref
+
+    def _source(self, connection):
+        from .result_pages import _at, _load
+
+        ticket, ref = self._ticket, self._ref
+        if not isinstance(ref, ResultPageRef) or ref.ticket != ticket:
+            raise ConsistencyError("设备完成依据改变原结果尝试")
+        _, attempt, action, activity = _load(connection, ticket)
+        first, last = attempt["result_first_page_event_id"], attempt["result_last_page_event_id"]
+        if first is None or last is None or not first <= ref.event_id <= last:
+            raise ConsistencyError("设备完成依据不在原可靠页范围内")
+        saved, _ = _at(connection, ref.event_id)
+        actual = saved.page.completion_evidence
+        if saved.ref != ref or actual is None:
+            raise ConsistencyError("原结果页没有可用的实际设备完成观察")
+        if activity["dispatch_state"] in (1, 4):
+            raise ConsistencyError("可靠未启动的活动不能保存设备完成")
+        observation = {"result_page_event_id": ref.event_id,
+            "completion_evidence": {"type": actual.type, "version": actual.version,
+                                    "data": dict(actual.data)}}
+        return activity, action, saved.occurred_at, observation
+
+    def plan(self, scope) -> CommandPlan:
+        activity, action, occurred_at, observation = self._source(scope.connection)
+        if 3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset()):
+            raise ConsistencyError("原设备结束已经保存，不再次承载结束输入")
+        allocation = scope.allocate(1)
+        event = _envelope(allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+            (_update("device_activities", activity["id"],
+                {"activity_state": activity["activity_state"]}, {"activity_state": 3}),),
+            occurred_at, evidence={"observation": observation})
+        return CommandPlan(events=(event,),
+            owners={("device_activities", activity["id"]): ("action", action["id"])},
+            state_rows={"device_activities": {activity["id"]: activity},
+                        "actions": {action["id"]: action}}, result=activity["id"])
+
+    def reuse(self, scope, saved) -> CommandPlan:
+        activity, action, occurred_at, observation = self._source(scope.connection)
+        if len(saved) != 1:
+            raise TransactionError("原结果设备观察事件组成不同")
+        event = saved[0]
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)
+                or event["occurred_at"] != occurred_at
+                or not json_equal(event["body"]["evidence"], {"observation": observation})
+                or len(rows) != 1 or rows[0]["table"] != "device_activities"
+                or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], {"activity_state": 3})):
+            raise TransactionError("设备完成重送改变原可靠页、观察或时刻")
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
+                           result=activity["id"])
+
+
+class _OutputSetFinalizedCommand:
+    """原完整扫描及可靠归属证明输出范围确定，不判定采集目标。"""
+
+    def __init__(self, finish: AttemptFinish | None, ref: ResultPageRef, *,
+                 occurred_at=None, key=None, action_id=None) -> None:
+        self._finish, self._ref, self._key, self._action_id = finish, ref, key, action_id
+        self._occurred_at = occurred_at if finish is None else finish.occurred_at
+
+    def _source(self, scope):
+        from .result_pages import _load, read_pages, read_page, _TYPE
+        from camctl.operations.result_format import result_document
+
+        ref = self._ref
+        ticket = ref.ticket if self._finish is None else self._finish.ticket
+        if not isinstance(ref, ResultPageRef) or ref.ticket != ticket:
+            raise ConsistencyError("集合确定事实改变原结果尝试")
+        run, attempt, action, activity = _load(scope.connection, ticket)
+        if self._action_id is not None and self._action_id != action["id"]:
+            raise ConsistencyError("独立集合申请不属于原末页的动作")
+        saved = read_page(ref, scope)
+        if self._finish is None:
+            if attempt["result_event_id"] is None:
+                raise ConsistencyError("独立保存集合事实要求原 RESULTS 结果已经可靠保存")
+            actual = saved_outcome(attempt["status"], attempt["effect_state"],
+                attempt["result_json"], attempt["error_json"])
+        else:
+            actual = self._finish.outcome.outcome
+        if (ref.event_id != attempt["result_last_page_event_id"]
+                or saved.page.next_cursor is not None or not saved.page.set_finalized
+                or saved.page.outcome.error is not None
+                or actual.status is not AttemptStatus.SUCCEEDED or actual.error is not None
+                or self._occurred_at != saved.occurred_at
+                or not json_equal(result_document(actual), result_document(saved.page.outcome))):
+            raise ConsistencyError("集合确定事实要求原成功末页、完整集合保证和实际返回时刻")
+        cursor = None
+        while True:
+            pages = read_pages(ticket, cursor, 128, scope)
+            if pages.next_cursor is None:
+                break
+            cursor = pages.next_cursor
+        # 归属只核对原扫描实际新增的成员；历史目录成员不属于本次集合。
+        unresolved = scope.connection.execute(
+            "SELECT 1 FROM history_events h, json_each(h.body_json,'$.evidence.result_page.file_ids') i"
+            " LEFT JOIN device_files f ON f.id=json_extract(i.value,'$[1]')"
+            " WHERE h.id>=? AND h.id<=? AND h.event_type=?"
+            " AND json_extract(h.body_json,'$.evidence.attempt_id')=?"
+            " AND (f.id IS NULL OR f.source_action_id IS NOT ? OR f.ownership_evidence_json IS NULL) LIMIT 1",
+            (attempt["result_first_page_event_id"], ref.event_id, _TYPE, attempt["id"], action["id"])).fetchone()
+        if unresolved is not None:
+            raise ConsistencyError("原完整扫描仍有未确认归属的新增文件")
+        return activity, action, run, attempt
+
+    def plan(self, scope) -> CommandPlan:
+        if self._key is not None:
+            saved = saved_transaction_events(scope.connection, self._key)
+            if saved is not None:
+                return self.reuse(scope, saved)
+        activity, action, run, attempt = self._source(scope)
+        if activity["output_set_finalized_event_id"] is not None:
+            raise ConsistencyError("原集合确定事实已经保存，不能重复承载新输入")
+        allocation = scope.allocate(1)
+        event_id = allocation.first_event_id
+        event = _envelope(event_id, allocation.txn_id, _RESULT_SET_EVENT,
+            _RESULT_OUTPUTS_FINALIZED_REASON,
+            (_update("device_activities", activity["id"],
+                {"output_set_finalized_event_id": None}, {"output_set_finalized_event_id": event_id}),),
+            self._occurred_at, evidence={"attempt_id": attempt["id"],
+                "result_page_event_id": self._ref.event_id})
+        return CommandPlan(events=(event,),
+            owners={("device_activities", activity["id"]): ("action", action["id"])},
+            state_rows={"device_activities": {activity["id"]: activity}, "actions": {action["id"]: action},
+                "operation_runs": {run["id"]: run}, "operation_attempts": {attempt["id"]: attempt}})
+
+    def reuse(self, scope, saved) -> CommandPlan:
+        activity, _, _, attempt = self._source(scope)
+        if len(saved) != 1:
+            raise TransactionError("原独立集合事件组成不同")
+        event = saved[0]
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_RESULT_SET_EVENT, _RESULT_OUTPUTS_FINALIZED_REASON)
+                or event["occurred_at"] != self._occurred_at
+                or not json_equal(event["body"]["evidence"], {
+                    "attempt_id": attempt["id"], "result_page_event_id": self._ref.event_id})
+                or len(rows) != 1 or rows[0]["table"] != "device_activities"
+                or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], {"output_set_finalized_event_id": event["event_id"]})):
+            raise TransactionError("集合确定重送改变原可靠末页、活动或时刻")
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True)
+
+
 class _FinishResultCheckCommand:
-    """一轮核实结论与尝试结束、流程收场同事务提交的命令。
+    """原设备完成观察、适用集合结论与原尝试结果共同提交。
 
     结论依据与承载它的列举轮次原子保存：任一侧输入被拒整组回滚，
     不留下已结束而无结论的轮次；重送按原事务分段恢复。
     """
 
-    def __init__(self, finish: AttemptFinish, confirm: ResultSetSave,
-                 key: OperationKey) -> None:
+    def __init__(self, finish: AttemptFinish, confirm: ResultSetSave | None,
+                 key: OperationKey, *, completion_page: ResultPageRef | None = None,
+                 finalized_page: ResultPageRef | None = None) -> None:
         self._finish = finish
         self._confirm = confirm
         self._key = key
+        self._completion_page = completion_page
+        self._finalized_page = finalized_page
+        if confirm is None and completion_page is None and finalized_page is None:
+            raise TypeError("结果复合保存必须携带设备完成或集合结论")
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
             return self._reuse(scope, saved)
-        # 一次总分配覆盖尝试结果、流程收场与集合结论三个事件。
-        allocation = scope.allocate(3)
+        run = row_facts(connection, "operation_runs", self._finish.ticket.run_id)
+        if run is None or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+            raise ConsistencyError("结果复合保存必须属于原结果核实流程")
+        if self._confirm is not None and self._confirm.action_id != run["action_id"]:
+            raise ConsistencyError("集合结论与原结果尝试所属动作不同")
+        count = 1 + int(run["status"] in (1, 2)
+            and (self._finish.retry_wait or self._finish.run_finish is not None))
+        allocation = scope.allocate(count + int(self._completion_page is not None)
+                                    + int(self._confirm is not None) + int(self._finalized_page is not None))
         sub = _CompositeScope(scope, allocation.first_event_id)
         finish_plan = FinishAttemptCommand(self._finish, self._key).plan(sub)
         if finish_plan.read_only:
             raise TransactionError("结论轮次的尝试已结束，不能再次携带结论提交")
-        confirm_plan = _ResultSetConfirmCommand(self._confirm, self._key).plan(sub)
+        plans = [finish_plan]
+        ended_activity = None
+        if self._completion_page is not None:
+            end_plan = _ResultPageCompletionCommand(
+                self._finish.ticket, self._completion_page).plan(sub)
+            plans.append(end_plan)
+            ended_activity = end_plan.result
+        if self._finalized_page is not None:
+            plans.append(_OutputSetFinalizedCommand(self._finish, self._finalized_page).plan(sub))
+        confirm_plan = None
+        if self._confirm is not None:
+            confirm_plan = _ResultSetConfirmCommand(self._confirm, self._key,
+                ended_activity=ended_activity).plan(sub)
+            plans.append(confirm_plan)
         return CommandPlan(
-            events=(*finish_plan.events, *confirm_plan.events),
-            owners={**finish_plan.owners, **confirm_plan.owners},
-            state_rows=_merged_state_rows(
-                finish_plan.state_rows, confirm_plan.state_rows),
+            events=tuple(event for plan in plans for event in plan.events),
+            owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
             result=ResultCheckOutcome(
-                finish=finish_plan.result, result_set=confirm_plan.result),
+                finish=finish_plan.result,
+                result_set=None if confirm_plan is None else confirm_plan.result),
         )
 
     def _reuse(self, scope, saved) -> CommandPlan:
         types = [(event["type"], event["reason"]) for event in saved]
-        if (len(types) != 3 or types[0][0] != _ATTEMPT_RESULT_EVENT
-                or types[1] != (_RUN_END_EVENT, 3)
-                or types[2][0] != _RESULT_SET_EVENT):
+        finish_count = 1 + int(len(types) > 1
+            and types[1][0] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
+        if (not types or types[0][0] != _ATTEMPT_RESULT_EVENT
+                or len(types) != finish_count + int(self._completion_page is not None)
+                                      + int(self._confirm is not None) + int(self._finalized_page is not None)):
             raise TransactionError("操作身份已用于其他事务，不能作为核实结论重送")
         finish_plan = FinishAttemptCommand(
-            self._finish, self._key)._reuse(scope, saved[:2])
-        confirm_plan = _ResultSetConfirmCommand(
-            self._confirm, self._key)._reuse(scope, saved[2:])
+            self._finish, self._key)._reuse(scope, saved[:finish_count])
+        plans = [finish_plan]
+        offset = finish_count
+        if self._completion_page is not None:
+            plans.append(_ResultPageCompletionCommand(self._finish.ticket,
+                self._completion_page).reuse(scope, saved[offset:offset + 1]))
+            offset += 1
+        if self._finalized_page is not None:
+            plans.append(_OutputSetFinalizedCommand(self._finish, self._finalized_page).reuse(
+                scope, saved[offset:offset + 1]))
+            offset += 1
+        confirm_plan = None
+        if self._confirm is not None:
+            confirm_plan = _ResultSetConfirmCommand(
+                self._confirm, self._key)._reuse(scope, saved[offset:])
+            plans.append(confirm_plan)
         return CommandPlan(
             events=(),
-            owners={**finish_plan.owners, **confirm_plan.owners},
-            state_rows=_merged_state_rows(
-                finish_plan.state_rows, confirm_plan.state_rows),
+            owners={row: owner for plan in plans for row, owner in plan.owners.items()},
+            state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
             read_only=True,
             result=ResultCheckOutcome(
-                finish=finish_plan.result, result_set=confirm_plan.result),
+                finish=finish_plan.result,
+                result_set=None if confirm_plan is None else confirm_plan.result),
         )
 
 
@@ -3830,7 +4486,10 @@ class _FinishRecordingResultsCommand:
         validate_output_registration(capture.drafts, capture.catalog_facts)
         return action, run
 
-    def _ready(self, connection, action, run) -> None:
+    def _ready(self, scope, action, run) -> None:
+        from .result_pages import read_last_page, read_pages
+
+        connection = scope.connection
         with closing(connection.execute(
             "SELECT 1 FROM operation_attempts WHERE run_id=? AND status=? LIMIT 1",
             (run["id"], int(_ATTEMPT_STATUS.RUNNING)),
@@ -3850,7 +4509,26 @@ class _FinishRecordingResultsCommand:
                 if any(value.type == "result_files_listed" for value in actual.observations):
                     ticket = AttemptTicket(number, "result", str(run["activity_id"]),
                                            run["responsibility_key"], run["id"])
-                    metadata.update((entry.identity, entry) for entry in files_from_outcome(ticket, actual))
+                    last = read_last_page(ticket, scope)
+                    if last is None:
+                        metadata.update((entry.identity, entry) for entry in files_from_outcome(ticket, actual))
+                        continue
+                    if last.page.outcome != actual:
+                        raise TransactionError("录像核实收场改变原可靠末页的实际结果")
+                    if number == run["attempts_used"] and (
+                            not last.page.scan_complete or not last.page.set_finalized
+                            or actual.error is not None):
+                        raise TransactionError("录像核实收场缺少原完整集合保证")
+                    page_cursor = None
+                    while True:
+                        pages = read_pages(ticket, page_cursor, 1, scope)
+                        for saved in pages.items:
+                            accepted = dict(saved.file_ids)
+                            metadata.update((entry.identity, entry) for entry in saved.page.entries
+                                            if entry.identity in accepted)
+                        if pages.next_cursor is None:
+                            break
+                        page_cursor = pages.next_cursor
         with closing(connection.execute(
             "SELECT id FROM device_files WHERE source_action_id=? ORDER BY id", (action["id"],),
         )) as cursor:
@@ -3940,7 +4618,7 @@ class _FinishRecordingResultsCommand:
                 result=CaptureResult(action["status"], plan["status"], output_ids,
                     FinishDisposition.RETIRED))
         capture = FinishCaptureCommand(self._request.capture, self._key)
-        self._ready(connection, action, run)
+        self._ready(scope, action, run)
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         plans = [capture.plan(sub)]
         if run["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
@@ -4106,6 +4784,28 @@ def _observer_binding(action) -> tuple[str, str]:
     return device, driver
 
 
+def file_discovery_row(command: FileObservationSave, file_id: int, identity_key: str):
+    """共同构造首次发现的未知文件行，不提前确认归属或完成。"""
+    return _row("device_files", file_id, {
+        "observer_action_id": command.observer_action_id,
+        "source_action_id": None,
+        "identity_key": identity_key,
+        "locator_json": dict(command.locator),
+        "ownership_evidence_json": None,
+        "original_name": command.original_name,
+        "media_type": command.media_type,
+        "role": int(_FILE_ROLE.UNDETERMINED),
+        "original_device_file_id": None,
+        "pairing_evidence_json": None,
+        "presence_state": int(_FILE_PRESENCE.UNKNOWN),
+        "completion_state": int(_FILE_COMPLETION.UNKNOWN),
+        "completion_evidence_json": None,
+        "size_bytes": None,
+        "checksum_support": int(_FILE_CHECKSUM.UNDETERMINED),
+        "sha256": None,
+        "last_error_json": None,
+    })
+
 class _FileCreateCommand:
     """登记一次设备文件发现（DEVICE_FILE_OBSERVED.CREATE）。
 
@@ -4149,25 +4849,7 @@ class _FileCreateCommand:
                 result=ObservationOutcome(ObservationDisposition.ALREADY, file_id),
             )
         file_id = _next_id(connection, "device_files")
-        row = _row("device_files", file_id, {
-            "observer_action_id": command.observer_action_id,
-            "source_action_id": None,
-            "identity_key": identity_key,
-            "locator_json": dict(command.locator),
-            "ownership_evidence_json": None,
-            "original_name": command.original_name,
-            "media_type": command.media_type,
-            "role": int(_FILE_ROLE.UNDETERMINED),
-            "original_device_file_id": None,
-            "pairing_evidence_json": None,
-            "presence_state": int(_FILE_PRESENCE.UNKNOWN),
-            "completion_state": int(_FILE_COMPLETION.UNKNOWN),
-            "completion_evidence_json": None,
-            "size_bytes": None,
-            "checksum_support": int(_FILE_CHECKSUM.UNDETERMINED),
-            "sha256": None,
-            "last_error_json": None,
-        })
+        row = file_discovery_row(command, file_id, identity_key)
         self._owners[("device_files", file_id)] = ("device_file", file_id)
         # 公开投影路由从文件行走到产物表；新发现尚无产物，装配空范围。
         self._state.setdefault("device_files", {})[file_id] = dict(row.after.values)
@@ -4744,6 +5426,8 @@ class SaveEmergencyCommand:
                     "copy_round": None,
                     "intent_event_id": None,
                     "result_event_id": first_id,
+                    "result_first_page_event_id": None,
+                    "result_last_page_event_id": None,
                     "max_attempts_used": record.max_attempts,
                     "timeout_s_json": self._timeout_s,
                     "retry_interval_s_json": self._retry_interval_s,
@@ -4933,8 +5617,8 @@ def _activity_guard(event, context) -> None:
         before_state = row.before.values.get("activity_state")
         after_state = row.after.values.get("activity_state")
         if after_state == 3 and before_state != 3:
-            # 活动结束必须由本事务的可靠停止事实承载；同事件创建的
-            # 最终流程行即为该事实。
+            # 实际停止或原结果页的完成观察承载设备结束；本地退出
+            # 和目录扫描结束均不构成该依据。
             stopped = any(
                 row.table == "operation_runs"
                 and not row.before.exists
@@ -4945,8 +5629,68 @@ def _activity_guard(event, context) -> None:
             stopped = stopped or any(
                 values.get("status") == 3 for values in runs.values()
             )
-            if not stopped:
-                raise EventValidationError("活动结束缺少可靠停止事实")
+            observation = event.evidence.get("observation")
+            completed = False
+            if isinstance(observation, Mapping) and "result_page_event_id" in observation:
+                actual = observation.get("completion_evidence")
+                completed = (
+                    set(observation) == {"result_page_event_id", "completion_evidence"}
+                    and is_json_integer(observation["result_page_event_id"])
+                    and 0 < observation["result_page_event_id"] < event.event_id
+                    and isinstance(actual, Mapping)
+                    and set(actual) == {"type", "version", "data"}
+                    and isinstance(actual["type"], str) and bool(actual["type"])
+                    and is_json_integer(actual["version"]) and actual["version"] > 0
+                    and isinstance(actual["data"], Mapping)
+                    and actual["data"].get("activity_id") == str(row.row_id))
+                if not completed:
+                    raise EventValidationError("结果页完成观察不属于原活动或可靠先前页")
+            if isinstance(observation, Mapping) and "start_result_event_id" in observation:
+                facts = context.state_rows.get("device_activities", {}).get(row.row_id, {})
+                result_id = observation["start_result_event_id"]
+                completed = (set(observation) == {"start_result_event_id"}
+                    and is_json_integer(result_id) and 0 < result_id < event.event_id
+                    and facts.get("start_return_meaning") == 3
+                    and any(attempt.get("result_event_id") == result_id
+                        and attempt.get("status") == int(_ATTEMPT_STATUS.SUCCEEDED)
+                        and attempt.get("effect_state") == int(enum_for("operation_attempts.effect_state").CONFIRMED)
+                        and attempt.get("error_json") is None
+                        and any(run.get("kind") == int(_RUN_KIND.START)
+                            and run.get("action_id") == facts.get("action_id")
+                            and run.get("activity_id") == row.row_id
+                            and run.get("id") == attempt.get("run_id") for run in runs.values())
+                        for attempt in context.state_rows.get("operation_attempts", {}).values()))
+                if not completed:
+                    raise EventValidationError("完成返回缺少原活动的可靠成功 START 结果")
+            if isinstance(observation, Mapping) and "stop_result_event_id" in observation:
+                facts = context.state_rows.get("device_activities", {}).get(row.row_id, {})
+                action = context.state_rows.get("actions", {}).get(facts.get("action_id"), {})
+                result_id, elapsed = observation["stop_result_event_id"], observation.get("control_elapsed_ns")
+                try:
+                    HostTimerStopSave(elapsed)
+                except ValueError as error:
+                    raise EventValidationError("主机停止的控制时长非法") from error
+                end_control = (1 if action.get("type") == 2
+                               else action.get("execution_spec_json", {}).get("end_control"))
+                shape = (set(observation) == {"stop_result_event_id"} if end_control == 1
+                    else set(observation) == {"stop_result_event_id", "control_elapsed_ns"} if end_control == 2
+                    else False)
+                completed = (shape
+                    and is_json_integer(result_id) and 0 < result_id < event.event_id
+                    and action.get("type") in (2, 3)
+                    and json_equal(row.after.values.get("control_elapsed_ns"), elapsed)
+                    and any(attempt.get("result_event_id") == result_id
+                        and attempt.get("status") != int(_ATTEMPT_STATUS.RUNNING)
+                        and attempt.get("effect_state") == int(enum_for("operation_attempts.effect_state").CONFIRMED)
+                        and any(run.get("kind") == int(_RUN_KIND.STOP)
+                            and run.get("action_id") == facts.get("action_id")
+                            and run.get("activity_id") == row.row_id
+                            and run.get("id") == attempt.get("run_id") for run in runs.values())
+                        for attempt in context.state_rows.get("operation_attempts", {}).values()))
+                if not completed:
+                    raise EventValidationError("拍摄停止观察缺少原 STOP 确认或一致控制时长")
+            if not stopped and not completed:
+                raise EventValidationError("活动结束缺少可靠停止或设备完成事实")
         basis_before = row.before.values.get("completion_basis")
         basis_after = row.after.values.get("completion_basis")
         capture_columns = (
@@ -4994,8 +5738,18 @@ def _release_guard(event, context) -> None:
         if not release_basis_holds(facts):
             raise EventValidationError(
                 "占用释放缺少活动结束、未派发或完成依据")
-        if facts.get("ownership_mode") == 2 and facts.get("baseline_state") != 3:
-            raise EventValidationError("输出范围归属未固定不得释放占用")
+        action = context.state_rows.get("actions", {}).get(facts.get("action_id"), {})
+        if "preparation_resolved" in event.evidence and event.evidence["preparation_resolved"] is not True:
+            raise EventValidationError("准备收场依据必须是实际可靠的 true")
+        if "preparation_error" in event.evidence and event.evidence.get("preparation_resolved") is not True:
+            raise EventValidationError("实际准备错误必须与准备收场共同保存")
+        unstarted = ((event.evidence.get("preparation_resolved") is True or facts.get("baseline_state") == 3)
+                     and action.get("status") in _ACTION_TERMINAL
+                     and facts.get("dispatch_state") in (1, 4)
+                     and facts.get("activity_state") == 1 and facts.get("started_at") is None)
+        if (facts.get("ownership_mode") == 2 and not unstarted
+                and not output_scope_resolved(facts)):
+            raise EventValidationError("原输出范围的归属及集合未确定不得释放占用")
 
 
 def _result_check_guard(event, context) -> None:
@@ -5013,6 +5767,43 @@ def _result_check_guard(event, context) -> None:
     if len(rows) != 1:
         raise EventValidationError("结果集合核实恰好修改一个设备活动")
     row = rows[0]
+    if event.reason == _RESULT_OUTPUTS_FINALIZED_REASON:
+        from camctl.capture.result_inputs import page_from_outcome, saved_outcome
+
+        if (set(row.before.values) != {"output_set_finalized_event_id"}
+                or row.before.values["output_set_finalized_event_id"] is not None
+                or not json_equal(row.after.values, {"output_set_finalized_event_id": event.event_id})
+                or set(event.evidence) != {"attempt_id", "result_page_event_id"}):
+            raise EventValidationError("独立集合事实只能首次保存本事件引用及原尝试末页")
+        attempt_id, page_id = event.evidence["attempt_id"], event.evidence["result_page_event_id"]
+        if (not is_json_integer(attempt_id) or not is_json_integer(page_id)
+                or not 0 < page_id < event.event_id or attempt_id <= 0):
+            raise EventValidationError("独立集合事实缺少可靠原尝试或先前页引用")
+        attempt = context.state_rows.get("operation_attempts", {}).get(attempt_id, {})
+        run = context.state_rows.get("operation_runs", {}).get(attempt.get("run_id"), {})
+        activity = context.state_rows.get("device_activities", {}).get(row.row_id, {})
+        if (attempt.get("status") != int(_ATTEMPT_STATUS.SUCCEEDED)
+                or attempt.get("error_json") is not None
+                or attempt.get("result_last_page_event_id") != page_id
+                or run.get("kind") != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+                or run.get("activity_id") != row.row_id or run.get("action_id") != activity.get("action_id")):
+            raise EventValidationError("独立集合事实不属于原活动的可靠成功扫描末页")
+        try:
+            ticket = AttemptTicket(attempt["attempt_no"], "result", str(row.row_id),
+                run["responsibility_key"], run["id"])
+            outcome = saved_outcome(attempt["status"], attempt["effect_state"],
+                attempt["result_json"], attempt["error_json"])
+            observation = next(item for item in outcome.observations
+                               if item.type == "result_files_listed" and item.version == 2)
+            from camctl.devices.directory import DirectoryCursor
+            cursor = observation.data["cursor"]
+            page = page_from_outcome(ticket, outcome,
+                cursor=None if cursor is None else DirectoryCursor.from_json(cursor))
+        except (ValueError, KeyError, StopIteration) as error:
+            raise EventValidationError("独立集合事实缺少合法的原 v2 扫描结果") from error
+        if page.next_cursor is not None or not page.set_finalized:
+            raise EventValidationError("独立集合事实要求扫描结束且原集合确定")
+        return
     state_after = row.after.values.get("result_set_state")
     state_before = row.before.values.get("result_set_state")
     if event.reason == _RESULT_BEGIN_REASON:

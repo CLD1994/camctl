@@ -21,6 +21,45 @@ def test_photo_spec_has_no_device_parameter_copy():
     assert build_capture_spec("camera_take_photo", None) == {}
 
 
+def _completed_spec():
+    return {"duration_based": True, "wait_after_send": False,
+        "stop_supported": True, "end_control": 1, "start_return_meaning": 3,
+        "completion_mode": 1, "target_duration_ms": 1234}
+
+
+def test_completed_definition_requires_explicit_full_call_timeout():
+    with pytest.raises(ValueError):
+        validate_capture_spec("camera_timelapse", _completed_spec())
+
+
+def test_completed_definition_keeps_exact_full_call_timeout():
+    spec = {**_completed_spec(), "start_call_timeout_s": Decimal("600.0001")}
+    assert validate_capture_spec("camera_timelapse", spec) == spec
+
+
+@pytest.mark.parametrize("timeout", [None, True, "600", 0, -1, 600.0,
+    Decimal("NaN"), Decimal("Infinity")])
+def test_completed_definition_rejects_invalid_full_call_timeout(timeout):
+    with pytest.raises(ValueError):
+        validate_capture_spec("camera_timelapse", {**_completed_spec(), "start_call_timeout_s": timeout})
+
+
+def test_driver_full_call_timeout_survives_definition_build_and_read():
+    task = _task(start_return_meaning=StartReturn.COMPLETED, wait_after_send=False,
+        result_wait_margin_s=None, completion_mode=CompletionMode.DEVICE_EVIDENCE,
+        start_call_timeout_s=Decimal("600.0001"))
+    spec = build_capture_spec("camera_timelapse", task)
+    assert validate_capture_spec("camera_timelapse", spec)["start_call_timeout_s"] == Decimal("600.0001")
+
+
+@pytest.mark.parametrize("meaning", [StartReturn.SENT, StartReturn.STARTED])
+def test_short_control_return_rejects_full_native_call_timeout(meaning):
+    spec = {**_completed_spec(), "start_return_meaning": int(meaning),
+        "start_call_timeout_s": 600}
+    with pytest.raises(ValueError):
+        validate_capture_spec("camera_timelapse", spec)
+
+
 @pytest.mark.parametrize("seconds, milliseconds", [(Decimal(".001"), 1), (Decimal("1.234"), 1234), (Decimal("9223372036854775.807"), 9223372036854775807)])
 def test_record_duration_is_exact_and_bounded(seconds, milliseconds):
     with localcontext() as context:
@@ -59,7 +98,9 @@ def test_timelapse_control_capability_matrix(end, stop, completion, valid):
 
 @pytest.mark.parametrize("start", list(StartReturn))
 def test_device_task_can_declare_each_start_meaning(start):
-    task = _task(start_return_meaning=start, wait_after_send=False, result_wait_margin_s=None, completion_mode=CompletionMode.DEVICE_EVIDENCE)
+    task = _task(start_return_meaning=start, wait_after_send=False, result_wait_margin_s=None,
+        completion_mode=CompletionMode.DEVICE_EVIDENCE,
+        start_call_timeout_s=Decimal("2") if start is StartReturn.COMPLETED else None)
     assert build_capture_spec("camera_timelapse", task)["start_return_meaning"] == int(start)
 
 

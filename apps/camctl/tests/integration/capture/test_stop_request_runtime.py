@@ -43,5 +43,8 @@ async def test_stop_request_carries_original_ticket_and_current_timeout(tmp_path
         assert request.ticket.target_id == "12"
         assert request.timeout_s == Decimal("0.125")
         assert row[3] == "0.125"
+        assert owned.connection.execute("SELECT activity_state FROM device_activities WHERE action_id=12").fetchone() == (1,)
+        assert owned.connection.execute("SELECT status,effect_state FROM operation_attempts WHERE run_id=?",
+            (request.ticket.run_id,)).fetchone() == (2, 3)
     finally:
         owned.connection.close()

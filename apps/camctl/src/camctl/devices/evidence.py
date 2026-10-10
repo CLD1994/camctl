@@ -132,3 +132,9 @@ class EvidenceRegistry:
         if found is None:
             raise EvidenceError(f"证据契约未登记: {key!r}")
         return found
+
+    def with_contract(self, contract: EvidenceContract) -> EvidenceRegistry:
+        """保留原登记，仅在新登记中替换或加入指定类型和版本。"""
+        contracts = dict(self._contracts)
+        contracts[(contract.type, contract.version)] = contract
+        return EvidenceRegistry(tuple(contracts.values()))

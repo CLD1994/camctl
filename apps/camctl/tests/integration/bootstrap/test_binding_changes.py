@@ -162,7 +162,9 @@ async def test_changed_binding_respects_execution_eligibility(environment, chang
     owned, context, home = environment
     ids = _photos(owned, state)
     if state == "terminal":
-        await _capture({key: {"driver": "camctl-adb"} for key in ids}, _Driver(), home)(context)
+        original = _capture({key: {"driver": "camctl-adb"} for key in ids}, _Driver(), home)
+        await original(context)
+        await original.settle()
     if state == "canceled":
         _register(owned, {
             "request_id": "2", "created_at": "2026-01-15 08:00:00", "name": "取消",
@@ -175,7 +177,9 @@ async def test_changed_binding_respects_execution_eligibility(environment, chang
         devices["cam-a"] = {"driver": "alternate-camera"}
     driver = _Driver()
 
-    await _capture(devices, driver, home)(context)
+    capture = _capture(devices, driver, home)
+    await capture(context)
+    await capture.settle()
 
     row = owned.connection.execute(
         "SELECT status, execution_started, cancel_requested, driver_id, error_code, error_details_json"

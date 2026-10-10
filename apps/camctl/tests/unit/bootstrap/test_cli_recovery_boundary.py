@@ -8,6 +8,7 @@ import pytest
 from camctl import cli
 from camctl.bootstrap import application, lifecycle
 from camctl.capture.recovery import RecoveryBoundary
+from camctl.devices.drivers.adb_cameras import registration
 from camctl.session.outcome import SessionOutcome
 
 
@@ -17,6 +18,7 @@ from camctl.session.outcome import SessionOutcome
 ])
 def test_cli_uses_deployment_run_boundary_only_for_execution(monkeypatch, kind, expected):
     config = object()
+    monkeypatch.setattr(registration, "register_builtin_camera_drivers", create_autospec(registration.register_builtin_camera_drivers))
     build = create_autospec(lifecycle.build_runtime)
     execute = create_autospec(lifecycle.execute_command)
     execute.return_value = SessionOutcome(succeeded=True, needs_run=True if kind is cli.CommandKind.SUBMIT else None)

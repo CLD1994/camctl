@@ -41,6 +41,7 @@ class FakeProcess:
     def __init__(self, output: bytes = b"") -> None:
         self.output = output
         self.output_failure = None
+        self.stderr = None
         self._exited: asyncio.Future[LocalExit] | None = None
         self.terminate_requests = 0
         self.kill_requests = 0
@@ -59,6 +60,10 @@ class FakeProcess:
 
     async def wait_output(self) -> None:
         return None
+
+    async def wait_output_failure(self) -> None:
+        if self.output_failure is None:
+            await asyncio.Future()
 
     def exit(self, exit_code: int | None = None, signal: int | None = None) -> None:
         if self._exited is None:
@@ -136,6 +141,67 @@ async def test_already_exited_sends_no_signal() -> None:
     assert outcome.exit == LocalExit(exit_code=0)
 
 
+@pytest.mark.parametrize("phase", ["running", "spawn", "output", "terminating"])
+async def test_coroutine_cancel_waits_original_process_and_output_and_keeps_outcome(phase):
+    spawned, spawn_release, output_release = (asyncio.Event() for _ in range(3))
+
+    class HeldProcess(FakeProcess):
+        async def wait_output(self):
+            await output_release.wait()
+
+    process = HeldProcess(b"original output")
+    process.stderr = b"original stderr"
+    stop = FakeStop()
+
+    async def spawn(spec):
+        spawned.set()
+        if phase == "spawn":
+            await spawn_release.wait()
+        return process
+
+    if phase == "output":
+        process.exit(exit_code=0)
+    task = asyncio.create_task(execute_tool(
+        _spec(grace=Decimal("0.01")), stop=stop, spawner=spawn))
+    try:
+        await spawned.wait()
+        if phase == "terminating":
+            stop.request()
+            await _within(lambda: process.terminate_requests == 1)
+        task.cancel()
+        await _within(lambda: task.done() or phase == "spawn" or
+                      phase == "output" or process.terminate_requests == 1)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert not task.done()
+        spawn_release.set()
+        if phase != "output":
+            await _within(lambda: process.kill_requests == 1)
+            assert process.terminate_requests == 1
+            task.cancel()
+            assert not task.done()
+            process.exit(signal=9)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert not task.done()
+        output_release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        raw = caught.value.outcome
+        assert raw.output == b"original output" and raw.stderr == b"original stderr"
+        if phase == "output":
+            assert raw.exit == LocalExit(exit_code=0) and raw.error is None
+            assert process.terminate_requests == process.kill_requests == 0
+        else:
+            assert raw.exit == LocalExit(signal=9) and raw.error == "cancelled"
+            assert process.terminate_requests == process.kill_requests == 1
+    finally:
+        spawn_release.set()
+        process.exit(exit_code=0)
+        output_release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_grace_exit_continues_without_kill() -> None:
     process = FakeProcess()
     stop = FakeStop()
@@ -200,6 +266,48 @@ async def test_normal_exit_has_no_error_and_bounded_output() -> None:
     assert outcome.exit == LocalExit(exit_code=0)
     assert outcome.output == b"ok"
     assert process.terminate_requests == 0
+
+
+async def test_truncated_output_is_an_explicit_error_after_draining():
+    class Bytes:
+        def __init__(self):
+            self.chunks = iter([b"1234", b"56", b""])
+            self.calls = 0
+
+        async def read(self, limit):
+            self.calls += 1
+            return next(self.chunks)
+
+    stream = Bytes()
+    captured = await process_module._read_bounded(stream, 4)
+    assert captured.data == b"1234"
+    assert captured.error is not None
+    assert stream.calls == 3
+
+
+async def test_stderr_is_preserved_separately_from_file_data():
+    process = FakeProcess(b"file-data")
+    process.stderr = b"remote-error"
+    process.exit(exit_code=2)
+    outcome = await (await _drive(_spec(), process))
+    assert outcome.output == b"file-data"
+    assert getattr(outcome, "stderr", None) == b"remote-error"
+
+
+async def test_stream_sink_failure_is_a_classified_output_error():
+    class Bytes:
+        def __init__(self):
+            self.chunks = iter([b"file-data", b"remaining", b""])
+
+        async def read(self, limit):
+            return next(self.chunks)
+
+    async def sink(data):
+        raise OSError("sink failed")
+
+    captured = await process_module._read_bounded(Bytes(), 4, sink)
+    assert captured.data == b""
+    assert "sink failed" in captured.error
 
 
 def test_local_exit_is_exclusive() -> None:

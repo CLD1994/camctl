@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, runtime_checkable
 
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, OPERATIONS
@@ -53,6 +53,8 @@ class DriverDeclaration:
     capture_read_parallel_supported: bool = False
     #: 逐操作声明普通前台命令的恢复假设；缺省不授权恢复。
     adb_foreground_recovery_operations: frozenset[str] = frozenset()
+    #: 启动前完整目录准备，独立于任务结果列举能力。
+    directory_supported: bool = False
 
     def __post_init__(self) -> None:
         operations = self.adb_foreground_recovery_operations
@@ -73,6 +75,8 @@ class ControlRequest:
     params: Mapping[str, Any]
     ticket: AttemptTicket | None = None
     timeout_s: Decimal | None = None
+    #: 多步启动在新设备派发前调用；None 返回值表示仍有原业务资格。
+    dispatch_check: Callable[[], str | None] | None = None
 
 
 @dataclass(frozen=True)

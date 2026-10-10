@@ -562,7 +562,9 @@
         "retry_interval_s_json",
         "effect_state",
         "result_json",
-        "error_json"
+        "error_json",
+        "result_first_page_event_id",
+        "result_last_page_event_id"
       ],
       "derived": [
         "id"
@@ -570,7 +572,8 @@
       "write_once": [
         "result_event_id",
         "result_json",
-        "error_json"
+        "error_json",
+        "result_first_page_event_id"
       ],
       "owner": {
         "inherit": "run_id"
@@ -612,7 +615,8 @@
         "completion_evidence_json",
         "result_set_state",
         "result_check_json",
-        "last_error_json"
+        "last_error_json",
+        "output_set_finalized_event_id"
       ],
       "derived": [
         "id"
@@ -620,7 +624,8 @@
       "write_once": [
         "sent_at",
         "started_at",
-        "wait_completed_event_id"
+        "wait_completed_event_id",
+        "output_set_finalized_event_id"
       ],
       "owner": {
         "entity": "action",
@@ -1110,6 +1115,11 @@
     "motor": {
       "contract": "workflow-fields.md#电机发送事实",
       "rule": "意图与开始共同保存；只有首次新意图事务交付本地许可。可靠未发送、完整写入、明确失败或恢复未知与动作终态及父计划聚合共同保存，未知不补造字节；同键核实原输入和完整事务，不重授许可。",
+      "scope": "transaction"
+    },
+    "result_page": {
+      "contract": "history-formats.md#结果页的分批记录",
+      "rule": "页属于原 CHECK_CAPTURE_RESULTS 活动、流程和 RUNNING 尝试；从页号 1 连续推进，原游标和后游标精确衔接，末页或实际错误后不再追加。原完整 Outcome、文件输入和页范围同事务保存，实际发现的新文件按 DEVICE_FILE_OBSERVED.CREATE 登记。基准比较使用原 FIXED 范围，以单序稳定路径流形成差集；原键逐字段核实时刻、页和完整错误，不依赖当前投影反推原输入。",
       "scope": "transaction"
     }
   },
@@ -4204,7 +4214,9 @@
             "plan_aggregate",
             "output"
           ],
-          "evidence": []
+          "evidence": [
+            "preparation_resolved"
+          ]
         },
         "EXPIRE": {
           "reason": 3,
@@ -4256,7 +4268,9 @@
             "plan_aggregate",
             "output"
           ],
-          "evidence": []
+          "evidence": [
+            "preparation_resolved"
+          ]
         },
         "CANCEL": {
           "reason": 4,
@@ -4300,7 +4314,9 @@
             "plan_aggregate",
             "output"
           ],
-          "evidence": []
+          "evidence": [
+            "preparation_resolved"
+          ]
         }
       }
     },
@@ -5020,7 +5036,10 @@
             "activity",
             "release"
           ],
-          "evidence": []
+          "evidence": [
+            "preparation_resolved",
+            "preparation_error"
+          ]
         }
       }
     },
@@ -5478,6 +5497,40 @@
             "result_check"
           ],
           "evidence": []
+        },
+        "OUTPUTS_FINALIZED": {
+          "reason": 5,
+          "title": "保存本次文件集合确定事实",
+          "rows": [
+            {
+              "table": "device_activities",
+              "op": "update",
+              "columns": [
+                "output_set_finalized_event_id"
+              ],
+              "before": {
+                "output_set_finalized_event_id": [
+                  null
+                ]
+              },
+              "required": [
+                "output_set_finalized_event_id"
+              ],
+              "after": {},
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "result_check"
+          ],
+          "evidence": [
+            "attempt_id",
+            "result_page_event_id"
+          ]
         }
       }
     },
@@ -8993,6 +9046,47 @@
           ]
         }
       }
+    },
+    "RESULT_PAGE": {
+      "id": 35,
+      "version": 1,
+      "branches": {
+        "APPEND": {
+          "reason": 1,
+          "title": "保存本轮实际页返回、文件观察及页范围",
+          "rows": [
+            {
+              "table": "operation_attempts",
+              "op": "update",
+              "columns": [
+                "result_first_page_event_id",
+                "result_last_page_event_id"
+              ],
+              "before": {
+                "status": [
+                  1
+                ]
+              },
+              "after": {},
+              "required": [
+                "result_last_page_event_id"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "result_page"
+          ],
+          "evidence": [
+            "attempt_id",
+            "result_page"
+          ]
+        }
+      }
     }
   },
   "history_references": {
@@ -9034,6 +9128,17 @@
       "target": "assigning_event"
     },
     "runtime_state.trusted_time_event_id": {
+      "target": "assigning_event"
+    },
+    "operation_attempts.result_first_page_event_id": {
+      "target": "assigning_event",
+      "exception": "RESULT_PAGE 首批共同赋值为本页 E；首引用保持，末引用随每页推进；没有页时共同为空。"
+    },
+    "operation_attempts.result_last_page_event_id": {
+      "target": "assigning_event",
+      "exception": "RESULT_PAGE 首批共同赋值为本页 E；首引用保持，末引用随每页推进；没有页时共同为空。"
+    },
+    "device_activities.output_set_finalized_event_id": {
       "target": "assigning_event"
     }
   },

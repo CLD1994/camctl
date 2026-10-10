@@ -110,6 +110,12 @@ def _environment(
     _seed_record_action(connection, 1, 1)
     if action_type != 2:
         connection.execute("UPDATE actions SET type = ? WHERE id = 1", (action_type,))
+    if action_type == 3:
+        connection.execute("UPDATE actions SET execution_spec_json = ? WHERE id = 1", (
+            json.dumps({"duration_based": True, "wait_after_send": True,
+                "target_duration_ms": 600_000, "result_wait_margin_ms": 0,
+                "end_control": 1, "stop_supported": True,
+                "start_return_meaning": 1, "completion_mode": completion_mode}),))
     _seed_activity(connection, 1)
     connection.execute(
         "UPDATE device_activities SET completion_mode = ?, dispatch_state = 3,"
@@ -331,7 +337,8 @@ class TestResultSetConfirmation:
                 contract=_RESULT_CONTRACT,
                 observation={"missing": ["video"]},
                 capture={"status": "failed",
-                         "error": {"code": "capture_unsatisfied"}},
+                         "error": {"code": "capture_failed", "stage": "execution",
+                                   "details": {"activity_id": "1", "reason": "invalid_outputs"}}},
                 evidence={
                     "method": "known_failure",
                     "observation": {"missing": ["video"]},
@@ -447,7 +454,8 @@ class TestResultSetConfirmation:
                     action_id=1, occurred_at=_NOW, phase=ResultSetPhase.COMPLETE,
                     contract=_RESULT_CONTRACT, observation={},
                     capture={"status": "failed",
-                             "error": {"code": "capture_unsatisfied"}},
+                             "error": {"code": "capture_failed", "stage": "execution",
+                                       "details": {"activity_id": "1", "reason": "invalid_outputs"}}},
                     evidence={"method": "time_and_outputs",
                               "wait_completed_event_id": wait_id,
                               "observation": {}}))

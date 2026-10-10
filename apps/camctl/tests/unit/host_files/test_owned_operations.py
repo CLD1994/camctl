@@ -89,6 +89,32 @@ async def test_owned_cancellation_requests_stop_but_waits_actual_result():
 
 
 @pytest.mark.asyncio
+async def test_owned_cancellation_preserves_actual_save_failure_as_original_cause():
+    executor = FileTaskExecutor(Supervisor())
+    entered, release = asyncio.Event(), asyncio.Event()
+    failure = ValueError("original save failed")
+
+    async def body(control):
+        entered.set()
+        await release.wait()
+        assert control.stop_requested
+        raise failure
+
+    running = asyncio.create_task(executor.run_owned_async_file_task(
+        _task("read", (1,), body)))
+    await entered.wait()
+    running.cancel()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert not running.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await running
+    assert caught.value.__cause__ is failure
+    assert executor.unfinished_files() == ()
+
+
+@pytest.mark.asyncio
 async def test_nested_media_task_keeps_outer_result_owner_and_file_lease():
     from unittest.mock import create_autospec
     from camctl.session.supervision import ResponsibilityOwner

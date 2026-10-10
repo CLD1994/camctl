@@ -44,7 +44,11 @@ def _main(argv: list[str]) -> int:
     spec_path = os.environ.get("CAMCTL_TEST_DRIVER_SPEC")
     if spec_path:
         spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
-        install_stub_driver(spec)
+        if spec.get("camera_demo"):
+            from camera_demo_fixtures import install_camera_demo
+            install_camera_demo(spec)
+        else:
+            install_stub_driver(spec)
         if os.environ.get("CAMCTL_TEST_TRACE_DISPATCH"):
             _trace_dispatch()
     from camctl.cli import main

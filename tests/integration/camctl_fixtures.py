@@ -115,7 +115,8 @@ class Deployment:
                             'retry_interval_s = "0"',
                             "",
                             "[devices.cam-1.cleanup]",
-                            'retry_interval_s = "0"',
+                            'delete_retry_interval_s = "0"',
+                            'query_retry_interval_s = "0"',
                             "",
                         ]
                         if devices
@@ -369,8 +370,6 @@ _STUB_EVIDENCE_CONTRACTS = (
     ("timelapse_sent", 1, "control", frozenset({"activity_id"}), "activity_id"),
     ("stop_returned", 1, "stop", frozenset(), None),
     ("stop_confirmed", 1, "stop", frozenset({"activity_id"}), "activity_id"),
-    ("result_files_listed", 1, "result",
-     frozenset({"activity_id", "entries"}), "activity_id"),
     ("results_returned", 1, "result", frozenset(), None),
     ("file_digest", 1, "digest",
      frozenset({"file_id", "sha256"}), "file_id"),
@@ -514,8 +513,11 @@ class _ScriptedStubDriver:
             settlement=Settlement(
                 SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation(
-                type="result_files_listed", version=1,
-                data={"activity_id": identity, "entries": entries}),),
+                type="result_files_listed", version=2,
+                data={"activity_id": identity, "entries": entries,
+                      "cursor": request.params.get("cursor"), "next_cursor": None,
+                      "set_finalized": self._spec.get("set_finalized", True),
+                      "completion_evidence": None}),),
         ))
 
     def _device_content(self, identity: str) -> bytes:
@@ -698,8 +700,9 @@ def install_stub_driver(spec: dict) -> None:
     from camctl.devices.drivers.runtime import register_drivers
     from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
     from camctl.devices.ports import DriverDeclaration
+    from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
-    evidence = EvidenceRegistry(tuple(
+    evidence = EvidenceRegistry((RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT) + tuple(
         EvidenceContract(
             type=kind, version=version, operation=operation, fields=fields,
             identity_field=identity)

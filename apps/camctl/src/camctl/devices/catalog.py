@@ -81,7 +81,7 @@ class Catalog:
 
     def __init__(self, config: ConfigSnapshot, definitions: DriverDefinitions) -> None:
         self._devices: dict[str, Mapping[str, Any]] = dict(config.devices)
-        self._definitions = definitions
+        available: dict[str, DriverDefinition] = {}
         for driver_id, definition in definitions.drivers.items():
             if definition.driver_id != driver_id:
                 raise RuleError("驱动身份与登记键矛盾")
@@ -94,6 +94,15 @@ class Catalog:
                             or capability.parameter_type in seen or not isinstance(capability.preview_supported, bool)):
                         raise RuleError("驱动动作及参数类型定义矛盾")
                     seen.add(capability.parameter_type)
+            actions = {}
+            for action_type, capabilities in definition.actions.items():
+                complete = tuple(capability for capability in capabilities
+                    if action_type not in {"camera_record", "camera_timelapse"}
+                    or callable(capability.task_factory))
+                if complete:
+                    actions[action_type] = complete
+            available[driver_id] = DriverDefinition(driver_id, actions)
+        self._definitions = DriverDefinitions(available)
         self._implemented = frozenset(
             action_type for definition in definitions.drivers.values() for action_type in definition.actions
         ) | {"obtain_action_outputs", "delete_action_outputs", "cancel_task", "report_status", "motor_control"}
@@ -199,10 +208,9 @@ def build_catalog(config: ConfigSnapshot, definitions: DriverDefinitions) -> Cat
 def default_driver_definitions() -> DriverDefinitions:
     """当前进程可见的已部署驱动定义。
 
-    第一版没有内置厂商映射；部署适配（或集成测试的受约束替身）
-    在进程启动阶段经定义登记点接入，登记结果与将来内置的厂商映
-    射合并。未登记定义的驱动不出现，声明了未登记驱动定义的设备
-    在目录构建时报部署错误。
+    正常装配先通过内置相机或其他部署适配登记同源定义。此函数只
+    读取快照，不自行登记或执行设备 IO。候选能力由 Catalog 过滤；
+    声明了未登记驱动定义的设备在目录构建时报部署错误。
     """
     from camctl.devices.definitions_runtime import current_driver_definitions
 

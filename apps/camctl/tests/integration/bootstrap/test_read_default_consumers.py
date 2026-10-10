@@ -139,6 +139,12 @@ async def _default_world(pipeline, monkeypatch):
         assert deps.startup_error is None
         assert (await lifecycle.execute_command(deps, None)).succeeded
         assert len(factories) == 3 and len(contexts) == 1
+        # 本夹具核验每轮业务结果；等待生产拥有者交付，之后才能检查状态。
+        capture = contexts[0].flows["scheduling"]
+        async def advance_capture(context):
+            await capture(context)
+            await capture.settle()
+        contexts[0].flows["scheduling"] = advance_capture
         return deps, factories, contexts[0], reader, driver, ends, wall, factory_calls
     except BaseException:
         lifecycle.close_runtime(deps)

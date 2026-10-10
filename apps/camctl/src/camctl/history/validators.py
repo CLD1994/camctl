@@ -16,7 +16,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.history.changes import ChangeDerivationError, event_report_targets
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import BaselineRangeRead, ReadCoverage
 from camctl.history.events import (
     EventEnvelope,
     HistoryEventError,
@@ -56,6 +56,7 @@ class EventContext:
     state_rows: Mapping[str, Mapping[int, Mapping[str, Any]]]
     transaction_rows: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None
     read_coverage: ReadCoverage = field(default_factory=ReadCoverage)
+    baseline_reads: Mapping[int, BaselineRangeRead] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；
@@ -428,9 +429,9 @@ def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
     成员白名单来自分支登记；此处只核对已出现成员的取值类型。
     布尔不是整数编号；驱动依据必须是结构化对象，成员顺序无关。
     """
-    if member == "attempt_id":
+    if member in ("attempt_id", "result_page_event_id"):
         if not is_json_integer(value) or value <= 0:
-            _fail(f"事件 {event_id} 的 evidence.attempt_id 必须是正整数")
+            _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
     elif member == "input_key":
         if (not isinstance(value, str) or len(value) != 32
                 or any(char not in "0123456789abcdef" for char in value)):
@@ -438,12 +439,24 @@ def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
     elif member == "observation":
         if not isinstance(value, Mapping):
             _fail(f"事件 {event_id} 的 evidence.observation 必须是结构化对象")
-    elif member in ("activity_id", "chunk_no", "chunk_count", "entry_count"):
+    elif member in ("activity_id", "chunk_no"):
         if not is_json_integer(value) or value <= 0:
             _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
+    elif member in ("chunk_count", "entry_count"):
+        if not is_json_integer(value) or value < 0:
+            _fail(f"事件 {event_id} 的 evidence.{member} 必须是非负整数")
     elif member == "entries":
         if not isinstance(value, list):
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
+    elif member == "preparation_resolved":
+        if value is not True:
+            _fail(f"事件 {event_id} 的 evidence.preparation_resolved 只能为实际可靠的 true")
+    elif member == "preparation_error":
+        if (not isinstance(value, Mapping) or set(value) != {"code", "stage", "details"}
+                or not isinstance(value["code"], str) or not value["code"]
+                or not isinstance(value["stage"], str) or not value["stage"]
+                or not isinstance(value["details"], Mapping)):
+            _fail(f"事件 {event_id} 的 evidence.preparation_error 必须是完整实际错误")
 
 
 def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[str, Any]]:

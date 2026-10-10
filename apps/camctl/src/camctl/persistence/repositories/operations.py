@@ -48,9 +48,11 @@ from camctl.operations.models import (
     SettlementBasis,
     ValidatedOutcome,
 )
+from camctl.operations.result_format import result_document, error_document as _error_json
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
+from camctl.scheduling.resources import baseline_start_reason, capture_scope_blocked
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
@@ -453,6 +455,11 @@ class BeginAttemptCommand:
             intent.query_purpose,
             self._state,
         )
+        if intent.kind is OperationKind.START:
+            activity = self._state["device_activities"][intent.target.activity_id]
+            if capture_scope_blocked(connection, action["device_id"], action["id"],
+                                     activity["ownership_mode"], activity["output_scope_json"]):
+                return self._rejected("device_busy")
 
         found = _find_responsibility(connection, intent)
         run_facts = (
@@ -506,6 +513,8 @@ class BeginAttemptCommand:
                 "status": int(_ATTEMPT_STATUS.RUNNING),
                 "intent_event_id": event_id,
                 "result_event_id": None,
+                "result_first_page_event_id": None,
+                "result_last_page_event_id": None,
                 "max_attempts_used": intent.config.max_attempts,
                 "timeout_s_json": intent.config.timeout_s,
                 "retry_interval_s_json": intent.config.retry_interval_s,
@@ -723,45 +732,7 @@ class BeginAttemptCommand:
 
 
 def _result_json(validated: ValidatedOutcome) -> dict:
-    """按统一外层结构编码结束结果；状态、错误及效果由行列保存。"""
-    outcome = validated.outcome
-    settlement = outcome.settlement
-    assert settlement is not None
-    document = {
-        "format_version": outcome.format_version,
-        "settlement": {
-            "basis": settlement.basis.value,
-            "evidence": {
-                "type": settlement.evidence.type,
-                "version": settlement.evidence.version,
-                "data": dict(settlement.evidence.data),
-            },
-        },
-        "observations": [
-            {
-                "type": observation.type,
-                "version": observation.version,
-                "data": dict(observation.data),
-            }
-            for observation in outcome.observations
-        ],
-    }
-    if outcome.call_info is not None:
-        call_info: dict[str, Any] = {}
-        if outcome.call_info.local_exit_code is not None:
-            call_info["local_exit"] = {"exit_code": outcome.call_info.local_exit_code}
-        elif outcome.call_info.local_signal is not None:
-            call_info["local_exit"] = {"signal": outcome.call_info.local_signal}
-        if outcome.call_info.remote_exit_code is not None:
-            call_info["remote_exit_code"] = outcome.call_info.remote_exit_code
-        document["call_info"] = call_info
-    return document
-
-
-def _error_json(error) -> dict | None:
-    if error is None:
-        return None
-    return {"code": error.code, "stage": error.stage, "details": dict(error.details)}
+    return result_document(validated.outcome)
 
 
 def _verify_result_ticket(finish: AttemptFinish, run: Mapping[str, Any], attempt: Mapping[str, Any]) -> None:
@@ -1500,6 +1471,15 @@ def _attempt_intent_guard(event, context) -> None:
     elif attempt_no != 1:
         _fail("首次建立的流程必须从第 1 次尝试开始")
     kind = run_after.get("kind")
+    if kind == int(_RUN_KIND.START):
+        activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
+        action = _guard_facts(context, "actions", run_after.get("action_id"))
+        try:
+            preparation_reason = baseline_start_reason(activity, action)
+        except ConsistencyError as error:
+            raise EventValidationError(str(error)) from error
+        if preparation_reason is not None:
+            _fail(f"启动意图的基准准备未完成: {preparation_reason}")
     copy_round = attempts[0].after.values.get("copy_round")
     if kind == int(_RUN_KIND.READ_FILE):
         if (

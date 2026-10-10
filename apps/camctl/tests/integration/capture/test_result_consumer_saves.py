@@ -63,14 +63,14 @@ async def _consume(runtime, consumer, action_id, handler):
         await capture_handler(handler)(action_id, runtime)
 
 
-def _assert_actual_saved(owned, action_id, actual):
+def _assert_actual_saved(owned, action_id, actual, *, attempts_used=1):
     row = owned.connection.execute(
         "SELECT t.status,t.result_json,t.error_json,r.attempts_used FROM operation_attempts t"
-        " JOIN operation_runs r ON r.id=t.run_id WHERE r.responsibility_key=?",
+        " JOIN operation_runs r ON r.id=t.run_id WHERE r.responsibility_key=? AND t.attempt_no=1",
         (f"results/{action_id}",)).fetchone()
     assert row is not None
     status, result_json, error_json, count = row
-    assert (status, count) == (3, 1)
+    assert (status, count) == (3, attempts_used)
     saved = json.loads(result_json)
     assert saved["settlement"] == {"basis": "assumed", "evidence": {
         "type": "adb_foreground_assumption", "version": 1,
@@ -123,7 +123,8 @@ async def test_closed_result_consumers_use_saved_input_without_device_query(tmp_
                 action_id=action_id, occurred_at=runtime.wall_us(),
                 phase=ResultSetPhase.UNSATISFIED, contract="task_scope_files",
                 observation={"reason": "known_failure"},
-                capture={"status": "failed", "error": {"code": "capture_unsatisfied"}},
+                capture={"status": "failed", "error": {"code": "capture_failed", "stage": "execution",
+                    "details": {"activity_id": str(action_id), "reason": "invalid_outputs"}}},
                 evidence={"method": "known_failure", "observation": {"reason": "known_failure"}},
             ), new_operation_key(), owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error

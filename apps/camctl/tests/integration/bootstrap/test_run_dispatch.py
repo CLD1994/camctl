@@ -57,7 +57,7 @@ from camctl.session.locks import probe_admission
 from ..capture.test_capture_contract import (
     DriverDouble,
     ResultsDouble,
-    _EVIDENCE,
+    _PAGE_EVIDENCE as _EVIDENCE,
     _entry,
 )
 from ..persistence.test_runtime import _create_valid_database  # noqa: F401

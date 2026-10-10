@@ -29,6 +29,14 @@ RESOURCE_SOURCES: dict[str, str] = {
     "registry/event-transitions.json": "docs/camctl/database/event-transitions.json",
     "registry/report-dependencies.json": "docs/camctl/database/report-dependencies.json",
     "runtime/sqlite-runtime.json": "docs/camctl/sqlite-runtime.json",
+    "examples/camera-demo/action6-record.json": "docs/camctl/examples/camera-demo/action6-record.json",
+    "examples/camera-demo/action6-timelapse.json": "docs/camctl/examples/camera-demo/action6-timelapse.json",
+    "examples/camera-demo/osmo360ii-record.json": "docs/camctl/examples/camera-demo/osmo360ii-record.json",
+    "examples/camera-demo/osmo360ii-timelapse.json": "docs/camctl/examples/camera-demo/osmo360ii-timelapse.json",
+    "examples/camera-demo/obtain.json": "docs/camctl/examples/camera-demo/obtain.json",
+    "examples/camera-demo/report-ack.json": "docs/camctl/examples/camera-demo/report-ack.json",
+    "examples/camera-demo/config.toml": "docs/camctl/examples/camera-demo/config.toml",
+    "examples/camera-demo/prepare-plan.py": "docs/camctl/examples/camera-demo/prepare-plan.py",
 }
 
 

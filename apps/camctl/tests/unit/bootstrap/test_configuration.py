@@ -18,6 +18,22 @@ from camctl.bootstrap.config import (
 )
 
 
+@pytest.mark.parametrize("adb", [None, "serial-1", {}, {"serial": None}, {"serial": 1},
+    {"serial": ""}, {"serial": "-implicit"}, {"serial": "bad\0serial"},
+    {"serial": "serial-1", "unknown": True}])
+def test_explicit_adb_table_requires_valid_serial(adb):
+    with pytest.raises(ConfigError):
+        load_config({"devices": {"cam-1": {"kind": "camera", "driver": "dji-action6", "adb": adb}}}, ConfigDefaults())
+
+
+def test_explicit_adb_serial_is_preserved_without_default():
+    config = load_config({"devices": {
+        "cam-1": {"kind": "camera", "driver": "dji-action6", "adb": {"serial": "serial-1"}},
+        "cam-2": {"kind": "camera", "driver": "dji-action6"}}}, ConfigDefaults())
+    assert config.devices["cam-1"]["adb"]["serial"] == "serial-1"
+    assert "adb" not in config.devices["cam-2"]
+
+
 class TestCapacityParsing:
     def test_exact_decimal_conversion(self) -> None:
         assert parse_capacity("1.5 KiB") == 1536

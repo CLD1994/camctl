@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
 import contextlib
@@ -84,6 +84,7 @@ _EVIDENCE = EvidenceRegistry(
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
         RESULT_FILES_CONTRACT,
+        RESULT_PAGE_CONTRACT,
     )
 )
 
@@ -304,7 +305,7 @@ class TestNormalStopAtTarget:
         driver = _ActivityDriver()
         stopper = _StopDouble()
         clock = {"ns": time.monotonic_ns()}
-        results = ResultsDouble({})
+        results = ResultsDouble({}, set_finalized=False)
         task = _run_session(deps, cfg, driver, stopper, clock, results)
         try:
             # 到期开始：启动确认即登记本会话计时锚点与活动启动事实。
@@ -334,6 +335,7 @@ class TestNormalStopAtTarget:
             assert results.calls == [1]
             # 原空列表已保存重试等待；单调钟到间隔后核实迟到原片。
             results.files_by_action[1] = (_entry("clip-1"),)
+            results.set_finalized = True
             clock["ns"] += 3_000_000_000
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
             assert results.calls == [1, 1]

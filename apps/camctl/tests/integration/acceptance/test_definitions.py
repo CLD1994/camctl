@@ -32,6 +32,17 @@ class TaskCatalog(Catalog):
         return ParameterDefinition(CAMERA_DEFINITION, {"shots":1}, True, task)
 
 
+class CompletedTaskCatalog(TaskCatalog):
+    timeout = Decimal("600.0001")
+
+    def parameter_definition(self, device_id, action_type, parameter_type):
+        definition = super().parameter_definition(device_id, action_type, parameter_type)
+        return replace(definition, task_factory=lambda params: replace(
+            definition.task_factory(params), wait_after_send=False, result_wait_margin_s=None,
+            start_return_meaning=StartReturn.COMPLETED, completion_mode=CompletionMode.DEVICE_EVIDENCE,
+            start_call_timeout_s=self.timeout))
+
+
 def _obtain(params):
     return {"name":"fetch", "type":"obtain_action_outputs", "scheduled_at":"2026-01-15 09:00:00", "params":params}
 
@@ -103,6 +114,35 @@ async def test_valid_input_with_invalid_task_rolls_back_whole_registration(envir
         await _accept((connection, replace(context, catalog=catalog)), tmp_path, body)
     assert connection.execute("SELECT COUNT(*) FROM plans").fetchone() == (0,)
     assert connection.execute("SELECT COUNT(*) FROM actions").fetchone() == (0,)
+
+
+@pytest.mark.parametrize("timeout", [None, 0, -1, True, "600", Decimal("Infinity")])
+async def test_invalid_completed_call_timeout_rolls_back_admission(environment, tmp_path, timeout):
+    connection, context = environment
+    catalog = CompletedTaskCatalog()
+    catalog.timeout = timeout
+    body = _plan_body()
+    body["actions"][0]["type"] = "camera_timelapse"
+    with pytest.raises(AcceptanceStateError):
+        await _accept((connection, replace(context, catalog=catalog)), tmp_path, body)
+    assert connection.execute("SELECT count(*) FROM plans").fetchone() == (0,)
+    assert connection.execute("SELECT count(*) FROM actions").fetchone() == (0,)
+
+
+async def test_completed_timeout_keeps_original_value_after_driver_defaults_change(environment, tmp_path):
+    connection, context = environment
+    catalog = CompletedTaskCatalog()
+    context = replace(context, catalog=catalog)
+    body = _plan_body()
+    body["actions"][0]["type"] = "camera_timelapse"
+    await _accept((connection, context), tmp_path, body)
+    (tmp_path / "plan.json").unlink()
+    catalog.timeout = Decimal("900")
+    reused = await _accept((connection, context), tmp_path, {"request_id": "42"})
+    assert reused.plan_disposition is PlanDisposition.REUSED
+    history = HistoryRepository(tmp_path / "state.db")
+    row = history.restore_entity("action", 1, history.current_boundary())[("actions", 1)]
+    assert read_action_spec(row)["start_call_timeout_s"] == Decimal("600.0001")
 
 
 async def test_history_and_retry_keep_first_definition_after_default_changes(environment, tmp_path):

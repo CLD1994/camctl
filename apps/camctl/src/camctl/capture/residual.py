@@ -34,6 +34,7 @@ from camctl.operations.attempts import (
     StaleRunFinish,
 )
 from camctl.operations.models import ErrorValue
+from camctl.operations.owned_calls import owned_tool_call
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import ExpireActionRequest
 from camctl.persistence.repositories.capture import FinishResidualBindingFailure, RecordingFailure
@@ -307,6 +308,7 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
     return await _preflight_check(runtime, trigger, candidate)
 
 
+@owned_tool_call
 async def _preflight_check(
     runtime: Any, trigger: Mapping[str, Any], candidate: ResidualCandidate
 ) -> bool:
@@ -441,6 +443,7 @@ async def _advance_winddown(
     await _stop_residual(runtime, trigger_id, candidate)
 
 
+@owned_tool_call
 async def _stop_residual(
     runtime: Any, trigger_id: int, candidate: ResidualCandidate,
 ) -> None:
@@ -524,6 +527,7 @@ def _stop_error(candidate: ResidualCandidate, run_id: int):
                  "operation_run_id": str(run_id)})
 
 
+@owned_tool_call
 async def _confirm_by_query(
     runtime: Any, trigger_id: int, candidate: ResidualCandidate,
 ) -> bool:
@@ -591,6 +595,7 @@ async def _confirm_by_query(
 def residual_flow(
     capture_factory: Any, *,
     resume_actual_file_facts: Callable[[Any], Awaitable[None]] | None = None,
+    owns_device: Callable[[str], bool] | None = None,
 ) -> Any:
     """构造无人驱动的残留收场推进流程。
 
@@ -609,7 +614,7 @@ def residual_flow(
         try:
             if resume_actual_file_facts is not None:
                 await resume_actual_file_facts(owned)
-            await _recover_old_attempts(owned, capture_factory)
+            await _recover_old_attempts(owned, capture_factory, owns_device=owns_device)
             _settle_orphan_queries(context, owned, OperationRepository())
             with closing(owned.connection.execute(
                 "SELECT id, action_id, activity_id, attempts_used"
@@ -632,6 +637,8 @@ def residual_flow(
                     facts = cursor.fetchone()
                 if facts is None:
                     raise ConsistencyError(f"残留收场关联事实缺失: {run_id}")
+                if owns_device is not None and owns_device(facts[4]):
+                    continue
                 candidate = ResidualCandidate(
                     activity_id=activity_id, action_id=int(facts[1]),
                     stop_supported=int(facts[2]), safe_repeat_stop=int(facts[3]))
@@ -646,7 +653,7 @@ def residual_flow(
     return flow
 
 
-async def _recover_old_attempts(owned: Any, capture_factory: Any) -> None:
+async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device=None) -> None:
     """分批结束具有可靠旧边界的原调用，动作及流程终态保持。"""
     from camctl.capture.handlers import _RECOVERABLE_OPERATIONS
     from camctl.operations.models import AttemptTicket
@@ -672,6 +679,8 @@ async def _recover_old_attempts(owned: Any, capture_factory: Any) -> None:
             last_id = identity
             if not isinstance(device_id, str) or not device_id:
                 raise ConsistencyError("拍摄旧调用缺少所属设备身份")
+            if owns_device is not None and owns_device(device_id):
+                continue
             if device_id not in runtimes:
                 runtimes[device_id] = capture_factory(owned, device_id)
             runtime = runtimes[device_id]

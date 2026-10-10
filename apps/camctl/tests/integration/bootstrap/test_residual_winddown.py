@@ -12,7 +12,7 @@ execute_command）同契约驱动、查询与停止端口替身组合：录像�
 
 from __future__ import annotations
 
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
 import contextlib
@@ -92,6 +92,7 @@ _EVIDENCE = EvidenceRegistry(
         EvidenceContract(type="results_returned", version=1, operation="result",
                          fields=frozenset()),
         RESULT_FILES_CONTRACT,
+        RESULT_PAGE_CONTRACT,
     )
 )
 
@@ -357,7 +358,8 @@ def _tracewrap(name, flow):
 
 def _run_session(deps, cfg, factory, *, trace=False):
     scheduling = capture_flow(factory)
-    residual = residual_flow(factory)
+    residual = residual_flow(factory, owns_device=scheduling.owns_device)
+    deps.background_flows = (scheduling,)
     if trace:
         scheduling = _tracewrap("scheduling", scheduling)
         residual = _tracewrap("residual", residual)

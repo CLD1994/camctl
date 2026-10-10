@@ -65,7 +65,8 @@ async def test_closed_latest_error_keeps_previously_registered_file_input(tmp_pa
                 action_id=action_id, occurred_at=runtime.wall_us(),
                 phase=ResultSetPhase.UNSATISFIED, contract="task_scope_files",
                 observation={"reason": "known_failure"},
-                capture={"status": "failed", "error": {"code": "capture_unsatisfied"}},
+                capture={"status": "failed", "error": {"code": "capture_failed", "stage": "execution",
+                    "details": {"activity_id": str(action_id), "reason": "invalid_outputs"}}},
                 evidence={"method": "known_failure", "observation": {"reason": "known_failure"}},
             ), new_operation_key(), owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
@@ -80,6 +81,9 @@ async def test_closed_latest_error_keeps_previously_registered_file_input(tmp_pa
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM outputs WHERE source_action_id=? AND device_file_id IS NOT NULL",
             (action_id,)).fetchone() == (1,)
+        if consumer in ("photo", "record"):
+            assert resumed.action(action_id)["status"] == 4
+            assert resumed.action(action_id)["error_details_json"]["reason"] == "outputs_unknown"
         attempts = owned.connection.execute(
             "SELECT t.status,t.result_json,r.attempts_used FROM operation_attempts t"
             " JOIN operation_runs r ON r.id=t.run_id WHERE r.responsibility_key=?"

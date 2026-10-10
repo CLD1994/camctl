@@ -72,6 +72,8 @@ class RuntimeDeps:
     recovery_max_event_id: int | None = None
     #: 正常运行共用的文件实际拥有者及固定维护范围；submit 不装配。
     work_files: Any = None
+    #: 独立推进的拍摄及取回流程；实际任务和连接在会话收场前交付。
+    background_flows: tuple[Any, ...] = ()
     #: 原 await 拥有者的实际结果；普通、残留与受限工厂共用同一集合。
     capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
     #: 拍摄完整终态及附属读取收尾申请，三种工厂共用。
@@ -80,6 +82,10 @@ class RuntimeDeps:
     capture_result_closes: dict[int, PendingResultCheckClose] = field(default_factory=dict)
     #: 文件发现及其派生事实具有独立生命周期，三种工厂共用。
     capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
+    #: 基准准备及原页保存由本会话持有，普通、残留与受限工厂共用。
+    capture_baselines: dict = field(default_factory=dict)
+    #: 原结果页保存申请由普通、残留和受限工厂共享。
+    capture_result_scans: dict = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
     capture_recording_anchors: dict[int, tuple[int, int]] = field(default_factory=dict)
     #: 已保存等待的原返回锚点；由流程行与剩余预算判定适用性。
@@ -110,6 +116,20 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     from camctl.capture.handlers import (
         resume_canceled_recording_results, resume_capture_completions, resume_result_check_closes,
     )
+    from types import SimpleNamespace
+    from camctl.capture.baseline import PreparationPhase, resume_baseline_save, resume_baseline_settlement
+    from camctl.capture.result_scans import resume_result_page_saves
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories.capture import CaptureRepository
+
+    runtime = SimpleNamespace(owned=owned, capture=CaptureRepository(), pending_baselines=deps.capture_baselines,
+                              wall_us=lambda: SystemClock().utc_micros())
+    for action_id in tuple(deps.capture_baselines):
+        result = resume_baseline_save(action_id, runtime=runtime)
+        if result is not None and result.phase is PreparationPhase.PENDING:
+            raise ConsistencyError(f"原基准保存仍未可靠完成: {result.database_error}")
+
+    resume_result_page_saves(owned, pending_scans=deps.capture_result_scans, repository=runtime.capture)
 
     resume_result_check_closes(owned,
         pending_result_closes=deps.capture_result_closes,
@@ -120,6 +140,10 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     resume_canceled_recording_results(owned,
         pending_capture_completions=deps.capture_completions,
         retry_gate=deps.capture_retry_gate)
+    for action_id in tuple(deps.capture_baselines):
+        result = resume_baseline_settlement(action_id, runtime=runtime)
+        if result is not None and result.phase is PreparationPhase.PENDING:
+            raise ConsistencyError(f"原准备收场仍未可靠保存: {result.database_error}")
 
 
 def _resume_normal_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
@@ -140,7 +164,9 @@ def _resume_normal_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> N
 def _default_catalog(config: ConfigSnapshot):
     """从 describe 使用的同一部署定义构建受理目录。"""
     from camctl.devices.catalog import build_catalog, default_driver_definitions
+    from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
 
+    register_builtin_camera_drivers(config)
     return build_catalog(config, default_driver_definitions())
 
 
@@ -447,6 +473,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_call_results=deps.capture_call_results,
             pending_capture_completions=deps.capture_completions,
             pending_result_closes=deps.capture_result_closes,
+            pending_baselines=deps.capture_baselines,
+            pending_result_scans=deps.capture_result_scans,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -472,6 +500,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             pending_call_results=deps.capture_call_results,
             pending_capture_completions=deps.capture_completions,
             pending_result_closes=deps.capture_result_closes,
+            pending_baselines=deps.capture_baselines,
+            pending_result_scans=deps.capture_result_scans,
             pending_file_observations=deps.capture_file_observations,
             pending_media_results=deps.capture_media_results,
             pending_read_results=deps.capture_read_results,
@@ -486,7 +516,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
         ), resume_media_results=deps.work_files.resume_media_results,
-           resume_file_observations=resume_files, resume_read_results=resume_reads),
+           resume_file_observations=resume_files, resume_read_results=resume_reads,
+           owns_device=lambda device: capture_owner.owns_device(device)),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
         # 推进；拷贝段大小取自 copy 配置。
         "obtain": obtain_flow(session_obtain_assembly(
@@ -512,6 +543,10 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         )),
         "work_files": deps.work_files.flow,
     }
+    from camctl.bootstrap.background_flow import BackgroundFlow
+    capture_owner = flows["scheduling"]
+    flows["obtain"] = BackgroundFlow(flows["obtain"])
+    deps.background_flows = (capture_owner, flows["obtain"])
     return flows, supervisor
 
 
@@ -603,6 +638,8 @@ async def execute_command(
                         pending_call_results=deps.capture_call_results,
                         pending_capture_completions=deps.capture_completions,
                         pending_result_closes=deps.capture_result_closes,
+                        pending_baselines=deps.capture_baselines,
+                        pending_result_scans=deps.capture_result_scans,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
                         pending_read_results=deps.capture_read_results,
@@ -622,6 +659,7 @@ async def execute_command(
                     resume_media_results=deps.work_files.resume_media_results,
                     resume_file_observations=resume_files,
                     resume_read_results=resume_reads,
+                    owns_device=flows["scheduling"].owns_device,
                 ),
             },
             once_report=report_flow(
@@ -657,7 +695,7 @@ async def execute_command(
         failure_log=failure_log,
         copy_request_factory=copy_request_factory,
         on_session_open=lambda owned: _initialize_recovery(deps, owned),
-        local_work=deps.work_files,
+        local_work=_local_work(deps, overrides["flows"]),
         **overrides,
     )
     outcome: SessionOutcome | None = None
@@ -697,6 +735,17 @@ async def execute_command(
 
                 await close_logging(deps.log_runtime)
     return outcome
+
+
+def _local_work(deps, flows):
+    from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+    from camctl.bootstrap.flows import CaptureFlow
+    owners = list(deps.background_flows)
+    owners.extend(flow for flow in flows.values() if isinstance(flow, (BackgroundFlow, CaptureFlow)))
+    if deps.work_files is not None:
+        owners.append(deps.work_files)
+    owners = tuple({id(owner): owner for owner in owners}.values())
+    return CombinedLocalWork(owners) if owners else None
 
 
 def _shutdown_state_outcome(

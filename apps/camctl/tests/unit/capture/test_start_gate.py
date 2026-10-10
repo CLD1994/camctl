@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from camctl.capture.handlers import CaptureRuntime, DeviceControlPort, _control_call, capture_handler
 from camctl.capture.residual import pass_residual_gate
+from camctl.capture.baseline import BaselinePreparation, PreparationPhase
 from camctl.contracts.enums import enum_for
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -22,6 +23,8 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.pending_read_results = {}
     runtime.pending_read_business = {}
     runtime.pending_read_ends = {}
+    runtime.pending_baselines = {}
+    runtime.prepare_baseline.return_value = BaselinePreparation(PreparationPhase.READY)
     runtime.wall_us = mocker.Mock(return_value=now)
     runtime.monotonic_ns = mocker.Mock(return_value=100_000)
     runtime.window_of = mocker.Mock(return_value=LaunchWindow(100, 1100))

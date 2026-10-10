@@ -115,7 +115,9 @@ async def _residual(environment, *, stop_error=False, cancel_trigger=False):
     driver = _Driver(stop_error)
     factory = _factory(home, "camctl-adb", driver)
     old_action = _accept(owned, 1, _action("camera_record", "原录像"))
-    await capture_flow(factory)(context)
+    capture = capture_flow(factory)
+    await capture(context)
+    await capture.settle()
     runtime = factory(owned, "cam-1")
     activity = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id = ?", (old_action,)).fetchone()[0]
@@ -197,7 +199,9 @@ async def test_new_driver_trigger_preserves_old_driver_residual(environment, sto
     frozen_old = history.restore_entity("action", old_action, frozen_boundary)
     current_driver = _Driver(stop_error)
 
-    await capture_flow(_factory(home, "alternate-camera", current_driver))(context)
+    capture = capture_flow(_factory(home, "alternate-camera", current_driver))
+    await capture(context)
+    await capture.settle()
 
     assert current_driver.calls == []
     assert owned.connection.execute(

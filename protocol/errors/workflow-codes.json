@@ -348,6 +348,7 @@
             "enum": [
               "start_unknown",
               "completion_unknown",
+              "duration_unknown",
               "outputs_unknown"
             ]
           }
@@ -362,7 +363,7 @@
     },
     "capture_failed": {
       "stage": "execution",
-      "description": "存在明确的采集失败或结果不满足任务契约的证据。",
+      "description": "启动前目录基准读取明确失败、采集明确失败，或结果不满足任务契约。",
       "details_schema": {
         "type": "object",
         "properties": {
@@ -371,6 +372,7 @@
           },
           "reason": {
             "enum": [
+              "baseline_read_failed",
               "device_failed",
               "ended_early",
               "no_outputs",

@@ -1,6 +1,7 @@
 """RESULTS 验证沿公开受理和调度建立可回放的完整拍摄历史。"""
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import create_autospec
@@ -92,7 +93,7 @@ def returned(operation, observation, activity_id):
     )
 
 
-async def consumer_world(tmp_path, consumer, *, independent_activity=False):
+async def consumer_world(tmp_path, consumer, *, independent_activity=False, catalog=None, start=True):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
     cfg = _config(tmp_path)
     path = Path(cfg.paths.state_db)
@@ -112,7 +113,7 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False):
     try:
         accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("results.json", {
             "request_id": "1", "created_at": instant, "name": "产物核实", "actions": actions,
-        }), ResultCatalog(), CommandMode.RUN, _NOW), new_operation_key(), owned)
+        }), ResultCatalog() if catalog is None else catalog, CommandMode.RUN, _NOW), new_operation_key(), owned)
         assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
         scheduling = SchedulingRepository()
         for save, request in (
@@ -128,6 +129,8 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False):
         runtime = _runtime(owned, driver=control)
         runtime.evidence = RESULT_EVIDENCE
         runtime.check_config = AttemptConfig(3, Decimal("1.25"), Decimal("2"))
+        if not start:
+            return owned, runtime, action_id, handler
         if handler == "camera_record":
             await capture_handler(handler)(action_id, runtime)
         else:
@@ -167,7 +170,10 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False):
                 runtime.wall_us()), new_operation_key(), owned)
             assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
         if consumer == "timelapse":
-            runtime.wall_us = lambda: _NOW + 700_000_000
+            # 消费测试从已保存的前次 START 恢复，不带入旧运行的
+            # 单调钟锚点；本次可靠 UTC 已越过原自主任务等待。
+            runtime = replace(runtime, timelapse_deadlines={},
+                              wall_us=lambda: _NOW + 700_000_000)
         return owned, runtime, action_id, handler
     except BaseException:
         owned.connection.close()

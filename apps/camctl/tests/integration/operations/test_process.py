@@ -18,6 +18,7 @@ from camctl.operations.process import (
     StopSignal,
     ToolSpec,
     execute_tool,
+    spawn_subprocess,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -89,6 +90,36 @@ async def test_cancel_uses_same_termination_flow() -> None:
     assert outcome.exit is not None
 
 
+async def test_canceled_waiter_reaps_real_process_and_finishes_both_output_readers(tmp_path):
+    marker = tmp_path / "started"
+    handles = []
+    async def spawn(spec):
+        handle = await spawn_subprocess(spec)
+        handles.append(handle)
+        return handle
+    script = ("import sys,time; from pathlib import Path; "
+              "print('original stdout',flush=True); print('original stderr',file=sys.stderr,flush=True); "
+              "Path(" + repr(str(marker)) + ").write_text('started'); time.sleep(30)")
+    task = asyncio.create_task(execute_tool(_tool(script), stop=_CancelRequest(), spawner=spawn))
+    try:
+        async with asyncio.timeout(5):
+            while not marker.exists():
+                await asyncio.sleep(.005)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        raw = caught.value.outcome
+        assert raw.exit is not None and raw.error == "cancelled"
+        assert b"original stdout" in raw.output and b"original stderr" in raw.stderr
+        assert len(handles) == 1
+        assert handles[0]._process.returncode is not None
+        assert handles[0]._reader.done() and handles[0]._stderr_reader.done()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_output_captured_up_to_limit() -> None:
     class Never:
         async def requested(self) -> None:
@@ -96,7 +127,7 @@ async def test_output_captured_up_to_limit() -> None:
 
     script = (
         "import sys\n"
-        f"sys.stdout.write('x' * {OUTPUT_LIMIT_BYTES + 4096})\n"
+        f"sys.stdout.write('x' * {OUTPUT_LIMIT_BYTES})\n"
         "sys.stdout.flush()\n"
     )
     outcome = await _run(
@@ -120,6 +151,7 @@ async def test_output_beyond_pipe_capacity_is_drained_before_exit() -> None:
             ),
             Never(),
         )
-    assert outcome.error is None
-    assert outcome.exit.exit_code == 0
+    assert outcome.error == "output_failed"
+    assert "output_limit_exceeded" in outcome.output_failure
+    assert outcome.exit is not None
     assert outcome.output == b"x" * OUTPUT_LIMIT_BYTES

@@ -14,6 +14,8 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Awaitable, Callable, Literal, Protocol, runtime_checkable
 
+from camctl.operations.owned_calls import current_call_scope
+
 __all__ = [
     "LocalExit",
     "ManagedProcess",
@@ -24,11 +26,12 @@ __all__ = [
     "ToolError",
     "ToolSpec",
     "ToolStartError",
+    "ToolCallCancelled",
     "execute_tool",
     "spawn_subprocess",
 ]
 
-#: 受约束输出的捕获上限；超出部分丢弃，只保留前缀。
+#: 每个输出通道的捕获上限；超出部分丢弃并明确报告不完整。
 OUTPUT_LIMIT_BYTES = 1 << 20
 
 ToolError = Literal["timeout", "cancelled", "output_failed"]
@@ -111,6 +114,7 @@ class RawToolOutcome:
     used_grace_s: Decimal | None
     signal_failures: tuple[SignalFailure, ...] = ()
     output_failure: str | None = None
+    stderr: bytes | None = None
 
 
 class StopSignal(Protocol):
@@ -135,9 +139,14 @@ class ManagedProcess(Protocol):
     @property
     def output_failure(self) -> str | None: ...
 
+    @property
+    def stderr(self) -> bytes | None: ...
+
     async def wait(self) -> LocalExit: ...
 
     async def wait_output(self) -> None: ...
+
+    async def wait_output_failure(self) -> None: ...
 
     def request_terminate(self) -> None: ...
 
@@ -147,11 +156,58 @@ class ManagedProcess(Protocol):
 Spawner = Callable[[ToolSpec], Awaitable[ManagedProcess]]
 
 
+class ToolCallCancelled(asyncio.CancelledError):
+    """等待取消后的原实际结果；仅未接入业务拥有范围的调用者使用。"""
+
+    def __init__(self, outcome: RawToolOutcome):
+        super().__init__("工具等待取消，实际调用已收场")
+        self.outcome = outcome
+
+
 async def execute_tool(
     spec: ToolSpec,
     *,
     stop: StopSignal,
     spawner: Spawner | None = None,
+    stdout_sink: Callable[[bytes], Awaitable[None]] | None = None,
+) -> RawToolOutcome:
+    """取消等待时沿同一次调用收场，并交接原实际结果。"""
+    scope = current_call_scope()
+    if scope is not None:
+        scope.checkpoint()
+    wait_cancel = asyncio.Event()
+    actual = asyncio.create_task(_execute_tool(
+        spec, stop=stop, wait_cancel=wait_cancel, spawner=spawner, stdout_sink=stdout_sink))
+    interrupted = None
+    while True:
+        try:
+            outcome = await asyncio.shield(actual)
+            break
+        except asyncio.CancelledError as error:
+            if actual.cancelled():
+                raise
+            if interrupted is None:
+                interrupted = error
+            wait_cancel.set()
+        except BaseException as error:
+            if interrupted is not None:
+                if scope is not None:
+                    scope.interrupted = interrupted
+                    # 尚未启动等实际错误仍交给原消费者按其类型处理和保存。
+                    raise
+                raise interrupted from error
+            raise
+    if interrupted is not None:
+        if scope is None:
+            raise ToolCallCancelled(outcome) from interrupted
+        # 原消费者继续解释、持有和保存这一份结果；范围退出再传播取消。
+        scope.interrupted = interrupted
+    return outcome
+
+
+async def _execute_tool(
+    spec: ToolSpec, *, stop: StopSignal, wait_cancel: asyncio.Event, spawner: Spawner | None,
+    stdout_sink: Callable[[bytes], Awaitable[None]] | None,
 ) -> RawToolOutcome:
     """执行一次受管工具调用并等待实际收场。
 
@@ -161,18 +217,24 @@ async def execute_tool(
     请求终止时开始后延长。
     """
     try:
-        process = await (spawner or spawn_subprocess)(spec)
+        if spawner is not None and stdout_sink is not None:
+            raise ValueError("流式输出必须由共同受管启动边界持有")
+        process = await (spawner(spec) if spawner is not None else
+                         spawn_subprocess(spec, stdout_sink=stdout_sink))
     except OSError as error:
         raise ToolStartError(f"{type(error).__name__}: {error}") from error
     exit_task = asyncio.ensure_future(process.wait())
     output_task = asyncio.ensure_future(process.wait_output())
-    watch: set[asyncio.Future] = {exit_task, output_task}
+    failure_task = asyncio.ensure_future(process.wait_output_failure())
+    watch: set[asyncio.Future] = {exit_task, output_task, failure_task}
     timeout_task: asyncio.Task[None] | None = None
     if spec.timeout_s is not None:
         timeout_task = asyncio.ensure_future(asyncio.sleep(float(spec.timeout_s)))
         watch.add(timeout_task)
     stop_task = asyncio.ensure_future(stop.requested())
     watch.add(stop_task)
+    cancel_task = asyncio.create_task(wait_cancel.wait())
+    watch.add(cancel_task)
 
     try:
         done, _ = await asyncio.wait(watch, return_when=asyncio.FIRST_COMPLETED)
@@ -186,7 +248,7 @@ async def execute_tool(
         if exit_task not in done:
             if timeout_task is not None and timeout_task in done:
                 error = "timeout"
-            elif stop_task in done:
+            elif stop_task in done or cancel_task in done:
                 error = "cancelled"
             else:
                 error = "output_failed"
@@ -207,9 +269,10 @@ async def execute_tool(
             used_grace_s=used_grace,
             signal_failures=signal_failures,
             output_failure=output_failure,
+            stderr=process.stderr,
         )
     finally:
-        watchers = [stop_task] + ([timeout_task] if timeout_task is not None else [])
+        watchers = [stop_task, cancel_task, failure_task] + ([timeout_task] if timeout_task is not None else [])
         for watcher in watchers:
             watcher.cancel()
         await asyncio.gather(*watchers, return_exceptions=True)
@@ -245,34 +308,72 @@ class _CapturedOutput:
     error: str | None = None
 
 
-async def _read_bounded(stream: asyncio.StreamReader | None, limit: int) -> _CapturedOutput:
+async def _read_bounded(
+    stream: asyncio.StreamReader | None, limit: int,
+    sink: Callable[[bytes], Awaitable[None]] | None = None,
+    on_failure: Callable[[str], None] | None = None,
+) -> _CapturedOutput:
     if stream is None:
         return _CapturedOutput(b"")
     chunks: list[bytes] = []
     total = 0
+    truncated = False
+    sink_failure = None
     while True:
         try:
             chunk = await stream.read(65536)
         except OSError as error:
-            return _CapturedOutput(b"".join(chunks), f"{type(error).__name__}: {error}")
+            failure = f"{type(error).__name__}: {error}"
+            if on_failure is not None:
+                on_failure(failure)
+            return _CapturedOutput(b"".join(chunks), failure)
         if not chunk:
             break
+        if sink is not None:
+            if sink_failure is None:
+                try:
+                    await sink(chunk)
+                except Exception as error:
+                    # 输出消费者失败后继续排空，保留错误并让原进程可靠退出。
+                    sink_failure = f"stdout_sink_failed: {type(error).__name__}: {error}"
+                    if on_failure is not None:
+                        on_failure(sink_failure)
+            continue
         # 保留上限只限制返回值；继续排空管道，才能让工具写完并实际退出。
-        if total < limit:
-            retained = chunk[:limit - total]
+        available = max(0, limit - total)
+        if len(chunk) > available and not truncated:
+            truncated = True
+            if on_failure is not None:
+                on_failure("output_limit_exceeded")
+        if available:
+            retained = chunk[:available]
             chunks.append(retained)
             total += len(retained)
-    return _CapturedOutput(b"".join(chunks))
+    return _CapturedOutput(b"".join(chunks), sink_failure or ("output_limit_exceeded" if truncated else None))
+
+
+class _OutputFailures:
+    def __init__(self):
+        self.event = asyncio.Event()
+        self.messages: dict[str, str] = {}
+
+    def report(self, channel, message):
+        self.messages[channel] = message
+        self.event.set()
 
 
 class _SubprocessHandle:
     """asyncio 子进程的受管封装：退出结果与受约束输出。"""
 
     def __init__(
-        self, process: asyncio.subprocess.Process, reader: asyncio.Task[_CapturedOutput]
+        self, process: asyncio.subprocess.Process, reader: asyncio.Task[_CapturedOutput],
+        stderr_reader: asyncio.Task[_CapturedOutput] | None = None,
+        failures: _OutputFailures | None = None,
     ) -> None:
         self._process = process
         self._reader = reader
+        self._stderr_reader = stderr_reader
+        self._failures = failures
 
     @property
     def output(self) -> bytes | None:
@@ -280,10 +381,30 @@ class _SubprocessHandle:
 
     @property
     def output_failure(self) -> str | None:
-        return self._reader.result().error if self._reader.done() else None
+        failures = {} if self._failures is None else dict(self._failures.messages)
+        for name, reader in (("stdout", self._reader), ("stderr", self._stderr_reader)):
+            if reader is not None and reader.done() and reader.result().error is not None:
+                failures[name] = reader.result().error
+        return "; ".join(f"{name}: {message}" for name, message in failures.items()) or None
+
+    @property
+    def stderr(self) -> bytes | None:
+        reader = self._stderr_reader
+        return reader.result().data if reader is not None and reader.done() else None
 
     async def wait_output(self) -> None:
-        await self._reader
+        readers = [self._reader]
+        if self._stderr_reader is not None:
+            readers.append(self._stderr_reader)
+        await asyncio.gather(*readers)
+
+    async def wait_output_failure(self) -> None:
+        if self._failures is not None:
+            await self._failures.event.wait()
+        else:
+            await self.wait_output()
+            if self.output_failure is None:
+                await asyncio.Future()
 
     async def wait(self) -> LocalExit:
         code = await self._process.wait()
@@ -298,12 +419,18 @@ class _SubprocessHandle:
         self._process.kill()
 
 
-async def spawn_subprocess(spec: ToolSpec) -> _SubprocessHandle:
-    """统一受管启动边界：留在本进程组，捕获 stdout 至上限。"""
+async def spawn_subprocess(
+    spec: ToolSpec, *, stdout_sink: Callable[[bytes], Awaitable[None]] | None = None,
+) -> _SubprocessHandle:
+    """统一受管启动边界：留在本进程组，分别有界捕获两个输出通道。"""
     process = await asyncio.create_subprocess_exec(
         *spec.argv,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
-    reader = asyncio.ensure_future(_read_bounded(process.stdout, OUTPUT_LIMIT_BYTES))
-    return _SubprocessHandle(process, reader)
+    failures = _OutputFailures()
+    reader = asyncio.ensure_future(_read_bounded(process.stdout, OUTPUT_LIMIT_BYTES, stdout_sink,
+                                    lambda error: failures.report("stdout", error)))
+    stderr_reader = asyncio.ensure_future(_read_bounded(process.stderr, OUTPUT_LIMIT_BYTES,
+                                    on_failure=lambda error: failures.report("stderr", error)))
+    return _SubprocessHandle(process, reader, stderr_reader, failures)

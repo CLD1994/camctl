@@ -388,6 +388,17 @@ async def _drive_flows(context: SessionContext) -> str | None:
     余流程的状态库错误立即停止后续流程。返回致命错误描述或 None。
     """
     for name, flow in context.flows.items():
+        # 后台保存错误属于原设备责任，不能套用即将调用的报告失败规则。
+        try:
+            check = getattr(getattr(context, "local_work", None), "check_completed", None)
+            if check is not None:
+                check()
+        except (ClockBecameUntrusted, DirectoryBindingError, DeviceConfigurationError):
+            raise
+        except StateDbFailure as error:
+            return str(error)
+        except Exception as error:
+            return f"后台流程异常: {error}"
         try:
             await flow(context)
         except ClockBecameUntrusted:

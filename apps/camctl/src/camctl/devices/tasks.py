@@ -34,6 +34,10 @@ class CaptureTask:
     start_return_meaning: StartReturn | None = None
     completion_mode: CompletionMode | None = None
     result_wait_margin_s: JsonValue = None
+    start_call_timeout_s: JsonValue = None
+    ownership_mode: int | None = None
+    output_scope: dict[str, JsonValue] | None = None
+    product_rules: tuple[Mapping[str, JsonValue], ...] | None = None
 
 
 class CaptureTaskFactory(Protocol):

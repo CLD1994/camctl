@@ -53,7 +53,7 @@ from camctl.persistence.transaction import (
     saved_transaction_events,
     update_change as _update,
 )
-from camctl.scheduling.resources import current_start_holder
+from camctl.scheduling.resources import baseline_start_reason, capture_scope_blocked, current_start_holder
 from camctl.scheduling.rules import (
     ExpirationReason,
     LaunchWindow,
@@ -247,6 +247,22 @@ class StartActionCommand:
 
         capabilities = activity_capabilities(
             literal, self._decoded_spec(action["execution_spec_json"]))
+        if capabilities.ownership_mode == 2:
+            mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
+            with closing(connection.execute(
+                "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
+                " WHERE device_id=? AND type IN (1,2,3) AND status IN (1,2) AND cancel_requested=0"
+                " ORDER BY scheduled_at,plan_id,input_index", (action["device_id"],),
+            )) as cursor:
+                for scheduled, plan_id, input_index, maximum in cursor:
+                    if (scheduled, plan_id, input_index) >= mine:
+                        break
+                    if window_phase(LaunchWindow(scheduled, scheduled + maximum * 1000),
+                                    request.trusted_wall_now) is WindowPhase.IN_WINDOW:
+                        return self._rejected("not_first_candidate")
+            if capture_scope_blocked(connection, action["device_id"], action["id"],
+                                     capabilities.ownership_mode, capabilities.output_scope_json):
+                return self._rejected("device_busy")
         # 动作开始事实与计划首次开始同一事务保存（计划执行状态规格：
         # 曾有动作开始且未全部终态的计划为执行中）。
         plan = row_facts(connection, "plans", action["plan_id"])
@@ -286,7 +302,10 @@ class StartActionCommand:
             "completion_mode": capabilities.completion_mode,
             "ownership_mode": capabilities.ownership_mode,
             "output_scope_json": capabilities.output_scope_json,
-            "baseline_state": 1,
+            "baseline_state": int(
+                enum_for("device_activities.baseline_state").COLLECTING
+                if capabilities.ownership_mode == enum_for("device_activities.ownership_mode").BASELINE_COMPARISON
+                else enum_for("device_activities.baseline_state").NOT_REQUIRED),
             "baseline_first_event_id": None,
             "baseline_last_event_id": None,
             "dispatch_state": int(_DISPATCH_STATE.NOT_DISPATCHED),
@@ -305,6 +324,7 @@ class StartActionCommand:
             "completion_evidence_json": None,
             "result_set_state": 1,
             "result_check_json": None,
+            "output_set_finalized_event_id": None,
             "last_error_json": None,
         }
         activity_row = _row("device_activities", activity_id, activity_values)
@@ -560,6 +580,11 @@ class ExpireActionRequest:
     action_id: int
     trusted_wall_now: int
     occurred_at: int
+    preparation_resolved: bool = False
+
+    def __post_init__(self):
+        if type(self.preparation_resolved) is not bool:
+            raise TypeError("准备收场依据必须是布尔值")
 
 
 @dataclass(frozen=True)
@@ -647,10 +672,12 @@ class ExpireActionCommand:
                     {"status": _ACTION_EXPIRED, "expiration_reason": reason_code},
                 ),),
                 request.occurred_at,
+                evidence={"preparation_resolved": True} if request.preparation_resolved else {},
             )
         ]
         templates.extend(unstarted_events(
-            start, request.occurred_at, run_status=int(_RUN_STATUS.EXPIRED)))
+            start, request.occurred_at, run_status=int(_RUN_STATUS.EXPIRED),
+            preparation_resolved=request.preparation_resolved))
         if plan_complete:
             self._owners[("plans", plan["id"])] = ("plan", plan["id"])
             templates.append(
@@ -689,6 +716,8 @@ class ExpireActionCommand:
         if (not saved or saved[0]["type"] != _ACTION_FINISHED_EVENT
                 or saved[0]["reason"] != 3):
             raise TransactionError("操作身份已用于其他事务，不能作为过期重送")
+        if saved[0]["body"]["evidence"].get("preparation_resolved", False) != request.preparation_resolved:
+            raise TransactionError("原过期申请的准备收场依据与重送输入不符")
         for event in saved:
             if event["occurred_at"] != request.occurred_at:
                 raise TransactionError("过期事务的事实时刻与原事务不同")
@@ -823,6 +852,12 @@ class GrantStartCommand:
             # 首次机会记录必须包含活动身份；缺活动整组拒绝。
             raise TransactionError(f"设备活动不存在: {request.action_id}")
         self._state["device_activities"] = {activity["id"]: activity}
+        preparation_reason = baseline_start_reason(activity, action)
+        if preparation_reason is not None:
+            return self._rejected(preparation_reason)
+        if capture_scope_blocked(connection, action["device_id"], action["id"],
+                                 activity["ownership_mode"], activity["output_scope_json"]):
+            return self._rejected("device_busy")
         if activity["dispatch_state"] not in (
             int(_DISPATCH_STATE.NOT_DISPATCHED),
             int(_DISPATCH_STATE.REJECTED_WITHOUT_EFFECT),
@@ -874,6 +909,8 @@ class GrantStartCommand:
                 "status": int(_ATTEMPT_STATUS.RUNNING),
                 "intent_event_id": event_id,
                 "result_event_id": None,
+                "result_first_page_event_id": None,
+                "result_last_page_event_id": None,
                 "max_attempts_used": request.config.max_attempts,
                 "timeout_s_json": request.config.timeout_s,
                 "retry_interval_s_json": request.config.retry_interval_s,
@@ -997,7 +1034,7 @@ class GrantStartCommand:
     def _is_first_candidate(self, connection, request: GrantRequest) -> bool:
         """同设备存在排序更早的合格候选时不授予本动作。"""
         with closing(connection.execute(
-            "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index"
+            "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index, a.max_delay_ms"
             " FROM actions a"
             " WHERE a.type IN (1, 2, 3) AND a.status = ? AND a.cancel_requested = 0"
             " AND a.device_id = ? AND a.scheduled_at IS NOT NULL",
@@ -1010,13 +1047,13 @@ class GrantStartCommand:
             action["plan_id"],
             action["input_index"],
         )
-        for action_id, scheduled_at, plan_id, input_index in rows:
+        for action_id, scheduled_at, plan_id, input_index, max_delay_ms in rows:
             if int(action_id) == request.action_id:
                 continue
             other = (scheduled_at, plan_id, input_index)
             if other < mine:
                 # 更早候选也须在窗口内才构成排序阻挡。
-                other_end = scheduled_at + (action["max_delay_ms"] or 0) * 1000
+                other_end = scheduled_at + max_delay_ms * 1000
                 other_window = LaunchWindow(
                     scheduled_at=scheduled_at, window_end=other_end
                 )

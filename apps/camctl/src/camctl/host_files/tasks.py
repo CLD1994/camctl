@@ -314,13 +314,20 @@ class FileTaskExecutor:
                 except asyncio.CancelledError:
                     if drain.done() and drain.cancelled():
                         raise
+            actual_failures = []
             if owner.result is not None:
                 actual = owner.result.value
                 if isinstance(actual, _OwnedFileOutcome) and actual.error is not None:
+                    actual_failures.append(actual.error)
                     interrupted.add_note(
                         f"实际文件操作收场失败: {type(actual.error).__name__}: {actual.error}")
             for failure in settled.failed:
+                actual_failures.append(FileTaskError(failure.error))
                 interrupted.add_note(f"文件任务接手失败: {failure.error}")
+            if actual_failures:
+                cause = actual_failures[0] if len(actual_failures) == 1 else BaseExceptionGroup(
+                    "实际文件操作收场失败", actual_failures)
+                raise interrupted from cause
             raise interrupted
         if not result.ran:
             raise FileTaskError("完整文件操作未执行，不能提供完成结果")

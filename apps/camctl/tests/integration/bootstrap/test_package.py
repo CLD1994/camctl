@@ -6,6 +6,7 @@
 
 import hashlib
 import json
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -14,29 +15,15 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 REPO_ROOT = PROJECT_DIR.parents[1]
 
-# 独立预期：包必须携带的权威资源映射。键是包内资源名，值是仓库权威来源。
-AUTHORITATIVE_RESOURCES = {
-    "protocol/plan.schema.json": REPO_ROOT / "protocol" / "schemas" / "plan.schema.json",
-    "protocol/status-report.schema.json": REPO_ROOT / "protocol" / "schemas" / "status-report.schema.json",
-    "protocol/capabilities.schema.json": REPO_ROOT / "protocol" / "schemas" / "capabilities.schema.json",
-    "protocol/host-notification.schema.json": REPO_ROOT / "protocol" / "schemas" / "host-notification.schema.json",
-    "protocol/workflow-codes.json": REPO_ROOT / "protocol" / "errors" / "workflow-codes.json",
-    "sql/core.sql": REPO_ROOT / "docs" / "camctl" / "database" / "schema" / "core.sql",
-    "sql/workflows.sql": REPO_ROOT / "docs" / "camctl" / "database" / "schema" / "workflows.sql",
-    "sql/files.sql": REPO_ROOT / "docs" / "camctl" / "database" / "schema" / "files.sql",
-    "sql/operations.sql": REPO_ROOT / "docs" / "camctl" / "database" / "schema" / "operations.sql",
-    "sql/reports.sql": REPO_ROOT / "docs" / "camctl" / "database" / "schema" / "reports.sql",
-    "sql/history.sql": REPO_ROOT / "docs" / "camctl" / "database" / "schema" / "history.sql",
-    "registry/enum-registry.json": REPO_ROOT / "docs" / "camctl" / "database" / "enum-registry.json",
-    "registry/event-transitions.json": REPO_ROOT / "docs" / "camctl" / "database" / "event-transitions.json",
-    "registry/report-dependencies.json": REPO_ROOT / "docs" / "camctl" / "database" / "report-dependencies.json",
-    "runtime/sqlite-runtime.json": REPO_ROOT / "docs" / "camctl" / "sqlite-runtime.json",
-}
+# 资源名和来源映射只由构建登记维护；这里独立核对安装后的实际字节。
+_RESOURCE_SOURCES = runpy.run_path(str(PROJECT_DIR / "scripts" / "sync_resources.py"))["RESOURCE_SOURCES"]
+AUTHORITATIVE_RESOURCES = {name: REPO_ROOT / source for name, source in _RESOURCE_SOURCES.items()}
 
 # 在安装环境中执行：读取全部包资源并输出摘要，避免与被测代码共享同一计算路径。
 _PROBE_SCRIPT = """
 import hashlib
 import json
+import runpy
 import sys
 
 from camctl.resources import available_resources, resource_bytes
@@ -77,13 +64,18 @@ def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
     assert len(wheels) == 1, f"期望恰好一个 wheel，实际: {wheels}"
 
     env_dir = tmp_path / "env"
-    _run(["uv", "venv", str(env_dir)])
+    _run(["uv", "venv", "--python", sys.executable, str(env_dir)])
     # resource_bytes 只依赖标准库；--no-deps 使安装不依赖网络解析生产依赖。
     _run(["uv", "pip", "install", "--no-deps", "--python", str(_venv_python(env_dir)), str(wheels[0])])
 
     probe = _run([str(_venv_python(env_dir)), "-c", _PROBE_SCRIPT])
     installed_digests = json.loads(probe.stdout)
 
+    # 软件演示必须能在没有源码目录的部署上取得四份拍摄、取回和确认样例。
+    assert {"examples/camera-demo/action6-record.json", "examples/camera-demo/action6-timelapse.json",
+            "examples/camera-demo/osmo360ii-record.json", "examples/camera-demo/osmo360ii-timelapse.json",
+            "examples/camera-demo/obtain.json", "examples/camera-demo/report-ack.json",
+            "examples/camera-demo/config.toml", "examples/camera-demo/prepare-plan.py"} <= installed_digests.keys()
     expected_digests = {}
     for name, source_path in AUTHORITATIVE_RESOURCES.items():
         assert source_path.is_file(), f"权威来源缺失: {source_path}"

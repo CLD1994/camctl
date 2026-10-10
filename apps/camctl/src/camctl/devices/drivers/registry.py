@@ -3,8 +3,8 @@
 登记项区分软件契约状态与实际设备验收状态：前者由受约束替身的
 契约测试取得，后者记录实际设备联调的可复查输入，两者不互相代
 替。消费者经 port_for 按静态声明取得端口；声明不支持的能力不可
-调用，能力缺失与调用失败分开。第一版不登记任何具体厂商映射，
-取得实际接口证据后另行编写。
+调用，能力缺失与调用失败分开。具体相机按完整契约声明可用能力，
+尚待真实设备核实的命令候选不声明为已支持。
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class DriverRegistry:
         return self._entries.get(driver_id)
 
 
-#: 操作名到 DriverDeclaration 声明成员的映射；与 ports.py 七类端口一致。
+#: 普通操作及目录准备端口对应的声明；目录准备不建立普通尝试。
 _DECLARATION_MEMBERS: Mapping[str, str] = {
     "control": "control_supported",
     "stop": "stop_supported",
@@ -82,6 +82,7 @@ _DECLARATION_MEMBERS: Mapping[str, str] = {
     "read": "read_supported",
     "digest": "digest_supported",
     "delete": "delete_supported",
+    "directory": "directory_supported",
 }
 
 

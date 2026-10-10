@@ -84,3 +84,24 @@ async def test_result_round_rejects_foreign_operation_before_device_call():
         await adapter.list_round(other, timeout_s=Decimal("1.25"))
 
     driver.list_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_result_page_uses_original_ticket_cursor_and_single_call_limit():
+    from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
+    from camctl.devices.directory import DirectoryCursor
+    cursor = DirectoryCursor(_BINDING, ("/DCIM",), 0, "/DCIM/a.mp4")
+    actual = CallOutcome(effect=EffectState.CONFIRMED, settlement=Settlement(
+        SettlementBasis.ASSUMED, EvidenceValue("adb_foreground_assumption", 1, {"terminate_grace_s": Decimal("0.25")})),
+        observations=(DeviceObservation("result_files_listed", 2, {
+            "activity_id": "71", "entries": [], "cursor": cursor.as_json(),
+            "next_cursor": None, "set_finalized": True, "completion_evidence": None}),))
+    registry = EvidenceRegistry((RESULT_PAGE_CONTRACT, _REGISTRY.contract("adb_foreground_assumption", 1)))
+    driver = create_autospec(ResultDriver, instance=True)
+    driver.list_results.return_value = DeviceCallResult.from_outcome(actual)
+    page = await DriverResultListing(driver, _BINDING, registry).list_page(_TICKET, cursor=cursor, timeout_s=Decimal("1.25"))
+    assert page.outcome is actual and page.set_finalized and page.scan_complete
+    request, batch = driver.list_results.call_args.args
+    assert request.ticket is _TICKET and request.timeout_s == Decimal("1.25")
+    assert request.params == {"activity_id": "71", "cursor": cursor.as_json()}
+    driver.list_results.assert_awaited_once()
