@@ -26,6 +26,7 @@ from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
 from camctl.devices.catalog import (
     ActionCapability, DriverDefinition, DriverDefinitions, build_catalog,
 )
+from camctl.devices.definitions_runtime import reset_driver_definitions
 from camctl.devices.drivers.registry import DriverEntry, DriverStatus
 from camctl.devices.drivers.runtime import (
     current_registry,
@@ -182,8 +183,10 @@ def _config(home: Path, *, min_plausible: str = "2025-01-01",
 
 @pytest.fixture(autouse=True)
 def _isolated_registry():
+    reset_driver_definitions()
     reset_drivers()
     yield
+    reset_driver_definitions()
     reset_drivers()
 
 

@@ -215,7 +215,7 @@ assert unknown_error["details"]["activity_id"] == original_activity_id
 - [x] **运行红灯：** `P apps/camctl/tests/integration/devices/test_adb_camera_registration.py -q`，确认装配及候选过滤尚不成立。
 - [x] **实现端口装配：** 设置、启动、停止保留各自真实返回含义；设置失败不继续启动，设置完成不算已经启动，同一已授予 START 不能由每条设置命令重复消耗预算。实际派发前仍核对适用取消/窗口。未知启动结果不能直接再发启动。文件和读控制通过 T3 接入，必要控制不被长读取或报告维护阻塞。
 - [x] **接入绑定与同源导出：** describe、submit、run 消费同一 driver_id/参数定义/工厂；运行使用动作原设备和驱动身份、本次配置的明确 ADB 绑定。缺失/不匹配按已有核对及错误规则，不自动改驱动或 serial。设备观察按原票据的实际活动身份校验，列举同源；只有设备支持传入任务标识时才下发原 `task_key`，目录基准方式不新增设备去重语义。查询“尚未实现”与设备“不支持”区分；真实契约未补齐的部分继续隔离为候选，可用性由内容决定。
-- [ ] **运行绿灯并提交：** 顺序运行 devices、acceptance、bootstrap、contracts 集成目录，验证包内 Schema/资源和无需源码 checkout 的启动。软件专用契约替身仅经测试装配注入，不加入生产 fake 模式或替代真机判据。提交静态/运行登记与发行验证。
+- [x] **运行绿灯并提交：** 顺序运行 devices、acceptance、bootstrap、contracts 集成目录，验证包内 Schema/资源和无需源码 checkout 的启动。软件专用契约替身仅经测试装配注入，不加入生产 fake 模式或替代真机判据。提交静态/运行登记与发行验证。
 
 ```python
 assert candidate_parameter_type not in described_parameter_types
@@ -223,7 +223,7 @@ assert pending_task_admission["status"] == enum_for("actions.status").FAILED
 assert installed_catalog_document == checkout_catalog_document
 ```
 
-T7 阶段验证（2026-10-10，容器，Python 3.11.16）：相机端口、明确 serial、多步派发检查和正常登记已经接入。全部单元 4233 项、devices 集成 84 项、acceptance 集成 239 项、contracts 集成 192 项及仓库外发行 6 项通过；完整 bootstrap 装配下的新派发分区 8 项通过。发行构建使用本机缓存验证；未完成的真实响应、结束及文件工具契约继续保持候选。完整 bootstrap 门禁仍待完成，T7 不标记整体完成。
+T7 阶段验证（2026-10-10，容器，Python 3.11.16）：相机端口、明确 serial、多步派发检查和正常登记已经接入。全部单元 4233 项、devices 集成 84 项、acceptance 集成 239 项、contracts 集成 192 项及仓库外发行 6 项通过；完整 bootstrap 装配下的新派发分区 8 项通过。发行构建使用本机缓存验证；未完成的真实响应、结束及文件工具契约继续保持候选。完整 bootstrap 取得 883 项通过、12 项失败、1 项跳过；12 项均为旧测试夹具只清空运行登记却留下静态定义导致的装配冲突。将两份登记一起隔离后，按实际前序登记、夹具清理及全部失败入口顺序复验 16 项通过。生产登记和冲突规则保持原契约；此处不声称单次完整 bootstrap 全绿。T7 门禁完成，四条 C host 软件演示由 T8 验证。
 
 ## T8 容器的四条跨组件演示链与设备采集交付
 
