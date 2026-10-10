@@ -123,7 +123,12 @@ class CameraWorld:
             capture = {"params": dict(request.params), "started_at": self.clock.utc_micros(), "stopped": False, "files": []}
             formats = ["mp4"]
             if request.params.get("outputs") in ("video_raw", "video_jpeg"):
-                formats += ["dng" if request.params["outputs"] == "video_raw" else "jpeg"]
+                photo_format = "dng" if request.params["outputs"] == "video_raw" else "jpeg"
+                product_case = self.spec.get("product_case", "complete")
+                if product_case == "wrong_format":
+                    photo_format = "jpeg" if photo_format == "dng" else "dng"
+                if product_case != "missing_photo":
+                    formats += [photo_format]
             for format_id in formats:
                 remote = f"/mnt/media_rw/emulated/DCIM/new-{number}/clip {number}.{format_id}"
                 source = self.source_path(remote)

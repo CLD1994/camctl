@@ -121,6 +121,66 @@ OSMO 已有停止候选 `dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 00`。在需�
 | 前后目录、新文件的实际格式、长度及源摘要 | 原目录基准、文件归属、必要产物与完整读取 |
 | 完成文件读取期间执行必要停止的实际结果 | 文件读取与控制的设备兼容性 |
 
+## 从安装包准备计划和配置
+
+先按[独立安装与主程序联调](../../apps/host-demo/docs/camctl-integration.md#一准备运行账户和交付文件)安装 Python 3.11、配套依赖、camctl wheel 和 host-demo。以下步骤使用已安装的程序，不要求目标机存在源码仓库。
+
+在终端 B 从 camctl 包提取演示资源。提取目录为 `$HOME/.camctl/camera-demo`，已有同名文件会使操作失败，以便保留人工填写的 serial 和已经生成的计划。
+
+```bash
+"$HOME/.camctl/venv/bin/python" - <<'PY'
+from pathlib import Path
+from camctl.resources import available_resources, resource_bytes
+
+root = Path.home() / ".camctl" / "camera-demo"
+root.mkdir(parents=True, exist_ok=True)
+prefix = "examples/camera-demo/"
+for name in sorted(available_resources()):
+    if name.startswith(prefix):
+        target = root / name.removeprefix(prefix)
+        with target.open("xb") as file:
+            file.write(resource_bytes(name))
+print(root)
+PY
+```
+
+在提取的 `config.toml` 中，将两款相机的 serial 分别替换为 `adb devices -l` 列出的实际标识。`device_id` 分别为 `action6` 和 `osmo360ii`；样例省略 `[paths]`，使用运行账户的默认部署目录。已有部署保留原配置，将设备项合并到实际使用的配置中。初始化、能力导出和 host 始终使用同一份配置：
+
+```bash
+"$HOME/.camctl/venv/bin/camctl" init --config "$HOME/.camctl/camera-demo/config.toml"
+"$HOME/.camctl/venv/bin/camctl" describe --config "$HOME/.camctl/camera-demo/config.toml" \
+  > "$HOME/.camctl/camera-demo/capabilities.json"
+```
+
+`prepare-plan.py` 从安装包读取计划模板，生成新的正整数请求身份和 UTC 时间，并按刚导出的能力 Schema 校验拍摄参数。默认安排在生成后 10 秒开始，允许迟到 30 秒。每份生成计划提交前都重新生成；原键重送时继续使用原文件。若实际能力尚未包含该任务，生成器会拒绝生成。候选命令和样例存在不表示设备响应、结束方式和文件工具已核实；完成 T9 契约后再执行真机演示。
+
+打开终端 A，运行 `"$HOME/.camctl/host/bin/host-demo" --config "$HOME/.camctl/camera-demo/config.toml"`。保持它运行，在终端 B 生成一份拍摄计划：
+
+```bash
+"$HOME/.camctl/venv/bin/python" "$HOME/.camctl/camera-demo/prepare-plan.py" action6-record \
+  --capabilities "$HOME/.camctl/camera-demo/capabilities.json" \
+  --output "$HOME/.camctl/camera-demo/capture.json"
+```
+
+将生成器打印的 `submit <绝对路径>` 整行复制到终端 A。host 交互命令不展开 `$HOME` 或 `~`，路径外不加引号。其他三条链分别使用 `action6-timelapse`、`osmo360ii-record` 和 `osmo360ii-timelapse`，每次指定不同的输出文件。四份模板的时长与本文开头的表一致，延时预设保持其完整参数组合。
+
+拍摄结束后在终端 A 输入 `claim`，由客户端校验并可靠导入 `processing` 中的状态报告。从本次 `request_id` 对应计划中取得拍摄动作的 `action_instance_id`；拍摄动作应为 `succeeded`，正式产物应属于这个原动作。将此身份填入独立取回计划。下例中的 `123` 和 `456` 分别替换为原拍摄动作身份和客户端已经可靠导入的累计报告身份：
+
+```bash
+"$HOME/.camctl/venv/bin/python" "$HOME/.camctl/camera-demo/prepare-plan.py" obtain \
+  --source-action-id 123 --last-report-id 456 \
+  --output "$HOME/.camctl/camera-demo/obtain.json"
+```
+
+按打印的路径在终端 A 提交，等待取回结束并再次 `claim`。核对取回报告的 `deliveries` 与领取文件的文件名、长度及 SHA-256，并由客户端可靠导入报告。领取视频本身不确认报告；`last_report_id` 只采用客户端可靠保存的累计位置。用该位置生成最后的确认计划，再提交给 host：
+
+```bash
+"$HOME/.camctl/venv/bin/python" "$HOME/.camctl/camera-demo/prepare-plan.py" report-ack \
+  --last-report-id 789 --output "$HOME/.camctl/camera-demo/report-ack.json"
+```
+
+将 `789` 替换为取回结束报告的累计身份。最后确认提交与 camctl 吸收确认的结果，保留本次计划、客户端导入凭据、最终报告及源文件信息。host 的 `logs` 命令用于查看 CLI 调用和收场；受理或执行失败以正式结果及报告中的错误为依据。
+
 ## ARM Linux 的完整验收
 
 在独立部署目录安装正式发行物，显式配置两款相机的驱动及本次 ADB 绑定，执行初始化并导出 `describe`。计划参数来自实际导出的能力。C host 提交四项真实时长拍摄；各次拍摄保存正式产物后，再提交独立的 `obtain_action_outputs`，按原动作实例选择产物。

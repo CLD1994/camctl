@@ -166,6 +166,7 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> _Installed:
     # 替身基础设施以副本进入部署目录：被测进程不经仓库路径取用。
     shutil.copy2(_BRIDGE_SOURCE, deploy / _BRIDGE_SOURCE.name)
     shutil.copy2(_FIXTURES_SOURCE, deploy / _FIXTURES_SOURCE.name)
+    shutil.copy2(_CROSS_DIR / "camera_demo_fixtures.py", deploy / "camera_demo_fixtures.py")
 
     return _Installed(
         python=python, deploy=deploy, state_db=state_db,
@@ -245,6 +246,91 @@ def test_installed_and_checkout_cli_have_same_pending_camera_catalog(installed, 
     with zipfile.ZipFile(installed.wheel) as archive:
         assert "camctl/devices/drivers/adb_cameras/registration.py" in archive.namelist()
         assert "camctl/devices/drivers/adb_cameras/driver.py" in archive.namelist()
+
+
+def _demo_generator(installed):
+    target = installed.deploy / "prepare-plan.py"
+    _probe(installed, f"from pathlib import Path; from camctl.resources import resource_bytes; "
+           f"Path({str(target)!r}).write_bytes(resource_bytes('examples/camera-demo/prepare-plan.py'))")
+    return target
+
+
+@pytest.mark.parametrize("stem", ["action6-record", "action6-timelapse", "osmo360ii-record", "osmo360ii-timelapse"])
+def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp_path, stem):
+    """安装后的样例消费实际能力说明，经正式受理保存原参数。"""
+    sys.path.insert(0, str(_CROSS_DIR))
+    from camctl_fixtures import Deployment
+    from camera_demo_fixtures import camera_spec, recording_params, timelapse_params
+    from camctl.devices.drivers.adb_cameras.commands import CameraModel
+    model = CameraModel.ACTION6 if stem.startswith("action6") else CameraModel.OSMO360II
+    expected = recording_params(model) if stem.endswith("-record") else timelapse_params(model)
+    deployment = Deployment(tmp_path, devices=False)
+    spec = camera_spec(deployment, model, expected)
+    initialized = installed.cli("init", "--config", str(deployment.config_path))
+    assert initialized.returncode == 0, initialized.stderr
+    described = installed.cli("describe", "--config", str(deployment.config_path), driver=spec)
+    assert described.returncode == 0, described.stderr
+    capabilities = tmp_path / "capabilities.json"
+    capabilities.write_text(described.stdout)
+    plan_path = tmp_path / "sample-plan.json"
+    generator = _demo_generator(installed)
+    _run([str(installed.python), str(generator), stem, "--capabilities", str(capabilities),
+          "--device-id", "camera", "--output", str(plan_path)],
+         cwd=installed.deploy, env=_clean_environment())
+    document = json.loads(plan_path.read_text())
+    assert document["actions"][0]["params"] == expected
+    assert 1 <= int(document["request_id"]) <= 9223372036854775807
+    submitted = installed.cli("submit", str(plan_path), "--config", str(deployment.config_path), driver=spec)
+    assert submitted.returncode == 0, submitted.stderr
+    with closing(sqlite3.connect(deployment.state_db)) as connection:
+        rows = connection.execute("SELECT status,effective_params_json FROM actions").fetchall()
+    assert len(rows) == 1 and rows[0][0] == 1
+    assert json.loads(rows[0][1]) == expected
+
+
+def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, tmp_path):
+    generator = _demo_generator(installed)
+    maximum = "9223372036854775807"
+    for stem, extra in (("obtain", ["--source-action-id", maximum]), ("report-ack", [])):
+        target = tmp_path / f"{stem}.json"
+        _run([str(installed.python), str(generator), stem, *extra,
+              "--last-report-id", maximum, "--output", str(target)],
+             cwd=installed.deploy, env=_clean_environment())
+        plan = json.loads(target.read_text())
+        assert plan["last_report_id"] == maximum
+        if stem == "obtain":
+            assert plan["actions"][0]["params"]["source"]["action_instance_id"] == maximum
+        _probe(installed, "from camctl.contracts.json_values import parse_exact_json; "
+               "from camctl.contracts.schemas import validate_document; "
+               f"from pathlib import Path; validate_document('protocol/plan.schema.json', "
+               f"parse_exact_json(Path({str(target)!r}).read_text()))")
+
+
+def test_installed_sample_rejects_unavailable_camera_before_writing_plan(installed, tmp_path):
+    config = tmp_path / "pending.toml"
+    config.write_text('[devices.action6]\nkind="camera"\ndriver="dji-action6"\n'
+                      '[devices.action6.adb]\nserial="explicit-serial"\n')
+    described = installed.cli("describe", "--config", str(config))
+    assert described.returncode == 0, described.stderr
+    capabilities = tmp_path / "pending.json"
+    capabilities.write_text(described.stdout)
+    target = tmp_path / "plan.json"
+    refused = subprocess.run([str(installed.python), str(_demo_generator(installed)), "action6-record",
+        "--capabilities", str(capabilities), "--output", str(target)],
+        cwd=installed.deploy, env=_clean_environment(), capture_output=True, text=True, timeout=30)
+    assert refused.returncode != 0
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("stem,args", [("obtain", []), ("obtain", ["--source-action-id", "01"]),
+                                      ("report-ack", []), ("report-ack", ["--last-report-id", "0"])])
+def test_installed_sample_requires_valid_source_and_ack_ids(installed, tmp_path, stem, args):
+    target = tmp_path / "plan.json"
+    refused = subprocess.run([str(installed.python), str(_demo_generator(installed)), stem,
+        *args, "--output", str(target)], cwd=installed.deploy, env=_clean_environment(),
+        capture_output=True, text=True, timeout=30)
+    assert refused.returncode != 0
+    assert not target.exists()
 
 
 def test_distribution_works_outside_repository(installed: _Installed) -> None:
