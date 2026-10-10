@@ -294,6 +294,22 @@ contracts 完整目录取得 `192 passed`，耗时 3.91 秒，覆盖实际模块
 
 软件证据只证明组件按声明协作。五秒等待尚无真机验证依据，软件结果不证明实际媒体时长、分辨率、帧率或目标主机性能。ARM Linux 的十秒任务、实际文件完成及副本核验按[完整验收](../hardware/camera-demo-validation.md#arm-linux-的完整验收)执行；Action6 延时和 OSMO 另按各自设备条件继续。
 
+## ARM 主机部署准备（2026-10-10）
+
+本次证据由用户从目标主机回传，`date -u` 显示 `2026-10-10 18:00:38 UTC`，本记录按该 UTC 日期登记。目标为 `aarch64`、Ubuntu 18.04.6，运行账户为普通用户 `cld`。部署工具为 uv 0.13.0（aarch64-musl）、CMake 3.10.2 和 GCC 7.5.0；ADB 为 1.0.39，版本标识为 `1:8.1.0+r23-5~18.04`。设备列表中目标 serial `123456789ABCDEF` 的状态为 `device`。
+
+用户在该主机核对交付包、验证 ADB 执行通道并安装 Python 包，从交付源码现场构建 C host。各项取得的实际结果如下：
+
+| 检查对象 | 实际结果与证明范围 |
+| --- | --- |
+| 交付包校验 | 十四个载荷的 SHA-256 均通过；证明收到的载荷与交付清单一致 |
+| `adb shell -T` 受控退出与输出分流 | 实际退出码为 `7`，stdout 为 `b'OUT\n'`，stderr 为 `b'ERR\n'`；证明本机通道保留本次远端退出码及独立输出 |
+| `adb shell -T` 二进制输出 | 实际退出码为 `0`，stdout 为 `b'\x00\n\r\x80\xff'`，stderr 为 `b''`；证明本次已知字节序列原样返回 |
+| Python 环境与安装 | 用已核验的 `/home/cld/.venv/bin/python` 创建新的 `/home/cld/.camctl/venv`，实际 Python 为 3.11.17，SQLite 为 3.53.1；九个锁定运行依赖和 camctl 0.1.0 安装成功，camctl 导入来自该新环境的 site-packages |
+| C host 目标构建与安装 | 交付源码以 `HOST_BUILD_TESTS=OFF` 和 Release 配置在目标主机构建、安装，进度达到 100%；安装后的 `/home/cld/.camctl/host/bin/host-demo` 为 `293640` 字节。此项证明该源码在本机工具链构建与安装成功，尚不证明运行时业务链 |
+
+本记录只证明包校验、上述执行通道、Python 安装和目标主机 C 构建。`init`、`describe`、十秒录像、实际五秒等待及文件完成、独立取回、host 领取、客户端导入和报告 ACK 尚未取得回传结果。完整真机业务链的验收及挂起状态由[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)跟踪，不能由部署准备结果声明演示成功。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。
