@@ -23,6 +23,14 @@ export interface DraftContent {
   pending?: Record<string, { kind: "number" | "json"; text: string }>;
   /** 非当前动作类型的编辑内容；键为动作下标，不进入执行协议。 */
   actionVariants?: Record<string, ActionVariant[]>;
+  /** 当前外层动作分支的停用参数类型内容；键为动作下标。 */
+  parameterVariants?: Record<string, ParameterVariant[]>;
+}
+export interface ParameterVariant {
+  /** 仅含可选 params 成员的权威 JSON 原文；缺省与显式值分别保存。 */
+  paramsText: string;
+  /** 相对于 params 的成员 JSON Pointer，不含整个参数或类型身份输入。 */
+  pending: NonNullable<DraftContent["pending"]>;
 }
 export interface ActionVariant {
   type?: unknown;
@@ -31,6 +39,8 @@ export interface ActionVariant {
   fieldsText?: string;
   /** 相对于动作对象的 JSON Pointer。 */
   pending: NonNullable<DraftContent["pending"]>;
+  /** 此停用外层动作分支拥有的参数类型内容。 */
+  parameterVariants?: ParameterVariant[];
 }
 export interface Draft {
   id: string;

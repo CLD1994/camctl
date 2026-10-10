@@ -1,3 +1,4 @@
+import { pendingInput, pendingAction } from "./pending-support";
 import { choose } from "./select-support";
 import { beforeAll, afterAll, afterEach, expect, it } from "vitest";
 import {
@@ -690,12 +691,8 @@ it("真实PendingInput名称恢复及普通名称重名恢复可以保存后导�
     id = d.content.automaticPreviews!.actions[2].id;
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await page
-    .getByLabel("未完成输入 /actions/0/name", { exact: true })
-    .fill('"C"');
-  await page
-    .getByRole("button", { name: "应用修正 /actions/0/name", exact: true })
-    .click();
+  await pendingInput(page, "/actions/0/name").fill('"C"');
+  await pendingAction(page, "/actions/0/name", "apply").click();
   await browserExpect
     .poll(
       () =>
@@ -755,12 +752,8 @@ it.each([
     const d = application.createDraft(c);
     await page.reload();
     await page.getByTestId("draft-open-button").click();
-    await page
-      .getByLabel(`未完成输入 ${path}`, { exact: true })
-      .fill(JSON.stringify(value));
-    await page
-      .getByRole("button", { name: `应用修正 ${path}`, exact: true })
-      .click();
+    await pendingInput(page, path).fill(JSON.stringify(value));
+    await pendingAction(page, path, "apply").click();
     await browserExpect
       .poll(
         () =>

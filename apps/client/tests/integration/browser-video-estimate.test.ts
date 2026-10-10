@@ -12,9 +12,9 @@ import { Application } from "../../src/server/application";
 import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
-import type { DraftContent } from "../../src/server/models";
+import type { DraftContent, ExportedRequest } from "../../src/server/models";
 import { parseClientJson, stringifyJson } from "../../src/shared/json";
-import { choose } from "./select-support";
+import { choose, readOptions } from "./select-support";
 import { initializePreviewMetadata } from "../../src/shared/automatic-previews";
 
 let browser: Browser;
@@ -55,6 +55,7 @@ function gate() {
 async function setup(
   content = draftContent([camera()]),
   text = capabilityText,
+  controlledClock = false,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "camctl-video-estimate-"));
   writeFileSync(join(directory, "device-capabilities.json"), text);
@@ -65,6 +66,13 @@ async function setup(
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const context = await browser.newContext(),
     page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  if (controlledClock) {
+    await page.clock.install({ time: new Date("2026-10-10T00:00:00Z") });
+    // 应用加载前暂停，保存与轮询的计时都从同一个冻结点开始。
+    await page.clock.pauseAt(new Date("2026-10-10T00:01:00Z"));
+  }
   page.setDefaultTimeout(5000);
   const stop = createStop(
     () =>
@@ -87,8 +95,430 @@ async function setup(
   const draft = app.createDraft(content);
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  return { app, page, draft, directory };
+  return { app, page, draft, directory, pageErrors };
 }
+it("真实普通录像用码率单选与时长输入，独立 pending 不遮蔽码率修正", async () => {
+  const { page, app, draft } = await setup();
+  const bitrate = page.getByRole("combobox", {
+    name: "码率档位 (bitrate_mode)",
+    exact: true,
+  });
+  expect((await readOptions(bitrate)).map((option) => option.text)).toEqual([
+    "请选择",
+    "standard",
+    "high",
+  ]);
+  await check(bitrate).toContainText("high");
+  const duration = page.getByLabel("录像时长 (duration_s)", { exact: true });
+  expect(await duration.evaluate((element) => element.tagName)).toBe("INPUT");
+  await duration.fill("60e额");
+  await check(bitrate).toBeEnabled();
+  await choose(bitrate, "0");
+  await check
+    .poll(
+      () =>
+        app.draft(draft.id).content.pending?.["/actions/0/params/duration_s"]
+          ?.text,
+    )
+    .toBe("60e额");
+  await check
+    .poll(() => parseClientJson(app.draft(draft.id).content.text) as any)
+    .toMatchObject({
+      actions: [{ params: { bitrate_mode: "standard", duration_s: 60 } }],
+    });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(duration).toHaveValue("60e额");
+  await check(bitrate).toContainText("standard");
+  await duration.fill("60");
+  await check(page.getByTestId("video-size-value")).toContainText("712.5 MB");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  await page.getByTestId("nav-devices").click();
+  const task = page.locator(".guide-task").filter({
+    has: page.getByRole("heading", { name: "演示：普通录像", exact: true }),
+  });
+  await check(task.getByRole("table")).toHaveCount(0);
+  await check(task).toContainText("standard");
+  await check(task).toContainText("high");
+}, 20000);
+it("参数类型空选项保持未填写，查看不补首项且切回恢复完整内容", async () => {
+  const { params: _params, ...action } = camera();
+  const { page, app, draft } = await setup(
+    initializePreviewMetadata(
+      draftContent([action]),
+      "disabled",
+      "parameter-unselected",
+    ),
+  );
+  const type = page.getByLabel("参数类型", { exact: true });
+  const before = app.draft(draft.id);
+  await check(type).toHaveAttribute("data-value", "");
+  expect((await readOptions(type)).map((option) => option.value)).toEqual([
+    "",
+    "example_record",
+    "example_record_from",
+  ]);
+  await page.getByRole("button", { name: "收起动作", exact: true }).click();
+  await page.getByRole("button", { name: "展开动作", exact: true }).click();
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await page.getByRole("button", { name: "参数表单", exact: true }).click();
+  await page.waitForResponse((response) =>
+    response.url().endsWith("/api/state"),
+  );
+  expect(app.draft(draft.id)).toEqual(before);
+  await choose(type, "example_record");
+  const bitrate = page.getByLabel("码率档位 (bitrate_mode)", { exact: true });
+  await check(bitrate).toHaveAttribute("data-value", "");
+  await check(
+    page.getByLabel("录像时长 (duration_s)", { exact: true }),
+  ).toHaveValue("");
+  await choose(bitrate, "0");
+  await page.getByLabel("录像时长 (duration_s)", { exact: true }).fill("60");
+  await choose(type, "");
+  await check(type).toHaveAttribute("data-value", "");
+  await check
+    .poll(
+      () =>
+        (parseClientJson(app.draft(draft.id).content.text) as any).actions[0],
+    )
+    .toEqual(action);
+  await choose(type, "example_record");
+  await check(bitrate).toContainText("standard");
+  await check(
+    page.getByLabel("录像时长 (duration_s)", { exact: true }),
+  ).toHaveValue("60");
+  await check(page.getByTestId("video-size-value")).toContainText("712.5 MB");
+});
+it("参数类型各自保存60秒和10秒，首次不继承字段且重开后分别恢复", async () => {
+  const initial = initializePreviewMetadata(
+    draftContent([
+      {
+        ...camera(),
+        params: {
+          type: "example_record",
+          bitrate_mode: "standard",
+          duration_s: 60,
+        },
+      },
+    ]),
+    "disabled",
+    "parameter-estimate",
+  );
+  const { page, app, draft } = await setup(initial);
+  const type = page.getByLabel("参数类型", { exact: true });
+  const before = app.draft(draft.id);
+  let writes = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "PUT" &&
+      request.url().includes(`/api/drafts/${draft.id}`)
+    )
+      writes++;
+  });
+  await choose(type, "example_record");
+  await page.waitForResponse((response) =>
+    response.url().endsWith("/api/state"),
+  );
+  expect(writes).toBe(0);
+  expect(app.draft(draft.id)).toEqual(before);
+  await choose(type, "example_record_from");
+  await check(
+    page.getByLabel("参考码率 (bitrate_mbps)", { exact: true }),
+  ).toHaveValue("");
+  await check(
+    page.getByLabel("成片时长 (duration_s)", { exact: true }),
+  ).toHaveValue("");
+  await check
+    .poll(
+      () =>
+        (parseClientJson(app.draft(draft.id).content.text) as any).actions[0]
+          .params,
+    )
+    .toEqual({ type: "example_record_from" });
+  await page.getByLabel("参考码率 (bitrate_mbps)", { exact: true }).fill("70");
+  await page.getByLabel("成片时长 (duration_s)", { exact: true }).fill("10");
+  await check(page.getByTestId("video-size-value")).toContainText("87.5 MB");
+  await choose(type, "example_record");
+  await check(
+    page.getByLabel("码率档位 (bitrate_mode)", { exact: true }),
+  ).toContainText("standard");
+  await check(
+    page.getByLabel("录像时长 (duration_s)", { exact: true }),
+  ).toHaveValue("60");
+  await check(page.getByTestId("video-size-value")).toContainText("712.5 MB");
+  await check(page.getByTestId("retained-parameters")).toHaveCount(0);
+  await choose(type, "example_record_from");
+  await check(
+    page.getByLabel("参考码率 (bitrate_mbps)", { exact: true }),
+  ).toHaveValue("70");
+  await check(
+    page.getByLabel("成片时长 (duration_s)", { exact: true }),
+  ).toHaveValue("10");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  const saved = app.draft(draft.id);
+  expect((parseClientJson(saved.content.text) as any).actions[0]).toEqual({
+    ...camera(),
+    params: { type: "example_record_from", bitrate_mbps: 70, duration_s: 10 },
+  });
+  expect(saved.content.parameterVariants?.["0"]).toEqual([
+    {
+      paramsText:
+        '{"params":{"type":"example_record","bitrate_mode":"standard","duration_s":60}}',
+      pending: {},
+    },
+  ]);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(page.getByTestId("video-size-value")).toContainText("87.5 MB");
+  await choose(type, "example_record");
+  await check(
+    page.getByLabel("录像时长 (duration_s)", { exact: true }),
+  ).toHaveValue("60");
+  await check(page.getByTestId("video-size-value")).toContainText("712.5 MB");
+  await choose(type, "example_record_from");
+  await check(
+    page.getByLabel("成片时长 (duration_s)", { exact: true }),
+  ).toHaveValue("10");
+  await check(page.getByTestId("video-size-value")).toContainText("87.5 MB");
+}, 20000);
+it("参数成员未完成输入随类型保存，切回恢复且只阻止当前类型导出", async () => {
+  const { page, app, draft } = await setup(
+    initializePreviewMetadata(
+      draftContent([camera()]),
+      "disabled",
+      "parameter-pending",
+    ),
+  );
+  const type = page.getByLabel("参数类型", { exact: true });
+  await page.getByLabel("录像时长 (duration_s)", { exact: true }).fill("60e额");
+  await check(type).toBeEnabled();
+  await choose(type, "example_record_from");
+  await page.getByLabel("参考码率 (bitrate_mbps)", { exact: true }).fill("70");
+  await page.getByLabel("成片时长 (duration_s)", { exact: true }).fill("10");
+  await check(page.getByTestId("video-size-value")).toContainText("87.5 MB");
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  expect(app.draft(draft.id).content.pending ?? {}).toEqual({});
+  expect(
+    app.draft(draft.id).content.parameterVariants?.["0"]?.[0].pending,
+  ).toEqual({ "/duration_s": { kind: "number", text: "60e额" } });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await choose(type, "example_record");
+  await check(
+    page.getByLabel("录像时长 (duration_s)", { exact: true }),
+  ).toHaveValue("60e额");
+  await check(page.getByTestId("video-size-value")).toHaveCount(0);
+  await page.getByTestId("export-button").click();
+  await check(page.getByTestId("export-button")).toBeEnabled();
+  expect(app.store.all("requests")).toEqual([]);
+  await choose(type, "example_record_from");
+  await check(page.getByTestId("video-size-value")).toContainText("87.5 MB");
+  await page.getByTestId("export-button").click();
+  await check.poll(() => app.store.all("requests").length).toBe(1);
+  const request = app.store.all<ExportedRequest>("requests")[0];
+  expect(request.body).toMatchObject({
+    actions: [
+      {
+        params: {
+          type: "example_record_from",
+          bitrate_mbps: 70,
+          duration_s: 10,
+        },
+      },
+    ],
+  });
+  expect(request.body.actions).toHaveLength(1);
+  expect(request.body).not.toHaveProperty("parameterVariants");
+});
+it("整个参数原文尚未完成时类型选择暂停，修正后恢复手动选择", async () => {
+  const { page, app, draft } = await setup();
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  const field = page.getByLabel("参数 JSON 文本", { exact: true });
+  await field.fill("{");
+  await check(page.getByLabel("参数类型", { exact: true })).toBeDisabled();
+  await check
+    .poll(
+      () => app.draft(draft.id).content.pending?.["/actions/0/params"]?.text,
+    )
+    .toBe("{");
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(page.getByLabel("参数类型", { exact: true })).toBeDisabled();
+  await check(field).toHaveValue("{");
+  await field.fill(
+    '{"type":"example_record","bitrate_mode":"standard","duration_s":60}',
+  );
+  await check(page.getByLabel("参数类型", { exact: true })).toBeEnabled();
+  await check(page.getByTestId("video-size-value")).toContainText("712.5 MB");
+});
+it("仅有参数类型资料的整份JSON替换仍确认，取消和查看均保留资料", async () => {
+  const initial: DraftContent = {
+    ...draftContent([camera()]),
+    parameterVariants: {
+      "0": [
+        {
+          paramsText:
+            '{"params":{"type":"example_record_from","bitrate_mbps":70,"duration_s":10}}',
+          pending: {},
+        },
+      ],
+    },
+  };
+  const { page, app, draft } = await setup(initial);
+  const before = app.draft(draft.id);
+  await page.getByTestId("draft-json-toggle").click();
+  expect(app.draft(draft.id)).toEqual(before);
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page
+    .getByTestId("draft-json-input")
+    .fill('{"name":"替换","actions":[]}');
+  await check(page.getByTestId("draft-json-input")).toHaveValue(
+    before.content.text,
+  );
+  expect(app.draft(draft.id)).toEqual(before);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByTestId("draft-json-input")
+    .fill('{"name":"替换","actions":[]}');
+  await check
+    .poll(() => app.draft(draft.id).content)
+    .toEqual({ text: '{"name":"替换","actions":[]}', pending: {} });
+});
+it("导出后仅参数资料的额外输入可完整另存并切回查看", async () => {
+  const initial: DraftContent = {
+    ...draftContent([camera()]),
+    parameterVariants: {
+      "0": [
+        {
+          paramsText:
+            '{"params":{"type":"example_record_from","bitrate_mbps":70,"duration_s":10}}',
+          pending: {},
+        },
+      ],
+    },
+  };
+  const { page, app, draft } = await setup(initial);
+  await page.route(`**/api/drafts/${draft.id}`, async (route) => {
+    if (route.request().method() === "PUT") {
+      const saved = app.draft(draft.id);
+      app.exportDraft(
+        draft.id,
+        saved.revision,
+        saved.content,
+        app.capabilities.version,
+      );
+      await route.abort();
+    } else await route.continue();
+  });
+  await page.getByLabel("录像时长 (duration_s)", { exact: true }).fill("61");
+  const recovery = page.locator("section.panel").filter({
+    has: page.getByRole("heading", {
+      name: "保留的额外编辑内容",
+      exact: true,
+    }),
+  });
+  await check(recovery).toBeVisible();
+  await check(recovery).toContainText(/参数类型.*切换查看/);
+  await recovery
+    .getByRole("button", { name: "将保留内容保存为新草稿", exact: true })
+    .click();
+  const newDraft = app.store
+    .all<any>("drafts")
+    .find((item) => !item.exportedRequestId)!;
+  expect(
+    (parseClientJson(newDraft.content.text) as any).actions[0].params
+      .duration_s,
+  ).toBe(61);
+  expect(newDraft.content.parameterVariants).toEqual(initial.parameterVariants);
+  await choose(
+    page.getByLabel("参数类型", { exact: true }),
+    "example_record_from",
+  );
+  await check(page.getByTestId("video-size-value")).toContainText("87.5 MB");
+});
+it.each(["/actions/00/params/ghost", "/actions/0/params/ghost~2"])(
+  "未知原文路径 %s 与两层类型资料读取不崩溃且保留已关闭的派生预览",
+  async (pendingPath) => {
+    const initial = initializePreviewMetadata(
+      {
+        ...draftContent([
+          camera(),
+          {
+            name: "录像预览",
+            type: "obtain_action_outputs",
+            scheduled_at: "2026-10-11 00:00:00",
+            params: {
+              source: { action_name: "录像" },
+              filter: "preview",
+              purpose: "auto_preview",
+            },
+          },
+        ]),
+        pending: { [pendingPath]: { kind: "json" as const, text: "{" } },
+        parameterVariants: {
+          "0": [
+            {
+              paramsText:
+                '{"params":{"type":"example_record_from","bitrate_mbps":70,"duration_s":10}}',
+              pending: {},
+            },
+          ],
+        },
+        actionVariants: {
+          "0": [
+            {
+              type: "camera_timelapse",
+              fields: {
+                device_id: device,
+                params: {
+                  type: "example_timelapse",
+                  capture_duration_s: 60,
+                  interval_s: 1,
+                },
+              },
+              pending: {},
+              parameterVariants: [
+                {
+                  paramsText:
+                    '{"params":{"type":"example_timelapse_frames","frames":1.0000000000000001}}',
+                  pending: {
+                    "/frames": { kind: "number" as const, text: "1e" },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      "disabled",
+      "unknown-input",
+    );
+    const { page, app, draft, pageErrors } = await setup(initial);
+    const before = app.draft(draft.id);
+    await check(page.getByTestId("validation-issues")).toBeVisible();
+    await check(page.getByLabel("参数类型", { exact: true })).toBeDisabled();
+    await check(
+      page.locator(
+        `[data-pending-path=${JSON.stringify(pendingPath)}] textarea`,
+      ),
+    ).toHaveValue("{");
+    await page.waitForResponse((response) =>
+      response.url().endsWith("/api/state"),
+    );
+    expect(pageErrors).toEqual([]);
+    expect(app.draft(draft.id)).toEqual(before);
+    expect(before.content.pending).toEqual(initial.pending);
+    expect(before.content.parameterVariants).toEqual(initial.parameterVariants);
+    expect(before.content.actionVariants).toEqual(initial.actionVariants);
+    expect((parseClientJson(before.content.text) as any).actions).toHaveLength(
+      2,
+    );
+    expect(before.content.automaticPreviews?.intent).toBe("disabled");
+    expect(before.content.automaticPreviews?.actions[1].sourceId).toBe(
+      before.content.automaticPreviews?.actions[0].id,
+    );
+  },
+);
 it("表单和JSON共用当前完整参数，显示与折叠不会保存", async () => {
   const { page, app, draft } = await setup(
     initializePreviewMetadata(
@@ -540,10 +970,19 @@ it("再次准备失败保留此前未核实责任并仍能由之后新观察恢�
   await check(page.getByTestId("video-size-value")).toContainText("300 MB");
 });
 it("保存回执丢失的唯一核实观察恢复估算且不重入pendingWrite", async () => {
-  const { page, app, draft, directory } = await setup();
+  const { page, app, draft, directory } = await setup(
+    undefined,
+    undefined,
+    true,
+  );
   await check(page.getByTestId("video-size-value")).toContainText("975");
   const control = await pauseAfterLostReload(page, directory);
   let writes = 0;
+  let successfulReads = 0;
+  page.on("response", (response) => {
+    if (response.url().endsWith("/api/state") && response.status() === 200)
+      successfulReads++;
+  });
   await page.route("**/api/drafts/*", async (route) => {
     if (route.request().method() === "PUT") {
       writes++;
@@ -553,9 +992,12 @@ it("保存回执丢失的唯一核实观察恢复估算且不重入pendingWrite"
     } else await route.continue();
   });
   await page.getByLabel("录像时长 (duration_s)", { exact: true }).fill("30");
+  // 只触发450ms自动保存，不触发从同一冻结点起算的900ms轮询。
+  await page.clock.runFor(450);
   await check(page.getByTestId("save-status")).toContainText("已保存");
   await check(page.getByTestId("video-size-value")).toContainText("300 MB");
   expect(writes).toBe(1);
+  expect(successfulReads).toBe(1);
   expect(
     (parseClientJson(app.draft(draft.id).content.text) as any).actions[0].params
       .duration_s,

@@ -134,22 +134,53 @@ export const isRawNumber = (value: unknown): value is RawNumber =>
   rawJson.isRawJSON(value);
 /** 身份表达 JSON 类型、数组次序和精确数学值；对象成员顺序不参与身份。 */
 export function exactJsonIdentity(value: unknown, present = true): string {
-  const identity = (v: unknown): unknown => {
+  return jsonIdentity(value, present, false);
+}
+/** 枚举等消费原数字事实时显式读取父容器词元，不改变投影核对的入口。 */
+export function exactJsonValueIdentity(
+  value: unknown,
+  present = true,
+  source?: { parent: unknown; key: string | number },
+): string {
+  return jsonIdentity(value, present, true, source);
+}
+function jsonIdentity(
+  value: unknown,
+  present: boolean,
+  preserveTokens: boolean,
+  source?: { parent: unknown; key: string | number },
+): string {
+  const identity = (
+    v: unknown,
+    parent?: unknown,
+    key?: string | number,
+  ): unknown => {
     if (isRawNumber(v)) return ["number", decimalIdentity(v.rawJSON)];
     if (v === null) return ["null"];
-    if (typeof v === "number") return ["number", decimalIdentity(String(v))];
+    if (typeof v === "number")
+      return [
+        "number",
+        decimalIdentity(
+          !preserveTokens || key === undefined
+            ? String(v)
+            : (originalNumberToken(parent, key, v) ?? String(v)),
+        ),
+      ];
     if (typeof v === "string" || typeof v === "boolean") return [typeof v, v];
-    if (Array.isArray(v)) return ["array", v.map(identity)];
+    if (Array.isArray(v))
+      return ["array", v.map((item, index) => identity(item, v, index))];
     if (v !== null && typeof v === "object")
       return [
         "object",
         Object.keys(v)
           .sort()
-          .map((key) => [key, identity(Reflect.get(v, key))]),
+          .map((key) => [key, identity(Reflect.get(v, key), v, key)]),
       ];
     throw new Error("值不属于 JSON 类型");
   };
-  return JSON.stringify(present ? identity(value) : ["missing"]);
+  return JSON.stringify(
+    present ? identity(value, source?.parent, source?.key) : ["missing"],
+  );
 }
 function exactNodeValue(
   node: Node,

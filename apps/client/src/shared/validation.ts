@@ -99,6 +99,7 @@ export function createValidator() {
 export function schemaIssues(
   errors: ErrorObject[] | null | undefined,
   prefix = "",
+  pointerPrefix = prefix ? `/${prefix}` : "",
 ): Issue[] {
   return (errors ?? []).map((error) => {
     const segments = error.instancePath
@@ -120,6 +121,17 @@ export function schemaIssues(
       path,
       code: `schema_${error.keyword}`,
       message: `${path || "输入"}：${error.message ?? "不符合规则"}`,
+      pointer:
+        pointerPrefix +
+        segments
+          .map((s) => `/${s.replace(/~/g, "~0").replace(/\//g, "~1")}`)
+          .join(""),
+      schema: {
+        instancePath: pointerPrefix + error.instancePath,
+        schemaPath: error.schemaPath,
+        keyword: error.keyword,
+        params: { ...error.params },
+      },
     };
   });
 }

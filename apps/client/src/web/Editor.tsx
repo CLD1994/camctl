@@ -42,8 +42,9 @@ import {
   type EstimateReloadPhase,
 } from "./video-estimate-state";
 import { VideoSizeEstimate } from "./VideoSizeEstimate";
+import { PreviewControl } from "./PreviewControl";
 import { BuiltinFields } from "./BuiltinFields";
-import { presentIssue } from "./validation-presentation";
+import { presentIssues, presentPendingInput } from "./validation-presentation";
 import {
   ValidationControl,
   ValidationProvider,
@@ -52,9 +53,14 @@ import {
 import { deviceOptions } from "./device-options";
 import { canSwitchActionType, switchActionType } from "./action-drafts";
 import {
+  canSwitchParameterType,
+  switchParameterType,
+} from "./parameter-drafts";
+import {
   parameterOptions,
   compatibleValues,
   parameterRequired,
+  parameterChoiceBlocked,
 } from "./parameter-options";
 
 interface Props {
@@ -146,6 +152,7 @@ export function Editor(props: Props) {
     session.schedule();
   };
   const choosePreviewIntent = (selected: "enabled" | "disabled") => {
+    if (busy || !session.editable || identityProblem) return;
     const namespace = crypto.randomUUID();
     const prepared = content.automaticPreviews
       ? content
@@ -212,9 +219,21 @@ export function Editor(props: Props) {
   const remove = (index: number) => {
     change(removeAction(content, index), { remove: index });
   };
-  const presentations: PresentedIssue[] = issues.map((issue) => ({
-    issue,
-    ...presentIssue(issue, plan, capabilities),
+  const pendingLabels = new Map(
+    Object.keys(content.pending ?? {}).map((path, index) => [
+      path,
+      presentPendingInput(path, index + 1, plan, capabilities),
+    ]),
+  );
+  const presentations: PresentedIssue[] = presentIssues(
+    issues,
+    plan,
+    capabilities,
+  ).map((item) => ({
+    ...item,
+    ...(item.issue.code === "unfinished_input"
+      ? { location: pendingLabels.get(item.issue.path)! }
+      : {}),
   }));
   const locate = (index: number) => {
     const target = presentations[index];
@@ -230,6 +249,7 @@ export function Editor(props: Props) {
         : (controls.find(
             (control) =>
               control.dataset.validationPath === controlPath &&
+              (!target.json || control.dataset.validationJson === "true") &&
               (control.dataset.validationPending === "true") === pending &&
               (pending || control.dataset.validationPath !== ""),
           ) ??
@@ -302,7 +322,7 @@ export function Editor(props: Props) {
               复制草稿
             </button>
             <button
-              className="quiet danger-text"
+              className="danger-text"
               disabled={busy || !session.editable}
               onClick={props.onDelete}
             >
@@ -319,32 +339,44 @@ export function Editor(props: Props) {
         <ErrorBox error={copyError} />
         <ErrorBox error={identityProblem} />
         <Issues
-          issues={issues}
+          issues={presentations.map((item) => item.issue)}
+          rawIssues={issues}
           presentations={presentations}
           onLocate={locate}
         />
         <div className="save-line">
-          <span data-testid="save-status" role="status">
-            {session.deletionState === "deleting"
-              ? "正在删除草稿…"
-              : session.deletionState === "unknown"
-                ? "删除结果尚未确认"
-                : session.error
-                  ? `保存失败或未确认：${session.error}`
-                  : session.saving
-                    ? "保存中…"
-                    : session.saved
-                      ? "已保存"
-                      : "等待保存…"}
-          </span>
-          {session.error && session.editable && (
-            <button
-              disabled={busy}
-              onClick={() => void session.flush().catch(() => {})}
-            >
-              重试保存
-            </button>
-          )}
+          <div className="save-feedback">
+            <span data-testid="save-status" role="status">
+              {session.deletionState === "deleting"
+                ? "正在删除草稿…"
+                : session.deletionState === "unknown"
+                  ? "删除结果尚未确认"
+                  : session.error
+                    ? `保存失败或未确认：${session.error}`
+                    : session.saving
+                      ? "保存中…"
+                      : session.saved
+                        ? "已保存"
+                        : "等待保存…"}
+            </span>
+            {session.error && session.editable && (
+              <button
+                disabled={busy}
+                onClick={() => void session.flush().catch(() => {})}
+              >
+                重试保存
+              </button>
+            )}
+          </div>
+          <PreviewControl
+            intent={intent}
+            disabled={busy || !session.editable || !!identityProblem}
+            hasAutomatic={
+              !!content.automaticPreviews?.actions.some((a) => a.sourceId)
+            }
+            issues={previewIssues}
+            onChoose={choosePreviewIntent}
+          />
         </div>
         {session.deletionState === "unknown" && (
           <div className="notice warning">
@@ -378,47 +410,11 @@ export function Editor(props: Props) {
         <SelectFieldset
           disabled={busy || !session.editable || !!identityProblem}
         >
-          <section className="notice" aria-label="自动获取预览文件">
-            <strong data-testid="preview-intent">
-              自动预览
-              {intent === "enabled"
-                ? "已开启"
-                : intent === "disabled"
-                  ? "已关闭"
-                  : "尚未设置"}
-            </strong>
-            <div className="button-row">
-              <button
-                disabled={intent === "enabled"}
-                onClick={() => choosePreviewIntent("enabled")}
-              >
-                开启自动预览
-              </button>
-              <button
-                disabled={intent === "disabled"}
-                onClick={() => choosePreviewIntent("disabled")}
-              >
-                关闭自动预览
-              </button>
-            </div>
-            <p data-testid="preview-status">
-              {intent === "unset"
-                ? "保留全部显式动作；选择开启或关闭后按该意图维护。"
-                : intent === "disabled"
-                  ? "手动取回仍独立保留。"
-                  : previewIssues.length
-                    ? "部分自动预览关联待核实。"
-                    : content.automaticPreviews?.actions.some((a) => a.sourceId)
-                      ? "符合条件的拍摄由客户端维护自动取回。"
-                      : "当前没有适用动作；新增符合条件的拍摄后自动维护。"}
-            </p>
-            {previewIssues.map((message, i) => (
-              <p key={i} className="warning">
-                {message}
-              </p>
-            ))}
-          </section>
-          <PendingInputs content={content} change={change} />
+          <PendingInputs
+            content={content}
+            change={change}
+            labels={pendingLabels}
+          />
           {json ? (
             <>
               <label className="field">
@@ -435,9 +431,11 @@ export function Editor(props: Props) {
                     onChange={(e) => {
                       if (
                         (content.automaticPreviews ||
-                          Object.keys(content.actionVariants ?? {}).length) &&
+                          Object.keys(content.actionVariants ?? {}).length ||
+                          Object.keys(content.parameterVariants ?? {})
+                            .length) &&
                         !window.confirm(
-                          "替换整份计划 JSON 将清除自动预览意图、动作关联和其他动作类型暂存内容。确认后自动预览为尚未设置，并保存输入原文。是否继续？",
+                          "替换整份计划 JSON 将清除自动预览意图、动作关联和按动作类型、参数类型保存的其他内容。确认后自动预览为尚未设置，并保存输入原文。是否继续？",
                         )
                       )
                         return;
@@ -547,11 +545,8 @@ export function Editor(props: Props) {
                       }
                     }}
                     issueCount={
-                      issues.filter(
-                        (issue) =>
-                          issue.path === `actions[${index}]` ||
-                          issue.path.startsWith(`actions[${index}].`) ||
-                          issue.path.startsWith(`/actions/${index}/`),
+                      presentations.filter(
+                        ({ actionIndex }) => actionIndex === index,
                       ).length
                     }
                   />
@@ -588,9 +583,11 @@ export function Editor(props: Props) {
 function PendingInputs({
   content,
   change,
+  labels,
 }: {
   content: DraftContent;
   change: (content: DraftContent) => void;
+  labels: Map<string, string>;
 }) {
   const entries = Object.entries(content.pending ?? {});
   if (!entries.length) return null;
@@ -598,13 +595,14 @@ function PendingInputs({
     <section className="notice warning">
       <h3>未完成输入</h3>
       <p>
-        以下原文随草稿保留。每项均可修正或放弃，包括当前没有对应控件的字段。
-        放弃会清除该字段；必填字段仍需重新填写才能导出。
+        这里保留了你尚未完成的输入。请修正后确认修改，或清除这项输入。
+        清除会移除对应字段；必填字段需要重新填写才能导出。
       </p>
       {entries.map(([key, value]) => (
         <PendingInput
           key={key}
           path={key}
+          label={labels.get(key)!}
           value={value}
           content={content}
           change={change}
@@ -615,11 +613,13 @@ function PendingInputs({
 }
 function PendingInput({
   path,
+  label,
   value,
   content,
   change,
 }: {
   path: string;
+  label: string;
   value: { kind: "number" | "json"; text: string };
   content: DraftContent;
   change: (content: DraftContent, operation?: "reset") => void;
@@ -632,7 +632,7 @@ function PendingInput({
         checkActionListChange(content, omit ? undefined : value.text);
         if (
           !window.confirm(
-            `${omit ? "移除" : "替换"}整组动作将清除动作身份、自动预览和其他动作类型编辑资料，以及动作集合内的未完成输入。自动预览将变为尚未设置，集合外的输入继续保留。是否继续？`,
+            `${omit ? "移除" : "替换"}整组动作将清除动作身份、自动预览和按动作类型、参数类型保存的其他内容，以及动作集合内的未完成输入。自动预览将变为尚未设置，集合外的输入继续保留。是否继续？`,
           )
         )
           return;
@@ -656,13 +656,13 @@ function PendingInput({
     }
   };
   return (
-    <div className="field">
+    <div className="field" data-pending-path={path}>
       <label>
-        {path}
+        {label}
         <ValidationControl path={path} pending>
           <textarea
             rows={1}
-            aria-label={`未完成输入 ${path}`}
+            aria-label={`未完成输入：${label}`}
             value={value.text}
             onChange={(e) =>
               change({
@@ -676,11 +676,22 @@ function PendingInput({
           />
         </ValidationControl>
       </label>
-      <small>原文随草稿保存，点击应用修正后写入对应字段。</small>
+      <small>修正上面的内容后，点击“确认修改”将它填入对应字段。</small>
       <div className="button-row">
-        <button onClick={() => apply(false)}>应用修正 {path}</button>
-        <button onClick={() => apply(true)}>放弃输入 {path}</button>
+        <button aria-label={`确认修改：${label}`} onClick={() => apply(false)}>
+          确认修改
+        </button>
+        <button
+          aria-label={`清除这项输入：${label}`}
+          onClick={() => apply(true)}
+        >
+          清除这项输入
+        </button>
       </div>
+      <details>
+        <summary>技术详情</summary>
+        <code>{path === "" ? "整个计划（根路径）" : path}</code>
+      </details>
       <ErrorBox error={error} />
     </div>
   );
@@ -795,7 +806,7 @@ function ActionEditor(
           >
             {props.collapsed ? "展开" : "收起"}
           </button>
-          <button className="quiet danger-text" onClick={props.remove}>
+          <button className="danger-text" onClick={props.remove}>
             删除动作
           </button>
         </div>
@@ -854,7 +865,7 @@ function ActionEditor(
                   )}
                 {options.actions.map((type) => (
                   <SelectItem key={type} value={type}>
-                    {actionLabel(type)} · {type}
+                    {actionLabel(type)}
                   </SelectItem>
                 ))}
               </Select>
@@ -969,17 +980,26 @@ function ActionEditor(
                         ? action.params.type
                         : ""
                     }
-                    disabled={!!pending}
-                    onValueChange={(selectedValue) =>
-                      change(
-                        setValue(
+                    disabled={!canSwitchParameterType(content, index)}
+                    onValueChange={(selectedValue) => {
+                      try {
+                        const next = switchParameterType(
                           content,
-                          [...base, "params", "type"],
-                          selectedValue,
-                          selectedValue === "",
-                        ),
-                      )
-                    }
+                          index,
+                          selectedValue || undefined,
+                        );
+                        if (next === content) return;
+                        change(next);
+                        setTypeError("");
+                        setJson(false);
+                        setError("");
+                        setNotice("");
+                      } catch (error) {
+                        setTypeError(
+                          `参数类型切换未完成：${error instanceof Error ? error.message : String(error)}`,
+                        );
+                      }
+                    }}
                   >
                     <SelectItem value="">请选择参数类型</SelectItem>
                     {isObject(action.params) &&
@@ -998,19 +1018,21 @@ function ActionEditor(
                 </ValidationControl>
               </label>
             </div>
-            <Field
-              content={content}
-              path={[...base, "policy", "max_delay_ms"]}
-              schema={{
-                type: "integer",
-                minimum: 0,
-                title: "最大允许延迟",
-                description: "单位为毫秒；必须明确填写，0 表示不允许延迟。",
-              }}
-              name="max_delay_ms"
-              required
-              change={change}
-            />
+            {(!Object.hasOwn(action, "policy") || isObject(action.policy)) && (
+              <Field
+                content={content}
+                path={[...base, "policy", "max_delay_ms"]}
+                schema={{
+                  type: "integer",
+                  minimum: 0,
+                  title: "最大允许延迟",
+                  description: "单位为毫秒；必须明确填写，0 表示不允许延迟。",
+                }}
+                name="max_delay_ms"
+                required
+                change={change}
+              />
+            )}
             {parameter && (
               <div className="parameter-intro">
                 <strong>{parameter.name}</strong>
@@ -1158,21 +1180,22 @@ function ActionEditor(
           </>
         ) : (
           <>
-            {action.type === "motor_control" && (
-              <Field
-                content={content}
-                path={[...base, "policy", "max_delay_ms"]}
-                schema={{
-                  type: "integer",
-                  minimum: 0,
-                  title: "最大允许延迟",
-                  description: "单位为毫秒；必须明确填写，0 表示不允许延迟。",
-                }}
-                name="max_delay_ms"
-                required
-                change={change}
-              />
-            )}
+            {action.type === "motor_control" &&
+              (!Object.hasOwn(action, "policy") || isObject(action.policy)) && (
+                <Field
+                  content={content}
+                  path={[...base, "policy", "max_delay_ms"]}
+                  schema={{
+                    type: "integer",
+                    minimum: 0,
+                    title: "最大允许延迟",
+                    description: "单位为毫秒；必须明确填写，0 表示不允许延迟。",
+                  }}
+                  name="max_delay_ms"
+                  required
+                  change={change}
+                />
+              )}
             {action.type !== "motor_control" &&
               Object.hasOwn(action, "policy") &&
               (!isObject(action.policy) ||
@@ -1220,7 +1243,13 @@ function ActionEditor(
             )}
           </>
         )}
-        <details className="advanced">
+        <details
+          className="advanced"
+          open={
+            (Object.hasOwn(action, "policy") && !isObject(action.policy)) ||
+            undefined
+          }
+        >
           <summary>完整业务策略 JSON</summary>
           <JsonField
             content={content}
@@ -1243,7 +1272,7 @@ function ActionEditor(
     </article>
   );
 }
-function SchemaFields({
+export function SchemaFields({
   parameter,
   content,
   path,
@@ -1259,60 +1288,74 @@ function SchemaFields({
   const fields = Object.entries(properties).filter(([name]) => name !== "type");
   const catalog = parameterOptions(parameter);
   const params = valueAt(parseDraft(content), path);
-  const hasPending = Object.keys(content.pending ?? {}).some(
-    (key) => key === pointer(path) || key.startsWith(pointer(path) + "/"),
-  );
-  return fields.length ? (
+  const hasPending =
+    catalog.kind !== "unavailable" &&
+    fields.some(([name]) =>
+      parameterChoiceBlocked(content, [...path, name], catalog.kind),
+    );
+  const form = fields.length ? (
     <>
       {catalog.kind === "unavailable" && (
         <p className="notice">
-          这些参数包含无法完整推导的组合规则，选项字段请通过 JSON
+          当前规则无法可靠生成选项控件，选项字段请通过 JSON
           填写；填写后将检查全部规则。
         </p>
       )}
-      {hasPending && (
+      {hasPending && catalog.kind === "finite" && (
         <p className="notice">请先修正上方未完成输入，再选择关联参数。</p>
       )}
       <div className="form-grid">
-        {fields.map(([name, field]) => (
-          <Field
-            key={name}
-            name={name}
-            schema={resolveField(field, schema)}
-            required={
-              catalog.kind === "finite" && isObject(params)
-                ? parameterRequired(catalog, params, name)
-                : Array.isArray(schema.required) &&
-                  schema.required.includes(name)
-            }
-            content={content}
-            path={[...path, name]}
-            change={change}
-            choices={
-              catalog.kind === "finite"
-                ? catalog.fields.find((f) => f.name === name)?.values
-                : undefined
-            }
-            allowed={
-              catalog.kind === "finite" && isObject(params)
-                ? compatibleValues(catalog, params, name)
-                : undefined
-            }
-            choicesBlocked={hasPending}
-            jsonChoices={catalog.kind === "unavailable"}
-          />
-        ))}
+        {fields.map(([name, field]) => {
+          const choices =
+            catalog.kind === "unavailable"
+              ? undefined
+              : catalog.fields.find((entry) => entry.name === name)?.values;
+          const blocked =
+            catalog.kind !== "unavailable" &&
+            parameterChoiceBlocked(content, [...path, name], catalog.kind);
+          return (
+            <Field
+              key={name}
+              name={name}
+              schema={resolveField(field, schema)}
+              required={
+                catalog.kind === "finite" && isObject(params) && !blocked
+                  ? parameterRequired(catalog, params, name)
+                  : Array.isArray(schema.required) &&
+                    schema.required.includes(name)
+              }
+              content={content}
+              path={[...path, name]}
+              change={change}
+              choices={choices}
+              allowed={
+                catalog.kind === "finite" && isObject(params) && !blocked
+                  ? compatibleValues(catalog, params, name)
+                  : undefined
+              }
+              choicesBlocked={blocked}
+              choiceBasis={
+                catalog.kind === "independent" ? "independent" : "linked"
+              }
+              jsonChoices={
+                catalog.kind === "unavailable" ||
+                (catalog.kind === "independent" && !choices)
+              }
+            />
+          );
+        })}
       </div>
     </>
   ) : catalog.kind === "unavailable" ? (
     <p className="notice">
       此任务的完整参数无法用普通字段表达，请通过参数 JSON 设置并检查。
     </p>
-  ) : catalog.rows.length === 0 ? (
+  ) : catalog.kind === "finite" && catalog.rows.length === 0 ? (
     <p className="notice warning">
       当前规则没有允许的参数组合，请联系提供设备说明的人员。
     </p>
   ) : (
     <p className="muted">该任务使用固定设置，无需填写其他参数。</p>
   );
+  return form;
 }

@@ -3,6 +3,7 @@ import {
   chromium,
   expect as browserExpect,
   type Browser,
+  type Page,
 } from "@playwright/test";
 import {
   mkdtempSync,
@@ -20,7 +21,10 @@ import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import type { Draft } from "../../src/server/models";
 import { mappedReport, reportInput } from "./fixtures";
-import { initializePreviewMetadata } from "../../src/shared/automatic-previews";
+import {
+  initializePreviewMetadata,
+  previewIntent,
+} from "../../src/shared/automatic-previews";
 import { Readable } from "node:stream";
 import { makeMediaFixture } from "../helpers/media";
 import { createHash } from "node:crypto";
@@ -287,15 +291,13 @@ it.each([1280, 390])(
     await page.getByTestId("initialize-button").click();
     await page.getByTestId("new-draft-button").click();
     await browserExpect(page.getByTestId("preview-intent")).toContainText(
-      "开启",
+      "已启用",
     );
     await browserExpect(page.getByTestId("preview-status")).toContainText(
-      "没有适用",
+      "支持预览",
     );
     await inspect("enabled");
-    await page
-      .getByRole("button", { name: "关闭自动预览", exact: true })
-      .click();
+    await page.getByRole("button", { name: "已启用预览", exact: true }).click();
     await browserExpect(page.getByTestId("save-status")).toContainText(
       "已保存",
     );
@@ -304,7 +306,7 @@ it.each([1280, 390])(
       .poll(() => application.store.all<Draft>("drafts").length)
       .toBe(2);
     await browserExpect(page.getByTestId("preview-intent")).toContainText(
-      "关闭",
+      "已禁用",
     );
     await inspect("disabled");
     await page.getByTestId("draft-json-toggle").click();
@@ -315,7 +317,7 @@ it.each([1280, 390])(
       before,
     );
     await browserExpect(page.getByTestId("preview-intent")).toContainText(
-      "关闭",
+      "已禁用",
     );
     page.once("dialog", (d) => d.accept());
     await page.getByTestId("draft-json-input").fill('{"name":"未完成",');
@@ -323,6 +325,10 @@ it.each([1280, 390])(
       "尚未设置",
     );
     await inspect("unset");
+    await page.getByTestId("preview-intent").click();
+    await browserExpect(page.getByRole("menu")).toBeVisible();
+    await inspect("unset-menu");
+    await page.keyboard.press("Escape");
     await browserExpect(page.getByTestId("save-status")).toContainText(
       "已保存",
     );
@@ -396,7 +402,7 @@ it("重载先等旧轮询结束，同generation的失败和随后恢复不被旧
   ).toBeEnabled();
   await page.getByTestId("nav-plans").click();
   await browserExpect(page.getByTestId("preview-status")).toContainText(
-    "没有适用",
+    "支持预览",
   );
   expect(JSON.parse(application.draft(d.id).content.text).actions).toHaveLength(
     1,
@@ -562,6 +568,234 @@ function previewDraft(application: Application, name = "拍摄计划") {
     ),
   );
 }
+
+const previewButton = (page: Page) => page.getByTestId("preview-intent");
+const manualPreview = {
+  name: "手动预览",
+  type: "obtain_action_outputs",
+  scheduled_at: "2026-10-10 02:00:00",
+  params: { source: { action_name: "拍摄" }, filter: "preview" },
+};
+function externalPreviewDraft(application: Application) {
+  const supported = previewDraft(application);
+  const body = JSON.parse(supported.content.text);
+  body.actions.push(manualPreview);
+  application.deleteDraft(supported.id, supported.revision);
+  return application.createDraft({ text: JSON.stringify(body) });
+}
+
+it("紧凑入口已知双向单击，手动取回完整保留且保存重开", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const external = externalPreviewDraft(application);
+  const d = application.createDraft(
+    initializePreviewMetadata(external.content, "enabled", "known"),
+  );
+  application.deleteDraft(external.id, external.revision);
+  const manualIdentity = d.content.automaticPreviews!.actions.at(-1)!.id;
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  const button = previewButton(page);
+  await browserExpect(button).toHaveAccessibleName("已启用预览");
+  expect(await button.getAttribute("aria-pressed")).toBeNull();
+  await browserExpect(
+    page.locator('[aria-label="自动获取预览文件"].notice'),
+  ).toHaveCount(0);
+  await button.press("Enter");
+  await browserExpect(button).toHaveAccessibleName("已禁用预览");
+  await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
+  let saved = application.draft(d.id).content;
+  expect(previewIntent(saved)).toBe("disabled");
+  expect(JSON.parse(saved.text).actions).toHaveLength(2);
+  expect(JSON.parse(saved.text).actions.at(-1)).toEqual(manualPreview);
+  expect(saved.automaticPreviews!.actions.at(-1)!.id).toBe(manualIdentity);
+  await button.press("Space");
+  await browserExpect(button).toHaveAccessibleName("已启用预览");
+  await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
+  saved = application.draft(d.id).content;
+  expect(previewIntent(saved)).toBe("enabled");
+  expect(JSON.parse(saved.text).actions).toHaveLength(3);
+  const manualIndex = JSON.parse(saved.text).actions.findIndex(
+    (action: typeof manualPreview) => action.name === manualPreview.name,
+  );
+  expect(JSON.parse(saved.text).actions[manualIndex]).toEqual(manualPreview);
+  expect(saved.automaticPreviews!.actions[manualIndex].id).toBe(manualIdentity);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await browserExpect(previewButton(page)).toHaveAccessibleName("已启用预览");
+  expect(application.draft(d.id).content).toEqual(saved);
+});
+
+it.each(["missing", "unset"])(
+  "尚未设置的%s资料打开、导航、悬停和取消零修改零保存",
+  async (metadata) => {
+    const { page, application } = await setup();
+    await page.getByTestId("initialize-button").click();
+    let d = externalPreviewDraft(application);
+    if (metadata === "unset") {
+      const old = d;
+      d = application.createDraft(
+        initializePreviewMetadata(d.content, "unset", "unset"),
+      );
+      application.deleteDraft(old.id, old.revision);
+    }
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    let writes = 0;
+    await page.route(`**/api/drafts/${d.id}`, async (route) => {
+      if (route.request().method() === "PUT") writes++;
+      await route.continue();
+    });
+    const before = application.draft(d.id);
+    const button = previewButton(page);
+    await browserExpect(button).toContainText("尚未设置");
+    expect(await button.getAttribute("aria-pressed")).toBeNull();
+    await button.focus();
+    await button.press("Enter");
+    await browserExpect(page.getByRole("menu")).toBeVisible();
+    await browserExpect(page.getByRole("menuitem")).toHaveCount(2);
+    expect(await page.getByRole("menuitemradio").count()).toBe(0);
+    expect(await page.getByRole("menuitemcheckbox").count()).toBe(0);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    await page.getByRole("menuitem", { name: "禁用预览", exact: true }).hover();
+    await page.keyboard.press("Escape");
+    await browserExpect(button).toBeFocused();
+    await browserExpect(page.getByRole("menu")).toHaveCount(0);
+    await button.click();
+    await browserExpect(page.getByRole("menu")).toBeVisible();
+    await page.mouse.click(5, 5);
+    await browserExpect(page.getByRole("menu")).toHaveCount(0);
+    // 两次正常轮询跨过自动保存延迟，证明没有安排写入。
+    for (let n = 0; n < 2; n++)
+      await page.waitForResponse((response) =>
+        response.url().endsWith("/api/state"),
+      );
+    expect(application.draft(d.id)).toEqual(before);
+    expect(writes).toBe(0);
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await browserExpect(previewButton(page)).toContainText("尚未设置");
+    expect(application.draft(d.id)).toEqual(before);
+  },
+);
+
+it.each(["enabled", "disabled"])(
+  "尚未设置显式选择%s一次写入，焦点返回且保留手动取回",
+  async (selected) => {
+    const { page, application } = await setup();
+    await page.getByTestId("initialize-button").click();
+    const d = externalPreviewDraft(application);
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    let writes = 0;
+    await page.route(`**/api/drafts/${d.id}`, async (route) => {
+      if (route.request().method() === "PUT") writes++;
+      await route.continue();
+    });
+    await previewButton(page).press("Space");
+    const item = page.getByRole("menuitem", {
+      name: selected === "enabled" ? "启用预览" : "禁用预览",
+      exact: true,
+    });
+    await item.focus();
+    await item.press("Enter");
+    await browserExpect(previewButton(page)).toHaveAccessibleName(
+      selected === "enabled" ? "已启用预览" : "已禁用预览",
+    );
+    await browserExpect(previewButton(page)).toBeFocused();
+    await browserExpect(page.getByRole("menu")).toHaveCount(0);
+    await browserExpect(page.getByTestId("save-status")).toContainText(
+      "已保存",
+    );
+    const saved = application.draft(d.id);
+    expect(previewIntent(saved.content)).toBe(selected);
+    expect(writes).toBe(1);
+    expect(saved.revision).toBe(d.revision + 1);
+    const actions = JSON.parse(saved.content.text).actions;
+    expect(
+      actions.find((a: typeof manualPreview) => a.name === manualPreview.name),
+    ).toEqual(manualPreview);
+    expect(actions).toHaveLength(selected === "enabled" ? 3 : 2);
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await browserExpect(previewButton(page)).toHaveAccessibleName(
+      selected === "enabled" ? "已启用预览" : "已禁用预览",
+    );
+    expect(application.draft(d.id)).toEqual(saved);
+  },
+);
+
+it("普通保存期间入口保持可编辑，第二个明确意图完整保存", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const d = previewDraft(application);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let writes = 0;
+  await page.route(`**/api/drafts/${d.id}`, async (route) => {
+    if (route.request().method() === "PUT" && ++writes === 1) await gate;
+    await route.continue();
+  });
+  try {
+    await previewButton(page).click();
+    await browserExpect.poll(() => writes).toBe(1);
+    await browserExpect(page.getByTestId("save-status")).toContainText(
+      "保存中",
+    );
+    await browserExpect(previewButton(page)).toBeEnabled();
+    await previewButton(page).click();
+    await browserExpect(previewButton(page)).toHaveAccessibleName("已启用预览");
+  } finally {
+    release();
+  }
+  await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
+  expect(writes).toBe(2);
+  expect(previewIntent(application.draft(d.id).content)).toBe("enabled");
+  expect(JSON.parse(application.draft(d.id).content.text).actions).toHaveLength(
+    2,
+  );
+});
+
+it("能力故障和不可解释正文的实际关联诊断在入口附近保留", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const d = previewDraft(application);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  writeFileSync(
+    join(application.store.directory, "device-capabilities.json"),
+    "{",
+  );
+  await page.getByTestId("nav-devices").click();
+  await page.getByRole("button", { name: "重新加载能力说明" }).click();
+  await browserExpect.poll(() => application.capabilities.error).toBeTruthy();
+  await page.getByTestId("nav-plans").click();
+  await browserExpect(previewButton(page)).toHaveAccessibleName("已启用预览");
+  await browserExpect(page.getByTestId("preview-diagnostics")).toContainText(
+    "能力尚不能确认",
+  );
+  expect(application.draft(d.id).content).toEqual(d.content);
+  const invalid = application.createDraft({
+    ...initializePreviewMetadata(
+      { text: '{"name":"待修正","actions":[]}' },
+      "disabled",
+      "invalid",
+    ),
+    text: "{",
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").last().click();
+  await browserExpect(previewButton(page)).toHaveAccessibleName("已禁用预览");
+  await browserExpect(page.getByTestId("preview-diagnostics")).toContainText(
+    "正文尚不能可靠解释",
+  );
+  expect(application.draft(invalid.id).content).toEqual(invalid.content);
+});
 it("复制拍摄分配独立来源及自动取回身份，改名删项保持对应", async () => {
   const { page, application } = await setup();
   await page.setViewportSize({ width: 390, height: 844 });

@@ -136,11 +136,16 @@ function declaredFields(schema: unknown, seen = new Set<string>()): string[] {
         keys.push(...declaredFields(branch, seen));
   return [...new Set(keys)];
 }
+const parameterSchemas = createProtocolValidator();
 export const builtinFields = Object.fromEntries(
-  Object.entries(paramDefs).map(([type, def]) => [
-    type,
-    declaredFields(planSchema.$defs[def]),
-  ]),
+  Object.entries(paramDefs).map(([type, def]) => {
+    // 公共注册器负责跨文档引用；这里只读取解析后的当前参数字段。
+    const parameters = parameterSchemas.getSchema(
+      `plan.schema.json#/$defs/${def}`,
+    );
+    if (!parameters) throw new Error(`公共参数定义未登记：${def}`);
+    return [type, declaredFields(parameters.schema)];
+  }),
 ) as unknown as Record<
   Exclude<ActionType, CameraActionType>,
   readonly string[]

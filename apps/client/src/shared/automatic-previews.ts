@@ -8,6 +8,12 @@ import { cloneClientJson, parseJson, stringifyJson } from "./json";
 import { isObject, isName, isTimestamp } from "./validation";
 import { isCameraAction, ACTION_TYPES } from "./actions";
 import { validateParams } from "./capabilities";
+import { checkParameterVariantLocations } from "./parameter-variants";
+import {
+  inspectActionPending,
+  requireKnownActionList,
+  pointer,
+} from "./draft-plan";
 
 export interface CapabilityState {
   active: Capabilities | null;
@@ -20,6 +26,8 @@ export const sameContent = (a: DraftContent, b: DraftContent) =>
   stringifyJson(a.pending ?? {}) === stringifyJson(b.pending ?? {}) &&
   stringifyJson(a.actionVariants ?? {}) ===
     stringifyJson(b.actionVariants ?? {}) &&
+  stringifyJson(a.parameterVariants ?? {}) ===
+    stringifyJson(b.parameterVariants ?? {}) &&
   stringifyJson(a.automaticPreviews ?? null) ===
     stringifyJson(b.automaticPreviews ?? null);
 export const previewIntent = (c: DraftContent): PreviewIntent =>
@@ -49,6 +57,7 @@ function inspectPlan(content: DraftContent): PreviewPlan | undefined {
 function plan(content: DraftContent): PreviewPlan {
   const root = inspectPlan(content);
   if (!root) throw Error("动作列表无法可靠解释");
+  checkParameterVariantLocations(content, root.actions, true);
   return root;
 }
 function hasPending(content: DraftContent, path: string): boolean {
@@ -223,6 +232,8 @@ export function removeDraftActions(
 ): DraftContent {
   const root = plan(content),
     map = new Map<number, number>();
+  const inputs = inspectActionPending(content, root.actions);
+  requireKnownActionList(inputs);
   const kept: Record<string, unknown>[] = [];
   root.actions.forEach((a, i) => {
     if (!removed.has(i)) {
@@ -231,11 +242,11 @@ export function removeDraftActions(
     }
   });
   const pending: NonNullable<DraftContent["pending"]> = {};
-  for (const [key, value] of Object.entries(content.pending ?? {})) {
-    const match = /^\/actions\/(\d+)(\/.*)?$/.exec(key);
-    if (!match) pending[key] = value;
-    else if (map.has(Number(match[1])))
-      pending[`/actions/${map.get(Number(match[1]))}${match[2] ?? ""}`] = value;
+  for (const { key, input, path, actionIndex } of inputs) {
+    if (actionIndex === undefined) pending[key] = input;
+    else if (map.has(actionIndex))
+      pending[pointer(["actions", map.get(actionIndex)!, ...path.slice(2)])] =
+        input;
   }
   root.actions = kept;
   return {
@@ -246,6 +257,15 @@ export function removeDraftActions(
       ? {
           actionVariants: Object.fromEntries(
             Object.entries(content.actionVariants)
+              .filter(([i]) => map.has(Number(i)))
+              .map(([i, v]) => [String(map.get(Number(i))), v]),
+          ),
+        }
+      : {}),
+    ...(content.parameterVariants
+      ? {
+          parameterVariants: Object.fromEntries(
+            Object.entries(content.parameterVariants)
               .filter(([i]) => map.has(Number(i)))
               .map(([i, v]) => [String(map.get(Number(i))), v]),
           ),
@@ -281,6 +301,14 @@ export function coordinatePreviews(
     Object.keys(content.pending ?? {}).some((p) => p === "" || p === "/actions")
   )
     return { content, issues: ["动作列表仍有未完成输入"] };
+  // 派生修改前先确认原文和参数资料的动作归属；资格失败保持整份输入。
+  try {
+    inspectActionPending(content, root.actions);
+    checkParameterVariantLocations(content, root.actions, true);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    return { content, issues: [error.message] };
+  }
   if (
     root.actions.some(
       (a, i) =>
@@ -477,9 +505,10 @@ export function copyDraftAction(
   const root = plan(content),
     action = root.actions[index];
   if (!action || automatic(action)) throw Error("请选择普通动作复制");
+  const inputs = inspectActionPending(content, root.actions);
+  requireKnownActionList(inputs);
   const next = appendContentAction(content, action, true),
     newIndex = root.actions.length;
-  const prefix = `/actions/${index}`;
   if (content.actionVariants?.[String(index)])
     next.actionVariants = {
       ...next.actionVariants,
@@ -487,12 +516,19 @@ export function copyDraftAction(
         content.actionVariants[String(index)],
       ),
     };
-  for (const [key, value] of Object.entries(content.pending ?? {}))
-    if (key === prefix || key.startsWith(prefix + "/"))
+  if (content.parameterVariants?.[String(index)])
+    next.parameterVariants = {
+      ...next.parameterVariants,
+      [String(newIndex)]: cloneClientJson(
+        content.parameterVariants[String(index)],
+      ),
+    };
+  for (const { input, path, actionIndex } of inputs)
+    if (actionIndex === index)
       next.pending = {
         ...next.pending,
-        [`/actions/${newIndex}${key.slice(prefix.length)}`]:
-          cloneClientJson(value),
+        [pointer(["actions", newIndex, ...path.slice(2)])]:
+          cloneClientJson(input),
       };
   return next;
 }

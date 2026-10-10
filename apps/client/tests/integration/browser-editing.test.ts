@@ -67,6 +67,39 @@ async function setup(capabilityText?: string) {
   await page.getByTestId("initialize-button").click();
   return { page, app, directory };
 }
+it("独立选择保留其他数字词元并按源候选明确写入当前字段", async () => {
+  const caps =
+    '{"devices":[{"device_id":"cam","driver_id":"demo","actions":[{"type":"camera_record","parameter_types":[{"type":"probe","name":"独立设置","description":"测试","preview_supported":false,"schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"required":["type","value","quality","duration"],"properties":{"type":{"const":"probe"},"value":{"title":"数值选项","type":"number","enum":[1e0]},"quality":{"title":"画质","enum":["a","b"]},"duration":{"title":"连续数值","type":"number"}}}}]}]}]}';
+  const { page, app } = await setup(caps);
+  const draft = app.createDraft({
+    text: '{"name":"精确选择","actions":[{"name":"录像","type":"camera_record","device_id":"cam","scheduled_at":"2026-10-11 00:00:00","policy":{"max_delay_ms":0},"params":{"type":"probe","value":1e-999,"quality":"b","duration":1.0000000000000001}}]}',
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  const value = page.getByRole("combobox", {
+    name: "数值选项 (value)",
+    exact: true,
+  });
+  await check(value).toHaveAttribute("data-value", "invalid");
+  await check(value).toContainText("1e-999");
+  await choose(page.getByLabel("画质 (quality)", { exact: true }), "0");
+  await check
+    .poll(() => app.draft(draft.id).content.text)
+    .toContain('"quality": "a"');
+  expect(app.draft(draft.id).content.text).toContain("1e-999");
+  expect(app.draft(draft.id).content.text).toContain("1.0000000000000001");
+  await choose(value, "0");
+  await check
+    .poll(() => app.draft(draft.id).content.text)
+    .toContain('"value": 1e0');
+  expect(app.draft(draft.id).content.text).toContain("1.0000000000000001");
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await check(value).toHaveAttribute("data-value", "0");
+  await check(
+    page.getByLabel("连续数值 (duration)", { exact: true }),
+  ).toHaveValue("1.0000000000000001");
+}, 20000);
 it("相机数字与参数 JSON 保留原词元且预设不会接受舍入后的整数", async () => {
   const token = "1.0000000000000001";
   const { page, app } = await setup(
@@ -1514,10 +1547,10 @@ it("普通字段保留缺省和显式空值，重载说明不写入Schema默认�
     page.getByRole("checkbox", { name: "填写次数 (count)", exact: true }),
   ).toHaveCount(0);
   await check(page.getByLabel("次数 (count)", { exact: true })).toHaveValue("");
-  await page.getByLabel("启用 (enabled)", { exact: true }).fill("false");
+  await choose(page.getByLabel("启用 (enabled)", { exact: true }), "1");
   await page.getByLabel("次数 (count)", { exact: true }).fill("0");
   await page.getByRole("button", { name: "设为 null", exact: true }).click();
-  await page.getByLabel("选项 (choice)", { exact: true }).fill('""');
+  await choose(page.getByLabel("选项 (choice)", { exact: true }), "3");
   await check(page.getByTestId("save-status")).toContainText("已保存");
   const draft = app.store.all<Draft>("drafts")[0];
   expect(JSON.parse(draft.content.text).actions[0]?.params).toEqual({
@@ -1752,7 +1785,48 @@ it("手动取回的精确列表与筛选转换须明确选择，原非法组合�
   });
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await check(page.locator(".builtin-parameters")).toContainText("组合");
+  const before = app.draft(draft.id);
+  const issues = page.getByTestId("validation-issues");
+  const combination = issues.getByRole("button", { name: /取回.*动作参数/ });
+  await check(combination).toContainText(/筛选.*产物列表.*不能同时/);
+  const currentIssues = () =>
+    validatePlan(
+      {
+        ...parseDraft(app.draft(draft.id).content),
+        request_id: "1",
+        created_at: "2026-09-16 00:00:00",
+      },
+      app.capabilities.active,
+    );
+  expect(currentIssues()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        code: "schema_oneOf",
+        pointer: "/actions/0/params",
+      }),
+    ]),
+  );
+  expect(() => app.validateContent(before.content)).toThrow();
+  await combination.click();
+  const planJson = page.getByTestId("draft-json-input");
+  await check(planJson).toBeFocused();
+  await check(planJson).toHaveAttribute("aria-invalid", "true");
+  await check(planJson).toHaveValue(before.content.text);
+  expect(app.draft(draft.id)).toEqual(before);
+  await page.getByTestId("draft-json-toggle").click();
+  await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+  await combination.click();
+  const paramsJson = page.getByLabel("动作参数 JSON", { exact: true });
+  await check(paramsJson).toBeFocused();
+  await check(paramsJson).toHaveAttribute("aria-invalid", "true");
+  expect(JSON.parse(await paramsJson.inputValue())).toEqual(params);
+  const descriptionId = await paramsJson.getAttribute("aria-describedby");
+  await check(
+    page.locator(`[id=${JSON.stringify(descriptionId)}]`),
+  ).toContainText(/筛选.*产物列表.*不能同时/);
+  expect(app.draft(draft.id)).toEqual(before);
+  await page.getByRole("button", { name: "参数表单", exact: true }).click();
+  expect(app.draft(draft.id)).toEqual(before);
   await check(
     page
       .locator("label.field")
@@ -1770,6 +1844,12 @@ it("手动取回的精确列表与筛选转换须明确选择，原非法组合�
       filter: "default",
       purpose: "manual",
     });
+  await check(combination).toHaveCount(0);
+  expect(
+    currentIssues().filter((issue) =>
+      issue.pointer?.startsWith("/actions/0/params"),
+    ),
+  ).toEqual([]);
   await page.getByLabel("指定产物筛选").check();
   await check
     .poll(() => JSON.parse(app.draft(draft.id).content.text).actions[0].params)
@@ -1778,6 +1858,21 @@ it("手动取回的精确列表与筛选转换须明确选择，原非法组合�
       output_ids: [],
       purpose: "manual",
     });
+  await check(combination).toHaveCount(0);
+  expect(currentIssues()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        code: "schema_minItems",
+        pointer: "/actions/0/params/output_ids",
+      }),
+    ]),
+  );
+  const afterSelection = app.draft(draft.id);
+  await issues.getByRole("button", { name: /产物 ID.*数量/ }).click();
+  await check(
+    page.getByRole("button", { name: "添加产物 ID", exact: true }),
+  ).toBeFocused();
+  expect(app.draft(draft.id)).toEqual(afterSelection);
 }, 20000);
 
 it.each([

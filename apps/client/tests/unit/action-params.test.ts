@@ -4,6 +4,22 @@ import {
   sources,
   validateBuiltinParams,
 } from "../../src/shared/action-params";
+import notificationSchema from "../../../../protocol/schemas/host-notification.schema.json";
+
+it("电机字段目录包含公共跨文档参数声明", () => {
+  expect([...builtinFields.motor_control].sort()).toEqual(
+    Object.keys(notificationSchema.$defs.motor_params.properties).sort(),
+  );
+});
+it("电机合法字段与真实额外字段分别按完整协议验证", () => {
+  const legal = { position: 0 };
+  const extra = { ...legal, unexpected: "保留" };
+  expect(validateBuiltinParams("motor_control", legal, true)).toEqual([]);
+  expect(validateBuiltinParams("motor_control", extra, true)).toMatchObject([
+    { path: "params", code: "invalid_params" },
+  ]);
+  expect(extra).toEqual({ position: 0, unexpected: "保留" });
+});
 
 it("内置字段识别使用公共参数定义的所有分支声明", () => {
   expect([...builtinFields.obtain_action_outputs].sort()).toEqual([

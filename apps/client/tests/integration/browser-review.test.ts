@@ -1,3 +1,4 @@
+import { pendingInput, pendingAction } from "./pending-support";
 import { choose } from "./select-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
@@ -91,7 +92,7 @@ it("通用入口修正回原合法参数后JSON显示、保存和导出同源", 
     .getByRole("button", { name: "参数 JSON", exact: true })
     .click();
   const widget = page.getByLabel("参数 JSON 文本"),
-    pending = page.getByLabel("未完成输入 /actions/0/params");
+    pending = pendingInput(page, "/actions/0/params");
   await widget.fill("{");
   await check(page.getByTestId("save-status")).toContainText("已保存");
   expect(app.draft(draft.id).content.pending?.["/actions/0/params"].text).toBe(
@@ -99,9 +100,7 @@ it("通用入口修正回原合法参数后JSON显示、保存和导出同源", 
   );
   await pending.fill('{"type":');
   await check(widget).toHaveValue('{"type":');
-  await page
-    .getByRole("button", { name: "应用修正 /actions/0/params", exact: true })
-    .click();
+  await pendingAction(page, "/actions/0/params", "apply").click();
   await check(widget).toHaveValue('{"type":');
   await check(page.getByTestId("save-status")).toContainText("已保存");
   expect(app.draft(draft.id).content.pending?.["/actions/0/params"].text).toBe(
@@ -109,9 +108,7 @@ it("通用入口修正回原合法参数后JSON显示、保存和导出同源", 
   );
   await pending.fill('{"type":"demo_fixed"}');
   await check(widget).toHaveValue('{"type":"demo_fixed"}');
-  await page
-    .getByRole("button", { name: "应用修正 /actions/0/params", exact: true })
-    .click();
+  await pendingAction(page, "/actions/0/params", "apply").click();
   await check(page.getByTestId("save-status")).toContainText("已保存");
   expect(app.draft(draft.id).content.pending).toEqual({});
   expect(
@@ -207,22 +204,10 @@ it.each(["different", "omit", "preset_same", "preset_different"] as const)(
       await choose(page.getByLabel("已有预设"), preset.id);
       await page.getByRole("button", { name: "应用预设", exact: true }).click();
     } else if (mode === "omit")
-      await page
-        .getByRole("button", {
-          name: "放弃输入 /actions/0/params",
-          exact: true,
-        })
-        .click();
+      await pendingAction(page, "/actions/0/params", "clear").click();
     else {
-      await page
-        .getByLabel("未完成输入 /actions/0/params")
-        .fill(JSON.stringify(want));
-      await page
-        .getByRole("button", {
-          name: "应用修正 /actions/0/params",
-          exact: true,
-        })
-        .click();
+      await pendingInput(page, "/actions/0/params").fill(JSON.stringify(want));
+      await pendingAction(page, "/actions/0/params", "apply").click();
     }
     await check(widget).toHaveValue(
       want === undefined ? "" : JSON.stringify(want, null, 2),
@@ -268,10 +253,8 @@ it.each(["policy", "action_params"] as const)(
       isPolicy ? "业务策略 JSON" : "动作参数 JSON",
     );
     await widget.fill("{");
-    await page.getByLabel(`未完成输入 ${path}`).fill(JSON.stringify(original));
-    await page
-      .getByRole("button", { name: `应用修正 ${path}`, exact: true })
-      .click();
+    await pendingInput(page, path).fill(JSON.stringify(original));
+    await pendingAction(page, path, "apply").click();
     await check(widget).toHaveValue(JSON.stringify(original, null, 2));
     await check(page.getByTestId("save-status")).toContainText("已保存");
     expect(app.draft(draft.id).content.pending).toEqual({});
@@ -387,16 +370,9 @@ it("数值未完成时兄弟字段编辑保留原文，修正后导出准确新�
   await page.getByTestId("export-button").click();
   await check(page.getByRole("alert")).toBeVisible();
   expect(app.store.all("requests")).toHaveLength(0);
-  await check(
-    page.getByLabel("未完成输入 /actions/0/params/count"),
-  ).toBeEnabled();
-  await page.getByLabel("未完成输入 /actions/0/params/count").fill("12");
-  await page
-    .getByRole("button", {
-      name: "应用修正 /actions/0/params/count",
-      exact: true,
-    })
-    .click();
+  await check(pendingInput(page, "/actions/0/params/count")).toBeEnabled();
+  await pendingInput(page, "/actions/0/params/count").fill("12");
+  await pendingAction(page, "/actions/0/params/count", "apply").click();
   await page.getByTestId("export-button").click();
   await check(page.getByTestId("download-request-button")).toBeVisible();
   const body = app.store.all<{ body: { actions: Array<{ params: unknown }> } }>(
@@ -443,11 +419,9 @@ it("父JSON只读保留未完成路径，Schema没有控件时仍能明确修正
     "",
   );
   const path = "/actions/0/params/count";
-  await check(page.getByLabel(`未完成输入 ${path}`)).toHaveValue("1e");
-  await page.getByLabel(`未完成输入 ${path}`).fill("12");
-  await page
-    .getByRole("button", { name: `应用修正 ${path}`, exact: true })
-    .click();
+  await check(pendingInput(page, path)).toHaveValue("1e");
+  await pendingInput(page, path).fill("12");
+  await pendingAction(page, path, "apply").click();
   await check(page.getByTestId("save-status")).toContainText("已保存");
   expect(app.draft(draft.id).content.pending).toEqual({});
   expect(

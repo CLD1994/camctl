@@ -339,6 +339,65 @@ fieldset {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.save-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.preview-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 10px;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+}
+.preview-status {
+  max-width: 30em;
+  overflow-wrap: anywhere;
+}
+.preview-diagnostics {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.preview-diagnostics p {
+  margin: 0;
+}
+.preview-menu-positioner {
+  z-index: 30;
+}
+.preview-menu-popup {
+  padding: 5px;
+  border: 1px solid #ccd8cf;
+  border-radius: 8px;
+  background: #fff;
+  color: #233c36;
+  box-shadow: 0 5px 20px #243b2526;
+  max-width: calc(100vw - 24px);
+}
+.preview-menu-item {
+  padding: 8px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+  outline: none;
+}
+.preview-menu-item[data-highlighted] {
+  background: #edf3e9;
+  outline: 2px solid #60836b;
+  outline-offset: -2px;
+}
+.preview-menu-item[data-disabled] {
+  opacity: 0.5;
+  cursor: default;
 }
 .field {
   display: flex;
@@ -683,7 +742,10 @@ fieldset {
   border-color: #d8e0d9;
   background: #f1f3ef;
 }
-.select-trigger[aria-invalid="true"] {
+.select-trigger[aria-invalid="true"],
+input[aria-invalid="true"],
+textarea[aria-invalid="true"],
+button[data-validation-path][aria-invalid="true"] {
   border-color: #ae5148;
 }
 .select-value {

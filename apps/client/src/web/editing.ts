@@ -4,12 +4,20 @@ import {
   cloneClientJson,
   stringifyJson,
   rememberNumberToken,
+  originalNumberToken,
 } from "../shared/json";
 import { isObject } from "../shared/validation";
 export { decodeJsonPointer as pointerPath } from "../shared/json-pointer";
 import { decodeJsonPointer as pointerPath } from "../shared/json-pointer";
 import type { DraftContent, ExportedRequest } from "../server/models";
 import type { ReportPlan } from "../shared/types";
+import {
+  replaceParameterValue,
+  switchParameterType,
+} from "../shared/parameter-variants";
+import { replaceActionValue, switchActionType } from "./action-drafts";
+import { parseDraft, pointer, requireDraftRoot } from "../shared/draft-plan";
+export { parseDraft, pointer } from "../shared/draft-plan";
 import {
   appendContentAction,
   removeContentAction,
@@ -24,27 +32,6 @@ import {
 
 export type Path = Array<string | number>;
 export type EditObject = Record<string, any>;
-export function parseDraft(
-  content: DraftContent,
-): EditObject & { actions: EditObject[] } {
-  return requireDraftRoot(parseJson(content.text));
-}
-function requireDraftRoot(
-  value: unknown,
-): EditObject & { actions: EditObject[] } {
-  if (!isObject(value) || !Array.isArray(value.actions))
-    throw new Error("计划必须是对象，并包含 actions 数组。请在 JSON 中修正。");
-  return value as EditObject & { actions: EditObject[] };
-}
-export function pointer(path: Path): string {
-  if (!path.length) return "";
-  return (
-    "/" +
-    path
-      .map((p) => String(p).replace(/~/g, "~0").replace(/\//g, "~1"))
-      .join("/")
-  );
-}
 function prepareActionListChange(content: DraftContent, text?: string) {
   if (Object.hasOwn(content.pending ?? {}, ""))
     throw new Error("整个计划仍有未完成输入，请先修正该祖先输入");
@@ -87,6 +74,7 @@ function replaceActionList(
   const {
     automaticPreviews: _preview,
     actionVariants: _variants,
+    parameterVariants: _parameters,
     ...rest
   } = content;
   return { ...rest, text: stringifyJson(root, 2), pending };
@@ -108,7 +96,8 @@ export function editPlanText(
     throw new Error("请先修正或明确省略未完成输入，再编辑整份 JSON");
   if (
     (content.automaticPreviews ||
-      Object.keys(content.actionVariants ?? {}).length) &&
+      Object.keys(content.actionVariants ?? {}).length ||
+      Object.keys(content.parameterVariants ?? {}).length) &&
     !replaceVariants
   )
     throw new Error(
@@ -178,6 +167,49 @@ export function setValue(
   if (!omit && !replace && pendingBlocks(content, path))
     throw new Error("此路径存在尚未解决的输入，请先逐项修正或明确省略");
   path = resolvePath(parseDraft(content), path);
+  if (path[0] === "actions" && typeof path[1] === "number") {
+    if (path.length === 2)
+      return replaceActionValue(content, path[1], value, omit, numberToken);
+    if (path.length >= 3 && path[2] === "type") {
+      const {
+        content: pending,
+        type,
+        token,
+      } = prepareTypeEdit(
+        content,
+        path,
+        path.slice(0, 3),
+        value,
+        omit,
+        numberToken,
+      );
+      return switchActionType(pending, path[1], type, token);
+    }
+  }
+  if (
+    path[0] === "actions" &&
+    typeof path[1] === "number" &&
+    path[2] === "params"
+  ) {
+    if (path.length === 3)
+      return replaceParameterValue(content, path[1], value, omit, numberToken);
+    if (path.length >= 4 && path[3] === "type") {
+      // 成功应用类型字段自己的原文与转换一起提交，其他输入仍参与资格检查。
+      const {
+        content: prepared,
+        type,
+        token,
+      } = prepareTypeEdit(
+        content,
+        path,
+        path.slice(0, 4),
+        value,
+        omit,
+        numberToken,
+      );
+      return switchParameterType(prepared, path[1], type, token);
+    }
+  }
   if (
     path.length === 3 &&
     path[0] === "actions" &&
@@ -186,6 +218,30 @@ export function setValue(
   )
     content = renamePreviewSources(content, path[1], omit ? undefined : value);
   const root = parseDraft(content);
+  applyPath(root, path, value, omit, numberToken);
+  const targetPath = path.map(String);
+  const pending = Object.fromEntries(
+    Object.entries(content.pending ?? {}).filter(([key]) => {
+      try {
+        const inputPath = pointerPath(key);
+        return !(
+          targetPath.length <= inputPath.length &&
+          targetPath.every((part, index) => part === inputPath[index])
+        );
+      } catch {
+        return true; // 无法归属的输入资料保持原文。
+      }
+    }),
+  );
+  return { ...content, text: stringifyJson(root, 2), pending };
+}
+function applyPath(
+  root: EditObject,
+  path: Path,
+  value: unknown,
+  omit: boolean,
+  numberToken?: string,
+) {
   let target: EditObject = root;
   for (const part of path.slice(0, -1)) {
     if (
@@ -210,13 +266,58 @@ export function setValue(
       configurable: true,
     });
   rememberNumberToken(target, key, omit ? undefined : numberToken);
-  const p = pointer(path);
+}
+function prepareTypeEdit(
+  content: DraftContent,
+  path: Path,
+  identityPath: Path,
+  value: unknown,
+  omit: boolean,
+  numberToken?: string,
+) {
+  const prepared = consumeOwnInput(content, path),
+    identity = identityPath.map(String);
+  for (const key of Object.keys(prepared.pending ?? {})) {
+    const input = pointerPath(key);
+    const ancestor =
+      input.length <= identity.length &&
+      input.every((part, i) => part === identity[i]);
+    const descendant =
+      identity.length <= input.length &&
+      identity.every((part, i) => part === input[i]);
+    if (ancestor || descendant)
+      throw Error("类型身份仍有其他未完成输入，暂不能修正");
+  }
+  const root = parseDraft(content);
+  applyPath(root, path, value, omit, numberToken);
+  const owner = valueAt(root, identityPath.slice(0, -1)),
+    key = identityPath.at(-1)!;
+  const type = valueAt(root, identityPath);
+  // clone 将明确省略的数组位置形成实际 JSON null，同时保留嵌套原数字事实。
+  return {
+    content: prepared,
+    type: cloneClientJson(type),
+    token: originalNumberToken(owner, key, type),
+  };
+}
+function consumeOwnInput(content: DraftContent, path: Path): DraftContent {
+  let changed = false;
+  const target = path.map(String);
   const pending = Object.fromEntries(
-    Object.entries(content.pending ?? {}).filter(
-      ([key]) => key !== p && !key.startsWith(p + "/"),
-    ),
+    Object.entries(content.pending ?? {}).filter(([key]) => {
+      try {
+        const parts = pointerPath(key),
+          own =
+            parts.length === target.length &&
+            target.every((part, i) => part === parts[i]);
+        if (own) changed = true;
+        return !own;
+      } catch {
+        return true;
+      }
+    }),
   );
-  return { ...content, text: stringifyJson(root, 2), pending };
+  return changed ? { ...content, pending } : content;
 }
 function requireCompleteParams(content: DraftContent, path: Path): void {
   const prefix = pointer(path);
@@ -366,7 +467,9 @@ export function resolveField(
   seen = new Set<string>(),
 ): Record<string, unknown> {
   if (!isObject(field)) return {};
-  const { $ref, ...own } = field;
+  const own = cloneClientJson(field);
+  const $ref = own.$ref;
+  delete own.$ref;
   if (typeof $ref !== "string") return own;
   if (!$ref.startsWith("#/") || seen.has($ref)) return own;
   const target = $ref
@@ -379,7 +482,17 @@ export function resolveField(
           : undefined,
       root,
     );
-  return { ...resolveField(target, root, new Set([...seen, $ref])), ...own };
+  const resolved = resolveField(target, root, new Set([...seen, $ref]));
+  for (const key of Object.keys(own)) {
+    Object.defineProperty(resolved, key, {
+      value: own[key],
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    rememberNumberToken(resolved, key, originalNumberToken(own, key, own[key]));
+  }
+  return resolved;
 }
 export function localToUtc(input: string): string | undefined {
   if (!input) return undefined;

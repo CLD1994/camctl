@@ -6,6 +6,8 @@ import {
 } from "../../src/shared/automatic-previews";
 import { loadCapabilities } from "../../src/shared/capabilities";
 import { parseClientJson } from "../../src/shared/json";
+import type { DraftContent, PreviewIntent } from "../../src/server/models";
+import { DraftSession } from "../../src/web/session";
 const capture = {
   name: "拍摄",
   type: "camera_record",
@@ -53,6 +55,151 @@ const content = () =>
     "enabled",
     "test",
   );
+const contentWithBothCaches = (intent: PreviewIntent): DraftContent => ({
+  text: JSON.stringify({
+    name: "计划",
+    actions: [
+      capture,
+      {
+        name: "拍摄预览",
+        type: "obtain_action_outputs",
+        scheduled_at: capture.scheduled_at,
+        params: {
+          source: { action_name: "拍摄" },
+          filter: "preview",
+          purpose: "auto_preview",
+        },
+      },
+    ],
+  }),
+  automaticPreviews: {
+    intent,
+    namespace: "test",
+    next: 2,
+    actions: [{ id: "test:0" }, { id: "test:1", sourceId: "test:0" }],
+  },
+  parameterVariants: {
+    "0": [
+      {
+        paramsText: '{"params":{"type":"spare","value":9007199254740993}}',
+        pending: { "/value": { kind: "number", text: "9e" } },
+      },
+    ],
+  },
+  actionVariants: {
+    "0": [
+      {
+        type: "camera_timelapse",
+        fields: { params: { type: "inactive", value: 7 } },
+        pending: { "/params/value": { kind: "number", text: "7e" } },
+        parameterVariants: [
+          {
+            paramsText:
+              '{"params":{"type":"other","value":1.0000000000000001}}',
+            pending: { "/value": { kind: "number", text: "1e" } },
+          },
+        ],
+      },
+    ],
+  },
+});
+for (const intent of ["disabled", "enabled"] as const) {
+  it.each(["/actions/01/params/ghost", "/actions/0/policy/ghost~2"])(
+    `预览协调在 ${intent} 删除前停止不能确定归属的输入 %s`,
+    (path) => {
+      const original = contentWithBothCaches(intent);
+      original.pending = { [path]: { kind: "json", text: "{" } };
+      const before = JSON.stringify(original);
+      const result = coordinatePreviews(original, capabilities(false));
+      expect(result.content).toBe(original);
+      expect(JSON.stringify(result.content)).toBe(before);
+      expect(JSON.stringify(original)).toBe(before);
+      expect(result.issues.length).toBeGreaterThan(0);
+      expect(result.issues.join(" ")).toContain(path);
+    },
+  );
+  it(`预览协调在 ${intent} 可靠删除时按真实位置搬移两层缓存`, () => {
+    const original = contentWithBothCaches(intent);
+    const root = parseClientJson(original.text) as any;
+    root.actions.push({ ...capture, name: "第二拍摄" });
+    original.text = JSON.stringify(root);
+    original.automaticPreviews!.actions.push({ id: "test:2" });
+    original.automaticPreviews!.next = 3;
+    original.parameterVariants = { "2": original.parameterVariants!["0"] };
+    original.actionVariants = { "2": original.actionVariants!["0"] };
+    original.pending = {
+      "/actions/2/policy/a~1b~0c": { kind: "number", text: "7e" },
+    };
+    const before = JSON.stringify(original);
+    const result = coordinatePreviews(original, capabilities(false));
+    expect(result.issues).toEqual([]);
+    expect((parseClientJson(result.content.text) as any).actions).toEqual([
+      capture,
+      { ...capture, name: "第二拍摄" },
+    ]);
+    expect(result.content.pending).toEqual({
+      "/actions/1/policy/a~1b~0c": { kind: "number", text: "7e" },
+    });
+    expect(result.content.parameterVariants).toEqual({
+      "1": original.parameterVariants["2"],
+    });
+    expect(result.content.actionVariants).toEqual({
+      "1": original.actionVariants["2"],
+    });
+    expect(JSON.stringify(original)).toBe(before);
+  });
+}
+it.each(["", "/actions"])(
+  "预览协调对整个集合未完成输入保持原完整内容 %s",
+  (path) => {
+    const original = contentWithBothCaches("enabled");
+    original.pending = { [path]: { kind: "json", text: "{" } };
+    const before = JSON.stringify(original);
+    const result = coordinatePreviews(original, capabilities(false));
+    expect(result.content).toBe(original);
+    expect(JSON.stringify(original)).toBe(before);
+    expect(result.issues.length).toBeGreaterThan(0);
+  },
+);
+it("预览协调对参数资料的双重权威保持原文并返回诊断", () => {
+  const original = contentWithBothCaches("enabled");
+  original.parameterVariants!["0"].push({
+    paramsText: '{"params":{"type":"photo","other":7}}',
+    pending: {},
+  });
+  const before = JSON.stringify(original);
+  const result = coordinatePreviews(original, capabilities(false));
+  expect(result.content).toBe(original);
+  expect(JSON.stringify(original)).toBe(before);
+  expect(result.issues.length).toBeGreaterThan(0);
+});
+it("会话观察与准备编辑共同保留停止协调的完整内容", () => {
+  const original = contentWithBothCaches("disabled");
+  original.pending = {
+    "/actions/01/params/ghost": { kind: "json", text: "{" },
+  };
+  const draft = {
+    id: "draft",
+    revision: 1,
+    createdAt: "2026-10-10 01:00:00",
+    updatedAt: "2026-10-10 01:00:00",
+    content: original,
+  };
+  const session = new DraftSession(
+    draft,
+    { read: async () => draft, save: async () => draft },
+    () => {},
+  );
+  const before = JSON.stringify(original);
+  session.observe(draft, undefined, capabilities(false));
+  expect(session.content).toEqual(original);
+  expect(session.saved).toBe(true);
+  expect(session.prepareEdit(original).content).toEqual(original);
+  session.coordinate(capabilities(false));
+  expect(session.content).toEqual(original);
+  expect(session.version).toBe(0);
+  expect(JSON.stringify(original)).toBe(before);
+});
 it("开启时生成唯一取回并且重复协调保持完整版本", () => {
   const first = coordinatePreviews(content(), capabilities());
   expect((parseClientJson(first.content.text) as any).actions).toEqual([

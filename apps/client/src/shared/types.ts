@@ -1,6 +1,18 @@
 import type { ActionType } from './status-report.generated';
 export type { Camctl as StatusReport, Plan as ReportPlan, Action as ReportAction, Output, Delivery, ActionType } from './status-report.generated';
-export interface Issue { path: string; code: string; message: string }
+export interface Issue {
+  path: string;
+  code: string;
+  message: string;
+  /** 客户端内部的精确数据路径；path 仍保留既有机器诊断表示。 */
+  pointer?: string;
+  schema?: {
+    instancePath: string;
+    schemaPath: string;
+    keyword: string;
+    params: Record<string, unknown>;
+  };
+}
 export type EstimateQuantity =
   | { source: "constant"; value: number }
   | { source: "parameter"; path: string }

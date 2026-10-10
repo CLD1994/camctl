@@ -5,7 +5,6 @@ import { useId, useState } from "react";
 import type { DraftContent } from "../server/models";
 import { isObject, isName } from "../shared/validation";
 import {
-  validateBuiltinParams,
   sources,
   targets,
   builtinFields,
@@ -14,7 +13,6 @@ import {
   referenceMode,
 } from "../shared/action-params";
 import {
-  stringifyJson,
   displayJsonValue,
   parseClientJson,
   cloneClientJson,
@@ -58,7 +56,6 @@ export function BuiltinFields({
       k === prefix || k.startsWith(prefix + "/") || prefix.startsWith(k + "/"),
   );
   const structural = value !== undefined && !params;
-  const issues = validateBuiltinParams(type, value, value !== undefined);
   const put = (key: string, v: unknown, omit = false) =>
     change(setValue(content, [...path, key], v, omit));
   const reset = () => change(setValue(content, path, {}, false, true));
@@ -431,11 +428,6 @@ export function BuiltinFields({
                   </Select>
                 </ValidationControl>
               </label>
-              {reportMode === "" && (
-                <p className="notice warning">
-                  请选择完整或增量同步并补齐必填项，填写完成后才能导出。
-                </p>
-              )}
               {reportMode === "since" && (
                 <label className="field">
                   <span>
@@ -489,22 +481,9 @@ export function BuiltinFields({
                   尚无可用的增量同步起点，可以请求完整同步。
                 </p>
               )}
-              {issues.length > 0 && params && (
-                <div className="notice warning">
-                  报告参数需要修正，原值：
-                  <pre>{stringifyJson(params, 2)}</pre>
-                  <button onClick={reset}>清空参数并重新填写</button>
-                </div>
-              )}
             </>
           )}
         </>
-      )}
-      {issues.length > 0 && type !== "report_status" && (
-        <p className="notice warning">
-          参数字段、值或组合需要修正；原输入保留，请补齐表单或通过参数 JSON
-          核对。
-        </p>
       )}
     </section>
   );
@@ -619,15 +598,17 @@ function OutputIds({
           </button>
         </div>
       ))}
-      <button
-        onClick={() => {
-          const next = cloneClientJson(ids);
-          next.push("");
-          change(setValue(content, path, next));
-        }}
-      >
-        添加产物 ID
-      </button>
+      <ValidationControl path={path}>
+        <button
+          onClick={() => {
+            const next = cloneClientJson(ids);
+            next.push("");
+            change(setValue(content, path, next));
+          }}
+        >
+          添加产物 ID
+        </button>
+      </ValidationControl>
       {!ids.length && (
         <p className="notice">至少添加一个产物 ID；空列表不能导出。</p>
       )}

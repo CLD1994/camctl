@@ -1,3 +1,4 @@
+import { pendingInput } from "./pending-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
 import { mkdtempSync, rmSync, copyFileSync } from "node:fs";
@@ -245,10 +246,8 @@ it("页签方向键与 Home End 激活内容并保持草稿原输入", async () 
     );
     await check(page.locator('[role="tabpanel"][inert]')).toBeHidden();
   }
-  await check(
-    page.getByLabel("未完成输入 /actions/0/policy/max_delay_ms", {
-      exact: true,
-    }),
-  ).toHaveValue("1e");
+  await check(pendingInput(page, "/actions/0/policy/max_delay_ms")).toHaveValue(
+    "1e",
+  );
   expect(app.draft(draft.id).content).toEqual(content);
 });

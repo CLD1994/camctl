@@ -6,11 +6,10 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import type { Issue } from "../shared/types";
 import { pointer, type Path } from "./editing";
-import type { IssuePresentation } from "./validation-presentation";
+import type { PresentedIssue } from "./validation-presentation";
+export type { PresentedIssue } from "./validation-presentation";
 
-export type PresentedIssue = IssuePresentation & { issue: Issue };
 export const ValidationContext = createContext<PresentedIssue[]>([]);
 
 /** 在真实控件上关联当前错误；JSON 控件同时负责其内部路径。 */
@@ -29,11 +28,12 @@ export function ValidationControl({
     target = typeof path === "string" ? path : pointer(path),
     all = useContext(ValidationContext);
   const matching = all.filter(
-    ({ target: issueTarget, issue }) =>
+    ({ target: issueTarget, issue, json: requiresJson }) =>
       (json && target === "") ||
       (pending
         ? issue.code === "unfinished_input" && issue.path === target
-        : issueTarget !== null &&
+        : (!requiresJson || json) &&
+          issueTarget !== null &&
           (issueTarget === target ||
             (json && issueTarget.startsWith(target + "/")))),
   );
@@ -55,9 +55,7 @@ export function ValidationControl({
       })}
       {matching.length > 0 && (
         <small id={id} className="field-error">
-          {matching
-            .map((item) => `${item.location}：${item.message}`)
-            .join("；")}
+          {matching.map((item) => item.message).join("；")}
         </small>
       )}
     </>

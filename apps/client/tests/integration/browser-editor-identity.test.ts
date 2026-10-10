@@ -1,3 +1,4 @@
+import { pendingInput, pendingAction } from "./pending-support";
 import { beforeAll, afterAll, afterEach, expect, it } from "vitest";
 import {
   chromium,
@@ -183,7 +184,7 @@ it.each(["{", "[]", "null", "ambiguous"])(
       card(page, "A").getByLabel("动作类型", { exact: true }),
     ).toHaveAttribute("data-value", "camera_record");
     await browserExpect(
-      page.getByLabel("未完成输入 /actions/0/params/count"),
+      pendingInput(page, "/actions/0/params/count"),
     ).toHaveValue("1e");
     await retained(page, "B");
     expect(application.draft(draft.id).content).toEqual(draft.content);
@@ -456,8 +457,12 @@ it.each(["开启", "关闭"])(
     expect(
       application.draft(draft.id).content.automaticPreviews,
     ).toBeUndefined();
+    await page.getByTestId("preview-intent").click();
     await page
-      .getByRole("button", { name: `${choice}自动预览`, exact: true })
+      .getByRole("menuitem", {
+        name: choice === "开启" ? "启用预览" : "禁用预览",
+        exact: true,
+      })
       .click();
     await retained(page, "B");
     await browserExpect(page.getByTestId("save-status")).toContainText(
@@ -492,8 +497,12 @@ it.each(["开启", "关闭"])(
     input.text = JSON.stringify(plan);
     const { application, page, draft } = await setup(input);
     await mark(page, "B");
+    await page.getByTestId("preview-intent").click();
     await page
-      .getByRole("button", { name: `${choice}自动预览`, exact: true })
+      .getByRole("menuitem", {
+        name: choice === "开启" ? "启用预览" : "禁用预览",
+        exact: true,
+      })
       .click();
     await browserExpect(page.getByTestId("derived-preview")).toHaveCount(0);
     await retained(page, "B");
@@ -608,16 +617,12 @@ it("整数组取消保全部组件状态，确认同数替换unset且集合外pe
   const { page, application, draft } = await setup(input);
   await mark(page, "B");
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page
-    .getByRole("button", { name: "应用修正 /actions", exact: true })
-    .click();
+  await pendingAction(page, "/actions", "apply").click();
   await retained(page, "B");
   expect(application.draft(draft.id).content).toEqual(draft.content);
   await mark(page, "B");
   page.once("dialog", (dialog) => dialog.accept());
-  await page
-    .getByRole("button", { name: "应用修正 /actions", exact: true })
-    .click();
+  await pendingAction(page, "/actions", "apply").click();
   await browserExpect(
     card(page, "B").getByRole("button", { name: "收起动作", exact: true }),
   ).toHaveAttribute("aria-expanded", "true");
@@ -631,9 +636,7 @@ it("整数组取消保全部组件状态，确认同数替换unset且集合外pe
   expect(saved.pending).toEqual({ "/name": input.pending["/name"] });
   await page.reload();
   await page.getByTestId("draft-open-button").click();
-  await browserExpect(
-    page.getByLabel("未完成输入 /name", { exact: true }),
-  ).toHaveValue('"集合外');
+  await browserExpect(pendingInput(page, "/name")).toHaveValue('"集合外');
   await browserExpect(page.getByTestId("preview-intent")).toContainText(
     "尚未设置",
   );
@@ -646,14 +649,10 @@ it("整actions字段移除先确认，取消保原值，确认不遗留资料且
   };
   const { page, application, draft } = await setup(input);
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page
-    .getByRole("button", { name: "放弃输入 /actions", exact: true })
-    .click();
+  await pendingAction(page, "/actions", "clear").click();
   expect(application.draft(draft.id).content).toEqual(draft.content);
   page.once("dialog", (dialog) => dialog.accept());
-  await page
-    .getByRole("button", { name: "放弃输入 /actions", exact: true })
-    .click();
+  await pendingAction(page, "/actions", "clear").click();
   await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
   const saved = application.draft(draft.id).content;
   expect(Object.hasOwn(JSON.parse(saved.text), "actions")).toBe(false);
@@ -678,14 +677,10 @@ it.each(["null", "["])(
       dialogs++;
       await dialog.accept();
     });
-    await page
-      .getByRole("button", { name: "应用修正 /actions", exact: true })
-      .click();
+    await pendingAction(page, "/actions", "apply").click();
     await browserExpect(page.getByRole("alert")).toBeVisible();
     expect(dialogs).toBe(0);
-    await browserExpect(
-      page.getByLabel("未完成输入 /actions", { exact: true }),
-    ).toHaveValue(text);
+    await browserExpect(pendingInput(page, "/actions")).toHaveValue(text);
     expect(application.draft(draft.id).content).toEqual(draft.content);
   },
 );
@@ -699,9 +694,7 @@ it("确认业务非法动作数组仍保存原数字和字符串，完整导出�
   };
   const { page, application, draft } = await setup(input);
   page.once("dialog", (dialog) => dialog.accept());
-  await page
-    .getByRole("button", { name: "应用修正 /actions", exact: true })
-    .click();
+  await pendingAction(page, "/actions", "apply").click();
   await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
   const saved = application.draft(draft.id).content;
   expect(saved.text).toContain("1.0000000000000001");

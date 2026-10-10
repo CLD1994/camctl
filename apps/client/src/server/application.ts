@@ -41,6 +41,11 @@ import {
 import { isCameraAction } from "../shared/actions";
 import { loadCapabilities, validateParams } from "../shared/capabilities";
 import { validatePlan } from "../shared/plan";
+import {
+  checkParameterVariants,
+  checkParameterVariantLocations,
+  checkActiveParameterVariant,
+} from "../shared/parameter-variants";
 import type { StatusReport } from "../shared/types";
 import {
   mergeReport,
@@ -248,7 +253,13 @@ export class Application {
             !object(variant.pending) ||
             Object.keys(variant).some(
               (key) =>
-                !["type", "fields", "fieldsText", "pending"].includes(key),
+                ![
+                  "type",
+                  "fields",
+                  "fieldsText",
+                  "pending",
+                  "parameterVariants",
+                ].includes(key),
             ) ||
             Object.keys(variant.fields).some((key) =>
               [...DRAFT_COMMON_ACTION_FIELDS, "type"].includes(key),
@@ -266,6 +277,13 @@ export class Application {
             )
           )
             fail();
+          if (variant.parameterVariants !== undefined) {
+            try {
+              checkParameterVariants(variant.parameterVariants);
+            } catch {
+              fail();
+            }
+          }
           if (variant.fieldsText !== undefined) {
             try {
               if (typeof variant.fieldsText !== "string") fail();
@@ -279,7 +297,62 @@ export class Application {
               fail();
             }
           }
+          if (variant.parameterVariants !== undefined) {
+            try {
+              const fields =
+                variant.fieldsText === undefined
+                  ? variant.fields
+                  : parseClientJson(variant.fieldsText);
+              checkActiveParameterVariant(
+                variant.parameterVariants,
+                fields as Record<string, unknown>,
+              );
+            } catch {
+              fail();
+            }
+          }
         }
+      }
+    }
+    if (content.parameterVariants !== undefined) {
+      try {
+        if (!object(content.parameterVariants))
+          throw Error("参数类型资料必须是动作位置映射");
+        for (const [index, variants] of Object.entries(
+          content.parameterVariants,
+        )) {
+          if (
+            !/^(0|[1-9]\d*)$/.test(index) ||
+            !Number.isSafeInteger(Number(index))
+          )
+            throw Error("参数类型资料动作位置不正确");
+          checkParameterVariants(variants);
+        }
+      } catch {
+        throw new AppError("invalid_content", "参数类型编辑资料格式不正确");
+      }
+    }
+    // 无法解析的正文仍可作为编辑原文保存；可解释时不能保存悬空的新资料位置。
+    let root: unknown;
+    try {
+      root = parseClientJson(content.text);
+    } catch {
+      return;
+    }
+    if (object(root) && Array.isArray(root.actions)) {
+      try {
+        checkParameterVariantLocations(content, root.actions);
+        for (const [index, variants] of Object.entries(
+          content.parameterVariants ?? {},
+        )) {
+          const action = root.actions[Number(index)];
+          if (object(action)) checkActiveParameterVariant(variants, action);
+        }
+      } catch {
+        throw new AppError(
+          "invalid_content",
+          "参数类型编辑资料的动作归属不正确",
+        );
       }
     }
   }

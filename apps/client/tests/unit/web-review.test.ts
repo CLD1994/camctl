@@ -52,6 +52,40 @@ it("明确省略只解除所删除子树的待完成输入", () => {
     "/actions/0/policy/max_delay_ms": { kind: "number", text: "-" },
   });
 });
+it.each([true, false])(
+  "明确省略或覆盖保留无法解码资料，只清有效成员：omit=%s",
+  (omit) => {
+    const pending = {
+      "/actions/0/params/old": { kind: "json" as const, text: "{" },
+      "/actions/0/params/old/missing/nested": {
+        kind: "json" as const,
+        text: "{",
+      },
+      "/actions/0/params/old/bad~2": {
+        kind: "json" as const,
+        text: "未知原文",
+      },
+      "/actions/0/params/old~1sibling": { kind: "json" as const, text: "兄弟" },
+      "/actions/0/params/older": { kind: "json" as const, text: "相似前缀" },
+      "/actions/1/params/old": { kind: "json" as const, text: "其他动作" },
+    };
+    const before = {
+      text: '{"actions":[{"params":{"old":0}},{"params":{"old":1}}]}',
+      pending,
+    };
+    const next = setValue(
+      before,
+      ["actions", 0, "params", "old"],
+      omit ? undefined : 2,
+      omit,
+      true,
+    );
+    expect(next.pending).toEqual(
+      Object.fromEntries(Object.entries(pending).slice(2)),
+    );
+    expect(before.pending).toEqual(pending);
+  },
+);
 it.each([
   [true, true],
   [true, false],

@@ -3,6 +3,7 @@ import { createProtocolValidator } from "./protocol-validation";
 import type { ValidateFunction } from "ajv";
 import type { Capabilities, Issue, ParameterType } from "./types";
 import { createValidator, DIALECT, isObject, schemaIssues } from "./validation";
+import { visitSchemaNodes } from "./schema-nodes";
 
 const compiled = new WeakMap<object, ValidateFunction>();
 function unique(values: Set<string>, value: string, path: string) {
@@ -12,50 +13,22 @@ function unique(values: Set<string>, value: string, path: string) {
 function validateSchemaResources(
   schema: Record<string, unknown>,
   validator: ReturnType<typeof createValidator>,
-  root = true,
 ) {
-  // 使用校验器已注册词汇，包含仅作说明的标准关键词，不另维护完整清单。
-  for (const keyword of Object.keys(schema))
-    if (!Object.hasOwn(validator.RULES.keywords, keyword))
-      throw new Error(`Schema 关键词不支持：${keyword}`);
-  if (
-    typeof schema.format === "string" &&
-    !Object.hasOwn(validator.formats, schema.format)
-  )
-    throw new Error(`Schema 格式不支持：${schema.format}`);
-  if ((root || Object.hasOwn(schema, "$id")) && schema.$schema !== DIALECT)
-    throw new Error("Schema 资源必须声明 Draft 2020-12");
-  if (Object.hasOwn(schema, "$schema") && schema.$schema !== DIALECT)
-    throw new Error("Schema 版本不支持");
-  const single = [
-    "$defs",
-    "properties",
-    "patternProperties",
-    "dependentSchemas",
-  ];
-  for (const key of single)
-    if (isObject(schema[key]))
-      for (const child of Object.values(schema[key]))
-        if (isObject(child)) validateSchemaResources(child, validator, false);
-  for (const key of [
-    "items",
-    "additionalProperties",
-    "unevaluatedProperties",
-    "contains",
-    "not",
-    "if",
-    "then",
-    "else",
-    "propertyNames",
-    "unevaluatedItems",
-    "contentSchema",
-  ])
-    if (isObject(schema[key]))
-      validateSchemaResources(schema[key], validator, false);
-  for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"])
-    if (Array.isArray(schema[key]))
-      for (const child of schema[key])
-        if (isObject(child)) validateSchemaResources(child, validator, false);
+  visitSchemaNodes(schema, (schema, root) => {
+    // 使用校验器已注册词汇，包含仅作说明的标准关键词，不另维护完整清单。
+    for (const keyword of Object.keys(schema))
+      if (!Object.hasOwn(validator.RULES.keywords, keyword))
+        throw new Error(`Schema 关键词不支持：${keyword}`);
+    if (
+      typeof schema.format === "string" &&
+      !Object.hasOwn(validator.formats, schema.format)
+    )
+      throw new Error(`Schema 格式不支持：${schema.format}`);
+    if ((root || Object.hasOwn(schema, "$id")) && schema.$schema !== DIALECT)
+      throw new Error("Schema 资源必须声明 Draft 2020-12");
+    if (Object.hasOwn(schema, "$schema") && schema.$schema !== DIALECT)
+      throw new Error("Schema 版本不支持");
+  });
 }
 function compile(parameter: ParameterType): ValidateFunction {
   const validator = createValidator();

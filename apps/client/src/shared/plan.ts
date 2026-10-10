@@ -59,7 +59,21 @@ export function validatePlan(
           type,
           action.params,
           capabilities,
-        ).map((i) => ({ ...i, path: `${path}.${i.path}` })),
+        ).map((i) => ({
+          ...i,
+          path: `${path}.${i.path}`,
+          ...(i.pointer !== undefined
+            ? { pointer: `/actions/${index}${i.pointer}` }
+            : {}),
+          ...(i.schema
+            ? {
+                schema: {
+                  ...i.schema,
+                  instancePath: `/actions/${index}${i.schema.instancePath}`,
+                },
+              }
+            : {}),
+        })),
       );
       return;
     }

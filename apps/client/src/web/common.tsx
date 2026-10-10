@@ -84,10 +84,12 @@ export function Empty({ children }: { children: ReactNode }) {
 export function Issues({
   issues,
   presentations,
+  rawIssues,
   onLocate,
 }: {
   issues: Issue[];
   presentations?: IssuePresentation[];
+  rawIssues?: readonly Issue[];
   onLocate?: (index: number) => void;
 }) {
   return (
@@ -116,16 +118,32 @@ export function Issues({
                     {(presentations?.[i] ?? presentIssue(issue)).message}
                   </span>
                 )}
-                <details>
-                  <summary>技术详情</summary>
-                  <small>
-                    <code>{issue.path || "计划"}</code> · {issue.code} ·{" "}
-                    {issue.message}
-                  </small>
-                </details>
+                {!rawIssues && (
+                  <details>
+                    <summary>技术详情</summary>
+                    <small>
+                      <code>{issue.path || "计划"}</code> · {issue.code} ·{" "}
+                      {issue.message}
+                    </small>
+                  </details>
+                )}
               </li>
             ))}
           </ul>
+          {rawIssues && (
+            <details className="raw-validation">
+              <summary>技术详情</summary>
+              <p>完整原始校验诊断：</p>
+              <ol>
+                {rawIssues.map((issue, index) => (
+                  <li key={index}>
+                    <code>{issue.path || "计划"}</code> · {issue.code} ·{" "}
+                    {issue.message}
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
         </>
       ) : (
         <span>当前输入检查通过；导出时后端将检查完整计划。</span>
