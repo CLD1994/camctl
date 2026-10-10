@@ -25,6 +25,7 @@ from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
     ActivityReleaseSave,
+    HostTimerStopSave,
     ResultRunClose,
     ResultSetPhase,
     ResultSetSave,
@@ -262,6 +263,7 @@ class PendingCallResult:
     result_set: ResultSetSave | None = None
     completion_page: ResultPageRef | None = None
     result_registered_files: Mapping[str, tuple[CaptureFile, int]] | None = None
+    host_timer_stop: HostTimerStopSave | None = None
 
 
 # 启动装配和既有调用方使用同一个公共责任集合。
@@ -853,7 +855,7 @@ class CaptureRuntime(_FileObservationSaves):
             window=self.window_of(action),
             trusted_wall_now=self.wall_us(),
             config=(self.start_config if action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
-                    else AttemptConfig(max_attempts=1, timeout_s=Decimal("30"))),
+                    else AttemptConfig(max_attempts=1, timeout_s=_start_call_timeout(action))),
             occurred_at=self.wall_us(),
         )
         outcome = self.scheduling.grant_start(
@@ -876,7 +878,8 @@ class CaptureRuntime(_FileObservationSaves):
                expiration: ExpireActionRequest | None = None,
                confirmation_anchor_ns: int | None = None,
                returned_ns: int | None = None,
-               canceled_unstarted: bool = False) -> None:
+               canceled_unstarted: bool = False,
+               host_timer_stop: HostTimerStopSave | None = None) -> None:
         """先持有完整实际结果，再保存原尝试及其适用的伴随事实。
 
         保存重试等待使用调用返回时的单调读数；流程结束清除。
@@ -896,7 +899,8 @@ class CaptureRuntime(_FileObservationSaves):
             new_operation_key(), attempt, activity, start_finish,
             expiration=expiration, confirmation_anchor_ns=confirmation_anchor_ns,
             returned_ns=self.monotonic_ns() if returned_ns is None else returned_ns,
-            action_failure=action_failure, canceled_unstarted=canceled_unstarted)
+            action_failure=action_failure, canceled_unstarted=canceled_unstarted,
+            host_timer_stop=host_timer_stop)
         self.pending_start_results[identity] = pending
         self._save_call_result(identity, pending)
 
@@ -908,6 +912,9 @@ class CaptureRuntime(_FileObservationSaves):
             raise ConsistencyError("原调用结果缺少所属流程")
         if not pending.result_disposition_ready:
             raise ConsistencyError("原 RESULTS 仍持有，所属消费者尚未确定结果处置")
+        if pending.host_timer_stop is not None:
+            return self.capture.finish_host_timer_stop(
+                pending.finish, pending.host_timer_stop, pending.key, self.owned)
         if pending.result_set is not None or pending.completion_page is not None:
             if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
                 raise ConsistencyError("集合结论必须使用原 RESULTS 责任")
@@ -983,10 +990,12 @@ class CaptureRuntime(_FileObservationSaves):
                     action_id = self.action_id_of_ticket(ticket)
                     action = self.action(action_id)
                     if action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE):
-                        config = self.wait_config(action)
-                        self.timelapse_deadlines[action_id] = pending.confirmation_anchor_ns + (
-                            config.target_duration_ms + config.driver_margin_ms
-                            + config.extra_wait_ms) * 1_000_000
+                        if action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER):
+                            delay = _target_duration_ms(action)
+                        else:
+                            config = self.wait_config(action)
+                            delay = config.target_duration_ms + config.driver_margin_ms + config.extra_wait_ms
+                        self.timelapse_deadlines[action_id] = pending.confirmation_anchor_ns + delay * 1_000_000
                     else:
                         _recording_port(self).anchor_confirmed(
                             action_id, pending.confirmation_anchor_ns,
@@ -1274,7 +1283,7 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         operation=operation,
         binding=_binding(action),
         params=action["effective_params_json"],
-        ticket=ticket, timeout_s=Decimal("30"),
+        ticket=ticket, timeout_s=_start_call_timeout(action),
     ))
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
     if result.outcome is not None:
@@ -1289,10 +1298,13 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         captured_facts = {}
         if meaning == int(StartReturn.SENT):
             captured_facts["sent_at"] = returned_at
-            if action["execution_spec_json"]["wait_after_send"]:
+            if (action["execution_spec_json"]["wait_after_send"]
+                    or action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER)):
                 anchor = returned_ns
         elif meaning == int(StartReturn.STARTED):
             captured_facts.update(started_at=returned_at, activity_state=int(_ACTIVITY_STATE.ACTIVE))
+            if action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER):
+                anchor = returned_ns
     elif activity_facts is not None and result.error is None:
         captured_facts = (activity_facts(confirmed) if callable(activity_facts)
                           else activity_facts)
@@ -1876,10 +1888,20 @@ async def _stop_call(runtime: CaptureRuntime, action,
     returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     call, confirmed = _operation_outcome(
         response, "stop_confirmed", evidence_type="stop_returned")
+    if response.outcome is not None:
+        confirmed = call.effect is EffectState.CONFIRMED
     try:
         if confirmed:
+            host_stop = None
+            if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+                    and action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER)):
+                deadline = runtime.timelapse_deadlines.get(action["id"])
+                elapsed = None if deadline is None else returned_ns - (
+                    deadline - _target_duration_ms(action) * 1_000_000)
+                host_stop = HostTimerStopSave(elapsed)
             runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED,
-                           occurred_at=returned_at, returned_ns=returned_ns)
+                           occurred_at=returned_at, returned_ns=returned_ns,
+                           host_timer_stop=host_stop)
         else:
             runtime.finish(ticket, call, retry_wait=True,
                            occurred_at=returned_at, returned_ns=returned_ns)
@@ -2062,6 +2084,14 @@ def _target_duration_ms(action: Mapping[str, Any]) -> int:
     if isinstance(duration, bool) or not isinstance(duration, int) or duration < 1:
         raise ConsistencyError(f"录像目标时长缺失或非法: {duration!r}")
     return duration
+
+
+def _start_call_timeout(action: Mapping[str, Any]) -> Decimal:
+    """完整原生调用使用首次固定期限，其余启动为短控制调用。"""
+    if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+            and action["execution_spec_json"]["start_return_meaning"] == int(StartReturn.COMPLETED)):
+        return action["execution_spec_json"]["start_call_timeout_s"]
+    return Decimal("30")
 
 
 def _closed_capture_is_local(
@@ -3133,6 +3163,91 @@ async def _advance_recording_outcome(
                         failure=_unconfirmed_failure(context, action_id))
 
 
+class HostTimerPhase(Enum):
+    """主机计时推进结果，目标完成与实际停止分别判断。"""
+
+    WAITING = "waiting"
+    CONFIRMED = "confirmed"
+    DURATION_UNKNOWN = "duration_unknown"
+    COMPLETION_UNKNOWN = "completion_unknown"
+
+
+async def _advance_host_timer(context: CaptureRuntime, action, attempt) -> HostTimerPhase:
+    """原计时到期停止；缺少连续依据时及时停止且目标保持无法确认。"""
+    action_id = action["id"]
+    if attempt[0] == int(_ATTEMPT_STATUS.RUNNING):
+        ticket = _original_ticket(context, f"start/{action_id}", "control")
+        if not context.recover_attempt(ticket):
+            return HostTimerPhase.WAITING
+        attempt = context.last_attempt(f"start/{action_id}")
+    if attempt[1] == int(_EFFECT_STATE.NO_EFFECT):
+        # 可靠未启动继续原窗口收场，不能发出不适用的停止命令。
+        return HostTimerPhase.WAITING
+    activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
+    if activity["activity_state"] == 3:
+        return (HostTimerPhase.CONFIRMED if context.capture.read_result_completion(
+            action_id, context.owned) is not None else HostTimerPhase.DURATION_UNKNOWN)
+    deadline = context.timelapse_deadlines.get(action_id)
+    reason = (HostTimerPhase.DURATION_UNKNOWN if deadline is None
+              else HostTimerPhase.COMPLETION_UNKNOWN)
+    stop = context.last_attempt(f"stop/{action_id}")
+    if stop is not None and stop[0] == int(_ATTEMPT_STATUS.RUNNING):
+        ticket = _original_ticket(context, f"stop/{action_id}", "stop")
+        if not context.recover_attempt(ticket, retry_wait=True):
+            return HostTimerPhase.WAITING
+    with closing(context.owned.connection.execute(
+        "SELECT status FROM operation_runs WHERE responsibility_key=?", (f"stop/{action_id}",))) as cursor:
+        run = cursor.fetchone()
+    if run is not None and run[0] not in (1, 2):
+        return reason
+    if deadline is not None and context.monotonic_ns() < deadline:
+        return HostTimerPhase.WAITING
+    step = await _stop_call(context, action, "stop_timelapse")
+    if step.phase == "confirmed":
+        return (HostTimerPhase.CONFIRMED if context.capture.read_result_completion(
+            action_id, context.owned) is not None else HostTimerPhase.DURATION_UNKNOWN)
+    if step.phase == "stop_not_granted" and step.detail == "budget_exhausted":
+        _close_stop_exhausted(context, action)
+        return reason
+    return HostTimerPhase.WAITING
+
+
+def _unconfirmed_result_set(runtime, action_id, reason, occurred_at):
+    code = "capture_result_unconfirmed"
+    error = {"code": code, "stage": registered_error(code)["stage"],
+        "details": {"activity_id": str(_activity_id_of(runtime, action_id)), "reason": reason}}
+    return ResultSetSave(action_id, occurred_at, ResultSetPhase.UNCONFIRMED,
+        contract=_RESULT_CONTRACT, observation={"reason": reason},
+        capture={"status": "unconfirmed", "error": error}, error=error)
+
+
+async def _close_host_timer_failed(context, action_id, reason):
+    """目标无法确认时有限核实文件，再沿原结论保存失败和完整产物。"""
+    listing = await _listing_round(context, action_id)
+    if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
+        return
+    if listing.phase is ListingPhase.EXHAUSTED:
+        _close_check_unconfirmed(context, action_id, reason=reason)
+        await _finish_timelapse_conclusion(context, action_id)
+        return
+    if listing.phase is ListingPhase.CLOSED:
+        await _finish_timelapse_conclusion(context, action_id)
+        return
+    registered = _register_listing(context, action_id, listing)
+    assessment = assess_capture_files(CaptureFileSet(
+        files=(file for file, _ in registered), set_finalized=_listing_finalized(listing)),
+        _product_requirements(context.action(action_id), FileKind.VIDEO))
+    if listing.completion_evidence is not None and (assessment.is_complete or assessment.explicitly_unmet):
+        _confirm_timelapse_results(context, action_id, assessment, listing.entries, None, listing)
+        await _finish_timelapse_conclusion(context, action_id)
+    elif listing.outcome.error is None and (assessment.is_complete or assessment.explicitly_unmet):
+        command = _unconfirmed_result_set(context, action_id, reason, listing.occurred_at)
+        _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED, result_set=command)
+        await _finish_timelapse_conclusion(context, action_id)
+    else:
+        _finish_listing_result(context, listing, retry_wait=True)
+
+
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_capture_completions(action_id)
     context.resume_baselines(action_id)
@@ -3166,6 +3281,19 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
         if context.action(action_id)["status"] in _ACTION_TERMINAL:
             context.timelapse_deadlines.pop(action_id, None)
         return
+    if action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER):
+        activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
+        if activity["result_set_state"] in (3, 4):
+            await _finish_timelapse_conclusion(context, action_id)
+            return
+        step = await _advance_host_timer(context, action, attempt)
+        if step is HostTimerPhase.WAITING:
+            return
+        if step is not HostTimerPhase.CONFIRMED:
+            await _close_host_timer_failed(context, action_id, step.value)
+            if context.action(action_id)["status"] in _ACTION_TERMINAL:
+                context.timelapse_deadlines.pop(action_id, None)
+            return
     wait_after_send = action["execution_spec_json"]["wait_after_send"]
     if wait_after_send and _settle_start_without_sent_at(context, action, attempt):
         # 可能派发但没有可靠发送时间：无法计算等待锚点，不重复启
@@ -3293,7 +3421,8 @@ async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> N
                 _close_stop_exhausted(context, action)
             elif step.phase != "call_failed":
                 return
-    if confirmed:
+    if confirmed and row_facts(context.owned.connection, "device_activities",
+            _activity_id_of(context, action_id))["activity_state"] != 3:
         _conclude_activity(context, action_id)
     if action["type"] == 3:
         await _close_canceled_timelapse(context, action_id)
@@ -3326,6 +3455,9 @@ async def _close_canceled_timelapse(
     _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED)
     registered = _register_listing(context, action_id, listing)
     drafts = _catalog_drafts(registered, entries)
+    activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
+    if activity["activity_state"] == 3:
+        _release_occupancy(context, action_id)
     context.save_capture_completion(
         FinishCanceledCapture(
             action_id=action_id,
@@ -3352,7 +3484,8 @@ def _begin_check_round(runtime: CaptureRuntime, action_id: int):
     return outcome.value
 
 
-def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int) -> None:
+def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int, *,
+                             reason: str = "outputs_unknown") -> None:
     """预算耗尽：核实流程与无法确认的集合结论同事务收场。"""
     if action_id in runtime.pending_result_closes:
         runtime.resume_result_check_closes(action_id)
@@ -3360,7 +3493,7 @@ def _close_check_unconfirmed(runtime: CaptureRuntime, action_id: int) -> None:
     code = "capture_result_unconfirmed"
     error = {"code": code, "stage": registered_error(code)["stage"],
              "details": {"activity_id": str(_activity_id_of(runtime, action_id)),
-                         "reason": "outputs_unknown"}}
+                         "reason": reason}}
     runtime.pending_result_closes[action_id] = PendingResultCheckClose(
         new_operation_key(), ResultSetSave(
             action_id=action_id,
@@ -3785,6 +3918,10 @@ async def _finish_timelapse_conclusion(
             raise ConsistencyError("已保存的明确采集失败缺少完整公共错误")
         _finish_capture(
             runtime, action_id, entries, FileKind.VIDEO, registered=registered,
+            failure=RecordingFailure(code=error["code"], details=error["details"]))
+    elif capture is not None and isinstance(capture.get("error"), Mapping):
+        error = capture["error"]
+        _finish_capture(runtime, action_id, entries, FileKind.VIDEO, registered=registered,
             failure=RecordingFailure(code=error["code"], details=error["details"]))
     else:
         _finish_capture(

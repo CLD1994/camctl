@@ -20,6 +20,7 @@ from camctl.capture.models import (
     ActivityConcludeSave,
     ActivityObservationSave,
     ActivityReleaseSave,
+    HostTimerStopSave,
     ResultRunClose,
     ResultSetPhase,
     ResultSetSave,
@@ -1769,7 +1770,8 @@ class CaptureRepository:
             " WHERE l.entity_type=1 AND l.entity_id=? AND h.event_type=?"
             " AND json_extract(h.body_json,'$.reason')=?"
             " AND (json_extract(h.body_json,'$.evidence.observation.result_page_event_id') IS NOT NULL"
-            " OR json_extract(h.body_json,'$.evidence.observation.start_result_event_id') IS NOT NULL)"
+            " OR json_extract(h.body_json,'$.evidence.observation.start_result_event_id') IS NOT NULL"
+            " OR json_extract(h.body_json,'$.evidence.observation.stop_result_event_id') IS NOT NULL)"
             " AND EXISTS (SELECT 1 FROM json_each(h.body_json,'$.rows') r"
             " WHERE json_extract(r.value,'$.table')='device_activities'"
             " AND json_extract(r.value,'$.id')=?"
@@ -1779,8 +1781,24 @@ class CaptureRepository:
         )) as cursor:
             row = cursor.fetchone()
         if row is None:
-            return None
+            return self._read_ended_page_completion(action_id, activity["id"], owned)
         observation = parse_exact_json(row[1])["evidence"]["observation"]
+        if "stop_result_event_id" in observation:
+            original, occurred_at = _HostTimerStopCommand.source(
+                owned.connection, observation["stop_result_event_id"])
+            elapsed = observation.get("control_elapsed_ns")
+            try:
+                HostTimerStopSave(elapsed)
+            except ValueError as error:
+                raise ConsistencyError("原主机停止观察的控制时长无效") from error
+            if (set(observation) != {"stop_result_event_id", "control_elapsed_ns"}
+                    or original["id"] != activity["id"] or occurred_at != row[0]
+                    or not json_equal(elapsed, activity["control_elapsed_ns"])):
+                raise ConsistencyError("原主机停止观察与活动、时刻或控制时长不符")
+            action = row_facts(owned.connection, "actions", action_id)
+            if elapsed is None or elapsed < action["execution_spec_json"]["target_duration_ms"] * 1_000_000:
+                return self._read_ended_page_completion(action_id, activity["id"], owned)
+            return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
         if "start_result_event_id" in observation:
             original, occurred_at = _CompletedStartReturnCommand.source(
                 owned.connection, observation["start_result_event_id"])
@@ -1795,10 +1813,47 @@ class CaptureRepository:
             raise ConsistencyError("原设备结束观察与完成页、活动或事实时刻不符")
         return {"method": _DEVICE_EVIDENCE_METHOD, "observation": expected}
 
+    def _read_ended_page_completion(self, action_id, activity_id, owned):
+        """设备已结束后取得的目标保证仍由原可靠页承载，不再补写结束。"""
+        from .result_pages import _TYPE, _at
+
+        with closing(owned.connection.execute(
+            "SELECT h.id FROM entity_event_links l JOIN history_events h ON h.id=l.event_id"
+            " WHERE l.entity_type=1 AND l.entity_id=? AND h.event_type=?"
+            " AND json_extract(h.body_json,'$.evidence.result_page.activity_id')=?"
+            " AND EXISTS (SELECT 1 FROM json_each(h.body_json,"
+            " '$.evidence.result_page.outcome.result.observations') o"
+            " WHERE json_extract(o.value,'$.type')='result_files_listed'"
+            " AND json_extract(o.value,'$.version')=2"
+            " AND json_type(o.value,'$.data.completion_evidence')='object')"
+            " ORDER BY h.id DESC LIMIT 1", (action_id, _TYPE, activity_id),
+        )) as cursor:
+            found = cursor.fetchone()
+        if found is None:
+            return None
+        saved, _ = _at(owned.connection, found[0])
+        original, _, _, observation = _ResultPageCompletionCommand(
+            saved.ref.ticket, saved.ref)._source(owned.connection)
+        if original["id"] != activity_id:
+            raise ConsistencyError("已结束任务的原页保证属于其他活动")
+        return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
+
     def read_baseline(self, ref: BaselineRef, cursor: int | None, batch: int,
                       owned: OwnedConnection) -> Page[BaselineChunk, int]:
         from .baseline import read_chunks
         return read_chunks(ref, cursor, batch, owned)
+
+    def finish_host_timer_stop(
+        self, finish: AttemptFinish, stop: HostTimerStopSave,
+        key: OperationKey, owned: OwnedConnection,
+    ) -> DbOutcome[FinishAttemptResult]:
+        """原 STOP 实际结果、实际结束和控制时长共同保存，不提前释放。"""
+        receipt = commit_operation(_HostTimerStopCommand(finish, stop, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
 
     def finish_start_result(
         self, finish: AttemptFinish, observation: ActivityObservationSave | None,
@@ -3003,6 +3058,109 @@ class _CompositeScope:
             first_event_id=first,
             last_event_id=first + event_count - 1,
         )
+
+
+class _HostTimerStopCommand:
+    """停止确认承载实际结束；原时长输入与调用结果有共同保存身份。"""
+
+    def __init__(self, finish, stop, key):
+        if not isinstance(stop, HostTimerStopSave):
+            raise TypeError("主机停止事实必须使用 HostTimerStopSave")
+        self._finish, self._stop, self._key = finish, stop, key
+
+    @staticmethod
+    def _confirms(run, action, activity, actual):
+        return (run["kind"] == int(_RUN_KIND.STOP)
+                and run["activity_id"] == activity["id"]
+                and run["responsibility_key"] == f"stop/{action['id']}"
+                and action["type"] == 3 and action["execution_spec_json"]["end_control"] == 2
+                and activity["dispatch_state"] not in (1, 4)
+                and actual.effect is EffectState.CONFIRMED)
+
+    @staticmethod
+    def source(connection, result_event_id):
+        if not is_json_integer(result_event_id) or result_event_id <= 0:
+            raise ConsistencyError("主机停止须引用原实际结果事件")
+        with closing(connection.execute(
+            "SELECT event_type,occurred_at,body_json FROM history_events WHERE id=?",
+            (result_event_id,),
+        )) as cursor:
+            event = cursor.fetchone()
+        if event is None or event[0] != _ATTEMPT_RESULT_EVENT:
+            raise ConsistencyError("主机停止引用的事件不是实际结果")
+        rows = [row for row in parse_exact_json(event[2])["rows"] if row["table"] == "operation_attempts"]
+        if len(rows) != 1:
+            raise ConsistencyError("主机停止结果须属于一个原尝试")
+        original, = rows
+        attempt = row_facts(connection, "operation_attempts", original["id"])
+        if attempt is None or attempt["result_event_id"] != result_event_id:
+            raise ConsistencyError("主机停止缺少原实际结果尝试")
+        run = row_facts(connection, "operation_runs", attempt["run_id"])
+        action = row_facts(connection, "actions", run["action_id"])
+        activity = load_activity_of_action(connection, action["id"])
+        actual = saved_outcome(attempt["status"], attempt["effect_state"], attempt["result_json"], attempt["error_json"])
+        if (not _HostTimerStopCommand._confirms(run, action, activity, actual)
+                or any(not json_equal(original["after"]["values"].get(name), attempt[name])
+                    for name in ("status", "effect_state", "result_json", "error_json"))):
+            raise ConsistencyError("原结果没有一致的主机停止确认")
+        return activity, event[1]
+
+    def _observation(self, result_event_id):
+        return {"stop_result_event_id": result_event_id,
+                "control_elapsed_ns": self._stop.control_elapsed_ns}
+
+    def plan(self, scope):
+        saved = saved_transaction_events(scope.connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        finish = self._finish
+        run = row_facts(scope.connection, "operation_runs", finish.ticket.run_id)
+        action = row_facts(scope.connection, "actions", run["action_id"])
+        activity = load_activity_of_action(scope.connection, action["id"])
+        if (not self._confirms(run, action, activity, finish.outcome.outcome)
+                or finish.run_finish is None or finish.run_finish.status is not RunOutcome.SUCCEEDED
+                or 3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset())
+                or activity["control_elapsed_ns"] is not None):
+            raise ConsistencyError("原 STOP 不具备新的主机计时结束事实")
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        result = FinishAttemptCommand(finish, self._key).plan(sub)
+        if result.read_only:
+            raise ConsistencyError("已保存的普通 STOP 结果不能补写为共同停止事实")
+        before, after = {"activity_state": activity["activity_state"]}, {"activity_state": 3}
+        if self._stop.control_elapsed_ns is not None:
+            before["control_elapsed_ns"] = None
+            after["control_elapsed_ns"] = self._stop.control_elapsed_ns
+        allocation = sub.allocate(1)
+        ended = _envelope(allocation.first_event_id, allocation.txn_id,
+            _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+            (_update("device_activities", activity["id"], before, after),), finish.occurred_at,
+            evidence={"observation": self._observation(result.events[0].event_id)})
+        events = (*result.events, ended)
+        scope.allocate(len(events))
+        return CommandPlan(events=events,
+            owners={**result.owners, ("device_activities", activity["id"]): ("action", action["id"])},
+            state_rows=_merged_state_rows(result.state_rows, {
+                "device_activities": {activity["id"]: activity}, "actions": {action["id"]: action}}),
+            result=result.result)
+
+    def _reuse(self, scope, saved):
+        cut = 1 + int(len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
+        result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        if len(saved) != cut + 1:
+            raise TransactionError("主机停止原保存缺少或增添伴随事实")
+        activity, occurred_at = self.source(scope.connection, saved[0]["event_id"])
+        event = saved[cut]
+        expected = {"activity_state": 3}
+        if self._stop.control_elapsed_ns is not None:
+            expected["control_elapsed_ns"] = self._stop.control_elapsed_ns
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)
+                or event["occurred_at"] != occurred_at or occurred_at != self._finish.occurred_at
+                or not json_equal(event["body"]["evidence"], {"observation": self._observation(saved[0]["event_id"])})
+                or len(rows) != 1 or rows[0]["table"] != "device_activities" or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], expected)):
+            raise TransactionError("主机停止重送改变原结果、结束时刻或控制时长")
+        return result
 
 
 class _CompletedStartReturnCommand:
@@ -5371,6 +5529,28 @@ def _activity_guard(event, context) -> None:
                         for attempt in context.state_rows.get("operation_attempts", {}).values()))
                 if not completed:
                     raise EventValidationError("完成返回缺少原活动的可靠成功 START 结果")
+            if isinstance(observation, Mapping) and "stop_result_event_id" in observation:
+                facts = context.state_rows.get("device_activities", {}).get(row.row_id, {})
+                action = context.state_rows.get("actions", {}).get(facts.get("action_id"), {})
+                result_id, elapsed = observation["stop_result_event_id"], observation.get("control_elapsed_ns")
+                try:
+                    HostTimerStopSave(elapsed)
+                except ValueError as error:
+                    raise EventValidationError("主机停止的控制时长非法") from error
+                completed = (set(observation) == {"stop_result_event_id", "control_elapsed_ns"}
+                    and is_json_integer(result_id) and 0 < result_id < event.event_id
+                    and action.get("type") == 3 and action.get("execution_spec_json", {}).get("end_control") == 2
+                    and json_equal(row.after.values.get("control_elapsed_ns"), elapsed)
+                    and any(attempt.get("result_event_id") == result_id
+                        and attempt.get("status") != int(_ATTEMPT_STATUS.RUNNING)
+                        and attempt.get("effect_state") == int(enum_for("operation_attempts.effect_state").CONFIRMED)
+                        and any(run.get("kind") == int(_RUN_KIND.STOP)
+                            and run.get("action_id") == facts.get("action_id")
+                            and run.get("activity_id") == row.row_id
+                            and run.get("id") == attempt.get("run_id") for run in runs.values())
+                        for attempt in context.state_rows.get("operation_attempts", {}).values()))
+                if not completed:
+                    raise EventValidationError("主机停止观察缺少原 STOP 确认或一致控制时长")
             if not stopped and not completed:
                 raise EventValidationError("活动结束缺少可靠停止或设备完成事实")
         basis_before = row.before.values.get("completion_basis")

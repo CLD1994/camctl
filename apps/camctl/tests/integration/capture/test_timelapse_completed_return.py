@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,8 @@ class CompletedCatalog(DeviceCompletionCatalog):
         if action_type != "camera_timelapse":
             return definition
         return replace(definition, task_factory=lambda params: replace(
-            definition.task_factory(params), start_return_meaning=StartReturn.COMPLETED))
+            definition.task_factory(params), start_return_meaning=StartReturn.COMPLETED,
+            start_call_timeout_s=Decimal("610.0001")))
 
 
 async def world(tmp_path, *, case="video", catalog=None):
@@ -51,6 +53,18 @@ async def world(tmp_path, *, case="video", catalog=None):
             DeviceObservation(_CONTROL_COMPLETION.type, 1, {"activity_id": "1"}),)))
     runtime.wall_us = lambda: _NOW
     return owned, runtime, action_id, handler, driver
+
+
+async def test_full_call_timeout_is_shared_by_intent_and_actual_call(tmp_path):
+    owned, runtime, action_id, handler, driver = await world(tmp_path)
+    try:
+        await capture_handler(handler)(action_id, runtime)
+        assert runtime.driver.control.call_args.args[0].timeout_s == Decimal("610.0001")
+        assert owned.connection.execute("SELECT a.timeout_s_json FROM operation_attempts a"
+            " JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1").fetchone() == ("610.0001",)
+        assert runtime.action(action_id)["execution_spec_json"]["start_call_timeout_s"] == Decimal("610.0001")
+    finally:
+        owned.connection.close()
 
 
 @pytest.mark.parametrize("case", ["video", "empty", "wrong_kind"])

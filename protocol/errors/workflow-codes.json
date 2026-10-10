@@ -348,6 +348,7 @@
             "enum": [
               "start_unknown",
               "completion_unknown",
+              "duration_unknown",
               "outputs_unknown"
             ]
           }

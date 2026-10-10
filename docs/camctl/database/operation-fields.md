@@ -436,6 +436,8 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 
 能力列保存实际执行依据，不把设备调用本身伪造成受理操作。延时摄影受理时已固定的相同能力必须精确一致；其他任务以驱动接入契约和部署兼容性要求解释。文件集合通过 `device_files.source_action_id` 分页读取，基准通过不可变事件分块读取。任务可能有多份原文件和预览，不能仅发现一个视频就固定集合。
 
+主机计时延时沿[停止与恢复规则](../../architecture/camera-capture.md#主机计时任务的停止与恢复)保存原 STOP 结果、实际结束和控制时长。实际结束事件使用原 STOP 返回时刻及[结果引用格式](history-formats.md)，与 STOP 尝试结果共同提交；文件归属或集合尚未确定时仍保持占用。跨运行缺少连续计时依据时，`control_elapsed_ns` 保持 SQL `NULL`，结束观察显式保存未知输入。原目标无法证明时，采集结果为 `unconfirmed`，动作使用 `capture_result_unconfirmed/duration_unknown`；停止未确认则保留实际未知活动。原完成保证和原完整保存申请先于新执行资格恢复。
+
 `capture_json` 是内部 JSON 对象，只包含必填的 `status`、可选的实际 `captured_count`、`elapsed_s` 及适用的 `error`。`captured_count` 是 0～9007199254740991 的整数，`elapsed_s` 是有限非负秒数；只填驱动可靠提供的次数和时长，未知成员省略，不能用 `null` 代替。状态与错误按下表保存，错误使用公共 `error` 对象的结构。
 
 | 已保存的采集事实 | `status` | `error` |

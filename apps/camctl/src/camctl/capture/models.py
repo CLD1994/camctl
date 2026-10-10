@@ -24,6 +24,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.workflow_errors import validate_public_error
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 from camctl.operations.models import ErrorValue
+from camctl.operations.attempts import AttemptConfig
 
 __all__ = [
     "ActivityCapabilities",
@@ -213,6 +214,8 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
     completion = CompletionMode(_integer(spec["completion_mode"], 1))
     result.update(end_control=int(end), start_return_meaning=int(start), completion_mode=int(completion))
     expected = set(required) | set(ownership) | set(products)
+    if start is StartReturn.COMPLETED:
+        expected.add("start_call_timeout_s")
     if spec["duration_based"]:
         expected.add("target_duration_ms")
     if spec["wait_after_send"]:
@@ -221,6 +224,11 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
             raise ValueError("发送后等待必须具有设备自行结束的固定时长任务和 SENT 返回")
     if set(spec) != expected:
         raise ValueError("延时定义条件字段缺失或不适用")
+    if start is StartReturn.COMPLETED:
+        timeout = spec["start_call_timeout_s"]
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal)):
+            raise ValueError("完整启动调用期限必须是精确 JSON 数字秒数")
+        result["start_call_timeout_s"] = AttemptConfig(1, timeout_s=timeout).timeout_s
     if spec["duration_based"]:
         result["target_duration_ms"] = _integer(spec["target_duration_ms"], 1)
     if spec["wait_after_send"]:
@@ -254,7 +262,21 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
         spec["target_duration_ms"] = seconds_to_duration_ms(task.target_duration_s)
     if task.result_wait_margin_s is not None:
         spec["result_wait_margin_ms"] = seconds_to_duration_ms(task.result_wait_margin_s)
+    if task.start_call_timeout_s is not None:
+        spec["start_call_timeout_s"] = task.start_call_timeout_s
     return validate_capture_spec(action_type, spec)
+
+
+@dataclass(frozen=True)
+class HostTimerStopSave:
+    """原停止确认同时保存的控制时长；None 明确表示无法证明。"""
+
+    control_elapsed_ns: int | None
+
+    def __post_init__(self) -> None:
+        value = self.control_elapsed_ns
+        if value is not None and (not is_json_integer(value) or not 0 <= value <= MAX_OBJECT_ID):
+            raise ValueError("控制时长必须是可保存的非负整数纳秒或未知")
 
 
 @dataclass(frozen=True)
