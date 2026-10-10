@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
 import contextlib
@@ -116,6 +116,7 @@ _EVIDENCE = EvidenceRegistry(
         EvidenceContract(type="results_returned", version=1,
                          operation="result", fields=frozenset()),
         RESULT_FILES_CONTRACT,
+        RESULT_PAGE_CONTRACT,
         EvidenceContract(type="file_digest", version=1, operation="digest",
                          fields=frozenset({"file_id", "sha256"}),
                          identity_field="file_id"),
