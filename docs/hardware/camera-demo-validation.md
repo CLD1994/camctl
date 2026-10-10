@@ -69,11 +69,13 @@ python .\action6_record_probe.py --serial 123456789ABCDEF --ffprobe "C:\path\to\
 
 默认录像模式使用新的 `action6/record-probe-<UTC 时间>` 目录，每项调用分别保留 `call.json`、`stdout.bin` 和 `stderr.bin`。脚本检查真正的工具退出码；`dji_mb_ctrl` 必须返回唯一完整的单字节 `00`，非 `00`、缺失、多段、不完整响应或非预期 stderr 都会使脚本报错并停止。已经发送的设置保留实际效果，不自动撤销或重试。普通录像的 START 已经尝试时，脚本在收场阶段发送一次 STOP，再结束本次试验。原生延时模式的时序和停止边界见[统一采集](#action6-原生延时的统一采集)。
 
-每份 MP4 只下载一次，下载前后分别读取一次源长度及摘要。`video-<序号>-copy.json` 保留两组源观测、副本值、长度和摘要各自是否变化，以及副本是否与下载后的源观测一致；比对不一致时，脚本先保存该记录，再报告实际数值并结束。后续源查询失败或结果无效时直接报错，不使用早期值代替。长度和摘要是分开的查询，不能视为同一时刻的文件快照；这些检查不证明源文件以后保持不变，也不证明本次全部文件已写完。
+每次采集或复查中，每份 MP4 只下载一次，下载前后分别读取一次源长度及摘要。`video-<序号>-copy.json` 保留两组源观测、副本值、长度和摘要各自是否变化，以及副本是否与下载后的源观测一致；比对不一致时，脚本先保存该记录，再报告实际数值并结束。后续源查询失败或结果无效时直接报错，不使用早期值代替。长度和摘要是分开的查询，不能视为同一时刻的文件快照；这些检查不证明源文件以后保持不变，也不证明本次全部文件已写完。
 
 `simulate_device` 只核对已有样例中的属性匹配和服务连接、注册日志，码率生效仍标为未确认。十秒从启动调用返回后计算；没有实际开始、结束观察时，不把这段主机等待认作十秒有效视频。成功执行只证明本次诊断步骤及副本一致性检查完成，`summary.json` 保留实际媒体属性；设置生效、全部产物写完、驱动启用和 ARM Linux 完整验收继续按相应设备契约核实。
 
 脚本响应与副本比对的单元测试可在容器中使用 `apps/camctl/.venv/bin/python -m unittest discover -s docs/hardware/tests/unit` 执行；测试使用采集样式和故障输入，不连接相机。
+
+集成测试在容器中另行运行 `apps/camctl/.venv/bin/python -m unittest discover -s docs/hardware/tests/integration`。它通过真实采集器、隔离目录和受命令接口约束的 ADB、ffprobe 替身核对完整流程，目录调用使用容器的 `sh` 和 `find`；可控时钟只缩短软件测试，不提供设备时长证据。
 
 ### 原始调用与设备观察
 
@@ -111,6 +113,31 @@ python .\action6_record_probe.py --capture timelapse --adb .\adb.exe --serial 12
 采样阶段保存两范围的后目录、新增路径及新增 MP4 的一次下载、前后源观测、副本比对和媒体信息。目录与文件记录保存在新的 `action6/timelapse-probe-<UTC 时间>` 目录。结果中的实际开始、自然结束、文件写完及集合确定均保持未知；本次未列出 MP4 只说明采样时尚未取得新增 MP4。
 
 Action6 延时 STOP 尚未给出，脚本在正常运行和异常路径均不自动发送停止命令，也不重发 START。设置异常时立即报错，不启动；START 已尝试后的调用或响应异常也立即报错，但设备是否开始保持未知。出错后保留目录和原片，不重新执行拍摄脚本，将错误及记录目录交回继续诊断。正常结束时只需交回最终摘要；如能观察到设备提示音、指示灯或其他实际现象，连同时间一并记录，不能观察到的事实保持未知。
+
+### Action6 延时采样后的只读复查
+
+原试验已经保存 `capture-observation.json`，但采样时没有新增 MP4 时，可以用同一个脚本的 `--observe <原采集目录>` 重新观察。该入口从原始调用记录读取内置和 SD 的启动前目录，沿原基准识别文件。相机和原片继续保留，复查期间不通过按键或其他程序另行拍摄。
+
+```powershell
+python .\action6_record_probe.py --observe ".\action6\timelapse-probe-<原 UTC 时间>" --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
+```
+
+`--observe` 与 `--capture` 互斥，只接受原生延时记录。脚本先核对原模式、计时记录、START 和两次启动前目录调用的 serial、退出状态及完整目录结果；记录缺失、无效、绑定不同或两个原范围均不存在时，在新设备调用之前报错。原 START 异常而尚未保存 `capture-observation.json` 的记录仍需分别检查原始调用。
+
+复查立即读取目录，不再等待三十分钟；它只列举目录、查询文件、拉取副本及检查媒体，不发送设置、START、STOP 或删除命令。每次记录保存到原目录下新的 `observation-<UTC 时间>` 子目录，不覆盖原记录。新 `capture-observation.json` 保存本次采样时刻、`observation_only=true`、原采集目录及 `original_capture_observation`；原计时值只说明原试验，不作为本次经过时间。
+
+成功列举后，脚本先保存 `summary.json`，再检查视频。`sample_status` 只表达这次目录差集；`video_checks` 分别表示未尝试、尚未完成、全部通过和检查报错。新增文件不是 MP4 时仍保留其路径。目录读取失败不转换为空差集，实际调用及错误继续保留。
+
+摘要写入同目录临时文件，写完后再替换目标；写入或替换失败时保留上一次完整摘要并报告实际错误。视频检查已经报错、其失败摘要也无法保存时，继续抛出原检查错误，并附上摘要保存错误。每份检查通过的视频及时保存到摘要，后续视频失败不丢失已有结果。
+
+| 本次观察或检查 | 保存的结果及后续动作 |
+| --- | --- |
+| 没有新增路径，或新增路径中没有 MP4 | `sample_status=no_new_mp4`，`video_checks=not_attempted`，保存实际新增路径后报告尚未取得 MP4 |
+| 新增路径中有 MP4，检查尚未完成 | `sample_status=mp4_observed`，`video_checks=incomplete`，保存路径后依次核对副本和媒体 |
+| 全部 MP4 的副本和媒体检查通过 | `video_checks=complete`，保存检查结果 |
+| 下载、源观测、副本核对或媒体检查报错 | `video_checks=failed`，保存已完成的视频检查和实际错误，保留原始调用并报错 |
+
+无论后来是否出现文件，`actual_start`、`natural_end`、`file_write_complete` 和 `output_set_finalized` 都保持 `unknown`。只读复查用于补充实际观察，不能据此启用正式驱动能力。
 
 ### 分别保存原始调用
 

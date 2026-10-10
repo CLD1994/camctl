@@ -169,5 +169,52 @@ class DirectoryChecks(unittest.TestCase):
             probe.parse_directory(b'/a\0/a\0', b'CAMCTL_FIND_EXIT=0\n')
 
 
+class SampleChecks(unittest.TestCase):
+    def test_no_new_paths_retains_unknown_device_facts(self):
+        result = probe.assess_sample('timelapse', {b'/old.mp4'}, {b'/old.mp4'})
+        self.assertEqual(result['sample_status'], 'no_new_mp4')
+        self.assertEqual(result['new_files'], [])
+        self.assertEqual(result['observed_mp4_files'], [])
+        self.assertEqual(result['video_checks'], 'not_attempted')
+        for fact in ('actual_start', 'natural_end', 'file_write_complete', 'output_set_finalized'):
+            self.assertEqual(result[fact], 'unknown')
+
+    def test_new_non_video_paths_are_retained(self):
+        result = probe.assess_sample('timelapse', set(), {b'/new.LRF', b'/new.trinf'})
+        self.assertEqual(result['new_files'], ['/new.LRF', '/new.trinf'])
+        self.assertEqual(result['sample_status'], 'no_new_mp4')
+        self.assertEqual(result['video_checks'], 'not_attempted')
+
+    def test_new_mp4_is_observed_without_claiming_copy_checks(self):
+        result = probe.assess_sample('timelapse', {b'/old.mp4'}, {b'/old.mp4', b'/new.MP4'})
+        self.assertEqual(result['new_files'], ['/new.MP4'])
+        self.assertEqual(result['observed_mp4_files'], ['/new.MP4'])
+        self.assertEqual(result['sample_status'], 'mp4_observed')
+        self.assertEqual(result['videos'], [])
+        self.assertEqual(result['video_checks'], 'incomplete')
+        self.assertEqual(result['natural_end'], 'unknown')
+        self.assertEqual(result['file_write_complete'], 'unknown')
+        self.assertEqual(result['output_set_finalized'], 'unknown')
+
+    def test_paths_from_both_storage_scopes_are_ordered(self):
+        result = probe.assess_sample('timelapse', set(), {
+            b'/mnt/media_rw/sd/DCIM/b.mp4', b'/mnt/media_rw/emulated/DCIM/a.mp4',
+            b'/mnt/media_rw/sd/DCIM/b.LRF',
+        })
+        self.assertEqual(result['new_files'], [
+            '/mnt/media_rw/emulated/DCIM/a.mp4', '/mnt/media_rw/sd/DCIM/b.LRF',
+            '/mnt/media_rw/sd/DCIM/b.mp4',
+        ])
+        self.assertEqual(result['observed_mp4_files'], [
+            '/mnt/media_rw/emulated/DCIM/a.mp4', '/mnt/media_rw/sd/DCIM/b.mp4',
+        ])
+
+    def test_recording_keeps_unconfirmed_setting_facts(self):
+        result = probe.assess_sample('record', set(), {b'/new.mp4'})
+        self.assertEqual(result['aperture'], 'unconfirmed')
+        self.assertEqual(result['bitrate_effect'], 'unconfirmed')
+        self.assertEqual(result['capture'], 'record')
+
+
 if __name__ == '__main__':
     unittest.main()

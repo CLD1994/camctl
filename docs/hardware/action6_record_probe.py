@@ -9,6 +9,7 @@ from decimal import Decimal
 from enum import StrEnum
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import shlex
@@ -39,6 +40,8 @@ TIMELAPSE_SETTINGS = (
     ("04-preset", "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400005000080700000000000000000000"),
 )
 
+STORAGE_ROOTS = (("internal", "/mnt/media_rw/emulated/DCIM"), ("sd", "/mnt/media_rw/sd/DCIM"))
+
 
 class CaptureMode(StrEnum):
     RECORD = "record"
@@ -48,6 +51,18 @@ class CaptureMode(StrEnum):
 class StorageState(StrEnum):
     DIRECTORY = "directory"
     ABSENT = "absent"
+
+
+class SampleStatus(StrEnum):
+    NO_NEW_MP4 = "no_new_mp4"
+    MP4_OBSERVED = "mp4_observed"
+
+
+class VideoCheckState(StrEnum):
+    NOT_ATTEMPTED = "not_attempted"
+    INCOMPLETE = "incomplete"
+    COMPLETE = "complete"
+    FAILED = "failed"
 
 
 def expect_ack(stdout: bytes) -> None:
@@ -116,22 +131,91 @@ def parse_directory(stdout: bytes, stderr: bytes):
     return StorageState.DIRECTORY, set(paths)
 
 
+def assess_sample(mode, before: set[bytes], after: set[bytes]) -> dict:
+    mode = CaptureMode(mode)
+    new_files = sorted(after - before)
+    videos = [path.decode("utf-8") for path in new_files if path.lower().endswith(b".mp4")]
+    summary = {
+        "capture": mode,
+        "sample_status": SampleStatus.MP4_OBSERVED if videos else SampleStatus.NO_NEW_MP4,
+        "new_files": [path.decode("utf-8") for path in new_files],
+        "observed_mp4_files": videos,
+        "videos": [],
+        "video_checks": VideoCheckState.INCOMPLETE if videos else VideoCheckState.NOT_ATTEMPTED,
+    }
+    if mode is CaptureMode.RECORD:
+        summary.update(aperture="unconfirmed", bitrate_effect="unconfirmed")
+    else:
+        summary.update(params={"resolution": "4k30", "exposure": "auto", "interval_s": 8,
+                               "duration_s": 1800, "outputs": "video"},
+                       actual_start="unknown", natural_end="unknown",
+                       file_write_complete="unknown", output_set_finalized="unknown")
+    return summary
+
+
+def load_observation_source(original: Path, serial: str) -> tuple[dict, set[bytes]]:
+    observation = json.loads((original / "capture-observation.json").read_text(encoding="utf-8"))
+    if not isinstance(observation, dict) or observation.get("capture") != CaptureMode.TIMELAPSE:
+        raise RuntimeError("只读复查只接受原生延时的采集记录")
+    try:
+        sampled_at = datetime.fromisoformat(observation["sampling_started_at"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("原采样时刻缺失或无效") from error
+    if sampled_at.utcoffset() is None:
+        raise RuntimeError("原采样时刻缺少时区")
+    for key in ("start_call_elapsed_s", "start_to_observation_s"):
+        value = observation.get(key)
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            raise RuntimeError(f"原计时记录 {key} 缺失或无效")
+
+    def check_call(label):
+        call = json.loads((original / label / "call.json").read_text(encoding="utf-8"))
+        argv = call.get("argv") if isinstance(call, dict) else None
+        if not isinstance(argv, list) or argv[1:4] != ["-s", serial, "shell"]:
+            raise RuntimeError(f"{label} 的原绑定与本次 serial 不同或记录无效")
+        if type(call.get("returncode")) is not int or call["returncode"] != 0:
+            raise RuntimeError(f"{label} 的原调用退出状态无效：{call.get('returncode')!r}")
+
+    check_call("12-start")
+    before = set()
+    states = []
+    for name, root in STORAGE_ROOTS:
+        label = "11-before-" + name
+        check_call(label)
+        directory = original / label
+        state, paths = parse_directory((directory / "stdout.bin").read_bytes(),
+                                       (directory / "stderr.bin").read_bytes())
+        if any(not path.startswith(root.encode("utf-8") + b"/") for path in paths):
+            raise RuntimeError(f"{label} 的原路径不属于声明范围 {root}")
+        states.append(state)
+        before.update(paths)
+    if all(state is StorageState.ABSENT for state in states):
+        raise RuntimeError("原基准的两个存储范围均不存在")
+    return observation, before
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="配置 Action6，诊断普通录像或 30 分钟原生延时预设")
-    parser.add_argument("--capture", choices=tuple(CaptureMode), default=CaptureMode.RECORD)
+    operation = parser.add_mutually_exclusive_group()
+    operation.add_argument("--capture", choices=tuple(CaptureMode), help="新拍摄，默认为 record")
+    operation.add_argument("--observe", type=Path, help="沿原延时采集目录的基准进行只读复查")
     parser.add_argument("--adb", default="./adb.exe")
     parser.add_argument("--serial", default="123456789ABCDEF")
     parser.add_argument("--ffprobe", default="ffprobe")
     args = parser.parse_args()
-    mode = CaptureMode(args.capture)
+    mode = CaptureMode.TIMELAPSE if args.observe is not None else CaptureMode(args.capture or CaptureMode.RECORD)
     if sys.version_info[:2] != (3, 11):
         raise RuntimeError("请使用现有 Python 3.11 环境")
 
     collector = Path(__file__).resolve().with_name("collect_call.py")
     if not collector.is_file():
         raise RuntimeError("请将 collect_call.py 放在本脚本所在目录")
+    original = args.observe.resolve() if args.observe is not None else None
+    if original is not None:
+        original_observation, before = load_observation_source(original, args.serial)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    base = Path("action6") / (mode.value + "-probe-" + stamp)
+    base = (original / ("observation-" + stamp) if original is not None
+            else Path("action6") / (mode.value + "-probe-" + stamp))
     base.mkdir(parents=True, exist_ok=False)
     print(f"采集目录：{base.resolve()}", flush=True)
 
@@ -166,7 +250,7 @@ def main() -> None:
     def timelapse_inventory(label):
         scopes = {}
         all_paths = set()
-        for name, root in (("internal", "/mnt/media_rw/emulated/DCIM"), ("sd", "/mnt/media_rw/sd/DCIM")):
+        for name, root in STORAGE_ROOTS:
             script = (
                 f"if [ -d {root} ]; then\n"
                 f"find {root} -type f -print0\n"
@@ -196,34 +280,51 @@ def main() -> None:
             raise RuntimeError(f"{label} 的源端摘要格式异常：{digest_raw!r}")
         return {"bytes": int(size_raw), "sha256": digest_match[1].decode("ascii")}
 
-    # 先验证本地主机工具可运行，之后才改变相机设置。
+    # 先验证本地主机工具可运行，之后才开始采集。
     run("00-ffprobe-version", [args.ffprobe, "-version"])
-    for label, script in (SETTINGS if mode is CaptureMode.RECORD else TIMELAPSE_SETTINGS):
-        shell(label, script, ack=True)
-        print(f"{label}：收到预期 00 响应", flush=True)
-    if mode is CaptureMode.RECORD:
-        bitrate = shell("10-bitrate", "simulate_device -s bitrate 2")
-        if not all(marker in bitrate for marker in (
-            b"name [DeviceRecordRecSettingBitRate]", b"link to server rlt 0", b"register to server successs",
-        )):
-            raise RuntimeError(f"10-bitrate 未取得已采集的属性及服务注册日志：{bitrate!r}")
-        print("光圈待确认；码率命令已返回，其实际生效仍待确认。", flush=True)
+    if original is None:
+        for label, script in (SETTINGS if mode is CaptureMode.RECORD else TIMELAPSE_SETTINGS):
+            shell(label, script, ack=True)
+            print(f"{label}：收到预期 00 响应", flush=True)
+        if mode is CaptureMode.RECORD:
+            bitrate = shell("10-bitrate", "simulate_device -s bitrate 2")
+            if not all(marker in bitrate for marker in (
+                b"name [DeviceRecordRecSettingBitRate]", b"link to server rlt 0", b"register to server successs",
+            )):
+                raise RuntimeError(f"10-bitrate 未取得已采集的属性及服务注册日志：{bitrate!r}")
+            print("光圈待确认；码率命令已返回，其实际生效仍待确认。", flush=True)
 
-    read_inventory = inventory if mode is CaptureMode.RECORD else timelapse_inventory
-    before = read_inventory("11-before")
-    timing = capture_once(mode, shell)
+        read_inventory = inventory if mode is CaptureMode.RECORD else timelapse_inventory
+        before = read_inventory("11-before")
+        timing = capture_once(mode, shell)
+        observation = {"capture": mode, "observation_only": False, **timing}
+    else:
+        read_inventory = timelapse_inventory
+        observation = {"capture": mode, "observation_only": True,
+                       "source_capture_directory": str(original),
+                       "original_capture_observation": original_observation}
+        print("沿原基准进行只读复查；立即采样，不发送设备控制命令。", flush=True)
+    observation["sampling_started_at"] = datetime.now(timezone.utc).isoformat()
     (base / "capture-observation.json").write_text(
-        json.dumps({"capture": mode, "sampling_started_at": datetime.now(timezone.utc).isoformat(),
-                    **timing}, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(observation, ensure_ascii=False, indent=2), encoding="utf-8")
     after = read_inventory("14-after")
-    new_files = sorted(after - before)
-    videos = [path for path in new_files if path.lower().endswith(b".mp4")]
-    if not videos:
-        raise RuntimeError(f"本次列举未取得新增 MP4；新增路径：{new_files!r}；目录：{base.resolve()}")
+    summary = assess_sample(mode, before, after)
+    summary["observation"] = observation
+    if original is None:
+        summary["timing"] = timing
 
-    summaries = []
-    for index, raw_path in enumerate(videos, 1):
-        source = raw_path.decode("utf-8")
+    def save_summary():
+        temporary = base / "summary.json.tmp"
+        temporary.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(base / "summary.json")
+
+    save_summary()
+    videos = summary["observed_mp4_files"]
+    if not videos:
+        raise RuntimeError(f"本次采样尚未取得新增 MP4；新增路径：{summary['new_files']!r}；"
+                           f"摘要：{(base / 'summary.json').resolve()}")
+
+    def check_video(index, source):
         quoted = shlex.quote(source)
         prefix = f"video-{index:02d}"
         source_before = source_facts(prefix, quoted)
@@ -253,19 +354,25 @@ def main() -> None:
         duration = Decimal(media.get("format", {}).get("duration", "NaN"))
         if not streams or not duration.is_finite() or duration <= 0:
             raise RuntimeError(f"{local} 未取得视频流或有效容器时长")
-        summaries.append({**copy_record, **local_facts,
-                          "duration_s": str(duration), "video_streams": streams})
+        return {**copy_record, **local_facts,
+                "duration_s": str(duration), "video_streams": streams}
 
-    summary = {"capture": mode, "timing": timing,
-               "new_files": [path.decode("utf-8") for path in new_files], "videos": summaries}
-    if mode is CaptureMode.RECORD:
-        summary.update(aperture="unconfirmed", bitrate_effect="unconfirmed")
-    else:
-        summary.update(params={"resolution": "4k30", "exposure": "auto", "interval_s": 8,
-                               "duration_s": 1800, "outputs": "video"},
-                       actual_start="unknown", natural_end="unknown",
-                       file_write_complete="unknown", output_set_finalized="unknown")
-    (base / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        for index, source in enumerate(videos, 1):
+            summary["videos"].append(check_video(index, source))
+            save_summary()
+    except Exception as error:
+        # 保存实际诊断结果后重新抛出原错误；补存失败也保留其原因。
+        summary["video_checks"] = VideoCheckState.FAILED
+        summary["error"] = str(error)
+        try:
+            save_summary()
+        except Exception as save_error:
+            error.add_note(f"失败摘要未能保存：{type(save_error).__name__}: {save_error}；"
+                           f"记录目录：{base.resolve()}")
+        raise
+    summary["video_checks"] = VideoCheckState.COMPLETE
+    save_summary()
     print("本次采样及副本一致性检查完成。媒体信息：", flush=True)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"详细记录：{(base / 'summary.json').resolve()}")
