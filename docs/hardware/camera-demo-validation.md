@@ -67,7 +67,7 @@ py -3.11 collect_call.py action6/011-before-sd adb -s <serial> shell 'find /mnt/
 python .\action6_record_probe.py --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
 ```
 
-每次执行使用新的 `action6/record-probe-<UTC 时间>` 目录，每项调用分别保留 `call.json`、`stdout.bin` 和 `stderr.bin`。脚本检查真正的工具退出码；`dji_mb_ctrl` 必须返回唯一完整的单字节 `00`，非 `00`、缺失、多段、不完整响应或非预期 stderr 都会使脚本报错并停止。已经发送的设置保留实际效果，不自动撤销或重试。START 已经尝试时，脚本在收场阶段发送一次 STOP，再结束本次试验。
+默认录像模式使用新的 `action6/record-probe-<UTC 时间>` 目录，每项调用分别保留 `call.json`、`stdout.bin` 和 `stderr.bin`。脚本检查真正的工具退出码；`dji_mb_ctrl` 必须返回唯一完整的单字节 `00`，非 `00`、缺失、多段、不完整响应或非预期 stderr 都会使脚本报错并停止。已经发送的设置保留实际效果，不自动撤销或重试。普通录像的 START 已经尝试时，脚本在收场阶段发送一次 STOP，再结束本次试验。原生延时模式的时序和停止边界见[统一采集](#action6-原生延时的统一采集)。
 
 每份 MP4 只下载一次，下载前后分别读取一次源长度及摘要。`video-<序号>-copy.json` 保留两组源观测、副本值、长度和摘要各自是否变化，以及副本是否与下载后的源观测一致；比对不一致时，脚本先保存该记录，再报告实际数值并结束。后续源查询失败或结果无效时直接报错，不使用早期值代替。长度和摘要是分开的查询，不能视为同一时刻的文件快照；这些检查不证明源文件以后保持不变，也不证明本次全部文件已写完。
 
@@ -95,6 +95,24 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 ## 延时摄影资料
 
 两款相机分别选择表中的完整预设。Action6 使用 4K/30 fps、自动曝光、8 秒间隔、30 分钟和仅视频的组合；OSMO 使用全景延时、8K/30 fps、手动曝光、30 秒间隔、10 分钟和仅视频的组合。设置步骤和完整负载从[交接资料](camera-control-handoff.md#action--action6-静止延时摄影)及[OSMO 延时资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)取得，不自行修改负载中的时间字节。
+
+### Action6 原生延时的统一采集
+
+更新 Windows 上的 [action6_record_probe.py](action6_record_probe.py)，与原有 `collect_call.py` 放在同一目录，以 `--capture timelapse` 选择延时试验：
+
+```powershell
+python .\action6_record_probe.py --capture timelapse --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
+```
+
+脚本依次发送延时模式、4K/30 fps、Auto 曝光及完整的 8 秒／30 分钟／仅视频负载，保存内置和 SD 两个 DCIM 范围的启动前目录，再发送一次 START。目录不存在与可靠空目录分别记录；路径不是目录、读取失败或两个范围均不存在时不启动。延时设置仍使用预期 `00` 样式作诊断检查，不能据此登记设置或启动已经生效。
+
+相机和电脑保持供电及连接，电脑保持唤醒。脚本从 START 调用发起计主机单调时间，满 1800 秒后采样；如果启动调用本身阻塞超过该时间，则返回后直接采样，不再重复等待三十分钟。每次实际调用保存 UTC 发起及返回时刻；`capture-observation.json` 另存调用耗时、距发起的主机间隔与后目录采样时刻。这些时刻不替代设备实际开始、自然结束或最终处理完成的观察。
+
+采样阶段保存两范围的后目录、新增路径及新增 MP4 的一次下载、前后源观测、副本比对和媒体信息。目录与文件记录保存在新的 `action6/timelapse-probe-<UTC 时间>` 目录。结果中的实际开始、自然结束、文件写完及集合确定均保持未知；本次未列出 MP4 只说明采样时尚未取得新增 MP4。
+
+Action6 延时 STOP 尚未给出，脚本在正常运行和异常路径均不自动发送停止命令，也不重发 START。设置异常时立即报错，不启动；START 已尝试后的调用或响应异常也立即报错，但设备是否开始保持未知。出错后保留目录和原片，不重新执行拍摄脚本，将错误及记录目录交回继续诊断。正常结束时只需交回最终摘要；如能观察到设备提示音、指示灯或其他实际现象，连同时间一并记录，不能观察到的事实保持未知。
+
+### 分别保存原始调用
 
 逐条保存设置调用后，采集启动候选：
 

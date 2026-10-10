@@ -81,5 +81,93 @@ class CopyChecks(unittest.TestCase):
         self.assertFalse(probe.assess_copy((10, 'a' * 64), (11, 'a' * 64), (10, 'a' * 64))['matches_source_after'])
 
 
+class CaptureChecks(unittest.TestCase):
+    def setUp(self):
+        self.now = 100
+        self.commands = []
+        self.sleeps = []
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def shell(self, label, command, **kwargs):
+        self.commands.append(command)
+        if label == '12-start':
+            self.now += 2
+
+    def test_timelapse_samples_1800_seconds_after_start_dispatch(self):
+        result = probe.capture_once('timelapse', self.shell, clock=self.clock, sleep=self.sleep)
+        self.assertEqual(self.now, 1900)
+        self.assertEqual(result, {'start_call_elapsed_s': 2, 'start_to_observation_s': 1800})
+        self.assertEqual(self.commands, ['dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'])
+
+    def test_blocking_timelapse_start_does_not_wait_another_30_minutes(self):
+        def shell(label, command, **kwargs):
+            self.commands.append(command)
+            self.now += 1810
+        result = probe.capture_once('timelapse', shell, clock=self.clock, sleep=self.sleep)
+        self.assertEqual(self.sleeps, [])
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result['start_to_observation_s'], 1810)
+        self.assertEqual(len(self.commands), 1)
+
+    def test_timelapse_start_error_keeps_actual_error_and_unknown_activity(self):
+        def shell(label, command, **kwargs):
+            self.commands.append(command)
+            raise RuntimeError('e3')
+        with self.assertRaises(RuntimeError) as caught:
+            probe.capture_once('timelapse', shell, clock=self.clock, sleep=self.sleep)
+        self.assertIn('e3', str(caught.exception))
+        self.assertIn('未知', str(caught.exception))
+        self.assertEqual(self.commands, ['dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'])
+
+    def test_record_waits_ten_seconds_after_start_return_and_stops(self):
+        probe.capture_once('record', self.shell, clock=self.clock, sleep=self.sleep)
+        self.assertEqual(self.sleeps, [10])
+        self.assertEqual(self.commands, ['dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 02 01',
+                                         'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 02 00'])
+
+    def test_record_start_error_still_sends_stop(self):
+        def shell(label, command, **kwargs):
+            self.commands.append(command)
+            if label == '12-start':
+                raise RuntimeError('e3')
+        with self.assertRaises(RuntimeError):
+            probe.capture_once('record', shell, clock=self.clock, sleep=self.sleep)
+        self.assertEqual(self.commands[-1], 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 02 00')
+
+
+class DirectoryChecks(unittest.TestCase):
+    def test_existing_empty_directory_is_distinct_from_absent(self):
+        self.assertEqual(probe.parse_directory(b'', b'CAMCTL_FIND_EXIT=0\r\n'), ('directory', set()))
+
+    def test_absent_directory_is_explicit(self):
+        self.assertEqual(probe.parse_directory(b'', b'CAMCTL_STORAGE_ABSENT\r\n'), ('absent', set()))
+
+    def test_directory_paths_are_kept(self):
+        self.assertEqual(probe.parse_directory(b'/a\0/b\0', b'CAMCTL_FIND_EXIT=0\n'),
+                         ('directory', {b'/a', b'/b'}))
+
+    def test_unexpected_stderr_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            probe.parse_directory(b'', b'CAMCTL_FIND_EXIT=1\r\n')
+
+    def test_absent_marker_with_paths_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            probe.parse_directory(b'/a\0', b'CAMCTL_STORAGE_ABSENT\n')
+
+    def test_truncated_path_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            probe.parse_directory(b'/a', b'CAMCTL_FIND_EXIT=0\n')
+
+    def test_duplicate_path_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            probe.parse_directory(b'/a\0/a\0', b'CAMCTL_FIND_EXIT=0\n')
+
+
 if __name__ == '__main__':
     unittest.main()
