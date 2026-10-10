@@ -281,7 +281,7 @@ def read_last_page(ticket, owned):
     return read_page(saved.ref, owned)
 
 
-def read_file_input(last_ref, identity, owned):
+def read_file_input(last_ref, identity, owned, *, allow_missing=False):
     """从原页范围查找一个差集成员，不装载全部文件元数据。"""
     last = read_page(last_ref, owned)
     _, attempt, _, _ = _load(owned.connection, last_ref.ticket)
@@ -293,6 +293,8 @@ def read_file_input(last_ref, identity, owned):
             " AND json_extract(f.value,'$[0]')=? ORDER BY e.id LIMIT 2",
             (attempt["result_first_page_event_id"], last.ref.event_id, _TYPE, attempt["id"], identity))) as reader:
         found = reader.fetchall()
+    if not found and allow_missing:
+        return None
     if len(found) != 1:
         raise ConsistencyError("配对原片必须唯一属于原结果页范围")
     saved, _ = _at(owned.connection, found[0][0])

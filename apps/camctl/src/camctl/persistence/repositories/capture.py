@@ -1748,9 +1748,9 @@ class CaptureRepository:
         from .result_pages import read_last_page
         return read_last_page(ticket, owned)
 
-    def read_result_file_input(self, ref, identity: str, owned: OwnedConnection):
+    def read_result_file_input(self, ref, identity: str, owned: OwnedConnection, *, allow_missing=False):
         from .result_pages import read_file_input
-        return read_file_input(ref, identity, owned)
+        return read_file_input(ref, identity, owned, allow_missing=allow_missing)
 
     def read_result_sources(self, ticket, cursor, batch: int, owned: OwnedConnection):
         from .result_pages import read_source_inputs

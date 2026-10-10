@@ -1,7 +1,5 @@
 """取回和清理逐项使用设备文件原观察者的绑定。"""
 
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
-
 from dataclasses import replace
 import json
 from decimal import Decimal
@@ -19,6 +17,7 @@ from camctl.bootstrap.flows import capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime
 from camctl.bootstrap.obtain_assembly import obtain_flow, session_obtain_assembly
 from camctl.capture.handlers import ObservedFile
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 from camctl.capture.results import FileKind
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.enums import enum_for
@@ -43,7 +42,8 @@ _EVIDENCE = EvidenceRegistry((
     EvidenceContract(type="photo_taken", version=1, operation="control",
                      fields=frozenset({"activity_id"}), identity_field="activity_id"),
     EvidenceContract(type="results_returned", version=1, operation="result", fields=frozenset()),
-        RESULT_FILES_CONTRACT,
+    RESULT_FILES_CONTRACT,
+    RESULT_PAGE_CONTRACT,
     EvidenceContract(type="read_returned", version=1, operation="read", fields=frozenset()),
     EvidenceContract(type="delete_returned", version=1, operation="delete", fields=frozenset()),
     EvidenceContract(type="file_absent", version=1, operation="delete",

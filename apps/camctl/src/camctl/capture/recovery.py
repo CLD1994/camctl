@@ -64,10 +64,11 @@ class RecoveryDiagnostic:
 
 
 def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
-    """从原驱动的适用声明和正式恢复模板取得单操作恢复契约。
+    """从原驱动的适用声明取得保留实际返回契约的恢复登记。
 
     恢复类型与版本共用空正文规则；原驱动必须明确声明本操作适用。
-    仅把模板的操作类别绑定原票据，不改变一般设备观察登记。
+    仅把模板的操作类别绑定原票据；其他契约保持原驱动声明，
+    以便可靠页已保存实际返回时仍能验证原结果。
     """
     if entry is None or operation not in entry.declaration.adb_foreground_recovery_operations:
         return None
@@ -77,7 +78,7 @@ def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
         return None
     if template.fields or template.identity_field is not None:
         raise ValueError("原驱动恢复模板必须是正式 v1 空正文契约")
-    return EvidenceRegistry((replace(template, operation=operation),))
+    return entry.evidence.with_contract(replace(template, operation=operation))
 
 
 class EmergencyDecision(Enum):

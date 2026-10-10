@@ -133,8 +133,9 @@ class SavedResultEntries:
             self._count = sum(len(saved.file_ids) for saved in self.pages())
         return self._count
 
-    def find(self, identity):
-        return self.repository.read_result_file_input(self.last_ref, identity, self.owned)
+    def find(self, identity, *, allow_missing=False):
+        return self.repository.read_result_file_input(self.last_ref, identity, self.owned,
+                                                    allow_missing=allow_missing)
 
 
 class SourceResultEntries:

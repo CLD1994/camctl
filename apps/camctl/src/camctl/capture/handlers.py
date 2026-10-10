@@ -1036,11 +1036,14 @@ class CaptureRuntime(_FileObservationSaves):
             interval_s=interval_s,
             now_ns=self.monotonic_ns())
 
-    def recover_attempt(self, ticket: AttemptTicket) -> bool:
+    def recover_attempt(self, ticket: AttemptTicket, *, retry_wait: bool = False) -> bool:
         """可靠旧会话边界结束原前台发令；未知设备活动另行核实。"""
         identity = (ticket.run_id, ticket.attempt_id)
         pending = self.pending_start_results.get(identity)
         if pending is not None:
+            if not pending.result_disposition_ready:
+                pending = _settle_recovered_listing(self, pending)
+                self.pending_start_results[identity] = pending
             self._save_call_result(identity, pending)
             self.last_recovery_diagnostic = None
             return True
@@ -1054,6 +1057,43 @@ class CaptureRuntime(_FileObservationSaves):
         if attempt["status"] != int(_ATTEMPT_STATUS.RUNNING):
             self.last_recovery_diagnostic = None
             return True
+        evidence = self._attempt_recovery_evidence(ticket, attempt)
+        if evidence is None:
+            return False
+        # 可靠末页已经承载实际返回；部分页仍与整轮未知结果分开。
+        if ticket.operation == "result":
+            last = self.capture.read_last_result_page(ticket, self.owned)
+            if last is not None and _result_page_returned(last):
+                _hold_recovered_result_page(self, last, evidence)
+                pending = _settle_recovered_listing(self, self.pending_start_results[identity])
+            else:
+                entries = None if last is None else SavedResultEntries(self.capture, self.owned, last.ref)
+                pending = PendingCallResult(new_operation_key(), AttemptFinish(
+                    ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
+                    retry_wait=retry_wait),
+                    None, returned_ns=self.monotonic_ns(), result_listing=entries)
+                pending = _settle_recovered_listing(self, pending)
+            self.pending_start_results[identity] = pending
+            self._save_call_result(identity, pending)
+        else:
+            receipt = self.operations.finish_attempt(
+                AttemptFinish(ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us()),
+                new_operation_key(), self.owned)
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(f"原调用恢复结果未可靠保存: {receipt.error}")
+        self.last_recovery_diagnostic = None
+        return True
+
+    def _attempt_recovery_evidence(self, ticket: AttemptTicket, attempt=None):
+        """核对原意图与旧会话收场资格，不保存或推导设备结果。"""
+        if attempt is None:
+            with closing(self.owned.connection.execute(
+                "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                (ticket.run_id, ticket.attempt_id))) as cursor:
+                found = cursor.fetchone()
+            if found is None:
+                raise ConsistencyError("原恢复尝试不存在")
+            attempt = row_facts(self.owned.connection, "operation_attempts", found[0])
         blocked = None
         if self.recovery_boundary is RecoveryBoundary.UNCONFIRMED:
             blocked = RecoveryBlockedReason.UNCONFIRMED_BOUNDARY
@@ -1064,13 +1104,13 @@ class CaptureRuntime(_FileObservationSaves):
         if blocked is not None:
             self.record_recovery_diagnostic(RecoveryDiagnostic(
                 blocked, ticket.run_id, ticket.attempt_id))
-            return False
+            return None
         if (attempt["intent_event_id"] is None
                 or attempt["intent_event_id"] > self.recovery_max_event_id):
             self.record_recovery_diagnostic(RecoveryDiagnostic(
                 RecoveryBlockedReason.INTENT_OUTSIDE_HORIZON,
                 ticket.run_id, ticket.attempt_id))
-            return False
+            return None
         run = row_facts(self.owned.connection, "operation_runs", ticket.run_id)
         if run is None:
             raise ConsistencyError("原恢复尝试缺少流程")
@@ -1087,21 +1127,9 @@ class CaptureRuntime(_FileObservationSaves):
             self.record_recovery_diagnostic(RecoveryDiagnostic(
                 RecoveryBlockedReason.EVIDENCE_UNAVAILABLE,
                 ticket.run_id, ticket.attempt_id))
-            return False
-        # RUNNING 意图不携带原调用结果。活动已有确认在其原记录中保持，
-        # 本次恢复不为原发令补造退出信息、观察或发生时刻。
-        recovered = CallOutcome(
-            status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
-            error=ErrorValue("result_not_saved", "recovery"),
-            settlement=Settlement(SettlementBasis.ASSUMED,
-                                  EvidenceValue("adb_foreground_recovery", 1, {})))
-        receipt = self.operations.finish_attempt(
-            AttemptFinish(ticket, validate_outcome(ticket, recovered, evidence), self.wall_us()),
-            new_operation_key(), self.owned)
-        if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"原调用恢复结果未可靠保存: {receipt.error}")
+            return None
         self.last_recovery_diagnostic = None
-        return True
+        return evidence
 
 
 class SessionRecordingState:
@@ -2243,8 +2271,9 @@ def _binding_failure_request(runtime, action, details, *, excluded_run_id=None):
 
 
 def _binding_failure_files(runtime: CaptureRuntime, action) -> tuple[OutputDraft, ...]:
-    """照片和延时摄影按原实际 RESULTS 保留文件，当前绑定不解释原观察。"""
-    if action["type"] not in (int(_ACTION_TYPE.CAMERA_TAKE_PHOTO), int(_ACTION_TYPE.CAMERA_TIMELAPSE)):
+    """拍摄按原实际 RESULTS 保留文件，当前绑定不解释原观察。"""
+    if action["type"] not in (int(_ACTION_TYPE.CAMERA_TAKE_PHOTO), int(_ACTION_TYPE.CAMERA_RECORD),
+                              int(_ACTION_TYPE.CAMERA_TIMELAPSE)):
         return ()
     connection = runtime.owned.connection
     with closing(connection.execute(
@@ -3445,8 +3474,16 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                     and (entry.paired_identity is not None) == previews)
                 if not batch:
                     continue
-                pairs = {entry.paired_identity: entries.find(entry.paired_identity)
+                pairs = {entry.paired_identity: entries.find(entry.paired_identity,
+                         allow_missing=not listing.scan_complete)
                          for entry in batch if entry.paired_identity is not None}
+                if not listing.scan_complete:
+                    # 尚未读到的原片不形成配对依据；可靠页仍保留预览输入。
+                    batch = tuple(entry for entry in batch if entry.paired_identity is None
+                                  or pairs[entry.paired_identity] is not None)
+                    pairs = {identity: pair for identity, pair in pairs.items() if pair is not None}
+                if not batch:
+                    continue
                 _register_observed(runtime, action_id, batch, occurred_at=saved.occurred_at,
                     registration=FileRegistration(pairing_files=pairs, ownership_method=method,
                     activity_id=activity["id"] if baseline else None,
@@ -3498,6 +3535,42 @@ def _uses_result_pages(runtime: CaptureRuntime) -> bool:
     return contract.operation == "result"
 
 
+def _recovered_call_outcome() -> CallOutcome:
+    """旧前台已收场但整轮返回未保存；不生成退出或设备观察。"""
+    return CallOutcome(status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
+        error=ErrorValue("result_not_saved", "recovery"),
+        settlement=Settlement(SettlementBasis.ASSUMED,
+                              EvidenceValue("adb_foreground_recovery", 1, {})))
+
+
+def _result_page_returned(saved) -> bool:
+    return saved.page.next_cursor is None or saved.page.outcome.error is not None
+
+
+def _hold_recovered_result_page(runtime: CaptureRuntime, saved, evidence) -> None:
+    """原末页实际返回沿原驱动登记验证，时刻和页范围保持。"""
+    ticket = saved.ref.ticket
+    identity = (ticket.run_id, ticket.attempt_id)
+    if identity in runtime.pending_start_results:
+        raise ConsistencyError("原 RESULTS 结果尚未交接，不能替换")
+    runtime.pending_start_results[identity] = PendingCallResult(new_operation_key(), AttemptFinish(
+        ticket, validate_outcome(ticket, saved.page.outcome, evidence), saved.occurred_at), None,
+        returned_ns=runtime.monotonic_ns(),
+        result_listing=SavedResultEntries(runtime.capture, runtime.owned, saved.ref),
+        result_disposition_ready=False)
+
+
+def _settle_recovered_listing(runtime: CaptureRuntime, pending: PendingCallResult) -> PendingCallResult:
+    """独立保存原真实结束依据；绑定失败不判定正常集合结论。"""
+    completion = None
+    if isinstance(pending.result_listing, SavedResultEntries):
+        saved = pending.result_listing.completion_page
+        activity = row_facts(runtime.owned.connection, "device_activities", int(pending.finish.ticket.target_id))
+        if saved is not None and activity["activity_state"] != 3:
+            completion = saved.ref
+    return replace(pending, completion_page=completion, result_disposition_ready=True)
+
+
 async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultScan) -> ListingRound:
     if not await advance_result_scan(pending, runtime=runtime):
         return ListingRound(ListingPhase.IN_FLIGHT)
@@ -3546,12 +3619,14 @@ def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRou
                            None if row[8] is None else parse_exact_json(row[8]))
     last = runtime.capture.read_last_result_page(ticket, runtime.owned)
     if last is not None:
-        if last.page.outcome != actual or last.occurred_at != row[9]:
+        partial_recovery = actual == _recovered_call_outcome() and not _result_page_returned(last)
+        if not partial_recovery and (last.page.outcome != actual or last.occurred_at != row[9]):
             raise ConsistencyError("RESULTS 结束记录改变原末页实际返回或时刻")
         entries = SavedResultEntries(runtime.capture, runtime.owned, last.ref)
         completion = entries.completion_page
         return ListingRound(ListingPhase.CLOSED, entries, ticket, actual, row[9], None, True,
-            scan_complete=last.page.scan_complete, set_finalized=last.page.set_finalized,
+            scan_complete=False if partial_recovery else last.page.scan_complete,
+            set_finalized=False if partial_recovery else last.page.set_finalized,
             completion_evidence=None if completion is None else completion.page.completion_evidence,
             completion_page=None if completion is None else completion.ref)
     metadata = _result_file_metadata(runtime, ticket)
@@ -3615,7 +3690,17 @@ async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRoun
         pending = runtime.pending_result_scans.get((ticket.run_id, ticket.attempt_id))
         if pending is not None:
             return await _continue_result_scan(runtime, pending)
-        return ListingRound(ListingPhase.IN_FLIGHT)
+        evidence = runtime._attempt_recovery_evidence(ticket)
+        if evidence is None:
+            return ListingRound(ListingPhase.IN_FLIGHT)
+        last = runtime.capture.read_last_result_page(ticket, runtime.owned)
+        if last is not None and _result_page_returned(last):
+            _hold_recovered_result_page(runtime, last, evidence)
+            return _held_listing(runtime, ticket)
+        if not runtime.recover_attempt(ticket, retry_wait=True):
+            return ListingRound(ListingPhase.IN_FLIGHT)
+        # 原页发现的文件可能尚未保存归属或完成事实，必须先消费。
+        _register_listing(runtime, action_id, _saved_result_listing(runtime, action_id))
     if runtime.retry_wait_remaining(responsibility, runtime.check_config.retry_interval_s,
                                     maximum=runtime.check_config.max_attempts) is not None:
         return ListingRound(ListingPhase.RETRY_WAIT)
