@@ -615,7 +615,8 @@
         "completion_evidence_json",
         "result_set_state",
         "result_check_json",
-        "last_error_json"
+        "last_error_json",
+        "output_set_finalized_event_id"
       ],
       "derived": [
         "id"
@@ -623,7 +624,8 @@
       "write_once": [
         "sent_at",
         "started_at",
-        "wait_completed_event_id"
+        "wait_completed_event_id",
+        "output_set_finalized_event_id"
       ],
       "owner": {
         "entity": "action",
@@ -5495,6 +5497,40 @@
             "result_check"
           ],
           "evidence": []
+        },
+        "OUTPUTS_FINALIZED": {
+          "reason": 5,
+          "title": "保存本次文件集合确定事实",
+          "rows": [
+            {
+              "table": "device_activities",
+              "op": "update",
+              "columns": [
+                "output_set_finalized_event_id"
+              ],
+              "before": {
+                "output_set_finalized_event_id": [
+                  null
+                ]
+              },
+              "required": [
+                "output_set_finalized_event_id"
+              ],
+              "after": {},
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "result_check"
+          ],
+          "evidence": [
+            "attempt_id",
+            "result_page_event_id"
+          ]
         }
       }
     },
@@ -9101,6 +9137,9 @@
     "operation_attempts.result_last_page_event_id": {
       "target": "assigning_event",
       "exception": "RESULT_PAGE 首批共同赋值为本页 E；首引用保持，末引用随每页推进；没有页时共同为空。"
+    },
+    "device_activities.output_set_finalized_event_id": {
+      "target": "assigning_event"
     }
   },
   "non_event_tables": {

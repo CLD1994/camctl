@@ -432,6 +432,7 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | `completion_evidence_json` | `completion_basis` 为 `DEVICE_EVIDENCE`、`TIME_AND_OUTPUTS` 或 `KNOWN_FAILURE` 时必填，为 `UNDETERMINED` 或不适用时为空；保存 `method`、`observation` 及适用的 `attempt_id`、`wait_completed_event_id`，不能填理论张数作为实际观察 |
 | `result_set_state` | `UNEXAMINED`、`CHECKING`、`COMPLETE`、`UNCONFIRMED` |
 | `result_check_json` | 结果集合为 `COMPLETE` 或 `UNCONFIRMED` 时必填，结构为 `contract`（驱动结果规则标识）、`outcome`（`SATISFIED` 表示满足，`NOT_SATISFIED` 表示明确不满足，`UNCONFIRMED` 表示无法确认）、`observation`（驱动结构化依据）；不放可增长的文件清单 |
+| `output_set_finalized_event_id` | 本次文件范围已经确定时引用独立的 `RESULT_SET_CONFIRMED.OUTPUTS_FINALIZED` 事件；尚未保存该事实时为空，首次确定后保持原引用。它不表达采集目标是否满足 |
 | `last_error_json` | 目前设备或结果核实的错误，无错误时为空；动作最终错误另行保存 |
 
 能力列保存实际执行依据，不把设备调用本身伪造成受理操作。延时摄影受理时已固定的相同能力必须精确一致；其他任务以驱动接入契约和部署兼容性要求解释。文件集合通过 `device_files.source_action_id` 分页读取，基准通过不可变事件分块读取。任务可能有多份原文件和预览，不能仅发现一个视频就固定集合。
@@ -528,6 +529,16 @@ SQL 对每次行修改即时检查这些组合。一个事件同时确定设备�
 报告生成检查设备完成依据时，也从同一历史边界读取发送时间、等待安排、等待完成引用及结果事实。这些输入由[报告字段依赖说明](report-dependencies.json)的 `device_completion_consistency` 集中列出，用于核对设备执行提示的依据，不增加公开字段。设备已经结束而仍保留占用时，报告不把内部的文件归属限制解释成设备仍在运行。
 
 ### 剩余限制与下一动作
+
+取消收尾或目标时长无法确认时，文件范围仍可以已经确定。`RESULT_SET_CONFIRMED.OUTPUTS_FINALIZED` 只保存这项独立事实，不修改 `capture_json`、`completion_basis`、`result_set_state` 或动作状态。原 RESULTS 尚未保存结果时，结果与该事实共同提交；原结果已经保存时，沿原可靠页范围补齐该事实，不重开尝试。事务沿原票据核对全部连续可靠页、成功且无错误的末页、没有后续游标、驱动明确提供的 `set_finalized=true`，以及全部新增成员的可靠归属。历史目录成员由原固定基准排除，不混入本次文件范围；事件引用及原键核实遵守[历史格式](history-formats.md#结果页的分批记录)。
+
+| 真实活动与输出范围 | 保存与释放行为 |
+| --- | --- |
+| 活动可靠结束，基准固定，原集合结论为 `COMPLETE` 或独立文件范围事实已经保存，全部调用已收场 | 可以释放；取消和时长无法确认分别保持原 `CANCELED` 和 `capture_result_unconfirmed/duration_unknown` 结果 |
+| 活动可靠结束，基准固定，但集合或新增成员归属仍未知 | 保持 `HELD`；保留已确认的完整文件，不补造集合确定事实 |
+| 文件范围已经确定，但活动是否结束仍未知且没有其他适用释放依据 | 保持 `HELD`；目录扫描结束不表示相机停止 |
+
+这项事实没有新增公开字段。原完整保存申请、原末页引用、key 和实际时刻在回执未知时继续保持；改变或省略原末页的原键重送必须拒绝。
 
 取得上述释放依据后，事件处理器按下表核对剩余责任。不新增一套占用状态，沿用 `HELD` 与 `RELEASED`，通过已有任务归属、基准、文件记录及处理进度判断具体限制。
 

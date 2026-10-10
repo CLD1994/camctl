@@ -324,6 +324,7 @@ class StartActionCommand:
             "completion_evidence_json": None,
             "result_set_state": 1,
             "result_check_json": None,
+            "output_set_finalized_event_id": None,
             "last_error_json": None,
         }
         activity_row = _row("device_activities", activity_id, activity_values)

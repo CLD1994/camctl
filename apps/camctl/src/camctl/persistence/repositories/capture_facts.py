@@ -126,12 +126,19 @@ def release_basis_holds(facts: Mapping[str, Any]) -> bool:
             or facts.get("completion_basis") == 3)
 
 
+def output_scope_resolved(facts: Mapping[str, Any]) -> bool:
+    """基准已固定，且原集合结论或独立集合事实证明范围确定。"""
+    return (facts.get("baseline_state") == 3
+            and (facts.get("result_set_state") == 3
+                 or facts.get("output_set_finalized_event_id") is not None))
+
+
 def occupancy_release_allowed(facts: Mapping[str, Any], *, unstarted: bool = False,
                               preparation_resolved: bool = False) -> bool:
     """释放依据与输出范围限制都满足，且占用尚未释放。"""
     return (facts["occupancy_state"] == 1 and release_basis_holds(facts)
             and (facts["ownership_mode"] != 2 or (unstarted and preparation_resolved)
-                 or (facts["baseline_state"] == 3 and facts["result_set_state"] == 3)))
+                 or output_scope_resolved(facts)))
 
 
 def start_finish_event(run: Mapping[str, Any] | None, status: int, occurred_at: int):

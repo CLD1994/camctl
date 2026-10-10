@@ -98,7 +98,7 @@ from camctl.operations.attempts import (
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture_facts import (
-    include_start_facts, load_start_facts, release_basis_holds,
+    include_start_facts, load_start_facts, release_basis_holds, output_scope_resolved,
     unstarted_events, verify_unstarted_final,
 )
 from camctl.persistence.repositories.operations import (
@@ -154,6 +154,7 @@ _RESULT_COMPLETE_REASON = 1
 _RESULT_UNSATISFIED_REASON = 2
 _RESULT_UNCONFIRMED_REASON = 3
 _RESULT_BEGIN_REASON = 4
+_RESULT_OUTPUTS_FINALIZED_REASON = 5
 
 #: 结论分支到（事件分支编号、目标核实状态、结果判定）的映射。
 _RESULT_PHASE_TARGETS = {
@@ -1784,18 +1785,22 @@ class CaptureRepository:
             return self._read_ended_page_completion(action_id, activity["id"], owned)
         observation = parse_exact_json(row[1])["evidence"]["observation"]
         if "stop_result_event_id" in observation:
-            original, occurred_at = _HostTimerStopCommand.source(
+            original, occurred_at = _CaptureStopCommand.source(
                 owned.connection, observation["stop_result_event_id"])
             elapsed = observation.get("control_elapsed_ns")
             try:
                 HostTimerStopSave(elapsed)
             except ValueError as error:
                 raise ConsistencyError("原主机停止观察的控制时长无效") from error
-            if (set(observation) != {"stop_result_event_id", "control_elapsed_ns"}
+            action = row_facts(owned.connection, "actions", action_id)
+            if action["type"] == 2:
+                return None
+            expected_members = ({"stop_result_event_id", "control_elapsed_ns"}
+                if action["execution_spec_json"]["end_control"] == 2 else {"stop_result_event_id"})
+            if (set(observation) != expected_members
                     or original["id"] != activity["id"] or occurred_at != row[0]
                     or not json_equal(elapsed, activity["control_elapsed_ns"])):
                 raise ConsistencyError("原主机停止观察与活动、时刻或控制时长不符")
-            action = row_facts(owned.connection, "actions", action_id)
             if elapsed is None or elapsed < action["execution_spec_json"]["target_duration_ms"] * 1_000_000:
                 return self._read_ended_page_completion(action_id, activity["id"], owned)
             return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
@@ -1843,12 +1848,21 @@ class CaptureRepository:
         from .baseline import read_chunks
         return read_chunks(ref, cursor, batch, owned)
 
+    def finish_capture_stop(self, finish, key, owned):
+        """停止确认保存实际结束；文件范围和采集目标分别核实。"""
+        receipt = commit_operation(_CaptureStopCommand(finish, None, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_host_timer_stop(
         self, finish: AttemptFinish, stop: HostTimerStopSave,
         key: OperationKey, owned: OwnedConnection,
     ) -> DbOutcome[FinishAttemptResult]:
         """原 STOP 实际结果、实际结束和控制时长共同保存，不提前释放。"""
-        receipt = commit_operation(_HostTimerStopCommand(finish, stop, key), key, owned)
+        receipt = commit_operation(_CaptureStopCommand(finish, stop, key), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -2190,14 +2204,26 @@ class CaptureRepository:
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def finalize_output_set(self, request, key, owned):
+        """沿原已保存 RESULTS 末页形成独立事实，不改写原调用结果。"""
+        receipt = commit_operation(_OutputSetFinalizedCommand(None, request.page,
+            occurred_at=request.occurred_at, key=key, action_id=request.action_id), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_result_check(
         self, finish: AttemptFinish, confirm: ResultSetSave | None,
         key: OperationKey, owned: OwnedConnection, *,
         completion_page: ResultPageRef | None = None,
+        finalized_page: ResultPageRef | None = None,
     ) -> DbOutcome[ResultCheckOutcome]:
         receipt = commit_operation(
             _FinishResultCheckCommand(finish, confirm, key,
-                                      completion_page=completion_page), key, owned)
+                                      completion_page=completion_page,
+                                      finalized_page=finalized_page), key, owned)
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":
@@ -2588,8 +2614,7 @@ class _ActivityReleaseCommand:
             completion_evidence=release_basis_holds(projected),
             unresolved_calls=unresolved,
             file_ownership_resolved=(projected["ownership_mode"] != 2 or unstarted
-                                     or (projected["baseline_state"] == 3
-                                         and projected["result_set_state"] == 3))))
+                                     or output_scope_resolved(projected))))
         if decision is not ReleaseDecision.RELEASE:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
@@ -2710,7 +2735,7 @@ class _ActivityConcludeCommand:
             combined["activity_state"] = 3
         if not release_basis_holds(combined):
             return self._rejected("conditions_unmet")
-        if combined["ownership_mode"] == 2 and combined["baseline_state"] != 3:
+        if combined["ownership_mode"] == 2 and not output_scope_resolved(combined):
             return self._rejected("scope_limited")
 
         allocation = scope.allocate(2 if needs_ended else 1)
@@ -3060,11 +3085,11 @@ class _CompositeScope:
         )
 
 
-class _HostTimerStopCommand:
+class _CaptureStopCommand:
     """停止确认承载实际结束；原时长输入与调用结果有共同保存身份。"""
 
     def __init__(self, finish, stop, key):
-        if not isinstance(stop, HostTimerStopSave):
+        if stop is not None and not isinstance(stop, HostTimerStopSave):
             raise TypeError("主机停止事实必须使用 HostTimerStopSave")
         self._finish, self._stop, self._key = finish, stop, key
 
@@ -3073,41 +3098,42 @@ class _HostTimerStopCommand:
         return (run["kind"] == int(_RUN_KIND.STOP)
                 and run["activity_id"] == activity["id"]
                 and run["responsibility_key"] == f"stop/{action['id']}"
-                and action["type"] == 3 and action["execution_spec_json"]["end_control"] == 2
-                and activity["dispatch_state"] not in (1, 4)
+                and action["type"] in (2, 3)
                 and actual.effect is EffectState.CONFIRMED)
 
     @staticmethod
     def source(connection, result_event_id):
         if not is_json_integer(result_event_id) or result_event_id <= 0:
-            raise ConsistencyError("主机停止须引用原实际结果事件")
+            raise ConsistencyError("拍摄停止须引用原实际结果事件")
         with closing(connection.execute(
             "SELECT event_type,occurred_at,body_json FROM history_events WHERE id=?",
             (result_event_id,),
         )) as cursor:
             event = cursor.fetchone()
         if event is None or event[0] != _ATTEMPT_RESULT_EVENT:
-            raise ConsistencyError("主机停止引用的事件不是实际结果")
+            raise ConsistencyError("拍摄停止引用的事件不是实际结果")
         rows = [row for row in parse_exact_json(event[2])["rows"] if row["table"] == "operation_attempts"]
         if len(rows) != 1:
-            raise ConsistencyError("主机停止结果须属于一个原尝试")
+            raise ConsistencyError("拍摄停止结果须属于一个原尝试")
         original, = rows
         attempt = row_facts(connection, "operation_attempts", original["id"])
         if attempt is None or attempt["result_event_id"] != result_event_id:
-            raise ConsistencyError("主机停止缺少原实际结果尝试")
+            raise ConsistencyError("拍摄停止缺少原实际结果尝试")
         run = row_facts(connection, "operation_runs", attempt["run_id"])
         action = row_facts(connection, "actions", run["action_id"])
         activity = load_activity_of_action(connection, action["id"])
         actual = saved_outcome(attempt["status"], attempt["effect_state"], attempt["result_json"], attempt["error_json"])
-        if (not _HostTimerStopCommand._confirms(run, action, activity, actual)
+        if (not _CaptureStopCommand._confirms(run, action, activity, actual)
                 or any(not json_equal(original["after"]["values"].get(name), attempt[name])
                     for name in ("status", "effect_state", "result_json", "error_json"))):
-            raise ConsistencyError("原结果没有一致的主机停止确认")
+            raise ConsistencyError("原结果没有一致的拍摄停止确认")
         return activity, event[1]
 
     def _observation(self, result_event_id):
-        return {"stop_result_event_id": result_event_id,
-                "control_elapsed_ns": self._stop.control_elapsed_ns}
+        observation = {"stop_result_event_id": result_event_id}
+        if self._stop is not None:
+            observation["control_elapsed_ns"] = self._stop.control_elapsed_ns
+        return observation
 
     def plan(self, scope):
         saved = saved_transaction_events(scope.connection, self._key)
@@ -3118,16 +3144,23 @@ class _HostTimerStopCommand:
         action = row_facts(scope.connection, "actions", run["action_id"])
         activity = load_activity_of_action(scope.connection, action["id"])
         if (not self._confirms(run, action, activity, finish.outcome.outcome)
-                or finish.run_finish is None or finish.run_finish.status is not RunOutcome.SUCCEEDED
-                or 3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset())
+                or (action["type"] == 3 and action["execution_spec_json"]["end_control"]
+                    != (1 if self._stop is None else 2))
+                or (action["type"] == 2 and self._stop is not None)
+                or finish.run_finish is None or finish.run_finish.status is not RunOutcome.SUCCEEDED):
+            raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
+        if self._stop is None and (activity["dispatch_state"] in (1, 4)
+                or activity["activity_state"] == 3):
+            return FinishAttemptCommand(finish, self._key).plan(scope)
+        if (3 not in _ACTIVITY_STATE_NEXT.get(activity["activity_state"], frozenset())
                 or activity["control_elapsed_ns"] is not None):
-            raise ConsistencyError("原 STOP 不具备新的主机计时结束事实")
+            raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         result = FinishAttemptCommand(finish, self._key).plan(sub)
         if result.read_only:
             raise ConsistencyError("已保存的普通 STOP 结果不能补写为共同停止事实")
         before, after = {"activity_state": activity["activity_state"]}, {"activity_state": 3}
-        if self._stop.control_elapsed_ns is not None:
+        if self._stop is not None and self._stop.control_elapsed_ns is not None:
             before["control_elapsed_ns"] = None
             after["control_elapsed_ns"] = self._stop.control_elapsed_ns
         allocation = sub.allocate(1)
@@ -3146,12 +3179,14 @@ class _HostTimerStopCommand:
     def _reuse(self, scope, saved):
         cut = 1 + int(len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
         result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        if self._stop is None and len(saved) == cut:
+            return result
         if len(saved) != cut + 1:
-            raise TransactionError("主机停止原保存缺少或增添伴随事实")
+            raise TransactionError("拍摄停止原保存缺少或增添伴随事实")
         activity, occurred_at = self.source(scope.connection, saved[0]["event_id"])
         event = saved[cut]
         expected = {"activity_state": 3}
-        if self._stop.control_elapsed_ns is not None:
+        if self._stop is not None and self._stop.control_elapsed_ns is not None:
             expected["control_elapsed_ns"] = self._stop.control_elapsed_ns
         rows = event["body"]["rows"]
         if ((event["type"], event["reason"]) != (_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)
@@ -3159,7 +3194,7 @@ class _HostTimerStopCommand:
                 or not json_equal(event["body"]["evidence"], {"observation": self._observation(saved[0]["event_id"])})
                 or len(rows) != 1 or rows[0]["table"] != "device_activities" or rows[0]["id"] != activity["id"]
                 or not json_equal(rows[0]["after"]["values"], expected)):
-            raise TransactionError("主机停止重送改变原结果、结束时刻或控制时长")
+            raise TransactionError("拍摄停止重送改变原结果、结束时刻或控制时长")
         return result
 
 
@@ -4032,6 +4067,96 @@ class _ResultPageCompletionCommand:
                            result=activity["id"])
 
 
+class _OutputSetFinalizedCommand:
+    """原完整扫描及可靠归属证明输出范围确定，不判定采集目标。"""
+
+    def __init__(self, finish: AttemptFinish | None, ref: ResultPageRef, *,
+                 occurred_at=None, key=None, action_id=None) -> None:
+        self._finish, self._ref, self._key, self._action_id = finish, ref, key, action_id
+        self._occurred_at = occurred_at if finish is None else finish.occurred_at
+
+    def _source(self, scope):
+        from .result_pages import _load, read_pages, read_page, _TYPE
+        from camctl.operations.result_format import result_document
+
+        ref = self._ref
+        ticket = ref.ticket if self._finish is None else self._finish.ticket
+        if not isinstance(ref, ResultPageRef) or ref.ticket != ticket:
+            raise ConsistencyError("集合确定事实改变原结果尝试")
+        run, attempt, action, activity = _load(scope.connection, ticket)
+        if self._action_id is not None and self._action_id != action["id"]:
+            raise ConsistencyError("独立集合申请不属于原末页的动作")
+        saved = read_page(ref, scope)
+        if self._finish is None:
+            if attempt["result_event_id"] is None:
+                raise ConsistencyError("独立保存集合事实要求原 RESULTS 结果已经可靠保存")
+            actual = saved_outcome(attempt["status"], attempt["effect_state"],
+                attempt["result_json"], attempt["error_json"])
+        else:
+            actual = self._finish.outcome.outcome
+        if (ref.event_id != attempt["result_last_page_event_id"]
+                or saved.page.next_cursor is not None or not saved.page.set_finalized
+                or saved.page.outcome.error is not None
+                or actual.status is not AttemptStatus.SUCCEEDED or actual.error is not None
+                or self._occurred_at != saved.occurred_at
+                or not json_equal(result_document(actual), result_document(saved.page.outcome))):
+            raise ConsistencyError("集合确定事实要求原成功末页、完整集合保证和实际返回时刻")
+        cursor = None
+        while True:
+            pages = read_pages(ticket, cursor, 128, scope)
+            if pages.next_cursor is None:
+                break
+            cursor = pages.next_cursor
+        # 归属只核对原扫描实际新增的成员；历史目录成员不属于本次集合。
+        unresolved = scope.connection.execute(
+            "SELECT 1 FROM history_events h, json_each(h.body_json,'$.evidence.result_page.file_ids') i"
+            " LEFT JOIN device_files f ON f.id=json_extract(i.value,'$[1]')"
+            " WHERE h.id>=? AND h.id<=? AND h.event_type=?"
+            " AND json_extract(h.body_json,'$.evidence.attempt_id')=?"
+            " AND (f.id IS NULL OR f.source_action_id IS NOT ? OR f.ownership_evidence_json IS NULL) LIMIT 1",
+            (attempt["result_first_page_event_id"], ref.event_id, _TYPE, attempt["id"], action["id"])).fetchone()
+        if unresolved is not None:
+            raise ConsistencyError("原完整扫描仍有未确认归属的新增文件")
+        return activity, action, run, attempt
+
+    def plan(self, scope) -> CommandPlan:
+        if self._key is not None:
+            saved = saved_transaction_events(scope.connection, self._key)
+            if saved is not None:
+                return self.reuse(scope, saved)
+        activity, action, run, attempt = self._source(scope)
+        if activity["output_set_finalized_event_id"] is not None:
+            raise ConsistencyError("原集合确定事实已经保存，不能重复承载新输入")
+        allocation = scope.allocate(1)
+        event_id = allocation.first_event_id
+        event = _envelope(event_id, allocation.txn_id, _RESULT_SET_EVENT,
+            _RESULT_OUTPUTS_FINALIZED_REASON,
+            (_update("device_activities", activity["id"],
+                {"output_set_finalized_event_id": None}, {"output_set_finalized_event_id": event_id}),),
+            self._occurred_at, evidence={"attempt_id": attempt["id"],
+                "result_page_event_id": self._ref.event_id})
+        return CommandPlan(events=(event,),
+            owners={("device_activities", activity["id"]): ("action", action["id"])},
+            state_rows={"device_activities": {activity["id"]: activity}, "actions": {action["id"]: action},
+                "operation_runs": {run["id"]: run}, "operation_attempts": {attempt["id"]: attempt}})
+
+    def reuse(self, scope, saved) -> CommandPlan:
+        activity, _, _, attempt = self._source(scope)
+        if len(saved) != 1:
+            raise TransactionError("原独立集合事件组成不同")
+        event = saved[0]
+        rows = event["body"]["rows"]
+        if ((event["type"], event["reason"]) != (_RESULT_SET_EVENT, _RESULT_OUTPUTS_FINALIZED_REASON)
+                or event["occurred_at"] != self._occurred_at
+                or not json_equal(event["body"]["evidence"], {
+                    "attempt_id": attempt["id"], "result_page_event_id": self._ref.event_id})
+                or len(rows) != 1 or rows[0]["table"] != "device_activities"
+                or rows[0]["id"] != activity["id"]
+                or not json_equal(rows[0]["after"]["values"], {"output_set_finalized_event_id": event["event_id"]})):
+            raise TransactionError("集合确定重送改变原可靠末页、活动或时刻")
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True)
+
+
 class _FinishResultCheckCommand:
     """原设备完成观察、适用集合结论与原尝试结果共同提交。
 
@@ -4040,12 +4165,14 @@ class _FinishResultCheckCommand:
     """
 
     def __init__(self, finish: AttemptFinish, confirm: ResultSetSave | None,
-                 key: OperationKey, *, completion_page: ResultPageRef | None = None) -> None:
+                 key: OperationKey, *, completion_page: ResultPageRef | None = None,
+                 finalized_page: ResultPageRef | None = None) -> None:
         self._finish = finish
         self._confirm = confirm
         self._key = key
         self._completion_page = completion_page
-        if confirm is None and completion_page is None:
+        self._finalized_page = finalized_page
+        if confirm is None and completion_page is None and finalized_page is None:
             raise TypeError("结果复合保存必须携带设备完成或集合结论")
 
     def plan(self, scope) -> CommandPlan:
@@ -4061,7 +4188,7 @@ class _FinishResultCheckCommand:
         count = 1 + int(run["status"] in (1, 2)
             and (self._finish.retry_wait or self._finish.run_finish is not None))
         allocation = scope.allocate(count + int(self._completion_page is not None)
-                                    + int(self._confirm is not None))
+                                    + int(self._confirm is not None) + int(self._finalized_page is not None))
         sub = _CompositeScope(scope, allocation.first_event_id)
         finish_plan = FinishAttemptCommand(self._finish, self._key).plan(sub)
         if finish_plan.read_only:
@@ -4073,6 +4200,8 @@ class _FinishResultCheckCommand:
                 self._finish.ticket, self._completion_page).plan(sub)
             plans.append(end_plan)
             ended_activity = end_plan.result
+        if self._finalized_page is not None:
+            plans.append(_OutputSetFinalizedCommand(self._finish, self._finalized_page).plan(sub))
         confirm_plan = None
         if self._confirm is not None:
             confirm_plan = _ResultSetConfirmCommand(self._confirm, self._key,
@@ -4093,7 +4222,7 @@ class _FinishResultCheckCommand:
             and types[1][0] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
         if (not types or types[0][0] != _ATTEMPT_RESULT_EVENT
                 or len(types) != finish_count + int(self._completion_page is not None)
-                                      + int(self._confirm is not None)):
+                                      + int(self._confirm is not None) + int(self._finalized_page is not None)):
             raise TransactionError("操作身份已用于其他事务，不能作为核实结论重送")
         finish_plan = FinishAttemptCommand(
             self._finish, self._key)._reuse(scope, saved[:finish_count])
@@ -4102,6 +4231,10 @@ class _FinishResultCheckCommand:
         if self._completion_page is not None:
             plans.append(_ResultPageCompletionCommand(self._finish.ticket,
                 self._completion_page).reuse(scope, saved[offset:offset + 1]))
+            offset += 1
+        if self._finalized_page is not None:
+            plans.append(_OutputSetFinalizedCommand(self._finish, self._finalized_page).reuse(
+                scope, saved[offset:offset + 1]))
             offset += 1
         confirm_plan = None
         if self._confirm is not None:
@@ -5537,9 +5670,14 @@ def _activity_guard(event, context) -> None:
                     HostTimerStopSave(elapsed)
                 except ValueError as error:
                     raise EventValidationError("主机停止的控制时长非法") from error
-                completed = (set(observation) == {"stop_result_event_id", "control_elapsed_ns"}
+                end_control = (1 if action.get("type") == 2
+                               else action.get("execution_spec_json", {}).get("end_control"))
+                shape = (set(observation) == {"stop_result_event_id"} if end_control == 1
+                    else set(observation) == {"stop_result_event_id", "control_elapsed_ns"} if end_control == 2
+                    else False)
+                completed = (shape
                     and is_json_integer(result_id) and 0 < result_id < event.event_id
-                    and action.get("type") == 3 and action.get("execution_spec_json", {}).get("end_control") == 2
+                    and action.get("type") in (2, 3)
                     and json_equal(row.after.values.get("control_elapsed_ns"), elapsed)
                     and any(attempt.get("result_event_id") == result_id
                         and attempt.get("status") != int(_ATTEMPT_STATUS.RUNNING)
@@ -5550,7 +5688,7 @@ def _activity_guard(event, context) -> None:
                             and run.get("id") == attempt.get("run_id") for run in runs.values())
                         for attempt in context.state_rows.get("operation_attempts", {}).values()))
                 if not completed:
-                    raise EventValidationError("主机停止观察缺少原 STOP 确认或一致控制时长")
+                    raise EventValidationError("拍摄停止观察缺少原 STOP 确认或一致控制时长")
             if not stopped and not completed:
                 raise EventValidationError("活动结束缺少可靠停止或设备完成事实")
         basis_before = row.before.values.get("completion_basis")
@@ -5610,7 +5748,7 @@ def _release_guard(event, context) -> None:
                      and facts.get("dispatch_state") in (1, 4)
                      and facts.get("activity_state") == 1 and facts.get("started_at") is None)
         if (facts.get("ownership_mode") == 2 and not unstarted
-                and (facts.get("baseline_state") != 3 or facts.get("result_set_state") != 3)):
+                and not output_scope_resolved(facts)):
             raise EventValidationError("原输出范围的归属及集合未确定不得释放占用")
 
 
@@ -5629,6 +5767,43 @@ def _result_check_guard(event, context) -> None:
     if len(rows) != 1:
         raise EventValidationError("结果集合核实恰好修改一个设备活动")
     row = rows[0]
+    if event.reason == _RESULT_OUTPUTS_FINALIZED_REASON:
+        from camctl.capture.result_inputs import page_from_outcome, saved_outcome
+
+        if (set(row.before.values) != {"output_set_finalized_event_id"}
+                or row.before.values["output_set_finalized_event_id"] is not None
+                or not json_equal(row.after.values, {"output_set_finalized_event_id": event.event_id})
+                or set(event.evidence) != {"attempt_id", "result_page_event_id"}):
+            raise EventValidationError("独立集合事实只能首次保存本事件引用及原尝试末页")
+        attempt_id, page_id = event.evidence["attempt_id"], event.evidence["result_page_event_id"]
+        if (not is_json_integer(attempt_id) or not is_json_integer(page_id)
+                or not 0 < page_id < event.event_id or attempt_id <= 0):
+            raise EventValidationError("独立集合事实缺少可靠原尝试或先前页引用")
+        attempt = context.state_rows.get("operation_attempts", {}).get(attempt_id, {})
+        run = context.state_rows.get("operation_runs", {}).get(attempt.get("run_id"), {})
+        activity = context.state_rows.get("device_activities", {}).get(row.row_id, {})
+        if (attempt.get("status") != int(_ATTEMPT_STATUS.SUCCEEDED)
+                or attempt.get("error_json") is not None
+                or attempt.get("result_last_page_event_id") != page_id
+                or run.get("kind") != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+                or run.get("activity_id") != row.row_id or run.get("action_id") != activity.get("action_id")):
+            raise EventValidationError("独立集合事实不属于原活动的可靠成功扫描末页")
+        try:
+            ticket = AttemptTicket(attempt["attempt_no"], "result", str(row.row_id),
+                run["responsibility_key"], run["id"])
+            outcome = saved_outcome(attempt["status"], attempt["effect_state"],
+                attempt["result_json"], attempt["error_json"])
+            observation = next(item for item in outcome.observations
+                               if item.type == "result_files_listed" and item.version == 2)
+            from camctl.devices.directory import DirectoryCursor
+            cursor = observation.data["cursor"]
+            page = page_from_outcome(ticket, outcome,
+                cursor=None if cursor is None else DirectoryCursor.from_json(cursor))
+        except (ValueError, KeyError, StopIteration) as error:
+            raise EventValidationError("独立集合事实缺少合法的原 v2 扫描结果") from error
+        if page.next_cursor is not None or not page.set_finalized:
+            raise EventValidationError("独立集合事实要求扫描结束且原集合确定")
+        return
     state_after = row.after.values.get("result_set_state")
     state_before = row.before.values.get("result_set_state")
     if event.reason == _RESULT_BEGIN_REASON:

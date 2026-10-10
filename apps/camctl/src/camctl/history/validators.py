@@ -429,9 +429,9 @@ def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
     成员白名单来自分支登记；此处只核对已出现成员的取值类型。
     布尔不是整数编号；驱动依据必须是结构化对象，成员顺序无关。
     """
-    if member == "attempt_id":
+    if member in ("attempt_id", "result_page_event_id"):
         if not is_json_integer(value) or value <= 0:
-            _fail(f"事件 {event_id} 的 evidence.attempt_id 必须是正整数")
+            _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
     elif member == "input_key":
         if (not isinstance(value, str) or len(value) != 32
                 or any(char not in "0123456789abcdef" for char in value)):

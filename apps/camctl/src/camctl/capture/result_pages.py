@@ -39,6 +39,21 @@ class ResultPageRef:
 
 
 @dataclass(frozen=True)
+class OutputSetFinalizationSave:
+    """原 RESULTS 已保存后，独立交接其可靠末页的文件范围事实。"""
+
+    action_id: int
+    page: ResultPageRef
+    occurred_at: int
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+        if not isinstance(self.page, ResultPageRef):
+            raise TypeError("独立集合事实要求原完整末页引用")
+
+
+@dataclass(frozen=True)
 class SavedResultPage:
     ref: ResultPageRef
     page: ResultPage

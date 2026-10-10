@@ -50,7 +50,7 @@ from camctl.capture.result_inputs import (
 from camctl.capture.result_scans import (
     PendingResultScan, SavedResultEntries, SourceResultEntries, RegisteredSourceFiles, advance_result_scan,
 )
-from camctl.capture.result_pages import ResultPageRef
+from camctl.capture.result_pages import ResultPageRef, OutputSetFinalizationSave
 from camctl.capture.photo import (
     CaptureAssessment,
     PhotoCompletion,
@@ -264,6 +264,8 @@ class PendingCallResult:
     completion_page: ResultPageRef | None = None
     result_registered_files: Mapping[str, tuple[CaptureFile, int]] | None = None
     host_timer_stop: HostTimerStopSave | None = None
+    finalized_page: ResultPageRef | None = None
+    capture_stop: bool = False
 
 
 # 启动装配和既有调用方使用同一个公共责任集合。
@@ -330,10 +332,10 @@ class PendingCaptureCompletion:
 
 @dataclass(frozen=True)
 class PendingResultCheckClose:
-    """有限核实耗尽的完整决定；保存恢复沿用原 key 和 T1。"""
+    """结果核实收尾的完整申请；保存恢复沿用原 key 和时刻。"""
 
     key: OperationKey
-    request: ResultSetSave | ResultRunClose
+    request: ResultSetSave | ResultRunClose | OutputSetFinalizationSave
 
 
 def resume_result_check_closes(
@@ -341,24 +343,27 @@ def resume_result_check_closes(
     action_id: int | None = None, capture: CaptureRepository | None = None,
     retry_gate: RetryWaitGate | None = None,
 ) -> None:
-    """只核已形成的耗尽申请，不取得新的设备或业务资格。"""
+    """只核已形成的收尾申请，不取得新的设备或业务资格。"""
     repository = CaptureRepository() if capture is None else capture
     for identity, pending in tuple(pending_result_closes.items()):
         if action_id is not None and identity != action_id:
             continue
         if pending.request.action_id != identity:
-            raise ConsistencyError("原核实耗尽申请与所属动作不一致")
+            raise ConsistencyError("原核实收尾申请与所属动作不一致")
         if isinstance(pending.request, ResultSetSave):
             receipt = repository.close_result_check_unconfirmed(pending.request, pending.key, owned)
             complete = receipt.kind is DbOutcomeKind.COMPLETED and receipt.value is not None
         elif isinstance(pending.request, ResultRunClose):
             receipt = repository.close_unconfirmed_result_run(pending.request, pending.key, owned)
             complete = receipt.kind is DbOutcomeKind.COMPLETED
+        elif isinstance(pending.request, OutputSetFinalizationSave):
+            receipt = repository.finalize_output_set(pending.request, pending.key, owned)
+            complete = receipt.kind is DbOutcomeKind.COMPLETED
         else:
-            raise ConsistencyError("原核实耗尽申请类型无效")
+            raise ConsistencyError("原核实收尾申请类型无效")
         if not complete:
-            raise ConsistencyError(f"原核实耗尽申请未可靠保存，完整申请仍持有: {receipt.error}")
-        if retry_gate is not None:
+            raise ConsistencyError(f"原核实收尾申请未可靠保存，完整申请仍持有: {receipt.error}")
+        if retry_gate is not None and not isinstance(pending.request, OutputSetFinalizationSave):
             activity = _activity_id_of_connection(owned.connection, identity)
             retry_gate.cleared(f"results/{activity}")
         del pending_result_closes[identity]
@@ -879,7 +884,8 @@ class CaptureRuntime(_FileObservationSaves):
                confirmation_anchor_ns: int | None = None,
                returned_ns: int | None = None,
                canceled_unstarted: bool = False,
-               host_timer_stop: HostTimerStopSave | None = None) -> None:
+               host_timer_stop: HostTimerStopSave | None = None,
+               capture_stop: bool = False) -> None:
         """先持有完整实际结果，再保存原尝试及其适用的伴随事实。
 
         保存重试等待使用调用返回时的单调读数；流程结束清除。
@@ -900,7 +906,7 @@ class CaptureRuntime(_FileObservationSaves):
             expiration=expiration, confirmation_anchor_ns=confirmation_anchor_ns,
             returned_ns=self.monotonic_ns() if returned_ns is None else returned_ns,
             action_failure=action_failure, canceled_unstarted=canceled_unstarted,
-            host_timer_stop=host_timer_stop)
+            host_timer_stop=host_timer_stop, capture_stop=capture_stop)
         self.pending_start_results[identity] = pending
         self._save_call_result(identity, pending)
 
@@ -915,12 +921,18 @@ class CaptureRuntime(_FileObservationSaves):
         if pending.host_timer_stop is not None:
             return self.capture.finish_host_timer_stop(
                 pending.finish, pending.host_timer_stop, pending.key, self.owned)
-        if pending.result_set is not None or pending.completion_page is not None:
+        if pending.capture_stop:
+            return self.capture.finish_capture_stop(pending.finish, pending.key, self.owned)
+        if (pending.result_set is not None or pending.completion_page is not None
+                or pending.finalized_page is not None):
             if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
                 raise ConsistencyError("集合结论必须使用原 RESULTS 责任")
+            options = {"completion_page": pending.completion_page}
+            if pending.finalized_page is not None:
+                options["finalized_page"] = pending.finalized_page
             return self.capture.finish_result_check(
                 pending.finish, pending.result_set, pending.key, self.owned,
-                completion_page=pending.completion_page)
+                **options)
         is_start = run["kind"] == int(_RUN_KIND.START) or (
             run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
             and run["query_purpose"] == int(_QUERY_PURPOSE.START_CONFIRMATION))
@@ -1901,7 +1913,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
                 host_stop = HostTimerStopSave(elapsed)
             runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED,
                            occurred_at=returned_at, returned_ns=returned_ns,
-                           host_timer_stop=host_stop)
+                           host_timer_stop=host_stop, capture_stop=True)
         else:
             runtime.finish(ticket, call, retry_wait=True,
                            occurred_at=returned_at, returned_ns=returned_ns)
@@ -3138,10 +3150,12 @@ async def _advance_recording_outcome(
             if original is None:
                 raise ConsistencyError("完整录像文件缺少原结果核实责任")
             results_run_id = original.run_id
-        if ticket is not None:
-            # 承载结论的轮次以可靠结果收场核实责任。
-            _finish_listing_result(context, listing,
-                           end_run=RunOutcome.SUCCEEDED)
+        # 原调用与文件范围独立闭合；CLOSED 沿原末页补齐范围事实。
+        _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED,
+                               finalize_output_set=True)
+        if row_facts(context.owned.connection, "device_activities",
+                _activity_id_of(context, action_id))["activity_state"] == 3:
+            _release_occupancy(context, action_id)
         if result.kind.value == "succeeded" and output_failure is None:
             _finish_capture(
                 context, action_id, entries, FileKind.VIDEO,
@@ -3242,7 +3256,8 @@ async def _close_host_timer_failed(context, action_id, reason):
         await _finish_timelapse_conclusion(context, action_id)
     elif listing.outcome.error is None and (assessment.is_complete or assessment.explicitly_unmet):
         command = _unconfirmed_result_set(context, action_id, reason, listing.occurred_at)
-        _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED, result_set=command)
+        _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED, result_set=command,
+                               finalize_output_set=True)
         await _finish_timelapse_conclusion(context, action_id)
     else:
         _finish_listing_result(context, listing, retry_wait=True)
@@ -3427,6 +3442,9 @@ async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> N
     if action["type"] == 3:
         await _close_canceled_timelapse(context, action_id)
     else:
+        if row_facts(context.owned.connection, "device_activities",
+                _activity_id_of(context, action_id))["activity_state"] == 3:
+            _release_occupancy(context, action_id)
         _finish_canceled_capture(context, action_id)
 
 
@@ -3452,8 +3470,9 @@ async def _close_canceled_timelapse(
         _close_check_unconfirmed(context, action_id)
         listing = _saved_result_listing(context, action_id)
     entries = listing.entries
-    _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED)
     registered = _register_listing(context, action_id, listing)
+    _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED,
+                           finalize_output_set=True)
     drafts = _catalog_drafts(registered, entries)
     activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
     if activity["activity_state"] == 3:
@@ -3801,9 +3820,22 @@ def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRou
 
 def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
                            retry_wait: bool = False, end_run: RunOutcome | None = None,
-                           result_set: ResultSetSave | None = None) -> None:
+                           result_set: ResultSetSave | None = None,
+                           finalize_output_set: bool = False) -> None:
     """首次固定真实处置后沿原 key 保存；已保存的 CLOSED 输入不再改写。"""
     if listing.already_saved:
+        if finalize_output_set and _listing_finalized(listing):
+            ticket = listing.ticket
+            activity = row_facts(runtime.owned.connection, "device_activities", int(ticket.target_id))
+            if activity["output_set_finalized_event_id"] is None:
+                last = runtime.capture.read_last_result_page(ticket, runtime.owned)
+                if last is None:
+                    raise ConsistencyError("原完整集合缺少可靠末页")
+                action_id = activity["action_id"]
+                if action_id not in runtime.pending_result_closes:
+                    runtime.pending_result_closes[action_id] = PendingResultCheckClose(
+                        new_operation_key(), OutputSetFinalizationSave(action_id, last.ref, last.occurred_at))
+                runtime.resume_result_check_closes(action_id)
         return
     ticket = listing.ticket
     identity = (ticket.run_id, ticket.attempt_id)
@@ -3813,14 +3845,24 @@ def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
     finish = replace(pending.finish, retry_wait=retry_wait,
                      run_finish=None if end_run is None else RunFinish(end_run))
     completion_page = pending.completion_page
+    finalized_page = pending.finalized_page
+    if finalize_output_set and _listing_finalized(listing):
+        activity = row_facts(runtime.owned.connection, "device_activities", int(ticket.target_id))
+        if activity["output_set_finalized_event_id"] is None:
+            last = runtime.capture.read_last_result_page(ticket, runtime.owned)
+            if last is None:
+                raise ConsistencyError("完整集合缺少原可靠末页")
+            finalized_page = last.ref
     if not pending.result_disposition_ready and listing.completion_page is not None:
         activity = row_facts(runtime.owned.connection, "device_activities", int(ticket.target_id))
         if activity["activity_state"] != 3:
             completion_page = listing.completion_page
-    if pending.result_disposition_ready and (pending.finish != finish or pending.result_set != result_set):
+    if pending.result_disposition_ready and (pending.finish != finish or pending.result_set != result_set
+            or pending.finalized_page != finalized_page):
         raise ConsistencyError("RESULTS 原 key 的已确定处置不可改变")
     pending = replace(pending, finish=finish, result_set=result_set,
-                      completion_page=completion_page, result_disposition_ready=True)
+                      completion_page=completion_page, finalized_page=finalized_page,
+                      result_disposition_ready=True)
     runtime.pending_start_results[identity] = pending
     runtime.save_held_result(ticket)
 
