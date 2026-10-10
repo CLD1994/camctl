@@ -145,6 +145,7 @@ export function Field({
           >
             {unsupportedChoice ? (
               <textarea
+                rows={1}
                 aria-label={label}
                 readOnly={pendingBlocks(content, path)}
                 value={
@@ -252,6 +253,7 @@ export function Field({
               />
             ) : (
               <textarea
+                rows={1}
                 aria-label={label}
                 readOnly={pendingBlocks(content, path)}
                 value={

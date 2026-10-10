@@ -661,6 +661,7 @@ function PendingInput({
         {path}
         <ValidationControl path={path} pending>
           <textarea
+            rows={1}
             aria-label={`未完成输入 ${path}`}
             value={value.text}
             onChange={(e) =>
