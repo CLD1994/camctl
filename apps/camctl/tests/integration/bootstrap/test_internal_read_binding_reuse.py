@@ -11,6 +11,7 @@ from camctl.capture.media import RecordingFailure
 from camctl.capture.media_flow import run_recording_media
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.capture.timelapse import CaptureWaitConfig
+from camctl.contracts.enums import enum_for
 from camctl.devices.drivers.registry import DriverRegistry
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.persistence.models import DbOutcomeKind
@@ -91,7 +92,18 @@ async def test_internal_binding_unknown_commit_reuses_original_nulls_and_slot(tm
             "SELECT event_type FROM history_events WHERE transaction_id=(SELECT id FROM history_transactions WHERE operation_key=?) ORDER BY id",
             (str(saved[0][1]),)).fetchall()
         if preclosed:
-            assert types == [(8,), (9,), (10,)]
+            assert types == [(8,), (20,), (9,), (10,)]
+            assert flow.owned.connection.execute(
+                "SELECT o.source_action_id,o.kind,o.device_file_id,o.intermediate_file_id,f.size_bytes"
+                " FROM outputs o JOIN device_files f ON f.id=o.device_file_id").fetchall() == [(
+                    1, int(enum_for("outputs.kind").ORIGINAL),
+                    flow.owned.connection.execute(
+                        "SELECT source_device_file_id FROM recording_processing WHERE id=1").fetchone()[0],
+                    None, len(_MEDIA_CONTENT))]
+            assert flow.owned.connection.execute(
+                "SELECT e.transaction_id FROM outputs o JOIN history_events e ON e.id=o.created_event_id").fetchall() == [(
+                    flow.owned.connection.execute(
+                        "SELECT id FROM history_transactions WHERE operation_key=?", (str(saved[0][1]),)).fetchone()[0],)]
             import json
             assert saved[0][0].responsibility_keys == ("results/1",)
             body = json.loads(flow.owned.connection.execute(
