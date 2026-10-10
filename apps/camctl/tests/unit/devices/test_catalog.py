@@ -8,8 +8,15 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from dataclasses import replace
+from unittest.mock import create_autospec
 
 import pytest
+from video_estimate_helpers import (
+    catalog_for_capabilities,
+    record_capability,
+    record_catalog,
+)
 
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.devices.catalog import (
@@ -186,3 +193,94 @@ def test_nested_default_annotations_follow_effective_object_default():
     assert selected.schema["properties"]["payload"]["const"] == {"default":17}
     assert apply_defaults({"type":"single_shot"}, selected.defaults)["settings"] == {"quality":2}
     assert apply_defaults({"type":"single_shot","settings":{}}, selected.defaults)["settings"] == {}
+
+
+class TestVideoEstimateMetadata:
+    @pytest.fixture(autouse=True)
+    def isolate_schema_validation(self, monkeypatch):
+        from camctl.devices import catalog as module
+
+        monkeypatch.setattr(module, "validate_parameter_schema",
+                            create_autospec(module.validate_parameter_schema))
+
+    def test_describe_exports_decimal_estimate(self):
+        document = record_catalog({
+            "bitrate_mbps": Decimal("130.125"),
+            "duration": {"method": "direct", "seconds": {
+                "source": "constant", "value": 60,
+            }},
+        }).describe_document()
+        parameter = document["devices"][0]["actions"][0]["parameter_types"][0]
+        assert parameter["video_size_estimate"] == {
+            "bitrate_mbps": Decimal("130.125"),
+            "duration": {"method": "direct", "seconds": {
+                "source": "constant", "value": 60,
+            }},
+        }
+        assert "video_size_estimate" not in parameter["schema"]["properties"]
+
+    def test_undeclared_estimate_is_omitted(self):
+        parameter = record_catalog(None).describe_document()[
+            "devices"][0]["actions"][0]["parameter_types"][0]
+        assert "video_size_estimate" not in parameter
+
+    def test_exported_nested_estimate_does_not_modify_source(self):
+        estimate = {
+            "bitrate_mbps": {"by": "/mode", "values": {"high": 130}},
+            "duration": {"method": "direct", "seconds": {
+                "source": "constant", "value": 60,
+            }},
+        }
+        catalog = record_catalog(estimate)
+        document = catalog.describe_document()
+        exported = document["devices"][0]["actions"][0]["parameter_types"][0]
+        exported["video_size_estimate"]["bitrate_mbps"]["values"]["high"] = 1
+        exported["video_size_estimate"]["duration"]["seconds"]["value"] = 1
+        assert estimate["bitrate_mbps"]["values"]["high"] == 130
+        assert estimate["duration"]["seconds"]["value"] == 60
+        fresh = catalog.describe_document()["devices"][0]["actions"][0]["parameter_types"][0]
+        assert fresh["video_size_estimate"] == estimate
+
+    def test_execution_definition_does_not_include_estimate(self):
+        capability = replace(record_capability({
+            "bitrate_mbps": 130, "duration": {"method": "direct", "seconds": {
+                "source": "constant", "value": 60,
+            }},
+        }), defaults={"quality": 5})
+        capability.schema["properties"]["quality"] = {"type": "integer"}
+        catalog = catalog_for_capabilities(capability)
+        selected = catalog.parameter_definition("cam-1", "camera_record", "estimate_record")
+        assert selected is not None
+        assert set(vars(selected)) == {"schema", "defaults", "preview_supported", "task_factory"}
+        assert selected.defaults == {"quality": 5}
+        assert apply_defaults({"type": "estimate_record"}, selected.defaults) == {
+            "type": "estimate_record", "quality": 5,
+        }
+        assert selected.task_factory is capability.task_factory
+        assert "video_size_estimate" not in selected.schema
+
+    @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
+    @pytest.mark.parametrize("task_factory", [None, "not_callable"])
+    def test_estimate_does_not_make_candidate_executable(self, action_type, task_factory):
+        candidate = replace(record_capability({
+            "bitrate_mbps": 130, "duration": {"method": "direct", "seconds": {
+                "source": "constant", "value": 60,
+            }},
+        }), action_type=action_type, task_factory=task_factory)
+        catalog = catalog_for_capabilities(candidate)
+        assert catalog.describe_document() == {"devices": [{
+            "device_id": "cam-1", "driver_id": "estimate_demo", "actions": [],
+        }]}
+        assert not catalog.device_supports("cam-1", action_type)
+        assert catalog.parameter_definition("cam-1", action_type, "estimate_record") is None
+
+    def test_legacy_positional_definition_omits_estimate(self):
+        original = record_capability(None)
+        legacy = ActionCapability(
+            original.action_type, original.parameter_type, original.name,
+            original.description, original.preview_supported, original.schema,
+            original.defaults, original.task_factory,
+        )
+        parameter = catalog_for_capabilities(legacy).describe_document()[
+            "devices"][0]["actions"][0]["parameter_types"][0]
+        assert "video_size_estimate" not in parameter

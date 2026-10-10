@@ -20,7 +20,7 @@ apps/camctl 的 Python 包、命令入口和业务模块按后文阶段推进。
 
 Action6 与 OSMO 360 II 的录像和原生延时摄影由[相机接入实施计划](2026-10-10-camctl-real-camera-demo.md#既有任务归属与接入增量)编排。该计划消费 devices D1—D5、capture C1—C6、scheduling Q4/Q6、结果核实和错误专项、integration I5 及 bootstrap B7 的既有交付，补齐具体驱动、目录基准生产路径、正常结果收尾和双相机四条软件链。ARM Linux 真机演示的目标是通过 C host 完成 Action6 普通录像、独立取回、文件领取及报告确认；其能力启用门禁和后续相机、延时任务的接入条件由[接入计划 T9](2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。原任务细项状态仍由对应责任计划维护。
 
-2026-10-11 用户已告知客户端开发分支准备好了。当前[清理查询结果保存与恢复阶段](2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)完成验证和提交后停止；下一项是合并客户端分支，核对客户端、camctl 和 C host 的公共协议，并按实际差异决定是否重新构建发行包，随后恢复 Action6 ARM 真机演示。分支名称、提交身份及协议差异尚未提供，尚未合并或实际恢复演示；已取得的 ARM 部署证据和接续步骤由[挂起状态与恢复入口](2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)保留。
+2026-10-11 客户端分支 `origin/codex/client-spec-sync` 已通过 `106f93e` 合并。[视频大小估算计划](2026-10-10-video-size-estimate.md#linux-实施记录2026-10-11)已完成 Python 同源能力导出、包内公共 Schema 及客户端软件交接验收；下一步重新交付 camctl 发行包和能力说明，再接续 Action6 ARM 真机验收。已取得的 ARM 部署证据和现场核对步骤由[挂起状态与恢复入口](2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)保留，实际拍摄验收尚未恢复。[清理查询结果保存与恢复计划](2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)中尚未完成的责任继续按该计划跟踪。
 
 公共计划、动作、设备状态和报告模型保持设备无关。第一版 MCU 仅遵守[接口预留与不支持动作的受理规则](../../architecture/mcu-actions.md)，不增加实际通信工作或运行依赖。
 

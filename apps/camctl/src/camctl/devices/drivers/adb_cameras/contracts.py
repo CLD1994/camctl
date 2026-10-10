@@ -82,6 +82,8 @@ class CameraContract:
                     if callable(factory) else capability.name,
                 description=((capability.description.replace("调用响应待设备核实。", "")
                               if capability.action_type == "camera_record" else
-                              "间隔、持续时间、产物和曝光须符合 Schema 列出的完整组合。")
+                              capability.description.replace(
+                                  "仅接受资料给出的完整组合；正常结束及文件写完依据待设备核实。",
+                                  "间隔、持续时间、产物和曝光须符合 Schema 列出的完整组合。"))
                              if callable(factory) else capability.description)))
         return tuple(capabilities)

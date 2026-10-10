@@ -46,6 +46,7 @@ class ActionCapability:
     schema: Mapping[str, Any]
     defaults: Mapping[str, Any]
     task_factory: CaptureTaskFactory | None = None
+    video_size_estimate: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,8 @@ class Catalog:
                             "description": parameter.description,
                             "preview_supported": parameter.preview_supported,
                             "schema": dict(self.parameter_definition(device_id, action_type, parameter.parameter_type).schema),
+                            **({"video_size_estimate": deepcopy(parameter.video_size_estimate)}
+                               if parameter.video_size_estimate is not None else {}),
                         } for parameter in capabilities
                     ],
                 }

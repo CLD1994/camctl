@@ -187,7 +187,7 @@ class Deployment:
         return target
 
     def run_client_driver(self, *args: str, output: Path) -> dict:
-        """运行客户端真实服务驱动（export/import），返回输出凭据。"""
+        """运行客户端真实服务驱动，返回导出、导入或估算凭据。"""
         completed = subprocess.run(
             ["node", "--import", "tsx", str(_ROOT / "client_driver.ts"), *args,
              str(output)],
@@ -626,6 +626,7 @@ def _stub_definition(spec: dict):
     from decimal import Decimal
 
     from camctl.devices.catalog import ActionCapability, DriverDefinition
+    from camctl.contracts.json_values import parse_exact_json
     from camctl.devices.tasks import (
         CaptureTask,
         CompletionMode,
@@ -639,14 +640,16 @@ def _stub_definition(spec: dict):
     def record_task(params):
         return CaptureTask(
             "camera_record",
-            target_duration_s=Decimal(str(spec.get("record_duration_s", 1.0))),
+            target_duration_s=params.get(
+                "duration_s", Decimal(str(spec.get("record_duration_s", 1.0)))),
             stop_supported=True,
         )
 
     def timelapse_task(params):
         return CaptureTask(
             "camera_timelapse",
-            target_duration_s=Decimal(str(spec.get("timelapse_duration_s", 3.0))),
+            target_duration_s=params.get(
+                "capture_duration_s", Decimal(str(spec.get("timelapse_duration_s", 3.0)))),
             duration_based=True,
             wait_after_send=True,
             end_control=EndControl.DEVICE,
@@ -669,6 +672,14 @@ def _stub_definition(spec: dict):
     record_schema["properties"]["type"]["const"] = "video"
     timelapse_schema = json.loads(json.dumps(schema))
     timelapse_schema["properties"]["type"]["const"] = "timelapse"
+    # 估算文本独立精确解析，避免剧本的普通 JSON 解析先舍入数字。
+    estimate_texts = spec.get("video_size_estimate_json", {})
+    estimates = {kind: parse_exact_json(text) for kind, text in estimate_texts.items()}
+    schemas = spec.get("parameter_schema_json", {})
+    if "camera_record" in schemas:
+        record_schema = parse_exact_json(schemas["camera_record"])
+    if "camera_timelapse" in schemas:
+        timelapse_schema = parse_exact_json(schemas["camera_timelapse"])
     return DriverDefinition(
         driver_id=spec["driver_id"],
         actions={
@@ -683,12 +694,14 @@ def _stub_definition(spec: dict):
                 action_type="camera_record", parameter_type="video",
                 name="录像", description="跨组件替身的停止控制录像",
                 preview_supported=False, schema=record_schema, defaults={},
-                task_factory=record_task),),
+                task_factory=record_task,
+                video_size_estimate=estimates.get("camera_record")),),
             "camera_timelapse": (ActionCapability(
                 action_type="camera_timelapse", parameter_type="timelapse",
                 name="延时摄影", description="跨组件替身的定时结束延时任务",
                 preview_supported=False, schema=timelapse_schema, defaults={},
-                task_factory=timelapse_task),),
+                task_factory=timelapse_task,
+                video_size_estimate=estimates.get("camera_timelapse")),),
         },
     )
 

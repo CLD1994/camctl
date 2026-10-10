@@ -204,3 +204,29 @@ def test_describe_encoding_propagates_validation_failure(monkeypatch):
     monkeypatch.setattr(cli, "validate_document", reject)
     with pytest.raises(SchemaValidationError):
         cli.encode_describe_document({"devices":[]})
+
+
+def test_describe_invalid_estimate_keeps_stdout_empty(monkeypatch):
+    from camctl import cli
+    from camctl.bootstrap import application
+    from camctl.contracts.schemas import SchemaValidationError
+    from camctl.devices import catalog
+
+    document = {"devices": [{"device_id": "cam-1", "driver_id": "estimate_demo", "actions": [{
+        "type": "camera_record", "parameter_types": [{
+            "type": "estimate_record", "name": "演示", "description": "虚构参考值",
+            "preview_supported": False, "schema": {}, "video_size_estimate": {},
+        }],
+    }]}]}
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: cls("/unused")))
+    monkeypatch.setattr(application.ConfigAdapter, "load", create_autospec(application.ConfigAdapter.load))
+    monkeypatch.setattr(catalog, "build_catalog", create_autospec(catalog.build_catalog))
+    monkeypatch.setattr(catalog, "default_driver_definitions", create_autospec(catalog.default_driver_definitions))
+    monkeypatch.setattr(application, "describe", create_autospec(application.describe, return_value=document))
+    monkeypatch.setattr(cli, "validate_document", create_autospec(cli.validate_document,
+        side_effect=SchemaValidationError("缺少 video_size_estimate/bitrate_mbps")))
+    out, err = StringIO(), StringIO()
+    assert cli.main(["describe"], stdout=out, stderr=err) == 1
+    assert out.getvalue() == ""
+    assert "video_size_estimate" in err.getvalue()
+    assert document["devices"][0]["actions"][0]["parameter_types"][0]["video_size_estimate"] == {}

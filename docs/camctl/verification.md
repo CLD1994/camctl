@@ -355,6 +355,38 @@ bootstrap 的两个失败分区涉及已保存未知查询、取消生效及当�
 
 本次结果不证明相机、ARM64 运行、性能或物理断电行为。QUERY-only 的共同建档、取消与限制转换、成员及伴随仓储的完整原键证明和专项历史回放仍由[剩余责任](../superpowers/plans/2026-10-10-camctl-cleanup-query-result-closure.md#尚未完成的前置与核验)跟踪，完整清理计划及第一版均未完成。阶段提交后停止；下一项是[合并客户端分支并恢复 Action6 真机演示](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)。
 
+## 视频大小估算的协议同步验证（2026-10-11）
+
+本次在客户端分支合并后的 Linux x86_64 容器验证 Python 同源导出及跨组件交接。环境为 Python 3.11.16、SQLite 3.53.1、uv 0.12.10、Node.js 24.20.0、pnpm 12.3.4。Python 使用 `apps/camctl/.venv`；每个集成目录或专项分别独占、顺序运行。客户端命令设置 `VITEST_MAX_WORKERS=2`，单元与集成分别执行。
+
+所有 Python 命令均从仓库根使用以下前缀，后接表中测试范围及 `-q`：
+
+```bash
+UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 pytest
+```
+
+| 范围 | 命令中的测试路径或检查入口 | 实际结果 |
+| --- | --- | --- |
+| Python 全部单元 | `apps/camctl/tests/unit` | 4723 项通过、1 项跳过，12.96 秒；保留两条既有的同步测试 asyncio 标记警告。 |
+| 公共格式及精确编码 | `apps/camctl/tests/integration/contracts` | 438 项通过，4.22 秒；其中视频估算共同原始文本 246 项按 `encode_valid` 独立核验。 |
+| 驱动及同源目录 | `apps/camctl/tests/integration/devices` | 131 项通过，2.38 秒；包括新增的真实参数关联、整份失败及精确数值分区。 |
+| CLI 与安装资源 | `apps/camctl/tests/integration/bootstrap/test_command_output.py apps/camctl/tests/integration/bootstrap/test_package.py` | 6 项通过，1.20 秒；独立安装 wheel 内的全部登记资源与根权威来源逐字节一致。 |
+| 视频估算跨组件闭环 | `tests/integration/test_video_size_estimate.py` | 12 项通过，27.82 秒。 |
+| 安装版内置驱动与 C host | `tests/integration/test_action6_builtin_demo_roundtrip.py` | 1 项通过，31.82 秒；独立安装的 wheel 导出 130 Mbps 假定说明，经真实 C host 完成录像、取回、领取、客户端导入和 ACK 软件链。 |
+| 公共协议检查器 | `node scripts/check-protocol.mjs`、`node --test scripts/check-protocol.test.mjs` | 格式检查通过，247 项脚本测试通过；结构检查与真实编码／加载分开验收。 |
+| 客户端全部单元 | `pnpm --dir apps/client run test:unit` | 1864 项通过，36 个文件通过，13.38 秒。 |
+| 客户端全部集成与浏览器 | `pnpm --dir apps/client run test:integration` | 972 项通过，29 个文件通过，266.06 秒；前置 `tsc --noEmit` 与 Vite 构建通过。 |
+
+构建产物的主 JavaScript 包为 758.64 kB，日志保留超过 500 kB 的体积警告以及 `@base-ui/react` 依赖中 `use client` 模块指令的提示。构建与测试均成功，不能将这次结果描述为无警告。
+
+跨组件闭环使用同源虚构驱动，经真实 `describe`、客户端 Application、HTTP 草稿和能力状态、精确解析、估算与计划导出，再由真实 CLI 受理执行并发布报告，客户端导入报告并保存累计确认。录像的一秒虚构参考值为 16,250,000 字节；延时实际执行三秒采集，其估算成片为 0.1 秒和 2,187,500 字节。两条报告都保存替身产物的实际 8192 字节，不携带估算资料；生效参数及执行定义继续使用原拍摄要求。
+
+精确数字分区包括 `130.125` Mbps、数学整数帧数 `240`／`240.0`／`2.4e2`，以及不能被舍入为整数的 `1.00000000000000000001`。非法声明使真实 `describe` 退出 1 且 stdout 为空；客户端重新加载同一非法内容时保留此前完整说明与诊断。合法的缺失元数据、查表未覆盖及可选引用省略仍能导出计划。估算前后的既有草稿版本和内容保持一致。
+
+内置相机使用在任务说明中标注的固定假定参考值，数值与说明由同源定义生成。当前可执行的 Action6 录像声明 130 Mbps；元数据不启用缺少任务工厂的候选类型，也不改变 START／STOP 含义及五秒文件完成运行假设。实际码率、文件完成与 ARM 主机真实业务链仍按[演示接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)核验。
+
+静态复核通过：本地文件链接 3883 项，修改文档的标题及显式锚点 263 项，Python 3.11 AST 检查 12 个修改文件；`git diff --check` 无空白错误。独立审查核对同源声明、候选过滤、精确 HTTP 草稿、导出及报告边界，没有未解决的阻断问题。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。

@@ -171,6 +171,13 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
     assert [(device["device_id"], device["driver_id"]) for device in capabilities["devices"]] == [
         ("action6", "dji-action6")]
     assert [action["type"] for action in capabilities["devices"][0]["actions"]] == ["camera_record"]
+    parameter = capabilities["devices"][0]["actions"][0]["parameter_types"][0]
+    assert parameter["video_size_estimate"] == {
+        "bitrate_mbps": 130,
+        "duration": {"method": "direct",
+                     "seconds": {"source": "parameter", "path": "/duration_s"}},
+    }
+    assert "130 Mbps" in parameter["description"] and "假定" in parameter["description"]
     capabilities_path = deployment.root / "capabilities.json"
     capabilities_path.write_text(described.stdout)
     client_store = deployment.root / "client-store"

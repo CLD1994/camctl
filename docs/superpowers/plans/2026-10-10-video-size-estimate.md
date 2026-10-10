@@ -21,7 +21,7 @@
 - 估算不写入计划、`effective_params`、报告或客户端持久化资料，不触发草稿保存，不改变自动预览开关、资料和派生动作。已有用户编辑、保存和能力协调照常执行。
 - 重载正在进行或结果尚待核实时撤下估算数值。请求结束后的新状态观察成功返回时，根据实际启用说明和当前内容恢复；观察失败继续暂停。
 - Python 验证使用部署版本 3.11。单元测试隔离真实文件、网络、数据库、子进程和用户全局状态；涉及真实协作者的测试放在集成层。Python 组件集成目录分别前台、独占、顺序运行。
-- 硬件码率统计口径、有效档位和成片关系仍需设备接入核实。本计划使用明确虚构的驱动与能力资料验收，不为真实候选驱动填入未经核实的数字。
+- 硬件码率统计口径、有效档位和成片关系仍需设备接入核实。真实驱动可以使用明确标注的固定假定参考码率，后续由厂商核实后调整同源定义；估算不成为设备观察或文件大小保证。软件交接仍使用明确虚构的驱动与能力资料验收。
 - 各步骤的文件划分、类型、辅助函数和提交拆分是实现建议。实施者可以依据实际数据流调整，但须同步更新调用者、测试和计划中的衔接说明；行为契约、失败语义和验收条件必须保持一致。
 
 ## 评审重点
@@ -61,7 +61,7 @@ $env:UV_PROJECT_ENVIRONMENT = Join-Path (Get-Location) 'apps/camctl/.venv311'
 
 Python 同源导出与跨组件闭环由 Linux 开发环境中的 Agent 实施，负责任务 2，以及任务 5 中的 Python 部署替身、真实 CLI 交接、受理、执行、报告和对应文档门禁。Python 使用部署版本 3.11，并遵守测试目录的独占、顺序运行规则。客户端完成状态与跨组件完成状态分别记录。
 
-客户端任务 3、任务 4及任务 5中的客户端责任文档已经完成独立评审，客户端整体评审通过。客户端完整门禁在 `VITEST_MAX_WORKERS=2` 的命令环境下通过，实际结果与并发范围见[客户端验证记录](../../client/verification.md#2026-10-10-视频大小估算验证)。任务 2及任务 5中的 Linux 实施、部署和跨组件验收继续保留待办。
+客户端任务 3、任务 4及任务 5中的客户端责任文档已经完成独立评审，客户端整体评审通过。客户端完整门禁在 `VITEST_MAX_WORKERS=2` 的命令环境下通过，实际结果与并发范围见[客户端验证记录](../../client/verification.md#2026-10-10-视频大小估算验证)。任务 2及任务 5中的 Linux 同源导出、安装包资源和跨组件软件验收已完成，证据见[协议同步验证](../../camctl/verification.md#视频大小估算的协议同步验证2026-10-11)。ARM 现场安装更新与真实相机验收由[真机演示计划](2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续跟踪。
 
 ## 文件责任与建议接口
 
@@ -285,7 +285,7 @@ for (const entry of estimateCases) {
 
 **建议文件：** 修改 `apps/camctl/src/camctl/devices/catalog.py`、`apps/camctl/tests/unit/devices/test_catalog.py`、`apps/camctl/tests/unit/bootstrap/test_command_output.py`、`apps/camctl/tests/integration/contracts/test_schemas.py`、`apps/camctl/tests/integration/devices/test_catalog.py`、`apps/camctl/tests/integration/bootstrap/test_command_output.py`、`docs/architecture/camera-capabilities.md`；新增纯构造辅助模块 `apps/camctl/tests/video_estimate_helpers.py`。发行验证复用 `apps/camctl/tests/integration/bootstrap/test_package.py`。
 
-- [ ] 先给 `ActionCapability` 的导出行为增加单元测试。测试使用 `load_config`、`ConfigDefaults` 和内存 `DriverDefinitions`；参数 Schema 校验协作者使用受真实函数签名约束的替身。下列构造器放在 `tests/video_estimate_helpers.py`，按现有 `tests/media_helpers.py` 的导入方式供单元和集成测试复用；辅助模块自身不安装 mock。`estimate` 使用 `Decimal` 而非 Python `float`。
+- [x] 先给 `ActionCapability` 的导出行为增加单元测试。测试使用 `load_config`、`ConfigDefaults` 和内存 `DriverDefinitions`；参数 Schema 校验协作者使用受真实函数签名约束的替身。下列构造器放在 `tests/video_estimate_helpers.py`，按现有 `tests/media_helpers.py` 的导入方式供单元和集成测试复用；辅助模块自身不安装 mock。`estimate` 使用 `Decimal` 而非 Python `float`。
 
 ```python
 from decimal import Decimal
@@ -339,13 +339,13 @@ def test_describe_exports_estimate_as_metadata(monkeypatch):
     assert "video_size_estimate" not in parameter["schema"]["properties"]
 ```
 
-- [ ] 从仓库根运行上述单元文件，确认新增字段尚未实现导致预期失败：
+- [x] 从仓库根运行上述单元文件，确认新增字段尚未实现导致预期失败：
 
 ```powershell
 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/devices/test_catalog.py -q
 ```
 
-- [ ] 在 `ActionCapability` 最后追加可选声明，不插入已有位置参数之间。可用 `None` 表示内部未声明，或采用现有缺失哨兵；这是内部实现选择。导出已声明值时保留原类型和结构，未声明时省略整个字段；已经进入交接文档的显式 `null` 必须保留并拒绝。建议导出代码在现有参数条目生成处添加：
+- [x] 在 `ActionCapability` 最后追加可选声明，不插入已有位置参数之间。可用 `None` 表示内部未声明，或采用现有缺失哨兵；这是内部实现选择。导出已声明值时保留原类型和结构，未声明时省略整个字段；已经进入交接文档的显式 `null` 必须保留并拒绝。建议导出代码在现有参数条目生成处添加：
 
 ```python
 # parameter 为同源 ActionCapability，entry 为该参数类型的导出条目。
@@ -355,8 +355,8 @@ if parameter.video_size_estimate is not None:
 
 不得把辅助元数据传给 `acceptance.ports.ParameterDefinition`、默认值应用、任务工厂或状态库。驱动开放参数才进入 `params`；固定码率和播放帧率留在声明中。真实驱动需要接入时，说明中的数值和估算元数据必须从同一份定义产生。
 
-- [ ] 增加单元分支：字段未声明时省略；`parameter_definition()` 仍只含现有执行端口字段；无可调用 `task_factory` 的录像/延时候选继续被过滤；能力导出不调用任务工厂。保持 `Catalog` 的设备、动作及参数类型精确关联。
-- [ ] 在组件集成层读取任务 1的共同文本，以 `parse_exact_json()` → `encode_describe_document()` 验证 `encode_valid`。同时以真实 Catalog 构造验证源定义的参数 Schema 关联、同作用域重复类型及整份导出失败；不要以编码函数替代这段语义检查。真实参数 Schema 编译和根包 Schema 不作 mock。另在内存文档中覆盖 `Decimal("NaN")`、`Decimal("Infinity")`、布尔值及 Python `float`，证明非法数值不会被转成合法 JSON。
+- [x] 增加单元分支：字段未声明时省略；`parameter_definition()` 仍只含现有执行端口字段；无可调用 `task_factory` 的录像/延时候选继续被过滤；能力导出不调用任务工厂。保持 `Catalog` 的设备、动作及参数类型精确关联。
+- [x] 在组件集成层读取任务 1的共同文本，以 `parse_exact_json()` → `encode_describe_document()` 验证 `encode_valid`。同时以真实 Catalog 构造验证源定义的参数 Schema 关联、同作用域重复类型及整份导出失败；不要以编码函数替代这段语义检查。真实参数 Schema 编译和根包 Schema 不作 mock。另在内存文档中覆盖 `Decimal("NaN")`、`Decimal("Infinity")`、布尔值及 Python `float`，证明非法数值不会被转成合法 JSON。
 
 ```python
 import pytest
@@ -387,9 +387,9 @@ def test_describe_preserves_decimal_reference():
 
 集成文件中的 `record_catalog` 使用纯构造辅助模块，不继承单元测试的 mock。CLI 单元测试复用现有校验失败边界，断言退出码为1、stdout 为空、stderr 有事实诊断；任务 5再验证非法真实声明走到同一结果。
 
-- [ ] 复用现有 `schemas.py` 精确数值、`encode_json_value()` 和 `encode_describe_document()` 的整份校验。新增定义放在既有能力 Schema 时，无需新增资源映射；若文件划分调整出同级 Schema，须同时更新 `apps/camctl/scripts/sync_resources.py` 与 `contracts/schemas.py` 的资源注册。不得手改生成的 `_resources`。
-- [ ] 在 `docs/architecture/camera-capabilities.md` 说明驱动的同源声明与候选过滤责任，并引用能力格式和估算设计，不复制字段清单。
-- [ ] 从仓库根依次运行以下命令。前三个集成命令分别启动进程，不合并目录或并发运行。包测试需证明安装 wheel 中的根能力 Schema 与权威资源一致。
+- [x] 复用现有 `schemas.py` 精确数值、`encode_json_value()` 和 `encode_describe_document()` 的整份校验。新增定义放在既有能力 Schema 时，无需新增资源映射；若文件划分调整出同级 Schema，须同时更新 `apps/camctl/scripts/sync_resources.py` 与 `contracts/schemas.py` 的资源注册。不得手改生成的 `_resources`。
+- [x] 在 `docs/architecture/camera-capabilities.md` 说明驱动的同源声明与候选过滤责任，并引用能力格式和估算设计，不复制字段清单。
+- [x] 从仓库根依次运行以下命令。前三个集成命令分别启动进程，不合并目录或并发运行。包测试需证明安装 wheel 中的根能力 Schema 与权威资源一致。
 
 ```powershell
 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/devices/test_catalog.py apps/camctl/tests/unit/bootstrap/test_command_output.py -q
@@ -398,7 +398,7 @@ uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests
 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/bootstrap/test_command_output.py apps/camctl/tests/integration/bootstrap/test_package.py -q
 ```
 
-- [ ] 审计全部 `ActionCapability` 构造及导出入口，独立评审缺失/非法声明和执行端口边界，提交本任务变更，建议提交信息为 `feat: 从驱动定义导出视频估算说明`。
+- [x] 审计全部 `ActionCapability` 构造及导出入口，独立评审缺失/非法声明和执行端口边界，提交本任务变更，建议提交信息为 `feat: 从驱动定义导出视频估算说明`。
 
 ## 任务 3：客户端整份加载、精确引用和纯计算
 
@@ -726,7 +726,7 @@ pnpm exec vitest run tests/integration/browser-video-estimate.test.ts tests/inte
 
 **建议文件：** 新增 `tests/integration/test_video_size_estimate.py`；扩展 `tests/integration/camctl_fixtures.py`、`client_driver.ts`；修改 `tests/integration/README.md`、`docs/client/page-interactions.md`、`docs/client/verification.md`、`docs/architecture/client-editing.md`、`docs/superpowers/specs/2026-10-10-video-size-estimate-design.md` 的实施状态。
 
-- [ ] 在根测试替身的驱动剧本中允许对录像和延时参数类型显式提供虚构估算声明，默认剧本继续省略。建议剧本以 `video_size_estimate_json` 映射动作类型到估算对象的原始 JSON 文本，避免现有普通剧本解析先把小数变为 `float`。在 `_stub_definition()` 中使用 `parse_exact_json` 解析对应文本后传给同源 `ActionCapability.video_size_estimate`，不改变其他剧本字段和执行任务。
+- [x] 在根测试替身的驱动剧本中允许对录像和延时参数类型显式提供虚构估算声明，默认剧本继续省略。建议剧本以 `video_size_estimate_json` 映射动作类型到估算对象的原始 JSON 文本，避免现有普通剧本解析先把小数变为 `float`。在 `_stub_definition()` 中使用 `parse_exact_json` 解析对应文本后传给同源 `ActionCapability.video_size_estimate`，不改变其他剧本字段和执行任务。
 
 ```python
 from camctl.contracts.json_values import parse_exact_json
@@ -740,7 +740,7 @@ timelapse_estimate = (parse_exact_json(texts["camera_timelapse"])
 ```
 
 只改变替身静态定义，不改真实驱动能力、不改变任务工厂和完成判定。`camctl_fixtures.py` 现有 `Deployment.install_client_capabilities()` 已执行真实 describe 并写交接文件，应继续复用。这里的原文映射只是测试装配，不是新增公共协议字段。
-- [ ] 在 `client_driver.ts` 增加仅用于集成测试的 `estimate` 命令，建议调用约定为 `estimate <client-store> <action-json-path> <output-path>`。用真实 Application 初始化后的 `app.capabilities.active`、真实 JSON 解析与任务 3的纯估算器计算，然后输出测试凭据；不新增产品 API 或落库字段。
+- [x] 在 `client_driver.ts` 增加仅用于集成测试的 `estimate` 命令，建议调用约定为 `estimate <client-store> <action-json-path> <output-path>`。用真实 Application 初始化后的 `app.capabilities.active`、真实 JSON 解析与任务 3的纯估算器计算，然后输出测试凭据；不新增产品 API 或落库字段。
 
 ```ts
 // tests/integration/client_driver.ts 的新增导入。
@@ -757,7 +757,7 @@ try {
 }
 ```
 
-- [ ] 写真实跨组件测试，先确认 describe 尚无声明或 estimate 命令尚未接入导致预期失败。下列录像场景使用已有一秒替身任务和明确虚构的成片时长常量，避免把估算资料当作设备测量。所有实际执行仍由现有 CaptureTask 契约决定。
+- [x] 写真实跨组件测试，先确认 describe 尚无声明或 estimate 命令尚未接入导致预期失败。下列录像场景使用已有一秒替身任务和明确虚构的成片时长常量，避免把估算资料当作设备测量。所有实际执行仍由现有 CaptureTask 契约决定。
 
 ```python
 import json
@@ -780,8 +780,8 @@ def test_estimate_survives_describe_and_stays_out_of_plan(tmp_path):
     result = deployment.run_client_driver(
         "estimate", str(tmp_path / "client-store"), str(action_file),
         output=tmp_path / "estimate.json")
-    assert result["kind"] == "ready"
-    assert result["sizeBytes"] == 16_250_000
+    assert result["estimate"]["kind"] == "ready"
+    assert result["estimate"]["sizeBytes"] == 16_250_000
     plan_path, receipt = deployment.export_plan_with_client({
         "name": "录像估算闭环", "actions": [action],
     })
@@ -792,11 +792,11 @@ def test_estimate_survives_describe_and_stays_out_of_plan(tmp_path):
 
 继续在同一场景使用 `deployment.camctl("init", ...)`、`submit`、`run` 和已有真实报告导入入口，断言生效参数仍为 `{ "type": "video" }`，报告产物大小仍为替身文件事实8192字节，而不是16,250,000估算字节；报告 Schema 不出现辅助估算字段。报告定位复用现有 ready 文件与摘要规则，不硬写报告文件名。
 
-- [ ] 增加延时场景，以 `timelapse_interval` 的虚构元数据经相同真实 describe 与客户端路径取得结果。可以使用采集持续时间3秒、间隔1秒、播放帧率30、码率175 Mbps，独立期望为0.1秒、2,187,500字节；同源虚构 Schema 与任务工厂明确接受和执行这组输入，不能声明6000秒而仍执行固定3秒。估算依据与最终文件事实分别断言。还需验证声明完全缺失、合法但未覆盖的查表选项都能按原规则导出；非法真实声明使 CLI 退出1、stdout为空，并使新的客户端加载失败而保留已启用说明。根替身的参数 Schema 当前只接受 `type`；需要查表参数或采集参数的场景，必须在同一虚构定义中显式添加对应 Schema，不能仅放宽 `additionalProperties`。
-- [ ] 经 `video_size_estimate_json` 的原文入口分别传入合法小数码率 `130.125`、合法帧数 `240.0`/`2.4e2` 及非法帧数 `1.00000000000000000001`。前者经真实 describe、客户端和 HTTP 仍保持正确判定；后者在 describe 退出1且 stdout为空，证明测试装配没有先舍入或清洗。
-- [ ] 从仓库根执行 `uv run --project apps/camctl --group test --python 3.11 pytest tests/integration/test_video_size_estimate.py -q`。本文件不申请 `host_demo` 夹具，不连接设备，不要求 WSL/C 编译；真实组件、真实文件、子进程与数据库都属于此集成层。
+- [x] 增加延时场景，以 `timelapse_interval` 的虚构元数据经相同真实 describe 与客户端路径取得结果。可以使用采集持续时间3秒、间隔1秒、播放帧率30、码率175 Mbps，独立期望为0.1秒、2,187,500字节；同源虚构 Schema 与任务工厂明确接受和执行这组输入，不能声明6000秒而仍执行固定3秒。估算依据与最终文件事实分别断言。还需验证声明完全缺失、合法但未覆盖的查表选项都能按原规则导出；非法真实声明使 CLI 退出1、stdout为空，并使新的客户端加载失败而保留已启用说明。根替身的默认参数 Schema 只接受 `type`；需要查表参数或采集参数的场景，必须在同一虚构定义中显式添加对应 Schema，不能仅放宽 `additionalProperties`。
+- [x] 经 `video_size_estimate_json` 的原文入口分别传入合法小数码率 `130.125`、合法帧数 `240.0`/`2.4e2` 及非法帧数 `1.00000000000000000001`。前者经真实 describe、客户端和 HTTP 仍保持正确判定；后者在 describe 退出1且 stdout为空，证明测试装配没有先舍入或清洗。
+- [x] 从仓库根执行 `uv run --project apps/camctl --group test --python 3.11 pytest tests/integration/test_video_size_estimate.py -q`。本文件不申请 `host_demo` 夹具，不连接设备，不要求 WSL/C 编译；真实组件、真实文件、子进程与数据库都属于此集成层。
 - [x] 更新客户端交互专题和设计实施状态，说明位置、近似单位、无法估算原因与重载暂停。把正式字段规则保留在能力格式专题，把实施进度留在本计划；不把虚构参考值记为真实设备依据。验证记录注明实际执行日期、环境与版本、命令、范围及结果，并明确 Linux 组件的待验边界。
-- [ ] 按以下顺序执行最终门禁；仅在新修改、失败或未解决问题出现时扩大或重复。Python 集成目录继续分别前台运行。
+- [x] 按以下顺序执行最终门禁；仅在新修改、失败或未解决问题出现时扩大或重复。Python 集成目录继续分别前台运行。
 
 ```powershell
 # 工作目录：仓库根。
@@ -818,8 +818,8 @@ pnpm run test:integration
 
 `test:integration` 的前置脚本会执行 `build`。记录构建与测试各自结果；构建若仍有既有的大包体积警告，应如实记录，不能写为“无警告”。本门禁不验证真实设备码率、现场采集次数或目标主机性能。
 
-- [ ] 完成一次横跨全部任务的独立评审：沿驱动权威定义 → describe 整体校验与包资源 → 客户端后端加载 → HTTP 词元交接 → 当前草稿/pending → 计算 → 展示 → 重载失败/观察恢复 → 导出 → 受理/报告逐段核对。审计已发现风险的所有同类入口，而不是只检查测试中的例子。
-- [ ] 检查 `git diff --check`、暂存范围和所有复选框，提交本任务测试与文档，建议提交信息为 `test: 验证视频估算的跨组件交接`。只在所有验收条件满足后记录功能完成。
+- [x] 完成一次横跨全部任务的独立评审：沿驱动权威定义 → describe 整体校验与包资源 → 客户端后端加载 → HTTP 词元交接 → 当前草稿/pending → 计算 → 展示 → 重载失败/观察恢复 → 导出 → 受理/报告逐段核对。审计已发现风险的所有同类入口，而不是只检查测试中的例子。
+- [x] 检查 `git diff --check`、暂存范围和所有复选框，提交本任务测试与文档，建议提交信息为 `test: 验证视频估算的跨组件交接`。只在所有验收条件满足后记录功能完成。
 
 ## 最终验收与实施边界
 
@@ -834,3 +834,21 @@ pnpm run test:integration
 | 文档和证据 | 责任专题引用一致；日期、环境、范围和实际门禁结果完整；真实码率统计口径仍归设备接入验证。 |
 
 公共格式与重载待核实的行为契约由设计文件定义。实施者若发现现有数据流不能保持这些契约、出现表中未定义的状态，或需要改变公共字段或加载语义，须停止相关任务，报告输入、发生步骤、已完成操作及冲突依据；不能自行选择新的业务语义。
+
+
+## Linux 实施记录（2026-10-11）
+
+**状态：任务 1—5 的软件实施与验收完成。** 当前工作区通过 `106f93e` 合并客户端分支。Python 同源导出、安装资源、客户端全部门禁与跨组件闭环的实际环境、命令和结果见[协议同步验证](../../camctl/verification.md#视频大小估算的协议同步验证2026-10-11)；真实设备验收不计入本计划的软件完成条件。
+
+实现按实际数据流衔接：
+
+- `ActionCapability` 在末尾提供可选估算声明，Catalog 深复制导出；执行参数定义仍只有原有字段。公共 Schema 和精确编码器直接复用，包内资源通过既有同步脚本生成，wheel 安装测试核对权威字节。
+- 内置相机在参数类型的同源定义中维护固定假定参考码率，并据此生成任务说明；实际参考值待厂商核实后调整。当前只有 Action6 录像具有可调用工厂，延时及 OSMO 候选继续过滤。说明保留预计成片关系，不改变实际完成依据。
+- 根部署替身用 `video_size_estimate_json` 保存估算原文，用 `parameter_schema_json` 明确声明专用测试参数。显式录像秒数及延时采集秒数进入同一任务工厂的执行定义，默认剧本保持原有语义。
+- 客户端测试驱动提供 `estimate` 和 `reload-estimate` 凭据，先建立测试输入草稿，再读取真实 HTTP 返回的草稿原文与完整能力状态进行计算。凭据的 `estimate` 和 `http_estimate` 分别记录后端与 HTTP 消费结果；估算前后比较已有草稿。计划正文使用共享精确序列化函数，没有新增产品接口或持久化字段。
+
+有效失败基线已分别实跑：Catalog 新增九项单元用例因缺少元数据字段失败；内置定义初稿十八项因缺少估算声明失败；根录像闭环因尚无 `estimate` 命令失败；原始帧参数的 HTTP 凭据专项因尚未从 HTTP 返回动作失败。完成实现后，全部单元、对应组件目录、根视频估算十二项、客户端全量及安装版 Action6 经 C host 的软件链均通过。
+
+独立审查沿权威驱动定义、精确编码和资源、客户端加载、HTTP 原文、编辑与重载、导出、受理、执行及报告消费核对，未发现未解决的阻断问题。任务 2和任务 5 的变更作为同一组协议同步提交，保证安装资源、真实驱动说明与跨组件验收共同可复核；没有重复执行已合并的客户端任务实现。
+
+下一步重新构建并交付 camctl 发行包，在 ARM 主机更新安装后生成新的 `describe` 文件并同步客户端，再按[现场接续入口](2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)核对既有状态并继续录像演示。实际码率、文件完成依据和现场业务链继续单独验收。
