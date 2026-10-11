@@ -342,7 +342,27 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 - [x] 在各次采用新配置、保存判断、开始调用、结果保存及取消提交前后使用明确同步点注入中断；恢复原完整事务及原身份，验证没有重复副作用、重复名额或遗漏独立收场。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_runtime_configuration_recovery.py::TestInterruptedSecondCallRecovery::test_interrupted_result_call_resumes_without_duplicate_side_effects`：第二运行在新配置下发起的第二次结果核实调用阻塞在设备端口同步点（开始调用后、结果保存前）后中断会话，中断时流程行已固定 attempts_used=2 而调用未登记；第三运行按原责任恢复——原在途尝试以未知结果结束并重建重试等待（尝试状态 UNKNOWN、attempt_no 连续且不重复名额），随后恰好一次新调用完成核实与业务收场（产物登记、占用释放、动作成功终态）。恢复边界与证据查找沿生产装配口径（HOST_LOCAL_SETTLED 与会话开始前固定历史水位、驱动声明的恢复契约）。其余同步点的组合证据：配置采用边界即两项两段会话测试的会话切换本身；保存判断的原子提交与拒绝由 `integration/capture/test_result_confirmation.py::test_atomic_rejection_keeps_attempt_running` 与同键重送恢复覆盖；取消提交前后中断的幂等重入由 `integration/cancellation/test_controller_cancel.py::test_interrupt_boundaries_reenter_idempotently` 覆盖；意图提交后中断的进程级恢复由根 `tests/integration/test_camctl_process_recovery.py` 与电机恢复专项覆盖。）
 - [x] 对配置更新前后分别冻结完整 H，以初始回放、快照正向、当前投影逆向恢复对照独立预期；旧报告重建字节一致，当前报告表达实际逐项失败／成功及原绑定事实，不新增无需求依据的内部过程字段。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_runtime_configuration_recovery.py::TestConfigurationChangeHistoryRecovery::test_freezes_before_and_after_change_recover_identically`：同一状态库在第一运行后（照片核实重试等待、延时等待安排、额外等待为零）冻结 H1 并保存动作对象快照，配置更新（照片预算 2→5、间隔 30 秒→0.2 秒、延时额外等待 0→3000 毫秒、结果集合改为明确缺必需类别）后第二运行收场（照片成功、延时已知失败）再冻结 H2。两个边界都以空种子初始回放对照独立预期——预期直接读取各时点当前投影的四张业务表（actions、device_activities、operation_runs、operation_attempts）业务列，不经生产恢复代码；另验证 H1 快照种子正向回放到 H2、H2 当前投影业务列种子逆向回退到 H1，均与对应边界的初始回放一致。配置更新前冻结的旧报告在终态事实与新历史之后按原冻结依据分批重建，字节一致。当前报告经公共 Schema 校验：照片成功且绑定 cam-1，延时失败且绑定 cam-2、原请求参数与错误码如实呈现，成功动作不携带 device_execution；动作投影不含 extra_wait_ms_used、max_attempts、retry_interval_s、attempt_no 等内部过程或配置字段。）
 - [x] 逐目录顺序执行受影响组件集成，再运行根配置组合；源码导入图和 AST（抽象语法树）检查验证执行入口实际消费统一核对及配置接口，不能只搜索函数名称。（2026-10-11，容器 Linux Python 3.11.16。逐目录顺序执行：bootstrap 全目录 980 passed、1 skipped（含本计划新增的 test_runtime_configuration_recovery 四项），capture 全目录 986 passed，outputs 与 cancellation 两目录合计 2040 passed、2 skipped。根配置组合 `tests/integration/test_camctl_session_recovery.py` 6 passed（真实 CLI 两段会话恢复）。新增 `scripts/check-config-consumption.py` 的语法树检查：生产源码中 CaptureRuntime 的尝试配置字段（check、stop、start、query、delete）必须经统一按设备读取接口（_device_attempts／_device_seconds）构造或由装配参数转发，AttemptConfig 预算关键字出现数字字面量即拒绝（唯一例外为主机源交付拷贝保存的本地单次预算协议），设备调用意图的 config 必须引用运行时配置字段或转发装配输入，延时额外等待必须经统一读取；检查以真实调用点为依据并已用违规探针验证证伪能力（字面量 7 被正确拒绝），登记于 scripts/README.md。）
-- [ ] 最终独立审阅全部共享不变量的入口：普通拍摄、取消停止、恢复核实、后续残留收场、普通取回、内部输入拷贝、设备及主机清理、结果核实、报告。记录实际环境、命令、结果与尚未裁决字段，只有全部已确认要求得到行为证据才更新对应覆盖结论。
+- [x] 最终独立审阅全部共享不变量的入口：普通拍摄、取消停止、恢复核实、后续残留收场、普通取回、内部输入拷贝、设备及主机清理、结果核实、报告。记录实际环境、命令、结果与尚未裁决字段，只有全部已确认要求得到行为证据才更新对应覆盖结论。（2026-10-11 最终审阅记录见下方专节。）
+
+### RC5 最终审阅记录（2026-10-11）
+
+环境：Linux 容器（Python 3.11.16），命令统一为
+`UV_PROJECT_ENVIRONMENT=apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 python -m pytest <目标> -q`。
+九个共享不变量入口逐项核对，证据为本计划的组合测试与既有专项在同一批目录门禁中的实际通过结果（bootstrap 980、capture 986、outputs+cancellation 2040、reporting 373、根会话恢复 6）。
+
+| 入口 | 行为证据 |
+| --- | --- |
+| 普通拍摄 | `test_runtime_configuration_recovery.py::test_second_run_uses_changed_budget_and_extra_wait`（两台设备照片与延时在两段会话中完成执行、等待与核实）；`bootstrap/test_media_assembly.py` 与 `bootstrap/test_timelapse_finish.py` 的录像、延时全流程矩阵。 |
+| 取消停止 | 同文件 `test_second_run_cancels_with_current_stop_configuration`（新配置停止预算下第一次错误经新间隔重试确认，取消终态与已拍产物同事务）；`bootstrap/test_timelapse_finish.py::TestTimelapseCancel` 可停止与不可停止分区；`cancellation/test_controller_cancel.py` 幂等重入边界。 |
+| 恢复核实 | 同文件 `test_interrupted_result_call_resumes_without_duplicate_side_effects`（在途调用中断后按原责任恢复，无重复名额或副作用）；`capture/test_result_scan_recovery.py` 十二项扫描恢复；根 `test_camctl_session_recovery.py` 真实 CLI 两段会话恢复。 |
+| 后续残留收场 | `bootstrap/test_residual_winddown.py` 九项受限收场；`bootstrap/test_emergency_session_exit.py` 六项应急停止（状态库失效或配置错误退出路径）。 |
+| 普通取回 | `outputs/test_delivery.py` 二十六项交付链；根 `test_camctl_output_roundtrip.py` 经 C 模块的真实取回交接。 |
+| 内部输入拷贝 | `outputs/test_internal_input_lifecycle.py` 八项生命周期；`capture/test_check_current_budget.py` 跨运行读取预算（上调只补剩余名额、原尝试保持）。 |
+| 设备及主机清理 | `bootstrap/test_cleanup_flow.py` 七项清理轮次；`bootstrap/test_cleanup_query_default_recovery.py` 每轮新连接续接原查询责任。 |
+| 结果核实 | RC3 与 RC4 交付的预算、期限、间隔与结果矩阵（`test_check_current_budget.py`、`test_recording_start_runtime.py`、`test_timelapse_finish.py`、`test_timelapse_wait_runtime.py`）。 |
+| 报告 | 同文件 `test_freezes_before_and_after_change_recover_identically`（三路径恢复、旧报告字节一致、当前报告表达逐项结果与原绑定、无内部字段）；`reporting/test_generation.py` 与 `test_encoding.py` 的冻结、生成与编码基线。 |
+
+尚未裁决字段：延时等待重配置中驱动声明的修复余量上限、受管工具结果页格式仍以独立待定事项跟踪（见[产物核实执行计划](2026-10-09-camctl-result-round-runtime.md)），不改变本计划已确认要求的覆盖结论。
 
 ## 验收执行方式
 
