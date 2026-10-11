@@ -293,7 +293,7 @@ def test_slow_callback_allows_submit_new_run_and_fifo(tmp_path, motor_host_drive
 def test_motor_and_camera_share_cli_without_device_result_confusion(tmp_path, motor_host_driver):
     """电机回调阻塞不妨碍相机生产流程，报告保持各自动作的完成含义。"""
     deployment = Deployment(tmp_path)
-    spec = stub_driver_spec({"2": [photo_file("motor-camera-shot")]})
+    spec = stub_driver_spec({"1": [photo_file("motor-camera-shot")]})
     launcher = _init(deployment, spec)
     scheduled = future_schedule(-1)
     body = {"name": "电机与相机共存", "actions": [
