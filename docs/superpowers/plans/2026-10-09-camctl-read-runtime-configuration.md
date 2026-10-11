@@ -112,7 +112,24 @@
 - [x]  对配置采用、读取意图、结果、重拷决定和失败／保护收场注入投影错误与 COMMIT 前后丢失。确认回滚无部分事实；UNKNOWN 关闭重开按原键核实完整事件组，改变输入须拒绝。 两入口 business key 与读取结果 key 的 COMMIT 前后 UNKNOWN、保存门分支回滚及原键拒绝分别由 `test_obtain_failure_unknown_commit_retries_original_business_key`、`test_internal_failure_unknown_commit_retries_original_business_key`、`test_default_read_save_failure_keeps_original_responsibility` 与 copy segments 原键分区覆盖。
 - [x] 历史回放和固定 H 报告不加载新配置、不开设备、不执行文件副作用，原 bytes、已用、attempt_no 和失败理由保持。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_read_history_replay_report.py::test_replay_and_fixed_report_ignore_changed_read_configuration`：经真实媒体链完成一次完整源读取建立读取责任（READ 流程行、尝试与副本事实），冻结固定 H 并生成公共 Schema 合法的报告；随后把设备驱动改绑为替代驱动、读取上限与间隔改值，同一冻结依据分批重建报告字节与摘要一致、staging 除报告文件外无新增（无文件副作用）。录像动作对象以空种子初始回放恢复，读取责任成员与当前投影逐行业务列一致：已用次数与原上限保持本次配置之前的保存值、尝试编号与状态（第 1 次且成功、无错误）如实恢复；回放与报告阶段媒体工具零新增调用，配置变化不被任何路径消费。）
 - [x]  根 Agent 顺序执行 bootstrap、capture、outputs、operations、devices、history 相关目录。每次 pytest 前台独占；不合并集成目录或并行运行。 2026-10-11 复跑：capture 982 passed、reporting 373 passed、devices+history+operations 540 passed、全量单元 4726 passed；outputs 1937+2 skipped 与 bootstrap 963+1 skipped 为本会话同代码位点的先前门禁。
-- [ ] 独立审阅普通取回、内部异常原片检查、内部修复、重拷、取消、断电续传、绑定异常恢复及会话退出接缝，再更新路线图范围。窄装配或某一个入口通过不足以完成本任务。
+- [x] 独立审阅普通取回、内部异常原片检查、内部修复、重拷、取消、断电续传、绑定异常恢复及会话退出接缝，再更新路线图范围。窄装配或某一个入口通过不足以完成本任务。（2026-10-11 独立审阅记录见下方专节；路线图验收映射注记同步更新。）
+
+### 八接缝独立审阅记录（2026-10-11）
+
+环境：Linux 容器（Python 3.11.16）。各接缝沿真实公开装配核对行为证据；同批门禁见本计划 RD3 的目录复跑记录与本日 bootstrap、capture、outputs 目录结果。
+
+| 接缝 | 行为证据 |
+| --- | --- |
+| 普通取回 | `bootstrap/test_read_execution_runtime.py::test_obtain_failure_unknown_commit_retries_original_business_key`（取回业务键 COMMIT 前后 UNKNOWN 按原键重试）；`outputs/test_delivery.py` 交付链二十六项。 |
+| 内部异常原片检查 | 同文件 `test_internal_read_exhaustion_finishes_required_check_and_releases_source`（内检耗尽收场并释放 source_dependency）、`test_internal_actual_read_result_is_retained_before_check`。 |
+| 内部修复 | RD 计划内检／修复责任项（`test_internal_binding_failure_preserves_running_read_and_reports_reason` 等）与 `outputs/test_work_file_reuse.py` 修复成品的原键复用。 |
+| 重拷 | `test_registered_recopy_continues_when_later_budget_is_lower`（后续预算降低时已登记重拷沿原责任继续）；copy segments 原键分区。 |
+| 取消 | `bootstrap/test_read_default_consumers.py::test_default_entry_confirms_committed_read_child_after_canceled_terminal` 的 normal/residual/restricted 三入口。 |
+| 断电续传 | `test_read_default_raw_binding.py` 的重开连接两入口恢复、`test_read_default_save_gate.py` 保存门停止、根 `tests/integration/test_camctl_process_recovery.py` 进程级中断恢复。 |
+| 绑定异常恢复 | `test_read_default_raw_binding.py` 观察者／来源 × normal/residual × missing/mismatch 八项与本次新增 MATCHED 排除两项。 |
+| 会话退出 | `test_read_default_save_failure_keeps_original_responsibility`（保存门保留原责任）；`bootstrap/test_emergency_session_exit.py` 应急停止与诊断合并。 |
+
+未核验前提：目标主机的真实断电持久性与外部工具行为按部署交接五维表单独安排，不在本审阅范围。
 
 ## 禁止的捷径与未核验事项
 
