@@ -7122,6 +7122,11 @@ def _require_cleanup_success_basis(event, row, context) -> None:
         raise EventValidationError("清理成功必须携带结果依据")
     target = (row.after.values.get("output_id")
               or row.before.values.get("output_id"))
+    if target is None:
+        # 成功事件行不携带产物列；待删除成员复用完成事实时从当前
+        # 成员事实解析目标。
+        target = context.state_rows.get("cleanup_items", {}).get(
+            row.row_id, {}).get("output_id")
     if outcome == int(_CLEANUP_OUTCOME.ALREADY_CLEANED):
         output = context.state_rows.get("outputs", {}).get(target)
         if (output is None
@@ -7748,7 +7753,8 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
         command = self._command
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._verify_and_reuse(saved)
+            item = self._load_item(connection, command.item_id)
+            return self._verify_and_reuse(scope, saved, item)
         item = self._load_item(connection, command.item_id)
         if command.irreversible:
             # 删除中成员取得可靠派发事实：限制从可撤销升级为不可撤销。
@@ -7817,22 +7823,79 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
             result=CleanupItemSaved(
                 CleanupItemDisposition.SAVED, command.item_id))
 
-    def _verify_and_reuse(self, saved):
-        if [(event["type"], event["reason"]) for event in saved][0] != (24, 2):
-            raise TransactionError("原事务不是删除推进，不能作为重送核实")
-        if saved[0]["occurred_at"] != self._command.occurred_at:
-            raise TransactionError("删除推进的事实时刻与原事务不同")
-        row = saved[0]["body"]["rows"][0]
-        if row["table"] != "cleanup_items" or row["id"] != self._command.item_id:
-            raise TransactionError("原删除推进属于其他成员")
-        if self._command.irreversible != (row["after"]["values"].get(
-                "restriction_state") == int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
-            raise TransactionError("原删除推进的不可撤销输入与原事务不同")
+    def _verify_and_reuse(self, scope, saved, item):
+        command = self._command
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if command.irreversible:
+            # 不可撤销事实是单成员事件；不同输入整组拒绝。
+            if kinds != [(24, 2)]:
+                raise TransactionError("原事务不是不可撤销事实，不能作为重送核实")
+            if saved[0]["occurred_at"] != command.occurred_at:
+                raise TransactionError("不可撤销事实的时刻与原事务不同")
+            row = saved[0]["body"]["rows"][0]
+            if (row["table"] != "cleanup_items" or row["id"] != command.item_id
+                    or row["after"]["values"].get("restriction_state")
+                    != int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
+                raise TransactionError("原不可撤销事实属于其他成员或输入不同")
+            boundary = _member_values_at_saved_boundary(scope, saved, item)
+            if (boundary.get("status") != int(_CLEANUP_ITEM_STATUS.DELETING)
+                    or boundary.get("restriction_state")
+                    != int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
+                raise TransactionError("原不可撤销事实的完整边界与成员结果不符")
+        else:
+            # 取得归属：成员事件与产物投影同组；不同输入整组拒绝。
+            if kinds != [(24, 2), (_OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON)]:
+                raise TransactionError("原事务不是归属推进，不能作为重送核实")
+            if any(event["occurred_at"] != command.occurred_at for event in saved):
+                raise TransactionError("归属推进的事实时刻与原事务不同")
+            row = saved[0]["body"]["rows"][0]
+            if (row["table"] != "cleanup_items" or row["id"] != command.item_id
+                    or row["after"]["values"].get("status")
+                    != int(_CLEANUP_ITEM_STATUS.DELETING)):
+                raise TransactionError("原归属推进属于其他成员")
+            projection = saved[1]["body"]["rows"]
+            if (len(projection) != 1 or projection[0]["table"] != "outputs"
+                    or projection[0]["id"] != item["output_id"]
+                    or projection[0]["after"]["values"].get("cleanup_status")
+                    != int(_OUTPUT_CLEANUP_STATUS.RUNNING)):
+                raise TransactionError("原归属推进的投影不属于本产物")
+            boundary = _member_values_at_saved_boundary(scope, saved, item)
+            if (boundary.get("status") != int(_CLEANUP_ITEM_STATUS.DELETING)
+                    or boundary.get("restriction_state")
+                    != int(_CLEANUP_RESTRICTION.ACTIVE)):
+                raise TransactionError("原归属推进的完整边界与成员阶段不符")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
             result=CleanupItemSaved(
                 CleanupItemDisposition.ALREADY, self._command.item_id))
+
+
+def _values_at_saved_boundary(scope, saved, owner, table: str, row_id: int,
+                              current_values: Mapping[str, Any]) -> dict[str, Any]:
+    """按原事务边界恢复指定业务列；不用后来推进的当前值替代。"""
+    from camctl.contracts.history_values import HistoryBoundary
+    from camctl.persistence.row_history import read_row_values_at_boundary
+
+    transaction = saved[0]["transaction"]
+    return read_row_values_at_boundary(
+        scope.connection, owner=owner, table=table, row_id=row_id,
+        columns=frozenset(current_values), current_values=current_values,
+        boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id),
+        current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+
+
+def _member_values_at_saved_boundary(scope, saved, item) -> dict[str, Any]:
+    """清理成员在原事务边界处的完整结果列。"""
+    return _values_at_saved_boundary(
+        scope, saved, ("action", item["action_id"]), "cleanup_items", item["id"], {
+            "status": item["status"],
+            "restriction_state": item["restriction_state"],
+            "outcome": item["outcome"],
+            "final_event_id": item["final_event_id"],
+            "error_code": item["error_code"],
+            "error_details_json": item["error_details_json"],
+        })
 
 
 def _member_delete_dispatch_state(connection, item_id: int) -> tuple[bool, bool]:
@@ -8057,9 +8120,9 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
         connection = scope.connection
         command = self._command
         saved = saved_transaction_events(connection, self._key)
-        if saved is not None:
-            return self._verify_and_reuse(saved)
         item = self._load_item(connection, command.item_id)
+        if saved is not None:
+            return self._verify_and_reuse(scope, saved, item)
         if item["status"] in (int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
                               int(_CLEANUP_ITEM_STATUS.FAILED),
                               int(_CLEANUP_ITEM_STATUS.CANCELED)):
@@ -8193,17 +8256,60 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
             result=CleanupItemSaved(
                 CleanupItemDisposition.SAVED, command.item_id))
 
-    def _verify_and_reuse(self, saved):
+    def _verify_and_reuse(self, scope, saved, item):
+        command = self._command
         kinds = [(event["type"], event["reason"]) for event in saved]
-        if (24, 3) not in kinds:
+        if kinds.count((24, 3)) != 1:
             raise TransactionError("原事务不是清理成功，不能作为重送核实")
-        if saved[0]["occurred_at"] != self._command.occurred_at:
+        succeed_index = kinds.index((24, 3))
+        if any(event["occurred_at"] != command.occurred_at for event in saved):
             raise TransactionError("清理成功的事实时刻与原事务不同")
+        rows = saved[succeed_index]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "cleanup_items"
+                or rows[0]["id"] != command.item_id):
+            raise TransactionError("原清理成功属于其他成员")
+        after = rows[0]["after"]["values"]
+        if (after.get("status") != int(_CLEANUP_ITEM_STATUS.SUCCEEDED)
+                or after.get("outcome") != command.outcome.value
+                or after.get("final_event_id") != saved[succeed_index]["event_id"]):
+            raise TransactionError("原清理成功的输入与原事务不同")
+        # 先行文件缺席事实只指向本产物承载文件；投影事件只指向本产物。
+        output = self._state["outputs"].get(item["output_id"])
+        carried = set()
+        if output is not None:
+            if output.get("device_file_id") is not None:
+                carried.add(("device_files", output["device_file_id"]))
+            if output.get("intermediate_file_id") is not None:
+                carried.add(("intermediate_files", output["intermediate_file_id"]))
+        for event in saved[:succeed_index]:
+            covered = {
+                (row["table"], row["id"]) for row in event["body"]["rows"]}
+            if not covered <= carried:
+                raise TransactionError("原清理成功的前置事件不是本产物文件事实")
+        for event in saved[succeed_index + 1:]:
+            projection = event["body"]["rows"]
+            if ((event["type"], event["reason"])
+                    != (_OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON)
+                    or len(projection) != 1 or projection[0]["table"] != "outputs"
+                    or projection[0]["id"] != item["output_id"]):
+                raise TransactionError("原清理成功的投影不属于本产物")
+        # 按原完整事务边界核对成员结果，不用后来推进的当前阶段替代。
+        boundary = _member_values_at_saved_boundary(scope, saved, item)
+        for name, value in (
+            ("status", int(_CLEANUP_ITEM_STATUS.SUCCEEDED)),
+            ("restriction_state", int(_CLEANUP_RESTRICTION.IRREVERSIBLE)),
+            ("outcome", command.outcome.value),
+            ("final_event_id", saved[succeed_index]["event_id"]),
+            ("error_code", None),
+            ("error_details_json", None),
+        ):
+            if not json_equal(boundary.get(name), value):
+                raise TransactionError("原清理成功的完整边界与成员结果不符")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
             result=CleanupItemSaved(
-                CleanupItemDisposition.ALREADY, self._command.item_id))
+                CleanupItemDisposition.ALREADY, command.item_id))
 
 
 class _FailCleanupItemCommand(_CleanupItemCommandMixin):
@@ -8221,9 +8327,9 @@ class _FailCleanupItemCommand(_CleanupItemCommandMixin):
         connection = scope.connection
         command = self._command
         saved = saved_transaction_events(connection, self._key)
-        if saved is not None:
-            return self._verify_and_reuse(saved)
         item = self._load_item(connection, command.item_id)
+        if saved is not None:
+            return self._verify_and_reuse(scope, saved, item)
         if item["status"] in (int(_CLEANUP_ITEM_STATUS.SUCCEEDED),
                               int(_CLEANUP_ITEM_STATUS.FAILED),
                               int(_CLEANUP_ITEM_STATUS.CANCELED)):
@@ -8281,23 +8387,46 @@ class _FailCleanupItemCommand(_CleanupItemCommandMixin):
             result=CleanupItemSaved(
                 CleanupItemDisposition.SAVED, command.item_id))
 
-    def _verify_and_reuse(self, saved):
+    def _verify_and_reuse(self, scope, saved, item):
+        command = self._command
         if [(event["type"], event["reason"]) for event in saved][0] != (24, 4):
             raise TransactionError("原事务不是清理失败，不能作为重送核实")
-        if saved[0]["occurred_at"] != self._command.occurred_at:
+        if saved[0]["occurred_at"] != command.occurred_at:
             raise TransactionError("清理失败的事实时刻与原事务不同")
         row = saved[0]["body"]["rows"][0]
-        if row["table"] != "cleanup_items" or row["id"] != self._command.item_id:
+        error_id = item_error_id("cleanup_items", command.code)
+        if (row["table"] != "cleanup_items" or row["id"] != command.item_id):
             raise TransactionError("原清理失败属于其他成员")
         after = row["after"]["values"]
-        if after.get("error_code") != item_error_id(
-                "cleanup_items", self._command.code):
-            raise TransactionError("清理失败的重送输入与原事务不同")
+        if (after.get("error_code") != error_id
+                or not json_equal(after.get("error_details_json"),
+                                  dict(command.details))
+                or after.get("status") != int(_CLEANUP_ITEM_STATUS.FAILED)
+                or after.get("final_event_id") != saved[0]["event_id"]):
+            raise TransactionError("原清理失败的输入与原事务不同")
+        for event in saved[1:]:
+            projection = event["body"]["rows"]
+            if ((event["type"], event["reason"])
+                    != (_OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON)
+                    or len(projection) != 1 or projection[0]["table"] != "outputs"
+                    or projection[0]["id"] != item["output_id"]):
+                raise TransactionError("原清理失败的投影不属于本产物")
+        # 按原完整边界核对成员结果与完整错误，不只比较错误编号。
+        boundary = _member_values_at_saved_boundary(scope, saved, item)
+        for name, value in (
+            ("status", int(_CLEANUP_ITEM_STATUS.FAILED)),
+            ("outcome", None),
+            ("final_event_id", saved[0]["event_id"]),
+            ("error_code", error_id),
+            ("error_details_json", dict(command.details)),
+        ):
+            if not json_equal(boundary.get(name), value):
+                raise TransactionError("原清理失败的完整边界与成员结果不符")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
             result=CleanupItemSaved(
-                CleanupItemDisposition.ALREADY, self._command.item_id))
+                CleanupItemDisposition.ALREADY, command.item_id))
 
 
 class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
@@ -8324,7 +8453,7 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
         saved = saved_transaction_events(connection, self._key)
         item = self._load_item(connection, command.item_id)
         if saved is not None:
-            return self._verify_and_reuse(saved, item)
+            return self._verify_and_reuse(scope, saved, item)
         action = self._state["actions"][item["action_id"]]
         if action["target_selection_state"] != _TARGET_FIXED:
             raise ConsistencyError("成员取消要求目标集合已固定")
@@ -8451,7 +8580,7 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
         )) as cursor:
             return cursor.fetchone() is not None
 
-    def _verify_and_reuse(self, saved, item):
+    def _verify_and_reuse(self, scope, saved, item):
         command = self._command
         kinds = [(event["type"], event["reason"]) for event in saved]
         if kinds not in ([(24, 5)], [(24, 5), (_OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON)]):
@@ -8516,12 +8645,39 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
                 or item["outcome"] is not None or item["final_event_id"] != saved[0]["event_id"]
                 or item["error_code"] != error_id or not json_equal(item["error_details_json"], details)):
             raise TransactionError("清理取消的原键输入与完整结果不同")
+        # 按原完整边界核对成员结果；不用后来成员或文件观察改写原取消。
+        boundary = _member_values_at_saved_boundary(scope, saved, item)
+        for name, value in (
+            ("status", int(_CLEANUP_ITEM_STATUS.CANCELED)),
+            ("restriction_state", restrictions[prior_status]),
+            ("outcome", None),
+            ("final_event_id", saved[0]["event_id"]),
+            ("error_code", error_id),
+            ("error_details_json", details),
+        ):
+            if not json_equal(boundary.get(name), value):
+                raise TransactionError("原清理取消的完整边界与成员结果不符")
         if len(saved) == 2:
             projection = saved[1]["body"]["rows"]
             if (len(projection) != 1 or projection[0]["table"] != "outputs"
                     or projection[0]["id"] != item["output_id"]
                     or not projection[0]["before"]["exists"] or not projection[0]["after"]["exists"]):
                 raise TransactionError("原清理取消的产物投影属于其他目标")
+            # 原边界的投影结果与事件一致；后来的产物事实不参与解释。
+            output = row_facts(scope.connection, "outputs", item["output_id"])
+            if output is None:
+                raise ConsistencyError(f"产物不存在: {item['output_id']}")
+            self._state.setdefault("outputs", {})[item["output_id"]] = output
+            output_boundary = _values_at_saved_boundary(
+                scope, saved, ("output", item["output_id"]), "outputs",
+                item["output_id"], {
+                    "availability": output["availability"],
+                    "cleanup_status": output["cleanup_status"],
+                    "cleanup_error_json": output["cleanup_error_json"],
+                })
+            for name, value in projection[0]["after"]["values"].items():
+                if not json_equal(output_boundary.get(name), value):
+                    raise TransactionError("原清理取消的投影与完整边界不符")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
@@ -8650,8 +8806,7 @@ class _CleanupBindingFailCommand(_CleanupItemCommandMixin):
                 raise TransactionError("原清理绑定失败的投影不属于本产物")
             split = 2
         member_command = self._member_command(item, details)
-        member = (member_command._verify_and_reuse(saved[:split], item) if command.canceled
-                  else member_command._verify_and_reuse(saved[:split]))
+        member = member_command._verify_and_reuse(scope, saved[:split], item)
         flow_events = saved[split:]
         expected_error = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
         keys = []

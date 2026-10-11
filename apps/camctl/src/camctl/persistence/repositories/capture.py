@@ -3850,7 +3850,7 @@ class _FinishBindingFailureCommand:
             finished_keys.add(key)
             plans.append(_FinishStaleRunsCommand(StaleRunFinish(
                 (run["responsibility_key"],), RunOutcome.FAILED,
-                request.occurred_at, self._error()), self._key)._reuse(scope, [event]))
+                request.occurred_at, self._error()), self._key)._verify_saved_rows(scope, [event]))
         expected_keys = set(request.responsibility_keys)
         if created_keys & expected_keys:
             raise TransactionError("原事务新建的必要责任不属于此前固定责任集合")
@@ -4024,7 +4024,7 @@ class _FinishResidualBindingFailureCommand:
             keys.add(run["responsibility_key"])
             plans.append(_FinishStaleRunsCommand(StaleRunFinish(
                 (run["responsibility_key"],), RunOutcome.FAILED,
-                request.occurred_at, self._error()), self._key)._reuse(scope, [event]))
+                request.occurred_at, self._error()), self._key)._verify_saved_rows(scope, [event]))
         if keys != set(request.responsibility_keys):
             raise TransactionError("原残留绑定失败的完整责任集合与重送输入不同")
         return CommandPlan(

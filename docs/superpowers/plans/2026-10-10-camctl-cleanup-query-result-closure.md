@@ -244,7 +244,7 @@ Task 0 已于 2026-10-11 交付（见下方阶段记录）：首次 QUERY／DELE
 
 Task 2 的全组合原键拒绝、Task 3 的主机派生成品保存中断、实际 QUERY 等待者取消及矛盾终态，以及 Task 4 的完整历史边界三种回放与报告组合尚未取得专项证据。上述条目继续保持未完成。内存责任只覆盖同一会话和连接更换，不承诺原进程退出后恢复从未提交的设备返回。
 
-独立审阅还确认，成员仓储及伴随仓储的原键复验不足以完整证明原申请。会话始终重送同一对象并不能替代仓储拒绝冲突输入；下列修复应按相互依赖的持久化工作包先补失败测试，再实现，不能只修改调用者或放宽事件守卫。
+独立审阅还确认，成员仓储及伴随仓储的原键复验不足以完整证明原申请。会话始终重送同一对象并不能替代仓储拒绝冲突输入；下表契约对应的五项修复已于 2026-10-11 交付，红—绿证据与门禁见下方交付记录。
 
 | 原键入口与触发场景 | 必须保持的契约与修复边界 |
 | --- | --- |
@@ -263,3 +263,13 @@ Task 2 的全组合原键拒绝、Task 3 的主机派生成品保存中断、实
 取消分类按本成员自身 DELETE 尝试的逐项可靠结果判定“可能删除”：`decide_cleanup_cancel`、`_cancel_member`、`_consume_saved_query`、`_CancelCleanupItemCommand`（含原键复验，历史只编码变化列，限制列缺省表示保持不可撤销）共用该分类；另一成员的 DELETE 经 `operation_runs.cleanup_item_id` 单向关联隔离，不进入本项。仅有查询的成员确认缺席仍保存 `SUCCEEDED + IRREVERSIBLE`（成功事务保存完成事实），不再要求派发前已不可撤销。
 
 验证环境 Linux x86 容器、Python 3.11.16，命令沿用上文统一入口。新增 `integration/outputs/test_cleanup_query_cancel_before_delete.py` 9 项在旧实现下 7 项失败（4 组“结果保存前后 × 在场/未知”解除组合以 ConsistencyError 或借用 C1 删除的错误收场失败；共同事务与派发前取消两项失败；2 项为既有守卫），实施后 9 项通过。单元决策表补 3 项未派发分支。`test_cleanup_query_durable_consumption.py` 的意图故障注入端口随接缝迁移到 `outputs.begin_cleanup_attempt`。目录门禁：`integration/outputs` 1920 项通过、2 项跳过；`integration/bootstrap` 959 项通过、1 项跳过（此前记录的两个取消分区失败已随本轮分类闭合）；`integration/cancellation` 103 项通过；单元 4726 项通过、1 项跳过。清理意图事务的 COMMIT 未知由通用原键复验路径核实，未新增会话级 fresh 连接重送专项用例，仍属 Task 2／Task 3 的恢复范围。
+
+## 原键复验修复交付记录（2026-10-11）
+
+五项修复覆盖上表契约，共用新增的边界恢复辅助：`_values_at_saved_boundary` 与 `_member_values_at_saved_boundary` 按原完整事务边界（前一事务末事件）恢复行业务列，与事件 before／after 互证，不用成员后来推进的当前阶段替代原阶段。所有拒绝以 `DbOutcome(ROLLED_BACK)` 返回并保持零新增历史；同输入重送在成员后续推进后仍只读复用。
+
+成员成功复验要求唯一 `(24,3)` 事件的目标、outcome、事实时刻与最终事件匹配，先行文件事件只指向本产物承载文件、投影事件只指向本产物，并按原边界核对成员六列结果；改变目标或 outcome 整组拒绝。成员失败复验以 `json_equal` 精确比较原 code、details、目标与时刻，并核对完整事件组与原最终结果，不只比较错误编号。限制及归属推进复验区分 entry（status-only）与 irreversible 升级两种事件形态，在 entry 原键上重送升级输入被拒绝。成员取消复验保留既有完整错误与成员结果校验，补齐原边界与配套产物投影核对；投影当前值直接从连接读取产物行，不依赖委托方装载状态；历史只编码变化列，限制列缺省回退不可撤销解释。
+
+伴随收场正式登记专属事件依据 `stale_run_request`（申请种类、全部责任键、status、完整 error 或显式 null）：`event-transitions.json` 为 `OPERATION_CONFIGURED.FINISH` 增列该依据并同步正文、资源与历史校验守卫；生产事件全部携带，原键重送要求依据全等并核对行级事实。绑定失败复合事务中“零尝试必要责任”由复合命令直接写入收场事件、逐键子申请核对行事实，这类事件没有本命令依据，改走行级核对（`_verify_saved_rows`），不放宽直接入口的依据全等要求。
+
+新增 `integration/outputs/test_cleanup_member_reuse_rejection.py` 7 项，在旧实现下 6 项失败（成功 outcome／目标、失败 details、entry 键升级输入、取消后事实变化、伴随责任键增删替换），实施后 7 项通过；伴随范围组合用例覆盖开放、已结束与不存在的责任键。目录门禁：`integration/outputs` 1927 项通过、2 项跳过；`integration/operations` 200 项通过；`integration/history` 与 `integration/bootstrap` 合计 1168 项通过、1 项跳过；单元 4726 项通过、1 项跳过。

@@ -174,6 +174,7 @@ class CleanupOutcomeChoice(Enum):
     """清理成功的结果依据选择（登记枚举成员）。"""
 
     DELETED = 1
+    ALREADY_CLEANED = 2
     ABSENCE_CONFIRMED = 3
 
 

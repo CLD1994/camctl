@@ -457,6 +457,25 @@ def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
                 or not isinstance(value["stage"], str) or not value["stage"]
                 or not isinstance(value["details"], Mapping)):
             _fail(f"事件 {event_id} 的 evidence.preparation_error 必须是完整实际错误")
+    elif member == "stale_run_request":
+        if (not isinstance(value, Mapping)
+                or set(value) != {"kind", "responsibility_keys", "status", "error"}
+                or value.get("kind") != "stale_run_finish"):
+            _fail(f"事件 {event_id} 的 evidence.stale_run_request 必须是完整伴随收场申请")
+        keys = value.get("responsibility_keys")
+        if (not isinstance(keys, list) or not keys
+                or any(not isinstance(name, str) or not name for name in keys)
+                or len(set(keys)) != len(keys)):
+            _fail(f"事件 {event_id} 的伴随收场责任键必须是唯一非空字符串数组")
+        if not is_json_integer(value.get("status")):
+            _fail(f"事件 {event_id} 的伴随收场结果必须是整数编号")
+        error = value.get("error")
+        if error is not None and (not isinstance(error, Mapping)
+                or set(error) != {"code", "stage", "details"}
+                or not isinstance(error["code"], str) or not error["code"]
+                or not isinstance(error["stage"], str) or not error["stage"]
+                or not isinstance(error["details"], Mapping)):
+            _fail(f"事件 {event_id} 的伴随收场错误必须是完整结构化错误或显式 null")
 
 
 def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[str, Any]]:
