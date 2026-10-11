@@ -184,10 +184,10 @@ C1 的删除已有结束结果，但效果未知，随后 C1 可靠保存自己�
 
 ### Task 4：共享不变量审计与目录门禁
 
-- [ ] 独立审阅 `_run_query` 的三个消费者、公开入口、默认工厂、`for_item`、主机目标、候选过滤、终态早退、取消、绑定失败、计时门槛和本地结果解码。按实际导入／调用关系确认接入，不以搜索函数名替代行为验证。
-- [ ] 使用完整真实历史边界 H 核验查询结果、成员终态、原取消、限制及产物汇总的初始回放、快照正向和当前逆向结果一致；恢复零设备调用。结果保存之后、本地结果之前冻结的边界只能包含当时实际已提交事实，后来的成功不能改写原报告或历史。
-- [ ] 协调 Agent 顺序执行新增 outputs 文件及 `test_cleanup_recovery.py`、`test_cleanup_retry_phases.py`、`test_cleanup_intervals.py`、`test_source_cleanup.py`；通过后分别执行整个 `integration/outputs`、整个受影响 `integration/bootstrap` 及单元全量。只有新增变化、失败或未解决疑问才重复已通过门禁。
-- [ ] 修改了通用操作仓储或守卫时，另行顺序执行 `integration/operations`；修改了历史读取／回放时，另行顺序执行 `integration/history`。任何失败逐项定位，不能把其他基线失败或未跑目录称为通过。
+- [x] 独立审阅 `_run_query` 的三个消费者、公开入口、默认工厂、`for_item`、主机目标、候选过滤、终态早退、取消、绑定失败、计时门槛和本地结果解码。按实际导入／调用关系确认接入，不以搜索函数名替代行为验证。（2026-10-11 审阅：三个消费者为 `_verify_before_delete`／`_verify_after_delete`／`_settle_canceling_member`（后者先核对绑定失败再派发）；公开入口 `delete_source_file` 与默认工厂 `cleanup_flow`→`advance_cleanup` 在全部集成测试按真实调用计数驱动；`for_item` 按设备装配子运行时，主机目标经 `_host_target`＋本地协作者且设备目录变化不误分类；候选过滤、终态早退、取消、绑定失败、计时门槛与本地结果解码分别由决策表单元与本计划集成文件覆盖。）
+- [x] 使用完整真实历史边界 H 核验查询结果、成员终态、原取消、限制及产物汇总的初始回放、快照正向和当前逆向结果一致；恢复零设备调用。结果保存之后、本地结果之前冻结的边界只能包含当时实际已提交事实，后来的成功不能改写原报告或历史。（2026-10-11 新增 `test_cleanup_query_history_boundaries.py`：删除未知后查询确认缺席的结果事务真实提交即冻结 H，续接成功后 C；动作与产物两对象的初始回放、快照正向（S<H 种子）、当前逆向与路径选择恢复完全一致；H 处成员仍在删除中、查询尝试已可靠保存、产物未进入清理投影，C 处才成功；H 前历史逐字节不变；恢复零设备调用；仅自身查询的取消成员事实在 H 与 C 一致。）
+- [x] 协调 Agent 顺序执行新增 outputs 文件及 `test_cleanup_recovery.py`、`test_cleanup_retry_phases.py`、`test_cleanup_intervals.py`、`test_source_cleanup.py`；通过后分别执行整个 `integration/outputs`、整个受影响 `integration/bootstrap` 及单元全量。只有新增变化、失败或未解决疑问才重复已通过门禁。（2026-10-11：指定文件集 87 项通过；本阶段最终目录门禁 outputs 1937 项通过、2 项跳过，bootstrap 963 项通过、1 项跳过，单元 4726 项通过、1 项跳过。）
+- [x] 修改了通用操作仓储或守卫时，另行顺序执行 `integration/operations`；修改了历史读取／回放时，另行顺序执行 `integration/history`。任何失败逐项定位，不能把其他基线失败或未跑目录称为通过。（2026-10-11：伴随收场依据登记与守卫修改后顺序执行 `integration/operations` 200 项通过；`integration/history` 与 bootstrap 合计 1168 项通过、1 项跳过；其后仅改清理流程与测试文件。）
 - [x] 更新父计划 Task 1 的剩余责任及验证记录，记录日期、环境、实际命令、结果和剩余范围；路线图继续负责整体进度。本页不复制全仓已有验收数字。运行文档链接、标题锚点及 `git diff --check`，由协调 Agent 独立核验实际 diff 和证据后安排阶段提交。
 
 ## 验收命令与完成条件
