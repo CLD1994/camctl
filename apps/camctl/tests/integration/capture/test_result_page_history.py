@@ -358,3 +358,161 @@ async def test_page_range_forward_reverse_and_snapshot_restore_same_state(tmp_pa
         assert [page.ref.event_id for page in pages.items] == [receipt.value.event_id, last.value.event_id]
     finally:
         owned.connection.close()
+
+
+def _entity_events(connection, entity_type: int, entity_id: int):
+    """按目录取得对象在当前边界前的全部事件，行归属按目录事实标注。"""
+    from contextlib import closing
+
+    events = []
+    with closing(connection.execute(
+            "SELECT h.id, h.transaction_id, h.event_type, h.event_version,"
+            " h.occurred_at, h.clock_status, h.change_seq, h.body_json"
+            " FROM history_events h JOIN entity_event_links l ON l.event_id=h.id"
+            " WHERE l.entity_type=? AND l.entity_id=? ORDER BY h.id",
+            (entity_type, entity_id))) as cursor:
+        rows = cursor.fetchall()
+    reference = (entity_type, entity_id)
+    for raw in rows:
+        envelope = decode_event_row(raw)
+        events.append(ValidatedEvent(
+            envelope=envelope,
+            event_name=event_type_name(envelope.event_type),
+            branch_name=branch_of(envelope.event_type, envelope.reason)[0],
+            references=(reference,),
+            row_owners={(row.table, row.row_id): reference for row in envelope.rows},
+        ))
+    return events
+
+
+async def test_page_created_files_and_catalog_restore_from_three_paths(tmp_path):
+    """真实结果页生产者建立的新文件、设备文件及页目录三路径恢复一致。"""
+    from camctl.contracts.enums import load_registry
+    from camctl.persistence.transaction import row_facts
+
+    file_type = load_registry()["history_objects"]["device_file"]["id"]
+    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
+    path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    history = HistoryRepository(path)
+    repository = CaptureRepository()
+    executor = DbExecutor(
+        lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()),
+        capacity=4, enqueue_timeout_seconds=9)
+    store = SqliteSnapshotStore(path, executor)
+
+    def _seed(image):
+        """快照种子行转换为回放镜像的映射形态。"""
+        return {(row.table, row.row_id): dict(row.values) for row in image.rows}
+
+    def _empty_seed(entity_type: int, entity_id: int):
+        return RestoreSeed(
+            EntityImage(entity_type, entity_id, False, {}, 0, 0), INITIAL_BOUNDARY)
+
+    try:
+        ticket = _begin_check_round(runtime, action_id).ticket
+        first = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
+        saved = repository.save_result_page(first, new_operation_key(), owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+        middle = history.current_boundary()
+        file_a, = (int(row[0]) for row in owned.connection.execute(
+            "SELECT id FROM device_files WHERE observer_action_id=? ORDER BY id", (action_id,)))
+        # 快照维护把首批页后的对象状态固定为 S<H 种子。
+        middle_file_image, middle_action_image = await store.load_entity_images(
+            (SnapshotRef(file_type, file_a), SnapshotRef(1, action_id)))
+        assert [image.boundary for image in (middle_file_image, middle_action_image)] == [middle, middle]
+        await store.save_snapshots(tuple(
+            prepare_snapshot(image) for image in (middle_file_image, middle_action_image)))
+
+        second = _request(runtime, ticket, _actual(
+            ticket, entries=[_entry("a"), _entry("b")], cursor=_CURSOR, finalized=True),
+            page_no=2, cursor=_CURSOR)
+        last = repository.save_result_page(second, new_operation_key(), owned)
+        assert last.kind is DbOutcomeKind.COMPLETED, last.error
+        end = history.current_boundary()
+        file_ids = [int(row[0]) for row in owned.connection.execute(
+            "SELECT id FROM device_files WHERE observer_action_id=? ORDER BY id", (action_id,))]
+        assert len(file_ids) == 2, file_ids
+        file_b = file_ids[1]
+
+        attempt_id, = owned.connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id=?",
+            (ticket.run_id,)).fetchone()
+        discovery = {}
+        for raw in owned.connection.execute(
+                "SELECT h.id, h.transaction_id, h.body_json FROM history_events h"
+                " JOIN entity_event_links l ON l.event_id=h.id"
+                " WHERE l.entity_type=? AND l.entity_id IN (?, ?) ORDER BY h.id",
+                (file_type, file_a, file_b)):
+            body = json.loads(raw[2])
+            row = body["rows"][0]
+            discovery[int(row["id"])] = (int(raw[0]), int(raw[1]), row["after"]["values"])
+        assert sorted(discovery) == [file_a, file_b]
+        page_txn = dict(owned.connection.execute(
+            "SELECT id, transaction_id FROM history_events WHERE id IN (?, ?)",
+            (saved.value.event_id, last.value.event_id)))
+        # 新文件与所属页目录条目同事务创建；页一目录只含 a，页二补登记 b 并复用 a。
+        assert discovery[file_a][1] == page_txn[saved.value.event_id]
+        assert discovery[file_b][1] == page_txn[last.value.event_id]
+
+        current_rows = {fid: row_facts(owned.connection, "device_files", fid)
+                        for fid in file_ids}
+        end_images = dict(zip(
+            file_ids,
+            await store.load_entity_images(
+                tuple(SnapshotRef(file_type, fid) for fid in file_ids))))
+        for fid in file_ids:
+            events = _entity_events(owned.connection, file_type, fid)
+            initial_end = restore(_empty_seed(file_type, fid), events, end)
+            initial_middle = restore(_empty_seed(file_type, fid), events, middle)
+            counted = owned.connection.execute(
+                "SELECT MAX(change_count) FROM entity_event_links"
+                " WHERE entity_type=? AND entity_id=?",
+                (file_type, fid)).fetchone()[0]
+            # 独立预期来自发现事件本身的业务列，不经生产恢复代码。
+            expected = dict(discovery[fid][2])
+            reverse_middle = restore(RestoreSeed(
+                EntityImage(file_type, fid, True,
+                            {("device_files", fid): {name: current_rows[fid][name]
+                                                      for name in expected}},
+                            end.last_event_id, int(counted)), end), events, middle)
+            assert initial_end.rows[("device_files", fid)] == expected
+            assert {key: value for key, value in current_rows[fid].items()
+                    if key in expected} == expected
+            stored = _seed(end_images[fid])[("device_files", fid)]
+            assert stored["id"] == fid
+            assert {key: value for key, value in stored.items()
+                    if key in expected} == expected
+            assert end_images[fid].change_count == int(counted)
+            assert reverse_middle.rows == initial_middle.rows
+            if fid == file_a:
+                assert initial_middle.rows[("device_files", fid)] == expected
+            else:
+                assert ("device_files", fid) not in initial_middle.rows
+
+        # 页目录：动作对象两条边界上的尝试行分别指向各自末页事件。
+        action_events = _entity_events(owned.connection, 1, action_id)
+
+        def _attempt_row(image):
+            return {name: value for name, value in
+                    image.rows[("operation_attempts", attempt_id)].items()
+                    if name != "id"}
+
+        seed_action = RestoreSeed(
+            EntityImage(1, action_id, True, _seed(middle_action_image),
+                        middle.last_event_id, middle_action_image.change_count),
+            middle)
+        for target, tail_event in (
+                (middle, saved.value.event_id), (end, last.value.event_id)):
+            initial_action = restore(_empty_seed(1, action_id), action_events, target)
+            snapshot_action = restore(seed_action, action_events, target)
+            assert _attempt_row(initial_action) == _attempt_row(snapshot_action)
+            assert _attempt_row(initial_action)["result_last_page_event_id"] == tail_event
+        assert _attempt_row(restore(seed_action, action_events, end))[
+            "result_first_page_event_id"] == saved.value.event_id
+        pages = repository.read_result_pages(ticket, None, 128, owned)
+        assert [page.ref.event_id for page in pages.items] == [
+            saved.value.event_id, last.value.event_id]
+        assert len(pages.items[1].page.entries) == 2
+    finally:
+        await executor.close()
+        owned.connection.close()

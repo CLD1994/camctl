@@ -221,4 +221,15 @@ H1/H2 每个已实现事件均有具名校验及原子目录；H3—H6 全部对
 
 环境为 Python 3.11.16、SQLite 3.53.1。事件登记与验收映射一致性的反例取得 1 failed，确认 `_EVENT_COVERAGE` 遗漏 `RESULT_PAGE`。映射补入 [test_result_page_history.py](../../../apps/camctl/tests/integration/capture/test_result_page_history.py)，标记为不由综合剧本产生。该文件的二十个用例已经验证原键核实、两页共用一次原尝试、提交前后失败及 fresh Owned 恢复，也包含同一操作尝试在正向、逆向及快照路径的恢复。最终 history 完整目录取得 205 passed；对应 capture 完整目录取得 982 passed，实际命令见[软件验证记录](../../camctl/verification.md#应急错误与历史报告的软件验证2026-10-11)。
 
-- [ ] 在由真实结果页生产者创建的历史上，独立推导新文件、设备文件及页目录的完整对象成员，分别核对初始回放、快照正向恢复与当前投影逆向恢复。现有操作尝试行的三路径相等和映射锚点不能替代这一完整对象证明；完成后再核验 H7 的全部范围。
+- [x] 在由真实结果页生产者创建的历史上，独立推导新文件、设备文件及页目录的完整对象成员，分别核对初始回放、快照正向恢复与当前投影逆向恢复。现有操作尝试行的三路径相等和映射锚点不能替代这一完整对象证明；完成后再核验 H7 的全部范围。已由 `integration/capture/test_result_page_history.py::test_page_created_files_and_catalog_restore_from_three_paths` 交付，验证记录见下节（2026-10-11）。
+
+### H7 结果页对象成员的三路径证明（2026-10-11，容器）
+
+Linux 开发容器、Python 3.11.16、SQLite 3.53.1。真实 `consumer_world` 录像世界经 `_begin_check_round` 与两次 `save_result_page` 建立历史：页一发现新文件 a（带续读游标），页二复用 a、发现新文件 b 并结束集合。快照维护在页一后的边界 S 固定 `device_file(a)` 与 `action` 两个对象种子（S<H）。
+
+独立预期直接取发现事件正文的业务列，不经生产恢复代码；比较口径统一到业务列（当前投影带主键与历史元数据列）。核验结果：
+
+- 每个设备文件对象（页一新文件 a、页二新文件 b）：初始回放、快照正向（a 自 S 前进，b 经存储初始重放）与当前投影逆向（自 end 业务列种子回退到 S）三路径一致；`change_count` 与 `entity_event_links` 计数一致；b 在 S 边界不存在，a 在两边界值相同。
+- 页目录：新文件与所属页目录条目同事务创建（a 与页一、b 与页二）；动作对象在 S 与 end 两条边界的尝试行 `result_last_page_event_id` 分别指向页一／页二事件，`result_first_page_event_id` 保持页一事件；快照种子正向与初始回放的尝试行（除主键）逐列相等；`read_result_pages` 的目录顺序与页二两条目成员保持。
+
+`test_result_page_history.py` 全文件与 `integration/history` 全目录 230 项通过（39.56s）。H7 的其余范围（事件覆盖映射、规模测量、验收映射）此前已经闭合，本项为结果页生产者的最后专项。
