@@ -403,7 +403,11 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 用户从 ARM 主机回传 `2026-10-11 02:46:51 UTC` 的现场结果。更新压缩包的 SHA-256 及解压后全部 14 个载荷的 SHA-256 均通过，证明本次主机收到的文件与更新交付一致。`adb devices -l` 只输出表头，未列出设备；运行账户的进程查询未显示 host 或 camctl，唯一匹配项是查询命令自身的 `awk`。
 
-`/home/cld/.camctl/camera-demo` 不存在；用户列出的 `/home/cld/.camctl` 内容为 `host`、`packages`、`venv`，其中 `host` 包含 `bin`、`include`、`lib`、`share`。本次尚未取得新版 wheel 安装、配置提取、初始化或能力导出的结果。下一步先沿用既有虚拟环境更新 wheel 并提取演示资源，再核对相机供电和 USB 连接，以当前 ADB 列表中的实际 serial 填写配置；初始化与拍摄沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
+该次目录检查中，`/home/cld/.camctl/camera-demo` 不存在；用户列出的 `/home/cld/.camctl` 内容为 `host`、`packages`、`venv`，其中 `host` 包含 `bin`、`include`、`lib`、`share`。
+
+随后用户完成更新安装与资源提取，并回传 Python 3.11.17、SQLite 3.53.1。uv 检查九个运行依赖后，卸载原 `camctl 0.1.0` 并安装更新目录中的同版本 wheel；实际导入来源为 `/home/cld/.camctl/venv/lib/python3.11/site-packages/camctl/__init__.py`，演示配置提取到 `/home/cld/.camctl/camera-demo/config.toml`。本次 `adb devices -l` 列出 serial `123456789ABCDEF`，状态为 `device`，USB 为 `1-2.3`，product 为 `qcs8625_ac206`，transport_id 为 `3`。
+
+当前已取得 ARM 更新安装和相机连接证据，尚未取得配置填写、初始化、现场能力导出或真机拍摄结果。下一步使用本次实际 serial 填写已提取的配置，再执行 `init` 和 `describe`；现场新能力说明同步到客户端后，真机业务链沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
 
 ## 部署交接与待核验项
 
