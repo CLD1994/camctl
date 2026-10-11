@@ -176,13 +176,13 @@ C1—C3、C6 的录像分支及 C7 随首个设备副作用一起交付；C4/C5 
 
 - [x] 编写失败用例。建立 `test_emergency_recording_does_not_repeat_stop`，最终补记提交未知核实后 `assert extra_stop_calls == 0`。零尝试已知/未知配置、有尝试已知配置分别按正式组合保存；有尝试未知上限、超限、缺项、普通意图被省略、进行中补记均拒绝。错误重复不刷新本会话额度。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/unit/capture/test_emergency.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
-- [ ] 实施本任务。仅在可靠归属、排他资格、安全重复停止能力及可运行条件成立时应急；目标结束且调用收场后一次补记最终流程、全部尝试和观察。记录保存 not_recorded/recorded/unknown 与实际停止结果分开，不等待数据库无限恢复。
-- [ ] 再运行上述命令，要求全部 PASS，并核对 S-01—S-07 全部分区有可证伪用例，应急例外不进入普通调用。
+- [x] 实施本任务。仅在可靠归属、排他资格、安全重复停止能力及可运行条件成立时应急；目标结束且调用收场后一次补记最终流程、全部尝试和观察。记录保存 not_recorded/recorded/unknown 与实际停止结果分开，不等待数据库无限恢复。默认出口已接线：`capture/emergency_flow.py::EmergencySettlement` 按会话启动锚点发现目标，经真实 `StopDriver` 适配 `DeviceCallResult` 有限停止并逐个补记；`SessionContext.emergency_settlement` 在非时钟致命错误（state_db_error／configuration_error）出口先执行应急再本地收场，诊断并入 `details.emergency_stops`；同会话同活动至多一条应急流程，身份读取失败不发令不虚构目标。真实会话反例见 `integration/bootstrap/test_emergency_session_exit.py` 六项。
+- [x] 再运行上述命令，要求全部 PASS，并核对 S-01—S-07 全部分区有可证伪用例，应急例外不进入普通调用。2026-10-11：新六项、既有应急专项与全量单元 4740 passed、1 skipped；bootstrap+session 全目录 1069 passed、1 skipped。submit 不装配应急端口；报告文件失败（report_error）与日志失败不触发应急，状态库错误主导的退出按规格取得资格。
 
 随后运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/capture/test_emergency.py -q`，真实数据库失效/恢复与受约束录像替身，按补记前后 H 重建并验证旧动作终态保持。
-- [ ] 审阅实际接口、状态分区及失败路径，检查 受限、普通错误、报告失败及日志失败是否错误取得应急资格；记录门禁证据，建议以“feat: 实现录像有限收场与最终补记”形成独立提交。
+- [x] 审阅实际接口、状态分区及失败路径，检查 受限、普通错误、报告失败及日志失败是否错误取得应急资格；记录门禁证据，建议以“feat: 实现录像有限收场与最终补记”形成独立提交。审阅结论（2026-10-11）：应急只在 `run` 的非时钟致命错误出口触发；受限会话失败以 state_db_error 返回时同样经该出口；报告文件失败保留 report_error 分类不取得资格；日志失败不改变会话分类。剩余简化分区：每次继续前的执行条件逐项复验由内存资格一次判定代替（进程内条件不变），在途本地调用的收场等待不阻塞应急发令（安全重复停止能力已声明）。
 
-2026-10-11 的生产消费者核验：纯资格模型、内存预算及独立补记仓储已有实现；默认 `bootstrap`／`session` 致命错误出口没有调用应急停止和补记。现有 helper 使用的停止响应也尚未适配真实 `DeviceCallResult`。本任务的默认出口、原目标拥有者、在途调用收场、实际超时与间隔、逐次资格核验及完整实际结果收集仍未完成，须先建立真实会话反例再接线。两个应急错误的登记、实际原因及最终补记由[错误专项](2026-10-09-camctl-result-errors-and-report-projection.md#应急错误登记与最终补记)独立推进，其门禁不能代替本任务的完整生产链。
+2026-10-11 的生产消费者核验（已被同日接线取代）：默认出口、真实 `DeviceCallResult` 适配与会话诊断合并均已交付，见上方勾选记录。真机设备停止、目标主机资源测量及物理断电后的跨进程恢复仍按部署交接项单独验收。两个应急错误的登记与最终补记语义由[错误专项](2026-10-09-camctl-result-errors-and-report-projection.md#应急错误登记与最终补记)维护。
 
 ### C8 异常原片检查及内部修复
 

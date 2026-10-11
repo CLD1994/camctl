@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Awaitable, Callable, Mapping, Protocol
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.notification import notify_acceptance
@@ -119,6 +119,8 @@ class SessionContext:
     on_session_open: Callable[[OwnedConnection], None] | None = None
     #: 实际文件调用、结果保存和独立连接关闭均完成后才结束的责任。
     local_work: LocalWorkPort | None = None
+    #: 非时钟致命错误收场时的录像应急停止端口；返回诊断条目。
+    emergency_settlement: Callable[[], Awaitable[list[dict]]] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.poll_interval_s, (int, float)) or (
@@ -294,6 +296,13 @@ async def _run_session(
             outcome = await drive()
         except BaseException as error:
             original = error
+        if (original is None and outcome is not None
+                and context.emergency_settlement is not None
+                and not outcome.succeeded
+                and outcome.reason in ("state_db_error", "configuration_error")):
+            # 非时钟致命错误：先对会话内录像执行有限应急停止，再继
+            # 续本地收场；应急收场失败不改写原错误分类。
+            outcome = await _merge_emergency_stops(context, outcome)
         try:
             await _settle_local_work(context)
         except BaseException as error:
@@ -324,6 +333,25 @@ async def _run_session(
             session_lease.close()
         if owned is not None:
             owned.connection.close()
+
+
+async def _merge_emergency_stops(
+        context: SessionContext, outcome: SessionOutcome) -> SessionOutcome:
+    """执行应急停止并把诊断并入原错误；收场失败不掩盖原错误。"""
+    from dataclasses import replace as _replace
+
+    try:
+        stops = list(await context.emergency_settlement())
+    except Exception as error:
+        stops = [{"outcome": "not_attempted", "attempts_used": 0,
+                  "record_status": "not_recorded",
+                  "error": f"应急收场失败: {error}"}]
+    if not stops:
+        return outcome
+    details = dict(outcome.details)
+    existing = list(details.get("emergency_stops", ()))
+    details["emergency_stops"] = existing + stops
+    return _replace(outcome, details=details)
 
 
 def _run_work_facts(context: SessionContext, connection: Any) -> WorkFacts:

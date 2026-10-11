@@ -368,4 +368,4 @@ Linux 开发容器、Python 3.11.16、SQLite 3.53.1。根运行 `/tmp/camctl-v1-
 
 最终顺序门禁：全部单元 4601 passed、1 skipped、2 条既有 asyncio 标记警告；capture 完整目录 982 passed；history 完整目录 205 passed；reporting 完整目录 373 passed；operations 完整目录 200 passed；bootstrap 的发行物文件 17 passed。发行物测试在仓库外构建、安装并读取正式错误资源，不使用源码替代安装包。完整命令、耗时、环境、RESULT_PAGE 映射的证明范围及剩余历史验证见[应急错误与历史报告的软件验证](../../camctl/verification.md#应急错误与历史报告的软件验证2026-10-11)。bootstrap 全目录未在本专项重跑。
 
-当前默认 bootstrap／session 尚未调用 `emergency_stop` 或 `save_emergency`。默认致命错误收场到实际设备停止、有限预算及最终补记的接线仍属于 capture C7 和会话集成责任，本任务不能代替该完整生产门禁。Action6 真机演示继续按 T9 挂起记录处理。
+默认致命错误收场到实际设备停止、有限预算及最终补记的接线已于 2026-10-11 交付（`capture/emergency_flow.py` 加 `SessionContext.emergency_settlement` 出口，真实会话反例 `integration/bootstrap/test_emergency_session_exit.py` 六项），细项状态见[接入计划 C7](2026-09-30-camctl-capture.md#c7-有限安全收场与应急最终补记)。真机设备停止与物理断电恢复仍按部署交接项单独验收；Action6 真机演示继续按 T9 挂起记录处理。

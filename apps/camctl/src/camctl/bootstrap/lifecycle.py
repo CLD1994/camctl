@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
+from uuid import uuid4
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
@@ -94,6 +95,8 @@ class RuntimeDeps:
     capture_media_results: dict = field(default_factory=dict)
     #: 四个 READ 集合保留本会话原实际结束、完整保存申请和续传身份。
     capture_read_results: dict = field(default_factory=dict)
+    #: 本进程会话的固定身份；应急补记的责任键组成部分。
+    session_key: str = field(default_factory=lambda: uuid4().hex)
     capture_read_business: dict = field(default_factory=dict)
     capture_read_ends: dict = field(default_factory=dict)
     capture_continuing_reads: dict = field(default_factory=dict)
@@ -676,6 +679,10 @@ async def execute_command(
         )
     elif restricted_flows is not None:
         overrides["restricted_flows"] = restricted_flows
+    if flows is None and deps.mode is CommandMode.RUN:
+        # 生产 run 装配：非时钟致命错误收场时对会话内录像执行有
+        # 限应急停止并补记；submit 不执行该流程。
+        overrides["emergency_settlement"] = _emergency_settlement_of(deps)
     context = SessionContext(
         mode=deps.mode,
         catalog=deps.catalog,
@@ -745,6 +752,36 @@ def _local_work(deps, flows):
         owners.append(deps.work_files)
     owners = tuple({id(owner): owner for owner in owners}.values())
     return CombinedLocalWork(owners) if owners else None
+
+
+def _emergency_settlement_of(deps: RuntimeDeps):
+    """构建生产应急收场：锚点、停止配置与驱动登记来自本会话。"""
+    from camctl.bootstrap.capture_assembly import (
+        _DEFAULT_RETRY_INTERVAL_S, _device_attempts, _device_seconds,
+    )
+    from camctl.capture.emergency_flow import EmergencySettlement
+    from camctl.devices.drivers.runtime import current_registry
+    from decimal import Decimal
+
+    stop_config = {}
+    for device_id, declaration in deps.config.devices.items():
+        stop_config[device_id] = {
+            "max_attempts": _device_attempts(declaration, "recording", 3, "max_stop_attempts"),
+            "timeout_s": _device_seconds(
+                declaration, "recording", "stop_timeout_s", Decimal("10")),
+            "retry_interval_s": _device_seconds(
+                declaration, "recording", "stop_retry_interval_s",
+                _DEFAULT_RETRY_INTERVAL_S),
+        }
+    settlement = EmergencySettlement(
+        session_key=deps.session_key,
+        anchors=deps.capture_recording_anchors,
+        stop_config=stop_config,
+        registry=current_registry(),
+        open_owned=lambda: _open_runtime_connection(deps),
+        wall_us=lambda: SystemClock().utc_micros(),
+    )
+    return settlement.settle
 
 
 def _shutdown_state_outcome(
