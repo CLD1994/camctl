@@ -409,7 +409,13 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 用户随后回传实际配置：`devices.action6` 使用 `dji-action6`，ADB serial 为 `123456789ABCDEF`，省略 `[paths]` 而使用运行账户默认目录。`init` 成功；现场 `describe` 导出 `/home/cld/.camctl/camera-demo/capabilities.json`，通过安装版能力 Schema 校验，范围为 `action6 / camera_record / action6_record`。估算声明为 `bitrate_mbps=130`、`duration.method=direct`、`seconds.source=parameter`、`seconds.path=/duration_s`。
 
-当前已取得 ARM 配置、初始化和现场能力导出的证据，客户端加载该说明及真机拍摄仍待回传。下一步同步完整能力说明并通过 C host 提交十秒录像，按实际报告核对原动作及产物，再独立取回。完整业务链沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
+该阶段已取得 ARM 配置、初始化和现场能力导出的证据；后续现场进度见[客户端计划独立取回](#arm-客户端计划独立取回进度2026-10-11)。完整业务链沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
+
+## ARM 客户端计划独立取回进度（2026-10-11）
+
+用户在上述 ARM 部署的接续过程中回传：已在客户端生成取回计划，并成功完成独立取回。本条记录保存用户回传的现场进度；尚未收到本次原拍摄计划、取回计划、正式状态报告或交付文件，因此不能独立核对请求与动作身份、产物来源、实际录像要求及取回结果。
+
+下一步沿用本次拍摄和取回请求，核对 host 领取的视频及报告是否已在客户端可靠导入，视频大小与 SHA-256 是否匹配报告；使用客户端可靠保存的累计确认依据完成演示的报告确认，并核对主机确认水位。实际媒体属性、START／STOP 响应与计时、STOP 后五秒等待、相机原片保留及完整能力说明的客户端加载结果仍须补齐证据。用户回传取回成功不单独构成 T9 完整验收通过。
 
 ## 部署交接与待核验项
 

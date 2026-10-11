@@ -334,11 +334,11 @@ T8 的长读取用例已经证伪正常装配：取回流程等待整份设备�
 
 ### 挂起状态与恢复入口
 
-**状态：ARM 初始化与现场能力导出完成，等待客户端加载及真实录像（2026-10-11）。** `origin/codex/client-spec-sync` 已通过 `106f93e` 合并到 `implement_camctl`。[视频大小估算计划](2026-10-10-video-size-estimate.md#linux-实施记录2026-10-11)已补齐 Python 同源导出、发行资源与跨组件交接，固定假定参考码率的范围由[估算设计](../specs/2026-10-10-video-size-estimate-design.md#参考码率)定义。软件验证见[协议同步验证](../../camctl/verification.md#视频大小估算的协议同步验证2026-10-11)。包含新驱动说明及公共 Schema 的更新包已构建，独立安装、源码与资源逐字节核对及安装版 C host 软件链通过，详情见[更新发行物核验](../../camctl/verification.md#action6-更新发行物核验2026-10-11)。下一步由用户将完整现场能力说明同步到客户端，并通过 C host 提交真实十秒录像；真实拍摄和领取仍须根据现场事实接续。
+**状态：用户报告独立取回成功，等待客户端导入及累计确认核验（2026-10-11）。** `origin/codex/client-spec-sync` 已通过 `106f93e` 合并到 `implement_camctl`。[视频大小估算计划](2026-10-10-video-size-estimate.md#linux-实施记录2026-10-11)已补齐 Python 同源导出、发行资源与跨组件交接，固定假定参考码率的范围由[估算设计](../specs/2026-10-10-video-size-estimate-design.md#参考码率)定义。软件验证见[协议同步验证](../../camctl/verification.md#视频大小估算的协议同步验证2026-10-11)。包含新驱动说明及公共 Schema 的更新包已构建，独立安装、源码与资源逐字节核对及安装版 C host 软件链通过，详情见[更新发行物核验](../../camctl/verification.md#action6-更新发行物核验2026-10-11)。用户已在客户端生成取回计划并报告独立取回成功，证据范围见[独立取回进度](../../camctl/verification.md#arm-客户端计划独立取回进度2026-10-11)。下一步继续原拍摄和取回请求，核对正式报告、视频领取及客户端导入结果，并验证累计确认已被主机吸收。
 
-此前 ARM 部署准备已核验交付包校验、ADB 执行通道、camctl 安装和 C host 构建安装，证据见[ARM 主机部署准备](../../camctl/verification.md#arm-主机部署准备2026-10-10)。启动 host、生成及提交十秒录像计划和首次 `claim` 的命令已经提供，尚未回传执行结果。现场配置、状态库、host 进程、已生成请求以及相机状态均须核对，不能由任务挂起推断其状态。
+此前 ARM 部署准备已核验交付包校验、ADB 执行通道、camctl 安装和 C host 构建安装，证据见[ARM 主机部署准备](../../camctl/verification.md#arm-主机部署准备2026-10-10)。初始化后已提供启动 host、生成及提交十秒录像计划和首次 `claim` 的命令；用户随后通过客户端生成独立取回计划。实际使用的请求身份、拍摄要求、原动作及产物关联须由对应计划和报告核对，不能由取回成功的进度回传推定。
 
-2026-10-11 的[现场回传](../../camctl/verification.md#arm-更新包接收与现场状态2026-10-11)确认更新包及全部载荷校验通过，新版 wheel 安装和资源提取成功；实际 Python 为 3.11.17、SQLite 为 3.53.1，演示配置位于 `/home/cld/.camctl/camera-demo/config.toml`。当前 Action6 serial 为 `123456789ABCDEF`，ADB 状态为 `device`；实际配置已填写，`init` 及现场 `describe` 已成功，估算声明为 130 Mbps、`direct`、`/duration_s`。客户端说明加载及真实拍摄仍待回传。此前的 ADB 通道证据保留其原日期和范围。
+2026-10-11 的[现场回传](../../camctl/verification.md#arm-更新包接收与现场状态2026-10-11)确认更新包及全部载荷校验通过，新版 wheel 安装和资源提取成功；实际 Python 为 3.11.17、SQLite 为 3.53.1，演示配置位于 `/home/cld/.camctl/camera-demo/config.toml`。Action6 serial 为 `123456789ABCDEF`，该次 ADB 状态为 `device`；实际配置已填写，`init` 及现场 `describe` 已成功，估算声明为 130 Mbps、`direct`、`/duration_s`。用户随后报告独立取回成功；完整能力说明的客户端加载结果、拍摄与取回的正式报告、实际媒体和累计确认水位尚待核验。此前的 ADB 通道证据保留其原日期和范围。
 
 恢复时按以下顺序接续：
 
