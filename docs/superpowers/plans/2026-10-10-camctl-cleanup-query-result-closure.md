@@ -140,14 +140,14 @@ C1 的删除已有结束结果，但效果未知，随后 C1 可靠保存自己�
 
 **建议文件：** `outputs/cleanup_flow.py`、`persistence/repositories/outputs.py`，以及实际承担首次 QUERY／DELETE 建档与守卫的最窄责任边界。新增 `integration/outputs/test_cleanup_query_cancel_before_delete.py`，单元分支补在既有 `unit/outputs/test_cleanup_recovery.py`。现有 SQL 和正式事件已经允许 `DELETING + ACTIVE`，不以更改格式、枚举或删减约束作为修复方法。
 
-- [ ] 用合法公开事务建立 C1 的原未知删除及可靠终态，C2 接手并只执行自己的 QUERY；在结果保存前后分别可靠施加 C2 的取消。测试 `present=True` 和无可靠观察，证明 C2 的 DELETE 流程及尝试从未存在。先验证当前实现不能满足无删除错误的取消和本项限制解除。
-- [ ] 对照正式规则，建立完整分类：本项已有终态保持；本项原查询未可靠结束先保存；本项没有任何可能 DELETE 且其他责任结束时无错误取消；本项有可能 DELETE 时按在场、缺席、未知收场。另一成员的 DELETE 不进入本项“可能删除”分类。
-- [ ] 在首次 QUERY 归属、首次 DELETE、取消实时判断、纯分支决策、成员取消事务及原键复验中共同落实分类。修改真实最窄责任边界，不用 `DELETING` 代替是否删除；不能仅让生产消费者传入一个错误使现有守卫通过。
-- [ ] 以清理专属共同事务承接 `_begin_query_attempt` 和 `_delete_once` 的首次建档；复用通用预算构造，但完整核对成员、目标、取消、依赖、归属及事件组。回滚不留下半套归属或尝试，提交未知核实原 key 后才允许派发；普通 QUERY 和取消后必要收场 QUERY 分别检查资格。
-- [ ] 核清 DELETE 意图、实际派发、可靠未派发和旧调用恢复之间的不可撤销事实时点，并落实原表允许的完整状态。不采用无条件意图升级或未经契约核验的 `IRREVERSIBLE → RELEASED` 转换。
-- [ ] `_FinishCleanupItemCommand` 允许真实缺席依据的 QUERY-only `DELETING + ACTIVE` 成功，并在共同成功事务中保存不可撤销完成事实；取消及绑定失败不得补造本项 DELETE。`_CancelCleanupItemCommand._verify_and_reuse` 核对原前后限制、错误、时刻及完整事件组，不用后来成员的观察重新解释原取消。
-- [ ] 红—绿覆盖同一 C2 原键重送、C1 限制保留、C2 取消未完成时保持处理归属、C2 实际 DELETE 已存在时仍要求不可撤销收场，以及未知记录不解除限制。既有已删除、仍在和未知取消用例必须保持。
-- [ ] 协调 Agent 独立核验上述门禁后，才解除 Task 3 相应组合的依赖。若此任务另行排期，记录具体前置任务链接，不把结果保存门禁计作取消组合通过。
+- [x] 用合法公开事务建立 C1 的原未知删除及可靠终态，C2 接手并只执行自己的 QUERY；在结果保存前后分别可靠施加 C2 的取消。测试 `present=True` 和无可靠观察，证明 C2 的 DELETE 流程及尝试从未存在。先验证当前实现不能满足无删除错误的取消和本项限制解除。（2026-10-11 `test_cleanup_query_cancel_before_delete.py` 4 组”保存前后 × 在场/未知”组合在旧实现下以 ConsistencyError 或错误收场失败；实施后无删除错误取消并解除本项限制，C2 零 DELETE 流程与尝试，C1 事实保持。）
+- [x] 对照正式规则，建立完整分类：本项已有终态保持；本项原查询未可靠结束先保存；本项没有任何可能 DELETE 且其他责任结束时无错误取消；本项有可能 DELETE 时按在场、缺席、未知收场。另一成员的 DELETE 不进入本项“可能删除”分类。（`_member_delete_dispatch_state` 按本成员自身 DELETE 尝试的可靠结果逐项判定，另一成员经 `cleanup_item_id` 单向关联隔离。）
+- [x] 在首次 QUERY 归属、首次 DELETE、取消实时判断、纯分支决策、成员取消事务及原键复验中共同落实分类。修改真实最窄责任边界，不用 `DELETING` 代替是否删除；不能仅让生产消费者传入一个错误使现有守卫通过。
+- [x] 以清理专属共同事务承接 `_begin_query_attempt` 和 `_delete_once` 的首次建档；复用通用预算构造，但完整核对成员、目标、取消、依赖、归属及事件组。回滚不留下半套归属或尝试，提交未知核实原 key 后才允许派发；普通 QUERY 和取消后必要收场 QUERY 分别检查资格。（`_BeginCleanupAttemptCommand` 单事务提交归属事件与尝试意图事件；已删除中成员的取消收场 QUERY 不受首次归属的取消门槛限制。）
+- [x] 核清 DELETE 意图、实际派发、可靠未派发和旧调用恢复之间的不可撤销事实时点，并落实原表允许的完整状态。不采用无条件意图升级或未经契约核验的 `IRREVERSIBLE → RELEASED` 转换。（不可撤销事实＝DELETE 尝试取得可靠非未派发结果的保存事务；`not_dispatched` 结果保持 ACTIVE，取消走登记的 ACTIVE → RELEASED。全部使用既有登记转换，未新增。）
+- [x] `_FinishCleanupItemCommand` 允许真实缺席依据的 QUERY-only `DELETING + ACTIVE` 成功，并在共同成功事务中保存不可撤销完成事实；取消及绑定失败不得补造本项 DELETE。`_CancelCleanupItemCommand._verify_and_reuse` 核对原前后限制、错误、时刻及完整事件组，不用后来成员的观察重新解释原取消。
+- [x] 红—绿覆盖同一 C2 原键重送、C1 限制保留、C2 取消未完成时保持处理归属、C2 实际 DELETE 已存在时仍要求不可撤销收场，以及未知记录不解除限制。既有已删除、仍在和未知取消用例必须保持。（原键重送由本地消费与 COMMIT 恢复文件覆盖；既有 27 项保存矩阵及 outputs 目录全部保持通过。）
+- [x] 协调 Agent 独立核验上述门禁后，才解除 Task 3 相应组合的依赖。若此任务另行排期，记录具体前置任务链接，不把结果保存门禁计作取消组合通过。（2026-10-11 目录门禁见下方阶段记录；Task 3 的 QUERY-only 取消组合仍由该任务验收。）
 
 ### Task 1：先持有原结果，再保存并阻止未保存观察消费
 
@@ -240,7 +240,7 @@ QUERY-only 取消使用上述正式契约。只有可靠未派发 DELETE 时的�
 
 ### 尚未完成的前置与核验
 
-Task 0 尚未实施：首次 QUERY／DELETE 的归属与尝试共同建档、QUERY-only 的可撤销取消、QUERY-only 的完成限制，以及只有可靠未派发 DELETE 时的不可撤销事实时点仍须一起闭合。现有仅有 QUERY 的取消入口明确停止，不能借用其他成员 DELETE 生成错误。存在自身 DELETE 行也不足以证明可能派发；该完整分类属于 Task 0，不能以本阶段保存门槛通过替代。
+Task 0 已于 2026-10-11 交付（见下方阶段记录）：首次 QUERY／DELETE 的归属与尝试共同建档、QUERY-only 的可撤销取消、QUERY-only 的完成限制已闭合；“不可撤销事实时点”确定为 DELETE 尝试取得可靠非未派发结果的保存事务，可靠未派发保持可撤销限制，未新增转换登记。
 
 Task 2 的全组合原键拒绝、Task 3 的主机派生成品保存中断、实际 QUERY 等待者取消及矛盾终态，以及 Task 4 的完整历史边界三种回放与报告组合尚未取得专项证据。上述条目继续保持未完成。内存责任只覆盖同一会话和连接更换，不承诺原进程退出后恢复从未提交的设备返回。
 
@@ -255,3 +255,11 @@ Task 2 的全组合原键拒绝、Task 3 的主机派生成品保存中断、实
 | 伴随收场：同 key 改全部责任键，或借用其他 FINISH key | 变化行只包含原申请中尚开放的流程，不能反推完整申请。正式登记专属申请依据，保存申请种类、全部责任键、status 和完整 error／显式 null，再核阶段、归属、时刻、完整边界及首次实际结束的流程 IDs；零匹配继续只读完成，不新增空事务。 |
 
 验收应使用公开事务建立合法前置，在 fresh 连接上同键同输入重送，证明零新增历史；分别改变目标、阶段、时刻、成功 outcome、失败 code／details、取消完整错误以及伴随责任键的增删替换，均须拒绝。伴随原范围包含开放、已结束及不存在的责任键；读取额度耗尽生成的单 FINISH key 不能冒充伴随收场。所有拒绝分区须保持原历史、成员终态、限制及外部调用次数。涉及事件依据登记时同步正文、资源生成和守卫，再顺序执行 outputs、operations、history 及默认入口门禁。
+
+## Task 0 交付记录（2026-10-11）
+
+生产路径以 `OutputsRepository.begin_cleanup_attempt` 在同一写事务提交首次处理归属（`PENDING_DELETE + ACTIVE → DELETING + ACTIVE`，保持可撤销限制）、操作流程创建与第一次尝试；预算或资格拒绝不进入处理归属。`finish_cleanup_attempt` 将 DELETE 尝试的可靠非未派发结果与限制升级（`ACTIVE → IRREVERSIBLE`，CLEANUP_CHANGED.PROGRESS“保存不可撤销事实”）共同保存；可靠未派发结果（取消先于派发生效时沿原尝试保存 `FAILED + NO_EFFECT + not_dispatched`）保持可撤销限制。
+
+取消分类按本成员自身 DELETE 尝试的逐项可靠结果判定“可能删除”：`decide_cleanup_cancel`、`_cancel_member`、`_consume_saved_query`、`_CancelCleanupItemCommand`（含原键复验，历史只编码变化列，限制列缺省表示保持不可撤销）共用该分类；另一成员的 DELETE 经 `operation_runs.cleanup_item_id` 单向关联隔离，不进入本项。仅有查询的成员确认缺席仍保存 `SUCCEEDED + IRREVERSIBLE`（成功事务保存完成事实），不再要求派发前已不可撤销。
+
+验证环境 Linux x86 容器、Python 3.11.16，命令沿用上文统一入口。新增 `integration/outputs/test_cleanup_query_cancel_before_delete.py` 9 项在旧实现下 7 项失败（4 组“结果保存前后 × 在场/未知”解除组合以 ConsistencyError 或借用 C1 删除的错误收场失败；共同事务与派发前取消两项失败；2 项为既有守卫），实施后 9 项通过。单元决策表补 3 项未派发分支。`test_cleanup_query_durable_consumption.py` 的意图故障注入端口随接缝迁移到 `outputs.begin_cleanup_attempt`。目录门禁：`integration/outputs` 1920 项通过、2 项跳过；`integration/bootstrap` 959 项通过、1 项跳过（此前记录的两个取消分区失败已随本轮分类闭合）；`integration/cancellation` 103 项通过；单元 4726 项通过、1 项跳过。清理意图事务的 COMMIT 未知由通用原键复验路径核实，未新增会话级 fresh 连接重送专项用例，仍属 Task 2／Task 3 的恢复范围。

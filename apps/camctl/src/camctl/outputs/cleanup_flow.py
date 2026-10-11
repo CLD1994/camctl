@@ -152,13 +152,21 @@ class RestrictCleanupItem:
 
 @dataclass(frozen=True)
 class ProgressCleanupItem:
-    """进入删除执行的申请输入（限制中 → 删除中）。"""
+    """进入删除执行或保存不可撤销派发事实的申请输入。
+
+    首次取得处理归属（限制中 → 删除中）保持可撤销限制；删除尝试
+    取得可靠非未派发结果时以 irreversible=True 在同一保存事务中升
+    级为不可撤销限制，可靠未派发结果不升级。
+    """
 
     item_id: int
     occurred_at: int
+    irreversible: bool = False
 
     def __post_init__(self) -> None:
         ObjectId(self.item_id)
+        if type(self.irreversible) is not bool:
+            raise TypeError("不可撤销输入必须是布尔值")
         _item_timestamp(self.occurred_at)
 
 
@@ -275,8 +283,10 @@ class CleanupCancelChoice(Enum):
 class CleanupCancelFacts:
     """取消分支判定的输入事实。
 
-    delete_issued 要求本项此前任何可能删除文件的操作，不只最后一
-    次尝试；call_settled 表示已有调用取得适用收场依据。
+    delete_issued 要求本项此前任何可能删除文件的操作（已结束且收
+    场依据不是可靠未派发的 DELETE 尝试），不只最后一次尝试，也不
+    包括其他成员的删除；call_settled 表示已有调用取得适用收场依
+    据。
     """
 
     status: int
@@ -297,6 +307,10 @@ def decide_cleanup_cancel(facts: CleanupCancelFacts) -> CleanupCancelChoice:
             return CleanupCancelChoice.TRACKING
         if facts.file_absent:
             return CleanupCancelChoice.SUCCEED
+        if not facts.delete_issued:
+            # 删除中成员可靠从未派发自己的删除：无删除错误取消并解
+            # 除本项可撤销限制，另一成员的删除事实不进入本项分类。
+            return CleanupCancelChoice.RELEASE
         if facts.file_present:
             return CleanupCancelChoice.DELETE_FAILED
         return CleanupCancelChoice.UNCONFIRMED
@@ -872,11 +886,6 @@ async def _verify_before_delete(
                 runtime, item_id, output_id, "exists",
                 runtime.query_config, "file_query_attempts_exhausted")
         return CleanupStep("query_budget_rejected", ticket.value.reason)
-    progress = runtime.outputs.progress_cleanup_item(
-        ProgressCleanupItem(item_id, runtime.occurred_at()),
-        new_operation_key(), runtime.owned)
-    if progress.kind is not DbOutcomeKind.COMPLETED:
-        return CleanupStep("progress_rejected", str(progress.error))
     present = await _run_query(
         runtime, ticket.value.ticket, item_id, CleanupQueryConsumer.BEFORE_DELETE)
     return _consume_saved_query(
@@ -913,7 +922,8 @@ async def _delete_once(
         config=runtime.delete_config,
         occurred_at=occurred,
     )
-    ticket = runtime.operations.begin_attempt(
+    # 首次删除取得处理归属、删除流程与本次尝试在同一事务建档。
+    ticket = runtime.outputs.begin_cleanup_attempt(
         intent, new_operation_key(), runtime.owned)
     if ticket.kind is not DbOutcomeKind.COMPLETED:
         return CleanupStep("delete_budget_rejected", str(ticket.error))
@@ -923,11 +933,11 @@ async def _delete_once(
                 runtime, item_id, output_id, "delete",
                 runtime.delete_config, "delete_attempts_exhausted")
         return CleanupStep("delete_budget_rejected", ticket.value.reason)
-    progress = runtime.outputs.progress_cleanup_item(
-        ProgressCleanupItem(item_id, occurred), new_operation_key(),
-        runtime.owned)
-    if progress.kind is not DbOutcomeKind.COMPLETED:
-        return CleanupStep("progress_rejected", str(progress.error))
+    if _cancel_requested(connection, action_id):
+        # 取消已阻止本次派发：沿原尝试保存可靠未派发结果，限制保持
+        # 可撤销，由取消按未发出删除分类解除。
+        return await _stop_delete_dispatch(
+            runtime, item_id, action_id, output_id, ticket.value.ticket)
     result = await _call_delete(runtime, item_id, ticket.value.ticket)
     absent, errored = _delete_observation(result)
     if errored:
@@ -944,7 +954,8 @@ async def _delete_once(
             basis=SettlementBasis.OBSERVED,
             evidence=EvidenceValue(type="delete_returned", version=1, data={})),
         observations=result.observations)
-    finish = runtime.operations.finish_attempt(
+    # 实际调用的结果与不可撤销限制事实（可靠非未派发时）共同保存。
+    finish = runtime.outputs.finish_cleanup_attempt(
         AttemptFinish(
             ticket=ticket.value.ticket,
             outcome=validate_outcome(ticket.value.ticket, outcome, runtime.evidence),
@@ -975,6 +986,43 @@ async def _delete_once(
     if _cancel_requested(runtime.owned.connection, action_id):
         return await _settle_canceling_member(runtime, item_id, output_id)
     return await _verify_after_delete(runtime, item_id, action_id, output_id)
+
+
+async def _stop_delete_dispatch(
+        runtime: CleanupRuntime, item_id: int, action_id: int,
+        output_id: int, ticket) -> CleanupStep:
+    """删除意图已提交、取消先于实际派发生效时保存可靠未派发结果。
+
+    未派发结果沿用原尝试身份（FAILED + NO_EFFECT + not_dispatched
+    依据），次数保留、限制保持可撤销；随后按未发出删除的取消分类
+    解除本项限制，不产生删除收场错误。
+    """
+    from camctl.contracts.values import new_operation_key
+    from camctl.operations.attempts import AttemptFinish
+    from camctl.operations.models import (
+        AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
+        Settlement, SettlementBasis)
+    from camctl.operations.validation import validate_outcome
+    from camctl.persistence.models import DbOutcomeKind
+
+    outcome = CallOutcome(
+        status=AttemptStatus.FAILED,
+        error=ErrorValue(code="canceled_before_dispatch", stage="delete"),
+        effect=EffectState.NO_EFFECT,
+        settlement=Settlement(
+            basis=SettlementBasis.NOT_DISPATCHED,
+            evidence=EvidenceValue("dispatch_prevented", 1, {})),
+        observations=())
+    finish = runtime.outputs.finish_cleanup_attempt(
+        AttemptFinish(
+            ticket=ticket,
+            outcome=validate_outcome(ticket, outcome, runtime.evidence),
+            occurred_at=runtime.occurred_at(),
+            retry_wait=False),
+        new_operation_key(), runtime.owned)
+    if finish.kind is not DbOutcomeKind.COMPLETED:
+        return CleanupStep("finish_rejected", str(finish.error))
+    return await _cancel_member(runtime, item_id, 3, output_id)
 
 
 async def _verify_after_delete(
@@ -1008,10 +1056,12 @@ async def _cancel_member(
         output_id) -> CleanupStep:
     """取消已生效的成员处理：未发出删除解除限制，删除中按结论收场。"""
     from camctl.contracts.values import new_operation_key
-    from camctl.operations.attempts import RunOutcome
     from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.outputs import (
+        _member_delete_dispatch_state)
 
-    pending = runtime.owned.connection.execute(
+    connection = runtime.owned.connection
+    pending = connection.execute(
         "SELECT 1 FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
         " WHERE r.cleanup_item_id=? AND (a.status=1 OR a.result_json IS NULL) LIMIT 1",
         (item_id,)).fetchone()
@@ -1020,6 +1070,19 @@ async def _cancel_member(
         return CleanupStep("call_tracking")
 
     if status in (1, 2):
+        canceled = runtime.outputs.cancel_cleanup_item(
+            CancelCleanupItem(item_id, runtime.occurred_at()),
+            new_operation_key(), runtime.owned)
+        if canceled.kind is not DbOutcomeKind.COMPLETED:
+            return CleanupStep("cancel_rejected", str(canceled.error))
+        rejected = _settle_companion_runs(runtime, item_id, RunOutcome.CANCELED)
+        if rejected is not None:
+            return CleanupStep("companion_rejected", rejected)
+        return CleanupStep("canceled")
+    dispatched, _unsettled = _member_delete_dispatch_state(connection, item_id)
+    if not dispatched:
+        # 删除中成员可靠从未派发自己的删除（只有查询或可靠未派发的
+        # 删除尝试）：无删除错误取消并解除本项可撤销限制。
         canceled = runtime.outputs.cancel_cleanup_item(
             CancelCleanupItem(item_id, runtime.occurred_at()),
             new_operation_key(), runtime.owned)
@@ -1136,12 +1199,16 @@ def _fail_exhausted(
 
 
 def _begin_query_attempt(runtime: CleanupRuntime, item_id: int, action_id: int):
-    """登记一次存在性查询尝试；预算独立于删除流程。"""
+    """登记一次存在性查询尝试；预算独立于删除流程。
+
+    首次查询取得处理归属、查询流程与本次尝试在同一事务建档；已在
+    处理阶段的成员只登记查询尝试。
+    """
     from camctl.contracts.values import new_operation_key
     from camctl.operations.attempts import (
         AttemptIntent, AttemptTarget, OperationKind)
 
-    return runtime.operations.begin_attempt(
+    return runtime.outputs.begin_cleanup_attempt(
         AttemptIntent(
             operation="query",
             action_id=action_id,
@@ -1279,16 +1346,19 @@ def _consume_saved_query(runtime: CleanupRuntime, pending: PendingCleanupQuery) 
             request = FinishCleanupItem(
                 item_id, CleanupOutcomeChoice.ABSENCE_CONFIRMED, runtime.occurred_at())
         elif canceled:
-            own_delete = runtime.owned.connection.execute(
-                "SELECT 1 FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
-                " WHERE r.cleanup_item_id=? AND r.kind=4 LIMIT 1", (item_id,)).fetchone()
-            if own_delete is None:
-                # 查询完成不证明本成员删除；此取消组合由 Task 0 的共同
-                # 建档和限制分类接入，不能借用其他成员的删除生成错误。
-                raise ConsistencyError("仅有查询的清理取消尚缺成员归属与限制结算")
-            code = "file_delete_failed" if present else "delete_unconfirmed"
-            request = CancelCleanupItem(
-                item_id, runtime.occurred_at(), code, {"output_id": str(output_id)})
+            from camctl.persistence.repositories.outputs import (
+                _member_delete_dispatch_state)
+            dispatched, _unsettled = _member_delete_dispatch_state(
+                runtime.owned.connection, item_id)
+            if not dispatched:
+                # 查询完成不证明本成员删除；本项可靠从未派发自己的删
+                # 除时无删除错误取消并解除本项限制，不借用其他成员
+                # 的删除生成收场错误。
+                request = CancelCleanupItem(item_id, runtime.occurred_at())
+            else:
+                code = "file_delete_failed" if present else "delete_unconfirmed"
+                request = CancelCleanupItem(
+                    item_id, runtime.occurred_at(), code, {"output_id": str(output_id)})
         else:
             _establish_query_retry_gate(runtime, item_id, present)
             runtime.consumed_queries[item_id] = (pending.database_id, *identity)
@@ -1305,6 +1375,12 @@ def _consume_saved_query(runtime: CleanupRuntime, pending: PendingCleanupQuery) 
         phase, detail = "succeeded", "ABSENCE_CONFIRMED"
         save = runtime.outputs.finish_cleanup_item
         rejected_phase = "result_rejected"
+    elif member.request.code is None:
+        # 可靠未派发删除的解除取消：无删除错误，伴随流程按取消收场。
+        outcome, error = RunOutcome.CANCELED, None
+        phase, detail = "canceled", None
+        save = runtime.outputs.cancel_cleanup_item
+        rejected_phase = "cancel_rejected"
     else:
         code = member.request.code
         outcome = RunOutcome.FAILED if code == "file_delete_failed" else RunOutcome.UNCONFIRMED

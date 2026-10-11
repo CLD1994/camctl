@@ -32,9 +32,11 @@ from camctl.host_files.paths import (
     PathRuleError, object_file_name, relative_file_path, validate_relative_file_path,
 )
 from camctl.operations.attempts import (
-    AttemptTarget, OperationKind, RunOutcome, StaleRunFinish, operation_responsibility_key)
-from camctl.operations.models import ErrorValue
-from camctl.persistence.repositories.operations import _FinishStaleRunsCommand
+    AttemptFinish, AttemptIntent, AttemptTarget, BeginAttemptResult, BeginDisposition,
+    FinishAttemptResult, OperationKind, RunOutcome, StaleRunFinish, operation_responsibility_key)
+from camctl.operations.models import ErrorValue, SettlementBasis
+from camctl.persistence.repositories.operations import (
+    BeginAttemptCommand, FinishAttemptCommand, _FinishStaleRunsCommand)
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.cleanup_flow import (
     CancelCleanupItem,
@@ -5766,6 +5768,30 @@ class OutputsRepository:
         receipt = commit_operation(_ProgressCleanupCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
+    def begin_cleanup_attempt(
+        self, intent: AttemptIntent, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[BeginAttemptResult]:
+        """清理首次处理归属、操作流程与第一次尝试的共同建档事务。"""
+        receipt = commit_operation(
+            _BeginCleanupAttemptCommand(intent, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def finish_cleanup_attempt(
+        self, finish: AttemptFinish, key: OperationKey, owned: OwnedConnection
+    ) -> DbOutcome[FinishAttemptResult]:
+        """清理 DELETE 尝试结果与不可撤销限制事实的共同保存事务。"""
+        receipt = commit_operation(
+            _FinishCleanupAttemptCommand(finish, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_cleanup_item(
         self, command: FinishCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
@@ -7702,7 +7728,12 @@ class _RestrictCleanupCommand(_CleanupItemCommandMixin):
 
 
 class _ProgressCleanupCommand(_CleanupItemCommandMixin):
-    """进入删除执行（CLEANUP_CHANGED.PROGRESS + 投影 RUNNING）。"""
+    """进入删除执行或保存不可撤销事实（CLEANUP_CHANGED.PROGRESS）。
+
+    首次取得处理归属从限制中进入删除中并保持可撤销限制；不可撤销
+    限制只在删除尝试取得可靠非未派发结果的事实保存事务中升级，未
+    派发结果不升级（限制登记语义见 workflow-fields 的限制状态）。
+    """
 
     def __init__(self, command: ProgressCleanupItem, key: OperationKey) -> None:
         if not isinstance(command, ProgressCleanupItem):
@@ -7719,6 +7750,33 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
         if saved is not None:
             return self._verify_and_reuse(saved)
         item = self._load_item(connection, command.item_id)
+        if command.irreversible:
+            # 删除中成员取得可靠派发事实：限制从可撤销升级为不可撤销。
+            if item["status"] != int(_CLEANUP_ITEM_STATUS.DELETING):
+                raise ConsistencyError("不可撤销事实要求成员处于删除中")
+            if item["restriction_state"] == int(_CLEANUP_RESTRICTION.IRREVERSIBLE):
+                return CommandPlan(
+                    events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True,
+                    result=CleanupItemSaved(
+                        CleanupItemDisposition.ALREADY, command.item_id))
+            if item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE):
+                raise ConsistencyError("不可撤销事实要求本项限制仍可撤销")
+            upgrade = _update(
+                "cleanup_items", command.item_id,
+                {"restriction_state": int(_CLEANUP_RESTRICTION.ACTIVE)},
+                {"restriction_state": int(_CLEANUP_RESTRICTION.IRREVERSIBLE)},
+            )
+            self._claim(item)
+            allocation = scope.allocate(1)
+            return CommandPlan(
+                events=(_envelope(
+                    allocation.first_event_id, allocation.txn_id,
+                    _CLEANUP_CHANGED_EVENT, 2, (upgrade,),
+                    command.occurred_at),),
+                owners=self._owners, state_rows=self._state,
+                result=CleanupItemSaved(
+                    CleanupItemDisposition.SAVED, command.item_id))
         if item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING):
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
@@ -7736,10 +7794,8 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
         allocation = scope.allocate(2)
         progress = _update(
             "cleanup_items", command.item_id,
-            {"status": int(_CLEANUP_ITEM_STATUS.PENDING_DELETE),
-             "restriction_state": int(_CLEANUP_RESTRICTION.ACTIVE)},
-            {"status": int(_CLEANUP_ITEM_STATUS.DELETING),
-             "restriction_state": int(_CLEANUP_RESTRICTION.IRREVERSIBLE)},
+            {"status": int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)},
+            {"status": int(_CLEANUP_ITEM_STATUS.DELETING)},
         )
         projection = _update(
             "outputs", output_id,
@@ -7769,11 +7825,215 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
         row = saved[0]["body"]["rows"][0]
         if row["table"] != "cleanup_items" or row["id"] != self._command.item_id:
             raise TransactionError("原删除推进属于其他成员")
+        if self._command.irreversible != (row["after"]["values"].get(
+                "restriction_state") == int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
+            raise TransactionError("原删除推进的不可撤销输入与原事务不同")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
             result=CleanupItemSaved(
                 CleanupItemDisposition.ALREADY, self._command.item_id))
+
+
+def _member_delete_dispatch_state(connection, item_id: int) -> tuple[bool, bool]:
+    """本成员自身 DELETE 尝试的派发事实：返回（可能派发, 尚未收场）。
+
+    可能派发按逐尝试的可靠结果判定：任何非 `not_dispatched` 收场依
+    据的已结束尝试都算可能派发；可靠未派发不撤销其他尝试。另一成
+    员的 DELETE 不进入本成员分类（按 cleanup_item_id 单向关联）。
+    """
+    delete_kind = int(enum_for("operation_runs.kind").DELETE_FILE)
+    dispatched = unsettled = False
+    with closing(connection.execute(
+        "SELECT a.status, a.result_json FROM operation_attempts a"
+        " JOIN operation_runs r ON a.run_id = r.id"
+        " WHERE r.cleanup_item_id = ? AND r.kind = ?"
+        " ORDER BY a.id", (item_id, delete_kind),
+    )) as cursor:
+        rows = cursor.fetchall()
+    for status, result_json in rows:
+        if int(status) == int(enum_for("operation_attempts.status").RUNNING) \
+                or result_json is None:
+            unsettled = True
+            continue
+        basis = connection.execute(
+            "SELECT json_extract(?, '$.settlement.basis')", (result_json,)
+        ).fetchone()[0]
+        if basis != "not_dispatched":
+            dispatched = True
+    return dispatched, unsettled
+
+
+class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
+    """清理首次处理归属、操作流程与第一次尝试的共同建档事务。
+
+    完整已提交边界不能只有首次尝试却没有处理归属，也不能只有归属
+    却缺少对应流程；成员进入删除中、流程创建与首次尝试登记在同一
+    事务提交（cleanup-coordination 流程关联与按需创建）。预算或资
+    格拒绝时不进入处理归属，成员保持待删除。
+    """
+
+    def __init__(self, intent: AttemptIntent, key: OperationKey) -> None:
+        if not isinstance(intent, AttemptIntent):
+            raise TypeError("清理首次建档申请必须使用 AttemptIntent")
+        if intent.target is None or intent.target.cleanup_item_id is None:
+            raise TransactionError("清理首次建档要求清理成员目标")
+        self._intent = intent
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        intent = self._intent
+        item_id = intent.target.cleanup_item_id
+        saved = saved_transaction_events(connection, self._key)
+        item = self._load_item(connection, item_id)
+        if saved is not None:
+            return self._reuse(scope, saved, item)
+        action = self._state["actions"][item["action_id"]]
+        if action["target_selection_state"] != _TARGET_FIXED:
+            raise ConsistencyError("清理首次建档要求目标集合已固定")
+        if intent.action_id != item["action_id"]:
+            raise TransactionError("清理首次建档的意图与成员所属动作不符")
+        if item["status"] == int(_CLEANUP_ITEM_STATUS.PENDING_DELETE):
+            if item["restriction_state"] != int(_CLEANUP_RESTRICTION.ACTIVE):
+                raise ConsistencyError("清理首次建档要求成员处于可撤销限制")
+            # 新处理责任不建立在取消已生效的动作上；已删除中成员的
+            # 后续尝试（含取消收场 QUERY）按各自资格规则检查。
+            if (action["status"] != int(_ACTION_STATUS.RUNNING)
+                    or action["cancel_requested"]):
+                raise TransactionError("清理首次建档要求清理动作执行中且未取消")
+            entry = True
+        elif item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING):
+            # 已在处理阶段：首次使用另一种操作或既有流程的后续尝试。
+            entry = False
+        else:
+            raise ConsistencyError("清理首次建档要求成员待删除或删除中")
+        sub = _CleanupBindingScope(scope)
+        begin = BeginAttemptCommand(intent, self._key).plan(sub)
+        if not begin.events:
+            # 预算或资格拒绝：归属、流程与尝试都不建立，成员保持待删除。
+            return _merge_cleanup_binding_plans([
+                CommandPlan(events=(), owners=self._owners,
+                            state_rows=self._state, result=begin.result),
+                begin,
+            ], result=begin.result, read_only=True)
+        plans = [begin]
+        if entry:
+            plans.append(_ProgressCleanupCommand(
+                ProgressCleanupItem(item_id, intent.occurred_at), self._key,
+            ).plan(sub))
+        merged = _merge_cleanup_binding_plans(plans, result=begin.result)
+        allocation = scope.allocate(len(merged.events))
+        if (merged.events[0].event_id != allocation.first_event_id
+                or merged.events[-1].event_id != allocation.last_event_id):
+            raise TransactionError("清理首次建档的事件组编号不连续")
+        return merged
+
+    def _reuse(self, scope, saved, item):
+        intent = self._intent
+        began = [event for event in saved if event["type"] == 11]
+        if not began or any(
+                event["type"] not in (11, 17, 24) for event in saved):
+            raise TransactionError("原事务不是清理首次建档，不能作为重送核实")
+        for event in saved:
+            if event["type"] != 24 or event["reason"] != 2:
+                continue
+            row = event["body"]["rows"][0]
+            if (row["table"] != "cleanup_items"
+                    or row["id"] != intent.target.cleanup_item_id
+                    or row["after"]["values"].get("status")
+                    != int(_CLEANUP_ITEM_STATUS.DELETING)):
+                raise TransactionError("原清理首次建档的归属事件属于其他成员")
+            if event["occurred_at"] != intent.occurred_at:
+                raise TransactionError("原清理首次建档的时刻与意图不同")
+        # 同键委托通用意图命令原键核实：额外归属事件不影响其只读复用。
+        begin = BeginAttemptCommand(intent, self._key).plan(scope)
+        merged = _merge_cleanup_binding_plans([
+            CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                        result=begin.result),
+            begin,
+        ])
+        return replace(merged, read_only=True)
+
+
+class _FinishCleanupAttemptCommand(_CleanupItemCommandMixin):
+    """清理 DELETE 尝试结果与不可撤销限制事实的共同保存事务。
+
+    删除调用取得可靠非未派发结果的同一事务把成员限制从可撤销升
+    级为不可撤销；可靠未派发结果保持可撤销限制，由取消按未发出删
+    除分类解除。迟到或原键重送沿原事务事实核实，不重复升级。
+    """
+
+    def __init__(self, finish: AttemptFinish, key: OperationKey) -> None:
+        if not isinstance(finish, AttemptFinish):
+            raise TypeError("清理尝试结果申请必须使用 AttemptFinish")
+        self._finish = finish
+        self._key = key
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        finish = self._finish
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        item_id = int(finish.ticket.target_id)
+        item = self._load_item(connection, item_id)
+        sub = _CleanupBindingScope(scope)
+        base = FinishAttemptCommand(finish, self._key).plan(sub)
+        merged = _merge_cleanup_binding_plans([
+            CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                        result=base.result),
+            base,
+        ])
+        if not base.events:
+            # 原键重送或迟到结果：限制事实已随原结果事务保存。
+            return replace(merged, read_only=True)
+        dispatched = (finish.outcome.outcome.settlement.basis
+                      is not SettlementBasis.NOT_DISPATCHED)
+        if (dispatched and item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING)
+                and item["restriction_state"] == int(_CLEANUP_RESTRICTION.ACTIVE)):
+            upgrade = _ProgressCleanupCommand(
+                ProgressCleanupItem(
+                    item_id, finish.occurred_at, irreversible=True),
+                self._key,
+            ).plan(sub)
+            merged = _merge_cleanup_binding_plans([merged, upgrade], result=base.result)
+        allocation = scope.allocate(len(merged.events))
+        if (merged.events[0].event_id != allocation.first_event_id
+                or merged.events[-1].event_id != allocation.last_event_id):
+            raise TransactionError("清理尝试结果的事件组编号不连续")
+        return merged
+
+    def _reuse(self, scope, saved):
+        finish = self._finish
+        split = len(saved)
+        for index, event in enumerate(saved):
+            if event["type"] == _CLEANUP_CHANGED_EVENT and event["reason"] == 2:
+                split = index
+                break
+        upgrade = saved[split:]
+        if len(upgrade) > 1 or any(
+                (event["type"], event["reason"]) != (24, 2) for event in upgrade):
+            raise TransactionError("原清理尝试结果事务包含其他清理事件")
+        item_id = int(finish.ticket.target_id)
+        if upgrade:
+            row = upgrade[0]["body"]["rows"][0]
+            if (row["table"] != "cleanup_items" or row["id"] != item_id
+                    or row["after"]["values"].get("restriction_state")
+                    != int(_CLEANUP_RESTRICTION.IRREVERSIBLE)
+                    or upgrade[0]["occurred_at"] != finish.occurred_at):
+                raise TransactionError("原不可撤销事实与本次结果保存不符")
+        base = FinishAttemptCommand(finish, self._key)._reuse(scope, saved[:split])
+        merged = _merge_cleanup_binding_plans([
+            CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                        result=base.result),
+            base,
+        ])
+        return replace(merged, read_only=True)
 
 
 class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
@@ -7823,8 +8083,11 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                     and output["availability"] != int(_AVAILABILITY.CLEANED)):
                 raise ConsistencyError("已有完成依据要求产物已可靠清理")
         elif (item["status"] != int(_CLEANUP_ITEM_STATUS.DELETING)
-                or item["restriction_state"]
-                != int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
+                or item["restriction_state"] not in (
+                    int(_CLEANUP_RESTRICTION.ACTIVE),
+                    int(_CLEANUP_RESTRICTION.IRREVERSIBLE))):
+            # 删除中成员在派发事实保存前仍为可撤销限制；成功终态本身
+            # 保存不可撤销完成事实（查询确认或缺席依据同样适用）。
             raise ConsistencyError("清理成功要求成员处于删除中")
         device_file_id = output.get("device_file_id")
         intermediate_file_id = output.get("intermediate_file_id")
@@ -8084,25 +8347,39 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
         error_id = None
         details = None
         if item["status"] == int(_CLEANUP_ITEM_STATUS.DELETING):
-            if command.code is None:
+            dispatched, unsettled = _member_delete_dispatch_state(
+                connection, command.item_id)
+            if unsettled:
                 raise TransactionError(
-                    "删除中的成员取消必须携带收场错误，不经直接取消")
-            if command.code not in self._SETTLEMENT_CODES:
-                raise TransactionError(
-                    f"取消收场错误不在允许集合: {command.code!r}")
-            if item["restriction_state"] != int(_CLEANUP_RESTRICTION.IRREVERSIBLE):
-                raise ConsistencyError("删除中的成员取消要求不可撤销限制")
-            error_id = item_error_id("cleanup_items", command.code)
-            validate_error_details(command.code, command.details)
-            details = dict(command.details)
-            if details.get("output_id") != str(item["output_id"]):
-                raise TransactionError("取消收场错误必须属于原清理成员的产物")
-            from camctl.outputs.cleanup_flow import _output_delete_facts
-            facts = _output_delete_facts(connection, item["output_id"])
-            expected = "file_delete_failed" if facts["confirmed_present_after"] else "delete_unconfirmed"
-            if facts["file_absent"] or command.code != expected:
-                raise TransactionError("取消收场错误与原删除和查询的可靠事实不符")
-            after_restriction = int(_CLEANUP_RESTRICTION.IRREVERSIBLE)
+                    "本项删除尝试尚未可靠结束，不能结束取消成员")
+            if not dispatched:
+                # 本项可靠从未派发删除：无删除错误取消并解除本项可撤
+                # 销限制；另一成员的删除事实不进入本项分类。
+                if command.code is not None:
+                    raise TransactionError(
+                        "可靠未派发删除的成员取消不携带收场错误")
+                after_restriction = int(_CLEANUP_RESTRICTION.RELEASED)
+            else:
+                if command.code is None:
+                    raise TransactionError(
+                        "删除中的成员取消必须携带收场错误，不经直接取消")
+                if command.code not in self._SETTLEMENT_CODES:
+                    raise TransactionError(
+                        f"取消收场错误不在允许集合: {command.code!r}")
+                if item["restriction_state"] != int(_CLEANUP_RESTRICTION.IRREVERSIBLE):
+                    raise ConsistencyError(
+                        "已派发删除的成员取消要求不可撤销限制")
+                error_id = item_error_id("cleanup_items", command.code)
+                validate_error_details(command.code, command.details)
+                details = dict(command.details)
+                if details.get("output_id") != str(item["output_id"]):
+                    raise TransactionError("取消收场错误必须属于原清理成员的产物")
+                from camctl.outputs.cleanup_flow import _output_delete_facts
+                facts = _output_delete_facts(connection, item["output_id"])
+                expected = "file_delete_failed" if facts["confirmed_present_after"] else "delete_unconfirmed"
+                if facts["file_absent"] or command.code != expected:
+                    raise TransactionError("取消收场错误与原删除和查询的可靠事实不符")
+                after_restriction = int(_CLEANUP_RESTRICTION.IRREVERSIBLE)
         elif item["status"] in (int(_CLEANUP_ITEM_STATUS.UNRESOLVED),
                                 int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)):
             if command.code is not None:
@@ -8187,15 +8464,28 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
             raise TransactionError("原清理取消属于其他成员")
         row = rows[0]
         prior_status = row["before"]["values"].get("status")
-        restrictions = {
+        released_restrictions = {
             int(_CLEANUP_ITEM_STATUS.UNRESOLVED): int(_CLEANUP_RESTRICTION.NOT_ESTABLISHED),
             int(_CLEANUP_ITEM_STATUS.PENDING_DELETE): int(_CLEANUP_RESTRICTION.RELEASED),
-            int(_CLEANUP_ITEM_STATUS.DELETING): int(_CLEANUP_RESTRICTION.IRREVERSIBLE),
         }
+        if prior_status == int(_CLEANUP_ITEM_STATUS.DELETING):
+            # 历史只编码变化列：限制列缺省表示保持不可撤销（已派发分
+            # 支不改限制），解除分支必然编码 RELEASED。
+            prior_restriction = row["after"]["values"].get("restriction_state")
+            if prior_restriction is None:
+                prior_restriction = int(_CLEANUP_RESTRICTION.IRREVERSIBLE)
+            if prior_restriction not in (
+                    int(_CLEANUP_RESTRICTION.RELEASED),
+                    int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
+                raise TransactionError("原删除收场的限制分支不可解释")
+            released_restrictions[int(_CLEANUP_ITEM_STATUS.DELETING)] = prior_restriction
+        restrictions = released_restrictions
         if prior_status not in restrictions:
             raise TransactionError("原清理取消的处理分支不可解释")
         error_id, details = None, None
-        if prior_status == int(_CLEANUP_ITEM_STATUS.DELETING):
+        if (prior_status == int(_CLEANUP_ITEM_STATUS.DELETING)
+                and restrictions[prior_status]
+                == int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
             if command.code not in self._SETTLEMENT_CODES:
                 raise TransactionError("原删除收场不能复用未发出删除的取消输入")
             validate_error_details(command.code, command.details)
@@ -8209,10 +8499,14 @@ class _CancelCleanupItemCommand(_CleanupItemCommandMixin):
         expected_before = {"status": prior_status, "final_event_id": None}
         expected_after = {"status": int(_CLEANUP_ITEM_STATUS.CANCELED),
                           "final_event_id": saved[0]["event_id"]}
-        if prior_status == int(_CLEANUP_ITEM_STATUS.DELETING):
+        if (prior_status == int(_CLEANUP_ITEM_STATUS.DELETING)
+                and restrictions[prior_status]
+                == int(_CLEANUP_RESTRICTION.IRREVERSIBLE)):
             expected_before.update(error_code=None, error_details_json=None)
             expected_after.update(error_code=error_id, error_details_json=details)
-        elif prior_status == int(_CLEANUP_ITEM_STATUS.PENDING_DELETE):
+        elif prior_status in (int(_CLEANUP_ITEM_STATUS.PENDING_DELETE),
+                              int(_CLEANUP_ITEM_STATUS.DELETING)):
+            # 待删除或可靠未派发删除的删除中成员：可撤销限制解除。
             expected_before["restriction_state"] = int(_CLEANUP_RESTRICTION.ACTIVE)
             expected_after["restriction_state"] = int(_CLEANUP_RESTRICTION.RELEASED)
         if (not json_equal(row["before"]["values"], expected_before)
@@ -8250,7 +8544,7 @@ class _CleanupBindingScope:
         return TransactionAllocations(self.max_txn_id + 1, first, self._next - 1)
 
 
-def _merge_cleanup_binding_plans(plans, *, read_only=False, coverage=None):
+def _merge_cleanup_binding_plans(plans, *, read_only=False, coverage=None, result=None):
     state, owners = {}, {}
     for plan in plans:
         owners.update(plan.owners)
@@ -8259,11 +8553,12 @@ def _merge_cleanup_binding_plans(plans, *, read_only=False, coverage=None):
             for identity, facts in rows.items():
                 previous = target.setdefault(identity, {})
                 if any(column in previous and not json_equal(previous[column], value)
-                       for column, value in facts.items()):
+                        for column, value in facts.items()):
                     raise TransactionError("清理复合事务的同一原记录事实矛盾")
                 target[identity] = {**previous, **facts}
     return CommandPlan(events=tuple(event for plan in plans for event in plan.events),
-        owners=owners, state_rows=state, result=plans[0].result, read_only=read_only,
+        owners=owners, state_rows=state,
+        result=result if result is not None else plans[0].result, read_only=read_only,
         read_coverage=coverage or ReadCoverage())
 
 
