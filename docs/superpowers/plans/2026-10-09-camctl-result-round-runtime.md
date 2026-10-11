@@ -287,7 +287,7 @@ root 新鲜日志 `/tmp/camctl-goal-recovery-fixture-red.log` 证明旧中断用
 
 - [x] 新录像八个组件分区建立完整公开历史，root 确认有效红。
 - [x] 八个分区验证录像文件门槛、前轮事实合并及预算失败时的文件保留。
-- [ ] 媒体等待后结束原 ACTIVE RESULTS，以及既有明确媒体失败入口，按下述独立阶段核验。 任务一半（媒体等待后收场）已交付；任务二（明确媒体失败入口，下述 2026-10-09 记录点名的四个未完成分区）仍未执行，本项保持未勾。
+- [x] 媒体等待后结束原 ACTIVE RESULTS，以及既有明确媒体失败入口，按下述独立阶段核验。（2026-10-11 收齐。任务一半——媒体等待后收场——由 `test_record_media_result_settlement.py` 四组分区交付；任务二——明确媒体失败入口——由同文件新增的 `test_explicit_media_issue_settles_from_saved_check_without_new_queries`（时长充足的明确媒体问题经公开仓储保存后本地收场，零新查询、错误与 T0 保持）与任务二六项核验交付，root 复跑全文件 19 passed。）
 - [x] 正常 STOP 用例等待原重试事实后推进 3 秒，定向 bootstrap 通过。
 - [x] 独立只读审查文件门槛、前轮事实及媒体接缝，分别记录证据范围和未完成事项。
 - [x] root 完成相关分目录回归；阶段产物纳入本地统一提交范围。
@@ -352,7 +352,7 @@ root 的 `/tmp/camctl-goal-media-settlement-save-red-2.log` 为 4 failed、10 pa
 独立只读审查核对新源文件、原 run 身份、原尝试守恒、共同事务、实际媒体判定、完整请求的保存失败与恢复及默认保存前缀，有限范围内未发现阻断项。取消入口尚未接入录像申请的保存前缀；原后续事务不存在而取消先保存的相遇分区、默认入口提交前／媒体失败／持续保存拒绝、复合预览或修复产物关联重送仍须独立验证。任务二的明确媒体失败优先路径、完整 VIDEO 加未完成 OTHER 的新媒体控制分区、原 raw READ End 与 v2 均未在此范围内完成。上述绿色不作为整个媒体核实计划完成的依据。
 
 - [x]  读取上述正式规则、`AttemptFinish`／`RunFinish`／`StaleRunFinish` 及其真实事务守卫，记录独立结束入口能否同时覆盖 RESULTS、适用动作与产物。如果状态映射或事务成员没有唯一正式依据，先报告未决，停止生产设计。 正式依据核对与 `FinishRecordingResults` 复合入口的授权记录见“任务一”阶段验证。
-- [ ] 沿公开 Acceptance、Scheduling、实际 START／STOP、活动结束及正式处理仓储建立需要媒体处理的录像。可复用 `media_retry_fixtures.py::media_pipeline` 的完整历史方式，不能直接修改 processing 状态或移除守卫。使用真实媒体端口与受接口约束的工具替身，让完整 VIDEO 的第一轮 RESULTS 已保存、媒体仍 PENDING；另设完整 VIDEO 加未完成 OTHER 的文件控制分区。 媒体管线前提半已交付；“完整 VIDEO 加未完成 OTHER”控制分区仍未单独建反例。
+- [x] 沿公开 Acceptance、Scheduling、实际 START／STOP、活动结束及正式处理仓储建立需要媒体处理的录像。可复用 `media_retry_fixtures.py::media_pipeline` 的完整历史方式，不能直接修改 processing 状态或移除守卫。使用真实媒体端口与受接口约束的工具替身，让完整 VIDEO 的第一轮 RESULTS 已保存、媒体仍 PENDING；另设完整 VIDEO 加未完成 OTHER 的文件控制分区。（2026-10-11，容器 Python 3.11.16。单文件前提由 `media_pipeline` 与 `test_record_media_result_settlement.py` 既有四组分区交付；本次新增 `test_incomplete_other_file_control_partition_keeps_media_pipeline` 建立完整 VIDEO 加未完成 OTHER 的控制分区：RESULTS 第一轮已保存、媒体仍待定时，未完成 OTHER 被如实观察为完成未知且不进入读取或产物，完整源文件的读取、检查完成与无需修复的判定不受影响，集合因未完成文件暂不齐备时保持重试等待、不收场、不登记产物，已观察的完整源文件事实不因未完成文件丢弃。尚未核验的前提：集合中未完成 OTHER 转完整后的重新观察与收场链路不在本前提分区内（读取已可靠结束后的本地装载次序属普通轮次观察范围），该边界由既有收场矩阵与后续审计跟踪，本项不为其填写结论。）
 - [x]  在 PENDING 点保存原 activity／run／ticket、原结果事务 key 和全文、事件引用、T0、次数、配置与等待状态快照。确认 run ACTIVE、真实 retry 已可靠保存、raw holder 已释放。后次通过真实媒体链得到合法 SUCCEEDED 或既有判定 FAILED，分别断言无新 START／STOP／RESULTS、无新 run／attempt、正式文件与业务结果正确，原尝试及原处分不变；原 ACTIVE RESULTS 必须沿已确认入口结束并清除等待。 PENDING 点快照与媒体成功／失败消费均经 `test_record_media_result_settlement.py` 四组分区验证。
 - [x]  对同一 runtime 继续与 fresh Owned／runtime 本地装载分别覆盖。真正关闭和重开连接，核对 metadata；同会话继续保留实际 pending 集合。没有 holder 的跨进程路径只能使用已可靠历史，不能伪造原 RawOutcome 或比较旧进程单调钟。 同会话与真正重开两种入口都在 `/tmp/camctl-goal-media-settlement-red-2.log` 前提中通过。
 - [x]  root 独占运行候选反例，确认失败确实是原 ACTIVE RESULTS 未收场，或本地恢复新增查询；fixture／导入／守卫错误不能记为行为红。root 确认有效红与正式接口后，才授权最窄生产修改。 有效红为 `/tmp/camctl-goal-media-settlement-red-2.log`（4 failed，唯一失败是原 RESULTS 仍 ACTIVE）。

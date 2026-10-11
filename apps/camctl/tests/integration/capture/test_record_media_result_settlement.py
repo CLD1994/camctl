@@ -23,6 +23,7 @@ from camctl.persistence.transaction import TransactionError
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .media_retry_fixtures import _EVIDENCE, media_pipeline  # noqa: F401
+from camctl.capture.results import FileKind
 from .test_capture_contract import ResultsDouble, _entry, _runtime
 from .test_input_copy import _CONTENT, _NOW
 from .test_media_flow import ReadDriverDouble, _flow
@@ -403,3 +404,56 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
     finally:
         if recovered is not None:
             recovered.connection.close()
+
+
+async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
+        media_pipeline):
+    """完整 VIDEO 加未完成 OTHER 的控制分区：媒体链照常，收场等集合。
+
+    未完成 OTHER 被如实观察为完成未知，不进入读取或产物；完整
+    VIDEO 的读取与检查不受影响。集合因未完成文件暂不齐备时保持
+    重试等待，不把未完成解释为完成；OTHER 写完后集合齐备，收场
+    只登记完整源文件为产物。
+    """
+    owned, roots, source_id = media_pipeline
+    entry = replace(_entry("original-recording", size=len(_CONTENT)),
+                    locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
+    incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
+    results = ResultsDouble({1: (entry, incomplete)})
+    runtime = _runtime(owned, results=results, listing_cache={})
+    runtime.evidence = _EVIDENCE
+    reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
+    runtime.media = _flow(media_pipeline, reader, tools)
+
+    await capture_handler("camera_record")(1, runtime)
+    assert _result_run(owned)[1:4] == (2, 1, 1)
+
+    runtime.wall_us = lambda: _NOW + 200_000_000
+    await capture_handler("camera_record")(1, runtime)
+
+    # 未完成 OTHER 被如实观察为完成未知，不进入读取或产物。
+    other_id, = owned.connection.execute(
+        "SELECT id FROM device_files WHERE observer_action_id=1 AND id<>?",
+        (source_id,)).fetchone()
+    assert owned.connection.execute(
+        "SELECT completion_state FROM device_files WHERE id=?",
+        (other_id,)).fetchone() == (1,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
+        (other_id,)).fetchone() == (0,)
+    # 媒体链不受未完成 OTHER 影响：只读源文件，检查完成且无需修复。
+    assert len(reader.opens) == 1
+    assert tools.calls == ["probe", "probe"]
+    assert owned.connection.execute(
+        "SELECT check_state, repair_state FROM recording_processing"
+        " WHERE id=1").fetchone() == (3, 2)
+    # 集合因未完成 OTHER 暂不齐备：不收场、不登记产物、保持重试等待。
+    assert _result_run(owned)[1:4] == (2, 1, 1)
+    assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
+
+    # 集合中未完成文件不参与收场判定：保持等待、不解释为完成，
+    # 也不因未完成文件丢弃已观察的完整源文件事实。
+    assert owned.connection.execute(
+        "SELECT presence_state, completion_state FROM device_files WHERE id=?",
+        (source_id,)).fetchone() == (2, 3)
