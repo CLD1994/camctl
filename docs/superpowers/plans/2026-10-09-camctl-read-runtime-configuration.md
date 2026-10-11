@@ -110,7 +110,7 @@
 ### RD3 失败原子与整体复核
 
 - [x]  对配置采用、读取意图、结果、重拷决定和失败／保护收场注入投影错误与 COMMIT 前后丢失。确认回滚无部分事实；UNKNOWN 关闭重开按原键核实完整事件组，改变输入须拒绝。 两入口 business key 与读取结果 key 的 COMMIT 前后 UNKNOWN、保存门分支回滚及原键拒绝分别由 `test_obtain_failure_unknown_commit_retries_original_business_key`、`test_internal_failure_unknown_commit_retries_original_business_key`、`test_default_read_save_failure_keeps_original_responsibility` 与 copy segments 原键分区覆盖。
-- [ ] 历史回放和固定 H 报告不加载新配置、不开设备、不执行文件副作用，原 bytes、已用、attempt_no 和失败理由保持。2026-10-11 核对未找到针对读取配置的专项回放／报告反例，本项保持未勾。
+- [x] 历史回放和固定 H 报告不加载新配置、不开设备、不执行文件副作用，原 bytes、已用、attempt_no 和失败理由保持。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_read_history_replay_report.py::test_replay_and_fixed_report_ignore_changed_read_configuration`：经真实媒体链完成一次完整源读取建立读取责任（READ 流程行、尝试与副本事实），冻结固定 H 并生成公共 Schema 合法的报告；随后把设备驱动改绑为替代驱动、读取上限与间隔改值，同一冻结依据分批重建报告字节与摘要一致、staging 除报告文件外无新增（无文件副作用）。录像动作对象以空种子初始回放恢复，读取责任成员与当前投影逐行业务列一致：已用次数与原上限保持本次配置之前的保存值、尝试编号与状态（第 1 次且成功、无错误）如实恢复；回放与报告阶段媒体工具零新增调用，配置变化不被任何路径消费。）
 - [x]  根 Agent 顺序执行 bootstrap、capture、outputs、operations、devices、history 相关目录。每次 pytest 前台独占；不合并集成目录或并行运行。 2026-10-11 复跑：capture 982 passed、reporting 373 passed、devices+history+operations 540 passed、全量单元 4726 passed；outputs 1937+2 skipped 与 bootstrap 963+1 skipped 为本会话同代码位点的先前门禁。
 - [ ] 独立审阅普通取回、内部异常原片检查、内部修复、重拷、取消、断电续传、绑定异常恢复及会话退出接缝，再更新路线图范围。窄装配或某一个入口通过不足以完成本任务。
 
