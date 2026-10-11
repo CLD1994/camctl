@@ -407,7 +407,9 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 随后用户完成更新安装与资源提取，并回传 Python 3.11.17、SQLite 3.53.1。uv 检查九个运行依赖后，卸载原 `camctl 0.1.0` 并安装更新目录中的同版本 wheel；实际导入来源为 `/home/cld/.camctl/venv/lib/python3.11/site-packages/camctl/__init__.py`，演示配置提取到 `/home/cld/.camctl/camera-demo/config.toml`。本次 `adb devices -l` 列出 serial `123456789ABCDEF`，状态为 `device`，USB 为 `1-2.3`，product 为 `qcs8625_ac206`，transport_id 为 `3`。
 
-当前已取得 ARM 更新安装和相机连接证据，尚未取得配置填写、初始化、现场能力导出或真机拍摄结果。下一步使用本次实际 serial 填写已提取的配置，再执行 `init` 和 `describe`；现场新能力说明同步到客户端后，真机业务链沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
+用户随后回传实际配置：`devices.action6` 使用 `dji-action6`，ADB serial 为 `123456789ABCDEF`，省略 `[paths]` 而使用运行账户默认目录。`init` 成功；现场 `describe` 导出 `/home/cld/.camctl/camera-demo/capabilities.json`，通过安装版能力 Schema 校验，范围为 `action6 / camera_record / action6_record`。估算声明为 `bitrate_mbps=130`、`duration.method=direct`、`seconds.source=parameter`、`seconds.path=/duration_s`。
+
+当前已取得 ARM 配置、初始化和现场能力导出的证据，客户端加载该说明及真机拍摄仍待回传。下一步同步完整能力说明并通过 C host 提交十秒录像，按实际报告核对原动作及产物，再独立取回。完整业务链沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
 
 ## 部署交接与待核验项
 
