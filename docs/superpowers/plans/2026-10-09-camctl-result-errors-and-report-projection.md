@@ -82,15 +82,15 @@
 
 **接口建议：** `validate_public_error(value: Mapping[str, Any]) -> None` 复用 `status-report.schema.json#/$defs/error` 和现有本地 Schema 注册表，验证完整形状；登记码附加检查正式 stage/details，未知码保留开放行为。返回值不重构、不标准化原错误。输入模型按现行 ValueError 约定拒绝，事件守卫转换为现有 EventValidationError；不改变 DbOutcome 协议。
 
-- [ ] 写纯单元 `test_result_error_shape_rejects_incomplete_input`：缺 stage、缺 details、空 code/stage、非对象 details、额外顶层成员分别拒绝；BEGIN/COMPLETE 原阶段限制保持。
-- [ ] 写 `test_registered_error_rejects_wrong_stage_or_details` 与 `test_unknown_driver_error_preserves_full_value`：使用公共登记原定义，不自建完整错误列表；未知 code/stage 与特殊字符、嵌套 details 保持。
-- [ ] 根运行上述 unit 文件，确认是行为红；导入和 Schema 资源准备错误不计红。
-- [ ] 写真实组件 `test_finite_results_exhaustion_saves_complete_activity_error`，参数化 photo/timelapse 与 action/activity 是否不同。复用公开 `consumer_world` 的 Acceptance、调度、真实 START 和 typed RESULTS，设置有界预算与可控等待；耗尽后核正式完整核实错误、原实际 Outcome、文件及累计尝试守恒。不能直接 SQL 写动作/集合状态。
-- [ ] 在同文件写公共保存重送反例：原完整 ResultSetSave/key/T1 在 COMMIT 前后 UNKNOWN 后关闭原连接，fresh Owned 核实可靠 F，再原键重送。核历史完整组最多一份、首次响应与错误不变、零额外设备调用。该步骤沿现有责任 holder，不把新错误格式伪装成另一实际返回。
-- [ ] 对上述两类来源分别从实际消费者触发故障；耗尽来源至少覆盖 photo/timelapse，再从正常默认入口消费共享责任。若需要新增 holder，建议保存完整 ResultSetSave、原 key 与首次 response，并由同会话 RuntimeDeps/三 factory 共享；仅重送已形成申请的前置保存不取得新的受限或取消业务资格。原请求可靠完成前不保存依赖终态；UNKNOWN/回滚保持申请并按 StateDbFailure 停止候选。具体集合和回调接线须依据有效反例由根协调，不自行扩大 flow 资格。
-- [ ] 用合法 UNCONFIRMED 申请加完整错误建立仓储组件前提，控制事件输入的公共结构使守卫成为被测边界；拒绝后无半组历史/投影。UNSATISFIED 用例使用正式错误分区，不靠更换假码获得绿色。
-- [ ] 根确认实际红后，仅修已确定构造、共同验证和守卫。按新规范修受影响旧 typed fixture 的合法输入；不删除原业务预期。
-- [ ] 审计全部 `_close_check_unconfirmed` 调用及结果集合直接保存入口，列出 UNKNOWN/终态未覆盖分区。UNSATISFIED 按任务三审计完整状态分类及恢复消费。
+- [x] 写纯单元 `test_result_error_shape_rejects_incomplete_input`：缺 stage、缺 details、空 code/stage、非对象 details、额外顶层成员分别拒绝；BEGIN/COMPLETE 原阶段限制保持。已交付于 `unit/capture/test_result_error_contract.py`。
+- [x] 写 `test_registered_error_rejects_wrong_stage_or_details` 与 `test_unknown_driver_error_preserves_full_value`：使用公共登记原定义，不自建完整错误列表；未知 code/stage 与特殊字符、嵌套 details 保持。同文件交付，另含完整登记错误保真控制。
+- [x] 根运行上述 unit 文件，确认是行为红；导入和 Schema 资源准备错误不计红。行为红证据 `/tmp/camctl-goal-result-errors-unit-red.log`（26 failed、4 passed）记录于下文“公共验证的实施与红灯依据”。
+- [x] 写真实组件 `test_finite_results_exhaustion_saves_complete_activity_error`，参数化 photo/timelapse 与 action/activity 是否不同。复用公开 `consumer_world` 的 Acceptance、调度、真实 START 和 typed RESULTS，设置有界预算与可控等待；耗尽后核正式完整核实错误、原实际 Outcome、文件及累计尝试守恒。不能直接 SQL 写动作/集合状态。已交付于 `integration/capture/test_result_error_history.py`。
+- [x] 在同文件写公共保存重送反例：原完整 ResultSetSave/key/T1 在 COMMIT 前后 UNKNOWN 后关闭原连接，fresh Owned 核实可靠 F，再原键重送。核历史完整组最多一份、首次响应与错误不变、零额外设备调用。该步骤沿现有责任 holder，不把新错误格式伪装成另一实际返回。实际交付于独立文件 `integration/capture/test_result_exhaustion_save_recovery.py`（photo/timelapse × COMMIT 前后四项，见“有限耗尽恢复的阶段验证”）。
+- [x] 对上述两类来源分别从实际消费者触发故障；耗尽来源至少覆盖 photo/timelapse，再从正常默认入口消费共享责任。若需要新增 holder，建议保存完整 ResultSetSave、原 key 与首次 response，并由同会话 RuntimeDeps/三 factory 共享；仅重送已形成申请的前置保存不取得新的受限或取消业务资格。原请求可靠完成前不保存依赖终态；UNKNOWN/回滚保持申请并按 StateDbFailure 停止候选。具体集合和回调接线须依据有效反例由根协调，不自行扩大 flow 资格。`PendingResultCheckClose` 已实现，五入口默认矩阵 30 passed 记录于“有限耗尽恢复的阶段验证”。
+- [x] 用合法 UNCONFIRMED 申请加完整错误建立仓储组件前提，控制事件输入的公共结构使守卫成为被测边界；拒绝后无半组历史/投影。UNSATISFIED 用例使用正式错误分区，不靠更换假码获得绿色。守卫反例交付于 `integration/capture/test_result_error_guard_transaction.py`（34 passed，见“守卫、事务退出与原响应的阶段验证”）；UNSATISFIED 正式分区生产与旧 fixture 修正见任务三记录。
+- [x] 根确认实际红后，仅修已确定构造、共同验证和守卫。按新规范修受影响旧 typed fixture 的合法输入；不删除原业务预期。四项旧 UNCONFIRMED fixture 补完整正式错误通过；UNSATISFIED fixture 已随正式 reason 分区改为 `invalid_outputs`/`no_outputs`（2026-10-11 复核七文件 96 passed）。
+- [x] 审计全部 `_close_check_unconfirmed` 调用及结果集合直接保存入口，列出 UNKNOWN/终态未覆盖分区。UNSATISFIED 按任务三审计完整状态分类及恢复消费。审计结论记录于“录像有限核实流程的完整申请”：录像 `ResultRunClose` 缺口已修复，剩余 FinishCapture UNKNOWN 责任、ResultRunClose 动作类型校验及 CLOSED 后本地收尾由[产物核实计划](2026-10-09-camctl-result-round-runtime.md)承接。
 
 ## 任务二：固定 H 的解释与报告分类
 
@@ -139,9 +139,9 @@
 双相机普通产物检查所需的构造、恢复和反例，由[接入计划 T6](2026-10-10-camctl-real-camera-demo.md#t6-录像与延时摄影的正常收尾及原决定恢复)编排执行本任务的适用部分；细项状态和错误语义的验收继续在本任务维护。独立应急错误身份仍按本计划自身范围处理。
 
 - [x] 非空 UNSATISFIED 的 reason 分区登记于[产物检查的错误表达](../../architecture/camera-capture.md#产物检查的错误表达)：只有 OTHER、缺一类必需产物、数量不符和其他必要检查明确失败使用 `invalid_outputs`；可靠空集合使用 `no_outputs`。明确驱动失败优先按其独立责任处理，详情保持现有公共登记；具体未满足规则内部保存。2026-10-10 完成规格登记，生产构造和对应反例尚待实施。
-- [ ] 决策写入责任规格后，分别对 `_confirm_timelapse_results` 的 KNOWN_FAILURE 构造和 `_finish_timelapse_conclusion` 恢复消费写真实公开历史反例。只有独立正式集合依据才能建立该前提；保留符合条件文件，零新 listing，原 attempt 不变。
+- [x] 决策写入责任规格后，分别对 `_confirm_timelapse_results` 的 KNOWN_FAILURE 构造和 `_finish_timelapse_conclusion` 恢复消费写真实公开历史反例。只有独立正式集合依据才能建立该前提；保留符合条件文件，零新 listing，原 attempt 不变。构造由 `integration/capture/test_result_scan_runtime.py::test_timelapse_uses_wait_and_finalized_pages_without_fabricating_device_end`（empty/wrong_kind → `no_outputs`/`invalid_outputs`）经真实终末分页建立；恢复消费由 `integration/capture/test_capture_failure_activity_identity.py::test_closed_unsatisfied_timelapse_reports_actual_activity_without_query` 覆盖：重开后零设备查询、零新 listing、attempt 与历史前缀不变、符合条件文件保留、终态重入不追加历史（2026-10-11 复核通过）。
 - [x] 登记应急未尝试及停止未确认两个公共错误，核验原应急资格、实际原因、独立活动身份、事务守卫及固定 H 的公开报告分区。2026-10-11 的实际证据与默认会话接线的剩余责任见[应急错误登记与最终补记](#应急错误登记与最终补记)。
-- [ ] 汇报已闭合分区与未闭合分区；不得由 UNCONFIRMED 和形状测试绿色声明所有采集错误或报告恢复完成。
+- [x] 汇报已闭合分区与未闭合分区；不得由 UNCONFIRMED 和形状测试绿色声明所有采集错误或报告恢复完成。闭合与未闭合分区总账已于 2026-10-11 更新于[当前交付与明确未完成](#当前交付与明确未完成)。
 
 ## 根 Agent 独占门禁
 
@@ -161,7 +161,7 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 
 2026-10-09，Linux 开发容器、Python 3.11.16：root 独占运行新单元文件，`/tmp/camctl-goal-result-errors-unit-red.log` 为 26 failed、4 passed、0.10s；不完整结构、登记阶段和详情均未被拒绝，完整登记值及未知驱动值保真控制通过。真实组件文件 `/tmp/camctl-goal-result-errors-history-red.log` 为 4 failed、2.34s；photo/timelapse 与独立 activity ID 四项的公开启动、两轮实际结果、次数耗尽、动作失败及正式动作错误全部通过，活动核实错误仍只有 `code: result_unconfirmed`。这些有效红允许实施已确定的共同结构验证和耗尽构造；UNKNOWN 保存责任及报告生成还未验证。
 
-UNCONFIRMED、公共形状、未知完整驱动错误保真和历史实例 STATE 分类有正式依据；非空 UNSATISFIED 的错误 reason 和必要检查失败映射已登记于责任规格，其生产与恢复按任务三及接入计划 T6 核验。应急两个公共错误、最终补记和固定 H 的报告分区已完成本计划专项；默认会话的真实应急接线仍由 capture C7 承接。结果集合完成能力、历史格式迁移、完整媒体失败优先阶段、真实设备与物理断电验收不属于本计划完成声明。实施与验证范围见下文。
+UNCONFIRMED、公共形状、未知完整驱动错误保真和历史实例 STATE 分类有正式依据；非空 UNSATISFIED 的错误 reason 和必要检查失败映射已登记于责任规格。2026-10-11 复核：其生产构造（`_output_failure` 的 `no_outputs`/`invalid_outputs`）与真实公开历史反例均已交付——KNOWN_FAILURE 构造经 `test_result_scan_runtime.py::test_timelapse_uses_wait_and_finalized_pages_without_fabricating_device_end` 从真实终末分页建立，恢复消费经 `test_capture_failure_activity_identity.py::test_closed_unsatisfied_timelapse_reports_actual_activity_without_query` 核验零新 listing、原 attempt 不变；任务一七文件 96 项与单元契约 30 项同日复跑通过。应急两个公共错误、最终补记和固定 H 的报告分区已完成本计划专项；默认会话的真实应急接线仍由 capture C7 承接。录像有限核实完整申请（`ResultRunClose`）已交付并经五入口恢复验证。本计划仍未闭合的分区：耗尽后 `_finish_capture` 的普通 FinishCapture 保存 UNKNOWN 责任、`ResultRunClose` 公共端口的动作类型校验、photo/timelapse 可靠 CLOSED 后的本地文件收尾与失效绑定（由[产物核实计划](2026-10-09-camctl-result-round-runtime.md)承接）、结果申请输入身份的正式登记（等待用户决策）及 capture C7 应急接线。结果集合完成能力、历史格式迁移、完整媒体失败优先阶段、真实设备与物理断电验收不属于本计划完成声明。实施与验证范围见下文。
 
 ### 首批测试候选（2026-10-09）
 
