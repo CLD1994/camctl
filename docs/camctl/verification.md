@@ -387,6 +387,18 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 静态复核通过：本地文件链接 3883 项，修改文档的标题及显式锚点 263 项，Python 3.11 AST 检查 12 个修改文件；`git diff --check` 无空白错误。独立审查核对同源声明、候选过滤、精确 HTTP 草稿、导出及报告边界，没有未解决的阻断问题。
 
+## Action6 更新发行物核验（2026-10-11）
+
+本次从 `af94f2b` 的业务源码构建更新包，在 Linux x86_64 容器、Python 3.11.16、SQLite 3.53.1、uv 0.12.10 上核验。交付包为工作区的 `dist/action6-record-update-20261011T023816Z/action6-record-update-20261011T023816Z.tar.gz`，包含 wheel、配套运行依赖、完整能力说明示例、能力 Schema、演示资源、中文更新说明及构建记录；运行版本仍为 `0.1.0`，现场更新使用 `--reinstall-package camctl`。
+
+构建命令为 `uv build --project apps/camctl --wheel --out-dir <交付目录>`，依赖通过 `uv export --project apps/camctl --frozen --no-dev --no-emit-project -o <交付目录>/requirements.txt` 导出。随后在源码目录外创建独立环境，按哈希安装依赖，以 `--no-deps` 安装实际交付的 wheel。wheel 内的 201 个生产 Python 文件与源码逐字节一致，23 项包资源与构建登记的全部权威来源逐字节一致；环境只安装 camctl 及运行依赖，不携带测试依赖。
+
+安装版 `describe` 使用占位 serial 配置导出完整能力说明，并通过包内能力 Schema 校验。导出范围为 `action6 / camera_record / action6_record`，估算声明为 130 Mbps、`direct`、参数路径 `/duration_s`；十秒参考大小为 162,500,000 字节，即 162.5 MB。安装版计划生成器使用该说明成功生成十秒录像计划，参数省略光圈和码率，估算资料不进入计划参数。现场使用实际配置重新导出说明后，才由客户端加载。
+
+从仓库根执行 `UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_action6_builtin_demo_roundtrip.py -q`，取得 `1 passed`，耗时 30.48 秒。该专项通过安装版内建驱动、真实 C host、CLI、状态库和客户端完成录像、独立取回、领取及 ACK；ADB 仍使用受真实接口约束的替身。日志位于同一交付工作目录的 `.work/c-host-software.log`。
+
+交付的 14 个载荷 SHA-256 全部通过，压缩包中的所有文件与交付目录逐字节一致，更新说明的三段 Bash 命令通过语法检查。主执行者核对文档引用、修改标题锚点和 diff 后登记本阶段；未修改业务代码。ARM 现场的配置、状态库、进程、原请求及交接文件仍等待用户回传；当前结果不证明 ARM 已更新安装或真机演示已经完成。现场步骤继续由[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)跟踪。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。
