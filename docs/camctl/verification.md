@@ -399,6 +399,12 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 交付的 14 个载荷 SHA-256 全部通过，压缩包中的所有文件与交付目录逐字节一致，更新说明的三段 Bash 命令通过语法检查。主执行者核对文档引用、修改标题锚点和 diff 后登记本阶段；未修改业务代码。ARM 现场的配置、状态库、进程、原请求及交接文件仍等待用户回传；当前结果不证明 ARM 已更新安装或真机演示已经完成。现场步骤继续由[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)跟踪。
 
+## ARM 更新包接收与现场状态（2026-10-11）
+
+用户从 ARM 主机回传 `2026-10-11 02:46:51 UTC` 的现场结果。更新压缩包的 SHA-256 及解压后全部 14 个载荷的 SHA-256 均通过，证明本次主机收到的文件与更新交付一致。`adb devices -l` 只输出表头，未列出设备；运行账户的进程查询未显示 host 或 camctl，唯一匹配项是查询命令自身的 `awk`。
+
+`/home/cld/.camctl/camera-demo` 不存在；用户列出的 `/home/cld/.camctl` 内容为 `host`、`packages`、`venv`，其中 `host` 包含 `bin`、`include`、`lib`、`share`。本次尚未取得新版 wheel 安装、配置提取、初始化或能力导出的结果。下一步先沿用既有虚拟环境更新 wheel 并提取演示资源，再核对相机供电和 USB 连接，以当前 ADB 列表中的实际 serial 填写配置；初始化与拍摄沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。
