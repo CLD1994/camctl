@@ -68,6 +68,15 @@ from .test_recording_stop import (
     _StopDouble,
     _submit_plan,
 )
+from camctl.history.decoding import decode_event_row
+from camctl.history.events import branch_of, event_type_name
+from camctl.history.validators import ValidatedEvent
+from camctl.contracts.history_values import INITIAL_BOUNDARY
+from camctl.history.replay import EntityImage, RestoreSeed, restore
+from camctl.history.snapshots import SnapshotRef, prepare_snapshot
+from camctl.persistence.executor import DbExecutor
+from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
+from camctl.persistence.transaction import row_facts
 from .test_timelapse_finish import _TimelapseCatalog, _timelapse_plan
 
 register_operation_guards()
@@ -598,3 +607,227 @@ class TestInterruptedSecondCallRecovery:
         assert _scalar(
             db, "SELECT occupancy_state FROM device_activities WHERE id = 1"
             ) == (2,)
+
+
+def _current_rows(owned) -> dict:
+    """读取四张业务表的当前投影行，作为恢复对照的独立预期。"""
+    return {
+        table: {int(row["id"]): dict(row) for row in map(
+            lambda raw: row_facts(owned.connection, table, int(raw[0])),
+            owned.connection.execute(f"SELECT id FROM {table}"))}
+        for table in ("actions", "device_activities",
+                      "operation_runs", "operation_attempts")}
+
+
+class TestConfigurationChangeHistoryRecovery:
+    async def test_freezes_before_and_after_change_recover_identically(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "history-recovery"
+        home.mkdir()
+        cfg = _paths_and_devices(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TwoDeviceCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _two_device_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        photo_file = replace(_entry("img-1", kind=FileKind.PHOTO),
+                             original_name="img-1.jpg", media_type="image/jpeg")
+        results = ResultsDouble(
+            {1: (photo_file,), 2: (_entry("sequence-1"),)}, set_finalized=False)
+        driver = _TwoDeviceDriver()
+
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        task = _run_session(
+            deps, driver, results,
+            photo_check=AttemptConfig(2, Decimal("10"), Decimal("30")),
+            extra_ms=0)
+        try:
+            await _await_query(
+                db,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'",
+                (2, 1, 1))
+            await _await_query(
+                db,
+                "SELECT extra_wait_ms_used FROM device_activities"
+                " WHERE action_id = 2", (0,))
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+        # 配置更新前冻结 H1；独立预期直接读取当时的当前投影业务列，
+        # 并把动作对象状态固定为快照供配置更新后正向恢复使用。
+        owned = open_existing(db, DbOpenMode.EXISTING_RW, DbConfig())
+        executor = DbExecutor(
+            lambda: open_existing(db, DbOpenMode.EXISTING_RW, DbConfig()),
+            capacity=2, enqueue_timeout_seconds=9)
+        store = SqliteSnapshotStore(db, executor)
+        try:
+            history = HistoryRepository(db)
+            first_boundary = history.current_boundary()
+
+            def _table_rows() -> dict:
+                return {
+                    table: {int(row["id"]): dict(row) for row in map(
+                        lambda raw: row_facts(owned.connection, table, int(raw[0])),
+                        owned.connection.execute(f"SELECT id FROM {table}"))}
+                    for table in ("actions", "device_activities",
+                                  "operation_runs", "operation_attempts")}
+
+            expected_h1 = _current_rows(owned)
+            h1_images = dict(zip(
+                (1, 2), await store.load_entity_images(
+                    (SnapshotRef(1, 1), SnapshotRef(1, 2)))))
+            await store.save_snapshots(tuple(
+                prepare_snapshot(image) for image in h1_images.values()))
+            frozen1 = ReportingRepository().freeze_report(
+                new_operation_key(), owned, occurred_at=1)
+            assert frozen1.kind is DbOutcomeKind.COMPLETED, frozen1.error
+            report1 = frozen1.value.report
+        finally:
+            owned.connection.close()
+        spec1 = GenerationSpec(
+            db_path=db, report_id=report1.report_id,
+            from_wm=report1.from_wm, to_wm=report1.to_wm,
+            frozen_event_id=report1.boundary.last_event_id,
+            staging_path=home / "before.json")
+        before_bytes = generate_report_file(spec1).path.read_bytes()
+
+        # 配置更新后：照片预算上调，延时额外等待增至三秒且结果集合
+        # 明确缺必需类别（已知失败）。
+        results.set_finalized = True
+        results.files_by_action[2] = ()
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        task = _run_session(
+            deps, driver, results,
+            photo_check=AttemptConfig(5, Decimal("10"), Decimal("0.2")),
+            extra_ms=3000)
+        try:
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (4,))
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+        owned = open_existing(db, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            history = HistoryRepository(db)
+            end_boundary = history.current_boundary()
+            expected_h2 = _current_rows(owned)
+            frozen2 = ReportingRepository().freeze_report(
+                new_operation_key(), owned, occurred_at=2)
+            assert frozen2.kind is DbOutcomeKind.COMPLETED, frozen2.error
+            report2 = frozen2.value.report
+
+            _META = {"id", "created_event_id", "last_event_id", "change_count"}
+
+            def _business(values: dict) -> dict:
+                return {name: value for name, value in values.items()
+                        if name not in _META}
+
+            def _events(entity_id: int):
+                rows = owned.connection.execute(
+                    "SELECT h.id, h.transaction_id, h.event_type, h.event_version,"
+                    " h.occurred_at, h.clock_status, h.change_seq, h.body_json"
+                    " FROM history_events h"
+                    " JOIN entity_event_links l ON l.event_id=h.id"
+                    " WHERE l.entity_type=1 AND l.entity_id=? ORDER BY h.id",
+                    (entity_id,)).fetchall()
+                reference = (1, entity_id)
+                events = []
+                for raw in rows:
+                    envelope = decode_event_row(raw)
+                    events.append(ValidatedEvent(
+                        envelope=envelope,
+                        event_name=event_type_name(envelope.event_type),
+                        branch_name=branch_of(envelope.event_type,
+                                              envelope.reason)[0],
+                        references=(reference,),
+                        row_owners={(row.table, row.row_id): reference
+                                    for row in envelope.rows},
+                    ))
+                return events
+
+            _TABLES = ("actions", "device_activities", "operation_runs",
+                       "operation_attempts")
+            action_events = {aid: _events(aid) for aid in (1, 2)}
+
+            def _projected(seed, entity_id: int, boundary) -> dict:
+                image = restore(seed, action_events[entity_id], boundary)
+                return {key: _business(values) for key, values in image.rows.items()
+                        if key[0] in _TABLES}
+
+            def _expected_rows(expected: dict, keys) -> dict:
+                return {(table, row_id): _business(expected[table][row_id])
+                        for table, row_id in keys}
+
+            for aid in (1, 2):
+                empty = RestoreSeed(
+                    EntityImage(1, aid, False, {}, 0, 0), INITIAL_BOUNDARY)
+                # 配置更新前后两个边界上的初始回放都对照独立预期。
+                for boundary, expected in (
+                        (first_boundary, expected_h1), (end_boundary, expected_h2)):
+                    projected = _projected(empty, aid, boundary)
+                    assert projected == _expected_rows(
+                        expected, projected.keys()), (aid, boundary.last_event_id)
+                # 快照正向：H1 快照种子回放到 H2 与 H2 初始回放一致。
+                snapshot_seed = RestoreSeed(
+                    EntityImage(1, aid, True,
+                                {(row.table, row.row_id): dict(row.values)
+                                 for row in h1_images[aid].rows},
+                                first_boundary.last_event_id,
+                                h1_images[aid].change_count),
+                    first_boundary)
+                assert (_projected(snapshot_seed, aid, end_boundary)
+                        == _projected(empty, aid, end_boundary))
+                # 当前投影逆向：H2 业务列种子回退到 H1 与 H1 初始回放一致。
+                counted = int(owned.connection.execute(
+                    "SELECT MAX(change_count) FROM entity_event_links"
+                    " WHERE entity_type=1 AND entity_id=?",
+                    (aid,)).fetchone()[0])
+                h2_projection = _projected(empty, aid, end_boundary)
+                reverse_seed = RestoreSeed(
+                    EntityImage(1, aid, True,
+                                {key: _business(expected_h2[key[0]][key[1]])
+                                 for key in h2_projection},
+                                end_boundary.last_event_id, counted),
+                    end_boundary)
+                assert (_projected(reverse_seed, aid, first_boundary)
+                        == _projected(empty, aid, first_boundary))
+
+            # 旧报告在新配置与终态事实之后按原冻结依据重建，字节一致。
+            rebuilt = generate_report_file(GenerationSpec(
+                db_path=db, report_id=report1.report_id,
+                from_wm=report1.from_wm, to_wm=report1.to_wm,
+                frozen_event_id=report1.boundary.last_event_id,
+                staging_path=home / "before-rebuilt.json",
+                entity_batch_size=1, event_batch_size=1))
+            assert rebuilt.path.read_bytes() == before_bytes
+        finally:
+            await executor.close()
+            owned.connection.close()
+
+        # 当前报告表达实际逐项结果与原绑定事实，不新增内部过程字段。
+        spec2 = GenerationSpec(
+            db_path=db, report_id=report2.report_id,
+            from_wm=report2.from_wm, to_wm=report2.to_wm,
+            frozen_event_id=report2.boundary.last_event_id,
+            staging_path=home / "after.json")
+        after_bytes = generate_report_file(spec2).path.read_bytes()
+        document = json.loads(after_bytes)
+        validate_document("protocol/status-report.schema.json", document)
+        actions = {action["action_instance_id"]: action
+                   for plan in document["plans"] for action in plan["actions"]}
+        assert set(actions) == {"1", "2"}
+        photo, timelapse = actions["1"], actions["2"]
+        assert (photo["status"], photo["device_id"]) == ("succeeded", "cam-1")
+        assert (timelapse["status"], timelapse["device_id"]) == ("failed", "cam-2")
+        assert timelapse["input_params"] == {"type": "timelapse"}
+        assert timelapse["error"]["code"]
+        # 公共投影不含内部过程与配置字段。
+        _INTERNAL = {"extra_wait_ms_used", "max_attempts", "retry_interval_s",
+                     "attempt_no", "check_config", "wait_config"}
+        for action in actions.values():
+            assert not (_INTERNAL & set(action))
+        assert "device_execution" not in photo
