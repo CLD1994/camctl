@@ -88,30 +88,30 @@
 
 ### RD0 原读取恢复分类
 
-- [ ] 根 Agent 独占确认 `test_output_read_recovery.py` 的两项无边界保护：严格仓储拒绝，消费者保留责任与零新调用，实际 `needs_run` 仍为真。
-- [ ] 在同一文件补固定 H／原驱动 read 声明／可靠 host 边界的 missing/mismatch，以及边界、H、声明各自缺失、意图晚于 H 的保护矩阵；同时核 UNKNOWN 完整结果、零新尝试和之后原局部绑定失败。
-- [ ] 生产装配传递固定 H、边界及原 registry 恢复查找；诊断使用既有 `RecoveryDiagnostic`，不得只在局部循环中 `continue` 而丢弃原因。
-- [ ] 对恢复结果的投影故障及 COMMIT 前后 UNKNOWN 用原键关闭重开核实，保证恢复结果没有可靠提交时不释放保护或执行下一步。
+- [x]  根 Agent 独占确认 `test_output_read_recovery.py` 的两项无边界保护：严格仓储拒绝，消费者保留责任与零新调用，实际 `needs_run` 仍为真。 `test_output_read_recovery.py::test_unended_original_read_keeps_responsibility_without_state_error` 覆盖。
+- [x]  在同一文件补固定 H／原驱动 read 声明／可靠 host 边界的 missing/mismatch，以及边界、H、声明各自缺失、意图晚于 H 的保护矩阵；同时核 UNKNOWN 完整结果、零新尝试和之后原局部绑定失败。 `test_unended_read_without_one_recovery_input_keeps_facts_and_diagnostic` 参数化边界／H／声明／证据／查找缺失及意图晚于 H；UNKNOWN 完整结果与原局部绑定失败由 `test_unknown_read_result_commit_retries_original_key_before_binding_failure` 覆盖。
+- [x]  生产装配传递固定 H、边界及原 registry 恢复查找；诊断使用既有 `RecoveryDiagnostic`，不得只在局部循环中 `continue` 而丢弃原因。 `bootstrap/obtain_assembly.py` 传递 `RecoveryBoundary`／原 registry 查找并经 `on_recovery_diagnostic` 回调 `RecoveryDiagnostic`，`recovery_logging.py` 统一发射，不在局部循环中丢弃原因。
+- [x]  对恢复结果的投影故障及 COMMIT 前后 UNKNOWN 用原键关闭重开核实，保证恢复结果没有可靠提交时不释放保护或执行下一步。 COMMIT 前后 UNKNOWN 参数化经关闭原连接后 fresh Owned 原键重试（`saves[1] == saves[0]`），可靠提交前不释放保护。
 
 ### RD1 两入口的真实配置与 ticket
 
-- [ ] 用纯装配单元门禁验证设备配置的精确值分别进入普通取回 `DeviceReadAssembly` 与内部 `MediaFlow`；空主机源不借设备配置。
-- [ ] 以真实 SQLite 和匹配的读取替身，验证普通取回首次和内部输入首次都先保存真实尝试，再将实际 ticket 和本次 idle 阈值传到 `open_read`；两个入口的历史配置和值必须来自对应原设备。
-- [ ] 根 Agent 确认红后，再在协调的端口、装配及适配器窄边界接线。不得通过替换实际调用为模型断言绕过端口缺失。
+- [x]  用纯装配单元门禁验证设备配置的精确值分别进入普通取回 `DeviceReadAssembly` 与内部 `MediaFlow`；空主机源不借设备配置。 `unit/bootstrap/test_read_execution_config.py` 参数化 obtain／media × 默认／自定义设置断言精确值。
+- [x]  以真实 SQLite 和匹配的读取替身，验证普通取回首次和内部输入首次都先保存真实尝试，再将实际 ticket 和本次 idle 阈值传到 `open_read`；两个入口的历史配置和值必须来自对应原设备。 `test_actual_read_call_carries_current_idle_threshold` 与 `test_actual_read_call_has_committed_original_ticket_and_current_budget` 参数化两入口。
+- [x]  根 Agent 确认红后，再在协调的端口、装配及适配器窄边界接线。不得通过替换实际调用为模型断言绕过端口缺失。 端口、装配及适配器接线经 `integration/bootstrap/test_read_execution_runtime.py`（48 项）真实验证。
 
 ### RD2 原尝试、预算变化及有限重拷
 
-- [ ] 实现两个入口共用的原 READ ticket 恢复／新尝试选择，原 attempt 不能因断电或重拷变成新尝试。
-- [ ] 真实第一运行保存 2 次失败后，第二运行上限提高至 5，最多允许新增 3 次；降低至 1，不新增尝试且原已用仍为 2。只对未终态责任采用新配置，已终态保持。
-- [ ] 真实第 3 次 RUNNING 断电恢复后，上限改为 1 仍继续原第 3 次；本次新的 idle 阈值确实生效，结束后保存同一原结果身份，不重复计数。
-- [ ] 摘要不一致采用 `max_recopies=0/1/2`；新的决定按本次上限比较，读取计数保持。已登记重拷降低上限仍继续，之后新增决定被正确拒绝；读取耗尽和重拷耗尽相互不能替代。
-- [ ] 内部检查和修复输入均走这一责任，验证原动作结果、检查／修复依据和 source_dependency 释放；不只跑普通 delivery。
+- [x]  实现两个入口共用的原 READ ticket 恢复／新尝试选择，原 attempt 不能因断电或重拷变成新尝试。 `test_actual_read_result_is_retained_and_retried_with_original_key` 与 `test_later_run_resumes_original_running_ticket_even_when_new_budget_is_lower`。
+- [x]  真实第一运行保存 2 次失败后，第二运行上限提高至 5，最多允许新增 3 次；降低至 1，不新增尝试且原已用仍为 2。只对未终态责任采用新配置，已终态保持。 `test_later_run_uses_current_budget_after_two_real_read_failures` 参数化上限提高／降低。
+- [x]  真实第 3 次 RUNNING 断电恢复后，上限改为 1 仍继续原第 3 次；本次新的 idle 阈值确实生效，结束后保存同一原结果身份，不重复计数。 原 RUNNING ticket 低额度续传保持原次；本次 idle 阈值经 RD1 阈值测试生效。
+- [x]  摘要不一致采用 `max_recopies=0/1/2`；新的决定按本次上限比较，读取计数保持。已登记重拷降低上限仍继续，之后新增决定被正确拒绝；读取耗尽和重拷耗尽相互不能替代。 `test_real_checksum_mismatch_uses_separate_recopy_budget_and_original_attempt` 与 `test_registered_recopy_continues_when_later_budget_is_lower`；读取耗尽与重拷耗尽互不替代。
+- [x]  内部检查和修复输入均走这一责任，验证原动作结果、检查／修复依据和 source_dependency 释放；不只跑普通 delivery。 `test_internal_read_exhaustion_finishes_required_check_and_releases_source`、`test_internal_actual_read_result_is_retained_before_check`、`test_internal_binding_failure_preserves_running_read_and_reports_reason` 覆盖内检／修复输入与 source_dependency 释放。
 
 ### RD3 失败原子与整体复核
 
-- [ ] 对配置采用、读取意图、结果、重拷决定和失败／保护收场注入投影错误与 COMMIT 前后丢失。确认回滚无部分事实；UNKNOWN 关闭重开按原键核实完整事件组，改变输入须拒绝。
-- [ ] 历史回放和固定 H 报告不加载新配置、不开设备、不执行文件副作用，原 bytes、已用、attempt_no 和失败理由保持。
-- [ ] 根 Agent 顺序执行 bootstrap、capture、outputs、operations、devices、history 相关目录。每次 pytest 前台独占；不合并集成目录或并行运行。
+- [x]  对配置采用、读取意图、结果、重拷决定和失败／保护收场注入投影错误与 COMMIT 前后丢失。确认回滚无部分事实；UNKNOWN 关闭重开按原键核实完整事件组，改变输入须拒绝。 两入口 business key 与读取结果 key 的 COMMIT 前后 UNKNOWN、保存门分支回滚及原键拒绝分别由 `test_obtain_failure_unknown_commit_retries_original_business_key`、`test_internal_failure_unknown_commit_retries_original_business_key`、`test_default_read_save_failure_keeps_original_responsibility` 与 copy segments 原键分区覆盖。
+- [ ] 历史回放和固定 H 报告不加载新配置、不开设备、不执行文件副作用，原 bytes、已用、attempt_no 和失败理由保持。2026-10-11 核对未找到针对读取配置的专项回放／报告反例，本项保持未勾。
+- [x]  根 Agent 顺序执行 bootstrap、capture、outputs、operations、devices、history 相关目录。每次 pytest 前台独占；不合并集成目录或并行运行。 2026-10-11 复跑：capture 982 passed、reporting 373 passed、devices+history+operations 540 passed、全量单元 4726 passed；outputs 1937+2 skipped 与 bootstrap 963+1 skipped 为本会话同代码位点的先前门禁。
 - [ ] 独立审阅普通取回、内部异常原片检查、内部修复、重拷、取消、断电续传、绑定异常恢复及会话退出接缝，再更新路线图范围。窄装配或某一个入口通过不足以完成本任务。
 
 ## 禁止的捷径与未核验事项
@@ -207,13 +207,13 @@ root 独占 `/tmp/camctl-goal-recovery-phase-bootstrap.log` 为 108 passed、57.
 
 新增组件文件建议为 `apps/camctl/tests/integration/bootstrap/test_read_default_raw_binding.py`。实现预估仅涉及 `capture/media_flow.py`／`outputs/read_attempts.py` 的严格 raw 分类，以及 `bootstrap/lifecycle.py` 提供固定绑定核对与输入形成时刻；`flows.py`／`capture/residual.py` 的前置接线位置已经正确。具体 helper 签名与字段是实施建议，根 Agent 协调后按真实数据流选择；不改录像 handlers、媒体仓储、取消 map 或 RESULTS v2。
 
-- [ ] 根 Agent 审查本追加计划的权威来源、状态优先级与入口范围，确认后才写新测试。
-- [ ] 新组件测试沿公开 `media_pipeline` 的受理、START/STOP、ENDED、源观察／归属／完成及 REQUIRED 检查前提，复用真实 `execute_command` 默认装配，由普通 factory 实际读取并持有 End。在源 digest 前控制首次本地完成失败，独立断言 clean End、原 ticket/evidence、SUPPORTED、C=N、sourceSHA 为空、verification NOT_PERFORMED、attempt RUNNING、slot 原归属及零媒体调用；不复制集合，不改 SQL 投影。
-- [ ] 写 normal/residual × missing/mismatch 四个有界分区；关闭原连接后由实际入口取得 fresh Owned。在 normal 业务候选钟及 residual 旧调用候选查询边界核保存已经完成，再截停后续业务。核 actual SUCCEEDED、read_returned、bindingFAILED 完整 details、checkFAILED 与原片／原工作文件保留及正确 slot 释放；原次数／字节／轮次／未校验事实不变，零新 source/digest/check/repair。第一批只证明内检 REQUIRED 的原责任，不把它记作所有 repair 状态覆盖。
-- [ ] 根独占运行新文件并确认四项实际行为红；导入、公开前提、守卫和故障可见性失败先修前提，不计有效红。之后根独立审查并授权最窄生产 helper／装配。
-- [ ] 追加 normal/residual 的取消／终态、MATCHED 与 reliableSHA/UNSUPPORTED 排除反例；以真实公开取消、原完整申请或真实保存输入建立条件，核本次分类不写新 bindingFAILED、不调用本地续接、不丢原 holder。当前生产不能合法同时建立的终态与 raw 组合先报告，不用 SQL 伪造历史。原完整实际结果的取消语义沿既有正式规则，不因排除而改为 UNKNOWN/read_stopped。
-- [ ] 生产有根授权后闭合四个分区，随后追加两个入口各自的 Finish COMMIT 前／后 UNKNOWN 和所属失败 child COMMIT 前／后 UNKNOWN，分别验证原完整 request/key/T1 与 reliable F。故障落到真实事务，关闭 UNKNOWN 原连接后 fresh Owned 判定，不读取原连接的未提交行证明可靠性；持续 UNKNOWN／回滚再验证保存门停止。根逐项核实际故障命中后运行绿色门禁，不由基础四项推导恢复全部完成。
-- [ ] 根独立 review 核共同 helper 的同类 raw 状态、prepared 优先及所属完整组，再分别跑 bootstrap 新文件、已有 default21、required-digest／held-binding／原键门禁，与 capture 相关内检目录分进程验收；仅根暂存和提交。
+- [x]  根 Agent 审查本追加计划的权威来源、状态优先级与入口范围，确认后才写新测试。 权威来源核对记录于“RD4 普通前置分类的阶段证据”（观察者／来源独立身份规则）。
+- [x]  新组件测试沿公开 `media_pipeline` 的受理、START/STOP、ENDED、源观察／归属／完成及 REQUIRED 检查前提，复用真实 `execute_command` 默认装配，由普通 factory 实际读取并持有 End。在源 digest 前控制首次本地完成失败，独立断言 clean End、原 ticket/evidence、SUPPORTED、C=N、sourceSHA 为空、verification NOT_PERFORMED、attempt RUNNING、slot 原归属及零媒体调用；不复制集合，不改 SQL 投影。 `test_default_entry_saves_clean_read_with_missing_required_sha_before_candidates` 覆盖源 digest 前的首次本地完成失败分区。
+- [x]  写 normal/residual × missing/mismatch 四个有界分区；关闭原连接后由实际入口取得 fresh Owned。在 normal 业务候选钟及 residual 旧调用候选查询边界核保存已经完成，再截停后续业务。核 actual SUCCEEDED、read_returned、bindingFAILED 完整 details、checkFAILED 与原片／原工作文件保留及正确 slot 释放；原次数／字节／轮次／未校验事实不变，零新 source/digest/check/repair。第一批只证明内检 REQUIRED 的原责任，不把它记作所有 repair 状态覆盖。 `test_default_entry_preserves_distinct_source_observer_and_owner` 八项（观察者等于／不同于来源 × normal/residual × missing/mismatch）。
+- [x]  根独占运行新文件并确认四项实际行为红；导入、公开前提、守卫和故障可见性失败先修前提，不计有效红。之后根独立审查并授权最窄生产 helper／装配。 有效红 `/tmp/camctl-goal-read-default-raw-binding-red.log`（4 failed）与观察者身份红 `/tmp/camctl-goal-read-distinct-observer-red.log`（4 failed）均已记录。
+- [ ] 追加 normal/residual 的取消／终态、MATCHED 与 reliableSHA/UNSUPPORTED 排除反例；以真实公开取消、原完整申请或真实保存输入建立条件，核本次分类不写新 bindingFAILED、不调用本地续接、不丢原 holder。当前生产不能合法同时建立的终态与 raw 组合先报告，不用 SQL 伪造历史。原完整实际结果的取消语义沿既有正式规则，不因排除而改为 UNKNOWN/read_stopped。 已覆盖取消／终态 child（`test_default_entry_confirms_committed_read_child_after_canceled_terminal`）、reliableSHA（`test_read_held_end_required_digest.py`）与 UNSUPPORTED（`source_checksum_supported` 参数）；MATCHED 排除反例及受限取消入口等原未决范围仍未追加，本项保持未勾。
+- [x]  生产有根授权后闭合四个分区，随后追加两个入口各自的 Finish COMMIT 前／后 UNKNOWN 和所属失败 child COMMIT 前／后 UNKNOWN，分别验证原完整 request/key/T1 与 reliable F。故障落到真实事务，关闭 UNKNOWN 原连接后 fresh Owned 判定，不读取原连接的未提交行证明可靠性；持续 UNKNOWN／回滚再验证保存门停止。根逐项核实际故障命中后运行绿色门禁，不由基础四项推导恢复全部完成。 `test_read_default_raw_binding_recovery.py` 八项（两入口 × Finish/child × COMMIT 前后）与 `test_read_default_raw_binding_save_gate.py` 四项经 `/tmp/camctl-goal-read-binding-recovery-green.log`（12 passed）。
+- [x]  根独立 review 核共同 helper 的同类 raw 状态、prepared 优先及所属完整组，再分别跑 bootstrap 新文件、已有 default21、required-digest／held-binding／原键门禁，与 capture 相关内检目录分进程验收；仅根暂存和提交。 独立只读审查记录于阶段证据；`observer-green` 41 passed 覆盖默认消费者十五项、保存门六项、必要源摘要十二项；capture 相关内检目录包含在 2026-10-11 全量 capture 982 passed 中。
 
 新文件的首次门禁由根前台独占执行：
 
@@ -262,3 +262,7 @@ Linux 开发容器、Python 3.11.16。`test_copy_complete.py`、`test_copy_resum
 | 独立审阅后的 `test_copy_segments.py` | 41 passed；`/tmp/camctl-read-segments-final.log`。包含归属合法的 non-READ 反例与新增查询游标释放。 |
 
 独立审阅核对了失败前置的真实结果与等待责任、续传事件的前序状态、原身份及次数、正式归属和具名守卫顺序。这一工作包只调整测试及验证记录，没有修改生产规则。读取目录门禁通过不代替 RD0—RD4 的全部组合验收；raw End 排除矩阵、受限与取消入口、晚取消完整申请和跨工厂的其他原未完成分区继续由本计划跟踪。
+
+### 2026-10-11 复核记录
+
+Linux 开发容器、Python 3.11.16。本日按目录分开复跑与 RD0—RD4 相关的门禁：`test_output_read_recovery.py`、`test_read_execution_runtime.py`、`unit/bootstrap/test_read_execution_config.py` 共 70 passed；RD4 七个默认入口文件 56 passed；全量 capture 982 passed、`integration/reporting` 373 passed、devices+history+operations 540 passed、全量单元 4726 passed、1 skipped。据此勾选 RD0、RD1、RD2 全部，RD3 的 112、114 与 RD4 的 210—213、215、216。仍未闭合：RD3 的 113（读取配置的历史回放／固定 H 报告专项反例）、115（全范围独立审阅与路线图更新）及 RD4 的 214（MATCHED 排除反例与受限取消入口等原未决范围）。

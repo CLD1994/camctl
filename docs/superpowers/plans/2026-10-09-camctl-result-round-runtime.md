@@ -287,7 +287,7 @@ root 新鲜日志 `/tmp/camctl-goal-recovery-fixture-red.log` 证明旧中断用
 
 - [x] 新录像八个组件分区建立完整公开历史，root 确认有效红。
 - [x] 八个分区验证录像文件门槛、前轮事实合并及预算失败时的文件保留。
-- [ ] 媒体等待后结束原 ACTIVE RESULTS，以及既有明确媒体失败入口，按下述独立阶段核验。
+- [ ] 媒体等待后结束原 ACTIVE RESULTS，以及既有明确媒体失败入口，按下述独立阶段核验。 任务一半（媒体等待后收场）已交付；任务二（明确媒体失败入口，下述 2026-10-09 记录点名的四个未完成分区）仍未执行，本项保持未勾。
 - [x] 正常 STOP 用例等待原重试事实后推进 3 秒，定向 bootstrap 通过。
 - [x] 独立只读审查文件门槛、前轮事实及媒体接缝，分别记录证据范围和未完成事项。
 - [x] root 完成相关分目录回归；阶段产物纳入本地统一提交范围。
@@ -351,13 +351,13 @@ root 的 `/tmp/camctl-goal-media-settlement-save-red-2.log` 为 4 failed、10 pa
 
 独立只读审查核对新源文件、原 run 身份、原尝试守恒、共同事务、实际媒体判定、完整请求的保存失败与恢复及默认保存前缀，有限范围内未发现阻断项。取消入口尚未接入录像申请的保存前缀；原后续事务不存在而取消先保存的相遇分区、默认入口提交前／媒体失败／持续保存拒绝、复合预览或修复产物关联重送仍须独立验证。任务二的明确媒体失败优先路径、完整 VIDEO 加未完成 OTHER 的新媒体控制分区、原 raw READ End 与 v2 均未在此范围内完成。上述绿色不作为整个媒体核实计划完成的依据。
 
-- [ ] 读取上述正式规则、`AttemptFinish`／`RunFinish`／`StaleRunFinish` 及其真实事务守卫，记录独立结束入口能否同时覆盖 RESULTS、适用动作与产物。如果状态映射或事务成员没有唯一正式依据，先报告未决，停止生产设计。
-- [ ] 沿公开 Acceptance、Scheduling、实际 START／STOP、活动结束及正式处理仓储建立需要媒体处理的录像。可复用 `media_retry_fixtures.py::media_pipeline` 的完整历史方式，不能直接修改 processing 状态或移除守卫。使用真实媒体端口与受接口约束的工具替身，让完整 VIDEO 的第一轮 RESULTS 已保存、媒体仍 PENDING；另设完整 VIDEO 加未完成 OTHER 的文件控制分区。
-- [ ] 在 PENDING 点保存原 activity／run／ticket、原结果事务 key 和全文、事件引用、T0、次数、配置与等待状态快照。确认 run ACTIVE、真实 retry 已可靠保存、raw holder 已释放。后次通过真实媒体链得到合法 SUCCEEDED 或既有判定 FAILED，分别断言无新 START／STOP／RESULTS、无新 run／attempt、正式文件与业务结果正确，原尝试及原处分不变；原 ACTIVE RESULTS 必须沿已确认入口结束并清除等待。
-- [ ] 对同一 runtime 继续与 fresh Owned／runtime 本地装载分别覆盖。真正关闭和重开连接，核对 metadata；同会话继续保留实际 pending 集合。没有 holder 的跨进程路径只能使用已可靠历史，不能伪造原 RawOutcome 或比较旧进程单调钟。
-- [ ] root 独占运行候选反例，确认失败确实是原 ACTIVE RESULTS 未收场，或本地恢复新增查询；fixture／导入／守卫错误不能记为行为红。root 确认有效红与正式接口后，才授权最窄生产修改。
-- [ ] 独立后续结束申请首次确定时持有完整输入、新责任 key 与该决定时刻 T1；原 RESULTS 的 T0 始终保持。以已有故障代理分别注入提交前回滚、提交后 UNKNOWN，再用 fresh Owned 沿同一完整申请及 key 恢复。断言原 attempt 不变、原后续 key 对应唯一事务、失败时保留责任并报 STATE、恢复零设备调用；不能在未知时重新取得 T1 或新建 key。
-- [ ] root 独占绿灯后审计缓存与无缓存本地路径，并检查“结果收场已保存、动作尚未收尾”和“动作已终态但原申请仍需核实”窗口，证明共同事务边界及终态保持。单一缓存案例通过不作为恢复链完成证据。
+- [x]  读取上述正式规则、`AttemptFinish`／`RunFinish`／`StaleRunFinish` 及其真实事务守卫，记录独立结束入口能否同时覆盖 RESULTS、适用动作与产物。如果状态映射或事务成员没有唯一正式依据，先报告未决，停止生产设计。 正式依据核对与 `FinishRecordingResults` 复合入口的授权记录见“任务一”阶段验证。
+- [ ] 沿公开 Acceptance、Scheduling、实际 START／STOP、活动结束及正式处理仓储建立需要媒体处理的录像。可复用 `media_retry_fixtures.py::media_pipeline` 的完整历史方式，不能直接修改 processing 状态或移除守卫。使用真实媒体端口与受接口约束的工具替身，让完整 VIDEO 的第一轮 RESULTS 已保存、媒体仍 PENDING；另设完整 VIDEO 加未完成 OTHER 的文件控制分区。 媒体管线前提半已交付；“完整 VIDEO 加未完成 OTHER”控制分区仍未单独建反例。
+- [x]  在 PENDING 点保存原 activity／run／ticket、原结果事务 key 和全文、事件引用、T0、次数、配置与等待状态快照。确认 run ACTIVE、真实 retry 已可靠保存、raw holder 已释放。后次通过真实媒体链得到合法 SUCCEEDED 或既有判定 FAILED，分别断言无新 START／STOP／RESULTS、无新 run／attempt、正式文件与业务结果正确，原尝试及原处分不变；原 ACTIVE RESULTS 必须沿已确认入口结束并清除等待。 PENDING 点快照与媒体成功／失败消费均经 `test_record_media_result_settlement.py` 四组分区验证。
+- [x]  对同一 runtime 继续与 fresh Owned／runtime 本地装载分别覆盖。真正关闭和重开连接，核对 metadata；同会话继续保留实际 pending 集合。没有 holder 的跨进程路径只能使用已可靠历史，不能伪造原 RawOutcome 或比较旧进程单调钟。 同会话与真正重开两种入口都在 `/tmp/camctl-goal-media-settlement-red-2.log` 前提中通过。
+- [x]  root 独占运行候选反例，确认失败确实是原 ACTIVE RESULTS 未收场，或本地恢复新增查询；fixture／导入／守卫错误不能记为行为红。root 确认有效红与正式接口后，才授权最窄生产修改。 有效红为 `/tmp/camctl-goal-media-settlement-red-2.log`（4 failed，唯一失败是原 RESULTS 仍 ACTIVE）。
+- [x]  独立后续结束申请首次确定时持有完整输入、新责任 key 与该决定时刻 T1；原 RESULTS 的 T0 始终保持。以已有故障代理分别注入提交前回滚、提交后 UNKNOWN，再用 fresh Owned 沿同一完整申请及 key 恢复。断言原 attempt 不变、原后续 key 对应唯一事务、失败时保留责任并报 STATE、恢复零设备调用；不能在未知时重新取得 T1 或新建 key。 `PendingRecordingResults` 持有完整输入、key 与 T1；COMMIT 前后 UNKNOWN 经 fresh Owned 复验，`/tmp/camctl-goal-media-settlement-save-red-2.log` 转 `media-settlement-capture-green`。
+- [x]  root 独占绿灯后审计缓存与无缓存本地路径，并检查“结果收场已保存、动作尚未收尾”和“动作已终态但原申请仍需核实”窗口，证明共同事务边界及终态保持。单一缓存案例通过不作为恢复链完成证据。 缓存与无缓存路径、五入口默认接线及“动作已终态但原申请仍需核实”窗口由 `test_recording_results_saved_consumers.py` 与默认入口三项覆盖；独立只读审查记录在“当前交付范围与验证”。
 
 #### 任务二：明确媒体失败入口的有效反例核验
 
@@ -375,8 +375,8 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/capture/test_record_result_retry.py apps/camctl/tests/integration/capture/test_recording_media_link.py -q
 ```
 
-- [ ] root 根据实际生产影响补跑原 RESULTS 保存、文件四阶段、元数据／CLOSED、媒体原申请和取消／退出门禁；若修改共享 runtime 或默认装配，再独立执行对应 bootstrap 目录，不与 capture 混在一次进程中。
-- [ ] 独立审查沿原输入、媒体派生、独立流程结束、保存失败、同会话／已保存历史恢复直到原 run 与动作的可观察终态，分别记录两任务证据与仍未决接口。执行者不运行 pytest 或提交；root 按用户授权统一验证和提交。
+- [x]  root 根据实际生产影响补跑原 RESULTS 保存、文件四阶段、元数据／CLOSED、媒体原申请和取消／退出门禁；若修改共享 runtime 或默认装配，再独立执行对应 bootstrap 目录，不与 capture 混在一次进程中。 2026-10-11 复跑：全量 capture 目录 982 passed（含此前两项正常集合失败用例），`integration/reporting` 373 passed，全量单元 4726 passed、1 skipped。
+- [x]  独立审查沿原输入、媒体派生、独立流程结束、保存失败、同会话／已保存历史恢复直到原 run 与动作的可观察终态，分别记录两任务证据与仍未决接口。执行者不运行 pytest 或提交；root 按用户授权统一验证和提交。 独立审查记录见“当前交付范围与验证”末段；本次核对未发现新增生产阻断。
 
 完成条件是任务一已用真实媒体等待后完成及保存故障证明原责任收场，任务二已对合法充分输入形成有效反例与修复证据，或者形成可核验的不可达／已满足规则结论。正常文件门槛八项绿色不能替代上述证据；第一版集合结束、分页／v2、全部 READ 工厂恢复及真实设备验收仍属于各自未完成范围。
 
@@ -408,7 +408,7 @@ root 的实现将定位收敛到 `persistence/repositories/capture.py::_result_r
 - [x] `test_record_result_retry.py::test_result_budget_close_uses_original_activity_on_resend` 新增照片／延时摄影／录像乘同编号／独立活动六个公开组件分区。真实 `_listing_round` 保存原尝试和 retry 后，使用原 T0 与单个预算收场 key；断言真实活动错误、同 key 复用完成、改变 T0 拒绝、历史与原尝试守恒、一次 RESULTS。这六项属于新增首次覆盖，不能记录为六项既有红绿循环。
 - [x] 六项首次覆盖通过；`/tmp/camctl-goal-read-recording-capture-target.log` 为 138 passed、52.94s，覆盖录像文件门槛、预算、原身份重送、结论恢复、照片有限核实、原 RESULTS 与文件事实、媒体原申请及输入取得。直接仓储六项不等于全部拍摄消费者或恢复收场已经通过。
 - [x] 已保存 UNCONFIRMED 后的延时摄影本地业务收场补入独立活动反例：公开建立活动、正式原文件与未确认结论，fresh Owned 后零新查询，核原 run／尝试不变和动作错误里的实际 activity。`/tmp/camctl-goal-conclusion-activity-red.log` 为 1 failed、3 passed、2.27s，确认独立活动的业务错误编号不符；该消费者复用原活动错误构造后，`/tmp/camctl-goal-record-final-narrow.log` 为 26 passed、10.55s，包含四项同编号／独立活动的正式结论恢复、十七项录像核实及五项原媒体接线。
-- [ ] 剩余四处启动／照片／CLOSED 明确失败错误按下述独立组件矩阵核实真实活动字段；它们不是预算定位或六项首次覆盖的完成证据。
+- [x]  剩余四处启动／照片／CLOSED 明确失败错误按下述独立组件矩阵核实真实活动字段；它们不是预算定位或六项首次覆盖的完成证据。 四分支矩阵的全部机械步骤已勾选，红绿记录见“剩余四个失败分支的实际活动身份”末段（`failure-activity-red-2` 4 failed 转 `failure-activity-green` 25 passed）。
 
 最窄验收命令由 root 独占执行：
 
@@ -499,12 +499,12 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 
 2026-10-09，Linux 容器、Python 3.11.16：root 的 `/tmp/camctl-goal-recording-retirement-red.log` 为 10 failed、6.54s。五个默认入口分别覆盖 RUNNING／cancel=1 与 CANCELED；首次完整申请实际命中 COMMIT 前 UNKNOWN，关闭原连接后由 fresh Owned 确认 F 缺失，再通过公共取消仓储建立目标状态。普通、残留、受限入口因取消标记或不同终态拒绝原普通申请并报告状态库错误；两个取消入口未重送原 F 就进入候选。独立审查核对完整测试及上述日志，确认前提、原尝试和完整申请均已形成，查询代理只观察候选边界、不修改投影。这十项只验证候选前可靠退役和事实守恒，在候选边界主动结束，不能证明后续拥有者已经完成取消或结束 RESULTS。
 
-- [ ] 在真实公开媒体完成之后对原共同申请注入实际 COMMIT 前 UNKNOWN，记录完整输入、F、T1、原尝试、run 和媒体；真正关闭旧连接，再由 fresh Owned 核同库身份、证明 F 缺失和无迟到事务。通过公共取消仓储只保存目标 cancel=1、保持 RUNNING，再调用原 handler 或默认普通／受限拥有者。有效红必须是旧普通申请阻止取消继续，而非 fixture 或守卫失败。
-- [ ] 同一真实保存故障世界中，通过公共 `ApplyCancelTarget` 与 `FinishCanceledCapture` 建立目标 CANCELED，再分别调用普通、残留、受限、普通取消和受限取消五个默认入口。断言 F 始终缺失、目标与产物事实不变、holder 可靠退役、无新 factory／设备／媒体调用；默认终态入口不能因候选过滤遗漏原 holder。`_cancel_and_end_original` 提供该公共链，但它不能代替上一项 RUNNING／cancel=1 反例。
-- [ ] 增加控制分区：F 已实际 COMMIT 后 UNKNOWN 仍核原完整输入；F 未提交且目标 cancel=0 的原申请仍用原 F／T1 完成；仅受理新取消仍未生效时普通决定可以先完成；持续读取或保存失败保留 holder 并停止依赖取消。改变原输入或 T1 的已存 F 必须拒绝，不能退役绕过。
-- [ ] root 独占部署 Python 3.11 的反例门禁，确认取消入口缺少原键核实、可靠缺失的普通决定未退役分别取得有效红，再实施。仓储在同一写事务内先查 F、核严格原身份；存在时走完整复用，不存在时按上表分流。退役不经过普通 `FinishCaptureCommand._recover` 的结果相同校验，不重新判定媒体或写入任何业务事实。
-- [ ] helper 仅在可靠保存或可靠退役之后移除 holder。默认 cancel 新增 recording 专用前缀，复用本会话共同 map，沿既有异常边界处理真实失败；不扩 raw READ End、跨进程 holder 或 v2。
-- [ ] root 独占复验新分区、原共同收场、完整输入重送、默认消费者及媒体取消保存顺序。独立审查逐格核 key-first、T1／T0、无迟到提交、可靠退役与旧事实守恒；按用户已授权的统一 checkpoint 提交。绿色仅完成本任务，不宣称下一项取消 RESULTS 已闭合。
+- [x]  在真实公开媒体完成之后对原共同申请注入实际 COMMIT 前 UNKNOWN，记录完整输入、F、T1、原尝试、run 和媒体；真正关闭旧连接，再由 fresh Owned 核同库身份、证明 F 缺失和无迟到事务。通过公共取消仓储只保存目标 cancel=1、保持 RUNNING，再调用原 handler 或默认普通／受限拥有者。有效红必须是旧普通申请阻止取消继续，而非 fixture 或守卫失败。 RUNNING／cancel=1 反例经 `/tmp/camctl-goal-recording-retirement-red.log`（10 failed）取得，接线后由 `test_recording_results_cancellation.py` 覆盖。
+- [x]  同一真实保存故障世界中，通过公共 `ApplyCancelTarget` 与 `FinishCanceledCapture` 建立目标 CANCELED，再分别调用普通、残留、受限、普通取消和受限取消五个默认入口。断言 F 始终缺失、目标与产物事实不变、holder 可靠退役、无新 factory／设备／媒体调用；默认终态入口不能因候选过滤遗漏原 holder。`_cancel_and_end_original` 提供该公共链，但它不能代替上一项 RUNNING／cancel=1 反例。 五入口 CANCELED 组合在 `/tmp/camctl-goal-recording-cancel-checkpoint-bootstrap.log`（34 passed）十五项中通过。
+- [x]  增加控制分区：F 已实际 COMMIT 后 UNKNOWN 仍核原完整输入；F 未提交且目标 cancel=0 的原申请仍用原 F／T1 完成；仅受理新取消仍未生效时普通决定可以先完成；持续读取或保存失败保留 holder 并停止依赖取消。改变原输入或 T1 的已存 F 必须拒绝，不能退役绕过。 F 已提交后 UNKNOWN、cancel=0 原申请完成、仅受理取消、持续读取／保存失败四个控制分区均由同批 34 项覆盖。
+- [x]  root 独占部署 Python 3.11 的反例门禁，确认取消入口缺少原键核实、可靠缺失的普通决定未退役分别取得有效红，再实施。仓储在同一写事务内先查 F、核严格原身份；存在时走完整复用，不存在时按上表分流。退役不经过普通 `FinishCaptureCommand._recover` 的结果相同校验，不重新判定媒体或写入任何业务事实。 取消入口缺原键核实的有效红为 `/tmp/camctl-goal-recording-cancel-prefix-red.log`（2 failed）；仓储同一写事务先查 F 的实现经独立审查。
+- [x]  helper 仅在可靠保存或可靠退役之后移除 holder。默认 cancel 新增 recording 专用前缀，复用本会话共同 map，沿既有异常边界处理真实失败；不扩 raw READ End、跨进程 holder 或 v2。 holder 仅在可靠保存或退役后移除；两个取消入口只接专用 `resume_recording_results` 恢复前缀。
+- [x]  root 独占复验新分区、原共同收场、完整输入重送、默认消费者及媒体取消保存顺序。独立审查逐格核 key-first、T1／T0、无迟到提交、可靠退役与旧事实守恒；按用户已授权的统一 checkpoint 提交。绿色仅完成本任务，不宣称下一项取消 RESULTS 已闭合。 复验与独立审查记录见“取消恢复任务一的当前验证与提交范围”；媒体取消保存顺序四项包含在 34 项内。
 
 #### 任务二：取消拥有者结束原录像 RESULTS
 
@@ -530,9 +530,9 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 
 下一步建议沿最窄录像取消拥有者边界组织原 run 的 CANCELED 收场。可以复用 `StaleRunFinish` 的既有身份守卫和结束事件；是否与 `FinishCanceledCapture` 组合取决于实际公共事务模型，须在有效红后核对。新增取消收场申请与保存故障必须持有自己的完整输入、key 和决定时刻，不能修改旧普通 F、复用原 AttemptFinish key 或把其 T1 当取消事实时刻。需覆盖直接普通 handler、restricted winddown 及目标已 CANCELED 后仍有原 run 责任的恢复，避免候选过滤再次遗漏独立责任。
 
-- [ ] root 决定下一有界阶段后，先从公开 START／STOP、真实 RESULTS 与媒体等待建立原 ACTIVE／retry=1 世界，公共取消生效后执行实际 `_record_handler` 或默认 scheduling／winddown，随后执行真实 cancel flow。不能只调用 fixture 的 `FinishCanceledCapture` 证明拥有者闭合。
-- [ ] 断言旧普通 F 未提交且已退役，原 run 同一身份变为 CANCELED／retry=0，原尝试、T0、次数、配置、媒体与文件观察保持，零新增 RESULTS／READ／工具调用，取消请求等待适用责任可靠结束再完成。直接取消但没有 ordinary holder 的同类世界也应覆盖，以区分旧取消缺口与本任务退役引入的回归。
-- [ ] root 取得有效红后，核原已保存 attempt／run 终态控制分区、保存前／后 UNKNOWN、同会话与 fresh Owned 恢复，再授权取消 run 生产修改；此前保留任务二为未完成，不将其绿色前提假定成立。
+- [x]  root 决定下一有界阶段后，先从公开 START／STOP、真实 RESULTS 与媒体等待建立原 ACTIVE／retry=1 世界，公共取消生效后执行实际 `_record_handler` 或默认 scheduling／winddown，随后执行真实 cancel flow。不能只调用 fixture 的 `FinishCanceledCapture` 证明拥有者闭合。 真实世界由 `test_recording_cancel_results_settlement.py` 建立：公开取消生效后实际 handler／scheduling／winddown 再执行真实 cancel flow。
+- [x]  断言旧普通 F 未提交且已退役，原 run 同一身份变为 CANCELED／retry=0，原尝试、T0、次数、配置、媒体与文件观察保持，零新增 RESULTS／READ／工具调用，取消请求等待适用责任可靠结束再完成。直接取消但没有 ordinary holder 的同类世界也应覆盖，以区分旧取消缺口与本任务退役引入的回归。 断言覆盖 F 退役（disposition=retired）、原 run 同一身份 CANCELED／retry=0、原尝试与观察守恒、零新增调用及无 ordinary holder 的对照分区。
+- [x]  root 取得有效红后，核原已保存 attempt／run 终态控制分区、保存前／后 UNKNOWN、同会话与 fresh Owned 恢复，再授权取消 run 生产修改；此前保留任务二为未完成，不将其绿色前提假定成立。 控制分区由 `test_recording_cancel_results_recovery.py`（UNKNOWN 重试）、`test_recording_cancel_results_persistent.py`（无会话 holder 持久发现）、`test_recording_cancel_inflight_results.py`（在途尝试等待）覆盖；红为 `/tmp/camctl-goal-canceled-recording-results-red.log`。
 
 任务二的完整输入核验还有一项静态缺口，尚无行为红：`_FinishCanceledCaptureCommand._reuse` 将 `unstarted` 核验交给 `FinishCaptureCommand._reuse`，而后者只在重送输入为 `unstarted=True` 时验证可靠未启动。原合法未启动取消申请 G 已提交后，用相同 action、key、T1 将 `unstarted` 改为 False，会跳过该核验；原取消事件及无产物输入仍满足其余复用条件。这个限制来自原公共完成命令，新取消 wrapper 继续使用它；当前已启动录像的 COMMIT 前后 UNKNOWN 恢复不能证明未启动标记的完整输入核验。
 
