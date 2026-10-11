@@ -511,7 +511,7 @@ flowchart LR
 - [x] [事件生产者与结构余项](2026-10-02-camctl-event-contracts-review.md)：真实变化、完整守卫、原操作键目标与输入核对，以及证据成员校验的全部入口闭合。
 - [x] [历史对象读取](2026-10-09-camctl-history-object-closure.md)：限定对象的投影与 C、同 H 恢复及必要成员完整性，以及短读事务和快照成本选择。
 - [ ] 报告生成链：固定历史分页、子集合跨页写出、控制消息、实际工作进程及维护协调器的真实组合；[子进程收场计划](2026-10-09-camctl-worker-late-state.md)跟踪已送达结果与迟到状态库错误。
-- [ ] [显式同步动作执行与取消](2026-10-09-camctl-sync-cancellation.md)：开始责任、本地发布及动作成功、取消生效和恢复的真实消费者。
+- [x] [显式同步动作执行与取消](2026-10-09-camctl-sync-cancellation.md)：开始责任、本地发布及动作成功、取消生效和恢复的真实消费者。（2026-10-11 完成：SC1—SC3 全部任务交付，含同事务取消、ACK 双序、原键四模式、故障注入与历史回放矩阵；cancellation 103 项、bootstrap 963 项、reporting 352 项目录门禁通过。）
 - [x] [目录绑定切换](2026-10-09-camctl-directory-switch-verification.md)：实际目录对象、整套提交观察、业务事实保留、进程退出及有界遍历。
 - [ ] [本次运行配置与原绑定](2026-10-09-camctl-runtime-configuration-closure.md)：日常入口三路径、逐设备失败、实际调用参数、未完成等待及历史恢复。
 - [ ] [停止与查询结果保存](2026-10-09-camctl-capture-call-results.md)：原完整结果和事务身份、五种查询用途、可靠停止同时带错误，以及迟到事实与原终态。

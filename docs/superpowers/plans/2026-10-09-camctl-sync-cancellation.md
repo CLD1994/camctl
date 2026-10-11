@@ -105,12 +105,12 @@
 
 **接口：** 保持 `CancellationRepository.apply_cancel_target(command: ApplyCancelTarget, key: OperationKey, owned: OwnedConnection)`。命令内部读取原同步记录并按上表分区，在同一个 `CommandPlan` 中保存必要的 `SYNC_CHANGED.CANCEL`。`cancel_sync` 的独立接口可以继续用于既有责任，但生产取消链必须使用同事务组合，不能嵌套提交。
 
-- [ ] 先写 `test_apply_cancel_ends_running_sync_in_same_transaction`：通过真实受理和 `start_sync` 建立报告动作，固定真实取消成员，执行取消生效。断言目标 `(status, execution_started, cancel_requested) == (2, 1, 1)`，原同步状态为 `CANCELED`；标记、成员进度和同步结束事件属于同一完整事务，原同步定义及其他同步不变。
-- [ ] 分别覆盖报告未发布、已发布但动作仍运行、ACK 已先结束，以及动作已成功四个分区；独立断言结束原因、`ack_report_id`、`local_report_id` 和动作标记。已有报告经真实冻结/发布入口准备，不用虚构的水位或不完整历史作为查询依据。
-- [ ] 由主 Agent 顺序运行新文件，确认目标反例因同步责任未结束而失败；依赖、守卫注册或场景准备错误不算有效失败。
-- [ ] 在现有生效事务统一读取、判断、登记拥有者、分配事件与提交；同步事件的 `ended_event_id` 必须指向它自身。原键重送读取完整原事务，核对目标、输入、同步身份和结束事实，不重新分配身份或追加结束。
-- [ ] 用真实事务失败注入覆盖同步写入前后回滚与提交未知；验证标记、成员、同步与历史共同回滚，未知结果不推进成员成功，恢复核实原键。
-- [ ] 审计 PRE_START、WITH_STOP、ALREADY、TERMINAL 四个入口及其他目标类型，保持它们现有责任边界。先运行新文件，再运行 cancellation 目录门禁。
+- [x] 先写 `test_apply_cancel_ends_running_sync_in_same_transaction`：通过真实受理和 `start_sync` 建立报告动作，固定真实取消成员，执行取消生效。断言目标 `(status, execution_started, cancel_requested) == (2, 1, 1)`，原同步状态为 `CANCELED`；标记、成员进度和同步结束事件属于同一完整事务，原同步定义及其他同步不变。（`integration/cancellation/test_report_sync_lifecycle.py` 交付，2026-10-11 复核 37 项与 `test_report_flow.py` 合计 41 项通过。）
+- [x] 分别覆盖报告未发布、已发布但动作仍运行、ACK 已先结束，以及动作已成功四个分区；独立断言结束原因、`ack_report_id`、`local_report_id` 和动作标记。已有报告经真实冻结/发布入口准备，不用虚构的水位或不完整历史作为查询依据。（`integration/cancellation/test_report_sync_lifecycle.py` 交付，2026-10-11 复核 37 项与 `test_report_flow.py` 合计 41 项通过。）
+- [x] 由主 Agent 顺序运行新文件，确认目标反例因同步责任未结束而失败；依赖、守卫注册或场景准备错误不算有效失败。（上文 2026-10-09 记录 6 项反例红及原因分类。）
+- [x] 在现有生效事务统一读取、判断、登记拥有者、分配事件与提交；同步事件的 `ended_event_id` 必须指向它自身。原键重送读取完整原事务，核对目标、输入、同步身份和结束事实，不重新分配身份或追加结束。（`integration/cancellation/test_report_sync_lifecycle.py` 交付，2026-10-11 复核 37 项与 `test_report_flow.py` 合计 41 项通过。）
+- [x] 用真实事务失败注入覆盖同步写入前后回滚与提交未知；验证标记、成员、同步与历史共同回滚，未知结果不推进成员成功，恢复核实原键。（`test_sync_cancellation_failure_rolls_back_all_facts` 与 `test_unknown_sync_cancellation_verifies_original_complete_transaction`。）
+- [x] 审计 PRE_START、WITH_STOP、ALREADY、TERMINAL 四个入口及其他目标类型，保持它们现有责任边界。先运行新文件，再运行 cancellation 目录门禁。（`test_report_cancel_original_key_rejects_changed_apply_mode`、`test_running_unstarted_capture_original_key_keeps_exact_mode` 及守卫反例；2026-10-11 cancellation 目录 103 项通过。）
 
 **阶段门禁：** 尚未结束的运行中同步与取消标记共同提交；已 ACK 或已成功分区保持原事实；事件登记、原键核实、回放与其他目标类型均能解释实际事务。
 
@@ -120,12 +120,12 @@
 
 **接口：** `TargetSettlement.settle(target_action_id: int) -> SettlementOutcome` 消费真实取消事实。建议新增窄用例 `finish_canceled_sync_action(key: OperationKey, owned: OwnedConnection, *, action_id: int, occurred_at: int) -> DbOutcome[SyncSaved]`，保持现有结果类型或使用等价有约束类型；用例只保存目标本地收场及适用计划完成，不触碰共享生成和报告文件。调用方必须检查 `DbOutcomeKind`。
 
-- [ ] 先写 `test_running_sync_cancel_settles_target_before_member_success`，组合 `apply_cancel` 与真实 `TargetSettlement`。断言目标最终 `(6, 1, 1)`，取消成员为成功且 `outcome=canceled`，同步保留 SC1 的结束事实；不能只断言收场端口返回 `complete=True`。
-- [ ] 写 ACK 已先结束后的取消反例、最后一个动作取消时计划共同完成、目标已有终态保持，以及取消生效提交后中断再重建收场端口的反例。
-- [ ] 建立原取消发起者自身结束等待后的恢复反例：只留下目标已取消生效的持久化事实，由目标本地责任发现入口完成动作收场；取消成员和发起者已保存结果保持原事实。恢复不能依赖原发起者仍 `RUNNING`。
-- [ ] 由主 Agent运行上述反例确认红灯，再实施本地收场事务和报告目标分派；取消结果保存前核实目标已经取得契约规定的终态，禁止把 `RUNNING` 记为 `already_terminal`。
-- [ ] 将已生效且尚未终态的报告动作收场接入正常及受限运行的责任发现；先处理本地取消，再考虑普通本地成功。重入沿原同步、动作和计划事实，只追加尚缺的事实。
-- [ ] 覆盖动作/计划终态写入失败、原键重送、回放及成员结果保存前中断；运行新 cancellation 测试文件和 bootstrap 报告窄门禁。
+- [x] 先写 `test_running_sync_cancel_settles_target_before_member_success`，组合 `apply_cancel` 与真实 `TargetSettlement`。断言目标最终 `(6, 1, 1)`，取消成员为成功且 `outcome=canceled`，同步保留 SC1 的结束事实；不能只断言收场端口返回 `complete=True`。（`integration/cancellation/test_report_sync_lifecycle.py` 交付，2026-10-11 复核 37 项与 `test_report_flow.py` 合计 41 项通过。）
+- [x] 写 ACK 已先结束后的取消反例、最后一个动作取消时计划共同完成、目标已有终态保持，以及取消生效提交后中断再重建收场端口的反例。（`test_acknowledged_running_sync_can_cancel_without_rewriting_ack`、`test_local_cancel_finish_rolls_back_action_and_plan_then_reenters` 与共享报告矩阵。）
+- [x] 建立原取消发起者自身结束等待后的恢复反例：只留下目标已取消生效的持久化事实，由目标本地责任发现入口完成动作收场；取消成员和发起者已保存结果保持原事实。恢复不能依赖原发起者仍 `RUNNING`。（`test_target_cancel_recovers_after_origin_stops_waiting`。）
+- [x] 由主 Agent运行上述反例确认红灯，再实施本地收场事务和报告目标分派；取消结果保存前核实目标已经取得契约规定的终态，禁止把 `RUNNING` 记为 `already_terminal`。（2026-10-09 记录取消目标仍运行的反例红及实施后 31／37 项通过。）
+- [x] 将已生效且尚未终态的报告动作收场接入正常及受限运行的责任发现；先处理本地取消，再考虑普通本地成功。重入沿原同步、动作和计划事实，只追加尚缺的事实。（`test_target_cancel_recovers_after_origin_stops_waiting` 与 `test_cancel_finish_store_failure_stops_session_without_member_result`。）
+- [x] 覆盖动作/计划终态写入失败、原键重送、回放及成员结果保存前中断；运行新 cancellation 测试文件和 bootstrap 报告窄门禁。（`test_local_cancel_finish_rolls_back_action_and_plan_then_reenters`、`test_unknown_local_cancel_finish_recovers_original_key`、`test_sync_cancel_history_replays_target_sync_member_and_plan`。）
 
 **阶段门禁：** 取消成员成功时目标已可靠终态；报告动作本地收场不等待共享生成或 ACK；已保存标记的收场责任在原发起者退出后仍可发现和完成。
 
@@ -135,12 +135,12 @@
 
 **接口：** 沿用 `record_local_report(key, owned, *, action_id, local_report_id, occurred_at)` 与 `report_flow`。责任发现必须根据动作仍正常运行、本地结果尚未保存和可靠合格发布报告判断；同步为 `OUTSTANDING` 或 `ACKNOWLEDGED` 均可承担尚未结束的本地工作。
 
-- [ ] 先写 `test_acknowledged_sync_recovers_local_action_success`：真实开始同步、冻结和发布报告，真实 ACK 先结束同步但尚未保存本地结果；重新建立生产 `report_flow`。断言原动作 `SUCCEEDED`、原报告 ID 成为 `local_report_id`、ACK 的结束字段保持，最后一个动作适用时计划完成，不建立第二项同步。
-- [ ] 写 `test_work_facts_keeps_acknowledged_local_result_pending`，断言上述中间状态在真实会话查询中仍有本地待处理责任；正常维护成功后只剩合法远端或保留责任，不为等待 ACK 延长运行。
-- [ ] 写取消已经生效后的本地成功拒绝反例及 `_settle_covered_local_syncs` 保存回滚/未知反例；断言生产维护抛出状态库错误，动作和计划不被声明完成。
-- [ ] 由主 Agent 顺序运行反例确认红灯，再修改全部实际消费者的过滤与结果处理。查询不选择 `CANCELED` 同步、不选择目标已有终态或取消标记已生效的动作；发布流程可以保存共享报告实际事实，不能恢复被取消目标成功。
-- [ ] 组合正常会话、受限会话、ACK 与取消两种提交顺序和报告生成期间新变化；报告固定 `H`、字节和其他同步要求保持。运行 reporting、cancellation、bootstrap 各目录门禁，彼此分开启动。
-- [ ] 独立审阅新事务、全部责任查询及实际报告内容，按本计划矩阵逐行对照证据；更新路线图对应入口与模块计划。只有具备真实消费者证据的条目才勾选完成。
+- [x] 先写 `test_acknowledged_sync_recovers_local_action_success`：真实开始同步、冻结和发布报告，真实 ACK 先结束同步但尚未保存本地结果；重新建立生产 `report_flow`。断言原动作 `SUCCEEDED`、原报告 ID 成为 `local_report_id`、ACK 的结束字段保持，最后一个动作适用时计划完成，不建立第二项同步。（`integration/cancellation/test_report_sync_lifecycle.py` 交付，2026-10-11 复核 37 项与 `test_report_flow.py` 合计 41 项通过。）
+- [x] 写 `test_work_facts_keeps_acknowledged_local_result_pending`，断言上述中间状态在真实会话查询中仍有本地待处理责任；正常维护成功后只剩合法远端或保留责任，不为等待 ACK 延长运行。（`integration/cancellation/test_report_sync_lifecycle.py` 交付，2026-10-11 复核 37 项与 `test_report_flow.py` 合计 41 项通过。）
+- [x] 写取消已经生效后的本地成功拒绝反例及 `_settle_covered_local_syncs` 保存回滚/未知反例；断言生产维护抛出状态库错误，动作和计划不被声明完成。（`test_local_result_save_failure_stops_maintenance` 与共享报告取消保持矩阵。）
+- [x] 由主 Agent 顺序运行反例确认红灯，再修改全部实际消费者的过滤与结果处理。查询不选择 `CANCELED` 同步、不选择目标已有终态或取消标记已生效的动作；发布流程可以保存共享报告实际事实，不能恢复被取消目标成功。（2026-10-09 记录会话责任遗漏与状态库错误未转换的反例红及实施。）
+- [x] 组合正常会话、受限会话、ACK 与取消两种提交顺序和报告生成期间新变化；报告固定 `H`、字节和其他同步要求保持。运行 reporting、cancellation、bootstrap 各目录门禁，彼此分开启动。（reporting 352 项见上文记录；2026-10-11 cancellation 103 项、bootstrap 963 项分别通过。）
+- [x] 独立审阅新事务、全部责任查询及实际报告内容，按本计划矩阵逐行对照证据；更新路线图对应入口与模块计划。只有具备真实消费者证据的条目才勾选完成。（上文阶段记录逐项对照；路线图同步更新。）
 
 **阶段门禁：** ACK 结束不丢失本地动作结果责任，取消不被迟到成功覆盖，任何本地结果保存失败都保留可诊断事实并进入状态库错误处理。
 
@@ -163,7 +163,7 @@ git diff --check
 
 2026-10-09，开发容器 Python 3.11.16、`.venv311`：主 Agent 按上述新 cancellation 文件命令独占执行，初始 6 项反例全部失败，原因分别为同步责任未结束、取消目标仍运行、ACK 后本地动作结果及会话责任遗漏。补充原键模式反例得到 `1 failed, 15 passed`，变化的 `mode` 被错误复用；补充两类查询在正常／受限报告入口的反例得到 4 项失败，SQLite 错误没有转换为 `StateDbFailure`。生产路径实施后，扩展文件的业务字段与各对象正式声明的派生元数据分别核对，得到 `31 passed`。随后补充完整输入身份门禁六项均失败：拍摄 `PRE_START`／`WITH_STOP` 的原键歧义，以及守卫对缺失、其他成员、其他模式、其他时间和额外字段的证据未拒绝。完整证据写入、守卫及原键核实完成后，该文件 `37 passed`。
 
-扩展门禁覆盖同事务取消、报告已发布／未发布、ACK 两种顺序、原操作键四种模式、明确回滚与提交未知、本地收场和成员保存之间的恢复、原发起者取消后的责任发现、固定 `H` 的共享报告、初始回放与当前投影逆向恢复，以及真实会话驱动在状态库失败后停止后续流程。reporting 单目录独立回归 352 项通过；完整 cancellation、bootstrap 目录门禁仍待完成。
+扩展门禁覆盖同事务取消、报告已发布／未发布、ACK 两种顺序、原操作键四种模式、明确回滚与提交未知、本地收场和成员保存之间的恢复、原发起者取消后的责任发现、固定 `H` 的共享报告、初始回放与当前投影逆向恢复，以及真实会话驱动在状态库失败后停止后续流程。reporting 单目录独立回归 352 项通过；2026-10-11 补齐完整目录门禁：cancellation 103 项通过、bootstrap 963 项通过、1 项跳过。本计划任务全部完成。
 
 ## 输入身份记录与验证边界
 
