@@ -218,3 +218,19 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 - 顺带闭合的接缝：`_reconcile_recording` 的对账停止此前未接停止核实，跨会话对账停止未确认后没有查询核实路径；现与 READY_TO_STOP 分支一致先经 `_confirm_stop_by_query` 核实。
 
 回归：capture＋scheduling＋cancellation＋operations＋unit 6172 passed＋1 skipped；bootstrap 986 passed＋1 skipped。第三阶段软件分区至此闭合，剩余第四阶段历史与可观察结果三路径核验。
+
+### 第四阶段验证记录（2026-10-11）
+
+2026-10-11，Linux 容器（WSL2 x86_64）、Python 3.11.16，协调 Agent 前台独占执行。新测试文件为 `integration/history/test_stop_query_result_replay.py`（3 项），本阶段无生产改动，核验对象为第二、三阶段交付的保存与收场事务组合。
+
+世界构建的必要条件是被恢复的行有完整历史：首版尝试在 capture 级 `_world` 的 SQL 种子行上回放，因种子行没有创建事件在 ReplayError（行不存在，无法更新）处失败；据此改为真实 `initialize_state`、受理与 run 会话（按场景装配拍摄、取消与残留流程），事务前状态由端口替身在途暂停（进入调用 → 读库 → 放行）提供。
+
+三个结果事务各取基线、事务前、事务后三个检查点，每点边界与行投影在同一读事务内读取：
+
+- 普通停止确认事务（停止替身在途暂停后返回可靠确认）：事务前 stop 流程 ACTIVE、尝试 RUNNING、活动 RUNNING；事务后尝试 SUCCEEDED／CONFIRMED 并携带 result_json，流程 SUCCEEDED，活动 ENDED。
+- 停止核实查询收场事务（停止发送未确认后查询替身在途暂停、返回可靠空闲）：事务前 stop 流程 ACTIVE（尝试 SUCCEEDED 发送未确认）、query/stop 流程 ACTIVE 且尝试 RUNNING 无结果；事务后两流程 SUCCEEDED、查询尝试携带可靠空闲结果，活动 ENDED。
+- 残留确认查询收场事务（原动作 1 停止预算耗尽失败终态、触发动作 2 执行前检查发现残留、收场首停未确认、确认查询在途暂停）：事务前 followup 流程 ACTIVE、query/residual 流程 ACTIVE 且尝试 RUNNING 无结果，活动仍在录且占用保留，原动作已失败终态；事务后两流程 SUCCEEDED、活动 ENDED 并释放占用，原动作终态保持。停止流程行沿原活动归属原动作实体而 `action_id` 仍记触发动作，核实查询行归触发动作实体——A／B 归属在双实体行集上分别断言并回放。
+
+每个检查点验证三条恢复路径与该边界当时的投影一致：直接回放（INITIAL_BOUNDARY 空种子加实体事件 `restore`）、快照正向（前一检查点行作种子恢复到本边界）与当前投影逆向（当前行加 `apply_reverse` 逐事件逆推）。比较目标经 `HistoryRepository.restore_within` 的权威归属枚举读取动作实体全部行（动作、活动、处理行、拷贝、流程、尝试等），不采用手选表集。"旧 H 报告不含后来观察"以事务前边界表达：三路径在事务前恢复的投影中查询尝试无结果事实（RUNNING、result_json 为空），空闲确认与活动结束仅在事务后边界出现；固定 H 报告的字节级重建沿用既有 `integration/bootstrap/test_read_history_replay_report.py` 覆盖，本文件不重复生成报告。证伪探针：在两项单实体测试上临时把直接回放的比较目标替换为最后检查点投影，两项立即失败，边界判别确认有效后恢复。
+
+阶段门禁按计划顺序前台独占执行并全部通过：unit（capture 865＋operations 278）；integration 依次为 capture 1009、operations 200、cancellation 103、scheduling 134、bootstrap 986 passed＋1 skipped、history 212、reporting 373。本计划四个阶段的软件任务至此全部闭合；ARM64 真机、物理断电与真机演示属部署联调，由[部署交接与待核验项](../../camctl/verification.md#部署交接与待核验项)另行跟踪。
