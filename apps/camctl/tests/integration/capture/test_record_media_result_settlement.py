@@ -457,3 +457,76 @@ async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
     assert owned.connection.execute(
         "SELECT presence_state, completion_state FROM device_files WHERE id=?",
         (source_id,)).fetchone() == (2, 3)
+
+
+async def test_incomplete_other_turning_complete_settles_from_saved_facts(
+        media_pipeline):
+    """未完成 OTHER 转完整后的本地装载次序：新轮次只补观察，收场沿已保存事实。
+
+    第一轮集合因未完成 OTHER 保持重试等待（VIDEO 已读取、检查完成、
+    无需修复）；后续轮次 OTHER 转完整后，新观察只登记该文件的完成事
+    实，不重新读取已可靠结束的源文件、不重新检查，集合齐备即收场，
+    每份完整原片各自登记为正式产物。
+    """
+    owned, roots, source_id = media_pipeline
+    entry = replace(_entry("original-recording", size=len(_CONTENT)),
+                    locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
+    incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
+    results = ResultsDouble({1: (entry, incomplete)})
+    runtime = _runtime(owned, results=results, listing_cache={})
+    runtime.evidence = _EVIDENCE
+    reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
+    runtime.media = _flow(media_pipeline, reader, tools)
+
+    await capture_handler("camera_record")(1, runtime)
+    runtime.wall_us = lambda: _NOW + 200_000_000
+    await capture_handler("camera_record")(1, runtime)
+    assert _result_run(owned)[1:4] == (2, 1, 1)
+    assert len(reader.opens) == 1
+    assert tools.calls == ["probe", "probe"]
+    other_id, = owned.connection.execute(
+        "SELECT id FROM device_files WHERE observer_action_id=1 AND id<>?",
+        (source_id,)).fetchone()
+
+    # 后续轮次：同一集合中的 OTHER 转完整且集合确定。重试间隔按会
+    # 话单调钟计时，墙钟与单调钟一起越过间隔。
+    results.files_by_action[1] = (entry, _entry("sidecar-log", kind=FileKind.OTHER))
+    runtime.wall_us = lambda: _NOW + 400_000_000
+    runtime.monotonic_ns = lambda: 15_000_000_000
+    await capture_handler("camera_record")(1, runtime)
+
+    # 本地装载次序：新轮次重新列举并只补观察 OTHER 的完成事实；已可
+    # 靠结束的读取与已完成的检查不重做——零新读取、零新 probe。
+    assert results.calls == [1, 1]
+    assert len(reader.opens) == 1
+    assert tools.calls == ["probe", "probe"]
+    assert owned.connection.execute(
+        "SELECT completion_state FROM device_files WHERE id=?",
+        (other_id,)).fetchone() == (3,)
+    # 集合齐备即收场：第二次列举消耗第二次名额，动作成功；完整 VIDEO
+    # 与转完整的 OTHER 各自登记为原片产物，收场同事务。
+    assert _result_run(owned)[1:4] == (3, 2, 0)
+    assert owned.connection.execute(
+        "SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
+        (source_id,)).fetchone() == (1,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
+        (other_id,)).fetchone() == (1,)
+    # 收场事务边界：新轮次直接齐备时，本轮列举处置（尝试结果与 run
+    # 终结）沿轮次保存事务提交；正式产物登记与动作成功终态按设备事
+    # 实与动作结果规则在同一历史事务保存。
+    transactions = {"action": set(), "output": set()}
+    for transaction_id, body in owned.connection.execute(
+            "SELECT transaction_id,body_json FROM history_events ORDER BY id"):
+        for row in json.loads(body)["rows"]:
+            values = row["after"]["values"]
+            if row["table"] == "actions" and row["id"] == 1 and values.get("status") == 3:
+                transactions["action"].add(transaction_id)
+            if row["table"] == "outputs" and values.get("source_action_id") == 1:
+                transactions["output"].add(transaction_id)
+    assert len(transactions["action"]) == 1
+    assert transactions["action"] == transactions["output"]

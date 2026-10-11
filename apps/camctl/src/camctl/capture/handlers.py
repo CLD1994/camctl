@@ -2929,7 +2929,7 @@ def _local_recording_listing(runtime: CaptureRuntime, action):
     with closing(connection.execute(
         "SELECT f.identity_key,f.completion_state,f.source_action_id,c.verification_state,"
         " c.committed_bytes,c.source_size,c.target_sha256,h.owner_action_id,h.size_bytes,h.sha256,"
-        " h.retention_state,h.cleanup_state,r.id,r.status,a.activity_state"
+        " h.retention_state,h.cleanup_state,r.id,r.status,a.activity_state,a.id"
         " FROM recording_processing p JOIN device_files f ON f.id=p.source_device_file_id"
         " JOIN file_copies c ON c.processing_id=p.id AND c.source_device_file_id=f.id"
         " JOIN intermediate_files h ON h.id=c.target_file_id"
@@ -2941,7 +2941,15 @@ def _local_recording_listing(runtime: CaptureRuntime, action):
     if row is None:
         return None
     (identity, completion, owner, verification, committed, source_size, target_sha,
-     host_owner, host_size, host_sha, retention, cleanup, run_id, run_status, activity) = row
+     host_owner, host_size, host_sha, retention, cleanup, run_id, run_status, activity,
+     activity_id) = row
+    # 集合完成依据仍不充分且核实预算未耗尽时，重试等待到期后必须
+    # 重新观察设备文件（继续有限核实）；等待期内的推进沿用已保存
+    # 观察，媒体链可继续推进而不消耗核实名额。
+    if runtime.retry_wait_remaining(
+            f"results/{activity_id}", runtime.check_config.retry_interval_s,
+            maximum=runtime.check_config.max_attempts) is None:
+        return None
     ready = enum_for("file_copies.verification_state")
     if (completion != int(enum_for("device_files.completion_state").COMPLETE)
             or owner != action["id"] or host_owner != action["id"]

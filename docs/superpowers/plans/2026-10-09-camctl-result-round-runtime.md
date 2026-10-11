@@ -596,3 +596,11 @@ F 可靠缺失、已有终态时，内部复合入口可以统一返回 `FinishD
 `/tmp/camctl-goal-cancel-timelapse-related-capture.log` 为 41 passed、5.24s，覆盖已保存取消结果消费、末轮报错前文件恢复、迟到 START 和录像开始查询取消。合法核实错误另经三项真实报告生成与固定 H 重建验证，范围见[报告投影计划](2026-10-09-camctl-result-errors-and-report-projection.md#合法核实错误的真实报告生成)。
 
 独立只读审查核这五行生产改动、实际文件消费者和十四项候选结构，未发现该修复的生产阻断。此门禁只闭合有限耗尽决定可靠前后、文件资格和取消登记之间的差异；取消终态申请自身的保存 UNKNOWN、普通集合结束、UNSATISFIED、事件守卫及完整报告链仍按各自计划推进，不由此推定已完成。
+
+### 未完成文件转完整后的本地装载次序
+
+2026-10-11，Linux 开发容器、Python 3.11.16：`integration/capture/test_record_media_result_settlement.py` 新增控制分区 `test_incomplete_other_turning_complete_settles_from_saved_facts`，闭合[决策清单第三项](2026-10-11-camctl-open-decisions.md#三未完成文件转完整后的本地装载次序)的未核验前提。前置为完整 VIDEO 加未完成 OTHER 两轮推进（重试等待保持、单次真实读取、媒体检查完成无需修复）；后续轮次 OTHER 转完整且墙钟与会话单调钟共同越过重试间隔后，断言重新列举消耗第二次名额、OTHER 完成事实按普通轮次观察登记、零新读取与零新 probe、集合齐备即收场，完整 VIDEO 与转完整的 OTHER 按正式产物模型各自登记为原片产物。
+
+该轮暴露一项生产缺陷：`_local_recording_listing` 在重试等待到期后仍以已保存观察短路新列举，使"集合完成依据仍不充分且核实预算未耗尽"的责任不再重新观察设备文件，违反[文件完成依据与产物检查](../../architecture/camera-capture.md#文件完成依据与产物检查)中"继续有限核实；预算耗尽后按失败及文件保留规则结束"的规则。修复为在装载前按 `retry_wait_remaining` 判定：等待期内的推进沿用已保存观察，媒体链继续推进而不消耗核实名额；等待到期或预算耗尽后禁用本地装载，走正常列举轮次。证伪探针确认守卫必要（撤守卫后 `results.calls == [1]`，新观察被短路为有效红）；诊断中曾怀疑的第二处缺陷（已登记文件完成转换在跳过分支丢失）经插桩与调用方审计证伪——列举快照与条目经 `_same_observed_files` 全字段比较按构造一致，恢复路径重放同一输入，完成转换由全量登记路径的既有保存覆盖，因此不添加不可达分支。
+
+事务边界同时核验：新轮次直接齐备时，本轮列举处置（尝试结果与 run 终结）沿轮次保存事务提交，正式产物登记与动作成功终态在同一历史事务保存，符合[设备事实与动作结果](../../architecture/camera-capture.md#设备事实与动作结果)的同一事务要求；该入口与本地装载收场经 `FinishRecordingResults` 的单事务路径属两类各自闭合的入口。`/tmp/camctl-goal-other-turning-green.log` 为 20 passed、15.64s；`/tmp/camctl-goal-other-turning-capture.log` 为 capture 目录 1010 passed、384.86s；`/tmp/camctl-goal-other-turning-bootstrap.log` 为 bootstrap 目录 989 passed、1 skipped（既有跳过）、819.02s，确认会话级流不受该守卫影响。
