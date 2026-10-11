@@ -231,19 +231,26 @@ class WorkFileRuntime:
         await asyncio.shield(task.pending)
 
     async def settle(self) -> None:
-        """等待已接纳责任；正常关闭重查后仍可推进新业务责任。"""
+        """等待已接纳责任；正常关闭重查后仍可推进新业务责任。
+
+        维护收场失败与每份未核实媒体申请的原保存错误都是已知收场
+        事实，全部呈现且不互相覆盖；首份媒体原错误保留为异常因果。
+        """
         result = await self.supervisor.drain_required()
         files = await self.file_supervisor.drain_required()
         self._raise_task_failure()
-        if result.failed or files.failed:
-            raise StateDbFailure("; ".join(
-                failure.error for failure in (*result.failed, *files.failed)))
+        reasons = [failure.error for failure in (*result.failed, *files.failed)]
+        reasons.extend(
+            f"原媒体申请尚未可靠保存: processing_id={held.command.processing_id},"
+            f" stage={held.stage.value}, key={held.key}: {held.save_error}"
+            for held in self.pending_media_results.values())
+        if not reasons:
+            return
+        error = StateDbFailure("; ".join(reasons))
         if self.pending_media_results:
-            pending = next(iter(self.pending_media_results.values()))
-            raise StateDbFailure(
-                f"原媒体申请尚未可靠保存: processing_id={pending.command.processing_id},"
-                f" stage={pending.stage.value}, key={pending.key}: {pending.save_error}"
-            ) from pending.save_error
+            raise error from next(
+                iter(self.pending_media_results.values())).save_error
+        raise error
 
     def stop_new_work(self) -> None:
         """致命错误、取消或受限转换停止新增维护，保留实际收场。"""
