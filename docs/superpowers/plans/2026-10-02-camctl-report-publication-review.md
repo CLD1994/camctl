@@ -57,7 +57,7 @@
 - [x] staging 重建与恢复观察的真实生产者和数据库保存。
 - [x] 同一报告补投资格及正常、受限会话中的真实机会处理。
 - [x] 发布结果与同步本地完成及动作成功共同保存。
-- [ ] 报告进程的真实生成结果、文件锁及维护协调器装配。
+- [x] 报告进程的真实生成结果、文件锁及维护协调器装配。（`WorkerSupervisor` 真实 spawn 与报告锁、`report_flow` 消费生成结果并发布、`reporting/maintenance.py` 协调器接入；`test_supervisor_transport.py` 与 reporting 目录 373 项，2026-10-11 审计。）
 
 前四项由 `camctl.reporting.publication` 及 `record_recovered_publication` 于 2026-10-03 闭合：报告文件使用 `staging/reports/` 专属子目录与最终发布名，发布编排按"写入同步 → 字节登记 → 意图 → 撤下旧 ready 报告 → 原子移动 → 发布记录 → 同步本地完成"推进并逐步分类失败；恢复观察按目录位置与报告登记判定保留、重建或补投，staging 的报告子目录尚未创建视为无残留，ready 与 processing 缺失仍是观察错误；恢复发现以文件名摘要与首次确定字节核对后同事务补齐发布事实（PREPARED 补意图、FAILED 先恢复到发布中）。受限会话的一次报告处理入口随 run/submit 真实入口装配（R6 CLI 分项）。
 

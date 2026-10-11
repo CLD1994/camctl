@@ -48,10 +48,10 @@
 
 ## 尚未闭合的消费者
 
-- [ ] 已有文件的保留、替换、同报告补投与数据库选择组合。
-- [ ] 正常与受限会话的机会资格、失败边界及一次处理限制。
-- [ ] 同步实际开始、取消及本地发布共同保存动作结果。
-- [ ] 实际 run 与报告协调器的装配及会话工作事实查询。
+- [x] 已有文件的保留、替换、同报告补投与数据库选择组合。（[冻结复用](2026-10-02-camctl-freeze-result-reuse.md)与[管理复用](2026-10-02-camctl-report-management-reuse.md)计划全部勾选交付；2026-10-11 审计无剩余分区。）
+- [x] 正常与受限会话的机会资格、失败边界及一次处理限制。（`test_report_flow.py` 正常机会与失败边界；受限会话 `once_report` 恰好一次并经受限组合与 `test_report_shutdown.py` 验证。）
+- [x] 同步实际开始、取消及本地发布共同保存动作结果。（`reporting/test_sync_lifecycle.py` 与[同步取消计划](2026-10-09-camctl-sync-cancellation.md) SC1—SC3 全部交付。）
+- [x] 实际 run 与报告协调器的装配及会话工作事实查询。（生产 `execute_command` 装配 report_flow 与维护协调器；`test_work_facts_keeps_acknowledged_local_result_pending` 及会话目录门禁。）
 
 ## 验证证据
 

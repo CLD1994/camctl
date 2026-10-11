@@ -47,12 +47,12 @@
 ## 待继续审查的消费者
 
 - [x] [报告数据库选择](2026-10-02-camctl-report-freeze-review.md)从同一 H 取得累计 ACK 与全部有效同步起点，重判范围及已有报告的内容资格。
-- [ ] 文件责任及正常、受限会话的完整报告机会处理。
-- [ ] 显式同步实际开始、起点不存在时的动作失败、重启及重送保持原定义。
-- [ ] 本地报告首次满足与动作成功共同保存；ACK 先结束后仍可独立完成本地工作。
-- [ ] 同步取消覆盖未开始、运行与终态动作；运行中的报告动作可取消，共享生成继续执行。
-- [ ] CLI 对提交结果未知的完整核实与恢复装配。
-- [ ] 会话工作事实查询与真实 `run` 装配消费上述持久化责任。
+- [x] 文件责任及正常、受限会话的完整报告机会处理。（2026-10-11 审计：`bootstrap/test_report_flow.py` 四项覆盖正常报告机会与失败边界；受限会话一次报告由 `once_report` 装配并经受限组合验证；文件发布责任见[发布评审](2026-10-02-camctl-report-publication-review.md)。）
+- [x] 显式同步实际开始、起点不存在时的动作失败、重启及重送保持原定义。（`reporting/test_sync_lifecycle.py::test_full_sync_starts_within_action_start_transaction`、`test_missing_anchor_fails_action_without_creating_sync`、`test_start_is_idempotent_for_retry_and_resend`。）
+- [x] 本地报告首次满足与动作成功共同保存；ACK 先结束后仍可独立完成本地工作。（`test_local_report_saved_with_action_success`、`test_local_report_after_ack_end`；取消侧经[同步取消计划](2026-10-09-camctl-sync-cancellation.md) SC2 全部交付。）
+- [x] 同步取消覆盖未开始、运行与终态动作；运行中的报告动作可取消，共享生成继续执行。（`test_canceled_before_start_does_not_start`、`test_cancel_ends_running_action_sync_only`、`test_unstarted_action_has_nothing_to_end`、`test_succeeded_action_preserves_sync_for_ack`、`test_one_sync_cancel_preserves_shared_frozen_report_and_other_success`；cancellation 目录 103 项。）
+- [x] CLI 对提交结果未知的完整核实与恢复装配。（`acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry` 按 commit_reached_database 参数化；B7 发行物全链覆盖 submit＋run 组合。）
+- [x] 会话工作事实查询与真实 `run` 装配消费上述持久化责任。（`cancellation/test_report_sync_lifecycle.py::test_work_facts_keeps_acknowledged_local_result_pending` 及路线图“会话工作事实与实际 run 装配”入口；bootstrap＋session 目录 1069 项。）
 
 ## 验证证据
 
