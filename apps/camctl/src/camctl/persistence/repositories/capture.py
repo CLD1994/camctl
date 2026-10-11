@@ -1869,6 +1869,19 @@ class CaptureRepository:
             return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def finish_residual_stop(
+        self, finish: AttemptFinish, action_id: int, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[FinishAttemptResult]:
+        """残留停止的实际结果、流程结束与活动收场共同保存。"""
+        receipt = commit_operation(
+            _ResidualStopCommand(finish, action_id, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_host_timer_stop(
         self, finish: AttemptFinish, stop: HostTimerStopSave,
         key: OperationKey, owned: OwnedConnection,
@@ -2552,13 +2565,18 @@ class ConcludeOutcome(Enum):
     """活动收场事务的可靠结果分区。"""
 
     CONCLUDED = "concluded"
+    ENDED_HELD = "ended_held"
     ALREADY = "already"
     REJECTED = "rejected"
 
 
 @dataclass(frozen=True)
 class ActivityConclusion:
-    """收场结果：结束观察与占用释放在同一事务共同保存。"""
+    """收场结果：结束观察与占用释放在同一事务共同保存。
+
+    输出范围限制未解除时，结束观察单独保存且占用保留 HELD，
+    结果为 ENDED_HELD；不把范围限制解释为设备仍在运行。
+    """
 
     outcome: ConcludeOutcome
     reason: str | None = None
@@ -2700,8 +2718,9 @@ class _ActivityConcludeCommand:
     活动结束的可靠停止事实按动作类型选择：照片整次活动随启动调
     用完成，使用 start 责任；录像与延时活动随停止调用结束，使用
     stop 责任的成功终态流程行，由本事务装载核验；结束观察
-    （DEVICE_OBSERVED.OBSERVE）与占用释放（RELEASE）在同一事务，
-    释放条件不满足时整组拒绝。
+    （DEVICE_OBSERVED.OBSERVE）与占用释放（RELEASE）在同一事务。
+    输出范围限制未解除时，结束观察单独保存且占用保留 HELD，不将
+    范围限制解释为设备仍在运行；没有可靠停止事实的活动保持拒绝。
     """
 
     def __init__(self, command: ActivityConcludeSave, key: OperationKey) -> None:
@@ -2717,6 +2736,18 @@ class _ActivityConcludeCommand:
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
             return self._reuse(scope, saved)
+        return self._plan_new(scope)
+
+    def plan_combined(self, scope, *, in_transaction_stop_run=None) -> CommandPlan:
+        """在复合事务内组合活动收场：不独立核对重用键。
+
+        停止证据可以来自同一事务内即将置为成功终态的流程行；其余
+        判定与独立收场完全一致。
+        """
+        return self._plan_new(scope, in_transaction_stop_run=in_transaction_stop_run)
+
+    def _plan_new(self, scope, *, in_transaction_stop_run=None) -> CommandPlan:
+        connection = scope.connection
         command = self._command
         facts = load_activity_of_action(connection, command.action_id)
         activity_id = facts["id"]
@@ -2738,7 +2769,8 @@ class _ActivityConcludeCommand:
                 return self._rejected("not_active")
             needs_ended = True
         if needs_ended and not self._load_stop_fact(
-                connection, command.action_id, activity_id):
+                connection, command.action_id, activity_id,
+                in_transaction_stop_run=in_transaction_stop_run):
             raise ConsistencyError(
                 "活动结束缺少可靠停止事实: "
                 f"{command.action_id}")
@@ -2748,7 +2780,32 @@ class _ActivityConcludeCommand:
         if not release_basis_holds(combined):
             return self._rejected("conditions_unmet")
         if combined["ownership_mode"] == 2 and not output_scope_resolved(combined):
-            return self._rejected("scope_limited")
+            if not needs_ended and facts["activity_state"] != 3:
+                # 可靠确认没有启动效果的活动没有结束事实可保存，
+                # 范围限制按原拒绝语义表达。
+                return self._rejected("scope_limited")
+            if needs_ended:
+                allocation = scope.allocate(1)
+                owner = ("action", facts["action_id"])
+                self._owners[("device_activities", activity_id)] = owner
+                events = (_envelope(
+                    allocation.first_event_id, allocation.txn_id,
+                    _ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON,
+                    (_update(
+                        "device_activities", activity_id,
+                        {"activity_state": facts["activity_state"]},
+                        {"activity_state": 3}),),
+                    command.occurred_at),)
+                return CommandPlan(
+                    events=events, owners=self._owners,
+                    state_rows=self._state,
+                    result=ActivityConclusion(
+                        outcome=ConcludeOutcome.ENDED_HELD, reason="scope_limited"))
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ActivityConclusion(
+                    outcome=ConcludeOutcome.ENDED_HELD, reason="scope_limited"))
 
         allocation = scope.allocate(2 if needs_ended else 1)
         owner = ("action", facts["action_id"])
@@ -2777,14 +2834,17 @@ class _ActivityConcludeCommand:
             result=ActivityConclusion(outcome=ConcludeOutcome.CONCLUDED))
 
     def _load_stop_fact(
-            self, connection, action_id: int, activity_id: int) -> bool:
+            self, connection, action_id: int, activity_id: int, *,
+            in_transaction_stop_run=None) -> bool:
         """按动作类型装载成功终态流程行作为活动结束证据。
 
         照片整次活动随启动调用完成，使用 start 责任；录像与延时活
         动随停止调用结束，使用 stop 责任。后续动作建立的残留收场流
         程可靠确认停止时同样证明活动结束，按活动引用采纳任一成功
         的收场流程。启动调用的成功不证明采集已经结束，正常延时按
-        等待与产物判定解除占用，不经本命令。
+        等待与产物判定解除占用，不经本命令。同一事务内即将置为成
+        功终态的流程行同样装载，供复合停止事务引用本事务的停止事
+        实。
         """
         action_row = connection.execute(
             "SELECT type FROM actions WHERE id = ?", (action_id,)).fetchone()
@@ -2812,6 +2872,11 @@ class _ActivityConcludeCommand:
             rows[int(row[0])] = facts
             if facts["status"] == 3:
                 found = True
+        if in_transaction_stop_run is not None:
+            # 同一事务内即将置为成功终态的流程行不进入装载快照：
+            # 守卫按事件顺序在本事务的流程结束事件后核验停止事实。
+            if int(in_transaction_stop_run["status"]) == 3:
+                found = True
         if rows:
             self._state["operation_runs"] = rows
         return found
@@ -2827,6 +2892,7 @@ class _ActivityConcludeCommand:
         """原键重送：核实原收场组成后恢复首次响应。"""
         command = self._command
         types = [(event["type"], event["reason"]) for event in saved]
+        ended_only = types == [(_ACTIVITY_OBSERVE_EVENT, _ACTIVITY_OBSERVE_REASON)]
         if not types or any(
                 event_type != _ACTIVITY_OBSERVE_EVENT for event_type, _ in types):
             raise TransactionError("操作身份已用于其他事务，不能作为活动收场重送")
@@ -2839,6 +2905,14 @@ class _ActivityConcludeCommand:
                 if (row["table"] != "device_activities"
                         or row["id"] != facts["id"]):
                     raise TransactionError("原活动收场属于其他活动")
+        if ended_only:
+            # 原事务只保存结束观察：占用按范围限制保留，后续可能
+            # 已由新事务释放，不能按当前占用核实。
+            return CommandPlan(
+                events=(), owners=self._owners, state_rows=self._state,
+                read_only=True,
+                result=ActivityConclusion(
+                    outcome=ConcludeOutcome.ENDED_HELD, reason="scope_limited"))
         if facts["occupancy_state"] != 2:
             raise TransactionError("原活动收场的可靠记录与输入不符")
         return CommandPlan(
@@ -3220,6 +3294,65 @@ class _CaptureStopCommand:
                 or len(rows) != 1 or rows[0]["table"] != "device_activities" or rows[0]["id"] != activity["id"]
                 or not json_equal(rows[0]["after"]["values"], expected)):
             raise TransactionError("拍摄停止重送改变原结果、结束时刻或控制时长")
+        return result
+
+
+class _ResidualStopCommand:
+    """残留停止确认承载实际结束：结果、流程与活动收场共同保存。
+
+    后续动作为残留录像建立的收场流程可靠确认停止时，原尝试结果、
+    流程成功终态、活动结束观察及条件释放使用同一事务身份；可靠停
+    止同时携带调用错误时保留 FAILED 尝试与完整错误依据。
+    """
+
+    def __init__(self, finish, action_id: int, key) -> None:
+        self._finish, self._action_id, self._key = finish, action_id, key
+
+    def plan(self, scope) -> CommandPlan:
+        saved = saved_transaction_events(scope.connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        finish = self._finish
+        run = row_facts(scope.connection, "operation_runs", finish.ticket.run_id)
+        activity = load_activity_of_action(scope.connection, self._action_id)
+        if (run is None or run["kind"] != int(_RUN_KIND.STOP_RESIDUAL)
+                or run["activity_id"] != activity["id"]
+                or finish.outcome.outcome.effect is not EffectState.CONFIRMED
+                or finish.run_finish is None
+                or finish.run_finish.status is not RunOutcome.SUCCEEDED):
+            raise ConsistencyError("残留收场不具备共同的停止结束事实")
+        if activity["activity_state"] == 3 and activity["occupancy_state"] == 2:
+            # 活动已经完整收场：实际结果单独保存，不重复活动事实。
+            return FinishAttemptCommand(finish, self._key).plan(scope)
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        result = FinishAttemptCommand(finish, self._key).plan(sub)
+        if result.read_only:
+            raise ConsistencyError("已保存的残留停止结果不能补写为共同收场事实")
+        conclude = _ActivityConcludeCommand(
+            ActivityConcludeSave(self._action_id, finish.occurred_at), self._key,
+        ).plan_combined(sub, in_transaction_stop_run={
+            "id": run["id"], "status": int(_RUN_STATUS.SUCCEEDED)})
+        events = (*result.events, *conclude.events)
+        scope.allocate(len(events))
+        return CommandPlan(
+            events=events,
+            owners={**result.owners, **conclude.owners},
+            state_rows=_merged_state_rows(result.state_rows, conclude.state_rows),
+            result=result.result)
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        cut = 1 + int(
+            len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
+        result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        if len(saved) == cut:
+            return result
+        activity = load_activity_of_action(scope.connection, self._action_id)
+        for event in saved[cut:]:
+            rows = event["body"]["rows"]
+            if (event["type"] != _ACTIVITY_OBSERVE_EVENT or len(rows) != 1
+                    or rows[0]["table"] != "device_activities"
+                    or rows[0]["id"] != activity["id"]):
+                raise TransactionError("残留停止重送改变原收场组成")
         return result
 
 

@@ -494,7 +494,10 @@ async def _stop_residual(
     outcome, confirmed = _operation_outcome(
         response, "stop_confirmed", evidence_type="stop_returned")
     if confirmed:
-        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
+        # 可靠确认的残留停止：尝试结果、流程成功与活动收场同事务。
+        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                       residual_conclude=candidate.action_id)
+        # 范围限制等收场拒绝已随同事务表达；重入按幂等补足收场。
         _conclude_activity(runtime, candidate.action_id)
     else:
         runtime.finish(ticket, outcome, retry_wait=True)

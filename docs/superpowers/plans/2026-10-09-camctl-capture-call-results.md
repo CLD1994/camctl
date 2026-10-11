@@ -179,3 +179,16 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 第一阶段的公共保存生产边界使用 `PendingCallResult`，实际返回先登记持有，普通保存、START 复合结果与恢复接手共用原键及事实时刻。`RuntimeDeps.capture_call_results` 传入普通、残留和受限三个工厂，缺失绑定运行时也引用同一集合。2026-10-09，Linux x86_64、Python 3.11.16，协调 Agent 独占复验 `integration/capture/test_call_result_save.py` 与 `test_recording_start_save_boundary.py`，32 项通过，日志为 `/tmp/camctl-goal-call-result-current.log`。该范围覆盖普通 STOP 保存的读取／投影／COMMIT 故障、五种 QUERY 的公共保存及 START／START_CONFIRMATION 在派生读取前持有；它不代替第三阶段尚缺的真实查询消费者，也不证明跨工厂计时消费已经闭合。
 
 上述测试精确核对原 ASSUMED／OBSERVED 依据、错误、观察、`call_info`、票据、次数、实际时刻和单个事务键；故障解除后在默认无可靠恢复边界且没有恢复 H 的同一运行时调用 `recover_attempt`，要求原实际结果优先保存。跨工厂计时消费的新 10 项反例位于 `integration/bootstrap/test_capture_call_session_state.py`。首次执行在契约断言前被缺失驱动部署定义阻断，日志 `/tmp/camctl-goal-capture-session-state-red.log` 为 10 failed、4.15s，不属于有效行为红。fixture 使用真实 `Catalog` 和现有合法驱动定义后，root 独占复跑得到 `/tmp/camctl-goal-capture-session-state-red-2.log`，6 failed、4 passed，4.36s：两个接手入口都丢失普通消费者的录像锚点，并在原等待尚余一秒或恰好到期时重置等待。根确认有效红后，生产通过 `RuntimeDeps.capture_recording_anchors` 和 `capture_retry_gate` 将两个权威会话对象传给三个工厂；原登记时刻、预算算法和持有集合保持。root 独占复跑该文件，日志 `/tmp/camctl-goal-capture-session-state-current.log` 为 10 passed、4.28s；该范围证明两个接手入口后的原确认锚点与有限等待消费，整体独立审查仍须完成。RESULTS 与 cleanup 的各自完整结果保存仍由其他专题验收。
+
+### 第二阶段验证记录（2026-10-11）
+
+2026-10-11，Linux 容器（WSL2 x86_64）、Python 3.11.16，协调 Agent 前台独占执行。新测试文件为 `integration/capture/test_stop_confirmed_with_error.py`（8 项），停止端口替身经 `DeviceCallResult.from_outcome` 返回 FAILED／CONFIRMED 与完整错误并存的正式结果。
+
+五条 `_stop_call` 调用方（`_record_handler` 正常路径、`SessionRecordingState` 重建后的 `_reconcile_recording` 对账路径、`advance_winddown` 保守路径、经迟到启动链进入的 `_advance_canceled_capture` 取消路径、主机到期 `stop_timelapse` 路径）的 CONFIRMED+error 分区全部首次即通过：尝试保存 FAILED（3）／CONFIRMED（3）效果与完整错误依据，流程按停止事实成功收场，活动 ENDED 与条件释放同事务，重入零补发。NO_EFFECT 停止（活动保持执行中并建立重试等待）与在途取消（实际返回前不派发新停止、不提前结束活动，返回后按停止事实收取消终态）两个分区同样首次即通过；预算变化不清零由 `integration/capture/test_stop_current_budget.py` 既有三入口矩阵继续覆盖。
+
+本阶段交付两处生产修复，均先取得有效红：
+
+- 范围限制保留 HELD：`_ActivityConcludeCommand` 此前在输出范围未解除时整组拒绝，结束观察不保存，与[操作字段规格](../../camctl/database/operation-fields.md#设备活动占用的释放条件)“保存 ENDED 并保留 HELD”不一致。修复新增 `ConcludeOutcome.ENDED_HELD`：可靠停止事实具备时结束观察单独保存，占用按范围限制保留；范围解除后重入收场才释放，原键重送与幂等重入按新组合核实。有效红（`ConcludeOutcome` 无该分区且活动保持执行中）与转绿均位于 `integration/scheduling/test_recovery.py` 的 `test_scope_limited_conclude_saves_ended_and_keeps_held`。
+- 残留停止同事务：`residual._stop_residual` 确认分支此前把尝试结果与流程结束（`runtime.finish`）和活动收场（`_conclude_activity`）拆成两个事务。有效红位于 `test_residual_stop_confirmed_with_error_settles_in_one_transaction`（结果事务与活动结束事务分离）。修复新增 `_ResidualStopCommand` 与仓储入口 `finish_residual_stop`；`CaptureRuntime.finish` 新增 `residual_conclude` 标记经 `PendingCallResult` 分派；`_ActivityConcludeCommand` 拆出 `plan_combined` 组合入口，同一事务内即将置为成功终态的流程行不进入装载快照，停止事实由 `_activity_guard` 按事件顺序在本事务流程结束事件后核验。该测试同时覆盖迟到确认分区：原录像 STOP 已按未确认收场终态化后，残留停止的可靠确认仍结束原活动并释放占用。
+
+阶段门禁按计划顺序前台独占执行并全部通过：unit（capture＋operations）997 passed；integration 依次为 capture 200、operations 103、cancellation 103、scheduling 134、bootstrap 983 passed＋1 skipped、history 209、reporting 373。第二阶段软件分区闭合；第三阶段（五种查询用途的真实消费者与恢复接缝）与第四阶段（历史与可观察结果三路径）尚未实施。

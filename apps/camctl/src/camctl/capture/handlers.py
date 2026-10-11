@@ -271,6 +271,7 @@ class PendingCallResult:
     host_timer_stop: HostTimerStopSave | None = None
     finalized_page: ResultPageRef | None = None
     capture_stop: bool = False
+    residual_conclude: int | None = None
 
 
 # 启动装配和既有调用方使用同一个公共责任集合。
@@ -893,7 +894,8 @@ class CaptureRuntime(_FileObservationSaves):
                returned_ns: int | None = None,
                canceled_unstarted: bool = False,
                host_timer_stop: HostTimerStopSave | None = None,
-               capture_stop: bool = False) -> None:
+               capture_stop: bool = False,
+               residual_conclude: int | None = None) -> None:
         """先持有完整实际结果，再保存原尝试及其适用的伴随事实。
 
         保存重试等待使用调用返回时的单调读数；流程结束清除。
@@ -914,7 +916,8 @@ class CaptureRuntime(_FileObservationSaves):
             expiration=expiration, confirmation_anchor_ns=confirmation_anchor_ns,
             returned_ns=self.monotonic_ns() if returned_ns is None else returned_ns,
             action_failure=action_failure, canceled_unstarted=canceled_unstarted,
-            host_timer_stop=host_timer_stop, capture_stop=capture_stop)
+            host_timer_stop=host_timer_stop, capture_stop=capture_stop,
+            residual_conclude=residual_conclude)
         self.pending_start_results[identity] = pending
         self._save_call_result(identity, pending)
 
@@ -931,6 +934,9 @@ class CaptureRuntime(_FileObservationSaves):
                 pending.finish, pending.host_timer_stop, pending.key, self.owned)
         if pending.capture_stop:
             return self.capture.finish_capture_stop(pending.finish, pending.key, self.owned)
+        if pending.residual_conclude is not None:
+            return self.capture.finish_residual_stop(
+                pending.finish, pending.residual_conclude, pending.key, self.owned)
         if (pending.result_set is not None or pending.completion_page is not None
                 or pending.finalized_page is not None):
             if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
