@@ -577,18 +577,12 @@ async def _confirm_by_query(
         response, "activity_status", evidence_type="query_returned")
     observed = _observed_activity(response)
     if response.error is None and observed is None:
-        # 可靠确认空闲：目标录像已不再执行，查询责任结束，按停止事
-        # 实收场流程与活动。
-        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
-        receipt = runtime.operations.finish_stale_runs(
-            StaleRunFinish(
-                responsibility_keys=(
-                    _winddown_key(trigger_id, candidate.activity_id),),
-                status=RunOutcome.SUCCEEDED,
-                occurred_at=runtime.wall_us()),
-            new_operation_key(), runtime.owned)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        _conclude_activity(runtime, candidate.action_id)
+        # 可靠确认空闲：目标录像已不再执行，查询结果、残留停止结束
+        # 与活动收场同事务保存。
+        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                       query_conclude=candidate.action_id,
+                       query_conclude_stop_keys=(
+                           _winddown_key(trigger_id, candidate.activity_id),))
         return True
     # 仍在录制、其他活动或调用错误：保存事实，继续停止路径。
     runtime.finish(ticket, outcome, retry_wait=True)

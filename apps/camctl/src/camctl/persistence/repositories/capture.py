@@ -1882,6 +1882,19 @@ class CaptureRepository:
             return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def finish_query_conclude(
+        self, finish: AttemptFinish, action_id: int, stop_keys: tuple[str, ...],
+        key: OperationKey, owned: OwnedConnection,
+    ) -> DbOutcome[FinishAttemptResult]:
+        """查询空闲确认的查询结果、停止责任与活动收场共同保存。"""
+        receipt = commit_operation(
+            _QueryConcludeCommand(finish, action_id, stop_keys, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
     def finish_host_timer_stop(
         self, finish: AttemptFinish, stop: HostTimerStopSave,
         key: OperationKey, owned: OwnedConnection,
@@ -3353,6 +3366,93 @@ class _ResidualStopCommand:
                     or rows[0]["table"] != "device_activities"
                     or rows[0]["id"] != activity["id"]):
                 raise TransactionError("残留停止重送改变原收场组成")
+        return result
+
+
+class _QueryConcludeCommand:
+    """查询空闲确认承载活动收场：结果、查询与停止责任共同保存。
+
+    停止核实或活动核实经可靠空闲观察确认设备不再执行原活动时，
+    查询尝试结果、查询流程成功、原普通停止流程的结束（停止核实
+    时）及活动结束观察与条件释放使用同一事务身份；不为形式完整
+    追加停止调用。
+    """
+
+    def __init__(self, finish, action_id: int, stop_keys: tuple[str, ...], key) -> None:
+        self._finish, self._action_id = finish, action_id
+        self._stop_keys, self._key = tuple(stop_keys), key
+
+    def plan(self, scope) -> CommandPlan:
+        saved = saved_transaction_events(scope.connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        finish = self._finish
+        run = row_facts(scope.connection, "operation_runs", finish.ticket.run_id)
+        activity = load_activity_of_action(scope.connection, self._action_id)
+        if (run is None or run["kind"] != int(_RUN_KIND.QUERY_ACTIVITY)
+                or run["query_purpose"] not in (
+                    int(_QUERY_PURPOSE.STOP_CONFIRMATION),
+                    int(_QUERY_PURPOSE.ACTIVITY_OBSERVATION),
+                    int(_QUERY_PURPOSE.RESIDUAL_STOP_CONFIRMATION))
+                or run["activity_id"] != activity["id"]
+                or finish.outcome.outcome.observations
+                or finish.run_finish is None
+                or finish.run_finish.status is not RunOutcome.SUCCEEDED):
+            raise ConsistencyError("查询收场缺少可靠空闲确认")
+        if activity["activity_state"] == 3 and activity["occupancy_state"] == 2:
+            stale = _FinishStaleRunsCommand(
+                StaleRunFinish(
+                    responsibility_keys=self._stop_keys,
+                    status=RunOutcome.SUCCEEDED,
+                    occurred_at=finish.occurred_at), self._key)
+            return stale.plan(scope)
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        result = FinishAttemptCommand(finish, self._key).plan(sub)
+        if result.read_only:
+            raise ConsistencyError("已保存的查询结果不能补写为共同收场事实")
+        events = list(result.events)
+        owners = dict(result.owners)
+        state_rows = dict(result.state_rows)
+        for stop_key in self._stop_keys:
+            stale = _FinishStaleRunsCommand(
+                StaleRunFinish(
+                    responsibility_keys=(stop_key,),
+                    status=RunOutcome.SUCCEEDED,
+                    occurred_at=finish.occurred_at), self._key)
+            ended = stale.plan(sub)
+            if ended.read_only:
+                raise ConsistencyError("查询收场的停止责任没有可结束流程")
+            events.extend(ended.events)
+            owners.update(ended.owners)
+            state_rows = _merged_state_rows(state_rows, ended.state_rows)
+        conclude = _ActivityConcludeCommand(
+            ActivityConcludeSave(self._action_id, finish.occurred_at), self._key,
+        ).plan_combined(sub, in_transaction_stop_run={
+            "id": run["id"], "status": int(_RUN_STATUS.SUCCEEDED)})
+        events.extend(conclude.events)
+        events = tuple(events)
+        scope.allocate(len(events))
+        return CommandPlan(
+            events=events,
+            owners={**owners, **conclude.owners},
+            state_rows=_merged_state_rows(state_rows, conclude.state_rows),
+            result=result.result)
+
+    def _reuse(self, scope, saved) -> CommandPlan:
+        cut = 1 + int(
+            len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
+        result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        activity = load_activity_of_action(scope.connection, self._action_id)
+        for event in saved[cut:]:
+            rows = event["body"]["rows"]
+            if (event["type"] in (_RUN_END_EVENT, _ATTEMPT_RESULT_EVENT)
+                    and all(row["table"] == "operation_runs" for row in rows)):
+                continue
+            if (event["type"] == _ACTIVITY_OBSERVE_EVENT
+                    and len(rows) == 1 and rows[0]["table"] == "device_activities"
+                    and rows[0]["id"] == activity["id"]):
+                continue
+            raise TransactionError("查询收场重送改变原收场组成")
         return result
 
 

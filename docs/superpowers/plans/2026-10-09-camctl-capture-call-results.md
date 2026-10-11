@@ -192,3 +192,18 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 - 残留停止同事务：`residual._stop_residual` 确认分支此前把尝试结果与流程结束（`runtime.finish`）和活动收场（`_conclude_activity`）拆成两个事务。有效红位于 `test_residual_stop_confirmed_with_error_settles_in_one_transaction`（结果事务与活动结束事务分离）。修复新增 `_ResidualStopCommand` 与仓储入口 `finish_residual_stop`；`CaptureRuntime.finish` 新增 `residual_conclude` 标记经 `PendingCallResult` 分派；`_ActivityConcludeCommand` 拆出 `plan_combined` 组合入口，同一事务内即将置为成功终态的流程行不进入装载快照，停止事实由 `_activity_guard` 按事件顺序在本事务流程结束事件后核验。该测试同时覆盖迟到确认分区：原录像 STOP 已按未确认收场终态化后，残留停止的可靠确认仍结束原活动并释放占用。
 
 阶段门禁按计划顺序前台独占执行并全部通过：unit（capture＋operations）997 passed；integration 依次为 capture 200、operations 103、cancellation 103、scheduling 134、bootstrap 983 passed＋1 skipped、history 209、reporting 373。第二阶段软件分区闭合；第三阶段（五种查询用途的真实消费者与恢复接缝）与第四阶段（历史与可观察结果三路径）尚未实施。
+
+### 第三阶段验证记录（2026-10-11）
+
+2026-10-11，Linux 容器（WSL2 x86_64）、Python 3.11.16，协调 Agent 前台独占执行。新测试文件为 `integration/capture/test_recording_queries.py`（8 项）与 `integration/bootstrap/test_residual_result_transactions.py`（3 项），全部经真实处理器、仓储与守卫驱动，查询端点只提供正式 `CallOutcome`。
+
+本阶段交付两项缺失的真实消费者，不再只有仓储创建记录：
+
+- 普通 STOP_CONFIRMATION 消费者 `handlers._confirm_stop_by_query`：停止命令已发送、没有调用错误且未确认时，`_record_handler` 的 READY_TO_STOP 分支与 `_advance_canceled_capture` 取消链先经 `query/stop/<action>/<activity>` 责任核实。可靠空闲（正常返回且没有进行中活动观察）经新命令 `_QueryConcludeCommand` 把查询尝试结果、查询流程成功、原停止流程结束与活动 ENDED／条件释放并入同一事务，零追加停止调用；仍在录、其他活动或调用错误保存观察与重试等待并交回停止链。有效红为第二次停止被重发且查询责任不存在。
+- 对账 ACTIVITY_OBSERVATION 消费者 `handlers._observe_activity_for_reconcile`：跨会话对账计时满足后先经 `query/activity/<action>/<activity>` 责任确认归属与连续性。同一活动在录即保存观察（流程 SUCCEEDED）并继续停止；可靠空闲保存观察并同事务收场活动、不重新执行停止；归属不明（其他活动或调用错误）按间隔重查，不进入墙钟成功分支；查询预算耗尽按 UNCONFIRMED 回到仅计时对账的停止链。驱动未声明查询能力时保持仅计时对账（第二阶段对账测试即此形态）。stash 移除生产接线后本文件四项全部失败，证伪能力已核验。
+
+`SessionRecordingState` 的停止确认扩展接受停止核实或活动核实成功终态且最近观察为空的流程（`_query_confirmed_idle`），归属确认（仍在录观察）不构成停止事实。残留确认查询 `_confirm_by_query` 的空闲分支从三个事务改为经 `query_conclude` 同事务保存（查询结果、残留停止结束、活动收场），有效红为事务 11／12／13 三分离；矩阵另覆盖仍在录持续核实至预算耗尽（UNCONFIRMED 后停止沿原预算重试）与查询调用失败后不重复查询。
+
+矩阵覆盖：可靠满足（空闲确认、归属确认）、可靠仍未满足（仍在录）、调用失败（FAILED，规格的 UNKNOWN 效果分区由调用错误表达——设备端口语义中正常返回无观察即空闲确认）、CONFIRMED+error（仍在录确认与调用错误并存完整保存）、额度耗尽（持续在录耗尽查询预算按 UNCONFIRMED 交回停止链）、取消（取消链经停止核实收场并收取消终态）及真实 await；BEFORE_EXECUTION 与 START_CONFIRMATION 的消费者由既有 `test_residual_winddown.py`（preflight 空闲／目标在录／其他活动等待）与启动确认测试继续覆盖。阶段门禁：capture+scheduling+cancellation+operations 1442、bootstrap 986+1 skipped、unit+history+reporting 1725 顺序全绿。
+
+本阶段如实记录的剩余缺口：各用途次数独立、同一用途重入不换键、原驱动绑定与历史 owner 分开尚未有显式断言（当前由责任键唯一约束与各测试隐含覆盖）；查询尝试的跨会话恢复分区（RUNNING 尝试经 `recover_attempt` 接手）未在本两文件显式验证；普通会话动作终态后 purpose 3／4 孤儿查询的收场仍只在 residual_flow 的 `_settle_orphan_queries`（purpose 1／5）有对应机制。上述缺口不阻塞消费者验收，与第四阶段（历史与可观察结果三路径）一并跟踪。
