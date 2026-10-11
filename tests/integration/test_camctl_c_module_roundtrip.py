@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import json
+import io
+import os
 from pathlib import Path
 
 from _wsl_host_demo import (
@@ -65,7 +67,8 @@ def _report_with_statuses(directory: Path, expected: dict[str, str]):
     """
     for path in sorted(directory.glob("status-report-*.json")):
         try:
-            report = json.loads(path.read_text(encoding="utf-8"))
+            with _open_ready_report(path) as reader:
+                report = json.loads(reader.read())
         except (FileNotFoundError, PermissionError):
             continue
         statuses = {
@@ -75,6 +78,28 @@ def _report_with_statuses(directory: Path, expected: dict[str, str]):
                for name, status in expected.items()):
             return report
     return None
+
+
+def _open_ready_report(path: Path):
+    """打开测试观察器读取的 READY 报告；调用方负责关闭。"""
+    if os.name != "nt":
+        return path.open(encoding="utf-8")
+    # Windows 测试解释器限定 CPython 3.11；复用其 Win32 句柄接口。
+    import _winapi
+    import msvcrt
+    def opener(file_name, _flags):
+        # Win32 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE。
+        share_mode = 1 | 2 | 4
+        # FILE_ATTRIBUTE_NORMAL 不设置关闭时删除等额外行为。
+        handle = _winapi.CreateFile(str(file_name), _winapi.GENERIC_READ, share_mode, 0,
+                                    _winapi.OPEN_EXISTING, 128, 0)
+        try:
+            return msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        except BaseException:
+            _winapi.CloseHandle(handle)
+            raise
+    # opener 返回 FD 后，标准库拥有其后包装成功与失败的全部关闭责任。
+    return io.open(path, encoding="utf-8", opener=opener)
 
 
 def _init_with_capabilities(deployment: Deployment, spec: dict) -> None:

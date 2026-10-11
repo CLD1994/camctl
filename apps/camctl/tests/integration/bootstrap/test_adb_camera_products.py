@@ -67,9 +67,9 @@ def test_action6_presets_keep_video_and_require_selected_photo(tmp_path, preset,
         assert "mp4" in formats
         if product_case == "complete" and preset.outputs != "video":
             assert formats == {"mp4", "dng" if preset.outputs == "video_raw" else "jpeg"}
-        for _, locator, size in outputs:
+        for original_name, locator, size in outputs:
             remote = json.loads(locator)["path"]
-            assert "/new-1/" in remote
+            assert remote == f"/mnt/media_rw/emulated/DCIM/new-1/{original_name}"
             assert (Path(spec["remote_root"]) / remote.lstrip("/")).stat().st_size == size
     except subprocess.TimeoutExpired:
         pytest.fail("原生延时收尾未在有限期限内完成")

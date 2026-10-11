@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import re
 import shutil
 from pathlib import Path
 import shlex
@@ -151,7 +152,7 @@ class CameraWorld:
         index = 0 if cursor is None else cursor["directory_index"]
         after = None if cursor is None else cursor["after_path"]
         root = self.source_path(directories[index])
-        paths = sorted("/" + str(p.relative_to(self.root)) for p in root.rglob("*") if p.is_file())
+        paths = sorted("/" + p.relative_to(self.root).as_posix() for p in root.rglob("*") if p.is_file())
         paths = [p for p in paths if after is None or p > after]
         selected = paths[:batch]
         next_cursor = None
@@ -206,6 +207,16 @@ class WorldTransport:
         if raw.output is not None and raw.output.startswith(b"CAMCTL-DIRECTORY/1\0"):
             raw = replace(raw, output=raw.output.replace(
                 self.world.root.as_posix().encode(), b""))
+        if (raw.error is None and raw.output_failure is None and raw.exit is not None
+                and raw.exit.exit_code == 0 and isinstance(raw.output, bytes)
+                and re.fullmatch(rb"[0-9a-f]{64} \*-\n", raw.output) is not None):
+            try:
+                words = shlex.split(script)
+            except ValueError:
+                words = []
+            if words and script == ShellFileTools().digest_script(words[-1]):
+                # 本机工具的 binary stdin marker 映射为目标 POSIX 响应。
+                raw = replace(raw, output=raw.output[:64] + b"  -\n")
         return raw
 
     def _bash_argv(self, script) -> tuple:
