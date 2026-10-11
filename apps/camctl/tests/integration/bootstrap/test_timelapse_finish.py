@@ -48,11 +48,19 @@ from camctl.persistence.repositories.operations import (
     register_operation_guards,
 )
 from camctl.persistence.repositories.scheduling import SchedulingRepository
+from camctl.contracts.values import new_operation_key
+from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.timelapse import (
     TimelapseRepository,
     register_timelapse_guards,
 )
-from camctl.reporting.policy import register_report_guards, register_sync_guard
+from camctl.reporting.generation import GenerationSpec, generate_report_file
+from camctl.reporting.policy import (
+    ReportingRepository,
+    register_report_guards,
+    register_sync_guard,
+)
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.cancellation import (
     register_cancellation_guards,
@@ -170,7 +178,7 @@ def _timelapse_plan(request_id: str, scheduled_at: str) -> dict:
 
 
 def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = None,
-                       stopper=None, wait_ms: int = 2_000):
+                       stopper=None, wait_ms: int = 2_000, extra_ms: int = 0):
     retry_gate = RetryWaitGate()
 
     def build(owned, device_id: str) -> CaptureRuntime:
@@ -192,7 +200,8 @@ def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = 
                 scheduled_at=action["scheduled_at"],
                 window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
             wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=wait_ms, driver_margin_ms=0),
+                target_duration_ms=wait_ms, driver_margin_ms=0,
+                extra_wait_ms=extra_ms),
             retry_gate=retry_gate,
             **overrides,
         )
@@ -202,10 +211,11 @@ def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = 
 
 def _run_session(deps, driver, results, *,
                  check_config: AttemptConfig | None = None,
-                 stopper=None, wait_ms: int = 2_000, cancel_flow_paths=None):
+                 stopper=None, wait_ms: int = 2_000, extra_ms: int = 0,
+                 cancel_flow_paths=None):
     flows = {"scheduling": capture_flow(
         _timelapse_factory(driver, results, check_config=check_config,
-                           stopper=stopper, wait_ms=wait_ms))}
+                           stopper=stopper, wait_ms=wait_ms, extra_ms=extra_ms))}
     if cancel_flow_paths is not None:
         flows["cancel"] = cancel_flow(
             ready=Path(cancel_flow_paths[0]),
@@ -551,3 +561,229 @@ class TestTimelapseCancel:
         finally:
             await _cancel(task)
         close_runtime(deps)
+
+
+class TestTimelapseSatisfiedFinishMultiple:
+    async def test_multiple_files_register_all_outputs(self, tmp_path: Path) -> None:
+        home = tmp_path / "multi-file"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        results = ResultsDouble(
+            {1: (_entry("sequence-1"), _entry("sequence-2", size=8192))})
+        task = _run_session(deps, driver, results)
+        try:
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            # 每份观察到的完整文件各自登记为正式产物，不折叠也不遗漏。
+            assert _scalar(
+                db,
+                "SELECT COUNT(*), COUNT(DISTINCT device_file_id)"
+                " FROM outputs WHERE source_action_id = 1") == (2, 2)
+            assert _scalar(
+                db, "SELECT COUNT(*), SUM(size_bytes) FROM device_files"
+                " WHERE source_action_id = 1") == (2, 4096 + 8192)
+            assert _scalar(
+                db, "SELECT COUNT(*) FROM device_files WHERE source_action_id = 1"
+                ) == (2,)
+            assert _scalar(
+                db, "SELECT result_set_state FROM device_activities WHERE id = 1"
+                ) == (3,)
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+
+class TestTimelapseUnfinalizedSet:
+    async def test_unfinalized_set_retries_next_round_then_succeeds(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "unfinalized"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        # 集合尚未确定：必需类别已观察且文件写完，但驱动尚未声明集合齐备。
+        results = ResultsDouble({1: (_entry("sequence-1"),)}, set_finalized=False)
+        task = _run_session(deps, driver, results)
+        try:
+            await _await_query(
+                db,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'",
+                (2, 1, 1))
+            # 尚未齐备不产生任何集合结论，动作保持运行。
+            assert _scalar(
+                db, "SELECT result_set_state FROM device_activities WHERE id = 1"
+                ) == (1,)
+            assert _scalar(db, "SELECT status FROM actions WHERE id = 1") == (2,)
+            assert _scalar(db, "SELECT COUNT(*) FROM outputs") == (0,)
+            results.set_finalized = True
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            assert _scalar(
+                db,
+                "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'results/1'") == (3, 2)
+            assert _scalar(
+                db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1"
+                ) == (1,)
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+
+class TestTimelapseCrossRunBudget:
+    @pytest.mark.parametrize(
+        "new_limit,final_run,final_action,extra_calls",
+        [(5, (3, 2), 3, 1), (1, (6, 1), 4, 0)],
+        ids=["raised", "lowered"],
+    )
+    async def test_later_run_uses_current_check_budget(
+            self, tmp_path: Path, new_limit, final_run, final_action,
+            extra_calls) -> None:
+        home = tmp_path / f"cross-run-{new_limit}"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        # 第一会话：长间隔保证观察窗口内只有一轮列举，随后可靠停止。
+        results = ResultsDouble({1: (_entry("sequence-1"),)}, set_finalized=False)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        task = _run_session(
+            deps, driver, results,
+            check_config=AttemptConfig(
+                max_attempts=3, timeout_s=Decimal("10"),
+                retry_interval_s=Decimal("30")))
+        try:
+            await _await_query(
+                db,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'",
+                (2, 1, 1))
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+        assert results.calls == [1]
+        # 第一会话留下的责任事实固定：一轮已用、处于重试等待、无集合结论。
+        assert _scalar(
+            db,
+            "SELECT status, attempts_used, retry_wait_required"
+            " FROM operation_runs WHERE responsibility_key = 'results/1'"
+            ) == (2, 1, 1)
+
+        # 第二会话：本次上限生效。上调可继续尝试并按齐备集合成功；
+        # 下调后无剩余名额，不再列举，按无法核实关闭。
+        results.set_finalized = True
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        task = _run_session(
+            deps, driver, results,
+            check_config=AttemptConfig(
+                max_attempts=new_limit, timeout_s=Decimal("10"),
+                retry_interval_s=Decimal("0.2")))
+        try:
+            await _await_query(
+                db, "SELECT status FROM actions WHERE id = 1", (final_action,))
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+        assert _scalar(
+            db,
+            "SELECT status, attempts_used FROM operation_runs"
+            " WHERE responsibility_key = 'results/1'") == final_run
+        assert results.calls == [1] * (1 + extra_calls)
+        # 已观察的完整文件在两种收场下都保留为产物事实；下调关闭
+        # UNCONFIRMED 不把保留文件解释为集合满足。
+        assert _scalar(
+            db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1"
+            ) == (1,)
+
+
+class TestTimelapseReportRebuild:
+    async def test_reconfigured_second_run_rebuilds_old_report_bytes(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "rebuild"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TimelapseCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("1", _future_schedule(2)))
+        db = Path(cfg.paths.state_db)
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        driver = _ActivityDriver()
+        results = ResultsDouble({})
+        task = _run_session(deps, driver, results)
+        try:
+            results.files_by_action[1] = (_entry("sequence-1"),)
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+            assert driver.calls == ["start_timelapse"]
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+        # 第一运行的等待采用值按当时配置保存（额外等待为零）。
+        assert _scalar(
+            db, "SELECT extra_wait_ms_used FROM device_activities"
+            " WHERE action_id = 1") == (0,)
+
+        owned = open_existing(db, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            frozen = ReportingRepository().freeze_report(
+                new_operation_key(), owned, occurred_at=1)
+            assert frozen.kind is DbOutcomeKind.COMPLETED, frozen.error
+            report = frozen.value.report
+        finally:
+            owned.connection.close()
+        spec = GenerationSpec(
+            db_path=db, report_id=report.report_id,
+            from_wm=report.from_wm, to_wm=report.to_wm,
+            frozen_event_id=report.boundary.last_event_id,
+            staging_path=home / "first.json")
+        original = generate_report_file(spec).path.read_bytes()
+
+        # 第二运行采用新等待配置并完成新计划：等待按新目标时长与
+        # 额外等待安排，旧报告按原冻结依据重建，字节不变。
+        await _submit_plan(
+            tmp_path, cfg, catalog, _timelapse_plan("2", _future_schedule(2)))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        second_driver = _ActivityDriver(activity_target="2")
+        second_results = ResultsDouble({})
+        task = _run_session(
+            deps, second_driver, second_results, wait_ms=5_000, extra_ms=3_000)
+        try:
+            second_results.files_by_action[2] = (_entry("sequence-2"),)
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (3,))
+            assert second_driver.calls == ["start_timelapse"]
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+        sent_at, extra_used, check_at = _scalar(
+            db,
+            "SELECT sent_at, extra_wait_ms_used, expected_check_at"
+            " FROM device_activities WHERE action_id = 2")
+        assert extra_used == 3_000
+        assert check_at == sent_at + (5_000 + 3_000) * 1000
+
+        rebuilt = generate_report_file(GenerationSpec(
+            db_path=db, report_id=report.report_id,
+            from_wm=report.from_wm, to_wm=report.to_wm,
+            frozen_event_id=report.boundary.last_event_id,
+            staging_path=home / "second.json",
+            entity_batch_size=1, event_batch_size=1))
+        assert rebuilt.path.read_bytes() == original
