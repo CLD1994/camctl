@@ -5,8 +5,11 @@ from decimal import Decimal
 import hashlib
 import json
 import os
+import shutil
 import shlex
 import sys
+from pathlib import Path
+import tempfile
 import time
 
 import pytest
@@ -29,6 +32,12 @@ pytestmark = pytest.mark.asyncio
 BINDING = DeviceBinding("cam-1", "dji-action6")
 
 
+_POSIX_ONLY = pytest.mark.skipif(
+    os.name == "nt",
+    reason="本地文件路径直接作为 POSIX 设备路径、Bash 管线或无扩展名命令"
+           "按部署平台边界在 Linux（含 WSL）验证")
+
+
 class Stop:
     def __init__(self):
         self.event = asyncio.Event()
@@ -37,10 +46,23 @@ class Stop:
         await self.event.wait()
 
 
+_BASH = shutil.which("bash") or "bash"
+_SCRIPT_SEQ = iter(range(1_000_000))
+
+
+def _local_bash_argv(script: str, tmp: Path):
+    """经脚本文件执行本地 Bash：Windows 命令行重解析会破坏内嵌
+    脚本的引号，裸名 `bash` 可能命中 WSL 启动器。"""
+    target = tmp / f"local-script-{next(_SCRIPT_SEQ)}.sh"
+    target.write_text(script, encoding="utf-8")
+    return (_BASH, target.as_posix())
+
+
 class LocalAdbChannel:
     """保留具体适配生成的远端 shell，替换指定 serial 的 ADB 通道。"""
     def __init__(self):
         self.calls = []
+        self._tmp = Path(tempfile.mkdtemp(prefix="adb-channel-"))
 
     async def run(self, spec, stop):
         return await self._run(spec, stop)
@@ -54,7 +76,7 @@ class LocalAdbChannel:
         remote = shlex.split(spec.argv[5])
         assert remote[:2] == ["sh", "-c"] and len(remote) == 3
         # 相机已核实的 sh 支持 read -d；容器 dash 不支持，以已有 Bash 执行原脚本。
-        local = replace(spec, argv=("bash", *remote[1:]))
+        local = replace(spec, argv=_local_bash_argv(remote[2], self._tmp))
         if stdout_sink is not None:
             return await AdbTransport().run_stream(local, stop, stdout_sink)
         return await AdbTransport().run(local, stop)
@@ -72,6 +94,7 @@ def _source(path, size):
     return SourceFile(json.dumps([BINDING.device_id, BINDING.driver_id, str(path)]), {"path": str(path)}, size)
 
 
+@_POSIX_ONLY
 async def test_managed_transport_preserves_both_channels_and_process_group():
     script = "import os,sys; print(os.getpgrp()); sys.stderr.write('diagnostic')"
     raw = await AdbTransport().run(ToolSpec((sys.executable, "-c", script), Decimal("5"), Decimal("1")), Stop())
@@ -102,6 +125,7 @@ async def test_stream_output_error_triggers_stop_before_normal_deadline():
     assert raw.exit is not None and "consumer failed" in raw.output_failure
 
 
+@_POSIX_ONLY
 async def test_recursive_paging_preserves_old_new_and_special_paths(tmp_path):
     empty = tmp_path / "a-empty"
     root = tmp_path / "b-files"
@@ -136,6 +160,7 @@ async def test_recursive_paging_preserves_old_new_and_special_paths(tmp_path):
     ("d.mp4", [], False),
     ("z.mp4", [], False),
 ])
+@_POSIX_ONLY
 async def test_directory_paging_with_awk_that_cannot_preserve_nul(tmp_path, monkeypatch, after, names, more):
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -161,6 +186,7 @@ async def test_directory_paging_with_awk_that_cannot_preserve_nul(tmp_path, monk
         assert result.page.next_cursor is None
 
 
+@_POSIX_ONLY
 async def test_directory_tool_failure_is_not_a_reliable_empty_page(tmp_path):
     result = await _filesystem().read_directory(
         DirectoryRequest(BINDING, (str(tmp_path / "missing"),), None, 128, Decimal("5")), stop=Stop())
@@ -170,6 +196,7 @@ async def test_directory_tool_failure_is_not_a_reliable_empty_page(tmp_path):
 
 
 @pytest.mark.parametrize("readable_records", [0, 1])
+@_POSIX_ONLY
 async def test_directory_record_read_failure_is_not_a_reliable_end(tmp_path, monkeypatch, readable_records):
     root = tmp_path / "files"
     root.mkdir()
@@ -191,6 +218,7 @@ async def test_directory_record_read_failure_is_not_a_reliable_end(tmp_path, mon
     assert result.outcome.stderr == b"record read failed"
 
 
+@_POSIX_ONLY
 async def test_directory_sort_failure_keeps_actual_exit_and_diagnostic(tmp_path, monkeypatch):
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -211,6 +239,7 @@ async def test_directory_sort_failure_keeps_actual_exit_and_diagnostic(tmp_path,
     assert result.outcome.stderr == b"sort failed"
 
 
+@_POSIX_ONLY
 async def test_metadata_and_source_digest_come_from_remote_tool(tmp_path):
     path = tmp_path / "a 'quoted'\nfile"
     path.write_bytes(b"remote source content")
@@ -222,6 +251,7 @@ async def test_metadata_and_source_digest_come_from_remote_tool(tmp_path):
     assert digest.value == hashlib.sha256(b"remote source content").hexdigest()
 
 
+@_POSIX_ONLY
 async def test_concrete_driver_file_ports_preserve_original_identity_and_content(tmp_path):
     content = b"camera-source" * 100000
     path, other = tmp_path / "source ' \n.mp4", tmp_path / "keep.mp4"
@@ -257,12 +287,14 @@ async def test_concrete_driver_file_ports_preserve_original_identity_and_content
     assert not path.exists() and other.read_bytes() == b"keep"
 
 
+@_POSIX_ONLY
 async def test_missing_source_retains_access_error_without_host_digest(tmp_path):
     fs = _filesystem()
     result = await fs.source_digest(_identity(tmp_path / "missing"), timeout_s=Decimal("5"), stop=Stop())
     assert result.value is None and result.error is not None and result.outcome.stderr
 
 
+@_POSIX_ONLY
 async def test_empty_file_is_present_and_access_failure_remains_unknown(tmp_path):
     empty = tmp_path / "empty"
     empty.write_bytes(b"")
@@ -273,6 +305,7 @@ async def test_empty_file_is_present_and_access_failure_remains_unknown(tmp_path
     assert unknown.value is None and unknown.error is not None
 
 
+@_POSIX_ONLY
 async def test_explicit_delete_only_removes_requested_file(tmp_path):
     target, other = tmp_path / "quote ' \n target", tmp_path / "other"
     target.write_bytes(b"delete"); other.write_bytes(b"keep")
@@ -281,6 +314,7 @@ async def test_explicit_delete_only_removes_requested_file(tmp_path):
     assert not target.exists() and other.read_bytes() == b"keep"
 
 
+@_POSIX_ONLY
 async def test_read_session_preserves_unaligned_offset_and_actual_end(tmp_path):
     content = bytes(range(256)) * 10000
     path = tmp_path / "source ' \n.bin"
@@ -302,6 +336,7 @@ async def test_read_session_preserves_unaligned_offset_and_actual_end(tmp_path):
     assert path.read_bytes() == content
 
 
+@_POSIX_ONLY
 async def test_read_shorter_than_fixed_source_is_a_failure(tmp_path):
     path = tmp_path / "short"
     path.write_bytes(b"short")
@@ -316,6 +351,7 @@ async def test_read_shorter_than_fixed_source_is_a_failure(tmp_path):
     assert end.error == "failed" and end.bytes_read == 5
 
 
+@_POSIX_ONLY
 async def test_wrong_original_binding_never_invokes_tool(tmp_path):
     channel = LocalAdbChannel()
     identity = FileIdentity(DeviceBinding("cam-2", "dji-action6"), str(tmp_path / "source"))
@@ -324,6 +360,7 @@ async def test_wrong_original_binding_never_invokes_tool(tmp_path):
     assert channel.calls == []
 
 
+@_POSIX_ONLY
 async def test_stop_request_waits_for_actual_read_call_return(tmp_path):
     class HeldCall:
         def __init__(self):

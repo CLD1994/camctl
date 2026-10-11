@@ -6,6 +6,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from camctl.persistence.directory_switch import canonical_to_path
 from camctl.contracts.public_projection import PublicProjectionError
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.history import HistoryRepository
@@ -50,8 +51,10 @@ def _job(owned, spec):
         job_id=new_job_id(), report_id=spec.report_id,
         from_wm=spec.from_wm, to_wm=spec.to_wm, frozen_event_id=spec.frozen_event_id,
         instance_id=metadata.instance_id, db_path=str(spec.db_path),
-        staging_path=str(spec.staging_path), staging_root=metadata.staging_path,
-        ready_root=metadata.ready_path, processing_root=metadata.processing_path,
+        staging_path=str(spec.staging_path),
+        staging_root=str(canonical_to_path(metadata.staging_path)),
+        ready_root=str(canonical_to_path(metadata.ready_path)),
+        processing_root=str(canonical_to_path(metadata.processing_path)),
         entity_batch_size=spec.entity_batch_size, event_batch_size=spec.event_batch_size,
         busy_timeout_ms=9000,
     )
@@ -66,8 +69,8 @@ def _snapshot(owned, report, runtime):
     return (
         owned.connection.execute("SELECT * FROM reports WHERE id=?", (report.report_id,)).fetchone(),
         owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall(),
-        _file_bytes(Path(owned.metadata.ready_path)),
-        _file_bytes(Path(owned.metadata.staging_path)),
+        _file_bytes(canonical_to_path(owned.metadata.ready_path)),
+        _file_bytes(canonical_to_path(owned.metadata.staging_path)),
         tuple(runtime.results.calls), runtime.driver.control.await_count,
     )
 

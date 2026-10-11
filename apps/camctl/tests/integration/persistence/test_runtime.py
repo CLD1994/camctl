@@ -24,6 +24,7 @@ from camctl.persistence.runtime import (
     open_existing,
     verify_directory_binding,
 )
+from camctl.persistence.runtime import canonical_directory_binding
 
 SCHEMA_RESOURCES = [
     "sql/core.sql",
@@ -34,7 +35,14 @@ SCHEMA_RESOURCES = [
     "sql/history.sql",
 ]
 
-DIRECTORIES = ("/srv/camctl/staging", "/srv/camctl/ready", "/srv/camctl/processing")
+# 假路径绑定按主机规则规范化（Windows 形如 /c:/srv/...），使库内
+# 绑定文本与配置侧 canonical 化结果可比较，且能经 canonical_to_path
+# 还原为本机路径。
+DIRECTORIES = (
+    canonical_directory_binding(Path("/srv/camctl/staging")),
+    canonical_directory_binding(Path("/srv/camctl/ready")),
+    canonical_directory_binding(Path("/srv/camctl/processing")),
+)
 
 
 def _create_valid_database(path: Path, *, format_version: int = 1) -> None:
@@ -156,13 +164,15 @@ def test_readonly_connection_rejects_writes(tmp_path: Path) -> None:
 
 
 def test_directory_binding_verification() -> None:
+    from camctl.persistence.directory_switch import canonical_to_path
     metadata_ok, metadata_off = (
         _metadata(staging=s, ready=r, processing=p)
         for s, r, p in (DIRECTORIES, ("/other/staging", *DIRECTORIES[1:]))
     )
-    verify_directory_binding(metadata_ok, *DIRECTORIES)
+    configured = tuple(str(canonical_to_path(value)) for value in DIRECTORIES)
+    verify_directory_binding(metadata_ok, *configured)
     with pytest.raises(DirectoryBindingError):
-        verify_directory_binding(metadata_off, *DIRECTORIES)
+        verify_directory_binding(metadata_off, *configured)
 
 
 def _metadata(staging: str, ready: str, processing: str):

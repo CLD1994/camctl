@@ -65,6 +65,19 @@ def query_state(state_db: Path, sql: str, params=()) -> list[tuple]:
         connection.close()
 
 
+def _wsl_python() -> str:
+    """解析 WSL 内 Python 3.11 的绝对路径。
+
+    部署验证环境的 Python 由 uv 安装在 ~/.local/bin 等仅登录 shell
+    纳入 PATH 的位置；``wsl.exe -e sh -c`` 的非登录 PATH 解析不到
+    裸名 python3.11，须按登录 shell 环境解析一次。
+    """
+    resolved = run_wsl(
+        "command -v python3.11 || bash -lc 'command -v python3.11'",
+        timeout_s=30)
+    return resolved.stdout.strip() or "python3.11"
+
+
 def wait_for(predicate, timeout_s: float, message: str):
     """轮询直到谓词为真；显式同步点，不使用随机 sleep。"""
     deadline = time.monotonic() + timeout_s
@@ -238,11 +251,15 @@ class HostDemo:
             "while any(Path(f'/proc/{pid}').exists() for pid in groups) and time.monotonic() < deadline:",
             "    time.sleep(.01)",
         ])
-        cleanup_python = to_wsl(Path(sys.executable)) if _NATIVE_POSIX else "python3.11"
+        cleanup_python = to_wsl(Path(sys.executable)) if _NATIVE_POSIX else _wsl_python()
         result = run_wsl(f"{shlex.quote(cleanup_python)} -c {shlex.quote(cleanup)}", timeout_s=15)
         assert result.returncode == 0, result.stderr
         if not _NATIVE_POSIX:
-            result = run_wsl(f"kill -TERM {self._host_pid}", timeout_s=15)
+            # cleanup 已对主程序发出 SIGTERM；到这一步通常已退出，
+            # 仅在仍存活时补一次 TERM，不把已退出当作失败。
+            result = run_wsl(
+                f"kill -TERM {self._host_pid} 2>/dev/null"
+                f" || [ ! -e /proc/{self._host_pid} ]", timeout_s=15)
             assert result.returncode == 0, result.stderr
         self.proc.stdin.close()
         self.proc.terminate()

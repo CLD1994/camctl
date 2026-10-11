@@ -24,6 +24,9 @@ class Interpreter:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="超时终止时已打印输出的保留依赖部署平台的进程组"
+                           "软终止时序；Windows 树杀不保证该窗口，按部署边界在 Linux 验证")
 async def test_real_managed_timeout_keeps_original_result_and_earlier_confirmation(confirmed):
     returned = EvidenceContract("operation_returned", 1, "control", frozenset({"terminate_grace_s"}))
     assumption = EvidenceContract("adb_foreground_assumption", 1, "control", frozenset({"terminate_grace_s"}))

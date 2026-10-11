@@ -38,8 +38,9 @@ from camctl_fixtures import (
 )
 
 _MEDIA_TOOLS = pytest.mark.skipif(
-    shutil.which("ffprobe") is None or shutil.which("ffmpeg") is None,
-    reason="本用例组合需要部署环境提供真实 ffprobe/ffmpeg",
+    os.name != "posix" or shutil.which("ffprobe") is None or shutil.which("ffmpeg") is None,
+    reason="本用例组合需要部署环境提供真实 ffprobe/ffmpeg；会话中替换"
+           "数据库文件另需 POSIX 重命名语义，按部署边界在 Linux 验证",
 )
 
 #: 源视频时长（秒）：严格超过目标 3 秒加余量 0.5 秒的修复门槛。

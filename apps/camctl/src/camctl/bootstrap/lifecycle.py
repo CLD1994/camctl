@@ -206,12 +206,11 @@ def build_runtime(
     register_motor_guards()
     startup_error = None
     try:
-        config = replace(config, paths=replace(
-            config.paths,
-            staging=configured_directory_binding(config.paths.staging, "staging"),
-            ready=configured_directory_binding(config.paths.ready, "ready"),
-            processing=configured_directory_binding(config.paths.processing, "processing"),
-        ))
+        # 装配边界独立校验目录绑定：配置可能不经 ConfigAdapter 进入
+        # （如测试替身或新入口）。校验不改值，规范文本只在库内保存
+        # 与比对边界生成。
+        for name in ("staging", "ready", "processing"):
+            configured_directory_binding(getattr(config.paths, name), name)
     except DirectoryBindingError as error:
         startup_error = SessionOutcome(succeeded=False, reason="configuration_error",
                                        details={"error": str(error)})

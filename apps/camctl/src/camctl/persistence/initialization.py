@@ -220,7 +220,8 @@ def _verify_existing(
         )
     try:
         try:
-            verify_directory_binding(owned.metadata, *binding)
+            # 配置侧按操作系统路径比较；规范绑定文本只在库内保存。
+            verify_directory_binding(owned.metadata, *(str(root) for root in roots))
         except StateDatabaseError:
             # 绑定不一致：显式 init 是第一版唯一切换入口，按切换资格判定。
             return _attempt_directory_switch(state_db, owned, roots, binding)

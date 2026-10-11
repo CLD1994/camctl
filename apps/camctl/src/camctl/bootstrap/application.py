@@ -6,6 +6,7 @@ describe 只读取本地配置与静态能力目录，不创建状态库、会�
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, fields, replace
 from decimal import Decimal
@@ -54,8 +55,12 @@ class ConfigAdapter:
             for field in fields(config.paths)
         }
         for name in ("staging", "ready", "processing"):
+            # 目录绑定必须可接受：绝对、不含 NUL；通过后 `..` 等相对
+            # 段折叠为操作系统路径形式。规范绑定文本只在库内保存与
+            # 比对边界生成，不进入配置值。
             try:
-                paths[name] = configured_directory_binding(paths[name], name)
+                configured_directory_binding(paths[name], name)
+                paths[name] = os.path.abspath(paths[name])
             except DirectoryBindingError as error:
                 raise ConfigError(str(error)) from error
         return replace(config, paths=replace(config.paths, **paths))

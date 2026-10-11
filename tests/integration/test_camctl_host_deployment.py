@@ -25,6 +25,9 @@ def test_default_configuration_is_shared_by_init_and_run(tmp_path: Path, explici
     home = tmp_path / "home"
     home.mkdir()
     environment = {**os.environ, "HOME": str(home)}
+    if os.name == "nt":
+        # Windows 的用户目录展开读 USERPROFILE 而非 HOME。
+        environment["USERPROFILE"] = str(home)
     options = ["--config", str(tmp_path / "missing.toml")] if explicit_missing else []
     for command in ["init", "run"]:
         result = subprocess.run(

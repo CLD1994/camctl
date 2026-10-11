@@ -1,2 +1,5 @@
 # 报告文件名绑定原始字节 SHA-256，检出与提交均保持 LF。
 **/status-report-*.json text eol=lf
+
+# 供应依赖按字节摘要校验，检出必须保持上游原始 LF。
+apps/host-demo/vendor/** text eol=lf

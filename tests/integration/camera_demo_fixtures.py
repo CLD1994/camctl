@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import shutil
 from pathlib import Path
 import shlex
 import time
@@ -183,6 +184,8 @@ class WorldTransport:
 
     def __init__(self, world):
         self.world = world
+        self._script_seq = iter(range(1_000_000))
+        self._bash = shutil.which("bash") or "bash"
 
     def _script(self, spec):
         assert spec.argv[:2] == ("adb", "-s") and spec.argv[3:5] == ("shell", "-T")
@@ -198,14 +201,29 @@ class WorldTransport:
             output = self.world.call(spec.argv[2], *request)
             return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
         # 使用支持已核实 read -d 接口的 Bash，执行具体适配生成的原脚本。
-        local = replace(spec, argv=("bash", "-c", self._local_script(script)))
-        raw = await AdbTransport().run(local, stop)
+        raw = await AdbTransport().run(
+            replace(spec, argv=self._bash_argv(script)), stop)
         if raw.output is not None and raw.output.startswith(b"CAMCTL-DIRECTORY/1\0"):
-            raw = replace(raw, output=raw.output.replace(str(self.world.root).encode(), b""))
+            raw = replace(raw, output=raw.output.replace(
+                self.world.root.as_posix().encode(), b""))
         return raw
 
+    def _bash_argv(self, script) -> tuple:
+        """经临时脚本文件执行本地 Bash；返回完整 argv。
+
+        Windows 的进程创建按自身规则重解析命令行与 PATH：内嵌脚本
+        的引号会被破坏，裸名 `bash` 可能命中 WSL 启动器（看不到
+        Windows 文件）。脚本写入文件，Bash 用解析到的绝对路径。
+        """
+        self.world.gates.mkdir(parents=True, exist_ok=True)
+        target = self.world.gates / f"local-script-{next(self._script_seq)}.sh"
+        target.write_text(self._local_script(script), encoding="utf-8")
+        return (self._bash, target.as_posix())
+
     def _local_script(self, script):
-        return script.replace("/mnt/media_rw/", str(self.world.root / "mnt/media_rw") + "/")
+        # Git Bash 无法解析反斜杠路径；本地根以 POSIX 形式注入。
+        return script.replace("/mnt/media_rw/",
+                              (self.world.root / "mnt/media_rw").as_posix() + "/")
 
     async def run_stream(self, spec, stop, stdout_sink):
         script = self._script(spec)
@@ -218,7 +236,8 @@ class WorldTransport:
                 (self.world.gates / "read-started").touch()
                 while not (self.world.gates / "release-read").exists():
                     await asyncio.sleep(0.01)
-        return await AdbTransport().run_stream(replace(spec, argv=("bash", "-c", self._local_script(script))), stop, gated_sink)
+        return await AdbTransport().run_stream(
+            replace(spec, argv=self._bash_argv(script)), stop, gated_sink)
 
 
 def _contract(model, world):

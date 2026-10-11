@@ -43,10 +43,12 @@ async def _default_stop_close_world(tmp_path, monkeypatch, consumer):
     actual_config = completion_defaults._config
 
     def bound_config(home):
+        from camctl.persistence.directory_switch import canonical_to_path
         config = actual_config(home)
         return replace(config, paths=replace(config.paths,
-            staging=world.metadata.staging_path, ready=world.metadata.ready_path,
-            processing=world.metadata.processing_path))
+            staging=str(canonical_to_path(world.metadata.staging_path)),
+            ready=str(canonical_to_path(world.metadata.ready_path)),
+            processing=str(canonical_to_path(world.metadata.processing_path))))
 
     # 三个目录属于原数据库身份；默认配置必须采用相同绑定。
     monkeypatch.setattr(completion_defaults, "_config", bound_config)

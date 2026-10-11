@@ -87,16 +87,20 @@ def _unused(*_args, **_kwargs):
 
 
 def _context(owned, runtime, spec, supervisor, following):
+    from camctl.persistence.directory_switch import canonical_to_path
     metadata = owned.metadata
     cfg = load_config({"paths": {
-        "state_db": str(spec.db_path), "staging": metadata.staging_path,
-        "ready": metadata.ready_path, "processing": metadata.processing_path,
+        "state_db": str(spec.db_path),
+        "staging": str(canonical_to_path(metadata.staging_path)),
+        "ready": str(canonical_to_path(metadata.ready_path)),
+        "processing": str(canonical_to_path(metadata.processing_path)),
     }}, ConfigDefaults())
     clock = create_autospec(ClockPort, instance=True, spec_set=True)
     clock.utc_micros.return_value = runtime.wall_us() + 1
     maintenance = report_flow(
-        state_db=spec.db_path, staging=Path(metadata.staging_path),
-        ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
+        state_db=spec.db_path, staging=canonical_to_path(metadata.staging_path),
+        ready=canonical_to_path(metadata.ready_path),
+        processing=canonical_to_path(metadata.processing_path),
         history=cfg.history, database=cfg.database, supervisor=supervisor)
     return SessionContext(
         mode=CommandMode.RUN, catalog=ResultCatalog(), clock=clock,
@@ -108,11 +112,12 @@ def _context(owned, runtime, spec, supervisor, following):
 
 
 def _snapshot(owned, report, runtime):
+    from camctl.persistence.directory_switch import canonical_to_path
     return (
         owned.connection.execute("SELECT * FROM reports WHERE id=?", (report.report_id,)).fetchone(),
         owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall(),
-        _file_bytes(Path(owned.metadata.ready_path)),
-        _file_bytes(Path(owned.metadata.staging_path)),
+        _file_bytes(canonical_to_path(owned.metadata.ready_path)),
+        _file_bytes(canonical_to_path(owned.metadata.staging_path)),
         tuple(runtime.results.calls), runtime.driver.control.await_count,
     )
 

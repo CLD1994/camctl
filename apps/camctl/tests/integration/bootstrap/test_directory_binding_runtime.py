@@ -105,10 +105,12 @@ def test_run_and_submit_reject_each_changed_directory_before_acceptance(deployed
     assert result["kind"] == "error"
     assert result["body"]["reason"] == "configuration_error"
     diagnostic = json.dumps(result["body"]["details"], ensure_ascii=False)
+    # 诊断中的路径是规范绑定文本（Windows 形如 /c:/...）。
+    from camctl.persistence.runtime import canonical_directory_binding
     for name in changed:
         assert name in diagnostic
-        assert original[name] in diagnostic
-        assert configured[name] in diagnostic
+        assert canonical_directory_binding(Path(original[name])) in diagnostic
+        assert canonical_directory_binding(Path(configured[name])) in diagnostic
     assert _facts(home) == facts
     assert _files(home) == files
     assert all(not Path(configured[name]).exists() for name in changed)

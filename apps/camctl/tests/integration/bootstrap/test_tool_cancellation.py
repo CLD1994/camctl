@@ -100,7 +100,11 @@ async def test_canceled_real_control_saves_actual_response_without_next_dispatch
         assert json.loads(row[2])["code"] == "transport_cancelled"
         assert result["observations"][0]["type"] == ("setting_applied" if phase == "setting" else (
             "start_confirmed" if action_type == "camera_record" else "timelapse_sent"))
-        assert result["call_info"]["local_exit"]["signal"] is not None
+        # 本地退出码与终止信号互斥（平台表达不同：Windows 终止子进程
+        # 产生退出码，POSIX 产生终止信号），恰好一种事实即证明收场。
+        local_exit = result["call_info"]["local_exit"]
+        assert (local_exit.get("signal") is not None) != (
+            local_exit.get("exit_code") is not None)
         effect = enum_for("operation_attempts.effect_state")
         assert row[1] == int(effect.NO_EFFECT if phase == "setting" else effect.CONFIRMED)
         assert len([spec for spec in transport.calls if is_start(spec)]) == int(phase == "start")

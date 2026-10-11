@@ -179,9 +179,17 @@ def verify_directory_binding(
     ready: str,
     processing: str,
 ) -> None:
-    """核对本次配置目录与数据库保存的绑定。"""
+    """核对本次配置目录与数据库保存的绑定。
+
+    配置侧是操作系统路径形式，先按同一规则规范化再与库内保存的
+    绑定文本比较；两侧文本都由 `canonical_directory_binding` 生成。
+    """
     actual = (metadata.staging_path, metadata.ready_path, metadata.processing_path)
-    configured = (staging, ready, processing)
+    configured = (
+        canonical_directory_binding(Path(staging)),
+        canonical_directory_binding(Path(ready)),
+        canonical_directory_binding(Path(processing)),
+    )
     changed = [f"{name}: 数据库原路径 {old!r}，本次配置新路径 {new!r}"
                for name, old, new in zip(("staging", "ready", "processing"), actual, configured)
                if old != new]

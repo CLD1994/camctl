@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from camctl.persistence.directory_switch import canonical_to_path
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.capture.handlers import capture_handler
@@ -94,7 +95,7 @@ def _spec(owned, report, name):
         db_path=db_path, report_id=report.report_id,
         from_wm=report.from_wm, to_wm=report.to_wm,
         frozen_event_id=report.boundary.last_event_id,
-        staging_path=Path(owned.metadata.staging_path) / "reports" / name,
+        staging_path=canonical_to_path(owned.metadata.staging_path) / "reports" / name,
     )
 
 

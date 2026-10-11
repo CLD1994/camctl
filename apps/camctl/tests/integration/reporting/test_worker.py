@@ -31,7 +31,9 @@ from camctl.reporting.worker import (
 )
 
 from ..history.test_report_scope import _finish_action, _submit
-from ..persistence.test_runtime import _create_valid_database
+from ..persistence.test_runtime import DIRECTORIES, _create_valid_database
+from camctl.persistence.directory_switch import canonical_to_path
+from camctl.persistence.runtime import canonical_directory_binding
 from ..reporting.test_generation import _freeze
 
 
@@ -66,8 +68,9 @@ def _job(db_path: Path, instance_id: str, report, tmp_path: Path,
         instance_id=instance_id,
         db_path=str(db_path),
         staging_path=str(tmp_path / "staging" / name),
-        staging_root="/srv/camctl/staging", ready_root="/srv/camctl/ready",
-        processing_root="/srv/camctl/processing",
+        staging_root=str(canonical_to_path(DIRECTORIES[0])),
+        ready_root=str(canonical_to_path(DIRECTORIES[1])),
+        processing_root=str(canonical_to_path(DIRECTORIES[2])),
         entity_batch_size=16,
         event_batch_size=128,
         busy_timeout_ms=9000,
@@ -92,7 +95,7 @@ async def test_worker_rejects_each_changed_binding_before_staging(frozen_report,
     assert result.error_kind is ErrorKind.REPORT
     assert result.error_code == "configuration_error"
     assert changed.removesuffix("_root") in result.error_message
-    assert str(home / "changed") in result.error_message
+    assert canonical_directory_binding(home / "changed") in result.error_message
     assert not Path(job.staging_path).exists()
     assert not (home / "staging").exists()
     assert not (home / "changed").exists()

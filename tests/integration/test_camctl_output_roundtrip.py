@@ -330,7 +330,7 @@ def test_duplicate_auto_preview_fails_at_admission(tmp_path: Path) -> None:
 
     shoot_at = future_schedule(1)
     body = {
-        "request_id": "0",
+        "request_id": "42",
         "created_at": "2026-01-15 08:00:00",
         "name": "photo-duplicate-auto",
         "actions": [
@@ -346,7 +346,9 @@ def test_duplicate_auto_preview_fails_at_admission(tmp_path: Path) -> None:
                 "auto-a", "auto-b", source="shoot", scheduled_at=shoot_at),
         ],
     }
-    plan_path, _ = deployment.export_plan_with_client(body)
+    # 客户端导出链同样预检重复自动预览并拒绝导出；本用例验证的是
+    # 服务端受理事务的冲突登记，直接提交计划正文（I4 手写先例）。
+    plan_path = deployment.write_plan(body)
     submitted = deployment.camctl(
         "submit", str(plan_path), "--config", str(deployment.config_path),
         driver=spec)
