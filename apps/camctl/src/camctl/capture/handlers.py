@@ -1122,7 +1122,8 @@ class CaptureRuntime(_FileObservationSaves):
             self._save_call_result(identity, pending)
         else:
             receipt = self.operations.finish_attempt(
-                AttemptFinish(ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us()),
+                AttemptFinish(ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
+                              retry_wait=retry_wait),
                 new_operation_key(), self.owned)
             if receipt.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原调用恢复结果未可靠保存: {receipt.error}")
@@ -3175,6 +3176,9 @@ async def _reconcile_recording(
     if not await _observe_activity_for_reconcile(context, action):
         # 归属或连续性未确认、活动已空闲收场或核实占本轮：不进入
         # 墙钟成功分支。
+        return
+    if await _confirm_stop_by_query(context, action):
+        # 对账会话的未确认停止先经原停止核实责任查询收场。
         return
     step = await _stop_call(context, action)
     if step.phase == "confirmed":

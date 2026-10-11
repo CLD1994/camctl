@@ -207,3 +207,14 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/te
 矩阵覆盖：可靠满足（空闲确认、归属确认）、可靠仍未满足（仍在录）、调用失败（FAILED，规格的 UNKNOWN 效果分区由调用错误表达——设备端口语义中正常返回无观察即空闲确认）、CONFIRMED+error（仍在录确认与调用错误并存完整保存）、额度耗尽（持续在录耗尽查询预算按 UNCONFIRMED 交回停止链）、取消（取消链经停止核实收场并收取消终态）及真实 await；BEFORE_EXECUTION 与 START_CONFIRMATION 的消费者由既有 `test_residual_winddown.py`（preflight 空闲／目标在录／其他活动等待）与启动确认测试继续覆盖。阶段门禁：capture+scheduling+cancellation+operations 1442、bootstrap 986+1 skipped、unit+history+reporting 1725 顺序全绿。
 
 本阶段如实记录的剩余缺口：各用途次数独立、同一用途重入不换键、原驱动绑定与历史 owner 分开尚未有显式断言（当前由责任键唯一约束与各测试隐含覆盖）；查询尝试的跨会话恢复分区（RUNNING 尝试经 `recover_attempt` 接手）未在本两文件显式验证；普通会话动作终态后 purpose 3／4 孤儿查询的收场仍只在 residual_flow 的 `_settle_orphan_queries`（purpose 1／5）有对应机制。上述缺口不阻塞消费者验收，与第四阶段（历史与可观察结果三路径）一并跟踪。
+
+### 第三阶段缺口闭合记录（2026-10-11）
+
+同日补齐第三阶段验证记录中列出的三个缺口，2026-10-11，Linux 容器（WSL2 x86_64）、Python 3.11.16。
+
+- 显式断言：`test_recording_queries.py` 新增 `test_query_attempts_independent_and_same_key_across_reentry`——对账归属确认（活动核实一次终态）与停止核实持续在录查询并行推进，断言责任键不同、次数分别累计（活动核实 1 次、停止核实 2 次，各自上限独立保存）、同一用途第二次查询沿用原流程行且尝试号递增、各次调用的票据属于同一 run。`test_residual_result_transactions.py` 的同事务测试补充绑定与 owner 分开的断言：残留确认查询的请求绑定取目标活动所属动作 A 保存的设备绑定，查询责任与历史 owner 沿触发动作 B。
+- 查询尝试跨会话恢复分区：`test_running_query_attempt_recovered_by_new_session`——旧会话提交停止核实意图后中断，新会话按 `HOST_LOCAL_SETTLED` 边界、固定 H 与原证据以 ASSUMED `adb_foreground_recovery` 结果结束 RUNNING 尝试；等待从本会话首次观察重新计时，间隔到达后第二次查询沿用原责任与累计次数并按空闲确认同事务收场。实施中发现并修复两处恢复接缝缺陷（均先取得红）：`recover_attempt` 的普通 finish 分支丢失 `retry_wait` 参数，使恢复后的下一次尝试被"后续尝试要求先建立重试等待"守卫拒绝；`residual._recover_old_attempts` 扫描接手在途尝试时未对查询责任携带 `retry_wait`，同样卡死后续查询。
+- 孤儿查询收场：`_settle_orphan_queries` 扩展支持 purpose 3／4——原普通停止（或残留收场、活动 ENDED）已按可靠依据成功时，停止核实或活动核实按同一依据收 SUCCEEDED；所属动作取消或终态后不再承担的核实责任按 CANCELED 收场；责任仍须继续时保持。residual flow 在普通会话每轮驱动，扩展后普通会话动作终态后的孤儿查询随之收场，无需新增接线。两处有效红（停止链自行成功后核实保持 ACTIVE；取消终态后活动核实保持 ACTIVE）转绿。
+- 顺带闭合的接缝：`_reconcile_recording` 的对账停止此前未接停止核实，跨会话对账停止未确认后没有查询核实路径；现与 READY_TO_STOP 分支一致先经 `_confirm_stop_by_query` 核实。
+
+回归：capture＋scheduling＋cancellation＋operations＋unit 6172 passed＋1 skipped；bootstrap 986 passed＋1 skipped。第三阶段软件分区至此闭合，剩余第四阶段历史与可观察结果三路径核验。

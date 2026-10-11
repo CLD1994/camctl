@@ -88,6 +88,20 @@ async def test_residual_confirm_query_settles_in_one_transaction(tmp_path):
 
         assert stopper.calls == ["stop_recording"]
         assert len(query.calls) == 1
+        assert query.calls[0].operation == "query"
+        # 绑定取目标活动所属动作 A 保存的设备绑定；查询责任与历史
+        # owner 沿触发动作 B，两者分开保存。
+        from camctl.devices.bindings import DeviceBinding
+
+        assert query.calls[0].binding == DeviceBinding("cam-1", "camctl-adb")
+        assert query.calls[0].ticket.responsibility_key == (
+            f"query/residual/13/{_activity_id(owned)}")
+        assert owned.connection.execute(
+            "SELECT action_id FROM operation_runs WHERE id = ?",
+            (_run(owned, f"query/residual/13/{_activity_id(owned)}")[0],)).fetchone() == (13,)
+        assert owned.connection.execute(
+            "SELECT action_id FROM device_activities WHERE id = ?",
+            (_activity_id(owned),)).fetchone() == (12,)
         confirmation = _run(owned, f"query/residual/13/{_activity_id(owned)}")
         assert confirmation[1:] == (3, 1)
         winddown = _run(owned, "followup/13/12")

@@ -686,30 +686,55 @@ async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device
             ticket = AttemptTicket(
                 attempt_no, _RECOVERABLE_OPERATIONS[kind],
                 None if activity_id is None else str(activity_id), responsibility, run_id)
-            runtime.recover_attempt(ticket)
+            # 查询责任的后续尝试沿重试间隔继续；恢复结果不带等待会
+            # 使下一次查询被"先建立重试等待"守卫拒绝。
+            runtime.recover_attempt(
+                ticket, retry_wait=ticket.operation == "query")
         if len(rows) < batch_size:
             return
         await asyncio.sleep(0)
 
 
 def _settle_orphan_queries(context: Any, owned: Any, operations: Any) -> None:
-    """按查询用途和原停止责任结算，不以触发者终态覆盖必要核实。"""
+    """按查询用途和原停止责任结算，不以触发者终态覆盖必要核实。
+
+    普通停止核实与活动核实随所属动作和停止责任收场：原停止已按
+    可靠依据成功时查询按同一依据收 SUCCEEDED，不为形式完整追加
+    查询；动作取消或终态后不再承担的核实责任按 CANCELED 收场。
+    """
 
     with closing(owned.connection.execute(
         "SELECT r.responsibility_key, r.query_purpose, a.status, a.cancel_requested,"
-        " stop.id, stop.status, stop.attempts_used FROM operation_runs r"
+        " stop.id, stop.status, stop.attempts_used,"
+        " nstop.status, act.activity_state FROM operation_runs r"
         " JOIN actions a ON a.id = r.action_id"
         " LEFT JOIN operation_runs stop ON stop.kind = 8"
         " AND stop.action_id = r.action_id AND stop.activity_id = r.activity_id"
+        " LEFT JOIN operation_runs nstop ON nstop.kind = 2"
+        " AND nstop.responsibility_key = 'stop/' || r.action_id"
+        " AND nstop.activity_id = r.activity_id"
+        " LEFT JOIN device_activities act ON act.id = r.activity_id"
         " WHERE r.kind = 6 AND r.status IN (1, 2)"
-        " AND r.query_purpose IN (1, 5)",
+        " AND r.query_purpose IN (1, 3, 4, 5)",
     )) as cursor:
         rows = cursor.fetchall()
-    for responsibility, purpose, status, canceled, stop_id, stop_status, used in rows:
+    for (responsibility, purpose, status, canceled, stop_id, stop_status, used,
+         nstop_status, activity_state) in rows:
         if purpose == 1:
             if not canceled and status not in _TRIGGER_TERMINAL:
                 continue
             final = RunOutcome.CANCELED
+        elif purpose in (3, 4):
+            # 普通核实：停止或活动已按可靠依据成功即同依据收成功；
+            # 动作不再承担核实责任时按取消收场；责任仍须继续时保持。
+            succeeded = (nstop_status == 3 or stop_status == 3
+                         or activity_state == 3)
+            if succeeded:
+                final = RunOutcome.SUCCEEDED
+            elif canceled or status in _TRIGGER_TERMINAL:
+                final = RunOutcome.CANCELED
+            else:
+                continue
         else:
             if stop_id is None:
                 raise ConsistencyError(f"残留确认查询缺少原停止责任: {responsibility}")
