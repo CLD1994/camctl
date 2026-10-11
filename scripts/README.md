@@ -27,3 +27,7 @@
 结构检查先读取[统一运行库版本条件](../docs/camctl/sqlite-runtime.json)，核对文档版本表、Python 实际链接的 SQLite 及必要能力。`--runtime-only` 只执行这部分检查，使用隔离的临时文件库验证 WAL/FULL、JSON、STRICT 及分段 BLOB 读写；`--write-runtime-doc` 从同一条件生成[版本表](../docs/camctl/sqlite-runtime.md#允许的版本)。脚本尚未接入生产入口，也不证明目标存储的并发或断电持久性。
 
 结构检查同时读取[全库整数编号定义](../docs/camctl/database/enum-registry.json)，核对有限值列的完整分类、实际 SQL 列值约束、公共错误映射及事件状态条件。`~/.venv/bin/python scripts/check-database-spec.py --write-enum-doc` 从同一来源生成[编号一览](../docs/camctl/database/enum-values.md)；默认模式检查该文档是否一致。SQL 列值检查与完整表的状态组合样本分别执行，JSON 内部分类只检查定义及归属；生产类型适配、JSON 业务校验和历史往返仍待实现。
+
+## 执行入口配置消费
+
+运行 `python3 scripts/check-config-consumption.py` 核对生产源码中拍摄执行入口对配置的实际消费路径：`CaptureRuntime` 的尝试配置（check、stop、start、query、delete）必须经统一的按设备读取接口（`_device_attempts`／`_device_seconds`）构造或由装配参数转发，设备调用意图的 `config` 必须引用运行时配置字段或转发装配输入，延时额外等待必须经统一读取或注入转发。检查基于语法树与真实调用点：`AttemptConfig` 预算关键字出现数字字面量即拒绝；唯一例外是主机源交付拷贝的本地单次预算协议（一次、无时限、无定时重试），其值由授予拷贝时保存的配置约束。该检查证明入口消费统一配置接口，不验证各接口的实现正确性（由组件集成测试覆盖）。
