@@ -87,8 +87,9 @@ def _register_alternate_driver(monkeypatch):
 def _current_binding_fact(monkeypatch, change):
     """控制稳定绑定协作者的可用性；真正 check_binding 产生分类和详情。"""
     actual_check = bindings.check_binding
+    driver_id = "camctl-adb" if change == "matched" else "alternate-camera"
     fault_config = SimpleNamespace(devices={} if change == "missing" else {
-        "cam-1": {"kind": "camera", "driver": "alternate-camera"}})
+        "cam-1": {"kind": "camera", "driver": driver_id}})
     checks = []
 
     def check(saved, current):
@@ -240,6 +241,107 @@ async def test_default_entry_saves_clean_read_with_missing_required_sha_before_c
         assert reopened.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()[:len(history)] == history
         assert reopened.connection.execute(
             "SELECT * FROM operation_attempts WHERE run_id<>? ORDER BY id", (ticket.run_id,)).fetchall() == original_attempts
+    finally:
+        if reopened is not None:
+            reopened.connection.close()
+        lifecycle.close_runtime(deps)
+
+
+@pytest.mark.parametrize("entrance", ["normal", "residual"])
+async def test_matched_binding_excludes_failure_path_and_keeps_read_open(
+        pipeline, monkeypatch, entrance):
+    """原绑定与本次配置匹配时排除绑定失败路径：不写 bindingFAILED。
+
+    与 missing／mismatch 同一前提（digest 前持有原 End、重开后经
+    入口恢复），绑定核对返回 MATCHED：本次分类不产生绑定失败申
+    请、不把 run 或动作收场为绑定失败，原 READ 按正常链保存，原
+    holder 释放后由候选链继续。
+    """
+    owned, roots, source_id = pipeline
+    _register_alternate_driver(monkeypatch)
+    world = await _default_world(pipeline, monkeypatch)
+    deps, factories, context, reader, driver, ends, wall, factory_calls = world
+    reopened = None
+    try:
+        action_id, processing_id = owned.connection.execute(
+            "SELECT action_id,id FROM recording_processing WHERE source_device_file_id=?",
+            (source_id,)).fetchone()
+        runtime = factories[0](owned, "cam-1")
+        flow = runtime.media
+        completions = _hold_before_digest(monkeypatch)
+        with pytest.raises(ConsistencyError):
+            await run_recording_media(flow, action_id, processing_id, source_id)
+        ticket, before_progress = _held_without_digest(owned, flow, reader)
+        copy_id = int(ticket.target_id)
+        held = flow.pending_read_ends[copy_id]
+        history = owned.connection.execute(
+            "SELECT * FROM history_events ORDER BY id").fetchall()
+        original_attempts = owned.connection.execute(
+            "SELECT * FROM operation_attempts WHERE run_id<>? ORDER BY id",
+            (ticket.run_id,)).fetchall()
+
+        owned.connection.close()
+        reopened = open_existing(roots.staging.parent / "state.db",
+                                 DbOpenMode.EXISTING_RW, DbConfig())
+        wall[0] += 1000
+        # 绑定核对保持原配置：本次分类为 MATCHED。
+        binding_checks = _current_binding_fact(monkeypatch, "matched")
+        binding_calls = []
+        actual_binding = CaptureRepository.finish_binding_failure
+
+        def binding(repository, request, key, current):
+            binding_calls.append(request)
+            return actual_binding(repository, request, key, current)
+
+        monkeypatch.setattr(CaptureRepository, "finish_binding_failure", binding)
+
+        def matched_excludes_failure():
+            # 匹配排除绑定失败路径：不保存收场、不写 bindingFAILED，
+            # 原 READ 尝试保持执行中，原 holder 不被消费。
+            status, error = reopened.connection.execute(
+                "SELECT status,error_json FROM operation_attempts"
+                " WHERE run_id=? AND attempt_no=?",
+                (ticket.run_id, ticket.attempt_id)).fetchone()
+            assert status == int(enum_for("operation_attempts.status").RUNNING)
+            assert error is None
+            run = _snapshot(reopened, "operation_runs", ticket.run_id)
+            assert run["status"] == int(enum_for("operation_runs.status").ACTIVE)
+            assert run["error_json"] is None
+            assert flow.pending_read_ends.get(copy_id) == held
+            action_status, error_code = reopened.connection.execute(
+                "SELECT status,error_code FROM actions WHERE id=?",
+                (action_id,)).fetchone()
+            assert action_status == int(enum_for("actions.status").RUNNING)
+            assert error_code is None
+            assert binding_calls == []
+            assert all(check.status is bindings.BindingStatus.MATCHED
+                       for check in binding_checks)
+
+        original_open = context.open_connection
+
+        def open_connection():
+            current = original_open()
+            return replace(current, connection=_ResidualReadBoundary(
+                current.connection, matched_excludes_failure)) \
+                if entrance == "residual" else current
+
+        context.open_connection = open_connection
+        if entrance == "normal":
+            context.clock = _CandidateClock(matched_excludes_failure)
+        selected = context.flows["scheduling"] if entrance == "normal" \
+            else context.flows["residual"]
+        with pytest.raises(_BeforeBusinessCandidates):
+            await selected(context)
+        matched_excludes_failure()
+        # 原会话持有物保持：未保存收场、未调用本地续接、原 holder 在。
+        assert list(flow.pending_read_ends) == [copy_id]
+        assert flow.pending_read_results == flow.pending_read_business == {}
+        assert len(completions) == 1
+        assert reopened.connection.execute(
+            "SELECT * FROM history_events ORDER BY id").fetchall()[:len(history)] == history
+        assert reopened.connection.execute(
+            "SELECT * FROM operation_attempts WHERE run_id<>? ORDER BY id",
+            (ticket.run_id,)).fetchall() == original_attempts
     finally:
         if reopened is not None:
             reopened.connection.close()
