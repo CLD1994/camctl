@@ -308,7 +308,7 @@ contracts 完整目录取得 `192 passed`，耗时 3.91 秒，覆盖实际模块
 | Python 环境与安装 | 用已核验的 `/home/cld/.venv/bin/python` 创建新的 `/home/cld/.camctl/venv`，实际 Python 为 3.11.17，SQLite 为 3.53.1；九个锁定运行依赖和 camctl 0.1.0 安装成功，camctl 导入来自该新环境的 site-packages |
 | C host 目标构建与安装 | 交付源码以 `HOST_BUILD_TESTS=OFF` 和 Release 配置在目标主机构建、安装，进度达到 100%；安装后的 `/home/cld/.camctl/host/bin/host-demo` 为 `293640` 字节。此项证明该源码在本机工具链构建与安装成功，尚不证明运行时业务链 |
 
-本记录只证明包校验、上述执行通道、Python 安装和目标主机 C 构建。`init`、`describe`、十秒录像、实际五秒等待及文件完成、独立取回、host 领取、客户端导入和报告 ACK 尚未取得回传结果。完整真机业务链的验收及挂起状态由[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)跟踪，不能由部署准备结果声明演示成功。
+本记录只证明包校验、上述执行通道、Python 安装和目标主机 C 构建，不覆盖后续初始化、能力导出及完整业务链。后续部署与现场验收结论由[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)分别记录，不能由本条部署准备结果声明演示成功。
 
 ## 应急错误与历史报告的软件验证（2026-10-11）
 
@@ -331,7 +331,7 @@ contracts 完整目录取得 `192 passed`，耗时 3.91 秒，覆盖实际模块
 
 RESULT_PAGE 的事件验收映射指向实际结果页历史测试，未标为综合剧本已经产生。其二十项锚点验证通过不表示新文件、设备文件及页目录的完整对象成员已在三条历史路径按独立预期全部核验；这项剩余证明由[H7 结果页验证](../superpowers/plans/2026-09-30-camctl-history.md#h7-结果页验收映射与剩余证明2026-10-11容器)跟踪。
 
-本次完成错误登记、最终补记与上述软件验证。默认 bootstrap／session 尚未接入真实应急停止、有限尝试及最终补记，责任仍在[capture C7](../superpowers/plans/2026-09-30-camctl-capture.md#c7-有限安全收场与应急最终补记)。原键事务核实不等于默认会话已持有 UNKNOWN 保存的恢复责任。Action6 完整真机演示仍按[T9 挂起记录](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)等待恢复，本次软件通过不作为设备、ARM 运行或物理断电验收。
+本次完成错误登记、最终补记与上述软件验证。默认 bootstrap／session 尚未接入真实应急停止、有限尝试及最终补记，责任仍在[capture C7](../superpowers/plans/2026-09-30-camctl-capture.md#c7-有限安全收场与应急最终补记)。原键事务核实不等于默认会话已持有 UNKNOWN 保存的恢复责任。Action6 现场演示结论见[T9 验收记录](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)，本次软件通过不作为设备、ARM 运行或物理断电验收。
 
 ## 清理查询结果保存与恢复的软件验证（2026-10-11）
 
@@ -353,7 +353,7 @@ bootstrap 的两个失败分区涉及已保存未知查询、取消生效及当�
 
 静态检查取得 3754 个本地文件链接通过，修改文档的 242 个标题锚点均可解析，13 个修改 Python 文件通过 3.11 AST 检查；暂存及未暂存 diff 均通过空白检查。
 
-本次结果不证明相机、ARM64 运行、性能或物理断电行为。QUERY-only 的共同建档、取消与限制转换、成员及伴随仓储的完整原键证明和专项历史回放仍由[剩余责任](../superpowers/plans/2026-10-10-camctl-cleanup-query-result-closure.md#尚未完成的前置与核验)跟踪，完整清理计划及第一版均未完成。阶段提交后停止；下一项是[合并客户端分支并恢复 Action6 真机演示](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)。
+本次结果不证明相机、ARM64 运行、性能或物理断电行为。QUERY-only 的共同建档、取消与限制转换、成员及伴随仓储的完整原键证明和专项历史回放仍由[剩余责任](../superpowers/plans/2026-10-10-camctl-cleanup-query-result-closure.md#尚未完成的前置与核验)跟踪，完整清理计划及第一版均未完成。阶段提交后停止；后续客户端分支合并及 Action6 现场验收结果见[演示交付状态](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)。
 
 ## 视频大小估算的协议同步验证（2026-10-11）
 
@@ -383,7 +383,7 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 精确数字分区包括 `130.125` Mbps、数学整数帧数 `240`／`240.0`／`2.4e2`，以及不能被舍入为整数的 `1.00000000000000000001`。非法声明使真实 `describe` 退出 1 且 stdout 为空；客户端重新加载同一非法内容时保留此前完整说明与诊断。合法的缺失元数据、查表未覆盖及可选引用省略仍能导出计划。估算前后的既有草稿版本和内容保持一致。
 
-内置相机使用在任务说明中标注的固定假定参考值，数值与说明由同源定义生成。当前可执行的 Action6 录像声明 130 Mbps；元数据不启用缺少任务工厂的候选类型，也不改变 START／STOP 含义及五秒文件完成运行假设。实际码率、文件完成与 ARM 主机真实业务链仍按[演示接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)核验。
+内置相机使用在任务说明中标注的固定假定参考值，数值与说明由同源定义生成。当前可执行的 Action6 录像声明 130 Mbps；元数据不启用缺少任务工厂的候选类型，也不改变 START／STOP 含义及五秒文件完成运行假设。现场演示的结论与依据见[演示交付状态](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)，不将估算声明记为实际码率。
 
 静态复核通过：本地文件链接 3883 项，修改文档的标题及显式锚点 263 项，Python 3.11 AST 检查 12 个修改文件；`git diff --check` 无空白错误。独立审查核对同源声明、候选过滤、精确 HTTP 草稿、导出及报告边界，没有未解决的阻断问题。
 
@@ -397,7 +397,7 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 从仓库根执行 `UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_action6_builtin_demo_roundtrip.py -q`，取得 `1 passed`，耗时 30.48 秒。该专项通过安装版内建驱动、真实 C host、CLI、状态库和客户端完成录像、独立取回、领取及 ACK；ADB 仍使用受真实接口约束的替身。日志位于同一交付工作目录的 `.work/c-host-software.log`。
 
-交付的 14 个载荷 SHA-256 全部通过，压缩包中的所有文件与交付目录逐字节一致，更新说明的三段 Bash 命令通过语法检查。主执行者核对文档引用、修改标题锚点和 diff 后登记本阶段；未修改业务代码。ARM 现场的配置、状态库、进程、原请求及交接文件仍等待用户回传；当前结果不证明 ARM 已更新安装或真机演示已经完成。现场步骤继续由[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)跟踪。
+交付的 14 个载荷 SHA-256 全部通过，压缩包中的所有文件与交付目录逐字节一致，更新说明的三段 Bash 命令通过语法检查。主执行者核对文档引用、修改标题锚点和 diff 后登记本阶段；未修改业务代码。本条结果证明更新发行物本身，后续 ARM 安装与真机演示的结论见[交付状态](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)。
 
 ## ARM 更新包接收与现场状态（2026-10-11）
 
@@ -409,13 +409,21 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 用户随后回传实际配置：`devices.action6` 使用 `dji-action6`，ADB serial 为 `123456789ABCDEF`，省略 `[paths]` 而使用运行账户默认目录。`init` 成功；现场 `describe` 导出 `/home/cld/.camctl/camera-demo/capabilities.json`，通过安装版能力 Schema 校验，范围为 `action6 / camera_record / action6_record`。估算声明为 `bitrate_mbps=130`、`duration.method=direct`、`seconds.source=parameter`、`seconds.path=/duration_s`。
 
-该阶段已取得 ARM 配置、初始化和现场能力导出的证据；后续现场进度见[客户端计划独立取回](#arm-客户端计划独立取回进度2026-10-11)。完整业务链沿[接续入口](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#挂起状态与恢复入口)继续。
+该阶段已取得 ARM 配置、初始化和现场能力导出的证据；后续现场进度见[客户端计划独立取回](#arm-客户端计划独立取回进度2026-10-11)，最终结论见[现场验收](#action6-普通录像演示的现场验收2026-10-11)。
 
 ## ARM 客户端计划独立取回进度（2026-10-11）
 
-用户在上述 ARM 部署的接续过程中回传：已在客户端生成取回计划，并成功完成独立取回。本条记录保存用户回传的现场进度；尚未收到本次原拍摄计划、取回计划、正式状态报告或交付文件，因此不能独立核对请求与动作身份、产物来源、实际录像要求及取回结果。
+用户在上述 ARM 部署的接续过程中回传：已在客户端生成取回计划，并成功完成独立取回。本条记录保存用户回传的现场进度；原始计划、正式状态报告及交付文件未在仓库归档。
 
-下一步沿用本次拍摄和取回请求，核对 host 领取的视频及报告是否已在客户端可靠导入，视频大小与 SHA-256 是否匹配报告；使用客户端可靠保存的累计确认依据完成演示的报告确认，并核对主机确认水位。实际媒体属性、START／STOP 响应与计时、STOP 后五秒等待、相机原片保留及完整能力说明的客户端加载结果仍须补齐证据。用户回传取回成功不单独构成 T9 完整验收通过。
+当前演示的最终结论见[现场验收](#action6-普通录像演示的现场验收2026-10-11)。
+
+## Action6 普通录像演示的现场验收（2026-10-11）
+
+环境沿用上述 ARM 主机、运行账户 `/home/cld`、Python 3.11.17、SQLite 3.53.1、已安装的 camctl wheel 和 C host，以及 serial 为 `123456789ABCDEF` 的 Action6。
+
+验收执行者为用户。用户在实际演示后确认目前一切正常；当前 Action6 普通录像演示按用户现场确认验收通过，[T9 当前演示范围](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)完成。已明确回传的业务结果包括客户端生成取回计划及成功完成独立取回。该结论采用用户总体确认；原始报告、媒体文件及确认水位未在仓库归档，不补写媒体测量值、文件摘要或逐项检查结果。
+
+本次范围为 Action6 普通录像演示。Action6 延时、OSMO 及未支持选项按各自设备条件后续安排，其他软件缺口、目标资源测量和物理断电验收继续由各自责任计划跟踪。130 Mbps 仍是录像大小估算的固定假定参考值。
 
 ## 部署交接与待核验项
 
