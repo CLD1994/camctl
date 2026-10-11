@@ -122,24 +122,26 @@ export function parameterOptions(parameter: ParameterType): ParameterOptions {
   if (prior) return prior;
   const complete = buildOptions(parameter);
   const result =
-    complete.kind === "unavailable" && complete.reason !== "numeric"
+    complete.kind === "unavailable"
       ? (independentOptions(parameter) ?? complete)
       : complete;
   cache.set(parameter, result);
   return result;
 }
-function buildOptions(parameter: ParameterType): ParameterOptions {
-  const schema = parameter.schema;
+export function hasNumericLoss(schema: Record<string, unknown>): boolean {
   const assertions = cloneClientJson(schema);
   visitSchemaNodes(assertions, (node) => {
     for (const keyword of SCHEMA_ANNOTATIONS) delete node[keyword];
   });
-  // Ajv 的 enum、范围等使用 Number；不把存在舍入损失的规则用于生成候选。
-  if (
+  return (
     exactJsonValueIdentity(assertions) !==
     exactJsonValueIdentity(JSON.parse(JSON.stringify(assertions)))
-  )
-    return { kind: "unavailable", reason: "numeric" };
+  );
+}
+function buildOptions(parameter: ParameterType): ParameterOptions {
+  const schema = parameter.schema;
+  // 完整目录与局部字段分别检查其全部断言，不能用舍入事实生成候选。
+  if (hasNumericLoss(schema)) return { kind: "unavailable", reason: "numeric" };
   // patternProperties 可以开放未列出的键，无法证明下面的候选目录完整。
   if (
     schema.additionalProperties !== false ||
@@ -224,22 +226,18 @@ function independentOptions(
     Object.keys(schema).some((key) => !independentRoot.has(key))
   )
     return undefined;
-  const definitions = Object.entries(schema.properties);
-  if (
-    definitions.some(
-      ([, field]) =>
-        !isObject(field) ||
-        Object.keys(field).some((key) => !scalarAssertions.has(key)) ||
-        (field.type !== undefined &&
-          !(Array.isArray(field.type) ? field.type : [field.type]).every(
-            (type) => typeof type === "string" && scalarTypes.has(type),
-          )),
-    )
-  )
-    return undefined;
   const fields: ParameterField[] = [];
-  for (const [name, field] of definitions) {
-    const definition = field as Record<string, unknown>;
+  for (const [name, definition] of Object.entries(schema.properties)) {
+    if (
+      !isObject(definition) ||
+      Object.keys(definition).some((key) => !scalarAssertions.has(key)) ||
+      (definition.type !== undefined &&
+        !(
+          Array.isArray(definition.type) ? definition.type : [definition.type]
+        ).every((type) => typeof type === "string" && scalarTypes.has(type))) ||
+      hasNumericLoss(definition)
+    )
+      continue;
     const values = domain(definition, schema);
     if (
       !values ||

@@ -133,8 +133,8 @@ it("已导出观察不会覆盖尚未保存的额外输入", () => {
     () => {},
   );
   session.edit({ text: "额外输入" });
-  session.observe({ ...draft(), revision: 2, exportedRequestId: "r" });
-  expect(session.exportedRequestId).toBe("r");
+  session.observe({ ...draft(), revision: 2, exportedRequestId: "1" });
+  expect(session.exportedRequestId).toBe("1");
   expect(session.recoveryContent?.text).toBe("额外输入");
   expect(() => session.edit({ text: "其他" })).toThrow();
 });
@@ -145,7 +145,7 @@ it("额外内容明确保存为新草稿后，后续导出观察不重复提供�
     () => {},
   );
   session.edit({ text: "额外输入" });
-  const actual = { ...draft(), exportedRequestId: "r" };
+  const actual = { ...draft(), revision: 2, exportedRequestId: "1" };
   session.observe(actual);
   expect(session.saved).toBe(false);
   session.completeRecovery();
@@ -214,11 +214,11 @@ it("明确导出验证失败后恢复编辑，已确认导出不会被失败或�
   session.exportFailed();
   expect(session.editable).toBe(true);
   session.beginExport();
-  session.confirmExport("r");
+  session.confirmExport("1");
   session.exportFailed();
   session.observe(draft(), session.exportToken);
   expect(session.editable).toBe(false);
-  expect(session.exportedRequestId).toBe("r");
+  expect(session.exportedRequestId).toBe("1");
 });
 it("保存待定时发现已导出会保留新输入并停止写入", async () => {
   let puts = 0;
@@ -229,7 +229,7 @@ it("保存待定时发现已导出会保留新输入并停止写入", async () =
         puts++;
         throw Error("lost");
       },
-      read: async () => ({ ...draft(), exportedRequestId: "r" }),
+      read: async () => ({ ...draft(), revision: 2, exportedRequestId: "1" }),
     },
     () => {},
   );

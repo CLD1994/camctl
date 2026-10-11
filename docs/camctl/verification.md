@@ -387,6 +387,57 @@ UV_PROJECT_ENVIRONMENT=/workspaces/camctl/apps/camctl/.venv uv run --frozen --pr
 
 静态复核通过：本地文件链接 3883 项，修改文档的标题及显式锚点 263 项，Python 3.11 AST 检查 12 个修改文件；`git diff --check` 无空白错误。独立审查核对同源声明、候选过滤、精确 HTTP 草稿、导出及报告边界，没有未解决的阻断问题。
 
+## 普通录像参数与客户端字段的软件验证（2026-10-11，Windows）
+
+本次在 Windows 开发机使用 `apps/camctl/.venv311` 的 Python 3.11.15 与 SQLite 3.53.1，验证[普通录像整数秒契约](../architecture/camera-parameters.md#普通录像时长)和客户端参数字段接缝。Python 单元与每个组件集成目录分别、独占、顺序运行；客户端完整门禁和当前页面的只读证据见[客户端参数字段验证](../client/verification.md)。本次执行步骤由[参数字段实施计划](../superpowers/plans/2026-10-11-client-parameter-fields.md)维护。
+
+普通录像的两个候选型号共用 `integer`、`minimum: 1`、`maximum: MAX_OBJECT_ID // 1000`，没有默认值或小数步进。数学整数写法 `1.0`、`1e0` 合法，非整数与非法类型拒绝；最大合法值 `9223372036854775` 秒精确转换为 `9223372036854775000` 毫秒。单元反例在修改前为 8 项失败、195 项通过，修改后 203 项通过；该专项数量不再叠加到全部单元数量。
+
+以下命令均从仓库根目录执行。测试进程前置 Git Bash 路径并统一父子进程的 UTF-8 模式，避免本机的 WSL `bash.exe` 首命中及父子进程文本编码不一致。测试没有更改部署依赖、公共协议或设备命令。
+
+```powershell
+$env:PATH = 'C:\Program Files\Git\bin;' + $env:PATH
+$env:PYTHONUTF8 = '1'
+& '.\apps\camctl\.venv311\Scripts\python.exe' -m pytest <表中测试路径> -q
+```
+
+| 测试路径 | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 4757 项通过，23.61 秒；保留 2 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/acceptance` | 239 项通过，54.86 秒。 |
+| `apps/camctl/tests/integration/bootstrap` | 930 项通过、14 项跳过；16 项分发用例在同一依赖安装 fixture 准备阶段报错，731.00 秒。 |
+| `apps/camctl/tests/integration/bootstrap/test_distribution.py` | 设置测试进程 `UV_OFFLINE=1` 后完整复验，16 项通过、1 项跳过，25.73 秒；此跳过已包含于整目录的 14 项。 |
+| `apps/camctl/tests/integration/cancellation` | 103 项通过，11.39 秒。 |
+| `apps/camctl/tests/integration/capture` | 982 项通过，253.48 秒。 |
+| `apps/camctl/tests/integration/contracts` | 438 项通过，5.33 秒。 |
+| `apps/camctl/tests/integration/devices` | UTF-8 环境复验 108 项通过、23 项跳过，2.58 秒。 |
+| `apps/camctl/tests/integration/history` | 209 项通过，29.79 秒。 |
+| `apps/camctl/tests/integration/host_files` | 82 项通过、5 项跳过，68.25 秒。 |
+| `apps/camctl/tests/integration/logging_runtime` | 28 项通过，3.40 秒；保留 1 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/motor` | 3 项通过、9 项跳过，0.76 秒。 |
+| `apps/camctl/tests/integration/operations` | 200 项通过，14.81 秒。 |
+| `apps/camctl/tests/integration/outputs` | 1911 项通过、2 项跳过，242.18 秒。 |
+| `apps/camctl/tests/integration/persistence` | 106 项通过，4.94 秒。 |
+| `apps/camctl/tests/integration/reporting` | 373 项通过，45.01 秒。 |
+| `apps/camctl/tests/integration/scheduling` | 133 项通过，10.00 秒。 |
+| `apps/camctl/tests/integration/session` | 100 项通过，18.73 秒。 |
+
+组件集成按不重复的用例分区累计为 5961 项通过、53 项跳过。Bootstrap 整目录的准备错误发生于 wheel 构建、锁文件导出和临时 Python 3.11 环境创建完成之后：`uv pip install -r` 获取 PyPI 的 `jsonschema-specifications` 元数据超时，16 项用例尚未开始。随后完整分发文件用已有缓存安装相同锁定依赖并通过。此结果证明该分区已经复验，不能表述为一次完整 bootstrap 全绿。
+
+跳过项包括 Windows 上的真实符号链接、部署通知描述符继承、POSIX 文件与命令边界、Linux 进程组及信号、目录权限和目录同步、通知管道及 `proc` 描述符检查；文件取回的两项跳过属于不适用的输入分类。单元及日志目录的警告来自既有同步测试的 asyncio 标记，测试未因警告删除或放宽。
+
+设备软件结果页使用 POSIX 远端路径；本机临时文件仍使用 `Path`。真实产物集成断言核对完整远端目录与原文件名，整目录执行覆盖 21 个相机产物参数场景。
+
+[本机文件工具集成回归](../../tests/integration/test_camera_demo_transport.py)共 43 项通过，0.88 秒。测试只在成功的权威摘要脚本返回完整 binary stdin marker 时，将本机 Bash 的 ` *-` 转为目标 POSIX 的 `  -`；摘要、错误、退出、stderr 和其他工具响应保持。真实文件用 CRLF、NUL、非 ASCII、`0x1a`、`0xff`、空格及引号路径验证摘要、metadata、分页、偏移读取与原字节，并独立计算期望摘要。生产摘要解析仍严格拒绝错误长度、大小写、CRLF、缺少 LF 和附加内容。
+
+四条根相机链首次运行均在上述响应格式处失败。适配后有三条完整通过，OSMO 延时摄影在等待中间报告时超时；单独复验仍在同一步失败。状态库已有符合等待条件的确定报告正文，但发布者撤下旧 READY 报告遇到 `WinError 32`。独立文件回归证明测试观察器默认读句柄可能阻止撤下，并证明适配后的观察器允许该操作；没有把观察器推定为此前唯一的锁持有者。生产发布失败和重试规则保持。
+
+[报告观察器集成回归](../../tests/integration/test_ready_report_observer.py)最终 19 项通过，0.14 秒。Windows 测试读取只请求已有报告的只读句柄，允许其他进程删除或重命名；正常关闭不删除报告，观察器仍只检查 READY 的 UTF-8 正文与既有动作状态。真实文件回归证明已打开的读流在路径撤下后仍取得原正文，默认换行转换和 JSON／编码错误保持。`io.open` 统一负责文件描述符返回后的包装和关闭；真实包装失败回归保留原 `LookupError`，通过失效描述符与独占重新打开证明资源释放。独立审查核对了这些失败分区、原始 RED／GREEN 输出和三个共享观察入口。
+
+最终源码的三个共享入口串行复验为 7 项通过、1 项跳过，111.30 秒：[双相机四条链](../../tests/integration/test_real_camera_demo_roundtrip.py)与[三条 C 模块链](../../tests/integration/test_camctl_c_module_roundtrip.py)全部通过；[安装版内建 Action6 链](../../tests/integration/test_action6_builtin_demo_roundtrip.py)按已有 Linux 平台条件在 Windows 跳过。实际组合当前 C host、Python CLI、SQLite、文件工具与客户端，验证整数秒受理、原 START／SENT 与基准恢复、长读取期间后续录像停止及中间报告、源与副本摘要和字节、领取、报告导入及累计 ACK。等待条件、时限与媒体门保持原值。源文件及既有无关文件保留；此结果只覆盖受接口约束的设备替身，不证明真实相机通信或本次跳过的安装版 ADB 进程链。
+
+本次软件替身、浏览器和开发环境结果不证明相机固件能力、目标主机性能、ARM 运行差异或物理断电行为。OSMO 360 II 保持候选能力状态，不因整数秒定义或软件演示启用未登记的生产任务工厂。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。

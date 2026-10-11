@@ -1,7 +1,15 @@
-import type { DraftContent, ParameterVariant } from "../server/models";
+import type {
+  DraftContent,
+  ParameterVariant,
+  ObjectVariantMap,
+} from "../server/models";
 import { isObject } from "./validation";
 import { decodeJsonPointer } from "./json-pointer";
 import { inspectActionPending } from "./draft-plan";
+import {
+  checkObjectVariants,
+  checkObjectVariantLocations,
+} from "./object-variants";
 import {
   cloneClientJson,
   exactJsonValueIdentity,
@@ -72,7 +80,9 @@ export function checkParameterVariants(
       !isObject(entry) ||
       typeof entry.paramsText !== "string" ||
       !isObject(entry.pending) ||
-      Object.keys(entry).some((key) => !["paramsText", "pending"].includes(key))
+      Object.keys(entry).some(
+        (key) => !["paramsText", "pending", "objectVariants"].includes(key),
+      )
     )
       throw new Error("参数类型编辑资料格式不正确");
     for (const [key, input] of Object.entries(entry.pending)) {
@@ -91,6 +101,12 @@ export function checkParameterVariants(
     );
     if (identities.has(id)) throw new Error("参数类型有多个相同事实的停用内容");
     identities.add(id);
+    if (entry.objectVariants !== undefined)
+      checkObjectVariants(
+        entry.objectVariants,
+        readParameterVariant(entry as unknown as ParameterVariant).params,
+        true,
+      );
   }
 }
 
@@ -106,6 +122,7 @@ function inspect(content: DraftContent, index: number) {
   )
     throw new Error("参数类型路径没有对应的动作对象");
   checkParameterVariantLocations(content, root.actions);
+  checkObjectVariantLocations(content, root.actions);
   const variants = content.parameterVariants?.[String(index)] ?? [];
   checkParameterVariants(variants);
   const inputs = inspectActionPending(content, root.actions).map(
@@ -150,7 +167,21 @@ export function checkParameterVariantLocations(
   }
   for (const [key, variants] of Object.entries(content.actionVariants ?? {})) {
     if (!Array.isArray(variants)) throw Error("动作类型资料必须是列表");
-    for (const variant of variants)
+    for (const variant of variants) {
+      if (variant.objectVariants !== undefined) {
+        if (
+          !/^(0|[1-9][0-9]*)$/.test(key) ||
+          !Number.isSafeInteger(Number(key)) ||
+          Number(key) >= actions.length
+        )
+          throw Error("动作分支的对象资料没有对应的位置");
+        const fields =
+          variant.fieldsText === undefined
+            ? variant.fields
+            : parseClientJson(variant.fieldsText);
+        if (!isObject(fields)) throw Error("动作类型字段原文必须是对象");
+        checkObjectVariants(variant.objectVariants, fields.params, true);
+      }
       if (variant.parameterVariants !== undefined) {
         if (
           !/^(0|[1-9][0-9]*)$/.test(key) ||
@@ -168,15 +199,23 @@ export function checkParameterVariantLocations(
           checkActiveParameterVariant(variant.parameterVariants, fields);
         }
       }
+    }
   }
 }
 
-function snapshot(action: ParamsOwner, pending: Pending): ParameterVariant {
+function snapshot(
+  action: ParamsOwner,
+  pending: Pending,
+  objects?: ObjectVariantMap,
+): ParameterVariant {
   const owner: ParamsOwner = {};
   transferParams(owner, action);
   return {
     paramsText: stringifyJson(owner),
     pending: cloneClientJson(pending),
+    ...(objects && Object.keys(objects).length
+      ? { objectVariants: cloneClientJson(objects) }
+      : {}),
   };
 }
 
@@ -253,7 +292,11 @@ export function switchParameterType(
       ] = cloneClientJson(value);
       delete pending[key];
     }
-  const saved = snapshot(action, relative),
+  const saved = snapshot(
+      action,
+      relative,
+      content.objectVariants?.[String(index)],
+    ),
     replacement = restored ? readParameterVariant(restored) : target;
   delete action.params;
   transferParams(action, replacement);
@@ -263,11 +306,16 @@ export function switchParameterType(
     ...variants.filter((v) => identity(readParameterVariant(v)) !== targetId),
     saved,
   ];
+  const objectVariants = { ...content.objectVariants };
+  if (restored?.objectVariants)
+    objectVariants[String(index)] = cloneClientJson(restored.objectVariants);
+  else delete objectVariants[String(index)];
   return {
     ...content,
     text: stringifyJson(root, 2),
     pending,
     parameterVariants: withVariants(content, index, remaining),
+    objectVariants,
   };
 }
 
@@ -317,13 +365,19 @@ export function replaceParameterValue(
       identity(readParameterVariant(v)) !== currentId,
   );
   if (currentId !== targetId)
-    remaining = [...remaining, snapshot(action, relative)];
+    remaining = [
+      ...remaining,
+      snapshot(action, relative, content.objectVariants?.[String(index)]),
+    ];
   delete action.params;
   transferParams(action, replacement);
+  const objectVariants = { ...content.objectVariants };
+  delete objectVariants[String(index)];
   return {
     ...content,
     text: stringifyJson(root, 2),
     pending,
     parameterVariants: withVariants(content, index, remaining),
+    objectVariants,
   };
 }

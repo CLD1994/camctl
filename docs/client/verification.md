@@ -2,6 +2,168 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 2026-10-12 并发草稿与完整版本选择验证
+
+验证环境为 Windows、PowerShell、Node.js `v24.16.0`、TypeScript `7.0.2`、Vitest `5.0.1`、Vite `8.3.0`、Playwright `1.63.0` 和 Chromium `153.0.8010.12`。命令直接使用已有 Node 入口，没有安装依赖。有效规则分别见[自动保存与并发冲突](storage-and-recovery.md#草稿的自动保存与并发冲突)、[另存的确认与重试](storage-and-recovery.md#另存的确认与重试)、[采用与替换的异常处理](storage-and-recovery.md#采用与替换的异常处理)、[键盘与焦点](page-interactions.md#键盘与焦点)和[动作显示状态与追加接纳](../architecture/client-editing.md#动作显示状态与追加接纳)。实施范围由[并发草稿计划](../superpowers/plans/2026-10-11-client-draft-conflicts.md#任务七真实双浏览器组合完整门禁与交付)跟踪。七项实施均已通过逐任务独立审查，整体审查及统一修复后的限定复审结论在下述当前端点登记。
+
+新增双浏览器测试为每项用例创建隔离临时目录、一个 `Application`、真实 `Files`、SQLite Store、`RequestLifecycle` 和随机 `127.0.0.1` HTTP 端口，加载当前 `dist`，A、B 使用两个独立 `browser.newContext()`。程序化装配的远端版本通过 A 上下文的真实 HTTP 请求保存；该装配不能代表 A 在表单中手工输入。版本拒绝由真实事务产生；保存和创建响应丢失先用 `route.fetch()` 完成后端操作再中断响应。新夹具清理先释放闸门，随后关闭浏览器上下文、请求、Files、服务与 Store，最后核验绝对临时路径再删除目录。既有保存与导出、录像估算页面测试分别使用其真实后端和单页面夹具；它们不作为双浏览器证据。
+
+组件测试使用 Vite 临时独立缓存，注入源显示、目标会话、Map、导航准备和提交前校验故障；它们证明受控组件与真实领域函数共同工作的分区，不能作为真实 Application 的故障证据。可靠 `not_created` 的首个 HTTP 响应也是受控替身，后续同身份创建与终态查询经过真实后端。测试保留页面错误、失败请求和 HTTP 错误诊断。早期 Task6 夹具首次加载缺少 HTTP 诊断，无法追溯其确定根因；后来独立缓存的验证不改变这一证据限制。
+
+任务七在整体审查前取得的门禁端点如下；整体审查修复后的源码端点在本节后续单独登记。开发阶段、失败门禁和窄验证不与完整测试数量累加。任务七日志位于 `.superpowers/sdd/2026-10-11-client-draft-conflicts/task-7-*.log`，日志记录命令、实际日期时间和退出码；空的类型检查 stdout 不单独作为通过依据。
+
+| 命令与范围 | 2026-10-12 北京时间、实际退出码及结果 |
+| --- | --- |
+| 客户端 `node node_modules/typescript/bin/tsc --noEmit` | 01:46:30.568→01:46:31.163，exit0，stdout 空；日志为 `task-7-final-types-closed.log`。 |
+| 客户端 `node node_modules/vite/bin/vite.js build` | 01:06:54.091→01:06:54.530，exit0，463 modules，主包848.13 kB、gzip254.11 kB；保留超过500 kB notice。日志为 `task-7-save-entry-build.log`，对应整体审查前的源码。 |
+| 客户端 `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` | 01:09:21.517→01:09:41.866，exit0，54 files、2667 tests、20.03 s；日志为 `task-7-current-unit.log`。 |
+| 客户端 `node node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=2` | 01:38:56.412→01:45:59.953，exit0，34 files、1282 tests、423.20 s；日志为 `task-7-final-integration-closed.log`。 |
+| 暂停计时 Select 的两个调用补证 | 完整集成后只补回原帮助函数的 option label 断言；01:46:31.804→01:46:35.817，exit0，2 passed/36 skipped、3.66 s，日志为 `task-7-final-select-assertions.log`。完整端点对应补断言前测试文件，补证覆盖此后唯一测试差异；没有累加这两项或重跑未变 build/unit。 |
+| 根目录 `node scripts/check-protocol.mjs` | 00:53:25.415→00:53:25.933，exit0，4 schemas、27 reports、19 plans、5 capabilities、166结构正反例、23 errors、76 motor夹具、246 video估算夹具；此后协议未变。 |
+| 根目录 `node scripts/check-doc-links.mjs` 与标题核对 | 01:21:31.418→01:21:31.895，exit0，3989本地文件链接；01:21:52.815→01:21:52.937，exit0，8个实际引用标题存在。链接脚本不检查标题锚点；此后修改说明与计划勾选，没有改变引用目标。 |
+| 根目录 `git diff --check` 与 Task7 新增文件空白检查 | 实际 exit0；最终命令、日期和结果记录于 `task-7-final-diff-check.log`。检查保留 Git 的 LF/CRLF 提示；没有空白错误。 |
+
+失败记录单独保留。首完整集成 `task-7-final-integration-2.log` 为1275项中5项失败，包含组件入口 `ERR_NO_BUFFER_SPACE`、私有资料同内容无 PUT 的夹具前提、旧保存自动恢复预期、具体导出核实接入和历史导航；不是包含全部后加测试的当前端点。后续 `task-7-current-integration.log` 为1282项中既有保存入口一项超时，原单例和两个文件91项诊断随后通过，但该次确定根因未证明。`task-7-current-integration-final.log` 为1282项中追加准备一项失败；原运行缺少请求归属诊断，不能追溯确定由哪个 GET 消费配额。
+
+追加的受控诊断随后证明：在夹具授予两次 GET 后，合法普通900ms poll 可以先消费一次，第二次准备被中断，实际追加 POST=0、Store仍只有一项动作。要求操作自身固定读回的保存、递交标记、删除、导出、追加、查看目标、上传错误核实和旧能力拒绝后的核实八种调用，统一使用已有 controlledClock 冻结计时轮询；有意依赖 allow=true 普通轮询恢复的用例保持真实计时。38项录像估算针对验证通过，原配额、超时、追加次数和结果断言保持。这一反例证明夹具竞争机制，不能替代早先完整失败的请求归属证据，也不能解释没有有限 GET 配额的保存入口失败。最终通过不消除这些证据限制；首次 Task6 装配、`ERR_NO_BUFFER_SPACE` 和保存入口失败的确定根因仍未证明。
+
+以下编号对应[并发编辑与冲突解决](acceptance.md#并发编辑与冲突解决)的 28 行。真实页面入口为[双浏览器测试](../../apps/client/tests/integration/browser-draft-conflicts.test.ts)，受控组件入口为[异常组件测试](../../apps/client/tests/integration/browser-draft-conflict-ui.test.ts)，局部领域入口为[六部分选择测试](../../apps/client/tests/unit/draft-six-part-conflicts.test.ts)、[恢复基线测试](../../apps/client/tests/unit/draft-restored-baseline.test.ts)、[独立责任矩阵](../../apps/client/tests/unit/draft-responsibility-matrix.test.ts)及[既有会话冲突测试](../../apps/client/tests/unit/draft-session-conflicts.test.ts)。表中的测试名称包含参数化分区名称；输入事实、当前保存事实和过去请求结果分别断言。
+
+| 行 | 具体测试与输入 | 实际断言及证据层次 |
+| --- | --- | --- |
+| 1 | 会话 `450毫秒自动保存与连续修改重计时`；双浏览器 `清洁同步完整远端版本，曾修改后恢复基线=false不多PUT`；[完整普通接纳单元](../../apps/client/tests/unit/draft-clean-complete.test.ts)。 | 计时单元分别推进 449/1 ms 并重计时；真实 B 显示 R 的计划名称、pending、保存事实及后端 `updatedAt`，后端保存完整六部分 R 和 revision，B 的 PUT 为 0。B 的六部分完整接纳由独立字面量单元断言证明；后端断言不作为 B 私有资料的浏览器证据。 |
+| 2 | `恢复已确认完整基线后450毫秒不再写相同内容且保存事实成立`；双浏览器上述 `restore=true`；`只修改并恢复%s` 七个分区；上述完整普通接纳单元的 `restore=true`。 | 真实 B 输入 temporary 再恢复 base 后显示 R 的计划名称、pending、保存事实及后端时间，后端完整 R 保持且 B 零 PUT。领域单元验证恢复完整 B 后六部分 R 共同接纳；逐部分恢复时编辑代次仍增加，但 `confirmedVersion` 不伪造，saved 成立且没有同内容 PUT。 |
+| 3 | `真实纯版本推进保留完整本页输入，普通重试使用实际新revision`。 | A 的真实 HTTP 保存只推进 B 基线版本；B 的六部分 L 保留，不显示内容冲突，普通重试的请求 revision 为 `[1,2]`，最终记录为 revision 3 的完整 L。 |
+| 4 | `双浏览器完整copy取消保持两侧，成功重开往返所属类型模式和原数字`；领域 `普通失败派生后真实用户写回固定旧B仍为冲突，flush不能覆盖`。 | 三方 B/L/R 不同；真实差异两侧和原后端 R 保留，取消不写；领域普通 flush 不能覆盖冲突目标。 |
+| 5 | `真实UI仅pending-number不同` 与 `pending-json`；三种完整选择。 | 真实 UI 分别保留 `+`/`1e` 和 `[`/`"` 原文，其他部分相同；保存反馈、未完成原文和业务校验分别存在，选择后的原文按所属分支恢复。 |
+| 6 | `被拒替换后的可靠R=L只确认当前已存在，不伪造替换成功`；完整采用分区。 | 单元可靠 R=L 只确认当前保存事实，旧替换仍明确未写入；普通完整接纳不新增 PUT。该请求归属分类由单元证明。 |
+| 7 | `真实普通保存请求在途仍可继续输入，较早回执不覆盖第二份输入`；`固定unknown期间恢复B仍保留原写入核实责任`。 | 真实请求闸门期间仍能输入第二份内容，回执不覆盖它；单元相同完整输入不能清除固定 unknown，具体核实之前 saved=false。 |
+| 8 | `真实保存核实先读取失败后证实未写入，只读按钮零额外PUT`。 | HTTP 未到后端的 abort 是明确的未写入测试安排；读取故障与恢复均保留固定责任，反复核实 PUT 数仍为 1，随后明确普通保存才产生新 PUT。 |
+| 9 | `真实旧Y保存响应丢失后被不同Z隔离，adopt/replace/copy完成且旧请求不重发`。 | B 的 Y 真实写入后丢失响应，A 真实表单保存 Z；三种选择分别成功，B 请求数为 1/2/1，原目标及另存目标按所选版本保存，旧请求不重发。 |
+| 10 | `真实B写Y回执丢失，A先Z后Y取代依据，R=L仍须明确采用且零重发`。 | 真实 revision 链为 1→2→3→4，最后 `lastWrite.revision=4`；B 仍显示旧结果不可确认，明确采用后当前保存成立且 PUT 只有旧一次。 |
+| 11 | `双浏览器完整copy取消保持两侧，成功重开往返所属类型模式和原数字`。 | 新草稿身份独立、原草稿 R 不被覆盖、六部分 L 转交成功；没有异常弹窗，焦点到实际目标 Editor。 |
+| 12 | 真实目标终态矩阵 `真实另存响应丢失后目标%s×来源%s再%s保留首次事实和完整输入`。 | 创建经真实后端完成后丢失回执，再中断核实；首次明确重试按同 ID 查询，unknown 时放弃不可用，不提前创建第二份。 |
+| 13 | `真实另存未创建×来源%s后%s固定全输入且不改原事实`。 | 首响应受控为 `not_created`；真实后续重试保持同 attemptId 和固定完整正文，成功只产生一个创建事实；放弃无残留同份独立恢复条目。 |
+| 14 | 真实目标 deleted/exported × 源 conflict/deleted/exported × retry/abandon 十二分区。 | 第一次核实只呈现终态待决定，不创建；下一明确重试才以新 ID、固定输入创建，旧 creation 与终态保持；放弃不复建旧目标。 |
+| 15 | `双浏览器完整adopt取消保持两侧，成功重开往返所属类型模式和原数字`。 | 取消保留双方完整事实；确认使用 R 后不 PUT，重开所选草稿并恢复其动作、参数、对象和 pending 原文。 |
+| 16 | 上述完整 replace 分区。 | B 以展示的 R revision 条件写入，查看与返回比较不写；真实后端完整 L、页面 L 与可靠保存版本一致。 |
+| 17 | `真实完整替换事务前A%s后%s只处理所选责任并保留完整输入`；会话旧采用确认失效矩阵。 | 请求闸门期间 A 更新/导出/删除原目标，真实 CAS 拒绝；重试返回新比较而不抬版本重发，放弃保留完整 L 和终态。采用的陈旧资格由领域/组件验证。 |
+| 18 | 会话 `%s使完整选择快照失效，旧确认不得执行`；组件旧按钮与 UI 比较更新。 | 本页编辑、远端版本或 epoch 改变均撤销旧资格；旧 callback 零副作用，不把旧比较与新输入拼接。 |
+| 19 | `双浏览器可靠差异后读取不可用仍显示此前两侧且禁用覆盖`。 | 真实 GET 失败后仍显示此前可靠 L/R，禁止替换、不推断删除；原后端 revision 保持。 |
+| 20 | 真实另存目标终态矩阵中的源 deleted/exported 分区；`真实App来源%s放弃已删除另存目标后保留可见只读输入及焦点`。 | 原终态不复活，保留输入仍可明确另存；有额外输入时实际源 Editor 只读并可聚焦，没有额外输入的普通导出进入记录。 |
+| 21 | `Task7公开 export/delete/append 待定期间来源 updated/exported/deleted 不越过独立责任` 九分区。 | 公共领域入口产生导出未知、删除未知或追加锁；可靠观察不消除操作自身责任，不能编辑、开始另存或准备完整选择。该交叉矩阵为单元证据。 |
+| 22 | `只有%s独立不同仍为完整三方冲突`；`%s整份%s保留所选事实及写入边界`；`真实UI仅%s不同` 七分区。 | 单元分别隔离 text、两种 pending 和四类资料及组合，并执行三个选择；真实 UI 构造 L，A HTTP 装配 R，其他五部分相同，面板恰有一项差异、五项一致，技术详情逐份等于完整输入。空对象与缺省资料按已定义等价比较，正文字符串仍精确比较。 |
+| 23 | 三个 `双浏览器完整%s取消保持两侧，成功重开往返所属类型模式和原数字`。 | 保存后实际 reload、重开；当前 `1.0000000000000001`/`1e-999`、停用动作直接/嵌套数值、所属参数和对象模式、非法 pending 及可靠 preview sourceId 全部按独立字面量核对，未选侧 marker 不进入所选版本。 |
+| 24 | `双浏览器身份可靠=%s的%s接纳远端%s按实际动作重建局部状态` 十二分区。 | 无身份/可靠身份 × clean/adopt × add/delete/reorder；实际 DOM node、数量、顺序、折叠和 JSON 模式分别核对，无身份不被动补资料。 |
+| 25 | `真实两页独立新增动作后adopt/replace，持久身份及局部模式属于所选动作`。 | A、B 实际表单新增取得不同 persistent ID；所选版本动作顺序正确，B 的局部 DOM/mode 只归属于可靠对应动作。 |
+| 26 | `真实A新增后B旧版本替换再新增，跳过中间版本仍保持独立身份和实际组件`。 | Aadd→Boldreplace→Badd 的真实 revision 为 2→3→4，新 ID 不复用 A；另一页跳过中间状态后不会沿用 A 的 DOM/JSON 模式。 |
+| 27 | 组件 `完整差异两侧独立顺序，键盘关闭只隐藏，另存成功直接进入目标`；差异呈现单元。 | 同名、改名、重排和不可解释原文各自按本侧顺序展示；不按名称猜测共同动作，原文及诊断可查看。 |
+| 28 | 上述键盘组件测试、真实三个选择焦点、真实终态放弃焦点和旧回调测试。 | Tab/Shift+Tab/Enter/Escape、执行中不能关闭、隐藏后可重开、领域锁及旧 callback 由组件验证；成功后的实际目标 Editor/记录入口与终态源焦点由真实 App 验证。 |
+
+以下编号对应[异常弹窗补充矩阵](acceptance.md#并发选择异常弹窗补充矩阵)。
+
+| 编号 | 具体入口与输入 | 断言及边界 |
+| --- | --- | --- |
+| M1 | 真实完整 copy/adopt/replace 三分区。 | 无异常弹窗，共同成功后可见目标拥有焦点；真实重开与所属模式往返保持六部分。 |
+| M2 | `组件核实在途两个按钮禁用且Escape不能隐藏，旧按钮不增加GET`；真实创建响应未知。 | 执行中禁止放弃、重复请求与关闭；固定输入和领域写锁保持。 |
+| M3 | 组件 `unknown/wrong_identity/wrong_input`；真实创建成功后 GET 中断。 | 错误身份、完整输入不匹配和不可用读回分别保持原 ID、资料及核实责任，不许可放弃或新建。 |
+| M4 | 真实 App 中受控 not_created × 三种源状态 × retry/abandon。 | 同 ID/同 input 重试；放弃交回完整资料、原冲突/终态限制保持。首个拒绝响应属于 HTTP 替身。 |
+| M5 | 组件源显示、target、validate、navigation 失败；`Task7受控组件 copy 来源 changed/deleted/exported 执行 retry/abandon`。 | 首个共同 commit 前拒绝，Map/源内容/导航没有部分提交；重试只完成本地转交、create 不增加；放弃保留完整输入及已创建事实。所有准备故障均为组件注入。 |
+| M6 | 真实目标 deleted/exported 十二分区。 | 创建事实、第一次快照和目标终态保持；同次核实后待决定，下一次明确重试用新 ID 固定 input，放弃不复建。 |
+| M7 | M4/M6 的源 conflict/deleted/exported；M5 的来源组件矩阵。 | 所选责任结束不解除源冲突或终态，完整输入仍归原会话；组件与真实 HTTP 证据分别保留。 |
+| M8 | 真实替换条件检查前 updated/deleted/exported × retry/abandon 六分区。 | 只一 PUT；可靠拒绝撤销旧确认，重试更新比较并再次确认，放弃保持固定 L。 |
+| M9 | 组件 adopt 来源 changed/deleted/exported × retry/abandon；采用资格失效后恢复。 | 旧确认不复活，重试返回确认、零 PUT；可靠放弃保留完整输入，unavailable 时放弃不可用。来源故障由组件装配。 |
+| M10 | 组件 replace 来源 changed/deleted/exported × retry/abandon 与既有正常资格分区。 | 已可靠写入的 input/版本和本地接纳责任分开；重试/放弃均不 PUT，可靠更高 R 的接纳按领域规则执行，不撤销先前写入。该本地显示故障没有冒充真实 Application 故障。 |
+| M11 | 公开责任矩阵、whole acceptance 48 项、目标 prepare/validate 和旧 preparedEdit/导航 callback。 | 首 commit 前再次核对代次、身份、完整 input、观察和导航；旧 snapshot 对 save/read/create/prepare/commit 均零副作用，当前普通 B 资格仍能正常完成。 |
+| M12 | 公开 export/delete/append 九分区；公开另存终态关联链；私有装配的独立输入组件测试。 | 当前自然业务路径 selectedCopy 阻止第二次独立 beginCopy；终态新尝试复用同一 recovery，未处理条目仍为 1。放弃后 returned、完成后 transferred 的历史创建不是 pending。多个独立 pending copy 只能由现有私有 fake 装配证明 getter/呈现及责任隔离，不能称为真实双浏览器可达组合。 |
+| M13 | 组件 Escape 隐藏、同观察、旧回调及重开；真实冲突取消焦点。 | 背景不关闭、Tab 受限、执行中关闭被拒；隐藏不解除领域锁，重开入口与资格保持，旧 callback 不能创建或导航。 |
+| M14 | `真实保存核实先读取失败后证实未写入，只读按钮零额外PUT`；`保存回执和首次核实均丢失后能保存更新输入`；`真实普通保存请求在途仍可继续输入，较早回执不覆盖第二份输入`。 | 仅核实不调用普通保存；真实核实 A 后 PUT=1、revision=2，B 输入保持并可通过“保存当前输入”明确保存；点击后才 PUT=2、revision=3。450 ms 保持，较早回执不覆盖新输入。 |
+| M15 | 真实 source export/delete 放弃、页面切换；组件超过三秒仍保留；真实 beforeunload reload/close。 | Editor 卸载和导航不消除责任；取消真实刷新/关闭提示后页面和未完成输入仍存在。独立 fake 输入的 beforeunload 为合成 handler 证据，与真实浏览器提示分开。取消 reload 的 Playwright 等待可以返回 TimeoutError，不据此声称导航完成。 |
+
+导出结果核实另由[保存与导出真实页面测试](../../apps/client/tests/integration/browser-review.test.ts)的 `导出回执和即时核实丢失期间锁定编辑，具体核实恢复固定原记录且零重发` 与 `实际导出核实按钮%s只读取并保持对应输入资格` 覆盖。普通轮询读到已导出或原完整未导出基线，均保留该次 unknown、固定输入和编辑锁；明确核实后只有一个 POST，PUT 不增加，实际原请求整份记录保持。具体核实可靠未导出且对应原基线时恢复编辑；unavailable/invalid 保留固定输入、锁和再次核实入口。`Task7具体导出核实等待期间%s新观察阻止旧读回降级事实` 的四个领域分区验证新 updated/exported/unavailable/invalid 观察使旧核实结果失效。[导出读取归属单元](../../apps/client/tests/unit/draft-export-owned.test.ts)进一步区分普通 token、其他会话 owned 读取与本会话 checkExport，并验证能力重载预检使用具体核实。实际导出成功及核实成功后的记录导航按会话和 requestId 消费一次，[录像估算页面测试](../../apps/client/tests/integration/browser-video-estimate.test.ts)的 `导出核实接纳实际原请求并恢复其他草稿能力` 进一步验证用户随后选择草稿页及另一会话不会被历史事实抢回记录页。
+
+整体审查统一实施补充了[追加首提交复核单元](../../apps/client/tests/unit/draft-append-precommit.test.ts)和[删除责任分区单元](../../apps/client/tests/unit/draft-deleted-responsibilities.test.ts)。真实 FollowOperation 形成转换后，外部显示准备中的 updated/exported/deleted/unavailable/invalid 及失效恢复均在首个 commit 前拒绝，保留输入、显示键、具体追加锁和后端已追加事实；正常重复观察、释放后基础绑定和同转换幂等仍成立。准备重入与字段资格变化是领域／受控组件证据，不能表述为真实浏览器自然发生的线上数据丢失。当前生产构建的四个真实 App 追加分区另行验证旧草稿 0／2 项动作以及 Editor 从未挂载／曾挂载释放。
+
+双浏览器新增清洁删除验证由 A 实际点击删除按钮，B 的 Editor 结束，实际焦点回到可见草稿入口，B 零 POST／PUT、无合成离页责任，reload 不重建旧 ID。配对验证保留 save 在途、export/delete unknown 的完整只读输入与具体处理入口；领域分区补齐 recoveryContent、append、selection、copy 的独立责任。unavailable/invalid 不按删除导航，迟到 deleted 不抢已经选择的其他草稿／记录／设备页。copy 断言比较实际 `c.local` 全部源动作 ID 集合，目标全部 ID 与之不相交，sourceId 指向目标自身来源，所选业务内容、私有分支和精确数字保持。
+
+当前源码门禁如下。2026-10-12 的独立限定复审完整核对 12 个文件的修复差异及实际门禁日志，F1、F2、F3、M1、M2 全部为 `ADDRESSED`，结论为 `Approved`，没有新增或残留的阻断项。最终报告为 `.superpowers/sdd/2026-10-11-client-draft-conflicts/final-fix-rereview-report.md`，门禁日志为同目录的 `final-fix-*.log`。历史 Task7 端点不与当前门禁数量相加。
+
+| 当前命令与范围 | 2026-10-12 北京时间、退出码与结果 |
+| --- | --- |
+| 客户端 `node node_modules/typescript/bin/tsc --noEmit` | 02:31:21.238 +08:00→02:31:21.793 +08:00，exit0；final-fix-closed-types.log。 |
+| 客户端 `node node_modules/vite/bin/vite.js build` | 02:31:22.514 +08:00→02:31:22.939 +08:00，exit0，463 modules、850.60 kB/gzip254.72 kB；final-fix-closed-build.log。保留超过500 kB notice。 |
+| 客户端 `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` | 02:32:44.820 +08:00→02:33:04.501 +08:00，exit0，58 files、2720 tests、19.38s；final-fix-full-unit.log。 |
+| 客户端 `node node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=2` | 02:35:48.618 +08:00→02:43:24.548 +08:00，exit0，34 files、1291 tests、455.62s；final-fix-full-integration.log，加载上述最终 dist。 |
+
+最初五文件针对集成为274项中1项新夹具前提失败：revision=0使整个状态先归类unavailable；改为结构合法但createdAt与已知基线不一致后，invalid/unavailable两分区通过，完整门禁使用最终输入。测试入口／日志装配错误分别登记，未用它们充当有效产品RED。协议未改变，沿用已核验Task7 protocol端点；本波受影响文件链接与BASE相对空白检查在实施报告和freeze中逐项记录。
+
+这些验证没有重启或重新加载用户的 `localhost:4310` 服务，没有读取或修改用户 `data`，不能说明现场运行问题已经消失。软件测试不证明相机、motor、host、Docker、TX2、目标主机性能、真实电源中断或第三方 transport 的行为。上述时间均为北京时间。
+
+## 2026-10-11 对象参数级联验证
+
+验证环境为 Windows、PowerShell、Node.js `v24.16.0`、Vitest `5.0.1`、Vite `8.3.0`、Playwright `1.63.0` 和 Chromium `153.0.8010.12`，使用仓库锁定依赖。先同步[对象参数级联编辑](../architecture/client-editing.md#对象参数级联编辑)、草稿保存、交互和验收规格，再实施共享状态与控件；执行范围由[级联实施任务](../superpowers/plans/2026-10-11-client-parameter-fields.md#任务七对象参数级联与分支保存)跟踪。
+
+| 门禁 | 实际结果 |
+| --- | --- |
+| 类型检查 | `node node_modules/typescript/bin/tsc --noEmit` 在客户端目录通过，退出码为 0。 |
+| 当前网页构建 | `node node_modules/vite/bin/vite.js build` 通过；451 个模块，主包 781.09 kB，gzip 后 237.40 kB。保留既有主包超过 500 kB 的提示。 |
+| 全部单元测试 | `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` 通过；14:56:43 开始，43 个文件、2033 项，用时 17.72 秒。 |
+| 全部集成测试 | `node node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=2` 使用上述最终网页通过；14:57:47 开始，31 个文件、1066 项，用时 297.23 秒。其中包括录像参数浏览器测试的全部 30 项。 |
+| 总计 | 3099 项客户端测试通过，不叠加开发阶段、独立复核或先前门禁的测试数量。 |
+| 独立复核 | 评审者核验实际代码和回归矩阵，并独立运行 3 个文件、165 项测试通过；范围限定的最终复核没有剩余缺陷。 |
+
+[对象模式状态测试](../../apps/client/tests/unit/object-variants.test.ts)覆盖首次选择不补子值、当前模式零写入、成员原文与数字事实恢复、明确重填、父级替换、类型归属、复制删除及完整保存比较。[级联控件测试](../../apps/client/tests/unit/object-branch-controls.test.ts)验证同源资格、各设备字段、不可表达原文和判别字段变化的恢复入口。[级联诊断测试](../../apps/client/tests/unit/object-branch-validation.test.ts)验证当前模式责任、缺省模式定位、成员与对象输入阶段、特殊 JSON Pointer、兄弟字段及不合格 Schema 边界；呈现前后完整原始诊断序列保持。
+
+[参数分支服务器集成测试](../../apps/client/tests/integration/parameter-variants.test.ts)验证对象资料的四个保存仓位、身份唯一性、当前正文唯一权威、可解析与语法未完成正文的归属区别、保存重启、导出和从导出时编辑内容继续编辑。[录像参数浏览器测试](../../apps/client/tests/integration/browser-camera-parameters.test.ts)使用临时 Application、HTTP 服务和 Chromium，验证首次模式选择、双向恢复、刷新、高级 JSON 明确替换、取消与确认重填、子成员未完成原文、当前分支红框与摘要焦点、完整技术及 HTTP 诊断、不同设备选项和判别字段变化。整数秒及精确数值显示的既有回归继续通过。
+
+现场核验将 `http://localhost:4310/` 的既有服务更新为最终代码，仍使用原 `data` 目录。重启前后，3 份草稿及其保存版本、2 份原请求、5 份报告、7 份导入、2 份媒体、预设、快照和累计确认依据逐项相同；能力版本按启动规则更新，设备能力事实保持。重新加载网页并只读打开原草稿后，完整状态读取结果与重启后的结果相同。原草稿中的 `exposure: 1` 和未完成原文保持，页面提供该字段的重新填写确认入口，没有代替用户选择曝光模式。实际页面截图为 `.superpowers/sdd/2026-10-11-client-parameter-fields/exposure-cascade-runtime.png`。
+
+合法 `auto` 与 `compensation_ev: 0.7` 的界面示例使用隔离测试草稿，截图为同目录的 `exposure-cascade.png` 和 `exposure-cascade-field.png`；最终集成门禁重新捕获并实际查看。类型、构建、单元、集成及独立评审记录保存在同目录的 `cascade-*.log` 和 `cascade-final-review.md`。
+
+这些结果证明客户端软件、持久化和浏览器之间的协作行为，不证明实际相机执行、目标嵌入式主机性能或物理断电。本项没有改动相机执行或公共能力 Schema；对应组件及跨组件验证由各自记录维护。上述时间为北京时间。
+
+## 2026-10-11 JSON 字段说明与输入阶段验证
+
+验证环境为 Windows、PowerShell、Node.js `v24.16.0`、Vitest `5.0.1`、Vite `8.3.0`，使用已有依赖。行为分类见[根据 Schema 生成表单](../architecture/client-editing.md#根据-schema-生成表单)和[校验与导出](../architecture/client-editing.md#校验与导出)，实施范围见[参数字段实施计划](../superpowers/plans/2026-10-11-client-parameter-fields.md#任务六高级字段说明与输入阶段)。
+
+| 门禁 | 实际结果 |
+| --- | --- |
+| 类型检查 | `node_modules/.bin/tsc.cmd --noEmit` 在客户端目录通过。 |
+| 当前网页构建 | `node node_modules/vite/bin/vite.js build` 通过；448 个模块，主包 765.07 kB，gzip 后 233.42 kB。保留既有主包超过 500 kB 的提示。 |
+| 全部单元测试 | `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` 通过；12:58:55 开始，40 个文件、1955 项，用时 14.41 秒。 |
+| 全部集成测试 | `node node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=2` 使用上述当前网页通过；12:59:29 开始，31 个文件、1016 项，用时 299.90 秒。 |
+| 总计 | 2971 项客户端测试通过，不叠加先前门禁或开发阶段窄验证数量。 |
+
+[字段规则说明单元测试](../../apps/client/tests/unit/json-field-rules.test.ts)验证直接对象与 `oneOf` 的同源事实、引用与未覆盖组合的原规则、布尔 Schema、精确数值、说明页模式及查看零写入。[中文诊断单元测试](../../apps/client/tests/unit/validation-presentation.test.ts)验证已声明直接字段在没有标题、标题为空白、合法布尔规则和公共字段同名时使用真实名称，并保持未知属性、继承属性及身份不匹配的未识别状态。
+
+[录像参数浏览器测试](../../apps/client/tests/integration/browser-camera-parameters.test.ts)覆盖缺失与非法曝光值的明确多行 JSON 编辑、两种对象分支事实、非法旧值 `1` 与裸 `auto` 原文并存、字段／参数 JSON／整份计划 JSON 的分段诊断、独立枚举选择、保存与刷新，以及用户显式填写完整自动曝光对象后的重新校验和其他参数保持。[规则展示浏览器测试](../../apps/client/tests/integration/browser-rule-display.test.ts)经真实编辑与说明入口核对本地 `$ref`、兄弟约束、`true` 和 `false` 原规则，查看前后内容与保存版本保持。[校验浏览器测试](../../apps/client/tests/integration/browser-validation.test.ts)覆盖不可解析正文与根未完成原文同时保留，诊断数量、原始机器码及两个输入的焦点定位。
+
+运行页面使用 `http://localhost:4310/` 的现有服务，重新加载当前构建后打开原草稿。曝光显示 JSON 标记、多行编辑区、两个分支的字段事实与允许值，并区分当前未完成文本和草稿正文诊断。只读查看前后，完整状态读取结果相同；原 `exposure: 1` 与 pending `auto` 原文保持，没有为用户补曝光对象。页面截图保存在 `.superpowers/sdd/2026-10-11-client-parameter-fields/exposure-json-editor.png`。
+
+这些结果只证明客户端软件与本地页面行为，不证明实际相机、目标主机性能或物理断电。本项没有改动 Python 执行或跨组件交接；它们的实际结果由各自验证记录维护。上述时间为北京时间。
+
+## 2026-10-11 参数字段与精确数值验证
+
+验证环境为 Windows、PowerShell、Node.js `v24.16.0`、Vitest `5.0.1` 和 Vite `8.3.0`。使用已有依赖，直接执行相应工具入口。实施范围和行为分类见[参数字段实施计划](../superpowers/plans/2026-10-11-client-parameter-fields.md)。
+
+| 门禁 | 实际结果 |
+| --- | --- |
+| 类型检查 | `node_modules/.bin/tsc.cmd --noEmit` 在客户端目录通过。 |
+| 当前网页构建 | `node node_modules/vite/bin/vite.js build` 通过，构建 447 个模块；主包 760.95 kB，gzip 后 232.24 kB。 |
+| 全部单元测试 | `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` 通过；11:33:01 开始，39 个文件、1931 项，用时 16.90 秒。 |
+| 全部集成测试 | `node node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=2` 使用上述当前网页通过；11:33:01 开始，31 个文件、999 项，用时 296.94 秒。 |
+| 总计 | 2930 项客户端测试通过，不叠加开发阶段的窄测试或审查临时检查数量。 |
+
+构建保留主包超过 500 kB 的提示，没有修改阈值或隐藏提示。上述时间为北京时间。
+
+[参数选项单元测试](../../apps/client/tests/unit/parameter-options.test.ts)验证完整目录优先、逐字段独立资格、复杂兄弟字段及不相关数值精度损失、空允许集、根跨字段约束与未完成输入。[数值边界测试](../../apps/client/tests/unit/numeric-boundaries.test.ts)和[精确步进测试](../../apps/client/tests/unit/numeric-multiples.test.ts)验证原数字比较、整倍数、数组、本地引用、条件分支和根标量上下文，以及无效规则的拒绝。[诊断规范化测试](../../apps/client/tests/unit/schema-issues.test.ts)与[中文诊断测试](../../apps/client/tests/unit/validation-presentation.test.ts)验证四类范围错误在复制和展示时保留原边界。
+
+[录像参数浏览器测试](../../apps/client/tests/integration/browser-camera-parameters.test.ts)使用临时 Application、真实 HTTP 服务和 Chromium，验证五个独立枚举、整数时长、曝光 JSON、可选字段缺省、未完成原文保存及刷新、超界和非整数导出拒绝，并核对 HTTP 诊断、字段错误及顶部摘要的原上界。[规则展示浏览器测试](../../apps/client/tests/integration/browser-rule-display.test.ts)验证编辑页、说明页和技术详情中的包含／严格边界、直接／引用规则、嵌套默认值及数字字符串；查看及切换视图不改变草稿内容或保存版本。
+
+现场核验使用 `http://localhost:4310/` 的本地服务与 `data` 目录。普通录像时长规则从 Python 共享驱动定义取得后替换运行能力中的对应字段，其余设备身份与能力内容保持。服务重启前后核对草稿、原请求、预设、快照、报告、导入和媒体等保存内容相同。当前设备说明页实际列出五个枚举的允许值和精确上界 `9223372036854775`，已查看并保存全页截图；只读校验入口对 `1`、`1.0`、`1e0`、最大整数秒返回 200，对零、小数秒和上界加一返回 400，越界诊断仍返回原上界。
+
+这些结果证明客户端软件组件和当前本地页面的行为，不证明实际相机、目标主机性能或物理断电。Python 组件与跨组件结果按其各自验证记录维护。
+
 ## 2026-10-11 Linux 协议同步复验
 
 客户端分支合并后，在 Linux x86_64 容器使用 Node.js 24.20.0、pnpm 12.3.4 和 `VITEST_MAX_WORKERS=2` 依次运行 `pnpm --dir apps/client run test:unit` 与 `test:integration`。全部单元 1864 项通过，全部集成与浏览器 972 项通过；集成入口的前置类型检查和网页构建通过。构建保留主包体积及依赖模块指令提示，具体数值和范围见[协议同步验证](../camctl/verification.md#视频大小估算的协议同步验证2026-10-11)。

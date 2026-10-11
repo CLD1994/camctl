@@ -121,6 +121,62 @@ function decimalIdentity(token: string): string {
     BigInt(coefficient.length - significant.length);
   return `${match[1]}${significant}e${exponent}`;
 }
+/** 比较原 JSON 数字的数学值，指数只参与数量级比较，不展开巨大指数。 */
+export function compareJsonNumberTokens(a: string, b: string): number {
+  const left = decimalIdentity(a),
+    right = decimalIdentity(b);
+  if (left === right) return 0;
+  const leftNegative = left.startsWith("-"),
+    rightNegative = right.startsWith("-");
+  if (leftNegative !== rightNegative) return leftNegative ? -1 : 1;
+  if (left === "0") return -1;
+  if (right === "0") return 1;
+  const [leftDigits, leftExponent] = left.replace(/^-/, "").split("e");
+  const [rightDigits, rightExponent] = right.replace(/^-/, "").split("e");
+  const leftOrder = BigInt(leftDigits.length) + BigInt(leftExponent);
+  const rightOrder = BigInt(rightDigits.length) + BigInt(rightExponent);
+  const length = Math.max(leftDigits.length, rightDigits.length);
+  const leftSignificand = leftDigits.padEnd(length, "0");
+  const rightSignificand = rightDigits.padEnd(length, "0");
+  const magnitude =
+    leftOrder < rightOrder
+      ? -1
+      : leftOrder > rightOrder
+        ? 1
+        : leftSignificand < rightSignificand
+          ? -1
+          : 1;
+  return leftNegative ? -magnitude : magnitude;
+}
+/** 精确倍数按约分后的分母判定，不展开十进制指数。 */
+export function jsonNumberIsMultipleOf(
+  value: string,
+  divisor: string,
+): boolean {
+  const dividend = decimalIdentity(value),
+    step = decimalIdentity(divisor);
+  if (step === "0" || step.startsWith("-")) return false;
+  if (dividend === "0") return true;
+  const [valueDigits, valueExponent] = dividend.replace(/^-/, "").split("e");
+  const [stepDigits, stepExponent] = step.split("e");
+  const exponent = BigInt(valueExponent) - BigInt(stepExponent);
+  if (exponent < 0n) return false;
+  let a = BigInt(valueDigits),
+    b = BigInt(stepDigits);
+  while (b !== 0n) [a, b] = [b, a % b];
+  let denominator = BigInt(stepDigits) / a;
+  let twos = 0n,
+    fives = 0n;
+  while (denominator % 2n === 0n) {
+    denominator /= 2n;
+    twos++;
+  }
+  while (denominator % 5n === 0n) {
+    denominator /= 5n;
+    fives++;
+  }
+  return denominator === 1n && exponent >= twos && exponent >= fives;
+}
 export interface MotorInputText {
   text?: string;
   inputIdentity: string;

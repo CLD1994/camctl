@@ -16,6 +16,7 @@ import {
   originalNumberToken,
 } from "../shared/json";
 import { ValidationControl } from "./Validation";
+import { JsonFieldRules } from "./JsonFieldRules";
 export function JsonField({
   content,
   path,
@@ -74,6 +75,7 @@ export function JsonField({
 }
 export function Field({
   schema,
+  rulesSchema = schema,
   name,
   required,
   content,
@@ -86,6 +88,7 @@ export function Field({
   choiceBasis = "linked",
 }: {
   schema: Record<string, unknown>;
+  rulesSchema?: unknown;
   name: string;
   required: boolean;
   content: DraftContent;
@@ -135,6 +138,13 @@ export function Field({
   const unsupportedChoice =
     jsonChoices &&
     (!!declared || type === "boolean" || Object.hasOwn(schema, "const"));
+  const jsonEditor =
+    unsupportedChoice ||
+    (!enumeration &&
+      type !== "boolean" &&
+      type !== "string" &&
+      type !== "number" &&
+      type !== "integer");
   const showRaw =
     !pending &&
     value !== undefined &&
@@ -146,28 +156,21 @@ export function Field({
         ? typeof value !== "number"
         : false);
   return (
-    <div className="field">
+    <div className={jsonEditor ? "field json-field" : "field"}>
       <>
         <label>
           <span>
             {typeof schema.title === "string" ? schema.title : name}{" "}
             {required && <span className="required">必填</span>}{" "}
             <small className="field-key">{name}</small>
+            {jsonEditor && <span className="json-field-label">JSON</span>}
           </span>
-          <ValidationControl
-            path={path}
-            json={
-              unsupportedChoice ||
-              (!enumeration &&
-                type !== "boolean" &&
-                type !== "string" &&
-                type !== "number" &&
-                type !== "integer")
-            }
-          >
+          <ValidationControl path={path} json={jsonEditor}>
             {unsupportedChoice ? (
               <textarea
-                rows={1}
+                rows={4}
+                className="code-input compact"
+                spellCheck={false}
                 aria-label={label}
                 readOnly={pendingBlocks(content, path)}
                 value={
@@ -287,7 +290,9 @@ export function Field({
               />
             ) : (
               <textarea
-                rows={1}
+                rows={4}
+                className="code-input compact"
+                spellCheck={false}
                 aria-label={label}
                 readOnly={pendingBlocks(content, path)}
                 value={
@@ -308,6 +313,7 @@ export function Field({
             )}
           </ValidationControl>
         </label>
+        {jsonEditor && <JsonFieldRules schema={rulesSchema} />}
         {showRaw && (
           <small className="danger-text">
             原值{" "}
@@ -346,10 +352,14 @@ export function Field({
         <small>
           {String(schema.description ?? "")}
           {schema.default !== undefined
-            ? ` 默认值说明：${optionLabel(schema.default)}。`
+            ? ` 默认值说明：${optionLabel(schema.default, schema, "default")}。`
             : ""}
-          {schema.minimum !== undefined ? ` 最小值 ${schema.minimum}。` : ""}
-          {schema.maximum !== undefined ? ` 最大值 ${schema.maximum}。` : ""}
+          {schema.minimum !== undefined
+            ? ` 最小值 ${displayJsonValue(schema, "minimum", schema.minimum)}。`
+            : ""}
+          {schema.maximum !== undefined
+            ? ` 最大值 ${displayJsonValue(schema, "maximum", schema.maximum)}。`
+            : ""}
           {(type === "number" || type === "integer") &&
           schema.exclusiveMinimum !== undefined
             ? ` 必须大于 ${displayJsonValue(schema, "exclusiveMinimum", schema.exclusiveMinimum)}。`

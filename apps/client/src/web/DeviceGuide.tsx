@@ -3,6 +3,8 @@ import { isObject } from "../shared/validation";
 import { resolveField } from "./editing";
 import { optionLabel, parameterOptions } from "./parameter-options";
 import { actionLabel } from "./common";
+import { stringifyJson } from "../shared/json";
+import { JsonFieldRules } from "./JsonFieldRules";
 
 export function DeviceGuide({
   capabilities,
@@ -110,6 +112,7 @@ function TaskGuide({
     .filter(([name]) => name !== "type")
     .map(([name, schema]) => ({
       name,
+      rulesSchema: schema,
       schema: resolveField(schema, parameter.schema),
     }));
   const fixed =
@@ -131,7 +134,7 @@ function TaskGuide({
         <>
           <h4>拍摄前需要了解</h4>
           <dl className="guide-fields">
-            {fields.map(({ name, schema }) => (
+            {fields.map(({ name, schema, rulesSchema }) => (
               <div key={name}>
                 <dt>
                   {typeof schema.title === "string" ? schema.title : name}
@@ -147,15 +150,46 @@ function TaskGuide({
                     ? schema.description
                     : "按任务规则填写。"}
                   {schema.minimum !== undefined && (
-                    <span> 最小值：{optionLabel(schema.minimum)}。</span>
+                    <span>
+                      {" "}
+                      最小值：{optionLabel(schema.minimum, schema, "minimum")}。
+                    </span>
                   )}
                   {schema.maximum !== undefined && (
-                    <span> 最大值：{optionLabel(schema.maximum)}。</span>
+                    <span>
+                      {" "}
+                      最大值：{optionLabel(schema.maximum, schema, "maximum")}。
+                    </span>
+                  )}
+                  {schema.exclusiveMinimum !== undefined && (
+                    <span>
+                      {" "}
+                      必须大于：
+                      {optionLabel(
+                        schema.exclusiveMinimum,
+                        schema,
+                        "exclusiveMinimum",
+                      )}
+                      。
+                    </span>
+                  )}
+                  {schema.exclusiveMaximum !== undefined && (
+                    <span>
+                      {" "}
+                      必须小于：
+                      {optionLabel(
+                        schema.exclusiveMaximum,
+                        schema,
+                        "exclusiveMaximum",
+                      )}
+                      。
+                    </span>
                   )}
                   {schema.default !== undefined && (
                     <span>
                       {" "}
-                      未填写时的默认值说明：{optionLabel(schema.default)}。
+                      未填写时的默认值说明：
+                      {optionLabel(schema.default, schema, "default")}。
                     </span>
                   )}
                   {catalog.kind === "independent" &&
@@ -172,6 +206,10 @@ function TaskGuide({
                         。
                       </span>
                     )}
+                  <JsonFieldRules
+                    schema={rulesSchema}
+                    showEditingHint={false}
+                  />
                 </dd>
               </div>
             ))}
@@ -211,7 +249,7 @@ function TaskGuide({
                           {fields.map(({ name }) => (
                             <td key={name}>
                               {Object.hasOwn(row, name)
-                                ? optionLabel(row[name])
+                                ? optionLabel(row[name], row, name)
                                 : "不填写"}
                             </td>
                           ))}
@@ -243,7 +281,7 @@ function TaskGuide({
         <p>
           参数类型：<code>{parameter.type}</code>
         </p>
-        <pre>{JSON.stringify(parameter.schema, null, 2)}</pre>
+        <pre>{stringifyJson(parameter.schema, 2)}</pre>
       </details>
     </article>
   );

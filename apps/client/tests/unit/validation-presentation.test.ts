@@ -4,6 +4,20 @@ import {
   presentPendingInput,
 } from "../../src/web/validation-presentation";
 import type { Capabilities } from "../../src/shared/types";
+import { parseJson } from "../../src/shared/json";
+import type { Issue } from "../../src/shared/types";
+
+it.each([
+  ["minimum", "1e-999"],
+  ["maximum", "9223372036854775"],
+  ["exclusiveMinimum", "1.0000000000000001"],
+  ["exclusiveMaximum", "-1e-999"],
+] as const)("%s 错误说明展示原边界 %s", (keyword, bound) => {
+  const issue = parseJson(
+    `{"path":"value","code":"schema_${keyword}","message":"technical","schema":{"instancePath":"/value","schemaPath":"#/properties/value/${keyword}","keyword":"${keyword}","params":{"limit":${bound}}}}`,
+  ) as unknown as Issue;
+  expect(presentIssue(issue).message).toContain(bound);
+});
 
 const plan = {
   name: "计划",
@@ -139,6 +153,86 @@ it("未完成参数使用实际能力字段名称和所属动作", () => {
   expect(result).toContain("录像 A");
   expect(result).toContain("分辨率");
   expect(result).not.toContain("/actions/");
+});
+
+it.each([
+  [{ type: "object" }, "exposure"],
+  [{ type: "object", title: "" }, "exposure"],
+  [{ type: "object", title: "   " }, "exposure"],
+  [{ type: "object", title: "曝光设置" }, "曝光设置"],
+  [true, "exposure"],
+  [false, "exposure"],
+] as const)("已声明的直接参数字段可识别未完成输入：%j", (definition, field) => {
+  const declared = structuredClone(capabilities);
+  declared.devices[0].actions[0].parameter_types[0].schema.properties = {
+    exposure: definition,
+  };
+  const result = presentPendingInput(
+    "/actions/0/params/exposure",
+    2,
+    plan,
+    declared,
+  );
+  expect(result).toContain("录像 A");
+  expect(result).toContain(field);
+  expect(result).not.toContain("未识别");
+  expect(result).not.toContain("/actions/");
+});
+
+it("已声明的设备字段没有标题时使用字段名，不借用公共字段名称", () => {
+  const declared = structuredClone(capabilities);
+  declared.devices[0].actions[0].parameter_types[0].schema.properties = {
+    source: { type: "object" },
+  };
+  const result = presentPendingInput(
+    "/actions/0/params/source",
+    2,
+    plan,
+    declared,
+  );
+  expect(result).toContain("录像 A");
+  expect(result).toContain("source");
+  expect(result).not.toContain("取回或清理来源");
+});
+
+it.each([false, true])(
+  "未知或继承属性不能识别未完成输入：inherited=%s",
+  (inherited) => {
+    const declared = structuredClone(capabilities);
+    declared.devices[0].actions[0].parameter_types[0].schema.properties =
+      inherited
+        ? Object.create({ exposure: { type: "object", title: "继承的曝光" } })
+        : {};
+    const result = presentPendingInput(
+      "/actions/0/params/exposure",
+      2,
+      plan,
+      declared,
+    );
+    expect(result).toContain("未识别");
+    expect(result).toContain("2");
+    expect(result).not.toContain("录像 A");
+    expect(result).not.toContain("曝光");
+  },
+);
+
+it.each([
+  { device_id: "unknown" },
+  { type: "camera_timelapse" },
+  { params: { type: "unknown" } },
+])("参数身份不能精确匹配时不识别 Schema 字段：%j", (identity) => {
+  const mismatch = structuredClone(plan);
+  Object.assign(mismatch.actions[0], identity);
+  const result = presentPendingInput(
+    "/actions/0/params/resolution",
+    2,
+    mismatch,
+    capabilities,
+  );
+  expect(result).toContain("未识别");
+  expect(result).toContain("2");
+  expect(result).not.toContain("录像 A");
+  expect(result).not.toContain("分辨率");
 });
 
 it.each([

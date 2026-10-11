@@ -4,6 +4,7 @@ import {
   initializePreviewMetadata,
   previewIntent,
   copyDraftAction,
+  createActionAllocation,
 } from "../../src/shared/automatic-previews";
 import { parseClientJson, stringifyJson } from "../../src/shared/json";
 it("整份替换有预览资料时必须明确确认，确认后原文与尚未设置一起保留", () => {
@@ -27,7 +28,7 @@ it("局部参数编辑及动作复制保留意图和原数字词元，复制身�
     "test",
   );
   const edited = setValue(c, ["actions", 0, "name"], "B");
-  const copied = copyDraftAction(edited, 0);
+  const copied = copyDraftAction(edited, 0, createActionAllocation());
   expect(previewIntent(copied)).toBe("disabled");
   expect(copied.automaticPreviews!.actions[0].id).not.toBe(
     copied.automaticPreviews!.actions[1].id,

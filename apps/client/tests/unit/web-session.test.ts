@@ -5,12 +5,69 @@ import {
   type DraftTransport,
 } from "../../src/web/session";
 import type { Draft, DraftContent } from "../../src/server/models";
+import { record } from "../helpers/draft-conflicts";
+import { HttpError } from "../../src/web/api";
 const draft = (): Draft => ({
   id: "d1",
   revision: 1,
   content: { text: "{}" },
   createdAt: "2026-01-01 00:00:00",
   updatedAt: "2026-01-01 00:00:00",
+});
+it("清洁会话完整同步其他页面且不重复保存", async () => {
+  const save = vi.fn(async () => record(3, "unexpected"));
+  const session = new DraftSession(
+    record(1, "base"),
+    { save, read: async () => record(2, "remote") },
+    () => {},
+  );
+  session.observe(record(2, "remote"));
+  expect(session.content).toEqual(record(2, "remote").content);
+  expect(session.saved).toBe(true);
+  await session.flush();
+  expect(save).not.toHaveBeenCalled();
+});
+it("真正冲突的修正保留输入但自动计时器不能写入", async () => {
+  vi.useFakeTimers();
+  try {
+    const save = vi.fn(async () => record(3, "unexpected"));
+    const session = new DraftSession(
+      record(1, "base"),
+      { save, read: async () => record(2, "remote") },
+      () => {},
+    );
+    session.edit(record(1, "local").content);
+    session.observe(record(2, "remote"));
+    session.edit(record(1, "corrected").content);
+    session.schedule();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).not.toHaveBeenCalled();
+    expect(session.content).toEqual(record(1, "corrected").content);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("可靠拒绝后读取失败仍可重试保存而不保留未知请求", async () => {
+  let attempts = 0;
+  const session = new DraftSession(
+    record(1, "base"),
+    {
+      save: async (_id, revision, content) => {
+        if (++attempts === 1)
+          throw new HttpError("invalid_content", "rejected", [], 400);
+        return { ...record(revision + 1, ""), content };
+      },
+      read: async () => {
+        throw Error("offline");
+      },
+    },
+    () => {},
+  );
+  session.edit(record(1, "local").content);
+  await expect(session.flush()).rejects.toThrow();
+  await session.flush();
+  expect(session.saved).toBe(true);
+  expect(attempts).toBe(2);
 });
 it("当前文本相同时其他类型内容的变化仍需保存", () => {
   const first: DraftContent = {
@@ -350,7 +407,8 @@ it("导出未知遇到仅能力派生的新版本可证实未导出并保留新�
   };
   const session = new DraftSession(
     original,
-    { save: async () => original, read: async () => original },
+    { save: async () => original, read: async () => original,
+      readObservation: async () => ({ kind: "available", draft: actual, capabilities: k }) },
     () => {},
   );
   session.beginExport();
@@ -361,6 +419,8 @@ it("导出未知遇到仅能力派生的新版本可证实未导出并保留新�
     content: coordinatePreviews(original.content, k).content,
   };
   session.observe(actual, session.exportToken, k);
+  expect(session.exportState).toBe("unknown");
+  await session.checkExport();
   expect(session.exportState).toBe("editable");
   expect(session.revision).toBe(2);
   expect(session.content).toEqual(actual.content);

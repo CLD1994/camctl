@@ -21,6 +21,7 @@ import { switchActionType } from "../../src/web/action-drafts";
 import { editValue, removeAction, setValue } from "../../src/web/editing";
 import { switchParameterType } from "../../src/web/parameter-drafts";
 import { DraftSession } from "../../src/web/session";
+import { switchObjectBranch } from "../../src/shared/object-variants";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -202,6 +203,295 @@ function storedStandard(input: DraftContent, index = "0"): ParameterVariant {
   return entries![0];
 }
 
+it("服务器拒绝对象分支中重复身份资料", async () => {
+  const host = await setup();
+  const input: DraftContent = {
+    ...content('{"type":"standard","exposure":{"mode":"auto"}}'),
+    objectVariants: {
+      "0": {
+        "/exposure": {
+          discriminator: "mode",
+          variants: [
+            { valueText: '{"value":{"mode":"manual","iso":100}}', pending: {} },
+            { valueText: '{"value":{"mode":"manual","iso":400}}', pending: {} },
+          ],
+        },
+      },
+    },
+  };
+  const result = await host.request("/api/drafts", "POST", { content: input });
+  expect(result.status).toBe(400);
+  expect((result.value as any).code).toBe("invalid_content");
+});
+
+it("服务器拒绝悬空停用动作拥有的对象分支资料", async () => {
+  const host = await setup();
+  const input: DraftContent = {
+    ...content('{"type":"standard","exposure":{"mode":"auto"}}'),
+    actionVariants: {
+      "99": [
+        {
+          type: "camera_still",
+          fields: { params: { type: "photo", exposure: { mode: "auto" } } },
+          pending: {},
+          objectVariants: {
+            "/exposure": {
+              discriminator: "mode",
+              variants: [
+                { valueText: '{"value":{"mode":"manual"}}', pending: {} },
+              ],
+            },
+          },
+        },
+      ],
+    },
+  };
+  const result = await host.request("/api/drafts", "POST", { content: input });
+  expect(result.status).toBe(400);
+  expect((result.value as any).code).toBe("invalid_content");
+});
+
+const rootlessObjectMap = {
+  "/exposure": {
+    discriminator: "mode",
+    variants: [
+      { valueText: '{"value":{"mode":"manual","iso":100}}', pending: {} },
+    ],
+  },
+};
+const rootlessParameter = {
+  paramsText: '{"params":{"type":"photo","exposure":{"mode":"auto"}}}',
+  pending: {},
+  objectVariants: rootlessObjectMap,
+};
+const rootlessMetadata: Array<[string, Partial<DraftContent>]> = [
+  ["活动对象资料", { objectVariants: { "0": rootlessObjectMap } }],
+  [
+    "停用动作对象资料",
+    {
+      actionVariants: {
+        "0": [
+          {
+            type: "camera_still",
+            fields: { params: { type: "photo", exposure: { mode: "auto" } } },
+            pending: {},
+            objectVariants: rootlessObjectMap,
+          },
+        ],
+      },
+    },
+  ],
+  ["停用参数对象资料", { parameterVariants: { "0": [rootlessParameter] } }],
+  [
+    "停用动作中的停用参数对象资料",
+    {
+      actionVariants: {
+        "0": [
+          {
+            type: "camera_still",
+            fields: { params: { type: "standard" } },
+            pending: {},
+            parameterVariants: [rootlessParameter],
+          },
+        ],
+      },
+    },
+  ],
+  [
+    "停用参数资料",
+    {
+      parameterVariants: {
+        "0": [{ paramsText: '{"params":{"type":"photo"}}', pending: {} }],
+      },
+    },
+  ],
+];
+for (const [name, metadata] of rootlessMetadata) {
+  it.each(["null", "{}", '{"actions":{}}', '{"actions":null}'])(
+    `已解析正文%s没有动作集合时拒绝${name}`,
+    async (text) => {
+      const host = await setup();
+      const result = await host.request("/api/drafts", "POST", {
+        content: { text, ...metadata },
+      });
+      expect(result.status).toBe(400);
+      expect((result.value as any).code).toBe("invalid_content");
+    },
+  );
+  it(`语法未完成正文仍完整保存${name}`, async () => {
+    const host = await setup();
+    const input = { text: '{"actions":', ...metadata };
+    const saved = await host.create(input);
+    expect(saved.content).toEqual(input);
+  });
+}
+it.each(["null", "{}", '{"actions":{}}'])(
+  "已解析正文%s允许空对象和参数资料映射",
+  async (text) => {
+    const host = await setup();
+    const input = {
+      text,
+      objectVariants: { "0": {} },
+      parameterVariants: { "0": [] },
+    };
+    expect((await host.create(input)).content).toEqual(input);
+  },
+);
+
+it("已导出请求复制保留导出时完整对象分支并经服务重启恢复", async () => {
+  const host = await setup();
+  const original = content(
+    '{"type":"standard","exposure":{"mode":"manual","iso":100,"exact":1.0000000000000001}}',
+  );
+  const inactive = switchObjectBranch(
+    original,
+    0,
+    ["exposure"],
+    "mode",
+    "auto",
+  );
+  const draft = await host.create(inactive);
+  const exported = await host.export(draft);
+  expect(exported.status, exported.raw).toBe(200);
+  expect((exported.value.body.actions as any[])[0].params.exposure).toEqual({
+    mode: "auto",
+  });
+  const copy = await host.ok<Draft>(
+    `/api/requests/${exported.value.id}/copy`,
+    "POST",
+    undefined,
+    201,
+  );
+  expect(copy.content.objectVariants).toEqual(inactive.objectVariants);
+  await host.restart();
+  const reopened = await host.read(copy.id);
+  const restored = switchObjectBranch(
+    reopened.content,
+    0,
+    ["exposure"],
+    "mode",
+    "manual",
+  );
+  expect(actions(restored)[0].params.exposure).toEqual({
+    mode: "manual",
+    iso: 100,
+    exact: 1,
+  });
+  expect(restored.text).toContain("1.0000000000000001");
+});
+
+it.each([
+  [
+    "当前同身份副本",
+    {
+      "0": {
+        "/exposure": {
+          discriminator: "mode",
+          variants: [{ valueText: '{"value":{"mode":"auto"}}', pending: {} }],
+        },
+      },
+    },
+  ],
+  [
+    "动作位置悬空",
+    { "1": { "/exposure": { discriminator: "mode", variants: [] } } },
+  ],
+  [
+    "原文包装含其他字段",
+    {
+      "0": {
+        "/exposure": {
+          discriminator: "mode",
+          variants: [
+            { valueText: '{"value":{"mode":"manual"},"extra":1}', pending: {} },
+          ],
+        },
+      },
+    },
+  ],
+  [
+    "成员指针无法解码",
+    {
+      "0": {
+        "/exposure": {
+          discriminator: "mode",
+          variants: [
+            {
+              valueText: '{"value":{"mode":"manual"}}',
+              pending: { "/iso~2": { kind: "number", text: "1e" } },
+            },
+          ],
+        },
+      },
+    },
+  ],
+  [
+    "身份原文进入成员资料",
+    {
+      "0": {
+        "/exposure": {
+          discriminator: "mode",
+          variants: [
+            {
+              valueText: '{"value":{"mode":"manual"}}',
+              pending: { "/mode": { kind: "json", text: "{" } },
+            },
+          ],
+        },
+      },
+    },
+  ],
+])(
+  "服务器保存拒绝无法可靠解释的对象资料：%s",
+  async (_name, objectVariants) => {
+    const host = await setup();
+    const input = {
+      ...content('{"type":"standard","exposure":{"mode":"auto"}}'),
+      objectVariants,
+    };
+    const result = await host.request("/api/drafts", "POST", {
+      content: input,
+    });
+    expect(result.status).toBe(400);
+    expect((result.value as any).code).toBe("invalid_content");
+  },
+);
+
+it("停用对象成员原文经保存重启恢复后阻止当前导出", async () => {
+  const host = await setup();
+  const initial = editValue(
+    content('{"type":"standard","exposure":{"mode":"manual","iso":100}}'),
+    ["actions", 0, "params", "exposure", "iso"],
+    "1e",
+    "number",
+  );
+  const inactive = switchObjectBranch(initial, 0, ["exposure"], "mode", "auto");
+  const draft = await host.create(inactive);
+  expect((await host.export(draft)).status).toBe(200);
+  const copy = await host.ok<Draft>(
+    `/api/requests/${host.app.draft(draft.id).exportedRequestId}/copy`,
+    "POST",
+    undefined,
+    201,
+  );
+  await host.restart();
+  const reopened = await host.read(copy.id);
+  const restored = switchObjectBranch(
+    reopened.content,
+    0,
+    ["exposure"],
+    "mode",
+    "manual",
+  );
+  const saved = await host.save(reopened, restored);
+  expect(saved.content.pending).toEqual({
+    "/actions/0/params/exposure/iso": { kind: "number", text: "1e" },
+  });
+  const rejected = await host.export(saved);
+  expect(rejected.status).toBe(400);
+  expect(rejected.value.code).toBe("unfinished_input");
+});
+
 it("停用完整参数经 HTTP 保存、SQLite 重开和服务重启后恢复原数字词元", async () => {
   const host = await setup();
   const original = content(standardParams);
@@ -334,8 +624,10 @@ it("停用成员输入不阻止当前导出，切回后原输入继续阻止导�
     undefined,
     201,
   );
-  expect(fromRequest.content.parameterVariants).toBeUndefined();
-  expect(fromRequest.content.pending).toBeUndefined();
+  expect(fromRequest.content.parameterVariants).toEqual(
+    draft.content.parameterVariants,
+  );
+  expect(Object.keys(fromRequest.content.pending ?? {})).toHaveLength(0);
   expect(actions(fromRequest.content)[0].params).toEqual(bitrateParams);
 
   draft = await host.save(
@@ -466,9 +758,9 @@ describe("非法参数资料不产生部分写入", () => {
         ],
       },
     };
-    expect(() => host.app.saveDraft(draft.id, draft.revision, bad)).toThrowError(
-      expect.objectContaining({ code: "invalid_content" }),
-    );
+    expect(() =>
+      host.app.saveDraft(draft.id, draft.revision, bad),
+    ).toThrowError(expect.objectContaining({ code: "invalid_content" }));
     expect(host.app.draft(draft.id)).toEqual(draft);
     expect(() => host.app.createDraft(bad)).toThrowError(
       expect.objectContaining({ code: "invalid_content" }),
@@ -500,9 +792,9 @@ describe("非法参数资料不产生部分写入", () => {
         ],
       },
     };
-    expect(() => host.app.saveDraft(draft.id, draft.revision, bad)).toThrowError(
-      expect.objectContaining({ code: "invalid_content" }),
-    );
+    expect(() =>
+      host.app.saveDraft(draft.id, draft.revision, bad),
+    ).toThrowError(expect.objectContaining({ code: "invalid_content" }));
     expect(host.app.draft(draft.id)).toEqual(draft);
     expect(() => host.app.createDraft(bad)).toThrowError(
       expect.objectContaining({ code: "invalid_content" }),

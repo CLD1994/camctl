@@ -6,6 +6,7 @@ import {
 import { cloneClientJson } from "../shared/json";
 import type { VerifiedAppend } from "./followup";
 import { parseDraft } from "./editing";
+import type { WholeDraftTransition } from "./session";
 
 type PositionChange = "preserve" | "append" | "reset" | { remove: number };
 function structure(content: DraftContent) {
@@ -98,6 +99,37 @@ export class ActionUiIdentity {
     this.previous = prepared.previous;
     this.keys = prepared.keys;
     this.content = prepared.content;
+  }
+  prepareWhole(input: WholeDraftTransition): () => void {
+    const transition = cloneClientJson(input);
+    if (!this.content || !sameContent(this.content, transition.origin))
+      throw Error("完整接纳的原输入与当前动作视图不一致");
+    const prepared = this.copy(),
+      before = structure(transition.origin),
+      next = structure(transition.next);
+    const baseline = structure(transition.baseline.content);
+    if (!next) prepared.update(transition.next, "reset");
+    else if (before?.ids && next.ids) {
+      // 本页提交及能力派生从具体转换证明存续；远端版本只信任确认基线已有身份。
+      const local = ["save", "replace", "derived"].includes(transition.reason);
+      const proven = new Set(local ? before.ids : (baseline?.ids ?? []));
+      const byId = new Map(
+        before.ids
+          .filter((id) => proven.has(id))
+          .map((id) => [id, this.keys[before.ids!.indexOf(id)]]),
+      );
+      prepared.keys = next.ids.map(
+        (id) => byId.get(id) ?? `ui-action-${prepared.sequence++}`,
+      );
+      prepared.previous = next;
+      prepared.content = cloneClientJson(transition.next);
+    } else if (
+      ["save", "replace", "derived"].includes(transition.reason) &&
+      sameContent(transition.origin, transition.next)
+    ) {
+      prepared.content = cloneClientJson(transition.next);
+    } else prepared.update(transition.next, "reset");
+    return () => this.adopt(prepared);
   }
   prepareAppend(transition: VerifiedAppend): () => void {
     if (!this.content || !sameContent(this.content, transition.origin.content))

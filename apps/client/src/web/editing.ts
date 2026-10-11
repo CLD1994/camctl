@@ -16,10 +16,15 @@ import {
   switchParameterType,
 } from "../shared/parameter-variants";
 import { replaceActionValue, switchActionType } from "./action-drafts";
+import {
+  replaceObjectValue,
+  switchObjectBranch,
+} from "../shared/object-variants";
 import { parseDraft, pointer, requireDraftRoot } from "../shared/draft-plan";
 export { parseDraft, pointer } from "../shared/draft-plan";
 import {
   appendContentAction,
+  type ActionAllocation,
   removeContentAction,
   renamePreviewSources,
 } from "../shared/automatic-previews";
@@ -75,6 +80,7 @@ function replaceActionList(
     automaticPreviews: _preview,
     actionVariants: _variants,
     parameterVariants: _parameters,
+    objectVariants: _objects,
     ...rest
   } = content;
   return { ...rest, text: stringifyJson(root, 2), pending };
@@ -97,7 +103,8 @@ export function editPlanText(
   if (
     (content.automaticPreviews ||
       Object.keys(content.actionVariants ?? {}).length ||
-      Object.keys(content.parameterVariants ?? {}).length) &&
+      Object.keys(content.parameterVariants ?? {}).length ||
+      Object.keys(content.objectVariants ?? {}).length) &&
     !replaceVariants
   )
     throw new Error(
@@ -217,6 +224,49 @@ export function setValue(
     path[2] === "name"
   )
     content = renamePreviewSources(content, path[1], omit ? undefined : value);
+  if (
+    path[0] === "actions" &&
+    typeof path[1] === "number" &&
+    path[2] === "params" &&
+    path.length > 3
+  ) {
+    const groups = content.objectVariants?.[String(path[1])] ?? {};
+    for (const [key, group] of Object.entries(groups)) {
+      const objectPath = pointerPath(key),
+        relative = path.slice(3).map(String);
+      if (
+        relative.length < objectPath.length &&
+        relative.every((part, i) => objectPath[i] === part)
+      )
+        return replaceObjectValue(content, path[1], relative, value, {
+          omit,
+          numberToken,
+        });
+      if (
+        relative.length === objectPath.length &&
+        objectPath.every((part, i) => relative[i] === part)
+      )
+        return replaceObjectValue(content, path[1], objectPath, value, {
+          omit,
+          numberToken,
+        });
+      if (
+        relative.length === objectPath.length + 1 &&
+        objectPath.every((part, i) => relative[i] === part) &&
+        relative.at(-1) === group.discriminator
+      ) {
+        const prepared = consumeOwnInput(content, path);
+        return switchObjectBranch(
+          prepared,
+          path[1],
+          objectPath,
+          group.discriminator,
+          omit ? undefined : value,
+          numberToken,
+        );
+      }
+    }
+  }
   const root = parseDraft(content);
   applyPath(root, path, value, omit, numberToken);
   const targetPath = path.map(String);
@@ -458,8 +508,9 @@ export function removeAction(
 export function appendDraftAction(
   content: DraftContent,
   action: EditObject,
+  allocation?: ActionAllocation,
 ): DraftContent {
-  return appendContentAction(content, action);
+  return appendContentAction(content, action, false, allocation);
 }
 export function resolveField(
   field: unknown,

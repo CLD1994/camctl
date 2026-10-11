@@ -13,6 +13,7 @@ import {
   inspectActionPending,
 } from "../shared/draft-plan";
 import { decodeJsonPointer } from "../shared/json-pointer";
+import { checkObjectVariantLocations } from "../shared/object-variants";
 import {
   parseClientJson,
   stringifyJson,
@@ -125,6 +126,7 @@ function switchActionBranch(
   const variants = content.actionVariants?.[String(index)] ?? [];
   const parameters = content.parameterVariants?.[String(index)] ?? [];
   checkParameterVariantLocations(content, root.actions);
+  checkObjectVariantLocations(content, root.actions);
   checkParameterVariants(parameters);
   checkActiveParameterVariant(parameters, action);
   if (variants.some((variant) => typeIdentity(variant) === currentIdentity))
@@ -153,6 +155,9 @@ function switchActionBranch(
     pending: {},
   };
   if (parameters.length) saved.parameterVariants = cloneClientJson(parameters);
+  const objects = content.objectVariants?.[String(index)];
+  if (objects && Object.keys(objects).length)
+    saved.objectVariants = cloneClientJson(objects);
   if (Object.hasOwn(action, "type")) transferFields(saved, action, ["type"]);
   transferFields(
     saved.fields,
@@ -198,7 +203,8 @@ function switchActionBranch(
     ),
     ...(Object.keys(saved.fields).length ||
     Object.keys(saved.pending).length ||
-    saved.parameterVariants?.length
+    saved.parameterVariants?.length ||
+    Object.keys(saved.objectVariants ?? {}).length
       ? [cloneClientJson(saved)]
       : []),
   ];
@@ -208,12 +214,17 @@ function switchActionBranch(
   if (restored?.parameterVariants?.length)
     parameterVariants[index] = cloneClientJson(restored.parameterVariants);
   else delete parameterVariants[index];
+  const objectVariants = { ...content.objectVariants };
+  if (restored?.objectVariants)
+    objectVariants[String(index)] = cloneClientJson(restored.objectVariants);
+  else delete objectVariants[String(index)];
   return {
     ...content,
     text: stringifyJson(root, 2),
     pending,
     actionVariants,
     parameterVariants,
+    objectVariants,
   };
 }
 
@@ -253,6 +264,8 @@ export function replaceActionValue(
   if (!isObject(old)) {
     if (content.parameterVariants?.[String(index)]?.length)
       throw Error("非对象动作的参数资料无法确定归属");
+    if (Object.keys(content.objectVariants?.[String(index)] ?? {}).length)
+      throw Error("非对象动作的对象分支资料无法确定归属");
     if (isObject(value) && !omit) {
       const candidates = (content.actionVariants?.[String(index)] ?? []).filter(
         (v) => typeIdentity(v) === typeIdentity(value),
@@ -293,6 +306,12 @@ export function replaceActionValue(
         parameterVariants: {
           ...next.parameterVariants,
           [index]: cloneClientJson(parameters),
+        },
+        objectVariants: {
+          ...next.objectVariants,
+          ...(restored?.objectVariants
+            ? { [index]: cloneClientJson(restored.objectVariants) }
+            : {}),
         },
       };
       next = replaceParameterValue(
@@ -347,6 +366,9 @@ export function replaceActionValue(
     if (Object.hasOwn(old, "type")) transferFields(saved, old, ["type"]);
     if (parameters.length)
       saved.parameterVariants = cloneClientJson(parameters);
+    const objects = next.objectVariants?.[String(index)];
+    if (objects && Object.keys(objects).length)
+      saved.objectVariants = cloneClientJson(objects);
     for (const { key, input, path: p } of entries)
       if (
         p.length > 2 &&
@@ -388,5 +410,12 @@ export function replaceActionValue(
       return !(p[0] === "actions" && p[1] === String(index));
     }),
   );
-  return { ...next, text: stringifyJson(updated, 2), pending: finalPending };
+  const objectVariants = { ...next.objectVariants };
+  delete objectVariants[String(index)];
+  return {
+    ...next,
+    text: stringifyJson(updated, 2),
+    pending: finalPending,
+    objectVariants,
+  };
 }

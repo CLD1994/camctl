@@ -7,6 +7,19 @@ const apps:Application[]=[]; const dirs:string[]=[];
 function setup() {const dir=mkdtempSync(join(tmpdir(),'camctl-app-'));dirs.push(dir);const app=new Application(dir);apps.push(app);app.store.initialize();return app;}
 afterEach(()=>{apps.splice(0).forEach(a=>a.store.close());dirs.splice(0).forEach(d=>rmSync(d,{recursive:true,force:true}));});
 const content={text:JSON.stringify({name:'同步',actions:[{name:'完整同步',type:'report_status',params:{scope:'full'}}]})};
+it.each([
+  ["空封套", {}, "invalid_content"],
+  ["null封套", null, "invalid_content"],
+  ["显式undefined封套", undefined, "invalid_content"],
+  ["缺少内容", { allocation: { id: "fixed" } }, "invalid_content"],
+  ["null内容", { content: null, allocation: { id: "fixed" } }, "invalid_content"],
+  ["缺少身份", { content }, "invalid_action_allocation"],
+])("Application 无效固定预期 %s 不改变草稿", (_name, expected, code) => {
+  const app = setup(), draft = app.createDraft(content);
+  const before = structuredClone(draft);
+  expect(() => app.appendAction(draft.id, draft.revision, { name: "报告", type: "report_status" }, expected as any)).toThrowError(expect.objectContaining({ code }));
+  expect(app.draft(draft.id)).toEqual(before);
+});
 it.each([undefined, {}])("同步范围未填写的草稿可恢复但不能导出 %j", (params) => {
   const app = setup();
   const value = {

@@ -108,6 +108,18 @@ export function createHttpApp(
   app.post("/api/drafts", (req, res) =>
     res.status(201).json(application.createDraft(req.body?.content)),
   );
+  app.put("/api/draft-creations/:attemptId", (req, res) =>
+    res.json(
+      application.createDraftCopy(
+        String(req.params.attemptId),
+        req.body?.content,
+      ),
+    ),
+  );
+  app.get("/api/draft-creations/:attemptId", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(application.draftCreation(String(req.params.attemptId)));
+  });
   app.put("/api/drafts/:id", (req, res) =>
     res.json(
       application.saveDraft(
@@ -135,17 +147,16 @@ export function createHttpApp(
       ),
     ),
   );
-  app.post("/api/drafts/:id/actions", (req, res) =>
+  app.post("/api/drafts/:id/actions", (req, res) => {
+    const id = String(req.params.id),
+      revision = req.body.revision,
+      action = req.body.action;
     res.json(
-      application.appendAction(
-        String(req.params.id),
-        req.body.revision,
-        req.body.action,
-        req.body.expected?.content,
-        req.body.expected?.capabilityVersion,
-      ),
-    ),
-  );
+      Object.hasOwn(req.body, "expected")
+        ? application.appendAction(id, revision, action, req.body.expected)
+        : application.appendAction(id, revision, action),
+    );
+  });
   app.post("/api/drafts/:id/copy", (req, res) =>
     res.status(201).json(application.copyDraft(String(req.params.id))),
   );

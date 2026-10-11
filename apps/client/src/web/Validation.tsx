@@ -38,6 +38,12 @@ export function ValidationControl({
             (json && issueTarget.startsWith(target + "/")))),
   );
   const child = children as ReactElement<Record<string, unknown>>;
+  const unfinished = matching.filter(
+    (item) => item.issue.code === "unfinished_input",
+  );
+  const completeValueIssues = matching.filter(
+    (item) => item.issue.code !== "unfinished_input",
+  );
   const describedBy = [
     child.props["aria-describedby"],
     matching.length ? id : undefined,
@@ -55,7 +61,19 @@ export function ValidationControl({
       })}
       {matching.length > 0 && (
         <small id={id} className="field-error">
-          {matching.map((item) => item.message).join("；")}
+          {unfinished.length && completeValueIssues.length ? (
+            <>
+              <span className="current-input-error">
+                当前输入：{unfinished.map((item) => item.message).join("；")}
+              </span>
+              <span className="retained-content-errors">
+                草稿正文的诊断（未完成原文尚未应用）：
+                {completeValueIssues.map((item) => item.message).join("；")}
+              </span>
+            </>
+          ) : (
+            matching.map((item) => item.message).join("；")
+          )}
         </small>
       )}
     </>

@@ -434,11 +434,12 @@ it("保存回执和首次核实均丢失后能保存更新输入", async () => {
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
   let offline = false,
-    first = true;
+    first = true, writes = 0;
   await page.route("**/api/state", async (route) =>
     offline ? route.abort() : route.continue(),
   );
   await page.route("**/api/drafts/*", async (route) => {
+    if(route.request().method() === "PUT") writes++;
     if (route.request().method() === "PUT" && first) {
       first = false;
       await route.fetch();
@@ -450,22 +451,31 @@ it("保存回执和首次核实均丢失后能保存更新输入", async () => {
   await check(page.getByTestId("save-status")).toContainText("未确认");
   await page.getByTestId("draft-json-input").fill(text("B"));
   offline = false;
+  await page.getByRole("button",{name:"核实保存结果",exact:true}).click();
+  expect(writes).toBe(1);
+  const verified = app.store.all<Draft>("drafts")[0];
+  expect(JSON.parse(verified.content.text).name).toBe("A"); expect(verified.revision).toBe(2);
+  await check(page.getByRole("button",{name:"保存当前输入",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"保存当前输入",exact:true}).click();
   await check(page.getByTestId("save-status")).toContainText("已保存");
   const actual = app.store.all<Draft>("drafts")[0];
   expect(JSON.parse(actual.content.text).name).toBe("B");
   expect(actual.revision).toBe(3);
+  expect(writes).toBe(2);
 }, 20000);
-it("导出回执和即时核实丢失期间锁定编辑，随后轮询恢复原记录", async () => {
+it("导出回执和即时核实丢失期间锁定编辑，具体核实恢复固定原记录且零重发", async () => {
   const { app, page } = await setup();
   page.on("dialog", (dialog) => dialog.accept());
   await page.getByTestId("new-draft-button").click();
   await page.getByTestId("draft-json-toggle").click();
   await page.getByTestId("draft-json-input").fill(text("固定请求"));
-  let offline = false;
+  let offline = false, posts = 0, puts = 0;
+  await page.route("**/api/drafts/*",async route => {if(route.request().method()==="PUT") puts++; return route.continue();});
   await page.route("**/api/state", async (route) =>
     offline ? route.abort() : route.continue(),
   );
   await page.route("**/api/drafts/*/export", async (route) => {
+    posts++;
     await route.fetch();
     offline = true;
     await route.abort();
@@ -475,13 +485,75 @@ it("导出回执和即时核实丢失期间锁定编辑，随后轮询恢复原�
     page.getByRole("button", { name: "重新核实导出结果", exact: true }),
   ).toBeVisible();
   await check(page.getByTestId("draft-json-input")).toBeDisabled();
+  const fixedRequest = structuredClone(app.store.all("requests")[0]);
   offline = false;
+  const beforePuts=puts;
+  await page.waitForResponse(response => new URL(response.url()).pathname === "/api/state" && response.ok());
+  await check(page.getByRole("button",{name:"重新核实导出结果",exact:true})).toBeVisible();
+  await check(page.getByTestId("draft-json-input")).toBeDisabled();
+  expect(posts).toBe(1); expect(puts).toBe(beforePuts);
+  await page.getByRole("button",{name:"重新核实导出结果",exact:true}).click();
   await check(page.getByTestId("download-request-button")).toBeVisible();
+  expect(posts).toBe(1); expect(puts).toBe(beforePuts);
   expect(app.store.all("requests")).toHaveLength(1);
+  expect(app.store.all("requests")[0]).toEqual(fixedRequest);
   expect(
     app.store.all<{ body: { name: string } }>("requests")[0].body.name,
   ).toBe("固定请求");
 }, 20000);
+it.each(["unexported", "unavailable", "invalid"] as const)("实际导出核实按钮%s只读取并保持对应输入资格", async kind => {
+  const {app,page}=await setup();
+  page.on("dialog",dialog => dialog.accept());
+  await page.getByTestId("new-draft-button").click();
+  await page.getByTestId("draft-json-toggle").click();
+  await page.getByTestId("draft-json-input").fill(text("核实固定输入"));
+  await check.poll(() => app.store.all<Draft>("drafts")[0].content.text).toBe(text("核实固定输入"));
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  let mode: "offline" | "reliable" | "invalid" = "reliable", posts=0, puts=0, reads=0;
+  await page.route("**/api/drafts/*",async route => {if(route.request().method()==="PUT") puts++; await route.continue();});
+  await page.route("**/api/state",async route => {
+    reads++;
+    if(mode==="offline") return route.abort();
+    if(mode==="invalid") {const response=await route.fetch(); const state=await response.json(); state.drafts[0].revision=0; return route.fulfill({response,json:state});}
+    await route.continue();
+  });
+  await page.route("**/api/drafts/*/export",async route => {
+    posts++;
+    if(kind!=="unexported") await route.fetch();
+    mode="offline"; await route.abort();
+  });
+  await page.getByTestId("export-button").click();
+  const verify=page.getByRole("button",{name:"重新核实导出结果",exact:true});
+  await check(verify).toBeVisible();
+  const fixed=structuredClone(app.store.all("requests"));
+  mode=kind==="unexported" ? "reliable" : kind==="invalid" ? "invalid" : "offline";
+  if (kind === "unexported") {
+    // 普通完整GET恢复不拥有这次导出；只有下方具体核实按钮可以结束unknown。
+    await page.waitForResponse(response => new URL(response.url()).pathname === "/api/state" && response.ok());
+    await check(verify).toBeVisible();
+    await check(page.getByTestId("draft-json-input")).toBeDisabled();
+    await check(page.getByTestId("draft-json-input")).toHaveValue(text("核实固定输入"));
+    expect(posts).toBe(1); expect(puts).toBe(0); expect(fixed).toHaveLength(0);
+  }
+  const beforeReads=reads;
+  await verify.click();
+  await check.poll(() => reads).toBeGreaterThan(beforeReads);
+  expect(posts).toBe(1); expect(puts).toBe(0); expect(app.store.all("requests")).toEqual(fixed);
+  await check(page.getByTestId("draft-json-input")).toHaveValue(text("核实固定输入"));
+  if(kind==="unexported") {
+    await check(verify).toHaveCount(0);
+    await check(page.getByTestId("draft-json-input")).toBeEnabled();
+    expect(fixed).toHaveLength(0);
+  } else {
+    await check(verify).toBeEnabled();
+    await check(page.getByTestId("draft-json-input")).toBeDisabled();
+    expect(fixed).toHaveLength(1);
+    mode="reliable";
+    await verify.click();
+    await check(page.getByTestId("download-request-button")).toBeVisible();
+    expect(posts).toBe(1); expect(puts).toBe(0); expect(app.store.all("requests")).toEqual(fixed);
+  }
+},20000);
 it("观察已导出后保留额外输入，跨页面明确另存后不重复恢复", async () => {
   const { app, page } = await setup();
   const draft = app.createDraft({ text: text("固定A") });

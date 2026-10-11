@@ -106,17 +106,16 @@ window.previewLockFixture = {
         busy = true;
         redraw();
       } else if (state === "append") session.lockAppend();
-      else if (state === "identity")
-        session.accept({
-          ...stored,
-          content: {
-            text: JSON.stringify({
-              name: "锁态检查",
-              actions: [report, { ...report, name: "新增" }],
-            }),
-          },
-        });
-      else if (state === "exporting") session.beginExport();
+      else if (state === "identity") {
+        // 没有完整接纳依据的动作集合变化触发身份锁；合法 accept 会共同更新身份。
+        session.content = {
+          text: JSON.stringify({
+            name: "锁态检查",
+            actions: [report, { ...report, name: "新增" }],
+          }),
+        };
+        redraw();
+      } else if (state === "exporting") session.beginExport();
       else if (state === "export-unknown") {
         session.beginExport();
         session.exportUnknown();

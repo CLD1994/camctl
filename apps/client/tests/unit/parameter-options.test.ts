@@ -48,6 +48,61 @@ it("封闭的普通录像规则为独立码率提供选项，不枚举时长区�
     ],
   });
 });
+it.each([
+  { type: "object", properties: { mode: { enum: ["manual", "auto"] } } },
+  { oneOf: [{ type: "object" }, { type: "array" }] },
+  { type: "array", items: { type: "number" } },
+  { $ref: "#/properties/duration_s" },
+])("复杂兄弟字段保留 JSON，不遮蔽独立枚举 %#", (exposure) => {
+  const p = independent();
+  (p.schema.properties as any).exposure = exposure;
+  expect(parameterOptions(p)).toMatchObject({
+    kind: "independent",
+    fields: [
+      { name: "type" },
+      { name: "bitrate_mode", values: ["standard", "high"] },
+    ],
+  });
+});
+it.each([
+  '{"type":"integer","minimum":1,"maximum":9223372036854775}',
+  '{"type":"number","minimum":1e-999}',
+  '{"enum":[1.0000000000000001]}',
+  '{"type":"object","properties":{"n":{"enum":[1e-999]}}}',
+])("其他字段数值精度不改变当前独立枚举资格 %s", (text) => {
+  const p = independent();
+  (p.schema.properties as any).other = parseJson(text);
+  const before = stringifyJson(p.schema);
+  expect(parameterOptions(p)).toMatchObject({
+    kind: "independent",
+    fields: [
+      { name: "type" },
+      { name: "bitrate_mode", values: ["standard", "high"] },
+    ],
+  });
+  expect(stringifyJson(p.schema)).toBe(before);
+});
+it.each(['{"enum":[1.0000000000000001]}', '{"enum":[0,1],"minimum":1e-999}'])(
+  "当前字段数值事实无法准确生成时只保留该字段 JSON %s",
+  (text) => {
+    const p = independent();
+    (p.schema.properties as any).bitrate_mode = parseJson(text);
+    (p.schema.properties as any).quality = { enum: ["a", "b"] };
+    expect(parameterOptions(p)).toMatchObject({
+      kind: "independent",
+      fields: [{ name: "type" }, { name: "quality", values: ["a", "b"] }],
+    });
+  },
+);
+it("复杂兄弟字段不改变局部空允许集合的含义", () => {
+  const p = independent();
+  (p.schema.properties as any).exposure = { oneOf: [{ type: "object" }] };
+  (p.schema.properties as any).bitrate_mode = { enum: ["a"], pattern: "^b" };
+  expect(parameterOptions(p)).toMatchObject({
+    kind: "independent",
+    fields: [{ name: "type" }, { name: "bitrate_mode", values: [] }],
+  });
+});
 it.each(["default", "examples"])(
   "根说明元数据 %s 的数值精度不改变独立控件资格",
   (keyword) => {
@@ -295,15 +350,15 @@ it("候选积与过滤后的选项保持源数值词元", () => {
   expect(originalNumberToken(values, 0, values[0])).toBe("1e0");
 });
 it.each(["1e-999", "1.0000000000000001"])(
-  "不能准确验证的候选数学事实 %s 保守使用 JSON",
+  "不能准确验证的候选数学事实 %s 只将该字段交给 JSON",
   (token) => {
     const p = independent();
     (p.schema.properties as any).bitrate_mode = parseJson(
       `{"enum":[${token}]}`,
     );
-    expect(parameterOptions(p)).toEqual({
-      kind: "unavailable",
-      reason: "numeric",
+    expect(parameterOptions(p)).toMatchObject({
+      kind: "independent",
+      fields: [{ name: "type" }],
     });
   },
 );

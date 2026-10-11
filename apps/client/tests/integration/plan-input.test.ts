@@ -665,7 +665,7 @@ it("复制动作和能力协调不会丢停用类型的直属字段或type数字
   };
   const switched = switchActionType(original, 0, "report_status");
   const tagged = initializePreviewMetadata(switched, "disabled", "n");
-  const copied = copyDraftAction(tagged, 0);
+  const copied = copyDraftAction(tagged, 0, { id: "copied-action" });
   const coordinated = coordinatePreviews(copied, app.capabilities).content;
   expect(previewIntent(coordinated)).toBe("disabled");
   for (const index of ["0", "1"]) {

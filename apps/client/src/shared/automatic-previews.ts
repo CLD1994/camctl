@@ -9,6 +9,7 @@ import { isObject, isName, isTimestamp } from "./validation";
 import { isCameraAction, ACTION_TYPES } from "./actions";
 import { validateParams } from "./capabilities";
 import { checkParameterVariantLocations } from "./parameter-variants";
+import { checkObjectVariantLocations } from "./object-variants";
 import {
   inspectActionPending,
   requireKnownActionList,
@@ -21,6 +22,17 @@ export interface CapabilityState {
   generation: number;
   version?: string;
 }
+export interface ActionAllocation {
+  id: string;
+}
+export interface AppendExpectation {
+  content: DraftContent;
+  allocation: ActionAllocation;
+  capabilityVersion?: string;
+}
+export function createActionAllocation(): ActionAllocation {
+  return { id: crypto.randomUUID() };
+}
 export const sameContent = (a: DraftContent, b: DraftContent) =>
   a.text === b.text &&
   stringifyJson(a.pending ?? {}) === stringifyJson(b.pending ?? {}) &&
@@ -28,6 +40,8 @@ export const sameContent = (a: DraftContent, b: DraftContent) =>
     stringifyJson(b.actionVariants ?? {}) &&
   stringifyJson(a.parameterVariants ?? {}) ===
     stringifyJson(b.parameterVariants ?? {}) &&
+  stringifyJson(a.objectVariants ?? {}) ===
+    stringifyJson(b.objectVariants ?? {}) &&
   stringifyJson(a.automaticPreviews ?? null) ===
     stringifyJson(b.automaticPreviews ?? null);
 export const previewIntent = (c: DraftContent): PreviewIntent =>
@@ -58,6 +72,7 @@ function plan(content: DraftContent): PreviewPlan {
   const root = inspectPlan(content);
   if (!root) throw Error("动作列表无法可靠解释");
   checkParameterVariantLocations(content, root.actions, true);
+  checkObjectVariantLocations(content, root.actions);
   return root;
 }
 function hasPending(content: DraftContent, path: string): boolean {
@@ -271,6 +286,15 @@ export function removeDraftActions(
           ),
         }
       : {}),
+    ...(content.objectVariants
+      ? {
+          objectVariants: Object.fromEntries(
+            Object.entries(content.objectVariants)
+              .filter(([i]) => map.has(Number(i)))
+              .map(([i, v]) => [String(map.get(Number(i))), v]),
+          ),
+        }
+      : {}),
     ...(content.automaticPreviews
       ? {
           automaticPreviews: {
@@ -476,6 +500,7 @@ export function appendContentAction(
   content: DraftContent,
   action: Record<string, unknown>,
   uniqueName = false,
+  allocation?: ActionAllocation,
 ): DraftContent {
   const root = plan(content),
     copy = cloneClientJson(action),
@@ -493,7 +518,13 @@ export function appendContentAction(
   if (meta) {
     if (meta.actions.length !== root.actions.length - 1)
       throw Error("动作身份与正文不对应");
-    meta.actions.push({ id: `${meta.namespace}:${meta.next++}` });
+    if (
+      typeof allocation?.id !== "string" ||
+      !allocation.id ||
+      meta.actions.some((entry) => entry.id === allocation.id)
+    )
+      throw Error("新增动作身份缺失或已经使用");
+    meta.actions.push({ id: allocation.id });
   }
   next.text = stringifyJson(root, 2);
   return next;
@@ -501,13 +532,14 @@ export function appendContentAction(
 export function copyDraftAction(
   content: DraftContent,
   index: number,
+  allocation?: ActionAllocation,
 ): DraftContent {
   const root = plan(content),
     action = root.actions[index];
   if (!action || automatic(action)) throw Error("请选择普通动作复制");
   const inputs = inspectActionPending(content, root.actions);
   requireKnownActionList(inputs);
-  const next = appendContentAction(content, action, true),
+  const next = appendContentAction(content, action, true, allocation),
     newIndex = root.actions.length;
   if (content.actionVariants?.[String(index)])
     next.actionVariants = {
@@ -521,6 +553,13 @@ export function copyDraftAction(
       ...next.parameterVariants,
       [String(newIndex)]: cloneClientJson(
         content.parameterVariants[String(index)],
+      ),
+    };
+  if (content.objectVariants?.[String(index)])
+    next.objectVariants = {
+      ...next.objectVariants,
+      [String(newIndex)]: cloneClientJson(
+        content.objectVariants[String(index)],
       ),
     };
   for (const { input, path, actionIndex } of inputs)

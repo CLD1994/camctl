@@ -7,6 +7,7 @@ import {
   appendContentAction,
   initializePreviewMetadata,
   coordinatePreviews,
+  createActionAllocation,
 } from "../../src/shared/automatic-previews";
 import { loadCapabilities } from "../../src/shared/capabilities";
 
@@ -215,6 +216,7 @@ const catalog = (support: boolean) => ({
   version: support ? "v1" : "v2",
 });
 async function derivedTransition(beforeAppend: boolean) {
+  const allocation = createActionAllocation();
   const origin = {
     ...draft(),
     content: coordinatePreviews(
@@ -237,12 +239,17 @@ async function derivedTransition(beforeAppend: boolean) {
     revision: 2,
     content: coordinatePreviews(origin.content, catalog(false)).content,
   };
-  const expected = appendContentAction(origin.content, action, true);
+  const expected = appendContentAction(
+    origin.content,
+    action,
+    true,
+    allocation,
+  );
   const actual = beforeAppend
     ? {
         ...base,
         revision: 3,
-        content: appendContentAction(base.content, action, true),
+        content: appendContentAction(base.content, action, true, allocation),
       }
     : {
         ...origin,
@@ -251,18 +258,23 @@ async function derivedTransition(beforeAppend: boolean) {
         lastWrite: { revision: 2, input: expected, content: expected },
       };
   let calls = 0;
-  const op = new FollowOperation(origin.id, action, {
-    capabilities: () => capabilities,
-    create: async () => origin,
-    prepare: async () => origin,
-    append: async () => {
-      calls++;
-      capabilities = catalog(false);
-      if (beforeAppend && calls === 1) throw Error("未提交");
-      return actual;
+  const op = new FollowOperation(
+    origin.id,
+    action,
+    {
+      capabilities: () => capabilities,
+      create: async () => origin,
+      prepare: async () => origin,
+      append: async () => {
+        calls++;
+        capabilities = catalog(false);
+        if (beforeAppend && calls === 1) throw Error("未提交");
+        return actual;
+      },
+      read: async () => base,
     },
-    read: async () => base,
-  });
+    allocation,
+  );
   await op.advance();
   if (beforeAppend) await op.advance();
   const session = new DraftSession(
@@ -308,6 +320,16 @@ it.each(["target", "revision", "break", "repeat"])(
     expect(identity.keys).toEqual(keys);
   },
 );
+it("接纳追加拒绝与预期不一致的分配依据，并保持完整版本", async () => {
+  const { session, identity, transition } = await derivedTransition(true);
+  const content = session.content,
+    keys = [...identity.keys];
+  transition.allocation = createActionAllocation();
+  expect(() => session.acceptAppend(transition)).toThrow();
+  expect(session.content).toBe(content);
+  expect(session.revision).toBe(1);
+  expect(identity.keys).toEqual(keys);
+});
 it("已证明追加但后续实际结构没有ID映射时保留结果且不重发", async () => {
   const base = draft(),
     action = { name: "C", type: "report_status", params: { scope: "full" } },

@@ -13,6 +13,7 @@ import {
   setPreviewIntent,
   coordinatePreviews,
   copyDraftAction,
+  createActionAllocation,
   initializePreviewMetadata,
   type CapabilityState,
 } from "../shared/automatic-previews";
@@ -33,10 +34,13 @@ import {
   type Path,
   type EditObject,
 } from "./editing";
-import { DraftSession } from "./session";
+import { DraftSession, sameContent, type DraftSaveStatus } from "./session";
+import { identityForSession } from "./draft-session-view";
 import { ActionUiIdentity } from "./action-ui-identity";
 import { actionLabel, Issues, ErrorBox } from "./common";
 import { Field, JsonField } from "./Fields";
+import { ObjectBranchField } from "./ObjectBranchField";
+import { objectBranches } from "./object-branches";
 import {
   estimateDraftAction,
   type EstimateReloadPhase,
@@ -77,6 +81,8 @@ interface Props {
   onCopy: () => void;
   checkDeletion: () => void;
   checkExport: () => void;
+  onConflict?: () => void;
+  onSaveAs?: () => void;
   savePreset: (input: {
     id?: string;
     name: string;
@@ -97,14 +103,21 @@ export function Editor(props: Props) {
     sequence: number;
   }>();
   const content = session.content;
-  const [actionIdentity] = useState(() => new ActionUiIdentity(content));
-  useLayoutEffect(
-    () =>
-      session.bindAppendView((transition) =>
-        actionIdentity.prepareAppend(transition),
-      ),
-    [session, actionIdentity],
-  );
+  const saveVerification = session.saveVerification;
+  const wholeAcceptance = session.wholeAcceptanceSnapshot;
+  const [actionIdentity] = useState(() => identityForSession(session));
+  useLayoutEffect(() => {
+    const releaseAppend = session.bindAppendView((transition) =>
+      actionIdentity.prepareAppend(transition),
+    );
+    const releaseWhole = session.bindWholeView((transition) =>
+      actionIdentity.prepareWhole(transition),
+    );
+    return () => {
+      releaseAppend();
+      releaseWhole();
+    };
+  }, [session, actionIdentity]);
   let identityProblem = "";
   try {
     actionIdentity.update(content);
@@ -209,9 +222,13 @@ export function Editor(props: Props) {
   const add = () => {
     if (plan) {
       change(
-        appendDraftAction(content, {
-          name: `动作 ${plan.actions.length + 1}`,
-        }),
+        appendDraftAction(
+          content,
+          {
+            name: `动作 ${plan.actions.length + 1}`,
+          },
+          createActionAllocation(),
+        ),
         "append",
       );
     }
@@ -229,6 +246,7 @@ export function Editor(props: Props) {
     issues,
     plan,
     capabilities,
+    content,
   ).map((item) => ({
     ...item,
     ...(item.issue.code === "unfinished_input"
@@ -311,7 +329,12 @@ export function Editor(props: Props) {
   }, [focusTarget]);
   return (
     <ValidationProvider issues={presentations}>
-      <section className="panel editor" ref={editor}>
+      <section
+        className="panel editor"
+        ref={editor}
+        tabIndex={-1}
+        data-testid="draft-editor"
+      >
         <div className="section-head">
           <div>
             <p className="eyebrow">准备新的执行请求</p>
@@ -338,6 +361,11 @@ export function Editor(props: Props) {
         </div>
         <ErrorBox error={copyError} />
         <ErrorBox error={identityProblem} />
+        {Object.keys(content.pending ?? {}).length > 0 && (
+          <p className="notice pending-validation-note">
+            未完成原文尚未应用到草稿正文。下方其余诊断针对草稿正文；修正原文后将重新校验。
+          </p>
+        )}
         <Issues
           issues={presentations.map((item) => item.issue)}
           rawIssues={issues}
@@ -351,22 +379,82 @@ export function Editor(props: Props) {
                 ? "正在删除草稿…"
                 : session.deletionState === "unknown"
                   ? "删除结果尚未确认"
-                  : session.error
-                    ? `保存失败或未确认：${session.error}`
-                    : session.saving
-                      ? "保存中…"
-                      : session.saved
-                        ? "已保存"
-                        : "等待保存…"}
+                  : saveStatusLabels[session.saveStatus]}
             </span>
-            {session.error && session.editable && (
+            <span role="status" data-testid="input-save-fact">
+              {session.selectionDecision?.written &&
+              sameContent(content, session.selectionDecision.written.content)
+                ? "本页完整输入已可靠写入；本地显示接纳尚未完成。"
+                : sameContent(content, session.confirmedDraft.content)
+                  ? "本页完整输入已有可靠保存版本。"
+                  : "本页完整输入尚未可靠保存。"}
+            </span>
+            <span>
+              最后完整接纳的保存时间：{session.confirmedDraft.updatedAt}
+            </span>
+            {session.error && <span role="status">{session.error}</span>}
+            {session.saveDiagnostic && (
+              <span role="status">{session.saveDiagnostic}</span>
+            )}
+            {saveVerification && !session.selectionPendingDecision && (
               <button
-                disabled={busy}
-                onClick={() => void session.flush().catch(() => {})}
+                disabled={busy || session.saving}
+                onClick={() => {
+                  void session
+                    .verifySaveResult(saveVerification)
+                    .catch(() => {});
+                }}
               >
-                重试保存
+                核实保存结果
               </button>
             )}
+            {session.canSave &&
+              !session.saved &&
+              !session.saving &&
+              !saveVerification &&
+              !session.selectionPendingDecision && (
+                <button
+                  disabled={busy}
+                  onClick={() => void session.flush().catch(() => {})}
+                >
+                  {session.error || session.saveDiagnostic ? "重试保存" : "保存当前输入"}
+                </button>
+              )}
+            {wholeAcceptance && (
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    try {
+                      session.retryWholeAcceptance(wholeAcceptance);
+                    } catch {
+                      /* 领域诊断持续保留。 */
+                    }
+                  }}
+                >
+                  重试完整接纳
+                </button>
+              )}
+            {session.conflict && props.onConflict && (
+              <button
+                onClick={props.onConflict}
+                disabled={
+                  busy ||
+                  session.selectionPendingDecision ||
+                  session.copyPendingDecision
+                }
+              >
+                查看完整差异
+              </button>
+            )}
+            {(session.saveStatus === "deleted" ||
+              session.saveStatus === "exported") &&
+              props.onSaveAs &&
+              !session.selectionPendingDecision &&
+              !session.copyPendingDecision && (
+                <button disabled={busy} onClick={props.onSaveAs}>
+                  将本页另存为新草稿
+                </button>
+              )}
           </div>
           <PreviewControl
             intent={intent}
@@ -432,10 +520,10 @@ export function Editor(props: Props) {
                       if (
                         (content.automaticPreviews ||
                           Object.keys(content.actionVariants ?? {}).length ||
-                          Object.keys(content.parameterVariants ?? {})
-                            .length) &&
+                          Object.keys(content.parameterVariants ?? {}).length ||
+                          Object.keys(content.objectVariants ?? {}).length) &&
                         !window.confirm(
-                          "替换整份计划 JSON 将清除自动预览意图、动作关联和按动作类型、参数类型保存的其他内容。确认后自动预览为尚未设置，并保存输入原文。是否继续？",
+                          "替换整份计划 JSON 将清除自动预览意图、动作关联和按动作类型、参数类型、对象模式保存的编辑内容。确认后自动预览为尚未设置，并保存输入原文。是否继续？",
                         )
                       )
                         return;
@@ -537,7 +625,14 @@ export function Editor(props: Props) {
                     remove={() => remove(index)}
                     copy={() => {
                       try {
-                        change(copyDraftAction(content, index), "append");
+                        change(
+                          copyDraftAction(
+                            content,
+                            index,
+                            createActionAllocation(),
+                          ),
+                          "append",
+                        );
                       } catch (error) {
                         setCopyError(
                           `动作复制未完成：${(error as Error).message}`,
@@ -580,6 +675,23 @@ export function Editor(props: Props) {
     </ValidationProvider>
   );
 }
+const saveStatusLabels: Record<DraftSaveStatus, string> = {
+  saved: "已保存",
+  dirty: "未保存，等待保存…",
+  saving: "保存中…",
+  replacing: "替换正在提交…",
+  selecting: "正在选择完整版本",
+  accepting: "完整版本已证明，本地接纳未完成",
+  unknown: "保存结果尚未确认，需要核实",
+  conflict: "完整版本冲突，自动保存已暂停",
+  superseded_write: "旧保存结果不可确认，请选择当前完整版本",
+  invalid: "后端记录无效，需要重新核实",
+  unavailable: "读取不可用，输入已保留",
+  blocked: "当前操作限制保存",
+  exported: "原草稿已导出，只读输入已保留",
+  deleted: "原草稿已删除，输入已保留",
+  copying: "另存尚待处理，固定输入已保留",
+};
 function PendingInputs({
   content,
   change,
@@ -632,7 +744,7 @@ function PendingInput({
         checkActionListChange(content, omit ? undefined : value.text);
         if (
           !window.confirm(
-            `${omit ? "移除" : "替换"}整组动作将清除动作身份、自动预览和按动作类型、参数类型保存的其他内容，以及动作集合内的未完成输入。自动预览将变为尚未设置，集合外的输入继续保留。是否继续？`,
+            `${omit ? "移除" : "替换"}整组动作将清除动作身份、自动预览和按动作类型、参数类型、对象模式保存的编辑内容，以及动作集合内的未完成输入。自动预览将变为尚未设置，集合外的输入继续保留。是否继续？`,
           )
         )
           return;
@@ -1306,6 +1418,22 @@ export function SchemaFields({
       )}
       <div className="form-grid">
         {fields.map(([name, field]) => {
+          const branches = objectBranches(parameter, name);
+          if (branches)
+            return (
+              <ObjectBranchField
+                key={name}
+                catalog={branches}
+                name={name}
+                required={
+                  Array.isArray(schema.required) &&
+                  schema.required.includes(name)
+                }
+                content={content}
+                path={[...path, name]}
+                change={change}
+              />
+            );
           const choices =
             catalog.kind === "unavailable"
               ? undefined
@@ -1318,6 +1446,7 @@ export function SchemaFields({
               key={name}
               name={name}
               schema={resolveField(field, schema)}
+              rulesSchema={field}
               required={
                 catalog.kind === "finite" && isObject(params) && !blocked
                   ? parameterRequired(catalog, params, name)

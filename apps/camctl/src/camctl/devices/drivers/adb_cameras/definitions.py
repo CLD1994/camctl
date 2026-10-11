@@ -5,8 +5,6 @@ Schema 从命令候选表取得离散选项。返回定义不自动登记到能�
 视频估算采用固定假定参考值，说明和元数据从同一份定义生成；
 厂商核实后调整本模块的参考值，不改变拍摄参数或完成契约。
 """
-from decimal import Decimal
-
 from camctl.contracts.values import MAX_OBJECT_ID
 from camctl.devices.catalog import ActionCapability
 from .commands import (ACTION_APERTURE, ACTION_BITRATE, ACTION_EV, ACTION_FOV,
@@ -68,9 +66,8 @@ def _exposure(iso, ev):
 
 def _record_schema(model: CameraModel, parameter_type: str) -> dict:
     properties = {"type": {"const": parameter_type},
-                  "duration_s": {"type": "number", "minimum": Decimal("0.001"),
-                                 "maximum": Decimal(f"{MAX_OBJECT_ID // 1000}.{MAX_OBJECT_ID % 1000:03d}"),
-                                 "multipleOf": Decimal("0.001")}}
+                  "duration_s": {"type": "integer", "minimum": 1,
+                                 "maximum": MAX_OBJECT_ID // 1000}}
     if model is CameraModel.ACTION6:
         properties.update({"resolution": {"enum": list(ACTION_RESOLUTIONS)},
                            "fov": {"enum": list(ACTION_FOV)},

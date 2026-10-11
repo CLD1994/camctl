@@ -5,6 +5,7 @@ from decimal import Decimal, localcontext
 import pytest
 
 from camctl.acceptance.schema import BodySchemaError, validate_precise
+from camctl.contracts.json_values import parse_exact_json
 from camctl.devices.drivers.adb_cameras import definitions
 from camctl.devices.parameter_schemas import validate_parameter_schema
 
@@ -106,26 +107,45 @@ def test_action_record_without_aperture_or_bitrate_still_requires_other_fields(e
         validate_precise(capability("dji-action6", "camera_record").schema, params)
 
 
-@pytest.mark.parametrize("duration", [Decimal("0.001"), 10, 60, Decimal("1.234")])
-def test_record_duration_uses_exact_milliseconds_without_example_limit(duration):
-    params = {**recording_params(), "duration_s": duration}
-    validate_precise(capability("dji-action6", "camera_record").schema, params)
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+@pytest.mark.parametrize("duration_json", ["1", "1.0", "1e0", "10", "60", "9223372036854775"])
+def test_record_duration_accepts_mathematical_integer_seconds(driver, duration_json):
+    params = {**recording_params(driver), "duration_s": parse_exact_json(duration_json)}
+    validate_precise(capability(driver, "camera_record").schema, params)
 
 
-@pytest.mark.parametrize("duration", [None, True, "10", 0, -1, Decimal("1.0005"), 9223372036854776])
-def test_invalid_record_duration_is_rejected(duration):
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+@pytest.mark.parametrize("duration_json", [
+    "null", "true", '"10"', "0", "-1", "0.001", "1.234", "1.0005",
+    "1.000000000000000000000000000001", "9223372036854775.001", "9223372036854776",
+])
+def test_invalid_record_duration_is_rejected(driver, duration_json):
     with pytest.raises(BodySchemaError):
-        validate_precise(capability("dji-action6", "camera_record").schema,
-                         {**recording_params(), "duration_s": duration})
+        validate_precise(capability(driver, "camera_record").schema,
+                         {**recording_params(driver), "duration_s": parse_exact_json(duration_json)})
 
 
-def test_record_duration_boundary_does_not_depend_on_decimal_context():
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+def test_record_duration_boundary_does_not_depend_on_decimal_context(driver):
     with localcontext() as context:
         context.prec = 3
-        schema = capability("dji-action6", "camera_record").schema
-        validate_precise(schema, {**recording_params(), "duration_s": Decimal("9223372036854775.807")})
+        schema = capability(driver, "camera_record").schema
+        validate_precise(schema, {**recording_params(driver), "duration_s": Decimal("9223372036854775.0")})
         with pytest.raises(BodySchemaError):
-            validate_precise(schema, {**recording_params(), "duration_s": Decimal("9223372036854775.808")})
+            validate_precise(schema, {**recording_params(driver), "duration_s": Decimal("9223372036854776.0")})
+
+
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+def test_record_duration_is_required_without_a_default(driver):
+    params = recording_params(driver)
+    del params["duration_s"]
+    cap = capability(driver, "camera_record")
+
+    with pytest.raises(BodySchemaError):
+        validate_precise(cap.schema, params)
+
+    assert "duration_s" not in cap.defaults
+    assert "default" not in cap.schema["properties"]["duration_s"]
 
 
 @pytest.mark.parametrize("exposure", [None, {}, {"mode": "manual"},

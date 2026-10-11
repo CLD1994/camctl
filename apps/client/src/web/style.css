@@ -873,6 +873,51 @@ button[data-validation-path][aria-invalid="true"] {
 .code-input.compact {
   min-height: 132px !important;
 }
+.json-field-label {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #245347;
+}
+.form-grid > .json-field {
+  grid-column: 1 / -1;
+}
+.form-grid > .object-branch-field {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.object-branch-field h5 {
+  margin: 0;
+  font-size: 14px;
+}
+.json-field-rules {
+  margin-top: 8px;
+  padding: 12px;
+  background: #f3f6f1;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.json-field-rules p {
+  margin: 4px 0;
+}
+.json-field-rules th,
+.json-field-rules td {
+  vertical-align: top;
+  font-size: 12px;
+}
+.json-field-rules h5 {
+  margin: 12px 0 6px;
+  font-size: 12px;
+}
+.json-field-rules pre {
+  max-height: 320px;
+  overflow: auto;
+}
+.field-error > span {
+  display: block;
+}
+.retained-content-errors {
+  margin-top: 6px;
+}
 .parameter-intro {
   background: #edf4e9;
   border-radius: 8px;
@@ -1480,3 +1525,11 @@ progress {
     margin-left: 0.35rem;
   }
 }
+/* 完整版本比较各自保持原有顺序；技术原文在窄屏内独立滚动。 */
+.draft-conflict-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
+.draft-difference-sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.draft-difference-sides section { min-width: 0; }
+.draft-conflict-dialog pre, .draft-operation-notice pre { max-height: 320px; overflow: auto; white-space: pre; }
+.draft-operation-dialog { max-height: calc(100dvh - 32px); overflow: auto; }
+.save-feedback { flex-wrap: wrap; }
+@media (max-width: 650px) { .draft-difference-sides { grid-template-columns: minmax(0, 1fr); } }

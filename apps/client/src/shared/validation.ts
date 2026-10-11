@@ -2,7 +2,14 @@ import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import type { ErrorObject } from "ajv";
 import type { Issue } from "./types";
-import { mathematicalInteger, originalNumberToken } from "./json";
+import {
+  compareJsonNumberTokens,
+  jsonNumberIsMultipleOf,
+  mathematicalInteger,
+  originalNumberToken,
+  rememberNumberToken,
+  cloneClientJson,
+} from "./json";
 
 export const DIALECT = "https://json-schema.org/draft/2020-12/schema";
 export const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -93,6 +100,127 @@ export function createValidator() {
       return token === undefined || mathematicalInteger(token);
     },
   });
+  // 数值范围消费输入与规则的原词元；浏览器和后端使用相同的精确判定。
+  for (const [keyword, comparison] of [
+    ["minimum", ">="],
+    ["maximum", "<="],
+    ["exclusiveMinimum", ">"],
+    ["exclusiveMaximum", "<"],
+  ] as const) {
+    ajv.removeKeyword(keyword);
+    const check = Object.assign(
+      function (
+        this: { numberToken?: string } | undefined,
+        limit: number,
+        data: number,
+        parentSchema?: Record<string, unknown>,
+        context?: {
+          parentData?: unknown;
+          parentDataProperty?: string | number;
+        },
+      ) {
+        const dataToken =
+          context?.parentData === undefined
+            ? this?.numberToken
+            : originalNumberToken(
+                context.parentData,
+                context.parentDataProperty!,
+                data,
+              );
+        const schemaLimit = parentSchema?.[keyword];
+        const limitToken =
+          originalNumberToken(parentSchema, keyword, schemaLimit) ??
+          String(limit);
+        // 非有限 Number 仍由 Ajv 的原生数字类型规则拒绝。
+        if (!Number.isFinite(data) || !Number.isFinite(limit)) return true;
+        const order = compareJsonNumberTokens(
+          dataToken ?? String(data),
+          limitToken,
+        );
+        const valid =
+          keyword === "minimum"
+            ? order >= 0
+            : keyword === "maximum"
+              ? order <= 0
+              : keyword === "exclusiveMinimum"
+                ? order > 0
+                : order < 0;
+        const params = {
+          comparison,
+          limit: typeof schemaLimit === "number" ? schemaLimit : limit,
+        };
+        rememberNumberToken(params, "limit", limitToken);
+        check.errors = valid
+          ? undefined
+          : [
+              {
+                keyword,
+                params,
+                message: `must be ${comparison} ${limitToken}`,
+              },
+            ];
+        return valid;
+      },
+      { errors: undefined as Array<Partial<ErrorObject>> | undefined },
+    );
+    ajv.addKeyword({
+      keyword,
+      type: "number",
+      schemaType: "number",
+      errors: true,
+      validate: check,
+    });
+  }
+  ajv.removeKeyword("multipleOf");
+  const checkMultiple = Object.assign(
+    function (
+      this: { numberToken?: string } | undefined,
+      step: number,
+      data: number,
+      parentSchema?: Record<string, unknown>,
+      context?: { parentData?: unknown; parentDataProperty?: string | number },
+    ) {
+      const dataToken =
+        context?.parentData === undefined
+          ? this?.numberToken
+          : originalNumberToken(
+              context.parentData,
+              context.parentDataProperty!,
+              data,
+            );
+      const schemaStep = parentSchema?.multipleOf;
+      const stepToken =
+        originalNumberToken(parentSchema, "multipleOf", schemaStep) ??
+        String(step);
+      if (!Number.isFinite(data) || !Number.isFinite(step)) return true;
+      const valid = jsonNumberIsMultipleOf(
+        dataToken ?? String(data),
+        stepToken,
+      );
+      const params = {
+        multipleOf: typeof schemaStep === "number" ? schemaStep : step,
+      };
+      rememberNumberToken(params, "multipleOf", stepToken);
+      checkMultiple.errors = valid
+        ? undefined
+        : [
+            {
+              keyword: "multipleOf",
+              params,
+              message: `must be multiple of ${stepToken}`,
+            },
+          ];
+      return valid;
+    },
+    { errors: undefined as Array<Partial<ErrorObject>> | undefined },
+  );
+  ajv.addKeyword({
+    keyword: "multipleOf",
+    type: "number",
+    schemaType: "number",
+    errors: true,
+    validate: checkMultiple,
+  });
   addFormats(ajv);
   return ajv;
 }
@@ -130,7 +258,7 @@ export function schemaIssues(
         instancePath: pointerPrefix + error.instancePath,
         schemaPath: error.schemaPath,
         keyword: error.keyword,
-        params: { ...error.params },
+        params: cloneClientJson(error.params),
       },
     };
   });

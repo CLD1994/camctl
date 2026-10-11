@@ -3,9 +3,12 @@ import { HttpError } from "./api";
 import { cloneClientJson } from "../shared/json";
 import {
   appendContentAction,
+  createActionAllocation,
   coordinatePreviews,
   sameContent,
   type CapabilityState,
+  type ActionAllocation,
+  type AppendExpectation,
 } from "../shared/automatic-previews";
 import { parseDraft } from "./editing";
 type Phase =
@@ -31,16 +34,14 @@ export interface FollowTransport {
   ): Promise<Draft>;
   read(id: string): Promise<Draft>;
 }
-export interface AppendExpectation {
-  content: DraftContent;
-  capabilityVersion?: string;
-}
+export type { AppendExpectation } from "../shared/automatic-previews";
 /** 客户端 attempt 的明确追加关系，不属于持久化资料或公共协议。 */
 export interface AppendAttempt {
   origin: Draft;
   baselineChanges: Array<{ actual: Draft; capabilities?: CapabilityState }>;
   baseline: Draft;
   action: Record<string, unknown>;
+  allocation: ActionAllocation;
   index: number;
   appended: DraftContent;
   expected: AppendExpectation;
@@ -74,6 +75,13 @@ export function classifyAppend(
   )
     return "baseline";
   try {
+    if (
+      (baseline.content.automaticPreviews ||
+        actual.content.automaticPreviews ||
+        expected?.content.automaticPreviews) &&
+      (typeof expected?.allocation?.id !== "string" || !expected.allocation.id)
+    )
+      return "conflict";
     const content =
       expected?.content ?? appendContentAction(baseline.content, action, true);
     if (
@@ -107,6 +115,7 @@ export class FollowOperation {
   result?: Draft;
   error = "";
   readonly action: Record<string, unknown>;
+  #allocation: ActionAllocation;
   expected?: AppendExpectation;
   private fixedAttempt?: AppendAttempt;
   private verified?: VerifiedAppend;
@@ -118,10 +127,15 @@ export class FollowOperation {
     destination: string,
     action: Record<string, unknown>,
     private transport: FollowTransport,
+    allocation?: ActionAllocation,
   ) {
     this.phase = destination === "new" ? "new" : "target";
     this.targetId = destination === "new" ? undefined : destination;
     this.action = cloneClientJson(action);
+    this.#allocation = cloneClientJson(allocation ?? createActionAllocation());
+  }
+  get allocation(): ActionAllocation {
+    return cloneClientJson(this.#allocation);
   }
   get inProgress() {
     return this.running;
@@ -147,18 +161,21 @@ export class FollowOperation {
       this.baseline!.content,
       this.action,
       true,
+      this.#allocation,
     );
     this.expected = {
       content: capabilities
         ? coordinatePreviews(appended, capabilities).content
         : appended,
       capabilityVersion: capabilities?.version,
+      allocation: cloneClientJson(this.#allocation),
     };
     this.fixedAttempt = cloneClientJson({
       origin: this.origin ?? this.baseline!,
       baselineChanges: this.baselineChanges,
       baseline: this.baseline!,
       action: this.action,
+      allocation: this.#allocation,
       index: parseDraft(this.baseline!.content).actions.length,
       appended,
       expected: this.expected,

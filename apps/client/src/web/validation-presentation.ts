@@ -1,4 +1,6 @@
 import type { Capabilities, Issue } from "../shared/types";
+import type { DraftContent } from "../server/models";
+import { displayJsonValue } from "../shared/json";
 import { isCameraAction } from "../shared/actions";
 import planSchema from "../../../../protocol/schemas/plan.schema.json";
 import notificationSchema from "../../../../protocol/schemas/host-notification.schema.json";
@@ -12,6 +14,7 @@ import { isObject, schemaIssues } from "../shared/validation";
 import { createProtocolValidator } from "../shared/protocol-validation";
 import type { ValidateFunction } from "ajv";
 import { pointer, pointerPath, type Path } from "./editing";
+import { objectBranches, objectBranchState } from "./object-branches";
 
 export interface IssuePresentation {
   target: string | null;
@@ -228,15 +231,43 @@ function locateInput(
       );
     }
   }
-  const definition = isObject(properties) ? properties[String(key)] : undefined;
-  if (
-    parts?.[2] === "params" &&
-    parts.length === 4 &&
-    isObject(definition) &&
-    typeof definition.title === "string"
-  ) {
-    field = definition.title;
-    identified = definition.title.trim() !== "";
+  const declared =
+    isObject(properties) && Object.hasOwn(properties, String(key));
+  const definition = declared ? properties[String(key)] : undefined;
+  if (parts?.[2] === "params" && parts.length === 4 && declared) {
+    field =
+      isObject(definition) &&
+      typeof definition.title === "string" &&
+      definition.title.trim() !== ""
+        ? definition.title
+        : String(key);
+    identified = true;
+  }
+  if (parts?.[2] === "params" && parts.length === 5 && parameter) {
+    const catalog = objectBranches(parameter, String(parts[3]));
+    if (catalog) {
+      const params =
+        isObject(action) && isObject(action.params) ? action.params : undefined;
+      const value = params?.[String(parts[3])];
+      const branch = isObject(value)
+        ? catalog.branches.find(
+            (candidate) => candidate.value === value[catalog.discriminator],
+          )
+        : undefined;
+      const child =
+        key === catalog.discriminator
+          ? (catalog.branches[0].schema.properties as Record<string, unknown>)[
+              catalog.discriminator
+            ]
+          : branch?.members.find((member) => member.name === key)?.schema;
+      if (isObject(child)) {
+        field =
+          typeof child.title === "string" && child.title.trim() !== ""
+            ? child.title
+            : String(key);
+        identified = true;
+      }
+    }
   }
   if (parts?.length === 2 && index !== undefined) {
     field = "动作内容";
@@ -309,7 +340,7 @@ export function presentIssue(
     ].includes(issue.code) &&
     typeof params?.limit === "number"
   )
-    message = `${own(hints, issue.code)}限制为 ${params.limit}。`;
+    message = `${own(hints, issue.code)}限制为 ${displayJsonValue(params, "limit", params.limit)}。`;
   if (issue.code === "schema_format" && typeof params?.format === "string")
     message = `输入不符合 ${params.format} 格式。`;
   return {
@@ -693,11 +724,85 @@ function builtinProjection(
   ];
 }
 
+/** 已证明局部独立的模式，仅将当前可修正责任呈现给用户。 */
+function cameraObjectProjection(
+  issues: readonly Issue[],
+  action: Record<string, unknown>,
+  index: number,
+  plan: unknown,
+  capabilities: Capabilities | null | undefined,
+  content: DraftContent,
+): { handled: Issue[]; shown: PresentedIssue[] } {
+  const handled: Issue[] = [],
+    shown: PresentedIssue[] = [];
+  if (!isCameraAction(action.type) || !isObject(action.params))
+    return { handled, shown };
+  const params = action.params;
+  const parameter = capabilities?.devices
+    .find((device) => device.device_id === action.device_id)
+    ?.actions.find((candidate) => candidate.type === action.type)
+    ?.parameter_types.find((candidate) => candidate.type === params.type);
+  if (!parameter || !isObject(parameter.schema.properties))
+    return { handled, shown };
+  for (const name of Object.keys(parameter.schema.properties)) {
+    const catalog = objectBranches(parameter, name);
+    if (!catalog) continue;
+    const path: Path = ["actions", index, "params", name],
+      prefix = pointer(path);
+    const state = objectBranchState(content, path, catalog);
+    // 身份或祖先输入未完成时，完整诊断继续采用原有 JSON 定位。
+    if (state.kind === "blocked") continue;
+    const local = issues.filter(
+      (issue) =>
+        issue.schema &&
+        (issue.pointer === prefix || issue.pointer?.startsWith(prefix + "/")),
+    );
+    if (!local.length) continue;
+    handled.push(...local);
+    if (state.kind === "empty") {
+      const target = pointer([...path, catalog.discriminator]);
+      const issue = projectedIssue(target, "schema_required", "请选择模式。");
+      shown.push({
+        issue,
+        ...presentIssue(issue, plan, capabilities),
+        message: "请选择模式。",
+        responsibility: `camera-object-selection:${prefix}`,
+      });
+    } else if (state.kind === "selected") {
+      const value = params[name];
+      shown.push(
+        ...validatePresentation(state.branch.schema, value, prefix).map(
+          (issue) => ({
+            issue,
+            ...presentIssue(issue, plan, capabilities),
+            json: false,
+            responsibility: `camera-object-member:${prefix}:${issue.schema?.schemaPath}`,
+          }),
+        ),
+      );
+    } else {
+      // 保留正文的具体诊断，但所有修正都归本对象 JSON，不猜测隐藏成员。
+      const location = locateInput(prefix, plan, capabilities).location;
+      shown.push(
+        ...local.map((issue) => ({
+          issue,
+          ...presentIssue(issue, plan, capabilities),
+          target: prefix,
+          location,
+          json: true,
+        })),
+      );
+    }
+  }
+  return { handled, shown };
+}
+
 /** 当前输入的唯一呈现集合；原始机器诊断由调用者完整保留。 */
 export function presentIssues(
   issues: readonly Issue[],
   plan?: unknown,
   capabilities?: Capabilities | null,
+  content?: DraftContent,
 ): PresentedIssue[] {
   const result: PresentedIssue[] = [];
   const handled = new Set<Issue>();
@@ -705,6 +810,18 @@ export function presentIssues(
     plan.actions.forEach((action, index) => {
       if (!isObject(action)) return;
       const prefix = `/actions/${index}`;
+      if (content) {
+        const objects = cameraObjectProjection(
+          issues,
+          action,
+          index,
+          plan,
+          capabilities,
+          content,
+        );
+        objects.handled.forEach((issue) => handled.add(issue));
+        result.push(...objects.shown);
+      }
       const rawParams = issues.filter(
         (issue) =>
           issue.schema &&

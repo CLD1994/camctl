@@ -1,7 +1,7 @@
 import { Select, SelectItem, SelectFieldset } from "./Select";
 import { Dialog } from "@base-ui/react/dialog";
 import { Tabs } from "@base-ui/react/tabs";
-import { useEffect, useRef, useState, useReducer } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useReducer } from "react";
 import type {
   Draft,
   Preset,
@@ -11,6 +11,10 @@ import type {
 import {
   api,
   readDraft as readObservedDraft,
+  readDraftObservation,
+  observeDraft,
+  createDraftCopy,
+  readDraftCreation,
   download,
   upload,
   HttpError,
@@ -21,11 +25,18 @@ import { FollowOperation } from "./followup";
 import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
 import type { EstimateReloadPhase } from "./video-estimate-state";
-import { StateObservations } from "./state-observations";
+import { StateObservations, SupersededStateReadError } from "./state-observations";
 import { DeviceGuide } from "./DeviceGuide";
 import { useFeedback } from "./feedback";
+import { stringifyJson } from "../shared/json";
 import { RecordDetail, type Followup } from "./Records";
 import { Badge, Empty, ErrorBox, Facts } from "./common";
+import { DraftConflictDialog } from "./DraftConflictDialog";
+import { DraftOperationNotice } from "./DraftOperationNotice";
+import { prepareCopyTarget } from "./draft-copy-target";
+import { bindSessionWholeView } from "./draft-session-view";
+import type { ConflictSelectionSnapshot } from "./draft-conflicts";
+import type { DraftCopyRecovery } from "./session";
 
 type Page = "plans" | "import" | "devices";
 type PendingFollow = { operation: FollowOperation; follow: Followup };
@@ -40,6 +51,12 @@ export function App() {
     [follow, setFollow] = useState<Followup>(),
     [activeFollow, setActiveFollow] = useState<PendingFollow>(),
     [followOperations, setFollowOperations] = useState<PendingFollow[]>([]);
+  const [conflictSession, setConflictSession] = useState<DraftSession>();
+  const conflictEntry = useRef<HTMLElement | null>(null);
+  const conflictEntryNavigation = useRef(0);
+  const navigationGeneration = useRef(0);
+  const exportedNavigation = useRef(new WeakMap<DraftSession, string>());
+  const [focusRequest, setFocusRequest] = useState<number>();
   const [error, setError] = useFeedback(page);
   const [estimateReloadPhase, setEstimateReloadPhase] =
     useState<EstimateReloadPhase>("idle");
@@ -47,6 +64,7 @@ export function App() {
   const followEntry = useRef<HTMLElement | null>(null),
     followDestination = useRef(false),
     draftTab = useRef<HTMLElement | null>(null),
+    recordTab = useRef<HTMLElement | null>(null),
     plansNav = useRef<HTMLButtonElement | null>(null);
   const captureFollowEntry = () => {
     followEntry.current =
@@ -72,21 +90,18 @@ export function App() {
     refreshing = useRef<Promise<ClientState> | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}),
     [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  const captureStateContext = (consumerId?: string) => ({ consumerId });
   const [observations] = useState(
     () =>
       new StateObservations(
         () => api<ClientState>("/state"),
-        () =>
-          new Map(
-            [...sessions.current].map(([id, session]) => [
-              id,
-              session.exportState === "unknown"
-                ? session.exportToken
-                : undefined,
-            ]),
-          ),
-        (value, exportTokens) => {
+        () => captureStateContext(),
+        (value, { consumerId }) => {
           if (!mounted.current) return;
+          // 对所有已打开会话消费同一份完整集合，可靠缺失和读取异常分别分类。
+          for (const [id, session] of sessions.current)
+            if (id !== consumerId)
+              session.observeTarget(observeDraft(id, value));
           if (value.drafts)
             value = {
               ...value,
@@ -95,17 +110,27 @@ export function App() {
               ),
             };
           capabilityObservation.current = value.capabilities;
-          for (const draft of value.drafts ?? [])
-            sessions.current
-              .get(draft.id)
-              ?.observe(draft, exportTokens.get(draft.id), value.capabilities);
           setState(value);
           setConnection("");
         },
         setEstimateReloadPhase,
+        (error, { consumerId }) => {
+          if (!mounted.current) return;
+          const message =
+            error instanceof Error ? error.message : String(error);
+          for (const [id, session] of sessions.current)
+            if (id !== consumerId)
+              session.observeTarget({ kind: "unavailable", message });
+        },
       ),
   );
-  const readState = () => observations.read();
+  const readState = async (consumerId?: string): Promise<ClientState> => {
+    // 操作的同次读回由其领域入口消费；其他会话仍观察原始完整集合。
+    const result = await observations.read(captureStateContext(consumerId));
+    if (result.kind === "superseded")
+      throw new SupersededStateReadError();
+    return result.value;
+  };
   const readDraft = (id: string) => readObservedDraft(id, readState);
   const refresh = async (duringReload = false) => {
     if (reloadPaused.current && !duringReload) {
@@ -115,7 +140,9 @@ export function App() {
     if (refreshing.current) return refreshing.current;
     const request = readState()
       .catch((e) => {
-        if (mounted.current) setConnection((e as Error).message);
+        if (mounted.current) {
+          setConnection((e as Error).message);
+        }
         throw e;
       })
       .finally(() => {
@@ -131,7 +158,7 @@ export function App() {
       if (!reloadPaused.current) void refresh().catch(() => {});
     }, 900);
     const leave = (e: BeforeUnloadEvent) => {
-      if ([...sessions.current.values()].some((s) => !s.saved)) {
+      if ([...sessions.current.values()].some((s) => s.needsLeaveWarning)) {
         e.preventDefault();
         e.returnValue = "";
       }
@@ -143,26 +170,33 @@ export function App() {
       window.removeEventListener("beforeunload", leave);
     };
   }, []);
+  const createSession = (draft: Draft) => {
+    const s = new DraftSession(
+      draft,
+      {
+        save: (id, revision, content) =>
+          api<Draft>(`/drafts/${id}`, "PUT", { revision, content }),
+        read: (id) => readObservedDraft(id, () => readState(id)),
+        readObservation: (id) => readDraftObservation(id, () => readState(id)),
+      },
+      () => {
+        if (mounted.current) render();
+      },
+    );
+    bindSessionWholeView(s);
+    return s;
+  };
   const getSession = (draft: Draft) => {
     let s = sessions.current.get(draft.id);
     if (!s) {
-      s = new DraftSession(
-        draft,
-        {
-          save: (id, revision, content) =>
-            api<Draft>(`/drafts/${id}`, "PUT", { revision, content }),
-          read: readDraft,
-        },
-        () => {
-          if (mounted.current) render();
-        },
-      );
+      s = createSession(draft);
       sessions.current.set(draft.id, s);
       s.coordinate(capabilityObservation.current);
     }
     return s;
   };
   const openDraft = (draft: Draft) => {
+    navigationGeneration.current++;
     getSession(draft);
     setSelected(draft.id);
     setPage("plans");
@@ -189,12 +223,7 @@ export function App() {
     try {
       // 已发的轮询先结束；其后只有本次流程可以启动下一份状态观察。
       await observations.settle();
-      await prepareSessionsForReload(
-        [...sessions.current.values()],
-        async () => {
-          await refresh(true);
-        },
-      );
+      await prepareSessionsForReload([...sessions.current.values()]);
       started = true;
       observations.postStarted();
       try {
@@ -226,12 +255,118 @@ export function App() {
     openDraft(draft);
     await refresh();
   };
+  const visibleDestination = () => {
+    const editor = document.querySelector<HTMLElement>('[data-testid="draft-editor"]');
+    if (editor && editor.getClientRects().length) return editor;
+    const tab = document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (tab && tab.getClientRects().length) return tab;
+    return plansNav.current;
+  };
+  const focusNavigation = (generation: number) => setFocusRequest(generation);
+  // 焦点只能在目的地的 React 提交完成后移动，不能提前聚焦即将卸载的来源 Editor。
+  useLayoutEffect(() => {
+    if (focusRequest !== undefined) queueMicrotask(() => {
+      if (mounted.current && navigationGeneration.current === focusRequest)
+        visibleDestination()?.focus();
+    });
+  }, [focusRequest, page, tab, selected, recordId]);
   const openRecord = (id: string) => {
+    for (const session of sessions.current.values())
+      if (session.exportedRequestId === id && !session.needsLeaveWarning)
+        exportedNavigation.current.set(session, id);
+    const generation = ++navigationGeneration.current;
     setRecordId(id);
     setPage("plans");
     setTab("records");
+    focusNavigation(generation);
+  };
+  const finishExportNavigation = (session: DraftSession, id: string, generation: number) => {
+    if (session.exportedRequestId !== id || session.needsLeaveWarning) return;
+    exportedNavigation.current.set(session, id);
+    if (generation === navigationGeneration.current)
+      openRecord(id);
   };
   const current = sessions.current.get(selected);
+  const hasReliableDeletion = (session: DraftSession) =>
+    session.targetObservation.kind === "deleted" || session.deletionState === "deleted";
+  const finishDeletedNavigation = (session: DraftSession, generation: number) => {
+    if (!hasReliableDeletion(session) || session.needsLeaveWarning ||
+      generation !== navigationGeneration.current || selected !== session.draft.id ||
+      page !== "plans" || tab !== "drafts") return;
+    const next = ++navigationGeneration.current;
+    setSelected("");
+    focusNavigation(next);
+  };
+  const focusSource = (session: DraftSession) => {
+    if (session.exportedRequestId && !session.needsLeaveWarning) {
+      openRecord(session.exportedRequestId);
+      return;
+    }
+    const generation = ++navigationGeneration.current;
+    setSelected(hasReliableDeletion(session) && !session.needsLeaveWarning ? "" : session.draft.id);
+    setPage("plans");
+    setTab("drafts");
+    focusNavigation(generation);
+  };
+  const showConflict = (session: DraftSession) => {
+    conflictEntryNavigation.current = navigationGeneration.current;
+    conflictEntry.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setConflictSession(session);
+  };
+  const prepareCopyNavigation = (actual: Draft) => {
+    const target = prepareCopyTarget(sessions.current, actual, createSession);
+    const navigation = navigationGeneration.current;
+    return {
+      validate: () => {
+        if (!mounted.current || navigationGeneration.current !== navigation)
+          throw Error("导航在准备期间改变");
+        target.validate();
+      },
+      commit: () => {
+        target.commit();
+        const generation = ++navigationGeneration.current;
+        setSelected(actual.id);
+        setPage("plans");
+        setTab("drafts");
+        setConflictSession(undefined);
+        focusNavigation(generation);
+      },
+    };
+  };
+  const startCopy = (
+    session: DraftSession,
+    recovery?: DraftCopyRecovery,
+    shown?: ConflictSelectionSnapshot,
+  ) =>
+    run(async () => {
+      if (
+        shown &&
+        (shown.draftId !== session.draft.id ||
+          shown.localVersion !== session.version ||
+          shown.observationEpoch !== session.observationEpoch ||
+          !sameContent(shown.local, session.content))
+      )
+        throw Error("另存比较的完整输入或观察资格已改变，请重新打开比较");
+      const transport = { create: createDraftCopy, read: readDraftCreation };
+      if (recovery) session.beginRecoveryCopy(recovery, transport);
+      else session.beginCopy(transport);
+      setConflictSession(undefined);
+      await session.retryCopy(session.copyDecision!, prepareCopyNavigation);
+    });
+  const chooseVersion = (
+    session: DraftSession,
+    snapshot: ConflictSelectionSnapshot,
+    kind: "adopt" | "replace",
+  ) =>
+    run(async () => {
+      setConflictSession(undefined);
+      if (kind === "adopt") session.adoptSavedVersion(snapshot);
+      else await session.replaceSavedVersion(snapshot);
+      focusSource(session);
+    });
   const removeDraft = (session: DraftSession, verify = false) => {
     if (
       !verify &&
@@ -242,11 +377,16 @@ export function App() {
       return;
     run(async () => {
       const id = session.draft.id;
+      const generation = navigationGeneration.current;
       const read = async () => {
-        const latest = await readState();
-        if (latest.startup.state !== "ready" || !Array.isArray(latest.drafts))
-          throw new Error("无法可靠读取草稿列表");
-        return latest.drafts.find((d) => d.id === id);
+        const epoch = session.observationEpoch;
+        const observed = await readDraftObservation(id, () => readState(id));
+        if (epoch !== session.observationEpoch)
+          throw Error("删除核实已被较新来源观察取代");
+        session.observeTarget(observed);
+        if (observed.kind === "unavailable" || session.decision.kind === "invalid")
+          throw Error(session.error);
+        return observed.kind === "available" ? observed.draft : undefined;
       };
       if (verify) await session.checkDeletion(read);
       else
@@ -259,8 +399,14 @@ export function App() {
           if (result.deleted !== true) throw new Error("删除回执无效");
         }, read);
       deletedDrafts.current.add(id);
-      sessions.current.delete(id);
-      setSelected((value) => (value === id ? "" : value));
+      if (
+        !session.hasUnfinishedResponsibilities &&
+        !session.needsLeaveWarning
+      ) {
+        finishDeletedNavigation(session, generation);
+        sessions.current.delete(id);
+        setSelected((value) => (value === id ? "" : value));
+      }
       setState((old) =>
         old?.drafts
           ? { ...old, drafts: old.drafts.filter((d) => d.id !== id) }
@@ -270,15 +416,21 @@ export function App() {
     });
   };
   useEffect(() => {
-    if (current?.exportedRequestId) {
-      setRecordId(current.exportedRequestId);
-      setPage("plans");
-      setTab("records");
-    }
-  }, [current?.exportedRequestId]);
+    if (current?.targetObservation.kind === "deleted")
+      finishDeletedNavigation(current, navigationGeneration.current);
+  }, [current, current?.targetObservation.kind, current?.needsLeaveWarning, page, tab, selected]);
+  useEffect(() => {
+    if (!current?.exportedRequestId || current.needsLeaveWarning || conflictSession)
+      return;
+    const id = current.exportedRequestId;
+    if (exportedNavigation.current.get(current) === id) return;
+    exportedNavigation.current.set(current, id);
+    if (page === "plans" && tab === "drafts") openRecord(id);
+  }, [current, current?.exportedRequestId, current?.needsLeaveWarning, conflictSession, page, tab]);
   const exportDraft = () =>
     run(async () => {
       if (!current) return;
+      const generation = navigationGeneration.current;
       let record: ExportedRequest;
       current.coordinate(capabilityObservation.current);
       await current.flush();
@@ -317,7 +469,7 @@ export function App() {
             }
           : old,
       );
-      openRecord(record.id);
+      finishExportNavigation(current, record.id, generation);
       await download(
         `/requests/${record.id}/download`,
         `plan-${record.id}.json`,
@@ -348,7 +500,8 @@ export function App() {
     run(async () => {
       if (!current) return;
       await current.flush();
-      if (!current.saved) throw Error("请先核实草稿保存状态");
+      if (!current.canSave || !current.saved)
+        throw Error("请先核实草稿保存状态");
       const draft = await api<Draft>(
         `/drafts/${current.draft.id}/copy`,
         "POST",
@@ -569,6 +722,22 @@ export function App() {
     ),
     records = recordsFor(state.requests ?? [], state.snapshot?.plans ?? []),
     record = records.find((r) => r.id === recordId);
+  let conflictSnapshot: ConflictSelectionSnapshot | undefined,
+    conflictSelectable = false;
+  if (conflictSession) {
+    try {
+      conflictSnapshot = conflictSession.prepareConflictSelection();
+      conflictSelectable = true;
+    } catch {
+      conflictSnapshot = {
+        draftId: conflictSession.draft.id,
+        localVersion: conflictSession.version,
+        local: conflictSession.content,
+        remote: conflictSession.lastReliableDraft,
+        observationEpoch: conflictSession.observationEpoch,
+      };
+    }
+  }
   const planContent = (
     <div className="content-grid">
       <section className="panel list-panel">
@@ -625,7 +794,10 @@ export function App() {
         )}
       </section>
       {tab === "drafts" ? (
-        current && !current.exportedRequestId ? (
+        current &&
+        (!current.exportedRequestId ||
+          current.hasUnfinishedResponsibilities ||
+          current.needsLeaveWarning) ? (
           <Editor
             key={selected}
             session={current}
@@ -639,12 +811,17 @@ export function App() {
             onExport={exportDraft}
             onDelete={() => removeDraft(current)}
             onCopy={copyDraft}
+            onConflict={() => showConflict(current)}
+            onSaveAs={() => startCopy(current)}
             checkDeletion={() => removeDraft(current, true)}
             checkExport={() =>
               run(async () => {
-                await refresh();
+                const generation = navigationGeneration.current;
+                const actual = await current.checkExport();
                 if (current.exportState === "unknown")
                   throw Error(current.error);
+                if (actual.exportedRequestId)
+                  finishExportNavigation(current, actual.exportedRequestId, generation);
               })
             }
             savePreset={savePreset}
@@ -689,21 +866,30 @@ export function App() {
             ref={plansNav}
             data-testid="nav-plans"
             aria-current={page === "plans" ? "page" : undefined}
-            onClick={() => setPage("plans")}
+            onClick={() => {
+              navigationGeneration.current++;
+              setPage("plans");
+            }}
           >
             <span>▤</span>计划
           </button>
           <button
             data-testid="nav-import"
             aria-current={page === "import" ? "page" : undefined}
-            onClick={() => setPage("import")}
+            onClick={() => {
+              navigationGeneration.current++;
+              setPage("import");
+            }}
           >
             <span>↥</span>文件导入
           </button>
           <button
             data-testid="nav-devices"
             aria-current={page === "devices" ? "page" : undefined}
-            onClick={() => setPage("devices")}
+            onClick={() => {
+              navigationGeneration.current++;
+              setPage("devices");
+            }}
           >
             <span>◉</span>设备说明
           </button>
@@ -714,6 +900,19 @@ export function App() {
         </div>
       </aside>
       <main className="workspace">
+        {[...sessions.current.values()].map((session) => (
+          <DraftOperationNotice
+            key={session.draft.id}
+            session={session}
+            prepareTarget={prepareCopyNavigation}
+            onConfirmation={() => {
+              focusSource(session);
+              showConflict(session);
+            }}
+            onSource={() => focusSource(session)}
+            finalFocus={visibleDestination}
+          />
+        ))}
         {page === "plans" &&
           followOperations
             .filter((item) => item.operation.phase !== "done")
@@ -782,7 +981,7 @@ export function App() {
                 <h2>保留的额外编辑内容</h2>
                 <p>
                   原草稿 {session.draft.id}{" "}
-                  已导出，以下本地输入未写入固定原请求，可明确保存为新草稿。
+                  {session.decision.kind === "deleted" ? "已删除" : "已导出"}，以下本地输入仍保留在当前会话，可明确保存为新草稿。
                 </p>
                 <textarea
                   className="code-input"
@@ -791,26 +990,23 @@ export function App() {
                   value={session.recoveryContent!.text}
                 />
                 <Facts value={session.recoveryContent!.pending} />
+                <details>
+                  <summary>额外编辑内容的完整技术详情</summary>
+                  <pre>{stringifyJson(session.recoveryContent, 2)}</pre>
+                </details>
                 {(Object.keys(session.recoveryContent!.actionVariants ?? {})
                   .length > 0 ||
                   Object.keys(session.recoveryContent!.parameterVariants ?? {})
+                    .length > 0 ||
+                  Object.keys(session.recoveryContent!.objectVariants ?? {})
                     .length > 0) && (
                   <p>
-                    同时保留了其他动作类型或参数类型的编辑内容，保存为新草稿后可切换查看。
+                    同时保留了其他动作类型、参数类型或对象模式的编辑内容，保存为新草稿后可切换查看。
                   </p>
                 )}
                 <button
-                  disabled={busy}
-                  onClick={() =>
-                    run(async () => {
-                      const draft = await api<Draft>("/drafts", "POST", {
-                        content: session.recoveryContent,
-                      });
-                      session.completeRecovery();
-                      openDraft(draft);
-                      await refresh();
-                    })
-                  }
+                  disabled={busy || !session.canBeginCopy}
+                  onClick={() => startCopy(session)}
                 >
                   将保留内容保存为新草稿
                 </button>
@@ -843,7 +1039,10 @@ export function App() {
           <Tabs.Root
             value={tab}
             onValueChange={(value) => {
-              if (value === "drafts" || value === "records") setTab(value);
+              if (value === "drafts" || value === "records") {
+                navigationGeneration.current++;
+                setTab(value);
+              }
             }}
           >
             <div className="plan-tools">
@@ -851,7 +1050,7 @@ export function App() {
                 <Tabs.Tab value="drafts" ref={draftTab}>
                   草稿 <span>{drafts.length}</span>
                 </Tabs.Tab>
-                <Tabs.Tab value="records" data-testid="tab-records">
+                <Tabs.Tab value="records" ref={recordTab} data-testid="tab-records">
                   计划记录 <span>{records.length}</span>
                 </Tabs.Tab>
               </Tabs.List>
@@ -940,6 +1139,38 @@ export function App() {
               followDestination.current = true;
               setFollow(undefined);
             })
+          }
+        />
+      )}
+      {conflictSession && conflictSnapshot && (
+        <DraftConflictDialog
+          snapshot={conflictSnapshot}
+          selectable={conflictSelectable}
+          canCopy={conflictSession.canBeginCopy}
+          busy={
+            busy ||
+            conflictSession.copyPendingDecision ||
+            conflictSession.selectionPendingDecision
+          }
+          close={() => setConflictSession(undefined)}
+          adopt={(snapshot) =>
+            chooseVersion(conflictSession, snapshot, "adopt")
+          }
+          replace={(snapshot) =>
+            chooseVersion(conflictSession, snapshot, "replace")
+          }
+          copy={() => startCopy(conflictSession, undefined, conflictSnapshot)}
+          verify={() =>
+            run(async () => {
+              await refresh();
+            })
+          }
+          finalFocus={() =>
+            conflictEntryNavigation.current !== navigationGeneration.current
+              ? false
+              : conflictEntry.current?.isConnected
+              ? conflictEntry.current
+              : visibleDestination()
           }
         />
       )}

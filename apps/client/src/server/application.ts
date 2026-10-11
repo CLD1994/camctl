@@ -10,10 +10,11 @@ import { join } from "node:path";
 import { Store } from "./database";
 import {
   AppError,
-  DRAFT_COMMON_ACTION_FIELDS,
   errorMessage,
   type Draft,
   type DraftContent,
+  type DraftCreationResult,
+  type DraftCreation,
   type ExportedRequest,
   type Preset,
   type ImportFile,
@@ -22,7 +23,6 @@ import {
   parseJson,
   parseClientJson,
   stringifyJson,
-  exactJsonIdentity,
   motorInputTexts,
   type MotorInputText,
   MOTOR_ORIGINAL_INPUT_FIELDS,
@@ -32,20 +32,18 @@ import {
   coordinatePreviews,
   initializePreviewMetadata,
   copyDraftContent,
-  validPreviewMetadata,
   sameContent,
   appendContentAction,
   copyDraftAction,
+  createActionAllocation,
+  type AppendExpectation,
   type CapabilityState,
 } from "../shared/automatic-previews";
+import { checkDraftContent } from "../shared/draft-content";
+import { isCanonicalId } from "../shared/validation";
 import { isCameraAction } from "../shared/actions";
 import { loadCapabilities, validateParams } from "../shared/capabilities";
 import { validatePlan } from "../shared/plan";
-import {
-  checkParameterVariants,
-  checkParameterVariantLocations,
-  checkActiveParameterVariant,
-} from "../shared/parameter-variants";
 import type { StatusReport } from "../shared/types";
 import {
   mergeReport,
@@ -216,145 +214,7 @@ export class Application {
     return r;
   }
   private checkContent(content: DraftContent) {
-    if (!object(content) || typeof content.text !== "string")
-      throw new AppError("invalid_content", "草稿必须包含编辑文本");
-    if (
-      content.automaticPreviews !== undefined &&
-      !validPreviewMetadata(content.automaticPreviews)
-    )
-      throw new AppError("invalid_content", "自动预览编辑资料格式不正确");
-    if (
-      content.pending !== undefined &&
-      (!object(content.pending) ||
-        Object.values(content.pending).some(
-          (v) =>
-            !object(v) ||
-            !["number", "json"].includes(String(v.kind)) ||
-            typeof v.text !== "string",
-        ))
-    )
-      throw new AppError("invalid_content", "未完成输入格式不正确");
-    if (content.actionVariants !== undefined) {
-      const fail = () => {
-        throw new AppError("invalid_content", "动作类型编辑资料格式不正确");
-      };
-      if (!object(content.actionVariants)) fail();
-      for (const [index, variants] of Object.entries(content.actionVariants)) {
-        if (
-          !/^(0|[1-9]\d*)$/.test(index) ||
-          !Number.isSafeInteger(Number(index)) ||
-          !Array.isArray(variants)
-        )
-          fail();
-        for (const variant of variants) {
-          if (
-            !object(variant) ||
-            !object(variant.fields) ||
-            !object(variant.pending) ||
-            Object.keys(variant).some(
-              (key) =>
-                ![
-                  "type",
-                  "fields",
-                  "fieldsText",
-                  "pending",
-                  "parameterVariants",
-                ].includes(key),
-            ) ||
-            Object.keys(variant.fields).some((key) =>
-              [...DRAFT_COMMON_ACTION_FIELDS, "type"].includes(key),
-            ) ||
-            Object.entries(variant.pending).some(
-              ([key, value]) =>
-                !/^\/(?:[^~]|~[01])*$/.test(key) ||
-                DRAFT_COMMON_ACTION_FIELDS.some(
-                  (field) =>
-                    key === `/${field}` || key.startsWith(`/${field}/`),
-                ) ||
-                !object(value) ||
-                !["number", "json"].includes(String(value.kind)) ||
-                typeof value.text !== "string",
-            )
-          )
-            fail();
-          if (variant.parameterVariants !== undefined) {
-            try {
-              checkParameterVariants(variant.parameterVariants);
-            } catch {
-              fail();
-            }
-          }
-          if (variant.fieldsText !== undefined) {
-            try {
-              if (typeof variant.fieldsText !== "string") fail();
-              const fields = parseClientJson(variant.fieldsText!);
-              if (
-                !object(fields) ||
-                exactJsonIdentity(fields) !== exactJsonIdentity(variant.fields)
-              )
-                fail();
-            } catch {
-              fail();
-            }
-          }
-          if (variant.parameterVariants !== undefined) {
-            try {
-              const fields =
-                variant.fieldsText === undefined
-                  ? variant.fields
-                  : parseClientJson(variant.fieldsText);
-              checkActiveParameterVariant(
-                variant.parameterVariants,
-                fields as Record<string, unknown>,
-              );
-            } catch {
-              fail();
-            }
-          }
-        }
-      }
-    }
-    if (content.parameterVariants !== undefined) {
-      try {
-        if (!object(content.parameterVariants))
-          throw Error("参数类型资料必须是动作位置映射");
-        for (const [index, variants] of Object.entries(
-          content.parameterVariants,
-        )) {
-          if (
-            !/^(0|[1-9]\d*)$/.test(index) ||
-            !Number.isSafeInteger(Number(index))
-          )
-            throw Error("参数类型资料动作位置不正确");
-          checkParameterVariants(variants);
-        }
-      } catch {
-        throw new AppError("invalid_content", "参数类型编辑资料格式不正确");
-      }
-    }
-    // 无法解析的正文仍可作为编辑原文保存；可解释时不能保存悬空的新资料位置。
-    let root: unknown;
-    try {
-      root = parseClientJson(content.text);
-    } catch {
-      return;
-    }
-    if (object(root) && Array.isArray(root.actions)) {
-      try {
-        checkParameterVariantLocations(content, root.actions);
-        for (const [index, variants] of Object.entries(
-          content.parameterVariants ?? {},
-        )) {
-          const action = root.actions[Number(index)];
-          if (object(action)) checkActiveParameterVariant(variants, action);
-        }
-      } catch {
-        throw new AppError(
-          "invalid_content",
-          "参数类型编辑资料的动作归属不正确",
-        );
-      }
-    }
+    checkDraftContent(content);
   }
   createDraft(
     content: DraftContent = initializePreviewMetadata(
@@ -363,6 +223,11 @@ export class Application {
       randomUUID(),
     ),
   ): Draft {
+    const draft = this.buildDraft(content);
+    this.store.set("drafts", draft.id, draft);
+    return draft;
+  }
+  private buildDraft(content: DraftContent): Draft {
     this.checkContent(content);
     content = coordinatePreviews(
       copyDraftContent(content, randomUUID()),
@@ -376,8 +241,147 @@ export class Application {
       createdAt: now,
       updatedAt: now,
     };
-    this.store.set("drafts", d.id, d);
     return d;
+  }
+  createDraftCopy(attemptId: string, input: DraftContent): DraftCreationResult {
+    return this.store.transaction(() => {
+      const priorValue = this.readCreationRecord("draft_creations", attemptId);
+      if (priorValue !== undefined) {
+        const prior = this.requireCreationFact(priorValue, attemptId);
+        this.checkContent(input);
+        if (!sameContent(prior.input, input))
+          throw new AppError(
+            "creation_conflict",
+            "创建身份与固定输入不一致",
+            409,
+          );
+        return this.readCreationTarget(prior);
+      }
+      if (typeof attemptId !== "string" || !attemptId.length)
+        throw new AppError("invalid_creation_id", "创建尝试必须具有非空身份");
+      const created = this.buildDraft(input);
+      const creation: DraftCreation = {
+        attemptId,
+        input: cloneClientJson(input),
+        created,
+      };
+      this.store.set("drafts", created.id, created);
+      this.store.set("draft_creations", attemptId, creation);
+      return {
+        kind: "created",
+        creation,
+        target: { kind: "editable", draft: created },
+      };
+    });
+  }
+  draftCreation(attemptId: string): DraftCreationResult {
+    return this.store.transaction(() => {
+      const value = this.readCreationRecord("draft_creations", attemptId);
+      return value === undefined
+        ? { kind: "not_created", attemptId }
+        : this.readCreationTarget(this.requireCreationFact(value, attemptId));
+    });
+  }
+  private readCreationRecord(
+    namespace: "draft_creations" | "drafts",
+    id: string,
+  ): unknown {
+    try {
+      return this.store.get<unknown>(namespace, id);
+    } catch (error) {
+      throw new AppError(
+        "data_fault",
+        `创建记录无法可靠读取：${errorMessage(error)}`,
+        503,
+      );
+    }
+  }
+  private requireCreationDraft(value: unknown): Draft {
+    if (
+      !object(value) ||
+      typeof value.id !== "string" ||
+      !value.id.length ||
+      !Number.isSafeInteger(value.revision) ||
+      (value.revision as number) < 1 ||
+      typeof value.createdAt !== "string" ||
+      typeof value.updatedAt !== "string" ||
+      (value.exportedRequestId !== undefined &&
+        !isCanonicalId(value.exportedRequestId))
+    )
+      throw Error("草稿记录的身份、版本或时间结构不正确");
+    formatProtocolTime(value.createdAt);
+    formatProtocolTime(value.updatedAt);
+    if (value.updatedAt < value.createdAt)
+      throw Error("草稿更新时间早于创建时间");
+    this.checkContent(value.content as DraftContent);
+    if (value.lastWrite !== undefined) {
+      const write = value.lastWrite;
+      if (
+        !object(write) ||
+        !Number.isSafeInteger(write.revision) ||
+        (write.revision as number) < 2 ||
+        (write.revision as number) > (value.revision as number)
+      )
+        throw Error("草稿最近写入依据的版本不正确");
+      this.checkContent(write.input as DraftContent);
+      this.checkContent(write.content as DraftContent);
+    }
+    return value as unknown as Draft;
+  }
+  private requireCreationFact(
+    value: unknown,
+    attemptId: string,
+  ): DraftCreation {
+    try {
+      if (!object(value) || value.attemptId !== attemptId || !attemptId.length)
+        throw Error("创建尝试身份不正确");
+      this.checkContent(value.input as DraftContent);
+      const created = this.requireCreationDraft(value.created);
+      if (
+        created.revision !== 1 ||
+        created.exportedRequestId !== undefined ||
+        created.lastWrite !== undefined ||
+        created.createdAt !== created.updatedAt
+      )
+        throw Error("首次创建快照不是初始草稿记录");
+      return value as unknown as DraftCreation;
+    } catch (error) {
+      throw new AppError(
+        "data_fault",
+        `创建依据无法可靠读取：${errorMessage(error)}`,
+        503,
+      );
+    }
+  }
+  private readCreationTarget(creation: DraftCreation): DraftCreationResult {
+    const value = this.readCreationRecord("drafts", creation.created.id);
+    if (value === undefined)
+      return { kind: "created", creation, target: { kind: "deleted" } };
+    try {
+      const draft = this.requireCreationDraft(value);
+      if (
+        draft.id !== creation.created.id ||
+        draft.createdAt !== creation.created.createdAt ||
+        (draft.revision === 1 &&
+          (!sameContent(draft.content, creation.created.content) ||
+            draft.exportedRequestId !== undefined))
+      )
+        throw Error("当前目标与首次创建快照不一致");
+      return {
+        kind: "created",
+        creation,
+        target: {
+          kind: draft.exportedRequestId === undefined ? "editable" : "exported",
+          draft,
+        },
+      };
+    } catch (error) {
+      throw new AppError(
+        "data_fault",
+        `创建目标无法可靠读取：${errorMessage(error)}`,
+        503,
+      );
+    }
   }
   saveDraft(id: string, revision: number, content: DraftContent): Draft {
     this.checkContent(content);
@@ -574,10 +578,8 @@ export class Application {
     const original = this.request(id);
     const { request_id, created_at, last_report_id, ...intent } = original.body;
     return this.createDraft({
+      ...(original.copyContent ? cloneClientJson(original.copyContent) : {}),
       text: stringifyJson(intent, 2),
-      ...(original.copyContent?.automaticPreviews
-        ? { automaticPreviews: original.copyContent.automaticPreviews }
-        : {}),
     });
   }
   copyDraft(id: string): Draft {
@@ -587,7 +589,7 @@ export class Application {
     return this.saveDraft(
       id,
       revision,
-      copyDraftAction(this.draft(id).content, index),
+      copyDraftAction(this.draft(id).content, index, createActionAllocation()),
     );
   }
   markHandoff(id: string, marked: boolean): ExportedRequest {
@@ -658,20 +660,34 @@ export class Application {
     id: string,
     revision: number,
     action: Record<string, unknown>,
-    expectedContent?: DraftContent,
-    capabilityVersion?: string,
+    expected?: AppendExpectation,
   ): Draft {
     const draft = this.draft(id);
+    if (arguments.length > 3) {
+      if (!object(expected))
+        throw new AppError("invalid_content", "固定追加预期必须是完整对象");
+      this.checkContent(expected.content);
+      if (
+        !object(expected.allocation) ||
+        typeof expected.allocation.id !== "string" ||
+        !expected.allocation.id
+      )
+        throw new AppError(
+          "invalid_action_allocation",
+          "固定追加预期缺少有效动作身份",
+        );
+    }
+    const fixedAllocation = expected?.allocation ?? createActionAllocation();
     if (
-      capabilityVersion !== undefined &&
-      capabilityVersion !== this.capabilities.version
+      expected?.capabilityVersion !== undefined &&
+      expected.capabilityVersion !== this.capabilities.version
     )
       throw new AppError("capabilities_changed", "能力说明已经变化", 409);
     const content = coordinatePreviews(
-      appendContentAction(draft.content, action, true),
+      appendContentAction(draft.content, action, true, fixedAllocation),
       this.capabilities,
     ).content;
-    if (expectedContent && !sameContent(content, expectedContent))
+    if (expected !== undefined && !sameContent(content, expected.content))
       throw new AppError(
         "content_conflict",
         "追加的完整预期与当前依据不一致",

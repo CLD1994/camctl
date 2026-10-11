@@ -55,7 +55,7 @@ it.each(["append", "delete", "export"])(
   async (state) => {
     const s = new sessionModule.DraftSession(
       draft("a"),
-      { read: async () => draft("a"), save: vi.fn() },
+      { read: async () => { throw Error("核实读取不可用"); }, save: vi.fn() },
       () => {},
     );
     if (state === "append") s.lockAppend();
@@ -72,9 +72,10 @@ it.each(["append", "delete", "export"])(
 it("导出核实没有同次能力观察时保持未知，后续一致观察可以恢复", async () => {
   const initial = draft("a");
   const actual = { ...initial, revision: 2 };
+  let observedCapabilities: { active: { devices: never[] }; error: null; generation: number; version: string } | undefined;
   const s = new sessionModule.DraftSession(
     initial,
-    { read: async () => actual, save: vi.fn() },
+    { read: async () => actual, save: vi.fn(), readObservation: async () => ({ kind: "available", draft: actual, capabilities: observedCapabilities }) },
     () => {},
   );
   s.beginExport();
@@ -88,6 +89,9 @@ it("导出核实没有同次能力观察时保持未知，后续一致观察可�
     generation: 2,
     version: "k2",
   });
+  expect(s.exportState).toBe("unknown");
+  observedCapabilities = { active: { devices: [] }, error: null, generation: 2, version: "k2" };
+  await s.checkExport();
   expect(s.exportState).toBe("editable");
   expect(s.revision).toBe(2);
 });

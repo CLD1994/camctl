@@ -10,6 +10,7 @@ import {
   initializePreviewMetadata,
   appendContentAction,
   coordinatePreviews,
+  createActionAllocation,
 } from "../../src/shared/automatic-previews";
 const action = {
   name: "同步",
@@ -26,6 +27,29 @@ const baseline = (): Draft => ({
   createdAt: "t",
   updatedAt: "t",
 });
+it.each(["none", "missing_allocation"])(
+  "有元数据的追加缺少固定依据 %s 时不能确认已经追加",
+  (missing) => {
+    const base = {
+      ...baseline(),
+      content: initializePreviewMetadata(baseline().content, "disabled", "n"),
+    };
+    const actual = {
+      ...base,
+      revision: 2,
+      content: appendContentAction(
+        base.content,
+        action,
+        true,
+        createActionAllocation(),
+      ),
+    };
+    const expected =
+      missing === "none" ? undefined : ({ content: actual.content } as any);
+    expect(classifyAppend(base, action, actual, expected)).toBe("conflict");
+    expect(classifyAppend(base, action, base)).toBe("baseline");
+  },
+);
 const appended = (): Draft => ({
   ...baseline(),
   revision: 2,
@@ -100,11 +124,13 @@ it.each([false, true])(
           baselineChanges: [],
           baseline: baseline(),
           action,
+          allocation: op.allocation,
           index: 0,
           appended: appended().content,
           expected: {
             content: appended().content,
             capabilityVersion: undefined,
+            allocation: op.allocation,
           },
         });
         expect(op.transition).toBeUndefined();
@@ -177,6 +203,7 @@ it("已确认未追加只在明确重试时对同目标再次追加", async () =
   expect(tx.append).toHaveBeenLastCalledWith("fixed", 1, action, {
     content: appended().content,
     capabilityVersion: undefined,
+    allocation: op.allocation,
   });
 });
 it("基线读取失败后仍使用已知目标", async () => {
@@ -351,6 +378,7 @@ it("transport改变发送副本不能改变固定attempt", async () => {
     append: async (_id, _rev, sentAction, expected) => {
       sentAction.name = "被改写";
       expected!.content.text = "被改写";
+      expected!.allocation.id = "发送副本改写";
       return appended();
     },
   });
@@ -360,7 +388,111 @@ it("transport改变发送副本不能改变固定attempt", async () => {
   expect(op.attempt!.expected.content).toEqual(appended().content);
   expect(op.attempt!.action).toEqual(action);
 });
+it.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])(
+  "公开分配副本不能改变首次与重试身份：metadata %s，派生基线 %s",
+  async (metadata, derivedBaseline) => {
+    const originalAllocation = { id: "original-fixed-id" };
+    const base = baseline();
+    if (metadata)
+      base.content = initializePreviewMetadata(base.content, "disabled", "n");
+    const capabilities = {
+      active: null,
+      error: null,
+      generation: 2,
+      version: "v2",
+    };
+    const retryBase = derivedBaseline ? { ...base, revision: 2 } : base;
+    const actual = {
+      ...retryBase,
+      revision: retryBase.revision + 1,
+      content: appendContentAction(
+        retryBase.content,
+        action,
+        true,
+        originalAllocation,
+      ),
+    };
+    const sentIds: string[] = [];
+    const op = new FollowOperation(
+      base.id,
+      action,
+      transport({
+        capabilities: () => capabilities,
+        prepare: async () => base,
+        append: async (_id, _revision, _action, expected) => {
+          sentIds.push(expected!.allocation.id);
+          expected!.allocation.id = "transport-mutated";
+          if (sentIds.length === 1) throw Error("未追加");
+          return actual;
+        },
+        read: async () => retryBase,
+      }),
+      originalAllocation,
+    );
+    op.allocation.id = "public-first-mutated";
+    originalAllocation.id = "constructor-mutated";
+    await op.advance();
+    expect(op.phase).toBe("not_appended");
+    expect(sentIds).toEqual(["original-fixed-id"]);
+    const attempt = op.attempt!;
+    attempt.allocation.id = "attempt-mutated";
+    attempt.expected.allocation.id = "attempt-expected-mutated";
+    op.expected!.allocation.id = "public-expected-mutated";
+    op.allocation.id = "public-retry-mutated";
+    await op.advance();
+    expect(sentIds).toEqual(["original-fixed-id", "original-fixed-id"]);
+    expect(op.phase).toBe("done");
+    expect(op.attempt!.allocation.id).toBe("original-fixed-id");
+    expect(op.attempt!.expected.allocation.id).toBe("original-fixed-id");
+    const transition = op.transition!;
+    transition.allocation.id = "transition-mutated";
+    expect(op.transition!.allocation.id).toBe("original-fixed-id");
+  },
+);
+it("旧基线准备失败后取得有资料的新基线，仍使用构造时的固定身份", async () => {
+  const allocation = { id: "prepared-fixed-id" };
+  const old = { ...baseline(), content: { text: '{"actions":[null]}' } };
+  const base = {
+    ...baseline(),
+    content: initializePreviewMetadata(baseline().content, "disabled", "n"),
+  };
+  const actual = {
+    ...base,
+    revision: 2,
+    content: appendContentAction(base.content, action, true, allocation),
+  };
+  const sentIds: string[] = [];
+  let prepared = 0;
+  const op = new FollowOperation(
+    base.id,
+    action,
+    transport({
+      prepare: async () => (++prepared === 1 ? old : base),
+      append: async (_id, _rev, _action, expected) => {
+        sentIds.push(expected!.allocation.id);
+        return actual;
+      },
+    }),
+    allocation,
+  );
+  await op.advance();
+  expect(op.phase).toBe("target");
+  expect(sentIds).toEqual([]);
+  op.allocation.id = "later-mutated";
+  await op.advance();
+  expect(op.phase).toBe("done");
+  expect(sentIds).toEqual(["prepared-fixed-id"]);
+  expect(op.transition!.actual.content.automaticPreviews!.actions[0].id).toBe(
+    "prepared-fixed-id",
+  );
+});
 it("not_appended重试形成新attempt，固定此前已证明的baseline派生链", async () => {
+  const allocation = createActionAllocation();
   const base = {
     ...baseline(),
     content: initializePreviewMetadata(baseline().content, "disabled", "n"),
@@ -379,7 +511,7 @@ it("not_appended重试形成新attempt，固定此前已证明的baseline派生�
   const actual = {
     ...derived,
     revision: 3,
-    content: appendContentAction(derived.content, action, true),
+    content: appendContentAction(derived.content, action, true, allocation),
   };
   const tx = transport({
     capabilities: () => capabilities,
@@ -390,7 +522,7 @@ it("not_appended重试形成新attempt，固定此前已证明的baseline派生�
       .mockResolvedValue(actual),
     read: async () => derived,
   });
-  const op = new FollowOperation("fixed", action, tx);
+  const op = new FollowOperation("fixed", action, tx, allocation);
   await op.advance();
   const first = op.attempt!;
   expect(op.phase).toBe("not_appended");
@@ -404,4 +536,42 @@ it("not_appended重试形成新attempt，固定此前已证明的baseline派生�
     { actual: derived, capabilities },
   ]);
   expect(op.transition!.actual).toEqual(actual);
+  expect(first.allocation).toEqual(allocation);
+  expect(op.attempt!.allocation).toEqual(allocation);
+  expect(op.attempt!.expected.allocation).toEqual(allocation);
 });
+it.each([false, true])(
+  "有元数据的追加传递固定身份并核实完整结果，响应丢失%s",
+  async (lost) => {
+    const base = {
+      ...baseline(),
+      content: initializePreviewMetadata(baseline().content, "disabled", "n"),
+    };
+    const allocation = createActionAllocation();
+    const actual = {
+      ...base,
+      revision: 2,
+      content: appendContentAction(base.content, action, true, allocation),
+    };
+    const originalAllocation = { ...allocation };
+    const tx = transport({
+      prepare: async () => base,
+      append: async (_id, _revision, _action, expected) => {
+        expect(expected!.allocation).toEqual(originalAllocation);
+        if (lost) throw Error("响应丢失");
+        return actual;
+      },
+      read: async () => actual,
+    });
+    const op = new FollowOperation(base.id, action, tx, allocation);
+    expect(op.allocation).toEqual(originalAllocation);
+    allocation.id = "调用者修改副本";
+    await op.advance();
+    expect(op.phase).toBe("done");
+    expect(op.transition!.allocation).toEqual(op.allocation);
+    expect(op.transition!.expected.allocation).toEqual(op.allocation);
+    expect(op.transition!.actual.content.automaticPreviews!.actions[0].id).toBe(
+      op.allocation.id,
+    );
+  },
+);

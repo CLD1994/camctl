@@ -1,4 +1,12 @@
 import type { EstimateReloadPhase } from "./video-estimate-state";
+export type StateRead<Value> =
+  { kind: "accepted"; value: Value } | { kind: "superseded" };
+/** 读取已失去资格，不能用旧响应降级较新的来源事实。 */
+export class SupersededStateReadError extends Error {
+  constructor(cause?: unknown) {
+    super(`${cause instanceof Error ? cause.message + "；" : ""}本次状态读取已被较新观察或能力重载取代，请重新核实。`, { cause });
+  }
+}
 export class StateObservations<Value, Context> {
   private stage: "idle" | "preparing" | "posting" | "awaiting" = "idle";
   private unconfirmed = false;
@@ -6,12 +14,13 @@ export class StateObservations<Value, Context> {
   private epoch = 0;
   private sequence = 0;
   private acceptedSequence = 0;
-  private inflight = new Set<Promise<Value>>();
+  private inflight = new Set<Promise<StateRead<Value>>>();
   constructor(
     private request: () => Promise<Value>,
     private capture: () => Context,
     private accept: (value: Value, context: Context) => void,
     private changed: (phase: EstimateReloadPhase) => void,
+    private failed?: (error: unknown, context: Context) => void,
   ) {}
   get phase(): EstimateReloadPhase {
     return this.stage !== "idle"
@@ -28,6 +37,7 @@ export class StateObservations<Value, Context> {
   }
   postStarted() {
     if (this.stage !== "preparing") throw Error("能力重载尚未完成准备");
+    this.epoch++;
     this.stage = "posting";
     this.unconfirmed = true;
     this.requestEnded = false;
@@ -35,6 +45,7 @@ export class StateObservations<Value, Context> {
   }
   postEnded() {
     if (this.stage !== "posting") throw Error("没有正在执行的能力重载请求");
+    this.epoch++;
     this.requestEnded = true;
     this.stage = "awaiting";
     this.changed(this.phase);
@@ -48,16 +59,17 @@ export class StateObservations<Value, Context> {
     this.stage = "idle";
     this.changed(this.phase);
   }
-  read(): Promise<Value> {
+  read(context: Context = this.capture()): Promise<StateRead<Value>> {
     const epoch = this.epoch,
-      sequence = ++this.sequence,
-      context = this.capture();
+      sequence = ++this.sequence;
     const eligible =
       this.requestEnded &&
       this.unconfirmed &&
       (this.stage === "idle" || this.stage === "awaiting");
-    const request = this.request().then((value) => {
-      if (sequence > this.acceptedSequence) {
+    const request = this.request().then(
+      (value): StateRead<Value> => {
+        if (epoch !== this.epoch || sequence <= this.acceptedSequence)
+          return { kind: "superseded" };
         this.accept(value, context);
         this.acceptedSequence = sequence;
         if (
@@ -69,9 +81,15 @@ export class StateObservations<Value, Context> {
           this.stage = "idle";
           this.changed(this.phase);
         }
-      }
-      return value;
-    });
+        return { kind: "accepted", value };
+      },
+      (error: unknown) => {
+        if (epoch !== this.epoch || sequence <= this.acceptedSequence)
+          throw new SupersededStateReadError(error);
+        this.failed?.(error, context);
+        throw error;
+      },
+    );
     this.inflight.add(request);
     void request.then(
       () => this.inflight.delete(request),

@@ -4,6 +4,7 @@ import {
   expect as check,
   type Browser,
   type Page,
+  type Locator,
 } from "@playwright/test";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,6 +52,20 @@ function gate() {
     release = resolve;
   });
   return { promise, release };
+}
+async function chooseWithPausedClock(select: Locator, value: string) {
+  // 冻结业务计时期间，通过 Select 的键盘入口选择，不依赖鼠标打开时
+  // 挂载/焦点移交的计时回调；仍从实际 listbox 的 option 提交选值。
+  await select.focus();
+  await select.page().clock.runFor(0);
+  await select.press("ArrowDown");
+  const list = select.page().getByRole("listbox");
+  await check(list).toBeVisible();
+  const option = list.locator(`[role="option"][data-value=${JSON.stringify(value)}]`);
+  const label = await option.locator(".select-item-text").innerText();
+  await option.click();
+  await check(select).toHaveAttribute("data-value", value);
+  await check(select).toContainText(label);
 }
 async function setup(
   content = draftContent([camera()]),
@@ -913,8 +928,18 @@ async function pauseAfterLostReload(
   directory: string,
   changed = true,
 ) {
-  const control = { reads: 0, allow: false, posts: 0 };
+  const control = {
+    reads: 0,
+    allow: false,
+    posts: 0,
+    trace: [] as Array<{ reads: number; allow: boolean; accepted: boolean }>,
+  };
   await page.route("**/api/state", async (route) => {
+    control.trace.push({
+      reads: control.reads,
+      allow: control.allow,
+      accepted: control.allow || control.reads > 0,
+    });
     if (control.allow || control.reads > 0) {
       if (!control.allow) control.reads--;
       await route.continue();
@@ -1004,7 +1029,7 @@ it("保存回执丢失的唯一核实观察恢复估算且不重入pendingWrite"
   ).toBe(30);
 });
 it("递交标记核实的唯一完整观察恢复全部会话与实际能力", async () => {
-  const { page, app, directory } = await setup();
+  const { page, app, directory } = await setup(undefined, undefined, true);
   const recordDraft = app.createDraft(
     draftContent([
       { name: "同步", type: "report_status", params: { scope: "full" } },
@@ -1036,7 +1061,7 @@ it("递交标记核实的唯一完整观察恢复全部会话与实际能力", a
   expect(app.request(record.id).handedAt).not.toBeNull();
 });
 it("删除核实观察恢复其他草稿估算且仍确认删除缺失事实", async () => {
-  const { page, app, directory } = await setup();
+  const { page, app, directory } = await setup(undefined, undefined, true);
   const spare = app.createDraft({
     text: stringifyJson({ name: "待删除", actions: [] }),
   });
@@ -1068,7 +1093,7 @@ it("删除核实观察恢复其他草稿估算且仍确认删除缺失事实", a
   expect(app.state().drafts?.some((d) => d.id === spare.id)).toBe(false);
 });
 it("导出核实接纳实际原请求并恢复其他草稿能力", async () => {
-  const { page, app, directory } = await setup();
+  const { page, app, directory } = await setup(undefined, undefined, true);
   app.createDraft({
     text: stringifyJson({
       name: "待导出",
@@ -1106,7 +1131,8 @@ it("导出核实接纳实际原请求并恢复其他草稿能力", async () => {
   expect(app.state().requests).toHaveLength(1);
 });
 it("后续动作两次准备和追加核实共用观察但不重复追加", async () => {
-  const { page, app, draft, directory } = await setup();
+  // 两次准备及一次具体核实各有固定读取配额，计时轮询不参与该故障安排。
+  const { page, app, draft, directory } = await setup(undefined, undefined, true);
   await check(page.getByTestId("video-size-value")).toContainText("975");
   const control = await pauseAfterLostReload(page, directory);
   let appends = 0;
@@ -1117,10 +1143,22 @@ it("后续动作两次准备和追加核实共用观察但不重复追加", asyn
     await route.abort();
   });
   await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
-  await choose(page.getByLabel("目标草稿"), draft.id);
+  await chooseWithPausedClock(page.getByLabel("目标草稿"), draft.id);
   control.reads = 2;
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
-  await check(page.getByRole("dialog")).toHaveCount(0);
+  try {
+    await check(page.getByRole("dialog")).toHaveCount(0);
+  } catch (error) {
+    throw new Error(
+      `追加实际诊断 ${JSON.stringify({
+        trace: control.trace,
+        appends,
+        dialog: await page.getByRole("dialog").innerText(),
+        actual: app.draft(draft.id),
+      })}`,
+      { cause: error },
+    );
+  }
   await check(page.getByTestId("video-size-value")).toContainText("600 MB");
   expect(appends).toBe(1);
   expect(
@@ -1128,11 +1166,11 @@ it("后续动作两次准备和追加核实共用观察但不重复追加", asyn
   ).toHaveLength(2);
 });
 it("查看目标的唯一完整观察恢复估算且不把准备失败解释为追加", async () => {
-  const { page, app, draft, directory } = await setup();
+  const { page, app, draft, directory } = await setup(undefined, undefined, true);
   await check(page.getByTestId("video-size-value")).toContainText("975");
   const control = await pauseAfterLostReload(page, directory);
   await page.getByRole("button", { name: "准备状态同步", exact: true }).click();
-  await choose(page.getByLabel("目标草稿"), draft.id);
+  await chooseWithPausedClock(page.getByLabel("目标草稿"), draft.id);
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
   await check(
     page.getByRole("button", { name: "查看目标草稿", exact: true }),
@@ -1146,7 +1184,7 @@ it("查看目标的唯一完整观察恢复估算且不把准备失败解释为�
   ).toHaveLength(1);
 });
 it("上传失败核实接纳完整观察并仍按uploading事实记录失败", async () => {
-  const { page, app, directory } = await setup();
+  const { page, app, directory } = await setup(undefined, undefined, true);
   await check(page.getByTestId("video-size-value")).toContainText("975");
   const control = await pauseAfterLostReload(page, directory);
   const initialRefresh = gate();
@@ -1180,7 +1218,7 @@ it("上传失败核实接纳完整观察并仍按uploading事实记录失败", a
   expect(app.state().imports).toHaveLength(1);
 });
 it("导出被旧能力版本拒绝后核实观察恢复估算但不补造原请求", async () => {
-  const { page, app, directory } = await setup();
+  const { page, app, directory } = await setup(undefined, undefined, true);
   app.createDraft({
     text: stringifyJson({
       name: "待导出",

@@ -4,8 +4,17 @@ import shlex
 
 import pytest
 
+from camctl.acceptance.schema import BodySchemaError
 from camctl.devices.drivers.adb_cameras import commands
 from .test_adb_camera_parameters import recording_params
+
+
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+def test_record_setting_lookup_rejects_fractional_seconds_before_mapping(driver):
+    params = {**recording_params(driver), "duration_s": Decimal("1.234")}
+
+    with pytest.raises(BodySchemaError):
+        commands.settings_for(driver, "camera_record", params)
 
 
 @pytest.mark.parametrize("exposure, exposure_commands", [

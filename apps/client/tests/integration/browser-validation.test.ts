@@ -77,6 +77,42 @@ const camera = (name = "录像 A") => ({
   policy: { max_delay_ms: 0 },
   scheduled_at: "2026-10-11 00:00:00",
 });
+
+it("未解析的草稿正文与未完成原文分别诊断而不声称存在完整值", async () => {
+  const original: DraftContent = {
+    text: "{",
+    pending: { "": { kind: "json", text: "[" } },
+  };
+  const { page, app, draft } = await setup(original);
+  const before = app.draft(draft.id);
+  const issues = page.getByTestId("validation-issues");
+  await check(issues.getByRole("button")).toHaveCount(2);
+  await check(page.locator(".pending-validation-note")).not.toContainText(
+    "完整",
+  );
+  await page.getByTestId("draft-json-toggle").click();
+  const control = page.getByTestId("draft-json-input");
+  const field = page.locator(".field").filter({ has: control });
+  await check(control).toHaveValue("{");
+  await check(field.locator(".current-input-error")).toBeVisible();
+  await check(field.locator(".retained-content-errors")).toBeVisible();
+  await check(field.locator(".retained-content-errors")).not.toContainText(
+    "完整",
+  );
+  await issues.getByRole("button").first().click();
+  await check(pendingInput(page, "")).toBeFocused();
+  await check(pendingInput(page, "")).toHaveValue("[");
+  await issues.getByRole("button").nth(1).click();
+  await check(control).toBeFocused();
+  await page.locator(".raw-validation > summary").click();
+  await check(
+    page.locator(".raw-validation li").filter({ hasText: "invalid_json" }),
+  ).toHaveCount(1);
+  await check(
+    page.locator(".raw-validation li").filter({ hasText: "unfinished_input" }),
+  ).toHaveCount(1);
+  expect(app.draft(draft.id)).toEqual(before);
+});
 const content = (actions: unknown[]): DraftContent => ({
   text: JSON.stringify({ name: "校验定位", actions }),
 });

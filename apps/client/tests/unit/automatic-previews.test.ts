@@ -3,11 +3,98 @@ import {
   coordinatePreviews,
   initializePreviewMetadata,
   setPreviewIntent,
+  appendContentAction,
+  copyDraftAction,
+  createActionAllocation,
+  sameContent,
 } from "../../src/shared/automatic-previews";
 import { loadCapabilities } from "../../src/shared/capabilities";
 import { parseClientJson } from "../../src/shared/json";
 import type { DraftContent, PreviewIntent } from "../../src/server/models";
 import { DraftSession } from "../../src/web/session";
+it("两个操作从同一版本新增不同动作，身份独立且重算固定", () => {
+  const base = initializePreviewMetadata(
+    { text: '{"name":"计划","actions":[]}' },
+    "disabled",
+    "base",
+  );
+  const a = createActionAllocation(),
+    b = createActionAllocation();
+  const action = {
+    name: "报告",
+    type: "report_status",
+    params: { scope: "full" },
+  };
+  const first = appendContentAction(base, action, false, a);
+  const second = appendContentAction(base, action, false, b);
+  expect(first.automaticPreviews!.actions[0].id).toBe(a.id);
+  expect(first.automaticPreviews!.next).toBe(base.automaticPreviews!.next);
+  expect(first.automaticPreviews!.actions[0].id).not.toBe(
+    second.automaticPreviews!.actions[0].id,
+  );
+  expect(sameContent(first, appendContentAction(base, action, false, a))).toBe(
+    true,
+  );
+});
+it("接纳旧完整内容后新增不会复用另一版本的新增身份", () => {
+  const base = initializePreviewMetadata(
+    { text: '{"actions":[]}' },
+    "disabled",
+    "base",
+  );
+  const first = appendContentAction(
+    base,
+    { name: "A" },
+    false,
+    createActionAllocation(),
+  );
+  const afterReplacement = appendContentAction(
+    base,
+    { name: "B" },
+    false,
+    createActionAllocation(),
+  );
+  expect(afterReplacement.automaticPreviews!.actions[0].id).not.toBe(
+    first.automaticPreviews!.actions[0].id,
+  );
+});
+it("同一基线的独立复制使用各自固定身份", () => {
+  const base = initializePreviewMetadata(
+    { text: '{"actions":[{"name":"A"}]}' },
+    "disabled",
+    "base",
+  );
+  const a = createActionAllocation(),
+    b = createActionAllocation();
+  const first = copyDraftAction(base, 0, a),
+    second = copyDraftAction(base, 0, b);
+  expect(first.automaticPreviews!.actions[1].id).toBe(a.id);
+  expect(second.automaticPreviews!.actions[1].id).toBe(b.id);
+  expect(sameContent(first, copyDraftAction(base, 0, a))).toBe(true);
+});
+it.each([undefined, { id: "" }, { id: "base:0" }, { id: 1 }])(
+  "有元数据的新增拒绝缺少、重复或非法分配 %j 并保持输入",
+  (allocation) => {
+    const base = initializePreviewMetadata(
+      { text: '{"actions":[{"name":"A"}]}' },
+      "disabled",
+      "base",
+    );
+    const before = structuredClone(base);
+    expect(() =>
+      appendContentAction(base, { name: "B" }, false, allocation as any),
+    ).toThrow();
+    expect(base).toEqual(before);
+  },
+);
+it("旧草稿追加没有元数据，不被动建立身份资料", () => {
+  const base = { text: '{"actions":[]}' };
+  const result = appendContentAction(base, { name: "A" });
+  expect(result.automaticPreviews).toBeUndefined();
+  expect((parseClientJson(result.text) as any).actions).toEqual([
+    { name: "A" },
+  ]);
+});
 const capture = {
   name: "拍摄",
   type: "camera_record",
@@ -294,10 +381,14 @@ it("改名跟随稳定来源身份，删除拍摄同步移除派生并搬移资�
   expect(
     (parseClientJson(renamed.text) as any).actions[1].params.source.action_name,
   ).toBe("新拍摄");
-  const appended = appendDraftAction(renamed, {
-    name: "手动",
-    type: "report_status",
-  });
+  const appended = appendDraftAction(
+    renamed,
+    {
+      name: "手动",
+      type: "report_status",
+    },
+    createActionAllocation(),
+  );
   const withInputs = {
     ...appended,
     pending: { "/actions/2/params": { kind: "json" as const, text: "{" } },
@@ -319,8 +410,9 @@ it("复制拍摄生成独立身份和预览，不复制来源的自动关联", a
   const { copyDraftAction } =
     await import("../../src/shared/automatic-previews");
   const original = coordinatePreviews(content(), capabilities()).content;
+  const allocation = createActionAllocation();
   const copied = coordinatePreviews(
-    copyDraftAction(original, 0),
+    copyDraftAction(original, 0, allocation),
     capabilities(),
   ).content;
   const actions = (parseClientJson(copied.text) as any).actions;
@@ -333,6 +425,14 @@ it("复制拍摄生成独立身份和预览，不复制来源的自动关联", a
   expect(new Set(copied.automaticPreviews!.actions.map((a) => a.id)).size).toBe(
     4,
   );
+  expect(copied.automaticPreviews!.actions[2]).toEqual({ id: allocation.id });
+  expect(copied.automaticPreviews!.actions[3]).toEqual({
+    id: `${allocation.id}:preview`,
+    sourceId: allocation.id,
+  });
+  expect(
+    sameContent(copied, coordinatePreviews(copied, capabilities()).content),
+  ).toBe(true);
 });
 it("另一个动作的业务错误不阻止有效拍摄生成，参数非法不得猜支持", () => {
   const original = initializePreviewMetadata(

@@ -308,17 +308,22 @@ it("能力错误仍处理明确非拍摄，不借旧active删除其他自动项"
   ]);
 });
 it("能力错误只恢复已证明名称，不生成或维护时间", async () => {
-  const { appendContentAction } =
+  const { appendContentAction, createActionAllocation } =
     await import("../../src/shared/automatic-previews");
   let c = setValue(waiting(), ["actions", 1, "name"], "C");
   c = setValue(c, ["actions", 0, "scheduled_at"], "2026-10-11 01:00:00");
-  c = appendContentAction(c, {
-    name: "D",
-    type: "camera_record",
-    device_id: "cam",
-    scheduled_at: "2026-10-11 01:00:00",
-    params: { type: "photo" },
-  });
+  c = appendContentAction(
+    c,
+    {
+      name: "D",
+      type: "camera_record",
+      device_id: "cam",
+      scheduled_at: "2026-10-11 01:00:00",
+      params: { type: "photo" },
+    },
+    false,
+    createActionAllocation(),
+  );
   const cap = k(false);
   cap.error = "加载失败";
   const result = coordinatePreviews(c, cap).content,
@@ -355,8 +360,8 @@ it("会话按同一次能力观察协调其他动作带来的恢复", async () =
   const draft = {
     id: "d",
     revision: 1,
-    createdAt: "now",
-    updatedAt: "now",
+    createdAt: "2026-10-11 10:00:00",
+    updatedAt: "2026-10-11 10:00:00",
     content: waiting(),
   };
   let stored = draft;

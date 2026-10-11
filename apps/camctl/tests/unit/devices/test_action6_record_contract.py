@@ -2,6 +2,11 @@
 
 from decimal import Decimal
 
+import pytest
+
+from camctl.acceptance.schema import validate_precise
+from camctl.capture.models import build_capture_spec
+from camctl.contracts.json_values import parse_exact_json
 from camctl.devices.drivers.adb_cameras.commands import CameraModel
 from camctl.devices.drivers.adb_cameras.registration import builtin_camera_contracts
 
@@ -32,6 +37,22 @@ def test_action6_task_freezes_internal_scope_and_five_second_completion_rule():
     assert task.output_scope == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
     assert task.product_rules == ({"kind": "video", "format_id": "mp4", "min_count": 1,
                                   "exact_count": 1, "require_pairing": False},)
+
+
+@pytest.mark.parametrize("duration_json, target_duration_ms", [
+    ("1", 1000), ("1.0", 1000), ("1e0", 1000),
+    ("9223372036854775", 9223372036854775000),
+    ("9223372036854775.0", 9223372036854775000),
+])
+def test_action6_integer_seconds_reach_execution_definition_exactly(duration_json, target_duration_ms):
+    capability = next(cap for cap in _contract(CameraModel.ACTION6).capabilities()
+                      if cap.action_type == "camera_record")
+    params = {**_params(), "duration_s": parse_exact_json(duration_json)}
+    validate_precise(capability.schema, params)
+
+    spec = build_capture_spec("camera_record", capability.task_factory(params))
+
+    assert spec["target_duration_ms"] == target_duration_ms
 
 
 def test_action6_declaration_has_real_results_and_files_without_query_or_delete():

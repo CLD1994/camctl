@@ -2,10 +2,35 @@ import { afterEach, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Server } from "node:http";
 import { Application } from "../../src/server/application";
-import { initializePreviewMetadata } from "../../src/shared/automatic-previews";
+import { Files } from "../../src/server/files";
+import { createHttpApp } from "../../src/server/http";
+import { FollowOperation } from "../../src/web/followup";
+import { DraftSession } from "../../src/web/session";
+import {
+  createActionAllocation,
+  appendContentAction,
+  initializePreviewMetadata,
+} from "../../src/shared/automatic-previews";
 const apps: Application[] = [],
   dirs: string[] = [];
+const httpCleanup: Array<() => Promise<void>> = [];
+async function actionsUrl(app: Application, id: string) {
+  const files = new Files(app);
+  const server = await new Promise<Server>((resolve) => {
+    const started = createHttpApp(app, files).listen(0, "127.0.0.1", () =>
+      resolve(started),
+    );
+  });
+  httpCleanup.push(async () => {
+    await files.idle();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  });
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}/api/drafts/${id}/actions`;
+}
 const catalog = (support = true) => ({
   devices: [
     {
@@ -60,10 +85,256 @@ function setup() {
   app.store.initialize();
   return app;
 }
-afterEach(() => {
+afterEach(async () => {
+  for (const close of httpCleanup.splice(0)) await close();
   apps.splice(0).forEach((a) => a.store.close());
   dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true }));
 });
+it("HTTP 固定分配在发送、后端保存及界面接纳中保持同一身份", async () => {
+  const app = setup(),
+    base = app.createDraft(input());
+  const files = new Files(app);
+  const server = await new Promise<Server>((resolve) => {
+    const started = createHttpApp(app, files).listen(0, "127.0.0.1", () =>
+      resolve(started),
+    );
+  });
+  httpCleanup.push(async () => {
+    await files.idle();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  });
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/drafts/${base.id}/actions`;
+  const allocation = createActionAllocation();
+  const action = {
+    name: "报告",
+    type: "report_status",
+    params: { scope: "full" },
+  };
+  let requestAllocation: unknown;
+  const operation = new FollowOperation(
+    base.id,
+    action,
+    {
+      capabilities: () => app.capabilities,
+      create: async () => {
+        throw Error("不应创建草稿");
+      },
+      prepare: async () => base,
+      append: async (_id, revision, sent, expected) => {
+        requestAllocation = expected!.allocation;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revision, action: sent, expected }),
+        });
+        expect(response.status).toBe(200);
+        return response.json();
+      },
+      read: async () => app.draft(base.id),
+    },
+    allocation,
+  );
+  await operation.advance();
+  expect(operation.phase).toBe("done");
+  expect(requestAllocation).toEqual(allocation);
+  expect(
+    operation.transition!.actual.content.automaticPreviews!.actions.at(-1)!.id,
+  ).toBe(allocation.id);
+  const session = new DraftSession(
+    base,
+    {
+      save: async () => {
+        throw Error("不应保存");
+      },
+      read: async () => app.draft(base.id),
+    },
+    () => {},
+  );
+  session.lockAppend();
+  session.acceptAppend(operation.transition!);
+  expect(session.content).toEqual(app.draft(base.id).content);
+  const current = app.draft(base.id);
+  const withoutAllocation = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      revision: current.revision,
+      action,
+      expected: {
+        content: appendContentAction(
+          current.content,
+          action,
+          true,
+          createActionAllocation(),
+        ),
+        capabilityVersion: app.capabilities.version,
+      },
+    }),
+  });
+  expect(withoutAllocation.status).toBe(400);
+  expect((await withoutAllocation.json()).code).toBe(
+    "invalid_action_allocation",
+  );
+  expect(app.draft(base.id)).toEqual(current);
+});
+for (const metadata of [false, true]) {
+  it.each([
+    ["null", null, "invalid_content"],
+    ["布尔", false, "invalid_content"],
+    ["数字", 0, "invalid_content"],
+    ["字符串", "expected", "invalid_content"],
+    ["数组", [], "invalid_content"],
+    ["空对象", {}, "invalid_content"],
+    ["仅能力", { capabilityVersion: "v1" }, "invalid_content"],
+    ["仅分配", { allocation: { id: "provided-id" } }, "invalid_content"],
+    [
+      "null内容",
+      { content: null, allocation: { id: "provided-id" } },
+      "invalid_content",
+    ],
+    [
+      "非法文本",
+      { content: { text: 7 }, allocation: { id: "provided-id" } },
+      "invalid_content",
+    ],
+    [
+      "非法资料",
+      {
+        content: { text: '{"actions":[]}', pending: [] },
+        allocation: { id: "provided-id" },
+      },
+      "invalid_content",
+    ],
+    [
+      "缺少分配",
+      { content: { text: '{"actions":[]}' } },
+      "invalid_action_allocation",
+    ],
+    [
+      "null分配",
+      { content: { text: '{"actions":[]}' }, allocation: null },
+      "invalid_action_allocation",
+    ],
+    [
+      "空身份",
+      { content: { text: '{"actions":[]}' }, allocation: { id: "" } },
+      "invalid_action_allocation",
+    ],
+    [
+      "数字身份",
+      { content: { text: '{"actions":[]}' }, allocation: { id: 7 } },
+      "invalid_action_allocation",
+    ],
+    [
+      "字符串分配",
+      { content: { text: '{"actions":[]}' }, allocation: "id" },
+      "invalid_action_allocation",
+    ],
+    [
+      "数组分配",
+      { content: { text: '{"actions":[]}' }, allocation: [] },
+      "invalid_action_allocation",
+    ],
+  ])(
+    `HTTP metadata ${metadata} 无效固定预期 %s 无副作用拒绝`,
+    async (_name, expected, code) => {
+      const app = setup();
+      const base = app.createDraft(
+        metadata ? input() : { text: '{"name":"旧计划","actions":[]}' },
+      );
+      const before = structuredClone(base);
+      const response = await fetch(await actionsUrl(app, base.id), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: base.revision,
+          action: { name: "报告", type: "report_status" },
+          expected,
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json()).code).toBe(code);
+      expect(app.draft(base.id)).toEqual(before);
+    },
+  );
+}
+it.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])(
+  "HTTP metadata %s，固定预期 %s 的追加保留业务未完成输入",
+  async (metadata, fixed) => {
+    const app = setup();
+    const base = app.createDraft(
+      metadata ? input() : { text: '{"name":"旧计划","actions":[]}' },
+    );
+    const current = app.saveDraft(base.id, base.revision, {
+      ...base.content,
+      pending: { "/name": { kind: "json", text: "{" } },
+    });
+    const action = { name: "未完成报告", type: "report_status" };
+    const allocation = { id: "fixed-request-id" };
+    const expected = {
+      content: appendContentAction(current.content, action, true, allocation),
+      allocation,
+      capabilityVersion: app.capabilities.version,
+    };
+    const response = await fetch(await actionsUrl(app, base.id), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        revision: current.revision,
+        action,
+        ...(fixed ? { expected } : {}),
+      }),
+    });
+    expect(response.status).toBe(200);
+    const actual = await response.json();
+    expect(actual.revision).toBe(current.revision + 1);
+    expect(actual.content.pending).toEqual({
+      "/name": { kind: "json", text: "{" },
+    });
+    expect(JSON.parse(actual.content.text).actions.at(-1)).toEqual(action);
+    if (metadata) {
+      const id = actual.content.automaticPreviews.actions.at(-1).id;
+      if (fixed) expect(id).toBe("fixed-request-id");
+      else
+        expect(id).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        );
+    } else expect(actual.content.automaticPreviews).toBeUndefined();
+  },
+);
+it.each([false, true])(
+  "HTTP metadata %s 完整预期不匹配返回 conflict，原记录保持",
+  async (metadata) => {
+    const app = setup();
+    const base = app.createDraft(
+      metadata ? input() : { text: '{"name":"旧计划","actions":[]}' },
+    );
+    const expected = {
+      content: base.content,
+      allocation: { id: "fixed-request-id" },
+      capabilityVersion: app.capabilities.version,
+    };
+    const response = await fetch(await actionsUrl(app, base.id), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        revision: base.revision,
+        action: { name: "报告", type: "report_status" },
+        expected,
+      }),
+    });
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("content_conflict");
+    expect(app.draft(base.id)).toEqual(base);
+  },
+);
 it("空白默认开启，外部正文保持尚未设置，保存独立协调", () => {
   const app = setup();
   expect(app.createDraft().content.automaticPreviews?.intent).toBe("enabled");
@@ -213,13 +484,16 @@ it("能力派生保留原始写入依据，后端追加拒绝错误完整预期"
       actual.revision,
       { name: "报告", type: "report_status" },
       {
-        ...actual.content,
-        automaticPreviews: {
-          ...actual.content.automaticPreviews!,
-          intent: "disabled",
+        content: {
+          ...actual.content,
+          automaticPreviews: {
+            ...actual.content.automaticPreviews!,
+            intent: "disabled",
+          },
         },
+        capabilityVersion: app.capabilities.version,
+        allocation: createActionAllocation(),
       },
-      app.capabilities.version,
     ),
   ).toThrowError(expect.objectContaining({ code: "content_conflict" }));
   expect(app.draft(d.id)).toEqual(actual);
@@ -321,13 +595,7 @@ it("追加响应丢失后重载通过固定完整预期与原始提交依据核�
       },
       prepare: async () => app.draft(d.id),
       append: async (id, revision, action, expected) => {
-        app.appendAction(
-          id,
-          revision,
-          action,
-          expected!.content,
-          expected!.capabilityVersion,
-        );
+        app.appendAction(id, revision, action, expected!);
         writeFileSync(
           join(app.store.directory, "device-capabilities.json"),
           JSON.stringify(catalog(false)),
@@ -369,13 +637,7 @@ it("追加遇能力变化未提交后以同目标的新可靠版本重试", asyn
           );
           app.reloadCapabilities();
         }
-        return app.appendAction(
-          id,
-          revision,
-          action,
-          expected!.content,
-          expected!.capabilityVersion,
-        );
+        return app.appendAction(id, revision, action, expected!);
       },
       read: async () => app.draft(d.id),
     },

@@ -25,12 +25,28 @@ export interface DraftContent {
   actionVariants?: Record<string, ActionVariant[]>;
   /** 当前外层动作分支的停用参数类型内容；键为动作下标。 */
   parameterVariants?: Record<string, ParameterVariant[]>;
+  /** 当前参数类型所属的停用对象分支；路径相对于 params。 */
+  objectVariants?: Record<string, ObjectVariantMap>;
 }
+export interface ObjectVariant {
+  /** 仅含可选 value 的包装对象，保留缺省及完整数字事实。 */
+  valueText: string;
+  /** 相对于对象的非身份成员未完成输入。 */
+  pending: NonNullable<DraftContent["pending"]>;
+}
+export type ObjectVariantMap = Record<
+  string,
+  {
+    discriminator: string;
+    variants: ObjectVariant[];
+  }
+>;
 export interface ParameterVariant {
   /** 仅含可选 params 成员的权威 JSON 原文；缺省与显式值分别保存。 */
   paramsText: string;
   /** 相对于 params 的成员 JSON Pointer，不含整个参数或类型身份输入。 */
   pending: NonNullable<DraftContent["pending"]>;
+  objectVariants?: ObjectVariantMap;
 }
 export interface ActionVariant {
   type?: unknown;
@@ -41,6 +57,7 @@ export interface ActionVariant {
   pending: NonNullable<DraftContent["pending"]>;
   /** 此停用外层动作分支拥有的参数类型内容。 */
   parameterVariants?: ParameterVariant[];
+  objectVariants?: ObjectVariantMap;
 }
 export interface Draft {
   id: string;
@@ -52,6 +69,19 @@ export interface Draft {
   /** 最近用户写入的原始完整依据；后续能力派生不覆盖它。 */
   lastWrite?: { revision: number; input: DraftContent; content: DraftContent };
 }
+export interface DraftCreation {
+  attemptId: string;
+  input: DraftContent;
+  created: Draft;
+}
+export type DraftCreationResult =
+  | { kind: "not_created"; attemptId: string }
+  | {
+      kind: "created";
+      creation: DraftCreation;
+      target:
+        { kind: "editable" | "exported"; draft: Draft } | { kind: "deleted" };
+    };
 export interface ExportedRequest {
   id: string;
   draftId: string;

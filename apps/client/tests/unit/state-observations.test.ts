@@ -24,6 +24,52 @@ function setup() {
   );
   return { observations, pending, accepted, changeToken: () => token++ };
 }
+it("操作读回保留本次消费者上下文，普通读取仍独立捕获上下文", async () => {
+  const { observations: model, pending, accepted, changeToken } = setup();
+  const owned = model.read(9);
+  changeToken();
+  pending[0].resolve("owned");
+  await owned;
+  const ordinary = model.read();
+  pending[1].resolve("ordinary");
+  await ordinary;
+  expect(accepted).toEqual([
+    ["owned", 9],
+    ["ordinary", 2],
+  ]);
+});
+it.each(["current", "superseded", "reload"] as const)(
+  "状态读取%s失败只向有资格的完整Map传递不可用观察",
+  async (timing) => {
+    const pending: ReturnType<typeof gate<string>>[] = [],
+      failures: unknown[] = [],
+      accepted: string[] = [];
+    const model = Reflect.construct(StateObservations, [
+      () => {
+        const request = gate<string>();
+        pending.push(request);
+        return request.promise;
+      },
+      () => 1,
+      (value: string) => accepted.push(value),
+      () => {},
+      (error: unknown) => failures.push(error),
+    ]) as StateObservations<string, number>;
+    const old = model.read();
+    void old.catch(() => {});
+    if (timing === "superseded") {
+      const next = model.read();
+      pending[1].resolve("new");
+      await next;
+    }
+    if (timing === "reload") model.beginReload();
+    const error = Error("offline");
+    pending[0].reject(error);
+    await expect(old).rejects.toThrow("offline");
+    expect(failures).toEqual(timing === "current" ? [error] : []);
+    expect(accepted).toEqual(timing === "superseded" ? ["new"] : []);
+  },
+);
 it.each([false, true])(
   "准备失败恢复原未核实责任 %s 且之后新观察可以核实",
   async (prior) => {
@@ -48,7 +94,7 @@ it.each(["old", "preparing", "posting"])(
   "%s 发起的观察晚到不能解锁",
   async (timing) => {
     const { observations: model, pending } = setup();
-    let read: Promise<string>;
+    let read: ReturnType<typeof model.read>;
     if (timing === "old") read = model.read();
     model.beginReload();
     if (timing === "preparing") read = model.read();
@@ -102,19 +148,54 @@ it("结束后唯一成功观察接纳原快照和发起token并恢复", async ()
   const read = model.read();
   changeToken();
   pending[0].resolve("same-version-active-and-error");
-  expect(await read).toBe("same-version-active-and-error");
+  expect(await read).toEqual({
+    kind: "accepted",
+    value: "same-version-active-and-error",
+  });
   expect(accepted).toEqual([["same-version-active-and-error", 1]]);
   expect(model.phase).toBe("idle");
 });
-it("较旧成功观察不覆盖已经接纳的新快照，但调用者仍得到自己的事实", async () => {
+it("较旧成功观察不覆盖新快照，也不向核实调用者返回旧事实", async () => {
   const { observations: model, pending, accepted } = setup();
   const old = model.read(),
     fresh = model.read();
   pending[1].resolve("fresh");
   await fresh;
   pending[0].resolve("old");
-  expect(await old).toBe("old");
+  expect(await old).toEqual({ kind: "superseded" });
   expect(accepted).toEqual([["fresh", 1]]);
+});
+it("较早代次的读取不再向调用者提供可用原始值", async () => {
+  const { observations: model, pending, accepted } = setup();
+  const old = model.read();
+  model.beginReload();
+  pending[0].resolve("old");
+  expect(await old).toEqual({ kind: "superseded" });
+  expect(accepted).toEqual([]);
+});
+it.each(["preparing", "posting"])(
+  "%s 读取跨越能力写入边界后不能向核实返回旧事实",
+  async (timing) => {
+    const { observations: model, pending, accepted } = setup();
+    model.beginReload();
+    let old: ReturnType<typeof model.read>;
+    if (timing === "preparing") old = model.read();
+    model.postStarted();
+    if (timing === "posting") old = model.read();
+    model.postEnded();
+    pending[0].resolve("old-capabilities");
+    expect(await old!).toEqual({ kind: "superseded" });
+    expect(accepted).toEqual([]);
+  },
+);
+it("仅被取代的成功读取不使 settle 失败", async () => {
+  const { observations: model, pending } = setup();
+  const old = model.read();
+  model.beginReload();
+  const settled = model.settle();
+  pending[0].resolve("old");
+  expect(await old).toEqual({ kind: "superseded" });
+  await expect(settled).resolves.toBeUndefined();
 });
 it("较新失败不妨碍较旧成功快照接纳", async () => {
   const { observations: model, pending, accepted } = setup();

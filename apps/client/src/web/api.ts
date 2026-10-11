@@ -1,21 +1,22 @@
 import type { Application } from "../server/application";
-import type { Draft, Video } from "../server/models";
-import type { Issue } from "../shared/types";
+import type {
+  Draft,
+  DraftContent,
+  DraftCreationResult,
+  Video,
+} from "../server/models";
 import { parseClientJson, stringifyJson } from "../shared/json";
+import { sameContent } from "../shared/automatic-previews";
+import { requireDraftCreationResult as validateDraftCreationResult } from "../shared/draft-creation";
+import { requireDraftRecord } from "../shared/draft-record";
+import type { DraftObservation } from "./draft-conflicts";
+import { SupersededStateReadError } from "./state-observations";
 export type ClientState = ReturnType<Application["state"]> & {
   videos?: Video[];
   workerError?: string | null;
 };
-export class HttpError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly issues: Issue[] = [],
-    readonly status = 0,
-  ) {
-    super(message);
-  }
-}
+export { HttpError } from "../shared/http-error";
+import { HttpError } from "../shared/http-error";
 export async function api<T>(
   path: string,
   method = "GET",
@@ -43,23 +44,119 @@ export async function api<T>(
         "无法读取完整响应，请重新读取保存记录以确认结果。",
       );
     });
-  if (!response.ok)
+  if (!response.ok) {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value) ||
+      typeof value.code !== "string" ||
+      !value.code.length ||
+      typeof value.message !== "string" ||
+      (value.issues !== undefined && !Array.isArray(value.issues))
+    )
+      throw new HttpError(
+        "result_unconfirmed",
+        "错误响应不完整，请重新读取保存记录以确认结果。",
+      );
     throw new HttpError(
-      value.code ?? "http_error",
-      value.message ?? `请求失败（${response.status}）`,
+      value.code,
+      value.message,
       value.issues ?? [],
       response.status,
     );
+  }
   return value as T;
+}
+export async function createDraftCopy(
+  attemptId: string,
+  content: DraftContent,
+): Promise<DraftCreationResult> {
+  const result = requireDraftCreationResult(
+    await api(`/draft-creations/${encodeURIComponent(attemptId)}`, "PUT", {
+      content,
+    }),
+    attemptId,
+  );
+  if (result.kind === "created" && !sameContent(result.creation.input, content))
+    throw new HttpError(
+      "result_unconfirmed",
+      "创建回执的固定输入与本次输入不一致。",
+    );
+  return result;
+}
+export async function readDraftCreation(
+  attemptId: string,
+): Promise<DraftCreationResult> {
+  return requireDraftCreationResult(
+    await api(`/draft-creations/${encodeURIComponent(attemptId)}`),
+    attemptId,
+  );
+}
+function requireDraftCreationResult(
+  value: unknown,
+  attemptId: string,
+): DraftCreationResult {
+  try {
+    return validateDraftCreationResult(value, attemptId);
+  } catch {
+    throw new HttpError(
+      "result_unconfirmed",
+      "无法读取完整创建结果，请按原尝试身份重新核实。",
+    );
+  }
 }
 export async function readDraft(
   id: string,
   readState: () => Promise<ClientState>,
 ): Promise<Draft> {
-  const state = await readState();
-  const draft = state.drafts?.find((d) => d.id === id);
-  if (!draft) throw new Error("无法读取草稿的保存结果");
-  return draft;
+  const observation = await readDraftObservation(id, readState);
+  if (observation.kind === "available") return observation.draft;
+  throw new Error(
+    observation.kind === "unavailable"
+      ? observation.message
+      : "草稿已删除，无法读取保存结果",
+  );
+}
+/** 可靠存在和可靠删除共同要求启动正常且整个集合满足完整记录契约。 */
+export function observeDraft(id: string, state: ClientState): DraftObservation {
+  try {
+    if (
+      !state ||
+      state.startup?.state !== "ready" ||
+      !Array.isArray(state.drafts)
+    )
+      throw Error("客户端启动状态或草稿集合不可用");
+    const ids = new Set<string>();
+    let target: Draft | undefined;
+    for (const item of state.drafts) {
+      const draft = requireDraftRecord(item);
+      if (ids.has(draft.id)) throw Error(`草稿集合存在重复身份：${draft.id}`);
+      ids.add(draft.id);
+      if (draft.id === id) target = draft;
+    }
+    return target
+      ? { kind: "available", draft: target, capabilities: state.capabilities }
+      : { kind: "deleted" };
+  } catch (error) {
+    return {
+      kind: "unavailable",
+      message: `无法可靠读取草稿：${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+export async function readDraftObservation(
+  id: string,
+  readState: () => Promise<ClientState>,
+): Promise<DraftObservation> {
+  try {
+    return observeDraft(id, await readState());
+  } catch (error) {
+    if (error instanceof SupersededStateReadError) throw error;
+    return {
+      kind: "unavailable",
+      message: `无法读取草稿观察：${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 export async function download(path: string, name: string) {
   const response = await fetch("/api" + path, { cache: "no-store" });
