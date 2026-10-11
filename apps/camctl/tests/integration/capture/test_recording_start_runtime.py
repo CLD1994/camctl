@@ -99,14 +99,15 @@ class StateQuery:
         ))
 
 
-def _configured(owned, driver, *, wall=None, mono=None, maximum=3):
+def _configured(owned, driver, *, wall=None, mono=None, maximum=3,
+                timeout=Decimal("0.75")):
     wall = [_NOW] if wall is None else wall
     mono = [_ANCHOR] if mono is None else mono
     runtime = _runtime(owned, driver=driver)
     runtime.evidence = _START_EVIDENCE
     runtime.wall_us = lambda: wall[0]
     runtime.monotonic_ns = lambda: mono[0]
-    runtime.start_config = AttemptConfig(maximum, Decimal("0.75"), Decimal("1"))
+    runtime.start_config = AttemptConfig(maximum, timeout, Decimal("1"))
     runtime.query_config = AttemptConfig(2, Decimal("0.5"), Decimal("1"))
     return runtime
 
@@ -214,6 +215,42 @@ async def test_start_passes_original_ticket_and_current_timeout_to_driver(tmp_pa
         assert request.ticket is not None
         assert request.ticket.responsibility_key == "start/12"
         assert request.timeout_s == Decimal("0.75")
+    finally:
+        owned.connection.close()
+
+
+async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_path):
+    """两次运行各自的精确超时值分别到达实际调用并保存本次依据。
+
+    旧尝试的期限与结果不被改写；跨运行超时变化与跨运行限额变化
+    同规则（见运行配置计划 RC3）。
+    """
+    owned = _world(tmp_path)
+    try:
+        wall, mono = [_NOW], [_ANCHOR]
+        driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_rejected", "device")))
+        first = _configured(owned, driver, wall=wall, mono=mono)
+        handler = capture_handler("camera_record")
+        await handler(12, first)
+        assert [call.timeout_s for call in driver.calls] == [Decimal("0.75")]
+        original = owned.connection.execute(
+            "SELECT id, attempt_no, result_json, timeout_s_json FROM operation_attempts"
+            " ORDER BY id").fetchall()
+        assert Decimal(original[0][3]) == Decimal("0.75")
+        second = _configured(owned, driver, wall=wall, mono=mono, timeout=Decimal("2.5"))
+        # 跨会话恢复的等待按本次间隔从本会话首次观察重新计时。
+        await handler(12, second)
+        assert len(driver.calls) == 1
+        mono[0] += 1_000_000_000
+        wall[0] += 1_000_000
+        await handler(12, second)
+
+        assert [call.timeout_s for call in driver.calls] == [Decimal("0.75"), Decimal("2.5")]
+        resumed = owned.connection.execute(
+            "SELECT id, attempt_no, result_json, timeout_s_json FROM operation_attempts"
+            " ORDER BY id").fetchall()
+        assert resumed[0] == original[0]
+        assert Decimal(resumed[1][3]) == Decimal("2.5")
     finally:
         owned.connection.close()
 
