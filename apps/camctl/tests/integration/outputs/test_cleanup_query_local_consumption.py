@@ -8,16 +8,22 @@ from __future__ import annotations
 
 from dataclasses import replace
 from decimal import Decimal
+from pathlib import Path
 from sqlite3 import OperationalError
 
 import pytest
 
+from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.operations.attempts import AttemptConfig
+from camctl.operations.attempts import AttemptConfig, FinishDisposition
+from camctl.operations.models import EffectState
 from camctl.outputs.cleanup_flow import (
-    DeleteDriverPort, FinishCleanupAction, delete_source_file,
+    CleanupQueryConsumer, CleanupQueryPhase, DeleteDriverPort,
+    FinishCleanupAction, delete_source_file,
 )
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.initialization import InitOutcome, initialize_state
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.cancellation import register_cancellation_guards
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
@@ -387,5 +393,158 @@ async def test_terminal_member_companion_finish_interrupted(environment, consume
         _check_original_query(fresh, operations, item_id)
         assert f"exists/{item_id}" not in resumed.retry_gate.anchors
         assert f"delete/{item_id}" not in resumed.retry_gate.anchors
+    finally:
+        fresh.connection.close()
+
+
+class _FailingQuerySaves(OperationRepository):
+    """目标 QUERY 的真实保存端口持续返回未完成结果；其余事务真实执行。"""
+
+    def __init__(self, kind, item_id, driver, retry_gate):
+        self.kind, self.item_id = kind, item_id
+        self.driver, self.retry_gate = driver, retry_gate
+        self.calls = []
+        self.checkpoints = []
+
+    def finish_attempt(self, finish, key, owned):
+        if (finish.ticket.operation != "query"
+                or finish.ticket.target_id != str(self.item_id)):
+            return super().finish_attempt(finish, key, owned)
+        self.calls.append((finish, key))
+        self.checkpoints.append((
+            tuple(owned.connection.iterdump()), dict(self.retry_gate.anchors),
+            len(self.driver.deletes), len(self.driver.queries)))
+        return DbOutcome(kind=self.kind, error=OperationalError("原 QUERY 结果保存再次失败"))
+
+
+class _RecordingQuerySaves(OperationRepository):
+    """记录目标 QUERY 的原完整申请与首次 key；保存事务真实执行。"""
+
+    def __init__(self, item_id):
+        self.item_id = item_id
+        self.calls = []
+
+    def finish_attempt(self, finish, key, owned):
+        if (finish.ticket.operation == "query"
+                and finish.ticket.target_id == str(self.item_id)):
+            self.calls.append((finish, key))
+        return super().finish_attempt(finish, key, owned)
+
+
+async def _saved_absence_query(environment):
+    """真实执行删除未知后查询确认缺席：记录唯一已保存的查询申请。"""
+    cfg, owned, context, capture_driver = environment
+    await _save_photos(cfg, owned, context, capture_driver)
+    output_id = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'",
+    ).fetchone()[0]
+    driver = _MatrixDriver(owned)
+    action_id, item_id = _start_cleanup(owned, output_id, "2")
+    base = _new_runtime(cfg, owned, driver)
+    port = _RecordingQuerySaves(item_id)
+    base.operations = port
+    runtime = base.for_item(item_id)
+    driver.matrix_enabled, driver.present = True, False
+    step = await delete_source_file(runtime, item_id)
+    assert (step.phase, step.detail) == ("succeeded", "ABSENCE_CONFIRMED"), step
+    assert len(driver.queries) == 1 and len(driver.deletes) == 1
+    assert len(port.calls) == 1
+    return port.calls[0], context
+
+
+@pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK],
+                         ids=["unknown", "rolled_back"])
+async def test_query_result_redelivery_remains_pending(environment, kind):
+    """第二次保存复验再次失败时，完整原申请与首次 key 仍被持有。"""
+    cfg, owned, _, _ = environment
+    base, driver, action_id, item_id, old_member = await _world(environment, "before", False)
+    port = _FailingQuerySaves(kind, item_id, driver, base.retry_gate)
+    base.operations = port
+    runtime = base.for_item(item_id)
+    deletes_before, queries_before = len(driver.deletes), len(driver.queries)
+    with pytest.raises(ConsistencyError):
+        await delete_source_file(runtime, item_id)
+    first_finish, first_key = port.calls[0]
+    identity = (first_finish.ticket.run_id, first_finish.ticket.attempt_id)
+    held = runtime.pending_queries[identity]
+
+    with pytest.raises(ConsistencyError):
+        await delete_source_file(runtime, item_id)
+
+    assert len(port.calls) == 2
+    assert port.calls[1] == (first_finish, first_key)
+    assert runtime.pending_queries[identity] is held
+    assert held.phase is CleanupQueryPhase.PREPARED
+    assert held.finish is first_finish and held.key == first_key
+    assert held.ticket is first_finish.ticket and held.occurred_at == _NOW
+    assert (len(driver.deletes), len(driver.queries)) == (
+        deletes_before, queries_before + 1)
+    assert port.checkpoints[1] == port.checkpoints[0]
+    assert _member_facts(owned, item_id)[:2] == (3, 2)
+    _check_old_member(owned, old_member)
+
+
+async def test_query_key_rejected_on_another_database_instance(environment, tmp_path):
+    """另一库实例没有原流程事实：同键同申请被拒，原责任保持原 key。"""
+    (finish, key), context = await _saved_absence_query(environment)
+    other_cfg = load_config({
+        "paths": {"state_db": str(tmp_path / "other" / "state.db"),
+                  "log_file": str(tmp_path / "other" / "log"),
+                  **{name: str(tmp_path / "other" / name)
+                     for name in ("staging", "ready", "processing")}},
+        "devices": {device: {"kind": "camera", "driver": "camctl-adb"}
+                    for device in ("cam-a", "cam-b")}}, ConfigDefaults())
+    assert initialize_state(
+        other_cfg, Path(other_cfg.paths.state_db)).outcome is InitOutcome.CREATED
+    other = open_existing(
+        Path(other_cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        rejected = OperationRepository().finish_attempt(finish, key, other)
+        assert rejected.kind is DbOutcomeKind.ROLLED_BACK, rejected.error
+        assert other.connection.execute(
+            "SELECT COUNT(*) FROM history_transactions").fetchone() == (0,)
+    finally:
+        other.connection.close()
+
+    fresh = context.open_connection()
+    try:
+        history_before = _history(fresh)
+        reused = OperationRepository().finish_attempt(finish, key, fresh)
+        assert reused.kind is DbOutcomeKind.COMPLETED, reused.error
+        assert reused.value.disposition is FinishDisposition.SAVED
+        assert _saved_key_count(fresh, key) == 1
+        assert _history(fresh) == history_before
+    finally:
+        fresh.connection.close()
+
+
+def _changed_redelivery(finish, change):
+    if change == "phase":
+        return replace(finish, retry_wait=not finish.retry_wait)
+    if change == "result":
+        return replace(finish, outcome=replace(
+            finish.outcome, outcome=replace(
+                finish.outcome.outcome, effect=EffectState.UNKNOWN)))
+    return replace(finish, occurred_at=finish.occurred_at + 1_000_000)
+
+
+@pytest.mark.parametrize("change", ["phase", "result", "moment"])
+async def test_query_key_rejects_changed_redelivery_and_keeps_key(environment, change):
+    """同键改阶段、改结果或改时刻均拒绝；原申请重送仍只读复用。"""
+    (finish, key), context = await _saved_absence_query(environment)
+    fresh = context.open_connection()
+    try:
+        history_before = _history(fresh)
+        rejected = OperationRepository().finish_attempt(
+            _changed_redelivery(finish, change), key, fresh)
+        assert rejected.kind is DbOutcomeKind.ROLLED_BACK, rejected.error
+        assert _history(fresh) == history_before
+
+        reused = OperationRepository().finish_attempt(finish, key, fresh)
+        assert reused.kind is DbOutcomeKind.COMPLETED, reused.error
+        assert reused.value.disposition is FinishDisposition.SAVED
+        assert _saved_key_count(fresh, key) == 1
+        assert _history(fresh) == history_before
     finally:
         fresh.connection.close()

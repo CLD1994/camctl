@@ -1664,9 +1664,13 @@ async def _advance_cleanup_action(
         unfinished = int(cursor.fetchone()[0])
     if unfinished:
         return
-    if canceled:
-        # 取消已请求：不保存普通汇总终态，动作终态化由取消结算
-        # 保存，完成依据按取消语义判定。
+    with closing(connection.execute(
+        "SELECT cancel_requested FROM actions WHERE id = ?", (action_id,),
+    )) as cursor:
+        canceled_now = int(cursor.fetchone()[0]) == 1
+    if canceled or canceled_now:
+        # 取消已请求（含本轮成员推进期间生效）：不保存普通汇总终
+        # 态，动作终态化由取消结算保存，完成依据按取消语义判定。
         return
     outcome = runtime.outputs.finish_cleanup_action(
         FinishCleanupAction(action_id=action_id, occurred_at=now),

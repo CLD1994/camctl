@@ -17,6 +17,7 @@ import pytest
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
+from camctl.contracts.workflow_errors import item_error_id
 from camctl.operations.attempts import BeginDisposition, FinishDisposition
 from camctl.outputs.cleanup_flow import (
     FinishCleanupAction, delete_source_file)
@@ -318,3 +319,56 @@ async def test_query_only_absence_success_from_reversible_restriction(environmen
     assert owned.connection.execute(
         "SELECT COUNT(*) FROM operation_runs WHERE cleanup_item_id=? AND kind=?",
         (item_id, int(_KIND.DELETE_FILE))).fetchone() == (0,)
+
+
+class _CancelAfterQueryDriver(_MatrixDriver):
+    """查询实际返回后、结果保存前施加本动作取消；DELETE 真实执行。"""
+
+    def __init__(self, owned):
+        super().__init__(owned)
+        self.on_query_return = None
+
+    async def query_state(self, request):
+        result = await super().query_state(request)
+        if self.on_query_return is not None:
+            callback, self.on_query_return = self.on_query_return, None
+            callback()
+        return result
+
+
+@pytest.mark.parametrize("present,phase,detail,status,outcome,code,settled", [
+    (True, "canceled", "file_delete_failed", 6, None, "file_delete_failed", 4),
+    (None, "canceled", "delete_unconfirmed", 6, None, "delete_unconfirmed", 6),
+    (False, "succeeded", "ABSENCE_CONFIRMED", 4, 3, None, 3),
+], ids=["present", "unknown", "absent"])
+async def test_cancel_after_query_return_settles_by_matrix(
+        environment, present, phase, detail, status, outcome, code, settled):
+    """本项 DELETE 已发出：取消在查询返回后生效，按矩阵收场且零新增删除。"""
+    cfg, owned, context, capture_driver = environment
+    await _save_photos(cfg, owned, context, capture_driver)
+    output_id = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'").fetchone()[0]
+    driver = _CancelAfterQueryDriver(owned)
+    action_id, item_id = _start_cleanup(owned, output_id, "2")
+    driver.matrix_enabled, driver.present = True, present
+    driver.on_query_return = lambda: _apply_cleanup_cancel(owned, action_id)
+
+    step = await delete_source_file(_new_runtime(cfg, owned, driver).for_item(item_id), item_id)
+
+    assert (step.phase, step.detail) == (phase, detail), step
+    # 取消生效后不再发起任何设备调用。
+    assert len(driver.deletes) == 1 and len(driver.queries) == 1
+    facts = _member_facts(owned, item_id)
+    assert facts[:4] == (status, int(_ITEM_RESTRICTION.IRREVERSIBLE), outcome,
+                         None if code is None else item_error_id("cleanup_items", code))
+    assert facts[4] is not None
+    assert owned.connection.execute(
+        "SELECT cancel_requested FROM actions WHERE id=?", (action_id,)).fetchone() == (1,)
+    # 流程收束与取消错误一致：仍在为 FAILED，未确认为 UNCONFIRMED，
+    # 确认缺席按 SUCCEEDED；两条流程都不再等待重试。
+    runs = owned.connection.execute(
+        "SELECT kind,status,retry_wait_required FROM operation_runs"
+        " WHERE cleanup_item_id=? ORDER BY kind", (item_id,)).fetchall()
+    assert runs == [(int(_KIND.DELETE_FILE), settled, 0),
+                    (int(_KIND.CHECK_FILE_EXISTS), settled, 0)]

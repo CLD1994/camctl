@@ -153,7 +153,7 @@ C1 的删除已有结束结果，但效果未知，随后 C1 可靠保存自己�
 
 **建议文件：** `outputs/cleanup_flow.py`；新增 `unit/outputs/test_cleanup_query_save_responsibility.py` 和 `integration/outputs/test_cleanup_query_save_recovery.py`。保持公开 `delete_source_file` 返回 `CleanupStep`；`_run_query` 可以保留可靠时的 `bool | None` 返回并在保存失败时抛出明确一致性错误，也可以返回有约束的保存分区，但不能用 `None` 表示数据库失败。
 
-- [ ] 单元测试受 `finish_attempt` 接口约束的保存替身，逐项验证 `ROLLED_BACK`、`UNKNOWN`、缺少合法完成值、`ALREADY_ENDED`、完整 `SAVED`、原票据错配和重复持有冲突。断言原完整申请、首次 key、实际时刻及持有状态，不复制内部调用图。
+- [x] 单元测试受 `finish_attempt` 接口约束的保存替身，逐项验证 `ROLLED_BACK`、`UNKNOWN`、缺少合法完成值、`ALREADY_ENDED`、完整 `SAVED`、原票据错配和重复持有冲突。断言原完整申请、首次 key、实际时刻及持有状态，不复制内部调用图。（79 项单元见 `unit/outputs/test_cleanup_query_save_responsibility.py`，随 4c872ae 交付。）
 - [x] 在真实 SQLite 上写三个公开消费者的矩阵测试，建议节点 `test_query_save_matrix[consumer-observation-db_kind]`。删除前使用合法接手责任；删除后使用本项真实未知删除；取消使用本项真实已结束但效果未知的 DELETE，加公开取消事务。不能只改数据库字段模拟已发生查询。
 - [x] 每个非完成分区断言：原 QUERY 只调用一次、原查询次数只占一次；没有新增 DELETE、成员终态、伴随收场或重试锚点变化；错误保持为结果保存失败，不能成为 `query_unknown`、`succeeded` 或 `canceled`。COMPLETED 分区断言矩阵规定的实际行为。先运行新增文件并记录有效红。
 - [x] 实现首次持有和完整申请准备，在首次 `finish_attempt` 前将数据放入集合。保存失败保持原对象和原 key，三个消费者均在明确保存资格通过后才取得观察；默认错误分区复用 `finish_rejected` 或等价明确分类，不吞掉数据库错误。
@@ -165,7 +165,7 @@ C1 的删除已有结束结果，但效果未知，随后 C1 可靠保存自己�
 
 - [x] 建立 `test_query_result_commit_unknown[consumer-observation-before_commit/after_commit]`：COMMIT 前错误保持未完成事务，COMMIT 后错误已经真实提交。可复用 `integration/operations/test_result_reuse.py` 的连接故障包装，但必须在真实查询结果事务注入，不能伪造一个 UNKNOWN 返回代替实际提交。
 - [x] 在原调用结束后关闭或可靠结束旧连接，用 fresh `OwnedConnection` 和同一持有集合恢复。核验相同数据库实例身份、相同完整 finish／key／时刻，恢复只保存原结果；设备 QUERY 总数和查询 attempts_used 都不增加。COMMIT 后重送零新增查询结果历史，COMMIT 前沿原 key 只新增首次结果事实。
-- [ ] 写 `test_query_result_redelivery_remains_pending[UNKNOWN/ROLLED_BACK]`，在第二次复验再次失败，断言完整责任仍存在、消费者未推进。写另一库实例身份及原 key 不同阶段／不同结果／不同时刻的拒绝用例；拒绝不换 key。
+- [x] 写 `test_query_result_redelivery_remains_pending[UNKNOWN/ROLLED_BACK]`，在第二次复验再次失败，断言完整责任仍存在、消费者未推进。写另一库实例身份及原 key 不同阶段／不同结果／不同时刻的拒绝用例；拒绝不换 key。（2026-10-11 补入 `test_cleanup_query_local_consumption.py`：第二次失败后原申请对象、首次 key、PREPARED 阶段保持，设备调用与历史与第一次失败时相同；另一实例零历史拒绝；同键改 retry_wait／effect／occurred_at 均拒绝且原键只读复用，20 项通过。）
 - [x] 写 `test_saved_absence_member_finish_interrupted[before_commit/after_commit]`：原 QUERY 缺席已可靠提交，成员成功事务中断；再次推进零设备 QUERY、零 DELETE，仍使用原 `present=False` 保存或复验原成功申请。取消已保存未知观察后，成员取消事务失败同样不得重查设备；伴随收场失败只续接原收场。
 - [x] 实现显式的“待保存实际结果 → 已保存待消费 → 待成员结果／伴随收场 → 已可靠交接”责任阶段。成员申请和伴随申请首次提交前固定完整输入、key 和时刻；消费成功后才释放对应责任。普通后续合法新查询与原结果重送分开判断。
 - [x] 清空内存集合并重新打开库，验证查询结果已提交但本地成员结果未提交时从原 `result_json` 恢复在场、缺席和未知；校验原身份及后续 DELETE 顺序。`CONFIRMED` 不能代替 `present=True`；结构错误、成员身份错误、未知版本和相互矛盾观察保留诊断，不变为空观察。
@@ -177,10 +177,10 @@ C1 的删除已有结束结果，但效果未知，随后 C1 可靠保存自己�
 
 - [x] 从真实初始化、受理、产物及清理事务建立默认入口测试，复用 `bootstrap/test_output_binding_changes.py` 的公开环境和 `test_output_binding_cancellation.py` 的公开取消入口。第一次 factory 创建的 runtime 取得实际查询，第二次 factory 使用新连接，单靠同一个 runtime 不算默认入口证据。
 - [x] 覆盖三观察 × COMMIT 前／后 UNKNOWN，分别在绑定匹配、缺失和不匹配时接手。待存结果早于候选、成员终态、取消、绑定及新调用资格恢复；已经取得的原结果不重新验证当前驱动。新的外部操作仍按当前绑定处理。
-- [ ] 原查询返回后、普通下一步前施加取消；本项已有 DELETE 的三个观察按取消矩阵处理，零新增 DELETE。Task 0 通过后，再覆盖本项仅有 QUERY 且取消生效的在场／未知组合：原结果保存后无错误取消，只解除本项限制，另一成员事实保持。
-- [ ] 对终态早退分别覆盖合法的“查询和成员结果已经提交，但完成通知或伴随收场尚未交接”，以及矛盾的“成员终态仍缺必要原查询结果”。前者核实原责任且保持业务结果；后者诊断，不通过直接造终态数据证明可以正常继续。
-- [ ] 对主机派生成品经 `HostArtifacts.query_state` 注入真实结果保存失败和 fresh 连接恢复，确保本地文件查询也只调用一次；主机产物不会被当前设备目录变化误分为设备目标。
-- [ ] 证明等待者取消期间实际 QUERY 仍由原拥有者跟踪，取得返回后原保存责任进入共享集合；另一轮不会依据 DB.RUNNING 重查或把实际结果降为旧调用 UNKNOWN。根 Agent 前台独占运行新增默认入口文件及既有 `test_output_cleanup_recovery.py`、`test_output_binding_cancellation.py`。
+- [x] 原查询返回后、普通下一步前施加取消；本项已有 DELETE 的三个观察按取消矩阵处理，零新增 DELETE。Task 0 通过后，再覆盖本项仅有 QUERY 且取消生效的在场／未知组合：原结果保存后无错误取消，只解除本项限制，另一成员事实保持。（2026-10-11：`test_cleanup_query_cancel_before_delete.py` 新增查询返回后施加取消的三观察矩阵（在场／未知按携带错误取消、流程分别 FAILED／UNCONFIRMED，缺席仍按成功），零新增设备调用；QUERY-only 组合已由该文件 Task 0 用例覆盖，12 项通过。）
+- [x] 对终态早退分别覆盖合法的“查询和成员结果已经提交，但完成通知或伴随收场尚未交接”，以及矛盾的“成员终态仍缺必要原查询结果”。前者核实原责任且保持业务结果；后者诊断，不通过直接造终态数据证明可以正常继续。（2026-10-11：`test_cleanup_query_default_recovery.py` 新会话默认轮次补齐中断的伴随收场、成员事实与历史前缀保持、零设备调用；同文件验证伴随责任存在而成员缺可靠终态时整轮诊断且数据库不变。）
+- [x] 对主机派生成品经 `HostArtifacts.query_state` 注入真实结果保存失败和 fresh 连接恢复，确保本地文件查询也只调用一次；主机产物不会被当前设备目录变化误分为设备目标。（2026-10-11：本地删除失败而文件确已不在时，本地查询结果事务注入真实 COMMIT 后故障；下一默认轮次从已提交结果恢复并成功收场，本地删除／查询各恰一次，设备目录移除原设备后零设备调用。）
+- [x] 证明等待者取消期间实际 QUERY 仍由原拥有者跟踪，取得返回后原保存责任进入共享集合；另一轮不会依据 DB.RUNNING 重查或把实际结果降为旧调用 UNKNOWN。根 Agent 前台独占运行新增默认入口文件及既有 `test_output_cleanup_recovery.py`、`test_output_binding_cancellation.py`。（2026-10-11：门控驱动挂起在途 QUERY，等待期间经独立连接施加取消；原拥有者保存实际结果后按矩阵收场，查询尝试可靠保存且不被降级，后续轮次零重查；三个文件前台顺序运行 39 项通过。修复了取消在本轮成员推进期间生效时汇总分支沿用轮首取消标记、被仓储拒绝后整轮失败的生产缺陷：汇总前重读取消标记。）
 
 ### Task 4：共享不变量审计与目录门禁
 

@@ -9,6 +9,8 @@ QUERY 结果事务的 COMMIT，不替换运行时或直接写入状态投影。
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -16,9 +18,15 @@ from sqlite3 import ProgrammingError
 
 import pytest
 
-from camctl.bootstrap.cleanup_assembly import cleanup_flow, session_cleanup_assembly
-from camctl.contracts.values import ConsistencyError
-from camctl.operations.attempts import FinishDisposition
+from camctl.bootstrap.cleanup_assembly import (
+    HostArtifacts, cleanup_flow, session_cleanup_assembly,
+)
+from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.workflow_errors import item_error_id
+from camctl.devices.ports import DeviceCallResult
+from camctl.operations.attempts import FinishDisposition, RunOutcome, StaleRunFinish
+from camctl.outputs.cleanup_flow import PendingCleanupCompanion, delete_source_file
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 
@@ -26,7 +34,10 @@ from ..outputs.test_cleanup_query_commit_recovery import (
     _CommitFaultConnection, _assert_saved_result, _dependent_facts,
     _history, _query_row,
 )
-from ..outputs.test_cleanup_query_save_recovery import _MatrixDriver
+from ..outputs.test_cleanup_query_save_recovery import (
+    _MatrixDriver, _apply_cleanup_cancel, _member_facts, _start_cleanup,
+)
+from .test_cleanup_flow import _seed_repaired_artifact
 from .test_output_binding_changes import (
     _NOW, _accept, _registry, _save_photos, environment,
 )
@@ -236,3 +247,266 @@ async def test_default_cleanup_query_recovers_original_result(
         assert owned.connection.execute(
             "SELECT * FROM device_files WHERE id=(SELECT device_file_id FROM outputs WHERE id=?)",
             (output_id,)).fetchone() == fault.dependencies_before[3]
+
+
+class _DefaultCompanionFault:
+    """目标成员伴随收场事务注入真实 COMMIT 前故障；其余事务真实执行。"""
+
+    def __init__(self, original, item_id):
+        self.original, self.item_id = original, item_id
+        self.fault = None
+        self.calls = 0
+
+    def save(self, repository, request, key, owned):
+        if f"exists/{self.item_id}" not in request.responsibility_keys:
+            return self.original(repository, request, key, owned)
+        self.calls += 1
+        if self.fault is None:
+            self.fault = _CommitFaultConnection(
+                owned.connection, after_commit=False)
+            return self.original(
+                repository, request, key, replace(owned, connection=self.fault))
+        return self.original(repository, request, key, owned)
+
+
+async def test_default_round_settles_companion_after_member_result(
+        environment, monkeypatch):
+    """成员结果已提交、伴随收场中断：新会话默认轮次补齐且零设备调用。"""
+    cfg, owned, context, capture_driver = environment
+    await _save_photos(cfg, owned, context, capture_driver)
+    output_id = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'").fetchone()[0]
+    driver = _DefaultDriver(owned)
+    action_id, item_id = _start_cleanup(owned, output_id, "2")
+    fault = _DefaultCompanionFault(
+        OperationRepository.finish_stale_runs, item_id)
+    monkeypatch.setattr(
+        OperationRepository, "finish_stale_runs",
+        lambda repository, request, key, current_owned:
+            fault.save(repository, request, key, current_owned))
+    driver.matrix_enabled, driver.present = True, False
+    session_factory = session_cleanup_assembly(
+        devices={device: dict(declaration) for device, declaration in cfg.devices.items()},
+        drivers=_registry(driver), max_delete_attempts=3, max_query_attempts=3,
+        staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
+
+    with pytest.raises(ConsistencyError):
+        await cleanup_flow(session_factory)(context)
+
+    assert fault.calls == 1 and fault.fault.commit_calls == 1
+    member = _member_facts(owned, item_id)
+    assert member[:4] == (4, 4, 3, None) and member[4] is not None
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_runs WHERE cleanup_item_id=? AND status IN (1,2)",
+        (item_id,)).fetchone() == (2,)
+    calls_before = (len(driver.deletes), len(driver.queries))
+    history_before = _history(owned.connection)
+
+    await cleanup_flow(session_factory)(context)
+
+    assert fault.calls == 2
+    assert (len(driver.deletes), len(driver.queries)) == calls_before
+    assert _member_facts(owned, item_id) == member
+    assert owned.connection.execute(
+        "SELECT status,retry_wait_required FROM operation_runs"
+        " WHERE cleanup_item_id=? ORDER BY id", (item_id,)).fetchall() == [(3, 0), (3, 0)]
+    assert owned.connection.execute(
+        "SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3,)
+    assert _history(owned.connection)[:len(history_before)] == history_before
+
+
+async def test_default_round_diagnoses_companion_without_terminal_member(environment):
+    """伴随责任存在而成员缺可靠终态：默认轮次诊断，不造终态继续。"""
+    cfg, owned, context, capture_driver = environment
+    await _save_photos(cfg, owned, context, capture_driver)
+    output_id = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'").fetchone()[0]
+    driver = _DefaultDriver(owned)
+    _action_id, item_id = _start_cleanup(owned, output_id, "2")
+    database_before = tuple(owned.connection.iterdump())
+    session_factory = session_cleanup_assembly(
+        devices={device: dict(declaration) for device, declaration in cfg.devices.items()},
+        drivers=_registry(driver), max_delete_attempts=3, max_query_attempts=3,
+        staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0,
+        pending_companions={item_id: PendingCleanupCompanion(
+            owned.metadata.instance_id,
+            StaleRunFinish((f"exists/{item_id}",), RunOutcome.CANCELED, _NOW),
+            new_operation_key())})
+
+    with pytest.raises(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
+        await cleanup_flow(session_factory)(context)
+
+    assert tuple(owned.connection.iterdump()) == database_before
+    assert (len(driver.deletes), len(driver.queries)) == (0, 0)
+
+
+class _GatedQueryDriver(_DefaultDriver):
+    """首次 QUERY 挂起等待放行：取消在途施加，原拥有者仍完成保存。"""
+
+    def __init__(self, owned):
+        super().__init__(owned)
+        self.dispatched = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def query_state(self, request):
+        if self.reject_new_calls:
+            raise AssertionError("原 QUERY 在途期间不得重新查询设备")
+        result = await super().query_state(request)
+        self.dispatched.set()
+        await self.release.wait()
+        return result
+
+
+async def test_waiter_cancel_keeps_original_query_owner(environment):
+    """等待者取消期间实际 QUERY 由原拥有者收场，结果不降级不重查。"""
+    cfg, owned, context, capture_driver = environment
+    await _save_photos(cfg, owned, context, capture_driver)
+    output_id = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'").fetchone()[0]
+    driver = _GatedQueryDriver(owned)
+    driver.matrix_enabled, driver.present = True, None
+    action_id, item_id = _start_cleanup(owned, output_id, "2")
+    session_factory = session_cleanup_assembly(
+        devices={device: dict(declaration) for device, declaration in cfg.devices.items()},
+        drivers=_registry(driver), max_delete_attempts=3, max_query_attempts=3,
+        staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
+    flow = cleanup_flow(session_factory)
+
+    task = asyncio.create_task(flow(context))
+    try:
+        await asyncio.wait_for(driver.dispatched.wait(), timeout=10)
+        canceling = context.open_connection()
+        try:
+            _apply_cleanup_cancel(canceling, action_id)
+        finally:
+            canceling.connection.close()
+        driver.release.set()
+        await asyncio.wait_for(task, timeout=10)
+    finally:
+        if not task.done():
+            driver.release.set()
+            await task
+
+    assert (len(driver.deletes), len(driver.queries)) == (1, 1)
+    member = _member_facts(owned, item_id)
+    assert member[:4] == (6, 4, None, item_error_id("cleanup_items", "delete_unconfirmed"))
+    assert member[4] is not None
+    # 原拥有者保存了实际结果：在途查询尝试有可靠结果事件与完整错误。
+    row = owned.connection.execute(
+        "SELECT a.status,a.result_event_id,a.result_json FROM operation_attempts a"
+        " JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=? AND r.kind=5",
+        (item_id,)).fetchone()
+    attempt_failed = int(enum_for("operation_attempts.status").FAILED)
+    assert row[0] == attempt_failed and row[1] is not None  # 已可靠保存。
+    assert json.loads(row[2])["observations"] == []
+    assert owned.connection.execute(
+        "SELECT status,retry_wait_required FROM operation_runs"
+        " WHERE cleanup_item_id=? ORDER BY id", (item_id,)).fetchall() == [(6, 0), (6, 0)]
+    assert owned.connection.execute(
+        "SELECT cancel_requested,status FROM actions WHERE id=?",
+        (action_id,)).fetchone() == (1, 2)
+
+    # 另一轮只确认事实：不依据 DB 流程状态重查或改写成员终态。
+    driver.reject_new_calls = True
+    await flow(context)
+    assert (len(driver.deletes), len(driver.queries)) == (1, 1)
+    assert _member_facts(owned, item_id) == member
+
+
+class _LocalProbe(HostArtifacts):
+    """记录本地调用；删除按类级开关失败以进入存在性查询。"""
+
+    instances = []
+    fail_delete = False
+
+    def __init__(self, staging):
+        super().__init__(staging)
+        self.delete_calls, self.query_calls = [], []
+        _LocalProbe.instances.append(self)
+
+    async def delete(self, request):
+        self.delete_calls.append(request)
+        if _LocalProbe.fail_delete:
+            return DeviceCallResult(
+                observations=(), error={"code": "local_io_failed", "stage": "delete"})
+        return await super().delete(request)
+
+    async def query_state(self, request):
+        self.query_calls.append(request)
+        return await super().query_state(request)
+
+
+async def test_host_artifact_query_recovers_after_save_fault(
+        environment, monkeypatch):
+    """主机派生成品的本地查询保存失败后新轮次恢复；目标不落入设备。"""
+    cfg, owned, context, capture_driver = environment
+    await _save_photos(cfg, owned, context, capture_driver)
+    output_id = owned.connection.execute(
+        "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " WHERE a.device_id='cam-a'").fetchone()[0]
+    _seed_repaired_artifact(Path(cfg.paths.state_db), cfg, output_id)
+    # 删除调用将失败，而目标文件确已不在：查询按真实缺席核实。
+    (Path(cfg.paths.staging) / "derived" / "900.jpg").unlink()
+    _accept(owned, "2", [{
+        "name": "清理主机成品", "type": "delete_action_outputs",
+        "scheduled_at": "2026-01-15 09:00:00",
+        "params": {"output_ids": [str(output_id)]},
+    }])
+    action_id = owned.connection.execute(
+        "SELECT id FROM actions WHERE type=5").fetchone()[0]
+    devices = {device: dict(declaration) for device, declaration in cfg.devices.items()}
+    driver = _DefaultDriver(owned)
+    clock = {"wall": _NOW, "mono": 0}
+
+    def probe(staging):
+        return _LocalProbe(staging)
+
+    monkeypatch.setattr(
+        "camctl.bootstrap.cleanup_assembly.HostArtifacts", probe)
+    session_factory = session_cleanup_assembly(
+        devices=devices, drivers=_registry(driver),
+        max_delete_attempts=3, max_query_attempts=3,
+        staging=Path(cfg.paths.staging), occurred_at=lambda: clock["wall"],
+        monotonic_ns=lambda: clock["mono"])
+    fault = _DefaultQueryFault(
+        OperationRepository.finish_attempt, action_id, output_id, after_commit=True)
+    monkeypatch.setattr(
+        OperationRepository, "finish_attempt",
+        lambda repository, finish, key, current_owned:
+            fault.save(repository, finish, key, current_owned))
+    _LocalProbe.fail_delete = True
+
+    with pytest.raises(ConsistencyError):
+        await cleanup_flow(session_factory)(context)
+
+    first = _LocalProbe.instances[-1]
+    assert len(first.delete_calls) == 1 and len(first.query_calls) == 1
+    assert fault.receipts[0].kind is DbOutcomeKind.UNKNOWN
+    _finish, first_key = fault.calls[0][1], fault.calls[0][2]
+    item_id = int(fault.calls[0][1].ticket.target_id)
+    member_before = _member_facts(owned, item_id)
+    assert member_before[0] == 3
+
+    # 设备目录不再包含原设备：主机目标不得被误分为设备目标。
+    devices.pop("cam-a")
+    clock.update(wall=_NOW + 5_000, mono=900)
+    driver.reject_new_calls = True
+    await cleanup_flow(session_factory)(context)
+
+    second = _LocalProbe.instances[-1]
+    assert second is not first
+    assert len(second.delete_calls) == 0 and len(second.query_calls) == 0
+    member = _member_facts(owned, item_id)
+    assert member[:4] == (4, 4, 3, None) and member[4] is not None
+    assert owned.connection.execute(
+        "SELECT status,retry_wait_required FROM operation_runs"
+        " WHERE cleanup_item_id=? ORDER BY id", (item_id,)).fetchall() == [(3, 0), (3, 0)]
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+        (str(first_key),)).fetchone() == (1,)
+    assert owned.connection.execute(
+        "SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3,)
+    assert (len(driver.deletes), len(driver.queries)) == (0, 0)
