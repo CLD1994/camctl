@@ -338,7 +338,7 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 **预计文件：** 建议 `integration/bootstrap/test_runtime_configuration_recovery.py`；跨组件需要真实 CLI 时放根 `tests/integration/test_camctl_configuration_recovery.py`，先阅读根测试运行说明。证据更新到本计划和已有软件验收映射，不另建重复进度页。
 
-- [ ] 同一真实状态库先 `submit` 受理原请求，经第一运行保存未完成责任后可靠停止，再修改配置并运行第二次；组合两台设备、跨设备取回／清理、完整主机副本、取消和报告维护。时钟通过既有可注入端口控制，不等待真实拍摄时长。
+- [x] 同一真实状态库先 `submit` 受理原请求，经第一运行保存未完成责任后可靠停止，再修改配置并运行第二次；组合两台设备、跨设备取回／清理、完整主机副本、取消和报告维护。时钟通过既有可注入端口控制，不等待真实拍摄时长。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_runtime_configuration_recovery.py` 两项组合测试。`test_second_run_uses_changed_budget_and_extra_wait`：同一状态库 submit 受理 cam-1 照片与 cam-2 延时的双设备计划，第一运行保存照片核实重试等待（results/1 为 (2,1,1)）与延时等待安排（额外等待零）后可靠停止，修改按设备配置后第二运行以新预算（上限 2→5、间隔 30 秒→0.2 秒）恰好补足一轮完成照片核实、按新额外等待（0→3000 毫秒）从原发送锚点重算预计检查（extra_wait_ms_used=3000、预计检查精确等于发送加 5 秒），两台设备产物各登记一份且占用释放，随后真实冻结、生成与分批重建报告（公共 Schema 校验、两动作成功投影、字节一致与摘要一致）。`test_second_run_cancels_with_current_stop_configuration`：第一运行保存延时启动与等待安排后可靠停止，取消排期与停止预算重配置（1 次 30 秒间隔→3 次 0.2 秒间隔）后第二运行第一次停止错误经新间隔重试、第二次确认，取消终态与已拍完产物同事务登记，取消动作与两计划全部收场。时钟经真实墙钟加秒级目标时长与可控等待配置注入，不等待真实拍摄时长。跨设备取回、清理与完整主机副本的两段会话维度由既有专项覆盖：读取与重拷跨运行预算 `integration/capture/test_check_current_budget.py` 与读取失败跨会话专项、清理每轮新连接续接 `integration/bootstrap/test_cleanup_query_default_recovery.py`、主机副本 `integration/outputs/test_copy_complete.py` 与录像媒体链 `integration/capture/test_recording_media_link.py`。）
 - [ ] 在各次采用新配置、保存判断、开始调用、结果保存及取消提交前后使用明确同步点注入中断；恢复原完整事务及原身份，验证没有重复副作用、重复名额或遗漏独立收场。
 - [ ] 对配置更新前后分别冻结完整 H，以初始回放、快照正向、当前投影逆向恢复对照独立预期；旧报告重建字节一致，当前报告表达实际逐项失败／成功及原绑定事实，不新增无需求依据的内部过程字段。
 - [ ] 逐目录顺序执行受影响组件集成，再运行根配置组合；源码导入图和 AST（抽象语法树）检查验证执行入口实际消费统一核对及配置接口，不能只搜索函数名称。
