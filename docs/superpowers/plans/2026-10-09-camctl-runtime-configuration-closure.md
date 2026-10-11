@@ -92,10 +92,10 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 相应生产接线后，CLI 原窄门禁 14 项通过，正常／受限报告消费者及最终关闭分类的组合共 24 项通过，消息与迟到结果单元共 68 项通过，实际 worker 文件 11 项通过。reporting 单目录独立回归 352 项通过，覆盖历史分页与 RC0 消息／worker 组合。非法相对路径、NUL、展开后词法规范化、报告开库错误分类及 bootstrap 完整目录仍须保留各自证据；本节不以 reporting 目录通过替代日常会话或整个配置目标的验收。
 
-- [ ] 添加 `test_run_and_submit_reject_each_changed_directory_before_acceptance`：分别只改变 staging、ready、processing 及改变全部三项，真实 CLI 返回 `configuration_error`；诊断包含变更字段和原／新路径，库、受理事件、动作、设备调用与业务文件保持。路径书写不同但实际规范对象相同的输入通过。
-- [ ] 添加 `test_report_worker_rejects_mismatched_binding_before_generation`：主进程检查之后、子进程开库之前受控改变绑定输入，子进程拒绝且不创建或覆盖临时文件，不读取历史生成报告；通过既有报告通信保留配置错误所属范围，不把合法配置不匹配冒充状态库损坏。
-- [ ] 添加 `test_directory_gate_keeps_database_errors_and_describe_scope`：库缺失／无效返回原状态库错误，`describe` 无状态库也能执行；已经有文件的正常匹配运行不额外扫描原目录，日常入口不能更新绑定。
-- [ ] 先确认失败，再接入门禁及精确错误分类。RC0 只比较已保存元信息，不执行目录切换；显示路径错误和诊断须沿正式协议分类。门禁：所有日常入口及报告子进程都具有实际生产调用证据，显式 `init` 的切换行为仍由独立目录切换计划验收。
+- [x] 添加 `test_run_and_submit_reject_each_changed_directory_before_acceptance`：分别只改变 staging、ready、processing 及改变全部三项，真实 CLI 返回 `configuration_error`；诊断包含变更字段和原／新路径，库、受理事件、动作、设备调用与业务文件保持。路径书写不同但实际规范对象相同的输入通过。（`integration/bootstrap/test_directory_binding_runtime.py` 逐项目录与等价规范书写组合交付。）
+- [x] 添加 `test_report_worker_rejects_mismatched_binding_before_generation`：主进程检查之后、子进程开库之前受控改变绑定输入，子进程拒绝且不创建或覆盖临时文件，不读取历史生成报告；通过既有报告通信保留配置错误所属范围，不把合法配置不匹配冒充状态库损坏。（以 `integration/reporting/test_worker.py::test_worker_rejects_each_changed_binding_before_staging` 交付：三类路径逐项拒绝、零临时文件，缺库仍按 STATE。）
+- [x] 添加 `test_directory_gate_keeps_database_errors_and_describe_scope`：库缺失／无效返回原状态库错误，`describe` 无状态库也能执行；已经有文件的正常匹配运行不额外扫描原目录，日常入口不能更新绑定。（拆分为同文件 `test_directory_gate_keeps_database_error_classification` 与 `test_describe_does_not_require_database_or_bound_directories`；纯词法规范化不访问目录由 `test_adapter_normalizes_expanded_paths_without_directory_access` 覆盖。）
+- [x] 先确认失败，再接入门禁及精确错误分类。RC0 只比较已保存元信息，不执行目录切换；显示路径错误和诊断须沿正式协议分类。门禁：所有日常入口及报告子进程都具有实际生产调用证据，显式 `init` 的切换行为仍由独立目录切换计划验收。（上文 2026-10-09 窄门禁记录红—绿及 reporting 352 项目录回归；正常／受限会话的配置错误停止由 `test_report_configuration_error_stops_normal_and_restricted_session` 覆盖。）
 
 ### RC1 已明确设备配置字段的校验与传递
 
@@ -103,10 +103,10 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 **接口与交付：** 保留 `load_config(document, defaults) -> ConfigSnapshot` 为配置入口。使用已存在的 `AttemptConfig`／`OperationConfig` 向运行时传递相应操作的本次上限、超时与间隔；原执行定义只提供业务要求和驱动必要余量。具体归一化辅助函数签名由实施者根据当前装配确认，必须保持一处权威默认值，不能在流程、仓储和测试中各维护一份完整字段清单。
 
-- [ ] 先添加 `test_known_device_fields_reject_invalid_values`：逐字段覆盖 `recording.start_timeout_s`、`stop_timeout_s`、`max_start_attempts`、`max_stop_attempts`、`result_check.max_attempts`、`call_timeout_s`、`copy.max_read_attempts`、`max_recopies`、`read_idle_timeout_s`、`capture.extra_wait_ms`；精确断言合法值归一化及非法值抛 `ConfigError`。
-- [ ] 添加 `test_runtime_policies_use_current_device_values`：输入两台设备的不同值，断言相应运行时采用各自值；省略字段和空表取默认值，修改原配置输入不能改变已加载快照。
-- [ ] 单独运行上述单元失败测试，确认红来自字段未校验或未消费；再实现字段校验和配置传递，复跑至绿。不得用原样冻结、静默忽略或统一默认值满足该任务。
-- [ ] 门禁：完整执行 `unit/bootstrap`；审计所有已明确设备子表字段的生产消费者，记录已经接入和仍待字段裁决的项目。
+- [x] 先添加 `test_known_device_fields_reject_invalid_values`：逐字段覆盖 `recording.start_timeout_s`、`stop_timeout_s`、`max_start_attempts`、`max_stop_attempts`、`result_check.max_attempts`、`call_timeout_s`、`copy.max_read_attempts`、`max_recopies`、`read_idle_timeout_s`、`capture.extra_wait_ms`；精确断言合法值归一化及非法值抛 `ConfigError`。（`unit/bootstrap/test_device_execution_config.py` 对十个字段全覆盖：精确秒值、非法秒值、整数下界、非整数、低于下界、未知字段与显式空表。）
+- [x] 添加 `test_runtime_policies_use_current_device_values`：输入两台设备的不同值，断言相应运行时采用各自值；省略字段和空表取默认值，修改原配置输入不能改变已加载快照。（`unit/bootstrap/test_read_execution_config.py` 验证 copy 配置到达取回与内部输入两个消费者；`test_timelapse_assembly.py` 验证 capture 额外等待进入等待装配；`test_device_execution_config.py` 的快照加载为一次性冻结值。录像 START／STOP 的逐设备运行时消费由[录像 START 执行计划](2026-10-09-camctl-recording-start-runtime.md)与 `test_recording_stop.py` 承载。）
+- [x] 单独运行上述单元失败测试，确认红来自字段未校验或未消费；再实现字段校验和配置传递，复跑至绿。不得用原样冻结、静默忽略或统一默认值满足该任务。（字段校验与传递随上述文件交付；上文 2026-10-09 记录加载相关单元 133 项通过。）
+- [x] 门禁：完整执行 `unit/bootstrap`；审计所有已明确设备子表字段的生产消费者，记录已经接入和仍待字段裁决的项目。（2026-10-11 本轮全量单元 4726 项通过包含 `unit/bootstrap` 全目录；字段消费方分布见上文“当前代码起点”表与各装配测试，尚待裁决字段继续由[设备计划](2026-09-30-camctl-devices.md)跟踪。）
 
 ### RC2 原绑定核对与局部失败的完整事务
 
@@ -114,12 +114,12 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 **接口与交付：** 消费已存在的 `DeviceBinding`、`BindingResult`、`check_binding(saved, current)`；拍摄从动作取得原绑定，设备文件从原观察者动作取得原绑定。当前声明只选择匹配驱动的运行端口，不能生成或覆盖原绑定。提供类型化绑定失败结果给对应拍摄、取回项、清理项及独立收场的事务入口，普通缺失配置不抛成全会话状态库错误。
 
-- [ ] 添加 `test_changed_binding_fails_only_due_device_work`：先经真实受理保存 A、B 两台设备动作，下一次会话移除 A 或把 A 改绑另一个已登记驱动。断言 A 已到期工作失败且新增设备调用、尝试均为零，B 正常执行；A 的未来、过期、已有终态与已取消分别满足状态矩阵。
-- [ ] 添加 `test_cross_device_items_and_host_copy_continue_after_binding_failure`：一个取回和一个清理各涉及 A、B；A 异常项失败，B 项继续；主机完整副本继续发布及本地成品继续清理。清理工厂必须实际处理各设备，不能只处理首个可装配设备。
-- [ ] 添加 `test_binding_failure_preserves_unknown_effect_and_cancel_winddown`：已有未知活动及调用责任时，取消事实正常保存，异常绑定的停止／核实失败，其他设备独立收场；原未知效果、保护和限制不能凭局部失败解除。
-- [ ] 添加 `test_new_driver_trigger_preserves_old_driver_residual`：真实建立驱动 A 的残留活动及独立收场责任，再以驱动 B 受理同设备的新触发动作。本次配置为 B；原责任保存 A 绑定失败，零设备调用且原活动事实保持，新触发动作按 `device_activity_unresolved` 失败，其自身原绑定仍为 B。
-- [ ] 对相应事务注入提交前失败、明确回滚、提交结果未知与提交后通知丢失；核实原请求和完整事务，未完成结果不产生部分项、重复计数或错误的父计划终态。
-- [ ] 确认失败后接入统一原绑定核对与分支事务，逐项复验。门禁：配置修正及同请求重送保持原失败，全部本地责任完成后 `run` 正常退出，无新责任时 `needs_run: false`；状态库错误仍进入会话错误。
+- [ ] 添加 `test_changed_binding_fails_only_due_device_work`：先经真实受理保存 A、B 两台设备动作，下一次会话移除 A 或把 A 改绑另一个已登记驱动。断言 A 已到期工作失败且新增设备调用、尝试均为零，B 正常执行；A 的未来、过期、已有终态与已取消分别满足状态矩阵。（已到期失败、B 正常与终态／取消保持已由上述专项覆盖；“A 的未来时间不因绑定异常提前执行或失败”的组合分区尚缺专项用例。）
+- [x] 添加 `test_cross_device_items_and_host_copy_continue_after_binding_failure`：一个取回和一个清理各涉及 A、B；A 异常项失败，B 项继续；主机完整副本继续发布及本地成品继续清理。清理工厂必须实际处理各设备，不能只处理首个可装配设备。（`test_output_binding_changes.py` 的跨设备取回项、逐成员原绑定清理与完整副本免设备发布；`test_output_device_configuration.py` 验证空设备目录仍装配主机协作者；`test_cleanup_flow.py` 的修复成品本地清理零设备调用。）
+- [x] 添加 `test_binding_failure_preserves_unknown_effect_and_cancel_winddown`：已有未知活动及调用责任时，取消事实正常保存，异常绑定的停止／核实失败，其他设备独立收场；原未知效果、保护和限制不能凭局部失败解除。（`test_unfinished_read_binding_failure_closes_responsibility_and_keeps_progress`、`test_unfinished_cleanup_binding_failure_preserves_unknown_delete`、`test_canceled_cleanup_preserves_saved_unknown_results_after_binding_change` 及清理查询计划的取消收场矩阵。）
+- [x] 添加 `test_new_driver_trigger_preserves_old_driver_residual`：真实建立驱动 A 的残留活动及独立收场责任，再以驱动 B 受理同设备的新触发动作。本次配置为 B；原责任保存 A 绑定失败，零设备调用且原活动事实保持，新触发动作按 `device_activity_unresolved` 失败，其自身原绑定仍为 B。（`integration/bootstrap/test_residual_binding.py` 交付，含票据与期限传递。）
+- [x] 对相应事务注入提交前失败、明确回滚、提交结果未知与提交后通知丢失；核实原请求和完整事务，未完成结果不产生部分项、重复计数或错误的父计划终态。（`test_output_binding_transactions.py`、`test_binding_transactions.py`、`test_residual_binding_transactions.py` 与 `test_binding_canceled_result_transactions.py` 的投影失败回滚、COMMIT 前后未知重开原键与改变输入拒绝矩阵。）
+- [x] 确认失败后接入统一原绑定核对与分支事务，逐项复验。门禁：配置修正及同请求重送保持原失败，全部本地责任完成后 `run` 正常退出，无新责任时 `needs_run: false`；状态库错误仍进入会话错误。（上文 2026-10-09 分区记录的窄门禁与 2026-10-11 清理查询计划交付后的 outputs 1937 项、bootstrap 963 项目录门禁；原请求重送保持原失败由各原键复验矩阵覆盖。）
 
 #### RC2 拍摄恢复及取消的事务分区
 
@@ -410,4 +410,4 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 2026-10-10，读取预算与续传测试的前置、事件定位及实际消费者门禁已完成，验证范围见[读取计划记录](2026-10-09-camctl-read-runtime-configuration.md#读取预算与续传事务的验证记录2026-10-10)。上述五项失败不再属于当前未完成项。查询结果保存责任及跨成员组合仍分别待闭合，RC3／RC5 的完整门禁保持未完成。
 
-2026-10-11，查询原结果持有、可靠保存门槛、fresh 连接重送、成员和伴随结果续接、持久化原观察恢复及集合恢复顺序已进入阶段交付，实际范围与剩余任务见[清理查询阶段记录](2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)。相关清理组合 91 项通过。QUERY-only 取消与共同建档、成员和伴随仓储的完整原键证明、专项历史回放及 RC3／RC5 的其余门禁仍未完成。本阶段验证、提交后停止软件推进；接续任务为客户端分支合并及 Action6 真机演示恢复。
+2026-10-11，[清理查询结果保存与恢复计划](2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)的全部任务（Task 0—4）交付：QUERY-only 取消与首次共同建档、成员／伴随仓储原键复验五项修复、重送拒绝、取消时机矩阵、默认入口恢复、主机派生查询恢复及冻结边界三路径回放核验均已闭合。本计划剩余未完成项为 RC2 的 A 设备未来时间组合分区、RC3 的预算／期限／间隔专项、RC4 的等待重配置与结果矩阵、RC5 的两次会话组合验收。
