@@ -13,6 +13,7 @@ import hashlib
 import json
 import sqlite3
 import time
+from contextlib import closing
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +26,7 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.handlers import CaptureRuntime
+from camctl.capture.recovery import RecoveryBoundary
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 from camctl.capture.results import FileKind
 from camctl.capture.timelapse import CaptureWaitConfig
@@ -205,6 +207,15 @@ def _factory(driver, results, *, photo_check, extra_ms, wait_ms=2000):
         overrides = {}
         if device_id == "cam-1":
             overrides["check_config"] = photo_check
+        with closing(owned.connection.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:
+            horizon = int(cursor.fetchone()[0])
+        overrides["recovery_boundary"] = RecoveryBoundary.HOST_LOCAL_SETTLED
+        overrides["recovery_max_event_id"] = horizon
+        overrides["recovery_evidence_for"] = (
+            lambda binding, operation: EvidenceRegistry((
+                EvidenceContract(
+                    "adb_foreground_recovery", 1, operation, frozenset()),)))
         return CaptureRuntime(
             owned=owned,
             scheduling=SchedulingRepository(),
@@ -391,6 +402,9 @@ class TestTwoSessionCancelUnderChangedStopBudget:
             retry_gate = RetryWaitGate()
 
             def build(owned, device_id: str) -> CaptureRuntime:
+                with closing(owned.connection.execute(
+                        "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:
+                    horizon = int(cursor.fetchone()[0])
                 return CaptureRuntime(
                     owned=owned,
                     scheduling=SchedulingRepository(),
@@ -411,6 +425,11 @@ class TestTwoSessionCancelUnderChangedStopBudget:
                     wait_config=lambda params: CaptureWaitConfig(
                         target_duration_ms=600_000, driver_margin_ms=0),
                     retry_gate=retry_gate,
+                    recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+                    recovery_max_event_id=horizon,
+                    recovery_evidence_for=lambda binding, operation: EvidenceRegistry((
+                        EvidenceContract(
+                            "adb_foreground_recovery", 1, operation, frozenset()),)),
                 )
 
             return build
@@ -469,3 +488,113 @@ class TestTwoSessionCancelUnderChangedStopBudget:
                 row[0] for row in connection.execute(
                     "SELECT status FROM plans ORDER BY id"))
         assert plan_statuses == (3, 3)
+
+
+class TestInterruptedSecondCallRecovery:
+    async def test_interrupted_result_call_resumes_without_duplicate_side_effects(
+            self, tmp_path: Path) -> None:
+        home = tmp_path / "interrupted"
+        home.mkdir()
+        cfg = _paths_and_devices(home)
+        assert initialize_state(
+            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _TwoDeviceCatalog()
+        await _submit_plan(
+            tmp_path, cfg, catalog,
+            {
+                "request_id": "1", "created_at": "2026-01-15 08:00:00",
+                "name": "plan-1",
+                "actions": [{
+                    "name": "photo", "type": "camera_take_photo",
+                    "device_id": "cam-1",
+                    "scheduled_at": _future_schedule(2),
+                    "params": {"type": "photo"},
+                    "policy": {"max_delay_ms": 30000},
+                }],
+            })
+        db = Path(cfg.paths.state_db)
+        photo_file = replace(_entry("img-1", kind=FileKind.PHOTO),
+                             original_name="img-1.jpg", media_type="image/jpeg")
+
+        # 第二次列举调用阻塞在设备端口：同步点在开始调用后、结果保
+        # 存前。中断由会话取消注入，进程内持有的返回被丢弃。
+        blocked = asyncio.Event()
+
+        class _BlockingResults(ResultsDouble):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self._blocked_once = False
+
+            async def list_files(self, action_id: int) -> tuple:
+                if len(self.calls) == 1 and not self._blocked_once:
+                    self._blocked_once = True
+                    blocked.set()
+                    await asyncio.Event().wait()
+                return await super().list_files(action_id)
+
+        results = _BlockingResults({1: (photo_file,)}, set_finalized=False)
+        driver = _TwoDeviceDriver()
+
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        task = _run_session(
+            deps, driver, results,
+            photo_check=AttemptConfig(2, Decimal("10"), Decimal("30")),
+            extra_ms=0)
+        try:
+            await _await_query(
+                db,
+                "SELECT status, attempts_used, retry_wait_required"
+                " FROM operation_runs WHERE responsibility_key = 'results/1'",
+                (2, 1, 1))
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+
+        # 第二运行采用新配置，在第二次列举调用处中断。
+        results.set_finalized = True
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        task = _run_session(
+            deps, driver, results,
+            photo_check=AttemptConfig(5, Decimal("10"), Decimal("0.2")),
+            extra_ms=0)
+        try:
+            await asyncio.wait_for(blocked.wait(), timeout=15)
+            await _await_query(
+                db,
+                "SELECT attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'results/1'", (2,))
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+        # 第二次调用阻塞在设备端口，尚未登记：中断点恰在开始调用后。
+        assert results.calls == [1]
+        run_id = _scalar(
+            db, "SELECT id FROM operation_runs"
+            " WHERE responsibility_key = 'results/1'")[0]
+
+        # 第三运行恢复：在途尝试按原责任收场，不重复既有名额；随后
+        # 以恰好一次新调用完成核实与业务收场。
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        task = _run_session(
+            deps, driver, results,
+            photo_check=AttemptConfig(5, Decimal("10"), Decimal("0.2")),
+            extra_ms=0)
+        try:
+            await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
+        finally:
+            await _cancel(task)
+        close_runtime(deps)
+        assert _scalar(
+            db,
+            "SELECT status, attempts_used FROM operation_runs"
+            " WHERE responsibility_key = 'results/1'") == (3, 3)
+        assert results.calls == [1, 1]
+        assert _scalar(
+            db, "SELECT COUNT(*), COUNT(DISTINCT attempt_no)"
+            " FROM operation_attempts WHERE run_id = ?", run_id) == (3, 3)
+        assert _scalar(
+            db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1"
+            ) == (1,)
+        assert _scalar(
+            db, "SELECT occupancy_state FROM device_activities WHERE id = 1"
+            ) == (2,)
