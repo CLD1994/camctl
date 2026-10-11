@@ -361,12 +361,12 @@ root 的 `/tmp/camctl-goal-media-settlement-save-red-2.log` 为 4 failed、10 pa
 
 #### 任务二：明确媒体失败入口的有效反例核验
 
-- [ ] 先用公开媒体链保存真实检查结果，分别构造时长不足与明确媒体问题，使既有 `decide_recording_result` 确实返回 FAILED。同时核对 source、原文件身份、完整／归属、原 RESULT 输入与历史引用；无需检查的正常控制世界不能直接改为已检查失败。
-- [ ] 在原 run ACTIVE、间隔已到、无待存调用和无内存缓存的前提下，核验原可靠输入是否足以本地收场。若检查需要的 host copy 已完成其责任，必须用正式清理／保留入口建立该状态并证明仍合法；若合法流程无法形成候选输入，记录不可达依据，不用直接 SQL 制造缺失 READ 资格。
-- [ ] 对合法且充分的输入，用真实 `DriverResultListing` 与受契约约束的 driver spy 验证零新查询；再设先前已取得的完整实际 FAILED（无文件观察）等待原 key 保存的分区，核对完整错误、收场、退出信息和 T0 不丢失，已有媒体失败与完整可靠文件保持。不能为了提供 current FAILED 再主动查询，也不能把它解释为空集合。
-- [ ] 保留三个控制分区：原输入不足且确需观察、原调用仍在执行／保存未定、已 CLOSED／UNCONFIRMED。分别断言既有诊断／调用收场／终态规则不被媒体优先绕过；修复失败而已有独立成功依据的案例继续采用既有判定。
-- [ ] root 确认真实前提并运行反例。失败若证明充分原输入仍被新查询阻挡，才登记确认缺陷、区分原路径潜伏问题与文件门槛改变产生的可达影响，并授权生产修改；首次即通过则记录该分区已经满足规则。不能预先给该项填写红绿结论。
-- [ ] 授权后在共同消费边界按原可靠处理结果与文件事实选择合法收场分区，复用任务一核实的独立权威入口；实际未保存请求先核原 key，当前业务判断不能改变其已固定处分。保留原取消、终态、预算、READ／WF 与明确媒体失败语义。
+- [x] 先用公开媒体链保存真实检查结果，分别构造时长不足与明确媒体问题，使既有 `decide_recording_result` 确实返回 FAILED。同时核对 source、原文件身份、完整／归属、原 RESULT 输入与历史引用；无需检查的正常控制世界不能直接改为已检查失败。（2026-10-11，容器 Python 3.11.16。时长不足分区由既有 `test_record_media_result_settlement.py::test_media_completion_ends_original_results_without_new_observation[media-failed-*]` 覆盖（观察时长 5 秒低于 60 秒目标，decide 返回 recording_too_short FAILED）。明确媒体问题分区本次新增 `test_explicit_media_issue_settles_from_saved_check_without_new_queries`：probe 通路只产生时长或错误、不产生 issues，测试经公开处理仓储 `CaptureRepository.save_check_result` 保存时长充足（65 秒）但携带明确媒体问题的完成观察，decide 返回 recording_processing_failed（reason invalid_media）FAILED；原文件身份、presence/completion 归属完成状态、原 RESULT 输入与历史引用经断言保持，全程不直接修改处理状态或移除守卫。）
+- [x] 在原 run ACTIVE、间隔已到、无待存调用和无内存缓存的前提下，核验原可靠输入是否足以本地收场。若检查需要的 host copy 已完成其责任，必须用正式清理／保留入口建立该状态并证明仍合法；若合法流程无法形成候选输入，记录不可达依据，不用直接 SQL 制造缺失 READ 资格。（2026-10-11。新增测试的 saved-history 参数分支以新 runtime 与空 listing_cache 重开，wall 推进 200 秒越过间隔后仅凭已保存的检查观察本地收场：零新 RESULTS 查询、零新 probe、零新 READ、零新尝试。host copy 责任由 media_pipeline 的真实 ReadDriverDouble 读取链建立，未用 SQL 制造读取资格；probe 通路不产生明确媒体问题观察的事实已在测试注释中记录为该输入分区的构造依据。）
+- [x] 对合法且充分的输入，用真实 `DriverResultListing` 与受契约约束的 driver spy 验证零新查询；再设先前已取得的完整实际 FAILED（无文件观察）等待原 key 保存的分区，核对完整错误、收场、退出信息和 T0 不丢失，已有媒体失败与完整可靠文件保持。不能为了提供 current FAILED 再主动查询，也不能把它解释为空集合。（2026-10-11。零新查询由受 v2 契约约束的 ResultsDouble spy 断言 results.calls 恒为一次；先前已取得的完整 FAILED 分区由新增测试覆盖——已保存的 issues 完成观察等待原 key 收场，完整错误（错误码、processing_id、invalid_media 理由）、run 终态与等待清除、原 T0（attempts_used 与配置列逐项保持）均不丢失，已有媒体失败与源文件完整归属状态保持；收场不发起任何新查询，也不把失败解释为空集合。）
+- [x] 保留三个控制分区：原输入不足且确需观察、原调用仍在执行／保存未定、已 CLOSED／UNCONFIRMED。分别断言既有诊断／调用收场／终态规则不被媒体优先绕过；修复失败而已有独立成功依据的案例继续采用既有判定。（2026-10-11 组合证据。原输入不足且确需观察：新增测试第一段 probe 首次未执行（ran=False）按诊断保存、不猜测结论；原调用仍在执行／保存未定：同文件 `test_unknown_settlement_reuses_whole_request_and_original_decision_time` 与 `_TrackedCommitFailure` 覆盖提交前后 UNKNOWN 的原请求与决定时刻保持；已 CLOSED／UNCONFIRMED：`test_media_completion_ends_original_results_without_new_observation` 的收场后前缀不变断言与 CLOSED 本地消费专项（closed-result-local-consumption 计划）覆盖终态不被重开。媒体失败不绕过既有规则：新增测试断言错误经公共错误登记表达、收场与动作失败及源文件事实同事务（`_assert_joint_settlement`）。）
+- [x] root 确认真实前提并运行反例。失败若证明充分原输入仍被新查询阻挡，才登记确认缺陷、区分原路径潜伏问题与文件门槛改变产生的可达影响，并授权生产修改；首次即通过则记录该分区已经满足规则。不能预先给该项填写红绿结论。（2026-10-11，root 在部署 Python 3.11 独占运行：`test_record_media_result_settlement.py` 全文件 18 passed。明确媒体问题分区首次运行即通过（期间仅修正测试自身断言切片笔误，生产代码零改动），按规则记录该分区已经满足规则，无需生产修改。）
+- [x] 授权后在共同消费边界按原可靠处理结果与文件事实选择合法收场分区，复用任务一核实的独立权威入口；实际未保存请求先核原 key，当前业务判断不能改变其已固定处分。保留原取消、终态、预算、READ／WF 与明确媒体失败语义。（2026-10-11。无需授权生产修改；收场经任务一核实的独立权威入口：`_assert_joint_settlement` 断言核实收场、动作终态与源文件事实同一事务且不复用原尝试事务；原 key 核对由 `test_original_settlement_key_rejects_changed_request_member` 覆盖，未保存请求不能改变已固定处分。取消、终态、预算、READ／WF 与明确媒体失败语义分别由 cancellation 目录、终态断言、check/READ 预算专项与本次 invalid_media 分区保持。）
 
 两个任务的最窄集成门禁建议如下，由 root 在部署 Python 3.11 下独占执行；新文件须先建立再运行：
 

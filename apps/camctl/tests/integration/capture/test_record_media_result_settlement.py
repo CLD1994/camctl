@@ -9,7 +9,11 @@ import pytest
 
 from camctl.capture.handlers import capture_handler
 from camctl.capture.media import RecordingFailure
-from camctl.contracts.values import ConsistencyError
+from camctl.capture.processing import (
+    CheckPhase, CheckResultSave, MediaObservation, ProcessingError,
+)
+from camctl.contracts.workflow_errors import registered_error
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.host_files.media import MediaProbe
 from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.persistence.repositories.outputs import register_outputs_guards
@@ -317,3 +321,85 @@ async def test_unknown_settlement_reuses_whole_request_and_original_decision_tim
         assert isinstance(first_error.value, ConsistencyError)
     finally:
         reopened.connection.close()
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["same-runtime", "saved-history"])
+async def test_explicit_media_issue_settles_from_saved_check_without_new_queries(
+        media_pipeline, reopen):
+    """明确媒体问题的检查结果经公开仓储保存后，原输入足以本地收场。
+
+    时长充足但检查发现明确媒体问题：probe 通路不产生该分区（检查
+    观察只携带时长或错误），本测试经公开处理仓储保存带 issues 的
+    完成观察，随后在无内存缓存与同运行时两种入口下核验收场——
+    零新设备查询、零新尝试，错误事实与原 T0、完整可靠文件保持。
+    """
+    owned, roots, source_id = media_pipeline
+    runtime, results, reader, tools = _runtime_with_media(media_pipeline, Decimal("65"))
+
+    await capture_handler("camera_record")(1, runtime)
+
+    original_run = _result_run(owned)
+    assert original_run[1:4] == (2, 1, 1)
+    original_attempts = _attempts(owned)
+    history = owned.connection.execute(
+        "SELECT * FROM history_events ORDER BY id").fetchall()
+    assert tools.calls == ["probe"]
+
+    # 公开处理仓储保存明确媒体问题的完成观察：时长充足但 issues
+    # 非空，时长判定不覆盖已知媒体问题。
+    saved = CaptureRepository().save_check_result(CheckResultSave(
+        1, MediaObservation(
+            CheckPhase.COMPLETED, duration_s=Decimal("65"),
+            issues=(ProcessingError(
+                code="container_invalid", stage="check",
+                details={"message": "moov atom missing"}),),
+        ), _NOW + 100_000), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+
+    recovered = None
+    try:
+        if reopen:
+            database_path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+            metadata = owned.metadata
+            owned.connection.close()
+            recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
+            assert recovered.metadata == metadata
+            owned = recovered
+            runtime = _runtime(owned, results=results, listing_cache={})
+            runtime.evidence = _EVIDENCE
+            runtime.media = _flow((owned, roots, source_id), reader, tools)
+        runtime.wall_us = lambda: _NOW + 200_000_000
+        await capture_handler("camera_record")(1, runtime)
+
+        # 动作按明确媒体问题失败，公共错误如实表达 invalid_media。
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (4,)
+        code, reason, details = owned.connection.execute(
+            "SELECT error_code, json_extract(error_details_json,'$.reason'),"
+            " error_details_json FROM actions WHERE id=1").fetchone()
+        registered = registered_error("recording_processing_failed")
+        assert code == registered["action_error_id"]
+        assert json.loads(details)["processing_id"] == "1"
+        assert reason == "invalid_media"
+        # 零新设备活动：无新 RESULTS 查询、无新 probe、无新 READ、无新尝试。
+        assert results.calls == [1]
+        assert tools.calls == ["probe"]
+        assert len(reader.opens) == 1
+        assert _attempts(owned) == original_attempts
+        # 原历史与 T0 保持；收场事务在原 run 上结束并清除等待。
+        assert owned.connection.execute(
+            "SELECT * FROM history_events WHERE id<=? ORDER BY id", (history[-1][0],)
+        ).fetchall()[:len(history)] == history
+        current_run = _result_run(owned)
+        assert current_run[0] == original_run[0]
+        assert current_run[2] == original_run[2]
+        assert current_run[4:] == original_run[4:]
+        assert current_run[1:4] == (3, 1, 0)
+        # 已有完整可靠源文件保持，不被媒体失败撤下；核实收场、动作
+        # 失败与源文件事实在同一事务保存。
+        assert owned.connection.execute(
+            "SELECT presence_state, completion_state FROM device_files WHERE id=?",
+            (source_id,)).fetchone() == (2, 3)
+        _assert_joint_settlement(owned, original_run[0], 4)
+    finally:
+        if recovered is not None:
+            recovered.connection.close()
