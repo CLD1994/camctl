@@ -59,11 +59,11 @@
 
 原绑定与当前配置只决定后续设备操作资格。已有完整本地观察可继续登记、发布和报告；失效绑定不能使已保存观察消失，也不能使新的驱动解释旧定位信息。是否集合确定、单个文件写完及归属是独立事实，禁止固定 `set_finalized=True`。
 
-## 分页格式的待定事项
+## 分页格式的确定
 
-现有驱动结果 `result_files_listed/v1` 仅登记 `activity_id` 和 `entries`，不能表达下一批及集合确定，也不独立证明完整目录扫描。双相机的分页、独立完成依据及普通延时成功由[接入计划 T5/T6](2026-10-10-camctl-real-camera-demo.md#t5-分页结果完成依据与必要检查)承接本计划的对应未完成范围。具体内部类型、版本和成员属于实现选择，写入前须在责任登记中定义，并同时覆盖实时解释、保存和原输入恢复；不得用空页、条目数量或相同文件名推定扫描结束。
+分页登记格式已由[接入计划 T5/T6](2026-10-10-camctl-real-camera-demo.md#t5-分页结果完成依据与必要检查)实施并验证，用户于 2026-10-11 裁决确认现状（见[决策清单](2026-10-11-camctl-open-decisions.md)）。驱动证据契约为 `result_files_listed/v2`，在 `activity_id` 与 `entries` 之外登记 `cursor`、`next_cursor`、`set_finalized` 与 `completion_evidence`；数据库按 `result_page` 逐页保存完整实际调用结果，并以 `RESULT_SET_CONFIRMED.OUTPUTS_FINALIZED` 独立保存集合确定事实，格式见[历史格式](../../camctl/database/history-formats.md)。`v1` 仅作解码兼容输入保留，生产驱动不再产出。
 
-多批结果需要保持每批实际调用结果，不能只保存最后一批的错误或 `call_info`，也不能把多个调用包装成一个伪造的本地退出。优先复用现有文件事实分批保存及正式 result 外层；若现有登记无法完整表达批次结果，先提出有具体字段和保证范围的登记方案，不在 JSON 中加入未登记成员。
+以下约束持续有效：实时解释、保存与原输入恢复使用同一登记；不得用空页、条目数量或相同文件名推定扫描结束；多批结果保持每批实际调用结果，不只保存最后一批的错误或 `call_info`，也不把多个调用包装成伪造的本地退出；不在 JSON 中加入未登记成员。空中间页、末页、未确定集合、每批失败与迟到结果的验证由 T5 测试矩阵与结果页集成测试族覆盖。
 
 ## 实施顺序与门禁
 
@@ -83,7 +83,7 @@
 
 真实 RESULTS 消费者新增两项反例，分别返回带文件观察的调用错误和无文件观察的调用错误。原动作身份为 12，原活动身份为 71。root 前台独占确认实际请求仍为 `activity_id=12`、`ticket=None`、`timeout_s=None`，日志为 `/tmp/camctl-goal-result-round-consumer-red.log`。真实意图已经沿 `results/71` 保存，但消费者没有将原票据交给驱动；这两项仍处于有效失败测试阶段。
 
-后续实施须沿上述实际责任传入当前单次期限，并在任何结果后读取或保存之前持有完整原返回。带错误的可靠文件观察仍参与所属任务判定；没有观察的错误保存真实错误、收场及退出信息。照片、录像、延时摄影、取消与 CLOSED 恢复的共同持久化输入尚未闭合，分页格式也仍等待既有决策。适配器通过不构成该阶段或完整拍摄链完成的证据。
+后续实施须沿上述实际责任传入当前单次期限，并在任何结果后读取或保存之前持有完整原返回。带错误的可靠文件观察仍参与所属任务判定；没有观察的错误保存真实错误、收场及退出信息。照片、录像、延时摄影、取消与 CLOSED 恢复的共同持久化输入尚未闭合（后续由接入计划 T5/T6 闭合，分页格式见上文[分页格式的确定](#分页格式的确定)）。适配器通过不构成该阶段或完整拍摄链完成的证据。
 
 新增消费者十四项由 root 确认有效红，日志 `/tmp/camctl-goal-result-consumers-red-2.log` 为 14 failed、1.54s。生产随后接入 `_listing_round` 的完整原返回持有和消费者实际处置保存；`capture/result_inputs.py` 提供 v1 原输入及持久化完整 Outcome 解码，照片、录像、延时摄影、取消和保守收场共同消费原结果。typed 替身按正式接口补齐，原业务预期保持。
 
@@ -136,7 +136,7 @@ root 前台独占共同消费者门禁，`/tmp/camctl-goal-results-consumers-cur
 
 `test_result_file_metadata.py` 两项分别验证最新结果含原 v1 观察，以及最新 FAILED 没有观察时的原片与预览元数据。类别、名称、媒体类型、配对与大小保持，恢复零设备查询。root 修复前的 READ 日志 `/tmp/camctl-goal-read-digest-local-current-2.log` 为 13 passed、2 failed；修复后 `/tmp/camctl-goal-read-digest-local-current-3.log` 为 15 passed、9.80s，元数据日志 `/tmp/camctl-goal-result-file-metadata-current.log` 为 2 passed、1.34s。执行者已实际读取日志。
 
-当前生产与测试已冻结，完整 unit、capture、bootstrap 目录及端到端独立审查由 root 执行。44 项文件责任、15 项 READ 与 2 项元数据仅证明上述分区；分页格式及普通延时摄影集合成功仍等待既有正式决策。
+当前生产与测试已冻结，完整 unit、capture、bootstrap 目录及端到端独立审查由 root 执行。44 项文件责任、15 项 READ 与 2 项元数据仅证明上述分区；分页格式及普通延时摄影集合成功分别由[接入计划 T5/T6](2026-10-10-camctl-real-camera-demo.md#t5-分页结果完成依据与必要检查)实施闭合。
 
 
 ### 结构化 JSON 原申请的同一性

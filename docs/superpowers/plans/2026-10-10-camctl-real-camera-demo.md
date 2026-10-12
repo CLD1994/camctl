@@ -45,7 +45,7 @@
 | [devices D1—D4](2026-09-30-camctl-devices.md#实施任务) 的同源目录、证据/绑定、调用适配与读取会话已有完成记录；[D5](2026-09-30-camctl-devices.md#d5-驱动契约测试与实际设备接入交付) 软件契约完成，具体厂商映射另需设备证据 | T1、T3、T7、T9 只新增两款相机的参数/命令、ADB 文件适配、正式登记及实际响应，复用已交付端口和生命周期 |
 | [capture C1/C2/C3/C5/C6](2026-09-30-camctl-capture.md#实施任务) 及 [scheduling Q4/Q6](2026-09-30-camctl-scheduling.md#实施任务) 已有定义、控制、等待、归属及释放的基础完成记录 | T1 固定具体任务事实；T4 将实际基准准备接入既有授予和释放；T6 补正常集合完成的消费接线，不重建录像、等待或调度模块 |
 | [history H7 的验证记录](2026-09-30-camctl-history.md#h7-验证记录2026-10-08windows-开发机) 明确 `BASELINE_CHUNK` 尚无生产写入方 | T2 是基准追加、固定、范围读取和对应历史验证的实际补齐，T4 是共同启动准备的新增生产接线 |
-| [产物核实与恢复](2026-10-09-camctl-result-round-runtime.md#条件模型) 已覆盖完整调用结果、原文件事实及 CLOSED 本地消费；[分页格式](2026-10-09-camctl-result-round-runtime.md#分页格式的待定事项) 和普通延时成功仍未闭合 | T5/T6 承接该计划的多批、集合依据及正常成功子集，保留已完成的原输入与文件事实保存责任 |
+| [产物核实与恢复](2026-10-09-camctl-result-round-runtime.md#条件模型) 已覆盖完整调用结果、原文件事实及 CLOSED 本地消费；[分页格式](2026-10-09-camctl-result-round-runtime.md#分页格式的确定) 和普通延时成功仍未闭合 | T5/T6 承接该计划的多批、集合依据及正常成功子集，保留已完成的原输入与文件事实保存责任 |
 | [结果错误计划任务三](2026-10-09-camctl-result-errors-and-report-projection.md#任务三结果失败语义与同类入口交接) 的正式错误分区已登记，UNSATISFIED 生产与恢复反例待实施；公共耗尽错误和历史报告已有交付 | T6 依赖并落实该任务中的产物失败分区；错误细项进度仍在原计划，独立应急错误身份不列入正常演示任务 |
 | [完整终态申请恢复](2026-10-09-camctl-capture-completion-save-recovery.md#task-1-四类完整申请与处理器恢复) 及其默认入口、START 外层、STOP 收尾已有完成记录；[本次配置与原绑定](2026-10-09-camctl-runtime-configuration-closure.md#任务与依赖) 定义运行时消费边界 | T2/T4/T5 对新增申请延用现有拥有者模式；T6/T7 复用既有终态恢复和绑定核对，不再次实现整套保存或配置机制 |
 | [integration I5](2026-09-30-camctl-integration.md#i5-三种采集取回取消及清理的跨组件组合)、outputs 取回/交付和 [bootstrap B7](2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查) 已有软件交付；B7 默认拍摄装配复验仍有待执行节点 | T7 只验证新驱动在现有发行物的登记与资源；T8 在现有 C host/取回/报告测试链添加四个具体设备场景，消费并完成适用装配复验 |
