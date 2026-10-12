@@ -20,6 +20,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
+import json
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from camctl.operations.owned_calls import owned_tool_call
@@ -271,6 +272,9 @@ class PendingCallResult:
     host_timer_stop: HostTimerStopSave | None = None
     finalized_page: ResultPageRef | None = None
     capture_stop: bool = False
+    residual_conclude: int | None = None
+    query_conclude: int | None = None
+    query_conclude_stop_keys: tuple[str, ...] = ()
 
 
 # 启动装配和既有调用方使用同一个公共责任集合。
@@ -893,7 +897,10 @@ class CaptureRuntime(_FileObservationSaves):
                returned_ns: int | None = None,
                canceled_unstarted: bool = False,
                host_timer_stop: HostTimerStopSave | None = None,
-               capture_stop: bool = False) -> None:
+               capture_stop: bool = False,
+               residual_conclude: int | None = None,
+               query_conclude: int | None = None,
+               query_conclude_stop_keys: tuple[str, ...] = ()) -> None:
         """先持有完整实际结果，再保存原尝试及其适用的伴随事实。
 
         保存重试等待使用调用返回时的单调读数；流程结束清除。
@@ -914,7 +921,9 @@ class CaptureRuntime(_FileObservationSaves):
             expiration=expiration, confirmation_anchor_ns=confirmation_anchor_ns,
             returned_ns=self.monotonic_ns() if returned_ns is None else returned_ns,
             action_failure=action_failure, canceled_unstarted=canceled_unstarted,
-            host_timer_stop=host_timer_stop, capture_stop=capture_stop)
+            host_timer_stop=host_timer_stop, capture_stop=capture_stop,
+            residual_conclude=residual_conclude, query_conclude=query_conclude,
+            query_conclude_stop_keys=query_conclude_stop_keys)
         self.pending_start_results[identity] = pending
         self._save_call_result(identity, pending)
 
@@ -931,6 +940,13 @@ class CaptureRuntime(_FileObservationSaves):
                 pending.finish, pending.host_timer_stop, pending.key, self.owned)
         if pending.capture_stop:
             return self.capture.finish_capture_stop(pending.finish, pending.key, self.owned)
+        if pending.residual_conclude is not None:
+            return self.capture.finish_residual_stop(
+                pending.finish, pending.residual_conclude, pending.key, self.owned)
+        if pending.query_conclude is not None:
+            return self.capture.finish_query_conclude(
+                pending.finish, pending.query_conclude,
+                pending.query_conclude_stop_keys, pending.key, self.owned)
         if (pending.result_set is not None or pending.completion_page is not None
                 or pending.finalized_page is not None):
             if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
@@ -1106,7 +1122,8 @@ class CaptureRuntime(_FileObservationSaves):
             self._save_call_result(identity, pending)
         else:
             receipt = self.operations.finish_attempt(
-                AttemptFinish(ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us()),
+                AttemptFinish(ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
+                              retry_wait=retry_wait),
                 new_operation_key(), self.owned)
             if receipt.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原调用恢复结果未可靠保存: {receipt.error}")
@@ -1161,15 +1178,39 @@ class CaptureRuntime(_FileObservationSaves):
         return evidence
 
 
+def _query_confirmed_idle(connection, action_id: int, activity_id: int) -> bool:
+    """停止核实或活动核实是否已可靠确认设备不再执行本活动。
+
+    只有成功终态且最近观察没有进行中活动的核实流程构成停止事
+    实；归属确认（仍在录观察）或未确认终态不构成。
+    """
+    for purpose in ("stop", "activity"):
+        responsibility = f"query/{purpose}/{action_id}/{activity_id}"
+        with closing(connection.execute(
+            "SELECT r.status, (SELECT a.result_json FROM operation_attempts a"
+            " WHERE a.run_id = r.id ORDER BY a.id DESC LIMIT 1)"
+            " FROM operation_runs r WHERE r.responsibility_key = ?",
+            (responsibility,),
+        )) as cursor:
+            row = cursor.fetchone()
+        if row is None or int(row[0]) != 3 or not isinstance(row[1], str):
+            continue
+        observations = json.loads(row[1]).get("observations")
+        if observations == []:
+            return True
+    return False
+
+
 class SessionRecordingState:
     """录像中段事实的生产装载器。
 
-    启动确认与停止确认取自 start/stop 责任的最近尝试；停止次数与
-    在途取自停止流程行，上限取本次运行的停止配置。计时锚点是本
-    进程会话的单调钟读数（规格：
-    重启后旧读数不能与新会话组合，须先对账），由装配层在启动确认
-    后登记；未登记时按跨会话处理进入对账分区。推进循环每轮重建运
-    行时时，装配层传入同一会话共享的锚点表，锚点跨轮保留。
+    启动确认与停止确认取自 start/stop 责任的最近尝试；停止确认也
+    接受停止核实或活动核实的可靠空闲确认；停止次数与在途取自停
+    止流程行，上限取本次运行的停止配置。计时锚点是本进程会话的
+    单调钟读数（规格：重启后旧读数不能与新会话组合，须先对账），
+    由装配层在启动确认后登记；未登记时按跨会话处理进入对账分区。
+    推进循环每轮重建运行时时，装配层传入同一会话共享的锚点表，
+    锚点跨轮保留。
     """
 
     def __init__(self, runtime: "CaptureRuntime",
@@ -1213,6 +1254,12 @@ class SessionRecordingState:
             stop_confirmed = (
                 stop_run[3] != int(_ATTEMPT_STATUS.RUNNING)
                 and stop_run[4] == int(_EFFECT_STATE.CONFIRMED))
+        if not stop_confirmed:
+            # 停止核实或活动核实的可靠空闲确认同样证明停止责任完成；
+            # 归属确认（仍在录观察）不构成停止事实。
+            stop_confirmed = _query_confirmed_idle(
+                runtime.owned.connection, action_id,
+                int(activity["id"]))
         anchor = self._anchors.get(action_id)
         stop_target = anchor[1] if anchor is not None else None
         file_complete = stop_confirmed
@@ -1975,6 +2022,134 @@ async def _stop_call(runtime: CaptureRuntime, action,
     return HandlerOutcome("sent")
 
 
+async def _confirm_stop_by_query(runtime: CaptureRuntime, action) -> bool:
+    """普通停止核实消费者：未确认停止先经原停止核实责任查询。
+
+    停止命令已发送、没有调用错误且未取得确认时，先用本次 query 配
+    置经 `query/stop` 责任查询。可靠空闲即按停止事实同事务结束查
+    询、原停止流程并收场活动，返回 True；仍在录制、其他活动占用
+    或调用错误保存观察与重试等待并交回停止链继续。直接停止已确认
+    时不进入本消费者。
+    """
+
+    from camctl.capture.residual import (
+        _begin_query_attempt, _last_attempt, _observed_activity, _run_row,
+    )
+
+    if runtime.state_query is None:
+        return False
+    action_id = action["id"]
+    stop_attempt = runtime.last_attempt(f"stop/{action_id}")
+    if (stop_attempt is None
+            or int(stop_attempt[0]) != int(_ATTEMPT_STATUS.SUCCEEDED)
+            or int(stop_attempt[1]) != int(_EFFECT_STATE.UNKNOWN)):
+        # 只有没有调用错误的未确认发送进入停止核实。
+        return False
+    responsibility = (
+        f"query/stop/{action_id}/{_activity_id_of(runtime, action_id)}")
+    row = _run_row(runtime.owned.connection, responsibility)
+    if row is not None and int(row[1]) not in (1, 2):
+        # 核实责任已终态：预算耗尽按 UNCONFIRMED，停止链继续。
+        return False
+    attempt = _last_attempt(runtime.owned.connection, responsibility)
+    if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.RUNNING):
+        # 在途查询等待实际返回；停止链本轮不再发令。
+        return True
+    if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.FAILED):
+        # 查询调用失败：不反复查询，按停止预算继续停止。
+        return False
+    if runtime.retry_wait_remaining(
+            responsibility,
+            runtime.query_config.retry_interval_s) is not None:
+        return False
+    ticket = _begin_query_attempt(
+        runtime, responsibility, action_id,
+        AttemptTarget(activity_id=_activity_id_of(runtime, action_id)),
+        QueryPurpose.STOP_CONFIRMATION)
+    if ticket is None:
+        return False
+    response = await runtime.state_query.query_state(ControlRequest(
+        operation="query", binding=_binding(action),
+        params=action["effective_params_json"], ticket=ticket,
+        timeout_s=runtime.query_config.timeout_s))
+    returned_at = runtime.wall_us()
+    outcome, _ = _operation_outcome(
+        response, "activity_status", evidence_type="query_returned")
+    if response.error is None and _observed_activity(response) is None:
+        # 可靠空闲：停止已经生效，结果、原停止流程与活动收场同事务。
+        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                       occurred_at=returned_at, query_conclude=action_id,
+                       query_conclude_stop_keys=(f"stop/{action_id}",))
+        return True
+    # 仍在录制、其他活动或调用错误：核实继续，停止链按原预算推进。
+    runtime.finish(ticket, outcome, retry_wait=True, occurred_at=returned_at)
+    return False
+
+
+async def _observe_activity_for_reconcile(runtime: CaptureRuntime, action) -> bool:
+    """对账活动核实消费者：墙钟成功分支前的归属与连续性确认。
+
+    跨会话对账计时满足后，先用本次 query 配置经 `query/activity`
+    责任确认当前仍是同一活动在录：归属确认即继续停止；可靠空闲表
+    示活动已结束，保存观察并同事务收场活动，不重新执行停止；归属
+    或连续性不足时不进入墙钟成功分支。驱动未声明查询能力时保持仅
+    计时对账。
+    """
+
+    from camctl.capture.residual import (
+        _begin_query_attempt, _last_attempt, _last_observations,
+        _observed_activity, _run_row,
+    )
+
+    if runtime.state_query is None:
+        return True
+    action_id = action["id"]
+    activity_id = _activity_id_of(runtime, action_id)
+    responsibility = f"query/activity/{action_id}/{activity_id}"
+    row = _run_row(runtime.owned.connection, responsibility)
+    if row is not None and int(row[1]) not in (1, 2):
+        # 核实责任已终态：归属确认过即可停止；空闲已另行收场。
+        if int(row[1]) == 3 and not _last_observations(
+                runtime.owned.connection, responsibility):
+            return False
+        return True
+    attempt = _last_attempt(runtime.owned.connection, responsibility)
+    if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.RUNNING):
+        return False
+    if runtime.retry_wait_remaining(
+            responsibility,
+            runtime.query_config.retry_interval_s) is not None:
+        # 调用失败或归属不明按间隔重查；预算耗尽前不进入停止。
+        return False
+    ticket = _begin_query_attempt(
+        runtime, responsibility, action_id,
+        AttemptTarget(activity_id=activity_id),
+        QueryPurpose.ACTIVITY_OBSERVATION)
+    if ticket is None:
+        # 预算耗尽按 UNCONFIRMED：不再阻塞计时对账的停止链。
+        return True
+    response = await runtime.state_query.query_state(ControlRequest(
+        operation="query", binding=_binding(action),
+        params=action["effective_params_json"], ticket=ticket,
+        timeout_s=runtime.query_config.timeout_s))
+    returned_at = runtime.wall_us()
+    outcome, _ = _operation_outcome(
+        response, "activity_status", evidence_type="query_returned")
+    if response.error is None and _observed_activity(response) == activity_id:
+        # 同一活动仍在录：归属与连续性已确认，继续停止。
+        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                       occurred_at=returned_at)
+        return True
+    if response.error is None and _observed_activity(response) is None:
+        # 可靠空闲：活动已结束，观察与活动收场同事务，不重新停止。
+        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                       occurred_at=returned_at, query_conclude=action_id)
+        return False
+    # 其他活动占用或调用错误：归属不明，不进入墙钟成功分支。
+    runtime.finish(ticket, outcome, retry_wait=True, occurred_at=returned_at)
+    return False
+
+
 def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
                              unstarted: bool = False) -> None:
     """取消终态：放弃内容，不登记正式产物。"""
@@ -2700,6 +2875,9 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         raise ConsistencyError("已确认录像缺少可继续的录像状态")
         return
     if decision.phase is RecordingPhase.READY_TO_STOP:
+        if await _confirm_stop_by_query(context, action):
+            # 停止核实本轮已收场或占用：重入按已保存事实推进。
+            return
         step = await _stop_call(context, action)
         if step.phase == "confirmed":
             # 停止确认：活动以可靠停止事实收场，重入进入终态分支。
@@ -2751,7 +2929,7 @@ def _local_recording_listing(runtime: CaptureRuntime, action):
     with closing(connection.execute(
         "SELECT f.identity_key,f.completion_state,f.source_action_id,c.verification_state,"
         " c.committed_bytes,c.source_size,c.target_sha256,h.owner_action_id,h.size_bytes,h.sha256,"
-        " h.retention_state,h.cleanup_state,r.id,r.status,a.activity_state"
+        " h.retention_state,h.cleanup_state,r.id,r.status,a.activity_state,a.id"
         " FROM recording_processing p JOIN device_files f ON f.id=p.source_device_file_id"
         " JOIN file_copies c ON c.processing_id=p.id AND c.source_device_file_id=f.id"
         " JOIN intermediate_files h ON h.id=c.target_file_id"
@@ -2763,7 +2941,15 @@ def _local_recording_listing(runtime: CaptureRuntime, action):
     if row is None:
         return None
     (identity, completion, owner, verification, committed, source_size, target_sha,
-     host_owner, host_size, host_sha, retention, cleanup, run_id, run_status, activity) = row
+     host_owner, host_size, host_sha, retention, cleanup, run_id, run_status, activity,
+     activity_id) = row
+    # 集合完成依据仍不充分且核实预算未耗尽时，重试等待到期后必须
+    # 重新观察设备文件（继续有限核实）；等待期内的推进沿用已保存
+    # 观察，媒体链可继续推进而不消耗核实名额。
+    if runtime.retry_wait_remaining(
+            f"results/{activity_id}", runtime.check_config.retry_interval_s,
+            maximum=runtime.check_config.max_attempts) is None:
+        return None
     ready = enum_for("file_copies.verification_state")
     if (completion != int(enum_for("device_files.completion_state").COMPLETE)
             or owner != action["id"] or host_owner != action["id"]
@@ -2994,6 +3180,13 @@ async def _reconcile_recording(
         target_duration_ms=_target_duration_ms(action),
         trusted_now_us=context.wall_us()))
     if phase is not ReconciliationPhase.TIMING_SATISFIED:
+        return
+    if not await _observe_activity_for_reconcile(context, action):
+        # 归属或连续性未确认、活动已空闲收场或核实占本轮：不进入
+        # 墙钟成功分支。
+        return
+    if await _confirm_stop_by_query(context, action):
+        # 对账会话的未确认停止先经原停止核实责任查询收场。
         return
     step = await _stop_call(context, action)
     if step.phase == "confirmed":
@@ -3573,14 +3766,19 @@ async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> N
         if run is None or run[0] in (1, 2):
             if not activity[1]:
                 raise ConsistencyError("可能启动的取消拍摄缺少原停止能力")
-            step = await _stop_call(context, action,
-                                    "stop_timelapse" if action["type"] == 3 else "stop_recording")
-            if step.phase == "confirmed":
+            if await _confirm_stop_by_query(context, action):
+                # 未确认停止由停止核实收场：不重复发令，按停止事实
+                # 继续取消收场。
                 confirmed = True
-            elif step.phase == "stop_not_granted" and step.detail == "budget_exhausted":
-                _close_stop_exhausted(context, action)
-            elif step.phase != "call_failed":
-                return
+            else:
+                step = await _stop_call(context, action,
+                                        "stop_timelapse" if action["type"] == 3 else "stop_recording")
+                if step.phase == "confirmed":
+                    confirmed = True
+                elif step.phase == "stop_not_granted" and step.detail == "budget_exhausted":
+                    _close_stop_exhausted(context, action)
+                elif step.phase != "call_failed":
+                    return
     if confirmed and row_facts(context.owned.connection, "device_activities",
             _activity_id_of(context, action_id))["activity_state"] != 3:
         _conclude_activity(context, action_id)

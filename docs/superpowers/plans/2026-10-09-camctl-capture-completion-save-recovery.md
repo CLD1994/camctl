@@ -120,7 +120,7 @@ PYTHONPATH=/workspaces/camctl/apps/camctl/src apps/camctl/.venv/bin/python -m py
 
 ### bootstrap 全目录的失败归属
 
-下列六项在 `/tmp/camctl-goal-combined-bootstrap-current.log` 已有相同失败表现。本次没有修改延时摄影集合结束判定；v1 条目没有独立集合结束依据。五个预期成功的入口实际保存 FAILED；缺少必需类别的入口实际保存 UNCONFIRMED 集合，而非测试预期的 UNSATISFIED。既有未决格式及集合判定继续由[产物核实计划](2026-10-09-camctl-result-round-runtime.md#分页格式的待定事项)跟踪，不改状态预期或补造 `set_finalized`。
+下列六项在 `/tmp/camctl-goal-combined-bootstrap-current.log` 已有相同失败表现。本次没有修改延时摄影集合结束判定；v1 条目没有独立集合结束依据。五个预期成功的入口实际保存 FAILED；缺少必需类别的入口实际保存 UNCONFIRMED 集合，而非测试预期的 UNSATISFIED。既有未决格式及集合判定继续由[产物核实计划](2026-10-09-camctl-result-round-runtime.md#分页格式的确定)跟踪，不改状态预期或补造 `set_finalized`。
 
 | 文件 | 实际失败用例 |
 | --- | --- |

@@ -17,7 +17,7 @@ from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.outputs.cleanup_flow import delete_source_file
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.outputs import OutputsRepository
 
 from .test_cleanup_query_local_consumption import (
     _CommitFault, _NoDeviceCalls, _assert_history_prefix, _check_old_member,
@@ -78,19 +78,21 @@ class _OnlyNewQuery(_MatrixDriver):
         return await super().query_state(request)
 
 
-class _QueryIntentCommitFault(OperationRepository):
+class _QueryIntentCommitFault(OutputsRepository):
     """后续 DELETE 已可靠返回后，使新的 QUERY 意图在 COMMIT 前中断。"""
 
     def __init__(self):
+        super().__init__()
         self.fault = None
         self.result = None
 
-    def begin_attempt(self, intent, key, owned):
+    def begin_cleanup_attempt(self, intent, key, owned):
         if intent.operation == "query" and self.fault is None:
             self.fault = _CommitFault(owned.connection, after_commit=False)
-            self.result = super().begin_attempt(intent, key, replace(owned, connection=self.fault))
+            self.result = super().begin_cleanup_attempt(
+                intent, key, replace(owned, connection=self.fault))
             return self.result
-        return super().begin_attempt(intent, key, owned)
+        return super().begin_cleanup_attempt(intent, key, owned)
 
 
 @pytest.mark.parametrize("consumer,present,method", [
@@ -212,7 +214,7 @@ async def test_query_before_later_possible_delete_is_not_recovered_as_latest_obs
     # 同一成员在删除间隔到时后真正发出第二次 DELETE，仍返回未知。
     # 紧随其后的 QUERY 意图在真实 COMMIT 前失败，关闭连接回滚该意图。
     fault_port = _QueryIntentCommitFault()
-    base.operations = fault_port
+    base.outputs = fault_port
     base.monotonic_ns = lambda: 10_000_000_000
     again = await delete_source_file(base.for_item(item_id), item_id)
     assert again.phase == "query_rejected", again

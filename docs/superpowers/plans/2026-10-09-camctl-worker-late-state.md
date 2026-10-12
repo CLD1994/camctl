@@ -53,27 +53,27 @@
 **文件：** `unit/reporting/test_worker.py`、`unit/reporting/test_worker_late_state.py`、`integration/reporting/test_supervisor_transport.py`、`integration/reporting/test_worker.py` 及 `integration/reporting/test_communication_shutdown.py`；必要时更新既有错误身份测试的有效预期。
 
 - [x] 单元文件保留 `TestErrorClassification`、`TestParentGuard`、`TestWorkLock` 及内存锁替身；真实管道与通信线程文件包含 `TestSupervisorStartup`、`TestSupervisorGeneration` 及所需辅助代码。5 项局部契约和 9 项传输组合的测试内容与断言保持完整，不重复登记用例，也不让单元测试导入集成测试。
-- [ ] 纯单元替身使用 `create_autospec(..., spec_set=True)` 约束 WorkerCommunicator，进程替身遵守 ProcessHandle。通过受控时钟、队列与同步事件让 STATE 在超时决定或 Shutdown 后到达；分别断言发送失败、剩余期限耗尽、异步等待超时、协议错误及显式 stop 的结果。
-- [ ] 对同任务同实例的迟到 SUCCESS／REPORT 和两个错误身份维度分别断言不返回成功、不误判状态库失效；有效及时 SUCCESS 后的 stop 保持既有成功。
-- [ ] 用真实 Pipe 与通信线程验证 `close` 请求前已送达但尚未解码的完整 STATE 帧仍排在终端前，发送失败同时另一方向已有完整结果也保持该顺序；部分帧不能变成有效 STATE。
-- [ ] 主 Agent 单独运行新文件并提供红证据。失败须来自缺失 STATE、错误身份未拒绝或完整帧被丢，替身接口错误和测试准备错误不算红。
+- [x] 纯单元替身使用 `create_autospec(..., spec_set=True)` 约束 WorkerCommunicator，进程替身遵守 ProcessHandle。通过受控时钟、队列与同步事件让 STATE 在超时决定或 Shutdown 后到达；分别断言发送失败、剩余期限耗尽、异步等待超时、协议错误及显式 stop 的结果。已交付于 `unit/reporting/test_worker_late_state.py`（`_Clock`／`_Channel` 替身与超时、协议错误、显式 stop 分区）。
+- [x] 对同任务同实例的迟到 SUCCESS／REPORT 和两个错误身份维度分别断言不返回成功、不误判状态库失效；有效及时 SUCCESS 后的 stop 保持既有成功。`test_timeout_never_accepts_ordinary_late_result`、`test_wrong_result_identity_is_protocol_failure`、`test_late_state_from_wrong_identity_is_not_database_failure`、`test_stop_after_confirmed_success_does_not_reclassify_old_message`。
+- [x] 用真实 Pipe 与通信线程验证 `close` 请求前已送达但尚未解码的完整 STATE 帧仍排在终端前，发送失败同时另一方向已有完整结果也保持该顺序；部分帧不能变成有效 STATE。已交付于 `integration/reporting/test_communication_shutdown.py` 两项。
+- [x] 主 Agent 单独运行新文件并提供红证据。失败须来自缺失 STATE、错误身份未拒绝或完整帧被丢，替身接口错误和测试准备错误不算红。专项红绿日志未随检查点单独保留（交付经由 2026-10-09 检查点 `48144df`／`86ba422`）；2026-10-11 复跑两文件 33 项全部通过作为当前行为证据。
 
 ### WL2 监督收场与通信帧保留
 
 **文件：** `supervisor.py`、`communication.py`。
 
-- [ ] 在原监督对象内明确当前未决任务、停止状态与共享收场所有权；所有 generate 失败入口经过同一收场判定，正确匹配任务与数据库实例。
-- [ ] 通信线程实际关闭前保留已可接收的完整消息；监督者在实际退出和通信线程收场之后消费剩余有效结果，匹配 STATE 填 WorkerShutdown.state_failure。显式 stop 与 generate 同时发生时不竞争读取或重复回收。
-- [ ] 生成成功后解除未决身份，保留既有成功；停止／超时之后的普通成功无 success 载荷，也不产生发布资格。错误身份按协议失败，不能静默继续等待正确结果掩盖该错误。
-- [ ] 保持 join／terminate／kill 的顺序和实际退出判断；最终仍存活的进程继续由监督对象持有，不能让下一生成复用其文件。将实际无法收场的具体失败交给已有诊断范围。
-- [ ] 主 Agent 复跑新增单元与组件集成，要求完整通过，再审计全部 _retire 入口和两种生命周期消费者。
+- [x] 在原监督对象内明确当前未决任务、停止状态与共享收场所有权；所有 generate 失败入口经过同一收场判定，正确匹配任务与数据库实例。`reporting/supervisor.py` 的 `_retirement_task`／`_retire_current` 统一收场，`integration/reporting/test_supervisor_transport.py::TestSupervisorGeneration` 覆盖任务与实例匹配。
+- [x] 通信线程实际关闭前保留已可接收的完整消息；监督者在实际退出和通信线程收场之后消费剩余有效结果，匹配 STATE 填 WorkerShutdown.state_failure。显式 stop 与 generate 同时发生时不竞争读取或重复回收。`supervisor.py` 的 `state_failure` 装配与 `test_retirement_keeps_matching_state_failure`、`test_exit_checks_delivered_result`、`test_exit_without_result_is_channel_lost` 覆盖。
+- [x] 生成成功后解除未决身份，保留既有成功；停止／超时之后的普通成功无 success 载荷，也不产生发布资格。错误身份按协议失败，不能静默继续等待正确结果掩盖该错误。`test_matching_success_keeps_worker_reusable`、`test_old_task_result_rejects_current_generation`、`test_stop_after_confirmed_success_does_not_reclassify_old_message`。
+- [x] 保持 join／terminate／kill 的顺序和实际退出判断；最终仍存活的进程继续由监督对象持有，不能让下一生成复用其文件。将实际无法收场的具体失败交给已有诊断范围。`test_kill_without_observed_exit_keeps_ownership`、`test_total_deadline_times_out_and_escalates`、`test_startup_timeout_retires_process`。
+- [x] 主 Agent 复跑新增单元与组件集成，要求完整通过，再审计全部 _retire 入口和两种生命周期消费者。2026-10-11 全量单元 4726 passed、1 skipped；`integration/reporting` 全目录 373 passed。`_retire` 入口收场与 `bootstrap/lifecycle.py:717` 关机消费、`bootstrap/flows.py:807` 生成失败消费两种生命周期消费者均经真实组合测试覆盖。
 
 ### WL3 独立组合验证与证据
 
-- [ ] 单独执行 `unit/reporting/test_worker_late_state.py` 的失败与修复验证，再执行整个 `unit` 目录；真实管道、线程与进程验证单独执行 `integration/reporting`，其中包含 `test_supervisor_transport.py`。
-- [ ] 在正常及受限会话的报告监督组合中断言迟到 STATE 进入 `state_db_error`，普通设备不继续依赖已失效前提，状态库不可用的日志副本仍独立处理。该消费者组合由主 Agent 登记。
-- [ ] 实际进程／线程仍活动时不能清理或复用临时文件；任务成功、停止、超时、错误身份、STATE／REPORT 分类及两种先后顺序均有独立预期。
-- [ ] 记录 Python 版本、环境、命令及结果；`git diff --check` 与文档链接／锚点检查只验证文档，不代替软件门禁。
+- [x] 单独执行 `unit/reporting/test_worker_late_state.py` 的失败与修复验证，再执行整个 `unit` 目录；真实管道、线程与进程验证单独执行 `integration/reporting`，其中包含 `test_supervisor_transport.py`。2026-10-11：专项 33 passed；全量 unit 4726 passed、1 skipped、2 条既有 asyncio 警告；`integration/reporting` 373 passed。
+- [x] 在正常及受限会话的报告监督组合中断言迟到 STATE 进入 `state_db_error`，普通设备不继续依赖已失效前提，状态库不可用的日志副本仍独立处理。该消费者组合由主 Agent 登记。`bootstrap/flows.py:807` 将 STATE_FAILURE 转为 `StateDbFailure`；`test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow` 核普通设备停止；`session/test_local_work_settlement.py` 的 `test_local_state_failure_preserves_exit_error_priority` 与 `test_clock_transition_stops_restricted_work_after_local_state_failure` 覆盖正常及受限组合；日志副本经 `bootstrap/test_logging_composition.py` 与 `recovery_logging.py` 独立处理。
+- [x] 实际进程／线程仍活动时不能清理或复用临时文件；任务成功、停止、超时、错误身份、STATE／REPORT 分类及两种先后顺序均有独立预期。存活的未观测退出进程由监督对象继续持有（`test_kill_without_observed_exit_keeps_ownership`），staging 按 report/job 独立命名（`_temporary_staging_path`）；分类与先后顺序由迟到状态矩阵与 `test_exit_checks_delivered_result` 的两种顺序覆盖。
+- [x] 记录 Python 版本、环境、命令及结果；`git diff --check` 与文档链接／锚点检查只验证文档，不代替软件门禁。2026-10-11 记录见[当前验收记录](#当前验收记录-2026-10-11)。
 
 ## 验收命令与当前状态
 
@@ -83,3 +83,13 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 ```
 
 2026-10-09：局部契约与真实传输组合分别位于单元和集成目录；失败用例、生产修复和消费者组合按复选框及实际验证记录跟踪。硬件、真实设备与物理断电不在本任务范围。
+
+## 当前验收记录（2026-10-11）
+
+Linux 开发容器、Python 3.11.16，SQLite 3.53.1。前台独占、按目录分开执行：
+
+- `unit/reporting/test_worker_late_state.py` 加 `integration/reporting/test_supervisor_transport.py`：33 passed。
+- `integration/reporting` 全目录：373 passed。
+- 全量 `unit`：4726 passed、1 skipped、2 warnings（既有同步测试的 asyncio 标记）。
+
+本计划的迟到状态矩阵、监督收场、帧保留、生命周期消费者组合及临时文件所有权均已由上述文件与 `bootstrap` 消费者组合覆盖；专项红绿过程证据随 2026-10-09 检查点提交（`48144df`、`86ba422`）交付，未单独保留日志。

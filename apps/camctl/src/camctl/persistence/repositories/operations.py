@@ -1112,6 +1112,7 @@ class _FinishStaleRunsCommand:
                 3,
                 (row,),
                 request.occurred_at,
+                evidence={"stale_run_request": self._request_evidence()},
             )
             for offset, row in enumerate(rows)
         )
@@ -1122,17 +1123,41 @@ class _FinishStaleRunsCommand:
             result=StaleRunFinishResult(finished_run_ids=tuple(run_ids)),
         )
 
+    def _request_evidence(self) -> dict[str, Any]:
+        """伴随收场申请的完整依据：种类、全部责任键、结果与错误。"""
+        return {
+            "kind": "stale_run_finish",
+            "responsibility_keys": list(self._request.responsibility_keys),
+            "status": int(_RUN_STATUS[self._request.status.name]),
+            "error": _error_json(self._request.error),
+        }
+
     def _reuse(self, scope, saved: list[SavedEvent]) -> CommandPlan:
-        request = self._request
-        connection = scope.connection
-        run_ids = []
+        evidence = self._request_evidence()
         for event in saved:
             if (event["type"] != _OPERATION_CONFIGURED_EVENT
                     or event["reason"] != 3):
                 raise TransactionError(
                     "操作身份已用于其他阶段，不能作为伴随收场重送")
-            if event["occurred_at"] != request.occurred_at:
+            if event["occurred_at"] != self._request.occurred_at:
                 raise TransactionError("重送的伴随收场时刻与原事务不同")
+            if not json_equal(
+                    event["body"].get("evidence", {}).get("stale_run_request"),
+                    evidence):
+                raise TransactionError("重送的伴随收场申请与原事务不同")
+        return self._verify_saved_rows(scope, saved)
+
+    def _verify_saved_rows(self, scope, saved: list[SavedEvent]) -> CommandPlan:
+        """按本次申请核对已保存收场事件的行事实，不要求事件依据相等。
+
+        复合命令以逐键子申请核对零尝试必要责任等不由本命令写入的
+        收场事件时，事件可能没有本命令依据或依据键集合不同；行级
+        事实（终态字段与当前投影）仍须与申请一致。
+        """
+        request = self._request
+        connection = scope.connection
+        run_ids = []
+        for event in saved:
             rows = event["body"]["rows"]
             if (len(rows) != 1 or rows[0]["table"] != "operation_runs"
                     or not rows[0]["before"]["exists"]

@@ -51,6 +51,25 @@ class TestDecideCleanupCancel:
             file_absent=False, file_present=False,
         )) is CleanupCancelChoice.TRACKING
 
+    def test_settled_never_dispatched_releases_reversible_restriction(self):
+        """删除中成员可靠从未派发删除：无删除错误取消并解除限制。"""
+        assert decide_cleanup_cancel(CleanupCancelFacts(
+            status=_DELETING, delete_issued=False, call_settled=True,
+            file_absent=False, file_present=True,
+        )) is CleanupCancelChoice.RELEASE
+
+    def test_settled_never_dispatched_unknown_observation_still_releases(self):
+        assert decide_cleanup_cancel(CleanupCancelFacts(
+            status=_DELETING, delete_issued=False, call_settled=True,
+            file_absent=False, file_present=False,
+        )) is CleanupCancelChoice.RELEASE
+
+    def test_settled_never_dispatched_with_absence_evidence_succeeds(self):
+        assert decide_cleanup_cancel(CleanupCancelFacts(
+            status=_DELETING, delete_issued=False, call_settled=True,
+            file_absent=True, file_present=False,
+        )) is CleanupCancelChoice.SUCCEED
+
     def test_settled_with_completion_evidence_succeeds(self):
         assert decide_cleanup_cancel(CleanupCancelFacts(
             status=_DELETING, delete_issued=True, call_settled=True,

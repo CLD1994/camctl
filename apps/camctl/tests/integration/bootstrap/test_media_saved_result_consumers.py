@@ -191,3 +191,68 @@ async def test_default_consumers_save_original_media_after_target_terminal(pipel
         if reopened is not None:
             reopened.connection.close()
         lifecycle.close_runtime(deps)
+
+
+async def test_original_media_result_and_key_retained_across_runtimes(
+        pipeline, monkeypatch):
+    """原媒体结果与原操作键跨两次真实运行时保留。
+
+    第一个真实运行时取得原结果并可靠保存后整体关闭（共享待保存集
+    合随之丢弃）；第二个全新 build_runtime 与执行只依赖已持久化的
+    原结果、原键与归属事实重新进入同一条媒体链：不再观察、修复或
+    读取，处理行业务列、动作事件与正式产物数量保持。
+    """
+    owned, roots, source_id = pipeline
+    real_run_session = lifecycle.run_session
+    real_capture_assembly = capture_assembly.session_capture_assembly
+    deps, factories, _ = await _default_factories(pipeline, monkeypatch)
+    driver, tools = ReadDriverDouble(_CONTENT), _ActualTools("repair_complete")
+    reopened = None
+    try:
+        flow = factories[0](owned, "cam-1").media
+        flow.sessions = DriverReadSessions(owned, driver, ticket=None)
+        flow.tools = tools
+        await run_recording_media(flow, 1, 1, source_id)
+        assert tools.probes == 1 and tools.repairs == 1 and len(driver.opens) == 1
+        columns = business_columns("recording_processing")
+        saved_processing = {
+            name: row_facts(owned.connection, "recording_processing", 1)[name]
+            for name in columns}
+        entity_events = owned.connection.execute(
+            "SELECT COUNT(*) FROM entity_event_links"
+            " WHERE entity_type=1 AND entity_id=1").fetchone()[0]
+        outputs = owned.connection.execute(
+            "SELECT COUNT(*) FROM outputs WHERE source_action_id=1").fetchone()[0]
+        owned.connection.close()
+    finally:
+        lifecycle.close_runtime(deps)
+    # 恢复真实装配入口，供第二次装配重新以真实函数为规格与原函数。
+    monkeypatch.setattr(lifecycle, "run_session", real_run_session)
+    monkeypatch.setattr(capture_assembly,
+                        "session_capture_assembly", real_capture_assembly)
+    deps2, factories2, _ = await _default_factories(pipeline, monkeypatch)
+    try:
+        reopened = open_existing(roots.staging.parent / "state.db",
+                                 DbOpenMode.EXISTING_RW, DbConfig())
+        driver2, tools2 = ReadDriverDouble(_CONTENT), _ActualTools("repair_complete")
+        flow2 = factories2[0](reopened, "cam-1").media
+        assert flow2 is not None and not flow2.pending_media_results
+        flow2.sessions = DriverReadSessions(reopened, driver2, ticket=None)
+        flow2.tools = tools2
+        await run_recording_media(flow2, 1, 1, source_id)
+        # 集合为空不触发重新观察、修复或读取；原事实与原键保持。
+        assert tools2.probes == 0 and tools2.repairs == 0 and len(driver2.opens) == 0
+        assert not flow2.pending_media_results
+        assert {
+            name: row_facts(reopened.connection, "recording_processing", 1)[name]
+            for name in columns} == saved_processing
+        assert reopened.connection.execute(
+            "SELECT COUNT(*) FROM entity_event_links"
+            " WHERE entity_type=1 AND entity_id=1").fetchone()[0] == entity_events
+        assert reopened.connection.execute(
+            "SELECT COUNT(*) FROM outputs"
+            " WHERE source_action_id=1").fetchone()[0] == outputs
+    finally:
+        if reopened is not None:
+            reopened.connection.close()
+        lifecycle.close_runtime(deps2)

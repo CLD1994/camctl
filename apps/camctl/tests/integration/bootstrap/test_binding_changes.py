@@ -206,6 +206,73 @@ async def test_changed_binding_respects_execution_eligibility(environment, chang
     ).fetchone() == (3,)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["missing", "mismatch"])
+async def test_future_action_gains_eligibility_only_at_original_time(environment, change):
+    """未来动作不因绑定异常提前执行或失败；到达原计划时间才取得处理资格。
+
+    规格来源：configuration.md「设备绑定异常的影响范围」——未来动作
+    仍按原计划时间取得处理资格，不因加载历史记录就提前执行。
+    """
+    owned, context, home = environment
+    ids = _photos(owned, "future")
+    clock = {"now": _NOW}
+    context.clock = SimpleNamespace(utc_micros=lambda: clock["now"])
+    devices = {"cam-b": {"driver": "camctl-adb"}}
+    if change == "mismatch":
+        devices["cam-a"] = {"driver": "alternate-camera"}
+    driver = _Driver()
+
+    def build():
+        factory = session_capture_assembly(
+            devices=devices, drivers=_registry(driver), staging=home / "staging",
+            results=ResultsDouble({1: (_photo_entry("photo-b", "b.jpg"),),
+                                   2: (_photo_entry("photo-a", "a.jpg"),)}),
+            wall_us=lambda: clock["now"], monotonic_ns=lambda: 0,
+            wait_config=lambda action: CaptureWaitConfig(target_duration_ms=1000, driver_margin_ms=0),
+        )
+        return capture_flow(factory)
+
+    # 第一轮（09:00）：A 的计划时间是 10:00，绑定异常不提前执行也不
+    # 提前失败；B 正常成功。
+    first = build()
+    await first(context)
+    await first.settle()
+    assert owned.connection.execute(
+        "SELECT status, execution_started, error_code FROM actions WHERE id = ?",
+        (ids["cam-a"],)).fetchone() == (1, 0, None)
+    assert owned.connection.execute(
+        "SELECT status FROM actions WHERE id = ?", (ids["cam-b"],)).fetchone() == (3,)
+    assert not any(binding.device_id == "cam-a" for binding in driver.calls)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
+        " WHERE r.action_id = ?", (ids["cam-a"],)).fetchone()[0] == 0
+
+    # 到达原计划时间（10:00）：A 取得处理资格，按绑定失败收场；仍零
+    # 设备调用、零新尝试。
+    clock["now"] = int(datetime(2026, 1, 15, 10, tzinfo=timezone.utc).timestamp() * 1_000_000)
+    second = build()
+    await second(context)
+    await second.settle()
+
+    row = owned.connection.execute(
+        "SELECT status, execution_started, cancel_requested, driver_id, error_code,"
+        " error_details_json FROM actions WHERE id = ?", (ids["cam-a"],),
+    ).fetchone()
+    assert row[:4] == (4, 1, 0, "camctl-adb")
+    assert row[4] == registered_error("device_binding_unavailable")["action_error_id"]
+    expected = {"device_id": "cam-a", "expected_driver_id": "camctl-adb", "reason": change}
+    if change == "mismatch":
+        expected["actual_driver_id"] = "alternate-camera"
+    assert json.loads(row[5]) == expected
+    assert not any(binding.device_id == "cam-a" for binding in driver.calls)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
+        " WHERE r.action_id = ?", (ids["cam-a"],)).fetchone()[0] == 0
+    assert owned.connection.execute(
+        "SELECT status FROM actions WHERE id = ?", (ids["cam-b"],)).fetchone() == (3,)
+
+
 class _RecoveryDriver:
     """控制与停止均受设备端口契约约束，记录不允许发生的新调用。"""
 

@@ -434,3 +434,41 @@ class TestConcludeRequiresStopFact:
         assert _value(
             owned, "SELECT activity_state, occupancy_state"
             " FROM device_activities WHERE id = 1") == (1, 1)
+
+    async def test_scope_limited_conclude_saves_ended_and_keeps_held(self, owned):
+        """输出范围未解除：结束观察照常保存，占用保留 HELD。"""
+        connection = owned.connection
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_running_action(connection, 1)
+        _seed_activity(connection, 1, dispatch_state=3, activity_state=2)
+        _seed_terminal_run(connection, 1, status=3, responsibility="stop")
+        # 目录所有权活动：文件归属尚未确定，范围限制仍然存在。
+        connection.execute(
+            "UPDATE device_activities SET ownership_mode = 2, baseline_state = 2"
+            " WHERE id = 1")
+        connection.commit()
+
+        outcome = _conclude(owned, 1)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert outcome.value.outcome is ConcludeOutcome.ENDED_HELD
+        assert outcome.value.reason == "scope_limited"
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (3, 1)
+        # 已保存结束后的重入不新增事实，仍表达占用保留。
+        again = _conclude(owned, 1)
+        assert again.value.outcome is ConcludeOutcome.ENDED_HELD
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (3, 1)
+
+        # 范围解除后重入收场才释放占用；结束事实保持不变。
+        connection.execute(
+            "UPDATE device_activities SET baseline_state = 3,"
+            " result_set_state = 3, result_check_json = '{}' WHERE id = 1")
+        connection.commit()
+        released = _conclude(owned, 1)
+        assert released.value.outcome is ConcludeOutcome.CONCLUDED
+        assert _value(
+            owned, "SELECT activity_state, occupancy_state"
+            " FROM device_activities WHERE id = 1") == (3, 2)

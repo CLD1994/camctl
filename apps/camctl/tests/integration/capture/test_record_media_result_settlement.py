@@ -9,7 +9,11 @@ import pytest
 
 from camctl.capture.handlers import capture_handler
 from camctl.capture.media import RecordingFailure
-from camctl.contracts.values import ConsistencyError
+from camctl.capture.processing import (
+    CheckPhase, CheckResultSave, MediaObservation, ProcessingError,
+)
+from camctl.contracts.workflow_errors import registered_error
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.host_files.media import MediaProbe
 from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.persistence.repositories.outputs import register_outputs_guards
@@ -19,6 +23,7 @@ from camctl.persistence.transaction import TransactionError
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .media_retry_fixtures import _EVIDENCE, media_pipeline  # noqa: F401
+from camctl.capture.results import FileKind
 from .test_capture_contract import ResultsDouble, _entry, _runtime
 from .test_input_copy import _CONTENT, _NOW
 from .test_media_flow import ReadDriverDouble, _flow
@@ -317,3 +322,211 @@ async def test_unknown_settlement_reuses_whole_request_and_original_decision_tim
         assert isinstance(first_error.value, ConsistencyError)
     finally:
         reopened.connection.close()
+
+
+@pytest.mark.parametrize("reopen", [False, True], ids=["same-runtime", "saved-history"])
+async def test_explicit_media_issue_settles_from_saved_check_without_new_queries(
+        media_pipeline, reopen):
+    """明确媒体问题的检查结果经公开仓储保存后，原输入足以本地收场。
+
+    时长充足但检查发现明确媒体问题：probe 通路不产生该分区（检查
+    观察只携带时长或错误），本测试经公开处理仓储保存带 issues 的
+    完成观察，随后在无内存缓存与同运行时两种入口下核验收场——
+    零新设备查询、零新尝试，错误事实与原 T0、完整可靠文件保持。
+    """
+    owned, roots, source_id = media_pipeline
+    runtime, results, reader, tools = _runtime_with_media(media_pipeline, Decimal("65"))
+
+    await capture_handler("camera_record")(1, runtime)
+
+    original_run = _result_run(owned)
+    assert original_run[1:4] == (2, 1, 1)
+    original_attempts = _attempts(owned)
+    history = owned.connection.execute(
+        "SELECT * FROM history_events ORDER BY id").fetchall()
+    assert tools.calls == ["probe"]
+
+    # 公开处理仓储保存明确媒体问题的完成观察：时长充足但 issues
+    # 非空，时长判定不覆盖已知媒体问题。
+    saved = CaptureRepository().save_check_result(CheckResultSave(
+        1, MediaObservation(
+            CheckPhase.COMPLETED, duration_s=Decimal("65"),
+            issues=(ProcessingError(
+                code="container_invalid", stage="check",
+                details={"message": "moov atom missing"}),),
+        ), _NOW + 100_000), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+
+    recovered = None
+    try:
+        if reopen:
+            database_path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+            metadata = owned.metadata
+            owned.connection.close()
+            recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
+            assert recovered.metadata == metadata
+            owned = recovered
+            runtime = _runtime(owned, results=results, listing_cache={})
+            runtime.evidence = _EVIDENCE
+            runtime.media = _flow((owned, roots, source_id), reader, tools)
+        runtime.wall_us = lambda: _NOW + 200_000_000
+        await capture_handler("camera_record")(1, runtime)
+
+        # 动作按明确媒体问题失败，公共错误如实表达 invalid_media。
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (4,)
+        code, reason, details = owned.connection.execute(
+            "SELECT error_code, json_extract(error_details_json,'$.reason'),"
+            " error_details_json FROM actions WHERE id=1").fetchone()
+        registered = registered_error("recording_processing_failed")
+        assert code == registered["action_error_id"]
+        assert json.loads(details)["processing_id"] == "1"
+        assert reason == "invalid_media"
+        # 零新设备活动：无新 RESULTS 查询、无新 probe、无新 READ、无新尝试。
+        assert results.calls == [1]
+        assert tools.calls == ["probe"]
+        assert len(reader.opens) == 1
+        assert _attempts(owned) == original_attempts
+        # 原历史与 T0 保持；收场事务在原 run 上结束并清除等待。
+        assert owned.connection.execute(
+            "SELECT * FROM history_events WHERE id<=? ORDER BY id", (history[-1][0],)
+        ).fetchall()[:len(history)] == history
+        current_run = _result_run(owned)
+        assert current_run[0] == original_run[0]
+        assert current_run[2] == original_run[2]
+        assert current_run[4:] == original_run[4:]
+        assert current_run[1:4] == (3, 1, 0)
+        # 已有完整可靠源文件保持，不被媒体失败撤下；核实收场、动作
+        # 失败与源文件事实在同一事务保存。
+        assert owned.connection.execute(
+            "SELECT presence_state, completion_state FROM device_files WHERE id=?",
+            (source_id,)).fetchone() == (2, 3)
+        _assert_joint_settlement(owned, original_run[0], 4)
+    finally:
+        if recovered is not None:
+            recovered.connection.close()
+
+
+async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
+        media_pipeline):
+    """完整 VIDEO 加未完成 OTHER 的控制分区：媒体链照常，收场等集合。
+
+    未完成 OTHER 被如实观察为完成未知，不进入读取或产物；完整
+    VIDEO 的读取与检查不受影响。集合因未完成文件暂不齐备时保持
+    重试等待，不把未完成解释为完成；OTHER 写完后集合齐备，收场
+    只登记完整源文件为产物。
+    """
+    owned, roots, source_id = media_pipeline
+    entry = replace(_entry("original-recording", size=len(_CONTENT)),
+                    locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
+    incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
+    results = ResultsDouble({1: (entry, incomplete)})
+    runtime = _runtime(owned, results=results, listing_cache={})
+    runtime.evidence = _EVIDENCE
+    reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
+    runtime.media = _flow(media_pipeline, reader, tools)
+
+    await capture_handler("camera_record")(1, runtime)
+    assert _result_run(owned)[1:4] == (2, 1, 1)
+
+    runtime.wall_us = lambda: _NOW + 200_000_000
+    await capture_handler("camera_record")(1, runtime)
+
+    # 未完成 OTHER 被如实观察为完成未知，不进入读取或产物。
+    other_id, = owned.connection.execute(
+        "SELECT id FROM device_files WHERE observer_action_id=1 AND id<>?",
+        (source_id,)).fetchone()
+    assert owned.connection.execute(
+        "SELECT completion_state FROM device_files WHERE id=?",
+        (other_id,)).fetchone() == (1,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
+        (other_id,)).fetchone() == (0,)
+    # 媒体链不受未完成 OTHER 影响：只读源文件，检查完成且无需修复。
+    assert len(reader.opens) == 1
+    assert tools.calls == ["probe", "probe"]
+    assert owned.connection.execute(
+        "SELECT check_state, repair_state FROM recording_processing"
+        " WHERE id=1").fetchone() == (3, 2)
+    # 集合因未完成 OTHER 暂不齐备：不收场、不登记产物、保持重试等待。
+    assert _result_run(owned)[1:4] == (2, 1, 1)
+    assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
+
+    # 集合中未完成文件不参与收场判定：保持等待、不解释为完成，
+    # 也不因未完成文件丢弃已观察的完整源文件事实。
+    assert owned.connection.execute(
+        "SELECT presence_state, completion_state FROM device_files WHERE id=?",
+        (source_id,)).fetchone() == (2, 3)
+
+
+async def test_incomplete_other_turning_complete_settles_from_saved_facts(
+        media_pipeline):
+    """未完成 OTHER 转完整后的本地装载次序：新轮次只补观察，收场沿已保存事实。
+
+    第一轮集合因未完成 OTHER 保持重试等待（VIDEO 已读取、检查完成、
+    无需修复）；后续轮次 OTHER 转完整后，新观察只登记该文件的完成事
+    实，不重新读取已可靠结束的源文件、不重新检查，集合齐备即收场，
+    每份完整原片各自登记为正式产物。
+    """
+    owned, roots, source_id = media_pipeline
+    entry = replace(_entry("original-recording", size=len(_CONTENT)),
+                    locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
+    incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
+    results = ResultsDouble({1: (entry, incomplete)})
+    runtime = _runtime(owned, results=results, listing_cache={})
+    runtime.evidence = _EVIDENCE
+    reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
+    runtime.media = _flow(media_pipeline, reader, tools)
+
+    await capture_handler("camera_record")(1, runtime)
+    runtime.wall_us = lambda: _NOW + 200_000_000
+    await capture_handler("camera_record")(1, runtime)
+    assert _result_run(owned)[1:4] == (2, 1, 1)
+    assert len(reader.opens) == 1
+    assert tools.calls == ["probe", "probe"]
+    other_id, = owned.connection.execute(
+        "SELECT id FROM device_files WHERE observer_action_id=1 AND id<>?",
+        (source_id,)).fetchone()
+
+    # 后续轮次：同一集合中的 OTHER 转完整且集合确定。重试间隔按会
+    # 话单调钟计时，墙钟与单调钟一起越过间隔。
+    results.files_by_action[1] = (entry, _entry("sidecar-log", kind=FileKind.OTHER))
+    runtime.wall_us = lambda: _NOW + 400_000_000
+    runtime.monotonic_ns = lambda: 15_000_000_000
+    await capture_handler("camera_record")(1, runtime)
+
+    # 本地装载次序：新轮次重新列举并只补观察 OTHER 的完成事实；已可
+    # 靠结束的读取与已完成的检查不重做——零新读取、零新 probe。
+    assert results.calls == [1, 1]
+    assert len(reader.opens) == 1
+    assert tools.calls == ["probe", "probe"]
+    assert owned.connection.execute(
+        "SELECT completion_state FROM device_files WHERE id=?",
+        (other_id,)).fetchone() == (3,)
+    # 集合齐备即收场：第二次列举消耗第二次名额，动作成功；完整 VIDEO
+    # 与转完整的 OTHER 各自登记为原片产物，收场同事务。
+    assert _result_run(owned)[1:4] == (3, 2, 0)
+    assert owned.connection.execute(
+        "SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
+        (source_id,)).fetchone() == (1,)
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM outputs WHERE device_file_id=?",
+        (other_id,)).fetchone() == (1,)
+    # 收场事务边界：新轮次直接齐备时，本轮列举处置（尝试结果与 run
+    # 终结）沿轮次保存事务提交；正式产物登记与动作成功终态按设备事
+    # 实与动作结果规则在同一历史事务保存。
+    transactions = {"action": set(), "output": set()}
+    for transaction_id, body in owned.connection.execute(
+            "SELECT transaction_id,body_json FROM history_events ORDER BY id"):
+        for row in json.loads(body)["rows"]:
+            values = row["after"]["values"]
+            if row["table"] == "actions" and row["id"] == 1 and values.get("status") == 3:
+                transactions["action"].add(transaction_id)
+            if row["table"] == "outputs" and values.get("source_action_id") == 1:
+                transactions["output"].add(transaction_id)
+    assert len(transactions["action"]) == 1
+    assert transactions["action"] == transactions["output"]

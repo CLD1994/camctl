@@ -205,7 +205,7 @@ B1 建立包后才运行各模块命令。B2、B3 可先用端口替身实施，
 
 - [x] 阅读既有完整 bootstrap 日志并区分两项前提：发行物的列举返回缺少完整调用结果；正常延时摄影受理时保存的驱动与本次配置不一致。`/tmp/camctl-goal-combined-bootstrap-current.log` 的发行物错误为 `state_db_error`，内容指向结果列举的完整实际返回；正常延时摄影在等待成功终态时已经失败。此记录不构成未决结果格式的红灯证据。
 - [x] 修正共用替身的完整结果返回和正常延时摄影的合法受理目录。发行物失败断言同时保留 stdout 与 stderr，供下一边界失败时定位真实错误。未修改生产代码、状态投影或集合判定预期。
-- [ ] root 在 Linux 容器、部署 Python 3.11 下前台独占执行以下两个节点，记录实际结果。导入、静态检查或前提修正不能替代本次发行物与生产装配验证。
+- [x] root 在 Linux 容器、部署 Python 3.11 下前台独占执行以下两个节点，记录实际结果。导入、静态检查或前提修正不能替代本次发行物与生产装配验证。2026-10-11 执行：发行物全链 1 passed（6.72s），正常延时经默认流程成功 1 passed（4.70s）。此前两项阻塞已由后续工作解决——集合结束依据由[结果分页与等待产物收尾](2026-10-09-camctl-read-runtime-configuration.md#rd4-默认入口交接原-read-保存责任)时代的正式分页收场提供，`device_execution/error` 的公共结构由[结果错误计划](2026-10-09-camctl-result-errors-and-report-projection.md)的完整错误验证闭合；本日全量 capture 目录 982 passed 亦含两分区。真实设备、ARM64 及物理断电仍按部署交接项单独验收。
 
 ```sh
 PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest apps/camctl/tests/integration/bootstrap/test_distribution.py::test_distribution_works_outside_repository -q

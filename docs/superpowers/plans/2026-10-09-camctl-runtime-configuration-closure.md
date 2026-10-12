@@ -92,10 +92,10 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 相应生产接线后，CLI 原窄门禁 14 项通过，正常／受限报告消费者及最终关闭分类的组合共 24 项通过，消息与迟到结果单元共 68 项通过，实际 worker 文件 11 项通过。reporting 单目录独立回归 352 项通过，覆盖历史分页与 RC0 消息／worker 组合。非法相对路径、NUL、展开后词法规范化、报告开库错误分类及 bootstrap 完整目录仍须保留各自证据；本节不以 reporting 目录通过替代日常会话或整个配置目标的验收。
 
-- [ ] 添加 `test_run_and_submit_reject_each_changed_directory_before_acceptance`：分别只改变 staging、ready、processing 及改变全部三项，真实 CLI 返回 `configuration_error`；诊断包含变更字段和原／新路径，库、受理事件、动作、设备调用与业务文件保持。路径书写不同但实际规范对象相同的输入通过。
-- [ ] 添加 `test_report_worker_rejects_mismatched_binding_before_generation`：主进程检查之后、子进程开库之前受控改变绑定输入，子进程拒绝且不创建或覆盖临时文件，不读取历史生成报告；通过既有报告通信保留配置错误所属范围，不把合法配置不匹配冒充状态库损坏。
-- [ ] 添加 `test_directory_gate_keeps_database_errors_and_describe_scope`：库缺失／无效返回原状态库错误，`describe` 无状态库也能执行；已经有文件的正常匹配运行不额外扫描原目录，日常入口不能更新绑定。
-- [ ] 先确认失败，再接入门禁及精确错误分类。RC0 只比较已保存元信息，不执行目录切换；显示路径错误和诊断须沿正式协议分类。门禁：所有日常入口及报告子进程都具有实际生产调用证据，显式 `init` 的切换行为仍由独立目录切换计划验收。
+- [x] 添加 `test_run_and_submit_reject_each_changed_directory_before_acceptance`：分别只改变 staging、ready、processing 及改变全部三项，真实 CLI 返回 `configuration_error`；诊断包含变更字段和原／新路径，库、受理事件、动作、设备调用与业务文件保持。路径书写不同但实际规范对象相同的输入通过。（`integration/bootstrap/test_directory_binding_runtime.py` 逐项目录与等价规范书写组合交付。）
+- [x] 添加 `test_report_worker_rejects_mismatched_binding_before_generation`：主进程检查之后、子进程开库之前受控改变绑定输入，子进程拒绝且不创建或覆盖临时文件，不读取历史生成报告；通过既有报告通信保留配置错误所属范围，不把合法配置不匹配冒充状态库损坏。（以 `integration/reporting/test_worker.py::test_worker_rejects_each_changed_binding_before_staging` 交付：三类路径逐项拒绝、零临时文件，缺库仍按 STATE。）
+- [x] 添加 `test_directory_gate_keeps_database_errors_and_describe_scope`：库缺失／无效返回原状态库错误，`describe` 无状态库也能执行；已经有文件的正常匹配运行不额外扫描原目录，日常入口不能更新绑定。（拆分为同文件 `test_directory_gate_keeps_database_error_classification` 与 `test_describe_does_not_require_database_or_bound_directories`；纯词法规范化不访问目录由 `test_adapter_normalizes_expanded_paths_without_directory_access` 覆盖。）
+- [x] 先确认失败，再接入门禁及精确错误分类。RC0 只比较已保存元信息，不执行目录切换；显示路径错误和诊断须沿正式协议分类。门禁：所有日常入口及报告子进程都具有实际生产调用证据，显式 `init` 的切换行为仍由独立目录切换计划验收。（上文 2026-10-09 窄门禁记录红—绿及 reporting 352 项目录回归；正常／受限会话的配置错误停止由 `test_report_configuration_error_stops_normal_and_restricted_session` 覆盖。）
 
 ### RC1 已明确设备配置字段的校验与传递
 
@@ -103,10 +103,10 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 **接口与交付：** 保留 `load_config(document, defaults) -> ConfigSnapshot` 为配置入口。使用已存在的 `AttemptConfig`／`OperationConfig` 向运行时传递相应操作的本次上限、超时与间隔；原执行定义只提供业务要求和驱动必要余量。具体归一化辅助函数签名由实施者根据当前装配确认，必须保持一处权威默认值，不能在流程、仓储和测试中各维护一份完整字段清单。
 
-- [ ] 先添加 `test_known_device_fields_reject_invalid_values`：逐字段覆盖 `recording.start_timeout_s`、`stop_timeout_s`、`max_start_attempts`、`max_stop_attempts`、`result_check.max_attempts`、`call_timeout_s`、`copy.max_read_attempts`、`max_recopies`、`read_idle_timeout_s`、`capture.extra_wait_ms`；精确断言合法值归一化及非法值抛 `ConfigError`。
-- [ ] 添加 `test_runtime_policies_use_current_device_values`：输入两台设备的不同值，断言相应运行时采用各自值；省略字段和空表取默认值，修改原配置输入不能改变已加载快照。
-- [ ] 单独运行上述单元失败测试，确认红来自字段未校验或未消费；再实现字段校验和配置传递，复跑至绿。不得用原样冻结、静默忽略或统一默认值满足该任务。
-- [ ] 门禁：完整执行 `unit/bootstrap`；审计所有已明确设备子表字段的生产消费者，记录已经接入和仍待字段裁决的项目。
+- [x] 先添加 `test_known_device_fields_reject_invalid_values`：逐字段覆盖 `recording.start_timeout_s`、`stop_timeout_s`、`max_start_attempts`、`max_stop_attempts`、`result_check.max_attempts`、`call_timeout_s`、`copy.max_read_attempts`、`max_recopies`、`read_idle_timeout_s`、`capture.extra_wait_ms`；精确断言合法值归一化及非法值抛 `ConfigError`。（`unit/bootstrap/test_device_execution_config.py` 对十个字段全覆盖：精确秒值、非法秒值、整数下界、非整数、低于下界、未知字段与显式空表。）
+- [x] 添加 `test_runtime_policies_use_current_device_values`：输入两台设备的不同值，断言相应运行时采用各自值；省略字段和空表取默认值，修改原配置输入不能改变已加载快照。（`unit/bootstrap/test_read_execution_config.py` 验证 copy 配置到达取回与内部输入两个消费者；`test_timelapse_assembly.py` 验证 capture 额外等待进入等待装配；`test_device_execution_config.py` 的快照加载为一次性冻结值。录像 START／STOP 的逐设备运行时消费由[录像 START 执行计划](2026-10-09-camctl-recording-start-runtime.md)与 `test_recording_stop.py` 承载。）
+- [x] 单独运行上述单元失败测试，确认红来自字段未校验或未消费；再实现字段校验和配置传递，复跑至绿。不得用原样冻结、静默忽略或统一默认值满足该任务。（字段校验与传递随上述文件交付；上文 2026-10-09 记录加载相关单元 133 项通过。）
+- [x] 门禁：完整执行 `unit/bootstrap`；审计所有已明确设备子表字段的生产消费者，记录已经接入和仍待字段裁决的项目。（2026-10-11 本轮全量单元 4726 项通过包含 `unit/bootstrap` 全目录；字段消费方分布见上文“当前代码起点”表与各装配测试，尚待裁决字段继续由[设备计划](2026-09-30-camctl-devices.md)跟踪。）
 
 ### RC2 原绑定核对与局部失败的完整事务
 
@@ -114,12 +114,12 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 **接口与交付：** 消费已存在的 `DeviceBinding`、`BindingResult`、`check_binding(saved, current)`；拍摄从动作取得原绑定，设备文件从原观察者动作取得原绑定。当前声明只选择匹配驱动的运行端口，不能生成或覆盖原绑定。提供类型化绑定失败结果给对应拍摄、取回项、清理项及独立收场的事务入口，普通缺失配置不抛成全会话状态库错误。
 
-- [ ] 添加 `test_changed_binding_fails_only_due_device_work`：先经真实受理保存 A、B 两台设备动作，下一次会话移除 A 或把 A 改绑另一个已登记驱动。断言 A 已到期工作失败且新增设备调用、尝试均为零，B 正常执行；A 的未来、过期、已有终态与已取消分别满足状态矩阵。
-- [ ] 添加 `test_cross_device_items_and_host_copy_continue_after_binding_failure`：一个取回和一个清理各涉及 A、B；A 异常项失败，B 项继续；主机完整副本继续发布及本地成品继续清理。清理工厂必须实际处理各设备，不能只处理首个可装配设备。
-- [ ] 添加 `test_binding_failure_preserves_unknown_effect_and_cancel_winddown`：已有未知活动及调用责任时，取消事实正常保存，异常绑定的停止／核实失败，其他设备独立收场；原未知效果、保护和限制不能凭局部失败解除。
-- [ ] 添加 `test_new_driver_trigger_preserves_old_driver_residual`：真实建立驱动 A 的残留活动及独立收场责任，再以驱动 B 受理同设备的新触发动作。本次配置为 B；原责任保存 A 绑定失败，零设备调用且原活动事实保持，新触发动作按 `device_activity_unresolved` 失败，其自身原绑定仍为 B。
-- [ ] 对相应事务注入提交前失败、明确回滚、提交结果未知与提交后通知丢失；核实原请求和完整事务，未完成结果不产生部分项、重复计数或错误的父计划终态。
-- [ ] 确认失败后接入统一原绑定核对与分支事务，逐项复验。门禁：配置修正及同请求重送保持原失败，全部本地责任完成后 `run` 正常退出，无新责任时 `needs_run: false`；状态库错误仍进入会话错误。
+- [x] 添加 `test_changed_binding_fails_only_due_device_work`：先经真实受理保存 A、B 两台设备动作，下一次会话移除 A 或把 A 改绑另一个已登记驱动。断言 A 已到期工作失败且新增设备调用、尝试均为零，B 正常执行；A 的未来、过期、已有终态与已取消分别满足状态矩阵。（已到期失败、B 正常与终态／取消保持由 `test_changed_binding_respects_execution_eligibility` 十个参数化分区覆盖；“A 的未来时间不因绑定异常提前执行或失败”的组合分区由 `test_future_action_gains_eligibility_only_at_original_time` 交付——第一轮 09:00 A 保持 PENDING、零调用零尝试，推进会话时钟到原计划时间 10:00 后取得处理资格并按 `device_binding_unavailable` 失败，仍零设备调用零新尝试，B 保持成功。2026-10-11 复跑该文件 38 passed。）
+- [x] 添加 `test_cross_device_items_and_host_copy_continue_after_binding_failure`：一个取回和一个清理各涉及 A、B；A 异常项失败，B 项继续；主机完整副本继续发布及本地成品继续清理。清理工厂必须实际处理各设备，不能只处理首个可装配设备。（`test_output_binding_changes.py` 的跨设备取回项、逐成员原绑定清理与完整副本免设备发布；`test_output_device_configuration.py` 验证空设备目录仍装配主机协作者；`test_cleanup_flow.py` 的修复成品本地清理零设备调用。）
+- [x] 添加 `test_binding_failure_preserves_unknown_effect_and_cancel_winddown`：已有未知活动及调用责任时，取消事实正常保存，异常绑定的停止／核实失败，其他设备独立收场；原未知效果、保护和限制不能凭局部失败解除。（`test_unfinished_read_binding_failure_closes_responsibility_and_keeps_progress`、`test_unfinished_cleanup_binding_failure_preserves_unknown_delete`、`test_canceled_cleanup_preserves_saved_unknown_results_after_binding_change` 及清理查询计划的取消收场矩阵。）
+- [x] 添加 `test_new_driver_trigger_preserves_old_driver_residual`：真实建立驱动 A 的残留活动及独立收场责任，再以驱动 B 受理同设备的新触发动作。本次配置为 B；原责任保存 A 绑定失败，零设备调用且原活动事实保持，新触发动作按 `device_activity_unresolved` 失败，其自身原绑定仍为 B。（`integration/bootstrap/test_residual_binding.py` 交付，含票据与期限传递。）
+- [x] 对相应事务注入提交前失败、明确回滚、提交结果未知与提交后通知丢失；核实原请求和完整事务，未完成结果不产生部分项、重复计数或错误的父计划终态。（`test_output_binding_transactions.py`、`test_binding_transactions.py`、`test_residual_binding_transactions.py` 与 `test_binding_canceled_result_transactions.py` 的投影失败回滚、COMMIT 前后未知重开原键与改变输入拒绝矩阵。）
+- [x] 确认失败后接入统一原绑定核对与分支事务，逐项复验。门禁：配置修正及同请求重送保持原失败，全部本地责任完成后 `run` 正常退出，无新责任时 `needs_run: false`；状态库错误仍进入会话错误。（上文 2026-10-09 分区记录的窄门禁与 2026-10-11 清理查询计划交付后的 outputs 1937 项、bootstrap 963 项目录门禁；原请求重送保持原失败由各原键复验矩阵覆盖。）
 
 #### RC2 拍摄恢复及取消的事务分区
 
@@ -311,15 +311,15 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 2026-10-09，Linux 容器、Python 3.11.16：完整结果及实际期限的端口单元 6 项、控制结果保留 2 项、逐操作恢复声明 4 项通过。真实受管子进程组合 2 项验证超时及超时前启动确认保留；普通 STOP 请求集成 1 项通过。会话初始恢复回调 2 项、三个生产工厂共用恢复输入 2 项通过，CLI 边界及既有输出单元组合 24 项通过。录像真实 START 初始矩阵 12 项通过，完整事务未知提交、终态遗留调用及结果核实尚待后续门禁；上述证据不代表 RC3 或 RC5 完成。
 
-- [ ] 添加 `test_changed_limit_preserves_used_attempts_and_terminal_runs`：第一运行已用 2 次，第二运行上限 5 时最多新增 3 次；第二运行上限 1 时无新尝试且原已用仍为 2。成功、失败、取消终态都不重开，未知结果先核实，原在途尝试不重复计数。分别覆盖启动、停止、读取、重拷、删除、查询与核实责任。
-- [ ] 添加 `test_current_timeout_reaches_managed_call_and_settlement`：两次运行使用不同精确超时值，观察真实受管调用输入及保存依据；超时后继续实际收场，部分输出不刷新期限、迟到可靠效果不被抹去，停止前不开始冲突操作或复用文件。单元用受控时钟和真实接口替身，真实子进程组合放集成层。
-- [ ] 添加 `test_retry_wait_restarts_with_current_interval_without_refunding_budget`：跨运行使用新间隔和新无数据阈值；同一运行内固定。等待不消耗次数，窗口、取消和调用实际结束分别决定资格。
-- [ ] 先确认上述用例失败，再接入本次值及相应安全重试状态机。录像启动默认 3 次必须沿可靠无效果、未知效果核实、成功确认、窗口和调用收场完整判定下一次启动。
-- [ ] 门禁：新增尝试历史精确保留本次配置，旧尝试、结果、决定与累计次数保持；回放不调用设备、不加载新配置。禁止删除旧尝试、重建流程、放宽数据库约束或隐藏重试。
+- [x] 添加 `test_changed_limit_preserves_used_attempts_and_terminal_runs`：第一运行已用 2 次，第二运行上限 5 时最多新增 3 次；第二运行上限 1 时无新尝试且原已用仍为 2。成功、失败、取消终态都不重开，未知结果先核实，原在途尝试不重复计数。分别覆盖启动、停止、读取、重拷、删除、查询与核实责任。（七项责任按各自专项交付，2026-10-11 审计合并：读取与重拷由 `integration/bootstrap/test_read_execution_runtime.py` 覆盖——`test_later_run_uses_current_budget_after_two_real_read_failures` 正是 2→5 补 3 次／上限 1 零新尝试的 RC3 形状，`test_registered_recopy_continues_when_later_budget_is_lower` 与独立重拷预算覆盖重拷；启动由 `test_recording_start_runtime.py::test_new_session_limit_preserves_original_attempts`（新上限参数化）及 `test_unknown_start_uses_start_confirmation_before_any_resend`（未知先核实）覆盖；停止由 `test_stop_current_budget.py` 五项覆盖（提高仅补剩余、降低零新尝试、在途等待实际返回、终态保持）；删除与查询由 `outputs/test_cleanup_retry_phases.py` 两参数化覆盖（提高沿原等待重试、降低无新尝试直接耗尽）。核实责任为本轮新增 `integration/capture/test_check_current_budget.py::test_check_budget_change_adds_only_remaining_attempts`：第一运行集合未确定耗 2 次进入重试等待，第二运行上限 5 恰补 3 次、上限 1 零新尝试且原已用保持 2，已收场 UNCONFIRMED 不因后续更高上限重开，原尝试行与历史前缀逐行保持；该分区首次运行即通过，按规则记录为生产已满足，不虚构红。未知核实保存先核实原键由 `test_result_exhaustion_save_recovery.py` 及结果页原键矩阵覆盖。七文件合计 92 passed。）
+- [x] 添加 `test_current_timeout_reaches_managed_call_and_settlement`：两次运行使用不同精确超时值，观察真实受管调用输入及保存依据；超时后继续实际收场，部分输出不刷新期限、迟到可靠效果不被抹去，停止前不开始冲突操作或复用文件。单元用受控时钟和真实接口替身，真实子进程组合放集成层。（2026-10-11 组合交付：`test_recording_start_runtime.py::test_two_runs_deliver_their_own_current_timeout_to_start_calls` 新增——两次运行各自的精确超时（0.75→2.5）到达实际调用并按尝试保存本次 `timeout_s_json`，旧尝试行逐行保持；`unit/devices/test_managed_port.py::test_current_timeout_reaches_managed_transport_without_retry` 参数化精确值单次到达真实受管 transport（部分输出不刷新期限、ASSUMED 依据含 terminate_grace、无隐藏重试）；`integration/devices/test_managed_port.py::test_real_managed_timeout_keeps_original_result_and_earlier_confirmation` 与 `test_transport.py::test_real_tool_timeout_settles_by_assumption` 覆盖真实子进程超时后的实际收场与迟到可靠效果保留；停止前不开始冲突操作由在途停止等待实际返回（`test_lower_limit_waits_for_in_flight_stop_actual_result`）及读取让路分区覆盖。本文件 14 项通过。）
+- [x] 添加 `test_retry_wait_restarts_with_current_interval_without_refunding_budget`：跨运行使用新间隔和新无数据阈值；同一运行内固定。等待不消耗次数，窗口、取消和调用实际结束分别决定资格。（组合交付：`outputs/test_cleanup_retry_phases.py::test_higher_current_limit_restarts_original_retry_wait` 核跨运行新间隔从本会话首次观察重新计时且等待期间零新调用、原次数保持；`test_recording_start_runtime.py::test_no_effect_retries_same_run_and_activity_after_current_interval` 核同一运行内间隔固定；读取新无数据阈值经 `test_actual_read_call_carries_current_idle_threshold`（两入口参数化）到达实际调用；窗口与调用实际结束分别决定资格由 `test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt` 与在途返回等待矩阵覆盖。）
+- [x] 先确认上述用例失败，再接入本次值及相应安全重试状态机。录像启动默认 3 次必须沿可靠无效果、未知效果核实、成功确认、窗口和调用收场完整判定下一次启动。（生产经早前子计划已消费本次值：上述用例首次运行即通过，按“首次即通过则记录该分区已经满足规则”记录，不虚构红。录像启动默认 3 次的完整判定矩阵由 `test_recording_start_runtime.py` 十四项覆盖——可靠无效果重试、未知效果先核实（`test_unknown_start_uses_start_confirmation_before_any_resend`）、成功确认锚点、窗口结束（`test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt`）与永久拒绝不耗剩余次数。）
+- [x] 门禁：新增尝试历史精确保留本次配置，旧尝试、结果、决定与累计次数保持；回放不调用设备、不加载新配置。禁止删除旧尝试、重建流程、放宽数据库约束或隐藏重试。（2026-10-11：七项责任限额与超时矩阵文件合计 92 项＋启动十四项通过；每个新尝试按行保存本次 `max_attempts_used/timeout_s_json/retry_interval_s_json`，旧尝试行与历史前缀逐行保持由各矩阵断言；回放不调用设备由历史恢复三路径测试（回放仅由事件正文驱动）覆盖；未删除测试、未放宽约束、无隐藏重试（transport 单次调用断言）。）
 
 ### RC4 延时等待重配置与结果核实矩阵
 
-结果列举端口、原完整结果、文件输入保存及 CLOSED 恢复的实施依据由[产物核实执行计划](2026-10-09-camctl-result-round-runtime.md)维护。该计划单列分页格式的待定事项；既有等待及局部结果核实门禁不代表多批实际调用与跨会话文件恢复已经完成。
+结果列举端口、原完整结果、文件输入保存及 CLOSED 恢复的实施依据由[产物核实执行计划](2026-10-09-camctl-result-round-runtime.md)维护。该计划的分页格式已由[接入计划 T5/T6](2026-10-10-camctl-real-camera-demo.md)实施并于 2026-10-11 裁决确认现状（见[决策清单](2026-10-11-camctl-open-decisions.md)）；本计划的等待及局部结果核实门禁不代替多批实际调用与跨会话文件恢复的验证，该证据由接入计划验证记录持有。
 
 等待接线首先验证第一版已经启用的发送后等待方式。发送成功返回时取得日期时间和单调钟锚点，在尝试结果与活动保存之前保留这两个实际读数。日期时间推导持久化的预计检查时间；本次会话共享未完成等待的单调截止，后续推进不因墙钟改变而提前完成或延长等待。重启首次推进时从原发送日期时间和本次额外等待推导剩余时间，保存适用的重配置，再以本次单调钟等待；已完成等待直接核实结果。活动按 `action_id` 关联，不能假定活动与动作的主键相同。等待完成或动作终态后释放会话缓存。
 
@@ -329,20 +329,40 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 **接口与交付：** `CaptureWaitConfig` 保留原目标时长及驱动必要余量，额外等待取本次对应设备的 `capture.extra_wait_ms`。重启后的未完成等待通过原发送锚点计算并可靠保存新等待；已有完成或集合结论直接恢复收尾。结果核实使用本次 `result_check` 值，每轮多批查询不额外消耗轮数，每次查询独立遵守调用时限。
 
-- [ ] 添加 `test_two_runs_reconfigure_unfinished_wait_from_original_send_anchor`：第一运行已保存发送和等待，第二运行增加或减少额外等待；断言发送时间不变，预计检查及采用值符合精确独立预期。重复同值无新历史，等待已完成时不重等；新配置下重建旧报告字节保持。
-- [ ] 在生产装配下覆盖单文件、多文件、合法空列举、缺必需类型、未写完文件、集合尚未齐备、读取／列举错误、轮数耗尽及跨运行上调／下调。完整成功保存实际观察并释放占用；明确不满足保存已知失败且不凭时间释放；耗尽保存无法核实结论。取消及无停止能力沿已有动作契约处理。
-- [ ] 先确认失败再连接等待重配置和完整结果矩阵；不得把空观察、错误或尚未齐备统一解释为成功、合法空集合或暂时无结果。驱动的文件写完、归属和集合齐备保证分别核对，不自拟设备观察。
-- [ ] 门禁：核实结论、尝试结束和流程结果原子提交，重入不新增轮次或改变原结论；在结论保存后、动作终态前中断时，实际恢复结果必须与原结论一致。
+- [x] 添加 `test_two_runs_reconfigure_unfinished_wait_from_original_send_anchor`：第一运行已保存发送和等待，第二运行增加或减少额外等待；断言发送时间不变，预计检查及采用值符合精确独立预期。重复同值无新历史，等待已完成时不重等；新配置下重建旧报告字节保持。（2026-10-11，容器 Python 3.11.16。发送锚点、精确独立预期与重复同值无新历史由 `integration/capture/test_timelapse_wait_runtime.py::test_new_session_reconfigures_unfinished_wait_from_original_send_anchor` 覆盖，参数化 extra=0/5000 分别对应下调与上调，断言 sent_at 不变且 expected_check_at 精确等于发送锚点加目标时长、驱动余量与本次额外等待之和；等待已完成不重等由同文件 `test_completed_wait_is_not_reopened_by_new_extra_wait` 覆盖。报告字节保持由本次新增 `integration/bootstrap/test_timelapse_finish.py::TestTimelapseReportRebuild::test_reconfigured_second_run_rebuilds_old_report_bytes` 覆盖：第一会话成功后冻结并生成报告字节，第二会话以目标时长 5 秒、额外等待 3 秒的新配置完成新计划并按新配置保存等待（extra_wait_ms_used=3000、预计检查等于发送加 8 秒），旧报告以逐实体逐事件的小批次重建，字节与原生成一致。）
+- [x] 在生产装配下覆盖单文件、多文件、合法空列举、缺必需类型、未写完文件、集合尚未齐备、读取／列举错误、轮数耗尽及跨运行上调／下调。完整成功保存实际观察并释放占用；明确不满足保存已知失败且不凭时间释放；耗尽保存无法核实结论。取消及无停止能力沿已有动作契约处理。（2026-10-11，`integration/bootstrap/test_timelapse_finish.py` 真实 run 会话装配矩阵。单文件 `test_wait_completes_and_confirms_time_and_outputs`、多文件本次新增 `test_multiple_files_register_all_outputs`（两份完整文件各自登记产物与设备文件、大小合计逐份核对）、合法空列举与缺必需类型同由 `test_missing_required_kind_saves_known_failure` 覆盖（集合结论明确不满足、占用保持等待残留收场）、未写完文件 `test_incomplete_file_retries_next_round_then_succeeds`、集合尚未齐备本次新增 `test_unfinalized_set_retries_next_round_then_succeeds`（set_finalized 为假时只建立重试等待且无任何集合结论，下一轮集合确定后成功）、读取／列举错误 `test_listing_failure_consumes_round_then_recovers`、轮数耗尽 `test_exhausted_rounds_close_unconfirmed`、跨运行上调／下调本次新增 `test_later_run_uses_current_check_budget`（上调补足剩余名额后成功收场 run (3,2)，下调后无剩余名额立即按无法核实关闭 run (6,1)、动作失败，已观察的完整文件保留为产物事实但不解释为集合满足）、取消及无停止能力沿 `TestTimelapseCancel` 两项既有契约。）
+- [x] 先确认失败再连接等待重配置和完整结果矩阵；不得把空观察、错误或尚未齐备统一解释为成功、合法空集合或暂时无结果。驱动的文件写完、归属和集合齐备保证分别核对，不自拟设备观察。（2026-10-11 组合证据。空观察在 `test_missing_required_kind_saves_known_failure` 保存明确不满足的已知失败，不解释为成功或暂无结果；列举错误在 `test_listing_failure_consumes_round_then_recovers` 保存失败尝试并建立重试等待，不解释为合法空集合；尚未齐备在 `test_unfinalized_set_retries_next_round_then_succeeds` 只产生重试等待与零产物，不解释为暂无结果。文件写完保证由 `test_incomplete_file_retries_next_round_then_succeeds` 分区核对（complete 为假的文件不登记产物）；归属保证由 `integration/capture/test_result_confirmation.py`（失败仍保留已列举的完整且归属明确的文件）与 `test_cancel_timelapse_exhaustion_files.py`（集合无法确认仍登记已完成且可靠归属的原文件）核对；集合齐备保证由 set_finalized 分区及 `integration/capture/test_result_device_completion.py`（未 finalized 的观察按原样保存）核对。失败先于等待重配置由 `test_later_run_uses_current_check_budget` 的两段会话结构覆盖。）
+- [x] 门禁：核实结论、尝试结束和流程结果原子提交，重入不新增轮次或改变原结论；在结论保存后、动作终态前中断时，实际恢复结果必须与原结论一致。（2026-10-11。原子提交由 `integration/capture/test_result_confirmation.py::test_conclusion_commits_with_attempt_and_run_end` 与 `test_atomic_rejection_keeps_attempt_running` 覆盖；结论保存后重开拒绝由 `test_terminal_result_set_rejects_further_rounds` 覆盖，同键重送按原结论恢复由 `test_same_key_resend_recovers_first_result` 两处覆盖；等待同值重送无新历史由 `integration/capture/test_timelapse.py::test_unchanged_wait_configuration_returns_saved_result_without_new_history` 覆盖。轮次精确性由 `test_unfinalized_set_retries_next_round_then_succeeds`（恰好两轮）与 `test_later_run_uses_current_check_budget`（attempts_used 逐分支断言）保证；已收场不重开由 `integration/capture/test_check_current_budget.py` 的再次运行分区覆盖。复跑 `apps/camctl/tests/integration/bootstrap` 全目录 976 passed、1 skipped。）
 
 ### RC5 两次会话、历史与报告组合验收
 
 **预计文件：** 建议 `integration/bootstrap/test_runtime_configuration_recovery.py`；跨组件需要真实 CLI 时放根 `tests/integration/test_camctl_configuration_recovery.py`，先阅读根测试运行说明。证据更新到本计划和已有软件验收映射，不另建重复进度页。
 
-- [ ] 同一真实状态库先 `submit` 受理原请求，经第一运行保存未完成责任后可靠停止，再修改配置并运行第二次；组合两台设备、跨设备取回／清理、完整主机副本、取消和报告维护。时钟通过既有可注入端口控制，不等待真实拍摄时长。
-- [ ] 在各次采用新配置、保存判断、开始调用、结果保存及取消提交前后使用明确同步点注入中断；恢复原完整事务及原身份，验证没有重复副作用、重复名额或遗漏独立收场。
-- [ ] 对配置更新前后分别冻结完整 H，以初始回放、快照正向、当前投影逆向恢复对照独立预期；旧报告重建字节一致，当前报告表达实际逐项失败／成功及原绑定事实，不新增无需求依据的内部过程字段。
-- [ ] 逐目录顺序执行受影响组件集成，再运行根配置组合；源码导入图和 AST（抽象语法树）检查验证执行入口实际消费统一核对及配置接口，不能只搜索函数名称。
-- [ ] 最终独立审阅全部共享不变量的入口：普通拍摄、取消停止、恢复核实、后续残留收场、普通取回、内部输入拷贝、设备及主机清理、结果核实、报告。记录实际环境、命令、结果与尚未裁决字段，只有全部已确认要求得到行为证据才更新对应覆盖结论。
+- [x] 同一真实状态库先 `submit` 受理原请求，经第一运行保存未完成责任后可靠停止，再修改配置并运行第二次；组合两台设备、跨设备取回／清理、完整主机副本、取消和报告维护。时钟通过既有可注入端口控制，不等待真实拍摄时长。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_runtime_configuration_recovery.py` 两项组合测试。`test_second_run_uses_changed_budget_and_extra_wait`：同一状态库 submit 受理 cam-1 照片与 cam-2 延时的双设备计划，第一运行保存照片核实重试等待（results/1 为 (2,1,1)）与延时等待安排（额外等待零）后可靠停止，修改按设备配置后第二运行以新预算（上限 2→5、间隔 30 秒→0.2 秒）恰好补足一轮完成照片核实、按新额外等待（0→3000 毫秒）从原发送锚点重算预计检查（extra_wait_ms_used=3000、预计检查精确等于发送加 5 秒），两台设备产物各登记一份且占用释放，随后真实冻结、生成与分批重建报告（公共 Schema 校验、两动作成功投影、字节一致与摘要一致）。`test_second_run_cancels_with_current_stop_configuration`：第一运行保存延时启动与等待安排后可靠停止，取消排期与停止预算重配置（1 次 30 秒间隔→3 次 0.2 秒间隔）后第二运行第一次停止错误经新间隔重试、第二次确认，取消终态与已拍完产物同事务登记，取消动作与两计划全部收场。时钟经真实墙钟加秒级目标时长与可控等待配置注入，不等待真实拍摄时长。跨设备取回、清理与完整主机副本的两段会话维度由既有专项覆盖：读取与重拷跨运行预算 `integration/capture/test_check_current_budget.py` 与读取失败跨会话专项、清理每轮新连接续接 `integration/bootstrap/test_cleanup_query_default_recovery.py`、主机副本 `integration/outputs/test_copy_complete.py` 与录像媒体链 `integration/capture/test_recording_media_link.py`。）
+- [x] 在各次采用新配置、保存判断、开始调用、结果保存及取消提交前后使用明确同步点注入中断；恢复原完整事务及原身份，验证没有重复副作用、重复名额或遗漏独立收场。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_runtime_configuration_recovery.py::TestInterruptedSecondCallRecovery::test_interrupted_result_call_resumes_without_duplicate_side_effects`：第二运行在新配置下发起的第二次结果核实调用阻塞在设备端口同步点（开始调用后、结果保存前）后中断会话，中断时流程行已固定 attempts_used=2 而调用未登记；第三运行按原责任恢复——原在途尝试以未知结果结束并重建重试等待（尝试状态 UNKNOWN、attempt_no 连续且不重复名额），随后恰好一次新调用完成核实与业务收场（产物登记、占用释放、动作成功终态）。恢复边界与证据查找沿生产装配口径（HOST_LOCAL_SETTLED 与会话开始前固定历史水位、驱动声明的恢复契约）。其余同步点的组合证据：配置采用边界即两项两段会话测试的会话切换本身；保存判断的原子提交与拒绝由 `integration/capture/test_result_confirmation.py::test_atomic_rejection_keeps_attempt_running` 与同键重送恢复覆盖；取消提交前后中断的幂等重入由 `integration/cancellation/test_controller_cancel.py::test_interrupt_boundaries_reenter_idempotently` 覆盖；意图提交后中断的进程级恢复由根 `tests/integration/test_camctl_process_recovery.py` 与电机恢复专项覆盖。）
+- [x] 对配置更新前后分别冻结完整 H，以初始回放、快照正向、当前投影逆向恢复对照独立预期；旧报告重建字节一致，当前报告表达实际逐项失败／成功及原绑定事实，不新增无需求依据的内部过程字段。（2026-10-11，容器 Python 3.11.16。新增 `integration/bootstrap/test_runtime_configuration_recovery.py::TestConfigurationChangeHistoryRecovery::test_freezes_before_and_after_change_recover_identically`：同一状态库在第一运行后（照片核实重试等待、延时等待安排、额外等待为零）冻结 H1 并保存动作对象快照，配置更新（照片预算 2→5、间隔 30 秒→0.2 秒、延时额外等待 0→3000 毫秒、结果集合改为明确缺必需类别）后第二运行收场（照片成功、延时已知失败）再冻结 H2。两个边界都以空种子初始回放对照独立预期——预期直接读取各时点当前投影的四张业务表（actions、device_activities、operation_runs、operation_attempts）业务列，不经生产恢复代码；另验证 H1 快照种子正向回放到 H2、H2 当前投影业务列种子逆向回退到 H1，均与对应边界的初始回放一致。配置更新前冻结的旧报告在终态事实与新历史之后按原冻结依据分批重建，字节一致。当前报告经公共 Schema 校验：照片成功且绑定 cam-1，延时失败且绑定 cam-2、原请求参数与错误码如实呈现，成功动作不携带 device_execution；动作投影不含 extra_wait_ms_used、max_attempts、retry_interval_s、attempt_no 等内部过程或配置字段。）
+- [x] 逐目录顺序执行受影响组件集成，再运行根配置组合；源码导入图和 AST（抽象语法树）检查验证执行入口实际消费统一核对及配置接口，不能只搜索函数名称。（2026-10-11，容器 Linux Python 3.11.16。逐目录顺序执行：bootstrap 全目录 980 passed、1 skipped（含本计划新增的 test_runtime_configuration_recovery 四项），capture 全目录 986 passed，outputs 与 cancellation 两目录合计 2040 passed、2 skipped。根配置组合 `tests/integration/test_camctl_session_recovery.py` 6 passed（真实 CLI 两段会话恢复）。新增 `scripts/check-config-consumption.py` 的语法树检查：生产源码中 CaptureRuntime 的尝试配置字段（check、stop、start、query、delete）必须经统一按设备读取接口（_device_attempts／_device_seconds）构造或由装配参数转发，AttemptConfig 预算关键字出现数字字面量即拒绝（唯一例外为主机源交付拷贝保存的本地单次预算协议），设备调用意图的 config 必须引用运行时配置字段或转发装配输入，延时额外等待必须经统一读取；检查以真实调用点为依据并已用违规探针验证证伪能力（字面量 7 被正确拒绝），登记于 scripts/README.md。）
+- [x] 最终独立审阅全部共享不变量的入口：普通拍摄、取消停止、恢复核实、后续残留收场、普通取回、内部输入拷贝、设备及主机清理、结果核实、报告。记录实际环境、命令、结果与尚未裁决字段，只有全部已确认要求得到行为证据才更新对应覆盖结论。（2026-10-11 最终审阅记录见下方专节。）
+
+### RC5 最终审阅记录（2026-10-11）
+
+环境：Linux 容器（Python 3.11.16），命令统一为
+`UV_PROJECT_ENVIRONMENT=apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 python -m pytest <目标> -q`。
+九个共享不变量入口逐项核对，证据为本计划的组合测试与既有专项在同一批目录门禁中的实际通过结果（bootstrap 980、capture 986、outputs+cancellation 2040、reporting 373、根会话恢复 6）。
+
+| 入口 | 行为证据 |
+| --- | --- |
+| 普通拍摄 | `test_runtime_configuration_recovery.py::test_second_run_uses_changed_budget_and_extra_wait`（两台设备照片与延时在两段会话中完成执行、等待与核实）；`bootstrap/test_media_assembly.py` 与 `bootstrap/test_timelapse_finish.py` 的录像、延时全流程矩阵。 |
+| 取消停止 | 同文件 `test_second_run_cancels_with_current_stop_configuration`（新配置停止预算下第一次错误经新间隔重试确认，取消终态与已拍产物同事务）；`bootstrap/test_timelapse_finish.py::TestTimelapseCancel` 可停止与不可停止分区；`cancellation/test_controller_cancel.py` 幂等重入边界。 |
+| 恢复核实 | 同文件 `test_interrupted_result_call_resumes_without_duplicate_side_effects`（在途调用中断后按原责任恢复，无重复名额或副作用）；`capture/test_result_scan_recovery.py` 十二项扫描恢复；根 `test_camctl_session_recovery.py` 真实 CLI 两段会话恢复。 |
+| 后续残留收场 | `bootstrap/test_residual_winddown.py` 九项受限收场；`bootstrap/test_emergency_session_exit.py` 六项应急停止（状态库失效或配置错误退出路径）。 |
+| 普通取回 | `outputs/test_delivery.py` 二十六项交付链；根 `test_camctl_output_roundtrip.py` 经 C 模块的真实取回交接。 |
+| 内部输入拷贝 | `outputs/test_internal_input_lifecycle.py` 八项生命周期；`capture/test_check_current_budget.py` 跨运行读取预算（上调只补剩余名额、原尝试保持）。 |
+| 设备及主机清理 | `bootstrap/test_cleanup_flow.py` 七项清理轮次；`bootstrap/test_cleanup_query_default_recovery.py` 每轮新连接续接原查询责任。 |
+| 结果核实 | RC3 与 RC4 交付的预算、期限、间隔与结果矩阵（`test_check_current_budget.py`、`test_recording_start_runtime.py`、`test_timelapse_finish.py`、`test_timelapse_wait_runtime.py`）。 |
+| 报告 | 同文件 `test_freezes_before_and_after_change_recover_identically`（三路径恢复、旧报告字节一致、当前报告表达逐项结果与原绑定、无内部字段）；`reporting/test_generation.py` 与 `test_encoding.py` 的冻结、生成与编码基线。 |
+
+原尚未裁决字段均已闭合：受管工具结果页格式已于 2026-10-11 裁决确认现状（格式已由接入计划 T5/T6 实施）；延时等待重配置中驱动声明的修复余量上限同日裁决为不设上限、维持"有限、非负"约束。两者均不改变本计划已确认要求的覆盖结论，裁决记录见[决策清单](2026-10-11-camctl-open-decisions.md)。
 
 ## 验收执行方式
 
@@ -410,4 +430,4 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 2026-10-10，读取预算与续传测试的前置、事件定位及实际消费者门禁已完成，验证范围见[读取计划记录](2026-10-09-camctl-read-runtime-configuration.md#读取预算与续传事务的验证记录2026-10-10)。上述五项失败不再属于当前未完成项。查询结果保存责任及跨成员组合仍分别待闭合，RC3／RC5 的完整门禁保持未完成。
 
-2026-10-11，查询原结果持有、可靠保存门槛、fresh 连接重送、成员和伴随结果续接、持久化原观察恢复及集合恢复顺序已进入阶段交付，实际范围与剩余任务见[清理查询阶段记录](2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)。相关清理组合 91 项通过。QUERY-only 取消与共同建档、成员和伴随仓储的完整原键证明、专项历史回放及 RC3／RC5 的其余门禁仍未完成。本阶段验证、提交后停止软件推进；接续任务为客户端分支合并及 Action6 真机演示恢复。
+2026-10-11，[清理查询结果保存与恢复计划](2026-10-10-camctl-cleanup-query-result-closure.md#阶段记录2026-10-11)的全部任务（Task 0—4）交付：QUERY-only 取消与首次共同建档、成员／伴随仓储原键复验五项修复、重送拒绝、取消时机矩阵、默认入口恢复、主机派生查询恢复及冻结边界三路径回放核验均已闭合。本计划剩余未完成项为 RC2 的 A 设备未来时间组合分区、RC3 的预算／期限／间隔专项、RC4 的等待重配置与结果矩阵、RC5 的两次会话组合验收。

@@ -609,6 +609,90 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
         "取照片": "succeeded", "取延时": "succeeded"}
 
 
+def test_repeated_obtain_of_same_output_yields_independent_deliveries(
+        tmp_path: Path) -> None:
+    """同一产物的重复取回：两个取回动作各自取得独立交付；源产物保
+    持可用、设备原文件保留，两份 ready 副本字节与来源一致且文件名
+    互不相同，源文件与副本生命周期分开。"""
+    deployment = Deployment(tmp_path)
+    initialized = deployment.camctl(
+        "init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+
+    content = ("repeat-clip-" * 700)[:8192]
+    spec = stub_driver_spec(
+        {"1": [video_file("repeat-clip", size_bytes=len(content))]},
+        device_files={"repeat-clip": content})
+    deployment.install_client_capabilities(spec)
+
+    shoot_at = future_schedule(1)
+    body = {
+        "request_id": "0",
+        "created_at": "2026-01-15 08:00:00",
+        "name": "repeated-obtain",
+        "actions": [
+            {
+                "name": "拍录",
+                "type": "camera_record",
+                "device_id": "cam-1",
+                "scheduled_at": shoot_at,
+                "params": {"type": "video"},
+                "policy": {"max_delay_ms": 5000},
+            },
+            {
+                "name": "第一次取回",
+                "type": "obtain_action_outputs",
+                "scheduled_at": shoot_at,
+                "params": {
+                    "source": {"action_name": "拍录"},
+                    "purpose": "manual",
+                },
+            },
+            {
+                "name": "第二次取回",
+                "type": "obtain_action_outputs",
+                "scheduled_at": shoot_at,
+                "params": {
+                    "source": {"action_name": "拍录"},
+                    "purpose": "manual",
+                },
+            },
+        ],
+    }
+    plan_path, _ = deployment.export_plan_with_client(body)
+    submitted = deployment.camctl(
+        "submit", str(plan_path), "--config", str(deployment.config_path),
+        driver=spec)
+    assert submitted.exit_code == 0, submitted.stderr
+    run = deployment.camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    assert run.exit_code == 0, run.stderr
+
+    state_db = deployment.state_db
+    assert _query(
+        state_db, "SELECT status FROM actions ORDER BY id") == [(3,), (3,), (3,)]
+    # 同一产物被两个取回动作各建一份交付；文件名互不相同。
+    assert _query(
+        state_db, "SELECT source_action_id, kind FROM outputs") == [(1, 1)]
+    deliveries = _query(
+        state_db, "SELECT action_id, file_name FROM deliveries ORDER BY id")
+    assert [row[0] for row in deliveries] == [2, 3]
+    assert deliveries[0][1] != deliveries[1][1]
+    delivered = _delivered_files(deployment.ready)
+    assert len(delivered) == 2, delivered
+    assert {path.read_bytes() for path in delivered} == {
+        content.encode("utf-8")}
+    # 源产物保持可用：交付副本与源产物生命周期分开。
+    assert _query(
+        state_db, "SELECT availability FROM outputs WHERE id = 1") == [(1,)]
+    report = _ready_report(deployment)
+    statuses = {
+        action["name"]: action["status"]
+        for plan in report["plans"] for action in plan["actions"]}
+    assert statuses == {
+        "拍录": "succeeded", "第一次取回": "succeeded", "第二次取回": "succeeded"}
+
+
 #: 跨计划引用用例的设备侧内容；截断前长度覆盖 4096 声明。
 _CROSS_FIRST_CONTENT = ("cross-plan-first-" * 250)[:4096]
 _CROSS_SECOND_CONTENT = ("cross-plan-second-" * 250)[:4096]

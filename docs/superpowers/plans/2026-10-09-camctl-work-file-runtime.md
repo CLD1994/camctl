@@ -254,3 +254,16 @@
 仓储修改限定在 `_AdvanceWithdrawalCommand`：事实数量有限且由实际明细集合推导，单个 `DELIVERY_CHANGED.WITHDRAW` 事件的原完整集合包含原交付以及每个适用等待明细；事件拥有者分别保持原 delivery 和原取消 action。`cancel_delivery_items` 没有独立创建事件列；原边界的成员存在性沿本行在原取消 action 目录中的唯一不可变 CREATE 事实核实，并核对原关联与完整事务边界。创建晚于原边界的明细不属于原组；父 action 创建较早不能代替该明细的创建依据，缺失或损坏的历史也不能解释为尚不存在。原键核实恢复原完整边界后逐项比较交付、分支、错误、时刻、行前后值及完整等待集合。相同输入只读重入；改变任何输入、把 `REQUESTED` 原键当实际结果键、缺明细事实或错拥有者均拒绝，不能只比较事件类型与时刻。原键保存以后新增的其他请求不改变原组，后续请求使用可靠既有撤回结论结束自身明细，不重复删除。取消生效时，原交付仍为已发布且独立撤回为 PENDING、FAILED 或 UNKNOWN 的后到请求仍须登记本请求明细；不能只选择 NOT_REQUESTED 而遗漏必要共享责任。
 
 顺序门禁：真实默认消费者的 ready／processing／实际删除失败 3 项已有 2 项有效失败、1 项保护通过，日志 `/tmp/camctl-goal-cancel-ready-red.log`，根 Agent 已授权实际消费者修复。随后补取消等待与文件资格、实际结果保存失败后的原键重入、所有实际返回分类及并发等待明细；仓储原键改变／完整成员组／投影及提交前后未知分别先交根 Agent 确认有效红，再实施对应块。历史恢复另在 `integration/bootstrap/test_work_file_history.py` 验证文件和继续位置的初始、快照正向与当前逆向相等，不将 ready 删除副作用放入历史回放。
+
+### 收尾复验与最终组合门禁（2026-10-11）
+
+2026-10-11，Linux 容器（WSL2 x86_64）、Python 3.11.16，协调 Agent 前台独占执行，闭合前文列出的收尾项、诊断组合缺口与最终组合门禁：
+
+- 会话本地责任完整复验：`test_media_local_settlement.py`（含时钟转换与重复取消诊断两项修复）与 `test_media_cancel_save_order.py` 合并运行 10 passed。
+- 媒体原结果与原操作键跨运行时保留独立闭合：`test_media_saved_result_consumers.py` 新增 `test_original_media_result_and_key_retained_across_runtimes`——第一个真实运行时（build_runtime 与真实执行装配）取得原结果并可靠保存后整体关闭，共享待保存集合随之丢弃；第二个全新 build_runtime 与执行只依赖持久化事实重新进入同一媒体链，零新观察、修复与读取，处理行业务列、动作实体事件数与正式产物数量保持不变。工具计数断言的反例探针失败后恢复，判别有效；整文件 13 passed。
+- 取消阶段组合复验：取消首次清理与前置仓储四个文件与媒体会话收场两个文件合并运行 60 passed。
+- 诊断组合缺口闭合（先取得有效红）：`WorkFileRuntime.settle` 此前对多份未核实媒体申请、或维护收场失败与媒体原保存失败并存时只呈现先遇到的错误。修复把维护收场失败与每份未核实媒体申请的原保存错误全部并入同一次收场错误，首份媒体原错误保留为异常因果。`test_media_local_settlement.py` 新增两项：第二个真实录像周期（观察者动作经真实窗口观察、启动、可靠停止、活动收场、源文件事实与检查决定补全）与第一个录像的检查观察保存同时失败后，收场错误同时呈现两份处理的原保存原因且两份申请均保留、不盲重试、不再执行工具；注入维护收场失败（真实 `SupervisionResult` 追加 `TaskFailure`）时维护与媒体两类原因同现。修复前两项分别因缺第二份原因、缺媒体原因失败。
+- WF 最终组合门禁：root 前台独占按目录顺序执行 bootstrap 987 passed＋1 skipped、outputs 1937 passed＋2 skipped、host_files 87 passed、history 212 passed、session 100 passed，全部通过。实际 CLI 场景复验：媒体修复链 `test_camctl_media_roundtrip.py` 3 项、会话恢复 `test_camctl_session_recovery.py` 6 项、录像与取消 roundtrip 3 项、会话恢复＋跨计划取回＋视频估算合计 24 项全部通过。首轮媒体场景暴露一个跨组件接缝缺陷并已修复：对账活动核实消费者（capture-call-results 第三阶段交付）会对声明查询能力的驱动发出 `activity_status` 查询，根替身驱动 `_ScriptedStubDriver.query_state` 只实现清理文件在场查询，遇活动查询即以 KeyError 崩溃；替身补齐 `query_returned` 与 `activity_status` 观察契约，并按请求形态分支应答设备当前执行中的活动（身份与停止目标同样从部署状态库对齐）后复验通过。
+- settle 修复后回归：session 100 passed 与 bootstrap 989 passed＋1 skipped 顺序通过。
+
+至此本计划的软件任务全部闭合。ARM64 真机、物理断电与真实相机演示属部署联调，按[部署交接与待核验项](../../camctl/verification.md#部署交接与待核验项)单独验收。

@@ -44,6 +44,7 @@ _LOCAL_EVIDENCE = EvidenceRegistry((
     EvidenceContract(type="delete_returned", version=1, operation="delete", fields=frozenset()),
     EvidenceContract(type="file_absent", version=1, operation="delete",
                      fields=frozenset({"cleanup_item_id"}), identity_field="cleanup_item_id"),
+    EvidenceContract(type="dispatch_prevented", version=1, operation="delete", fields=frozenset()),
     EvidenceContract(type="file_presence", version=1, operation="query",
                      fields=frozenset({"cleanup_item_id", "present"}), identity_field="cleanup_item_id"),
 ))
