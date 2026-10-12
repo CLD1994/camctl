@@ -362,7 +362,7 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 | 结果核实 | RC3 与 RC4 交付的预算、期限、间隔与结果矩阵（`test_check_current_budget.py`、`test_recording_start_runtime.py`、`test_timelapse_finish.py`、`test_timelapse_wait_runtime.py`）。 |
 | 报告 | 同文件 `test_freezes_before_and_after_change_recover_identically`（三路径恢复、旧报告字节一致、当前报告表达逐项结果与原绑定、无内部字段）；`reporting/test_generation.py` 与 `test_encoding.py` 的冻结、生成与编码基线。 |
 
-尚未裁决字段：延时等待重配置中驱动声明的修复余量上限仍以独立待定事项跟踪（见[决策清单](2026-10-11-camctl-open-decisions.md)）；受管工具结果页格式已于 2026-10-11 裁决确认现状闭合（格式已由接入计划 T5/T6 实施）。两者均不改变本计划已确认要求的覆盖结论。
+原尚未裁决字段均已闭合：受管工具结果页格式已于 2026-10-11 裁决确认现状（格式已由接入计划 T5/T6 实施）；延时等待重配置中驱动声明的修复余量上限同日裁决为不设上限、维持"有限、非负"约束。两者均不改变本计划已确认要求的覆盖结论，裁决记录见[决策清单](2026-10-11-camctl-open-decisions.md)。
 
 ## 验收执行方式
 
