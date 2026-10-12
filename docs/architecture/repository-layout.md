@@ -2,18 +2,19 @@
 
 ## 组件与共享资源
 
-| 路径 | 责任 |
-| --- | --- |
-| `apps/client` | 本地网页、Node.js 服务、客户端存储、依赖与组件测试 |
-| `apps/camctl` | ARM Linux 上的 Python CLI，实现设备调度、持久化和产物管理 |
-| `apps/host-demo` | C 接入模块与终端演示，供第三方主程序接入进程管理、文件领取及各消息类型的回调 |
-| `protocol` | 机器可读 Schema 与标准协议样例的唯一来源 |
-| `docs/architecture` | 全局业务、协议语义与组件协作设计 |
-| `docs/client`、`docs/camctl`、`docs/host-demo` | 各组件的设计入口、运行与验证说明 |
-| `tests/integration` | 跨组件真实协作者组合测试 |
-| `demos` | 完整业务演示的说明、生成脚本和可提交输入 |
-| `scripts` | 跨组件检查与开发脚本 |
-| `.local`、`tmp` | 不入库的本地运行、验收与临时资料 |
+路径|责任
+-|-
+`apps/client`|本地网页、Node.js 服务、客户端存储、依赖与组件测试
+`apps/camctl`|ARM Linux 上的 Python CLI，实现设备调度、持久化和产物管理
+`apps/host-demo`|C 接入模块与终端演示，供第三方主程序接入进程管理、文件领取及各消息类型的回调
+`protocol`|机器可读 Schema 与标准协议样例的唯一来源
+`docs/architecture`|全局业务、协议语义与组件协作设计
+`docs/client`、`docs/camctl`、`docs/host-demo`|各组件的设计入口、运行与验证说明
+`tests/integration`|跨组件真实协作者组合测试
+`demos`|完整业务演示的说明、生成脚本和可提交输入
+`scripts`|跨组件检查与开发脚本
+`.agents/rules`|按任务读取的共享工作规范；读取条件由根目录 `AGENTS.md` 定义
+`.local`、`tmp`|不入库的本地运行、验收与临时资料
 
 组件内部测试分别放在自身 `tests/unit` 与 `tests/integration`。仅涉及客户端前后端的测试仍属于客户端。只有跨独立组件的协作验证放在根测试目录。
 
@@ -23,14 +24,18 @@
 
 阅读入口提供范围与导航，具体规则由对应责任专题完整定义。文档按用途分工如下：
 
-| 资料 | 维护内容 |
-| --- | --- |
-| `docs/architecture`、组件设计专题与 `protocol` | 当前有效的业务规则、内部契约及机器表示；验收要求随责任专题维护。 |
-| `docs/superpowers/plans` | 实施任务、依赖、未完成项与验证证据。camctl 从[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)进入模块及专项修复计划。 |
-| 验证记录及 `docs/superpowers/notes` | 在注明日期、环境和范围下取得的实际结果。记录中的版本及通过数量用于解释该次验证。 |
-| 根目录和组件 `README.md` | 项目与组件入口、使用方法及详细资料链接。 |
+资料|维护内容
+-|-
+`docs/architecture`、组件设计专题与 `protocol`|当前有效的业务规则、内部契约及机器表示；验收要求随责任专题维护。
+根目录及作用域内的 `AGENTS.md`|全局与局部工作约束、任务读取条件，以及组件资料入口。
+`.agents/rules`|写作、测试、设计与计划、实施、评审等共享工作规范的完整定义；业务契约引用责任专题。
+`docs/superpowers/plans`|实施任务、依赖、未完成项与验证证据。camctl 从[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)进入模块及专项修复计划。
+验证记录及 `docs/superpowers/notes`|在注明日期、环境和范围下取得的实际结果。记录中的版本及通过数量用于解释该次验证。
+根目录和组件 `README.md`|项目与组件入口、使用方法及详细资料链接。
 
 计划引用正式规格并区分行为要求和实现建议。模块任务的完成包含其组合验收；某项修复通过只证明该修复所列的范围。依赖版本以组件依赖声明和锁文件为准，实验中的版本表只记录实验环境。
+
+[根工作规则](../../AGENTS.md)按任务指向 `.agents/rules` 中的专题；任务同时符合多个读取条件时，读取全部适用规则。[CLAUDE.md](../../CLAUDE.md)作为共享入口的适配文件，规则正文只维护一份。
 
 ## 运行数据与路径
 

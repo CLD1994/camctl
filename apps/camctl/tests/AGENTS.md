@@ -2,6 +2,8 @@
 
 本目录包含 camctl 的单元测试（`unit/`）和组件集成测试（`integration/`，按业务模块分目录）。仓库根的 `tests/integration/` 是另一层：跨组件集成测试（真实 CLI 进程、客户端与 C 主程序的组合），与本目录分开维护。本文件只覆盖本目录；跑跨组件测试请到仓库根并阅读 `tests/integration/README.md`。
 
+测试设计与分类遵守[共享测试规则](../../../.agents/rules/testing.md)；本文件补充 camctl 组件的运行命令和局部限制。
+
 ## 怎么跑
 
 所有命令都从仓库根目录执行，用 uv 管理的 Python 3.11（部署规格版本）：
@@ -28,14 +30,14 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 ## 时长预期
 
-| 目录 | 大约耗时 | 说明 |
-|---|---|---|
-| unit | 10 秒 | 全部在进程内，无真实 IO |
-| outputs | 2 分钟 | 文件 IO 量最大 |
-| host_files | 1 分钟 | 真实文件操作 |
-| bootstrap | 1.5—2 分钟 | 含真实进程会话 |
-| acceptance | 40 秒 | |
-| 其余目录 | 数秒到半分钟 | |
+目录|大约耗时|说明
+-|-|-
+unit|10 秒|全部在进程内，无真实 IO
+outputs|2 分钟|文件 IO 量最大
+host_files|1 分钟|真实文件操作
+bootstrap|1.5—2 分钟|含真实进程会话
+acceptance|40 秒
+其余目录|数秒到半分钟
 
 全量集成（所有目录合计）约 4—5 分钟。如果某个目录远超上表耗时且无输出，先按"管道缓冲"排查，再怀疑拖挂。
 
@@ -58,7 +60,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 - **集成测试的守卫要显式注册。** 事件守卫（`register_*_guards()`）不经 import 链自动触发。新文件按所在目录的惯例补齐：outputs 侧常见 `register_operation_guards()` + `register_capture_guards()`；capture 侧常见 `register_outputs_guards()`。漏注册时写入类用例会以"未接入具名校验"失败。参考同目录既有测试文件的开头。
 - **单元测试不启动真实线程或子进程**，不访问真实文件系统；线程、事件循环与进程组合放集成测试。
 - **测试目录带 `__init__.py`**，同目录模块（如 fixtures）靠 pytest 的 prepend 导入。
-- **替身受真实接口约束**（stub/fake/mock 按真实协作方的契约编写），这与根 AGENTS.md 的测试规范一致。
+- **替身受真实接口约束**（stub/fake/mock 按真实协作方的契约编写），具体要求见[共享测试规则](../../../.agents/rules/testing.md)。
 - 个别已知限制：`persistence/test_transactions.py` 的 window 守卫断言依赖单目录运行，与其他目录组合 import 时会被污染——这也是"分目录跑"的原因之一。
 
 ## 环境备忘

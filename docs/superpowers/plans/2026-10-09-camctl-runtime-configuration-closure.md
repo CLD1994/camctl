@@ -27,40 +27,40 @@
 
 2026-10-09 静态核对发现以下入口需要组合验证。以下内容定位实施起点，不表示已执行失败测试。
 
-| 责任 | 生产起点 | 已有测试及当前证明范围 |
-| --- | --- | --- |
-| 日常目录绑定 | `persistence/runtime.py::verify_directory_binding`、`bootstrap/application.py`、`bootstrap/lifecycle.py`、`session/service.py`、`reporting/worker.py` | 原绑定检查当前只在 `persistence/initialization.py` 导入和调用，日常会话及报告工作入口尚缺与本次三路径的实际比较。捕获 `ConfigurationFailure` 不能证明有人执行了检查。 |
-| 配置加载 | `bootstrap/config.py` 的 `load_config`、`_validate_devices`、`_validated_recording`、`_validated_seconds_subtable`、`_validated_attempts_subtable` | `unit/bootstrap/test_configuration.py` 覆盖已接入字段；设备子表部分字段按原样冻结，尚不能证明所有正式字段的范围校验和实际消费。 |
-| 原绑定核对 | `devices/bindings.py::check_binding` | `integration/devices/test_evidence.py::test_binding_errors_cover_capture_retrieval_cleanup_and_shutdown` 直接调用核对函数及停止替身。对全部生产源码的语法树检查未找到该函数的导入或调用，测试没有证明实际执行入口拒绝异常绑定。 |
-| 拍摄及独立收场 | `bootstrap/flows.py::capture_flow`、`bootstrap/capture_assembly.py::session_capture_assembly`、`capture/handlers.py::CaptureRuntime.grant`、`_control_call`、`_stop_call`、`capture/residual.py::pass_residual_gate`、`residual_flow` | `integration/bootstrap/test_recording_stop.py`、`test_residual_winddown.py` 覆盖默认配置的正常、失败、取消和残留路径。装配缺失设备时返回 `None`；启动采用固定 1 次／30 秒，停止采用固定 3 次／10 秒。 |
-| 跨设备取回 | `bootstrap/obtain_assembly.py::session_obtain_assembly`、`outputs/obtain_flow.py::_device_source_candidate`、`advance_obtain` | `integration/bootstrap/test_obtain_flow.py` 与 `integration/outputs/test_read_recovery.py` 覆盖既有取回和原身份恢复。运行时按当前声明选择读取驱动，尚缺配置变化前后及异常绑定的逐项组合。 |
-| 跨设备清理 | `bootstrap/cleanup_assembly.py::session_cleanup_assembly`、`_member_binding`、`outputs/cleanup_flow.py::delete_source_file`、`advance_cleanup` | `integration/bootstrap/test_cleanup_flow.py` 覆盖设备和主机成品清理。工厂当前只返回第一台可装配设备的运行时；成员绑定取当前驱动且未读取原 `driver_id`，无绑定时保留等待。 |
-| 延时等待 | `bootstrap/capture_assembly.py::execution_wait_config`、`capture/handlers.py::_timelapse_handler`、`persistence/repositories/timelapse.py::TimelapseRepository.reconfigure_wait` | `integration/capture/test_timelapse.py::test_restart_reconfigure_uses_current_extra_wait` 直接调用仓储。生产语法树没有 `reconfigure_wait` 调用，等待装配只读执行定义且未取本次 `capture.extra_wait_ms`。 |
-| 结果核实 | `bootstrap/capture_assembly.py::DriverResultListing.list_files`、`capture/handlers.py::_listing_round`、`_confirm_timelapse_results` | `integration/bootstrap/test_timelapse_finish.py` 已覆盖成功、缺必需类型、未写完后成功、轮次耗尽、列举错误与两类取消；`integration/capture/test_result_confirmation.py` 覆盖保存分类。装配仍固定 3 轮／10 秒，尚缺合法覆盖和跨运行组合。 |
+责任|生产起点|已有测试及当前证明范围
+-|-|-
+日常目录绑定|`persistence/runtime.py::verify_directory_binding`、`bootstrap/application.py`、`bootstrap/lifecycle.py`、`session/service.py`、`reporting/worker.py`|原绑定检查当前只在 `persistence/initialization.py` 导入和调用，日常会话及报告工作入口尚缺与本次三路径的实际比较。捕获 `ConfigurationFailure` 不能证明有人执行了检查。
+配置加载|`bootstrap/config.py` 的 `load_config`、`_validate_devices`、`_validated_recording`、`_validated_seconds_subtable`、`_validated_attempts_subtable`|`unit/bootstrap/test_configuration.py` 覆盖已接入字段；设备子表部分字段按原样冻结，尚不能证明所有正式字段的范围校验和实际消费。
+原绑定核对|`devices/bindings.py::check_binding`|`integration/devices/test_evidence.py::test_binding_errors_cover_capture_retrieval_cleanup_and_shutdown` 直接调用核对函数及停止替身。对全部生产源码的语法树检查未找到该函数的导入或调用，测试没有证明实际执行入口拒绝异常绑定。
+拍摄及独立收场|`bootstrap/flows.py::capture_flow`、`bootstrap/capture_assembly.py::session_capture_assembly`、`capture/handlers.py::CaptureRuntime.grant`、`_control_call`、`_stop_call`、`capture/residual.py::pass_residual_gate`、`residual_flow`|`integration/bootstrap/test_recording_stop.py`、`test_residual_winddown.py` 覆盖默认配置的正常、失败、取消和残留路径。装配缺失设备时返回 `None`；启动采用固定 1 次／30 秒，停止采用固定 3 次／10 秒。
+跨设备取回|`bootstrap/obtain_assembly.py::session_obtain_assembly`、`outputs/obtain_flow.py::_device_source_candidate`、`advance_obtain`|`integration/bootstrap/test_obtain_flow.py` 与 `integration/outputs/test_read_recovery.py` 覆盖既有取回和原身份恢复。运行时按当前声明选择读取驱动，尚缺配置变化前后及异常绑定的逐项组合。
+跨设备清理|`bootstrap/cleanup_assembly.py::session_cleanup_assembly`、`_member_binding`、`outputs/cleanup_flow.py::delete_source_file`、`advance_cleanup`|`integration/bootstrap/test_cleanup_flow.py` 覆盖设备和主机成品清理。工厂当前只返回第一台可装配设备的运行时；成员绑定取当前驱动且未读取原 `driver_id`，无绑定时保留等待。
+延时等待|`bootstrap/capture_assembly.py::execution_wait_config`、`capture/handlers.py::_timelapse_handler`、`persistence/repositories/timelapse.py::TimelapseRepository.reconfigure_wait`|`integration/capture/test_timelapse.py::test_restart_reconfigure_uses_current_extra_wait` 直接调用仓储。生产语法树没有 `reconfigure_wait` 调用，等待装配只读执行定义且未取本次 `capture.extra_wait_ms`。
+结果核实|`bootstrap/capture_assembly.py::DriverResultListing.list_files`、`capture/handlers.py::_listing_round`、`_confirm_timelapse_results`|`integration/bootstrap/test_timelapse_finish.py` 已覆盖成功、缺必需类型、未写完后成功、轮次耗尽、列举错误与两类取消；`integration/capture/test_result_confirmation.py` 覆盖保存分类。装配仍固定 3 轮／10 秒，尚缺合法覆盖和跨运行组合。
 
 ## 状态与输入矩阵
 
 表中按“已有终态、取消、未来时间、窗口、绑定、原调用、预算”的顺序判断。适用行确定后再判断后续条件，不能把所有状态折叠为当前声明缺失。
 
-| 当前状态或输入分区 | 必须发生的行为 | 不变量与可观察结果 |
-| --- | --- | --- |
-| `run`、`submit` 或报告子进程的本次规范三路径与状态库任一保存值不同 | 在使用业务状态或文件前拒绝，报告 `configuration_error`，指出每个变更字段、原路径和新路径 | 不受理计划、不启动设备或报告工作、不修改绑定；`describe` 不新增状态库依赖。 |
-| 日常三路径全部匹配 | 按所属入口继续，其他错误按各自规则处理 | 不扫描全部旧目录，不把绑定检查变成显式切换；库缺失或无效仍按状态库错误。 |
-| 动作、处理项或责任已经终态 | 保留原终态、结果及决定；只继续该终态仍要求的独立收场 | 提高上限、修正配置和同请求重送均不重开普通工作；旧报告字节保持。 |
-| 已取消且尚有必要停止、读取结束、删除核实或交付撤回责任 | 先保存取消事实，沿原责任收场；停止或查询需要异常绑定时保存该收场失败 | 取消终态不被改写为普通执行失败；原次数、未知效果、限制及保护保留。 |
-| 动作计划时间尚未来到 | 继续等待原时间，不因发现异常绑定而提前执行或失败 | 无新增设备调用、尝试和执行标记。 |
-| 拍摄窗口已满足过期条件 | 按既有错过／耗尽分类保存过期 | 不用绑定错误覆盖过期原因；在途尝试仍独立收场。 |
-| 当前设备缺失或驱动不匹配，且工作已具备执行资格 | 相关拍摄保存执行失败；取回／清理按受影响项失败；其他设备及主机工作继续 | 错误采用 `device_binding_unavailable` 并含原设备、预期驱动、已知实际驱动及原因；不新增尝试，不把失败解释为未执行或已停止。 |
-| 设备声明无法可靠使用，或声明指定的驱动未登记 | 停止依赖该配置的会话工作，报告 `configuration_error` | 使用内部 `DeviceConfigurationError` 保留设备及驱动诊断；不伪造合法 `missing`／`mismatch` 的逐项业务结果。 |
-| 绑定匹配，但原调用在途或结果未知 | 先观察并完成原调用、核实及适用收场 | 增加额度不授权重复未知副作用；已有实际成功与诊断分别保存。 |
-| 新触发动作按本次驱动 B 受理并且自身绑定匹配，同一设备仍有由驱动 A 保存的未解决活动 | 对原活动按 A 的绑定核对；A 绑定异常时，原停止／查询流程失败并保持活动事实，不能把原定位信息交给 B | 新触发动作按既有 `device_activity_unresolved` 执行失败，详情指向原 `activity_id` 与 `device_id`；设备调用为零，不能把自身匹配的动作记为驱动不匹配。 |
-| 需要新增尝试、原累计为 `used`、本次上限为 `limit`，且 `used < limit` | 继续核对窗口、间隔、取消及设备条件，全部成立才提交新尝试 | 剩余名额为 `limit - used`；原责任、身份和次数不重置。 |
-| 需要新增尝试且 `used >= limit` | 保存所属责任的额度耗尽结论；不再新增尝试 | `used > limit` 是合法历史，不裁剪旧记录或重建流程。 |
-| 恢复已登记的未结束尝试或重拷轮次 | 恢复原身份与可靠进度，不重复计数；后续新操作采用本次配置 | 原次数、文件、交付及关联保持；可靠未派发也不退还已消耗次数。 |
-| 修复或其他业务决定已经提交 | 按原决定继续；决定后的读取、等待及重试采用本次配置 | 新门槛不能重算或推翻旧决定；提交未知先核实原事务。 |
-| 未完成延时等待，本次额外等待改变 | 保留原 `sent_at`、首次目标时长与驱动必要余量，重新保存 `extra_wait_ms_used`、`expected_check_at` | 从原锚点推导；配置更新或数据库耗时不生成新发送时间。 |
-| 已保存等待完成或结果集合结论 | 沿原完成事实及结论收尾，不重新等待或重开核实轮次 | 新等待值和上限不能改变原结论；没有设备状态观察时不补造 `ENDED`。 |
-| 配置文件本身非法，或状态库／锁／时钟等会话前提失效 | 按所属会话错误处理 | 局部绑定失败策略不能掩盖会话错误，缺失状态库不能重建为空库。 |
+当前状态或输入分区|必须发生的行为|不变量与可观察结果
+-|-|-
+`run`、`submit` 或报告子进程的本次规范三路径与状态库任一保存值不同|在使用业务状态或文件前拒绝，报告 `configuration_error`，指出每个变更字段、原路径和新路径|不受理计划、不启动设备或报告工作、不修改绑定；`describe` 不新增状态库依赖。
+日常三路径全部匹配|按所属入口继续，其他错误按各自规则处理|不扫描全部旧目录，不把绑定检查变成显式切换；库缺失或无效仍按状态库错误。
+动作、处理项或责任已经终态|保留原终态、结果及决定；只继续该终态仍要求的独立收场|提高上限、修正配置和同请求重送均不重开普通工作；旧报告字节保持。
+已取消且尚有必要停止、读取结束、删除核实或交付撤回责任|先保存取消事实，沿原责任收场；停止或查询需要异常绑定时保存该收场失败|取消终态不被改写为普通执行失败；原次数、未知效果、限制及保护保留。
+动作计划时间尚未来到|继续等待原时间，不因发现异常绑定而提前执行或失败|无新增设备调用、尝试和执行标记。
+拍摄窗口已满足过期条件|按既有错过／耗尽分类保存过期|不用绑定错误覆盖过期原因；在途尝试仍独立收场。
+当前设备缺失或驱动不匹配，且工作已具备执行资格|相关拍摄保存执行失败；取回／清理按受影响项失败；其他设备及主机工作继续|错误采用 `device_binding_unavailable` 并含原设备、预期驱动、已知实际驱动及原因；不新增尝试，不把失败解释为未执行或已停止。
+设备声明无法可靠使用，或声明指定的驱动未登记|停止依赖该配置的会话工作，报告 `configuration_error`|使用内部 `DeviceConfigurationError` 保留设备及驱动诊断；不伪造合法 `missing`／`mismatch` 的逐项业务结果。
+绑定匹配，但原调用在途或结果未知|先观察并完成原调用、核实及适用收场|增加额度不授权重复未知副作用；已有实际成功与诊断分别保存。
+新触发动作按本次驱动 B 受理并且自身绑定匹配，同一设备仍有由驱动 A 保存的未解决活动|对原活动按 A 的绑定核对；A 绑定异常时，原停止／查询流程失败并保持活动事实，不能把原定位信息交给 B|新触发动作按既有 `device_activity_unresolved` 执行失败，详情指向原 `activity_id` 与 `device_id`；设备调用为零，不能把自身匹配的动作记为驱动不匹配。
+需要新增尝试、原累计为 `used`、本次上限为 `limit`，且 `used < limit`|继续核对窗口、间隔、取消及设备条件，全部成立才提交新尝试|剩余名额为 `limit - used`；原责任、身份和次数不重置。
+需要新增尝试且 `used >= limit`|保存所属责任的额度耗尽结论；不再新增尝试|`used > limit` 是合法历史，不裁剪旧记录或重建流程。
+恢复已登记的未结束尝试或重拷轮次|恢复原身份与可靠进度，不重复计数；后续新操作采用本次配置|原次数、文件、交付及关联保持；可靠未派发也不退还已消耗次数。
+修复或其他业务决定已经提交|按原决定继续；决定后的读取、等待及重试采用本次配置|新门槛不能重算或推翻旧决定；提交未知先核实原事务。
+未完成延时等待，本次额外等待改变|保留原 `sent_at`、首次目标时长与驱动必要余量，重新保存 `extra_wait_ms_used`、`expected_check_at`|从原锚点推导；配置更新或数据库耗时不生成新发送时间。
+已保存等待完成或结果集合结论|沿原完成事实及结论收尾，不重新等待或重开核实轮次|新等待值和上限不能改变原结论；没有设备状态观察时不补造 `ENDED`。
+配置文件本身非法，或状态库／锁／时钟等会话前提失效|按所属会话错误处理|局部绑定失败策略不能掩盖会话错误，缺失状态库不能重建为空库。
 
 已明确字段的合法性分别验证：正整数次数拒绝布尔值、非整数、零和负数；重拷次数与 `capture.extra_wait_ms` 接受整数零；秒数采用精确数值，调用时限必须有限且正，间隔允许有限非负。缺省与空表采用所属规格默认值；未知字段按配置契约拒绝，驱动专属配置按其权威定义校验。
 
@@ -78,15 +78,15 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 报告 `JobMessage` 的生产者为 `bootstrap/flows.py::report_flow`，消息编解码及子进程 `worker.py::run_job` 是消费者。消息必需携带 `staging_root`、`ready_root`、`processing_root`，值来自本次规范配置；数据库身份可取已核实连接的元信息，但不能用元信息的旧路径替代本次配置。子进程先可靠打开库、核对实例与这三路径，再生成任何文件。内部消息测试和所有构造者同步调整，公共报告格式不变。
 
-| 失败发生位置或分类 | 最终行为 |
-| --- | --- |
-| `run`／`submit` 装配及业务连接发现路径不匹配 | 最终机器结果为 `configuration_error`，未开始受理或报告／设备处理，诊断逐项包含变更字段及原／新路径。 |
-| 子进程发现路径不匹配 | 返回 `ErrorKind.REPORT` 与精确 `error_code="configuration_error"`；主进程转换为配置前提错误，不保存普通报告失败或继续设备流程。 |
-| 正常报告流程或受限会话的一次报告收到配置前提错误 | 正常会话停止后续流程；受限会话保留配置主错误，不被普通报告捕获或 `clock_invalid` 覆盖。 |
-| 任务因期限、发送、等待或协议错误开始收场，随后送达同一任务及实例的配置错误 | 监督方保存该错误；生成结果仍携带配置错误，不能因迟到丢成普通报告故障。不同身份的结果保持协议错误。 |
-| 显式停止收到未决任务的配置错误 | `WorkerShutdown.configuration_failure` 保留事实。最终会话的成功或普通报告错误升级为配置错误；已有其他致命错误保持主错误并追加诊断。 |
-| 同次收场也收到状态库错误 | 原有 STATE 优先链保持：状态库错误主导生成分类，最终会话沿原状态库主／次错误规则处理。 |
-| 状态库缺失、无效或元信息不可读 | 最终机器结果为 `state_db_error`，不建库、不建立新绑定。普通文件生成及交接错误仍按报告错误。 |
+失败发生位置或分类|最终行为
+-|-
+`run`／`submit` 装配及业务连接发现路径不匹配|最终机器结果为 `configuration_error`，未开始受理或报告／设备处理，诊断逐项包含变更字段及原／新路径。
+子进程发现路径不匹配|返回 `ErrorKind.REPORT` 与精确 `error_code="configuration_error"`；主进程转换为配置前提错误，不保存普通报告失败或继续设备流程。
+正常报告流程或受限会话的一次报告收到配置前提错误|正常会话停止后续流程；受限会话保留配置主错误，不被普通报告捕获或 `clock_invalid` 覆盖。
+任务因期限、发送、等待或协议错误开始收场，随后送达同一任务及实例的配置错误|监督方保存该错误；生成结果仍携带配置错误，不能因迟到丢成普通报告故障。不同身份的结果保持协议错误。
+显式停止收到未决任务的配置错误|`WorkerShutdown.configuration_failure` 保留事实。最终会话的成功或普通报告错误升级为配置错误；已有其他致命错误保持主错误并追加诊断。
+同次收场也收到状态库错误|原有 STATE 优先链保持：状态库错误主导生成分类，最终会话沿原状态库主／次错误规则处理。
+状态库缺失、无效或元信息不可读|最终机器结果为 `state_db_error`，不建库、不建立新绑定。普通文件生成及交接错误仍按报告错误。
 
 2026-10-09，Python 3.11.16：CLI 窄门禁得到 `10 failed, 4 passed`，失败为八种目录变更缺少配置错误及两个缺库入口没有机器结果；消息与监督方窄门禁六项均失败，分别暴露本次三路径丢失和迟到配置错误丢失。实际 worker 三项目录变更均错误地生成了文件，缺库保护通过。上述结果只授权相应 RC0 分区的实施，后续真实 worker 与会话消费证据仍需单独核验。
 
@@ -127,28 +127,28 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 会话在取得会话锁及首个可靠状态视图后固定历史边界 H，并在受理及本会话的新事务开始前保存该值。所有拍摄运行时共享这一个 H；工厂不重新查询当前 C 作为恢复起点。`recovery_boundary` 明确区分未确认、host 可靠收场及主机重新上电。`recovery_evidence_for(saved_binding, operation)` 从原 `actions.driver_id` 的登记项取得适用声明与证据；当前配置缺失或改绑 B 时仍不能改用 B 的声明。
 
-| 未结束尝试与恢复依据 | 原尝试及后续工作 |
-| --- | --- |
-| 意图事件在 H 之后，属于本会话新发起调用 | 保留原调用管理责任；绑定失败不能提前写尝试、流程或动作终态。 |
-| 意图事件不晚于 H，但旧本地执行收场边界未确认，或原操作未声明适用普通前台假设 | 保留未完成责任和诊断，零新设备调用；不把未知结果转为可靠未派发。 |
-| 意图事件不晚于 H，旧本地执行已可靠收场，原操作适用普通前台假设，且不是具备续传资格的读取 | 沿原 ticket、次数和责任保存 UNKNOWN、实际已知效果、原结果未可靠保存的错误，以及 `adb_foreground_recovery`/v1、ASSUMED、空 data；没有原退出信息或可靠观察时不生成 `call_info` 或观察。随后执行绑定失败事务。 |
-| 原尝试已有可靠结束结果 | 保留原结果及冻结历史，不生成恢复结果覆盖它。 |
-| 原读取符合续传资格 | 沿原身份继续读取；不能仅因旧本地连接已结束而提前终态化。 |
+未结束尝试与恢复依据|原尝试及后续工作
+-|-
+意图事件在 H 之后，属于本会话新发起调用|保留原调用管理责任；绑定失败不能提前写尝试、流程或动作终态。
+意图事件不晚于 H，但旧本地执行收场边界未确认，或原操作未声明适用普通前台假设|保留未完成责任和诊断，零新设备调用；不把未知结果转为可靠未派发。
+意图事件不晚于 H，旧本地执行已可靠收场，原操作适用普通前台假设，且不是具备续传资格的读取|沿原 ticket、次数和责任保存 UNKNOWN、实际已知效果、原结果未可靠保存的错误，以及 `adb_foreground_recovery`/v1、ASSUMED、空 data；没有原退出信息或可靠观察时不生成 `call_info` 或观察。随后执行绑定失败事务。
+原尝试已有可靠结束结果|保留原结果及冻结历史，不生成恢复结果覆盖它。
+原读取符合续传资格|沿原身份继续读取；不能仅因旧本地连接已结束而提前终态化。
 
 本会话已经取得的完整 START 返回结果优先于上述假设恢复。`PendingStartResult` 按原 `(run_id, attempt_no)` 保留正式结果、派生观察、事务键及实际返回锚点；同一会话的拍摄工厂为正常及绑定失败运行时提供同一缓存。保存失败时先核实原事务并保存该实际结果，不能生成 UNKNOWN 覆盖它，也不能因为下一轮重新构造 Runtime 而丢失。多个设备共享工厂时仍按原尝试身份区分，不能按设备清空其他尝试。
 
 独立残留消费者按有界批次查找尚为 RUNNING 的旧 START、普通 STOP、活动 QUERY、结果核实及残留 STOP 尝试，不依赖动作或流程仍未终态。每个原 ticket 继续经过固定 H、可靠旧本地执行边界与原驱动声明；本会话的新意图保持原实际拥有者。扫描只保存原调用的正式恢复事实，不生成新的启动或停止，也不改写原动作、流程终态及设备活动。恢复之后，仍适用的必要责任沿其原消费者推进。
 
-| 原动作及必要收场条件 | 动作与流程结果 |
-| --- | --- |
-| 原动作已有终态 | 返回原结果，不更新原流程终态，也不增加绑定失败事件。 |
-| 取消已生效，启动可靠未派发或全部尝试可靠无效果 | 继续原未启动取消事务及适用释放，不因绑定异常新增停止责任。 |
-| 取消已生效，活动已有可靠结束事实或 STOP 已有终态 | 使用原停止或无需停止依据，保持原终态及错误，不重开停止责任。 |
-| 取消已生效，活动效果未知或仍在执行，驱动不支持停止 | 沿该动作既有无停止能力的取消规则处理，不凭绑定异常创建 STOP 或声称设备已停止。 |
-| 取消已生效，必要停止仍需执行，原驱动支持停止，STOP 尚未建立 | 同一事务建立 `stop/<action_id>` 的零尝试责任，先保存 `OPERATION_CONFIGURED.CREATE` 的 PENDING，再保存 `FINISH` 的 FAILED 和绑定错误，最后保存目标 CANCELED 及计划聚合。采用本次停止配置；不创建尝试或设备观察。 |
-| 取消已生效，必要停止仍需执行，原 STOP 尚未结束 | 同一事务保存该 STOP 与相关未完成核实流程的绑定失败、目标 CANCELED 及计划聚合。已有次数及尝试结果保持；取消结果由原 STOP 的失败事实判定。 |
-| 尚未取消，仍需异常绑定推进启动、停止、查询或结果列举 | 同一事务保存动作 FAILED、相应未完成流程 FAILED、计划聚合及所属历史；不增加调用或尝试。 |
-| 同设备的新触发绑定匹配，原残留活动的驱动与本次配置不同 | 原残留流程保存原绑定失败且保留活动，新触发动作保存 `device_activity_unresolved`，包含原 activity_id/device_id。不能把新触发动作的匹配绑定写成 mismatch。 |
+原动作及必要收场条件|动作与流程结果
+-|-
+原动作已有终态|返回原结果，不更新原流程终态，也不增加绑定失败事件。
+取消已生效，启动可靠未派发或全部尝试可靠无效果|继续原未启动取消事务及适用释放，不因绑定异常新增停止责任。
+取消已生效，活动已有可靠结束事实或 STOP 已有终态|使用原停止或无需停止依据，保持原终态及错误，不重开停止责任。
+取消已生效，活动效果未知或仍在执行，驱动不支持停止|沿该动作既有无停止能力的取消规则处理，不凭绑定异常创建 STOP 或声称设备已停止。
+取消已生效，必要停止仍需执行，原驱动支持停止，STOP 尚未建立|同一事务建立 `stop/<action_id>` 的零尝试责任，先保存 `OPERATION_CONFIGURED.CREATE` 的 PENDING，再保存 `FINISH` 的 FAILED 和绑定错误，最后保存目标 CANCELED 及计划聚合。采用本次停止配置；不创建尝试或设备观察。
+取消已生效，必要停止仍需执行，原 STOP 尚未结束|同一事务保存该 STOP 与相关未完成核实流程的绑定失败、目标 CANCELED 及计划聚合。已有次数及尝试结果保持；取消结果由原 STOP 的失败事实判定。
+尚未取消，仍需异常绑定推进启动、停止、查询或结果列举|同一事务保存动作 FAILED、相应未完成流程 FAILED、计划聚合及所属历史；不增加调用或尝试。
+同设备的新触发绑定匹配，原残留活动的驱动与本次配置不同|原残留流程保存原绑定失败且保留活动，新触发动作保存 `device_activity_unresolved`，包含原 activity_id/device_id。不能把新触发动作的匹配绑定写成 mismatch。
 
 建议增加类型化 `FinishBindingFailure` 输入，在 `CaptureRepository` 的单次 `commit_operation` 内组合终态命令及流程事件。动作和计划的事件归属于各自对象；普通 START、STOP、查询和核实流程沿原 `action_id` 归属，残留停止沿目标活动所属动作归属。所有子计划只读取同一个事务开始状态，事件编号连续且不同；外层 `scope.allocate` 只调用一次，子范围不得嵌套提交。新 STOP 的 CREATE 和 FINISH 依次更新同一行，创建行全部业务字段与后续变更均受正式事件守卫检查。
 
@@ -158,18 +158,18 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 延时摄影 T 已经或可能启动后，合法取消要求有限停止及适用文件核实。普通 STOP 的成功仅证明停止责任成功，不证明已取得本次全部适用产物；STOP 的失败也不消除对已拍完文件的有限核实。以下分类依据[取消及文件保留](../../architecture/camera-capture.md#取消失败与文件保留)、[取消动作完成时机](../../architecture/task-cancellation.md#取消动作的完成时机)和[绑定异常影响范围](../../architecture/configuration.md#设备绑定异常的影响范围)。先检查已保存终态、取消合法性和未结束实际调用，然后分别核对停止责任与 `results/<activity_id>`。
 
-| 原停止、启动和文件核实事实 | 目标与本次取消结果 |
-| --- | --- |
-| 目标已有终态 | 保持原目标和产物；只等待仍适用的独立调用收场，不因新配置重开文件核实或取消结果。 |
-| 启动可靠未发生，全部原尝试已结束且无效果 | 本地保存未启动 CANCELED，不创建 STOP 或 RESULTS；本次取消没有停止或文件核实失败。 |
-| 原启动、STOP 或 RESULTS 尚未保存可靠结束结果 | 先保存本会话实际返回结果，或按旧调用恢复双门保存适用结果；条件不足时保留责任，零新调用，不用业务终态代替调用结束。 |
-| 可能启动，原能力不支持停止且取消尚未生效 | 按取消资格拒绝本次取消，目标保留原普通执行；异常绑定按尚未取消工作的失败规则处理。 |
-| 可能启动且取消已生效，但原能力不支持停止 | 先核对已提交取消是否具有可靠未启动等合法依据；事实矛盾属于状态库错误，不创建虚构 STOP，也不调用本次驱动修正旧能力。 |
-| 原 STOP 未结束或尚未建立，文件仍需设备核实，绑定异常 | 同一完整事务保存适用 STOP 与 RESULTS 的失败及目标 CANCELED、计划聚合；实际调用、效果、活动与次数保持。本次取消因必要处理失败而失败。 |
-| 原 STOP 已 SUCCEEDED，或活动已有可靠结束事实；RESULTS 尚未建立或仍未结束，且取得文件事实需要异常绑定 | 不重开 STOP，不改变其成功结果；保存本次必要文件核实的绑定失败及目标 CANCELED、计划聚合。本次取消因该文件核实失败而失败，不能单凭 STOP 成功判取消成功。 |
-| 原 STOP 已 FAILED 或 UNCONFIRMED；RESULTS 尚未建立或仍未结束且需要异常绑定 | 保持原 STOP 失败及未知设备事实，保存适用 RESULTS 绑定失败并结束目标；本次取消失败，不刷新停止或核实预算。 |
-| 原 RESULTS 已 FAILED 或 UNCONFIRMED，且不允许继续；STOP 已完成适用有限处理 | 采用原核实及停止结论本地结束目标，不重开 RESULTS。本次取消包含原必要处理的失败或无法确认结果。 |
-| 已可靠取得本次适用文件事实，只剩本地产物登记；STOP 已完成适用有限处理 | 使用已保存事实登记符合条件的完整产物，与 CANCELED 共同提交；不因源绑定变化再调用设备。本次取消分别采用原停止与核实结果。 |
+原停止、启动和文件核实事实|目标与本次取消结果
+-|-
+目标已有终态|保持原目标和产物；只等待仍适用的独立调用收场，不因新配置重开文件核实或取消结果。
+启动可靠未发生，全部原尝试已结束且无效果|本地保存未启动 CANCELED，不创建 STOP 或 RESULTS；本次取消没有停止或文件核实失败。
+原启动、STOP 或 RESULTS 尚未保存可靠结束结果|先保存本会话实际返回结果，或按旧调用恢复双门保存适用结果；条件不足时保留责任，零新调用，不用业务终态代替调用结束。
+可能启动，原能力不支持停止且取消尚未生效|按取消资格拒绝本次取消，目标保留原普通执行；异常绑定按尚未取消工作的失败规则处理。
+可能启动且取消已生效，但原能力不支持停止|先核对已提交取消是否具有可靠未启动等合法依据；事实矛盾属于状态库错误，不创建虚构 STOP，也不调用本次驱动修正旧能力。
+原 STOP 未结束或尚未建立，文件仍需设备核实，绑定异常|同一完整事务保存适用 STOP 与 RESULTS 的失败及目标 CANCELED、计划聚合；实际调用、效果、活动与次数保持。本次取消因必要处理失败而失败。
+原 STOP 已 SUCCEEDED，或活动已有可靠结束事实；RESULTS 尚未建立或仍未结束，且取得文件事实需要异常绑定|不重开 STOP，不改变其成功结果；保存本次必要文件核实的绑定失败及目标 CANCELED、计划聚合。本次取消因该文件核实失败而失败，不能单凭 STOP 成功判取消成功。
+原 STOP 已 FAILED 或 UNCONFIRMED；RESULTS 尚未建立或仍未结束且需要异常绑定|保持原 STOP 失败及未知设备事实，保存适用 RESULTS 绑定失败并结束目标；本次取消失败，不刷新停止或核实预算。
+原 RESULTS 已 FAILED 或 UNCONFIRMED，且不允许继续；STOP 已完成适用有限处理|采用原核实及停止结论本地结束目标，不重开 RESULTS。本次取消包含原必要处理的失败或无法确认结果。
+已可靠取得本次适用文件事实，只剩本地产物登记；STOP 已完成适用有限处理|使用已保存事实登记符合条件的完整产物，与 CANCELED 共同提交；不因源绑定变化再调用设备。本次取消分别采用原停止与核实结果。
 
 已确认的不变量是目标取消、必要文件核实失败和发起取消逐项失败均须可恢复地表达，并共同保存所属本地事实。建议复用 `FinishBindingFailure`，在原结果核实责任已经存在时结束固定 RESULTS；必要文件核实尚未建立时，用其本次 `check_config` 保存零尝试 `OPERATION_CONFIGURED.CREATE` 的 PENDING，再保存 FINISH 的 FAILED。这个新增责任只记录无法执行的适用核实，不创建尝试、观察、文件不存在或集合齐备结论。它与新建必要 STOP 使用不同流程 ID，归属于 T；动作与计划段保持正式 owner。具体输入字段与事件顺序属于实现建议，实施前须以正式守卫及窄失败测试验证，不能先只放宽空事件组的原键核实。
 
@@ -183,15 +183,15 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 录像 A 的普通 STOP 已经失败，活动仍保持执行及占用。触发动作 T 建立 `followup/<T>/<activity_id>` 并已发出一次停止；该调用已经结束，但设备效果尚未确认。T 后来取消，原残留流程仍沿原有限责任继续。新动作 B 使用本次配置的匹配驱动，既有残留停止及确认查询仍必须沿 A 保存的驱动解释和调用。
 
-| 本轮推进入口与已有事实 | 本地事务及外部调用 |
-| --- | --- |
-| 本轮触发动作自身取消、终态或不具备时间资格 | 先按其原规则处理，不借新触发资格发出普通启动。已发出的独立残留责任仍由 `residual_flow` 推进。 |
-| 本轮触发动作自身绑定缺失或不匹配 | 按自身绑定错误进入拍摄失败责任；不将其分类为另一个活动的占用错误。 |
-| 原残留已有可靠成功终态或本轮触发已有可靠空闲检查结果 | 先使用已有本地依据继续既有收场或放行，不因原配置变更撤回确定结果。 |
-| 已有残留 STOP 或确认 QUERY 未保存原调用结束结果 | 先按固定 H、可靠旧执行边界及原驱动适用声明恢复；条件不足时保留责任且零新调用。 |
-| 原残留流程未结束，原调用均已结束，A 的绑定异常；本轮匹配的新动作 B 已开始执行 | 同一事务保存固定残留 STOP 及其未完成确认 QUERY 的 FAILED 和 A 绑定错误，再保存 B 的 FAILED、`device_activity_unresolved` 及计划聚合。A 的活动、原动作终态、累计次数及已有尝试结果保持，设备调用为零。 |
-| 原残留流程未结束，原调用均已结束，A 的绑定异常；独立推进时 T 已终态 | 同一事务只结束固定残留 STOP 及其未完成确认 QUERY，保留 T 与 A 的终态和活动；不将局部绑定失败改成新的触发资格。 |
-| 原残留 STOP 或确认 QUERY 已终态 | 保持原结果，不重开责任；固定失败事务只能包含本次仍未结束的责任。 |
+本轮推进入口与已有事实|本地事务及外部调用
+-|-
+本轮触发动作自身取消、终态或不具备时间资格|先按其原规则处理，不借新触发资格发出普通启动。已发出的独立残留责任仍由 `residual_flow` 推进。
+本轮触发动作自身绑定缺失或不匹配|按自身绑定错误进入拍摄失败责任；不将其分类为另一个活动的占用错误。
+原残留已有可靠成功终态或本轮触发已有可靠空闲检查结果|先使用已有本地依据继续既有收场或放行，不因原配置变更撤回确定结果。
+已有残留 STOP 或确认 QUERY 未保存原调用结束结果|先按固定 H、可靠旧执行边界及原驱动适用声明恢复；条件不足时保留责任且零新调用。
+原残留流程未结束，原调用均已结束，A 的绑定异常；本轮匹配的新动作 B 已开始执行|同一事务保存固定残留 STOP 及其未完成确认 QUERY 的 FAILED 和 A 绑定错误，再保存 B 的 FAILED、`device_activity_unresolved` 及计划聚合。A 的活动、原动作终态、累计次数及已有尝试结果保持，设备调用为零。
+原残留流程未结束，原调用均已结束，A 的绑定异常；独立推进时 T 已终态|同一事务只结束固定残留 STOP 及其未完成确认 QUERY，保留 T 与 A 的终态和活动；不将局部绑定失败改成新的触发资格。
+原残留 STOP 或确认 QUERY 已终态|保持原结果，不重开责任；固定失败事务只能包含本次仍未结束的责任。
 
 建议增加 `FinishResidualBindingFailure`，输入包括可选的新触发动作、固定活动身份、A 的绑定错误、事实时间及完整责任键集合。事务内复核活动所属 A 的设备／驱动、T 与目标活动关联、允许的残留类型和查询用途，以及 B 的设备身份及执行资格。流程事件拥有者继续按目标活动及正式流程规则登记，动作／计划段归属于 B。原键必须核实有无动作段、完整固定流程集合、目标活动、错误详情及时间；仅有动作段或改变集合不能被接受为相同请求。
 
@@ -211,22 +211,22 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 - `bootstrap/cleanup_assembly.py::session_cleanup_assembly` 从第一个可用设备返回运行时；`_member_binding` 只允许该设备，并用当前 driver 构造绑定。`outputs/cleanup_flow.py::delete_source_file`、取消删除分支及恢复核实必须按每个成员选择匹配端口。即使设备目录为空，也必须能够装配 staging 的主机文件处理。
 - `OutputsRepository._GrantFileCommand._reject_item` 已能保存未建交付项的最终失败；`fail_read_delivery` 只接受已失败读取流程的次数耗尽原因，不能直接当作任意绑定失败入口。`fail_cleanup_item` 维护清理限制及产物聚合，但伴随流程收场目前另行提交。需要窄仓储输入共同保存绑定失败与适用责任，不能按函数名认为现有事务已经覆盖。
 
-| 动作／成员与源状态 | 必须执行的行为 |
-| --- | --- |
-| 动作未来、尚未取得来源或处理资格 | 保持原等待与时间资格，不因扫描历史提前写绑定失败。 |
-| 动作或成员已有终态 | 返回原结果，配置修正及原请求重送不重开成员。 |
-| 未取消的已选取回项，尚无交付，源设备绑定异常 | 保存该 obtain_item 的绑定失败，不建立交付、拷贝或读取尝试；继续其他项。先按既有规则判断源可用性及删除限制，不能绕过限制来发读取。 |
-| 未取消的取回项已有交付／未完成主机拷贝，下一步仍需异常设备读取或源端摘要 | 同事务保存受影响项／交付的失败及原 READ_FILE 等责任结束；不新增尝试、不退已用次数，不发布未核实副本。已有进度、未知效果和适用读取保护保留。 |
-| 设备来源的交付副本已经完整核实，只需本地发布或撤回 | 使用原已核实副本完成本地工作，不因源设备绑定异常改成失败或重新读取／校验。 |
-| 取回源本身是主机正式中间文件 | 继续本地复制、核实及交付，不要求设备目录存在。 |
-| 未取消的清理项需要异常绑定删除或存在性查询 | 保存该 cleanup_item 的绑定失败及其未完成 DELETE_FILE／CHECK_FILE_EXISTS 责任结果，按实际删除事实维护原限制、输出及源存在性；没有调用时不新增尝试，不能报告文件已删除。 |
-| 清理项已有可靠缺席事实，只需补齐本地结果保存 | 使用原可靠事实完成，不再调用设备，也不凭新配置改写该事实。 |
-| 清理对象是主机派生成品 | 继续本地删除／查询，零设备目录也不能阻止它。 |
-| 一个动作同时涉及异常设备 A、匹配设备 B 和主机文件 | 逐项使用各自端口及原绑定；A 失败，B 和主机项继续。全部适用项结束后按既有逐项汇总保存动作与计划结果。 |
-| 取消已生效，原读取／删除未发出或已经实际结束 | 保持目标取消；本地撤回、保护与限制处理按所属规则完成，不因绑定异常恢复普通读取／删除。 |
-| 取消已生效，仍需异常绑定核实已发出的删除等未知效果 | 所需核实以失败结束，保留原未知及限制；目标取消终态和发起取消动作的逐项失败分别汇总。不能把未核实解释为删除未发生。 |
-| 原设备调用仍有本会话实际拥有者 | 先跟踪实际结果及适用收场，不用成员失败作为实际结束证据，不先释放读取名额、保护、文件或通道。跨会话只有持久化 RUNNING 时的恢复前提须单独核验。 |
-| 任一所需状态查询／事务回滚／提交未知不能可靠确认 | 保留责任并进入状态库错误，不能以绑定可以局部失败为由跳过数据库结果。 |
+动作／成员与源状态|必须执行的行为
+-|-
+动作未来、尚未取得来源或处理资格|保持原等待与时间资格，不因扫描历史提前写绑定失败。
+动作或成员已有终态|返回原结果，配置修正及原请求重送不重开成员。
+未取消的已选取回项，尚无交付，源设备绑定异常|保存该 obtain_item 的绑定失败，不建立交付、拷贝或读取尝试；继续其他项。先按既有规则判断源可用性及删除限制，不能绕过限制来发读取。
+未取消的取回项已有交付／未完成主机拷贝，下一步仍需异常设备读取或源端摘要|同事务保存受影响项／交付的失败及原 READ_FILE 等责任结束；不新增尝试、不退已用次数，不发布未核实副本。已有进度、未知效果和适用读取保护保留。
+设备来源的交付副本已经完整核实，只需本地发布或撤回|使用原已核实副本完成本地工作，不因源设备绑定异常改成失败或重新读取／校验。
+取回源本身是主机正式中间文件|继续本地复制、核实及交付，不要求设备目录存在。
+未取消的清理项需要异常绑定删除或存在性查询|保存该 cleanup_item 的绑定失败及其未完成 DELETE_FILE／CHECK_FILE_EXISTS 责任结果，按实际删除事实维护原限制、输出及源存在性；没有调用时不新增尝试，不能报告文件已删除。
+清理项已有可靠缺席事实，只需补齐本地结果保存|使用原可靠事实完成，不再调用设备，也不凭新配置改写该事实。
+清理对象是主机派生成品|继续本地删除／查询，零设备目录也不能阻止它。
+一个动作同时涉及异常设备 A、匹配设备 B 和主机文件|逐项使用各自端口及原绑定；A 失败，B 和主机项继续。全部适用项结束后按既有逐项汇总保存动作与计划结果。
+取消已生效，原读取／删除未发出或已经实际结束|保持目标取消；本地撤回、保护与限制处理按所属规则完成，不因绑定异常恢复普通读取／删除。
+取消已生效，仍需异常绑定核实已发出的删除等未知效果|所需核实以失败结束，保留原未知及限制；目标取消终态和发起取消动作的逐项失败分别汇总。不能把未核实解释为删除未发生。
+原设备调用仍有本会话实际拥有者|先跟踪实际结果及适用收场，不用成员失败作为实际结束证据，不先释放读取名额、保护、文件或通道。跨会话只有持久化 RUNNING 时的恢复前提须单独核验。
+任一所需状态查询／事务回滚／提交未知不能可靠确认|保留责任并进入状态库错误，不能以绑定可以局部失败为由跳过数据库结果。
 
 建议按以下依赖实施，内部接口名称与文件拆分属于建议：
 
@@ -243,41 +243,41 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 已有 READ_FILE 的恢复先读取原尝试及流程，再决定本轮是否需要源设备。读取尝试跨断电继续的规则由 [file-copy.md](../../architecture/file-copy.md#按文件累计读取尝试)定义；仅有进程重新启动不生成 `read_returned`、读取错误或新的尝试次数。本会话配置固定，同一读取协程等待实际结束期间不另行扫描它来重复调用；跨会话没有结束结果的原尝试仍按下表分类。
 
-| 原交付／副本及读取事实 | 绑定核对后的处理 |
-| --- | --- |
-| 交付已有失败、取消或撤回终态 | 保留交付结果；原尝试若尚未结束，继续独立收场责任，不重新发布或重开读取。 |
-| 副本已完整核实，只余本地发布或撤回 | 使用原完整副本，不调用源设备，不改写为绑定失败。 |
-| 尚需读取；原尝试未结束且 missing/mismatch；旧本地工作可靠收场、固定 H 包含原意图，原驱动明确声明 read 适用普通前台恢复且正式证据可用 | 按原 ticket 保存 `UNKNOWN/result_not_saved` 和 `assumed/adb_foreground_recovery/v1/{}`，不造读取错误或观察；确认原结果提交后，再完成既有局部绑定失败事务。零新调用、零新尝试。 |
-| 尚需读取；原尝试未结束且 missing/mismatch；上述恢复依据任一不足 | 保留原尝试、流程、字节进度、源保护和名额，保存原 run/attempt 的 `RecoveryDiagnostic`；本轮零新设备调用，不作为 `STATE` 错误，也不以无诊断无限重扫替代会话门禁。 |
-| 尚需读取；原尝试已可靠结束，原 READ 仍未终态 | matched 按原身份及本次配置继续；missing/mismatch 使用完整绑定失败事务，原尝试及次数保持。 |
-| 原 READ 已终态失败，交付尚未保存相应失败 | 沿原流程错误完成其既有本地交付收场，不用新绑定错误覆盖原失败，也不把流程失败作为尚未结束尝试的停止证明。 |
-| 必需身份、完整记录、查询或事务结果不可可靠解释 | 保留责任并按状态库错误结束依赖执行；不得将合法未完成与损坏事实合并。 |
+原交付／副本及读取事实|绑定核对后的处理
+-|-
+交付已有失败、取消或撤回终态|保留交付结果；原尝试若尚未结束，继续独立收场责任，不重新发布或重开读取。
+副本已完整核实，只余本地发布或撤回|使用原完整副本，不调用源设备，不改写为绑定失败。
+尚需读取；原尝试未结束且 missing/mismatch；旧本地工作可靠收场、固定 H 包含原意图，原驱动明确声明 read 适用普通前台恢复且正式证据可用|按原 ticket 保存 `UNKNOWN/result_not_saved` 和 `assumed/adb_foreground_recovery/v1/{}`，不造读取错误或观察；确认原结果提交后，再完成既有局部绑定失败事务。零新调用、零新尝试。
+尚需读取；原尝试未结束且 missing/mismatch；上述恢复依据任一不足|保留原尝试、流程、字节进度、源保护和名额，保存原 run/attempt 的 `RecoveryDiagnostic`；本轮零新设备调用，不作为 `STATE` 错误，也不以无诊断无限重扫替代会话门禁。
+尚需读取；原尝试已可靠结束，原 READ 仍未终态|matched 按原身份及本次配置继续；missing/mismatch 使用完整绑定失败事务，原尝试及次数保持。
+原 READ 已终态失败，交付尚未保存相应失败|沿原流程错误完成其既有本地交付收场，不用新绑定错误覆盖原失败，也不把流程失败作为尚未结束尝试的停止证明。
+必需身份、完整记录、查询或事务结果不可可靠解释|保留责任并按状态库错误结束依赖执行；不得将合法未完成与损坏事实合并。
 
 消费者须在调用严格绑定失败仓储之前识别合法的未完成尝试；仓储仍拒绝没有可靠结束依据的失败事务。对应窄门禁用真实 `begin_attempt` 建立没有结果的原读取，验证消费者返回等待而不抛状态库错误，并同时证明仓储直接拒绝、所有持久化事实不变、零新调用。读取恢复需要可靠结束结果的后续扩展不得绕过上述专题规则。
 
 取消已生效的设备清理先使用实际删除事实，绑定异常不能替代存在性结论。下面的“调用已结束”指原尝试已有正式结束结果；本会话仍有实际调用拥有者时先跟踪该调用。
 
-| 删除事实与原责任 | 取消收场及原键核实 |
-| --- | --- |
-| 尚未发出删除 | 按原未发出取消解除可撤销限制，不采用绑定失败输入，不创建删除或查询尝试。 |
-| 已有可靠缺席事实 | 保存原成功依据，保持原删除结果，不查询设备。 |
-| 原删除之后已有可靠在场事实 | 保存 `CANCELED + file_delete_failed`，保留不可撤销限制，不查询设备。 |
-| 调用已结束、效果未知、DELETE 已终态，且没有未完成 QUERY | 保存 `CANCELED + delete_unconfirmed + IRREVERSIBLE`，原文件未知及尝试结果保持。不开零尝试查询责任，也不将本次绑定核对纳入事务采用输入。原键按原成员、未知删除依据及事实时刻核实，不重算当前设备配置。 |
-| 调用已结束、效果未知，且 DELETE 或 QUERY 仍未终态，需要异常绑定继续推进 | 在同一事务保存 `CANCELED + delete_unconfirmed + IRREVERSIBLE` 与原未完成流程的 `device_binding_unavailable` 失败。固定责任集合与原绑定属于此复合事务输入；原键核对完整成员、投影和流程事件组。 |
-| 调用仍有实际拥有者或结束结果尚不能可靠确认 | 保留原责任、不可逆限制及未知文件事实，先跟踪实际结束；不以成员终态或配置异常结束实际调用。 |
+删除事实与原责任|取消收场及原键核实
+-|-
+尚未发出删除|按原未发出取消解除可撤销限制，不采用绑定失败输入，不创建删除或查询尝试。
+已有可靠缺席事实|保存原成功依据，保持原删除结果，不查询设备。
+原删除之后已有可靠在场事实|保存 `CANCELED + file_delete_failed`，保留不可撤销限制，不查询设备。
+调用已结束、效果未知、DELETE 已终态，且没有未完成 QUERY|保存 `CANCELED + delete_unconfirmed + IRREVERSIBLE`，原文件未知及尝试结果保持。不开零尝试查询责任，也不将本次绑定核对纳入事务采用输入。原键按原成员、未知删除依据及事实时刻核实，不重算当前设备配置。
+调用已结束、效果未知，且 DELETE 或 QUERY 仍未终态，需要异常绑定继续推进|在同一事务保存 `CANCELED + delete_unconfirmed + IRREVERSIBLE` 与原未完成流程的 `device_binding_unavailable` 失败。固定责任集合与原绑定属于此复合事务输入；原键核对完整成员、投影和流程事件组。
+调用仍有实际拥有者或结束结果尚不能可靠确认|保留原责任、不可逆限制及未知文件事实，先跟踪实际结束；不以成员终态或配置异常结束实际调用。
 
 清理的每个设备请求还须携带对应已提交 `AttemptTicket` 和本次删除／查询各自的 `timeout_s`，使受管驱动能够限制实际调用。主机成品使用独立本地协作者，不借用第一个设备的端口、证据或超时配置。装配遇到不可靠声明或未登记驱动时抛 `DeviceConfigurationError`，普通及受限会话按 `configuration_error` 结束，不把装配前提失效写成公共 missing/mismatch。
 
 清理取消的输入与结果由成员和调用事实共同决定。`CancelCleanupItem` 的采用输入为原成员、事实时刻、错误名称及详情；错误详情中的产物身份必须是原成员指向的产物。第一次提交沿原成员状态、限制、调用和文件事实选择下表分支。重送按已保存的完整成员／产物事件组核实同一输入，不重新读取当前设备配置来改选分支；调用与文件的后续可靠事实也不改写原取消结果。
 
-| 原成员及适用责任 | 输入核实及取消消费者结果 |
-| --- | --- |
-| 成员尚未发出删除，原成员为 `UNRESOLVED` 或 `PENDING_DELETE` | 输入不携带错误或详情。保存取消并按原限制是否已建立决定不建立或解除限制。必要处理可靠结束后，发起取消可成功。 |
-| 已发出删除，实际调用尚未可靠结束 | 保留责任并等待真实结束，不以 `CancelCleanupItem` 的终态输入代替调用结果。 |
-| 删除已结束且仍未知，没有需要绑定失败结束的开放责任 | 输入为 `delete_unconfirmed` 及原 `output_id`，保留不可逆限制和未知事实；发起取消按未知收场失败。此输入不含本次配置或 `BindingResult`。 |
-| 原删除后已有可靠在场事实 | 输入为 `file_delete_failed` 及原 `output_id`，保留不可逆限制；发起取消按明确收场失败。 |
-| 删除已结束且仍未知，存在需要异常绑定结束的开放责任 | 使用复合绑定失败事务，固定原成员、原文件、采用的绑定失败、完整责任集合和时间；其原键不能被省略流程输入的单项取消请求复用。目标仍为 `CANCELED`，发起取消失败。 |
-| 已确认删除成功，或尚未发生删除的取消已经可靠完成 | 保留原逐项事实，发起取消仅汇总本次适用处理，不把已经成功删除解释为取消失败。 |
+原成员及适用责任|输入核实及取消消费者结果
+-|-
+成员尚未发出删除，原成员为 `UNRESOLVED` 或 `PENDING_DELETE`|输入不携带错误或详情。保存取消并按原限制是否已建立决定不建立或解除限制。必要处理可靠结束后，发起取消可成功。
+已发出删除，实际调用尚未可靠结束|保留责任并等待真实结束，不以 `CancelCleanupItem` 的终态输入代替调用结果。
+删除已结束且仍未知，没有需要绑定失败结束的开放责任|输入为 `delete_unconfirmed` 及原 `output_id`，保留不可逆限制和未知事实；发起取消按未知收场失败。此输入不含本次配置或 `BindingResult`。
+原删除后已有可靠在场事实|输入为 `file_delete_failed` 及原 `output_id`，保留不可逆限制；发起取消按明确收场失败。
+删除已结束且仍未知，存在需要异常绑定结束的开放责任|使用复合绑定失败事务，固定原成员、原文件、采用的绑定失败、完整责任集合和时间；其原键不能被省略流程输入的单项取消请求复用。目标仍为 `CANCELED`，发起取消失败。
+已确认删除成功，或尚未发生删除的取消已经可靠完成|保留原逐项事实，发起取消仅汇总本次适用处理，不把已经成功删除解释为取消失败。
 
 `TargetSettlement._settle_cleanup` 须读取成员终态及其已保存错误。`FAILED` 或携带 `delete_unconfirmed`／`file_delete_failed` 的 `CANCELED` 都表示本次必要处理未成功；没有错误的 `CANCELED` 和原 `SUCCEEDED` 可正常结束本次等待。读取或提交不可靠时停止依赖执行，不能把数据库失败写成成员业务失败。原键核实要逐项拒绝改变成员、时间、错误、详情、分支或完整组，不只比较成员编号；保存的错误和未知依据独立于目标动作的 `CANCELED` 状态。
 
@@ -299,13 +299,13 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 
 内部 `ControlRequest` 携带原 `AttemptTicket` 与本次 `timeout_s`。`ManagedDeviceDriver` 接收部署提供的具体命令映射及响应解释，复用既有 `invoke` 和受管工具执行，不另写进程终止机制或添加隐藏重试。控制、停止、查询、列举、删除分别核对原操作类别和设备绑定；本次期限覆盖命令模板值。`DeviceCallResult.outcome` 保留同一完整 `CallOutcome`，兼容观察和错误视图须与其一致，不能从视图重新推定效果、收场或退出信息。
 
-| 真实调用责任 | 请求生产者与当前接线范围 |
-| --- | --- |
-| 录像 START | `capture/handlers.py::_record_start_once` 沿原启动票据传递本次配置，调用完成后共同保存实际结果与确认事实。 |
-| 普通 STOP | `capture/handlers.py::_stop_call` 沿原停止票据传递本次停止期限；单次请求不产生隐含重试。 |
-| 执行前查询、残留停止及停止确认查询 | `capture/residual.py` 的三个请求分别消费本次 query／residual_stop 配置，原残留活动使用原驱动绑定。 |
-| 产物核实、设备删除及存在性查询 | `DriverResultListing`、cleanup 适配器仍须补齐真实尝试与期限传递、完整结果保存及恢复消费者门禁。已通过配置装配测试不代表这些调用完成验收。 |
-| 源端整片摘要及连续内容读取 | 沿所属独立责任处理，不套用元数据查询时限。 |
+真实调用责任|请求生产者与当前接线范围
+-|-
+录像 START|`capture/handlers.py::_record_start_once` 沿原启动票据传递本次配置，调用完成后共同保存实际结果与确认事实。
+普通 STOP|`capture/handlers.py::_stop_call` 沿原停止票据传递本次停止期限；单次请求不产生隐含重试。
+执行前查询、残留停止及停止确认查询|`capture/residual.py` 的三个请求分别消费本次 query／residual_stop 配置，原残留活动使用原驱动绑定。
+产物核实、设备删除及存在性查询|`DriverResultListing`、cleanup 适配器仍须补齐真实尝试与期限传递、完整结果保存及恢复消费者门禁。已通过配置装配测试不代表这些调用完成验收。
+源端整片摘要及连续内容读取|沿所属独立责任处理，不套用元数据查询时限。
 
 旧调用恢复还需同时满足固定初始 H、调用方提供的旧本地执行收场边界及原驱动逐操作适用声明。`build_runtime` 默认 `UNCONFIRMED`；正式 CLI `run` 依既有部署启动契约传递 `HOST_LOCAL_SETTLED`。`SessionContext.on_session_open` 在会话锁内、首次可靠打开后固定 H，先于受理及时钟事务。三个拍摄工厂只消费同一 H，不重新读取当前 C。意图在 H 之后的本会话调用保持实际管理责任。
 
@@ -350,17 +350,17 @@ RC0 保证日常入口使用当前部署绑定；RC1 提供合法、固定的本
 `UV_PROJECT_ENVIRONMENT=apps/camctl/.venv uv run --frozen --project apps/camctl --group test --python 3.11 python -m pytest <目标> -q`。
 九个共享不变量入口逐项核对，证据为本计划的组合测试与既有专项在同一批目录门禁中的实际通过结果（bootstrap 980、capture 986、outputs+cancellation 2040、reporting 373、根会话恢复 6）。
 
-| 入口 | 行为证据 |
-| --- | --- |
-| 普通拍摄 | `test_runtime_configuration_recovery.py::test_second_run_uses_changed_budget_and_extra_wait`（两台设备照片与延时在两段会话中完成执行、等待与核实）；`bootstrap/test_media_assembly.py` 与 `bootstrap/test_timelapse_finish.py` 的录像、延时全流程矩阵。 |
-| 取消停止 | 同文件 `test_second_run_cancels_with_current_stop_configuration`（新配置停止预算下第一次错误经新间隔重试确认，取消终态与已拍产物同事务）；`bootstrap/test_timelapse_finish.py::TestTimelapseCancel` 可停止与不可停止分区；`cancellation/test_controller_cancel.py` 幂等重入边界。 |
-| 恢复核实 | 同文件 `test_interrupted_result_call_resumes_without_duplicate_side_effects`（在途调用中断后按原责任恢复，无重复名额或副作用）；`capture/test_result_scan_recovery.py` 十二项扫描恢复；根 `test_camctl_session_recovery.py` 真实 CLI 两段会话恢复。 |
-| 后续残留收场 | `bootstrap/test_residual_winddown.py` 九项受限收场；`bootstrap/test_emergency_session_exit.py` 六项应急停止（状态库失效或配置错误退出路径）。 |
-| 普通取回 | `outputs/test_delivery.py` 二十六项交付链；根 `test_camctl_output_roundtrip.py` 经 C 模块的真实取回交接。 |
-| 内部输入拷贝 | `outputs/test_internal_input_lifecycle.py` 八项生命周期；`capture/test_check_current_budget.py` 跨运行读取预算（上调只补剩余名额、原尝试保持）。 |
-| 设备及主机清理 | `bootstrap/test_cleanup_flow.py` 七项清理轮次；`bootstrap/test_cleanup_query_default_recovery.py` 每轮新连接续接原查询责任。 |
-| 结果核实 | RC3 与 RC4 交付的预算、期限、间隔与结果矩阵（`test_check_current_budget.py`、`test_recording_start_runtime.py`、`test_timelapse_finish.py`、`test_timelapse_wait_runtime.py`）。 |
-| 报告 | 同文件 `test_freezes_before_and_after_change_recover_identically`（三路径恢复、旧报告字节一致、当前报告表达逐项结果与原绑定、无内部字段）；`reporting/test_generation.py` 与 `test_encoding.py` 的冻结、生成与编码基线。 |
+入口|行为证据
+-|-
+普通拍摄|`test_runtime_configuration_recovery.py::test_second_run_uses_changed_budget_and_extra_wait`（两台设备照片与延时在两段会话中完成执行、等待与核实）；`bootstrap/test_media_assembly.py` 与 `bootstrap/test_timelapse_finish.py` 的录像、延时全流程矩阵。
+取消停止|同文件 `test_second_run_cancels_with_current_stop_configuration`（新配置停止预算下第一次错误经新间隔重试确认，取消终态与已拍产物同事务）；`bootstrap/test_timelapse_finish.py::TestTimelapseCancel` 可停止与不可停止分区；`cancellation/test_controller_cancel.py` 幂等重入边界。
+恢复核实|同文件 `test_interrupted_result_call_resumes_without_duplicate_side_effects`（在途调用中断后按原责任恢复，无重复名额或副作用）；`capture/test_result_scan_recovery.py` 十二项扫描恢复；根 `test_camctl_session_recovery.py` 真实 CLI 两段会话恢复。
+后续残留收场|`bootstrap/test_residual_winddown.py` 九项受限收场；`bootstrap/test_emergency_session_exit.py` 六项应急停止（状态库失效或配置错误退出路径）。
+普通取回|`outputs/test_delivery.py` 二十六项交付链；根 `test_camctl_output_roundtrip.py` 经 C 模块的真实取回交接。
+内部输入拷贝|`outputs/test_internal_input_lifecycle.py` 八项生命周期；`capture/test_check_current_budget.py` 跨运行读取预算（上调只补剩余名额、原尝试保持）。
+设备及主机清理|`bootstrap/test_cleanup_flow.py` 七项清理轮次；`bootstrap/test_cleanup_query_default_recovery.py` 每轮新连接续接原查询责任。
+结果核实|RC3 与 RC4 交付的预算、期限、间隔与结果矩阵（`test_check_current_budget.py`、`test_recording_start_runtime.py`、`test_timelapse_finish.py`、`test_timelapse_wait_runtime.py`）。
+报告|同文件 `test_freezes_before_and_after_change_recover_identically`（三路径恢复、旧报告字节一致、当前报告表达逐项结果与原绑定、无内部字段）；`reporting/test_generation.py` 与 `test_encoding.py` 的冻结、生成与编码基线。
 
 原尚未裁决字段均已闭合：受管工具结果页格式已于 2026-10-11 裁决确认现状（格式已由接入计划 T5/T6 实施）；延时等待重配置中驱动声明的修复余量上限同日裁决为不设上限、维持"有限、非负"约束。两者均不改变本计划已确认要求的覆盖结论，裁决记录见[决策清单](2026-10-11-camctl-open-decisions.md)。
 
@@ -393,14 +393,14 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 以下分类在已有终态、取消、绑定、在途调用及可靠保存资格判定之后适用。查询和删除预算分别判断；删除预算耗尽不跳过未知删除的必要核实。
 
-| 可靠事实与需要执行的操作 | 时间门槛与结果 |
-| --- | --- |
-| 尚无删除尝试，需要首次删除 | 不等待重试间隔。 |
-| 新删除之后尚无本成员核实尝试，需要首次查询 | 根据保存的意图顺序识别本次核实，清除旧查询时间锚点，不等待上一轮查询间隔；原查询次数保持。 |
-| 本次查询没有可靠在场结论，需要再次查询，且本次预算有余 | 保存结果后建立查询时间锚点；跨运行从本次首次具备资格时按本次间隔重新计时。 |
-| 查询可靠确认文件仍在，允许再次删除 | 必要查询返回并可靠保存后建立删除时间锚点；查询耗时不计入删除间隔。原查询流程仍允许后续删除后的新核实。 |
-| 对应累计次数达到或超过本次上限 | 不等待时间门槛，交给意图事务按本次上限拒绝，并保存所属耗尽结论。 |
-| 删除可靠完成或查询可靠确认缺席 | 沿已有成员终态和伴随流程收场，不新增重试。 |
+可靠事实与需要执行的操作|时间门槛与结果
+-|-
+尚无删除尝试，需要首次删除|不等待重试间隔。
+新删除之后尚无本成员核实尝试，需要首次查询|根据保存的意图顺序识别本次核实，清除旧查询时间锚点，不等待上一轮查询间隔；原查询次数保持。
+本次查询没有可靠在场结论，需要再次查询，且本次预算有余|保存结果后建立查询时间锚点；跨运行从本次首次具备资格时按本次间隔重新计时。
+查询可靠确认文件仍在，允许再次删除|必要查询返回并可靠保存后建立删除时间锚点；查询耗时不计入删除间隔。原查询流程仍允许后续删除后的新核实。
+对应累计次数达到或超过本次上限|不等待时间门槛，交给意图事务按本次上限拒绝，并保存所属耗尽结论。
+删除可靠完成或查询可靠确认缺席|沿已有成员终态和伴随流程收场，不新增重试。
 
 **实施步骤与验收：** 以下命令从仓库根执行，解释器为已核实的 Python 3.11.16。所有 pytest 前台独占、按目录顺序运行。
 
@@ -410,7 +410,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 - [x] 顺序运行 `integration/outputs` 全目录、`integration/bootstrap/test_cleanup_flow.py` 和 `tests/unit`，命令统一为 `PYTHONPATH=apps/camctl/src apps/camctl/.venv/bin/python -m pytest <路径> -q`。预期受影响组件与单元门禁通过；任何失败单独定位、记录，不能把旧的其他目录失败当作通过。全目录存在下述 5 项基线失败，本项只记录检查已执行。
 - [x] 独立审阅本阶段变更、必要核实前后的时间门槛、配置上调／下调、共享产物事实及取消入口。运行 `node scripts/check-doc-links.mjs` 和 `git diff --check`，记录实际范围与未完成事项，然后按用户授权统一提交本阶段本地变更。
 
-**执行优先级：** 用户已授权持续实现和阶段性统一提交；不重复要求实施方法或提交许可。仓库的按目录独占测试规则优先于 skill 的单进程全仓测试建议，根测试规范的受约束替身策略优先于 skill 的默认真实协作者偏好。验收只证明本任务，不表示 RC3、RC5 或第一版整体完成。
+**执行优先级：** 用户已授权持续实现和阶段性统一提交；不重复要求实施方法或提交许可。仓库的按目录独占测试规则优先于 skill 的单进程全仓测试建议，[共享测试规范](../../../.agents/rules/testing.md)的受约束替身策略优先于 skill 的默认真实协作者偏好。验收只证明本任务，不表示 RC3、RC5 或第一版整体完成。
 
 ### Task 1 验证记录与剩余责任
 
