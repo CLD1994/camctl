@@ -9,6 +9,10 @@ developer_instructions = """
 
 只有存在明确的定时检查需求时，才缩短等待时间。
 不要仅为了重新取得控制权而进行无意义的周期轮询。
+
+`spawn_agent` 通常使用 `fork_turns: "none"`，并传入已确认的模型和思考强度。
+优先选择便宜的模型来完成边界稳定的调查、实现、测试或批量工作。比如 `GPT6 Luna` 就是个很优秀的执行模型。
+
 """
 
 [features.multi_agent_v2]
