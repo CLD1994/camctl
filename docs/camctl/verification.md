@@ -53,6 +53,30 @@
 
 本次软件证据覆盖日志回执、报告触发及诊断装配。标记临时文件清理和取消后的文件责任由后续 SW-03、SW-04 承接，设备及目标部署验收保持各自范围。
 
+## SW-03 标记临时文件清理验证（2026-10-14）
+
+环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1。[标记保存拥有者](../../apps/camctl/src/camctl/logging_runtime/copies.py)在同步操作结束、临时句柄确认关闭后，只清理自己生成的临时路径。替换成功后记录源路径已移走；关闭未确认时保留路径并记录未尝试删除。保存、关闭和清理错误分别保留，目录同步成功后的关闭错误不抹去已确认的保存或删除事实。实施范围见[SW-03 计划](../superpowers/plans/2026-10-13-camctl-sw03-marker-temp-cleanup.md)。
+
+[单元专项](../../apps/camctl/tests/unit/logging_runtime/test_marker_temp_cleanup.py)通过内存路径和文件描述符替身，验证创建与进度保存的本次归属、外部文件及正式标记字节保持、未知替换、零字节写入、一次删除、关闭未知，以及程序异常、取消和有序异常组。先发生普通文件错误、后续关闭或清理取消时，传播同一取消对象并保留此前原因；原程序异常或原取消优先级保持。创建及两次进度的诊断消费者分别覆盖 `SAVED` 携带附属错误，正式删除的诊断只表述实际已知的关闭事实。
+
+[真实文件与线程专项](../../apps/camctl/tests/integration/logging_runtime/test_marker_temp_cleanup.py)核对部分写入、替换失败、临时句柄关闭未确认、目录同步与关闭组合，以及等待协程取消后同步保存拥有者实际完成清理。测试在确认生产事实之后回收故意保持打开的测试句柄。[默认装配专项](../../apps/camctl/tests/integration/bootstrap/test_log_copy_diagnostics.py)验证进度临时文件清理失败时副本仍可发布、标记可靠保存后的附属关闭错误进入日志，以及正式标记已删除后的关闭错误仍可诊断；原报告结果和已交接副本保持。
+
+根代理逐文件探索了生产者、会话消费者、默认恢复出口、测试与规格；独立复核核对同一文件快照。临时残留、错误覆盖、取消被普通错误吞掉和关闭事实误报均有有效失败记录，修正后完整门禁从仓库根按既有 Python 3.11 命令分别顺序执行：
+
+| 命令目标（相对于 `apps/camctl/tests`） | 实际结果 |
+| --- | --- |
+| `unit` | 5125 项通过、1 项跳过、2 条既有警告 |
+| `integration/logging_runtime` | 53 项通过、1 条既有警告 |
+| `integration/session` | 106 项通过 |
+| `integration/bootstrap` | 1030 项通过、1 项跳过 |
+| `unit/logging_runtime/test_marker_temp_cleanup.py` | 35 项通过 |
+| `integration/logging_runtime/test_marker_temp_cleanup.py` | 8 项通过 |
+| `integration/bootstrap/test_log_copy_diagnostics.py` | 33 项通过 |
+
+以上命令退出码均为 `0`；完整目录的 stderr 日志为空，跳过及已有警告范围与 SW-02 相同。窄验证后生产及测试保持冻结，完整目录覆盖同一最终快照。命令、红绿次序、输出、耗时、退出码和文件摘要保存在工作区忽略的 `.superpowers/sdd/2026-10-13-camctl-sw03-marker-temp-cleanup/sw03-report.md` 及相邻日志；完整目录记录为 `sw03-full-*-execution.json`。早期测试构造或启动器错误与有效测试结果分别记录。
+
+本次软件证据覆盖同步保存拥有者和诊断消费者。等待协程取消后的全部日志文件责任、遗留启动检查及会话锁放行由 SW-04 承接；真实设备、ARM 部署及物理断电保持各自验收范围。
+
 ## 测试与分步实施方向
 
 ### Python 环境

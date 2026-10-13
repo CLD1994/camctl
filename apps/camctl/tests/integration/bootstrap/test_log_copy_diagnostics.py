@@ -162,6 +162,169 @@ async def test_default_run_records_marker_progress_failure(
     assert state["round_id"] in log and state["copy_name"] in log
 
 
+async def test_default_run_keeps_published_copy_when_progress_temp_cleanup_fails(
+        tmp_path: Path, monkeypatch) -> None:
+    deps = await _runtime(tmp_path)
+    original_write = copies._write_synced
+    original_unlink = copies._unlink
+    write_calls = {"count": 0}
+    failed_temp: dict[str, Path] = {}
+
+    def fail_copied_progress_after_real_write(path, data):
+        write_calls["count"] += 1
+        if write_calls["count"] == 2:
+            failed_temp["path"] = Path(path)
+            original_write(path, data)
+            raise OSError("progress marker write failed after close")
+        return original_write(path, data)
+
+    def fail_owned_temp_cleanup(path):
+        if copies.is_marker_temp_name(Path(path).name):
+            raise OSError("progress temp cleanup denied")
+        return original_unlink(path)
+
+    monkeypatch.setattr(copies, "_write_synced", fail_copied_progress_after_real_write)
+    monkeypatch.setattr(copies, "_unlink", fail_owned_temp_cleanup)
+
+    try:
+        outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
+    finally:
+        close_runtime(deps)
+
+    assert outcome.reason == "report_error"
+    assert report_called["count"] == 1
+    assert write_calls["count"] == 3
+    assert failed_temp["path"].is_file()
+    ready_files = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+    assert len(ready_files) == 1
+    assert b"controlled report generation failure" in ready_files[0].read_bytes()
+    marker_path = (Path(deps.config.paths.staging).expanduser()
+                   / "logs" / copies.MARKER_NAME)
+    assert json.loads(marker_path.read_text(encoding="utf-8"))["stage"] == (
+        MarkerStage.PUBLISHED.value)
+    log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
+    assert "marker_progress[copied]" in log
+    assert "progress marker write failed after close" in log
+    assert "progress temp cleanup denied" in log
+    assert failed_temp["path"].name in log
+    assert "temp_cleanup=failed" in log
+
+
+async def test_default_run_reports_saved_marker_close_error_and_keeps_report_result(
+        tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    deps = await _runtime(tmp_path)
+    logs_dir = (Path(deps.config.paths.staging).expanduser() / "logs").resolve()
+    real_open = os.open
+    real_fsync = os.fsync
+    real_close = os.close
+    marker_directory_fds: set[int] = set()
+    fsync_calls: list[int] = []
+    fsynced_fds: set[int] = set()
+    close_error = OSError("marker directory close failed after sync")
+    close_injections = {"count": 0}
+    close_followed_sync = {"value": False}
+
+    def track_marker_directory(path, flags, *args):
+        fd = real_open(path, flags, *args)
+        if Path(path).resolve() == logs_dir:
+            marker_directory_fds.add(fd)
+        return fd
+
+    def sync_marker_directory(fd: int) -> None:
+        if fd in marker_directory_fds:
+            fsync_calls.append(fd)
+            fsynced_fds.add(fd)
+        real_fsync(fd)
+
+    def close_marker_directory(fd: int) -> None:
+        if fd in marker_directory_fds and close_injections["count"] == 0:
+            marker_directory_fds.remove(fd)
+            real_close(fd)
+            close_injections["count"] += 1
+            close_followed_sync["value"] = fd in fsynced_fds
+            raise close_error
+        marker_directory_fds.discard(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(copies.os, "open", track_marker_directory)
+    monkeypatch.setattr(copies.os, "fsync", sync_marker_directory)
+    monkeypatch.setattr(copies.os, "close", close_marker_directory)
+    try:
+        outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
+    finally:
+        close_runtime(deps)
+
+    assert close_injections["count"] == 1
+    assert fsync_calls
+    assert close_followed_sync["value"] is True
+    assert outcome.reason == "report_error"
+    assert report_called["count"] == 1
+    ready_files = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+    assert len(ready_files) == 1
+    assert b"controlled report generation failure" in ready_files[0].read_bytes()
+    log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
+    assert "marker_create: outcome=saved" in log
+    assert "marker directory close failed after sync" in log
+    assert "report_error" in log
+
+
+async def test_default_recovery_reports_delete_close_error_after_confirmed_sync(
+        tmp_path: Path, monkeypatch) -> None:
+    import os
+    import stat
+
+    from camctl.bootstrap.lifecycle import _on_report_recovered
+    from camctl.logging_runtime.copies import MarkerStore, SaveOutcome
+
+    deps = await _runtime(tmp_path)
+    logs_dir = (Path(deps.config.paths.staging).expanduser() / "logs")
+    marker = MarkerStore(logs_dir)
+    assert marker.create("recovery-close", "log-copy-recovery-close.log").outcome is (
+        SaveOutcome.SAVED)
+    failure_log, _ = _failure_log_wiring(deps)
+    real_close = os.close
+
+    def close_directory_then_report_error(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            real_close(fd)
+            raise OSError("recovery directory close result unconfirmed")
+        real_close(fd)
+
+    monkeypatch.setattr(copies.os, "close", close_directory_then_report_error)
+    try:
+        await _on_report_recovered(deps, failure_log)
+    finally:
+        close_runtime(deps)
+
+    assert marker.check().presence.value == "absent"
+    log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
+    assert "报告日志标记恢复删除诊断" in log
+    assert "outcome=deleted" in log
+    assert "recovery directory close result unconfirmed" in log
+
+
+async def test_recovery_exception_diagnostic_formats_error_once(
+        tmp_path: Path) -> None:
+    from camctl.bootstrap.lifecycle import _on_report_recovered
+
+    deps = await _runtime(tmp_path)
+
+    class FailedRecovery:
+        async def on_report_recovered(self) -> None:
+            raise RuntimeError("recovery delete raised unexpectedly")
+
+    try:
+        await _on_report_recovered(deps, FailedRecovery())
+    finally:
+        close_runtime(deps)
+
+    log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
+    assert "outcome=unknown; error=RuntimeError: recovery delete raised unexpectedly" in log
+    assert "error=error:" not in log
+
+
 @pytest.mark.parametrize("check_failure", ["stat", "read", "invalid"])
 async def test_default_run_records_marker_progress_check_failure(
         tmp_path: Path, monkeypatch, check_failure: str) -> None:

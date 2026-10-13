@@ -439,7 +439,9 @@ async def _close_log_runtime(deps: RuntimeDeps) -> None:
 
 async def _on_report_recovered(deps: RuntimeDeps, failure_log: Any) -> None:
     """结束副本轮次，并诊断未完成的正式标记删除。"""
-    from camctl.logging_runtime.copies import DeleteOutcome
+    from camctl.logging_runtime.copies import (
+        DeleteOutcome, _exception_description,
+    )
 
     try:
         result = await failure_log.on_report_recovered()
@@ -447,10 +449,11 @@ async def _on_report_recovered(deps: RuntimeDeps, failure_log: Any) -> None:
         await _emit_log_diagnostic(
             deps,
             "报告日志标记恢复删除诊断：stage=marker_delete; "
-            f"outcome=unknown; error={type(error).__name__}: {error}",
+            f"outcome=unknown; error={_exception_description(error)}",
         )
         return
-    if result.outcome in (DeleteOutcome.DELETED, DeleteOutcome.NOT_PRESENT):
+    if (result.outcome in (DeleteOutcome.DELETED, DeleteOutcome.NOT_PRESENT)
+            and result.error is None):
         return
     await _emit_log_diagnostic(
         deps,

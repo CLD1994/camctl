@@ -157,6 +157,8 @@ class MarkerSave:
     outcome: SaveOutcome
     error: str | None = None
     marker_check: MarkerCheck | None = None
+    temp_name: str | None = None
+    temp_cleanup: MarkerDelete | None = None
 
 
 class DeleteOutcome(enum.Enum):
@@ -173,8 +175,54 @@ class MarkerDelete:
     error: str | None = None
 
 
+def _exception_description(
+    failure: BaseException,
+    *,
+    seen: frozenset[int] = frozenset(),
+) -> str:
+    if id(failure) in seen:
+        return f"{type(failure).__name__}: <异常链循环>"
+    seen = seen | {id(failure)}
+    details = [f"{type(failure).__name__}: {failure}"]
+    for note in getattr(failure, "__notes__", ()):
+        details.append(f"note={note}")
+    if isinstance(failure, BaseExceptionGroup):
+        for index, member in enumerate(failure.exceptions):
+            details.append(
+                f"group[{index}]={_exception_description(member, seen=seen)}")
+    cause = failure.__cause__
+    if cause is None and not failure.__suppress_context__:
+        cause = failure.__context__
+    if cause is not None:
+        details.append(f"cause={_exception_description(cause, seen=seen)}")
+    return "; ".join(details)
+
+
 def _describe(kind: str, failure: BaseException) -> str:
-    return f"{kind}: {type(failure).__name__}: {failure}"
+    return f"{kind}: {_exception_description(failure)}"
+
+
+_TEMP_CLOSE_UNKNOWN_ATTR = "_camctl_marker_temp_close_unknown"
+_DIRECTORY_SYNC_CONFIRMED_ATTR = "_camctl_directory_sync_confirmed"
+
+
+def _add_exception_note(failure: BaseException, note: str) -> None:
+    failure.add_note(note)
+
+
+def _mark_temp_close_unknown(
+    failure: BaseException, close_error: BaseException,
+) -> None:
+    setattr(failure, _TEMP_CLOSE_UNKNOWN_ATTR, True)
+    _add_exception_note(
+        failure,
+        "marker_temp_close_unknown: "
+        f"{_exception_description(close_error)}",
+    )
+
+
+def _temp_close_unknown(failure: BaseException) -> bool:
+    return bool(getattr(failure, _TEMP_CLOSE_UNKNOWN_ATTR, False))
 
 
 # 窄注入点：真实文件操作的系统调用边界；仅测试替换。
@@ -188,31 +236,138 @@ def _read_bytes(path: Path) -> bytes:
 
 def _write_synced(path: Path, data: bytes) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _BINARY, 0o600)
+    primary: BaseException | None = None
     try:
         view = memoryview(data)
         while view:
-            view = view[os.write(fd, view):]
+            written = os.write(fd, view)
+            if written == 0:
+                raise OSError("标记临时文件写入无进展")
+            view = view[written:]
         os.fsync(fd)
-    finally:
+    except BaseException as failure:
+        primary = failure
+
+    close_error: BaseException | None = None
+    try:
         os.close(fd)
+    except BaseException as failure:
+        close_error = failure
+
+    if close_error is not None:
+        if primary is None:
+            _mark_temp_close_unknown(close_error, close_error)
+            raise close_error
+        if isinstance(primary, OSError) and not isinstance(close_error, Exception):
+            _mark_temp_close_unknown(close_error, close_error)
+            _add_exception_note(
+                close_error,
+                "marker_temp_prior_failure: "
+                f"{_exception_description(primary)}; temp_name={path.name}; "
+                "outcome=failed_not_created; temp_cleanup=not_attempted",
+            )
+            raise close_error from None
+        _mark_temp_close_unknown(primary, close_error)
+        if (isinstance(primary, OSError)
+                and isinstance(close_error, Exception)
+                and not isinstance(close_error, OSError)):
+            group = ExceptionGroup(
+                "标记临时文件写入与关闭均失败",
+                [primary, close_error],
+            )
+            _mark_temp_close_unknown(group, close_error)
+            raise group from None
+    if primary is not None:
+        raise primary
 
 
 def _replace(source: Path, target: Path) -> None:
     os.replace(source, target)
 
 
-def _fsync_directory(path: Path) -> None:
+def _fsync_directory(path: Path) -> OSError | None:
+    """同步目录并独立报告已成功同步后的 close OSError。"""
     if not _DIRECTORY_SYNC_SUPPORTED:
-        return
+        return None
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    sync_error: BaseException | None = None
     try:
         os.fsync(fd)
-    finally:
+    except BaseException as failure:
+        sync_error = failure
+
+    close_error: BaseException | None = None
+    try:
         os.close(fd)
+    except BaseException as failure:
+        close_error = failure
+
+    if sync_error is not None:
+        if close_error is not None:
+            if (isinstance(sync_error, OSError)
+                    and not isinstance(close_error, Exception)):
+                _add_exception_note(
+                    close_error,
+                    "directory_sync_prior_failure: "
+                    f"{_exception_description(sync_error)}; directory={path}; "
+                    "directory sync not confirmed; directory close unknown",
+                )
+                raise close_error from None
+            _add_exception_note(
+                sync_error,
+                "directory_close_unknown: "
+                f"{_exception_description(close_error)}",
+            )
+            if (isinstance(sync_error, OSError)
+                    and isinstance(close_error, Exception)
+                    and not isinstance(close_error, OSError)):
+                raise ExceptionGroup(
+                    "目录同步与关闭均失败", [sync_error, close_error]
+                ) from None
+        raise sync_error
+    if close_error is None:
+        return None
+    setattr(close_error, _DIRECTORY_SYNC_CONFIRMED_ATTR, True)
+    _add_exception_note(
+        close_error,
+        "directory_fsync_confirmed: directory data sync completed before close",
+    )
+    if isinstance(close_error, OSError):
+        return close_error
+    raise close_error
 
 
 def _unlink(path: Path) -> None:
     os.unlink(path)
+
+
+def _cleanup_marker_temp(
+    path: Path, *, save_outcome: SaveOutcome,
+) -> MarkerDelete:
+    """仅结果化本次路径的标准 unlink 结果；程序异常继续传播。"""
+    try:
+        _unlink(path)
+    except FileNotFoundError:
+        return MarkerDelete(DeleteOutcome.NOT_PRESENT)
+    except InterruptedError as failure:
+        return MarkerDelete(
+            DeleteOutcome.UNKNOWN,
+            error=_describe("temp_cleanup_unknown", failure),
+        )
+    except OSError as failure:
+        return MarkerDelete(
+            DeleteOutcome.FAILED,
+            error=_describe("temp_cleanup_failed", failure),
+        )
+    except BaseException as failure:
+        _add_exception_note(
+            failure,
+            "marker_save_facts: "
+            f"outcome={save_outcome.value}; temp_name={path.name}; "
+            "temp_cleanup=unknown",
+        )
+        raise
+    return MarkerDelete(DeleteOutcome.DELETED)
 
 
 def _listdir(path: Path) -> tuple[str, ...]:
@@ -308,31 +463,157 @@ class MarkerStore:
                 return MarkerDelete(DeleteOutcome.FAILED,
                                     error=_describe("unlink_failed", failure))
             try:
-                _fsync_directory(self._dir)
+                close_error = _fsync_directory(self._dir)
             except OSError as failure:
                 return MarkerDelete(DeleteOutcome.DELETE_UNSYNCED,
                                     error=_describe("dir_sync_failed", failure))
+            except BaseException as failure:
+                if getattr(failure, _DIRECTORY_SYNC_CONFIRMED_ATTR, False):
+                    _add_exception_note(
+                        failure,
+                        "marker_delete_facts: outcome=deleted; "
+                        "marker absent; directory sync confirmed; "
+                        "directory close unknown",
+                    )
+                else:
+                    _add_exception_note(
+                        failure,
+                        "marker_delete_facts: outcome=delete_unsynced; "
+                        "unlink confirmed; marker absent; "
+                        "directory sync not confirmed",
+                    )
+                raise
+            if close_error is not None:
+                return MarkerDelete(
+                    DeleteOutcome.DELETED,
+                    error=_describe("dir_close_failed_after_sync", close_error),
+                )
             return MarkerDelete(DeleteOutcome.DELETED)
 
     def _save_payload(self, payload: bytes) -> MarkerSave:
         temp = self._dir / marker_temp_file_name(secrets.token_hex(8))
         try:
             _write_synced(temp, payload)
-        except OSError as failure:
-            return MarkerSave(SaveOutcome.FAILED_NOT_CREATED,
-                              error=_describe("temp_write_failed", failure))
+        except BaseException as failure:
+            return self._finish_failed_save(
+                temp, SaveOutcome.FAILED_NOT_CREATED,
+                "temp_write_failed", failure,
+            )
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
+        except BaseException as failure:
+            return self._finish_failed_save(
+                temp, SaveOutcome.UNKNOWN, "replace_failed", failure,
+            )
+        try:
             _replace(temp, self._path)
+        except BaseException as failure:
+            return self._finish_failed_save(
+                temp, SaveOutcome.UNKNOWN, "replace_failed", failure,
+            )
+        temp_cleanup = MarkerDelete(DeleteOutcome.NOT_PRESENT)
+        try:
+            close_error = _fsync_directory(self._dir)
         except OSError as failure:
             return MarkerSave(
-                SaveOutcome.UNKNOWN, error=_describe("replace_failed", failure))
+                SaveOutcome.PLACED_UNSYNCED,
+                error=_describe("dir_sync_failed", failure),
+                temp_name=temp.name,
+                temp_cleanup=temp_cleanup,
+            )
+        except BaseException as failure:
+            if getattr(failure, _DIRECTORY_SYNC_CONFIRMED_ATTR, False):
+                _add_exception_note(
+                    failure,
+                    "marker_save_facts: outcome=saved; formal marker placed; "
+                    f"temp_name={temp.name}; temp_cleanup=not_present",
+                )
+            else:
+                _add_exception_note(
+                    failure,
+                    "marker_save_facts: outcome=placed_unsynced; "
+                    "formal marker placed; directory sync not confirmed; "
+                    f"temp_name={temp.name}; temp_cleanup=not_present",
+                )
+            raise
+        error = (_describe("dir_close_failed_after_sync", close_error)
+                 if close_error is not None else None)
+        return MarkerSave(
+            SaveOutcome.SAVED,
+            error=error,
+            temp_name=temp.name,
+            temp_cleanup=temp_cleanup,
+        )
+
+    def _finish_failed_save(
+        self,
+        temp: Path,
+        outcome: SaveOutcome,
+        kind: str,
+        failure: BaseException,
+    ) -> MarkerSave:
+        temp_name = temp.name
+        if _temp_close_unknown(failure):
+            _add_exception_note(
+                failure,
+                "marker_save_facts: "
+                f"outcome={outcome.value}; temp_name={temp_name}; "
+                "temp_cleanup=not_attempted",
+            )
+            if isinstance(failure, OSError):
+                return MarkerSave(
+                    outcome,
+                    error=_describe(kind, failure),
+                    temp_name=temp_name,
+                    temp_cleanup=None,
+                )
+            raise failure
+
         try:
-            _fsync_directory(self._dir)
-        except OSError as failure:
-            return MarkerSave(SaveOutcome.PLACED_UNSYNCED,
-                              error=_describe("dir_sync_failed", failure))
-        return MarkerSave(SaveOutcome.SAVED)
+            cleanup = _cleanup_marker_temp(temp, save_outcome=outcome)
+        except BaseException as cleanup_failure:
+            facts = (
+                f"marker_save_facts: outcome={outcome.value}; "
+                f"temp_name={temp_name}; temp_cleanup=unknown"
+            )
+            if isinstance(failure, OSError):
+                if isinstance(cleanup_failure, Exception):
+                    group = ExceptionGroup(
+                        "标记保存与临时文件清理均失败",
+                        [failure, cleanup_failure],
+                    )
+                    _add_exception_note(group, facts)
+                    raise group from None
+                _add_exception_note(
+                    cleanup_failure,
+                    f"{facts}; cleanup_exception="
+                    f"{_exception_description(cleanup_failure)}; "
+                    f"primary_save_error={_exception_description(failure)}",
+                )
+                raise cleanup_failure from None
+            _add_exception_note(
+                failure,
+                f"{facts}; cleanup_exception="
+                f"{_exception_description(cleanup_failure)}",
+            )
+            raise failure
+
+        if isinstance(failure, OSError):
+            return MarkerSave(
+                outcome,
+                error=_describe(kind, failure),
+                temp_name=temp_name,
+                temp_cleanup=cleanup,
+            )
+
+        _add_exception_note(
+            failure,
+            "marker_save_facts: "
+            f"outcome={outcome.value}; temp_name={temp_name}; "
+            f"temp_cleanup={cleanup.outcome.value}; "
+            f"temp_cleanup_error={cleanup.error or 'none'}",
+        )
+        raise failure
 
 
 def _encode_state(round_id: str, copy_name: str, stage: MarkerStage) -> bytes:

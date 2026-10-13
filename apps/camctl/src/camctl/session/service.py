@@ -26,8 +26,11 @@ from camctl.devices.bindings import DeviceConfigurationError
 from camctl.logging_runtime.copies import (
     CopyOutcome,
     CopyReceipt,
+    DeleteOutcome,
     MarkerPresence,
+    MarkerSave,
     SaveOutcome,
+    _describe,
 )
 from camctl.persistence.models import DbOutcomeKind, DirectoryBindingError
 from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
@@ -500,9 +503,29 @@ def _failure_copy_exception(
 ) -> str:
     return (
         "报告失败的日志副本诊断："
-        f"report_error={type(report_error).__name__}: {report_error}; "
+        f"{_describe('report_error', report_error)}; "
         f"stage={stage}; outcome=unknown; "
-        f"error={type(failure).__name__}: {failure}"
+        f"{_describe('error', failure)}"
+    )
+
+
+def _marker_save_diagnostic(stage: str, save: MarkerSave) -> str | None:
+    cleanup = save.temp_cleanup
+    cleanup_problem = (
+        cleanup is not None
+        and (cleanup.outcome is not DeleteOutcome.NOT_PRESENT
+             or cleanup.error is not None)
+    )
+    cleanup_unattempted = save.temp_name is not None and cleanup is None
+    if (save.outcome is SaveOutcome.SAVED and save.error is None
+            and not cleanup_problem and not cleanup_unattempted):
+        return None
+    return (
+        f"{stage}: outcome={save.outcome.value}; "
+        f"error={save.error or 'none'}; "
+        f"temp_name={save.temp_name or 'none'}; "
+        f"temp_cleanup={cleanup.outcome.value if cleanup else 'not_attempted'}; "
+        f"temp_cleanup_error={cleanup.error if cleanup and cleanup.error else 'none'}"
     )
 
 
@@ -522,20 +545,15 @@ def _copy_receipt_diagnostic(
             f"error={check.error or 'check outcome unknown'}"
         )
     marker_create = receipt.marker_create
-    if (marker_create is not None
-            and (marker_create.outcome is not SaveOutcome.SAVED
-                 or marker_create.error is not None)):
-        issues.append(
-            f"marker_create: outcome={marker_create.outcome.value}; "
-            f"error={marker_create.error or 'none'}"
-        )
+    if marker_create is not None:
+        detail = _marker_save_diagnostic("marker_create", marker_create)
+        if detail is not None:
+            issues.append(detail)
     for stage, save in receipt.marker_progress:
-        if save.outcome is not SaveOutcome.SAVED or save.error is not None:
-            issues.append(
-                f"marker_progress[{stage.value}]: "
-                f"outcome={save.outcome.value}; "
-                f"error={save.error or 'none'}"
-            )
+        detail = _marker_save_diagnostic(
+            f"marker_progress[{stage.value}]", save)
+        if detail is not None:
+            issues.append(detail)
         check = save.marker_check
         if (check is not None
                 and (check.error is not None
@@ -584,7 +602,7 @@ def _copy_receipt_diagnostic(
     )
     message = (
         "报告失败的日志副本诊断："
-        f"report_error={type(report_error).__name__}: {report_error}; "
+        f"{_describe('report_error', report_error)}; "
         f"outcome={receipt.outcome.value}; {identity}; "
         + "; ".join(issues)
     )
