@@ -4,7 +4,7 @@
 
 ## 条目格式与结论分类
 
-每条包含六项：原文、结论、归属（所属模块任务）、生产入口、测试、证据、未核验前提。结论分三类：
+每条包含七项：原文、结论、归属（所属模块任务）、生产入口、测试、证据、未核验前提。结论分三类：
 
 - **已覆盖**：条目全部要求有可证伪用例且已有通过记录。
 - **部分覆盖**：主体行为已验证；中断注入矩阵、排序竞争组合、跨组件或规模测量等子场景未核验，未核验前提列出归属。
@@ -147,18 +147,18 @@
 - 结论：部分覆盖
 - 归属：Q4/Q5 授予顺序（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_resources.py
-- 证据：资格、窗口与既定顺序的单元及集成判定已覆盖（scheduling 计划分段验证记录）；交错提交竞争组合未逐项注入。
-- 未核验前提：候选取消、释放与授予的交错竞争矩阵，归路线图阶段 6 排序竞争行。
+- 测试：apps/camctl/tests/integration/scheduling/test_resources.py、apps/camctl/tests/integration/scheduling/test_recovery.py
+- 证据：`test_resources.py::test_grant_does_not_skip_dispatch_recheck`、`test_two_candidates_same_device_only_one_granted` 与 `test_earlier_candidate_wins_consistently` 覆盖候选复查、同设备互斥和排序；`test_recovery.py::test_not_dispatched_activity_releases`、`test_ended_activity_releases`、`test_rejected_without_effect_releases`、`test_late_observation_keeps_new_owner_occupancy` 覆盖可靠释放及迟到旧观察不覆盖新归属。路线图阶段 3 也记录同会话释放后下一动作推进。上述分区尚未把候选取消、活动释放、保留结束、下一候选授予及提前／重复／迟到通知组合为同一竞争序列。
+- 未核验前提：W-05 所列候选取消、释放、保留结束与下一候选授予之间的组合竞争及通知交接仍待联合注入；路线图阶段 3 调度竞争项跟踪该启动责任范围。
 
 #### 验收 W-06
 - 原文：[验收 W-06](database/consistency-verification.md#等待与来源结束)（归属变化中断与三路径恢复一致）。
 - 结论：部分覆盖
 - 归属：Q4 授予与恢复（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_recovery.py
-- 证据：恢复等价与迟到观察不覆盖新归属已覆盖（scheduling 计划分段验证记录）；中断逐点注入未建立。
-- 未核验前提：归属变化各边界中断注入，归路线图阶段 3 中断行。
+- 测试：apps/camctl/tests/integration/scheduling/test_grant_reuse.py、apps/camctl/tests/integration/scheduling/test_recovery.py、apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py
+- 证据：`scheduling/test_grant_reuse.py::test_grant_write_failure_rolls_back_all_joint_facts` 注入 attempt、run、activity 和 link 写失败并核对整体回滚；`test_grant_unknown_commit_is_resolved_by_original_key` 覆盖提交前／后结果未知后的原键只读核实。`scheduling/test_recovery.py::test_late_observation_keeps_new_owner_occupancy` 验证迟到观察不抹去新归属。录像启动结果保存边界另由 `capture/test_recording_start_save_boundary.py::test_start_grant_state_failure_stops_before_device_call` 与 `test_actual_start_result_is_verified_and_resaved_with_same_key_without_resend` 覆盖授予未可靠保存时不派发、实际结果同键复验后保存。
+- 未核验前提：不同阶段的故障用例尚未合成为同一历史边界：授予后通知丢失、下一候选获得机会并重启后，仍需在初始回放、快照正向恢复和当前投影逆向恢复中对照原保留、活动、收场与下一候选。对应路线图阶段 3 的跨阶段接缝。
 
 #### 验收 W-13
 - 原文：[验收 W-13](database/consistency-verification.md#等待与来源结束)（首次启动共同提交分类表）。
@@ -174,9 +174,9 @@
 - 结论：部分覆盖
 - 归属：Q4 授予恢复（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_recovery.py
-- 证据：恢复先核实原责任、不重复分配已覆盖（scheduling 计划分段验证记录，17 项恢复用例）。
-- 未核验前提：意图提交、派发、结果保存前后的逐点中断注入，归路线图阶段 3 中断行。
+- 测试：apps/camctl/tests/integration/scheduling/test_grant_reuse.py、apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py
+- 证据：`scheduling/test_grant_reuse.py::test_grant_write_failure_rolls_back_all_joint_facts` 覆盖共同授予事实的写入回滚，`test_grant_unknown_commit_is_resolved_by_original_key` 覆盖提交未知后的原键核实；`capture/test_recording_start_save_boundary.py::test_start_grant_state_failure_stops_before_device_call` 验证授予状态未可靠保存时不调用设备，`test_actual_start_result_is_verified_and_resaved_with_same_key_without_resend` 覆盖实际启动结果经原键核实并保存且不重发。路线图阶段 3 另记录调用结果保存及窗口结束的回滚、提交前／后与恢复用例。
+- 未核验前提：尚缺同一历史边界把授予后通知丢失、下一候选推进、启动尝试／活动收场及三路径恢复串联核对；这不是缺少所有阶段的中断注入，余项归路线图阶段 3 的跨阶段接缝。
 
 #### 验收 W-15
 - 原文：[验收 W-15](database/consistency-verification.md#等待与来源结束)（录像启动状态表全部合法与非法组合）。
@@ -192,8 +192,8 @@
 - 结论：部分覆盖
 - 归属：Q5 资源判定（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_resources.py
-- 证据：持有者推导、交错授予与矛盾报错已覆盖（scheduling 计划分段验证记录）；仓储层查询计划已由持久化 P6 收口核对，调度侧未完成工作查询计划未单独核对。
+- 测试：apps/camctl/tests/integration/scheduling/test_resources.py、apps/camctl/tests/integration/scheduling/test_recovery.py
+- 证据：`test_resources.py::test_grant_does_not_skip_dispatch_recheck`、`test_two_candidates_same_device_only_one_granted`、`test_earlier_candidate_wins_consistently` 覆盖派发前复查、同设备互斥和排序；`test_recovery.py::test_not_dispatched_activity_releases`、`test_ended_activity_releases`、`test_rejected_without_effect_releases` 与 `test_late_observation_keeps_new_owner_occupancy` 覆盖可靠释放和迟到旧观察不覆盖新归属。仓储层查询计划已由持久化 P6 收口核对，调度侧未完成工作查询计划未单独核对。
 - 未核验前提：调度查询的实际索引与查询计划核对，归路线图阶段 7 规模验证行。
 
 #### 验收 W-17
@@ -210,27 +210,27 @@
 - 结论：部分覆盖
 - 归属：Q 窗口观察与过期（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py
-- 证据：窗口观察、窗口外未派发过期与窗口守卫已接入生产路径（scheduling 计划分段验证记录）。
-- 未核验前提：窗口内发出、窗口后确认的在途确认子项，归路线图阶段 3 窗口行剩余。
+- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py、apps/camctl/tests/integration/capture/test_recording_start.py、apps/camctl/tests/integration/capture/test_recording_start_runtime.py、apps/camctl/tests/integration/capture/test_stop_confirmed_with_error.py、apps/camctl/tests/integration/capture/test_recording_start_query_cancel.py、apps/camctl/tests/integration/capture/test_recording_queries.py
+- 证据：窗口观察、窗口外未派发过期和窗口守卫已覆盖；`capture/test_recording_start.py::test_late_confirmation_after_window_is_accepted` 验证录像在窗口内派发、窗口后确认仍沿原责任继续，`scheduling/test_window_expiration.py::test_granted_intent_is_not_expired_by_window` 验证已授予意图不因窗口结束过期。未知启动先核实、不重发及核实耗尽时保留未知占用由 `capture/test_recording_start_runtime.py::test_unknown_start_uses_start_confirmation_before_any_resend`、`test_start_confirmation_exhaustion_keeps_unknown_occupancy_and_original_start`、`test_original_start_stays_in_flight_without_second_dispatch_or_early_terminal` 覆盖；窗口后不得派发且保留已用次数由 `test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt` 覆盖。窗口观察、可靠未派发、无效果等待、在途和迟到结果均有相应分区用例，见路线图阶段 3 的 2026-10-11 核对记录。
+- 未核验前提：单张拍摄、录像和延时摄影三种动作的启动、停止及结果核实，尚未与窗口边界、取消／有限核实及各结果分支组合到同一个历史边界，并共同完成三路径恢复对照；剩余项是统一交叉矩阵，不是上述分项行为缺少验证。
 
 #### 验收 W-19
 - 原文：[验收 W-19](database/consistency-verification.md#等待与来源结束)（意图提交后派发前跨过窗口）。
 - 结论：部分覆盖
 - 归属：Q 窗口与派发（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py
-- 证据：窗口外未派发事实与过期收场已覆盖；派发前后逐点中断未建立。
-- 未核验前提：中断注入与原尝试未知子项，归路线图阶段 3 窗口行剩余与中断行。
+- 测试：apps/camctl/tests/integration/capture/test_recording_start_runtime.py、apps/camctl/tests/integration/operations/test_attempts.py、apps/camctl/tests/integration/operations/test_recovery.py、apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py、apps/camctl/tests/integration/capture/test_call_result_save.py、apps/camctl/tests/integration/scheduling/test_window_expiration.py
+- 证据：`capture/test_recording_start_runtime.py::test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt` 覆盖意图已保存、窗口结束后不派发且不退还次数；同文件的未知启动先核实、不重发、耗尽后保留未知占用及原启动仍在途用例覆盖原责任保持。`operations/test_attempts.py::test_first_intent_creates_run_and_attempt_together` 与 `operations/test_recovery.py::test_intent_only_attempt_recovers_without_redispatch` 覆盖意图共同提交和只有意图时不重派发；`capture/test_recording_start_save_boundary.py`、`capture/test_call_result_save.py` 覆盖结果读取／投影／提交边界，`scheduling/test_window_expiration.py::test_unstarted_expiration_recovers_atomic_transaction` 覆盖 rollback、commit 前／后及三路径恢复。
+- 未核验前提：各中断点和结果分支已有分项证据；尚未将窗口外的意图、派发、响应与结果提交前后切点，以及可靠未派发、有／无效果和仍未知，组合成同一历史边界的完整对照与三路径恢复。
 
 #### 验收 W-20
 - 原文：[验收 W-20](database/consistency-verification.md#等待与来源结束)（调用截止与启动窗口分别触发；迟到成功不改写终态）。
 - 结论：部分覆盖
 - 归属：Q 窗口与 O 尝试（scheduling、operations 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py
-- 证据：迟到结果不改写终态已覆盖（capture、operations 计划分段验证记录）。
-- 未核验前提：截止与窗口分别触发的组合矩阵与三路径中断对照，归路线图阶段 3 窗口行剩余与中断行。
+- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py、apps/camctl/tests/integration/capture/test_stop_confirmed_with_error.py、apps/camctl/tests/integration/capture/test_recording_start_query_cancel.py、apps/camctl/tests/integration/capture/test_recording_queries.py、apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py、apps/camctl/tests/integration/capture/test_call_result_save.py
+- 证据：调用窗口后确认、已授予意图在窗口后保留、未知启动核实及结果保存边界见 W-18／W-19 用例。迟到停止调用在取消后仍等待实际结果并按真实停止事实收场由 `capture/test_stop_confirmed_with_error.py::test_cancel_during_in_flight_stop_waits_for_actual_result` 覆盖；取消后的迟到确认保留实际观察且不改写原动作与尝试终态由 `capture/test_recording_start_query_cancel.py::test_canceled_confirmation_keeps_actual_observation_and_original_terminals` 覆盖；原停止／活动查询结束后迟到核实由 `capture/test_recording_queries.py::test_orphan_stop_confirmation_settled_after_stop_succeeds`、`test_orphan_activity_observation_settled_after_cancel` 覆盖。`capture/test_call_result_save.py` 覆盖调用结果读取、投影及提交阶段的故障注入。
+- 未核验前提：现有分项证据尚未在同一历史 H 上交叉覆盖原调用截止与启动窗口、核实期间取消、迟到成功／错误及终态，并对初始回放、快照正向和当前投影逆向作整链对照；还须验证回放不读取当前时钟或调用设备。
 
 ## 二、相机读取机会与调度交接（W-07–W-12）
 
@@ -276,10 +276,10 @@
 - 原文：[验收 W-11](database/consistency-verification.md#相机读取机会与调度交接)（启动扫描和按设备候选查询分批进行）。
 - 结论：部分覆盖
 - 归属：Q3 工作发现（scheduling 计划）。
-- 生产入口：apps/camctl/src/camctl/outputs/dispatch.py
+- 生产入口：apps/camctl/src/camctl/scheduling/discovery.py、apps/camctl/src/camctl/outputs/dispatch.py、apps/camctl/src/camctl/outputs/obtain_flow.py
 - 测试：apps/camctl/tests/integration/scheduling/test_discovery.py
-- 证据：候选发现、排序与重启恢复已覆盖（scheduling 计划分段验证记录）。
-- 未核验前提：最优候选位于后续页、详情缓存淘汰与分批扫描，归路线图阶段 3 窗口行的分页与缓存淘汰子项。
+- 证据：`scheduling/test_discovery.py::test_pages_reach_candidates_beyond_first_batch` 验证首批仅有未来动作时继续翻页并发现计划时间更早的后续页候选；`test_cursor_positions_advance_independently` 验证动作、流程及尝试的分页游标分别推进；`test_cache_is_bounded_and_keeps_latest` 实际淘汰旧候选并保留最新有界批次；`test_new_submit_does_not_mutate_cached_parents` 验证新增提交不污染已有缓存且重新查询可发现新动作。`test_terminal_action_does_not_hide_call` 验证动作终态不会隐藏仍运行的调用，`test_unrelated_history_is_not_loaded_whole` 验证终态历史按有限批次处理而不整库常驻。相应范围已在路线图阶段 3 的 2026-10-11 复核中逐项确认。
+- 未核验前提：上述用例直接调用分页与缓存辅助函数；默认取回使用 `plan_device_work` 整批读取设备候选，主机源读取也一次收集全部未完成拷贝。实际消费者的分批处理，以及后续页最优候选、详情淘汰、初始化期间新提交和已有机会优先恢复的组合由[SW-06](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)跟踪。
 
 #### 验收 W-12
 - 原文：[验收 W-12](database/consistency-verification.md#相机读取机会与调度交接)（授予及释放的中断与三路径恢复一致）。
@@ -317,9 +317,9 @@
 - 结论：部分覆盖
 - 归属：X 排序与清理协调（outputs 计划）。
 - 生产入口：apps/camctl/src/camctl/outputs/dispatch.py
-- 测试：apps/camctl/tests/integration/outputs/test_device_work.py
-- 证据：业务顺序资格判定已覆盖（outputs 计划分段验证记录）。
-- 未核验前提：先取回后清理、先清理后取回及同时间的竞争交换，归路线图阶段 6 排序竞争行。
+- 测试：apps/camctl/tests/integration/outputs/test_qualification.py、apps/camctl/tests/integration/outputs/test_outputs_contract.py、apps/camctl/tests/integration/outputs/test_read_slot.py
+- 证据：`test_qualification.py::test_earlier_obtain_participates_before_its_selection_is_saved` 与 `test_earlier_cleanup_participates_before_restriction_is_saved` 覆盖选择／限制尚未保存时更早候选参与资格；`test_different_products_prepare_independently_after_their_due_time` 覆盖不同产物分别等待自己的计划时间，不是同产物的竞争排序测试。`test_existing_read_protection_preserves_original_copy` 验证两份取回独立建档且两条源依赖保持，`test_delete_in_progress_rejects_with_dedicated_code` 覆盖删除进行中拒绝。`test_outputs_contract.py` 覆盖两份副本均准备完成后清理源产物、继续发布及保留历史；`test_read_slot.py` 验证同时间读取候选按动作身份排序。它们证明这些分项，不覆盖本条全部交错顺序。
+- 未核验前提：尚须组合验证取消与建档分别先提交、建档后新增删除限制，以及同产物两份取回中一份完成解除依赖、另一份仍排队时继续受保护；不能以两份副本均准备完成后的清理代替非最后一条依赖解除的边界。归路线图阶段 6 的排序与清理协调验收。
 
 #### 验收 14
 - 原文：[验收 14](database/consistency-verification.md#取回读取保护与清理)（读取各期间失败或取消与依赖解除边界）。
@@ -335,9 +335,9 @@
 - 结论：部分覆盖
 - 归属：X 拷贝恢复（outputs 计划）。
 - 生产入口：apps/camctl/src/camctl/outputs/copy.py
-- 测试：apps/camctl/tests/integration/outputs/test_read_recovery.py
-- 证据：恢复保留原身份、次数与关联已覆盖（outputs 计划分段验证记录）。
-- 未核验前提：建档与准备完成各边界中断注入，归路线图阶段 6 中断行。
+- 测试：apps/camctl/tests/integration/outputs/test_copy_creation_slot.py、apps/camctl/tests/integration/outputs/test_copy_complete.py、apps/camctl/tests/integration/outputs/test_read_recovery.py
+- 证据：`test_copy_creation_slot.py` 覆盖建档时相机槽位资格与拒绝；`test_copy_complete.py::test_prepared_commit_releases_source` 注入准备事务提交结果未知，断言源依赖仍保留且副本未标为已准备，再次进入后以原键幂等完成准备并解除依赖。续传和重拷恢复由 `test_read_recovery.py` 与 outputs 计划分段记录覆盖。
+- 未核验前提：共同建档事务的完整中断矩阵仍需覆盖回滚、提交未知与通知丢失；准备完成已有未知结果后的重放证据，但真实 SQL 提交前／后、明确回滚与通知丢失的完整故障组合尚未在同一历史边界统一核对。归路线图阶段 6 事务接缝。
 
 #### 验收 16
 - 原文：[验收 16](database/consistency-verification.md#取回读取保护与清理)（三路径恢复取得相同资格和依赖事实）。
@@ -380,9 +380,9 @@
 - 结论：部分覆盖
 - 归属：X9 清理恢复（outputs 计划）。
 - 生产入口：apps/camctl/src/camctl/outputs/cleanup_flow.py
-- 测试：apps/camctl/tests/integration/outputs/test_cleanup_recovery.py
-- 证据：通知丢失后的启动恢复接续已覆盖（outputs 计划分段验证记录）。
-- 未核验前提：源依赖解除各边界中断注入，归路线图阶段 6 中断行。
+- 测试：apps/camctl/tests/integration/outputs/test_cleanup_recovery.py、apps/camctl/tests/integration/outputs/test_copy_complete.py
+- 证据：`test_cleanup_recovery.py` 覆盖通知丢失后的启动恢复接续；`test_copy_complete.py::test_prepared_commit_releases_source` 将准备保存返回 `UNKNOWN`，断言源依赖仍为 1、尚未进入准备状态，再次进入后完成准备并解除源依赖，覆盖未知结果后幂等重入。
+- 未核验前提：现有用例覆盖恢复通知和准备提交未知，但未组成源依赖解除真实 SQL 提交前／后、明确回滚及提交后通知丢失的同一历史边界三路径核对；归路线图阶段 6 事务接缝。
 
 #### 验收 21
 - 原文：[验收 21](database/consistency-verification.md#取回读取保护与清理)（多清理请求排队与跨重启预算）。
@@ -1062,7 +1062,7 @@
 - 证据：恢复等价与回放不操作设备已覆盖（history 计划分段验证记录）。
 - 未核验前提：共同提交前后逐点中断注入，归路线图阶段 3 中断行。
 
-## 七、路径定位、运行库与编号（F-01–F-08、V-01–V-04、J-01–J-06、E-01–E-02）
+## 七、路径定位、主机拍摄、运行库与编号（F-01–F-08、HBF-01–HBF-02、V-01–V-04、J-01–J-06、E-01–E-02）
 
 路径与文件操作的生产入口为 `apps/camctl/src/camctl/host_files/paths.py`、`apps/camctl/src/camctl/host_files/io.py` 与 `apps/camctl/src/camctl/host_files/handoff.py`；运行库条件为 `apps/camctl/src/camctl/persistence/runtime.py`；初始化为 `apps/camctl/src/camctl/persistence/initialization.py`。
 
@@ -1122,21 +1122,39 @@
 
 #### 验收 F-07
 - 原文：[验收 F-07](database/consistency-verification.md#中间文件的路径与定位)（责任全部结束后的允许切换）。
-- 结论：部分覆盖
-- 归属：B4 目录切换开放项（bootstrap 计划；允许切换分支已交付）。
+- 结论：已覆盖
+- 归属：B4 目录切换与主机交接（bootstrap 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/initialization.py、apps/camctl/src/camctl/persistence/directory_switch.py
-- 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py
-- 证据：B4 开放项交付验证记录（责任全部结束且原目录只剩空目录树时 SWITCHED 并三路径共同保存；数据库身份与全部业务历史保持；原目录原样保留、新目录准备后重复 init 按已有库验证；原配置恢复正常处理；相同、互相包含、跨文件系统与 Windows 大小写别名目录拒绝；来回切换各保存一整套绑定）。
-- 未核验前提：目标 Linux 环境的符号链接真实对象核对（Windows 开发环境不可创建）与主程序采用新交接路径后的恢复领取联调，归 B7 目标部署复验。
+- 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py、tests/integration/test_camctl_directory_switch.py
+- 证据：`test_directory_switch.py::test_configured_root_symlink_is_rejected` 在 Linux 上实际创建 staging、ready、processing 三处的有效与悬空符号链接，并分别验证新库初始化拒绝且不创建状态库、既有库切换拒绝且保持原绑定（DS2 记录 39 passed、1 skipped，Windows 仅跳过真实链接对象测试）。责任全部结束且原目录只剩空目录树时，切换共同保存三路径、保留数据库身份及全部业务历史；其他路径边界、原目录保留和重复初始化亦有覆盖。`tests/integration/test_camctl_directory_switch.py::test_new_binding_publishes_and_claims_after_explicit_init` 以真实 CLI 和 C 接入模块在新绑定发布并领取报告，核对 processing 字节和旧目录无残留。
+- 未核验前提：无
 
 #### 验收 F-08
 - 原文：[验收 F-08](database/consistency-verification.md#中间文件的路径与定位)（切换各边界中断与三路径共同更新）。
-- 结论：部分覆盖
-- 归属：B4 目录切换开放项（bootstrap 计划；中断矩阵主体已交付）。
+- 结论：已覆盖
+- 归属：B4 目录切换的历史保留与进程恢复（bootstrap 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/initialization.py、apps/camctl/src/camctl/persistence/directory_switch.py
-- 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py、apps/camctl/tests/unit/persistence/test_directory_switch.py
-- 证据：B4 开放项交付验证记录（提交注入失败回滚后重读判定 not_completed 且库值保持整套旧绑定、混合组合判 inconsistent 不混用新旧目录；提交成功后重读核实三列整体为新值；绑定保存失败时新空目录保留不构成切换成功；准备前各检查中止保持原绑定；切换保留数据库身份与全部表内容）。
-- 未核验前提：带真实报告历史、累计 ACK 与文件 ID 的库切换保留验证及切换后历史回放、进程在提交后返回前被终止的字面中断模拟，归 I 跨组件复验场景群（路线图 376-377 行）。
+- 测试：apps/camctl/tests/integration/bootstrap/test_directory_switch.py、apps/camctl/tests/integration/bootstrap/test_directory_switch_history.py、apps/camctl/tests/unit/persistence/test_directory_switch.py、tests/integration/test_camctl_directory_switch.py
+- 证据：提交边界注入后重读整组三路径并分类完成、未完成或不一致；`test_directory_switch_history.py::test_switch_preserves_report_bytes_ack_and_file_history` 使用真实报告、文件 ID 与累计 ACK，切换后逐表核对业务记录并重建旧报告，确认原字节不变。`test_process_exit_preserves_whole_binding_and_business` 分别在提交前和实际提交后返回前终止子进程，再由新进程核对完整旧／新绑定和业务历史，并验证显式初始化可继续。跨组件测试另以真实 CLI 和 C 模块验证新目录发布与领取（DS3 记录 Linux 通过）。
+- 未核验前提：无
+
+#### 验收 HBF-01
+- 原文：[主机单张拍摄的成对文件责任](database/consistency-verification.md#主机单张拍摄的成对文件责任)（原图和预览共同登记、保存完整字节并恢复原身份）。
+- 结论：部分覆盖
+- 归属：Hasselblad T1/T3（主机文件责任和单张拍摄编排）。
+- 生产入口：apps/camctl/src/camctl/capture/host_photo.py、apps/camctl/src/camctl/persistence/repositories/host_capture.py、apps/camctl/src/camctl/persistence/repositories/capture.py、apps/camctl/src/camctl/history/host_photo_request.py
+- 测试：apps/camctl/tests/integration/capture/test_host_photo_storage.py、apps/camctl/tests/integration/capture/test_host_photo_flow.py、apps/camctl/tests/integration/capture/test_host_photo_finish_pair_boundary.py、apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py、apps/camctl/tests/integration/capture/test_host_photo_malformed_history_entries.py、apps/camctl/tests/integration/host_files/test_capture_sources.py
+- 证据：`test_host_photo_storage.py::test_prepare_reuses_action_files_across_operation_keys_without_physical_files` 核对两份固定用途路径和稳定文件身份；`test_host_original_preview_register_promote_and_recover_without_new_outputs` 核对同一事务中的 `CREATE`、`HOST_PHOTO_COMPLETE`、原图与预览关联以及同键／新键恢复。`test_host_photo_flow.py::test_host_photo_resumes_after_original_archive_and_ignores_later_binding_failure` 在原图已归档后注入中断，恢复时复用原图并完成预览，仅派发一次 START；`test_complete_receipt_unknown_verifies_same_request_and_key` 覆盖完整字节已提交但回执未知的独立只读核实。`test_capture_sources.py` 分别验证原图和 JPEG 的大小、摘要与文件同步，以及移动后重试复用匹配目标；历史测试覆盖准备、完整字节、成品与清理边界的恢复。ARM 记录另有真实 RAW 与配对 JPEG 的拍摄、独立取回及报告证据（[软件验证](verification.md#hasselblad-主机单张接入的软件验证2026-10-12)、[ARM 验收](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)）。
+- 未核验前提：现有流程中断用例在同一个 runtime 实例中恢复；没有用新装配的进程级运行时分别恢复“START 结果已保存但尚未归档”及“两份源文件均归档但完整字节事件尚未保存”的组合。该范围是恢复演练覆盖边界，不否定已经验证的成对持久化、原图归档后恢复或 ARM 真实拍摄链。
+
+#### 验收 HBF-02
+- 原文：[主机单张拍摄的成对文件责任](database/consistency-verification.md#主机单张拍摄的成对文件责任)（提交结果未知时使用独立只读连接核实原请求与键，格式 1/2 保持各自边界）。
+- 结论：部分覆盖
+- 归属：Hasselblad T3（原请求核实）与状态库格式 P1（persistence 计划）。
+- 生产入口：apps/camctl/src/camctl/capture/host_photo.py、apps/camctl/src/camctl/persistence/repositories/host_capture.py、apps/camctl/src/camctl/persistence/runtime.py
+- 测试：apps/camctl/tests/integration/capture/test_host_photo_flow.py、apps/camctl/tests/integration/capture/test_host_photo_storage.py、apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py、apps/camctl/tests/integration/capture/test_host_photo_malformed_history_entries.py、apps/camctl/tests/integration/persistence/test_format_admission.py、apps/camctl/tests/integration/bootstrap/test_initialization.py、apps/camctl/tests/integration/bootstrap/test_distribution.py
+- 证据：`test_host_photo_flow.py::test_complete_receipt_unknown_verifies_same_request_and_key` 覆盖完整字节事务已提交但调用方收到未知时，先结束原写事务，再用另一条 `query_only` 连接核实相同请求和键，且拍摄只执行一次；`test_unknown_host_photo_receipt_without_verifier_retains_request` 覆盖核实端口缺失或抛错时原请求仍在运行时待处理集合中，且不重复拍摄。`test_host_photo_storage.py::test_original_complete_request_can_be_verified_after_promotion_with_new_connection` 覆盖新连接重建已提交准备／完整字节申请、修改申请返回未知、未登记键返回可靠未提交；畸形事件测试覆盖核实读取拒绝坏申请。格式 1 的初始化保持历史和版本（`test_initialization.py::test_init_preserves_legacy_v1_sql_metadata_and_history`），受理及仓储入口均拒绝新增主机照片责任且无历史副作用；安装包测试确认格式 2 新库和主机照片计划。ARM 格式 2 初始化及真实拍摄记录见[ARM 验收](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
+- 未核验前提：仓储测试已分别验证核实结果为 `ROLLED_BACK`、`UNKNOWN` 和 `COMPLETED`，生产流程代码也按原请求与键分支处理；尚缺一项流程集成组合，注入前次保存回执未知后依次让独立核实返回“可靠未提交”或“仍未知”，断言同键重试或保留待处理申请。当前已验证的 ARM 拍摄、配对、取回与报告不依赖该模拟分支。
 
 #### 验收 V-01
 - 原文：[验收 V-01](database/consistency-verification.md#sqlite-运行库与部署版本)（统一条件文件的版本判定）。
@@ -1153,8 +1171,8 @@
 - 归属：P1 运行库（persistence 计划）与 H 快照（history 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/runtime.py
 - 测试：apps/camctl/tests/integration/persistence/test_runtime.py
-- 证据：写连接 PRAGMA 核验（WAL/FULL）、STRICT/JSON 由结构 SQL 与事务测试覆盖、增量 BLOB 分段读写由快照维护覆盖（persistence、history 计划分段验证记录；检查器执行全部规格 SQL）。
-- 未核验前提：目标部署环境的实际 Python 路径与构建身份记录，归 V-04/B7。
+- 证据：写连接 PRAGMA 核验（WAL/FULL）、STRICT/JSON 由结构 SQL 与事务测试覆盖、增量 BLOB 分段读写由快照维护覆盖（persistence、history 计划分段验证记录；检查器执行全部规格 SQL）。ARM64 Hasselblad 验收实际记录 CPython 3.11.17、SQLite 3.53.1、独立虚拟环境和安装发行物，并完成格式 2 初始化、拍摄、取回及报告（见[ARM 真实拍摄与取回验收](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)）；Action6 普通录像也在同一目标环境完成现场验收（见[现场验收记录](verification.md#action6-普通录像演示的现场验收2026-10-11)）。
+- 未核验前提：目标进程的 `sqlite_source_id()` 与 SQL `sqlite_version()` 对照，以及在 ARM64 上单独执行的 JSON、增量 BLOB、WAL/FULL 能力检查未见记录；归 V-04/B7。
 
 #### 验收 V-03
 - 原文：[验收 V-03](database/consistency-verification.md#sqlite-运行库与部署版本)（init、run、submit 与报告子进程的兼容分支）。
@@ -1168,11 +1186,11 @@
 #### 验收 V-04
 - 原文：[验收 V-04](database/consistency-verification.md#sqlite-运行库与部署版本)（目标 Python 3.11/ARM64 发行物固定构建验证）。
 - 结论：部分覆盖
-- 归属：真实 ARM64 硬件的构建与运行差异复验，见[部署交接与待核验项](verification.md#部署交接与待核验项)。
+- 归属：P1 运行库条件（persistence 计划）与 B7 发行物及部署验证（bootstrap 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/runtime.py
 - 测试：apps/camctl/tests/integration/bootstrap/test_distribution.py、apps/camctl/tests/integration/persistence/test_runtime.py
-- 证据：B7 已按部署验证裁决在 WSL x86 合规环境（cpython-3.11.17/SQLite 3.53.1）完成源码目录之外的发行物构建、按锁文件安装与 init/describe/submit/设备替身 run 验证，发行物自包含权威资源且只声明运行时依赖；Windows 开发机同样通过（[B7 验证记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-验证记录2026-10-08)）。
-- 未核验前提：真实 ARM64 硬件上的发行物构建（或安装）与运行差异复验，按部署交接表在目标硬件执行，不以 x86 通过代替。
+- 证据：B7 已在 WSL x86 合规环境（CPython 3.11.17、SQLite 3.53.1）完成源码目录外构建、按锁文件安装、`init`/`describe`/`submit`/设备替身 `run`，并核对权威资源及运行依赖（[B7 验证记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-验证记录2026-10-08)）。目标 ARM64 已安装发行物并在真实工作流中运行：Hasselblad 使用独立环境和数据目录完成格式 2 初始化、真实单张拍摄、原图与预览配对、独立取回及报告；Action6 普通录像在 ARM 安装更新包后由用户确认演示及独立取回正常（[Hasselblad ARM 验收](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)、[Action6 现场验收](verification.md#action6-普通录像演示的现场验收2026-10-11)）。
+- 未核验前提：尚无 ARM64 上直接执行统一运行库能力检查，并组合验证真实 WAL 多连接、读视图、提交、历史恢复及报告流程的专项记录；这项 SQLite 目标运行库验证仍归 P1/B7。它不影响已完成的 Action6 普通录像和 Hasselblad 单张现场验收，也不表示 ARM64 安装与运行尚未进行。
 
 #### 验收 J-01
 - 原文：[验收 J-01](database/consistency-verification.md#历史引用与事务边界)（规则文件逐列核对引用分类）。
@@ -1194,12 +1212,12 @@
 
 #### 验收 J-03
 - 原文：[验收 J-03](database/consistency-verification.md#历史引用与事务边界)（首次事实不被后续观察覆盖）。
-- 结论：已覆盖
+- 结论：部分覆盖
 - 归属：H2 历史归属（history 计划）。
-- 生产入口：apps/camctl/src/camctl/history/changes.py
-- 测试：apps/camctl/tests/integration/history/test_changes.py
-- 证据：history 计划分段验证记录。
-- 未核验前提：无
+- 生产入口：apps/camctl/src/camctl/history/changes.py、apps/camctl/src/camctl/persistence/repositories/acceptance.py、apps/camctl/src/camctl/session/service.py
+- 测试：apps/camctl/tests/integration/history/test_changes.py、apps/camctl/tests/integration/acceptance/test_acceptance.py、apps/camctl/tests/integration/session/test_session.py
+- 证据：`history/test_changes.py::test_internal_event_has_no_watermark_and_consumes_none` 覆盖可信时间首次建立的事件引用与业务水位边界，历史计划分段验证记录覆盖 J-03 的首次事实与既有结果保持。受理测试覆盖事件构造及复用流程，但当前没有断言受理事件的 `clock_status` 与调用模式一致。
+- 未核验前提：受理仓储的 `_envelope` 将所有受理事件固定记为 `TRUSTED`；`submit` 和带计划 `run` 均在启动墙钟检查前完成受理，因此这些事件需要表示尚未检查的 `UNCHECKED`。该缺口由[SW-01](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)跟踪；它不否定本条其他首次写入及历史恢复覆盖。
 
 #### 验收 J-04
 - 原文：[验收 J-04](database/consistency-verification.md#历史引用与事务边界)（交错保存与逆向撤回的计数）。
@@ -1513,7 +1531,7 @@
 
 ## 九、跨模块契约场景
 
-[跨模块契约检查](verification.md#跨模块契约检查)的十项组合场景在此映射到实际生产入口、测试与验证证据。场景条目独立于上文验收条目编号；每条包含五项：规则、结论、生产入口、测试、证据、未核验前提，结论分类与上文一致。单个模块测试通过不代表整条业务链组合成立，本节只登记已有组合证据的边界。
+[跨模块契约检查](verification.md#跨模块契约检查)的十项组合场景在此映射到实际生产入口、测试与验证证据。场景条目独立于上文验收条目编号；每条包含六项：规则、结论、生产入口、测试、证据、未核验前提，结论分类与上文一致。单个模块测试通过不代表整条业务链组合成立，本节只登记已有组合证据的边界。
 
 #### 场景 配置变化后继续工作
 - 规则：[本地配置变化与未完成工作](../architecture/configuration.md#本地配置变化与未完成工作)、[设备绑定异常的影响范围](../architecture/configuration.md#设备绑定异常的影响范围)
@@ -1525,11 +1543,11 @@
 
 #### 场景 延时摄影等待与完成
 - 规则：[设备自行结束时的等待与完成核实](../architecture/camera-capture.md#设备自行结束时的等待与完成核实)、[相机验证](../architecture/camera-verification.md)
-- 结论：部分覆盖
+- 结论：已覆盖
 - 生产入口：apps/camctl/src/camctl/capture/handlers.py、apps/camctl/src/camctl/persistence/repositories/timelapse.py
-- 测试：apps/camctl/tests/integration/capture/test_result_confirmation.py
-- 证据：发送锚点保存、跨检查轮恢复、时间与产物双依据、不满足保存已知失败保持占用、未确认标记等分区均有失败用例并纳入回归（capture 计划分段验证记录）。
-- 未核验前提：单文件、多文件、合法空结果、集合未齐、读取错误、核实耗尽及跨运行配置变化的完整结果核实矩阵，归路线图阶段 4 结果核实行。
+- 测试：apps/camctl/tests/integration/bootstrap/test_timelapse_finish.py、apps/camctl/tests/integration/capture/test_result_confirmation.py、apps/camctl/tests/integration/capture/test_timelapse_wait_runtime.py
+- 证据：RC4 的真实 run 装配覆盖单文件、多文件、合法空列举但必需类型缺失、未写完文件、集合尚未齐备、列举错误、轮数耗尽及跨运行预算上调／下调；分别核对完整结果、已知失败或未确认结论、产物登记与占用收场。`bootstrap/test_timelapse_finish.py` 对原子结论保存、同键重入和等待配置重送亦有测试；`capture/test_result_confirmation.py` 覆盖文件归属、结果结论与原子结束，结果与等待分区见 RC4 的 2026-10-11 记录。
+- 未核验前提：无
 
 #### 场景 普通交付移入 ready 后，结果保存前中断
 - 规则：[普通交付的保存顺序与中断恢复](../architecture/file-handoff.md#普通交付的保存顺序与中断恢复)、[产物验证](../architecture/output-verification.md)
@@ -1565,11 +1583,11 @@
 
 #### 场景 日志错误触发副本交付
 - 规则：[日志适配与写入完成通知](logging-runtime.md#日志适配与写入完成通知)、[日志交付](../architecture/log-delivery.md)、[故障标记](../architecture/log-failure-marker.md)
-- 结论：已覆盖
+- 结论：部分覆盖
 - 生产入口：apps/camctl/src/camctl/logging_runtime/copies.py、apps/camctl/src/camctl/session/service.py
-- 测试：apps/camctl/tests/integration/logging_runtime/test_copies.py、apps/camctl/tests/integration/session/test_session.py、tests/integration/test_camctl_report_roundtrip.py
-- 证据：副本包含触发错误与轮换竞争字节、标记创建失败先于复制、发布失败清理暂存、失败交付不重试、状态库不可用不阻塞交付（组件层与跨组件两处）及会话内触发链均通过（logging_runtime、session 计划与集成计划 I 系列验证记录）。
-- 未核验前提：无
+- 测试：apps/camctl/tests/unit/logging_runtime/test_copies.py、apps/camctl/tests/integration/logging_runtime/test_copies.py、apps/camctl/tests/integration/session/test_session.py、tests/integration/test_camctl_report_roundtrip.py
+- 证据：副本包含触发错误与轮换竞争字节、标记创建失败先于复制、发布失败清理暂存、失败交付不重试、状态库不可用不阻塞交付（组件层与跨组件两处）及会话内触发链均通过（logging_runtime、session 计划与集成计划 I 系列验证记录）。现有进度写入失败测试确认仍继续发布，但没有验证 `MarkerSave.error` 进入诊断；保存错误诊断与本次临时文件清理、生产启动清理接线仍未覆盖完整。
+- 未核验前提：日志副本与标记失败的会话诊断、每次失败保存对本次临时文件的清理，以及默认 `run` 对旧日志副本和标记临时文件的启动扫描接线分别由[SW-02、SW-03、SW-04](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)跟踪。副本自身条件满足时继续交付的现有行为保持已验证结论。
 
 #### 场景 业务事实保存后生成历史报告
 - 规则：[独立历史与报告重建](database/consistency-verification.md#独立历史与报告重建)、[报告验证](../architecture/report-acceptance.md)
@@ -1611,10 +1629,24 @@
 
 Python 组件测试路径相对 `apps/camctl/tests/`；前两行未标出分类的 Python 测试属于 `integration/`。客户端测试分别位于 `apps/client/tests/unit/` 和 `integration/`，host 测试位于 `apps/host-demo/tests/`，根测试位于 `tests/integration/`。这些软件验证不覆盖 TX2、电机实际执行或物理断电，具体部署输入见[部署交接](verification.md#部署交接与待核验项)。
 
+## ARM 目标运行与真实相机验收范围（截至 2026-10-13）
+
+本节补充软件映射之外的 ARM 安装和真实相机证据，不改变前述 165 条软件验收及十项跨模块场景的结论统计。目标 Python 3.11 发行物已在 ARM64 上安装并用于以下两项已完成的相机演示；SQLite 专项能力检查、其他设备场景和部署方验收分别保留其自身边界。
+
+| 验收范围 | 当前结论 | 证据与未覆盖范围 |
+| --- | --- | --- |
+| ARM64 上的 camctl 安装与运行 | Action6 普通录像和 Hasselblad 单张拍摄均已在目标 ARM64 环境运行。 | 现场记录的解释器为 CPython 3.11.17，SQLite 为 3.53.1。Hasselblad 使用独立虚拟环境、独立数据目录和已安装发行物；Action6 使用 ARM 更新后的 camctl 与 C host。SQLite 版本与工作流证据见[V-02](#验收-v-02)、[V-04](#验收-v-04)。目标运行库的完整 WAL 多连接、读视图、提交和历史恢复专项仍未执行，不能把这一项未完成扩大解释为 ARM 安装或两项现场工作流未完成。 |
+| Action6 普通录像 | 2026-10-11 的 ARM 演示按用户现场确认验收通过。 | 用户确认演示正常，并明确回传客户端生成取回计划和成功完成独立取回。原始计划、正式报告、媒体文件和确认水位没有归档；不补写媒体属性、摘要、实测码率或逐项响应。详见[Action6 普通录像现场记录](verification.md#action6-普通录像演示的现场验收2026-10-11)。 |
+| Hasselblad CFV 100C 单张拍摄 | 2026-10-12 在 ARM64 上完成真实 RAW 拍摄、主机原图与配对 JPEG 预览登记、取回及报告生成。 | 新库以格式 2 初始化；格式 1 的既有业务保持兼容，不隐式升级，格式 1 新增 Hasselblad 拍摄仍受拒绝规则保护。正式源文件保留在主机；删除两份交付副本后再次取回，产生新的独立交付且未再次拍摄。取回文件的领取和删除由验收脚本模拟，不代表第三方传输；原 RAW 未纳入归档或解码，相机端是否同时保留原片仍未确认。本次没有物理断电。详见[Hasselblad ARM 验收记录](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。 |
+| Action6 原生延时摄影 | 尚未完成真实设备验收。 | 当前没有已核实的设备停止接口和完整结束、文件写完及产物集合证据；诊断和驱动状态见[原生延时记录](verification.md#action6-的-windows-原生延时采样2026-10-10)及接入计划。 |
+| OSMO 360 II 完整接入 | 尚未完成真实设备验收。 | 目前没有完整真实设备接入及 ARM 业务链证据；按[相机接入计划](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。 |
+| 第三方接入、目标资源与物理断电 | 尚无通过证据。 | Action6 演示使用 ARM64 上构建安装的 C host；ARM64 上尚未运行 host-demo 组件 CTest，也没有实际第三方主程序或传输程序接入证据。Hasselblad 验收中的领取由脚本模拟。本次没有电机实测、目标资源测量或物理断电验收。部署方输入及通过条件见[目标联调记录](verification.md#部署交接与待核验项)。 |
+
 ## 执行记录
 
 - 2026-10-08（Linux x86_64，CPython 3.11.16）：I1/I2 与真实 O6 组合验证通过，验收 32、33、R-09、R-10、R-11 及遗留工具契约场景升级为已覆盖；34 增补 C 收场期间 pending 与预算的证据，R-12 分别登记 C 软件证据和部署联调前提。具体命令、环境和范围见[接入模块验证记录](../host-demo/verification.md)及[跨组件计划](../superpowers/plans/2026-09-30-camctl-integration.md#i1i2-验证记录2026-10-08linux-x86_64)。
 
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：新增[九、跨模块契约场景](#九跨模块契约场景)十项映射并扩展 `tests/integration/test_camctl_acceptance_map.py` 检查器（场景清单解析自 verification.md 表格、字段与引用逐项校验、条目解析不再跨章节读取）；验收 68、P-03、P-04、P-06 依据 history 计划 H7 规模测量记录升级为已覆盖。`tests/integration/test_camctl_acceptance_map.py` 3 项全部通过。
 - 2026-10-08（Windows 开发机，uv CPython 3.11）：`tests/integration/test_camctl_acceptance_map.py` 全部通过；引用的模块测试文件与生产入口路径逐一核验存在。此前的最近全量回归见[集成计划验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i4-验证记录2026-10-07)（Windows 单元 3353、根跨组件 52+4 跳+342 子测试、bootstrap 87、session 82；WSL 单元 3352+1 跳、reporting 345 等）。
-- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 163 条（数字条目 72 条、字母条目 91 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至本记录：验收条目已覆盖 140 条，部分覆盖 23 条，开放 0 条；契约场景已覆盖 8 项，部分覆盖 2 项。开放与部分覆盖条目的未核验前提均归属到模块任务或路线图行（B4 两项开放功能已交付：目录切换允许分支与运行库 `configuration_error` 分类，F-06/V-03 升级为已覆盖，F-07/F-08 剩余前提为目标 Linux 符号链接对象、主程序恢复领取联调与带真实报告历史的切换保留验证），不作为行为通过的依据。
+- 2026-10-13（验收映射与当前 ARM 证据核对）：逐条复核 165 项的权威编号、结论、生产入口、测试入口和未核验前提，并复核十项跨模块场景；全部入口路径均存在。2026-10-12 的最新全量软件回归记录为单元测试 `5076 passed, 1 skipped`、16 个集成目录合计 `6209 passed, 3 skipped`；之后另有 capture 完整目录 `1088 passed`、主机照片专项 `19 passed`、收场恢复专项 `93 passed` 及安装版专项 `1 passed`（本次审阅未运行测试）。现场结果见[Hasselblad 软件及 ARM 验收](verification.md#hasselblad-主机单张接入的软件验证2026-10-12)和[ARM 真实拍摄与取回验收](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)，以及[Action6 普通录像现场确认](verification.md#action6-普通录像演示的现场验收2026-10-11)。Action6 普通录像和 Hasselblad 单张已通过各自记录的现场范围；Action6 原生延时、OSMO、V-02/V-04 所列的目标 SQLite 专项、第三方传输、目标资源及物理断电仍分别按上表和对应责任入口跟踪。
+- 本映射覆盖[数据库一致性验收](database/consistency-verification.md)全部 165 条（数字条目 72 条、字母条目 93 条）与[跨模块契约检查](verification.md#跨模块契约检查)十项场景。截至 2026-10-13 本次复核，验收条目已覆盖 141 条、部分覆盖 24 条、开放 0 条；契约场景已覆盖 8 项、部分覆盖 2 项。较 2026-10-08 记录新增的 HBF-01 和 HBF-02 均列为部分覆盖，并保留各自尚未核验的恢复分支；本次复核补入 W-11、验收 13 的分项证据，并按实际消费者和交错顺序的覆盖边界保留部分覆盖；依据 Linux 符号链接、主机领取、真实报告历史及进程中断证据将 F-07/F-08 升为已覆盖，并将延时摄影结果矩阵场景升级为已覆盖。W-05、W-06、W-14、W-18—W-20 及取回事务条目的剩余范围已按现有具名证据收窄。该统计描述软件验收映射，不将目标设备工作流混入编号结论。部分覆盖条目的未核验前提均归属到模块任务或路线图行（B4 已交付目录切换与运行库 `configuration_error` 分类，F-06/F-07/F-08/V-03 已覆盖；J-03 受理时钟状态由 SW-01 跟踪，日志诊断、临时文件清理和启动扫描由 SW-02—SW-04 跟踪，读取发现分批处理由 SW-06 跟踪），不作为行为通过的依据。

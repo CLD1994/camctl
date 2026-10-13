@@ -33,6 +33,8 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 ## 实施计划与验证依据
 
+当前交付、软件遗漏及设备调试进度统一从[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)核对；本目录的行为与实现专题定义有效规则，带日期的验证记录保存相应环境中的实际结果。
+
 | 文档 | 用途 |
 | --- | --- |
 | [第一版实施路线图与模块计划目录](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口) | 引用 15 个模块计划及跨组件集成计划，按任务编排阶段、前置交付和完整业务链门禁 |

@@ -38,6 +38,7 @@ camctl-client/
     data/
         device-capabilities.json
         client.db
+        uploads/
 ```
 
 | 路径 | 职责 |
@@ -46,12 +47,13 @@ camctl-client/
 | `data/` | 用户电脑上的持久化目录，在启动前准备并赋予应用所需的读写权限 |
 | `data/device-capabilities.json` | 用户手工复制覆盖的完整能力说明；客户端按本专题加载 |
 | `data/client.db` | 客户端后端管理的 SQLite 数据库，保存草稿、原请求、预设、报告状态及累计确认进度 |
+| `data/uploads/` | 后端按需创建并管理完整图片、视频副本及上传处理中间文件；数据库保存相对于 `data/` 的媒体路径，随整个持久化目录一起备份和恢复，详见[客户端运行说明](../client/running.md#数据目录) |
 
 Compose 将相对于配置文件的 `../../data/` 整体映射为容器内的 `/app/data/`。源码构建上下文为仓库根目录，包含 `apps/client` 和 `protocol/schemas`。后端从 `/app/data/device-capabilities.json` 读取说明，使用 `/app/data/client.db` 保存客户端数据。目录映射采用 Docker 的 bind mount（绑定挂载），让容器直接访问用户电脑上的指定目录，机制见[目录挂载说明](https://docs.docker.com/engine/storage/bind-mounts/)。
 
 挂载整个目录，使用户通过文件管理器复制、覆盖或替换能力说明文件后，后端重新打开固定路径即可读取当前文件。后端不要求用户进入容器操作文件。SQLite 运行所需的伴随文件也位于持久化目录，不能只持久化数据库主文件而把必要数据留在容器临时存储中。
 
-重新创建或更新应用容器时继续挂载同一个 `data/`，不清空或用部署包中的初始数据覆盖它。能力说明的加载不删除、替换或重建 `client.db`。本目录用于个人电脑上的客户端；嵌入式主机上 camctl 的配置、状态库及交接目录继续遵守各自契约。
+重新创建或更新应用容器时继续挂载同一个 `data/`，不清空或用部署包中的初始数据覆盖它。能力说明的加载不删除、替换或重建 `client.db`，也不清理其中的媒体文件。本目录用于个人电脑上的客户端；嵌入式主机上 camctl 的配置、状态库及交接目录继续遵守各自契约。
 
 部署配置提供客户端镜像构建和启动入口，用户通过本机 `localhost` 端口访问网页。具体操作见[运行说明](../client/running.md)，容器部署由部署人员验证。
 

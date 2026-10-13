@@ -1,12 +1,18 @@
 # Action6 普通录像演示与相机资料采集
 
-正式演示在 ARM Linux 上通过已安装 camctl 和 C host 控制 Action6，完成普通录像、正式产物登记、独立取回、文件领取和报告确认。Windows 负责试验 ADB 命令并采集原始设备资料；本文的采集器和诊断脚本用于取得这些资料。任务范围及完成依据见[相机接入设计](../superpowers/specs/2026-10-10-camctl-real-camera-demo-design.md)，双相机软件验证与当前真机门禁分别由[实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)和[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
+ARM 上的 Action6 普通录像演示已由用户于 2026-10-11 确认正常，T9 当前演示范围完成。当前不需要再次拍摄或要求用户补交报告；原始计划、正式报告、媒体文件和确认水位未归档，因此本文不补写测量值或逐项结论。详见[普通录像现场验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。
 
-| 当前真机演示 | 拍摄要求 | 后续交接 |
+Action6 原生延时摄影的诊断已暂停；STOP、实际开始与结束、文件完成及最终产物集合尚未由真机证据确认。不要对这次未闭合试验运行 `--capture timelapse`、重发 START 或自动重试；只有对已有采样目录进行只读观察时才使用 `--observe`。OSMO 360 II 整体真机联调也未完成。范围与证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)及[组件验证记录](../camctl/verification.md)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
+
+真实目标主机性能测量、物理断电后的持久性验证和真实第三方传输方联调采用独立验收范围；边界见[第一版完善与验收范围](../architecture/README.md#第一版完善与验收范围)和[文件交接规格](../architecture/file-handoff.md)。本文保留相机资料采集、诊断工具说明以及 ARM 安装版 host 演示的操作步骤，设备当前结果以组件验证记录为准。
+
+Windows 采集器保存逐次调用及设备目录观察；ARM Linux 步骤说明如何从已安装的 camctl 与 C host 开展演示。任务范围和软件验证由[相机接入设计](../superpowers/specs/2026-10-10-camctl-real-camera-demo-design.md)、[实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)和[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
+
+| 已验收的真机演示 | 拍摄要求 | 后续交接 |
 | --- | --- | --- |
 | Action6 普通录像 | 目标 10 秒，主机发送停止 | 独立取回正式产物，经 C host 领取文件并确认报告 |
 
-设备试验先取得设置、启动、停止及文件访问的实际响应，确定每种返回能够证明什么。正式演示前，先完成 Action6 普通录像的响应解释、停止与产物完成依据、文件访问契约，并在正常启动路径实际启用。正式任务只使用 `camctl describe` 导出的完整能力；配置和计划模板不能使候选任务变为可执行能力。命令候选和相互约束见[相机控制交接资料](camera-control-handoff.md)，具体启用及验收步骤由上述 T9 跟踪。
+新增设备接入前，应先核实设置、启动、停止及文件访问的设备事实。生产任务只使用 `camctl describe` 导出的完整能力；配置和计划模板不能使候选任务变为可执行能力。命令候选和资料缺口见[相机控制交接资料](camera-control-handoff.md)，行为契约由相应[架构规格](../architecture/README.md)维护。
 
 ## Windows 上采集设备资料
 
@@ -60,6 +66,8 @@ py -3.11 collect_call.py action6/011-before-sd adb -s <serial> shell 'find /mnt/
 
 [action6_record_probe.py](action6_record_probe.py) 使用 Python 3.11，在一次执行中重新进入普通录像模式，依次发送 4K/30 fps、Pro 开启、Auto 曝光、5200 K 白平衡、0 EV、D-Log M、Wide、关闭增稳及高码率命令，然后试录、停止、列出新增文件、拉取新增 MP4、核对源端与副本的长度和 SHA-256，并保存 `ffprobe` 的实际媒体信息。光圈的命令与返回仍需资料方说明，诊断脚本将光圈标为未确认；它不替代包含光圈要求的完整预设验收。
 
+当前 ARM 普通录像演示已完成，不要为重复取证启动此 Windows 诊断流程。脚本的默认模式会设置并启动一段新的普通录像；只有另行安排新的诊断时，才按本节操作。光圈与码率能力边界见[参数规格](../architecture/camera-parameters.md)。
+
 将脚本与 [collect_call.py](collect_call.py) 放在 Windows 的 `platform-tools` 目录，使用现有 Python 3.11 环境执行。明确指定相机 serial 和已安装的 `ffprobe`；例如：
 
 ```powershell
@@ -95,82 +103,37 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 
 ## 延时摄影资料
 
-延时摄影的设备接入条件和后续诊断目标由[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。Action6 延时诊断使用正常新机，OSMO 的试验以设备能够进入 ADB 为前提；这些任务不属于当前普通录像演示。OSMO 后续诊断要求为 5 秒间隔、持续 60 秒，完整负载、编码和设备支持须先核实，不能直接改写原表预设。原始完整组合仍见[Action6 延时资料](camera-control-handoff.md#action--action6-静止延时摄影)及[OSMO 延时资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)。下述 Action6 工具保留候选诊断和原记录只读复查的使用方法，试验结果只表达实际观察。
+Action6 和 OSMO 的延时摄影仍是设备接入范围，但当前 Action6 原生延时诊断已暂停，OSMO 整体联调未完成。设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。本节只说明诊断脚本保留的行为和既有记录的只读复查入口，不是当前拍摄指令。
 
 ### Action6 原生延时的统一采集
 
-更新 Windows 上的 [action6_record_probe.py](action6_record_probe.py)，与原有 `collect_call.py` 放在同一目录，以 `--capture timelapse` 选择延时试验：
-
-```powershell
-python .\action6_record_probe.py --capture timelapse --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
-```
-
-脚本遵循[原表列出的准备与设置顺序](camera-control-handoff.md#原表列出的准备与设置顺序)：先进入延时模式、设置 4K/30 fps，再发送一次完整 `6c` 负载，同时设置间隔、时长和仅视频输出，然后设置 Auto。四项设置分别保存到 `01-mode`、`02-resolution`、`03-timing`、`04-exposure`。之后保存内置和 SD 两个 DCIM 范围的启动前目录，再发送一次 START。目录不存在与可靠空目录分别记录；路径不是目录、读取失败或两个范围均不存在时不启动。延时设置仍使用预期 `00` 样式作诊断检查，不能据此登记设置或启动已经生效。
-
-相机和电脑保持供电及连接，电脑保持唤醒。脚本从 START 调用发起计主机单调时间，到所选时长后采样，默认 1800 秒；如果启动调用本身阻塞超过该时间，则返回后直接采样。每次实际调用保存 UTC 发起及返回时刻；`capture-observation.json` 另存调用耗时、距发起的主机间隔、后目录采样时刻，以及 `requested_params`、`preset_payload`、`preset_basis`。这些时刻和要求不替代设备实际开始、自然结束或最终处理完成的观察。
-
-采样阶段保存两范围的后目录、新增路径及新增 MP4 的一次下载、前后源观测、副本比对和媒体信息。目录与文件记录保存在新的 `action6/timelapse-probe-<UTC 时间>` 目录。结果中的实际开始、自然结束、文件写完及集合确定均保持未知；本次未列出 MP4 只说明采样时尚未取得新增 MP4。
-
-Action6 延时 STOP 尚未给出，脚本在正常运行和异常路径均不自动发送停止命令，也不重发 START。设置异常时立即报错，不启动；START 已尝试后的调用或响应异常也立即报错，但设备是否开始保持未知。出错后保留目录和原片，将错误及记录目录交回继续诊断；对同一次试验不补发 START，后续文件观察使用只读复查。正常结束时交回最终摘要；如能观察到设备提示音、指示灯或其他实际现象，连同时间一并记录，不能观察到的事实保持未知。
+`action6_record_probe.py --capture timelapse` 会发送延时设置并发出一次 START，采样既定目录后保存新增路径、一次下载及媒体检查。脚本没有 Action6 延时 STOP，不会自动重发 START；调用异常后仍无法据此判断设备是否开始。本机时钟、调用耗时、文件出现或副本检查都不能证明设备开始、自然结束、写完或产物集合已固定。当前这项诊断已暂停，因此不要执行该模式，也不要对同一试验补发 START 或自动重试。既有设备观察见[Action6 原生延时记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
 
 ### Action6 秒级延时试验
 
-每次新拍摄作为独立试验：先按设备现有方式正常关机并重新供电开机，保持相机和电脑连接，期间只由诊断脚本发起拍摄。原表没有提供具体预热时长或就绪查询，脚本也没有这类检查。将更新后的脚本放回 Windows 的 `platform-tools` 目录，保留同目录的 `collect_call.py`，先试持续 30 秒：
-
-```powershell
-python .\action6_record_probe.py --capture timelapse --timelapse-duration-s 30 --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
-```
-
-需要更短的独立试验时，将 `30` 改成 `10`。`--timelapse-duration-s` 只允许与新建 `--capture timelapse` 一起使用，接受 1 至 1800 的整数秒数，省略时保留原 1800 秒预设；这个范围是诊断脚本的输入边界，硬件支持的最短值和步长尚未核实。间隔仍为 8 秒，短时任务只能覆盖少量采集机会，不能预定设备帧数或视频最低时长。
-
-候选编码依据是原表三个 Action6 完整负载中的低位字节：从零计数的偏移 5、6 分别为 `18 15`、`70 17`、`08 07`，按小端整数解释得到 5400、6000、1800，分别对应 90、100、30 分钟。因此试验只将原预设的这两个字节替换为所选秒数，其余字节原样保留，包括 Action6 的第 17 字节。这是编码推断，不能据此确定完整字段宽度或秒级值的实际效力。
-
-| 时长 | 完整预设负载 | 保存的 `preset_basis` |
-| --- | --- | --- |
-| 原预设 1800 秒 | `0400005000080700000000000000000000` | `source_example` |
-| 实验 30 秒 | `04000050001e0000000000000000000000` | `experimental_duration` |
-| 实验 10 秒 | `04000050000a0000000000000000000000` | `experimental_duration` |
-
-摘要的 `params.duration_s` 保留所选秒数，`preset_basis` 保留同一依据。采样时没有 MP4 就保存无新增 MP4 的结果；如果稍后需要观察文件，使用 `--observe` 沿该次原基准复查。主机经过所选秒数、响应 `00` 或取得文件各自只表达对应观察，实际启动、自然结束、文件写完和产物集合仍未知。
+脚本支持 1800 秒原预设及 30 秒、10 秒的实验时长参数，具体候选负载和依据见[相机控制交接资料](camera-control-handoff.md)、[秒级候选试验记录](../camctl/verification.md#30-秒候选与完整设置顺序的试验)及[脚本实现](action6_record_probe.py)。它们不是已确认的相机协议或时长保证；当前诊断已暂停，不要执行新的 `--capture timelapse`。脚本的参数边界不代表设备支持。
 
 ### Action6 延时采样后的只读复查
 
-原试验已经保存 `capture-observation.json`，但采样时没有新增 MP4 时，可以用同一个脚本的 `--observe <原采集目录>` 重新观察。该入口从原始调用记录读取内置和 SD 的启动前目录，沿原基准识别文件。相机和原片继续保留，复查期间不通过按键或其他程序另行拍摄。
+对已经存在并保存了 `capture-observation.json` 的原采样目录，如需补充目录观察，可使用同一个脚本的 `--observe <原采集目录>`。该入口从原始记录读取启动前目录，新增观察保存在原目录下，不覆盖原记录，不发送设置、START、STOP 或删除命令。它可能列举文件、下载文件并运行媒体检查，因此只用于原试验资料复查，不能当成新拍摄或恢复采集。
 
 ```powershell
 python .\action6_record_probe.py --observe ".\action6\timelapse-probe-<原 UTC 时间>" --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
 ```
 
-`--observe` 与 `--capture` 互斥，只接受原生延时记录，不能另带时长选项。脚本先核对原模式、计时记录、START 和两次启动前目录调用的 serial、退出状态及完整目录结果；记录缺失、无效、绑定不同或两个原范围均不存在时，在新设备调用之前报错。原 START 异常而尚未保存 `capture-observation.json` 的记录仍需分别检查原始调用。
+`--observe` 与 `--capture` 互斥，只接受原生延时记录，不能另带时长选项。脚本校验原模式、计时记录、START、启动前目录调用的 serial、退出状态及目录结果；原始记录缺失或无效时，不会继续设备观察。原 START 异常而尚未保存 `capture-observation.json` 的记录应只检查原始调用材料，不得补发 START。
 
-新版原记录中的 `requested_params`、`preset_payload` 和 `preset_basis` 必须完整、有效且相互一致，复查摘要沿用原试验时长；缺少其中任一字段或值不一致时，在新设备调用之前报错。三个字段均不存在的旧版记录按原固定 1800 秒预设复查。
-
-复查立即读取目录，不再等待三十分钟；它只列举目录、查询文件、拉取副本及检查媒体，不发送设置、START、STOP 或删除命令。每次记录保存到原目录下新的 `observation-<UTC 时间>` 子目录，不覆盖原记录。新 `capture-observation.json` 保存本次采样时刻、`observation_only=true`、原采集目录及 `original_capture_observation`；原计时值只说明原试验，不作为本次经过时间。
-
-成功列举后，脚本先保存 `summary.json`，再检查视频。`sample_status` 只表达这次目录差集；`video_checks` 分别表示未尝试、尚未完成、全部通过和检查报错。新增文件不是 MP4 时仍保留其路径。目录读取失败不转换为空差集，实际调用及错误继续保留。
-
-摘要写入同目录临时文件，写完后再替换目标；写入或替换失败时保留上一次完整摘要并报告实际错误。视频检查已经报错、其失败摘要也无法保存时，继续抛出原检查错误，并附上摘要保存错误。每份检查通过的视频及时保存到摘要，后续视频失败不丢失已有结果。
-
-| 本次观察或检查 | 保存的结果及后续动作 |
-| --- | --- |
-| 没有新增路径，或新增路径中没有 MP4 | `sample_status=no_new_mp4`，`video_checks=not_attempted`，保存实际新增路径后报告尚未取得 MP4 |
-| 新增路径中有 MP4，检查尚未完成 | `sample_status=mp4_observed`，`video_checks=incomplete`，保存路径后依次核对副本和媒体 |
-| 全部 MP4 的副本和媒体检查通过 | `video_checks=complete`，保存检查结果 |
-| 下载、源观测、副本核对或媒体检查报错 | `video_checks=failed`，保存已完成的视频检查和实际错误，保留原始调用并报错 |
-
-无论后来是否出现文件，`actual_start`、`natural_end`、`file_write_complete` 和 `output_set_finalized` 都保持 `unknown`。只读复查用于补充实际观察，不能据此启用正式驱动能力。
+新版记录的 `requested_params`、`preset_payload` 与 `preset_basis` 必须一致；旧版记录按脚本兼容规则处理。复查结果分别记录本次目录差集、下载与媒体检查，不能更新原试验的开始、结束、文件写完或产物集合结论。既有复查语义和观察值见[验证记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
 
 ### 分别保存原始调用
 
-逐条保存设置调用后，采集启动候选：
+以下启动与停止候选仅供未来单独安排的设备观察使用。它们不应被用于恢复当前已暂停的 Action6 原生延时试验；不得重发该试验的 START。
 
-```powershell
-py -3.11 collect_call.py action6/030-timelapse-start adb -s <serial> shell dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01
-```
+Action6 原生延时的 START 候选及原表组合见[相机控制交接资料](camera-control-handoff.md#action--action6-静止延时摄影)。
 
 OSMO 使用独立资料目录和自己的 serial。记录启动调用是在发送后、实际开始后，还是整项任务完成后返回。等待预设的真实持续时间，观察相机是否自行结束、是否进入视频处理阶段，以及最终全部文件何时写完。
 
-OSMO 已有停止候选 `dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 00`。在需要主机停止的情况下执行并独立保存结果；记录实际停止是否结束采集，以及之后的视频处理。Action6 的延时停止接口尚缺具体资料；若预设结束后仍需主动停止，提供实际可用接口及响应后再补齐该任务契约。
+OSMO 的停止候选和适用前提见[相机控制交接资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)。现有候选不能证明设备已经接受或停止采集；Action6 延时 STOP 接口仍缺真机核验。
 
 设备接受有限目标并自行结束时，保存实际结束或明确等待假设所需的证据。由主机负责结束时，保存实际开始、计时和停止证据。启动调用一直等待整项任务结束的情况，记录完整耗时及处理阶段，用于确定驱动的有限完整调用期限。
 
@@ -225,7 +188,7 @@ PY
 
 Action6 录像模板按[参数规则](../architecture/camera-parameters.md)省略 `aperture` 和 `bitrate`，驱动保留相机原设置，不将实际值补写为用户要求。其他计划明确请求这些参数时，仍须执行设置；设置失败或未确认时停止后续设置和 START，保留实际错误。已有码率工具只提供服务日志，显式码率要求尚不能取得生效确认。
 
-普通录像使用[Action6 的运行假设](../architecture/camera-recording.md#action6-普通录像的运行假设)：正常设备下，完整 `00` 分别确认 START 已开始采集和 STOP 已结束采集；STOP 后实际等待 5 秒，再按文件已写完核实本次 MP4。数据库分别保留原始响应、固定等待规则和实际等待事实。等待不计入录像时长；等待或结果读取失败不重发已确认的 STOP。这组假设尚须在目标主机核验，不能将软件测试视为真实设备验证。
+正式驱动的停止及文件完成规则见[Action6 录像规格](../architecture/camera-recording.md#action6-普通录像的运行假设)，本文不重复定义其确认语义。当前 ARM 普通录像演示已获用户整体确认；原始报告、媒体及确认水位未归档，因此不据此填写具体响应、计时或媒体测量值。
 
 上述命令展示首次部署。已有部署合并设备项后，将本节所有 `--config` 路径替换为实际沿用的配置；配置覆盖 `[paths]` 时，host 同时传入对应的 `--ready <绝对路径>` 和 `--processing <绝对路径>`，初始化和 CLI 使用同一状态库与交接目录。
 
@@ -282,7 +245,9 @@ PY
 
 ## ARM Linux 的完整验收
 
-在独立部署目录安装已启用 Action6 普通录像契约的正式发行物，显式配置 Action6 的驱动及本次 ADB 绑定，执行初始化并导出 `describe`。计划参数来自实际导出的能力。通过 C host 依次提交 `action6-record`、`obtain` 和 `report-ack`：先完成真实目标时长为 10 秒的普通录像，保存正式产物，再用独立的 `obtain_action_outputs` 按原动作实例选择产物，最后确认已经可靠导入的报告。
+本节对应的 ARM Action6 普通录像演示已由用户现场确认正常，当前 T9 演示范围完成；用户不需要重新拍摄或补交报告。现场结果和未归档材料边界见[组件验证记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。本节以下内容是操作流程和验收项的参考，供另行安排的演示使用，不是当前待办。
+
+独立部署时安装正式发行物，显式配置 Action6 驱动及 ADB 绑定，初始化后导出 `describe`，并只按实际导出的能力生成计划。通过 C host 提交录像、独立取回和报告确认计划；从原拍摄动作选择正式产物，并分别记录文件领取与报告确认。有关状态流转和文件交接的契约以[正式产物与取回规格](../architecture/outputs.md)及[状态同步规格](../architecture/README.md)为准。
 
 核对拍摄与取回成功、产物属于原拍摄动作、完整交付发布到 `ready`、host 领取到 `processing`，以及领取文件的实际长度和 SHA-256 与源文件相符。领取并核验状态报告后提交累计报告 ACK，再核对确认水位。视频收到与报告确认分别记录；两种确认完成后，相机原片仍存在。
 
@@ -294,6 +259,6 @@ ffprobe -v error -show_entries \
   -of json /absolute/path/to/received.MP4
 ```
 
-保存工具输出中的实际分辨率、帧率和时长，连同十秒控制目标、原 START／STOP 时刻及五秒等待记录核对。文件无法解析或媒体属性不符合要求时，保留实际结果并继续诊断，不从请求参数补写媒体属性。
+如另行开展包含媒体属性测量的演示，保存工具实际输出并按[录像规格](../architecture/camera-recording.md#action6-普通录像的运行假设)核对；不能从请求参数补写媒体属性。当前用户确认的演示没有归档这些原始测量材料。
 
-验收记录包含日期、ARM Linux 主机与 ADB 环境、固件、实际生效参数、原任务的结束及文件完成依据、动作和产物关联、交付文件长度与摘要及报告结果。省略的光圈和码率保持未指定，不补写相机设置值。软件替身的加速运行只用于容器协作验证，真实设备录像按完整 10 秒目标验收；既有双相机四条软件链的验证记录保留其原范围，不替代这条正式真机演示。
+另行安排的新验收应保留环境、调用、动作与产物关联、交付文件及报告的实际证据。未实际观察到的参数、写完条件和媒体值应明确保持未知。软件替身与目标设备证据分别见[组件验证记录](../camctl/verification.md)，不能互相替代。

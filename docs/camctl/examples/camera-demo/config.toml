@@ -1,6 +1,6 @@
 # 使用同一运行账户的 $HOME/.camctl 默认状态库和交接目录。
 # 从 adb devices -l 取得 Action6 的实际 serial，替换下列值。
-# 尚未核实的设备响应和结束契约不会因填写配置而变为可执行能力。
+# 本配置使用已接入的 Action6 普通录像；延时摄影候选须完成独立真机核验。
 [devices.action6]
 kind = "camera"
 driver = "dji-action6"

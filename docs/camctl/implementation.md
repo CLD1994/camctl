@@ -43,13 +43,13 @@ camctl 以较为乐观的 MVP（最小可行产品）为目标，优先打通计
 | CPU | 两核 Denver 2，2 GHz；四核 Cortex-A57，2 GHz |
 | 内存 | 8GB、128-bit LPDDR4 |
 | 存储 | 板载 32GB eMMC 5.1，视频文件写入该存储 |
-| 相机连接 | USB 3.x，相机驱动通过 ADB 通信 |
+| 相机连接 | USB 3.x；通信方式按驱动契约，ADB 相机使用 ADB，Hasselblad 使用主机 `hb_cli` |
 | camctl 部署内存参考 | 约 3GB，供测试与联调评估 camctl 主进程、报告子进程及其管理的 adb、ffmpeg 等工具进程的合计占用；具体负载及峰值验收门槛仍需细化 |
 | Python | 3.11，由第三方准备 |
 | 环境依赖 | 第三方依据我们提供的要求安装，并与我们联调 |
 | 我方交付责任 | 应用包、依赖与版本要求、安装说明和环境检查说明 |
 
-已确定的主机外部工具为 `adb`、`ffmpeg`、`ffprobe`，用途与设备边界见[部署依赖](../architecture/initialization.md#依赖与部署)。依赖的具体版本、目标主机兼容性与安装方式须在发布准备及联调中核验。第一版 MCU 仅预留接口，遵守既有规格。
+主机外部工具按[部署依赖](../architecture/initialization.md#依赖与部署)及对应驱动契约准备，工具用途不从某一款相机推广到全部设备。依赖的具体版本、目标主机兼容性与安装方式须在发布准备及联调中核验。第一版 MCU 仅预留接口，遵守既有规格。
 
 第三方提供运行环境不改变本项目的职责：业务输入由 camctl 自己校验，状态与恢复依据由 camctl 保存。主程序调用和目录交接继续遵守[CLI 契约](../architecture/cli-commands.md)与[C 接入模块规格](../host-demo/design.md)。
 
@@ -75,7 +75,7 @@ camctl 以较为乐观的 MVP（最小可行产品）为目标，优先打通计
 
 目标主机安装分三步：先准备满足版本要求的 Python 3.11 解释器；再用 `uv export --project apps/camctl --frozen --no-dev --no-emit-project` 从锁文件导出运行时依赖清单（版本与哈希钉定），在部署虚拟环境中安装该清单；最后以 `uv pip install --no-deps` 安装 wheel 本体。发行物只声明三个运行时依赖（concurrent-log-handler、janus、jsonschema），测试依赖属于开发用依赖组，不进入部署环境。
 
-安装后的运行检查由 `camctl` 命令自身承担：`init` 在创建或验证状态库之前核验解释器版本与实际链接的 SQLite，条件以包内 `runtime/sqlite-runtime.json` 为权威（达到主线最低版本，或精确匹配回移修复清单），不满足时以退出码 1 报告"运行库条件不满足"，不创建状态库；包资源缺失时同样明确失败。`describe` 不依赖状态库即可导出设备能力说明。`adb`、`ffprobe`、`ffmpeg` 由部署环境提供裸名可执行文件，工具缺失或调用失败时的行为分类见[部署依赖](../architecture/initialization.md#依赖与部署)。
+安装后的运行检查由 `camctl` 命令自身承担：`init` 在创建或验证状态库之前核验解释器版本与实际链接的 SQLite，条件以包内 `runtime/sqlite-runtime.json` 为权威（达到主线最低版本，或精确匹配回移修复清单），不满足时以退出码 1 报告"运行库条件不满足"，不创建状态库；包资源缺失时同样明确失败。`describe` 不依赖状态库即可导出设备能力说明。ADB 与媒体工具由部署环境提供裸名可执行文件；Hasselblad 的工具路径由[驱动配置](hasselblad-driver.md#设备与拍摄参数)提供。工具缺失或调用失败按所属驱动和处理流程分类，依赖范围见[部署依赖](../architecture/initialization.md#依赖与部署)。
 
 仓库外构建、安装与运行由 `apps/camctl/tests/integration/bootstrap/test_distribution.py` 持续验证：它在仓库之外的独立虚拟环境按锁文件安装发行物，经安装后的 CLI 完成 init、describe、submit 与设备替身 run，并核对资源自包含、依赖边界及资源缺失与 SQLite 条件不满足的明确失败。真实 ARM64 硬件与真实设备的结果按[部署交接与待核验项](verification.md#部署交接与待核验项)单独核验，不由开发环境通过代替。
 
@@ -113,7 +113,7 @@ camctl 以较为乐观的 MVP（最小可行产品）为目标，优先打通计
 | SQLite 操作 | 专用数据库线程，调用协程等待其结果 |
 | 相机文件内容传输 | 主协程按进度段通过 `asyncio.to_thread()` 提交默认线程池；线程内以小块连续读取、写入并完成段尾同步 |
 | 其他普通文件读写、截断和同步 | 通过 `asyncio.to_thread()` 使用同一默认线程池，调用协程等待结果 |
-| 外部设备及媒体工具 | 异步启动和管理 `adb`、`ffmpeg`、`ffprobe` 子进程 |
+| 外部设备及媒体工具 | 按驱动及媒体处理契约异步启动和管理工具子进程 |
 | 普通日志追加与轮换 | 各进程的专用 `QueueListener` 日志线程按入队顺序消费 `janus` 有界队列并调用 `ConcurrentRotatingFileHandler`；按水位限制低级别日志接纳并对中间区间的 `INFO` 独立随机采样 |
 | 报告状态读取、按范围逆向恢复和 JSON 编码 | 独立报告生成进程；主进程通过协程异步等待结果 |
 | 报告进程通信 | 主进程中的专用通信线程执行可能阻塞的管道收发；调度协程通过异步接口等待结果，并监测子进程退出 |

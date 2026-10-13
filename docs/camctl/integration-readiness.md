@@ -2,7 +2,7 @@
 
 [实现总览](implementation.md) · [软件验证](verification.md) · [实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)
 
-本页保存 2026-09-22 的依赖能力核验记录，并列出真实设备联调所需的证据。依赖实验中的版本、环境和结果均属于该次记录；生产依赖由组件 [pyproject.toml](../../apps/camctl/pyproject.toml) 与 [uv.lock](../../apps/camctl/uv.lock) 管理，开发与测试环境遵守[Python 环境要求](verification.md#python-环境)。生产实现及验收进度由[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)和模块计划跟踪。
+本页保存 2026-09-22 的依赖能力核验记录，并列出真实设备联调所需的证据。依赖实验中的版本、环境和结果均属于该次记录；下文对临时脚本和后续生产验证的说明按当时范围理解，不表示当前生产实现尚未完成。生产依赖由组件 [pyproject.toml](../../apps/camctl/pyproject.toml) 与 [uv.lock](../../apps/camctl/uv.lock) 管理，开发与测试环境遵守[Python 环境要求](verification.md#python-环境)。当前实施进度由[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)和模块计划跟踪，实际结果见[验证记录](verification.md)。
 
 ## 核验环境与范围
 
@@ -46,7 +46,7 @@ Janus 负责等待机制，项目只适配接纳规则、来源路由、结果�
 
 临时验证使用两个独立启动的进程，各自创建文件处理器，并发写入及轮换后逐条核对全部 80 条记录；另验证保留数量为 1 时只留下轮换后的活动内容。持锁复制验证在触发错误写入后安排另一进程尝试轮换，确认复制期间后者等待，副本完整包含触发记录。上述验证使用开发环境中的 CLH 0.9.29 与 portalocker 4.4.0。
 
-实际接入仍须覆盖轮换失败但可追加、追加失败禁用、调整保留数量、取消及完整日志生命周期；临时验证不代表生产适配验收。第三方组件的线程后台队列工具不参与方案，队列职责由标准库与 Janus 承担。
+该次临时实验没有覆盖轮换失败但可追加、追加失败禁用、调整保留数量、取消及完整日志生命周期，不能代表生产适配验收。生产日志的规则与验证入口见[日志执行](logging-runtime.md)及[跨模块检查](verification.md#跨模块契约检查)。第三方组件的线程后台队列工具不参与方案，队列职责由标准库与 Janus 承担。
 
 ### 精确数字核验
 
@@ -54,7 +54,7 @@ Janus 负责等待机制，项目只适配接纳规则、来源路由、结果�
 
 临时适配只替换整数判断和 `multipleOf`：从精确 `int` / `Decimal` 构造 `Fraction`，用分母判断整数及倍数关系。验证覆盖 `1.0`、`1e0`、略大于整数的长小数、布尔值及超过默认 Decimal 精度的大数，并在三种上下文精度下取得相同结果。[Fraction 的 Decimal 输入](https://docs.python.org/3.11/library/fractions.html)
 
-另验证低精度上下文中的 `Decimal.normalize()` 会改变长小数，因此它不能直接用于规定的无损报告编码。生产编码按数字元组生成文本；仍须单独验证普通与科学计数法的分区、负零、Unicode、深层数组及分批生成。这里没有实现完整编码器，也没有证明所有 Schema 组合规则已适配。
+另验证低精度上下文中的 `Decimal.normalize()` 会改变长小数，因此它不能直接用于规定的无损报告编码。该次临时脚本没有实现完整编码器，也没有证明所有 Schema 组合规则已适配。生产编码的数字元组、普通与科学计数法、负零、Unicode、深层数组及分批生成契约见[报告编码](../architecture/report-encoding.md)与[输入类型适配](data-types.md)，实际软件验证按对应记录核对。
 
 ### SQLite 查询与连接核验
 
@@ -68,7 +68,7 @@ Janus 负责等待机制，项目只适配接纳规则、来源路由、结果�
 
 Hasselblad CFV 100C 按[单张拍照接入契约](hasselblad-driver.md)提供单张 RAW 拍摄。驱动、主机原图与配对预览登记、独立取回及结果报告已完成软件实现和 ARM 真实业务验证；实施进度见[专项计划](../superpowers/plans/2026-10-12-hasselblad-integration.md#实施状态)，实际环境、结果和证据边界见[ARM 验收记录](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
 
-相机接入按[资料采集与 Action6 录像演示](../hardware/camera-demo-validation.md)取得原始响应及观察记录。正式演示通过已安装 camctl 和 C host 完成 Action6 普通录像、独立取回、文件领取及报告确认；采集器和诊断脚本只提供设备资料，不代替这条业务链。双相机四条软件链的实际验证范围由[实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)登记，当前真机范围、后续设备接入条件及能力启用门禁由[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
+相机接入按[资料采集与 Action6 录像演示](../hardware/camera-demo-validation.md)取得原始响应及观察记录。Action6 普通录像演示已获[用户现场确认](verification.md#action6-普通录像演示的现场验收2026-10-11)；采集器和诊断脚本只提供设备资料，不代替正式业务链。双相机四条软件链的实际验证范围由[实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)登记，Action6 原生延时摄影与 OSMO 360 II 完整真机调试，以及能力启用条件由[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
 
 本节是单独设备联调的证据清单，不是第一版软件集成测试的环境要求或通过门槛。软件集成测试以受接口契约约束的设备替身提供响应；具体设备和现场负载到位后，再安排真实协议、性能与存储测量。
 

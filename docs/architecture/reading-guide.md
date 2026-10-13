@@ -34,7 +34,7 @@
 9|如何准备运行环境并验证完整流程？|[本地配置](configuration.md)、[初始化](initialization.md)、[部署联调样例](deployment-example.md)、[运行日志](logging.md)
 10|哪些能力属于后续扩展？|[拍摄能力与参数类型](camera-capabilities.md)、[MCU 接口预留](mcu-actions.md)；真实设备依据见[相机交接整理](../hardware/camera-control-handoff.md)
 
-每个专题先给阅读提示，再给规则。决策表用于区分不同条件下的结果；“验收要求”用于验证实现；“实现时细化”保留需要在实现和联调中落实的事项。首次阅读可先掌握规则，实施和完整评审时再核对后两类内容。
+各专题说明行为规则、条件分类和验收要求。首次阅读先掌握规则，完整评审再沿生产入口和消费者核对实现。内部执行细节由[camctl 实现专题](../camctl/README.md)定义，未完成项由[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)及其模块计划跟踪。
 
 ## 按职责查阅
 
@@ -125,16 +125,16 @@ camctl 与驱动开发者|全部行为规格，重点核对持久化、会话接
 2. 设备执行：阅读调度与设备执行、相机拍摄，以及 MCU 接口预留边界。
 3. 数据管理：阅读正式产物与取回清理，并核对文件交接与状态报告。
 
-实施核对先追踪请求接管与文件交接，再核对调度条件及动作证据，随后检查产物和报告的完整状态转换。各处需要细化的实现事项保留在责任专题；真实设备协议尚未核实的保证仍须在设备专题确认。
+实施核对先追踪请求接管与文件交接，再核对调度条件及动作证据，随后检查产物和报告的完整状态转换。实现契约与实际联调结果分别查阅责任专题及验证记录；新增设备或尚未核实的场景，按对应接入计划补齐证据。
 
 第一版已确定的配置与设备边界：
 
 事项|第一版约定|权威位置
 -|-|-
-异常恢复等待|默认 60 秒，可配置；等待 `min(duration_s, recovery_wait_cap_s)`|[相机配置](camera-recording.md#配置归属)
-异常多录余量|本地配置 `devices.<id>.recording.repair_margin_s`；严格超过目标时长与余量之和才触发修复|[相机配置](camera-recording.md#配置归属)
-调度提前唤醒|`session.wakeup_margin_ms` 默认 50ms，可配置；0 关闭，不提前执行动作|[唤醒决策](scheduling-execution.md#唤醒后的统一重新决策)
-新计划发现|`plans.id`、`latest_plan_id`、`last_seen_plan_id`|[受理序列](protocol-session.md#新计划受理序列)
-当前相机接入|使用已确认的 ADB/Linux 能力；厂商命令映射和正常响应作为真实驱动联调输入|[驱动接入契约](camera-recording.md#第一版驱动接入契约)
+异常恢复等待|受限会话采用有限等待，默认值、上限和计算方式见责任专题|[相机配置](camera-recording.md#配置归属)
+异常多录余量|按本地配置及实际录像依据判断是否修复|[相机配置](camera-recording.md#配置归属)
+调度提前唤醒|提前准备不授予提前执行资格|[唤醒决策](scheduling-execution.md#唤醒后的统一重新决策)
+新计划发现|按已保存的受理序列发现新工作|[受理序列](protocol-session.md#新计划受理序列)
+相机接入|采用各驱动的通信、参数和正式源契约；联调范围独立记录|[驱动接入契约](camera-recording.md#第一版驱动接入契约)、[Hasselblad 单张驱动](../camctl/hasselblad-driver.md)
 
-各专题的实现细节在对应流程落地时细化。项目测试规范统一见[共享测试规则](../../.agents/rules/testing.md)，任务读取条件见[根工作规则](../../AGENTS.md)；先完成第一版正常流程及其必要失败处理，再验证既有断电与恢复契约。真实设备命令映射和联调仍是设备验收的前提。
+项目测试规范统一见[共享测试规则](../../.agents/rules/testing.md)，任务读取条件见[根工作规则](../../AGENTS.md)。软件验证、目标部署和真实设备验收的日期、环境及通过范围见[camctl 验证记录](../camctl/verification.md)；实施进度按路线图核对。

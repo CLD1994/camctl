@@ -73,7 +73,7 @@
 - [x] 单独执行 `unit/reporting/test_worker_late_state.py` 的失败与修复验证，再执行整个 `unit` 目录；真实管道、线程与进程验证单独执行 `integration/reporting`，其中包含 `test_supervisor_transport.py`。2026-10-11：专项 33 passed；全量 unit 4726 passed、1 skipped、2 条既有 asyncio 警告；`integration/reporting` 373 passed。
 - [x] 在正常及受限会话的报告监督组合中断言迟到 STATE 进入 `state_db_error`，普通设备不继续依赖已失效前提，状态库不可用的日志副本仍独立处理。该消费者组合由主 Agent 登记。`bootstrap/flows.py:807` 将 STATE_FAILURE 转为 `StateDbFailure`；`test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow` 核普通设备停止；`session/test_local_work_settlement.py` 的 `test_local_state_failure_preserves_exit_error_priority` 与 `test_clock_transition_stops_restricted_work_after_local_state_failure` 覆盖正常及受限组合；日志副本经 `bootstrap/test_logging_composition.py` 与 `recovery_logging.py` 独立处理。
 - [x] 实际进程／线程仍活动时不能清理或复用临时文件；任务成功、停止、超时、错误身份、STATE／REPORT 分类及两种先后顺序均有独立预期。存活的未观测退出进程由监督对象继续持有（`test_kill_without_observed_exit_keeps_ownership`），staging 按 report/job 独立命名（`_temporary_staging_path`）；分类与先后顺序由迟到状态矩阵与 `test_exit_checks_delivered_result` 的两种顺序覆盖。
-- [x] 记录 Python 版本、环境、命令及结果；`git diff --check` 与文档链接／锚点检查只验证文档，不代替软件门禁。2026-10-11 记录见[当前验收记录](#当前验收记录-2026-10-11)。
+- [x] 记录 Python 版本、环境、命令及结果；`git diff --check` 与文档链接／锚点检查只验证文档，不代替软件门禁。2026-10-11 记录见[当前验收记录](#当前验收记录2026-10-11)。
 
 ## 验收命令与当前状态
 

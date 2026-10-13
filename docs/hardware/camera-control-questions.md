@@ -32,6 +32,8 @@ dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x26 9001
 
 目前没有取得光圈读回结果，不能确认这三次请求是否改变了实际光圈。`e3` 的含义及出现原因尚未明确。
 
+这项未知仅影响显式要求调整光圈的计划，不表示当前 Action6 普通录像演示未验收：该能力允许省略 `aperture` 并保留相机原设置，现场演示结果见[验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)，参数规则见[录像参数规格](../architecture/camera-parameters.md#action6-的光圈要求)。
+
 ### 设置光圈前的操作顺序
 
 先发送普通视频模式命令 `dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 0xe1 01`，收到 `00`。随后试录时分别发送同一调用前缀下的 `-c 02 01` 和 `-c 02 00`，两者均收到 `00`；期间主机等待十秒，之后新增 MP4 的本地副本可以用播放器打开。没有取得相机空闲状态的查询结果。
@@ -75,6 +77,8 @@ Windows 采集目录为 `action6/042-record-aperture`、`action6/043-record-aper
 项目内的其他采集事实及适用范围见[普通录像试录记录](../camctl/verification.md#action6-的-windows-普通录像试录2026-10-10)。
 
 ## Action6：原生延时 START 返回 `00`，两次采样均无新增路径
+
+**当前状态：** 这轮原生延时诊断已暂停。本节记录的是已有请求与观察，不是继续拍摄的步骤。不得为补足记录而重拍、重发 START 或自动重试；先保留并核对原采集材料。项目当前验收范围见[相机现场状态](camera-demo-validation.md#action6-原生延时的统一采集)。
 
 记录日期：2026-10-10。设备是使用者确认的 Action6 调试机，屏幕损坏，无法通过界面观察当前模式或拍摄状态。试验在 Windows PowerShell 中使用 Python 3.11、ADB 1.0.41（Platform Tools 37.0.1）执行；固件和控制工具版本尚未取得。此前普通录像能够生成 MP4 并取回一致副本。详细试验范围见[延时采样记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
 

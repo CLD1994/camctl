@@ -65,7 +65,7 @@ Action6 延时与 OSMO 360 II 的后续真机范围由[真机演示计划 T8/T9]
 
 ## F. ARM64 组件测试复验（第 36 条）
 
-C host 已在目标主机构建安装（`HOST_BUILD_TESTS=OFF`），组件测试尚未在 ARM 执行。按 host-demo 表“arm64 Ubuntu 18.04”行：使用实际编译器（GCC 7.5.0）与 glibc 重新构建并执行组件测试（Debug/Release 各 33 项 CTest），确认 `posix_spawn` 错误证据与资源限制。
+C host 已在目标主机构建安装（`HOST_BUILD_TESTS=OFF`），组件测试尚未在 ARM 执行。按 host-demo 表“arm64 Ubuntu 18.04”行：使用实际编译器（GCC 7.5.0）与 glibc 重新构建并执行 Debug、Release 组件测试，范围以[组件验证记录](../../host-demo/verification.md)及当前构建登记为准，确认 `posix_spawn` 错误证据与资源限制。
 
 ## 执行记录与收口
 

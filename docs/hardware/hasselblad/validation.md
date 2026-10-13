@@ -1,6 +1,6 @@
 # Hasselblad CFV 100C 安装演示
 
-本文说明如何从已安装的 camctl 发行包导出独立演示资源，在单独数据目录中初始化 Hasselblad 配置，按实际能力生成单张拍摄计划，并分别取回原图和预览。该流程面向已安装 Python 3.11、camctl 及配套依赖的 ARM Linux 主机；安装步骤见[camctl 主机联调指南](../../../apps/host-demo/docs/camctl-integration.md)。本文给出执行步骤，不记录目标主机或真实相机已完成验证的结论。
+本文说明如何从已安装的 camctl 发行包导出独立演示资源，在单独数据目录中初始化 Hasselblad 配置，按实际能力生成单张拍摄计划，并分别取回原图和预览。该流程面向已安装 Python 3.11、camctl 及配套依赖的 ARM Linux 主机；安装步骤见[camctl 主机联调指南](../../../apps/host-demo/docs/camctl-integration.md)。本文给出执行步骤，不记录目标主机或真实相机已完成验证的结论；已完成的 ARM 单张拍摄与取回验收结论见[组件验证记录](../../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)，其中也列出本地原始证据归档位置。
 
 拍摄能力、主机文件及已有的取回和保留规则见[Hasselblad 驱动设计](../../camctl/hasselblad-driver.md)和[正式产物与取回清理](../../architecture/outputs.md)。相机端是否另行保存文件仍须按[单张拍摄接口核验记录](../../superpowers/notes/2026-10-12-hasselblad-cfv100c-probe.md)确认。
 

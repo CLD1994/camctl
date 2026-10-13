@@ -113,7 +113,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 
 `INTERMEDIATE_FILE_CHANGED.CLEANUP_RESULT` 必须使用专属成员 `cleanup_request` 保存原清理结果申请中的游标输入，结构恰好为 `{"advance_cursor": 布尔值}`。原文件身份、结果、错误和时刻由同一结果事件表达。自动历史清理保存 `true`，单文件首次清理和显式主机清理保存 `false`。原游标已经指向目标文件时不产生重复位置变化，结果事件仍保存原布尔输入；原操作键重送逐项核对该输入和完整事件组，不能把 `true` 与 `false` 相互替代。该输入不改变文件清理或游标的状态转换，也不进入对外报告。
 
-单张拍摄的主机原图与预览使用 `INTERMEDIATE_FILE_CHANGED.CREATE` 共同保存两份文件责任，使用专用 `HOST_PHOTO_COMPLETE` 分支共同保存两份完整大小与 SHA-256。准备申请恰有 `action_id`、`occurred_at`；完整字节申请还包含 `original_file_id`、`original_size_bytes`、`original_sha256`、`preview_file_id`、`preview_size_bytes`、`preview_sha256`。解码器要求专用完成分支携带申请，并按事件自身的时刻、文件身份、大小和摘要核对两行变化。通用 `LIFECYCLE` 分支仍保留原来的用途变化、提升、清理和完整字节变更契约，不根据行数推断主机拍摄。原键重送与回执未知核实逐项比较原申请，并按原完整事务边界恢复字节事实；后来已提升的保留状态不能改写原准备或完整字节结果。文件提升仍由同事务先行的正式产物登记授权。
+单张拍摄的主机原图与预览使用 `INTERMEDIATE_FILE_CHANGED.CREATE` 共同保存两份文件责任，使用专用 `HOST_PHOTO_COMPLETE` 分支共同保存两份完整大小与 SHA-256。准备申请恰有 `action_id`、`occurred_at`；完整字节申请还包含 `original_file_id`、`original_size_bytes`、`original_sha256`、`preview_file_id`、`preview_size_bytes`、`preview_sha256`。解码器要求专用完成分支携带申请，并按事件自身的时刻、文件身份、大小和摘要核对两行变化。通用 `LIFECYCLE` 分支仍保留原来的用途变化、提升、清理和完整字节变更契约，不根据行数推断主机拍摄。原键重送逐项比较原申请；提交结果未知时，先结束原写连接上的未决事务，再通过启用 `query_only` 的独立只读连接核实原键对应的完整事务，不从写入重试推断提交结果。核实按原完整事务边界恢复两份字节事实；后来已提升的保留状态不能改写原准备或完整字节结果。文件提升仍由同事务先行的正式产物登记授权。
 
 拥有者终态后的伴随收场（`OPERATION_CONFIGURED.FINISH` 中由 `finish_stale_runs` 产生的部分）必须使用专属成员 `stale_run_request` 保存完整申请依据，结构恰好为 `{"kind": "stale_run_finish", "responsibility_keys": 唯一非空字符串数组, "status": 流程状态整数编号, "error": 完整结构化错误或显式 null}`。数组保存申请的全部责任键，包含当时已结束或不存在的键；实际结束的流程只是其中当时仍开放的子集。同一申请的每个结束事件携带相同依据；原操作键重送逐项核对依据、时刻、阶段及实际结束集合与原事务边界开放的流程一致，子集、替换或借用的其他结束事务键均整组拒绝。尝试结果事务自带的流程处置事件不携带该成员，也不作为伴随收场重送。该依据不改变流程状态转换，也不进入对外报告。
 

@@ -10,6 +10,7 @@
 `protocol`|机器可读 Schema 与标准协议样例的唯一来源
 `docs/architecture`|全局业务、协议语义与组件协作设计
 `docs/client`、`docs/camctl`、`docs/host-demo`|各组件的设计入口、运行与验证说明
+`docs/hardware`|设备工具资料、联调操作入口与诊断脚本；实际验收结果引用组件验证记录
 `tests/integration`|跨组件真实协作者组合测试
 `demos`|完整业务演示的说明、生成脚本和可提交输入
 `scripts`|跨组件检查与开发脚本
@@ -39,7 +40,7 @@
 
 ## 运行数据与路径
 
-现有日常数据保留在仓库根 `data`，运行说明使用显式 `CAMCTL_DATA_DIR` 指向它。未设置时客户端仍按进程工作目录下 `data` 解释；启动界面要求显式初始化的规则保持不变。移动源码不移动或创建业务数据库。
+客户端日常数据默认保留在仓库根 `data`，运行说明使用显式 `CAMCTL_DATA_DIR` 指向它。未设置时客户端仍按进程工作目录下 `data` 解释；启动界面要求显式初始化的规则保持不变。嵌入式主机上的 camctl 使用独立的[本地路径配置](configuration.md)，不复用客户端数据库或媒体目录。移动源码不移动或创建业务数据库。
 
 Docker 构建上下文为仓库根，客户端 apps/client/Dockerfile 与 Compose 放在组件目录。Compose 的数据挂载指向根 `data`，目录缺失时拒绝自动创建。
 

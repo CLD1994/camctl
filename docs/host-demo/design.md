@@ -2,7 +2,7 @@
 
 [返回主程序对接入口](README.md) · [设计总览](../architecture/README.md)
 
-本页定义 `apps/host-demo` 提供什么、主程序怎样调用，以及如何验收。公共 CLI（命令行接口）协议、业务状态和交接目录规则分别引用对应的架构文档；技术选型、公开 C 接口和构建交付见[实现设计](implementation.md)，实际验证范围见[验证记录](verification.md)。电机通知的实现与机器定义接入由[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#电机控制与主程序通知接入)单独跟踪。
+本页定义 `apps/host-demo` 提供什么、主程序怎样调用，以及如何验收。公共 CLI（命令行接口）协议、业务状态和交接目录规则分别引用对应的架构文档；技术选型、公开 C 接口和构建交付见[实现设计](implementation.md)，实际验证范围见[验证记录](verification.md)。电机通知行为见[电机动作](../architecture/motor-control.md)和[主程序通知协议](../../protocol/host-notifications.md)；host 软件实现及真实软件组合的证据见[验证记录](verification.md#电机通知真实组合复验2026-10-08)，第三方主程序和真实电机的现场接入见[目标环境联调清单](../superpowers/plans/2026-10-11-camctl-target-integration-runbook.md)。
 
 ## 目标与交付范围
 

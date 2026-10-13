@@ -6,7 +6,7 @@
 
 真机试验中需要向资料提供方询问的具体问题、实际请求和返回集中在[待询问的相机控制资料](camera-control-questions.md)。
 
-项目的 Action6 普通录像执行语义由[录像运行假设](../architecture/camera-recording.md#action6-普通录像的运行假设)定义，安装后的完整操作见[相机演示指南](camera-demo-validation.md#从安装包准备计划和配置)。本页继续表达原始交接资料的内容和缺口，原表参数不直接成为项目的完成保证。
+项目的 Action6 普通录像执行语义由[录像运行假设](../architecture/camera-recording.md#action6-普通录像的运行假设)定义，当前现场结果见[相机验收状态](camera-demo-validation.md#arm-linux-的完整验收)。本页只整理原始交接资料及其缺口；原表参数和候选命令不直接成为项目的完成保证。
 
 ## 阅读约定
 

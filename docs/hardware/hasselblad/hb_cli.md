@@ -2,6 +2,8 @@
 
 `hb_cli` 用于在 Linux 下通过 USB 控制 Hasselblad CFV 100C。
 
+本工具单独提供的子命令不等同于 camctl 已接入的拍摄能力。当前 camctl 只通过 `camera_take_photo` 执行单张 RAW 拍摄；部署与现场结果见[ARM 演示记录](validation.md)，行为契约见[驱动设计](../../camctl/hasselblad-driver.md)。
+
 ## 目录结构
 
 交付包用于 Jetson TX2 Ubuntu 18.04 ARM64：
