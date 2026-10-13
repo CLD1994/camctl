@@ -92,7 +92,7 @@ def _envelope(
         event_type=event_type,
         event_version=1,
         occurred_at=occurred_at,
-        clock_status=2,
+        clock_status=int(enum_for("history_events.clock_status").UNCHECKED),
         change_seq=None,
         reason=reason,
         evidence={},

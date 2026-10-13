@@ -12,6 +12,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Callable
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import OperationKey
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
@@ -134,7 +135,7 @@ class _LowerBoundCommand:
             event_type=31,
             event_version=1,
             occurred_at=check.reading_micros,
-            clock_status=1,
+            clock_status=int(enum_for("history_events.clock_status").TRUSTED),
             change_seq=None,
             reason=1 if current_bound is None else 2,
             evidence={},

@@ -6,6 +6,31 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## SW-01 时间状态验证（2026-10-13）
+
+环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1。受理仓储统一使用整数登记的 `UNCHECKED`，保存受理时取得的实际读数；检查通过后的可信下界事件使用登记的 `TRUSTED` 和实际通过读数。启动顺序、下界更新资格、公共接口和数据库格式保持原契约，既有事件不迁移或修订。实施范围见[SW-01 计划](../superpowers/plans/2026-10-13-camctl-sw01-acceptance-clock-status.md)。
+
+新增 [受理专项](../../apps/camctl/tests/integration/acceptance/test_clock_status.py)覆盖首次注册、动作参数失败、来源成员、输入拒绝、读入／解析诊断、复用加 ACK、无效 ACK、推进及相等水位的同步结束，以及无新增事实的幂等路径。新增 [默认入口专项](../../apps/camctl/tests/integration/bootstrap/test_acceptance_clock_status.py)组合真实会话装配、SQLite 和锁，核对无下界／已有下界的 `submit`、正常接纳期间的并发提交、检查通过／失败及后续运行的旧历史保持。按原完整历史边界恢复的计划与动作，与受理后的原投影一致；普通设备流程在检查失败时没有取得执行资格。
+
+加强 [会话时钟专项](../../apps/camctl/tests/integration/session/test_clock.py)，分别验证首次建立和推进下界事件的实际读数及 `TRUSTED`；相等读数经过真实 `enter_execution` 后，事件和事务均保持原样。两类生产缺陷分别有有效失败记录：受理事件实际为 `2`、预期为 `1`；下界事件实际为 `1`、预期为 `2`。
+
+所有 pytest 从仓库根执行，使用 `UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest <目标> -q`；单元及各集成目录分别顺序启动。最终有效验证如下：
+
+| 命令目标（相对于 `apps/camctl/tests`） | 实际结果 |
+| --- | --- |
+| `unit` | 5076 项通过、1 项跳过、2 条既有警告 |
+| `integration/acceptance` | 250 项通过 |
+| `integration/session` | 100 项通过 |
+| `integration/bootstrap` | 997 项通过、1 项跳过 |
+| `integration/reporting/test_ack_sync.py` | 44 项通过 |
+| `integration/acceptance/test_clock_status.py` | 10 项通过，含完整目录之后加强的旧事件原键重送断言 |
+| `integration/session/test_clock.py` | 4 项通过，含完整目录之后加强的真实无更新路径 |
+| `integration/bootstrap/test_acceptance_clock_status.py` | 4 项通过 |
+
+以上命令退出码均为 `0`，stderr 日志为空。单元跳过验证 Linux 之外的守护行为；bootstrap 跳过依赖 Windows 文件系统的大小写别名。两条警告来自已有同步测试的 asyncio 标记，未修改对应测试。完整命令、红绿次序、日志和退出结果保存在工作区忽略的 `.superpowers/sdd/2026-10-13-camctl-sw01-acceptance-clock-status/sw01-report.md` 及其 `logs/`；早期一轮受理回归未捕获退出码，最终扩展后的完整目录已有退出码 `0` 的记录。
+
+本次验证只覆盖软件受理、会话、事务和历史恢复，没有连接相机或 ARM 主机。
+
 ## 测试与分步实施方向
 
 ### Python 环境

@@ -28,25 +28,29 @@ Hasselblad CFV 100C 接入的拍摄能力仅为单张 RAW 拍照，由[专项接
 
 ## 文档复核发现的实现缺口
 
-2026-10-13 对五个设计与交接文档目录逐篇回顾，并沿当前生产入口核对后，确认下列软件缺口。结论来自源码、调用方、现有测试和有效规格的静态对照；本次没有修改生产代码或重新执行业务测试。既有任务的勾选和历史测次记录保留其当时范围，不能作为下列遗漏已经解决的证据。
+2026-10-13 对五个设计与交接文档目录逐篇回顾，并沿生产入口对照源码、调用方、现有测试和有效规格，确认下列软件缺口。修复按对应专项计划实施，当前状态由本节复选框维护，实际验证结果见各专项引用的验证记录。既有任务的勾选和历史测次记录保留其当时范围。
 
 这些任务修复现行契约，不改变公共协议、动作成功含义或已有历史。SW-01、SW-05、SW-06 可独立进行；SW-02—SW-04 共用日志副本入口，应协调修改并分别验收。
 
-| 任务 | 当前事实与影响 | 修复边界及验收条件 |
+| 任务 | 当前事实与影响 | 实施计划 |
 | --- | --- | --- |
-| SW-01：受理事件时间状态 | [受理事件构造](../../../apps/camctl/src/camctl/persistence/repositories/acceptance.py)固定写入 `clock_status=2`。`submit` 不检查启动墙钟，带计划的 `run` 也先受理、后检查；这些事件错误声称时间已可信。 | 按[时钟契约](../../architecture/clock-recovery.md#时钟异常期间的事件)与[历史时间字段](../../camctl/database/history-formats.md#历史事务与事件字段)保存 `UNCHECKED`。验证首次受理、幂等复用、拒绝、ACK 及同步结束的受理事务，以及后续 `run` 检查通过或失败；后续检查不改写原事件，不推进受理阶段的可信下界。受理和会话集成测试直接读取历史状态，不只校验枚举合法。 |
-| SW-02：日志副本与标记失败诊断 | [副本编排](../../../apps/camctl/src/camctl/logging_runtime/copies.py)丢弃 `COPIED`、`PUBLISHED` 两次 `MarkerSave`；[会话调用方](../../../apps/camctl/src/camctl/session/service.py)也忽略 `CopyReceipt`。进度保存错误，以及回执携带的标记检查、创建和副本失败信息，没有进入该会话的诊断出口。 | 沿已有日志端口保留并呈现实际错误，分别遵守[标记创建失败](../../architecture/log-failure-marker.md#故障标记创建失败)、[进度更新失败](../../architecture/log-failure-marker.md#故障标记的进度更新失败)和[副本失败清理](../../architecture/log-delivery.md#日志副本的失败清理)。覆盖各步骤可靠失败、同步未确认和未知；仅进度保存失败时，副本具备条件仍继续交付。原报告错误、正式标记和已发布文件保留，不因诊断失败重试副本或递归复制日志。组合验证实际 `run` 的诊断出口。 |
-| SW-03：标记保存流程的临时文件清理 | `MarkerStore._save_payload` 在临时写入或替换失败时直接返回；句柄已关闭，但本次专用临时文件可能留下。 | 按[临时文件归属](../../architecture/log-failure-marker.md#故障标记的临时文件)在实际保存结束后清理本次残留。覆盖部分写入、替换失败、临时路径已不存在、删除失败及结果未知；清理不覆盖正式标记，不删除其他保存操作的文件，不把清理失败覆盖为原保存成功。真实文件集成测试核对实际路径和错误。 |
-| SW-04：启动清理接线 | `startup_sweep` 已有辅助函数和直接调用测试，但生产 `run`、装配与会话没有调用点；旧日志副本和标记临时文件都未通过默认启动入口清理。 | 在持有会话锁的实际启动路径接入[旧日志副本检查](../../architecture/log-delivery.md#run-启动时清理遗留日志副本)及[标记临时文件清理](../../architecture/log-failure-marker.md#故障标记的临时文件)。覆盖正常和受限 `run`、状态库不可用、有效与不可读标记，分别核对旧副本、旧临时文件、本次活动文件、未知文件及检查或删除错误。正式标记与 `ready`/`processing` 文件保持各自所有权，不补投旧副本；检查只安排一次，错误可诊断且不单独终止业务。通过默认装配或真实 CLI 验证，不以直接调用辅助函数代替接线。 |
-| SW-05：会话锁失败分类 | 默认装配直接调用[会话锁端口](../../../apps/camctl/src/camctl/session/locks.py)，但 `run_session` 将取得会话锁时的异常全部归为 `state_db_error`，锁文件打开或加锁故障没有按 `lock_error` 报告。 | 按[会话错误分类](../../architecture/session-errors.md#错误标识)区分锁故障、正常锁冲突、数据库故障和内部异常。先审计 `run`/`submit` 的取得、探测、释放及句柄管理入口，再修正错误转换；核对未取得会话锁时零受理、零设备操作，保存实际诊断。实际锁端口与默认会话组合验证分类，不把正常接纳锁冲突变成错误。 |
-| SW-06：读取发现的分批处理 | [默认取回流程](../../../apps/camctl/src/camctl/outputs/obtain_flow.py)调用 `plan_device_work`，后者在[设备工作发现](../../../apps/camctl/src/camctl/outputs/dispatch.py)中用无批次限制的 `fetchall()` 收集活动与全部读取候选；主机源读取也一次收集全部未完成拷贝。`scheduling/discovery.py` 的分页辅助函数没有接入这些入口，其直接测试不能证明默认读取发现已分批。 | 按[读取工作的发现与唤醒](../../architecture/file-copy.md#读取工作的发现与唤醒)和[W-11](../../camctl/database/consistency-verification.md#相机读取机会与调度交接)改造实际消费者。分别审计普通取回、自动预览、内部检查、修复输入及主机源读取；分批限制不能改变全体合格候选的业务排序，先恢复已有机会，未加载候选仍参与资格判断，后续批次有明确推进安排。通过默认装配组合验证后续页最优候选、详情淘汰、初始化期间新提交、取消与重启；查询及缓存容量随配置批次受限，错误不当作扫描结束。 |
+| SW-01：受理与启动检查的时间状态 | [受理事件构造](../../../apps/camctl/src/camctl/persistence/repositories/acceptance.py)使用登记的 `UNCHECKED`；[可信下界事件](../../../apps/camctl/src/camctl/persistence/repositories/session.py)使用 `TRUSTED`，各自保留实际读数。默认入口、ACK 同步、旧历史及原边界恢复已通过[组合验证](../../camctl/verification.md#sw-01-时间状态验证2026-10-13)。 | [修复步骤与验收门禁](2026-10-13-camctl-sw01-acceptance-clock-status.md) |
+| SW-02：日志副本与标记失败诊断 | [副本编排](../../../apps/camctl/src/camctl/logging_runtime/copies.py)丢弃 `COPIED`、`PUBLISHED` 两次 `MarkerSave`；[会话调用方](../../../apps/camctl/src/camctl/session/service.py)也忽略 `CopyReceipt`。进度保存错误，以及回执携带的标记检查、创建和副本失败信息，没有进入该会话的诊断出口。 | [修复步骤与验收门禁](2026-10-13-camctl-sw02-log-copy-diagnostics.md) |
+| SW-03：标记保存流程的临时文件清理 | `MarkerStore._save_payload` 在临时写入或替换失败时直接返回，本次专用临时文件可能留下；句柄关闭失败也没有独立记录。 | [修复步骤与验收门禁](2026-10-13-camctl-sw03-marker-temp-cleanup.md) |
+| SW-04：启动清理接线 | `startup_sweep` 已有辅助函数和直接调用测试，但生产 `run`、装配与会话没有调用点；旧日志副本和标记临时文件都未通过默认启动入口清理。 | [修复步骤与验收门禁](2026-10-13-camctl-sw04-startup-log-sweep.md) |
+| SW-05：会话锁失败分类 | 默认装配直接调用[会话锁端口](../../../apps/camctl/src/camctl/session/locks.py)，但 `run_session` 将取得会话锁时的异常全部归为 `state_db_error`，锁文件打开或加锁故障没有按 `lock_error` 报告。 | [修复步骤与验收门禁](2026-10-13-camctl-sw05-session-lock-errors.md) |
+| SW-06：读取发现的分批处理 | [默认取回流程](../../../apps/camctl/src/camctl/outputs/obtain_flow.py)调用 `plan_device_work`，后者在[设备工作发现](../../../apps/camctl/src/camctl/outputs/dispatch.py)中用无批次限制的 `fetchall()` 收集活动与全部读取候选；主机源读取也一次收集全部未完成拷贝。`scheduling/discovery.py` 的分页辅助函数没有接入这些入口，其直接测试不能证明默认读取发现已分批。 | [修复步骤与验收门禁](2026-10-13-camctl-sw06-bounded-read-discovery.md) |
 
-- [ ] SW-01：受理历史时间状态及组合验证。
-- [ ] SW-02：日志副本与标记错误的会话诊断。
-- [ ] SW-03：本次保存流程的临时文件清理。
-- [ ] SW-04：默认 `run` 的遗留清理接线。
-- [ ] SW-05：锁错误分类及会话入口同类检查。
-- [ ] SW-06：默认读取发现的分批处理与排序组合验证。
+六份计划已按 SW-01 → SW-02 → SW-03 → SW-04 → SW-05 → SW-06 的顺序编写。后续实施建议沿此顺序逐项完成失败测试、修复、组合验证与独立复核，再进入下一项。编号顺序用于组织工作，不改变业务依赖：SW-02 提供日志诊断与完整保存回执，SW-03 和 SW-04 分别消费它；SW-04 的启动与收场变化由 SW-05 复核。各计划区分现行契约与内部接口、配置和文件组织的实施建议。
+
+- [x] [SW-01](2026-10-13-camctl-sw01-acceptance-clock-status.md)：受理及可信下界历史时间状态、默认入口与历史保持组合验证。
+- [ ] [SW-02](2026-10-13-camctl-sw02-log-copy-diagnostics.md)：日志副本与标记错误的会话诊断。
+- [ ] [SW-03](2026-10-13-camctl-sw03-marker-temp-cleanup.md)：本次保存流程的临时文件清理。
+- [ ] [SW-04](2026-10-13-camctl-sw04-startup-log-sweep.md)：默认 `run` 的遗留清理接线。
+- [ ] [SW-05](2026-10-13-camctl-sw05-session-lock-errors.md)：锁错误分类及会话入口同类检查。
+- [ ] [SW-06](2026-10-13-camctl-sw06-bounded-read-discovery.md)：默认读取发现的分批处理与排序组合验证。
+
+2026-10-13：SW-01 已修复并通过专项、相关完整目录回归及根代理复核；SW-02—SW-06 尚未实施。软件测试、真实设备和目标部署分别保留证据边界。
 
 相机调试进度由[相机接入计划 T9](2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)维护；目标资源、物理断电和第三方接入的独立证据边界见[部署交接](../../camctl/verification.md#部署交接与待核验项)。这些范围不能替代上述软件任务，也不因软件替身通过而成为目标环境已验结论。
 

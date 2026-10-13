@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,7 +17,9 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.session.clock import (
     ClockCheckInput,
     ClockTrustStatus,
+    ExecutionMode,
     check_clock,
+    enter_execution,
     register_clock_guard,
 )
 
@@ -66,11 +69,13 @@ class TestLowerBoundPersistence:
         ).fetchone()
         assert row == (reading, 1)
         event = connection.execute(
-            "SELECT event_type, change_seq, occurred_at FROM history_events"
+            "SELECT event_type, change_seq, occurred_at, clock_status"
+            " FROM history_events"
         ).fetchone()
-        assert event == (31, None, reading)
+        assert event == (31, None, reading, 2)
 
-    def test_second_run_advances_only_strictly(self, database) -> None:
+    @pytest.mark.asyncio
+    async def test_second_run_advances_only_strictly(self, database) -> None:
         connection, repository = database
         first = check_clock(_input(None), FixedClock([_MIN + 10_000]))
         repository.update_lower_bound(first, new_operation_key(), _owned(connection))
@@ -80,14 +85,46 @@ class TestLowerBoundPersistence:
         later = check_clock(_input(_MIN + 10_000), FixedClock([_MIN + 20_000]))
         assert later.needs_bound_update
         repository.update_lower_bound(later, new_operation_key(), _owned(connection))
-        assert connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0] == events_before + 1
+        assert (
+            connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0]
+            == events_before + 1
+        )
         assert connection.execute(
             "SELECT trusted_time_lower_bound FROM runtime_state"
         ).fetchone()[0] == _MIN + 20_000
+        advance_event = connection.execute(
+            "SELECT event_type, change_seq, occurred_at, clock_status"
+            " FROM history_events ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert advance_event == (31, None, _MIN + 20_000, 2)
 
-        # 不晚于下界的读数：不新增事件或写事务。
-        stale = check_clock(_input(_MIN + 20_000), FixedClock([_MIN + 15_000]))
+        # 与下界相等的读数可信，但无需推进下界或新增历史事务。
+        events_before_stale = connection.execute(
+            "SELECT * FROM history_events ORDER BY id"
+        ).fetchall()
+        transactions_before_stale = connection.execute(
+            "SELECT * FROM history_transactions ORDER BY id"
+        ).fetchall()
+        stale = check_clock(
+            _input(_MIN + 20_000), FixedClock([_MIN + 20_000])
+        )
+        assert stale.status is ClockTrustStatus.TRUSTED
         assert not stale.needs_bound_update
+        mode = await enter_execution(
+            stale,
+            SimpleNamespace(
+                repository=repository,
+                operation_key=new_operation_key(),
+                owned=_owned(connection),
+            ),
+        )
+        assert mode is ExecutionMode.NORMAL
+        assert connection.execute(
+            "SELECT * FROM history_events ORDER BY id"
+        ).fetchall() == events_before_stale
+        assert connection.execute(
+            "SELECT * FROM history_transactions ORDER BY id"
+        ).fetchall() == transactions_before_stale
 
     def test_clock_failure_preserves_acceptance(self, database) -> None:
         connection, repository = database
