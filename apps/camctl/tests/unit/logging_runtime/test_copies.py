@@ -18,6 +18,7 @@ from camctl.logging_runtime.copies import (
     MARKER_NAME,
     CopyOutcome,
     CopyRequest,
+    CopyReceipt,
     FailureLogService,
     MarkerPresence,
     MarkerStage,
@@ -163,6 +164,8 @@ def test_check_keeps_existence_when_content_invalid(monkeypatch):
     check = MarkerStore(_logs_dir()).check()
     assert check.presence is MarkerPresence.EXISTS
     assert check.state is None
+    assert check.error is not None
+    assert "{not json" not in check.error
 
 
 @pytest.mark.parametrize("payload", [
@@ -216,6 +219,34 @@ def test_create_failure_before_placement_is_not_created(monkeypatch):
     assert store.check().presence is MarkerPresence.ABSENT
 
 
+def test_unexpected_marker_write_error_propagates(monkeypatch):
+    from camctl.logging_runtime import copies
+
+    FakeFiles(monkeypatch)
+
+    def fail_write(path, data):
+        raise RuntimeError("unexpected marker writer bug")
+
+    monkeypatch.setattr(copies, "_write_synced", fail_write)
+
+    with pytest.raises(RuntimeError, match="unexpected marker writer bug"):
+        MarkerStore(_logs_dir()).create("r1", "log-copy-r1.log")
+
+
+def test_unexpected_marker_replace_error_propagates(monkeypatch):
+    from camctl.logging_runtime import copies
+
+    FakeFiles(monkeypatch)
+
+    def fail_replace(source, target):
+        raise RuntimeError("unexpected marker replace bug")
+
+    monkeypatch.setattr(copies, "_replace", fail_replace)
+
+    with pytest.raises(RuntimeError, match="unexpected marker replace bug"):
+        MarkerStore(_logs_dir()).create("r1", "log-copy-r1.log")
+
+
 def test_create_placed_but_directory_sync_unconfirmed(monkeypatch):
     files = FakeFiles(monkeypatch)
     files.errors[str(_logs_dir())] = OSError("sync failed")
@@ -247,6 +278,103 @@ def test_update_without_existing_marker_fails(monkeypatch):
     store = MarkerStore(_logs_dir())
     save = store.update_stage(MarkerStage.COPIED)
     assert save.outcome is SaveOutcome.FAILED_NOT_CREATED
+
+
+@pytest.mark.parametrize("failure_kind", ["stat", "read", "invalid"])
+def test_update_stage_preserves_marker_check_failure(monkeypatch, failure_kind):
+    from camctl.logging_runtime import copies
+
+    files = FakeFiles(monkeypatch)
+    store = MarkerStore(_logs_dir())
+    assert store.create("r1", "log-copy-r1.log").outcome is SaveOutcome.SAVED
+    marker_path = str(_logs_dir() / MARKER_NAME)
+    if failure_kind == "stat":
+        files.errors[marker_path] = PermissionError("progress stat denied")
+    elif failure_kind == "read":
+        monkeypatch.setattr(
+            copies, "_read_bytes",
+            lambda path: (_ for _ in ()).throw(
+                PermissionError("progress read denied")),
+        )
+    else:
+        files.files[marker_path] = b"{invalid progress marker"
+
+    saved = store.update_stage(
+        MarkerStage.COPIED,
+        expected_round_id="r1",
+        expected_copy_name="log-copy-r1.log",
+    )
+
+    assert saved.outcome is SaveOutcome.FAILED_NOT_CREATED
+    assert saved.marker_check is not None
+    if failure_kind == "stat":
+        assert saved.marker_check.presence is MarkerPresence.CHECK_ERROR
+        assert "progress stat denied" in saved.marker_check.error
+    else:
+        assert saved.marker_check.presence is MarkerPresence.EXISTS
+        assert saved.marker_check.error is not None
+        if failure_kind == "read":
+            assert "progress read denied" in saved.marker_check.error
+        else:
+            assert "marker_content_invalid" in saved.marker_check.error
+            assert "invalid progress marker" not in saved.marker_check.error
+
+
+@pytest.mark.parametrize("failure_stage", ["factory", "delivery"])
+def test_service_suspends_unexpected_attempt_and_recovers(monkeypatch, failure_stage):
+    files = FakeFiles(monkeypatch)
+    marker = MarkerStore(_logs_dir())
+    attempts = {"factory": 0, "delivery": 0}
+
+    async def deliver(request):
+        attempts["delivery"] += 1
+        if failure_stage == "delivery" and attempts["delivery"] == 1:
+            raise RuntimeError("unexpected delivery error")
+        return CopyReceipt(CopyOutcome.PUBLISHED)
+
+    service = FailureLogService(marker, deliver=deliver)
+
+    def build_request():
+        attempts["factory"] += 1
+        if failure_stage == "factory" and attempts["factory"] == 1:
+            raise RuntimeError("unexpected factory error")
+        return _request(monkeypatch)
+
+    if failure_stage == "factory":
+        with pytest.raises(RuntimeError, match="unexpected factory error"):
+            asyncio.run(service.on_report_failure_with_factory(build_request))
+    else:
+        with pytest.raises(RuntimeError, match="unexpected delivery error"):
+            asyncio.run(service.on_report_failure_with_factory(build_request))
+
+    suppressed = asyncio.run(
+        service.on_report_failure_with_factory(build_request))
+    assert suppressed.outcome is CopyOutcome.SUPPRESSED
+    assert attempts["factory"] == 1
+    assert attempts["delivery"] == (1 if failure_stage == "delivery" else 0)
+
+    asyncio.run(service.on_report_recovered())
+    receipt = asyncio.run(service.on_report_failure_with_factory(build_request))
+    assert receipt.outcome is CopyOutcome.PUBLISHED
+    assert attempts["factory"] == 2
+    assert attempts["delivery"] == (2 if failure_stage == "delivery" else 1)
+
+
+def test_old_progress_does_not_modify_new_round_marker(monkeypatch):
+    files = FakeFiles(monkeypatch)
+    store = MarkerStore(_logs_dir())
+    assert store.create("old", "log-copy-old.log").outcome is SaveOutcome.SAVED
+    assert store.delete().outcome.value == "deleted"
+    assert store.create("new", "log-copy-new.log").outcome is SaveOutcome.SAVED
+    before = files.files[str(_logs_dir() / MARKER_NAME)]
+
+    save = store.update_stage(MarkerStage.COPIED, expected_round_id="old")
+
+    assert save.outcome is SaveOutcome.FAILED_NOT_CREATED
+    assert files.files[str(_logs_dir() / MARKER_NAME)] == before
+    check = store.check()
+    assert check.state.round_id == "new"
+    assert check.state.stage is MarkerStage.TRIGGERED
 
 
 def test_delete_removes_marker_and_syncs_directory(monkeypatch):
@@ -336,6 +464,11 @@ def test_full_delivery_publishes_and_updates_progress(monkeypatch):
     publisher.result = _moved()
     receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
     assert receipt.outcome is CopyOutcome.PUBLISHED
+    assert receipt.marker_create.outcome is SaveOutcome.SAVED
+    assert tuple(stage for stage, _ in receipt.marker_progress) == (
+        MarkerStage.COPIED, MarkerStage.PUBLISHED)
+    assert all(save.outcome is SaveOutcome.SAVED
+               for _, save in receipt.marker_progress)
     assert is_copy_file_name(receipt.copy_name)
     # 标记先行：创建成功后才开始锁内写入并复制，最后发布并保存进度。
     sequence = [e[0] for e in order]
@@ -384,6 +517,39 @@ def test_marker_create_failure_stops_before_copy(monkeypatch):
     assert channel.copies == [] and publisher.calls == []
 
 
+@pytest.mark.parametrize("outcome", [
+    SaveOutcome.FAILED_NOT_CREATED,
+    SaveOutcome.PLACED_UNSYNCED,
+    SaveOutcome.UNKNOWN,
+])
+def test_marker_create_receipt_keeps_actual_non_success_outcome(
+        monkeypatch, outcome):
+    files = FakeFiles(monkeypatch)
+    store = MarkerStore(_logs_dir())
+    if outcome is SaveOutcome.FAILED_NOT_CREATED:
+        monkeypatch.setattr(
+            "camctl.logging_runtime.copies._write_synced",
+            lambda path, data: (_ for _ in ()).throw(OSError("temp denied")))
+    elif outcome is SaveOutcome.PLACED_UNSYNCED:
+        files.errors[str(_logs_dir())] = OSError("directory sync denied")
+    else:
+        monkeypatch.setattr(
+            "camctl.logging_runtime.copies._replace",
+            lambda source, target: (_ for _ in ()).throw(
+                OSError("replace unknown")))
+
+    channel, publisher = FakeChannel(), FakePublisher()
+    receipt = _deliver(_request(
+        monkeypatch, channel=channel, marker_dir=_logs_dir()), publisher)
+
+    assert receipt.outcome is CopyOutcome.MARKER_CREATE_FAILED
+    assert receipt.round_id is not None
+    assert receipt.copy_name == f"log-copy-{receipt.round_id}.log"
+    assert receipt.marker_create.outcome is outcome
+    assert receipt.marker_create.error is not None
+    assert channel.copies == [] and publisher.calls == []
+
+
 def test_copy_write_failure_cleans_staging_copy(monkeypatch):
     files = FakeFiles(monkeypatch)
     channel, publisher = FakeChannel(), FakePublisher()
@@ -395,6 +561,20 @@ def test_copy_write_failure_cleans_staging_copy(monkeypatch):
     assert MarkerStore(_logs_dir()).check().presence is MarkerPresence.EXISTS
     assert any(c[0] == "unlink" and is_copy_file_name(Path(c[1]).name)
                for c in files.calls)
+    assert publisher.calls == []
+
+
+def test_copy_failure_keeps_prior_marker_diagnostic(monkeypatch):
+    files = FakeFiles(monkeypatch)
+    channel, publisher = FakeChannel(), FakePublisher()
+    channel.copy_error = "snapshot read failed"
+
+    receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
+
+    assert receipt.outcome is CopyOutcome.COPY_FAILED
+    assert receipt.marker_create.outcome is SaveOutcome.SAVED
+    assert receipt.copy_error == "snapshot read failed"
+    assert receipt.cleanup_error is None
     assert publisher.calls == []
 
 
@@ -468,6 +648,51 @@ def test_progress_update_failure_does_not_block_delivery(monkeypatch):
     assert receipt.outcome is CopyOutcome.PUBLISHED
     # 标记保留原触发进度，身份不变。
     assert MarkerStore(_logs_dir()).check().state.stage is MarkerStage.TRIGGERED
+
+
+def test_both_progress_failures_survive_published_receipt(monkeypatch):
+    files = FakeFiles(monkeypatch)
+    original_write = files._write_synced
+    calls = {"count": 0}
+
+    def fail_progress_writes(path, data):
+        calls["count"] += 1
+        if calls["count"] > 1:
+            raise OSError(f"progress-{calls['count']} failed")
+        return original_write(path, data)
+
+    monkeypatch.setattr(
+        "camctl.logging_runtime.copies._write_synced", fail_progress_writes)
+    channel, publisher = FakeChannel(), FakePublisher()
+    publisher.result = _moved()
+
+    receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
+
+    assert receipt.outcome is CopyOutcome.PUBLISHED
+    assert receipt.round_id is not None
+    assert receipt.copy_name == f"log-copy-{receipt.round_id}.log"
+    assert [(stage, save.outcome) for stage, save in receipt.marker_progress] == [
+        (MarkerStage.COPIED, SaveOutcome.FAILED_NOT_CREATED),
+        (MarkerStage.PUBLISHED, SaveOutcome.FAILED_NOT_CREATED),
+    ]
+    assert all(save.error is not None for _, save in receipt.marker_progress)
+    assert receipt.error is None
+
+
+def test_rotation_failure_keeps_successful_copy_classification(monkeypatch):
+    from camctl.logging_runtime.clh_adapter import WriteResult
+
+    files = FakeFiles(monkeypatch)
+    channel, publisher = FakeChannel(), FakePublisher()
+    channel.write_result = WriteResult(
+        appended=True, rotated=False, rotation_error="rotation denied")
+    publisher.result = _moved()
+
+    receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
+
+    assert receipt.outcome is CopyOutcome.PUBLISHED
+    assert receipt.write_result.rotation_error == "rotation denied"
+    assert receipt.write_result.appended is True
 
 
 # ---- 同运行暂停服务 --------------------------------------------------

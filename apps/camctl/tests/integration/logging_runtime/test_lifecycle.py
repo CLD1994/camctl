@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import unittest.mock as mock
 from pathlib import Path
 
@@ -55,6 +56,42 @@ def _read_log(tmp_path: Path) -> str:
 
 @pytest.mark.asyncio
 class TestRealFileClose:
+    async def test_unsafe_close_waits_for_active_listener_write(self) -> None:
+        import asyncio
+
+        started = threading.Event()
+        release = threading.Event()
+        closed: list[bool] = []
+
+        def writer(record: LogRecord) -> bool:
+            started.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("test did not release listener write")
+            return True
+
+        channel = _channel_with(writer)
+        channel.start()
+        await channel.alog(LogRecord(level=LogLevel.ERROR, message="active write"))
+        assert await asyncio.to_thread(started.wait, 5)
+        runtime = LogRuntime(
+            channel=channel,
+            path_unsafe=True,
+            file_closer=lambda: closed.append(True),
+        )
+        closing = asyncio.create_task(close_logging(runtime))
+        waited_while_active = False
+        try:
+            done, _ = await asyncio.wait((closing,), timeout=0.25)
+            waited_while_active = not done
+        finally:
+            release.set()
+        result = await asyncio.wait_for(closing, timeout=5)
+
+        assert waited_while_active is True
+        assert result.listener_stopped is True
+        assert channel.listener_alive is False
+        assert closed == [True]
+
     async def test_close_writes_summary_and_stops_listener(
         self, tmp_path: Path,
     ) -> None:

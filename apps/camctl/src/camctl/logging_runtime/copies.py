@@ -16,9 +16,10 @@ import json
 import os
 import secrets
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, Protocol, Sequence
+from typing import TYPE_CHECKING, Awaitable, Callable, Protocol, Sequence
 
 from camctl.host_files.handoff import (
     HandoffDirectories,
@@ -29,6 +30,9 @@ from camctl.host_files.handoff import (
 )
 from camctl.host_files.io import DirectorySyncStage
 from camctl.logging_runtime.service import LogRecord
+
+if TYPE_CHECKING:
+    from camctl.logging_runtime.clh_adapter import WriteResult
 
 __all__ = [
     "COPY_PREFIX",
@@ -152,6 +156,7 @@ class SaveOutcome(enum.Enum):
 class MarkerSave:
     outcome: SaveOutcome
     error: str | None = None
+    marker_check: MarkerCheck | None = None
 
 
 class DeleteOutcome(enum.Enum):
@@ -220,6 +225,7 @@ class MarkerStore:
     def __init__(self, logs_dir: Path) -> None:
         self._dir = Path(logs_dir)
         self._path = self._dir / MARKER_NAME
+        self._lock = threading.RLock()
 
     @property
     def directory(self) -> Path:
@@ -227,54 +233,86 @@ class MarkerStore:
 
     def check(self) -> MarkerCheck:
         """存在性与内容分别判断；检查错误不当作不存在。"""
-        try:
-            present = _exists(self._path)
-        except OSError as failure:
-            return MarkerCheck(MarkerPresence.CHECK_ERROR,
-                               error=_describe("stat_failed", failure))
-        if not present:
-            return MarkerCheck(MarkerPresence.ABSENT)
-        try:
-            raw = _read_bytes(self._path)
-        except OSError as failure:
-            # 已确认存在：内容不可读仍按有标记抑制。
-            return MarkerCheck(MarkerPresence.EXISTS,
-                               error=_describe("read_failed", failure))
-        return MarkerCheck(MarkerPresence.EXISTS, state=_decode_state(raw))
+        with self._lock:
+            try:
+                present = _exists(self._path)
+            except OSError as failure:
+                return MarkerCheck(MarkerPresence.CHECK_ERROR,
+                                   error=_describe("stat_failed", failure))
+            if not present:
+                return MarkerCheck(MarkerPresence.ABSENT)
+            try:
+                raw = _read_bytes(self._path)
+            except OSError as failure:
+                # 已确认存在：内容不可读仍按有标记抑制。
+                return MarkerCheck(MarkerPresence.EXISTS,
+                                   error=_describe("read_failed", failure))
+            state = _decode_state(raw)
+            if state is None:
+                # 只记录无效类别，不复制或转储标记原始字节。
+                return MarkerCheck(
+                    MarkerPresence.EXISTS,
+                    error="marker_content_invalid: 标记内容不符合已知结构",
+                )
+            return MarkerCheck(MarkerPresence.EXISTS, state=state)
 
     def create(self, round_id: str, copy_name: str) -> MarkerSave:
         """可靠保存新故障标记：临时写入同步后原子放置。"""
-        payload = _encode_state(round_id, copy_name, MarkerStage.TRIGGERED)
-        return self._save_payload(payload)
+        with self._lock:
+            payload = _encode_state(round_id, copy_name, MarkerStage.TRIGGERED)
+            return self._save_payload(payload)
 
-    def update_stage(self, stage: MarkerStage) -> MarkerSave:
+    def update_stage(
+        self,
+        stage: MarkerStage,
+        *,
+        expected_round_id: str | None = None,
+        expected_copy_name: str | None = None,
+    ) -> MarkerSave:
         """原子替换保存进度；身份与副本身份保持不变。"""
-        check = self.check()
-        if check.presence is not MarkerPresence.EXISTS or check.state is None:
-            return MarkerSave(SaveOutcome.FAILED_NOT_CREATED,
-                              error="正式标记缺失或身份不可读，不能更新进度")
-        payload = _encode_state(
-            check.state.round_id, check.state.copy_name, stage)
-        return self._save_payload(payload)
+        with self._lock:
+            check = self.check()
+            if check.presence is not MarkerPresence.EXISTS or check.state is None:
+                return MarkerSave(SaveOutcome.FAILED_NOT_CREATED,
+                                  error="正式标记缺失或身份不可读，不能更新进度",
+                                  marker_check=check)
+            if (expected_round_id is not None
+                    and check.state.round_id != expected_round_id):
+                return MarkerSave(
+                    SaveOutcome.FAILED_NOT_CREATED,
+                    error=("marker_round_mismatch: 当前正式标记属于另一轮次，"
+                           "旧进度未保存"),
+                )
+            if (expected_copy_name is not None
+                    and check.state.copy_name != expected_copy_name):
+                return MarkerSave(
+                    SaveOutcome.FAILED_NOT_CREATED,
+                    error=("marker_copy_mismatch: 当前正式标记属于另一副本，"
+                           "旧进度未保存"),
+                )
+            payload = _encode_state(
+                check.state.round_id, check.state.copy_name, stage)
+            return self._save_payload(payload)
 
     def delete(self) -> MarkerDelete:
         """报告可靠恢复后删除标记并同步目录。"""
-        try:
-            _unlink(self._path)
-        except FileNotFoundError:
-            return MarkerDelete(DeleteOutcome.NOT_PRESENT)
-        except InterruptedError as failure:
-            return MarkerDelete(DeleteOutcome.UNKNOWN,
-                                error=_describe("unlink_unknown", failure))
-        except OSError as failure:
-            return MarkerDelete(DeleteOutcome.FAILED,
-                                error=_describe("unlink_failed", failure))
-        try:
-            _fsync_directory(self._dir)
-        except OSError as failure:
-            return MarkerDelete(DeleteOutcome.DELETE_UNSYNCED,
-                                error=_describe("dir_sync_failed", failure))
-        return MarkerDelete(DeleteOutcome.DELETED)
+        with self._lock:
+            try:
+                _unlink(self._path)
+            except FileNotFoundError:
+                return MarkerDelete(DeleteOutcome.NOT_PRESENT)
+            except InterruptedError as failure:
+                return MarkerDelete(DeleteOutcome.UNKNOWN,
+                                    error=_describe("unlink_unknown", failure))
+            except OSError as failure:
+                return MarkerDelete(DeleteOutcome.FAILED,
+                                    error=_describe("unlink_failed", failure))
+            try:
+                _fsync_directory(self._dir)
+            except OSError as failure:
+                return MarkerDelete(DeleteOutcome.DELETE_UNSYNCED,
+                                    error=_describe("dir_sync_failed", failure))
+            return MarkerDelete(DeleteOutcome.DELETED)
 
     def _save_payload(self, payload: bytes) -> MarkerSave:
         temp = self._dir / marker_temp_file_name(secrets.token_hex(8))
@@ -365,6 +403,13 @@ class CopyReceipt:
     copy_name: str | None = None
     stage: MarkerStage | None = None
     error: str | None = None
+    marker_check: MarkerCheck | None = None
+    marker_create: MarkerSave | None = None
+    marker_progress: tuple[tuple[MarkerStage, MarkerSave], ...] = ()
+    write_result: WriteResult | None = None
+    copy_error: str | None = None
+    publish_error: str | None = None
+    cleanup_error: str | None = None
 
 
 async def deliver_failure_copy(
@@ -378,7 +423,8 @@ async def deliver_failure_copy(
     """
     check = await asyncio.to_thread(request.marker.check)
     if check.presence is MarkerPresence.CHECK_ERROR:
-        return CopyReceipt(CopyOutcome.MARKER_UNAVAILABLE, error=check.error)
+        return CopyReceipt(CopyOutcome.MARKER_UNAVAILABLE, error=check.error,
+                           marker_check=check)
     if check.presence is MarkerPresence.EXISTS:
         state = check.state
         return CopyReceipt(
@@ -386,57 +432,93 @@ async def deliver_failure_copy(
             round_id=state.round_id if state else None,
             copy_name=state.copy_name if state else None,
             stage=state.stage if state else None,
-            error=check.error)
+            error=check.error,
+            marker_check=check)
 
     round_id = secrets.token_hex(16)
     name = copy_file_name(round_id)
     save = await asyncio.to_thread(
         request.marker.create, round_id, name)
     if save.outcome is not SaveOutcome.SAVED:
-        return CopyReceipt(CopyOutcome.MARKER_CREATE_FAILED, round_id, name,
-                           None, save.error)
+        return CopyReceipt(
+            CopyOutcome.MARKER_CREATE_FAILED, round_id, name,
+            error=save.error, marker_check=check, marker_create=save,
+        )
 
     logs_dir = request.marker.directory
     destination = logs_dir / name
-    write_result, copy_error = await asyncio.to_thread(
-        request.channel.copy_with_write, request.trigger, destination)
+    try:
+        write_result, copy_error = await asyncio.to_thread(
+            request.channel.copy_with_write, request.trigger, destination)
+    except Exception as failure:
+        error = _describe("copy_result_unknown", failure)
+        return CopyReceipt(
+            CopyOutcome.COPY_UNKNOWN, round_id, name,
+            error=error, marker_check=check, marker_create=save,
+            copy_error=error,
+        )
     if not write_result.appended or copy_error is not None:
         cleanup = await asyncio.to_thread(
             _cleanup_staging_copy, destination)
+        error = "; ".join(part for part in (
+            copy_error, write_result.append_error, cleanup) if part)
         return CopyReceipt(
-            CopyOutcome.COPY_FAILED, round_id, name, None,
-            "; ".join(part for part in (copy_error,
-                                        write_result.append_error, cleanup)
-                      if part))
+            CopyOutcome.COPY_FAILED, round_id, name,
+            error=error, marker_check=check, marker_create=save,
+            write_result=write_result, copy_error=copy_error,
+            cleanup_error=cleanup,
+        )
 
-    await asyncio.to_thread(request.marker.update_stage, MarkerStage.COPIED)
+    progress: list[tuple[MarkerStage, MarkerSave]] = []
+    copied_save = await asyncio.to_thread(
+        request.marker.update_stage, MarkerStage.COPIED,
+        expected_round_id=round_id, expected_copy_name=name)
+    progress.append((MarkerStage.COPIED, copied_save))
     try:
         file_result = await publish(
             destination, HandoffDirectories(request.staging_root,
                                             request.ready_dir),
             ReadyName(name))
     except Exception as failure:
-        return CopyReceipt(CopyOutcome.COPY_UNKNOWN, round_id, name,
-                           MarkerStage.COPIED,
-                           _describe("publish_failed", failure))
+        error = _describe("publish_failed", failure)
+        return CopyReceipt(
+            CopyOutcome.COPY_UNKNOWN, round_id, name, MarkerStage.COPIED,
+            error, check, save, tuple(progress), write_result,
+            publish_error=error,
+        )
     if file_result.stage is PublishStage.UNKNOWN:
-        return CopyReceipt(CopyOutcome.COPY_UNKNOWN, round_id, name,
-                           MarkerStage.COPIED, file_result.error)
+        return CopyReceipt(
+            CopyOutcome.COPY_UNKNOWN, round_id, name, MarkerStage.COPIED,
+            file_result.error, check, save, tuple(progress), write_result,
+            publish_error=file_result.error,
+        )
     if file_result.stage is not PublishStage.MOVED:
         cleanup = await asyncio.to_thread(
             _cleanup_staging_copy, destination)
+        error = "; ".join(part for part in (file_result.error, cleanup)
+                           if part)
         return CopyReceipt(
             CopyOutcome.COPY_FAILED, round_id, name, MarkerStage.COPIED,
-            "; ".join(part for part in (file_result.error, cleanup)
-                      if part))
+            error, check, save, tuple(progress), write_result,
+            publish_error=file_result.error, cleanup_error=cleanup,
+        )
     if not _handoff_confirmed(file_result):
         # 已移入 ready 的文件保持不撤回；同步未确认不宣称发布完成。
-        return CopyReceipt(CopyOutcome.COPY_UNKNOWN, round_id, name,
-                           MarkerStage.COPIED, file_result.error)
+        return CopyReceipt(
+            CopyOutcome.COPY_UNKNOWN, round_id, name, MarkerStage.COPIED,
+            file_result.error, check, save, tuple(progress), write_result,
+            publish_error=file_result.error,
+        )
 
-    await asyncio.to_thread(request.marker.update_stage, MarkerStage.PUBLISHED)
-    return CopyReceipt(CopyOutcome.PUBLISHED, round_id, name,
-                       MarkerStage.PUBLISHED)
+    published_save = await asyncio.to_thread(
+        request.marker.update_stage, MarkerStage.PUBLISHED,
+        expected_round_id=round_id, expected_copy_name=name)
+    progress.append((MarkerStage.PUBLISHED, published_save))
+    return CopyReceipt(
+        CopyOutcome.PUBLISHED, round_id, name, MarkerStage.PUBLISHED,
+        marker_check=check, marker_create=save,
+        marker_progress=tuple(progress), write_result=write_result,
+    )
 
 
 def _handoff_confirmed(result: PublishResult) -> bool:
@@ -472,20 +554,37 @@ class FailureLogService:
         self._marker = marker
         self._deliver = deliver
         self._suspended = False
+        self._lock = asyncio.Lock()
 
     async def on_report_failure(self, request: CopyRequest) -> CopyReceipt:
-        if self._suspended:
-            return CopyReceipt(CopyOutcome.SUPPRESSED)
-        receipt = await self._deliver(request)
-        if receipt.outcome in (CopyOutcome.MARKER_UNAVAILABLE,
-                               CopyOutcome.MARKER_CREATE_FAILED):
-            self._suspended = True
-        return receipt
+        return await self.on_report_failure_with_factory(lambda: request)
+
+    async def on_report_failure_with_factory(
+            self, request_factory: Callable[[], CopyRequest]) -> CopyReceipt:
+        """由服务协调请求构造及副本调用，异常也暂停本故障轮。"""
+        async with self._lock:
+            if self._suspended:
+                return CopyReceipt(CopyOutcome.SUPPRESSED)
+            try:
+                request = request_factory()
+                receipt = await self._deliver(request)
+            except Exception:
+                self._suspended = True
+                raise
+            if receipt.outcome in (CopyOutcome.MARKER_UNAVAILABLE,
+                                   CopyOutcome.MARKER_CREATE_FAILED):
+                self._suspended = True
+            if (receipt.write_result is not None
+                    and receipt.write_result.disables_file_logging):
+                self._suspended = True
+            return receipt
 
     async def on_report_recovered(self) -> MarkerDelete:
         """报告本地处理可靠恢复：结束本轮故障并解除暂停。"""
-        self._suspended = False
-        return await asyncio.to_thread(self._marker.delete)
+        async with self._lock:
+            deletion = await asyncio.to_thread(self._marker.delete)
+            self._suspended = False
+            return deletion
 
 
 # ---- run 启动清理 ----------------------------------------------------

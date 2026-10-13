@@ -23,6 +23,12 @@ from camctl.acceptance.service import AcceptanceResult, CommandMode, accept_inpu
 from camctl.contracts.clock import ClockPort
 from camctl.contracts.values import OperationKey, new_operation_key
 from camctl.devices.bindings import DeviceConfigurationError
+from camctl.logging_runtime.copies import (
+    CopyOutcome,
+    CopyReceipt,
+    MarkerPresence,
+    SaveOutcome,
+)
 from camctl.persistence.models import DbOutcomeKind, DirectoryBindingError
 from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
 from camctl.session.clock import (
@@ -111,6 +117,12 @@ class SessionContext:
     failure_log: Any = None
     #: 报告失败触发副本时的请求工厂：(error) -> CopyRequest。
     copy_request_factory: Callable[[Any], Any] | None = None
+    #: 报告副本诊断的普通日志出口；装配层保证实际写入并处理回退。
+    on_log_diagnostic: Callable[[str], Awaitable[None]] | None = None
+    #: 文件协调状态不明时使用的剩余 stderr 出口。
+    on_stderr_diagnostic: Callable[[str], Awaitable[None]] | None = None
+    #: 文件协调及关闭结果均未知后，通知装配停止使用共享日志路径。
+    on_log_path_unsafe: Callable[[], None] | None = None
     #: 进程内工作唤醒通知；等待新工作时由生产者触发。
     wake: Any = None
     #: 外部输入感知的轮询上限（秒）；部署目标为 0.5 秒量级。
@@ -450,12 +462,200 @@ async def _trigger_failure_log(context: SessionContext, error: Exception) -> Non
     """报告首次失败触发一次日志副本交付；副本失败不扩大错误。"""
     if context.failure_log is None or context.copy_request_factory is None:
         return
+
+    stage = "request_factory"
+
+    def request_factory() -> CopyRequest:
+        nonlocal stage
+        request = context.copy_request_factory(error)
+        stage = "delivery_call"
+        return request
+
     try:
-        await context.failure_log.on_report_failure(
-            context.copy_request_factory(error))
-    except Exception:
-        # 副本交付失败按其自身规则处理，不改写本次报告错误。
-        pass
+        receipt = await context.failure_log.on_report_failure_with_factory(
+            request_factory)
+    except Exception as failure:
+        # 调用异常可能发生在文件操作之后；保持副本位置未知并保留
+        # 主报告结果，不重试或另行推测文件事实。
+        await _deliver_log_diagnostic(
+            context,
+            _failure_copy_exception(stage, error, failure),
+        )
+        return
+    message, stderr_only = _copy_receipt_diagnostic(error, receipt)
+    if _copy_receipt_log_path_unsafe(receipt):
+        callback = context.on_log_path_unsafe
+        if callback is not None:
+            try:
+                callback()
+            except Exception:
+                pass
+    if message is not None:
+        await _deliver_log_diagnostic(
+            context, message, stderr_only=stderr_only)
+
+
+def _failure_copy_exception(
+    stage: str, report_error: Exception, failure: Exception,
+) -> str:
+    return (
+        "报告失败的日志副本诊断："
+        f"report_error={type(report_error).__name__}: {report_error}; "
+        f"stage={stage}; outcome=unknown; "
+        f"error={type(failure).__name__}: {failure}"
+    )
+
+
+def _copy_receipt_diagnostic(
+    report_error: Exception, receipt: CopyReceipt | None,
+) -> tuple[str | None, bool]:
+    """把回执中实际保存的各阶段错误汇成一条附属诊断。"""
+    if receipt is None:
+        return None, False
+    issues: list[str] = []
+    check = receipt.marker_check
+    if (check is not None
+            and (check.error is not None
+                 or check.presence is MarkerPresence.CHECK_ERROR)):
+        issues.append(
+            f"marker_check: presence={check.presence.value}; "
+            f"error={check.error or 'check outcome unknown'}"
+        )
+    marker_create = receipt.marker_create
+    if (marker_create is not None
+            and (marker_create.outcome is not SaveOutcome.SAVED
+                 or marker_create.error is not None)):
+        issues.append(
+            f"marker_create: outcome={marker_create.outcome.value}; "
+            f"error={marker_create.error or 'none'}"
+        )
+    for stage, save in receipt.marker_progress:
+        if save.outcome is not SaveOutcome.SAVED or save.error is not None:
+            issues.append(
+                f"marker_progress[{stage.value}]: "
+                f"outcome={save.outcome.value}; "
+                f"error={save.error or 'none'}"
+            )
+        check = save.marker_check
+        if (check is not None
+                and (check.error is not None
+                     or check.presence is MarkerPresence.CHECK_ERROR)):
+            issues.append(
+                f"marker_progress[{stage.value}].marker_check: "
+                f"presence={check.presence.value}; "
+                f"error={check.error or 'check outcome unknown'}"
+            )
+    write_result = receipt.write_result
+    if write_result is not None:
+        if write_result.failure_stage is not None:
+            issues.append(
+                f"copy_write_stage={write_result.failure_stage.value}")
+        for label, detail in (
+                ("rotation_error", write_result.rotation_error),
+                ("append_error", write_result.append_error),
+                ("coordination_error", write_result.coordination_error),
+                ("close_error", write_result.close_error)):
+            if detail is not None:
+                issues.append(f"copy_{label}: {detail}")
+    for label, detail in (
+            ("copy_error", receipt.copy_error),
+            ("publish_error", receipt.publish_error),
+            ("cleanup_error", receipt.cleanup_error)):
+        if detail is not None:
+            issues.append(f"{label}: {detail}")
+    legacy_error = receipt.error
+    if (legacy_error is not None
+            and not _legacy_error_is_stage_duplicate(
+                receipt, write_result, legacy_error)):
+        issues.append(f"error: {legacy_error}")
+    if (receipt.outcome in {
+            CopyOutcome.MARKER_UNAVAILABLE, CopyOutcome.MARKER_CREATE_FAILED,
+            CopyOutcome.COPY_FAILED, CopyOutcome.COPY_UNKNOWN,
+    } and not issues):
+        issues.append(
+            f"copy_outcome={receipt.outcome.value}; "
+            f"error={legacy_error or 'none'}")
+    if not issues:
+        return None, False
+    stage = receipt.stage.value if receipt.stage is not None else "unknown"
+    identity = (
+        f"round_id={receipt.round_id or 'unknown'}; "
+        f"copy_name={receipt.copy_name or 'unknown'}; stage={stage}"
+    )
+    message = (
+        "报告失败的日志副本诊断："
+        f"report_error={type(report_error).__name__}: {report_error}; "
+        f"outcome={receipt.outcome.value}; {identity}; "
+        + "; ".join(issues)
+    )
+    # 文件 I/O 或共享协调失败后停用本进程后续文件日志；
+    # 直接写 stderr，不再触碰同一路径。
+    stderr_only = _copy_receipt_log_path_unsafe(receipt)
+    return message, stderr_only
+
+
+def _legacy_error_is_stage_duplicate(
+    receipt: CopyReceipt, write_result: Any, legacy_error: str,
+) -> bool:
+    """只省略生产者明确重复到 legacy 字段的同一步错误。"""
+    if receipt.outcome in (CopyOutcome.MARKER_UNAVAILABLE,
+                           CopyOutcome.SUPPRESSED):
+        return (receipt.marker_check is not None
+                and legacy_error == receipt.marker_check.error)
+    if receipt.outcome is CopyOutcome.MARKER_CREATE_FAILED:
+        return (receipt.marker_create is not None
+                and legacy_error == receipt.marker_create.error)
+    if receipt.outcome is CopyOutcome.COPY_FAILED:
+        expected = "; ".join(part for part in (
+            receipt.copy_error,
+            write_result.append_error if write_result is not None else None,
+            receipt.cleanup_error,
+        ) if part)
+        return bool(expected) and legacy_error == expected
+    if receipt.outcome is CopyOutcome.COPY_UNKNOWN:
+        return (
+            receipt.copy_error is not None
+            and legacy_error == receipt.copy_error
+        ) or (
+            receipt.publish_error is not None
+            and legacy_error == receipt.publish_error
+        )
+    return False
+
+
+def _copy_receipt_log_path_unsafe(receipt: CopyReceipt | None) -> bool:
+    result = receipt.write_result if receipt is not None else None
+    return result is not None and result.disables_file_logging
+
+
+async def _deliver_log_diagnostic(
+    context: SessionContext,
+    message: str,
+    *,
+    stderr_only: bool = False,
+) -> None:
+    """写一次附属诊断；出口故障不递归触发报告副本或改写会话。"""
+    if stderr_only:
+        callback = context.on_stderr_diagnostic
+        if callback is not None:
+            try:
+                await callback(message)
+            except Exception:
+                pass
+        return
+    callback = context.on_log_diagnostic
+    if callback is not None:
+        try:
+            await callback(message)
+            return
+        except Exception:
+            pass
+    fallback = context.on_stderr_diagnostic
+    if fallback is not None:
+        try:
+            await fallback(message)
+        except Exception:
+            pass
 
 
 async def _try_close(
@@ -558,13 +758,15 @@ async def _restricted_session(context: SessionContext) -> SessionOutcome:
         except ClockBecameUntrusted:
             raise
         except (DirectoryBindingError, DeviceConfigurationError) as error:
+            await _trigger_failure_log(context, error)
             return _outcome_error("configuration_error", {"error": str(error)})
         except StateDbFailure as error:
+            await _trigger_failure_log(context, error)
             return _outcome_error("state_db_error", {"error": str(error)})
-        except Exception:
+        except Exception as error:
             # 一次报告机会失败：保留诊断与责任，本次不循环重试，
             # 仍按时钟异常退出。
-            pass
+            await _trigger_failure_log(context, error)
     return _outcome_error("clock_invalid")
 
 

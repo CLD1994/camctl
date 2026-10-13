@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 import threading
@@ -291,6 +292,51 @@ class TestDelivery:
         assert receipt.outcome is CopyOutcome.PUBLISHED
         channel.close()
 
+    @pytest.mark.parametrize("failed_progress_call,failed_stage", [
+        (2, MarkerStage.COPIED),
+        (3, MarkerStage.PUBLISHED),
+    ])
+    async def test_real_progress_sync_failure_keeps_published_bytes(
+            self, tmp_path: Path, monkeypatch, failed_progress_call: int,
+            failed_stage: MarkerStage) -> None:
+        """真实 marker 替换已放置时目录同步失败，不改写发布文件事实。"""
+        from camctl.host_files.handoff import PublishStage
+        from camctl.logging_runtime import copies
+        from camctl.logging_runtime.copies import SaveOutcome
+
+        staging, ready, logs_dir, log_path = _layout(tmp_path)
+        channel = _channel(log_path)
+        marker = MarkerStore(logs_dir)
+        original_sync = copies._fsync_directory
+        calls = {"count": 0}
+
+        def fail_selected_marker_sync(path):
+            if Path(path) == logs_dir:
+                calls["count"] += 1
+                if calls["count"] == failed_progress_call:
+                    raise OSError("injected progress directory sync failure")
+            return original_sync(path)
+
+        monkeypatch.setattr(copies, "_fsync_directory", fail_selected_marker_sync)
+
+        receipt = await copies.deliver_failure_copy(
+            _request(staging, ready, channel, marker))
+
+        assert receipt.outcome is CopyOutcome.PUBLISHED
+        assert receipt.stage is MarkerStage.PUBLISHED
+        assert tuple(stage for stage, _ in receipt.marker_progress) == (
+            MarkerStage.COPIED, MarkerStage.PUBLISHED)
+        saved = dict(receipt.marker_progress)[failed_stage]
+        assert saved.outcome is SaveOutcome.PLACED_UNSYNCED
+        assert "injected progress directory sync failure" in saved.error
+        assert len(list(ready.iterdir())) == 1
+        published = ready / receipt.copy_name
+        payload = published.read_bytes()
+        assert _TRIGGER.encode() in payload
+        assert receipt.write_result.appended is True
+        assert receipt.copy_error is None
+        channel.close()
+
 
 # ---- 恢复与服务 ------------------------------------------------------
 
@@ -315,6 +361,69 @@ class TestRecovery:
         assert second.round_id != first.round_id
         assert sorted(p.name for p in ready.iterdir()) == sorted(
             [first.copy_name, second.copy_name])
+        channel.close()
+
+    async def test_recovery_waits_for_original_progress_before_new_round(
+            self, tmp_path: Path, monkeypatch) -> None:
+        """副本更新临时文件期间，恢复和新失败在同一拥有者下排队。"""
+        import json
+
+        from camctl.logging_runtime import copies
+
+        staging, ready, logs_dir, log_path = _layout(tmp_path)
+        channel = _channel(log_path)
+        marker = MarkerStore(logs_dir)
+        service = FailureLogService(marker)
+        original_write = copies._write_synced
+        progress_temp_ready = threading.Event()
+        release_progress = threading.Event()
+        paused = {"done": False}
+
+        def pause_after_writing_progress_temp(path, data):
+            original_write(path, data)
+            state = json.loads(data.decode())
+            if state["stage"] == MarkerStage.COPIED.value and not paused["done"]:
+                paused["done"] = True
+                progress_temp_ready.set()
+                if not release_progress.wait(timeout=10):
+                    raise TimeoutError("test did not release marker progress")
+
+        monkeypatch.setattr(copies, "_write_synced", pause_after_writing_progress_temp)
+
+        first_task = asyncio.create_task(service.on_report_failure(
+            _request(staging, ready, channel, marker, "first report failure")))
+        assert await asyncio.to_thread(progress_temp_ready.wait, 5)
+        temps = [path for path in logs_dir.iterdir()
+                 if is_marker_temp_name(path.name)]
+        assert len(temps) == 1
+
+        recovery_started = asyncio.Event()
+
+        async def recover():
+            recovery_started.set()
+            return await service.on_report_recovered()
+
+        recovery_task = asyncio.create_task(recover())
+        await recovery_started.wait()
+        assert not recovery_task.done()
+        next_failure_task = asyncio.create_task(service.on_report_failure(
+            _request(staging, ready, channel, marker, "next report failure")))
+        release_progress.set()
+
+        first, deletion, second = await asyncio.gather(
+            first_task, recovery_task, next_failure_task)
+
+        assert first.outcome is CopyOutcome.PUBLISHED
+        assert deletion.outcome.value == "deleted"
+        assert second.outcome is CopyOutcome.PUBLISHED
+        assert second.round_id != first.round_id
+        final = marker.check()
+        assert final.state.round_id == second.round_id
+        assert final.state.copy_name == second.copy_name
+        assert final.state.stage is MarkerStage.PUBLISHED
+        assert len(list(ready.iterdir())) == 2
+        assert not [path for path in logs_dir.iterdir()
+                    if is_marker_temp_name(path.name)]
         channel.close()
 
     async def test_suspension_lifted_by_recovery(

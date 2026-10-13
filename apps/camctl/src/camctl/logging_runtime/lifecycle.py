@@ -36,6 +36,8 @@ class LogRuntime:
     summary_written: bool = False
     listener_stopped: bool = True
     close_attempts: int = 0
+    #: 共享文件日志 I/O 或协调失败后停用后续文件日志。
+    path_unsafe: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,7 @@ class CloseResult:
     summary_written: bool
     dropped_total: int
     listener_stopped: bool = True
+    close_error: str | None = None
 
 
 def _allows_warning(level: LogLevel) -> bool:
@@ -65,6 +68,30 @@ async def close_logging(
             summary_written=runtime.summary_written,
             dropped_total=runtime.channel.counters.total_dropped(),
             listener_stopped=runtime.listener_stopped,
+        )
+    if runtime.path_unsafe:
+        from camctl.logging_runtime.service import ChannelError
+
+        runtime.close_attempts = 1
+        channel = runtime.channel
+        dropped = channel.counters.total_dropped()
+        channel.disable_channel(ChannelError("共享文件日志 I/O 或协调不可用"))
+        stopped = await asyncio.to_thread(channel.stop_listener, None)
+        runtime.listener_stopped = stopped
+        close_error = None
+        try:
+            if stopped and runtime.file_closer is not None:
+                await asyncio.to_thread(runtime.file_closer)
+        except Exception as error:
+            close_error = f"file_handler_close_failed: {type(error).__name__}: {error}"
+        finally:
+            channel.async_close()
+            await channel.await_closed()
+        return CloseResult(
+            summary_written=False,
+            dropped_total=dropped,
+            listener_stopped=stopped,
+            close_error=close_error,
         )
     runtime.close_attempts = 1
     channel = runtime.channel

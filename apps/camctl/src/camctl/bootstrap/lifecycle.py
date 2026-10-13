@@ -40,7 +40,9 @@ from camctl.reporting.messages import ResultFailureMessage
 from camctl.session.clock import ClockCheckInput, register_clock_guard
 from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
 from camctl.session.outcome import SessionOutcome
-from camctl.session.service import SessionContext, SessionPaths, run_session
+from camctl.session.service import (
+    SessionContext, SessionPaths, _trigger_failure_log, run_session,
+)
 from camctl.session.work import WorkFacts
 
 __all__ = ["RuntimeDeps", "build_runtime", "close_runtime", "execute_command"]
@@ -59,6 +61,10 @@ class RuntimeDeps:
     notifier: Any = None
     #: 报告失败日志副本的文件通道；首次触发时创建，关闭时释放。
     failure_channel: Any = None
+    #: stderr 诊断曾发生写入错误后停止再次尝试。
+    stderr_diagnostic_failed: bool = False
+    #: 本命令内共享文件日志 I/O 或协调失败后不再使用该路径。
+    log_path_unsafe: bool = False
     #: 业务日志链运行时；由 build_runtime 创建并在会话结束时有序关闭。
     log_runtime: Any = None
     #: CLI 拥有的单向通知写端；装配只借用，CLI 在全部退出路径关闭。
@@ -234,7 +240,7 @@ def build_runtime(
             startup_error = SessionOutcome(succeeded=False, reason="state_db_error",
                                            details={"error": str(error)})
     session_lock, admission_lock = lock_file_paths(state_db)
-    return RuntimeDeps(
+    deps = RuntimeDeps(
         mode=command_mode,
         config=config,
         state_db=state_db,
@@ -242,22 +248,35 @@ def build_runtime(
         admission_lock=admission_lock,
         catalog=catalog if catalog is not None else _default_catalog(config),
         notifier=notifier,
-        log_runtime=(_log_wiring(config) if startup_error is None
-                     or startup_error.reason == "state_db_error" else None),
         host_notifications=host_notifications,
         startup_error=startup_error,
         recovery_boundary=recovery_boundary,
     )
+    if startup_error is None or startup_error.reason == "state_db_error":
+        deps.log_runtime = _log_wiring(
+            config,
+            on_file_failure=lambda: _mark_log_path_unsafe(deps),
+            on_stderr_diagnostic=lambda message: _write_stderr_diagnostic(
+                deps, message),
+        )
+    return deps
 
 
-def _log_wiring(config: ConfigSnapshot):
+def _log_wiring(
+    config: ConfigSnapshot,
+    *,
+    on_file_failure: Callable[[], None] | None = None,
+    on_stderr_diagnostic: Callable[[str], None] | None = None,
+):
     """业务日志链装配：文件通道、接纳通道与关闭运行时。
 
     追加失败经 ChannelWriteError 交给接纳通道按通道故障禁用；轮换
     失败但仍追加成功时通道继续。监听线程在此启动，收场由
     execute_command 的 close_logging 完成。
     """
-    from camctl.logging_runtime.clh_adapter import ChannelWriteError, FileChannel
+    from camctl.logging_runtime.clh_adapter import (
+        ChannelWriteError, FileChannel, WriteFailureStage,
+    )
     from camctl.logging_runtime.lifecycle import LogRuntime
     from camctl.logging_runtime.models import LogLevel
     from camctl.logging_runtime.service import LogChannel
@@ -270,12 +289,62 @@ def _log_wiring(config: ConfigSnapshot):
         max_bytes=log_config.max_size_bytes,
         file_count=log_config.file_count,
     )
+    rotation_warning_reported = False
 
     def writer(record):
+        nonlocal rotation_warning_reported
         result = file_channel.write_record(record)
-        if result.append_error is not None:
-            raise ChannelWriteError(result.append_error)
+        failure_stage = result.failure_stage
+        details = tuple(
+            f"{label}={detail}" for label, detail in (
+                ("append_error", result.append_error),
+                ("coordination_error", result.coordination_error),
+                ("close_error", result.close_error),
+                ("rotation_error", result.rotation_error),
+            ) if detail is not None
+        )
+        if failure_stage is WriteFailureStage.FORMAT:
+            report_writer_failure(
+                f"普通日志写入诊断：stage=format; appended=false; "
+                + "; ".join(details))
+            return False
+        if result.disables_file_logging:
+            stage = failure_stage.value if failure_stage is not None else "unknown"
+            report_writer_failure(
+                f"普通日志写入诊断：stage={stage}; "
+                f"appended={str(result.appended).lower()}; "
+                + "; ".join(details))
+            if on_file_failure is None:
+                raise ChannelWriteError(
+                    result.append_error or result.coordination_error
+                    or "共享文件日志通道失效")
+            on_file_failure()
+            return result.appended
+        if result.rotation_error is not None:
+            if not rotation_warning_reported:
+                rotation_warning_reported = True
+                report_writer_failure(
+                    "普通日志写入诊断：stage=rotation; "
+                    f"appended={str(result.appended).lower()}; "
+                    f"rotation_error={result.rotation_error}")
         return result.appended
+
+    stderr_failed = False
+
+    def report_writer_failure(message: str) -> None:
+        nonlocal stderr_failed
+        if on_stderr_diagnostic is not None:
+            on_stderr_diagnostic(message)
+            return
+        if stderr_failed:
+            return
+        import sys
+
+        try:
+            sys.stderr.write(message + "\n")
+            sys.stderr.flush()
+        except Exception:
+            stderr_failed = True
 
     channel = LogChannel(
         capacity=log_config.queue_capacity,
@@ -301,8 +370,93 @@ async def _emit_session_error(deps: RuntimeDeps, message: str) -> None:
 
     if deps.log_runtime is None:
         return
+    if deps.log_path_unsafe:
+        _write_stderr_diagnostic(deps, message)
+        return
     await deps.log_runtime.channel.alog(
         LogRecord(level=LogLevel.ERROR, message=message)
+    )
+
+
+async def _emit_log_diagnostic(
+    deps: RuntimeDeps, message: str, *, stderr_only: bool = False,
+) -> None:
+    """等待普通日志实际写入；不可用时写一次 stderr，不触发副本。"""
+    if (not stderr_only and not deps.log_path_unsafe
+            and deps.log_runtime is not None):
+        from camctl.logging_runtime.models import LogLevel
+        from camctl.logging_runtime.service import LogRecord
+
+        try:
+            result = await deps.log_runtime.channel.deliver_important(
+                LogRecord(level=LogLevel.ERROR, message=message))
+            if result.delivered is True:
+                return
+        except Exception:
+            # deliver_important 等待监听线程凭据，异常代表文件通道不
+            # 可用；不能仅凭 alog 入队结果宣称诊断已写出。
+            pass
+    _write_stderr_diagnostic(deps, message)
+
+
+def _mark_log_path_unsafe(deps: RuntimeDeps) -> None:
+    """禁用本命令的共享文件日志，后续会话诊断改走 stderr。"""
+    deps.log_path_unsafe = True
+    runtime = deps.log_runtime
+    if runtime is None:
+        return
+    from camctl.logging_runtime.service import ChannelError
+
+    runtime.path_unsafe = True
+    runtime.channel.disable_channel(
+        ChannelError("共享文件日志 I/O 或协调失败"))
+
+
+def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> None:
+    """stderr 失败后停止重复尝试，且不写入 stdout。"""
+    if deps.stderr_diagnostic_failed:
+        return
+    import sys
+
+    try:
+        sys.stderr.write(message + "\n")
+        sys.stderr.flush()
+    except Exception:
+        deps.stderr_diagnostic_failed = True
+
+
+async def _close_log_runtime(deps: RuntimeDeps) -> None:
+    from camctl.logging_runtime.lifecycle import close_logging
+
+    result = await close_logging(deps.log_runtime)
+    if result.close_error is not None:
+        _write_stderr_diagnostic(
+            deps,
+            "共享日志处理器关闭诊断：stage=log_handler_close; "
+            f"outcome=unknown; error={result.close_error}",
+        )
+
+
+async def _on_report_recovered(deps: RuntimeDeps, failure_log: Any) -> None:
+    """结束副本轮次，并诊断未完成的正式标记删除。"""
+    from camctl.logging_runtime.copies import DeleteOutcome
+
+    try:
+        result = await failure_log.on_report_recovered()
+    except Exception as error:
+        await _emit_log_diagnostic(
+            deps,
+            "报告日志标记恢复删除诊断：stage=marker_delete; "
+            f"outcome=unknown; error={type(error).__name__}: {error}",
+        )
+        return
+    if result.outcome in (DeleteOutcome.DELETED, DeleteOutcome.NOT_PRESENT):
+        return
+    await _emit_log_diagnostic(
+        deps,
+        "报告日志标记恢复删除诊断："
+        f"stage=marker_delete; outcome={result.outcome.value}; "
+        f"error={result.error or 'none'}",
     )
 
 
@@ -354,7 +508,7 @@ def _clock_policy_factory(config: ConfigSnapshot) -> Callable[[Any], ClockCheckI
 
 def _failure_log_wiring(deps: RuntimeDeps):
     """报告失败日志副本的触发装配：标记、通道与请求工厂。"""
-    from camctl.logging_runtime.clh_adapter import FileChannel
+    from camctl.logging_runtime.clh_adapter import ChannelWriteError, FileChannel
     from camctl.logging_runtime.copies import (
         CopyRequest, FailureLogService, MarkerStore,
     )
@@ -364,8 +518,11 @@ def _failure_log_wiring(deps: RuntimeDeps):
     staging = Path(deps.config.paths.staging).expanduser()
     logs_dir = staging / "logs"
     channel_box: dict = {}
+    marker = MarkerStore(logs_dir)
 
     def copy_request_factory(error: Exception) -> CopyRequest:
+        if deps.log_path_unsafe:
+            raise ChannelWriteError("本命令已停用共享文件日志")
         channel = channel_box.get("channel")
         if channel is None:
             channel = FileChannel(
@@ -383,10 +540,10 @@ def _failure_log_wiring(deps: RuntimeDeps):
             staging_root=staging,
             ready_dir=Path(deps.config.paths.ready).expanduser(),
             channel=channel,
-            marker=MarkerStore(logs_dir),
+            marker=marker,
         )
 
-    return FailureLogService(MarkerStore(logs_dir)), copy_request_factory
+    return FailureLogService(marker), copy_request_factory
 
 
 def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any], Any]:
@@ -439,7 +596,11 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
         pending_call_results=deps.capture_call_results)
     resume_reads = partial(_resume_normal_read_requests, deps)
     recovery_logger = (None if deps.log_runtime is None else
-                       recovery_diagnostics_logger(deps.log_runtime.channel))
+                       recovery_diagnostics_logger(
+                           deps.log_runtime.channel,
+                           path_unsafe=lambda: deps.log_path_unsafe,
+                           fallback=lambda message: _write_stderr_diagnostic(
+                               deps, message)))
     from camctl.bootstrap.motor_assembly import motor_flow
     from camctl.motor.notification import NotificationWriter
     writer = deps.host_notifications
@@ -454,8 +615,9 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             history=deps.config.history,
             database=deps.config.database,
             supervisor=supervisor,
-            on_recovered=(failure_log.on_report_recovered
+            on_recovered=(_recovery_callback(deps, failure_log)
                           if failure_log is not None else None),
+            on_failure=_trigger_failure_log,
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
         "cancel": cancel_flow(ready=ready, processing=processing,
@@ -573,12 +735,10 @@ async def execute_command(
 
     if deps.startup_error is not None:
         if deps.log_runtime is not None:
-            from camctl.logging_runtime.lifecycle import close_logging
-
             try:
                 await _emit_session_error(deps, f"{deps.mode.value} 会话失败: {deps.startup_error.reason}")
             finally:
-                await close_logging(deps.log_runtime)
+                await _close_log_runtime(deps)
         return deps.startup_error
 
     failure_log, copy_request_factory = _failure_log_wiring(deps)
@@ -655,7 +815,11 @@ async def execute_command(
                         recovery_boundary=deps.recovery_boundary,
                         recovery_max_event_id=lambda: deps.recovery_max_event_id,
                         on_recovery_diagnostic=(None if deps.log_runtime is None else
-                            recovery_diagnostics_logger(deps.log_runtime.channel)),
+                            recovery_diagnostics_logger(
+                                deps.log_runtime.channel,
+                                path_unsafe=lambda: deps.log_path_unsafe,
+                                fallback=lambda message: _write_stderr_diagnostic(
+                                    deps, message))),
                     ),
                     wait_cap_s=deps.config.clock.recovery_wait_cap_s,
                     resume_media_results=deps.work_files.resume_media_results,
@@ -673,8 +837,9 @@ async def execute_command(
                 database=deps.config.database,
                 supervisor=restricted_supervisor,
                 start_actions=False,
-                on_recovered=(failure_log.on_report_recovered
+                on_recovered=(_recovery_callback(deps, failure_log)
                               if failure_log is not None else None),
+                on_failure=_trigger_failure_log,
             ),
         )
     elif restricted_flows is not None:
@@ -700,6 +865,10 @@ async def execute_command(
         notifier=deps.notifier,
         failure_log=failure_log,
         copy_request_factory=copy_request_factory,
+        on_log_diagnostic=lambda message: _emit_log_diagnostic(deps, message),
+        on_stderr_diagnostic=lambda message: _emit_log_diagnostic(
+            deps, message, stderr_only=True),
+        on_log_path_unsafe=lambda: _mark_log_path_unsafe(deps),
         on_session_open=lambda owned: _initialize_recovery(deps, owned),
         local_work=_local_work(deps, overrides["flows"]),
         **overrides,
@@ -737,10 +906,15 @@ async def execute_command(
                 await stop_worker(restricted_supervisor)
         finally:
             if deps.log_runtime is not None:
-                from camctl.logging_runtime.lifecycle import close_logging
-
-                await close_logging(deps.log_runtime)
+                await _close_log_runtime(deps)
     return outcome
+
+
+def _recovery_callback(deps: RuntimeDeps, failure_log: Any):
+    async def on_recovered() -> None:
+        await _on_report_recovered(deps, failure_log)
+
+    return on_recovered
 
 
 def _local_work(deps, flows):
@@ -829,11 +1003,37 @@ def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体
         return
     deps.closed = True
     if deps.failure_channel is not None:
-        deps.failure_channel.close()
+        try:
+            deps.failure_channel.close()
+        except Exception as error:
+            _write_stderr_diagnostic(
+                deps,
+                "日志副本处理器关闭诊断：stage=copy_handler_close; "
+                f"outcome=unknown; error={type(error).__name__}: {error}",
+            )
     runtime = deps.log_runtime
     if runtime is not None and runtime.close_attempts == 0:
         runtime.close_attempts = 1
-        runtime.listener_stopped = runtime.channel.stop_listener(0.5)
-        if runtime.file_closer is not None:
-            runtime.file_closer()
-        runtime.channel.async_close()
+        if deps.log_path_unsafe or runtime.path_unsafe:
+            from camctl.logging_runtime.service import ChannelError
+
+            runtime.path_unsafe = True
+            runtime.channel.disable_channel(
+                ChannelError("共享文件日志 I/O 或协调不可用"))
+            runtime.listener_stopped = runtime.channel.stop_listener(None)
+            try:
+                if runtime.listener_stopped and runtime.file_closer is not None:
+                    runtime.file_closer()
+            except Exception as error:
+                _write_stderr_diagnostic(
+                    deps,
+                    "共享日志处理器关闭诊断：stage=log_handler_close; "
+                    f"outcome=unknown; error={type(error).__name__}: {error}",
+                )
+            finally:
+                runtime.channel.async_close()
+        else:
+            runtime.listener_stopped = runtime.channel.stop_listener(0.5)
+            if runtime.file_closer is not None:
+                runtime.file_closer()
+            runtime.channel.async_close()

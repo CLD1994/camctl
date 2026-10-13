@@ -47,9 +47,17 @@ class FakeClock:
 @dataclass
 class FakeFailureLog:
     requests: list = field(default_factory=list)
+    result: Any = None
+    failure: Exception | None = None
 
     async def on_report_failure(self, request) -> None:
         self.requests.append(request)
+        if self.failure is not None:
+            raise self.failure
+        return self.result
+
+    async def on_report_failure_with_factory(self, request_factory):
+        return await self.on_report_failure(request_factory())
 
 
 @dataclass
@@ -350,6 +358,184 @@ class TestRunCompletion:
         assert recorder.calls == ["report-db"]
         assert len(failure_log.requests) == 1
 
+    async def test_report_failure_consumes_copy_diagnostics(self, environment):
+        from camctl.logging_runtime.copies import (
+            CopyOutcome, CopyReceipt, MarkerStage, MarkerSave, SaveOutcome,
+        )
+
+        context, recorder, holder, _ = environment
+        failure_log = FakeFailureLog(result=CopyReceipt(
+            CopyOutcome.PUBLISHED,
+            round_id="round-1",
+            copy_name="log-copy-round-1.log",
+            marker_create=MarkerSave(SaveOutcome.SAVED),
+            marker_progress=((
+                MarkerStage.COPIED,
+                MarkerSave(SaveOutcome.UNKNOWN, "dir_sync_failed: injected"),
+            ),),
+        ))
+        diagnostics: list[str] = []
+
+        async def diagnose(message: str) -> None:
+            diagnostics.append(message)
+
+        context.flows = {"report": recorder.report_fails}
+        context.failure_log = failure_log
+        context.copy_request_factory = lambda error: _CopyProbe(error, context)
+        context.on_log_diagnostic = diagnose
+        holder["facts"] = lambda connection: _facts(
+            report_failed_no_new_changes=True)
+
+        outcome = await _run(context)
+
+        assert outcome.reason == "report_error"
+        assert len(failure_log.requests) == 1
+        assert len(diagnostics) == 1
+        assert "outcome=published" in diagnostics[0]
+        assert "round-1" in diagnostics[0]
+        assert "marker_progress[copied]" in diagnostics[0]
+        assert "outcome=unknown" in diagnostics[0]
+        assert "dir_sync_failed: injected" in diagnostics[0]
+
+    async def test_suppressed_invalid_marker_error_is_reported_once(
+            self, environment):
+        from camctl.logging_runtime.copies import (
+            CopyOutcome, CopyReceipt, MarkerCheck, MarkerPresence,
+        )
+
+        context, recorder, holder, _ = environment
+        failure_log = FakeFailureLog(result=CopyReceipt(
+            CopyOutcome.SUPPRESSED,
+            marker_check=MarkerCheck(
+                MarkerPresence.EXISTS,
+                error="marker_content_invalid: injected invalid marker",
+            ),
+            error="marker_content_invalid: injected invalid marker",
+        ))
+        diagnostics: list[str] = []
+
+        async def diagnose(message: str) -> None:
+            diagnostics.append(message)
+
+        context.flows = {"report": recorder.report_fails}
+        context.failure_log = failure_log
+        context.copy_request_factory = lambda error: _CopyProbe(error, context)
+        context.on_log_diagnostic = diagnose
+        holder["facts"] = lambda connection: _facts(
+            report_failed_no_new_changes=True)
+
+        outcome = await _run(context)
+
+        assert outcome.reason == "report_error"
+        assert len(failure_log.requests) == 1
+        assert len(diagnostics) == 1
+        assert diagnostics[0].count("marker_content_invalid") == 1
+
+    async def test_identical_error_text_keeps_both_failure_stages(
+            self, environment):
+        from camctl.logging_runtime.copies import (
+            CopyOutcome, CopyReceipt, MarkerStage, MarkerSave, SaveOutcome,
+        )
+
+        context, recorder, holder, _ = environment
+        same_cause = "injected shared low-level failure"
+        failure_log = FakeFailureLog(result=CopyReceipt(
+            CopyOutcome.COPY_FAILED,
+            round_id="same-error-round",
+            copy_name="log-copy-same-error-round.log",
+            error=same_cause,
+            marker_progress=((
+                MarkerStage.COPIED,
+                MarkerSave(SaveOutcome.UNKNOWN, same_cause),
+            ),),
+            copy_error=same_cause,
+        ))
+        diagnostics: list[str] = []
+
+        async def diagnose(message: str) -> None:
+            diagnostics.append(message)
+
+        context.flows = {"report": recorder.report_fails}
+        context.failure_log = failure_log
+        context.copy_request_factory = lambda error: _CopyProbe(error, context)
+        context.on_log_diagnostic = diagnose
+        holder["facts"] = lambda connection: _facts(
+            report_failed_no_new_changes=True)
+
+        outcome = await _run(context)
+
+        assert outcome.reason == "report_error"
+        assert len(diagnostics) == 1
+        assert "marker_progress[copied]" in diagnostics[0]
+        assert "copy_error" in diagnostics[0]
+        assert diagnostics[0].count(same_cause) == 2
+
+    async def test_unknown_publish_summary_is_not_deduplicated_by_progress_text(
+            self, environment):
+        from camctl.logging_runtime.copies import (
+            CopyOutcome, CopyReceipt, MarkerStage, MarkerSave, SaveOutcome,
+        )
+
+        context, recorder, holder, _ = environment
+        failure_log = FakeFailureLog(result=CopyReceipt(
+            CopyOutcome.COPY_UNKNOWN,
+            round_id="unknown-publish-round",
+            copy_name="log-copy-unknown-publish-round.log",
+            stage=MarkerStage.COPIED,
+            error="发布未确认: permission denied",
+            marker_progress=((
+                MarkerStage.COPIED,
+                MarkerSave(SaveOutcome.UNKNOWN, "permission denied"),
+            ),),
+        ))
+        diagnostics: list[str] = []
+
+        async def diagnose(message: str) -> None:
+            diagnostics.append(message)
+
+        context.flows = {"report": recorder.report_fails}
+        context.failure_log = failure_log
+        context.copy_request_factory = lambda error: _CopyProbe(error, context)
+        context.on_log_diagnostic = diagnose
+        holder["facts"] = lambda connection: _facts(
+            report_failed_no_new_changes=True)
+
+        outcome = await _run(context)
+
+        assert outcome.reason == "report_error"
+        assert len(diagnostics) == 1
+        assert "stage=copied" in diagnostics[0]
+        assert "marker_progress[copied]" in diagnostics[0]
+        assert "error: 发布未确认: permission denied" in diagnostics[0]
+        assert diagnostics[0].count("permission denied") == 2
+
+    async def test_copy_factory_exception_is_diagnosed_without_reclassification(
+            self, environment):
+        context, recorder, holder, _ = environment
+        diagnostics: list[str] = []
+
+        async def diagnose(message: str) -> None:
+            diagnostics.append(message)
+
+        def broken_factory(error):
+            raise RuntimeError("copy request factory failed")
+
+        context.flows = {"report": recorder.report_fails}
+        context.failure_log = FakeFailureLog()
+        context.copy_request_factory = broken_factory
+        context.on_log_diagnostic = diagnose
+        holder["facts"] = lambda connection: _facts(
+            report_failed_no_new_changes=True)
+
+        outcome = await _run(context)
+
+        assert outcome.reason == "report_error"
+        assert context.failure_log.requests == []
+        assert len(diagnostics) == 1
+        assert "request_factory" in diagnostics[0]
+        assert "RuntimeError" in diagnostics[0]
+        assert "copy request factory failed" in diagnostics[0]
+
     async def test_state_db_failure_stops_remaining_flows(self, environment):
         context, recorder, holder, _ = environment
         context.flows = {"a": recorder.fails_db, "b": recorder.ok}
@@ -483,14 +669,70 @@ class TestRestrictedSession:
 
     async def test_restricted_report_failure_still_clock_invalid(
             self, environment):
+        from camctl.logging_runtime.copies import CopyOutcome, CopyReceipt
+
         context, recorder, holder, _ = environment
         self._restrict(environment)
         once = Recorder()
         context.once_report = once.report_fails
+        failure_log = FakeFailureLog(result=CopyReceipt(
+            CopyOutcome.COPY_FAILED, round_id="restricted-round",
+            copy_name="log-copy-restricted-round.log",
+            error="copy_cleanup_failed: busy",
+        ))
+        diagnostics: list[str] = []
+
+        async def diagnose(message: str) -> None:
+            diagnostics.append(message)
+
+        context.failure_log = failure_log
+        context.copy_request_factory = lambda error: _CopyProbe(error, context)
+        context.on_log_diagnostic = diagnose
         outcome = await _run(context)
         assert outcome.reason == "clock_invalid"
         # 一次报告机会失败不重试、不延长受限会话。
         assert once.calls == ["report"]
+        assert len(failure_log.requests) == 1
+        assert len(diagnostics) == 1
+        assert "report_error" in diagnostics[0]
+        assert "restricted-round" in diagnostics[0]
+        assert "copy_cleanup_failed: busy" in diagnostics[0]
+
+    async def test_restricted_report_state_db_failure_uses_log_diagnostics(
+            self, environment):
+        from camctl.logging_runtime.copies import (
+            CopyOutcome, CopyReceipt,
+        )
+
+        context, recorder, holder, _ = environment
+        self._restrict(environment)
+        once = Recorder()
+        context.once_report = once.report_db_fails
+        failure_log = FakeFailureLog(result=CopyReceipt(
+            CopyOutcome.COPY_FAILED,
+            round_id="restricted-db-round",
+            copy_name="log-copy-restricted-db-round.log",
+            error="copy_failed: injected report copy failure",
+            copy_error="copy_failed: injected report copy failure",
+        ))
+        diagnostics: list[str] = []
+
+        async def diagnose(message: str) -> None:
+            diagnostics.append(message)
+
+        context.failure_log = failure_log
+        context.copy_request_factory = lambda error: _CopyProbe(error, context)
+        context.on_log_diagnostic = diagnose
+
+        outcome = await _run(context)
+
+        assert outcome.reason == "state_db_error"
+        assert "report db unusable" in outcome.details["error"]
+        assert once.calls == ["report-db"]
+        assert len(failure_log.requests) == 1
+        assert len(diagnostics) == 1
+        assert "restricted-db-round" in diagnostics[0]
+        assert "injected report copy failure" in diagnostics[0]
 
 
 class TestSubmitVerification:

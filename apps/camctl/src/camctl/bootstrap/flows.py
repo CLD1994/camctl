@@ -695,6 +695,7 @@ def report_flow(
     supervisor: Any,
     start_actions: bool = True,
     on_recovered: Callable[[], Any] | None = None,
+    on_failure: Callable[[Any, Exception], Any] | None = None,
 ) -> Callable[[Any], Any]:
     """构造推进报告责任的维护流程。
 
@@ -708,7 +709,9 @@ def report_flow(
 
     on_recovered 在一轮报告处理全部可靠完成、没有进行中或失败
     遗留的报告责任时调用，用于结束日志副本的故障轮（删除故障标
-    记）；调用失败不阻止报告职责。
+    记）；调用失败不阻止报告职责。普通报告文件失败已可靠记入状态
+    库后，立即经 on_failure 交给会话的共同副本入口，再推进本轮下一份报告；
+    回调执行时不持有状态库写事务。
     """
 
     def _temporary_staging_path(report_id: int, job_id: str) -> Path:
@@ -727,8 +730,8 @@ def report_flow(
                 f"报告失败记录事务未完成（{outcome.kind.value}）: {outcome.error}")
 
     async def _recover_or_generate(
-            report_id: int, owned: Any, now_us: int) -> bool:
-        """推进一份报告；返回本次调用是否登记了报告失败。"""
+            report_id: int, owned: Any, now_us: int) -> str | None:
+        """推进一份报告；失败时返回已确认的实际失败摘要。"""
         from camctl.contracts.history_values import BoundaryError
         from camctl.contracts.json_values import JsonParseError
         from camctl.contracts.public_projection import PublicProjectionError
@@ -774,7 +777,7 @@ def report_flow(
                         f"发布恢复事务未完成（{outcome.kind.value}）:"
                         f" {outcome.error}")
                 _settle_covered_local_syncs(owned, now_us)
-                return False
+                return None
 
         try:
             repository = HistoryRepository(
@@ -819,8 +822,9 @@ def report_flow(
             failure = generation.failure
             detail = (f"{failure.error_code}: {failure.error_message}"
                       if failure is not None else generation.detail)
-            _record_failure(owned, report_id, now_us, f"生成失败: {detail}")
-            return True
+            failure_detail = f"报告生成失败: {detail}"
+            _record_failure(owned, report_id, now_us, failure_detail)
+            return f"report_id={report_id}; {failure_detail}"
         success = generation.success
         identity = parse_report_file_name(Path(success.path).name)
         if (identity is None or identity.report_id != report_id
@@ -837,17 +841,20 @@ def report_flow(
         )
         if delivery.outcome is DeliveryOutcome.PUBLISHED:
             _settle_covered_local_syncs(owned, now_us)
-            return False
+            return None
         if delivery.outcome in (DeliveryOutcome.STORE_FAILED,
                                 DeliveryOutcome.UNKNOWN):
             raise StateDbFailure(
                 f"报告 {report_id} 发布记录失败: {delivery.error}")
         if delivery.outcome is DeliveryOutcome.HANDOFF_FAILED:
             # 交接不完整的实际错误已由发布编排按其规则保存。
-            return False
-        _record_failure(owned, report_id, now_us,
-                        f"发布失败: {delivery.outcome.value}: {delivery.error}")
-        return True
+            return (
+                f"report_id={report_id}; 报告文件交接失败: "
+                f"{delivery.error or delivery.outcome.value}")
+        failure_detail = (
+            f"报告发布失败: {delivery.outcome.value}: {delivery.error}")
+        _record_failure(owned, report_id, now_us, failure_detail)
+        return f"report_id={report_id}; {failure_detail}"
 
     flow_state: dict[str, bool] = {"started": False}
 
@@ -884,8 +891,17 @@ def report_flow(
                 pending = _failed_report_ids(owned)
             round_clean = True
             for report_id in pending:
-                if await _recover_or_generate(report_id, owned, now_us):
+                failure_detail = await _recover_or_generate(
+                    report_id, owned, now_us)
+                if failure_detail is not None:
                     round_clean = False
+                    if on_failure is not None:
+                        # 可靠登记的报告错误立即尝试日志副本；不持有
+                        # 写事务，也不等待本轮其余报告后再复制。
+                        try:
+                            await on_failure(context, RuntimeError(failure_detail))
+                        except Exception:
+                            pass
             if (on_recovered is not None and round_clean
                     and not _in_flight_report_ids(owned)
                     and not _failed_report_ids(owned)):
@@ -900,5 +916,4 @@ def report_flow(
             raise StateDbFailure(f"报告维护无法可靠读取或保存状态库事实: {error}") from error
         finally:
             owned.connection.close()
-
     return flow
