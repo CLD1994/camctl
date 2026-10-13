@@ -19,7 +19,10 @@ staging/
   deliveries/
   recording-inputs/
   processing-temp/
+  capture-originals/
+  capture-previews/
   derived/
+  capture-work/<activity_id>/
   logs/
 ready/
 processing/
@@ -27,7 +30,7 @@ processing/
 
 ### staging
 
-`staging` 是主机上唯一完全由 camctl 掌控的文件处理目录。相机等已接入设备使用各自存储空间保存设备正式产物；需要在主机进行的产物拷贝、加工和交付准备均在 `staging` 中完成，包括异常录像修复的输入文件、处理过程文件和目标录像。
+`staging` 是主机上唯一完全由 camctl 掌控的文件处理目录。设备可以把正式产物保存在设备存储，也可以按其驱动契约直接写到主机；主机拍摄原图和预览使用专属正式源目录，主机加工成品使用 `derived/`。需要在主机进行的产物拷贝、加工和交付准备均在 `staging` 中完成，包括异常录像修复的输入文件、处理过程文件和目标录像。
 
 文件还在准备时，camctl 可以进行以下工作：
 
@@ -42,7 +45,9 @@ processing/
 
 `staging` 中的文件由所属录像处理、取回或报告流程管理，按其业务条件准备和发布。`ready` 和 `processing` 继续遵守下文约定的交接权限。
 
-`staging` 中登记的主机文件按[用途与路径规则](../camctl/database/file-fields.md#中间文件的路径与用途目录)分开保存：`deliveries/` 用于交付副本，`recording-inputs/` 用于录像输入，`processing-temp/` 用于处理临时文件，`derived/` 用于修复目标。各目录名称固定，实际根目录由部署配置提供。
+`staging` 中登记的主机文件按[用途与路径规则](../camctl/database/file-fields.md#中间文件的路径与用途目录)分开保存：`deliveries/` 用于交付副本，`recording-inputs/` 用于录像输入，`processing-temp/` 用于处理临时文件，`capture-originals/` 与 `capture-previews/` 分别用于单张拍摄的原图和预览，`derived/` 用于主机加工成品。各用途子目录名称固定，实际根目录由部署配置提供。
+
+相机工具可能按厂商规则自行生成文件名。单张拍摄的临时输出使用 `staging/capture-work/<activity_id>/`，其中 `activity_id` 必须来自已持久化的采集活动；恢复继续使用同一目录。该工作区不登记为正式用途文件，也不是交付目录。驱动完成必要的结果和文件核实后，再按原图或预览用途提升到各自正式源目录；准确的文件责任、提升条件及恢复行为见[主机单张拍摄文件的登记与恢复](camera-capture.md#主机单张拍摄文件的登记与恢复)。
 
 状态报告文件不登记为中间文件，使用 `staging` 下专属的 `reports/` 直接子目录，文件名即最终发布名（`status-report-<report_id>-<sha256>.json`）。该目录由首次报告写入创建，报告自身的管理属于内部状态；恢复观察、残留替代及发布规则见[报告发布与补投](report-publication.md)。
 
@@ -212,6 +217,8 @@ camctl 按以下顺序发布状态报告：
 使用受接口约束的文件操作与状态存储替身，验证发布、领取、撤回的许可判定和错误分类。
 
 验证主机上的录像修复、取回及报告文件使用 `staging` 作为生成和处理位置，发布资格依据所属流程判断，不因文件出现在 `staging` 就自动发布。
+
+验证主机拍摄的正式原图和预览按用途留在 `staging`，不会作为正式源文件移入 `ready`；只有取回流程生成的独立 delivery 才能发布。工具工作区 `capture-work/<activity_id>/` 不得被主程序领取。
 
 验证派生产物发布使用独立交付文件，保留文件仍位于 `staging/derived/`；清理取回中间文件时不涉及该保留文件。
 

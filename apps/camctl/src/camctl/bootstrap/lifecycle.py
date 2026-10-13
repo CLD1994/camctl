@@ -167,9 +167,9 @@ def _resume_normal_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> N
 def _default_catalog(config: ConfigSnapshot):
     """从 describe 使用的同一部署定义构建受理目录。"""
     from camctl.devices.catalog import build_catalog, default_driver_definitions
-    from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
+    from camctl.devices.drivers.builtin import register_builtin_drivers
 
-    register_builtin_camera_drivers(config)
+    register_builtin_drivers(config)
     return build_catalog(config, default_driver_definitions())
 
 

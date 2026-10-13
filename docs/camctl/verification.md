@@ -474,6 +474,50 @@ $env:PYTHONUTF8 = '1'
 验收执行者为用户。用户在实际演示后确认目前一切正常；当前 Action6 普通录像演示按用户现场确认验收通过，[T9 当前演示范围](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#现场验收状态与部署入口)完成。已明确回传的业务结果包括客户端生成取回计划及成功完成独立取回。该结论采用用户总体确认；原始报告、媒体文件及确认水位未在仓库归档，不补写媒体测量值、文件摘要或逐项检查结果。
 
 本次范围为 Action6 普通录像演示。Action6 延时、OSMO 及未支持选项按各自设备条件后续安排，其他软件缺口、目标资源测量和物理断电验收继续由各自责任计划跟踪。130 Mbps 仍是录像大小估算的固定假定参考值。
+
+## Hasselblad 主机单张接入的软件验证（2026-10-12）
+
+环境为 Linux x86_64 开发容器、Python 3.11.16 和 SQLite 3.53.1。验证对象是[Hasselblad 单张接入](hasselblad-driver.md)：已有 `hb_cli` 经受管进程执行单张 RAW 拍摄，原图和 JPEG 预览保存在主机，并按稳定文件身份登记。每次 `obtain` 产生独立交付；领取并删除交付后，正式源文件仍保留。测试由子代理按[组件运行指南](../../apps/camctl/tests/AGENTS.md#运行边界与结果记录)执行，同工作区共享包资源的进程通过同一文件锁协调，保留命令、会话、日志和退出码。
+
+[受管驱动组合测试](../../apps/camctl/tests/integration/devices/test_hasselblad_managed_capture.py)使用实际进程执行器和文件端口，以可执行工具替身覆盖成功、序列号不符、部分原图后非零退出、缺预览及长度错误。[主机单张流程测试](../../apps/camctl/tests/integration/capture/test_host_photo_flow.py)组合真实 SQLite、文件系统和驱动，验证原图归档后中断、绑定变化后的本地恢复，以及保存回执未知时使用原申请和键从独立只读连接核实。结果未知时保留工作文件，不重新拍摄。
+
+[正式配对边界](../../apps/camctl/tests/integration/capture/test_host_photo_finish_pair_boundary.py)按动作已保存的执行规格识别主机照片，成功必须共同登记完整原图、预览及唯一关联。计划、事件守卫、同键重送和新键恢复共同拒绝缺失责任或不完整配对；失败和取消可保留可靠部分原图，合法旧照片规格继续使用设备源。[历史恢复测试](../../apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py)核对快照正向与当前投影逆向恢复；正式源显式清理后仍沿用原永久身份。数据库首次初始化使用格式 2，格式 1 保留旧业务并拒绝新的主机照片写入，不隐式升级。
+
+[安装包组合测试](../../apps/camctl/tests/integration/bootstrap/test_distribution.py)在源码目录外构建并安装 wheel，使用安装资源完成 `init`、`describe`、计划生成、`submit` 和 `run`。完整链核对单张、原图与预览取回的成功报告、来源和交付的长度与 SHA-256；领取并删除两份交付后再次取回原图，生成新交付且工具只执行一次 `capture`。安装版专项 3 项通过。工具替身使用 29 字节 TIFF 和 25 字节 JPEG 签名样本，结果只证明软件协作，不证明实际媒体可解码。
+
+旧设备照片继续使用空执行定义；没有任务工厂或工厂返回完全空的同类 `CaptureTask` 均可受理。不完整的主机任务和单张不适用的字段仍被拒绝。共享替身的[照片闭环](../../tests/integration/test_camctl_capture_roundtrip.py)、[自动预览取回](../../tests/integration/test_camctl_output_roundtrip.py)和[C 接入模块拍摄、取回与清理](../../tests/integration/test_camctl_c_module_roundtrip.py)三个相关用例分别通过，核对了真实 CLI、客户端和 C host 的对应消费路径；设备仍由替身提供。兼容修复后，安装包重新构建并完成上述安装版专项及旧照片流程的 4 项补验。
+
+全量单元测试取得 `5076 passed, 1 skipped`。16 个集成目录分别启动 pytest，全部取得完整通过结果，合计 `6209 passed, 3 skipped`。其中 `capture` 为 1078 项，`outputs` 为 1944 项，`bootstrap` 为 993 项；兼容修复后另从当前源码重建安装包并完成 4 项补验。单元的两项及集成的一项既有 asyncio 标记告警保留，均为同步函数误加标记。跳过范围分别是非 Linux 守护、Windows 文件名大小写别名、主机候选读取配置及内部副本的普通交付发布。
+
+独立评审已核对主机成功配对、原键与新键恢复、独立只读回执核实、精确 JSON 数字和旧照片任务兼容边界。数据库结构检查通过 31 张表、3196 项断言；事件登记为 35 类、113 个分支；历史对象 SQL、配置消费、报告依赖及公共协议检查均通过。文档文件链接、改动文档的标题链接及差异空白检查通过。
+
+已有工具与真机的接口证据见[单张拍摄核验记录](../superpowers/notes/2026-10-12-hasselblad-cfv100c-probe.md)。ARM 独立部署及真实相机业务验收结果见下一节；软件替身结果与目标设备现场结果分别记录。
+
+## Hasselblad ARM 真实拍摄与取回验收（2026-10-12 UTC）
+
+目标环境为 ARM64 Ubuntu 18.04.6、CPython 3.11.17 和 SQLite 3.53.1，安装与数据使用独立虚拟环境和目录，没有复用既有业务状态库。用于正式拍摄的 PID 显式前缀发行包 `camctl-0.1.0-py3-none-any.whl` 为 993360 字节，SHA-256 为 `964baf983ce1167adf1de7a980dac6eeaa03af7e22f21aec085d8a99309fb733`；安装检查逐字节比对了 239 个包文件，权威资源共 26 项，9 个运行依赖按带哈希的清单安装或核对。初始化数据库格式为 `2`，`init` 与 `describe` 均退出 `0`。
+
+首次 USB 预检没有枚举到目标相机；设备接入后，`doctor` 和 `info` 最初因 USB 权限不足失败。重新加载既有 udev 规则并触发设备节点后，两项命令均退出 `0`，观察到的设备身份与配置相符。此处只记录最终可访问状态，不把首次预检或权限错误当成当前设备状态。
+
+2026-10-12 16:24–16:29 UTC，受管 `submit` 和 `run` 均退出 `0`。正式计划请求 `7087489617487330885` 创建拍摄动作 `1`；动作成功并登记原图和配对预览。唯一持久化 START 尝试结果记录 `list`、`info`、`drive_mode_single`、`capture_format_raw` 和 `capture` 五步，每步 `local_exit_code=0`，工具返回码为 `0`，其中恰有一条 `capture` 步骤。次数来自持久化 START 结果；独立进程采样文件没有事件，不据此声称独立观察到操作系统进程。完整过程命令、步骤事实和输出登记均保存在下述最终证据归档中。
+
+| 正式源 | output 与文件身份 | 归档相对路径 | 大小及 SHA-256 |
+| --- | --- | --- | --- |
+| 原图，`image/x-hasselblad-3fr` | output `1`，file `1` | `staging/capture-originals/1.3fr` | `211177472` 字节；`25197dd1cd197ef3cb51e56d08150c93998d6842eed7d5bdc0600a8ac2d4bcdf` |
+| 预览，`image/jpeg`，关联 `preview_of_output_id=1` | output `2`，file `2` | `staging/capture-previews/2.jpg` | `646812` 字节；`900436f043360d6ecc6c62c51a4384eb48e26021b6b8fa669703c2aea47afd61` |
+
+首次取回分别成功发布原图与预览，delivery 为 `1`、`2`，目标文件身份为 `3`、`4`；来源与交付的大小及 SHA-256 相同。验收脚本随后模拟将这两份 delivery 从 `ready` 移到 `processing` 并删除；这模拟领取和删除，不是第三方传输程序的真实领取。正式源仍保留在主机。
+
+之后使用完全省略 `[devices]` 的离线配置运行 `describe`，设备列表为空；此配置仍指向同一状态库和文件目录。以原图请求 `4935035650787902070` 和预览请求 `1358301172749695578` 再次取回，动作 `4`、`5` 成功，新建 delivery `3`、`4` 和目标文件身份 `5`、`6`。新交付仍与正式源大小和摘要一致；两份源文件的路径、inode（279451、279452）、大小和 SHA-256 未变。数据库最终保有五条尝试：一条 START 和四条本地读取；再次取回没有调用相机。该离线配置没有设备声明，但没有物理拔线。
+
+2026-10-12 17:14 UTC，拍摄后沿原动作通过 `CaptureRepository.conclude_activity` 的正式事务保存活动结束和占用释放，不调用相机停止命令、不重新拍摄，也不直接改写数据库。首次收场回执为 `COMPLETED/CONCLUDED`；原活动从 `ACTIVE/HELD` 转为 `ENDED/RELEASED`。随后使用同一 intent 和 operation key 再调用，回执仍为 `COMPLETED/CONCLUDED`，确认重送核实；拍摄动作的业务字段、两份正式 output 与 intermediate file 事实、唯一 START 尝试均保持不变。17:15 UTC，正常 `camctl run` 使用空设备列表的离线配置退出 `0`，生成最终报告 `status-report-12-1f03519829fd70a08408a07842cbaf67f3bfbe7939068ffe905230590f5542ac.json`。最终报告将动作 `1` 标记为 `succeeded`，包含原图与预览及正确关联，不含 `device_execution`；报告 Schema 和文件名 SHA-256 校验均退出 `0`。`ready` 中保留最新的原图交付 `3.3fr`、预览交付 `4.jpg` 和最终报告。
+
+实际拍摄使用前述 PID 显式前缀 wheel `964baf983ce1167adf1de7a980dac6eeaa03af7e22f21aec085d8a99309fb733`。17:12 UTC 才在同一独立虚拟环境安装最终 wheel `camctl-0.1.0-py3-none-any.whl`，大小 993512 字节、SHA-256 `306117d8bffaa199a66f8177492330302857b09a1dbb5ff06c5f6f8c96e44961`；最终包的 239 个已安装文件也逐字节匹配发行物。此最终版本用于既有动作的收场回执核实及离线 `run` 生成报告，没有再次拍摄。
+
+最终完整命令、活动收场记录、报告验证结果和只读数据库快照保存在 `.local/hasselblad-arm-acceptance/20261013-final/final-evidence.tar.gz`，大小为 `132502` 字节，SHA-256 为 `923eeb25bedfe6ad20d8cd01228d4b2d114bcdd0c8057e0c755d08106b339102`。清单含 148 项，均与解包后的证据目录大小和 SHA-256 相符。原图没有纳入本地证据包且未解码；预览副本 `.local/hasselblad-arm-acceptance/20261013-camera/capture-preview.jpg` 的摘要匹配并可正常呈现，但这不评价图像质量。相机端是否同时保存原片仍待设备负责人向官方核实；本次没有物理断电或真实第三方领取 delivery。
+
+此前全量软件回归仍为单元测试 `5076 passed, 1 skipped`、16 个集成目录合计 `6209 passed, 3 skipped`；最终收场修复另通过完整 `capture` 目录 `1088 passed`、主机照片流与优化模式专项 `19 passed`、收场恢复相关用例 `93 passed` 及最终 wheel 安装版拍摄、双文件取回和报告专项 `1 passed`。这些测试结果与本节目标主机的实际拍摄证据分别记录；本次文档更新未重跑测试。
+
 ## 部署交接与待核验项
 
 第一版软件层验证的结论交给部署与联调执行：[软件验收映射](software-acceptance.md)逐条登记 163 条验收与十项契约场景的结论、证据和未核验前提，[集成计划 I6 验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)保存全量命令执行的命令、环境与数字。两项是 [B7 发行物与部署检查](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)的输入；B7 在源码目录之外构建、安装发行物并验证 init、describe、submit 与设备替身 run，构建与安装步骤见[构建、安装与运行检查](implementation.md#构建安装与运行检查)。软件替身与开发环境的通过结果不写成设备或目标主机结论，下表逐项列出剩余核验的输入、执行者和通过条件。

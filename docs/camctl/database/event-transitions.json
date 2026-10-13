@@ -7577,7 +7577,9 @@
             "report_impact",
             "intermediate"
           ],
-          "evidence": []
+          "evidence": [
+            "host_photo_request"
+          ]
         },
         "LIFECYCLE": {
           "reason": 2,
@@ -7633,6 +7635,40 @@
             "output"
           ],
           "evidence": []
+        },
+        "HOST_PHOTO_COMPLETE": {
+          "reason": 5,
+          "title": "保存主机拍摄两份文件的完整字节",
+          "rows": [
+            {
+              "table": "intermediate_files",
+              "op": "update",
+              "columns": [
+                "size_bytes",
+                "sha256"
+              ],
+              "before": {},
+              "after": {},
+              "required": [
+                "size_bytes",
+                "sha256"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "intermediate",
+            "delivery",
+            "processing",
+            "output"
+          ],
+          "evidence": [
+            "host_photo_request"
+          ]
         },
         "CLEANUP_INTENT": {
           "reason": 3,

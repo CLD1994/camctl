@@ -44,9 +44,33 @@ def _registration(kind=1):
         rows += (row_change("output_origins", 8, {"output_id": 10, "original_output_id": 9}),)
     event = event_envelope(1, 1, 20, kind, rows, 1)
     return event, EventContext(TransactionRange(1, 1, 1), {}, states, read_coverage=ReadCoverage({
+        ("intermediate_files", "owner_action_id"): frozenset({1}),
         ("output_origins", "output_id"): frozenset({9, 10}),
         ("output_origins", "original_output_id"): frozenset({9}),
     }))
+
+
+def _legacy_photo_action():
+    """完整保存的 legacy 单张定义；设备来源路径不声明 host 输出。"""
+    return {
+        "id": 1,
+        "name": "legacy photo",
+        "type": 1,
+        "device_id": "cam",
+        "driver_id": "driver",
+        "status": 3,
+        "scheduled_at": 1_000_000,
+        "group_name": None,
+        "input_fields_json": {
+            "params": {"type": "legacy_photo"},
+            "policy": {"max_delay_ms": 1000},
+        },
+        "effective_params_json": {"type": "legacy_photo"},
+        "max_delay_ms": 1000,
+        "execution_spec_json": {},
+        "error_code": None,
+        "execution_started": 1,
+    }
 
 
 @pytest.fixture
@@ -58,8 +82,15 @@ def output_guard(monkeypatch):
 
 @pytest.mark.parametrize("kind,source_type", [(1, 1), (1, 2), (1, 3), (2, 2), (3, 1), (3, 2), (3, 3)])
 def test_output_guard_accepts_matching_source(output_guard, kind, source_type):
+    from camctl.acceptance.definitions import read_action_spec
+
     event, context = _registration(kind)
-    context.state_rows["actions"][1]["type"] = source_type
+    if source_type == 1:
+        # 设备文件原片/预览对应合法 legacy 拍摄；host 规格必须走主机 pair 契约。
+        context.state_rows["actions"][1] = _legacy_photo_action()
+        assert read_action_spec(context.state_rows["actions"][1]) == {}
+    else:
+        context.state_rows["actions"][1]["type"] = source_type
     output_guard(event, context)
 
 

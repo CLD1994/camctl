@@ -537,9 +537,11 @@ def main() -> None:
         rejects(db, 'UPDATE operation_attempts SET intent_event_id=NULL WHERE id=1')
         verify(list(db.execute('PRAGMA foreign_key_check')) == [], '应急结构样本的关联引用有效')
 
+    format_members = read_unique_json(SCHEMA.parent / 'enum-registry.json')['enums']['database_metadata.format_version']['members']
+    unknown_format = max(format_members.values()) + 1
     for sql in [
         'UPDATE runtime_state SET id=2',
-        'UPDATE database_metadata SET format_version=2',
+        f'UPDATE database_metadata SET format_version={unknown_format}',
         'UPDATE actions SET id=0 WHERE id=1',
         'UPDATE actions SET type=99 WHERE id=1',
         "UPDATE actions SET input_fields_json='[]' WHERE id=1",

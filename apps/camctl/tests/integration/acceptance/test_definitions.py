@@ -29,7 +29,19 @@ class TaskCatalog(Catalog):
                 wait_after_send=True, stop_supported=False, end_control=EndControl.DEVICE,
                 start_return_meaning=StartReturn.SENT, completion_mode=CompletionMode.TIME_AND_OUTPUTS,
                 result_wait_margin_s=Decimal("0.005"))
-        return ParameterDefinition(CAMERA_DEFINITION, {"shots":1}, True, task)
+        task_factory = None if action_type == "camera_take_photo" else task
+        return ParameterDefinition(CAMERA_DEFINITION, {"shots":1}, True, task_factory)
+
+
+class EmptyPhotoTaskFactoryCatalog(TaskCatalog):
+    def parameter_definition(self, device_id, action_type, parameter_type):
+        definition = super().parameter_definition(device_id, action_type, parameter_type)
+        if definition is None or action_type != "camera_take_photo":
+            return definition
+        return replace(
+            definition,
+            task_factory=lambda _params: CaptureTask("camera_take_photo"),
+        )
 
 
 class CompletedTaskCatalog(TaskCatalog):
@@ -37,6 +49,8 @@ class CompletedTaskCatalog(TaskCatalog):
 
     def parameter_definition(self, device_id, action_type, parameter_type):
         definition = super().parameter_definition(device_id, action_type, parameter_type)
+        if definition.task_factory is None:
+            return definition
         return replace(definition, task_factory=lambda params: replace(
             definition.task_factory(params), wait_after_send=False, result_wait_margin_s=None,
             start_return_meaning=StartReturn.COMPLETED, completion_mode=CompletionMode.DEVICE_EVIDENCE,
@@ -61,6 +75,15 @@ async def test_capture_specs_match_owned_contracts(environment, tmp_path, action
     row = _action_facts(connection).tables["actions"][1]
     assert read_action_spec(row) == expected
     assert row["execution_spec_json"] is not None
+
+
+async def test_empty_photo_task_factory_persists_legacy_empty_definition(environment, tmp_path):
+    connection, context = environment
+    context = replace(context, catalog=EmptyPhotoTaskFactoryCatalog())
+    await _accept((connection, context), tmp_path, _plan_body())
+    row = _action_facts(connection).tables["actions"][1]
+    assert read_action_spec(row) == {}
+    assert row["execution_spec_json"] == "{}"
 
 
 @pytest.mark.parametrize("params, expected", [

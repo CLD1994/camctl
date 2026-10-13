@@ -648,9 +648,6 @@ def _stub_definition(spec: dict):
         StartReturn,
     )
 
-    def photo_task(params):
-        return CaptureTask("camera_take_photo")
-
     def record_task(params):
         return CaptureTask(
             "camera_record",
@@ -703,7 +700,7 @@ def _stub_definition(spec: dict):
                 preview_supported=bool(
                     spec.get("photo_preview_supported", False)),
                 schema=photo_schema, defaults={},
-                task_factory=photo_task),),
+                task_factory=None),),
             "camera_record": (ActionCapability(
                 action_type="camera_record", parameter_type="video",
                 name="录像", description="跨组件替身的停止控制录像",

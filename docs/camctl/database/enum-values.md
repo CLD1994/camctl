@@ -149,6 +149,15 @@
 | 5 | `FAILED` |
 | 6 | `CANCELED` |
 
+### `database_metadata.format_version`
+
+[行为说明](reports-runtime.md#单份状态字段)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `V1` |
+| 2 | `V2` |
+
 ### `deliveries.status`
 
 [行为说明](file-fields.md#普通交付)
@@ -363,6 +372,8 @@
 | 2 | `RECORDING_INPUT` |
 | 3 | `PROCESSING_TEMP` |
 | 4 | `REPAIR_OUTPUT` |
+| 5 | `CAPTURE_ORIGINAL` |
+| 6 | `CAPTURE_PREVIEW` |
 
 ### `intermediate_files.retention_state`
 

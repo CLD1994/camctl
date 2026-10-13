@@ -48,9 +48,17 @@ from camctl.operations.models import (
     Settlement,
     SettlementBasis,
 )
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import (
+    CURRENT_FORMAT_VERSION,
+    DbConfig,
+    DbOpenMode,
+    open_existing,
+)
 
-from ..persistence.test_runtime import _create_valid_database
+from ..persistence.test_runtime import (
+    _create_legacy_v1_database,
+    _create_valid_database,
+)
 
 register_operation_guards()
 register_capture_guards()
@@ -58,9 +66,17 @@ register_capture_guards()
 _NOW = 1_750_000_000_000_000
 
 
-def _environment(tmp_path: Path):
+def _environment(
+    tmp_path: Path,
+    *,
+    format_version: int = CURRENT_FORMAT_VERSION,
+    legacy_v1_schema: bool = False,
+):
     target = tmp_path / "state.db"
-    _create_valid_database(target)
+    if legacy_v1_schema:
+        _create_legacy_v1_database(target, format_version=format_version)
+    else:
+        _create_valid_database(target, format_version=format_version)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")

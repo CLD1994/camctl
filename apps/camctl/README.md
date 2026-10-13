@@ -7,3 +7,5 @@
 开发与测试使用部署指定的 Python 3.11。先核对虚拟环境解释器版本；不匹配时通过 uv 创建对应版本的非项目级虚拟环境。环境与测试分工见[软件验证](../../docs/camctl/verification.md#python-环境)，业务和部署契约见[设计入口](../../docs/camctl/README.md)。
 
 技术选型、模块边界和接口契约见[实现规格](../../docs/camctl/implementation.md)。实施前须完成其中列明的设计事项。
+
+Hasselblad CFV 100C 单张 RAW 驱动的设备身份、`hb_cli` 调用和主机输出设计见[专项驱动说明](../../docs/camctl/hasselblad-driver.md)；公共拍摄与正式产物规则见[相机拍摄规格](../../docs/architecture/camera-capture.md)和[正式产物规格](../../docs/architecture/outputs.md)。

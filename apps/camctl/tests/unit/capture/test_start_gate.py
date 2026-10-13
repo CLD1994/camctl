@@ -4,10 +4,14 @@ import sqlite3
 import pytest
 from decimal import Decimal
 
-from camctl.capture.handlers import CaptureRuntime, DeviceControlPort, _control_call, capture_handler
+from camctl.capture.handlers import (
+    CaptureRuntime, DeviceControlPort, ResultFilesPort, _control_call,
+    _record_start_once, capture_handler,
+)
 from camctl.capture.residual import pass_residual_gate
 from camctl.capture.baseline import BaselinePreparation, PreparationPhase
 from camctl.contracts.enums import enum_for
+from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.scheduling import (
@@ -29,6 +33,7 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.monotonic_ns = mocker.Mock(return_value=100_000)
     runtime.window_of = mocker.Mock(return_value=LaunchWindow(100, 1100))
     runtime.driver = mocker.create_autospec(DeviceControlPort, instance=True)
+    runtime.results = mocker.create_autospec(ResultFilesPort, instance=True, spec_set=True)
     runtime.scheduling = mocker.create_autospec(SchedulingRepository, instance=True)
     runtime.scheduling.expire_action.return_value = DbOutcome(
         DbOutcomeKind.COMPLETED,
@@ -61,6 +66,64 @@ async def test_first_control_waits_without_grant_or_device_call(mocker, action_t
     runtime = _runtime(mocker, action_type=action_type)
     mocker.patch("camctl.capture.residual.pass_residual_gate", return_value=False)
     await capture_handler(action_type)(2, runtime)
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action_type", [
+    "camera_take_photo", "camera_record", "camera_timelapse",
+])
+async def test_missing_results_waits_until_residual_gate_allows_new_dispatch(mocker, action_type):
+    runtime = _runtime(mocker, action_type=action_type)
+    runtime.results = None
+    mocker.patch("camctl.capture.residual.pass_residual_gate", return_value=False)
+
+    await capture_handler(action_type)(2, runtime)
+
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action_type", [
+    "camera_take_photo", "camera_record", "camera_timelapse",
+])
+async def test_missing_results_before_launch_window_waits_without_grant(mocker, action_type):
+    runtime = _runtime(mocker, now=99, action_type=action_type)
+    runtime.results = None
+
+    await capture_handler(action_type)(2, runtime)
+
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action_type", [
+    "camera_take_photo", "camera_record", "camera_timelapse",
+])
+async def test_missing_results_after_idle_gate_fails_before_baseline_or_grant(mocker, action_type):
+    runtime = _runtime(mocker, action_type=action_type)
+    runtime.results = None
+
+    with pytest.raises(CapabilityNotDeclaredError, match="result"):
+        await capture_handler(action_type)(2, runtime)
+
+    runtime.prepare_baseline.assert_not_awaited()
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_awaited()
+
+
+async def test_missing_results_blocks_saved_no_effect_record_retry_before_baseline(mocker):
+    runtime = _runtime(mocker, action_type="camera_record")
+    runtime.results = None
+    runtime.last_attempt.return_value = (3, 3, 100)
+    residual_gate = mocker.patch(
+        "camctl.capture.residual.pass_residual_gate", return_value=True)
+
+    with pytest.raises(CapabilityNotDeclaredError, match="result"):
+        await _record_start_once(runtime, runtime.action(2))
+
+    residual_gate.assert_not_awaited()
+    runtime.prepare_baseline.assert_not_awaited()
     runtime.grant.assert_not_called()
     runtime.driver.control.assert_not_awaited()
 

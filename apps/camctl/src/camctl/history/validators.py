@@ -17,6 +17,11 @@ from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.history.changes import ChangeDerivationError, event_report_targets
 from camctl.history.reads import BaselineRangeRead, ReadCoverage
+from camctl.history.host_photo_request import (
+    HostPhotoRequestError,
+    parse_host_photo_request,
+    validate_host_photo_event_structure,
+)
 from camctl.history.events import (
     EventEnvelope,
     HistoryEventError,
@@ -423,7 +428,7 @@ register_guard("ownership", _ownership_guard)
 register_guard("report_impact", _report_impact_guard)
 
 
-def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
+def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) -> None:
     """按格式 1 的公共与基准成员规则核对依据取值。
 
     成员白名单来自分支登记；此处只核对已出现成员的取值类型。
@@ -457,6 +462,11 @@ def _check_evidence_member(event_id: int, member: str, value: Any) -> None:
                 or not isinstance(value["stage"], str) or not value["stage"]
                 or not isinstance(value["details"], Mapping)):
             _fail(f"事件 {event_id} 的 evidence.preparation_error 必须是完整实际错误")
+    elif member == "host_photo_request":
+        try:
+            parse_host_photo_request(value, reason=reason)
+        except HostPhotoRequestError as error:
+            _fail(f"事件 {event_id} 的 evidence.host_photo_request 非法: {error}")
     elif member == "stale_run_request":
         if (not isinstance(value, Mapping)
                 or set(value) != {"kind", "responsibility_keys", "status", "error"}
@@ -511,7 +521,14 @@ def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[st
             f" 不在 {event_name}.{branch_name} 的登记成员内"
         )
     for member, value in event.evidence.items():
-        _check_evidence_member(event.event_id, member, value)
+        request_phase = (
+            1 if branch_name == "CREATE"
+            else 2 if branch_name == "HOST_PHOTO_COMPLETE"
+            else event.reason
+        )
+        _check_evidence_member(event.event_id, member, value, request_phase)
+    if "host_photo_request" in event.evidence and event_name != "INTERMEDIATE_FILE_CHANGED":
+        _fail(f"事件 {event.event_id} 的 host_photo_request 只能用于中间文件事件")
     if not event.rows:
         _fail(f"事件 {event.event_id} 的 rows 为空")
     seen: set[tuple[str, int]] = set()
@@ -539,6 +556,11 @@ def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[st
                 f"行 {row.table}#{row.row_id} 不匹配 {event_name}.{branch_name}"
                 " 声明的任何行规格"
             )
+    try:
+        validate_host_photo_event_structure(
+            event, event_name=event_name, branch_name=branch_name)
+    except HostPhotoRequestError as error:
+        _fail(f"事件 {event.event_id} 的主机拍摄依据不一致: {error}")
     return event_name, branch_name, branch
 
 

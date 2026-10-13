@@ -15,9 +15,12 @@ from camctl.capture.models import (
     CaptureCompletion,
     CaptureDefinition,
     CaptureInput,
+    activity_capabilities,
+    build_capture_spec,
+    validate_capture_spec,
 )
 from camctl.capture.handlers import capture_handler, route_completion
-from camctl.devices.tasks import CaptureTask
+from camctl.devices.tasks import CaptureStorage, CaptureTask, StartReturn
 
 
 def _input(action_type: str = "camera_record", **params) -> CaptureInput:
@@ -64,6 +67,82 @@ class TestCaptureDefinition:
     def test_photo_has_no_duration(self) -> None:
         definition = CaptureDefinition.build(_input("camera_take_photo"))
         assert definition.target_duration_ms is None
+
+    def test_legacy_photo_without_task_keeps_an_empty_execution_definition(self) -> None:
+        assert build_capture_spec("camera_take_photo", None) == {}
+
+    def test_host_photo_task_saves_its_storage_and_exact_start_deadline(self) -> None:
+        task = CaptureTask(
+            "camera_take_photo",
+            output_storage=CaptureStorage.HOST,
+            start_call_timeout_s=Decimal("180"),
+        )
+        assert build_capture_spec("camera_take_photo", task) == {
+            "output_storage": "host",
+            "start_call_timeout_s": Decimal("180"),
+        }
+
+    def test_empty_photo_task_factory_keeps_legacy_empty_execution_definition(self) -> None:
+        assert build_capture_spec("camera_take_photo", CaptureTask("camera_take_photo")) == {}
+
+    @pytest.mark.parametrize(
+        "task",
+        [
+            CaptureTask("camera_take_photo", output_storage=CaptureStorage.HOST),
+            CaptureTask("camera_take_photo", start_call_timeout_s=Decimal("180")),
+        ],
+        ids=["storage-without-deadline", "deadline-without-storage"],
+    )
+    def test_photo_factory_rejects_partial_host_task_definition(self, task) -> None:
+        with pytest.raises(ValueError):
+            build_capture_spec("camera_take_photo", task)
+
+    def test_photo_factory_rejects_task_for_another_action(self) -> None:
+        with pytest.raises(ValueError):
+            build_capture_spec("camera_take_photo", CaptureTask("camera_record"))
+
+    def test_photo_factory_rejects_recording_fields_in_its_single_task(self) -> None:
+        from camctl.devices.tasks import CaptureStorage
+
+        with pytest.raises(ValueError):
+            build_capture_spec(
+                "camera_take_photo",
+                CaptureTask(
+                    "camera_take_photo",
+                    output_storage=CaptureStorage.HOST,
+                    start_call_timeout_s=Decimal("180"),
+                    target_duration_s=Decimal("4"),
+                ),
+            )
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            {"output_storage": "host"},
+            {"start_call_timeout_s": Decimal("180")},
+            {"output_storage": "device", "start_call_timeout_s": Decimal("180")},
+            {"output_storage": "host", "start_call_timeout_s": Decimal("180"), "extra": 1},
+        ],
+    )
+    def test_photo_execution_definition_rejects_missing_or_inapplicable_fields(self, spec):
+        with pytest.raises(ValueError):
+            validate_capture_spec("camera_take_photo", spec)
+
+    @pytest.mark.parametrize("timeout", [True, 0, -1, 1.25, Decimal("NaN"), Decimal("Infinity")])
+    def test_photo_start_deadline_must_be_finite_positive_and_exact(self, timeout):
+        with pytest.raises(ValueError):
+            validate_capture_spec(
+                "camera_take_photo", {"output_storage": "host", "start_call_timeout_s": timeout}
+            )
+
+    def test_photo_activity_contract_keeps_completed_without_stop_or_state_query(self):
+        capabilities = activity_capabilities(
+            "camera_take_photo",
+            {"output_storage": "host", "start_call_timeout_s": Decimal("180")},
+        )
+        assert capabilities.state_query_supported == 0
+        assert capabilities.stop_supported == 0
+        assert capabilities.start_return_meaning == int(StartReturn.COMPLETED)
 
 
 class TestCompletionRouting:

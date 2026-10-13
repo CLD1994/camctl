@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import uuid
 from pathlib import Path
 
 import pytest
 
+from camctl.contracts.enums import enum_for
+from camctl.host_files.paths import HOST_PHOTO_PURPOSES, PURPOSE_DIRECTORIES
 from camctl.resources import resource_bytes
 from camctl.persistence.runtime import (
+    CURRENT_FORMAT_VERSION,
+    SUPPORTED_FORMAT_VERSIONS,
     DatabaseInvalidError,
     DatabaseMissingError,
     DatabaseUnsupportedFormatError,
@@ -45,7 +50,12 @@ DIRECTORIES = (
 )
 
 
-def _create_valid_database(path: Path, *, format_version: int = 1) -> None:
+def _create_valid_database(
+    path: Path,
+    *,
+    format_version: int = CURRENT_FORMAT_VERSION,
+    directories: tuple[str, str, str] = DIRECTORIES,
+) -> None:
     """按权威 SQL 构造完整有效的状态库（测试准备，不经过被测入口）。
 
     准备连接关闭同步落盘：synchronous 是连接级属性，不进入库文件，
@@ -62,11 +72,71 @@ def _create_valid_database(path: Path, *, format_version: int = 1) -> None:
         connection.execute(
             "INSERT INTO database_metadata (id, application_id, instance_id, format_version,"
             " staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, ?, ?, ?, ?)",
-            (uuid.uuid4().hex, format_version, *DIRECTORIES),
+            (uuid.uuid4().hex, format_version, *directories),
         )
         connection.execute(
             "INSERT INTO runtime_state (id, acknowledged_wm) VALUES (1, 0)"
         )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _create_legacy_v1_database(
+    path: Path,
+    *,
+    format_version: int = 1,
+    directories: tuple[str, str, str] = DIRECTORIES,
+    legacy_metadata_check: bool = True,
+) -> None:
+    """从当前权威 SQL 收窄到已发布 V1 的两个格式约束。
+
+    旧用途集合由正式路径映射排除只在新格式登记的主机照片用途得到，
+    不在测试复制编号清单。保留其他当前结构，专门证明运行时能识别旧
+    V1 的两个 CHECK 特征。
+    """
+    connection = sqlite3.connect(path)
+    purpose_enum = enum_for("intermediate_files.purpose")
+    legacy_purposes = sorted(
+        int(purpose_enum[purpose.name])
+        for purpose in PURPOSE_DIRECTORIES
+        if purpose not in HOST_PHOTO_PURPOSES
+    )
+    purpose_values = ",".join(str(value) for value in legacy_purposes)
+    version_enum = enum_for("database_metadata.format_version")
+    version_values = ",".join(str(value) for value in sorted(int(member) for member in version_enum))
+    try:
+        connection.execute("PRAGMA synchronous=OFF")
+        connection.execute("PRAGMA journal_mode=wal")
+        connection.execute("BEGIN IMMEDIATE")
+        for name in SCHEMA_RESOURCES:
+            sql = resource_bytes(name).decode("utf-8")
+            if name == "sql/files.sql":
+                sql, replacements = re.subn(
+                    r"(purpose INTEGER NOT NULL CHECK \(purpose IN \()[^)]+(\)\))",
+                    rf"\g<1>{purpose_values}\g<2>",
+                    sql,
+                    count=1,
+                )
+                assert replacements == 1
+            if name == "sql/reports.sql":
+                if legacy_metadata_check:
+                    marker = "CREATE TABLE database_metadata ("
+                    prefix, metadata_sql = sql.split(marker, maxsplit=1)
+                    changed = metadata_sql.replace(
+                        f"format_version INTEGER NOT NULL CHECK (format_version IN ({version_values}))",
+                        "format_version INTEGER NOT NULL CHECK (format_version = 1)",
+                        1,
+                    )
+                    assert changed != metadata_sql
+                    sql = prefix + marker + changed
+            connection.executescript(sql)
+        connection.execute(
+            "INSERT INTO database_metadata (id, application_id, instance_id, format_version,"
+            " staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, ?, ?, ?, ?)",
+            (uuid.uuid4().hex, format_version, *directories),
+        )
+        connection.execute("INSERT INTO runtime_state (id, acknowledged_wm) VALUES (1, 0)")
         connection.commit()
     finally:
         connection.close()
@@ -103,6 +173,7 @@ def test_plain_sqlite_without_camctl_identity_is_rejected(tmp_path: Path) -> Non
 
 
 def test_unsupported_format_version_is_rejected(tmp_path: Path) -> None:
+    unsupported = max(SUPPORTED_FORMAT_VERSIONS) + 1
     target = tmp_path / "future.db"
     connection = sqlite3.connect(target)
     connection.execute("PRAGMA journal_mode=wal")
@@ -113,12 +184,46 @@ def test_unsupported_format_version_is_rejected(tmp_path: Path) -> None:
         " processing_path TEXT)"
     )
     connection.execute(
-        "INSERT INTO database_metadata VALUES (1, 'camctl', ?, 2, ?, ?, ?)",
-        (uuid.uuid4().hex, *DIRECTORIES),
+        "INSERT INTO database_metadata VALUES (1, 'camctl', ?, ?, ?, ?, ?)",
+        (uuid.uuid4().hex, unsupported, *DIRECTORIES),
     )
     connection.commit()
     connection.close()
     with pytest.raises(DatabaseUnsupportedFormatError):
+        open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+
+
+@pytest.mark.parametrize("format_version", sorted(SUPPORTED_FORMAT_VERSIONS))
+def test_current_schema_opens_for_every_supported_format(
+    tmp_path: Path, format_version: int
+) -> None:
+    target = tmp_path / f"format-{format_version}.db"
+    _create_valid_database(target, format_version=format_version)
+    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        assert owned.metadata.format_version == format_version
+    finally:
+        owned.connection.close()
+
+
+def test_legacy_v1_schema_opens_for_old_format(tmp_path: Path) -> None:
+    target = tmp_path / "legacy-v1.db"
+    _create_legacy_v1_database(target, format_version=1)
+    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        assert owned.metadata.format_version == 1
+    finally:
+        owned.connection.close()
+
+
+def test_new_format_rejects_legacy_purpose_check(tmp_path: Path) -> None:
+    target = tmp_path / "misdeclared-v2.db"
+    _create_legacy_v1_database(
+        target,
+        format_version=CURRENT_FORMAT_VERSION,
+        legacy_metadata_check=False,
+    )
+    with pytest.raises(DatabaseInvalidError, match="CHECK|结构|约束"):
         open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
 
 

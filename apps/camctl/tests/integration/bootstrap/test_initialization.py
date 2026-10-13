@@ -13,13 +13,23 @@ import pytest
 
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.values import new_operation_key
+from camctl.host_files.paths import PURPOSE_DIRECTORIES
 from camctl.persistence.initialization import InitOutcome, initialize_state
-from camctl.persistence.runtime import DbOpenMode, DbConfig, open_existing
+from camctl.persistence.runtime import (
+    CURRENT_FORMAT_VERSION,
+    DbOpenMode,
+    DbConfig,
+    canonical_directory_binding,
+    open_existing,
+)
 from camctl.session.locks import acquire_session, lock_file_paths
 
 from ..persistence.test_transactions import PlanCreateCommand, plan_guards
+from ..persistence.test_runtime import _create_legacy_v1_database
 
-_STAGING_SUBDIRS = ("deliveries", "recording-inputs", "processing-temp", "derived", "logs")
+
+def _expected_staging_subdirs() -> tuple[str, ...]:
+    return (*PURPOSE_DIRECTORIES.values(), "logs", "capture-work")
 
 
 def _config(tmp_path: Path, *, prefix: str = ""):
@@ -55,6 +65,19 @@ def _dump(path: Path) -> dict[str, list[tuple]]:
         connection.close()
 
 
+def _database_image(path: Path) -> tuple[list[tuple], dict[str, list[tuple]]]:
+    """读取所有建表 SQL 及行事实，核对 init 没有升级或改写既有库。"""
+    connection = sqlite3.connect(path)
+    try:
+        schema = connection.execute(
+            "SELECT type, name, sql FROM sqlite_master "
+            "WHERE type IN ('table', 'index', 'trigger') ORDER BY type, name"
+        ).fetchall()
+    finally:
+        connection.close()
+    return schema, _dump(path)
+
+
 class TestFirstCreation:
     def test_init_creates_complete_initial_database(self, tmp_path: Path) -> None:
         cfg = _config(tmp_path)
@@ -63,7 +86,7 @@ class TestFirstCreation:
         owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
         try:
             assert owned.metadata.application_id == "camctl"
-            assert owned.metadata.format_version == 1
+            assert owned.metadata.format_version == CURRENT_FORMAT_VERSION
             assert owned.metadata.instance_id
         finally:
             owned.connection.close()
@@ -75,7 +98,7 @@ class TestFirstCreation:
         finally:
             connection.close()
         staging = Path(cfg.paths.staging)
-        for name in _STAGING_SUBDIRS:
+        for name in _expected_staging_subdirs():
             assert (staging / name).is_dir(), name
         assert Path(cfg.paths.ready).is_dir()
         assert Path(cfg.paths.processing).is_dir()
@@ -106,6 +129,34 @@ class TestExistingDatabase:
         again = initialize_state(cfg, Path(cfg.paths.state_db))
         assert again.outcome is InitOutcome.VERIFIED_EXISTING
         assert _dump(Path(cfg.paths.state_db)) == image_before
+
+    def test_init_preserves_legacy_v1_sql_metadata_and_history(self, tmp_path: Path, plan_guards) -> None:
+        cfg = _config(tmp_path)
+        target = Path(cfg.paths.state_db)
+        directories = tuple(
+            canonical_directory_binding(Path(value))
+            for value in (
+                cfg.paths.staging,
+                cfg.paths.ready,
+                cfg.paths.processing,
+            )
+        )
+        _create_legacy_v1_database(target, format_version=1, directories=directories)
+        owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            from camctl.persistence.transaction import commit_operation
+
+            receipt = commit_operation(PlanCreateCommand((1,)), new_operation_key(), owned)
+            assert receipt.kind == "completed"
+            assert owned.metadata.format_version == 1
+        finally:
+            owned.connection.close()
+        before = _database_image(target)
+
+        result = initialize_state(cfg, target)
+
+        assert result.outcome is InitOutcome.VERIFIED_EXISTING
+        assert _database_image(target) == before
 
     def test_invalid_existing_file_is_not_replaced(self, tmp_path: Path) -> None:
         target = tmp_path / "state.db"

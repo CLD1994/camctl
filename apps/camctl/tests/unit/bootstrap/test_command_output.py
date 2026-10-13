@@ -26,9 +26,9 @@ from camctl.session.outcome import SessionOutcome
 
 @pytest.fixture(autouse=True)
 def isolate_builtin_driver_registration(monkeypatch):
-    from camctl.devices.drivers.adb_cameras import registration
-    monkeypatch.setattr(registration, "register_builtin_camera_drivers",
-                        create_autospec(registration.register_builtin_camera_drivers))
+    from camctl.devices.drivers import builtin
+    monkeypatch.setattr(builtin, "register_builtin_drivers",
+                        create_autospec(builtin.register_builtin_drivers))
 
 
 class TestParseCommand:

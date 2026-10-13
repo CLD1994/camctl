@@ -77,6 +77,7 @@ _SELECTION_STATUS = enum_for("obtain_source_selections.status")
 _ITEM_STATUS = enum_for("obtain_items.status")
 _DELIVERY_STATUS = enum_for("deliveries.status")
 _VERIFICATION = enum_for("file_copies.verification_state")
+_OUTPUT_KIND = enum_for("outputs.kind")
 
 #: 已完成副本校验的固定事实组合（与拷贝收尾口径一致）。
 _VERIFICATION_DONE = (3, 5)
@@ -410,13 +411,15 @@ def _host_source_candidate(
 ) -> FileCandidate:
     """主机源产物建档：不采用设备配置，不占用相机读取机会。"""
     with closing(runtime.owned.connection.execute(
-        "SELECT relative_path FROM intermediate_files WHERE id = ?",
-        (intermediate_file_id,),
+        "SELECT f.relative_path, o.original_name, o.kind FROM intermediate_files f"
+        " JOIN outputs o ON o.intermediate_file_id = f.id WHERE f.id = ? AND o.id = ?",
+        (intermediate_file_id, output_id),
     )) as cursor:
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError(f"中间文件缺失: {intermediate_file_id}")
     extension = _extension_of(row[0])
+    stem = "repaired" if row[2] == int(_OUTPUT_KIND.REPAIRED) else _original_stem(row[1])
     return FileCandidate(
         action_id=action["id"], item_id=item_id, processing_id=None,
         output_id=output_id, source_device_file_id=None,
@@ -424,7 +427,7 @@ def _host_source_candidate(
         target_extension="part",
         delivery_extension=extension,
         delivery_display_name=(
-            f"repaired-{plan_name}-{source_action_name}.{extension}"),
+            f"{stem}-{plan_name}-{source_action_name}.{extension}"),
         config=None, occurred_at=now)
 
 

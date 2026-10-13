@@ -29,7 +29,7 @@ from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.persistence.repositories.timelapse import TimelapseRepository
-from .test_capture_contract import _EVIDENCE
+from .test_capture_contract import ResultsDouble, _PAGE_EVIDENCE
 
 pytestmark = pytest.mark.asyncio
 register_operation_guards()
@@ -108,7 +108,8 @@ async def test_baseline_failure_atomically_preserves_error_and_releases_unstarte
 
 def _runtime(owned, directory, driver):
     return CaptureRuntime(owned, SchedulingRepository(), OperationRepository(), CaptureRepository(),
-        TimelapseRepository(), driver, None, _EVIDENCE, lambda: _SCHEDULED, lambda: 0,
+        TimelapseRepository(), driver, ResultsDouble({}), _PAGE_EVIDENCE,
+        lambda: _SCHEDULED, lambda: 0,
         lambda a: LaunchWindow(a["scheduled_at"], a["scheduled_at"] + a["max_delay_ms"] * 1000),
         lambda a: CaptureWaitConfig(10_000, 0, 0), baseline_directory=directory)
 
@@ -244,7 +245,14 @@ async def test_cancellation_waits_for_actual_preparation_return_before_releasing
     handler = capture_handler(action_type)
     original = asyncio.create_task(handler(1, runtime))
     try:
-        await entered.wait()
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2)
+        except asyncio.TimeoutError:
+            # 若 handler 在进入目录端口前失败，取回原任务异常，避免只留下
+            # 一个没有诊断的无界等待和 "Task exception was never retrieved"。
+            if original.done():
+                await original
+            raise
         owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
         owned.connection.commit()
         await handler(1, runtime)
@@ -273,7 +281,7 @@ async def test_cancellation_waits_for_actual_preparation_return_before_releasing
     finally:
         returned.set()
         if not original.done():
-            await original
+            await asyncio.wait_for(original, timeout=2)
 
 
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])

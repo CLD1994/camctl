@@ -281,7 +281,13 @@ _TIMELAPSE = ((13, 3),)
 
 
 def _seed_action(connection, action_id: int, action_type: int) -> None:
-    """录像种子按受理约定保存执行定义（目标时长毫秒）。"""
+    """按动作类型保存有效的输入事实与固定执行定义。"""
+    input_fields = (
+        {"params": {"type": "legacy_photo"},
+         "policy": {"max_delay_ms": 1000}}
+        if action_type == 1 else {}
+    )
+    effective_params = {"type": "legacy_photo"} if action_type == 1 else {}
     spec = '{"target_duration_ms": 60000}' if action_type == 2 else '{}'
     if action_type == 3:
         spec = json.dumps({"duration_based": True, "wait_after_send": True,
@@ -294,10 +300,11 @@ def _seed_action(connection, action_id: int, action_type: int) -> None:
         " cancel_requested, error_code, error_details_json, first_window_observed_at,"
         " expiration_reason, source_resolution_state, resolved_source_plan_id,"
         " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, '{}', '{}',"
+        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, ?, ?,"
         " 'camctl-adb', 1000, ?, 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL,"
         " NULL, 1, 1, 1)",
-        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW, spec),
+        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW,
+         json.dumps(input_fields), json.dumps(effective_params), spec),
     )
 
 

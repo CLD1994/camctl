@@ -355,7 +355,7 @@ def test_formal_guard_rejects_unqualified_confirmation(sync_environment, bad_fac
 
     class IncorrectConfirmation:
         def plan(self, scope):
-            plan = ProcessInputCommand(command).plan(scope)
+            plan = ProcessInputCommand(command, owned.metadata.format_version).plan(scope)
             states = deepcopy(plan.state_rows)
             events = list(plan.events)
             event = next(event for event in events if event.event_type == 29)

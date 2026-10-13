@@ -30,7 +30,7 @@ from camctl.contracts.workflow_errors import action_error_id, action_error_ids, 
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.runtime import OwnedConnection, require_host_photo_format
 from camctl.persistence.repositories.reporting import (
     read_ack_report, read_ack_state, read_outstanding_syncs,
 )
@@ -171,8 +171,9 @@ def _evaluate_ack(connection, document: Mapping[str, Any] | None) -> _AckEvaluat
 class ProcessInputCommand:
     """一次输入处理的完整事务命令。"""
 
-    def __init__(self, command: ProcessInput) -> None:
+    def __init__(self, command: ProcessInput, format_version: int | None) -> None:
         self._command = command
+        self._format_version = format_version
         self._catalog = command.catalog
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {
@@ -363,6 +364,13 @@ class ProcessInputCommand:
                 },
             ),
         )
+        if any(
+            action.ok
+            and isinstance(action.execution_spec, Mapping)
+            and action.execution_spec.get("output_storage") == "host"
+            for action in prepared.actions
+        ):
+            require_host_photo_format(self._format_version)
 
         templates: list[EventEnvelope] = []
         dep_id = self._next_id(connection, "action_dependencies")
@@ -575,7 +583,14 @@ class AcceptanceRepository:
         key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[AcceptanceResult]:
-        receipt = commit_operation(ProcessInputCommand(command), key, owned)
+        receipt = commit_operation(
+            ProcessInputCommand(
+                command,
+                owned.metadata.format_version if owned.metadata is not None else None,
+            ),
+            key,
+            owned,
+        )
         if receipt.kind == "completed":
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
         if receipt.kind == "rolled_back":

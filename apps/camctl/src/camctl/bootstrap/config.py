@@ -509,15 +509,34 @@ def _validated_attempts_subtable(
 def _validate_devices(raw: Any) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         raise ConfigError(f"devices 必须是表: {raw!r}")
+    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+
     validated: dict[str, Any] = {}
+    hasselblad_serials: dict[str, str] = {}
     for device_id, declaration in raw.items():
         if not isinstance(device_id, str) or not device_id:
             raise ConfigError(f"设备身份必须是非空字符串: {device_id!r}")
         if not isinstance(declaration, Mapping):
             raise ConfigError(f"devices.{device_id} 必须是表: {declaration!r}")
         _require_nonempty_str(declaration.get("kind"), f"devices.{device_id}.kind")
-        _require_nonempty_str(declaration.get("driver"), f"devices.{device_id}.driver")
+        driver_id = _require_nonempty_str(declaration.get("driver"), f"devices.{device_id}.driver")
         normalized = dict(declaration)
+        if driver_id == DRIVER_ID:
+            try:
+                camera = read_camera_config(normalized)
+            except (TypeError, ValueError) as error:
+                raise ConfigError(f"devices.{device_id}.hasselblad 配置无效: {error}") from error
+            previous_device = hasselblad_serials.get(camera.serial)
+            if previous_device is not None:
+                raise ConfigError(
+                    f"devices.{device_id}.hasselblad.serial 与设备 {previous_device!r} 重复绑定"
+                )
+            hasselblad_serials[camera.serial] = device_id
+        elif "hasselblad" in normalized:
+            raise ConfigError(
+                f"devices.{device_id}.hasselblad 只能用于驱动 {DRIVER_ID!r}"
+            )
         if "adb" in normalized:
             adb = _take(normalized["adb"], f"devices.{device_id}.adb", ("serial",))
             serial = adb.get("serial")

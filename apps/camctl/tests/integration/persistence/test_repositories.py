@@ -3,8 +3,8 @@
 真实状态库与替身命令组合：全局事件批返回后读连接已归还——新读
 事务可见新提交、固定 H 批次不被后续写入污染；读取错误按一致性
 错误传播而不是空批；仓储目录静态审计没有自提交函数——写提交统
-一经事务内核，事务控制语句只属于读事务生命周期与快照维护窄仓
-储的执行函数。
+一经事务内核，事务控制语句只属于明确登记的一致读视图核实函数
+与快照维护窄仓储的执行函数。
 """
 
 from __future__ import annotations
@@ -30,12 +30,14 @@ _REPOSITORIES = Path(camctl.__file__).resolve().parent / "persistence" / "reposi
 #: 仓储经数据库执行器执行的函数。其他仓储自开写事务属于违规。
 _ALLOWED_TRANSACTION_OWNERS = {"HistoryRepository", "SqliteSnapshotStore"}
 
-# 电机事实读取和提交未知核实只建立一致的读视图；许可限定到函数，
-# 不允许这些仓储的其他入口自开事务，也不允许 BEGIN IMMEDIATE。
+# 电机事实读取，以及电机和主机拍摄的未知提交回执核实，只建立一致
+# 的读视图；许可限定到函数，不允许仓储的其他入口自开事务，也不允许
+# BEGIN IMMEDIATE。
 _READ_TRANSACTION_FUNCTIONS = {
     "module:read_motor_facts",
     "MotorRepository.verify_operation",
     "CancellationRepository.verify_motor_operation",
+    "HostCaptureRepository.verify_operation",
 }
 
 
@@ -120,8 +122,8 @@ class TestCommitPathAudit:
         """静态审计：仓储目录没有自提交函数或直连数据库。
 
         写提交统一经事务内核；``.commit()`` 方法调用与
-        ``sqlite3.connect`` 直连都不得出现。事务控制字面量只允许
-        出现在白名单责任者的函数内。
+        ``sqlite3.connect`` 直连都不得出现。只读核实事务按函数级
+        白名单登记，写事务不得绕过事务内核。
         """
         commit_calls: list[str] = []
         direct_connections: list[str] = []

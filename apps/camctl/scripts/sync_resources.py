@@ -33,9 +33,12 @@ RESOURCE_SOURCES: dict[str, str] = {
     "examples/camera-demo/action6-timelapse.json": "docs/camctl/examples/camera-demo/action6-timelapse.json",
     "examples/camera-demo/osmo360ii-record.json": "docs/camctl/examples/camera-demo/osmo360ii-record.json",
     "examples/camera-demo/osmo360ii-timelapse.json": "docs/camctl/examples/camera-demo/osmo360ii-timelapse.json",
+    "examples/camera-demo/hasselblad-photo.json": "docs/camctl/examples/camera-demo/hasselblad-photo.json",
+    "examples/camera-demo/obtain-preview.json": "docs/camctl/examples/camera-demo/obtain-preview.json",
     "examples/camera-demo/obtain.json": "docs/camctl/examples/camera-demo/obtain.json",
     "examples/camera-demo/report-ack.json": "docs/camctl/examples/camera-demo/report-ack.json",
     "examples/camera-demo/config.toml": "docs/camctl/examples/camera-demo/config.toml",
+    "examples/camera-demo/hasselblad-config.toml": "docs/camctl/examples/camera-demo/hasselblad-config.toml",
     "examples/camera-demo/prepare-plan.py": "docs/camctl/examples/camera-demo/prepare-plan.py",
 }
 

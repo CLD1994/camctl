@@ -2,6 +2,7 @@
 from copy import deepcopy
 from decimal import Decimal
 import json
+import re
 from unittest.mock import create_autospec
 
 import pytest
@@ -56,6 +57,17 @@ def _row(body=None, **columns):
     return tuple(values.values())
 
 
+def _json_with_integer_literals(body, *members):
+    """把指定 JSON 成员的数字字面量换成精确小数或指数形式。"""
+    text = json.dumps(body)
+    for member, original, replacement in members:
+        pattern = re.compile(
+            rf'("{re.escape(member)}":\s*){re.escape(str(original))}(?=[,}}])')
+        text, count = pattern.subn(lambda match: f'{match.group(1)}{replacement}', text, count=1)
+        assert count == 1
+    return text
+
+
 def test_legal_stored_event_decodes_exact_facts():
     event = decode_event_row(_row())
     assert (event.event_id, event.transaction_id, event.reason, event.change_seq) == (7, 3, 1, 5)
@@ -102,6 +114,329 @@ def test_boolean_is_not_a_numeric_column_enum():
     body["rows"][0]["after"]["values"]["status"] = True
     with pytest.raises(ConsistencyError):
         decode_event_row(_row(body))
+
+
+def _host_event_registration():
+    registry = events.load_event_registry()
+    registry["tables"]["intermediate_files"] = {
+        "immutable": ["owner_action_id", "owner_delivery_id", "purpose", "relative_path"],
+        "mutable": ["retention_state", "cleanup_state", "size_bytes", "sha256", "last_error_json"],
+        "write_once": [],
+        "derived": ["id", "created_event_id", "last_event_id", "change_count"],
+        "owner": {"entity": "intermediate_file", "id": "id", "via": []},
+        "state_columns": [],
+    }
+    registry["events"]["INTERMEDIATE_FILE_CHANGED"] = {
+        "id": 26,
+        "version": 1,
+        "branches": {
+            "CREATE": {
+                "reason": 1,
+                "rows": [{"table": "intermediate_files", "op": "create",
+                          "after": {"purpose": [2, 5, 6]}}],
+                "guards": [],
+                "evidence": ["host_photo_request"],
+            },
+            "LIFECYCLE": {
+                "reason": 2,
+                "rows": [{"table": "intermediate_files", "op": "update",
+                          "columns": ["size_bytes", "sha256", "retention_state"],
+                          "required": []}],
+                "guards": [],
+                "evidence": [],
+            },
+            "HOST_PHOTO_COMPLETE": {
+                "reason": 5,
+                "rows": [{"table": "intermediate_files", "op": "update",
+                          "columns": ["size_bytes", "sha256"],
+                          "required": ["size_bytes", "sha256"]}],
+                "guards": [],
+                "evidence": ["host_photo_request"],
+            },
+        },
+    }
+
+
+def _host_file_row(identity, purpose, relative_path):
+    return {
+        "table": "intermediate_files",
+        "id": identity,
+        "before": {"exists": False, "values": {}},
+        "after": {"exists": True, "values": {
+            "owner_action_id": 7,
+            "owner_delivery_id": None,
+            "purpose": purpose,
+            "relative_path": relative_path,
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "size_bytes": None,
+            "sha256": None,
+            "last_error_json": None,
+        }},
+    }
+
+
+def _host_prepare_body(evidence=None):
+    return {
+        "reason": 1,
+        "evidence": ({"host_photo_request": {"action_id": 7, "occurred_at": 0}}
+                     if evidence is None else evidence),
+        "rows": [
+            _host_file_row(31, 5, "capture-originals/31.3fr"),
+            _host_file_row(32, 6, "capture-previews/32.jpg"),
+        ],
+    }
+
+
+def test_history_decode_accepts_complete_host_photo_prepare_event():
+    _host_event_registration()
+    assert events.reason_for_branch("INTERMEDIATE_FILE_CHANGED", "HOST_PHOTO_COMPLETE") == 5
+    event = decode_event_row(_row(_host_prepare_body(), event_type=26))
+    assert event.evidence["host_photo_request"] == {"action_id": 7, "occurred_at": 0}
+
+
+def test_history_decode_accepts_mathematical_integer_prepare_request_and_rows():
+    _host_event_registration()
+    body = _host_prepare_body()
+    text = _json_with_integer_literals(
+        body,
+        ("action_id", 7, "7.0"),
+        ("occurred_at", 0, "0e0"),
+        ("id", 31, "31.0"),
+        ("id", 32, "32e0"),
+        ("owner_action_id", 7, "7.0"),
+        ("owner_action_id", 7, "7.0"),
+        ("purpose", 5, "5.0"),
+        ("purpose", 6, "6e0"),
+        ("retention_state", 1, "1.0"),
+        ("retention_state", 1, "1.0"),
+        ("cleanup_state", 1, "1e0"),
+        ("cleanup_state", 1, "1e0"),
+    )
+
+    event = decode_event_row(_row(body_json=text, event_type=26))
+
+    assert event.evidence["host_photo_request"]["action_id"] == Decimal("7.0")
+    assert type(event.rows[0].row_id) is int and event.rows[0].row_id == 31
+    assert event.rows[0].after.values["owner_action_id"] == Decimal("7.0")
+    assert event.rows[0].after.values["purpose"] == Decimal("5.0")
+    assert event.rows[0].after.values["retention_state"] == Decimal("1.0")
+
+
+@pytest.mark.parametrize("body,occurred_at", [
+    (_host_prepare_body(evidence={"host_photo_request": 0}), 0),
+    (_host_prepare_body(evidence={}), 0),
+    (_host_prepare_body(evidence={"host_photo_request": {"action_id": 8, "occurred_at": 0}}), 0),
+    (_host_prepare_body(), 1),
+])
+def test_history_decode_rejects_invalid_or_missing_host_prepare_request(body, occurred_at):
+    _host_event_registration()
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body, event_type=26, occurred_at=occurred_at))
+
+
+def test_history_decode_does_not_accept_boolean_as_prepare_action_identity():
+    _host_event_registration()
+    body = _host_prepare_body()
+    body["evidence"]["host_photo_request"]["action_id"] = 1
+    body["rows"][0]["after"]["values"]["owner_action_id"] = True
+    body["rows"][1]["after"]["values"]["owner_action_id"] = 1
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body, event_type=26))
+
+
+def test_history_decode_keeps_legacy_file_create_without_photo_request():
+    _host_event_registration()
+    body = {
+        "reason": 1,
+        "evidence": {},
+        "rows": [_host_file_row(40, 2, "recording-inputs/40.mp4")],
+    }
+    event = decode_event_row(_row(body, event_type=26))
+    assert "host_photo_request" not in event.evidence
+
+
+def test_history_decode_keeps_file_promotion_lifecycle_without_byte_request():
+    _host_event_registration()
+    body = {
+        "reason": 2,
+        "evidence": {},
+        "rows": [{
+            "table": "intermediate_files",
+            "id": 31,
+            "before": {"exists": True, "values": {"retention_state": 1}},
+            "after": {"exists": True, "values": {"retention_state": 3}},
+        }],
+    }
+    event = decode_event_row(_row(body, event_type=26))
+    assert event.rows[0].after.values == {"retention_state": 3}
+
+
+def _host_complete_body(original_sha256="a" * 64):
+    return {
+        "reason": 5,
+        "evidence": {"host_photo_request": {
+            "action_id": 7,
+            "original_file_id": 31,
+            "original_size_bytes": 4096,
+            "original_sha256": original_sha256,
+            "preview_file_id": 32,
+            "preview_size_bytes": 128,
+            "preview_sha256": "b" * 64,
+            "occurred_at": 0,
+        }},
+        "rows": [
+            {"table": "intermediate_files", "id": 31,
+             "before": {"exists": True, "values": {"size_bytes": None, "sha256": None}},
+             "after": {"exists": True, "values": {"size_bytes": 4096, "sha256": "a" * 64}}},
+            {"table": "intermediate_files", "id": 32,
+             "before": {"exists": True, "values": {"size_bytes": None, "sha256": None}},
+             "after": {"exists": True, "values": {"size_bytes": 128, "sha256": "b" * 64}}},
+        ],
+    }
+
+
+def test_history_decode_accepts_and_cross_checks_host_complete_bytes():
+    _host_event_registration()
+    event = decode_event_row(_row(_host_complete_body(), event_type=26))
+    assert len(event.rows) == 2
+
+
+def test_history_decode_accepts_mathematical_integer_complete_request_and_rows():
+    _host_event_registration()
+    body = _host_complete_body()
+    text = _json_with_integer_literals(
+        body,
+        ("action_id", 7, "7.0"),
+        ("original_file_id", 31, "31.0"),
+        ("original_size_bytes", 4096, "4096e0"),
+        ("preview_file_id", 32, "32e0"),
+        ("preview_size_bytes", 128, "128.0"),
+        ("occurred_at", 0, "-1.0"),
+        ("id", 31, "31.0"),
+        ("id", 32, "32e0"),
+        ("size_bytes", 4096, "4096e0"),
+        ("size_bytes", 128, "128.0"),
+    )
+
+    event = decode_event_row(_row(body_json=text, event_type=26, occurred_at=-1))
+
+    assert event.evidence["host_photo_request"]["original_size_bytes"] == Decimal("4096")
+    assert type(event.rows[0].row_id) is int and event.rows[0].row_id == 31
+    assert event.rows[0].after.values["size_bytes"] == Decimal("4096")
+
+
+def test_history_decode_rejects_host_complete_branch_without_request():
+    _host_event_registration()
+    body = _host_complete_body()
+    body["evidence"] = {}
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body, event_type=26))
+
+
+def test_history_decode_keeps_generic_two_file_byte_lifecycle_without_photo_request():
+    _host_event_registration()
+    body = {
+        "reason": 2,
+        "evidence": {},
+        "rows": [
+            {"table": "intermediate_files", "id": 41,
+             "before": {"exists": True, "values": {"size_bytes": None, "sha256": None}},
+             "after": {"exists": True, "values": {"size_bytes": 4096, "sha256": "a" * 64}}},
+            {"table": "intermediate_files", "id": 42,
+             "before": {"exists": True, "values": {"size_bytes": None, "sha256": None}},
+             "after": {"exists": True, "values": {"size_bytes": 128, "sha256": "b" * 64}}},
+        ],
+    }
+    event = decode_event_row(_row(body, event_type=26))
+    assert len(event.rows) == 2
+
+
+def test_history_decode_rejects_host_complete_hash_that_contradicts_rows():
+    _host_event_registration()
+    body = _host_complete_body(original_sha256="c" * 64)
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body, event_type=26))
+
+
+def test_history_decode_does_not_accept_boolean_as_complete_byte_size():
+    _host_event_registration()
+    body = _host_complete_body()
+    body["evidence"]["host_photo_request"]["original_size_bytes"] = 1
+    body["rows"][0]["after"]["values"]["size_bytes"] = True
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body, event_type=26))
+
+
+@pytest.mark.parametrize(
+    "member,original,replacement",
+    [
+        ("action_id", 7, "true"),
+        ("action_id", 7, "7.5"),
+        ("action_id", 7, "9223372036854775808.0"),
+        ("action_id", 7, "0.0"),
+        ("occurred_at", 0, "false"),
+        ("occurred_at", 0, "0.5"),
+        ("occurred_at", 0, '"0"'),
+    ],
+)
+def test_history_decode_rejects_invalid_prepare_integer_json_values(member, original, replacement):
+    _host_event_registration()
+    body = _host_prepare_body()
+    text = _json_with_integer_literals(body, (member, original, replacement))
+
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body_json=text, event_type=26))
+
+
+@pytest.mark.parametrize(
+    "member,original,replacement",
+    [
+        ("original_file_id", 31, "true"),
+        ("original_file_id", 31, "31.5"),
+        ("original_file_id", 31, "9223372036854775808.0"),
+        ("original_size_bytes", 4096, "0.0"),
+        ("original_size_bytes", 4096, "4096.5"),
+        ("original_size_bytes", 4096, "9223372036854775808e0"),
+    ],
+)
+def test_history_decode_rejects_invalid_complete_integer_json_values(member, original, replacement):
+    _host_event_registration()
+    body = _host_complete_body()
+    text = _json_with_integer_literals(body, (member, original, replacement))
+
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body_json=text, event_type=26))
+
+
+@pytest.mark.parametrize(
+    "member,original,replacement",
+    [
+        ("owner_action_id", 7, "7.5"),
+        ("owner_action_id", 7, "9223372036854775808.0"),
+        ("purpose", 5, "5.5"),
+        ("retention_state", 1, "true"),
+        ("retention_state", 1, "9223372036854775808.0"),
+        ("cleanup_state", 1, "1.5"),
+    ],
+)
+def test_history_decode_rejects_noninteger_prepare_row_values(member, original, replacement):
+    _host_event_registration()
+    body = _host_prepare_body()
+    text = _json_with_integer_literals(body, (member, original, replacement))
+
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body_json=text, event_type=26))
+
+
+@pytest.mark.parametrize("literal", ["4096.5", "9223372036854775808e0"])
+def test_history_decode_rejects_noninteger_or_oversized_complete_row_size(literal):
+    _host_event_registration()
+    body = _host_complete_body()
+    text = _json_with_integer_literals(body, ("size_bytes", 4096, literal))
+
+    with pytest.raises(ConsistencyError):
+        decode_event_row(_row(body_json=text, event_type=26))
 
 
 def _update_registration(registration, *, required=()):

@@ -22,7 +22,13 @@ from camctl.contracts.values import (
 from camctl.contracts.json_values import is_json_integer
 from camctl.contracts.enums import enum_for
 from camctl.contracts.workflow_errors import validate_public_error
-from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
+from camctl.devices.tasks import (
+    CaptureStorage,
+    CaptureTask,
+    CompletionMode,
+    EndControl,
+    StartReturn,
+)
 from camctl.operations.models import ErrorValue
 from camctl.operations.attempts import AttemptConfig
 
@@ -185,9 +191,19 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
     if not isinstance(spec, dict):
         raise ValueError("拍摄执行定义必须是 JSON 对象")
     if action_type == "camera_take_photo":
-        if spec:
-            raise ValueError("拍照执行定义必须是空对象")
-        return {}
+        if not spec:
+            return {}
+        if set(spec) != {"output_storage", "start_call_timeout_s"}:
+            raise ValueError("单张拍摄定义必须恰好声明存储位置和启动调用期限")
+        if spec["output_storage"] != CaptureStorage.HOST:
+            raise ValueError("单张拍摄正式产物必须声明写入主机")
+        timeout = spec["start_call_timeout_s"]
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal)):
+            raise ValueError("单张拍摄启动期限必须是精确数值秒数")
+        return {
+            "output_storage": CaptureStorage.HOST.value,
+            "start_call_timeout_s": AttemptConfig(1, timeout_s=timeout).timeout_s,
+        }
     products = {}
     if "product_rules" in spec:
         from camctl.capture.results import ProductRule
@@ -246,7 +262,41 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
 def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
     """所属处理模块将驱动任务事实转为首次固定定义。"""
     if action_type == "camera_take_photo":
-        return validate_capture_spec(action_type, {})
+        if task is None:
+            return validate_capture_spec(action_type, {})
+        if not isinstance(task, CaptureTask) or task.action_type != action_type:
+            raise ValueError("驱动未提供对应动作的固定拍摄任务")
+        if any(
+            getattr(task, name) is not None
+            for name in (
+                "target_duration_s",
+                "stop_supported",
+                "duration_based",
+                "wait_after_send",
+                "end_control",
+                "start_return_meaning",
+                "completion_mode",
+                "result_wait_margin_s",
+                "ownership_mode",
+                "output_scope",
+                "product_rules",
+                "file_completion_wait_s",
+            )
+        ):
+            raise ValueError("单张任务不能携带时长、停止、完成或产物范围字段")
+        if task.output_storage is None and task.start_call_timeout_s is None:
+            return validate_capture_spec(action_type, {})
+        if task.output_storage is None or task.start_call_timeout_s is None:
+            raise ValueError("主机单张任务必须同时声明存储位置和启动调用期限")
+        storage = task.output_storage
+        if isinstance(storage, CaptureStorage):
+            storage = storage.value
+        spec = {}
+        if storage is not None:
+            spec["output_storage"] = storage
+        if task.start_call_timeout_s is not None:
+            spec["start_call_timeout_s"] = task.start_call_timeout_s
+        return validate_capture_spec(action_type, spec)
     if not isinstance(task, CaptureTask) or task.action_type != action_type:
         raise ValueError("驱动未提供对应动作的固定拍摄任务")
     ownership = {}

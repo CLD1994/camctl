@@ -62,8 +62,9 @@ class OutputDraft:
 
     sha256 为空表示摘要未知（合法，不强制作登记前置计算）；已有
     可靠值原样保留。修复与预览必须提供 original_output_id（既有
-    产物）或 original_batch_file_id（同批原片的文件身份）之一；
-    原片不携带关联。
+    产物）、original_batch_file_id（同批设备原片）或
+    original_batch_intermediate_file_id（同批主机原图）之一。
+    主机拍摄源另携带可靠可读元信息；原片不携带关联。
     """
 
     kind: OutputKind
@@ -72,24 +73,36 @@ class OutputDraft:
     sha256: str | None = None
     original_output_id: int | None = None
     original_batch_file_id: int | None = None
+    original_batch_intermediate_file_id: int | None = None
+    original_name: str | None = None
+    media_type: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, OutputKind):
             raise ValueError("产物种类必须是 OutputKind")
-        if (self.kind is OutputKind.REPAIRED) != (self.file.intermediate_file_id is not None):
-            raise ValueError("原片和预览由设备文件承载，修复成品由中间文件承载")
-        for identity in (self.original_output_id, self.original_batch_file_id):
+        if self.kind is OutputKind.REPAIRED and self.file.intermediate_file_id is None:
+            raise ValueError("修复成品必须由中间文件承载")
+        host_capture = self.file.intermediate_file_id is not None and self.kind is not OutputKind.REPAIRED
+        if host_capture:
+            if any(not isinstance(value, str) or not value for value in (self.original_name, self.media_type)):
+                raise ValueError("主机拍摄源必须携带可靠原文件名和内容类型")
+        elif self.original_name is not None or self.media_type is not None:
+            raise ValueError("设备和修复产物的元信息来自已保存的设备文件")
+        if self.original_batch_intermediate_file_id is not None and not host_capture:
+            raise ValueError("主机原片引用只适用于主机拍摄源")
+        for identity in (self.original_output_id, self.original_batch_file_id, self.original_batch_intermediate_file_id):
             if identity is not None:
                 ObjectId(identity)
         if self.kind is OutputKind.ORIGINAL and (
             self.original_output_id is not None
             or self.original_batch_file_id is not None
+            or self.original_batch_intermediate_file_id is not None
         ):
             raise ValueError("原片不携带产物关联")
         if self.kind is not OutputKind.ORIGINAL:
-            has_existing = self.original_output_id is not None
-            has_batch = self.original_batch_file_id is not None
-            if has_existing == has_batch:
+            references = sum(value is not None for value in (
+                self.original_output_id, self.original_batch_file_id, self.original_batch_intermediate_file_id))
+            if references != 1 or (host_capture and self.original_batch_file_id is not None):
                 raise ValueError(
                     f"{self.kind.value} 必须恰好提供既有产物或同批文件身份之一"
                 )
@@ -105,6 +118,9 @@ class RegisteredOutput:
     sha256: str | None
     original_output_id: int | None = None
     original_batch_file_id: int | None = None
+    original_batch_intermediate_file_id: int | None = None
+    original_name: str | None = None
+    media_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +142,7 @@ def validate_output_registration(
         raise ValueError("产物归属未确认，不能登记")
     seen_files: set[FileReference] = set()
     registered: list[RegisteredOutput] = []
-    batch_originals: set[int] = set()
+    batch_originals: set[FileReference] = set()
     for draft in drafts:
         if draft.file in seen_files:
             raise ValueError(f"文件身份重复登记: {draft.file}")
@@ -134,14 +150,18 @@ def validate_output_registration(
         if not draft.file_complete:
             raise ValueError(f"文件尚未完成，不能登记: {draft.file}")
         if draft.kind is OutputKind.ORIGINAL:
-            batch_originals.add(draft.file.device_file_id)
+            batch_originals.add(draft.file)
     for draft in drafts:
         if draft.original_batch_file_id is not None:
-            referenced = draft.original_batch_file_id
+            referenced = FileReference(device_file_id=draft.original_batch_file_id)
             if referenced not in batch_originals:
                 raise ValueError(
                     f"同批配对必须指向原片文件: {referenced}"
                 )
+        if draft.original_batch_intermediate_file_id is not None:
+            referenced = FileReference(intermediate_file_id=draft.original_batch_intermediate_file_id)
+            if referenced not in batch_originals:
+                raise ValueError(f"同批主机配对必须指向主机原片文件: {referenced}")
         registered.append(
             RegisteredOutput(
                 kind=draft.kind,
@@ -150,6 +170,9 @@ def validate_output_registration(
                 sha256=draft.sha256,
                 original_output_id=draft.original_output_id,
                 original_batch_file_id=draft.original_batch_file_id,
+                original_batch_intermediate_file_id=draft.original_batch_intermediate_file_id,
+                original_name=draft.original_name,
+                media_type=draft.media_type,
             )
         )
     return RegistrationChanges(outputs=tuple(registered))

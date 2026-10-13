@@ -1,0 +1,19 @@
+{
+  "request_id": "1",
+  "created_at": "2026-01-01 00:00:00",
+  "name": "hasselblad-photo",
+  "actions": [
+    {
+      "name": "capture",
+      "type": "camera_take_photo",
+      "device_id": "hb0",
+      "scheduled_at": "2026-01-01 00:00:10",
+      "params": {
+        "type": "hasselblad_photo"
+      },
+      "policy": {
+        "max_delay_ms": 30000
+      }
+    }
+  ]
+}

@@ -40,7 +40,7 @@ def main(argv=None):
             raise ValueError("安排执行的延迟必须是正整数秒")
         plan = parse_exact_json(resource_bytes(PREFIX + args.sample + ".json").decode("utf-8"))
         action = plan["actions"][0]
-        if action["type"] in ("camera_record", "camera_timelapse"):
+        if action["type"] in ("camera_take_photo", "camera_record", "camera_timelapse"):
             if args.capabilities is None:
                 raise ValueError("拍摄必须提供本次实际能力说明")
             if args.source_action_id is not None:

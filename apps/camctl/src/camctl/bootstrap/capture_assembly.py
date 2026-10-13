@@ -7,15 +7,18 @@ result 端口构造生产适配（DriverResultListing），注入 results 时整
 随读取声明构造，未声明读取能力的驱动不装配媒体端口，处理行保持
 等待。时钟异常的受限会话以 media_enabled=False 构造：不装配媒体
 链，保守收场只停止并保存等待阶段。设备未声明时装配原绑定局部
-失败责任；驱动未登记按配置错误拒绝。控制能力或生产装配下结果
-列举能力未声明的动作保持原责任，等待适用装配；异
-常多录修复余量读取 devices.<id>.recording.repair_margin_s
+失败责任；驱动未登记按配置错误拒绝。控制能力未声明时保持原责任，
+等待适用装配。结果列举能力未声明时仍装配运行时；保存规格选择的
+主机单张分支直接归档本机文件；旧单张、录像和延时流程若需要结果
+核实而驱动未声明 result 能力，则在依赖设备结果前明确报告缺少该能力。
+异常多录修复余量读取 devices.<id>.recording.repair_margin_s
 （configuration.md#配置归属），默认 10 秒。
 """
 
 from __future__ import annotations
 
 import time
+from contextlib import closing
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
@@ -40,6 +43,7 @@ from camctl.capture.media_flow import (
 from camctl.capture.results import FileKind
 from camctl.capture.result_inputs import observed_file as _observed_file
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
+from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
 from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recovery_registry
 from camctl.capture.timelapse import CaptureWaitConfig
@@ -59,9 +63,11 @@ from camctl.operations.models import AttemptTicket
 from camctl.operations.validation import validate_outcome
 from camctl.outputs.copy import SourceDigest
 from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.host_capture import HostCaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.scheduling.rules import LaunchWindow
 from camctl.session.supervision import OwnedTask, Supervisor
 
@@ -382,6 +388,30 @@ def _window_of(action: Mapping[str, Any]) -> LaunchWindow:
         window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000)
 
 
+def _host_photo_operation_verifier(
+    owned: Any,
+) -> Callable[[Any, Any, Any], Any]:
+    """在装配层为未知主机拍摄回执创建独立只读核实连接。"""
+    def verify(request, key, repository):
+        with closing(owned.connection.execute("PRAGMA database_list")) as cursor:
+            rows = cursor.fetchall()
+        main = next((row[2] for row in rows if row[1] == "main"), None)
+        if not main:
+            raise ConsistencyError("原主机拍摄事务无法取得状态库路径以独立核实")
+
+        verifier = open_existing(Path(main), DbOpenMode.EXISTING_RO, DbConfig())
+        try:
+            verifier.connection.execute("PRAGMA query_only = ON").close()
+            with closing(verifier.connection.execute("PRAGMA query_only")) as cursor:
+                if cursor.fetchone() != (1,):
+                    raise ConsistencyError("主机拍摄核实连接未进入 query_only 模式")
+            return repository.verify_operation(request, key, verifier)
+        finally:
+            verifier.connection.close()
+
+    return verify
+
+
 def session_capture_assembly(
     *,
     devices: Mapping[str, Mapping[str, Any]],
@@ -412,13 +442,18 @@ def session_capture_assembly(
     pending_read_ends: dict | None = None,
     pending_baselines: dict | None = None,
     pending_result_scans: dict | None = None,
+    pending_host_photo_prepares: dict[int, Any] | None = None,
+    pending_host_photo_completions: dict[int, Any] | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
     会话共享录像锚点表、结果列举缓存与媒体任务执行器；每个推进轮
     次按设备构造 CaptureRuntime。设备未声明时构造不取得设备端口的
-    局部失败运行时，驱动未登记时抛配置错误。控制能力未声明或结果
-    列举能力未声明（生产装配时）返回 None，保持已保存责任。
+    局部失败运行时，驱动未登记时抛配置错误。控制能力未声明时返回
+    None，保持已保存责任；结果列举能力未声明时仍装配运行时，由已
+    保存执行规格决定是否进入主机单张流程。旧单张、录像和延时流程
+    若后续需要结果核实而驱动未声明 result 能力，则不会先派发新的
+    START，再明确报告缺少该能力。
     results 未注入时按
     驱动 result 端口构造生产列举适配（DriverResultListing），注入时
     整体替换为部署提供的端口。wall_us 与 monotonic_ns 缺省使用真实
@@ -445,6 +480,10 @@ def session_capture_assembly(
     file_observations = {} if pending_file_observations is None else pending_file_observations
     baselines = {} if pending_baselines is None else pending_baselines
     result_scans = {} if pending_result_scans is None else pending_result_scans
+    host_photo_prepares = ({} if pending_host_photo_prepares is None
+                           else pending_host_photo_prepares)
+    host_photo_completions = ({} if pending_host_photo_completions is None
+                              else pending_host_photo_completions)
     continuing_read_tickets = {} if continuing_read_tickets is None else continuing_read_tickets
     pending_read_results = {} if pending_read_results is None else pending_read_results
     pending_read_business = {} if pending_read_business is None else pending_read_business
@@ -473,6 +512,8 @@ def session_capture_assembly(
             owned=owned, scheduling=SchedulingRepository(),
             operations=OperationRepository(), capture=CaptureRepository(),
             timelapse=TimelapseRepository(), driver=None, results=None,
+            roots=roots, host_capture=HostCaptureRepository(),
+            host_photo_operation_verifier=_host_photo_operation_verifier(owned),
             evidence=None, wall_us=wall, monotonic_ns=monotonic,
             window_of=_window_of, wait_config=wait_config,
             recovery_boundary=recovery_boundary,
@@ -480,6 +521,8 @@ def session_capture_assembly(
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
             pending_capture_completions=capture_completions,
+            pending_host_photo_prepares=host_photo_prepares,
+            pending_host_photo_completions=host_photo_completions,
             pending_result_closes=result_closes,
             pending_file_observations=file_observations,
             pending_baselines=baselines,
@@ -522,11 +565,12 @@ def session_capture_assembly(
             try:
                 result_port = port_for(entry, "result")
             except CapabilityNotDeclaredError:
-                return None
-            results_port = DriverResultListing(
-                result_port,
-                DeviceBinding(device_id=device_id, driver_id=str(driver_id)),
-                entry.evidence)
+                results_port = None
+            else:
+                results_port = DriverResultListing(
+                    result_port,
+                    DeviceBinding(device_id=device_id, driver_id=str(driver_id)),
+                    entry.evidence)
         media = (
             _media_flow_with(
                 owned, entry, device_id, str(driver_id), tools, staging,
@@ -556,6 +600,9 @@ def session_capture_assembly(
             timelapse=TimelapseRepository(),
             driver=control_port,
             results=results_port,
+            roots=roots,
+            host_capture=HostCaptureRepository(),
+            host_photo_operation_verifier=_host_photo_operation_verifier(owned),
             evidence=entry.evidence,
             wall_us=wall,
             monotonic_ns=monotonic,
@@ -567,6 +614,8 @@ def session_capture_assembly(
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
             pending_capture_completions=capture_completions,
+            pending_host_photo_prepares=host_photo_prepares,
+            pending_host_photo_completions=host_photo_completions,
             pending_result_closes=result_closes,
             pending_file_observations=file_observations,
             pending_baselines=baselines, baseline_directory=directory_port,

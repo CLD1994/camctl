@@ -1,9 +1,12 @@
 """固定定义读取验证保存事实，不接触设备或规则资源。"""
 from enum import IntEnum
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
 from camctl.acceptance import definitions
+from camctl.acceptance.definitions import build_action_spec
 from camctl.contracts.values import ConsistencyError
 
 
@@ -43,3 +46,29 @@ def test_reader_decodes_effective_json_without_recomputing_it():
 def test_reader_rejects_changed_effective_parameter_type():
     with pytest.raises(ConsistencyError):
         definitions.read_action_spec(_row(effective_params_json={"type":"other"}))
+
+
+def test_photo_acceptance_uses_the_parameter_definition_task_factory():
+    from camctl.devices.drivers.hasselblad.definitions import capability
+
+    validation = SimpleNamespace(
+        action_type="camera_take_photo",
+        name="shoot",
+        effective_params={"type": "hasselblad_photo"},
+        parameter_definition=capability(),
+    )
+
+    assert definitions.build_action_spec(validation) == {
+        "output_storage": "host",
+        "start_call_timeout_s": Decimal("180"),
+    }
+
+
+def test_photo_acceptance_without_task_factory_preserves_the_legacy_empty_definition():
+    validation = SimpleNamespace(
+        action_type="camera_take_photo",
+        name="legacy shoot",
+        effective_params={"type": "legacy_photo"},
+        parameter_definition=SimpleNamespace(task_factory=None),
+    )
+    assert build_action_spec(validation) == {}

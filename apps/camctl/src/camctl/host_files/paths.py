@@ -23,7 +23,8 @@ from camctl.host_files.models import (
 )
 
 __all__ = [
-    "PURPOSE_DIRECTORIES", "inspect_file", "observe_file", "resolve_file", "object_file_name",
+    "HOST_PHOTO_PURPOSES", "PURPOSE_DIRECTORIES", "PURPOSE_FIXED_EXTENSIONS",
+    "inspect_file", "observe_file", "resolve_file", "object_file_name",
     "relative_file_path", "validate_file_extension", "validate_relative_file_path",
 ]
 
@@ -33,7 +34,17 @@ PURPOSE_DIRECTORIES = {
     FilePurpose.RECORDING_INPUT: "recording-inputs",
     FilePurpose.PROCESSING_TEMP: "processing-temp",
     FilePurpose.REPAIR_OUTPUT: "derived",
+    FilePurpose.CAPTURE_ORIGINAL: "capture-originals",
+    FilePurpose.CAPTURE_PREVIEW: "capture-previews",
 }
+
+# 单张主机拍摄角色的扩展名契约；消费者从此映射派生角色集合，
+# 路径生产与已保存路径校验共用同一来源。
+PURPOSE_FIXED_EXTENSIONS = {
+    FilePurpose.CAPTURE_ORIGINAL: "3fr",
+    FilePurpose.CAPTURE_PREVIEW: "jpg",
+}
+HOST_PHOTO_PURPOSES = frozenset(PURPOSE_FIXED_EXTENSIONS)
 
 _EXTENSION = re.compile(r"[A-Za-z0-9]+")
 _ID_AND_EXTENSION = re.compile(rf"\A([1-9][0-9]*)(?:\.({_EXTENSION.pattern}))?\Z")
@@ -69,6 +80,11 @@ def relative_file_path(purpose: FilePurpose, file_id: int, extension: str | None
     """在正式用途目录中生成登记路径，不接收自由路径文本。"""
     if not isinstance(purpose, FilePurpose):
         raise PathRuleError(f"文件用途类型无效: {purpose!r}")
+    expected_extension = PURPOSE_FIXED_EXTENSIONS.get(purpose)
+    if expected_extension is not None and extension != expected_extension:
+        raise PathRuleError(
+            f"{purpose.value} 用途的扩展名固定为 {expected_extension!r}: {extension!r}"
+        )
     return f"{PURPOSE_DIRECTORIES[purpose]}/{object_file_name(file_id, extension)}"
 
 
@@ -96,6 +112,11 @@ def validate_relative_file_path(purpose: FilePurpose, file_id: int, relative_pat
     if name != object_file_name(file_id, match.group(2)):
         raise PathRuleError(
             f"文件名 ID 与文件身份不一致: {name!r} 应为 {file_id}"
+        )
+    expected_extension = PURPOSE_FIXED_EXTENSIONS.get(purpose)
+    if expected_extension is not None and match.group(2) != expected_extension:
+        raise PathRuleError(
+            f"{purpose.value} 用途的扩展名固定为 {expected_extension!r}: {match.group(2)!r}"
         )
 
 

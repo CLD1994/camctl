@@ -1,6 +1,6 @@
 """驱动在首次受理时提供的固定拍摄任务事实，不执行设备操作。"""
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from typing import Mapping, Protocol
 
 from camctl.contracts.json_values import JsonValue
@@ -22,6 +22,12 @@ class CompletionMode(IntEnum):
     TIME_AND_OUTPUTS = 2
 
 
+class CaptureStorage(StrEnum):
+    """拍摄任务正式产物由设备保留还是写入主机。"""
+
+    HOST = "host"
+
+
 @dataclass(frozen=True)
 class CaptureTask:
     """驱动从生效参数取得任务事实；时长与余量明确使用秒。"""
@@ -39,6 +45,7 @@ class CaptureTask:
     output_scope: dict[str, JsonValue] | None = None
     product_rules: tuple[Mapping[str, JsonValue], ...] | None = None
     file_completion_wait_s: JsonValue = None
+    output_storage: CaptureStorage | None = None
 
 
 class CaptureTaskFactory(Protocol):

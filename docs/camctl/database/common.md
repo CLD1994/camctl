@@ -10,7 +10,7 @@
 
 ## 结构定义与校验边界
 
-格式 1 的目标语义、字段责任、状态转换及跨记录不变量由所属专题定义，SQL 应完整落实其类型、空值、外键、唯一性和索引要求。结构文件和检查脚本的完成状态见[结构与检查边界](schema/README.md#结构同步状态)。目标契约尚未同步到 SQL 的部分不得按旧结构实施，结构检查也不代替生产持久化层验证。
+各整体格式的目标语义、字段责任、状态转换及跨记录不变量由所属专题定义，SQL 应完整落实其类型、空值、外键、唯一性和索引要求。结构文件和检查脚本的完成状态见[结构与检查边界](schema/README.md#结构同步状态)。目标契约尚未同步到 SQL 的部分不得按旧结构实施，结构检查也不代替生产持久化层验证。
 
 表采用 `STRICT` 模式。每个连接在事务开始前启用并核验 `PRAGMA foreign_keys = ON`；外键使用 `NO ACTION` 和 `DEFERRABLE INITIALLY DEFERRED`，允许历史、投影及相互引用的处理记录在一个事务内按方便的顺序插入，提交时必须全部存在。日常业务不删除数据库记录，不使用级联删除。结构初始化不使用 `IF NOT EXISTS` 掩盖残缺结构。
 
@@ -139,7 +139,7 @@ SQLite 会对能够无损转换的输入进行类型转换，因此 `STRICT` 不
 `sources`|以相对本文件的路径指定 `public_errors` 和 `events` 的权威文件，不复制其编号
 `external_columns`|以 `表名.列名` 指定编号来源。`public_errors` 按 `key` 读取动作或明细错误编号；`events`、`event_versions` 分别读取事件类型和版本；`history_objects` 读取本文件的对象定义，可用 `qualification` 限定为 `report_target` 或 `snapshot`
 `history_objects`|按[历史对象规则](history-formats.md#对象目录与归属)定义标识、编号、主表及报告和快照资格；不同目录使用各自的资格子集
-`fixed_columns`|以 `表名.列名` 指定固定的 `value` 和说明其含义的 `contract`，用于单份记录身份及格式版本；不作为可转换的业务状态。事件版本仍从事件定义取得
+`fixed_columns`|以 `表名.列名` 指定固定的 `value` 和说明其含义的 `contract`，用于单份记录身份；不作为可转换的业务状态。`database_metadata.format_version` 是从 `enums` 登记的整体格式版本。事件版本仍从事件定义取得
 字段可空、状态转换和跨表约束|由所属正式字段及事件契约定义；空值不登记为枚举成员，编号大小不表达转换顺序
 公共错误登记的 `action_error_id`|定义该公共错误在 `actions.error_code` 中的固定编号
 公共错误登记的 `item_error_ids`|以明细表名为键、该表 `error_code` 的固定正整数为值；同一表的编号唯一。同一公共错误可以在不同明细表中具有不同编号

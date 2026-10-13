@@ -17,7 +17,13 @@ from camctl.host_files.models import (
     FilePurpose,
     FileRef,
 )
-from camctl.host_files.paths import inspect_file, resolve_file
+from camctl.host_files.paths import (
+    HOST_PHOTO_PURPOSES,
+    PURPOSE_FIXED_EXTENSIONS,
+    inspect_file,
+    relative_file_path,
+    resolve_file,
+)
 
 _STAGING = Path("/srv/camctl/staging")
 _ROOTS = BoundDirectories(staging=_STAGING)
@@ -96,6 +102,30 @@ class TestResolveRules:
         long_name = "28." + "a" * 300
         with pytest.raises(ValueError):
             resolve_file(_ref(f"recording-inputs/{long_name}"), _ROOTS)
+
+    def test_capture_purposes_have_one_shared_fixed_extension_rule(self) -> None:
+        assert PURPOSE_FIXED_EXTENSIONS == {
+            FilePurpose.CAPTURE_ORIGINAL: "3fr",
+            FilePurpose.CAPTURE_PREVIEW: "jpg",
+        }
+        assert HOST_PHOTO_PURPOSES == frozenset(PURPOSE_FIXED_EXTENSIONS)
+        assert relative_file_path(FilePurpose.CAPTURE_ORIGINAL, 28, "3fr") == "capture-originals/28.3fr"
+        assert relative_file_path(FilePurpose.CAPTURE_PREVIEW, 28, "jpg") == "capture-previews/28.jpg"
+
+    @pytest.mark.parametrize(
+        "purpose,wrong_extension,wrong_path",
+        [
+            (FilePurpose.CAPTURE_ORIGINAL, "jpg", "capture-originals/28.jpg"),
+            (FilePurpose.CAPTURE_PREVIEW, "3fr", "capture-previews/28.3fr"),
+        ],
+    )
+    def test_capture_fixed_extension_is_enforced_by_producer_and_resolver(
+        self, purpose, wrong_extension, wrong_path
+    ) -> None:
+        with pytest.raises(ValueError, match="扩展名"):
+            relative_file_path(purpose, 28, wrong_extension)
+        with pytest.raises(ValueError, match="扩展名"):
+            resolve_file(_ref(wrong_path, purpose=purpose), _ROOTS)
 
 
 class TestInspectRules:

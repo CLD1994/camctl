@@ -108,6 +108,20 @@ def branch_of(type_id: int, reason: int) -> tuple[str, dict[str, Any]]:
     raise HistoryEventError(f"事件 {name} 没有分支编号 {reason}")
 
 
+def reason_for_branch(event_name: str, branch_name: str) -> int:
+    """按权威登记取得指定事件分支编号，供事件生产者引用。"""
+    event = load_event_registry()["events"].get(event_name)
+    if event is None:
+        raise HistoryEventError(f"未知事件类型: {event_name}")
+    branch = event["branches"].get(branch_name)
+    if branch is None:
+        raise HistoryEventError(f"事件 {event_name} 没有分支 {branch_name}")
+    reason = branch.get("reason")
+    if type(reason) is not int or reason <= 0:
+        raise HistoryEventError(f"事件 {event_name}.{branch_name} 的分支编号非法")
+    return reason
+
+
 def business_columns(table: str) -> frozenset[str]:
     """该业务投影表全部业务列（不含主键与派生历史元数据）。"""
     spec = load_event_registry()["tables"].get(table)

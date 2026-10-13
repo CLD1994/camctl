@@ -1,0 +1,58 @@
+"""Hasselblad CFV 100C 的同源单张能力与执行任务定义。"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from decimal import Decimal
+from typing import Mapping
+
+from camctl.contracts.json_values import JsonValue
+from camctl.devices.catalog import ActionCapability, DriverDefinition
+from camctl.devices.tasks import CaptureStorage, CaptureTask
+
+__all__ = [
+    "DRIVER_ID",
+    "PARAMETER_TYPE",
+    "capability",
+    "driver_definition",
+]
+
+
+DRIVER_ID = "hasselblad_cfv100c"
+PARAMETER_TYPE = "hasselblad_photo"
+
+_PHOTO_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {"type": {"const": PARAMETER_TYPE}},
+    "required": ["type"],
+    "additionalProperties": False,
+}
+
+
+def _photo_task(_effective_params: Mapping[str, JsonValue]) -> CaptureTask:
+    return CaptureTask(
+        action_type="camera_take_photo",
+        output_storage=CaptureStorage.HOST,
+        start_call_timeout_s=Decimal("180"),
+    )
+
+
+def capability() -> ActionCapability:
+    """返回唯一权威的单张参数定义，供说明导出与受理共同使用。"""
+    return ActionCapability(
+        action_type="camera_take_photo",
+        parameter_type=PARAMETER_TYPE,
+        name="Hasselblad 单张 RAW",
+        description="执行一次单张 RAW 拍摄；驱动沿用机身已有曝光、白平衡和对焦设置。",
+        preview_supported=True,
+        schema=deepcopy(_PHOTO_SCHEMA),
+        defaults={},
+        task_factory=_photo_task,
+    )
+
+
+def driver_definition() -> DriverDefinition:
+    """构造由 Hasselblad 静态单张能力组成的驱动定义。"""
+    photo = capability()
+    return DriverDefinition(DRIVER_ID, {photo.action_type: (photo,)})

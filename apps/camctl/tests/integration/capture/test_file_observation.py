@@ -77,6 +77,12 @@ def _environment(tmp_path: Path):
 
 
 def _seed_action(connection, action_id: int, *, action_type: int) -> None:
+    input_fields = (
+        {"params": {"type": "legacy_photo"},
+         "policy": {"max_delay_ms": 1000}}
+        if action_type == 1 else {}
+    )
+    effective_params = {"type": "legacy_photo"} if action_type == 1 else {}
     connection.execute(
         "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
         " scheduled_at, group_name, input_fields_json, effective_params_json,"
@@ -84,9 +90,10 @@ def _seed_action(connection, action_id: int, *, action_type: int) -> None:
         " cancel_requested, error_code, error_details_json, first_window_observed_at,"
         " expiration_reason, source_resolution_state, resolved_source_plan_id,"
         " target_selection_state, created_event_id, last_event_id, change_count)"
-        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, '{}', '{}', 'camctl-adb',"
+        " VALUES (?, 1, ?, ?, ?, 'cam-1', ?, NULL, ?, ?, 'camctl-adb',"
         " 1000, '{}', 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)",
-        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW),
+        (action_id, action_id - 11, f"act-{action_id}", action_type, _NOW,
+         json.dumps(input_fields), json.dumps(effective_params)),
     )
 
 

@@ -32,7 +32,7 @@ from camctl.persistence.initialization import (
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from .test_initialization import _STAGING_SUBDIRS, _config, _dump
+from .test_initialization import _expected_staging_subdirs, _config, _dump
 
 _SHA256 = "a" * 64
 
@@ -530,7 +530,7 @@ class TestInitializeStateDirectorySwitch:
         for table, rows in before.items():
             if table != "database_metadata":
                 assert after[table] == rows
-        for name in _STAGING_SUBDIRS:
+        for name in _expected_staging_subdirs():
             assert (Path(moved.paths.staging) / name).is_dir(), name
         # 新配置重复 init 按已有库验证，不再切换。
         assert (initialize_state(moved, state_db).outcome

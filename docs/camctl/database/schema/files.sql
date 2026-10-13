@@ -39,7 +39,7 @@ CREATE TABLE intermediate_files (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     owner_action_id INTEGER REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
     owner_delivery_id INTEGER REFERENCES deliveries(id) DEFERRABLE INITIALLY DEFERRED,
-    purpose INTEGER NOT NULL CHECK (purpose IN (1,2,3,4)),
+    purpose INTEGER NOT NULL CHECK (purpose IN (1,2,3,4,5,6)),
     relative_path TEXT NOT NULL UNIQUE CHECK (length(relative_path) > 0),
     retention_state INTEGER NOT NULL CHECK (retention_state IN (1,2,3,4)),
     cleanup_state INTEGER NOT NULL CHECK (cleanup_state IN (1,2,3,4,5,6)),

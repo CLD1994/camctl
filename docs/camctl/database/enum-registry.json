@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "description": "数据库第一版内部整数编号的统一定义。enums 定义普通列，json_enums 定义框架 JSON 中的整数分类；外部编号只引用其权威来源。布尔列和固定值分别列明。字段组合、转换及关联由 contract 指向的正式规格规定。",
+  "description": "数据库整体格式版本与内部整数编号的统一定义。enums 定义普通列，json_enums 定义框架 JSON 中的整数分类；外部编号只引用其权威来源。布尔列和固定值分别列明。字段组合、转换及关联由 contract 指向的正式规格规定。",
   "enums": {
     "actions.expiration_reason": {
       "contract": "plans-actions.md",
@@ -117,6 +117,13 @@
         "SUCCEEDED": 4,
         "FAILED": 5,
         "CANCELED": 6
+      }
+    },
+    "database_metadata.format_version": {
+      "contract": "reports-runtime.md#单份状态字段",
+      "members": {
+        "V1": 1,
+        "V2": 2
       }
     },
     "deliveries.status": {
@@ -291,7 +298,9 @@
         "DELIVERY_COPY": 1,
         "RECORDING_INPUT": 2,
         "PROCESSING_TEMP": 3,
-        "REPAIR_OUTPUT": 4
+        "REPAIR_OUTPUT": 4,
+        "CAPTURE_ORIGINAL": 5,
+        "CAPTURE_PREVIEW": 6
       }
     },
     "intermediate_files.retention_state": {
@@ -674,10 +683,6 @@
     "reports.format_version": {
       "value": 1,
       "contract": "reports-runtime.md#报告字段"
-    },
-    "database_metadata.format_version": {
-      "value": 1,
-      "contract": "reports-runtime.md#单份状态字段"
     },
     "database_metadata.id": {
       "value": 1,

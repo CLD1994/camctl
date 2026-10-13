@@ -132,6 +132,7 @@ class _WinddownCatalog:
             "camera_record", "camera_take_photo")
 
     def parameter_definition(self, device_id, action_type, parameter_type):
+        task_factory = None
         if action_type == "camera_record":
             if parameter_type != "video":
                 return None
@@ -142,18 +143,16 @@ class _WinddownCatalog:
                     target_duration_s=self.duration_s,
                     stop_supported=True,
                 )
+            task_factory = task
         elif action_type == "camera_take_photo":
             if parameter_type != "single_shot":
                 return None
-
-            def task(params):
-                return CaptureTask("camera_take_photo")
         else:
             return None
         return ParameterDefinition(
             schema=_RECORD_DEFINITION if action_type == "camera_record"
             else _PHOTO_DEFINITION,
-            defaults={}, task_factory=task)
+            defaults={}, task_factory=task_factory)
 
 
 class _ControlDouble:

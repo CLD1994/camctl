@@ -18,11 +18,11 @@ def build_action_spec(validation) -> dict:
     try:
         if literal.startswith("camera_"):
             task = None
-            if literal != "camera_take_photo":
-                factory = validation.parameter_definition.task_factory
-                if not callable(factory):
-                    raise ValueError("已支持的拍摄参数类型未提供任务定义")
+            factory = validation.parameter_definition.task_factory
+            if callable(factory):
                 task = factory(deepcopy(validation.effective_params))
+            elif literal != "camera_take_photo":
+                raise ValueError("已支持的拍摄参数类型未提供任务定义")
             return build_capture_spec(literal, task)
         if literal == "obtain_action_outputs":
             return validate_obtain_spec(build_obtain_spec(validation.raw["params"]))

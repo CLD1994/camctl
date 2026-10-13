@@ -123,9 +123,11 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, ne
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.devices.directory import DirectoryReader
+from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import EvidenceError
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.devices.recording_completion import is_completed_file_wait
+from camctl.host_files.models import BoundDirectories
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptFinish,
@@ -725,7 +727,7 @@ class CaptureRuntime(_FileObservationSaves):
     capture: CaptureRepository
     timelapse: TimelapseRepository
     driver: DeviceControlPort
-    results: ResultFilesPort
+    results: ResultFilesPort | None
     evidence: Any
     wall_us: Callable[[], int]
     monotonic_ns: Callable[[], int]
@@ -777,6 +779,14 @@ class CaptureRuntime(_FileObservationSaves):
     pending_start_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
     #: 原拍摄完整收场申请独立于原调用尝试和当前设备资格。
     pending_capture_completions: dict[int, PendingCaptureCompletion] = field(default_factory=dict)
+    #: 主机单张文件责任及完整字节请求；UNKNOWN 时保留原请求与键。
+    pending_host_photo_prepares: dict[int, Any] = field(default_factory=dict)
+    pending_host_photo_completions: dict[int, Any] = field(default_factory=dict)
+    #: 主机正式文件归档使用已固定 staging 根目录和专用仓储。
+    roots: BoundDirectories | None = None
+    host_capture: Any = None
+    #: 未知主机拍摄保存回执的独立只读核实端口；连接由装配层创建和关闭。
+    host_photo_operation_verifier: Callable[[Any, Any, Any], Any] | None = None
     #: 没有新尝试承载的有限耗尽决定，由三个拍摄工厂共用。
     pending_result_closes: dict[int, PendingResultCheckClose] = field(default_factory=dict)
     pending_read_results: dict = field(default_factory=dict)
@@ -1337,6 +1347,12 @@ def _capture_dispatch_check(runtime, action_id):
         window=runtime.window_of(current), trusted_wall_now=runtime.wall_us()).reason
 
 
+def _require_result_port(runtime, message: str) -> None:
+    """只在旧拍摄已通过本轮启动资格检查后拒绝缺少结果端口。"""
+    if runtime.results is None:
+        raise CapabilityNotDeclaredError(message)
+
+
 @owned_tool_call
 async def _control_call(runtime: CaptureRuntime, action, operation: str,
                         confirmed_observation: str,
@@ -1350,14 +1366,20 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     """
     if operation == "start_recording":
         return await _record_start_once(runtime, action)
-    if runtime.last_attempt(f"start/{action['id']}") is None:
+    from camctl.capture.host_photo import is_saved_host_photo
+
+    host_photo = is_saved_host_photo(action)
+    if not host_photo and runtime.last_attempt(f"start/{action['id']}") is None:
         from camctl.capture.residual import pass_residual_gate
 
         if not await pass_residual_gate(runtime, action):
             return HandlerOutcome("not_granted")
-    prepared = await _baseline_before_control(runtime, action)
-    if prepared is not None:
-        return prepared
+    if not host_photo:
+        _require_result_port(runtime,
+            "旧拍摄启动与后续产物核实需要驱动声明 result 能力")
+        prepared = await _baseline_before_control(runtime, action)
+        if prepared is not None:
+            return prepared
     ticket, reason = runtime.grant(action)
     if ticket is None:
         return HandlerOutcome("not_granted", reason)
@@ -1598,6 +1620,7 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
         if not await pass_residual_gate(runtime, action):
             return HandlerOutcome("not_granted")
 
+    _require_result_port(runtime, "录像启动与后续产物核实需要驱动声明 result 能力")
     prepared = await _baseline_before_control(runtime, action)
     if prepared is not None:
         return prepared
@@ -1814,7 +1837,9 @@ def _conclude_activity(runtime: CaptureRuntime, action_id: int) -> None:
         ActivityConcludeSave(
             action_id=action_id, occurred_at=runtime.wall_us()),
         new_operation_key(), runtime.owned)
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"活动收场事务未完成（{receipt.kind.value}）: {receipt.error}")
 
 
 def _settle_open_start(runtime: CaptureRuntime, action_id: int, status: RunOutcome,
@@ -2313,6 +2338,14 @@ def _target_duration_ms(action: Mapping[str, Any]) -> int:
 
 def _start_call_timeout(action: Mapping[str, Any]) -> Decimal:
     """完整原生调用使用首次固定期限，其余启动为短控制调用。"""
+    from camctl.capture.host_photo import is_saved_host_photo
+
+    if is_saved_host_photo(action):
+        timeout = action["execution_spec_json"].get("start_call_timeout_s")
+        if (isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal))
+                or timeout <= 0):
+            raise ConsistencyError("主机单张固定调用期限缺失或非法")
+        return timeout if isinstance(timeout, Decimal) else Decimal(timeout)
     if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
             and action["execution_spec_json"]["start_return_meaning"] == int(StartReturn.COMPLETED)):
         return action["execution_spec_json"]["start_call_timeout_s"]
@@ -2571,6 +2604,11 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_start_results(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
+        return
+    from camctl.capture.host_photo import advance_host_photo, is_saved_host_photo
+
+    if is_saved_host_photo(action):
+        await advance_host_photo(context, action_id)
         return
     if _handle_binding_failure(context, action):
         return
@@ -2853,7 +2891,6 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         return
     open_start = context.last_attempt(f"start/{action_id}")
     if open_start is None:
-        # 尚未发起启动：首次授予并调用，不依赖中段事实端口。
         if action["cancel_requested"]:
             _finish_canceled_capture(context, action_id, unstarted=True)
             return
@@ -4081,6 +4118,16 @@ def _settle_recovered_listing(runtime: CaptureRuntime, pending: PendingCallResul
 
 
 async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultScan) -> ListingRound:
+    if runtime.results is None and not pending.finished:
+        if pending.saves.pending is None:
+            raise CapabilityNotDeclaredError(
+                "继续未完成的拍摄结果分页需要驱动声明 result 能力")
+        original = pending.saves.pending.request
+        available_page = page_from_outcome(
+            original.ticket, original.outcome.outcome, cursor=original.cursor)
+        if available_page.next_cursor is not None and available_page.outcome.error is None:
+            raise CapabilityNotDeclaredError(
+                "继续未完成的拍摄结果分页需要驱动声明 result 能力")
     if not await advance_result_scan(pending, runtime=runtime):
         return ListingRound(ListingPhase.IN_FLIGHT)
     if pending.last_ref is None or pending.last_outcome is None or pending.occurred_at is None:
@@ -4264,6 +4311,21 @@ async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRoun
     if runtime.retry_wait_remaining(responsibility, runtime.check_config.retry_interval_s,
                                     maximum=runtime.check_config.max_attempts) is not None:
         return ListingRound(ListingPhase.RETRY_WAIT)
+    if runtime.results is None:
+        with closing(runtime.owned.connection.execute(
+            "SELECT status,attempts_used FROM operation_runs WHERE responsibility_key=?",
+            (responsibility,),
+        )) as cursor:
+            run = cursor.fetchone()
+        if run is None:
+            raise CapabilityNotDeclaredError(
+                "拍摄结果核实需要驱动声明 result 能力")
+        if run[0] not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+            return _saved_result_listing(runtime, action_id)
+        if run[1] >= runtime.check_config.max_attempts:
+            return ListingRound(ListingPhase.EXHAUSTED)
+        raise CapabilityNotDeclaredError(
+            "拍摄结果核实需要驱动声明 result 能力")
     begin = _begin_check_round(runtime, action_id)
     if begin.disposition is not BeginDisposition.GRANTED:
         if begin.reason == "budget_exhausted":

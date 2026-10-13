@@ -17,6 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from camctl.contracts.enums import enum_for
 from camctl.resources import resource_bytes
 
 _RUNTIME_RESOURCE = "runtime/sqlite-runtime.json"
@@ -29,8 +30,11 @@ _SCHEMA_RESOURCES = (
     "sql/history.sql",
 )
 
-#: 程序支持的数据库整体格式；第一版只支持格式 1。
-SUPPORTED_FORMAT_VERSIONS = frozenset({1})
+#: 整体格式编号及当前格式直接从权威登记取得。
+_FORMAT_VERSIONS = enum_for("database_metadata.format_version")
+SUPPORTED_FORMAT_VERSIONS = frozenset(int(member) for member in _FORMAT_VERSIONS)
+CURRENT_FORMAT_VERSION = max(SUPPORTED_FORMAT_VERSIONS)
+HOST_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V2)
 
 _PRAGMA_LIMIT = 2_147_483_647
 _INSTANCE_ID = re.compile(r"\A[0-9a-f]{32}\Z")
@@ -230,7 +234,114 @@ def _read_metadata(connection: sqlite3.Connection) -> DatabaseMetadata:
     )
 
 
-def _verify_structure(connection: sqlite3.Connection) -> None:
+def require_host_photo_format(format_version: int | None) -> None:
+    """拒绝在尚不能表达主机拍摄文件用途的整体格式中写入该事实。"""
+    if (
+        isinstance(format_version, bool)
+        or not isinstance(format_version, int)
+        or format_version not in SUPPORTED_FORMAT_VERSIONS
+        or format_version < HOST_PHOTO_MINIMUM_FORMAT_VERSION
+    ):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持主机照片存储；"
+            f"至少需要格式 {HOST_PHOTO_MINIMUM_FORMAT_VERSION}"
+        )
+
+
+def _known_integer_check_values(sql: str | None, column: str) -> frozenset[int] | None:
+    """读取指定已知列声明中的简单整数等值或 IN 检查，不解析通用 SQL。"""
+    if not isinstance(sql, str):
+        return None
+    expression = re.compile(
+        rf"\b{re.escape(column)}\s+INTEGER\s+NOT\s+NULL\s+CHECK\s*\(\s*"
+        rf"{re.escape(column)}\s*(?:=\s*(?P<equal>[0-9]+)|"
+        rf"IN\s*\((?P<values>[0-9,\s]+)\))\s*\)",
+        re.IGNORECASE,
+    )
+    matches = tuple(expression.finditer(sql))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    if match.group("equal") is not None:
+        return frozenset({int(match.group("equal"))})
+    raw_values = match.group("values")
+    if raw_values is None:
+        return None
+    parts = tuple(part.strip() for part in raw_values.split(","))
+    if not parts or any(not part.isdecimal() for part in parts):
+        return None
+    values = tuple(int(part) for part in parts)
+    if len(values) != len(set(values)):
+        return None
+    return frozenset(values)
+
+
+def _verify_format_constraints(
+    connection: sqlite3.Connection, format_version: int
+) -> None:
+    """核对仅涉及整体格式声明的两个已知 CHECK 约束。"""
+    metadata_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'database_metadata'"
+    ).fetchone()
+    files_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'intermediate_files'"
+    ).fetchone()
+    if metadata_row is None or files_row is None:
+        raise DatabaseInvalidError("整体格式所需的已知表结构缺失")
+
+    metadata_values = _known_integer_check_values(metadata_row[0], "format_version")
+    purpose_values = _known_integer_check_values(files_row[0], "purpose")
+    if metadata_values is None or format_version not in metadata_values:
+        raise DatabaseInvalidError(
+            "database_metadata.format_version 的 CHECK 不接受其已保存格式"
+        )
+
+    from camctl.host_files.paths import HOST_PHOTO_PURPOSES, PURPOSE_DIRECTORIES
+
+    purpose_enum = enum_for("intermediate_files.purpose")
+    mapped_purposes = frozenset(
+        int(purpose_enum[purpose.name]) for purpose in PURPOSE_DIRECTORIES
+    )
+    all_purposes = frozenset(int(member) for member in purpose_enum)
+    if mapped_purposes != all_purposes:
+        raise DatabaseInvalidError(
+            "用途目录映射没有覆盖 intermediate_files.purpose 的登记成员"
+        )
+    host_photo_purposes = frozenset(
+        int(purpose_enum[purpose.name]) for purpose in HOST_PHOTO_PURPOSES
+    )
+    legacy_purposes = mapped_purposes - host_photo_purposes
+    if purpose_values is None:
+        raise DatabaseInvalidError("intermediate_files.purpose 的 CHECK 不可解释")
+
+    if format_version == int(_FORMAT_VERSIONS.V1):
+        allowed_purpose_checks = {legacy_purposes, mapped_purposes}
+        allowed_metadata_checks = {
+            frozenset({int(_FORMAT_VERSIONS.V1)}),
+            SUPPORTED_FORMAT_VERSIONS,
+        }
+        if purpose_values not in allowed_purpose_checks or metadata_values not in allowed_metadata_checks:
+            raise DatabaseInvalidError(
+                "格式 V1 的已知 CHECK 与受支持的旧版或当前结构不匹配"
+            )
+        return
+
+    if format_version == CURRENT_FORMAT_VERSION:
+        if (
+            purpose_values != mapped_purposes
+            or not metadata_values.issubset(SUPPORTED_FORMAT_VERSIONS)
+        ):
+            raise DatabaseInvalidError(
+                "格式 V2 的已知 CHECK 未声明完整用途集合或格式版本"
+            )
+        return
+
+    raise DatabaseUnsupportedFormatError(
+        f"数据库整体格式 {format_version} 没有本程序的结构资格规则"
+    )
+
+
+def _verify_structure(connection: sqlite3.Connection, format_version: int) -> None:
     try:
         present = {
             name
@@ -241,6 +352,7 @@ def _verify_structure(connection: sqlite3.Connection) -> None:
         missing = expected_table_names() - present
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
+        _verify_format_constraints(connection, format_version)
         state = connection.execute(
             "SELECT acknowledged_wm FROM runtime_state WHERE id = 1"
         ).fetchone()
@@ -285,7 +397,7 @@ def open_existing(path, mode: DbOpenMode, config: DbConfig) -> OwnedConnection:
             _set_and_verify(connection, "synchronous", 2)
             _set_and_verify(connection, "wal_autocheckpoint", config.wal_autocheckpoint_pages)
         metadata = _read_metadata(connection)
-        _verify_structure(connection)
+        _verify_structure(connection, metadata.format_version)
     except StateDatabaseError:
         connection.close()
         raise

@@ -1513,7 +1513,9 @@ class _CurrentCatalogReads:
         if "id" in facts:
             if not is_json_integer(facts["id"]) or facts["id"] != identity:
                 raise ConsistencyError(f"产物关联行身份矛盾: {table}#{identity}")
-            return facts
+        # Saved JSON facts may represent an integral database ID as Decimal.
+        # Once exact-integrality, equality, and ObjectId range have been checked,
+        # expose the canonical integer form to strict file-path identity APIs.
         return {**facts, "id": int(identity)}
 
     def _require_coverage(self, column, identity):
@@ -1723,6 +1725,18 @@ def _load_family_members(connection, output_id: int) -> tuple[_CatalogMember, ..
     return _family_members(_CatalogReads(connection), output_id)
 
 
+def _host_source_purpose(kind, action_type):
+    """正式主机源的角色用途；修复与单张拍摄分别限定所属动作。"""
+    if kind == int(_OUTPUT_KIND.REPAIRED) and action_type == int(_ACTION_TYPE.CAMERA_RECORD):
+        return _PURPOSE.REPAIR_OUTPUT
+    if action_type == int(_ACTION_TYPE.CAMERA_TAKE_PHOTO):
+        if kind == int(_OUTPUT_KIND.ORIGINAL):
+            return _PURPOSE.CAPTURE_ORIGINAL
+        if kind == int(_OUTPUT_KIND.PREVIEW):
+            return _PURPOSE.CAPTURE_PREVIEW
+    raise ConsistencyError("主机产物种类与来源动作不一致")
+
+
 def _family_members(reads: _FamilyReads, output_id: int) -> tuple[_CatalogMember, ...]:
     """逐产物、完整来源及当前事实解释共用的固定关系边界。"""
     ObjectId(output_id)
@@ -1771,12 +1785,20 @@ def _family_members(reads: _FamilyReads, output_id: int) -> tuple[_CatalogMember
             elif (file["original_device_file_id"] is not None
                   or file["pairing_evidence_json"] is not None):
                 raise ConsistencyError("原片文件不能携带预览配对")
-        elif (kind is not OutputKind.REPAIRED
-              or file["owner_delivery_id"] is not None
-              or file["purpose"] != int(_PURPOSE.REPAIR_OUTPUT)
-              or file["retention_state"] != int(_RETENTION.PROMOTED)
-              or file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)):
-            raise ConsistencyError("修复产物必须由来源动作的已提升修复文件承载")
+        else:
+            source_action = required("actions", original["source_action_id"])
+            purpose = _host_source_purpose(entry["kind"], source_action["type"])
+            if (file["owner_delivery_id"] is not None
+                    or file["purpose"] != int(purpose)
+                    or file["retention_state"] != int(_RETENTION.PROMOTED)
+                    or file["cleanup_state"] not in (int(_FILE_CLEANUP.NOT_NEEDED), int(_FILE_CLEANUP.COMPLETED))):
+                raise ConsistencyError("主机产物必须由来源动作的已提升角色文件承载")
+            if (file["cleanup_state"] == int(_FILE_CLEANUP.COMPLETED)
+                    and entry["availability"] != int(_AVAILABILITY.CLEANED)):
+                raise ConsistencyError("已清理主机源必须保留对应产物的可靠清理状态")
+            validate_relative_file_path(FilePurpose[purpose.name], file["id"], file["relative_path"])
+            if kind is OutputKind.PREVIEW and original["intermediate_file_id"] is None:
+                raise ConsistencyError("主机预览必须关联同源主机原图")
         size = file["size_bytes"]
         if size is not None and (not is_json_integer(size) or size < 0):
             raise ConsistencyError("产物完整长度无法解释")
@@ -2044,20 +2066,18 @@ class _GrantFileCommand:
             if source_file["completion_state"] != int(_COMPLETION.COMPLETE):
                 raise ConsistencyError("已登记设备产物必须保留文件完成事实")
         elif (
-            output["kind"] != int(_OUTPUT_KIND.REPAIRED)
-            or source_action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
-            or source_file["owner_action_id"] != output["source_action_id"]
+            source_file["owner_action_id"] != output["source_action_id"]
             or source_file["owner_delivery_id"] is not None
-            or source_file["purpose"] != int(_PURPOSE.REPAIR_OUTPUT)
+            or source_file["purpose"] != int(_host_source_purpose(output["kind"], source_action["type"]))
             or source_file["retention_state"] != int(_RETENTION.PROMOTED)
             or source_file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)
             or source_file["size_bytes"] is None
         ):
-            raise ConsistencyError("主机产物必须关联原录像已提升的完整修复文件")
+            raise ConsistencyError("主机产物必须关联来源动作已提升的完整角色文件")
         if command.source_intermediate_file_id is not None:
             try:
                 validate_relative_file_path(
-                    FilePurpose.REPAIR_OUTPUT, command.source_intermediate_file_id,
+                    FilePurpose[_host_source_purpose(output["kind"], source_action["type"]).name], command.source_intermediate_file_id,
                     source_file["relative_path"],
                 )
             except PathRuleError as error:
@@ -6072,6 +6092,9 @@ def _source_selection_guard(event, context) -> None:
 
 def _intermediate_guard(event, context) -> None:
     """中间文件建档与字节事实守卫：用途互斥、初始状态固定。"""
+    if event.event_type == _INTERMEDIATE_FILE_EVENT:
+        from .host_capture import validate_host_photo_event
+        validate_host_photo_event(event, context)
     if event.event_type == _INTERMEDIATE_FILE_EVENT and event.reason == _CLEANUP_RESULT_REASON:
         request = event.evidence.get("cleanup_request")
         if (not isinstance(request, Mapping) or set(request) != {"advance_cursor"}

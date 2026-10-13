@@ -226,8 +226,8 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
     try:
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
-        register_builtin_camera_drivers(config)
+        from camctl.devices.drivers.builtin import register_builtin_drivers
+        register_builtin_drivers(config)
     except (ConfigError, RuleError, OSError) as error:
         print(f"camctl {command.kind.value}: {error}", file=err)
         return 1
@@ -281,11 +281,11 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
 
     try:
         from camctl.devices.catalog import build_catalog, default_driver_definitions
-        from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
+        from camctl.devices.drivers.builtin import register_builtin_drivers
 
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        register_builtin_camera_drivers(config)
+        register_builtin_drivers(config)
         catalog = build_catalog(config, default_driver_definitions())
         document = describe(config, catalog)
         payload = encode_describe_document(document).decode("utf-8")

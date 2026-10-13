@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from camctl.contracts.enums import enum_for
+
 __all__ = [
     "BoundDirectories",
     "FileObservation",
@@ -17,13 +19,10 @@ __all__ = [
 ]
 
 
-class FilePurpose(enum.Enum):
-    """中间文件的正式用途；与固定用途目录一一对应。"""
-
-    DELIVERY_COPY = "delivery_copy"
-    RECORDING_INPUT = "recording_input"
-    PROCESSING_TEMP = "processing_temp"
-    REPAIR_OUTPUT = "repair_output"
+FilePurpose = enum.Enum(
+    "FilePurpose", {member.name: member.name.lower() for member in enum_for("intermediate_files.purpose")}
+)
+FilePurpose.__doc__ = "从权威登记派生的中间文件用途；与固定用途目录一一对应。"
 
 
 class FileObservationKind(enum.Enum):

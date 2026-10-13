@@ -1,0 +1,17 @@
+# Hasselblad 演示使用独立数据目录，不改变其他相机的状态库和交接目录。
+# 将 serial 替换为目标相机的实际序列号；工具路径按目标主机安装位置配置。
+[paths]
+state_db = "$HOME/.camctl/hasselblad-demo/state/state.db"
+log_file = "$HOME/.camctl/hasselblad-demo/log/camctl.log"
+staging = "$HOME/.camctl/hasselblad-demo/staging"
+ready = "$HOME/.camctl/hasselblad-demo/ready"
+processing = "$HOME/.camctl/hasselblad-demo/processing"
+
+[devices.hb0]
+kind = "camera"
+driver = "hasselblad_cfv100c"
+
+[devices.hb0.hasselblad]
+executable = "/home/cld/hb_cli/hb_cli"
+serial = "REPLACE_HASSELBLAD_SERIAL"
+product_id = 10

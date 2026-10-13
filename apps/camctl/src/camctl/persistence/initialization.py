@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from camctl.history.initial_state import runtime_state_values
+from camctl.host_files.paths import PURPOSE_DIRECTORIES
 from camctl.resources import resource_bytes
 from camctl.persistence.directory_switch import (
     SwitchCommitError,
@@ -34,6 +35,7 @@ from camctl.persistence.runtime import (
     DbConfig,
     DbOpenMode,
     StateDatabaseError,
+    CURRENT_FORMAT_VERSION,
     canonical_directory_binding,
     ensure_runtime_library,
     open_existing,
@@ -50,16 +52,8 @@ _SCHEMA_RESOURCES = (
     "sql/history.sql",
 )
 
-#: staging 下的固定直接子目录：四种中间文件用途目录与日志副本目录。
-#: 定义来源：docs/camctl/database/file-fields.md#中间文件的路径与用途目录
-#: 及 docs/architecture/file-handoff.md#配置归属。
-_STAGING_SUBDIRS = (
-    "deliveries",
-    "recording-inputs",
-    "processing-temp",
-    "derived",
-    "logs",
-)
+#: 用途子目录从用途与路径的权威映射派生；另建日志目录和拍摄工作父目录。
+_STAGING_SUBDIRS = (*PURPOSE_DIRECTORIES.values(), "logs", "capture-work")
 
 
 def _canonical_binding(path: Path) -> str:
@@ -132,8 +126,8 @@ def _build_initial_database(
             connection.executescript(resource_bytes(name).decode("utf-8"))
         connection.execute(
             "INSERT INTO database_metadata (id, application_id, instance_id, format_version,"
-            " staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, 1, ?, ?, ?)",
-            (uuid.uuid4().hex, staging, ready, processing),
+            " staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, ?, ?, ?, ?)",
+            (uuid.uuid4().hex, CURRENT_FORMAT_VERSION, staging, ready, processing),
         )
         initial = runtime_state_values()
         columns = ", ".join(initial)

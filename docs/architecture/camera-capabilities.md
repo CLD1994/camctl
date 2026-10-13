@@ -2,7 +2,7 @@
 
 [返回设计总览](README.md) · [阅读路线](reading-guide.md)
 
-本页解释如何让不同相机使用不同的拍摄参数，以及如何把参数规则交给客户端。理解“做什么”“接受哪些参数”“用户常用的一组值”后，再看能力说明的机器格式。当前真实相机的固定设置见[当前相机录像参数](camera-parameters.md)。
+本页解释如何让不同相机使用不同的拍摄参数，以及如何把参数规则交给客户端。理解“做什么”“接受哪些参数”“用户常用的一组值”后，再看能力说明的机器格式。当前 Action6 录像固定设置见[当前相机录像参数](camera-parameters.md)；Hasselblad 单张类型见下文及[驱动设计](../camctl/hasselblad-driver.md)。
 
 **阅读提示：** 例如“录像”说明要做什么，`params.type` 选择该相机允许填写的参数，用户预设保存常用参数值。先读三者区别，再读说明交接与 JSON Schema（JSON 数据规则）的校验约束。
 
@@ -13,6 +13,8 @@
 拍摄能力表达要做什么；驱动定义的拍摄参数类型表达目标相机接受哪一种参数结构及其约束，正文简称“参数类型”。驱动根据选定的参数类型和参数值执行对应设备操作。当前已知能力为拍摄单张照片、录像和延时摄影，分别使用动作类型 `camera_take_photo`、`camera_record`、`camera_timelapse` 表达。每台相机可以支持其中任意一种或多种，后续可以新增拍摄能力及动作类型。
 
 第一版支持 `camera_take_photo`、`camera_record` 和 `camera_timelapse`，每台设备只导出其实际支持的能力。单张拍摄与延时摄影遵守[单张拍摄与延时摄影](camera-capture.md)，录像行为遵守[相机录像](camera-recording.md)及[异常恢复](camera-recovery.md)。实际设备的参数及命令由驱动定义；支持某个动作类别不表示所有相机都支持该类别。
+
+Hasselblad CFV 100C 的接入仅提供单张拍照能力，具体定义为驱动 `hasselblad_cfv100c` 下的 `camera_take_photo` / `hasselblad_photo`。参数 Schema 只要求 `params.type` 固定为 `hasselblad_photo`，拒绝任何其他参数字段；驱动固定执行单张 RAW，并声明支持原图配对预览。该参数类型的能力说明仍由驱动定义生成并通过 `camctl describe` 导出；设备身份与工具调用见[Hasselblad 驱动设计](../camctl/hasselblad-driver.md)，实际实施与验收范围见其引用的计划和验证记录。
 
 | 层级 | 定义者与职责 |
 | --- | --- |
