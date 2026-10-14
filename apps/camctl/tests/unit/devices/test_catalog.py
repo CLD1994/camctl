@@ -68,6 +68,18 @@ def _config(devices: dict | None = None):
     )
 
 
+def test_deployment_binding_must_return_a_callable_task_factory():
+    from camctl.acceptance.schema import RuleError
+
+    definition = _definitions().drivers["camctl-adb"]
+    capability = definition.actions["camera_take_photo"][0]
+    invalid = replace(capability, deployment_task_factory=lambda _declaration: None)
+    definitions = DriverDefinitions({"camctl-adb": replace(definition,
+        actions={"camera_take_photo": (invalid,)})})
+    with pytest.raises(RuleError):
+        build_catalog(_config({"cam-1": {"kind": "camera", "driver": "camctl-adb"}}), definitions)
+
+
 class TestApplyDefaults:
     def test_defaults_preserve_raw_input(self) -> None:
         raw = {"type": "single_shot"}

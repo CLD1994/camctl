@@ -15,6 +15,7 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
+from camctl.devices.evidence import EvidenceError
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,21 @@ def forget_read_result(runtime, pending):
     del runtime.pending_read_results[(ticket.run_id, ticket.attempt_id)]
 
 
+def require_preparation_settled(step):
+    """结果边界保留未收场责任；本地准备前提错误交付会话退出。"""
+    from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+
+    if step.preparation_settlement is ReadPreparationSettlement.WAITING:
+        if step.error is not None:
+            raise step.error
+        raise ReadPreparationError("原 READ 本地准备前提尚未满足",
+                                   settlement=ReadPreparationSettlement.WAITING)
+    if step.preparation_settlement is not ReadPreparationSettlement.SETTLED:
+        raise ReadPreparationError(f"原 READ 准备尚未收场: {step.error}",
+                                   settlement=step.preparation_settlement) from step.error
+    return True
+
+
 async def run_owned_read(runtime, copy_id, body):
     """同一文件资格持有到源实际结束及原读取结果保存完成。"""
     executor = getattr(runtime, "file_executor", None)
@@ -273,6 +289,12 @@ def record_read_diagnostic(runtime, reason, ticket):
 
 def read_host_boundary(runtime, ticket, intent_event_id, *, continuing=True) -> bool:
     """只恢复启动边界之前的原意图；本次连接已关闭的重拷仍沿原尝试。"""
+    from camctl.host_files.downloads import download_owned
+
+    roots = getattr(runtime, "directories", None) or getattr(runtime, "roots", None)
+    if download_owned(ticket, None if roots is None else roots.staging):
+        record_read_diagnostic(runtime, RecoveryBlockedReason.ACTIVE_LOCAL_READ, ticket)
+        return False
     held = getattr(runtime, "pending_read_ends", {}).get(int(ticket.target_id))
     if continuing and held is not None and held.ticket == ticket:
         return True
@@ -338,11 +360,15 @@ def recover_unavailable_read(runtime, copy_id: int, binding, now: int) -> bool:
     if evidence is None:
         record_read_diagnostic(runtime, RecoveryBlockedReason.EVIDENCE_UNAVAILABLE, ticket)
         return False
+    try:
+        contract = evidence.contract("local_read_recovery", 1)
+    except EvidenceError:
+        contract = evidence.contract("adb_foreground_recovery", 1)
     recovered = CallOutcome(
         status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
         error=ErrorValue("result_not_saved", "recovery"),
         settlement=Settlement(SettlementBasis.ASSUMED,
-                              EvidenceValue("adb_foreground_recovery", 1, {})))
+                              EvidenceValue.of(contract)))
     finish = AttemptFinish(ticket, validate_outcome(ticket, recovered, evidence), now)
     pending = hold_read_result(runtime, finish)
     save_read_result(runtime, pending)

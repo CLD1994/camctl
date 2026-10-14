@@ -188,3 +188,14 @@ class TestFileCompletionSave:
     def test_rejects_invalid_states_and_values(self, kwargs):
         with pytest.raises(ValueError):
             self._save(**kwargs)
+
+class TestCapturedChecksum:
+    def test_accepts_reliable_sha_without_digest_query(self):
+        from camctl.capture.files import FileChecksumSave
+        assert FileChecksumSave(1, 2, 100, sha256="a" * 64).sha256 == "a" * 64
+
+    @pytest.mark.parametrize("support,digest", [(3,"a"*64),(2,"A"*64),(2,"a"*63),(2,True),(True,None),(2.0,None)])
+    def test_rejects_invalid_captured_checksum(self, support, digest):
+        from camctl.capture.files import FileChecksumSave
+        with pytest.raises(ValueError):
+            FileChecksumSave(1, support, 100, sha256=digest)

@@ -40,3 +40,19 @@ def test_distinct_hasselblad_serials_remain_separate_logical_devices():
         ConfigDefaults(),
     )
     assert tuple(config.devices) == ("hb0", "hb1")
+
+
+@pytest.mark.parametrize("storage", ["host", "device"])
+def test_output_storage_is_only_accepted_in_the_hasselblad_subtable(storage):
+    device = _device("SERIAL-1")
+    device["output_storage"] = storage
+    with pytest.raises(ConfigError):
+        load_config({"devices": {"hb0": device}}, ConfigDefaults())
+
+
+@pytest.mark.parametrize("storage", [None, True, 1, "", "camera"])
+def test_load_config_rejects_invalid_hasselblad_output_storage(storage):
+    device = _device("SERIAL-1")
+    device["hasselblad"]["output_storage"] = storage
+    with pytest.raises(ConfigError):
+        load_config({"devices": {"hb0": device}}, ConfigDefaults())

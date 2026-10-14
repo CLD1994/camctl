@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from copy import deepcopy
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.schema import RuleError
 from camctl.bootstrap.config import ConfigSnapshot
-from camctl.devices.tasks import CaptureTaskFactory
+from camctl.devices.tasks import CaptureTaskFactory, DeploymentTaskFactory
 from camctl.devices.parameter_schemas import validate_parameter_schema, schema_with_defaults
 
 __all__ = [
@@ -47,6 +47,7 @@ class ActionCapability:
     defaults: Mapping[str, Any]
     task_factory: CaptureTaskFactory | None = None
     video_size_estimate: Mapping[str, Any] | None = None
+    deployment_task_factory: DeploymentTaskFactory | None = None
 
 
 @dataclass(frozen=True)
@@ -99,7 +100,7 @@ class Catalog:
             for action_type, capabilities in definition.actions.items():
                 complete = tuple(capability for capability in capabilities
                     if action_type not in {"camera_record", "camera_timelapse"}
-                    or callable(capability.task_factory))
+                    or callable(capability.task_factory) or callable(capability.deployment_task_factory))
                 if complete:
                     actions[action_type] = complete
             available[driver_id] = DriverDefinition(driver_id, actions)
@@ -118,7 +119,21 @@ class Catalog:
                 raise RuleError(f"设备 {device_id} 声明的驱动未部署: {driver_id!r}")
             kind = declaration.get("kind")
             declared = _KIND_ACTION_TYPES.get(kind, frozenset())
-            resolved[device_id] = (driver_id, definition, declared)
+            try:
+                actions = {
+                    action_type: tuple(
+                        replace(capability, task_factory=capability.deployment_task_factory(declaration))
+                        if capability.deployment_task_factory is not None else capability
+                        for capability in capabilities
+                    )
+                    for action_type, capabilities in definition.actions.items()
+                }
+            except (TypeError, ValueError) as error:
+                raise RuleError(f"设备 {device_id} 的部署任务定义无法绑定: {error}") from error
+            if any(capability.deployment_task_factory is not None and not callable(capability.task_factory)
+                   for capabilities in actions.values() for capability in capabilities):
+                raise RuleError(f"设备 {device_id} 的部署任务定义未提供任务工厂")
+            resolved[device_id] = (driver_id, DriverDefinition(driver_id, actions), declared)
         return resolved
 
     def action_types(self) -> frozenset[str]:

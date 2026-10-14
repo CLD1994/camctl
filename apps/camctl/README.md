@@ -8,4 +8,4 @@
 
 技术选型、模块边界和接口契约见[实现规格](../../docs/camctl/implementation.md)。实施前须完成其中列明的设计事项。
 
-Hasselblad CFV 100C 单张 RAW 驱动的设备身份、`hb_cli` 调用和主机输出设计见[专项驱动说明](../../docs/camctl/hasselblad-driver.md)；公共拍摄与正式产物规则见[相机拍摄规格](../../docs/architecture/camera-capture.md)和[正式产物规格](../../docs/architecture/outputs.md)。
+Hasselblad CFV 100C 单张 RAW 驱动的设备身份、`hb_cli` 调用及正式源部署选择见[专项驱动说明](../../docs/camctl/hasselblad-driver.md)；公共拍摄与正式产物规则见[相机拍摄规格](../../docs/architecture/camera-capture.md)和[正式产物规格](../../docs/architecture/outputs.md)。

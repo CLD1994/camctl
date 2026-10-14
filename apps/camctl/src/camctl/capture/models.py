@@ -195,13 +195,14 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
             return {}
         if set(spec) != {"output_storage", "start_call_timeout_s"}:
             raise ValueError("单张拍摄定义必须恰好声明存储位置和启动调用期限")
-        if spec["output_storage"] != CaptureStorage.HOST:
-            raise ValueError("单张拍摄正式产物必须声明写入主机")
+        if not isinstance(spec["output_storage"], str):
+            raise ValueError("单张拍摄正式产物的存储位置必须是字符串")
+        storage = CaptureStorage(spec["output_storage"])
         timeout = spec["start_call_timeout_s"]
         if isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal)):
             raise ValueError("单张拍摄启动期限必须是精确数值秒数")
         return {
-            "output_storage": CaptureStorage.HOST.value,
+            "output_storage": storage.value,
             "start_call_timeout_s": AttemptConfig(1, timeout_s=timeout).timeout_s,
         }
     products = {}
@@ -287,7 +288,7 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
         if task.output_storage is None and task.start_call_timeout_s is None:
             return validate_capture_spec(action_type, {})
         if task.output_storage is None or task.start_call_timeout_s is None:
-            raise ValueError("主机单张任务必须同时声明存储位置和启动调用期限")
+            raise ValueError("单张任务必须同时声明存储位置和启动调用期限")
         storage = task.output_storage
         if isinstance(storage, CaptureStorage):
             storage = storage.value

@@ -623,3 +623,31 @@ class TestDeviceFileGuardBranches:
                     self._context(owned, file_id, facts, event_id=4))
         finally:
             owned.connection.close()
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_captured_checksum_is_fixed_and_same_key_compares_full_request(tmp_path, complete):
+    from camctl.capture.files import FileChecksumSave
+    owned = _environment(tmp_path)
+    repo = CaptureRepository()
+    try:
+        file_id = _created_file(owned)
+        if complete:
+            result = repo.save_file_completion(FileCompletionSave(file_id, 3, _NOW,
+                basis=1, observation={"capture":"returned"},size_bytes=10),new_operation_key(),owned)
+            assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        request = FileChecksumSave(file_id,2,_NOW,sha256="a"*64)
+        key = new_operation_key()
+        result = repo.save_file_checksum(request,key,owned)
+        if not complete:
+            assert result.kind is DbOutcomeKind.ROLLED_BACK
+            assert _row(owned,file_id)["sha256"] is None
+            return
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert _row(owned,file_id)["sha256"] == "a"*64
+        assert repo.save_file_checksum(request,key,owned).kind is DbOutcomeKind.COMPLETED
+        for changed in (replace(request,sha256="b"*64),replace(request,sha256=None)):
+            assert repo.save_file_checksum(changed,key,owned).kind is DbOutcomeKind.ROLLED_BACK
+        assert repo.save_file_checksum(replace(request,sha256="b"*64),new_operation_key(),owned).kind is DbOutcomeKind.ROLLED_BACK
+        assert _row(owned,file_id)["sha256"] == "a"*64
+    finally:
+        owned.connection.close()

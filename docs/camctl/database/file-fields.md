@@ -41,6 +41,8 @@
 
 `checksum_support` 为 `UNDETERMINED`、`SUPPORTED`、`UNSUPPORTED`。`sha256` 只有完整固定文件真正取得源摘要后才填写，否则为空。摘要查询失败保存 `last_error_json`，不能改成 `UNSUPPORTED`；驱动不支持摘要的合法降级由拷贝流程判定。`last_error_json` 为空表示没有尚待表达的文件观察错误；后续可靠观察可清除当前错误，历史不删除。
 
+文件在拍摄时已经取得可靠完整源摘要时，CHECKSUM 观察可共同保存 `SUPPORTED` 和该摘要，后续取回直接复用，不要求驱动另外提供摘要查询端口。Hasselblad 通过同次主机副本取得相机固定源摘要的内容一致性依据见[驱动契约](../hasselblad-driver.md#相机正式源与主机临时文件)。没有可靠源摘要的设备仍按实际读取能力声明和摘要查询结果决定，不能用待交付副本的摘要填充源端期望。
+
 ## 中间文件
 
 每条 `intermediate_files` 记录通过 `owner_action_id` 或 `owner_delivery_id` 指定唯一业务责任人，两列恰好一列有值。`DELIVERY_COPY` 属于交付，录像处理用途属于录像动作，拍摄源用途属于单张拍摄动作；完整用途集合从[整数登记](enum-registry.json)读取。`relative_path` 相对于所属部署的 `paths.staging`，保存创建时确定的工作位置，全库唯一；创建文件前先登记路径和责任。具体用途目录、路径格式和交接后的定位见下节。

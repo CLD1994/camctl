@@ -4,6 +4,8 @@
 
 目标：Hasselblad CFV 100C 接入的拍摄能力仅为 `camera_take_photo`，使用 `hasselblad_photo` 参数类型，通过现有 `hb_cli` 完成单张 RAW 拍摄。ARM 主机上的原图及缩略图登记为正式源文件，使独立取回、状态报告和显式清理遵守既有产物生命周期。完整行为契约由[驱动设计](../../camctl/hasselblad-driver.md)维护。
 
+本计划记录主机正式源模式的接入及验收。通过部署配置选择相机正式源、可靠登记后回收主机副本的实施见[相机正式源计划](2026-10-14-hasselblad-camera-source.md)，两种模式保留并共用拍摄链路。
+
 技术边界：Python 3.11；工具进程统一使用 `camctl.operations.process`；本地文件操作由 `host_files` 承担；SQL、内部编号和公共协议分别沿现有权威来源维护；软件测试按[组件测试指南](../../../apps/camctl/tests/AGENTS.md#运行边界与结果记录)判断隔离范围并保留执行证据。
 
 ## 实施状态
@@ -70,4 +72,4 @@ T1—T4 已完成：主机原图与预览承载、单张能力与工具解析、
 
 首次原图和预览取回成功后，验收脚本模拟领取并删除两份 delivery；正式源保持不变。随后改用完全省略 `[devices]`、但复用同一状态库和文件目录的配置，再次分别成功取回原图和预览，生成新的 delivery 与目标文件身份，来源路径、inode、大小和 SHA-256 未变。这验证无需设备配置即可独立取回；没有物理拔线，也没有真实第三方传输程序领取。完整证据包位于 `.local/hasselblad-arm-acceptance/20261013-camera/camera-evidence.tar.gz`，SHA-256 为 `661f6dc84d143c729e593e2bbe3368d37fe650de08a396f434b5f6afeea5c59e`。
 
-17:14 UTC，受管正式收场事务将活动从 `ACTIVE/HELD` 转为 `ENDED/RELEASED`；同一 intent/key 的重送核实返回 `COMPLETED/CONCLUDED`，原拍摄业务事实、两份正式源和唯一 START 尝试保持不变。17:15 UTC，标准离线 `camctl run` 生成最终报告 12：动作 `1` 为 `succeeded`，报告包含配对原图和预览，不含 `device_execution`；报告 Schema 及文件名 SHA-256 校验通过。T4 业务、活动收场和报告验证均已完成。最终归档 `.local/hasselblad-arm-acceptance/20261013-final/final-evidence.tar.gz` 大小 132502 字节、SHA-256 `923eeb25bedfe6ad20d8cd01228d4b2d114bcdd0c8057e0c755d08106b339102`，清单内 148 项文件的大小和摘要均匹配。首次两份 delivery 的删除由验收脚本模拟，不是第三方实际领取；后续离线取回没有物理拔线。相机端是否同时保存原片仍待设备负责人向官方核实；本次没有物理断电。RAW 未解码且未纳入本地证据包；本地预览副本摘要匹配并可正常呈现，不据此评价图像质量。接入继续遵循[主机正式源文件契约](../../camctl/hasselblad-driver.md#主机正式源文件)。
+17:14 UTC，受管正式收场事务将活动从 `ACTIVE/HELD` 转为 `ENDED/RELEASED`；同一 intent/key 的重送核实返回 `COMPLETED/CONCLUDED`，原拍摄业务事实、两份正式源和唯一 START 尝试保持不变。17:15 UTC，标准离线 `camctl run` 生成最终报告 12：动作 `1` 为 `succeeded`，报告包含配对原图和预览，不含 `device_execution`；报告 Schema 及文件名 SHA-256 校验通过。T4 业务、活动收场和报告验证均已完成。最终归档 `.local/hasselblad-arm-acceptance/20261013-final/final-evidence.tar.gz` 大小 132502 字节、SHA-256 `923eeb25bedfe6ad20d8cd01228d4b2d114bcdd0c8057e0c755d08106b339102`，清单内 148 项文件的大小和摘要均匹配。首次两份 delivery 的删除由验收脚本模拟，不是第三方实际领取；后续离线取回没有物理拔线。该次验收没有检查相机端原片，也没有执行物理断电；当前固件的双落盘及下载契约见[驱动设计](../../camctl/hasselblad-driver.md#正式源的部署选择)。RAW 未解码且未纳入本地证据包；本地预览副本摘要匹配并可正常呈现，不据此评价图像质量。接入继续遵循[主机正式源文件契约](../../camctl/hasselblad-driver.md#主机正式源文件)。

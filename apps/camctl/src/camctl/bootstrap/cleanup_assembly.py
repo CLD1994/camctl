@@ -189,7 +189,14 @@ def session_cleanup_assembly(
                 return base
             assembly = load_ports().get(binding.device_id)
             if assembly is None:
-                return base
+                entry = drivers.entry(binding.driver_id)
+                if entry is None:
+                    raise DeviceConfigurationError(f"原清理驱动未登记: {binding.driver_id}")
+                if not entry.declaration.delete_supported:
+                    return replace(base, delete_supported=False)
+                # 删除能力存在但恢复查询端口缺失是装配前提错误，不能伪装成无删除能力。
+                port_for(entry, "query")
+                raise DeviceConfigurationError(f"清理协作者未装配: {binding.device_id}")
             entry, delete_config, query_config = assembly
             return replace(base, driver=entry.driver, evidence=entry.evidence,
                            delete_config=delete_config, query_config=query_config)

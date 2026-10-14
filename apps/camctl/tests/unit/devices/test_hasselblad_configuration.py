@@ -16,6 +16,29 @@ def test_camera_config_preserves_serial_and_defaults_product_id():
         _declaration({"executable": "/home/cld/hb_cli/hb_cli", "serial": " 64010904 "})
     )
     assert result == CameraConfig("/home/cld/hb_cli/hb_cli", " 64010904 ", 10)
+    assert result.output_storage.value == "host"
+
+
+@pytest.mark.parametrize("storage", ["host", "device"])
+def test_camera_config_parses_output_storage_as_the_shared_type(storage):
+    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+    from camctl.devices.tasks import CaptureStorage
+
+    result = read_camera_config(_declaration({
+        "executable": "/usr/bin/hb_cli", "serial": "SERIAL-1", "output_storage": storage,
+    }))
+    assert isinstance(result.output_storage, CaptureStorage)
+    assert result.output_storage.value == storage
+
+
+@pytest.mark.parametrize("storage", [None, True, 1, [], {}, "", "HOST", "camera"])
+def test_camera_config_rejects_invalid_output_storage(storage):
+    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+
+    with pytest.raises(ValueError):
+        read_camera_config(_declaration({
+            "executable": "/usr/bin/hb_cli", "serial": "SERIAL-1", "output_storage": storage,
+        }))
 
 
 @pytest.mark.parametrize(

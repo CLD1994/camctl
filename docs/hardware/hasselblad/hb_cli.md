@@ -106,7 +106,8 @@ sudo udevadm trigger
 ./hb_cli capture --output ./photos # 拍摄，同时将原图和缩略图保存到指定目录
 ```
 
-`capture` 保存原图，并为 JPEG 或 3FR 生成同名的 `.thumbnail.jpg` 缩略图。
+1. `capture` 会先启用相机与本地双落盘：原图同时保存在相机存储和本地目录，并在本地为 JPEG 或 3FR 生成同名的 `.thumbnail.jpg` 缩略图。
+2. `capture` 返回的名称是本地存盘的名称，可以理解成收到这名称就意味着拍摄成功结束且相机里已经存在该照片了。不需要再通过列出相机的所有图片进行新增核对。
 
 ## 浏览和下载图片
 

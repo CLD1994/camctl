@@ -1,9 +1,9 @@
-"""主机保存的单张拍摄编排。"""
+"""取得主机双文件的单张拍摄编排，按保存定义登记正式源。"""
 
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 from camctl.contracts.enums import enum_for
@@ -65,6 +65,15 @@ def is_saved_host_photo(action: Mapping[str, Any]) -> bool:
         action.get("type") == int(_ACTION.CAMERA_TAKE_PHOTO)
         and isinstance(action.get("execution_spec_json"), Mapping)
         and action["execution_spec_json"].get("output_storage") == "host"
+    )
+
+
+def is_saved_capture_photo(action: Mapping[str, Any]) -> bool:
+    """两种正式源共用捕获返回；旧空定义继续走原列举流程。"""
+    return (
+        action.get("type") == int(_ACTION.CAMERA_TAKE_PHOTO)
+        and isinstance(action.get("execution_spec_json"), Mapping)
+        and action["execution_spec_json"].get("output_storage") in ("host", "device")
     )
 
 
@@ -321,18 +330,52 @@ def _drafts(files, artifacts: tuple[CapturedArtifact, CapturedArtifact]):
     )
 
 
+def _device_drafts(runtime, action_id, artifacts, occurred_at):
+    from camctl.capture.handlers import FileRegistration, ObservedFile, _binding, _register_observed
+    from camctl.capture.results import FileKind
+    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+
+    binding = _binding(runtime.action(action_id))
+    original, preview = artifacts
+    identities = tuple(CameraFileIdentity(binding, original.original_name, variant, artifact.sha256)
+                       for variant, artifact in zip(
+                           (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL), artifacts))
+    entries = tuple(ObservedFile(
+        identity=identity.file_identity, locator=identity.locator(),
+        evidence={"activity_id": str(_activity_id(runtime, action_id)),
+                  "artifact": asdict(artifact)},
+        complete=True, size_bytes=artifact.size_bytes, kind=FileKind.PHOTO,
+        original_name=artifact.original_name, media_type=artifact.media_type,
+        paired_identity=None if index == 0 else identities[0].file_identity,
+    ) for index, (identity, artifact) in enumerate(zip(identities, artifacts)))
+    registered = _register_observed(runtime, action_id, entries, occurred_at=occurred_at,
+        registration=FileRegistration(
+            ownership_method=int(enum_for("device_files.ownership_evidence_json.method").DRIVER_TASK_ASSOCIATION),
+            captured_checksums={identity.file_identity: artifact.sha256
+                                for identity, artifact in zip(identities, artifacts)}))
+    original_id, preview_id = (file_id for _, file_id in registered)
+    return (
+        OutputDraft(OutputKind.ORIGINAL, FileReference(device_file_id=original_id), True, original.sha256),
+        OutputDraft(OutputKind.PREVIEW, FileReference(device_file_id=preview_id), True, preview.sha256,
+                    original_batch_file_id=original_id),
+    )
+
+
 def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_at: int) -> None:
-    runtime.save_capture_completion(FinishCapture(
-        action_id,
-        _drafts(files, artifacts),
-        OutputCatalogFacts(action_id, True),
-        occurred_at,
-    ))
+    from camctl.persistence.repositories.capture import FinishCanceledCapture
+
+    action = runtime.action(action_id)
+    drafts = (_drafts(files, artifacts) if is_saved_host_photo(action)
+              else _device_drafts(runtime, action_id, artifacts, occurred_at))
+    request_type = FinishCanceledCapture if action["cancel_requested"] else FinishCapture
+    runtime.save_capture_completion(request_type(
+        action_id=action_id, drafts=drafts, catalog_facts=OutputCatalogFacts(action_id, True),
+        occurred_at=occurred_at))
 
 
 @owned_tool_call
 async def advance_host_photo(runtime, action_id: int) -> None:
-    """消费原 START 结果、归档两源并共同保存主机拍摄产物。"""
+    """消费原 START 结果、归档双文件并按固定模式登记正式产物。"""
     from camctl.capture.handlers import (
         _control_call,
         _conclude_activity,

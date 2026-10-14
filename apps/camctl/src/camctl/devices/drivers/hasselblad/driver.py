@@ -17,6 +17,8 @@ from camctl.devices.evidence import (
     validate_observation,
 )
 from camctl.devices.ports import ControlRequest, DeviceCallResult, DriverDeclaration
+from camctl.devices.read_session import ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
+from camctl.host_files.downloads import DownloadWorkspace
 from camctl.host_files.capture_sources import (
     CaptureFileError,
     CaptureFileSpec,
@@ -54,6 +56,7 @@ from .responses import (
     parse_devices,
     parse_serial,
 )
+from .files import CameraFileIdentity
 
 __all__ = ["EVIDENCE", "HasselbladDriver"]
 
@@ -71,12 +74,30 @@ _OPERATION_RETURNED = EvidenceContract(
 _DISPATCH_PREVENTED = EvidenceContract(
     "dispatch_prevented", 1, "control", frozenset()
 )
-EVIDENCE = EvidenceRegistry((_PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED))
+EVIDENCE = EvidenceRegistry((
+    _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED,
+    EvidenceContract("read_returned", 1, "read", frozenset()),
+    EvidenceContract("local_read_recovery", 1, "read", frozenset()),
+))
 
 _VENDOR_ID = 0x2756
 _RAW_MEDIA_TYPE = "image/x-hasselblad-3fr"
 _PREVIEW_MEDIA_TYPE = "image/jpeg"
 _NANOSECONDS_PER_SECOND = Decimal(1_000_000_000)
+READ_PREPARATION_TIMEOUT_S = Decimal("180")
+
+
+class CameraReadError(ReadPreparationError):
+    """下载或身份核对失败；保留各次受管调用与实际收场细节。"""
+
+    def __init__(self, reason, steps, *, causes=(), settlement=ReadPreparationSettlement.SETTLED):
+        self.reason, self.steps = reason, tuple(dict(step) for step in steps)
+        self.causes = tuple(causes)
+        # OSError 的 repr 不包含 filename；异常组的 str 则不包含各子错误。
+        diagnostics = tuple(f"{type(cause).__name__}: {cause}" if isinstance(cause, OSError)
+                            else repr(cause) for cause in self.causes)
+        super().__init__(f"相机文件读取失败: {reason}; steps={self.steps!r}; causes={diagnostics!r}",
+                         settlement=settlement)
 
 
 class _NeverStop:
@@ -131,11 +152,92 @@ class HasselbladDriver:
             stop_supported=False,
             query_supported=False,
             result_supported=False,
-            read_supported=False,
+            read_supported=True,
             digest_supported=False,
             delete_supported=False,
             directory_supported=False,
+            local_read_recovery_supported=True,
         )
+
+    def _binding_config(self, binding):
+        if binding.driver_id != self.driver_id:
+            raise DeviceConfigurationError("原设备绑定的驱动与 Hasselblad 不匹配")
+        result = check_binding(binding, self)
+        if result.status is not BindingStatus.MATCHED:
+            raise DeviceConfigurationError(f"原设备绑定在本次配置中不可用: {result.status.value}")
+        return read_camera_config(self.devices[binding.device_id])
+
+    async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+        """下载指定固定源，核验后从偏移读取；工具 stdout 不承载文件定位。"""
+        if not isinstance(source, SourceFile):
+            raise ValueError("读取必须携带固定源文件")
+        identity = CameraFileIdentity.from_source(source.file_id, source.locator)
+        config = self._binding_config(identity.binding)
+        workspace = DownloadWorkspace(self.roots.staging, ticket)
+        if type(offset) is not int or not 0 <= offset <= source.size_bytes:
+            raise ValueError("读取偏移不在固定长度范围内")
+        if (not isinstance(idle_timeout_s, Decimal) or not idle_timeout_s.is_finite()
+                or idle_timeout_s <= 0):
+            raise ValueError("无数据超时必须是有限正 Decimal 秒数")
+        steps = []
+        settled = True
+        began = self.monotonic_ns()
+
+        async def run(name, args, *, stdout):
+            nonlocal settled
+            remaining = READ_PREPARATION_TIMEOUT_S - Decimal(self.monotonic_ns() - began) / _NANOSECONDS_PER_SECOND
+            if remaining <= 0:
+                raise CameraReadError("preparation_timeout", steps)
+            settled = False
+            raw = await self._run_step(config=config, name=name, args=args,
+                                       timeout_s=remaining, steps=steps)
+            settled = True
+            if raw is None:
+                raise CameraReadError("tool_start_failed", steps)
+            failure = self._local_return_failure(raw, needs_stdout=stdout)
+            if raw.error == "cancelled":
+                raise asyncio.CancelledError("相机读取已取消，受管工具已退出") from CameraReadError(failure, steps)
+            if failure:
+                raise CameraReadError(failure, steps)
+            return raw
+
+        try:
+            async with asyncio.timeout(float(READ_PREPARATION_TIMEOUT_S)):
+                try:
+                    await workspace.prepare()
+                except (OSError, ValueError) as error:
+                    raise CameraReadError("download_maintenance_waiting", steps, causes=(error,),
+                        settlement=ReadPreparationSettlement.WAITING) from error
+                raw = await run("list", ("list",), stdout=True)
+                cameras = parse_devices(raw.output)
+                matching = tuple(camera for camera in cameras if camera.vendor_id == _VENDOR_ID
+                                 and camera.product_id == config.product_id)
+                if len(matching) != 1:
+                    raise CameraReadError("no_matching_device" if not matching else "multiple_matching_devices", steps)
+                raw = await run("info", ("info",), stdout=True)
+                if parse_serial(raw.output) != config.serial:
+                    raise CameraReadError("serial_mismatch", steps)
+                await run("download", ("download", identity.variant.value, identity.original_name,
+                                       "--output", str(workspace.path)), stdout=False)
+                stream = await workspace.open_verified(source.size_bytes, identity.sha256, offset)
+                return ReadSession(source, offset, stream, idle_timeout_s)
+        except BaseException as error:
+            # transport 未交回实际退出事实时，不能删除可能仍被工具使用的目录。
+            if not settled or not workspace.files_closed:
+                causes = (error,) if error.__cause__ is None else (error, error.__cause__)
+                raise CameraReadError("preparation_unconfirmed", steps, causes=causes,
+                    settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+            if settled:
+                try:
+                    await workspace.cleanup()
+                except BaseException as cleanup_error:
+                    if isinstance(error, Exception) and isinstance(cleanup_error, Exception):
+                        raise CameraReadError("preparation_and_cleanup_failed", steps,
+                                              causes=(error, cleanup_error)) from error
+                    raise BaseExceptionGroup("相机读取准备与临时下载回收均失败", [error, cleanup_error]) from None
+            if isinstance(error, Exception) and not isinstance(error, CameraReadError):
+                raise CameraReadError("preparation_failed", steps, causes=(error,)) from error
+            raise
 
     def _request_config(self, request: ControlRequest) -> tuple[str, CameraConfig]:
         if request.operation != "take_photo":
@@ -146,13 +248,7 @@ class HasselbladDriver:
         if not isinstance(ticket.target_id, str):
             raise ValueError("拍摄调用必须以活动身份为目标")
         parse_object_id(ticket.target_id)
-        if request.binding.driver_id != self.driver_id:
-            raise DeviceConfigurationError("原设备绑定的驱动与 Hasselblad 不匹配")
-        if request.binding.device_id not in self.devices:
-            raise DeviceConfigurationError("原设备绑定在本次配置中不存在")
-        binding = check_binding(request.binding, self)
-        if binding.status is not BindingStatus.MATCHED:
-            raise DeviceConfigurationError("原设备绑定在本次配置中不可用")
+        config = self._binding_config(request.binding)
         if set(request.params) != {"type"} or request.params.get("type") != PARAMETER_TYPE:
             raise ValueError("Hasselblad 单张参数必须恰为已登记照片类型")
         timeout = request.timeout_s
@@ -165,8 +261,7 @@ class HasselbladDriver:
             raise ValueError("拍摄调用必须携带有限正 Decimal 总期限")
         if not callable(request.dispatch_check):
             raise ValueError("多步拍摄需要框架的派发资格检查")
-        declaration = self.devices[request.binding.device_id]
-        return ticket.target_id, read_camera_config(declaration)
+        return ticket.target_id, config
 
     def _call_info(self, raw: RawToolOutcome | None) -> CallInfo | None:
         if raw is None or raw.exit is None:

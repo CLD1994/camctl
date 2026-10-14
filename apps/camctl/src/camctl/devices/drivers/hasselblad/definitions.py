@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from decimal import Decimal
 from typing import Mapping
 
 from camctl.contracts.json_values import JsonValue
 from camctl.devices.catalog import ActionCapability, DriverDefinition
-from camctl.devices.tasks import CaptureStorage, CaptureTask
+from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
 
 __all__ = [
     "DRIVER_ID",
@@ -38,6 +39,17 @@ def _photo_task(_effective_params: Mapping[str, JsonValue]) -> CaptureTask:
     )
 
 
+def _deployed_photo_factory(declaration: Mapping[str, object]) -> CaptureTaskFactory:
+    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+
+    storage = read_camera_config(declaration).output_storage
+
+    def photo_task(effective_params: Mapping[str, JsonValue]) -> CaptureTask:
+        return replace(_photo_task(effective_params), output_storage=storage)
+
+    return photo_task
+
+
 def capability() -> ActionCapability:
     """返回唯一权威的单张参数定义，供说明导出与受理共同使用。"""
     return ActionCapability(
@@ -49,6 +61,7 @@ def capability() -> ActionCapability:
         schema=deepcopy(_PHOTO_SCHEMA),
         defaults={},
         task_factory=_photo_task,
+        deployment_task_factory=_deployed_photo_factory,
     )
 
 

@@ -555,8 +555,9 @@ async def test_configuration_updates_are_visible_to_the_same_registered_driver(h
         stop_supported=False,
         query_supported=False,
         result_supported=False,
-        read_supported=False,
+        read_supported=True,
         digest_supported=False,
         delete_supported=False,
         directory_supported=False,
+        local_read_recovery_supported=True,
     )

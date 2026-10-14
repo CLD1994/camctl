@@ -46,3 +46,16 @@ def test_recovery_keeps_original_return_contracts_and_rebinds_only_recovery_temp
     assert recovered.contract("adb_foreground_recovery", 1).operation == "result"
     assert original.contract("adb_foreground_recovery", 1) == template
     assert recovery_registry(entry, "control") is None
+
+
+def test_local_read_recovery_uses_its_own_empty_contract():
+    from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
+    from camctl.host_files.models import BoundDirectories
+    from pathlib import Path
+
+    driver = HasselbladDriver({}, BoundDirectories(Path("/staging")), monotonic_ns=lambda: 0)
+    recovered = recovery_registry(driver, "read")
+    assert recovered is not None, "本地 READ 恢复应保留原驱动独立登记"
+    assert recovered.contract("local_read_recovery", 1).operation == "read"
+    assert recovered.contract("read_returned", 1).operation == "read"
+    assert recovery_registry(driver, "control") is None

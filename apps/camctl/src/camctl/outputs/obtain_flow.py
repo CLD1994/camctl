@@ -784,9 +784,14 @@ async def _copy_delivery(
             _source_file_id(facts), state.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
             else prepared.decision.offset)
     except Exception as error:
-        # 打开会话也是一次源读取调用：按读取失败保存本次尝试。
-        return InputStep(InputPhase.SEGMENT_FAILED, copy_id=facts["id"],
-                         error=error, source_failed=True)
+        from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+
+        settlement = (error.settlement if isinstance(error, ReadPreparationError)
+                      else ReadPreparationSettlement.SETTLED)
+        return InputStep(InputPhase.WAITING if settlement is ReadPreparationSettlement.WAITING else InputPhase.SEGMENT_FAILED,
+                         copy_id=facts["id"],
+                         error=error, source_failed=settlement is ReadPreparationSettlement.SETTLED,
+                         preparation_settlement=settlement)
     result = None
     try:
         if prepared.decision.outcome is ResumeOutcome.VERIFY:
@@ -845,6 +850,10 @@ def _finish_read_attempt(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
         facts: Mapping, ticket, step: InputStep) -> None:
     """保存尝试结果；预算耗尽按流程失败终局交付并交还机会。"""
+    from camctl.outputs.read_attempts import require_preparation_settled
+
+    if not require_preparation_settled(step):
+        return
     if step.phase is InputPhase.RECOPY_PENDING:
         # 新轮次已经提交且本连接已关闭；读取尝试和原次数继续承担责任。
         runtime.continuing_read_tickets[facts["id"]] = ticket
@@ -873,7 +882,7 @@ def _finish_read_attempt(
         status=(AttemptStatus.SUCCEEDED if succeeded
                 else AttemptStatus.FAILED),
         error=None if succeeded else ErrorValue(
-            code="device_error", stage="read"),
+            code="device_error", stage="read", details={"reason": str(step.error)}),
         effect=EffectState.UNKNOWN,
         settlement=Settlement(
             basis=SettlementBasis.OBSERVED,

@@ -612,9 +612,32 @@ $env:PYTHONUTF8 = '1'
 
 实际拍摄使用前述 PID 显式前缀 wheel `964baf983ce1167adf1de7a980dac6eeaa03af7e22f21aec085d8a99309fb733`。17:12 UTC 才在同一独立虚拟环境安装最终 wheel `camctl-0.1.0-py3-none-any.whl`，大小 993512 字节、SHA-256 `306117d8bffaa199a66f8177492330302857b09a1dbb5ff06c5f6f8c96e44961`；最终包的 239 个已安装文件也逐字节匹配发行物。此最终版本用于既有动作的收场回执核实及离线 `run` 生成报告，没有再次拍摄。
 
-最终完整命令、活动收场记录、报告验证结果和只读数据库快照保存在 `.local/hasselblad-arm-acceptance/20261013-final/final-evidence.tar.gz`，大小为 `132502` 字节，SHA-256 为 `923eeb25bedfe6ad20d8cd01228d4b2d114bcdd0c8057e0c755d08106b339102`。清单含 148 项，均与解包后的证据目录大小和 SHA-256 相符。原图没有纳入本地证据包且未解码；预览副本 `.local/hasselblad-arm-acceptance/20261013-camera/capture-preview.jpg` 的摘要匹配并可正常呈现，但这不评价图像质量。相机端是否同时保存原片仍待设备负责人向官方核实；本次没有物理断电或真实第三方领取 delivery。
+最终完整命令、活动收场记录、报告验证结果和只读数据库快照保存在 `.local/hasselblad-arm-acceptance/20261013-final/final-evidence.tar.gz`，大小为 `132502` 字节，SHA-256 为 `923eeb25bedfe6ad20d8cd01228d4b2d114bcdd0c8057e0c755d08106b339102`。清单含 148 项，均与解包后的证据目录大小和 SHA-256 相符。原图没有纳入本地证据包且未解码；预览副本 `.local/hasselblad-arm-acceptance/20261013-camera/capture-preview.jpg` 的摘要匹配并可正常呈现，但这不评价图像质量。该次验收没有检查相机端原片，也没有执行物理断电或真实第三方领取 delivery；当前固件的双落盘及下载契约见[驱动设计](hasselblad-driver.md#正式源的部署选择)。
 
 此前全量软件回归仍为单元测试 `5076 passed, 1 skipped`、16 个集成目录合计 `6209 passed, 3 skipped`；最终收场修复另通过完整 `capture` 目录 `1088 passed`、主机照片流与优化模式专项 `19 passed`、收场恢复相关用例 `93 passed` 及最终 wheel 安装版拍摄、双文件取回和报告专项 `1 passed`。这些测试结果与本节目标主机的实际拍摄证据分别记录；本次文档更新未重跑测试。
+
+## Hasselblad 双正式源的软件验证（2026-10-14）
+
+环境为 Linux x86_64 开发容器、CPython 3.11.16 和 SQLite 3.53.1。验证对象是[相机正式源实施计划](../superpowers/plans/2026-10-14-hasselblad-camera-source.md)及[双模式驱动契约](hasselblad-driver.md#正式源的部署选择)。部署配置决定新受理动作采用主机或相机正式源，计划参数保持原结构。组件测试组合真实 SQLite、文件系统、受管进程和受工具契约约束的相机替身；安装版测试在源码目录之外构建、安装并使用正式 CLI。
+
+[双模式拍摄测试](../../apps/camctl/tests/integration/capture/test_device_photo_flow.py)核对两种部署变更方向下的原动作定义、设备原图和配对预览、固定大小与摘要，以及产物登记前后主机副本的实际保留和回收。可靠成功结果保存后移除相机配置，仍可继续登记、报告及临时副本回收。归档、CHECKSUM 或完成事务回执未知时沿原请求和键恢复，只有一次 capture；未知拍摄保留工作文件。取消期间取得可靠双文件仍保存已有产物。持久化入口和直接事件共同拒绝空产物、单边产物、错误角色或配对，终态重送允许临时副本已经回收。相机源显式清理保存逐项错误，不形成删除尝试或相机缺席，主机源继续本地清理。
+
+[受管下载测试](../../apps/camctl/tests/integration/devices/test_hasselblad_download.py)和[准备失败分类测试](../../apps/camctl/tests/integration/outputs/test_read_preparation_settlement.py)核对原图名的两种下载、绑定身份、非零偏移、完整大小及捕获摘要。下载准备、进程收场和文件句柄责任分别保存，未确认收场不终结 READ 或释放占用。[遗留下载维护](../../apps/camctl/tests/integration/bootstrap/test_download_cleanup.py)只处理已知 READ，并按独立额度和游标续查；[两次默认运行专项](../../apps/camctl/tests/integration/bootstrap/test_hasselblad_read_waiting_session.py)验证本地前提等待使第一次 run 有限失败退出，下一次实际 run 经维护后沿原最后票据完成，不消耗新的源失败预算。
+
+[相机源安装版专项](../../apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py)从实际 wheel 运行拍摄、临时副本回收及原图和预览各两轮独立取回，保存四份独立交付并核对捕获时的固定大小、SHA-256、配对和最终报告。后续部署改为 host 仍从原设备源下载；等长错误内容不能通过原捕获摘要核验，也不发布错误交付。既有[主机源安装版专项](../../apps/camctl/tests/integration/bootstrap/test_distribution.py)继续验证离线重复取回及显式清理。安装版三个专项均通过，结果属于下述组件回归的相应范围，不重复计入总数。
+
+验证范围|实际结果
+-|-
+全量单元测试|`5199 passed, 1 skipped`；两条既有同步测试 asyncio 标记警告保留。
+组件集成回归|16 个目录分别启动 pytest，合计 `6518 passed, 3 skipped`；`bootstrap` 为 1101 项，`capture` 为 1120 项，`outputs` 为 1970 项。日志目录保留一条既有同步测试 asyncio 标记警告。
+安装版专项|`3 passed, 17 deselected`；从当前源码构建安装，覆盖主机和相机正式源的正式入口。
+静态契约检查|数据库 31 表、3196 项断言；事件 35 类、113 分支；历史对象 SQL、配置消费、报告依赖及公共协议检查均通过。
+
+单元测试使用 `PYTHONDONTWRITEBYTECODE=1 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`。集成回归遵守[组件运行边界](../../apps/camctl/tests/AGENTS.md#运行边界与结果记录)，同工作区一次只运行一个集成 pytest，按各目录分别启动进程。本地证据目录为 `.local/hasselblad-camera-source/20261014-software/`；`validation-20261014T120352Z.json` 和 `validation-20261014T121125Z.json` 分别保存单元、全部集成目录的完整命令、工作目录、解释器、UTC 时间、PID、原始日志路径及退出码，`validation-summary.json` 从实际日志汇总各目录结果。静态检查的完整命令和输出分别保存在 `static-checks.json` 与 `static-final-checks.json`。各项通过声明均已核对实际日志和退出码。
+
+独立评审核对了部署固化、两种源模式、可靠摘要与配对、读取责任及遗留恢复，没有未解决的代码问题。文档本地文件链接与标题引用检查通过；同步测试的三条 asyncio 标记警告均来自未改动的既有测试，不影响本轮测试结果。
+
+本次没有执行 ARM 新固件的真实相机拍摄和下载、目标存储空间测量或物理断电验收。此前主机正式源的现场证据保持[原验收范围](#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)；新增相机源模式仍须在目标固件上核验两种下载、交付内容及主机副本回收。
 
 ## 部署交接与待核验项
 

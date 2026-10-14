@@ -497,6 +497,7 @@ class CleanupRuntime:
     monotonic_ns: Callable[[], int] = _default_monotonic_ns
     retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
     binding_check: Callable[[DeviceBinding], BindingResult] | None = None
+    delete_supported: bool | None = None
     for_item: Callable[[int], CleanupRuntime] | None = None
     pending_queries: dict[tuple[int, int], PendingCleanupQuery] = field(default_factory=dict)
     pending_companions: dict[int, PendingCleanupCompanion] = field(default_factory=dict)
@@ -808,6 +809,13 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
     failed_binding = _finish_binding_failure(runtime, item_id)
     if failed_binding is not None:
         return failed_binding
+    if runtime.binding_of(item_id) is not None and runtime.delete_supported is False:
+        failed = runtime.outputs.fail_cleanup_item(
+            FailCleanupItem(item_id, "file_delete_failed", {"output_id": str(output_id)},
+                            runtime.occurred_at()), new_operation_key(), runtime.owned)
+        if failed.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(f"不支持设备删除的逐项结果未可靠保存: {failed.error}")
+        return CleanupStep("failed", "file_delete_failed")
     if runtime.binding_of(item_id) is None:
         if (_host_target(connection, item_id) is None
                 or runtime.local_files is None):

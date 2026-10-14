@@ -241,6 +241,11 @@ def _hasselblad_tool_source(call_log: Path, serial: str) -> str:
                 f"saved {{original}} ({{len(RAW)}} bytes)\\n"
                 f"saved {{preview}} ({{len(PREVIEW)}} bytes)\\n"
             )
+        elif len(args) == 7 and args[2] == "download" and args[4] == "fixture_capture.3FR" and args[5] == "--output":
+            if args[3] not in ("original", "thumbnail"):
+                raise SystemExit("unexpected download variant")
+            work = pathlib.Path(args[6])
+            (work / "download.bin").write_bytes(RAW if args[3] == "original" else PREVIEW)
         else:
             raise SystemExit("unexpected hb_cli argument vector")
         """

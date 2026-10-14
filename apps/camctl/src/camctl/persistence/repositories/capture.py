@@ -444,7 +444,7 @@ class _HostPhotoPairError(ValueError):
 
 def _host_photo_source_pair(
     rows: Mapping[int, Mapping[str, Any]], action_id: int, *,
-    host_spec: bool = False, terminal: bool = False,
+    host_spec: bool = False, terminal: bool = False, device_temporary: bool = False,
 ) -> dict[int, Mapping[str, Any]] | None:
     """按已保存规格和来源责任读取唯一原图/预览对。"""
     photo_rows = [
@@ -457,7 +457,7 @@ def _host_photo_source_pair(
             raise _HostPhotoPairError("主机单张成功缺少原图和预览文件责任")
         return None
     if len(photo_rows) != len(HOST_PHOTO_PURPOSES):
-        raise _HostPhotoPairError("成功主机拍摄必须恰有原图和预览两份文件责任")
+        raise _HostPhotoPairError("成功单张拍摄必须恰有原图和预览两份文件责任")
     by_kind: dict[int, Mapping[str, Any]] = {}
     for facts in photo_rows:
         purpose_code = facts.get("purpose")
@@ -477,7 +477,10 @@ def _host_photo_source_pair(
             raise _HostPhotoPairError("主机拍摄固定角色路径与文件身份不一致") from error
         if facts.get("relative_path") != expected_path:
             raise _HostPhotoPairError("主机拍摄固定角色路径与文件身份不一致")
-        if terminal:
+        if terminal and device_temporary:
+            valid_lifecycle = facts.get("retention_state") in (
+                int(_RETENTION.REQUIRED), int(_RETENTION.RELEASABLE))
+        elif terminal:
             valid_lifecycle = (
                 facts.get("retention_state") == int(_RETENTION.PROMOTED)
                 and facts.get("cleanup_state") in (
@@ -508,15 +511,70 @@ def _host_photo_execution_spec(action: Mapping[str, Any]) -> bool:
     return spec.get("output_storage") == "host"
 
 
+def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, terminal=False):
+    """设备单张的两源必须沿原动作及双文件捕获事实完整配对。"""
+    temporary = _host_photo_source_pair(temporary_rows, action_id, host_spec=True,
+                                        terminal=terminal, device_temporary=True)
+    files = [row for row in device_rows.values() if row.get("source_action_id") == action_id]
+    by_kind = {}
+    for kind, captured in temporary.items():
+        matches = [row for row in files if row.get("role") == _FILE_ROLE_FOR_KIND[kind]]
+        if len(matches) != 1:
+            raise _HostPhotoPairError("相机单张必须恰有原图和预览两份设备源")
+        source = matches[0]
+        ownership = source.get("ownership_evidence_json")
+        completion = source.get("completion_evidence_json")
+        ownership = parse_exact_json(ownership) if isinstance(ownership, str) else ownership
+        completion = parse_exact_json(completion) if isinstance(completion, str) else completion
+        if (source.get("observer_action_id") != action_id
+                or source.get("completion_state") != int(_FILE_COMPLETION.COMPLETE)
+                or source.get("checksum_support") != int(_FILE_CHECKSUM.SUPPORTED)
+                or source.get("size_bytes") != captured["size_bytes"]
+                or source.get("sha256") != captured["sha256"]
+                or not isinstance(ownership, Mapping)
+                or ownership.get("method") != int(_OWNERSHIP_METHOD.DRIVER_TASK_ASSOCIATION)
+                or not isinstance(completion, Mapping)
+                or completion.get("basis") != int(_COMPLETION_BASIS.DEVICE_GUARANTEE)):
+            raise _HostPhotoPairError("相机源的归属、完成或固定摘要与捕获事实不一致")
+        by_kind[kind] = source
+    if len(files) != len(temporary):
+        raise _HostPhotoPairError("相机单张设备源集合与捕获双文件不一致")
+    original = by_kind[_KIND_CODES[OutputKind.ORIGINAL]]
+    preview = by_kind[_KIND_CODES[OutputKind.PREVIEW]]
+    if (original.get("original_device_file_id") is not None
+            or original.get("pairing_evidence_json") is not None
+            or preview.get("original_device_file_id") != original["id"]
+            or preview.get("pairing_evidence_json") is None):
+        raise _HostPhotoPairError("相机预览没有关联本动作的原图设备源")
+    return by_kind
+
+
+def _device_photo_drafts(drafts, sources):
+    if len(drafts) != len(sources) or {draft.kind for draft in drafts} != {
+            OutputKind.ORIGINAL, OutputKind.PREVIEW}:
+        raise _HostPhotoPairError("相机单张必须同时登记原图和预览")
+    for draft in drafts:
+        source = sources[_KIND_CODES[draft.kind]]
+        if (draft.file.device_file_id != source["id"]
+                or draft.file.intermediate_file_id is not None
+                or draft.file_complete is not True or draft.sha256 != source["sha256"]):
+            raise _HostPhotoPairError("相机产物草稿与可靠设备源不一致")
+        if draft.kind is OutputKind.PREVIEW and (
+                draft.original_batch_file_id != sources[_KIND_CODES[OutputKind.ORIGINAL]]["id"]
+                or draft.original_output_id is not None
+                or draft.original_batch_intermediate_file_id is not None):
+            raise _HostPhotoPairError("相机预览必须关联同批原图设备源")
+
+
 def _host_photo_drafts(
     drafts: tuple[OutputDraft, ...], sources: Mapping[int, Mapping[str, Any]]
 ) -> dict[int, OutputDraft]:
     """要求成功申请的两份草稿与原责任身份、完整摘要和预览关联相同。"""
     if len(drafts) != 2:
-        raise _HostPhotoPairError("成功主机拍摄必须登记原图与预览两份产物")
+        raise _HostPhotoPairError("成功单张拍摄必须登记原图与预览两份产物")
     by_kind = {draft.kind: draft for draft in drafts}
     if len(by_kind) != 2 or set(by_kind) != {OutputKind.ORIGINAL, OutputKind.PREVIEW}:
-        raise _HostPhotoPairError("成功主机拍摄草稿必须恰有一份原图和一份预览")
+        raise _HostPhotoPairError("成功单张拍摄草稿必须恰有一份原图和一份预览")
     original = by_kind[OutputKind.ORIGINAL]
     preview = by_kind[OutputKind.PREVIEW]
     for draft in (original, preview):
@@ -541,6 +599,7 @@ def _host_photo_registered_pair(
     origins: Mapping[int, Mapping[str, Any]],
     action_id: int,
     sources: Mapping[int, Mapping[str, Any]],
+    *, device: bool = False,
 ) -> None:
     """检查保存或提案中的两份正式产物和唯一原图关联。"""
     action_outputs = {
@@ -548,12 +607,12 @@ def _host_photo_registered_pair(
         if values.get("source_action_id") == action_id
     }
     if len(action_outputs) != 2:
-        raise _HostPhotoPairError("成功主机拍摄的正式产物必须恰有原图和预览")
+        raise _HostPhotoPairError("成功单张拍摄的正式产物必须恰有原图和预览")
     by_kind = {values.get("kind"): (identity, values)
                for identity, values in action_outputs.items()}
     if (len(by_kind) != 2
             or set(by_kind) != {_KIND_CODES[OutputKind.ORIGINAL], _KIND_CODES[OutputKind.PREVIEW]}):
-        raise _HostPhotoPairError("成功主机拍摄的正式产物角色必须恰好配对")
+        raise _HostPhotoPairError("成功单张拍摄的正式产物角色必须恰好配对")
     original_id, original = by_kind[_KIND_CODES[OutputKind.ORIGINAL]]
     preview_id, preview = by_kind[_KIND_CODES[OutputKind.PREVIEW]]
     for kind, values in (
@@ -561,8 +620,10 @@ def _host_photo_registered_pair(
         (_KIND_CODES[OutputKind.PREVIEW], preview),
     ):
         source = sources[kind]
-        if (values.get("intermediate_file_id") != source["id"]
-                or values.get("device_file_id") is not None
+        source_column = "device_file_id" if device else "intermediate_file_id"
+        other_column = "intermediate_file_id" if device else "device_file_id"
+        if (values.get(source_column) != source["id"]
+                or values.get(other_column) is not None
                 or not isinstance(values.get("original_name"), str)
                 or not values["original_name"]
                 or not isinstance(values.get("media_type"), str)
@@ -577,21 +638,25 @@ def _host_photo_registered_pair(
 
 
 def _guard_host_photo_completion(
-    context, action_id: int, *, host_spec: bool, terminal: bool,
+    context, action_id: int, *, host_spec: bool, terminal: bool, device_spec: bool = False,
 ) -> None:
     source_rows = context.complete_rows(
         "intermediate_files", "owner_action_id", action_id)
-    sources = _host_photo_source_pair(
-        source_rows, action_id, host_spec=host_spec, terminal=terminal)
+    if device_spec:
+        device_rows = context.complete_rows("device_files", "source_action_id", action_id)
+        sources = _device_photo_source_pair(device_rows, source_rows, action_id, terminal=terminal)
+    else:
+        sources = _host_photo_source_pair(
+            source_rows, action_id, host_spec=host_spec, terminal=terminal)
     if sources is None:
         return
     context.complete_rows("outputs", "source_action_id", action_id)
     transaction_rows = context.transaction_rows
     if transaction_rows is None:
-        raise EventValidationError("成功主机拍摄缺少同事务完整产物提案")
+        raise EventValidationError("成功单张拍摄缺少同事务完整产物提案")
     outputs = transaction_rows.get("outputs", {})
     origins = transaction_rows.get("output_origins", {})
-    _host_photo_registered_pair(outputs, origins, action_id, sources)
+    _host_photo_registered_pair(outputs, origins, action_id, sources, device=device_spec)
     action_outputs = [
         (identity, values)
         for identity, values in outputs.items()
@@ -626,7 +691,8 @@ def _action_finish_guard(event, context) -> None:
                     try:
                         host_spec = _host_photo_execution_spec(facts)
                         _guard_host_photo_completion(
-                            context, row.row_id, host_spec=host_spec, terminal=False)
+                            context, row.row_id, host_spec=host_spec, terminal=False,
+                            device_spec=read_action_spec(facts).get("output_storage") == "device")
                     except ConsistencyError as error:
                         raise EventValidationError(str(error)) from error
                     except _HostPhotoPairError as error:
@@ -674,7 +740,8 @@ def _output_guard(event, context) -> None:
         try:
             host_spec = _host_photo_execution_spec(action)
             _guard_host_photo_completion(
-                context, action_id, host_spec=host_spec, terminal=terminal)
+                context, action_id, host_spec=host_spec, terminal=terminal,
+                device_spec=read_action_spec(action).get("output_storage") == "device")
         except ConsistencyError as error:
             raise EventValidationError(str(error)) from error
         except _HostPhotoPairError as error:
@@ -1036,13 +1103,20 @@ class FinishCaptureCommand:
                 if action["type"] == _ACTION_TYPE.CAMERA_TAKE_PHOTO
                 else False
             )
-            photo_sources = _host_photo_source_pair(
-                self._state.get("intermediate_files", {}), command.action_id,
-                host_spec=host_spec)
-            if photo_sources is not None:
-                if action["type"] != _ACTION_TYPE.CAMERA_TAKE_PHOTO:
-                    raise TransactionError("主机拍摄文件责任只能由单张拍摄动作完成")
-                _host_photo_drafts(command.drafts, photo_sources)
+            if (action["type"] == _ACTION_TYPE.CAMERA_TAKE_PHOTO
+                    and read_action_spec(action).get("output_storage") == "device"):
+                photo_sources = _device_photo_source_pair(
+                    self._state.get("device_files", {}),
+                    self._state.get("intermediate_files", {}), command.action_id)
+                _device_photo_drafts(command.drafts, photo_sources)
+            else:
+                photo_sources = _host_photo_source_pair(
+                    self._state.get("intermediate_files", {}), command.action_id,
+                    host_spec=host_spec)
+                if photo_sources is not None:
+                    if action["type"] != _ACTION_TYPE.CAMERA_TAKE_PHOTO:
+                        raise TransactionError("主机拍摄文件责任只能由单张拍摄动作完成")
+                    _host_photo_drafts(command.drafts, photo_sources)
 
         first_output_id = _next_id(connection, "outputs")
         numbered = tuple((first_output_id + index, output) for index, output in enumerate(changes.outputs))
@@ -1221,22 +1295,26 @@ class FinishCaptureCommand:
         self, action_id: int, action: Mapping[str, Any],
     ) -> None:
         host_spec = _host_photo_execution_spec(action)
+        device = read_action_spec(action).get("output_storage") == "device"
         try:
-            sources = _host_photo_source_pair(
-                self._state.get("intermediate_files", {}), action_id,
-                host_spec=host_spec, terminal=True)
-            if sources is None:
-                return
-            _host_photo_drafts(self._command.drafts, sources)
+            if device:
+                sources = _device_photo_source_pair(
+                    self._state.get("device_files", {}), self._state.get("intermediate_files", {}),
+                    action_id, terminal=True)
+                _device_photo_drafts(self._command.drafts, sources)
+            else:
+                sources = _host_photo_source_pair(
+                    self._state.get("intermediate_files", {}), action_id,
+                    host_spec=host_spec, terminal=True)
+                if sources is None:
+                    return
+                _host_photo_drafts(self._command.drafts, sources)
             _host_photo_registered_pair(
-                self._state.get("outputs", {}),
-                self._state.get("output_origins", {}),
-                action_id,
-                sources,
-            )
+                self._state.get("outputs", {}), self._state.get("output_origins", {}),
+                action_id, sources, device=device)
         except _HostPhotoPairError as error:
             raise ConsistencyError(
-                "已终态单张动作缺少可靠主机原图/预览配对，不能恢复为成功"
+                "已终态单张动作缺少可靠原图/预览配对，不能恢复为成功"
             ) from error
 
     def _reuse(self, connection, saved) -> CommandPlan:
@@ -1503,6 +1581,14 @@ class FinishCaptureCommand:
             file_ids = [row[0] for row in cursor.fetchall()]
         for file_id in file_ids:
             self._required(connection, "intermediate_files", file_id)
+
+        self._ranges.setdefault(("device_files", "source_action_id"), set()).add(action_id)
+        with closing(connection.execute(
+            "SELECT id FROM device_files WHERE source_action_id=? ORDER BY id", (action_id,),
+        )) as cursor:
+            device_ids = [row[0] for row in cursor.fetchall()]
+        for file_id in device_ids:
+            self._required(connection, "device_files", file_id)
 
         self._ranges.setdefault(("outputs", "source_action_id"), set()).add(action_id)
         with closing(connection.execute(
@@ -2736,10 +2822,7 @@ class _FilePresenceCommand:
 
 
 class _FileChecksumCommand:
-    """保存一次设备源摘要能力声明（DEVICE_FILE_OBSERVED.CHECKSUM）。
-
-    能力只能从未判定一次决定；实际摘要与查询错误另行保存。
-    """
+    """共同固定源摘要能力及可选的可靠捕获摘要，重送核对完整输入。"""
 
     def __init__(self, command: FileChecksumSave, key: OperationKey) -> None:
         if not isinstance(command, FileChecksumSave):
@@ -2760,11 +2843,14 @@ class _FileChecksumCommand:
             raise ConsistencyError(
                 f"摘要能力已决定，不重复声明: {command.file_id}"
                 f" {facts['checksum_support']!r}")
-        row = _update(
-            "device_files", command.file_id,
-            {"checksum_support": facts["checksum_support"]},
-            {"checksum_support": command.support},
-        )
+        before = {"checksum_support": facts["checksum_support"]}
+        after = {"checksum_support": command.support}
+        if command.sha256 is not None:
+            if facts["completion_state"] != int(_FILE_COMPLETION.COMPLETE):
+                raise ConsistencyError("固定源摘要要求可靠完整文件")
+            before["sha256"] = facts["sha256"]
+            after["sha256"] = command.sha256
+        row = _update("device_files", command.file_id, before, after)
         self._owners[("device_files", command.file_id)] = (
             "device_file", command.file_id)
         allocation = scope.allocate(1)
@@ -2782,6 +2868,7 @@ class _FileChecksumCommand:
         if facts is None:
             raise ConsistencyError(f"设备文件不存在: {file_id}")
         self._state.setdefault("device_files", {})[file_id] = facts
+        _load_related_outputs(connection, self._state, file_id)
         return facts
 
     def _reuse(self, saved) -> CommandPlan:
@@ -2796,7 +2883,8 @@ class _FileChecksumCommand:
         if row["table"] != "device_files" or row["id"] != command.file_id:
             raise TransactionError("原摘要能力声明属于其他文件")
         after = row["after"]["values"]
-        if after.get("checksum_support") != command.support:
+        if (after.get("checksum_support") != command.support
+                or after.get("sha256") != command.sha256):
             raise TransactionError("摘要能力声明的重送输入与原事务不同")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,

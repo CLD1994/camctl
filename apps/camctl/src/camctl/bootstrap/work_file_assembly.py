@@ -33,7 +33,8 @@ _TERMINAL_DELIVERIES = frozenset(int(_DELIVERY_STATUS[name]) for name in (
 class WorkFileRuntime:
     """保存会话的固定范围与处理记录，后台责任自己关闭独立连接。"""
 
-    def __init__(self, *, staging: Path, limits: WorkFileLimits, pending_media_results=None):
+    def __init__(self, *, staging: Path, limits: WorkFileLimits, pending_media_results=None,
+                 download_cleanup=None):
         self.staging = staging
         self.limits = limits
         self.repository = OutputsRepository()
@@ -51,15 +52,24 @@ class WorkFileRuntime:
         self._stopping = False
         self._discovery_after = 0
         self._first_files: set[int] = set()
+        self.download_cleanup = download_cleanup
 
     async def resume_media_results(self, owned) -> None:
         """筛选业务前核实会话已取得的媒体申请，不开始设备或工具操作。"""
         from camctl.capture.media_flow import resume_media_saves
 
+        await self._cleanup_downloads(owned)
         try:
             await resume_media_saves(owned, self.pending_media_results, self.executor)
         except (ConsistencyError, sqlite3.Error) as error:
             raise StateDbFailure(f"原媒体申请未可靠保存: {error}") from error
+
+    async def _cleanup_downloads(self, owned):
+        if self.download_cleanup is not None:
+            try:
+                await self.download_cleanup.run(owned)
+            except (OSError, ValueError, sqlite3.Error) as error:
+                raise StateDbFailure(f"原 READ 下载遗留未可靠回收: {error}") from error
 
     async def first_cleanup(self, file_ids: tuple[int, ...], *, owned, occurred_at: int):
         """采用本次必要文件的首次结果，不使用历史扫描范围或额度。"""
@@ -95,12 +105,20 @@ class WorkFileRuntime:
             batch_size=self.limits.batch_size)
         with closing(owned.connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
             self._discovery_after = int(cursor.fetchone()[0] or 0)
+        if self.download_cleanup is not None:
+            self.download_cleanup.initialize(owned, horizon=self._discovery_after)
 
     async def flow(self, context: Any) -> None:
         """后台推进已固定的历史责任，立即让出设备调度。"""
         # 正常关闭重查可能发现新工作；继续原会话时恢复新增责任，
         # 历史范围和已经消耗的额度仍由原 history 保存。
         self._stopping = False
+        if self.download_cleanup is not None:
+            owned = context.open_connection()
+            try:
+                await self._cleanup_downloads(owned)
+            finally:
+                owned.connection.close()
         if self._task is not None:
             if not self._task.done():
                 return

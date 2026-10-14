@@ -36,6 +36,7 @@ from camctl.capture.models import (
     WaitCompletedSave,
 )
 from camctl.capture.files import (
+    FileChecksumSave,
     FileCompletionSave,
     FileObservationSave,
     FilePresenceSave,
@@ -215,6 +216,7 @@ _CHECK_DECISION = enum_for("recording_processing.check_decision")
 _CHECK_STATE = enum_for("recording_processing.check_state")
 _REPAIR_STATE = enum_for("recording_processing.repair_state")
 _FILE_PRESENCE = enum_for("device_files.presence_state")
+_FILE_CHECKSUM = enum_for("device_files.checksum_support")
 _FILE_ROLE = enum_for("device_files.role")
 _ORIGINAL_ROLE = int(_FILE_ROLE.ORIGINAL)
 _PREVIEW_ROLE = int(_FILE_ROLE.PREVIEW)
@@ -526,9 +528,9 @@ def resume_canceled_recording_results(
 
 @dataclass(frozen=True)
 class PendingFileFact:
-    """一个在场、归属或完成事实的原申请及可靠保存阶段。"""
+    """一个在场、归属、完成或摘要事实的原申请及可靠保存阶段。"""
 
-    command: FilePresenceSave | OwnershipSave | FileCompletionSave
+    command: FilePresenceSave | OwnershipSave | FileCompletionSave | FileChecksumSave
     key: OperationKey
     response: ObservationOutcome | None = None
 
@@ -537,6 +539,7 @@ class FileFactStage(Enum):
     PRESENCE = "presence"
     OWNERSHIP = "ownership"
     COMPLETION = "completion"
+    CHECKSUM = "checksum"
 
 
 @dataclass(frozen=True)
@@ -551,6 +554,7 @@ class FileRegistration:
     wait_completed_event_id: int | None = None
     result_page_event_id: int | None = None
     stop_result_event_id: int | None = None
+    captured_checksums: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -588,7 +592,9 @@ def _same_file_request(left, right) -> bool:
         return (replace(left, error=right.error, locator=right.locator) == right
                 and json_equal(left.error, right.error)
                 and json_equal(left.locator, right.locator))
-    raise TypeError("文件申请必须属于发现、在场、归属或完成阶段")
+    if isinstance(left, FileChecksumSave):
+        return left == right
+    raise TypeError("文件申请必须属于发现、在场、归属、完成或摘要阶段")
 
 
 def _same_observed_files(left: tuple[ObservedFile, ...] | None,
@@ -642,7 +648,7 @@ class _FileObservationSaves:
                 raise ConsistencyError(f"原文件发现未可靠保存，原请求仍持有: {error}")
 
     def _save_file_fact(self, identity: tuple[int, str], stage: FileFactStage,
-                        command: FilePresenceSave | OwnershipSave | FileCompletionSave) -> None:
+                        command: FilePresenceSave | OwnershipSave | FileCompletionSave | FileChecksumSave) -> None:
         """子阶段首次确定原请求和 key，未知提交先核实该身份。"""
         observation = self.pending_file_observations[identity]
         pending = observation.facts.get(stage)
@@ -655,7 +661,8 @@ class _FileObservationSaves:
             return
         save = {FileFactStage.PRESENCE: self.capture.save_file_presence,
                 FileFactStage.OWNERSHIP: self.capture.save_file_ownership,
-                FileFactStage.COMPLETION: self.capture.save_file_completion}[stage]
+                FileFactStage.COMPLETION: self.capture.save_file_completion,
+                FileFactStage.CHECKSUM: self.capture.save_file_checksum}[stage]
         error = None
         for _ in range(2):
             receipt = save(pending.command, pending.key, self.owned)
@@ -1366,15 +1373,15 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     """
     if operation == "start_recording":
         return await _record_start_once(runtime, action)
-    from camctl.capture.host_photo import is_saved_host_photo
+    from camctl.capture.host_photo import is_saved_capture_photo
 
-    host_photo = is_saved_host_photo(action)
-    if not host_photo and runtime.last_attempt(f"start/{action['id']}") is None:
+    direct_photo = is_saved_capture_photo(action)
+    if not direct_photo and runtime.last_attempt(f"start/{action['id']}") is None:
         from camctl.capture.residual import pass_residual_gate
 
         if not await pass_residual_gate(runtime, action):
             return HandlerOutcome("not_granted")
-    if not host_photo:
+    if not direct_photo:
         _require_result_port(runtime,
             "旧拍摄启动与后续产物核实需要驱动声明 result 能力")
         prepared = await _baseline_before_control(runtime, action)
@@ -1813,6 +1820,16 @@ def _register_observed(
                     observation=entry.evidence,
                     size_bytes=entry.size_bytes,
                 ))
+        if entry.identity in registration.captured_checksums:
+            digest = registration.captured_checksums[entry.identity]
+            pending = runtime.pending_file_observations[identity]
+            facts = row_facts(runtime.owned.connection, "device_files", file_id)
+            if (FileFactStage.CHECKSUM in pending.facts
+                    or facts["checksum_support"] == int(_FILE_CHECKSUM.UNDETERMINED)):
+                runtime._save_file_fact(identity, FileFactStage.CHECKSUM, FileChecksumSave(
+                    file_id, int(_FILE_CHECKSUM.SUPPORTED), occurred, sha256=digest))
+            elif facts["checksum_support"] != int(_FILE_CHECKSUM.SUPPORTED) or facts["sha256"] != digest:
+                raise ConsistencyError("捕获源摘要与已经固定的设备文件事实不一致")
         registered.append((
             CaptureFile(
                 file_id=entry.identity, kind=entry.kind, complete=entry.complete,
@@ -2338,13 +2355,12 @@ def _target_duration_ms(action: Mapping[str, Any]) -> int:
 
 def _start_call_timeout(action: Mapping[str, Any]) -> Decimal:
     """完整原生调用使用首次固定期限，其余启动为短控制调用。"""
-    from camctl.capture.host_photo import is_saved_host_photo
-
-    if is_saved_host_photo(action):
+    if (action["type"] == int(_ACTION_TYPE.CAMERA_TAKE_PHOTO)
+            and action["execution_spec_json"].get("output_storage") is not None):
         timeout = action["execution_spec_json"].get("start_call_timeout_s")
         if (isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal))
                 or timeout <= 0):
-            raise ConsistencyError("主机单张固定调用期限缺失或非法")
+            raise ConsistencyError("单张固定调用期限缺失或非法")
         return timeout if isinstance(timeout, Decimal) else Decimal(timeout)
     if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
             and action["execution_spec_json"]["start_return_meaning"] == int(StartReturn.COMPLETED)):
@@ -2605,9 +2621,9 @@ async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
         return
-    from camctl.capture.host_photo import advance_host_photo, is_saved_host_photo
+    from camctl.capture.host_photo import advance_host_photo, is_saved_capture_photo
 
-    if is_saved_host_photo(action):
+    if is_saved_capture_photo(action):
         await advance_host_photo(context, action_id)
         return
     if _handle_binding_failure(context, action):

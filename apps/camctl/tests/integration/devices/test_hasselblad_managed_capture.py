@@ -250,6 +250,12 @@ def _script_source(call_log: Path, *, scenario: str, observed_serial: str) -> st
                 f"saved {{original}} ({{len(RAW)}} bytes)\\n"
                 f"saved {{preview}} ({{preview_size}} bytes)\\n"
             )
+        elif command == "download" and len(args) == 7 and args[3] in ("original", "thumbnail"):
+            if args[4] != {_ORIGINAL_NAME!r} or args[5] != "--output":
+                raise SystemExit("download must use the captured original name")
+            work = pathlib.Path(args[6])
+            (work / "tool-download-file").write_bytes(RAW if args[3] == "original" else PREVIEW)
+            sys.stdout.write("download complete\\n")
         else:
             raise SystemExit("unexpected hb_cli argument vector")
         """

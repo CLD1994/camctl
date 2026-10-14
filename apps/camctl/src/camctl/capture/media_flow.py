@@ -612,6 +612,10 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
 
 def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep) -> None:
     """连接已经关闭后保存读取结果；重拷继续原尝试。"""
+    from camctl.outputs.read_attempts import require_preparation_settled
+
+    if not require_preparation_settled(step):
+        return
     if step.phase is InputPhase.RECOPY_PENDING:
         flow.continuing_read_tickets[step.copy_id] = ticket
         return
@@ -635,7 +639,7 @@ def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep) -> None:
     exhausted = ticket.attempt_id >= flow.max_read_attempts
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if succeeded else AttemptStatus.FAILED,
         effect=EffectState.UNKNOWN,
-        error=None if succeeded else ErrorValue("device_error", "read"),
+        error=None if succeeded else ErrorValue("device_error", "read", {"reason": str(step.error)}),
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
     run_finish = RunFinish(RunOutcome.SUCCEEDED) if succeeded else (
         RunFinish(RunOutcome.FAILED, ErrorValue("read_attempts_exhausted", "source_read")) if exhausted else None)

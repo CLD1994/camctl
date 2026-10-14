@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
@@ -34,6 +35,7 @@ _COMPLETION_BASIS = enum_for("device_files.completion_evidence_json.basis")
 _PAIRING_METHOD = enum_for("device_files.pairing_evidence_json.method")
 _FILE_ROLE = enum_for("device_files.role")
 _COMPLETION_STATE = enum_for("device_files.completion_state")
+_CHECKSUM_SUPPORT = enum_for("device_files.checksum_support")
 
 _TASK_SCOPE = int(_OWNERSHIP_METHOD.TASK_SCOPE)
 _BASELINE_DIFFERENCE = int(_OWNERSHIP_METHOD.BASELINE_DIFFERENCE)
@@ -310,22 +312,23 @@ class FilePresenceSave:
 
 @dataclass(frozen=True)
 class FileChecksumSave:
-    """一次设备源摘要能力声明的保存输入（DEVICE_FILE_OBSERVED.CHECKSUM）。
-
-    能力由读取绑定的驱动声明，只能从未判定一次决定；已决定的能力
-    不重复声明。实际取得的源摘要在可靠取得后另行保存，不与能力混
-    同表达。
-    """
+    """决定源摘要能力，并可共同固定拍摄时可靠取得的完整源摘要。"""
 
     file_id: int
     support: int
     occurred_at: int
+    sha256: str | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.file_id)
-        if self.support not in (2, 3):
+        support = _member(_CHECKSUM_SUPPORT, "摘要能力", self.support)
+        if support not in (_CHECKSUM_SUPPORT.SUPPORTED, _CHECKSUM_SUPPORT.UNSUPPORTED):
             raise ValueError(f"摘要能力声明必须是支持或不支持: {self.support!r}")
         _timestamp(self.occurred_at)
+        if self.sha256 is not None and (
+                support != _CHECKSUM_SUPPORT.SUPPORTED or not isinstance(self.sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", self.sha256) is None):
+            raise ValueError("可靠源摘要必须属于支持摘要的文件且为完整小写 SHA-256")
 
 
 class ObservationDisposition(Enum):

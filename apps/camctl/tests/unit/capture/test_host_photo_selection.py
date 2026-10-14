@@ -11,6 +11,12 @@ from camctl.contracts.values import ConsistencyError
 _PHOTO = int(enum_for("actions.type").CAMERA_TAKE_PHOTO)
 
 
+def test_device_photo_start_uses_the_saved_complete_deadline():
+    action = {"type": _PHOTO,
+              "execution_spec_json": {"output_storage": "device", "start_call_timeout_s": Decimal("170.25")}}
+    assert _start_call_timeout(action) == Decimal("170.25")
+
+
 def test_host_photo_is_selected_only_by_saved_execution_spec():
     hasselblad = {
         "type": _PHOTO,

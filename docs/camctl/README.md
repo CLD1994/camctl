@@ -26,7 +26,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | 怎样恢复某个历史位置并重建报告？ | [历史状态查询](historical-state-query.md)：正反向路径、一致读取、分页、分批编码和性能边界 |
 | 历史快照何时生成，是否影响会话退出？ | [快照维护](history-snapshots.md)：对象范围、累计次数、候选发现、分批处理和退出 |
 | 驱动返回什么证据，文件如何分段处理？ | [设备驱动与文件执行](file-runtime.md)：结果分类、线程池、流式传输、取消和文件所有权 |
-| Hasselblad 如何执行单张 RAW 拍摄？ | [Hasselblad CFV 100C 驱动设计](hasselblad-driver.md)：设备身份、`hb_cli` 调用和主机输出；公共拍摄生命周期见[相机拍摄](../architecture/camera-capture.md)与[正式产物](../architecture/outputs.md) |
+| Hasselblad 如何执行单张 RAW 拍摄？ | [Hasselblad CFV 100C 驱动设计](hasselblad-driver.md)：设备身份、`hb_cli` 调用及正式源部署选择；公共拍摄生命周期见[相机拍摄](../architecture/camera-capture.md)与[正式产物](../architecture/outputs.md) |
 | 日志满载时怎么办，怎样安全写同一文件？ | [日志执行与适配](logging-runtime.md)：入口、队列水位、采样、取消、多进程轮换及持锁复制 |
 | 报告进程如何启动、复用、停止和回收？ | [报告进程与通信](report-runtime.md)：任务身份、结果确认、超时、管道和工作锁 |
 | 如何证明上述软件模块能共同工作？ | [软件验证与实施顺序](verification.md)：单元测试、集成测试、契约验证和阶段方向 |

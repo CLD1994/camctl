@@ -52,6 +52,7 @@ class RecoveryBlockedReason(Enum):
     MISSING_EVIDENCE_LOOKUP = "missing_evidence_lookup"
     EVIDENCE_UNAVAILABLE = "evidence_unavailable"
     INTENT_OUTSIDE_HORIZON = "intent_outside_horizon"
+    ACTIVE_LOCAL_READ = "active_local_read"
 
 
 @dataclass(frozen=True)
@@ -70,10 +71,16 @@ def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
     仅把模板的操作类别绑定原票据；其他契约保持原驱动声明，
     以便可靠页已保存实际返回时仍能验证原结果。
     """
-    if entry is None or operation not in entry.declaration.adb_foreground_recovery_operations:
+    if entry is None:
+        return None
+    if operation == "read" and entry.declaration.local_read_recovery_supported:
+        evidence_type = "local_read_recovery"
+    elif operation in entry.declaration.adb_foreground_recovery_operations:
+        evidence_type = "adb_foreground_recovery"
+    else:
         return None
     try:
-        template = entry.evidence.contract("adb_foreground_recovery", 1)
+        template = entry.evidence.contract(evidence_type, 1)
     except EvidenceError:
         return None
     if template.fields or template.identity_field is not None:

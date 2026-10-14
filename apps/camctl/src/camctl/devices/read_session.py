@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from camctl.operations.models import AttemptTicket
@@ -25,6 +26,8 @@ __all__ = [
     "ReadError",
     "ReadSession",
     "ReadSessionError",
+    "ReadPreparationError",
+    "ReadPreparationSettlement",
     "SourceFile",
     "SourceStream",
     "open_read",
@@ -36,6 +39,24 @@ _POLL_INTERVAL_S = 0.001
 
 class ReadSessionError(ValueError):
     """会话使用或源端契约错误：范围、并发或返回数据不合法。"""
+
+
+class ReadPreparationSettlement(Enum):
+    """打开会话失败时的事实；等待维护和未收场均不能结束原 READ。"""
+
+    SETTLED = "settled"
+    UNCONFIRMED = "unconfirmed"
+    WAITING = "waiting"
+
+
+class ReadPreparationError(ReadSessionError):
+    """驱动明确交付准备失败的收场分类，供全部消费者及保存边界使用。"""
+
+    def __init__(self, message, *, settlement=ReadPreparationSettlement.SETTLED):
+        if not isinstance(settlement, ReadPreparationSettlement):
+            raise TypeError("读取准备错误必须携带收场分类")
+        self.settlement = settlement
+        super().__init__(message)
 
 
 class ReadError(Exception):

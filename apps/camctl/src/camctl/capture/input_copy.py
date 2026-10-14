@@ -19,7 +19,7 @@ from typing import Callable, Protocol
 from camctl.capture.media import SaveDisposition, SaveReceipt
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, ObjectId
-from camctl.devices.read_session import ReadChunk, ReadEnd
+from camctl.devices.read_session import ReadChunk, ReadEnd, ReadPreparationError, ReadPreparationSettlement
 from camctl.host_files.models import FileRef
 from camctl.outputs.copy import (
     CompletionPhase,
@@ -128,6 +128,7 @@ class InputStep:
     read_end: ReadEnd | None = None
     stop_requested: bool = False
     content_complete: bool = False
+    preparation_settlement: ReadPreparationSettlement = ReadPreparationSettlement.SETTLED
 
 
 @dataclass(frozen=True)
@@ -214,7 +215,12 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
             context.source_device_file_id, facts.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
             else prepared.decision.offset)
     except Exception as error:
-        return InputStep(InputPhase.SEGMENT_FAILED, copy_id=copy_id, error=error, source_failed=True)
+        settlement = (error.settlement if isinstance(error, ReadPreparationError)
+                      else ReadPreparationSettlement.SETTLED)
+        return InputStep(InputPhase.WAITING if settlement is ReadPreparationSettlement.WAITING else InputPhase.SEGMENT_FAILED,
+                         copy_id=copy_id, error=error,
+                         source_failed=settlement is ReadPreparationSettlement.SETTLED,
+                         preparation_settlement=settlement)
     result = None
     try:
         if prepared.decision.outcome is ResumeOutcome.VERIFY:

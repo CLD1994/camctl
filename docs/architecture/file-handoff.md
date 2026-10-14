@@ -23,6 +23,8 @@ staging/
   capture-previews/
   derived/
   capture-work/<activity_id>/
+  read-downloads/<run_id>-<attempt_id>/
+  .read-download-cleanup-cursor
   logs/
 ready/
 processing/
@@ -47,7 +49,9 @@ processing/
 
 `staging` 中登记的主机文件按[用途与路径规则](../camctl/database/file-fields.md#中间文件的路径与用途目录)分开保存：`deliveries/` 用于交付副本，`recording-inputs/` 用于录像输入，`processing-temp/` 用于处理临时文件，`capture-originals/` 与 `capture-previews/` 分别用于单张拍摄的原图和预览，`derived/` 用于主机加工成品。各用途子目录名称固定，实际根目录由部署配置提供。
 
-相机工具可能按厂商规则自行生成文件名。单张拍摄的临时输出使用 `staging/capture-work/<activity_id>/`，其中 `activity_id` 必须来自已持久化的采集活动；恢复继续使用同一目录。该工作区不登记为正式用途文件，也不是交付目录。驱动完成必要的结果和文件核实后，再按原图或预览用途提升到各自正式源目录；准确的文件责任、提升条件及恢复行为见[主机单张拍摄文件的登记与恢复](camera-capture.md#主机单张拍摄文件的登记与恢复)。
+相机工具可能按厂商规则自行生成文件名。单张拍摄的临时输出使用 `staging/capture-work/<activity_id>/`，其中 `activity_id` 必须来自已持久化的采集活动；恢复继续使用同一目录。该工作区不登记为正式用途文件，也不是交付目录。驱动完成必要的结果和文件核实后，再按原图或预览用途归档；主机模式提升为正式源，相机模式可靠登记设备产物后回收主机副本。准确的文件责任、提升条件及恢复行为见[主机单张拍摄文件的登记与恢复](camera-capture.md#主机单张拍摄文件的登记与恢复)。
+
+Hasselblad 读取相机源时，工具先把指定文件下载到 `staging/read-downloads/<run_id>-<attempt_id>/`。目录身份来自已经保存的 READ 流程及尝试；下载副本只供本次读取使用，不登记为正式源或交付。有限维护的续查位置保存在 `staging/.read-download-cleanup-cursor`，写入时通过同名 `.tmp` 临时文件原子替换；该位置只决定续查顺序，不授予删除资格。副本的正常回收与重启核实遵守[驱动下载契约](../camctl/hasselblad-driver.md#相机正式源与主机临时文件)，主程序不领取这些文件。
 
 状态报告文件不登记为中间文件，使用 `staging` 下专属的 `reports/` 直接子目录，文件名即最终发布名（`status-report-<report_id>-<sha256>.json`）。该目录由首次报告写入创建，报告自身的管理属于内部状态；恢复观察、残留替代及发布规则见[报告发布与补投](report-publication.md)。
 

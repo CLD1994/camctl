@@ -26,6 +26,7 @@ class CaptureStorage(StrEnum):
     """拍摄任务正式产物由设备保留还是写入主机。"""
 
     HOST = "host"
+    DEVICE = "device"
 
 
 @dataclass(frozen=True)
@@ -50,3 +51,9 @@ class CaptureTask:
 
 class CaptureTaskFactory(Protocol):
     def __call__(self, effective_params: Mapping[str, JsonValue]) -> CaptureTask: ...
+
+
+class DeploymentTaskFactory(Protocol):
+    """从单个设备的部署声明绑定纯任务工厂。"""
+
+    def __call__(self, declaration: Mapping[str, object]) -> CaptureTaskFactory: ...

@@ -280,7 +280,7 @@ class _EmptyResults:
         raise AssertionError("legacy v1 result fake must use list_round")
 
 
-def _config(home: Path):
+def _config(home: Path, *, storage="host"):
     return load_config({
         "paths": {
             "state_db": str(home / "state.db"),
@@ -291,7 +291,7 @@ def _config(home: Path):
         },
         "devices": {"cam-1": {
             "kind": "camera", "driver": DRIVER_ID,
-            "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": "SERIAL-1"},
+            "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": "SERIAL-1", "output_storage": storage},
         }},
     }, ConfigDefaults())
 
@@ -334,8 +334,8 @@ def _apply_cancel(owned, cancel_action_id: int, action_id: int) -> None:
 async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
                  cancel_action: bool = False, legacy: bool = False,
                  wall: list[int] | None = None, results=None, evidence=None,
-                 driver_factory=None):
-    cfg = _config(tmp_path)
+                 driver_factory=None, storage="host"):
+    cfg = _config(tmp_path, storage=storage)
     state_db = Path(cfg.paths.state_db)
     initialized = initialize_state(cfg, state_db)
     assert initialized.outcome is InitOutcome.CREATED, initialized.detail

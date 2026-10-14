@@ -661,9 +661,13 @@ def _report_assembly(
     processing = Path(deps.config.paths.processing)
     drivers = current_registry()
     from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from camctl.bootstrap.download_cleanup import ReadDownloadCleanup
     from camctl.outputs.work_files import WorkFileLimits
     deps.work_files = WorkFileRuntime(
-        staging=staging, pending_media_results=deps.capture_media_results, limits=WorkFileLimits(
+        staging=staging, pending_media_results=deps.capture_media_results,
+        download_cleanup=ReadDownloadCleanup(staging,
+            limit=deps.config.cleanup.work_file_limit_per_run, boundary=deps.recovery_boundary),
+        limits=WorkFileLimits(
             batch_size=deps.config.cleanup.work_file_batch_size,
             limit_per_run=deps.config.cleanup.work_file_limit_per_run))
     resume_files = partial(resume_file_observations,

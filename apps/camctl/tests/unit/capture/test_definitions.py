@@ -82,6 +82,17 @@ class TestCaptureDefinition:
             "start_call_timeout_s": Decimal("180"),
         }
 
+    def test_device_photo_task_saves_its_storage_and_exact_start_deadline(self) -> None:
+        assert build_capture_spec("camera_take_photo", CaptureTask(
+            "camera_take_photo", output_storage=CaptureStorage.DEVICE, start_call_timeout_s=Decimal("180.125"),
+        )) == {"output_storage": "device", "start_call_timeout_s": Decimal("180.125")}
+
+    @pytest.mark.parametrize("storage", ["host", "device"])
+    def test_saved_photo_definition_preserves_original_deadline(self, storage):
+        assert validate_capture_spec("camera_take_photo", {
+            "output_storage": storage, "start_call_timeout_s": Decimal("170.25"),
+        }) == {"output_storage": storage, "start_call_timeout_s": Decimal("170.25")}
+
     def test_empty_photo_task_factory_keeps_legacy_empty_execution_definition(self) -> None:
         assert build_capture_spec("camera_take_photo", CaptureTask("camera_take_photo")) == {}
 
@@ -120,7 +131,10 @@ class TestCaptureDefinition:
         [
             {"output_storage": "host"},
             {"start_call_timeout_s": Decimal("180")},
-            {"output_storage": "device", "start_call_timeout_s": Decimal("180")},
+            {"output_storage": "camera", "start_call_timeout_s": Decimal("180")},
+            {"output_storage": None, "start_call_timeout_s": Decimal("180")},
+            {"output_storage": True, "start_call_timeout_s": Decimal("180")},
+            {"output_storage": [], "start_call_timeout_s": Decimal("180")},
             {"output_storage": "host", "start_call_timeout_s": Decimal("180"), "extra": 1},
         ],
     )

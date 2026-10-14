@@ -55,6 +55,8 @@ class DriverDeclaration:
     adb_foreground_recovery_operations: frozenset[str] = frozenset()
     #: 启动前完整目录准备，独立于任务结果列举能力。
     directory_supported: bool = False
+    #: 仅声明 READ 的本地主机收场恢复，不推断设备效果或独立活动结束。
+    local_read_recovery_supported: bool = False
 
     def __post_init__(self) -> None:
         operations = self.adb_foreground_recovery_operations

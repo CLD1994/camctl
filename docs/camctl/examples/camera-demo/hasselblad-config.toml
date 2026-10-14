@@ -15,3 +15,5 @@ driver = "hasselblad_cfv100c"
 executable = "/home/cld/hb_cli/hb_cli"
 serial = "REPLACE_HASSELBLAD_SERIAL"
 product_id = 10
+# 主机作为正式源，保留原图和缩略图；相机模式见驱动说明。
+output_storage = "host"

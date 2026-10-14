@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from unicodedata import category
 
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+from camctl.devices.tasks import CaptureStorage
 
 __all__ = ["CameraConfig", "read_camera_config"]
 
@@ -17,6 +18,7 @@ class CameraConfig:
     executable: str
     serial: str
     product_id: int = 10
+    output_storage: CaptureStorage = CaptureStorage.HOST
 
 
 def read_camera_config(declaration: Mapping[str, object]) -> CameraConfig:
@@ -25,11 +27,13 @@ def read_camera_config(declaration: Mapping[str, object]) -> CameraConfig:
         raise ValueError("设备声明必须是表")
     if declaration.get("kind") != "camera" or declaration.get("driver") != DRIVER_ID:
         raise ValueError("设备声明不是 Hasselblad 相机")
+    if "output_storage" in declaration:
+        raise ValueError("output_storage 必须位于 Hasselblad 配置表")
 
     raw = declaration.get("hasselblad")
     if not isinstance(raw, Mapping):
         raise ValueError("Hasselblad 配置必须是表")
-    unknown = set(raw) - {"executable", "serial", "product_id"}
+    unknown = set(raw) - {"executable", "serial", "product_id", "output_storage"}
     if unknown:
         raise ValueError(f"Hasselblad 配置包含未知字段: {sorted(unknown)}")
     missing = {"executable", "serial"} - set(raw)
@@ -57,4 +61,12 @@ def read_camera_config(declaration: Mapping[str, object]) -> CameraConfig:
     if not 1 <= product_id <= 65535:
         raise ValueError("Hasselblad product_id 必须在 1～65535 之间")
 
-    return CameraConfig(executable, serial, product_id)
+    output_storage = raw.get("output_storage", CaptureStorage.HOST.value)
+    if not isinstance(output_storage, str):
+        raise ValueError("Hasselblad output_storage 必须是字符串")
+    try:
+        storage = CaptureStorage(output_storage)
+    except ValueError as error:
+        raise ValueError("Hasselblad output_storage 不合法") from error
+
+    return CameraConfig(executable, serial, product_id, storage)
