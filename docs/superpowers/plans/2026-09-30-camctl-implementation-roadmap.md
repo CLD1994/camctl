@@ -38,10 +38,10 @@ Hasselblad CFV 100C 接入的拍摄能力仅为单张 RAW 拍照，由[专项接
 | SW-02：日志副本与标记失败诊断 | [副本编排](../../../apps/camctl/src/camctl/logging_runtime/copies.py)保留完整标记与文件回执，[会话入口](../../../apps/camctl/src/camctl/session/service.py)消费诊断。默认报告首次失败立即触发，工厂及交付异常暂停同轮后续尝试，失效文件日志停用后采用 stderr；真实文件、默认装配和两类会话已通过[组合验证](../../camctl/verification.md#sw-02-日志副本诊断验证2026-10-13)。 | [修复步骤与验收门禁](2026-10-13-camctl-sw02-log-copy-diagnostics.md) |
 | SW-03：标记保存流程的临时文件清理 | [同步保存拥有者](../../../apps/camctl/src/camctl/logging_runtime/copies.py)只在临时句柄确认关闭后清理本次路径，独立保留保存、关闭和清理错误；已确认的目录同步事实保持。真实文件、取消及默认诊断已通过[组合验证](../../camctl/verification.md#sw-03-标记临时文件清理验证2026-10-14)。 | [修复步骤与验收门禁](2026-10-13-camctl-sw03-marker-temp-cleanup.md) |
 | SW-04：日志责任与启动清理 | 默认 `run` 锁后登记一次旧副本及临时文件检查，排除本次归属和实际普通日志目标；必要业务停止、文件结果及诊断在释放会话锁前分别消费。默认装配、取消及真实文件已通过[组合验证](../../camctl/verification.md#sw-04-日志责任与启动检查验证2026-10-14)。 | [修复步骤与验收门禁](2026-10-13-camctl-sw04-startup-log-sweep.md) |
-| SW-05：会话锁失败分类 | 默认装配直接调用[会话锁端口](../../../apps/camctl/src/camctl/session/locks.py)，但 `run_session` 将取得会话锁时的异常全部归为 `state_db_error`，锁文件打开或加锁故障没有按 `lock_error` 报告。 | [修复步骤与验收门禁](2026-10-13-camctl-sw05-session-lock-errors.md) |
-| SW-06：读取发现的分批处理 | [默认取回流程](../../../apps/camctl/src/camctl/outputs/obtain_flow.py)调用 `plan_device_work`，后者在[设备工作发现](../../../apps/camctl/src/camctl/outputs/dispatch.py)中用无批次限制的 `fetchall()` 收集活动与全部读取候选；主机源读取也一次收集全部未完成拷贝。`scheduling/discovery.py` 的分页辅助函数没有接入这些入口，其直接测试不能证明默认读取发现已分批。 | [修复步骤与验收门禁](2026-10-13-camctl-sw06-bounded-read-discovery.md) |
+| SW-05：会话锁失败分类 | 截至 SW-04 交付基线，默认装配直接调用[会话锁端口](../../../apps/camctl/src/camctl/session/locks.py)，但 `run_session` 将取得会话锁时的异常全部归为 `state_db_error`。重复启动导致锁冲突，或打开、加锁、释放锁发生故障时，错误分类及退出收场不完整；多个退出错误叠加还可能覆盖原错误或跳过其他资源清理。正常取得和释放锁的路径仍可运行。 | [修复步骤与验收门禁](2026-10-13-camctl-sw05-session-lock-errors.md) |
+| SW-06：读取发现的分批处理 | [默认取回流程](../../../apps/camctl/src/camctl/outputs/obtain_flow.py)调用 `plan_device_work`，后者在[设备工作发现](../../../apps/camctl/src/camctl/outputs/dispatch.py)中用无批次限制的 `fetchall()` 收集活动与全部读取候选；主机源读取也一次收集全部未完成拷贝。查询与内存开销随候选积累增长，可能拖慢运行或遇到资源不足；没有证据表明少量任务会因缺少分页而必然漏任务或失败。`scheduling/discovery.py` 的分页辅助函数尚未接入这些入口。 | [修复步骤与验收门禁](2026-10-13-camctl-sw06-bounded-read-discovery.md) |
 
-六份计划已按 SW-01 → SW-02 → SW-03 → SW-04 → SW-05 → SW-06 的顺序编写。后续实施建议沿此顺序逐项完成失败测试、修复、组合验证与独立复核，再进入下一项。编号顺序用于组织工作，不改变业务依赖：SW-02 提供日志诊断与完整保存回执，SW-03 和 SW-04 分别消费它；SW-04 的启动与收场变化由 SW-05 复核。各计划区分现行契约与内部接口、配置和文件组织的实施建议。
+六份计划已按 SW-01 → SW-02 → SW-03 → SW-04 → SW-05 → SW-06 的顺序编写。编号顺序用于组织这些专项，不改变业务依赖：SW-02 提供日志诊断与完整保存回执，SW-03 和 SW-04 分别消费它；SW-04 的启动与收场变化由 SW-05 复核。各计划区分现行契约与内部接口、配置和文件组织的实施建议。
 
 - [x] [SW-01](2026-10-13-camctl-sw01-acceptance-clock-status.md)：受理及可信下界历史时间状态、默认入口与历史保持组合验证。
 - [x] [SW-02](2026-10-13-camctl-sw02-log-copy-diagnostics.md)：日志副本与标记错误的会话诊断。
@@ -50,7 +50,11 @@ Hasselblad CFV 100C 接入的拍摄能力仅为单张 RAW 拍照，由[专项接
 - [ ] [SW-05](2026-10-13-camctl-sw05-session-lock-errors.md)：锁错误分类及会话入口同类检查。
 - [ ] [SW-06](2026-10-13-camctl-sw06-bounded-read-discovery.md)：默认读取发现的分批处理与排序组合验证。
 
-2026-10-14：SW-01—SW-04 已修复并通过专项、相关完整目录回归及根代理与独立复核；SW-05、SW-06 待按串行顺序实施。软件测试、真实设备和目标部署分别保留证据边界。
+2026-10-14：SW-01—SW-04 已修复并通过专项、相关完整目录回归及根代理与独立复核。SW-05 已完成部分实现及定向验证，候选作为开发中快照保存在 `wip/sw05-session-lock-errors` 分支；最终逐文件审核、独立整体复核、完整目录门禁与正式修复提交尚待完成，详见其专项计划。`implement_camctl` 的功能代码保持 SW-04 实现完成的状态。SW-06 尚未开始。软件测试、真实设备和目标部署分别保留证据边界。
+
+**SW-04 的可用范围与后续优先级：** 已提交的 SW-04 版本 `8755532` 可继续用于此前演示范围及现有规模的正常拍摄、产物登记、独立取回和报告。未完成 SW-05、SW-06 本身不会使这些正常路径失效，也不推翻已有演示的验收结论；这两项仍关系到故障发生后的可靠退出与恢复，以及大量候选积累后的运行稳定性。本判断依据 SW-04 源码、既有演示及验证记录，不扩大其已验范围。
+
+后续优先实施其他功能，SW-05、SW-06 暂缓推进。SW-05 的已有实现、定向证据和恢复点继续保留；恢复这两项时，先完成 SW-05 的剩余审核、门禁与提交，再推进 SW-06。
 
 相机调试进度由[相机接入计划 T9](2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)维护；目标资源、物理断电和第三方接入的独立证据边界见[部署交接](../../camctl/verification.md#部署交接与待核验项)。这些范围不能替代上述软件任务，也不因软件替身通过而成为目标环境已验结论。
 
