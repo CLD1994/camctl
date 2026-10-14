@@ -444,6 +444,7 @@ def session_capture_assembly(
     pending_result_scans: dict | None = None,
     pending_host_photo_prepares: dict[int, Any] | None = None,
     pending_host_photo_completions: dict[int, Any] | None = None,
+    read_discovery_batch_size: int | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
@@ -574,7 +575,8 @@ def session_capture_assembly(
         media = (
             _media_flow_with(
                 owned, entry, device_id, str(driver_id), tools, staging,
-                wall, declaration, retry_gate, monotonic, executor)
+                wall, declaration, retry_gate, monotonic, executor,
+                read_discovery_batch_size=read_discovery_batch_size)
             if media_enabled else None)
         if media is not None:
             media.segment_size = segment_size
@@ -687,6 +689,7 @@ def _media_flow_with(
     retry_gate: RetryWaitGate,
     monotonic: Callable[[], int],
     file_executor: FileTaskExecutor | None = None,
+    read_discovery_batch_size: int | None = None,
 ) -> MediaFlow | None:
     """按登记声明与设备声明构造媒体链；未声明读取能力时不装配。
 
@@ -722,4 +725,5 @@ def _media_flow_with(
         max_recopies=_device_attempts(declaration, "copy", 1, "max_recopies"),
         evidence=entry.evidence,
         file_executor=file_executor,
+        read_discovery_batch_size=read_discovery_batch_size,
     )

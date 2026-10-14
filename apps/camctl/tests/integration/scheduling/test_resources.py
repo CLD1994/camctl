@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -386,6 +387,56 @@ def test_earlier_candidate_wins_consistently(tmp_path: Path) -> None:
         assert early.value.outcome is GrantOutcome.GRANTED
     finally:
         owned.connection.close()
+
+
+@pytest.mark.parametrize("blocker", [False, True])
+def test_start_order_probe_returns_only_first_blocker(tmp_path: Path, blocker: bool) -> None:
+    owned = _seed_environment(tmp_path)
+    connection = owned.connection
+    returned = []
+
+    class Connection:
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+        def execute(self, sql, parameters=()):
+            cursor = connection.execute(sql, parameters)
+            if not sql.startswith("SELECT a.id, a.scheduled_at"):
+                return cursor
+
+            class Cursor:
+                def close(self):
+                    cursor.close()
+
+                def fetchall(self):
+                    rows = cursor.fetchall()
+                    returned.append(len(rows))
+                    return rows
+
+                def fetchone(self):
+                    row = cursor.fetchone()
+                    returned.append(int(row is not None))
+                    return row
+
+            return Cursor()
+
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        _seed_plan(connection, 1)
+        for identity in range(1, 133):
+            _seed_record_action(connection, identity, 1, input_index=identity,
+                scheduled_at=_NOW - 1_000_000 if blocker and identity == 132 else _NOW)
+        _seed_activity(connection, 1)
+        connection.commit()
+        result = SchedulingRepository().grant_start(_grant_request(1), new_operation_key(),
+            replace(owned, connection=Connection()))
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.outcome is (GrantOutcome.REJECTED if blocker else GrantOutcome.GRANTED)
+        if blocker:
+            assert result.value.reason == "not_first_candidate"
+        assert returned and max(returned) <= 1, "启动排序判断加载了所有执行中动作"
+    finally:
+        connection.close()
 
 
 def test_grant_rejects_window_and_terminal_states(tmp_path: Path) -> None:

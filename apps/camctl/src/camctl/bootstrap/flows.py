@@ -38,20 +38,22 @@ from camctl.persistence.repositories.scheduling import (
 )
 from camctl.session.service import StateDbFailure
 from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 
 __all__ = ["CaptureFlow", "capture_flow", "cancel_flow", "report_flow", "residual_flow",
            "winddown_flow"]
 
 
 def residual_flow(capture_factory, *, resume_media_results=None, resume_file_observations=None,
-                  resume_read_results=None, owns_device=None):
+                  resume_read_results=None, owns_device=None, read_discovery_batch_size=DEFAULT_BATCH_SIZE):
     """残留收场推进流程；实现见 camctl.capture.residual。"""
     async def resume_actual_file_facts(owned):
         await _resume_actual_file_facts(
             owned, resume_file_observations, resume_media_results, resume_read_results)
 
     return _residual_flow_impl(
-        capture_factory, resume_actual_file_facts=resume_actual_file_facts, owns_device=owns_device)
+        capture_factory, resume_actual_file_facts=resume_actual_file_facts, owns_device=owns_device,
+        read_discovery_batch_size=read_discovery_batch_size)
 
 
 async def _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
@@ -72,6 +74,7 @@ async def _resume_actual_file_facts(owned, resume_file_observations, resume_medi
 
 def _due_pending_actions(
     connection: Any, now_us: int, *, device_id: str | None = None,
+    action_ids=None, limit=DEFAULT_BATCH_SIZE,
 ) -> list[tuple[int, str, int, int]]:
     """从当前投影取到期拍摄动作及窗口事实：待执行、未取消且已到时间。"""
     query = ("SELECT id, device_id, scheduled_at, max_delay_ms FROM actions"
@@ -81,7 +84,12 @@ def _due_pending_actions(
     if device_id is not None:
         query += " AND device_id=?"
         parameters += (device_id,)
-    with closing(connection.execute(query + " ORDER BY plan_id, input_index", parameters)) as cursor:
+    if action_ids is not None:
+        if not action_ids:
+            return []
+        query += " AND id IN (" + ",".join("?" for _ in action_ids) + ")"
+        parameters += tuple(action_ids)
+    with closing(connection.execute(query + " ORDER BY plan_id, input_index LIMIT ?", (*parameters, limit))) as cursor:
         return [(int(row[0]), row[1], int(row[2]), int(row[3]))
                 for row in cursor.fetchall()]
 
@@ -117,13 +125,15 @@ class CaptureFlow:
     """每设备持有一项跨轮任务，连接持续到原结果保存及交付完成。"""
 
     def __init__(self, capture_factory, *, resume_media_results=None,
-                 resume_file_observations=None, resume_read_results=None):
+                 resume_file_observations=None, resume_read_results=None,
+                 read_discovery_batch_size=DEFAULT_BATCH_SIZE):
         self._factory = capture_factory
         self._resume_media = resume_media_results
         self._resume_files = resume_file_observations
         self._resume_reads = resume_read_results
         self._devices: dict[str, BackgroundFlow] = {}
         self._stopping = False
+        self._discovery = ReadDiscoveryOwner(read_discovery_batch_size)
 
     def owns_device(self, device_id):
         owner = self._devices.get(device_id)
@@ -162,31 +172,37 @@ class CaptureFlow:
         try:
             await _resume_actual_file_facts(owned, self._resume_files, self._resume_media, self._resume_reads)
             now = context.clock.utc_micros()
-            device_ids = dict.fromkeys(row[1] for row in _due_pending_actions(owned.connection, now))
-            for device_id, _ in _ready_device_groups(owned.connection, ready_capture_actions(owned.connection, now)):
-                device_ids[device_id] = None
+            self._discovery.begin_round(owned.connection, now)
+            page = self._discovery.captures(owned.connection, now)
+            device_ids = {}
+            for action_id, device_id, *_ in page.items:
+                device_ids.setdefault(device_id, []).append(action_id)
+            if self._discovery.pending and getattr(context, "wake", None) is not None:
+                from camctl.scheduling.notifications import WakeReason
+                context.wake.mark_changed(WakeReason.READ_OPPORTUNITY)
         except (sqlite3.Error, ConsistencyError) as error:
             raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
         finally:
             owned.connection.close()
-        for device_id in device_ids:
+        for device_id, action_ids in device_ids.items():
             self.check_completed()
             if self._stopping:
                 return
             owner = self._devices.get(device_id)
             if owner is None:
-                async def advance(context, device_id=device_id):
-                    await self._advance_device(context, device_id)
+                async def advance(context, device_id=device_id, action_ids=tuple(action_ids)):
+                    await self._advance_device(context, device_id, action_ids)
                 owner = BackgroundFlow(advance)
                 self._devices[device_id] = owner
             await owner(context)
 
-    async def _advance_device(self, context, device_id):
+    async def _advance_device(self, context, device_id, action_ids):
         owned = context.open_connection()
         try:
             scheduling = SchedulingRepository()
             runtime = self._factory(owned, device_id)
-            pending = _due_pending_actions(owned.connection, context.clock.utc_micros(), device_id=device_id)
+            pending = _due_pending_actions(owned.connection, context.clock.utc_micros(), device_id=device_id,
+                action_ids=action_ids, limit=self._discovery.batch_size)
             for action_id, _, scheduled_at, max_delay_ms in pending:
                 if self._stopping:
                     return
@@ -215,7 +231,8 @@ class CaptureFlow:
                     raise StateDbFailure(f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
             if runtime is None or self._stopping:
                 return
-            group = ready_capture_actions(owned.connection, context.clock.utc_micros(), device_id=device_id)
+            group = ready_capture_actions(owned.connection, context.clock.utc_micros(), device_id=device_id,
+                action_ids=action_ids, limit=self._discovery.batch_size)
             for action_id, outcome in await dispatch_ready(runtime, group):
                 if isinstance(outcome, BaseException):
                     raise outcome
@@ -232,10 +249,12 @@ class CaptureFlow:
 
 
 def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None,
-                 resume_file_observations=None, resume_read_results=None) -> CaptureFlow:
+                 resume_file_observations=None, resume_read_results=None,
+                 read_discovery_batch_size=DEFAULT_BATCH_SIZE) -> CaptureFlow:
     """构造按设备独立推进的拍摄拥有者；工厂返回 None 表示能力未装配。"""
     return CaptureFlow(capture_factory, resume_media_results=resume_media_results,
-                       resume_file_observations=resume_file_observations, resume_read_results=resume_read_results)
+                       resume_file_observations=resume_file_observations, resume_read_results=resume_read_results,
+                       read_discovery_batch_size=read_discovery_batch_size)
 
 
 @dataclass(frozen=True)

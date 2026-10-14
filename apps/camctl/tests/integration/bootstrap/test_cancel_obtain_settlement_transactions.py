@@ -172,7 +172,7 @@ async def test_cancel_obtain_unbuilt_items_end_without_new_delivery_or_attempt(e
         ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), occurred_at=lambda: _NOW)(owned)
     obtain._start_due(runtime, _NOW)
     assert obtain._resolve_sources(runtime, obtain._action_facts(owned.connection, target), _NOW)
-    obtain._fix_pending_selections(runtime, obtain._action_facts(owned.connection, target), _NOW)
+    obtain._fix_pending_selections(runtime, _NOW)
     assert owned.connection.execute("SELECT status,delivery_id FROM obtain_items ORDER BY id").fetchall() == [(2, None), (2, None)]
     _apply(owned, target)
     before_attempts = _attempts(owned)

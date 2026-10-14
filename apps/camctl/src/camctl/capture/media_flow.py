@@ -151,13 +151,14 @@ class RecordingInputCopies:
     def __init__(self, owned: OwnedConnection, roots: BoundDirectories,
                  occurred_at: Callable[[], int], *,
                  max_recopies: int = 1,
-                 file_executor: FileTaskExecutor | None = None) -> None:
+                 file_executor: FileTaskExecutor | None = None,
+                 read_discovery_batch_size: int | None = None) -> None:
         self.owned = owned
         self.roots = roots
         self.occurred_at = occurred_at
         self.max_recopies = max_recopies
         self.file_executor = file_executor
-        self.repository = OutputsRepository()
+        self.repository = OutputsRepository() if read_discovery_batch_size is None else OutputsRepository(read_discovery_batch_size)
 
     @staticmethod
     def _receipt(outcome) -> SaveReceipt:
@@ -335,7 +336,7 @@ def load_processing_status(owned: OwnedConnection, processing_id: int) -> Proces
     if output_id is None and repair_state == 4:
         with closing(owned.connection.execute(
             "SELECT id FROM intermediate_files"
-            " WHERE owner_action_id=? AND purpose=4 ORDER BY id", (action_id,)
+            " WHERE owner_action_id=? AND purpose=4 ORDER BY id LIMIT 2", (action_id,)
         )) as cursor:
             registered = cursor.fetchall()
         if not registered:
@@ -409,6 +410,7 @@ class MediaFlow:
     pending_read_business: dict = field(default_factory=dict)
     pending_read_ends: dict = field(default_factory=dict)
     pending_media_results: dict = field(default_factory=dict)
+    read_discovery_batch_size: int | None = None
 
     def saves(self, *, file_ids=()) -> CaptureProcessingSaves:
         return CaptureProcessingSaves(self.owned, self.pending_media_results, file_ids=file_ids)
@@ -416,7 +418,7 @@ class MediaFlow:
     def copies(self) -> RecordingInputCopies:
         return RecordingInputCopies(
             self.owned, self.roots, self.occurred_at, max_recopies=self.max_recopies,
-            file_executor=self.file_executor)
+            file_executor=self.file_executor, read_discovery_batch_size=self.read_discovery_batch_size)
 
 
 def _ensure_checksum_support(
@@ -463,7 +465,7 @@ async def run_recording_media(
     await retry_read_ends(flow)
     original_failure = flow.owned.connection.execute(
         "SELECT c.id FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
-        " WHERE c.processing_id=? AND r.kind=3 AND r.status=4", (processing_id,)).fetchall()
+        " WHERE c.processing_id=? AND r.kind=3 AND r.status=4 LIMIT 2", (processing_id,)).fetchall()
     if len(original_failure) > 1:
         raise ConsistencyError("同一内部处理有多个终态失败读取")
     if original_failure:

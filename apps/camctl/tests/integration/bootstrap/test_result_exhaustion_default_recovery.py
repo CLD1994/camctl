@@ -35,7 +35,6 @@ from .test_recording_results_saved_consumers import _UnavailableOriginalKey
 pytestmark = pytest.mark.asyncio
 _ENTRANCES = ("normal", "residual", "restricted", "cancel", "restricted_cancel")
 _CANDIDATE_QUERIES = {
-    "residual": "SELECT t.id, t.attempt_no, r.id, r.kind",
     "restricted": "SELECT id FROM actions WHERE type = 2 AND status = 2",
     "restricted_cancel": "SELECT id, status, input_fields_json FROM actions WHERE type = 6",
 }

@@ -134,7 +134,9 @@ async def _default_world(pipeline, monkeypatch):
 
     monkeypatch.setattr(capture_assembly, "session_capture_assembly", capture_factory)
     monkeypatch.setattr(lifecycle, "run_session", create_autospec(lifecycle.run_session, side_effect=session))
-    deps = lifecycle.build_runtime(CommandMode.RUN, _config(roots.staging.parent), catalog=_Catalog())
+    cfg = _config(roots.staging.parent)
+    cfg = replace(cfg, session=replace(cfg.session, read_discovery_batch_size=1))
+    deps = lifecycle.build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
     try:
         assert deps.startup_error is None
         assert (await lifecycle.execute_command(deps, None)).succeeded

@@ -30,7 +30,8 @@ class _Sequence:
         events = tuple(replace(event, event_id=allocation.first_event_id + index,
                                transaction_id=allocation.txn_id) for index, event in enumerate(self.events))
         return CommandPlan(events, self.context.owners, self.context.state_rows,
-                           read_coverage=self.context.read_coverage)
+                           read_coverage=self.context.read_coverage,
+                           product_read_scope=getattr(self.context, "product_read_scope", None))
 
 
 def _scenarios(owned, mode, change):

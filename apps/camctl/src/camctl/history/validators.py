@@ -16,7 +16,7 @@ from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.history.changes import ChangeDerivationError, event_report_targets
-from camctl.history.reads import BaselineRangeRead, ReadCoverage
+from camctl.history.reads import BaselineRangeRead, CurrentEventReads, ReadCoverage
 from camctl.history.host_photo_request import (
     HostPhotoRequestError,
     parse_host_photo_request,
@@ -54,6 +54,8 @@ class EventContext:
     状态或执行资格。未提供时，固定关联只能使用事件已有事实。
     read_coverage 声明本事务完整读取的范围，需确认集合完整性的
     守卫通过 complete_rows 读取该范围内的当前行。
+    current_reads 由原写事务内核提供限定只读端口，只合并已经验证
+    的前序事件；静态验证与历史回放不依赖当前 SQL 投影。
     """
 
     transaction: TransactionRange
@@ -62,6 +64,7 @@ class EventContext:
     transaction_rows: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None
     read_coverage: ReadCoverage = field(default_factory=ReadCoverage)
     baseline_reads: Mapping[int, BaselineRangeRead] = field(default_factory=dict)
+    current_reads: CurrentEventReads | None = None
 
     def __post_init__(self) -> None:
         # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；

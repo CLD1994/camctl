@@ -103,6 +103,7 @@ def _proposal(owned):
     try:
         plan = outputs._GrantFileCommand(_candidate(_Seedling(31, 101, 701, 501)),
             new_operation_key()).plan(TransactionScope(connection, 1, 1))
+        plan = _static_product_facts(plan, connection, 31, 701, _NOW)
     finally:
         connection.rollback()
     state = deepcopy(plan.state_rows)
@@ -112,6 +113,13 @@ def _proposal(owned):
             state.setdefault(row.table, {})[row.row_id] = dict(row.after.values)
     return replace(plan.events[-1], change_seq=1), EventContext(TransactionRange(2, 2, 6), plan.owners, state,
                                          read_coverage=plan.read_coverage)
+
+
+def _static_product_facts(plan, connection, action_id, output_id, occurred_at):
+    """静态事件验证显式取得完整边界；生产路径使用原事务内的读取端口。"""
+    reads = outputs._ProductReads(connection, plan.state_rows)
+    has_product_predecessor(reads, action_id, output_id, occurred_at)
+    return replace(plan, read_coverage=reads.read_coverage())
 
 
 def test_formal_grant_accepts_complete_candidate_facts(competition_database):
@@ -203,9 +211,8 @@ class _WithoutCandidateCoverage:
 
     def plan(self, scope):
         plan = outputs._GrantFileCommand(_candidate(_Seedling(31, 101, 701, 501)), self.key).plan(scope)
-        ranges = dict(plan.read_coverage.ranges)
-        del ranges["actions", "status"]
-        return replace(plan, read_coverage=ReadCoverage(ranges))
+        # 两条可靠路径都没有提供：没有事务端口，也没有静态完整范围。
+        return replace(plan, product_read_scope=None)
 
 
 def test_incomplete_candidate_reads_roll_back_entire_grant(competition_database):
@@ -227,10 +234,11 @@ class _BatchReads(_FaultConnection):
         self.scope, self.fail_at = scope, fail_at
         self.cursors = []
         self.sizes = []
+        self.batches = 0
 
     def execute(self, sql, parameters=()):
-        selected = sql.startswith("SELECT id, type, status,") and (
-            "WHERE status IN" in sql if self.scope == "active" else "WHERE plan_id=" in sql)
+        selected = sql.startswith("SELECT id FROM actions WHERE (") and (
+            "status=?" in sql if self.scope == "active" else "plan_id=?" in sql)
         if selected and self.fail_at == "execute":
             raise sqlite3.OperationalError("candidate query interrupted")
         real = super().execute(sql, parameters)
@@ -238,13 +246,10 @@ class _BatchReads(_FaultConnection):
             return real
         cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
         self.cursors.append(cursor)
-        batches = 0
-
         def fetchmany(size):
-            nonlocal batches
-            batches += 1
+            self.batches += 1
             self.sizes.append(size)
-            if self.fail_at == batches:
+            if self.fail_at == self.batches:
                 raise sqlite3.OperationalError("candidate batch interrupted")
             return real.fetchmany(size)
 
@@ -271,7 +276,7 @@ def test_candidate_metadata_spans_bounded_batches(competition_database, scope):
         new_operation_key(), replace(owned, connection=reads))
     assert result.kind.value == "completed", result.error
     assert result.value.outcome.value == "granted"
-    assert len(reads.sizes) >= 3
+    assert len(reads.sizes) >= 2
     assert all(0 < size <= 128 for size in reads.sizes)
     assert reads.cursors
     for cursor in reads.cursors:

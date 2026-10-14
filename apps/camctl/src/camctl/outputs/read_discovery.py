@@ -1,0 +1,317 @@
+"""读取责任的有界发现；继续位置只保存值，资格由机会事务复核。"""
+
+from contextlib import closing
+from dataclasses import dataclass
+
+from camctl.contracts.pages import Page
+from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
+
+
+DEFAULT_BATCH_SIZE = 100
+
+
+def positive_limit(limit: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("发现批量上限必须是非布尔正整数")
+    return limit
+
+
+@dataclass(frozen=True)
+class ReadDiscoveryScope:
+    database: str
+    kind: str
+    now_us: int
+    generation: int
+    device_id: str | None = None
+
+    def __post_init__(self):
+        if not isinstance(self.database, str) or not self.database:
+            raise ValueError("发现范围必须指定数据库")
+        if not isinstance(self.kind, str) or not self.kind:
+            raise ValueError("发现范围必须指定查询种类")
+        UtcMicros(self.now_us)
+        if isinstance(self.generation, bool) or not isinstance(self.generation, int) or self.generation < 0:
+            raise ValueError("发现代次必须是非布尔非负整数")
+        if self.device_id is not None and (not isinstance(self.device_id, str) or not self.device_id):
+            raise ValueError("设备范围必须使用非空设备身份")
+
+
+@dataclass(frozen=True)
+class ReadDiscoveryCursor:
+    scope: ReadDiscoveryScope
+    after: tuple
+
+    def __post_init__(self):
+        if not isinstance(self.scope, ReadDiscoveryScope) or not isinstance(self.after, tuple) or not self.after:
+            raise ValueError("继续位置必须保存范围和稳定排序键")
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in self.after):
+            raise ValueError("继续位置的排序键必须是整数")
+
+
+def check_cursor(scope, cursor):
+    if cursor is not None and cursor.scope != scope:
+        raise ValueError("继续位置不属于本次数据库、范围、时刻或代次")
+
+
+def database_identity(connection):
+    with closing(connection.execute("PRAGMA database_list")) as cursor:
+        database = next(row[2] for row in cursor.fetchall() if row[1] == "main")
+    return database or f"memory:{id(connection)}"
+
+
+# 普通取回与录像内部输入使用同一归属及资格定义。
+_READ_FROM = (
+    " FROM file_copies fc"
+    " LEFT JOIN device_files df ON df.id=fc.source_device_file_id"
+    " LEFT JOIN intermediate_files hf ON hf.id=fc.source_intermediate_file_id"
+    " LEFT JOIN actions ob ON ob.id=df.observer_action_id"
+    " LEFT JOIN actions origin ON origin.id=df.source_action_id"
+    " LEFT JOIN deliveries d ON d.id=fc.delivery_id"
+    " LEFT JOIN recording_processing rp ON rp.id=fc.processing_id"
+    " LEFT JOIN actions a ON a.id=COALESCE(d.action_id,rp.action_id)"
+    " LEFT JOIN plans p ON p.id=a.plan_id"
+    " LEFT JOIN operation_runs r ON r.responsibility_key='read/'||fc.id"
+)
+_ACTIVE_COPY = (
+    " (fc.slot_device_id IS NOT NULL OR (fc.verification_state NOT IN (3,5)"
+    " AND (d.status IN (1,2) OR rp.id IS NOT NULL OR (d.id IS NULL AND rp.id IS NULL))))"
+)
+_ELIGIBLE = (
+    " a.status=2 AND a.cancel_requested=0 AND a.scheduled_at<=?"
+    " AND r.status IN (1,2) AND r.retry_wait_required=0"
+    " AND df.completion_state=3 AND fc.slot_device_id IS NULL"
+    " AND fc.verification_state NOT IN (3,5)"
+    " AND (fc.delivery_id IS NULL OR d.status IN (1,2))"
+)
+_READ_ORDER = "a.scheduled_at,a.plan_id,a.input_index,fc.id"
+
+
+def validate_read_basis(connection, device_id=None):
+    """错误探测与候选筛选分开；坏关联不能被 JOIN 或最优项截断隐藏。"""
+    condition = ""
+    parameters = ()
+    if device_id is not None:
+        condition = " AND fc.source_device_file_id IS NOT NULL AND (ob.device_id=? OR ob.id IS NULL OR df.id IS NULL)"
+        parameters = (device_id,)
+    with closing(connection.execute(
+        "SELECT fc.id" + _READ_FROM + " WHERE "
+        + _ACTIVE_COPY + condition + " AND ((fc.source_device_file_id IS NOT NULL AND ("
+        "df.id IS NULL OR ob.id IS NULL OR origin.id IS NULL"
+        " OR ob.device_id IS NULL OR ob.driver_id IS NULL OR ob.device_id='' OR ob.driver_id=''"
+        " OR ob.device_id IS NOT origin.device_id OR ob.driver_id IS NOT origin.driver_id"
+        " OR (fc.slot_device_id IS NOT NULL AND fc.slot_device_id IS NOT ob.device_id)))"
+        " OR (fc.source_device_file_id IS NULL AND (hf.id IS NULL OR fc.slot_device_id IS NOT NULL))"
+        " OR a.id IS NULL OR p.id IS NULL OR a.scheduled_at IS NULL"
+        " OR a.input_index IS NULL OR r.id IS NULL OR r.kind<>3 OR r.copy_id IS NOT fc.id"
+        " OR r.action_id IS NOT a.id OR r.delivery_id IS NOT fc.delivery_id"
+        " OR (SELECT COUNT(*) FROM operation_runs rr WHERE rr.copy_id=fc.id AND rr.kind=3)<>1) LIMIT 1",
+        parameters,
+    )) as cursor:
+        bad = cursor.fetchone()
+    if bad is not None:
+        raise ConsistencyError(f"读取候选缺少可靠关联、流程或排序依据: copy={bad[0]}")
+
+
+def device_holder(connection, device_id):
+    with closing(connection.execute(
+        "SELECT id FROM file_copies WHERE slot_device_id=? ORDER BY id LIMIT 2", (device_id,),
+    )) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) > 1:
+        raise ConsistencyError("同一设备的读取机会存在多个持有者")
+    return rows[0][0] if rows else None
+
+
+def first_eligible_read(connection, device_id, now_us):
+    validate_read_basis(connection, device_id)
+    with closing(connection.execute(
+        "SELECT fc.id" + _READ_FROM + " WHERE ob.device_id=? AND " + _ELIGIBLE
+        + " ORDER BY " + _READ_ORDER + " LIMIT 1", (device_id, now_us),
+    )) as cursor:
+        row = cursor.fetchone()
+    return None if row is None else row[0]
+
+
+@dataclass(frozen=True)
+class ReadCandidate:
+    copy_id: int
+    action_id: int
+    scheduled_at: int
+    plan_id: int
+    input_index: int
+    device_id: str | None
+    driver_id: str | None
+    source_file_id: int | None
+    held: bool
+
+    def __post_init__(self):
+        for identity in (self.copy_id, self.action_id, self.plan_id):
+            ObjectId(identity)
+        UtcMicros(self.scheduled_at)
+        if isinstance(self.input_index, bool) or not isinstance(self.input_index, int) or self.input_index < 0:
+            raise ConsistencyError("读取候选缺少可靠的计划内顺序")
+        object.__setattr__(self, "held", bool(self.held))
+
+    @property
+    def key(self):
+        return (0 if self.held else 1, self.scheduled_at, self.plan_id, self.input_index, self.copy_id)
+
+
+def read_candidates(connection, scope, cursor=None, *, limit):
+    positive_limit(limit)
+    check_cursor(scope, cursor)
+    if scope.database != database_identity(connection):
+        raise ValueError("发现范围不属于当前数据库")
+    if cursor is not None and len(cursor.after) != 5:
+        raise ValueError("读取继续位置缺少完整排序键")
+    if scope.kind not in ("delivery", "reads", "internal", "all", "local"):
+        raise ValueError("读取候选种类无效")
+    validate_read_basis(connection, scope.device_id)
+    condition = "a.status=2 AND a.cancel_requested=0 AND fc.verification_state NOT IN (3,5)"
+    parameters = []
+    if scope.kind == "local":
+        condition += " AND fc.source_device_file_id IS NULL AND d.status IN (1,2)"
+    else:
+        condition += " AND fc.source_device_file_id IS NOT NULL"
+        condition += " AND (fc.delivery_id IS NULL OR d.status IN (1,2))"
+        if scope.kind in ("delivery", "reads"):
+            condition += " AND fc.delivery_id IS NOT NULL"
+        elif scope.kind == "internal":
+            condition += " AND fc.processing_id IS NOT NULL"
+    if scope.device_id is not None:
+        condition += " AND ob.device_id=?"
+        parameters.append(scope.device_id)
+    priority = "CASE WHEN fc.slot_device_id IS NOT NULL THEN 0 ELSE 1 END"
+    key_sql = f"{priority},a.scheduled_at,a.plan_id,a.input_index,fc.id"
+    if cursor is not None:
+        condition += f" AND ({key_sql})>(?,?,?,?,?)"
+        parameters.extend(cursor.after)
+    parameters.append(limit)
+    with closing(connection.execute(
+        "SELECT fc.id,a.id,a.scheduled_at,a.plan_id,a.input_index,ob.device_id,ob.driver_id,"
+        "fc.source_device_file_id,fc.slot_device_id IS NOT NULL" + _READ_FROM
+        + " WHERE " + condition + " ORDER BY " + key_sql + " LIMIT ?", parameters,
+    )) as result:
+        items = tuple(ReadCandidate(*row) for row in result.fetchall())
+    position = ReadDiscoveryCursor(scope, items[-1].key) if len(items) == limit else None
+    return Page(items, position)
+
+
+class ReadDiscoveryOwner:
+    """会话内的有限继续位置；不持有候选详情、连接或查询游标。
+
+    每种查询只有一个位置。历史尾变化或相关计划时间到达时重查；
+    查询结束后下一轮重新观察仍未完成的责任，不把查空当业务结束。
+    """
+
+    _KINDS = frozenset((
+        "start", "actions", "selections", "items", "finish", "reads", "local",
+        "failed", "capture", "residual", "attempts", "queries",
+    ))
+
+    def __init__(self, batch_size=DEFAULT_BATCH_SIZE):
+        self.batch_size = positive_limit(batch_size)
+        self.generation = 0
+        self._positions = {}
+        self._stamp = None
+        self._deadline = None
+
+    @property
+    def pending(self):
+        return bool(self._positions)
+
+    @property
+    def cursor_count(self):
+        return len(self._positions)
+
+    def invalidate(self):
+        self.generation += 1
+        self._positions.clear()
+
+    def observe(self, stamp, now_us):
+        if stamp != self._stamp or (self._deadline is not None and now_us >= self._deadline):
+            self.invalidate()
+            self._stamp = stamp
+            self._deadline = None
+
+    def begin_round(self, connection, now_us):
+        with closing(connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
+            tail = cursor.fetchone()[0]
+        database = database_identity(connection)
+        self.observe((database, tail), now_us)
+        with closing(connection.execute(
+            "SELECT MIN(scheduled_at) FROM actions WHERE status IN (1,2)"
+            " AND cancel_requested=0 AND scheduled_at>?", (now_us,),
+        )) as cursor:
+            self._deadline = cursor.fetchone()[0]
+        return database
+
+    def scope(self, kind, database, now_us):
+        if kind not in self._KINDS:
+            raise ValueError(f"未登记的发现范围: {kind}")
+        saved = self._positions.get(kind)
+        return saved.scope if saved is not None else ReadDiscoveryScope(
+            database, kind, now_us, self.generation)
+
+    def accept(self, scope, page):
+        if scope.kind not in self._KINDS:
+            raise ValueError(f"未登记的发现范围: {scope.kind}")
+        if scope.generation != self.generation:
+            raise ValueError("不能保存旧代次的继续位置")
+        check_cursor(scope, page.next_cursor)
+        if page.next_cursor is None:
+            self._positions.pop(scope.kind, None)
+        else:
+            old = self._positions.get(scope.kind)
+            if old is not None and page.next_cursor.after <= old.after:
+                raise ValueError("继续位置必须严格推进")
+            self._positions[scope.kind] = page.next_cursor
+
+    def rows(self, connection, kind, now_us, query, parameters=(), *, identity="id"):
+        """对内部查询作稳定 ID 续读；query 含 SELECT/FROM/WHERE，不含排序。"""
+        database = self._stamp[0] if self._stamp is not None else self.begin_round(connection, now_us)
+        scope = self.scope(kind, database, now_us)
+        saved = self._positions.get(kind)
+        after = saved.after[0] if saved is not None else 0
+        parameters = parameters(scope.now_us) if callable(parameters) else parameters
+        with closing(connection.execute(
+            query + f" AND {identity}>? ORDER BY {identity} LIMIT ?",
+            (*parameters, after, self.batch_size),
+        )) as cursor:
+            rows = tuple(cursor.fetchall())
+        next_cursor = (ReadDiscoveryCursor(scope, (rows[-1][0],))
+                       if len(rows) == self.batch_size else None)
+        page = Page(items=rows, next_cursor=next_cursor)
+        self.accept(scope, page)
+        return page
+
+    def reads(self, connection, kind, now_us):
+        database = self._stamp[0] if self._stamp is not None else self.begin_round(connection, now_us)
+        scope = self.scope(kind, database, now_us)
+        page = read_candidates(connection, scope, self._positions.get(kind), limit=self.batch_size)
+        self.accept(scope, page)
+        return page
+
+    def captures(self, connection, now_us):
+        """拍摄入口按完整业务顺序续页，避免较晚动作先取得启动资格。"""
+        database = self._stamp[0] if self._stamp is not None else self.begin_round(connection, now_us)
+        scope = self.scope("capture", database, now_us)
+        saved = self._positions.get("capture")
+        order = "scheduled_at,plan_id,input_index,id"
+        query = (
+            "SELECT id,device_id,scheduled_at,plan_id,input_index FROM actions"
+            " WHERE type IN (1,2,3) AND status IN (1,2)"
+            " AND ((cancel_requested=0 AND scheduled_at<=?) OR (status=2 AND cancel_requested=1))"
+        )
+        parameters = (scope.now_us,)
+        if saved is not None:
+            query += f" AND ({order})>(?,?,?,?)"
+            parameters += saved.after
+        with closing(connection.execute(query + f" ORDER BY {order} LIMIT ?",
+                                        (*parameters, self.batch_size))) as cursor:
+            rows = tuple(cursor.fetchall())
+        next_cursor = (ReadDiscoveryCursor(scope, (rows[-1][2], rows[-1][3], rows[-1][4], rows[-1][0]))
+                       if len(rows) == self.batch_size else None)
+        page = Page(items=rows, next_cursor=next_cursor)
+        self.accept(scope, page)
+        return page

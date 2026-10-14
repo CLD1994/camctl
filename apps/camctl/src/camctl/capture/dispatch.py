@@ -26,7 +26,8 @@ class ReadyActions(Protocol):
     def __call__(self) -> Iterable[ActionDescriptor]: ...
 
 
-def ready_capture_actions(connection, now_us: int, *, device_id: str | None = None) -> list[ActionDescriptor]:
+def ready_capture_actions(connection, now_us: int, *, device_id: str | None = None,
+                          action_ids=None, limit=None) -> list[ActionDescriptor]:
     """从当前投影取可推进的拍摄动作。
 
     未取消的到期拍摄正常推进；已取消的三类拍摄继续各自本地收场、
@@ -42,10 +43,18 @@ def ready_capture_actions(connection, now_us: int, *, device_id: str | None = No
         "      OR (cancel_requested = 1 AND type IN (1, 2, 3)))"
         )
     parameters = (now_us,)
+    from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, positive_limit
+
+    size = positive_limit(DEFAULT_BATCH_SIZE if limit is None else limit)
     if device_id is not None:
         query += " AND device_id=?"
         parameters += (device_id,)
-    with closing(connection.execute(query + " ORDER BY plan_id, input_index", parameters)) as cursor:
+    if action_ids is not None:
+        if not action_ids:
+            return []
+        query += " AND id IN (" + ",".join("?" for _ in action_ids) + ")"
+        parameters += tuple(action_ids)
+    with closing(connection.execute(query + " ORDER BY plan_id, input_index LIMIT ?", (*parameters, size))) as cursor:
         rows = cursor.fetchall()
     mapping = {1: "camera_take_photo", 2: "camera_record", 3: "camera_timelapse"}
     return [

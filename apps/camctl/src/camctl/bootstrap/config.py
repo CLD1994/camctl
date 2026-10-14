@@ -15,6 +15,8 @@ from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
+
 __all__ = [
     "ConfigDefaults",
     "ConfigError",
@@ -152,6 +154,7 @@ class LogSection:
 class SessionSection:
     plan_poll_interval_ms: int
     wakeup_margin_ms: int
+    read_discovery_batch_size: int
 
 
 @dataclass(frozen=True)
@@ -234,6 +237,7 @@ class ConfigDefaults:
     adb_terminate_grace_s: str = "3"
     plan_poll_interval_ms: int = 500
     wakeup_margin_ms: int = 50
+    read_discovery_batch_size: int = DEFAULT_BATCH_SIZE
     queue_capacity: int = 64
     busy_timeout_ms: int = 9000
     wal_autocheckpoint_pages: int = 1000
@@ -283,7 +287,7 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         ),
     )
 
-    session = _take(root.get("session", {}), "session", ("plan_poll_interval_ms", "wakeup_margin_ms"))
+    session = _take(root.get("session", {}), "session", ("plan_poll_interval_ms", "wakeup_margin_ms", "read_discovery_batch_size"))
     session_section = SessionSection(
         plan_poll_interval_ms=_require_int(
             session.get("plan_poll_interval_ms", defaults.plan_poll_interval_ms),
@@ -294,6 +298,10 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
             session.get("wakeup_margin_ms", defaults.wakeup_margin_ms),
             "session.wakeup_margin_ms",
             0,
+        ),
+        read_discovery_batch_size=_require_int(
+            session.get("read_discovery_batch_size", defaults.read_discovery_batch_size),
+            "session.read_discovery_batch_size", 1,
         ),
     )
 

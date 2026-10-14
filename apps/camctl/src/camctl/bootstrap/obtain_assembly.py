@@ -35,6 +35,7 @@ from camctl.outputs.obtain_flow import (
 )
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 
 __all__ = ["obtain_flow", "session_obtain_assembly"]
 
@@ -56,6 +57,7 @@ def session_obtain_assembly(
     recovery_max_event_id: Callable[[], int | None] | None = None,
     on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None,
     file_executor: FileTaskExecutor | None = None,
+    read_discovery_batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> Callable[[Any], ObtainRuntime]:
     """构造会话级取回推进工厂：解析各设备读取协作者并组装运行时。
 
@@ -73,6 +75,7 @@ def session_obtain_assembly(
     pending_read_results: dict = {}
     pending_read_business: dict = {}
     pending_read_ends: dict = {}
+    discovery = ReadDiscoveryOwner(read_discovery_batch_size)
 
     def factory(owned: Any) -> ObtainRuntime:
         read_ports: dict[str, DeviceReadAssembly] = {}
@@ -117,7 +120,7 @@ def session_obtain_assembly(
             retry_gate=retry_gate,
             monotonic_ns=monotonic,
             occurred_at=wall,
-            outputs=OutputsRepository(),
+            outputs=OutputsRepository(read_discovery_batch_size),
             operations=OperationRepository(),
             binding_check=lambda saved: check_binding(saved, SimpleNamespace(devices=devices)),
             recovery_boundary=recovery_boundary,
@@ -129,6 +132,7 @@ def session_obtain_assembly(
             pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends,
             file_executor=file_executor,
+            discovery=discovery,
         )
 
     return factory
@@ -140,7 +144,13 @@ def obtain_flow(factory: Callable[[Any], ObtainRuntime]):
     async def flow(context: Any) -> None:
         owned = context.open_connection()
         try:
-            await advance_obtain(factory(owned))
+            runtime = factory(owned)
+            await advance_obtain(runtime)
+            if runtime.discovery.pending:
+                from camctl.scheduling.notifications import WakeReason
+                notifier = getattr(context, "wake", None)
+                if notifier is not None:
+                    notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
         finally:
             owned.connection.close()
 

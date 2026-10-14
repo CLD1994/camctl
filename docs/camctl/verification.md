@@ -129,6 +129,36 @@ Root 对每个修改文件亲自核对规格、生产者、消费者和测试，
 
 两个跳过项分别为单元测试的非 Linux 守护对照和 bootstrap 的 Windows 文件系统大小写别名对照；三条警告来自既有同步测试的 asyncio 标记。最终八个进程退出码均为 `0`，18 个生产与测试 Python 文件在门禁前后摘要一致。
 
+## SW-06 默认读取分批发现验证（2026-10-15）
+
+环境为 Linux WSL2 x86_64、Python 3.11.16、SQLite 3.53.1、uv 0.12.10。实施范围见[SW-06 计划](../superpowers/plans/2026-10-13-camctl-sw06-bounded-read-discovery.md)。
+
+[真实候选与事务专项](../../apps/camctl/tests/integration/outputs/test_read_discovery.py)验证设备源及录像内部输入共用全体业务顺序，旧持有者优先，坏关联、重复 READ 和多持有者不能被有限结果隐藏。逐产物资格的规划与独立守卫分别读取必要事实；[事实端口专项](../../apps/camctl/tests/integration/outputs/test_current_event_reads.py)验证原写事务、范围与限额、读取错误及已验证前序变化。[既有事件顺序反例](../../apps/camctl/tests/integration/outputs/test_product_event_sequence.py)继续拒绝未来提案冒充当前事实，静态验证与历史恢复保留原完整范围依据。完成汇总使用固定计数；取回完成及来源解析失败时的计划完成守卫逐批独立检查。
+
+[默认入口专项](../../apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py)从真实配置、SQLite 和会话装配推进多批取回、初始化期间新提交、原绑定失败、低位候选重查、取消与内部输入检查；[默认保存消费者](../../apps/camctl/tests/integration/bootstrap/test_read_default_consumers.py)在 B=1 下覆盖正常、残留及受限工厂接手已有实际结果。[安装版主机源专项](../../apps/camctl/tests/integration/bootstrap/test_distribution.py)用 B=1 完成 RAW/JPEG 两份源及两轮独立取回。[会话通知反例](../../apps/camctl/tests/integration/session/test_session.py)在30秒轮询条件下要求流程内安排的下一页及时继续；退出仍由原短写事务重新检查持久化责任。
+
+容量用例的候选总数 N 为14、122，批次 B 为1、3：每页最多返回 B 个候选，交付下一页前，上一页候选的弱引用全部释放，扫描结束继续位置为0；默认流程另外用3／5个取回动作生成6／10份独立副本并核对同样的详情释放。另有新增131个终态动作、132项混合结果，以及新增131个终态兄弟动作后的完成事务检查。实际查询计划包含索引查找和 `USE TEMP B-TREE FOR ORDER BY`；这些结果证明 Python 候选详情受限，不代表 SQL 扫描／排序为常数，也不构成 ARM 性能验收。原子来源／选择集合、本笔实际变化及实际操作收场各自保持原责任，发现上限不截断它们。
+
+Root 逐文件核对规格、生产者、消费者和测试，GPT6.1-Sol 完成一次完整独立复核。两项重要问题分别是内部读取的持有者被误派给普通取回，以及按 ID 的拍摄分页改变全体启动顺序。Root 按用途归属恢复原持有者，并按完整业务键续读拍摄；真实 SQL 和实际控制调用的反例修复后通过。沿相关入口发现的启动排序及最近等待截止也改为常数探测／SQL 聚合，132／131个动作的有效红绿记录保留。
+
+| 命令目标（相对于 `apps/camctl/tests`） | 实际结果 | 进程耗时 |
+| --- | --- | --- |
+| `unit` | 5238 项通过，1 项跳过，2 条既有警告 | 14.402 秒 |
+| `integration/capture` | 1120 项通过 | 419.098 秒 |
+| `integration/scheduling` | 136 项通过 | 6.714 秒 |
+| `integration/session` | 139 项通过 | 26.838 秒 |
+| `integration/bootstrap` | 1152 项通过，1 项跳过 | 922.961 秒 |
+| `integration/history` | 212 项通过 | 45.546 秒 |
+| `integration/persistence` | 123 项通过 | 4.598 秒 |
+| `integration/contracts` | 438 项通过 | 4.955 秒 |
+| `integration/logging_runtime` | 112 项通过，1 条既有警告 | 2.959 秒 |
+| `integration/outputs` | 2011 项通过，2 项跳过 | 328.794 秒 |
+| `配置消费检查` | 通过，退出码 0 | 0.622 秒 |
+
+命令从仓库根使用 `apps/camctl/.venv311/bin/python -m pytest <目标> -q -rs`，配置消费检查使用同一解释器运行 `scripts/check-config-consumption.py`。各完整集成目录分别启动进程并串行执行。完整命令、PID、UTC 起止时间、耗时、退出码、原始输出和文件 SHA-256 保存在工作区忽略的 `.superpowers/sdd/2026-10-14-camctl-sw06-bounded-read-discovery/`。软件证据与真实相机、ARM 部署及物理断电的证据分别维护。
+
+表内11个进程均退出0。跳过项包括非 Linux 守护对照、Windows 大小写别名对照，以及两类不适用参数（主机源不携带相机读取配置、内部副本不执行普通交付发布）；警告来自既有同步测试的 asyncio 标记。最终38个修改或新增的 Python 文件已完成语法与摘要核对。完整 bootstrap 复跑前仅校正另外三份既有测试的私有调用签名和候选边界，其余35份生产及测试文件摘要保持；原 bootstrap 的12项失败及其全部边界消费者定向复验、完整目录复验均保留。完整目录通过后，W-11 的默认发现、排序、详情释放、新提交、原持有者、终态后独立收场、继续唤醒及退出条件均有软件证据。 验收映射结构检查另有3项通过，本地文件链接4450项、新增标题链接6项及删除标题入链检查均通过；`git diff --check` 通过。
+
 ## 测试与分步实施方向
 
 ### Python 环境

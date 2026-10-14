@@ -37,7 +37,7 @@ from camctl.history.events import (
     changeable_columns,
     load_event_registry,
 )
-from camctl.history.reads import BaselineRangeRead, ReadCoverage
+from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -84,6 +84,8 @@ class CommandPlan:
     #: 本写事务已完整读取的身份等值范围；匹配行由 state_rows 提供。
     read_coverage: ReadCoverage = field(default_factory=ReadCoverage)
     baseline_reads: Mapping[int, BaselineRangeRead] = field(default_factory=dict)
+    product_read_scope: ProductReadScope | None = None
+    plan_read_scope: PlanReadScope | None = None
 
 
 class TransactionScope:
@@ -514,6 +516,11 @@ def commit_operation(
             first_event_id=allocation.first_event_id,
             last_event_id=allocation.last_event_id,
         )
+        from camctl.persistence.event_reads import SqlEventReads
+
+        if plan.product_read_scope is not None and plan.plan_read_scope is not None:
+            raise TransactionError("同一命令不能混用逐产物比较与计划聚合范围")
+        read_scope = plan.product_read_scope or plan.plan_read_scope
         for event in sequenced:
             context = EventContext(
                 transaction=transaction_range,
@@ -522,6 +529,8 @@ def commit_operation(
                 transaction_rows=working,
                 read_coverage=plan.read_coverage,
                 baseline_reads=plan.baseline_reads,
+                current_reads=(None if read_scope is None else
+                               SqlEventReads(connection, read_scope, validated)),
             )
             validated.append(validate_event(event, context))
             _apply_rows(validation_state, (event,))

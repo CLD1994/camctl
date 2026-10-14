@@ -69,7 +69,7 @@ class _CandidateBoundary:
     def execute(self, sql, parameters=()):
         normalized = " ".join(sql.split())
         if normalized.startswith((
-            "SELECT id, device_id, scheduled_at, max_delay_ms FROM actions",
+            "SELECT id,device_id,scheduled_at,plan_id,input_index FROM actions",
             "SELECT t.id, t.attempt_no, r.id, r.kind, r.activity_id",
             "SELECT id FROM actions WHERE type = 2 AND status = 2",
             "SELECT id, status, input_fields_json FROM actions WHERE type = 6",

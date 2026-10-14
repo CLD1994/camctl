@@ -777,7 +777,9 @@ def _report_assembly(
             on_recovery_diagnostic=recovery_logger,
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
-        ), resume_media_results=deps.work_files.resume_media_results,
+            read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
+        ), read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
+           resume_media_results=deps.work_files.resume_media_results,
            resume_file_observations=resume_files, resume_read_results=resume_reads),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
@@ -804,7 +806,9 @@ def _report_assembly(
             on_recovery_diagnostic=recovery_logger,
             file_executor=deps.work_files.executor,
             segment_size=deps.config.copy.segment_size_bytes,
-        ), resume_media_results=deps.work_files.resume_media_results,
+            read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
+        ), read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
+           resume_media_results=deps.work_files.resume_media_results,
            resume_file_observations=resume_files, resume_read_results=resume_reads,
            owns_device=lambda device: capture_owner.owns_device(device)),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
@@ -816,6 +820,7 @@ def _report_assembly(
             ready=ready,
             processing=processing,
             segment_size=deps.config.copy.segment_size_bytes,
+            read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
             recovery_boundary=deps.recovery_boundary,
             recovery_max_event_id=lambda: deps.recovery_max_event_id,
             on_recovery_diagnostic=recovery_logger,

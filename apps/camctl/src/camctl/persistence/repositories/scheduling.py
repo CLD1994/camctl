@@ -1033,36 +1033,20 @@ class GrantStartCommand:
 
     def _is_first_candidate(self, connection, request: GrantRequest) -> bool:
         """同设备存在排序更早的合格候选时不授予本动作。"""
+        action = self._state["actions"][request.action_id]
+        # 原资格包含窗口内及窗口后的执行中动作，等价于已到计划时间。
+        # 待执行动作仍由启动入口处理，本事务只核对原执行中候选。
         with closing(connection.execute(
-            "SELECT a.id, a.scheduled_at, a.plan_id, a.input_index, a.max_delay_ms"
+            "SELECT a.id, a.scheduled_at"
             " FROM actions a"
             " WHERE a.type IN (1, 2, 3) AND a.status = ? AND a.cancel_requested = 0"
-            " AND a.device_id = ? AND a.scheduled_at IS NOT NULL",
-            (_ACTION_RUNNING, request.device_id),
+            " AND a.device_id = ? AND a.scheduled_at<=?"
+            " AND (a.scheduled_at,a.plan_id,a.input_index)<(?,?,?)"
+            " ORDER BY a.scheduled_at,a.plan_id,a.input_index LIMIT 1",
+            (_ACTION_RUNNING, request.device_id, request.trusted_wall_now,
+             action["scheduled_at"], action["plan_id"], action["input_index"]),
         )) as cursor:
-            rows = cursor.fetchall()
-        action = self._state["actions"][request.action_id]
-        mine = (
-            action["scheduled_at"],
-            action["plan_id"],
-            action["input_index"],
-        )
-        for action_id, scheduled_at, plan_id, input_index, max_delay_ms in rows:
-            if int(action_id) == request.action_id:
-                continue
-            other = (scheduled_at, plan_id, input_index)
-            if other < mine:
-                # 更早候选也须在窗口内才构成排序阻挡。
-                other_end = scheduled_at + max_delay_ms * 1000
-                other_window = LaunchWindow(
-                    scheduled_at=scheduled_at, window_end=other_end
-                )
-                if window_phase(other_window, request.trusted_wall_now) in (
-                    WindowPhase.IN_WINDOW,
-                    WindowPhase.AFTER_WINDOW,
-                ):
-                    return False
-        return True
+            return cursor.fetchone() is None
 
     def _rejected(self, reason: str) -> CommandPlan:
         return CommandPlan(

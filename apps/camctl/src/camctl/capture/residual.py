@@ -39,6 +39,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import ExpireActionRequest
 from camctl.persistence.repositories.capture import FinishResidualBindingFailure, RecordingFailure
 from camctl.scheduling.rules import WindowPhase, window_phase
+from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 from camctl.persistence.repositories.operations import (
     _ATTEMPT_STATUS, _EFFECT_STATE,
 )
@@ -85,7 +86,7 @@ def residual_candidates(
         " JOIN actions a ON a.id = da.action_id"
         " WHERE a.device_id = ? AND da.occupancy_state = 1"
         " AND da.activity_state = 2 AND a.status IN (3, 4, 5, 6)"
-        " ORDER BY da.id",
+        " ORDER BY da.id LIMIT 2",
         (device_id,),
     )) as cursor:
         return tuple(
@@ -593,6 +594,7 @@ def residual_flow(
     capture_factory: Any, *,
     resume_actual_file_facts: Callable[[Any], Awaitable[None]] | None = None,
     owns_device: Callable[[str], bool] | None = None,
+    read_discovery_batch_size=DEFAULT_BATCH_SIZE,
 ) -> Any:
     """构造无人驱动的残留收场推进流程。
 
@@ -601,6 +603,8 @@ def residual_flow(
     继续使用剩余次数收场（camera-recovery.md#触发动作结束时的收
     场）。执行前检查随触发资格结束；确认查询随原残留停止责任结束。
     """
+
+    discovery = ReadDiscoveryOwner(read_discovery_batch_size)
 
     async def flow(context: Any) -> None:
         from camctl.persistence.repositories.operations import (
@@ -611,16 +615,15 @@ def residual_flow(
         try:
             if resume_actual_file_facts is not None:
                 await resume_actual_file_facts(owned)
-            await _recover_old_attempts(owned, capture_factory, owns_device=owns_device)
-            _settle_orphan_queries(context, owned, OperationRepository())
-            with closing(owned.connection.execute(
+            now = context.clock.utc_micros()
+            discovery.begin_round(owned.connection, now)
+            await _recover_old_attempts(owned, capture_factory, owns_device=owns_device, discovery=discovery, now=now)
+            _settle_orphan_queries(context, owned, OperationRepository(), discovery=discovery, now=now)
+            page = discovery.rows(owned.connection, "residual", now,
                 "SELECT id, action_id, activity_id, attempts_used"
                 " FROM operation_runs WHERE kind = 8"
-                " AND status IN (1, 2) ORDER BY id",
-            )) as cursor:
-                flows = [
-                    (int(row[0]), int(row[1]), int(row[2]), int(row[3]))
-                    for row in cursor.fetchall()]
+                " AND status IN (1, 2)")
+            flows = page.items
             for (run_id, trigger_id, activity_id, used) in flows:
                 with closing(owned.connection.execute(
                     "SELECT a.status, da.action_id, da.stop_supported,"
@@ -644,58 +647,52 @@ def residual_flow(
                     continue
                 await _advance_winddown(
                     runtime, candidate, (run_id, trigger_id, used))
+            if discovery.pending and getattr(context, "wake", None) is not None:
+                from camctl.scheduling.notifications import WakeReason
+                context.wake.mark_changed(WakeReason.READ_OPPORTUNITY)
         finally:
             owned.connection.close()
 
     return flow
 
 
-async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device=None) -> None:
-    """分批结束具有可靠旧边界的原调用，动作及流程终态保持。"""
+async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device=None,
+                                discovery=None, now=0) -> None:
+    """每轮结束一批具有可靠旧边界的原调用，沿用原身份及预算。"""
     from camctl.capture.handlers import _RECOVERABLE_OPERATIONS
     from camctl.operations.models import AttemptTicket
 
-    batch_size = 128
-    last_id = 0
+    discovery = discovery if discovery is not None else ReadDiscoveryOwner()
     kinds = tuple(_RECOVERABLE_OPERATIONS)
     marks = ",".join("?" for _ in kinds)
-    while True:
-        with closing(owned.connection.execute(
-            "SELECT t.id, t.attempt_no, r.id, r.kind, r.activity_id, r.responsibility_key, a.device_id"
-            " FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
-            " LEFT JOIN actions a ON a.id = r.action_id"
-            f" WHERE t.status = ? AND t.id > ? AND r.kind IN ({marks})"
-            " ORDER BY t.id LIMIT ?",
-            (int(_ATTEMPT_STATUS.RUNNING), last_id, *kinds, batch_size),
-        )) as cursor:
-            rows = cursor.fetchall()
-        if not rows:
-            return
-        runtimes = {}
-        for identity, attempt_no, run_id, kind, activity_id, responsibility, device_id in rows:
-            last_id = identity
-            if not isinstance(device_id, str) or not device_id:
-                raise ConsistencyError("拍摄旧调用缺少所属设备身份")
-            if owns_device is not None and owns_device(device_id):
-                continue
-            if device_id not in runtimes:
-                runtimes[device_id] = capture_factory(owned, device_id)
-            runtime = runtimes[device_id]
-            if runtime is None:
-                continue
-            ticket = AttemptTicket(
-                attempt_no, _RECOVERABLE_OPERATIONS[kind],
-                None if activity_id is None else str(activity_id), responsibility, run_id)
-            # 查询责任的后续尝试沿重试间隔继续；恢复结果不带等待会
-            # 使下一次查询被"先建立重试等待"守卫拒绝。
-            runtime.recover_attempt(
-                ticket, retry_wait=ticket.operation == "query")
-        if len(rows) < batch_size:
-            return
-        await asyncio.sleep(0)
+    page = discovery.rows(owned.connection, "attempts", now,
+        "SELECT t.id, t.attempt_no, r.id, r.kind, r.activity_id, r.responsibility_key, a.device_id"
+        " FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " LEFT JOIN actions a ON a.id=r.action_id"
+        f" WHERE t.status=? AND r.kind IN ({marks})",
+        (int(_ATTEMPT_STATUS.RUNNING), *kinds), identity="t.id")
+    rows = page.items
+    runtimes = {}
+    for identity, attempt_no, run_id, kind, activity_id, responsibility, device_id in rows:
+        if not isinstance(device_id, str) or not device_id:
+            raise ConsistencyError("拍摄旧调用缺少所属设备身份")
+        if owns_device is not None and owns_device(device_id):
+            continue
+        if device_id not in runtimes:
+            runtimes[device_id] = capture_factory(owned, device_id)
+        runtime = runtimes[device_id]
+        if runtime is None:
+            continue
+        ticket = AttemptTicket(
+            attempt_no, _RECOVERABLE_OPERATIONS[kind],
+            None if activity_id is None else str(activity_id), responsibility, run_id)
+        # 查询责任的后续尝试沿重试间隔继续；恢复结果不带等待会
+        # 使下一次查询被"先建立重试等待"守卫拒绝。
+        runtime.recover_attempt(
+            ticket, retry_wait=ticket.operation == "query")
 
 
-def _settle_orphan_queries(context: Any, owned: Any, operations: Any) -> None:
+def _settle_orphan_queries(context: Any, owned: Any, operations: Any, *, discovery=None, now=0) -> None:
     """按查询用途和原停止责任结算，不以触发者终态覆盖必要核实。
 
     普通停止核实与活动核实随所属动作和停止责任收场：原停止已按
@@ -703,8 +700,9 @@ def _settle_orphan_queries(context: Any, owned: Any, operations: Any) -> None:
     查询；动作取消或终态后不再承担的核实责任按 CANCELED 收场。
     """
 
-    with closing(owned.connection.execute(
-        "SELECT r.responsibility_key, r.query_purpose, a.status, a.cancel_requested,"
+    discovery = discovery if discovery is not None else ReadDiscoveryOwner()
+    page = discovery.rows(owned.connection, "queries", now,
+        "SELECT r.id,r.responsibility_key, r.query_purpose, a.status, a.cancel_requested,"
         " stop.id, stop.status, stop.attempts_used,"
         " nstop.status, act.activity_state FROM operation_runs r"
         " JOIN actions a ON a.id = r.action_id"
@@ -715,11 +713,9 @@ def _settle_orphan_queries(context: Any, owned: Any, operations: Any) -> None:
         " AND nstop.activity_id = r.activity_id"
         " LEFT JOIN device_activities act ON act.id = r.activity_id"
         " WHERE r.kind = 6 AND r.status IN (1, 2)"
-        " AND r.query_purpose IN (1, 3, 4, 5)",
-    )) as cursor:
-        rows = cursor.fetchall()
-    for (responsibility, purpose, status, canceled, stop_id, stop_status, used,
-         nstop_status, activity_state) in rows:
+        " AND r.query_purpose IN (1, 3, 4, 5)", identity="r.id")
+    for (_, responsibility, purpose, status, canceled, stop_id, stop_status, used,
+         nstop_status, activity_state) in page.items:
         if purpose == 1:
             if not canceled and status not in _TRIGGER_TERMINAL:
                 continue

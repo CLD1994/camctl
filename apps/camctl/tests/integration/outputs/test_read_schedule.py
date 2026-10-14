@@ -20,6 +20,7 @@ from camctl.persistence.transaction import TransactionScope
 from .test_grant_reuse import read_request, _save_grant
 from .test_local_read import local_read
 from .test_read_associations import read_targets, _command
+from .test_product_competition import _static_product_facts
 from .test_read_rejections import _availability
 
 
@@ -108,6 +109,8 @@ def _scheduled_event(request, kind, event_type):
     try:
         plan = outputs._GrantFileCommand(command, new_operation_key()).plan(
             TransactionScope(owned.connection, 1, 1))
+        if kind != "internal":
+            plan = _static_product_facts(plan, owned.connection, command.action_id, command.output_id, command.occurred_at)
     finally:
         owned.connection.rollback()
     _save_grant(owned, command)

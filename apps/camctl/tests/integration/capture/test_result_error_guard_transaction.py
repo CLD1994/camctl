@@ -405,6 +405,8 @@ def _exception_chain(error):
             continue
         seen.append(current)
         pending.extend((current.__cause__, current.__context__))
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
     return seen
 
 

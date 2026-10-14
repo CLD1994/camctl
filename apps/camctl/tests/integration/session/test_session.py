@@ -238,6 +238,29 @@ class TestRunLoop:
         assert outcome.succeeded is True
         assert calls["count"] == 2
 
+    async def test_next_discovery_page_notified_during_flow_is_not_lost(self, environment):
+        import asyncio
+        from camctl.scheduling.notifications import WakeReason, WorkNotifier
+
+        context, _, holder, _ = environment
+        context.wake = WorkNotifier()
+        context.poll_interval_s = 30.0
+        state = {"facts": _facts(unfinished_actions=1)}
+        holder["facts"] = lambda connection: state["facts"]
+        calls = []
+
+        async def flow(ctx):
+            calls.append(len(calls) + 1)
+            if len(calls) == 1:
+                ctx.wake.mark_changed(WakeReason.READ_OPPORTUNITY)
+            else:
+                state["facts"] = _facts()
+
+        context.flows = {"discovery": flow}
+        outcome = await asyncio.wait_for(_run(context), timeout=2)
+        assert outcome.succeeded
+        assert calls == [1, 2]
+
     async def test_pending_deadline_bounds_idle_wait(self, environment):
         import asyncio
 

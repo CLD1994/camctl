@@ -17,7 +17,7 @@ from camctl.persistence.transaction import (
     TransactionScope, commit_operation, event_envelope, row_change, row_facts, update_change,
 )
 
-from .test_product_competition import competition_database
+from .test_product_competition import competition_database, _static_product_facts
 from .test_qualification import qualification_environment, _NOW, _Seedling, _candidate, _seed_output
 from .test_selection_event_sequence import _Sequence
 from ..operations.test_result_reuse import _FaultConnection
@@ -45,6 +45,7 @@ def _grant_plan(connection, command):
     try:
         plan = outputs._GrantFileCommand(command, new_operation_key()).plan(TransactionScope(connection, 1, 1))
         assert len(plan.events) == 5, plan.result
+        plan = _static_product_facts(plan, connection, command.action_id, command.output_id, command.occurred_at)
         return plan
     finally:
         connection.rollback()

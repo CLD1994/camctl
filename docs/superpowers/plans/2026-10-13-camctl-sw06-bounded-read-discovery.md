@@ -10,7 +10,7 @@
 
 **设计依据：** [读取发现与唤醒](../../architecture/file-copy.md#读取工作的发现与唤醒)、[候选文件顺序](../../architecture/file-copy.md#多个候选文件的选择顺序)、[取回与清理资格](../../architecture/outputs.md#延后执行时的取回与清理顺序)、[分页结果契约](../../camctl/module-contracts.md#分页结果契约)、[相机读取机会](../../camctl/database/waiting.md#相机读取机会与未完成责任)、[W-11](../../camctl/database/consistency-verification.md#相机读取机会与调度交接)。本计划承接[路线图 SW-06](2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)，顺序在[SW-05](2026-10-13-camctl-sw05-session-lock-errors.md)之后。
 
-## 当前入口、扩展审计与文件责任
+## 实施前入口审计与文件责任
 
 2026-10-13：`outputs/dispatch.py::plan_device_work` 四次无界 `fetchall()`，把活动和候选累计到设备字典及元组；唯一生产消费者是 `outputs/obtain_flow.py::_advance_reads`。其绑定检查也无界收集候选；`_advance_local_reads` 一次收集全部主机源未完成拷贝。
 
@@ -28,7 +28,8 @@
 | `src/camctl/outputs/dispatch.py`、`obtain_flow.py` | 设备活动／读取发现、绑定失败检查、主机源读取和前置取回工作分批推进。 |
 | `src/camctl/persistence/repositories/outputs.py` | 机会授予事务使用全体合格候选的有界查询；保留事实缺失／多持有者错误。 |
 | `src/camctl/outputs/competition.py`、`obtain_summary.py` | 同产物前序判断与取回汇总逐批折叠必要事实，不累计完整候选详情；契约与独立守卫保持。 |
-| `src/camctl/history/events.py`、`validators.py`、`persistence/transaction.py` | 必要时为相关资格守卫接入原写事务内的限定只读事实端口；其他事件守卫和回放语义保持。 |
+| `src/camctl/history/reads.py`、`validators.py`、`persistence/transaction.py` | 为相关资格守卫接入原写事务内的限定只读事实端口；其他事件守卫和回放语义保持。 |
+| `src/camctl/persistence/event_reads.py` | 合并原事务 SQL 与已验证前序变化，限定允许读取的表、列、对象范围和批次。 |
 | `src/camctl/capture/media_flow.py`、`bootstrap/capture_assembly.py` | 内部原片检查和修复输入消费统一读取机会，核对实际恢复及配置传递。 |
 | `src/camctl/bootstrap/obtain_assembly.py`、`lifecycle.py` | 会话级发现状态与限额在各轮工厂之间共享，连接关闭不丢继续位置。 |
 | `src/camctl/bootstrap/config.py`、`docs/architecture/configuration.md` | 实施阶段落实读取发现批次配置及合法性，不借用媒体字节段或报告批次含义。 |
@@ -42,7 +43,7 @@
 - 当前已持有机会的读取先恢复，包括重试等待及独立停止／保存责任；同一相机最多一份真实读取。主机源交付副本不占相机机会。
 - 全体合格候选按所属动作 `scheduled_at`、`plans.id`、`input_index`、首次文件登记顺序比较；普通取回和自动预览使用各自取回动作，内部检查／修复使用所属录像动作，不按用途插队。
 - 使用 `scheduling/order.py::file_key` 的既有语义核对 SQL 排序。先前取得的源读取资格保持；新的删除限制不撤销旧资格，尚未授予者按原资格规则判断。排序和分页均不授予读取资格。
-- 建议新增本地配置 `session.read_discovery_batch_size`，默认建议为 `100`，合法值为非布尔的正整数，会话内固定，下一运行采用新值。这是当前尚未存在的实施配置建议，实施时在配置责任专题定义并接入真实装配；不把 `discover_work` 的默认数值误称为现有部署配置。
+- 本地配置 `session.read_discovery_batch_size` 默认值为 `100`，合法值为非布尔的正整数，会话内固定，下一运行采用新值。该配置已在配置责任专题定义并接入真实装配；生产默认值由 `read_discovery.py` 的常量维护，`ConfigDefaults` 从该常量读取。
 - 详情最多保留一个当前批次，容量随批次 B 受限；不额外引入无用途的缓存配置。可以不缓存详情，也不能为淘汰当前详情而结束持久化责任。每个固定流程种类保留有限游标及推进状态，不累计历次所有页。
 - 建议接口为 `read_candidates(connection, scope: ReadDiscoveryScope, cursor: ReadDiscoveryCursor | None, *, limit: int) -> Page[ReadCandidate, ReadDiscoveryCursor]`。`scope` 明确设备或主机来源、查询种类、当前判断时间及扫描代次；游标携带同范围绑定和稳定排序继续位置。`ReadCandidate` 至少保存 `copy_id`、发起动作与计划身份、固定登记顺序、来源绑定及必要资格事实。
 - 建议机会事务使用 `first_eligible_read(connection, device_id: str, now_us: int) -> int | None`，共享上述全体候选资格和排序查询；SQLite 内部排序不等于 Python 加载全部对象。事务内再次核对当前持有者和本请求资格，不信任外层缓存。
@@ -92,11 +93,11 @@
 
 **交付接口：** 上述发现范围、游标、候选与会话级拥有者；批次 B 贯通真实运行时。
 
-- [ ] 新增 `test_empty_page_with_cursor_continues`、`test_cursor_is_bound_to_scope_and_generation`、`test_eviction_keeps_discovery_responsibility`、`test_new_eligibility_invalidates_old_frontier`。纯规则替身返回各类合法页及读取错误，断言继续、重查、错误和范围绑定。
-- [ ] 配置测试覆盖省略、显式值 `1`、较大正整数、布尔值、0、负数及会话重载；先证明实际装配当前没有该限额消费。正式配置表由 `configuration.md` 定义，生产默认值及加载沿现有 `ConfigDefaults` 组织。
-- [ ] 先运行专项保留有效失败，再接入数据类型和配置。页字段复用 `Page`，不用独立 `exhausted` 标志或未接入生产的另一套缓存结束规则。
-- [ ] 工厂共享发现状态，现有待保存实际结果集合仍属于其结果拥有者，不为限制候选缓存而丢弃。缓存不持有 SQL 游标，正常重建不重置尝试额度。
-- [ ] 单元专项及配置测试通过后再进入真实 SQL 阶段。
+- [x] 新增 `test_empty_page_with_cursor_continues`、`test_cursor_is_bound_to_scope_and_generation`、`test_eviction_keeps_discovery_responsibility`、`test_new_eligibility_invalidates_old_frontier`。纯规则专项断言继续、重查和范围绑定；真实查询错误另由 outputs 专项验证。
+- [x] 配置测试覆盖省略、显式值 `1`、较大正整数、布尔值、0、负数及会话重载；先证明实际装配当前没有该限额消费。正式配置表由 `configuration.md` 定义，生产默认值及加载沿现有 `ConfigDefaults` 组织。
+- [x] 先运行专项保留有效失败，再接入数据类型和配置。页字段复用 `Page`，不用独立 `exhausted` 标志或未接入生产的另一套缓存结束规则。
+- [x] 工厂共享发现状态，现有待保存实际结果集合仍属于其结果拥有者，不为限制候选缓存而丢弃。缓存不持有 SQL 游标，正常重建不重置尝试额度。
+- [x] 单元专项及配置测试通过后再进入真实 SQL 阶段。
 
 ## 任务二：全体排序与机会事务的有界 SQL
 
@@ -104,14 +105,14 @@
 
 **交付接口：** 有界候选页及共享 `first_eligible_read`；原 `grant_read_slot` 行为完整保持。
 
-- [ ] 新增 outputs 集成测试 `test_later_registered_earlier_action_wins_without_full_load`、`test_internal_and_delivery_reads_share_global_order`、`test_held_retry_copy_precedes_new_candidates`、`test_missing_candidate_basis_is_not_filtered_away`、`test_device_holder_query_detects_multiple_holders`。将批次设为 `1` 或 `2`，故意让登记 ID／枚举顺序与业务顺序相反。
-- [ ] 对需要分批恢复筛选的路径，把前几页都设为不合格但后页有最优候选，断言不提前结束或授予错误项。若 SQL 直接完成完整资格及排序，验证未先缓存的最优项能直接被正确选出；不要求人为保留低效扫描。
-- [ ] 先运行专项，确认当前返回数量或键累计无界。将资格及完整排序下推 SQLite，用有界查询返回本页和全体最优身份；外层发现与事务授予复用同一查询定义，不能分别维护完整规则列表。
-- [ ] 替换 `_SlotChangeCommand._first_candidate` 的全量行及排序键累计；持有者查询用有限结果同时验证“零、唯一、非法多个”三类。缺失关联／无效排序仍明确报错，不因查询优化变为空集合。
-- [ ] 新增 `test_product_predecessor_scan_retains_only_current_batch`、`test_group_source_predecessor_beyond_first_batch_still_blocks`、`test_guard_independently_rejects_skipped_predecessor`。覆盖计划、动作、组及明确产物来源，未固定选择与已固定选择、取回／清理同时间排序及已授予资格复用；保留现有 `test_product_competition.py` 的后页阻挡和查询失败回滚反例。
-- [ ] 将 `_ProductReads` 的全量累积改为上述限定迭代／查询；`_CurrentProductReads` 在该事件之前的原事务视图独立复核相同范围。为新增只读端口加入越界、错误范围、数据库读取失败、已验证前序变化必须生效及未来提案不能冒充当前行的测试；历史恢复继续使用原边界事实。完成这些门禁后才移除旧的全候选状态收集。
-- [ ] 保留原资格、源写完、时间、重试、取消、释放实际读取及操作键重送测试，扩展 `integration/outputs/test_read_slot.py`。不修改固定候选集合、源清理保护或取消终态。
-- [ ] 对实际查询保存 `EXPLAIN QUERY PLAN` 和所返回行数证据。SQL 内部仍可能处理大量行，记录开发环境边界；批次限制不声称固定延迟或 ARM 性能已通过。如确需新增索引，按现有显式格式／初始化边界处理，不能在日常 `run` 隐式升级旧库。
+- [x] 新增 outputs 集成测试 `test_later_registered_earlier_action_wins_without_full_load`、`test_internal_and_delivery_reads_share_global_order`、`test_held_retry_copy_precedes_new_candidates`、`test_missing_candidate_basis_is_not_filtered_away`、`test_device_holder_query_detects_multiple_holders`。将批次设为 `1` 或 `2`，故意让登记 ID／枚举顺序与业务顺序相反。
+- [x] 对需要分批恢复筛选的路径，把前几页都设为不合格但后页有最优候选，断言不提前结束或授予错误项。若 SQL 直接完成完整资格及排序，验证未先缓存的最优项能直接被正确选出；不要求人为保留低效扫描。
+- [x] 先运行专项，确认当前返回数量或键累计无界。将资格及完整排序下推 SQLite，用有界查询返回本页和全体最优身份；外层发现与事务授予复用同一查询定义，不能分别维护完整规则列表。
+- [x] 替换 `_SlotChangeCommand._first_candidate` 的全量行及排序键累计；持有者查询用有限结果同时验证“零、唯一、非法多个”三类。缺失关联／无效排序仍明确报错，不因查询优化变为空集合。
+- [x] 新增 `test_product_predecessor_scan_retains_only_current_batch`、`test_guard_independently_rejects_skipped_predecessor`，并保留、复验 `test_product_competition.py::test_predecessor_discovered_after_first_batch_still_blocks`。覆盖计划、动作、组及明确产物来源，未固定选择与已固定选择、取回／清理同时间排序及已授予资格复用；保留查询失败回滚反例。
+- [x] 生产资格使用 `_BoundedProductReads` 的限定迭代／查询；`_CurrentProductReads` 在该事件之前的原事务视图独立复核相同范围。新增只读端口覆盖越界、错误范围、数据库读取失败、已验证前序变化及未来提案不能冒充当前行的反例。静态验证保留 `_ProductReads` 与完整范围依据，历史恢复继续使用原边界事实。
+- [x] 保留 `integration/outputs/test_read_slot.py` 的原资格、源写完、时间、重试、取消、释放实际读取及操作键重送测试，在 `test_read_discovery.py` 扩展排序、坏关联和容量反例。固定候选集合、源清理保护及取消终态保持。
+- [x] 对实际查询保存 `EXPLAIN QUERY PLAN` 和所返回行数证据。SQL 内部仍可能处理大量行，记录开发环境边界；批次限制不声称固定延迟或 ARM 性能已通过。如确需新增索引，按现有显式格式／初始化边界处理，不能在日常 `run` 隐式升级旧库。
 
 ## 任务三：实际取回、内部读取与本地读取接线
 
@@ -119,14 +120,14 @@
 
 **交付接口：** 默认路径按有限批次推进，尚未处理的范围明确继续；机会由原事务确认。
 
-- [ ] 新增 `test_default_obtain_reaches_candidates_beyond_first_batch`、`test_default_binding_failures_are_paged`、`test_host_sources_use_bounded_independent_batches`。分别从 `build_runtime`／`execute_command` 的默认装配启动真实计划和文件，不能只直接调用新增查询函数。
-- [ ] 把 `plan_device_work` 的四组事实按设备／工作范围查询并有界交付；纯 `decide_device_work` 可保留。绑定失败检查与主机源读取使用同样的范围／继续模型，不累计全部 ID 元组或设备桶。
-- [ ] 把 `_start_due`、`_running_actions`、逐动作待处理项、发布项及 `_settle_failed_reads` 的无界发现分批；同时审计默认 capture／residual 流程进入内部读取前的发现，限于本次读取责任链，不做无关调度器重写。
-- [ ] 新增 `test_obtain_summary_folds_many_items_without_full_materialization`，按独立业务分类比较分批汇总与预期终态；处理 `load_obtain_facts` 的全量 `sources/items` 构造，原选择集合、结果和原子结束保持。覆盖来源未完成、混合成功／失败、无产物、全部交付完成及取消后的实际残留。
-- [ ] 每个推进轮次处理有限本批后交回控制，后续批次通过拥有者推进标志与既有唤醒安排；不要在一轮中同步循环到所有页结束。设备机会释放及内部输入建档后重新查全体最优候选。
-- [ ] 内部检查和修复继续使用统一 `grant_read_slot`；自动预览保持独立取回责任。同一源多次取回分别建档和交付，不以缓存命中复用副本。主机 RAW／JPEG 正式源分别保留，每次生成独立副本。
-- [ ] 批次限额从配置经 lifecycle、取回工厂及相关 capture 工厂传递，记录实际消费者。已有 `discover_work` 可复用其有限查询思想，但不把调用辅助函数本身当完成条件。
-- [ ] 分别执行新增 bootstrap 专项、outputs 及 capture 目录，确认重试保留、预览让路、内部读入与本地单次预算未回归。
+- [x] 新增 `test_default_obtain_reaches_candidates_beyond_first_batch`、`test_default_binding_failures_are_paged`；既有 `test_distribution.py::test_installed_hasselblad_sample_uses_actual_unique_capability` 采用主机源 B=1。从 `build_runtime`／`execute_command` 的默认装配启动真实计划和文件，安装版另核对主机 RAW／JPEG 的两轮独立取回。
+- [x] 把 `plan_device_work` 的四组事实按设备／工作范围查询并有界交付；纯 `decide_device_work` 可保留。绑定失败检查与主机源读取使用同样的范围／继续模型，不累计全部 ID 元组或设备桶。
+- [x] 把 `_start_due`、`_running_actions`、逐动作待处理项、发布项及 `_settle_failed_reads` 的无界发现分批；同时审计默认 capture／residual 流程进入内部读取前的发现，限于本次读取责任链，不做无关调度器重写。
+- [x] 新增 `test_obtain_summary_folds_many_items_without_full_materialization`，按独立业务分类比较分批汇总与预期终态；处理 `load_obtain_facts` 的全量 `sources/items` 构造，原选择集合、结果和原子结束保持。覆盖来源未完成、混合成功／失败、无产物、全部交付完成及取消后的实际残留。
+- [x] 每个推进轮次处理有限本批后交回控制，后续批次通过拥有者推进标志与既有唤醒安排；不要在一轮中同步循环到所有页结束。设备机会释放及内部输入建档后重新查全体最优候选。
+- [x] 内部检查和修复继续使用统一 `grant_read_slot`；自动预览保持独立取回责任。同一源多次取回分别建档和交付，不以缓存命中复用副本。主机 RAW／JPEG 正式源分别保留，每次生成独立副本。
+- [x] 批次限额从配置经 lifecycle、取回工厂及相关 capture 工厂传递，记录实际消费者。已有 `discover_work` 可复用其有限查询思想，但不把调用辅助函数本身当完成条件。
+- [x] 分别执行新增 bootstrap 专项、outputs 及 capture 目录，确认重试保留、预览让路、内部读入与本地单次预算未回归。
 
 ## 任务四：动态变化、取消、重启及容量组合
 
@@ -134,16 +135,16 @@
 
 **交付接口：** 范围变化可重查，未完成页不丢责任，Python 保留量随 B 而非总任务数增长。
 
-- [ ] 新增 `test_submit_during_initial_discovery_is_not_lost`、`test_newly_eligible_low_key_is_rediscovered`、`test_evicted_read_resumes_after_restart`、`test_cancel_during_discovery_preserves_active_read_settlement`、`test_query_failure_is_not_exhaustion`。分别在分页继续、查空到等待、机会释放和初始化时设置同步点。
-- [ ] 接入文件拷贝专题列出的全部变化入口：新提交、来源完成、建档、机会释放、读取重试、重拷准备、兼容性变化、取消生效及实际收场。范围代次变化后重建继续位置，授予前仍在事务内验证；通知不能代替数据库事实。
-- [ ] 查询结束不等于动作结束。最终退出事务重新检查未处理页及实际业务责任；新提交或新责任存在时不能仅因缓存为空关闭接纳。读错误保存原错误，等待失败不返回空结束页。
-- [ ] 用真实默认流程对比多组总候选数量及 B，记录每页返回量、同时保留详情和有限继续状态；查询返回不超过 B，详情不随累计页数增长。单个设备持有者和最优身份查询按其常数界核对，不能只搜索是否存在 `fetchall` 字符串。
-- [ ] 大量终态历史加入后，发现仍限定未完成责任范围；等待重试和未来动作不会引发无进展忙循环。开发环境的查询及内存结果注明负载，目标性能不在此宣称通过。
-- [ ] 复验主机源两次独立取回、不同设备、同一产物旧读取保护、预览让路、内部检查／修复及取消后机会释放，分别执行 bootstrap、outputs、capture、scheduling、session、history 目录。
+- [x] 新增 `test_submit_during_initial_discovery_is_not_lost`、`test_newly_eligible_low_key_is_rediscovered`、`test_evicted_read_resumes_after_restart`、`test_cancel_during_discovery_preserves_active_read_settlement`、`test_query_failure_is_not_exhaustion`。分别在分页继续、查空到等待、机会释放和初始化时设置同步点。
+- [x] 接入文件拷贝专题列出的全部变化入口：新提交、来源完成、建档、机会释放、读取重试、重拷准备、兼容性变化、取消生效及实际收场。范围代次变化后重建继续位置，授予前仍在事务内验证；通知不能代替数据库事实。
+- [x] 查询结束不等于动作结束。最终退出事务重新检查未处理页及实际业务责任；新提交或新责任存在时不能仅因缓存为空关闭接纳。读错误保存原错误，等待失败不返回空结束页。
+- [x] 用真实默认流程对比多组总候选数量及 B，记录每页返回量、同时保留详情和有限继续状态；查询返回不超过 B，详情不随累计页数增长。单个设备持有者和最优身份查询按其常数界核对，不能只搜索是否存在 `fetchall` 字符串。
+- [x] 大量终态历史加入后，发现仍限定未完成责任范围；等待重试和未来动作不会引发无进展忙循环。开发环境的查询及内存结果注明负载，目标性能不在此宣称通过。
+- [x] 复验主机源两次独立取回、不同设备、同一产物旧读取保护、预览让路、内部检查／修复及取消后机会释放，分别执行 bootstrap、outputs、capture、scheduling、session、history 目录。
 
 ## 验收命令与收口
 
-从仓库根执行，新增文件将在实施阶段创建：
+从仓库根执行；新增文件和配置已接入生产装配：
 
 ```bash
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/outputs/test_read_discovery.py -q
@@ -153,8 +154,8 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 完整门禁分别执行 `unit`、`integration/outputs`、`integration/capture`、`integration/scheduling`、`integration/session`、`integration/bootstrap`、`integration/history`、`integration/persistence`、`integration/contracts`，以及配置消费检查 `apps/camctl/.venv311/bin/python scripts/check-config-consumption.py`。新增只读端口须保持模块依赖和外部调用边界；配置脚本现有范围不能替代新增限额的真实消费者组合验证。
 
-- [ ] 沿普通取回、自动预览、内部检查、修复输入、重试／重拷及主机源逐入口审计有界发现、全体排序、旧机会恢复与继续推进；所有已知无界入口有明确处置。
-- [ ] 记录红绿、查询及容量证据、环境、负载、命令和退出码；独立复核后更新路线图 SW-06。只有实际 W-11 条件全部闭合才更新相应验收映射，不能因辅助函数通过升级结论。
-- [ ] 形成独立修复提交；对 SW-01—SW-06 的共同会话、日志、取消及恢复接缝进行最终组合复验，保留各专项实际证据与目标环境未核验边界。
+- [x] 沿普通取回、自动预览、内部检查、修复输入、重试／重拷及主机源逐入口审计有界发现、全体排序、旧机会恢复与继续推进；所有已知无界入口有明确处置。
+- [x] 记录红绿、查询及容量证据、环境、负载、命令和退出码；独立复核后更新路线图 SW-06。只有实际 W-11 条件全部闭合才更新相应验收映射，不能因辅助函数通过升级结论。
+- [x] 形成独立修复提交；对 SW-01—SW-06 的共同会话、日志、取消及恢复接缝进行最终组合复验，保留各专项实际证据与目标环境未核验边界。
 
-2026-10-13：计划已编写，生产修复与业务测试尚未执行；不需要真实相机或目标主机。
+2026-10-15：任务一至四已完成。Root 已逐文件核对行为契约、生产者、消费者和测试；GPT6.1-Sol 完成一次完整独立复核，Root 以真实 SQL 和实际控制调用的反例修复内部持有者归属及拍摄分页顺序。所有最终门禁通过，查询容量、弱引用释放、动态变化、取消、重启和独立守卫证据见[SW-06 验证记录](../../camctl/verification.md#sw-06-默认读取分批发现验证2026-10-15)。本次为开发环境软件验证，目标 ARM 性能与真实相机范围分别维护。

@@ -87,91 +87,54 @@ def decide_device_work(facts: DeviceFacts) -> DeviceWork:
         True)
 
 
-#: file_copies.verification_state 的完成态（MATCHED 与源摘要不可用降级）。
-_VERIFICATION_DONE = (3, 5)
-#: deliveries.status 的取消与撤回终态。
-_DELIVERY_INACTIVE = (7, 8)
-#: device_activities.occupancy_state 的 HELD。
-_OCCUPIED = 1
+def plan_device_work(connection, now_us: int, capture_read_parallel: Container[str] = (),
+                     *, candidates=None, limit=None) -> tuple[DeviceWork, ...]:
+    """本批设备读取事实；当前持有者独立查询，不依赖它是否在本页。"""
+    from camctl.outputs.read_discovery import (
+        DEFAULT_BATCH_SIZE, ReadDiscoveryScope, database_identity, device_holder, read_candidates,
+    )
 
-
-def plan_device_work(
-        connection, now_us: int,
-        capture_read_parallel: Container[str] = ()) -> tuple[DeviceWork, ...]:
-    """从当前投影装配各设备的调度事实并给出本轮工作计划。
-
-    已取消动作的读取工作不进入普通授予（取消联动由取消收场流程
-    推进）；在途读取以其持有的读取机会归属设备；capture_read_
-    parallel 提供声明拍摄与读取并行的设备集合（驱动声明面），未
-    提供的设备按不并行让路。
-    """
-    devices: dict[str, dict[str, tuple[int, ...]]] = {}
-    with closing(connection.execute(
-        "SELECT a.device_id, a.id FROM actions a"
-        " JOIN device_activities d ON d.action_id = a.id"
-        " WHERE a.status = 2 AND a.cancel_requested = 0"
-        " AND a.type IN (1, 2, 3) AND a.scheduled_at <= ?"
-        " AND d.activity_state <> 3"
-        " AND d.occupancy_state = ?"
-        " ORDER BY a.device_id, a.plan_id, a.input_index", (now_us, _OCCUPIED),
-    )) as cursor:
-        for device_id, action_id in cursor.fetchall():
-            _bucket(devices, device_id)["due"] = _bucket(devices, device_id)[
-                "due"] + (int(action_id),)
-    with closing(connection.execute(
-        "SELECT a.device_id, a.id FROM actions a"
-        " JOIN device_activities d ON d.action_id = a.id"
-        " WHERE d.activity_state <> 3"
-        " AND d.occupancy_state = ?"
-        " ORDER BY a.device_id, a.id", (_OCCUPIED,),
-    )) as cursor:
-        due = {action_id for device in devices.values()
-               for action_id in device["due"]}
-        for device_id, action_id in cursor.fetchall():
-            if int(action_id) in due:
-                continue
-            _bucket(devices, device_id)["held"] = _bucket(devices, device_id)[
-                "held"] + (int(action_id),)
-    with closing(connection.execute(
-        "SELECT c.slot_device_id, c.id FROM file_copies c"
-        " JOIN deliveries d ON d.id = c.delivery_id"
-        " JOIN actions a ON a.id = d.action_id"
-        " WHERE c.verification_state NOT IN (?, ?)"
-        " AND c.slot_device_id IS NOT NULL"
-        " AND a.status = 2 AND a.cancel_requested = 0"
-        " ORDER BY c.id", _VERIFICATION_DONE,
-    )) as cursor:
-        for device_id, copy_id in cursor.fetchall():
-            _bucket(devices, device_id)["held_reads"] = _bucket(
-                devices, device_id)["held_reads"] + (int(copy_id),)
-    with closing(connection.execute(
-        "SELECT obs.device_id, c.id FROM file_copies c"
-        " JOIN deliveries d ON d.id = c.delivery_id"
-        " JOIN actions a ON a.id = d.action_id"
-        " JOIN device_files f ON f.id = c.source_device_file_id"
-        " JOIN actions obs ON obs.id = f.observer_action_id"
-        " WHERE c.verification_state NOT IN (?, ?)"
-        " AND d.status NOT IN (?, ?)"
-        " AND c.slot_device_id IS NULL" 
-        " AND a.status = 2 AND a.cancel_requested = 0"
-        " AND obs.device_id IS NOT NULL"
-        " ORDER BY a.plan_id, a.input_index, c.id",
-        (*_VERIFICATION_DONE, *_DELIVERY_INACTIVE),
-    )) as cursor:
-        for device_id, copy_id in cursor.fetchall():
-            _bucket(devices, device_id)["grantable"] = _bucket(
-                devices, device_id)["grantable"] + (int(copy_id),)
-    return tuple(
-        decide_device_work(DeviceFacts(
-            device_id=device_id,
-            due_captures=buckets.get("due", ()),
-            held_captures=buckets.get("held", ()),
-            grantable_reads=buckets.get("grantable", ()),
-            held_reads=buckets.get("held_reads", ()),
-            capture_read_parallel=device_id in capture_read_parallel))
-        for device_id, buckets in sorted(devices.items()))
-
-
-def _bucket(devices: dict, device_id: str) -> dict[str, tuple[int, ...]]:
-    return devices.setdefault(
-        device_id, {"due": (), "held": (), "grantable": (), "held_reads": ()})
+    if candidates is None:
+        scope = ReadDiscoveryScope(database_identity(connection), "delivery", now_us, 0)
+        candidates = read_candidates(connection, scope, limit=DEFAULT_BATCH_SIZE if limit is None else limit).items
+        with closing(connection.execute(
+            "SELECT DISTINCT a.device_id FROM actions a JOIN device_activities d ON d.action_id=a.id"
+            " WHERE d.activity_state<>3 AND d.occupancy_state=1 ORDER BY a.device_id LIMIT ?",
+            (DEFAULT_BATCH_SIZE if limit is None else limit,),
+        )) as cursor:
+            activity_devices = tuple(row[0] for row in cursor.fetchall())
+    else:
+        activity_devices = ()
+    devices = dict.fromkeys(candidate.device_id for candidate in candidates if candidate.device_id is not None)
+    devices.update(dict.fromkeys(activity_devices))
+    work = []
+    for device_id in devices:
+        # 读取消费者只需要知道是否存在拍摄阻挡，不加载该设备所有活动。
+        with closing(connection.execute(
+            "SELECT a.id FROM actions a JOIN device_activities d ON d.action_id=a.id"
+            " WHERE a.device_id=? AND a.status=2 AND a.cancel_requested=0"
+            " AND a.type IN (1,2,3) AND a.scheduled_at<=?"
+            " AND d.activity_state<>3 AND d.occupancy_state=1 ORDER BY a.id LIMIT 1",
+            (device_id, now_us),
+        )) as cursor:
+            due = cursor.fetchone()
+        with closing(connection.execute(
+            "SELECT a.id FROM actions a JOIN device_activities d ON d.action_id=a.id"
+            " WHERE a.device_id=? AND d.activity_state<>3 AND d.occupancy_state=1"
+            " ORDER BY a.id LIMIT 1", (device_id,),
+        )) as cursor:
+            held_capture = cursor.fetchone()
+        holder = device_holder(connection, device_id)
+        delivery_holder = None
+        if holder is not None:
+            with closing(connection.execute(
+                "SELECT delivery_id FROM file_copies WHERE id=?", (holder,),
+            )) as cursor:
+                if cursor.fetchone()[0] is not None:
+                    delivery_holder = holder
+        reads = tuple(candidate.copy_id for candidate in candidates if candidate.device_id == device_id and not candidate.held)
+        work.append(decide_device_work(DeviceFacts(
+            device_id, () if due is None else (due[0],),
+            () if held_capture is None else (held_capture[0],), reads if holder is None else (),
+            () if delivery_holder is None else (delivery_holder,), device_id in capture_read_parallel)))
+    return tuple(work)

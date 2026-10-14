@@ -2,9 +2,53 @@
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping
+from typing import Any, Iterable, Mapping, Protocol
 
-from camctl.contracts.values import ObjectId
+from camctl.contracts.values import ObjectId, UtcMicros
+
+
+@dataclass(frozen=True)
+class ProductReadScope:
+    """逐产物资格的可信比较范围；只在原写事务内使用。"""
+
+    action_id: int
+    output_id: int
+    occurred_at: int
+    batch_size: int
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        ObjectId(self.output_id)
+        UtcMicros(self.occurred_at)
+        if isinstance(self.batch_size, bool) or not isinstance(self.batch_size, int) or self.batch_size < 1:
+            raise ValueError("事实读取限额必须为正整数")
+
+
+@dataclass(frozen=True)
+class PlanReadScope:
+    """终态事务独立核对所属计划的动作聚合。"""
+
+    plan_id: int
+    batch_size: int
+
+    def __post_init__(self):
+        ObjectId(self.plan_id)
+        if isinstance(self.batch_size, bool) or not isinstance(self.batch_size, int) or self.batch_size < 1:
+            raise ValueError("事实读取限额必须为正整数")
+
+
+class CurrentEventReads(Protocol):
+    """原写事务内的当前事实；实现必须应用已验证前序事件并限制每批。"""
+
+    scope: ProductReadScope | PlanReadScope
+    ACTION_COLUMNS: tuple[str, ...]
+    SOURCE_COLUMNS: tuple[str, ...]
+
+    def optional(self, table: str, identity: int, columns=None) -> Mapping[str, Any] | None: ...
+    def required(self, table: str, identity: int) -> Mapping[str, Any]: ...
+    def iter_members(self, table: str, column: str, identity: int, *, columns=None,
+                     limit: int | None = None) -> Iterable[tuple[tuple[int, Mapping[str, Any]], ...]]: ...
+    def actions(self) -> Iterable[tuple[int, Mapping[str, Any]]]: ...
 
 
 @dataclass(frozen=True)

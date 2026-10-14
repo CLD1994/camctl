@@ -5,6 +5,7 @@ from typing import Any, Iterable, Mapping, Protocol
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import is_json_integer
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, parse_object_id
+from camctl.history.reads import ProductReadScope
 from camctl.outputs.definitions import SelectionMode, read_selection_request
 from camctl.outputs.sources import (
     ActionFacts, OriginalOutputs, ResolutionState, SourceSpec, resolve_source,
@@ -28,16 +29,90 @@ _TERMINAL = frozenset((_STATUS.SUCCEEDED, _STATUS.FAILED, _STATUS.EXPIRED, _STAT
 
 
 class CompetitionReads(Protocol):
-    """同一事务的可靠当前事实；集合方法保证完整，空集合也是已完成的读取。"""
+    """同一事件发生前的可靠事实；流式和静态集合接口分别补充成员读取。"""
 
     def actions(self) -> Iterable[tuple[int, Row]]: ...
     def required(self, table: str, identity: int) -> Row: ...
     def optional(self, table: str, identity: int) -> Row | None: ...
-    def members(self, table: str, column: str, value: int) -> Mapping[int, Row]: ...
     def action(self, identity: int) -> Row | None: ...
-    def plan_actions(self, plan_id: int) -> Mapping[int, Row]: ...
     def family(self, output_id: int) -> OriginalOutputs: ...
     def processing_completed(self, source_id: int) -> bool: ...
+
+
+class StaticCompetitionReads(CompetitionReads, Protocol):
+    """静态边界事实已完整读取，可靠空集合也须有读取范围证明。"""
+
+    def members(self, table: str, column: str, value: int) -> Mapping[int, Row]: ...
+    def plan_actions(self, plan_id: int) -> Mapping[int, Row]: ...
+
+
+class BatchedCompetitionReads(CompetitionReads, Protocol):
+    """完整遍历由端口分批提供，不要求累计已处理成员。"""
+
+    def iter_members(self, table: str, column: str, value: int) -> Iterable[tuple[int, Row]]: ...
+    def iter_plan_actions(self, plan_id: int) -> Iterable[tuple[int, Row]]: ...
+
+
+def _members(reads, table, column, identity):
+    iterator = getattr(reads, "iter_members", None)
+    return (reads.members(table, column, identity).items() if iterator is None
+            else iterator(table, column, identity))
+
+
+def _bounded_sources(reads, identity, action):
+    """比较当前产物时逐个检查来源，不构造整组来源身份元组。"""
+    state = _member(ResolutionState, action["source_resolution_state"])
+    dependencies = _members(reads, "action_dependencies", "action_id", identity)
+    if state == ResolutionState.FAILED:
+        return
+    if state == ResolutionState.FIXED:
+        plan_id = _integer(action["resolved_source_plan_id"], minimum=1)
+        for _, row in dependencies:
+            source_id = _integer(row["depends_on_action_id"], minimum=1)
+            source = _source_action(reads, source_id)
+            if source["plan_id"] != plan_id or _member(_ACTION, source["type"]) not in _CAPTURE:
+                raise ConsistencyError("固定来源成员不属于原来源计划的拍摄动作")
+            yield source_id
+        return
+    if next(iter(dependencies), None) is not None:
+        raise ConsistencyError("未固定来源不能携带已保存成员")
+    raw = _params(action).get("source")
+    if not isinstance(raw, dict):
+        raise ConsistencyError("未固定来源缺少原引用")
+    values = dict(raw)
+    try:
+        for name in ("action_instance_id", "plan_instance_id"):
+            if name in values:
+                values[name] = parse_object_id(values[name])
+        spec = SourceSpec(**values)
+    except (TypeError, ValueError) as error:
+        raise ConsistencyError("资格候选的来源引用不可解释") from error
+    if spec.action_instance_id is not None:
+        row = reads.action(spec.action_instance_id)
+        if row is not None and _member(_ACTION, row["type"]) in _CAPTURE:
+            yield spec.action_instance_id
+        return
+    plan_id = spec.plan_instance_id or _integer(action["plan_id"], minimum=1)
+    if spec.plan_instance_id is not None and reads.optional("plans", plan_id) is None:
+        return
+    for key, row in reads.iter_plan_actions(plan_id):
+        if spec.action_name is not None and row["name"] != spec.action_name:
+            continue
+        if spec.group is not None and row["group_name"] != spec.group:
+            continue
+        if _member(_ACTION, row["type"]) in _CAPTURE:
+            yield key
+
+
+def _source_matches(reads, identity, action, target, *, all_ready=False):
+    sources = (_bounded_sources(reads, identity, action)
+               if hasattr(reads, "iter_plan_actions") else _sources(reads, identity, action))
+    found, ready = False, True
+    for source_id in sources:
+        found |= source_id == target
+        if all_ready:
+            ready &= _source_ready(reads, source_id)
+    return found and ready
 
 
 def _integer(value, *, minimum=0) -> int:
@@ -157,9 +232,9 @@ def _cleanup_targets(reads: CompetitionReads, identity: int, action: Row, output
     state = _member(_TARGETS, action["target_selection_state"])
     if state == _TARGETS.FAILED:
         return False
-    items = reads.members("cleanup_items", "action_id", identity)
+    items = _members(reads, "cleanup_items", "action_id", identity)
     if state == _TARGETS.FIXED:
-        for item in items.values():
+        for _, item in items:
             if item["requested_output_id"] != output_id:
                 continue
             actual = item["output_id"]
@@ -173,49 +248,54 @@ def _cleanup_targets(reads: CompetitionReads, identity: int, action: Row, output
                 raise ConsistencyError("可用产物不能同时存在已开始清理的责任")
             return True
         return False
-    if items:
+    if next(iter(items), None) is not None:
         raise ConsistencyError("未固定清理集合不能已有目标明细")
     params = _params(action)
     if "output_ids" in params:
         return output_id in _requested_ids(params)
-    sources = _sources(reads, identity, action)
-    return source_id in sources and all(_source_ready(reads, source) for source in sources)
+    return _source_matches(reads, identity, action, source_id, all_ready=True)
 
 
 def _obtain_targets(reads: CompetitionReads, identity: int, action: Row, output_id: int, source_id: int) -> bool:
-    sources = _sources(reads, identity, action)
-    if source_id not in sources or not _source_ready(reads, source_id):
+    if not _source_matches(reads, identity, action, source_id) or not _source_ready(reads, source_id):
         return False
     if action["source_resolution_state"] == int(ResolutionState.FIXED):
-        dependencies = reads.members("action_dependencies", "action_id", identity)
-        matching = [key for key, row in dependencies.items() if row["depends_on_action_id"] == source_id]
+        dependencies = _members(reads, "action_dependencies", "action_id", identity)
+        matching = []
+        for key, row in dependencies:
+            if row["depends_on_action_id"] == source_id:
+                matching.append(key)
+                if len(matching) > 1:
+                    raise ConsistencyError("同一取回来源必须有唯一依赖")
         if len(matching) != 1:
             raise ConsistencyError("同一取回来源必须有唯一依赖")
-        selections = reads.members("obtain_source_selections", "dependency_id", matching[0])
+        selections = iter(_members(reads, "obtain_source_selections", "dependency_id", matching[0]))
+        first_selection = next(selections, None)
+        if next(selections, None) is not None:
+            raise ConsistencyError("固定来源必须有唯一选择责任")
         if _member(_STATUS, action["status"]) == _STATUS.PENDING:
-            if selections:
+            if first_selection is not None:
                 raise ConsistencyError("尚未开始的取回不能已有来源选择责任")
-        elif len(selections) != 1:
+        elif first_selection is None:
             raise ConsistencyError("固定来源必须有唯一选择责任")
         else:
-            selection_id, selection = next(iter(selections.items()))
+            selection_id, selection = first_selection
             state = _member(_SELECTION, selection["status"])
             if state == _SELECTION.FIXED:
                 if selection["error_code"] is not None:
                     return False
                 # 仅读取涉及当前产物的成员，不加载其他原片或整个选择目录。
-                items = dict(reads.members("obtain_items", "output_id", output_id))
-                items.update(reads.members("obtain_items", "requested_output_id", output_id))
-                for item in items.values():
-                    if item["selection_id"] != selection_id:
-                        continue
-                    status = _member(_ITEM, item["status"])
-                    if status in (_ITEM.SELECTED, _ITEM.UNRESOLVED):
-                        if item["delivery_id"] is not None or item["source_dependency"] != 0:
-                            raise ConsistencyError("尚未授予的取回项已携带准备责任")
-                        return True
+                for column in ("output_id", "requested_output_id"):
+                    for _, item in _members(reads, "obtain_items", column, output_id):
+                        if item["selection_id"] != selection_id:
+                            continue
+                        status = _member(_ITEM, item["status"])
+                        if status in (_ITEM.SELECTED, _ITEM.UNRESOLVED):
+                            if item["delivery_id"] is not None or item["source_dependency"] != 0:
+                                raise ConsistencyError("尚未授予的取回项已携带准备责任")
+                            return True
                 return False
-            if reads.members("obtain_items", "selection_id", selection_id):
+            if next(iter(_members(reads, "obtain_items", "selection_id", selection_id)), None) is not None:
                 raise ConsistencyError("尚未固定的选择不能已有成员")
     try:
         mode, requested = read_selection_request(action["execution_spec_json"], action["input_fields_json"])
@@ -238,7 +318,11 @@ def has_product_predecessor(reads: CompetitionReads, action_id: int, output_id: 
                 or _member(_OUTPUT_CLEANUP, output["cleanup_status"]) not in (
                     _OUTPUT_CLEANUP.NOT_REQUESTED, _OUTPUT_CLEANUP.CANCELED)):
             raise ConsistencyError("首次授予要求产物当前可用且没有有效清理限制")
-        for item in reads.members("cleanup_items", "output_id", output_id).values():
+        if hasattr(reads, "view"):
+            scope = reads.view.scope
+            if not isinstance(scope, ProductReadScope) or (scope.action_id, scope.output_id, scope.occurred_at) != (action_id, output_id, occurred_at):
+                raise ConsistencyError("逐产物事实读取不属于当前资格比较范围")
+        for _, item in _members(reads, "cleanup_items", "output_id", output_id):
             if _member(_RESTRICTION, item["restriction_state"]) in (_RESTRICTION.ACTIVE, _RESTRICTION.IRREVERSIBLE):
                 raise ConsistencyError("首次授予不能越过已生效的清理限制")
         source_id = _integer(output["source_action_id"], minimum=1)

@@ -24,7 +24,7 @@ from camctl.contracts.values import (
     ConsistencyError, MAX_OBJECT_ID, ObjectId, OperationKey, UtcMicros, parse_object_id,
 )
 from camctl.devices.bindings import BindingResult, binding_failure_details
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import PlanReadScope, ReadCoverage
 from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
@@ -59,6 +59,7 @@ from camctl.outputs.cleanup_flow import (
     StartCleanupAction,
 )
 from camctl.outputs.competition import has_product_predecessor
+from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, device_holder, first_eligible_read, positive_limit
 from camctl.outputs.copy import (
     AttemptRecord, CopyStateFacts, CopyTargetRef, PreparedCopy, PreparedDisposition,
     PreparedRequest, PreparedSaveOutcome, RecopyDisposition, RecopyRegistration,
@@ -83,7 +84,7 @@ from camctl.outputs.work_files import (
 )
 from camctl.outputs.definitions import read_selection_request
 from camctl.outputs.obtain_summary import (
-    ObtainFacts,
+    ObtainFacts, ObtainAggregate,
     ObtainItemStage,
     ObtainPhase,
     ObtainSourceFacts,
@@ -677,9 +678,10 @@ class _StartCleanupCommand:
 class _ResolveSourcesCommand:
     """执行期来源解析的完整事务命令。"""
 
-    def __init__(self, command: ResolveSources, key: OperationKey) -> None:
+    def __init__(self, command: ResolveSources, key: OperationKey, read_batch_size=DEFAULT_BATCH_SIZE) -> None:
         self._command = command
         self._key = key
+        self._read_batch_size = positive_limit(read_batch_size)
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         # 报告关联解析沿登记路由读取各表事实，预置空映射。
         self._state: dict[str, dict[int, dict[str, Any]]] = {
@@ -788,6 +790,7 @@ class _ResolveSourcesCommand:
                 result=ResolveSourcesOutcome(
                     fixed=False, error_code=error_code, error_details=details
                 ),
+                plan_read_scope=PlanReadScope(action["plan_id"], self._read_batch_size),
             )
 
         rows = []
@@ -866,14 +869,7 @@ class _ResolveSourcesCommand:
         )
 
     def _load_siblings(self, connection, action) -> dict[int, dict[str, Any]]:
-        with closing(connection.execute(
-            "SELECT id FROM actions WHERE plan_id=?", (action["plan_id"],),
-        )) as cursor:
-            siblings = {
-                row[0]: row_facts(connection, "actions", row[0])
-                for row in cursor
-            }
-        siblings = {key: value for key, value in siblings.items() if value}
+        siblings = _completion_siblings(connection, action)
         self._state["actions"].update(siblings)
         return siblings
 
@@ -1539,7 +1535,7 @@ class _CurrentCatalogReads:
 
 
 class _ProductReads(_CatalogReads):
-    """逐产物候选的 SQL 读取；只为需要进一步判断的动作加载完整原请求。"""
+    """静态事件边界的完整事实装载；默认资格链使用逐批读取端口。"""
 
     def __init__(self, connection, state_rows):
         super().__init__(connection)
@@ -1632,6 +1628,11 @@ class _ProductReads(_CatalogReads):
 class _CurrentProductReads(_CurrentCatalogReads):
     """正式资格守卫复核同一范围的当前行，不读取事务未来提案。"""
 
+    def __new__(cls, context):
+        if context.current_reads is not None:
+            return _BoundedProductReads(context.current_reads)
+        return super().__new__(cls)
+
     def optional(self, table, identity):
         rows = self.context.complete_rows(table, "id", identity)
         return self.required(table, identity) if rows else None
@@ -1660,6 +1661,58 @@ class _CurrentProductReads(_CurrentCatalogReads):
         if len(rows) > 1:
             raise ConsistencyError("录像处理责任重复")
         return _processing_completed_facts(next(iter(rows.values()), None))
+
+
+class _BoundedProductReads:
+    """资格计算与守卫各自读取当前批；不把比较对象累计到命令提案。"""
+
+    def __init__(self, view):
+        self.view = view
+
+    def required(self, table, identity):
+        return self.view.required(table, identity)
+
+    def optional(self, table, identity):
+        return self.view.optional(table, identity)
+
+    def action(self, identity):
+        return self.view.optional("actions", identity, self.view.SOURCE_COLUMNS)
+
+    def iter_members(self, table, column, identity):
+        for batch in self.view.iter_members(table, column, identity):
+            yield from batch
+
+    def iter_plan_actions(self, identity):
+        for batch in self.view.iter_members("actions", "plan_id", identity, columns=self.view.SOURCE_COLUMNS):
+            yield from batch
+
+    def actions(self):
+        return self.view.actions()
+
+    def family(self, output_id):
+        return _original_outputs(self, output_id)
+
+    def origin(self, output_id):
+        rows = iter(self.iter_members("output_origins", "output_id", output_id))
+        first = next(rows, None)
+        if next(rows, None) is not None:
+            raise ConsistencyError("同一产物不能重复登记原片关联")
+        return None if first is None else first[1]["original_output_id"]
+
+    def related(self, original_id):
+        result = []
+        for _, row in self.iter_members("output_origins", "original_output_id", original_id):
+            result.append(row["output_id"])
+            if len(result) > 2:
+                raise ConsistencyError("同一原片最多登记一份预览和一份修复成品")
+        return tuple(result)
+
+    def processing_completed(self, source_id):
+        rows = iter(self.iter_members("recording_processing", "action_id", source_id))
+        first = next(rows, None)
+        if next(rows, None) is not None:
+            raise ConsistencyError("录像处理责任重复")
+        return _processing_completed_facts(None if first is None else first[1])
 
 
 def _original_outputs(reads, output_id):
@@ -1919,11 +1972,13 @@ class _GrantFileCommand:
         "intermediate_files",
     )
 
-    def __init__(self, command: FileCandidate, key: OperationKey) -> None:
+    def __init__(self, command: FileCandidate, key: OperationKey, read_batch_size=DEFAULT_BATCH_SIZE) -> None:
         self._command = command
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._read_coverage = ReadCoverage()
+        self._read_batch_size = positive_limit(read_batch_size)
+        self._product_read_scope = None
         self._state: dict[str, dict[int, dict[str, Any]]] = {
             table: {} for table in self._TABLES
         }
@@ -1973,10 +2028,14 @@ class _GrantFileCommand:
             return readiness
 
         if output is not None:
-            reads = _ProductReads(connection, self._state)
+            from camctl.history.reads import ProductReadScope
+            from camctl.persistence.event_reads import SqlEventReads
+
+            self._product_read_scope = ProductReadScope(command.action_id, command.output_id,
+                command.occurred_at, self._read_batch_size)
+            reads = _BoundedProductReads(SqlEventReads(connection, self._product_read_scope))
             if has_product_predecessor(reads, command.action_id, command.output_id, command.occurred_at):
                 return self._wait("business_order")
-            self._read_coverage = reads.read_coverage()
 
         if binding_failure is not None:
             if command.item_id is None:
@@ -2181,6 +2240,7 @@ class _GrantFileCommand:
         return CommandPlan(
             events=self._envelopes(scope, specs), owners=self._owners, state_rows=self._state,
             read_coverage=self._read_coverage,
+            product_read_scope=self._product_read_scope,
             result=FileQualification(outcome=QualificationOutcome.GRANTED, copy_id=copy_id,
                 run_id=run_id, delivery_id=delivery_id, target_file_id=target_file_id, reason=None),
         )
@@ -2688,7 +2748,7 @@ class _SlotChangeCommand:
 
     def _load_run(self, connection, copy_id: int) -> dict:
         with closing(connection.execute(
-            "SELECT id FROM operation_runs WHERE responsibility_key = ?",
+            "SELECT id FROM operation_runs WHERE responsibility_key = ? LIMIT 2",
             (f"read/{copy_id}",),
         )) as cursor:
             identities = cursor.fetchall()
@@ -2717,6 +2777,7 @@ class _SlotChangeCommand:
     # ---- 授予 ----
 
     def _grant(self, scope, copy, device_id: str, run, action) -> CommandPlan:
+        holder = self._device_holder(scope.connection, device_id)
         slot = copy["slot_device_id"]
         if slot == device_id:
             return self._decision(SlotOutcome.HELD)
@@ -2728,7 +2789,7 @@ class _SlotChangeCommand:
             return self._decision(SlotOutcome.WAIT, "not_due")
         if run["retry_wait_required"] == 1:
             return self._decision(SlotOutcome.WAIT, "retry_wait")
-        if self._device_holder(scope.connection, device_id) is not None:
+        if holder is not None:
             return self._decision(SlotOutcome.WAIT, "device_busy")
         eligible, reason = self._first_candidate(scope.connection, device_id)
         if not eligible:
@@ -2736,64 +2797,13 @@ class _SlotChangeCommand:
         return self._save(scope, copy, None, device_id, SlotOutcome.GRANTED)
 
     def _device_holder(self, connection, device_id: str) -> int | None:
-        with closing(connection.execute(
-            "SELECT id FROM file_copies WHERE slot_device_id = ?", (device_id,),
-        )) as cursor:
-            rows = cursor.fetchall()
-        others = [row[0] for row in rows if row[0] != self._request.copy_id]
-        if len(others) > 1:
-            raise ConsistencyError("同一设备的读取机会存在多个持有者")
-        return others[0] if others else None
+        return device_holder(connection, device_id)
 
     def _first_candidate(self, connection, device_id: str) -> tuple[bool, str]:
-        """本拷贝是否为该设备统一文件顺序中最早的合格候选。"""
-        occurred_at = self._request.occurred_at
-        keys: list[tuple] = []
-        mine: tuple | None = None
-        with closing(connection.execute(
-            "SELECT fc.id AS copy_id, fc.slot_device_id,"
-            " df.completion_state, df.observer_action_id,"
-            " r.id AS run_id, r.status AS run_status, r.retry_wait_required,"
-            " a.id AS action_id, a.scheduled_at, a.plan_id, a.input_index,"
-            " a.status AS action_status, a.cancel_requested"
-            " FROM file_copies fc"
-            " JOIN device_files df ON df.id = fc.source_device_file_id"
-            " JOIN actions ob ON ob.id = df.observer_action_id"
-            " LEFT JOIN deliveries d ON d.id = fc.delivery_id"
-            " LEFT JOIN recording_processing rp ON rp.id = fc.processing_id"
-            " LEFT JOIN actions a ON a.id = COALESCE(d.action_id, rp.action_id)"
-            " LEFT JOIN operation_runs r ON r.responsibility_key = 'read/' || fc.id"
-            " WHERE ob.device_id = ? AND fc.slot_device_id IS NULL",
-            (device_id,),
-        )) as cursor:
-            rows = cursor.fetchall()
-        for row in rows:
-            copy_id, _, completion, _, run_id, run_status, retry_wait, action_id, \
-                scheduled_at, plan_id, input_index, action_status, cancel_requested = row
-            if run_id is None or action_id is None:
-                raise ConsistencyError("同设备候选拷贝缺少读取流程或发起动作")
-            eligible = (
-                action_status == int(_ACTION_STATUS.RUNNING)
-                and cancel_requested == 0
-                and scheduled_at is not None and scheduled_at <= occurred_at
-                and run_status not in _RUN_TERMINAL
-                and retry_wait == 0
-                and completion == 3
-            )
-            if not eligible:
-                continue
-            key = _file_order_key(_OrderFile(
-                action=_OrderAction(action_id, scheduled_at, plan_id, input_index),
-                entry_index=copy_id,
-            ))
-            keys.append(key)
-            if copy_id == self._request.copy_id:
-                mine = key
-        if mine is None:
-            return False, "source_not_ready"
-        if any(key < mine for key in keys):
-            return False, "predecessor"
-        return True, ""
+        first = first_eligible_read(connection, device_id, self._request.occurred_at)
+        if first == self._request.copy_id:
+            return True, ""
+        return False, "predecessor" if first is not None else "source_not_ready"
 
     # ---- 释放 ----
 
@@ -5372,11 +5382,12 @@ class _FinishObtainCommand:
         "plans",
     )
 
-    def __init__(self, command: FinishObtain, key: OperationKey) -> None:
+    def __init__(self, command: FinishObtain, key: OperationKey, read_batch_size=DEFAULT_BATCH_SIZE) -> None:
         if not isinstance(command, FinishObtain):
             raise TypeError("取回完成申请必须使用 FinishObtain")
         self._command = command
         self._key = key
+        self._read_batch_size = positive_limit(read_batch_size)
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {
             table: {} for table in self._TABLES
@@ -5463,12 +5474,12 @@ class _FinishObtainCommand:
             result=ObtainFinishResult(
                 action_status=action_status, plan_status=plan_status,
                 prepared=decision.prepared, failed=decision.failed),
+            plan_read_scope=PlanReadScope(action["plan_id"], self._read_batch_size),
         )
 
-    def _load_facts(self, connection) -> ObtainFacts:
+    def _load_facts(self, connection) -> ObtainAggregate:
         """从已保存行装配汇总事实；装载规则与选择、条目、交付状态一致。"""
-        return load_obtain_facts(
-            connection, self._command.action_id, self._state)
+        return load_obtain_facts(connection, self._command.action_id)
 
     def _unpublished_deliveries(self, connection) -> tuple[int, ...]:
         """汇总确定后仍处于准备或发布中的成功交付。"""
@@ -5478,7 +5489,7 @@ class _FinishObtainCommand:
             " JOIN obtain_source_selections s ON s.id = i.selection_id"
             " JOIN action_dependencies dep ON dep.id = s.dependency_id"
             " WHERE dep.action_id=? AND i.status IN (?, ?)"
-            " AND d.status IN (?, ?) ORDER BY d.id",
+            " AND d.status IN (?, ?) ORDER BY d.id LIMIT 1",
             (self._command.action_id,
              int(_ITEM_STATUS.SELECTED), int(_ITEM_STATUS.DELIVERY_CREATED),
              int(_DELIVERY_STATUS.PREPARED), int(_DELIVERY_STATUS.PUBLISHING)),
@@ -5486,13 +5497,7 @@ class _FinishObtainCommand:
             return tuple(row[0] for row in cursor)
 
     def _load_siblings(self, connection, action) -> dict[int, dict[str, Any]]:
-        with closing(connection.execute(
-            "SELECT id FROM actions WHERE plan_id=?", (action["plan_id"],),
-        )) as cursor:
-            siblings = {
-                row[0]: row_facts(connection, "actions", row[0])
-                for row in cursor}
-        siblings = {key: value for key, value in siblings.items() if value}
+        siblings = _completion_siblings(connection, action)
         self._state["actions"].update(siblings)
         return siblings
 
@@ -5540,52 +5545,36 @@ class _FinishObtainCommand:
         )
 
 
-def load_obtain_facts(
-    connection, action_id: int, state: dict | None = None,
-) -> ObtainFacts:
-    """从当前投影装配一个取回动作的汇总事实。
-
-    装载规则与选择、条目、交付状态一致；state 提供时顺路收集行
-    事实（事务命令复用），只读调用不传。"""
+def load_obtain_facts(connection, action_id: int) -> ObtainAggregate:
+    """SQLite 折叠完整来源与条目范围，Python 只保留固定数量的计数。"""
     ObjectId(action_id)
-    sources: list[ObtainSourceFacts] = []
-    items: list[ObtainItemStage] = []
     with closing(connection.execute(
-        "SELECT s.id, s.status FROM obtain_source_selections s"
-        " JOIN action_dependencies d ON d.id = s.dependency_id"
-        " WHERE d.action_id=? ORDER BY s.id", (action_id,),
+        "SELECT COUNT(*) FILTER (WHERE s.status<>?),"
+        "(SELECT COUNT(*) FROM obtain_items i"
+        " JOIN obtain_source_selections os ON os.id=i.selection_id"
+        " JOIN action_dependencies dep ON dep.id=os.dependency_id"
+        " WHERE dep.action_id=? AND i.status=?)"
+        " FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id"
+        " WHERE d.action_id=?",
+        (int(_SELECTION_STATUS.FIXED), action_id, int(_ITEM_STATUS.UNRESOLVED), action_id),
     )) as cursor:
-        selections = cursor.fetchall()
-    for selection_id, status in selections:
-        facts = row_facts(connection, "obtain_source_selections", selection_id)
-        if facts is not None and state is not None:
-            state.setdefault("obtain_source_selections", {})[selection_id] = facts
-        with closing(connection.execute(
-            "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?"
-            " AND status=1", (selection_id,),
-        )) as cursor:
-            unresolved = cursor.fetchone()[0]
-        sources.append(ObtainSourceFacts(
-            selection_fixed=status == int(_SELECTION_STATUS.FIXED),
-            unresolved_items=unresolved))
-        with closing(connection.execute(
-            "SELECT id, status, delivery_id FROM obtain_items"
-            " WHERE selection_id=? AND status<>1 ORDER BY id",
-            (selection_id,),
-        )) as cursor:
-            rows = cursor.fetchall()
-        for item_id, item_status, delivery_id in rows:
-            item = row_facts(connection, "obtain_items", item_id)
-            if item is not None and state is not None:
-                state.setdefault("obtain_items", {})[item_id] = item
-            delivery = None
-            if delivery_id is not None:
-                delivery = row_facts(connection, "deliveries", delivery_id)
-                if delivery is not None and state is not None:
-                    state.setdefault("deliveries", {})[delivery_id] = delivery
-                delivery = delivery["status"] if delivery else None
-            items.append(obtain_item_stage(item_status, delivery))
-    return ObtainFacts(sources=tuple(sources), items=tuple(items))
+        waiting, unresolved = cursor.fetchone()
+    total = prepared = failed = 0
+    # 状态分组的数量由登记枚举限制；不加载全部条目正文或交付行。
+    with closing(connection.execute(
+        "SELECT i.status,d.status,COUNT(*) FROM obtain_items i"
+        " JOIN obtain_source_selections s ON s.id=i.selection_id"
+        " JOIN action_dependencies dep ON dep.id=s.dependency_id"
+        " LEFT JOIN deliveries d ON d.id=i.delivery_id"
+        " WHERE dep.action_id=? AND i.status<>? GROUP BY i.status,d.status",
+        (action_id, int(_ITEM_STATUS.UNRESOLVED)),
+    )) as cursor:
+        while row := cursor.fetchone():
+            stage = obtain_item_stage(row[0], row[1])
+            total += row[2]
+            prepared += row[2] if stage is ObtainItemStage.PREPARED else 0
+            failed += row[2] if stage is ObtainItemStage.FAILED else 0
+    return ObtainAggregate(waiting, unresolved, total, prepared, failed)
 
 
 def plan_complete(siblings, current_action_id: int) -> bool:
@@ -5597,8 +5586,26 @@ def plan_complete(siblings, current_action_id: int) -> bool:
     )
 
 
+def _completion_siblings(connection, action):
+    """只取一个未终态兄弟；独立聚合守卫另按原事务视图逐批复核。"""
+    terminal = tuple(sorted(_ACTION_TERMINAL))
+    marks = ",".join("?" for _ in terminal)
+    with closing(connection.execute(
+        f"SELECT id FROM actions WHERE plan_id=? AND id<>? AND status NOT IN ({marks})"
+        " ORDER BY id LIMIT 1", (action["plan_id"], action["id"], *terminal),
+    )) as cursor:
+        blocker = cursor.fetchone()
+    rows = {action["id"]: action}
+    if blocker is not None:
+        rows[blocker[0]] = row_facts(connection, "actions", blocker[0])
+    return rows
+
+
 class OutputsRepository:
     """来源固定、选择与读取资格的 SQLite 仓储。"""
+
+    def __init__(self, read_batch_size=DEFAULT_BATCH_SIZE):
+        self.read_batch_size = positive_limit(read_batch_size)
 
     def start_obtain_action(
         self, command: StartObtainAction, key: OperationKey, owned: OwnedConnection
@@ -5615,13 +5622,13 @@ class OutputsRepository:
     def resolve_sources(
         self, command: ResolveSources, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ResolveSourcesOutcome]:
-        receipt = commit_operation(_ResolveSourcesCommand(command, key), key, owned)
+        receipt = commit_operation(_ResolveSourcesCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def finish_obtain(
         self, command: FinishObtain, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ObtainFinishResult]:
-        receipt = commit_operation(_FinishObtainCommand(command, key), key, owned)
+        receipt = commit_operation(_FinishObtainCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def settle_canceled_obtain(
@@ -5639,7 +5646,7 @@ class OutputsRepository:
     def grant_file(
         self, command: FileCandidate, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[FileQualification]:
-        receipt = commit_operation(_GrantFileCommand(command, key), key, owned)
+        receipt = commit_operation(_GrantFileCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def grant_read_slot(

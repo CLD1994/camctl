@@ -15,6 +15,7 @@ from enum import Enum
 from camctl.contracts.enums import enum_for
 
 __all__ = [
+    "ObtainAggregate",
     "ObtainDecision",
     "ObtainFacts",
     "ObtainItemStage",
@@ -129,6 +130,24 @@ class ObtainPhase(Enum):
 
 
 @dataclass(frozen=True)
+class ObtainAggregate:
+    """完整范围的计数汇总，不保留逐来源或逐条目详情。"""
+
+    waiting_sources: int
+    unresolved: int
+    total: int
+    prepared: int
+    failed: int
+
+    def __post_init__(self):
+        for value in (self.waiting_sources, self.unresolved, self.total, self.prepared, self.failed):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError("取回汇总计数必须为非负整数")
+        if self.prepared + self.failed > self.total:
+            raise ValueError("取回终态计数超过条目总数")
+
+
+@dataclass(frozen=True)
 class ObtainDecision:
     """一次汇总判定：阶段与成功/失败项计数。"""
 
@@ -141,13 +160,21 @@ class ObtainDecision:
         return self.phase is ObtainPhase.READY_TO_PUBLISH
 
 
-def decide_obtain_finish(facts: ObtainFacts) -> ObtainDecision:
+def decide_obtain_finish(facts: ObtainFacts | ObtainAggregate) -> ObtainDecision:
     """按开始发布的条件决定统一发布阶段。
 
     来源等待优先于显式条目与准备等待；全部来源判定完成且全部条
     目取得最终准备结果后进入发布阶段，成功项与失败结果一并确
     定，整次有失败仍保留成功交付。
     """
+    if isinstance(facts, ObtainAggregate):
+        if facts.waiting_sources:
+            return ObtainDecision(ObtainPhase.WAIT_SOURCES)
+        if facts.unresolved:
+            return ObtainDecision(ObtainPhase.WAIT_ITEMS)
+        if facts.prepared + facts.failed != facts.total:
+            return ObtainDecision(ObtainPhase.WAIT_PREPARATION)
+        return ObtainDecision(ObtainPhase.READY_TO_PUBLISH, facts.prepared, facts.failed)
     if not isinstance(facts, ObtainFacts):
         raise TypeError(f"汇总事实必须使用 ObtainFacts: {facts!r}")
     if any(not source.selection_fixed for source in facts.sources):

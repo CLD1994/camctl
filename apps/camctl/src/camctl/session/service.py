@@ -809,6 +809,7 @@ async def _run_session(
             )
 
         while True:
+            observed_wake = None if context.wake is None else context.wake.snapshot()
             try:
                 fatal = await _drive_flows(context)
             except ClockBecameUntrusted as clock_error:
@@ -898,7 +899,7 @@ async def _run_session(
                 if outcome is not None:
                     return outcome
                 # 关闭事务观察到新工作：继续推进，不释放接纳。
-            await _wait_for_more_work(context, owned)
+            await _wait_for_more_work(context, owned, observed=observed_wake)
 
     outcome: SessionOutcome | None = None
     original: BaseException | None = None
@@ -1583,29 +1584,31 @@ def _pending_deadline_seconds(
     """
     try:
         with closing(owned.connection.execute(
-                "SELECT type, scheduled_at, max_delay_ms FROM actions"
-                " WHERE status = 1 AND scheduled_at IS NOT NULL")) as cursor:
-            rows = cursor.fetchall()
+                "SELECT 1 FROM actions WHERE status=1 AND scheduled_at IS NOT NULL LIMIT 1")) as cursor:
+            pending = cursor.fetchone()
     except Exception:
         # 截止查询失败不改变分类：责任检查仍按各自错误规则处理。
         return None
-    if not rows:
+    if pending is None:
         return None
     now = context.clock.utc_micros()
-    next_times: list[int] = []
-    for kind, scheduled_at, max_delay_ms in rows:
-        scheduled = int(scheduled_at)
-        if now < scheduled:
-            next_times.append(scheduled)
-        elif int(kind) in (1, 2, 3, 8) and max_delay_ms is not None:
-            next_times.append(scheduled + int(max_delay_ms) * 1000)
-    if not next_times:
+    try:
+        with closing(owned.connection.execute(
+                "SELECT MIN(CASE WHEN scheduled_at>? THEN scheduled_at"
+                " WHEN type IN (1,2,3,8) AND max_delay_ms IS NOT NULL"
+                " THEN scheduled_at+max_delay_ms*1000 END)"
+                " FROM actions WHERE status=1 AND scheduled_at IS NOT NULL", (now,))) as cursor:
+            next_time = cursor.fetchone()[0]
+    except Exception:
+        # 聚合查询同样只影响本轮等待；责任检查仍负责报告状态库错误。
         return None
-    return max((min(next_times) - now) / 1_000_000, 0.0)
+    if next_time is None:
+        return None
+    return max((next_time - now) / 1_000_000, 0.0)
 
 
 async def _wait_for_more_work(
-    context: SessionContext, owned: OwnedConnection,
+    context: SessionContext, owned: OwnedConnection, *, observed=None,
 ) -> None:
     """等待下一轮推进：最近待执行截止、进程内通知或轮询上限。
 
@@ -1621,7 +1624,10 @@ async def _wait_for_more_work(
         await asyncio.sleep(wait_s)
         return
     loop = asyncio.get_running_loop()
-    await context.wake.wait_changed(context.wake.snapshot(),
+    # 本轮查询前的版本覆盖流程内安排的下一批，以及查询后到等待前的通知。
+    # 通知已到达时仍交回事件循环，避免连续页面挤占其他设备或取消收场。
+    await asyncio.sleep(0)
+    await context.wake.wait_changed(context.wake.snapshot() if observed is None else observed,
                                     loop.time() + wait_s)
 
 

@@ -442,6 +442,8 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
                   .replace("$HOME/.camctl/hasselblad-demo", str(data_root))
                   .replace("/home/cld/hb_cli/hb_cli", str(fake_executable))
                   .replace("REPLACE_HASSELBLAD_SERIAL", "TEST-HASSELBLAD-SERIAL"))
+    # 已安装默认流程分批发现两份主机源及两次独立取回。
+    configured += "\n[session]\nread_discovery_batch_size = 1\n"
     assert "$HOME/.camctl/hasselblad-demo" not in configured
     assert "REPLACE_HASSELBLAD_SERIAL" not in configured
     assert str(fake_executable) in configured

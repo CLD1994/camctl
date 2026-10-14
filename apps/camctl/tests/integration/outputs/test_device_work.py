@@ -138,6 +138,11 @@ def pipeline(tmp_path: Path):
             " last_event_id, change_count)"
             " VALUES (?, NULL, ?, 1, ?, 10, NULL, 1, 1, NULL, 1, 1, 1)",
             (70 + copy_id, delivery_id, f"deliveries/{70 + copy_id}.mp4"))
+        action_id = 21 if copy_id == 42 else 22
+        connection.execute(
+            "INSERT INTO operation_runs (id,action_id,delivery_id,kind,responsibility_key,copy_id,"
+            "status,attempts_used,max_attempts_used,retry_wait_required) VALUES (?,?,?,3,?,?,1,0,3,0)",
+            (copy_id, action_id, delivery_id, f"read/{copy_id}", copy_id))
     connection.commit()
     yield owned
     owned.connection.close()

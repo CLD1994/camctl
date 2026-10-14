@@ -48,6 +48,7 @@ from camctl.outputs.copy import (
     CopySegmentError, RecopyExhausted, ResumeOutcome, SegmentOutcome,
     SegmentSaveDisposition)
 from camctl.outputs.dispatch import plan_device_work
+from camctl.outputs.read_discovery import ReadDiscoveryOwner
 from camctl.outputs.handoff import (
     DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery)
 from camctl.outputs.qualification import (
@@ -144,6 +145,7 @@ class ObtainRuntime:
     file_executor: FileTaskExecutor | None = None
     pending_read_business: dict = field(default_factory=dict)
     pending_read_ends: dict = field(default_factory=dict)
+    discovery: ReadDiscoveryOwner = field(default_factory=ReadDiscoveryOwner)
 
 
 async def advance_obtain(runtime: ObtainRuntime) -> None:
@@ -153,11 +155,21 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
     retry_read_business(runtime)
     _retry_read_results(runtime)
     await retry_read_ends(runtime)
-    _settle_failed_reads(runtime)
     now = runtime.occurred_at()
+    runtime.discovery.begin_round(runtime.owned.connection, now)
+    _settle_failed_reads(runtime)
     _start_due(runtime, now)
-    for action_id in _running_actions(runtime.owned.connection):
-        await _advance_action(runtime, action_id, now)
+    for (action_id,) in runtime.discovery.rows(runtime.owned.connection, "actions", now,
+            "SELECT id FROM actions WHERE status=2 AND cancel_requested=0 AND type=4"
+            " AND source_resolution_state=1").items:
+        action = _action_facts(runtime.owned.connection, action_id)
+        _resolve_sources(runtime, action, now)
+    _fix_pending_selections(runtime, now)
+    _qualify_selected_items(runtime, now)
+    publish_remaining = runtime.discovery.batch_size
+    for (action_id,) in runtime.discovery.rows(runtime.owned.connection, "finish", now,
+            "SELECT id FROM actions WHERE status=2 AND cancel_requested=0 AND type=4").items:
+        publish_remaining -= await _publish_and_finish(runtime, action_id, now, publish_limit=publish_remaining)
     await _advance_reads(runtime, now)
     await _advance_local_reads(runtime, now)
 
@@ -167,12 +179,10 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
 
 def _start_due(runtime: ObtainRuntime, now: int) -> None:
     """开始到时的待执行取回动作；未到时与已取消动作不进入。"""
-    with closing(runtime.owned.connection.execute(
-        "SELECT id FROM actions"
-        " WHERE status = 1 AND cancel_requested = 0 AND type = 4"
-        " AND scheduled_at <= ? ORDER BY plan_id, input_index", (now,),
-    )) as cursor:
-        due = [int(row[0]) for row in cursor.fetchall()]
+    page = runtime.discovery.rows(runtime.owned.connection, "start", now,
+        "SELECT id FROM actions WHERE status=1 AND cancel_requested=0 AND type=4"
+        " AND scheduled_at<=?", lambda fixed: (fixed,))
+    due = (row[0] for row in page.items)
     for action_id in due:
         outcome = runtime.outputs.start_obtain_action(
             StartObtainAction(action_id=action_id, occurred_at=now),
@@ -181,33 +191,6 @@ def _start_due(runtime: ObtainRuntime, now: int) -> None:
             raise ConsistencyError(
                 f"取回开始事务未完成（{outcome.kind.value}）:"
                 f" {outcome.error}")
-
-
-def _running_actions(connection) -> list[int]:
-    """执行中且未请求取消的取回动作。"""
-    with closing(connection.execute(
-        "SELECT id FROM actions"
-        " WHERE status = 2 AND cancel_requested = 0 AND type = 4"
-        " ORDER BY plan_id, input_index",
-    )) as cursor:
-        return [int(row[0]) for row in cursor.fetchall()]
-
-
-async def _advance_action(
-        runtime: ObtainRuntime, action_id: int, now: int) -> None:
-    """按已保存事实推进一个执行中的取回动作的下一个阶段。"""
-    connection = runtime.owned.connection
-    action = _action_facts(connection, action_id)
-    if action["source_resolution_state"] == int(
-            _RESOLUTION_STATE.PENDING):
-        if not _resolve_sources(runtime, action, now):
-            return
-        action = _action_facts(connection, action_id)
-    if action["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED):
-        return
-    _fix_pending_selections(runtime, action, now)
-    _qualify_selected_items(runtime, action, now)
-    await _publish_and_finish(runtime, action_id, now)
 
 
 def _action_facts(connection, action_id: int) -> dict:
@@ -266,24 +249,22 @@ def _source_spec(action: Mapping) -> SourceSpec:
 
 
 def _fix_pending_selections(
-        runtime: ObtainRuntime, action: Mapping, now: int) -> None:
+        runtime: ObtainRuntime, now: int) -> None:
     """对每个待固定的选择计算快照并保存；来源未完成保持等待。"""
     from camctl.outputs.definitions import read_selection_request
 
     connection = runtime.owned.connection
-    with closing(connection.execute(
-        "SELECT s.id, d.depends_on_action_id FROM obtain_source_selections s"
-        " JOIN action_dependencies d ON d.id = s.dependency_id"
-        " WHERE d.action_id = ? AND s.status = ? ORDER BY s.id",
-        (action["id"], int(_SELECTION_STATUS.PENDING)),
-    )) as cursor:
-        pending = cursor.fetchall()
-    if not pending:
-        return
-    mode, requested = read_selection_request(
-        parse_exact_json(action["execution_spec_json"]),
-        parse_exact_json(action["input_fields_json"]))
-    for selection_id, member_id in pending:
+    page = runtime.discovery.rows(connection, "selections", now,
+        "SELECT s.id,d.depends_on_action_id,d.action_id FROM obtain_source_selections s"
+        " JOIN action_dependencies d ON d.id=s.dependency_id"
+        " JOIN actions a ON a.id=d.action_id"
+        " WHERE a.status=2 AND a.cancel_requested=0 AND a.source_resolution_state=2"
+        " AND s.status=?", (int(_SELECTION_STATUS.PENDING),), identity="s.id")
+    for selection_id, member_id, action_id in page.items:
+        action = _action_facts(connection, action_id)
+        mode, requested = read_selection_request(
+            parse_exact_json(action["execution_spec_json"]),
+            parse_exact_json(action["input_fields_json"]))
         facts = load_selection_facts(
             connection, int(member_id),
             requested_output_ids=requested)
@@ -308,19 +289,18 @@ def _fix_pending_selections(
 
 
 def _qualify_selected_items(
-        runtime: ObtainRuntime, action: Mapping, now: int) -> None:
+        runtime: ObtainRuntime, now: int) -> None:
     """为没有交付的已选中条目申请读取资格建档；等待不阻塞其他条目。"""
     connection = runtime.owned.connection
-    with closing(connection.execute(
-        "SELECT i.id, i.output_id FROM obtain_items i"
-        " JOIN obtain_source_selections s ON s.id = i.selection_id"
-        " JOIN action_dependencies d ON d.id = s.dependency_id"
-        " WHERE d.action_id = ? AND i.status = ? AND i.delivery_id IS NULL"
-        " ORDER BY i.id",
-        (action["id"], int(_ITEM_STATUS.SELECTED)),
-    )) as cursor:
-        pending = cursor.fetchall()
-    for item_id, output_id in pending:
+    page = runtime.discovery.rows(connection, "items", now,
+        "SELECT i.id,i.output_id,d.action_id FROM obtain_items i"
+        " JOIN obtain_source_selections s ON s.id=i.selection_id"
+        " JOIN action_dependencies d ON d.id=s.dependency_id"
+        " JOIN actions a ON a.id=d.action_id"
+        " WHERE a.status=2 AND a.cancel_requested=0 AND a.source_resolution_state=2"
+        " AND i.status=? AND i.delivery_id IS NULL", (int(_ITEM_STATUS.SELECTED),), identity="i.id")
+    for item_id, output_id, action_id in page.items:
+        action = _action_facts(connection, action_id)
         outcome = runtime.outputs.grant_file(
             _delivery_candidate(runtime, action, int(item_id),
                                 int(output_id), now),
@@ -450,16 +430,20 @@ def _extension_of(name: Any) -> str:
 
 
 async def _publish_and_finish(
-        runtime: ObtainRuntime, action_id: int, now: int) -> None:
+        runtime: ObtainRuntime, action_id: int, now: int, *, publish_limit: int) -> int:
     """汇总确定后发布成功交付并保存动作终态；未确定保持等待。"""
     from camctl.outputs.obtain_summary import decide_obtain_finish
 
     connection = runtime.owned.connection
     decision = decide_obtain_finish(load_obtain_facts(connection, action_id))
     if not decision.may_publish:
-        return
-    for delivery_id in _prepared_deliveries(connection, action_id):
+        return 0
+    deliveries = (_prepared_deliveries(connection, action_id, limit=publish_limit)
+                  if publish_limit else ())
+    for delivery_id in deliveries:
         await _publish_delivery(runtime, int(delivery_id), now)
+    if _prepared_deliveries(connection, action_id, limit=1):
+        return len(deliveries)
     outcome = runtime.outputs.finish_obtain(
         FinishObtain(action_id=action_id, occurred_at=now),
         new_operation_key(), runtime.owned)
@@ -467,17 +451,18 @@ async def _publish_and_finish(
         raise ConsistencyError(
             f"取回完成事务未完成（{outcome.kind.value}）:"
             f" {outcome.error}")
+    return len(deliveries)
 
 
-def _prepared_deliveries(connection, action_id: int) -> list[int]:
+def _prepared_deliveries(connection, action_id: int, *, limit: int) -> list[int]:
     """汇总确定后仍待发布的成功交付。"""
     with closing(connection.execute(
         "SELECT d.id FROM deliveries d"
         " JOIN obtain_items i ON i.delivery_id = d.id"
         " JOIN obtain_source_selections s ON s.id = i.selection_id"
         " JOIN action_dependencies dep ON dep.id = s.dependency_id"
-        " WHERE dep.action_id = ? AND d.status = ? ORDER BY d.id",
-        (action_id, int(_DELIVERY_STATUS.PREPARED)),
+        " WHERE dep.action_id = ? AND d.status = ? ORDER BY d.id LIMIT ?",
+        (action_id, int(_DELIVERY_STATUS.PREPARED), limit),
     )) as cursor:
         return [int(row[0]) for row in cursor.fetchall()]
 
@@ -508,17 +493,9 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     发不阻塞读取推进。
     """
     connection = runtime.owned.connection
+    page = runtime.discovery.reads(connection, "reads", now)
     if runtime.binding_check is not None:
-        with closing(connection.execute(
-            "SELECT c.id,c.source_device_file_id,a.device_id,a.driver_id"
-            " FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id"
-            " JOIN actions owner ON owner.id=d.action_id"
-            " JOIN device_files f ON f.id=c.source_device_file_id"
-            " JOIN actions a ON a.id=f.observer_action_id"
-            " WHERE owner.status=2 AND owner.cancel_requested=0 AND d.status IN (1,2)"
-            " AND c.verification_state NOT IN (3,5) ORDER BY c.id",
-        )) as cursor:
-            candidates = cursor.fetchall()
+        candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id) for item in page.items)
         for copy_id, source_id, device_id, driver_id in candidates:
             result = runtime.binding_check(DeviceBinding(device_id, driver_id))
             if result.status in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH):
@@ -543,7 +520,7 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
     for work in plan_device_work(
-            connection, now, capture_read_parallel=parallel):
+            connection, now, capture_read_parallel=parallel, candidates=page.items):
         if work.yield_reads or (
                 work.dispatch_captures and not work.capture_read_parallel):
             continue
@@ -589,7 +566,7 @@ async def _advance_read(
             is not None:
         return
     slot = runtime.outputs.grant_read_slot(
-        SlotRequest(copy_id=copy_id, occurred_at=now),
+        SlotRequest(copy_id=copy_id, occurred_at=runtime.occurred_at()),
         new_operation_key(), runtime.owned)
     if slot.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(
@@ -687,11 +664,13 @@ def _fail_read_delivery(
 
 def _settle_failed_reads(runtime: ObtainRuntime) -> None:
     """新会话只消费原终态依据，不用本次上限重开已失败读取。"""
-    rows = runtime.owned.connection.execute(
+    now = runtime.occurred_at()
+    page = runtime.discovery.rows(runtime.owned.connection, "failed", now,
         "SELECT c.id,r.error_json FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
         " JOIN deliveries d ON d.id=c.delivery_id JOIN actions a ON a.id=d.action_id"
         " WHERE r.kind=3 AND r.status=4 AND d.status IN (1,2)"
-        " AND a.status=2 AND a.cancel_requested=0 ORDER BY c.id").fetchall()
+        " AND a.status=2 AND a.cancel_requested=0", identity="c.id")
+    rows = page.items
     for copy_id, error_json in rows:
         if error_json is None:
             raise ConsistencyError("原失败读取缺少可靠终局错误")
@@ -1064,18 +1043,8 @@ class _LocalReadSession:
 async def _advance_local_reads(runtime: ObtainRuntime, now: int) -> None:
     """推进全部主机源交付拷贝：不依赖设备装配，逐份独立推进。"""
     connection = runtime.owned.connection
-    with closing(connection.execute(
-        "SELECT c.id FROM file_copies c"
-        " JOIN deliveries d ON d.id = c.delivery_id"
-        " JOIN actions a ON a.id = d.action_id"
-        " WHERE c.source_device_file_id IS NULL"
-        " AND c.verification_state NOT IN (?, ?)"
-        " AND d.status NOT IN (?, ?, ?)"
-        " AND a.status = 2 AND a.cancel_requested = 0"
-        " ORDER BY c.id",
-        (*_VERIFICATION_DONE, *_INACTIVE_DELIVERIES),
-    )) as cursor:
-        copy_ids = tuple(int(row[0]) for row in cursor.fetchall())
+    page = runtime.discovery.reads(connection, "local", now)
+    copy_ids = (candidate.copy_id for candidate in page.items)
     sessions = LocalReadSessions(runtime.owned, runtime.directories)
     for copy_id in copy_ids:
         await _advance_local_read(runtime, sessions, copy_id, now)
