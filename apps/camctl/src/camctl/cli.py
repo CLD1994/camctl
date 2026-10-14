@@ -203,11 +203,41 @@ def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
     # 在读取配置、输入和启动任何协作者前取得写端所有权并禁止继承。
     writer = (open_notification_writer(command.host_notification_fd)
               if command.kind is CommandKind.RUN else None)
+    primary_error: BaseException | None = None
     try:
         return _execute_session_command(command, out, err, writer)
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
         if writer is not None:
-            writer.close()
+            try:
+                writer.close()
+            except BaseException as close_error:
+                if primary_error is None:
+                    raise
+                from camctl.bootstrap.lifecycle import _attach_runtime_close_note
+
+                selected = (close_error
+                            if isinstance(primary_error, Exception)
+                            and not isinstance(close_error, Exception)
+                            else primary_error)
+                _attach_runtime_close_note(
+                    selected, "通知管道关闭后的其他错误",
+                    primary_error if selected is close_error else close_error)
+                try:
+                    print(f"通知管道关闭诊断: {type(close_error).__name__}: "
+                          f"{close_error}", file=err)
+                except BaseException as diagnostic_error:
+                    if (isinstance(selected, Exception)
+                            and not isinstance(diagnostic_error, Exception)):
+                        _attach_runtime_close_note(
+                            diagnostic_error, "此前命令错误", selected)
+                        raise
+                    _attach_runtime_close_note(
+                        selected, "通知管道关闭诊断写入错误", diagnostic_error)
+                if selected is close_error:
+                    raise
 
 
 def _execute_session_command(command: Command, out: TextIO, err: TextIO,
@@ -253,8 +283,10 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
 
     try:
         outcome = asyncio.run(execute_command(deps, source))
-    except Exception as error:  # 会话装配外溢的异常按会话错误收口。
-        close_runtime(deps)
+    except BaseException as error:  # 装配后异常也须先释放 CLI 所有资源。
+        close_runtime(deps, primary_error=error)
+        if not isinstance(error, Exception):
+            raise
         print(f"camctl {command.kind.value}: 会话错误: {error}", file=err)
         return 1
     close_runtime(deps)
@@ -299,7 +331,11 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
 def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.application import ConfigAdapter
     from camctl.bootstrap.config import ConfigError
-    from camctl.persistence.initialization import InitOutcome, initialize_state
+    from camctl.persistence.initialization import (
+        InitOutcome,
+        initialization_error_descriptions,
+        initialize_state,
+    )
 
     try:
         adapter = ConfigAdapter(home=Path.home())
@@ -309,7 +345,20 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
         print(f"camctl init: {error}", file=err)
         return 1
     if result.outcome is InitOutcome.FAILED:
-        print(f"camctl init: {result.detail}", file=err)
+        detail = result.detail
+        descriptions: list[str] = []
+        for error in result.secondary_errors:
+            descriptions.extend(initialization_error_descriptions(error))
+        if result.error is not None:
+            descriptions.extend(
+                initialization_error_descriptions(
+                    result.error,
+                    include_primary=False,
+                )
+            )
+        if descriptions:
+            detail = f"{detail}；后续收场错误: {'；'.join(descriptions)}"
+        print(f"camctl init: {detail}", file=err)
         return 1
     # init 的 stdout 保持为空。
     return 0

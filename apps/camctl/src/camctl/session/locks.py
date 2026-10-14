@@ -10,14 +10,71 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
+
+
+class LockOperation(Enum):
+    """锁端口实际执行的单个操作。"""
+
+    OPEN = "open"
+    SET_INHERITABLE = "set_inheritable"
+    TRY_LOCK = "try_lock"
+    UNLOCK = "unlock"
+    CLOSE = "close"
+
+
+class LockAcquisitionResult(Enum):
+    """内核锁取得结果；异常结果保持未确认。"""
+
+    NOT_ATTEMPTED = "not_attempted"
+    ACQUIRED = "acquired"
+    CONFLICT = "conflict"
+    UNCONFIRMED = "unconfirmed"
+
+
+class LockActionResult(Enum):
+    """解锁或关闭操作的实际结果。"""
+
+    NOT_ATTEMPTED = "not_attempted"
+    CONFIRMED = "confirmed"
+    UNCONFIRMED = "unconfirmed"
+
+
+@dataclass(frozen=True)
+class _LockErrorFacts:
+    """锁操作错误与句柄收场事实；错误后的关闭不推断句柄仍然打开。"""
+
+    operation: LockOperation
+    path: Path
+    original_error: BaseException | None
+    lock_result: LockAcquisitionResult
+    unlock_result: LockActionResult
+    close_result: LockActionResult
+    secondary_errors: tuple[_LockErrorFacts, ...] = ()
+
+    @property
+    def errno(self) -> int | None:
+        return (
+            self.original_error.errno
+            if isinstance(self.original_error, OSError)
+            else None
+        )
 
 
 class LockError(RuntimeError):
     """锁文件打开、加锁、解锁或句柄管理失败。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        facts: _LockErrorFacts | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.facts = facts
 
 
 class SessionLockConflictError(LockError):
@@ -26,6 +83,190 @@ class SessionLockConflictError(LockError):
 
 class AdmissionLockConflictError(LockError):
     """接纳锁已被其他接纳者持有。"""
+
+
+_LOCK_FACTS_ATTRIBUTE = "lock_facts"
+
+
+def lock_error_facts(error: BaseException) -> _LockErrorFacts | None:
+    """读取锁模块附加的 typed 事实，包括未转换的内部控制异常。"""
+    if isinstance(error, LockError) and isinstance(error.facts, _LockErrorFacts):
+        return error.facts
+    facts = getattr(error, _LOCK_FACTS_ATTRIBUTE, None)
+    return facts if isinstance(facts, _LockErrorFacts) else None
+
+
+def _attach_lock_facts(error: BaseException, facts: _LockErrorFacts) -> None:
+    if isinstance(error, LockError):
+        error.facts = facts
+    setattr(error, _LOCK_FACTS_ATTRIBUTE, facts)
+
+
+def _facts(
+    operation: LockOperation,
+    path: Path,
+    original_error: BaseException | None,
+    *,
+    lock_result: LockAcquisitionResult = LockAcquisitionResult.NOT_ATTEMPTED,
+    unlock_result: LockActionResult = LockActionResult.NOT_ATTEMPTED,
+    close_result: LockActionResult = LockActionResult.NOT_ATTEMPTED,
+    secondary_errors: tuple[_LockErrorFacts, ...] = (),
+) -> _LockErrorFacts:
+    return _LockErrorFacts(
+        operation=operation,
+        path=path,
+        original_error=original_error,
+        lock_result=lock_result,
+        unlock_result=unlock_result,
+        close_result=close_result,
+        secondary_errors=secondary_errors,
+    )
+
+
+def _close_error_fact(path: Path, error: BaseException) -> _LockErrorFacts:
+    return _facts(
+        LockOperation.CLOSE,
+        path,
+        error,
+        close_result=LockActionResult.UNCONFIRMED,
+    )
+
+
+def _operation_failure(
+    message: str,
+    error: BaseException,
+    facts: _LockErrorFacts,
+) -> BaseException:
+    if isinstance(error, OSError):
+        return LockError(message, facts=facts)
+    _attach_lock_facts(error, facts)
+    return error
+
+
+def _raise_operation_failure(
+    message: str,
+    error: BaseException,
+    facts: _LockErrorFacts,
+) -> None:
+    failure = _operation_failure(message, error, facts)
+    if failure is error:
+        raise error
+    raise failure from error
+
+
+@dataclass(frozen=True)
+class _LockFailureEvent:
+    operation: LockOperation
+    error: BaseException
+
+
+def _failure_event_facts(path: Path, event: _LockFailureEvent) -> _LockErrorFacts:
+    if event.operation is LockOperation.TRY_LOCK:
+        return _facts(
+            event.operation,
+            path,
+            event.error,
+            lock_result=LockAcquisitionResult.UNCONFIRMED,
+        )
+    if event.operation is LockOperation.UNLOCK:
+        return _facts(
+            event.operation,
+            path,
+            event.error,
+            lock_result=LockAcquisitionResult.ACQUIRED,
+            unlock_result=LockActionResult.UNCONFIRMED,
+        )
+    if event.operation is LockOperation.CLOSE:
+        return _close_error_fact(path, event.error)
+    return _facts(event.operation, path, event.error)
+
+
+def _select_operation_failure(
+    message: str,
+    path: Path,
+    events: tuple[_LockFailureEvent, ...],
+    *,
+    lock_result: LockAcquisitionResult,
+    unlock_result: LockActionResult,
+    close_result: LockActionResult,
+) -> tuple[BaseException, BaseException]:
+    """统一选择操作及其收场错误中的主错误。"""
+    if not events:
+        raise ValueError("至少需要一个锁操作错误事实")
+    primary_index = next(
+        (
+            index
+            for index, event in enumerate(events)
+            if not isinstance(event.error, Exception)
+        ),
+        0,
+    )
+    primary = events[primary_index]
+    secondary_errors: list[_LockErrorFacts] = []
+    seen_errors = {id(primary.error)}
+    for index, event in enumerate(events):
+        if index == primary_index or id(event.error) in seen_errors:
+            continue
+        seen_errors.add(id(event.error))
+        secondary_errors.append(_failure_event_facts(path, event))
+    facts = _facts(
+        primary.operation,
+        path,
+        primary.error,
+        lock_result=lock_result,
+        unlock_result=unlock_result,
+        close_result=close_result,
+        secondary_errors=tuple(secondary_errors),
+    )
+    failure = _operation_failure(
+        f"{message}: {primary.error}",
+        primary.error,
+        facts,
+    )
+    return primary.error, failure
+
+
+def _raise_selected_failure(cause: BaseException, failure: BaseException) -> None:
+    if failure is cause:
+        raise cause
+    raise failure from cause
+
+
+def _try_close(
+    backend: LockBackend,
+    fd: int,
+) -> tuple[LockActionResult, BaseException | None]:
+    try:
+        backend.close(fd)
+    except BaseException as error:
+        return LockActionResult.UNCONFIRMED, error
+    return LockActionResult.CONFIRMED, None
+
+
+def _close_after_failure(
+    path: Path,
+    fd: int,
+    backend: LockBackend,
+    message: str,
+    error: BaseException,
+    operation: LockOperation,
+    *,
+    lock_result: LockAcquisitionResult = LockAcquisitionResult.NOT_ATTEMPTED,
+    unlock_result: LockActionResult = LockActionResult.NOT_ATTEMPTED,
+) -> None:
+    close_result, close_error = _try_close(backend, fd)
+    events = [_LockFailureEvent(operation, error)]
+    if close_error is not None:
+        events.append(_LockFailureEvent(LockOperation.CLOSE, close_error))
+    cause, failure = _select_operation_failure(
+        message,
+        path,
+        tuple(events),
+        lock_result=lock_result,
+        unlock_result=unlock_result,
+        close_result=close_result,
+    )
+    _raise_selected_failure(cause, failure)
 
 
 class LockBackend(Protocol):
@@ -136,16 +377,47 @@ class _Lease:
     fd: int
     path: Path
     _backend: LockBackend
+    _close_confirmed: bool = field(default=False, init=False, repr=False)
+    _close_failure: BaseException | None = field(default=None, init=False, repr=False)
 
     def close(self, backend: LockBackend | None = None) -> None:
         active = backend if backend is not None else self._backend
-        if self.fd < 0:
+        if self._close_failure is not None:
+            raise self._close_failure
+        if self._close_confirmed or self.fd < 0:
             return
         fd, self.fd = self.fd, -1
+
+        events: list[_LockFailureEvent] = []
+        unlock_result = LockActionResult.NOT_ATTEMPTED
         try:
             active.unlock(fd)
-        finally:
+        except BaseException as error:
+            events.append(_LockFailureEvent(LockOperation.UNLOCK, error))
+            unlock_result = LockActionResult.UNCONFIRMED
+        else:
+            unlock_result = LockActionResult.CONFIRMED
+
+        try:
             active.close(fd)
+        except BaseException as error:
+            close_result = LockActionResult.UNCONFIRMED
+            events.append(_LockFailureEvent(LockOperation.CLOSE, error))
+        else:
+            close_result = LockActionResult.CONFIRMED
+            self._close_confirmed = True
+
+        if events:
+            cause, failure = _select_operation_failure(
+                f"锁租约释放失败: {self.path}",
+                self.path,
+                tuple(events),
+                lock_result=LockAcquisitionResult.ACQUIRED,
+                unlock_result=unlock_result,
+                close_result=close_result,
+            )
+            self._close_failure = failure
+            _raise_selected_failure(cause, failure)
 
 
 @dataclass
@@ -161,40 +433,100 @@ class AdmissionLease(_Lease):
 def _open_lock_file(path: Path, backend: LockBackend) -> int:
     try:
         fd = backend.open(path)
-    except OSError as error:
-        raise LockError(f"锁文件打开失败: {path}: {error}") from error
-    backend.set_inheritable(fd, False)
+    except BaseException as error:
+        facts = _facts(LockOperation.OPEN, path, error)
+        _raise_operation_failure(f"锁文件打开失败: {path}: {error}", error, facts)
+    try:
+        backend.set_inheritable(fd, False)
+    except BaseException as error:
+        _close_after_failure(
+            path,
+            fd,
+            backend,
+            f"锁文件不可继承设置失败: {path}",
+            error,
+            LockOperation.SET_INHERITABLE,
+        )
     return fd
+
+
+def _acquire(
+    lock_path: Path,
+    backend: LockBackend | None,
+    *,
+    lease_type: type[_Lease],
+    conflict_type: type[LockError],
+    label: str,
+) -> _Lease:
+    active = backend if backend is not None else default_backend()
+    fd = _open_lock_file(lock_path, active)
+    try:
+        locked = active.try_lock(fd)
+    except BaseException as error:
+        _close_after_failure(
+            lock_path,
+            fd,
+            active,
+            f"{label}加锁失败: {lock_path}",
+            error,
+            LockOperation.TRY_LOCK,
+            lock_result=LockAcquisitionResult.UNCONFIRMED,
+        )
+    if not locked:
+        close_result, close_error = _try_close(active, fd)
+        if close_error is not None and not isinstance(close_error, OSError):
+            facts = _facts(
+                LockOperation.CLOSE,
+                lock_path,
+                close_error,
+                lock_result=LockAcquisitionResult.CONFLICT,
+                close_result=close_result,
+            )
+            _attach_lock_facts(close_error, facts)
+            raise close_error
+        secondary_errors = (
+            (_close_error_fact(lock_path, close_error),)
+            if close_error is not None
+            else ()
+        )
+        facts = _facts(
+            LockOperation.TRY_LOCK,
+            lock_path,
+            None,
+            lock_result=LockAcquisitionResult.CONFLICT,
+            close_result=close_result,
+            secondary_errors=secondary_errors,
+        )
+        raise conflict_type(f"{label}已被持有: {lock_path}", facts=facts)
+    return lease_type(fd=fd, path=lock_path, _backend=active)
 
 
 def acquire_session(lock_path: Path, backend: LockBackend | None = None) -> SessionLease:
     """非阻塞取得会话锁；冲突与系统错误分别表达。"""
-    active = backend if backend is not None else default_backend()
-    fd = _open_lock_file(lock_path, active)
-    try:
-        locked = active.try_lock(fd)
-    except OSError as error:
-        active.close(fd)
-        raise LockError(f"会话锁加锁失败: {lock_path}: {error}") from error
-    if not locked:
-        active.close(fd)
-        raise SessionLockConflictError(f"会话锁已被持有: {lock_path}")
-    return SessionLease(fd=fd, path=lock_path, _backend=active)
+    return cast(
+        SessionLease,
+        _acquire(
+            lock_path,
+            backend,
+            lease_type=SessionLease,
+            conflict_type=SessionLockConflictError,
+            label="会话锁",
+        ),
+    )
 
 
 def acquire_admission(lock_path: Path, backend: LockBackend | None = None) -> AdmissionLease:
     """非阻塞取得接纳锁；用于 run 的接纳阶段及事务内取得。"""
-    active = backend if backend is not None else default_backend()
-    fd = _open_lock_file(lock_path, active)
-    try:
-        locked = active.try_lock(fd)
-    except OSError as error:
-        active.close(fd)
-        raise LockError(f"接纳锁加锁失败: {lock_path}: {error}") from error
-    if not locked:
-        active.close(fd)
-        raise AdmissionLockConflictError(f"接纳锁已被持有: {lock_path}")
-    return AdmissionLease(fd=fd, path=lock_path, _backend=active)
+    return cast(
+        AdmissionLease,
+        _acquire(
+            lock_path,
+            backend,
+            lease_type=AdmissionLease,
+            conflict_type=AdmissionLockConflictError,
+            label="接纳锁",
+        ),
+    )
 
 
 def probe_admission(lock_path: Path, backend: LockBackend | None = None) -> AdmissionProbe:
@@ -205,22 +537,48 @@ def probe_admission(lock_path: Path, backend: LockBackend | None = None) -> Admi
     """
     active = backend if backend is not None else default_backend()
     fd = _open_lock_file(lock_path, active)
+    lock_result = LockAcquisitionResult.NOT_ATTEMPTED
+    unlock_result = LockActionResult.NOT_ATTEMPTED
+    events: list[_LockFailureEvent] = []
+
     try:
         locked = active.try_lock(fd)
+    except BaseException as error:
+        locked = False
+        lock_result = LockAcquisitionResult.UNCONFIRMED
+        events.append(_LockFailureEvent(LockOperation.TRY_LOCK, error))
+    else:
         if locked:
-            active.unlock(fd)
-    except OSError as error:
-        raise LockError(f"接纳锁探测失败: {lock_path}: {error}") from error
-    finally:
-        active.close(fd)
-    if locked:
+            lock_result = LockAcquisitionResult.ACQUIRED
+            try:
+                active.unlock(fd)
+            except BaseException as error:
+                unlock_result = LockActionResult.UNCONFIRMED
+                events.append(_LockFailureEvent(LockOperation.UNLOCK, error))
+            else:
+                unlock_result = LockActionResult.CONFIRMED
+        else:
+            lock_result = LockAcquisitionResult.CONFLICT
+
+    close_result, close_error = _try_close(active, fd)
+    if close_error is not None:
+        events.append(_LockFailureEvent(LockOperation.CLOSE, close_error))
+    if events:
+        cause, failure = _select_operation_failure(
+            f"接纳锁探测失败: {lock_path}",
+            lock_path,
+            tuple(events),
+            lock_result=lock_result,
+            unlock_result=unlock_result,
+            close_result=close_result,
+        )
+        _raise_selected_failure(cause, failure)
+
+    if lock_result is LockAcquisitionResult.ACQUIRED:
         return AdmissionProbe(status=AdmissionProbeStatus.ACQUIRED_AND_RELEASED)
     return AdmissionProbe(status=AdmissionProbeStatus.CONFLICT)
 
 
 def release_admission(lease: AdmissionLease, backend: LockBackend | None = None) -> None:
     """释放接纳锁；释放或关闭失败保留错误，不宣称成功关闭。"""
-    try:
-        lease.close(backend=backend)
-    except OSError as error:
-        raise LockError(f"接纳锁释放失败: {lease.path}: {error}") from error
+    lease.close(backend=backend)

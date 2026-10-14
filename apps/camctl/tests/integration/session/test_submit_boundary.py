@@ -410,20 +410,21 @@ def test_invalid_handoff_result_rolls_back_input(runtime):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("rollback_recovers, expected_kind", [
-    (True, DbOutcomeKind.ROLLED_BACK), (False, DbOutcomeKind.UNKNOWN),
-])
-async def test_close_transaction_failure_keeps_released_admission_closed(runtime, rollback_recovers, expected_kind):
+@pytest.mark.parametrize("rollback_reached_database", [False, True])
+async def test_close_transaction_failure_keeps_released_admission_closed(
+        runtime, rollback_reached_database):
     lease = acquire_admission(runtime.admission_lock)
     owned = open_existing(runtime.state_db, DbOpenMode.EXISTING_RW, DbConfig())
+    failure = sqlite3.OperationalError("关闭事务未取得结束结果")
+    rollback_calls = []
 
     class EndTransactionFailure:
-        failed_once = False
-
         def execute(self, statement, parameters=()):
-            if statement == "ROLLBACK" and (not self.failed_once or not rollback_recovers):
-                self.failed_once = True
-                raise sqlite3.OperationalError("关闭事务未取得结束结果")
+            if statement == "ROLLBACK":
+                rollback_calls.append(statement)
+                if rollback_reached_database:
+                    owned.connection.execute(statement, parameters)
+                raise failure
             return owned.connection.execute(statement, parameters)
 
     try:
@@ -431,8 +432,11 @@ async def test_close_transaction_failure_keeps_released_admission_closed(runtime
             CloseAdmission(application.query_work_facts, lease.close), new_operation_key(),
             OwnedConnection(EndTransactionFailure(), owned.metadata),
         )
-        assert outcome.kind is expected_kind
+        assert outcome.kind is DbOutcomeKind.UNKNOWN
+        assert outcome.error is failure
         assert outcome.value is None
+        assert rollback_calls == ["ROLLBACK"]
+        assert owned.connection.in_transaction is (not rollback_reached_database)
         assert probe_admission(runtime.admission_lock).is_free
     finally:
         owned.connection.close()

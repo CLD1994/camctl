@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -16,7 +17,9 @@ from camctl.contracts.values import new_operation_key
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import register_guard
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
+import camctl.persistence.transaction as transaction_module
 from camctl.persistence.transaction import commit_operation
+from camctl.session.locks import LockError
 
 from .test_runtime import _create_valid_database
 
@@ -250,6 +253,33 @@ class FailingConnection:
         if sql.startswith(self._fail_prefix):
             raise sqlite3.OperationalError(f"injected failure at: {sql[:40]}")
         return self._connection.execute(sql, parameters)
+
+
+class RecordingFailureConnection:
+    """按事务边界注入一次失败并记录实际 SQL 调用。"""
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        failures: dict[str, BaseException],
+        *,
+        after_failures: dict[str, BaseException] | None = None,
+    ) -> None:
+        self._connection = connection
+        self._failures = dict(failures)
+        self._after_failures = dict(after_failures or {})
+        self.statements: list[str] = []
+
+    def execute(self, sql, parameters=()):
+        self.statements.append(sql)
+        error = self._failures.pop(sql, None)
+        if error is not None:
+            raise error
+        result = self._connection.execute(sql, parameters)
+        error = self._after_failures.pop(sql, None)
+        if error is not None:
+            raise error
+        return result
 
 
 def _owned_with(connection) -> OwnedConnection:
@@ -682,3 +712,313 @@ class TestAtomicRollback:
             assert _count(connection, "actions") == 0
         finally:
             connection.close()
+
+
+class TestTransactionControlReceipt:
+    def test_write_receipt_accessor_rejects_untyped_attribute(self) -> None:
+        error = RuntimeError("ordinary business failure")
+        setattr(error, "_camctl_write_receipt", object())
+        accessor = getattr(transaction_module, "write_receipt_for", None)
+        assert callable(accessor)
+        assert accessor(error) is None
+
+    @pytest.mark.parametrize("location", ["command", "complete_result"])
+    def test_precommit_control_rolls_back_once_and_keeps_same_object(
+        self, tmp_path, location
+    ) -> None:
+        from camctl.persistence.transaction import CommandPlan
+
+        _create_valid_database(tmp_path / "state.db")
+        real = sqlite3.connect(tmp_path / "state.db")
+        control = asyncio.CancelledError(f"control from {location}")
+        control.add_note("预先存在的控制附注")
+
+        class ControlCommand:
+            def plan(self, scope):
+                if location == "command":
+                    raise control
+
+                def complete_result(connection, result):
+                    raise control
+
+                return CommandPlan(
+                    events=(), owners={}, state_rows={}, read_only=True,
+                    complete_result=complete_result,
+                )
+
+        tracked = RecordingFailureConnection(real, {})
+        try:
+            with pytest.raises(asyncio.CancelledError) as caught:
+                commit_operation(
+                    ControlCommand(), new_operation_key(), _owned_with(tracked)
+                )
+
+            assert caught.value is control
+            assert tracked.statements.count("ROLLBACK") == 1
+            assert not real.in_transaction
+            accessor = getattr(transaction_module, "write_receipt_for", None)
+            assert callable(accessor)
+            receipt = accessor(control)
+            assert receipt is not None
+            assert receipt.kind == "rolled_back"
+            assert receipt.error is control
+            assert receipt.secondary_errors == ()
+            assert control.__notes__ == ["预先存在的控制附注"]
+        finally:
+            real.close()
+
+    @pytest.mark.parametrize("location", ["command", "complete_result"])
+    def test_precommit_control_and_rollback_error_keep_control_and_secondary(
+        self, tmp_path, location
+    ) -> None:
+        from camctl.persistence.transaction import CommandPlan
+
+        _create_valid_database(tmp_path / "state.db")
+        real = sqlite3.connect(tmp_path / "state.db")
+        control = asyncio.CancelledError(f"control from {location}")
+        rollback_error = sqlite3.OperationalError("rollback was not confirmed")
+
+        class ControlCommand:
+            def plan(self, scope):
+                if location == "command":
+                    raise control
+
+                def complete_result(connection, result):
+                    raise control
+
+                return CommandPlan(
+                    events=(), owners={}, state_rows={}, read_only=True,
+                    complete_result=complete_result,
+                )
+
+        tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_error})
+        try:
+            with pytest.raises(asyncio.CancelledError) as caught:
+                commit_operation(
+                    ControlCommand(), new_operation_key(), _owned_with(tracked)
+                )
+
+            assert caught.value is control
+            assert tracked.statements.count("ROLLBACK") == 1
+            assert real.in_transaction
+            accessor = getattr(transaction_module, "write_receipt_for", None)
+            assert callable(accessor)
+            receipt = accessor(control)
+            assert receipt is not None
+            assert receipt.kind == "unknown"
+            assert receipt.error is control
+            assert receipt.secondary_errors == (rollback_error,)
+        finally:
+            real.close()
+
+    @pytest.mark.parametrize("after_real_commit", [False, True])
+    def test_commit_control_is_unknown_without_retry_or_rollback(
+        self, tmp_path, plan_guards, after_real_commit
+    ) -> None:
+        _create_valid_database(tmp_path / "state.db")
+        real = sqlite3.connect(tmp_path / "state.db")
+        control = asyncio.CancelledError("control while COMMIT started")
+        command_calls = []
+
+        class CountedCommand:
+            def plan(self, scope):
+                command_calls.append("plan")
+                return PlanCreateCommand((1,)).plan(scope)
+
+        tracked = RecordingFailureConnection(
+            real,
+            {} if after_real_commit else {"COMMIT": control},
+            after_failures={"COMMIT": control} if after_real_commit else None,
+        )
+        try:
+            with pytest.raises(asyncio.CancelledError) as caught:
+                commit_operation(
+                    CountedCommand(), new_operation_key(), _owned_with(tracked)
+                )
+
+            assert caught.value is control
+            assert command_calls == ["plan"]
+            assert tracked.statements.count("COMMIT") == 1
+            assert tracked.statements.count("ROLLBACK") == 0
+            assert real.in_transaction is (not after_real_commit)
+            check = sqlite3.connect(tmp_path / "state.db")
+            try:
+                assert _count(check, "history_transactions") == int(after_real_commit)
+                assert _count(check, "history_events") == int(after_real_commit)
+                assert _count(check, "plans") == int(after_real_commit)
+            finally:
+                check.close()
+            accessor = getattr(transaction_module, "write_receipt_for", None)
+            assert callable(accessor)
+            receipt = accessor(control)
+            assert receipt is not None
+            assert receipt.kind == "unknown"
+            assert receipt.error is control
+            assert receipt.secondary_errors == ()
+        finally:
+            real.close()
+
+    @pytest.mark.parametrize(
+        "control", [False, True], ids=["sqlite-error", "control"]
+    )
+    def test_read_only_end_failure_is_unknown_and_not_retried(
+        self, tmp_path, control
+    ) -> None:
+        from camctl.persistence.transaction import CommandPlan
+
+        database = tmp_path / "state.db"
+        _create_valid_database(database)
+
+        def database_facts():
+            check = sqlite3.connect(database)
+            try:
+                return tuple(
+                    _count(check, table)
+                    for table in (
+                        "history_transactions", "history_events",
+                        "entity_event_links", "plans",
+                    )
+                )
+            finally:
+                check.close()
+
+        before = database_facts()
+        real = sqlite3.connect(database)
+        failure: BaseException
+        if control:
+            failure = asyncio.CancelledError("control at read-only ROLLBACK")
+            failure.add_note("原控制附注")
+        else:
+            failure = sqlite3.OperationalError("read-only ROLLBACK failed")
+        command_calls: list[str] = []
+
+        class ReadOnlyCommand:
+            def plan(self, scope):
+                command_calls.append("plan")
+                return CommandPlan(
+                    events=(), owners={}, state_rows={}, read_only=True,
+                    result="not completed",
+                )
+
+        tracked = RecordingFailureConnection(real, {"ROLLBACK": failure})
+        try:
+            if control:
+                with pytest.raises(asyncio.CancelledError) as caught:
+                    commit_operation(
+                        ReadOnlyCommand(), new_operation_key(), _owned_with(tracked)
+                    )
+                assert caught.value is failure
+                accessor = getattr(transaction_module, "write_receipt_for", None)
+                assert callable(accessor)
+                receipt = accessor(failure)
+                assert receipt is not None
+                assert receipt.kind == "unknown"
+                assert receipt.error is failure
+                assert receipt.result is None
+                assert receipt.secondary_errors == ()
+                assert failure.__notes__ == ["原控制附注"]
+            else:
+                receipt = commit_operation(
+                    ReadOnlyCommand(), new_operation_key(), _owned_with(tracked)
+                )
+                assert receipt.kind == "unknown"
+                assert receipt.error is failure
+                assert receipt.result is None
+
+            assert command_calls == ["plan"]
+            assert tracked.statements.count("ROLLBACK") == 1
+            assert tracked.statements.count("COMMIT") == 0
+            assert real.in_transaction
+            assert database_facts() == before
+        finally:
+            real.close()
+
+    def test_rollback_control_preserves_operation_error_and_is_not_retried(
+        self, tmp_path
+    ) -> None:
+        _create_valid_database(tmp_path / "state.db")
+        real = sqlite3.connect(tmp_path / "state.db")
+        operation_error = RuntimeError("command failed before rollback")
+        rollback_control = asyncio.CancelledError("control during ROLLBACK")
+
+        class FailingCommand:
+            def plan(self, scope):
+                raise operation_error
+
+        tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_control})
+        try:
+            with pytest.raises(asyncio.CancelledError) as caught:
+                commit_operation(
+                    FailingCommand(), new_operation_key(), _owned_with(tracked)
+                )
+
+            assert caught.value is rollback_control
+            assert tracked.statements.count("ROLLBACK") == 1
+            assert real.in_transaction
+            accessor = getattr(transaction_module, "write_receipt_for", None)
+            assert callable(accessor)
+            receipt = accessor(rollback_control)
+            assert receipt is not None
+            assert receipt.kind == "unknown"
+            assert receipt.error is rollback_control
+            assert receipt.secondary_errors == (operation_error,)
+        finally:
+            real.close()
+
+    def test_rollback_control_does_not_replace_earlier_control(
+        self, tmp_path
+    ) -> None:
+        _create_valid_database(tmp_path / "state.db")
+        real = sqlite3.connect(tmp_path / "state.db")
+        first_control = asyncio.CancelledError("command control first")
+        rollback_control = asyncio.CancelledError("rollback control second")
+
+        class ControlCommand:
+            def plan(self, scope):
+                raise first_control
+
+        tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_control})
+        try:
+            with pytest.raises(asyncio.CancelledError) as caught:
+                commit_operation(
+                    ControlCommand(), new_operation_key(), _owned_with(tracked)
+                )
+
+            assert caught.value is first_control
+            assert tracked.statements.count("ROLLBACK") == 1
+            accessor = getattr(transaction_module, "write_receipt_for", None)
+            assert callable(accessor)
+            receipt = accessor(first_control)
+            assert receipt is not None
+            assert receipt.kind == "unknown"
+            assert receipt.error is first_control
+            assert receipt.secondary_errors == (rollback_control,)
+        finally:
+            real.close()
+
+    def test_ordinary_operation_and_rollback_errors_keep_ordered_group(
+        self, tmp_path
+    ) -> None:
+        _create_valid_database(tmp_path / "state.db")
+        real = sqlite3.connect(tmp_path / "state.db")
+        operation_error = LockError("admission lock failed")
+        rollback_error = sqlite3.OperationalError("rollback failed")
+
+        class FailingCommand:
+            def plan(self, scope):
+                raise operation_error
+
+        tracked = RecordingFailureConnection(real, {"ROLLBACK": rollback_error})
+        try:
+            receipt = commit_operation(
+                FailingCommand(), new_operation_key(), _owned_with(tracked)
+            )
+
+            assert receipt.kind == "unknown"
+            assert isinstance(receipt.error, ExceptionGroup)
+            assert receipt.error.exceptions == (operation_error, rollback_error)
+            assert getattr(receipt, "secondary_errors", ()) == ()
+            assert tracked.statements.count("ROLLBACK") == 1
+            assert real.in_transaction
+        finally:
+            real.close()

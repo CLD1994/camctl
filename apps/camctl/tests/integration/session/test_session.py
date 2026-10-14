@@ -1175,7 +1175,7 @@ class TestSubmitVerification:
             def process_input(self, command, key, owned):
                 attempts["count"] += 1
                 return DbOutcome(kind=DbOutcomeKind.UNKNOWN,
-                                 error="commit unknown")
+                                 error=RuntimeError("commit unknown"))
 
         context = SessionContext(
             mode=CommandMode.SUBMIT,
@@ -1211,7 +1211,7 @@ class TestSubmitVerification:
         class RolledBackRepository:
             def process_input(self, command, key, owned):
                 return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK,
-                                 error="guard rejected")
+                                 error=RuntimeError("guard rejected"))
 
         context = SessionContext(
             mode=CommandMode.SUBMIT,

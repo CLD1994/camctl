@@ -1,9 +1,9 @@
-"""会话侧仓储：事务内接纳关闭。
+"""会话侧仓储：事务内接纳资格交接、关闭及下界维护。
 
-正常关闭在同一写事务内重新检查工作并释放接纳；有新工作或报告
-失败后尚有新工作时保持接纳；没有新工作的失败机会结束后关闭。
-锁释放是事务内的非阻塞锁操作，不产生
-权威事件。
+取得资格在无事件短写事务内执行并立即登记租约。正常关闭在同一写
+事务内重新检查工作并释放接纳；有新工作或报告失败后尚有新工作
+时保持接纳；没有新工作的失败机会结束后关闭。锁操作不产生权威
+事件。
 """
 
 from __future__ import annotations
@@ -19,7 +19,16 @@ from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.transaction import CommandPlan, commit_operation
 from camctl.session.work import WorkDecision, WorkDecisionKind, WorkFacts, classify_work
 
-__all__ = ["CloseAdmission", "CloseDecision", "SessionRepository"]
+__all__ = [
+    "AcquireAdmission", "CloseAdmission", "CloseDecision", "SessionRepository",
+]
+
+
+@dataclass(frozen=True)
+class AcquireAdmission:
+    """短交接事务内取得接纳资格并立即登记实际租约的命令。"""
+
+    acquire_and_register: Callable[[], None]
 
 
 @dataclass(frozen=True)
@@ -59,8 +68,36 @@ class _CloseCommand:
         )
 
 
+class _AcquireAdmissionCommand:
+    def __init__(self, command: AcquireAdmission) -> None:
+        self._command = command
+
+    def plan(self, scope) -> CommandPlan:
+        self._command.acquire_and_register()
+        return CommandPlan(
+            events=(),
+            owners={},
+            state_rows={},
+            read_only=True,
+            result=None,
+        )
+
+
 class SessionRepository:
-    """接纳关闭的 SQLite 仓储。"""
+    """接纳资格与关闭事务的 SQLite 仓储。"""
+
+    def acquire_admission(
+        self,
+        command: AcquireAdmission,
+        key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[None]:
+        receipt = commit_operation(_AcquireAdmissionCommand(command), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=None)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
     def close_admission(
         self,

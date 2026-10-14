@@ -242,7 +242,7 @@ async def test_session_lock_conflict_stops_before_startup_sweep(
         close_runtime(deps)
 
     assert outcome.succeeded is False
-    assert outcome.reason == "state_db_error"
+    assert outcome.reason == "lock_error"
     assert scans == []
     assert old_copy.exists()
 

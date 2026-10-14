@@ -127,6 +127,40 @@ class WriteReceipt:
     error: BaseException | None = None
     boundary: HistoryBoundary | None = None
     change_set: Any = None
+    secondary_errors: tuple[BaseException, ...] = ()
+
+
+_WRITE_RECEIPT_ATTRIBUTE = "_camctl_write_receipt"
+
+
+def write_receipt_for(error: BaseException) -> WriteReceipt | None:
+    """只读取事务内核附加的类型化收场事实。"""
+    receipt = getattr(error, _WRITE_RECEIPT_ATTRIBUTE, None)
+    return receipt if isinstance(receipt, WriteReceipt) else None
+
+
+def _attach_write_receipt(error: BaseException, receipt: WriteReceipt) -> None:
+    setattr(error, _WRITE_RECEIPT_ATTRIBUTE, receipt)
+
+
+def _attach_control_receipt(
+    control: BaseException,
+    kind: str,
+    secondary_errors: tuple[BaseException, ...] = (),
+) -> None:
+    unique_errors: list[BaseException] = []
+    for error in secondary_errors:
+        if error is control or any(error is saved for saved in unique_errors):
+            continue
+        unique_errors.append(error)
+    _attach_write_receipt(
+        control,
+        WriteReceipt(
+            kind=kind,
+            error=control,
+            secondary_errors=tuple(unique_errors),
+        ),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -387,6 +421,20 @@ def commit_operation(
     connection: sqlite3.Connection = owned.connection
     begun = False
     committing = False
+    rollback_attempted = False
+
+    def rollback_error(error: BaseException) -> WriteReceipt:
+        nonlocal rollback_attempted
+        if begun:
+            rollback_attempted = True
+        return _rollback_or_unknown(connection, begun, error)
+
+    def rollback_control(control: BaseException) -> None:
+        nonlocal rollback_attempted
+        if begun:
+            rollback_attempted = True
+        _rollback_control_or_unknown(connection, control)
+
     try:
         connection.execute("BEGIN IMMEDIATE")
         begun = True
@@ -401,7 +449,7 @@ def commit_operation(
             raise
         except Exception as error:
             # 命令执行期意外失败：整组不提交，按回滚或未知分类。
-            return _rollback_or_unknown(connection, True, error)
+            return rollback_error(error)
         events = plan.events
         if len(events) == 0:
             if not plan.read_only:
@@ -414,8 +462,17 @@ def commit_operation(
             except SchemaRuleError:
                 raise
             except Exception as error:
-                return _rollback_or_unknown(connection, True, error)
-            connection.execute("ROLLBACK")
+                return rollback_error(error)
+            try:
+                rollback_attempted = True
+                connection.execute("ROLLBACK")
+            except Exception as rollback_error:
+                # 该回滚已经尝试过；不重复发送 ROLLBACK，也不把只读
+                # 命令称为已完成。
+                return WriteReceipt(kind="unknown", error=rollback_error)
+            except BaseException as control:
+                _attach_control_receipt(control, "unknown")
+                raise
             return WriteReceipt(kind="completed", result=result)
         allocation = scope.allocation
         if allocation is None:
@@ -554,7 +611,7 @@ def commit_operation(
         except SchemaRuleError:
             raise
         except Exception as error:
-            return _rollback_or_unknown(connection, True, error)
+            return rollback_error(error)
         committing = True
         connection.execute("COMMIT")
         return WriteReceipt(
@@ -566,16 +623,39 @@ def commit_operation(
             change_set=change_set,
         )
     except SchemaRuleError as error:
-        receipt = _rollback_or_unknown(connection, begun, error)
+        receipt = rollback_error(error)
         if receipt.kind == "unknown":
             return receipt
         raise
     except (TransactionError, ConsistencyError, EventValidationError, ChangeDerivationError) as error:
-        return _rollback_or_unknown(connection, begun, error)
+        return rollback_error(error)
     except sqlite3.Error as error:
         if committing:
             return WriteReceipt(kind="unknown", error=error)
-        return _rollback_or_unknown(connection, begun, error)
+        return rollback_error(error)
+    except BaseException as control:
+        if isinstance(control, Exception):
+            raise
+        if committing:
+            _attach_control_receipt(control, "unknown")
+            raise
+        if begun and not rollback_attempted:
+            rollback_control(control)
+        raise
+
+
+def _rollback_control_or_unknown(
+    connection: sqlite3.Connection,
+    control: BaseException,
+) -> None:
+    """回滚一次并在原控制对象上附加实际事务结果。"""
+    try:
+        connection.execute("ROLLBACK")
+    except BaseException as rollback_error:
+        _attach_control_receipt(control, "unknown", (rollback_error,))
+    else:
+        _attach_control_receipt(control, "rolled_back")
+    raise control
 
 
 def _rollback_or_unknown(
@@ -585,8 +665,24 @@ def _rollback_or_unknown(
         return WriteReceipt(kind="rolled_back", error=error)
     try:
         connection.execute("ROLLBACK")
-    except sqlite3.Error as rollback_error:
-        return WriteReceipt(kind="unknown", error=rollback_error)
+    except BaseException as rollback_error:
+        if not isinstance(rollback_error, Exception):
+            if isinstance(error, Exception):
+                _attach_control_receipt(rollback_error, "unknown", (error,))
+                raise rollback_error
+            # 原操作控制对象先发生，回滚又交付控制对象时仍保留首个。
+            _attach_control_receipt(error, "unknown", (rollback_error,))
+            raise error
+        if not isinstance(error, Exception):
+            _attach_control_receipt(error, "unknown", (rollback_error,))
+            raise error
+        if rollback_error is error:
+            combined_error = error
+        else:
+            combined_error = ExceptionGroup(
+                "写事务操作及回滚均失败", [error, rollback_error]
+            )
+        return WriteReceipt(kind="unknown", error=combined_error)
     return WriteReceipt(kind="rolled_back", error=error)
 
 

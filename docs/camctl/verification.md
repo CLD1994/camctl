@@ -102,6 +102,33 @@
 
 本次结果证明开发环境的软件启动、日志实际责任、取消及锁内消费；真实设备、ARM 部署和物理断电继续按各自计划验收。通用锁错误与独立资源释放由 SW-05 承接。
 
+## SW-05 会话锁与退出收场验证（2026-10-14）
+
+环境为 Linux WSL2 x86_64、Python 3.11.16、SQLite 3.53.1。实施范围见[SW-05 计划](../superpowers/plans/2026-10-13-camctl-sw05-session-lock-errors.md)。
+
+[锁端口专项](../../apps/camctl/tests/unit/session/test_locks.py)验证打开、不可继承设置、加锁、探测、解锁及关闭各阶段的实际错误；稳定锁文件继续由内核锁表达资格。首次控制异常保持同一对象，没有控制异常时保留首个普通错误及有序后错；失败租约再次关闭交付保存的失败，系统关闭只尝试一次。
+
+[会话与事务专项](../../apps/camctl/tests/integration/session/test_lock_error_classification.py)组合真实 SQLite 与锁端口，验证普通接纳在短写事务内取得、租约立即登记、事务可靠结束后进入普通执行。锁系统故障、可信锁程序异常与实际数据库故障分别形成 `lock_error`、`internal_error`、`state_db_error`；回滚失败保留原错误及未知状态，最终次错保持平坦且去重。事务结束响应在真实回滚前后丢失时均只回滚一次，已释放接纳资格保持关闭。
+
+[默认入口专项](../../apps/camctl/tests/integration/bootstrap/test_session_lock_errors.py)验证真实 Linux 进程锁冲突、CLI 单条错误结果、未持锁时零业务副作用，以及既有受理及可信下界事实。晚到时钟交接错误沿原每目标应急资格收场，最终资源释放不新建应急。监督方、通知管道和日志的后错保留首个实际控制对象；CLI 控制退出完成副本通道、普通日志与通知 fd 的适用关闭，`stdout` 为空。[初始化专项](../../apps/camctl/tests/integration/bootstrap/test_initialization.py)另验 `init` 的 `stderr`、退出状态及实际库创建、验证和目录绑定事实。
+
+Root 对每个修改文件亲自核对规格、生产者、消费者和测试，再由 GPT6.1-Sol 完整独立复核。复核发现日志关闭等待取消会跳过后续资源，Root 按统一关闭任务补齐：父取消保留首对象，实际操作及适用后续关闭结束后才传播。[真实日志专项](../../apps/camctl/tests/integration/logging_runtime/test_lifecycle.py)的 20 项测试覆盖两个日志分支，分别在等待监听停止、文件关闭和队列结束时取消，并核对重复取消和后错先后。CLI 对照首次复验发现 stderr 后错诊断遗漏，补齐后 2 项通过。独立复核后的这一修复由 Root 自审并执行最终门禁。
+
+| 命令目标（相对于 `apps/camctl/tests`） | 实际结果 | 进程耗时 |
+| --- | --- | --- |
+| `unit` | 5230 项通过，1 项跳过，2 条既有警告 | 14.768 秒 |
+| `integration/session` | 138 项通过 | 24.789 秒 |
+| `integration/acceptance` | 258 项通过 | 43.679 秒 |
+| `integration/persistence` | 123 项通过 | 4.006 秒 |
+| `integration/bootstrap` | 1134 项通过，1 项跳过 | 884.273 秒 |
+| `integration/logging_runtime` | 112 项通过，1 条既有警告 | 2.720 秒 |
+| `integration/contracts` | 438 项通过 | 5.016 秒 |
+| 报告工作锁单节点 | 1 项通过 | 5.486 秒 |
+
+所有完整目录分别启动 pytest 并串行执行。完整命令从仓库根使用 `apps/camctl/.venv311/bin/python -m pytest <目标> -q -rs`；实际命令参数、PID、UTC 时间、耗时、退出码及原始输出保存于工作区忽略的 `.superpowers/sdd/2026-10-14-camctl-sw05-session-lock-errors/resume-validation/`，最终文件摘要见 `final-gate-manifest.json`。有效红、旧测试预期同步及中间诊断遗漏分别保留，不作为最终通过测次。本次验证提供开发环境的软件证据，真实相机、ARM 部署及物理断电继续按各自计划验收。
+
+两个跳过项分别为单元测试的非 Linux 守护对照和 bootstrap 的 Windows 文件系统大小写别名对照；三条警告来自既有同步测试的 asyncio 标记。最终八个进程退出码均为 `0`，18 个生产与测试 Python 文件在门禁前后摘要一致。
+
 ## 测试与分步实施方向
 
 ### Python 环境

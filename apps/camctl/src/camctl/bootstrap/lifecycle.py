@@ -471,16 +471,61 @@ def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> None:
         deps.stderr_diagnostic_failed = True
 
 
-async def _close_log_runtime(deps: RuntimeDeps) -> None:
+def _attach_runtime_close_note(
+    target: BaseException,
+    label: str,
+    error: BaseException,
+) -> None:
+    if target is error:
+        return
+    notes = tuple(getattr(error, "__notes__", ()))
+    existing = set(tuple(getattr(target, "__notes__", ())))
+    messages = [f"{label}: {type(error).__name__}: {error}"]
+    messages.extend(f"{label}附注: {note}" for note in notes)
+    for message in messages:
+        if message not in existing:
+            target.add_note(message)
+            existing.add(message)
+
+
+async def _close_log_runtime(
+    deps: RuntimeDeps,
+    *,
+    primary_error: BaseException | None = None,
+) -> None:
     from camctl.logging_runtime.lifecycle import close_logging
 
-    result = await close_logging(deps.log_runtime)
-    if result.close_error is not None:
-        _write_stderr_diagnostic(
-            deps,
-            "共享日志处理器关闭诊断：stage=log_handler_close; "
-            f"outcome=unknown; error={result.close_error}",
+    try:
+        result = await close_logging(deps.log_runtime)
+    except BaseException as error:
+        notes = "; ".join(tuple(getattr(error, "__notes__", ())))
+        diagnostic = (
+            "共享日志关闭诊断：stage=log_close; outcome=unknown; "
+            f"error={type(error).__name__}: {error}"
         )
+        if notes:
+            diagnostic += f"; notes={notes}"
+        try:
+            _write_stderr_diagnostic(deps, diagnostic)
+        except BaseException as diagnostic_error:
+            if (isinstance(error, Exception)
+                    and not isinstance(diagnostic_error, Exception)):
+                _attach_runtime_close_note(
+                    diagnostic_error, "此前日志关闭错误", error)
+                raise
+            _attach_runtime_close_note(
+                error, "日志关闭诊断写入错误", diagnostic_error)
+        raise
+    if result.close_error is not None:
+        diagnostic = (
+            "共享日志处理器关闭诊断：stage=log_handler_close; "
+            f"outcome=unknown; error={result.close_error}"
+        )
+        _write_stderr_diagnostic(deps, diagnostic)
+        if primary_error is not None:
+            note = f"后续日志关闭错误: {result.close_error}"
+            if note not in tuple(getattr(primary_error, "__notes__", ())):
+                primary_error.add_note(note)
 
 
 async def _on_report_recovered(
@@ -989,12 +1034,66 @@ async def execute_command(
         **overrides,
     )
     outcome: SessionOutcome | None = None
+    primary_error: BaseException | None = None
     try:
         outcome = await run_session(context, source)
-    except Exception as error:
-        await _emit_session_error(deps, f"{type(error).__name__}: {error}")
+    except BaseException as error:
+        primary_error = error
+        if isinstance(error, Exception):
+            await _emit_session_error(deps, f"{type(error).__name__}: {error}")
         raise
     finally:
+        selected_control = (
+            primary_error
+            if primary_error is not None and not isinstance(primary_error, Exception)
+            else None
+        )
+        cleanup_errors: list[tuple[str, BaseException]] = []
+        seen_cleanup_errors: set[int] = set()
+        noted_cleanup_errors: set[int] = (
+            set() if selected_control is None else {id(selected_control)}
+        )
+
+        def attach_cleanup_error(
+                target: BaseException, label: str, error: BaseException) -> None:
+            if target is error or id(error) in noted_cleanup_errors:
+                return
+            _attach_runtime_close_note(target, label, error)
+            noted_cleanup_errors.add(id(error))
+
+        def remember_cleanup_error(
+                label: str, error: BaseException) -> None:
+            """保存首个收场 control，并在全部资源结束后选择传播对象。"""
+            nonlocal selected_control
+            if id(error) not in seen_cleanup_errors:
+                seen_cleanup_errors.add(id(error))
+                cleanup_errors.append((label, error))
+            if isinstance(error, Exception):
+                if selected_control is not None:
+                    attach_cleanup_error(selected_control, label, error)
+                return
+            if selected_control is None:
+                selected_control = error
+                noted_cleanup_errors.add(id(error))
+                if primary_error is not None and primary_error is not error:
+                    attach_cleanup_error(
+                        selected_control, "此前会话异常", primary_error,
+                    )
+                if outcome is not None and not outcome.succeeded:
+                    note = (
+                        "此前会话结果："
+                        f"reason={outcome.reason}; details={outcome.details!r}"
+                    )
+                    if note not in tuple(getattr(selected_control, "__notes__", ())):
+                        selected_control.add_note(note)
+                for earlier_label, earlier_error in cleanup_errors:
+                    if earlier_error is not error:
+                        attach_cleanup_error(
+                            selected_control, earlier_label, earlier_error,
+                        )
+            else:
+                attach_cleanup_error(selected_control, label, error)
+
         # 会话失败结论先于监督方收场与日志关闭记录。
         if outcome is not None and not outcome.succeeded:
             await _emit_session_error(
@@ -1014,14 +1113,28 @@ async def execute_command(
                     outcome = _shutdown_configuration_outcome(outcome, stopped.configuration_failure)
                 await _emit_session_error(deps, stopped.configuration_failure.error_message)
 
-        try:
+        for worker in (supervisor, restricted_supervisor):
             try:
-                await stop_worker(supervisor)
-            finally:
-                await stop_worker(restricted_supervisor)
-        finally:
-            if deps.log_runtime is not None:
-                await _close_log_runtime(deps)
+                await stop_worker(worker)
+            except BaseException as error:
+                remember_cleanup_error("报告监督收场异常", error)
+        if deps.log_runtime is not None:
+            try:
+                await _close_log_runtime(
+                    deps,
+                    primary_error=selected_control,
+                )
+            except BaseException as error:
+                remember_cleanup_error("共享日志收场异常", error)
+        if selected_control is not None and selected_control is not primary_error:
+            raise selected_control.with_traceback(
+                selected_control.__traceback__)
+        if selected_control is None and cleanup_errors:
+            selected_error = primary_error or cleanup_errors[0][1]
+            for label, error in cleanup_errors:
+                attach_cleanup_error(selected_error, label, error)
+            if selected_error is not primary_error:
+                raise selected_error.with_traceback(selected_error.__traceback__)
     return outcome
 
 
@@ -1109,7 +1222,11 @@ def _shutdown_configuration_outcome(
     return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous)
 
 
-def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体
+def close_runtime(
+    deps: RuntimeDeps,
+    *,
+    primary_error: BaseException | None = None,
+) -> None:  # noqa: D401 - 见函数体
     """关闭装配层持有的资源；重复关闭不重复处理。
 
     会话内部资源（锁与连接）由会话流程按收尾次序自行释放；装配
@@ -1120,14 +1237,33 @@ def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体
     if deps.closed:
         return
     deps.closed = True
+
+    primary_control: BaseException | None = None
+    if primary_error is not None and not isinstance(primary_error, Exception):
+        primary_control = primary_error
+
+    def record_close_error(label: str, error: BaseException) -> None:
+        nonlocal primary_control
+        _write_stderr_diagnostic(
+            deps,
+            f"{label}: outcome=unknown; "
+            f"error={type(error).__name__}: {error}",
+        )
+        if primary_control is None and not isinstance(error, Exception):
+            primary_control = error
+            if primary_error is not None and primary_error is not error:
+                _attach_runtime_close_note(
+                    primary_control, "此前命令异常", primary_error,
+                )
+        elif primary_control is not None and error is not primary_control:
+            _attach_runtime_close_note(primary_control, label, error)
+
     if deps.failure_channel is not None:
         try:
             deps.failure_channel.close()
-        except Exception as error:
-            _write_stderr_diagnostic(
-                deps,
-                "日志副本处理器关闭诊断：stage=copy_handler_close; "
-                f"outcome=unknown; error={type(error).__name__}: {error}",
+        except BaseException as error:
+            record_close_error(
+                "日志副本处理器关闭诊断：stage=copy_handler_close", error,
             )
     runtime = deps.log_runtime
     if runtime is not None and runtime.close_attempts == 0:
@@ -1136,22 +1272,53 @@ def close_runtime(deps: RuntimeDeps) -> None:  # noqa: D401 - 见函数体
             from camctl.logging_runtime.service import ChannelError
 
             runtime.path_unsafe = True
-            runtime.channel.disable_channel(
-                ChannelError("共享文件日志 I/O 或协调不可用"))
-            runtime.listener_stopped = runtime.channel.stop_listener(None)
+            try:
+                runtime.channel.disable_channel(
+                    ChannelError("共享文件日志 I/O 或协调不可用"))
+            except BaseException as error:
+                record_close_error(
+                    "共享日志通道停用诊断：stage=log_channel_disable", error,
+                )
+            try:
+                runtime.listener_stopped = runtime.channel.stop_listener(None)
+            except BaseException as error:
+                runtime.listener_stopped = False
+                record_close_error(
+                    "共享日志监听线程关闭诊断：stage=log_listener_close", error,
+                )
             try:
                 if runtime.listener_stopped and runtime.file_closer is not None:
                     runtime.file_closer()
-            except Exception as error:
-                _write_stderr_diagnostic(
-                    deps,
-                    "共享日志处理器关闭诊断：stage=log_handler_close; "
-                    f"outcome=unknown; error={type(error).__name__}: {error}",
+            except BaseException as error:
+                record_close_error(
+                    "共享日志处理器关闭诊断：stage=log_handler_close", error,
                 )
-            finally:
+            try:
                 runtime.channel.async_close()
+            except BaseException as error:
+                record_close_error(
+                    "共享日志通道关闭诊断：stage=log_channel_close", error,
+                )
         else:
-            runtime.listener_stopped = runtime.channel.stop_listener(0.5)
-            if runtime.file_closer is not None:
-                runtime.file_closer()
-            runtime.channel.async_close()
+            try:
+                runtime.listener_stopped = runtime.channel.stop_listener(0.5)
+            except BaseException as error:
+                runtime.listener_stopped = False
+                record_close_error(
+                    "共享日志监听线程关闭诊断：stage=log_listener_close", error,
+                )
+            try:
+                if runtime.file_closer is not None:
+                    runtime.file_closer()
+            except BaseException as error:
+                record_close_error(
+                    "共享日志处理器关闭诊断：stage=log_handler_close", error,
+                )
+            try:
+                runtime.channel.async_close()
+            except BaseException as error:
+                record_close_error(
+                    "共享日志通道关闭诊断：stage=log_channel_close", error,
+                )
+    if primary_control is not None and primary_control is not primary_error:
+        raise primary_control.with_traceback(primary_control.__traceback__)

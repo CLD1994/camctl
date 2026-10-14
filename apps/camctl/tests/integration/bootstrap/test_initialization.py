@@ -6,7 +6,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import errno
+import json
+import os
 import sqlite3
+import sys
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -19,10 +25,18 @@ from camctl.persistence.runtime import (
     CURRENT_FORMAT_VERSION,
     DbOpenMode,
     DbConfig,
+    StateDatabaseError,
     canonical_directory_binding,
     open_existing,
 )
-from camctl.session.locks import acquire_session, lock_file_paths
+from camctl.session.locks import (
+    LockActionResult,
+    LockError,
+    LockOperation,
+    acquire_session,
+    lock_error_facts,
+    lock_file_paths,
+)
 
 from ..persistence.test_transactions import PlanCreateCommand, plan_guards
 from ..persistence.test_runtime import _create_legacy_v1_database
@@ -76,6 +90,151 @@ def _database_image(path: Path) -> tuple[list[tuple], dict[str, list[tuple]]]:
     finally:
         connection.close()
     return schema, _dump(path)
+
+
+def _install_linux_flock_failure(
+    monkeypatch,
+    *,
+    stage: str,
+    error: BaseException,
+    close_error: BaseException | None = None,
+):
+    """仅在真实 Linux 锁系统调用边界注入失败，保留实际 open/close。"""
+    if sys.platform != "linux":
+        pytest.skip("此项验证要求真实 Linux flock")
+
+    import fcntl
+
+    lock_flags = fcntl.LOCK_EX | fcntl.LOCK_NB
+    calls = {
+        "fd": None,
+        "acquire": [],
+        "unlock": [],
+        "close": [],
+        "actual_close": [],
+        "close_error": [],
+    }
+    actual_flock = fcntl.flock
+    actual_close = os.close
+
+    def controlled_flock(fd: int, operation: int) -> None:
+        if operation == lock_flags:
+            calls["fd"] = fd
+            calls["acquire"].append(fd)
+            if stage == "acquire":
+                raise error
+        elif operation == fcntl.LOCK_UN:
+            calls["unlock"].append(fd)
+            if stage == "unlock":
+                raise error
+        actual_flock(fd, operation)
+
+    def tracked_close(fd: int) -> None:
+        if fd == calls["fd"]:
+            calls["close"].append(fd)
+        actual_close(fd)
+        if fd == calls["fd"]:
+            calls["actual_close"].append(fd)
+            if close_error is not None and not calls["close_error"]:
+                calls["close_error"].append(fd)
+                raise close_error
+
+    monkeypatch.setattr(fcntl, "flock", controlled_flock)
+    monkeypatch.setattr(os, "close", tracked_close)
+    return calls
+
+
+def _assert_one_lock_fd_closed(calls) -> int:
+    assert len(calls["acquire"]) == 1
+    assert calls["fd"] == calls["acquire"][0]
+    assert calls["close"] == [calls["fd"]]
+    assert calls["actual_close"] == [calls["fd"]]
+    return calls["fd"]
+
+
+def _directory_file_image(roots: tuple[Path, ...]) -> tuple[tuple[str, str, bytes], ...]:
+    """记录实际目录树中的文件路径和字节，不从数据库行推断文件存在。"""
+    files: list[tuple[str, str, bytes]] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.is_file():
+                files.append((str(root), path.relative_to(root).as_posix(), path.read_bytes()))
+    return tuple(files)
+
+
+def _bound_roots(config) -> tuple[Path, ...]:
+    return tuple(Path(getattr(config.paths, name)) for name in ("staging", "ready", "processing"))
+
+
+def _assert_switch_kept_business_image(before, after, config) -> None:
+    before_schema, before_tables = before
+    after_schema, after_tables = after
+    assert after_schema == before_schema
+    assert after_tables.keys() == before_tables.keys()
+    for table in before_tables:
+        if table != "database_metadata":
+            assert after_tables[table] == before_tables[table], table
+
+    old_metadata = before_tables["database_metadata"][0]
+    new_metadata = after_tables["database_metadata"][0]
+    assert new_metadata[:4] == old_metadata[:4]
+    assert new_metadata[4:7] == tuple(
+        canonical_directory_binding(Path(getattr(config.paths, name)))
+        for name in ("staging", "ready", "processing")
+    )
+    assert new_metadata[7:] == old_metadata[7:]
+    assert before_tables["device_files"]
+    assert before_tables["outputs"]
+    assert before_tables["reports"]
+    assert before_tables["history_events"]
+    assert before_tables["state_syncs"]
+
+
+def _diagnostic_evidence(value: BaseException) -> str:
+    """检查错误对象、notes、可信锁事实和因果链中的实际诊断。"""
+    seen: set[int] = set()
+    parts: list[str] = []
+
+    def visit(error: BaseException | None) -> None:
+        if error is None or id(error) in seen:
+            return
+        seen.add(id(error))
+        parts.append(str(error))
+        parts.append(repr(getattr(error, "args", ())))
+        parts.append(repr(getattr(error, "__notes__", ())))
+        parts.append(repr(getattr(error, "__dict__", {})))
+        facts = lock_error_facts(error)
+        if facts is not None:
+            parts.append(repr(facts))
+        visit(error.__cause__)
+        visit(error.__context__)
+        for item in getattr(error, "exceptions", ()):
+            visit(item)
+
+    visit(value)
+    return "\n".join(parts)
+
+
+async def _completed_history_with_files(tmp_path: Path):
+    """复用真实初始化、受理、文件事实和报告输出，为复验提供完整旧库。"""
+    from .test_directory_switch_history import _completed_history
+
+    config, report, report_bytes = await _completed_history(tmp_path)
+    return config, report, report_bytes
+
+
+def _write_cli_config(path: Path, config) -> None:
+    values = {
+        name: getattr(config.paths, name)
+        for name in ("state_db", "log_file", "staging", "ready", "processing")
+    }
+    path.write_text(
+        "[paths]\n"
+        + "".join(f"{name} = {json.dumps(value)}\n" for name, value in values.items()),
+        encoding="utf-8",
+    )
 
 
 class TestFirstCreation:
@@ -247,3 +406,401 @@ class TestLockCoordination:
         dump = _dump(Path(cfg.paths.state_db))
         assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.VERIFIED_EXISTING
         assert _dump(Path(cfg.paths.state_db)) == dump
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed_state", ["created", "verified_existing", "switched"])
+async def test_release_oserror_keeps_completed_initialization_facts(
+    tmp_path: Path, monkeypatch, completed_state: str
+) -> None:
+    if completed_state == "created":
+        source_config = _config(tmp_path)
+        target_config = source_config
+        report_bytes = None
+    else:
+        source_config, _, report_bytes = await _completed_history_with_files(tmp_path)
+        target_config = (
+            source_config
+            if completed_state == "verified_existing"
+            else _config(tmp_path, prefix="new-")
+        )
+        if completed_state == "verified_existing":
+            note = Path(source_config.paths.ready) / "operator-note.bin"
+            note.write_bytes(b"existing directory content survives init cleanup")
+
+    state_db = Path(target_config.paths.state_db)
+    if completed_state == "created":
+        before = None
+    else:
+        before = _database_image(state_db)
+        assert before[1]["device_files"]
+        assert before[1]["outputs"]
+
+    report_path = tmp_path / "original-report.json"
+    source_roots = _bound_roots(source_config)
+    target_roots = _bound_roots(target_config)
+    file_roots = tuple(dict.fromkeys((*source_roots, *target_roots)))
+    files_before = _directory_file_image(file_roots)
+    if report_bytes is not None:
+        assert report_path.read_bytes() == report_bytes
+
+    release_error = OSError(errno.EIO, f"init-release-{completed_state}-sentinel")
+    with monkeypatch.context() as patch:
+        calls = _install_linux_flock_failure(
+            patch, stage="unlock", error=release_error
+        )
+        result = initialize_state(target_config, state_db)
+
+    assert result.outcome is InitOutcome.FAILED
+    assert isinstance(result.error, LockError)
+    assert result.secondary_errors == ()
+    assert result.error.__cause__ is release_error
+    facts = lock_error_facts(result.error)
+    assert facts is not None
+    assert facts.operation is LockOperation.UNLOCK
+    assert facts.path == lock_file_paths(state_db)[0]
+    assert facts.original_error is release_error
+    assert facts.close_result is LockActionResult.CONFIRMED
+    lock_fd = _assert_one_lock_fd_closed(calls)
+    assert calls["unlock"] == [lock_fd]
+
+    after_failure = _database_image(state_db)
+    if before is None:
+        owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            assert owned.metadata.application_id == "camctl"
+            assert owned.metadata.format_version == CURRENT_FORMAT_VERSION
+            instance_id = owned.metadata.instance_id
+            assert instance_id
+            assert owned.connection.execute(
+                "SELECT acknowledged_wm FROM runtime_state"
+            ).fetchone() == (0,)
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM history_events"
+            ).fetchone() == (0,)
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM history_transactions"
+            ).fetchone() == (0,)
+        finally:
+            owned.connection.close()
+    elif completed_state == "switched":
+        _assert_switch_kept_business_image(before, after_failure, target_config)
+    else:
+        assert after_failure == before
+
+    assert _directory_file_image(file_roots) == files_before
+    if report_bytes is not None:
+        assert report_path.read_bytes() == report_bytes
+    assert not tuple(tmp_path.glob(".state.db.init-*"))
+
+    verified = initialize_state(target_config, state_db)
+    assert verified.outcome is InitOutcome.VERIFIED_EXISTING
+    assert _database_image(state_db) == after_failure
+    assert _directory_file_image(file_roots) == files_before
+    if report_bytes is not None:
+        assert report_path.read_bytes() == report_bytes
+
+
+def test_failed_existing_database_keeps_primary_error_and_release_secondary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from camctl.persistence import initialization as initialization_module
+
+    cfg = _config(tmp_path)
+    state_db = Path(cfg.paths.state_db)
+    state_db.write_bytes(b"preserve this invalid database file")
+    original_bytes = state_db.read_bytes()
+    original_verify = initialization_module._verify_existing
+    body_results = []
+
+    def observe_real_validation(*args, **kwargs):
+        result = original_verify(*args, **kwargs)
+        body_results.append(result)
+        return result
+
+    release_error = OSError(errno.EIO, "init-failed-library-release-sentinel")
+    with monkeypatch.context() as patch:
+        patch.setattr(initialization_module, "_verify_existing", observe_real_validation)
+        calls = _install_linux_flock_failure(
+            patch, stage="unlock", error=release_error
+        )
+        result = initialize_state(cfg, state_db)
+
+    assert len(body_results) == 1
+    body_result = body_results[0]
+    assert body_result.outcome is InitOutcome.FAILED
+    assert isinstance(body_result.error, StateDatabaseError)
+    assert result.outcome is InitOutcome.FAILED
+    assert result.detail == body_result.detail
+    assert result.error is body_result.error
+    assert len(result.secondary_errors) == 1
+    secondary = result.secondary_errors[0]
+    assert isinstance(secondary, LockError)
+    assert secondary.__cause__ is release_error
+    facts = lock_error_facts(secondary)
+    assert facts is not None
+    assert facts.operation is LockOperation.UNLOCK
+    assert facts.close_result is LockActionResult.CONFIRMED
+    lock_fd = _assert_one_lock_fd_closed(calls)
+    assert calls["unlock"] == [lock_fd]
+    assert state_db.read_bytes() == original_bytes
+
+    still_invalid = initialize_state(cfg, state_db)
+    assert still_invalid.outcome is InitOutcome.FAILED
+    assert isinstance(still_invalid.error, StateDatabaseError)
+    assert state_db.read_bytes() == original_bytes
+
+
+def test_cli_init_reports_release_lock_error_only_on_stderr(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from camctl.cli import main
+
+    cfg = _config(tmp_path)
+    config_path = tmp_path / "camctl.toml"
+    _write_cli_config(config_path, cfg)
+    stdout = StringIO()
+    stderr = StringIO()
+    release_error = OSError(errno.EIO, "cli-init-release-diagnostic-sentinel")
+
+    with monkeypatch.context() as patch:
+        calls = _install_linux_flock_failure(
+            patch, stage="unlock", error=release_error
+        )
+        exit_code = main(
+            ["init", "--config", str(config_path)], stdout=stdout, stderr=stderr
+        )
+
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue()
+    assert "cli-init-release-diagnostic-sentinel" in stderr.getvalue()
+    assert len(stderr.getvalue().splitlines()) == 1
+    lock_fd = _assert_one_lock_fd_closed(calls)
+    assert calls["unlock"] == [lock_fd]
+
+    state_db = Path(cfg.paths.state_db)
+    owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        assert owned.metadata.instance_id
+        assert owned.metadata.format_version == CURRENT_FORMAT_VERSION
+    finally:
+        owned.connection.close()
+    assert initialize_state(cfg, state_db).outcome is InitOutcome.VERIFIED_EXISTING
+
+
+@pytest.mark.parametrize(
+    ("body_state", "inject_close_error"),
+    [("success", False), ("failed", False), ("success", True)],
+    ids=["success", "failed", "success-close-error"],
+)
+def test_cleanup_control_after_result_keeps_same_object_and_diagnostics(
+    tmp_path: Path, monkeypatch, body_state: str, inject_close_error: bool
+) -> None:
+    from camctl.persistence import initialization as initialization_module
+
+    cfg = _config(tmp_path)
+    state_db = Path(cfg.paths.state_db)
+    if body_state == "failed":
+        state_db.write_bytes(b"keep invalid library after cancellation")
+        original_bytes = state_db.read_bytes()
+        original_body = initialization_module._verify_existing
+        body_results = []
+
+        def observe_real_validation(*args, **kwargs):
+            result = original_body(*args, **kwargs)
+            body_results.append(result)
+            return result
+
+        original_result = observe_real_validation
+        observed_method = "_verify_existing"
+    else:
+        original_body = initialization_module._create_new
+        body_results = []
+
+        def observe_real_creation(*args, **kwargs):
+            result = original_body(*args, **kwargs)
+            body_results.append(result)
+            return result
+
+        original_result = observe_real_creation
+        observed_method = "_create_new"
+
+    control = asyncio.CancelledError(f"cleanup-{body_state}-control-sentinel")
+    control.add_note("caller-owned initialization note")
+    close_error = (
+        OSError(errno.EIO, "cleanup close secondary sentinel")
+        if inject_close_error
+        else None
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(initialization_module, observed_method, original_result)
+        calls = _install_linux_flock_failure(
+            patch, stage="unlock", error=control, close_error=close_error
+        )
+        with pytest.raises(asyncio.CancelledError) as caught:
+            initialize_state(cfg, state_db)
+
+    assert caught.value is control
+    assert len(body_results) == 1
+    body_result = body_results[0]
+    assert body_result.outcome is (
+        InitOutcome.CREATED if body_state == "success" else InitOutcome.FAILED
+    )
+    assert "caller-owned initialization note" in getattr(control, "__notes__", ())
+    assert body_result.detail in _diagnostic_evidence(control)
+    facts = lock_error_facts(control)
+    assert facts is not None
+    assert facts.operation is LockOperation.UNLOCK
+    assert facts.close_result is (
+        LockActionResult.UNCONFIRMED
+        if close_error is not None
+        else LockActionResult.CONFIRMED
+    )
+    if close_error is not None:
+        notes = tuple(getattr(control, "__notes__", ()))
+        assert any("cleanup close secondary sentinel" in note for note in notes)
+        assert any(body_result.detail in note for note in notes)
+        assert len(facts.secondary_errors) == 1
+        close_facts = facts.secondary_errors[0]
+        assert close_facts.operation is LockOperation.CLOSE
+        assert close_facts.original_error is close_error
+    lock_fd = _assert_one_lock_fd_closed(calls)
+    assert calls["unlock"] == [lock_fd]
+    assert calls["close_error"] == ([lock_fd] if close_error is not None else [])
+    assert not tuple(tmp_path.glob(".state.db.init-*"))
+
+    if body_state == "success":
+        after_control = _database_image(state_db)
+        owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            assert owned.metadata.instance_id
+            assert owned.metadata.format_version == CURRENT_FORMAT_VERSION
+        finally:
+            owned.connection.close()
+        assert initialize_state(cfg, state_db).outcome is InitOutcome.VERIFIED_EXISTING
+        assert _database_image(state_db) == after_control
+    else:
+        assert state_db.read_bytes() == original_bytes
+        still_invalid = initialize_state(cfg, state_db)
+        assert still_invalid.outcome is InitOutcome.FAILED
+        assert isinstance(still_invalid.error, StateDatabaseError)
+        assert state_db.read_bytes() == original_bytes
+
+
+@pytest.mark.parametrize(
+    "release_kind", ["oserror", "control", "oserror_and_close_oserror"]
+)
+def test_original_control_survives_later_release_failure(
+    tmp_path: Path, monkeypatch, release_kind: str
+) -> None:
+    from camctl.persistence import initialization as initialization_module
+
+    cfg = _config(tmp_path)
+    state_db = Path(cfg.paths.state_db)
+    body_control = asyncio.CancelledError("original initialization control sentinel")
+    body_control.add_note("original initialization control note")
+    release_error: BaseException = (
+        KeyboardInterrupt("later initialization control sentinel")
+        if release_kind == "control"
+        else OSError(errno.EIO, "later initialization release sentinel")
+    )
+    close_error = (
+        OSError(errno.EIO, "later initialization close sentinel")
+        if release_kind == "oserror_and_close_oserror"
+        else None
+    )
+
+    def interrupt_real_initialization(*args, **kwargs):
+        raise body_control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            initialization_module, "_prepare_directories", interrupt_real_initialization
+        )
+        calls = _install_linux_flock_failure(
+            patch, stage="unlock", error=release_error, close_error=close_error
+        )
+        with pytest.raises(asyncio.CancelledError) as caught:
+            initialize_state(cfg, state_db)
+
+    assert caught.value is body_control
+    assert "original initialization control note" in getattr(
+        body_control, "__notes__", ()
+    )
+    release_marker = (
+        "later initialization control sentinel"
+        if release_kind == "control"
+        else "later initialization release sentinel"
+    )
+    assert release_marker in _diagnostic_evidence(body_control)
+    lock_fd = _assert_one_lock_fd_closed(calls)
+    assert calls["unlock"] == [lock_fd]
+    if close_error is not None:
+        notes = tuple(getattr(body_control, "__notes__", ()))
+        assert any(release_marker in note for note in notes)
+        assert any("later initialization close sentinel" in note for note in notes)
+        assert calls["close_error"] == [lock_fd]
+    else:
+        assert calls["close_error"] == []
+    assert not state_db.exists()
+    assert not tuple(tmp_path.glob(".state.db.init-*"))
+
+    created = initialize_state(cfg, state_db)
+    assert created.outcome is InitOutcome.CREATED
+
+
+@pytest.mark.parametrize("acquire_kind", ["runtime", "oserror", "control"])
+def test_acquire_failure_keeps_init_contract_without_mutating_library(
+    tmp_path: Path, monkeypatch, acquire_kind: str
+) -> None:
+    cfg = _config(tmp_path)
+    state_db = Path(cfg.paths.state_db)
+    assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
+    image_before = _database_image(state_db)
+    files_before = _directory_file_image(_bound_roots(cfg))
+
+    if acquire_kind == "runtime":
+        injected: BaseException = RuntimeError("init-acquire-runtime-sentinel")
+    elif acquire_kind == "oserror":
+        injected = OSError(errno.EIO, "init-acquire-oserror-sentinel")
+    else:
+        injected = asyncio.CancelledError("init-acquire-control-sentinel")
+        injected.add_note("caller-owned acquisition note")
+
+    with monkeypatch.context() as patch:
+        calls = _install_linux_flock_failure(
+            patch, stage="acquire", error=injected
+        )
+        if acquire_kind == "control":
+            with pytest.raises(asyncio.CancelledError) as caught:
+                initialize_state(cfg, state_db)
+            assert caught.value is injected
+            assert "caller-owned acquisition note" in getattr(
+                injected, "__notes__", ()
+            )
+            facts = lock_error_facts(injected)
+            assert facts is not None
+            assert facts.operation is LockOperation.TRY_LOCK
+            assert facts.close_result is LockActionResult.CONFIRMED
+        else:
+            result = initialize_state(cfg, state_db)
+            assert result.outcome is InitOutcome.FAILED
+            assert result.secondary_errors == ()
+            if acquire_kind == "runtime":
+                assert result.error is injected
+            else:
+                assert isinstance(result.error, LockError)
+                assert result.error.__cause__ is injected
+                facts = lock_error_facts(result.error)
+                assert facts is not None
+                assert facts.operation is LockOperation.TRY_LOCK
+                assert facts.close_result is LockActionResult.CONFIRMED
+
+    # 取得失败时没有租约可释放；锁端口只关闭已打开的实际句柄。
+    _assert_one_lock_fd_closed(calls)
+    assert calls["unlock"] == []
+    assert _database_image(state_db) == image_before
+    assert _directory_file_image(_bound_roots(cfg)) == files_before
+    assert initialize_state(cfg, state_db).outcome is InitOutcome.VERIFIED_EXISTING
+    assert _database_image(state_db) == image_before

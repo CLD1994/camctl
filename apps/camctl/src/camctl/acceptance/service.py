@@ -125,4 +125,6 @@ async def accept_input(
         f"输入处理未完成（{outcome.kind.value}）: {outcome.error}"
     )
     error.outcome_kind = outcome.kind
-    raise error
+    if outcome.error is None:
+        raise error
+    raise error from outcome.error

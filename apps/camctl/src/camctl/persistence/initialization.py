@@ -41,7 +41,12 @@ from camctl.persistence.runtime import (
     open_existing,
     verify_directory_binding,
 )
-from camctl.session.locks import SessionLockConflictError, acquire_session, lock_file_paths
+from camctl.session.locks import (
+    SessionLockConflictError,
+    acquire_session,
+    lock_error_facts,
+    lock_file_paths,
+)
 
 _SCHEMA_RESOURCES = (
     "sql/core.sql",
@@ -81,6 +86,7 @@ class InitResult:
     outcome: InitOutcome
     detail: str
     error: BaseException | None = None
+    secondary_errors: tuple[BaseException, ...] = ()
 
 
 def _fsync_directory(path: Path) -> None:
@@ -187,18 +193,203 @@ def initialize_state(config, state_db: Path) -> InitResult:
     except Exception as error:  # 锁系统的其他故障不能解释为无占用。
         return InitResult(InitOutcome.FAILED, f"会话锁取得失败: {error}", error)
     roots = (staging, ready, processing)
+    result: InitResult | None = None
+    body_error: BaseException | None = None
     try:
-        binding = (_canonical_binding(staging), _canonical_binding(ready), _canonical_binding(processing))
-        if state_db.exists() or state_db.is_symlink():
-            # 已有目标：无论内容如何都按已有库验证；无效时保留原文件。
-            return _verify_existing(state_db, roots, binding)
-        try:
-            _prepare_directories(state_db, *roots)
-        except (OSError, StateDatabaseError) as error:
-            return InitResult(InitOutcome.FAILED, f"目录准备失败: {error}", error)
-        return _create_new(state_db, roots, binding)
-    finally:
+        result = _initialize_under_lease(state_db, roots)
+    except BaseException as error:
+        body_error = error
+
+    release_error: BaseException | None = None
+    try:
         lease.close()
+    except BaseException as error:
+        release_error = error
+
+    if body_error is not None and not isinstance(body_error, Exception):
+        if release_error is not None:
+            _attach_initialization_exception(
+                body_error, "后续会话锁释放错误", release_error,
+            )
+        raise body_error.with_traceback(body_error.__traceback__)
+
+    if release_error is not None and not isinstance(release_error, Exception):
+        if body_error is not None:
+            _attach_initialization_exception(
+                release_error, "此前初始化异常", body_error,
+            )
+        if result is not None:
+            _attach_initialization_result(release_error, result)
+        _attach_initialization_exception(
+            release_error, "会话锁释放后续错误", release_error,
+        )
+        raise release_error.with_traceback(release_error.__traceback__)
+
+    if body_error is not None:
+        if release_error is not None:
+            _attach_initialization_exception(
+                body_error, "后续会话锁释放错误", release_error,
+            )
+        raise body_error.with_traceback(body_error.__traceback__)
+
+    assert result is not None
+    if release_error is None:
+        return result
+
+    if result.outcome is InitOutcome.FAILED:
+        return InitResult(
+            result.outcome,
+            result.detail,
+            result.error,
+            (*result.secondary_errors, release_error),
+        )
+    return InitResult(
+        InitOutcome.FAILED,
+        f"{result.detail}；初始化完成后的会话锁释放失败: {release_error}",
+        release_error,
+        result.secondary_errors,
+    )
+
+
+def _initialize_under_lease(
+    state_db: Path,
+    roots: tuple[Path, Path, Path],
+) -> InitResult:
+    """在已取得的会话锁下完成一次初始化或既有库验证。"""
+    binding = tuple(_canonical_binding(root) for root in roots)
+    if state_db.exists() or state_db.is_symlink():
+        # 已有目标：无论内容如何都按已有库验证；无效时保留原文件。
+        return _verify_existing(state_db, roots, binding)
+    try:
+        _prepare_directories(state_db, *roots)
+    except (OSError, StateDatabaseError) as error:
+        return InitResult(InitOutcome.FAILED, f"目录准备失败: {error}", error)
+    return _create_new(state_db, roots, binding)
+
+
+def _attach_initialization_note(target: BaseException, note: str) -> None:
+    if note not in tuple(getattr(target, "__notes__", ())):
+        target.add_note(note)
+
+
+def initialization_error_descriptions(
+    error: BaseException,
+    *,
+    include_primary: bool = True,
+) -> tuple[str, ...]:
+    """按原始错误顺序格式化异常组与锁端口记录的实际错误。"""
+    descriptions: list[str] = []
+    seen_errors: set[int] = set()
+    seen_facts: set[int] = set()
+
+    def describe_error(source: BaseException) -> str:
+        facts = lock_error_facts(source)
+        if facts is None:
+            return f"{type(source).__name__}: {source}"
+        return _describe_lock_fact(facts, source)
+
+    def visit_fact(facts, fallback: BaseException, *, include: bool) -> None:
+        if id(facts) in seen_facts:
+            return
+        seen_facts.add(id(facts))
+        source = facts.original_error or fallback
+        if include and id(source) not in seen_errors:
+            seen_errors.add(id(source))
+            descriptions.append(_describe_lock_fact(facts, source))
+        elif not include:
+            seen_errors.add(id(source))
+        for secondary in facts.secondary_errors:
+            visit_fact(secondary, secondary.original_error or fallback, include=True)
+
+    def visit(source: BaseException, *, include: bool) -> None:
+        if isinstance(source, BaseExceptionGroup):
+            for child in source.exceptions:
+                visit(child, include=include)
+        facts = lock_error_facts(source)
+        if facts is not None:
+            visit_fact(facts, source, include=include)
+            return
+        if isinstance(source, BaseExceptionGroup):
+            return
+        if include and id(source) not in seen_errors:
+            seen_errors.add(id(source))
+            descriptions.append(describe_error(source))
+        else:
+            seen_errors.add(id(source))
+
+    visit(error, include=include_primary)
+    return tuple(descriptions)
+
+
+def _describe_lock_fact(facts, source: BaseException) -> str:
+    return (
+        f"{facts.operation.value}: {type(source).__name__}: {source}; "
+        f"path={facts.path}; errno={facts.errno}"
+    )
+
+
+def _initialization_error_objects(error: BaseException) -> tuple[BaseException, ...]:
+    """返回错误树中的原对象，供有限地复制既有附注。"""
+    objects: list[BaseException] = []
+    seen: set[int] = set()
+
+    def visit(source: BaseException) -> None:
+        if id(source) in seen:
+            return
+        seen.add(id(source))
+        objects.append(source)
+        if isinstance(source, BaseExceptionGroup):
+            for child in source.exceptions:
+                visit(child)
+        facts = lock_error_facts(source)
+        if facts is None:
+            return
+
+        def visit_fact(fact) -> None:
+            if fact.original_error is not None:
+                visit(fact.original_error)
+            for secondary in fact.secondary_errors:
+                visit_fact(secondary)
+
+        visit_fact(facts)
+
+    visit(error)
+    return tuple(objects)
+
+
+def _attach_initialization_exception(
+    target: BaseException,
+    label: str,
+    error: BaseException,
+) -> None:
+    same_source = target is error
+    descriptions = initialization_error_descriptions(
+        error,
+        include_primary=not same_source,
+    )
+    for index, description in enumerate(descriptions):
+        suffix = "" if index == 0 else "后续错误"
+        _attach_initialization_note(target, f"{label}{suffix}: {description}")
+    existing = set(tuple(getattr(target, "__notes__", ())))
+    for source in _initialization_error_objects(error):
+        if source is target:
+            continue
+        for note in tuple(getattr(source, "__notes__", ())):
+            attached = f"{label}附注: {note}"
+            if attached not in existing:
+                target.add_note(attached)
+                existing.add(attached)
+
+
+def _attach_initialization_result(
+    target: BaseException,
+    result: InitResult,
+) -> None:
+    _attach_initialization_note(target, f"此前初始化结果: {result.detail}")
+    if result.error is not None:
+        _attach_initialization_exception(target, "此前初始化原错误", result.error)
+    for error in result.secondary_errors:
+        _attach_initialization_exception(target, "此前初始化后续错误", error)
 
 
 def _verify_existing(

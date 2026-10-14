@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -56,6 +57,165 @@ def _read_log(tmp_path: Path) -> str:
 
 @pytest.mark.asyncio
 class TestRealFileClose:
+    @pytest.mark.parametrize("path_unsafe", [False, True])
+    @pytest.mark.parametrize("later_control", [False, True])
+    @pytest.mark.parametrize("blocked_stage", ["stop", "file", "wait"])
+    async def test_parent_cancel_waits_for_complete_log_close(
+        self, tmp_path: Path, monkeypatch, path_unsafe: bool, later_control: bool,
+        blocked_stage: str,
+    ) -> None:
+        file_channel = _file_channel(tmp_path)
+        channel = _channel_with(lambda record: file_channel.write_record(record).appended)
+        channel.start()
+        await channel.alog(LogRecord(level=LogLevel.ERROR, message="关闭前记录"))
+        entered = threading.Event()
+        release = threading.Event()
+        calls: list[str] = []
+        parent_errors: list[asyncio.CancelledError] = []
+        close_error = (asyncio.CancelledError("later file close control")
+                       if later_control else OSError("later file close error"))
+        real_stop = channel.stop_listener
+        real_close = channel.async_close
+        real_wait = channel.await_closed
+        real_shield = asyncio.shield
+
+        def block_stage(stage):
+            if blocked_stage == stage:
+                entered.set()
+                if not release.wait(timeout=10):
+                    raise TimeoutError("test did not release log close")
+
+        def stop_once(*args, **kwargs):
+            calls.append("stop")
+            block_stage("stop")
+            return real_stop(*args, **kwargs)
+
+        def close_file():
+            calls.append("file")
+            block_stage("file")
+            file_channel.close()
+            raise close_error
+
+        def close_channel():
+            calls.append("channel")
+            real_close()
+
+        async def wait_channel():
+            calls.append("wait")
+            if blocked_stage == "wait":
+                entered.set()
+                assert await asyncio.to_thread(release.wait, 10)
+            await real_wait()
+
+        async def observe_parent_cancel(task):
+            try:
+                return await real_shield(task)
+            except asyncio.CancelledError as error:
+                parent_errors.append(error)
+                raise
+
+        channel.stop_listener = stop_once
+        channel.async_close = close_channel
+        channel.await_closed = wait_channel
+        monkeypatch.setattr(asyncio, "shield", observe_parent_cancel)
+        runtime = LogRuntime(channel=channel, file_closer=close_file,
+                             path_unsafe=path_unsafe)
+        closing = asyncio.create_task(close_logging(runtime))
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            closing.cancel("first close wait cancel")
+            await asyncio.sleep(0)
+            closing.cancel("later close wait cancel")
+            await asyncio.sleep(0)
+            pending_before_release = not closing.done()
+            calls_before_release = list(calls)
+            release.set()
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await closing
+            assert pending_before_release is True
+            expected_calls = {"stop": ["stop"], "file": ["stop", "file"],
+                              "wait": ["stop", "file", "channel", "wait"]}
+            assert calls_before_release == expected_calls[blocked_stage]
+            assert parent_errors
+            if blocked_stage == "wait" and later_control:
+                assert raised.value is close_error
+                assert "first close wait cancel" in "\n".join(raised.value.__notes__)
+            else:
+                assert raised.value is parent_errors[0]
+                assert raised.value.args == ("first close wait cancel",)
+                assert str(close_error) in "\n".join(raised.value.__notes__)
+            assert calls == ["stop", "file", "channel", "wait"]
+            assert runtime.close_attempts == 1
+            assert runtime.listener_stopped is True
+            assert channel.listener_alive is False
+            assert file_channel.closed is True
+            with pytest.raises(asyncio.CancelledError) as repeated:
+                await close_logging(runtime)
+            assert repeated.value is raised.value
+            assert calls == ["stop", "file", "channel", "wait"]
+        finally:
+            release.set()
+            if not closing.done():
+                await asyncio.gather(closing, return_exceptions=True)
+            await asyncio.to_thread(real_stop)
+            file_channel.close()
+            real_close()
+            await real_wait()
+
+    @pytest.mark.parametrize("path_unsafe", [False, True])
+    @pytest.mark.parametrize("control_error", [False, True])
+    async def test_listener_stop_error_does_not_skip_queue_close(
+        self, tmp_path: Path, path_unsafe: bool, control_error: bool,
+    ) -> None:
+        file_channel = _file_channel(tmp_path)
+        channel = _channel_with(lambda record: file_channel.write_record(record).appended)
+        channel.start()
+        calls: list[str] = []
+        failure = (asyncio.CancelledError("listener stop control") if control_error
+                   else OSError("listener stop error"))
+        real_stop = channel.stop_listener
+        real_close = channel.async_close
+        real_wait = channel.await_closed
+
+        def fail_after_real_stop(*args, **kwargs):
+            calls.append("stop")
+            real_stop(*args, **kwargs)
+            raise failure
+
+        def close_file():
+            calls.append("file")
+            file_channel.close()
+
+        def close_channel():
+            calls.append("channel")
+            real_close()
+
+        async def wait_channel():
+            calls.append("wait")
+            await real_wait()
+
+        channel.stop_listener = fail_after_real_stop
+        channel.async_close = close_channel
+        channel.await_closed = wait_channel
+        runtime = LogRuntime(channel=channel, file_closer=close_file,
+                             path_unsafe=path_unsafe)
+        try:
+            if control_error:
+                with pytest.raises(asyncio.CancelledError) as raised:
+                    await close_logging(runtime)
+                assert raised.value is failure
+            else:
+                result = await close_logging(runtime)
+                assert str(failure) in result.close_error
+            assert runtime.listener_stopped is False
+            assert calls == (["stop", "channel", "wait"] if path_unsafe else
+                             ["stop", "file", "channel", "wait"])
+            assert channel.listener_alive is False
+        finally:
+            file_channel.close()
+            real_close()
+            await real_wait()
+
     async def test_unsafe_close_waits_for_active_listener_write(self) -> None:
         import asyncio
 

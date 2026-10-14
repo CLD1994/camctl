@@ -34,6 +34,7 @@ from camctl.logging_runtime.copies import (
 )
 from camctl.persistence.models import DbOutcomeKind, DirectoryBindingError
 from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
+from camctl.persistence.transaction import write_receipt_for
 from camctl.session.clock import (
     ClockBecameUntrusted,
     ClockCheckInput,
@@ -44,7 +45,9 @@ from camctl.session.clock import (
 from camctl.session.handoff import SubmitHandoff
 from camctl.session.locks import (
     AdmissionLease,
+    LockError,
     SessionLease,
+    lock_error_facts,
     probe_admission,
 )
 from camctl.session.outcome import SessionOutcome
@@ -69,12 +72,14 @@ class _RequiredPhaseWaiter:
         self._context = context
         self.parent_cancel: asyncio.CancelledError | None = None
         self._phase_errors: list[BaseException] = []
+        self.first_control: BaseException | None = None
 
     async def run(self, name: str, operation: Callable[[], Awaitable[Any]]) -> Any:
         async def capture() -> _RequiredPhaseFact:
             try:
                 return _RequiredPhaseFact(value=await operation())
             except BaseException as error:
+                self.record_phase_error(error)
                 return _RequiredPhaseFact(error=error)
 
         task = asyncio.create_task(capture(), name=f"camctl-required-{name}")
@@ -85,9 +90,23 @@ class _RequiredPhaseWaiter:
             except asyncio.CancelledError as error:
                 self.record_parent_cancel(error)
         if fact.error is not None:
-            self._phase_errors.append(fact.error)
             raise fact.error.with_traceback(fact.error.__traceback__)
         return fact.value
+
+    def record_phase_error(self, error: BaseException) -> None:
+        if not any(error is saved for saved in self._phase_errors):
+            self._phase_errors.append(error)
+        if (not isinstance(error, Exception)
+                and _is_typed_sync_control(error)
+                and self.first_control is None):
+            self.first_control = error
+
+    def record_sync_control(self, error: BaseException) -> None:
+        """在同步子操作实际交错失败处登记可信控制来源。"""
+        if (not isinstance(error, Exception)
+                and _is_typed_sync_control(error)
+                and self.first_control is None):
+            self.first_control = error
 
     def is_phase_error(self, error: BaseException) -> bool:
         return any(error is phase_error for phase_error in self._phase_errors)
@@ -96,6 +115,8 @@ class _RequiredPhaseWaiter:
         if self.parent_cancel is not None:
             return
         self.parent_cancel = error
+        if self.first_control is None:
+            self.first_control = error
         local_work = self._context.local_work
         stop_new = getattr(local_work, "stop_new_work", None)
         if stop_new is not None:
@@ -143,6 +164,8 @@ class AcceptanceRepositoryPort(Protocol):
 
 
 class SessionRepositoryPort(Protocol):
+    def acquire_admission(self, command, key: OperationKey, owned: OwnedConnection): ...
+
     def close_admission(self, command, key: OperationKey, owned: OwnedConnection): ...
 
     def update_lower_bound(self, check, key: OperationKey, owned: OwnedConnection): ...
@@ -237,6 +260,337 @@ def _outcome_error(reason: str, details: Mapping[str, Any] | None = None) -> Ses
     )
 
 
+def _transaction_status(kind: DbOutcomeKind | None) -> str | None:
+    if kind is DbOutcomeKind.NOT_EXECUTED:
+        return "not_started"
+    if kind is DbOutcomeKind.ROLLED_BACK:
+        return "not_committed"
+    if kind is DbOutcomeKind.UNKNOWN:
+        return "unknown"
+    if kind is DbOutcomeKind.COMPLETED:
+        return "committed"
+    return None
+
+
+def _exception_leaves(error: BaseException) -> list[BaseException]:
+    if isinstance(error, BaseExceptionGroup):
+        return [leaf for child in error.exceptions for leaf in _exception_leaves(child)]
+    return [error]
+
+
+def _ordered_error_sources(
+    error: BaseException,
+) -> list[tuple[BaseException, Any]]:
+    """按异常组和锁事实记录的实际顺序展开诊断来源。"""
+    sources: list[tuple[BaseException, Any]] = []
+    seen_errors: set[int] = set()
+    seen_facts: set[int] = set()
+
+    def add_facts(facts: Any) -> None:
+        if id(facts) in seen_facts:
+            return
+        seen_facts.add(id(facts))
+        source = facts.original_error
+        if source is not None:
+            add_error(source, facts)
+        else:
+            for secondary in facts.secondary_errors:
+                add_facts(secondary)
+
+    def add_error(source: BaseException, facts_override: Any = None) -> None:
+        facts = (
+            facts_override
+            if facts_override is not None
+            else lock_error_facts(source)
+        )
+        if isinstance(source, BaseExceptionGroup):
+            if id(source) in seen_errors:
+                if facts is not None:
+                    for secondary in facts.secondary_errors:
+                        add_facts(secondary)
+                return
+            seen_errors.add(id(source))
+            for child in source.exceptions:
+                add_error(child)
+            if facts is not None:
+                for secondary in facts.secondary_errors:
+                    add_facts(secondary)
+            return
+        if id(source) in seen_errors:
+            if facts is not None:
+                for secondary in facts.secondary_errors:
+                    add_facts(secondary)
+            return
+        seen_errors.add(id(source))
+        sources.append((source, facts))
+        if facts is not None:
+            for secondary in facts.secondary_errors:
+                add_facts(secondary)
+
+    add_error(error)
+    return sources
+
+
+def _error_identity_objects(error: BaseException) -> list[BaseException]:
+    """列出异常组与锁事实引用的对象，用于识别租约重复交付。"""
+    objects: list[BaseException] = []
+    seen_errors: set[int] = set()
+    seen_facts: set[int] = set()
+
+    def visit_facts(facts: Any) -> None:
+        if id(facts) in seen_facts:
+            return
+        seen_facts.add(id(facts))
+        source = facts.original_error
+        if source is not None:
+            visit_error(source)
+        for secondary in facts.secondary_errors:
+            visit_facts(secondary)
+
+    def visit_error(error: BaseException) -> None:
+        if id(error) not in seen_errors:
+            seen_errors.add(id(error))
+            objects.append(error)
+            if isinstance(error, BaseExceptionGroup):
+                for child in error.exceptions:
+                    visit_error(child)
+        facts = lock_error_facts(error)
+        if facts is not None:
+            visit_facts(facts)
+
+    visit_error(error)
+    return objects
+
+
+def _exception_details(
+    error: BaseException,
+    *,
+    stage: str,
+    transaction_status: str | None = None,
+    fallback_reason: str = "state_db_error",
+    facts_override: Any = None,
+) -> tuple[str, dict[str, Any]]:
+    """按可信锁事实生成一个无嵌套的机器错误诊断。"""
+    facts = (
+        facts_override
+        if facts_override is not None
+        else lock_error_facts(error)
+    )
+    if isinstance(error, LockError) or (
+            facts is not None and isinstance(error, OSError)):
+        reason = "lock_error"
+    elif facts is not None:
+        reason = "internal_error"
+    else:
+        reason = fallback_reason
+    message = f"{type(error).__name__}: {error}"
+    if facts is not None:
+        message = f"{facts.operation.value}: {message}"
+    details: dict[str, Any] = {
+        "stage": stage,
+        "message": message,
+    }
+    if facts is not None:
+        details["path"] = str(facts.path)
+        if facts.errno is not None:
+            details["errno"] = facts.errno
+    if transaction_status is not None:
+        details["transaction_status"] = transaction_status
+    return reason, details
+
+
+def _transaction_error_outcome(
+    error: BaseException | None,
+    kind: DbOutcomeKind | None,
+    *,
+    stage: str,
+    fallback_reason: str = "state_db_error",
+    include_unknown_commit: bool = False,
+) -> SessionOutcome:
+    if error is None:
+        error = RuntimeError("事务未交付错误对象")
+    sources = _ordered_error_sources(error)
+    return _ordered_sources_outcome(
+        sources,
+        stage=stage,
+        fallback_reason=fallback_reason,
+        transaction_status=_transaction_status(kind),
+        include_unknown_commit=(
+            include_unknown_commit and kind is DbOutcomeKind.UNKNOWN
+        ),
+    )
+
+
+def _ordered_sources_outcome(
+    sources: list[tuple[BaseException, Any]],
+    *,
+    stage: str,
+    fallback_reason: str,
+    transaction_status: str | None = None,
+    include_unknown_commit: bool = False,
+) -> SessionOutcome:
+    """把按实际顺序筛出的错误来源汇总为扁平诊断。"""
+    assert sources
+    primary, primary_facts = sources[0]
+    reason, details = _exception_details(
+        primary,
+        stage=stage,
+        transaction_status=transaction_status,
+        fallback_reason=fallback_reason,
+        facts_override=primary_facts,
+    )
+    if include_unknown_commit:
+        details["unknown_commit"] = True
+    secondary: list[dict[str, Any]] = []
+    for leaf, facts in sources[1:]:
+        secondary_reason, secondary_details = _exception_details(
+            leaf,
+            stage=stage,
+            fallback_reason=fallback_reason,
+            facts_override=facts,
+        )
+        secondary.append({"reason": secondary_reason, "details": secondary_details})
+    if secondary:
+        details["secondary_errors"] = secondary
+    return _outcome_error(reason, details)
+
+
+def _is_typed_sync_control(error: BaseException) -> bool:
+    return (
+        lock_error_facts(error) is not None
+        or write_receipt_for(error) is not None
+    )
+
+
+def _secondary_outcomes(outcome: SessionOutcome) -> list[dict[str, Any]]:
+    details = dict(outcome.details)
+    existing = list(details.pop("secondary_errors", ()))
+    entries = [{"reason": outcome.reason, "details": details}]
+    entries.extend(existing)
+    return entries
+
+
+def _merge_failure_outcome(
+    current: SessionOutcome,
+    added: SessionOutcome,
+) -> SessionOutcome:
+    """合并后续普通错误；首个致命结果保持为主，报告错误让位给致命错误。"""
+    if current.succeeded:
+        return added
+    if current.reason == "report_error":
+        details = dict(added.details)
+        secondary = list(details.pop("secondary_errors", ()))
+        secondary.extend(_secondary_outcomes(current))
+        details["secondary_errors"] = secondary
+        return _outcome_error(added.reason or "state_db_error", details)
+    details = dict(current.details)
+    secondary = list(details.pop("secondary_errors", ()))
+    secondary.extend(_secondary_outcomes(added))
+    details["secondary_errors"] = secondary
+    return _outcome_error(current.reason or "state_db_error", details)
+
+
+def _remember_error(errors: list[BaseException], error: BaseException | None) -> None:
+    if error is None:
+        return
+    for source in _error_identity_objects(error):
+        if not any(source is saved for saved in errors):
+            errors.append(source)
+
+
+def _attach_ordered_error_notes(
+    target: BaseException,
+    label: str,
+    sources: list[tuple[BaseException, Any]],
+) -> None:
+    """按实际错误顺序附注，保留目标已有说明并跳过自身。"""
+    existing_notes = set(tuple(getattr(target, "__notes__", ())))
+    for source, facts in sources:
+        if source is target:
+            continue
+        description = f"{type(source).__name__}: {source}"
+        if facts is not None:
+            description = f"{facts.operation.value}: {description}"
+        note = f"{label}: {description}"
+        if note not in existing_notes:
+            target.add_note(note)
+            existing_notes.add(note)
+        for source_note in tuple(getattr(source, "__notes__", ())):
+            attached_note = f"{label}附注: {source_note}"
+            if attached_note not in existing_notes:
+                target.add_note(attached_note)
+                existing_notes.add(attached_note)
+
+
+def _merge_cleanup_errors(
+    outcome: SessionOutcome | None,
+    original: BaseException | None,
+    failures: list[tuple[BaseException, str, str]],
+    observed_errors: list[BaseException] | None = None,
+) -> tuple[SessionOutcome | None, BaseException | None]:
+    """合并同步资源收场结果，控制对象优先且每个原错误只交付一次。"""
+    seen: set[int] = set()
+    if observed_errors is not None:
+        seen.update(id(error) for error in observed_errors)
+    if original is not None:
+        seen.add(id(original))
+    for error, stage, fallback_reason in failures:
+        sources = _ordered_error_sources(error)
+        unobserved_sources = [
+            (source, facts)
+            for source, facts in sources
+            if id(source) not in seen
+        ]
+        if not unobserved_sources:
+            continue
+        seen.update(
+            id(source) for source in _error_identity_objects(error)
+        )
+        if not isinstance(error, Exception):
+            if original is None or isinstance(original, Exception):
+                previous = original
+                if previous is not None:
+                    _RequiredPhaseWaiter.attach_exception_notes(
+                        error, "此前会话异常", previous,
+                    )
+                if outcome is not None and not outcome.succeeded:
+                    error.add_note(
+                        "此前会话结果: "
+                        f"reason={outcome.reason}; details={dict(outcome.details)!r}"
+                    )
+                original = error
+                _attach_ordered_error_notes(
+                    original, "同步资源收场异常", unobserved_sources,
+                )
+            else:
+                _attach_ordered_error_notes(
+                    original,
+                    "后续同步资源收场控制异常",
+                    unobserved_sources,
+                )
+            continue
+        if original is not None:
+            _attach_ordered_error_notes(
+                original, "同步资源收场异常", unobserved_sources,
+            )
+            continue
+        if len(unobserved_sources) == len(sources):
+            added = _transaction_error_outcome(
+                error,
+                None,
+                stage=stage,
+                fallback_reason=fallback_reason,
+            )
+        else:
+            added = _ordered_sources_outcome(
+                unobserved_sources,
+                stage=stage,
+                fallback_reason=fallback_reason,
+            )
+        outcome = added if outcome is None else _merge_failure_outcome(outcome, added)
+    return outcome, original
+
+
 async def run_session(
     context: SessionContext,
     source: ParsedInput | InputDiagnostic | None,
@@ -259,37 +613,73 @@ async def _submit_session(
 
     if source is None:
         return _outcome_error("input_missing", {"reason": "submit 需要计划输入文件"})
-    try:
-        owned = context.open_connection()
-    except (RuntimeLibraryError, DirectoryBindingError) as error:
-        # 本进程运行库不满足部署要求：配置环境问题，不是状态库数据问题。
-        return _outcome_error("configuration_error", {"error": str(error)})
-    except Exception as error:
-        return _outcome_error("state_db_error", {"error": str(error)})
+    owned: OwnedConnection | None = None
+    outcome: SessionOutcome | None = None
+    original: BaseException | None = None
     try:
         try:
-            accepted = await accept_input(
-                source,
-                _acceptance_context(context, owned),
-                new_operation_key(),
-                owned,
+            owned = context.open_connection()
+        except (RuntimeLibraryError, DirectoryBindingError) as error:
+            # 本进程运行库不满足部署要求：配置环境问题，不是状态库数据问题。
+            outcome = _outcome_error(
+                "configuration_error",
+                {"error": str(error)},
             )
-        except AcceptanceStateError as error:
-            unknown = getattr(error, "outcome_kind", None) is DbOutcomeKind.UNKNOWN
-            details = {"error": str(error)}
-            if unknown:
-                # 提交结果未知：不宣称受理失败或成功，保留未知事
-                # 实；同一请求的下一次重送按实际持久化状态幂等核
-                # 实（受理复用或重新处理）。
-                details["unknown_commit"] = True
-            return _outcome_error("state_db_error", details)
-        if context.notifier is not None:
-            notify_acceptance(accepted, context.notifier)
-        if type(accepted.needs_run) is not bool:
-            return _outcome_error("state_db_error", {"error": "已完成的 submit 缺少接管结果"})
-        return SessionOutcome(succeeded=True, needs_run=accepted.needs_run)
-    finally:
-        owned.connection.close()
+        except Exception as error:
+            outcome = _outcome_error(
+                "state_db_error",
+                {"error": str(error)},
+            )
+        if owned is not None:
+            try:
+                accepted = await accept_input(
+                    source,
+                    _acceptance_context(context, owned),
+                    new_operation_key(),
+                    owned,
+                )
+            except AcceptanceStateError as error:
+                kind = getattr(error, "outcome_kind", None)
+                if not isinstance(kind, DbOutcomeKind):
+                    kind = DbOutcomeKind.UNKNOWN
+                outcome = _transaction_error_outcome(
+                    error.__cause__ or error,
+                    kind,
+                    stage="handoff",
+                    include_unknown_commit=True,
+                )
+            else:
+                if context.notifier is not None:
+                    notify_acceptance(accepted, context.notifier)
+                if type(accepted.needs_run) is not bool:
+                    outcome = _outcome_error(
+                        "state_db_error",
+                        {
+                            "stage": "handoff",
+                            "transaction_status": "committed",
+                            "message": "已完成的 submit 缺少接管结果",
+                        },
+                    )
+                else:
+                    outcome = SessionOutcome(
+                        succeeded=True, needs_run=accepted.needs_run,
+                    )
+    except BaseException as error:
+        original = error
+
+    cleanup_failures: list[tuple[BaseException, str, str]] = []
+    if owned is not None:
+        try:
+            owned.connection.close()
+        except BaseException as error:
+            cleanup_failures.append((error, "shutdown", "state_db_error"))
+    outcome, original = _merge_cleanup_errors(
+        outcome, original, cleanup_failures,
+    )
+    if original is not None:
+        raise original.with_traceback(original.__traceback__)
+    assert outcome is not None
+    return outcome
 
 
 async def _run_session(
@@ -301,6 +691,7 @@ async def _run_session(
     admission_lease: AdmissionLease | None = None
     owned: OwnedConnection | None = None
     local_errors: list[Exception] = []
+    observed_errors: list[BaseException] = []
     waiter = _RequiredPhaseWaiter(context)
 
     async def drive() -> SessionOutcome:
@@ -308,7 +699,12 @@ async def _run_session(
         try:
             session_lease = context.acquire_session()
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": f"会话锁取得失败: {error}"})
+            return _transaction_error_outcome(
+                error,
+                None,
+                stage="locking",
+                fallback_reason="state_db_error",
+            )
         if context.on_session_locked is not None:
             try:
                 await context.on_session_locked()
@@ -338,6 +734,20 @@ async def _run_session(
                     owned,
                 )
             except Exception as error:
+                from camctl.acceptance.service import AcceptanceStateError
+
+                if isinstance(error, AcceptanceStateError):
+                    cause = error.__cause__ or error
+                    _remember_error(observed_errors, cause)
+                    kind = getattr(error, "outcome_kind", None)
+                    if not isinstance(kind, DbOutcomeKind):
+                        kind = DbOutcomeKind.UNKNOWN
+                    return _transaction_error_outcome(
+                        cause,
+                        kind,
+                        stage="input_handling",
+                        include_unknown_commit=True,
+                    )
                 return _outcome_error("state_db_error", {"error": str(error)})
 
         policy = context.clock_policy(owned.connection)
@@ -355,10 +765,48 @@ async def _run_session(
                 lambda: _initial_restricted_phase(context, waiter),
             )
 
-        try:
+        from camctl.persistence.repositories.session import AcquireAdmission
+
+        def acquire_and_register() -> None:
+            nonlocal admission_lease
             admission_lease = context.acquire_admission()
+
+        try:
+            admission_outcome = context.session_repository.acquire_admission(
+                AcquireAdmission(acquire_and_register),
+                new_operation_key(),
+                owned,
+            )
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": f"接纳锁取得失败: {error}"})
+            _remember_error(observed_errors, error)
+            receipt = write_receipt_for(error)
+            kind = None
+            if receipt is not None:
+                kind = {
+                    "completed": DbOutcomeKind.COMPLETED,
+                    "rolled_back": DbOutcomeKind.ROLLED_BACK,
+                    "unknown": DbOutcomeKind.UNKNOWN,
+                }.get(receipt.kind)
+            if kind is None:
+                kind = DbOutcomeKind.UNKNOWN
+            facts = lock_error_facts(error)
+            stage = "locking" if isinstance(error, LockError) or facts is not None else "handoff"
+            return _transaction_error_outcome(
+                error, kind, stage=stage,
+            )
+        if admission_outcome.kind is not DbOutcomeKind.COMPLETED:
+            error = admission_outcome.error
+            _remember_error(observed_errors, error)
+            leaves = _exception_leaves(error) if error is not None else []
+            lock_failure = any(
+                isinstance(item, LockError) or lock_error_facts(item) is not None
+                for item in leaves
+            )
+            return _transaction_error_outcome(
+                error,
+                admission_outcome.kind,
+                stage="locking" if lock_failure else "handoff",
+            )
 
         while True:
             try:
@@ -374,7 +822,26 @@ async def _run_session(
                         # 前置保存失败后，受限停止和报告不能依赖失效状态。
                         return _outcome_error(
                             "clock_invalid", {"error": str(clock_error)})
-                    admission_lease.close()
+                    try:
+                        admission_lease.close()
+                    except Exception as error:
+                        _remember_error(observed_errors, error)
+                        outcome = _transaction_error_outcome(
+                            error,
+                            None,
+                            stage="handoff",
+                            fallback_reason="internal_error",
+                        )
+                        details = dict(outcome.details)
+                        details["clock_error"] = str(clock_error)
+                        return _outcome_error(outcome.reason, details)
+                    except BaseException as error:
+                        if _is_typed_sync_control(error):
+                            waiter.record_sync_control(error)
+                            _RequiredPhaseWaiter.attach_exception_notes(
+                                error, "时钟转受限阶段", clock_error,
+                            )
+                        raise
                     admission_lease = None
                     restricted_failure = await _run_restricted_flows(context)
                     if restricted_failure is not None:
@@ -425,7 +892,9 @@ async def _run_session(
                     return (_outcome_error("report_error")
                             if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR
                             else SessionOutcome(succeeded=True))
-                outcome = await _try_close(context, owned, admission_lease)
+                outcome = await _try_close(
+                    context, owned, admission_lease, observed_errors,
+                )
                 if outcome is not None:
                     return outcome
                 # 关闭事务观察到新工作：继续推进，不释放接纳。
@@ -434,29 +903,39 @@ async def _run_session(
     outcome: SessionOutcome | None = None
     original: BaseException | None = None
     try:
-        try:
-            outcome = await drive()
-        except BaseException as error:
-            if isinstance(error, asyncio.CancelledError):
-                if waiter.is_phase_error(error):
+        outcome = await drive()
+    except BaseException as error:
+        if (not isinstance(error, Exception)
+                and _is_typed_sync_control(error)):
+            waiter.record_sync_control(error)
+        if isinstance(error, asyncio.CancelledError):
+            if _is_typed_sync_control(error) or waiter.is_phase_error(error):
+                if waiter.first_control is error or waiter.parent_cancel is None:
                     original = error
-                elif waiter.parent_cancel is None:
-                    waiter.record_parent_cancel(error)
-                elif error is not waiter.parent_cancel:
-                    waiter.add_exception_notes("必要收场实际控制异常", error)
-            elif waiter.parent_cancel is not None:
-                waiter.add_exception_notes("会话实际控制异常", error)
-            else:
-                original = error
+                else:
+                    waiter.add_exception_notes("后到同步控制异常", error)
+            elif waiter.parent_cancel is None:
+                waiter.record_parent_cancel(error)
+            elif error is not waiter.parent_cancel:
+                waiter.add_exception_notes("必要收场实际控制异常", error)
+        elif waiter.parent_cancel is not None:
+            waiter.add_exception_notes("会话实际控制异常", error)
+        else:
+            original = error
+    try:
         fatal_outcome = (
             outcome is not None
             and not outcome.succeeded
-            and outcome.reason in ("state_db_error", "configuration_error"))
+            and outcome.reason in (
+                "state_db_error", "configuration_error", "lock_error",
+                "internal_error",
+            )
+        )
         if fatal_outcome and waiter.parent_cancel is not None:
             waiter.add_note(
                 "会话保留实际致命结果："
                 f"reason={outcome.reason}; details={outcome.details!r}")
-        if (original is None and fatal_outcome
+        if (session_lease is not None and original is None and fatal_outcome
                 and context.emergency_settlement is not None):
             # 非时钟致命错误：先对会话内录像执行有限应急停止，再继
             # 续本地收场；应急收场失败不改写原错误分类。
@@ -502,29 +981,72 @@ async def _run_session(
                 # 后续内部控制异常不替换已保存的原对象。
                 waiter.attach_exception_notes(
                     original, "最终本地责任控制异常", error)
+    except BaseException as error:
         if waiter.parent_cancel is not None:
-            if original is not None and original is not waiter.parent_cancel:
+            if error is not waiter.parent_cancel:
+                waiter.add_exception_notes("必要会话收场异常", error)
+        elif original is None:
+            original = error
+        elif error is not original:
+            _RequiredPhaseWaiter.attach_exception_notes(
+                original, "后续会话收场异常", error,
+            )
+
+    if waiter.first_control is not None:
+        primary_control = waiter.first_control
+        if original is not None and original is not primary_control:
+            _RequiredPhaseWaiter.attach_exception_notes(
+                primary_control, "后续会话异常", original,
+            )
+        if (waiter.parent_cancel is not None
+                and waiter.parent_cancel is not primary_control):
+            _RequiredPhaseWaiter.attach_exception_notes(
+                primary_control, "后到父取消", waiter.parent_cancel,
+            )
+        original = primary_control
+    elif waiter.parent_cancel is not None:
+        if original is not None and original is not waiter.parent_cancel:
+            if isinstance(original, Exception):
                 waiter.add_exception_notes("会话原始异常", original)
-            for error in local_errors:
-                waiter.add_note(
-                    f"本地责任收场失败: {type(error).__name__}: {error}")
-            raise waiter.parent_cancel
-        if original is not None:
-            for error in local_errors:
-                original.add_note(f"本地责任收场失败: {type(error).__name__}: {error}")
-            raise original
+                original = waiter.parent_cancel
+            else:
+                _RequiredPhaseWaiter.attach_exception_notes(
+                    original, "后到父取消", waiter.parent_cancel,
+                )
+        elif original is None:
+            original = waiter.parent_cancel
+    if original is not None:
+        for error in local_errors:
+            original.add_note(
+                f"本地责任收场失败: {type(error).__name__}: {error}")
+    elif outcome is not None:
         assert outcome is not None
         for error in local_errors:
             outcome = _local_state_outcome(outcome, error)
-        return outcome
-    finally:
-        # 已开始的本地责任先完成实际结果、保存及独立连接关闭。
-        if admission_lease is not None:
+
+    cleanup_failures: list[tuple[BaseException, str, str]] = []
+    if admission_lease is not None:
+        try:
             admission_lease.close()
-        if session_lease is not None:
+        except BaseException as error:
+            cleanup_failures.append((error, "shutdown", "internal_error"))
+    if session_lease is not None:
+        try:
             session_lease.close()
-        if owned is not None:
+        except BaseException as error:
+            cleanup_failures.append((error, "shutdown", "internal_error"))
+    if owned is not None:
+        try:
             owned.connection.close()
+        except BaseException as error:
+            cleanup_failures.append((error, "shutdown", "state_db_error"))
+    outcome, original = _merge_cleanup_errors(
+        outcome, original, cleanup_failures, observed_errors,
+    )
+    if original is not None:
+        raise original.with_traceback(original.__traceback__)
+    assert outcome is not None
+    return outcome
 
 
 async def _merge_emergency_stops(
@@ -1006,6 +1528,7 @@ async def _deliver_log_diagnostic(
 async def _try_close(
     context: SessionContext, owned: OwnedConnection,
     admission_lease: AdmissionLease,
+    observed_errors: list[BaseException] | None = None,
 ) -> SessionOutcome | None:
     """在关闭事务内重查工作并按结果释放接纳；仍需驱动时返回 None。"""
     from camctl.persistence.repositories.session import CloseAdmission
@@ -1020,10 +1543,27 @@ async def _try_close(
             owned,
         )
     except Exception as error:
-        return _outcome_error("state_db_error", {"error": f"接纳关闭事务失败: {error}"})
+        if observed_errors is not None:
+            _remember_error(observed_errors, error)
+        receipt = write_receipt_for(error)
+        kind = None
+        if receipt is not None:
+            kind = {
+                "completed": DbOutcomeKind.COMPLETED,
+                "rolled_back": DbOutcomeKind.ROLLED_BACK,
+                "unknown": DbOutcomeKind.UNKNOWN,
+            }.get(receipt.kind)
+        return _transaction_error_outcome(
+            error,
+            kind or DbOutcomeKind.UNKNOWN,
+            stage="handoff",
+        )
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        detail = f"接纳关闭未完成（{outcome.kind.value}）: {outcome.error}"
-        return _outcome_error("state_db_error", {"error": detail})
+        if observed_errors is not None:
+            _remember_error(observed_errors, outcome.error)
+        return _transaction_error_outcome(
+            outcome.error, outcome.kind, stage="handoff",
+        )
     decision = outcome.value.work
     if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR:
         return _outcome_error("report_error")
