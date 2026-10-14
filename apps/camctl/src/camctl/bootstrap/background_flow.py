@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,9 @@ class CombinedLocalWork:
 
     def __init__(self, owners):
         self._owners = tuple(owners)
+        self._settlement_runs: list[
+            tuple[Any, asyncio.Task[tuple[BaseException, ...]]]
+        ] = []
 
     def required_settlements(self):
         return sum(owner.required_settlements() for owner in self._owners)
@@ -106,13 +110,86 @@ class CombinedLocalWork:
                 check()
 
     async def settle(self):
-        failures = []
-        for owner in self._owners:
-            try:
-                await owner.settle()
-            except Exception as error:
-                failures.append(error)
+        await self._settle(excluded_owner=None)
+
+    async def settle_excluding(self, excluded_owner):
+        """在既有 owner 顺序中收场，但暂不消费指定 owner。"""
+        await self._settle(excluded_owner=excluded_owner)
+
+    async def _settle(self, *, excluded_owner):
+        task = self._settlement_task(excluded_owner)
+        observer_cancel: asyncio.CancelledError | None = None
+        try:
+            while True:
+                try:
+                    failures = await asyncio.shield(task)
+                    break
+                except asyncio.CancelledError as error:
+                    if task.done() and task.cancelled():
+                        raise
+                    if observer_cancel is None:
+                        observer_cancel = error
+
+            if observer_cancel is not None:
+                self._attach_failures(observer_cancel, failures)
+                raise observer_cancel
+            self._raise_failures(failures)
+        finally:
+            if task.done():
+                self._settlement_runs = [
+                    (exclusion, active_task)
+                    for exclusion, active_task in self._settlement_runs
+                    if active_task is not task
+                ]
+
+    def _settlement_task(
+            self, excluded_owner: Any) -> asyncio.Task[tuple[BaseException, ...]]:
+        for existing_exclusion, task in self._settlement_runs:
+            if existing_exclusion is excluded_owner:
+                return task
+
+        async def collect() -> tuple[BaseException, ...]:
+            failures: list[BaseException] = []
+            for owner in self._owners:
+                if owner is excluded_owner:
+                    continue
+                try:
+                    await owner.settle()
+                except BaseException as error:
+                    failures.append(error)
+            return tuple(failures)
+
+        task = asyncio.create_task(collect(), name="camctl-local-work-settlement")
+        self._settlement_runs.append((excluded_owner, task))
+        return task
+
+    @staticmethod
+    def _attach_failures(
+            target: BaseException, failures: tuple[BaseException, ...]) -> None:
+        for failure in failures:
+            if failure is target:
+                continue
+            notes = tuple(getattr(failure, "__notes__", ()))
+            target.add_note(
+                "本地实际责任收场失败: "
+                f"{type(failure).__name__}: {failure}")
+            for note in notes:
+                target.add_note(f"本地实际责任收场失败附注: {note}")
+
+    @staticmethod
+    def _raise_failures(failures: tuple[BaseException, ...]) -> None:
+        if not failures:
+            return
+        control = next(
+            (failure for failure in failures if not isinstance(failure, Exception)),
+            None,
+        )
+        if control is not None:
+            CombinedLocalWork._attach_failures(
+                control,
+                tuple(failure for failure in failures if failure is not control),
+            )
+            raise control.with_traceback(control.__traceback__)
         if len(failures) == 1:
-            raise failures[0]
-        if failures:
-            raise ExceptionGroup("本地实际责任收场失败", failures)
+            raise failures[0].with_traceback(failures[0].__traceback__)
+        raise ExceptionGroup("本地实际责任收场失败", list(failures))

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
 from functools import partial
@@ -73,6 +74,10 @@ class RuntimeDeps:
     closed: bool = field(default=False)
     #: 装配前提未成立时保留机器结果，不启动报告协作者。
     startup_error: SessionOutcome | None = None
+    #: 状态库路径预检查得到的存在事实；None 表示无法可靠确认。
+    state_db_present: bool | None = None
+    #: 状态库目标已确认是普通文件；其他文件类型不能进入坏库收场。
+    state_db_regular: bool | None = None
     #: 来自本次调用方的旧本地执行收场前提，不由进程重启推导。
     recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED
     #: 会话锁内首次可靠打开后固定，排除本会话后来建立的意图。
@@ -224,21 +229,60 @@ def build_runtime(
         startup_error = SessionOutcome(succeeded=False, reason="configuration_error",
                                        details={"error": str(error)})
     state_db = Path(config.paths.state_db).expanduser().resolve()
+    state_db_present: bool | None = None
+    state_db_regular: bool | None = None
     if startup_error is None:
         try:
-            owned = open_existing(state_db, DbOpenMode.EXISTING_RO,
-                                  DbConfig(busy_timeout_ms=config.database.busy_timeout_ms))
-            try:
-                verify_directory_binding(owned.metadata, config.paths.staging,
-                                         config.paths.ready, config.paths.processing)
-            finally:
-                owned.connection.close()
-        except (DirectoryBindingError, RuntimeLibraryError) as error:
-            startup_error = SessionOutcome(succeeded=False, reason="configuration_error",
-                                           details={"error": str(error)})
-        except StateDatabaseError as error:
-            startup_error = SessionOutcome(succeeded=False, reason="state_db_error",
-                                           details={"error": str(error)})
+            state_db_info = state_db.stat()
+        except FileNotFoundError as error:
+            state_db_present = False
+            state_db_regular = False
+            startup_error = SessionOutcome(
+                succeeded=False, reason="state_db_error",
+                details={"error": f"状态库不存在: {state_db}: {error}"},
+            )
+        except OSError as error:
+            # 不能把 stat 权限错误推断成缺失；没有可靠存在事实时，
+            # run 也不能取得会话锁或扫描日志目录。
+            state_db_present = None
+            state_db_regular = None
+            startup_error = SessionOutcome(
+                succeeded=False, reason="state_db_error",
+                details={"error": f"状态库存在性无法确认: {state_db}: {error}"},
+            )
+        else:
+            state_db_present = True
+            state_db_regular = stat.S_ISREG(state_db_info.st_mode)
+            if not state_db_regular:
+                startup_error = SessionOutcome(
+                    succeeded=False, reason="state_db_error",
+                    details={"error": f"状态库目标不是普通文件: {state_db}"},
+                )
+            else:
+                try:
+                    owned = open_existing(
+                        state_db, DbOpenMode.EXISTING_RO,
+                        DbConfig(busy_timeout_ms=config.database.busy_timeout_ms),
+                    )
+                    try:
+                        verify_directory_binding(
+                            owned.metadata, config.paths.staging,
+                            config.paths.ready, config.paths.processing,
+                        )
+                    finally:
+                        owned.connection.close()
+                except (DirectoryBindingError, RuntimeLibraryError) as error:
+                    startup_error = SessionOutcome(
+                        succeeded=False, reason="configuration_error",
+                        details={"error": str(error)},
+                    )
+                except (StateDatabaseError, OSError) as error:
+                    # stat 已确认是普通文件；后续损坏、权限或打开错误
+                    # 不能抹去这个事实。run 会在同一会话锁内最小收场。
+                    startup_error = SessionOutcome(
+                        succeeded=False, reason="state_db_error",
+                        details={"error": str(error)},
+                    )
     session_lock, admission_lock = lock_file_paths(state_db)
     deps = RuntimeDeps(
         mode=command_mode,
@@ -250,6 +294,8 @@ def build_runtime(
         notifier=notifier,
         host_notifications=host_notifications,
         startup_error=startup_error,
+        state_db_present=state_db_present,
+        state_db_regular=state_db_regular,
         recovery_boundary=recovery_boundary,
     )
     if startup_error is None or startup_error.reason == "state_db_error":
@@ -437,30 +483,49 @@ async def _close_log_runtime(deps: RuntimeDeps) -> None:
         )
 
 
-async def _on_report_recovered(deps: RuntimeDeps, failure_log: Any) -> None:
+async def _on_report_recovered(
+        deps: RuntimeDeps, failure_log: Any,
+        logging_owner: Any = None) -> None:
     """结束副本轮次，并诊断未完成的正式标记删除。"""
     from camctl.logging_runtime.copies import (
         DeleteOutcome, _exception_description,
     )
 
-    try:
-        result = await failure_log.on_report_recovered()
-    except Exception as error:
+    async def diagnose(result, failure: BaseException | None) -> None:
+        if failure is not None:
+            await _emit_log_diagnostic(
+                deps,
+                "报告日志标记恢复删除诊断：stage=marker_delete; "
+                f"outcome=unknown; error={_exception_description(failure)}",
+                stderr_only=deps.log_path_unsafe,
+            )
+            return
+        if (result.outcome in (DeleteOutcome.DELETED, DeleteOutcome.NOT_PRESENT)
+                and result.error is None):
+            return
         await _emit_log_diagnostic(
             deps,
-            "报告日志标记恢复删除诊断：stage=marker_delete; "
-            f"outcome=unknown; error={_exception_description(error)}",
+            "报告日志标记恢复删除诊断："
+            f"stage=marker_delete; outcome={result.outcome.value}; "
+            f"error={result.error or 'none'}",
+            stderr_only=deps.log_path_unsafe,
         )
-        return
-    if (result.outcome in (DeleteOutcome.DELETED, DeleteOutcome.NOT_PRESENT)
-            and result.error is None):
-        return
-    await _emit_log_diagnostic(
-        deps,
-        "报告日志标记恢复删除诊断："
-        f"stage=marker_delete; outcome={result.outcome.value}; "
-        f"error={result.error or 'none'}",
-    )
+
+    async def operation() -> None:
+        try:
+            if logging_owner is None:
+                result = await failure_log.on_report_recovered()
+                await diagnose(result, None)
+            else:
+                await failure_log.on_report_recovered(diagnose=diagnose)
+        except Exception as error:
+            if logging_owner is None:
+                await diagnose(None, error)
+
+    if logging_owner is None:
+        await operation()
+    else:
+        await logging_owner.run_service_operation("report_recovered", operation)
 
 
 def _open_connection(state_db: Path) -> OwnedConnection:
@@ -546,10 +611,17 @@ def _failure_log_wiring(deps: RuntimeDeps):
             marker=marker,
         )
 
-    return FailureLogService(marker), copy_request_factory
+    def on_write_result(result) -> None:
+        if result.disables_file_logging:
+            _mark_log_path_unsafe(deps)
+
+    return FailureLogService(
+        marker, on_write_result=on_write_result), copy_request_factory
 
 
-def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any], Any]:
+def _report_assembly(
+        deps: RuntimeDeps, failure_log: Any,
+        logging_owner: Any = None) -> tuple[dict[str, Any], Any]:
     """run 会话的生产流程与生成子进程监督方。
 
     注册报告事务守卫后组装维护流程：到期的同步动作、报告冻结、
@@ -618,7 +690,8 @@ def _report_assembly(deps: RuntimeDeps, failure_log: Any) -> tuple[dict[str, Any
             history=deps.config.history,
             database=deps.config.database,
             supervisor=supervisor,
-            on_recovered=(_recovery_callback(deps, failure_log)
+            on_recovered=(_recovery_callback(
+                deps, failure_log, logging_owner)
                           if failure_log is not None else None),
             on_failure=_trigger_failure_log,
         ),
@@ -736,7 +809,14 @@ async def execute_command(
     """
     from camctl.bootstrap.application import query_work_facts
 
-    if deps.startup_error is not None:
+    minimal_bad_database_run = (
+        deps.mode is CommandMode.RUN
+        and deps.startup_error is not None
+        and deps.startup_error.reason == "state_db_error"
+        and deps.state_db_present is True
+        and deps.state_db_regular is True
+    )
+    if deps.startup_error is not None and not minimal_bad_database_run:
         if deps.log_runtime is not None:
             try:
                 await _emit_session_error(deps, f"{deps.mode.value} 会话失败: {deps.startup_error.reason}")
@@ -745,16 +825,38 @@ async def execute_command(
         return deps.startup_error
 
     failure_log, copy_request_factory = _failure_log_wiring(deps)
+    logging_owner = None
+    if deps.mode is CommandMode.RUN:
+        from camctl.logging_runtime.ownership import LoggingOwner
+        from camctl.session.supervision import Supervisor
+
+        logging_owner = LoggingOwner(
+            logs_dir=failure_log.logs_dir,
+            ownership=failure_log.ownership,
+            supervisor=Supervisor(),
+            owner_settled=(
+                deps.recovery_boundary is RecoveryBoundary.HOST_LOCAL_SETTLED),
+            ordinary_log_path=Path(deps.config.paths.log_file).expanduser(),
+            diagnose=lambda message: _emit_log_diagnostic(
+                deps, message, stderr_only=deps.log_path_unsafe),
+        )
+        failure_log.bind_owner(logging_owner)
     supervisor: Any = None
     restricted_supervisor: Any = None
     overrides: dict[str, Any] = {
         "flows": flows if flows is not None else {},
         "wake": wake,
     }
+    assemble_production_run = (
+        deps.startup_error is None
+        and deps.mode is CommandMode.RUN
+        and flows is None
+    )
     if poll_interval_s is not None:
         overrides["poll_interval_s"] = poll_interval_s
-    if flows is None and deps.mode is CommandMode.RUN:
-        flows, supervisor = _report_assembly(deps, failure_log)
+    if assemble_production_run:
+        flows, supervisor = _report_assembly(
+            deps, failure_log, logging_owner)
         # 受限会话装配：墙钟检查失败时消费规定取消流程、一次报告机
         # 会与录像保守收场（不装配媒体链）。
         from camctl.bootstrap.capture_assembly import (
@@ -840,14 +942,15 @@ async def execute_command(
                 database=deps.config.database,
                 supervisor=restricted_supervisor,
                 start_actions=False,
-                on_recovered=(_recovery_callback(deps, failure_log)
+                on_recovered=(_recovery_callback(
+                    deps, failure_log, logging_owner)
                               if failure_log is not None else None),
                 on_failure=_trigger_failure_log,
             ),
         )
     elif restricted_flows is not None:
         overrides["restricted_flows"] = restricted_flows
-    if flows is None and deps.mode is CommandMode.RUN:
+    if assemble_production_run:
         # 生产 run 装配：非时钟致命错误收场时对会话内录像执行有
         # 限应急停止并补记；submit 不执行该流程。
         overrides["emergency_settlement"] = _emergency_settlement_of(deps)
@@ -873,7 +976,12 @@ async def execute_command(
             deps, message, stderr_only=True),
         on_log_path_unsafe=lambda: _mark_log_path_unsafe(deps),
         on_session_open=lambda owned: _initialize_recovery(deps, owned),
-        local_work=_local_work(deps, overrides["flows"]),
+        on_session_locked=(None if logging_owner is None else
+                           logging_owner.start_session),
+        logging_owner=logging_owner,
+        local_work=_local_work(deps, overrides["flows"], logging_owner),
+        startup_outcome=(deps.startup_error
+                         if minimal_bad_database_run else None),
         **overrides,
     )
     outcome: SessionOutcome | None = None
@@ -913,20 +1021,23 @@ async def execute_command(
     return outcome
 
 
-def _recovery_callback(deps: RuntimeDeps, failure_log: Any):
+def _recovery_callback(
+        deps: RuntimeDeps, failure_log: Any, logging_owner: Any = None):
     async def on_recovered() -> None:
-        await _on_report_recovered(deps, failure_log)
+        await _on_report_recovered(deps, failure_log, logging_owner)
 
     return on_recovered
 
 
-def _local_work(deps, flows):
+def _local_work(deps, flows, logging_owner=None):
     from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
     from camctl.bootstrap.flows import CaptureFlow
     owners = list(deps.background_flows)
     owners.extend(flow for flow in flows.values() if isinstance(flow, (BackgroundFlow, CaptureFlow)))
     if deps.work_files is not None:
         owners.append(deps.work_files)
+    if logging_owner is not None:
+        owners.append(logging_owner)
     owners = tuple({id(owner): owner for owner in owners}.values())
     return CombinedLocalWork(owners) if owners else None
 

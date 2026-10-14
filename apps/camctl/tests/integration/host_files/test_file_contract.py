@@ -158,6 +158,9 @@ class _AppendResult:
     def __init__(self, appended: bool) -> None:
         self.appended = appended
         self.append_error = None if appended else "append failed"
+        self.copy_handles_closed = True
+        self.copy_source_close_error = None
+        self.copy_target_close_error = None
 
 
 def _handoff_dirs(tmp_path: Path, content: bytes | None = b"payload"):

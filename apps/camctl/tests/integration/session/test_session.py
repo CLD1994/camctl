@@ -397,6 +397,65 @@ class TestRunCompletion:
         assert "outcome=unknown" in diagnostics[0]
         assert "dir_sync_failed: injected" in diagnostics[0]
 
+    @pytest.mark.parametrize(
+        "result_shape", ["receipt", "exception_receipt", "exception_write_result"])
+    async def test_ownerless_custom_delivery_consumes_unsafe_write_result(
+            self, environment, tmp_path: Path, result_shape: str) -> None:
+        from camctl.logging_runtime.clh_adapter import (
+            WriteFailureStage, WriteResult,
+        )
+        from camctl.logging_runtime.copies import (
+            CopyOutcome, CopyReceipt, FailureLogService, MarkerStore,
+        )
+
+        context, recorder, holder, _ = environment
+        write_result = WriteResult(
+            appended=False,
+            rotated=False,
+            append_error="controlled custom-delivery file failure",
+            failure_stage=WriteFailureStage.FILE_IO,
+        )
+        receipt = CopyReceipt(
+            CopyOutcome.COPY_FAILED,
+            write_result=write_result,
+            copy_error="controlled custom-delivery file failure",
+        )
+
+        async def custom_delivery(_request):
+            if result_shape == "receipt":
+                return receipt
+            failure = RuntimeError("custom delivery raised after write")
+            if result_shape == "exception_receipt":
+                failure.copy_receipt = receipt
+            else:
+                failure.write_result = write_result
+            raise failure
+
+        events: list[str] = []
+        diagnostics: list[str] = []
+
+        async def stderr_diagnostic(message: str) -> None:
+            events.append("diagnostic")
+            diagnostics.append(message)
+
+        context.flows = {"report": recorder.report_fails}
+        context.failure_log = FailureLogService(
+            MarkerStore(tmp_path / "custom-logs"), deliver=custom_delivery)
+        context.copy_request_factory = lambda _error: object()
+        context.on_log_path_unsafe = lambda: events.append("unsafe")
+        context.on_stderr_diagnostic = stderr_diagnostic
+        holder["facts"] = lambda connection: _facts(
+            report_failed_no_new_changes=True)
+
+        outcome = await _run(context)
+
+        assert outcome.succeeded is False
+        assert outcome.reason == "report_error"
+        assert events == ["unsafe", "diagnostic"]
+        assert len(diagnostics) == 1
+        assert "report file failed" in diagnostics[0]
+        assert "controlled custom-delivery file failure" in diagnostics[0]
+
     async def test_suppressed_invalid_marker_error_is_reported_once(
             self, environment):
         from camctl.logging_runtime.copies import (
@@ -733,6 +792,370 @@ class TestRestrictedSession:
         assert len(diagnostics) == 1
         assert "restricted-db-round" in diagnostics[0]
         assert "injected report copy failure" in diagnostics[0]
+
+    async def test_required_phase_cancellation_keeps_original_eligibility(
+            self, environment):
+        import asyncio
+
+        from camctl.bootstrap.background_flow import CombinedLocalWork
+
+        context, recorder, _holder, _ = environment
+        self._restrict(environment)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        cancelled_inside_flow = asyncio.Event()
+        report_calls: list[str] = []
+
+        class Local:
+            def __init__(self) -> None:
+                self.stop_calls = 0
+                self.stopped = asyncio.Event()
+
+            def required_settlements(self) -> int:
+                return 0
+
+            def stop_new_work(self) -> None:
+                self.stop_calls += 1
+                self.stopped.set()
+
+            async def settle(self) -> None:
+                return None
+
+        class Startup:
+            def __init__(self) -> None:
+                self.cancel_calls = 0
+                self.startup_cancelled = asyncio.Event()
+
+            def required_settlements(self) -> int:
+                return 0
+
+            def stop_new_work(self) -> None:
+                return None
+
+            def cancel_startup_sweep(self) -> None:
+                self.cancel_calls += 1
+                self.startup_cancelled.set()
+
+            async def settle(self) -> None:
+                return None
+
+        local = Local()
+        startup = Startup()
+
+        async def required_stop(_context) -> None:
+            recorder.calls.append("stop-started")
+            started.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled_inside_flow.set()
+                raise
+
+        async def once_report(_context) -> None:
+            report_calls.append("report")
+
+        context.restricted_flows = {"stop": required_stop}
+        context.once_report = once_report
+        context.logging_owner = startup
+        context.local_work = CombinedLocalWork((local, startup))
+        task = asyncio.create_task(_run(context))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=10)
+            task.cancel("parent during qualified restricted stop")
+            # 同步取消回调必须先登记两类普通工作停止，再放行必要阶段。
+            await asyncio.wait_for(
+                asyncio.gather(
+                    local.stopped.wait(),
+                    startup.startup_cancelled.wait(),
+                ), timeout=10)
+            assert not cancelled_inside_flow.is_set()
+            assert not task.done()
+
+            task.cancel("repeated parent cancellation")
+            await asyncio.sleep(0)
+            assert local.stop_calls == 1
+            assert startup.cancel_calls == 1
+            assert recorder.calls == ["stop-started"]
+
+            release.set()
+            with pytest.raises(asyncio.CancelledError) as cancelled:
+                await asyncio.wait_for(task, timeout=10)
+            assert cancelled.value.args == (
+                "parent during qualified restricted stop",)
+            assert not cancelled_inside_flow.is_set()
+            assert report_calls == []
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel("restricted eligibility test cleanup")
+                await asyncio.wait_for(
+                    asyncio.gather(task, return_exceptions=True), timeout=10)
+
+    @pytest.mark.parametrize("local_failure", [False, True])
+    async def test_late_clock_cancellation_preserves_local_gate_result(
+            self, environment, local_failure: bool):
+        import asyncio
+
+        from camctl.bootstrap.background_flow import CombinedLocalWork
+        from camctl.session.clock import ClockBecameUntrusted
+
+        context, _recorder, _holder, _ = environment
+        local_started = asyncio.Event()
+        release_local = asyncio.Event()
+        restricted_started = asyncio.Event()
+        release_restricted = asyncio.Event()
+        report_calls: list[str] = []
+
+        class BusinessOwner:
+            def __init__(self) -> None:
+                self.stop_calls = 0
+                self.settle_calls = 0
+
+            def required_settlements(self) -> int:
+                return 0
+
+            def stop_new_work(self) -> None:
+                self.stop_calls += 1
+
+            async def settle(self) -> None:
+                self.settle_calls += 1
+                if self.settle_calls != 1:
+                    return
+                local_started.set()
+                await release_local.wait()
+                if local_failure:
+                    raise RuntimeError("controlled prior local failure")
+
+        class StartupOwner:
+            def __init__(self) -> None:
+                self.stop_calls = 0
+                self.cancel_calls = 0
+                self.settle_calls = 0
+
+            def required_settlements(self) -> int:
+                return 0
+
+            def stop_new_work(self) -> None:
+                self.stop_calls += 1
+
+            def cancel_startup_sweep(self) -> None:
+                self.cancel_calls += 1
+
+            async def settle(self) -> None:
+                self.settle_calls += 1
+
+        business = BusinessOwner()
+        startup = StartupOwner()
+
+        async def lose_clock(_context) -> None:
+            raise ClockBecameUntrusted("controlled late clock failure")
+
+        async def restricted_stop(_context) -> None:
+            restricted_started.set()
+            await release_restricted.wait()
+
+        async def once_report(_context) -> None:
+            report_calls.append("report")
+
+        context.flows = {"clock": lose_clock}
+        context.restricted_flows = {"winddown": restricted_stop}
+        context.once_report = once_report
+        context.logging_owner = startup
+        context.local_work = CombinedLocalWork((business, startup))
+        task = asyncio.create_task(_run(context))
+        try:
+            await asyncio.wait_for(local_started.wait(), timeout=10)
+            stop_counts_before_cancel = (
+                business.stop_calls, startup.stop_calls, startup.cancel_calls)
+            task.cancel("parent during late-clock local prerequisite")
+            # 首次取消必须先同步停止两类后续本地责任，再等待同一前置结果。
+            for _ in range(10):
+                if startup.cancel_calls > stop_counts_before_cancel[2]:
+                    break
+                await asyncio.sleep(0)
+            assert business.stop_calls >= stop_counts_before_cancel[0]
+            assert startup.stop_calls >= stop_counts_before_cancel[1]
+            assert startup.cancel_calls == stop_counts_before_cancel[2] + 1
+            assert not restricted_started.is_set()
+            stop_counts_after_cancel = (
+                business.stop_calls, startup.stop_calls, startup.cancel_calls)
+            task.cancel("repeat during late-clock local prerequisite")
+            await asyncio.sleep(0)
+            assert (
+                business.stop_calls, startup.stop_calls, startup.cancel_calls
+            ) == stop_counts_after_cancel
+
+            release_local.set()
+            if local_failure:
+                with pytest.raises(asyncio.CancelledError) as cancelled:
+                    await asyncio.wait_for(task, timeout=10)
+                assert cancelled.value.args == (
+                    "parent during late-clock local prerequisite",)
+                assert any("controlled prior local failure" in note
+                           for note in getattr(cancelled.value, "__notes__", ()))
+                assert not restricted_started.is_set()
+            else:
+                await asyncio.wait_for(restricted_started.wait(), timeout=10)
+                assert not task.done()
+                assert report_calls == []
+                task.cancel("repeat during required restricted winddown")
+                await asyncio.sleep(0)
+                assert not task.done()
+                release_restricted.set()
+                with pytest.raises(asyncio.CancelledError) as cancelled:
+                    await asyncio.wait_for(task, timeout=10)
+                assert cancelled.value.args == (
+                    "parent during late-clock local prerequisite",)
+                assert report_calls == []
+        finally:
+            release_local.set()
+            release_restricted.set()
+            if not task.done():
+                task.cancel("late-clock gate test cleanup")
+                await asyncio.wait_for(
+                    asyncio.gather(task, return_exceptions=True), timeout=10)
+
+    async def test_parent_cancel_without_original_qualification_creates_no_required_phase(
+            self, environment):
+        import asyncio
+
+        context, recorder, _holder, _ = environment
+        flow_started = asyncio.Event()
+        restricted_calls: list[str] = []
+        emergency_calls: list[str] = []
+
+        async def ordinary(_context) -> None:
+            flow_started.set()
+            await asyncio.Event().wait()
+
+        async def restricted(_context) -> None:
+            restricted_calls.append("restricted")
+
+        async def emergency() -> list[dict]:
+            emergency_calls.append("emergency")
+            return []
+
+        context.flows = {"ordinary": ordinary}
+        context.restricted_flows = {"restricted": restricted}
+        context.emergency_settlement = emergency
+        task = asyncio.create_task(_run(context))
+        try:
+            await asyncio.wait_for(flow_started.wait(), timeout=10)
+            task.cancel("parent before restricted or fatal qualification")
+            with pytest.raises(asyncio.CancelledError) as cancelled:
+                await asyncio.wait_for(task, timeout=10)
+            assert cancelled.value.args == (
+                "parent before restricted or fatal qualification",)
+            assert recorder.calls == []
+            assert restricted_calls == []
+            assert emergency_calls == []
+        finally:
+            if not task.done():
+                task.cancel("unqualified cancellation test cleanup")
+                await asyncio.wait_for(
+                    asyncio.gather(task, return_exceptions=True), timeout=10)
+
+    @pytest.mark.parametrize(
+        ("failure_kind", "with_emergency"),
+        [("state_db", True), ("configuration", True),
+         ("state_db", False), ("configuration", False)],
+    )
+    async def test_cancelled_restricted_fatal_still_runs_qualified_emergency_settlement(
+            self, environment, failure_kind: str, with_emergency: bool):
+        import asyncio
+
+        from camctl.bootstrap.background_flow import CombinedLocalWork
+        from camctl.devices.bindings import DeviceConfigurationError
+
+        context, _recorder, _holder, _ = environment
+        self._restrict(environment)
+        restricted_started = asyncio.Event()
+        release_restricted = asyncio.Event()
+        emergency_started = asyncio.Event()
+        release_emergency = asyncio.Event()
+        local_settled = asyncio.Event()
+        report_calls: list[str] = []
+        emergency_calls: list[str] = []
+        fatal_detail = f"restricted {failure_kind} fatal result detail"
+
+        class Local:
+            def required_settlements(self) -> int:
+                return 0
+
+            def stop_new_work(self) -> None:
+                return None
+
+            async def settle(self) -> None:
+                local_settled.set()
+
+        class Startup:
+            def required_settlements(self) -> int:
+                return 0
+
+            def stop_new_work(self) -> None:
+                return None
+
+            def cancel_startup_sweep(self) -> None:
+                return None
+
+            async def settle(self) -> None:
+                return None
+
+        async def restricted_fatal(_context) -> None:
+            restricted_started.set()
+            await release_restricted.wait()
+            if failure_kind == "configuration":
+                raise DeviceConfigurationError(fatal_detail)
+            raise StateDbFailure(fatal_detail)
+
+        async def emergency() -> list[dict]:
+            emergency_calls.append("started")
+            emergency_started.set()
+            await release_emergency.wait()
+            return [{"outcome": "stopped", "record_status": "recorded"}]
+
+        async def once_report(_context) -> None:
+            report_calls.append("report")
+
+        startup = Startup()
+        context.restricted_flows = {"stop": restricted_fatal}
+        context.once_report = once_report
+        context.emergency_settlement = emergency if with_emergency else None
+        context.logging_owner = startup
+        context.local_work = CombinedLocalWork((Local(), startup))
+        task = asyncio.create_task(_run(context))
+        try:
+            await asyncio.wait_for(restricted_started.wait(), timeout=10)
+            task.cancel("parent before restricted fatal result")
+            await asyncio.sleep(0)
+            assert not task.done()
+            release_restricted.set()
+            if with_emergency:
+                await asyncio.wait_for(emergency_started.wait(), timeout=10)
+                assert emergency_calls == ["started"]
+                assert report_calls == []
+                assert not task.done()
+
+                task.cancel("repeat during qualified emergency")
+                await asyncio.sleep(0)
+                assert emergency_calls == ["started"]
+                release_emergency.set()
+            await asyncio.wait_for(local_settled.wait(), timeout=10)
+            with pytest.raises(asyncio.CancelledError) as cancelled:
+                await asyncio.wait_for(task, timeout=10)
+            assert cancelled.value.args == (
+                "parent before restricted fatal result",)
+            assert any(fatal_detail in note for note in
+                       getattr(cancelled.value, "__notes__", ()))
+            assert emergency_calls == (["started"] if with_emergency else [])
+            assert report_calls == []
+        finally:
+            release_restricted.set()
+            release_emergency.set()
+            if not task.done():
+                task.cancel("restricted fatal test cleanup")
+                await asyncio.wait_for(
+                    asyncio.gather(task, return_exceptions=True), timeout=10)
 
 
 class TestSubmitVerification:

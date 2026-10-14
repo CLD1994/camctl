@@ -15,9 +15,10 @@ import enum
 import json
 import os
 import secrets
+import stat
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Protocol, Sequence
 
@@ -26,9 +27,11 @@ from camctl.host_files.handoff import (
     PublishResult,
     PublishStage,
     ReadyName,
+    publish_staged_file_sync,
     publish_staged_file,
 )
 from camctl.host_files.io import DirectorySyncStage
+from camctl.logging_runtime.models import LogFileStage
 from camctl.logging_runtime.service import LogRecord
 
 if TYPE_CHECKING:
@@ -38,6 +41,7 @@ __all__ = [
     "COPY_PREFIX",
     "MARKER_NAME",
     "CopyOutcome",
+    "CopyLocation",
     "CopyReceipt",
     "CopyRequest",
     "DeleteOutcome",
@@ -49,6 +53,8 @@ __all__ = [
     "MarkerStage",
     "MarkerState",
     "MarkerStore",
+    "LogFileStage",
+    "RunFileOwnership",
     "SaveOutcome",
     "SweepResult",
     "copy_file_name",
@@ -107,6 +113,43 @@ def is_marker_temp_name(name: str) -> bool:
         return False
     middle = name[len(MARKER_NAME) + 1:-len(".tmp")]
     return bool(middle) and all(c not in "/\\:" for c in middle)
+
+
+class RunFileOwnership:
+    """以固定空间标识本次 run 已登记的副本与标记临时名。"""
+
+    _SEQUENCE_MAX = 0xFFFFFFFF
+
+    def __init__(self) -> None:
+        self._namespace = secrets.token_hex(12)
+        self._sequence = 0
+        self._lock = threading.Lock()
+
+    def new_token(self) -> str:
+        """在路径使用前分配唯一、可由此 owner 识别的 token。"""
+        with self._lock:
+            if self._sequence == self._SEQUENCE_MAX:
+                raise RuntimeError("单次 run 的日志路径序号已耗尽")
+            self._sequence += 1
+            return f"{self._namespace}{self._sequence:08x}"
+
+    def owns_name(self, name: str) -> bool:
+        """常量空间判断专用副本名或临时名是否由本次分配。"""
+        if is_copy_file_name(name):
+            token = name[len(COPY_PREFIX):-len(".log")]
+        elif is_marker_temp_name(name):
+            token = name[len(MARKER_NAME) + 1:-len(".tmp")]
+        else:
+            return False
+        if (len(token) != 32 or token != token.lower()
+                or not token.startswith(self._namespace)):
+            return False
+        try:
+            sequence = int(token[24:], 16)
+        except ValueError:
+            return False
+        with self._lock:
+            return 0 < sequence <= self._sequence
 
 
 # ---- 故障标记 --------------------------------------------------------
@@ -223,6 +266,60 @@ def _mark_temp_close_unknown(
 
 def _temp_close_unknown(failure: BaseException) -> bool:
     return bool(getattr(failure, _TEMP_CLOSE_UNKNOWN_ATTR, False))
+
+
+def _write_result_from_exception(failure: BaseException):
+    """只读取原异常上由 FileChannel 写入的 typed 结果事实。"""
+    from camctl.logging_runtime.clh_adapter import WriteResult
+
+    result = getattr(failure, "write_result", None)
+    if isinstance(result, WriteResult):
+        return result
+    if isinstance(failure, BaseExceptionGroup):
+        for member in failure.exceptions:
+            result = _write_result_from_exception(member)
+            if result is not None:
+                return result
+    return None
+
+
+def _copy_handles_confirmed(result: WriteResult) -> bool:
+    return (result.copy_handles_closed is True
+            and result.copy_source_close_error is None
+            and result.copy_target_close_error is None)
+
+
+def _copy_exception_cleanup_is_owned(
+    request: CopyRequest, name: str, destination: Path,
+    result: WriteResult | None,
+) -> bool:
+    """只为本次预先分配、尚在 marker 目录的已关闭副本授权清理。"""
+    if result is None or not _copy_handles_confirmed(result):
+        return False
+    try:
+        return (
+            destination == Path(request.marker.directory) / name
+            and request.marker.ownership.owns_name(name)
+        )
+    except BaseException:
+        # 查询归属本身不能证明时保守保留文件，并保留主异常。
+        return False
+
+
+def _copy_close_diagnostics(result: WriteResult) -> tuple[str, ...]:
+    facts = []
+    if result.copy_handles_closed is not True:
+        facts.append(
+            "副本源与目标句柄关闭事实未明确确认"
+            if result.copy_handles_closed is None else
+            "副本源或目标句柄关闭失败／结果未知"
+        )
+    for side, error in (
+            ("源", result.copy_source_close_error),
+            ("目标", result.copy_target_close_error)):
+        if error is not None:
+            facts.append(f"副本{side}句柄关闭: {error}")
+    return tuple(facts)
 
 
 # 窄注入点：真实文件操作的系统调用边界；仅测试替换。
@@ -374,17 +471,27 @@ def _listdir(path: Path) -> tuple[str, ...]:
     return tuple(os.listdir(path))
 
 
+def _lstat(path: Path):
+    return Path(path).lstat()
+
+
 class MarkerStore:
     """staging/logs 下的故障标记存取；不依赖状态库。"""
 
-    def __init__(self, logs_dir: Path) -> None:
+    def __init__(self, logs_dir: Path, *,
+                 ownership: RunFileOwnership | None = None) -> None:
         self._dir = Path(logs_dir)
         self._path = self._dir / MARKER_NAME
         self._lock = threading.RLock()
+        self._ownership = ownership or RunFileOwnership()
 
     @property
     def directory(self) -> Path:
         return self._dir
+
+    @property
+    def ownership(self) -> RunFileOwnership:
+        return self._ownership
 
     def check(self) -> MarkerCheck:
         """存在性与内容分别判断；检查错误不当作不存在。"""
@@ -491,7 +598,7 @@ class MarkerStore:
             return MarkerDelete(DeleteOutcome.DELETED)
 
     def _save_payload(self, payload: bytes) -> MarkerSave:
-        temp = self._dir / marker_temp_file_name(secrets.token_hex(8))
+        temp = self._dir / marker_temp_file_name(self._ownership.new_token())
         try:
             _write_synced(temp, payload)
         except BaseException as failure:
@@ -677,6 +784,17 @@ class CopyOutcome(enum.Enum):
     COPY_UNKNOWN = "copy_unknown"
 
 
+class CopyLocation(enum.Enum):
+    """本次副本最后可证明的位置，不推断文件是否存在。"""
+
+    NOT_STARTED = "not_started"
+    STAGING = "staging"
+    PUBLISHING = "publishing"
+    READY = "ready"
+    UNKNOWN = "unknown"
+    ABSENT = "absent"
+
+
 @dataclass(frozen=True)
 class CopyReceipt:
     outcome: CopyOutcome
@@ -691,10 +809,194 @@ class CopyReceipt:
     copy_error: str | None = None
     publish_error: str | None = None
     cleanup_error: str | None = None
+    file_stage: LogFileStage | None = None
+    publish_result: PublishResult | None = None
+    copy_location: CopyLocation | None = None
+    cleanup_attempted: bool = False
+
+
+@dataclass
+class _CopyDeliveryFacts:
+    """一次交付的中央可变事实，最终只生成不可变 CopyReceipt。"""
+
+    round_id: str | None = None
+    copy_name: str | None = None
+    file_stage: LogFileStage | None = None
+    marker_check: MarkerCheck | None = None
+    marker_create: MarkerSave | None = None
+    marker_progress: list[tuple[MarkerStage, MarkerSave]] = field(
+        default_factory=list)
+    write_result: WriteResult | None = None
+    copy_error: str | None = None
+    publish_result: PublishResult | None = None
+    publish_error: str | None = None
+    copy_location: CopyLocation = CopyLocation.NOT_STARTED
+    cleanup_attempted: bool = False
+    cleanup_error: str | None = None
+
+    def receipt(self, outcome: CopyOutcome, *,
+                stage: MarkerStage | None = None,
+                error: str | None = None) -> CopyReceipt:
+        return CopyReceipt(
+            outcome=outcome,
+            round_id=self.round_id,
+            copy_name=self.copy_name,
+            stage=stage,
+            error=error,
+            marker_check=self.marker_check,
+            marker_create=self.marker_create,
+            marker_progress=tuple(self.marker_progress),
+            write_result=self.write_result,
+            copy_error=self.copy_error,
+            publish_error=self.publish_error,
+            cleanup_error=self.cleanup_error,
+            file_stage=self.file_stage,
+            publish_result=self.publish_result,
+            copy_location=self.copy_location,
+            cleanup_attempted=self.cleanup_attempted,
+        )
+
+
+def _copy_receipt_from_exception(failure: BaseException) -> CopyReceipt | None:
+    """只接受原异常或异常组上明确交付的不可变回执。"""
+    receipt = getattr(failure, "copy_receipt", None)
+    if isinstance(receipt, CopyReceipt):
+        return receipt
+    if isinstance(failure, BaseExceptionGroup):
+        for member in failure.exceptions:
+            receipt = _copy_receipt_from_exception(member)
+            if receipt is not None:
+                return receipt
+    return None
+
+
+def _attach_copy_receipt(
+    failure: BaseException, receipt: CopyReceipt,
+) -> None:
+    """把统一阶段事实附在实际传播的同一个异常对象上。"""
+    try:
+        setattr(failure, "copy_receipt", receipt)
+    except (AttributeError, TypeError):
+        _add_exception_note(
+            failure,
+            "camctl_copy_receipt_unavailable: 副本阶段事实已形成但无法附加",
+        )
+
+
+class _LoggingOperationStopped(Exception):
+    def __init__(self, stage: LogFileStage) -> None:
+        super().__init__(stage.value)
+        self.stage = stage
+
+
+async def _blocking_call(
+    stage: LogFileStage,
+    operation: Callable[[], Any],
+    *,
+    operation_runner: Callable[..., Awaitable[Any]] | None,
+    stop_requested: Callable[[], bool] | None,
+    required: bool = False,
+) -> Any:
+    if not required and stop_requested is not None and stop_requested():
+        raise _LoggingOperationStopped(stage)
+    if operation_runner is not None:
+        return await operation_runner(stage, operation, required=required)
+    return await asyncio.to_thread(operation)
+
+
+async def _cleanup_staging_once(
+    facts: _CopyDeliveryFacts,
+    request: CopyRequest,
+    destination: Path,
+    *,
+    operation_runner: Callable[..., Awaitable[Any]] | None,
+    stop_requested: Callable[[], bool] | None,
+    receipt_outcome: CopyOutcome,
+    receipt_stage: MarkerStage | None = None,
+    receipt_error: str | None = None,
+    primary: BaseException | None = None,
+) -> None:
+    """只为关闭明确且仍归本次准备位置的副本尝试一次清理。"""
+    if (facts.cleanup_attempted
+            or facts.copy_location is not CopyLocation.STAGING
+            or facts.copy_name is None
+            or not _copy_exception_cleanup_is_owned(
+                request, facts.copy_name, destination, facts.write_result)):
+        return
+
+    # 在提交之前登记，任何后续出口都不会重复清理。
+    facts.cleanup_attempted = True
+    cleanup_failure: BaseException | None = None
+    try:
+        cleanup_error = await _blocking_call(
+            LogFileStage.COPY_CLEANUP,
+            lambda: _cleanup_staging_copy(destination),
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            required=True,
+        )
+    except asyncio.CancelledError as failure:
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            # 新取消仍须传播；默认 service owner 会让已开始清理继续收场。
+            raise
+        cleanup_failure = failure
+    except BaseException as failure:
+        cleanup_failure = failure
+
+    if cleanup_failure is not None:
+        facts.cleanup_error = _describe(
+            "copy_cleanup_failed", cleanup_failure)
+        if primary is None:
+            # 结果已分类但没有仍传播的原异常时，异常出口由清理阶段负责。
+            facts.file_stage = LogFileStage.COPY_CLEANUP
+        receipt = facts.receipt(
+            receipt_outcome, stage=receipt_stage, error=receipt_error)
+
+        if primary is None:
+            _attach_copy_receipt(cleanup_failure, receipt)
+            raise cleanup_failure
+        if isinstance(primary, OSError):
+            if isinstance(cleanup_failure, Exception):
+                failure_group = ExceptionGroup(
+                    "日志副本操作与必要清理均失败",
+                    [primary, cleanup_failure],
+                )
+                _attach_copy_receipt(failure_group, receipt)
+                raise failure_group
+            _add_exception_note(
+                cleanup_failure,
+                "copy_primary_failure: "
+                f"{_exception_description(primary)}",
+            )
+            _attach_copy_receipt(cleanup_failure, receipt)
+            raise cleanup_failure from primary
+
+        _add_exception_note(
+            primary,
+            "copy_cleanup_failed: attempted=true; location=staging; "
+            f"error={facts.cleanup_error}",
+        )
+        _attach_copy_receipt(primary, receipt)
+        raise primary
+
+    facts.cleanup_error = cleanup_error
+    if cleanup_error is None:
+        # 成功 unlink 与可靠 FileNotFoundError 都证明准备位置已无本次文件。
+        facts.copy_location = CopyLocation.ABSENT
+    elif primary is not None:
+        _add_exception_note(
+            primary,
+            "copy_cleanup_failed: "
+            f"attempted=true; location=staging; error={cleanup_error}",
+        )
 
 
 async def deliver_failure_copy(
     request: CopyRequest, *, publish: CopyPublisher = publish_staged_file,
+    operation_runner: Callable[..., Awaitable[Any]] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
+    on_write_result: Callable[[WriteResult], None] | None = None,
 ) -> CopyReceipt:
     """执行一次日志副本交付：标记先行、锁内写入复制、交接发布。
 
@@ -702,103 +1004,322 @@ async def deliver_failure_copy(
     存失败不阻止仍在进行的交付。失败清理只删除仍在准备位置的本
     次副本，正式标记始终保留。
     """
-    check = await asyncio.to_thread(request.marker.check)
+    facts = _CopyDeliveryFacts()
+
+    def exception_receipt(
+        failure: BaseException,
+        *,
+        outcome: CopyOutcome = CopyOutcome.COPY_UNKNOWN,
+        stage: MarkerStage | None = None,
+        error: str | None = None,
+    ) -> CopyReceipt:
+        receipt = facts.receipt(
+            outcome, stage=stage,
+            error=error or _describe("copy_operation_failed", failure),
+        )
+        _attach_copy_receipt(failure, receipt)
+        return receipt
+
+    facts.file_stage = LogFileStage.MARKER_CHECK
+    try:
+        check = await _blocking_call(
+            LogFileStage.MARKER_CHECK, request.marker.check,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested)
+    except _LoggingOperationStopped as stopped:
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN,
+            error=f"日志交付在 {stopped.stage.value} 开始前停止",
+        )
+    except BaseException as failure:
+        exception_receipt(failure)
+        raise
+    facts.marker_check = check
     if check.presence is MarkerPresence.CHECK_ERROR:
-        return CopyReceipt(CopyOutcome.MARKER_UNAVAILABLE, error=check.error,
-                           marker_check=check)
+        return facts.receipt(
+            CopyOutcome.MARKER_UNAVAILABLE, error=check.error)
     if check.presence is MarkerPresence.EXISTS:
         state = check.state
-        return CopyReceipt(
+        facts.round_id = state.round_id if state else None
+        facts.copy_name = state.copy_name if state else None
+        return facts.receipt(
             CopyOutcome.SUPPRESSED,
-            round_id=state.round_id if state else None,
-            copy_name=state.copy_name if state else None,
             stage=state.stage if state else None,
             error=check.error,
-            marker_check=check)
+        )
 
-    round_id = secrets.token_hex(16)
-    name = copy_file_name(round_id)
-    save = await asyncio.to_thread(
-        request.marker.create, round_id, name)
+    facts.round_id = request.marker.ownership.new_token()
+    facts.copy_name = copy_file_name(facts.round_id)
+    round_id = facts.round_id
+    name = facts.copy_name
+    facts.file_stage = LogFileStage.MARKER_CREATE
+    try:
+        save = await _blocking_call(
+            LogFileStage.MARKER_CREATE,
+            lambda: request.marker.create(round_id, name),
+            operation_runner=operation_runner,
+            stop_requested=stop_requested)
+    except _LoggingOperationStopped as stopped:
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN,
+            error=f"日志交付在 {stopped.stage.value} 开始前停止",
+        )
+    except BaseException as failure:
+        exception_receipt(failure)
+        raise
+    facts.marker_create = save
     if save.outcome is not SaveOutcome.SAVED:
-        return CopyReceipt(
-            CopyOutcome.MARKER_CREATE_FAILED, round_id, name,
-            error=save.error, marker_check=check, marker_create=save,
-        )
+        return facts.receipt(CopyOutcome.MARKER_CREATE_FAILED,
+                             error=save.error)
 
-    logs_dir = request.marker.directory
-    destination = logs_dir / name
+    destination = request.marker.directory / name
+    facts.file_stage = LogFileStage.COPY_WRITE
+    write_result_notified = False
+
+    def notify_write_result(
+        result: WriteResult, primary: BaseException | None = None,
+    ) -> None:
+        nonlocal write_result_notified
+        if on_write_result is None or write_result_notified:
+            return
+        write_result_notified = True
+        try:
+            on_write_result(result)
+        except BaseException as callback_error:
+            if primary is None:
+                raise
+            _add_exception_note(
+                primary,
+                "write_result_callback_failed: "
+                f"{_exception_description(callback_error)}",
+            )
+
     try:
-        write_result, copy_error = await asyncio.to_thread(
-            request.channel.copy_with_write, request.trigger, destination)
-    except Exception as failure:
-        error = _describe("copy_result_unknown", failure)
-        return CopyReceipt(
-            CopyOutcome.COPY_UNKNOWN, round_id, name,
-            error=error, marker_check=check, marker_create=save,
-            copy_error=error,
+        write_result, copy_error = await _blocking_call(
+            LogFileStage.COPY_WRITE,
+            lambda: request.channel.copy_with_write(
+                request.trigger, destination),
+            operation_runner=operation_runner,
+            stop_requested=stop_requested)
+        facts.write_result = write_result
+        facts.copy_error = copy_error
+        facts.copy_location = CopyLocation.STAGING
+        # 必须在下一次 await 之前同步更新进程内的原日志禁用事实。
+        notify_write_result(write_result)
+    except _LoggingOperationStopped as stopped:
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN,
+            error=f"日志交付在 {stopped.stage.value} 开始前停止",
         )
-    if not write_result.appended or copy_error is not None:
-        cleanup = await asyncio.to_thread(
-            _cleanup_staging_copy, destination)
+    except Exception as failure:
+        if facts.write_result is None:
+            facts.write_result = _write_result_from_exception(failure)
+            facts.copy_location = CopyLocation.STAGING
+        if facts.write_result is not None:
+            notify_write_result(facts.write_result, failure)
+        facts.copy_error = facts.copy_error or _describe(
+            "copy_result_unknown", failure)
+        cleanup_receipt_error = "; ".join(part for part in (
+            facts.copy_error,
+            *(_copy_close_diagnostics(facts.write_result)
+              if facts.write_result is not None else ()),
+        ) if part)
+        await _cleanup_staging_once(
+            facts, request, destination,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            receipt_outcome=CopyOutcome.COPY_UNKNOWN,
+            receipt_error=cleanup_receipt_error,
+            primary=failure,
+        )
+        details = [facts.copy_error]
+        if facts.write_result is not None:
+            details.extend(_copy_close_diagnostics(facts.write_result))
+        return facts.receipt(CopyOutcome.COPY_UNKNOWN,
+                             error="; ".join(details))
+    except BaseException as failure:
+        if facts.write_result is None:
+            facts.write_result = _write_result_from_exception(failure)
+            facts.copy_location = CopyLocation.STAGING
+        if facts.write_result is not None:
+            notify_write_result(facts.write_result, failure)
+        facts.copy_error = facts.copy_error or _describe(
+            "copy_result_unknown", failure)
+        await _cleanup_staging_once(
+            facts, request, destination,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            receipt_outcome=CopyOutcome.COPY_UNKNOWN,
+            receipt_error=facts.copy_error,
+            primary=failure,
+        )
+        exception_receipt(failure, error=facts.copy_error)
+        raise
+
+    close_diagnostics = _copy_close_diagnostics(facts.write_result)
+    if not _copy_handles_confirmed(facts.write_result):
         error = "; ".join(part for part in (
-            copy_error, write_result.append_error, cleanup) if part)
-        return CopyReceipt(
-            CopyOutcome.COPY_FAILED, round_id, name,
-            error=error, marker_check=check, marker_create=save,
-            write_result=write_result, copy_error=copy_error,
-            cleanup_error=cleanup,
+            facts.copy_error, facts.write_result.append_error,
+            *close_diagnostics) if part)
+        return facts.receipt(CopyOutcome.COPY_UNKNOWN, error=error)
+    if not facts.write_result.appended or facts.copy_error is not None:
+        error = "; ".join(part for part in (
+            facts.copy_error, facts.write_result.append_error,
+            *close_diagnostics) if part)
+        await _cleanup_staging_once(
+            facts, request, destination,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            receipt_outcome=CopyOutcome.COPY_FAILED,
+            receipt_error=error,
         )
+        error = "; ".join(part for part in (
+            facts.copy_error, facts.write_result.append_error,
+            facts.cleanup_error) if part)
+        return facts.receipt(CopyOutcome.COPY_FAILED, error=error)
 
-    progress: list[tuple[MarkerStage, MarkerSave]] = []
-    copied_save = await asyncio.to_thread(
-        request.marker.update_stage, MarkerStage.COPIED,
-        expected_round_id=round_id, expected_copy_name=name)
-    progress.append((MarkerStage.COPIED, copied_save))
+    facts.file_stage = LogFileStage.MARKER_PROGRESS_COPIED
     try:
-        file_result = await publish(
-            destination, HandoffDirectories(request.staging_root,
-                                            request.ready_dir),
-            ReadyName(name))
-    except Exception as failure:
-        error = _describe("publish_failed", failure)
-        return CopyReceipt(
-            CopyOutcome.COPY_UNKNOWN, round_id, name, MarkerStage.COPIED,
-            error, check, save, tuple(progress), write_result,
-            publish_error=error,
+        copied_save = await _blocking_call(
+            LogFileStage.MARKER_PROGRESS_COPIED,
+            lambda: request.marker.update_stage(
+                MarkerStage.COPIED, expected_round_id=round_id,
+                expected_copy_name=name),
+            operation_runner=operation_runner,
+            stop_requested=stop_requested)
+    except _LoggingOperationStopped as stopped:
+        stop_error = f"日志交付在 {stopped.stage.value} 开始前停止"
+        await _cleanup_staging_once(
+            facts, request, destination,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            receipt_outcome=CopyOutcome.COPY_UNKNOWN,
+            receipt_stage=MarkerStage.COPIED,
+            receipt_error=stop_error,
         )
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN, stage=MarkerStage.COPIED,
+            error=(f"{stop_error}; "
+                   f"cleanup={facts.cleanup_error or 'none'}"),
+        )
+    except BaseException as failure:
+        exception_error = _describe("copy_operation_failed", failure)
+        await _cleanup_staging_once(
+            facts, request, destination,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            receipt_outcome=CopyOutcome.COPY_UNKNOWN,
+            receipt_stage=MarkerStage.COPIED,
+            receipt_error=exception_error,
+            primary=failure,
+        )
+        exception_receipt(
+            failure, stage=MarkerStage.COPIED, error=exception_error)
+        raise
+    facts.marker_progress.append((MarkerStage.COPIED, copied_save))
+
+    facts.file_stage = LogFileStage.COPY_PUBLISH
+    try:
+        directories = HandoffDirectories(request.staging_root,
+                                          request.ready_dir)
+        target = ReadyName(name)
+        if operation_runner is not None and publish is publish_staged_file:
+            file_result = await _blocking_call(
+                LogFileStage.COPY_PUBLISH,
+                lambda: publish_staged_file_sync(
+                    destination, directories, target),
+                operation_runner=operation_runner,
+                stop_requested=stop_requested,
+            )
+        else:
+            if stop_requested is not None and stop_requested():
+                raise _LoggingOperationStopped(LogFileStage.COPY_PUBLISH)
+            file_result = await publish(destination, directories, target)
+    except _LoggingOperationStopped as stopped:
+        stop_error = f"日志交付在 {stopped.stage.value} 开始前停止"
+        await _cleanup_staging_once(
+            facts, request, destination,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            receipt_outcome=CopyOutcome.COPY_UNKNOWN,
+            receipt_stage=MarkerStage.COPIED,
+            receipt_error=stop_error,
+        )
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN, stage=MarkerStage.COPIED,
+            error=(f"{stop_error}; "
+                   f"cleanup={facts.cleanup_error or 'none'}"),
+        )
+    except Exception as failure:
+        facts.copy_location = CopyLocation.UNKNOWN
+        facts.publish_error = _describe("publish_failed", failure)
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN, stage=MarkerStage.COPIED,
+            error=facts.publish_error,
+        )
+    except BaseException as failure:
+        facts.copy_location = CopyLocation.UNKNOWN
+        facts.publish_error = _describe("publish_failed", failure)
+        exception_receipt(failure, stage=MarkerStage.COPIED,
+                          error=facts.publish_error)
+        raise
+
+    facts.publish_result = file_result
+    if file_result.stage is PublishStage.MOVED:
+        facts.copy_location = CopyLocation.READY
+    elif file_result.stage is PublishStage.NOT_MOVED:
+        facts.copy_location = CopyLocation.STAGING
+    else:
+        facts.copy_location = CopyLocation.UNKNOWN
     if file_result.stage is PublishStage.UNKNOWN:
-        return CopyReceipt(
-            CopyOutcome.COPY_UNKNOWN, round_id, name, MarkerStage.COPIED,
-            file_result.error, check, save, tuple(progress), write_result,
-            publish_error=file_result.error,
+        facts.publish_error = file_result.error
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN, stage=MarkerStage.COPIED,
+            error=file_result.error,
         )
     if file_result.stage is not PublishStage.MOVED:
-        cleanup = await asyncio.to_thread(
-            _cleanup_staging_copy, destination)
-        error = "; ".join(part for part in (file_result.error, cleanup)
-                           if part)
-        return CopyReceipt(
-            CopyOutcome.COPY_FAILED, round_id, name, MarkerStage.COPIED,
-            error, check, save, tuple(progress), write_result,
-            publish_error=file_result.error, cleanup_error=cleanup,
+        facts.publish_error = file_result.error
+        await _cleanup_staging_once(
+            facts, request, destination,
+            operation_runner=operation_runner,
+            stop_requested=stop_requested,
+            receipt_outcome=CopyOutcome.COPY_FAILED,
+            receipt_stage=MarkerStage.COPIED,
+            receipt_error=file_result.error,
         )
+        error = "; ".join(part for part in (
+            file_result.error, facts.cleanup_error) if part)
+        return facts.receipt(CopyOutcome.COPY_FAILED,
+                             stage=MarkerStage.COPIED, error=error)
     if not _handoff_confirmed(file_result):
         # 已移入 ready 的文件保持不撤回；同步未确认不宣称发布完成。
-        return CopyReceipt(
-            CopyOutcome.COPY_UNKNOWN, round_id, name, MarkerStage.COPIED,
-            file_result.error, check, save, tuple(progress), write_result,
-            publish_error=file_result.error,
+        facts.publish_error = file_result.error
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN, stage=MarkerStage.COPIED,
+            error=file_result.error or "ready 位置已移动，但交接同步未确认",
         )
 
-    published_save = await asyncio.to_thread(
-        request.marker.update_stage, MarkerStage.PUBLISHED,
-        expected_round_id=round_id, expected_copy_name=name)
-    progress.append((MarkerStage.PUBLISHED, published_save))
-    return CopyReceipt(
-        CopyOutcome.PUBLISHED, round_id, name, MarkerStage.PUBLISHED,
-        marker_check=check, marker_create=save,
-        marker_progress=tuple(progress), write_result=write_result,
+    facts.file_stage = LogFileStage.MARKER_PROGRESS_PUBLISHED
+    try:
+        published_save = await _blocking_call(
+            LogFileStage.MARKER_PROGRESS_PUBLISHED,
+            lambda: request.marker.update_stage(
+                MarkerStage.PUBLISHED, expected_round_id=round_id,
+                expected_copy_name=name),
+            operation_runner=operation_runner,
+            stop_requested=stop_requested)
+    except _LoggingOperationStopped as stopped:
+        return facts.receipt(
+            CopyOutcome.COPY_UNKNOWN, stage=MarkerStage.COPIED,
+            error=(f"日志交付在 {stopped.stage.value} 开始前停止；"
+                   "副本已进入 ready"),
+        )
+    except BaseException as failure:
+        exception_receipt(failure, stage=MarkerStage.COPIED)
+        raise
+    facts.marker_progress.append((MarkerStage.PUBLISHED, published_save))
+    return facts.receipt(
+        CopyOutcome.PUBLISHED, stage=MarkerStage.PUBLISHED,
     )
 
 
@@ -831,26 +1352,56 @@ class FailureLogService:
 
     def __init__(self, marker: MarkerStore, *,
                  deliver: Callable[[CopyRequest], Awaitable[CopyReceipt]]
-                 = deliver_failure_copy) -> None:
+                 = deliver_failure_copy,
+                 on_write_result: Callable[[WriteResult], None] | None = None
+                 ) -> None:
         self._marker = marker
         self._deliver = deliver
+        self._on_write_result = on_write_result
         self._suspended = False
         self._lock = asyncio.Lock()
+        self._owner: Any = None
+
+    def bind_owner(self, owner: Any) -> None:
+        """接入本 run 的日志步骤拥有者；不改变服务协调锁身份。"""
+        self._owner = owner
+
+    @property
+    def ownership(self) -> RunFileOwnership:
+        return self._marker.ownership
+
+    @property
+    def logs_dir(self) -> Path:
+        return self._marker.directory
 
     async def on_report_failure(self, request: CopyRequest) -> CopyReceipt:
         return await self.on_report_failure_with_factory(lambda: request)
 
     async def on_report_failure_with_factory(
-            self, request_factory: Callable[[], CopyRequest]) -> CopyReceipt:
+            self, request_factory: Callable[[], CopyRequest], *,
+            diagnose: Callable[[CopyReceipt | None, BaseException | None],
+                               Awaitable[None]] | None = None
+            ) -> CopyReceipt:
         """由服务协调请求构造及副本调用，异常也暂停本故障轮。"""
         async with self._lock:
             if self._suspended:
                 return CopyReceipt(CopyOutcome.SUPPRESSED)
             try:
                 request = request_factory()
-                receipt = await self._deliver(request)
-            except Exception:
+                if self._deliver is deliver_failure_copy:
+                    receipt = await deliver_failure_copy(
+                        request,
+                        operation_runner=(None if self._owner is None else
+                                          self._owner.owned_call),
+                        stop_requested=(None if self._owner is None else
+                                        self._owner.stop_requested),
+                        on_write_result=self._on_write_result,
+                    )
+                else:
+                    receipt = await self._deliver(request)
+            except BaseException as failure:
                 self._suspended = True
+                await _diagnose_service_operation(diagnose, None, failure)
                 raise
             if receipt.outcome in (CopyOutcome.MARKER_UNAVAILABLE,
                                    CopyOutcome.MARKER_CREATE_FAILED):
@@ -858,14 +1409,53 @@ class FailureLogService:
             if (receipt.write_result is not None
                     and receipt.write_result.disables_file_logging):
                 self._suspended = True
+            await _diagnose_service_operation(diagnose, receipt, None)
             return receipt
 
-    async def on_report_recovered(self) -> MarkerDelete:
+    async def on_report_recovered(
+            self, *,
+            diagnose: Callable[[MarkerDelete | None, BaseException | None],
+                               Awaitable[None]] | None = None
+            ) -> MarkerDelete:
         """报告本地处理可靠恢复：结束本轮故障并解除暂停。"""
         async with self._lock:
-            deletion = await asyncio.to_thread(self._marker.delete)
-            self._suspended = False
+            deletion_completed = False
+            try:
+                if self._owner is None:
+                    deletion = await asyncio.to_thread(self._marker.delete)
+                else:
+                    deletion = await _blocking_call(
+                        LogFileStage.MARKER_RECOVERY_DELETE,
+                        self._marker.delete,
+                        operation_runner=self._owner.owned_call,
+                        stop_requested=self._owner.stop_requested,
+                    )
+                deletion_completed = True
+            except _LoggingOperationStopped as stopped:
+                deletion = MarkerDelete(
+                    DeleteOutcome.FAILED,
+                    error=("恢复标记删除在 "
+                           f"{stopped.stage.value} 开始前停止"),
+                )
+            except BaseException as failure:
+                await _diagnose_service_operation(diagnose, None, failure)
+                raise
+            if deletion_completed:
+                self._suspended = False
+            await _diagnose_service_operation(diagnose, deletion, None)
             return deletion
+
+
+async def _diagnose_service_operation(
+        callback: Callable[[Any, BaseException | None], Awaitable[None]] | None,
+        result: Any, failure: BaseException | None) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(result, failure)
+    except Exception:
+        # 诊断出口故障是附属事实，不改写报告／恢复主结果。
+        return
 
 
 # ---- run 启动清理 ----------------------------------------------------
@@ -877,25 +1467,75 @@ class SweepResult:
 
 
 def startup_sweep(logs_dir: Path, *,
-                  active_names: Sequence[str] = ()) -> SweepResult:
+                  active_names: Sequence[str] = (),
+                  ownership: RunFileOwnership | None = None,
+                  owner_settled: bool = True,
+                  ordinary_log_path: Path | None = None,
+                  stop_requested: Callable[[], bool] | None = None,
+                  unlink_candidate: Callable[[Path], None] | None = None
+                  ) -> SweepResult:
     """取得会话锁后的一次性检查：清理以前的日志副本与标记临时文件。
 
     保留正式标记、本次运行正在处理的副本及无法确认归属的文件；
     目录检查失败保留错误，单个删除失败不阻止其他文件。
     """
-    active = frozenset(active_names)
+    resolved_logs_dir: Path | None = None
+    protected_ordinary_paths: set[Path] = set()
+    if ordinary_log_path is not None:
+        configured_path = Path(ordinary_log_path)
+        try:
+            resolved_logs_dir = Path(logs_dir).resolve()
+            protected_ordinary_paths.add(
+                configured_path.parent.resolve() / configured_path.name)
+            protected_ordinary_paths.add(configured_path.resolve())
+        except (OSError, RuntimeError, ValueError) as failure:
+            return SweepResult(error=_describe(
+                "ordinary_log_path_resolve_failed", failure))
+
     try:
         names = _listdir(Path(logs_dir))
+    except FileNotFoundError:
+        return SweepResult()
     except OSError as failure:
         return SweepResult(error=_describe("listdir_failed", failure))
     failures = []
     for name in names:
-        if name in active or name == MARKER_NAME:
+        if stop_requested is not None and stop_requested():
+            break
+        if (name in active_names or (ownership is not None
+                               and ownership.owns_name(name))
+                or name == MARKER_NAME):
             continue
         if not (is_copy_file_name(name) or is_marker_temp_name(name)):
             continue
+        if (resolved_logs_dir is not None
+                and resolved_logs_dir / name in protected_ordinary_paths):
+            continue
+        path = Path(logs_dir) / name
         try:
-            _unlink(Path(logs_dir) / name)
+            info = _lstat(path)
+        except FileNotFoundError:
+            continue
+        except OSError as failure:
+            failures.append((name, _describe("lstat_failed", failure)))
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            continue
+        if not owner_settled:
+            continue
+        # 名字可在枚举后、lstat期间登记；删除前同时复查调用方与当前owner。
+        if (name in active_names or (ownership is not None
+                                     and ownership.owns_name(name))):
+            continue
+        if stop_requested is not None and stop_requested():
+            break
+        try:
+            if unlink_candidate is None:
+                _unlink(path)
+            else:
+                unlink_candidate(path)
+        except _LoggingOperationStopped:
+            break
         except FileNotFoundError:
             continue
         except OSError as failure:

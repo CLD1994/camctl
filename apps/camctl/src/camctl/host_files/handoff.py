@@ -31,6 +31,7 @@ __all__ = [
     "WithdrawStage",
     "publish_file",
     "publish_staged_file",
+    "publish_staged_file_sync",
     "withdraw_file",
     "withdraw_ready_file",
 ]
@@ -181,7 +182,17 @@ async def publish_staged_file(
     状态报告文件不经中间文件登记，凭 staging 内路径发布；移动语
     义与已登记文件一致。
     """
-    return await asyncio.to_thread(_publish_path, source, directories, target)
+    return await asyncio.to_thread(
+        publish_staged_file_sync, source, directories, target)
+
+
+def publish_staged_file_sync(
+    source: Path,
+    directories: HandoffDirectories,
+    target: ReadyName,
+) -> PublishResult:
+    """已准备 staging 文件发布的同步核心；由异步入口和有责线程复用。"""
+    return _publish_path(source, directories, target)
 
 
 async def withdraw_file(identity: HandoffIdentity) -> WithdrawResult:

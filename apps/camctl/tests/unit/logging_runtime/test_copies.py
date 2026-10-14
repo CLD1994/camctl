@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import stat
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from camctl.logging_runtime.copies import (
     MarkerPresence,
     MarkerStage,
     MarkerStore,
+    RunFileOwnership,
     SaveOutcome,
     copy_file_name,
     deliver_failure_copy,
@@ -64,6 +66,43 @@ def test_marker_temp_names_are_distinguished_from_marker():
     assert not is_copy_file_name(temp)
 
 
+def test_run_file_ownership_recognizes_allocated_copy_and_temp_names():
+    owner = RunFileOwnership()
+    copy_id = owner.new_token()
+    temp_id = owner.new_token()
+
+    assert owner.owns_name(copy_file_name(copy_id))
+    assert owner.owns_name(marker_temp_file_name(temp_id))
+    assert not owner.owns_name(copy_file_name("f" * 32))
+    assert not owner.owns_name("failure-marker.json")
+
+
+def test_logging_owner_keeps_ordinary_and_startup_stops_separate():
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.session.supervision import Supervisor
+
+    async def diagnose(_message: str) -> None:
+        return None
+
+    owner = LoggingOwner(
+        logs_dir=_logs_dir(),
+        ownership=RunFileOwnership(),
+        supervisor=Supervisor(),
+        owner_settled=True,
+        diagnose=diagnose,
+    )
+
+    owner.stop_new_work()
+
+    assert owner.stop_requested() is True
+    assert owner.startup_stop_requested() is False
+
+    owner.cancel_startup_sweep()
+
+    assert owner.stop_requested() is True
+    assert owner.startup_stop_requested() is True
+
+
 # ---- 标记存在性与内容 ------------------------------------------------
 
 
@@ -78,6 +117,7 @@ class FakeFiles:
         self.errors: dict[str, Exception] = {}
         self.listing: dict[str, list[str]] = {}
         self.fail_unlink: set[str] = set()
+        self.modes: dict[str, int] = {}
         monkeypatch.setattr(copies, "_exists", self._exists)
         monkeypatch.setattr(copies, "_read_bytes", self._read_bytes)
         monkeypatch.setattr(copies, "_write_synced", self._write_synced)
@@ -85,6 +125,15 @@ class FakeFiles:
         monkeypatch.setattr(copies, "_fsync_directory", self._fsync_directory)
         monkeypatch.setattr(copies, "_unlink", self._unlink)
         monkeypatch.setattr(copies, "_listdir", self._listdir)
+        monkeypatch.setattr(copies, "_lstat", self._lstat)
+
+    def _lstat(self, path):
+        self.calls.append(("lstat", str(path)))
+        if str(path) in self.errors:
+            raise self.errors[str(path)]
+        return type("StatResult", (), {
+            "st_mode": self.modes.get(str(path), stat.S_IFREG | 0o600),
+        })()
 
     def _exists(self, path):
         self.calls.append(("exists", str(path)))
@@ -142,7 +191,7 @@ def _marker_bytes(round_id="r1", name="log-copy-r1.log", stage="triggered"):
 
 
 def test_check_reports_absent_without_marker(monkeypatch):
-    files = FakeFiles(monkeypatch)
+    FakeFiles(monkeypatch)
     store = MarkerStore(_logs_dir())
     check = store.check()
     assert check.presence is MarkerPresence.ABSENT
@@ -409,7 +458,8 @@ class FakeChannel:
     def __init__(self, order: list | None = None) -> None:
         self.order = order if order is not None else []
         self.copies: list[tuple] = []
-        self.write_result = WriteResult(appended=True, rotated=False)
+        self.write_result = WriteResult(
+            appended=True, rotated=False, copy_handles_closed=True)
         self.copy_error: str | None = None
 
     def copy_with_write(self, record, destination):
@@ -477,6 +527,49 @@ def test_full_delivery_publishes_and_updates_progress(monkeypatch):
     assert MarkerStore(_logs_dir()).check().state.stage is MarkerStage.PUBLISHED
     assert channel.copies[0][1].parent == Path("staging") / "logs"
     assert publisher.calls and publisher.calls[0][0].name == receipt.copy_name
+
+
+def test_stopped_ordinary_owner_cleans_copied_staging_before_custom_publish(
+        monkeypatch):
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.session.supervision import Supervisor
+
+    files = FakeFiles(monkeypatch)
+    channel, publisher = FakeChannel(), FakePublisher()
+    publisher.result = _moved()
+
+    async def diagnose(_message: str) -> None:
+        return None
+
+    owner = LoggingOwner(
+        logs_dir=_logs_dir(),
+        ownership=RunFileOwnership(),
+        supervisor=Supervisor(),
+        owner_settled=True,
+        diagnose=diagnose,
+    )
+
+    async def run_inline(stage, operation, *, required=False):
+        result = operation()
+        if stage == "marker_progress_copied":
+            owner.stop_new_work()
+        return result
+
+    owner.owned_call = run_inline
+    request = _request(monkeypatch, channel=channel)
+
+    receipt = asyncio.run(
+        deliver_failure_copy(
+            request,
+            publish=publisher,
+            operation_runner=owner.owned_call,
+            stop_requested=owner.stop_requested,
+        ))
+
+    assert receipt.outcome is CopyOutcome.COPY_UNKNOWN
+    assert receipt.stage is MarkerStage.COPIED
+    assert receipt.cleanup_error is None
+    assert publisher.calls == []
 
 
 def test_existing_marker_suppresses_new_copy(monkeypatch):
@@ -554,7 +647,8 @@ def test_copy_write_failure_cleans_staging_copy(monkeypatch):
     files = FakeFiles(monkeypatch)
     channel, publisher = FakeChannel(), FakePublisher()
     channel.write_result = WriteResult(appended=False, rotated=False,
-                                       append_error="append failed")
+                                       append_error="append failed",
+                                       copy_handles_closed=True)
     receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
     assert receipt.outcome is CopyOutcome.COPY_FAILED
     # 标记保留（故障仍持续），本次副本清理。
@@ -562,6 +656,44 @@ def test_copy_write_failure_cleans_staging_copy(monkeypatch):
     assert any(c[0] == "unlink" and is_copy_file_name(Path(c[1]).name)
                for c in files.calls)
     assert publisher.calls == []
+
+
+def test_write_result_callback_runs_before_cleanup(monkeypatch):
+    from camctl.logging_runtime import copies
+    from camctl.logging_runtime.clh_adapter import WriteFailureStage
+
+    files = FakeFiles(monkeypatch)
+    channel = FakeChannel()
+    channel.write_result = WriteResult(
+        appended=False, rotated=False, append_error="file write failed",
+        failure_stage=WriteFailureStage.FILE_IO,
+        copy_handles_closed=True,
+    )
+    marker = MarkerStore(_logs_dir())
+    request = _request(monkeypatch, channel=channel, marker_dir=_logs_dir())
+    order = []
+    original_unlink = copies._unlink
+
+    def on_write_result(result):
+        order.append(("write_result", result))
+
+    def observe_unlink(path):
+        if is_copy_file_name(Path(path).name):
+            order.append(("cleanup", Path(path)))
+        return original_unlink(path)
+
+    monkeypatch.setattr(copies, "_unlink", observe_unlink)
+    service = FailureLogService(
+        marker, on_write_result=on_write_result)
+
+    receipt = asyncio.run(service.on_report_failure(request))
+
+    assert receipt.outcome is CopyOutcome.COPY_FAILED
+    assert order[0] == ("write_result", channel.write_result)
+    assert order[1][0] == "cleanup"
+    assert receipt.cleanup_attempted is True
+    assert receipt.copy_location.value == "absent"
+    assert service._suspended is True
 
 
 def test_copy_failure_keeps_prior_marker_diagnostic(monkeypatch):
@@ -575,6 +707,45 @@ def test_copy_failure_keeps_prior_marker_diagnostic(monkeypatch):
     assert receipt.marker_create.outcome is SaveOutcome.SAVED
     assert receipt.copy_error == "snapshot read failed"
     assert receipt.cleanup_error is None
+    assert publisher.calls == []
+
+
+def test_copy_without_close_fact_is_unknown_and_keeps_staging(monkeypatch):
+    files = FakeFiles(monkeypatch)
+    channel, publisher = FakeChannel(), FakePublisher()
+    # 兼容旧 WriteResult 构造的默认 None 表示生产者没有交付副本
+    # 句柄关闭事实；消费者不得把它猜成关闭成功。
+    channel.write_result = WriteResult(appended=True, rotated=False)
+    publisher.result = _moved()
+
+    receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
+
+    assert receipt.outcome is CopyOutcome.COPY_UNKNOWN
+    assert receipt.write_result is channel.write_result
+    assert not any(c[0] == "unlink" and is_copy_file_name(Path(c[1]).name)
+                   for c in files.calls)
+    assert publisher.calls == []
+
+
+def test_untyped_external_copy_exception_keeps_staging(monkeypatch):
+    files = FakeFiles(monkeypatch)
+    channel, publisher = FakeChannel(), FakePublisher()
+    failure = RuntimeError("external copy channel has no close facts")
+
+    def fail_without_typed_result(record, destination):
+        channel.copies.append((record, Path(destination)))
+        raise failure
+
+    channel.copy_with_write = fail_without_typed_result
+
+    receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
+
+    assert receipt.outcome is CopyOutcome.COPY_UNKNOWN
+    assert receipt.write_result is None
+    assert receipt.copy_error is not None
+    assert "external copy channel has no close facts" in receipt.copy_error
+    assert not any(c[0] == "unlink" and is_copy_file_name(Path(c[1]).name)
+                   for c in files.calls)
     assert publisher.calls == []
 
 
@@ -685,7 +856,8 @@ def test_rotation_failure_keeps_successful_copy_classification(monkeypatch):
     files = FakeFiles(monkeypatch)
     channel, publisher = FakeChannel(), FakePublisher()
     channel.write_result = WriteResult(
-        appended=True, rotated=False, rotation_error="rotation denied")
+        appended=True, rotated=False, rotation_error="rotation denied",
+        copy_handles_closed=True)
     publisher.result = _moved()
 
     receipt = _deliver(_request(monkeypatch, channel=channel), publisher)
@@ -732,6 +904,52 @@ def test_service_recovery_deletes_marker_and_lifts_suspension(monkeypatch):
     assert receipt.outcome is CopyOutcome.PUBLISHED
 
 
+@pytest.mark.parametrize("initial_failure", ["marker_check", "marker_create"])
+def test_withdrawn_queued_recovery_delete_keeps_suspension(
+        monkeypatch, initial_failure):
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.session.supervision import Supervisor
+
+    files = FakeFiles(monkeypatch)
+    marker = MarkerStore(_logs_dir())
+    request = _request(monkeypatch, marker_dir=_logs_dir())
+    if initial_failure == "marker_check":
+        files.errors[str(_logs_dir() / MARKER_NAME)] = PermissionError(
+            "marker check denied")
+    else:
+        monkeypatch.setattr(
+            "camctl.logging_runtime.copies._write_synced",
+            lambda path, data: (_ for _ in ()).throw(OSError("marker write denied")))
+
+    service = FailureLogService(marker)
+    failed = asyncio.run(service.on_report_failure(request))
+    assert failed.outcome is (
+        CopyOutcome.MARKER_UNAVAILABLE if initial_failure == "marker_check"
+        else CopyOutcome.MARKER_CREATE_FAILED)
+    assert service._suspended is True
+
+    async def diagnose(_message: str) -> None:
+        return None
+
+    owner = LoggingOwner(
+        logs_dir=_logs_dir(), ownership=marker.ownership,
+        supervisor=Supervisor(), owner_settled=True, diagnose=diagnose)
+    service.bind_owner(owner)
+    owner.stop_new_work()
+    deletion = asyncio.run(service.on_report_recovered())
+    assert deletion.outcome.value == "failed"
+    assert "开始前停止" in (deletion.error or "")
+    assert service._suspended is True
+
+    files.errors.clear()
+    calls_before_second_failure = len(files.calls)
+    receipt = asyncio.run(service.on_report_failure(request))
+    assert receipt.outcome is CopyOutcome.SUPPRESSED
+    assert not any(
+        call[0] == "exists" and call[1].endswith(MARKER_NAME)
+        for call in files.calls[calls_before_second_failure:])
+
+
 def test_service_suppressed_failure_does_not_suspend(monkeypatch):
     files = FakeFiles(monkeypatch)
     files.files[str(_logs_dir() / MARKER_NAME)] = _marker_bytes()
@@ -740,6 +958,108 @@ def test_service_suppressed_failure_does_not_suspend(monkeypatch):
     # 抑制不是错误：恢复后正常删除标记。
     asyncio.run(service.on_report_recovered())
     assert MarkerStore(_logs_dir()).check().presence is MarkerPresence.ABSENT
+
+
+def test_service_keeps_coordination_until_canceled_delivery_settles(monkeypatch):
+    async def scenario():
+        from camctl.logging_runtime.ownership import LoggingOwner
+        from camctl.session.supervision import Supervisor
+
+        delivery_started = asyncio.Event()
+        release_delivery = asyncio.Event()
+        diagnosis_started = asyncio.Event()
+        release_diagnosis = asyncio.Event()
+        calls = 0
+        diagnosed = []
+
+        async def deliver(_request):
+            nonlocal calls
+            calls += 1
+            delivery_started.set()
+            await release_delivery.wait()
+            return CopyReceipt(CopyOutcome.PUBLISHED)
+
+        async def diagnose(receipt, failure):
+            assert failure is None
+            diagnosed.append(receipt)
+            diagnosis_started.set()
+            await release_diagnosis.wait()
+
+        marker = MarkerStore(_logs_dir())
+        supervisor = Supervisor()
+        drain_results = []
+        original_drain = supervisor.drain_required
+
+        async def record_drain_result():
+            result = await original_drain()
+            drain_results.append(result)
+            return result
+
+        supervisor.drain_required = record_drain_result
+
+        async def owner_diagnose(_message: str) -> None:
+            return None
+
+        owner = LoggingOwner(
+            logs_dir=_logs_dir(), ownership=marker.ownership,
+            supervisor=supervisor, owner_settled=True,
+            diagnose=owner_diagnose,
+        )
+        service = FailureLogService(marker, deliver=deliver)
+        service.bind_owner(owner)
+        request = _request(monkeypatch)
+
+        async def invoke_service():
+            return await owner.run_service_operation(
+                "report_failure",
+                lambda: service.on_report_failure_with_factory(
+                    lambda: request, diagnose=diagnose),
+            )
+
+        first = asyncio.create_task(invoke_service())
+        second = None
+        try:
+            await asyncio.wait_for(delivery_started.wait(), timeout=5)
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(first, timeout=5)
+
+            second = asyncio.create_task(invoke_service())
+            await asyncio.sleep(0)
+            # 实际交付尚未返回：同一 service 的第二次调用仍在原锁外等待。
+            assert not second.done()
+            assert calls == 1
+
+            release_delivery.set()
+            await asyncio.wait_for(diagnosis_started.wait(), timeout=5)
+            # 结果已返回但主循环诊断仍被门闩阻塞，服务锁依然未释放。
+            assert not second.done()
+            assert calls == 1
+
+            release_diagnosis.set()
+            second_receipt = await asyncio.wait_for(second, timeout=5)
+            assert second_receipt.outcome is CopyOutcome.PUBLISHED
+            await asyncio.wait_for(owner.settle(), timeout=5)
+
+            assert len(diagnosed) == 2
+            assert all(item.outcome is CopyOutcome.PUBLISHED for item in diagnosed)
+            assert calls == 2
+            assert service._suspended is False
+            assert len(drain_results) == 1
+            result = drain_results[0]
+            assert len(result.settled) == 1
+            assert result.failed == ()
+        finally:
+            release_delivery.set()
+            release_diagnosis.set()
+            if second is not None and not second.done():
+                second.cancel()
+            if not first.done():
+                first.cancel()
+            await asyncio.gather(first, *(tuple([second]) if second else ()),
+                                 return_exceptions=True)
+
+    asyncio.run(scenario())
 
 
 # ---- 启动清理 --------------------------------------------------------
@@ -777,6 +1097,61 @@ def test_startup_sweep_keeps_directory_check_error(monkeypatch):
     assert not any(c[0] == "unlink" for c in files.calls)
 
 
+def test_startup_sweep_treats_missing_directory_as_completed_absence(monkeypatch):
+    files = FakeFiles(monkeypatch)
+    files.errors[str(_logs_dir())] = FileNotFoundError("logs directory absent")
+
+    result = startup_sweep(_logs_dir())
+
+    assert result.error is None
+    assert result.failures == ()
+    assert not any(c[0] == "unlink" for c in files.calls)
+
+
+def test_startup_sweep_checks_current_names_after_enumeration(monkeypatch):
+    from camctl.logging_runtime import copies
+
+    files = FakeFiles(monkeypatch)
+    candidate = "log-copy-created-during-scan.log"
+    files.listing[str(_logs_dir())] = [candidate]
+    current_names: list[str] = []
+    original_listdir = copies._listdir
+
+    def list_then_register(path):
+        names = original_listdir(path)
+        # 模拟日志 owner 在目录枚举完成、候选尚未获得删除资格时
+        # 登记本次创建的目标名。
+        current_names.append(candidate)
+        return names
+
+    monkeypatch.setattr(copies, "_listdir", list_then_register)
+    result = startup_sweep(_logs_dir(), active_names=current_names)
+
+    assert result.error is None
+    assert not any(c[0] == "unlink" for c in files.calls)
+
+
+def test_startup_sweep_rechecks_active_names_after_lstat(monkeypatch):
+    from camctl.logging_runtime import copies
+
+    files = FakeFiles(monkeypatch)
+    candidate = "log-copy-created-during-stat.log"
+    files.listing[str(_logs_dir())] = [candidate]
+    current_names: list[str] = []
+    original_lstat = copies._lstat
+
+    def stat_then_register(path):
+        info = original_lstat(path)
+        current_names.append(candidate)
+        return info
+
+    monkeypatch.setattr(copies, "_lstat", stat_then_register)
+    result = startup_sweep(_logs_dir(), active_names=current_names)
+
+    assert result.error is None
+    assert not any(c[0] == "unlink" for c in files.calls)
+
+
 def test_startup_sweep_continues_after_single_delete_failure(monkeypatch):
     files = FakeFiles(monkeypatch)
     files.listing[str(_logs_dir())] = ["log-copy-a.log", "log-copy-b.log"]
@@ -785,3 +1160,20 @@ def test_startup_sweep_continues_after_single_delete_failure(monkeypatch):
     removed = {c[1] for c in files.calls if c[0] == "unlink"}
     assert str(_logs_dir() / "log-copy-b.log") in removed
     assert result.failures and "log-copy-a.log" in result.failures[0][0]
+
+
+def test_startup_sweep_preserves_non_regular_and_reports_stat_error(
+        monkeypatch):
+    files = FakeFiles(monkeypatch)
+    links = "log-copy-link.log"
+    denied = "failure-marker.json.denied.tmp"
+    sibling = "log-copy-regular.log"
+    files.listing[str(_logs_dir())] = [links, denied, sibling]
+    files.modes[str(_logs_dir() / links)] = stat.S_IFLNK | 0o777
+    files.errors[str(_logs_dir() / denied)] = PermissionError("stat denied")
+
+    result = startup_sweep(_logs_dir())
+
+    removed = {call[1] for call in files.calls if call[0] == "unlink"}
+    assert removed == {str(_logs_dir() / sibling)}
+    assert result.failures == ((denied, "lstat_failed: PermissionError: stat denied"),)

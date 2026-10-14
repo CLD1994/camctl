@@ -77,6 +77,31 @@
 
 本次软件证据覆盖同步保存拥有者和诊断消费者。等待协程取消后的全部日志文件责任、遗留启动检查及会话锁放行由 SW-04 承接；真实设备、ARM 部署及物理断电保持各自验收范围。
 
+## SW-04 日志责任与启动检查验证（2026-10-14）
+
+环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1。默认 `run` 取得会话锁后登记一次旧日志检查，数据库和业务推进不等待扫描线程。可靠存在但不可用的普通状态库沿最小错误会话收场；锁前资格不成立、未取得会话锁及其他命令保持原职责。实施范围见[SW-04 计划](../superpowers/plans/2026-10-13-camctl-sw04-startup-log-sweep.md)。
+
+[启动专项](../../apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py)与[归属专项](../../apps/camctl/tests/integration/logging_runtime/test_startup_ownership.py)组合真实目录、SQLite、会话锁和工作线程。检查只删除归属明确且前任操作已结束的旧副本及临时文件，保留正式标记、本次分配的文件和非普通对象；单条失败在本轮不重试，下一次运行可处理残留。实际配置的普通日志按配置位置和文件链接目标保护，覆盖副本名、临时名、路径别名、解析后配置位置替换及其他目录同名；保护路径无法确认时保留候选并交付诊断。文件替换对照验证保护位置，未作为完整日志轮换验收。
+
+[日志拥有者](../../apps/camctl/src/camctl/logging_runtime/ownership.py)区分排队撤回、已开始调用及结果诊断；默认线程池内的实际文件操作结束后，才消费结果及有资格的一次清理。[默认复制与恢复专项](../../apps/camctl/tests/integration/bootstrap/test_log_operation_settlement.py)验证取消后源停止先推进，复制、必要清理或恢复删除及诊断完成前两类协调资格仍保留。[副本专项](../../apps/camctl/tests/integration/logging_runtime/test_copies.py)核对关闭确认、全流程回执、异常对象和次因、已移动及位置未知分支。[默认诊断专项](../../apps/camctl/tests/integration/bootstrap/test_log_copy_diagnostics.py)核对失效原日志路径在后继等待前停用，以及扫描与本次副本／临时文件重叠时的保护。
+
+[会话消费者](../../apps/camctl/src/camctl/session/service.py)持有原资格已经建立的有限受限流程、应急停止及一次报告任务；父等待取消与内部实际控制异常分别交付。真实 `winddown_flow`、`EmergencySettlement`、SQLite 和受控停止端口验证停止结果保存及连接关闭先于日志收场。[受限报告专项](../../apps/camctl/tests/integration/bootstrap/test_restricted_report_cancellation.py)通过真实 `WorkerSupervisor` 验证已派发生成的成功／失败结果；父取消不单独终止生成或建立新报告。组合收场继续消费后续拥有者，阶段结束后释放缓存登记；[单元专项](../../apps/camctl/tests/unit/bootstrap/test_background_flow.py)及默认运行集成分别核对控制对象、首次父取消、附注与下一阶段新责任。内部文件控制集成使用真实执行器及受控协程体，没有执行相机操作。
+
+根代理逐修改文件探索了规格、生产者、消费者和测试上下文，独立代理复核同一候选。所有 pytest 从仓库根使用既有 Python 3.11 命令顺序运行，完整目录各为独立进程；最终结果如下：
+
+| 命令目标（相对于 `apps/camctl/tests`） | 实际结果 |
+| --- | --- |
+| `unit` | 5152 项通过、1 项跳过、2 条既有警告；real 14.187 秒 |
+| `integration/logging_runtime` | 96 项通过、1 条既有警告；real 2.503 秒 |
+| `integration/session` | 117 项通过；real 22.487 秒 |
+| `integration/bootstrap` | 完整复验 1074 项通过、1 项跳过；real 879.863 秒 |
+
+最终四份记录的 pytest 退出码均为 `0`，stderr 为空。跳过及既有警告范围与 SW-03 相同。启动目录首次完整运行是 1064 项通过、1 项跳过、10 项测试装配错误：两处包装函数未接收新增的可选日志拥有者参数，尚未执行原业务断言。仅同步这两个测试包装器并原样转发后，原十个参数通过，随后完整启动目录通过；生产及其余测试保持不变，前三目录沿原通过快照复用。单元测试结束后的记录脚本曾在汇总元数据时报错，已补全记录，未重跑已通过的 pytest。
+
+完整命令、红绿与夹具错误区别、stdout／stderr、时间、退出码和文件 SHA-256 保存在工作区忽略的 `.superpowers/sdd/2026-10-13-camctl-sw04-startup-log-sweep/execution-index.md` 及 `logs/full-gate/`；最终启动复验对应 `integration-bootstrap-recheck.json`。24 个生产与测试 Python 文件在最终复验前后摘要一致。文档检查和提交核验由根代理收口。
+
+本次结果证明开发环境的软件启动、日志实际责任、取消及锁内消费；真实设备、ARM 部署和物理断电继续按各自计划验收。通用锁错误与独立资源释放由 SW-05 承接。
+
 ## 测试与分步实施方向
 
 ### Python 环境

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import subprocess
 import sys
@@ -75,6 +76,59 @@ def _plan_file(home: Path, request_id: str) -> Path:
 
 
 class TestRealEntrypoints:
+    def test_init_submit_describe_do_not_start_run_log_sweep(
+            self, tmp_path: Path, monkeypatch) -> None:
+        from camctl.cli import main
+        from camctl.logging_runtime import copies
+
+        home = tmp_path / "home"
+        home.mkdir()
+        config = _config(home)
+        logs_dir = home / "staging" / "logs"
+        logs_dir.mkdir(parents=True)
+        old_copy = logs_dir / "log-copy-old.log"
+        old_temp = logs_dir / "failure-marker.json.old.tmp"
+        formal_marker = logs_dir / "failure-marker.json"
+        old_copy.write_bytes(b"old copy")
+        old_temp.write_bytes(b"old marker temp")
+        formal_marker.write_bytes(b"malformed formal marker")
+
+        original_listdir = copies._listdir
+        scans: list[Path] = []
+
+        def record_listdir(path: Path):
+            scans.append(Path(path))
+            return original_listdir(path)
+
+        monkeypatch.setattr(copies, "_listdir", record_listdir)
+
+        init_stdout, init_stderr = io.StringIO(), io.StringIO()
+        assert main(["init", "--config", str(config)],
+                    stdout=init_stdout, stderr=init_stderr) == 0
+        assert init_stdout.getvalue() == ""
+        assert init_stderr.getvalue() == ""
+
+        describe_stdout, describe_stderr = io.StringIO(), io.StringIO()
+        assert main(["describe", "--config", str(config)],
+                    stdout=describe_stdout, stderr=describe_stderr) == 0
+        described = json.loads(describe_stdout.getvalue())
+        assert isinstance(described["devices"], list)
+        assert describe_stdout.getvalue().count("\n") == 1
+        assert describe_stderr.getvalue() == ""
+
+        plan = _plan_file(home, "33")
+        submit_stdout, submit_stderr = io.StringIO(), io.StringIO()
+        assert main(["submit", str(plan), "--config", str(config)],
+                    stdout=submit_stdout, stderr=submit_stderr) == 0
+        assert json.loads(submit_stdout.getvalue())["kind"] == "succeeded"
+        assert submit_stdout.getvalue().count("\n") == 1
+        assert submit_stderr.getvalue() == ""
+
+        assert scans == []
+        assert old_copy.read_bytes() == b"old copy"
+        assert old_temp.read_bytes() == b"old marker temp"
+        assert formal_marker.read_bytes() == b"malformed formal marker"
+
     def test_init_submit_run_closed_loop(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
         home.mkdir()
@@ -97,6 +151,8 @@ class TestRealEntrypoints:
         # run 装配生产报告流程：同步动作完成、报告发布后正常退出。
         finished = _run_cli(home, "run", "--config", str(config))
         assert finished.returncode == 0, finished.stderr
+        assert json.loads(finished.stdout) == {"kind": "succeeded"}
+        assert finished.stdout.count("\n") == 1
         with sqlite3.connect(home / "state.db") as connection:
             assert connection.execute(
                 "SELECT status FROM actions").fetchall() == [(3,)]

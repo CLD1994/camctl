@@ -216,8 +216,9 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
     supervisor.stop.return_value = WorkerShutdown(exitcode=0, forced=False)
     original_assembly = lifecycle._report_assembly
 
-    def assemble(runtime_deps, failure_log):
-        flows, report_supervisor = original_assembly(runtime_deps, failure_log)
+    def assemble(runtime_deps, failure_log, logging_owner=None):
+        flows, report_supervisor = original_assembly(
+            runtime_deps, failure_log, logging_owner)
         return {
             "report": flows["report"],
             "device": device,

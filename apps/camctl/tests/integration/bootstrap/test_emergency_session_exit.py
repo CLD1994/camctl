@@ -5,9 +5,11 @@
 像有限尝试停止，逐个补记 kind=9 流程并把诊断并入原错误。
 """
 
+import asyncio
 from decimal import Decimal
 import json
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -268,7 +270,10 @@ async def test_run_session_merges_emergency_diagnostics_into_fatal_error(tmp_pat
     from camctl.persistence.repositories.acceptance import AcceptanceRepository
     from camctl.persistence.repositories.session import SessionRepository
     from camctl.session.clock import ClockCheckInput
-    from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
+    from camctl.session.locks import (
+        SessionLockConflictError, acquire_admission, acquire_session,
+        lock_file_paths,
+    )
     from camctl.session.outcome import SessionOutcome
     from camctl.session.service import StateDbFailure, SessionContext, SessionPaths, run_session
 
@@ -314,3 +319,439 @@ async def test_run_session_merges_emergency_diagnostics_into_fatal_error(tmp_pat
         ).fetchone() == (3, 1)
     finally:
         check.connection.close()
+
+
+async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
+        tmp_path: Path, monkeypatch) -> None:
+    """父取消不取消已合格的真实 EMG，保存及日志收场仍在会话锁内。"""
+    from camctl.bootstrap.background_flow import CombinedLocalWork
+    from camctl.acceptance.service import CommandMode
+    from camctl.logging_runtime import copies
+    from camctl.logging_runtime.copies import RunFileOwnership
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.persistence.repositories.session import SessionRepository
+    from camctl.session.clock import ClockCheckInput
+    from camctl.session.locks import (
+        SessionLockConflictError, acquire_admission, acquire_session,
+        lock_file_paths,
+    )
+    from camctl.session.service import SessionContext, SessionPaths, StateDbFailure, run_session
+    from camctl.session.supervision import Supervisor
+
+    timeout = 10
+    target, seed = _world(tmp_path)
+    seed.connection.close()
+    loop = asyncio.get_running_loop()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    scan_started = asyncio.Event()
+    release_scan = threading.Event()
+    original_listdir = copies._listdir
+
+    def blocked_listdir(path):
+        loop.call_soon_threadsafe(scan_started.set)
+        if not release_scan.wait(timeout=timeout):
+            raise TimeoutError("startup sweep test gate was not released")
+        return original_listdir(path)
+
+    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    logging_owner = LoggingOwner(
+        logs_dir=logs, ownership=RunFileOwnership(), supervisor=Supervisor(),
+        owner_settled=True, diagnose=lambda message: asyncio.sleep(0))
+    startup_stopped = asyncio.Event()
+    original_cancel_sweep = logging_owner.cancel_startup_sweep
+
+    def observed_cancel_sweep() -> None:
+        original_cancel_sweep()
+        startup_stopped.set()
+
+    monkeypatch.setattr(logging_owner, "cancel_startup_sweep", observed_cancel_sweep)
+    log_settle_started = asyncio.Event()
+    original_log_settle = logging_owner.settle
+
+    async def observed_log_settle() -> None:
+        log_settle_started.set()
+        await original_log_settle()
+
+    monkeypatch.setattr(logging_owner, "settle", observed_log_settle)
+
+    stop_started = asyncio.Event()
+    release_stop = asyncio.Event()
+
+    class GatedStopPort(_StopPort):
+        async def stop(self, request):
+            self.calls.append(request)
+            stop_started.set()
+            await asyncio.wait_for(release_stop.wait(), timeout=timeout)
+            return _confirmed()
+
+    stop = GatedStopPort(_declaration(), ())
+    settlement = _settlement(target, _registry(stop))
+    close_counts: list[int] = []
+    original_open = settlement.open_owned
+
+    class ConnectionCloseSpy:
+        def __init__(self, connection) -> None:
+            self._connection = connection
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+        def close(self) -> None:
+            close_counts.append(len(close_counts) + 1)
+            self._connection.close()
+
+    def open_owned():
+        owned = original_open()
+        return type(owned)(
+            connection=ConnectionCloseSpy(owned.connection),
+            metadata=owned.metadata,
+        )
+
+    settlement.open_owned = open_owned
+    local_stopped = asyncio.Event()
+
+    class LocalOwner:
+        def __init__(self) -> None:
+            self.stop_calls = 0
+
+        def required_settlements(self) -> int:
+            return 0
+
+        def stop_new_work(self) -> None:
+            self.stop_calls += 1
+            local_stopped.set()
+
+        async def settle(self) -> None:
+            return None
+
+    local_owner = LocalOwner()
+    session_lock, admission_lock = lock_file_paths(target)
+
+    async def fatal_flow(_context) -> None:
+        raise StateDbFailure("读取流程事实失败: 数据库已锁定")
+
+    context = SessionContext(
+        mode=CommandMode.RUN, catalog=None, clock=_StaticClock(_NOW),
+        open_connection=lambda: open_existing(
+            target, DbOpenMode.EXISTING_RW, DbConfig()),
+        acceptance_repository=AcceptanceRepository(),
+        session_repository=SessionRepository(),
+        paths=SessionPaths(session_lock=session_lock, admission_lock=admission_lock),
+        clock_policy=lambda connection: ClockCheckInput(
+            lower_bound_micros=None, min_plausible_micros=_NOW - 1,
+            recheck_delay_s=0.0, recheck_count=1),
+        acquire_session=lambda: acquire_session(session_lock),
+        acquire_admission=lambda: acquire_admission(admission_lock),
+        facts_query=lambda connection: None,
+        flows={"capture": fatal_flow},
+        on_session_locked=logging_owner.start_session,
+        logging_owner=logging_owner,
+        local_work=CombinedLocalWork((local_owner, logging_owner)),
+        emergency_settlement=settlement.settle,
+    )
+    run_task = asyncio.create_task(run_session(context, None))
+    try:
+        await asyncio.wait_for(scan_started.wait(), timeout=timeout)
+        await asyncio.wait_for(stop_started.wait(), timeout=timeout)
+
+        run_task.cancel("parent cancel during emergency STOP")
+        await asyncio.wait_for(local_stopped.wait(), timeout=timeout)
+        await asyncio.wait_for(startup_stopped.wait(), timeout=timeout)
+        assert local_owner.stop_calls == 1
+        assert len(stop.calls) == 1
+        assert not log_settle_started.is_set()
+        assert not run_task.done()
+        unexpected_lease = None
+        try:
+            try:
+                unexpected_lease = acquire_session(session_lock)
+            except SessionLockConflictError:
+                pass
+            else:
+                pytest.fail("父取消后的必要 EMG 收场期间会话锁已提前释放")
+        finally:
+            if unexpected_lease is not None:
+                unexpected_lease.close()
+
+        run_task.cancel("repeated parent cancel")
+        await asyncio.sleep(0)
+        assert local_owner.stop_calls == 1
+        assert len(stop.calls) == 1
+        assert not log_settle_started.is_set()
+
+        release_stop.set()
+        await asyncio.wait_for(log_settle_started.wait(), timeout=timeout)
+        saved = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+        try:
+            assert _run_row(saved)[1:4] == (3, 1, 2)
+        finally:
+            saved.connection.close()
+        assert close_counts == [1, 2]
+        assert len(stop.calls) == 1
+        assert not run_task.done()
+        release_scan.set()
+        with pytest.raises(asyncio.CancelledError) as cancelled:
+            await asyncio.wait_for(run_task, timeout=timeout)
+        assert cancelled.value.args == ("parent cancel during emergency STOP",)
+    finally:
+        release_stop.set()
+        release_scan.set()
+        if not run_task.done():
+            run_task.cancel("emergency test cleanup")
+            await asyncio.wait_for(
+                asyncio.gather(run_task, return_exceptions=True), timeout=timeout)
+
+
+@pytest.mark.parametrize("parent_cancel", [False, True])
+async def test_internal_emergency_control_error_still_settles_logs(
+        tmp_path: Path, monkeypatch, parent_cancel: bool) -> None:
+    """EMG 内部 CancelledError 不跳过日志收场，也不替换首父取消。"""
+    from camctl.bootstrap.background_flow import CombinedLocalWork
+    from camctl.acceptance.service import CommandMode
+    from camctl.logging_runtime import copies
+    from camctl.logging_runtime.copies import RunFileOwnership
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.persistence.repositories.session import SessionRepository
+    from camctl.session.clock import ClockCheckInput
+    from camctl.session.locks import (
+        SessionLockConflictError, acquire_admission, acquire_session,
+        lock_file_paths,
+    )
+    from camctl.session.service import SessionContext, SessionPaths, StateDbFailure, run_session
+    from camctl.session.supervision import Supervisor
+
+    timeout = 10
+    target, seed = _world(tmp_path)
+    seed.connection.close()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    diagnostic_started = asyncio.Event()
+    release_diagnostic = asyncio.Event()
+    diagnostic_messages: list[str] = []
+    scan_thread_ids: list[int] = []
+    def failed_listdir(_path):
+        scan_thread_ids.append(threading.get_ident())
+        raise OSError("controlled startup scan failure")
+
+    async def gated_diagnose(message: str) -> None:
+        diagnostic_messages.append(message)
+        diagnostic_started.set()
+        await asyncio.wait_for(release_diagnostic.wait(), timeout=timeout)
+
+    monkeypatch.setattr(copies, "_listdir", failed_listdir)
+    logging_owner = LoggingOwner(
+        logs_dir=logs, ownership=RunFileOwnership(), supervisor=Supervisor(),
+        owner_settled=True, diagnose=gated_diagnose)
+    log_settle_started = asyncio.Event()
+    original_log_settle = logging_owner.settle
+
+    async def observed_log_settle() -> None:
+        log_settle_started.set()
+        await original_log_settle()
+
+    logging_owner.settle = observed_log_settle
+    stop_started = asyncio.Event()
+    release_stop = asyncio.Event()
+    internal_control = asyncio.CancelledError("internal emergency control")
+
+    class ControlStopPort(_StopPort):
+        async def stop(self, request):
+            self.calls.append(request)
+            stop_started.set()
+            await asyncio.wait_for(release_stop.wait(), timeout=timeout)
+            raise internal_control
+
+    stop = ControlStopPort(_declaration(), ())
+    settlement = _settlement(target, _registry(stop))
+    session_lock, admission_lock = lock_file_paths(target)
+
+    async def fatal_flow(_context) -> None:
+        raise StateDbFailure("读取流程事实失败")
+
+    context = SessionContext(
+        mode=CommandMode.RUN, catalog=None, clock=_StaticClock(_NOW),
+        open_connection=lambda: open_existing(
+            target, DbOpenMode.EXISTING_RW, DbConfig()),
+        acceptance_repository=AcceptanceRepository(),
+        session_repository=SessionRepository(),
+        paths=SessionPaths(session_lock=session_lock, admission_lock=admission_lock),
+        clock_policy=lambda connection: ClockCheckInput(
+            lower_bound_micros=None, min_plausible_micros=_NOW - 1,
+            recheck_delay_s=0.0, recheck_count=1),
+        acquire_session=lambda: acquire_session(session_lock),
+        acquire_admission=lambda: acquire_admission(admission_lock),
+        facts_query=lambda connection: None,
+        flows={"capture": fatal_flow},
+        on_session_locked=logging_owner.start_session,
+        logging_owner=logging_owner,
+        local_work=CombinedLocalWork((logging_owner,)),
+        emergency_settlement=settlement.settle,
+    )
+    run_task = asyncio.create_task(run_session(context, None))
+    try:
+        await asyncio.wait_for(diagnostic_started.wait(), timeout=timeout)
+        await asyncio.wait_for(stop_started.wait(), timeout=timeout)
+        assert scan_thread_ids and scan_thread_ids[0] != threading.get_ident()
+        assert "controlled startup scan failure" in diagnostic_messages[0]
+        if parent_cancel:
+            run_task.cancel("parent before internal EMG control")
+            await asyncio.sleep(0)
+            assert not run_task.done()
+        release_stop.set()
+        await asyncio.wait_for(log_settle_started.wait(), timeout=timeout)
+        unexpected_lease = None
+        try:
+            try:
+                unexpected_lease = acquire_session(session_lock)
+            except SessionLockConflictError:
+                pass
+            else:
+                pytest.fail("启动日志诊断阻塞期间会话锁已提前释放")
+        finally:
+            if unexpected_lease is not None:
+                unexpected_lease.close()
+        assert not run_task.done()
+        release_diagnostic.set()
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await asyncio.wait_for(run_task, timeout=timeout)
+        if parent_cancel:
+            assert raised.value.args == ("parent before internal EMG control",)
+            assert any("internal emergency control" in note
+                       for note in getattr(raised.value, "__notes__", ()))
+        else:
+            assert raised.value is internal_control
+        assert len(stop.calls) == 1
+    finally:
+        release_stop.set()
+        release_diagnostic.set()
+        if not run_task.done():
+            run_task.cancel("internal EMG test cleanup")
+            await asyncio.wait_for(
+                asyncio.gather(run_task, return_exceptions=True), timeout=timeout)
+
+
+@pytest.mark.parametrize("parent_cancel", [False, True])
+async def test_initial_restricted_internal_control_stays_separate_from_parent(
+        tmp_path: Path, monkeypatch, parent_cancel: bool) -> None:
+    """区分受限阶段内部取消与父取消，并保留内部异常附注。"""
+    from camctl.acceptance.service import CommandMode
+    from camctl.bootstrap.background_flow import CombinedLocalWork
+    from camctl.logging_runtime import copies
+    from camctl.logging_runtime.copies import RunFileOwnership
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.persistence.repositories.session import SessionRepository
+    from camctl.session.clock import ClockCheckInput
+    from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
+    from camctl.session.service import SessionContext, SessionPaths, run_session
+    from camctl.session.supervision import Supervisor
+
+    timeout = 10
+    target, seed = _world(tmp_path)
+    seed.connection.close()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    diagnostic_started = asyncio.Event()
+    release_diagnostic = asyncio.Event()
+    diagnostic_messages: list[str] = []
+    scan_thread_ids: list[int] = []
+
+    def failed_listdir(_path):
+        scan_thread_ids.append(threading.get_ident())
+        raise OSError("controlled restricted startup scan failure")
+
+    async def gated_diagnose(message: str) -> None:
+        diagnostic_messages.append(message)
+        diagnostic_started.set()
+        await asyncio.wait_for(release_diagnostic.wait(), timeout=timeout)
+
+    monkeypatch.setattr(copies, "_listdir", failed_listdir)
+    logging_owner = LoggingOwner(
+        logs_dir=logs, ownership=RunFileOwnership(), supervisor=Supervisor(),
+        owner_settled=True, diagnose=gated_diagnose)
+    startup_cancel_calls: list[str] = []
+    original_cancel_sweep = logging_owner.cancel_startup_sweep
+
+    def observed_cancel_sweep() -> None:
+        startup_cancel_calls.append("cancel")
+        original_cancel_sweep()
+
+    monkeypatch.setattr(logging_owner, "cancel_startup_sweep", observed_cancel_sweep)
+    log_settle_started = asyncio.Event()
+    original_log_settle = logging_owner.settle
+
+    async def observed_log_settle() -> None:
+        log_settle_started.set()
+        await original_log_settle()
+
+    logging_owner.settle = observed_log_settle
+    session_lock, admission_lock = lock_file_paths(target)
+    internal_control = asyncio.CancelledError("internal restricted control")
+    internal_control.add_note("restricted phase saved secondary cleanup fact")
+    restricted_started = asyncio.Event()
+
+    async def restricted_control(_context) -> None:
+        restricted_started.set()
+        raise internal_control
+
+    context = SessionContext(
+        mode=CommandMode.RUN, catalog=None, clock=_StaticClock(_NOW),
+        open_connection=lambda: open_existing(
+            target, DbOpenMode.EXISTING_RW, DbConfig()),
+        acceptance_repository=AcceptanceRepository(),
+        session_repository=SessionRepository(),
+        paths=SessionPaths(session_lock=session_lock, admission_lock=admission_lock),
+        clock_policy=lambda connection: ClockCheckInput(
+            lower_bound_micros=_NOW + 1, min_plausible_micros=_NOW + 1,
+            recheck_delay_s=0.0, recheck_count=1),
+        acquire_session=lambda: acquire_session(session_lock),
+        acquire_admission=lambda: acquire_admission(admission_lock),
+        facts_query=lambda connection: None,
+        restricted_flows={"stop": restricted_control},
+        on_session_locked=logging_owner.start_session,
+        logging_owner=logging_owner,
+        local_work=CombinedLocalWork((logging_owner,)),
+    )
+    run_task = asyncio.create_task(run_session(context, None))
+    try:
+        await asyncio.wait_for(restricted_started.wait(), timeout=timeout)
+        await asyncio.wait_for(diagnostic_started.wait(), timeout=timeout)
+        await asyncio.wait_for(log_settle_started.wait(), timeout=timeout)
+        assert scan_thread_ids and scan_thread_ids[0] != threading.get_ident()
+        assert "controlled restricted startup scan failure" in diagnostic_messages[0]
+        assert startup_cancel_calls == []
+        assert not run_task.done()
+
+        if parent_cancel:
+            run_task.cancel("actual parent cancellation during diagnostics")
+            await asyncio.sleep(0)
+            assert startup_cancel_calls == ["cancel"]
+            assert not run_task.done()
+            run_task.cancel("repeated parent cancellation")
+            await asyncio.sleep(0)
+            assert startup_cancel_calls == ["cancel"]
+
+        release_diagnostic.set()
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await asyncio.wait_for(run_task, timeout=timeout)
+        if parent_cancel:
+            assert raised.value.args == (
+                "actual parent cancellation during diagnostics",)
+            notes = getattr(raised.value, "__notes__", ())
+            assert any("internal restricted control" in note for note in notes)
+            assert any("restricted phase saved secondary cleanup fact" in note
+                       for note in notes)
+        else:
+            assert raised.value is internal_control
+            assert getattr(raised.value, "__notes__", ()) == [
+                "restricted phase saved secondary cleanup fact"]
+            assert startup_cancel_calls == []
+    finally:
+        release_diagnostic.set()
+        if not run_task.done():
+            run_task.cancel("initial restricted control test cleanup")
+            await asyncio.wait_for(
+                asyncio.gather(run_task, return_exceptions=True), timeout=timeout)

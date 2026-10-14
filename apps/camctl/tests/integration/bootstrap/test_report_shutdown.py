@@ -21,8 +21,8 @@ def _assemble_with_supervisor(mocker, supervisor):
     """保留真实会话协作者，只替换需要注入迟到结果的监督方。"""
     original = lifecycle._report_assembly
 
-    def assemble(deps, failure_log):
-        flows, _lazy_supervisor = original(deps, failure_log)
+    def assemble(deps, failure_log, logging_owner=None):
+        flows, _lazy_supervisor = original(deps, failure_log, logging_owner)
         return flows, supervisor
 
     mocker.patch("camctl.bootstrap.lifecycle._report_assembly", side_effect=assemble)

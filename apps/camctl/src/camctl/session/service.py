@@ -56,6 +56,84 @@ __all__ = ["SessionContext", "StateDbFailure", "run_session"]
 _MIN_IDLE_WAIT_S = 0.01
 
 
+@dataclass(frozen=True)
+class _RequiredPhaseFact:
+    value: Any = None
+    error: BaseException | None = None
+
+
+class _RequiredPhaseWaiter:
+    """让必要业务阶段与父协程取消分别交付实际事实。"""
+
+    def __init__(self, context: SessionContext) -> None:
+        self._context = context
+        self.parent_cancel: asyncio.CancelledError | None = None
+        self._phase_errors: list[BaseException] = []
+
+    async def run(self, name: str, operation: Callable[[], Awaitable[Any]]) -> Any:
+        async def capture() -> _RequiredPhaseFact:
+            try:
+                return _RequiredPhaseFact(value=await operation())
+            except BaseException as error:
+                return _RequiredPhaseFact(error=error)
+
+        task = asyncio.create_task(capture(), name=f"camctl-required-{name}")
+        while True:
+            try:
+                fact = await asyncio.shield(task)
+                break
+            except asyncio.CancelledError as error:
+                self.record_parent_cancel(error)
+        if fact.error is not None:
+            self._phase_errors.append(fact.error)
+            raise fact.error.with_traceback(fact.error.__traceback__)
+        return fact.value
+
+    def is_phase_error(self, error: BaseException) -> bool:
+        return any(error is phase_error for phase_error in self._phase_errors)
+
+    def record_parent_cancel(self, error: asyncio.CancelledError) -> None:
+        if self.parent_cancel is not None:
+            return
+        self.parent_cancel = error
+        local_work = self._context.local_work
+        stop_new = getattr(local_work, "stop_new_work", None)
+        if stop_new is not None:
+            try:
+                stop_new()
+            except BaseException as stop_error:
+                self.add_note(
+                    "父取消时停止本地新增工作的入口失败: "
+                    f"{type(stop_error).__name__}: {stop_error}")
+        cancel_sweep = getattr(
+            self._context.logging_owner, "cancel_startup_sweep", None)
+        if cancel_sweep is not None:
+            try:
+                cancel_sweep()
+            except BaseException as stop_error:
+                self.add_note(
+                    "父取消时停止启动日志检查的入口失败: "
+                    f"{type(stop_error).__name__}: {stop_error}")
+
+    def add_note(self, message: str) -> None:
+        if self.parent_cancel is not None:
+            self.parent_cancel.add_note(message)
+
+    def add_exception_notes(self, label: str, error: BaseException) -> None:
+        if self.parent_cancel is not None:
+            self.attach_exception_notes(self.parent_cancel, label, error)
+
+    @staticmethod
+    def attach_exception_notes(
+            target: BaseException, label: str, error: BaseException) -> None:
+        if target is error:
+            return
+        notes = tuple(getattr(error, "__notes__", ()))
+        target.add_note(f"{label}: {type(error).__name__}: {error}")
+        for note in notes:
+            target.add_note(f"{label}附注: {note}")
+
+
 class StateDbFailure(RuntimeError):
     """流程遭遇状态库错误：停止依赖已失效条件的工作。"""
 
@@ -126,6 +204,12 @@ class SessionContext:
     on_stderr_diagnostic: Callable[[str], Awaitable[None]] | None = None
     #: 文件协调及关闭结果均未知后，通知装配停止使用共享日志路径。
     on_log_path_unsafe: Callable[[], None] | None = None
+    #: 会话锁已取得且尚未打开状态库；只用于 run 锁内日志启动责任。
+    on_session_locked: Callable[[], Awaitable[None]] | None = None
+    #: 预检查确认存在坏库时保留原结果，并沿同一 run 锁收场路径退出。
+    startup_outcome: SessionOutcome | None = None
+    #: 本 run 的日志文件责任 owner；报告／恢复等待取消时立即交接。
+    logging_owner: Any = None
     #: 进程内工作唤醒通知；等待新工作时由生产者触发。
     wake: Any = None
     #: 外部输入感知的轮询上限（秒）；部署目标为 0.5 秒量级。
@@ -217,6 +301,7 @@ async def _run_session(
     admission_lease: AdmissionLease | None = None
     owned: OwnedConnection | None = None
     local_errors: list[Exception] = []
+    waiter = _RequiredPhaseWaiter(context)
 
     async def drive() -> SessionOutcome:
         nonlocal session_lease, admission_lease, owned
@@ -224,6 +309,14 @@ async def _run_session(
             session_lease = context.acquire_session()
         except Exception as error:
             return _outcome_error("state_db_error", {"error": f"会话锁取得失败: {error}"})
+        if context.on_session_locked is not None:
+            try:
+                await context.on_session_locked()
+            except Exception as error:
+                return _outcome_error(
+                    "state_db_error", {"error": f"日志启动收场未能启动: {error}"})
+        if context.startup_outcome is not None:
+            return context.startup_outcome
         try:
             owned = context.open_connection()
         except (RuntimeLibraryError, DirectoryBindingError) as error:
@@ -257,7 +350,10 @@ async def _run_session(
             return _outcome_error("state_db_error", {"error": "可信时间下界保存失败"})
         if mode is ExecutionMode.RESTRICTED:
             # 有限安全收场与一次报告机会：不取得普通接纳资格。
-            return await _restricted_session(context)
+            return await waiter.run(
+                "initial-restricted",
+                lambda: _initial_restricted_phase(context, waiter),
+            )
 
         try:
             admission_lease = context.acquire_admission()
@@ -268,17 +364,36 @@ async def _run_session(
             try:
                 fatal = await _drive_flows(context)
             except ClockBecameUntrusted as clock_error:
-                try:
-                    await _settle_local_work(context)
-                except Exception as error:
-                    local_errors.append(error)
-                    # 收场结果不能可靠保存后，受限工作也不能继续使用
-                    # 状态库；接纳及会话锁留到统一的实际收场结束。
-                    return _outcome_error(
-                        "clock_invalid", {"error": str(clock_error)})
-                admission_lease.close()
-                admission_lease = None
-                return await _restricted_session(context)
+                async def transition_to_restricted() -> SessionOutcome:
+                    nonlocal admission_lease
+                    try:
+                        await _settle_local_work(
+                            context, exclude_owner=context.logging_owner)
+                    except Exception as error:
+                        local_errors.append(error)
+                        # 前置保存失败后，受限停止和报告不能依赖失效状态。
+                        return _outcome_error(
+                            "clock_invalid", {"error": str(clock_error)})
+                    admission_lease.close()
+                    admission_lease = None
+                    restricted_failure = await _run_restricted_flows(context)
+                    if restricted_failure is not None:
+                        return restricted_failure
+                    if context.logging_owner is not None:
+                        try:
+                            await context.logging_owner.settle()
+                        except Exception as error:
+                            local_errors.append(error)
+                            return _outcome_error(
+                                "clock_invalid", {"error": str(clock_error)})
+                        if waiter.parent_cancel is None:
+                            context.logging_owner.resume_restricted_logging()
+                    if waiter.parent_cancel is not None:
+                        return _outcome_error("clock_invalid")
+                    return await _restricted_once_report(context)
+
+                return await waiter.run(
+                    "late-clock-restricted-transition", transition_to_restricted)
             except (DirectoryBindingError, DeviceConfigurationError) as error:
                 return _outcome_error("configuration_error", {"error": str(error)})
             if fatal is not None:
@@ -289,12 +404,24 @@ async def _run_session(
             except Exception as error:
                 return _outcome_error("state_db_error", {"error": str(error)})
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
-                try:
-                    await _settle_local_work(context, stop_new=False)
-                except Exception as error:
-                    local_errors.append(error)
+                async def settle_before_close() -> Exception | None:
+                    try:
+                        await _settle_local_work(context, stop_new=False)
+                    except Exception as error:
+                        return error
+                    return None
+
+                settle_error = await waiter.run(
+                    "normal-local-settlement", settle_before_close)
+                if settle_error is not None:
+                    local_errors.append(settle_error)
                     # 收场前提失效后不继续关闭事务；保留原退出分类，
                     # 最终结果统一附加本地收场的真实诊断。
+                    return (_outcome_error("report_error")
+                            if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR
+                            else SessionOutcome(succeeded=True))
+                if waiter.parent_cancel is not None:
+                    # 已取消时不开始下一项普通关闭步骤；finally 释放句柄。
                     return (_outcome_error("report_error")
                             if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR
                             else SessionOutcome(succeeded=True))
@@ -310,28 +437,78 @@ async def _run_session(
         try:
             outcome = await drive()
         except BaseException as error:
-            original = error
-        if (original is None and outcome is not None
-                and context.emergency_settlement is not None
-                and not outcome.succeeded
-                and outcome.reason in ("state_db_error", "configuration_error")):
+            if isinstance(error, asyncio.CancelledError):
+                if waiter.is_phase_error(error):
+                    original = error
+                elif waiter.parent_cancel is None:
+                    waiter.record_parent_cancel(error)
+                elif error is not waiter.parent_cancel:
+                    waiter.add_exception_notes("必要收场实际控制异常", error)
+            elif waiter.parent_cancel is not None:
+                waiter.add_exception_notes("会话实际控制异常", error)
+            else:
+                original = error
+        fatal_outcome = (
+            outcome is not None
+            and not outcome.succeeded
+            and outcome.reason in ("state_db_error", "configuration_error"))
+        if fatal_outcome and waiter.parent_cancel is not None:
+            waiter.add_note(
+                "会话保留实际致命结果："
+                f"reason={outcome.reason}; details={outcome.details!r}")
+        if (original is None and fatal_outcome
+                and context.emergency_settlement is not None):
             # 非时钟致命错误：先对会话内录像执行有限应急停止，再继
             # 续本地收场；应急收场失败不改写原错误分类。
-            outcome = await _merge_emergency_stops(context, outcome)
+            try:
+                outcome = await waiter.run(
+                    "emergency-settlement",
+                    lambda: _merge_emergency_stops(context, outcome),
+                )
+            except BaseException as error:
+                if waiter.parent_cancel is not None:
+                    if error is not waiter.parent_cancel:
+                        waiter.add_exception_notes("应急收场实际控制异常", error)
+                else:
+                    original = error
+            if waiter.parent_cancel is not None and outcome is not None:
+                waiter.add_note(
+                    "必要收场交付应急结果："
+                    f"reason={outcome.reason}; details={outcome.details!r}")
         try:
-            await _settle_local_work(context)
+            # 可靠存在但无法使用的状态库仍须沿同一会话锁完成一次
+            # 启动日志扫描；这是正常预检查结果，不是取消要求停止
+            # 后续步骤。若调用本身被取消，仍立即停止新增本地工作。
+            preserve_startup_work = (
+                waiter.parent_cancel is None
+                and original is None
+                and context.startup_outcome is not None)
+            stop_new = (
+                waiter.parent_cancel is None and not preserve_startup_work)
+            await waiter.run(
+                "final-local-settlement",
+                lambda: _settle_local_work(context, stop_new=stop_new),
+            )
         except BaseException as error:
             if isinstance(error, Exception):
                 if not any(error is saved for saved in local_errors):
                     local_errors.append(error)
+            elif waiter.parent_cancel is not None:
+                if error is not waiter.parent_cancel:
+                    waiter.add_exception_notes("最终本地责任控制异常", error)
             elif original is None:
                 original = error
             else:
-                # 后续取消只改变收场等待，原取消仍是传播对象；
-                # 实际结果保存失败的诊断须随原异常一起保留。
-                for note in getattr(error, "__notes__", ()):
-                    if note not in getattr(original, "__notes__", ()):
-                        original.add_note(note)
+                # 后续内部控制异常不替换已保存的原对象。
+                waiter.attach_exception_notes(
+                    original, "最终本地责任控制异常", error)
+        if waiter.parent_cancel is not None:
+            if original is not None and original is not waiter.parent_cancel:
+                waiter.add_exception_notes("会话原始异常", original)
+            for error in local_errors:
+                waiter.add_note(
+                    f"本地责任收场失败: {type(error).__name__}: {error}")
+            raise waiter.parent_cancel
         if original is not None:
             for error in local_errors:
                 original.add_note(f"本地责任收场失败: {type(error).__name__}: {error}")
@@ -380,7 +557,9 @@ def _run_work_facts(context: SessionContext, connection: Any) -> WorkFacts:
     return replace(facts, required_settlements=facts.required_settlements + pending)
 
 
-async def _settle_local_work(context: SessionContext, *, stop_new: bool = True) -> None:
+async def _settle_local_work(
+        context: SessionContext, *, stop_new: bool = True,
+        exclude_owner: Any = None) -> None:
     """重复取消只取消等待；同一个拥有者始终继续消费实际结果。"""
     if context.local_work is None:
         return
@@ -388,22 +567,60 @@ async def _settle_local_work(context: SessionContext, *, stop_new: bool = True) 
         stop = getattr(context.local_work, "stop_new_work", None)
         if stop is not None:
             stop()
-    task = asyncio.create_task(context.local_work.settle())
+    if exclude_owner is None:
+        settle = context.local_work.settle
+    else:
+        settle_excluding = getattr(context.local_work, "settle_excluding", None)
+        if settle_excluding is None:
+            raise TypeError("本地责任组合不支持按 owner 分阶段收场")
+
+        async def settle() -> None:
+            await settle_excluding(exclude_owner)
+
+    async def collect() -> _RequiredPhaseFact:
+        try:
+            await settle()
+        except BaseException as error:
+            return _RequiredPhaseFact(error=error)
+        return _RequiredPhaseFact()
+
+    task = asyncio.create_task(collect(), name="camctl-local-work-fact")
     cancellation: asyncio.CancelledError | None = None
     while True:
         try:
-            await asyncio.shield(task)
+            fact = await asyncio.shield(task)
             break
         except asyncio.CancelledError as error:
             if task.done() and task.cancelled():
                 raise
             if cancellation is None:
                 cancellation = error
-        except Exception as error:
-            if cancellation is not None:
-                cancellation.add_note(f"本地责任收场失败: {type(error).__name__}: {error}")
-                raise cancellation from error
-            raise
+                if not stop_new:
+                    stop = getattr(context.local_work, "stop_new_work", None)
+                    if stop is not None:
+                        try:
+                            stop()
+                        except BaseException as stop_error:
+                            cancellation.add_note(
+                                "取消收场时停止本地新增工作的入口失败: "
+                                f"{type(stop_error).__name__}: {stop_error}")
+                cancel_sweep = getattr(
+                    context.logging_owner, "cancel_startup_sweep", None)
+                if cancel_sweep is not None:
+                    try:
+                        cancel_sweep()
+                    except BaseException as stop_error:
+                        cancellation.add_note(
+                            "取消收场时停止启动日志检查失败: "
+                            f"{type(stop_error).__name__}: {stop_error}")
+    if fact.error is not None:
+        if cancellation is not None:
+            _RequiredPhaseWaiter.attach_exception_notes(
+                cancellation, "本地实际责任收场异常", fact.error)
+            if fact.error is cancellation:
+                raise cancellation
+            raise cancellation from fact.error
+        raise fact.error.with_traceback(fact.error.__traceback__)
     if cancellation is not None:
         raise cancellation
 
@@ -466,6 +683,20 @@ async def _trigger_failure_log(context: SessionContext, error: Exception) -> Non
     if context.failure_log is None or context.copy_request_factory is None:
         return
 
+    async def operation() -> None:
+        await _trigger_failure_log_owned(context, error)
+
+    owner = getattr(context, "logging_owner", None)
+    if owner is not None:
+        await owner.run_service_operation("report_failure", operation)
+        return
+    await _trigger_failure_log_owned(context, error)
+
+
+async def _trigger_failure_log_owned(
+        context: SessionContext, error: Exception) -> None:
+
+    owner = getattr(context, "logging_owner", None)
     stage = "request_factory"
 
     def request_factory() -> CopyRequest:
@@ -474,38 +705,109 @@ async def _trigger_failure_log(context: SessionContext, error: Exception) -> Non
         stage = "delivery_call"
         return request
 
-    try:
-        receipt = await context.failure_log.on_report_failure_with_factory(
-            request_factory)
-    except Exception as failure:
-        # 调用异常可能发生在文件操作之后；保持副本位置未知并保留
-        # 主报告结果，不重试或另行推测文件事实。
-        await _deliver_log_diagnostic(
-            context,
-            _failure_copy_exception(stage, error, failure),
-        )
-        return
-    message, stderr_only = _copy_receipt_diagnostic(error, receipt)
-    if _copy_receipt_log_path_unsafe(receipt):
-        callback = context.on_log_path_unsafe
+    def consume_unsafe_write_result(write_result: Any) -> bool:
+        """保留 ownerless/custom delivery 的共享日志停用回执消费。"""
+        if (write_result is None
+                or not write_result.disables_file_logging):
+            return False
+        callback = getattr(context, "on_log_path_unsafe", None)
         if callback is not None:
             try:
                 callback()
             except Exception:
                 pass
-    if message is not None:
-        await _deliver_log_diagnostic(
-            context, message, stderr_only=stderr_only)
+        return True
+
+    async def diagnose(receipt, failure: BaseException | None) -> None:
+        if failure is not None:
+            from camctl.logging_runtime.copies import (
+                _copy_receipt_from_exception,
+                _write_result_from_exception,
+            )
+
+            error_receipt = _copy_receipt_from_exception(failure)
+            if error_receipt is not None:
+                message, stderr_only = _copy_receipt_diagnostic(
+                    error, error_receipt)
+                stderr_only = (
+                    consume_unsafe_write_result(error_receipt.write_result)
+                    or stderr_only
+                )
+                if message is not None:
+                    await _deliver_log_diagnostic(
+                        context, message, stderr_only=stderr_only)
+                return
+
+            write_result = _write_result_from_exception(failure)
+            stderr_only = consume_unsafe_write_result(write_result)
+            await _deliver_log_diagnostic(
+                context,
+                _failure_copy_exception(
+                    stage, error, failure, write_result=write_result),
+                stderr_only=stderr_only,
+            )
+            return
+        message, stderr_only = _copy_receipt_diagnostic(error, receipt)
+        stderr_only = (
+            consume_unsafe_write_result(
+                receipt.write_result if receipt is not None else None)
+            or stderr_only
+        )
+        if message is not None:
+            await _deliver_log_diagnostic(
+                context, message, stderr_only=stderr_only)
+
+    try:
+        if owner is None:
+            receipt = await context.failure_log.on_report_failure_with_factory(
+                request_factory)
+        else:
+            await context.failure_log.on_report_failure_with_factory(
+                request_factory, diagnose=diagnose)
+    except Exception as failure:
+        # 调用异常可能发生在文件操作之后；保持副本位置未知并保留
+        # 主报告结果，不重试或另行推测文件事实。
+        if owner is None:
+            await diagnose(None, failure)
+        return
+    if owner is None:
+        await diagnose(receipt, None)
 
 
 def _failure_copy_exception(
-    stage: str, report_error: Exception, failure: Exception,
+    stage: str, report_error: Exception, failure: BaseException,
+    *, write_result: Any = None,
 ) -> str:
+    result_detail = ""
+    if write_result is not None:
+        facts = [
+            f"appended={write_result.appended}",
+            f"disables_file_logging={write_result.disables_file_logging}",
+        ]
+        if write_result.failure_stage is not None:
+            facts.append(f"failure_stage={write_result.failure_stage.value}")
+        for label, value in (
+                ("rotation_error", write_result.rotation_error),
+                ("append_error", write_result.append_error),
+                ("coordination_error", write_result.coordination_error),
+                ("close_error", write_result.close_error)):
+            if value is not None:
+                facts.append(f"{label}={value}")
+        if write_result.copy_handles_closed is not True:
+            facts.append(
+                "copy_handles_closed="
+                f"{write_result.copy_handles_closed!r}")
+        for label, value in (
+                ("copy_source_close_error", write_result.copy_source_close_error),
+                ("copy_target_close_error", write_result.copy_target_close_error)):
+            if value is not None:
+                facts.append(f"{label}={value}")
+        result_detail = "; write_result: " + "; ".join(facts)
     return (
         "报告失败的日志副本诊断："
         f"{_describe('report_error', report_error)}; "
         f"stage={stage}; outcome=unknown; "
-        f"{_describe('error', failure)}"
+        f"{_describe('error', failure)}{result_detail}"
     )
 
 
@@ -575,6 +877,16 @@ def _copy_receipt_diagnostic(
                 ("close_error", write_result.close_error)):
             if detail is not None:
                 issues.append(f"copy_{label}: {detail}")
+        if write_result.copy_handles_closed is not True:
+            status = (
+                "not_confirmed" if write_result.copy_handles_closed is None
+                else "failed_or_unknown")
+            issues.append(f"copy_handles_closed: {status}")
+        for label, detail in (
+                ("copy_source_close_error", write_result.copy_source_close_error),
+                ("copy_target_close_error", write_result.copy_target_close_error)):
+            if detail is not None:
+                issues.append(f"{label}: {detail}")
     for label, detail in (
             ("copy_error", receipt.copy_error),
             ("publish_error", receipt.publish_error),
@@ -595,10 +907,25 @@ def _copy_receipt_diagnostic(
             f"error={legacy_error or 'none'}")
     if not issues:
         return None, False
+    if receipt.file_stage is not None:
+        issues.append(f"file_stage={receipt.file_stage.value}")
+    if receipt.copy_location is not None:
+        issues.append(f"copy_location={receipt.copy_location.value}")
+    if receipt.publish_result is not None:
+        publish = receipt.publish_result
+        issues.append(
+            "publish_result: "
+            f"stage={publish.stage.value}; "
+            f"directory={publish.directory.value}; "
+            f"source_removed={publish.source_removed!r}; "
+            f"error={publish.error or 'none'}"
+        )
+    issues.append(f"cleanup_attempted={receipt.cleanup_attempted}")
     stage = receipt.stage.value if receipt.stage is not None else "unknown"
     identity = (
         f"round_id={receipt.round_id or 'unknown'}; "
-        f"copy_name={receipt.copy_name or 'unknown'}; stage={stage}"
+        f"copy_name={receipt.copy_name or 'unknown'}; "
+        f"marker_stage={stage}"
     )
     message = (
         "报告失败的日志副本诊断："
@@ -760,6 +1087,26 @@ async def _wait_for_more_work(
 
 async def _restricted_session(context: SessionContext) -> SessionOutcome:
     """受限会话：规定收场后处理一次报告，按时钟异常退出。"""
+    failure = await _run_restricted_flows(context)
+    if failure is not None:
+        return failure
+    return await _restricted_once_report(context)
+
+
+async def _initial_restricted_phase(
+        context: SessionContext, waiter: _RequiredPhaseWaiter) -> SessionOutcome:
+    """保护原受限收场；取消后不创建尚未开始的一次报告责任。"""
+    failure = await _run_restricted_flows(context)
+    if failure is not None:
+        return failure
+    if waiter.parent_cancel is not None:
+        return _outcome_error("clock_invalid")
+    return await _restricted_once_report(context)
+
+
+async def _run_restricted_flows(
+        context: SessionContext) -> SessionOutcome | None:
+    """按原顺序推进受限取消与必要设备收场，不取得普通资格。"""
     for name, flow in context.restricted_flows.items():
         try:
             await flow(context)
@@ -770,6 +1117,11 @@ async def _restricted_session(context: SessionContext) -> SessionOutcome:
             # 依赖已失效条件的报告工作。
             return _outcome_error("state_db_error",
                                   {"error": f"受限收场流程 {name} 失败: {error}"})
+    return None
+
+
+async def _restricted_once_report(context: SessionContext) -> SessionOutcome:
+    """执行既有唯一受限报告机会，不启动普通动作。"""
     if context.once_report is not None:
         try:
             await context.once_report(context)

@@ -545,6 +545,8 @@ async def test_default_run_suspends_copy_attempt_exception_until_recovery(
 
         service = captured["service"]
         factory = captured["factory"]
+        # run 已完成；后续断言验证无 owner 的服务辅助接口，不重用已停止的 run owner。
+        service.bind_owner(None)
         deletion = await service.on_report_recovered()
         assert deletion.outcome.value in {"deleted", "not_present"}
         context = SimpleNamespace(
@@ -699,14 +701,14 @@ async def test_default_current_log_io_failure_disables_file_logging(
 
     def capture_wiring(runtime):
         service, factory = original_wiring(runtime)
-        original_deliver = service._deliver
+        original_service_call = service.on_report_failure_with_factory
 
-        async def observe_delivery(request):
-            receipt = await original_deliver(request)
+        async def observe_service_call(*args, **kwargs):
+            receipt = await original_service_call(*args, **kwargs)
             receipts.append(receipt)
             return receipt
 
-        service._deliver = observe_delivery
+        service.on_report_failure_with_factory = observe_service_call
 
         def counted_factory(error):
             attempts["factory"] += 1
@@ -781,7 +783,7 @@ async def test_default_current_log_io_failure_disables_file_logging(
 
         assert outcome.reason == "report_error"
         assert generated == [first_report.report_id, second_report.report_id]
-        assert len(receipts) == 1
+        assert receipts
         assert receipts[0].outcome is copies.CopyOutcome.COPY_FAILED
         assert receipts[0].write_result.appended is False
         assert getattr(receipts[0].write_result, "failure_stage", None).value == "file_io"
@@ -1179,6 +1181,7 @@ async def test_default_run_records_copy_and_cleanup_failures(
         return (WriteResult(
             appended=True, rotated=True,
             rotation_error="rotation denied",
+            copy_handles_closed=True,
         ), "snapshot read failed")
 
     original_unlink = copies._unlink
@@ -1346,6 +1349,7 @@ async def test_unconfirmed_copy_unlock_uses_stderr_directly(
             appended=True, rotated=True,
             coordination_error="coordination_unlock_failed: unlock lost",
             close_error="coordination_close_failed: close unknown",
+            copy_handles_closed=True,
         ), None)
 
     monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_unlock)
@@ -1383,6 +1387,7 @@ async def test_unknown_copy_close_disables_later_file_logging(
             appended=True, rotated=True,
             coordination_error="coordination_unlock_failed: unlock unknown",
             close_error="coordination_close_failed: close unknown",
+            copy_handles_closed=True,
         ), None)
 
     monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_close)
@@ -1401,6 +1406,148 @@ async def test_unknown_copy_close_disables_later_file_logging(
         encoding="utf-8")
     assert deps.log_runtime.path_unsafe is True
     assert deps.log_runtime.channel.disabled is True
+
+
+async def test_default_copy_program_error_keeps_original_channel_failure_facts(
+        tmp_path: Path, monkeypatch) -> None:
+    import shutil
+
+    import camctl.bootstrap.lifecycle as lifecycle
+
+    deps = await _runtime(tmp_path)
+    first_report, second_report = await _seed_two_pending_reports(deps, tmp_path)
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    generated: list[int] = []
+    factories: list[Exception] = []
+    receipts = []
+    observed_program_errors: list[BaseException] = []
+    original_wiring = lifecycle._failure_log_wiring
+    program_error = RuntimeError("controlled snapshot program exception")
+
+    async def fail_generation(self, job):
+        generated.append(job.report_id)
+        failure = ResultFailureMessage(
+            job_id=job.job_id,
+            instance_id=job.instance_id,
+            error_kind=ErrorKind.REPORT,
+            error_code=f"controlled_failure_{job.report_id}",
+            error_message=f"report {job.report_id} actual error",
+        )
+        return WorkerGeneration(
+            kind=GenerationOutcomeKind.REPORT_FAILURE,
+            job_id=job.job_id,
+            failure=failure,
+        )
+
+    def capture_wiring(runtime):
+        service, request_factory = original_wiring(runtime)
+        original_service_call = service.on_report_failure_with_factory
+
+        async def observe_service_call(*args, **kwargs):
+            receipt = await original_service_call(*args, **kwargs)
+            receipts.append(receipt)
+            return receipt
+
+        service.on_report_failure_with_factory = observe_service_call
+
+        def counted_factory(error):
+            factories.append(error)
+            return request_factory(error)
+
+        return service, counted_factory
+
+    original_copy = FileChannel.copy_with_write
+
+    def fail_copy_program_with_unlock_error(channel, record, destination):
+        handler = channel._handler
+        original_unlock = handler._do_unlock
+        original_close = handler.close
+
+        def unlock_then_fail():
+            original_unlock()
+            raise OSError("controlled copy unlock failure")
+
+        def close_then_fail():
+            original_close()
+            raise OSError("controlled copy handler close failure")
+
+        def fail_snapshot_program(*_args, **_kwargs):
+            raise program_error
+
+        monkeypatch.setattr(handler, "_do_unlock", unlock_then_fail)
+        monkeypatch.setattr(handler, "close", close_then_fail)
+        monkeypatch.setattr(shutil, "copyfileobj", fail_snapshot_program)
+        try:
+            return original_copy(channel, record, destination)
+        except BaseException as failure:
+            observed_program_errors.append(failure)
+            raise
+
+    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture_wiring)
+    monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
+    monkeypatch.setattr(
+        FileChannel, "copy_with_write", fail_copy_program_with_unlock_error)
+
+    def contains_identity(error: BaseException, expected: BaseException) -> bool:
+        if error is expected:
+            return True
+        if isinstance(error, BaseExceptionGroup):
+            return any(contains_identity(item, expected)
+                       for item in error.exceptions)
+        return False
+
+    def write_result_from_exception(error: BaseException):
+        result = getattr(error, "write_result", None)
+        if result is not None:
+            return result
+        if isinstance(error, BaseExceptionGroup):
+            for item in error.exceptions:
+                result = write_result_from_exception(item)
+                if result is not None:
+                    return result
+        return None
+
+    try:
+        outcome = await execute_command(deps, None)
+
+        assert outcome.reason == "report_error"
+        assert generated == [first_report.report_id, second_report.report_id]
+        assert len(observed_program_errors) == 1
+        assert contains_identity(observed_program_errors[0], program_error)
+        receipt_result = (
+            receipts[0].write_result
+            if receipts and receipts[0].write_result is not None else None)
+        write_result = receipt_result or write_result_from_exception(
+            observed_program_errors[0])
+        assert write_result is not None
+        assert write_result.failure_stage is not None
+        assert write_result.failure_stage.value == "lock_release"
+        assert write_result.coordination_error is not None
+        assert "controlled copy unlock failure" in write_result.coordination_error
+        assert write_result.close_error is not None
+        assert "controlled copy handler close failure" in write_result.close_error
+        assert write_result.disables_file_logging is True
+        assert len(factories) == 1
+        assert deps.failure_channel.disabled is True
+        assert deps.log_path_unsafe is True
+        assert deps.log_runtime.path_unsafe is True
+        assert deps.log_runtime.channel.disabled is True
+        assert "controlled snapshot program exception" in stderr.getvalue()
+        assert "controlled copy unlock failure" in stderr.getvalue()
+        assert "controlled copy handler close failure" in stderr.getvalue()
+        assert "run 会话失败: report_error" in stderr.getvalue()
+        assert stdout.getvalue() == ""
+        assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
+        log_path = Path(deps.config.paths.log_file)
+        if log_path.exists():
+            log = log_path.read_text(encoding="utf-8")
+            assert "报告失败的日志副本诊断" not in log
+            assert "run 会话失败: report_error" not in log
+    finally:
+        close_runtime(deps)
 
 
 async def test_failure_wiring_does_not_reopen_failed_helper_channel(
@@ -1479,3 +1626,246 @@ async def test_stderr_failure_disables_repeated_diagnostic_writes(
         assert deps.stderr_diagnostic_failed is True
     finally:
         close_runtime(deps)
+
+
+async def test_current_copy_and_temp_survive_overlapping_sweep(
+        tmp_path: Path, monkeypatch) -> None:
+    """默认 run 的同一归属者排除扫描时正在写入的副本和进度临时名。"""
+    import asyncio
+    import threading
+
+    from camctl.capture.recovery import RecoveryBoundary
+
+    deps = await _runtime(tmp_path)
+    deps.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
+    first_report, _second_report = await _seed_two_pending_reports(deps, tmp_path)
+    logs_dir = Path(deps.config.paths.staging) / "logs"
+    old_copy = logs_dir / "log-copy-old-overlap.log"
+    old_temp = logs_dir / "failure-marker.json.old-overlap.tmp"
+    old_copy.write_bytes(b"old copy")
+    old_temp.write_bytes(b"old marker temp")
+
+    loop = asyncio.get_running_loop()
+    listdir_started = asyncio.Event()
+    copied_temp_ready = asyncio.Event()
+    sweep_finished = asyncio.Event()
+    release_listdir = threading.Event()
+    release_copied_temp = threading.Event()
+    listed_names: list[tuple[str, ...]] = []
+    current_copy_names: list[str] = []
+    copied_temp_paths: list[Path] = []
+    lstat_paths: list[Path] = []
+    unlink_paths: list[Path] = []
+    original_listdir = copies._listdir
+    original_sweep = copies.startup_sweep
+    original_write_synced = copies._write_synced
+    original_copy = FileChannel.copy_with_write
+    original_lstat = copies._lstat
+    original_unlink = copies._unlink
+
+    def blocked_listdir(path: Path):
+        if Path(path) == logs_dir:
+            loop.call_soon_threadsafe(listdir_started.set)
+            if not release_listdir.wait(timeout=10):
+                raise TimeoutError("startup listdir test gate was not released")
+            names = original_listdir(path)
+            listed_names.append(tuple(names))
+            return names
+        return original_listdir(path)
+
+    def block_copied_progress_temp(path: Path, data: bytes) -> None:
+        original_write_synced(path, data)
+        if b'"stage":"copied"' in data:
+            copied_temp_paths.append(Path(path))
+            loop.call_soon_threadsafe(copied_temp_ready.set)
+            if not release_copied_temp.wait(timeout=10):
+                raise TimeoutError("copied marker temp test gate was not released")
+
+    def observe_sweep(*args, **kwargs):
+        result = original_sweep(*args, **kwargs)
+        loop.call_soon_threadsafe(sweep_finished.set)
+        return result
+
+    def record_copy(channel, record, destination):
+        result = original_copy(channel, record, destination)
+        current_copy_names.append(Path(destination).name)
+        return result
+
+    def record_lstat(path: Path):
+        lstat_paths.append(Path(path))
+        return original_lstat(path)
+
+    def record_unlink(path: Path) -> None:
+        unlink_paths.append(Path(path))
+        original_unlink(path)
+
+    monkeypatch.setattr(copies, "_listdir", blocked_listdir)
+    monkeypatch.setattr(copies, "_write_synced", block_copied_progress_temp)
+    monkeypatch.setattr(copies, "startup_sweep", observe_sweep)
+    monkeypatch.setattr(FileChannel, "copy_with_write", record_copy)
+    monkeypatch.setattr(copies, "_lstat", record_lstat)
+    monkeypatch.setattr(copies, "_unlink", record_unlink)
+
+    async def fail_generation(self, job):
+        failure = ResultFailureMessage(
+            job_id=job.job_id,
+            instance_id=job.instance_id,
+            error_kind=ErrorKind.REPORT,
+            error_code="controlled_overlap_failure",
+            error_message="controlled report failure during startup scan",
+        )
+        return WorkerGeneration(
+            kind=GenerationOutcomeKind.REPORT_FAILURE,
+            job_id=job.job_id,
+            failure=failure,
+        )
+
+    monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
+    run_task = asyncio.create_task(execute_command(deps, None))
+    try:
+        await asyncio.wait_for(listdir_started.wait(), timeout=10)
+        await asyncio.wait_for(copied_temp_ready.wait(), timeout=10)
+        assert len(current_copy_names) == 1
+        current_copy = logs_dir / current_copy_names[0]
+        copied_temp = copied_temp_paths[0]
+        assert current_copy.is_file()
+        assert copied_temp.is_file()
+
+        release_listdir.set()
+        await asyncio.wait_for(sweep_finished.wait(), timeout=10)
+        assert listed_names
+        assert current_copy_names[0] in listed_names[0]
+        assert copied_temp.name in listed_names[0]
+        assert current_copy not in lstat_paths
+        assert copied_temp not in lstat_paths
+        assert len(unlink_paths) == 2
+        assert set(unlink_paths) == {old_copy, old_temp}
+        assert not old_copy.exists()
+        assert not old_temp.exists()
+        assert current_copy.is_file()
+        assert copied_temp.is_file()
+
+        release_copied_temp.set()
+        outcome = await asyncio.wait_for(run_task, timeout=10)
+    finally:
+        release_listdir.set()
+        release_copied_temp.set()
+        if not run_task.done():
+            run_task.cancel("test cleanup")
+            await asyncio.wait_for(
+                asyncio.gather(run_task, return_exceptions=True), timeout=10)
+        close_runtime(deps)
+
+    assert outcome.reason == "report_error"
+    assert first_report.report_id > 0
+    assert len(current_copy_names) == 1
+    ready_files = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+    assert len(ready_files) == 1
+    assert b"controlled report failure during startup scan" in ready_files[0].read_bytes()
+    marker = json.loads((logs_dir / copies.MARKER_NAME).read_text(encoding="utf-8"))
+    assert marker["stage"] == MarkerStage.PUBLISHED.value
+
+
+async def test_write_result_disables_log_before_followup_wait(
+        tmp_path: Path, monkeypatch) -> None:
+    """真实写入结果先停用原通道，再等待有资格的副本清理。"""
+    import asyncio
+    import threading
+
+    import camctl.bootstrap.lifecycle as lifecycle
+    import camctl.logging_runtime.clh_adapter as clh_adapter
+
+    deps = await _runtime(tmp_path)
+    await _seed_two_pending_reports(deps, tmp_path)
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    loop = asyncio.get_running_loop()
+    cleanup_started = asyncio.Event()
+    release_cleanup = threading.Event()
+    cleanup_names: list[str] = []
+    helper_channels: list[FileChannel] = []
+    log_deliveries: list[str] = []
+    original_unlink = copies._unlink
+    original_file_channel_init = FileChannel.__init__
+    original_check_stream = clh_adapter._TrackingHandler._check_stream
+    original_deliver = deps.log_runtime.channel.deliver_important
+    primary_path = Path(deps.config.paths.log_file).expanduser()
+
+    def count_file_channel_init(channel, *args, **kwargs):
+        original_file_channel_init(channel, *args, **kwargs)
+        helper_channels.append(channel)
+
+    def fail_copy_stream_check(handler):
+        if Path(handler.baseFilename) == primary_path:
+            raise OSError("controlled copy channel stream failure")
+        return original_check_stream(handler)
+
+    def block_copy_cleanup(path: Path) -> None:
+        path = Path(path)
+        if copies.is_copy_file_name(path.name):
+            cleanup_names.append(path.name)
+            loop.call_soon_threadsafe(cleanup_started.set)
+            if not release_cleanup.wait(timeout=10):
+                raise TimeoutError("copy cleanup test gate was not released")
+        original_unlink(path)
+
+    async def count_log_delivery(record):
+        log_deliveries.append(record.message)
+        return await original_deliver(record)
+
+    monkeypatch.setattr(FileChannel, "__init__", count_file_channel_init)
+    monkeypatch.setattr(
+        clh_adapter._TrackingHandler, "_check_stream", fail_copy_stream_check)
+    monkeypatch.setattr(copies, "_unlink", block_copy_cleanup)
+    monkeypatch.setattr(
+        deps.log_runtime.channel, "deliver_important", count_log_delivery)
+
+    async def fail_generation(self, job):
+        failure = ResultFailureMessage(
+            job_id=job.job_id,
+            instance_id=job.instance_id,
+            error_kind=ErrorKind.REPORT,
+            error_code="controlled_write_result_failure",
+            error_message="report failure for write-result timing",
+        )
+        return WorkerGeneration(
+            kind=GenerationOutcomeKind.REPORT_FAILURE,
+            job_id=job.job_id,
+            failure=failure,
+        )
+
+    monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
+    run_task = asyncio.create_task(execute_command(deps, None))
+    try:
+        await asyncio.wait_for(cleanup_started.wait(), timeout=10)
+        assert deps.log_path_unsafe is True
+        assert deps.log_runtime.path_unsafe is True
+        assert deps.log_runtime.channel.disabled is True
+        assert len(helper_channels) == 1
+        assert deps.failure_channel is helper_channels[0]
+        deliveries_before_diagnostic = tuple(log_deliveries)
+
+        await lifecycle._emit_log_diagnostic(
+            deps, "parallel startup diagnostic after write result")
+
+        assert "parallel startup diagnostic after write result" in stderr.getvalue()
+        assert stdout.getvalue() == ""
+        assert tuple(log_deliveries) == deliveries_before_diagnostic
+        assert len(helper_channels) == 1
+        assert cleanup_names and len(cleanup_names) == 1
+        assert not run_task.done()
+        release_cleanup.set()
+        outcome = await asyncio.wait_for(run_task, timeout=10)
+    finally:
+        release_cleanup.set()
+        if not run_task.done():
+            await asyncio.wait_for(
+                asyncio.gather(run_task, return_exceptions=True), timeout=10)
+        close_runtime(deps)
+
+    assert deps.log_path_unsafe is True
+    assert deps.failure_channel is not None
+    assert outcome.reason == "report_error"

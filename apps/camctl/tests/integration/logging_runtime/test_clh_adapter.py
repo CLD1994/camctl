@@ -39,6 +39,7 @@ def test_copy_preserves_unlock_and_handler_close_errors(
     assert copy_error is None
     assert destination.read_bytes().endswith(b"trigger\n")
     assert write_result.appended is True
+    assert write_result.copy_handles_closed is True
     assert "unlock lost" in write_result.coordination_error
     if close_fails:
         assert "close not confirmed" in write_result.close_error
@@ -67,6 +68,7 @@ def test_rotation_failure_retains_real_copy_success(
         LogRecord(level=LogLevel.ERROR, message="trigger"), destination)
 
     assert write_result.appended is True
+    assert write_result.copy_handles_closed is True
     assert write_result.rotation_error is not None
     assert "rotation denied" in write_result.rotation_error
     assert copy_error is None
@@ -110,6 +112,7 @@ def test_lock_failure_disables_channel_and_preserves_close_result(
 
     assert copy_error is None
     assert write_result.appended is False
+    assert write_result.copy_handles_closed is True
     assert write_result.rotated is False
     assert write_result.append_error is None
     assert "lock acquisition denied" in write_result.coordination_error
@@ -155,6 +158,7 @@ def test_copy_format_failure_does_not_disable_file_channel(
         LogRecord(level=LogLevel.ERROR, message="trigger"), destination)
 
     assert failed.appended is False
+    assert failed.copy_handles_closed is True
     assert failed.rotated is False
     assert failed.append_error is not None
     assert "permission denied" in failed.append_error
@@ -170,6 +174,7 @@ def test_copy_format_failure_does_not_disable_file_channel(
     succeeded, copy_error = channel.copy_with_write(
         LogRecord(level=LogLevel.ERROR, message="later"), destination)
     assert succeeded.appended is True
+    assert succeeded.copy_handles_closed is True
     assert copy_error is None
     assert destination.read_bytes().endswith(b"later\n")
     assert channel.disabled is False
@@ -241,6 +246,7 @@ def test_current_log_io_failure_disables_after_unlock(
         LogRecord(level=LogLevel.ERROR, message="trigger"), destination)
 
     assert result.appended is False
+    assert result.copy_handles_closed is True
     assert result.append_error is not None
     assert getattr(result, "failure_stage", None).value == "file_io"
     assert result.coordination_error is None
