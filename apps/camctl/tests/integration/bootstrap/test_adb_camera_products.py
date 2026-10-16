@@ -8,7 +8,7 @@ import sys
 import pytest
 
 from camctl.contracts.enums import enum_for
-from camctl.devices.drivers.adb_cameras.commands import CameraModel, TIMELAPSE_PRESETS
+from camctl.devices.drivers.adb_cameras.commands import CameraModel
 
 _ROOT_INTEGRATION = Path(__file__).resolve().parents[5] / "tests" / "integration"
 sys.path.insert(0, str(_ROOT_INTEGRATION))
@@ -17,19 +17,25 @@ from camera_demo_fixtures import advance_clock, camera_spec, schedule, timelapse
 from _wsl_host_demo import query_state, wait_for
 
 
-_VARIANTS = tuple(dict.fromkeys(
-    (preset.outputs, preset.exposure_mode)
-    for preset in TIMELAPSE_PRESETS[CameraModel.ACTION6]
-))
+# 固定 E1 要求的行为分区，不从生产候选表推导覆盖范围。
+_VARIANTS = (
+    ("video", "auto"),
+    ("video", "manual"),
+    ("video_raw", "auto"),
+    ("video_raw", "manual"),
+    ("video_jpeg", "auto"),
+    ("video_jpeg", "manual"),
+)
 _CASES = tuple(
     (outputs, exposure_mode, product_case)
     for outputs, exposure_mode in _VARIANTS
     for product_case in (("complete",) if outputs == "video" else
                          ("complete", "missing_photo", "wrong_format"))
 )
-_LEGACY_TIME_PRESETS = tuple(
-    preset for preset in TIMELAPSE_PRESETS[CameraModel.ACTION6]
-    if preset.duration_s in {5400, 6000} and preset.outputs == "video"
+# 历史输入只固定这两条可信样例，不复制生产时间域。
+_LEGACY_TIME_REQUESTS = (
+    ("manual", 30, 5400),
+    ("auto", 25, 6000),
 )
 
 
@@ -90,15 +96,17 @@ def test_action6_candidates_keep_video_and_require_selected_photo(
         if run.poll() is None:
             terminate_process_tree(run)
 
-@pytest.mark.parametrize("preset", _LEGACY_TIME_PRESETS,
-                         ids=[f"legacy-{preset.duration_s}-{preset.exposure_mode}"
-                              for preset in _LEGACY_TIME_PRESETS])
-def test_action6_legacy_timelapse_is_not_accepted_as_new_request(tmp_path, preset):
+
+@pytest.mark.parametrize("exposure_mode,interval_s,duration_s", _LEGACY_TIME_REQUESTS,
+                         ids=["legacy-manual-30-5400-video",
+                              "legacy-auto-25-6000-video"])
+def test_action6_legacy_timelapse_is_not_accepted_as_new_request(
+        tmp_path, exposure_mode, interval_s, duration_s):
     deployment = Deployment(tmp_path, devices=False)
-    params = {"type": "action6_timelapse", "interval_s": preset.interval_s,
-              "duration_s": preset.duration_s, "outputs": str(preset.outputs),
-              "exposure": {"mode": preset.exposure_mode,
-                           **({"iso": 800} if preset.exposure_mode == "manual" else {})}}
+    params = {"type": "action6_timelapse", "interval_s": interval_s,
+              "duration_s": duration_s, "outputs": "video",
+              "exposure": {"mode": exposure_mode,
+                           **({"iso": 800} if exposure_mode == "manual" else {})}}
     spec = camera_spec(deployment, CameraModel.ACTION6, params)
     clock = Path(spec["clock_path"])
     initialized = deployment.camctl("init", "--config", str(deployment.config_path))
