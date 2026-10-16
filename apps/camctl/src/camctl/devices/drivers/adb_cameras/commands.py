@@ -1,7 +1,7 @@
 """交接资料提供的命令候选，不解释调用成功或设备完成。
 
-设备侧 argv 保留大小写及前缀。离散选项和延时组合是参数 Schema
-的同一来源；负载只查完整字面量，不生成未提供的编码。
+设备侧 argv 保留大小写及前缀。录像离散选项供参数 Schema 使用；
+延时时间规则独立维护，负载只查完整字面量，不生成未提供的编码。
 """
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -9,6 +9,7 @@ from decimal import Decimal
 from enum import StrEnum
 
 from camctl.contracts.json_values import JsonValue
+from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 
 
 class CameraModel(StrEnum):
@@ -54,7 +55,7 @@ OSMO_EV = {0: _cmd("2e", "10")}
 
 @dataclass(frozen=True)
 class TimelapsePreset:
-    """同时配置间隔、持续时间和输出类型的完整候选命令。"""
+    """同时配置间隔、采集时长和输出类型的完整命令资料。"""
 
     interval_s: int
     duration_s: int
@@ -63,6 +64,7 @@ class TimelapsePreset:
     command: Command
 
 
+# 完整字面量包含既有记录；新请求合法域由独立时间参数定义约束。
 TIMELAPSE_PRESETS = {
     CameraModel.ACTION6: (
         TimelapsePreset(30, 5400, OutputSelection.VIDEO, "manual", _cmd("6c", "0400002c01181500000000000000000000")),
@@ -174,9 +176,12 @@ def settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValu
                 ("simulate_device", "-s", "BaseFormat", "6", "69", "0"),
                 *exposure_settings, _cmd("42", "3d"),
                 ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2"))
-    preset = next(preset for preset in TIMELAPSE_PRESETS[model]
+    preset = next((preset for preset in TIMELAPSE_PRESETS[model]
                   if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
-                  == (params["interval_s"], params["duration_s"], params["outputs"], exposure["mode"]))
+                  == (params["interval_s"], params["duration_s"], params["outputs"], exposure["mode"])), None)
+    if preset is None:
+        raise CapabilityNotDeclaredError(
+            f"驱动 {driver_id!r} 尚未提供该合法延时参数的完整命令映射")
     if model is CameraModel.ACTION6:
         exposure_settings = (_action_manual(800) if preset.exposure_mode == "manual"
                              else (_cmd("0x1e", "0100", test=True),))

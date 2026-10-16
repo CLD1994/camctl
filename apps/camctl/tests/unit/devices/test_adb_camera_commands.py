@@ -6,7 +6,8 @@ import pytest
 
 from camctl.acceptance.schema import BodySchemaError
 from camctl.devices.drivers.adb_cameras import commands
-from .test_adb_camera_parameters import recording_params
+from camctl.devices.drivers.registry import CapabilityNotDeclaredError
+from .test_adb_camera_parameters import recording_params, timelapse_params
 
 
 @pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
@@ -185,9 +186,17 @@ def test_osmo_manual_settings_keep_own_flags_and_no_unprovided_adjustments():
     ("dji-osmo360-ii", 40, 18000, "video", {"mode": "auto"}, "04000090015046000000000000000000"),
     ("dji-osmo360-ii", 8, 1800, "video", {"mode": "auto"}, "04000050000807000000000000000000"),
 ])
-def test_timelapse_uses_full_given_payload(driver, interval, duration, outputs, exposure, payload):
+def test_timelapse_preserves_given_payloads_and_rejects_legacy_new_requests(driver, interval, duration, outputs, exposure, payload):
     params = {"type": "action6_timelapse" if driver == "dji-action6" else "osmo360ii_timelapse",
               "interval_s": interval, "duration_s": duration, "outputs": outputs, "exposure": exposure}
+    if duration in (5400, 6000):
+        with pytest.raises(BodySchemaError):
+            commands.settings_for(driver, "camera_timelapse", params)
+        preset = next(preset for preset in commands.TIMELAPSE_PRESETS[commands.CameraModel(driver)]
+                      if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
+                      == (interval, duration, outputs, exposure["mode"]))
+        assert preset.command[-2:] == ("6c", payload)
+        return
     settings = commands.settings_for(driver, "camera_timelapse", params)
     preset_position = 2 if driver == "dji-action6" else -1
     assert settings[preset_position] == ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "6c", payload)
@@ -197,18 +206,6 @@ def test_timelapse_uses_full_given_payload(driver, interval, duration, outputs, 
 
 
 @pytest.mark.parametrize("interval, duration, outputs, exposure, payload", [
-    (30, 5400, "video", {"mode": "manual", "iso": 800},
-     "0400002c01181500000000000000000000"),
-    (30, 5400, "video_raw", {"mode": "manual", "iso": 800},
-     "0400032c01181500000000000000000000"),
-    (30, 5400, "video_jpeg", {"mode": "manual", "iso": 800},
-     "0400022c01181500000000000000000000"),
-    (25, 6000, "video", {"mode": "auto"},
-     "040000fa00701700000000000000000000"),
-    (25, 6000, "video_raw", {"mode": "auto"},
-     "040003fa00701700000000000000000000"),
-    (25, 6000, "video_jpeg", {"mode": "auto"},
-     "040002fa00701700000000000000000000"),
     (8, 1800, "video", {"mode": "auto"},
      "0400005000080700000000000000000000"),
     (8, 1800, "video_raw", {"mode": "auto"},
@@ -237,6 +234,19 @@ def test_action_timelapse_applies_selected_full_preset_once_before_exposure(
     )
     assert commands.settings_for("dji-action6", "camera_timelapse", params) == tuple(
         tuple(shlex.split(command)) for command in expected)
+
+
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+@pytest.mark.parametrize("exposure", [{"mode": "auto"}, {"mode": "manual", "iso": 800}])
+def test_timelapse_valid_unmapped_parameters_report_missing_capability(driver, exposure):
+    with pytest.raises(CapabilityNotDeclaredError):
+        commands.settings_for(driver, "camera_timelapse", timelapse_params(driver, exposure=exposure))
+
+
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+def test_timelapse_invalid_parameters_are_distinct_from_missing_mapping(driver):
+    with pytest.raises(BodySchemaError):
+        commands.settings_for(driver, "camera_timelapse", timelapse_params(driver, interval_s=300))
 
 
 @pytest.mark.parametrize("driver, action, control, suffix", [
