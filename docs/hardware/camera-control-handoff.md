@@ -299,7 +299,7 @@ adb pull /mnt/media_rw/emulated/DCIM
 合法组合要求 `duration_s > interval_s`，共有 134 种。最短组合为 1 s 间隔、5 min 采集时长。
 <!-- END GENERATED TIMELAPSE TIME PARAMETERS -->
 
-表格、合法组合数量及最短组合由[生产时间定义](../../apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py)生成。运行 `apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --write` 更新；`--check` 检查资料漂移。同一脚本生成[独立诊断时间资源](timelapse-time-parameters.json)，资源以秒为单位保存 JSON 数字、严格关系、组合数量和最短组合；Windows 诊断交付时随脚本复制该文件即可读取，不依赖本机源码或包安装。资源不包含命令编码或设备完成保证。
+表格、合法组合数量及最短组合由[生产时间定义](../../apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py)生成。运行 `apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --write` 更新；`--check` 检查资料漂移。同一脚本生成[独立诊断时间资源](timelapse-time-parameters.json)，资源以秒为单位保存 JSON 数字、严格关系、组合数量和最短组合；Windows 诊断交付时按[独立诊断交付](camera-demo-validation.md#action6-独立诊断交付)将时间资源与同源编码模块随脚本复制，不依赖本机源码或包安装。资源不包含命令编码或设备完成保证。
 
 间隔继续使用精确秒数和 `number` 枚举表达；允许值由生产参数定义集中维护，扩展允许值时可追加具有编码依据的小数间隔。数值类型本身不扩大当前枚举范围。
 

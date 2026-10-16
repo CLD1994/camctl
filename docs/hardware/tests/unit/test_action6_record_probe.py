@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from decimal import Decimal
+from unittest.mock import patch
 
 script = Path(__file__).resolve().parents[2] / 'action6_record_probe.py'
 spec = importlib.util.spec_from_file_location('record_probe', script)
@@ -81,30 +83,48 @@ class CopyChecks(unittest.TestCase):
         self.assertFalse(probe.assess_copy((10, 'a' * 64), (11, 'a' * 64), (10, 'a' * 64))['matches_source_after'])
 
 
+TIME_DOMAIN = {"format_version": 1, "interval_s": [1, 8, 3600],
+               "duration_s": [300, 1800, 18000], "relation": "duration_s > interval_s",
+               "legal_pair_count": 7, "shortest_pair": {"interval_s": 1, "duration_s": 300}}
+
+
 class TimelapseSettingsChecks(unittest.TestCase):
+    def setUp(self):
+        self.patch = patch.object(probe, "load_time_parameters", return_value=TIME_DOMAIN, create=True)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+
+    def test_default_comes_from_shortest_pair(self):
+        metadata = probe.timelapse_metadata()
+        self.assertEqual(metadata["requested_params"]["interval_s"], 1)
+        self.assertEqual(metadata["requested_params"]["duration_s"], 300)
+        self.assertEqual(metadata["preset_payload"], "0400000a002c0100000000000000000000")
+        self.assertEqual(metadata["encoding_format"], "action6-timelapse-candidate-v1")
+        self.assertEqual(metadata["template_identity"], "action6-auto-video")
+
     def test_original_preset_is_preserved(self):
-        self.assertEqual(probe.timelapse_payload(1800), '0400005000080700000000000000000000')
+        self.assertEqual(probe.timelapse_payload(1800, interval_s=8),
+                         "0400005000080700000000000000000000")
 
-    def test_thirty_second_candidate_is_complete(self):
-        payload = probe.timelapse_payload(30)
-        self.assertEqual(payload, '04000050001e0000000000000000000000')
-        self.assertEqual(len(bytes.fromhex(payload)), 17)
+    def test_equivalent_precise_numbers_are_preserved(self):
+        metadata = probe.timelapse_metadata(Decimal("3e2"), interval_s=Decimal("1.000000000000000000000"))
+        self.assertIsInstance(metadata["requested_params"]["interval_s"], Decimal)
+        self.assertEqual(metadata["preset_payload"], "0400000a002c0100000000000000000000")
 
-    def test_ten_second_candidate_is_complete(self):
-        self.assertEqual(probe.timelapse_payload(10), '04000050000a0000000000000000000000')
+    def test_invalid_or_inexact_pairs_are_rejected(self):
+        for interval, duration in ((1, 30), (300, 300), (3600, 1800), (True, 300),
+                                   (1, True), (1, 300.0), ("1", 300),
+                                   (Decimal("1.000000000000000000001"), 300)):
+            with self.subTest(interval=interval, duration=duration), self.assertRaises(ValueError):
+                probe.timelapse_payload(duration, interval_s=interval)
 
-    def test_invalid_durations_are_rejected(self):
-        for value in (0, -1, 1801, True, 30.0, '30', None):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                probe.timelapse_payload(value)
-
-    def test_auto_sequence_sets_complete_preset_once_before_exposure(self):
-        self.assertEqual(probe.timelapse_settings(30), (
-            ('01-mode', 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02'),
-            ('02-resolution', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000'),
-            ('03-timing', 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000050001e0000000000000000000000'),
-            ('04-exposure', 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100'),
-        ))
+    def test_auto_sequence_has_one_complete_preset_before_exposure(self):
+        settings = probe.timelapse_settings(300, interval_s=1)
+        self.assertEqual(settings, (
+            ("01-mode", "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02"),
+            ("02-resolution", "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000"),
+            ("03-timing", "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400000a002c0100000000000000000000"),
+            ("04-exposure", "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100")))
 
 
 class CaptureChecks(unittest.TestCase):
@@ -142,13 +162,13 @@ class CaptureChecks(unittest.TestCase):
         self.assertEqual(len(self.commands), 1)
 
     def test_short_timelapse_samples_from_start_dispatch(self):
-        for seconds in (30, 10):
+        for seconds in (300, 600):
             with self.subTest(seconds=seconds):
                 self.setUp()
                 result = probe.capture_once('timelapse', self.shell, duration_s=seconds,
                                             clock=self.clock, sleep=self.sleep)
                 self.assertEqual(self.now, 100 + seconds)
-                self.assertEqual(self.sleeps, [seconds - 2])
+                self.assertEqual(sum(self.sleeps), seconds - 2)
                 self.assertEqual(result, {'start_call_elapsed_s': 2,
                                           'start_to_observation_s': seconds})
                 self.assertEqual(self.commands, ['dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'])
@@ -225,9 +245,10 @@ class DirectoryChecks(unittest.TestCase):
 
 class SampleChecks(unittest.TestCase):
     def test_short_sample_preserves_requested_duration_and_unknown_device_facts(self):
-        result = probe.assess_sample('timelapse', set(), {b'/new.mp4'}, duration_s=30)
+        metadata = {'requested_params': {'resolution': '4k30', 'exposure': 'auto', 'interval_s': Decimal('2.0'), 'duration_s': 30, 'outputs': 'video'}, 'preset_basis': 'experimental_duration'}
+        result = probe.assess_sample('timelapse', set(), {b'/new.mp4'}, metadata=metadata)
         self.assertEqual(result['params'], {'resolution': '4k30', 'exposure': 'auto',
-                                          'interval_s': 8, 'duration_s': 30, 'outputs': 'video'})
+                                          'interval_s': Decimal('2.0'), 'duration_s': 30, 'outputs': 'video'})
         self.assertEqual(result['preset_basis'], 'experimental_duration')
         for fact in ('actual_start', 'natural_end', 'file_write_complete', 'output_set_finalized'):
             self.assertEqual(result[fact], 'unknown')
