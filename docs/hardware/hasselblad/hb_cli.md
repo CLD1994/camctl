@@ -27,15 +27,19 @@ chmod +x hb_cli
 
 `doctor: PASS` 表示 USB、相机联机握手和基础参数通信正常。
 
-如果系统能看到相机但提示没有权限，执行：
+如果系统能看到相机但提示没有权限，将授权规则放在系统 USB 默认规则之后执行：
 
 ```bash
-echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2756", MODE="0666"' | sudo tee /etc/udev/rules.d/50-hasselblad.rules
+echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2756", MODE="0666"' | sudo tee /etc/udev/rules.d/99-hasselblad.rules
 sudo udevadm control --reload-rules
-sudo udevadm trigger
+sudo udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=2756
+sudo udevadm settle --timeout=10
+./hb_cli doctor
 ```
 
-然后重新拔插相机。VMware 中需要将 Hasselblad USB 设备连接给 Ubuntu。连接前请退出 Phocus，避免设备被占用。
+udev 按规则文件名顺序处理设备；系统默认规则会设置 USB 节点权限，因此哈苏授权规则使用 `99-` 前缀，避免权限被默认规则覆盖。规则持久保存在主机，重新连接相机后也会应用。最后一条命令以普通用户运行，确认输出 `doctor: PASS`。
+
+如果系统尚未识别相机，保持相机开机并重新插好 USB 线。VMware 中需要将 Hasselblad USB 设备连接给 Ubuntu。连接前请退出 Phocus，避免设备被占用。
 
 ## 基础指令
 
