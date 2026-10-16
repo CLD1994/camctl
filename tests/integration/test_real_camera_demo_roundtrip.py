@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from camctl.contracts.enums import enum_for
+from camctl.contracts.json_values import parse_exact_json
 from camctl.devices.drivers.adb_cameras.commands import CameraModel
 from _wsl_host_demo import HostDemo, query_state, wait_for, write_stub_launcher
 from camctl_fixtures import Deployment
@@ -61,12 +62,20 @@ def _reading(deployment, demo):
 def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, model, action_type):
     deployment = Deployment(tmp_path, devices=False)
     params = recording_params(model) if action_type == "camera_record" else timelapse_params(model)
+    if action_type == "camera_timelapse":
+        stem = "action6" if model is CameraModel.ACTION6 else "osmo360ii"
+        sample = Path(__file__).resolve().parents[2] / "docs/camctl/examples/camera-demo" / f"{stem}-timelapse.json"
+        expected = parse_exact_json(sample.read_text(encoding="utf-8"))["actions"][0]["params"]
+        assert params == expected
     spec = camera_spec(deployment, model, params)
     clock = Path(spec["clock_path"])
     result = deployment.camctl("init", "--config", str(deployment.config_path))
     assert result.exit_code == 0, result.stderr
     deployment.install_client_capabilities(spec)
     capture, _ = deployment.export_plan_with_client(_body("camera-demo", [_capture(params, clock)]))
+    if action_type == "camera_timelapse":
+        exported = parse_exact_json(capture.read_text(encoding="utf-8"))
+        assert exported["actions"][0]["params"] == params
     demo = HostDemo(deployment, host_demo, launcher=write_stub_launcher(deployment))
     try:
         demo.start()
@@ -74,6 +83,14 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
         started = wait_for(lambda: _started(deployment, "capture"), 60, "原 START/SENT 未可靠保存")
         assert started[3] is not None and started[4] is not None
         if action_type == "camera_timelapse":
+            action_facts = query_state(deployment.state_db,
+                "SELECT effective_params_json,execution_spec_json FROM actions WHERE id=?",
+                (int(started[0]),))
+            assert len(action_facts) == 1
+            effective_params, execution_spec = map(
+                lambda value: parse_exact_json(value), action_facts[0])
+            assert effective_params == params
+            assert execution_spec["target_duration_ms"] == 300000
             # 跨进程恢复使用原发送和原基准，不重新设置或启动。
             demo.stop()
             advance_clock(clock, params["duration_s"] + 2)
@@ -153,7 +170,15 @@ def test_camera_demo_capture_obtain_and_report(tmp_path: Path, host_demo: str, m
             "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state") == [(int(report["report_id"]), report["to_wm"])], 60, "取回报告 ACK 未吸收")
         calls = [json.loads(line) for line in (deployment.gates / "camera-calls.jsonl").read_text().splitlines()]
         assert sum(call["kind"] == "start" for call in calls) == 2
+        assert sum(call["kind"] == "start" and str(call["target"]) == str(action_id)
+                   for call in calls) == 1
         assert sum(call["kind"] == "stop" for call in calls) == (2 if action_type == "camera_record" else 1)
+        if action_type == "camera_timelapse":
+            camera_state = json.loads((deployment.gates / "demo-camera-state.json").read_text())
+            timelapse_starts = [capture for capture in camera_state["captures"]
+                                if capture["params"]["type"].endswith("_timelapse")]
+            assert len(timelapse_starts) == 1
+            assert {key: timelapse_starts[0]["params"][key] for key in params} == params
         assert (Path(spec["remote_root"]) / "mnt/media_rw/emulated/DCIM/old.mp4").read_bytes() == b"old camera source"
     finally:
         (deployment.gates / "release-read").touch()

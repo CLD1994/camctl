@@ -28,6 +28,7 @@ from copy import deepcopy
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -357,6 +358,64 @@ def _demo_generator(installed):
     _probe(installed, f"from pathlib import Path; from camctl.resources import resource_bytes; "
            f"Path({str(target)!r}).write_bytes(resource_bytes('examples/camera-demo/prepare-plan.py'))")
     return target
+
+
+_RESOURCE_OVERRIDE_RUNNER = r"""
+from pathlib import Path
+import runpy
+import sys
+import camctl.resources as resources
+
+generator, stem, sample_path = sys.argv[1:4]
+replacement = Path(sample_path).read_bytes()
+original = resources.resource_bytes
+
+def resource_bytes(name):
+    if name == "examples/camera-demo/" + stem + ".json":
+        return replacement
+    return original(name)
+
+resources.resource_bytes = resource_bytes
+sys.argv = [generator, stem, *sys.argv[4:]]
+runpy.run_path(generator, run_name="__main__")
+"""
+
+
+def _run_installed_generator(installed, stem, capabilities, output, *, sample_path=None,
+                             device_id=None):
+    generator = _demo_generator(installed)
+    command = [str(installed.python)]
+    if sample_path is None:
+        command.extend([str(generator), stem])
+    else:
+        command.extend(["-c", _RESOURCE_OVERRIDE_RUNNER, str(generator), stem, str(sample_path)])
+    command.extend(["--capabilities", str(capabilities)])
+    if device_id is not None:
+        command.extend(["--device-id", device_id])
+    command.extend(["--output", str(output)])
+    return subprocess.run(command, cwd=installed.deploy, env=_clean_environment(),
+                          capture_output=True, text=True, timeout=30)
+
+
+def _installed_timelapse_capabilities(installed, tmp_path, stem):
+    """经安装 CLI 的测试合同 describe 取得唯一候选参数类型。"""
+    if str(_CROSS_DIR) not in sys.path:
+        sys.path.insert(0, str(_CROSS_DIR))
+    from camctl_fixtures import Deployment
+    from camera_demo_fixtures import camera_spec, timelapse_params
+    from camctl.devices.drivers.adb_cameras.commands import CameraModel
+
+    model = (CameraModel.ACTION6 if stem.startswith("action6")
+             else CameraModel.OSMO360II)
+    deployment = Deployment(tmp_path, devices=False)
+    spec = camera_spec(deployment, model, timelapse_params(model))
+    initialized = installed.cli("init", "--config", str(deployment.config_path))
+    assert initialized.returncode == 0, initialized.stderr
+    described = installed.cli("describe", "--config", str(deployment.config_path), driver=spec)
+    assert described.returncode == 0, described.stderr
+    capabilities = tmp_path / f"{stem}-capabilities.json"
+    capabilities.write_text(described.stdout, encoding="utf-8")
+    return deployment, capabilities
 
 
 @pytest.mark.parametrize("stem", ["action6-record", "action6-timelapse", "osmo360ii-record", "osmo360ii-timelapse"])
@@ -895,20 +954,80 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
     assert capture_calls[0][1:5] == ["--pid", "0x000a", "capture", "--output"]
 
 
-def test_installed_sample_rejects_unavailable_camera_before_writing_plan(installed, tmp_path):
+@pytest.mark.parametrize("stem,driver_id,device_id", [
+    ("osmo360ii-record", "dji-osmo360-ii", "osmo360ii"),
+    ("action6-timelapse", "dji-action6", "action6"),
+    ("osmo360ii-timelapse", "dji-osmo360-ii", "osmo360ii"),
+])
+def test_installed_sample_rejects_missing_matching_capability_before_plan(installed, tmp_path,
+                                                                           stem, driver_id, device_id):
     config = tmp_path / "pending.toml"
-    config.write_text('[devices.osmo360ii]\nkind="camera"\ndriver="dji-osmo360-ii"\n'
-                      '[devices.osmo360ii.adb]\nserial="explicit-serial"\n')
+    config.write_text(f'[devices.{device_id}]\nkind="camera"\ndriver="{driver_id}"\n'
+                      f'[devices.{device_id}.adb]\nserial="explicit-serial"\n')
     described = installed.cli("describe", "--config", str(config))
     assert described.returncode == 0, described.stderr
     capabilities = tmp_path / "pending.json"
     capabilities.write_text(described.stdout)
     target = tmp_path / "plan.json"
-    refused = subprocess.run([str(installed.python), str(_demo_generator(installed)), "osmo360ii-record",
-        "--capabilities", str(capabilities), "--output", str(target)],
-        cwd=installed.deploy, env=_clean_environment(), capture_output=True, text=True, timeout=30)
+    refused = _run_installed_generator(installed, stem, capabilities, target)
     assert refused.returncode != 0
     assert not target.exists()
+
+
+@pytest.mark.parametrize("stem", ["action6-timelapse", "osmo360ii-timelapse"])
+def test_installed_generator_rejects_duplicate_matching_parameter_type(installed, tmp_path, stem):
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.persistence.transaction import encode_json_value
+
+    deployment, capabilities_path = _installed_timelapse_capabilities(installed, tmp_path, stem)
+    capabilities = parse_exact_json(capabilities_path.read_text(encoding="utf-8"))
+    camera = next(device for device in capabilities["devices"] if device["device_id"] == "camera")
+    action = next(item for item in camera["actions"] if item["type"] == "camera_timelapse")
+    matching = [item for item in action["parameter_types"]
+                if item["type"] == f"{stem.removesuffix('-timelapse')}_timelapse"]
+    assert len(matching) == 1
+    action["parameter_types"].append(deepcopy(matching[0]))
+    capabilities_path.write_text(encode_json_value(capabilities), encoding="utf-8")
+    target = tmp_path / "duplicate-plan.json"
+    refused = _run_installed_generator(installed, stem, capabilities_path, target,
+                                       device_id="camera")
+    assert refused.returncode != 0
+    assert not target.exists()
+    call_log = deployment.gates / "camera-calls.jsonl"
+    assert not call_log.exists() or not call_log.read_text(encoding="utf-8").strip()
+
+
+@pytest.mark.parametrize("stem", ["action6-timelapse", "osmo360ii-timelapse"])
+@pytest.mark.parametrize("case,interval_s,duration_s", [
+    ("equal", 300, 300),
+    ("reverse", 3600, 300),
+    ("boolean-interval", True, 300),
+    ("string-duration", 1, "300"),
+    ("neighboring-decimal", Decimal("1.00000000000000000001"), 300),
+    ("out-of-domain-interval", 7, 300),
+    ("out-of-domain-duration", 30, 5400),
+], ids=["equal", "reverse", "boolean-interval", "string-duration",
+        "neighboring-decimal", "out-of-domain-interval", "out-of-domain-duration"])
+def test_installed_generator_rejects_invalid_timelapse_time_before_plan(
+        installed, tmp_path, stem, case, interval_s, duration_s):
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.persistence.transaction import encode_json_value
+
+    deployment, capabilities_path = _installed_timelapse_capabilities(installed, tmp_path, stem)
+    sample_path = (REPO_ROOT / "docs/camctl/examples/camera-demo" / f"{stem}.json")
+    sample = parse_exact_json(sample_path.read_text(encoding="utf-8"))
+    params = sample["actions"][0]["params"]
+    params["interval_s"] = interval_s
+    params["duration_s"] = duration_s
+    modified_sample = tmp_path / f"{stem}-{case}.json"
+    modified_sample.write_text(encode_json_value(sample), encoding="utf-8")
+    target = tmp_path / "invalid-plan.json"
+    refused = _run_installed_generator(installed, stem, capabilities_path, target,
+                                       sample_path=modified_sample, device_id="camera")
+    assert refused.returncode != 0
+    assert not target.exists()
+    call_log = deployment.gates / "camera-calls.jsonl"
+    assert not call_log.exists() or not call_log.read_text(encoding="utf-8").strip()
 
 
 @pytest.mark.parametrize("stem,args", [("obtain", []), ("obtain", ["--source-action-id", "01"]),
