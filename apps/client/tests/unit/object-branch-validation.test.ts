@@ -13,6 +13,7 @@ import { validatePlan } from "../../src/shared/plan";
 import { presentIssues } from "../../src/web/validation-presentation";
 import { SchemaFields } from "../../src/web/Editor";
 import { ValidationProvider } from "../../src/web/Validation";
+import { linkedParameter } from "../fixtures/linked-parameters";
 
 function parameter(
   field = "exposure",
@@ -262,4 +263,71 @@ it("对象原文未完成时结构诊断与当前原文分段", () => {
         item.issue.code === "schema_type" && item.message.includes("对象"),
     ),
   ).toBe(true);
+});
+it("根额外字段、时间条件和当前曝光错误同时保留，仅隐藏其他模式错误", () => {
+  const p = linkedParameter();
+  const capabilities: Capabilities = {
+    devices: [
+      {
+        device_id: "camera",
+        driver_id: "test",
+        actions: [{ type: "camera_timelapse", parameter_types: [p] }],
+      },
+    ],
+  };
+  const content: DraftContent = {
+    text: JSON.stringify({
+      name: "计划",
+      actions: [
+        {
+          name: "拍摄",
+          type: "camera_timelapse",
+          device_id: "camera",
+          scheduled_at: "2026-10-16 12:00:00",
+          policy: { max_delay_ms: 0 },
+          params: {
+            type: p.type,
+            interval_s: 3,
+            duration_s: 2,
+            exposure: { mode: "manual" },
+            extra: true,
+          },
+        },
+      ],
+    }),
+  };
+  const plan = parseDraft(content);
+  const raw = validatePlan(
+    { ...plan, request_id: "1", created_at: "2026-10-16 00:00:00" },
+    capabilities,
+  );
+  const shown = presentIssues(raw, plan, capabilities, content);
+  expect(
+    shown.some(
+      (item) =>
+        item.issue.code === "schema_additionalProperties" &&
+        item.issue.schema?.params.additionalProperty === "extra",
+    ),
+  ).toBe(true);
+  expect(
+    shown.some(
+      (item) =>
+        item.issue.code === "schema_exclusiveMaximum" &&
+        item.target === "/actions/0/params/interval_s",
+    ),
+  ).toBe(true);
+  expect(
+    shown.some(
+      (item) =>
+        item.target === "/actions/0/params/exposure/iso" &&
+        item.issue.code === "schema_required",
+    ),
+  ).toBe(true);
+  expect(
+    shown.some(
+      (item) =>
+        item.issue.code === "schema_const" &&
+        item.target?.startsWith("/actions/0/params/exposure"),
+    ),
+  ).toBe(false);
 });

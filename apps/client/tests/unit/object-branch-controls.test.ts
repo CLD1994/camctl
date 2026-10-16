@@ -8,6 +8,7 @@ import { editValue, parseDraft } from "../../src/web/editing";
 import { switchObjectBranch } from "../../src/shared/object-variants";
 import { objectBranchJsonEdit } from "../../src/web/object-branches";
 import { replaceObjectValue } from "../../src/shared/object-variants";
+import { linkedParameter } from "../fixtures/linked-parameters";
 
 function parameter(): ParameterType {
   return {
@@ -65,6 +66,36 @@ function render(
     }),
   );
 }
+it("时间条件共存时仍可独立编辑曝光且Auto不带入EV", () => {
+  const html = render('{"mode":"manual","iso":800}', linkedParameter());
+  expect(html).toContain('aria-label="mode (mode)"');
+  expect(html).toContain('aria-label="iso (iso)"');
+  expect(html).not.toContain('aria-label="exposure (exposure)"');
+  const auto = render('{"mode":"auto"}', linkedParameter());
+  expect(auto).toContain('aria-label="mode (mode)"');
+  expect(auto).not.toContain('aria-label="iso (iso)"');
+  expect(auto).not.toContain('aria-label="compensation_ev (compensation_ev)"');
+});
+it("时间组pending不阻止独立曝光，曝光成员pending保留其原文", () => {
+  const html = render('{"mode":"manual","iso":800}', linkedParameter(), {
+    "/actions/0/params/interval_s": { kind: "number", text: "1e" },
+    "/actions/0/params/exposure/iso": { kind: "number", text: "8e" },
+  });
+  expect(html).toContain('aria-label="mode (mode)"');
+  expect(html).toContain("8e");
+});
+it.each(["/actions/99/name", "/actions/00/params/exposure/iso", "invalid"])(
+  "无法归属的pending %s暂停曝光全部选择并保留JSON入口",
+  (path) => {
+    const html = render('{"mode":"manual","iso":800}', linkedParameter(), {
+      [path]: { kind: "number", text: "1e" },
+    });
+    expect(html).not.toContain('aria-label="mode (mode)"');
+    expect(html).not.toContain('aria-label="iso (iso)"');
+    expect(html).toContain('aria-label="exposure (exposure)"');
+    expect(html).toContain('aria-label="重新填写exposure" disabled');
+  },
+);
 it("合格对象回显判别字段且只提供当前分支成员", () => {
   const html = render();
   expect(html).toContain('aria-label="mode (mode)"');

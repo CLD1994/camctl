@@ -102,11 +102,11 @@ Schema 无效、引用缺失或必要语义不可执行|按能力加载/规则�
 根额外字段、时间条件与当前曝光字段同时有错误|允许具备资格的局部修正，但完整诊断同时保留三类错误；只抑制其他曝光模式的无关分支错误。
 能力重载、查看说明、切换视图或折叠|重新派生分类但不改原值、pending 或分支资料；纯查看不产生草稿保存版本。
 
-- [ ] 先扩展 `object-branch-controls.test.ts`、`object-branch-validation.test.ts`、`fields.test.ts`，并建议新增 `tests/integration/browser-linked-parameters.test.ts`。红灯应来自条件与独立曝光共存时控件缺失或范围错误，不能是夹具加载失败。
-- [ ] 同步[客户端编辑规格](../../architecture/client-editing.md#参数选项联动)：整份目录按完整参数补全，局部关联组只证明组内全部断言可补全；说明独立字段非法时仍可修正该组。对象级联、pending 范围及设备说明职责一起更新。
-- [ ] 接通各消费者及 `validation-presentation.ts`：增加根额外字段错误、时间条件错误及当前曝光分支错误同时存在的回归，完整诊断均保留；不泄漏其他模式必填错误，不因局部组可编辑而吞掉根或时间错误。
-- [ ] 说明页仅展示实际组成员与时间组合数量；沿现有展示上限，不把局部时间组合数量描述为整份任务组合数量，不铺开大型组合表。由现有字段标签解释关联，不向产品用户展示内部目录类型。
-- [ ] 从客户端目录顺序运行以下命令。验证参数 JSON 明确修正后可恢复选择、选择只改一个字段、曝光往返恢复和 pending 保留，以及查看前后完整草稿与版本不变。
+- [x] 先扩展 `object-branch-controls.test.ts`、`object-branch-validation.test.ts`、`fields.test.ts`，并建议新增 `tests/integration/browser-linked-parameters.test.ts`。红灯应来自条件与独立曝光共存时控件缺失或范围错误，不能是夹具加载失败。
+- [x] 同步[客户端编辑规格](../../architecture/client-editing.md#参数选项联动)：整份目录按完整参数补全，局部关联组只证明组内全部断言可补全；说明独立字段非法时仍可修正该组。对象级联、pending 范围及设备说明职责一起更新。
+- [x] 接通各消费者及 `validation-presentation.ts`：增加根额外字段错误、时间条件错误及当前曝光分支错误同时存在的回归，完整诊断均保留；不泄漏其他模式必填错误，不因局部组可编辑而吞掉根或时间错误。
+- [x] 说明页仅展示实际组成员与时间组合数量；沿现有展示上限，不把局部时间组合数量描述为整份任务组合数量，不铺开大型组合表。由现有字段标签解释关联，不向产品用户展示内部目录类型。
+- [x] 从客户端目录顺序运行以下命令。验证参数 JSON 明确修正后可恢复选择、选择只改一个字段、曝光往返恢复和 pending 保留，以及查看前后完整草稿与版本不变。
 
 ```bash
 pnpm exec vitest run tests/unit/parameter-options.test.ts tests/unit/object-branch-controls.test.ts tests/unit/object-branch-validation.test.ts tests/unit/fields.test.ts
@@ -114,7 +114,9 @@ pnpm run build
 pnpm exec vitest run tests/integration/browser-linked-parameters.test.ts tests/integration/browser-camera-parameters.test.ts tests/integration/browser-rule-display.test.ts
 ```
 
-- [ ] 检查 diff、统一分类消费及数值身份，复核后提交。
+- [x] 检查 diff、统一分类消费及数值身份，复核后提交。
+
+2026-10-16 在 Linux 开发容器、Node.js `v24.20.0` 及本工作树锁定依赖上验证。四个专项文件基线 250 项通过；修正夹具后取得 6 项有效目标失败，再接通统一字段范围和对象独立性接口。补充的关联提示范围及无法归属的对象成员输入分别先取得 1 项、2 项目标失败。最终专项 269 项、全部客户端单元 59 个文件 2883 项通过；类型检查及 Vite 构建通过。使用本次构建的三个浏览器文件共 68 项通过，其中新增联动文件 12 项，覆盖双向过滤、单字段写入、JSON 修正恢复、缺省与非法值、组内与组外 pending、曝光模式往返、完整诊断、原数字词元及查看／折叠／重载前后完整草稿与保存版本保持。说明页只按实际成员展示关联，沿用 24 行上限；36 对合成时间组合只显示局部数量。实际命令使用本工作树 `node node_modules/…` 等价入口，所有最终退出码均为 0；构建保留现有大包提示。`validation-presentation` 复用已按对象路径限定的投影，无需另加 Schema 分类；根额外字段与组条件不被对象分支归并。两款生产参数的完整 HTTP／SQLite／重启矩阵及跨语言接缝由 C3 接续，本项不代表设备接入或验收。
 
 ## C3 保存恢复、完整校验及 P/C 接缝
 

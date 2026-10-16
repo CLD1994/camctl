@@ -336,7 +336,7 @@ export function Field({
             <small className="danger-text">
               {choiceBasis === "independent"
                 ? `该字段没有允许值。${required ? "请联系设备说明提供者修正该字段规则。" : "可以清空此项，保持不填写。"}`
-                : "没有兼容选项，请先清空冲突字段或在参数 JSON 中修正。"}
+                : "没有兼容选项，其他已填参数与当前字段冲突，请在参数 JSON 中核对并修正。"}
             </small>
           )}
         {enumeration &&
@@ -345,8 +345,8 @@ export function Field({
           !choicePaused && (
             <small className="danger-text">
               {choiceBasis === "independent"
-                ? "当前值不在该字段允许范围内，原值已保留；请选择允许值或清空后重新选择。"
-                : "此值与当前参数不兼容，原值已保留；请选择兼容值或清空后重新选择。"}
+                ? "当前值不在该字段允许范围内，原值已保留；请选择允许值或在参数 JSON 中修正。"
+                : "此值与当前参数不兼容，原值已保留；请选择兼容值或在参数 JSON 中修正。"}
             </small>
           )}
         <small>
