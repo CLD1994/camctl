@@ -105,7 +105,7 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 
 Action6 和 OSMO 的延时摄影仍是设备接入范围，但当前 Action6 原生延时诊断已暂停，OSMO 整体联调未完成。设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。本节说明最短实机演示的参数目标、已有 TX2 执行记录、诊断脚本保留的行为和既有记录的只读复查入口。
 
-两款使用相同的[间隔与采集时长限制](camera-control-handoff.md#间隔与采集时长限制)，后续实机演示的最短时间目标均为 1 秒间隔、300 秒采集；模式、曝光、输出与编码分别沿自身契约。Action6 新诊断的输入、完整映射和旧记录读取由[驱动计划 D1A](../superpowers/plans/2026-10-16-osmo360ii-timelapse-driver.md#d1a-action6-新诊断与旧记录只读复查)同步。该任务完成前，现有脚本的实验秒级范围不作为新诊断执行依据；下文秒级操作说明及30秒结果保留为既有记录和只读复查背景，不执行新的域外任务。
+两款使用相同的[间隔与采集时长限制](camera-control-handoff.md#间隔与采集时长限制)，后续实机演示的最短时间目标均为 1 秒间隔、300 秒采集；模式、曝光、输出与编码分别沿自身契约。Action6 新诊断的输入、完整映射和旧记录读取由[驱动计划 D1A](../superpowers/plans/2026-10-16-osmo360ii-timelapse-driver.md#d1a-action6-新诊断与旧记录只读复查)同步。新诊断省略时间选项时从同源资源派生最短组合；下文秒级结果保留为既有记录和只读复查背景。
 
 ### OSMO 360 II 的最短实机演示
 
@@ -148,11 +148,35 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 200
 
 ### Action6 原生延时的统一采集
 
-`action6_record_probe.py --capture timelapse` 会发送延时设置并发出一次 START，采样既定目录后保存新增路径、一次下载及媒体检查。脚本没有 Action6 延时 STOP，不会自动重发 START；调用异常后仍无法据此判断设备是否开始。本机时钟、调用耗时、文件出现或副本检查都不能证明设备开始、自然结束、写完或产物集合已固定。当前这项诊断已暂停，因此不要执行该模式，也不要对同一试验补发 START 或自动重试。既有设备观察见[Action6 原生延时记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
+`action6_record_probe.py --capture timelapse` 使用 Action6 自身的 4K／30 fps、Auto、仅视频设置。新诊断的 `--timelapse-interval-s` 和 `--timelapse-duration-s` 接受精确秒数，包括数学值等价的 `1.0`、`1e0`；允许值和严格关系统一见[时间参数](camera-control-handoff.md#间隔与采集时长限制)。省略的时间字段从生成资源中的最短组合派生，当前为间隔 1 秒、采集时长 300 秒。30 秒实验时长、等值、反向关系和邻近但不相等的数值均在任何工具调用前拒绝。
+
+诊断按[候选编码契约](../camctl/timelapse-command-encoding.md)生成完整设置，模板或资源缺失、结构损坏及表示超界也在运行 ffprobe 或 ADB 前拒绝。记录保存精确 JSON 数字、完整负载、`encoding_format`、`template_identity`、原完整模板和样例推导依据。默认值只服务于该诊断入口，不为生产参数补默认值。
+
+脚本只发送一次 START，没有 Action6 延时 STOP，不会自动重发 START；调用异常后仍无法据此判断设备是否开始。本机时钟、调用耗时、文件出现或副本检查都不能证明设备开始、自然结束、写完或产物集合已固定。当前设备采集仍已暂停，不执行新的采集或对同一试验补发 START。既有设备观察见[Action6 原生延时记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
+
+### Action6 独立诊断交付
+
+Windows 诊断机使用 Python 3.11，并将下列四个文件放在同一目录：
+
+- [action6_record_probe.py](action6_record_probe.py)：参数校验、原记录读取、采样与副本检查。
+- [collect_call.py](collect_call.py)：分别保存每次调用的参数、退出状态与原始输出。
+- [timelapse-time-parameters.json](timelapse-time-parameters.json)：从生产权威时间定义生成的有限时间域和最短组合。
+- [action6_timelapse_candidate.py](action6_timelapse_candidate.py)：从生产完整模板与纯编码函数生成的标准库模块。
+
+交付文件不要求 Windows 诊断机存在源码工作区、安装 camctl 或运行生成器。ADB 与 ffprobe 沿原选项指定。运行 `python .\action6_record_probe.py --help` 可查看时间选项和只读入口。
+
+维护者在源码工作区运行以下检查，验证实际交付文件与生产权威来源一致：
+
+```bash
+apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --check
+apps/camctl/.venv311/bin/python apps/camctl/scripts/render_action6_diagnostic_candidate.py --check
+```
+
+第二个生成器只提取当前生产模块的已核对纯设置依赖及原异常声明；出现未知依赖或源码形状变化时明确失败，维护者需要重新核对独立交付边界。软件隔离目录运行及工具替身验证不表示 Windows 本机、ARM 或真实设备已验收。
 
 ### Action6 秒级延时试验
 
-脚本支持 1800 秒原预设及 30 秒、10 秒的实验时长参数，具体候选负载和依据见[相机控制交接资料](camera-control-handoff.md)、[秒级候选试验记录](../camctl/verification.md#30-秒候选与完整设置顺序的试验)及[脚本实现](action6_record_probe.py)。它们不是已确认的相机协议或时长保证；当前诊断已暂停，不要执行新的 `--capture timelapse`。脚本的参数边界不代表设备支持。
+已有 1800 秒原预设及 30 秒、10 秒实验记录按原请求、原负载和原设置顺序保留，只用于只读复查。具体依据见[相机控制交接资料](camera-control-handoff.md)及[秒级候选试验记录](../camctl/verification.md#30-秒候选与完整设置顺序的试验)。这些记录不扩大当前新请求的时间域，也不提供相机已经自然结束或文件写完的保证。
 
 ### Action6 延时采样后的只读复查
 
@@ -162,9 +186,9 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 200
 python .\action6_record_probe.py --observe ".\action6\timelapse-probe-<原 UTC 时间>" --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
 ```
 
-`--observe` 与 `--capture` 互斥，只接受原生延时记录，不能另带时长选项。脚本校验原模式、计时记录、START、启动前目录调用的 serial、退出状态及目录结果；原始记录缺失或无效时，不会继续设备观察。原 START 异常而尚未保存 `capture-observation.json` 的记录应只检查原始调用材料，不得补发 START。
+`--observe` 与 `--capture` 互斥，只接受原生延时记录，不能另带间隔或时长选项。脚本校验原模式、计时记录、START、启动前目录调用的 serial、退出状态及目录结果；原始记录缺失或无效时，不会继续设备观察。原 START 异常而尚未保存 `capture-observation.json` 的记录应只检查原始调用材料，不得补发 START。
 
-新版记录的 `requested_params`、`preset_payload` 与 `preset_basis` 必须一致；旧版记录按脚本兼容规则处理。复查结果分别记录本次目录差集、下载与媒体检查，不能更新原试验的开始、结束、文件写完或产物集合结论。既有复查语义和观察值见[验证记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
+新格式记录按保存的精确参数、完整负载、格式身份和原模板核对，不读取当前时间资源或按新请求 Schema 重判。旧格式的 `requested_params`、`preset_payload` 与 `preset_basis` 必须与原设置调用一致；最早没有这些字段的 8／1800 记录，需要原模式、分辨率、完整时间预设、曝光及 START 调用共同证明原参数，缺失时不按默认值补齐。原五步设置记录存在 `05-output` 时，其完整负载也必须与时间设置一致。复查结果分别记录本次目录差集、下载与媒体检查，不能更新原试验的开始、结束、文件写完或产物集合结论。既有复查语义和观察值见[验证记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
 
 ### 分别保存原始调用
 

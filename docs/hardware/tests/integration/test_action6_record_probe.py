@@ -9,6 +9,9 @@ import json
 import os
 from pathlib import Path
 import sys
+import shutil
+import subprocess
+from decimal import Decimal
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -23,6 +26,8 @@ SECOND_VIDEO = INTERNAL + "/DJI_001/second.MP4"
 CONTENT = b"CAMCTL_FAKE_VIDEO"
 TIMELAPSE_START = "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01"
 SHORT_PRESETS = {
+    300: "0400000a002c0100000000000000000000",
+    1200: "0400000a00b00400000000000000000000",
     30: "04000050001e0000000000000000000000",
     10: "04000050000a0000000000000000000000",
 }
@@ -151,6 +156,7 @@ else:
             "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000050000a0000000000000000000000",
             "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
         }
+        allowed.update({"dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c " + payload for payload in ("0400000a002c0100000000000000000000", "0400000a00b00400000000000000000000")})
         assert command in allowed, command
         control_calls = state.get("control_calls", 0) + 1
         state["control_calls"] = control_calls
@@ -223,29 +229,64 @@ class ProbeIntegration(unittest.TestCase):
         finally:
             os.chdir(previous)
 
-    def seed_original(self, duration_s=None):
+    def seed_original(self, duration_s=1800):
+        # 旧归档夹具直接保留原请求与原调用，不通过当前新请求入口制造。
+        original = self.workspace / "action6" / "timelapse-probe-archived"
+        original.mkdir(parents=True)
+        payload = {1800: "0400005000080700000000000000000000", **{k: v for k, v in SHORT_PRESETS.items() if k in (30, 10)}}[duration_s]
+        basis = "source_example" if duration_s == 1800 else "experimental_duration"
+        observation = {"capture": "timelapse", "observation_only": False,
+                       "sampling_started_at": "2026-10-10T12:00:00+00:00",
+                       "start_call_elapsed_s": 2, "start_to_observation_s": duration_s,
+                       "requested_params": {"resolution": "4k30", "exposure": "auto", "interval_s": 8,
+                                            "duration_s": duration_s, "outputs": "video"},
+                       "preset_payload": payload, "preset_basis": basis}
+        (original / "capture-observation.json").write_text(json.dumps(observation))
+        (original / "summary.json").write_text("{}")
+        controls = self.expected_short_controls(duration_s) if duration_s != 1800 else [
+            "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
+            "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
+            "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c " + payload,
+            "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100", TIMELAPSE_START]
+        for label, command in zip(("01-mode", "02-resolution", "03-timing", "04-exposure", "12-start"), controls):
+            self.archive_call(original, label, command, b"Resp message, len = 1, data:\n  00\n", b"")
+        for name, remote in (("internal", INTERNAL), ("sd", SD)):
+            storage = self.workspace / "storage" / name
+            paths = sorted(remote + "/" + str(p.relative_to(storage)) for p in storage.rglob("*") if p.is_file()) if storage.is_dir() else []
+            script = (f"if [ -d {remote} ]; then\n"
+                      f"find {remote} -type f -print0\n"
+                      "status=$?\nprintf 'CAMCTL_FIND_EXIT=%s\\n' \"$status\" >&2\nexit \"$status\"\n"
+                      f"elif [ -e {remote} ] || [ -L {remote} ]; then\n"
+                      "printf 'CAMCTL_STORAGE_NOT_DIRECTORY\\n' >&2\nexit 1\n"
+                      "else\nprintf 'CAMCTL_STORAGE_ABSENT\\n' >&2\nfi\n")
+            self.archive_call(original, "11-before-" + name, script,
+                              b"".join(p.encode() + b"\0" for p in paths),
+                              b"CAMCTL_FIND_EXIT=0\n" if storage.is_dir() else b"CAMCTL_STORAGE_ABSENT\n")
+        return original
+
+    def archive_call(self, original, label, command, stdout, stderr):
+        import shlex
+        directory = original / label
+        directory.mkdir()
+        (directory / "call.json").write_text(json.dumps({"argv": [str(self.tool), "-s", SERIAL, "shell", "-T", "sh -c " + shlex.quote(command)], "returncode": 0}))
+        (directory / "stdout.bin").write_bytes(stdout)
+        (directory / "stderr.bin").write_bytes(stderr)
+
+    def seed_new(self, duration_s=None, interval_s=None):
         args = ["--capture", "timelapse"]
         if duration_s is not None:
-            args.extend(["--timelapse-duration-s", str(duration_s)])
+            args.extend(["--timelapse-duration-s", duration_s])
+        if interval_s is not None:
+            args.extend(["--timelapse-interval-s", interval_s])
         with self.assertRaises(RuntimeError):
             self.invoke(*args)
         original, = (self.workspace / "action6").glob("timelapse-probe-*")
-        self.assertTrue((original / "capture-observation.json").is_file())
         return original
 
     def seed_five_setting_capture(self, duration_s):
         controls = self.expected_short_controls(duration_s)
-        labels = ("01-mode", "02-resolution", "03-timing", "04-exposure", "05-output")
-        commands = controls[:-1] + [controls[2]]
-        settings = tuple(zip(labels, commands))
-        with patch.object(self.probe, "timelapse_settings", return_value=settings):
-            original = self.seed_original(duration_s)
-        metadata = json.loads((original / "05-output" / "call.json").read_text())
-        self.assertEqual(shlex_command(metadata["argv"][1:]), controls[2])
-        self.assertEqual(metadata["returncode"], 0)
-        self.assertEqual((original / "05-output" / "stdout.bin").read_bytes(),
-                         b"Resp message, len = 1, data:\n  00\n")
-        self.assertEqual((original / "05-output" / "stderr.bin").read_bytes(), b"")
+        original = self.seed_original(duration_s)
+        self.archive_call(original, "05-output", controls[2], b"Resp message, len = 1, data:\n  00\n", b"")
         return original
 
     def trace(self):
@@ -295,7 +336,7 @@ class ProbeIntegration(unittest.TestCase):
         self.assertEqual([args for args in new_calls if args[:1] == ["-s"]], [])
 
     def test_new_capture_without_mp4_keeps_observation_and_summary(self):
-        original = self.seed_original()
+        original = self.seed_new()
         summary = self.read_summary(original)
         self.assertEqual(summary["sample_status"], "no_new_mp4")
         self.assertEqual(summary["new_files"], [])
@@ -305,16 +346,16 @@ class ProbeIntegration(unittest.TestCase):
         self.assert_unknown_completion(summary)
         observation = json.loads((original / "capture-observation.json").read_text())
         self.assertIs(observation["observation_only"], False)
-        self.assertEqual(observation["start_to_observation_s"], 1800)
+        self.assertEqual(observation["start_to_observation_s"], 300)
         commands = [args[4] for args in self.trace() if args[:4] == ["-s", SERIAL, "shell", "-T"]]
         self.assertEqual(sum("-c 01 01" in command for command in commands), 1)
         self.assertFalse(any("-c 01 00" in command or "-c 02 00" in command for command in commands))
 
     def assert_short_capture(self, duration_s):
-        original = self.seed_original(duration_s)
+        original = self.seed_new(duration_s)
         expected = self.expected_short_controls(duration_s)
         self.assertEqual(self.control_commands(), expected)
-        self.assertEqual(self.sleep_calls, [duration_s])
+        self.assertEqual(sum(self.sleep_calls), duration_s)
         labels = ("01-mode", "02-resolution", "03-timing", "04-exposure")
         for label, command in zip(labels, expected):
             with self.subTest(label=label):
@@ -324,49 +365,35 @@ class ProbeIntegration(unittest.TestCase):
                 self.assertEqual((original / label / "stdout.bin").read_bytes(),
                                  b"Resp message, len = 1, data:\n  00\n")
         self.assertFalse((original / "05-output").exists())
-        expected_params = {"resolution": "4k30", "exposure": "auto", "interval_s": 8,
+        expected_params = {"resolution": "4k30", "exposure": "auto", "interval_s": 1,
                            "duration_s": duration_s, "outputs": "video"}
         observation = json.loads((original / "capture-observation.json").read_text())
         self.assertEqual(observation["requested_params"], expected_params)
         self.assertEqual(observation["preset_payload"], SHORT_PRESETS[duration_s])
         self.assertEqual(len(bytes.fromhex(observation["preset_payload"])), 17)
-        self.assertEqual(observation["preset_basis"], "experimental_duration")
+        self.assertEqual(observation["preset_basis"], "sample_derived_candidate")
         self.assertEqual(observation["start_to_observation_s"], duration_s)
         summary = self.read_summary(original)
         self.assertEqual(summary["params"], expected_params)
-        self.assertEqual(summary["preset_basis"], "experimental_duration")
+        self.assertEqual(summary["preset_basis"], "sample_derived_candidate")
         self.assertEqual(summary["sample_status"], "no_new_mp4")
         self.assertEqual(summary["video_checks"], "not_attempted")
         self.assert_unknown_completion(summary)
 
-    def test_30_second_capture_keeps_complete_source_order_and_experiment_metadata(self):
-        self.assert_short_capture(30)
+    def test_300_second_capture_keeps_complete_source_order_and_experiment_metadata(self):
+        self.assert_short_capture(300)
 
-    def test_10_second_capture_keeps_complete_source_order_and_experiment_metadata(self):
-        self.assert_short_capture(10)
+    def test_1200_second_capture_keeps_complete_source_order_and_experiment_metadata(self):
+        self.assert_short_capture(1200)
 
     def test_original_duration_keeps_source_example_basis_and_one_full_preset(self):
-        original = self.seed_original()
-        commands = self.control_commands()
-        expected_preset = "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400005000080700000000000000000000"
-        self.assertEqual(commands, [
-            "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
-            "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
-            expected_preset,
-            "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
-            TIMELAPSE_START,
-        ])
-        self.assertFalse((original / "05-output").exists())
+        original = self.seed_new(1800, 8)
         observation = json.loads((original / "capture-observation.json").read_text())
-        self.assertEqual(observation["requested_params"]["duration_s"], 1800)
         self.assertEqual(observation["preset_payload"], "0400005000080700000000000000000000")
         self.assertEqual(observation["preset_basis"], "source_example")
-        summary = self.read_summary(original)
-        self.assertEqual(summary["params"]["duration_s"], 1800)
-        self.assertEqual(summary["preset_basis"], "source_example")
 
     def test_each_setting_failure_stops_before_start_and_keeps_raw_call(self):
-        expected = self.expected_short_controls(30)
+        expected = self.expected_short_controls(300)
         labels = ("01-mode", "02-resolution", "03-timing", "04-exposure")
         for step, label in enumerate(labels, 1):
             for failure in ("exit", "stderr", "nonzero_ack", "truncated_ack"):
@@ -376,7 +403,7 @@ class ProbeIntegration(unittest.TestCase):
                     prior = len(self.trace())
                     previous = set((self.workspace / "action6").glob("timelapse-probe-*"))
                     with self.assertRaises(RuntimeError):
-                        self.invoke("--capture", "timelapse", "--timelapse-duration-s", 30)
+                        self.invoke("--capture", "timelapse", "--timelapse-duration-s", 300)
                     calls = self.trace()[prior:]
                     self.assertEqual(self.control_commands(calls), expected[:step])
                     current, = set((self.workspace / "action6").glob("timelapse-probe-*")) - previous
@@ -400,24 +427,24 @@ class ProbeIntegration(unittest.TestCase):
     def test_media_tool_preparation_failure_does_not_configure_or_start(self):
         self.set_state(version_failure=True)
         with self.assertRaises(RuntimeError):
-            self.invoke("--capture", "timelapse", "--timelapse-duration-s", 30)
+            self.invoke("--capture", "timelapse", "--timelapse-duration-s", 300)
         self.assertEqual(self.control_commands(), [])
         self.assertEqual([args for args in self.trace() if args[:1] == ["-s"]], [])
 
     def test_original_directory_failure_does_not_start_after_settings(self):
         self.set_state(directory_failure="exit")
         with self.assertRaises(RuntimeError):
-            self.invoke("--capture", "timelapse", "--timelapse-duration-s", 30)
-        self.assertEqual(self.control_commands(), self.expected_short_controls(30)[:-1])
+            self.invoke("--capture", "timelapse", "--timelapse-duration-s", 300)
+        self.assertEqual(self.control_commands(), self.expected_short_controls(300)[:-1])
         original, = (self.workspace / "action6").glob("timelapse-probe-*")
         self.assertFalse((original / "12-start").exists())
 
     def test_short_start_failure_is_attempted_once_without_stop_or_wait(self):
         self.set_state(control_failure_at=5, control_failure="nonzero_ack")
         with self.assertRaises(RuntimeError) as caught:
-            self.invoke("--capture", "timelapse", "--timelapse-duration-s", 30)
+            self.invoke("--capture", "timelapse", "--timelapse-duration-s", 300)
         self.assertIn("e3", str(caught.exception))
-        self.assertEqual(self.control_commands(), self.expected_short_controls(30))
+        self.assertEqual(self.control_commands(), self.expected_short_controls(300))
         self.assertEqual(self.sleep_calls, [])
         original, = (self.workspace / "action6").glob("timelapse-probe-*")
         self.assertEqual((original / "12-start" / "stdout.bin").read_bytes(),
@@ -633,7 +660,7 @@ class ProbeIntegration(unittest.TestCase):
         self.assertEqual(self.trace()[prior:], [])
 
     def test_duration_option_rejects_invalid_seconds_before_tool_calls(self):
-        for value in ("0", "-1", "1801", "1.5", "abc"):
+        for value in ("0", "-1", "30", "1801", "1.5", "abc", "true", "NaN", "Infinity", "300.000000000000000001"):
             with self.subTest(value=value):
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
                     self.invoke("--capture", "timelapse", "--timelapse-duration-s", value)
@@ -958,6 +985,205 @@ class ProbeIntegration(unittest.TestCase):
         self.assertEqual((observation / "video-01.mp4").read_bytes(), CONTENT)
         self.assertTrue((observation / "video-01-copy.json").is_file())
         self.assertTrue((observation / "video-01-ffprobe" / "stdout.bin").is_file())
+
+    def test_precise_new_record_is_observed_with_original_interval(self):
+        original = self.seed_new("3e2", "1.000000000000000000000")
+        raw = (original / "capture-observation.json").read_text()
+        self.assertIn("1.000000000000000000000", raw)
+        self.add_video()
+        prior = len(self.trace())
+        self.invoke("--observe", original)
+        current, = original.glob("observation-*")
+        self.assertEqual(self.read_summary(current)["params"]["interval_s"], 1)
+        self.assertEqual(self.control_commands(self.trace()[prior:]), [])
+
+    def test_invalid_interval_and_relation_have_zero_external_calls(self):
+        for interval, duration in (("true", "300"), ("1.000000000000000000001", "300"),
+                                   ("300", "300"), ("3600", "1800"), ("-1", "300")):
+            with self.subTest(interval=interval, duration=duration), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.invoke("--capture", "timelapse", "--timelapse-interval-s", interval,
+                            "--timelapse-duration-s", duration)
+            self.assertEqual(self.trace(), [])
+
+    def test_missing_or_bad_resource_has_zero_external_calls(self):
+        for data in (None, "{}", '{"format_version":true}'):
+            with self.subTest(data=data):
+                resource = self.workspace / "timelapse-time-parameters.json"
+                if data is not None:
+                    resource.write_text(data)
+                with patch.object(self.probe, "TIME_PARAMETERS_PATH", resource), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                    self.invoke("--capture", "timelapse")
+                self.assertEqual(self.trace(), [])
+
+    def test_observe_missing_or_contradictory_original_timing_call_is_rejected(self):
+        original = self.seed_original(30)
+        call = original / "03-timing" / "call.json"
+        raw = call.read_bytes()
+        call.unlink()
+        self.assert_original_rejected_without_device_calls(original)
+        call.write_bytes(raw.replace(b"04000050001e00", b"04000050000a00"))
+        self.assert_original_rejected_without_device_calls(original)
+
+    def test_independent_delivery_runs_without_source_or_installed_package(self):
+        delivery = self.workspace / "delivery"
+        delivery.mkdir()
+        for name in ("action6_record_probe.py", "collect_call.py", "timelapse-time-parameters.json", "action6_timelapse_candidate.py"):
+            shutil.copyfile(SCRIPT.with_name(name), delivery / name)
+        self.set_state(video_at_start=True)
+        code = ("import action6_record_probe as p, functools, sys; "
+                "state={'now':0}; clock=lambda:state['now']; "
+                "sleep=lambda seconds:state.update(now=state['now']+seconds); "
+                "p.capture_once=functools.partial(p.capture_once,clock=clock,sleep=sleep); "
+                "sys.argv=['probe','--capture','timelapse','--adb'," + repr(str(self.tool)) +
+                ",'--ffprobe'," + repr(str(self.tool)) + "]; p.main()")
+        prefix = "import sys; sys.path.insert(0, " + repr(str(delivery)) + "); "
+        env = {**os.environ, "CAMCTL_PROBE_INTEGRATION_STATE": str(self.state_file)}
+        result = subprocess.run([sys.executable, "-I", "-c", prefix + code], cwd=delivery, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        original, = (delivery / "action6").glob("timelapse-probe-*")
+        self.assertEqual(self.read_summary(original)["params"]["interval_s"], 1)
+        self.assertEqual(self.read_summary(original)["video_checks"], "complete")
+        controls = self.control_commands()
+        self.assertEqual(sum(command == TIMELAPSE_START for command in controls), 1)
+        for name in ("timelapse-time-parameters.json", "action6_timelapse_candidate.py"):
+            (delivery / name).unlink()
+        code = ("import action6_record_probe as p,sys;sys.argv=['probe','--observe'," + repr(str(original)) +
+                ",'--adb'," + repr(str(self.tool)) + ",'--ffprobe'," + repr(str(self.tool)) + "];p.main()")
+        result = subprocess.run([sys.executable, "-I", "-c", prefix + code], cwd=delivery, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.control_commands(), controls)
+
+    def test_missing_bad_template_and_unrepresentable_window_have_zero_external_calls(self):
+        from dataclasses import replace
+        encoder = self.probe.load_candidate_encoder()
+        model = encoder.CameraModel.ACTION6
+        presets = encoder.TIMELAPSE_PRESETS[model]
+        identity = encoder.TimelapseCandidateTemplate.ACTION6_AUTO_VIDEO
+        variants = (
+            (tuple(p for p in presets if p.candidate_template != identity), "CapabilityNotDeclaredError"),
+            (tuple(replace(p, command=(*p.command[:-1], "040000")) if p.candidate_template == identity else p for p in presets), "ValueError"),
+        )
+        for changed, error_name in variants:
+            encoder.TIMELAPSE_PRESETS[model] = changed
+            with patch.object(self.probe, "load_candidate_encoder", return_value=encoder), contextlib.redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit):
+                self.invoke("--capture", "timelapse")
+            self.assertIn(error_name, errors.getvalue())
+            self.assertEqual(self.trace(), [])
+        encoder.TIMELAPSE_PRESETS[model] = presets
+        domain = self.probe.load_time_parameters()
+        domain["interval_s"] = [7000]
+        domain["duration_s"] = [18000]
+        domain["shortest_pair"] = {"interval_s": 7000, "duration_s": 18000}
+        with patch.object(self.probe, "load_time_parameters", return_value=domain), contextlib.redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit):
+            self.invoke("--capture", "timelapse")
+        self.assertIn("ValueError", errors.getvalue())
+        self.assertEqual(self.trace(), [])
+
+    def test_missing_encoder_has_zero_external_calls(self):
+        with patch.object(self.probe, "CANDIDATE_PATH", self.workspace / "missing.py"), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.invoke("--capture", "timelapse")
+        self.assertEqual(self.trace(), [])
+
+    def test_old_observe_is_independent_of_current_time_and_encoder_resources(self):
+        original = self.seed_original(30)
+        self.add_video()
+        with patch.object(self.probe, "load_time_parameters", side_effect=AssertionError("current time accessed")), patch.object(self.probe, "load_candidate_encoder", side_effect=AssertionError("new encoder accessed")):
+            self.invoke("--observe", original)
+        current, = original.glob("observation-*")
+        self.assertEqual(self.read_summary(current)["params"]["duration_s"], 30)
+
+    def test_new_format_observe_keeps_domain_external_original_values(self):
+        original = self.seed_new(300, 1)
+        path = original / "capture-observation.json"
+        observation = json.loads(path.read_text())
+        observation["requested_params"]["interval_s"] = 2
+        observation["requested_params"]["duration_s"] = 301
+        observation["start_to_observation_s"] = 301
+        observation["preset_payload"] = "04000014002d0100000000000000000000"
+        path.write_text(json.dumps(observation))
+        call = original / "03-timing" / "call.json"
+        call.write_bytes(call.read_bytes().replace(b"0400000a002c0100000000000000000000", b"04000014002d0100000000000000000000"))
+        self.add_video()
+        with patch.object(self.probe, "load_time_parameters", side_effect=AssertionError("current time accessed")), patch.object(self.probe, "load_candidate_encoder", side_effect=AssertionError("new encoder accessed")):
+            self.invoke("--observe", original)
+        current, = original.glob("observation-*")
+        self.assertEqual(self.read_summary(current)["params"]["interval_s"], 2)
+        self.assertEqual(self.read_summary(current)["params"]["duration_s"], 301)
+
+    def test_new_format_rejects_partial_or_contradictory_format_facts(self):
+        original = self.seed_new(1800, 8)
+        path = original / "capture-observation.json"
+        valid = path.read_bytes()
+        for field in ("encoding_format", "template_identity", "template_payload"):
+            observation = json.loads(valid)
+            del observation[field]
+            path.write_text(json.dumps(observation))
+            self.assert_original_rejected_without_device_calls(original)
+        observation = json.loads(valid)
+        observation["template_payload"] = "04000050001e0000000000000000000000"
+        path.write_text(json.dumps(observation))
+        self.assert_original_rejected_without_device_calls(original)
+
+    def test_minimal_old_record_needs_original_settings_not_defaults(self):
+        original = self.seed_original()
+        path = original / "capture-observation.json"
+        observation = json.loads(path.read_text())
+        for field in ("requested_params", "preset_payload", "preset_basis"):
+            del observation[field]
+        path.write_text(json.dumps(observation))
+        (original / "03-timing" / "call.json").unlink()
+        self.assert_original_rejected_without_device_calls(original)
+
+    def test_generated_encoder_matches_production_for_every_current_pair(self):
+        from camctl.devices.drivers.adb_cameras.commands import settings_for
+        domain = self.probe.load_time_parameters()
+        count = 0
+        for interval in domain["interval_s"]:
+            for duration in domain["duration_s"]:
+                if duration <= interval:
+                    continue
+                metadata, actual = self.probe.prepare_timelapse(duration, interval_s=interval, time_parameters=domain)
+                params = {"type": "action6_timelapse", "interval_s": interval, "duration_s": duration,
+                          "exposure": {"mode": "auto"}, "outputs": "video"}
+                import shlex
+                expected = settings_for("dji-action6", "camera_timelapse", params)
+                self.assertEqual([shlex.split(command) for _, command in actual], list(map(list, expected)))
+                payload = bytes.fromhex(metadata["preset_payload"])
+                self.assertEqual(len(payload), 17)
+                self.assertEqual(payload[:3], b"\x04\x00\x00")
+                self.assertEqual(payload[7:], b"\x00" * 10)
+                count += 1
+        self.assertEqual(count, domain["legal_pair_count"])
+
+    def test_generator_checks_exact_delivery_and_rejects_unknown_dependency(self):
+        generator_path = SCRIPT.parents[2] / "apps/camctl/scripts/render_action6_diagnostic_candidate.py"
+        spec = importlib.util.spec_from_file_location("diagnostic_generator", generator_path)
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        self.assertEqual(generator.generated_source(), SCRIPT.with_name("action6_timelapse_candidate.py").read_text())
+        source = self.workspace / "commands.py"
+        original = generator.SOURCE.read_text()
+        source.write_text(original.replace('    exposure = params["exposure"]\n    if action_type == "camera_record":', '    unknown_diagnostic_dependency()\n    exposure = params["exposure"]\n    if action_type == "camera_record":'))
+        with patch.object(generator, "SOURCE", source), self.assertRaises(ValueError) as caught:
+            generator.generated_source()
+        self.assertIn("unknown_diagnostic_dependency", str(caught.exception))
+
+    def test_original_directory_call_must_match_its_raw_baseline_scope(self):
+        original = self.seed_original()
+        call = original / "11-before-internal" / "call.json"
+        call.write_bytes(call.read_bytes().replace(INTERNAL.encode(), b"/unrelated/DCIM"))
+        self.assert_original_rejected_without_device_calls(original)
+
+    def test_non_json_numeric_spellings_are_rejected_before_tools(self):
+        for value in ("3_00", "+300", "03e2"):
+            with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.invoke("--capture", "timelapse", "--timelapse-duration-s", value)
+            self.assertEqual(self.trace(), [])
+
+    def test_original_control_call_rejects_non_object_record(self):
+        original = self.seed_original()
+        (original / "03-timing" / "call.json").write_text("[]")
+        self.assert_original_rejected_without_device_calls(original)
 
     def test_recording_keeps_one_start_and_stop_and_complete_video(self):
         self.set_state(video_at_start=True)
