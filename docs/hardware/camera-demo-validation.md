@@ -103,7 +103,48 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 
 ## 延时摄影资料
 
-Action6 和 OSMO 的延时摄影仍是设备接入范围，但当前 Action6 原生延时诊断已暂停，OSMO 整体联调未完成。设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。本节只说明诊断脚本保留的行为和既有记录的只读复查入口，不是当前拍摄指令。
+Action6 和 OSMO 的延时摄影仍是设备接入范围，但当前 Action6 原生延时诊断已暂停，OSMO 整体联调未完成。设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。本节说明最短实机演示的参数目标、已有 TX2 执行记录、诊断脚本保留的行为和既有记录的只读复查入口。
+
+两款使用相同的[间隔与采集时长限制](camera-control-handoff.md#间隔与采集时长限制)，后续实机演示的最短时间目标均为半秒间隔、300秒采集；模式、曝光、输出与编码分别沿自身契约。Action6 新诊断的输入、完整映射和旧记录读取由[驱动计划 D1A](../superpowers/plans/2026-10-16-osmo360ii-timelapse-driver.md#d1a-action6-新诊断与旧记录只读复查)同步。该任务完成前，现有脚本的实验秒级范围不作为新诊断执行依据；下文秒级操作说明及30秒结果保留为既有记录和只读复查背景，不执行新的域外任务。
+
+### OSMO 360 II 的最短实机演示
+
+实机演示采用[参数限制](camera-control-handoff.md#间隔与采集时长限制)中的最短允许组合：采集间隔为 0.5 s，采集时长为 5 min（300 s），仅输出视频。该组合满足 `duration_s > interval_s`。其余模式、分辨率和曝光设置沿用下文已执行记录中的要求，实际参数仍需核实。
+
+这项演示目标对应的完整 `6c` 负载尚待核对，核对后再整理执行命令。300 秒只表示采集时长，参数准备、命令响应及最终文件处理的耗时分别记录；结果观察和完成判定仍须具有对应依据。
+
+### OSMO 360 II 的 TX2 手工复验顺序
+
+以下记录用户提供的上次执行顺序，作用依据[全景静止延时控制资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)说明，实际参数尚未逐项回读确认。间隔与采集时长的完整允许值由[参数限制](camera-control-handoff.md#间隔与采集时长限制)维护；这里保留当时使用的 30 s / 600 s / 仅视频完整预设，作为既有试验记录。
+
+这套记录对应的操作约定为：命令在 TX2 终端逐条执行，确认 serial 为目标相机。每条执行后检查本地 `adb` 的退出码和标准错误；仅在退出码为 `0`、没有未解释的报错，并收到唯一完整的 `Resp message, len = 1, data: 00` 后执行下一条。错误、响应缺失或含义不明时停止后续派发，不自动重试。
+
+```bash
+# 1. 模式切换准备：与下一条配合进入全景静止延时；资料未单独解释本条控制字段。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x8e 01013f000101'
+# 2. 选择全景静止延时模式，为后续设置和启动准备拍摄模式。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c e1 3b'
+# 3. 设置输出 8K / 30 fps；输出帧率与采集间隔是不同参数。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 6f03000000'
+# 4. 打开 Pro，准备按资料中的手动曝光流程设置参数。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101'
+# 5. 使用 M 档，为手动 ISO 和快门建立曝光模式。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 1e 0400'
+# 6. 固定 ISO 800，保持本次复验的感光度条件。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 2A 06'
+# 7. 固定快门 1/60 秒，保持每次采集的曝光时间设置。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 28 013c8000'
+# 8. 固定白平衡 5200 K，减少自动白平衡造成的帧间色彩变化。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2c 0634000000'
+# 9. 一次设置 30 秒间隔、600 秒采集时长和仅视频输出。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0407002c015802000000000000000001'
+# 10. 发送一次启动请求；-o 20000000 是响应等待参数，不是采集时长。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 20000000 01'
+```
+
+这套 30 s / 600 s 复验的观察等待安排为：第 10 条执行后等待至少 610 秒再进行结果观察。该安排不是实测的启动至文件完成耗时，也不构成已核实的驱动处理余量或自然结束保证。上次完整观察期间没有发送停止命令，也没有在 USB 断连后再次发送启动命令；复查原试验时沿用已有记录，不补发 START。
+
+`00` 只作为这套手工顺序继续执行的依据，不能单独证明参数生效、相机实际开始、拍摄完成或文件写完。USB 断连也不能单独证明上述任一结果；当前没有据此确定断连原因。结果判定仍需区分实际参数、采集状态、本次文件归属、文件写完和产物集合齐备。
 
 ### Action6 原生延时的统一采集
 

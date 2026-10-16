@@ -1,0 +1,137 @@
+# Action6 与 OSMO 360 II 延时命令及 OSMO 执行计划
+
+> **执行者要求：** 使用 `superpowers:subagent-driven-development` 或 `superpowers:executing-plans` 实施；先读[统筹计划](2026-10-16-osmo360ii-timelapse.md)。设备输入门槛与软件任务分开验收。
+
+**目标：** 为两款相机的共同合法时间参数分别生成有依据的完整命令，同步 Action6 诊断输入，并将 OSMO 的实际返回、结束和文件契约接入已有延时执行流程。
+
+**架构：** 复用 `AdbCameraDriver` 的多步门控和受管调用，以 OSMO 专属合同装配任务、响应与结果读取。执行、重试、取消、占用和保存恢复继续由公共处理器负责。
+
+**技术栈：** Python 3.11、ADB、受管进程、`CameraContract`、`CaptureTask`、既有 SQLite 与产物接口。
+
+**规格：** [驱动执行边界](../../architecture/camera-capabilities.md#驱动执行与产物边界)、[延时执行与恢复](../../architecture/camera-capture.md)、[ADB 调用](../../architecture/adb-execution.md)、[执行定义](../../camctl/database/execution-definitions.md)、[文件执行](../../camctl/file-runtime.md)。
+
+## 全局约束
+
+遵守[统筹计划](2026-10-16-osmo360ii-timelapse.md#全局约束)。参数合法性由 P 的同源 Schema 决定；本领域不另建允许值清单，也不把已有负载样例当作完整编码规则。实际调用和设备事实不由软件替身结果替代。
+
+D0/D1 分别维护两款相机的编码状态，D1A 负责 Action6 诊断；D2—D4 只接入 OSMO 的正式执行。Action6 延时的结束及停止契约继续按原 T9 核实，不能因为时间规则相同而采用 OSMO 的 STOP 或完成依据。
+
+## 当前入口与建议文件
+
+- `apps/camctl/src/camctl/devices/drivers/adb_cameras/commands.py`：`settings_for`、`start_for`、`stop_for`。
+- 同目录 `driver.py`：`AdbCameraDriver.control`、`stop`、`list_results`；`contracts.py`：`CameraContract`；`registration.py`：内置合同入口。
+- `devices/adb_transport.py`：`DeviceCommand`、`InterpretedFacts`、`invoke`；`devices/tasks.py`：`CaptureTask`、`EndControl`、`StartReturn`、`CompletionMode`。
+- `capture/models.py`、`capture/timelapse.py`、`capture/handlers.py`：固定执行定义、等待、停止、结果保存及恢复；仅在实际接线缺口处修改。
+- 参照 `action6_record.py` 的装配形态及 `filesystem.py`，不复制其五秒文件完成假设、响应保证或产品数量规则。`record_results.py` 依赖普通录像 STOP 上下文，不能直接作为延时结果实现。
+- 建议按职责新增 `osmo_timelapse_commands.py`、`osmo_timelapse.py`、`osmo_timelapse_responses.py`、`osmo_timelapse_results.py`。只有实际复杂度需要时才拆分，不建立另一套调度器。
+- 既有单元测试：`test_adb_camera_commands.py`、`test_adb_camera_driver.py`；组件集成：`devices/test_adb_camera_transport.py`、`test_adb_camera_registration.py`、`bootstrap/test_adb_camera_dispatch.py`、`test_timelapse_finish.py` 及 capture 延时专题。
+- Action6 诊断入口：`docs/hardware/action6_record_probe.py`、同目录 `tests/unit/test_action6_record_probe.py` 和 `tests/integration/test_action6_record_probe.py`；保留 Windows 独立运行和旧记录只读复查能力。
+
+## D0 取得命令编码依据
+
+**输入：** [Action6 既有顺序及完整负载](../../hardware/camera-control-handoff.md#原表列出的准备与设置顺序)、[OSMO 现有负载](../../hardware/camera-control-handoff.md#三组任务的组合参数)、[上次 TX2 顺序](../../hardware/camera-demo-validation.md#osmo-360-ii-的-tx2-手工复验顺序)、P 的共同时间参数结构及各型号输出/曝光。
+
+**交付：** 建议新增 `docs/camctl/osmo360ii-timelapse-driver.md`，并在相应 Action6 责任资料记录其编码；每款分别说明有效字段、适用范围及未取得的输入。原始设备结果进入验证记录，规格只表达取得依据后的有效规则。
+
+- [ ] 核对适用机型、固件和工具；整理 `6c` 的总长度、字段偏移、宽度、端序、单位、固定字段及输出选择含义，解释 `040700…` 与 `040000…` 的差异，区分哪些差异来自曝光或其他条件。
+- [ ] 对两款分别取得半秒、最长允许间隔、最短和最长时长的可执行编码依据；可接受明确的通用字段定义及独立完整样例，不要求真机逐项运行全部组合。Action6 的三种输出及其完整字段宽度独立核对，不将旧诊断替换两个低位字节的做法升级为通用编码。只有个别完整负载时，记录其实际覆盖范围。
+- [ ] 确定 Auto 与手动曝光各自设置、顺序、输出要求及 `6c` 形态。OSMO 当前手动顺序以其 TX2 记录为参照；Action6 的设置顺序不作为 OSMO 的相反要求。
+- [ ] 核对 START 是否需要 `-o 20000000`、其单位与响应等待语义，并说明其与主机外层调用期限的关系；不把任一调用超时解释成采集时长。
+- [ ] 审阅编码说明与独立样例。关键字段未说明时，保持对应映射不可用，D1 不实施推测编码；P/C 仍可继续其独立软件任务。
+
+本任务不触发采集，不为补资料重发原试验 START；不得在交付中记录保密来源标识或凭据。
+
+## D1 纯命令生成与逐条派发
+
+**前置：** P1/P2 的共同参数与可信编码接线、D0 中与拟实现型号及范围对应的完整编码依据。OSMO 可先完成最短映射用于 D2 的资料核对；每款的整体完成分别要求共同合法时间域及其适用曝光、输出分支的映射齐备。
+
+**交付接口：** 保留 `settings_for(driver_id, action_type, params) -> tuple[Command, ...]` 作为当前候选校验入口，从 P 的合法输入和 D0 的格式规则生成完整预设。实际驱动沿 P2 的可信原生效参数编码入口消费保存事实，不用当前候选 Schema 重新校验旧已受理要求。若 START 需要依赖生效参数，建议扩展 `start_for` 并同步 `AdbCameraDriver.control` 的唯一调用处及测试；具体签名以实际需求为准。
+
+- [ ] 对两款分别写纯编码测试：独立完整样例逐字节一致；合法时间域全部有对应映射，半秒不取整；最长间隔、最短/最长时长及两种曝光分别覆盖，Action6 另覆盖三种输出。新请求的非法时间组合和错误类型不生成命令，旧已受理事实保留原有依据的负载解释能力，候选缺口沿 P1 的明确分类报告。
+- [ ] 增加两款驱动派发测试：分别按 D0 确认的手动与 Auto 完整设置序列逐条断言，各只有一次 START；保留 Action6 的完整预设在曝光之前、OSMO 按自身顺序派发，不以一款顺序推断另一款。不把手动路径的设置数量用于 Auto。任一设置失败、未确认、超时或取消均不派发后续设置和 START；每步继续检查原资格和剩余期限。
+- [ ] 运行 `P apps/camctl/tests/unit/devices/test_adb_camera_commands.py apps/camctl/tests/unit/devices/test_adb_camera_driver.py -q`，确认目标失败。
+- [ ] 实现完整负载生成，保留 Auto/手动选择和固定设置；不把三项预设拆成相互覆盖的多个 `6c`。复用现有多步控制骨架，不隐藏重试或整项等待。
+- [ ] 重跑该单元命令；仅在命令工厂或外层调用变化时，另行运行 `P apps/camctl/tests/integration/devices/test_adb_camera_transport.py -q`。检查 diff 后提交，本项通过仍不启用正式任务。
+- [ ] 分别记录 Action6 和 OSMO 的编码、派发及测试状态。D3 只消费已完成的 OSMO 部分；Action6 缺失映射继续明确报缺口，不阻塞独立 OSMO 输入，也不被该型号的通过状态覆盖。
+
+## D1A Action6 新诊断与旧记录只读复查
+
+**前置：** P1 共同时间定义、P3 的同源诊断资源；新诊断派发另需 D1 中对应 Action6 的完整映射。
+
+**交付接口：** 保留 `--capture timelapse`、`--timelapse-duration-s` 和 `--observe` 的职责，建议增加精确的 `--timelapse-interval-s`。新诊断消费同源时间资源及已核对编码，继续使用其 Action6 4K/30 fps、Auto、仅视频设置；生产参数不因此新增默认值。
+
+入口或状态|行为
+-|-
+新诊断省略时间选项|从 P 的权威时间域派生最短允许组合，得到半秒/300秒目标；映射尚未核对时在任何设备调用前报缺口，不退回旧默认预设。
+新诊断显式提供时间|按共同精确时间域及严格关系校验；30秒等域外时长、等值、反向大小、布尔或错误数值在工具/设备调用前拒绝。
+时间合法但没有 Action6 完整映射|明确报编码缺口，不按旧低位替换算法或 OSMO 格式生成负载。
+只读复查旧记录，包括原30秒实验或新规则之外的时长|按该记录的格式及原请求、原负载、原调用、原基准核对一致性，保留原参数，不用当前新请求 Schema 拒绝或改写它；不发送设置或 START。
+新格式记录含半秒间隔|保存和恢复精确参数、编码依据与格式身份；不以 `int` 类型限制或默认8秒覆盖原间隔。
+旧记录缺失或内部事实矛盾|报告原记录缺失/不一致，不按最短样例补齐后继续。
+
+- [ ] 先增加上述新旧入口分区的单元及脚本集成测试；覆盖独立 Windows 交付所需资源、旧记录只读复查、半秒精确保存以及非法/缺口零设备调用。`P docs/hardware/tests/unit/test_action6_record_probe.py -q` 和 `P docs/hardware/tests/integration/test_action6_record_probe.py -q` 分进程顺序执行，确认目标失败。
+- [ ] 将诊断的新请求校验和旧观察读取分开消费其原有事实。共同时间清单从 P 的权威来源生成诊断资源，不在脚本复制枚举；资源纳入生成检查和独立交付，不要求 Windows 诊断机具备源码工作区。只读旧记录的兼容解析不提供新请求编码。
+- [ ] 接入 D1 的 Action6 编码；新采集仍只 START 一次，不发送未核实的延时 STOP。更新帮助及诊断说明，再重跑上述测试并记录实际资源和设备替身范围，复核后提交。本项软件通过不恢复现场采集或启用正式延时能力。
+
+## D2 明确返回、结束及产物契约
+
+**前置：** D1 的 OSMO 部分已能给出最短目标的完整命令；现场具备正常设备和原始调用采集条件。
+
+**交付：** OSMO 专属有效执行规格及其实际依据。参数、设备范围和编码不足时，保留缺失项，不让 D3 执行者自行选择结束模式。
+
+- [ ] 先核对可用只读接口及已有记录。需要新采集时，以最短目标建立独立试验，沿正确顺序只启动一次；记录各调用的原始输出、标准错误、退出状态及耗时。设置错误停止后续派发，启动结果未知时不自动重试或新建请求复拍。
+- [ ] 分别明确设置、START 和适用 STOP 的响应含义；记录 START 是发送后、确认开始后还是整项完成后返回。短暂文件出现或 USB 断连不能补造任何设备状态。
+- [ ] 明确设备是否自行结束、何时可以读取完整结果、是否有最终处理阶段，以及正常结束、取消和异常收场时 STOP 的适用范围与重复安全性。
+- [ ] 明确存储目录及现有 Linux 工具适用性；分别取得原基准关联、单文件写完、结果集合齐备和必要产品要求的依据。除设备契约明确要求外，不以时间除以间隔建立精确帧数或文件数要求。
+- [ ] 按下表固定执行模式、必要余量或完整调用期限，并将实际设备结果写入带日期的组件验证记录。若采用运行假设，先在有效规格中写清保证范围；不要求默认增加拍摄状态查询接口。
+
+取得的有效契约|执行定义与后续动作
+-|-
+设备自行结束，原任务具有可靠设备完成依据|`EndControl.DEVICE` 与 `CompletionMode.DEVICE_EVIDENCE`；按实际返回语义核实完成和文件。
+设备自行结束，有限执行、等待、归属及文件完成规则具有明确运行假设|`EndControl.DEVICE` 与 `CompletionMode.TIME_AND_OUTPUTS`；从声明的原发送依据等待目标及必要余量，再核实产物。
+主机必须到时停止，能够证明开始计时和停止结果|`EndControl.HOST_TIMER` 与 `CompletionMode.DEVICE_EVIDENCE`；按可靠单调计时到期停止，恢复遵守原计时证据规则。
+START 阻塞至任务完成后返回|仅与 `EndControl.DEVICE` 配合，保存实际适用的 `StartReturn.COMPLETED` 及有限 `start_call_timeout_s`；`wait_after_send` 为 false，不保存发送后等待余量，不重复等待整段采集时间，文件仍按其保证范围核实。
+关键结束、返回或文件规则仍无法确定|不绑定正式任务工厂；保留原始错误及未知事实，后续实施仅推进不依赖这些输入的工作。
+支持 STOP，但重复安全性未知或不安全|当前活动能力会从 `stop_supported` 派生 `safe_repeat_stop`，因此该组合在现有表示下不能接入；保持工厂关闭，先完成独立能力的规格、冻结及恢复消费设计，再按修订计划实施。
+
+前三行定义结束/完成方式；第四行定义设备自行结束任务的返回语义，不是第四种结束控制。`stop_supported` 必须明确为 true 或 false：设备自行结束时两者均可，主机计时结束时必须为 true；已启动或可能启动且不支持停止的任务按既有规则拒绝取消。在当前模型下，声明支持停止还必须具有可安全重复的明确依据；不能由“支持停止”这一事实代替该依据。余量和调用期限均来自本任务的有效契约，不沿用旧试验的 610 秒观察安排。
+
+## D3 OSMO 专属合同与结果闭环
+
+**前置：** P2 的 OSMO 部分、D1 的 OSMO 完整映射、D2。只有这些输入齐备才完成正常内置登记，Action6 独立映射的缺口不替代或阻塞这些输入。
+
+**交付接口：** 建议 `osmo_timelapse_contract() -> CameraContract`；在现有 OSMO 绑定下提供 `osmo360ii_timelapse` 的工厂、命令工厂、证据登记、文件工具和结果读取器。其他 OSMO 候选能力仍按各自完整性过滤。
+
+- [ ] 先写 OSMO 合同及响应单元测试，建议新增 `test_osmo_timelapse_contract.py`、`test_osmo_timelapse_responses.py`。覆盖唯一完整成功响应、非零退出、缺退出、标准错误、输出截断、无响应、多响应、长度错误、设备非成功返回及传输中断；`00` 只产生 D2 授权的事实。
+- [ ] 在 `devices/test_adb_camera_registration.py` 和 `bootstrap/test_adb_camera_dispatch.py` 增加真实内置合同的能力、绑定及派发用例；在 `bootstrap/test_timelapse_finish.py` 增加 OSMO 结果闭合用例。先分别运行这些目标，确认缺失合同、结果保证或登记的失败。
+- [ ] 工厂从首次生效参数生成 `CaptureTask`：保存目标时长、实际结束控制、返回语义、停止能力、完成方式、适用余量/完整调用期限、目录范围和必要产物规则。工厂不访问设备，恢复不重新构造原定义。
+- [ ] 在合同装配测试中验证停止重复安全门槛：沿用当前固定定义时，只有 D2 明确授权安全重复的 STOP 才能声明支持停止。重复依据缺失或明确不安全时工厂保持关闭；已有明确不支持停止的设备结束任务按 false 接入，不通过改写实际合同来绕过门槛。验证原固定定义推导的活动能力与 D2 契约一致。
+- [ ] 实现专属解释器、文件工具和结果读取器。每条结果携带原任务、绑定、基准、调用和完成依据；分页结束只表示读完目录，不单独充当最终集合保证。结果缺少完成上下文时保留未知，不从文件扩展名或大小稳定补造完成。
+- [ ] 在 `registration.py` 用完整合同替代 OSMO 空合同；保持既有能力过滤逻辑，验证正式 `describe`、首次受理和运行消费同一工厂。驱动不直接写业务库、分配动作终态或生成报告。
+- [ ] 分别运行相关单元文件和 `P apps/camctl/tests/integration/devices -q`、`P apps/camctl/tests/integration/bootstrap -q`；只在 capture 实际接线变化时另跑其完整目录。检查 diff、独立复核后提交。
+
+## D4 失败、取消及恢复的联合验证
+
+**输入：** D3 的正式合同及 D2 已确定的结束模式。
+
+**交付接口：** 沿既有 `capture/timelapse.py`、`handlers.py`、原尝试和原保存申请恢复；不新增第二套 OSMO 状态机。
+
+状态或失败点|必须验证的行为
+-|-
+启动前目录读取失败、准备未完成或启动意图保存未可靠成功|不派发 START；区分读取失败与可靠空基准，保存未知先核实原申请。
+设置中失败、取消或期限到期|保留已发生的设置事实，不继续派发，不伪造实际开始。
+START 已派发但响应丢失、超时或断连|保留原尝试、设备占用及原基准；不重发 START，不建立没有依据的等待锚点。
+已确认发送后进程中断|按原发送事实、固定任务及可信时间恢复；不跨运行比较单调钟，不重新等待已证明完成的阶段。
+主机计时依据丢失或 STOP 未确认|仅执行本合同支持的有限收场；按既有 `duration_unknown` / `completion_unknown` 分区保存，不宣称已停或提前释放责任。
+STOP 支持但重复依据未知/不安全，或 STOP 调用结果未知后恢复|前者在当前表示下不能形成可用工厂；后者只有原合同明确允许安全重复时才按有限预算重停。若以后扩展独立能力，正常、取消、应急及残留停止消费者必须全部使用原冻结值，不因支持停止就再次派发。
+结果读取失败、集合不确定或文件未写完|保存读取错误或未确认事实；不能改报空集合或成功。
+已可靠结束且集合为空，或必要产物明确不合格|按既有 `no_outputs` / `invalid_outputs` 分区处理；有限核实后仍未知则使用 `outputs_unknown` 分区，保留已确认的合格文件。
+取消、会话退出、产物/终态保存结果未知|等待原实际调用和保存责任收场；复核原键、完整输入和决定，不换身份重新调用设备。符合保留条件的部分产物继续登记。
+
+- [ ] 先在对应单元及集成专题补齐上表实际分支，再运行最窄目标确认失败。已有机制已覆盖的分支通过实际 OSMO 合同复验，不为相同机制另建实现。
+- [ ] 仅修复实际缺口；不同运行模式分别使用其合法恢复规则，不在预算耗尽后切换完成方式。必要控制、其他设备和报告继续具备调度机会。
+- [ ] 分别运行 `P apps/camctl/tests/integration/capture -q`、`P apps/camctl/tests/integration/bootstrap -q`；涉及原保存或历史模块变化时追加其责任目录。留存实际命令、日志和退出码，复核后提交，并向 E2 交付正式合同及软件证据。
+
+## 审查重点与完成条件
+
+两款编码覆盖与共同时间域独立核验，Action6 新诊断和旧记录读取保持各自规则；响应不越过授权含义，结果成功具备归属及完成依据，未知调用不产生第二次 START。D0/D1/D1A 的 Action6 部分完成表示其时间相关软件已同步，不表示正式延时已启用；D0—D4 的 OSMO 部分完成才表明该型号正式软件接入具备交付条件，ARM 完整业务验收仍由 E3 单独完成。
