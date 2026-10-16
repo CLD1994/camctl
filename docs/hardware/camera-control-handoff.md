@@ -311,6 +311,8 @@ adb pull /mnt/media_rw/emulated/DCIM
 
 两款相机后续实机演示均选择最短允许时间组合：1 s 间隔、5 min 采集时长。OSMO 的仅视频演示要求见[最短实机演示](camera-demo-validation.md#osmo-360-ii-的最短实机演示)，Action6 的新诊断要求见[延时摄影资料](camera-demo-validation.md#延时摄影资料)。已有 OSMO 30 s / 600 s 完整预设保留为[上次 TX2 执行记录](camera-demo-validation.md#osmo-360-ii-的-tx2-手工复验顺序)；两款相机的最短组合负载分别核对，不能互相套用。
 
+OSMO 最短组合的[手工演示顺序](camera-demo-validation.md#osmo-360-ii-的最短手工演示顺序)已有[用户现场确认通过记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。该结果采用现场整体确认，逐项参数回读和正式执行契约按其记录的范围分别保留。
+
 ### 任务与输出要求
 
 | 样例 | 间隔 | 任务持续时间 | 曝光 | 输出与备注 |

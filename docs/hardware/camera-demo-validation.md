@@ -2,7 +2,7 @@
 
 ARM 上的 Action6 普通录像演示已由用户于 2026-10-11 确认正常，T9 当前演示范围完成。当前不需要再次拍摄或要求用户补交报告；原始计划、正式报告、媒体文件和确认水位未归档，因此本文不补写测量值或逐项结论。详见[普通录像现场验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。
 
-Action6 原生延时摄影的诊断已暂停；STOP、实际开始与结束、文件完成及最终产物集合尚未由真机证据确认。不要对这次未闭合试验运行 `--capture timelapse`、重发 START 或自动重试；只有对已有采样目录进行只读观察时才使用 `--observe`。OSMO 360 II 整体真机联调也未完成。范围与证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)及[组件验证记录](../camctl/verification.md)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
+Action6 原生延时摄影的诊断已暂停；STOP、实际开始与结束、文件完成及最终产物集合尚未由真机证据确认。不要对这次未闭合试验运行 `--capture timelapse`、重发 START 或自动重试；只有对已有采样目录进行只读观察时才使用 `--observe`。OSMO 360 II 的[最短延时手工演示已由用户现场确认通过](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)，正式执行与完整业务链继续由[领域计划](../superpowers/plans/2026-10-16-osmo360ii-timelapse.md)跟踪。其他范围与证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)及[组件验证记录](../camctl/verification.md)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
 
 真实目标主机性能测量、物理断电后的持久性验证和真实第三方传输方联调采用独立验收范围；边界见[第一版完善与验收范围](../architecture/README.md#第一版完善与验收范围)和[文件交接规格](../architecture/file-handoff.md)。本文保留相机资料采集、诊断工具说明以及 ARM 安装版 host 演示的操作步骤，设备当前结果以组件验证记录为准。
 
@@ -103,7 +103,7 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 
 ## 延时摄影资料
 
-Action6 和 OSMO 的延时摄影仍是设备接入范围，但当前 Action6 原生延时诊断已暂停，OSMO 整体联调未完成。设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。本节说明最短实机演示的参数目标、已有 TX2 执行记录、诊断脚本保留的行为和既有记录的只读复查入口。
+OSMO 最短延时手工演示的当前结果见[现场验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。Action6 原生延时诊断保持暂停；两款正式接入的剩余设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。本节说明最短实机演示的参数目标、已有 TX2 执行记录、诊断脚本保留的行为和既有记录的只读复查入口。
 
 两款使用相同的[间隔与采集时长限制](camera-control-handoff.md#间隔与采集时长限制)，后续实机演示的最短时间目标均为 1 秒间隔、300 秒采集；模式、曝光、输出与编码分别沿自身契约。Action6 新诊断的输入、完整映射和旧记录读取由[驱动计划 D1A](../superpowers/plans/2026-10-16-osmo360ii-timelapse-driver.md#d1a-action6-新诊断与旧记录只读复查)同步。新诊断省略时间选项时从同源资源派生最短组合；下文秒级结果保留为既有记录和只读复查背景。
 
@@ -111,7 +111,38 @@ Action6 和 OSMO 的延时摄影仍是设备接入范围，但当前 Action6 原
 
 实机演示采用[参数限制](camera-control-handoff.md#间隔与采集时长限制)中的最短允许组合：采集间隔为 1 s，采集时长为 5 min（300 s），仅输出视频。该组合满足 `duration_s > interval_s`。其余模式、分辨率和曝光设置沿用下文已执行记录中的要求，实际参数仍需核实。
 
-这项演示目标的完整 `6c` 候选遵守[候选编码契约](../camctl/timelapse-command-encoding.md)，在 D1 完成对应型号的软件生成与派发验证后供 D2 独立试验使用。候选可构造不证明设备参数生效；正式演示仍须取得工具、响应、结束及文件契约。300 秒只表示采集时长，参数准备、命令响应及最终文件处理的耗时分别记录；结果观察和完成判定仍须具有对应依据。
+这项演示使用的完整 `6c` 负载由[候选编码契约](../camctl/timelapse-command-encoding.md)生成；软件生成与派发验证已交付，本组合的手工现场结果见[验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。正式驱动仍须按 D2 明确工具、响应、结束及文件契约。300 秒只表示采集时长，参数准备、命令响应及最终文件处理的耗时分别记录；本次没有归档逐项参数读回或精确计时结果。
+
+### OSMO 360 II 的最短手工演示顺序
+
+以下为用户现场确认通过的演示请求顺序；确认范围由[现场验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)定义。该顺序与下文既有 30 秒／600 秒试验分别保留，不使用旧试验的 610 秒观察安排判定本次结果。
+
+在 TX2 终端先用 `adb devices -l` 确认目标 serial，下面沿用原绑定 `123456789ABCDEF`，实际不同时统一替换。逐条执行：仅在本地退出码为 `0`、没有未解释报错，并收到唯一完整的 `Resp message, len = 1, data: 00` 后继续；出现错误或响应不明确时停止后续派发，不自动重试。
+
+```bash
+# 1. 模式切换准备，与下一条配合进入全景静止延时模式。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x8e 01013f000101'
+# 2. 选择全景静止延时模式。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c e1 3b'
+# 3. 设置输出为 8K / 30 fps，输出帧率与采集间隔分别设置。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 6f03000000'
+# 4. 打开 Pro，准备设置手动曝光。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101'
+# 5. 切换至 M 档曝光。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 1e 0400'
+# 6. 设置 ISO 800。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 2A 06'
+# 7. 设置快门为 1/60 秒。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 28 013c8000'
+# 8. 设置白平衡为 5200 K。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2c 0634000000'
+# 9. 请求设置 1 秒采集间隔、300 秒采集时长及仅视频输出。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0407000a002c01000000000000000001'
+# 10. 发送一次延时摄影启动请求，保留原响应等待选项。
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 20000000 01'
+```
+
+`-o 20000000` 不表示拍摄时长，其单位和必要性仍由 D2 独立核实。启动后的观察覆盖至少 300 秒采集目标及后续视频处理；等待到期或 `00` 响应不能单独替代完成判定。结果未知或 USB 断连时保留原请求与现场材料，不补发 START。上述为复现入口，当前已通过的演示无需重复采集。
 
 ### OSMO 360 II 的 TX2 手工复验顺序
 
