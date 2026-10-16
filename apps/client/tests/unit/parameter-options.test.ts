@@ -6,6 +6,8 @@ import {
   parameterRequired,
   parameterChoiceBlocked,
   sameValueAt,
+  parameterFieldOptions,
+  parameterFieldIndependent,
 } from "../../src/web/parameter-options";
 import { DIALECT } from "../../src/shared/validation";
 import type { ParameterType } from "../../src/shared/types";
@@ -604,4 +606,392 @@ it.each([
   ["", "空字符串"],
 ])("选项标签保持值含义 %j", (value, expected) => {
   expect(optionLabel(value)).toBe(expected);
+});
+
+const grouped = (): ParameterType => ({
+  ...independent(),
+  schema: {
+    $schema: DIALECT,
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      type: { const: "example_record" },
+      pace: { type: "number", enum: [0.5, 1, 2] },
+      span: { type: "integer", enum: [1, 2] },
+      note: { type: "string" },
+      profile: {
+        oneOf: [
+          {
+            type: "object",
+            properties: { mode: { const: "auto" } },
+            required: ["mode"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              mode: { const: "manual" },
+              gain: { type: "integer" },
+            },
+            required: ["mode", "gain"],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+    required: ["type", "pace", "span", "profile"],
+    allOf: [
+      {
+        if: { required: ["span"], properties: { span: { const: 1 } } },
+        then: { properties: { pace: { exclusiveMaximum: 1 } } },
+        else: { properties: { pace: { exclusiveMaximum: 2 } } },
+      },
+    ],
+  },
+});
+const groupCatalog = (p = grouped()) => {
+  const result = parameterOptions(p);
+  expect(result.kind).toBe("grouped");
+  if (result.kind !== "grouped") throw new Error("应为关联组");
+  return result;
+};
+it("受限根合取生成局部关联目录并证明其余字段独立", () => {
+  const p = grouped(),
+    before = stringifyJson(p.schema);
+  const result = groupCatalog(p);
+  expect(result.group.members).toEqual(["pace", "span"]);
+  expect(result.independent).toEqual(["type", "note", "profile"]);
+  expect(result.group.catalog).toMatchObject({
+    kind: "finite",
+    rows: [
+      { pace: 0.5, span: 1 },
+      { pace: 0.5, span: 2 },
+      { pace: 1, span: 2 },
+    ],
+  });
+  expect(parameterFieldIndependent(result, "profile")).toBe(true);
+  expect(parameterFieldIndependent(result, "pace")).toBe(false);
+  expect(parameterFieldIndependent(result, "missing")).toBe(false);
+  expect(parameterFieldOptions(result, "pace")).toBe(result.group.catalog);
+  expect(parameterFieldOptions(result, "type")).toMatchObject({
+    kind: "independent",
+  });
+  expect(stringifyJson(p.schema)).toBe(before);
+});
+it("局部兼容只读取其他组成员，保留非法独立输入与完整输入", () => {
+  const result = groupCatalog();
+  const params = parseJson(
+    '{"pace":2,"span":2,"profile":false,"extra":true,"note":null} ',
+  ) as Record<string, unknown>;
+  const before = stringifyJson(params);
+  expect(compatibleValues(result, params, "pace")).toEqual([0.5, 1]);
+  expect(compatibleValues(result, { pace: 1 }, "span")).toEqual([2]);
+  expect(compatibleValues(result, { pace: null }, "span")).toEqual([]);
+  expect(compatibleValues(result, params, "type")).toEqual(["example_record"]);
+  expect(parameterRequired(result, params, "pace")).toBe(true);
+  expect(parameterRequired(result, params, "profile")).toBe(true);
+  expect(parameterRequired(result, params, "note")).toBe(false);
+  expect(stringifyJson(params)).toBe(before);
+});
+it("条件必填、else 和多个原条件共同过滤候选", () => {
+  const p = grouped();
+  p.schema.required = ["type", "pace"];
+  p.schema.allOf = [
+    {
+      if: { required: ["pace"], properties: { pace: { const: 0.5 } } },
+      then: { required: ["span"], properties: { span: { const: 1 } } },
+      else: { properties: { span: { const: 2 } } },
+    },
+    {
+      if: { required: ["span"] },
+      then: { properties: { pace: { maximum: 1 } } },
+    },
+  ];
+  const result = groupCatalog(p);
+  expect(result.group.catalog).toMatchObject({
+    kind: "finite",
+    rows: [
+      { pace: 0.5, span: 1 },
+      { pace: 1 },
+      { pace: 1, span: 2 },
+      { pace: 2 },
+    ],
+  });
+  expect(parameterRequired(result, { pace: 0.5 }, "span")).toBe(true);
+  expect(parameterRequired(result, { pace: 1 }, "span")).toBe(false);
+});
+it("条件的对象类型断言不能被删除后误判为可分解", () => {
+  const p = grouped();
+  p.schema.allOf = [
+    { if: { type: "array", properties: { span: { const: 1 } } }, then: false },
+  ];
+  expect(parameterOptions(p).kind).toBe("unavailable");
+});
+it("完整有限目录先于局部组，继续按全部参数过滤", () => {
+  const p = grouped(),
+    properties = p.schema.properties as Record<string, unknown>;
+  delete properties.note;
+  delete properties.profile;
+  p.schema.required = ["type", "pace", "span"];
+  const result = parameterOptions(p);
+  expect(result.kind).toBe("finite");
+  expect(compatibleValues(result, { span: 2, extra: true }, "pace")).toEqual(
+    [],
+  );
+});
+it("独立字段查询保留自身必填证明，不依赖其他字段", () => {
+  const result = parameterOptions(independent());
+  expect(parameterFieldIndependent(result, "duration_s")).toBe(true);
+  expect(parameterFieldIndependent(result, "missing")).toBe(false);
+  expect(parameterRequired(result, { duration_s: null }, "duration_s")).toBe(
+    true,
+  );
+  expect(
+    compatibleValues(result, { duration_s: null }, "bitrate_mode"),
+  ).toEqual(["standard", "high"]);
+});
+it("组外精度损失与注释不影响当前有限组", () => {
+  const p = grouped(),
+    properties = p.schema.properties as Record<string, unknown>;
+  properties.profile = parseJson('{"type":"number","minimum":1e-999}');
+  p.schema.examples = parseJson("[1.0000000000000001]");
+  const result = groupCatalog(p);
+  expect(result.group.catalog).toMatchObject({
+    kind: "finite",
+    rows: [
+      { pace: 0.5, span: 1 },
+      { pace: 0.5, span: 2 },
+      { pace: 1, span: 2 },
+    ],
+  });
+});
+it("布尔条件叶节点仍参与过滤，空合法集合有明确状态", () => {
+  const p = grouped();
+  (p.schema.allOf as unknown[]).push({ if: true, then: false });
+  expect(groupCatalog(p).group.catalog).toMatchObject({
+    kind: "finite",
+    rows: [],
+  });
+});
+it.each([
+  { if: true, then: false },
+  { if: false, then: false, else: true },
+  { if: { type: "object" }, then: {} },
+])("不为无引用字段的条件集合建立空组 %#", (condition) => {
+  const p = grouped();
+  p.schema.allOf = [condition];
+  expect(parameterOptions(p).kind).toBe("unavailable");
+});
+it.each([
+  { $id: "https://example.test/rules" },
+  { $defs: { value: {} } },
+  { $ref: "#/$defs/value", $defs: { value: {} } },
+  { anyOf: [{}] },
+  { oneOf: [{}] },
+  { not: false },
+  { dependentRequired: { pace: ["span"] } },
+  { dependentSchemas: { pace: {} } },
+  { minProperties: 1 },
+  { maxProperties: 20 },
+  { propertyNames: { type: "string" } },
+  { patternProperties: {} },
+  { unevaluatedProperties: false },
+  { if: true, then: true },
+  { unknownAssertion: true },
+  { additionalProperties: true },
+])("未覆盖根结构不提供分解证明 %#", (change) => {
+  const p = grouped();
+  Object.assign(p.schema, change);
+  expect(parameterOptions(p).kind).toBe("unavailable");
+});
+it.each([
+  { if: {}, then: {}, anyOf: [{}] },
+  { if: {}, then: {}, $id: "https://example.test/condition" },
+  { if: { $ref: "#/properties/type" }, then: {} },
+  { if: { allOf: [{}] }, then: {} },
+  { if: { properties: { absent: { const: 1 } } }, then: {} },
+  { if: { required: ["absent"] }, then: {} },
+  { if: { additionalProperties: false }, then: {} },
+  {
+    if: { properties: { span: { type: "object", properties: {} } } },
+    then: {},
+  },
+  { if: { properties: { span: { $ref: "#/properties/type" } } }, then: {} },
+  { if: { properties: { span: { allOf: [{}] } } }, then: {} },
+  { if: {}, then: { properties: { span: { enum: [{ nested: 1 }] } } } },
+])("未覆盖条件不能删去断言继续推导 %#", (condition) => {
+  const p = grouped();
+  p.schema.allOf = [condition];
+  expect(parameterOptions(p).kind).toBe("unavailable");
+});
+it.each(["then", "else"])("条件 %s 分支中的未覆盖断言也拒绝分解", (keyword) => {
+  const p = grouped();
+  (p.schema.allOf as Record<string, unknown>[])[0][keyword] = {
+    properties: { pace: { enum: [1] } },
+    minProperties: 1,
+  };
+  expect(parameterOptions(p).kind).toBe("unavailable");
+});
+it.each(["unbounded", "limit", "numeric"] as const)(
+  "已证明组不可枚举仍保留独立性 %s",
+  (reason) => {
+    const p = grouped(),
+      properties = p.schema.properties as Record<string, unknown>;
+    if (reason === "unbounded") properties.pace = { type: "number" };
+    if (reason === "limit")
+      properties.pace = { enum: Array.from({ length: 2049 }, (_, i) => i) };
+    if (reason === "numeric")
+      properties.pace = parseJson('{"enum":[1.0000000000000001]}');
+    const result = groupCatalog(p);
+    expect(result.group.catalog).toEqual({ kind: "unavailable", reason });
+    expect(parameterFieldIndependent(result, "profile")).toBe(true);
+    expect(compatibleValues(result, {}, "type")).toEqual(["example_record"]);
+    expect(() => compatibleValues(result, {}, "pace")).toThrow();
+  },
+);
+it("参与条件的精确数字事实无法可靠枚举时只停用组", () => {
+  const p = grouped();
+  p.schema.allOf = parseJson(
+    '[{"if":{"properties":{"span":{"const":1.0000000000000001}}},"then":{"properties":{"pace":{"const":1}}}}]',
+  );
+  expect(groupCatalog(p).group.catalog).toEqual({
+    kind: "unavailable",
+    reason: "numeric",
+  });
+});
+it.each([4096, 4097])("关联组在分配行前执行候选积上限 %s", (size) => {
+  const p = grouped(),
+    properties = p.schema.properties as Record<string, unknown>;
+  properties.pace = { enum: Array.from({ length: size }, (_, i) => i) };
+  properties.span = { const: 1 };
+  p.schema.allOf = [
+    { if: { required: ["span"] }, then: { required: ["pace"] } },
+  ];
+  const group = groupCatalog(p).group.catalog;
+  if (size === 4096) {
+    expect(group.kind).toBe("finite");
+    if (group.kind === "finite") expect(group.rows).toHaveLength(4096);
+  } else expect(group).toEqual({ kind: "unavailable", reason: "limit" });
+});
+it("可选缺省、null、false、零和空字符串在局部组中分别参与原条件", () => {
+  const p = grouped(),
+    properties = p.schema.properties as Record<string, unknown>;
+  properties.pace = { enum: [null, false, 0, ""] };
+  properties.span = { const: 1 };
+  p.schema.required = ["type", "span"];
+  p.schema.allOf = [
+    {
+      if: { required: ["span"] },
+      then: { properties: { pace: { enum: [null, false, 0, ""] } } },
+    },
+  ];
+  expect(groupCatalog(p).group.catalog).toMatchObject({
+    kind: "finite",
+    rows: [
+      { span: 1 },
+      { pace: null, span: 1 },
+      { pace: false, span: 1 },
+      { pace: 0, span: 1 },
+      { pace: "", span: 1 },
+    ],
+  });
+});
+it.each(["5e-1", "0.50", "0.50000000000000001"])(
+  "局部查询按精确数学身份比较 %s",
+  (token) => {
+    const result = groupCatalog();
+    const params = parseJson(`{"pace":${token}}`) as Record<string, unknown>;
+    expect(compatibleValues(result, params, "span")).toEqual(
+      token === "0.50000000000000001" ? [] : [1, 2],
+    );
+  },
+);
+it("局部候选复制保留源数字词元且不修改输入规则", () => {
+  const p = grouped();
+  (p.schema.properties as Record<string, unknown>).pace = parseJson(
+    '{"enum":[5e-1,1e0]}',
+  );
+  const before = stringifyJson(p.schema),
+    result = groupCatalog(p);
+  const values = compatibleValues(result, { span: 2 }, "pace");
+  expect(originalNumberToken(values, 0, values[0])).toBe("5e-1");
+  expect(originalNumberToken(values, 1, values[1])).toBe("1e0");
+  expect(stringifyJson(p.schema)).toBe(before);
+});
+it.each([
+  "/actions/0/params/pace",
+  "/actions/0/params/span",
+  "/actions/0/params/span/member",
+  "/actions/0/params/type",
+  "/actions/0/device_id",
+  "/actions/0/params",
+  "/bad~3",
+])("局部组被成员或身份 pending 阻塞 %s", (pendingPath) => {
+  const result = groupCatalog();
+  expect(
+    parameterChoiceBlocked(
+      pendingContent(pendingPath),
+      ["actions", 0, "params", "pace"],
+      result,
+    ),
+  ).toBe(true);
+});
+it.each([
+  "/actions/0/params/profile",
+  "/actions/0/params/note",
+  "/actions/0/name",
+  "/actions/1/params/value",
+])("独立字段或其他作用域 pending 不阻塞局部组 %s", (pendingPath) => {
+  const result = groupCatalog();
+  expect(
+    parameterChoiceBlocked(
+      pendingContent(pendingPath),
+      ["actions", 0, "params", "pace"],
+      result,
+    ),
+  ).toBe(false);
+});
+it("关联组 pending 不阻塞独立字段，但自身 pending 仍阻塞", () => {
+  const result = groupCatalog();
+  expect(
+    parameterChoiceBlocked(
+      pendingContent("/actions/0/params/pace"),
+      ["actions", 0, "params", "profile"],
+      result,
+    ),
+  ).toBe(false);
+  expect(
+    parameterChoiceBlocked(
+      pendingContent("/actions/0/params/profile/mode"),
+      ["actions", 0, "params", "profile"],
+      result,
+    ),
+  ).toBe(true);
+});
+it("不可枚举组仍按成员范围判断 pending，不使用组外旧值", () => {
+  const p = grouped();
+  (p.schema.properties as Record<string, unknown>).pace = { type: "number" };
+  const result = groupCatalog(p);
+  expect(
+    parameterChoiceBlocked(
+      pendingContent("/actions/0/params/span"),
+      ["actions", 0, "params", "pace"],
+      result,
+    ),
+  ).toBe(true);
+  expect(
+    parameterChoiceBlocked(
+      pendingContent("/actions/0/params/profile"),
+      ["actions", 0, "params", "pace"],
+      result,
+    ),
+  ).toBe(false);
+});
+it.each([
+  { properties: { pace: { type: 3 } } },
+  { properties: { pace: { $ref: "#/$defs/missing" } } },
+])("规则错误不能因无法生成完整目录而变成表单回退 %#", (change) => {
+  const p = grouped();
+  Object.assign(p.schema.properties as object, change.properties);
+  expect(() => parameterOptions(p)).toThrow();
 });

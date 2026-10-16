@@ -4,6 +4,7 @@ import { resolveField } from "./editing";
 import { parseDraft, pointerPath, type Path } from "./editing";
 import type { DraftContent } from "../server/models";
 import { SCHEMA_ANNOTATIONS, visitSchemaNodes } from "../shared/schema-nodes";
+import { isLocalScalarSchema } from "./scalar-schema";
 import {
   cloneClientJson,
   exactJsonValueIdentity,
@@ -18,15 +19,35 @@ export interface ParameterField {
   values: unknown[];
   required: boolean;
 }
+type FiniteOptions = {
+  kind: "finite";
+  fields: ParameterField[];
+  rows: Record<string, unknown>[];
+};
+type UnavailableOptions = {
+  kind: "unavailable";
+  reason: "open" | "unbounded" | "limit" | "numeric";
+};
+type IndependentOptions = {
+  kind: "independent";
+  fields: ParameterField[];
+  names: string[];
+  required: string[];
+};
 export type ParameterOptions =
+  | FiniteOptions
+  | IndependentOptions
+  | UnavailableOptions
   | {
-      kind: "finite";
+      kind: "grouped";
+      // fields 只包含独立字段的有限选项；组候选只由 group.catalog 表达。
       fields: ParameterField[];
-      rows: Record<string, unknown>[];
-    }
-  | { kind: "independent"; fields: ParameterField[] }
-  | { kind: "unavailable"; reason: "open" | "unbounded" | "limit" | "numeric" };
+      independent: string[];
+      independentRequired: string[];
+      group: { members: string[]; catalog: FiniteOptions | UnavailableOptions };
+    };
 const cache = new WeakMap<ParameterType, ParameterOptions>();
+const MAX_CANDIDATES = 4096;
 
 export function sameValue(a: unknown, b: unknown): boolean {
   if (a === undefined || b === undefined) return a === b;
@@ -123,7 +144,7 @@ export function parameterOptions(parameter: ParameterType): ParameterOptions {
   const complete = buildOptions(parameter);
   const result =
     complete.kind === "unavailable"
-      ? (independentOptions(parameter) ?? complete)
+      ? (groupedOptions(parameter) ?? independentOptions(parameter) ?? complete)
       : complete;
   cache.set(parameter, result);
   return result;
@@ -138,8 +159,12 @@ export function hasNumericLoss(schema: Record<string, unknown>): boolean {
     exactJsonValueIdentity(JSON.parse(JSON.stringify(assertions)))
   );
 }
-function buildOptions(parameter: ParameterType): ParameterOptions {
+function buildOptions(
+  parameter: ParameterType,
+): FiniteOptions | UnavailableOptions {
   const schema = parameter.schema;
+  // 规则错误必须原样交给能力加载层，不能被不可枚举状态隐藏。
+  const validate = createValidator().compile(schema);
   // 完整目录与局部字段分别检查其全部断言，不能用舍入事实生成候选。
   if (hasNumericLoss(schema)) return { kind: "unavailable", reason: "numeric" };
   // patternProperties 可以开放未列出的键，无法证明下面的候选目录完整。
@@ -157,7 +182,7 @@ function buildOptions(parameter: ParameterType): ParameterOptions {
     const required =
       Array.isArray(schema.required) && schema.required.includes(name);
     size *= values.length + (required ? 0 : 1);
-    if (size > 4096) return { kind: "unavailable", reason: "limit" };
+    if (size > MAX_CANDIDATES) return { kind: "unavailable", reason: "limit" };
     fields.push({
       name,
       schema: resolveField(definition, schema),
@@ -186,7 +211,6 @@ function buildOptions(parameter: ParameterType): ParameterOptions {
       }),
     ]);
   }
-  const validate = createValidator().compile(schema);
   return { kind: "finite", fields, rows: rows.filter((row) => validate(row)) };
 }
 
@@ -199,22 +223,6 @@ const independentRoot = new Set([
   "additionalProperties",
   ...SCHEMA_ANNOTATIONS,
 ]);
-const scalarAssertions = new Set([
-  "type",
-  "enum",
-  "const",
-  "minimum",
-  "maximum",
-  "exclusiveMinimum",
-  "exclusiveMaximum",
-  "multipleOf",
-  "minLength",
-  "maxLength",
-  "pattern",
-  "format",
-  ...SCHEMA_ANNOTATIONS,
-]);
-const scalarTypes = new Set(["string", "number", "integer", "boolean", "null"]);
 function independentOptions(
   parameter: ParameterType,
 ): Extract<ParameterOptions, { kind: "independent" }> | undefined {
@@ -228,20 +236,12 @@ function independentOptions(
     return undefined;
   const fields: ParameterField[] = [];
   for (const [name, definition] of Object.entries(schema.properties)) {
-    if (
-      !isObject(definition) ||
-      Object.keys(definition).some((key) => !scalarAssertions.has(key)) ||
-      (definition.type !== undefined &&
-        !(
-          Array.isArray(definition.type) ? definition.type : [definition.type]
-        ).every((type) => typeof type === "string" && scalarTypes.has(type))) ||
-      hasNumericLoss(definition)
-    )
+    if (!isLocalScalarSchema(definition) || hasNumericLoss(definition))
       continue;
     const values = domain(definition, schema);
     if (
       !values ||
-      values.length > 4096 ||
+      values.length > MAX_CANDIDATES ||
       values.some((value) => typeof value === "object" && value !== null)
     )
       continue;
@@ -259,14 +259,166 @@ function independentOptions(
       ),
     });
   }
-  return { kind: "independent", fields };
+  return {
+    kind: "independent",
+    fields,
+    names: Object.keys(schema.properties),
+    required: Array.isArray(schema.required)
+      ? (schema.required as string[])
+      : [],
+  };
+}
+
+const conditionKeywords = new Set([
+  "if",
+  "then",
+  "else",
+  ...SCHEMA_ANNOTATIONS,
+]);
+const leafKeywords = new Set([
+  "type",
+  "properties",
+  "required",
+  ...SCHEMA_ANNOTATIONS,
+]);
+
+function groupedOptions(
+  parameter: ParameterType,
+): Extract<ParameterOptions, { kind: "grouped" }> | undefined {
+  const schema = parameter.schema;
+  if (
+    schema.type !== "object" ||
+    schema.additionalProperties !== false ||
+    !isObject(schema.properties) ||
+    !Array.isArray(schema.required) ||
+    !Array.isArray(schema.allOf) ||
+    Object.keys(schema).some(
+      (key) => key !== "allOf" && !independentRoot.has(key),
+    ) ||
+    schema.required.some(
+      (name) =>
+        typeof name !== "string" ||
+        !Object.hasOwn(schema.properties as object, name),
+    )
+  )
+    return undefined;
+  const properties = schema.properties;
+  const members = new Set<string>();
+  const addMember = (name: string) => {
+    if (!Object.hasOwn(properties, name)) return false;
+    members.add(name);
+    return true;
+  };
+  const leaf = (value: unknown): boolean => {
+    if (typeof value === "boolean") return true;
+    if (
+      !isObject(value) ||
+      Object.keys(value).some((key) => !leafKeywords.has(key)) ||
+      (value.type !== undefined && value.type !== "object")
+    )
+      return false;
+    if (
+      value.required !== undefined &&
+      (!Array.isArray(value.required) ||
+        !value.required.every(
+          (name) => typeof name === "string" && addMember(name),
+        ))
+    )
+      return false;
+    return (
+      value.properties === undefined ||
+      (isObject(value.properties) &&
+        Object.entries(value.properties).every(
+          ([name, rule]) => addMember(name) && isLocalScalarSchema(rule),
+        ))
+    );
+  };
+  if (
+    !schema.allOf.every(
+      (condition) =>
+        isObject(condition) &&
+        Object.hasOwn(condition, "if") &&
+        Object.hasOwn(condition, "then") &&
+        Object.keys(condition).every((key) => conditionKeywords.has(key)) &&
+        leaf(condition.if) &&
+        leaf(condition.then) &&
+        (!Object.hasOwn(condition, "else") || leaf(condition.else)),
+    ) ||
+    members.size === 0
+  )
+    return undefined;
+  // 根字段本身也必须是可解释的局部标量；无限域和精度损失只影响枚举资格。
+  if ([...members].some((name) => !isLocalScalarSchema(properties[name])))
+    return undefined;
+  const names = Object.keys(properties);
+  const groupMembers = names.filter((name) => members.has(name));
+  const independent = names.filter((name) => !members.has(name));
+  const project = (keys: string[]) =>
+    Object.fromEntries(
+      keys.map((name) => [name, cloneClientJson(properties[name])]),
+    );
+  const groupSchema = {
+    $schema: schema.$schema,
+    type: "object",
+    additionalProperties: false,
+    properties: project(groupMembers),
+    required: schema.required.filter((name) => members.has(name as string)),
+    allOf: cloneClientJson(schema.allOf),
+  };
+  const local = independentOptions({
+    ...parameter,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: project(independent),
+      required: schema.required.filter((name) => !members.has(name as string)),
+    },
+  })!;
+  return {
+    kind: "grouped",
+    fields: local.fields,
+    independent,
+    independentRequired: local.required,
+    group: {
+      members: groupMembers,
+      catalog: buildOptions({ ...parameter, schema: groupSchema }),
+    },
+  };
+}
+
+/** 只有根结构证明条件不读取此字段时，才能采用其局部控件资格。 */
+export function parameterFieldIndependent(
+  catalog: ParameterOptions,
+  field: string,
+): boolean {
+  return (
+    (catalog.kind === "independent" && catalog.names.includes(field)) ||
+    (catalog.kind === "grouped" && catalog.independent.includes(field))
+  );
+}
+
+/** 查询返回当前字段实际覆盖的规则范围，局部组不能冒充完整目录。 */
+export function parameterFieldOptions(
+  catalog: ParameterOptions,
+  field: string,
+): FiniteOptions | IndependentOptions | UnavailableOptions {
+  if (catalog.kind !== "grouped") return catalog;
+  if (catalog.group.members.includes(field)) return catalog.group.catalog;
+  if (catalog.independent.includes(field))
+    return {
+      kind: "independent",
+      fields: catalog.fields,
+      names: catalog.independent,
+      required: catalog.independentRequired,
+    };
+  return { kind: "unavailable", reason: "unbounded" };
 }
 
 /** 当前字段的依赖范围由目录分类确定，不能读取相关 pending 所覆盖的旧值。 */
 export function parameterChoiceBlocked(
   content: DraftContent,
   path: Path,
-  kind: "finite" | "independent",
+  scope: "finite" | "independent" | ParameterOptions,
 ): boolean {
   if (path.length !== 4 || path[0] !== "actions" || path[2] !== "params")
     return true;
@@ -285,6 +437,16 @@ export function parameterChoiceBlocked(
     return true;
   const fieldPath = path.map(String);
   const paramsPath = fieldPath.slice(0, 3);
+  const kind =
+    typeof scope === "string"
+      ? scope
+      : parameterFieldOptions(scope, String(path[3])).kind;
+  const groupPaths =
+    typeof scope !== "string" &&
+    scope.kind === "grouped" &&
+    scope.group.members.includes(String(path[3]))
+      ? scope.group.members.map((name) => paramsPath.concat(name))
+      : [];
   const identityPaths = [
     fieldPath.slice(0, 2).concat("device_id"),
     fieldPath.slice(0, 2).concat("type"),
@@ -312,7 +474,11 @@ export function parameterChoiceBlocked(
       identityPaths.some(
         (identity) => prefix(pending, identity) || prefix(identity, pending),
       ) ||
-      (kind === "finite" && prefix(paramsPath, pending))
+      (groupPaths.length
+        ? groupPaths.some(
+            (member) => prefix(pending, member) || prefix(member, pending),
+          )
+        : kind === "finite" && prefix(paramsPath, pending))
     );
   });
 }
@@ -322,9 +488,12 @@ export function compatibleValues(
   params: Record<string, unknown>,
   field: string,
 ): unknown[] {
-  if (catalog.kind !== "finite") throw new Error("此规则无法推导联动选项");
-  const rows = compatibleRows(catalog, params, field);
-  const values = catalog.fields.find((entry) => entry.name === field)?.values;
+  const scope = parameterFieldOptions(catalog, field);
+  if (scope.kind === "unavailable") throw new Error("此规则无法推导联动选项");
+  const values = scope.fields.find((entry) => entry.name === field)?.values;
+  if (scope.kind === "independent")
+    return values ? filteredValues(values, () => true) : [];
+  const rows = compatibleRows(scope, params, field, catalog.kind === "grouped");
   return values
     ? filteredValues(values, (_value, index) =>
         rows.some(
@@ -336,14 +505,16 @@ export function compatibleValues(
 }
 
 function compatibleRows(
-  catalog: Extract<ParameterOptions, { kind: "finite" }>,
+  catalog: FiniteOptions,
   params: Record<string, unknown>,
   field: string,
+  local = false,
 ) {
   return catalog.rows.filter((row) =>
     Object.entries(params).every(
       ([key]) =>
         key === field ||
+        (local && !catalog.fields.some((entry) => entry.name === key)) ||
         (Object.hasOwn(row, key) && sameValueAt(row, key, params, key)),
     ),
   );
@@ -354,9 +525,11 @@ export function parameterRequired(
   params: Record<string, unknown>,
   field: string,
 ): boolean {
-  if (catalog.kind !== "finite") throw new Error("此规则无法推导条件必填性");
-  if (catalog.fields.find((f) => f.name === field)?.required) return true;
-  const rows = compatibleRows(catalog, params, field);
+  const scope = parameterFieldOptions(catalog, field);
+  if (scope.kind === "unavailable") throw new Error("此规则无法推导条件必填性");
+  if (scope.fields.find((f) => f.name === field)?.required) return true;
+  if (scope.kind === "independent") return scope.required.includes(field);
+  const rows = compatibleRows(scope, params, field, catalog.kind === "grouped");
   return rows.length > 0 && rows.every((row) => Object.hasOwn(row, field));
 }
 

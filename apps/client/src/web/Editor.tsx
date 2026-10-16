@@ -1403,7 +1403,7 @@ export function SchemaFields({
   const hasPending =
     catalog.kind !== "unavailable" &&
     fields.some(([name]) =>
-      parameterChoiceBlocked(content, [...path, name], catalog.kind),
+      parameterChoiceBlocked(content, [...path, name], catalog),
     );
   const form = fields.length ? (
     <>
@@ -1440,7 +1440,7 @@ export function SchemaFields({
               : catalog.fields.find((entry) => entry.name === name)?.values;
           const blocked =
             catalog.kind !== "unavailable" &&
-            parameterChoiceBlocked(content, [...path, name], catalog.kind);
+            parameterChoiceBlocked(content, [...path, name], catalog);
           return (
             <Field
               key={name}
