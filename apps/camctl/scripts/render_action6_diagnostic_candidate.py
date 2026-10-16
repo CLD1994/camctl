@@ -41,6 +41,13 @@ def generated_source():
     tree = ast.parse(source)
     definitions = {}
     imports = {}
+    bindings = set()
+
+    def bind(name):
+        if name in bindings:
+            raise ValueError(f"生产编码模块绑定重复：{name}")
+        bindings.add(name)
+
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
             name = node.name
@@ -49,36 +56,49 @@ def generated_source():
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 name = alias.asname or alias.name
-                imports[name] = f"from {node.module} import {alias.name}" + (f" as {alias.asname}" if alias.asname else "")
+                bind(name)
+                if node.level != 0 or node.module is None:
+                    raise ValueError(f"生产编码模块不支持相对 ImportFrom：{name}")
+                if node.module == "__future__" and (alias.name != "annotations" or alias.asname is not None):
+                    raise ValueError(f"生产编码模块不支持该 future ImportFrom：{name}")
+                imports[name] = (node.level, node.module, alias.name, alias.asname)
             continue
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             continue
         else:
             raise ValueError(f"生产编码模块出现未支持的顶层形状：{type(node).__name__}")
-        if name in definitions:
-            raise ValueError(f"生产编码模块定义重复：{name}")
+        bind(name)
         definitions[name] = node
     selected = set()
     needed_imports = set()
     pending = ["_encode_settings"]
     while pending:
         name = pending.pop()
-        if name in selected or name in needed_imports or name in vars(builtins):
+        if name in selected or name in needed_imports:
+            continue
+        if name in vars(builtins):
+            if name in bindings:
+                raise ValueError(f"闭包依赖的内建名称被模块重新绑定：{name}")
             continue
         if name in IMPORTS:
-            if imports.get(name) != IMPORTS[name]:
+            allowed = ast.parse(IMPORTS[name]).body[0]
+            identity = (allowed.level, allowed.module, allowed.names[0].name, allowed.names[0].asname)
+            if imports.get(name) != identity:
                 raise ValueError(f"标准库依赖与允许形状不符：{name}")
             needed_imports.add(name)
             continue
         if name == EXCEPTION:
-            if imports.get(name) != "from camctl.devices.drivers.registry import CapabilityNotDeclaredError":
-                raise ValueError("映射缺口异常的生产来源已变化")
+            if imports.get(name) != (0, "camctl.devices.drivers.registry", EXCEPTION, None):
+                raise ValueError(f"映射缺口异常的生产来源已变化：{EXCEPTION}")
             selected.add(name)
             continue
         if name not in definitions:
             raise ValueError(f"独立诊断编码存在未解释的运行依赖：{name}")
         selected.add(name)
         node = definitions[name]
+        for nested in ast.walk(node):
+            if isinstance(nested, (ast.Import, ast.ImportFrom)):
+                raise ValueError(f"{name} 的纯设置闭包包含未支持的 {type(nested).__name__}")
         start = min([node.lineno, *(decorator.lineno for decorator in getattr(node, "decorator_list", []))])
         pending.extend(global_references("\n".join(source.splitlines()[start - 1:node.end_lineno])))
     registry = REGISTRY.read_text(encoding="utf-8")

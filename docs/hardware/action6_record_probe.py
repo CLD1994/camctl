@@ -47,6 +47,14 @@ class CaptureMode(StrEnum):
     TIMELAPSE = "timelapse"
 
 
+class ObservationLayout(StrEnum):
+    EARLIEST = "A0"
+    EARLIEST_WITH_FLAG = "A1"
+    TWO_PRESETS = "B0"
+    SINGLE_PRESET = "B1"
+    CANDIDATE_V1 = "C"
+
+
 class StorageState(StrEnum):
     DIRECTORY = "directory"
     ABSENT = "absent"
@@ -294,7 +302,8 @@ def load_observation_source(original: Path, serial: str) -> tuple[dict, set[byte
     def check_call(label, root=None):
         call = json.loads((original / label / "call.json").read_text(encoding="utf-8"))
         argv = call.get("argv") if isinstance(call, dict) else None
-        if not isinstance(argv, list) or argv[1:4] != ["-s", serial, "shell"]:
+        if (not isinstance(argv, list) or len(argv) != 6 or not all(isinstance(arg, str) for arg in argv)
+                or not argv[0] or argv[1:4] != ["-s", serial, "shell"]):
             raise RuntimeError(f"{label} 的原绑定与本次 serial 不同或记录无效")
         if type(call.get("returncode")) is not int or call["returncode"] != 0:
             raise RuntimeError(f"{label} 的原调用退出状态无效：{call.get('returncode')!r}")
@@ -325,15 +334,59 @@ def load_observation_source(original: Path, serial: str) -> tuple[dict, set[byte
     return observation, before, metadata
 
 
+def original_observation_layout(original, observation):
+    """先按原字段与完整布局分区，缺失／混杂不能逐标签回退。"""
+    legacy_fields = {"requested_params", "preset_payload", "preset_basis"}
+    version_fields = {"encoding_format", "template_identity", "template_payload"}
+    legacy = legacy_fields & observation.keys()
+    version = version_fields & observation.keys()
+    if legacy and legacy != legacy_fields:
+        raise RuntimeError(f"原请求 metadata 缺失：{sorted(legacy_fields - legacy)}")
+    if version and version != version_fields:
+        raise RuntimeError(f"原 v1 格式事实缺失：{sorted(version_fields - version)}")
+    if version and not legacy:
+        raise RuntimeError("原 v1 请求 metadata 缺失")
+    if "observation_only" in observation and observation["observation_only"] is not False:
+        raise RuntimeError("原记录必须是 observation_only=false 的采集记录")
+    if legacy and "observation_only" not in observation:
+        raise RuntimeError("原请求 metadata 缺少 observation_only=false")
+    if version:
+        layout = ObservationLayout.CANDIDATE_V1
+    elif legacy:
+        output = original / "05-output"
+        layout = (ObservationLayout.TWO_PRESETS if output.exists() or output.is_symlink()
+                  else ObservationLayout.SINGLE_PRESET)
+    else:
+        layout = (ObservationLayout.EARLIEST_WITH_FLAG if "observation_only" in observation
+                  else ObservationLayout.EARLIEST)
+    early = layout in (ObservationLayout.EARLIEST, ObservationLayout.EARLIEST_WITH_FLAG)
+    expected = {"01-mode", "02-resolution"}
+    expected.update(("03-exposure", "04-preset") if early else ("03-timing", "04-exposure"))
+    if layout is ObservationLayout.TWO_PRESETS:
+        expected.add("05-output")
+    known = {label for label, _ in SETTINGS} | {"03-exposure", "04-preset", "03-timing", "05-output"}
+    present = {label for label in known if (original / label).exists() or (original / label).is_symlink()}
+    if present != expected:
+        raise RuntimeError(f"原 {layout} 设置布局缺失或混合：缺少 {sorted(expected - present)}；"
+                           f"额外 {sorted(present - expected)}")
+    return layout
+
+
 def original_timelapse_metadata(original, observation, serial):
     """解释原格式与调用事实；不消费当前时间资源或新请求编码。"""
+    layout = original_observation_layout(original, observation)
+    early = layout in (ObservationLayout.EARLIEST, ObservationLayout.EARLIEST_WITH_FLAG)
+    timing_label = "04-preset" if early else "03-timing"
+    exposure_label = "03-exposure" if early else "04-exposure"
+
     def command(label):
         directory = original / label
         call = exact_json((directory / "call.json").read_text(encoding="utf-8"))
         if not isinstance(call, dict):
             raise RuntimeError(f"{label} 的原调用记录必须是对象")
         argv = call.get("argv")
-        if (not isinstance(argv, list) or len(argv) != 6 or argv[1:5] != ["-s", serial, "shell", "-T"]
+        if (not isinstance(argv, list) or len(argv) != 6 or not all(isinstance(arg, str) for arg in argv)
+                or not argv[0] or argv[1:5] != ["-s", serial, "shell", "-T"]
                 or type(call.get("returncode")) is not int or call["returncode"] != 0):
             raise RuntimeError(f"{label} 的原调用、绑定或退出状态无效")
         try:
@@ -351,13 +404,13 @@ def original_timelapse_metadata(original, observation, serial):
     expected_controls = {
         "01-mode": "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
         "02-resolution": "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
-        "04-exposure": "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
+        exposure_label: "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
         "12-start": "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
     }
     for label, expected in expected_controls.items():
         if command(label) != shlex.split(expected):
             raise RuntimeError(f"{label} 的原延时设置或启动命令不一致")
-    timing = command("03-timing")
+    timing = command(timing_label)
     prefix = shlex.split("dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c")
     if timing[:-1] != prefix or len(timing) != len(prefix) + 1:
         raise RuntimeError("原延时完整负载调用无效")
@@ -368,11 +421,11 @@ def original_timelapse_metadata(original, observation, serial):
         raise RuntimeError("原延时完整负载无法解码") from error
     if len(payload) != 34 or len(raw) != 17:
         raise RuntimeError("原延时完整负载长度不符")
-    if (original / "05-output").exists() and command("05-output") != timing:
+    if layout is ObservationLayout.TWO_PRESETS and command("05-output") != timing:
         raise RuntimeError("原输出与时间负载调用不一致")
     fields = {"requested_params", "preset_payload", "preset_basis"}
-    has_metadata = any(field in observation for field in fields)
-    new_format = any(field in observation for field in ("encoding_format", "template_identity", "template_payload"))
+    has_metadata = not early
+    new_format = layout is ObservationLayout.CANDIDATE_V1
     if new_format:
         required = fields | {"encoding_format", "template_identity", "template_payload"}
         if (not required <= observation.keys() or observation["encoding_format"] != ENCODING_FORMAT

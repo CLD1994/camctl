@@ -172,7 +172,7 @@ apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parame
 apps/camctl/.venv311/bin/python apps/camctl/scripts/render_action6_diagnostic_candidate.py --check
 ```
 
-第二个生成器只提取当前生产模块的已核对纯设置依赖及原异常声明；出现未知依赖或源码形状变化时明确失败，维护者需要重新核对独立交付边界。软件隔离目录运行及工具替身验证不表示 Windows 本机、ARM 或真实设备已验收。
+第二个生成器只提取当前生产模块的已核对纯设置依赖及原异常声明；按原导入的模块、相对层级、名称和别名核对依赖；同名绑定、闭包内建名称重绑定、闭包内嵌套导入及其他未知依赖或源码形状均明确拒绝，维护者需要重新核对独立交付边界。软件隔离目录运行及工具替身验证不表示 Windows 本机、ARM 或真实设备已验收。
 
 ### Action6 秒级延时试验
 
@@ -188,7 +188,25 @@ python .\action6_record_probe.py --observe ".\action6\timelapse-probe-<原 UTC �
 
 `--observe` 与 `--capture` 互斥，只接受原生延时记录，不能另带间隔或时长选项。脚本校验原模式、计时记录、START、启动前目录调用的 serial、退出状态及目录结果；原始记录缺失或无效时，不会继续设备观察。原 START 异常而尚未保存 `capture-observation.json` 的记录应只检查原始调用材料，不得补发 START。
 
-新格式记录按保存的精确参数、完整负载、格式身份和原模板核对，不读取当前时间资源或按新请求 Schema 重判。旧格式的 `requested_params`、`preset_payload` 与 `preset_basis` 必须与原设置调用一致；最早没有这些字段的 8／1800 记录，需要原模式、分辨率、完整时间预设、曝光及 START 调用共同证明原参数，缺失时不按默认值补齐。原五步设置记录存在 `05-output` 时，其完整负载也必须与时间设置一致。复查结果分别记录本次目录差集、下载与媒体检查，不能更新原试验的开始、结束、文件写完或产物集合结论。既有复查语义和观察值见[验证记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
+新格式记录按保存的精确参数、完整负载、格式身份和原模板核对，不读取当前时间资源或按新请求 Schema 重判。旧记录沿[原记录格式与设置布局](#action6-原记录格式与设置布局)识别；原始事实不完整时不补默认值。复查结果分别记录本次目录差集、下载与媒体检查，不能更新原试验的开始、结束、文件写完或产物集合结论。既有复查语义和观察值见[验证记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
+
+### Action6 原记录格式与设置布局
+
+只读入口将 observation 字段和原设置目录一起核对，再读取对应调用。下表各分区均要求 `01-mode`、`02-resolution`，以及同一相机的 `12-start`、`11-before-internal` 和 `11-before-sd` 原调用。
+
+分区|observation 字段|其余设置目录
+-|-|-
+A0，最早记录|采集模式、采样时刻和两项计时，没有 `observation_only` 或参数 metadata。|`03-exposure`、`04-preset`。
+A1，带采集标志的最早记录|与 A0 相同，增加 `observation_only=false`。|与 A0 相同。
+B0，两次完整预设的旧实验记录|`observation_only=false`，`requested_params`、`preset_payload`、`preset_basis` 全部存在，没有 v1 字段。|`03-timing`、`04-exposure`、`05-output`；两次完整负载一致。
+B1，一次完整预设的旧实验记录|与 B0 相同。|`03-timing`、`04-exposure`。
+C，第一版候选记录|`observation_only=false`，三项参数 metadata 和 `encoding_format`、`template_identity`、`template_payload` 全部存在。|与 B1 相同。
+
+A0／A1 的完整原调用证明 4K／30 fps、Auto、仅视频和 8 秒／1800 秒；B0／B1 保存原 8 秒间隔及 1—1800 整数秒实验时长。C 沿原精确参数和固定格式解释，不因当前时间允许值变化而改写原记录。原文件保持原字节，当前时间资源和编码模块缺失不影响这些只读路径。
+
+各设置和 START 调用的原 argv 必须是六个字符串组成的 ADB shell 包装，工具名非空、serial 一致、退出状态为整数 `0`、标准错误为空，并保存唯一完整 `00` 响应。两个原基准分别核对目录脚本、原始输出和路径范围，可靠空目录与不存在分别处理，不能同时不存在。`summary.json`、`11-before-storage.json`、后采样及媒体资料不能补齐缺失的原调用或覆盖原基准。
+
+部分 metadata、部分或未知 v1 身份、旧新设置目录混合，以及必要原调用缺失或矛盾，都会在任何工具调用前拒绝。B0 的 `05-output` 存在时必须完整且与原时间负载一致；读取器不会因该目录内容损坏而按 B1 继续。旧格式没有独立版本字段，因此无法推断一个已经整目录删除的 `05-output` 原本是否存在。无关媒体和后续 `observation-*` 目录不参与设置布局判定。
 
 ### 分别保存原始调用
 

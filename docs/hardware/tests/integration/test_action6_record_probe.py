@@ -229,6 +229,44 @@ class ProbeIntegration(unittest.TestCase):
         finally:
             os.chdir(previous)
 
+    def historical_record(self, layout):
+        # 独立归档格式：最早四步、旧双预设及后续四步均直接保存原字面量。
+        # 不调用现代 seed_original、prepare_timelapse 或候选编码。
+        original = self.workspace / "history" / layout
+        original.mkdir(parents=True)
+        early = layout in ("A0", "A1")
+        observation = {"capture": "timelapse", "sampling_started_at": "2026-10-10T12:00:00+00:00",
+                       "start_call_elapsed_s": 2, "start_to_observation_s": 1800 if early else 30}
+        if layout != "A0":
+            observation["observation_only"] = False
+        payload = "0400005000080700000000000000000000" if early else "04000050001e0000000000000000000000"
+        if not early:
+            observation.update(requested_params={"resolution": "4k30", "exposure": "auto", "interval_s": 8,
+                                                 "duration_s": 30, "outputs": "video"},
+                               preset_payload=payload, preset_basis="experimental_duration")
+        (original / "capture-observation.json").write_text(json.dumps(observation))
+        common = (
+            ("01-mode", "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02"),
+            ("02-resolution", "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000"))
+        exposure = "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100"
+        timing = "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c " + payload
+        settings = (("03-exposure", exposure), ("04-preset", timing)) if early else (("03-timing", timing), ("04-exposure", exposure))
+        if layout == "B0":
+            settings += (("05-output", timing),)
+        for label, command in (*common, *settings, ("12-start", TIMELAPSE_START)):
+            self.archive_call(original, label, command, b"Resp message, len = 1, data:\n  00\n", b"")
+        for name, remote in (("internal", INTERNAL), ("sd", SD)):
+            script = (f"if [ -d {remote} ]; then\n"
+                      f"find {remote} -type f -print0\n"
+                      "status=$?\nprintf 'CAMCTL_FIND_EXIT=%s\\n' \"$status\" >&2\nexit \"$status\"\n"
+                      f"elif [ -e {remote} ] || [ -L {remote} ]; then\n"
+                      "printf 'CAMCTL_STORAGE_NOT_DIRECTORY\\n' >&2\nexit 1\n"
+                      "else\nprintf 'CAMCTL_STORAGE_ABSENT\\n' >&2\nfi\n")
+            self.archive_call(original, "11-before-" + name, script,
+                              (INTERNAL + "/old.JPG").encode() + b"\0" if name == "internal" else b"",
+                              b"CAMCTL_FIND_EXIT=0\n" if name == "internal" else b"CAMCTL_STORAGE_ABSENT\n")
+        return original
+
     def seed_original(self, duration_s=1800):
         # 旧归档夹具直接保留原请求与原调用，不通过当前新请求入口制造。
         original = self.workspace / "action6" / "timelapse-probe-archived"
@@ -593,14 +631,7 @@ class ProbeIntegration(unittest.TestCase):
         self.assertEqual(self.read_summary(observation)["new_files"], [VIDEO])
 
     def test_observe_accepts_original_capture_without_new_summary_fields(self):
-        original = self.seed_original()
-        (original / "summary.json").unlink()
-        path = original / "capture-observation.json"
-        observation = json.loads(path.read_text())
-        del observation["observation_only"]
-        for field in ("requested_params", "preset_payload", "preset_basis"):
-            observation.pop(field, None)
-        path.write_text(json.dumps(observation))
+        original = self.historical_record("A0")
         before = self.snapshot(original)
         with self.assertRaises(RuntimeError):
             self.invoke("--observe", original)
@@ -1185,6 +1216,218 @@ class ProbeIntegration(unittest.TestCase):
         (original / "03-timing" / "call.json").write_text("[]")
         self.assert_original_rejected_without_device_calls(original)
 
+    def assert_no_external_rejection(self, original):
+        prior = self.trace()
+        before = self.snapshot(original)
+        with self.assertRaises((RuntimeError, ValueError, OSError)):
+            self.invoke("--observe", original)
+        self.assertEqual(self.trace(), prior)
+        self.assertEqual(self.snapshot(original), before)
+        self.assertEqual(list(original.glob("observation-*")), [])
+
+    def test_f1_all_five_record_layouts_are_read_only(self):
+        for layout in ("A0", "A1", "B0", "B1", "C"):
+            with self.subTest(layout=layout):
+                (self.workspace / "storage/internal/DJI_001/late.MP4").unlink(missing_ok=True)
+                original = self.seed_new(300, 1) if layout == "C" else self.historical_record(layout)
+                before = self.snapshot(original)
+                prior = len(self.trace())
+                self.sleep_calls.clear()
+                self.add_video()
+                with patch.object(self.probe, "TIME_PARAMETERS_PATH", self.workspace / "deleted-time.json"), patch.object(self.probe, "CANDIDATE_PATH", self.workspace / "deleted-encoder.py"):
+                    self.invoke("--observe", original)
+                current, = original.glob("observation-*")
+                summary = self.read_summary(current)
+                self.assertEqual(summary["params"]["duration_s"], 1800 if layout in ("A0", "A1") else 300 if layout == "C" else 30)
+                self.assertEqual(summary["params"]["interval_s"], 1 if layout == "C" else 8)
+                self.assertEqual(summary["preset_basis"], "source_example" if layout in ("A0", "A1") else "sample_derived_candidate" if layout == "C" else "experimental_duration")
+                self.assert_unknown_completion(summary)
+                self.assertEqual(self.control_commands(self.trace()[prior:]), [])
+                self.assertEqual(self.sleep_calls, [])
+                self.assertEqual(self.snapshot(original), before)
+
+    def test_f1_earliest_layouts_validate_every_required_call_and_raw_file(self):
+        for layout in ("A0", "A1"):
+            original = self.historical_record(layout)
+            before = self.snapshot(original)
+            for label in ("01-mode", "02-resolution", "03-exposure", "04-preset", "12-start", "11-before-internal", "11-before-sd"):
+                for filename in ("call.json", "stdout.bin", "stderr.bin"):
+                    path = original / label / filename
+                    raw = path.read_bytes()
+                    with self.subTest(layout=layout, label=label, missing=filename):
+                        path.unlink()
+                        try:
+                            self.assert_no_external_rejection(original)
+                        finally:
+                            path.write_bytes(raw)
+                for field, value in (("returncode", 1), ("returncode", True), ("argv", []), ("argv", ["adb", "-s", "OTHER", "shell", "-T", "sh -c invalid"])):
+                    path = original / label / "call.json"
+                    raw = path.read_bytes()
+                    call = json.loads(raw)
+                    call[field] = value
+                    with self.subTest(layout=layout, label=label, field=field, value=value):
+                        path.write_text(json.dumps(call))
+                        try:
+                            self.assert_no_external_rejection(original)
+                        finally:
+                            path.write_bytes(raw)
+            for label in ("01-mode", "02-resolution", "03-exposure", "04-preset", "12-start"):
+                for filename, value in (("stderr.bin", b"ERROR"), ("stdout.bin", b"Resp message, len = 1, data: e3"), ("stdout.bin", b"Resp message, len = 2, data: 00")):
+                    path = original / label / filename
+                    raw = path.read_bytes()
+                    with self.subTest(layout=layout, label=label, filename=filename, invalid=value):
+                        path.write_bytes(value)
+                        try:
+                            self.assert_no_external_rejection(original)
+                        finally:
+                            path.write_bytes(raw)
+            path = original / "04-preset" / "call.json"
+            raw = path.read_bytes()
+            path.write_bytes(raw.replace(b"0400005000080700000000000000000000", b"04000050001e0000000000000000000000"))
+            self.assert_no_external_rejection(original)
+            path.write_bytes(raw)
+            self.assertEqual(self.snapshot(original), before)
+
+    def test_f1_partial_metadata_and_mixed_layouts_are_rejected(self):
+        for layout in ("A0", "A1", "B0", "B1"):
+            original = self.historical_record(layout)
+            path = original / "capture-observation.json"
+            raw = path.read_bytes()
+            original_observation = json.loads(raw)
+            for field in ("requested_params", "preset_payload", "preset_basis", "encoding_format", "template_identity", "template_payload"):
+                observation = json.loads(raw)
+                if field in observation:
+                    del observation[field]
+                else:
+                    observation[field] = {} if field == "requested_params" else "partial"
+                with self.subTest(layout=layout, partial=field):
+                    path.write_text(json.dumps(observation))
+                    self.assert_no_external_rejection(original)
+            path.write_bytes(raw)
+            for label in (("03-timing", "04-exposure", "05-output") if layout in ("A0", "A1") else ("03-exposure", "04-preset")):
+                added = original / label
+                added.mkdir()
+                try:
+                    with self.subTest(layout=layout, extra=label):
+                        self.assert_no_external_rejection(original)
+                finally:
+                    added.rmdir()
+            observation = dict(original_observation, observation_only=True)
+            path.write_text(json.dumps(observation))
+            self.assert_no_external_rejection(original)
+            path.write_bytes(raw)
+        original = self.seed_original()
+        path = original / "capture-observation.json"
+        observation = json.loads(path.read_text())
+        for field in ("requested_params", "preset_payload", "preset_basis"):
+            del observation[field]
+        path.write_text(json.dumps(observation))
+        self.assert_no_external_rejection(original)
+
+    def test_f1_mixed_partial_and_complete_earliest_and_modern_labels_are_rejected(self):
+        for remove in ((), ("03-exposure",), ("04-preset",)):
+            # 每个失败组合使用独立A0原件，不借现代夹具推断布局。
+            original = self.historical_record("A0")
+            for label in remove:
+                shutil.rmtree(original / label)
+            self.archive_call(original, "03-timing", "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400005000080700000000000000000000", b"Resp message, len = 1, data: 00", b"")
+            self.archive_call(original, "04-exposure", "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100", b"Resp message, len = 1, data: 00", b"")
+            self.assert_no_external_rejection(original)
+            shutil.rmtree(original)
+
+    def test_f1_b0_present_output_is_required_and_must_match(self):
+        original = self.historical_record("B0")
+        for filename, invalid in (("call.json", b"{}"), ("stdout.bin", b"Resp message, len = 1, data: e3"), ("stderr.bin", b"ERROR")):
+            path = original / "05-output" / filename
+            raw = path.read_bytes()
+            with self.subTest(filename=filename, state="missing"):
+                path.unlink()
+                self.assert_no_external_rejection(original)
+            path.write_bytes(invalid)
+            with self.subTest(filename=filename, state="invalid"):
+                self.assert_no_external_rejection(original)
+            path.write_bytes(raw)
+        path = original / "05-output" / "call.json"
+        path.write_bytes(path.read_bytes().replace(b"04000050001e0000000000000000000000", b"04000050000a0000000000000000000000"))
+        self.assert_no_external_rejection(original)
+
+    def test_f1_v1_rejects_extra_earliest_or_duplicate_output_markers(self):
+        original = self.seed_new(300, 1)
+        for label in ("03-exposure", "04-preset", "05-output"):
+            extra = original / label
+            if label == "05-output":
+                shutil.copytree(original / "03-timing", extra)
+            else:
+                extra.mkdir()
+            try:
+                with self.subTest(extra=label):
+                    self.assert_no_external_rejection(original)
+            finally:
+                shutil.rmtree(extra)
+
+    def test_f1_earliest_records_run_without_deleted_resources_in_isolated_delivery(self):
+        delivery = self.workspace / "earliest-delivery"
+        delivery.mkdir()
+        for name in ("action6_record_probe.py", "collect_call.py", "timelapse-time-parameters.json", "action6_timelapse_candidate.py"):
+            shutil.copyfile(SCRIPT.with_name(name), delivery / name)
+        for name in ("timelapse-time-parameters.json", "action6_timelapse_candidate.py"):
+            (delivery / name).unlink()
+        self.add_video()
+        env = {**os.environ, "CAMCTL_PROBE_INTEGRATION_STATE": str(self.state_file)}
+        for layout in ("A0", "A1"):
+            with self.subTest(layout=layout):
+                archived = self.historical_record(layout)
+                original = delivery / layout
+                shutil.copytree(archived, original)
+                before = self.snapshot(original)
+                result = subprocess.run([sys.executable, "-I", str(delivery / "action6_record_probe.py"), "--observe", str(original), "--adb", str(self.tool), "--ffprobe", str(self.tool)], cwd=delivery, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                current, = original.glob("observation-*")
+                summary = self.read_summary(current)
+                self.assertEqual(summary["params"]["interval_s"], 8)
+                self.assertEqual(summary["params"]["duration_s"], 1800)
+                self.assertEqual(summary["preset_basis"], "source_example")
+                self.assert_unknown_completion(summary)
+                self.assertEqual(self.snapshot(original), before)
+        self.assertEqual(self.control_commands(), [])
+
+    def test_f1_earliest_dual_baseline_states_are_distinct(self):
+        for layout in ("A0", "A1"):
+            original = self.historical_record(layout)
+            for internal, sd in (("directory", "absent"), ("absent", "directory"), ("directory", "directory"), ("absent", "absent")):
+                for name, state in (("internal", internal), ("sd", sd)):
+                    (original / ("11-before-" + name) / "stdout.bin").write_bytes(b"")
+                    (original / ("11-before-" + name) / "stderr.bin").write_bytes(b"CAMCTL_FIND_EXIT=0\n" if state == "directory" else b"CAMCTL_STORAGE_ABSENT\n")
+                with self.subTest(layout=layout, internal=internal, sd=sd):
+                    if internal == sd == "absent":
+                        self.assert_no_external_rejection(original)
+                    else:
+                        _, before, metadata = self.probe.load_observation_source(original, SERIAL)
+                        self.assertEqual(before, set())
+                        self.assertEqual(metadata["requested_params"]["duration_s"], 1800)
+            for name, root in (("internal", INTERNAL), ("sd", SD)):
+                path = original / ("11-before-" + name)
+                (path / "stderr.bin").write_bytes(b"CAMCTL_FIND_EXIT=0\n")
+                for raw in (b"truncated", b"/outside/DCIM/photo.JPG\0", (root + "/a.JPG\0" + root + "/a.JPG\0").encode()):
+                    with self.subTest(layout=layout, scope=name, raw=raw):
+                        (path / "stdout.bin").write_bytes(raw)
+                        self.assert_no_external_rejection(original)
+                (path / "stdout.bin").write_bytes(b"")
+        self.assertEqual(self.trace(), [])
+
+    def test_f1_original_argv_is_a_nonempty_tool_and_six_strings(self):
+        original = self.historical_record("A0")
+        for label in ("01-mode", "12-start", "11-before-internal", "11-before-sd"):
+            path = original / label / "call.json"
+            raw = path.read_bytes()
+            for tool in (None, True, ""):
+                with self.subTest(label=label, tool=tool):
+                    call = json.loads(raw)
+                    call["argv"][0] = tool
+                    path.write_text(json.dumps(call))
+                    self.assert_no_external_rejection(original)
+            path.write_bytes(raw)
+
     def test_recording_keeps_one_start_and_stop_and_complete_video(self):
         self.set_state(video_at_start=True)
         self.invoke("--capture", "record")
@@ -1197,6 +1440,121 @@ class ProbeIntegration(unittest.TestCase):
         self.assertEqual(sum(command.endswith("-c 02 01") for command in commands), 1)
         self.assertEqual(sum(command.endswith("-c 02 00") for command in commands), 1)
         self.assertEqual(self.sleep_calls, [10])
+
+
+class GeneratorBindingChecks(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="camctl-diagnostic-generation-")
+        self.addCleanup(self.temporary.cleanup)
+        self.workspace = Path(self.temporary.name)
+        path = SCRIPT.parents[2] / "apps/camctl/scripts/render_action6_diagnostic_candidate.py"
+        spec = importlib.util.spec_from_file_location("candidate_generator_review", path)
+        self.generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.generator)
+        self.source = self.generator.SOURCE.read_text()
+        self.delivery = SCRIPT.with_name("action6_timelapse_candidate.py").read_text()
+
+    def assert_source_rejected(self, source, fragment):
+        origin = self.workspace / "commands.py"
+        target = self.workspace / "delivery.py"
+        origin.write_text(source)
+        with patch.object(self.generator, "SOURCE", origin), patch.object(self.generator, "TARGET", target):
+            error = None
+            try:
+                generated = self.generator.generated_source()
+            except ValueError as caught:
+                error = str(caught)
+                generated = self.delivery
+            # 即使旧生成器给出错误产物，--check也必须拒绝其源码形状。
+            target.write_text(generated)
+            before = target.read_bytes()
+            with patch.object(sys, "argv", ["generator", "--check"]), contextlib.redirect_stderr(io.StringIO()) as stderr:
+                result = self.generator.main()
+            self.assertEqual(target.read_bytes(), before)
+        self.assertIsNotNone(error, "不支持的源码形状被生成器接受")
+        self.assertIn(fragment, error)
+        self.assertNotEqual(result, 0, stderr.getvalue())
+        self.assertIn(fragment, stderr.getvalue())
+
+    def test_f2_import_definition_bindings_are_unique_in_both_directions(self):
+        cases = (
+            self.source.replace("from decimal import Decimal", "Decimal = float", 1),
+            self.source.replace("class CameraModel", "Decimal = float\n\nclass CameraModel", 1),
+            self.source.replace("from decimal import Decimal", "Decimal = float\nfrom decimal import Decimal", 1),
+            self.source.replace("class CameraModel", "def Decimal():\n    return None\n\nclass CameraModel", 1),
+            self.source.replace("class CameraModel", "class Decimal:\n    pass\n\nclass CameraModel", 1),
+            self.source + "\nfrom decimal import Decimal\n",
+        )
+        for number, source in enumerate(cases):
+            with self.subTest(case=number):
+                self.assert_source_rejected(source, "Decimal")
+
+    def test_f2_rebound_dependency_builtins_and_external_exception_are_rejected(self):
+        for name, binding in (("next", "next = lambda values, default: default"),
+                              ("int", "int = float"),
+                              ("CapabilityNotDeclaredError", "CapabilityNotDeclaredError = ValueError"),
+                              ("next", "from decimal import Decimal as next")):
+            with self.subTest(binding=binding):
+                self.assert_source_rejected(self.source.replace("class CameraModel", binding + "\n\nclass CameraModel", 1), name)
+
+    def test_f2_import_identity_preserves_level_module_name_and_alias(self):
+        for replacement in ("from .decimal import Decimal", "from decimal import Decimal as Decimal",
+                            "from math import floor as Decimal"):
+            with self.subTest(replacement=replacement):
+                self.assert_source_rejected(self.source.replace("from decimal import Decimal", replacement, 1), "Decimal")
+        self.assert_source_rejected(self.source.replace("from camctl.devices.drivers.registry import", "from .camctl.devices.drivers.registry import", 1), "CapabilityNotDeclaredError")
+
+    def test_f2_nested_import_and_from_import_in_selected_closure_are_rejected(self):
+        for marker, insertion in (("def _encode_settings(model, action_type, params):", "import os"),
+                                  ("def _encode_settings(model, action_type, params):", "from os import path"),
+                                  ("class CameraModel(StrEnum):", "import os")):
+            with self.subTest(marker=marker, insertion=insertion):
+                source = self.source.replace(marker, marker + "\n    " + insertion, 1)
+                self.assert_source_rejected(source, "Import")
+
+    def test_f2_previous_unknown_shapes_and_missing_root_remain_rejected(self):
+        for extra, fragment in (("import os", "Import"), ("a = b = 1", "Assign"),
+                                ("a: int = 1", "AnnAssign"), ("async def extra():\n    pass", "AsyncFunctionDef"),
+                                ("print('module effect')", "Expr"), ("_DIAG = ()", "_DIAG")):
+            with self.subTest(extra=extra):
+                self.assert_source_rejected(self.source + "\n" + extra + "\n", fragment)
+        self.assert_source_rejected(self.source.replace("def _encode_settings(", "def removed_settings(", 1), "_encode_settings")
+
+    def test_f2_external_exception_shape_changes_are_rejected(self):
+        registry = self.workspace / "registry.py"
+        for source in ("class CapabilityNotDeclaredError(ValueError):\n    'changed'\n",
+                       "@staticmethod\nclass CapabilityNotDeclaredError(Exception):\n    'changed'\n",
+                       "class CapabilityNotDeclaredError(Exception):\n    'changed'\n    code = 1\n",
+                       "class CapabilityNotDeclaredError(Exception):\n    'first'\nclass CapabilityNotDeclaredError(Exception):\n    'second'\n"):
+            with self.subTest(source=source):
+                registry.write_text(source)
+                with patch.object(self.generator, "REGISTRY", registry):
+                    self.assert_source_rejected(self.source, "异常")
+
+    def test_f2_only_annotations_future_directive_is_supported(self):
+        self.assert_source_rejected("from __future__ import division\n" + self.source, "division")
+        path = self.workspace / "commands.py"
+        path.write_text("from __future__ import annotations\n" + self.source)
+        with patch.object(self.generator, "SOURCE", path):
+            self.assertEqual(self.generator.generated_source(), self.delivery)
+
+    def test_f2_unselected_nested_dependency_does_not_expand_closure(self):
+        source = self.source + "\ndef unrelated_diagnostic_function():\n    import os\n    return missing_runtime_dependency()\n"
+        path = self.workspace / "commands.py"
+        path.write_text(source)
+        with patch.object(self.generator, "SOURCE", path):
+            self.assertEqual(self.generator.generated_source(), self.delivery)
+
+    def test_f2_missing_and_drifted_distribution_are_rejected_without_writes(self):
+        target = self.workspace / "missing.py"
+        with patch.object(self.generator, "TARGET", target), patch.object(sys, "argv", ["generator", "--check"]):
+            # 使诊断路径仍属于源码工作区，明确检查缺失／漂移而非路径格式错误。
+            with patch.object(self.generator, "REPO", self.workspace), contextlib.redirect_stderr(io.StringIO()):
+                self.assertNotEqual(self.generator.main(), 0)
+                self.assertFalse(target.exists())
+                target.write_text("DRIFTED")
+                self.assertNotEqual(self.generator.main(), 0)
+                self.assertEqual(target.read_text(), "DRIFTED")
 
 
 def shlex_command(args):
