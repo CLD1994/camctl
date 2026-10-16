@@ -2,6 +2,28 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 2026-10-16 延时参数保存与恢复验证
+
+客户端领域的 C3 保存矩阵使用本工作树的真实 HTTP、SQLite 和 Chromium；任务入口见[延时客户端计划](../superpowers/plans/2026-10-16-osmo360ii-timelapse-client.md)。生产实现满足新增断言，本阶段只扩展测试。合成能力仅提供两个间隔、两个时长以及两类输出结构，分别验证保存场景；生产两款 Schema、各自 134 对合法时间及跨语言判定由 P3 的根接缝单独验证，C3 的共同项在最终组合树复验后登记。
+
+[参数保存测试](../../apps/client/tests/integration/parameter-variants.test.ts)覆盖最短数值 `1.0/3e2`、Auto/manual ISO 800、Action6 三输出与 OSMO 仅视频，经 HTTP 保存、预设和导出后关闭服务及数据库，再以同一隔离目录重建后端。数值与原数字词元保持，能力收窄或移除不改写草稿、预设及固定请求；非法草稿可保存和重开，非法预设更新保留原记录，导出仍由后端完整校验。组内间隔、组外曝光成员与公共策略的未完成输入分别保留并阻止导出；停用曝光模式及成员原文随重启恢复。修正时间后，未完成的曝光仍不能保存为预设或导出。
+
+[联动页面测试](../../apps/client/tests/integration/browser-linked-parameters.test.ts)覆盖能力更新后的完整草稿和版本保持、独立曝光恢复及预设全文替换。应用预设清除所属参数输入，保留公共字段及其未完成原文；之后修改草稿不改变原预设。旧 Action6 `5400/6000` 秒草稿与预设在新规则下保留原值并显示错误，固定请求下载正文保持。独立合成录像与单张规则继续由各自 Schema 决定，没有由时间联动增加统一限制。
+
+验证环境为 Linux 开发容器，Node.js `v24.20.0`、SQLite `3.53.4`、TypeScript `7.0.2`、Vitest `5.0.1`、Vite `8.3.0`、Playwright `1.63.0`、Chromium `153.0.8010.12`。依赖使用本工作树已有独立安装；命令从 `apps/client` 执行，直接使用 Node 入口，对应类型检查及完整测试脚本的顺序。测试使用两个工作进程，先单元，再构建当前网页，最后完整集成。
+
+| 检查与实际命令 | UTC 时间、退出码及结果 |
+| --- | --- |
+| 专项 `node node_modules/vitest/vitest.mjs run tests/integration/parameter-variants.test.ts tests/integration/browser-linked-parameters.test.ts --maxWorkers=2` | 08:17:15→08:18:02，exit0，2 文件、169 项，46.72 秒。 |
+| 类型 `node node_modules/typescript/bin/tsc --noEmit` | 08:18:02，exit0。 |
+| 完整单元 `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` | 08:18:02→08:18:27，exit0，59 文件、2883 项，25.07 秒。 |
+| 构建 `node node_modules/vite/bin/vite.js build` | 08:18:27→08:18:28，exit0，464 modules；主包 854.24 kB、gzip 255.80 kB，保留超过 500 kB 提示。构建前已通过上述类型检查。 |
+| 完整集成 `node node_modules/vitest/vitest.mjs run tests/integration --maxWorkers=2` | 08:18:28→08:26:21，exit0，35 文件、1350 项，472.90 秒。 |
+
+最终完整测试共 4233 项，不叠加专项及开发过程的数量。
+
+首轮测试的六项失败来自新增夹具的空 `allOf` 与浏览器请求地址，修正后原目标 158 项首次通过；随后补全的最终目标为 169 项。夹具失败不作为产品缺陷或产品测试红灯。实际命令、UTC 时间和退出码保存在本工作树忽略目录 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/task-C3-final-*.log`。上述后端重建和浏览器重开是客户端软件证据，正式安装版 `describe`、ARM、真实相机与物理断电分别验收。
+
 ## 2026-10-12 并发草稿与完整版本选择验证
 
 验证环境为 Windows、PowerShell、Node.js `v24.16.0`、TypeScript `7.0.2`、Vitest `5.0.1`、Vite `8.3.0`、Playwright `1.63.0` 和 Chromium `153.0.8010.12`。命令直接使用已有 Node 入口，没有安装依赖。有效规则分别见[自动保存与并发冲突](storage-and-recovery.md#草稿的自动保存与并发冲突)、[另存的确认与重试](storage-and-recovery.md#另存的确认与重试)、[采用与替换的异常处理](storage-and-recovery.md#采用与替换的异常处理)、[键盘与焦点](page-interactions.md#键盘与焦点)和[动作显示状态与追加接纳](../architecture/client-editing.md#动作显示状态与追加接纳)。实施范围由[并发草稿计划](../superpowers/plans/2026-10-11-client-draft-conflicts.md#任务七真实双浏览器组合完整门禁与交付)跟踪。七项实施均已通过逐任务独立审查，整体审查及统一修复后的限定复审结论在下述当前端点登记。

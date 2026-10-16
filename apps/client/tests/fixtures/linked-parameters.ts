@@ -56,3 +56,43 @@ export function linkedParameter(): ParameterType {
     },
   };
 }
+
+/** 仅供保存场景的两个时间取值，不替代生产相机的完整候选域。 */
+export function storageParameter(
+  outputs: string[],
+  legacy = false,
+): ParameterType {
+  const parameter = linkedParameter();
+  const properties = parameter.schema.properties as Record<string, unknown>;
+  properties.interval_s = { title: "拍摄间隔", enum: [1, 300] };
+  properties.duration_s = {
+    title: "采集时长",
+    enum: legacy ? [5400, 6000] : [300, 600],
+  };
+  delete properties.output;
+  properties.outputs = { title: "输出选择", type: "string", enum: outputs };
+  parameter.schema.required = [
+    "type",
+    "interval_s",
+    "duration_s",
+    "exposure",
+    "outputs",
+  ];
+  if (legacy) delete parameter.schema.allOf;
+  else
+    parameter.schema.allOf = [
+      {
+        if: {
+          properties: { duration_s: { const: 300 } },
+          required: ["duration_s"],
+        },
+        then: { properties: { interval_s: { exclusiveMaximum: 300 } } },
+      },
+    ];
+  return parameter;
+}
+
+export const storageScenarios = [
+  { device: "action6", outputs: ["video", "video_raw", "video_jpeg"] },
+  { device: "osmo360ii", outputs: ["video"] },
+];

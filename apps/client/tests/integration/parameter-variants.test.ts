@@ -11,6 +11,7 @@ import type {
   DraftContent,
   ExportedRequest,
   ParameterVariant,
+  Preset,
 } from "../../src/server/models";
 import {
   initializePreviewMetadata,
@@ -21,6 +22,10 @@ import { switchActionType } from "../../src/web/action-drafts";
 import { editValue, removeAction, setValue } from "../../src/web/editing";
 import { switchParameterType } from "../../src/web/parameter-drafts";
 import { DraftSession } from "../../src/web/session";
+import {
+  storageParameter,
+  storageScenarios,
+} from "../fixtures/linked-parameters";
 import { switchObjectBranch } from "../../src/shared/object-variants";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -58,11 +63,11 @@ function catalog(previewSupported = true) {
 }
 
 /** 每次只启动临时目录和随机端口；重启重新创建真实 Application 和 HTTP 服务。 */
-async function setup() {
+async function setup(initialCatalog: unknown = catalog()) {
   const directory = mkdtempSync(join(tmpdir(), "client-parameter-variants-"));
   writeFileSync(
     join(directory, "device-capabilities.json"),
-    JSON.stringify(catalog()),
+    stringifyJson(initialCatalog),
   );
   let app!: Application;
   let files!: Files;
@@ -157,6 +162,13 @@ async function setup() {
       await stop();
       await start();
       expect((await state()).startup.state).toBe("ready");
+    },
+    async replaceCatalog(value: unknown) {
+      writeFileSync(
+        join(directory, "device-capabilities.json"),
+        stringifyJson(value),
+      );
+      await ok("/api/capabilities/reload", "POST");
     },
     async reload(previewSupported: boolean) {
       writeFileSync(
@@ -1583,4 +1595,364 @@ describe("预览协调暂停的真实保存重开回归", () => {
       expectUnfinishedPreviewExport(host, draft);
     },
   );
+});
+
+function storageCatalog(
+  scenario: (typeof storageScenarios)[number],
+  legacy = false,
+) {
+  return {
+    devices: [
+      {
+        device_id: scenario.device,
+        driver_id: "test-storage",
+        actions: [
+          {
+            type: "camera_timelapse",
+            parameter_types: [storageParameter(scenario.outputs, legacy)],
+          },
+        ],
+      },
+    ],
+  };
+}
+function timeContent(
+  device: string,
+  duration = "300",
+  exposure = '{"mode":"auto"}',
+  output = "video",
+  interval = "1",
+): DraftContent {
+  return {
+    text: `{"name":"保存矩阵","actions":[{"name":"拍摄","type":"camera_timelapse","device_id":"${device}","scheduled_at":"2026-10-16 12:00:00","policy":{"max_delay_ms":0},"params":{"type":"linked_capture","interval_s":${interval},"duration_s":${duration},"exposure":${exposure},"outputs":"${output}"}}]}`,
+  };
+}
+for (const scenario of storageScenarios) {
+  describe(`${scenario.device} 小型保存矩阵`, () => {
+    for (const exposure of ['{"mode":"auto"}', '{"mode":"manual","iso":800}']) {
+      it.each(scenario.outputs)(
+        `最短参数与曝光 ${exposure} / %s 经 HTTP、SQLite 重启保持数值及固定正文`,
+        async (output) => {
+          const host = await setup(storageCatalog(scenario));
+          const draft = await host.create(
+            timeContent(scenario.device, "3e2", exposure, output, "1.0"),
+          );
+          const preset = await host.ok<Preset>(
+            "/api/presets",
+            "POST",
+            {
+              name: "最短",
+              deviceId: scenario.device,
+              actionType: "camera_timelapse",
+              params: actions(draft.content)[0].params,
+            },
+            201,
+          );
+          const exported = await host.export(draft);
+          expect(exported.status, exported.raw).toBe(200);
+          const path = `/api/requests/${exported.value.id}/download`;
+          const original = await host.request(path);
+          expect(original.raw).toContain('"interval_s": 1.0');
+          expect(original.raw).toContain('"duration_s": 3e2');
+          const params = (exported.value.body.actions as any[])[0].params;
+          expect(params).toEqual({
+            type: "linked_capture",
+            interval_s: 1,
+            duration_s: 300,
+            exposure: parseClientJson(exposure),
+            outputs: output,
+          });
+          expect(typeof params.interval_s).toBe("number");
+          expect(typeof params.duration_s).toBe("number");
+          await host.restart();
+          expect((await host.read(draft.id)).content).toEqual(draft.content);
+          expect((await host.state()).presets).toEqual([preset]);
+          await host.replaceCatalog({ devices: [] });
+          await host.restart();
+          expect((await host.request(path)).raw).toBe(original.raw);
+          expect((await host.export(await host.read(draft.id))).value).toEqual(
+            exported.value,
+          );
+        },
+      );
+    }
+    it("曝光模式及成员原文随时间参数一起保存重启恢复", async () => {
+      const host = await setup(storageCatalog(scenario));
+      const original = editValue(
+        timeContent(scenario.device, "300", '{"mode":"manual","iso":800}'),
+        ["actions", 0, "params", "exposure", "iso"],
+        "8e",
+        "number",
+      );
+      const inactive = switchObjectBranch(
+        original,
+        0,
+        ["exposure"],
+        "mode",
+        "auto",
+      );
+      const draft = await host.create(inactive);
+      await host.restart();
+      const reopened = await host.read(draft.id);
+      expect(reopened.content).toEqual(inactive);
+      const restored = switchObjectBranch(
+        reopened.content,
+        0,
+        ["exposure"],
+        "mode",
+        "manual",
+      );
+      const saved = await host.save(reopened, restored);
+      expect(actions(saved.content)[0].params).toEqual({
+        type: "linked_capture",
+        interval_s: 1,
+        duration_s: 300,
+        exposure: { mode: "manual", iso: 800 },
+        outputs: "video",
+      });
+      expect(saved.content.pending).toEqual(original.pending);
+      expect((await host.export(saved)).value.code).toBe("unfinished_input");
+    });
+    it("时间组修正后仍由后端拒绝独立曝光错误", async () => {
+      const host = await setup(storageCatalog(scenario));
+      const draft = await host.create(
+        timeContent(
+          scenario.device,
+          "300",
+          '{"mode":"manual"}',
+          "video",
+          "300",
+        ),
+      );
+      const corrected = await host.save(
+        draft,
+        setValue(draft.content, ["actions", 0, "params", "interval_s"], 1),
+      );
+      const result = await host.export(corrected);
+      expect(result.status).toBe(400);
+      expect(result.value.code).toBe("invalid_plan");
+      const preset = await host.request<{ code: string }>(
+        "/api/presets",
+        "POST",
+        {
+          name: "尚缺曝光",
+          deviceId: scenario.device,
+          actionType: "camera_timelapse",
+          params: actions(corrected.content)[0].params,
+        },
+      );
+      expect(preset.status).toBe(400);
+      expect(preset.value.code).toBe("invalid_preset");
+      expect((await host.state()).presets).toEqual([]);
+      expect((await host.state()).requests).toEqual([]);
+    });
+    it.each(["narrow", "remove"])(
+      "能力 %s 后保留草稿与预设，完整后端校验拒绝更新和导出",
+      async (change) => {
+        const host = await setup(storageCatalog(scenario));
+        const draft = await host.create(timeContent(scenario.device));
+        const presetInput = {
+          name: "保存",
+          deviceId: scenario.device,
+          actionType: "camera_timelapse",
+          params: actions(draft.content)[0].params,
+        };
+        const preset = await host.ok<Preset>(
+          "/api/presets",
+          "POST",
+          presetInput,
+          201,
+        );
+        const next = storageCatalog(scenario);
+        (
+          next.devices[0].actions[0].parameter_types[0].schema.properties as any
+        ).duration_s.enum = [600];
+        await host.replaceCatalog(change === "remove" ? { devices: [] } : next);
+        await host.restart();
+        const reopened = await host.read(draft.id);
+        expect(reopened.content).toEqual(draft.content);
+        const rejected = await host.request<{ code: string }>(
+          `/api/presets/${preset.id}`,
+          "PUT",
+          presetInput,
+        );
+        expect(rejected.status).toBe(400);
+        expect(rejected.value.code).toBe("invalid_preset");
+        expect((await host.export(reopened)).value.code).toBe("invalid_plan");
+        expect((await host.state()).presets).toEqual([preset]);
+        expect((await host.state()).requests).toEqual([]);
+      },
+    );
+    it.each([
+      "/actions/0/params/interval_s",
+      "/actions/0/params/exposure/iso",
+      "/actions/0/policy/max_delay_ms",
+    ])("未完成输入 %s 经保存重启保持且阻止导出", async (path) => {
+      const host = await setup(storageCatalog(scenario));
+      const content = {
+        ...timeContent(scenario.device),
+        pending: { [path]: { kind: "number" as const, text: "1e" } },
+      };
+      const draft = await host.create(content);
+      await host.restart();
+      expect((await host.read(draft.id)).content).toEqual(content);
+      const result = await host.export(await host.read(draft.id));
+      expect(result.status).toBe(400);
+      expect(result.value.code).toBe("unfinished_input");
+    });
+    it.each(["300", '"300"', "true", "300.00000000000000001", "5400", "6000"])(
+      "非法时长 %s 可保存重开，不能覆盖预设或导出",
+      async (duration) => {
+        const host = await setup(storageCatalog(scenario));
+        const valid = timeContent(scenario.device);
+        const preset = await host.ok<Preset>(
+          "/api/presets",
+          "POST",
+          {
+            name: "原预设",
+            deviceId: scenario.device,
+            actionType: "camera_timelapse",
+            params: actions(valid)[0].params,
+          },
+          201,
+        );
+        const invalid = timeContent(
+          scenario.device,
+          duration,
+          '{"mode":"manual","iso":800}',
+          "video",
+          duration === "300" ? "300" : "1",
+        );
+        const draft = await host.create(invalid);
+        await host.restart();
+        const reopened = await host.read(draft.id);
+        expect(reopened.content).toEqual(invalid);
+        const rejected = await host.request<{ code: string }>(
+          `/api/presets/${preset.id}`,
+          "PUT",
+          { ...preset, params: actions(invalid)[0].params },
+        );
+        expect(rejected.value.code).toBe("invalid_preset");
+        expect((await host.export(reopened)).value.code).toBe("invalid_plan");
+        expect((await host.state()).presets).toEqual([preset]);
+      },
+    );
+  });
+}
+it.each(["5400", "6000"])(
+  "旧 Action6 %s 秒草稿、预设与固定请求在规则更新后保留",
+  async (duration) => {
+    const scenario = storageScenarios[0];
+    const host = await setup(storageCatalog(scenario, true));
+    const original = timeContent(scenario.device, duration);
+    const editable = await host.create(original);
+    const fixed = await host.create(original);
+    const preset = await host.ok<Preset>(
+      "/api/presets",
+      "POST",
+      {
+        name: "旧参数",
+        deviceId: scenario.device,
+        actionType: "camera_timelapse",
+        params: actions(original)[0].params,
+      },
+      201,
+    );
+    const exported = await host.export(fixed);
+    expect(exported.status, exported.raw).toBe(200);
+    const path = `/api/requests/${exported.value.id}/download`;
+    const bytes = (await host.request(path)).raw;
+    await host.replaceCatalog(storageCatalog(scenario));
+    await host.restart();
+    expect((await host.read(editable.id)).content).toEqual(original);
+    expect((await host.state()).presets).toEqual([preset]);
+    expect((await host.export(await host.read(editable.id))).value.code).toBe(
+      "invalid_plan",
+    );
+    expect((await host.request(path)).raw).toBe(bytes);
+    expect((await host.export(await host.read(fixed.id))).value).toEqual(
+      exported.value,
+    );
+  },
+);
+
+it.each(["video_raw", "video_jpeg"])(
+  "OSMO 的非法输出 %s 经过保存重启仍保留并被后端拒绝",
+  async (output) => {
+    const scenario = storageScenarios[1];
+    const host = await setup(storageCatalog(scenario));
+    const content = timeContent(
+      scenario.device,
+      "300",
+      '{"mode":"auto"}',
+      output,
+    );
+    const draft = await host.create(content);
+    await host.restart();
+    expect((await host.read(draft.id)).content).toEqual(content);
+    expect((await host.export(await host.read(draft.id))).value.code).toBe(
+      "invalid_plan",
+    );
+  },
+);
+
+it("时间关联规则不扩散到普通录像和 Hasselblad 单张参数", async () => {
+  const parameter = (type: string, extra: Record<string, unknown> = {}) => ({
+    type,
+    name: type,
+    description: "独立参数存储验证",
+    preview_supported: false,
+    schema: {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      additionalProperties: false,
+      properties: { type: { const: type }, ...extra },
+      required: ["type", ...Object.keys(extra)],
+    },
+  });
+  const host = await setup({
+    devices: [
+      {
+        device_id: "cam",
+        driver_id: "test-storage",
+        actions: [
+          {
+            type: "camera_record",
+            parameter_types: [
+              parameter("record", {
+                duration_s: { type: "integer", minimum: 1 },
+              }),
+            ],
+          },
+          {
+            type: "camera_take_photo",
+            parameter_types: [parameter("hasselblad_photo")],
+          },
+        ],
+      },
+    ],
+  });
+  for (const seconds of [60, 5400, 6000]) {
+    const draft = await host.create(
+      content(`{"type":"record","duration_s":${seconds}}`),
+    );
+    const result = await host.export(draft);
+    expect(result.status, result.raw).toBe(200);
+    expect((result.value.body.actions as any[])[0].params).toEqual({
+      type: "record",
+      duration_s: seconds,
+    });
+  }
+  const photo = {
+    text: content('{"type":"hasselblad_photo"}').text.replace(
+      '"type":"camera_record"',
+      '"type":"camera_take_photo"',
+    ),
+  };
+  const draft = await host.create(photo);
+  expect((await host.export(draft)).status).toBe(200);
+  const invalid = await host.create(
+    setValue(photo, ["actions", 0, "params", "interval_s"], 1),
+  );
+  expect((await host.export(invalid)).value.code).toBe("invalid_plan");
 });
