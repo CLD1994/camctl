@@ -31,16 +31,18 @@
 
 2026-10-16 在 Node.js v24.20.0 上以只读探针核对：`parseJson` 保留了 `0.50000000000000001` 的原词元，但 `enum: [0.5, 1]` 和 `const: 0.5` 均判定通过；同一输入的 `maximum: 0.5` 则被精确范围适配拒绝。根因是前两项尚未使用精确身份，不能仅在选项显示层修补。
 
-- [ ] 建议新增 `tests/unit/numeric-equality.test.ts`。独立断言：`0.5`、`0.50`、`5e-1` 等价；`0.50000000000000001` 不等于半秒，`1.0000000000000001` 不等于一，`1e-999` 不等于零；数字、字符串、布尔和空值不混同。
-- [ ] 覆盖对象键序、数组顺序、嵌套数字、根标量显式 `numberToken` 上下文、对象属性、数组成员、本地引用和 `if` 中的 `const`。校验前后输入与 Schema 数值事实不变，`schema_enum` / `schema_const` 诊断保留精确允许值。
-- [ ] 从 `apps/client` 运行以下命令，确认近邻错误接受及条件分支错误的目标失败。
+- [x] 新增 `tests/unit/numeric-equality.test.ts`。独立断言：`0.5`、`0.50`、`5e-1` 等价；`0.50000000000000001` 不等于半秒，`1.0000000000000001` 不等于一，`1e-999` 不等于零；数字、字符串、布尔和空值不混同。
+- [x] 覆盖对象键序、数组顺序、嵌套数字、根标量显式 `numberToken` 上下文、对象属性、数组成员、本地引用和 `if` 中的 `const`。校验前后输入与 Schema 数值事实不变，`schema_enum` / `schema_const` 诊断保留精确允许值。
+- [x] 从 `apps/client` 运行以下命令对应的测试范围，确认近邻错误接受及条件分支错误的目标失败。
 
 ```bash
 pnpm exec vitest run tests/unit/numeric-equality.test.ts tests/unit/numeric-boundaries.test.ts tests/unit/numeric-multiples.test.ts
 ```
 
-- [ ] 在共享校验器统一接入精确身份比较，复用 `exactJsonValueIdentity`、父容器词元及既有根标量上下文；保持 JSON 值相等语义，不修改源 Schema 或增加另一套 UI 校验。现有 `hasNumericLoss` 仍可保守限制控件资格，不顺带扩大高精度控件范围。
-- [ ] 重跑上述命令及 `pnpm exec vitest run tests/unit`，核对其他公共协议消费者未退化；检查 diff 后提交。P3 在此项通过后验证跨语言一致性。
+- [x] 在共享校验器统一接入精确身份比较，复用 `exactJsonValueIdentity`、父容器词元及既有根标量上下文；保持 JSON 值相等语义，不修改源 Schema 或增加另一套 UI 校验。现有 `hasNumericLoss` 仍可保守限制控件资格，不顺带扩大高精度控件范围。
+- [x] 重跑上述命令及 `pnpm exec vitest run tests/unit` 对应的范围，核对其他公共协议消费者未退化；检查 diff 后提交。P3 在此项通过后验证跨语言一致性。
+
+2026-10-16 在 Linux 开发容器、Node.js `v24.20.0`、锁定 Vitest `5.0.1` 上验证。现有数字边界和步进基线为 2 个文件、48 项通过；新增测试先得到 30 项目标失败，最终三个聚焦文件的 126 项及全部客户端单元 59 个文件、2798 项通过，`tsc --noEmit` 通过，退出码均为 0。依赖由本工作区的 `package-lock.json` 独立安装；预装 `pnpm exec` 会先触发额外安装，因此实际使用本工作区的 `node node_modules/vitest/vitest.mjs run …` 和 `node node_modules/typescript/bin/tsc --noEmit`。本项保留 Ajv 对空枚举的规则错误；关键字规则声明在全部精确数值适配后注册，避免提前编译并缓存浮点规则校验。此处证明客户端共享校验及单元范围，跨语言组合、浏览器交互和设备验收由后续任务分别验证。
 
 ## C1 受限根合取分解与查询接口
 

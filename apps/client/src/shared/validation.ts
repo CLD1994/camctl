@@ -9,6 +9,7 @@ import {
   originalNumberToken,
   rememberNumberToken,
   cloneClientJson,
+  exactJsonValueIdentity,
 } from "./json";
 
 export const DIALECT = "https://json-schema.org/draft/2020-12/schema";
@@ -221,6 +222,83 @@ export function createValidator() {
     errors: true,
     validate: checkMultiple,
   });
+  // 关键字的 metaSchema 会立即编译；必须先登记全部精确数值规则。
+  // 枚举、常量及条件分支共用 JSON 身份，不按浮点投影比较数字。
+  for (const keyword of ["enum", "const"] as const) {
+    ajv.removeKeyword(keyword);
+    const check = Object.assign(
+      function (
+        this: { numberToken?: string } | undefined,
+        allowed: unknown,
+        data: unknown,
+        parentSchema?: Record<string, unknown>,
+        context?: {
+          parentData?: unknown;
+          parentDataProperty?: string | number;
+        },
+      ) {
+        const root = { value: data };
+        if (typeof data === "number")
+          rememberNumberToken(root, "value", this?.numberToken);
+        const source =
+          context?.parentData === undefined
+            ? { parent: root, key: "value" }
+            : { parent: context.parentData, key: context.parentDataProperty! };
+        const identity =
+          data === undefined ||
+          (typeof data === "number" && !Number.isFinite(data))
+            ? undefined
+            : exactJsonValueIdentity(data, true, source);
+        const valid =
+          identity !== undefined &&
+          (keyword === "enum"
+            ? (allowed as unknown[]).some(
+                (value, index) =>
+                  exactJsonValueIdentity(value, true, {
+                    parent: allowed,
+                    key: index,
+                  }) === identity,
+              )
+            : exactJsonValueIdentity(allowed, true, {
+                parent: parentSchema,
+                key: keyword,
+              }) === identity);
+        const param = keyword === "enum" ? "allowedValues" : "allowedValue";
+        const params = { [param]: allowed };
+        if (keyword === "const")
+          rememberNumberToken(
+            params,
+            param,
+            originalNumberToken(parentSchema, keyword, allowed),
+          );
+        check.errors = valid
+          ? undefined
+          : [
+              {
+                keyword,
+                params,
+                message:
+                  keyword === "enum"
+                    ? "must be equal to one of the allowed values"
+                    : "must be equal to constant",
+              },
+            ];
+        return valid;
+      },
+      { errors: undefined as Array<Partial<ErrorObject>> | undefined },
+    );
+    ajv.addKeyword({
+      keyword,
+      ...(keyword === "enum"
+        ? {
+            schemaType: "array" as const,
+            metaSchema: { type: "array", minItems: 1 },
+          }
+        : {}),
+      errors: true,
+      validate: check,
+    });
+  }
   addFormats(ajv);
   return ajv;
 }
