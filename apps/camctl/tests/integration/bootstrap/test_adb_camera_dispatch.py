@@ -12,6 +12,8 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.pages import Page
 from camctl.devices.adb_transport import DeviceCommand, InterpretedFacts
 from camctl.devices.directory import DirectoryRead
+from camctl.devices.drivers.adb_cameras import commands as camera_commands
+from camctl.devices.drivers.adb_cameras import timelapse_parameters
 from camctl.devices.drivers.adb_cameras.commands import CameraModel, settings_for
 from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
@@ -162,6 +164,86 @@ async def test_restart_dispatch_uses_original_admitted_parameters(
             "(SELECT id FROM operation_runs WHERE responsibility_key='start/1')").fetchone() == (1,)
     finally:
         resumed.connection.close()
+
+
+def _narrow_authoritative_time_domain(monkeypatch, field, excluded):
+    name = "TIMELAPSE_INTERVALS_S" if field == "interval_s" else "TIMELAPSE_DURATIONS_S"
+    source = getattr(timelapse_parameters, name)
+    narrowed = tuple(value for value in source if value != excluded)
+    assert len(narrowed) == len(source) - 1
+    monkeypatch.setattr(timelapse_parameters, name, narrowed)
+    if hasattr(camera_commands, name):
+        monkeypatch.setattr(camera_commands, name, narrowed)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,narrow_field,payload", [
+    (CameraModel.ACTION6, "interval_s", "0400000a002c0100000000000000000000"),
+    (CameraModel.OSMO360II, "duration_s", "0400000a002c01000000000000000000"),
+])
+async def test_restart_dispatch_keeps_first_format_after_current_domain_narrows(
+        owned, tmp_path, monkeypatch, model, narrow_field, payload):
+    driver_id = model.value
+    params = {"type": "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse",
+              "interval_s": 1, "duration_s": 300, "outputs": "video", "exposure": {"mode": "auto"}}
+    body = _plan_body()
+    body["actions"][0].update(type="camera_timelapse", params=params)
+    await _accept_plan(owned, tmp_path, body, _catalog(driver_id))
+    original = owned.connection.execute(
+        "SELECT device_id,driver_id,effective_params_json,execution_spec_json FROM actions WHERE id=1").fetchone()
+    assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
+
+    owned.connection.close()
+    _narrow_authoritative_time_domain(
+        monkeypatch, narrow_field, params[narrow_field])
+    restarted = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        assert restarted.connection.execute(
+            "SELECT device_id,driver_id,effective_params_json,execution_spec_json FROM actions WHERE id=1").fetchone() == original
+        with pytest.raises(BodySchemaError):
+            settings_for(model, "camera_timelapse", params)
+        body["request_id"] = "43"
+        await _accept_plan(restarted, tmp_path, body, _catalog(driver_id))
+        assert restarted.connection.execute("SELECT status FROM actions WHERE id=2").fetchone() == (4,)
+
+        assert _start(restarted, 1, now=_SCHEDULED).kind is DbOutcomeKind.COMPLETED
+        calls, requests = [], []
+        contract = software_contract(model)
+
+        class Transport:
+            async def run(self, spec, stop):
+                calls.append(spec)
+                return RawToolOutcome(LocalExit(exit_code=0), b"OK", None, None, stderr=b"")
+
+        def capture_start(request, serial, argv, batch):
+            requests.append(request)
+            return contract.commands[CameraCall.START](request, serial, argv, batch)
+
+        dispatch_contract = replace(contract, commands={
+            **contract.commands, CameraCall.START: capture_start})
+        driver = AdbCameraDriver(
+            dispatch_contract,
+            {"cam-1": {"driver": model, "adb": {"serial": "serial-original"}}},
+            Transport(), terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
+        directory = Directory([lambda _request: DirectoryRead(None, None, Page((), None))])
+        runtime = _runtime(restarted, directory, driver)
+        runtime.evidence = contract.evidence
+        await capture_handler("camera_timelapse")(1, runtime)
+
+        assert len(requests) == 1
+        assert requests[0].params == params
+        assert requests[0].binding.device_id == "cam-1"
+        assert requests[0].binding.driver_id == model
+        assert all(call.argv[:5] == ("adb", "-s", "serial-original", "shell", "-T") for call in calls)
+        command_words = [shlex.split(shlex.split(call.argv[5])[2]) for call in calls]
+        assert [words[-1] for words in command_words if words[-2] == "6c"] == [payload]
+        assert sum(words[-2:] == ["01", "01"] for words in command_words) == 1
+        assert restarted.connection.execute(
+            "SELECT attempts_used FROM operation_runs WHERE responsibility_key='start/1'").fetchone() == (1,)
+        assert restarted.connection.execute(
+            "SELECT device_id,driver_id,effective_params_json,execution_spec_json FROM actions WHERE id=1").fetchone() == original
+    finally:
+        restarted.connection.close()
 
 
 @pytest.mark.asyncio

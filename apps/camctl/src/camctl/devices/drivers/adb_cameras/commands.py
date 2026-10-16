@@ -1,7 +1,8 @@
 """交接资料提供的命令候选，不解释调用成功或设备完成。
 
 设备侧 argv 保留大小写及前缀。录像离散选项供参数 Schema 使用；
-延时时间规则独立维护，负载只查完整字面量，不生成未提供的编码。
+延时先精确匹配原完整字面量，否则按固定的第一版模板替换四个时间字节。
+当前允许时间由新请求 Schema 限定，不属于可信原事实的格式解释条件。
 """
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -10,7 +11,6 @@ from enum import StrEnum
 
 from camctl.contracts.json_values import JsonValue, is_json_integer
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
-from .timelapse_parameters import TIMELAPSE_DURATIONS_S, TIMELAPSE_INTERVALS_S
 
 
 class CameraModel(StrEnum):
@@ -22,6 +22,19 @@ class OutputSelection(StrEnum):
     VIDEO = "video"
     VIDEO_RAW = "video_raw"
     VIDEO_JPEG = "video_jpeg"
+
+
+class TimelapseCandidateTemplate(StrEnum):
+    """第一版候选格式的八个固定模板身份。"""
+
+    ACTION6_MANUAL_VIDEO = "action6-manual-video"
+    ACTION6_MANUAL_VIDEO_RAW = "action6-manual-video-raw"
+    ACTION6_MANUAL_VIDEO_JPEG = "action6-manual-video-jpeg"
+    ACTION6_AUTO_VIDEO = "action6-auto-video"
+    ACTION6_AUTO_VIDEO_RAW = "action6-auto-video-raw"
+    ACTION6_AUTO_VIDEO_JPEG = "action6-auto-video-jpeg"
+    OSMO360II_MANUAL_VIDEO = "osmo360ii-manual-video"
+    OSMO360II_AUTO_VIDEO = "osmo360ii-auto-video"
 
 
 Command = tuple[str, ...]
@@ -63,23 +76,24 @@ class TimelapsePreset:
     outputs: OutputSelection
     exposure_mode: str
     command: Command
+    candidate_template: TimelapseCandidateTemplate | None = None
 
 
 # 完整字面量包含既有记录；新请求合法域由独立时间参数定义约束。
 TIMELAPSE_PRESETS = {
     CameraModel.ACTION6: (
-        TimelapsePreset(30, 5400, OutputSelection.VIDEO, "manual", _cmd("6c", "0400002c01181500000000000000000000")),
-        TimelapsePreset(30, 5400, OutputSelection.VIDEO_RAW, "manual", _cmd("6c", "0400032c01181500000000000000000000")),
-        TimelapsePreset(30, 5400, OutputSelection.VIDEO_JPEG, "manual", _cmd("6c", "0400022c01181500000000000000000000")),
+        TimelapsePreset(30, 5400, OutputSelection.VIDEO, "manual", _cmd("6c", "0400002c01181500000000000000000000"), TimelapseCandidateTemplate.ACTION6_MANUAL_VIDEO),
+        TimelapsePreset(30, 5400, OutputSelection.VIDEO_RAW, "manual", _cmd("6c", "0400032c01181500000000000000000000"), TimelapseCandidateTemplate.ACTION6_MANUAL_VIDEO_RAW),
+        TimelapsePreset(30, 5400, OutputSelection.VIDEO_JPEG, "manual", _cmd("6c", "0400022c01181500000000000000000000"), TimelapseCandidateTemplate.ACTION6_MANUAL_VIDEO_JPEG),
         TimelapsePreset(25, 6000, OutputSelection.VIDEO, "auto", _cmd("6c", "040000fa00701700000000000000000000")),
         TimelapsePreset(25, 6000, OutputSelection.VIDEO_RAW, "auto", _cmd("6c", "040003fa00701700000000000000000000")),
         TimelapsePreset(25, 6000, OutputSelection.VIDEO_JPEG, "auto", _cmd("6c", "040002fa00701700000000000000000000")),
-        TimelapsePreset(8, 1800, OutputSelection.VIDEO, "auto", _cmd("6c", "0400005000080700000000000000000000")),
-        TimelapsePreset(8, 1800, OutputSelection.VIDEO_RAW, "auto", _cmd("6c", "0400035000080700000000000000000000")),
-        TimelapsePreset(8, 1800, OutputSelection.VIDEO_JPEG, "auto", _cmd("6c", "0400025000080700000000000000000000")),
+        TimelapsePreset(8, 1800, OutputSelection.VIDEO, "auto", _cmd("6c", "0400005000080700000000000000000000"), TimelapseCandidateTemplate.ACTION6_AUTO_VIDEO),
+        TimelapsePreset(8, 1800, OutputSelection.VIDEO_RAW, "auto", _cmd("6c", "0400035000080700000000000000000000"), TimelapseCandidateTemplate.ACTION6_AUTO_VIDEO_RAW),
+        TimelapsePreset(8, 1800, OutputSelection.VIDEO_JPEG, "auto", _cmd("6c", "0400025000080700000000000000000000"), TimelapseCandidateTemplate.ACTION6_AUTO_VIDEO_JPEG),
     ),
     CameraModel.OSMO360II: (
-        TimelapsePreset(30, 600, OutputSelection.VIDEO, "manual", _cmd("6c", "0407002c015802000000000000000001")),
+        TimelapsePreset(30, 600, OutputSelection.VIDEO, "manual", _cmd("6c", "0407002c015802000000000000000001"), TimelapseCandidateTemplate.OSMO360II_MANUAL_VIDEO),
         TimelapsePreset(30, 1200, OutputSelection.VIDEO, "manual", _cmd("6c", "0407002c01b004000000000000000001")),
         TimelapsePreset(30, 1800, OutputSelection.VIDEO, "manual", _cmd("6c", "0407002c010807000000000000000001")),
         TimelapsePreset(30, 3600, OutputSelection.VIDEO, "manual", _cmd("6c", "0407002c01100e000000000000000001")),
@@ -87,7 +101,7 @@ TIMELAPSE_PRESETS = {
         TimelapsePreset(30, 10800, OutputSelection.VIDEO, "manual", _cmd("6c", "0407002c01302a000000000000000001")),
         TimelapsePreset(30, 18000, OutputSelection.VIDEO, "manual", _cmd("6c", "0407002c015046000000000000000001")),
         TimelapsePreset(40, 18000, OutputSelection.VIDEO, "auto", _cmd("6c", "04000090015046000000000000000000")),
-        TimelapsePreset(8, 1800, OutputSelection.VIDEO, "auto", _cmd("6c", "04000050000807000000000000000000")),
+        TimelapsePreset(8, 1800, OutputSelection.VIDEO, "auto", _cmd("6c", "04000050000807000000000000000000"), TimelapseCandidateTemplate.OSMO360II_AUTO_VIDEO),
     ),
 }
 
@@ -218,8 +232,29 @@ def _validated_timelapse_template(model: CameraModel, preset: TimelapsePreset) -
     return payload
 
 
+def _candidate_template_for(model: CameraModel, outputs, exposure_mode: str) -> TimelapsePreset:
+    try:
+        output = OutputSelection(outputs)
+    except ValueError:
+        output = None
+    role_name = (f"{model.name}_{exposure_mode.upper()}_{output.name}"
+                 if output is not None else "")
+    role = TimelapseCandidateTemplate.__members__.get(role_name)
+    matches = tuple(preset for preset in TIMELAPSE_PRESETS[model]
+                    if preset.candidate_template is role and role is not None)
+    if not matches:
+        raise CapabilityNotDeclaredError(
+            f"驱动 {model!r} 尚未提供该延时参数分区的完整命令模板")
+    if len(matches) != 1:
+        raise ValueError("第一版延时格式的模板身份重复")
+    template = matches[0]
+    if template.outputs is not output or template.exposure_mode != exposure_mode:
+        raise ValueError("第一版延时格式的模板身份与参数分区不一致")
+    return template
+
+
 def _timelapse_command_for(model: CameraModel, params: Mapping[str, JsonValue]) -> Command:
-    """优先返回原完整字面量，否则仅替换所选模板的四个时间字节。"""
+    """优先返回原完整字面量，否则按固定第一版格式替换四个时间字节。"""
     presets = TIMELAPSE_PRESETS[model]
     exposure_mode = params["exposure"]["mode"]
     exact = next((preset for preset in presets
@@ -232,18 +267,7 @@ def _timelapse_command_for(model: CameraModel, params: Mapping[str, JsonValue]) 
 
     interval = params["interval_s"]
     duration = params["duration_s"]
-    if (interval not in TIMELAPSE_INTERVALS_S or duration not in TIMELAPSE_DURATIONS_S
-            or duration <= interval):
-        raise CapabilityNotDeclaredError(
-            f"驱动 {model!r} 没有可解释该延时事实的原有映射")
-
-    template = next((preset for preset in presets
-                     if preset.outputs == params["outputs"]
-                     and preset.exposure_mode == exposure_mode), None)
-    if template is None:
-        raise CapabilityNotDeclaredError(
-            f"驱动 {model!r} 尚未提供该延时参数分区的完整命令模板")
-
+    template = _candidate_template_for(model, params["outputs"], exposure_mode)
     payload = _validated_timelapse_template(model, template)
     interval_units = _exact_scaled_uint16(params["interval_s"], 10, "延时间隔")
     duration_units = _exact_scaled_uint16(params["duration_s"], 1, "采集时长")
