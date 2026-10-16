@@ -1,6 +1,8 @@
 """真实目录、受理和历史保存组合；任务完成契约仅由测试替身声明。"""
 from dataclasses import replace
 from copy import deepcopy
+from decimal import Decimal
+import json
 
 import pytest
 
@@ -9,17 +11,22 @@ from camctl.acceptance.service import PlanDisposition
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.input_fields import reconstruct_action_input
+from camctl.acceptance.input import parse_input, read_input
+from camctl.acceptance.service import accept_input
+from camctl.contracts.values import new_operation_key
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.devices.catalog import DriverDefinition, DriverDefinitions, build_catalog
 from camctl.devices.drivers.adb_cameras import definitions
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 from camctl.persistence.repositories.history import HistoryRepository
-from .test_acceptance import _accept, _plan_body, environment
+from .test_acceptance import _accept, _plan_body, _owned, RealFileReader, environment
 from .test_fields import _action_facts
 
 pytestmark = pytest.mark.asyncio
 
 
-def _catalog(driver, *, duration_default=None, device_id="cam-1", baseline=True):
+def _catalog(driver, *, duration_default=None, device_id="cam-1", baseline=True, timelapse_schema=None):
     """候选 Schema 复用生产定义；替身显式提供软件测试所需的结束契约。"""
     def task(params):
         action_type = "camera_record" if params["type"].endswith("_record") else "camera_timelapse"
@@ -32,6 +39,9 @@ def _catalog(driver, *, duration_default=None, device_id="cam-1", baseline=True)
                             result_wait_margin_s=0)
         return fixed if baseline else replace(fixed, ownership_mode=None, output_scope=None)
     capabilities = [replace(cap, task_factory=task) for cap in definitions.candidate_capabilities(driver)]
+    if timelapse_schema is not None:
+        capabilities = [replace(cap, schema=timelapse_schema)
+                        if cap.action_type == "camera_timelapse" else cap for cap in capabilities]
     if duration_default is not None:
         record = next(cap for cap in capabilities if cap.action_type == "camera_record")
         schema = deepcopy(record.schema)
@@ -41,6 +51,16 @@ def _catalog(driver, *, duration_default=None, device_id="cam-1", baseline=True)
     config = load_config({"devices": {device_id: {"kind": "camera", "driver": driver}}}, ConfigDefaults())
     return build_catalog(config, DriverDefinitions({driver: DriverDefinition(driver,
         {cap.action_type: (cap,) for cap in capabilities})}))
+
+
+def _legacy_action6_catalog(interval_s, duration_s):
+    """仅模拟旧合同曾经受理的事实，不改变生产候选或登记。"""
+    schema = deepcopy(next(cap.schema for cap in definitions.candidate_capabilities("dji-action6")
+                           if cap.action_type == "camera_timelapse"))
+    schema.pop("allOf")
+    schema["properties"]["interval_s"] = {"type": "number", "const": interval_s}
+    schema["properties"]["duration_s"] = {"type": "integer", "const": duration_s}
+    return _catalog("dji-action6", timelapse_schema=schema)
 
 
 def _params(driver, action_type):
@@ -104,3 +124,82 @@ async def test_explicit_null_does_not_become_default_duration(environment, tmp_p
     assert row["status"] == enum_for("actions.status").FAILED
     assert read_action_spec(row) is None
     assert connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+@pytest.mark.parametrize("interval_token", ["1", "1.0", "1e0"])
+async def test_shortest_exact_parameters_survive_resend_restart_and_history(environment, tmp_path, driver, interval_token):
+    connection, context = environment
+    body = _plan_body()
+    params = {**_params(driver, "camera_timelapse"), "interval_s": 1, "duration_s": 300}
+    body["actions"][0].update(type="camera_timelapse", params=params)
+    path = tmp_path / "exact.json"
+    path.write_text(json.dumps(body).replace('"interval_s": 1,', f'"interval_s": {interval_token},'), encoding="utf-8")
+    read = await read_input(str(path), RealFileReader())
+    result = await accept_input(parse_input(read), replace(context, catalog=_catalog(driver)),
+                                new_operation_key(), _owned(environment))
+    assert result.plan_disposition is PlanDisposition.REGISTERED
+    before = _action_facts(connection).tables["actions"][1]
+    assert before["status"] == enum_for("actions.status").PENDING
+    effective = parse_exact_json(before["effective_params_json"])
+    original = reconstruct_action_input(before)["params"]
+    assert effective == original == params
+    assert isinstance(effective["interval_s"], (int, Decimal)) and not isinstance(effective["interval_s"], bool)
+    assert read_action_spec(before)["target_duration_ms"] == 300000
+    assert "interval_s" not in read_action_spec(before)
+    changed = deepcopy(next(cap.schema for cap in definitions.candidate_capabilities(driver)
+                            if cap.action_type == "camera_timelapse"))
+    changed["properties"]["interval_s"]["enum"] = [8]
+    changed_catalog = _catalog(driver, timelapse_schema=changed)
+    reused = await _accept((connection, replace(context, catalog=changed_catalog)), tmp_path,
+                           {"request_id": "42", "actions": None})
+    assert reused.plan_disposition is PlanDisposition.REUSED and reused.plan_id == result.plan_id
+    assert _action_facts(connection).tables["actions"][1] == before
+    connection.close()
+    reopened = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        assert _action_facts(reopened.connection).tables["actions"][1] == before
+        repository = HistoryRepository(tmp_path / "state.db")
+        historical = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
+        assert reconstruct_action_input(historical)["params"] == original
+        assert historical["effective_params_json"] == effective
+        assert read_action_spec(historical) == read_action_spec(before)
+    finally:
+        reopened.connection.close()
+
+
+@pytest.mark.parametrize("interval_s,duration_s,exposure", [
+    (30, 5400, {"mode": "manual", "iso": 800}), (25, 6000, {"mode": "auto"}),
+])
+async def test_legacy_admitted_request_is_frozen_but_same_new_parameters_fail(
+        environment, tmp_path, interval_s, duration_s, exposure):
+    connection, context = environment
+    params = {"type": "action6_timelapse", "interval_s": interval_s,
+              "duration_s": duration_s, "outputs": "video", "exposure": exposure}
+    body = _plan_body()
+    body["actions"][0].update(type="camera_timelapse", params=params)
+    first = await _accept((connection, replace(context, catalog=_legacy_action6_catalog(interval_s, duration_s))),
+                          tmp_path, body)
+    before = _action_facts(connection).tables["actions"][1]
+    assert before["status"] == enum_for("actions.status").PENDING
+    connection.close()
+    reopened = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        current = (reopened.connection, replace(context, catalog=_catalog("dji-action6")))
+        reused = await _accept(current, tmp_path, {"request_id": "42"})
+        assert reused.plan_disposition is PlanDisposition.REUSED and reused.plan_id == first.plan_id
+        assert _action_facts(reopened.connection).tables["actions"][1] == before
+        assert read_action_spec(before)["target_duration_ms"] == duration_s * 1000
+        body["request_id"] = "43"
+        new = await _accept(current, tmp_path, body)
+        assert new.plan_disposition is PlanDisposition.REGISTERED
+        rejected = _action_facts(reopened.connection, 2).tables["actions"][2]
+        assert rejected["status"] == enum_for("actions.status").FAILED
+        assert rejected["effective_params_json"] is None and read_action_spec(rejected) is None
+        repository = HistoryRepository(tmp_path / "state.db")
+        historical = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
+        assert reconstruct_action_input(historical)["params"] == params
+        assert historical["effective_params_json"] == parse_exact_json(before["effective_params_json"])
+        assert read_action_spec(historical) == read_action_spec(before)
+    finally:
+        reopened.connection.close()

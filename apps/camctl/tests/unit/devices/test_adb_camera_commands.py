@@ -192,10 +192,8 @@ def test_timelapse_preserves_given_payloads_and_rejects_legacy_new_requests(driv
     if duration in (5400, 6000):
         with pytest.raises(BodySchemaError):
             commands.settings_for(driver, "camera_timelapse", params)
-        preset = next(preset for preset in commands.TIMELAPSE_PRESETS[commands.CameraModel(driver)]
-                      if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
-                      == (interval, duration, outputs, exposure["mode"]))
-        assert preset.command[-2:] == ("6c", payload)
+        settings = commands.settings_from_effective_params(driver, "camera_timelapse", params)
+        assert [command[-2:] for command in settings if command[-2] == "6c"] == [("6c", payload)]
         return
     settings = commands.settings_for(driver, "camera_timelapse", params)
     preset_position = 2 if driver == "dji-action6" else -1
@@ -281,3 +279,43 @@ def test_command_lookup_rejects_unknown_binding_and_unvalidated_parameters():
         commands.start_for("other-camera", "camera_record")
     with pytest.raises(ValueError):
         commands.settings_for("dji-action6", "camera_record", {**recording_params(), "aperture": "f8"})
+
+
+@pytest.mark.parametrize("patch", [
+    {"type": "osmo360ii_timelapse"}, {"extra": 1}, {"interval_s": True},
+    {"interval_s": "30"}, {"interval_s": Decimal("NaN")}, {"interval_s": 30.0},
+    {"duration_s": False}, {"duration_s": "5400"}, {"duration_s": Decimal("5400.001")},
+    {"exposure": None}, {"exposure": {"mode": "manual", "iso": 400}},
+    {"exposure": {"mode": "auto", "compensation_ev": 0}},
+    {"exposure": {"mode": "manual", "iso": True}}, {"outputs": []},
+])
+def test_original_effective_encoding_keeps_structure_and_model_checks(patch):
+    params = {"type": "action6_timelapse", "interval_s": 30, "duration_s": 5400,
+              "outputs": "video", "exposure": {"mode": "manual", "iso": 800}, **patch}
+    with pytest.raises(ValueError):
+        commands.settings_from_effective_params("dji-action6", "camera_timelapse", params)
+
+
+def test_original_effective_encoding_distinguishes_missing_mapping():
+    params = {"type": "action6_timelapse", "interval_s": Decimal("1"), "duration_s": Decimal("300"),
+              "outputs": "video", "exposure": {"mode": "auto"}}
+    with pytest.raises(CapabilityNotDeclaredError):
+        commands.settings_from_effective_params("dji-action6", "camera_timelapse", params)
+
+
+@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
+@pytest.mark.parametrize("patch", [
+    {"type": "action6_timelapse"}, {"duration_s": True}, {"duration_s": Decimal("10.001")},
+    {"exposure": {"mode": "manual", "iso": True}},
+    {"exposure": {"mode": "auto", "compensation_ev": False}},
+])
+def test_original_record_encoding_rejects_uninterpretable_structure(driver, patch):
+    with pytest.raises(ValueError):
+        commands.settings_from_effective_params(driver, "camera_record", {**recording_params(driver), **patch})
+
+
+def test_original_record_encoding_reports_absent_mapping_without_changing_parameter():
+    params = {**recording_params(), "resolution": "unmapped"}
+    with pytest.raises(CapabilityNotDeclaredError):
+        commands.settings_from_effective_params("dji-action6", "camera_record", params)
+    assert params["resolution"] == "unmapped"
