@@ -78,14 +78,26 @@ assert params_after_validation == params_before_validation
 
 **交付接口：** 正常 Catalog、受理和 `describe` 的关联不变；测试通过专用任务工厂提供受约束的可执行合同。原执行定义仍由 `CaptureTaskFactory(effective_params)` 首次构造，恢复只读已保存值。
 
-新请求和新诊断通过当前 Schema 校验后才允许生成候选命令。正式驱动控制接收的是公共处理器从原动作读取的 `effective_params_json` 及原绑定、尝试和派发资格，编码不能重新用当前候选 Schema 改判首次已受理的参数。建议在命令模块分开“当前候选校验入口”和“可信原生效参数编码入口”，后者保留必要的结构、型号及映射检查，不增加外部可选的跳过校验开关。原来具有依据的完整负载继续可被原事实解释，真正缺少映射时明确报告缺口；首次受理及新诊断不能借该内部入口接受域外值。
+新请求和新诊断通过当前 Schema 校验后才允许生成候选命令。普通录像和延时摄影的正式驱动控制共同接收公共处理器从原动作读取的 `effective_params_json` 及原绑定、尝试和派发资格，编码不能重新用当前候选 Schema 改判首次已受理的参数。命令模块将当前候选校验入口 `settings_for` 与可信原生效参数编码入口 `settings_from_effective_params` 分开，后者保留必要的结构、型号及映射检查，不增加外部可选的跳过校验开关。原来具有依据的完整负载继续可被原事实解释，真正缺少映射时明确报告缺口；首次受理及新诊断不能借该内部入口接受域外值。
 
-- [ ] 在 `acceptance/test_adb_camera_definitions.py` 对两款测试合同分别增加精确 `1/300` 受理及历史读取用例：原始参数、生效参数保留数值，执行目标为 `target_duration_ms == 300000`；间隔留在原生效参数，不为它新增不必要的执行定义列。
-- [ ] 增加两款原请求重送及重启读取用例：首次受理后改变当前默认值或参数定义，原实例、生效参数和执行定义仍保持首次事实。旧规则曾受理的 Action6 `5400/6000` 秒继续按保存事实重送和恢复，同值新请求按新规则拒绝；非法新动作仍按动作级参数失败处理，不提升为整份计划拒绝。
-- [ ] 在 `bootstrap/test_adb_camera_dispatch.py` 增加实际派发回归：通过测试合同按旧规则受理 Action6 的5400/6000秒任务，保持尚未启动，切换到新时间 Schema 后重启，并经公共处理器及真实 `AdbCameraDriver.control` 验证原参数、原绑定、原负载及唯一 START。同值新请求和直接当前候选入口必须拒绝；已存在 START 尝试的恢复仍不得重发。先单独运行该文件，确认目标失败来自当前 Schema 重校验。该软件兼容场景不表示生产已启用 Action6 延时或已有此类任务。
-- [ ] 在生产登记测试保留候选不导出/不受理的断言，并验证单纯增加参数域或估算说明不绑定工厂。分别运行 `P apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py -q`、`P apps/camctl/tests/integration/devices/test_adb_camera_registration.py -q`，观察对应失败。
-- [ ] 优先复用精确解析、默认值处理、冻结和恢复入口；按上述派发回归闭合 `commands.py` 与 `driver.py` 的可信编码接线，不反查当前候选 Schema，不访问设备重建原要求。只有实际缺口需要时才修改受理/持久化，不建立第二套用户参数校验规则；本项只用已有明确负载，不依赖 D1 的新编码。
-- [ ] 按上述两个独立进程重跑，另行运行 `P apps/camctl/tests/integration/bootstrap/test_adb_camera_dispatch.py -q`，再分别运行 `P apps/camctl/tests/integration/acceptance -q`、`P apps/camctl/tests/integration/devices -q`。记录环境和退出码，检查 diff 后提交。
+- [x] 在 `acceptance/test_adb_camera_definitions.py` 对两款测试合同分别增加精确 `1/300` 受理及历史读取用例：原始参数、生效参数保留数值，执行目标为 `target_duration_ms == 300000`；间隔留在原生效参数，不为它新增不必要的执行定义列。
+- [x] 增加两款原请求重送及重启读取用例：首次受理后改变当前默认值或参数定义，原实例、生效参数和执行定义仍保持首次事实。旧规则曾受理的 Action6 `5400/6000` 秒继续按保存事实重送和恢复，同值新请求按新规则拒绝；非法新动作仍按动作级参数失败处理，不提升为整份计划拒绝。
+- [x] 在 `bootstrap/test_adb_camera_dispatch.py` 增加实际派发回归：通过测试合同按旧规则受理 Action6 的5400/6000秒任务，保持尚未启动，切换到新时间 Schema 后重启，并经公共处理器及真实 `AdbCameraDriver.control` 验证原参数、原绑定、原负载及唯一 START。同值新请求和直接当前候选入口必须拒绝；已存在 START 尝试的恢复仍不得重发。先单独运行该文件，确认目标失败来自当前 Schema 重校验。该软件兼容场景不表示生产已启用 Action6 延时或已有此类任务。
+- [x] 在生产登记测试保留候选不导出/不受理的断言，并验证单纯增加参数域或估算说明不绑定工厂。分别运行 `P apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py -q`、`P apps/camctl/tests/integration/devices/test_adb_camera_registration.py -q`，核对已有受理与过滤实现的实际结果；两文件新增断言首次即通过。
+- [x] 优先复用精确解析、默认值处理、冻结和恢复入口；按上述派发回归闭合 `commands.py` 与 `driver.py` 的可信编码接线，不反查当前候选 Schema，不访问设备重建原要求。只有实际缺口需要时才修改受理/持久化，不建立第二套用户参数校验规则；本项只用已有明确负载，不依赖 D1 的新编码。
+- [x] 按上述两个独立进程重跑，另行运行 `P apps/camctl/tests/integration/bootstrap/test_adb_camera_dispatch.py -q`，再分别运行 `P apps/camctl/tests/integration/acceptance -q`、`P apps/camctl/tests/integration/devices -q`。记录环境和退出码，检查 diff 后提交。
+
+### P2 验证记录（2026-10-16）
+
+在独立工作区的 Python 3.11.16、SQLite 3.53.1 环境中，使用本树锁文件与独立 `.venv311` 验证；全部 pytest 命令显式设置本树 `UV_PROJECT_ENVIRONMENT`，并使用 `uv run --frozen --project apps/camctl --group test --python 3.11 pytest`。组件集成目录分别启动进程，同一工作区顺序运行。
+
+- 目标派发回归先得到 2 项失败、8 项通过：测试合同按旧规则受理 Action6 的 5400/6000 秒任务，实际关闭并重开数据库后，公共处理器进入真实驱动时被当前时间 Schema 拒绝。普通录像的独立反例先得到 1 项失败、12 项通过：受理 4K 参数后收窄当前 Schema，原任务恢复派发也被当前规则拒绝。
+- 两类实际 `control` 统一使用 `settings_from_effective_params`，只按原型号、结构、精确数值及已有完整命令映射编码。新请求和直接候选入口继续使用当前完整 Schema；没有新增外部跳过开关，也没有修改原生效参数、绑定或执行定义。完整映射缺失仍报告既有 `CapabilityNotDeclaredError`，不生成负载。
+- 最终派发文件 13 项通过。旧延时任务与录像任务均经公共受理、实际数据库重开、公共处理器和真实 `AdbCameraDriver.control` 验证原参数、原绑定、原负载及唯一 START。已发送任务再次重启沿原等待事实推进；已登记但结果未取得的 START 尝试继续保留，未重新派发设置或 START。
+- 最短精确受理及历史文件 14 项通过。两款分别验证 `1`、`1.0`、`1e0` 秒间隔与 300 秒目标；原输入及生效值保持数值，目标固定为 `300000` 毫秒。改变当前参数定义后重送、重开及历史读取保持原事实；旧 5400/6000 秒请求复用，新请求仅对应动作失败。
+- 生产登记文件 25 项通过；候选参数域及估算说明不提供任务工厂，候选仍不导出、不受理为可执行拍摄。完整受理目录 266 项、完整设备目录 161 项通过。生产注册、命令字面量及设备完成契约保持原有定义。
+- 全部单元测试 5340 项通过、1 项跳过；两条既有 asyncio 标记警告与本项无关。文档文件链接检查通过，未增加标题链接；`git diff --check` 通过。
+- 完整日志、命令与退出码保存在本工作区忽略目录 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/`。以上为测试合同下的软件恢复兼容验证，不表示生产已启用 Action6 延时，也不包含 ARM 或真实设备验收。
 
 ## P3 派生资料与跨语言接缝
 

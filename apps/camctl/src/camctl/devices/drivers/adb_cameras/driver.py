@@ -16,7 +16,7 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.validation import validate_outcome
 from camctl.operations.owned_calls import current_call_scope
-from .commands import settings_for, start_for, stop_for
+from .commands import settings_from_effective_params, start_for, stop_for
 from .contracts import CameraCall
 from .filesystem import AdbFilesystem
 from .transport import shell_argv
@@ -91,7 +91,7 @@ class AdbCameraDriver:
         if action_type is None:
             raise ValueError("没有该相机启动操作")
         began_ns = self.monotonic_ns()
-        settings = settings_for(self.contract.driver_id, action_type, request.params)
+        settings = settings_from_effective_params(self.contract.driver_id, action_type, request.params)
         commands = (*((CameraCall.SETTING, command) for command in settings),
                     (CameraCall.START, start_for(self.contract.driver_id, action_type)))
         previous = None

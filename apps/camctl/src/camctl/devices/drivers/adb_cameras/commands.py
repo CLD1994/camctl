@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from camctl.contracts.json_values import JsonValue
+from camctl.contracts.json_values import JsonValue, is_json_integer
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 
 
@@ -151,6 +151,70 @@ def settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValu
     if capability is None:
         raise ValueError("没有该动作的候选参数定义")
     validate_precise(capability.schema, dict(params))
+    return settings_from_effective_params(model, action_type, params)
+
+
+def settings_from_effective_params(
+        driver_id: str, action_type: str, params: Mapping[str, JsonValue]) -> tuple[Command, ...]:
+    """编码公共处理器读取的原生效参数，不按当前候选规则重新受理。
+
+    型号、结构和精确数值须可解释，设置只能使用已有完整映射。
+    新请求及诊断使用 settings_for；此内部入口不授予设备派发资格。
+    """
+    model = CameraModel(driver_id)
+    _check_effective_structure(model, action_type, params)
+    try:
+        return _encode_settings(model, action_type, params)
+    except KeyError as error:
+        raise CapabilityNotDeclaredError(
+            f"驱动 {driver_id!r} 尚未提供该生效参数的完整命令映射") from error
+
+
+def _exact_number(value):
+    return (not isinstance(value, bool) and isinstance(value, (int, Decimal))
+            and (not isinstance(value, Decimal) or value.is_finite()))
+
+
+def _check_effective_structure(model, action_type, params):
+    if action_type not in {"camera_record", "camera_timelapse"}:
+        raise ValueError("没有该动作的设置编码")
+    prefix = "action6" if model is CameraModel.ACTION6 else "osmo360ii"
+    required = {"type", "duration_s", "exposure"}
+    optional = set()
+    if action_type == "camera_timelapse":
+        required.update(("interval_s", "outputs"))
+    elif model is CameraModel.ACTION6:
+        required.update(("resolution", "fov", "stabilization"))
+        optional.update(("aperture", "bitrate"))
+    if (not isinstance(params, Mapping) or not required <= set(params)
+            or set(params) - required - optional
+            or params["type"] != f"{prefix}_{action_type.removeprefix('camera_')}"):
+        raise ValueError("原生效参数的结构或型号不匹配")
+    if not is_json_integer(params["duration_s"]) or params["duration_s"] <= 0:
+        raise ValueError("原采集时长必须为精确正整数")
+    for field in set(params) - {"type", "duration_s", "interval_s", "exposure"}:
+        if not isinstance(params[field], str):
+            raise ValueError("原设置必须为命令映射标识")
+    if action_type == "camera_timelapse":
+        interval = params["interval_s"]
+        if not _exact_number(interval) or interval <= 0:
+            raise ValueError("原延时间隔必须为精确正数")
+    exposure = params["exposure"]
+    if not isinstance(exposure, Mapping):
+        raise ValueError("原曝光必须为对象")
+    manual = (set(exposure) == {"mode", "iso"} and exposure["mode"] == "manual"
+              and is_json_integer(exposure["iso"]))
+    auto = (set(exposure) == {"mode"} and exposure["mode"] == "auto"
+            if action_type == "camera_timelapse" else
+            set(exposure) == {"mode", "compensation_ev"} and exposure["mode"] == "auto"
+            and _exact_number(exposure["compensation_ev"]))
+    if not (manual or auto):
+        raise ValueError("原曝光结构没有对应的完整编码")
+    if action_type == "camera_timelapse" and manual and exposure["iso"] != 800:
+        raise ValueError("原延时手动曝光没有对应的完整编码")
+
+
+def _encode_settings(model, action_type, params):
     exposure = params["exposure"]
     if action_type == "camera_record":
         if model is CameraModel.ACTION6:
@@ -181,7 +245,7 @@ def settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValu
                   == (params["interval_s"], params["duration_s"], params["outputs"], exposure["mode"])), None)
     if preset is None:
         raise CapabilityNotDeclaredError(
-            f"驱动 {driver_id!r} 尚未提供该合法延时参数的完整命令映射")
+            f"驱动 {model!r} 尚未提供该延时生效参数的完整命令映射")
     if model is CameraModel.ACTION6:
         exposure_settings = (_action_manual(800) if preset.exposure_mode == "manual"
                              else (_cmd("0x1e", "0100", test=True),))

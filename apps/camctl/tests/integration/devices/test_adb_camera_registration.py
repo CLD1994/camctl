@@ -137,8 +137,11 @@ def test_fresh_cli_registers_camera_without_device_io(tmp_path, model):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", list(CameraModel))
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
-async def test_pending_contract_is_not_described_or_accepted(environment, tmp_path, model, action_type):
-    candidates = candidate_capabilities(model)
+@pytest.mark.parametrize("estimate_present", [False, True])
+async def test_pending_contract_is_not_described_or_accepted(environment, tmp_path, model, action_type, estimate_present):
+    candidates = tuple(replace(cap, video_size_estimate=cap.video_size_estimate if estimate_present else None)
+                       for cap in candidate_capabilities(model))
+    assert all(cap.task_factory is None for cap in candidates)
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": model}}}, ConfigDefaults())
     catalog = build_catalog(config, DriverDefinitions({model: DriverDefinition(model, {
         capability.action_type: (capability,) for capability in candidates})}))
@@ -148,6 +151,8 @@ async def test_pending_contract_is_not_described_or_accepted(environment, tmp_pa
     assert catalog.parameter_definition("cam-1", action_type, _params(model, action_type)["type"]) is None
     body = _plan_body()
     body["actions"][0].update(type=action_type, params=_params(model, action_type))
+    if action_type == "camera_timelapse":
+        body["actions"][0]["params"].update(interval_s=1, duration_s=300)
     connection, context = environment
     outcome = await _accept((connection, replace(context, catalog=catalog)), tmp_path, body)
     assert outcome.plan_disposition is PlanDisposition.REGISTERED
