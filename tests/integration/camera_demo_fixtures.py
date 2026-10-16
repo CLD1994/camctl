@@ -14,8 +14,9 @@ import shlex
 import time
 
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
+from camctl.contracts.json_values import parse_exact_json
 from camctl.devices.adb_transport import DeviceCommand, InterpretedFacts
-from camctl.devices.drivers.adb_cameras.commands import CameraModel, TIMELAPSE_PRESETS
+from camctl.devices.drivers.adb_cameras.commands import CameraModel
 from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
 from camctl.devices.drivers.adb_cameras.definitions import candidate_capabilities, output_scope_for
 from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
@@ -66,14 +67,13 @@ def recording_params(model):
     return params
 
 
-def timelapse_params(model, outputs="video"):
-    duration = 1800 if model is CameraModel.ACTION6 else 600
-    preset = next(p for p in TIMELAPSE_PRESETS[model]
-                  if p.duration_s == duration and p.outputs == outputs)
-    prefix = "action6" if model is CameraModel.ACTION6 else "osmo360ii"
-    return {"type": prefix + "_timelapse", "interval_s": preset.interval_s,
-            "duration_s": preset.duration_s, "outputs": str(preset.outputs),
-            "exposure": {"mode": preset.exposure_mode, **({"iso": 800} if preset.exposure_mode == "manual" else {})}}
+def timelapse_params(model):
+    """读取型号自己的权威最短样例，保留精确 JSON 数值与曝光选择。"""
+    stem = "action6" if model is CameraModel.ACTION6 else "osmo360ii"
+    sample_path = (Path(__file__).resolve().parents[2]
+                   / "docs/camctl/examples/camera-demo" / f"{stem}-timelapse.json")
+    sample = parse_exact_json(sample_path.read_text(encoding="utf-8"))
+    return sample["actions"][0]["params"]
 
 
 def camera_spec(deployment, model, params):
