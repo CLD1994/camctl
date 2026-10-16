@@ -108,6 +108,17 @@ sudo udevadm trigger
 
 1. `capture` 会先启用相机与本地双落盘：原图同时保存在相机存储和本地目录，并在本地为 JPEG 或 3FR 生成同名的 `.thumbnail.jpg` 缩略图。
 2. `capture` 返回的名称是本地存盘的名称，可以理解成收到这名称就意味着拍摄成功结束且相机里已经存在该照片了。不需要再通过列出相机的所有图片进行新增核对。
+3. 本地原图按 `capture_<图片编号>.<扩展名>` 命名，缩略图追加 `.thumbnail.jpg`。先输出本地保存信息，最后输出机身路径，例如：
+
+   ```text
+   capture: OK
+   saved capture/capture_22675465.JPG (23310336 bytes)
+   saved capture/capture_22675465.JPG.thumbnail.jpg (806728 bytes)
+   camera file: /mnt/media_rw/ssd/DCIM/106HASBL/B9996039.JPG
+   ```
+
+   `--verbose capture` 会显示相机报告的原始路径。
+   如果相机未报告照片名，会提示 `capture: camera filename was not reported`。
 
 ## 浏览和下载图片
 
@@ -122,6 +133,30 @@ sudo udevadm trigger
 ```
 
 不指定图片名称时下载全部；指定名称时只下载对应图片。
+
+指定图片时，`download original` 和 `download thumbnail` 只接受机内文件名，不接受完整机内路径。拍摄响应中的本地文件名与机内文件名分别表示主机副本和相机原图；下载使用 `camera file:` 返回路径中的文件名。
+
+机身只保存原图，不单独保存缩略图文件。`download thumbnail` 按需从指定原图提取或生成缩略图，并将结果保存到主机：
+
+| 原图格式 | 缩略图的取得方式 |
+| --- | --- |
+| JPEG | 优先提取内嵌图；没有内嵌图时，生成宽、高分别为原图 1/10 的图片 |
+| 3FR | 提取原图中内嵌的 JPEG 预览图 |
+
+`capture` 在主机保存的 `.thumbnail.jpg` 是工具生成的主机文件，不表示机身中另存了一份缩略图。
+
+## 删除机内照片
+
+```bash
+./hb_cli-linux-aarch64 delete /mnt/media_rw/ssd/DCIM/106HASBL/B9996039.JPG # 按完整机内路径删除一张照片
+./hb_cli-linux-aarch64 delete B9996025.JPG # 从 images 列表中唯一匹配文件名后删除
+./hb_cli-linux-aarch64 delete             # 删除 images 能列出的全部照片；直接执行，无确认提示
+```
+
+成功输出 `deleted <路径>`；相机拒绝时输出错误并返回非零退出码。
+部分新拍照片暂未出现在 `images` 中，此时使用经过确认的完整机内路径删除。机内路径不是本地 Linux 的文件路径；删除不影响本地已下载的照片。
+
+删除机内原图后，工具无法再从该原图提取或生成缩略图；此前已经保存到主机的原图和缩略图仍保留。
 
 ## 时间和维护
 
