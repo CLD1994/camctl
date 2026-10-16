@@ -3,6 +3,7 @@
 //   client_driver.ts export <客户端存储目录> <计划正文JSON路径> <输出计划路径> <输出凭据路径>
 //   client_driver.ts import <报告目录> <客户端存储目录> <输出凭据路径>
 //   client_driver.ts estimate <客户端存储目录> <动作JSON路径> <输出凭据路径>
+//   client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <输出凭据路径>
 //   client_driver.ts reload-estimate <客户端存储目录> <动作JSON路径> <待加载能力路径> <输出凭据路径>
 //
 // 导出走客户端的 createDraft/exportDraft/downloadRequest 真实路径：
@@ -14,17 +15,27 @@
 // 前后草稿事实，不新增产品 API 或持久化字段。
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { Application } from "../../apps/client/src/server/application";
 import { parseReport } from "../../apps/client/src/domain/reports";
-import type { Draft, ImportFile } from "../../apps/client/src/server/models";
+import {
+  AppError,
+  type Draft,
+  type ImportFile,
+} from "../../apps/client/src/server/models";
 import {
   parseJson,
   parseClientJson,
   stringifyJson,
 } from "../../apps/client/src/shared/json";
-import { loadCapabilities } from "../../apps/client/src/shared/capabilities";
+import {
+  loadCapabilities,
+  validateParams,
+} from "../../apps/client/src/shared/capabilities";
 import { estimateVideoAction } from "../../apps/client/src/shared/video-size-estimate";
 import { Files } from "../../apps/client/src/server/files";
 import { createHttpApp } from "../../apps/client/src/server/http";
@@ -194,8 +205,145 @@ async function estimateAction(
   }
 }
 
+// 测试合同的同一 describe 文件分别进入真实浏览器模块与后端导出。
+// 输入和输出正文以文本交接，避免 Playwright 的浮点传输改写原数字。
+async function validateParameters(
+  storeDir: string,
+  inputPath: string,
+  receiptPath: string,
+) {
+  type ParameterCase = { name: string; params_text: string };
+  const input = JSON.parse(readFileSync(inputPath, "utf8")) as {
+    scheduled_at: string;
+    cases: ParameterCase[];
+  };
+  const capabilitiesText = readFileSync(
+    join(storeDir, "device-capabilities.json"),
+    "utf8",
+  );
+  const capabilities = loadCapabilities(parseClientJson(capabilitiesText));
+  const requireClient = createRequire(
+    new URL("../../apps/client/package.json", import.meta.url),
+  );
+  const { createServer } = await import(requireClient.resolve("vite"));
+  const { chromium } = requireClient("@playwright/test");
+  const clientRoot = fileURLToPath(
+    new URL("../../apps/client/", import.meta.url),
+  );
+  const vite = await createServer({
+    configFile: false,
+    root: clientRoot,
+    logLevel: "error",
+    server: {
+      host: "127.0.0.1",
+      port: 0,
+      fs: { allow: [dirname(dirname(clientRoot))] },
+    },
+  });
+  vite.middlewares.use(
+    "/__parameter-seam",
+    (_req: IncomingMessage, res: ServerResponse) => {
+      res.setHeader("Content-Type", "text/html");
+      res.end("<!doctype html><html><body>参数接缝</body></html>");
+    },
+  );
+  const app = openApp(storeDir);
+  let browser;
+  try {
+    await vite.listen();
+    const address = vite.httpServer!.address() as { port: number };
+    const origin = `http://127.0.0.1:${address.port}`;
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(`${origin}/__parameter-seam`);
+    const browserCases = await page.evaluate(
+      async ({
+        origin,
+        capabilitiesText,
+        cases,
+      }: {
+        origin: string;
+        capabilitiesText: string;
+        cases: ParameterCase[];
+      }) => {
+        const { parseClientJson, stringifyJson } = await import(
+          `${origin}/src/shared/json.ts`
+        );
+        const { loadCapabilities, validateParams } = await import(
+          `${origin}/src/shared/capabilities.ts`
+        );
+        const capabilities = loadCapabilities(
+          parseClientJson(capabilitiesText),
+        );
+        return cases.map((item: ParameterCase) => {
+          const params = parseClientJson(item.params_text);
+          return {
+            valid:
+              validateParams("camera", "camera_timelapse", params, capabilities)
+                .length === 0,
+            params: stringifyJson(params),
+          };
+        });
+      },
+      { origin, capabilitiesText, cases: input.cases },
+    );
+    const cases = input.cases.map((item, index) => {
+      const params = parseJson(item.params_text);
+      const sharedValid =
+        validateParams("camera", "camera_timelapse", params, capabilities)
+          .length === 0;
+      const body = {
+        name: "时间参数接缝",
+        actions: [
+          {
+            name: "延时摄影",
+            type: "camera_timelapse",
+            device_id: "camera",
+            scheduled_at: input.scheduled_at,
+            policy: { max_delay_ms: 5000 },
+            params,
+          },
+        ],
+      };
+      const draft = app.createDraft({ text: stringifyJson(body) });
+      let exported: string | undefined, exportError: string | undefined;
+      try {
+        const request = app.exportDraft(
+          draft.id,
+          draft.revision,
+          draft.content,
+        );
+        exported = stringifyJson(app.downloadRequest(request.id));
+      } catch (error) {
+        if (!(error instanceof AppError) || error.code !== "invalid_plan")
+          throw error;
+        exportError = error.code;
+      }
+      return {
+        name: item.name,
+        shared_valid: sharedValid,
+        shared_params: stringifyJson(params),
+        browser_valid: browserCases[index].valid,
+        browser_params: browserCases[index].params,
+        export_valid: exported !== undefined,
+        exported,
+        export_error: exportError,
+      };
+    });
+    writeFileSync(receiptPath, stringifyJson({ cases }));
+  } finally {
+    await browser?.close();
+    await vite.close();
+    app.store.close();
+  }
+}
+
 async function main() {
-  if (command === "export") {
+  if (command === "validate-parameters") {
+    const [storeDir, inputPath, receiptPath] = rest;
+    if (!storeDir || !inputPath || !receiptPath) badUsage();
+    await validateParameters(storeDir, inputPath, receiptPath);
+  } else if (command === "export") {
     const [storeDir, bodyPath, planPath, receiptPath] = rest;
     if (!storeDir || !bodyPath || !planPath || !receiptPath) badUsage();
     exportPlan(storeDir, bodyPath, planPath, receiptPath);
@@ -224,7 +372,7 @@ void main().catch((error) => {
 
 function badUsage(): never {
   console.error(
-    "用法: client_driver.ts export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径>",
+    "用法: client_driver.ts export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径>",
   );
   process.exit(2);
 }

@@ -105,10 +105,21 @@ assert params_after_validation == params_before_validation
 
 **交付接口：** 正式任务关闭时，测试可直接读取候选 Schema，或通过测试合同导出；不增加产品的候选能力导出开关。D3 完成后，E2 使用正式 `describe` 重验同一接缝。
 
-- [ ] 将[共同硬件参数表](../../hardware/camera-control-handoff.md#间隔与采集时长限制)中的允许值表及合法组合计数改为由生产权威定义生成的视图；Action6 和 OSMO 的入口共同引用它，手工说明保留输入来源和设备证据边界。使用 `apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --write` 生成后再核对，文档及诊断资源不再手工维护第二份完整枚举。
-- [ ] 建议新增 `tests/integration/test_timelapse_time_parameters.py`，使用两款同源 Schema 及测试专用任务工厂贯通 Python、客户端共享校验和后端导出。分别验证 `1/300`、半秒域外值、等价词元、邻近非等值、严格等值、反向大小、域外及错误类型，每款合法时间对为 134；另验 Action6 三种输出和两款各自曝光结构，禁止型号之间扩散输出。客户端合成通用单元夹具不冒充完整设备枚举。
-- [ ] 验证能力导出的精确 JSON 数字和参数规则可被浏览器、Node.js 后端及 Python 消费；估算信息仍仅展示，不进入生效参数或报告。
-- [ ] 执行 `P tests/integration/test_timelapse_time_parameters.py -q`、`apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --check`、`node scripts/check-doc-links.mjs` 及 `node scripts/check-protocol.mjs`。运行 `git diff --check`，提交资料与接缝验证；证据注明此时使用测试任务工厂，正式 OSMO 内置链另由 E2 验证，Action6 延时仍保留自身启用门槛。
+- [x] 将[共同硬件参数表](../../hardware/camera-control-handoff.md#间隔与采集时长限制)中的允许值表及合法组合计数改为由生产权威定义生成的视图；Action6 和 OSMO 的入口共同引用它，手工说明保留输入来源和设备证据边界。使用 `apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --write` 生成后再核对，文档及诊断资源不再手工维护第二份完整枚举。
+- [x] 建议新增 `tests/integration/test_timelapse_time_parameters.py`，使用两款同源 Schema 及测试专用任务工厂贯通 Python、客户端共享校验和后端导出。分别验证 `1/300`、半秒域外值、等价词元、邻近非等值、严格等值、反向大小、域外及错误类型，每款合法时间对为 134；另验 Action6 三种输出和两款各自曝光结构，禁止型号之间扩散输出。客户端合成通用单元夹具不冒充完整设备枚举。
+- [x] 验证能力导出的精确 JSON 数字和参数规则可被浏览器、Node.js 后端及 Python 消费；估算信息仍仅展示，不进入生效参数或报告。
+- [x] 执行 `P tests/integration/test_timelapse_time_parameters.py -q`、`apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --check`、`node scripts/check-doc-links.mjs` 及 `node scripts/check-protocol.mjs`。运行 `git diff --check`，提交资料与接缝验证；证据注明此时使用测试任务工厂，正式 OSMO 内置链另由 E2 验证，Action6 延时仍保留自身启用门槛。
+
+### P3 验证记录（2026-10-16）
+
+环境为独立工作区的 Linux x86_64、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0；Python 使用本树 `.venv311` 与冻结锁文件，客户端按本树 `package-lock.json` 独立安装。根集成 pytest 顺序执行。
+
+- `render_timelapse_time_parameters.py --write` 从生产定义生成共同硬件表及独立 `docs/hardware/timelapse-time-parameters.json`。后者保存精确 JSON 数字、严格关系、合法数量及最短组合，可随 Windows 诊断独立交付；不要求目标机安装源码或 Python 包。`--check` 核对两份派生内容并报告具体路径，缺失或损坏生成标记时明确失败。
+- 根时间接缝先确认生成器缺失和测试驱动命令缺失；两款既有 Python Schema 判定首次即符合预期。最终执行 `P tests/integration/test_timelapse_time_parameters.py -q`，3 项通过。两款分别从权威域穷举 144 对候选，使用独立有理数比较核对各 134 对合法输入，并覆盖精确等值／邻近值、半秒域外值、缺失及错误类型、型号输出和曝光结构；相同实际 `describe` 输出由 Chromium、Node.js 共享模块和真实后端导出消费。
+- 最短等值词元参数经真实受理，生效参数保持原值，执行目标为 `300000` 毫秒。未启动取消后的发布报告和客户端导入保持相同参数，估算元数据不进入导出动作、生效参数、执行定义或报告；设备调用数为零。该边界验证不替代完成拍摄的软件整链。
+- 既有 `test_video_size_estimate.py` 单独回归，12 项通过，验证原导出、HTTP、估算、执行及报告接缝。生成器 `--check`、文档文件链接、协议检查及 `git diff --check` 均按本阶段命令验证，完整命令、日志与退出码保存在本工作区 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/task-P3-report.md`。
+
+本阶段使用测试专用任务工厂，未增加产品候选能力开关。正式 OSMO 内置及安装版链由 E2 重验；Action6 延时继续保留自身启用门槛。以上不包含 ARM、真实相机、Windows 上的实际诊断执行或新命令编码验收。
 
 ## 审查重点与完成条件
 
