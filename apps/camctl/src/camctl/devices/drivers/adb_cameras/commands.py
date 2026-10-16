@@ -10,6 +10,7 @@ from enum import StrEnum
 
 from camctl.contracts.json_values import JsonValue, is_json_integer
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
+from .timelapse_parameters import TIMELAPSE_DURATIONS_S, TIMELAPSE_INTERVALS_S
 
 
 class CameraModel(StrEnum):
@@ -142,7 +143,7 @@ def _osmo_manual(iso) -> tuple[Command, ...]:
 
 
 def settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValue]) -> tuple[Command, ...]:
-    """校验完整候选输入后查表；不发送命令或隐藏重试。"""
+    """校验新候选并返回完整设置命令；纯转换，不访问设备或隐藏重试。"""
     from .definitions import candidate_capabilities
     from camctl.acceptance.schema import validate_precise
 
@@ -173,6 +174,82 @@ def settings_from_effective_params(
 def _exact_number(value):
     return (not isinstance(value, bool) and isinstance(value, (int, Decimal))
             and (not isinstance(value, Decimal) or value.is_finite()))
+
+
+def _exact_scaled_uint16(value, scale: int, field: str) -> int:
+    """精确缩放为两字节无符号小端窗口，不舍入或截断输入。"""
+    if not _exact_number(value):
+        raise ValueError(f"{field}不能精确编码")
+    maximum = Decimal(0xFFFF) / Decimal(scale)
+    if value < 0 or value > maximum:
+        raise ValueError(f"{field}超出两字节编码窗口")
+    numerator, denominator = (value.as_integer_ratio()
+                              if isinstance(value, Decimal) else (value, 1))
+    units, remainder = divmod(numerator * scale, denominator)
+    if remainder:
+        raise ValueError(f"{field}缩放后不是数学整数")
+    if not 0 <= units <= 0xFFFF:
+        raise ValueError(f"{field}超出两字节编码窗口")
+    return units
+
+
+def _validated_timelapse_template(model: CameraModel, preset: TimelapsePreset) -> bytearray:
+    """检查完整模板的命令、长度及其已有时间字节与资料索引相符。"""
+    expected_length = 17 if model is CameraModel.ACTION6 else 16
+    command = preset.command
+    if (not isinstance(command, tuple) or len(command) < 2
+            or command[0] != "dji_mb_ctrl" or command[-2] != "6c"):
+        raise ValueError("延时完整命令模板的命令结构错误")
+    encoded = command[-1]
+    if (not isinstance(encoded, str) or len(encoded) != expected_length * 2
+            or any(character not in "0123456789abcdefABCDEF" for character in encoded)):
+        raise ValueError("延时完整命令模板的十六进制长度或格式错误")
+    try:
+        payload = bytearray.fromhex(encoded)
+    except ValueError as error:
+        raise ValueError("延时完整命令模板无法完整解码") from error
+    if len(payload) != expected_length or len(payload) < 7:
+        raise ValueError("延时完整命令模板长度错误")
+    interval_units = _exact_scaled_uint16(preset.interval_s, 10, "模板间隔")
+    duration_units = _exact_scaled_uint16(preset.duration_s, 1, "模板时长")
+    if (payload[3:5] != interval_units.to_bytes(2, "little")
+            or payload[5:7] != duration_units.to_bytes(2, "little")):
+        raise ValueError("延时完整命令模板的时间窗口与其资料索引不一致")
+    return payload
+
+
+def _timelapse_command_for(model: CameraModel, params: Mapping[str, JsonValue]) -> Command:
+    """优先返回原完整字面量，否则仅替换所选模板的四个时间字节。"""
+    presets = TIMELAPSE_PRESETS[model]
+    exposure_mode = params["exposure"]["mode"]
+    exact = next((preset for preset in presets
+                  if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
+                  == (params["interval_s"], params["duration_s"],
+                      params["outputs"], exposure_mode)), None)
+    if exact is not None:
+        _validated_timelapse_template(model, exact)
+        return exact.command
+
+    interval = params["interval_s"]
+    duration = params["duration_s"]
+    if (interval not in TIMELAPSE_INTERVALS_S or duration not in TIMELAPSE_DURATIONS_S
+            or duration <= interval):
+        raise CapabilityNotDeclaredError(
+            f"驱动 {model!r} 没有可解释该延时事实的原有映射")
+
+    template = next((preset for preset in presets
+                     if preset.outputs == params["outputs"]
+                     and preset.exposure_mode == exposure_mode), None)
+    if template is None:
+        raise CapabilityNotDeclaredError(
+            f"驱动 {model!r} 尚未提供该延时参数分区的完整命令模板")
+
+    payload = _validated_timelapse_template(model, template)
+    interval_units = _exact_scaled_uint16(params["interval_s"], 10, "延时间隔")
+    duration_units = _exact_scaled_uint16(params["duration_s"], 1, "采集时长")
+    payload[3:5] = interval_units.to_bytes(2, "little")
+    payload[5:7] = duration_units.to_bytes(2, "little")
+    return (*template.command[:-1], payload.hex())
 
 
 def _check_effective_structure(model, action_type, params):
@@ -240,18 +317,13 @@ def _encode_settings(model, action_type, params):
                 ("simulate_device", "-s", "BaseFormat", "6", "69", "0"),
                 *exposure_settings, _cmd("42", "3d"),
                 ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2"))
-    preset = next((preset for preset in TIMELAPSE_PRESETS[model]
-                  if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
-                  == (params["interval_s"], params["duration_s"], params["outputs"], exposure["mode"])), None)
-    if preset is None:
-        raise CapabilityNotDeclaredError(
-            f"驱动 {model!r} 尚未提供该延时生效参数的完整命令映射")
+    timelapse_command = _timelapse_command_for(model, params)
     if model is CameraModel.ACTION6:
-        exposure_settings = (_action_manual(800) if preset.exposure_mode == "manual"
+        exposure_settings = (_action_manual(800) if exposure["mode"] == "manual"
                              else (_cmd("0x1e", "0100", test=True),))
         return (_cmd("e1", "02", test=True), ACTION_RESOLUTIONS["4k30"],
-                preset.command, *exposure_settings)
-    exposure_settings = (_osmo_manual(800) if preset.exposure_mode == "manual" else
+                timelapse_command, *exposure_settings)
+    exposure_settings = (_osmo_manual(800) if exposure["mode"] == "manual" else
                          (_cmd("8e", "010100000100"), _cmd("1e", "0000")))
     return (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "3b"),
-            _cmd("18", "6f03000000"), *exposure_settings, preset.command)
+            _cmd("18", "6f03000000"), *exposure_settings, timelapse_command)

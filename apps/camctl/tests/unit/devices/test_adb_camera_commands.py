@@ -1,4 +1,5 @@
 """命令预期独立抄自交接表，保留参数大小写和前缀。"""
+from dataclasses import replace
 from decimal import Decimal
 import shlex
 
@@ -6,6 +7,10 @@ import pytest
 
 from camctl.acceptance.schema import BodySchemaError
 from camctl.devices.drivers.adb_cameras import commands
+from camctl.devices.drivers.adb_cameras.timelapse_parameters import (
+    TIMELAPSE_DURATIONS_S,
+    TIMELAPSE_INTERVALS_S,
+)
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from .test_adb_camera_parameters import recording_params, timelapse_params
 
@@ -234,11 +239,150 @@ def test_action_timelapse_applies_selected_full_preset_once_before_exposure(
         tuple(shlex.split(command)) for command in expected)
 
 
+ACTION6_CANDIDATE_TEMPLATES = (
+    ("video", "manual", "0400002c01181500000000000000000000"),
+    ("video_raw", "manual", "0400032c01181500000000000000000000"),
+    ("video_jpeg", "manual", "0400022c01181500000000000000000000"),
+    ("video", "auto", "0400005000080700000000000000000000"),
+    ("video_raw", "auto", "0400035000080700000000000000000000"),
+    ("video_jpeg", "auto", "0400025000080700000000000000000000"),
+)
+OSMO_CANDIDATE_TEMPLATES = (
+    ("video", "manual", "0407002c015802000000000000000001"),
+    ("video", "auto", "04000050000807000000000000000000"),
+)
+
+
+def _candidate_params(driver, outputs, exposure_mode, interval_s, duration_s):
+    parameter_type = "action6_timelapse" if driver == "dji-action6" else "osmo360ii_timelapse"
+    exposure = ({"mode": "manual", "iso": 800} if exposure_mode == "manual"
+                else {"mode": "auto"})
+    return {"type": parameter_type, "interval_s": interval_s, "duration_s": duration_s,
+            "outputs": outputs, "exposure": exposure}
+
+
+def _payload_from_settings(settings):
+    payload_commands = [command for command in settings if command[-2] == "6c"]
+    assert len(payload_commands) == 1
+    return bytes.fromhex(payload_commands[0][-1])
+
+
+@pytest.mark.parametrize("outputs, exposure_mode, template", ACTION6_CANDIDATE_TEMPLATES)
+def test_action6_timelapse_candidate_covers_every_allowed_time_pair_and_preserves_template(
+        outputs, exposure_mode, template):
+    pairs = [(interval, duration) for interval in TIMELAPSE_INTERVALS_S
+             for duration in TIMELAPSE_DURATIONS_S if duration > interval]
+    assert len(pairs) == 134
+    template_bytes = bytes.fromhex(template)
+
+    for interval, duration in pairs:
+        settings = commands.settings_for(
+            "dji-action6", "camera_timelapse",
+            _candidate_params("dji-action6", outputs, exposure_mode, interval, duration),
+        )
+        payload = _payload_from_settings(settings)
+        assert len(payload) == 17
+        assert payload[:3] == template_bytes[:3]
+        assert payload[3:5] == (interval * 10).to_bytes(2, "little")
+        assert payload[5:7] == duration.to_bytes(2, "little")
+        assert payload[7:] == template_bytes[7:]
+
+
+@pytest.mark.parametrize("outputs, exposure_mode, template", OSMO_CANDIDATE_TEMPLATES)
+def test_osmo_timelapse_candidate_covers_every_allowed_time_pair_and_preserves_template(
+        outputs, exposure_mode, template):
+    pairs = [(interval, duration) for interval in TIMELAPSE_INTERVALS_S
+             for duration in TIMELAPSE_DURATIONS_S if duration > interval]
+    assert len(pairs) == 134
+    template_bytes = bytes.fromhex(template)
+
+    for interval, duration in pairs:
+        settings = commands.settings_for(
+            "dji-osmo360-ii", "camera_timelapse",
+            _candidate_params("dji-osmo360-ii", outputs, exposure_mode, interval, duration),
+        )
+        payload = _payload_from_settings(settings)
+        assert len(payload) == 16
+        assert payload[:3] == template_bytes[:3]
+        assert payload[3:5] == (interval * 10).to_bytes(2, "little")
+        assert payload[5:7] == duration.to_bytes(2, "little")
+        assert payload[7:] == template_bytes[7:]
+
+
+@pytest.mark.parametrize("interval, duration, expected", [
+    (1, 300, "0400030a002c0100000000000000000000"),
+    (30, 600, "0400032c01580200000000000000000000"),
+    (3600, 18000, "040003a08c504600000000000000000000"),
+])
+def test_timelapse_candidate_encodes_shortest_carry_and_maximum_values(interval, duration, expected):
+    settings = commands.settings_for(
+        "dji-action6", "camera_timelapse",
+        _candidate_params("dji-action6", "video_raw", "auto", interval, duration),
+    )
+
+    assert _payload_from_settings(settings) == bytes.fromhex(expected)
+
+
+@pytest.mark.parametrize("interval", [1, Decimal("1.0"), Decimal("1e0")])
+def test_timelapse_candidate_treats_exactly_equal_interval_numbers_as_the_same_value(interval):
+    settings = commands.settings_for(
+        "dji-action6", "camera_timelapse",
+        _candidate_params("dji-action6", "video", "auto", interval, 300),
+    )
+
+    assert _payload_from_settings(settings) == bytes.fromhex(
+        "0400000a002c0100000000000000000000")
+
+
+def test_timelapse_candidate_rejects_neighboring_unequal_interval_value():
+    with pytest.raises(BodySchemaError):
+        commands.settings_for(
+            "dji-action6", "camera_timelapse",
+            _candidate_params("dji-action6", "video", "auto", Decimal("1.00000000000000001"), 300),
+        )
+
+
 @pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
-@pytest.mark.parametrize("exposure", [{"mode": "auto"}, {"mode": "manual", "iso": 800}])
-def test_timelapse_valid_unmapped_parameters_report_missing_capability(driver, exposure):
+def test_timelapse_missing_template_is_a_mapping_error(monkeypatch, driver):
+    model = commands.CameraModel(driver)
+    presets = commands.TIMELAPSE_PRESETS[model]
+    monkeypatch.setitem(commands.TIMELAPSE_PRESETS, model, tuple(
+        preset for preset in presets
+        if not (preset.outputs is commands.OutputSelection.VIDEO and preset.exposure_mode == "auto")
+    ))
+
     with pytest.raises(CapabilityNotDeclaredError):
-        commands.settings_for(driver, "camera_timelapse", timelapse_params(driver, exposure=exposure))
+        commands.settings_for(
+            driver, "camera_timelapse",
+            _candidate_params(driver, "video", "auto", 1, 300),
+        )
+
+
+def test_timelapse_bad_template_is_rejected_before_returning_settings(monkeypatch):
+    model = commands.CameraModel.ACTION6
+    presets = commands.TIMELAPSE_PRESETS[model]
+    selected = next(preset for preset in presets
+                    if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
+                    == (8, 1800, commands.OutputSelection.VIDEO_RAW, "auto"))
+    malformed = replace(selected, command=(*selected.command[:-1], "not-hex"))
+    monkeypatch.setitem(commands.TIMELAPSE_PRESETS, model, tuple(
+        malformed if preset is selected else preset for preset in presets
+    ))
+
+    with pytest.raises(ValueError):
+        commands.settings_for(
+            "dji-action6", "camera_timelapse",
+            _candidate_params("dji-action6", "video_raw", "auto", 8, 1800),
+        )
+
+
+def test_timelapse_effective_interval_that_exceeds_replacement_window_is_rejected(monkeypatch):
+    monkeypatch.setattr(commands, "TIMELAPSE_INTERVALS_S", (6554,))
+    monkeypatch.setattr(commands, "TIMELAPSE_DURATIONS_S", (10800,))
+    params = _candidate_params("dji-action6", "video", "auto", 6554, 10800)
+
+    with pytest.raises(ValueError):
+        commands.settings_from_effective_params("dji-action6", "camera_timelapse", params)
 
 
 @pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
@@ -297,7 +441,7 @@ def test_original_effective_encoding_keeps_structure_and_model_checks(patch):
 
 
 def test_original_effective_encoding_distinguishes_missing_mapping():
-    params = {"type": "action6_timelapse", "interval_s": Decimal("1"), "duration_s": Decimal("300"),
+    params = {"type": "action6_timelapse", "interval_s": Decimal("1"), "duration_s": Decimal("301"),
               "outputs": "video", "exposure": {"mode": "auto"}}
     with pytest.raises(CapabilityNotDeclaredError):
         commands.settings_from_effective_params("dji-action6", "camera_timelapse", params)
