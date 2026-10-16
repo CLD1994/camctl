@@ -16,6 +16,7 @@ import {
   type Path,
 } from "./editing";
 import { hasNumericLoss, parameterOptions } from "./parameter-options";
+import { isLocalScalarSchema } from "./scalar-schema";
 
 export interface ObjectBranchMember {
   name: string;
@@ -44,22 +45,6 @@ const objectKeywords = new Set([
   "additionalProperties",
   ...SCHEMA_ANNOTATIONS,
 ]);
-const scalarKeywords = new Set([
-  "type",
-  "const",
-  "enum",
-  "minimum",
-  "maximum",
-  "exclusiveMinimum",
-  "exclusiveMaximum",
-  "multipleOf",
-  "minLength",
-  "maxLength",
-  "pattern",
-  "format",
-  ...SCHEMA_ANNOTATIONS,
-]);
-const scalarTypes = new Set(["string", "number", "integer", "boolean", "null"]);
 const scalar = (value: unknown) =>
   value === null || ["string", "number", "boolean"].includes(typeof value);
 
@@ -113,31 +98,14 @@ function buildBranches(
         ) &&
         Object.keys(branch).every((key) => objectKeywords.has(key)) &&
         Object.values(branch.properties).every((field) => {
-          if (
-            !isObject(field) ||
-            Object.keys(field).some((key) => !scalarKeywords.has(key))
-          )
-            return false;
+          if (!isLocalScalarSchema(field)) return false;
           const types =
             field.type === undefined
               ? []
               : Array.isArray(field.type)
                 ? field.type
                 : [field.type];
-          if (
-            types.some(
-              (type) => typeof type !== "string" || !scalarTypes.has(type),
-            ) ||
-            types.filter((type) => type !== "null").length > 1
-          )
-            return false;
-          if (Object.hasOwn(field, "const") && !scalar(field.const))
-            return false;
-          if (
-            Object.hasOwn(field, "enum") &&
-            (!Array.isArray(field.enum) || !field.enum.every(scalar))
-          )
-            return false;
+          if (types.filter((type) => type !== "null").length > 1) return false;
           return (
             Object.hasOwn(field, "const") ||
             Array.isArray(field.enum) ||
