@@ -15,7 +15,11 @@ import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import { parseJson, stringifyJson } from "../../src/shared/json";
 import type { DraftContent } from "../../src/server/models";
 import type { ParameterType } from "../../src/shared/types";
-import { linkedParameter } from "../fixtures/linked-parameters";
+import {
+  linkedParameter,
+  storageParameter,
+  storageScenarios,
+} from "../fixtures/linked-parameters";
 import { choose, readOptions } from "./select-support";
 
 let browser: Browser;
@@ -309,3 +313,202 @@ it("局部组选值写入原数字词元且其他字段保持", async () => {
   expect(current().duration_s).toBe(0.3);
   expect(current().exposure).toEqual({});
 });
+
+for (const scenario of storageScenarios) {
+  it.each(["narrow", "remove"])(
+    `${scenario.device} 能力 %s 后重开保留完整原值与错误`,
+    async (change) => {
+      const { page, saved, current, capabilityPath, capabilities } =
+        await setup(
+          '{"interval_s":1,"duration_s":300,"exposure":{"mode":"manual","iso":800},"outputs":"video"}',
+          { "/actions/0/policy/max_delay_ms": { kind: "number", text: "-" } },
+          storageParameter(scenario.outputs),
+        );
+      await choose(mode(page), "branch:1");
+      await check.poll(() => current().exposure).toEqual({ mode: "auto" });
+      const before = saved();
+      const narrowed = storageParameter(scenario.outputs);
+      (narrowed.schema.properties as any).duration_s.enum = [600];
+      capabilities.devices[0].actions[0].parameter_types[0] = narrowed;
+      writeFileSync(
+        capabilityPath,
+        stringifyJson(change === "remove" ? { devices: [] } : capabilities),
+      );
+      expect(
+        (
+          await page.request.post(
+            new URL("/api/capabilities/reload", page.url()).href,
+          )
+        ).status(),
+      ).toBe(200);
+      await page.reload();
+      await page.getByTestId("draft-open-button").click();
+      await check(page.locator(".validation")).toBeVisible();
+      expect(saved()).toEqual(before);
+      if (change === "narrow") {
+        await check(duration(page)).toHaveAttribute("data-value", "invalid");
+        await choose(mode(page), "branch:0");
+        await check
+          .poll(() => current().exposure)
+          .toEqual({ mode: "manual", iso: 800 });
+        expect(current().duration_s).toBe(300);
+        expect(saved().content.pending).toEqual(before.content.pending);
+      } else {
+        await check(interval(page)).toHaveCount(0);
+        expect(current()).toEqual({
+          type: "linked_capture",
+          interval_s: 1,
+          duration_s: 300,
+          exposure: { mode: "auto" },
+          outputs: "video",
+        });
+      }
+    },
+  );
+  it(`${scenario.device} 应用预设整体替换时间及曝光，清除组内输入并保留组外输入`, async () => {
+    const pending: DraftContent["pending"] = {
+      "/actions/0/params/interval_s": { kind: "number", text: "1e" },
+      "/actions/0/params/exposure/iso": { kind: "number", text: "8e" },
+      "/actions/0/policy/max_delay_ms": { kind: "number", text: "-" },
+    };
+    const { page, current, saved } = await setup(
+      '{"interval_s":1,"duration_s":600,"exposure":{"mode":"manual","iso":800},"outputs":"video","extra":true}',
+      pending,
+      storageParameter(scenario.outputs),
+    );
+    const params = {
+      type: "linked_capture",
+      interval_s: 1,
+      duration_s: 300,
+      exposure: { mode: "auto" },
+      outputs: "video",
+    };
+    const response = await page.request.post(
+      new URL("/api/presets", page.url()).href,
+      {
+        data: {
+          name: "最短预设",
+          deviceId: "camera",
+          actionType: "camera_timelapse",
+          params,
+        },
+      },
+    );
+    expect(response.status()).toBe(201);
+    const preset = parseJson(await response.text()) as { id: string };
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    const original = (parseJson(saved().content.text) as any).actions[0];
+    await check(interval(page)).toBeDisabled();
+    await page.locator(".preset-box > summary").click();
+    await choose(
+      page.getByRole("combobox", { name: "已有预设", exact: true }),
+      preset.id,
+    );
+    await page.getByRole("button", { name: "应用预设", exact: true }).click();
+    await check.poll(current).toEqual(params);
+    expect(saved().content.pending).toEqual({
+      "/actions/0/policy/max_delay_ms":
+        pending["/actions/0/policy/max_delay_ms"],
+    });
+    const actual = (parseJson(saved().content.text) as any).actions[0];
+    expect({ ...actual, params: undefined }).toEqual({
+      ...original,
+      params: undefined,
+    });
+    await check(interval(page)).toBeEnabled();
+    expect(
+      (
+        await readOptions(
+          page.getByRole("combobox", {
+            name: "输出选择 (outputs)",
+            exact: true,
+          }),
+        )
+      )
+        .filter((option) => option.value !== "")
+        .map((option) => option.text),
+    ).toEqual(scenario.outputs);
+    await choose(duration(page), "1");
+    await check.poll(() => current().duration_s).toBe(600);
+    const state = parseJson(
+      await (
+        await page.request.get(new URL("/api/state", page.url()).href)
+      ).text(),
+    ) as any;
+    expect(state.presets[0].params).toEqual(params);
+    const draft = saved();
+    const rejected = await page.request.post(
+      new URL(`/api/drafts/${draft.id}/export`, page.url()).href,
+      {
+        data: {
+          revision: draft.revision,
+          content: draft.content,
+          capabilityVersion: state.capabilities.version,
+        },
+      },
+    );
+    expect(rejected.status()).toBe(400);
+    expect((parseJson(await rejected.text()) as any).code).toBe(
+      "unfinished_input",
+    );
+  });
+}
+
+it.each([5400, 6000])(
+  "旧 Action6 %s 秒预设重新应用保留原值及错误，不自动改为合法时长",
+  async (seconds) => {
+    const { page, saved, current, capabilities, capabilityPath } = await setup(
+      `{"interval_s":1,"duration_s":${seconds},"exposure":{"mode":"auto"},"outputs":"video"}`,
+      undefined,
+      storageParameter(storageScenarios[0].outputs, true),
+    );
+    const params = current();
+    const response = await page.request.post(
+      new URL("/api/presets", page.url()).href,
+      {
+        data: {
+          name: "旧预设",
+          deviceId: "camera",
+          actionType: "camera_timelapse",
+          params,
+        },
+      },
+    );
+    expect(response.status()).toBe(201);
+    const preset = parseJson(await response.text()) as { id: string };
+    capabilities.devices[0].actions[0].parameter_types[0] = storageParameter(
+      storageScenarios[0].outputs,
+    );
+    writeFileSync(capabilityPath, stringifyJson(capabilities));
+    expect(
+      (
+        await page.request.post(
+          new URL("/api/capabilities/reload", page.url()).href,
+        )
+      ).status(),
+    ).toBe(200);
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await check(duration(page)).toHaveAttribute("data-value", "invalid");
+    expect(current().duration_s).toBe(seconds);
+    const before = saved();
+    await page.locator(".preset-box > summary").click();
+    const control = page.getByRole("combobox", {
+      name: "已有预设",
+      exact: true,
+    });
+    expect(
+      (await readOptions(control)).find((option) => option.value === preset.id)
+        ?.text,
+    ).toContain("需修正");
+    await choose(control, preset.id);
+    await page.getByRole("button", { name: "应用预设", exact: true }).click();
+    await check(duration(page)).toHaveAttribute("aria-invalid", "true");
+    expect(current()).toEqual(params);
+    expect(saved().content.text).toBe(before.content.text);
+    await check(
+      page.getByRole("button", { name: "更新所选预设", exact: true }),
+    ).toBeDisabled();
+  },
+);
