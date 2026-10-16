@@ -10,8 +10,8 @@
       "scheduled_at": "2026-01-01 00:00:10",
       "params": {
         "type": "action6_timelapse",
-        "interval_s": 8,
-        "duration_s": 1800,
+        "interval_s": 1,
+        "duration_s": 300,
         "outputs": "video",
         "exposure": {
           "mode": "auto"
