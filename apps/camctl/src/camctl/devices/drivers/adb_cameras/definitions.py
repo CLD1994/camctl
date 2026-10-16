@@ -1,6 +1,6 @@
 """尚待设备契约核实的参数定义。
 
-Schema 从命令候选表取得离散选项。返回定义不自动登记到能力目录；
+Schema 从权威参数定义取得离散选项。返回定义不自动登记到能力目录；
 调用返回含义和延时结束方式尚未核实，不提供可执行任务工厂。
 视频估算采用固定假定参考值，说明和元数据从同一份定义生成；
 厂商核实后调整本模块的参考值，不改变拍摄参数或完成契约。
@@ -9,7 +9,8 @@ from camctl.contracts.values import MAX_OBJECT_ID
 from camctl.devices.catalog import ActionCapability
 from .commands import (ACTION_APERTURE, ACTION_BITRATE, ACTION_EV, ACTION_FOV,
                        ACTION_ISO, ACTION_RESOLUTIONS, ACTION_STABILIZATION,
-                       OSMO_EV, OSMO_ISO, TIMELAPSE_PRESETS, CameraModel)
+                       OSMO_EV, OSMO_ISO, CameraModel, OutputSelection)
+from .timelapse_parameters import time_conditions, time_properties
 
 
 _ASSUMED_REFERENCE_BITRATE_MBPS = {
@@ -85,17 +86,17 @@ def _record_schema(model: CameraModel, parameter_type: str) -> dict:
 
 
 def _timelapse_schema(model: CameraModel, parameter_type: str) -> dict:
+    outputs = (list(OutputSelection) if model is CameraModel.ACTION6
+               else [OutputSelection.VIDEO])
     schema = _object({"type": {"const": parameter_type},
-                      "interval_s": {"type": "integer"}, "duration_s": {"type": "integer"},
-                      "outputs": {"type": "string"}, "exposure": {"type": "object"}})
-    schema["oneOf"] = [
-        {"properties": {"interval_s": {"const": preset.interval_s},
-                        "duration_s": {"const": preset.duration_s},
-                        "outputs": {"const": str(preset.outputs)},
-                        "exposure": (_object({"mode": {"const": "manual"}, "iso": {"const": 800}})
-                                     if preset.exposure_mode == "manual" else _object({"mode": {"const": "auto"}}))}}
-        for preset in TIMELAPSE_PRESETS[model]
-    ]
+                      **time_properties(),
+                      "outputs": {"type": "string", "enum": outputs},
+                      "exposure": {"type": "object", "oneOf": [
+                          _object({"mode": {"const": "manual"},
+                                   "iso": {"type": "integer", "const": 800}}),
+                          _object({"mode": {"const": "auto"}}),
+                      ]}})
+    schema["allOf"] = time_conditions()
     return schema
 
 
@@ -121,7 +122,9 @@ def candidate_capabilities(driver_id: str) -> tuple[ActionCapability, ...]:
                          record_description,
                          False, record, {}, video_size_estimate=record_estimate),
         ActionCapability("camera_timelapse", timelapse_type, "原生延时摄影候选参数",
-                         "仅接受资料给出的完整组合；正常结束及文件写完依据待设备核实。"
+                         "间隔和采集时长从各自允许值中选择，采集时长必须严格大于间隔；"
+                         "时间选择不改变曝光或输出。参数合法不表示已有完整命令映射；"
+                         "正常结束及文件写完依据待设备核实。"
                          + _video_estimate_description(timelapse_estimate),
                          False, timelapse, {}, video_size_estimate=timelapse_estimate),
     )

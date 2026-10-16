@@ -12,6 +12,7 @@ from camctl.devices.drivers.adb_cameras.commands import CameraModel, settings_fo
 from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
+from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import ControlRequest
 from camctl.operations.models import AttemptStatus, AttemptTicket, EffectState, ErrorValue, SettlementBasis
@@ -26,15 +27,11 @@ PREVENTED = EvidenceContract("dispatch_prevented", 1, "control", frozenset())
 EVIDENCE = EvidenceRegistry((RETURNED, ASSUMED, SETTING, STARTED, PREVENTED))
 
 
-ACTION6_MANUAL_TIMELAPSE_SCRIPTS = (
+ACTION6_AUTO_TIMELAPSE_SCRIPTS = (
     "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400032c01181500000000000000000000",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0400",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2a 06",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 28 013C8000",
-    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400035000080700000000000000000000",
+    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
 )
 
@@ -80,8 +77,8 @@ def _request(model=CameraModel.ACTION6, *, check=lambda: None, device_id="cam-1"
 
 def _timelapse_request(*, check=lambda: None):
     return replace(_request(check=check), operation="start_timelapse", params={
-        "type": "action6_timelapse", "interval_s": 30, "duration_s": 5400,
-        "outputs": "video_raw", "exposure": {"mode": "manual", "iso": 800},
+        "type": "action6_timelapse", "interval_s": 8, "duration_s": 1800,
+        "outputs": "video_raw", "exposure": {"mode": "auto"},
     })
 
 
@@ -218,12 +215,12 @@ async def test_action6_record_unconfirmed_explicit_bitrate_blocks_start(exposure
 
 
 @pytest.mark.asyncio
-async def test_action6_timelapse_applies_full_manual_sequence_before_one_start():
+async def test_action6_timelapse_applies_full_auto_sequence_before_one_start():
     transport = Transport()
     result = await _driver(CameraModel.ACTION6, transport).control(_timelapse_request())
 
     scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
-    assert scripts == list(ACTION6_MANUAL_TIMELAPSE_SCRIPTS)
+    assert scripts == list(ACTION6_AUTO_TIMELAPSE_SCRIPTS)
     assert all(call.argv[:5] == ("adb", "-s", "serial-1", "shell", "-T") for call in transport.calls)
     assert result.outcome.status is AttemptStatus.SUCCEEDED
     assert result.outcome.effect is EffectState.CONFIRMED
@@ -232,13 +229,13 @@ async def test_action6_timelapse_applies_full_manual_sequence_before_one_start()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("setting_number", range(1, 9))
+@pytest.mark.parametrize("setting_number", range(1, 5))
 async def test_action6_timelapse_unconfirmed_setting_preserves_error_and_blocks_later_commands(setting_number):
     transport = Transport(fail_at=setting_number)
     result = await _driver(CameraModel.ACTION6, transport).control(_timelapse_request())
 
     scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
-    assert scripts == list(ACTION6_MANUAL_TIMELAPSE_SCRIPTS[:setting_number])
+    assert scripts == list(ACTION6_AUTO_TIMELAPSE_SCRIPTS[:setting_number])
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
     assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}
@@ -256,7 +253,7 @@ async def test_action6_timelapse_eligibility_lost_before_or_after_preset_blocks_
     result = await _driver(CameraModel.ACTION6, transport).control(request)
 
     scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
-    assert scripts == list(ACTION6_MANUAL_TIMELAPSE_SCRIPTS[:completed_settings])
+    assert scripts == list(ACTION6_AUTO_TIMELAPSE_SCRIPTS[:completed_settings])
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
     assert result.error == {"code": reason, "stage": "dispatch", "details": {}}
@@ -278,7 +275,7 @@ async def test_action6_timelapse_deadline_exhausted_before_or_after_preset_block
     result = await _driver(CameraModel.ACTION6, transport, clock=lambda: now[0]).control(_timelapse_request())
 
     scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
-    assert scripts == list(ACTION6_MANUAL_TIMELAPSE_SCRIPTS[:completed_settings])
+    assert scripts == list(ACTION6_AUTO_TIMELAPSE_SCRIPTS[:completed_settings])
     assert [call.timeout_s for call in transport.calls] == expected_timeouts
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
@@ -290,17 +287,32 @@ async def test_action6_timelapse_deadline_exhausted_before_or_after_preset_block
 
 @pytest.mark.asyncio
 async def test_action6_timelapse_unknown_start_is_not_repeated_or_followed_by_stop():
-    transport = Transport(fail_at=9)
+    transport = Transport(fail_at=5)
     result = await _driver(CameraModel.ACTION6, transport).control(_timelapse_request())
 
     scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
-    assert scripts == list(ACTION6_MANUAL_TIMELAPSE_SCRIPTS)
+    assert scripts == list(ACTION6_AUTO_TIMELAPSE_SCRIPTS)
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.error == {"code": "response_unconfirmed", "stage": "device", "details": {"response": "UNKNOWN"}}
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
     assert not result.observations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", list(CameraModel))
+async def test_unmapped_timelapse_is_rejected_before_any_device_call(model):
+    request = _request(model)
+    request = replace(request, operation="start_timelapse", params={
+        "type": "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse",
+        "interval_s": Decimal("0.5"), "duration_s": 300,
+        "outputs": "video", "exposure": {"mode": "auto"},
+    })
+    transport = Transport()
+    with pytest.raises(CapabilityNotDeclaredError):
+        await _driver(model, transport).control(request)
+    assert transport.calls == []
 
 
 @pytest.mark.asyncio
