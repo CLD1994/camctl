@@ -15,8 +15,13 @@ import {
   valueAt,
   type Path,
 } from "./editing";
-import { hasNumericLoss, parameterOptions } from "./parameter-options";
+import {
+  hasNumericLoss,
+  parameterOptions,
+  parameterFieldIndependent,
+} from "./parameter-options";
 import { isLocalScalarSchema } from "./scalar-schema";
+import { inspectActionPending } from "../shared/draft-plan";
 
 export interface ObjectBranchMember {
   name: string;
@@ -64,7 +69,8 @@ function buildBranches(
   parameter: ParameterType,
   name: string,
 ): ObjectBranches | undefined {
-  if (parameterOptions(parameter).kind !== "independent") return undefined;
+  if (!parameterFieldIndependent(parameterOptions(parameter), name))
+    return undefined;
   const schema = isObject(parameter.schema.properties)
     ? parameter.schema.properties[name]
     : undefined;
@@ -198,13 +204,14 @@ export function objectBranchState(
     pointer(path.slice(0, 2).concat("type")),
     pointer(path.slice(0, 3).concat("type")),
   ];
+  let entries: ReturnType<typeof inspectActionPending>;
+  try {
+    entries = inspectActionPending(content, root.actions);
+  } catch {
+    return { kind: "blocked" };
+  }
   let raw = false;
-  for (const key of Object.keys(content.pending ?? {})) {
-    try {
-      pointerPath(key);
-    } catch {
-      return { kind: "blocked" };
-    }
+  for (const { key } of entries) {
     if (
       (key !== current && current.startsWith(key + "/")) ||
       identities.some(

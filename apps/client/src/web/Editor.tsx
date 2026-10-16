@@ -65,6 +65,7 @@ import {
   compatibleValues,
   parameterRequired,
   parameterChoiceBlocked,
+  parameterFieldOptions,
 } from "./parameter-options";
 
 interface Props {
@@ -1402,8 +1403,10 @@ export function SchemaFields({
   const params = valueAt(parseDraft(content), path);
   const hasPending =
     catalog.kind !== "unavailable" &&
-    fields.some(([name]) =>
-      parameterChoiceBlocked(content, [...path, name], catalog),
+    fields.some(
+      ([name]) =>
+        parameterFieldOptions(catalog, name).kind === "finite" &&
+        parameterChoiceBlocked(content, [...path, name], catalog),
     );
   const form = fields.length ? (
     <>
@@ -1413,11 +1416,12 @@ export function SchemaFields({
           填写；填写后将检查全部规则。
         </p>
       )}
-      {hasPending && catalog.kind === "finite" && (
+      {hasPending && (
         <p className="notice">请先修正上方未完成输入，再选择关联参数。</p>
       )}
       <div className="form-grid">
         {fields.map(([name, field]) => {
+          const scope = parameterFieldOptions(catalog, name);
           const branches = objectBranches(parameter, name);
           if (branches)
             return (
@@ -1435,9 +1439,9 @@ export function SchemaFields({
               />
             );
           const choices =
-            catalog.kind === "unavailable"
+            scope.kind === "unavailable"
               ? undefined
-              : catalog.fields.find((entry) => entry.name === name)?.values;
+              : scope.fields.find((entry) => entry.name === name)?.values;
           const blocked =
             catalog.kind !== "unavailable" &&
             parameterChoiceBlocked(content, [...path, name], catalog);
@@ -1448,7 +1452,7 @@ export function SchemaFields({
               schema={resolveField(field, schema)}
               rulesSchema={field}
               required={
-                catalog.kind === "finite" && isObject(params) && !blocked
+                scope.kind !== "unavailable" && isObject(params) && !blocked
                   ? parameterRequired(catalog, params, name)
                   : Array.isArray(schema.required) &&
                     schema.required.includes(name)
@@ -1458,17 +1462,20 @@ export function SchemaFields({
               change={change}
               choices={choices}
               allowed={
-                catalog.kind === "finite" && isObject(params) && !blocked
+                scope.kind !== "unavailable" &&
+                isObject(params) &&
+                !blocked &&
+                choices
                   ? compatibleValues(catalog, params, name)
                   : undefined
               }
               choicesBlocked={blocked}
               choiceBasis={
-                catalog.kind === "independent" ? "independent" : "linked"
+                scope.kind === "independent" ? "independent" : "linked"
               }
               jsonChoices={
-                catalog.kind === "unavailable" ||
-                (catalog.kind === "independent" && !choices)
+                scope.kind === "unavailable" ||
+                (scope.kind === "independent" && !choices)
               }
             />
           );

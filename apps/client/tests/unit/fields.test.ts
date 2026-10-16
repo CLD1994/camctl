@@ -6,12 +6,119 @@ import { SchemaFields } from "../../src/web/Editor";
 import { editValue, setValue } from "../../src/web/editing";
 import { createValidator } from "../../src/shared/validation";
 import { parseJson } from "../../src/shared/json";
+import { linkedParameter } from "../fixtures/linked-parameters";
+import type { DraftContent } from "../../src/server/models";
+import { DeviceGuide } from "../../src/web/DeviceGuide";
 const token = "1.0000000000000001";
 const content = (value = token) => ({
   text: `{"value":${value},"actions":[]}`,
 });
 const path = ["value"];
 const props = { name: "value", required: true, path, change: () => {} };
+function linkedHtml(
+  params: Record<string, unknown>,
+  pending?: DraftContent["pending"],
+) {
+  const draft: DraftContent = {
+    text: JSON.stringify({
+      actions: [
+        {
+          type: "camera_timelapse",
+          device_id: "camera",
+          params: { type: "linked_capture", ...params },
+        },
+      ],
+    }),
+    ...(pending ? { pending } : {}),
+  };
+  const before = JSON.stringify(draft);
+  const html = renderToStaticMarkup(
+    createElement(SchemaFields, {
+      parameter: linkedParameter(),
+      content: draft,
+      path: ["actions", 0, "params"],
+      change: () => {
+        throw new Error("查看不能修改草稿");
+      },
+    }),
+  );
+  expect(JSON.stringify(draft)).toBe(before);
+  const control = (name: string) =>
+    html.match(
+      new RegExp(`<button[^>]*aria-label="[^"]*\\(${name}\\)"[^>]*>`),
+    )?.[0];
+  return { html, control };
+}
+it("局部组字段显示缺省及原非法值，独立曝光缺失不遮蔽选择", () => {
+  expect(linkedHtml({}).control("interval_s")).toContain('data-value=""');
+  expect(
+    linkedHtml({ interval_s: 3, duration_s: 2 }).control("interval_s"),
+  ).toContain('data-value="invalid"');
+  expect(
+    linkedHtml({ interval_s: 3, duration_s: 2 }).control("duration_s"),
+  ).toContain('data-value="invalid"');
+});
+it.each([
+  ["/actions/0/params/exposure/iso", false],
+  ["/actions/0/name", false],
+  ["/actions/0/params/interval_s", true],
+  ["/actions/0/params/duration_s", true],
+  ["/actions/0/params", true],
+  ["/actions/0/device_id", true],
+  ["/actions/0/type", true],
+  ["/actions/0/params/type", true],
+  ["unexplained", true],
+] as const)("时间组按范围处理pending %s", (path, blocked) => {
+  const { control } = linkedHtml(
+    { interval_s: 1, duration_s: 3, exposure: { mode: "manual", iso: 800 } },
+    { [path]: { kind: "json", text: "1e" } },
+  );
+  expect(control("interval_s")).toBeDefined();
+  expect(control("interval_s")!.includes("disabled")).toBe(blocked);
+  expect(control("duration_s")!.includes("disabled")).toBe(blocked);
+});
+it("时间组没有兼容候选时指向参数JSON，不要求清空必填字段", () => {
+  const { html } = linkedHtml({ interval_s: 1, duration_s: null });
+  expect(html).toContain("没有兼容选项");
+  expect(html).toContain("参数 JSON");
+  expect(html).not.toContain("清空冲突字段");
+});
+it("仅曝光pending时不显示暂停关联选择的提示", () => {
+  const { html } = linkedHtml(
+    { interval_s: 1, duration_s: 3 },
+    {
+      "/actions/0/params/exposure": { kind: "json", text: '{"mode":' },
+    },
+  );
+  expect(html).not.toContain("再选择关联参数");
+});
+it("说明页的局部组合只列关联成员，不把曝光与输出计入组合表", () => {
+  const html = renderToStaticMarkup(
+    createElement(DeviceGuide, {
+      capabilities: {
+        devices: [
+          {
+            device_id: "camera",
+            driver_id: "test",
+            actions: [
+              {
+                type: "camera_timelapse",
+                parameter_types: [linkedParameter()],
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  const table = html.match(/<table><caption[\s\S]*?<\/table>/)?.[0];
+  expect(table).toContain("拍摄间隔");
+  expect(table).toContain("采集时长");
+  expect(table).not.toContain("exposure");
+  expect(table).not.toContain("output");
+  expect(html).toContain("关联");
+  expect(html).not.toContain("grouped");
+});
 it.each([
   [{ exclusiveMinimum: 0 }, "大于 0"],
   [{ exclusiveMaximum: 70 }, "小于 70"],

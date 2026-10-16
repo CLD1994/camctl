@@ -1,7 +1,11 @@
 import type { Capabilities, ParameterType } from "../shared/types";
 import { isObject } from "../shared/validation";
 import { resolveField } from "./editing";
-import { optionLabel, parameterOptions } from "./parameter-options";
+import {
+  optionLabel,
+  parameterOptions,
+  parameterFieldOptions,
+} from "./parameter-options";
 import { actionLabel } from "./common";
 import { stringifyJson } from "../shared/json";
 import { JsonFieldRules } from "./JsonFieldRules";
@@ -117,6 +121,21 @@ function TaskGuide({
     }));
   const fixed =
     catalog.kind === "finite" && catalog.rows.length > 0 && fields.length === 0;
+  const combinations =
+    catalog.kind === "grouped" ? catalog.group.catalog : catalog;
+  const combinationFields =
+    catalog.kind === "grouped"
+      ? fields.filter(({ name }) => catalog.group.members.includes(name))
+      : fields;
+  const combinationNames = combinationFields
+    .map(({ name, schema }) =>
+      typeof schema.title === "string" ? schema.title : name,
+    )
+    .join("、");
+  const combinationTitle =
+    catalog.kind === "grouped"
+      ? `${combinationNames}的允许组合`
+      : "允许的参数组合";
   return (
     <article className="guide-task">
       <div className="guide-task-title">
@@ -192,7 +211,9 @@ function TaskGuide({
                       {optionLabel(schema.default, schema, "default")}。
                     </span>
                   )}
-                  {catalog.kind === "independent" &&
+                  {parameterFieldOptions(catalog, name).kind ===
+                    "independent" &&
+                    catalog.kind !== "unavailable" &&
                     catalog.fields.some((field) => field.name === name) && (
                       <span>
                         {" "}
@@ -214,27 +235,38 @@ function TaskGuide({
               </div>
             ))}
           </dl>
-          {catalog.kind === "finite" ? (
-            catalog.rows.length === 0 ? (
+          {catalog.kind === "grouped" && (
+            <p className="notice">
+              {combinationNames}关联选择。
+              其他设置分别按自己的规则填写，完成后仍需检查整份参数。
+            </p>
+          )}
+          {combinations.kind === "finite" ? (
+            combinations.rows.length === 0 ? (
               <p className="notice warning">
-                当前规则没有允许的参数组合，请联系提供设备说明的人员。
+                {catalog.kind === "grouped"
+                  ? `${combinationNames}没有允许的组合`
+                  : "当前规则没有允许的参数组合"}
+                ，请联系提供设备说明的人员。
               </p>
-            ) : catalog.rows.length > 24 ? (
+            ) : combinations.rows.length > 24 ? (
               <p className="notice">
-                共有 {catalog.rows.length}{" "}
+                {catalog.kind === "grouped" ? combinationNames : ""}共有{" "}
+                {combinations.rows.length}{" "}
                 种允许组合。请在计划表单中选择，选项会随已选参数自动缩小范围。
               </p>
             ) : (
               <div className="guide-combinations">
-                <h4>允许的参数组合</h4>
+                <h4>{combinationTitle}</h4>
                 <div className="table-scroll">
                   <table>
                     <caption className="sr-only">
-                      {parameter.name}允许的参数组合
+                      {parameter.name}
+                      {combinationTitle}
                     </caption>
                     <thead>
                       <tr>
-                        {fields.map(({ name, schema }) => (
+                        {combinationFields.map(({ name, schema }) => (
                           <th key={name} scope="col">
                             {typeof schema.title === "string"
                               ? schema.title
@@ -244,9 +276,9 @@ function TaskGuide({
                       </tr>
                     </thead>
                     <tbody>
-                      {catalog.rows.map((row, i) => (
+                      {combinations.rows.map((row, i) => (
                         <tr key={i}>
-                          {fields.map(({ name }) => (
+                          {combinationFields.map(({ name }) => (
                             <td key={name}>
                               {Object.hasOwn(row, name)
                                 ? optionLabel(row[name], row, name)
@@ -263,6 +295,11 @@ function TaskGuide({
                 </p>
               </div>
             )
+          ) : catalog.kind === "grouped" ? (
+            <p className="notice">
+              当前关联设置无法可靠列出允许组合，请在计划的参数 JSON
+              中填写并完整检查。
+            </p>
           ) : catalog.kind === "independent" ? (
             <p className="notice">
               各项设置分别按自己的规则填写。已列出允许值的字段可在计划表单中选择；其他字段按普通控件或
