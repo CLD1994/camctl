@@ -306,7 +306,7 @@ async def test_unmapped_timelapse_is_rejected_before_any_device_call(model):
     request = _request(model)
     request = replace(request, operation="start_timelapse", params={
         "type": "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse",
-        "interval_s": Decimal("0.5"), "duration_s": 300,
+        "interval_s": 1, "duration_s": 300,
         "outputs": "video", "exposure": {"mode": "auto"},
     })
     transport = Transport()

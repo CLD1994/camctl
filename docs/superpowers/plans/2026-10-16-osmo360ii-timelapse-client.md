@@ -25,7 +25,7 @@
 
 ## C0 共享校验器的精确枚举与常量
 
-**输入：** 现有精确 JSON 身份和父容器数字词元机制。
+**输入：** 现有精确 JSON 身份和父容器数字词元机制。本节使用通用合成数值规则验证精确身份；设备允许值继续由[共同参数限制](../../hardware/camera-control-handoff.md#间隔与采集时长限制)及其同源 Schema 决定。
 
 **交付接口：** 保留 `createValidator()`、标准 `enum` / `const` 及现有诊断结构。浏览器、Node.js 后端和公共协议校验继续复用同一入口。
 
@@ -121,7 +121,7 @@ pnpm exec vitest run tests/integration/browser-linked-parameters.test.ts tests/i
 - [ ] 先扩展 `tests/integration/parameter-variants.test.ts` 和新联动浏览器文件：真实 HTTP、SQLite 及重启后，最短参数保持数值；非法草稿可以保存和重开，非法预设不能覆盖原记录，固定请求正文不随能力更新而改变。
 - [ ] 对两款覆盖能力收窄/移除、两个曝光模式、组内与组外 pending 及应用预设的整体替换；Action6 另覆盖三种输出选择及不向 OSMO 扩散。新规则下的旧 Action6 `5400/6000` 秒草稿和预设保留原值并显示错误，不自动替换为合法时长；旧固定请求正文不改写。时间组可修正不能绕过后端预设和导出校验。普通录像保持自身时长规则，Hasselblad 不新增时间字段。
 - [ ] 运行相关客户端集成目标确认实际接缝失败，再只修复暴露的保存/消费问题；不重写现有分支存储或请求协议。回归同一集成目标。
-- [ ] 与 P3 共同运行 `P tests/integration/test_timelapse_time_parameters.py -q`：两款生产候选 Schema 分别经真实客户端加载和后端校验，各时间对按独立精确数学比较核对，每款合法数均为 142；再覆盖各自曝光与输出结构、错误类型、等价词元和邻近非等值。TypeScript 不手写完整设备域，不按型号加入专用时间判断。
+- [ ] 与 P3 共同运行 `P tests/integration/test_timelapse_time_parameters.py -q`：两款生产候选 Schema 分别经真实客户端加载和后端校验，各时间对按独立精确数学比较核对，每款合法数均为 134；再覆盖各自曝光与输出结构、错误类型、等价词元和邻近非等值。TypeScript 不手写完整设备域，不按型号加入专用时间判断。
 - [ ] 从客户端目录执行 `pnpm run typecheck`、`pnpm test`，公共共享校验器消费者全部回归。检查 diff、记录实际环境和退出码后提交；正式安装版 `describe` 的整链接口交由 E2 重验。
 
 ## 审查重点与完成条件

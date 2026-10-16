@@ -14,7 +14,7 @@ Action6 普通录像演示在 ARM Linux 主机上通过正式 camctl 和 C host 
 
 Action6 静止延时与 OSMO 全景静止延时使用相同的间隔、采集时长及严格大小关系，遵守[参数限制](../../hardware/camera-control-handoff.md#间隔与采集时长限制)。驱动从一份共同时间定义生成各自 Schema，型号参数类型、曝光和输出结构分别保留；Action6 的旧90/100分钟样例只保留为资料与历史，不能供新请求使用，也不自动改成其他时长。已受理请求和只读诊断复查继续使用原事实。
 
-后续实机演示采用最短允许时间组合；OSMO 的参数目标及待核对负载见[最短实机演示](../../hardware/camera-demo-validation.md#osmo-360-ii-的最短实机演示)，已有 TX2 顺序见[上次执行记录](../../hardware/camera-demo-validation.md#osmo-360-ii-的-tx2-手工复验顺序)。共同时间范围不提供相同的命令编码、控制响应或完成保证；各型号组合负载、实际生效与结束依据分别补齐。延时摄影的任务持续时间与成片视频时长不同，不能以采集间隔推算的次数代替实际设备事实。Action6 正式延时的设备条件和各任务进度由[接入计划](../plans/2026-10-10-camctl-real-camera-demo.md)跟踪，共同时间修改不自动启用该能力。
+后续实机演示采用[参数限制](../../hardware/camera-control-handoff.md#间隔与采集时长限制)定义的最短间隔与采集时长组合；OSMO 的参数目标及待核对负载见[最短实机演示](../../hardware/camera-demo-validation.md#osmo-360-ii-的最短实机演示)，已有 TX2 顺序见[上次执行记录](../../hardware/camera-demo-validation.md#osmo-360-ii-的-tx2-手工复验顺序)。共同时间范围不提供相同的命令编码、控制响应或完成保证；各型号组合负载、实际生效与结束依据分别补齐。延时摄影的任务持续时间与成片视频时长不同，不能以采集间隔推算的次数代替实际设备事实。Action6 正式延时的设备条件和各任务进度由[接入计划](../plans/2026-10-10-camctl-real-camera-demo.md)跟踪，共同时间修改不自动启用该能力。
 
 ## 规格责任与运行前提
 
