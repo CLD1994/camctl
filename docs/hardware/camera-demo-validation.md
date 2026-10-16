@@ -259,6 +259,8 @@ print(root)
 PY
 ```
 
+提取出的 [osmo360ii-config.toml](../camctl/examples/camera-demo/osmo360ii-config.toml) 用于后续 [OSMO 最短实机演示](#osmo-360-ii-的最短实机演示)，设备标识为 `osmo360ii`；将其中 `REPLACE_OSMO360II_SERIAL` 替换为 `adb devices -l` 列出的实际 serial。该样例使用当前运行账户的默认路径。已有部署将 OSMO 设备项合并到原配置，保留原设备、状态库和交接目录。[E3 的设备与正式软件前置](../superpowers/plans/2026-10-16-osmo360ii-timelapse-delivery.md#e3-arm-最短实机演示)满足后，初始化、实际 `describe` 和 host 统一使用这份现场配置；已有状态库不重新初始化。
+
 提取目录中同时保留 Action6 延时和 OSMO 的候选计划模板，供后续接入使用；当前演示使用 `action6-record`、`obtain` 和 `report-ack`。在提取的 `config.toml` 中，将 Action6 的 serial 替换为 `adb devices -l` 列出的实际标识，`device_id` 为 `action6`。配置只包含这款相机，不要求填写 OSMO 绑定；样例省略 `[paths]`，使用运行账户的默认部署目录。已有部署保留原配置，将 Action6 设备项合并到实际使用的配置中。初始化、能力导出和 host 始终使用同一份配置：
 
 ```bash

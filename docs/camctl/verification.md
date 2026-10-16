@@ -6,6 +6,33 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 延时参数与候选软件验证（2026-10-16）
+
+环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1、Node.js v24.20.0。时间参数、当前新请求校验和可信原生效参数的恢复分别沿[共同参数资料](../hardware/camera-control-handoff.md#间隔与采集时长限制)及[候选编码契约](timelapse-command-encoding.md)验证；实施任务见[延时领域计划](../superpowers/plans/2026-10-16-osmo360ii-timelapse.md)。
+
+两款候选使用同一时间权威定义生成 Schema、资料表格和独立诊断 JSON。当前新请求遵守有限时间域及严格大小关系；最短样例为 1 秒间隔、300 秒采集，Action6 保留 Auto，OSMO 保留手动 ISO 800。原已受理参数、完整命令模板、执行定义、绑定、目录基准及未决 START 在重启和当前能力收窄后保持，不按新规则改写历史。
+
+各阶段在独立工作区提交并经独立审查，按依赖合入主工作区。pytest 使用各树自己的 Python 3.11 环境；主工作区命令为 `UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project apps/camctl --group test --python 3.11 pytest <目标> -q`。各集成目录分别启动进程，同一工作区顺序运行。下表分别记录最终有效范围，不把专项、阶段回归和组合复验相加。
+
+检查范围|实际结果与覆盖
+-|-
+主工作区参数、命令及驱动单元|418 项通过，13.18 秒；覆盖精确参数、当前新请求与可信原事实分流、两款完整模板及有界时间替换。
+主工作区公共派发集成|15 项通过，1.95 秒；覆盖原生效参数、真实 SQLite 重开及候选合同注入边界。
+主工作区跨语言接缝|3 项通过，19.29 秒；实际候选 `describe` 的 Schema 经 Python、真实 Chromium、Node 后端及客户端导出共同消费，两款各 134 对合法时间、精确数值、曝光和输出边界通过。
+安装包及计划生成器|`bootstrap/test_package.py` 3 项、`bootstrap/test_distribution.py` 38 项分别通过；已安装资源按实际能力生成计划，缺失或重复能力、非法及邻近精确时间在生成前拒绝。
+Action6 候选产物|`bootstrap/test_adb_camera_products.py` 16 项通过，43.40 秒；固定六种输出与曝光组合、必要产物及部分合格文件保留，另有两条固定历史域外时间的新请求拒绝。
+两款候选完整软件链|根 `test_real_camera_demo_roundtrip.py` 4 项通过，57.14 秒；两条普通录像链和两条最短延时链覆盖 C host、CLI 拍摄、重启恢复、独立取回、报告导入、ACK 及源文件保留。
+主工作区 Action6 诊断|硬件单元 43 项、10 个子用例通过；脚本集成 83 项、316 个子用例通过，分别为 0.04 秒、20.99 秒。新请求在工具调用前校验；五类历史布局按原完整调用及双存储基准读取，缺失、混杂或矛盾明确拒绝。
+客户端完整门禁|单元 2883 项、集成 1350 项通过，类型与构建通过；HTTP、SQLite、浏览器及草稿、预设、固定请求恢复的实际范围见[客户端验证记录](../client/verification.md#2026-10-16-延时参数保存与恢复验证)。
+
+Action6 独立诊断的四文件交付见[操作说明](../hardware/camera-demo-validation.md#action6-独立诊断交付)。隔离目录以 Python `-I` 运行实际脚本及调用采集器；删除当前时间 JSON 和候选编码模块后，最早两类记录仍可只读复查，不发送设置、START 或 STOP，不等待采集，不改写原文件。该路径没有依赖源码工作区或 camctl 安装；新诊断的 ADB、ffprobe 和时钟由受约束的替身提供。独立目录通过不能代替 Windows 本机或 ARM 验证。
+
+组合树的两项生成器 `--check`、包资源逐字节 `--check` 及诊断 `--help` 均退出 0。生成器源码变异验证覆盖重绑定、相对或嵌套导入、未知依赖和分发漂移的明确拒绝；生产完整模板和纯编码函数仍是独立诊断编码的来源。
+
+阶段命令、日志和退出码保存在各工作区忽略目录 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/`：主树 `integrated-d1-unit`、`integrated-d1-dispatch`、`integrated-e1-p3`、`integrated-d1a-unit`、`integrated-d1a-integration`，交付树 `task-E1-chain-report.md` 及 `logs/e1-chain-verify-*`、`logs/e1-chain-review-products.log`，诊断树 `task-D1A-report.md` 及 `d1a-fix-logs`，客户端树 `task-C3-final-*`。原阶段日志与本次复验分别保留。
+
+候选整链通过测试启动器显式注入相机合同，ADB、ffprobe 和采集时钟按测试范围替代；生产登记未由这些测试启用延时。整秒负载映射来自已有完整样例的有界推导，保留非时间字节，仍需实机核验模板适用性和未观察位。软件测试没有取得参数生效、实际开始、自然结束、停止重复安全性、单文件写完或结果集合齐备的新设备依据。正式 OSMO 合同和 ARM 完整业务验收继续由计划中的设备及后续阶段跟踪，Action6 正式延时仍沿原 T9 门槛。
+
 ## SW-01 时间状态验证（2026-10-13）
 
 环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1。受理仓储统一使用整数登记的 `UNCHECKED`，保存受理时取得的实际读数；检查通过后的可信下界事件使用登记的 `TRUSTED` 和实际通过读数。启动顺序、下界更新资格、公共接口和数据库格式保持原契约，既有事件不迁移或修订。实施范围见[SW-01 计划](../superpowers/plans/2026-10-13-camctl-sw01-acceptance-clock-status.md)。
