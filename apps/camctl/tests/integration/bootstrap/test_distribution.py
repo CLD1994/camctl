@@ -22,6 +22,7 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
+import tomllib
 import zipfile
 from copy import deepcopy
 from contextlib import closing
@@ -363,10 +364,36 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp
     """安装后的样例消费实际能力说明，经正式受理保存原参数。"""
     sys.path.insert(0, str(_CROSS_DIR))
     from camctl_fixtures import Deployment
-    from camera_demo_fixtures import camera_spec, recording_params, timelapse_params
+    from camera_demo_fixtures import camera_spec, recording_params
+    from camctl.contracts.json_values import parse_exact_json
     from camctl.devices.drivers.adb_cameras.commands import CameraModel
     model = CameraModel.ACTION6 if stem.startswith("action6") else CameraModel.OSMO360II
-    expected = recording_params(model) if stem.endswith("-record") else timelapse_params(model)
+    if stem.endswith("-record"):
+        expected = recording_params(model)
+    else:
+        sample_path = REPO_ROOT / "docs" / "camctl" / "examples" / "camera-demo" / f"{stem}.json"
+        sample = parse_exact_json(sample_path.read_text(encoding="utf-8"))
+        sample_action = sample["actions"][0]
+        assert sample_action["type"] == "camera_timelapse"
+        expected = sample_action["params"]
+        expected_type_by_model = {
+            CameraModel.ACTION6: "action6_timelapse",
+            CameraModel.OSMO360II: "osmo360ii_timelapse",
+        }
+        expected_exposure_by_model = {
+            CameraModel.ACTION6: {
+                "mode": "auto",
+            },
+            CameraModel.OSMO360II: {
+                "mode": "manual", "iso": 800,
+            },
+        }
+        assert set(expected) == {"type", "interval_s", "duration_s", "outputs", "exposure"}
+        assert expected["type"] == expected_type_by_model[model]
+        assert expected["interval_s"] == 1
+        assert expected["duration_s"] == 300
+        assert expected["outputs"] == "video"
+        assert expected["exposure"] == expected_exposure_by_model[model]
     if stem == "action6-record":
         expected.pop("aperture")
         expected.pop("bitrate")
@@ -392,6 +419,27 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp
         rows = connection.execute("SELECT status,effective_params_json FROM actions").fetchall()
     assert len(rows) == 1 and rows[0][0] == 1
     assert json.loads(rows[0][1]) == expected
+
+
+def test_installed_osmo_camera_config_is_single_device_default_config(installed):
+    """安装资源只绑定 OSMO 设备，使用默认状态库和交接目录。"""
+    config_path = installed.deploy / "osmo360ii-config.toml"
+    _probe(
+        installed,
+        "from pathlib import Path; from camctl.resources import resource_bytes; "
+        f"Path({str(config_path)!r}).write_bytes(resource_bytes("
+        "'examples/camera-demo/osmo360ii-config.toml'))",
+    )
+    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert config == {
+        "devices": {
+            "osmo360ii": {
+                "kind": "camera",
+                "driver": "dji-osmo360-ii",
+                "adb": {"serial": "REPLACE_OSMO360II_SERIAL"},
+            },
+        },
+    }
 
 
 def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, tmp_path):

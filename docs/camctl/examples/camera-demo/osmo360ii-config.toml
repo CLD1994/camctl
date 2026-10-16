@@ -1,0 +1,7 @@
+# 使用当前运行账户的 $HOME/.camctl 默认状态库和交接目录。
+# 将 serial 替换为 adb devices -l 中 OSMO 360 II 的实际标识。
+[devices.osmo360ii]
+kind = "camera"
+driver = "dji-osmo360-ii"
+[devices.osmo360ii.adb]
+serial = "REPLACE_OSMO360II_SERIAL"

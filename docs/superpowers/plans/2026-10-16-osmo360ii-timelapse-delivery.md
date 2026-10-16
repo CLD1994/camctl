@@ -30,7 +30,7 @@
 
 **交付接口：** 继续使用两款 `examples/camera-demo/*-timelapse.json` 资源名和 `prepare-plan.py` 命令接口；配置样例新增资源登记。测试合同通过已有 launcher 显式注入，生产登记不变。D1A 交付的 Action6 独立诊断资源另作同源核对，不作为生产能力凭据。
 
-- [ ] 先改两款安装样例及相应测试预期，均使用 `interval_s=1`、`duration_s=300`、仅视频；Action6 保留原 Auto，OSMO 保留手动 ISO 800。固定模式、分辨率、快门与白平衡分别由 D 的型号契约负责。最短值只作为具体样例，不额外限定驱动参数域或切换曝光。
+- [x] 先改两款安装样例及相应测试预期，均使用 `interval_s=1`、`duration_s=300`、仅视频；Action6 保留原 Auto，OSMO 保留手动 ISO 800。固定模式、分辨率、快门与白平衡分别由 D 的型号契约负责。最短值只作为具体样例，不额外限定驱动参数域或切换曝光。
 - [ ] 在 `test_distribution.py` 覆盖生成器对匹配能力、缺失能力、同类型不唯一及非法时间组合的结果；缺少能力时不生成待递交计划。沿精确 JSON 适配读取和编码样例，避免 Python 浮点类型进入精确参数校验。
 - [ ] 调整 `camera_demo_fixtures.py` 的两款延时演示输入来源，使其消费各自最短样例或同源派生输入，不再从首条命令候选或 `duration_s == 1800` 反推目标。用 `test_real_camera_demo_roundtrip.py` 的两个延时场景验证最短时间，两条普通录像链保持原职责。
 - [ ] 同步 `bootstrap/test_adb_camera_products.py` 等 Action6 候选产物测试：新请求只使用合法时间和有依据的映射，视频、RAW、JPEG 的必要产物与部分合格文件保留继续覆盖；旧5400/6000秒样例不能绕过新校验。分别验证 Action6 正式普通录像继续导出、正式延时仍关闭，候选测试合同不泄漏到生产登记。

@@ -10,8 +10,8 @@
       "scheduled_at": "2026-01-01 00:00:10",
       "params": {
         "type": "osmo360ii_timelapse",
-        "interval_s": 30,
-        "duration_s": 600,
+        "interval_s": 1,
+        "duration_s": 300,
         "outputs": "video",
         "exposure": {
           "mode": "manual",

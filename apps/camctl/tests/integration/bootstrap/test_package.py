@@ -75,7 +75,8 @@ def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
     assert {"examples/camera-demo/action6-record.json", "examples/camera-demo/action6-timelapse.json",
             "examples/camera-demo/osmo360ii-record.json", "examples/camera-demo/osmo360ii-timelapse.json",
             "examples/camera-demo/obtain.json", "examples/camera-demo/report-ack.json",
-            "examples/camera-demo/config.toml", "examples/camera-demo/prepare-plan.py"} <= installed_digests.keys()
+            "examples/camera-demo/config.toml", "examples/camera-demo/osmo360ii-config.toml",
+            "examples/camera-demo/prepare-plan.py"} <= installed_digests.keys()
     expected_digests = {}
     for name, source_path in AUTHORITATIVE_RESOURCES.items():
         assert source_path.is_file(), f"权威来源缺失: {source_path}"
