@@ -6,8 +6,11 @@ import shlex
 
 import pytest
 
+from camctl.acceptance.schema import BodySchemaError
 from camctl.devices.adb_transport import DeviceCommand, InterpretedFacts
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError
+from camctl.devices.drivers.adb_cameras import commands as camera_commands
+from camctl.devices.drivers.adb_cameras import timelapse_parameters
 from camctl.devices.drivers.adb_cameras.commands import CameraModel, settings_for, start_for
 from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
@@ -33,6 +36,56 @@ ACTION6_AUTO_TIMELAPSE_SCRIPTS = (
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400035000080700000000000000000000",
     "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
+)
+
+ACTION6_MANUAL_D1_SCRIPTS = (
+    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400030a002c0100000000000000000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0400",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2a 06",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 28 013C8000",
+    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
+)
+ACTION6_AUTO_D1_SCRIPTS = (
+    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400020a002c0100000000000000000000",
+    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x1e 0100",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
+)
+OSMO_MANUAL_D1_SCRIPTS = (
+    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x8e 01013f000101",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c e1 3b",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 6f03000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101",
+    "dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 1e 0400",
+    "dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 2A 06",
+    "dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 28 013c8000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2c 0634000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0407000a002c01000000000000000001",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
+)
+OSMO_AUTO_D1_SCRIPTS = (
+    "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x8e 01013f000101",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c e1 3b",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 6f03000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000100",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1e 0000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400000a002c01000000000000000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
+)
+TIMELAPSE_D1_CASES = (
+    pytest.param(CameraModel.ACTION6, {"mode": "manual", "iso": 800}, "video_raw",
+                 ACTION6_MANUAL_D1_SCRIPTS, id="action6-manual"),
+    pytest.param(CameraModel.ACTION6, {"mode": "auto"}, "video_jpeg",
+                 ACTION6_AUTO_D1_SCRIPTS, id="action6-auto"),
+    pytest.param(CameraModel.OSMO360II, {"mode": "manual", "iso": 800}, "video",
+                 OSMO_MANUAL_D1_SCRIPTS, id="osmo-manual"),
+    pytest.param(CameraModel.OSMO360II, {"mode": "auto"}, "video",
+                 OSMO_AUTO_D1_SCRIPTS, id="osmo-auto"),
 )
 
 
@@ -80,6 +133,32 @@ def _timelapse_request(*, check=lambda: None):
         "type": "action6_timelapse", "interval_s": 8, "duration_s": 1800,
         "outputs": "video_raw", "exposure": {"mode": "auto"},
     })
+
+
+def _candidate_timelapse_request(model, exposure, outputs, *, interval_s=1, duration_s=300, check=lambda: None):
+    parameter_type = "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse"
+    return replace(_request(model, check=check), operation="start_timelapse", params={
+        "type": parameter_type, "interval_s": interval_s, "duration_s": duration_s,
+        "outputs": outputs, "exposure": exposure,
+    })
+
+
+def _narrow_time_domain(monkeypatch, field, excluded):
+    name = "TIMELAPSE_INTERVALS_S" if field == "interval_s" else "TIMELAPSE_DURATIONS_S"
+    source = getattr(timelapse_parameters, name)
+    narrowed = tuple(value for value in source if value != excluded)
+    assert len(narrowed) == len(source) - 1
+    monkeypatch.setattr(timelapse_parameters, name, narrowed)
+    if hasattr(camera_commands, name):
+        monkeypatch.setattr(camera_commands, name, narrowed)
+
+
+TIMELAPSE_STABLE_FORMAT_CASES = (
+    (CameraModel.ACTION6, 1, 300, "0400000a002c0100000000000000000000"),
+    (CameraModel.ACTION6, 2, 600, "0400001400580200000000000000000000"),
+    (CameraModel.OSMO360II, 1, 300, "0400000a002c01000000000000000000"),
+    (CameraModel.OSMO360II, 2, 600, "04000014005802000000000000000000"),
+)
 
 
 def _driver(model, transport, *, clock=lambda: 0, devices=None):
@@ -229,6 +308,60 @@ async def test_action6_timelapse_applies_full_auto_sequence_before_one_start():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model,exposure,outputs,expected", TIMELAPSE_D1_CASES)
+async def test_timelapse_dispatch_uses_each_models_full_sequence_before_one_start(
+        model, exposure, outputs, expected):
+    checks = []
+    transport = Transport()
+
+    def check():
+        checks.append(len(transport.calls))
+
+    request = _candidate_timelapse_request(model, exposure, outputs, check=check)
+    result = await _driver(model, transport).control(request)
+
+    scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
+    assert scripts == list(expected)
+    assert scripts.count("dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01") == 1
+    assert checks == list(range(len(expected)))
+    assert [call.timeout_s for call in transport.calls] == [Decimal("20")] * len(expected)
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.outcome.effect is EffectState.CONFIRMED
+    assert result.observations == (DeviceObservation("start_confirmed", 1, {"activity_id": "7"}),)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,interval,duration,payload", TIMELAPSE_STABLE_FORMAT_CASES)
+@pytest.mark.parametrize("narrow_field", ["interval_s", "duration_s"])
+async def test_driver_dispatches_original_candidate_after_only_current_domain_narrows(
+        monkeypatch, model, interval, duration, payload, narrow_field):
+    outputs, exposure = "video", {"mode": "auto"}
+    request = _candidate_timelapse_request(
+        model, exposure, outputs, interval_s=interval, duration_s=duration)
+    frozen_settings = settings_for(model, "camera_timelapse", request.params)
+    frozen_payload = next(command[-1] for command in frozen_settings if command[-2] == "6c")
+    assert frozen_payload == payload
+
+    _narrow_time_domain(monkeypatch, narrow_field, interval if narrow_field == "interval_s" else duration)
+    with pytest.raises(BodySchemaError):
+        settings_for(model, "camera_timelapse", request.params)
+
+    transport = Transport()
+    result = await _driver(model, transport).control(request)
+
+    scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
+    expected = [shlex.join(command) for command in (*frozen_settings, start_for(model, "camera_timelapse"))]
+    assert scripts == expected
+    assert [command[-1] for command in (shlex.split(script) for script in scripts)
+            if command[-2] == "6c"] == [payload]
+    assert scripts.count(shlex.join(start_for(model, "camera_timelapse"))) == 1
+    assert all(call.argv[:5] == ("adb", "-s", "serial-1", "shell", "-T") for call in transport.calls)
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.outcome.effect is EffectState.CONFIRMED
+    assert result.observations == (DeviceObservation("start_confirmed", 1, {"activity_id": "7"}),)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("setting_number", range(1, 5))
 async def test_action6_timelapse_unconfirmed_setting_preserves_error_and_blocks_later_commands(setting_number):
     transport = Transport(fail_at=setting_number)
@@ -242,6 +375,76 @@ async def test_action6_timelapse_unconfirmed_setting_preserves_error_and_blocks_
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
     assert not result.observations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,exposure,outputs,expected", TIMELAPSE_D1_CASES)
+async def test_timelapse_unconfirmed_setting_blocks_every_later_command_for_each_sequence(
+        model, exposure, outputs, expected):
+    for setting_number in range(1, len(expected)):
+        transport = Transport(fail_at=setting_number)
+        request = _candidate_timelapse_request(model, exposure, outputs)
+
+        result = await _driver(model, transport).control(request)
+
+        scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
+        assert scripts == list(expected[:setting_number])
+        assert result.outcome.status is AttemptStatus.FAILED
+        assert result.outcome.effect is EffectState.NO_EFFECT
+        assert result.error == {"code": "response_unconfirmed", "stage": "device",
+                                "details": {"response": "UNKNOWN"}}
+        assert not result.observations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,exposure,outputs,expected", TIMELAPSE_D1_CASES)
+async def test_timelapse_cancel_at_each_dispatch_boundary_blocks_later_commands(
+        model, exposure, outputs, expected):
+    settings_count = len(expected) - 1
+    for completed_settings in range(settings_count + 1):
+        transport = Transport()
+        checks = []
+
+        def check():
+            checks.append(len(transport.calls))
+            return "canceled" if len(transport.calls) == completed_settings else None
+
+        request = _candidate_timelapse_request(model, exposure, outputs, check=check)
+        result = await _driver(model, transport).control(request)
+
+        scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
+        assert scripts == list(expected[:completed_settings])
+        assert checks == list(range(completed_settings + 1))
+        assert result.outcome.status is AttemptStatus.FAILED
+        assert result.error["code"] == "canceled"
+        assert result.error["stage"] == "dispatch"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,exposure,outputs,expected", TIMELAPSE_D1_CASES)
+async def test_timelapse_remaining_deadline_at_each_dispatch_boundary_blocks_later_commands(
+        model, exposure, outputs, expected):
+    settings_count = len(expected) - 1
+    for completed_settings in range(1, settings_count + 1):
+        now = [0]
+
+        def advance_clock(count):
+            now[0] = (100_000_000_000 if count == completed_settings
+                      else now[0] + 5_000_000_000)
+
+        transport = Transport(after_call=advance_clock)
+        request = replace(_candidate_timelapse_request(model, exposure, outputs),
+                          timeout_s=Decimal("100"))
+        result = await _driver(model, transport, clock=lambda: now[0]).control(request)
+
+        scripts = [shlex.split(call.argv[5])[2] for call in transport.calls]
+        assert scripts == list(expected[:completed_settings])
+        assert [call.timeout_s for call in transport.calls] == [
+            Decimal(100 - 5 * index) for index in range(completed_settings)
+        ]
+        assert result.outcome.status is AttemptStatus.FAILED
+        assert result.error["code"] == "start_preparation_timeout"
+        assert result.error["stage"] == "dispatch"
 
 
 @pytest.mark.asyncio
@@ -300,18 +503,66 @@ async def test_action6_timelapse_unknown_start_is_not_repeated_or_followed_by_st
     assert not result.observations
 
 
+AUTO_TEMPLATE_DRIVER_CASES = (
+    (CameraModel.ACTION6, "video"),
+    (CameraModel.ACTION6, "video_raw"),
+    (CameraModel.ACTION6, "video_jpeg"),
+    (CameraModel.OSMO360II, "video"),
+)
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model", list(CameraModel))
-async def test_unmapped_timelapse_is_rejected_before_any_device_call(model):
-    request = _request(model)
-    request = replace(request, operation="start_timelapse", params={
-        "type": "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse",
-        "interval_s": 1, "duration_s": 300,
-        "outputs": "video", "exposure": {"mode": "auto"},
-    })
+@pytest.mark.parametrize("model,outputs", AUTO_TEMPLATE_DRIVER_CASES)
+@pytest.mark.parametrize("damage", ["missing", "malformed"])
+async def test_auto_candidate_template_failure_prevents_all_driver_calls(
+        monkeypatch, model, outputs, damage):
+    presets = camera_commands.TIMELAPSE_PRESETS[model]
+    fixed = next(preset for preset in presets
+                 if (preset.interval_s, preset.duration_s, preset.outputs.value, preset.exposure_mode)
+                 == (8, 1800, outputs, "auto"))
+    if damage == "missing":
+        changed = tuple(preset for preset in presets if preset is not fixed)
+        error = CapabilityNotDeclaredError
+    else:
+        malformed = replace(fixed, command=(*fixed.command[:-1], "not-hex"))
+        changed = tuple(malformed if preset is fixed else preset for preset in presets)
+        error = ValueError
+    monkeypatch.setitem(camera_commands.TIMELAPSE_PRESETS, model, changed)
+    request = _candidate_timelapse_request(model, {"mode": "auto"}, outputs)
     transport = Transport()
-    with pytest.raises(CapabilityNotDeclaredError):
+
+    with pytest.raises(error):
         await _driver(model, transport).control(request)
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_timelapse_template_is_rejected_before_any_device_call(monkeypatch):
+    model = CameraModel.ACTION6
+    presets = camera_commands.TIMELAPSE_PRESETS[model]
+    selected = next(preset for preset in presets
+                    if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
+                    == (8, 1800, camera_commands.OutputSelection.VIDEO_RAW, "auto"))
+    malformed = replace(selected, command=(*selected.command[:-1], "040003"))
+    monkeypatch.setitem(camera_commands.TIMELAPSE_PRESETS, model, tuple(
+        malformed if preset is selected else preset for preset in presets
+    ))
+    request = _timelapse_request()
+    transport = Transport()
+
+    with pytest.raises(ValueError):
+        await _driver(model, transport).control(request)
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_timelapse_rejects_interval_beyond_replacement_window_before_any_device_call():
+    request = _candidate_timelapse_request(
+        CameraModel.ACTION6, {"mode": "auto"}, "video", interval_s=6554, duration_s=10800)
+    transport = Transport()
+
+    with pytest.raises(ValueError):
+        await _driver(CameraModel.ACTION6, transport).control(request)
     assert transport.calls == []
 
 
