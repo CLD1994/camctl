@@ -12,7 +12,7 @@
 
 归档的两份 `dji_mb_ctrl -h` 只列出可选的 `-o timeout`，没有给出默认值或单位。既有无 `-o` 的三次原生延时 START 快速返回，证明这些样本的响应没有等到整项采集完成；现有原始调用不足以证明工具默认响应上限。正式接入仍需按明确外层有限期限管理调用，响应未知时不重新启动设备。
 
-当前生产路径还缺少 OSMO 的 OSV／LRF 结果读取、延时提前 STOP 后独立冻结的文件等待，以及自然结束／提前 STOP／普通录像 STOP 的完成上下文分区。普通录像恢复还须避免选择 LRF 检查或在修复时丢弃一路主视频。[补充设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)提出有限等待与产物规则，以及低功耗取消后的有界收场方案；其中新的运行假设须经审阅后才能作为正式合同依据。D2、正式工厂和 ARM 业务链尚未完成。
+当前生产路径还缺少 OSMO 的 OSV／LRF 结果读取、延时提前 STOP 后独立冻结的文件等待，以及自然结束／提前 STOP／普通录像 STOP 的完成上下文分区。普通录像恢复还须避免选择 LRF 检查或在修复时丢弃一路主视频。[补充设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)提出有限等待与产物规则，以及低功耗取消后的有界收场方案；用户已接受 30 秒完成等待假设、可选 LRF、低功耗期间延迟取消，以及不要求修复成品保留厂商原生编辑兼容。实现按[补充执行步骤](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md)继续；正式工厂、软件门禁和 ARM 业务链尚未完成。
 
 本轮证据入口为本地忽略目录 `.local/acceptance/osmo360-formal-integration-20261017T164203Z/`。主机只读检查的实际 UTC 为 2026-10-17 16:42，OSMO USB／ADB 在线，未见 camctl 或 host-demo 进程；用户随后确认当前待机、供电充足。未发送新设置、START 或 STOP，未重复旧拍摄，未操作 Action6。本项是资料与前置状态复核，不计为新增拍摄、软件测试或正式业务验收。
 
@@ -26,7 +26,7 @@
 
 静态核对还确认：现有 `MediaProbe` 只返回单个容器时长，无法表达双路编码、尺寸、附加图标记或逐路时长；生产修复适配器只追加 `-c copy -t`，没有明确流选择。正式实现须同时补齐探测、持久化媒体事实、修复流映射及输出校验，不能仅替换一条 ffmpeg 命令。
 
-新增证据位于上述本轮目录的 `offline-dual-stream-repair-01/`，开发环境入口为 `summary.json`，TX2 入口为 `arm-evidence/summary.json`；每次工具调用另存 argv、UTC、耗时、退出码及原始输出。15 份 TX2 证据与取回副本的长度及 SHA-256 全部匹配，清单为 `arm-evidence-integrity.json`。它是既有媒体的离线工具可行性证据，不计为新增真机拍摄、正式驱动测试或完整业务验收；新的完成和取消运行假设仍待用户审阅。
+新增证据位于上述本轮目录的 `offline-dual-stream-repair-01/`，开发环境入口为 `summary.json`，TX2 入口为 `arm-evidence/summary.json`；每次工具调用另存 argv、UTC、耗时、退出码及原始输出。15 份 TX2 证据与取回副本的长度及 SHA-256 全部匹配，清单为 `arm-evidence-integrity.json`。它是既有媒体的离线工具可行性证据，不计为新增真机拍摄、正式驱动测试或完整业务验收；完成和取消运行假设的适用范围由上述补充设计维护。
 
 ## OSMO 360 II 响应处理与可用接口的用户确认（2026-10-17）
 
