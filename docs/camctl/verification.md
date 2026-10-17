@@ -40,7 +40,7 @@
 
 普通录像请求 `7611011678869730489` 对应 action 7，只发送一次 START 和一次 STOP，二者均收到 `00`。STOP 后实际等待 `30000662038 ns`。相机新生成 `0038.OSV`，大小为 `226150703` 字节；媒体包含两路 `3840×3840` HEVC，各 305 帧、10.176833 秒，以及 10.154667 秒 AAC。所有音视频流均完整解码退出 `0`。
 
-独立取回请求 `6596954726306245016` 创建 action 8、output 3 和 delivery 3，交付文件为 `3.OSV`。相机源文件、TX2 副本和本地领取文件 SHA-256 均为 `e2a00d948e2b1db291deafc7560a6d10a368eee38798c5b4a30444c0d7428cb2`。客户端实际调用 `Files.upload` 导入视频并核验报告；沿同一取回请求以新 ACK 重送后，action、output 和 delivery 数量未增加，report 32 与 watermark 90 已吸收，原有 5 个动作保持不变。
+独立取回请求 `6596954726306245016` 创建 action 8，使用拍摄动作已登记的 output 3 创建 delivery 3，交付文件为 `3.OSV`。相机源文件、TX2 副本和本地领取文件 SHA-256 均为 `e2a00d948e2b1db291deafc7560a6d10a368eee38798c5b4a30444c0d7428cb2`。客户端实际调用 `Files.upload` 导入视频并核验报告；沿同一取回请求以新 ACK 重送后，action、output 和 delivery 数量未增加，report 32 与 watermark 90 已吸收，原有 5 个动作保持不变。
 
 首轮还观察到 `0038.LRF` 存在，`stat` 大小为 `20538481` 字节，但原 capture 的结果扫描使用 10 秒调用预算，读取 `preview_directory` 超时，因此该文件没有登记为正式 output，也没有建立配对关系。这表示本次可选预览读取未完成，不表示相机没有生成 LRF。之后已将仅 OSMO 的 `result_check.call_timeout_s` 配置为 60 秒，保留变更前配置备份；首轮结果仍按原 10 秒预算记载，不回填登记、不重拍。该次只读检查及配置调整见同一证据目录中的 `01-record-preview-readonly.stdout` 与 `result-timeout-deployment.stdout`。
 
@@ -68,11 +68,11 @@ OSV 有两路 `3840×3840` HEVC 主视频，各 331 帧、11.044367 秒，并含
 
 有限取消以 request `7086359445954081151`（目标拍摄 action 18）和取消 request `2720512708612506655`（action 19）执行。原 `SENT`、task key、baseline event `785..785`、`expected_check_at=1792268478845531`、30 秒余量及 0 额外等待均保持不变。低功耗窗口内 STOP run 27 / attempt 27 只执行一次，随后以本地退出码 `1` 失败，错误为 `osmo360ii_response_unconfirmed`，stderr 为 `error: device '123456789ABCDEF' not found`；`attempts_used=1`、`retry_wait_required=0`，没有重发 START 或重复 STOP。等待期间目标和取消 action 仍运行、占用仍保持；原有限收场随后由 results run 28 / attempt 28 读取成功结果页并保存 `FINITE_CANCEL_END` 依据。最终目标 action 18 为 `CANCELED`，取消 action 19 为 `FAILED/cancel_items_failed`（错误码 `23`）。activity 7 为 `ENDED/RELEASED`，但 `completion_basis=UNDETERMINED`、`result_set_state=UNEXAMINED`，`capture_json` 与 `result_check_json` 均为空；该结果只结束有限收场责任，不证明目标拍摄完成或 STOP 成功。
 
-取得的同 stem `0042` 文件为 OSV output 11 / delivery 10（`10.OSV`），大小 `17506313` 字节，SHA-256 `744e9f2e2bceec4a11abb4b664ae0f5b2088fa8e61191af293c8d9fd1cb9d655`；LRF output 10 / delivery 11（`11.LRF`），大小 `3153436` 字节，SHA-256 `897467cdf5be27ed08aaf03c1dca8d9bfc76b546733202351b7efb6a0e0ac805`。两路 OSV 主视频与 LRF 主视频均为 11 帧；实际媒体流完整解码退出 `0`。两份原片均保留，相机源、TX2 副本和本地交付文件的长度与 SHA-256 一致；真实客户端 `Files.upload` 均验证通过。原 preview obtain request `8595314106976216469` 吸收 report `86`、watermark `267`，包含一个原请求 action；相机 boot ID 保持 `f6f90cbf`。
+取得的同 stem `0042` 文件为 OSV output 11 / delivery 10（`10.OSV`），大小 `17506313` 字节，SHA-256 `744e9f2e2bceec4a11abb4b664ae0f5b2088fa8e61191af293c8d9fd1cb9d655`；LRF output 10 / delivery 11（`11.LRF`），大小 `3153436` 字节，SHA-256 `897467cdf5be27ed08aaf03c1dca8d9bfc76b546733202351b7efb6a0e0ac805`。两路 OSV 主视频与 LRF 主视频均为 11 帧；实际媒体流完整解码退出 `0`。原片和预览均保留，相机源、TX2 副本和本地交付文件的长度与 SHA-256 一致；真实客户端 `Files.upload` 均验证通过。原 preview obtain request `8595314106976216469` 吸收 report `86`、watermark `267`，包含一个原请求 action；相机 boot ID 保持 `f6f90cbf`。
 
-最终只读状态检查的 SQLite `quick_check` 为 `ok`，USB／ADB 在线且 camera boot ID 不变；21 个 action 均为终态，7 个 activity 均已释放，30 个 operation run／attempt 保留，11 个 output 与 11 个 delivery 登记在库。既有 action 1—5 的状态未变。最终归档的 59 份文件共 `10957808` 字节，逐文件长度和 SHA-256 均与远端核对一致。Action6 继续等待固件修复，本轮未访问该设备。
+最终只读状态检查的 SQLite `quick_check` 为 `ok`，USB／ADB 在线且 camera boot ID 不变；21 个 action 均为终态，7 项设备占用均已释放，30 个 operation run／attempt 保留，11 个 output 与 11 个 delivery 登记在库。既有 action 1—5 的状态未变。最终归档的 59 份文件共 `10957808` 字节，逐文件长度和 SHA-256 均与远端核对一致。Action6 继续等待固件修复，本轮未访问该设备。
 
-本轮忽略证据目录为 `.local/acceptance/osmo360-formal-integration-20261017T164203Z/`；普通录像概要为 `01-record-summary.json`、`02b-record-manual-summary.json`，Manual 过程记录为 `02b-record-manual-watch.stdout`；延时观察及交付概要分别为 `02-timelapse-watch.stdout`、`02-timelapse-summary.json`，帧数复核为 `02-timelapse-frame-count.stdout` 与 `02-timelapse-frame-count.call.json`；恢复连续性和交付分别见 `03-recovery-continuity.json`、`03-recovery-summary.json` 与 `03-recovery-watch.stdout`；有限取消事实见 `04-cancel-continuity.json`、`04-cancel-target-terminal.json`、`04-cancel-command-terminal.json`、`04-cancel-events-readonly-v2.stdout` 和 `04-cancel-summary.json`。最终状态与远端归档逐文件核对见 `final-state.stdout`、`final-state.db`、`final-remote-evidence-integrity.json`。原始请求、日志及配置备份支撑本节细节；通过范围限于本计划所列 OSMO 场景。
+本轮忽略证据目录为 `.local/acceptance/osmo360-formal-integration-20261017T164203Z/`；普通录像概要为 `01-record-summary.json`、`02b-record-manual-summary.json`，Manual 过程记录为 `02b-record-manual-watch.stdout`；延时观察及交付概要分别为 `02-timelapse-watch.stdout`、`02-timelapse-summary.json`，帧数复核为 `02-timelapse-frame-count.stdout` 与 `02-timelapse-frame-count.call.json`；恢复连续性和交付分别见 `03-recovery-continuity.json`、`03-recovery-summary.json` 与 `03-recovery-watch.stdout`；有限取消事实见 `04-cancel-continuity.json`、`04-cancel-target-terminal.json`、`04-cancel-command-terminal.json`、`04-cancel-events-readonly-v2.stdout` 和 `04-cancel-summary.json`。最终状态与远端归档逐文件核对见 `final-state.stdout`、`final-remote-evidence/final-state.db`、`final-remote-evidence-integrity.json`。原始请求、日志及配置备份支撑本节细节；通过范围限于本计划所列 OSMO 场景。
 
 ### 既有 OSV 的离线双流裁剪核验
 
@@ -94,7 +94,7 @@ OSV 有两路 `3840×3840` HEVC 主视频，各 331 帧、11.044367 秒，并含
 
 ## OSMO 360 II 全量真机验证（2026-10-17）
 
-本次通过 SSH 在 TX2 执行普通录像及原生延时的候选命令验证，覆盖当时可用候选参数中的功能与曝光分支，时间组合选代表值。Auto 已按[用户执行依据](#osmo-360-ii-响应处理与可用接口的用户确认2026-10-17)完成独立采集和媒体完整性核验。**截至本候选验证轮结束时，全量验收尚未完成：正式 OSMO 任务工厂及业务链尚未接入。** `ee`、重复 STOP 的 `df` 和可用接口范围按当时适用约定处理。已通过的 1 秒／300 秒 Manual 最短手工演示保留原现场验收范围，没有为补材料重复拍摄。Action6 继续按其固件修复门槛暂停，本轮未操作 Action6；当前软件及正式 TX2 状态见[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)和[下方现场验收记录](#tx2-正式业务验收2026-10-18-起)。
+本次通过 SSH 在 TX2 执行普通录像及原生延时的候选命令验证，覆盖当时可用候选参数中的功能与曝光分支，时间组合选代表值。Auto 已按[用户执行依据](#osmo-360-ii-响应处理与可用接口的用户确认2026-10-17)完成独立采集和媒体完整性核验。**截至本候选验证轮结束时，全量验收尚未完成：正式 OSMO 任务工厂及业务链尚未接入。** `ee`、重复 STOP 的 `df` 和可用接口范围按当时适用约定处理。已通过的 1 秒／300 秒 Manual 最短手工演示保留原现场验收范围，没有为补材料重复拍摄。Action6 继续按其固件修复门槛暂停，本轮未操作 Action6；当前软件及正式 TX2 状态见[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)和[正式现场验收记录](#tx2-正式业务验收2026-10-18-起)。
 
 环境为 TX2 ARM64、Python 3.11.17；相机 USB 为 `2ca3:0020`，产品为 OSMO 360 II，ADB product 为 `eagle4_oq102`，固件读数为 `ro.dji.build.version=10.00.00.57`、`persist.plt.external_version=01.01.02.10`。预检内置存储约 105 GB 可用；当前 OSMO 的目录范围为内置 DCIM，没有 SD DCIM。可选电池 sysfs 节点不存在的预检错误已保留，用户确认相机待机且供电充足。安装版 `describe` 对 `dji-osmo360-ii` 仍返回 `actions: []`。
 
