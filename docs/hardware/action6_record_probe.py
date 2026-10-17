@@ -105,26 +105,46 @@ def exact_positive(value):
 
 def load_time_parameters():
     resource = exact_json(TIME_PARAMETERS_PATH.read_text(encoding="utf-8"))
-    required = {"format_version", "interval_s", "duration_s", "relation", "legal_pair_count", "shortest_pair"}
+    required = {"format_version", "duration_s", "relation", "models"}
     if (not isinstance(resource, dict) or set(resource) != required
-            or type(resource["format_version"]) is not int or resource["format_version"] != 1
+            or type(resource["format_version"]) is not int or resource["format_version"] != 2
             or resource["relation"] != "duration_s > interval_s"):
-        raise ValueError("共同时间资源的格式或版本无效")
-    for field in ("interval_s", "duration_s"):
-        values = resource[field]
-        if (not isinstance(values, list) or not values or not all(exact_positive(v) for v in values)
-                or sorted(set(values)) != values
-                or (field == "duration_s" and any(v != int(v) for v in values))):
-            raise ValueError(f"共同时间资源 {field} 无效")
-    pairs = [(i, d) for i in resource["interval_s"] for d in resource["duration_s"] if d > i]
-    if not pairs:
-        raise ValueError("共同时间资源没有合法组合")
-    interval, duration = min(pairs, key=lambda pair: (pair[1], pair[0]))
-    if (type(resource["legal_pair_count"]) is not int or resource["legal_pair_count"] != len(pairs)
-            or resource["shortest_pair"] != {"interval_s": interval, "duration_s": duration}
-            or not all(exact_positive(v) for v in resource["shortest_pair"].values())):
-        raise ValueError("共同时间资源的组合数量或最短组合不一致")
-    return resource
+        raise ValueError("按型号生成的时间资源格式或版本无效")
+    durations = resource["duration_s"]
+    if (not isinstance(durations, list) or not durations
+            or not all(exact_positive(value) and value == int(value) for value in durations)
+            or sorted(set(durations)) != durations):
+        raise ValueError("按型号时间资源的共享采集时长无效")
+    models = resource["models"]
+    if not isinstance(models, dict) or "dji-action6" not in models:
+        raise ValueError("按型号时间资源缺少 Action6 参数视图")
+    model_required = {"interval_s", "legal_pair_count", "shortest_pair"}
+    for model, view in models.items():
+        if (not isinstance(model, str) or not model or not isinstance(view, dict)
+                or set(view) != model_required):
+            raise ValueError("按型号时间资源的型号定义格式无效")
+        intervals = view["interval_s"]
+        if (not isinstance(intervals, list) or not intervals
+                or not all(exact_positive(value) for value in intervals)
+                or sorted(set(intervals)) != intervals):
+            raise ValueError(f"型号 {model!r} 的允许间隔无效")
+        pairs = [(interval, duration) for interval in intervals for duration in durations
+                 if duration > interval]
+        if not pairs:
+            raise ValueError(f"型号 {model!r} 没有合法延时组合")
+        interval, duration = min(pairs, key=lambda pair: (pair[1], pair[0]))
+        shortest = {"interval_s": interval, "duration_s": duration}
+        if (type(view["legal_pair_count"]) is not int or view["legal_pair_count"] != len(pairs)
+                or view["shortest_pair"] != shortest
+                or not isinstance(view["shortest_pair"], dict)
+                or set(view["shortest_pair"]) != {"interval_s", "duration_s"}
+                or not all(exact_positive(value) for value in view["shortest_pair"].values())):
+            raise ValueError(f"型号 {model!r} 的组合数量或最短组合不一致")
+    action6 = models["dji-action6"]
+    return {"format_version": 2, "interval_s": action6["interval_s"],
+            "duration_s": durations, "relation": resource["relation"],
+            "legal_pair_count": action6["legal_pair_count"],
+            "shortest_pair": action6["shortest_pair"]}
 
 
 def load_candidate_encoder():
@@ -145,7 +165,7 @@ def prepare_timelapse(duration_s=None, *, interval_s=None, time_parameters=None)
     if (not exact_positive(interval) or not exact_positive(duration)
             or interval not in domain["interval_s"] or duration not in domain["duration_s"]
             or duration <= interval):
-        raise ValueError("延时间隔、采集时长必须属于共同时间域，且时长严格大于间隔")
+        raise ValueError("延时间隔、采集时长必须属于 Action6 时间域，且时长严格大于间隔")
     encoder = load_candidate_encoder()
     params = {"type": "action6_timelapse", "interval_s": interval, "duration_s": duration,
               "exposure": {"mode": "auto"}, "outputs": "video"}

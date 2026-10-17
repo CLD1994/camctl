@@ -18,7 +18,7 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.devices.drivers.adb_cameras.commands import CameraModel
 from camctl.devices.drivers.adb_cameras.definitions import candidate_capabilities
 from camctl.devices.drivers.adb_cameras.timelapse_parameters import (
-    TIMELAPSE_DURATIONS_S, TIMELAPSE_INTERVALS_S,
+    TIMELAPSE_DURATIONS_S, timelapse_intervals_s, timelapse_model_ids,
 )
 from camctl_fixtures import Deployment, future_schedule
 from camera_demo_fixtures import camera_spec
@@ -46,11 +46,18 @@ def test_generated_views_are_current_and_independently_deliverable(tmp_path):
         (package / "__init__.py").touch()
         package = package.parent
     resource = parse_exact_json((tmp_path / RESOURCE).read_text())
-    assert resource["interval_s"] == list(TIMELAPSE_INTERVALS_S)
+    assert "models" in resource, "时间资源必须按型号导出参数视图"
     assert resource["duration_s"] == list(TIMELAPSE_DURATIONS_S)
-    assert resource["legal_pair_count"] == 134
     assert resource["relation"] == "duration_s > interval_s"
-    assert resource["shortest_pair"] == {"interval_s": 1, "duration_s": 300}
+    assert set(resource["models"]) == set(timelapse_model_ids())
+    action6 = resource["models"]["dji-action6"]
+    osmo = resource["models"]["dji-osmo360-ii"]
+    assert action6["interval_s"][0] == 1
+    assert osmo["interval_s"][0] == 2 and 1 not in osmo["interval_s"]
+    assert action6["legal_pair_count"] == 134
+    assert osmo["legal_pair_count"] == 126
+    assert action6["shortest_pair"] == {"interval_s": 1, "duration_s": 300}
+    assert osmo["shortest_pair"] == {"interval_s": 2, "duration_s": 300}
     expected = (tmp_path / RESOURCE).read_bytes()
     (tmp_path / RESOURCE).write_text("{}\n")
     run = lambda mode: subprocess.run([sys.executable, str(tmp_path / GENERATOR), mode],
@@ -63,42 +70,50 @@ def test_generated_views_are_current_and_independently_deliverable(tmp_path):
     assert (tmp_path / RESOURCE).read_bytes() == expected
     assert run("--check").returncode == 0
     authority = tmp_path / AUTHORITY
-    authority.write_text(authority.read_text() + "\nTIMELAPSE_INTERVALS_S += (7,)\n")
+    authority.write_text(authority.read_text()
+                         + "\n_TIMELAPSE_INTERVALS_S = tuple(sorted((*_TIMELAPSE_INTERVALS_S, 7)))\n")
     changed = run("--check")
     assert changed.returncode == 1
     assert DOCUMENT.as_posix() in changed.stderr and RESOURCE.as_posix() in changed.stderr
     assert run("--write").returncode == 0
     updated = json.loads((tmp_path / RESOURCE).read_text())
-    assert updated["interval_s"][-1] == 7
-    assert updated["legal_pair_count"] == 142
+    assert 7 in updated["models"]["dji-action6"]["interval_s"]
+    assert updated["models"]["dji-action6"]["legal_pair_count"] == 142
     document = tmp_path / DOCUMENT
     document.write_text(document.read_text().replace("<!-- END GENERATED TIMELAPSE TIME PARAMETERS -->", ""))
     broken = run("--write")
     assert broken.returncode == 1 and DOCUMENT.as_posix() in broken.stderr
 
 
-def parameter_cases(parameter_type):
+def parameter_cases(parameter_type, model):
     """完整枚举来自权威域，判定预期用独立有理数比较。"""
-    base = {"type": parameter_type, "interval_s": 1, "duration_s": 300,
+    intervals = timelapse_intervals_s(model.value)
+    minimum_interval = 1 if model is CameraModel.ACTION6 else 2
+    base = {"type": parameter_type, "interval_s": minimum_interval, "duration_s": 300,
             "outputs": "video", "exposure": {"mode": "auto"}}
     cases = []
     def add(name, params, valid, text=None):
         cases.append({"name": name, "params_text": text or json.dumps(params), "valid": valid})
-    for interval in TIMELAPSE_INTERVALS_S:
+    for interval in intervals:
         for duration in TIMELAPSE_DURATIONS_S:
             add(f"pair-{interval}-{duration}", {**base, "interval_s": interval, "duration_s": duration},
                 Fraction(duration) > Fraction(interval))
     for interval, duration, valid in (
-        ("1.0", "300.0", True), ("1e0", "3e2", True),
-        ("1.00000000000000001", "300", False),
+        (f"{minimum_interval}.0", "300.0", True), (f"{minimum_interval}e0", "3e2", True),
+        (f"{minimum_interval}.00000000000000001", "300", False),
         ("0.99999999999999999", "300", False),
         ("1", "300.00000000000000001", False),
         ("0.5", "300", False), ("7", "300", False),
-        ("1", "60", False), ("1", "5400", False), ("1", "6000", False),
+        (str(minimum_interval), "60", False), (str(minimum_interval), "5400", False),
+        (str(minimum_interval), "6000", False),
     ):
-        text = json.dumps(base).replace('"interval_s": 1,', f'"interval_s": {interval},').replace(
+        text = json.dumps(base).replace(f'"interval_s": {minimum_interval},',
+                                        f'"interval_s": {interval},').replace(
             '"duration_s": 300,', f'"duration_s": {duration},')
         add(f"exact-{interval}-{duration}", base, valid, text)
+    if model is CameraModel.OSMO360II:
+        one_second = json.dumps({**base, "interval_s": 1})
+        add("one-second-input-is-preserved-for-correction", {**base, "interval_s": 1}, False, one_second)
     for key in ("interval_s", "duration_s"):
         for value in (True, str(base[key]), None, {}, []):
             add(f"type-{key}-{value!r}", {**base, key: value}, False)
@@ -137,14 +152,15 @@ def test_describe_python_browser_and_node_export_agree(tmp_path, model):
     assert source.defaults == {}
     assert parameter["video_size_estimate"] == source.video_size_estimate
     assert all(type(value) is int for value in parameter["schema"]["properties"]["interval_s"]["enum"])
-    cases = parameter_cases(parameter["type"])
+    cases = parameter_cases(parameter["type"], model)
     validator = precise_validator_for(parameter["schema"])
     for case in cases:
         params = parse_exact_json(case["params_text"])
         before = deepcopy(params)
         assert validator.is_valid(params) == case["valid"], case["name"]
         assert params == before
-    assert sum(c["valid"] for c in cases if c["name"].startswith("pair-")) == 134
+    expected_pair_count = 134 if model is CameraModel.ACTION6 else 126
+    assert sum(c["valid"] for c in cases if c["name"].startswith("pair-")) == expected_pair_count
     inputs = tmp_path / "parameter-cases.json"
     inputs.write_text(json.dumps({"scheduled_at": future_schedule(3600), "cases": cases}))
     result = deployment.run_client_driver("validate-parameters", str(tmp_path / "client-store"), str(inputs),
@@ -163,7 +179,9 @@ def test_describe_python_browser_and_node_export_agree(tmp_path, model):
 
     # 受理真实候选后，在尚未开始时取消，核对生效参数和发布报告。
     # 此处不依赖尚未交付的新命令映射，也不冒充完整拍摄验收。
-    accepted = next(row for row in result["cases"] if row["name"] == "exact-1.0-300.0")
+    minimum_interval = 1 if model is CameraModel.ACTION6 else 2
+    accepted = next(row for row in result["cases"]
+                    if row["name"] == f"exact-{minimum_interval}.0-300.0")
     plan = tmp_path / "accepted-plan.json"
     plan.write_text(accepted["exported"])
     original = parse_exact_json(accepted["exported"])

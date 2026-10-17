@@ -65,7 +65,7 @@ OSMO_MANUAL_D1_SCRIPTS = (
     "dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 2A 06",
     "dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 28 013c8000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2c 0634000000",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0407000a002c01000000000000000001",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04070014002c01000000000000000001",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
 )
 OSMO_AUTO_D1_SCRIPTS = (
@@ -74,7 +74,7 @@ OSMO_AUTO_D1_SCRIPTS = (
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 6f03000000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000100",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1e 0000",
-    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400000a002c01000000000000000000",
+    "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000014002c01000000000000000000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
 )
 TIMELAPSE_D1_CASES = (
@@ -135,28 +135,35 @@ def _timelapse_request(*, check=lambda: None):
     })
 
 
-def _candidate_timelapse_request(model, exposure, outputs, *, interval_s=1, duration_s=300, check=lambda: None):
+def _candidate_timelapse_request(model, exposure, outputs, *, interval_s=None, duration_s=300, check=lambda: None):
     parameter_type = "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse"
+    if interval_s is None:
+        interval_s = 1 if model is CameraModel.ACTION6 else 2
     return replace(_request(model, check=check), operation="start_timelapse", params={
         "type": parameter_type, "interval_s": interval_s, "duration_s": duration_s,
         "outputs": outputs, "exposure": exposure,
     })
 
 
-def _narrow_time_domain(monkeypatch, field, excluded):
-    name = "TIMELAPSE_INTERVALS_S" if field == "interval_s" else "TIMELAPSE_DURATIONS_S"
-    source = getattr(timelapse_parameters, name)
-    narrowed = tuple(value for value in source if value != excluded)
-    assert len(narrowed) == len(source) - 1
-    monkeypatch.setattr(timelapse_parameters, name, narrowed)
-    if hasattr(camera_commands, name):
-        monkeypatch.setattr(camera_commands, name, narrowed)
+def _narrow_time_domain(monkeypatch, field, excluded, model):
+    if field == "interval_s":
+        original = timelapse_parameters.timelapse_intervals_s
+        narrowed = tuple(value for value in original(model.value) if value != excluded)
+        assert len(narrowed) == len(original(model.value)) - 1
+
+        def current_intervals(requested_model):
+            return narrowed if requested_model == model.value else original(requested_model)
+
+        monkeypatch.setattr(timelapse_parameters, "timelapse_intervals_s", current_intervals)
+        return
+    narrowed = tuple(value for value in timelapse_parameters.TIMELAPSE_DURATIONS_S if value != excluded)
+    assert len(narrowed) == len(timelapse_parameters.TIMELAPSE_DURATIONS_S) - 1
+    monkeypatch.setattr(timelapse_parameters, "TIMELAPSE_DURATIONS_S", narrowed)
 
 
 TIMELAPSE_STABLE_FORMAT_CASES = (
     (CameraModel.ACTION6, 1, 300, "0400000a002c0100000000000000000000"),
     (CameraModel.ACTION6, 2, 600, "0400001400580200000000000000000000"),
-    (CameraModel.OSMO360II, 1, 300, "0400000a002c01000000000000000000"),
     (CameraModel.OSMO360II, 2, 600, "04000014005802000000000000000000"),
 )
 
@@ -342,7 +349,8 @@ async def test_driver_dispatches_original_candidate_after_only_current_domain_na
     frozen_payload = next(command[-1] for command in frozen_settings if command[-2] == "6c")
     assert frozen_payload == payload
 
-    _narrow_time_domain(monkeypatch, narrow_field, interval if narrow_field == "interval_s" else duration)
+    _narrow_time_domain(monkeypatch, narrow_field,
+                        interval if narrow_field == "interval_s" else duration, model)
     with pytest.raises(BodySchemaError):
         settings_for(model, "camera_timelapse", request.params)
 

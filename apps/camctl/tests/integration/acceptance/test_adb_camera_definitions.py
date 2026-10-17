@@ -54,13 +54,17 @@ def _catalog(driver, *, duration_default=None, device_id="cam-1", baseline=True,
 
 
 def _legacy_action6_catalog(interval_s, duration_s):
+    return _legacy_timelapse_catalog("dji-action6", interval_s, duration_s)
+
+
+def _legacy_timelapse_catalog(driver, interval_s, duration_s):
     """仅模拟旧合同曾经受理的事实，不改变生产候选或登记。"""
-    schema = deepcopy(next(cap.schema for cap in definitions.candidate_capabilities("dji-action6")
+    schema = deepcopy(next(cap.schema for cap in definitions.candidate_capabilities(driver)
                            if cap.action_type == "camera_timelapse"))
     schema.pop("allOf")
     schema["properties"]["interval_s"] = {"type": "number", "const": interval_s}
     schema["properties"]["duration_s"] = {"type": "integer", "const": duration_s}
-    return _catalog("dji-action6", timelapse_schema=schema)
+    return _catalog(driver, timelapse_schema=schema)
 
 
 def _params(driver, action_type):
@@ -126,15 +130,20 @@ async def test_explicit_null_does_not_become_default_duration(environment, tmp_p
     assert connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone()[0] == 0
 
 
-@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
-@pytest.mark.parametrize("interval_token", ["1", "1.0", "1e0"])
-async def test_shortest_exact_parameters_survive_resend_restart_and_history(environment, tmp_path, driver, interval_token):
+@pytest.mark.parametrize("driver,interval_token,interval_s", [
+    ("dji-action6", "1", 1), ("dji-action6", "1.0", 1), ("dji-action6", "1e0", 1),
+    ("dji-osmo360-ii", "2", 2), ("dji-osmo360-ii", "2.0", 2), ("dji-osmo360-ii", "2e0", 2),
+])
+async def test_shortest_exact_parameters_survive_resend_restart_and_history(
+        environment, tmp_path, driver, interval_token, interval_s):
     connection, context = environment
     body = _plan_body()
-    params = {**_params(driver, "camera_timelapse"), "interval_s": 1, "duration_s": 300}
+    params = {**_params(driver, "camera_timelapse"), "interval_s": interval_s, "duration_s": 300}
     body["actions"][0].update(type="camera_timelapse", params=params)
     path = tmp_path / "exact.json"
-    path.write_text(json.dumps(body).replace('"interval_s": 1,', f'"interval_s": {interval_token},'), encoding="utf-8")
+    path.write_text(json.dumps(body).replace(f'"interval_s": {interval_s},',
+                                              f'"interval_s": {interval_token},'),
+                    encoding="utf-8")
     read = await read_input(str(path), RealFileReader())
     result = await accept_input(parse_input(read), replace(context, catalog=_catalog(driver)),
                                 new_operation_key(), _owned(environment))

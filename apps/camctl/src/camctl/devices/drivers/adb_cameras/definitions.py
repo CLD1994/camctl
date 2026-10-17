@@ -10,7 +10,8 @@ from camctl.devices.catalog import ActionCapability
 from .commands import (ACTION_APERTURE, ACTION_BITRATE, ACTION_EV, ACTION_FOV,
                        ACTION_ISO, ACTION_RESOLUTIONS, ACTION_STABILIZATION,
                        OSMO_EV, OSMO_ISO, CameraModel, OutputSelection)
-from .timelapse_parameters import time_conditions, time_properties
+from .timelapse_parameters import (time_conditions, time_properties,
+                                   timelapse_intervals_s)
 
 
 _ASSUMED_REFERENCE_BITRATE_MBPS = {
@@ -89,14 +90,14 @@ def _timelapse_schema(model: CameraModel, parameter_type: str) -> dict:
     outputs = (list(OutputSelection) if model is CameraModel.ACTION6
                else [OutputSelection.VIDEO])
     schema = _object({"type": {"const": parameter_type},
-                      **time_properties(),
+                      **time_properties(model.value),
                       "outputs": {"type": "string", "enum": outputs},
                       "exposure": {"type": "object", "oneOf": [
                           _object({"mode": {"const": "manual"},
                                    "iso": {"type": "integer", "const": 800}}),
                           _object({"mode": {"const": "auto"}}),
                       ]}})
-    schema["allOf"] = time_conditions()
+    schema["allOf"] = time_conditions(model.value)
     return schema
 
 
@@ -122,7 +123,8 @@ def candidate_capabilities(driver_id: str) -> tuple[ActionCapability, ...]:
                          record_description,
                          False, record, {}, video_size_estimate=record_estimate),
         ActionCapability("camera_timelapse", timelapse_type, "原生延时摄影候选参数",
-                         "间隔和采集时长从各自允许值中选择，采集时长必须严格大于间隔；"
+                         f"间隔从该型号允许值中选择，最短为 {timelapse_intervals_s(model.value)[0]} 秒；"
+                         "采集时长从允许值中选择，且必须严格大于间隔；"
                          "时间选择不改变曝光或输出。参数合法不表示已有完整命令映射；"
                          "正常结束及文件写完依据待设备核实。"
                          + _video_estimate_description(timelapse_estimate),

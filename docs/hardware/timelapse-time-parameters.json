@@ -1,25 +1,5 @@
 {
-  "format_version": 1,
-  "interval_s": [
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    8,
-    10,
-    15,
-    20,
-    25,
-    30,
-    40,
-    60,
-    120,
-    300,
-    1800,
-    3600
-  ],
+  "format_version": 2,
   "duration_s": [
     300,
     600,
@@ -31,9 +11,59 @@
     18000
   ],
   "relation": "duration_s > interval_s",
-  "legal_pair_count": 134,
-  "shortest_pair": {
-    "interval_s": 1,
-    "duration_s": 300
+  "models": {
+    "dji-action6": {
+      "interval_s": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        15,
+        20,
+        25,
+        30,
+        40,
+        60,
+        120,
+        300,
+        1800,
+        3600
+      ],
+      "legal_pair_count": 134,
+      "shortest_pair": {
+        "interval_s": 1,
+        "duration_s": 300
+      }
+    },
+    "dji-osmo360-ii": {
+      "interval_s": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        15,
+        20,
+        25,
+        30,
+        40,
+        60,
+        120,
+        300,
+        1800,
+        3600
+      ],
+      "legal_pair_count": 126,
+      "shortest_pair": {
+        "interval_s": 2,
+        "duration_s": 300
+      }
+    }
   }
 }

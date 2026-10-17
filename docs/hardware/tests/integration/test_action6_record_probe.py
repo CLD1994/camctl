@@ -1046,6 +1046,36 @@ class ProbeIntegration(unittest.TestCase):
                     self.invoke("--capture", "timelapse")
                 self.assertEqual(self.trace(), [])
 
+    def test_time_resource_selects_the_action6_model_view(self):
+        resource = {
+            "format_version": 2,
+            "duration_s": [300, 18000],
+            "relation": "duration_s > interval_s",
+            "models": {
+                "dji-action6": {
+                    "interval_s": [1, 8],
+                    "legal_pair_count": 4,
+                    "shortest_pair": {"interval_s": 1, "duration_s": 300},
+                },
+                "dji-osmo360-ii": {
+                    "interval_s": [2, 8],
+                    "legal_pair_count": 4,
+                    "shortest_pair": {"interval_s": 2, "duration_s": 300},
+                },
+            },
+        }
+        path = self.workspace / "model-time-parameters.json"
+        path.write_text(json.dumps(resource))
+
+        with patch.object(self.probe, "TIME_PARAMETERS_PATH", path):
+            domain = self.probe.load_time_parameters()
+
+        self.assertEqual(domain["format_version"], 2)
+        self.assertEqual(domain["interval_s"], [1, 8])
+        self.assertEqual(domain["duration_s"], [300, 18000])
+        self.assertEqual(domain["legal_pair_count"], 4)
+        self.assertEqual(domain["shortest_pair"], {"interval_s": 1, "duration_s": 300})
+
     def test_observe_missing_or_contradictory_original_timing_call_is_rejected(self):
         original = self.seed_original(30)
         call = original / "03-timing" / "call.json"

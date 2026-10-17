@@ -7,8 +7,9 @@ import pytest
 from camctl.acceptance.schema import BodySchemaError, validate_precise
 from camctl.contracts.json_values import parse_exact_json
 from camctl.devices.drivers.adb_cameras import definitions
+from camctl.devices.drivers.adb_cameras import timelapse_parameters
 from camctl.devices.drivers.adb_cameras.timelapse_parameters import (
-    TIMELAPSE_DURATIONS_S, TIMELAPSE_INTERVALS_S,
+    TIMELAPSE_DURATIONS_S, timelapse_intervals_s,
 )
 from camctl.devices.parameter_schemas import validate_parameter_schema
 
@@ -232,18 +233,32 @@ def test_timelapse_rejects_invalid_duration_exposure_or_model_output(driver, int
 
 def timelapse_params(driver, **changes):
     cap = capability(driver, "camera_timelapse")
-    return {"type": cap.parameter_type, "interval_s": 1,
+    return {"type": cap.parameter_type, "interval_s": timelapse_intervals_s(driver)[0],
             "duration_s": 300, "outputs": "video", "exposure": {"mode": "auto"}, **changes}
 
 
-@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
-@pytest.mark.parametrize("interval, duration, accepted", [
-    (1, 300, True), (Decimal("0.5"), 300, False), (300, 300, False),
-    (3600, 3600, False), (3600, 300, False), (3600, 7200, True),
-    (7, 300, False), (1, 60, False), (30, 5400, False), (25, 6000, False),
-    (Decimal("0.50000000000000001"), 300, False),
-    (Decimal("1.00000000000000001"), 300, False),
-    (parse_exact_json("1e0"), parse_exact_json("3e2"), True),
+@pytest.mark.parametrize("driver, interval, duration, accepted", [
+    ("dji-action6", 1, 300, True),
+    ("dji-osmo360-ii", 1, 300, False),
+    ("dji-osmo360-ii", 2, 300, True),
+    ("dji-action6", Decimal("0.5"), 300, False),
+    ("dji-osmo360-ii", Decimal("0.5"), 300, False),
+    ("dji-action6", 300, 300, False),
+    ("dji-osmo360-ii", 300, 300, False),
+    ("dji-action6", 3600, 3600, False),
+    ("dji-osmo360-ii", 3600, 3600, False),
+    ("dji-action6", 3600, 300, False),
+    ("dji-osmo360-ii", 3600, 7200, True),
+    ("dji-action6", 7, 300, False),
+    ("dji-osmo360-ii", 7, 300, False),
+    ("dji-action6", 1, 60, False),
+    ("dji-osmo360-ii", 2, 60, False),
+    ("dji-action6", 30, 5400, False),
+    ("dji-osmo360-ii", 25, 6000, False),
+    ("dji-action6", Decimal("0.50000000000000001"), 300, False),
+    ("dji-osmo360-ii", Decimal("1.00000000000000001"), 300, False),
+    ("dji-action6", parse_exact_json("1e0"), parse_exact_json("3e2"), True),
+    ("dji-osmo360-ii", parse_exact_json("2e0"), parse_exact_json("3e2"), True),
 ])
 def test_timelapse_exact_time_boundaries(driver, interval, duration, accepted):
     params = timelapse_params(driver, interval_s=interval, duration_s=duration)
@@ -257,11 +272,36 @@ def test_timelapse_exact_time_boundaries(driver, interval, duration, accepted):
     assert params == before
 
 
+def test_timelapse_interval_selector_is_model_specific_and_rejects_unknown_models():
+    select_intervals = getattr(timelapse_parameters, "timelapse_intervals_s", None)
+    assert callable(select_intervals), "延时时间参数必须提供按型号选择间隔的接口"
+
+    action6 = select_intervals("dji-action6")
+    osmo = select_intervals("dji-osmo360-ii")
+
+    assert action6[0] == 1
+    assert osmo[0] == 2
+    assert osmo == action6[1:]
+    with pytest.raises(ValueError):
+        select_intervals("unknown-camera")
+
+
+def test_osmo_timelapse_rejects_new_one_second_interval_without_mutating_input():
+    params = timelapse_params("dji-osmo360-ii", interval_s=1, duration_s=300)
+    before = deepcopy(params)
+
+    with pytest.raises(BodySchemaError):
+        validate_precise(capability("dji-osmo360-ii", "camera_timelapse").schema, params)
+
+    assert params == before
+
+
 @pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
 def test_timelapse_all_authoritative_time_pairs_follow_strict_mathematical_order(driver):
-    intervals = TIMELAPSE_INTERVALS_S
+    intervals = timelapse_intervals_s(driver)
     durations = TIMELAPSE_DURATIONS_S
-    assert len(intervals) == 18
+    expected_count = 134 if driver == "dji-action6" else 126
+    assert len(intervals) == (18 if driver == "dji-action6" else 17)
     assert len(durations) == 8
     cap = capability(driver, "camera_timelapse")
     assert cap.schema["properties"]["interval_s"]["type"] == "number"
@@ -276,7 +316,7 @@ def test_timelapse_all_authoritative_time_pairs_follow_strict_mathematical_order
             else:
                 assert duration > interval
                 accepted_time_pairs.append((interval, duration))
-    assert len(accepted_time_pairs) == 134
+    assert len(accepted_time_pairs) == expected_count
     assert cap.defaults == {}
     assert cap.task_factory is None
 
@@ -311,16 +351,22 @@ def test_timelapse_rejects_wrong_types_branch_mixing_and_extra_fields(driver, fi
                          timelapse_params(driver, **{field: value}))
 
 
-@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
 @pytest.mark.parametrize("exposure", [{"mode": "auto"}, {"mode": "manual", "iso": 800}])
-@pytest.mark.parametrize("interval_json", ["1", "1.0", "1e0"])
-def test_timelapse_preserves_exact_equivalent_input_and_exposure(driver, exposure, interval_json):
+@pytest.mark.parametrize("driver, interval_json, expected_interval", [
+    ("dji-action6", "1", Decimal("1")),
+    ("dji-action6", "1.0", Decimal("1.0")),
+    ("dji-action6", "1e0", Decimal("1")),
+    ("dji-osmo360-ii", "2", Decimal("2")),
+    ("dji-osmo360-ii", "2.0", Decimal("2.0")),
+    ("dji-osmo360-ii", "2e0", Decimal("2")),
+])
+def test_timelapse_preserves_exact_equivalent_input_and_exposure(driver, exposure, interval_json, expected_interval):
     params = timelapse_params(driver, interval_s=parse_exact_json(interval_json), exposure=exposure)
     before = deepcopy(params)
     cap = capability(driver, "camera_timelapse")
     validate_parameter_schema(cap.parameter_type, cap.schema)
     validate_precise(cap.schema, params)
-    assert params["interval_s"] == Decimal("1")
+    assert params["interval_s"] == expected_interval
     assert params == before
 
 

@@ -10,7 +10,7 @@ from camctl.devices.drivers.adb_cameras import commands
 from camctl.devices.drivers.adb_cameras import timelapse_parameters
 from camctl.devices.drivers.adb_cameras.timelapse_parameters import (
     TIMELAPSE_DURATIONS_S,
-    TIMELAPSE_INTERVALS_S,
+    timelapse_intervals_s,
 )
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from .test_adb_camera_parameters import recording_params, timelapse_params
@@ -272,22 +272,25 @@ def _payload_from_settings(settings):
     return bytes.fromhex(payload_commands[0][-1])
 
 
-def _narrow_time_domain(monkeypatch, field, excluded):
-    name = "TIMELAPSE_INTERVALS_S" if field == "interval_s" else "TIMELAPSE_DURATIONS_S"
-    source = getattr(timelapse_parameters, name)
-    narrowed = tuple(value for value in source if value != excluded)
-    assert len(narrowed) == len(source) - 1
-    monkeypatch.setattr(timelapse_parameters, name, narrowed)
-    # Older implementations imported the live domain values into commands.py.
-    # Patch that binding too so this regression reaches the trusted encoder.
-    if hasattr(commands, name):
-        monkeypatch.setattr(commands, name, narrowed)
+def _narrow_time_domain(monkeypatch, field, excluded, model):
+    if field == "interval_s":
+        original = timelapse_parameters.timelapse_intervals_s
+        narrowed = tuple(value for value in original(model) if value != excluded)
+        assert len(narrowed) == len(original(model)) - 1
+
+        def current_intervals(requested_model):
+            return narrowed if requested_model == model else original(requested_model)
+
+        monkeypatch.setattr(timelapse_parameters, "timelapse_intervals_s", current_intervals)
+        return
+    narrowed = tuple(value for value in TIMELAPSE_DURATIONS_S if value != excluded)
+    assert len(narrowed) == len(TIMELAPSE_DURATIONS_S) - 1
+    monkeypatch.setattr(timelapse_parameters, "TIMELAPSE_DURATIONS_S", narrowed)
 
 
 STABLE_FORMAT_CASES = (
     ("dji-action6", 1, 300, "0400000a002c0100000000000000000000"),
     ("dji-action6", 2, 600, "0400001400580200000000000000000000"),
-    ("dji-osmo360-ii", 1, 300, "0400000a002c01000000000000000000"),
     ("dji-osmo360-ii", 2, 600, "04000014005802000000000000000000"),
 )
 
@@ -300,7 +303,7 @@ def test_trusted_timelapse_encoding_keeps_first_format_after_current_domain_narr
     assert _payload_from_settings(commands.settings_for(driver, "camera_timelapse", params)) == bytes.fromhex(expected)
 
     _narrow_time_domain(monkeypatch, narrow_field,
-                        interval if narrow_field == "interval_s" else duration)
+                        interval if narrow_field == "interval_s" else duration, driver)
 
     with pytest.raises(BodySchemaError):
         commands.settings_for(driver, "camera_timelapse", params)
@@ -322,7 +325,7 @@ def test_trusted_first_format_can_explain_1_301_while_new_request_still_uses_cur
 @pytest.mark.parametrize("outputs, exposure_mode, template", ACTION6_CANDIDATE_TEMPLATES)
 def test_action6_timelapse_candidate_covers_every_allowed_time_pair_and_preserves_template(
         outputs, exposure_mode, template):
-    pairs = [(interval, duration) for interval in TIMELAPSE_INTERVALS_S
+    pairs = [(interval, duration) for interval in timelapse_intervals_s("dji-action6")
              for duration in TIMELAPSE_DURATIONS_S if duration > interval]
     assert len(pairs) == 134
     template_bytes = bytes.fromhex(template)
@@ -343,9 +346,9 @@ def test_action6_timelapse_candidate_covers_every_allowed_time_pair_and_preserve
 @pytest.mark.parametrize("outputs, exposure_mode, template", OSMO_CANDIDATE_TEMPLATES)
 def test_osmo_timelapse_candidate_covers_every_allowed_time_pair_and_preserves_template(
         outputs, exposure_mode, template):
-    pairs = [(interval, duration) for interval in TIMELAPSE_INTERVALS_S
+    pairs = [(interval, duration) for interval in timelapse_intervals_s("dji-osmo360-ii")
              for duration in TIMELAPSE_DURATIONS_S if duration > interval]
-    assert len(pairs) == 134
+    assert len(pairs) == 126
     template_bytes = bytes.fromhex(template)
 
     for interval, duration in pairs:
@@ -394,6 +397,17 @@ def test_timelapse_candidate_rejects_neighboring_unequal_interval_value():
         )
 
 
+def test_osmo_new_one_second_request_is_rejected_but_saved_parameters_keep_original_bytes():
+    params = _candidate_params("dji-osmo360-ii", "video", "auto", 1, 300)
+
+    with pytest.raises(BodySchemaError):
+        commands.settings_for("dji-osmo360-ii", "camera_timelapse", params)
+
+    settings = commands.settings_from_effective_params("dji-osmo360-ii", "camera_timelapse", params)
+    payloads = [command[-1] for command in settings if command[-2] == "6c"]
+    assert payloads == ["0400000a002c01000000000000000000"]
+
+
 AUTO_TEMPLATE_FAILURE_CASES = (
     ("dji-action6", "video", "040000fa00701700000000000000000000", 25, 6000),
     ("dji-action6", "video_raw", "040003fa00701700000000000000000000", 25, 6000),
@@ -423,7 +437,8 @@ def test_auto_candidate_requires_its_fixed_template_and_keeps_exact_legacy_liter
 
     with pytest.raises(error):
         commands.settings_for(driver, "camera_timelapse",
-                              _candidate_params(driver, outputs, "auto", 1, 300))
+                              _candidate_params(driver, outputs, "auto",
+                                                1 if driver == "dji-action6" else 2, 300))
 
     legacy_params = _candidate_params(driver, outputs, "auto", legacy_interval, legacy_duration)
     assert _payload_from_settings(
@@ -455,9 +470,10 @@ def test_candidate_template_identity_is_independent_of_history_order(
     for ordered in (tuple(changed), tuple(reversed(changed))):
         monkeypatch.setitem(commands.TIMELAPSE_PRESETS, model, ordered)
         actual = _payload_from_settings(commands.settings_for(
-            driver, "camera_timelapse", _candidate_params(driver, outputs, exposure, 1, 300)))
+            driver, "camera_timelapse",
+            _candidate_params(driver, outputs, exposure, 1 if model is commands.CameraModel.ACTION6 else 2, 300)))
         expected = bytearray.fromhex(template)
-        expected[3:5] = (10).to_bytes(2, "little")
+        expected[3:5] = (10 if model is commands.CameraModel.ACTION6 else 20).to_bytes(2, "little")
         expected[5:7] = (300).to_bytes(2, "little")
         assert actual == bytes(expected)
 
@@ -474,7 +490,7 @@ def test_timelapse_missing_template_is_a_mapping_error(monkeypatch, driver):
     with pytest.raises(CapabilityNotDeclaredError):
         commands.settings_for(
             driver, "camera_timelapse",
-            _candidate_params(driver, "video", "auto", 1, 300),
+            _candidate_params(driver, "video", "auto", 1 if driver == "dji-action6" else 2, 300),
         )
 
 

@@ -288,20 +288,20 @@ adb pull /mnt/media_rw/emulated/DCIM
 
 ### 间隔与采集时长限制
 
-范围依据用户于 2026-10-16 提供的信息，共同适用于 Action6 的静止延时摄影及 OSMO 360 II 的全景静止延时摄影。两款相机的间隔和采集时长分别从同一组允许值中选择；输出类型、曝光设置、命令编码及完成依据由各型号分别定义。
+范围依据用户于 2026-10-16 提供的信息，适用于 Action6 的静止延时摄影及 OSMO 360 II 的全景静止延时摄影。采集时长域由两款相机共享，间隔域按型号定义：Action6 保留 1 秒最小值，OSMO 新请求从 2 秒起；输出类型、曝光设置、命令编码及完成依据由各型号分别定义。
 
 <!-- BEGIN GENERATED TIMELAPSE TIME PARAMETERS -->
-参数|允许值|含义
--|-|-
-采集间隔|1 s、2 s、3 s、4 s、5 s、6 s、8 s、10 s、15 s、20 s、25 s、30 s、40 s、1 min、2 min、5 min、30 min、1 h|相机两次采集之间的目标间隔，共 18 个允许值。
-采集时长|5 min、10 min、20 min、30 min、1 h、2 h、3 h、5 h|采集过程的目标持续时间，共 8 个允许值；不表示输出视频的播放时长。
+型号|间隔允许值|采集时长允许值|合法组合数量|最短组合
+-|-|-|-|-
+Action6 (`dji-action6`)|1 s、2 s、3 s、4 s、5 s、6 s、8 s、10 s、15 s、20 s、25 s、30 s、40 s、1 min、2 min、5 min、30 min、1 h|5 min、10 min、20 min、30 min、1 h、2 h、3 h、5 h|134|1 s 间隔、5 min 采集时长
+OSMO 360 II (`dji-osmo360-ii`)|2 s、3 s、4 s、5 s、6 s、8 s、10 s、15 s、20 s、25 s、30 s、40 s、1 min、2 min、5 min、30 min、1 h|5 min、10 min、20 min、30 min、1 h、2 h、3 h、5 h|126|2 s 间隔、5 min 采集时长
 
-合法组合要求 `duration_s > interval_s`，共有 134 种。最短组合为 1 s 间隔、5 min 采集时长。
+间隔表示相机两次采集之间的目标间隔；采集时长表示采集过程的目标持续时间，不表示输出视频的播放时长。合法组合要求 `duration_s > interval_s`。
 <!-- END GENERATED TIMELAPSE TIME PARAMETERS -->
 
 表格、合法组合数量及最短组合由[生产时间定义](../../apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py)生成。运行 `apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --write` 更新；`--check` 检查资料漂移。同一脚本生成[独立诊断时间资源](timelapse-time-parameters.json)，资源以秒为单位保存 JSON 数字、严格关系、组合数量和最短组合；Windows 诊断交付时按[独立诊断交付](camera-demo-validation.md#action6-独立诊断交付)将时间资源与同源编码模块随脚本复制，不依赖本机源码或包安装。资源不包含命令编码或设备完成保证。
 
-间隔继续使用精确秒数和 `number` 枚举表达；允许值由生产参数定义集中维护，扩展允许值时可追加具有编码依据的小数间隔。数值类型本身不扩大当前枚举范围。
+间隔继续使用精确秒数和 `number` 枚举表达；允许值由生产参数定义集中维护，扩展允许值时可追加具有编码依据的小数间隔。数值类型本身不扩大当前枚举范围。OSMO 新请求不能使用 1 秒间隔，旧任务仍按其原受理参数恢复。
 
 90 min 和 100 min 均不在允许的采集时长中，两款相机均不能将其作为新请求的合法预设下发，也不能在调用方不知情时替换为其他时长。本页原始任务要求、命令样例和算术核对不扩大这份允许值范围；既有试验记录保留原参数。
 
@@ -309,7 +309,7 @@ adb pull /mnt/media_rw/emulated/DCIM
 
 范围及组合约束依据用户提供的信息，实际参数尚未逐项通过设备回读确认。[候选编码契约](../camctl/timelapse-command-encoding.md)限定完整模板、时间替换及失败分区，支持当前整秒域的纯候选生成；实际生效、自动结束和文件完成仍分别需要设备依据。参数合法不单独证明最终视频已经生成。原表的两种 `6c` 形态及尚未解释的差异见[组合参数](#三组任务的组合参数)。
 
-两款相机后续实机演示均选择最短允许时间组合：1 s 间隔、5 min 采集时长。OSMO 的仅视频演示要求见[最短实机演示](camera-demo-validation.md#osmo-360-ii-的最短实机演示)，Action6 的新诊断要求见[延时摄影资料](camera-demo-validation.md#延时摄影资料)。已有 OSMO 30 s / 600 s 完整预设保留为[上次 TX2 执行记录](camera-demo-validation.md#osmo-360-ii-的-tx2-手工复验顺序)；两款相机的最短组合负载分别核对，不能互相套用。
+两款相机后续实机演示均选择各自最短允许组合：Action6 使用 1 s 间隔，OSMO 使用 2 s 间隔，两者的采集时长均为 5 min。OSMO 的仅视频演示要求见[最短实机演示](camera-demo-validation.md#osmo-360-ii-的最短实机演示)，Action6 的新诊断要求见[延时摄影资料](camera-demo-validation.md#延时摄影资料)。已有 OSMO 30 s / 600 s 完整预设保留为[上次 TX2 执行记录](camera-demo-validation.md#osmo-360-ii-的-tx2-手工复验顺序)；两款相机的最短组合负载分别核对，不能互相套用。
 
 OSMO 最短组合的[手工演示顺序](camera-demo-validation.md#osmo-360-ii-的最短手工演示顺序)已有[用户现场确认通过记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。该结果采用现场整体确认，逐项参数回读和正式执行契约按其记录的范围分别保留。
 

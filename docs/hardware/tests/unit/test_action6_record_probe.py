@@ -83,7 +83,7 @@ class CopyChecks(unittest.TestCase):
         self.assertFalse(probe.assess_copy((10, 'a' * 64), (11, 'a' * 64), (10, 'a' * 64))['matches_source_after'])
 
 
-TIME_DOMAIN = {"format_version": 1, "interval_s": [1, 8, 3600],
+TIME_DOMAIN = {"format_version": 2, "interval_s": [1, 8, 3600],
                "duration_s": [300, 1800, 18000], "relation": "duration_s > interval_s",
                "legal_pair_count": 7, "shortest_pair": {"interval_s": 1, "duration_s": 300}}
 

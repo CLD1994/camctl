@@ -9,6 +9,9 @@ from camctl.acceptance.schema import validate_precise
 from camctl.devices.tasks import CompletionMode, EndControl, StartReturn
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
+from camctl.devices.drivers.adb_cameras.timelapse_parameters import (
+    TIMELAPSE_DURATIONS_S, timelapse_intervals_s,
+)
 from camctl.devices.ports import ControlRequest
 from camctl.operations.models import AttemptStatus, AttemptTicket
 from camctl.operations.process import LocalExit, RawToolOutcome
@@ -52,18 +55,18 @@ def test_timelapse_task_freezes_natural_wait_and_finite_cancel_policy():
         "exact_count": None, "require_pairing": False, "min_size_bytes": 1},)
 
 
-def test_formal_timelapse_keeps_all_134_valid_time_combinations():
+def test_formal_timelapse_accepts_all_osmo_time_combinations():
     cap = next(cap for cap in _contract().capabilities() if cap.action_type == "camera_timelapse")
     count = 0
-    for duration in (300, 600, 1200, 1800, 3600, 7200, 10800, 18000):
-        for interval in (1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 40, 60, 120, 300, 1800, 3600):
+    for duration in TIMELAPSE_DURATIONS_S:
+        for interval in timelapse_intervals_s("dji-osmo360-ii"):
             if interval < duration:
                 params = {"type": "osmo360ii_timelapse", "duration_s": duration,
                     "interval_s": interval, "outputs": "video", "exposure": {"mode": "auto"}}
                 validate_precise(cap.schema, params)
                 assert cap.task_factory(params).target_duration_s == duration
                 count += 1
-    assert count == 134
+    assert count == 126
 
 
 class Transport:

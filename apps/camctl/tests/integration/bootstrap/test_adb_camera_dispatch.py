@@ -12,7 +12,6 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.pages import Page
 from camctl.devices.adb_transport import DeviceCommand, InterpretedFacts
 from camctl.devices.directory import DirectoryRead
-from camctl.devices.drivers.adb_cameras import commands as camera_commands
 from camctl.devices.drivers.adb_cameras import timelapse_parameters
 from camctl.devices.drivers.adb_cameras.commands import CameraModel, settings_for
 from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
@@ -29,7 +28,9 @@ from ..capture.test_cancel_late_start import _cancel
 from ..scheduling.test_start_action import _SCHEDULED, owned
 from ..scheduling.test_start_action import _accept_plan, _start
 from ..acceptance.test_acceptance import _plan_body
-from ..acceptance.test_adb_camera_definitions import _catalog, _legacy_action6_catalog, _params
+from ..acceptance.test_adb_camera_definitions import (
+    _catalog, _legacy_action6_catalog, _legacy_timelapse_catalog, _params,
+)
 from camctl.devices.drivers.adb_cameras import definitions
 from ..devices.adb_camera_fixtures import software_contract
 from camctl.acceptance.schema import BodySchemaError
@@ -166,36 +167,48 @@ async def test_restart_dispatch_uses_original_admitted_parameters(
         resumed.connection.close()
 
 
-def _narrow_authoritative_time_domain(monkeypatch, field, excluded):
-    name = "TIMELAPSE_INTERVALS_S" if field == "interval_s" else "TIMELAPSE_DURATIONS_S"
-    source = getattr(timelapse_parameters, name)
-    narrowed = tuple(value for value in source if value != excluded)
-    assert len(narrowed) == len(source) - 1
-    monkeypatch.setattr(timelapse_parameters, name, narrowed)
-    if hasattr(camera_commands, name):
-        monkeypatch.setattr(camera_commands, name, narrowed)
+def _narrow_authoritative_time_domain(monkeypatch, field, excluded, model):
+    if field == "interval_s":
+        original = timelapse_parameters.timelapse_intervals_s
+        narrowed = tuple(value for value in original(model.value) if value != excluded)
+        assert len(narrowed) == len(original(model.value)) - 1
+
+        def current_intervals(requested_model):
+            return narrowed if requested_model == model.value else original(requested_model)
+
+        monkeypatch.setattr(timelapse_parameters, "timelapse_intervals_s", current_intervals)
+        return
+    narrowed = tuple(value for value in timelapse_parameters.TIMELAPSE_DURATIONS_S if value != excluded)
+    assert len(narrowed) == len(timelapse_parameters.TIMELAPSE_DURATIONS_S) - 1
+    monkeypatch.setattr(timelapse_parameters, "TIMELAPSE_DURATIONS_S", narrowed)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model,narrow_field,payload", [
-    (CameraModel.ACTION6, "interval_s", "0400000a002c0100000000000000000000"),
-    (CameraModel.OSMO360II, "duration_s", "0400000a002c01000000000000000000"),
+@pytest.mark.parametrize("model,narrow_field,interval,excluded,payload,legacy", [
+    (CameraModel.ACTION6, "interval_s", 1, 1,
+     "0400000a002c0100000000000000000000", False),
+    (CameraModel.OSMO360II, "duration_s", 2, 300,
+     "04000014002c01000000000000000000", False),
+    (CameraModel.OSMO360II, "interval_s", 1, 2,
+     "0400000a002c01000000000000000000", True),
 ])
 async def test_restart_dispatch_keeps_first_format_after_current_domain_narrows(
-        owned, tmp_path, monkeypatch, model, narrow_field, payload):
+        owned, tmp_path, monkeypatch, model, narrow_field, interval, excluded, payload, legacy):
     driver_id = model.value
     params = {"type": "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse",
-              "interval_s": 1, "duration_s": 300, "outputs": "video", "exposure": {"mode": "auto"}}
+              "interval_s": interval, "duration_s": 300, "outputs": "video", "exposure": {"mode": "auto"}}
     body = _plan_body()
     body["actions"][0].update(type="camera_timelapse", params=params)
-    await _accept_plan(owned, tmp_path, body, _catalog(driver_id))
+    accepted_catalog = (_legacy_timelapse_catalog(driver_id, interval, 300)
+                        if legacy else _catalog(driver_id))
+    await _accept_plan(owned, tmp_path, body, accepted_catalog)
     original = owned.connection.execute(
         "SELECT device_id,driver_id,effective_params_json,execution_spec_json FROM actions WHERE id=1").fetchone()
     assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
 
     owned.connection.close()
     _narrow_authoritative_time_domain(
-        monkeypatch, narrow_field, params[narrow_field])
+        monkeypatch, narrow_field, excluded, model)
     restarted = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert restarted.connection.execute(
