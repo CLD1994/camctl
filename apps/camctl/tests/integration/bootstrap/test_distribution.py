@@ -347,7 +347,8 @@ def test_installed_and_checkout_cli_have_same_camera_catalog(installed, model):
     assert document["devices"][0]["device_id"] == "cam-1"
     assert document["devices"][0]["driver_id"] == model
     assert [action["type"] for action in document["devices"][0]["actions"]] == (
-        ["camera_record"] if model == "dji-action6" else [])
+        ["camera_record"] if model == "dji-action6" else
+        ["camera_record", "camera_timelapse"])
     with zipfile.ZipFile(installed.wheel) as archive:
         assert "camctl/devices/drivers/adb_cameras/registration.py" in archive.namelist()
         assert "camctl/devices/drivers/adb_cameras/driver.py" in archive.namelist()
@@ -961,13 +962,18 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
 ])
 def test_installed_sample_rejects_missing_matching_capability_before_plan(installed, tmp_path,
                                                                            stem, driver_id, device_id):
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.persistence.transaction import encode_json_value
+
     config = tmp_path / "pending.toml"
     config.write_text(f'[devices.{device_id}]\nkind="camera"\ndriver="{driver_id}"\n'
                       f'[devices.{device_id}.adb]\nserial="explicit-serial"\n')
     described = installed.cli("describe", "--config", str(config))
     assert described.returncode == 0, described.stderr
     capabilities = tmp_path / "pending.json"
-    capabilities.write_text(described.stdout)
+    document = parse_exact_json(described.stdout)
+    document["devices"][0]["actions"] = []
+    capabilities.write_text(encode_json_value(document), encoding="utf-8")
     target = tmp_path / "plan.json"
     refused = _run_installed_generator(installed, stem, capabilities, target)
     assert refused.returncode != 0
