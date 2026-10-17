@@ -5761,7 +5761,7 @@ def _verify_record_result_page(saved, page_event, action, activity, state):
     run = _source_fact(state, "operation_runs", saved.ref.ticket.run_id)
     attempt = _source_fact(state, "operation_attempts", page_event.evidence["attempt_id"])
     first, last = attempt["result_first_page_event_id"], attempt["result_last_page_event_id"]
-    if (action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+    if (action["type"] not in (int(_ACTION_TYPE.CAMERA_RECORD), int(_ACTION_TYPE.CAMERA_TIMELAPSE))
             or saved.ref.ticket.target_id != str(activity["id"])
             or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
             or run["action_id"] != action["id"] or run["activity_id"] != activity["id"]
@@ -5878,12 +5878,14 @@ def _load_stop_wait_file_sources(scope, facts, evidence, state):
         state.setdefault("actions", {})[action_id] = action
 
 
-def _wait_record_file(facts, state):
+def _wait_record_file(facts, state, basis):
     """已归属或最初观察者的固定定义识别需单独等待的录像文件。"""
     action_id = facts["source_action_id"] or facts["observer_action_id"]
     action = _source_fact(state, "actions", action_id)
-    return (action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
-            and "file_completion_wait_ms" in action["execution_spec_json"])
+    return ("file_completion_wait_ms" in action["execution_spec_json"]
+            and (action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+                or (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+                    and basis != int(_COMPLETION_BASIS.TIME_AND_OUTPUTS))))
 
 
 class _FileCompleteCommand:
@@ -5932,7 +5934,7 @@ class _FileCompleteCommand:
                     ObservationDisposition.ALREADY, command.file_id))
         if (command.state == int(_FILE_COMPLETION.COMPLETE)
                 and command.basis != int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)
-                and _wait_record_file(facts, self._state)):
+                and _wait_record_file(facts, self._state, command.basis)):
             raise ConsistencyError("停止后等待的录像文件首次完成必须使用原停止与等待依据")
         allowed = _FILE_COMPLETION_NEXT.get(current, frozenset())
         if command.state not in allowed:
@@ -6194,7 +6196,7 @@ def _device_file_row_guard(event, row, context) -> None:
                 if evidence["basis"] == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT):
                     _verify_stop_wait_file(observed, evidence, size, context.state_rows, event_id=event.event_id)
                 elif (evidence["basis"] != int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)
-                        and _wait_record_file(facts, context.state_rows)):
+                        and _wait_record_file(facts, context.state_rows, evidence["basis"])):
                     raise ConsistencyError("停止后等待的录像文件首次完成必须使用原停止与等待依据")
             except (ConsistencyError, ValueError, KeyError, TypeError) as error:
                 raise EventValidationError("文件完成的原停止与等待依据不一致") from error

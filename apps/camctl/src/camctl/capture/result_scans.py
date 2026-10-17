@@ -8,6 +8,7 @@ from camctl.capture.result_inputs import ResultPage, page_from_outcome
 from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner, SavedResultPage
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
+from camctl.devices.capture_completion import is_stop_context, result_page_timeout_s
 from camctl.devices.recording_completion import completed_file_wait_source
 from camctl.operations.models import AttemptTicket, ValidatedOutcome
 from camctl.operations.owned_calls import check_call_interruption
@@ -82,7 +83,8 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
         pending.in_call = True
         try:
             page = await runtime.results.list_page(pending.ticket, cursor=pending.cursor,
-                timeout_s=pending.timeout_s, output_scope=pending.output_scope,
+                timeout_s=result_page_timeout_s(pending.timeout_s, pending.completion_context),
+                output_scope=pending.output_scope,
                 completion_context=deepcopy(pending.completion_context))
             # 实际返回立即成为原申请；保存未知不再取时钟或执行列举。
             occurred_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
@@ -102,7 +104,7 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
 
 def completed_wait_from_page(saved: SavedResultPage, context, *, repository, owned) -> dict | None:
     """可靠复制页仍返回真正执行等待的原页，引用错误停止继续复用。"""
-    if context is None or saved.page.outcome.settlement is None:
+    if not is_stop_context(context) or saved.page.outcome.settlement is None:
         return None
     if saved.ref.ticket.target_id != context["activity_id"]:
         raise ConsistencyError("等待事实的可靠结果页属于其他活动")

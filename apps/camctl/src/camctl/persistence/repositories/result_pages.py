@@ -359,7 +359,8 @@ def read_source_inputs(ticket, cursor, batch, owned):
             raise ConsistencyError("来源文件的原配对尚未可靠保存")
         entry = replace(entry, complete=complete, size_bytes=facts["size_bytes"] if complete else None)
         file = CaptureFile(entry.identity, entry.kind, complete, ownership_confirmed=True,
-            format_id=entry.format_id, pairing_confirmed=True if paired_id is not None else None)
+            format_id=entry.format_id, pairing_confirmed=True if paired_id is not None else None,
+            size_bytes=entry.size_bytes)
         items.append((entry, file, file_id))
     return Page(tuple(items), identifiers[batch - 1] if len(identifiers) > batch else None)
 

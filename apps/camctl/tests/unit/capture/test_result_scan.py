@@ -151,6 +151,8 @@ async def test_completion_context_is_frozen_and_next_page_reuses_reliable_wait_f
     assert await result_scans.advance_result_scan(pending, runtime=runtime)
 
     first, second = runtime.results.list_page.await_args_list
+    assert first.kwargs["timeout_s"] == Decimal("15")
+    assert second.kwargs["timeout_s"] == Decimal("10")
     assert first.kwargs["completion_context"] == _completion_context()
     assert second.kwargs["completion_context"] == {
         **_completion_context(), "prior_completion": {
@@ -236,3 +238,18 @@ async def test_next_page_does_not_reuse_completion_for_another_stop_or_unfinishe
     assert await result_scans.advance_result_scan(pending, runtime=runtime)
 
     assert runtime.results.list_page.await_args_list[1].kwargs["completion_context"]["prior_completion"] is None
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_context_does_not_expect_or_create_stop_wait_source():
+    runtime = _runtime()
+    runtime.results.list_page.return_value = _page(finalized=True)
+    runtime.capture.save_result_page.return_value = DbOutcome(
+        DbOutcomeKind.COMPLETED, ResultPageRef(_TICKET, 1, 10, None))
+    context = {"kind": "timelapse_natural", "activity_id": _TICKET.target_id,
+        "wait_completed_event_id": 7}
+    pending = result_scans.PendingResultScan(_TICKET, None, Decimal("10"),
+        completion_context=context)
+    assert await result_scans.advance_result_scan(pending, runtime=runtime)
+    assert runtime.results.list_page.await_args.kwargs["timeout_s"] == Decimal("10")
+    assert pending.completion_context == context
