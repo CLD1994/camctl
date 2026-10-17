@@ -95,7 +95,7 @@ async def test_restarted_finite_cancel_waits_only_remaining_original_deadline(tm
     owned, runtime, advance, stopper, wall, mono = await _world(tmp_path)
     try:
         await advance(13, runtime)
-        restarted = replace(runtime, timelapse_deadlines={}, wall_us=lambda: _NOW+1_000_000,
+        restarted = replace(runtime, natural_wait_states={}, timelapse_deadlines={}, wall_us=lambda: _NOW+1_000_000,
             monotonic_ns=lambda: 9_000_000_000)
         await advance(13, restarted)
         assert restarted.timelapse_deadlines[13] == 9_250_000_000
@@ -270,7 +270,7 @@ async def test_failed_result_budget_survives_rescheduling_and_finishes_with_resi
         mono[0] += 1_250_000_000
         await advance(13, runtime)
         assert runtime.action(13)['status'] == 2
-        runtime = replace(runtime, timelapse_deadlines={})
+        runtime = replace(runtime, natural_wait_states={}, timelapse_deadlines={})
         await advance(13, runtime)
         await advance(13, runtime)
         assert runtime.action(13)['status'] == 6
@@ -293,7 +293,7 @@ async def test_interrupted_stop_recovers_original_unknown_once_then_waits_natura
             await advance(13, runtime)
         assert owned.connection.execute("SELECT status,attempts_used FROM operation_runs WHERE responsibility_key='stop/13'").fetchone() == (2, 1)
         recovery = EvidenceRegistry((EvidenceContract('adb_foreground_recovery', 1, 'stop', frozenset()),))
-        runtime = replace(runtime, timelapse_deadlines={},
+        runtime = replace(runtime, natural_wait_states={}, timelapse_deadlines={},
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=owned.connection.execute('SELECT MAX(id) FROM history_events').fetchone()[0],
             recovery_evidence_for=lambda binding, operation: recovery if operation == 'stop' else None)

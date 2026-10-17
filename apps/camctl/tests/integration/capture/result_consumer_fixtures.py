@@ -172,7 +172,7 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False, cata
         if consumer == "timelapse":
             # 消费测试从已保存的前次 START 恢复，不带入旧运行的
             # 单调钟锚点；本次可靠 UTC 已越过原自主任务等待。
-            runtime = replace(runtime, timelapse_deadlines={},
+            runtime = replace(runtime, natural_wait_states={}, timelapse_deadlines={},
                               wall_us=lambda: _NOW + 700_000_000)
         return owned, runtime, action_id, handler
     except BaseException:

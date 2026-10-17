@@ -489,3 +489,28 @@ async def test_uncommitted_completion_projection_does_not_become_a_saved_fact(tm
     finally:
         if owned.connection.in_transaction: owned.connection.execute('ROLLBACK')
         owned.connection.close()
+
+
+@pytest.mark.parametrize('startup', [0, 1000])
+@pytest.mark.parametrize('boundary', ['total_duration', 'utc_deadline', 'monotonic_deadline', 'extra_wait'])
+async def test_unrepresentable_natural_wait_is_rejected_before_any_start(tmp_path, startup, boundary):
+    import json
+    from camctl.contracts.values import MAX_OBJECT_ID
+    owned, runtime, wall, mono, extra = await _mapping_world(tmp_path, startup, advance=False)
+    if boundary == 'total_duration':
+        spec = json.loads(owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=13').fetchone()[0])
+        spec['target_duration_ms'] = MAX_OBJECT_ID
+        owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=13', (json.dumps(spec),))
+    elif boundary == 'utc_deadline':
+        wall[0] = (MAX_OBJECT_ID//1000000)*1000000
+        owned.connection.execute('UPDATE actions SET scheduled_at=?,max_delay_ms=0 WHERE id=13', (wall[0],))
+    elif boundary == 'monotonic_deadline': mono[0] = MAX_OBJECT_ID-1000
+    else: extra[0] = MAX_OBJECT_ID
+    try:
+        with pytest.raises(ValueError, match='精确整数范围'):
+            await capture_handler('camera_timelapse')(13, runtime)
+        assert runtime.driver.calls == [] and runtime.results.calls == []
+        assert owned.connection.execute("SELECT COUNT(*) FROM operation_runs WHERE responsibility_key='start/13'").fetchone() == (0,)
+        assert owned.connection.execute('SELECT sent_at,started_at FROM device_activities WHERE action_id=13').fetchone() == (None, None)
+    finally:
+        owned.connection.close()

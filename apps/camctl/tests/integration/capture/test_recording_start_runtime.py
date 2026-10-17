@@ -594,3 +594,29 @@ async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(t
         assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None)
     finally:
         owned.connection.close()
+
+
+@pytest.mark.parametrize('boundary', ['total_duration', 'utc_deadline', 'monotonic_deadline'])
+@pytest.mark.parametrize('legacy', [False, True])
+async def test_unrepresentable_recording_timing_is_rejected_before_any_start(tmp_path, boundary, legacy):
+    from camctl.contracts.values import MAX_OBJECT_ID
+    owned = _sent_world(tmp_path, duration_ms=MAX_OBJECT_ID if boundary == 'total_duration' else 10000)
+    driver = StartDriver(_sent_result())
+    if legacy:
+        spec = json.loads(owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=12').fetchone()[0])
+        spec.pop('startup_margin_ms')
+        spec.pop('start_return_meaning')
+        owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=12', (json.dumps(spec),))
+    wall = [(MAX_OBJECT_ID//1000000)*1000000 if boundary == 'utc_deadline' else _NOW]
+    mono = [MAX_OBJECT_ID-1000 if boundary == 'monotonic_deadline' else _ANCHOR]
+    runtime = _sent_runtime(owned, driver, wall=wall, mono=mono)
+    if boundary == 'utc_deadline':
+        owned.connection.execute('UPDATE actions SET scheduled_at=?,max_delay_ms=0 WHERE id=12', (wall[0],))
+    try:
+        with pytest.raises(ValueError, match='精确整数范围'):
+            await capture_handler('camera_record')(12, runtime)
+        assert driver.calls == []
+        assert owned.connection.execute("SELECT COUNT(*) FROM operation_runs WHERE responsibility_key='start/12'").fetchone() == (0,)
+        assert owned.connection.execute('SELECT sent_at,started_at FROM device_activities WHERE action_id=12').fetchone() == (None, None)
+    finally:
+        owned.connection.close()
