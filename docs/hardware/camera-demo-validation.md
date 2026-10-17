@@ -197,7 +197,7 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 200
 
 ### Action6 低功耗假设的手工复核
 
-本专项由用户亲自执行，用于判断此前 Action6 断连是否同样伴随低功耗及采集结束后的自动重连，结论目前未知。以下保留此前长间隔诊断实际使用的八条设置和一次 START：4K／30 fps、Pro、M 档、ISO 800、快门 1/60 秒、白平衡 5200 K、30 秒间隔、600 秒采集、仅视频。该组合曾在采集中观察到 USB 移除；本次核对低功耗原因及完成后自行恢复连接的行为，不预设结果。它与此前两轮 5 秒／300 秒／视频+JPEG 的受控复现分别保留原参数。
+本专项由用户亲自执行，用于判断此前 Action6 断连是否同样伴随低功耗及采集结束后的自动重连，结论目前未知。本次请求为 4K／30 fps、Pro、M 档、ISO 800、快门 1/60 秒、白平衡 5200 K、30 秒间隔、300 秒（5 分钟）采集、仅视频。模式和曝光设置沿用此前长间隔诊断，时间负载按 Action6 候选编码生成；本组合的参数生效及低功耗行为待用户现场验证，既有诊断保留各自原参数和结果。
 
 先在 TX2 上核对 `adb devices -l`、`lsusb` 及 USB 产品名称，确认接入的是 Action6；两款相机可能使用相同 serial。保留相机原片，在待机时通过 ADB 记录相机的 `/proc/sys/kernel/random/boot_id`。另一个 TX2 终端可以运行 `udevadm monitor --kernel --property --subsystem-match=usb`，被动观察移除及重新添加，不向相机轮询。
 
@@ -208,8 +208,8 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 200
 adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02'"
 # 2. 请求 4K / 30 fps。
 adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000'"
-# 3. 一次请求 30 秒间隔、600 秒采集、仅视频。
-adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400002c01580200000000000000000000'"
+# 3. 一次请求 30 秒间隔、300 秒采集、仅视频。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400002c012c0100000000000000000000'"
 # 4. 请求开启 Pro。
 adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101'"
 # 5. 请求 M 档曝光。
@@ -224,7 +224,7 @@ adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s
 adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'"
 ```
 
-START 返回后先在主机等待，例如 `sleep 610`，同时观察功率、屏幕与 USB 事件。610 秒只是第一次检查的安排；以相机实际结束为准，记录完成后多久自行恢复连接，不将 OSMO 的约 5 秒作为 Action6 的截止条件。观察期间保留供电和数据连接；若最终需要人为拔插或重启，单独记录，不能记为自动恢复。连接恢复后再读一次 boot ID，与拍摄前值比较，以区分同一次启动内恢复与期间重启。Action6 延时 STOP 仍未核实，本专项不使用普通录像或 OSMO 的停止命令。
+START 返回后先在主机等待，例如 `sleep 310`，同时观察功率、屏幕与 USB 事件。310 秒只是第一次检查的安排；以相机实际结束为准，记录完成后多久自行恢复连接，不将 OSMO 的约 5 秒作为 Action6 的截止条件。观察期间保留供电和数据连接；若最终需要人为拔插或重启，单独记录，不能记为自动恢复。连接恢复后再读一次 boot ID，与拍摄前值比较，以区分同一次启动内恢复与期间重启。Action6 延时 STOP 仍未核实，本专项不使用普通录像或 OSMO 的停止命令。
 
 ### Action6 原生延时的统一采集
 
