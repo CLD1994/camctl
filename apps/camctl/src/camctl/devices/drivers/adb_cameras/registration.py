@@ -7,7 +7,6 @@ from camctl.devices.catalog import DriverDefinition
 from camctl.devices.definitions_runtime import current_driver_definitions, register_driver_definitions
 from camctl.devices.drivers.registry import DriverEntry
 from camctl.devices.drivers.runtime import current_registry, register_drivers
-from .commands import CameraModel
 from .action6_record import action6_record_contract
 from .osmo360ii_capture import osmo360ii_contract
 from .driver import AdbCameraDriver
