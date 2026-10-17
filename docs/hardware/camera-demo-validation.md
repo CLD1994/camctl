@@ -1,6 +1,6 @@
 # Action6 普通录像演示与相机资料采集
 
-设备的当前安排见[Action6 暂停与后续 360 验证](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)。2026-10-17 的 Action6 普通录像、六个延时诊断分支及 USB 断连复现见[真机验证记录](../camctl/verification.md#action6-tx2-真机验证与暂停2026-10-17)。暂停期间只整理已有本地材料，不按下文操作步骤自动启动或恢复相机验证。
+设备的当前安排见[真机验证安排](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)。2026-10-17 的 Action6 普通录像、六个延时诊断分支及 USB 断连复现见[真机验证记录](../camctl/verification.md#action6-tx2-真机验证与暂停2026-10-17)。Action6 已安排由用户亲自执行[低功耗专项复核](#action6-低功耗假设的手工复核)，Agent 不按下文步骤自动启动或恢复相机验证。
 
 ARM 上的 Action6 普通录像演示已由用户于 2026-10-11 确认正常，该次十秒演示范围已完成，不需要重复拍摄或补交报告。该次原始计划、正式报告、媒体文件和确认水位未归档；其范围与 2026-10-17 的扩大验证分别记录，详见[普通录像现场验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。
 
@@ -105,9 +105,25 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 
 ## 延时摄影资料
 
-OSMO 最短延时手工演示的当前结果见[现场验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。Action6 原生延时诊断保持暂停；两款正式接入的剩余设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。本节说明最短实机演示的参数目标、已有 TX2 执行记录、诊断脚本保留的行为和既有记录的只读复查入口。
+OSMO 最短延时手工演示的当前结果见[现场验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)，较长间隔下的连接行为见[低功耗现场确认](../camctl/verification.md#osmo-360-ii-延时低功耗与-adb-恢复的现场确认2026-10-17)。Action6 自动诊断保持暂停，用户手工专项复核按下文执行；两款正式接入的剩余设备条件、候选命令和资料缺口由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。
 
 两款使用相同的[间隔与采集时长限制](camera-control-handoff.md#间隔与采集时长限制)，后续实机演示的最短时间目标均为 1 秒间隔、300 秒采集；模式、曝光、输出与编码分别沿自身契约。Action6 新诊断的输入、完整映射和旧记录读取由[驱动计划 D1A](../superpowers/plans/2026-10-16-osmo360ii-timelapse-driver.md#d1a-action6-新诊断与旧记录只读复查)同步。新诊断省略时间选项时从同源资源派生最短组合；下文秒级结果保留为既有记录和只读复查背景。
+
+### 延时采集期间的低功耗与连接观察
+
+OSMO 360 II 的[用户现场确认](../camctl/verification.md#osmo-360-ii-延时低功耗与-adb-恢复的现场确认2026-10-17)说明，较长间隔采集可能伴随低功耗及 ADB 断开，并在采集完成后恢复连接。观察时分别记录相机采集状态、功率变化和 USB／ADB 可用性；通信不可用本身不证明采集失败或结束。
+
+采集期间通过相机屏幕、功率测量和主机 USB 日志观察，不因断连补发 START、发送未核实 STOP 或立即重启。以相机实际完成为依据继续观察连接恢复；主机等待到目标时长、短暂重枚举和 ADB 恢复均不替代媒体与集合完整性检查。OSMO 的约 5 秒恢复观察值不直接成为固定超时或文件处理余量，Action6 的对应行为由专项复核确认。
+
+### OSMO 360 II 当前 START 命令
+
+新验证请求按[OSMO START 调用](../camctl/timelapse-command-encoding.md#osmo-start-调用)省略可选响应等待参数。在 TX2 上执行：
+
+```bash
+adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'
+```
+
+下文两套手工顺序保留当时的完整命令，用于核对既有现场记录；新验证使用本节的 START 命令，其余设置按实际请求选择。
 
 ### OSMO 360 II 的最短实机演示
 
@@ -144,11 +160,11 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 040700
 adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 20000000 01'
 ```
 
-`-o 20000000` 不表示拍摄时长，其单位和必要性仍由 D2 独立核实。启动后的观察覆盖至少 300 秒采集目标及后续视频处理；等待到期或 `00` 响应不能单独替代完成判定。结果未知或 USB 断连时保留原请求与现场材料，不补发 START。上述为复现入口，当前已通过的演示无需重复采集。
+新验证的 START 使用[当前命令](#osmo-360-ii-当前-start-命令)。启动后的观察覆盖至少 300 秒采集目标及后续视频处理；等待到期或 `00` 响应不能单独替代完成判定。结果未知或 USB 断连时保留原请求与现场材料，不补发 START。当前已通过的演示无需重复采集。
 
 ### OSMO 360 II 的 TX2 手工复验顺序
 
-以下记录用户提供的上次执行顺序，作用依据[全景静止延时控制资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)说明，实际参数尚未逐项回读确认。间隔与采集时长的完整允许值由[参数限制](camera-control-handoff.md#间隔与采集时长限制)维护；这里保留当时使用的 30 s / 600 s / 仅视频完整预设，作为既有试验记录。
+以下保留 2026-10-15 TX2 复验采用的执行顺序，作用依据[全景静止延时控制资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)说明，实际参数尚未逐项回读确认。间隔与采集时长的完整允许值由[参数限制](camera-control-handoff.md#间隔与采集时长限制)维护；这里保留当时使用的 30 s / 600 s / 仅视频完整预设，作为既有试验记录。
 
 这套记录对应的操作约定为：命令在 TX2 终端逐条执行，确认 serial 为目标相机。每条执行后检查本地 `adb` 的退出码和标准错误；仅在退出码为 `0`、没有未解释的报错，并收到唯一完整的 `Resp message, len = 1, data: 00` 后执行下一条。错误、响应缺失或含义不明时停止后续派发，不自动重试。
 
@@ -177,7 +193,38 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 200
 
 这套 30 s / 600 s 复验的观察等待安排为：第 10 条执行后等待至少 610 秒再进行结果观察。该安排不是实测的启动至文件完成耗时，也不构成已核实的驱动处理余量或自然结束保证。上次完整观察期间没有发送停止命令，也没有在 USB 断连后再次发送启动命令；复查原试验时沿用已有记录，不补发 START。
 
-`00` 只作为这套手工顺序继续执行的依据，不能单独证明参数生效、相机实际开始、拍摄完成或文件写完。USB 断连也不能单独证明上述任一结果；当前没有据此确定断连原因。结果判定仍需区分实际参数、采集状态、本次文件归属、文件写完和产物集合齐备。
+`00` 只作为这套手工顺序继续执行的依据，不能单独证明参数生效、相机实际开始、拍摄完成或文件写完。USB 断连也不能单独证明上述任一结果；较长间隔低功耗场景的后续说明见[现场确认](../camctl/verification.md#osmo-360-ii-延时低功耗与-adb-恢复的现场确认2026-10-17)。结果判定仍需区分实际参数、采集状态、本次文件归属、文件写完和产物集合齐备。
+
+### Action6 低功耗假设的手工复核
+
+本专项由用户亲自执行，用于判断此前 Action6 断连是否同样伴随低功耗及采集结束后的自动重连，结论目前未知。以下保留此前长间隔诊断实际使用的八条设置和一次 START：4K／30 fps、Pro、M 档、ISO 800、快门 1/60 秒、白平衡 5200 K、30 秒间隔、600 秒采集、仅视频。该组合曾在采集中观察到 USB 移除；本次核对低功耗原因及完成后自行恢复连接的行为，不预设结果。它与此前两轮 5 秒／300 秒／视频+JPEG 的受控复现分别保留原参数。
+
+先在 TX2 上核对 `adb devices -l`、`lsusb` 及 USB 产品名称，确认接入的是 Action6；两款相机可能使用相同 serial。保留相机原片，在待机时通过 ADB 记录相机的 `/proc/sys/kernel/random/boot_id`。另一个 TX2 终端可以运行 `udevadm monitor --kernel --property --subsystem-match=usb`，被动观察移除及重新添加，不向相机轮询。
+
+以下命令逐条执行，只有退出码为 0、stderr 无错误且收到唯一完整 `00` 才继续；任一步错误或结果未知就保留现场，不重试 START。
+
+```bash
+# 1. 请求进入 Action6 延时模式。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c e1 02'"
+# 2. 请求 4K / 30 fps。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 18 1003000000'"
+# 3. 一次请求 30 秒间隔、600 秒采集、仅视频。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 0400002c01580200000000000000000000'"
+# 4. 请求开启 Pro。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000101'"
+# 5. 请求 M 档曝光。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1E 0400'"
+# 6. 请求 ISO 800。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2a 06'"
+# 7. 请求快门 1/60 秒。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 28 013C8000'"
+# 8. 请求白平衡 5200 K。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2c 0634000000'"
+# 9. 仅发送一次 START。
+adb -s 123456789ABCDEF shell -T "sh -c 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'"
+```
+
+START 返回后先在主机等待，例如 `sleep 610`，同时观察功率、屏幕与 USB 事件。610 秒只是第一次检查的安排；以相机实际结束为准，记录完成后多久自行恢复连接，不将 OSMO 的约 5 秒作为 Action6 的截止条件。观察期间保留供电和数据连接；若最终需要人为拔插或重启，单独记录，不能记为自动恢复。连接恢复后再读一次 boot ID，与拍摄前值比较，以区分同一次启动内恢复与期间重启。Action6 延时 STOP 仍未核实，本专项不使用普通录像或 OSMO 的停止命令。
 
 ### Action6 原生延时的统一采集
 
