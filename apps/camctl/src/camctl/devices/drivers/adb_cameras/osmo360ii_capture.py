@@ -9,7 +9,7 @@ from camctl.devices.evidence import EvidenceContract, EvidenceRegistry, RESULT_P
 from camctl.devices.tasks import (CancelCompletionPolicy, CaptureTask, CompletionMode, EndControl, StartReturn)
 from .action6_record import _digest_timeout
 from .commands import CameraModel
-from .contracts import CameraCall, CameraContract
+from .contracts import STARTUP_MARGIN_MS, CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .osmo360ii_responses import OSMO360II_OBSERVATIONS, Osmo360IIDjiInterpreter, Osmo360IISimulationInterpreter
 from .osmo360ii_results import list_osmo360ii_results
@@ -19,6 +19,7 @@ def _task(params):
     timelapse = params.get("type") == "osmo360ii_timelapse"
     task = CaptureTask("camera_timelapse" if timelapse else "camera_record",
         target_duration_s=params["duration_s"], stop_supported=True,
+        start_return_meaning=StartReturn.SENT, startup_margin_ms=STARTUP_MARGIN_MS,
         file_completion_wait_s=Decimal("30"), ownership_mode=2,
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "osv", "min_count": 1,
@@ -40,7 +41,7 @@ class _Osmo360IIContract(CameraContract):
                 "修复保留双路视频及音频内容，不声明厂商原生编辑兼容。"
                 if cap.action_type == "camera_record" else
                 "完成判断采用正常设备执行有限目标后自行结束的运行假设，"
-                "目标后等待固定 30 秒余量再核实原片。"))
+                f"另留 {STARTUP_MARGIN_MS // 1000} 秒启动余量，目标后等待固定 30 秒结果余量再核实原片；设备采集目标保持原值。"))
             for cap in super().capabilities())
 
 

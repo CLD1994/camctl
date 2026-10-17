@@ -1,7 +1,7 @@
 """录像启动编排与计时锚点。
 
 驱动可靠识别启动成功响应时读取当前会话单调钟作为计时锚点；后续
-持久化、日志或源文件查询不重新设置锚点。停止目标为锚点加目标时
+持久化、日志或源文件查询不重新设置锚点。停止目标为锚点加冻结启动余量及目标时
 长，正常录像不主动少录。意图与派发分别核对窗口；窗口内派发而窗
 口后取得的确认仍被接受。仅发送、拒绝无效果、未知及可靠启动后的
 调用错误分别保留，不互相覆盖。
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from fractions import Fraction
 from enum import Enum
 from typing import Any, Callable, Protocol
 
@@ -59,7 +60,7 @@ _MS_TO_NS = 1_000_000
 
 
 def recording_stop_target(anchor_ns: int, duration: DurationMillis, startup_margin_ms: int = 0) -> int:
-    """停止目标 = 启动确认锚点 + 目标时长（毫秒精确换算为纳秒）。"""
+    """停止目标采用原确认锚点、冻结启动余量与目标时长。"""
     if int(duration) == 0 and startup_margin_ms == 0:
         return anchor_ns
     return CaptureTiming(int(duration), startup_margin_ms).deadline_ns(anchor_ns)
@@ -188,7 +189,8 @@ class ReconciliationPhase(Enum):
 class ReconciliationFacts:
     """一次跨会话对账判定的输入事实。
 
-    启动确认墙钟与当前可信墙钟同源；目标时长毫秒精确换算比较。
+    原确认墙钟与当前可信墙钟同源；旧定义采用 started_at，
+    SENT 定义采用 sent_at，按冻结余量与目标时长精确比较。
     """
 
     started_at_us: int | None
@@ -298,7 +300,8 @@ def decide_recovered_control(
 ) -> RecoveredControlDecision | None:
     """判定恢复停止的控制完成依据与异常多录门槛。
 
-    控制耗时超过目标加余量即达到多录修复条件，恰好相等不触发。
+    录制下界超过目标加修复余量即明确多录；只有控制耗时上界
+    未超门槛才可排除多录，上下界跨门槛或不能证明目标时长时检查媒体。
     计时证据缺失时不折叠为连续控制完成，返回 None 由调用方保持
     未定决定等待对账。
     """
@@ -308,10 +311,12 @@ def decide_recovered_control(
             or facts.stop_confirmed_at_us < facts.started_at_us):
         return None
     elapsed_ns = (facts.stop_confirmed_at_us - facts.started_at_us) * 1_000
-    threshold_ns = int(
-        (Decimal(facts.target_duration_ms) / Decimal(1_000)
-         + facts.repair_margin_s) * Decimal(1_000_000_000))
+    threshold_ns = (Fraction(facts.target_duration_ms, 1000)
+                    + Fraction(facts.repair_margin_s)) * 1000000000
     lower_ns = CaptureTiming(facts.target_duration_ms, facts.startup_margin_ms).recording_lower_bound_ns(elapsed_ns)
+    if facts.startup_margin_ms > 0 and lower_ns < facts.target_duration_ms * 1000000:
+        return RecoveredControlDecision(RecoveredControlReason.DURATION_UNCERTAIN,
+                                        control_elapsed_ns=elapsed_ns)
     if lower_ns > threshold_ns:
         return RecoveredControlDecision(
             RecoveredControlReason.EXCESS_DURATION,

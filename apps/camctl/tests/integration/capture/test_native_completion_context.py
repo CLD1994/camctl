@@ -200,3 +200,88 @@ async def test_natural_file_event_guard_independently_checks_original_sources(tm
             assert validate_event(event, context).envelope == event
     finally:
         owned.connection.close()
+
+
+class StartupNativeCatalog(NativeWaitCatalog):
+    def parameter_definition(self, device_id, action_type, parameter_type):
+        definition = super().parameter_definition(device_id, action_type, parameter_type)
+        if definition is not None and action_type == 'camera_timelapse':
+            factory = definition.task_factory
+            return replace(definition, task_factory=lambda params: replace(factory(params),
+                target_duration_s=300, startup_margin_ms=1000))
+        return definition
+
+
+async def test_new_native_context_and_history_preserve_original_startup_margin(tmp_path):
+    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=StartupNativeCatalog())
+    runtime.wait_config = lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000)
+    seen = []
+    async def read(request, batch):
+        context = request.params['completion_context']
+        assert context['startup_margin_ms'] == 1000
+        assert context['expected_check_at_us'] == _NOW+331000000
+        assert context['target_duration_ms'] == 300000
+        seen.append(context)
+        return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
+    _result_port(runtime, read)
+    try:
+        await capture_handler(handler)(action_id, runtime)
+        assert runtime.action(action_id)['status'] == 3
+        path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
+        history = HistoryRepository(path)
+        restored = history.restore_entity('action', action_id, history.current_boundary())
+        assert restored[('actions', action_id)]['execution_spec_json']['startup_margin_ms'] == 1000
+        assert len(seen) == 1
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('change', ['none', 'startup', 'early_wait', 'future_page', 'future_time'])
+async def test_new_natural_file_guard_uses_original_startup_and_actual_event_times(tmp_path, change):
+    from camctl.contracts.history_values import TransactionRange
+    from camctl.history.validators import EventContext, EventValidationError, validate_event
+    from camctl.persistence.transaction import event_envelope, row_facts, update_change
+    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=StartupNativeCatalog())
+    runtime.wait_config = lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000)
+    async def read(request, batch):
+        return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
+    _result_port(runtime, read)
+    try:
+        await capture_handler(handler)(action_id, runtime)
+        file_id, = owned.connection.execute('SELECT id FROM device_files').fetchone()
+        original = row_facts(owned.connection, 'device_files', file_id)['completion_evidence_json']
+        state = {'outputs': {}}
+        for table in ('actions', 'device_activities', 'operation_runs', 'operation_attempts', 'device_files'):
+            state[table] = {identity: row_facts(owned.connection, table, identity)
+                for identity, in owned.connection.execute(f'SELECT id FROM {table}')}
+        state['device_files'][file_id].update(completion_state=1, completion_evidence_json=None, size_bytes=None)
+        columns = ('id', 'transaction_id', 'event_type', 'event_version', 'occurred_at', 'clock_status', 'change_seq', 'body_json')
+        state['history_events'] = {}
+        for key in ('start_result_event_id', 'wait_completed_event_id', 'result_page_event_id'):
+            identity = original[key]
+            row = owned.connection.execute('SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?', (identity,)).fetchone()
+            state['history_events'][identity] = dict(zip(columns, row))
+        if change == 'startup':
+            state['actions'][action_id]['execution_spec_json']['startup_margin_ms'] = 2000
+        elif change == 'early_wait':
+            state['history_events'][original['wait_completed_event_id']]['occurred_at'] = _NOW+330000000
+        elif change == 'future_page':
+            state['history_events'][original['result_page_event_id']]['occurred_at'] = _NOW+330000000
+        elif change == 'future_time':
+            state['history_events'][original['result_page_event_id']]['occurred_at'] = _NOW+800000000
+        event_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()
+        transaction_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_transactions').fetchone()
+        event = event_envelope(event_id, transaction_id, 17, 3,
+            (update_change('device_files', file_id,
+                {'completion_state': 1, 'completion_evidence_json': None, 'size_bytes': None},
+                {'completion_state': 3, 'completion_evidence_json': original, 'size_bytes': 50}),),
+            runtime.wall_us(), evidence={'completion_request': dict.fromkeys(('locator', 'original_name', 'media_type'))})
+        context = EventContext(TransactionRange(transaction_id, event_id, event_id),
+            {('device_files', file_id): ('device_file', file_id)}, state)
+        if change == 'none':
+            assert validate_event(event, context).envelope == event
+        else:
+            with pytest.raises(EventValidationError):
+                validate_event(event, context)
+    finally:
+        owned.connection.close()

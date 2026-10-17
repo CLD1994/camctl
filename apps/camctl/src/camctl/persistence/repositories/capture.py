@@ -80,6 +80,7 @@ from camctl.contracts.workflow_errors import (
     validate_public_error,
 )
 from camctl.acceptance.definitions import read_action_spec
+from camctl.devices.capture_timing import CaptureTiming
 from camctl.devices.recording_completion import completed_file_wait_source, is_completed_file_wait
 from camctl.history.decoding import decode_event_row
 from camctl.history.reads import ReadCoverage, PlanReadScope
@@ -2342,7 +2343,9 @@ class CaptureRepository:
                     or original["id"] != activity["id"] or occurred_at != row[0]
                     or not json_equal(elapsed, activity["control_elapsed_ns"])):
                 raise ConsistencyError("原主机停止观察与活动、时刻或控制时长不符")
-            if elapsed is None or elapsed < action["execution_spec_json"]["target_duration_ms"] * 1_000_000:
+            spec = action["execution_spec_json"]
+            if elapsed is None or CaptureTiming(spec["target_duration_ms"],
+                    spec.get("startup_margin_ms", 0)).recording_lower_bound_ns(elapsed) < spec["target_duration_ms"] * 1_000_000:
                 return self._read_ended_page_completion(action_id, activity["id"], owned)
             return {"method": _DEVICE_EVIDENCE_METHOD, "observation": observation}
         if "start_result_event_id" in observation:
@@ -5903,7 +5906,7 @@ def _verify_stop_wait_file(facts, evidence, size, state, *, event_id=None):
         raise ConsistencyError("文件完成复用的等待没有匹配的原实际等待页") from error
 
 
-def _verify_natural_wait_file(facts, evidence, size, state, *, event_id=None):
+def _verify_natural_wait_file(facts, evidence, size, state, *, event_id=None, occurred_at=None):
     """自然完成引用原发送、实际等待和文件页；不借用其他活动的完成事实。"""
     from .result_pages import _decode
     from camctl.devices.capture_completion import validate_completion_context
@@ -5927,7 +5930,9 @@ def _verify_natural_wait_file(facts, evidence, size, state, *, event_id=None):
     start_event = _history_source_event(state, evidence["start_result_event_id"])
     wait_event = _history_source_event(state, evidence["wait_completed_event_id"])
     if (not start_event.event_id < wait_event.event_id < page_event.event_id
-            or (event_id is not None and page_event.event_id >= event_id)):
+            or (event_id is not None and page_event.event_id >= event_id)
+            or page_event.occurred_at < wait_event.occurred_at
+            or (occurred_at is not None and page_event.occurred_at > occurred_at)):
         raise ConsistencyError("自然文件完成的原事件时序不符")
     start_rows = [row for row in start_event.rows if row.table == "operation_attempts"]
     if start_event.event_type != _ATTEMPT_RESULT_EVENT or len(start_rows) != 1:
@@ -5961,7 +5966,8 @@ def _verify_natural_wait_file(facts, evidence, size, state, *, event_id=None):
         "target_duration_ms": spec["target_duration_ms"],
         "result_wait_margin_ms": activity["result_wait_margin_ms"],
         "extra_wait_ms": activity["extra_wait_ms_used"],
-        "expected_check_at_us": activity["expected_check_at"]}, activity_id=str(activity["id"]))
+        "expected_check_at_us": activity["expected_check_at"],
+        **({"startup_margin_ms": spec["startup_margin_ms"]} if "startup_margin_ms" in spec else {})}, activity_id=str(activity["id"]))
     saved, _ = _decode(page_event)
     _verify_record_result_page(saved, page_event, action, activity, state)
     identity = parse_exact_json(facts["identity_key"])
@@ -6103,7 +6109,7 @@ class _FileCompleteCommand:
             prospective = {**facts, "locator_json": facts["locator_json"]
                 if command.locator is None else dict(command.locator)}
             _verify_natural_wait_file(prospective, command.completion_evidence(), command.size_bytes,
-                self._state, event_id=scope.max_event_id + 1)
+                self._state, event_id=scope.max_event_id + 1, occurred_at=command.occurred_at)
         if (command.state == int(_FILE_COMPLETION.COMPLETE)
                 and command.basis == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)):
             _load_stop_wait_file_sources(scope, facts, command.completion_evidence(), self._state)
@@ -6388,7 +6394,7 @@ def _device_file_row_guard(event, row, context) -> None:
             try:
                 if (evidence["basis"] == int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
                         and ("result_page_event_id" in evidence or _native_wait_file(facts, context.state_rows))):
-                    _verify_natural_wait_file(observed, evidence, size, context.state_rows, event_id=event.event_id)
+                    _verify_natural_wait_file(observed, evidence, size, context.state_rows, event_id=event.event_id, occurred_at=event.occurred_at)
                 elif evidence["basis"] == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT):
                     _verify_stop_wait_file(observed, evidence, size, context.state_rows, event_id=event.event_id)
                 elif (evidence["basis"] != int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)

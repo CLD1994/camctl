@@ -4,9 +4,9 @@ from camctl.contracts.values import MAX_OBJECT_ID
 
 
 def _bounded(value: int, minimum: int = 0) -> int:
-    if type(value) is not int or not minimum <= value <= MAX_OBJECT_ID:
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= MAX_OBJECT_ID:
         raise ValueError("拍摄时间超出可保存的精确整数范围")
-    return value
+    return int(value)
 
 
 @dataclass(frozen=True)
@@ -33,3 +33,19 @@ class CaptureTiming:
 
     def recording_lower_bound_ns(self, control_elapsed_ns: int) -> int:
         return max(0, _bounded(control_elapsed_ns) - self.startup_margin_ms * 1000000)
+
+
+@dataclass(frozen=True)
+class WaitClockReference:
+    """同一活动在本会话内固定的 UTC 与单调钟配对。"""
+
+    utc_us: int
+    monotonic_ns: int
+
+    def __post_init__(self):
+        _bounded(self.utc_us)
+        _bounded(self.monotonic_ns)
+
+    def logical_deadline_ns(self, expected_check_at_us: int) -> int:
+        # 这是内存中的有符号逻辑时点；过去的截止不能截成当前时刻。
+        return self.monotonic_ns + (_bounded(expected_check_at_us, 1) - self.utc_us) * 1000

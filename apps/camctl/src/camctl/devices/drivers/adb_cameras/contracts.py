@@ -16,6 +16,9 @@ from .definitions import candidate_capabilities
 from .filesystem import ShellFileTools
 
 
+STARTUP_MARGIN_MS = 1000
+
+
 class CameraCall(StrEnum):
     SETTING = "setting"
     START = "start"
@@ -84,5 +87,7 @@ class CameraContract:
                               if capability.action_type == "camera_record" else
                               capability.description.replace(
                                   "正常结束及文件写完依据待设备核实。", ""))
-                             if callable(factory) else capability.description)))
+                             if callable(factory) else capability.description)
+                    + (f"开始命令正常响应只确认相机已接受命令；主机额外等待 {STARTUP_MARGIN_MS // 1000} 秒启动余量，再计满原目标时长，不据此记录实际首帧时刻。"
+                       if callable(factory) and capability.action_type == "camera_record" else "")))
         return tuple(capabilities)

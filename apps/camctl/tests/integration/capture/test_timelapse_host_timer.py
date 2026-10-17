@@ -29,10 +29,11 @@ pytestmark = pytest.mark.asyncio
 
 
 class HostCatalog(DeviceCompletionCatalog):
-    def __init__(self, meaning=StartReturn.SENT, *, baseline=False, end_control=EndControl.HOST_TIMER):
+    def __init__(self, meaning=StartReturn.SENT, *, baseline=False, end_control=EndControl.HOST_TIMER, startup_margin_ms=None):
         self.meaning = meaning
         self.baseline = baseline
         self.end_control = end_control
+        self.startup_margin_ms = startup_margin_ms
 
     def parameter_definition(self, device_id, action_type, parameter_type):
         definition = super().parameter_definition(device_id, action_type, parameter_type)
@@ -44,7 +45,7 @@ class HostCatalog(DeviceCompletionCatalog):
             return definition
         return replace(definition, task_factory=lambda params: replace(
             definition.task_factory(params), target_duration_s=Decimal("10"),
-            end_control=self.end_control, start_return_meaning=self.meaning,
+            end_control=self.end_control, start_return_meaning=self.meaning, startup_margin_ms=self.startup_margin_ms,
             ownership_mode=2 if self.baseline else 1,
             output_scope={"directories": ["/DCIM"]} if self.baseline else {"task": "own"},
             product_rules=({"kind": "video", "format_id": "mp4", "min_count": 1,
@@ -52,9 +53,9 @@ class HostCatalog(DeviceCompletionCatalog):
 
 
 async def world(tmp_path, *, meaning=StartReturn.SENT, case="video", consumer="timelapse", completion_page=None,
-                baseline=False, end_control=EndControl.HOST_TIMER):
+                baseline=False, end_control=EndControl.HOST_TIMER, startup_margin_ms=None):
     owned, runtime, action_id, handler = await consumer_world(tmp_path, consumer,
-        independent_activity=True, catalog=HostCatalog(meaning, baseline=baseline, end_control=end_control), start=False)
+        independent_activity=True, catalog=HostCatalog(meaning, baseline=baseline, end_control=end_control, startup_margin_ms=startup_margin_ms), start=False)
     if baseline:
         from camctl.contracts.pages import Page
         from camctl.devices.directory import DirectoryRead
@@ -632,4 +633,19 @@ async def test_stopped_finalized_scope_has_identical_forward_reverse_and_snapsho
             if table == "operation_attempts")
     finally:
         await executor.close()
+        owned.connection.close()
+
+
+async def test_host_timer_sent_margin_preserves_raw_control_elapsed(tmp_path):
+    owned, runtime, action_id, handler, results, clock = await world(tmp_path, startup_margin_ms=1000)
+    try:
+        await capture_handler(handler)(action_id, runtime)
+        clock[0] = 15000000000
+        await capture_handler(handler)(action_id, runtime)
+        runtime.stopper.stop.assert_not_awaited()
+        clock[0] = 16000000000
+        await capture_handler(handler)(action_id, runtime)
+        assert owned.connection.execute('SELECT control_elapsed_ns FROM device_activities').fetchone() == (11000000000,)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (3,)
+    finally:
         owned.connection.close()

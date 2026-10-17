@@ -46,6 +46,7 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.owned.connection.execute.return_value = cursor
     runtime.binding_check = None
     runtime.timelapse_deadlines = {}
+    runtime.natural_wait_states = {}
     runtime.start_config = AttemptConfig(3, Decimal("10"), Decimal("3"))
     runtime.last_attempt.return_value = None
     runtime.grant.return_value = (None, "device_busy")

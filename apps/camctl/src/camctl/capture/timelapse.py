@@ -1,6 +1,6 @@
 """延时摄影等待安排与跨重启恢复。
 
-预计检查时间 = 发送成功日期时间 + 目标采集时长 + 驱动必要余量 +
+预计检查时间 = 发送成功日期时间 + 冻结启动余量 + 目标采集时长 + 驱动必要余量 +
 部署额外等待；持久化或日志延迟不改变该安排。本次运行用单调钟
 等待；重启以原发送日期时间计算剩余等待并采用本次额外等待。等
 待计划不制造设备完成观察；原生完成后返回与已保存等待完成事实
@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from camctl.devices.tasks import EndControl, StartReturn
+from camctl.devices.capture_timing import CaptureTiming, WaitClockReference
 
 __all__ = [
     "CaptureWaitConfig",
@@ -46,16 +47,18 @@ class CaptureWaitConfig:
     """等待安排的配置输入。
 
     driver_margin_ms 是驱动必要余量，首次受理确定后不变；extra_wait_ms
-    是部署额外等待，本次运行采用实际值。部署只能增加等待，不能用
+    是部署额外等待，本次运行采用实际值；startup_margin_ms 来自
+    原冻结定义，旧定义明确使用零。部署只能增加等待，不能用
     负值抵消驱动要求。
     """
 
     target_duration_ms: int
     driver_margin_ms: int
     extra_wait_ms: int = 0
+    startup_margin_ms: int = 0
 
     def __post_init__(self) -> None:
-        for name in ("target_duration_ms", "driver_margin_ms", "extra_wait_ms"):
+        for name in ("target_duration_ms", "driver_margin_ms", "extra_wait_ms", "startup_margin_ms"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} 必须是非负整数毫秒: {value!r}")
@@ -120,24 +123,26 @@ def plan_capture_wait(
             return WaitPlan(kind=WaitKind.UNRESOLVABLE)
         return WaitPlan(
             kind=WaitKind.HOST_CONTROL_STOP,
-            monotonic_deadline_ns=anchor + config.target_duration_ms * _MS_TO_NS,
+            monotonic_deadline_ns=CaptureTiming(config.target_duration_ms, config.startup_margin_ms).deadline_ns(anchor),
         )
     sent = state.sent_at_utc
     if sent is None:
         return WaitPlan(kind=WaitKind.UNRESOLVABLE)
-    total_ms = (
-        config.target_duration_ms + config.driver_margin_ms + config.extra_wait_ms
-    )
-    check_at_utc = sent + total_ms * _MS_TO_US
+    timing = CaptureTiming(config.target_duration_ms, config.startup_margin_ms,
+        config.driver_margin_ms, config.extra_wait_ms)
+    check_at_utc = timing.deadline_us(sent)
     if state.restart and state.anchor_monotonic_ns is None:
-        remaining_ms = (check_at_utc - now.utc_us) // _MS_TO_US
-        if remaining_ms <= 0:
-            return WaitPlan(kind=WaitKind.CHECK_NOW, check_at_utc=check_at_utc)
+        remaining_us = check_at_utc - now.utc_us
+        remaining_ms = (remaining_us + _MS_TO_US - 1) // _MS_TO_US
+        logical_deadline = WaitClockReference(now.utc_us, now.monotonic_ns).logical_deadline_ns(check_at_utc)
+        if remaining_us <= 0:
+            return WaitPlan(kind=WaitKind.CHECK_NOW, check_at_utc=check_at_utc,
+                            monotonic_deadline_ns=logical_deadline)
         return WaitPlan(
             kind=WaitKind.RESUME_WAIT,
             check_at_utc=check_at_utc,
             remaining_ms=remaining_ms,
-            monotonic_deadline_ns=now.monotonic_ns + remaining_ms * _MS_TO_NS,
+            monotonic_deadline_ns=logical_deadline,
         )
     anchor = state.anchor_monotonic_ns
     if anchor is None:
@@ -145,5 +150,5 @@ def plan_capture_wait(
     return WaitPlan(
         kind=WaitKind.WAIT_THEN_CHECK,
         check_at_utc=check_at_utc,
-        monotonic_deadline_ns=anchor + total_ms * _MS_TO_NS,
+        monotonic_deadline_ns=timing.deadline_ns(anchor),
     )

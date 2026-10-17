@@ -412,8 +412,9 @@ async def test_recovered_control_uses_failed_confirmed_stop_original_time(tmp_pa
             assert repair == 3
             assert json.loads(repair_basis) == {
                 "reason": 2, "target_duration_ms": 60000, "threshold_s": 70,
-                "actual_duration_s": 75, "control_elapsed_ns": 75_000_000_000,
+                "control_elapsed_ns": 75_000_000_000,
             }
+            assert "actual_duration_s" not in json.loads(repair_basis)
         assert len(stopper.calls) == 1
         assert _saved_consumer_stop(owned, action_id) == original
         _assert_confirmed_stop_error(owned, action_id, activity_id, returned_at)

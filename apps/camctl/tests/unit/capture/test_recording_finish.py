@@ -356,3 +356,18 @@ async def test_recovered_excess_requires_lower_bound_beyond_threshold():
         repair_margin_s=Decimal("10"), startup_margin_ms=1000))
     assert decision.reason is RecoveredControlReason.EXCESS_DURATION
     assert decision.control_elapsed_ns == 21000001000
+
+
+async def test_recovered_control_that_does_not_prove_target_requires_media_check():
+    decision = decide_recovered_control(RecoveredControlFacts(
+        session_anchor=False, started_at_us=1000000, stop_confirmed_at_us=1500000,
+        target_duration_ms=10000, repair_margin_s=Decimal('10'), startup_margin_ms=1000))
+    assert decision.reason.value == 'duration_uncertain'
+    assert decision.control_elapsed_ns == 500000000
+
+
+async def test_control_upper_bound_at_excess_threshold_can_exclude_excess():
+    decision = decide_recovered_control(RecoveredControlFacts(
+        session_anchor=False, started_at_us=1000000, stop_confirmed_at_us=21000000,
+        target_duration_ms=10000, repair_margin_s=Decimal('10'), startup_margin_ms=1000))
+    assert decision.reason is RecoveredControlReason.CONTINUOUS

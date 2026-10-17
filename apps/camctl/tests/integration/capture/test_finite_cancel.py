@@ -44,15 +44,19 @@ def _freeze_finite_spec(owned, *, extra_rules=()):
         (json.dumps({'params':{'type':'finite_fake'},'policy':{'max_delay_ms':1000}}), json.dumps({'type':'finite_fake'})))
 
 
-async def _world(tmp_path, *, unknown=False, extra_rules=()):
+async def _world(tmp_path, *, unknown=False, extra_rules=(), startup_margin_ms=None):
     owned = _environment(tmp_path, _TIMELAPSE)
     _freeze_finite_spec(owned, extra_rules=extra_rules)
+    if startup_margin_ms is not None:
+        spec = json.loads(owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=13').fetchone()[0])
+        spec['startup_margin_ms'] = startup_margin_ms
+        owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=13', (json.dumps(spec),))
     wall, mono = [_NOW], [5_000_000_000]
     runtime = _runtime(owned, results=_FiniteResults({13: (_entry('finite-original'),)}),
         stop_config=AttemptConfig(3, Decimal('1'), Decimal('0')))
     runtime.wall_us = lambda: wall[0]
     runtime.monotonic_ns = lambda: mono[0]
-    runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, 50)
+    runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, 50, startup_margin_ms=startup_margin_ms or 0)
     advance = capture_handler('camera_timelapse')
     await advance(13, runtime)
     _apply_public_cancel(owned, 13, _NOW+100_000)
@@ -461,5 +465,77 @@ async def test_prior_complete_files_do_not_supply_current_insufficient_cancel_sc
         assert owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE id=13').fetchone() == ((3, 2) if latest == 'sufficient' else (1, 1))
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.source_action_id=13 AND f.size_bytes=50 AND json_extract(f.identity_key,'$[2]')='/DCIM/a.OSV'").fetchone() == (1,)
         stopper.stop.assert_awaited_once()
+    finally:
+        owned.connection.close()
+
+
+async def test_new_finite_cancel_waits_original_startup_then_preserves_dual_terminal_and_history(tmp_path):
+    from pathlib import Path
+    from camctl.persistence.repositories.history import HistoryRepository
+    owned, runtime, advance, stopper, wall, mono = await _world(tmp_path, startup_margin_ms=1000)
+    try:
+        await advance(13, runtime)
+        wall[0] += 1250000
+        mono[0] += 1250000000
+        await advance(13, runtime)
+        assert runtime.results.calls == []
+        assert runtime.action(13)['status'] == 2
+        wall[0] += 1000000
+        mono[0] += 1000000000
+        await advance(13, runtime)
+        assert runtime.action(13)['status'] == 6
+        await _finish_cancel(owned, wall)
+        ended = owned.connection.execute("SELECT body_json FROM history_events WHERE event_type=13 AND json_extract(body_json,'$.reason')=4").fetchone()
+        evidence = json.loads(ended[0])['evidence']['cancel_completion']
+        assert evidence['startup_margin_ms'] == 1000
+        assert evidence['expected_check_at_us'] == _NOW+2250000
+        assert owned.connection.execute('SELECT activity_state,occupancy_state,completion_basis,capture_json FROM device_activities WHERE id=13').fetchone() == (3, 2, 1, None)
+        assert owned.connection.execute("SELECT status,attempts_used FROM operation_runs WHERE responsibility_key='stop/13'").fetchone() == (4, 1)
+        path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
+        history = HistoryRepository(path)
+        restored = history.restore_entity('action', 13, history.current_boundary())
+        assert restored[('actions', 13)]['status'] == 6
+        stopper.stop.assert_awaited_once()
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('startup', [1000, 2000, None])
+async def test_finite_cancel_guard_requires_same_frozen_startup_margin(tmp_path, startup):
+    import camctl.persistence.repositories.finite_cancel as finite
+    from camctl.contracts.history_values import TransactionRange
+    from camctl.history.validators import EventContext, EventValidationError
+    from camctl.persistence.transaction import event_envelope, update_change
+    from camctl.capture.handlers import _original_ticket
+    from camctl.persistence.event_reads import SqlEventReads
+    owned, runtime, advance, stopper, wall, mono = await _world(tmp_path, startup_margin_ms=1000)
+    try:
+        await advance(13, runtime)
+        wall[0] += 2250000
+        mono[0] += 2250000000
+        await advance(13, runtime)
+        ticket = _original_ticket(runtime, 'results/13', 'result')
+        page = runtime.capture.read_last_result_page(ticket, owned)
+        request = finite.FiniteCancelEndSave(13, page.ref, wall[0])
+        state, action, activity = finite._load(owned, request)
+        txn_id, event_id = owned.connection.execute('SELECT MAX(id)+1,last_event_id+1 FROM history_transactions').fetchone()
+        evidence = finite._evidence(state, request)
+        if startup is None:
+            del evidence['startup_margin_ms']
+        else:
+            evidence['startup_margin_ms'] = startup
+        event = event_envelope(event_id, txn_id, finite._TYPE, finite._REASON,
+            (update_change('device_activities', 13, {'activity_state':1}, {'activity_state':3}),),
+            wall[0], evidence={'cancel_completion': evidence})
+        owned.connection.execute('BEGIN')
+        context = EventContext(TransactionRange(txn_id, event_id, event_id),
+            {('device_activities',13):('action',13)}, state,
+            current_reads=SqlEventReads(owned.connection, finite._read_scope(request)))
+        if startup == 1000:
+            finite._guard(event, context)
+        else:
+            with pytest.raises(EventValidationError):
+                finite._guard(event, context)
+        owned.connection.execute('ROLLBACK')
     finally:
         owned.connection.close()

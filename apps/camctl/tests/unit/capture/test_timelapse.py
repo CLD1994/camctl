@@ -172,3 +172,27 @@ class TestOtherPaths:
             _now(),
         )
         assert plan.kind is WaitKind.UNRESOLVABLE
+
+
+async def test_native_startup_margin_waits_331_seconds_without_changing_target():
+    config = CaptureWaitConfig(300000, 30000, startup_margin_ms=1000)
+    plan = plan_capture_wait(_state(sent_at_utc=1000000, anchor_monotonic_ns=2000000000), config, _now())
+    assert config.target_duration_ms == 300000
+    assert plan.check_at_utc == 332000000
+    assert plan.monotonic_deadline_ns == 333000000000
+
+
+async def test_restart_never_rounds_remaining_wait_down_before_due():
+    plan = plan_capture_wait(_state(sent_at_utc=1000000, anchor_monotonic_ns=None, restart=True),
+        CaptureWaitConfig(300000, 30000, startup_margin_ms=1000),
+        ClockReading(331999999, 1000000))
+    assert plan.kind is WaitKind.RESUME_WAIT
+    assert plan.monotonic_deadline_ns == 1001000
+    assert plan.remaining_ms == 1
+
+
+async def test_overdue_restart_preserves_negative_logical_deadline():
+    plan = plan_capture_wait(_state(sent_at_utc=1000000, anchor_monotonic_ns=None, restart=True),
+        CaptureWaitConfig(1000, 200, startup_margin_ms=1000), ClockReading(4000000, 100000000))
+    assert plan.kind is WaitKind.CHECK_NOW
+    assert plan.monotonic_deadline_ns == -700000000

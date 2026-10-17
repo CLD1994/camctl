@@ -6,6 +6,7 @@ from enum import StrEnum
 
 from camctl.contracts.values import MAX_OBJECT_ID, parse_object_id
 from camctl.devices.recording_completion import is_completed_file_wait
+from camctl.devices.capture_timing import CaptureTiming
 from camctl.operations.models import AttemptStatus, EffectState
 from camctl.operations.result_format import read_result_document
 
@@ -55,7 +56,7 @@ def validate_completion_context(context, *, activity_id: str) -> dict | None:
     kind = (CompletionContextKind.RECORD_STOP if 'kind' not in context
             else CompletionContextKind(context['kind']))
     if kind is CompletionContextKind.TIMELAPSE_NATURAL:
-        if set(context) != _NATURAL_FIELDS:
+        if set(context) != _NATURAL_FIELDS | ({"startup_margin_ms"} if "startup_margin_ms" in context else set()):
             raise ValueError('自然完成上下文缺少固定规则或混入停止字段')
         start_event = _integer(context['start_result_event_id'], 1)
         if _integer(context['wait_completed_event_id'], 1) <= start_event:
@@ -65,7 +66,8 @@ def validate_completion_context(context, *, activity_id: str) -> dict | None:
         margin = _integer(context['result_wait_margin_ms'])
         extra = _integer(context['extra_wait_ms'])
         due = _integer(context['expected_check_at_us'])
-        if due != sent + (duration + margin + extra) * 1000:
+        startup = _integer(context['startup_margin_ms'], 1) if 'startup_margin_ms' in context else 0
+        if due != CaptureTiming(duration, startup, margin, extra).deadline_us(sent):
             raise ValueError('自然等待改变原发送时间或采用的等待规则')
         if _integer(context['wait_completed_at_us']) < due:
             raise ValueError('自然等待尚未满足原目标和余量')

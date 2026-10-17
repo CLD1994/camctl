@@ -37,7 +37,7 @@ class CancelCompletionPolicy(StrEnum):
 
 @dataclass(frozen=True)
 class CaptureTask:
-    """驱动从生效参数取得任务事实；时长与余量明确使用秒。"""
+    """驱动从生效参数取得任务事实；目标与结果余量用秒，启动余量用整数毫秒。"""
     action_type: str
     target_duration_s: JsonValue = None
     stop_supported: bool | None = None

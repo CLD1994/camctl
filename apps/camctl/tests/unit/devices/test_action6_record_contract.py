@@ -79,3 +79,11 @@ def test_osmo_builtin_exports_record_and_timelapse_from_one_complete_contract():
     capabilities = _contract(CameraModel.OSMO360II).capabilities()
     assert {capability.action_type for capability in capabilities} == {"camera_record", "camera_timelapse"}
     assert all(callable(capability.task_factory) and capability.preview_supported for capability in capabilities)
+
+
+def test_new_action6_record_freezes_command_acceptance_and_startup_margin():
+    factory = _contract(CameraModel.ACTION6).task_factories['action6_record']
+    spec = build_capture_spec('camera_record', factory(_params()))
+    assert spec['start_return_meaning'] == 1
+    assert spec['startup_margin_ms'] == 1000
+    assert spec['target_duration_ms'] == 10000

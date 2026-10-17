@@ -9,6 +9,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, new_operation_key
 from camctl.devices.tasks import EndControl, StartReturn, CompletionMode
+from camctl.devices.capture_timing import CaptureTiming
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.models import AttemptStatus, EffectState
@@ -88,6 +89,7 @@ def _evidence(state, request):
     spec = action['execution_spec_json']
     return {
         'policy': spec.get('cancel_completion_policy'), 'activity_id': activity['id'],
+        **({'startup_margin_ms': spec['startup_margin_ms']} if 'startup_margin_ms' in spec else {}),
         'start_result_event_id': start_attempt['result_event_id'],
         'stop_run_id': stop['id'], 'stop_result_event_id': stop_attempt['result_event_id'],
         'sent_at_us': activity['sent_at'], 'target_duration_ms': spec.get('target_duration_ms'),
@@ -137,7 +139,8 @@ def _verify_sources(state, request, evidence, *, event_id):
     wait_event = _history_source_event(state, activity['wait_completed_event_id'])
     page_event = _history_source_event(state, request.page.event_id)
     page, _ = _decode(page_event)
-    expected = activity['sent_at'] + (spec['target_duration_ms'] + spec['result_wait_margin_ms'] + activity['extra_wait_ms_used']) * 1000
+    expected = CaptureTiming(spec['target_duration_ms'], spec.get('startup_margin_ms', 0),
+        spec['result_wait_margin_ms'], activity['extra_wait_ms_used']).deadline_us(activity['sent_at'])
     if (sent_event.occurred_at != activity['sent_at'] or activity['expected_check_at'] != expected
             or activity['result_wait_margin_ms'] != spec['result_wait_margin_ms']
             or wait_event.event_type != _WAIT_EVENT['id']

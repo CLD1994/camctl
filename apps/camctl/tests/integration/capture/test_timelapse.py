@@ -224,3 +224,42 @@ def test_restart_reconfigure_uses_current_extra_wait(tmp_path: Path) -> None:
         assert row[2] is None  # 等待完成事实仍未建立
     finally:
         owned.connection.close()
+
+
+@pytest.mark.parametrize('change', ['none', 'time', 'extra', 'margin', 'due', 'action', 'branch'])
+def test_schedule_same_key_reuses_only_original_complete_persistent_input(tmp_path, change):
+    owned = _environment(tmp_path)
+    repository = TimelapseRepository()
+    try:
+        command = ScheduleWait(1, WaitPlan(WaitKind.WAIT_THEN_CHECK, _NOW+600000000), 0, 0, _NOW)
+        key = new_operation_key()
+        first = repository.schedule_wait(command, key, owned)
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        if change == 'time': command = replace(command, occurred_at=_NOW+1)
+        elif change == 'extra': command = replace(command, extra_wait_ms=1)
+        elif change == 'margin': command = replace(command, driver_margin_ms=1)
+        elif change == 'due': command = replace(command, plan=replace(command.plan, check_at_utc=_NOW+600001000))
+        elif change == 'action': command = replace(command, action_id=2)
+        save = repository.reconfigure_wait if change == 'branch' else repository.schedule_wait
+        replay = save(command, key, owned)
+        assert replay.kind is (DbOutcomeKind.COMPLETED if change == 'none' else DbOutcomeKind.ROLLED_BACK)
+        if change == 'none': assert replay.value == first.value
+    finally:
+        owned.connection.close()
+
+
+def test_wait_verification_reads_original_key_without_publishing_missing_candidate(tmp_path):
+    owned = _environment(tmp_path)
+    repository = TimelapseRepository()
+    try:
+        command = ScheduleWait(1, WaitPlan(WaitKind.WAIT_THEN_CHECK, _NOW+600000000), 0, 0, _NOW)
+        key = new_operation_key()
+        before = owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
+        verified = repository.verify_wait(command, key, owned)
+        assert verified.kind is DbOutcomeKind.COMPLETED and verified.value is None
+        assert owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone() == before
+        saved = repository.schedule_wait(command, key, owned)
+        verified = repository.verify_wait(command, key, owned)
+        assert verified.kind is DbOutcomeKind.COMPLETED and verified.value == saved.value
+    finally:
+        owned.connection.close()

@@ -5,9 +5,9 @@ import shlex
 
 from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry, RESULT_PAGE_CONTRACT
-from camctl.devices.tasks import CaptureTask
+from camctl.devices.tasks import CaptureTask, StartReturn
 from .commands import CameraModel
-from .contracts import CameraCall, CameraContract
+from .contracts import STARTUP_MARGIN_MS, CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .record_results import list_record_results
 from .responses import ACTION6_RECORD_OBSERVATIONS, Action6DjiInterpreter, Action6UnconfirmedSettingInterpreter
@@ -18,6 +18,7 @@ FILE_COMPLETION_WAIT_S = Decimal("5")
 
 def _task(params):
     return CaptureTask("camera_record", target_duration_s=params["duration_s"], stop_supported=True,
+        start_return_meaning=StartReturn.SENT, startup_margin_ms=STARTUP_MARGIN_MS,
         file_completion_wait_s=FILE_COMPLETION_WAIT_S, ownership_mode=2,
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "mp4", "min_count": 1,

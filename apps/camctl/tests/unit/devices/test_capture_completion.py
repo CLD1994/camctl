@@ -86,3 +86,15 @@ def test_stop_context_rejects_mismatched_control_and_natural_fields(mutate):
     else: context['wait_completed_event_id'] = 19
     with pytest.raises(ValueError):
         validate_completion_context(context, activity_id='7')
+
+
+def test_new_natural_context_includes_frozen_startup_margin_once():
+    from camctl.devices.capture_completion import validate_completion_context
+    context = {**_natural(), 'startup_margin_ms': 1000,
+        'expected_check_at_us': 332000000, 'wait_completed_at_us': 332000000}
+    assert validate_completion_context(context, activity_id='7') == context
+    for changes in ({'expected_check_at_us': 331000000}, {'expected_check_at_us': 333000000},
+                    {'wait_completed_at_us': 331999999}, {'startup_margin_ms': 0},
+                    {'startup_margin_ms': True}):
+        with pytest.raises(ValueError):
+            validate_completion_context({**context, **changes}, activity_id='7')

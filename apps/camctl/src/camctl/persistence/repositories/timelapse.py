@@ -15,7 +15,8 @@ from typing import Any
 from camctl.capture.models import WaitCompletedSave
 from camctl.capture.timelapse import WaitPlan
 from camctl.contracts.json_values import json_equal
-from camctl.contracts.values import ConsistencyError, OperationKey
+from camctl.contracts.values import MAX_OBJECT_ID, ConsistencyError, OperationKey
+from camctl.devices.capture_timing import CaptureTiming
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import load_activity_of_action
@@ -89,6 +90,10 @@ class WaitCompletedCommand:
         command = self._command
         activity = load_activity_of_action(connection, command.action_id)
         self._state["device_activities"] = {activity["id"]: activity}
+        action = row_facts(connection, "actions", activity["action_id"])
+        if action is None:
+            raise ConsistencyError("等待缺少原冻结动作定义")
+        self._state["actions"] = {action["id"]: action}
         self._owners[("device_activities", activity["id"])] = (
             "action", activity["action_id"])
         if activity["sent_at"] is None or activity["expected_check_at"] is None:
@@ -152,14 +157,23 @@ class ScheduleWaitCommand:
 
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
-        if saved_transaction_events(connection, self._key) is not None:
-            raise TransactionError("等待安排的重送须由调用方按原事务核实")
         command = self._command
+        _validate_wait_values({"expected_check_at": command.plan.check_at_utc,
+            "result_wait_margin_ms": command.driver_margin_ms, "extra_wait_ms_used": command.extra_wait_ms})
+        if command.plan.check_at_utc is None:
+            raise TransactionError("等待安排要求完整预计检查时间")
         activity = load_activity_of_action(connection, command.action_id)
         self._state["device_activities"] = {activity["id"]: activity}
+        action = row_facts(connection, "actions", activity["action_id"])
+        if action is None:
+            raise ConsistencyError("等待缺少原冻结动作定义")
+        self._state["actions"] = {action["id"]: action}
         self._owners[("device_activities", activity["id"])] = (
             "action", activity["action_id"],
         )
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(activity, saved)
         if self._reason == _SCHEDULE_REASON:
             if activity["expected_check_at"] is not None:
                 raise TransactionError("首次等待安排要求原预计检查为空")
@@ -206,8 +220,52 @@ class ScheduleWaitCommand:
         )
 
 
+    def _reuse(self, activity, saved) -> CommandPlan:
+        """同一原键只复用完整持久输入；不要求当前投影仍是原安排。"""
+        command = self._command
+        expected_after = {"extra_wait_ms_used": command.extra_wait_ms,
+                          "expected_check_at": command.plan.check_at_utc}
+        if self._reason == _SCHEDULE_REASON:
+            expected_after["result_wait_margin_ms"] = command.driver_margin_ms
+        elif not json_equal(activity["result_wait_margin_ms"], command.driver_margin_ms):
+            raise TransactionError("等待重配置重送改变原固定结果余量")
+        if (len(saved) != 1 or saved[0]["type"] != _CAPTURE_WAIT_EVENT
+                or saved[0]["reason"] != self._reason
+                or saved[0]["occurred_at"] != command.occurred_at):
+            raise TransactionError("等待安排重送改变原分支或事实时刻")
+        rows = saved[0]["body"]["rows"]
+        if (len(rows) != 1 or rows[0]["table"] != "device_activities"
+                or rows[0]["id"] != activity["id"]
+                or not rows[0]["before"]["exists"]
+                or not rows[0]["after"]["exists"]
+                or set(rows[0]["before"]["values"]) != set(expected_after)
+                or not json_equal(rows[0]["after"]["values"], expected_after)):
+            raise TransactionError("等待安排重送改变原活动或完整等待规则")
+        return CommandPlan((), self._owners, self._state, read_only=True,
+                           result=WaitSaved(command.plan.check_at_utc))
+
+
+class _VerifyWaitCommand:
+    """在可靠事务内核对原键；缺键只返回尚未提交，不发布候选安排。"""
+
+    def __init__(self, original, key):
+        self.original, self.key = original, key
+
+    def plan(self, scope):
+        if saved_transaction_events(scope.connection, self.key) is None:
+            return CommandPlan((), {}, {}, read_only=True, result=None)
+        return self.original.plan(scope)
+
+
 class TimelapseRepository:
     """延时等待安排事务的 SQLite 仓储。"""
+
+    def verify_wait(self, command: ScheduleWait | WaitCompletedSave, key: OperationKey,
+                    owned: OwnedConnection, *, reconfigure: bool = False):
+        """UNKNOWN 先核对原完整申请，不用当前投影推断提交结果。"""
+        original = (WaitCompletedCommand(command, key) if isinstance(command, WaitCompletedSave)
+                    else ScheduleWaitCommand(command, key, _RECONFIGURE_REASON if reconfigure else _SCHEDULE_REASON))
+        return _outcome_of(commit_operation(_VerifyWaitCommand(original, key), key, owned))
 
     def schedule_wait(
         self, command: ScheduleWait, key: OperationKey, owned: OwnedConnection
@@ -255,17 +313,32 @@ def _capture_wait_guard(event, context) -> None:
         if row.table != "device_activities" or not row.before.exists:
             continue
         _validate_wait_values(row.after.values)
+        activity = dict(context.state_rows.get("device_activities", {}).get(row.row_id, {}))
+        activity.update(row.after.values)
+        action = context.state_rows.get("actions", {}).get(activity.get("action_id"))
+        if action is None:
+            raise EventValidationError("等待缺少原冻结动作定义")
+        spec = action.get("execution_spec_json", {})
+        if "startup_margin_ms" in spec:
+            try:
+                expected = CaptureTiming(spec["target_duration_ms"], spec["startup_margin_ms"],
+                    spec["result_wait_margin_ms"], activity["extra_wait_ms_used"]).deadline_us(activity["sent_at"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise EventValidationError("等待缺少原可靠发送与冻结计时依据") from error
+            if (activity.get("result_wait_margin_ms") != spec["result_wait_margin_ms"]
+                    or activity.get("expected_check_at") != expected):
+                raise EventValidationError("等待改变原启动余量、目标或发送锚点")
 
 
 def _validate_wait_values(values) -> None:
     check = values.get("expected_check_at")
-    if check is not None and (isinstance(check, bool) or not isinstance(check, int) or check <= 0):
+    if check is not None and (isinstance(check, bool) or not isinstance(check, int) or not 0 < check <= MAX_OBJECT_ID):
         raise EventValidationError(f"预计检查时间必须为正微秒: {check!r}")
     for column in ("result_wait_margin_ms", "extra_wait_ms_used"):
         if column in values:
             value = values[column]
             if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_OBJECT_ID
             ):
                 raise EventValidationError(f"{column} 必须是非负毫秒: {value!r}")
 

@@ -371,6 +371,7 @@ def execution_wait_config(action: Mapping[str, Any]) -> CaptureWaitConfig:
     return CaptureWaitConfig(
         target_duration_ms=int(spec["target_duration_ms"]),
         driver_margin_ms=int(spec.get("result_wait_margin_ms", 0)),
+        startup_margin_ms=int(spec.get("startup_margin_ms", 0)),
     )
 
 
@@ -478,6 +479,7 @@ def session_capture_assembly(
     anchors = {} if recording_anchors is None else recording_anchors
     listings: dict[int, tuple[tuple, tuple]] = {}
     timelapse_deadlines: dict[int, int] = {}
+    natural_wait_states = {}
     pending_start_results = {} if pending_call_results is None else pending_call_results
     capture_completions = {} if pending_capture_completions is None else pending_capture_completions
     result_closes = {} if pending_result_closes is None else pending_result_closes
@@ -635,6 +637,7 @@ def session_capture_assembly(
             repair_margin_s=_repair_margin_s(declaration),
             listing_cache=listings,
             timelapse_deadlines=timelapse_deadlines,
+            natural_wait_states=natural_wait_states,
             retry_gate=retry_gate,
             start_config=AttemptConfig(
                 max_attempts=_device_attempts(
