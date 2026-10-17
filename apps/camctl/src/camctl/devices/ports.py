@@ -79,6 +79,8 @@ class ControlRequest:
     timeout_s: Decimal | None = None
     #: 多步启动在新设备派发前调用；None 返回值表示仍有原业务资格。
     dispatch_check: Callable[[], str | None] | None = None
+    #: 普通录像原受理定义中的返回含义；省略保持旧 STARTED 合同。
+    start_return_meaning: int | None = None
 
 
 @dataclass(frozen=True)

@@ -16,6 +16,7 @@ from typing import Any, Callable, Protocol
 
 from camctl.contracts.values import DurationMillis
 from camctl.devices.evidence import DeviceObservation
+from camctl.devices.capture_timing import CaptureTiming
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import (
     AttemptStatus,
@@ -57,9 +58,11 @@ __all__ = [
 _MS_TO_NS = 1_000_000
 
 
-def recording_stop_target(anchor_ns: int, duration: DurationMillis) -> int:
+def recording_stop_target(anchor_ns: int, duration: DurationMillis, startup_margin_ms: int = 0) -> int:
     """停止目标 = 启动确认锚点 + 目标时长（毫秒精确换算为纳秒）。"""
-    return anchor_ns + int(duration) * _MS_TO_NS
+    if int(duration) == 0 and startup_margin_ms == 0:
+        return anchor_ns
+    return CaptureTiming(int(duration), startup_margin_ms).deadline_ns(anchor_ns)
 
 
 @dataclass(frozen=True)
@@ -191,6 +194,7 @@ class ReconciliationFacts:
     started_at_us: int | None
     target_duration_ms: int
     trusted_now_us: int
+    startup_margin_ms: int = 0
 
 
 def decide_recording_reconciliation(
@@ -203,7 +207,7 @@ def decide_recording_reconciliation(
     """
     if facts.started_at_us is None:
         return ReconciliationPhase.TIMING_UNRELIABLE
-    target_us = facts.started_at_us + facts.target_duration_ms * 1_000
+    target_us = CaptureTiming(facts.target_duration_ms, facts.startup_margin_ms).deadline_us(facts.started_at_us)
     if facts.trusted_now_us >= target_us:
         return ReconciliationPhase.TIMING_SATISFIED
     return ReconciliationPhase.TIMING_WAIT_REMAINDER
@@ -214,6 +218,7 @@ class RecoveredControlReason(Enum):
 
     CONTINUOUS = "continuous"
     EXCESS_DURATION = "excess_duration"
+    DURATION_UNCERTAIN = "duration_uncertain"
 
 
 class WinddownPhase(Enum):
@@ -285,6 +290,7 @@ class RecoveredControlFacts:
     stop_confirmed_at_us: int | None
     target_duration_ms: int
     repair_margin_s: Decimal
+    startup_margin_ms: int = 0
 
 
 def decide_recovered_control(
@@ -305,10 +311,16 @@ def decide_recovered_control(
     threshold_ns = int(
         (Decimal(facts.target_duration_ms) / Decimal(1_000)
          + facts.repair_margin_s) * Decimal(1_000_000_000))
-    if elapsed_ns > threshold_ns:
+    lower_ns = CaptureTiming(facts.target_duration_ms, facts.startup_margin_ms).recording_lower_bound_ns(elapsed_ns)
+    if lower_ns > threshold_ns:
         return RecoveredControlDecision(
             RecoveredControlReason.EXCESS_DURATION,
             control_elapsed_ns=elapsed_ns)
+    # 确认到停止的控制耗时同时是内容时长的独立上界。只有上界未超
+    # 门槛才能排除异常多录；上下界跨门槛时必须实际检查媒体。
+    if elapsed_ns > threshold_ns:
+        return RecoveredControlDecision(RecoveredControlReason.DURATION_UNCERTAIN,
+                                        control_elapsed_ns=elapsed_ns)
     return RecoveredControlDecision(RecoveredControlReason.CONTINUOUS)
 
 
@@ -392,6 +404,7 @@ class CaptureContext:
     finishes: FinishPort
     canceled: bool = False
     canceled_now: Callable[[], bool] | None = None
+    startup_margin_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -455,7 +468,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
     dispatch = await context.driver.start(ticket)
     if dispatch.confirmed:
         stop_target = (
-            recording_stop_target(dispatch.anchor_ns or 0, context.duration)
+            recording_stop_target(dispatch.anchor_ns or 0, context.duration, context.startup_margin_ms)
             if dispatch.anchor_ns is not None
             else None
         )

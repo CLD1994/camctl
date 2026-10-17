@@ -329,3 +329,30 @@ class TestTimingWaivedStop:
         decision = decide_recording_next(
             _state(anchor_from_current_session=False), RecordingFacts())
         assert decision.phase is RecordingPhase.RECONCILE_REQUIRED
+
+
+async def test_sent_reconciliation_waits_frozen_startup_margin():
+    assert decide_recording_reconciliation(ReconciliationFacts(
+        started_at_us=1000000, target_duration_ms=10000,
+        trusted_now_us=11000000, startup_margin_ms=1000)) is ReconciliationPhase.TIMING_WAIT_REMAINDER
+    assert decide_recording_reconciliation(ReconciliationFacts(
+        started_at_us=1000000, target_duration_ms=10000,
+        trusted_now_us=12000000, startup_margin_ms=1000)) is ReconciliationPhase.TIMING_SATISFIED
+
+
+async def test_recovered_lower_bound_cannot_prove_actual_below_excess_threshold():
+    decision = decide_recovered_control(RecoveredControlFacts(
+        session_anchor=False, started_at_us=1000000,
+        stop_confirmed_at_us=21500000, target_duration_ms=10000,
+        repair_margin_s=Decimal("10"), startup_margin_ms=1000))
+    assert decision.reason.value == "duration_uncertain"
+    assert decision.control_elapsed_ns == 20500000000
+
+
+async def test_recovered_excess_requires_lower_bound_beyond_threshold():
+    decision = decide_recovered_control(RecoveredControlFacts(
+        session_anchor=False, started_at_us=1000000,
+        stop_confirmed_at_us=22000001, target_duration_ms=10000,
+        repair_margin_s=Decimal("10"), startup_margin_ms=1000))
+    assert decision.reason is RecoveredControlReason.EXCESS_DURATION
+    assert decision.control_elapsed_ns == 21000001000

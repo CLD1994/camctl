@@ -6,6 +6,7 @@ import re
 from camctl.contracts.values import parse_object_id
 from camctl.devices.adb_transport import InterpretedFacts
 from camctl.devices.evidence import DeviceObservation, EvidenceContract
+from camctl.devices.tasks import StartReturn
 from camctl.operations.models import EffectState, ErrorValue
 from .contracts import CameraCall
 from .responses import _call_details, _call_failure
@@ -14,7 +15,7 @@ from .responses import _call_details, _call_failure
 _FIELDS = frozenset({"activity_id", "response_payload", "confirmation_basis"})
 OSMO360II_OBSERVATIONS = tuple(EvidenceContract(name, 1, operation, _FIELDS, identity_field="activity_id")
     for name, operation in (("setting_applied", "control"), ("setting_command_accepted", "control"),
-        ("start_confirmed", "control"), ("timelapse_sent", "control"), ("stop_confirmed", "stop")))
+        ("start_confirmed", "control"), ("recording_sent", "control"), ("timelapse_sent", "control"), ("stop_confirmed", "stop")))
 
 
 def _response(output, details):
@@ -52,6 +53,7 @@ class Osmo360IIDjiInterpreter:
     operation: str
     activity_id: str
     command: tuple[str, ...]
+    start_return_meaning: int | None = None
 
     def __post_init__(self):
         operations = ({"stop_recording", "stop_timelapse"} if self.kind is CameraCall.STOP
@@ -84,6 +86,8 @@ class Osmo360IIDjiInterpreter:
         name = ("setting_applied" if self.kind is CameraCall.SETTING else "stop_confirmed"
                 if self.kind is CameraCall.STOP else "timelapse_sent"
                 if self.operation == "start_timelapse" else "start_confirmed")
+        if name == "start_confirmed" and self.start_return_meaning == StartReturn.SENT:
+            name = "recording_sent"
         observation = DeviceObservation(name, 1, {"activity_id": self.activity_id,
             "response_payload": details["response_payload"], "confirmation_basis":
                 "osmo360ii_record_ack/v1" if self.operation.endswith("recording")

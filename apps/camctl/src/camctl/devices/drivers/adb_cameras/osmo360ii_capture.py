@@ -63,7 +63,8 @@ def osmo360ii_contract():
             command = tuple(shlex.split(shlex.split(argv[5])[2]))
             interpreter = (Osmo360IISimulationInterpreter(request.ticket.target_id)
                 if command[0] == "simulate_device" and kind is CameraCall.SETTING
-                else Osmo360IIDjiInterpreter(kind, request.operation, request.ticket.target_id, command))
+                else Osmo360IIDjiInterpreter(kind, request.operation, request.ticket.target_id, command,
+                    start_return_meaning=request.start_return_meaning))
             operation = request.ticket.operation
             return DeviceCommand(operation, argv, request.binding, request.timeout_s, Decimal("1"), evidence,
                 returned[operation], foreground[operation], interpreter, kind.value)

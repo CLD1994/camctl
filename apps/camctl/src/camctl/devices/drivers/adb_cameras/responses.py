@@ -8,6 +8,7 @@ from camctl.contracts.json_values import JsonValue
 from camctl.contracts.values import parse_object_id
 from camctl.devices.adb_transport import InterpretedFacts
 from camctl.devices.evidence import DeviceObservation, EvidenceContract
+from camctl.devices.tasks import StartReturn
 from camctl.operations.models import EffectState, ErrorValue
 from camctl.operations.process import RawToolOutcome
 from .contracts import CameraCall
@@ -23,7 +24,8 @@ _ACK_PHASES = {
     CameraCall.STOP: ("stop_recording", EvidenceContract(
         "stop_confirmed", 1, "stop", _ACK_FIELDS, identity_field="activity_id")),
 }
-ACTION6_RECORD_OBSERVATIONS = tuple(contract for _, contract in _ACK_PHASES.values())
+ACTION6_RECORD_OBSERVATIONS = (*tuple(contract for _, contract in _ACK_PHASES.values()),
+    EvidenceContract("recording_sent", 1, "control", _ACK_FIELDS, identity_field="activity_id"))
 
 
 class _FailureReason(StrEnum):
@@ -108,6 +110,7 @@ class Action6DjiInterpreter:
     kind: CameraCall
     operation: str
     activity_id: str
+    start_return_meaning: int | None = None
 
     def __post_init__(self):
         if not isinstance(self.kind, CameraCall) or self.kind not in _ACK_PHASES:
@@ -116,6 +119,8 @@ class Action6DjiInterpreter:
         if self.operation != operation:
             raise ValueError("Action6 响应阶段与普通录像操作不符")
         parse_object_id(self.activity_id)
+        if self.start_return_meaning is not None and self.start_return_meaning not in (StartReturn.SENT, StartReturn.STARTED):
+            raise ValueError("普通录像必须沿原 SENT 或 STARTED 返回含义执行")
 
     def interpret(self, raw: RawToolOutcome) -> InterpretedFacts:
         details = _call_details(raw)
@@ -127,7 +132,8 @@ class Action6DjiInterpreter:
             return InterpretedFacts((), ErrorValue(
                 "action6_response_unconfirmed", "device_response", details), EffectState.UNKNOWN)
         _, contract = _ACK_PHASES[self.kind]
-        observation = DeviceObservation(contract.type, contract.version, {
+        name = ("recording_sent" if self.kind is CameraCall.START and self.start_return_meaning == StartReturn.SENT else contract.type)
+        observation = DeviceObservation(name, contract.version, {
             "activity_id": self.activity_id, "response_payload": "00",
             "confirmation_basis": ACTION6_RECORD_ACK_BASIS,
         })

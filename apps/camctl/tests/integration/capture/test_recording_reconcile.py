@@ -297,6 +297,10 @@ class TestCrossSessionReconciliation:
             assert processing[2] == 5
             assert processing[3] == 2
             assert processing[4] is not None
+            basis = json.loads(_value(owned,
+                "SELECT repair_basis_json FROM recording_processing WHERE id=41")[0])
+            assert basis["control_elapsed_ns"] == 120000000000
+            assert "actual_duration_s" not in basis
             kinds = owned.connection.execute(
                 "SELECT kind FROM outputs WHERE source_action_id = 1"
                 " ORDER BY kind").fetchall()

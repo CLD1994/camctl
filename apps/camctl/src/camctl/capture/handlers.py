@@ -19,6 +19,7 @@ from contextlib import closing
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
+from fractions import Fraction
 from enum import Enum
 import json
 from typing import Any, Callable, Iterable, Mapping, Protocol
@@ -129,6 +130,7 @@ from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
+from camctl.devices.capture_timing import CaptureTiming
 from camctl.devices.tasks import CompletionMode
 from camctl.devices.capture_completion import is_stop_context
 from camctl.devices.directory import DirectoryReader
@@ -1068,7 +1070,8 @@ class CaptureRuntime(_FileObservationSaves):
                         _recording_port(self).anchor_confirmed(
                             action_id, pending.confirmation_anchor_ns,
                             recording_stop_target(pending.confirmation_anchor_ns,
-                                                  _target_duration_ms(action)))
+                                                  _target_duration_ms(action),
+                                                  action["execution_spec_json"].get("startup_margin_ms", 0)))
                 del self.pending_start_results[identity]
                 self.pending_result_scans.pop(identity, None)
                 return
@@ -1373,11 +1376,31 @@ def _save_activity(runtime: CaptureRuntime, action_id: int, **facts) -> None:
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
+def _preflight_capture_timing(runtime, action):
+    """在任何物理 START 前核对完整等待与持久时钟范围。"""
+    spec = action["execution_spec_json"]
+    duration = spec.get("target_duration_ms")
+    if duration is None:
+        return
+    extra = 0
+    if action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE) and spec["wait_after_send"]:
+        extra = runtime.wait_config(action).extra_wait_ms
+    timing = CaptureTiming(duration, spec.get("startup_margin_ms", 0),
+        spec.get("result_wait_margin_ms", 0), extra)
+    # 包括启动调用最多还可能占用的时间，响应返回后不再出现新溢出。
+    timeout = (runtime.start_config.timeout_s if action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+               else _start_call_timeout(action))
+    timeout_us = (Fraction(timeout) * 1000000).__ceil__()
+    timing.deadline_us(runtime.wall_us() + timeout_us)
+    timing.deadline_ns(runtime.monotonic_ns() + timeout_us * 1000)
+
+
 def _capture_dispatch_check(runtime, action_id):
     """每次新设备派发前重新读取当前取消和原动作窗口。"""
     from camctl.scheduling.resources import recheck_dispatch
 
     current = runtime.action(action_id)
+    _preflight_capture_timing(runtime, current)
     return recheck_dispatch(canceled=bool(current["cancel_requested"]),
         window=runtime.window_of(current), trusted_wall_now=runtime.wall_us()).reason
 
@@ -1497,9 +1520,9 @@ def _prepare_recording_start_result(runtime, pending, preparation):
         facts = {"dispatch_state": int(_DISPATCH_STATE.SUCCESS_RETURNED)}
         activity = row_facts(runtime.owned.connection, "device_activities",
                              _activity_id_of(runtime, action_id))
-        if activity["sent_at"] is None:
+        if activity["sent_at"] is None and (dispatch.confirmed or "startup_margin_ms" not in current["execution_spec_json"]):
             facts["sent_at"] = dispatch.confirmed_at
-        if dispatch.confirmed:
+        if dispatch.confirmed and current["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED)) == int(StartReturn.STARTED):
             if activity["started_at"] is None:
                 facts["started_at"] = dispatch.confirmed_at
             if activity["activity_state"] != 2:
@@ -1649,6 +1672,7 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
 @owned_tool_call
 async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
     """将真实控制端口适配到一次启动骨架，事实时间先于保存。"""
+    _preflight_capture_timing(runtime, action)
     if runtime.last_attempt(f"start/{action['id']}") is None:
         from camctl.capture.residual import pass_residual_gate
 
@@ -1677,9 +1701,13 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
             result = await runtime.driver.control(ControlRequest(
                 "start_recording", _binding(action), action["effective_params_json"],
                 ticket=ticket, timeout_s=runtime.start_config.timeout_s,
+                start_return_meaning=action["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED)),
                 dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"])))
             received_at, anchor_ns = runtime.wall_us(), runtime.monotonic_ns()
-            outcome, confirmed = _operation_outcome(result, "start_confirmed")
+            meaning = action["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED))
+            outcome, confirmed = _operation_outcome(result,
+                "recording_sent" if meaning == int(StartReturn.SENT) else "start_confirmed")
+            confirmed = confirmed and outcome.effect is EffectState.CONFIRMED
             self.dispatch = StartDispatch(
                 confirmed=confirmed,
                 anchor_ns=anchor_ns if confirmed else None,
@@ -1720,6 +1748,7 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
         device_id=action["device_id"], action_id=action["id"],
         window=runtime.window_of(action), config=runtime.start_config,
         duration=_target_duration_ms(action), trusted_wall_now=runtime.wall_us(),
+        startup_margin_ms=action["execution_spec_json"].get("startup_margin_ms", 0),
         wall=Wall(), grants=Grants(), driver=driver, finishes=Finishes(),
         canceled_now=lambda: bool(runtime.action(action["id"])["cancel_requested"])))
     if step.phase in (RecordingPhase.START_CONFIRMED, RecordingPhase.START_CONFIRMED_WITH_ERROR):
@@ -3135,9 +3164,6 @@ def _save_excess_decisions(
                 # threshold_s 字段语义）。
                 threshold_s=(Decimal(target_duration_ms) / Decimal(1_000)
                              + runtime.repair_margin_s),
-                actual_duration_s=(
-                    None if elapsed is None
-                    else Decimal(elapsed) / Decimal(1_000_000_000)),
                 control_elapsed_ns=elapsed),
             occurred_at=runtime.wall_us()),
         new_operation_key(), runtime.owned)
@@ -3159,8 +3185,11 @@ def _media_responsibility_open(row) -> bool:
 
 def _activity_started_at(runtime: CaptureRuntime, action_id: int) -> int | None:
     """读取启动确认保存的墙钟；跨会话对账的历史计时依据。"""
+    action = runtime.action(action_id)
+    column = ("sent_at" if action["execution_spec_json"].get("start_return_meaning") == int(StartReturn.SENT)
+              else "started_at")
     with closing(runtime.owned.connection.execute(
-        "SELECT started_at FROM device_activities WHERE action_id = ?",
+        f"SELECT {column} FROM device_activities WHERE action_id = ?",
         (action_id,),
     )) as cursor:
         row = cursor.fetchone()
@@ -3326,7 +3355,8 @@ def _recovered_control_facts(
         started_at_us=_activity_started_at(runtime, action_id),
         stop_confirmed_at_us=_stop_confirmed_at(runtime, action_id),
         target_duration_ms=_target_duration_ms(action),
-        repair_margin_s=runtime.repair_margin_s)
+        repair_margin_s=runtime.repair_margin_s,
+        startup_margin_ms=action["execution_spec_json"].get("startup_margin_ms", 0))
 
 
 async def _reconcile_recording(
@@ -3339,7 +3369,8 @@ async def _reconcile_recording(
     phase = decide_recording_reconciliation(ReconciliationFacts(
         started_at_us=_activity_started_at(context, action["id"]),
         target_duration_ms=_target_duration_ms(action),
-        trusted_now_us=context.wall_us()))
+        trusted_now_us=context.wall_us(),
+        startup_margin_ms=action["execution_spec_json"].get("startup_margin_ms", 0)))
     if phase is not ReconciliationPhase.TIMING_SATISFIED:
         return
     if not await _observe_activity_for_reconcile(context, action):
@@ -3519,6 +3550,13 @@ async def _advance_recording_outcome(
             return
         if control.reason is RecoveredControlReason.EXCESS_DURATION:
             _save_excess_decisions(context, int(row[0]), target_ms, control)
+        elif control.reason is RecoveredControlReason.DURATION_UNCERTAIN:
+            receipt = context.capture.save_check_decision(CheckDecisionSave(
+                processing_id=int(row[0]), decision=CheckDecisionChoice.REQUIRED,
+                basis=CheckBasis(reason=CheckReason.INSUFFICIENT_TIMING,
+                    target_duration_ms=target_ms), occurred_at=context.wall_us()),
+                new_operation_key(), context.owned)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         else:
             _save_not_needed_decision(context, int(row[0]), target_ms)
         row = _load_processing_row(context, action_id)

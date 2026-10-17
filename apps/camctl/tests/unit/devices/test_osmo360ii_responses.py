@@ -91,3 +91,11 @@ def test_interpreter_requires_typed_phase_and_matching_operation(kind, operation
 def test_response_basis_preserves_original_action_scope(operation, basis):
     result = _parser(operation=operation).interpret(_raw())
     assert result.observations[0].data["confirmation_basis"] == basis
+
+
+def test_frozen_record_sent_contract_requires_complete_ack():
+    from camctl.devices.drivers.adb_cameras.osmo360ii_responses import Osmo360IIDjiInterpreter
+    parser = Osmo360IIDjiInterpreter(CameraCall.START, "start_recording", "7",
+        ("dji_mb_ctrl", "-c", "02", "01"), start_return_meaning=1)
+    assert [item.type for item in parser.interpret(_raw()).observations] == ["recording_sent"]
+    assert parser.interpret(replace(_raw(), output=b"Send message, data: 00\n")).observations == ()

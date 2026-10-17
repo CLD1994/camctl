@@ -166,3 +166,10 @@ def test_simulation_property_and_service_logs_do_not_confirm_bitrate(output, exi
     assert result.error.details["reason"] == "confirmation_unavailable"
     assert result.error.details["stdout_hex"] == output.hex()
     assert result.error.details["local_exit_code"] == exit_code
+
+
+def test_frozen_sent_contract_reports_acceptance_without_started_observation():
+    from camctl.devices.drivers.adb_cameras.responses import Action6DjiInterpreter
+    parser = Action6DjiInterpreter(CameraCall.START, "start_recording", "7", start_return_meaning=1)
+    assert [item.type for item in parser.interpret(_raw()).observations] == ["recording_sent"]
+    assert parser.interpret(_raw(b"Send message, data: 00\n")).observations == ()

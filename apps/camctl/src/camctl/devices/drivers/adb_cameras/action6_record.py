@@ -49,7 +49,8 @@ def action6_record_contract():
             script = shlex.split(argv[5])[2]
             executable = shlex.split(script)[0]
             interpreter = (Action6UnconfirmedSettingInterpreter() if executable == "simulate_device" else
-                           Action6DjiInterpreter(kind, request.operation, request.ticket.target_id))
+                           Action6DjiInterpreter(kind, request.operation, request.ticket.target_id,
+                               start_return_meaning=request.start_return_meaning))
             operation = request.ticket.operation
             return DeviceCommand(operation, argv, request.binding, request.timeout_s, Decimal("1"), evidence,
                                  returned[operation], foreground[operation], interpreter, kind.value)
