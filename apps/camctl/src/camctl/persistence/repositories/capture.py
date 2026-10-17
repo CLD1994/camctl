@@ -1009,6 +1009,8 @@ def register_capture_guards() -> None:
     register_guard("plan_aggregate", _plan_aggregate_guard)
     register_guard("device_file", _device_file_guard)
     register_guard("emergency", _emergency_guard)
+    from .finite_cancel import register_finite_cancel_guard
+    register_finite_cancel_guard()
     register_guard("activity", _activity_guard)
     register_guard("release", _release_guard)
     register_guard("result_check", _result_check_guard)

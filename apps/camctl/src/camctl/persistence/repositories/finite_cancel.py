@@ -1,0 +1,226 @@
+"""有限设备任务取消后的独立结束事实；不保存目标完成或成功停止。"""
+from dataclasses import dataclass
+from collections.abc import Mapping
+
+from camctl.capture.finite_cancel import finite_cancel_policy
+from camctl.capture.result_pages import ResultPageRef
+from camctl.capture.results import CaptureFile, CaptureFileSet, FileKind, ProductRequirements, ProductRule, assess_capture_files
+from camctl.contracts.enums import enum_for
+from camctl.contracts.json_values import json_equal
+from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
+from camctl.devices.tasks import EndControl, StartReturn, CompletionMode
+from camctl.history.events import load_event_registry
+from camctl.history.validators import EventValidationError, register_guard
+from camctl.operations.models import AttemptStatus, EffectState
+from camctl.operations.result_format import read_result_document
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.transaction import CommandPlan, TransactionError, commit_operation, event_envelope, row_facts, saved_transaction_events, update_change
+
+_BRANCH = load_event_registry()['events']['DEVICE_OBSERVED']
+_TYPE = _BRANCH['id']
+_REASON = _BRANCH['branches']['FINITE_CANCEL_END']['reason']
+_RUN = enum_for('operation_runs.status')
+_KIND = enum_for('operation_runs.kind')
+_ATTEMPT = enum_for('operation_attempts.status')
+
+
+@dataclass(frozen=True)
+class FiniteCancelEndSave:
+    """原可靠结果末页及原事实时刻；UNKNOWN 重送不更换输入。"""
+    action_id: int
+    page: ResultPageRef
+    occurred_at: int
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+        if not isinstance(self.page, ResultPageRef):
+            raise TypeError('有限取消收场必须引用原完整结果页')
+
+
+def _load(scope, request):
+    from .capture import load_activity_of_action, _history_source_row
+    state = {'actions': {}, 'device_activities': {}, 'operation_runs': {},
+             'operation_attempts': {}, 'history_events': {}}
+    action = row_facts(scope.connection, 'actions', request.action_id)
+    if action is None:
+        raise ConsistencyError('有限取消收场缺少原动作')
+    activity = load_activity_of_action(scope.connection, request.action_id)
+    state['actions'][action['id']] = action
+    state['device_activities'][activity['id']] = activity
+    for key in (f"start/{action['id']}", f"stop/{action['id']}", f"results/{activity['id']}"):
+        found = scope.connection.execute('SELECT id FROM operation_runs WHERE responsibility_key=?', (key,)).fetchone()
+        if found is None:
+            raise ConsistencyError('有限取消收场缺少原控制或结果责任')
+        run = row_facts(scope.connection, 'operation_runs', found[0])
+        state['operation_runs'][run['id']] = run
+        found = scope.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1', (run['id'],)).fetchone()
+        if found is None:
+            raise ConsistencyError('有限取消收场缺少原实际尝试')
+        attempt = row_facts(scope.connection, 'operation_attempts', found[0])
+        state['operation_attempts'][attempt['id']] = attempt
+        if attempt['result_event_id'] is not None:
+            state['history_events'][attempt['result_event_id']] = _history_source_row(scope.connection, attempt['result_event_id'])
+    for event_id in (activity['wait_completed_event_id'], request.page.event_id):
+        ObjectId(event_id)
+        state['history_events'][event_id] = _history_source_row(scope.connection, event_id)
+    return state, action, activity
+
+
+def _facts(state, action_id):
+    action = state['actions'][action_id]
+    activity, = (a for a in state['device_activities'].values() if a['action_id'] == action_id)
+    runs = state['operation_runs'].values()
+    start, = (r for r in runs if r['responsibility_key'] == f'start/{action_id}')
+    stop, = (r for r in runs if r['responsibility_key'] == f'stop/{action_id}')
+    results, = (r for r in runs if r['responsibility_key'] == f"results/{activity['id']}")
+    attempts = state['operation_attempts'].values()
+    start_attempt, = (a for a in attempts if a['run_id'] == start['id'])
+    stop_attempt, = (a for a in attempts if a['run_id'] == stop['id'])
+    result_attempt, = (a for a in attempts if a['run_id'] == results['id'])
+    return action, activity, start, stop, results, start_attempt, stop_attempt, result_attempt
+
+
+def _evidence(state, request):
+    from .capture import _history_source_event
+    action, activity, start, stop, results, start_attempt, stop_attempt, result_attempt = _facts(state, request.action_id)
+    spec = action['execution_spec_json']
+    return {
+        'policy': spec.get('cancel_completion_policy'), 'activity_id': activity['id'],
+        'start_result_event_id': start_attempt['result_event_id'],
+        'stop_run_id': stop['id'], 'stop_result_event_id': stop_attempt['result_event_id'],
+        'sent_at_us': activity['sent_at'], 'target_duration_ms': spec.get('target_duration_ms'),
+        'result_wait_margin_ms': activity['result_wait_margin_ms'],
+        'extra_wait_ms': activity['extra_wait_ms_used'],
+        'expected_check_at_us': activity['expected_check_at'],
+        'wait_completed_event_id': activity['wait_completed_event_id'],
+        'result_attempt_id': result_attempt['id'], 'result_page_event_id': request.page.event_id,
+    }
+
+
+def _verify_sources(state, request, evidence, *, event_id):
+    from .capture import _history_source_event
+    from .result_pages import _decode
+    action, activity, start, stop, results, sent, stopped, result = _facts(state, request.action_id)
+    spec = action['execution_spec_json']
+    if (not finite_cancel_policy(action) or not action['cancel_requested']
+            or spec.get('end_control') != int(EndControl.DEVICE)
+            or spec.get('start_return_meaning') != int(StartReturn.SENT)
+            or spec.get('completion_mode') != int(CompletionMode.TIME_AND_OUTPUTS)
+            or spec.get('wait_after_send') is not True or spec.get('duration_based') is not True):
+        raise ConsistencyError('有限取消结束要求原冻结策略、有限设备任务和已生效取消')
+    if not json_equal(evidence, _evidence(state, request)):
+        raise ConsistencyError('有限取消结束改变原调用、等待或结果页身份')
+    for run, kind in ((start, _KIND.START), (stop, _KIND.STOP), (results, _KIND.CHECK_CAPTURE_RESULTS)):
+        if (run['kind'] != int(kind) or run['action_id'] != action['id']
+                or run['activity_id'] != activity['id']):
+            raise ConsistencyError('有限取消结束的原责任不属于同一活动')
+    if (stop['status'] != int(_RUN.FAILED) or stop['attempts_used'] != 1
+            or stopped['status'] == int(_ATTEMPT.RUNNING)
+            or stopped['effect_state'] == int(enum_for('operation_attempts.effect_state').CONFIRMED)):
+        raise ConsistencyError('有限取消结束缺少第一次停止失败的终局责任')
+    original = read_result_document(sent['status'], sent['effect_state'], sent['result_json'], sent['error_json'])
+    if (original.status is not AttemptStatus.SUCCEEDED or original.effect is not EffectState.CONFIRMED
+            or not any(o.type == 'timelapse_sent' and o.data.get('activity_id') == str(activity['id']) for o in original.observations)):
+        raise ConsistencyError('有限取消结束缺少原活动的可靠 SENT')
+    sent_event = _history_source_event(state, sent['result_event_id'])
+    wait_event = _history_source_event(state, activity['wait_completed_event_id'])
+    page_event = _history_source_event(state, request.page.event_id)
+    page, _ = _decode(page_event)
+    expected = activity['sent_at'] + (spec['target_duration_ms'] + spec['result_wait_margin_ms'] + activity['extra_wait_ms_used']) * 1000
+    if (sent_event.occurred_at != activity['sent_at'] or activity['expected_check_at'] != expected
+            or activity['result_wait_margin_ms'] != spec['result_wait_margin_ms']
+            or wait_event.event_type != 15 or wait_event.reason != 3
+            or not any(r.table == 'device_activities' and r.row_id == activity['id']
+                and r.after.values.get('wait_completed_event_id') == wait_event.event_id for r in wait_event.rows)
+            or wait_event.occurred_at < expected or page_event.occurred_at < wait_event.occurred_at
+            or request.occurred_at < page_event.occurred_at
+            or not sent_event.event_id < wait_event.event_id < page_event.event_id < event_id):
+        raise ConsistencyError('有限取消结束未满足原发送锚点、原规则及可靠等待页顺序')
+    if (results['status'] != int(_RUN.SUCCEEDED) or result['status'] != int(_ATTEMPT.SUCCEEDED)
+            or result['error_json'] is not None or result['result_last_page_event_id'] != page.ref.event_id
+            or page.ref != request.page or page.ref.ticket.run_id != results['id']
+            or page.ref.ticket.target_id != str(activity['id']) or not page.page.scan_complete
+            or not page.page.set_finalized or page.page.outcome.error is not None
+            or activity['output_set_finalized_event_id'] is None):
+        raise ConsistencyError('有限取消结束要求可靠完整结果集合及原末页')
+
+
+def _verify_files(scope, request):
+    """按页复核全部候选，拒绝空集合、缺件、零长及尚未完成文件。"""
+    from .result_pages import read_pages
+    action = row_facts(scope.connection, 'actions', request.action_id)
+    rules = tuple(ProductRule.from_json(value) for value in action['execution_spec_json'].get('product_rules', ()))
+    def files():
+        cursor = None
+        while True:
+            batch = read_pages(request.page.ticket, cursor, 1, scope)
+            for saved in batch.items:
+                ids = dict(saved.file_ids)
+                for entry in saved.page.entries:
+                    if entry.identity not in ids:
+                        continue
+                    facts = row_facts(scope.connection, 'device_files', ids[entry.identity])
+                    yield CaptureFile(entry.identity, entry.kind,
+                        facts['completion_state'] == 3, facts['source_action_id'] == request.action_id,
+                        format_id=entry.format_id, pairing_confirmed=entry.paired_identity is not None,
+                        size_bytes=facts['size_bytes'])
+            if batch.next_cursor is None:
+                return
+            cursor = batch.next_cursor
+    assessment = assess_capture_files(CaptureFileSet(files(), True), ProductRequirements(frozenset({FileKind.VIDEO}), rules))
+    if not assessment.is_complete:
+        raise ConsistencyError('有限取消结束尚无满足原必要规则的可靠文件集合')
+
+
+class _FiniteCancelEndCommand:
+    def __init__(self, request, key):
+        self.request, self.key = request, key
+
+    def plan(self, scope):
+        request = self.request
+        state, action, activity = _load(scope, request)
+        evidence = _evidence(state, request)
+        saved = saved_transaction_events(scope.connection, self.key)
+        if saved is not None:
+            if (len(saved) != 1 or saved[0]['type'] != _TYPE or saved[0]['reason'] != _REASON
+                    or saved[0]['occurred_at'] != request.occurred_at
+                    or not json_equal(saved[0]['body']['evidence'], {'cancel_completion': evidence})
+                    or saved[0]['body']['rows'][0]['id'] != activity['id']):
+                raise TransactionError('有限取消结束的重送必须保留原完整申请')
+            return CommandPlan((), {}, state, read_only=True)
+        if activity['activity_state'] == 3:
+            raise ConsistencyError('已结束活动不能补写新的有限取消结束依据')
+        _verify_files(scope, request)
+        allocation = scope.allocate(1)
+        _verify_sources(state, request, evidence, event_id=allocation.first_event_id)
+        event = event_envelope(allocation.first_event_id, allocation.txn_id, _TYPE, _REASON,
+            (update_change('device_activities', activity['id'], {'activity_state': activity['activity_state']}, {'activity_state': 3}),),
+            request.occurred_at, evidence={'cancel_completion': evidence})
+        return CommandPlan((event,), {('device_activities', activity['id']): ('action', action['id'])}, state)
+
+
+def save_finite_cancel_end(request, key, owned):
+    receipt = commit_operation(_FiniteCancelEndCommand(request, key), key, owned)
+    return DbOutcome(kind=DbOutcomeKind(receipt.kind), error=receipt.error)
+
+
+def _guard(event, context):
+    if (len(event.rows) != 1 or set(event.evidence) != {'cancel_completion'}
+            or not isinstance(event.evidence['cancel_completion'], Mapping)):
+        raise EventValidationError('有限取消结束只保存原活动与完整收场依据')
+    row = event.rows[0]
+    try:
+        from .capture import _history_source_event
+        from .result_pages import _decode
+        evidence = event.evidence['cancel_completion']
+        saved, _ = _decode(_history_source_event(context.state_rows, evidence['result_page_event_id']))
+        activity = context.state_rows['device_activities'][row.row_id]
+        request = FiniteCancelEndSave(activity['action_id'], saved.ref, event.occurred_at)
+        _verify_sources(context.state_rows, request, evidence, event_id=event.event_id)
+    except (KeyError, ValueError, TypeError, ConsistencyError) as error:
+        raise EventValidationError(f'有限取消结束依据无效: {error}') from error
+
+
+def register_finite_cancel_guard():
+    register_guard('finite_cancel_end', _guard)

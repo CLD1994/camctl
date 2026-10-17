@@ -1121,6 +1121,11 @@
       "contract": "history-formats.md#结果页的分批记录",
       "rule": "页属于原 CHECK_CAPTURE_RESULTS 活动、流程和 RUNNING 尝试；从页号 1 连续推进，原游标和后游标精确衔接，末页或实际错误后不再追加。原完整 Outcome、文件输入和页范围同事务保存，实际发现的新文件按 DEVICE_FILE_OBSERVED.CREATE 登记。基准比较使用原 FIXED 范围，以单序稳定路径流形成差集；原键逐字段核实时刻、页和完整错误，不依赖当前投影反推原输入。",
       "scope": "transaction"
+    },
+    "finite_cancel_end": {
+      "contract": "operation-fields.md#等待未知结果和占用恢复",
+      "rule": "原有限任务取消后第一次停止失败可靠终结，原 SENT、原冻结策略、自然等待及完整结果页共同支持活动结束；不生成目标完成或成功停止。",
+      "scope": "transaction"
     }
   },
   "state_models": {
@@ -1886,7 +1891,8 @@
           "to": 3,
           "by": [
             "DEVICE_OBSERVED.OBSERVE",
-            "EMERGENCY_RECORDED.FINAL"
+            "EMERGENCY_RECORDED.FINAL",
+            "DEVICE_OBSERVED.FINITE_CANCEL_END"
           ],
           "id": "transition_2"
         },
@@ -1895,7 +1901,8 @@
           "to": 3,
           "by": [
             "DEVICE_OBSERVED.OBSERVE",
-            "EMERGENCY_RECORDED.FINAL"
+            "EMERGENCY_RECORDED.FINAL",
+            "DEVICE_OBSERVED.FINITE_CANCEL_END"
           ],
           "id": "transition_3"
         }
@@ -5041,6 +5048,49 @@
           "evidence": [
             "preparation_resolved",
             "preparation_error"
+          ]
+        },
+        "FINITE_CANCEL_END": {
+          "reason": 4,
+          "title": "有限设备任务取消后的自然收场结束",
+          "rows": [
+            {
+              "table": "device_activities",
+              "op": "update",
+              "columns": [
+                "activity_state"
+              ],
+              "before": {
+                "activity_state": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "activity_state": [
+                  3
+                ]
+              },
+              "required": [
+                "activity_state"
+              ],
+              "transitions": {
+                "activity_state": [
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "finite_cancel_end"
+          ],
+          "evidence": [
+            "cancel_completion"
           ]
         }
       }

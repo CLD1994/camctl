@@ -24,6 +24,8 @@ import json
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from camctl.operations.owned_calls import owned_tool_call
+from camctl.capture.finite_cancel import finite_cancel_policy
+from camctl.persistence.repositories.finite_cancel import FiniteCancelEndSave, save_finite_cancel_end
 
 from camctl.capture.models import (
     ActivityConcludeSave,
@@ -350,7 +352,7 @@ class PendingResultCheckClose:
     """结果核实收尾的完整申请；保存恢复沿用原 key 和时刻。"""
 
     key: OperationKey
-    request: ResultSetSave | ResultRunClose | OutputSetFinalizationSave
+    request: ResultSetSave | ResultRunClose | OutputSetFinalizationSave | FiniteCancelEndSave
 
 
 def resume_result_check_closes(
@@ -373,6 +375,9 @@ def resume_result_check_closes(
             complete = receipt.kind is DbOutcomeKind.COMPLETED
         elif isinstance(pending.request, OutputSetFinalizationSave):
             receipt = repository.finalize_output_set(pending.request, pending.key, owned)
+            complete = receipt.kind is DbOutcomeKind.COMPLETED
+        elif isinstance(pending.request, FiniteCancelEndSave):
+            receipt = save_finite_cancel_end(pending.request, pending.key, owned)
             complete = receipt.kind is DbOutcomeKind.COMPLETED
         else:
             raise ConsistencyError("原核实收尾申请类型无效")
@@ -1141,6 +1146,18 @@ class CaptureRuntime(_FileObservationSaves):
             self.pending_start_results[identity] = pending
             self._save_call_result(identity, pending)
         else:
+            finite_stop = (ticket.operation == "stop"
+                and finite_cancel_policy(self.action(self.action_id_of_ticket(ticket)))
+                and self.action(self.action_id_of_ticket(ticket))["cancel_requested"])
+            if finite_stop:
+                pending = PendingCallResult(new_operation_key(), AttemptFinish(ticket,
+                    validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
+                    run_finish=RunFinish(RunOutcome.FAILED, _recovered_call_outcome().error)),
+                    None, returned_ns=self.monotonic_ns())
+                self.pending_start_results[identity] = pending
+                self._save_call_result(identity, pending)
+                self.last_recovery_diagnostic = None
+                return True
             receipt = self.operations.finish_attempt(
                 AttemptFinish(ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
                               retry_wait=retry_wait),
@@ -2047,7 +2064,10 @@ async def _stop_call(runtime: CaptureRuntime, action,
                            occurred_at=returned_at, returned_ns=returned_ns,
                            host_timer_stop=host_stop, capture_stop=True)
         else:
-            runtime.finish(ticket, call, retry_wait=True,
+            finite_cancel = bool(action["cancel_requested"]) and finite_cancel_policy(action)
+            runtime.finish(ticket, call, retry_wait=not finite_cancel,
+                           end_run=RunOutcome.FAILED if finite_cancel else None,
+                           run_error=call.error if finite_cancel else None,
                            occurred_at=returned_at, returned_ns=returned_ns)
     except OutcomeValidationError:
         # 观察与收场依据不符合登记契约：该结果整体不可采纳，不落
@@ -3722,6 +3742,57 @@ async def _close_host_timer_failed(context, action_id, reason):
         _finish_listing_result(context, listing, retry_wait=True)
 
 
+def _advance_timelapse_natural_wait(context: CaptureRuntime, action) -> int | None:
+    """正常与取消共用原 SENT 的有限等待，不调用设备。"""
+    action_id = action["id"]
+    with closing(context.owned.connection.execute(
+        "SELECT sent_at, expected_check_at, result_wait_margin_ms, extra_wait_ms_used,"
+        " wait_completed_event_id FROM device_activities WHERE action_id=?", (action_id,))) as cursor:
+        activity = cursor.fetchone()
+    if activity is None or activity[0] is None:
+        return None
+    if activity[4] is None:
+        config = context.wait_config(action)
+        check_at = activity[0] + (
+            config.target_duration_ms + config.driver_margin_ms
+            + config.extra_wait_ms) * 1000
+        if activity[1] is not None:
+            if (activity[2] != config.driver_margin_ms
+                    or activity[3] is None
+                    or activity[1] != activity[0] + (
+                        config.target_duration_ms + activity[2] + activity[3]) * 1000):
+                raise ConsistencyError("原延时等待与固定执行定义或发送锚点不符")
+        if action_id not in context.timelapse_deadlines:
+            plan = plan_capture_wait(
+                TimelapseState(
+                    clock_trusted=True, start_return=StartReturn.SENT,
+                    end_control=EndControl.DEVICE, sent_at_utc=activity[0],
+                    anchor_monotonic_ns=None, restart=True),
+                config, ClockReading(
+                    utc_us=context.wall_us(), monotonic_ns=context.monotonic_ns()))
+            context.timelapse_deadlines[action_id] = (
+                plan.monotonic_deadline_ns if plan.monotonic_deadline_ns is not None
+                else context.monotonic_ns())
+        plan = WaitPlan(
+            kind=WaitKind.WAIT_THEN_CHECK, check_at_utc=check_at,
+            monotonic_deadline_ns=context.timelapse_deadlines[action_id])
+        if activity[1] is None or activity[1] != check_at or activity[3] != config.extra_wait_ms:
+            save = (context.timelapse.schedule_wait if activity[1] is None
+                    else context.timelapse.reconfigure_wait)
+            receipt = save(
+                ScheduleWait(
+                    action_id=action_id, plan=plan,
+                    driver_margin_ms=config.driver_margin_ms,
+                    extra_wait_ms=config.extra_wait_ms, occurred_at=context.wall_us()),
+                new_operation_key(), context.owned)
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(
+                    f"延时等待安排事务未完成（{receipt.kind.value}）: {receipt.error}")
+        if context.monotonic_ns() < context.timelapse_deadlines[action_id]:
+            return
+    return _complete_timelapse_wait(context, action_id)
+
+
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_capture_completions(action_id)
     context.resume_baselines(action_id)
@@ -3789,46 +3860,10 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
     if activity is None or (wait_after_send and activity[0] is None):
         # 发送事实（sent_at）由活动观察边界保存；尚未保存时等待。
         return
-    if wait_after_send and activity[4] is None:
-        config = context.wait_config(action)
-        check_at = activity[0] + (
-            config.target_duration_ms + config.driver_margin_ms
-            + config.extra_wait_ms) * 1000
-        if activity[1] is not None:
-            if (activity[2] != config.driver_margin_ms
-                    or activity[3] is None
-                    or activity[1] != activity[0] + (
-                        config.target_duration_ms + activity[2] + activity[3]) * 1000):
-                raise ConsistencyError("原延时等待与固定执行定义或发送锚点不符")
-        if action_id not in context.timelapse_deadlines:
-            plan = plan_capture_wait(
-                TimelapseState(
-                    clock_trusted=True, start_return=StartReturn.SENT,
-                    end_control=EndControl.DEVICE, sent_at_utc=activity[0],
-                    anchor_monotonic_ns=None, restart=True),
-                config, ClockReading(
-                    utc_us=context.wall_us(), monotonic_ns=context.monotonic_ns()))
-            context.timelapse_deadlines[action_id] = (
-                plan.monotonic_deadline_ns if plan.monotonic_deadline_ns is not None
-                else context.monotonic_ns())
-        plan = WaitPlan(
-            kind=WaitKind.WAIT_THEN_CHECK, check_at_utc=check_at,
-            monotonic_deadline_ns=context.timelapse_deadlines[action_id])
-        if activity[1] is None or activity[1] != check_at or activity[3] != config.extra_wait_ms:
-            save = (context.timelapse.schedule_wait if activity[1] is None
-                    else context.timelapse.reconfigure_wait)
-            receipt = save(
-                ScheduleWait(
-                    action_id=action_id, plan=plan,
-                    driver_margin_ms=config.driver_margin_ms,
-                    extra_wait_ms=config.extra_wait_ms, occurred_at=context.wall_us()),
-                new_operation_key(), context.owned)
-            if receipt.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(
-                    f"延时等待安排事务未完成（{receipt.kind.value}）: {receipt.error}")
-        if context.monotonic_ns() < context.timelapse_deadlines[action_id]:
-            return
-    wait_event_id = _complete_timelapse_wait(context, action_id) if wait_after_send else None
+    wait_event_id = (_advance_timelapse_natural_wait(context, action)
+                     if wait_after_send else None)
+    if wait_after_send and wait_event_id is None:
+        return
     context.timelapse_deadlines.pop(action_id, None)
     concluded = activity[5] in (3, 4)
     if concluded:
@@ -3882,6 +3917,11 @@ async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> N
     if activity is None:
         raise ConsistencyError("取消拍摄缺少设备活动")
     stop = context.last_attempt(f"stop/{action_id}")
+    finite_cancel = finite_cancel_policy(action)
+    if finite_cancel and stop is not None and stop[0] == int(_ATTEMPT_STATUS.RUNNING):
+        if not context.recover_attempt(_original_ticket(context, f"stop/{action_id}", "stop")):
+            return
+        stop = context.last_attempt(f"stop/{action_id}")
     confirmed = (stop is not None and stop[0] != int(_ATTEMPT_STATUS.RUNNING)
                  and stop[1] == int(_EFFECT_STATE.CONFIRMED))
     ended = activity[0] == 3
@@ -3896,7 +3936,7 @@ async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> N
         if run is None or run[0] in (1, 2):
             if not activity[1]:
                 raise ConsistencyError("可能启动的取消拍摄缺少原停止能力")
-            if await _confirm_stop_by_query(context, action):
+            if not finite_cancel and await _confirm_stop_by_query(context, action):
                 # 未确认停止由停止核实收场：不重复发令，按停止事实
                 # 继续取消收场。
                 confirmed = True
@@ -3907,8 +3947,15 @@ async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> N
                     confirmed = True
                 elif step.phase == "stop_not_granted" and step.detail == "budget_exhausted":
                     _close_stop_exhausted(context, action)
-                elif step.phase != "call_failed":
+                elif step.phase != "call_failed" and not finite_cancel:
                     return
+    if finite_cancel and not confirmed and not ended:
+        activity_facts = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
+        if activity_facts["sent_at"] is not None:
+            if _advance_timelapse_natural_wait(context, action) is None:
+                return
+            context.timelapse_deadlines.pop(action_id, None)
+        # 缺少可靠 SENT 时不制造等待，有限核实仍按原未知活动收场。
     if confirmed and row_facts(context.owned.connection, "device_activities",
             _activity_id_of(context, action_id))["activity_state"] != 3:
         _conclude_activity(context, action_id)
@@ -3949,6 +3996,16 @@ async def _close_canceled_timelapse(
     drafts = _catalog_drafts(registered, entries,
         product_rules=_product_requirements(context.action(action_id), FileKind.VIDEO).rules)
     activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
+    if (finite_cancel_policy(context.action(action_id)) and activity["activity_state"] != 3
+            and activity["sent_at"] is not None and activity["wait_completed_event_id"] is not None
+            and isinstance(entries, SavedResultEntries) and _listing_finalized(listing)):
+        assessment = assess_capture_files(CaptureFileSet((file for file, _ in registered), True),
+            _product_requirements(context.action(action_id), FileKind.VIDEO))
+        if assessment.is_complete:
+            context.pending_result_closes[action_id] = PendingResultCheckClose(
+                new_operation_key(), FiniteCancelEndSave(action_id, entries.last_ref, context.wall_us()))
+            context.resume_result_check_closes(action_id)
+            activity = row_facts(context.owned.connection, "device_activities", activity["id"])
     if activity["activity_state"] == 3:
         _release_occupancy(context, action_id)
     context.save_capture_completion(
