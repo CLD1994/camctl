@@ -23,6 +23,7 @@ from camctl.contracts.json_values import is_json_integer
 from camctl.contracts.enums import enum_for
 from camctl.contracts.workflow_errors import validate_public_error
 from camctl.devices.tasks import (
+    CancelCompletionPolicy,
     CaptureStorage,
     CaptureTask,
     CompletionMode,
@@ -234,6 +235,19 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
     completion = CompletionMode(_integer(spec["completion_mode"], 1))
     result.update(end_control=int(end), start_return_meaning=int(start), completion_mode=int(completion))
     expected = set(required) | set(ownership) | set(products)
+    if "file_completion_wait_ms" in spec:
+        if not spec["stop_supported"]:
+            raise ValueError("停止后文件等待要求明确停止能力")
+        expected.add("file_completion_wait_ms")
+        result["file_completion_wait_ms"] = _integer(spec["file_completion_wait_ms"], 1)
+    if "cancel_completion_policy" in spec:
+        policy = CancelCompletionPolicy(spec["cancel_completion_policy"])
+        if (not spec["duration_based"] or not spec["wait_after_send"]
+                or not spec["stop_supported"] or end is not EndControl.DEVICE
+                or start is not StartReturn.SENT or completion is not CompletionMode.TIME_AND_OUTPUTS):
+            raise ValueError("自然取消收场只适用于有限设备任务的 SENT 与时间产物完成契约")
+        expected.add("cancel_completion_policy")
+        result["cancel_completion_policy"] = policy.value
     if start is StartReturn.COMPLETED:
         expected.add("start_call_timeout_s")
     if spec["duration_based"]:
@@ -282,6 +296,7 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
                 "output_scope",
                 "product_rules",
                 "file_completion_wait_s",
+                "cancel_completion_policy",
             )
         ):
             raise ValueError("单张任务不能携带时长、停止、完成或产物范围字段")
@@ -305,6 +320,8 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
         ownership = {"ownership_mode": task.ownership_mode, "output_scope": task.output_scope}
     products = {} if task.product_rules is None else {"product_rules": deepcopy(list(task.product_rules))}
     if action_type == "camera_record":
+        if task.cancel_completion_policy is not None:
+            raise ValueError("普通录像不能使用原生有限任务的取消收场策略")
         if task.stop_supported is not True:
             raise ValueError("录像任务必须明确具备 stop_supported")
         completion_wait = ({} if task.file_completion_wait_s is None else {
@@ -322,6 +339,10 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
         spec["result_wait_margin_ms"] = seconds_to_duration_ms(task.result_wait_margin_s)
     if task.start_call_timeout_s is not None:
         spec["start_call_timeout_s"] = task.start_call_timeout_s
+    if task.file_completion_wait_s is not None:
+        spec["file_completion_wait_ms"] = seconds_to_duration_ms(task.file_completion_wait_s)
+    if task.cancel_completion_policy is not None:
+        spec["cancel_completion_policy"] = task.cancel_completion_policy
     return validate_capture_spec(action_type, spec)
 
 

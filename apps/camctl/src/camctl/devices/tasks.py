@@ -29,6 +29,12 @@ class CaptureStorage(StrEnum):
     DEVICE = "device"
 
 
+class CancelCompletionPolicy(StrEnum):
+    """停止未确认后的有限任务收场方式；缺省保持原停止契约。"""
+
+    FINITE_DEVICE_END = "finite_device_end"
+
+
 @dataclass(frozen=True)
 class CaptureTask:
     """驱动从生效参数取得任务事实；时长与余量明确使用秒。"""
@@ -47,6 +53,7 @@ class CaptureTask:
     product_rules: tuple[Mapping[str, JsonValue], ...] | None = None
     file_completion_wait_s: JsonValue = None
     output_storage: CaptureStorage | None = None
+    cancel_completion_policy: CancelCompletionPolicy | None = None
 
 
 class CaptureTaskFactory(Protocol):

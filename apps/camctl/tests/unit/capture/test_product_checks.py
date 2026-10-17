@@ -111,3 +111,29 @@ def test_invalid_saved_product_rule_is_rejected(changes):
     from camctl.capture.models import validate_capture_spec
     with pytest.raises(ValueError):
         validate_capture_spec("camera_record", {"target_duration_ms": 10000, "product_rules": [{**_RULE_DOCUMENT, **changes}]})
+
+
+@pytest.mark.parametrize('size,state', [(None, 'unknown'), (0, 'failed'), (1, 'passed'), (123, 'passed')])
+def test_nonzero_original_rule_distinguishes_unknown_empty_and_valid(size, state):
+    from camctl.capture.results import ProductRule
+    rule = ProductRule(FileKind.VIDEO, format_id='osv', min_size_bytes=1)
+    file = CaptureFile('original', FileKind.VIDEO, True, True, format_id='osv', size_bytes=size)
+    assessment = assess_capture_files(CaptureFileSet((file,), True), ProductRequirements(frozenset({FileKind.VIDEO}), (rule,)))
+    assert assessment.rules[0].state.value == state
+    assert assessment.is_complete is (state == 'passed')
+    assert assessment.explicitly_unmet is (state == 'failed')
+
+
+def test_optional_minimum_size_is_frozen_without_changing_legacy_rule_json():
+    from camctl.capture.results import ProductRule
+    legacy = ProductRule.from_json(_RULE_DOCUMENT)
+    assert legacy.as_json() == _RULE_DOCUMENT
+    original = {**_RULE_DOCUMENT, 'min_size_bytes': 1}
+    assert ProductRule.from_json(original).as_json() == original
+
+
+@pytest.mark.parametrize('size', [None, True, 0, -1, '1', 1.0])
+def test_present_minimum_size_must_be_positive_json_integer(size):
+    from camctl.capture.results import ProductRule
+    with pytest.raises(ValueError):
+        ProductRule.from_json({**_RULE_DOCUMENT, 'min_size_bytes': size})

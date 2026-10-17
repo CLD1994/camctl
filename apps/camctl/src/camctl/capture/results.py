@@ -49,6 +49,7 @@ class CaptureFile:
     read_error: bool = False
     format_id: str | None = None
     pairing_confirmed: bool | None = None
+    size_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class ProductRule:
     min_count: int = 1
     exact_count: int | None = None
     require_pairing: bool = False
+    min_size_bytes: int | None = None
 
     def __post_init__(self):
         if not isinstance(self.kind, FileKind):
@@ -84,18 +86,29 @@ class ProductRule:
             raise ValueError("明确产物数必须是不低于最低数量的整数")
         if type(self.require_pairing) is not bool:
             raise ValueError("适用配对要求必须是布尔值")
+        if self.min_size_bytes is not None:
+            from camctl.contracts.values import MAX_OBJECT_ID
+            if type(self.min_size_bytes) is not int or not 0 < self.min_size_bytes <= MAX_OBJECT_ID:
+                raise ValueError("必要文件长度必须是安全正整数")
 
     def as_json(self) -> dict:
         return {"kind": self.kind.value, "format_id": self.format_id,
                 "min_count": self.min_count, "exact_count": self.exact_count,
-                "require_pairing": self.require_pairing}
+                "require_pairing": self.require_pairing,
+                **({} if self.min_size_bytes is None else {"min_size_bytes": self.min_size_bytes})}
 
     @classmethod
     def from_json(cls, value) -> "ProductRule":
         from camctl.contracts.json_values import is_json_integer
         from camctl.contracts.values import MAX_OBJECT_ID
-        if not isinstance(value, dict) or set(value) != {"kind", "format_id", "min_count", "exact_count", "require_pairing"}:
+        fields = {"kind", "format_id", "min_count", "exact_count", "require_pairing"}
+        if not isinstance(value, dict) or set(value) not in (fields, fields | {"min_size_bytes"}):
             raise ValueError("必要产物规则必须具有完整登记成员")
+        size = value.get("min_size_bytes")
+        if "min_size_bytes" in value:
+            if not is_json_integer(size) or not 0 < size <= MAX_OBJECT_ID:
+                raise ValueError("必要文件长度必须是安全正 JSON 整数")
+            size = int(size)
         counts = {}
         for name in ("min_count", "exact_count"):
             raw = value[name]
@@ -106,7 +119,7 @@ class ProductRule:
             else:
                 counts[name] = int(raw)
         return cls(FileKind(value["kind"]), value["format_id"], **counts,
-                   require_pairing=value["require_pairing"])
+                   require_pairing=value["require_pairing"], min_size_bytes=size)
 
 
 class RuleState(Enum):
@@ -155,7 +168,7 @@ def assess_capture_files(
     file_count = incomplete_count = ownership_count = error_count = 0
     confirmed_kinds = set()
     counts = [0] * len(requirements.rules)
-    unknown_rules, failed_pairing = set(), set()
+    unknown_rules, failed_rules = set(), set()
     for file in files.files:
         file_count += 1
         if file.read_error:
@@ -186,7 +199,12 @@ def assess_capture_files(
                 if file.pairing_confirmed is None:
                     unknown_rules.add(index)
                 elif not file.pairing_confirmed:
-                    failed_pairing.add(index)
+                    failed_rules.add(index)
+            if rule.min_size_bytes is not None:
+                if file.size_bytes is None:
+                    unknown_rules.add(index)
+                elif file.size_bytes < rule.min_size_bytes:
+                    failed_rules.add(index)
     missing = tuple(
         kind
         for kind in sorted(requirements.required_kinds, key=lambda k: k.value)
@@ -199,7 +217,7 @@ def assess_capture_files(
             state = RuleState.UNKNOWN
         elif (counts[index] < rule.min_count
                 or (rule.exact_count is not None and counts[index] != rule.exact_count)
-                or index in failed_pairing):
+                or index in failed_rules):
             state = RuleState.FAILED
         else:
             state = RuleState.PASSED

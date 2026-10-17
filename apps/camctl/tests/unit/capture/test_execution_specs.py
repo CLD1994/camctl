@@ -197,3 +197,46 @@ def test_saved_wait_conditions_cannot_contradict_each_other(change):
         "target_duration_ms":1234,"result_wait_margin_ms":0}
     with pytest.raises(ValueError):
         validate_capture_spec("camera_timelapse", {**spec, **change})
+
+
+def test_native_timelapse_freezes_independent_stop_wait_and_delayed_cancel_policy():
+    from camctl.devices.tasks import CancelCompletionPolicy
+    spec = build_capture_spec('camera_timelapse', _task(stop_supported=True,
+        file_completion_wait_s=30, cancel_completion_policy=CancelCompletionPolicy.FINITE_DEVICE_END))
+    assert spec['file_completion_wait_ms'] == 30000
+    assert spec['cancel_completion_policy'] == 'finite_device_end'
+    assert validate_capture_spec('camera_timelapse', spec) == spec
+
+
+@pytest.mark.parametrize('changes', [
+    {'end_control': 2, 'completion_mode': 1, 'wait_after_send': False},
+    {'start_return_meaning': 2, 'wait_after_send': False},
+    {'completion_mode': 1}, {'stop_supported': False},
+    {'cancel_completion_policy': None}, {'cancel_completion_policy': 'other'},
+])
+def test_delayed_cancel_policy_rejects_incompatible_native_contract(changes):
+    spec = {'duration_based': True, 'wait_after_send': True, 'stop_supported': True,
+        'end_control': 1, 'start_return_meaning': 1, 'completion_mode': 2,
+        'target_duration_ms': 300000, 'result_wait_margin_ms': 30000,
+        'file_completion_wait_ms': 30000, 'cancel_completion_policy': 'finite_device_end'}
+    with pytest.raises(ValueError):
+        validate_capture_spec('camera_timelapse', {**spec, **changes})
+
+
+@pytest.mark.parametrize('wait', [None, True, '30000', 0, -1, Decimal('1.5')])
+def test_saved_native_stop_wait_must_be_positive_exact_milliseconds(wait):
+    spec = build_capture_spec('camera_timelapse', _task(stop_supported=True))
+    with pytest.raises(ValueError):
+        validate_capture_spec('camera_timelapse', {**spec, 'file_completion_wait_ms': wait})
+
+
+def test_no_stop_native_task_cannot_freeze_stop_file_wait():
+    with pytest.raises(ValueError):
+        build_capture_spec('camera_timelapse', _task(file_completion_wait_s=30))
+
+
+def test_photo_cannot_ignore_native_cancel_policy():
+    from camctl.devices.tasks import CancelCompletionPolicy
+    with pytest.raises(ValueError):
+        build_capture_spec('camera_take_photo', CaptureTask('camera_take_photo',
+            cancel_completion_policy=CancelCompletionPolicy.FINITE_DEVICE_END))
