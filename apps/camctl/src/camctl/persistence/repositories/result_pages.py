@@ -33,6 +33,45 @@ _RUN_KIND = enum_for("operation_runs.kind")
 _ROLE = enum_for("device_files.role")
 
 
+def capture_result_scope(action_id, ticket, last_page_event_id):
+    """原单次扫描的只读上界，由所有集合与完成消费者共同使用。"""
+    from camctl.history.reads import CaptureResultReadScope
+    return CaptureResultReadScope(action_id, int(ticket.target_id), ticket.run_id,
+        ticket.attempt_id, last_page_event_id)
+
+
+def iter_result_file_facts(reader, action, ticket, last_page_event_id):
+    """逐页交付当前新增候选和可靠文件事实；不混用其他轮次的文件。"""
+    if reader is None or reader.scope != capture_result_scope(action['id'], ticket, last_page_event_id):
+        raise ConsistencyError('结果文件核实缺少原有界扫描范围')
+    cursor = None
+    while True:
+        pages = reader.result_pages(ticket, cursor, 1)
+        for saved in pages.items:
+            ids = dict(saved.file_ids)
+            for entry in saved.page.entries:
+                if entry.identity in ids:
+                    yield entry, reader.required('device_files', ids[entry.identity])
+        if pages.next_cursor is None:
+            if not pages.items or pages.items[-1].ref.event_id != last_page_event_id:
+                raise ConsistencyError('当前结果文件核实缺少原可靠末页')
+            return
+        cursor = pages.next_cursor
+
+
+def verify_output_scope_ownership(reader, action, ticket, last_page_event_id):
+    """当前新增必要成员必须可靠归属；明确可选预览只留发现也可确定范围。"""
+    from camctl.capture.results import ProductRule, is_optional_preview
+    rules = tuple(ProductRule.from_json(value) for value in action['execution_spec_json'].get('product_rules', ()))
+    for entry, facts in iter_result_file_facts(reader, action, ticket, last_page_event_id):
+        if (facts['source_action_id'] == action['id'] and facts['ownership_evidence_json'] is not None):
+            continue
+        if (facts['source_action_id'] is None and is_optional_preview(
+                entry.kind, entry.format_id, entry.paired_identity, rules)):
+            continue
+        raise ConsistencyError('原完整扫描仍有未确认归属的新增必要文件')
+
+
 class _BaselineCursor:
     """只保留正在比较的一批；已比较部分由原页位置恢复。"""
 

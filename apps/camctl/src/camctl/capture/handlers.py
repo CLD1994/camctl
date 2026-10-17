@@ -111,6 +111,7 @@ from camctl.capture.results import (
     ProductRequirements,
     ProductRule,
     assess_capture_files,
+    is_optional_preview,
 )
 from camctl.capture.timelapse import (
     CaptureWaitConfig,
@@ -4189,12 +4190,9 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                          allow_missing=True)
                          for entry in batch if entry.paired_identity is not None}
                 rules = _product_requirements(action, FileKind.VIDEO).rules
-                def optional_preview(entry):
-                    return bool(rules) and not any(rule.kind is entry.kind
-                        and (rule.format_id is None or rule.format_id == entry.format_id)
-                        and rule.min_count > 0 for rule in rules)
                 if listing.scan_complete and any(entry.paired_identity is not None
-                        and pairs[entry.paired_identity] is None and not optional_preview(entry)
+                        and pairs[entry.paired_identity] is None and not is_optional_preview(
+                            entry.kind, entry.format_id, entry.paired_identity, rules)
                         for entry in batch):
                     raise ConsistencyError("必要预览的配对原片不属于原任务的完整差集")
                 # 原片在后页时等待；完整差集仍没有原片的可选预览保留发现事实而不登记。

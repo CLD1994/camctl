@@ -26,6 +26,7 @@ __all__ = [
     "RuleState",
     "ReleaseDecision",
     "assess_capture_files",
+    "is_optional_preview",
     "decide_release",
 ]
 
@@ -120,6 +121,18 @@ class ProductRule:
                 counts[name] = int(raw)
         return cls(FileKind(value["kind"]), value["format_id"], **counts,
                    require_pairing=value["require_pairing"], min_size_bytes=size)
+
+
+def is_optional_preview(kind: FileKind, format_id: str | None,
+                        paired_identity: str | None, rules: tuple[ProductRule, ...]) -> bool:
+    """原规则明确非必要的 LRF 配对候选；缺规则或未知角色保持原语义。"""
+    if (not rules or kind is not FileKind.VIDEO or format_id != "lrf"
+            or not isinstance(paired_identity, str) or not paired_identity):
+        return False
+    return not any(rule.kind is kind
+        and (rule.format_id is None or rule.format_id == format_id)
+        and (rule.min_count > 0 or (rule.exact_count is not None and rule.exact_count > 0))
+        for rule in rules)
 
 
 class RuleState(Enum):

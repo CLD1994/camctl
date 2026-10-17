@@ -4799,7 +4799,8 @@ class _OutputSetFinalizedCommand:
         self._occurred_at = occurred_at if finish is None else finish.occurred_at
 
     def _source(self, scope):
-        from .result_pages import _load, read_pages, read_page, _TYPE
+        from .result_pages import _load, read_page, capture_result_scope, verify_output_scope_ownership
+        from camctl.persistence.event_reads import SqlEventReads
         from camctl.operations.result_format import result_document
 
         ref = self._ref
@@ -4824,22 +4825,9 @@ class _OutputSetFinalizedCommand:
                 or self._occurred_at != saved.occurred_at
                 or not json_equal(result_document(actual), result_document(saved.page.outcome))):
             raise ConsistencyError("集合确定事实要求原成功末页、完整集合保证和实际返回时刻")
-        cursor = None
-        while True:
-            pages = read_pages(ticket, cursor, 128, scope)
-            if pages.next_cursor is None:
-                break
-            cursor = pages.next_cursor
-        # 归属只核对原扫描实际新增的成员；历史目录成员不属于本次集合。
-        unresolved = scope.connection.execute(
-            "SELECT 1 FROM history_events h, json_each(h.body_json,'$.evidence.result_page.file_ids') i"
-            " LEFT JOIN device_files f ON f.id=json_extract(i.value,'$[1]')"
-            " WHERE h.id>=? AND h.id<=? AND h.event_type=?"
-            " AND json_extract(h.body_json,'$.evidence.attempt_id')=?"
-            " AND (f.id IS NULL OR f.source_action_id IS NOT ? OR f.ownership_evidence_json IS NULL) LIMIT 1",
-            (attempt["result_first_page_event_id"], ref.event_id, _TYPE, attempt["id"], action["id"])).fetchone()
-        if unresolved is not None:
-            raise ConsistencyError("原完整扫描仍有未确认归属的新增文件")
+        read_scope = capture_result_scope(action['id'], ticket, ref.event_id)
+        verify_output_scope_ownership(SqlEventReads(scope.connection, read_scope),
+            action, ticket, ref.event_id)
         return activity, action, run, attempt
 
     def plan(self, scope) -> CommandPlan:
@@ -4861,7 +4849,12 @@ class _OutputSetFinalizedCommand:
         return CommandPlan(events=(event,),
             owners={("device_activities", activity["id"]): ("action", action["id"])},
             state_rows={"device_activities": {activity["id"]: activity}, "actions": {action["id"]: action},
-                "operation_runs": {run["id"]: run}, "operation_attempts": {attempt["id"]: attempt}})
+                "operation_runs": {run["id"]: run}, "operation_attempts": {attempt["id"]: attempt}},
+            capture_result_read_scope=self._read_scope(action["id"]))
+
+    def _read_scope(self, action_id):
+        from .result_pages import capture_result_scope
+        return capture_result_scope(action_id, self._ref.ticket, self._ref.event_id)
 
     def reuse(self, scope, saved) -> CommandPlan:
         activity, _, _, attempt = self._source(scope)
@@ -4937,6 +4930,8 @@ class _FinishResultCheckCommand:
             result=ResultCheckOutcome(
                 finish=finish_plan.result,
                 result_set=None if confirm_plan is None else confirm_plan.result),
+            capture_result_read_scope=next((plan.capture_result_read_scope for plan in plans
+                if plan.capture_result_read_scope is not None), None),
         )
 
     def _reuse(self, scope, saved) -> CommandPlan:
@@ -6948,6 +6943,14 @@ def _result_check_guard(event, context) -> None:
             raise EventValidationError("独立集合事实缺少合法的原 v2 扫描结果") from error
         if page.next_cursor is not None or not page.set_finalized:
             raise EventValidationError("独立集合事实要求扫描结束且原集合确定")
+        from .result_pages import verify_output_scope_ownership
+        action = context.state_rows.get("actions", {}).get(run["action_id"])
+        if action is None:
+            raise EventValidationError("集合范围核实缺少原动作")
+        try:
+            verify_output_scope_ownership(context.current_reads, action, ticket, page_id)
+        except (ConsistencyError, ValueError) as error:
+            raise EventValidationError(f"集合范围归属核实无效: {error}") from error
         return
     state_after = row.after.values.get("result_set_state")
     state_before = row.before.values.get("result_set_state")

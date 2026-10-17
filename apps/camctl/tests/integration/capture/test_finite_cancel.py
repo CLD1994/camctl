@@ -32,20 +32,21 @@ class _FiniteResults(ResultsDouble):
         return page_from_outcome(ticket, replace(page.outcome, observations=observations), cursor=cursor)
 
 
-def _freeze_finite_spec(owned):
+def _freeze_finite_spec(owned, *, extra_rules=()):
     spec = json.loads(owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=13').fetchone()[0])
     spec.update(target_duration_ms=1000, result_wait_margin_ms=200,
                 cancel_completion_policy='finite_device_end', file_completion_wait_ms=30000,
                 product_rules=[{'kind':'video','format_id':'osv','min_count':1,
                     'exact_count':None,'require_pairing':False,'min_size_bytes':1}])
+    spec['product_rules'].extend(extra_rules)
     owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=13', (json.dumps(spec),))
     owned.connection.execute('UPDATE actions SET input_fields_json=?, effective_params_json=? WHERE id=13',
         (json.dumps({'params':{'type':'finite_fake'},'policy':{'max_delay_ms':1000}}), json.dumps({'type':'finite_fake'})))
 
 
-async def _world(tmp_path, *, unknown=False):
+async def _world(tmp_path, *, unknown=False, extra_rules=()):
     owned = _environment(tmp_path, _TIMELAPSE)
-    _freeze_finite_spec(owned)
+    _freeze_finite_spec(owned, extra_rules=extra_rules)
     wall, mono = [_NOW], [5_000_000_000]
     runtime = _runtime(owned, results=_FiniteResults({13: (_entry('finite-original'),)}),
         stop_config=AttemptConfig(3, Decimal('1'), Decimal('0')))
