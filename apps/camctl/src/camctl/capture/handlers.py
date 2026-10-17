@@ -2426,7 +2426,7 @@ def _product_requirements(action, required):
 
 
 def _listing_finalized(listing: ListingRound | None) -> bool:
-    return (listing is not None and listing.scan_complete and listing.set_finalized
+    return (listing is not None and listing.time_qualified and listing.scan_complete and listing.set_finalized
             and listing.outcome is not None and listing.outcome.error is None)
 
 
@@ -3931,6 +3931,14 @@ def _advance_timelapse_natural_wait(context: CaptureRuntime, action) -> int | No
 
 
 async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
+    try:
+        await _timelapse_handler_once(action_id, context)
+    except _NaturalTimeDeferred:
+        # 当前来源资格不足；正常、取消和恢复共同交回会话正等待。
+        return
+
+
+async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> None:
     _resolve_natural_wait(context, action_id)
     context.resume_capture_completions(action_id)
     context.resume_baselines(action_id)
@@ -4242,6 +4250,7 @@ class ListingRound:
     registered_files: Mapping[str, tuple[CaptureFile, int]] | None = None
     scan_complete: bool = False
     set_finalized: bool = False
+    time_qualified: bool = True
     completion_evidence: Any = None
     completion_page: ResultPageRef | None = None
 
@@ -4298,8 +4307,74 @@ def _registered_result_files(runtime: CaptureRuntime, action_id: int,
     return tuple(entries), registered
 
 
+class _NaturalTimeDeferred(Exception):
+    """保留原申请并交还调度；当前真实读数尚不足以承载原来源时刻。"""
+
+
+def _natural_source_lower_bound(runtime: CaptureRuntime, action_id: int) -> int | None:
+    """从可靠原等待读取来源下界；明确 STOP 分支继续使用自己的完成依据。"""
+    action = runtime.action(action_id)
+    spec = action["execution_spec_json"]
+    if (action["type"] != int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+            or not spec.get("wait_after_send")
+            or spec.get("end_control") != int(EndControl.DEVICE)):
+        return None
+    stopped = runtime.last_attempt(f"stop/{action_id}")
+    if stopped is not None and stopped[1] == int(_EFFECT_STATE.CONFIRMED):
+        return None
+    context = _natural_file_completion_context(runtime, action_id)
+    if context is None:
+        activity = row_facts(runtime.owned.connection, "device_activities", _activity_id_of(runtime, action_id))
+        if activity["wait_completed_event_id"] is not None:
+            raise ConsistencyError("可靠自然完成缺少原等待或发送来源")
+        return None
+    return max(context["expected_check_at_us"], context["wait_completed_at_us"])
+
+
+def _natural_listing_time(runtime, action_id, listing):
+    """页资格只由原页实际时刻决定；当前时钟恢复不能改变坏页资格。"""
+    bound = _natural_source_lower_bound(runtime, action_id)
+    if bound is None:
+        return True, None
+    if not listing.time_qualified:
+        return False, bound
+    times = (saved.occurred_at for saved in listing.entries.pages()) if isinstance(
+        listing.entries, SavedResultEntries) else (() if listing.occurred_at is None else (listing.occurred_at,))
+    latest = bound
+    for occurred_at in times:
+        if occurred_at < bound:
+            return False, bound
+        latest = max(latest, occurred_at)
+    return True, latest
+
+
+def _natural_read_ready(runtime, action_id, entries=None):
+    bound = _natural_source_lower_bound(runtime, action_id)
+    if bound is None:
+        return True
+    if entries is not None:
+        for saved in entries.pages():
+            # 坏页只保留实际输入，不成为后续事实的完成来源。
+            if saved.occurred_at >= bound:
+                bound = max(bound, saved.occurred_at)
+    return runtime.wall_us() >= bound
+
+
+def _without_unqualified_files(runtime, action_id, listing):
+    valid, _ = _natural_listing_time(runtime, action_id, listing)
+    if valid:
+        return listing
+    return replace(listing, entries=(), registered_files={}, scan_complete=False,
+        set_finalized=False, time_qualified=False, completion_evidence=None, completion_page=None)
+
+
 def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingRound):
     """已登记事实直接消费；只有尚未登记的原观察产生文件保存责任。"""
+    valid, bound = _natural_listing_time(runtime, action_id, listing)
+    if not valid:
+        return ()
+    if bound is not None and runtime.wall_us() < bound:
+        raise _NaturalTimeDeferred("当前真实时间早于原来源时刻")
     if isinstance(listing.entries, SavedResultEntries):
         entries = listing.entries
         activity = row_facts(runtime.owned.connection, "device_activities", int(listing.ticket.target_id))
@@ -4451,7 +4526,16 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
         if available_page.next_cursor is not None and available_page.outcome.error is None:
             raise CapabilityNotDeclaredError(
                 "继续未完成的拍摄结果分页需要驱动声明 result 能力")
-    if not await advance_result_scan(pending, runtime=runtime):
+    action_id = runtime.action_id_of_ticket(pending.ticket)
+    def can_read():
+        entries = (None if pending.last_ref is None else
+            SavedResultEntries(runtime.capture, runtime.owned, pending.last_ref))
+        return _natural_read_ready(runtime, action_id, entries)
+    def page_qualified(saved):
+        bound = _natural_source_lower_bound(runtime, action_id)
+        return bound is None or saved.occurred_at >= bound
+    if not await advance_result_scan(pending, runtime=runtime,
+            can_read=can_read, page_qualified=page_qualified):
         return ListingRound(ListingPhase.IN_FLIGHT)
     if pending.last_ref is None or pending.last_outcome is None or pending.occurred_at is None:
         raise ConsistencyError("结果扫描缺少可靠末页及原返回")
@@ -4479,6 +4563,10 @@ def _result_file_metadata(runtime: CaptureRuntime, ticket: AttemptTicket) -> dic
 
 
 def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRound:
+    return _without_unqualified_files(runtime, action_id, _saved_result_listing_input(runtime, action_id))
+
+
+def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int) -> ListingRound:
     """CLOSED 消费原已保存输入；不取得当前驱动端口或新的时钟。"""
     activity_id = _activity_id_of(runtime, action_id)
     responsibility = f"results/{activity_id}"
@@ -4596,6 +4684,37 @@ def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
 
 @owned_tool_call
 async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRound:
+    """先交接原申请，分别核对调用前与原页实际返回的时间资格。"""
+    runtime.resume_file_observations(action_id)
+    activity_id = _activity_id_of(runtime, action_id)
+    responsibility = f"results/{activity_id}"
+    ticket = _original_ticket(runtime, responsibility, "result")
+    held = None if ticket is None else _held_listing(runtime, ticket)
+    scan = None if ticket is None else runtime.pending_result_scans.get((ticket.run_id, ticket.attempt_id))
+    if held is None and scan is None:
+        last = None if ticket is None else runtime.capture.read_last_result_page(ticket, runtime.owned)
+        entries = None if last is None else SavedResultEntries(runtime.capture, runtime.owned, last.ref)
+        if not _natural_read_ready(runtime, action_id, entries):
+            return ListingRound(ListingPhase.RETRY_WAIT)
+    try:
+        listing = await _listing_round_input(runtime, action_id)
+    except _NaturalTimeDeferred:
+        return ListingRound(ListingPhase.RETRY_WAIT)
+    if listing.phase not in (ListingPhase.LISTED, ListingPhase.CLOSED):
+        return listing
+    valid, bound = _natural_listing_time(runtime, action_id, listing)
+    if not valid:
+        if not listing.already_saved:
+            # 实际调用仍成功；只保存其业务完成不足和原责任重试等待。
+            _finish_listing_result(runtime, replace(listing, completion_page=None), retry_wait=True)
+            return ListingRound(ListingPhase.RETRY_WAIT)
+        return _without_unqualified_files(runtime, action_id, listing)
+    if bound is not None and runtime.wall_us() < bound:
+        return ListingRound(ListingPhase.RETRY_WAIT)
+    return listing
+
+
+async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> ListingRound:
     """同一活动的有限核实；实际返回先持有，消费者随后确定真实处置。"""
     runtime.resume_file_observations(action_id)
     activity_id = _activity_id_of(runtime, action_id)
@@ -4649,6 +4768,8 @@ async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRoun
             return ListingRound(ListingPhase.EXHAUSTED)
         raise CapabilityNotDeclaredError(
             "拍摄结果核实需要驱动声明 result 能力")
+    if not _natural_read_ready(runtime, action_id):
+        return ListingRound(ListingPhase.RETRY_WAIT)
     begin = _begin_check_round(runtime, action_id)
     if begin.disposition is not BeginDisposition.GRANTED:
         if begin.reason == "budget_exhausted":
@@ -4688,6 +4809,9 @@ async def _finish_timelapse_conclusion(
     )) as cursor:
         state, basis, capture_json, activity_state = cursor.fetchone()
     listing = _saved_result_listing(runtime, action_id)
+    valid, bound = _natural_listing_time(runtime, action_id, listing)
+    if valid and bound is not None and runtime.wall_us() < bound:
+        return
     entries = listing.entries
     registered = _register_listing(runtime, action_id, listing)
     capture = None if capture_json is None else parse_exact_json(capture_json)
@@ -4715,12 +4839,15 @@ async def _finish_timelapse_conclusion(
             failure=_unconfirmed_failure(runtime, action_id))
 
 
-def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int:
+def _complete_timelapse_wait(runtime: CaptureRuntime, action_id: int) -> int | None:
     """到期后保留原完成申请，可靠提交才返回完成事件。"""
     state = runtime.natural_wait_states[action_id]
     if state.pending is None:
+        occurred_at = runtime.wall_us()
+        if occurred_at < state.applied.expected_check_at:
+            return None
         state.pending = PendingNaturalWait(
-            WaitCompletedSave(action_id=action_id, occurred_at=runtime.wall_us()),
+            WaitCompletedSave(action_id=action_id, occurred_at=occurred_at),
             new_operation_key(), state.applied)
     return _save_natural_wait(runtime, action_id, state).event_id
 

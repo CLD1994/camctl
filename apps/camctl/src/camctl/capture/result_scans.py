@@ -2,7 +2,7 @@
 from copy import deepcopy
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Mapping
+from typing import Callable, Mapping
 
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
 from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner, SavedResultPage
@@ -34,6 +34,7 @@ class PendingResultScan:
     returned_ns: int | None = None
     in_call: bool = False
     interrupted: bool = False
+    #: 本轮主机不再读取；实际扫描是否完整仍由可靠末页单独表达。
     finished: bool = False
 
     def __post_init__(self):
@@ -53,7 +54,9 @@ def resume_result_page_saves(owned, *, pending_scans, repository):
             raise ConsistencyError(f"原结果页保存尚未可靠完成（{receipt.kind.value}）: {receipt.error}")
 
 
-async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
+async def advance_result_scan(pending: PendingResultScan, *, runtime,
+        can_read: Callable[[], bool] | None = None,
+        page_qualified: Callable[[SavedResultPage], bool] | None = None) -> bool:
     """可靠交接后继续原轮次；实际错误或中断不产生隐式重读。"""
     if pending.finished:
         return True
@@ -76,9 +79,14 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime) -> bool:
             pending.occurred_at = original.occurred_at
             pending.cursor = page.next_cursor
             pending.finished = page.next_cursor is None or page.outcome.error is not None
+            if page_qualified is not None and not page_qualified(
+                    SavedResultPage(pending.last_ref, page, original.occurred_at)):
+                pending.finished = True
             if pending.finished:
                 return True
             pending.page_no += 1
+        if can_read is not None and not can_read():
+            return False
         check_call_interruption()
         pending.in_call = True
         try:

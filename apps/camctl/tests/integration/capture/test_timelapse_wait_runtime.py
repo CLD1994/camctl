@@ -14,6 +14,10 @@ pytestmark = pytest.mark.asyncio
 
 
 def _configured_runtime(owned, *, extra, wall, monotonic):
+    import json
+    spec = json.loads(owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=13').fetchone()[0])
+    spec.update(target_duration_ms=1000, result_wait_margin_ms=200)
+    owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=13', (json.dumps(spec),))
     runtime = _runtime(owned, files={13: (_entry("sequence-1"),)})
     runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, extra)
     runtime.wall_us = lambda: wall[0]
@@ -77,7 +81,7 @@ async def test_forward_wall_clock_change_does_not_finish_current_session_wait(tm
         owned.connection.close()
 
 
-async def test_backward_wall_clock_change_does_not_extend_current_session_wait(tmp_path):
+async def test_backward_wall_clock_change_preserves_deadline_and_defers_completion(tmp_path):
     owned = _environment(tmp_path, _TIMELAPSE)
     try:
         wall, monotonic = [_NOW], [10_000_000_000]
@@ -85,6 +89,11 @@ async def test_backward_wall_clock_change_does_not_extend_current_session_wait(t
         await capture_handler("camera_timelapse")(13, runtime)
         wall[0] -= 100_000_000
         monotonic[0] += 2_200_000_000
+        await capture_handler("camera_timelapse")(13, runtime)
+        assert runtime.timelapse_deadlines[13] == 12200000000
+        assert runtime.results.calls == []
+        assert owned.connection.execute('SELECT wait_completed_event_id FROM device_activities WHERE id=13').fetchone() == (None,)
+        wall[0] = _NOW+2200000
         await capture_handler("camera_timelapse")(13, runtime)
         assert runtime.results.calls == [13]
         assert owned.connection.execute("SELECT status FROM actions WHERE id = 13").fetchone() == (3,)

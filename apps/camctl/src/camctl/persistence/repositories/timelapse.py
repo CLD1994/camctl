@@ -12,7 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from camctl.capture.models import WaitCompletedSave
+from camctl.capture.models import WaitCompletedSave, validate_capture_spec
+from camctl.contracts.enums import enum_for
+from camctl.devices.tasks import CompletionMode, EndControl, StartReturn
 from camctl.capture.timelapse import WaitPlan
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import MAX_OBJECT_ID, ConsistencyError, OperationKey
@@ -94,6 +96,7 @@ class WaitCompletedCommand:
         if action is None:
             raise ConsistencyError("等待缺少原冻结动作定义")
         self._state["actions"] = {action["id"]: action}
+        _load_wait_start(connection, activity, self._state)
         self._owners[("device_activities", activity["id"])] = (
             "action", activity["action_id"])
         if activity["sent_at"] is None or activity["expected_check_at"] is None:
@@ -138,6 +141,10 @@ class WaitCompletedCommand:
             raise TransactionError("原等待完成属于其他活动")
         if activity["wait_completed_event_id"] != event_id:
             raise TransactionError("原等待完成的可靠记录与输入不符")
+        action = row_facts(scope.connection, "actions", command.action_id)
+        _load_wait_start(scope.connection, activity, self._state)
+        _verify_wait_basis(activity, action, self._state,
+            occurred_at=command.occurred_at, complete=True)
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
             read_only=True,
@@ -168,6 +175,7 @@ class ScheduleWaitCommand:
         if action is None:
             raise ConsistencyError("等待缺少原冻结动作定义")
         self._state["actions"] = {action["id"]: action}
+        _load_wait_start(connection, activity, self._state)
         self._owners[("device_activities", activity["id"])] = (
             "action", activity["action_id"],
         )
@@ -241,6 +249,10 @@ class ScheduleWaitCommand:
                 or set(rows[0]["before"]["values"]) != set(expected_after)
                 or not json_equal(rows[0]["after"]["values"], expected_after)):
             raise TransactionError("等待安排重送改变原活动或完整等待规则")
+        original_activity = {**activity, **expected_after}
+        action = self._state["actions"][activity["action_id"]]
+        _verify_wait_basis(original_activity, action, self._state,
+            occurred_at=command.occurred_at, complete=False)
         return CommandPlan((), self._owners, self._state, read_only=True,
                            result=WaitSaved(command.plan.check_at_utc))
 
@@ -303,12 +315,74 @@ def _outcome_of(receipt) -> DbOutcome[WaitSaved]:
     return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
 
 
-def _capture_wait_guard(event, context) -> None:
-    """等待安排的数值与事实守卫。
+def _load_wait_start(connection, activity, state):
+    """有界装载原可靠 START，守卫与历史读取使用同一来源合同。"""
+    from .capture import _history_source_row
 
-    预计检查时间必须为正的墙钟微秒；余量与本次额外等待为非负毫
-    秒；重算不覆盖已保存的等待完成事实由行规格 before 核对。
-    """
+    found = connection.execute(
+        "SELECT r.id,a.id FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+        " WHERE r.responsibility_key=? AND r.action_id=? AND r.activity_id=?"
+        " ORDER BY a.attempt_no DESC LIMIT 1",
+        (f"start/{activity['action_id']}", activity["action_id"], activity["id"])).fetchone()
+    if found is None:
+        raise ConsistencyError("自然等待缺少原 START 结果")
+    run = row_facts(connection, "operation_runs", found[0])
+    attempt = row_facts(connection, "operation_attempts", found[1])
+    state.setdefault("operation_runs", {})[run["id"]] = run
+    state.setdefault("operation_attempts", {})[attempt["id"]] = attempt
+    if attempt["result_event_id"] is None:
+        raise ConsistencyError("自然等待缺少可靠原发送事件")
+    state.setdefault("history_events", {})[attempt["result_event_id"]] = _history_source_row(
+        connection, attempt["result_event_id"])
+
+
+def _verify_wait_basis(activity, action, state, *, occurred_at, complete, event_id=None):
+    """新旧自然定义统一核对真实 START、完整公式和完成真实时刻。"""
+    from .capture import _ATTEMPT_RESULT_EVENT, _history_source_event
+
+    try:
+        _validate_wait_values(activity)
+        if action is None or action["type"] != int(enum_for("actions.type").CAMERA_TIMELAPSE):
+            raise ValueError("自然等待不是延时任务")
+        spec = validate_capture_spec("camera_timelapse", action["execution_spec_json"])
+        if (not spec["duration_based"] or not spec["wait_after_send"]
+                or spec["end_control"] != int(EndControl.DEVICE)
+                or spec["start_return_meaning"] != int(StartReturn.SENT)
+                or spec["completion_mode"] != int(CompletionMode.TIME_AND_OUTPUTS)
+                or activity["action_id"] != action["id"]):
+            raise ValueError("自然等待缺少原有限自然任务合同")
+        runs = [run for run in state.get("operation_runs", {}).values()
+                if run["responsibility_key"] == f"start/{action['id']}"
+                and run["action_id"] == action["id"] and run["activity_id"] == activity["id"]]
+        if len(runs) != 1 or runs[0]["kind"] != int(enum_for("operation_runs.kind").START):
+            raise ValueError("自然等待 START 与原活动不符")
+        run = runs[0]
+        attempts = [attempt for attempt in state.get("operation_attempts", {}).values()
+                    if attempt["run_id"] == run["id"]]
+        attempt = max(attempts, key=lambda value: value["attempt_no"])
+        source = _history_source_event(state, attempt["result_event_id"])
+        rows = [row for row in source.rows if row.table == "operation_attempts" and row.row_id == attempt["id"]]
+        if (attempt["status"] != int(enum_for("operation_attempts.status").SUCCEEDED)
+                or attempt["effect_state"] != int(enum_for("operation_attempts.effect_state").CONFIRMED)
+                or source.event_type != _ATTEMPT_RESULT_EVENT or len(rows) != 1
+                or source.occurred_at != activity["sent_at"]
+                or (event_id is not None and source.event_id >= event_id)
+                or any(not json_equal(rows[0].after.values.get(name), attempt[name])
+                       for name in ("status", "effect_state", "result_json", "error_json"))):
+            raise ValueError("自然等待不匹配原可靠发送")
+        expected = CaptureTiming(spec["target_duration_ms"], spec.get("startup_margin_ms", 0),
+            spec["result_wait_margin_ms"], activity["extra_wait_ms_used"]).deadline_us(activity["sent_at"])
+        if (activity["result_wait_margin_ms"] != spec["result_wait_margin_ms"]
+                or activity["expected_check_at"] != expected):
+            raise ValueError("自然等待改变原启动余量、目标或发送锚点")
+        if complete and occurred_at < expected:
+            raise ValueError("自然等待实际完成时刻早于原预计时点")
+    except (KeyError, TypeError, ValueError, ConsistencyError) as error:
+        raise EventValidationError(str(error)) from error
+
+
+def _capture_wait_guard(event, context) -> None:
+    """三个分支共同验证合法自然任务、原来源、完整公式与完成资格。"""
     for row in event.rows:
         if row.table != "device_activities" or not row.before.exists:
             continue
@@ -316,18 +390,9 @@ def _capture_wait_guard(event, context) -> None:
         activity = dict(context.state_rows.get("device_activities", {}).get(row.row_id, {}))
         activity.update(row.after.values)
         action = context.state_rows.get("actions", {}).get(activity.get("action_id"))
-        if action is None:
-            raise EventValidationError("等待缺少原冻结动作定义")
-        spec = action.get("execution_spec_json", {})
-        if "startup_margin_ms" in spec:
-            try:
-                expected = CaptureTiming(spec["target_duration_ms"], spec["startup_margin_ms"],
-                    spec["result_wait_margin_ms"], activity["extra_wait_ms_used"]).deadline_us(activity["sent_at"])
-            except (KeyError, TypeError, ValueError) as error:
-                raise EventValidationError("等待缺少原可靠发送与冻结计时依据") from error
-            if (activity.get("result_wait_margin_ms") != spec["result_wait_margin_ms"]
-                    or activity.get("expected_check_at") != expected):
-                raise EventValidationError("等待改变原启动余量、目标或发送锚点")
+        _verify_wait_basis(activity, action, context.state_rows,
+            occurred_at=event.occurred_at, complete=event.reason == _WAIT_COMPLETED_REASON,
+            event_id=event.event_id)
 
 
 def _validate_wait_values(values) -> None:

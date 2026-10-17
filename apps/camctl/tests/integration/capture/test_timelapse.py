@@ -7,7 +7,6 @@ CAPTURE_WAIT_CHANGED 事件保存；重启后采用本次额外等待重算预�
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,38 +32,37 @@ from camctl.persistence.repositories.timelapse import (
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from ..persistence.test_runtime import _create_valid_database
-from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action
 
 register_timelapse_guards()
 
 _NOW = 1_750_000_000_000_000
 
 
-def _environment(tmp_path: Path):
-    target = tmp_path / "state.db"
-    _create_valid_database(target)
-    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)",
-        ("f" * 32,),
-    )
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
-    )
-    _seed_plan(connection, 1)
-    _seed_record_action(connection, 1, 1)
-    _seed_activity(connection, 1)
-    # 发送成功事实先行保存（sent_at），等待安排才允许建立预计检查。
-    connection.execute("UPDATE device_activities SET sent_at = ? WHERE id = 1", (_NOW,))
-    connection.commit()
-    return owned
+def _environment(tmp_path: Path, *, duration_ms=600000, driver_margin_ms=0):
+    """沿真实受理和 START 建立合法有限自然任务，不补造发送投影。"""
+    import asyncio
+    from decimal import Decimal
+    from .result_consumer_fixtures import ResultCatalog, consumer_world
+    from camctl.capture.handlers import _control_call
+
+    class WaitCatalog(ResultCatalog):
+        def parameter_definition(self, device_id, action_type, parameter_type):
+            definition = super().parameter_definition(device_id, action_type, parameter_type)
+            if definition is not None and action_type == "camera_timelapse":
+                factory = definition.task_factory
+                return replace(definition, task_factory=lambda params: replace(factory(params),
+                    target_duration_s=Decimal(duration_ms)/1000,
+                    result_wait_margin_s=Decimal(driver_margin_ms)/1000))
+            return definition
+
+    async def prepare():
+        owned, runtime, action_id, _ = await consumer_world(tmp_path, "timelapse",
+            catalog=WaitCatalog(), start=False)
+        assert action_id == 1
+        await _control_call(runtime, runtime.action(action_id), "start_timelapse", "timelapse_sent")
+        return owned
+
+    return asyncio.run(prepare())
 
 
 def _value(owned, sql: str, *params):
@@ -129,7 +127,7 @@ def test_same_wait_values_do_not_hide_invalid_input_types(tmp_path, field, value
 
 def test_schedule_saves_wait_plan_from_send_anchor(tmp_path: Path) -> None:
     """等待安排保存发送锚点推导的预计检查；DB 延迟不参与计算。"""
-    owned = _environment(tmp_path)
+    owned = _environment(tmp_path, duration_ms=1200000, driver_margin_ms=60000)
     repository = TimelapseRepository()
     try:
         config = CaptureWaitConfig(

@@ -429,7 +429,7 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | `occupancy_state` | `HELD`、`RELEASED`；包括设备和所属输出范围的冲突限制，不表示持有跨进程锁 |
 | `sent_at`、`started_at` | 实际可靠取得的 UTC 发送成功、开始时间；尚未取得时为空，不由重启时间补齐 |
 | `result_wait_margin_ms`、`extra_wait_ms_used`、`expected_check_at` | 本次等待的驱动余量、部署额外等待和预计检查时间；不采用该等待方式时为空 |
-| `wait_completed_event_id` | 已可靠保存等待结束时引用其事件，否则为空；配置变化不清除已有结束事实 |
+| `wait_completed_event_id` | 原自然等待的完整预计时点已满足且真实完成事件时刻不早于该时点时，引用可靠保存的完成事件，否则为空；配置变化不清除已有完成事实 |
 | `capture_json` | 单张拍摄与延时摄影的内部采集结果，结构见下文；进入采集处理前为空，录像为空。它保存采集阶段结果，不从动作终态或文件数量直接猜测 |
 | `control_elapsed_ns` | 本次连续单调钟计量或具有充分连续性证据的控制时长，以非负整数纳秒表示；不能证明时为空 |
 | `completion_basis` | 单张拍摄与延时摄影的采集判定：`UNDETERMINED`、`DEVICE_EVIDENCE`、`TIME_AND_OUTPUTS`、`KNOWN_FAILURE`；录像不适用，使用 SQL `NULL`，其停止和成功依据分别由活动、操作及录像处理记录保存 |
@@ -466,6 +466,8 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 发送成功后，处理模块立即取得单调钟锚点和 UTC 时间，再保存 `sent_at` 与等待安排。采用等待分支时，预计检查时间按原冻结定义及本次额外等待计算，所有乘加先检查整数范围；启动余量的适用范围、旧定义兼容及完整公式见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)。正常会话使用单调钟等待；恢复时在约定的可靠墙钟及设备独立运行前提下计算剩余时间，转换成本次单调钟等待。已有完成凭据仅跳过其能够证明的阶段。
 
 部署额外等待采用[本地配置](../../architecture/configuration.md#拍摄结果核实的额外等待)定义的 `devices.<id>.capture.extra_wait_ms`。未完成等待采用新值时保存新的 `extra_wait_ms_used` 和 `expected_check_at`，原 `sent_at` 不变。已保存等待完成后不重等。
+
+等待完成和结果页保留各自的真实发生时刻。自然完成的结果页不得早于原等待完成，新的文件事实不得早于其引用页；不合格实际页仍保留原调用和输入，后续校时不改变其完成资格。当前真实时间不足以承载原来源时，延后新读取或新文件事实；原合格申请沿原键和原时刻恢复。启动余量与原来源规则见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)，会话时钟边界见[时钟与恢复](../../architecture/clock-recovery.md)。
 
 | 恢复时的事实 | 持久化处理与执行边界 |
 | --- | --- |
