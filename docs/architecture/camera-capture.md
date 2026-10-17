@@ -335,6 +335,8 @@ Hasselblad CFV 100C 接入的拍摄能力仅为单张拍照，使用驱动 `hass
 
 录像的取消内容处理继续由[录像取消](camera-recording.md#camera_record-取消)定义。
 
+OSMO 360 II 原生延时的低功耗取消收场规则见[完成与正式业务接入设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md#低功耗期间的取消与异常)。
+
 ## 拍摄结果报告
 
 两种动作通过动作 `status`、适用的 `error` 和正式产物表达业务结果，省略 `result`。动作尚在执行时，缺少产物不表示最终没有产物；取消或失败后保留符合登记条件的实际产物。

@@ -129,7 +129,7 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'
 
 实机演示采用[参数限制](camera-control-handoff.md#间隔与采集时长限制)中的最短允许组合：采集间隔为 1 s，采集时长为 5 min（300 s），仅输出视频。该组合满足 `duration_s > interval_s`。其余模式、分辨率和曝光设置沿用下文已执行记录中的要求，实际参数仍需核实。
 
-这项演示使用的完整 `6c` 负载由[候选编码契约](../camctl/timelapse-command-encoding.md)生成；软件生成与派发验证已交付，本组合的手工现场结果见[验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。正式驱动仍须按 D2 明确工具、响应、结束及文件契约。300 秒只表示采集时长，参数准备、命令响应及最终文件处理的耗时分别记录；本次没有归档逐项参数读回或精确计时结果。
+这项演示使用的完整 `6c` 负载由[候选编码契约](../camctl/timelapse-command-encoding.md)生成；软件生成与派发验证已交付，本组合的手工现场结果见[验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。当前执行、结束及文件运行假设以[2026-10-18 完成设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)为准；正式实现、安装版联合链和 TX2 业务验收按[完成契约实施计划](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md)跟踪，设计不代表门禁通过。300 秒只表示采集时长，参数准备、命令响应及最终文件处理的耗时分别记录；本次没有归档逐项参数读回或精确计时结果。
 
 ### OSMO 360 II 的最短手工演示顺序
 

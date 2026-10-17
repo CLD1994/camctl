@@ -241,6 +241,8 @@ min(duration_s, recovery_wait_cap_s)
 
 ### 修复内容与文件处理
 
+OSMO 360 II 普通录像的逐流检查与修复边界见[完成与正式业务接入设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md#普通录像媒体检查与修复)。
+
 不允许调用方通过 `obtain_action_outputs` 主动指定：
 
 - 裁剪起点；
