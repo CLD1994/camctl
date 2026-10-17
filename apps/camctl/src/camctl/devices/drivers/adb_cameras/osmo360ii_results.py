@@ -100,14 +100,14 @@ class _ResultRead:
             return self.wait_error("wait_not_completed" if not self.completion["completed"] else "deadline_elapsed")
         return None
 
-    async def preview(self, filesystem, scope, original, complete):
-        observation = {"original_identity": original.path, "state": "completion_unknown",
+    async def preview(self, filesystem, scope, preview, complete, observation, observed_originals):
+        observation.update({"original_identity": None, "state": "completion_unknown",
             "osv_count": None, "lrf_count": None, "preview_identity": None, "size_bytes": None,
-            "scan_complete": False, "observed_original_identities": [], "observed_preview_identities": []}
-        self.previews.append(observation)
+            "scan_complete": False, "observed_original_identities": [], "observed_preview_identities": []})
+        observation["preview_identity"] = preview.path
         if not complete:
             return None
-        cursor, candidate, originals, previews = None, None, 0, 0
+        cursor, original_candidate, preview_candidate, originals, previews = None, None, None, 0, 0
         while True:
             if not self.available():
                 observation["state"] = "scan_unavailable"
@@ -120,17 +120,18 @@ class _ResultRead:
                 return None
             for identity in listing.page.items:
                 suffix = PurePosixPath(identity.path).suffix.lower()
-                if suffix not in (".osv", ".lrf") or _stem(identity.path) != _stem(original.path):
+                if suffix not in (".osv", ".lrf") or _stem(identity.path) != _stem(preview.path):
                     continue
                 if suffix == ".osv":
                     originals += 1
+                    original_candidate = identity if originals == 1 else None
                     if len(observation["observed_original_identities"]) < 2:
                         observation["observed_original_identities"].append(identity.path)
                 else:
                     previews += 1
                     if len(observation["observed_preview_identities"]) < 2:
                         observation["observed_preview_identities"].append(identity.path)
-                    candidate = identity if previews == 1 else None
+                    preview_candidate = identity if previews == 1 else None
             cursor = listing.page.next_cursor
             # 只保留计数及至多一个候选，不保留已扫描的目录条目。
             del listing
@@ -138,21 +139,25 @@ class _ResultRead:
                 break
         observation.update(osv_count=originals, lrf_count=previews, scan_complete=True)
         if originals == 0:
-            observation["state"] = "original_missing"
-            self.conflict = ErrorValue("osmo360ii_result_conflict", "device_file_completion",
-                {"reason": "original_missing", "identity": original.path})
+            original = next((item for item in observed_originals if _stem(item.path) == _stem(preview.path)), None)
+            if original is None:
+                observation["state"] = "missing_pair"
+            else:
+                observation["state"] = "original_missing"
+                self.conflict = ErrorValue("osmo360ii_result_conflict", "device_file_completion",
+                    {"reason": "original_missing", "identity": original.path})
             return None
         if originals > 1 or previews > 1:
             observation["state"] = "ambiguous"
             return None
-        if previews == 0:
-            observation["state"] = "missing"
+        if previews == 0 or preview_candidate.path != preview.path:
+            observation["state"] = "preview_missing"
             return None
-        observation["preview_identity"] = candidate.path
+        observation["original_identity"] = original_candidate.path
         if not self.available():
             observation["state"] = "metadata_unavailable"
             return None
-        metadata = await filesystem.metadata(candidate, timeout_s=self.remaining(), stop=_NeverStop())
+        metadata = await filesystem.metadata(preview, timeout_s=self.remaining(), stop=_NeverStop())
         self.remember(metadata.outcome, "preview_metadata")
         if metadata.error is not None:
             observation.update(state="metadata_failed", error_code=metadata.error.code)
@@ -162,7 +167,7 @@ class _ResultRead:
             observation["state"] = "zero_size"
             return None
         observation["state"] = "paired"
-        return _entry(candidate, metadata.value, True, paired=original.path)
+        return _entry(preview, metadata.value, True, paired=original_candidate.path)
 
 
 async def list_osmo360ii_results(driver, request, batch):
@@ -194,11 +199,20 @@ async def list_osmo360ii_results(driver, request, batch):
         "cursor": None if cursor is None else cursor.as_json(),
         "next_cursor": None if listing.page.next_cursor is None else listing.page.next_cursor.as_json(),
         "set_finalized": False, "completion_evidence": None}
-    originals, observed_previews = [], []
+    originals, preview_inputs, original_observations = [], [], {}
     for identity in listing.page.items:
         suffix = PurePosixPath(identity.path).suffix.lower()
         if suffix == ".lrf":
-            observed_previews.append(identity.path)
+            observation = {"preview_identity": identity.path, "state": "not_checked"}
+            read.previews.append(observation)
+            preview_inputs.append((identity, observation))
+        elif suffix == ".osv":
+            observation = {"original_identity": identity.path,
+                "state": "completion_unknown" if not complete else "not_observed_on_page"}
+            read.previews.append(observation)
+            original_observations[identity.path] = observation
+    for identity in listing.page.items:
+        suffix = PurePosixPath(identity.path).suffix.lower()
         if suffix != ".osv":
             continue
         if not read.available():
@@ -210,15 +224,23 @@ async def list_osmo360ii_results(driver, request, batch):
         if metadata.error is not None:
             return read.reply(metadata.error, page)
         originals.append(identity)
-    # 必要 OSV 元数据先全部取得，避免可选预览耗尽期限后阻塞同页原片。
-    for identity in originals:
-        preview = await read.preview(filesystem, scope, identity, complete)
+    # 必要 OSV 元数据先全部取得。预览在它自己的原目录页返回；
+    # 第二阶段扫描只提供配对身份。
+    entries = {entry["identity"]: entry for entry in page["entries"]}
+    for identity, observation in preview_inputs:
+        preview = await read.preview(filesystem, scope, identity, complete, observation, originals)
+        for original in originals:
+            if _stem(original.path) == _stem(identity.path):
+                original_observations[original.path].update(observation, original_identity=original.path)
         if preview is not None:
-            page["entries"].append(preview)
+            entries[identity.path] = preview
         if read.conflict is not None:
             break
-    paired = {entry["identity"] for entry in page["entries"] if entry["paired_identity"] is not None}
-    read.previews.extend({"preview_identity": path, "state": "observed_unregistered"}
-        for path in observed_previews if path not in paired)
+    if complete and cursor is None and listing.page.next_cursor is None:
+        # 只有单页覆盖整个范围时，本页未出现预览才能直接证明缺少预览。
+        for observation in original_observations.values():
+            if observation["state"] == "not_observed_on_page":
+                observation.update(state="missing", scan_complete=True)
+    page["entries"] = [entries[identity.path] for identity in listing.page.items if identity.path in entries]
     page["set_finalized"] = read.conflict is None and complete and listing.page.next_cursor is None
     return read.reply(read.conflict, page)
