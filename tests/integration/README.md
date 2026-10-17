@@ -27,7 +27,7 @@ apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parame
 
 `test_osmo_builtin_timelapse_roundtrip.py` 从源码目录外构建并安装当前 wheel 与锁定运行依赖，比较源码及安装版 `describe`，并核对安装 wheel 内的 OSMO 配置、普通录像和延时样例与权威资料逐字节一致。该模块共四个用例：一个源码／安装版能力与资源核对，以及三个业务组合——普通录像配 LRF、原生延时配 LRF、原生延时不配 LRF。
 
-业务链使用真实客户端计划导出、C host、安装版 CLI、SQLite、独立取回、报告导入及累计 ACK；只替换 PATH 中的 ADB 子进程边界和受控时钟入口。普通录像沿真实主机计时只发送一次 START，取得 `00` STOP 确认后等待完整 30 秒再读取文件；原生延时只发送一次 START、不派发 STOP，通过受控时钟推进 300 秒目标和 30 秒自然结束余量，并核对原 START、等待来源及结果页的先后关系。对原片和可选预览分别取回后，测试通过 `client_driver.ts import-media <客户端存储目录> <已领取文件路径> <输出凭据路径>` 调用客户端真实 `Files.upload`；保存回执核对报告中的 delivery、output 与源动作身份，并将导入文件大小和 SHA-256 与对应交付事实比对。测试还验证取回中断及同一请求恢复时沿用原交付和已提交偏移。
+业务链使用真实客户端计划导出、C host、安装版 CLI、SQLite、独立取回、报告导入及累计 ACK；只替换 PATH 中的 ADB 子进程边界和受控时钟入口。普通录像只发送一次 START，沿生产主机计时流程并通过受控时钟推进目标；取得 `00` STOP 确认后实际等待完整 30 秒再读取文件。原生延时只发送一次 START、不派发 STOP，通过受控时钟推进 300 秒目标和 30 秒自然结束余量，并核对原 START、等待来源及结果页的先后关系。对原片和可选预览分别取回后，测试通过 `client_driver.ts import-media <客户端存储目录> <已领取文件路径> <输出凭据路径>` 调用客户端真实 `Files.upload`；保存回执核对报告中的 delivery、output 与源动作身份，并将导入文件大小和 SHA-256 与对应交付事实比对。测试还验证取回中断及同一请求恢复时沿用原交付和已提交偏移。
 
 ADB 提供的 OSV／LRF 是合成字节样例，不证明真实媒体可解码、设备画质、帧率或采集时长；受控时钟也不等于真实设备计时。本链的执行命令为：
 
