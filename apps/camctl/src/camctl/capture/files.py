@@ -204,6 +204,7 @@ class FileCompletionSave:
     media_type: str | None = None
     result_page_event_id: int | None = None
     stop_result_event_id: int | None = None
+    start_result_event_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.file_id)
@@ -224,19 +225,25 @@ class FileCompletionSave:
                     raise ValueError("等待与产物契约依据必须引用任务及等待完成事件")
                 ObjectId(self.activity_id)
                 ObjectId(self.wait_completed_event_id)
-                if self.result_page_event_id is not None or self.stop_result_event_id is not None:
-                    raise ValueError("等待与产物契约依据不携带停止后等待引用")
+                if self.stop_result_event_id is not None:
+                    raise ValueError("自然等待不携带停止结果引用")
+                if (self.result_page_event_id is None) != (self.start_result_event_id is None):
+                    raise ValueError("原生文件完成须共同引用原发送结果及结果页")
+                for value in (self.result_page_event_id, self.start_result_event_id):
+                    if value is not None:
+                        ObjectId(value)
             elif basis == _STOP_RETURN_AND_WAIT:
                 if any(value is None for value in (
                         self.activity_id, self.result_page_event_id, self.stop_result_event_id)):
                     raise ValueError("停止后等待依据必须引用原活动、结果页和停止结果")
                 for value in (self.activity_id, self.result_page_event_id, self.stop_result_event_id):
                     ObjectId(value)
-                if self.wait_completed_event_id is not None:
-                    raise ValueError("停止后等待依据不引用延时等待完成事件")
+                if self.wait_completed_event_id is not None or self.start_result_event_id is not None:
+                    raise ValueError("停止后等待依据不引用延时自然等待依据")
             elif self.activity_id is not None or self.wait_completed_event_id is not None:
                 raise ValueError("只有等待与产物契约依据引用任务及等待完成事件")
-            elif self.result_page_event_id is not None or self.stop_result_event_id is not None:
+            elif (self.result_page_event_id is not None or self.stop_result_event_id is not None
+                    or self.start_result_event_id is not None):
                 raise ValueError("设备保证依据不携带停止后等待引用")
             if self.error is not None:
                 raise ValueError("完成状态不携带失败证据")
@@ -244,7 +251,8 @@ class FileCompletionSave:
             if self.size_bytes is not None:
                 raise ValueError("只有完成状态携带完整大小")
             if (self.activity_id is not None or self.wait_completed_event_id is not None
-                    or self.result_page_event_id is not None or self.stop_result_event_id is not None):
+                    or self.result_page_event_id is not None or self.stop_result_event_id is not None
+                    or self.start_result_event_id is not None):
                 raise ValueError("只有等待与产物契约依据引用任务及等待完成事件")
             if state == _WRITING:
                 if self.basis is not None:
@@ -273,6 +281,9 @@ class FileCompletionSave:
         if self.basis == _TIME_AND_OUTPUTS:
             document["activity_id"] = self.activity_id
             document["wait_completed_event_id"] = self.wait_completed_event_id
+            if self.result_page_event_id is not None:
+                document.update(result_page_event_id=self.result_page_event_id,
+                    start_result_event_id=self.start_result_event_id)
         elif self.basis == _STOP_RETURN_AND_WAIT:
             document.update(activity_id=self.activity_id, result_page_event_id=self.result_page_event_id,
                             stop_result_event_id=self.stop_result_event_id)

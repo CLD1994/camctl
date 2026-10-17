@@ -556,6 +556,7 @@ class FileRegistration:
     wait_completed_event_id: int | None = None
     result_page_event_id: int | None = None
     stop_result_event_id: int | None = None
+    start_result_event_id: int | None = None
     captured_checksums: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -1819,6 +1820,7 @@ def _register_observed(
                     wait_completed_event_id=registration.wait_completed_event_id,
                     result_page_event_id=registration.result_page_event_id,
                     stop_result_event_id=registration.stop_result_event_id,
+                    start_result_event_id=registration.start_result_event_id,
                     observation=entry.evidence,
                     size_bytes=entry.size_bytes,
                 ))
@@ -2236,7 +2238,7 @@ def _settle_unstarted_attempt(runtime: CaptureRuntime, action, attempt) -> bool:
 
 def _catalog_drafts(
     registered: tuple[tuple[CaptureFile, int], ...],
-    entries: tuple[ObservedFile, ...],
+    entries: tuple[ObservedFile, ...], *, product_rules: tuple[ProductRule, ...] = (),
 ) -> tuple[OutputDraft, ...]:
     """按登记结果构造产物目录草稿：原片与预览按配对分别登记。"""
     if isinstance(registered, RegisteredSourceFiles):
@@ -2244,11 +2246,17 @@ def _catalog_drafts(
     file_ids = {
         entry.identity: file_id
         for (_, file_id), entry in zip(registered, entries)}
+    def eligible(entry):
+        return all(rule.min_size_bytes is None or (
+            entry.size_bytes is not None and entry.size_bytes >= rule.min_size_bytes)
+            for rule in product_rules if entry.kind is rule.kind
+            and (rule.format_id is None or entry.format_id == rule.format_id))
+
     complete_originals = {entry.identity for entry in entries
-                          if entry.complete and entry.paired_identity is None}
+                          if entry.complete and entry.paired_identity is None and eligible(entry)}
     drafts = []
     for (_, file_id), entry in zip(registered, entries):
-        if not entry.complete:
+        if not entry.complete or not eligible(entry):
             continue
         if entry.paired_identity is None:
             drafts.append(OutputDraft(
@@ -2286,7 +2294,8 @@ def _finish_capture(
         CaptureFileSet(files=(file for file, _ in registered), set_finalized=set_finalized),
         _product_requirements(runtime.action(action_id), required),
     )
-    drafts = _catalog_drafts(registered, entries)
+    drafts = _catalog_drafts(registered, entries,
+        product_rules=_product_requirements(runtime.action(action_id), required).rules)
     if repair_file_id is not None:
         original_file_ids = [
             file_id for (_, file_id), entry in zip(registered, entries)
@@ -2613,7 +2622,8 @@ def _binding_failure_files(runtime: CaptureRuntime, action) -> tuple[OutputDraft
         return ()
     listing = _saved_result_listing(runtime, action["id"])
     registered = _register_listing(runtime, action["id"], listing)
-    return _catalog_drafts(registered, listing.entries)
+    return _catalog_drafts(registered, listing.entries,
+        product_rules=_product_requirements(action, FileKind.VIDEO).rules)
 
 
 async def _photo_handler(action_id: int, context: CaptureRuntime) -> None:
@@ -3142,6 +3152,25 @@ def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | None:
     return None if row is None else int(row[0])
 
 
+def _record_media_source(registered, entries, *, source_file_id=None):
+    """只保留一个完整原片及其原格式，拒绝由目录顺序选择修复输入。"""
+    selected, count = None, 0
+    for (file, identity), entry in zip(registered, entries, strict=True):
+        if file.file_id != entry.identity:
+            raise ConsistencyError("录像来源与原结果条目顺序不一致")
+        if (entry.complete and entry.kind is FileKind.VIDEO
+                and entry.size_bytes is not None and entry.size_bytes > 0
+                and entry.paired_identity is None and entry.format_id != "lrf"):
+            count += 1
+            if count == 1:
+                selected = (identity, entry.format_id)
+    if count != 1:
+        return None
+    if source_file_id is not None and selected[0] != source_file_id:
+        raise ConsistencyError("录像处理不能改选已经固定的原片身份")
+    return selected
+
+
 def _record_file_completion_context(runtime: CaptureRuntime, action_id: int) -> dict | None:
     """原 START/STOP 均可靠时，冻结 RESULT 采用的停止与等待依据。"""
     action = runtime.action(action_id)
@@ -3213,6 +3242,8 @@ def _natural_file_completion_context(runtime: CaptureRuntime, action_id: int) ->
         waited = cursor.fetchone()
     if waited is None:
         raise ConsistencyError("延时文件完成缺少原可靠等待事件")
+    if activity["result_wait_margin_ms"] != spec["result_wait_margin_ms"]:
+        raise ConsistencyError("自然文件完成使用的余量与原冻结规则不符")
     context = {"kind": CompletionContextKind.TIMELAPSE_NATURAL.value,
         "activity_id": str(activity["id"]), "start_result_event_id": int(start[2]),
         "start_response": {"status": int(start[0]), "effect_state": int(start[1]),
@@ -3317,9 +3348,8 @@ async def _save_winddown_progress(
     registered = _register_listing(runtime, action_id, listing)
     # 保守收场只保存待检查进度；核实与处理尚未终局，沿原责任保留等待。
     _finish_listing_result(runtime, listing, retry_wait=True)
-    source_file_id = next(
-        (file_id for (file, file_id), entry in zip(registered, entries)
-         if entry.complete and entry.kind is FileKind.VIDEO), None)
+    media_source = _record_media_source(registered, entries, source_file_id=row[6])
+    source_file_id = None if media_source is None else media_source[0]
     if source_file_id is None:
         # 尚无写完的完整原片可归属：不能用等待阶段代替文件证据。
         return False
@@ -3526,9 +3556,8 @@ async def _advance_recording_outcome(
         CaptureFileSet(files=(file for file, _ in registered), set_finalized=_listing_finalized(listing)),
         _product_requirements(action, FileKind.VIDEO),
     )
-    source_file_id = next(
-        (file_id for (file, file_id), entry in zip(registered, entries)
-         if entry.complete and entry.kind is FileKind.VIDEO), None)
+    media_source = _record_media_source(registered, entries, source_file_id=row[6])
+    source_file_id = None if media_source is None else media_source[0]
     if cached is None and files.is_complete and context.listing_cache is not None and (
             row[6] is not None or source_file_id is not None):
         # 完整原片已归属且媒体链推进中：已保存观察足以继续装载，等
@@ -3543,7 +3572,8 @@ async def _advance_recording_outcome(
             if row[6] is None:
                 _save_source_file(context, int(row[0]), source)
             await run_recording_media(
-                context.media, action_id, int(row[0]), source)
+                context.media, action_id, int(row[0]), source,
+                target_extension="osv" if media_source is not None and media_source[1] == "osv" else "mp4")
             row = _load_processing_row(context, action_id)
             action = context.action(action_id)
             if action["cancel_requested"]:
@@ -3916,7 +3946,8 @@ async def _close_canceled_timelapse(
     registered = _register_listing(context, action_id, listing)
     _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED,
                            finalize_output_set=True)
-    drafts = _catalog_drafts(registered, entries)
+    drafts = _catalog_drafts(registered, entries,
+        product_rules=_product_requirements(context.action(action_id), FileKind.VIDEO).rules)
     activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
     if activity["activity_state"] == 3:
         _release_occupancy(context, action_id)
@@ -4076,13 +4107,21 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                 if not batch:
                     continue
                 pairs = {entry.paired_identity: entries.find(entry.paired_identity,
-                         allow_missing=not listing.scan_complete)
+                         allow_missing=True)
                          for entry in batch if entry.paired_identity is not None}
-                if not listing.scan_complete:
-                    # 尚未读到的原片不形成配对依据；可靠页仍保留预览输入。
-                    batch = tuple(entry for entry in batch if entry.paired_identity is None
-                                  or pairs[entry.paired_identity] is not None)
-                    pairs = {identity: pair for identity, pair in pairs.items() if pair is not None}
+                rules = _product_requirements(action, FileKind.VIDEO).rules
+                def optional_preview(entry):
+                    return bool(rules) and not any(rule.kind is entry.kind
+                        and (rule.format_id is None or rule.format_id == entry.format_id)
+                        and rule.min_count > 0 for rule in rules)
+                if listing.scan_complete and any(entry.paired_identity is not None
+                        and pairs[entry.paired_identity] is None and not optional_preview(entry)
+                        for entry in batch):
+                    raise ConsistencyError("必要预览的配对原片不属于原任务的完整差集")
+                # 原片在后页时等待；完整差集仍没有原片的可选预览保留发现事实而不登记。
+                batch = tuple(entry for entry in batch if entry.paired_identity is None
+                              or pairs[entry.paired_identity] is not None)
+                pairs = {identity: pair for identity, pair in pairs.items() if pair is not None}
                 if not batch:
                     continue
                 if record_wait and any(entry.complete for entry in batch):
@@ -4101,8 +4140,11 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                         if wait_event is not None else _DEVICE_GUARANTEE,
                     completion_activity_id=activity["id"] if record_wait or wait_event is not None else None,
                     wait_completed_event_id=wait_event,
-                    result_page_event_id=saved.ref.event_id if record_wait else None,
-                    stop_result_event_id=None if stop_context is None else stop_context["stop_result_event_id"]))
+                    result_page_event_id=saved.ref.event_id if record_wait or (
+                        wait_event is not None and completion_context is not None) else None,
+                    stop_result_event_id=None if stop_context is None else stop_context["stop_result_event_id"],
+                    start_result_event_id=completion_context["start_result_event_id"]
+                        if wait_event is not None and completion_context is not None else None))
         return RegisteredSourceFiles(SourceResultEntries(runtime.capture, runtime.owned, listing.ticket))
     return _register_observed(runtime, action_id, listing.entries, occurred_at=listing.occurred_at,
                               registered_files=listing.registered_files)

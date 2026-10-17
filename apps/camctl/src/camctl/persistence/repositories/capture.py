@@ -5838,6 +5838,120 @@ def _verify_stop_wait_file(facts, evidence, size, state, *, event_id=None):
         raise ConsistencyError("文件完成复用的等待没有匹配的原实际等待页") from error
 
 
+def _verify_natural_wait_file(facts, evidence, size, state, *, event_id=None):
+    """自然完成引用原发送、实际等待和文件页；不借用其他活动的完成事实。"""
+    from .result_pages import _decode
+    from camctl.devices.capture_completion import validate_completion_context
+    from camctl.devices.tasks import CompletionMode, EndControl, StartReturn
+    from camctl.history.events import load_event_registry
+
+    fields = {"basis", "observation", "activity_id", "wait_completed_event_id",
+              "result_page_event_id", "start_result_event_id"}
+    if not isinstance(evidence, Mapping) or set(evidence) != fields:
+        raise ConsistencyError("原生文件完成缺少原发送、等待或结果页的完整引用")
+    activity = _source_fact(state, "device_activities", evidence["activity_id"])
+    action = _source_fact(state, "actions", activity["action_id"])
+    spec = action["execution_spec_json"]
+    if (action["type"] != int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+            or "file_completion_wait_ms" not in spec
+            or not spec["wait_after_send"] or spec["start_return_meaning"] != int(StartReturn.SENT)
+            or spec["end_control"] != int(EndControl.DEVICE)
+            or spec["completion_mode"] != int(CompletionMode.TIME_AND_OUTPUTS)):
+        raise ConsistencyError("原生文件完成与原有限设备任务不符")
+    page_event = _history_source_event(state, evidence["result_page_event_id"])
+    start_event = _history_source_event(state, evidence["start_result_event_id"])
+    wait_event = _history_source_event(state, evidence["wait_completed_event_id"])
+    if (not start_event.event_id < wait_event.event_id < page_event.event_id
+            or (event_id is not None and page_event.event_id >= event_id)):
+        raise ConsistencyError("自然文件完成的原事件时序不符")
+    start_rows = [row for row in start_event.rows if row.table == "operation_attempts"]
+    if start_event.event_type != _ATTEMPT_RESULT_EVENT or len(start_rows) != 1:
+        raise ConsistencyError("自然文件完成没有原实际发送结果")
+    original, = start_rows
+    attempt = _source_fact(state, "operation_attempts", original.row_id)
+    run = _source_fact(state, "operation_runs", attempt["run_id"])
+    if (attempt["result_event_id"] != start_event.event_id
+            or run["kind"] != int(_RUN_KIND.START) or run["action_id"] != action["id"]
+            or run["activity_id"] != activity["id"]
+            or run["responsibility_key"] != f"start/{action['id']}"
+            or start_event.occurred_at != activity["sent_at"]
+            or any(not json_equal(original.after.values.get(name), attempt[name])
+                for name in ("status", "effect_state", "result_json", "error_json"))):
+        raise ConsistencyError("自然文件完成的原发送与活动、任务或实际结果不符")
+    wait_branch = load_event_registry()["events"]["CAPTURE_WAIT_CHANGED"]
+    wait_rows = [row for row in wait_event.rows if row.table == "device_activities"]
+    if (wait_event.event_type != wait_branch["id"]
+            or wait_event.reason != wait_branch["branches"]["COMPLETE"]["reason"]
+            or len(wait_rows) != 1 or wait_rows[0].row_id != activity["id"]
+            or wait_rows[0].after.values.get("wait_completed_event_id") != wait_event.event_id
+            or activity["wait_completed_event_id"] != wait_event.event_id
+            or activity["result_wait_margin_ms"] != spec["result_wait_margin_ms"]):
+        raise ConsistencyError("自然文件完成没有同活动、同规则的实际等待完成事件")
+    validate_completion_context({"kind": "timelapse_natural", "activity_id": str(activity["id"]),
+        "start_result_event_id": start_event.event_id,
+        "start_response": {"status": attempt["status"], "effect_state": attempt["effect_state"],
+            "result": attempt["result_json"], "error": attempt["error_json"]},
+        "sent_at_us": activity["sent_at"], "wait_completed_event_id": wait_event.event_id,
+        "wait_completed_at_us": wait_event.occurred_at,
+        "target_duration_ms": spec["target_duration_ms"],
+        "result_wait_margin_ms": activity["result_wait_margin_ms"],
+        "extra_wait_ms": activity["extra_wait_ms_used"],
+        "expected_check_at_us": activity["expected_check_at"]}, activity_id=str(activity["id"]))
+    saved, _ = _decode(page_event)
+    _verify_record_result_page(saved, page_event, action, activity, state)
+    identity = parse_exact_json(facts["identity_key"])
+    observer = _source_fact(state, "actions", facts["observer_action_id"])
+    if (not isinstance(identity, list) or len(identity) != 3
+            or identity[:2] != list(_capture_binding(action))
+            or _capture_binding(observer) != _capture_binding(action)
+            or facts["source_action_id"] != action["id"]
+            or (identity[2], facts["id"]) not in saved.file_ids):
+        raise ConsistencyError("自然文件完成的原身份、来源或固定绑定与原页不符")
+    entries = [entry for entry in saved.page.entries if entry.identity == identity[2]]
+    if (len(entries) != 1 or not entries[0].complete
+            or not json_equal(entries[0].size_bytes, size)
+            or not json_equal(entries[0].evidence, evidence["observation"])
+            or not json_equal(entries[0].locator, facts["locator_json"])):
+        raise ConsistencyError("自然文件完成改变了原页观察、长度或定位")
+
+
+def _load_natural_wait_file_sources(scope, facts, evidence, state):
+    from .result_pages import _at, read_page
+
+    connection = scope.connection
+    if not {"result_page_event_id", "start_result_event_id", "wait_completed_event_id"} <= set(evidence):
+        raise ConsistencyError("原生文件完成须引用原发送、等待和结果页")
+    saved, _ = _at(connection, evidence["result_page_event_id"])
+    read_page(saved.ref, scope)
+    events = state.setdefault("history_events", {})
+    for identity in (evidence["result_page_event_id"], evidence["start_result_event_id"],
+                     evidence["wait_completed_event_id"]):
+        events[identity] = _history_source_row(connection, identity)
+    start = _history_source_event(state, evidence["start_result_event_id"])
+    start_rows = [row for row in start.rows if row.table == "operation_attempts"]
+    if len(start_rows) != 1:
+        raise ConsistencyError("自然文件完成缺少唯一原发送尝试")
+    page = _history_source_event(state, evidence["result_page_event_id"])
+    for identity in (start_rows[0].row_id, page.evidence["attempt_id"]):
+        attempt = row_facts(connection, "operation_attempts", identity)
+        if attempt is None:
+            raise ConsistencyError("自然文件完成缺少原实际尝试")
+        state.setdefault("operation_attempts", {})[identity] = attempt
+        run = row_facts(connection, "operation_runs", attempt["run_id"])
+        if run is None:
+            raise ConsistencyError("自然文件完成缺少原操作流程")
+        state.setdefault("operation_runs", {})[run["id"]] = run
+    activity = row_facts(connection, "device_activities", evidence["activity_id"])
+    if activity is None:
+        raise ConsistencyError("自然文件完成缺少原活动")
+    state.setdefault("device_activities", {})[activity["id"]] = activity
+    for action_id in (activity["action_id"], facts["observer_action_id"]):
+        action = row_facts(connection, "actions", action_id)
+        if action is None:
+            raise ConsistencyError("自然文件完成缺少原动作")
+        state.setdefault("actions", {})[action_id] = action
+
+
 def _load_stop_wait_file_sources(scope, facts, evidence, state):
     """装入文件页、原 STOP 及至多一条原等待页，供保存和守卫共同消费。"""
     from .result_pages import _at, read_page
@@ -5878,6 +5992,12 @@ def _load_stop_wait_file_sources(scope, facts, evidence, state):
         state.setdefault("actions", {})[action_id] = action
 
 
+def _native_wait_file(facts, state):
+    action = _source_fact(state, "actions", facts["source_action_id"] or facts["observer_action_id"])
+    return (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
+            and "file_completion_wait_ms" in action["execution_spec_json"])
+
+
 def _wait_record_file(facts, state, basis):
     """已归属或最初观察者的固定定义识别需单独等待的录像文件。"""
     action_id = facts["source_action_id"] or facts["observer_action_id"]
@@ -5911,6 +6031,14 @@ class _FileCompleteCommand:
         command = self._command
         facts = self._load(connection, command.file_id)
         current = facts["completion_state"]
+        if (command.state == int(_FILE_COMPLETION.COMPLETE)
+                and command.basis == int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
+                and (command.result_page_event_id is not None or _native_wait_file(facts, self._state))):
+            _load_natural_wait_file_sources(scope, facts, command.completion_evidence(), self._state)
+            prospective = {**facts, "locator_json": facts["locator_json"]
+                if command.locator is None else dict(command.locator)}
+            _verify_natural_wait_file(prospective, command.completion_evidence(), command.size_bytes,
+                self._state, event_id=scope.max_event_id + 1)
         if (command.state == int(_FILE_COMPLETION.COMPLETE)
                 and command.basis == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)):
             _load_stop_wait_file_sources(scope, facts, command.completion_evidence(), self._state)
@@ -6193,7 +6321,10 @@ def _device_file_row_guard(event, row, context) -> None:
                          or not is_json_integer(evidence.get("wait_completed_event_id")))):
                 raise EventValidationError("等待与产物契约依据必须引用任务及等待完成事件")
             try:
-                if evidence["basis"] == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT):
+                if (evidence["basis"] == int(_COMPLETION_BASIS.TIME_AND_OUTPUTS)
+                        and ("result_page_event_id" in evidence or _native_wait_file(facts, context.state_rows))):
+                    _verify_natural_wait_file(observed, evidence, size, context.state_rows, event_id=event.event_id)
+                elif evidence["basis"] == int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT):
                     _verify_stop_wait_file(observed, evidence, size, context.state_rows, event_id=event.event_id)
                 elif (evidence["basis"] != int(_COMPLETION_BASIS.STOP_RETURN_AND_WAIT)
                         and _wait_record_file(facts, context.state_rows, evidence["basis"])):
