@@ -56,15 +56,19 @@ def _scenario():
     params = json.loads(os.environ["CAMCTL_OSMO_TEST_PARAMS"])
     if params.get("type") not in ("osmo360ii_record", "osmo360ii_timelapse"):
         raise ValueError("OSMO 测试参数没有正式参数类型")
+    preview_flag = os.environ.get("CAMCTL_OSMO_TEST_INCLUDE_PREVIEW")
+    if preview_flag not in ("0", "1"):
+        raise ValueError("OSMO 测试场景必须明确声明是否包含 LRF")
     model = CameraModel.OSMO360II
     settings = tuple(tuple(command) for command in
                      settings_from_effective_params(model, action_type, params))
-    return action_type, params, settings, tuple(start_for(model, action_type)), tuple(stop_for(model, action_type))
+    return (action_type, params, settings, tuple(start_for(model, action_type)),
+            tuple(stop_for(model, action_type)), preview_flag == "1")
 
 
 def _control(script: str, *, root: Path, calls_path: Path):
     started_ns = time.monotonic_ns()
-    action_type, _, settings, start, stop = _scenario()
+    action_type, _, settings, start, stop, include_preview = _scenario()
     words = tuple(shlex.split(script))
     if words in settings:
         kind = "setting"
@@ -88,7 +92,8 @@ def _control(script: str, *, root: Path, calls_path: Path):
         if video.exists() or preview.exists():
             raise ValueError("START 目标路径在本场景开始前已经存在")
         shutil.copyfile(source, video)
-        shutil.copyfile(source.with_suffix(".lrf"), preview)
+        if include_preview:
+            shutil.copyfile(source.with_suffix(".lrf"), preview)
     elif words == stop:
         kind = "stop"
         payload = "df" if action_type == "camera_timelapse" else "00"
@@ -117,6 +122,7 @@ def _control(script: str, *, root: Path, calls_path: Path):
                 time.sleep(0.02)
         _append(calls_path, {
             "kind": "start_response", "response": payload,
+            "cwd": os.getcwd(), "python": sys.executable, "argv": sys.argv,
             "returned_ns": time.monotonic_ns(), "exitcode": 0,
             "returned_clock_ns": _clock_ns(),
         })

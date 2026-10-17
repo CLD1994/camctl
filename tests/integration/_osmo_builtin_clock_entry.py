@@ -84,9 +84,17 @@ def main() -> int:
         offset_path = Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_FILE"])
         controlled_time = _controlled_time(offset_path)
         _install_clock_ports(controlled_time)
-        from camctl.cli import main as camctl_main
+        import camctl
+        from camctl import cli as camctl_cli
+        from camctl.devices.drivers.adb_cameras import osmo360ii_capture, osmo360ii_results
 
-        exitcode = camctl_main(sys.argv[1:])
+        record["import_origins"] = {
+            "camctl": camctl.__file__,
+            "camctl.cli": camctl_cli.__file__,
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": osmo360ii_capture.__file__,
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": osmo360ii_results.__file__,
+        }
+        exitcode = camctl_cli.main(sys.argv[1:])
         record["exitcode"] = int(exitcode)
         return int(exitcode)
     except BaseException as error:
