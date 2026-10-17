@@ -5,11 +5,14 @@ REPAIRED 登记核对承载文件尚未提升且修复成功事实齐备；LIFEC
 受配对核对约束。
 """
 
+from dataclasses import replace
+from unittest.mock import create_autospec
+
 import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.history import validators
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import ReadCoverage, CurrentEventReads
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.transaction import event_envelope, row_change, update_change
@@ -89,7 +92,24 @@ def _promotion_event(after_retention: int = 3):
 
 def test_registered_repaired_accepts_promotable_file(output_guard) -> None:
     """未提升的完整修复输出配修复成功事实：登记可以进入。"""
-    output_guard(_registered_event(), _registered_context(_states()))
+    reader = create_autospec(CurrentEventReads, instance=True, spec_set=True)
+    reader.repair_media_proof.return_value = None
+    output_guard(_registered_event(), replace(_registered_context(_states()),current_reads=reader))
+    reader.repair_media_proof.assert_called_once_with(1,5,21,saved=True)
+
+
+@pytest.mark.parametrize("case", ["missing", "rejected"])
+def test_registered_repaired_requires_independent_media_proof(output_guard,case):
+    from camctl.contracts.values import ConsistencyError
+    context = _registered_context(_states())
+    if case == "rejected":
+        reader = create_autospec(CurrentEventReads, instance=True, spec_set=True)
+        reader.repair_media_proof.side_effect = ConsistencyError("原成品媒体资格不符")
+        context = replace(context,current_reads=reader)
+    with pytest.raises(EventValidationError):
+        output_guard(_registered_event(),context)
+    if case == "rejected":
+        reader.repair_media_proof.assert_called_once_with(1,5,21,saved=True)
 
 
 @pytest.mark.parametrize("retention", [2, 3, 4])

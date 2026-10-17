@@ -9,7 +9,7 @@ from camctl.history.reads import ReadCoverage
 from camctl.history.validators import EventValidationError
 from camctl.persistence.transaction import row_change
 
-from .test_registration_source_guard import _registration, output_guard
+from .test_registration_source_guard import _registration, _repair_reader, output_guard
 
 
 @pytest.mark.parametrize("kind", [2, 3])
@@ -60,7 +60,12 @@ def _existing_derivative(context, kind):
 def test_other_derivative_kind_does_not_block_registration(output_guard, kind):
     event, context = _registration(kind)
     _existing_derivative(context, 3 if kind == 2 else 2)
+    if kind == 2:
+        reader = _repair_reader()
+        context = replace(context,current_reads=reader)
     output_guard(event, context)
+    if kind == 2:
+        reader.repair_media_proof.assert_called_once_with(1,5,11,saved=True)
 
 
 @pytest.mark.parametrize("case", ["unpaired", "no_evidence", "wrong_original"])

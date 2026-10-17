@@ -1414,7 +1414,8 @@ class FinishCaptureCommand:
         expected = self._draft_identities()
         if set(registered) != set(expected):
             raise TransactionError("原完成登记的产物集合与重送输入不同")
-        self._verify_recovered_outputs(connection, registered)
+        self._verify_recovered_outputs(connection, registered,
+            at_event_id=saved[0]["transaction"].last_event_id)
         if (not self._canceled and self._failure is None
                 and current_action is not None
                 and current_action["type"] == _ACTION_TYPE.CAMERA_TAKE_PHOTO):
@@ -1506,17 +1507,32 @@ class FinishCaptureCommand:
             rows[identity] = facts
         return rows[identity]
 
-    def _verify_recovered_outputs(self, connection, registered):
-        """原事务和新键恢复均复核元信息、完整摘要及明确配对。"""
+    def _verify_recovered_outputs(self, connection, registered, *, at_event_id=None):
+        """原事务和新键恢复复核目录，并沿原登记边界核对修复媒体。"""
         command = self._command
         if command.catalog_facts is not None:
             validate_output_registration(command.drafts, command.catalog_facts)
+        processing_id = None
+        if any(draft.kind is OutputKind.REPAIRED for draft in command.drafts):
+            with closing(connection.execute(
+                "SELECT id FROM recording_processing WHERE action_id=? LIMIT 2",
+                (command.action_id,))) as cursor:
+                processing = cursor.fetchmany(2)
+            if len(processing) != 1:
+                raise ConsistencyError("恢复的修复产物缺少原动作唯一媒体处理")
+            processing_id = processing[0][0]
         originals = {FileReference(draft.file.device_file_id, draft.file.intermediate_file_id): registered[identity]
                      for draft, identity in zip(command.drafts, self._draft_identities())
                      if draft.kind is OutputKind.ORIGINAL}
         for draft, identity in zip(command.drafts, self._draft_identities()):
             output_id = registered[identity]
             output = self._required(connection, "outputs", output_id)
+            if draft.kind is OutputKind.REPAIRED:
+                boundary = output["created_event_id"]
+                if at_event_id is not None:
+                    boundary = min(boundary, at_event_id)
+                require_repair_media_proof(connection, command.action_id, processing_id,
+                    draft.file.intermediate_file_id, saved=True, at_event_id=boundary)
             if draft.file.intermediate_file_id is not None and draft.kind is not OutputKind.REPAIRED:
                 if output["original_name"] != draft.original_name or output["media_type"] != draft.media_type:
                     raise ConsistencyError("恢复的主机产物元信息与原登记不同")

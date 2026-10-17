@@ -2,12 +2,13 @@
 
 from copy import deepcopy
 from dataclasses import replace
+from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.history import validators
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import ReadCoverage, CurrentEventReads
 from camctl.history.validators import EventContext, EventValidationError
 from camctl.outputs.catalog import OutputCatalogFacts
 from camctl.persistence.repositories.capture import FinishCapture, register_capture_guards
@@ -80,6 +81,12 @@ def output_guard(monkeypatch):
     return validators.NAMED_GUARDS["output"]
 
 
+def _repair_reader():
+    reader = create_autospec(CurrentEventReads,instance=True,spec_set=True)
+    reader.repair_media_proof.return_value = None
+    return reader
+
+
 @pytest.mark.parametrize("kind,source_type", [(1, 1), (1, 2), (1, 3), (2, 2), (3, 1), (3, 2), (3, 3)])
 def test_output_guard_accepts_matching_source(output_guard, kind, source_type):
     from camctl.acceptance.definitions import read_action_spec
@@ -91,7 +98,12 @@ def test_output_guard_accepts_matching_source(output_guard, kind, source_type):
         assert read_action_spec(context.state_rows["actions"][1]) == {}
     else:
         context.state_rows["actions"][1]["type"] = source_type
+    if kind == 2:
+        reader = _repair_reader()
+        context = replace(context,current_reads=reader)
     output_guard(event, context)
+    if kind == 2:
+        reader.repair_media_proof.assert_called_once_with(1,5,11,saved=True)
 
 
 @pytest.mark.parametrize("kind", [1, 2, 3])
