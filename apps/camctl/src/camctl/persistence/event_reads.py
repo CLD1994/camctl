@@ -168,3 +168,15 @@ class SqlEventReads:
         if type(target) is not int or target <= 0:
             return ()
         return saved_osv_input_issues(self.connection, records[0][0], target)
+
+    def repair_media_proof(self, action_id: int, processing_id: int, output_file_id: int,
+            *, output_probe=None, saved: bool = False) -> None:
+        """原计划范围内独立核对原处理和本次修复输出的媒体资格。"""
+        from camctl.capture.media_facts import require_repair_media_proof
+        if not isinstance(self.scope, PlanReadScope):
+            raise ConsistencyError("修复媒体复核要求原计划读取范围")
+        action = self.required("actions", action_id)
+        if action["plan_id"] != self.scope.plan_id:
+            raise ConsistencyError("修复媒体不属于原计划")
+        require_repair_media_proof(self.connection, action_id, processing_id, output_file_id,
+            output_probe=output_probe, saved=saved)

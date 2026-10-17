@@ -37,7 +37,7 @@ from camctl.capture.processing import (
     RepairSuccess,
     repair_basis_from_check,
 )
-from camctl.capture.media_facts import osv_streams, osv_output_error, osv_input_issues
+from camctl.capture.media_facts import osv_streams, osv_output_error, osv_input_issues, osv_media_error
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, ObjectId, new_operation_key
 from camctl.host_files.media import MediaArtifact, MediaProbe
@@ -638,6 +638,9 @@ async def _execute_repair(context, output, output_ref) -> RepairStep:
             if issues:
                 return _save_repair_failure(context, output, error=ProcessingError(
                     "source_media_invalid", "repair", {"issues": [issue.as_json() for issue in issues]}))
+            media_error = osv_media_error(status.source_probe, trim_s)
+            if media_error is not None:
+                raise ValueError(media_error)
             selected = osv_streams(status.source_probe)
         except ValueError as error:
             return _save_repair_failure(context, output,

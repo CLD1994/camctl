@@ -72,3 +72,26 @@ def test_pending_media_keeps_original_stream_probe_when_save_is_unknown(monkeypa
     repository.save_check_result.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED)
     assert saves.save_check_result(command).disposition is SaveDisposition.SAVED
     assert repository.save_check_result.call_args.args[1] == key
+
+
+@pytest.mark.parametrize("entry", ["complete_repair_output", "save_repair_result"])
+def test_pending_repair_success_keeps_actual_probe_and_original_key(monkeypatch, entry):
+    from decimal import Decimal
+    from camctl.capture.processing import RepairSuccess, RepairResultSave, RepairOutcome
+    from camctl.host_files.media import MediaProbe
+    saves, repository = _saves(monkeypatch)
+    save = getattr(saves, entry)
+    repository_save = getattr(repository, entry)
+    repository_save.return_value = DbOutcome(kind=DbOutcomeKind.UNKNOWN)
+    probe = MediaProbe(Decimal("60"), None)
+    command = (RepairSuccess(1,2,2048,"a"*64,100,output_probe=probe) if entry == "complete_repair_output"
+        else RepairResultSave(1,RepairOutcome.SUCCEEDED,100,output_file_id=2,output_probe=probe))
+    assert save(command).disposition is SaveDisposition.UNKNOWN
+    key = repository_save.call_args.args[1]
+    repository_save.reset_mock()
+    with pytest.raises(ConsistencyError):
+        save(replace(command,output_probe=replace(probe,duration_s=Decimal("59"))))
+    repository_save.assert_not_called()
+    repository_save.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED)
+    assert save(command).disposition is SaveDisposition.SAVED
+    assert repository_save.call_args.args[1] == key

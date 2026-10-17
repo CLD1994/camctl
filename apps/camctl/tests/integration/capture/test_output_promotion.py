@@ -259,27 +259,19 @@ def test_guard_rejects_promotion_without_registration(tmp_path: Path) -> None:
         owned.connection.close()
 
 
-def test_osv_repaired_mp4_has_independent_format_metadata(tmp_path: Path) -> None:
-    owned = promotion_environment(tmp_path)
+@pytest.mark.asyncio
+async def test_osv_repaired_mp4_has_independent_format_metadata(tmp_path: Path) -> None:
+    from .test_osv_success_proof import prepared_repair
+    from camctl.capture.processing import RepairSuccess
+    owned, output_id, source, probe = await prepared_repair(tmp_path)
     try:
-        from decimal import Decimal
-        from camctl.capture.processing import RepairSuccess
-        from camctl.host_files.media import MediaProbe, MediaStream
-        owned.connection.execute(
-            "UPDATE device_files SET original_name='clip.OSV', media_type=NULL WHERE id=11")
-        owned.connection.execute(
-            "UPDATE recording_processing SET repair_state=4, repair_output_file_id=NULL WHERE id=1")
-        owned.connection.execute("UPDATE intermediate_files SET size_bytes=NULL,sha256=NULL WHERE id=21")
-        owned.connection.commit()
-        probe = MediaProbe(Decimal("60"), None, (
-            MediaStream(0, "video", "hevc", 3840, 3840, Decimal("60"), False),
-            MediaStream(1, "video", "hevc", 3840, 3840, Decimal("60"), False),
-        ), "mov,mp4,m4a,3gp,3g2,mj2")
+        source_id = owned.connection.execute("SELECT source_device_file_id FROM recording_processing WHERE id=41").fetchone()[0]
         saved = CaptureRepository().complete_repair_output(
-            RepairSuccess(1, 21, 2048, "a" * 64, _NOW, output_probe=probe),
+            RepairSuccess(41, output_id, 2048, "a" * 64, _NOW, output_probe=probe),
             new_operation_key(), owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-        outcome = _finish_with_repair(owned)
+        outcome = _finish_with_repair(owned, drafts=(
+            _repaired_draft(output_id,batch=source_id),_original_draft(source_id)))
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         repaired_id, original_id = outcome.value.output_ids
         assert _row(owned, "SELECT original_name,media_type FROM outputs WHERE id=?",

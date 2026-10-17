@@ -431,9 +431,13 @@ class RepairResultSave:
     occurred_at: int
     output_file_id: int | None = None
     error: ProcessingError | None = None
+    output_probe: MediaProbe | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.processing_id)
+        _validate_probe(self.output_probe)
+        if self.output_probe is not None and self.phase is not RepairOutcome.SUCCEEDED:
+            raise ValueError("只有修复成功申请携带成品探测")
         if not isinstance(self.phase, RepairOutcome):
             raise TypeError(f"修复阶段必须是 RepairOutcome: {self.phase!r}")
         if self.output_file_id is not None:

@@ -569,7 +569,7 @@ def _proposal(owned, command):
     return plan
 
 
-def _validate(plan, events=None, state_rows=None):
+def _validate(plan, events=None, state_rows=None, current_reads=None):
     """模仿内核按顺序分配报告变化序号并逐事件校验。"""
     working = {
         table: {row_id: dict(rows) for row_id, rows in table_rows.items()}
@@ -586,7 +586,7 @@ def _validate(plan, events=None, state_rows=None):
                 chosen[0].transaction_id, chosen[0].event_id, chosen[-1].event_id),
             dict(plan.owners),
             state_rows if state_rows is not None else plan.state_rows,
-            read_coverage=plan.read_coverage)
+            read_coverage=plan.read_coverage, current_reads=current_reads)
         validate_event(event, context)
         for row in event.rows:
             if row.after.exists:
@@ -618,7 +618,13 @@ def test_guard_accepts_real_processing_events(environment) -> None:
          capture_module._DiscardProgressCommand),
     ):
         plan = _proposal(owned, command_type(request, key))
-        _validate(plan)
+        from camctl.persistence.event_reads import SqlEventReads
+        owned.connection.execute("BEGIN")
+        try:
+            reader = SqlEventReads(owned.connection, plan.plan_read_scope) if plan.plan_read_scope else None
+            _validate(plan, current_reads=reader)
+        finally:
+            owned.connection.rollback()
         _save(owned, request)
 
 

@@ -235,7 +235,7 @@ def _media_request_values(command):
         raise TypeError("媒体保存必须使用已定义的类型化申请")
     if isinstance(command, (CheckResultSave, RepairStart)) and command.source_probe is not None:
         values["source_probe"] = probe_document(command.source_probe)
-    if isinstance(command, RepairSuccess) and command.output_probe is not None:
+    if isinstance(command, (RepairSuccess, RepairResultSave)) and command.output_probe is not None:
         values["output_probe"] = probe_document(command.output_probe)
     return values
 

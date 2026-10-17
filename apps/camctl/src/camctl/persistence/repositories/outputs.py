@@ -6932,6 +6932,15 @@ def _processed_processing_guard(event, context) -> None:
                 raise EventValidationError("修复输出属于其他动作")
             if output.get("size_bytes") is None or output.get("sha256") is None:
                 raise EventValidationError("修复成功要求输出已有完整字节事实")
+            if context.current_reads is None:
+                raise EventValidationError("修复成功缺少独立媒体读取端口")
+            from camctl.capture.media_facts import read_probe
+            try:
+                raw = event.evidence.get("output_probe")
+                context.current_reads.repair_media_proof(processing["action_id"], processing["id"], file_id,
+                    output_probe=None if raw is None else read_probe(raw))
+            except (ConsistencyError, ValueError) as error:
+                raise EventValidationError(str(error)) from error
         elif state == 6:
             _require_processing_error_document(
                 "修复错误", row.after.values.get("repair_error_json"))

@@ -240,3 +240,43 @@ async def test_direct_timing_repair_preserves_known_input_failure_without_dispat
 def test_original_failure_classifier_distinguishes_explicit_absence_from_unknown(profile, expected):
     from camctl.capture.media_facts import osv_input_issues
     assert [issue.code for issue in osv_input_issues(profile, 60000)] == expected
+
+
+@pytest.mark.parametrize("control_complete", [False, True])
+@pytest.mark.parametrize("phase", [1, 3, 5])
+@pytest.mark.parametrize("unknown_stream", [False, True])
+def test_reliable_short_container_is_independent_of_stream_duration_and_control(phase, control_complete, unknown_stream):
+    from camctl.capture.media_facts import osv_input_issues
+    from camctl.capture.media import RecordingOutcomeFacts, RecordingResultKind, decide_recording_result
+    source = replace(dual_probe(), duration_s=Decimal("55"))
+    if unknown_stream:
+        source = replace(source, streams=tuple(replace(s, duration_s=None) if s.index == 2 else s
+            for s in source.streams))
+    issues = osv_input_issues(source, 60000)
+    assert any(issue.code == "container_too_short" for issue in issues)
+    result = decide_recording_result(RecordingOutcomeFacts(1, control_complete, 2, phase,
+        source.duration_s if phase == 3 else None, bool(issues), False, 6, 60000))
+    assert result.kind is RecordingResultKind.FAILED
+
+
+@pytest.mark.parametrize("short_part", ["source_container", "output_container", "source_stream"])
+def test_repair_qualification_checks_each_duration_fact_without_compensation(short_part):
+    from camctl.capture.media_facts import osv_output_error
+    source, output = dual_probe(), dual_probe("60", output=True)
+    if short_part == "source_container": source = replace(source, duration_s=Decimal("55"))
+    if short_part == "output_container": output = replace(output, duration_s=Decimal("55"))
+    if short_part == "source_stream": source = replace(source, streams=(replace(source.streams[0], duration_s=Decimal("55")), *source.streams[1:]))
+    assert osv_output_error(source, output, Decimal("60")) is not None
+
+
+def test_recording_success_guard_requires_independent_scoped_reader():
+    from types import SimpleNamespace
+    from camctl.history.events import RowChange, RowImage
+    from camctl.history.validators import EventValidationError
+    from camctl.persistence.repositories.capture import _action_finish_guard
+    event = SimpleNamespace(rows=(RowChange("actions", 1, RowImage(True, {"status": 2}),
+        RowImage(True, {"status": 3})),))
+    context = SimpleNamespace(current_reads=None,
+        state_rows={"actions": {1: {"id": 1, "type": 2, "cancel_requested": 0}}})
+    with pytest.raises(EventValidationError):
+        _action_finish_guard(event, context)

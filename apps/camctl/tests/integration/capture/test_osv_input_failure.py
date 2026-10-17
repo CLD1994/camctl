@@ -41,13 +41,20 @@ class Tools:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("check_required", [True, False])
-@pytest.mark.parametrize("fault", ["short_video", "short_audio", "missing_video", "no_video_empty", "unknown", "tool_failed", "valid"])
+@pytest.mark.parametrize("fault", ["short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown", "unknown", "tool_failed", "valid"])
 async def test_capture_result_respects_saved_source_probe_without_fabricating_check(tmp_path, check_required, fault):
     owned, runtime, flow, source_id, source, tools, entry = prepared_input(tmp_path, check_required, fault)
     try:
         await run_recording_media(flow, 1, 41, source_id, target_extension="osv")
         status = load_processing_status(owned, 41)
         assert status.source_probe == source
+        media = parse_exact_json(owned.connection.execute("SELECT media_json FROM recording_processing WHERE id=41").fetchone()[0])
+        if check_required and source.error is None and source.duration_s is not None:
+            assert media["duration"] == {"status":"available","seconds":source.duration_s}
+            assert not {"streams", "source_probe", "output_probe"} & media.keys()
+            if fault in ("short_container", "short_container_unknown"):
+                assert any(issue["code"] == "container_too_short" and
+                    issue["details"]["actual_duration_s"] == Decimal("55") for issue in media["issues"])
         if not check_required:
             assert status.check_state == 1
             assert parse_exact_json(owned.connection.execute("SELECT media_json FROM recording_processing WHERE id=41").fetchone()[0]) == {}
@@ -55,7 +62,7 @@ async def test_capture_result_respects_saved_source_probe_without_fabricating_ch
             assert status.check_duration_s == Decimal("75") and status.check_issues
         await capture_handler("camera_record")(1, runtime)
         actual = owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()[0]
-        known_failure = fault in ("short_video", "short_audio", "missing_video", "no_video_empty")
+        known_failure = fault in ("short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown")
         expected = 4 if known_failure else 3
         assert actual == expected
         if known_failure or fault in ("unknown", "tool_failed"):
@@ -83,10 +90,17 @@ def prepared_input(tmp_path, check_required, fault):
     source = dual_probe()
     streams = list(source.streams)
     if fault == "short_video": streams[1] = replace(streams[1], duration_s=Decimal("55"))
-    if fault == "short_audio": streams[2] = replace(streams[2], duration_s=Decimal("55"))
+    if fault in ("short_audio", "short_audio_unknown"):
+        streams[2] = replace(streams[2], duration_s=Decimal("55"))
+    if fault == "short_audio_unknown": streams[0] = replace(streams[0], attached_pic=None)
     if fault == "missing_video": streams.pop(1)
     if fault == "unknown": streams[1] = replace(streams[1], duration_s=None)
     source = replace(source, streams=tuple(streams))
+    if fault in ("short_container", "short_container_unknown"):
+        source = replace(source, duration_s=Decimal("55"))
+        if fault == "short_container_unknown":
+            source = replace(source, streams=tuple(replace(s, duration_s=None) if s.index == 2 else s
+                for s in source.streams))
     if fault == "tool_failed": source = MediaProbe(None, "tool_failed: exit=1")
     if fault == "no_video_empty": source = MediaProbe(None, "no_video_stream: 容器没有视频流")
     tools = Tools(source)
@@ -98,7 +112,7 @@ def prepared_input(tmp_path, check_required, fault):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["short_video", "short_audio", "missing_video", "no_video_empty", "unknown", "tool_failed", "valid"])
+@pytest.mark.parametrize("fault", ["short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown", "unknown", "tool_failed", "valid"])
 async def test_running_repair_restart_keeps_original_probe_and_capture_failure_boundary(tmp_path, monkeypatch, fault):
     from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
     owned, runtime, flow, source_id, source, tools, entry = prepared_input(tmp_path, False, fault)
@@ -127,7 +141,7 @@ async def test_running_repair_restart_keeps_original_probe_and_capture_failure_b
         assert load_processing_status(reopened, 41).check_state == 1
         runtime = _runtime(reopened, {1: (entry,)})
         await capture_handler("camera_record")(1, runtime)
-        known_failure = fault in ("short_video", "short_audio", "missing_video", "no_video_empty")
+        known_failure = fault in ("short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown")
         assert reopened.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()[0] == (4 if known_failure else 3)
         assert tools.repairs == (1 if fault == "valid" else 0)
     finally:
@@ -135,7 +149,7 @@ async def test_running_repair_restart_keeps_original_probe_and_capture_failure_b
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ["short_video", "no_video_empty"])
+@pytest.mark.parametrize("fault", ["short_video", "no_video_empty", "short_container_unknown"])
 async def test_success_guard_independently_rejects_saved_input_failure_and_checks_plan_scope(tmp_path, fault):
     from camctl.history.reads import PlanReadScope
     from camctl.persistence.event_reads import SqlEventReads

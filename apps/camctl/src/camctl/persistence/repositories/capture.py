@@ -41,7 +41,7 @@ from camctl.capture.files import (
     OwnershipSave,
     file_identity_key,
 )
-from camctl.capture.media_facts import saved_osv_input_issues
+from camctl.capture.media_facts import saved_osv_input_issues, require_repair_media_proof
 from camctl.capture.media import (
     RecordingFailure, RecordingOutcomeFacts, RecordingResultKind,
     decide_recording_result,
@@ -688,7 +688,9 @@ def _action_finish_guard(event, context) -> None:
                 facts.update(row.before.values)
                 if facts.get("cancel_requested") != 0:
                     raise EventValidationError("取消请求生效的动作不能保存成功终态")
-                if facts.get("type") == _ACTION_TYPE.CAMERA_RECORD and context.current_reads is not None:
+                if facts.get("type") == _ACTION_TYPE.CAMERA_RECORD:
+                    if context.current_reads is None:
+                        raise EventValidationError("录像成功缺少独立的原输入读取端口")
                     if context.current_reads.recording_input_issues(row.row_id):
                         raise EventValidationError("原输入存在已知媒体失败，不能保存录像成功")
                 if facts.get("type") == _ACTION_TYPE.CAMERA_TAKE_PHOTO:
@@ -864,6 +866,12 @@ def _require_repair_success(context, source_id: int, file_id) -> None:
         if (processing.get("action_id") == source_id
                 and processing.get("repair_state") == RepairOutcome.SUCCEEDED.value
                 and processing.get("repair_output_file_id") == file_id):
+            if context.current_reads is None:
+                raise EventValidationError("正式修复提升缺少独立媒体读取端口")
+            try:
+                context.current_reads.repair_media_proof(source_id, processing["id"], file_id, saved=True)
+            except (ConsistencyError, ValueError) as error:
+                raise EventValidationError(str(error)) from error
             return
     raise EventValidationError(
         f"产物登记缺少本动作的修复成功事实: intermediate_files#{file_id}")
@@ -1564,6 +1572,8 @@ class FinishCaptureCommand:
                 raise TransactionError(
                     "产物登记缺少本动作的修复成功事实:"
                     f" {output.intermediate_file_id}")
+            require_repair_media_proof(connection, self._command.action_id,
+                processing["id"], output.intermediate_file_id, saved=True)
 
     def _readable_metadata(self, connection, output_id, output, original_ids):
         """登记时的可读元信息取自承载文件行；观察未保存时保留未知。
@@ -1778,7 +1788,16 @@ class _MediaProcessingCommand(_ProcessingCommand):
         events = tuple(_envelope(allocation.first_event_id + index, allocation.txn_id,
             kind, reason, rows, self._request.occurred_at, self._media_evidence(kind))
             for index, (kind, reason, rows) in enumerate(specs))
+        success = any(row.table == "recording_processing" and row.after.values.get("repair_state") == 5
+            for event in events for row in event.rows)
+        read_scope = None
+        if success:
+            processing = next(iter(self._state["recording_processing"].values()))
+            with closing(scope.connection.execute("SELECT plan_id FROM actions WHERE id=?",
+                    (processing["action_id"],))) as cursor:
+                read_scope = PlanReadScope(cursor.fetchone()[0], 128)
         return CommandPlan(events=events, owners=self._owners, state_rows=self._state,
+            plan_read_scope=read_scope,
             result=result if result is not None else ProcessingOutcome(ProcessingDisposition.SAVED))
 
     def _reuse_specs(self, scope, saved, specs, result=None):
@@ -1978,7 +1997,7 @@ class _RepairResultCommand(_MediaProcessingCommand):
         if saved is not None:
             processing = self._saved_processing(scope, saved,
                 [(_RECORDING_PROCESSED_EVENT, _PROCESSED_REPAIR_REASON)])
-            plan = self._reuse_specs(scope, saved, self._specs(processing))
+            plan = self._reuse_specs(scope, saved, self._specs(processing, connection))
             if request.phase is RepairOutcome.SUCCEEDED:
                 output = self._original_row(scope, "intermediate_files", request.output_file_id,
                     ("intermediate_file", request.output_file_id))
@@ -1989,7 +2008,7 @@ class _RepairResultCommand(_MediaProcessingCommand):
             self._verify_output(processing,
                 self._load_row(connection, "intermediate_files", request.output_file_id))
         self._claim(processing)
-        return self._save_specs(scope, self._specs(processing))
+        return self._save_specs(scope, self._specs(processing, connection))
 
     @staticmethod
     def _verify_output(processing, output):
@@ -2000,11 +2019,16 @@ class _RepairResultCommand(_MediaProcessingCommand):
         if output["size_bytes"] is None or output["sha256"] is None:
             raise ConsistencyError("修复输出缺少完整字节事实")
 
-    def _specs(self, processing):
+    def _specs(self, processing, connection):
         request = self._request
         if processing["repair_state"] not in (3, 4):
             raise ConsistencyError(
                 f"修复尚未取得执行决定或已终结: {processing['repair_state']!r}")
+        if request.phase is RepairOutcome.SUCCEEDED:
+            boundary = getattr(self, "_original_boundary", None)
+            require_repair_media_proof(connection, processing["action_id"], processing["id"],
+                request.output_file_id, output_probe=request.output_probe,
+                at_event_id=None if boundary is None else boundary.last_event_id)
         before: dict[str, Any] = {"repair_state": processing["repair_state"]}
         after: dict[str, Any] = {"repair_state": request.phase.value}
         if request.phase is RepairOutcome.SUCCEEDED:
@@ -2167,14 +2191,14 @@ class _RepairSuccessCommand(_MediaProcessingCommand):
             output = self._original_row(scope, "intermediate_files", request.output_file_id,
                 ("intermediate_file", request.output_file_id))
             self._owners[("intermediate_files", output["id"])] = ("intermediate_file", output["id"])
-            return self._reuse_specs(scope, saved, self._specs(processing, output))
+            return self._reuse_specs(scope, saved, self._specs(processing, output, connection))
         processing = self._load_processing(connection, request.processing_id)
         output = self._load_row(connection, "intermediate_files", request.output_file_id)
         self._claim(processing)
         self._owners[("intermediate_files", output["id"])] = ("intermediate_file", output["id"])
-        return self._save_specs(scope, self._specs(processing, output))
+        return self._save_specs(scope, self._specs(processing, output, connection))
 
-    def _specs(self, processing, output):
+    def _specs(self, processing, output, connection):
         request = self._request
         if processing["repair_state"] != int(_REPAIR_STATE.RUNNING):
             raise ConsistencyError(
@@ -2186,6 +2210,10 @@ class _RepairSuccessCommand(_MediaProcessingCommand):
             raise ConsistencyError("修复输出属于其他动作")
         if output["size_bytes"] is not None or output["sha256"] is not None:
             raise ConsistencyError("修复输出已保存完整字节事实")
+        boundary = getattr(self, "_original_boundary", None)
+        require_repair_media_proof(connection, processing["action_id"], processing["id"],
+            request.output_file_id, output_probe=request.output_probe,
+            at_event_id=None if boundary is None else boundary.last_event_id)
         file_row = _update(
             "intermediate_files", output["id"],
             {"size_bytes": output["size_bytes"], "sha256": output["sha256"]},
