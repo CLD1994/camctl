@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from camctl.capture.files import FileChecksumSave
+from camctl.capture.media_facts import probe_document, saved_source_probe
 from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic
 from camctl.capture.input_copy import (
     InputContext,
@@ -44,7 +45,7 @@ from camctl.capture.media import (
     require_saved_media_result,
 )
 from camctl.capture.processing import (
-    CheckResultSave, RepairDecisionSave, RepairOutputFile, RepairResultSave,
+    CheckResultSave, ProcessingError, RepairDecisionSave, RepairOutputFile, RepairResultSave,
     RepairStart, RepairSuccess, saved_check_duration, saved_target_duration_ms,
 )
 from camctl.contracts.json_values import json_equal, parse_exact_json
@@ -232,6 +233,10 @@ def _media_request_values(command):
             size_bytes=command.size_bytes, sha256=command.sha256)
     else:
         raise TypeError("媒体保存必须使用已定义的类型化申请")
+    if isinstance(command, (CheckResultSave, RepairStart)) and command.source_probe is not None:
+        values["source_probe"] = probe_document(command.source_probe)
+    if isinstance(command, RepairSuccess) and command.output_probe is not None:
+        values["output_probe"] = probe_document(command.output_probe)
     return values
 
 
@@ -329,8 +334,9 @@ def load_processing_status(owned: OwnedConnection, processing_id: int) -> Proces
         raise ConsistencyError(f"录像处理记录不存在: {processing_id}")
     (check_decision, check_state, media_raw, basis_raw, repair_state,
      output_id, action_id) = row
+    media = parse_exact_json(media_raw)
     duration = (
-        saved_check_duration(parse_exact_json(media_raw))
+        saved_check_duration(media)
         if check_state == 3 else None)
     target = saved_target_duration_ms(parse_exact_json(basis_raw))
     if output_id is None and repair_state == 4:
@@ -362,7 +368,11 @@ def load_processing_status(owned: OwnedConnection, processing_id: int) -> Proces
         repair_state=repair_state,
         repair_output_file_id=output_id,
         repair_output_path=path,
+        source_probe=saved_source_probe(owned.connection, processing_id),
+        check_issues=tuple(ProcessingError(item["code"], item["stage"], item["details"])
+            for item in media.get("issues", ())),
     )
+
 
 
 @dataclass
@@ -580,9 +590,7 @@ async def run_recording_media(
     repair = await execute_repair(RepairContext(
         processing=status,
         input_file=input_step.input_file,
-        # 修复成品与输入副本同容器：无重编码流复制沿用源容器的封
-        # 装格式，登记扩展名默认与输入副本一致，装配可用
-        # repair_extension 显式覆盖（camera-recovery.md 裁剪约束）。
+        # OSV 由修复入口固定独立 MP4；其他来源继续原扩展名规则。
         extension=(flow.repair_extension
                    if flow.repair_extension is not None
                    else target_extension),

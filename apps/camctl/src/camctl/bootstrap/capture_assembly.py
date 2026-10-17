@@ -165,14 +165,17 @@ class HostMediaTools:
         )
 
     async def repair(self, input: Any, output: Any,
-                     *, trim_s: Decimal) -> FileTaskResult:
+                     *, trim_s: Decimal, stream_indices: tuple[int, ...] | None = None,
+                     output_format: str | None = None) -> FileTaskResult:
         # 多录裁剪只采用无重新编码方式：流复制到目标时长，尾部允许
         # 保留余量，不为精确边界重新编码（camera-recovery.md 裁剪约
         # 束）。注入的附加参数置于裁剪参数之前，测试替身脚本可叠加。
         request = RepairRequest(
             ffmpeg=self._repair_request.ffmpeg,
             output_args=self._repair_request.output_args + (
-                "-c", "copy", "-t", str(trim_s)))
+                "-c", "copy", "-t", str(trim_s)),
+            stream_indices=stream_indices if stream_indices is not None else self._repair_request.stream_indices,
+            output_format=output_format if output_format is not None else self._repair_request.output_format)
         return await repair_media(
             input, output, self._roots, request,
             executor=self._executor,

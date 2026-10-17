@@ -55,3 +55,20 @@ def test_pending_media_same_request_uses_original_key_and_releases_after_confirm
     assert result.disposition is SaveDisposition.SAVED
     assert repository.save_check_result.call_args.args[1] == original_key
     assert not saves.pending
+
+
+def test_pending_media_keeps_original_stream_probe_when_save_is_unknown(monkeypatch):
+    from decimal import Decimal
+    from camctl.host_files.media import MediaProbe, MediaStream
+    saves, repository = _saves(monkeypatch)
+    probe = MediaProbe(Decimal("75"), None, (
+        MediaStream(0, "video", "hevc", 3840, 3840, Decimal("75"), False),), "mp4")
+    command = replace(_request(1), source_probe=probe)
+    assert saves.save_check_result(command).disposition is SaveDisposition.UNKNOWN
+    key = repository.save_check_result.call_args.args[1]
+    changed_probe = replace(probe, streams=(replace(probe.streams[0], width=1920),))
+    with pytest.raises(ConsistencyError):
+        saves.save_check_result(replace(command, source_probe=changed_probe))
+    repository.save_check_result.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED)
+    assert saves.save_check_result(command).disposition is SaveDisposition.SAVED
+    assert repository.save_check_result.call_args.args[1] == key

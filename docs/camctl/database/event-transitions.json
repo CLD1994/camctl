@@ -5934,7 +5934,9 @@
             "report_impact",
             "processing"
           ],
-          "evidence": []
+          "evidence": [
+            "source_probe"
+          ]
         },
         "REPAIR": {
           "reason": 2,
@@ -5983,7 +5985,10 @@
             "processing",
             "intermediate"
           ],
-          "evidence": []
+          "evidence": [
+            "source_probe",
+            "output_probe"
+          ]
         },
         "DISCARD": {
           "reason": 3,

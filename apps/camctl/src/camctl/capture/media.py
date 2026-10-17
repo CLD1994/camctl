@@ -26,6 +26,7 @@ from camctl.capture.processing import (
     MediaObservation,
     ProcessingDisposition,
     ProcessingError,
+    RepairBasis,
     RepairDecisionSave,
     RepairDecisionChoice,
     RepairOutcome,
@@ -36,6 +37,7 @@ from camctl.capture.processing import (
     RepairSuccess,
     repair_basis_from_check,
 )
+from camctl.capture.media_facts import osv_streams, osv_output_error, osv_input_issues
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, ObjectId, new_operation_key
 from camctl.host_files.media import MediaArtifact, MediaProbe
@@ -214,6 +216,10 @@ def repair_decision_from_check(
     target_duration_ms: int, processing_id: int, occurred_at: int,
 ) -> RepairDecisionSave | None:
     """检查完成才派生修复决定；门槛判定与检查分类共用同一规则。"""
+    if observation.issues and observation.phase is not CheckPhase.RUNNING:
+        return RepairDecisionSave(processing_id, RepairDecisionChoice.NOT_NEEDED,
+            RepairBasis(RepairReason.NO_USABLE_INPUT, target_duration_ms,
+                actual_duration_s=observation.duration_s), occurred_at)
     if observation.phase is not CheckPhase.COMPLETED or observation.duration_s is None:
         return None
     basis = repair_basis_from_check(
@@ -280,6 +286,8 @@ class ProcessingStatus:
     repair_state: int
     repair_output_file_id: int | None
     repair_output_path: str | None
+    source_probe: MediaProbe | None = None
+    check_issues: tuple[ProcessingError, ...] = ()
 
     def __post_init__(self) -> None:
         ObjectId(self.processing_id)
@@ -316,6 +324,7 @@ class MediaTools(Protocol):
 
     async def repair(
         self, input: FileRef, output: FileRef, *, trim_s: Decimal,
+        stream_indices: tuple[int, ...] | None = None, output_format: str | None = None,
     ) -> FileTaskResult: ...
 
 
@@ -446,9 +455,23 @@ async def _execute_check(context: CheckContext) -> CheckStep:
         detail = result.error or "probe task did not run"
         return CheckStep(CheckExecutionPhase.PROBE_NOT_COMPLETED,
                          error=RuntimeError(detail))
-    observation = check_observation_from_probe(result.value)
+    probe = result.value
+    if _osv_input(context.input_file) and probe.error is None:
+        issues = osv_input_issues(probe, status.target_duration_ms)
+        try:
+            osv_streams(probe)
+            if probe.duration_s is None:
+                raise ValueError("missing_duration: 未取得实际容器时长")
+            observation = MediaObservation(CheckPhase.COMPLETED,
+                duration_s=probe.duration_s, issues=issues)
+        except ValueError as error:
+            observation = MediaObservation(CheckPhase.UNCONFIRMED,
+                duration_s=probe.duration_s, issues=issues,
+                error=_error_from_message("probe", str(error)))
+    else:
+        observation = check_observation_from_probe(probe)
     saved = context.saves.save_check_result(CheckResultSave(
-        status.processing_id, observation, context.occurred_at))
+        status.processing_id, observation, context.occurred_at, source_probe=probe))
     if saved.disposition is SaveDisposition.REJECTED:
         return CheckStep(CheckExecutionPhase.RESULT_REJECTED, media=observation,
                          error=saved.error)
@@ -465,7 +488,7 @@ def _resume_finished_check(context: CheckContext) -> CheckStep:
             and status.check_duration_s is not None
             and status.repair_state == int(_REPAIR_STATE.UNDETERMINED)):
         observation = MediaObservation(
-            CheckPhase.COMPLETED, duration_s=status.check_duration_s)
+            CheckPhase.COMPLETED, duration_s=status.check_duration_s, issues=status.check_issues)
         step = _fix_repair_decision(context, observation)
         if step.phase is CheckExecutionPhase.CHECK_COMPLETED:
             return replace(step, phase=CheckExecutionPhase.FINISHED_DECISION_SAVED)
@@ -541,10 +564,37 @@ async def execute_repair(context: RepairContext) -> RepairStep:
     动工具；任务未取得成品不保存终态结论。完整成品按字节事实与
     成功同事务固定，不完整成品保存失败终态与错误结构。
     """
+    if (_osv_input(context.input_file)
+            and context.processing.repair_state == int(_REPAIR_STATE.PENDING)):
+        return await _owned_media_result(context, (context.input_file.file_id,),
+            "media_repair_prepare", lambda: _prepare_osv_repair(context))
+    return await _start_repair(context)
+
+
+def _osv_input(input_file: FileRef) -> bool:
+    return input_file.relative_path.lower().endswith(".osv")
+
+
+async def _prepare_osv_repair(context: RepairContext) -> RepairStep:
+    # 仅从控制计时直接进入修复、尚未执行过检查时取得首次输入事实。
+    # 已完成检查缺少原逐流事实属于恢复缺口，不由新探测覆盖。
+    if (context.processing.source_probe is None
+            and context.processing.check_decision == int(_CHECK_DECISION.NOT_NEEDED)
+            and context.processing.check_state == int(_CHECK_STATE.NOT_PERFORMED)):
+        result = await context.tools.probe(context.input_file)
+        if not result.ran or result.value is None:
+            return RepairStep(RepairExecutionPhase.TOOL_NOT_COMPLETED,
+                error=RuntimeError(result.error or "input probe task did not run"))
+        context = replace(context, processing=replace(context.processing, source_probe=result.value))
+    return await _start_repair(context)
+
+
+async def _start_repair(context: RepairContext) -> RepairStep:
     status = context.processing
     if status.repair_state == int(_REPAIR_STATE.PENDING):
         started = context.saves.start_repair_output(RepairStart(
-            status.processing_id, context.extension, context.occurred_at))
+            status.processing_id, "mp4" if _osv_input(context.input_file) else context.extension,
+            context.occurred_at, source_probe=status.source_probe))
         if started.disposition is SaveDisposition.REJECTED:
             return RepairStep(RepairExecutionPhase.START_REJECTED,
                               error=started.error)
@@ -579,24 +629,48 @@ async def _execute_repair(context, output, output_ref) -> RepairStep:
     status = context.processing
     # 裁剪时长来自已保存的目标时长（修复决定依据），不使用本次运行
     # 的其他时值；适配层负责翻译为无重新编码的工具参数。
-    result = await context.tools.repair(
-        context.input_file, output_ref,
-        trim_s=Decimal(status.target_duration_ms) / 1000)
+    trim_s = Decimal(status.target_duration_ms) / 1000
+    if _osv_input(context.input_file):
+        try:
+            if status.source_probe is None:
+                raise ValueError("source_probe_missing: 恢复缺少原输入探测事实")
+            issues = osv_input_issues(status.source_probe, status.target_duration_ms)
+            if issues:
+                return _save_repair_failure(context, output, error=ProcessingError(
+                    "source_media_invalid", "repair", {"issues": [issue.as_json() for issue in issues]}))
+            selected = osv_streams(status.source_probe)
+        except ValueError as error:
+            return _save_repair_failure(context, output,
+                error=_error_from_message("repair", str(error)))
+        result = await context.tools.repair(context.input_file, output_ref,
+            trim_s=trim_s, stream_indices=tuple(s.index for s in selected), output_format="mp4")
+    else:
+        result = await context.tools.repair(context.input_file, output_ref, trim_s=trim_s)
     if not result.ran or result.value is None:
         detail = result.error or "repair task did not run"
         return RepairStep(RepairExecutionPhase.TOOL_NOT_COMPLETED,
                           output_file=output, error=RuntimeError(detail))
     artifact = result.value
+    if artifact.complete and _osv_input(context.input_file):
+        probed = await context.tools.probe(output_ref)
+        error = ("output_probe_failed: 未取得成品探测结果"
+            if not probed.ran or probed.value is None
+            else osv_output_error(status.source_probe, probed.value, trim_s))
+        if error is not None:
+            return _save_repair_failure(context, output,
+                error=_error_from_message("repair", error))
     if artifact.complete:
-        return _complete_repair(context, output, output_ref, artifact)
+        return _complete_repair(context, output, output_ref, artifact,
+            output_probe=probed.value if _osv_input(context.input_file) else None)
     return _save_repair_failure(context, output, artifact)
 
 
 def _complete_repair(context: RepairContext, output: RepairOutputFile,
-                     output_ref: FileRef, artifact: MediaArtifact) -> RepairStep:
+                     output_ref: FileRef, artifact: MediaArtifact,
+                     *, output_probe: MediaProbe | None = None) -> RepairStep:
     completed = context.saves.complete_repair_output(RepairSuccess(
         context.processing.processing_id, output_ref.file_id,
-        artifact.size_bytes, artifact.digest, context.occurred_at))
+        artifact.size_bytes, artifact.digest, context.occurred_at, output_probe=output_probe))
     if completed.disposition is SaveDisposition.REJECTED:
         return RepairStep(RepairExecutionPhase.COMPLETE_REJECTED,
                           output_file=output, error=completed.error)
@@ -607,10 +681,11 @@ def _complete_repair(context: RepairContext, output: RepairOutputFile,
 
 
 def _save_repair_failure(context: RepairContext, output: RepairOutputFile,
-                         artifact: MediaArtifact) -> RepairStep:
+                         artifact: MediaArtifact | None = None,
+                         *, error: ProcessingError | None = None) -> RepairStep:
     saved = context.saves.save_repair_result(RepairResultSave(
         context.processing.processing_id, RepairOutcome.FAILED,
-        context.occurred_at, error=repair_error_from_artifact(artifact)))
+        context.occurred_at, error=error if error is not None else repair_error_from_artifact(artifact)))
     if saved.disposition is SaveDisposition.REJECTED:
         return RepairStep(RepairExecutionPhase.FAILED_REJECTED,
                           output_file=output, error=saved.error)
@@ -702,6 +777,10 @@ def decide_recording_result(facts: RecordingOutcomeFacts) -> RecordingResult:
                 code="recording_processing_failed",
                 details={"processing_id": processing_id,
                          "reason": "source_unavailable"}))
+    if facts.check_issues:
+        return RecordingResult(RecordingResultKind.FAILED,
+            failure=RecordingFailure("recording_processing_failed", {
+                "processing_id": processing_id, "reason": "invalid_media"}))
     check_open = (facts.check_decision == int(_CHECK_DECISION.REQUIRED)
                   and facts.check_state in (
                       int(_CHECK_STATE.NOT_PERFORMED), int(_CHECK_STATE.RUNNING)))
@@ -717,13 +796,6 @@ def decide_recording_result(facts: RecordingOutcomeFacts) -> RecordingResult:
                 failure=RecordingFailure(
                     code="recording_too_short",
                     details={"processing_id": processing_id}))
-        if facts.check_issues:
-            return RecordingResult(
-                RecordingResultKind.FAILED,
-                failure=RecordingFailure(
-                    code="recording_processing_failed",
-                    details={"processing_id": processing_id,
-                             "reason": "invalid_media"}))
         if facts.control_complete:
             return RecordingResult(
                 RecordingResultKind.SUCCEEDED, basis="control_complete")

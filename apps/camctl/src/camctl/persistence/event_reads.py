@@ -145,3 +145,26 @@ class SqlEventReads:
         for status in (1, 2):
             for batch in self.iter_members("actions", "status", status, columns=self.ACTION_COLUMNS):
                 yield from batch
+
+    def recording_input_issues(self, action_id: int) -> tuple:
+        """在原计划范围内独立核对唯一录像处理与原保存的 OSV 输入事实。"""
+        from camctl.capture.media_facts import saved_osv_input_issues
+        from camctl.contracts.json_values import parse_exact_json
+        if not isinstance(self.scope, PlanReadScope):
+            raise ConsistencyError("录像输入复核要求原计划读取范围")
+        action = self.required("actions", action_id)
+        if action["plan_id"] != self.scope.plan_id:
+            raise ConsistencyError("录像输入不属于原计划")
+        with closing(self.connection.execute(
+            "SELECT id,check_basis_json FROM recording_processing WHERE action_id=? LIMIT 2",
+            (action_id,))) as cursor:
+            records = cursor.fetchmany(2)
+        if len(records) > 1:
+            raise ConsistencyError("录像动作关联多个媒体处理")
+        if not records:
+            return ()
+        basis = parse_exact_json(records[0][1]) if records[0][1] else {}
+        target = basis.get("target_duration_ms")
+        if type(target) is not int or target <= 0:
+            return ()
+        return saved_osv_input_issues(self.connection, records[0][0], target)

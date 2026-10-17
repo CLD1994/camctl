@@ -53,6 +53,7 @@ from camctl.capture.media import (
     decide_recording_result,
 )
 from camctl.capture.media_flow import MediaFlow, run_recording_media
+from camctl.capture.media_facts import saved_osv_input_issues
 from camctl.capture.result_inputs import (
     ListedResult, ObservedFile, ResultPage, files_from_outcome, saved_outcome,
 )
@@ -3617,7 +3618,8 @@ async def _advance_recording_outcome(
         check_state=int(row[2]),
         check_duration_s=(saved_check_duration(media_json)
                           if row[2] == int(_CHECK_STATE.COMPLETED) else None),
-        check_issues=bool(media_json.get("issues")) if media_json else False,
+        check_issues=(bool(media_json.get("issues")) if media_json else False) or bool(
+            saved_osv_input_issues(context.owned.connection, int(row[0]), _target_duration_ms(action))),
         input_unavailable=(
             _media_responsibility_open(row) and row[6] is None
             and source_file_id is None),

@@ -589,6 +589,17 @@ SQL 对每次行修改即时检查这些组合。一个事件同时确定设备�
 
 `check_state` 为 `NOT_PERFORMED`、`RUNNING`、`COMPLETED`、`FAILED`、`UNCONFIRMED`，`media_json` 使用公共媒体结构并保持检查阶段一致。工具未取得时长与实测时长不足分别表达。
 
+检查取得的实际容器与逐流事实保存在原动作的 `RECORDING_PROCESSED` 历史依据中，不扩展公共 `media_json`。检查结果以 `source_probe` 保存实际输入探测；未执行检查而直接修复时，首次登记修复输出的同一事务保存该输入事实。修复成功以 `output_probe` 保存实际成品探测，恢复和正式产物的格式信息读取原已保存的事实。原键重送同时核对这些探测事实；结果提交未知时先核实原完整申请，不重新探测替换。旧事件未含这些成员时保持原规则；需要 OSV 双流验证的恢复缺少原输入事实时，不猜测或发布修复成品。成员的适用分支由[事件登记](event-transitions.json)维护。
+
+原输入与修复输出的问题按下列矩阵解释。原输入问题从同一处理身份的实际 OSV 输入副本和原 `source_probe` 派生；录像处理器、终态申请和写事务守卫共同消费这一依据。守卫在原 `PlanReadScope` 内核对动作归属，再有界读取唯一处理及其原探测历史。
+
+事实|原片与录像结果|修复处理
+-|-|-
+原探测缺失、工具失败，或必要字段未知，且没有已确认的原输入错误|保持无法核实，不将未知改成损坏，也不撤销独立可靠的控制完成依据|无法完成必要双流验证时保存修复失败，不发布成品
+原探测已可靠确认必要主视频缺失，或必要视频／音频流不足目标|保留具体流问题；任何检查决定和阶段都不能用控制完成覆盖已知原输入失败|保留原探测，停止修复派发并沿实际阶段收场；未执行检查不改写为检查完成
+原输入合格，但修复输出缺流、时长不足、编码／尺寸变化或工具失败|只说明修复失败，不据此推断原片损坏|保留原片，保存实际修复失败，不发布不合格成品
+
+
 `repair_state` 为 `UNDETERMINED`、`NOT_NEEDED`、`PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELED`。除 `UNDETERMINED` 外均必填 `repair_basis_json`，保存 `reason`（`BELOW_THRESHOLD` 表示未达到多录门槛，`THRESHOLD_REACHED` 表示达到门槛，`NO_USABLE_INPUT` 表示没有可用输入，`CANCELED` 表示取消停止处理）、`target_duration_ms`、实际比较门槛时使用的 `threshold_s`（原因为 `BELOW_THRESHOLD` 或 `THRESHOLD_REACHED` 时必填，其他原因不适用时省略），以及实际已知的 `actual_duration_s` 或 `control_elapsed_ns`；秒数采用精确 JSON 数值。已经决定后不因本地门槛变化重算。`SUCCEEDED` 必填 `repair_output_file_id`，`FAILED` 必填 `repair_error_json`，不需要修复时不能用成功修复冒充。
 
 `discard_state` 是取消或过期后处理产生文件的收场进度：`NOT_NEEDED`、`PENDING`、`RUNNING`、`COMPLETED`、`FAILED`、`UNKNOWN`。`FAILED`、`UNKNOWN` 必填 `discard_error_json`。它跟踪所属录像的处理结果；实际中间文件逐份保留和删除由文件表负责。原片检查、修复及取消后处理不在动作终态后重新启动；剩余文件清理责任仍可独立推进。

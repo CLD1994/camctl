@@ -17,6 +17,7 @@ from typing import Any, Mapping
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ObjectId
 from camctl.host_files.paths import validate_file_extension
+from camctl.host_files.media import MediaProbe
 
 __all__ = [
     "CheckBasis",
@@ -404,9 +405,11 @@ class CheckResultSave:
     processing_id: int
     media: MediaObservation
     occurred_at: int
+    source_probe: MediaProbe | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.processing_id)
+        _validate_probe(self.source_probe)
         if not isinstance(self.media, MediaObservation):
             raise TypeError(f"媒体观察必须是 MediaObservation: {self.media!r}")
 
@@ -483,17 +486,19 @@ _HEX_DIGITS = frozenset("0123456789abcdef")
 class RepairStart:
     """登记修复输出文件并进入修复执行的事务输入。
 
-    输出扩展名沿用原片容器类型；路径身份在事务内分配，创建文件
-    前先登记路径和责任。
+    输出扩展名由修复分支确定；OSV 产生独立 MP4，其他原片保持
+    原容器规则。路径身份在事务内分配，创建文件前先登记路径和责任。
     """
 
     processing_id: int
     extension: str | None
     occurred_at: int
+    source_probe: MediaProbe | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.processing_id)
         validate_file_extension(self.extension)
+        _validate_probe(self.source_probe)
 
 
 @dataclass(frozen=True)
@@ -522,9 +527,11 @@ class RepairSuccess:
     size_bytes: int
     sha256: str
     occurred_at: int
+    output_probe: MediaProbe | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.processing_id)
+        _validate_probe(self.output_probe)
         ObjectId(self.output_file_id)
         if (isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int)
                 or self.size_bytes <= 0):
@@ -600,3 +607,11 @@ def saved_target_duration_ms(document: Mapping[str, Any]) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("检查依据缺少整数目标时长毫秒")
     return _positive_int("目标时长毫秒", value)
+
+
+def _validate_probe(probe: MediaProbe | None) -> None:
+    if probe is not None:
+        from camctl.capture.media_facts import probe_document, read_probe
+        if not isinstance(probe, MediaProbe):
+            raise TypeError("媒体探测事实必须使用 MediaProbe")
+        read_probe(probe_document(probe))

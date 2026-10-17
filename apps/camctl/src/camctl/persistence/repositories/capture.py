@@ -41,6 +41,7 @@ from camctl.capture.files import (
     OwnershipSave,
     file_identity_key,
 )
+from camctl.capture.media_facts import saved_osv_input_issues
 from camctl.capture.media import (
     RecordingFailure, RecordingOutcomeFacts, RecordingResultKind,
     decide_recording_result,
@@ -81,7 +82,7 @@ from camctl.contracts.workflow_errors import (
 from camctl.acceptance.definitions import read_action_spec
 from camctl.devices.recording_completion import completed_file_wait_source, is_completed_file_wait
 from camctl.history.decoding import decode_event_row
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import ReadCoverage, PlanReadScope
 from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
@@ -687,6 +688,9 @@ def _action_finish_guard(event, context) -> None:
                 facts.update(row.before.values)
                 if facts.get("cancel_requested") != 0:
                     raise EventValidationError("取消请求生效的动作不能保存成功终态")
+                if facts.get("type") == _ACTION_TYPE.CAMERA_RECORD and context.current_reads is not None:
+                    if context.current_reads.recording_input_issues(row.row_id):
+                        raise EventValidationError("原输入存在已知媒体失败，不能保存录像成功")
                 if facts.get("type") == _ACTION_TYPE.CAMERA_TAKE_PHOTO:
                     try:
                         host_spec = _host_photo_execution_spec(facts)
@@ -1296,6 +1300,8 @@ class FinishCaptureCommand:
             owners=self._owners,
             state_rows=self._state,
             read_coverage=ReadCoverage(self._ranges),
+            plan_read_scope=(PlanReadScope(action["plan_id"], 128)
+                if action["type"] == _ACTION_TYPE.CAMERA_RECORD and not self._canceled else None),
             result=CaptureResult(
                 action_status=action_status,
                 plan_status=plan_status,
@@ -1562,8 +1568,8 @@ class FinishCaptureCommand:
     def _readable_metadata(self, connection, output_id, output, original_ids):
         """登记时的可读元信息取自承载文件行；观察未保存时保留未知。
 
-        修复成品沿用其关联原片设备文件的可读名称与类型：修复不重
-        新编码，媒体类型与原片一致。
+        修复成品的 MP4 容器事实来自成功事件的实际输出探测；旧事实
+        未包含输出探测时，继续沿用关联原片的可读名称与类型。
         """
         if output.intermediate_file_id is not None and output.kind is not OutputKind.REPAIRED:
             file = self._required(connection, "intermediate_files", output.intermediate_file_id)
@@ -1580,7 +1586,16 @@ class FinishCaptureCommand:
                 original_file_id = self._state["outputs"][
                     original_ids[output_id]]["device_file_id"]
             file = self._required(connection, "device_files", original_file_id)
-        return file.get("original_name"), file.get("media_type")
+        name, media_type = file.get("original_name"), file.get("media_type")
+        if output.kind is OutputKind.REPAIRED:
+            from camctl.capture.media_facts import saved_output_probe
+            # 修复 MP4 的格式来自已保存的实际成品探测，原片元信息不改写。
+            probe = saved_output_probe(connection, output.intermediate_file_id)
+            if probe is not None and probe.format_name is not None and "mp4" in probe.format_name.split(","):
+                if name is not None:
+                    name = name.rsplit(".", 1)[0] + ".mp4"
+                media_type = "video/mp4"
+        return name, media_type
 
     def _load_file(self, connection, device_id, intermediate_id):
         table = "device_files" if device_id is not None else "intermediate_files"
@@ -1751,10 +1766,17 @@ class _MediaProcessingCommand(_ProcessingCommand):
             current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id)))
         return facts
 
+    def _media_evidence(self, kind):
+        from camctl.capture.media_facts import probe_document
+        return {member: probe_document(probe)
+            for member in ("source_probe", "output_probe")
+            if kind == _RECORDING_PROCESSED_EVENT
+            and (probe := getattr(self._request, member, None)) is not None}
+
     def _save_specs(self, scope, specs, result=None):
         allocation = scope.allocate(len(specs))
         events = tuple(_envelope(allocation.first_event_id + index, allocation.txn_id,
-            kind, reason, rows, self._request.occurred_at)
+            kind, reason, rows, self._request.occurred_at, self._media_evidence(kind))
             for index, (kind, reason, rows) in enumerate(specs))
         return CommandPlan(events=events, owners=self._owners, state_rows=self._state,
             result=result if result is not None else ProcessingOutcome(ProcessingDisposition.SAVED))
@@ -1768,7 +1790,7 @@ class _MediaProcessingCommand(_ProcessingCommand):
                 "before": {"exists": row.before.exists, "values": dict(row.before.values)},
                 "after": {"exists": row.after.exists, "values": dict(row.after.values)}} for row in rows]
             if (event["type"] != kind or event["reason"] != reason
-                    or event["body"]["evidence"] != {}
+                    or not json_equal(event["body"]["evidence"], self._media_evidence(kind))
                     or not json_equal(event["body"]["rows"], expected)):
                 raise TransactionError("原媒体事务的完整申请、阶段或文件身份不同")
             expected_owners = {(registry[owner[0]]["id"], owner[1])
@@ -5302,7 +5324,8 @@ class _FinishRecordingResultsCommand:
             check_state=processing["check_state"],
             check_duration_s=(saved_check_duration(media)
                 if processing["check_state"] == int(_CHECK_STATE.COMPLETED) else None),
-            check_issues=bool(media.get("issues")) if isinstance(media, Mapping) else False,
+            check_issues=(bool(media.get("issues")) if isinstance(media, Mapping) else False)
+                or bool(saved_osv_input_issues(connection, processing["id"], target)),
             input_unavailable=False,
             repair_state=processing["repair_state"], target_duration_ms=target))
         failure = self._request.capture.failure
@@ -5356,7 +5379,8 @@ class _FinishRecordingResultsCommand:
             events=events,
             owners={row: owner for plan in plans for row, owner in plan.owners.items()},
             state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
-            read_coverage=ReadCoverage(ranges), result=plans[0].result)
+            read_coverage=ReadCoverage(ranges), plan_read_scope=plans[0].plan_read_scope,
+            result=plans[0].result)
 
     def _reuse(self, scope, saved, run) -> CommandPlan:
         capture = self._request.capture
