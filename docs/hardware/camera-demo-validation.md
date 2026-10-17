@@ -4,7 +4,7 @@
 
 ARM 上的 Action6 普通录像演示已由用户于 2026-10-11 确认正常，该次十秒演示范围已完成，不需要重复拍摄或补交报告。该次原始计划、正式报告、媒体文件和确认水位未归档；其范围与 2026-10-17 的扩大验证分别记录，详见[普通录像现场验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。
 
-Action6 原生延时的 STOP、返回、结束和产物完成契约仍待闭合，并且该设备的真机验证继续等待固件修复。OSMO 360 II 的[最短延时手工演示已由用户现场确认通过](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)，其正式普通录像、原生延时、低功耗中断恢复及有限取消的 TX2 业务链现已按[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)完成；实际范围和限制见[TX2 验证记录](../camctl/verification.md#tx2-正式业务验收2026-10-18-起)。Auto 1 秒／300 秒样片的实际采样间隔未独立读回；不能由其帧数确认 1 秒效果。其他范围与历史设备证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
+Action6 原生延时的 STOP、返回、结束和产物完成契约仍待闭合，并且该设备的真机验证继续等待固件修复。OSMO 360 II 的[1 秒／300 秒历史手工演示已由用户现场确认通过](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)；该确认针对历史请求，不代表当前最短 2 秒新请求的实机验收。OSMO 正式普通录像、原生延时、低功耗中断恢复及有限取消的 TX2 业务链现已按[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)完成；实际范围和限制见[TX2 验证记录](../camctl/verification.md#tx2-正式业务验收2026-10-18-起)，当前 2 秒新请求的实机补测由后续设备任务记录。Auto 1 秒／300 秒样片的实际采样间隔未独立读回；不能由其帧数确认 1 秒效果。其他范围与历史设备证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
 
 真实目标主机性能测量、物理断电后的持久性验证和真实第三方传输方联调采用独立验收范围；边界见[第一版完善与验收范围](../architecture/README.md#第一版完善与验收范围)和[文件交接规格](../architecture/file-handoff.md)。本文保留相机资料采集、诊断工具说明以及 ARM 安装版 host 演示的操作步骤，设备当前结果以组件验证记录为准。
 
@@ -109,7 +109,7 @@ py -3.11 collect_call.py action6/021-record-stop adb -s <serial> shell dji_mb_ct
 
 OSMO 最短延时手工演示的历史范围见[现场验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)，较长间隔下的连接行为见[低功耗现场确认](../camctl/verification.md#osmo-360-ii-延时低功耗与-adb-恢复的现场确认2026-10-17)。OSMO TX2 正式业务验收已经完成；当前进度只由[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)维护，拍摄与交付实测见[验证记录](../camctl/verification.md#tx2-正式业务验收2026-10-18-起)。Auto 1 秒／300 秒样片没有实际采样间隔独立读回。Action6 的手工专项已取得固件缺陷结论，后续真机诊断等待修复；剩余设备资料及候选命令由[相机控制交接资料](camera-control-handoff.md)维护，推进计划见[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。
 
-两款使用相同的[间隔与采集时长限制](camera-control-handoff.md#间隔与采集时长限制)，后续实机演示的最短时间目标均为 1 秒间隔、300 秒采集；模式、曝光、输出与编码分别沿自身契约。Action6 新诊断的输入、完整映射和旧记录读取由[驱动计划 D1A](../superpowers/plans/2026-10-16-osmo360ii-timelapse-driver.md#d1a-action6-新诊断与旧记录只读复查)同步。新诊断省略时间选项时从同源资源派生最短组合；下文秒级结果保留为既有记录和只读复查背景。
+两款使用相同的[采集时长域和严格组合关系](camera-control-handoff.md#间隔与采集时长限制)，间隔按型号定义。当前最短实机演示目标分别为 Action6 的 1 秒／300 秒和 OSMO 的 2 秒／300 秒；OSMO 当前目标的实机补测由后续设备任务记录。下文 1 秒／300 秒 OSMO 请求是历史演示记录，不属于当前 OSMO 新请求允许域。模式、曝光、输出与编码分别沿自身契约。Action6 新诊断的输入、完整映射和旧记录读取由[驱动计划 D1A](../superpowers/plans/2026-10-16-osmo360ii-timelapse-driver.md#d1a-action6-新诊断与旧记录只读复查)同步。新诊断省略时间选项时从同源资源派生最短组合；下文秒级结果保留为既有记录和只读复查背景。
 
 ### 延时采集期间的低功耗与连接观察
 
@@ -129,13 +129,13 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01'
 
 ### OSMO 360 II 的最短实机演示
 
-实机演示采用[参数限制](camera-control-handoff.md#间隔与采集时长限制)中的最短允许组合：采集间隔为 1 s，采集时长为 5 min（300 s），仅输出视频。该组合满足 `duration_s > interval_s`。其余模式、分辨率和曝光设置沿用下文已执行记录中的要求，实际参数仍需核实。
+本节保留此前 OSMO 手工演示的历史请求：采集间隔为 1 s、采集时长为 5 min（300 s），仅输出视频。当前[参数限制](camera-control-handoff.md#间隔与采集时长限制)规定 OSMO 新请求的最短间隔为 2 s；下文的 1 s 请求和命令仅用于理解历史记录，不是当前合法的新请求。当前最短目标为 2 s／300 s，其实机补测由后续设备任务记录。其余模式、分辨率和曝光设置沿用当时执行记录，实际参数仍需核实。
 
-本节只记录此前通过用户整体确认的 OSMO 手工演示，完整命令和当时未归档的参数读回、计时范围仍见[历史验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。新代码的 TX2 正式业务验收已按[2026-10-18 完成设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)和[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)完成；实际场景和结果见[验证记录](../camctl/verification.md#tx2-正式业务验收2026-10-18-起)。Auto 1 秒／300 秒这一轮的实际采样间隔未独立读回，不据帧数确认 1 秒效果。300 秒表示采集时长，命令响应、自然余量、文件等待与结果读取按完成设计分别处理。
+本节记录此前通过用户整体确认的历史 OSMO 1 秒／300 秒手工演示；完整命令和当时未归档的参数读回、计时范围仍见[历史验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。该历史确认不覆盖当前 2 秒新请求，当前请求的实机补测由后续设备任务记录。新代码的 TX2 正式业务验收已按[2026-10-18 完成设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)和[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)完成；实际场景和结果见[验证记录](../camctl/verification.md#tx2-正式业务验收2026-10-18-起)，该软件业务链验收不代表当前 2 秒参数已经通过实机复测。Auto 1 秒／300 秒这一轮的实际采样间隔未独立读回，不据帧数确认 1 秒效果。300 秒表示采集时长，命令响应、自然余量、文件等待与结果读取按完成设计分别处理。
 
 ### OSMO 360 II 的最短手工演示顺序
 
-以下为用户现场确认通过的演示请求顺序；确认范围由[现场验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)定义。该顺序与下文既有 30 秒／600 秒试验分别保留，不使用旧试验的 610 秒观察安排判定本次结果。
+以下保留用户现场整体确认通过的历史 1 秒／300 秒演示请求顺序；确认范围由[现场验收记录](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)定义。这些命令与参数不属于当前 OSMO 新请求域，也不能证明当前 2 秒请求已通过实机复测。该顺序与下文既有 30 秒／600 秒试验分别保留，不使用旧试验的 610 秒观察安排判定其他请求。
 
 在 TX2 终端先用 `adb devices -l` 确认目标 serial，下面沿用原绑定 `123456789ABCDEF`，实际不同时统一替换。逐条执行：仅在本地退出码为 `0`、没有未解释报错，并收到唯一完整的 `Resp message, len = 1, data: 00` 后继续；出现错误或响应不明确时停止后续派发，不自动重试。
 
