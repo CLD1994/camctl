@@ -12,9 +12,23 @@
 
 归档的两份 `dji_mb_ctrl -h` 只列出可选的 `-o timeout`，没有给出默认值或单位。既有无 `-o` 的三次原生延时 START 快速返回，证明这些样本的响应没有等到整项采集完成；现有原始调用不足以证明工具默认响应上限。正式接入仍需按明确外层有限期限管理调用，响应未知时不重新启动设备。
 
-当前生产路径还缺少 OSMO 的 OSV／LRF 结果读取、延时提前 STOP 后独立冻结的文件等待，以及自然结束／提前 STOP／普通录像 STOP 的完成上下文分区。普通录像恢复还须避免选择 LRF 检查或在修复时丢弃一路主视频。[补充设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)提出有限等待与产物规则，以及低功耗取消后的有界收场方案；用户已接受 30 秒完成等待假设、可选 LRF、低功耗期间延迟取消，以及不要求修复成品保留厂商原生编辑兼容。实现按[补充执行步骤](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md)继续；正式工厂、软件门禁和 ARM 业务链尚未完成。
+当前正式内置合同已登记 OSMO 普通录像和原生延时；安装版 `describe` 与联合业务链已覆盖两类动作。30 秒自然结束余量、独立 30 秒 STOP 文件等待、可选 LRF、低功耗取消收场和双主视频媒体修复按[补充设计](../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)执行。软件验证与实际设备验收分开记录；截至本记录，正式 TX2 业务链尚未完成。
 
 本轮证据入口为本地忽略目录 `.local/acceptance/osmo360-formal-integration-20261017T164203Z/`。主机只读检查的实际 UTC 为 2026-10-17 16:42，OSMO USB／ADB 在线，未见 camctl 或 host-demo 进程；用户随后确认当前待机、供电充足。未发送新设置、START 或 STOP，未重复旧拍摄，未操作 Action6。本项是资料与前置状态复核，不计为新增拍摄、软件测试或正式业务验收。
+
+### 正式软件接入验证（2026-10-18）
+
+主线 `bc0cad2` 的 Linux x86_64／WSL2、CPython 3.11.16 回归结果为：unit `5677 passed, 1 skipped`（26.61 秒）、capture `1357 passed`（580.22 秒）、session `139 passed`（26.98 秒）、history `212 passed`（52.26 秒）、cancellation `103 passed`（13.71 秒）、persistence `123 passed`（4.13 秒），命令均退出 `0`。原始命令、UTC、解释器、提交和退出码记录在 `.local/acceptance/osmo360-formal-integration-20261017T164203Z/software/` 的 `final-*.call.json` 与对应日志中。
+
+针对 `bc0cad2` 的补充回归中，`test_media_assembly.py` 与 `test_osv_media_pipeline.py` 共 `6 passed`（15.36 秒），`host_files` 共 `117 passed`（2.24 秒），修正旧 OSMO 能力断言后的 `devices` 完整目录共 `166 passed`（4.90 秒），均退出 `0`。首次 `devices` 执行的唯一失败来自旧测试仍要求 `describe` 返回 `actions=[]`；只更新该测试预期后重跑，生产代码未改。完整命令和日志记录在 QA 工作区 `/opt/devcontainer/.codex/worktrees/osmo-final-bootstrap/camctl/.local/verification/osmo-final-bootstrap/` 的 `manifest-bc0cad2.json`、`manifest-bc0cad2-devices-corrected.json` 及各自日志中。
+
+完整 `bootstrap` 目录在冻结快照 `74b010c` 上取得 `1174 passed, 1 skipped`（1043.25 秒，退出 `0`）；这项结果只属于该快照，不记作 `bc0cad2` 的全目录结果。原始完整日志和清单位于 QA 工作区 `/opt/devcontainer/.codex/worktrees/osmo-final-bootstrap/camctl/.local/verification/osmo-final-bootstrap/bootstrap-74b010c.log` 与 `manifest-74b010c.json`。`bc0cad2` 上另有针对媒体路径的两个 bootstrap 文件，完整日志见该 QA 工作区；安装版 OSMO 联合链日志及运行清单见 `/workspaces/camctl/.local/acceptance/osmo360-formal-integration-20261017T164203Z/software/cross-final/` 和下文跨组件记录。
+
+跨组件实测中，候选链 `test_real_camera_demo_roundtrip.py` 为 `4 passed`（60.89 秒），通用 C host 链 `test_camctl_c_module_roundtrip.py` 为 `3 passed`（35.17 秒），均在生产代码快照 `bc0cad2` 运行。OSMO 安装版链 `test_osmo_builtin_timelapse_roundtrip.py` 在 `13482ca` 快照取得 `4 passed`（91.69 秒，退出 `0`）；该快照以 `bc0cad2` 为生产代码基线，后续提交只改集成测试。安装版正式 `describe` 导出普通录像和原生延时，业务组合覆盖普通录像配 LRF、原生延时配 LRF 及不配 LRF；其 ADB 与时间边界及客户端 `Files.upload` 验收范围见[跨组件集成说明](../../tests/integration/README.md#osmo-360-ii-正式内置合同安装版联合链)。OSMO 安装版链完整日志与运行清单保存在 `/workspaces/camctl/.local/acceptance/osmo360-formal-integration-20261017T164203Z/software/cross-final/`；对应 QA 原始清单在 `/opt/devcontainer/.codex/worktrees/osmo-final-cross/camctl/.local/verification/osmo-final-cross/test_osmo_builtin_timelapse_roundtrip-green.log.meta.json`。
+
+公共协议检查 `node scripts/check-protocol.mjs` 于 2026-10-17 19:50:46 UTC 在 `f66d296` 退出码 `0`。检查覆盖 4 份 Schema、27 份报告及摘要、19 份计划、5 份能力说明、166 个结构正反例、23 个动作错误编号及详情，并通过电机共同夹具 76 例和视频大小估算共同夹具 246 例；边界说明未声称运行生产受理、客户端合并或设备联调。原始输出及命令清单见 `.local/acceptance/osmo360-formal-integration-20261017T164203Z/software/final-protocol.stdout`、`final-protocol.stderr` 与 `final-protocol.call.json`。
+
+跨组件候选链首次运行前发现工作区缺少被忽略的生成包资源，四个用例因此以 `registry/enum-registry.json` 未登记失败；保留的首次日志为 `/workspaces/camctl/.local/acceptance/osmo360-formal-integration-20261017T164203Z/software/cross-final/test_real_camera_demo_roundtrip.log`。执行 `apps/camctl/scripts/sync_resources.py` 生成 27 项资源并通过资源检查后，同一候选命令重跑为绿色；该故障属于工作区资源准备，不作为生产代码失败，也不隐藏首次诊断。本节记录的软件结果不替代 ARM 安装或真实 OSMO 拍摄、取回与 ACK 验收；本节所列软件门禁未操作相机，也未操作仍暂停的 Action6。当前软件实现和任务进度由[完成契约实施计划](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md)维护，TX2 业务证据取得后另行记录。
 
 ### 既有 OSV 的离线双流裁剪核验
 

@@ -12,7 +12,7 @@
 
 ## 全局约束
 
-遵守[统筹计划](2026-10-16-osmo360ii-timelapse.md#全局约束)。最短演示样例不是参数默认值，也不使尚未闭合的候选变为可执行能力。原始源文件保留，删除仅由明确清理动作触发。
+遵守[统筹计划](2026-10-16-osmo360ii-timelapse.md#全局约束)。最短演示样例不是参数默认值，也不替代设备证据；OSMO 正式合同和软件进度见[完成契约计划](2026-10-18-osmo360ii-capture-completion.md)。原始源文件保留，删除仅由明确清理动作触发。
 
 ## 上下文与建议文件
 
@@ -57,14 +57,16 @@ P tests/integration/test_real_camera_demo_roundtrip.py -q
 
 **交付接口：** 安装版 `describe` → 同一 Schema 的客户端加载及导出 → 实际 C host → 正式 CLI/SQLite → 独立取回 → 文件与报告领取 → 客户端导入 → ACK。候选 launcher 不用于替代该链中的内置 OSMO 合同。
 
-- [ ] 先在建议新增的 `test_osmo_builtin_timelapse_roundtrip.py` 编写安装版场景：在源码目录之外构建和安装当前 wheel，使用明确 OSMO 配置，真实内置 `describe` 必须导出完整延时参数类型；与源码运行结果及安装资源一致。
-- [ ] 该链只在真实 ADB 进程边界提供受合同约束的命令响应和源文件。建议新增 `tests/integration/_osmo_builtin_clock_entry.py` 并复制到安装版测试目录，作为独立的只注入时钟入口；从 wheel 导入正式 CLI，仅让 `lifecycle.SystemClock`、capture 的 `wall_us/monotonic_ns`、obtain 与 cleanup 的 `occurred_at/monotonic_ns` 共用同一个受控时钟源。可复用纯时钟辅助逻辑，不调用同时替换合同和传输的 `install_camera_demo`。
-- [ ] 核对安装入口中的正式 `CameraContract`、任务工厂、响应解释器、结果读取器及内置登记均来自 wheel 且没有被替换；时钟推进只通过上述端口，不修改冻结目标时长或业务状态。运行记录明确该软件链的时间替身范围。
-- [ ] 经客户端验证并导出最短参数，C host 递交后核对原始/生效参数的精确数值、固定执行定义、目录基准及唯一 START。非法等值和反向大小也由浏览器/后端及 CLI 同源拒绝，不产生设备调用。
-- [ ] 先运行 `P tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q`，确认目标缺失会使测试失败；据失败定位实际接缝，再完成必要接线，不用测试注册替代生产登记。
-- [ ] 验证拍摄产物的原动作关联及完整终态，生成独立 `obtain` 请求，C host 领取副本后核对源与副本长度及 SHA-256；源文件仍保留。报告导入和 ACK 使用客户端可靠接受的报告身份，不把文件领取等同于用户收到。
-- [ ] 增加原 START 后中断、取回中断及同请求重送的必要场景，核对原基准、原输入、单次设备启动和独立交付身份。已有通用机制直接复验，失败修复仍归相应领域。
-- [ ] 顺序执行新增内置链、四条候选链和通用 C host 链；最后执行 bootstrap 安装回归及公共协议检查。当前代码无关的目标资源、物理断电和性能验收不并入软件门槛。
+**当前状态：** E2 的安装版 OSMO 联合链及对应软件门禁已通过；实际快照、结果与替身边界见[组件验证记录](../../camctl/verification.md#正式软件接入验证2026-10-18)和[完成契约实施计划](2026-10-18-osmo360ii-capture-completion.md)。E3 的 TX2 正式业务验收仍未执行，E2 软件通过不代替真实设备结果。
+
+- [x] 在 `test_osmo_builtin_timelapse_roundtrip.py` 编写源码目录外安装版场景：从 wheel 运行正式内置 `describe`，并核对两类 OSMO 参数类型及安装资源与源码一致。
+- [x] 该链只在 PATH 的 ADB 子进程边界提供受合同约束的命令响应和源文件；时钟入口从测试源码复制到安装测试进程的独立运行目录。从 wheel 导入正式 CLI，受控时钟只注入 `lifecycle.SystemClock`、capture 的 `wall_us/monotonic_ns`、obtain 与 cleanup 的 `occurred_at/monotonic_ns`。没有调用同时替换合同与传输的 `install_camera_demo`。
+- [x] 核对安装入口中的正式 `CameraContract`、任务工厂、响应解释器、结果读取器及内置登记均来自 wheel 且没有被替换；时钟推进只通过受控端口，不修改冻结目标时长或业务状态。运行记录明确时间替身范围。
+- [x] 经客户端验证并导出录像与延时参数，C host 递交后核对原始／生效参数、固定执行定义、目录基准及唯一 START；非法等值和反向大小由浏览器／后端及 CLI 拒绝且不产生设备调用。
+- [x] 运行 `P tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q` 并完成安装版联合链；测试通过真实安装入口验证两类正式合同，不以测试登记替代生产登记。
+- [x] 验证拍摄产物的原动作关联及完整终态，生成独立 `obtain` 请求，C host 领取副本后核对源与副本长度及 SHA-256；源文件仍保留。客户端真实 `Files.upload` 导入媒体，报告导入和 ACK 使用客户端可靠接受的报告身份，不把文件领取等同于用户收到。
+- [x] 覆盖原执行恢复、取回中断及同请求重送，核对原基准、原输入、单次设备启动、原交付身份与已提交偏移；已有通用机制通过同一联合链复验。
+- [x] 执行新增内置链、候选链、通用 C host 链及实际适用的 bootstrap/resource 门禁，并完成公共协议检查。完整 `bootstrap` 快照和 `bc0cad2` 的补充门禁分别见验证记录，不混记为同一快照。
 
 ```bash
 P tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
@@ -74,7 +76,7 @@ P apps/camctl/tests/integration/bootstrap -q
 node scripts/check-protocol.mjs
 ```
 
-- [ ] 记录真实环境、日志和退出码，并明确 ADB/时钟替身范围。检查 diff、独立复核后提交，交付配套 wheel、锁定依赖、C host 及客户端版本。
+- [x] 记录真实软件环境、日志和退出码，并明确 ADB/时钟替身范围。检查 diff、独立复核并提交安装版联合链；ARM wheel、锁定依赖、C host 及客户端版本交付由 E3 按目标环境核对。
 
 ## E3 ARM 最短实机演示
 
@@ -82,7 +84,7 @@ node scripts/check-protocol.mjs
 
 **交付：** 带日期、环境和适用范围的实际设备与 ARM 业务验收记录；不回填没有取得的观测值。
 
-本节正式业务链之外，TX2 手工执行最短延时组合已有[用户现场整体确认通过记录](../../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。该记录交接到设备契约核对，不将手工结果计为安装版内置合同、客户端／C host、独立取回、报告或 ACK 的联合验收；E2／E3 的相应任务继续分别跟踪。
+本节正式业务链之外，TX2 手工执行最短延时组合已有[用户现场整体确认通过记录](../../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)。该记录交接到设备契约核对，不将手工结果计为安装版内置合同、客户端／C host、独立取回、报告或 ACK 的联合验收。E2 软件联合链已按上文独立完成；正式实现后的 TX2／ARM 业务链仍由 E3 验收，不能用旧手工样本替代。
 
 - [ ] 使用普通运行账户安装配套交付物，核对实际 Python/SQLite、ADB、相机型号/固件、serial 和存储。已有部署沿原状态库与交接目录；只有首次初始化才执行 `init`，不重新初始化业务数据。
 - [ ] 按[安装包提取与 OSMO 配置说明](../../hardware/camera-demo-validation.md#从安装包准备计划和配置)取得资源、填写实际 serial；已有部署合并设备项后，使用同一现场配置执行正式 `describe`，将说明交给现场客户端加载。其表单须保留时间关联选择及曝光编辑。由客户端导出唯一的新拍摄请求，检查最短目标及固定设置要求。
