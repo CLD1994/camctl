@@ -410,3 +410,9 @@ JSON 整数按数学值判断，沿用[精确数字规则](../data-types.md#精�
 ## 有限设备延时的取消收场策略
 
 新延时任务可在首次执行定义中保存 `cancel_completion_policy: "finite_device_end"`。该值由内部 `CancelCompletionPolicy` 类型统一定义，只允许有限时长、`wait_after_send: true`、支持停止、`DEVICE + SENT + TIME_AND_OUTPUTS` 的组合。缺失时保留原取消契约，显式 `null`、未知值或不适用组合非法。策略不随驱动升级追补到旧任务；实际取消责任和失败语义见[完成与正式接入设计](../../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md#低功耗期间的取消与异常)。
+
+## 拍摄执行定义的启动余量
+
+适用的新普通录像同时保存 `start_return_meaning = 1`（`SENT`）与 `startup_margin_ms`。后者为正的精确整数毫秒，表示主机采用的启动等待上界。两项缺一、普通录像使用其他返回含义，或余量为布尔、零、负数、小数时拒绝定义。旧普通录像同时缺少这两项时保留原 `STARTED` 合同。原生有限 `SENT` 延时可以独立保存 `startup_margin_ms`；缺失时保持原等待规则。
+
+字段由首次受理冻结，读取与恢复不补默认值。命令确认、实际开始、正常停止、自然核实和媒体证据的完整规则见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)。

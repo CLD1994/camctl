@@ -54,6 +54,7 @@ class CaptureTask:
     file_completion_wait_s: JsonValue = None
     output_storage: CaptureStorage | None = None
     cancel_completion_policy: CancelCompletionPolicy | None = None
+    startup_margin_ms: int | None = None
 
 
 class CaptureTaskFactory(Protocol):

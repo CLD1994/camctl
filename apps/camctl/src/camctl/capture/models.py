@@ -83,7 +83,7 @@ def activity_capabilities(
         validated = validate_capture_spec(action_type, spec)
         return ActivityCapabilities(
             state_query_supported=0, stop_supported=1, safe_repeat_stop=1,
-            start_return_meaning=int(StartReturn.STARTED),
+            start_return_meaning=validated.get("start_return_meaning", int(StartReturn.STARTED)),
             completion_mode=int(CompletionMode.TIME_AND_OUTPUTS),
             ownership_mode=validated.get("ownership_mode", 1),
             output_scope_json=deepcopy(validated.get("output_scope", {})))
@@ -216,10 +216,18 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
         ownership = _ownership(spec)
         completion_wait = ({"file_completion_wait_ms": _integer(spec["file_completion_wait_ms"], 1)}
                            if "file_completion_wait_ms" in spec else {})
-        if set(spec) != {"target_duration_ms", *ownership, *products, *completion_wait}:
+        startup = {}
+        if {"startup_margin_ms", "start_return_meaning"}.intersection(spec):
+            if not {"startup_margin_ms", "start_return_meaning"} <= set(spec):
+                raise ValueError("录像命令确认与启动余量必须共同冻结")
+            if StartReturn(_integer(spec["start_return_meaning"], 1)) is not StartReturn.SENT:
+                raise ValueError("启动余量要求录像使用可靠 SENT")
+            startup = {"start_return_meaning": int(StartReturn.SENT),
+                       "startup_margin_ms": _integer(spec["startup_margin_ms"], 1)}
+        if set(spec) != {"target_duration_ms", *ownership, *products, *completion_wait, *startup}:
             raise ValueError("录像定义必须保存目标时长及适用的归属声明")
         return {"target_duration_ms": _integer(spec["target_duration_ms"], 1),
-                **ownership, **products, **completion_wait}
+                **ownership, **products, **completion_wait, **startup}
     if action_type != "camera_timelapse":
         raise ValueError("动作类型不是拍摄动作")
     required = {"duration_based", "wait_after_send", "end_control", "stop_supported", "start_return_meaning", "completion_mode"}
@@ -235,6 +243,11 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
     completion = CompletionMode(_integer(spec["completion_mode"], 1))
     result.update(end_control=int(end), start_return_meaning=int(start), completion_mode=int(completion))
     expected = set(required) | set(ownership) | set(products)
+    if "startup_margin_ms" in spec:
+        if not spec["duration_based"] or start is not StartReturn.SENT:
+            raise ValueError("启动余量只适用于有限 SENT 任务")
+        expected.add("startup_margin_ms")
+        result["startup_margin_ms"] = _integer(spec["startup_margin_ms"], 1)
     if "file_completion_wait_ms" in spec:
         if not spec["stop_supported"]:
             raise ValueError("停止后文件等待要求明确停止能力")
@@ -297,6 +310,7 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
                 "product_rules",
                 "file_completion_wait_s",
                 "cancel_completion_policy",
+                "startup_margin_ms",
             )
         ):
             raise ValueError("单张任务不能携带时长、停止、完成或产物范围字段")
@@ -326,13 +340,18 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
             raise ValueError("录像任务必须明确具备 stop_supported")
         completion_wait = ({} if task.file_completion_wait_s is None else {
             "file_completion_wait_ms": seconds_to_duration_ms(task.file_completion_wait_s)})
+        startup = ({} if task.startup_margin_ms is None and task.start_return_meaning is None else {
+            "startup_margin_ms": task.startup_margin_ms,
+            "start_return_meaning": task.start_return_meaning})
         return validate_capture_spec(action_type, {
             "target_duration_ms": seconds_to_duration_ms(task.target_duration_s),
-            **ownership, **products, **completion_wait})
+            **ownership, **products, **completion_wait, **startup})
     spec = {"duration_based": task.duration_based, "wait_after_send": task.wait_after_send,
             "end_control":task.end_control, "stop_supported":task.stop_supported,
             "start_return_meaning":task.start_return_meaning, "completion_mode":task.completion_mode,
             **ownership, **products}
+    if task.startup_margin_ms is not None:
+        spec["startup_margin_ms"] = task.startup_margin_ms
     if task.target_duration_s is not None:
         spec["target_duration_ms"] = seconds_to_duration_ms(task.target_duration_s)
     if task.result_wait_margin_s is not None:
