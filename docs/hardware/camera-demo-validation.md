@@ -1,8 +1,10 @@
 # Action6 普通录像演示与相机资料采集
 
-ARM 上的 Action6 普通录像演示已由用户于 2026-10-11 确认正常，T9 当前演示范围完成。当前不需要再次拍摄或要求用户补交报告；原始计划、正式报告、媒体文件和确认水位未归档，因此本文不补写测量值或逐项结论。详见[普通录像现场验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。
+设备的当前安排见[Action6 暂停与后续 360 验证](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)。2026-10-17 的 Action6 普通录像、六个延时诊断分支及 USB 断连复现见[真机验证记录](../camctl/verification.md#action6-tx2-真机验证与暂停2026-10-17)。暂停期间只整理已有本地材料，不按下文操作步骤自动启动或恢复相机验证。
 
-Action6 原生延时摄影的诊断已暂停；STOP、实际开始与结束、文件完成及最终产物集合尚未由真机证据确认。不要对这次未闭合试验运行 `--capture timelapse`、重发 START 或自动重试；只有对已有采样目录进行只读观察时才使用 `--observe`。OSMO 360 II 的[最短延时手工演示已由用户现场确认通过](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)，正式执行与完整业务链继续由[领域计划](../superpowers/plans/2026-10-16-osmo360ii-timelapse.md)跟踪。其他范围与证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)及[组件验证记录](../camctl/verification.md)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
+ARM 上的 Action6 普通录像演示已由用户于 2026-10-11 确认正常，该次十秒演示范围已完成，不需要重复拍摄或补交报告。该次原始计划、正式报告、媒体文件和确认水位未归档；其范围与 2026-10-17 的扩大验证分别记录，详见[普通录像现场验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。
+
+Action6 原生延时的 STOP、返回、结束和产物完成契约仍待闭合。OSMO 360 II 的[最短延时手工演示已由用户现场确认通过](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)，正式执行与完整业务链继续由[领域计划](../superpowers/plans/2026-10-16-osmo360ii-timelapse.md)跟踪。其他范围与证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)及[组件验证记录](../camctl/verification.md)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
 
 真实目标主机性能测量、物理断电后的持久性验证和真实第三方传输方联调采用独立验收范围；边界见[第一版完善与验收范围](../architecture/README.md#第一版完善与验收范围)和[文件交接规格](../architecture/file-handoff.md)。本文保留相机资料采集、诊断工具说明以及 ARM 安装版 host 演示的操作步骤，设备当前结果以组件验证记录为准。
 
@@ -183,7 +185,7 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 200
 
 诊断按[候选编码契约](../camctl/timelapse-command-encoding.md)生成完整设置，模板或资源缺失、结构损坏及表示超界也在运行 ffprobe 或 ADB 前拒绝。记录保存精确 JSON 数字、完整负载、`encoding_format`、`template_identity`、原完整模板和样例推导依据。默认值只服务于该诊断入口，不为生产参数补默认值。
 
-脚本只发送一次 START，没有 Action6 延时 STOP，不会自动重发 START；调用异常后仍无法据此判断设备是否开始。本机时钟、调用耗时、文件出现或副本检查都不能证明设备开始、自然结束、写完或产物集合已固定。当前设备采集仍已暂停，不执行新的采集或对同一试验补发 START。既有设备观察见[Action6 原生延时记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)。
+脚本只发送一次 START，没有 Action6 延时 STOP，不会自动重发 START；调用异常后仍无法据此判断设备是否开始。本机时钟、调用耗时、文件出现或副本检查都不能证明设备开始、自然结束、写完或产物集合已固定。当前设备访问按[T9 暂停安排](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)处理；本节保留工具行为说明。既有 Windows 设备观察见[原生延时记录](../camctl/verification.md#action6-的-windows-原生延时采样2026-10-10)，本次 TX2 结果见[2026-10-17 验证记录](../camctl/verification.md#action6-tx2-真机验证与暂停2026-10-17)。
 
 ### Action6 独立诊断交付
 
@@ -211,7 +213,9 @@ apps/camctl/.venv311/bin/python apps/camctl/scripts/render_action6_diagnostic_ca
 
 ### Action6 延时采样后的只读复查
 
-对已经存在并保存了 `capture-observation.json` 的原采样目录，如需补充目录观察，可使用同一个脚本的 `--observe <原采集目录>`。该入口从原始记录读取启动前目录，新增观察保存在原目录下，不覆盖原记录，不发送设置、START、STOP 或删除命令。它可能列举文件、下载文件并运行媒体检查，因此只用于原试验资料复查，不能当成新拍摄或恢复采集。
+本节是另行恢复设备验证后的工具说明。暂停期间只核对已有本地材料，不运行 `--observe`；该入口会访问相机，不属于离线材料检查。恢复条件见[T9 当前安排](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)。
+
+恢复后，对已经存在并保存了 `capture-observation.json` 的原采样目录，如需补充目录观察，可使用同一个脚本的 `--observe <原采集目录>`。该入口从原始记录读取启动前目录，新增观察保存在原目录下，不覆盖原记录，不发送设置、START、STOP 或删除命令。它可能列举文件、下载文件并运行媒体检查，因此只用于原试验资料复查，不能当成新拍摄或恢复采集。
 
 ```powershell
 python .\action6_record_probe.py --observe ".\action6\timelapse-probe-<原 UTC 时间>" --adb .\adb.exe --serial 123456789ABCDEF --ffprobe "C:\path\to\ffprobe.exe"
@@ -241,7 +245,7 @@ A0／A1 的完整原调用证明 4K／30 fps、Auto、仅视频和 8 秒／1800 
 
 ### 分别保存原始调用
 
-以下启动与停止候选仅供未来单独安排的设备观察使用。它们不应被用于恢复当前已暂停的 Action6 原生延时试验；不得重发该试验的 START。
+以下启动与停止候选仅供未来单独安排的设备观察使用，执行前须满足[T9 当前安排](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)；暂停期间不派发，对既有试验不重发 START。
 
 Action6 原生延时的 START 候选及原表组合见[相机控制交接资料](camera-control-handoff.md#action--action6-静止延时摄影)。
 

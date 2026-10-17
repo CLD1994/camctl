@@ -10,6 +10,12 @@
 
 **规格：** [参数范围及组合关系](../../hardware/camera-control-handoff.md#间隔与采集时长限制)、[候选编码](../../camctl/timelapse-command-encoding.md)、[最短实机演示](../../hardware/camera-demo-validation.md#osmo-360-ii-的最短实机演示)、[相机接入设计](../specs/2026-10-10-camctl-real-camera-demo-design.md)、[能力与参数](../../architecture/camera-capabilities.md)、[延时执行](../../architecture/camera-capture.md)、[客户端编辑](../../architecture/client-editing.md#参数选项联动)。
 
+## 当前设备验证入口
+
+后续真机工作按[T9 当前安排](2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)转向 OSMO 360 II；Action6 暂停范围及未完成项只在该入口维护，实际证据见[2026-10-17 验证记录](../../camctl/verification.md#action6-tx2-真机验证与暂停2026-10-17)。已交付的共同参数、候选命令、客户端和安装资源保留各自软件验证范围。
+
+OSMO 下一步从[驱动 D2](2026-10-16-osmo360ii-timelapse-driver.md#d2-明确返回结束及产物契约)核对设备输入；该任务与[已通过的最短手工演示](../../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)分别记录。D3／D4 的正式接入、E2 的安装版联合验收及 E3 的 ARM 业务验收继续遵守下文依赖，不因调整验证设备而启用尚未闭合的能力。
+
 ## 全局约束
 
 - Action6 与 OSMO 360 II 的时间参数允许值共同由[参数限制](../../hardware/camera-control-handoff.md#间隔与采集时长限制)定义；采集时长必须严格大于间隔，各有相同的 134 种合法时间组合。两款演示使用该专题引用的最短时间组合。
