@@ -130,8 +130,11 @@ def test_fresh_cli_registers_camera_without_device_io(tmp_path, model):
     assert result.returncode == 0, result.stderr
     device = json.loads(result.stdout)["devices"][0]
     assert device["device_id"] == "cam-1" and device["driver_id"] == model
-    assert [action["type"] for action in device["actions"]] == (
-        ["camera_record"] if model == CameraModel.ACTION6 else [])
+    expected_actions = {
+        CameraModel.ACTION6: ["camera_record"],
+        CameraModel.OSMO360II: ["camera_record", "camera_timelapse"],
+    }
+    assert [action["type"] for action in device["actions"]] == expected_actions[model]
 
 
 @pytest.mark.asyncio
