@@ -75,5 +75,7 @@ def test_action6_digest_deadline_is_finite_and_positive_for_source_sizes():
         assert isinstance(value, Decimal) and value.is_finite() and value > 0
 
 
-def test_osmo_builtin_remains_pending_for_both_capture_actions():
-    assert all(capability.task_factory is None for capability in _contract(CameraModel.OSMO360II).capabilities())
+def test_osmo_builtin_exports_record_and_timelapse_from_one_complete_contract():
+    capabilities = _contract(CameraModel.OSMO360II).capabilities()
+    assert {capability.action_type for capability in capabilities} == {"camera_record", "camera_timelapse"}
+    assert all(callable(capability.task_factory) and capability.preview_supported for capability in capabilities)
