@@ -3,11 +3,11 @@
 from contextlib import closing
 
 from camctl.contracts.values import ConsistencyError, ObjectId
-from camctl.history.reads import PlanReadScope, ProductReadScope
+from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope
 
 
 class SqlEventReads:
-    """供逐产物守卫独立复核的有限只读端口。
+    """供产物、计划及拍摄结果守卫独立复核的有限只读端口。
 
     查询字段由内部白名单限定。每批 SQL 游标在交付前关闭；覆盖表
     只含本事务已经验证的变化，读错误与失效事务直接传播。
@@ -30,9 +30,10 @@ class SqlEventReads:
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
     def __init__(self, connection, scope, validated=()):
-        if not isinstance(scope, (ProductReadScope, PlanReadScope)):
+        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")
         self.connection, self.scope = connection, scope
+        self._result_file_ids = frozenset()
         self._overlay = {}
         for accepted in validated:
             event = accepted.envelope
@@ -51,6 +52,9 @@ class SqlEventReads:
             raise ConsistencyError("当前事件事实查询超出内部允许范围")
         if identity is not None:
             ObjectId(identity)
+        if isinstance(self.scope, CaptureResultReadScope) and (
+                table != "device_files" or column != "id" or identity not in self._result_file_ids):
+            raise ConsistencyError("结果文件事实只能读取本批原页的成员")
         if isinstance(self.scope, PlanReadScope) and (
                 table != "actions" or column not in ("id", "plan_id")
                 or (column == "plan_id" and identity != self.scope.plan_id)):
@@ -82,6 +86,27 @@ class SqlEventReads:
         if facts is None:
             raise ConsistencyError(f"当前事件关联记录缺失: {table}#{identity}")
         return facts
+
+    def result_pages(self, ticket, cursor, batch):
+        """只读取原单次扫描的已保存页及本批文件，不扩大历史上界。"""
+        from camctl.persistence.repositories.result_pages import read_pages
+        from camctl.persistence.transaction import row_facts
+
+        scope = self.scope
+        if (not isinstance(scope, CaptureResultReadScope) or not self.connection.in_transaction
+                or type(batch) is not int or not 1 <= batch <= scope.batch_size
+                or ticket.operation != "result" or ticket.run_id != scope.run_id
+                or ticket.attempt_id != scope.attempt_no or ticket.target_id != str(scope.activity_id)
+                or ticket.responsibility_key != f"results/{scope.activity_id}"):
+            raise ConsistencyError("结果页读取不属于原有限活动、尝试或批次")
+        run = row_facts(self.connection, "operation_runs", scope.run_id)
+        if run is None or run["action_id"] != scope.action_id or run["activity_id"] != scope.activity_id:
+            raise ConsistencyError("结果读取范围改变原活动归属")
+        result = read_pages(ticket, cursor, batch, self)
+        if any(page.ref.event_id > scope.last_page_event_id for page in result.items):
+            raise ConsistencyError("结果页读取超过原可靠末页")
+        self._result_file_ids = frozenset(file_id for page in result.items for _, file_id in page.file_ids)
+        return result
 
     def iter_members(self, table, column, identity, *, columns=None, limit=None):
         self._check(table, column, identity)

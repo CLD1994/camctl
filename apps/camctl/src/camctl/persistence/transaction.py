@@ -37,7 +37,7 @@ from camctl.history.events import (
     changeable_columns,
     load_event_registry,
 )
-from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope
+from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope, CaptureResultReadScope
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -86,6 +86,7 @@ class CommandPlan:
     baseline_reads: Mapping[int, BaselineRangeRead] = field(default_factory=dict)
     product_read_scope: ProductReadScope | None = None
     plan_read_scope: PlanReadScope | None = None
+    capture_result_read_scope: CaptureResultReadScope | None = None
 
 
 class TransactionScope:
@@ -518,9 +519,10 @@ def commit_operation(
         )
         from camctl.persistence.event_reads import SqlEventReads
 
-        if plan.product_read_scope is not None and plan.plan_read_scope is not None:
-            raise TransactionError("同一命令不能混用逐产物比较与计划聚合范围")
-        read_scope = plan.product_read_scope or plan.plan_read_scope
+        scopes = (plan.product_read_scope, plan.plan_read_scope, plan.capture_result_read_scope)
+        if sum(value is not None for value in scopes) > 1:
+            raise TransactionError("同一命令不能混用不同事实读取范围")
+        read_scope = next((value for value in scopes if value is not None), None)
         for event in sequenced:
             context = EventContext(
                 transaction=transaction_range,

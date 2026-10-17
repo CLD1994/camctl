@@ -382,6 +382,9 @@ def resume_result_check_closes(
         else:
             raise ConsistencyError("原核实收尾申请类型无效")
         if not complete:
+            if isinstance(pending.request, FiniteCancelEndSave) and owned.connection.in_transaction:
+                # COMMIT 前异常仍持有未提交投影；先回滚，再沿原申请核实。
+                owned.connection.execute("ROLLBACK")
             raise ConsistencyError(f"原核实收尾申请未可靠保存，完整申请仍持有: {receipt.error}")
         if retry_gate is not None and not isinstance(pending.request, OutputSetFinalizationSave):
             activity = _activity_id_of_connection(owned.connection, identity)
@@ -1146,13 +1149,14 @@ class CaptureRuntime(_FileObservationSaves):
             self.pending_start_results[identity] = pending
             self._save_call_result(identity, pending)
         else:
-            finite_stop = (ticket.operation == "stop"
-                and finite_cancel_policy(self.action(self.action_id_of_ticket(ticket)))
-                and self.action(self.action_id_of_ticket(ticket))["cancel_requested"])
-            if finite_stop:
+            action = self.action(self.action_id_of_ticket(ticket))
+            finite_cancel = (finite_cancel_policy(action) and action["cancel_requested"]
+                             and ticket.operation in ("stop", "control"))
+            if finite_cancel:
                 pending = PendingCallResult(new_operation_key(), AttemptFinish(ticket,
                     validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
-                    run_finish=RunFinish(RunOutcome.FAILED, _recovered_call_outcome().error)),
+                    run_finish=RunFinish(RunOutcome.FAILED if ticket.operation == "stop"
+                        else RunOutcome.UNCONFIRMED, _recovered_call_outcome().error)),
                     None, returned_ns=self.monotonic_ns())
                 self.pending_start_results[identity] = pending
                 self._save_call_result(identity, pending)
@@ -2065,9 +2069,11 @@ async def _stop_call(runtime: CaptureRuntime, action,
                            host_timer_stop=host_stop, capture_stop=True)
         else:
             finite_cancel = bool(action["cancel_requested"]) and finite_cancel_policy(action)
+            stop_error = (call.error or ErrorValue("recording_stop_failed", "device_stop", {
+                "activity_id": ticket.target_id, "operation_run_id": str(ticket.run_id)}))
             runtime.finish(ticket, call, retry_wait=not finite_cancel,
                            end_run=RunOutcome.FAILED if finite_cancel else None,
-                           run_error=call.error if finite_cancel else None,
+                           run_error=stop_error if finite_cancel else None,
                            occurred_at=returned_at, returned_ns=returned_ns)
     except OutcomeValidationError:
         # 观察与收场依据不符合登记契约：该结果整体不可采纳，不落
@@ -3908,7 +3914,10 @@ async def _advance_canceled_capture(context: CaptureRuntime, action, start) -> N
     """
     action_id = action["id"]
     if start is not None and start[0] == int(_ATTEMPT_STATUS.RUNNING):
-        return
+        if not finite_cancel_policy(action) or not context.recover_attempt(
+                _original_ticket(context, f"start/{action_id}", "control")):
+            return
+        start = context.last_attempt(f"start/{action_id}")
     with closing(context.owned.connection.execute(
         "SELECT activity_state, stop_supported FROM device_activities WHERE action_id = ?",
         (action_id,),

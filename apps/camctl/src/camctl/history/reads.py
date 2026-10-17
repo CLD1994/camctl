@@ -37,10 +37,29 @@ class PlanReadScope:
             raise ValueError("事实读取限额必须为正整数")
 
 
+@dataclass(frozen=True)
+class CaptureResultReadScope:
+    """原活动和单次结果扫描的可靠上界；每批页与文件均有界读取。"""
+
+    action_id: int
+    activity_id: int
+    run_id: int
+    attempt_no: int
+    last_page_event_id: int
+    batch_size: int = 128
+
+    def __post_init__(self):
+        for value in (self.action_id, self.activity_id, self.run_id,
+                      self.attempt_no, self.last_page_event_id):
+            ObjectId(value)
+        if type(self.batch_size) is not int or not 1 <= self.batch_size <= 128:
+            raise ValueError("结果事实读取每批须为 1 至 128 项")
+
+
 class CurrentEventReads(Protocol):
     """原写事务内的当前事实；实现必须应用已验证前序事件并限制每批。"""
 
-    scope: ProductReadScope | PlanReadScope
+    scope: ProductReadScope | PlanReadScope | CaptureResultReadScope
     ACTION_COLUMNS: tuple[str, ...]
     SOURCE_COLUMNS: tuple[str, ...]
 
@@ -49,6 +68,7 @@ class CurrentEventReads(Protocol):
     def iter_members(self, table: str, column: str, identity: int, *, columns=None,
                      limit: int | None = None) -> Iterable[tuple[tuple[int, Mapping[str, Any]], ...]]: ...
     def actions(self) -> Iterable[tuple[int, Mapping[str, Any]]]: ...
+    def result_pages(self, ticket, cursor, batch): ...
 
 
 @dataclass(frozen=True)

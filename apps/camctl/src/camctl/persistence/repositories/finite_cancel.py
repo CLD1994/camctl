@@ -10,6 +10,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
 from camctl.devices.tasks import EndControl, StartReturn, CompletionMode
 from camctl.history.events import load_event_registry
+from camctl.history.reads import CaptureResultReadScope
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.models import AttemptStatus, EffectState
 from camctl.operations.result_format import read_result_document
@@ -18,6 +19,8 @@ from camctl.persistence.transaction import CommandPlan, TransactionError, commit
 
 _BRANCH = load_event_registry()['events']['DEVICE_OBSERVED']
 _TYPE = _BRANCH['id']
+_ATTEMPT_RESULT_TYPE = load_event_registry()['events']['ATTEMPT_RESULT']['id']
+_WAIT_EVENT = load_event_registry()['events']['CAPTURE_WAIT_CHANGED']
 _REASON = _BRANCH['branches']['FINITE_CANCEL_END']['reason']
 _RUN = enum_for('operation_runs.status')
 _KIND = enum_for('operation_runs.kind')
@@ -82,7 +85,6 @@ def _facts(state, action_id):
 
 
 def _evidence(state, request):
-    from .capture import _history_source_event
     action, activity, start, stop, results, start_attempt, stop_attempt, result_attempt = _facts(state, request.action_id)
     spec = action['execution_spec_json']
     return {
@@ -123,6 +125,15 @@ def _verify_sources(state, request, evidence, *, event_id):
     if (original.status is not AttemptStatus.SUCCEEDED or original.effect is not EffectState.CONFIRMED
             or not any(o.type == 'timelapse_sent' and o.data.get('activity_id') == str(activity['id']) for o in original.observations)):
         raise ConsistencyError('有限取消结束缺少原活动的可靠 SENT')
+    for attempt in (sent, stopped, result):
+        source = _history_source_event(state, attempt['result_event_id'])
+        original_rows = [row for row in source.rows if row.table == 'operation_attempts']
+        if (source.event_type != _ATTEMPT_RESULT_TYPE or len(original_rows) != 1
+                or original_rows[0].row_id != attempt['id']
+                or any(not json_equal(original_rows[0].after.values.get(name), attempt[name])
+                    for name in ('status', 'result_event_id', 'effect_state', 'result_json', 'error_json')
+                    if name in original_rows[0].after.values)):
+            raise ConsistencyError('有限取消结束引用的实际结果与原尝试完整输入不同')
     sent_event = _history_source_event(state, sent['result_event_id'])
     wait_event = _history_source_event(state, activity['wait_completed_event_id'])
     page_event = _history_source_event(state, request.page.event_id)
@@ -130,7 +141,8 @@ def _verify_sources(state, request, evidence, *, event_id):
     expected = activity['sent_at'] + (spec['target_duration_ms'] + spec['result_wait_margin_ms'] + activity['extra_wait_ms_used']) * 1000
     if (sent_event.occurred_at != activity['sent_at'] or activity['expected_check_at'] != expected
             or activity['result_wait_margin_ms'] != spec['result_wait_margin_ms']
-            or wait_event.event_type != 15 or wait_event.reason != 3
+            or wait_event.event_type != _WAIT_EVENT['id']
+            or wait_event.reason != _WAIT_EVENT['branches']['COMPLETE']['reason']
             or not any(r.table == 'device_activities' and r.row_id == activity['id']
                 and r.after.values.get('wait_completed_event_id') == wait_event.event_id for r in wait_event.rows)
             or wait_event.occurred_at < expected or page_event.occurred_at < wait_event.occurred_at
@@ -142,25 +154,33 @@ def _verify_sources(state, request, evidence, *, event_id):
             or page.ref != request.page or page.ref.ticket.run_id != results['id']
             or page.ref.ticket.target_id != str(activity['id']) or not page.page.scan_complete
             or not page.page.set_finalized or page.page.outcome.error is not None
+            or not sent_event.event_id < stopped['result_event_id'] < page.ref.event_id
+            or page.page.outcome != read_result_document(result['status'], result['effect_state'],
+                result['result_json'], result['error_json'])
             or activity['output_set_finalized_event_id'] is None):
         raise ConsistencyError('有限取消结束要求可靠完整结果集合及原末页')
 
 
-def _verify_files(scope, request):
+def _read_scope(request):
+    return CaptureResultReadScope(request.action_id, int(request.page.ticket.target_id),
+        request.page.ticket.run_id, request.page.ticket.attempt_id, request.page.event_id)
+
+
+def _verify_files(reader, action, request):
     """按页复核全部候选，拒绝空集合、缺件、零长及尚未完成文件。"""
-    from .result_pages import read_pages
-    action = row_facts(scope.connection, 'actions', request.action_id)
+    if reader is None or reader.scope != _read_scope(request):
+        raise ConsistencyError('有限取消结束缺少原有界文件事实读取范围')
     rules = tuple(ProductRule.from_json(value) for value in action['execution_spec_json'].get('product_rules', ()))
     def files():
         cursor = None
         while True:
-            batch = read_pages(request.page.ticket, cursor, 1, scope)
+            batch = reader.result_pages(request.page.ticket, cursor, 1)
             for saved in batch.items:
                 ids = dict(saved.file_ids)
                 for entry in saved.page.entries:
                     if entry.identity not in ids:
                         continue
-                    facts = row_facts(scope.connection, 'device_files', ids[entry.identity])
+                    facts = reader.required('device_files', ids[entry.identity])
                     yield CaptureFile(entry.identity, entry.kind,
                         facts['completion_state'] == 3, facts['source_action_id'] == request.action_id,
                         format_id=entry.format_id, pairing_confirmed=entry.paired_identity is not None,
@@ -191,13 +211,15 @@ class _FiniteCancelEndCommand:
             return CommandPlan((), {}, state, read_only=True)
         if activity['activity_state'] == 3:
             raise ConsistencyError('已结束活动不能补写新的有限取消结束依据')
-        _verify_files(scope, request)
+        from camctl.persistence.event_reads import SqlEventReads
+        _verify_files(SqlEventReads(scope.connection, _read_scope(request)), action, request)
         allocation = scope.allocate(1)
         _verify_sources(state, request, evidence, event_id=allocation.first_event_id)
         event = event_envelope(allocation.first_event_id, allocation.txn_id, _TYPE, _REASON,
             (update_change('device_activities', activity['id'], {'activity_state': activity['activity_state']}, {'activity_state': 3}),),
             request.occurred_at, evidence={'cancel_completion': evidence})
-        return CommandPlan((event,), {('device_activities', activity['id']): ('action', action['id'])}, state)
+        return CommandPlan((event,), {('device_activities', activity['id']): ('action', action['id'])},
+            state, capture_result_read_scope=_read_scope(request))
 
 
 def save_finite_cancel_end(request, key, owned):
@@ -218,6 +240,8 @@ def _guard(event, context):
         activity = context.state_rows['device_activities'][row.row_id]
         request = FiniteCancelEndSave(activity['action_id'], saved.ref, event.occurred_at)
         _verify_sources(context.state_rows, request, evidence, event_id=event.event_id)
+        action = context.state_rows['actions'][activity['action_id']]
+        _verify_files(context.current_reads, action, request)
     except (KeyError, ValueError, TypeError, ConsistencyError) as error:
         raise EventValidationError(f'有限取消结束依据无效: {error}') from error
 
