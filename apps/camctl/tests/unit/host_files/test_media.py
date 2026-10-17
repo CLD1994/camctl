@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError, fields, is_dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -112,6 +114,31 @@ def _roots() -> BoundDirectories:
     return BoundDirectories(staging=_ROOT / "staging")
 
 
+def _repair_request(
+    *,
+    ffmpeg: str = "ffmpeg",
+    output_args: tuple[str, ...] = (),
+    stream_indices=None,
+    output_format=None,
+) -> RepairRequest:
+    return RepairRequest(
+        ffmpeg=ffmpeg,
+        output_args=output_args,
+        stream_indices=stream_indices,
+        output_format=output_format,
+    )
+
+
+def _stream_fact_values(probe: MediaProbe) -> tuple[tuple[object, ...], ...]:
+    return tuple(
+        tuple(getattr(stream, name, None) for name in (
+            "index", "codec_type", "codec_name", "width", "height",
+            "duration_s", "attached_pic",
+        ))
+        for stream in getattr(probe, "streams", ())
+    )
+
+
 async def test_failed_media_output_is_not_complete(fake: FakeMedia) -> None:
     """工具失败但输出文件存在：不是完成，部分成品不作正式产物。"""
     fake.outcome = RawToolOutcome(
@@ -200,6 +227,187 @@ async def test_probe_duration_keeps_full_precision(fake: FakeMedia) -> None:
     assert probe.duration_s != Decimal("3.017")
 
 
+async def test_media_probe_keeps_its_two_positional_arguments() -> None:
+    probe = MediaProbe(Decimal("1.25"), "legacy error")
+
+    assert probe.duration_s == Decimal("1.25")
+    assert probe.error == "legacy error"
+    assert getattr(probe, "streams", ()) == ()
+    assert getattr(probe, "format_name", None) is None
+
+
+async def test_repair_request_keeps_legacy_fields_and_adds_optional_selection() -> None:
+    request = RepairRequest("ffmpeg-custom", ("-c", "copy"))
+
+    assert request.ffmpeg == "ffmpeg-custom"
+    assert request.output_args == ("-c", "copy")
+    assert tuple(field.name for field in fields(RepairRequest)) == (
+        "ffmpeg", "output_args", "stream_indices", "output_format",
+    )
+    hints = get_type_hints(RepairRequest)
+    assert hints["stream_indices"] == tuple[int, ...] | None
+    assert hints["output_format"] == str | None
+    assert getattr(request, "stream_indices", object()) is None
+    assert getattr(request, "output_format", object()) is None
+
+
+async def test_media_stream_is_an_exported_frozen_fact_type() -> None:
+    stream_type = getattr(media, "MediaStream", None)
+
+    assert stream_type is not None
+    assert is_dataclass(stream_type)
+    assert "MediaStream" in media.__all__
+    assert tuple(field.name for field in fields(stream_type)) == (
+        "index", "codec_type", "codec_name", "width", "height",
+        "duration_s", "attached_pic",
+    )
+    hints = get_type_hints(stream_type)
+    assert hints == {
+        "index": int | None,
+        "codec_type": str,
+        "codec_name": str | None,
+        "width": int | None,
+        "height": int | None,
+        "duration_s": Decimal | None,
+        "attached_pic": bool | None,
+    }
+    stream = stream_type(0, "video", "h264", 32, 24, Decimal("1"), False)
+    with pytest.raises(FrozenInstanceError):
+        stream.index = 1
+
+
+async def test_probe_parses_two_videos_audio_and_attached_cover(fake: FakeMedia) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(
+            b'{"format":{"duration":"6.2500000000000001",'
+            b'"format_name":"mov,mp4,m4a,3gp,3g2,mj2"},"streams":['
+            b'{"index":0,"codec_type":"video","codec_name":"h264",'
+            b'"width":3840,"height":1920,"duration":"6.25",'
+            b'"disposition":{"attached_pic":0}},'
+            b'{"index":1,"codec_type":"video","codec_name":"hevc",'
+            b'"width":1920,"height":960,"duration":"6.25000000000000001",'
+            b'"disposition":{"attached_pic":0}},'
+            b'{"index":2,"codec_type":"audio","codec_name":"aac",'
+            b'"duration":"6.25","disposition":{"attached_pic":0}},'
+            b'{"index":3,"codec_type":"video","codec_name":"mjpeg",'
+            b'"width":320,"height":180,"duration":"0.04",'
+            b'"disposition":{"attached_pic":1}}]}'
+        ),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+
+    assert probe.error is None
+    assert probe.duration_s == Decimal("6.2500000000000001")
+    assert getattr(probe, "format_name", None) == "mov,mp4,m4a,3gp,3g2,mj2"
+    assert _stream_fact_values(probe) == (
+        (0, "video", "h264", 3840, 1920, Decimal("6.25"), False),
+        (1, "video", "hevc", 1920, 960, Decimal("6.25000000000000001"), False),
+        (2, "audio", "aac", None, None, Decimal("6.25"), False),
+        (3, "video", "mjpeg", 320, 180, Decimal("0.04"), True),
+    )
+
+
+async def test_probe_keeps_new_facts_unknown_for_legacy_stream_json(
+    fake: FakeMedia,
+) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(b'{"streams":[{"codec_type":"video"}],'
+                b'"format":{"duration":"6"}}'),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+
+    assert probe.error is None
+    assert probe.duration_s == Decimal("6")
+    assert getattr(probe, "format_name", None) is None
+    assert _stream_fact_values(probe) == (
+        (None, "video", None, None, None, None, None),
+    )
+
+
+async def test_probe_keeps_missing_attached_pic_unknown(fake: FakeMedia) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(b'{"streams":[{"index":4,"codec_type":"video",'
+                b'"disposition":{}}],"format":{"duration":"1"}}'),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+
+    assert probe.error is None
+    assert _stream_fact_values(probe) == (
+        (4, "video", None, None, None, None, None),
+    )
+
+
+@pytest.mark.parametrize(
+    "streams",
+    [
+        '[{"index":true,"codec_type":"video"}]',
+        '[{"index":null,"codec_type":"video"}]',
+        '[{"index":-1,"codec_type":"video"}]',
+        '[{"index":0.0,"codec_type":"video"}]',
+        '[{"codec_type":"video","width":true}]',
+        '[{"codec_type":"video","width":null}]',
+        '[{"codec_type":"video","height":0}]',
+        '[{"codec_type":"video","height":-2}]',
+        '[{"codec_type":"video","codec_name":false}]',
+        '[{"codec_type":"video","duration":"NaN"}]',
+        '[{"codec_type":"video","duration":"-0.1"}]',
+        '[{"codec_type":"video","duration":true}]',
+        '[{"codec_type":"video","disposition":null}]',
+        '[{"codec_type":"video","disposition":{"attached_pic":2}}]',
+        '[{"codec_type":"video","disposition":{"attached_pic":true}}]',
+        '[{"codec_type":"video","disposition":{"attached_pic":null}}]',
+        '[{"index":0,"codec_type":"video"},'
+        '{"index":0,"codec_type":"audio"}]',
+        '[null]',
+    ],
+)
+async def test_probe_rejects_present_illegal_stream_facts(
+    fake: FakeMedia, streams: str
+) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(f'{{"streams":{streams},"format":{{"duration":"1"}}}}'
+                ).encode(),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+
+    assert probe.duration_s is None
+    assert probe.streams == ()
+    assert probe.error is not None
+    assert probe.error.startswith("invalid_structure:")
+
+
+async def test_probe_rejects_non_string_present_format_name(fake: FakeMedia) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(b'{"streams":[{"codec_type":"video"}],'
+                b'"format":{"duration":"1","format_name":false}}'),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest())
+
+    assert probe.duration_s is None
+    assert probe.error is not None
+    assert probe.error.startswith("invalid_structure:")
+
+
 async def test_probe_accepts_video_only_container_without_audio(
         fake: FakeMedia) -> None:
     """容器时长作为视频时长事实：没有音频流不影响时长取得。"""
@@ -221,7 +429,7 @@ async def test_probe_accepts_video_only_container_without_audio(
         '[{"codec_type": "audio"}]',
         '[{"codec_type": "audio"}, {"codec_type": "data"}]',
         '[]',
-        '[{"other": "subtitle"}]',
+        '[{"codec_type": "subtitle"}]',
     ],
 )
 async def test_probe_without_video_stream_is_not_video_duration(
@@ -365,7 +573,81 @@ async def test_probe_argv_uses_managed_prefix(fake: FakeMedia) -> None:
     argv = fake.argvs[0]
     assert argv[0] == "C:\\tools\\ffprobe.exe"
     assert "-of" in argv and "json" in argv
+    assert argv[argv.index("-show_entries") + 1] == (
+        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,duration:"
+        "stream_disposition=attached_pic"
+    )
     assert argv[-1] == str(_ROOT / "staging" / "recording-inputs" / "11.mp4")
+
+
+async def test_repair_maps_requested_streams_and_selects_output_format(
+    fake: FakeMedia,
+) -> None:
+    fake.output_exists = True
+    fake.output_size = 1
+
+    await repair_media(
+        _input_ref(), _output_ref(), _roots(),
+        _repair_request(
+            output_args=("-c", "copy"),
+            stream_indices=(2, 0),
+            output_format="matroska",
+        ),
+    )
+
+    argv = fake.argvs[0]
+    input_index = argv.index(str(_ROOT / "staging" / "recording-inputs" / "11.mp4"))
+    assert argv[input_index + 1:input_index + 5] == (
+        "-map", "0:2", "-map", "0:0",
+    )
+    assert argv[input_index + 5:input_index + 7] == ("-c", "copy")
+    assert argv[-3:] == ("-f", "matroska", str(_ROOT / "staging" / "derived" / "12.mp4"))
+
+
+async def test_repair_without_explicit_mapping_keeps_legacy_arguments(
+    fake: FakeMedia,
+) -> None:
+    fake.output_exists = True
+    fake.output_size = 1
+
+    await repair_media(
+        _input_ref(), _output_ref(), _roots(),
+        RepairRequest(output_args=("-c", "copy")),
+    )
+
+    argv = fake.argvs[0]
+    assert "-map" not in argv
+    assert "-f" not in argv
+    assert argv[-3:] == (
+        "-c", "copy", str(_ROOT / "staging" / "derived" / "12.mp4")
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_request",
+    [
+        _repair_request(stream_indices=()),
+        _repair_request(stream_indices=(0, 0)),
+        _repair_request(stream_indices=(-1,)),
+        _repair_request(stream_indices=(True,)),
+        _repair_request(stream_indices=(1.5,)),
+        _repair_request(stream_indices=[]),
+        _repair_request(output_format=""),
+        _repair_request(output_format="  mp4  "),
+        _repair_request(output_format="-f"),
+        _repair_request(output_format="mp4;exit"),
+        _repair_request(output_format="../mp4"),
+        _repair_request(output_format=False),
+        _repair_request(output_format=0),
+    ],
+)
+async def test_repair_rejects_invalid_stream_selection_before_tool_call(
+    fake: FakeMedia, invalid_request: RepairRequest
+) -> None:
+    with pytest.raises(ValueError):
+        await repair_media(_input_ref(), _output_ref(), _roots(), invalid_request)
+
+    assert fake.argvs == []
 
 
 @pytest.mark.parametrize("entry", ["probe", "repair"])

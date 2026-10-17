@@ -10,6 +10,8 @@ import asyncio
 import errno
 import hashlib
 import os
+import shutil
+import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -72,6 +74,42 @@ def _tool(tmp_path: Path, name: str, body: str) -> str:
     return str(launcher)
 
 
+def _make_dual_video_input(tmp_path: Path) -> Path:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("需要真实 ffmpeg 生成多流输入")
+    source = tmp_path / "dual-video.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=red:s=32x24:r=2:d=1",
+            "-f", "lavfi", "-i", "color=c=blue:s=32x24:r=2:d=1",
+            "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+            "-f", "lavfi", "-i", "color=c=green:s=16x16:r=1:d=1",
+            "-map", "0:v:0", "-map", "1:v:0", "-map", "2:a:0", "-map", "3:v:0",
+            "-c:v", "mpeg4", "-c:a", "aac", "-c:v:2", "mjpeg",
+            "-frames:v:2", "1", "-disposition:v:2", "attached_pic",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return source
+
+
+def _repair_request_with_selection(
+    *, ffmpeg: str, output_args: tuple[str, ...],
+    stream_indices: tuple[int, ...], output_format: str,
+) -> RepairRequest:
+    return RepairRequest(
+        ffmpeg=ffmpeg,
+        output_args=output_args,
+        stream_indices=stream_indices,
+        output_format=output_format,
+    )
+
+
 def _setup(tmp_path: Path) -> tuple[FileRef, FileRef, BoundDirectories, Path, Path]:
     staging = tmp_path / "staging"
     (staging / "recording-inputs").mkdir(parents=True)
@@ -93,6 +131,75 @@ def _setup(tmp_path: Path) -> tuple[FileRef, FileRef, BoundDirectories, Path, Pa
         root=staging,
     )
     return input_ref, output_ref, roots, input_path, output_path
+
+
+async def test_real_dual_stream_probe_and_explicit_repair_exclude_attached_cover(
+    tmp_path: Path,
+) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if ffmpeg is None or ffprobe is None:
+        pytest.skip("需要真实 ffmpeg 与 ffprobe")
+    fixture = _make_dual_video_input(tmp_path)
+    input_ref, _, roots, input_path, _ = _setup(tmp_path)
+    original = fixture.read_bytes()
+    input_path.write_bytes(original)
+
+    probe = await probe_media(
+        input_ref, roots, ProbeRequest(ffprobe=ffprobe)
+    )
+
+    assert probe.error is None
+    assert probe.duration_s == Decimal("1.000000")
+    assert getattr(probe, "format_name", None) == "mov,mp4,m4a,3gp,3g2,mj2"
+    stream_values = tuple(
+        tuple(getattr(stream, name, None) for name in (
+            "index", "codec_type", "codec_name", "width", "height",
+            "duration_s", "attached_pic",
+        ))
+        for stream in getattr(probe, "streams", ())
+    )
+    assert stream_values == (
+        (0, "video", "mpeg4", 32, 24, Decimal("1.000000"), False),
+        (1, "video", "mpeg4", 32, 24, Decimal("1.000000"), False),
+        (2, "audio", "aac", None, None, Decimal("1.000000"), False),
+        (3, "video", "mjpeg", 16, 16, Decimal("1.000000"), True),
+    )
+
+    output_path = roots.staging / "derived" / "12.mkv"
+    output_ref = FileRef(
+        file_id=12,
+        purpose=FilePurpose.REPAIR_OUTPUT,
+        relative_path="derived/12.mkv",
+        root=roots.staging,
+    )
+    repaired = await repair_media(
+        input_ref,
+        output_ref,
+        roots,
+        _repair_request_with_selection(
+            ffmpeg=ffmpeg,
+            output_args=("-c", "copy"),
+            stream_indices=(0, 1, 2),
+            output_format="mp4",
+        ),
+    )
+
+    assert repaired.complete is True
+    assert repaired.error is None
+    assert output_path.is_file()
+    repaired_probe = await probe_media(
+        output_ref, roots, ProbeRequest(ffprobe=ffprobe)
+    )
+    assert repaired_probe.error is None
+    assert repaired_probe.format_name == "mov,mp4,m4a,3gp,3g2,mj2"
+    assert tuple(stream.codec_type for stream in repaired_probe.streams) == (
+        "video", "video", "audio",
+    )
+    assert tuple(stream.attached_pic for stream in repaired_probe.streams) == (
+        False, False, False,
+    )
+    assert input_path.read_bytes() == original
 
 
 async def test_real_subprocess_probe_success(tmp_path: Path) -> None:

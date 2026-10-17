@@ -1,14 +1,15 @@
 """受管媒体工具执行与结构化事实。
 
-ffprobe 只解析业务需要的时长字段并保持全精度；ffmpeg 成品经实际
-退出、存在与非空校验、摘要及同步分别确认，工具失败但文件存在不
-算完成。媒体子进程统一经 O3 受管执行，实际收场后才释放文件；本
-模块不决定拍摄成功，也不改变动作终态或源文件。
+ffprobe 读取容器时长及完整逐流事实，并保持时长全精度；ffmpeg
+成品经实际退出、存在与非空校验、摘要及同步分别确认，工具失败但
+文件存在不算完成。媒体子进程统一经 O3 受管执行，实际收场后才
+释放文件；本模块不决定拍摄成功，也不改变动作终态或源文件。
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
@@ -36,6 +37,7 @@ from camctl.operations.process import (
 __all__ = [
     "MediaArtifact",
     "MediaProbe",
+    "MediaStream",
     "ProbeRequest",
     "RepairRequest",
     "probe_media",
@@ -44,6 +46,7 @@ __all__ = [
 
 #: 媒体工具终止宽限；正常调用无期限，仅由取消终止。
 _MEDIA_TERMINATE_GRACE_S = Decimal("5")
+_SAFE_CONTAINER_FORMAT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 
 
 @dataclass(frozen=True)
@@ -55,11 +58,26 @@ class ProbeRequest:
 
 
 @dataclass(frozen=True)
+class MediaStream:
+    """ffprobe 取得的单条媒体流事实；未提供的新字段保持未知。"""
+
+    index: int | None
+    codec_type: str
+    codec_name: str | None
+    width: int | None
+    height: int | None
+    duration_s: Decimal | None
+    attached_pic: bool | None
+
+
+@dataclass(frozen=True)
 class MediaProbe:
-    """ffprobe 取得的必要媒体事实；时长保持全精度。"""
+    """ffprobe 取得的容器与逐流事实；时长保持全精度。"""
 
     duration_s: Decimal | None
     error: str | None
+    streams: tuple[MediaStream, ...] = ()
+    format_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +86,8 @@ class RepairRequest:
 
     ffmpeg: str = "ffmpeg"
     output_args: tuple[str, ...] = ()
+    stream_indices: tuple[int, ...] | None = None
+    output_format: str | None = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +190,87 @@ def _file_sync(ref: FileRef, roots: BoundDirectories) -> SyncResult:
     return sync_target(ref, roots)
 
 
+def _media_duration(value: object) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
+        raise ValueError("时长不是数字")
+    try:
+        duration = Decimal(value)
+    except (InvalidOperation, ValueError):
+        raise ValueError("时长不是数字") from None
+    if not duration.is_finite() or duration < 0:
+        raise ValueError("时长必须是有限非负数")
+    return duration
+
+
+def _stream_integer(stream: dict, name: str, *, minimum: int) -> int | None:
+    if name not in stream:
+        return None
+    value = stream[name]
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"流字段 {name} 不是合法整数")
+    return value
+
+
+def _stream_string(stream: dict, name: str) -> str | None:
+    if name not in stream:
+        return None
+    value = stream[name]
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"流字段 {name} 不是非空字符串")
+    return value
+
+
+def _parse_streams(value: object) -> tuple[MediaStream, ...]:
+    if not isinstance(value, list):
+        raise ValueError("输出缺少流信息段")
+    parsed: list[MediaStream] = []
+    seen_indices: set[int] = set()
+    for stream in value:
+        if not isinstance(stream, dict):
+            raise ValueError("流信息不是对象")
+        codec_type = stream.get("codec_type")
+        if not isinstance(codec_type, str) or not codec_type:
+            raise ValueError("流类别不是非空字符串")
+        index = _stream_integer(stream, "index", minimum=0)
+        if index is not None:
+            if index in seen_indices:
+                raise ValueError("流索引重复")
+            seen_indices.add(index)
+        codec_name = _stream_string(stream, "codec_name")
+        width = _stream_integer(stream, "width", minimum=1)
+        height = _stream_integer(stream, "height", minimum=1)
+        duration = (
+            _media_duration(stream["duration"])
+            if "duration" in stream else None
+        )
+
+        disposition = stream.get("disposition")
+        attached_pic = None
+        if "disposition" in stream:
+            if not isinstance(disposition, dict):
+                raise ValueError("流 disposition 不是对象")
+            if "attached_pic" in disposition:
+                attached_value = disposition["attached_pic"]
+                if (
+                    isinstance(attached_value, bool)
+                    or not isinstance(attached_value, int)
+                    or attached_value not in (0, 1)
+                ):
+                    raise ValueError("attached_pic 不是 0 或 1")
+                attached_pic = bool(attached_value)
+
+        parsed.append(MediaStream(
+            index=index,
+            codec_type=codec_type,
+            codec_name=codec_name,
+            width=width,
+            height=height,
+            duration_s=duration,
+            attached_pic=attached_pic,
+        ))
+    return tuple(parsed)
+
+
 async def probe_media(
     input: FileRef,
     roots: BoundDirectories,
@@ -194,18 +295,21 @@ async def probe_media(
 async def _probe(
     input: FileRef, roots: BoundDirectories, request: ProbeRequest, control: AsyncFileControl,
 ) -> MediaProbe:
-    """经 ffprobe 取得媒体时长等必要事实。
+    """经 ffprobe 取得容器时长、容器格式及每条流的媒体事实。
 
-    工具不可用、退出失败、输出结构非法与字段缺失分别分类；时长
-    以 Decimal 保留全部精度，不舍入到任何目标粒度。视频时长事实
-    取容器时长（format.duration，含估算值，误差几秒可接受）；无
-    视频流的容器不提供视频时长，明确分类不补造。
+    新增逐流字段缺失时保留未知；存在但类型、数值或索引非法时拒绝
+    整份事实。工具不可用、退出失败、输出结构非法与必需字段缺失
+    分别分类。视频时长事实取容器时长（format.duration，含估算值，
+    误差几秒可接受）；无视频流的容器不提供视频时长，明确分类不
+    补造。
     """
     host = resolve_file(input, roots)
     argv = (
         (request.ffprobe, "-v", "error")
         + request.extra_args
-        + ("-show_entries", "format=duration:stream=codec_type",
+        + ("-show_entries",
+           "format=duration,format_name:stream=index,codec_type,codec_name,width,height,duration:"
+           "stream_disposition=attached_pic",
            "-of", "json", str(host.path))
     )
     outcome = await _run_tool(argv, control)
@@ -219,27 +323,55 @@ async def _probe(
         return MediaProbe(duration_s=None, error="invalid_structure: 输出不是预期结构")
     if not isinstance(payload, dict) or not isinstance(payload.get("format"), dict):
         return MediaProbe(duration_s=None, error="invalid_structure: 输出不是预期结构")
-    if "duration" not in payload["format"]:
+    format_facts = payload["format"]
+    if "duration" not in format_facts:
         return MediaProbe(duration_s=None, error="missing_duration: 缺少时长字段")
-    value = payload["format"]["duration"]
-    if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
-        return MediaProbe(duration_s=None, error="invalid_structure: 时长不是数字")
     try:
-        duration = Decimal(value)
-    except (InvalidOperation, ValueError):
-        return MediaProbe(duration_s=None, error="invalid_structure: 时长不是数字")
-    if not duration.is_finite() or duration < 0:
-        return MediaProbe(duration_s=None, error="invalid_structure: 时长必须是有限非负数")
-    streams = payload.get("streams")
-    if not isinstance(streams, list):
-        return MediaProbe(duration_s=None, error="invalid_structure: 输出缺少流信息段")
-    if not any(
-            isinstance(stream, dict)
-            and stream.get("codec_type") == "video"
-            for stream in streams):
+        duration = _media_duration(format_facts["duration"])
+        format_name = None
+        if "format_name" in format_facts:
+            format_name = format_facts["format_name"]
+            if not isinstance(format_name, str) or not format_name:
+                raise ValueError("format_name 不是非空字符串")
+        streams = _parse_streams(payload.get("streams"))
+    except ValueError as error:
         return MediaProbe(
-            duration_s=None, error="no_video_stream: 容器没有视频流")
-    return MediaProbe(duration_s=duration, error=None)
+            duration_s=None, error=f"invalid_structure: {error}"
+        )
+    if not any(stream.codec_type == "video" for stream in streams):
+        return MediaProbe(
+            duration_s=None,
+            error="no_video_stream: 容器没有视频流",
+            streams=streams,
+            format_name=format_name,
+        )
+    return MediaProbe(
+        duration_s=duration,
+        error=None,
+        streams=streams,
+        format_name=format_name,
+    )
+
+
+def _validate_repair_request(request: RepairRequest) -> None:
+    indices = request.stream_indices
+    if indices is not None:
+        if not isinstance(indices, tuple) or not indices:
+            raise ValueError("stream_indices 必须是非空索引元组")
+        if any(
+            isinstance(index, bool) or not isinstance(index, int) or index < 0
+            for index in indices
+        ):
+            raise ValueError("stream_indices 只允许非负整数")
+        if len(set(indices)) != len(indices):
+            raise ValueError("stream_indices 不能重复")
+
+    output_format = request.output_format
+    if output_format is not None and (
+        not isinstance(output_format, str)
+        or _SAFE_CONTAINER_FORMAT.fullmatch(output_format) is None
+    ):
+        raise ValueError("output_format 必须是安全的容器格式标识")
 
 
 async def repair_media(
@@ -253,6 +385,7 @@ async def repair_media(
     owner: ResponsibilityOwner,
 ) -> FileTaskResult:
     """修复全程占用输入和输出，返回任务结果及 MediaArtifact。"""
+    _validate_repair_request(request)
     resolve_file(input, roots)
     resolve_file(output, roots)
     return await executor.run_async_file_task(
@@ -265,16 +398,27 @@ async def _repair(
     input: FileRef, output: FileRef, roots: BoundDirectories,
     request: RepairRequest, control: AsyncFileControl,
 ) -> MediaArtifact:
-    """经 ffmpeg 生成修复成品并分别确认退出、校验、同步与摘要。
+    """经 ffmpeg 显式映射可选流并分别确认退出、校验、同步与摘要。
 
     工具失败但输出文件存在时 exists 保留实际观察，complete 为
     False：部分成品不作为正式产物。
     """
     input_host = resolve_file(input, roots)
     output_host = resolve_file(output, roots)
+    stream_args = tuple(
+        argument
+        for index in request.stream_indices or ()
+        for argument in ("-map", f"0:{index}")
+    )
+    format_args = (
+        ("-f", request.output_format)
+        if request.output_format is not None else ()
+    )
     argv = (
         (request.ffmpeg, "-nostdin", "-y", "-i", str(input_host.path))
+        + stream_args
         + request.output_args
+        + format_args
         + (str(output_host.path),)
     )
     outcome = await _run_tool(argv, control)
