@@ -7,7 +7,7 @@ from camctl.capture.result_pages import ResultPageRef
 from camctl.capture.results import CaptureFile, CaptureFileSet, FileKind, ProductRequirements, ProductRule, assess_capture_files
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
-from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
+from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, new_operation_key
 from camctl.devices.tasks import EndControl, StartReturn, CompletionMode
 from camctl.history.events import load_event_registry
 from camctl.history.reads import CaptureResultReadScope
@@ -166,7 +166,7 @@ def _read_scope(request):
         request.page.ticket.run_id, request.page.ticket.attempt_id, request.page.event_id)
 
 
-def _verify_files(reader, action, request):
+def _assess_files(reader, action, request):
     """按页复核全部候选，拒绝空集合、缺件、零长及尚未完成文件。"""
     if reader is None or reader.scope != _read_scope(request):
         raise ConsistencyError('有限取消结束缺少原有界文件事实读取范围')
@@ -182,15 +182,45 @@ def _verify_files(reader, action, request):
                         continue
                     facts = reader.required('device_files', ids[entry.identity])
                     yield CaptureFile(entry.identity, entry.kind,
-                        facts['completion_state'] == 3, facts['source_action_id'] == request.action_id,
+                        entry.complete and facts['completion_state'] == 3,
+                        facts['source_action_id'] == request.action_id,
                         format_id=entry.format_id, pairing_confirmed=entry.paired_identity is not None,
                         size_bytes=facts['size_bytes'])
             if batch.next_cursor is None:
                 return
             cursor = batch.next_cursor
-    assessment = assess_capture_files(CaptureFileSet(files(), True), ProductRequirements(frozenset({FileKind.VIDEO}), rules))
-    if not assessment.is_complete:
+    return assess_capture_files(CaptureFileSet(files(), True),
+        ProductRequirements(frozenset({FileKind.VIDEO}), rules))
+
+
+def _verify_files(reader, action, request):
+    if not _assess_files(reader, action, request).is_complete:
         raise ConsistencyError('有限取消结束尚无满足原必要规则的可靠文件集合')
+
+
+class _FiniteCancelQualificationCommand:
+    """只读核对当前扫描，避免跨轮保留文件制造必然被拒绝的结束申请。"""
+
+    def __init__(self, request):
+        self.request = request
+
+    def plan(self, scope):
+        from camctl.persistence.event_reads import SqlEventReads
+        action = row_facts(scope.connection, 'actions', self.request.action_id)
+        if action is None:
+            raise ConsistencyError('有限取消资格缺少原动作')
+        assessment = _assess_files(SqlEventReads(scope.connection, _read_scope(self.request)),
+            action, self.request)
+        return CommandPlan((), {}, {'actions': {action['id']: action}},
+            read_only=True, result=assessment)
+
+
+def read_finite_cancel_assessment(request, owned):
+    """在原只读事务内核实当前扫描，区分充分、明确不符和仍未知。"""
+    receipt = commit_operation(_FiniteCancelQualificationCommand(request), new_operation_key(), owned)
+    if receipt.kind != 'completed':
+        raise ConsistencyError(f'有限取消的当前扫描资格无法可靠读取: {receipt.error}')
+    return receipt.result
 
 
 class _FiniteCancelEndCommand:

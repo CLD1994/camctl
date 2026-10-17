@@ -168,6 +168,7 @@ async def test_insufficient_natural_cancel_results_preserve_unknown_activity_and
     from camctl.capture.results import FileKind
     from camctl.bootstrap.application import query_work_facts
     owned, runtime, advance, stopper, wall, mono = await _world(tmp_path)
+    runtime.check_config = AttemptConfig(2, Decimal('1'), Decimal('0'))
     runtime.results.files_by_action = {13: {
         'empty': (), 'missing_kind': (_entry('photo', kind=FileKind.PHOTO),),
         'incomplete': (_entry('pending', complete=False),), 'zero': (_entry('zero', size=0),),
@@ -177,6 +178,10 @@ async def test_insufficient_natural_cancel_results_preserve_unknown_activity_and
         wall[0] += 1_250_000
         mono[0] += 1_250_000_000
         await advance(13, runtime)
+        if file_case == 'incomplete':
+            assert runtime.action(13)['status'] == 2
+            await advance(13, runtime)
+            await advance(13, runtime)
         assert owned.connection.execute('SELECT status FROM actions WHERE id=13').fetchone() == (6,)
         assert owned.connection.execute('SELECT activity_state,occupancy_state,completion_basis FROM device_activities WHERE id=13').fetchone() == (1, 1, 1)
         assert owned.connection.execute("SELECT COUNT(*) FROM history_events WHERE event_type=13 AND json_extract(body_json,'$.reason')=4").fetchone() == (0,)
@@ -414,6 +419,46 @@ async def test_finite_cancel_guard_reads_original_files_across_pages(tmp_path):
         assert owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE id=13').fetchone() == (3, 2)
         assert len(seen) == 2
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs WHERE source_action_id=13').fetchone() == (1,)
+        stopper.stop.assert_awaited_once()
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('latest', ['empty', 'missing_kind', 'zero', 'incomplete', 'unfinalized', 'error', 'sufficient'])
+async def test_prior_complete_files_do_not_supply_current_insufficient_cancel_scan(tmp_path, latest):
+    from .test_record_file_completion_wait import _result_port
+    from .test_result_page_history import _actual
+    from .test_native_completion_context import _osv
+    owned, runtime, advance, stopper, wall, mono = await _world(tmp_path)
+    runtime.check_config = AttemptConfig(2, Decimal('1'), Decimal('0'))
+    calls = []
+    async def read(request, batch):
+        calls.append(request.ticket.attempt_id)
+        if len(calls) == 1:
+            return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()],
+                error=ErrorValue('device_error','device')))
+        entries = {'empty': [], 'missing_kind': [{**_osv(), 'identity':'/DCIM/photo.JPG',
+            'locator':{'path':'/DCIM/photo.JPG'}, 'format_id':'jpeg','kind':'photo'}],
+            'zero': [{**_osv(0), 'identity':'/DCIM/zero.OSV','locator':{'path':'/DCIM/zero.OSV'}}],
+            'incomplete':[{**_osv(), 'complete':False, 'size_bytes':None}],
+            'unfinalized':[_osv()], 'error':[], 'sufficient':[_osv()]}[latest]
+        return DeviceCallResult.from_outcome(_actual(request.ticket, entries=entries,
+            finalized=latest != 'unfinalized', error=ErrorValue('device_error','device') if latest == 'error' else None))
+    _result_port(runtime, read)
+    try:
+        await advance(13, runtime)
+        wall[0] += 1_250_000
+        mono[0] += 1_250_000_000
+        await advance(13, runtime)
+        assert runtime.action(13)['status'] == 2
+        await advance(13, runtime)
+        if latest in ('incomplete', 'unfinalized', 'error'):
+            assert runtime.action(13)['status'] == 2
+            await advance(13, runtime)
+        assert runtime.action(13)['status'] == 6
+        assert not runtime.pending_result_closes
+        assert owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE id=13').fetchone() == ((3, 2) if latest == 'sufficient' else (1, 1))
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.source_action_id=13 AND f.size_bytes=50 AND json_extract(f.identity_key,'$[2]')='/DCIM/a.OSV'").fetchone() == (1,)
         stopper.stop.assert_awaited_once()
     finally:
         owned.connection.close()

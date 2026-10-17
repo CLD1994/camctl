@@ -25,7 +25,9 @@ from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.capture.finite_cancel import finite_cancel_policy
-from camctl.persistence.repositories.finite_cancel import FiniteCancelEndSave, save_finite_cancel_end
+from camctl.persistence.repositories.finite_cancel import (
+    FiniteCancelEndSave, read_finite_cancel_assessment, save_finite_cancel_end,
+)
 
 from camctl.capture.models import (
     ActivityConcludeSave,
@@ -4000,21 +4002,32 @@ async def _close_canceled_timelapse(
         listing = _saved_result_listing(context, action_id)
     entries = listing.entries
     registered = _register_listing(context, action_id, listing)
+    activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
+    end_request = None
+    if (finite_cancel_policy(context.action(action_id)) and activity["activity_state"] != 3
+            and isinstance(entries, SavedResultEntries)):
+        if listing.phase is ListingPhase.LISTED and not _listing_finalized(listing):
+            _finish_listing_result(context, listing, retry_wait=True)
+            return
+        if _listing_finalized(listing):
+            request = FiniteCancelEndSave(action_id, entries.last_ref, context.wall_us())
+            assessment = read_finite_cancel_assessment(request, context.owned)
+            if (listing.phase is ListingPhase.LISTED and not assessment.is_complete
+                    and not assessment.explicitly_unmet):
+                _finish_listing_result(context, listing, retry_wait=True)
+                return
+            if (assessment.is_complete and activity["sent_at"] is not None
+                    and activity["wait_completed_event_id"] is not None):
+                end_request = request
     _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED,
                            finalize_output_set=True)
     drafts = _catalog_drafts(registered, entries,
         product_rules=_product_requirements(context.action(action_id), FileKind.VIDEO).rules)
-    activity = row_facts(context.owned.connection, "device_activities", _activity_id_of(context, action_id))
-    if (finite_cancel_policy(context.action(action_id)) and activity["activity_state"] != 3
-            and activity["sent_at"] is not None and activity["wait_completed_event_id"] is not None
-            and isinstance(entries, SavedResultEntries) and _listing_finalized(listing)):
-        assessment = assess_capture_files(CaptureFileSet((file for file, _ in registered), True),
-            _product_requirements(context.action(action_id), FileKind.VIDEO))
-        if assessment.is_complete:
-            context.pending_result_closes[action_id] = PendingResultCheckClose(
-                new_operation_key(), FiniteCancelEndSave(action_id, entries.last_ref, context.wall_us()))
-            context.resume_result_check_closes(action_id)
-            activity = row_facts(context.owned.connection, "device_activities", activity["id"])
+    if end_request is not None:
+        context.pending_result_closes[action_id] = PendingResultCheckClose(
+            new_operation_key(), end_request)
+        context.resume_result_check_closes(action_id)
+        activity = row_facts(context.owned.connection, "device_activities", activity["id"])
     if activity["activity_state"] == 3:
         _release_occupancy(context, action_id)
     context.save_capture_completion(
