@@ -419,9 +419,40 @@ class LocalArtifactRequest:
 class LocalArtifactTaskFailure(RuntimeError):
     """任务实际结果已取回，但执行器监督交接自身发生错误。"""
 
-    def __init__(self, actual: DeviceCallResult, diagnostic: str):
-        super().__init__(diagnostic)
+    def __init__(
+            self, actual: DeviceCallResult,
+            supervision_diagnostic: CleanupSupervisionDiagnostic | None,
+            message: str | None = None):
+        rendered = (message if supervision_diagnostic is None else
+                    supervision_diagnostic.render())
+        super().__init__(rendered or "主机文件等待取消，原 completion 已取回")
         self.actual = actual
+        self.supervision_diagnostic = supervision_diagnostic
+
+
+def _raise_supervision_with_error(
+        pending, prior: BaseException, context: str) -> None:
+    """保存仍不可靠时同时交付原数据库问题和纯数据监督诊断。"""
+    diagnostic = pending.supervision_diagnostic
+    if diagnostic is None or pending.supervision_diagnostic_delivered:
+        return
+    supervision_error = RuntimeError(diagnostic.render())
+    combined = BaseExceptionGroup(
+        "清理结果保存与文件任务监督均有故障",
+        [prior, supervision_error])
+    raise ConsistencyError(
+        f"{context}；{prior}; {diagnostic.render()}") from combined
+
+
+def _deliver_supervision(pending, operation: str) -> None:
+    """原 actual 已可靠保存后，先固定一次交付，再阻止进入 consumer。"""
+    diagnostic = pending.supervision_diagnostic
+    if diagnostic is None or pending.supervision_diagnostic_delivered:
+        return
+    pending.supervision_diagnostic_delivered = True
+    raise ConsistencyError(
+        f"{operation}实际结果已可靠保存，文件任务监督交接失败: "
+        f"{diagnostic.render()}") from RuntimeError(diagnostic.render())
 
 
 class LocalArtifactTargetError(ConsistencyError):
@@ -487,6 +518,42 @@ class CleanupValidationDiagnostic:
     message: str
 
 
+@dataclass(frozen=True)
+class CleanupSupervisionFault:
+    """一次文件任务监督故障的无 traceback 记录。"""
+
+    source: str
+    identity: str | None
+    stage: str | None
+    business: str | None
+    resources: tuple[str, ...]
+    error_type: str
+    error_message: str
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CleanupSupervisionDiagnostic:
+    """本次文件结果交接的有界故障集合；不持有运行时异常或任务。"""
+
+    facts: tuple[CleanupSupervisionFault, ...]
+
+    def render(self) -> str:
+        rendered = []
+        for fact in self.facts:
+            record = ", ".join(value for value in (
+                f"identity={fact.identity}" if fact.identity is not None else None,
+                f"stage={fact.stage}" if fact.stage is not None else None,
+                f"business={fact.business}" if fact.business is not None else None,
+                f"resources={fact.resources}" if fact.resources else None,
+            ) if value is not None)
+            notes = "" if not fact.notes else f" notes={fact.notes}"
+            rendered.append(
+                f"{fact.source} [{record}] {fact.error_type}: "
+                f"{fact.error_message}{notes}")
+        return "; ".join(rendered)
+
+
 @dataclass
 class PendingCleanupQuery:
     """会话拥有的原返回与保存申请，不持有连接或设备回调。
@@ -515,6 +582,8 @@ class PendingCleanupQuery:
     binding_failure: BindingResult | None = None
     recovery_max_event_id: int | None = None
     query_unsupported: bool = False
+    supervision_diagnostic: CleanupSupervisionDiagnostic | None = None
+    supervision_diagnostic_delivered: bool = False
 
 
 @dataclass
@@ -553,6 +622,8 @@ class PendingCleanupDelete:
     binding_failure: BindingResult | None = None
     recovery_max_event_id: int | None = None
     delete_unsupported: bool = False
+    supervision_diagnostic: CleanupSupervisionDiagnostic | None = None
+    supervision_diagnostic_delivered: bool = False
 
 
 @dataclass
@@ -1438,8 +1509,10 @@ async def _delete_once(runtime, item_id, action_id, output_id):
     from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
     from camctl.operations.models import SettlementBasis
     from camctl.persistence.models import DbOutcomeKind
-    handoff_failure = None
+    supervision_diagnostic = None
     pending = runtime.pending_deletes.get(item_id)
+    if pending is not None:
+        supervision_diagnostic = pending.supervision_diagnostic
     if pending is None:
         original = runtime.pending_intents.get(item_id)
         if original is None:
@@ -1517,7 +1590,7 @@ async def _delete_once(runtime, item_id, action_id, output_id):
                         actual = await _call_delete(runtime, item_id, intent.ticket)
                     except LocalArtifactTaskFailure as error:
                         actual = error.actual
-                        handoff_failure = error
+                        supervision_diagnostic = error.supervision_diagnostic
                     except LocalArtifactTargetError as error:
                         from camctl.operations.models import ErrorValue
                         actual = _not_dispatched("delete", ErrorValue(
@@ -1530,17 +1603,26 @@ async def _delete_once(runtime, item_id, action_id, output_id):
                 finally:
                     runtime.active_calls.discard(identity)
         pending = PendingCleanupDelete(runtime.owned.metadata.instance_id, item_id, intent.ticket,
-            actual, evidence, None, None, new_operation_key())
+            actual, evidence, None, None, new_operation_key(),
+            supervision_diagnostic=supervision_diagnostic)
         runtime.pending_deletes[item_id] = pending
         pending.binding_failure = binding_failure
         pending.delete_unsupported = delete_unsupported
         pending.occurred_at = runtime.occurred_at()
         pending.returned_ns = runtime.monotonic_ns()
-    rejected = _save_delete_return(runtime, pending)
+    try:
+        rejected = _save_delete_return(runtime, pending)
+    except BaseException as error:
+        _raise_supervision_with_error(
+            pending, error, "删除原实际结果尚未可靠保存")
+        raise
     if rejected is not None:
+        _raise_supervision_with_error(
+            pending, ConsistencyError(
+                f"删除原实际结果未可靠保存: {rejected.phase} {rejected.detail}"),
+            "删除原实际结果尚未可靠保存")
         return rejected
-    if handoff_failure is not None:
-        raise ConsistencyError("删除实际结果已保存，但文件任务监督交接失败") from handoff_failure
+    _deliver_supervision(pending, "删除")
     return await _consume_delete_return(runtime, pending)
 
 
@@ -1757,7 +1839,8 @@ async def _run_query(
     pending = runtime.pending_queries.get(identity)
     consumer = consumer or (pending.consumer if pending is not None else CleanupQueryConsumer.BEFORE_DELETE)
     database_id = runtime.owned.metadata.instance_id
-    handoff_failure = None
+    supervision_diagnostic = (None if pending is None
+                              else pending.supervision_diagnostic)
     if pending is not None:
         if (pending.database_id != database_id or pending.ticket != ticket
                 or pending.item_id != item_id or pending.consumer is not consumer):
@@ -1817,7 +1900,7 @@ async def _run_query(
                         actual = await _call_query(runtime, item_id, ticket)
                     except LocalArtifactTaskFailure as error:
                         actual = error.actual
-                        handoff_failure = error
+                        supervision_diagnostic = error.supervision_diagnostic
                     except LocalArtifactTargetError as error:
                         from camctl.operations.models import ErrorValue
                         actual = _not_dispatched("query", ErrorValue(
@@ -1832,7 +1915,8 @@ async def _run_query(
             database_id=database_id, item_id=item_id, consumer=consumer,
             ticket=ticket, actual=actual, evidence=evidence,
             occurred_at=None, returned_ns=None,
-            key=new_operation_key())
+            key=new_operation_key(),
+            supervision_diagnostic=supervision_diagnostic)
         # 原返回先于验证和首次结果写入进入会话责任。
         runtime.pending_queries[identity] = pending
         pending.binding_failure = binding_failure
@@ -1849,43 +1933,51 @@ async def _run_query(
         pending.occurred_at = runtime.occurred_at()
     if pending.returned_ns is None:
         pending.returned_ns = runtime.monotonic_ns()
-    if pending.validation_diagnostic is not None:
-        raise OutcomeValidationError(pending.validation_diagnostic.message)
-    if pending.finish is None and pending.phase is not CleanupQueryPhase.SAVED:
-        try:
+    try:
+        if pending.validation_diagnostic is not None:
+            raise OutcomeValidationError(pending.validation_diagnostic.message)
+        if pending.finish is None and pending.phase is not CleanupQueryPhase.SAVED:
             original = runtime.pending_intents.get(item_id)
             retry_config = (original.request.config if original is not None
                             and original.ticket == ticket else runtime.query_config)
-            pending.finish = _prepare_query_finish(
-                pending, retry_wait=retry_config.retry_interval_s is not None)
-        except (ValueError, TypeError, KeyError, AttributeError) as error:
-            if not isinstance(error, OutcomeValidationError):
-                error = OutcomeValidationError(f"原调用返回无法按契约解释: {error}")
-            pending.validation_diagnostic = CleanupValidationDiagnostic(type(error).__name__, str(error))
-            raise OutcomeValidationError(pending.validation_diagnostic.message) from None
-        pending.phase = CleanupQueryPhase.PREPARED
-    if pending.phase is not CleanupQueryPhase.SAVED:
-        saved = runtime.operations.finish_attempt(pending.finish, pending.key, runtime.owned)
-        if not isinstance(saved, DbOutcome):
-            raise ConsistencyError("查询结果保存未返回合法数据库结果")
-        value = saved.value
-        if saved.kind is not DbOutcomeKind.COMPLETED:
-            error = ConsistencyError(f"原查询结果未可靠保存（{saved.kind.value}）: {saved.error}")
-            if isinstance(saved.error, BaseException):
-                raise error from saved.error
-            raise error
-        if not isinstance(value, FinishAttemptResult) or not isinstance(value.run_status, RunStatus):
-            raise ConsistencyError("原查询结果未返回可靠保存回执")
-        if value.disposition is FinishDisposition.ALREADY_ENDED:
-            _recover_already_ended(runtime, pending, value)
-        elif (value.disposition is not FinishDisposition.SAVED
-              or value.attempt_status is not pending.finish.outcome.outcome.status):
-            raise ConsistencyError("原查询结束回执与原返回不对应")
-        pending.phase = CleanupQueryPhase.SAVED
+            try:
+                pending.finish = _prepare_query_finish(
+                    pending, retry_wait=retry_config.retry_interval_s is not None)
+            except (ValueError, TypeError, KeyError, AttributeError) as error:
+                if not isinstance(error, OutcomeValidationError):
+                    error = OutcomeValidationError(f"原调用返回无法按契约解释: {error}")
+                pending.validation_diagnostic = CleanupValidationDiagnostic(
+                    type(error).__name__, str(error))
+                raise OutcomeValidationError(
+                    pending.validation_diagnostic.message) from None
+            pending.phase = CleanupQueryPhase.PREPARED
+        if pending.phase is not CleanupQueryPhase.SAVED:
+            saved = runtime.operations.finish_attempt(
+                pending.finish, pending.key, runtime.owned)
+            if not isinstance(saved, DbOutcome):
+                raise ConsistencyError("查询结果保存未返回合法数据库结果")
+            value = saved.value
+            if saved.kind is not DbOutcomeKind.COMPLETED:
+                error = ConsistencyError(
+                    f"原查询结果未可靠保存（{saved.kind.value}）: {saved.error}")
+                if isinstance(saved.error, BaseException):
+                    raise error from saved.error
+                raise error
+            if not isinstance(value, FinishAttemptResult) or not isinstance(value.run_status, RunStatus):
+                raise ConsistencyError("查询结果未返回可靠数据库回执")
+            if value.disposition is FinishDisposition.ALREADY_ENDED:
+                _recover_already_ended(runtime, pending, value)
+            elif (value.disposition is not FinishDisposition.SAVED
+                  or value.attempt_status is not pending.finish.outcome.outcome.status):
+                raise ConsistencyError("原查询结束回执与原返回不对应")
+            pending.phase = CleanupQueryPhase.SAVED
+    except BaseException as error:
+        _raise_supervision_with_error(
+            pending, error, "查询原实际结果尚未可靠保存")
+        raise
+    _deliver_supervision(pending, "查询")
     present = _presence_observation(pending.saved_actual or pending.actual)
     runtime.pending_intents.pop(item_id, None)
-    if handoff_failure is not None:
-        raise ConsistencyError("查询实际结果已保存，但文件任务监督交接失败") from handoff_failure
     return present
 
 

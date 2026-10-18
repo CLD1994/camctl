@@ -39,8 +39,8 @@ from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.operations.owned_calls import check_call_interruption, current_call_scope
 from camctl.operations.recovery import RecoveryBoundary, recovery_registry
 from camctl.outputs.cleanup_flow import (
-    CleanupRuntime, HostArtifactPort, LocalArtifactRequest, LocalArtifactTaskFailure,
-    LocalArtifactTargetError,
+    CleanupRuntime, CleanupSupervisionDiagnostic, CleanupSupervisionFault,
+    HostArtifactPort, LocalArtifactRequest, LocalArtifactTaskFailure, LocalArtifactTargetError,
     PendingCleanupCompanion, PendingCleanupQuery, PendingCleanupIntent,
     PendingCleanupDelete, advance_cleanup)
 from camctl.outputs.cleanup_ownership import PendingCleanupSave
@@ -123,35 +123,31 @@ class HostArtifacts(HostArtifactPort):
             result = None
 
         if interruption is not None or runner_error is not None:
-            result, interruption, drain_error = await _collect_file_result(
-                self._executor, owner, task_id, interruption)
+            result, interruption, supervision_diagnostic = await _collect_file_result(
+                self._executor, owner, task, interruption, runner_error)
             if result is None:
-                error = drain_error or runner_error or interruption
+                error = (RuntimeError(supervision_diagnostic.render())
+                         if supervision_diagnostic is not None else interruption)
                 raise ConsistencyError(
                     "主机文件任务监督收场未取得原 completion") from error
         else:
-            drain_error = None
+            supervision_diagnostic = None
 
         actual = _device_result(request, result)
+        scope = current_call_scope()
         if interruption is not None:
-            scope = current_call_scope()
             if scope is not None:
-                scope.interrupted = interruption
-                if drain_error is not None:
-                    interruption.add_note(
-                        f"主机文件任务 drain 故障: {type(drain_error).__name__}: {drain_error}")
-                    interruption.__cause__ = drain_error
-                return actual
-            diagnostic = "主机文件等待已取消，原 completion 已取回"
-            if drain_error is not None:
-                diagnostic += f"；drain 收场失败: {drain_error}"
-            raise LocalArtifactTaskFailure(actual, diagnostic) from interruption
-        if runner_error is not None or drain_error is not None:
-            diagnostic = "文件执行器 runner/supervisor 收场失败；原实际结果已保留"
-            cause = runner_error or drain_error
-            if runner_error is not None and drain_error is not None:
-                cause = BaseExceptionGroup("文件任务收场故障", [runner_error, drain_error])
-            raise LocalArtifactTaskFailure(actual, diagnostic) from cause
+                if scope.interrupted is None:
+                    scope.interrupted = interruption
+            if supervision_diagnostic is None:
+                if scope is not None:
+                    return actual
+                raise LocalArtifactTaskFailure(
+                    actual, None, "主机文件等待已取消，原 completion 已取回") from interruption
+        if supervision_diagnostic is not None:
+            raise LocalArtifactTaskFailure(
+                actual, supervision_diagnostic) from RuntimeError(
+                    supervision_diagnostic.render())
         return actual
 
     def _validate_request(self, request: LocalArtifactRequest) -> None:
@@ -213,23 +209,118 @@ class _LocalArtifactResultOwner:
     def __init__(self) -> None:
         self.handle: FileTaskHandle | None = None
         self.result: FileTaskResult | None = None
+        self._settled = False
 
     def retain_handle(self, handle: FileTaskHandle) -> None:
-        self.handle = handle
+        if not self._settled:
+            self.handle = handle
 
-    def release_handle(self) -> None:
+    def release_handle(self, handle: FileTaskHandle | None = None) -> None:
         """清理长寿命 supervisor owner 中已完成的文件任务引用。"""
-        self.handle = None
+        if handle is None or self.handle is handle:
+            self.handle = None
+
+    def record_result(self, result: FileTaskResult) -> None:
+        self.result = result
+        self._settled = True
+        self.release_handle()
 
     async def take_over(self, task) -> None:
-        self.retain_handle(task.pending)
-        self.result = await task.pending.wait()
+        if self._settled:
+            return
+        handle = task.pending
+        self.retain_handle(handle)
+        try:
+            self.record_result(await handle.wait())
+        finally:
+            self._settled = True
+            self.release_handle(handle)
 
 
-async def _collect_file_result(executor, owner, task_id, interruption):
-    """shield 同一个共享 drain，并在 owner 故障后从原 handle 补取 completion。"""
+def _task_context(task):
+    return (
+        task.task_id.value, task.stage, task.business,
+        (f"file:{task.file_id}", *task.resources),
+    )
+
+
+def _safe_error_text(error):
+    try:
+        return str(error)
+    except BaseException as formatting_error:
+        return f"<诊断格式化失败: {type(formatting_error).__name__}>"
+
+
+def _exception_facts(error, source, context=None):
+    """将异常及其 cause/context 转成不携带 traceback 的事实。"""
+    facts = []
+    pending = [(error, source)]
+    seen = set()
+    while pending:
+        current, current_source = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        identity, stage, business, resources = context or (None, None, None, ())
+        facts.append(CleanupSupervisionFault(
+            source=current_source,
+            identity=identity,
+            stage=stage,
+            business=business,
+            resources=resources,
+            error_type=type(current).__name__,
+            error_message=_safe_error_text(current),
+            notes=tuple(_safe_error_text(note)
+                        for note in getattr(current, "__notes__", ())),
+        ))
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend((child, f"{current_source}.nested")
+                           for child in current.exceptions)
+        if current.__cause__ is not None:
+            pending.append((current.__cause__, f"{current_source}.cause"))
+        if current.__context__ is not None:
+            pending.append((current.__context__, f"{current_source}.context"))
+    return facts
+
+
+def _interruption_facts(error, context):
+    """只记录取消携带的原故障与 notes，不把取消本身改成监督错误。"""
+    facts = []
+    notes = tuple(_safe_error_text(note)
+                  for note in getattr(error, "__notes__", ()))
+    if notes:
+        identity, stage, business, resources = context
+        facts.append(CleanupSupervisionFault(
+            source="wait_cancellation", identity=identity, stage=stage,
+            business=business, resources=resources,
+            error_type=type(error).__name__, error_message="等待被取消",
+            notes=notes))
+    if error.__cause__ is not None:
+        facts.extend(_exception_facts(
+            error.__cause__, "wait_cancellation.cause", context))
+    if error.__context__ is not None:
+        facts.extend(_exception_facts(
+            error.__context__, "wait_cancellation.context", context))
+    return facts
+
+
+def _supervision_diagnostic(facts):
+    unique = tuple(dict.fromkeys(facts))
+    return None if not unique else CleanupSupervisionDiagnostic(unique)
+
+
+async def _collect_file_result(executor, owner, task, interruption, runner_error):
+    """shield 同一共享 drain，完整保留全部失败并从原 handle 补取 completion。"""
+    task_context = _task_context(task)
+    facts = []
+    if runner_error is not None:
+        facts.extend(_exception_facts(runner_error, "runner", task_context))
+    if interruption is not None:
+        facts.extend(_interruption_facts(interruption, task_context))
+    # fallback 必须使用进入共享 drain 前接管的局部引用；callback 可能在
+    # drain 期间结束并主动释放 owner.handle。
+    handle = owner.handle
     drain = asyncio.create_task(executor.drain_required())
-    drain_error = None
     supervision = None
     while True:
         try:
@@ -238,16 +329,17 @@ async def _collect_file_result(executor, owner, task_id, interruption):
         except asyncio.CancelledError as error:
             if interruption is None:
                 interruption = error
+            facts.extend(_interruption_facts(error, task_context))
             if drain.done() and drain.cancelled():
-                drain_error = error
+                facts.extend(_exception_facts(error, "shared_drain_cancelled"))
                 break
         except Exception as error:
-            drain_error = error
+            facts.extend(_exception_facts(error, "shared_drain"))
             break
 
     result = owner.result
-    if result is None and owner.handle is not None:
-        take = asyncio.create_task(owner.handle.wait())
+    if result is None and handle is not None:
+        take = asyncio.create_task(handle.wait())
         while True:
             try:
                 result = await asyncio.shield(take)
@@ -255,21 +347,29 @@ async def _collect_file_result(executor, owner, task_id, interruption):
             except asyncio.CancelledError as error:
                 if interruption is None:
                     interruption = error
+                facts.extend(_interruption_facts(error, task_context))
                 if take.done() and take.cancelled():
-                    drain_error = drain_error or error
+                    facts.extend(_exception_facts(error, "fallback_cancelled", task_context))
                     break
             except Exception as error:
-                drain_error = drain_error or error
+                facts.extend(_exception_facts(error, "fallback", task_context))
                 break
     if supervision is not None:
-        failed = next((failure for failure in supervision.failed
-                       if failure.record.identity == task_id.value), None)
-        if failed is not None:
-            drain_error = drain_error or RuntimeError(failed.error)
+        for failure in supervision.failed:
+            record = failure.record
+            error_type, separator, error_message = failure.error.partition(": ")
+            facts.append(CleanupSupervisionFault(
+                source="supervisor_owner",
+                identity=record.identity,
+                stage=record.stage,
+                business=record.business,
+                resources=record.resources,
+                error_type=error_type if separator else "TaskFailure",
+                error_message=error_message if separator else failure.error,
+            ))
     if result is not None:
-        owner.result = result
-        owner.release_handle()
-    return result, interruption, drain_error
+        owner.record_result(result)
+    return result, interruption, _supervision_diagnostic(facts)
 
 
 def _device_result(request: LocalArtifactRequest, result: FileTaskResult | None) -> DeviceCallResult:
