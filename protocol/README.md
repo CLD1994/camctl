@@ -13,7 +13,7 @@
 | 文件 | 定义内容 |
 | --- | --- |
 | [执行计划 Schema](schemas/plan.schema.json) | 完整合法计划、分阶段受理用的公共结构、各动作参数及来源组合 |
-| [能力说明 Schema](schemas/capabilities.schema.json) | 设备、拍摄动作及参数类型结构，明确的预览支持声明与可选视频大小估算声明 |
+| [能力说明 Schema](schemas/capabilities.schema.json) | 设备及其可选正式源删除声明、拍摄动作与参数类型结构、预览支持及可选视频大小估算声明 |
 | [对象 ID 定义](schemas/status-report.schema.json#/$defs/entity_id) | 数据库对象整数身份的规范十进制字符串，范围 1～9223372036854775807；单项、数组、报告 ACK 及同步起点共用 |
 | [状态报告 Schema](schemas/status-report.schema.json) | 报告身份与覆盖水位、计划及动作结果、产物与交付、输入诊断、预览展示关联、逐项取消结果及动作结束后的设备执行情况 |
 | [工作流程错误登记](errors/workflow-codes.json) | 预览、产物选择、交付及取消相关错误码、阶段和详情 Schema；未知驱动错误仍按公共错误结构保留 |

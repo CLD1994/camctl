@@ -3,6 +3,7 @@
     {
       "device_id": "estimate_demo_cam0",
       "driver_id": "fictional_estimate_camera",
+      "delete_supported": false,
       "actions": [
         {
           "type": "camera_record",

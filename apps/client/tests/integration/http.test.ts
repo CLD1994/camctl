@@ -1,5 +1,10 @@
 import { afterEach, expect, it } from "vitest";
-import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
@@ -227,6 +232,115 @@ it("畸形 JSON 原文件到达逐文件诊断", async () => {
   }
   expect(state.imports[0].status).toBe("failed");
   expect(state.coverage).toBe(0);
+});
+
+it("HTTP 状态与能力重载保留每台设备的删除声明", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "camctl-http-capabilities-"));
+  const file = join(dir, "device-capabilities.json");
+  const document = {
+    devices: [
+      {
+        device_id: "camera-alpha",
+        driver_id: "vendor.future_camera_v9",
+        delete_supported: true,
+        actions: [],
+      },
+      {
+        device_id: "camera-beta",
+        driver_id: "vendor.future_camera_v9",
+        delete_supported: false,
+        actions: [],
+      },
+    ],
+  };
+  writeFileSync(file, JSON.stringify(document));
+  const app = new Application(dir);
+  const files = new Files(app);
+  const server = await new Promise<Server>((resolve) => {
+    const s = createHttpApp(app, files).listen(0, "127.0.0.1", () =>
+      resolve(s),
+    );
+  });
+  const address = server.address() as { port: number };
+  const base = "http://127.0.0.1:" + address.port;
+  clean.push(async () => {
+    await files.idle();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    app.store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const initial = await (await fetch(base + "/api/state")).json();
+  expect(
+    initial.capabilities.active.devices.map((device: any) => [
+      device.device_id,
+      device.delete_supported,
+    ]),
+  ).toEqual([
+    ["camera-alpha", true],
+    ["camera-beta", false],
+  ]);
+
+  document.devices[0].delete_supported = false;
+  writeFileSync(file, JSON.stringify(document));
+  const reloaded = await (
+    await fetch(base + "/api/capabilities/reload", { method: "POST" })
+  ).json();
+  expect(reloaded.error).toBeNull();
+  expect(reloaded.active.devices[0].delete_supported).toBe(false);
+  const current = await (await fetch(base + "/api/state")).json();
+  expect(current.capabilities.active.devices[0].delete_supported).toBe(false);
+});
+
+it("HTTP 状态与重载保留预览和估算声明的精确数字文本", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "camctl-http-capability-numbers-"));
+  const file = join(dir, "device-capabilities.json");
+  const text = [
+    '{"devices":[',
+    '{"device_id":"camera","driver_id":"vendor.future_camera_v9",',
+    '"delete_supported":true,"actions":[',
+    '{"type":"camera_record","parameter_types":[',
+    '{"type":"exact","name":"exact","description":"exact","preview_supported":true,',
+    '"schema":{"$schema":"https://json-schema.org/draft/2020-12/schema",',
+    '"type":"object","properties":{"type":{"const":"exact"}},',
+    '"required":["type"],"additionalProperties":false},',
+    '"video_size_estimate":{"bitrate_mbps":130.125,',
+    '"duration":{"method":"direct","seconds":{"source":"constant","value":2.4e2}}}',
+    '}]}]}]}',
+  ].join("");
+  writeFileSync(file, text);
+  const app = new Application(dir);
+  const files = new Files(app);
+  const server = await new Promise<Server>((resolve) => {
+    const s = createHttpApp(app, files).listen(0, "127.0.0.1", () =>
+      resolve(s),
+    );
+  });
+  const address = server.address() as { port: number };
+  const base = "http://127.0.0.1:" + address.port;
+  clean.push(async () => {
+    await files.idle();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    app.store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const stateText = await (await fetch(base + "/api/state")).text();
+  expect(stateText).toContain('"delete_supported":true');
+  expect(stateText).toContain('"preview_supported":true');
+  expect(stateText).toContain('"bitrate_mbps":130.125');
+  expect(stateText).toContain('"value":2.4e2');
+
+  const reloadText = await (
+    await fetch(base + "/api/capabilities/reload", { method: "POST" })
+  ).text();
+  expect(reloadText).toContain('"delete_supported":true');
+  expect(reloadText).toContain('"bitrate_mbps":130.125');
+  expect(reloadText).toContain('"value":2.4e2');
 });
 
 it("HTTP 混合反序报告、视频补发与 Range 使用同一权威结果", async () => {

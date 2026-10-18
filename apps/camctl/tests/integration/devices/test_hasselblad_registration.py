@@ -78,6 +78,13 @@ def test_hasselblad_catalog_and_task_binding_resolve_each_device_source(
         task = parameter.task_factory({"type": "hasselblad_photo"})
         assert task.output_storage is storage
 
+    described = {
+        device["device_id"]: device
+        for device in catalog.describe_document()["devices"]
+    }
+    assert described["hb-host"]["delete_supported"] is True
+    assert described["hb-device"]["delete_supported"] is False
+
     entry = drivers_runtime.current_registry().entry(DRIVER_ID)
     assert entry is not None
     assert entry.declaration.delete_supported is False

@@ -78,7 +78,7 @@ def test_driver_definition_requires_a_valid_explicit_declaration():
 def test_catalog_resolves_delete_support_per_device_and_keeps_empty_actions():
     declaration = synthetic_driver_declaration(delete_supported=False)
     definition = DriverDefinition(
-        "synthetic-camera",
+        "vendor.future_camera_v9",
         {},
         declaration=declaration,
         source_storage_resolver=synthetic_source_storage_resolver,
@@ -86,13 +86,13 @@ def test_catalog_resolves_delete_support_per_device_and_keeps_empty_actions():
     config = _config({
         "camera-host": {
             "kind": "camera",
-            "driver": "synthetic-camera",
+            "driver": "vendor.future_camera_v9",
             "synthetic_serial": "serial-host",
             "synthetic_output_storage": "host",
         },
         "camera-device": {
             "kind": "camera",
-            "driver": "synthetic-camera",
+            "driver": "vendor.future_camera_v9",
             "synthetic_serial": "serial-device",
             "synthetic_output_storage": "device",
         },
@@ -100,7 +100,7 @@ def test_catalog_resolves_delete_support_per_device_and_keeps_empty_actions():
 
     catalog = build_catalog(
         config,
-        DriverDefinitions({"synthetic-camera": definition}),
+        DriverDefinitions({"vendor.future_camera_v9": definition}),
     )
 
     assert catalog.source_delete_supported("camera-host") is True
@@ -111,15 +111,24 @@ def test_catalog_resolves_delete_support_per_device_and_keeps_empty_actions():
     assert catalog.describe_document()["devices"] == [
         {
             "device_id": "camera-device",
-            "driver_id": "synthetic-camera",
+            "driver_id": "vendor.future_camera_v9",
+            "delete_supported": False,
             "actions": [],
         },
         {
             "device_id": "camera-host",
-            "driver_id": "synthetic-camera",
+            "driver_id": "vendor.future_camera_v9",
+            "delete_supported": True,
             "actions": [],
         },
     ]
+
+
+def test_catalog_describes_a_valid_empty_device_directory():
+    config = load_config({"devices": {}}, ConfigDefaults())
+    catalog = build_catalog(config, DriverDefinitions({}))
+
+    assert catalog.describe_document() == {"devices": []}
 
 
 @pytest.mark.parametrize(
@@ -259,8 +268,10 @@ def test_catalog_keeps_declaration_when_candidate_actions_are_filtered(delete_su
     )
 
     assert catalog.describe_document() == {"devices": [
-        {"device_id": "camera-a", "driver_id": "synthetic-camera", "actions": []},
-        {"device_id": "camera-b", "driver_id": "synthetic-camera", "actions": []},
+        {"device_id": "camera-a", "driver_id": "synthetic-camera",
+         "delete_supported": delete_supported, "actions": []},
+        {"device_id": "camera-b", "driver_id": "synthetic-camera",
+         "delete_supported": delete_supported, "actions": []},
     ]}
     assert catalog._definitions.drivers["synthetic-camera"].declaration == declaration
     assert catalog._definitions.drivers["synthetic-camera"].source_storage_resolver is resolver
@@ -575,7 +586,8 @@ class TestVideoEstimateMetadata:
         }), action_type=action_type, task_factory=task_factory)
         catalog = catalog_for_capabilities(candidate)
         assert catalog.describe_document() == {"devices": [{
-            "device_id": "cam-1", "driver_id": "estimate_demo", "actions": [],
+            "device_id": "cam-1", "driver_id": "estimate_demo",
+            "delete_supported": False, "actions": [],
         }]}
         assert not catalog.device_supports("cam-1", action_type)
         assert catalog.parameter_definition("cam-1", action_type, "estimate_record") is None

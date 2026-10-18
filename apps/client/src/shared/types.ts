@@ -72,7 +72,14 @@ export interface ParameterType {
   schema: Record<string, unknown>;
   video_size_estimate?: VideoSizeEstimateDefinition;
 }
-export interface Capabilities { devices: Array<{ device_id: string; driver_id: string; actions: Array<{ type: string; parameter_types: ParameterType[] }> }> }
+export interface Capabilities {
+  devices: Array<{
+    device_id: string;
+    driver_id: string;
+    delete_supported?: boolean;
+    actions: Array<{ type: string; parameter_types: ParameterType[] }>;
+  }>;
+}
 export type Source = { action_instance_id: string } | { plan_instance_id: string; group: string } | { action_name: string } | { group: string };
 export type Target = { request_id: string } | { plan_instance_id: string; group?: string } | { action_instance_id: string };
 export interface Action { name: string; type: ActionType; device_id?: string; scheduled_at?: string; group?: string; params?: Record<string, unknown>; policy?: Record<string, unknown> }

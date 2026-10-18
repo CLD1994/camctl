@@ -25,6 +25,9 @@
         "driver_id": {
           "$ref": "status-report.schema.json#/$defs/text"
         },
+        "delete_supported": {
+          "type": "boolean"
+        },
         "actions": {
           "type": "array",
           "items": {

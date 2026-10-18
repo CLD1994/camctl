@@ -3,6 +3,7 @@
     {
       "device_id": "demo_cam0",
       "driver_id": "demo_camera",
+      "delete_supported": false,
       "actions": [
         {
           "type": "camera_record",

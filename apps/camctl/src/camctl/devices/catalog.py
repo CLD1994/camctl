@@ -219,6 +219,9 @@ class Catalog:
         for device_id, (driver_id, definition, declared) in sorted(
             self._capabilities.items()
         ):
+            delete_supported = self.source_delete_supported(device_id)
+            if not isinstance(delete_supported, bool):
+                raise RuleError(f"设备 {device_id} 的正式源删除声明未解析")
             actions = [
                 {
                     "type": action_type,
@@ -241,6 +244,7 @@ class Catalog:
                 {
                     "device_id": device_id,
                     "driver_id": driver_id,
+                    "delete_supported": delete_supported,
                     "actions": actions,
                 }
             )
