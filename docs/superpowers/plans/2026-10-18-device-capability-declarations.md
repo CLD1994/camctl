@@ -72,10 +72,10 @@
 
 **接口：** 消费 C1 按当前设备配置解析的正式源能力，产出公共可选布尔字段；客户端只从根协议执行整份校验。当前生产导出逐设备有值；旧文件可以缺字段。
 
-- [ ] **步骤 1：写结构和加载失败测试。** 实际 `loadCapabilities` 接受 true、false、旧缺字段，拒绝 null／非布尔／未知外层属性；原始 JSON 的重复键通过实际重载的 `parseJson → loadCapabilities` 链拒绝。夹具使用任意 driver_id、共享 driver_id 的两个设备、`actions: []` 和有效空目录；清理仍不能放进拍摄 `actions[]` 或携带 `device_id`。
-- [ ] **步骤 2：运行目标用例确认失败。** 扩展 `apps/client/tests/integration/video-estimate-capabilities.test.ts`、`http.test.ts` 及 Python Catalog 用例；不要用自建简化加载器替代生产路径。
-- [ ] **步骤 3：实现协议与导出。** 公共值只读取 C1 的当前正式源能力，缺静态定义或源解析失败使新导出失败。更新 Schema、样例、类型、责任文档和协议入口；保持预览、估算及精确数字原样传递。真实导出验证 HB host／device 及同驱动不同配置，不能只用合成布尔对象证明派生正确。
-- [ ] **步骤 4：验证重载与交接并提交。** `/api/state` 和重载返回保留字段；成功整体替换，失败保留旧 active 与错误，首次失败仍无 active。仅删除字段变化不改草稿／预设／原请求；预览字段同时变化时继续执行既有自动预览规则。运行 `node scripts/check-protocol.mjs`。
+- [x] **步骤 1：写结构和加载失败测试。** 实际 `loadCapabilities` 接受 true、false、旧缺字段，拒绝 null／非布尔／未知外层属性；原始 JSON 的重复键通过实际重载的 `parseJson → loadCapabilities` 链拒绝。夹具使用任意 driver_id、共享 driver_id 的两个设备、`actions: []` 和有效空目录；清理仍不能放进拍摄 `actions[]` 或携带 `device_id`。
+- [x] **步骤 2：运行目标用例确认失败。** 扩展 `apps/client/tests/integration/video-estimate-capabilities.test.ts`、`http.test.ts` 及 Python Catalog 用例；不要用自建简化加载器替代生产路径。
+- [x] **步骤 3：实现协议与导出。** 公共值只读取 C1 的当前正式源能力，缺静态定义或源解析失败使新导出失败。更新 Schema、样例、类型、责任文档和协议入口；保持预览、估算及精确数字原样传递。真实导出验证 HB host／device 及同驱动不同配置，不能只用合成布尔对象证明派生正确。
+- [x] **步骤 4：验证重载与交接并提交。** `/api/state` 和重载返回保留字段；成功整体替换，失败保留旧 active 与错误，首次失败仍无 active。仅删除字段变化不改草稿／预设／原请求；预览字段同时变化时继续执行既有自动预览规则。运行 `node scripts/check-protocol.mjs`。
 
 ## C3：补齐全部内置正式任务的同源说明
 
