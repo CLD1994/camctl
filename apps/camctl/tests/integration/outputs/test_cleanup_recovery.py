@@ -115,7 +115,7 @@ class GatedDriver:
 
     async def query_file(self, request) -> DeviceCallResult:
         self.query_calls += 1
-        return DeviceCallResult(observations=(), error=object())
+        return DeviceCallResult(observations=(), error={"code": "device_error", "stage": "query"})
 
 
 @pytest.fixture
@@ -236,7 +236,7 @@ class TestTakeoverPreservesOldFailure:
     async def test_later_cleanup_preserves_old_failure(self, pipeline):
         owned = pipeline
         # A：删除效果未知且查询预算耗尽——最终失败并保留限制。
-        driver = DriverDouble(absent=False, query_error=object())
+        driver = DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"})
         first = await delete_source_file(
             _runtime(owned, driver, delete_attempts=2, query_attempts=1), 91)
         assert first.phase == "query_unknown", first
@@ -315,7 +315,7 @@ class TestCleanupCancel:
 
     async def test_cancel_with_unknown_delete_keeps_restriction(self, pipeline):
         owned = pipeline
-        driver = DriverDouble(absent=False, query_error=object())
+        driver = DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"})
         first = await delete_source_file(_runtime(owned, driver), 91)
         assert first.phase == "query_unknown", first
         owned.connection.execute(

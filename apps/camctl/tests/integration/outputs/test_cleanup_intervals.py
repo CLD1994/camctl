@@ -124,7 +124,7 @@ class TestQueryInterval:
         owned = pipeline
         _seed_pending_delete(owned)
         try:
-            driver = DriverDouble(absent=False, query_error=object())
+            driver = DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"})
             clock = _Clock()
             runtime = _runtime(owned, driver, clock, query_interval=Decimal("3"))
             first = await delete_source_file(runtime, 91)

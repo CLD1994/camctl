@@ -8035,21 +8035,31 @@ class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
 
     def _reuse(self, scope, saved, item):
         intent = self._intent
-        began = [event for event in saved if event["type"] == 11]
-        if not began or any(
-                event["type"] not in (11, 17, 24) for event in saved):
-            raise TransactionError("原事务不是清理首次建档，不能作为重送核实")
-        for event in saved:
-            if event["type"] != 24 or event["reason"] != 2:
-                continue
-            row = event["body"]["rows"][0]
-            if (row["table"] != "cleanup_items"
-                    or row["id"] != intent.target.cleanup_item_id
-                    or row["after"]["values"].get("status")
-                    != int(_CLEANUP_ITEM_STATUS.DELETING)):
-                raise TransactionError("原清理首次建档的归属事件属于其他成员")
-            if event["occurred_at"] != intent.occurred_at:
-                raise TransactionError("原清理首次建档的时刻与意图不同")
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds not in ([(11, 1)], [(11, 1), (24, 2),
+                                    (_OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON)]):
+            raise TransactionError("原事务不是完整清理尝试建档，不能作为重送核实")
+        if saved[0]["occurred_at"] != intent.occurred_at:
+            raise TransactionError("原清理意图的事实时刻不同")
+        rows = saved[0]["body"]["rows"]
+        attempts = [row for row in rows if row["table"] == "operation_attempts"]
+        runs = [row for row in rows if row["table"] == "operation_runs"]
+        if (len(rows) != 2 or len(attempts) != 1 or len(runs) != 1
+                or attempts[0]["before"]["exists"] or not attempts[0]["after"]["exists"]):
+            raise TransactionError("原清理意图缺少唯一尝试及流程")
+        values = attempts[0]["after"]["values"]
+        expected = {"max_attempts_used": intent.config.max_attempts,
+                    "timeout_s_json": intent.config.timeout_s,
+                    "retry_interval_s_json": intent.config.retry_interval_s,
+                    "copy_round": intent.copy_round}
+        if (any(not json_equal(values.get(name), value) for name, value in expected.items())
+                or runs[0]["id"] != values.get("run_id")):
+            raise TransactionError("原清理意图的配置或流程与申请不同")
+        if len(saved) == 3:
+            # 首次建档同时取得归属并更新对应产物；复用已有完整核对。
+            _ProgressCleanupCommand(
+                ProgressCleanupItem(intent.target.cleanup_item_id, intent.occurred_at),
+                self._key)._verify_and_reuse(scope, saved[1:], item)
         # 同键委托通用意图命令原键核实：额外归属事件不影响其只读复用。
         begin = BeginAttemptCommand(intent, self._key).plan(scope)
         merged = _merge_cleanup_binding_plans([

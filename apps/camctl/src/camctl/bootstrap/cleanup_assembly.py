@@ -30,7 +30,9 @@ from camctl.host_files.declarations import HOST_FILE_DECLARATION
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.outputs.cleanup_flow import (
     CleanupRuntime, HostArtifactPort, LocalArtifactRequest,
-    PendingCleanupCompanion, PendingCleanupQuery, advance_cleanup)
+    PendingCleanupCompanion, PendingCleanupQuery, PendingCleanupIntent,
+    PendingCleanupDelete, advance_cleanup)
+from camctl.outputs.cleanup_ownership import PendingCleanupSave
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -111,6 +113,9 @@ def session_cleanup_assembly(
     occurred_at: Callable[[], int] | None = None,
     pending_queries: dict[tuple[int, int], PendingCleanupQuery] | None = None,
     pending_companions: dict[int, PendingCleanupCompanion] | None = None,
+    pending_intents: dict[int, PendingCleanupIntent] | None = None,
+    pending_deletes: dict[int, PendingCleanupDelete] | None = None,
+    pending_saves: dict[tuple[str, int], PendingCleanupSave] | None = None,
 ) -> Callable[[Any], CleanupRuntime | None]:
     """构造会话级清理推进工厂：解析删除/查询协作者并组装运行时。
 
@@ -123,6 +128,9 @@ def session_cleanup_assembly(
     queries = pending_queries if pending_queries is not None else {}
     companions = pending_companions if pending_companions is not None else {}
     consumed_queries = {}
+    intents = pending_intents if pending_intents is not None else {}
+    deletes = pending_deletes if pending_deletes is not None else {}
+    saves = pending_saves if pending_saves is not None else {}
     monotonic = monotonic_ns if monotonic_ns is not None else time.monotonic_ns
     wall = occurred_at if occurred_at is not None \
         else (lambda: int(time.time() * 1_000_000))
@@ -169,7 +177,7 @@ def session_cleanup_assembly(
             " JOIN cleanup_items c ON c.id=r.cleanup_item_id"
             " WHERE r.kind=5 AND c.status NOT IN (4,5,6)"
             " AND a.result_event_id IS NOT NULL LIMIT 1").fetchone()
-        if not queries and not companions and saved_query is None:
+        if not queries and not companions and not intents and not deletes and not saves and saved_query is None:
             load_ports()
         base = CleanupRuntime(
             owned=owned, outputs=OutputsRepository(), operations=OperationRepository(),
@@ -182,6 +190,7 @@ def session_cleanup_assembly(
             query_config=AttemptConfig(max_query_attempts, _DEFAULT_TIMEOUT_S, _DEFAULT_RETRY_INTERVAL_S),
             monotonic_ns=monotonic, retry_gate=retry_gate,
             pending_queries=queries, pending_companions=companions,
+            pending_intents=intents, pending_deletes=deletes, pending_saves=saves,
             consumed_queries=consumed_queries,
         )
 

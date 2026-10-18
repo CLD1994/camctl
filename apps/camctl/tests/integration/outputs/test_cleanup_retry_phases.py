@@ -112,7 +112,7 @@ async def test_higher_current_limit_restarts_original_retry_wait(pipeline, opera
     owned = pipeline
     _seed_pending_delete(owned)
     driver = (DriverDouble(absent=False, present=True) if operation == "delete"
-              else DriverDouble(absent=False, query_error=object()))
+              else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
     first = _runtime(
         owned, driver, _Clock(), delete_interval=Decimal("0"),
         query_interval=Decimal("0"))
@@ -138,7 +138,7 @@ async def test_higher_current_limit_restarts_original_retry_wait(pipeline, opera
     try:
         clock = _Clock(100_000_000_000)
         resumed_driver = (DriverDouble(absent=False, present=True) if operation == "delete"
-                          else DriverDouble(absent=False, query_error=object()))
+                          else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
         second = _runtime(
             fresh, resumed_driver, clock, delete_interval=Decimal("0"),
             query_interval=Decimal("0"))
@@ -174,7 +174,7 @@ async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operati
     owned = pipeline
     _seed_pending_delete(owned)
     driver = (DriverDouble(absent=False, present=True) if operation == "delete"
-              else DriverDouble(absent=False, query_error=object()))
+              else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
     first = _runtime(
         owned, driver, _Clock(), delete_interval=Decimal("0"),
         query_interval=Decimal("0"))
@@ -193,7 +193,7 @@ async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operati
     fresh = _reopen(owned)
     try:
         resumed_driver = (DriverDouble(absent=False, present=True) if operation == "delete"
-                          else DriverDouble(absent=False, query_error=object()))
+                          else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
         second = _runtime(
             fresh, resumed_driver, _Clock(100_000_000_000),
             delete_interval=Decimal("0"), query_interval=Decimal("0"))

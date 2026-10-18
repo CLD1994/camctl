@@ -395,7 +395,14 @@ async def test_validation_failure_retains_original_diagnostic_without_querying_a
     with pytest.raises(OutcomeValidationError) as repeated_error:
         await _run_query(runtime, _TICKET, _ITEM_ID)
 
-    assert repeated_error.value is first_error.value
+    assert repeated_error.value is not first_error.value
+    assert type(repeated_error.value) is type(first_error.value)
+    assert str(repeated_error.value) == str(first_error.value)
+    pending = next(iter(runtime.pending_queries.values()))
+    assert pending.actual is actual
+    assert vars(pending.validation_diagnostic) == {
+        "error_type": "OutcomeValidationError", "message": str(first_error.value)}
+    assert not any(isinstance(value, BaseException) for value in vars(pending).values())
     first_driver.query_file.assert_awaited_once()
     changed.driver.query_file.assert_not_awaited()
     runtime.operations.finish_attempt.assert_not_called()
