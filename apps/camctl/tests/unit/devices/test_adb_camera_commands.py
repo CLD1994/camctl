@@ -160,16 +160,78 @@ def test_action_auto_does_not_force_manual_exposure(ev, suffix):
     assert not any(cmd[-2] in {"2a", "28"} for cmd in settings)
 
 
-def test_osmo_manual_settings_keep_own_flags_and_no_unprovided_adjustments():
-    settings = commands.settings_for("dji-osmo360-ii", "camera_record", recording_params("dji-osmo360-ii"))
-    assert settings[:3] == (
+@pytest.mark.parametrize("exposure, exposure_commands", [
+    ({"mode": "manual", "iso": 800}, (
+        ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "8e", "010100000101"),
+        ("dji_mb_ctrl", "-r", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "1e", "0400"),
+        ("dji_mb_ctrl", "-r", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "2A", "06"),
+        ("dji_mb_ctrl", "-r", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "28", "013c8000"),
+        ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "2c", "0634000000"),
+    )),
+    ({"mode": "auto", "compensation_ev": 0}, (
+        ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "8e", "010100000101"),
+        ("dji_mb_ctrl", "-r", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "1e", "0100"),
+        ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "2c", "0634000000"),
+        ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "2e", "10"),
+    )),
+])
+def test_osmo_record_setting_requests_keep_independent_bytes_and_order(exposure, exposure_commands):
+    params = {**recording_params("dji-osmo360-ii"), "exposure": exposure}
+    settings = commands.settings_for("dji-osmo360-ii", "camera_record", params)
+    expected = (
         ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "0x8e", "01013f000101"),
         ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "e1", "38"),
         ("simulate_device", "-s", "BaseFormat", "6", "69", "0"),
+        *exposure_commands,
+        ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "42", "3d"),
+        ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2"),
     )
-    assert ("dji_mb_ctrl", "-r", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "28", "013c8000") in settings
-    assert ("DeviceRecordRecSettingBitRate", "2") in [cmd[-2:] for cmd in settings]
-    assert not any(cmd[-2] == "0x26" or cmd[-1].startswith("010108") for cmd in settings)
+
+    assert settings == expected
+
+
+def test_fixed_request_fact_and_command_are_consumed_from_the_same_task_declaration(monkeypatch):
+    plans = getattr(commands, "FIXED_SETTING_PLANS", None)
+    assert plans is not None, "fixed settings need one shared fact-and-command declaration"
+
+    key = (commands.CameraModel.OSMO360II, "camera_record")
+    plan = plans[key]
+    manual_steps = plan.exposure["manual"]
+    shutter_index = next(
+        index for index, step in enumerate(manual_steps)
+        if isinstance(step, commands.FixedSettingRequest) and step.kind == "shutter"
+    )
+    original_shutter = manual_steps[shutter_index]
+    changed_shutter = replace(
+        original_shutter,
+        value="1/30",
+        commands=(("probe", "changed-shutter"),),
+    )
+    changed_steps = (*manual_steps[:shutter_index], changed_shutter, *manual_steps[shutter_index + 1:])
+    monkeypatch.setitem(
+        plans,
+        key,
+        replace(plan, exposure={**plan.exposure, "manual": changed_steps}),
+    )
+
+    encoded = commands.settings_for(
+        "dji-osmo360-ii",
+        "camera_record",
+        recording_params("dji-osmo360-ii"),
+    )
+    from camctl.devices.drivers.adb_cameras.definitions import candidate_capabilities
+    capability = next(
+        item for item in candidate_capabilities("dji-osmo360-ii")
+        if item.action_type == "camera_record"
+    )
+
+    assert ("probe", "changed-shutter") in encoded
+    assert "1/30 秒" in capability.description
+    assert "1/60 秒" not in capability.description
+    exposure_description = capability.schema["properties"]["exposure"]["oneOf"][0][
+        "properties"]["mode"]["description"]
+    assert "1/30 秒" in exposure_description
+    assert "1/60 秒" not in exposure_description
 
 
 @pytest.mark.parametrize("driver, interval, duration, outputs, exposure, payload", [
