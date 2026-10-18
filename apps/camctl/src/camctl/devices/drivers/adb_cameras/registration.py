@@ -21,6 +21,15 @@ def builtin_camera_contracts():
     return _BUILTIN_CONTRACTS
 
 
+def begin_builtin_camera_session():
+    """取得执行会话资格后重置记录；不派发相机命令。"""
+    registry = current_registry()
+    for contract in builtin_camera_contracts():
+        entry = registry.entry(contract.driver_id)
+        if entry is not None and isinstance(entry.driver, AdbCameraDriver):
+            entry.driver.begin_session()
+
+
 def register_builtin_camera_drivers(config):
     """验证全部身份后登记；重复同源装配更新本次配置绑定。"""
     definitions = current_driver_definitions().drivers

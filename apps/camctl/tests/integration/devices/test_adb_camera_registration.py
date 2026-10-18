@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
+import shlex
 
 import pytest
 
@@ -38,7 +40,7 @@ from camctl.devices.ports import ControlRequest
 from camctl.devices.tasks import CaptureStorage
 from camctl.operations.models import AttemptTicket, EffectState, SettlementBasis
 from camctl.operations.process import LocalExit, RawToolOutcome
-from ..acceptance.test_acceptance import _accept, _plan_body, environment
+from ..acceptance.test_acceptance import _accept, _plan_body, _owned, environment
 from ..acceptance.test_adb_camera_definitions import _params
 from .adb_camera_fixtures import software_contract
 
@@ -138,6 +140,41 @@ def test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_
         assert not declaration.query_supported
     osmo = drivers_runtime.current_registry().entry(CameraModel.OSMO360II).declaration
     assert osmo.file_query_supported and osmo.delete_supported
+
+
+@pytest.mark.asyncio
+async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolated_registration, environment):
+    from camctl.bootstrap.lifecycle import _initialize_recovery
+
+    config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": CameraModel.OSMO360II,
+                           "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
+    registration.register_builtin_camera_drivers(config)
+    driver = drivers_runtime.current_registry().entry(CameraModel.OSMO360II).driver
+    commands = []
+
+    class Transport:
+        async def run(self, spec, stop):
+            command = shlex.split(spec.argv[5])[2]
+            commands.append(command)
+            output = b"service connected\n" if command.startswith("simulate_device ") else b"Resp message, len = 1, data:\n 00\n"
+            return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
+
+    driver.transport = Transport()
+    request = ControlRequest("start_recording", DeviceBinding("cam-1", CameraModel.OSMO360II),
+        _params(CameraModel.OSMO360II, "camera_record"),
+        AttemptTicket(1, "control", "7", "start/7", 9), Decimal("10"), lambda: None)
+    assert (await driver.control(request)).error is None
+    before = len(commands)
+    registration.register_builtin_camera_drivers(config)
+    build_catalog(config, definitions_runtime.current_driver_definitions()).describe_document()
+    assert len(commands) == before
+    assert (await driver.control(request)).error is None
+    fixed = ("simulate_device -n DualGuiCmd 12", "simulate_device -s 0xa13cdabe 3",
+             "simulate_device -s BaseFormat 6 69 0")
+    assert all(commands.count(command) == 1 for command in fixed)
+    _initialize_recovery(SimpleNamespace(work_files=None), _owned(environment))
+    assert (await driver.control(request)).error is None
+    assert all(commands.count(command) == 2 for command in fixed)
     action6 = drivers_runtime.current_registry().entry(CameraModel.ACTION6).declaration
     assert not action6.file_query_supported and not action6.delete_supported
 

@@ -112,6 +112,11 @@ OSMO_BITRATE = {
     "standard": BitrateSetting(120, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "1")),
     "high": BitrateSetting(170, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2")),
 }
+OSMO_SESSION_SETUP = (
+    ("simulate_device", "-n", "DualGuiCmd", "12"),
+    ("simulate_device", "-s", "0xa13cdabe", "3"),
+)
+OSMO_RECORD_FORMAT = ("simulate_device", "-s", "BaseFormat", "6", "69", "0")
 
 
 _ACTION6_SHUTTER = FixedSettingRequest(
@@ -137,7 +142,7 @@ _OSMO_RECORD_VIDEO = FixedSettingRequest(
     "video_mode",
     VideoModeFacts(True, "8K", 30, "D-Log M"),
     (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "38"),
-     ("simulate_device", "-s", "BaseFormat", "6", "69", "0")),
+     OSMO_RECORD_FORMAT),
 )
 _OSMO_TIMELAPSE_VIDEO = FixedSettingRequest(
     "video_mode",

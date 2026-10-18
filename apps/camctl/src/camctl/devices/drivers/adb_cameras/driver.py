@@ -35,6 +35,11 @@ class AdbCameraDriver:
         self.transport = transport
         self.terminate_grace_s = terminate_grace_s
         self.monotonic_ns = monotonic_ns
+        self._configured_settings = set()
+
+    def begin_session(self):
+        """新执行会话只清空内存记录，相机设置仍在拍摄准备时按需执行。"""
+        self._configured_settings.clear()
 
     def _serial(self, binding):
         result = check_binding(binding, SimpleNamespace(devices=self.devices))
@@ -92,10 +97,15 @@ class AdbCameraDriver:
             raise ValueError("没有该相机启动操作")
         began_ns = self.monotonic_ns()
         settings = settings_from_effective_params(self.contract.driver_id, action_type, request.params)
-        commands = (*((CameraCall.SETTING, command) for command in settings),
+        commands = (*((CameraCall.SETTING, command)
+                      for command in (*self.contract.session_setup_commands, *settings)),
                     (CameraCall.START, start_for(self.contract.driver_id, action_type)))
         previous = None
         for kind, command in commands:
+            session_key = (request.binding, serial, command)
+            once = kind is CameraCall.SETTING and command in self.contract.session_once_commands
+            if once and session_key in self._configured_settings:
+                continue
             argv = shell_argv(serial, shlex.join(command))
             reason = request.dispatch_check()
             if reason is not None:
@@ -113,6 +123,8 @@ class AdbCameraDriver:
                     error=outcome.error or ErrorValue("camera_settings_unconfirmed", "device_settings"))
                 validate_outcome(request.ticket, failed, self.contract.evidence)
                 return DeviceCallResult.from_outcome(failed)
+            if once:
+                self._configured_settings.add(session_key)
             scope = current_call_scope()
             if scope is not None and scope.interrupted is not None:
                 # 当前设置实际已返回，但原等待取消后不派发下一设置或 START。

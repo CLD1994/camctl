@@ -8,7 +8,7 @@ from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry, RESULT_PAGE_CONTRACT
 from camctl.devices.tasks import (CancelCompletionPolicy, CaptureTask, CompletionMode, EndControl, StartReturn)
 from .action6_record import _digest_timeout
-from .commands import CameraModel
+from .commands import CameraModel, OSMO_RECORD_FORMAT, OSMO_SESSION_SETUP
 from .contracts import STARTUP_MARGIN_MS, CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .file_commands import FILE_COMMAND_EVIDENCE, file_command_factory
@@ -37,6 +37,7 @@ class _Osmo360IIContract(CameraContract):
         return tuple(replace(cap, preview_supported=True,
             description=cap.description.replace("参数合法不表示已有完整命令映射；", "")
                 + "OSV 为原始视频，LRF 为可选配对预览。"
+                + "相机在本会话首次拍摄准备时跳过时间设置并选择仅充电；固定设置按需执行，码率按每个动作动态设置。"
                 + ("完成判断采用正常设备运行与停止确认后固定 30 秒文件等待假设。"
                 "普通取回优先交付已登记的修复 MP4，原 OSV 可用明确产物 ID 取回；"
                 "修复保留双路视频及音频内容，不声明厂商原生编辑兼容。"
@@ -83,5 +84,7 @@ def osmo360ii_contract():
             **{kind: file_command_factory(kind, tools=tools, evidence=evidence)
                for kind in (CameraCall.FILE_QUERY, CameraCall.DELETE)}},
         file_tools=tools, digest_timeout_s=_digest_timeout, evidence=evidence,
+        session_setup_commands=OSMO_SESSION_SETUP,
+        session_once_commands=frozenset((*OSMO_SESSION_SETUP, OSMO_RECORD_FORMAT)),
         result_reader=list_osmo360ii_results,
         recovery_operations=frozenset({"control", "stop", "result", "read", "query", "delete"}))

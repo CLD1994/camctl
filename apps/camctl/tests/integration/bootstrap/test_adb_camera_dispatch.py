@@ -197,6 +197,9 @@ async def test_restart_dispatch_keeps_first_format_after_current_domain_narrows(
     driver_id = model.value
     params = {"type": "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse",
               "interval_s": interval, "duration_s": 300, "outputs": "video", "exposure": {"mode": "auto"}}
+    if model is CameraModel.OSMO360II:
+        del params["outputs"]
+        params["bitrate"] = "high"
     body = _plan_body()
     body["actions"][0].update(type="camera_timelapse", params=params)
     accepted_catalog = (_legacy_timelapse_catalog(driver_id, interval, 300)

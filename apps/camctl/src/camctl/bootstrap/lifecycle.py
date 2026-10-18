@@ -598,6 +598,9 @@ def _open_runtime_connection(deps: RuntimeDeps) -> OwnedConnection:
 def _initialize_recovery(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     """在会话锁内固定旧历史边界，业务事务不得提前发生。"""
     from contextlib import closing
+    from camctl.devices.drivers.adb_cameras.registration import begin_builtin_camera_session
+
+    begin_builtin_camera_session()
 
     with closing(owned.connection.execute(
             "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:

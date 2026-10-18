@@ -12,7 +12,7 @@ from camctl.devices.evidence import EvidenceError, EvidenceRegistry
 from camctl.devices.ports import ControlRequest, DriverDeclaration, DeviceCallResult
 from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
 from camctl.devices.task_metadata import cancellation_description
-from .commands import CameraModel
+from .commands import CameraModel, Command
 from .definitions import candidate_capabilities
 from .filesystem import ShellFileTools
 
@@ -45,6 +45,8 @@ class CameraContract:
     capture_read_parallel_supported: bool = False
     recovery_operations: frozenset[str] = frozenset()
     result_reader: Callable[[Any, ControlRequest, int], Awaitable[DeviceCallResult]] | None = None
+    session_setup_commands: tuple[Command, ...] = ()
+    session_once_commands: frozenset[Command] = frozenset()
 
     @staticmethod
     def source_storage_resolver(_declaration: Mapping[str, object]) -> CaptureStorage:
@@ -52,6 +54,8 @@ class CameraContract:
         return CaptureStorage.DEVICE
 
     def __post_init__(self):
+        if not set(self.session_setup_commands) <= self.session_once_commands:
+            raise ValueError("会话首次准备命令必须同时声明为会话内固定设置")
         object.__setattr__(self, "task_factories", MappingProxyType(dict(self.task_factories)))
         object.__setattr__(self, "commands", MappingProxyType(dict(self.commands)))
 
