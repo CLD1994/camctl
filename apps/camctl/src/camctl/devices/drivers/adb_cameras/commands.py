@@ -42,6 +42,12 @@ _DIAG = ("-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c")
 
 
 @dataclass(frozen=True)
+class BitrateSetting:
+    nominal_mbps: int
+    command: Command
+
+
+@dataclass(frozen=True)
 class VideoModeFacts:
     panoramic: bool
     resolution: str
@@ -102,6 +108,10 @@ ACTION_BITRATE = {"standard": ("simulate_device", "-s", "bitrate", "1"),
                   "high": ("simulate_device", "-s", "bitrate", "2")}
 OSMO_ISO = {TIMELAPSE_MANUAL_ISO: _cmd("2A", "06", test=True, reply=True)}
 OSMO_EV = {0: _cmd("2e", "10")}
+OSMO_BITRATE = {
+    "standard": BitrateSetting(120, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "1")),
+    "high": BitrateSetting(170, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2")),
+}
 
 
 _ACTION6_SHUTTER = FixedSettingRequest(
@@ -129,8 +139,6 @@ _OSMO_RECORD_VIDEO = FixedSettingRequest(
     (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "38"),
      ("simulate_device", "-s", "BaseFormat", "6", "69", "0")),
 )
-_OSMO_RECORD_HIGH_BITRATE = FixedSettingRequest(
-    "bitrate", "high", (("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2"),))
 _OSMO_TIMELAPSE_VIDEO = FixedSettingRequest(
     "video_mode",
     VideoModeFacts(True, "8K", 30),
@@ -165,12 +173,12 @@ FIXED_SETTING_PLANS: dict[tuple[CameraModel, str], TaskSettingPlan] = {
     (CameraModel.OSMO360II, "camera_record"): TaskSettingPlan(
         (_OSMO_RECORD_VIDEO,),
         {
-            "manual": (_OSMO_MANUAL_MODE, ParameterSettingRequest("iso", OSMO_ISO),
+            "manual": (_OSMO_MANUAL_MODE, _OSMO_TIMELAPSE_ISO,
                        _OSMO_SHUTTER, _OSMO_WHITE_BALANCE),
             "auto": (_OSMO_RECORD_AUTO_MODE, _OSMO_WHITE_BALANCE,
-                     ParameterSettingRequest("compensation_ev", OSMO_EV)),
+                     FixedSettingRequest("compensation_ev", 0, (OSMO_EV[0],))),
         },
-        (CommandRequest((_cmd("42", "3d"),)), _OSMO_RECORD_HIGH_BITRATE),
+        (CommandRequest((_cmd("42", "3d"),)),),
     ),
     (CameraModel.OSMO360II, "camera_timelapse"): TaskSettingPlan(
         (_OSMO_TIMELAPSE_VIDEO,),
@@ -286,9 +294,9 @@ def _action_manual(iso) -> tuple[Command, ...]:
     return _commands_for_steps(plan.exposure["manual"], {"iso": iso})
 
 
-def _osmo_manual(iso) -> tuple[Command, ...]:
+def _osmo_manual() -> tuple[Command, ...]:
     plan = fixed_setting_plan_for(CameraModel.OSMO360II, "camera_record")
-    return _commands_for_steps(plan.exposure["manual"], {"iso": iso})
+    return _commands_for_steps(plan.exposure["manual"], {})
 
 
 def settings_for(driver_id: str, action_type: str, params: Mapping[str, JsonValue]) -> tuple[Command, ...]:
@@ -392,17 +400,18 @@ def _timelapse_command_for(model: CameraModel, params: Mapping[str, JsonValue]) 
     """优先返回原完整字面量，否则按固定第一版格式替换四个时间字节。"""
     presets = TIMELAPSE_PRESETS[model]
     exposure_mode = params["exposure"]["mode"]
+    outputs = OutputSelection.VIDEO if model is CameraModel.OSMO360II else params["outputs"]
     exact = next((preset for preset in presets
                   if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
                   == (params["interval_s"], params["duration_s"],
-                      params["outputs"], exposure_mode)), None)
+                      outputs, exposure_mode)), None)
     if exact is not None:
         _validated_timelapse_template(model, exact)
         return exact.command
 
     interval = params["interval_s"]
     duration = params["duration_s"]
-    template = _candidate_template_for(model, params["outputs"], exposure_mode)
+    template = _candidate_template_for(model, outputs, exposure_mode)
     payload = _validated_timelapse_template(model, template)
     interval_units = _exact_scaled_uint16(params["interval_s"], 10, "延时间隔")
     duration_units = _exact_scaled_uint16(params["duration_s"], 1, "采集时长")
@@ -417,8 +426,12 @@ def _check_effective_structure(model, action_type, params):
     prefix = "action6" if model is CameraModel.ACTION6 else "osmo360ii"
     required = {"type", "duration_s", "exposure"}
     optional = set()
+    if model is CameraModel.OSMO360II:
+        required.add("bitrate")
     if action_type == "camera_timelapse":
-        required.update(("interval_s", "outputs"))
+        required.add("interval_s")
+        if model is CameraModel.ACTION6:
+            required.add("outputs")
     elif model is CameraModel.ACTION6:
         required.update(("resolution", "fov", "stabilization"))
         optional.update(("aperture", "bitrate"))
@@ -438,15 +451,19 @@ def _check_effective_structure(model, action_type, params):
     exposure = params["exposure"]
     if not isinstance(exposure, Mapping):
         raise ValueError("原曝光必须为对象")
-    manual = (set(exposure) == {"mode", "iso"} and exposure["mode"] == "manual"
-              and is_json_integer(exposure["iso"]))
-    auto = (set(exposure) == {"mode"} and exposure["mode"] == "auto"
-            if action_type == "camera_timelapse" else
-            set(exposure) == {"mode", "compensation_ev"} and exposure["mode"] == "auto"
-            and _exact_number(exposure["compensation_ev"]))
+    if model is CameraModel.OSMO360II:
+        manual = set(exposure) == {"mode"} and exposure["mode"] == "manual"
+        auto = set(exposure) == {"mode"} and exposure["mode"] == "auto"
+    else:
+        manual = (set(exposure) == {"mode", "iso"} and exposure["mode"] == "manual"
+                  and is_json_integer(exposure["iso"]))
+        auto = (set(exposure) == {"mode"} and exposure["mode"] == "auto"
+                if action_type == "camera_timelapse" else
+                set(exposure) == {"mode", "compensation_ev"} and exposure["mode"] == "auto"
+                and _exact_number(exposure["compensation_ev"]))
     if not (manual or auto):
         raise ValueError("原曝光结构没有对应的完整编码")
-    if action_type == "camera_timelapse" and manual:
+    if model is CameraModel.ACTION6 and action_type == "camera_timelapse" and manual:
         fixed_iso = fixed_setting_value(model, action_type, "manual", "iso")
         if exposure["iso"] != fixed_iso:
             raise ValueError("原延时手动曝光没有对应的完整编码")
@@ -471,13 +488,14 @@ def _encode_settings(model, action_type, params):
                     ACTION_FOV[params["fov"]], ACTION_STABILIZATION[params["stabilization"]],
                     *aperture_settings, *bitrate_settings)
         if exposure["mode"] == "manual":
-            exposure_settings = _osmo_manual(exposure["iso"])
+            exposure_settings = _osmo_manual()
         else:
             exposure_settings = _commands_for_steps(
                 plan.exposure["auto"], exposure)
         return (*_commands_for_steps(plan.before_exposure, {}),
                 *exposure_settings,
-                *_commands_for_steps(plan.after_exposure, {}))
+                *_commands_for_steps(plan.after_exposure, {}),
+                OSMO_BITRATE[params["bitrate"]].command)
     timelapse_command = _timelapse_command_for(model, params)
     exposure_settings = _commands_for_steps(
         plan.exposure[exposure["mode"]], exposure)
@@ -485,4 +503,4 @@ def _encode_settings(model, action_type, params):
         return (_cmd("e1", "02", test=True), ACTION_RESOLUTIONS["4k30"],
                 timelapse_command, *exposure_settings)
     return (*_commands_for_steps(plan.before_exposure, {}),
-            *exposure_settings, timelapse_command)
+            *exposure_settings, timelapse_command, OSMO_BITRATE[params["bitrate"]].command)

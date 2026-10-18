@@ -72,15 +72,17 @@ def _legacy_timelapse_catalog(driver, interval_s, duration_s):
 
 def _params(driver, action_type):
     if action_type == "camera_timelapse":
-        return {"type": "action6_timelapse" if driver == "dji-action6" else "osmo360ii_timelapse",
-                "interval_s": 8 if driver == "dji-action6" else 30,
-                "duration_s": 1800 if driver == "dji-action6" else 600,
-                "outputs": "video", "exposure": {"mode": "auto"} if driver == "dji-action6" else {"mode": "manual", "iso": 800}}
+        if driver == "dji-osmo360-ii":
+            return {"type": "osmo360ii_timelapse", "interval_s": 30, "duration_s": 600,
+                    "bitrate": "high", "exposure": {"mode": "manual"}}
+        return {"type": "action6_timelapse", "interval_s": 8, "duration_s": 1800,
+                "outputs": "video", "exposure": {"mode": "auto"}}
     if driver == "dji-action6":
         return {"type": "action6_record", "duration_s": 10, "resolution": "8k30", "fov": "wide",
                 "stabilization": "off", "aperture": "f2.8", "bitrate": "high",
                 "exposure": {"mode": "manual", "iso": 800}}
-    return {"type": "osmo360ii_record", "duration_s": 10, "exposure": {"mode": "auto", "compensation_ev": 0}}
+    return {"type": "osmo360ii_record", "duration_s": 10,
+            "bitrate": "high", "exposure": {"mode": "auto"}}
 
 
 @pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])

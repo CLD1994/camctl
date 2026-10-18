@@ -66,6 +66,7 @@ OSMO_MANUAL_D1_SCRIPTS = (
     "dji_mb_ctrl -r -S test -R diag -g 1 -t 0 -s 2 -c 28 013c8000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 2c 0634000000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04070014002c01000000000000000001",
+    "simulate_device -s DeviceRecordRecSettingBitRate 2",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
 )
 OSMO_AUTO_D1_SCRIPTS = (
@@ -75,6 +76,7 @@ OSMO_AUTO_D1_SCRIPTS = (
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 8e 010100000100",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 1e 0000",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 6c 04000014002c01000000000000000000",
+    "simulate_device -s DeviceRecordRecSettingBitRate 2",
     "dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 01",
 )
 TIMELAPSE_D1_CASES = (
@@ -120,7 +122,7 @@ def _params(model):
                 "stabilization": "off", "aperture": "f2.8", "bitrate": "high",
                 "exposure": {"mode": "auto", "compensation_ev": 0}}
     return {"type": "osmo360ii_record", "duration_s": 10,
-            "exposure": {"mode": "auto", "compensation_ev": 0}}
+            "bitrate": "high", "exposure": {"mode": "auto"}}
 
 
 def _request(model=CameraModel.ACTION6, *, check=lambda: None, device_id="cam-1"):
@@ -139,10 +141,14 @@ def _candidate_timelapse_request(model, exposure, outputs, *, interval_s=None, d
     parameter_type = "action6_timelapse" if model is CameraModel.ACTION6 else "osmo360ii_timelapse"
     if interval_s is None:
         interval_s = 1 if model is CameraModel.ACTION6 else 2
-    return replace(_request(model, check=check), operation="start_timelapse", params={
+    selected = {
         "type": parameter_type, "interval_s": interval_s, "duration_s": duration_s,
         "outputs": outputs, "exposure": exposure,
-    })
+    }
+    if model is CameraModel.OSMO360II:
+        del selected["outputs"]
+        selected.update(bitrate="high", exposure={"mode": exposure["mode"]})
+    return replace(_request(model, check=check), operation="start_timelapse", params=selected)
 
 
 def _narrow_time_domain(monkeypatch, field, excluded, model):

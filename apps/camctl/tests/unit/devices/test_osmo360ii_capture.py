@@ -43,7 +43,7 @@ def test_formal_osmo_tasks_explain_requests_readback_estimate_and_actual_cancel_
     record_task = record.task_factory({"type": "osmo360ii_record", "duration_s": 10})
     assert record_task.stop_supported is True
     assert record_task.cancel_completion_policy is None
-    for fact in ("全景", "8K", "30 fps", "D-Log M", "高码率", "请求", "Manual", "ISO 800",
+    for fact in ("全景", "8K", "30 fps", "D-Log M", "码率档位必填", "请求", "Manual", "ISO 800",
                  "1/60 秒", "5200 K", "Auto", "EV 0", "独立读回", "固定假定参考码率 170 Mbps",
                  "不是实测平均值", "启动后", "取消"):
         assert fact in record.description
@@ -88,7 +88,7 @@ def test_formal_timelapse_accepts_all_osmo_time_combinations():
         for interval in timelapse_intervals_s("dji-osmo360-ii"):
             if interval < duration:
                 params = {"type": "osmo360ii_timelapse", "duration_s": duration,
-                    "interval_s": interval, "outputs": "video", "exposure": {"mode": "auto"}}
+                    "interval_s": interval, "bitrate": "high", "exposure": {"mode": "auto"}}
                 validate_precise(cap.schema, params)
                 assert cap.task_factory(params).target_duration_s == duration
                 count += 1
@@ -119,10 +119,9 @@ def _driver(transport):
 
 def _request(action="record", mode="manual", dispatch_check=lambda: None):
     params = {"type": "osmo360ii_" + action, "duration_s": 300,
-        "exposure": {"mode": mode, **({"iso": 800} if mode == "manual" else
-            {"compensation_ev": 0} if action == "record" else {})}}
+        "bitrate": "high", "exposure": {"mode": mode}}
     if action == "timelapse":
-        params.update(interval_s=1, outputs="video")
+        params.update(interval_s=2)
     return ControlRequest("start_recording" if action == "record" else "start_timelapse",
         DeviceBinding("camera", "dji-osmo360-ii"), params,
         AttemptTicket(1, "control", "7", "start/7", 9), Decimal("10"), dispatch_check)
@@ -132,8 +131,8 @@ def _request(action="record", mode="manual", dispatch_check=lambda: None):
 @pytest.mark.parametrize("action,mode,count,observation,start", [
     ("record", "manual", 11, "start_confirmed", ["02", "01"]),
     ("record", "auto", 10, "start_confirmed", ["02", "01"]),
-    ("timelapse", "manual", 10, "timelapse_sent", ["01", "01"]),
-    ("timelapse", "auto", 7, "timelapse_sent", ["01", "01"]),
+    ("timelapse", "manual", 11, "timelapse_sent", ["01", "01"]),
+    ("timelapse", "auto", 8, "timelapse_sent", ["01", "01"]),
 ])
 async def test_real_driver_contract_dispatches_settings_and_one_scoped_start(action, mode, count, observation, start):
     transport = Transport()
@@ -149,7 +148,7 @@ async def test_real_driver_contract_dispatches_settings_and_one_scoped_start(act
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action,fail_at", [("record", index) for index in range(1, 11)]
-    + [("timelapse", index) for index in range(1, 7)])
+    + [("timelapse", index) for index in range(1, 8)])
 async def test_each_failed_setting_prevents_every_later_setting_and_start(action, fail_at):
     transport = Transport(fail_at)
     result = await _driver(transport).control(_request(action, "manual" if action == "record" else "auto"))
@@ -161,7 +160,7 @@ async def test_each_failed_setting_prevents_every_later_setting_and_start(action
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action,cancel_after", [("record", 0), ("record", 1), ("record", 10),
-    ("timelapse", 0), ("timelapse", 1), ("timelapse", 6)])
+    ("timelapse", 0), ("timelapse", 1), ("timelapse", 7)])
 async def test_dispatch_cancellation_prevents_subsequent_start(action, cancel_after):
     transport = Transport()
     check = lambda: "canceled" if len(transport.commands) >= cancel_after else None

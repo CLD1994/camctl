@@ -176,7 +176,7 @@ def test_action_auto_does_not_force_manual_exposure(ev, suffix):
     )),
 ])
 def test_osmo_record_setting_requests_keep_independent_bytes_and_order(exposure, exposure_commands):
-    params = {**recording_params("dji-osmo360-ii"), "exposure": exposure}
+    params = {**recording_params("dji-osmo360-ii"), "exposure": {"mode": exposure["mode"]}}
     settings = commands.settings_for("dji-osmo360-ii", "camera_record", params)
     expected = (
         ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "0x8e", "01013f000101"),
@@ -255,8 +255,7 @@ def test_fixed_request_fact_and_command_are_consumed_from_the_same_task_declarat
     ("dji-osmo360-ii", 8, 1800, "video", {"mode": "auto"}, "04000050000807000000000000000000"),
 ])
 def test_timelapse_preserves_given_payloads_and_rejects_legacy_new_requests(driver, interval, duration, outputs, exposure, payload):
-    params = {"type": "action6_timelapse" if driver == "dji-action6" else "osmo360ii_timelapse",
-              "interval_s": interval, "duration_s": duration, "outputs": outputs, "exposure": exposure}
+    params = _candidate_params(driver, outputs, exposure["mode"], interval, duration)
     if duration in (5400, 6000):
         with pytest.raises(BodySchemaError):
             commands.settings_for(driver, "camera_timelapse", params)
@@ -264,7 +263,7 @@ def test_timelapse_preserves_given_payloads_and_rejects_legacy_new_requests(driv
         assert [command[-2:] for command in settings if command[-2] == "6c"] == [("6c", payload)]
         return
     settings = commands.settings_for(driver, "camera_timelapse", params)
-    preset_position = 2 if driver == "dji-action6" else -1
+    preset_position = 2 if driver == "dji-action6" else -2
     assert settings[preset_position] == ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "6c", payload)
     if driver == "dji-osmo360-ii" and exposure["mode"] == "auto":
         assert ("8e", "010100000100") in [cmd[-2:] for cmd in settings]
@@ -324,6 +323,9 @@ def _candidate_params(driver, outputs, exposure_mode, interval_s, duration_s):
     parameter_type = "action6_timelapse" if driver == "dji-action6" else "osmo360ii_timelapse"
     exposure = ({"mode": "manual", "iso": 800} if exposure_mode == "manual"
                 else {"mode": "auto"})
+    if driver == "dji-osmo360-ii":
+        return {"type": parameter_type, "interval_s": interval_s, "duration_s": duration_s,
+                "bitrate": "high", "exposure": {"mode": exposure_mode}}
     return {"type": parameter_type, "interval_s": interval_s, "duration_s": duration_s,
             "outputs": outputs, "exposure": exposure}
 

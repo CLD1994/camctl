@@ -9,7 +9,7 @@ from camctl.contracts.values import MAX_OBJECT_ID
 from camctl.devices.catalog import ActionCapability
 from .commands import (ACTION_APERTURE, ACTION_BITRATE, ACTION_EV, ACTION_FOV,
                        ACTION_ISO, ACTION_RESOLUTIONS, ACTION_STABILIZATION,
-                       OSMO_EV, OSMO_ISO, CameraModel, FixedSettingRequest,
+                       OSMO_BITRATE, CameraModel, FixedSettingRequest,
                        ParameterSettingRequest, VideoModeFacts, OutputSelection,
                        fixed_setting_plan_for, fixed_setting_value)
 from .timelapse_parameters import (time_conditions, time_properties,
@@ -178,6 +178,21 @@ def _exposure(iso, ev, plan):
         "description": "选择手动或自动曝光并填写对应请求值；各分支固定设置见分支说明。固定设置是命令请求，不代表设备独立读回。"}
 
 
+def _osmo_bitrate_field():
+    choices = "；".join(f"{name} 为标称 {setting.nominal_mbps} Mbps"
+                       for name, setting in OSMO_BITRATE.items())
+    return _field({"type": "string", "enum": list(OSMO_BITRATE)}, "码率档位",
+                  f"必填；{choices}。每个拍摄动作开始前动态设置；标称值不代表实测平均码率。")
+
+
+def _osmo_exposure(plan):
+    return {"oneOf": [
+        _object({"mode": _field({"const": mode}, "曝光模式",
+                                _schema_branch_description(mode, steps))})
+        for mode, steps in plan.exposure.items()
+    ], "title": "曝光设置", "description": "选择手动或自动曝光；固定请求值见分支说明。"}
+
+
 def _record_schema(model: CameraModel, parameter_type: str) -> dict:
     plan = fixed_setting_plan_for(model, "camera_record")
     properties = {"type": {"const": parameter_type},
@@ -197,7 +212,7 @@ def _record_schema(model: CameraModel, parameter_type: str) -> dict:
                                              "可选；填写时请求对应码率档位，省略时不发送码率设置并保留设备已有值。"),
                            "exposure": _exposure(ACTION_ISO, ACTION_EV, plan)})
     else:
-        properties["exposure"] = _exposure(OSMO_ISO, OSMO_EV, plan)
+        properties.update(bitrate=_osmo_bitrate_field(), exposure=_osmo_exposure(plan))
     required = list(properties)
     if model is CameraModel.ACTION6:
         required.remove("aperture")
@@ -207,9 +222,13 @@ def _record_schema(model: CameraModel, parameter_type: str) -> dict:
 
 def _timelapse_schema(model: CameraModel, parameter_type: str) -> dict:
     plan = fixed_setting_plan_for(model, "camera_timelapse")
+    if model is CameraModel.OSMO360II:
+        schema = _object({"type": {"const": parameter_type}, **time_properties(model.value),
+                          "bitrate": _osmo_bitrate_field(), "exposure": _osmo_exposure(plan)})
+        schema["allOf"] = time_conditions(model.value)
+        return schema
     manual_iso = fixed_setting_value(model, "camera_timelapse", "manual", "iso")
-    outputs = (list(OutputSelection) if model is CameraModel.ACTION6
-               else [OutputSelection.VIDEO])
+    outputs = list(OutputSelection)
     schema = _object({"type": {"const": parameter_type},
                       **time_properties(model.value),
                       "outputs": _field({"type": "string", "enum": outputs}, "输出类型",
@@ -250,11 +269,15 @@ def candidate_capabilities(driver_id: str) -> tuple[ActionCapability, ...]:
     )
     if model is CameraModel.ACTION6:
         record_description += "aperture 和 bitrate 均可选；显式提供时请求对应设置，省略时不发送该设置并保留设备已有值。"
+    else:
+        record_description += "码率档位必填，每个动作开始前动态设置。"
     record_description += _video_estimate_description(record_estimate)
     if model is CameraModel.ACTION6:
         record_description += "该固定估算适用于所列分辨率和码率档位，省略码率时也使用同一参考值。"
     timelapse_plan = fixed_setting_plan_for(model, "camera_timelapse")
     timelapse_description = _plan_description(timelapse_plan, "原生延时")
+    if model is CameraModel.OSMO360II:
+        timelapse_description += "固定输出视频；码率档位必填，每个动作开始前动态设置。"
     if model is CameraModel.ACTION6:
         timelapse_description += (
             f"间隔从该型号允许值中选择，最短为 {timelapse_intervals_s(model.value)[0]} 秒；"

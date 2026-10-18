@@ -21,7 +21,7 @@ def recording_params(driver="dji-action6"):
                 "aperture": "f2.8", "bitrate": "high",
                 "exposure": {"mode": "manual", "iso": 800}}
     return {"type": "osmo360ii_record", "duration_s": 10,
-            "exposure": {"mode": "manual", "iso": 800}}
+            "bitrate": "high", "exposure": {"mode": "manual"}}
 
 
 def capability(driver, action_type):
@@ -241,7 +241,7 @@ def test_action_auto_compensation_candidates(ev):
 
 
 @pytest.mark.parametrize("field, value", [("fov", "wide"), ("aperture", "f2.8"),
-    ("stabilization", "off"), ("bitrate", "high"), ("shutter", "1/60"), ("white_balance_k", 5200)])
+    ("stabilization", "off"), ("shutter", "1/60"), ("white_balance_k", 5200)])
 def test_osmo_record_rejects_unopened_settings(field, value):
     with pytest.raises(BodySchemaError):
         validate_precise(capability("dji-osmo360-ii", "camera_record").schema,
@@ -265,8 +265,11 @@ def test_osmo_record_rejects_unopened_settings(field, value):
 def test_timelapse_time_rules_are_independent_of_exposure_and_outputs(driver, interval, duration, outputs, exposure):
     cap = capability(driver, "camera_timelapse")
     validate_parameter_schema(cap.parameter_type, cap.schema)
-    validate_precise(cap.schema, {"type": cap.parameter_type, "interval_s": interval,
-        "duration_s": duration, "outputs": outputs, "exposure": exposure})
+    selected = timelapse_params(driver, interval_s=interval, duration_s=duration)
+    selected["exposure"] = exposure if driver == "dji-action6" else {"mode": exposure["mode"]}
+    if driver == "dji-action6":
+        selected["outputs"] = outputs
+    validate_precise(cap.schema, selected)
     assert cap.task_factory is None  # 正常结束及返回契约尚未取得。
 
 
@@ -281,15 +284,21 @@ def test_timelapse_time_rules_are_independent_of_exposure_and_outputs(driver, in
 ])
 def test_timelapse_rejects_invalid_duration_exposure_or_model_output(driver, interval, duration, outputs, exposure):
     cap = capability(driver, "camera_timelapse")
+    selected = timelapse_params(driver, interval_s=interval, duration_s=duration,
+                               exposure=exposure if driver == "dji-action6" else {"mode": exposure["mode"]})
+    if driver == "dji-action6" or outputs != "video":
+        selected["outputs"] = outputs
     with pytest.raises(BodySchemaError):
-        validate_precise(cap.schema, {"type": cap.parameter_type, "interval_s": interval,
-            "duration_s": duration, "outputs": outputs, "exposure": exposure})
+        validate_precise(cap.schema, selected)
 
 
 def timelapse_params(driver, **changes):
     cap = capability(driver, "camera_timelapse")
-    return {"type": cap.parameter_type, "interval_s": timelapse_intervals_s(driver)[0],
-            "duration_s": 300, "outputs": "video", "exposure": {"mode": "auto"}, **changes}
+    selected = {"type": cap.parameter_type, "interval_s": timelapse_intervals_s(driver)[0],
+                "duration_s": 300, "exposure": {"mode": "auto"}}
+    selected.update({"outputs": "video"} if driver == "dji-action6" else {"bitrate": "high"})
+    selected.update(changes)
+    return selected
 
 
 @pytest.mark.parametrize("driver, interval, duration, accepted", [
@@ -376,8 +385,10 @@ def test_timelapse_all_authoritative_time_pairs_follow_strict_mathematical_order
     assert cap.task_factory is None
 
 
-@pytest.mark.parametrize("driver", ["dji-action6", "dji-osmo360-ii"])
-@pytest.mark.parametrize("field", ["type", "interval_s", "duration_s", "outputs", "exposure"])
+@pytest.mark.parametrize("driver, field", [
+    *(("dji-action6", field) for field in ("type", "interval_s", "duration_s", "outputs", "exposure")),
+    *(("dji-osmo360-ii", field) for field in ("type", "interval_s", "duration_s", "bitrate", "exposure")),
+])
 def test_timelapse_requires_every_parameter_without_defaults(driver, field):
     params = timelapse_params(driver)
     del params[field]
@@ -394,7 +405,7 @@ def test_timelapse_requires_every_parameter_without_defaults(driver, field):
     ("duration_s", Decimal("300.00000000000000001")),
     ("exposure", {"mode": "auto", "compensation_ev": 0}),
     ("exposure", {"mode": "auto", "iso": 800}),
-    ("exposure", {"mode": "manual"}),
+    ("exposure", {"mode": "unsupported"}),
     ("exposure", {"mode": "manual", "iso": True}),
     ("exposure", {"mode": "manual", "iso": "800"}),
     ("exposure", {"mode": "manual", "iso": 800, "compensation_ev": 0}),
@@ -404,6 +415,12 @@ def test_timelapse_rejects_wrong_types_branch_mixing_and_extra_fields(driver, fi
     with pytest.raises(BodySchemaError):
         validate_precise(capability(driver, "camera_timelapse").schema,
                          timelapse_params(driver, **{field: value}))
+
+
+def test_action_timelapse_requires_its_manual_iso_parameter():
+    with pytest.raises(BodySchemaError):
+        validate_precise(capability("dji-action6", "camera_timelapse").schema,
+                         timelapse_params("dji-action6", exposure={"mode": "manual"}))
 
 
 @pytest.mark.parametrize("exposure", [{"mode": "auto"}, {"mode": "manual", "iso": 800}])
@@ -416,6 +433,8 @@ def test_timelapse_rejects_wrong_types_branch_mixing_and_extra_fields(driver, fi
     ("dji-osmo360-ii", "2e0", Decimal("2")),
 ])
 def test_timelapse_preserves_exact_equivalent_input_and_exposure(driver, exposure, interval_json, expected_interval):
+    if driver == "dji-osmo360-ii":
+        exposure = {"mode": exposure["mode"]}
     params = timelapse_params(driver, interval_s=parse_exact_json(interval_json), exposure=exposure)
     before = deepcopy(params)
     cap = capability(driver, "camera_timelapse")
