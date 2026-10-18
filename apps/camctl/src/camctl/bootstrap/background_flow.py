@@ -20,6 +20,11 @@ class BackgroundFlow:
         self._task: asyncio.Task | None = None
         self._stopping = False
 
+    @property
+    def unconsumed_task(self):
+        """只观察现有未交付任务；不改变任务或结果的所有权。"""
+        return self._task
+
     def _consume(self):
         task, self._task = self._task, None
         try:
@@ -100,8 +105,13 @@ class CombinedLocalWork:
         return sum(owner.required_settlements() for owner in self._owners)
 
     def stop_new_work(self):
+        failures = []
         for owner in self._owners:
-            owner.stop_new_work()
+            try:
+                owner.stop_new_work()
+            except BaseException as error:
+                failures.append(error)
+        self._raise_failures(tuple(failures))
 
     def check_completed(self):
         for owner in self._owners:

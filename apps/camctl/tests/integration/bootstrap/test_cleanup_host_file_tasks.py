@@ -10,6 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from .cleanup_helpers import finish_cleanup_round, cleanup_failure
+
+# 等待中断用例直接覆盖原单轮拥有范围，不取消已返回的调度调用。
+from camctl.bootstrap.cleanup_assembly import _CleanupRound
+
 from camctl.bootstrap.cleanup_assembly import (
     HostArtifacts, _LocalArtifactResultOwner, session_cleanup_assembly,
 )
@@ -210,7 +215,7 @@ async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
             max_query_attempts=cfg.cleanup.max_query_attempts,
             staging=Path(cfg.paths.staging), file_executor=work_files.executor,
         )
-        cleanup = asyncio.create_task(cleanup_flow(factory)(context))
+        cleanup = asyncio.create_task(_CleanupRound(factory)(context))
         await _wait_until(lambda: 900 in work_files.executor.unfinished_files())
         item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
         if business_cancel:
@@ -272,7 +277,7 @@ async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
             max_query_attempts=cfg.cleanup.max_query_attempts,
             staging=Path(cfg.paths.staging), file_executor=work_files.executor,
         )
-        await cleanup_flow(retry_factory)(context)
+        await finish_cleanup_round(cleanup_flow(retry_factory), context)
         observed = context.open_connection()
         try:
             attempts = observed.connection.execute(
@@ -350,7 +355,7 @@ async def test_queued_host_query_wait_cancellation_keeps_original_consumer(
     factory = _cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls,
         pending_queries=pending_queries, consumed_queries=consumed)
-    cleanup = asyncio.create_task(cleanup_flow(factory)(context))
+    cleanup = asyncio.create_task(_CleanupRound(factory)(context))
     try:
         await asyncio.wait_for(blocker_started.wait(), timeout=5)
         await _wait_until(lambda: 900 in work_files.executor.unfinished_files())
@@ -405,9 +410,9 @@ async def test_queued_host_query_wait_cancellation_keeps_original_consumer(
     assert work_files.executor.unfinished_files() == ()
 
     operations_before_resume = tuple(operations)
-    await cleanup_flow(_cleanup_factory(
+    await finish_cleanup_round(cleanup_flow(_cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls,
-        pending_queries=pending_queries, consumed_queries=consumed))(context)
+        pending_queries=pending_queries, consumed_queries=consumed)), context)
     assert tuple(operations) == operations_before_resume
     assert not pending_queries
     assert target.is_file()
@@ -450,7 +455,7 @@ async def test_started_host_delete_cancellation_saves_observation_and_error(
         return await drain_required()
 
     monkeypatch.setattr(work_files.executor, "drain_required", tracked_drain)
-    cleanup = asyncio.create_task(cleanup_flow(factory)(context))
+    cleanup = asyncio.create_task(_CleanupRound(factory)(context))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
         item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
@@ -540,7 +545,7 @@ async def test_supervisor_handoff_failure_keeps_original_handle_until_saved(
         return await drain()
 
     monkeypatch.setattr(work_files.executor, "drain_required", tracked_drain)
-    cleanup = asyncio.create_task(cleanup_flow(_cleanup_factory(
+    cleanup = asyncio.create_task(_CleanupRound(_cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls))(context))
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
@@ -626,7 +631,7 @@ async def test_finished_host_delete_cancellation_before_runner_delivery_keeps_ac
 
     monkeypatch.setattr(work_files.executor, "drain_required", track_drain)
     active_calls = set()
-    cleanup = asyncio.create_task(cleanup_flow(_cleanup_factory(
+    cleanup = asyncio.create_task(_CleanupRound(_cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls))(context))
     try:
         await asyncio.wait_for(runner_returned.wait(), timeout=5)
@@ -702,8 +707,8 @@ async def test_owner_failure_recovers_same_handle_and_saves_actual_before_error(
     pending_deletes = {}
     factory = _cleanup_factory(
         cfg, driver, work_files, pending_deletes=pending_deletes)
-    with pytest.raises(ConsistencyError, match="监督交接失败"):
-        await cleanup_flow(factory)(context)
+    with cleanup_failure(ConsistencyError, match="监督交接失败"):
+        await finish_cleanup_round(cleanup_flow(factory), context)
 
     item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     saved = saved_cleanup_delete(owned.connection, item_id)
@@ -721,8 +726,8 @@ async def test_owner_failure_recovers_same_handle_and_saves_actual_before_error(
     # 同一 pending 在新 factory 中完成成员交接，不重新提交文件任务。
     monkeypatch.setattr(work_files.executor, "_runner", runner)
     monkeypatch.setattr(_LocalArtifactResultOwner, "take_over", take_over)
-    await cleanup_flow(_cleanup_factory(
-        cfg, driver, work_files, pending_deletes=pending_deletes))(context)
+    await finish_cleanup_round(cleanup_flow(_cleanup_factory(
+        cfg, driver, work_files, pending_deletes=pending_deletes)), context)
     assert owned.connection.execute(
         "SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (4,)
     assert unlink_calls == [target]
@@ -765,7 +770,7 @@ async def test_canceled_owner_failure_saves_actual_and_chains_drain_error(
     monkeypatch.setattr(work_files.executor, "_runner", hold_delivery)
     monkeypatch.setattr(_LocalArtifactResultOwner, "take_over", fail_owner)
     pending_deletes = {}
-    cleanup = asyncio.create_task(cleanup_flow(_cleanup_factory(
+    cleanup = asyncio.create_task(_CleanupRound(_cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls,
         pending_deletes=pending_deletes))(context))
     try:
@@ -809,9 +814,9 @@ async def test_canceled_owner_failure_saves_actual_and_chains_drain_error(
     pending = pending_deletes[item_id]
     assert pending.supervision_diagnostic is not None
     assert pending.supervision_diagnostic_delivered
-    await cleanup_flow(_cleanup_factory(
+    await finish_cleanup_round(cleanup_flow(_cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls,
-        pending_deletes=pending_deletes))(context)
+        pending_deletes=pending_deletes)), context)
     assert owned.connection.execute(
         "SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (4,)
     assert not pending_deletes
@@ -862,8 +867,8 @@ async def test_host_delete_commit_unknown_recovers_same_save_without_task_replay
 
     monkeypatch.setattr(work_files.executor, "run_file_task", track_task)
     cleanup = cleanup_flow(factory)
-    with pytest.raises(ConsistencyError):
-        await cleanup(context)
+    with cleanup_failure(ConsistencyError):
+        await finish_cleanup_round(cleanup, context)
     item_id = owned.connection.execute(
         "SELECT id FROM cleanup_items WHERE output_id=?", (output_id,)).fetchone()[0]
     original_pending = pending_deletes[item_id]
@@ -878,7 +883,7 @@ async def test_host_delete_commit_unknown_recovers_same_save_without_task_replay
     assert active_calls == set()
 
     owned.connection.close()
-    await cleanup(context)
+    await finish_cleanup_round(cleanup, context)
     fresh = context.open_connection()
     try:
         saved = saved_cleanup_delete(fresh.connection, item_id)
@@ -959,7 +964,7 @@ async def test_started_host_query_cancellation_keeps_query_consumer_for_reentry(
     factory = _cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls,
         pending_queries=pending_queries, consumed_queries=consumed)
-    cleanup = asyncio.create_task(cleanup_flow(factory)(context))
+    cleanup = asyncio.create_task(_CleanupRound(factory)(context))
     drain_started = asyncio.Event()
     drain_required = work_files.executor.drain_required
 
@@ -1024,9 +1029,9 @@ async def test_started_host_query_cancellation_keeps_query_consumer_for_reentry(
     # 新工厂先接回已保存 consumer；这一步不得重新 stat 目标文件。
     before_resume_stats = len(stat_calls)
     operations_before_resume = tuple(host_operations)
-    await cleanup_flow(_cleanup_factory(
+    await finish_cleanup_round(cleanup_flow(_cleanup_factory(
         cfg, driver, work_files, active_calls=active_calls,
-        pending_queries=pending_queries, consumed_queries=consumed))(context)
+        pending_queries=pending_queries, consumed_queries=consumed)), context)
     assert len(stat_calls) == before_resume_stats
     assert tuple(host_operations) == operations_before_resume
     assert not pending_queries
@@ -1047,8 +1052,8 @@ async def test_fresh_host_target_path_error_stops_before_attempt_ticket(
 
     monkeypatch.setattr(host_paths, "resolve_file", invalid_target)
     factory = _cleanup_factory(cfg, driver, work_files)
-    with pytest.raises(ConsistencyError, match="FileRef 身份或路径不合法"):
-        await cleanup_flow(factory)(context)
+    with cleanup_failure(ConsistencyError, match="FileRef 身份或路径不合法"):
+        await finish_cleanup_round(cleanup_flow(factory), context)
 
     assert len(calls) == 1
     assert calls[0].file_id == 900
@@ -1086,7 +1091,7 @@ async def test_legal_ticket_target_recheck_records_real_not_dispatched(
         return await run_file_task(task, owner, **kwargs)
 
     monkeypatch.setattr(work_files.executor, "run_file_task", track_task)
-    await cleanup_flow(_cleanup_factory(cfg, driver, work_files))(context)
+    await finish_cleanup_round(cleanup_flow(_cleanup_factory(cfg, driver, work_files)), context)
 
     item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     saved = saved_cleanup_delete(owned.connection, item_id)
@@ -1115,8 +1120,8 @@ async def test_ticket_identity_error_is_not_rewritten_as_not_dispatched(
 
     monkeypatch.setattr(cleanup_flow_module, "_local_artifact_request", mismatched_ticket)
     factory = _cleanup_factory(cfg, driver, work_files)
-    with pytest.raises(ConsistencyError, match="ticket/member mismatch"):
-        await cleanup_flow(factory)(context)
+    with cleanup_failure(ConsistencyError, match="ticket/member mismatch"):
+        await finish_cleanup_round(cleanup_flow(factory), context)
 
     item_id, ticket, operation = calls[0]
     assert operation == "delete"
@@ -1181,7 +1186,7 @@ async def test_host_executor_admission_conflicts_preserve_original_owner(
                 await asyncio.gather(task_waiter, return_exceptions=True)
 
     monkeypatch.setattr(HostArtifacts, "_run", conflict_adapter)
-    cleanup = asyncio.create_task(cleanup_flow(_cleanup_factory(
+    cleanup = asyncio.create_task(_CleanupRound(_cleanup_factory(
         cfg, driver, work_files))(context))
     try:
         await asyncio.wait_for(conflict_seen.wait(), timeout=5)
@@ -1264,9 +1269,9 @@ async def test_cleanup_drain_preserves_failure_from_another_file_owner(
         return original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", count_unlink)
-    with pytest.raises(ConsistencyError, match="监督交接失败") as caught:
-        await cleanup_flow(_cleanup_factory(
-            cfg, driver, work_files, pending_deletes=pending_deletes))(context)
+    with cleanup_failure(ConsistencyError, match="监督交接失败") as caught:
+        await finish_cleanup_round(cleanup_flow(_cleanup_factory(
+            cfg, driver, work_files, pending_deletes=pending_deletes)), context)
 
     item_id = owned.connection.execute(
         "SELECT id FROM cleanup_items WHERE output_id=?", (output_id,)).fetchone()[0]
@@ -1344,7 +1349,7 @@ async def test_runner_failure_survives_cancellation_during_shared_drain(
     monkeypatch.setattr(cleanup_assembly_module, "_collect_file_result", observe_collect)
     monkeypatch.setattr(asyncio, "shield", observed_shield)
     pending_deletes = {}
-    cleanup = asyncio.create_task(cleanup_flow(_cleanup_factory(
+    cleanup = asyncio.create_task(_CleanupRound(_cleanup_factory(
         cfg, driver, work_files, pending_deletes=pending_deletes,
         active_calls=active_calls))(context))
     try:
@@ -1425,8 +1430,8 @@ async def test_delete_supervision_diagnostic_survives_unknown_finish(
     monkeypatch.setattr(work_files.executor, "run_file_task", track_file_task)
     cleanup = cleanup_flow(_cleanup_factory(
         cfg, driver, work_files, pending_deletes=pending_deletes))
-    with pytest.raises(ConsistencyError) as first:
-        await cleanup(context)
+    with cleanup_failure(ConsistencyError) as first:
+        await finish_cleanup_round(cleanup, context)
 
     item_id = owned.connection.execute(
         "SELECT id FROM cleanup_items WHERE output_id=?", (output_id,)).fetchone()[0]
@@ -1448,8 +1453,8 @@ async def test_delete_supervision_diagnostic_survives_unknown_finish(
 
     monkeypatch.setattr(work_files.executor, "_runner", original_runner)
     owned.connection.close()
-    with pytest.raises(ConsistencyError) as recovered:
-        await cleanup(context)
+    with cleanup_failure(ConsistencyError) as recovered:
+        await finish_cleanup_round(cleanup, context)
     assert "PROBE DELETE runner diagnosis survives UNKNOWN" in _exception_chain_text(
         recovered.value)
     assert pending.supervision_diagnostic_delivered, (
@@ -1461,7 +1466,7 @@ async def test_delete_supervision_diagnostic_survives_unknown_finish(
     assert pending.finish is original_pending_finish
     assert pending.occurred_at == original_occurred_at
 
-    await cleanup(context)
+    await finish_cleanup_round(cleanup, context)
     assert not pending_deletes
     assert [task.task_id.value for task in submitted].count(
         f"cleanup:{pending.database_id}:delete:{original_ticket.run_id}:"
@@ -1531,8 +1536,8 @@ async def test_query_supervision_diagnostic_survives_unknown_finish(
     monkeypatch.setattr(Path, "unlink", keep_target_present)
     cleanup = cleanup_flow(_cleanup_factory(
         cfg, driver, work_files, pending_queries=pending_queries))
-    with pytest.raises(ConsistencyError) as first:
-        await cleanup(context)
+    with cleanup_failure(ConsistencyError) as first:
+        await finish_cleanup_round(cleanup, context)
 
     assert len(pending_queries) == 1, (
         _exception_chain_text(first.value),
@@ -1560,8 +1565,8 @@ async def test_query_supervision_diagnostic_survives_unknown_finish(
 
     monkeypatch.setattr(work_files.executor, "_runner", original_runner)
     owned.connection.close()
-    with pytest.raises(ConsistencyError) as recovered:
-        await cleanup(context)
+    with cleanup_failure(ConsistencyError) as recovered:
+        await finish_cleanup_round(cleanup, context)
     assert "PROBE QUERY runner diagnosis survives UNKNOWN" in _exception_chain_text(
         recovered.value)
     assert pending.supervision_diagnostic_delivered, (
@@ -1573,7 +1578,7 @@ async def test_query_supervision_diagnostic_survives_unknown_finish(
     assert pending.finish is original_pending_finish
     assert pending.occurred_at == original_occurred_at
 
-    await cleanup(context)
+    await finish_cleanup_round(cleanup, context)
     assert len(finish_calls) >= 2
     assert finish_calls[0][0] is original_pending_finish
     assert finish_calls[1][0] is original_pending_finish
@@ -1618,9 +1623,9 @@ async def test_late_owner_callback_does_not_retain_handle_after_fallback(
         work_files.executor, "drain_required", drain_fails_before_owner_consumption)
     monkeypatch.setattr(Path, "unlink", count_unlink)
     pending_deletes = {}
-    with pytest.raises(ConsistencyError, match="监督交接失败"):
-        await cleanup_flow(_cleanup_factory(
-            cfg, driver, work_files, pending_deletes=pending_deletes))(context)
+    with cleanup_failure(ConsistencyError, match="监督交接失败"):
+        await finish_cleanup_round(cleanup_flow(_cleanup_factory(
+            cfg, driver, work_files, pending_deletes=pending_deletes)), context)
 
     owners = [owner for owner in work_files.file_supervisor._owners.values()
               if isinstance(owner, _LocalArtifactResultOwner)]

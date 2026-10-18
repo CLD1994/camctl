@@ -36,7 +36,7 @@ from camctl.persistence.repositories.scheduling import (
     SchedulingRepository,
     StartActionRequest,
 )
-from camctl.session.service import StateDbFailure
+from camctl.session.service import StateDbFailure, _RequiredPhaseWaiter
 from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 
@@ -144,15 +144,17 @@ class CaptureFlow:
 
     def stop_new_work(self):
         self._stopping = True
-        for owner in self._devices.values():
-            owner.stop_new_work()
+        CombinedLocalWork(tuple(self._devices.values())).stop_new_work()
 
     def check_completed(self):
         for device_id, owner in tuple(self._devices.items()):
             try:
                 owner.check_completed()
-            except BaseException:
-                self.stop_new_work()
+            except BaseException as error:
+                try:
+                    self.stop_new_work()
+                except BaseException as stop_error:
+                    _RequiredPhaseWaiter.attach_exception_notes(error, "拍摄停止入口失败", stop_error)
                 raise
             if owner.required_settlements() == 0:
                 del self._devices[device_id]
@@ -238,9 +240,11 @@ class CaptureFlow:
                     raise outcome
         except Exception as error:
             self._stopping = True
-            for other, owner in self._devices.items():
-                if other != device_id:
-                    owner.stop_new_work()
+            try:
+                CombinedLocalWork(tuple(owner for other, owner in self._devices.items()
+                                        if other != device_id)).stop_new_work()
+            except BaseException as stop_error:
+                _RequiredPhaseWaiter.attach_exception_notes(error, "拍摄停止入口失败", stop_error)
             if isinstance(error, (sqlite3.Error, ConsistencyError)):
                 raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
             raise

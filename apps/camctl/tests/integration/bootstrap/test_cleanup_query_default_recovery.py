@@ -18,6 +18,8 @@ from sqlite3 import ProgrammingError
 
 import pytest
 
+from .cleanup_helpers import finish_cleanup_round, cleanup_failure
+
 from camctl.bootstrap.cleanup_assembly import (
     HostArtifacts, cleanup_flow, session_cleanup_assembly,
 )
@@ -153,8 +155,8 @@ async def test_default_cleanup_query_recovers_original_result(
 
     monkeypatch.setattr(OperationRepository, "finish_attempt", save_query)
     flow = cleanup_flow(factory)
-    with pytest.raises(ConsistencyError):
-        await flow(context)
+    with cleanup_failure(ConsistencyError):
+        await finish_cleanup_round(flow, context)
 
     assert len(runtimes) == len(fault.calls) == len(fault.receipts) == 1
     _assert_closed(runtimes[0].owned)
@@ -190,7 +192,7 @@ async def test_default_cleanup_query_recovers_original_result(
         devices["cam-a"]["driver"] = "alternate-camera"
     clock.update(wall=_NOW + 5_000, mono=900)
     driver.reject_new_calls = True
-    await flow(context)
+    await finish_cleanup_round(flow, context)
 
     assert len(runtimes) == 2
     assert runtimes[0] is not runtimes[1]
@@ -293,8 +295,8 @@ async def test_default_round_settles_companion_after_member_result(
         drivers=_registry(driver), max_delete_attempts=3, max_query_attempts=3,
         staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
 
-    with pytest.raises(ConsistencyError):
-        await cleanup_flow(session_factory)(context)
+    with cleanup_failure(ConsistencyError):
+        await finish_cleanup_round(cleanup_flow(session_factory), context)
 
     assert fault.calls == 1 and fault.fault.commit_calls == 1
     member = _member_facts(owned, item_id)
@@ -305,7 +307,7 @@ async def test_default_round_settles_companion_after_member_result(
     calls_before = (len(driver.deletes), len(driver.queries))
     history_before = _history(owned.connection)
 
-    await cleanup_flow(session_factory)(context)
+    await finish_cleanup_round(cleanup_flow(session_factory), context)
 
     assert fault.calls == 2
     assert (len(driver.deletes), len(driver.queries)) == calls_before
@@ -337,8 +339,8 @@ async def test_default_round_diagnoses_companion_without_terminal_member(environ
             StaleRunFinish((f"exists/{item_id}",), RunOutcome.CANCELED, _NOW),
             new_operation_key())})
 
-    with pytest.raises(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
-        await cleanup_flow(session_factory)(context)
+    with cleanup_failure(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
+        await finish_cleanup_round(cleanup_flow(session_factory), context)
 
     assert tuple(owned.connection.iterdump()) == database_before
     assert (len(driver.deletes), len(driver.queries)) == (0, 0)
@@ -377,7 +379,7 @@ async def test_waiter_cancel_keeps_original_query_owner(environment):
         staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
     flow = cleanup_flow(session_factory)
 
-    task = asyncio.create_task(flow(context))
+    task = asyncio.create_task(finish_cleanup_round(flow, context))
     try:
         await asyncio.wait_for(driver.dispatched.wait(), timeout=10)
         canceling = context.open_connection()
@@ -413,7 +415,7 @@ async def test_waiter_cancel_keeps_original_query_owner(environment):
 
     # 另一轮只确认事实：不依据 DB 流程状态重查或改写成员终态。
     driver.reject_new_calls = True
-    await flow(context)
+    await finish_cleanup_round(flow, context)
     assert (len(driver.deletes), len(driver.queries)) == (1, 1)
     assert _member_facts(owned, item_id) == member
 
@@ -487,8 +489,8 @@ async def test_host_artifact_query_recovers_after_save_fault(
             fault.save(repository, finish, key, current_owned))
     _LocalProbe.fail_delete = True
 
-    with pytest.raises(ConsistencyError):
-        await cleanup_flow(session_factory)(context)
+    with cleanup_failure(ConsistencyError):
+        await finish_cleanup_round(cleanup_flow(session_factory), context)
 
     first = _LocalProbe.instances[-1]
     assert len(first.delete_calls) == 1 and len(first.query_calls) == 1
@@ -502,7 +504,7 @@ async def test_host_artifact_query_recovers_after_save_fault(
     devices.pop("cam-a")
     clock.update(wall=_NOW + 5_000, mono=900)
     driver.reject_new_calls = True
-    await cleanup_flow(session_factory)(context)
+    await finish_cleanup_round(cleanup_flow(session_factory), context)
 
     second = _LocalProbe.instances[-1]
     assert second is not first

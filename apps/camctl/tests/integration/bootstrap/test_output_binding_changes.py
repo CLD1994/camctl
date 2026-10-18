@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from .cleanup_helpers import finish_cleanup_round
+
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
@@ -240,7 +242,7 @@ async def test_cleanup_uses_each_members_original_binding(environment, state):
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
         monotonic_ns=lambda: 0)
     for _ in range(3):
-        await cleanup_flow(factory)(context)
+        await finish_cleanup_round(cleanup_flow(factory), context)
 
     assert sorted(binding.device_id for binding in driver.deletes) == (
         ["cam-a", "cam-b"] if state == "matched" else ["cam-b"])
@@ -264,7 +266,7 @@ async def test_matched_single_device_cleanup_saves_reliable_absence(environment)
         devices=cfg.devices, drivers=_registry(driver), max_delete_attempts=3,
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
         monotonic_ns=lambda: 0)
-    await cleanup_flow(factory)(context)
+    await finish_cleanup_round(cleanup_flow(factory), context)
 
     assert [(binding.device_id, binding.driver_id) for binding in driver.deletes] == [
         ("cam-a", "camctl-adb")]
@@ -364,7 +366,7 @@ async def _pending_cleanup(environment, *, confirmed_present=False):
         devices=cfg.devices, drivers=_registry(driver), max_delete_attempts=3,
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
         monotonic_ns=lambda: 0)
-    await cleanup_flow(factory)(context)
+    await finish_cleanup_round(cleanup_flow(factory), context)
     assert owned.connection.execute("SELECT status,restriction_state FROM cleanup_items").fetchone() == (
         3, int(enum_for("cleanup_items.restriction_state").IRREVERSIBLE))
     return output_id
@@ -396,12 +398,12 @@ async def test_unfinished_cleanup_binding_failure_preserves_unknown_delete(envir
 
     monkeypatch.setattr(cleanup_assembly, "port_for", port_for)
     before_handoff = tuple(owned.connection.iterdump())
-    await cleanup_flow(factory)(context)
+    await finish_cleanup_round(cleanup_flow(factory), context)
     assert tuple(owned.connection.iterdump()) == before_handoff
     assert not port_calls
     assert len(driver.deletes) == len(driver.queries) == 1
     # 新工厂先消费原持久 unknown；下一轮按当前绑定推进。
-    await cleanup_flow(factory)(context)
+    await finish_cleanup_round(cleanup_flow(factory), context)
 
     assert owned.connection.execute("SELECT status,restriction_state,error_code FROM cleanup_items").fetchone() == (
         5, int(enum_for("cleanup_items.restriction_state").IRREVERSIBLE), 5)
@@ -435,7 +437,7 @@ async def test_cleanup_passes_committed_ticket_and_each_operation_timeout(enviro
         devices=devices, drivers=_registry(driver), max_delete_attempts=3,
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
         monotonic_ns=lambda: 0)
-    await cleanup_flow(factory)(context)
+    await finish_cleanup_round(cleanup_flow(factory), context)
 
     for request, operation, timeout in (
             (driver.delete_requests[0], "delete", Decimal("1.25")),

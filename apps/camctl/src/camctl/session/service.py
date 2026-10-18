@@ -73,6 +73,11 @@ class _RequiredPhaseWaiter:
         self.parent_cancel: asyncio.CancelledError | None = None
         self._phase_errors: list[BaseException] = []
         self.first_control: BaseException | None = None
+        self._stop_attempted = False
+        self._sweep_cancel_attempted = False
+        self._restricted_logging_permit = False
+        self._stop_errors: list[BaseException] = []
+        self._delivered_stop_errors: set[int] = set()
 
     async def run(self, name: str, operation: Callable[[], Awaitable[Any]]) -> Any:
         async def capture() -> _RequiredPhaseFact:
@@ -96,17 +101,62 @@ class _RequiredPhaseWaiter:
     def record_phase_error(self, error: BaseException) -> None:
         if not any(error is saved for saved in self._phase_errors):
             self._phase_errors.append(error)
-        if (not isinstance(error, Exception)
-                and _is_typed_sync_control(error)
-                and self.first_control is None):
-            self.first_control = error
+        self.record_sync_control(error)
 
     def record_sync_control(self, error: BaseException) -> None:
-        """在同步子操作实际交错失败处登记可信控制来源。"""
-        if (not isinstance(error, Exception)
-                and _is_typed_sync_control(error)
-                and self.first_control is None):
+        """在实际来源处登记首个可信同步控制，包括原异常组的叶对象。"""
+        if (self.first_control is None and not isinstance(error, Exception)
+                and (lock_error_facts(error) is not None
+                     or write_receipt_for(error) is not None)):
             self.first_control = error
+            return
+        for source, _facts in _ordered_error_sources(error):
+            if (not isinstance(source, Exception)
+                    and _is_typed_sync_control(source)
+                    and self.first_control is None):
+                self.first_control = source
+
+    def _stop_error(self, error: BaseException) -> None:
+        if not any(error is saved for saved in self._stop_errors):
+            self._stop_errors.append(error)
+        self.record_phase_error(error)
+
+    def request_stop(self) -> None:
+        """一次尝试普通停止；受限日志新取得的许可独立撤回。"""
+        if not self._stop_attempted:
+            self._stop_attempted = True
+            try:
+                stop = getattr(self._context.local_work, "stop_new_work", None)
+                if stop is not None:
+                    stop()
+            except BaseException as error:
+                self._stop_error(error)
+        if self._restricted_logging_permit:
+            self._restricted_logging_permit = False
+            try:
+                self._context.logging_owner.stop_new_work()
+            except BaseException as error:
+                self._stop_error(error)
+
+    def resumed_restricted_logging(self) -> None:
+        self._restricted_logging_permit = True
+
+    def request_sweep_cancel(self) -> None:
+        if self._sweep_cancel_attempted:
+            return
+        self._sweep_cancel_attempted = True
+        try:
+            cancel = getattr(self._context.logging_owner, "cancel_startup_sweep", None)
+            if cancel is not None:
+                cancel()
+        except BaseException as error:
+            self._stop_error(error)
+
+    def take_stop_errors(self) -> tuple[BaseException, ...]:
+        errors = tuple(error for error in self._stop_errors
+                       if id(error) not in self._delivered_stop_errors)
+        self._delivered_stop_errors.update(id(error) for error in errors)
+        return errors
 
     def is_phase_error(self, error: BaseException) -> bool:
         return any(error is phase_error for phase_error in self._phase_errors)
@@ -117,24 +167,8 @@ class _RequiredPhaseWaiter:
         self.parent_cancel = error
         if self.first_control is None:
             self.first_control = error
-        local_work = self._context.local_work
-        stop_new = getattr(local_work, "stop_new_work", None)
-        if stop_new is not None:
-            try:
-                stop_new()
-            except BaseException as stop_error:
-                self.add_note(
-                    "父取消时停止本地新增工作的入口失败: "
-                    f"{type(stop_error).__name__}: {stop_error}")
-        cancel_sweep = getattr(
-            self._context.logging_owner, "cancel_startup_sweep", None)
-        if cancel_sweep is not None:
-            try:
-                cancel_sweep()
-            except BaseException as stop_error:
-                self.add_note(
-                    "父取消时停止启动日志检查的入口失败: "
-                    f"{type(stop_error).__name__}: {stop_error}")
+        self.request_stop()
+        self.request_sweep_cancel()
 
     def add_note(self, message: str) -> None:
         if self.parent_cancel is not None:
@@ -153,6 +187,8 @@ class _RequiredPhaseWaiter:
         target.add_note(f"{label}: {type(error).__name__}: {error}")
         for note in notes:
             target.add_note(f"{label}附注: {note}")
+        if isinstance(error, BaseExceptionGroup):
+            _attach_ordered_error_notes(target, label, _ordered_error_sources(error))
 
 
 class StateDbFailure(RuntimeError):
@@ -456,10 +492,12 @@ def _ordered_sources_outcome(
 
 
 def _is_typed_sync_control(error: BaseException) -> bool:
-    return (
-        lock_error_facts(error) is not None
-        or write_receipt_for(error) is not None
-    )
+    if lock_error_facts(error) is not None or write_receipt_for(error) is not None:
+        return True
+    if isinstance(error, BaseExceptionGroup):
+        return any(_is_typed_sync_control(source)
+                   for source, _facts in _ordered_error_sources(error))
+    return False
 
 
 def _secondary_outcomes(outcome: SessionOutcome) -> list[dict[str, Any]]:
@@ -817,7 +855,7 @@ async def _run_session(
                     nonlocal admission_lease
                     try:
                         await _settle_local_work(
-                            context, exclude_owner=context.logging_owner)
+                            context, exclude_owner=context.logging_owner, waiter=waiter)
                     except Exception as error:
                         local_errors.append(error)
                         # 前置保存失败后，受限停止和报告不能依赖失效状态。
@@ -856,6 +894,7 @@ async def _run_session(
                                 "clock_invalid", {"error": str(clock_error)})
                         if waiter.parent_cancel is None:
                             context.logging_owner.resume_restricted_logging()
+                            waiter.resumed_restricted_logging()
                     if waiter.parent_cancel is not None:
                         return _outcome_error("clock_invalid")
                     return await _restricted_once_report(context)
@@ -874,7 +913,7 @@ async def _run_session(
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
                 async def settle_before_close() -> Exception | None:
                     try:
-                        await _settle_local_work(context, stop_new=False)
+                        await _settle_local_work(context, stop_new=False, waiter=waiter)
                     except Exception as error:
                         return error
                     return None
@@ -932,6 +971,14 @@ async def _run_session(
                 "internal_error",
             )
         )
+        preserve_startup_work = (
+            waiter.parent_cancel is None
+            and original is None
+            and context.startup_outcome is not None)
+        if (fatal_outcome or original is not None) and not preserve_startup_work:
+            # 先尝试全部普通停止，再进入任何已取得资格的应急等待。
+            # 原入口错误延后到实际 settle 完成后交付。
+            waiter.request_stop()
         if fatal_outcome and waiter.parent_cancel is not None:
             waiter.add_note(
                 "会话保留实际致命结果："
@@ -967,7 +1014,7 @@ async def _run_session(
                 waiter.parent_cancel is None and not preserve_startup_work)
             await waiter.run(
                 "final-local-settlement",
-                lambda: _settle_local_work(context, stop_new=stop_new),
+                lambda: _settle_local_work(context, stop_new=stop_new, waiter=waiter),
             )
         except BaseException as error:
             if isinstance(error, Exception):
@@ -993,6 +1040,14 @@ async def _run_session(
                 original, "后续会话收场异常", error,
             )
 
+    for error in waiter.take_stop_errors():
+        if isinstance(error, Exception):
+            local_errors.append(error)
+        elif original is None:
+            original = error
+        elif error is not original:
+            waiter.attach_exception_notes(original, "本地停止入口异常", error)
+
     if waiter.first_control is not None:
         primary_control = waiter.first_control
         if original is not None and original is not primary_control:
@@ -1016,14 +1071,14 @@ async def _run_session(
                 )
         elif original is None:
             original = waiter.parent_cancel
-    if original is not None:
-        for error in local_errors:
-            original.add_note(
-                f"本地责任收场失败: {type(error).__name__}: {error}")
-    elif outcome is not None:
-        assert outcome is not None
-        for error in local_errors:
-            outcome = _local_state_outcome(outcome, error)
+    outcome, original = _merge_cleanup_errors(
+        outcome, original,
+        [(error, "shutdown", "state_db_error") for error in local_errors],
+        observed_errors,
+    )
+    # 后面的句柄关闭沿同一原错误身份去重，包括已通过控制附注交付的错误。
+    for error in (*local_errors, *waiter._stop_errors):
+        _remember_error(observed_errors, error)
 
     cleanup_failures: list[tuple[BaseException, str, str]] = []
     if admission_lease is not None:
@@ -1082,28 +1137,24 @@ def _run_work_facts(context: SessionContext, connection: Any) -> WorkFacts:
 
 async def _settle_local_work(
         context: SessionContext, *, stop_new: bool = True,
-        exclude_owner: Any = None) -> None:
-    """重复取消只取消等待；同一个拥有者始终继续消费实际结果。"""
-    if context.local_work is None:
-        return
+        exclude_owner: Any = None, waiter: _RequiredPhaseWaiter | None = None) -> None:
+    """停止失败也等待原实际收场；观察者的重复取消不重发请求。"""
+    records = waiter if waiter is not None else _RequiredPhaseWaiter(context)
     if stop_new:
-        stop = getattr(context.local_work, "stop_new_work", None)
-        if stop is not None:
-            stop()
-    if exclude_owner is None:
-        settle = context.local_work.settle
-    else:
-        settle_excluding = getattr(context.local_work, "settle_excluding", None)
-        if settle_excluding is None:
-            raise TypeError("本地责任组合不支持按 owner 分阶段收场")
-
-        async def settle() -> None:
-            await settle_excluding(exclude_owner)
+        records.request_stop()
 
     async def collect() -> _RequiredPhaseFact:
         try:
-            await settle()
+            if context.local_work is not None:
+                if exclude_owner is None:
+                    await context.local_work.settle()
+                else:
+                    settle = getattr(context.local_work, "settle_excluding", None)
+                    if settle is None:
+                        raise TypeError("本地责任组合不支持按 owner 分阶段收场")
+                    await settle(exclude_owner)
         except BaseException as error:
+            records.record_phase_error(error)
             return _RequiredPhaseFact(error=error)
         return _RequiredPhaseFact()
 
@@ -1114,52 +1165,46 @@ async def _settle_local_work(
             fact = await asyncio.shield(task)
             break
         except asyncio.CancelledError as error:
-            if task.done() and task.cancelled():
-                raise
             if cancellation is None:
                 cancellation = error
-                if not stop_new:
-                    stop = getattr(context.local_work, "stop_new_work", None)
-                    if stop is not None:
-                        try:
-                            stop()
-                        except BaseException as stop_error:
-                            cancellation.add_note(
-                                "取消收场时停止本地新增工作的入口失败: "
-                                f"{type(stop_error).__name__}: {stop_error}")
-                cancel_sweep = getattr(
-                    context.logging_owner, "cancel_startup_sweep", None)
-                if cancel_sweep is not None:
-                    try:
-                        cancel_sweep()
-                    except BaseException as stop_error:
-                        cancellation.add_note(
-                            "取消收场时停止启动日志检查失败: "
-                            f"{type(stop_error).__name__}: {stop_error}")
-    if fact.error is not None:
-        if cancellation is not None:
-            _RequiredPhaseWaiter.attach_exception_notes(
-                cancellation, "本地实际责任收场异常", fact.error)
-            if fact.error is cancellation:
-                raise cancellation
-            raise cancellation from fact.error
-        raise fact.error.with_traceback(fact.error.__traceback__)
+                records.request_stop()
+                records.request_sweep_cancel()
+
+    errors = list(records.take_stop_errors())
+    if fact.error is not None and not any(fact.error is error for error in errors):
+        errors.append(fact.error)
     if cancellation is not None:
-        raise cancellation
+        # 仅本观察者的取消在此交付；共享waiter的父取消留给run边界。
+        control = records.first_control
+        if (control is not None and control is not records.parent_cancel
+                and any(any(control is item for item in _error_identity_objects(error))
+                        for error in errors)):
+            _RequiredPhaseWaiter.attach_exception_notes(control, "后到本地收场等待取消", cancellation)
+            primary = control
+        else:
+            primary = cancellation
+        others = [error for error in errors if error is not primary]
+        for error in others:
+            _attach_ordered_error_notes(primary, "本地实际责任收场异常", _ordered_error_sources(error))
+        # 保持已有cause；不能把包含primary的原组作为它自身的cause。
+        causes = [error for error in others
+                  if not any(primary is item for item in _error_identity_objects(error))]
+        if primary.__cause__ is None and causes:
+            cause = causes[0] if len(causes) == 1 else BaseExceptionGroup("本地停止及实际收场失败", causes)
+            raise primary from cause
+        raise primary
+    if not errors:
+        return
+    control = next((error for error in errors if not isinstance(error, Exception)), None)
+    if control is not None:
+        for error in errors:
+            if error is not control:
+                _attach_ordered_error_notes(control, "本地实际责任收场异常", _ordered_error_sources(error))
+        raise control.with_traceback(control.__traceback__)
+    if len(errors) == 1:
+        raise errors[0].with_traceback(errors[0].__traceback__)
+    raise ExceptionGroup("本地停止及实际收场失败", errors)
 
-
-def _local_state_outcome(outcome: SessionOutcome, error: Exception) -> SessionOutcome:
-    """本地收场错误主导普通成功或报告失败，保留已有致命主错误。"""
-    details = {"stage": "shutdown", "message": f"{type(error).__name__}: {error}"}
-    if outcome.succeeded:
-        return _outcome_error("state_db_error", details)
-    previous = dict(outcome.details)
-    secondary = list(previous.pop("secondary_errors", ()))
-    if outcome.reason == "report_error":
-        details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
-        return _outcome_error("state_db_error", details)
-    previous["secondary_errors"] = [*secondary, {"reason": "state_db_error", "details": details}]
-    return _outcome_error(outcome.reason, previous)
 
 
 async def _drive_flows(context: SessionContext) -> str | None:

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from .cleanup_helpers import finish_cleanup_round
+
 from camctl.bootstrap.cleanup_assembly import cleanup_flow, session_cleanup_assembly
 from camctl.cancellation.models import (
     ApplyCancelTarget, CancelApplyMode, CancellationEffect, FinishCancelAction,
@@ -62,10 +64,10 @@ async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, co
                                   lambda _: "unknown", lambda: _NOW)
 
     assert not (await settlement.settle(target)).complete
-    await cleanup_flow(session_cleanup_assembly(
+    await finish_cleanup_round(cleanup_flow(session_cleanup_assembly(
         devices=cfg.devices, drivers=_registry(driver), max_delete_attempts=3,
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
-        monotonic_ns=lambda: 0))(context)
+        monotonic_ns=lambda: 0)), context)
 
     progress = await apply_cancel(ApplyCancel(origin, (cancel_item_id,)), CancellationRuntime(
         owned, CancellationRepository(), settlement, lambda: _NOW))
@@ -136,7 +138,7 @@ async def test_canceled_cleanup_preserves_saved_unknown_results_after_binding_ch
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
         monotonic_ns=lambda: 0)
 
-    await cleanup_flow(factory)(context)
+    await finish_cleanup_round(cleanup_flow(factory), context)
 
     assert (tuple(driver.deletes), tuple(driver.queries)) == calls_before
     assert tuple(owned.connection.execute(

@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
+from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
 from camctl.bootstrap.capture_assembly import (
     _DEFAULT_RETRY_INTERVAL_S,
     _device_seconds,
@@ -46,6 +47,7 @@ from camctl.outputs.cleanup_flow import (
 from camctl.outputs.cleanup_ownership import PendingCleanupSave
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.scheduling.notifications import WakeReason
 
 __all__ = [
     "HostArtifacts", "cleanup_flow", "session_cleanup_assembly"]
@@ -589,8 +591,8 @@ def _member_binding(connection, item_id: int) -> DeviceBinding | None:
     return DeviceBinding(device_id=row[0], driver_id=row[1])
 
 
-class CleanupFlow:
-    """会话拥有全部原保存集合；在途调用的 await 范围负责实际收场。"""
+class _CleanupRound:
+    """持有单轮连接及全部原保存集合，直至实际调用可靠交接。"""
 
     def __init__(self, factory, pending_collections=None, *, state_db_errors=False):
         self._factory = factory
@@ -635,6 +637,51 @@ class CleanupFlow:
         finally:
             self._active = False
             self._settled.set()
+
+
+class CleanupFlow:
+    """独立推进唯一清理轮次，组合实际任务与原保存责任。"""
+
+    def __init__(self, factory, pending_collections=None, *, state_db_errors=False):
+        self._round = _CleanupRound(
+            factory, pending_collections, state_db_errors=state_db_errors)
+        self._background = BackgroundFlow(self._round)
+        self._local_work = CombinedLocalWork((self._background, self._round))
+        self._stop_work = CombinedLocalWork((self._round, self._background))
+        self._notification_task = None
+        self._notified = False
+
+    async def __call__(self, context):
+        try:
+            await self._background(context)
+        finally:
+            task = self._background.unconsumed_task
+            if task is not None and task is not self._notification_task:
+                self._notification_task = task
+                self._notified = False
+                wake = getattr(context, "wake", None)
+
+                def completed(actual):
+                    if (actual is self._notification_task
+                            and actual is self._background.unconsumed_task
+                            and actual.done() and not self._notified):
+                        self._notified = True
+                        if wake is not None:
+                            wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
+
+                task.add_done_callback(completed)
+
+    def check_completed(self):
+        self._background.check_completed()
+
+    def required_settlements(self):
+        return self._local_work.required_settlements()
+
+    def stop_new_work(self):
+        self._stop_work.stop_new_work()
+
+    async def settle(self):
+        await self._local_work.settle()
 
 
 def cleanup_flow(factory: Callable[[Any], CleanupRuntime | None], *, pending_collections=None,
