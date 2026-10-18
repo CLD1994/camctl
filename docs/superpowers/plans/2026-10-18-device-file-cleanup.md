@@ -109,10 +109,10 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 
 **接口建议：** 在默认字段尾部增加 `DriverDeclaration.file_query_supported=False`；新增 `FileQueryDriver.query_file(ControlRequest) -> DeviceCallResult`、`port_for(entry, "file_query")` 与 `CameraCall.FILE_QUERY`。持久化仍用 `operation="query"`、`CHECK_FILE_EXISTS`、`exists/<item_id>`、`file_presence/v1`；原 `query_supported/query_state` 保持拍摄语义。
 
-- [ ] **步骤 1：写失败测试并运行。** `integration/devices/test_driver_contract.py`、`test_adb_camera_registration.py`、`integration/bootstrap/test_cleanup_flow.py` 覆盖能力分区、清理误调用 `query_state` 即失败、真实拍摄装配仍无状态查询。拒绝不完整的删除声明。
-- [ ] **步骤 2：实施独立路由。** 静态合同和运行登记同步检查完整性；受管端口按原 QUERY 票据、目标、cleanup item 和绑定路由 FILE_QUERY。清理无回退拍摄查询的分支；已保存结果消费不要求当前端口。
-- [ ] **步骤 3：迁移全部生产者与替身。** 核对 devices、bootstrap、outputs 清理测试及根 `tests/integration/camctl_fixtures.py`，只迁移文件查询；审计 `capture_assembly.py`、capture handlers／residual 与 `operations/queries.py` 未误获文件能力。保留原保存、取消及预算断言。
-- [ ] **步骤 4：验证并提交。** 跑窄用例和 devices 目录；bootstrap 的 `test_cleanup_query_default_recovery.py`、`test_output_binding_changes.py`、`test_closed_result_binding_recovery.py` 验证真实装配和恢复接缝。
+- [x] **步骤 1：写失败测试并运行。** `integration/devices/test_driver_contract.py`、`test_adb_camera_registration.py`、`integration/bootstrap/test_cleanup_flow.py` 覆盖能力分区、清理误调用 `query_state` 即失败、真实拍摄装配仍无状态查询。拒绝不完整的删除声明。
+- [x] **步骤 2：实施独立路由。** 静态合同和运行登记同步检查完整性；受管端口按原 QUERY 票据、目标、cleanup item 和绑定路由 FILE_QUERY。清理无回退拍摄查询的分支；已保存结果消费不要求当前端口。
+- [x] **步骤 3：迁移全部生产者与替身。** 核对 devices、bootstrap、outputs 清理测试及根 `tests/integration/camctl_fixtures.py`，只迁移文件查询；审计 `capture_assembly.py`、capture handlers／residual 与 `operations/queries.py` 未误获文件能力。保留原保存、取消及预算断言。
+- [x] **步骤 4：验证并提交。** 跑窄用例和 devices 目录；bootstrap 的 `test_cleanup_query_default_recovery.py`、`test_output_binding_changes.py`、`test_closed_result_binding_recovery.py` 验证真实装配和恢复接缝。
 
 ### R2：持有原意图、实际结果与全部终态保存申请
 
