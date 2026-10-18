@@ -31,6 +31,8 @@
 
 本地当前驱动另导出 `.local/deployments/20261019-osmo-settings/device-capabilities.json`，包含 `osmo360ii` 和采用主机正式源的 `hb0`。公共 Schema 及实际字段检查通过，SHA-256 为 `c64ed7aa118e120ceec8961f615f8b519b6e39866f7a258e3951130dbba351b6`。该文件与本次驱动代码配套，本项没有部署 TX2 或执行真实相机命令。
 
+独立评审者对 `a8b87b6..b8bb4f3` 完成串行只读复核，核对固定设置记录、实际会话重置、失败门禁、新参数、生成器和已有日志，未发现影响驱动软件交付的问题。客户端通用表单的进一步复核及其待修复显示／测试问题另见[客户端记录](../client/verification.md#设备能力解析与选项联动复核2026-10-18-utc)。
+
 ## 设备文件清理的 TX2 实机验收（2026-10-18 UTC）
 
 [设备文件清理计划 R7](../superpowers/plans/2026-10-18-device-file-cleanup.md#r7用已验发行物完成-osmo-目标设备验收)已通过真实 OSMO 360 II 的正式清理链验收。现场使用 `cld` 账户、ARM64、Python 3.11.17、SQLite 3.53.1 和 ADB 1.0.39；USB 为 `2ca3:0020`，产品属性为 `eagle4_oq102`，固件为 `10.00.00.57`／`01.01.02.10`。本次检查至最终目录核对的相机 boot ID 均为 `64eb2280-7f6e-48bb-bafd-5bed1dd7a797`。
