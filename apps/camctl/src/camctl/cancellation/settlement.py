@@ -46,7 +46,8 @@ class TargetSettlement:
                  withdrawal_positions: Callable[[int], str],
                  occurred_at: Callable[[], int], work_files: Any = None,
                  withdrawal_execute: Callable[[int], Awaitable[bool]] | None = None,
-                 withdrawal_resume: Callable[[int], Awaitable[bool]] | None = None) -> None:
+                 withdrawal_resume: Callable[[int], Awaitable[bool]] | None = None,
+                 cleanup_pending: Callable[[Any, int], bool] | None = None) -> None:
         self._owned = owned
         self._outputs = outputs
         self._cancellations = cancellations
@@ -54,6 +55,7 @@ class TargetSettlement:
         self._work_files = work_files
         self._withdrawal_execute = withdrawal_execute
         self._withdrawal_resume = withdrawal_resume
+        self._cleanup_pending = cleanup_pending
 
     async def settle(self, target_action_id: int) -> SettlementOutcome:
         row = self._owned.connection.execute(
@@ -225,6 +227,8 @@ class TargetSettlement:
             (target_action_id,),
         )) as cursor:
             items = tuple(cursor.fetchall())
+        if self._cleanup_pending is not None and self._cleanup_pending(connection,target_action_id):
+            return SettlementOutcome(complete=False)
         for item_id, status, _error in items:
             if status in (_CLEANUP_UNRESOLVED, _CLEANUP_PENDING):
                 outcome = self._outputs.cancel_cleanup_item(
@@ -233,6 +237,9 @@ class TargetSettlement:
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
                     raise ConsistencyError(f"清理取消事务未提交: {outcome.error}")
         statuses = {status for _, status, _error in items}
+        from camctl.outputs.cleanup_discovery import cleanup_action_has_responsibility
+        if cleanup_action_has_responsibility(connection, target_action_id):
+            return SettlementOutcome(complete=False)
         if int(action_row[0]) not in _ACTION_TERMINAL:
             if _CLEANUP_DELETING in statuses:
                 return SettlementOutcome(complete=False)

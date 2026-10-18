@@ -129,6 +129,8 @@ def query_work_facts(connection) -> "WorkFacts":
     settlements += scalar(
         "SELECT COUNT(*) FROM actions WHERE type = 7 AND status = 2"
         " AND cancel_requested = 1")
+    from camctl.outputs.cleanup_discovery import extra_cleanup_settlements
+    settlements += extra_cleanup_settlements(connection)
     acknowledged = scalar(
         "SELECT acknowledged_wm FROM runtime_state WHERE id = 1")
     # 已接手边界：任意状态报告的最大覆盖水位；失败尝试也覆盖其范围，

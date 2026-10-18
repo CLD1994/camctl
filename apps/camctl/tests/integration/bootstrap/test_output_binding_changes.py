@@ -371,7 +371,7 @@ async def _pending_cleanup(environment, *, confirmed_present=False):
 
 
 @pytest.mark.parametrize("state", ["missing", "mismatch"])
-async def test_unfinished_cleanup_binding_failure_preserves_unknown_delete(environment, state):
+async def test_unfinished_cleanup_binding_failure_preserves_unknown_delete(environment, state, monkeypatch):
     cfg, owned, context, driver = environment
     output_id = await _pending_cleanup(environment)
     source_before = owned.connection.execute(
@@ -386,6 +386,21 @@ async def test_unfinished_cleanup_binding_failure_preserves_unknown_delete(envir
         devices=current.devices, drivers=_registry(driver), max_delete_attempts=3,
         max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
         monotonic_ns=lambda: 0)
+    from camctl.bootstrap import cleanup_assembly
+    port_calls = []
+    original_port_for = cleanup_assembly.port_for
+
+    def port_for(entry, operation):
+        port_calls.append(operation)
+        return original_port_for(entry, operation)
+
+    monkeypatch.setattr(cleanup_assembly, "port_for", port_for)
+    before_handoff = tuple(owned.connection.iterdump())
+    await cleanup_flow(factory)(context)
+    assert tuple(owned.connection.iterdump()) == before_handoff
+    assert not port_calls
+    assert len(driver.deletes) == len(driver.queries) == 1
+    # 新工厂先消费原持久 unknown；下一轮按当前绑定推进。
     await cleanup_flow(factory)(context)
 
     assert owned.connection.execute("SELECT status,restriction_state,error_code FROM cleanup_items").fetchone() == (

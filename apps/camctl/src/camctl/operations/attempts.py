@@ -357,8 +357,14 @@ class AttemptFinish:
     retry_wait: bool = False
     run_finish: RunFinish | None = None
 
+    #: 清理启动恢复的固定已提交上界；写事务再次核对原意图。
+    recovery_max_event_id: int | None = None
+
     def __post_init__(self) -> None:
         _utc_micros(self.occurred_at)
+        if self.recovery_max_event_id is not None and (
+                type(self.recovery_max_event_id) is not int or self.recovery_max_event_id < 0):
+            raise AttemptConfigError("恢复历史上界必须是非负整数")
         if self.retry_wait and self.run_finish is not None:
             raise AttemptConfigError("重试等待与流程结束不能同时提交")
 

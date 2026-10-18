@@ -850,6 +850,11 @@ class FinishAttemptCommand:
                 ),
             )
 
+        if finish.recovery_max_event_id is not None and (
+                attempt_facts["intent_event_id"] is None
+                or attempt_facts["intent_event_id"] > finish.recovery_max_event_id):
+            raise TransactionError("原恢复意图晚于启动固定历史上界")
+
         outcome = finish.outcome.outcome
         # 流程终态与在途尝试分别结算：迟到结果不能重开间隔或改写终态。
         run_active = run_facts["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))

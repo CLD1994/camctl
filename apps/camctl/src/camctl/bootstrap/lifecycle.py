@@ -111,6 +111,13 @@ class RuntimeDeps:
     capture_read_business: dict = field(default_factory=dict)
     capture_read_ends: dict = field(default_factory=dict)
     capture_continuing_reads: dict = field(default_factory=dict)
+    cleanup_intents: dict = field(default_factory=dict)
+    cleanup_deletes: dict = field(default_factory=dict)
+    cleanup_queries: dict = field(default_factory=dict)
+    cleanup_companions: dict = field(default_factory=dict)
+    cleanup_saves: dict = field(default_factory=dict)
+    cleanup_consumed_queries: dict = field(default_factory=dict)
+    cleanup_active_calls: set = field(default_factory=set)
 
 
 def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
@@ -750,7 +757,8 @@ def _report_assembly(
                               work_files=deps.work_files,
                               resume_media_results=deps.work_files.resume_media_results,
                               resume_file_observations=resume_files,
-                              resume_capture_completions=partial(_resume_capture_requests, deps)),
+                              resume_capture_completions=partial(_resume_capture_requests, deps),
+                              cleanup_pending=partial(_cleanup_pending_for_action, deps)),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
@@ -834,7 +842,15 @@ def _report_assembly(
             max_delete_attempts=deps.config.cleanup.max_delete_attempts,
             max_query_attempts=deps.config.cleanup.max_query_attempts,
             staging=staging,
-        )),
+            pending_intents=deps.cleanup_intents, pending_deletes=deps.cleanup_deletes,
+            pending_queries=deps.cleanup_queries, pending_companions=deps.cleanup_companions,
+            pending_saves=deps.cleanup_saves, consumed_queries=deps.cleanup_consumed_queries,
+            active_calls=deps.cleanup_active_calls,
+            recovery_boundary=deps.recovery_boundary,
+            recovery_max_event_id=lambda: deps.recovery_max_event_id,
+            on_recovery_diagnostic=recovery_logger,
+            discovery_batch_size=deps.config.session.read_discovery_batch_size,
+        ), state_db_errors=True),
         "work_files": deps.work_files.flow,
     }
     from camctl.bootstrap.background_flow import BackgroundFlow
@@ -1151,11 +1167,25 @@ def _recovery_callback(
     return on_recovered
 
 
+def _cleanup_pending_for_action(deps, connection, action_id):
+    """取消等待同一会话的原保存责任，不能仅按成员终态完成。"""
+    item_ids = set(deps.cleanup_intents) | set(deps.cleanup_deletes) | set(deps.cleanup_companions)
+    item_ids.update(value.item_id for value in deps.cleanup_queries.values())
+    for value in deps.cleanup_saves.values():
+        if getattr(value.request, "action_id", None) == action_id:
+            return True
+        if hasattr(value.request, "item_id"):
+            item_ids.add(value.request.item_id)
+    return any(connection.execute("SELECT 1 FROM cleanup_items WHERE id=? AND action_id=?",
+        (item_id, action_id)).fetchone() is not None for item_id in item_ids)
+
+
 def _local_work(deps, flows, logging_owner=None):
     from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
     from camctl.bootstrap.flows import CaptureFlow
+    from camctl.bootstrap.cleanup_assembly import CleanupFlow
     owners = list(deps.background_flows)
-    owners.extend(flow for flow in flows.values() if isinstance(flow, (BackgroundFlow, CaptureFlow)))
+    owners.extend(flow for flow in flows.values() if isinstance(flow, (BackgroundFlow, CaptureFlow, CleanupFlow)))
     if deps.work_files is not None:
         owners.append(deps.work_files)
     if logging_owner is not None:

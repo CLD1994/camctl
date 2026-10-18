@@ -440,6 +440,10 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
     if member in ("attempt_id", "result_page_event_id"):
         if not is_json_integer(value) or value <= 0:
             _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
+    elif member == "cleanup_result_source":
+        if (not isinstance(value, Mapping) or set(value) != {"item_id", "result_event_id"}
+                or any(not is_json_integer(identity) or identity <= 0 for identity in value.values())):
+            _fail(f"事件 {event_id} 的 cleanup_result_source 必须是原成员与结果事件的正整数引用")
     elif member in ("source_probe", "output_probe"):
         from camctl.capture.media_facts import read_probe
         try:

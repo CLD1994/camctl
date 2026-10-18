@@ -8,10 +8,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+from typing import Any
+
+from camctl.devices.evidence import EvidenceError, EvidenceRegistry
 
 __all__ = [
+    "RecoveryBoundary", "RecoveryBlockedReason", "RecoveryDiagnostic", "recovery_registry",
     "CancelOutcome",
     "RecoveryClass",
     "RecoveryDecision",
@@ -21,6 +25,65 @@ __all__ = [
     "recover_attempt",
     "settle_cancelled_call",
 ]
+
+
+class RecoveryBoundary(Enum):
+    """调用方保证的旧本地执行收场边界；普通构造默认不确认。
+
+    正式 run 的部署调用方保证 host 已完成旧工作收场时使用
+    HOST_LOCAL_SETTLED；确认重新上电的嵌入式调用方可使用
+    HOST_POWER_CYCLE。此值不证明独立设备活动结束。
+    """
+
+    UNCONFIRMED = "unconfirmed"
+    HOST_LOCAL_SETTLED = "host_local_settled"
+    HOST_POWER_CYCLE = "host_power_cycle"
+
+
+class RecoveryBlockedReason(Enum):
+    """原调用仍承担责任时，阻止无依据恢复的输入分区。"""
+
+    UNCONFIRMED_BOUNDARY = "unconfirmed_boundary"
+    MISSING_HORIZON = "missing_horizon"
+    MISSING_EVIDENCE_LOOKUP = "missing_evidence_lookup"
+    EVIDENCE_UNAVAILABLE = "evidence_unavailable"
+    INTENT_OUTSIDE_HORIZON = "intent_outside_horizon"
+    ACTIVE_LOCAL_READ = "active_local_read"
+
+
+@dataclass(frozen=True)
+class RecoveryDiagnostic:
+    """单份恢复诊断，标明原流程及尝试；不生成数据库或机器协议。"""
+
+    reason: RecoveryBlockedReason
+    run_id: int
+    attempt_id: int
+
+
+def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
+    """从原驱动的适用声明取得保留实际返回契约的恢复登记。
+
+    恢复类型与版本共用空正文规则；原驱动必须明确声明本操作适用。
+    仅把模板的操作类别绑定原票据；其他契约保持原驱动声明，
+    以便可靠页已保存实际返回时仍能验证原结果。
+    """
+    if entry is None:
+        return None
+    if operation in getattr(entry.declaration, "local_file_recovery_operations", ()):
+        evidence_type = "local_file_recovery"
+    elif operation == "read" and getattr(entry.declaration, "local_read_recovery_supported", False):
+        evidence_type = "local_read_recovery"
+    elif operation in getattr(entry.declaration, "adb_foreground_recovery_operations", ()):
+        evidence_type = "adb_foreground_recovery"
+    else:
+        return None
+    try:
+        template = entry.evidence.contract(evidence_type, 1)
+    except EvidenceError:
+        return None
+    if template.fields or template.identity_field is not None:
+        raise ValueError("原驱动恢复模板必须是正式 v1 空正文契约")
+    return entry.evidence.with_contract(replace(template, operation=operation))
 
 
 class RecoveryClass(Enum):

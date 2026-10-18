@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import time
+import asyncio
+import sqlite3
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -20,6 +22,7 @@ from camctl.bootstrap.capture_assembly import (
     _DEFAULT_RETRY_INTERVAL_S,
     _device_seconds,
 )
+from camctl.contracts.values import ConsistencyError
 from camctl.devices.bindings import (
     DeviceBinding, DeviceConfigurationError, binding_failure_details, check_binding)
 from camctl.devices.drivers.registry import (
@@ -28,6 +31,7 @@ from camctl.devices.evidence import DeviceObservation, EvidenceContract, Evidenc
 from camctl.devices.ports import DeviceCallResult
 from camctl.host_files.declarations import HOST_FILE_DECLARATION
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
+from camctl.operations.recovery import RecoveryBoundary, recovery_registry
 from camctl.outputs.cleanup_flow import (
     CleanupRuntime, HostArtifactPort, LocalArtifactRequest,
     PendingCleanupCompanion, PendingCleanupQuery, PendingCleanupIntent,
@@ -44,6 +48,7 @@ __all__ = [
 _DEFAULT_TIMEOUT_S = Decimal("10")
 
 _LOCAL_EVIDENCE = EvidenceRegistry((
+    EvidenceContract("local_file_recovery", 1, "delete", frozenset()),
     EvidenceContract(type="delete_returned", version=1, operation="delete", fields=frozenset()),
     EvidenceContract(type="file_absent", version=1, operation="delete",
                      fields=frozenset({"cleanup_item_id"}), identity_field="cleanup_item_id"),
@@ -61,6 +66,7 @@ class HostArtifacts(HostArtifactPort):
     """
 
     declaration = HOST_FILE_DECLARATION
+    evidence = _LOCAL_EVIDENCE
 
     def __init__(self, staging: Path) -> None:
         self._staging = Path(staging)
@@ -116,6 +122,12 @@ def session_cleanup_assembly(
     pending_intents: dict[int, PendingCleanupIntent] | None = None,
     pending_deletes: dict[int, PendingCleanupDelete] | None = None,
     pending_saves: dict[tuple[str, int], PendingCleanupSave] | None = None,
+    recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED,
+    recovery_max_event_id: int | Callable[[], int | None] | None = None,
+    on_recovery_diagnostic: Callable | None = None,
+    discovery_batch_size: int = 100,
+    consumed_queries: dict | None = None,
+    active_calls: set | None = None,
 ) -> Callable[[Any], CleanupRuntime | None]:
     """构造会话级清理推进工厂：解析删除/查询协作者并组装运行时。
 
@@ -127,7 +139,8 @@ def session_cleanup_assembly(
     retry_gate = RetryWaitGate()
     queries = pending_queries if pending_queries is not None else {}
     companions = pending_companions if pending_companions is not None else {}
-    consumed_queries = {}
+    consumed_queries = consumed_queries if consumed_queries is not None else {}
+    active = active_calls if active_calls is not None else set()
     intents = pending_intents if pending_intents is not None else {}
     deletes = pending_deletes if pending_deletes is not None else {}
     saves = pending_saves if pending_saves is not None else {}
@@ -144,6 +157,12 @@ def session_cleanup_assembly(
                 device_ports = _device_ports()
             return device_ports
 
+        def operation_config(declaration, operation):
+            return AttemptConfig(
+                max_attempts=max_delete_attempts if operation == "delete" else max_query_attempts,
+                timeout_s=_device_seconds(declaration, "cleanup", f"{operation}_timeout_s", _DEFAULT_TIMEOUT_S),
+                retry_interval_s=_device_seconds(declaration, "cleanup", f"{operation}_retry_interval_s", _DEFAULT_RETRY_INTERVAL_S))
+
         def _device_ports():
             assembled = {}
             for device_id, declaration in devices.items():
@@ -158,26 +177,13 @@ def session_cleanup_assembly(
                     port_for(entry, "file_query")
                 except CapabilityNotDeclaredError:
                     continue
-                assembled[device_id] = (
-                    entry, AttemptConfig(
-                        max_attempts=max_delete_attempts,
-                        timeout_s=_device_seconds(declaration, "cleanup", "delete_timeout_s", _DEFAULT_TIMEOUT_S),
-                        retry_interval_s=_device_seconds(
-                            declaration, "cleanup", "delete_retry_interval_s", _DEFAULT_RETRY_INTERVAL_S)),
-                    AttemptConfig(
-                        max_attempts=max_query_attempts,
-                        timeout_s=_device_seconds(declaration, "cleanup", "query_timeout_s", _DEFAULT_TIMEOUT_S),
-                        retry_interval_s=_device_seconds(
-                            declaration, "cleanup", "query_retry_interval_s", _DEFAULT_RETRY_INTERVAL_S)))
+                assembled[device_id] = (entry, operation_config(declaration, "delete"),
+                                        operation_config(declaration, "query"))
             return assembled
 
-        # 已提交查询也可能尚未交给成员；其本地处理先于当前驱动解析。
-        saved_query = owned.connection.execute(
-            "SELECT 1 FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
-            " JOIN cleanup_items c ON c.id=r.cleanup_item_id"
-            " WHERE r.kind=5 AND c.status NOT IN (4,5,6)"
-            " AND a.result_event_id IS NOT NULL LIMIT 1").fetchone()
-        if not queries and not companions and not intents and not deletes and not saves and saved_query is None:
+        # 原历史与本地保存先交接；当前端口仅在需要新调用时解析。
+        from camctl.outputs.cleanup_discovery import has_cleanup_handoff
+        if not any((queries, companions, intents, deletes, saves)) and not has_cleanup_handoff(owned.connection):
             load_ports()
         base = CleanupRuntime(
             owned=owned, outputs=OutputsRepository(), operations=OperationRepository(),
@@ -192,6 +198,14 @@ def session_cleanup_assembly(
             pending_queries=queries, pending_companions=companions,
             pending_intents=intents, pending_deletes=deletes, pending_saves=saves,
             consumed_queries=consumed_queries,
+            recovery_boundary=recovery_boundary,
+            recovery_max_event_id=(recovery_max_event_id() if callable(recovery_max_event_id)
+                                   else recovery_max_event_id),
+            recovery_evidence_for=lambda binding, operation: (
+                recovery_registry(HostArtifacts, operation) if binding is None
+                else recovery_registry(drivers.entry(binding.driver_id), operation)),
+            on_recovery_diagnostic=on_recovery_diagnostic,
+            discovery_batch_size=discovery_batch_size, active_calls=active,
         )
 
         def for_item(item_id):
@@ -211,11 +225,33 @@ def session_cleanup_assembly(
                 raise DeviceConfigurationError(f"清理协作者未装配: {binding.device_id}")
             entry, delete_config, query_config = assembly
             return replace(base, driver=entry.driver, evidence=entry.evidence,
-                           delete_config=delete_config, query_config=query_config)
+                           delete_config=delete_config, query_config=query_config,
+                           delete_supported=True, query_supported=True)
 
+        def for_operation(item_id, operation):
+            binding = base.binding_of(item_id)
+            if binding is None or binding_failure_details(check_binding(
+                    binding, SimpleNamespace(devices=devices))) is not None:
+                return base
+            declaration = devices[binding.device_id]
+            entry = drivers.entry(binding.driver_id)
+            if entry is None:
+                raise DeviceConfigurationError(f"原清理驱动未登记: {binding.driver_id}")
+            supported = (entry.declaration.delete_supported if operation == "delete"
+                         else entry.declaration.file_query_supported)
+            config = {}
+            if supported:
+                port_for(entry, "delete" if operation == "delete" else "file_query")
+                config[f"{operation}_config"] = operation_config(declaration, operation)
+            return replace(base, driver=entry.driver, evidence=entry.evidence,
+                delete_supported=entry.declaration.delete_supported,
+                query_supported=entry.declaration.file_query_supported, **config)
+
+        base.for_operation = for_operation
         base.for_item = for_item
         return base
 
+    factory.pending_collections = (intents, deletes, queries, companions, saves, active)
     return factory
 
 
@@ -232,16 +268,55 @@ def _member_binding(connection, item_id: int) -> DeviceBinding | None:
     return DeviceBinding(device_id=row[0], driver_id=row[1])
 
 
-def cleanup_flow(factory: Callable[[Any], CleanupRuntime | None]):
-    """构造推进清理执行的流程端口；每轮驱动一次。"""
+class CleanupFlow:
+    """会话拥有全部原保存集合；在途调用的 await 范围负责实际收场。"""
 
-    async def flow(context: Any) -> None:
-        owned = context.open_connection()
+    def __init__(self, factory, pending_collections=None, *, state_db_errors=False):
+        self._factory = factory
+        self._pending = tuple(pending_collections if pending_collections is not None
+                              else getattr(factory, "pending_collections", ()))
+        self._state_db_errors = state_db_errors
+        self._active = False
+        self._settled = None
+        self._stopping = False
+
+    def required_settlements(self):
+        return int(self._active) + sum(len(collection) for collection in self._pending)
+
+    def stop_new_work(self):
+        self._stopping = True
+
+    async def settle(self):
+        if self._active:
+            await self._settled.wait()
+        if self.required_settlements():
+            from camctl.session.service import StateDbFailure
+            raise StateDbFailure("原清理保存责任尚未可靠交接")
+
+    async def __call__(self, context):
+        if self._stopping or self._active:
+            return
+        self._active = True
+        self._settled = asyncio.Event()
         try:
-            runtime = factory(owned)
-            if runtime is not None:
-                await advance_cleanup(runtime)
+            owned = context.open_connection()
+            try:
+                runtime = self._factory(owned)
+                if runtime is not None:
+                    await advance_cleanup(runtime)
+            finally:
+                owned.connection.close()
+        except (sqlite3.Error, ConsistencyError) as error:
+            if not self._state_db_errors:
+                raise
+            from camctl.session.service import StateDbFailure
+            raise StateDbFailure(f"清理无法可靠读取或保存状态库事实: {error}") from error
         finally:
-            owned.connection.close()
+            self._active = False
+            self._settled.set()
 
-    return flow
+
+def cleanup_flow(factory: Callable[[Any], CleanupRuntime | None], *, pending_collections=None,
+                 state_db_errors=False):
+    """构造会话实际清理拥有者；消费标记不构成待存责任。"""
+    return CleanupFlow(factory, pending_collections, state_db_errors=state_db_errors)

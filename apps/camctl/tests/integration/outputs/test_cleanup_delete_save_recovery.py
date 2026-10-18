@@ -745,6 +745,11 @@ async def test_new_factory_completes_original_query_before_parsing_removed_drive
         assert len(driver.deletes) == 1 and len(driver.queries) == 1
         assert not runtime.pending_queries and not runtime.pending_intents
         assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 3
+        from camctl.devices.bindings import DeviceConfigurationError
+        # 原交接只占本轮；下一轮仍按当前普通装配前提判断。
+        with pytest.raises(DeviceConfigurationError):
+            await advance_cleanup(resumed)
+        assert len(driver.deletes) == len(driver.queries) == 1
     finally:
         fresh.connection.close()
 

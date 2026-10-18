@@ -5825,6 +5825,13 @@ class OutputsRepository:
         receipt = commit_operation(_FinishCleanupItemCommand(command, key), key, owned)
         return self._cleanup_item_outcome(receipt)
 
+    def handoff_cleanup_absence(self, command, key, owned):
+        from camctl.persistence.repositories.cleanup_absence import HandoffCleanupAbsenceCommand
+        if command.database_id != owned.metadata.instance_id:
+            raise ConsistencyError("缺席交接申请不属于原数据库")
+        return self._cleanup_item_outcome(commit_operation(
+            HandoffCleanupAbsenceCommand(command, key), key, owned))
+
     def fail_cleanup_item(
         self, command: FailCleanupItem, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[CleanupItemSaved]:
@@ -7578,7 +7585,9 @@ class _CleanupItemCommandMixin:
         deleting = int(_CLEANUP_ITEM_STATUS.DELETING)
         pending = int(_CLEANUP_ITEM_STATUS.PENDING_DELETE)
         canceled = int(_CLEANUP_ITEM_STATUS.CANCELED)
-        if any(item["status"] == succeeded for item in items.values()):
+        if ((output["availability"] == int(_AVAILABILITY.CLEANED)
+                and output["cleanup_status"] == int(_OUTPUT_CLEANUP_STATUS.COMPLETED))
+                or any(item["status"] == succeeded for item in items.values())):
             return {"availability": int(_AVAILABILITY.CLEANED),
                     "cleanup_status": int(_OUTPUT_CLEANUP_STATUS.COMPLETED),
                     "cleanup_error_json": None}
@@ -7944,26 +7953,8 @@ def _member_delete_dispatch_state(connection, item_id: int) -> tuple[bool, bool]
     据的已结束尝试都算可能派发；可靠未派发不撤销其他尝试。另一成
     员的 DELETE 不进入本成员分类（按 cleanup_item_id 单向关联）。
     """
-    delete_kind = int(enum_for("operation_runs.kind").DELETE_FILE)
-    dispatched = unsettled = False
-    with closing(connection.execute(
-        "SELECT a.status, a.result_json FROM operation_attempts a"
-        " JOIN operation_runs r ON a.run_id = r.id"
-        " WHERE r.cleanup_item_id = ? AND r.kind = ?"
-        " ORDER BY a.id", (item_id, delete_kind),
-    )) as cursor:
-        rows = cursor.fetchall()
-    for status, result_json in rows:
-        if int(status) == int(enum_for("operation_attempts.status").RUNNING) \
-                or result_json is None:
-            unsettled = True
-            continue
-        basis = connection.execute(
-            "SELECT json_extract(?, '$.settlement.basis')", (result_json,)
-        ).fetchone()[0]
-        if basis != "not_dispatched":
-            dispatched = True
-    return dispatched, unsettled
+    from camctl.outputs.cleanup_results import cleanup_member_delete_state
+    return cleanup_member_delete_state(connection,item_id)
 
 
 class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
@@ -9443,3 +9434,5 @@ def register_outputs_guards() -> None:
     register_guard("target_set", _target_set_guard)
     register_guard("cleanup_member", _cleanup_member_guard)
     register_guard("cleanup", _cleanup_guard)
+    from camctl.persistence.repositories.cleanup_absence import cleanup_result_source_guard
+    register_guard("cleanup_result_source", cleanup_result_source_guard)

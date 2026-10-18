@@ -1126,6 +1126,11 @@
       "contract": "operation-fields.md#等待未知结果和占用恢复",
       "rule": "原有限任务取消后第一次停止失败可靠终结，原 SENT、原冻结策略、自然等待及完整结果页共同支持活动结束；不生成目标完成或成功停止。",
       "scope": "transaction"
+    },
+    "cleanup_result_source": {
+      "contract": "cleanup-coordination.md",
+      "rule": "纯文件交接只引用原终态成员已可靠保存的精确 DELETE 或 QUERY 缺席结果，产物观察核对原结果与唯一承载文件关联及前序文件完成事实；保存命令约束完整实际变化事件组，原键核实完整事务、来源、目标与时刻。原成员、动作、流程及调用事实保持。",
+      "scope": "transaction"
     }
   },
   "state_models": {
@@ -6188,9 +6193,12 @@
             "ownership",
             "report_impact",
             "output",
-            "cleanup_aggregate"
+            "cleanup_aggregate",
+            "cleanup_result_source"
           ],
-          "evidence": []
+          "evidence": [
+            "cleanup_result_source"
+          ]
         }
       }
     },

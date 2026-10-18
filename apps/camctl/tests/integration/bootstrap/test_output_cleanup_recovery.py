@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from camctl.bootstrap.cleanup_assembly import cleanup_flow, session_cleanup_assembly
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
 from camctl.outputs.cleanup_flow import CancelCleanupItem
 from camctl.persistence.models import DbOutcomeKind
@@ -55,7 +55,8 @@ async def test_cancel_cleanup_without_original_query_result_keeps_all_responsibi
         devices=current.devices, drivers=_registry(driver), max_delete_attempts=3, max_query_attempts=3,
         staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
 
-    await cleanup_flow(factory)(context)
+    with pytest.raises(ConsistencyError, match="恢复收场"):
+        await cleanup_flow(factory)(context)
 
     assert tuple(owned.connection.iterdump()) == before
     assert (tuple(driver.deletes), tuple(driver.queries)) == calls

@@ -362,9 +362,8 @@ class TestCleanupCancel:
         # 等待流程推进到删除调用挂起后，取消才到达。
         await asyncio.sleep(0)
         await asyncio.sleep(0)
-        owned.connection.execute(
-            "UPDATE actions SET cancel_requested = 1 WHERE id = 30")
-        owned.connection.commit()
+        from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
+        _apply_cleanup_cancel(owned,30)
         release.set()
         step = await task
         assert step.phase == "canceled", step

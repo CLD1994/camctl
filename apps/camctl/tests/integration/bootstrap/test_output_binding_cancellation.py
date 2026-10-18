@@ -51,7 +51,7 @@ def _apply_cleanup_cancel(owned):
 
 @pytest.mark.parametrize("code", ["delete_unconfirmed", "file_delete_failed"])
 async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, code):
-    _cfg, owned, _context, _driver = environment
+    cfg, owned, context, driver = environment
     output_id = await _pending_cleanup(environment, confirmed_present=code == "file_delete_failed")
     target, origin, cancel_item_id = _apply_cleanup_cancel(owned)
     cleanup_item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
@@ -60,6 +60,12 @@ async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, co
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     settlement = TargetSettlement(owned, OutputsRepository(), CancellationRepository(),
                                   lambda _: "unknown", lambda: _NOW)
+
+    assert not (await settlement.settle(target)).complete
+    await cleanup_flow(session_cleanup_assembly(
+        devices=cfg.devices, drivers=_registry(driver), max_delete_attempts=3,
+        max_query_attempts=3, staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
+        monotonic_ns=lambda: 0))(context)
 
     progress = await apply_cancel(ApplyCancel(origin, (cancel_item_id,)), CancellationRuntime(
         owned, CancellationRepository(), settlement, lambda: _NOW))
@@ -110,7 +116,7 @@ async def test_canceled_cleanup_preserves_saved_unknown_results_after_binding_ch
         }
     assert original_calls[0][5] is None
     assert json.loads(original_calls[1][5]) == {
-        "code": "device_error", "stage": "query", "details": {}}
+        "code": "source_query_failed", "stage": "query", "details": {}}
     calls_before = (tuple(driver.deletes), tuple(driver.queries))
     assert len(driver.deletes) == len(driver.queries) == 1
     source_before = owned.connection.execute(
@@ -155,8 +161,8 @@ async def test_canceled_cleanup_preserves_saved_unknown_results_after_binding_ch
         (f"exists/{item_id}", int(enum_for("operation_runs.kind").CHECK_FILE_EXISTS), unconfirmed, 1, 0),
     ]
     assert [json.loads(row[5]) for row in runs] == [
-        {"code": "delete_unconfirmed", "stage": "delete", "details": {}},
-        {"code": "delete_unconfirmed", "stage": "delete", "details": {}},
+        {"code": "delete_unconfirmed", "stage": "delete", "details": {"output_id": str(output_id)}},
+        {"code": "delete_unconfirmed", "stage": "delete", "details": {"output_id": str(output_id)}},
     ]
     assert owned.connection.execute(
         "SELECT * FROM device_files WHERE id=(SELECT device_file_id FROM outputs WHERE id=?)", (output_id,)).fetchone() == source_before

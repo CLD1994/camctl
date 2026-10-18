@@ -401,6 +401,7 @@ def cancel_flow(
     resume_media_results=None,
     resume_file_observations=None,
     resume_capture_completions=None,
+    cleanup_pending=None,
 ) -> Callable[[Any], Any]:
     """构造推进取消动作的会话流程。
 
@@ -487,7 +488,8 @@ def cancel_flow(
                     withdrawal_positions=_withdrawal_position(
                         owned, ready, processing),
                     occurred_at=occurred, work_files=work_files,
-                    withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal)
+                    withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
+                    cleanup_pending=cleanup_pending)
                 progress = await apply_cancel(
                     ApplyCancel(origin_action_id=action_id, item_ids=item_ids),
                     CancellationRuntime(
