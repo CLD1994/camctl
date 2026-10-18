@@ -5,17 +5,29 @@ import type { Followup } from "./Records";
 import { previewKind } from "../shared/media";
 import { download } from "./api";
 import { Badge, Facts } from "./common";
+import { cleanupEntryVisible } from "./device-options";
+import type { Capabilities } from "../shared/types";
 
 const groupNames = { video: "视频", image: "图片", other: "其他文件" };
 const source = (id: string) => `/api/media/${encodeURIComponent(id)}/content`;
 type Props = {
   products: Product[];
+  capabilities: Capabilities | null;
+  sourceDevices: Map<string, string | undefined>;
   active: boolean;
   follow: (f: Followup) => void;
   run: (fn: () => Promise<void>) => void;
   open: (id: string) => void;
 };
-export function MediaResults({ products, active, follow, run, open }: Props) {
+export function MediaResults({
+  products,
+  active,
+  capabilities,
+  sourceDevices,
+  follow,
+  run,
+  open,
+}: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const chosen = products.filter((p) => selected.has(p.id));
   const change = (ids: string[], value: boolean) =>
@@ -28,9 +40,7 @@ export function MediaResults({ products, active, follow, run, open }: Props) {
     // 每次选择归属于一个来源动作；跨来源操作分开准备，保留现有草稿流程。
     const sources = new Map<string, string[]>();
     for (const p of rows) {
-      const id =
-        p.output?.source_action_instance_id ??
-        p.deliveries[0]?.delivery.source_action_instance_id;
+      const id = sourceActionId(p);
       if (id) sources.set(id, [...(sources.get(id) ?? []), p.id]);
     }
     const [id, output_ids] = [...sources][0] ?? [];
@@ -44,13 +54,7 @@ export function MediaResults({ products, active, follow, run, open }: Props) {
         summary: `取回所选 ${output_ids.length} 个产物`,
       });
   }
-  const sourceIds = new Set(
-    chosen.map(
-      (p) =>
-        p.output?.source_action_instance_id ??
-        p.deliveries[0]?.delivery.source_action_instance_id,
-    ),
-  );
+  const sourceIds = new Set(chosen.map(sourceActionId));
   return (
     <section className="media-results">
       <div className="button-row">
@@ -105,7 +109,16 @@ export function MediaResults({ products, active, follow, run, open }: Props) {
         return rows.length ? (
           <ProductGroup
             key={group}
-            {...{ active, follow, run, open, selected, change }}
+            {...{
+              active,
+              capabilities,
+              sourceDevices,
+              follow,
+              run,
+              open,
+              selected,
+              change,
+            }}
             name={groupNames[group]}
             products={rows}
           />
@@ -118,6 +131,8 @@ function ProductGroup({
   name,
   products,
   active,
+  capabilities,
+  sourceDevices,
   follow,
   run,
   open,
@@ -220,7 +235,7 @@ function ProductGroup({
           <ProductCard
             key={p.id}
             product={p}
-            {...{ active, follow, run, open }}
+            {...{ active, capabilities, sourceDevices, follow, run, open }}
             selected={selected.has(p.id)}
             select={(v) => change([p.id], v)}
             preview={(e) => {
@@ -274,6 +289,8 @@ function ProductGroup({
 function ProductCard({
   product: p,
   active,
+  capabilities,
+  sourceDevices,
   follow,
   run,
   open,
@@ -283,6 +300,8 @@ function ProductCard({
 }: {
   product: Product;
   active: boolean;
+  capabilities: Capabilities | null;
+  sourceDevices: Map<string, string | undefined>;
   follow: Props["follow"];
   run: Props["run"];
   open: Props["open"];
@@ -392,20 +411,26 @@ function ProductCard({
         {p.output && (
           <div className="button-row">
             <Badge value={p.output.availability} />
-            <button
-              onClick={() =>
-                follow({
-                  action: {
-                    name: "清理源产物",
-                    type: "delete_action_outputs",
-                    params: { output_ids: [p.id] },
-                  },
-                  summary: `清理源文件 ${p.name}`,
-                })
-              }
-            >
-              准备清理源产物
-            </button>
+            {(p.output.kind === "repaired" ||
+              cleanupEntryVisible(
+                capabilities,
+                sourceDevices.get(p.output.source_action_instance_id),
+              )) && (
+              <button
+                onClick={() =>
+                  follow({
+                    action: {
+                      name: "清理源产物",
+                      type: "delete_action_outputs",
+                      params: { output_ids: [p.id] },
+                    },
+                    summary: `清理源文件 ${p.name}`,
+                  })
+                }
+              >
+                准备清理源产物
+              </button>
+            )}
           </div>
         )}
         {p.deliveries.map(({ delivery: d, video: v, owner }) => (
@@ -455,6 +480,12 @@ function ProductCard({
         )}
       </details>
     </article>
+  );
+}
+function sourceActionId(product: Product): string | undefined {
+  return (
+    product.output?.source_action_instance_id ??
+    product.deliveries[0]?.delivery.source_action_instance_id
   );
 }
 function ProductRelation({ product: p }: { product: Product }) {

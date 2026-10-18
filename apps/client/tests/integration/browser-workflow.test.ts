@@ -11,6 +11,7 @@ import {
   rmSync,
   copyFileSync,
   readFileSync,
+  writeFileSync,
   readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -235,6 +236,17 @@ it.each(["camera_take_photo", "camera_timelapse", "camera_record"] as const)(
   "拍摄 %s 在无产物且未开始时可准备清理，失败核实后仍使用同一目标",
   async (type) => {
     const { page, application } = await setup();
+    // 此用例验证追加流程；明确启用快捷清理声明，避免与 false 隐藏规则冲突。
+    const capabilityFile = join(
+      application.store.directory,
+      "device-capabilities.json",
+    );
+    const capabilities = JSON.parse(readFileSync(capabilityFile, "utf8")) as {
+      devices: Array<{ delete_supported?: boolean }>;
+    };
+    capabilities.devices[0]!.delete_supported = true;
+    writeFileSync(capabilityFile, JSON.stringify(capabilities));
+    application.reloadCapabilities();
     await page.getByTestId("initialize-button").click();
     const report = mappedReport(Buffer.from("probe"));
     report.plans![0].status = "pending";

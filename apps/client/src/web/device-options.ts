@@ -22,3 +22,15 @@ export function deviceOptions(
     ),
   };
 }
+
+/** 未知来源和旧目录缺少声明时保留入口；只隐藏明确声明不支持的设备。 */
+export function cleanupEntryVisible(
+  capabilities: Capabilities | null,
+  deviceId: unknown,
+): boolean {
+  if (typeof deviceId !== "string") return true;
+  return (
+    capabilities?.devices.find((device) => device.device_id === deviceId)
+      ?.delete_supported !== false
+  );
+}

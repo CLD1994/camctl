@@ -209,6 +209,7 @@ export function RecordDetail({
                       state.motorInputTexts?.[action.action_instance_id]
                     }
                     active={expanded}
+                    capabilities={state.capabilities.active}
                     plan={plan}
                     allPlans={allPlans}
                     videos={state.videos ?? []}

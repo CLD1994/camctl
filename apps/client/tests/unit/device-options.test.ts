@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { deviceOptions } from "../../src/web/device-options";
+import {
+  cleanupEntryVisible,
+  deviceOptions,
+} from "../../src/web/device-options";
 import type { Capabilities } from "../../src/shared/types";
 
 const capabilities: Capabilities = {
@@ -64,5 +67,38 @@ it.each([null, { devices: [] }, { devices: [capabilities.devices[1]] }])(
       "report_status",
       "motor_control",
     ]);
+  },
+);
+
+const cleanupCapabilities: Capabilities = {
+  devices: [
+    {
+      device_id: "host-source",
+      driver_id: "shared-driver",
+      delete_supported: true,
+      actions: [],
+    },
+    {
+      device_id: "device-source",
+      driver_id: "shared-driver",
+      delete_supported: false,
+      actions: [],
+    },
+    { device_id: "legacy-source", driver_id: "shared-driver", actions: [] },
+  ],
+};
+
+it.each([
+  [cleanupCapabilities, "host-source", true],
+  [cleanupCapabilities, "device-source", false],
+  [cleanupCapabilities, "legacy-source", true],
+  [cleanupCapabilities, "missing-source", true],
+  [cleanupCapabilities, undefined, true],
+  [null, "device-source", true],
+  [{ devices: [] } as Capabilities, "device-source", true],
+] as const)(
+  "清理入口仅在匹配设备明确声明不支持时隐藏",
+  (active, deviceId, visible) => {
+    expect(cleanupEntryVisible(active, deviceId)).toBe(visible);
   },
 );

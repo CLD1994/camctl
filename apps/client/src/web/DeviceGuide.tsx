@@ -77,6 +77,17 @@ export function DeviceGuide({
             {!device.actions.length && (
               <p className="empty">该设备尚未提供可用的拍摄任务。</p>
             )}
+            <p className="guide-cleanup-support">
+              当前配置选定的正式产物来源删除声明：
+              <strong>
+                {device.delete_supported === true
+                  ? "支持删除"
+                  : device.delete_supported === false
+                    ? "不支持删除"
+                    : "未知（未声明）"}
+              </strong>
+              。此声明不表示设备在线，也不保证某次删除一定成功。
+            </p>
             <div className="guide-task-grid">
               {device.actions.flatMap((action) =>
                 action.parameter_types.map((parameter) => (

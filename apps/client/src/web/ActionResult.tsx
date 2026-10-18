@@ -10,24 +10,28 @@ import { MediaResults } from "./MediaResults";
 import { isCameraAction } from "../shared/actions";
 import { actionLabel, Badge, Facts } from "./common";
 import { utcToLocal } from "./editing";
-import type { ReportAction, ReportPlan } from "../shared/types";
+import { cleanupEntryVisible } from "./device-options";
+import type { Capabilities, ReportAction, ReportPlan } from "../shared/types";
 import type { Video } from "../server/models";
 import type { Followup } from "./Records";
 
 export function ActionResult({
   action,
+  plan,
   allPlans,
   videos,
   follow,
   run,
   open,
   active,
+  capabilities,
   motorInputText,
   source,
   merged,
   association,
 }: {
   active: boolean;
+  capabilities: Capabilities | null;
   motorInputText?: string;
   source?: ReportAction;
   merged?: boolean;
@@ -47,6 +51,21 @@ export function ActionResult({
       : undefined;
   const products =
     automatic?.products ?? resultProducts(action, allPlans, videos);
+  const sourceDevices = new Map(
+    [plan, ...allPlans].flatMap((owner) =>
+      (owner.actions ?? [])
+        .filter((candidate) => isCameraAction(candidate.type))
+        .map(
+          (candidate) =>
+            [
+              candidate.action_instance_id,
+              typeof candidate.device_id === "string"
+                ? candidate.device_id
+                : undefined,
+            ] as const,
+        ),
+    ),
+  );
   const ready = products.filter((p) => p.state === "ready").length;
   const problems =
     automatic?.problems ?? products.reduce((sum, p) => sum + p.problems, 0);
@@ -195,24 +214,26 @@ export function ActionResult({
               >
                 准备取回默认产物
               </button>
-              <button
-                onClick={() =>
-                  follow({
-                    action: {
-                      name: `清理 ${action.name}`,
-                      type: "delete_action_outputs",
-                      params: {
-                        source: {
-                          action_instance_id: action.action_instance_id,
+              {cleanupEntryVisible(capabilities, action.device_id) && (
+                <button
+                  onClick={() =>
+                    follow({
+                      action: {
+                        name: `清理 ${action.name}`,
+                        type: "delete_action_outputs",
+                        params: {
+                          source: {
+                            action_instance_id: action.action_instance_id,
+                          },
                         },
                       },
-                    },
-                    summary: `清理 ${action.name} 的全部正式源产物，包括原文件、预览和修复成品；不清理客户端副本`,
-                  })
-                }
-              >
-                准备清理动作全部源产物
-              </button>
+                      summary: `清理 ${action.name} 的全部正式源产物，包括原文件、预览和修复成品；不清理客户端副本`,
+                    })
+                  }
+                >
+                  准备清理动作全部源产物
+                </button>
+              )}
             </>
           )}
         </div>
@@ -236,6 +257,8 @@ export function ActionResult({
         {products.length > 0 && (
           <MediaResults
             products={products}
+            capabilities={capabilities}
+            sourceDevices={sourceDevices}
             active={active && expanded}
             follow={follow}
             run={run}
