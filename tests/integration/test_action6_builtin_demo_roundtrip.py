@@ -21,6 +21,7 @@ import time
 import pytest
 
 from camctl.contracts.enums import enum_for
+from camctl.devices.tasks import StartReturn
 from _wsl_host_demo import HostDemo, query_state, wait_for
 from camctl_fixtures import Deployment
 from test_camctl_c_module_roundtrip import _report_with_statuses
@@ -196,8 +197,12 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
     try:
         demo.start(env=environment)
         demo.submit(capture_plan)
+        start_call = wait_for(lambda: next((call for call in _calls(calls_path)
+                            if call["kind"] == "start"), None),
+                            60, "没有取得唯一 START 原始调用")
         stop_call = wait_for(lambda: next((call for call in _calls(calls_path)
                             if call["kind"] == "stop"), None), 60, "没有取得正常 STOP 原始调用")
+        assert stop_call["started_ns"] - start_call["returned_ns"] >= 11_000_000_000
         stop_ns = stop_call["returned_ns"]
         # 文件在 START 时已存在也不能提前成功；至少检查停止后的前三秒。
         deadline = stop_ns + 3_000_000_000
@@ -213,6 +218,7 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         assert json.loads(rows[0][0]) == params
         execution = json.loads(rows[0][1])
         assert execution["target_duration_ms"] == 10000
+        assert execution["startup_margin_ms"] == 1000
         assert execution["file_completion_wait_ms"] == 5000
         assert execution["output_scope"] == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
         assert "aperture" not in json.loads(rows[0][0]) and "bitrate" not in json.loads(rows[0][0])
@@ -222,10 +228,19 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         stop_document = json.loads(stop_document)
         assert [item["type"] for item in stop_document["observations"]] == ["stop_confirmed"]
         activity_rows = query_state(deployment.state_db,
-            "SELECT id,baseline_state,baseline_first_event_id,baseline_last_event_id FROM device_activities"
+            "SELECT id,baseline_state,baseline_first_event_id,baseline_last_event_id,"
+            "started_at,sent_at,start_return_meaning FROM device_activities"
             " WHERE action_id=?", (action_id,))
-        assert len(activity_rows) == 1 and activity_rows[0][2:] != (None, None)
+        assert len(activity_rows) == 1 and activity_rows[0][2:4] != (None, None)
+        assert activity_rows[0][4] is None and activity_rows[0][5] is not None
+        assert activity_rows[0][6] == int(StartReturn.SENT)
         activity_id = activity_rows[0][0]
+        start_results = _results(deployment.state_db, action_id,
+                                 enum_for("operation_runs.kind").START)
+        assert len(start_results) == 1
+        start_document = json.loads(start_results[0][2])
+        assert [item["type"] for item in start_document["observations"]] == ["recording_sent"]
+        assert start_document["observations"][0]["data"]["response_payload"] == "00"
         result_rows = _results(deployment.state_db, action_id, enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)
         assert result_rows
         completed = []

@@ -1,9 +1,4 @@
-"""安装版 camctl 入口的时钟边界包装器。
-
-它仍调用 wheel 中的真实 CLI 和业务装配，只让已声明的时钟端口读取
-共享偏移文件。asyncio.sleep、ADB transport、task factory 和相机合同均
-保持安装包原实现。
-"""
+"""安装版 camctl 入口的绝对时钟边界包装器。"""
 
 from __future__ import annotations
 
@@ -12,7 +7,8 @@ import os
 from pathlib import Path
 import sys
 import time as _real_time
-from types import SimpleNamespace
+
+from _osmo_builtin_clock import ControlledClock
 
 
 def _append_record(path: Path, record: dict) -> None:
@@ -25,36 +21,10 @@ def _append_record(path: Path, record: dict) -> None:
         os.close(descriptor)
 
 
-def _controlled_time(offset_path: Path):
-    def offset_ns() -> int:
-        raw = offset_path.read_text(encoding="ascii").strip()
-        value = int(raw)
-        if value < 0:
-            raise ValueError("OSMO 测试时钟偏移不能为负数")
-        return value
-
-    def time_ns() -> int:
-        return _real_time.time_ns() + offset_ns()
-
-    def monotonic_ns() -> int:
-        return _real_time.monotonic_ns() + offset_ns()
-
-    def wall_seconds() -> float:
-        return time_ns() / 1_000_000_000
-
-    return SimpleNamespace(
-        time_ns=time_ns,
-        monotonic_ns=monotonic_ns,
-        time=wall_seconds,
-    )
-
-
 def _install_clock_ports(controlled_time) -> None:
     """替换安装进程各自捕获的时钟模块引用，不改全局标准库。"""
     from camctl.bootstrap import clocks, lifecycle
     from camctl.bootstrap import capture_assembly, cleanup_assembly, obtain_assembly
-    from camctl.devices.drivers.adb_cameras import registration
-
     class ControlledSystemClock:
         def utc_micros(self) -> int:
             return controlled_time.time_ns() // 1_000
@@ -68,42 +38,52 @@ def _install_clock_ports(controlled_time) -> None:
     capture_assembly.time = controlled_time
     obtain_assembly.time = controlled_time
     cleanup_assembly.time = controlled_time
-    registration.time = controlled_time
 
 
 def main() -> int:
     started_ns = _real_time.monotonic_ns()
     log_path = Path(os.environ["CAMCTL_OSMO_TEST_PROCESS_LOG"])
     record = {
+        "stage": "started",
+        "pid": os.getpid(),
         "cwd": os.getcwd(),
         "python": sys.executable,
         "argv": [sys.argv[0], *sys.argv[1:]],
+        "command": list(sys.argv[1:]),
         "started_ns": started_ns,
     }
+    exitcode = 1
     try:
-        offset_path = Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_FILE"])
-        controlled_time = _controlled_time(offset_path)
+        state_path = Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_FILE"])
+        clock_log_path = Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_LOG"])
+        controlled_time = ControlledClock(state_path, clock_log_path)
         _install_clock_ports(controlled_time)
         import camctl
         from camctl import cli as camctl_cli
+        from camctl.capture import handlers
         from camctl.devices.drivers.adb_cameras import osmo360ii_capture, osmo360ii_results
 
         record["import_origins"] = {
             "camctl": camctl.__file__,
             "camctl.cli": camctl_cli.__file__,
+            "camctl.capture.handlers": handlers.__file__,
             "camctl.devices.drivers.adb_cameras.osmo360ii_capture": osmo360ii_capture.__file__,
             "camctl.devices.drivers.adb_cameras.osmo360ii_results": osmo360ii_results.__file__,
         }
-        exitcode = camctl_cli.main(sys.argv[1:])
-        record["exitcode"] = int(exitcode)
-        return int(exitcode)
+        _append_record(log_path, record)
+        exitcode = int(camctl_cli.main(sys.argv[1:]))
     except BaseException as error:
-        record["exitcode"] = 1
         record["exception"] = f"{type(error).__name__}: {error}"
         raise
     finally:
-        record["finished_ns"] = _real_time.monotonic_ns()
-        _append_record(log_path, record)
+        final = {
+            **record,
+            "stage": "finished",
+            "exitcode": int(exitcode),
+            "finished_ns": _real_time.monotonic_ns(),
+        }
+        _append_record(log_path, final)
+    return exitcode
 
 
 if __name__ == "__main__":

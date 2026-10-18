@@ -17,19 +17,28 @@ import subprocess
 import sys
 import time
 
+from _osmo_builtin_clock import read_clock
+
 
 REMOTE_DIRECTORY = "/mnt/media_rw/emulated/DCIM"
 OSV_PATH = REMOTE_DIRECTORY + "/OSMO_0001/VID_0001.OSV"
 LRF_PATH = REMOTE_DIRECTORY + "/OSMO_0001/VID_0001.LRF"
+_IMPORT_ORIGINS: dict[str, str] = {}
 
 
-def _clock_ns() -> int:
-    offset = int(Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_FILE"])
-                 .read_text(encoding="ascii").strip())
-    return time.monotonic_ns() + offset
+def _clock_fields(prefix: str) -> dict:
+    reading = read_clock(Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_FILE"]))
+    return {
+        f"{prefix}_clock_ns": reading["monotonic_ns"],
+        f"{prefix}_clock_utc_us": reading["utc_us"],
+        f"{prefix}_epoch": reading["epoch"],
+    }
 
 
 def _append(path: Path, record: dict) -> None:
+    record.setdefault("pid", os.getpid())
+    record.setdefault("cli_pid", os.getppid())
+    record.setdefault("import_origins", _IMPORT_ORIGINS)
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
     descriptor = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
@@ -77,7 +86,7 @@ def _control(script: str, *, root: Path, calls_path: Path):
                 "kind": kind, "script": script, "command": list(words),
                 "response": None, "cwd": os.getcwd(), "python": sys.executable,
                 "argv": sys.argv, "started_ns": started_ns,
-                "started_clock_ns": _clock_ns(),
+                **_clock_fields("started"),
             }, payload=None)
         payload = "ee" if (action_type == "camera_timelapse"
                            and words[-3:] == ("-c", "1e", "0000")) else "00"
@@ -109,7 +118,7 @@ def _control(script: str, *, root: Path, calls_path: Path):
         "python": sys.executable,
         "argv": sys.argv,
         "started_ns": started_ns,
-        "started_clock_ns": _clock_ns(),
+        **_clock_fields("started"),
     }
     if kind == "start":
         _append(calls_path, record)
@@ -124,17 +133,17 @@ def _control(script: str, *, root: Path, calls_path: Path):
             "kind": "start_response", "response": payload,
             "cwd": os.getcwd(), "python": sys.executable, "argv": sys.argv,
             "returned_ns": time.monotonic_ns(), "exitcode": 0,
-            "returned_clock_ns": _clock_ns(),
+            **_clock_fields("returned"),
         })
     else:
-        record.update(returned_ns=time.monotonic_ns(), returned_clock_ns=_clock_ns(), exitcode=0)
+        record.update(returned_ns=time.monotonic_ns(), **_clock_fields("returned"), exitcode=0)
         _append(calls_path, record)
     return _emit_response(payload)
 
 
 def _run_control(calls_path: Path, record: dict, *, payload: str | None):
     record["returned_ns"] = time.monotonic_ns()
-    record["returned_clock_ns"] = _clock_ns()
+    record.update(_clock_fields("returned"))
     record["exitcode"] = 0
     _append(calls_path, record)
     return _emit_response(payload)
@@ -189,7 +198,7 @@ def _file_call(script: str, *, root: Path, calls_path: Path) -> int:
         "python": sys.executable,
         "argv": sys.argv,
         "started_ns": time.monotonic_ns(),
-        "started_clock_ns": _clock_ns(),
+        **_clock_fields("started"),
     }
     if kind == "read":
         _append(calls_path, {**record, "kind": "read_started"})
@@ -224,7 +233,7 @@ def _file_call(script: str, *, root: Path, calls_path: Path) -> int:
         if stderr:
             sys.stderr.buffer.write(stderr)
         exitcode = process.wait()
-        record.update(returned_ns=time.monotonic_ns(), returned_clock_ns=_clock_ns(), exitcode=exitcode)
+        record.update(returned_ns=time.monotonic_ns(), **_clock_fields("returned"), exitcode=exitcode)
         _append(calls_path, record)
         return exitcode
         exitcode = process.wait()
@@ -235,12 +244,19 @@ def _file_call(script: str, *, root: Path, calls_path: Path) -> int:
         output = process.stdout.replace(str(root).encode(), b"")
         sys.stdout.buffer.write(output)
         sys.stderr.buffer.write(process.stderr)
-    record.update(returned_ns=time.monotonic_ns(), returned_clock_ns=_clock_ns(), exitcode=exitcode)
+    record.update(returned_ns=time.monotonic_ns(), **_clock_fields("returned"), exitcode=exitcode)
     _append(calls_path, record)
     return exitcode
 
 
 def main() -> int:
+    global _IMPORT_ORIGINS
+    from camctl.devices.drivers.adb_cameras import commands, filesystem
+
+    _IMPORT_ORIGINS = {
+        "camctl.devices.drivers.adb_cameras.commands": commands.__file__,
+        "camctl.devices.drivers.adb_cameras.filesystem": filesystem.__file__,
+    }
     expected_serial = os.environ["CAMCTL_OSMO_TEST_SERIAL"]
     if len(sys.argv) != 6 or sys.argv[1:5] != ["-s", expected_serial, "shell", "-T"]:
         raise ValueError(f"不是本场景明确绑定的 ADB shell 调用: {sys.argv[1:]!r}")

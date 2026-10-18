@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -22,6 +23,9 @@ import time
 import pytest
 
 from _wsl_host_demo import HostDemo, query_state, wait_for
+from _osmo_builtin_clock import (
+    format_utc, read_clock, set_frozen, set_running, whole_second_utc_us,
+)
 from camctl.contracts.enums import enum_for
 from camctl_fixtures import Deployment
 from test_camctl_c_module_roundtrip import _report_with_statuses
@@ -52,7 +56,8 @@ def _archive_logs(package_root: Path, log_dir: Path) -> Path:
     for scenario in runtime.iterdir() if runtime.exists() else ():
         if not scenario.is_dir():
             continue
-        for name in ("adb-calls.jsonl", "installed-cli-processes.jsonl"):
+        for name in ("adb-calls.jsonl", "installed-cli-processes.jsonl",
+                     "controlled-clock-reads.jsonl"):
             source = scenario / name
             if source.is_file():
                 target = archive / "runtime" / scenario.name / name
@@ -179,10 +184,118 @@ def _records(path: Path) -> list[dict]:
     return [json.loads(line) for line in lines]
 
 
-def _set_clock_offset(path: Path, offset_s: int) -> None:
-    temporary = path.with_suffix(".new")
-    temporary.write_text(str(offset_s * 1_000_000_000), encoding="ascii")
-    temporary.replace(path)
+def _clock_frames(record: dict, *, module: str, function: str) -> list[dict]:
+    return [frame for frame in record.get("stack", ())
+            if frame.get("module") == module and frame.get("function") == function]
+
+
+def _matching_boundary_reads(
+        clock_log: Path, *, pid: int, epoch: int, module: str,
+        function: str, kind: str, utc_us: int, monotonic_ns: int) -> tuple[int, int] | None:
+    by_line: dict[int, list[dict]] = {}
+    for record in _records(clock_log):
+        if (record.get("pid") != pid or record.get("epoch") != epoch
+                or record.get("kind") != kind
+                or record.get("utc_us") != utc_us
+                or record.get("monotonic_ns") != monotonic_ns):
+            continue
+        for frame in _clock_frames(record, module=module, function=function):
+            by_line.setdefault(frame["line"], []).append(record)
+    for line, rows in by_line.items():
+        rows.sort(key=lambda row: row["real_monotonic_ns"])
+        if (len(rows) >= 2
+                and rows[-1]["real_monotonic_ns"] - rows[0]["real_monotonic_ns"]
+                >= 500_000_000):
+            return line, rows[-1]["real_monotonic_ns"] - rows[0]["real_monotonic_ns"]
+    return None
+
+
+def _wait_for_boundary_reads(
+        clock_log: Path, *, pid: int, epoch: int, module: str,
+        function: str, kind: str, utc_us: int, monotonic_ns: int,
+        timeout_s: float = 30) -> tuple[int, int]:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        matched = _matching_boundary_reads(
+            clock_log, pid=pid, epoch=epoch, module=module, function=function,
+            kind=kind, utc_us=utc_us, monotonic_ns=monotonic_ns)
+        if matched is not None:
+            return matched
+        time.sleep(0.05)
+    raise AssertionError(
+        f"安装版 run 未在决策调用点反复读取冻结边界: pid={pid} epoch={epoch} "
+        f"{module}.{function} kind={kind} utc_us={utc_us} monotonic_ns={monotonic_ns}")
+
+
+def _wait_for_running_read(
+        clock_log: Path, *, pid: int, epoch: int, module: str,
+        function: str, kind: str, utc_us: int, monotonic_ns: int,
+        real_monotonic_anchor_ns: int, timeout_s: float = 30) -> dict:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        for record in _records(clock_log):
+            if (record.get("pid") == pid and record.get("epoch") == epoch
+                    and record.get("kind") == kind
+                    and record.get("utc_us", -1) >= utc_us
+                    and record.get("monotonic_ns", -1) >= monotonic_ns
+                    and record.get("real_monotonic_ns", -1) >= real_monotonic_anchor_ns
+                    and any(frame.get("module") == module
+                            and frame.get("function") == function
+                            for frame in record.get("stack", ()))):
+                return record
+        time.sleep(0.05)
+    raise AssertionError(
+        f"恢复 run 未在释放 epoch 的决策调用点继续读取时钟: pid={pid} epoch={epoch} "
+        f"{module}.{function} kind={kind}")
+
+
+def _wait_for_run_process(
+        process_log: Path, module_log: Path, previous_pids: set[int], timeout_s: float = 30
+        ) -> dict:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        host_log = module_log.read_text(encoding="utf-8", errors="replace")
+        host_pids = set(map(int, re.findall(
+            r"command=run pid=(\d+) spawned execution=unknown", host_log)))
+        for record in _records(process_log):
+            if (record.get("stage") == "started" and record.get("pid") not in previous_pids
+                    and record.get("command", [None])[0] == "run"
+                    and record["pid"] in host_pids):
+                return record
+        time.sleep(0.05)
+    raise AssertionError("C host 日志没有对应的安装版 run 子进程 PID")
+
+
+def _assert_recovery_boundary_empty(
+        deployment: Deployment, adb_log: Path, *, action_id: int,
+        activity_id: int, recovery_started_ns: int) -> None:
+    stop_kind = int(enum_for("operation_runs.kind").STOP)
+    result_kind = int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)
+    assert query_state(deployment.state_db,
+        "SELECT t.id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " WHERE r.action_id=? AND r.kind IN (?,?) ORDER BY t.id",
+        (action_id, stop_kind, result_kind)) == []
+    assert query_state(deployment.state_db,
+        "SELECT id FROM history_events"
+        " WHERE json_extract(body_json,'$.evidence.result_page.activity_id')=?",
+        (activity_id,)) == []
+    assert query_state(deployment.state_db,
+        "SELECT id FROM device_files WHERE source_action_id=?", (action_id,)) == []
+    assert query_state(deployment.state_db,
+        "SELECT id FROM outputs WHERE source_action_id=?", (action_id,)) == []
+    assert not any(call.get("kind") in {
+        "stop", "directory", "metadata", "digest", "read", "read_started",
+    } and call.get("started_ns", 0) >= recovery_started_ns for call in _records(adb_log))
+    activity = query_state(deployment.state_db,
+        "SELECT sent_at,started_at,capture_json,completion_basis,"
+        "completion_evidence_json,result_check_json"
+        " FROM device_activities WHERE action_id=?", (action_id,))
+    assert len(activity) == 1
+    undetermined = int(enum_for("device_activities.completion_basis").UNDETERMINED)
+    assert activity[0][0] is not None
+    assert activity[0][1] is None and activity[0][2] is None
+    assert activity[0][3] in (None, undetermined)
+    assert activity[0][4:] == (None, None)
 
 
 def _scheduled_at(offset_s: int, *, lead_s: int = 2) -> str:
@@ -194,27 +307,27 @@ def _capture_params(action_type: str) -> dict:
     if action_type == "camera_record":
         return {
             "type": "osmo360ii_record",
-            "duration_s": 300,
+            "duration_s": 10,
             "exposure": {"mode": "auto", "compensation_ev": 0},
         }
     assert action_type == "camera_timelapse"
     return {
         "type": "osmo360ii_timelapse",
-        "interval_s": 1,
+        "interval_s": 2,
         "duration_s": 300,
         "outputs": "video",
         "exposure": {"mode": "auto"},
     }
 
 
-def _capture_body(action_type: str, params: dict, *, offset_s: int = 0) -> dict:
+def _capture_body(action_type: str, params: dict, *, scheduled_at: str | None = None) -> dict:
     return {
         "name": f"osmo-{action_type}",
         "actions": [{
             "name": "capture",
             "type": action_type,
             "device_id": "osmo360ii",
-            "scheduled_at": _scheduled_at(offset_s),
+            "scheduled_at": scheduled_at or _scheduled_at(0),
             "params": params,
             "policy": {"max_delay_ms": 30000},
         }],
@@ -227,6 +340,8 @@ def _install_osmo_process_tools(
         ) -> tuple[dict[str, str], Path, Path, Path]:
     tools = scratch / "tools"
     tools.mkdir(parents=True)
+    clock_helper = tools / "_osmo_builtin_clock.py"
+    shutil.copyfile(_ROOT / "_osmo_builtin_clock.py", clock_helper)
     adb_helper = tools / "osmo-adb.py"
     shutil.copyfile(_ROOT / "_osmo_builtin_adb.py", adb_helper)
     adb = tools / "adb"
@@ -243,8 +358,10 @@ def _install_osmo_process_tools(
         + shlex.quote(str(clock_entry)) + ' "$@"\n', encoding="utf-8")
     camctl.chmod(0o755)
 
-    clock_file = scratch / "clock-offset-ns.txt"
-    _set_clock_offset(clock_file, 0)
+    clock_file = scratch / "clock-state.json"
+    clock_log = scratch / "controlled-clock-reads.jsonl"
+    set_frozen(clock_file, utc_us=whole_second_utc_us(),
+               monotonic_ns=time.monotonic_ns())
     adb_root = scratch / "camera-files"
     adb_root.mkdir()
     (adb_root / "mnt/media_rw/emulated/DCIM").mkdir(parents=True)
@@ -267,6 +384,7 @@ def _install_osmo_process_tools(
         "CAMCTL_OSMO_TEST_ADB_LOG": str(adb_log),
         "CAMCTL_OSMO_TEST_SAMPLE": str(sample),
         "CAMCTL_OSMO_TEST_CLOCK_FILE": str(clock_file),
+        "CAMCTL_OSMO_TEST_CLOCK_LOG": str(clock_log),
         "CAMCTL_OSMO_TEST_PROCESS_LOG": str(process_log),
         "CAMCTL_OSMO_TEST_READ_GATE": str(read_gate),
         "CAMCTL_OSMO_TEST_READ_GATE_AFTER_BYTES": "65536",
@@ -309,6 +427,7 @@ def _assert_cli_process_provenance(package: _InstalledPackage, process_log: Path
     expected_origins = {
         "camctl",
         "camctl.cli",
+        "camctl.capture.handlers",
         "camctl.devices.drivers.adb_cameras.osmo360ii_capture",
         "camctl.devices.drivers.adb_cameras.osmo360ii_results",
     }
@@ -318,7 +437,14 @@ def _assert_cli_process_provenance(package: _InstalledPackage, process_log: Path
         cwd = Path(record["cwd"]).resolve()
         assert cwd != _REPO and _REPO not in cwd.parents
         assert Path(record["python"]).resolve() == package.python.resolve()
-        assert "exitcode" in record
+        assert record["stage"] in ("started", "finished")
+        assert type(record["pid"]) is int and record["pid"] > 0
+        assert record["command"]
+        if record["stage"] == "finished":
+            assert type(record.get("exitcode")) is int
+            assert type(record.get("finished_ns")) is int
+        else:
+            assert "exitcode" not in record
         assert record["argv"]
         helper = Path(record["argv"][0]).resolve()
         assert helper != _REPO and _REPO not in helper.parents
@@ -333,12 +459,26 @@ def _assert_cli_process_provenance(package: _InstalledPackage, process_log: Path
 def _assert_adb_process_provenance(package: _InstalledPackage, adb_log: Path) -> None:
     records = _records(adb_log)
     assert records
+    expected_origins = {
+        "camctl.devices.drivers.adb_cameras.commands",
+        "camctl.devices.drivers.adb_cameras.filesystem",
+    }
+    installed_site = (package.python.parent.parent / "lib" / "python3.11"
+                      / "site-packages").resolve()
     for record in records:
         cwd = Path(record["cwd"]).resolve()
         helper = Path(record["argv"][0]).resolve()
         assert cwd != _REPO and _REPO not in cwd.parents
         assert helper != _REPO and _REPO not in helper.parents
         assert Path(record["python"]).resolve() == package.python.resolve()
+        assert type(record["pid"]) is int and record["pid"] > 0
+        assert type(record["cli_pid"]) is int and record["cli_pid"] > 0
+        origins = record["import_origins"]
+        assert isinstance(origins, dict) and set(origins) == expected_origins
+        for origin in origins.values():
+            path = Path(origin).resolve()
+            assert installed_site in path.parents
+            assert _REPO not in path.parents
 
 
 def _assert_runtime_paths_external(
@@ -347,7 +487,9 @@ def _assert_runtime_paths_external(
     tools = scratch / "tools"
     paths = [
         scratch, tools, camctl, tools / "adb", tools / "osmo-adb.py",
-        tools / "osmo-clock-entry.py", Path(environment["CAMCTL_OSMO_TEST_CLOCK_FILE"]),
+        tools / "osmo-clock-entry.py", tools / "_osmo_builtin_clock.py",
+        Path(environment["CAMCTL_OSMO_TEST_CLOCK_FILE"]),
+        Path(environment["CAMCTL_OSMO_TEST_CLOCK_LOG"]),
         adb_root, Path(environment["CAMCTL_OSMO_TEST_SAMPLE"]),
         Path(environment["CAMCTL_OSMO_TEST_ADB_LOG"]),
         Path(environment["CAMCTL_OSMO_TEST_PROCESS_LOG"]),
@@ -360,6 +502,7 @@ def _assert_runtime_paths_external(
     assert camctl.is_file() and (tools / "adb").is_file()
     assert (tools / "osmo-adb.py").is_file()
     assert (tools / "osmo-clock-entry.py").is_file()
+    assert (tools / "_osmo_builtin_clock.py").is_file()
     assert Path(environment["CAMCTL_OSMO_TEST_CLOCK_FILE"]).is_file()
     assert Path(environment["CAMCTL_OSMO_TEST_SAMPLE"]).is_file()
     preview_sample = Path(environment["CAMCTL_OSMO_TEST_SAMPLE"]).with_suffix(".lrf")
@@ -414,6 +557,8 @@ def test_installed_osmo_describe_exposes_both_formal_capture_types(osmo_package,
     assert resources[_OSMO_CONFIG_RESOURCE].encode() == (_CAMERA_DEMOS / "osmo360ii-config.toml").read_bytes()
     assert resources[_OSMO_RECORD_RESOURCE].encode() == (_CAMERA_DEMOS / "osmo360ii-record.json").read_bytes()
     assert resources[_OSMO_TIMELAPSE_RESOURCE].encode() == (_CAMERA_DEMOS / "osmo360ii-timelapse.json").read_bytes()
+    timelapse_sample = json.loads(resources[_OSMO_TIMELAPSE_RESOURCE])
+    assert timelapse_sample["actions"][0]["params"]["interval_s"] == 2
 
     devices = [device for device in installed["devices"]
                if device["device_id"] == "osmo360ii"]
@@ -436,8 +581,8 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         tmp_path, host_demo, osmo_package, monkeypatch, action_type, include_preview):
     """正式 OSMO 合同经客户端、C host、安装 CLI、恢复、取回与 ACK。
 
-    受控时间只移动安装进程读到的共享时钟偏移。driver 的
-    asyncio.sleep(30) 保持原样；普通录像用真实单调时间验证 STOP 后等待。
+    受控时钟只接入既有业务时钟模块。driver 的 asyncio.sleep(30) 与
+    ADB 记录的真实单调时长保持原样。
     """
     package = osmo_package
     serial = _SERIAL
@@ -451,6 +596,9 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         include_preview=include_preview)
     adb_log = Path(environment["CAMCTL_OSMO_TEST_ADB_LOG"])
     process_log = Path(environment["CAMCTL_OSMO_TEST_PROCESS_LOG"])
+    clock_log = Path(environment["CAMCTL_OSMO_TEST_CLOCK_LOG"])
+    initial_clock = read_clock(clock_file)
+    assert initial_clock["mode"] == "frozen"
     _assert_runtime_paths_external(package, environment, scratch, camctl, adb_root,
                                    include_preview)
 
@@ -473,9 +621,12 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
 
     deployment.run_client_driver = client_driver
     capture_plan, capture_receipt = deployment.export_plan_with_client(
-        _capture_body(action_type, params))
+        _capture_body(action_type, params,
+                      scheduled_at=format_utc(initial_clock["utc_us"])))
     assert capture_receipt["last_report_id"] is None
-    exported_params = json.loads(capture_plan.read_text(encoding="utf-8"))["actions"][0]["params"]
+    exported_action = json.loads(capture_plan.read_text(encoding="utf-8"))["actions"][0]
+    assert exported_action["scheduled_at"] == format_utc(initial_clock["utc_us"])
+    exported_params = exported_action["params"]
     assert exported_params == params
 
     demo = HostDemo(deployment, host_demo, launcher=str(camctl))
@@ -504,13 +655,48 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         attempts = wait_for(saved_start_attempt, 90,
                             "正式 OSMO START 调用结果未可靠保存")
         assert len(attempts) == 1 and attempts[0][2] is not None
-        assert any(call.get("kind") == "start" for call in _records(adb_log))
+        start_call = next(call for call in _records(adb_log) if call.get("kind") == "start")
+        start_response = next(call for call in _records(adb_log)
+                              if call.get("kind") == "start_response")
+        assert start_call["started_clock_utc_us"] == initial_clock["utc_us"]
+        assert start_call["started_clock_ns"] == initial_clock["monotonic_ns"]
+        assert start_call["started_epoch"] == initial_clock["epoch"]
+        assert start_response["returned_clock_utc_us"] == initial_clock["utc_us"]
+        assert start_response["returned_clock_ns"] == initial_clock["monotonic_ns"]
+        assert start_response["returned_epoch"] == initial_clock["epoch"]
+        ack_clock_reads = [record for record in _records(clock_log)
+                           if record.get("pid") == start_response["cli_pid"]
+                           and record.get("epoch") == start_response["returned_epoch"]
+                           and record.get("utc_us") == start_response["returned_clock_utc_us"]
+                           and record.get("monotonic_ns") == start_response["returned_clock_ns"]
+                           and record.get("real_monotonic_ns", -1) >= start_response["returned_ns"]
+                           and _clock_frames(
+                               record, module="camctl.capture.handlers",
+                               function="_control_call")]
+        assert {record["kind"] for record in ack_clock_reads} >= {"time", "monotonic_ns"}
+        ack_call_lines = {
+            kind: {frame["line"] for record in ack_clock_reads
+                   if record["kind"] == kind
+                   for frame in _clock_frames(
+                       record, module="camctl.capture.handlers", function="_control_call")}
+            for kind in ("time", "monotonic_ns")
+        }
+        assert ack_call_lines["time"] & ack_call_lines["monotonic_ns"]
+        installed_site = (package.python.parent.parent / "lib" / "python3.11"
+                          / "site-packages").resolve()
+        assert all(installed_site in Path(frame["file"]).resolve().parents
+                   for record in ack_clock_reads
+                   for frame in _clock_frames(
+                       record, module="camctl.capture.handlers", function="_control_call"))
         started = _capture_facts(deployment.state_db)[0]
+        assert started[6] == initial_clock["utc_us"]
         if action_type == "camera_timelapse":
             assert started[6] is not None
         original_execution = json.loads(started[4])
-        assert original_execution["target_duration_ms"] == 300000
+        expected_target_ms = 10000 if action_type == "camera_record" else 300000
+        assert original_execution["target_duration_ms"] == expected_target_ms
         assert original_execution["file_completion_wait_ms"] == 30000
+        assert original_execution["startup_margin_ms"] == 1000
         from camctl.devices.tasks import EndControl, StartReturn
 
         if action_type == "camera_timelapse":
@@ -524,16 +710,15 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             assert started[6] is not None
             expected_start_observation = "timelapse_sent"
         else:
-            # camera_record stores its fixed target/wait/product contract without
-            # serializing the HOST_TIMER/STARTED modes into execution_spec_json.
-            # STARTED is persisted on the activity; HOST_TIMER is verified below
-            # from the real post-target STOP and its independent file wait.
+            # SENT records a reliable command acknowledgement while the device's
+            # actual recording start time remains unknown.
             start_return_rows = query_state(deployment.state_db,
                 "SELECT start_return_meaning FROM device_activities WHERE action_id=?",
                 (action_id,))
-            assert start_return_rows == [(int(StartReturn.STARTED),)]
-            assert started[5] is not None
-            expected_start_observation = "start_confirmed"
+            assert start_return_rows == [(int(StartReturn.SENT),)]
+            assert original_execution["start_return_meaning"] == int(StartReturn.SENT)
+            assert started[5] is None and started[6] is not None
+            expected_start_observation = "recording_sent"
         start_document = json.loads(attempts[0][3])
         assert [item["type"] for item in start_document["observations"]] == [
             expected_start_observation]
@@ -550,13 +735,68 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         assert len(_records(adb_log)) == before_wait
         assert query_state(deployment.state_db, "SELECT id FROM outputs") == []
 
-        # 中断原 C host run，保留刚才确认的 START、原参数、原绑定和基准。
+        # 中断原 C host run，保留已确认的 START、原参数、原绑定和基准。
         demo.stop()
-        natural_s = 300 if action_type == "camera_record" else 330
-        _set_clock_offset(clock_file, natural_s + 1)
+        natural_s = 10 if action_type == "camera_record" else 330
+        boundary_utc_us = initial_clock["utc_us"] + natural_s * 1_000_000
+        boundary_monotonic_ns = initial_clock["monotonic_ns"] + natural_s * 1_000_000_000
+        negative_state = set_frozen(
+            clock_file, utc_us=boundary_utc_us, monotonic_ns=boundary_monotonic_ns)
+        previous_pids = {row["pid"] for row in _records(process_log)}
         demo = HostDemo(deployment, host_demo, launcher=str(camctl))
         demo.start(env=environment)
         demo.submit(capture_plan)
+
+        recovered_run = _wait_for_run_process(
+            process_log, demo.log_path, previous_pids)
+        decision = ("_reconcile_recording", "time") if action_type == "camera_record" else (
+            "_advance_timelapse_natural_wait", "monotonic_ns")
+        line, real_gap_ns = _wait_for_boundary_reads(
+            clock_log, pid=recovered_run["pid"], epoch=negative_state["epoch"],
+            module="camctl.capture.handlers", function=decision[0], kind=decision[1],
+            utc_us=boundary_utc_us, monotonic_ns=boundary_monotonic_ns)
+        installed_site = (package.python.parent.parent / "lib" / "python3.11"
+                          / "site-packages").resolve()
+        line_records = [record for record in _records(clock_log)
+                        if record.get("pid") == recovered_run["pid"]
+                        and record.get("epoch") == negative_state["epoch"]
+                        and record.get("kind") == decision[1]
+                        and record.get("utc_us") == boundary_utc_us
+                        and record.get("monotonic_ns") == boundary_monotonic_ns
+                        and any(frame.get("module") == "camctl.capture.handlers"
+                                and frame.get("function") == decision[0]
+                                and frame.get("line") == line
+                                for frame in record.get("stack", ()))]
+        assert line_records
+        assert all(installed_site in Path(frame["file"]).resolve().parents
+                   for record in line_records
+                   for frame in _clock_frames(
+                       record, module="camctl.capture.handlers", function=decision[0])
+                   if frame["line"] == line)
+        assert real_gap_ns >= 500_000_000
+        recovered_host_log = demo.module_log()
+        assert re.search(
+            rf"command=run pid={recovered_run['pid']} spawned execution=unknown",
+            recovered_host_log)
+        activity_id = int(query_state(deployment.state_db,
+            "SELECT id FROM device_activities WHERE action_id=?", (action_id,))[0][0])
+        _assert_recovery_boundary_empty(
+            deployment, adb_log, action_id=action_id, activity_id=activity_id,
+            recovery_started_ns=recovered_run["started_ns"])
+
+        # 仍在运行的同一 CLI 进程释放到严格通过启动余量后的业务时钟。
+        release_utc_us = initial_clock["utc_us"] + (natural_s + 1) * 1_000_000
+        release_monotonic_ns = initial_clock["monotonic_ns"] + (natural_s + 1) * 1_000_000_000
+        release_state = set_running(
+            clock_file, utc_us=release_utc_us, monotonic_ns=release_monotonic_ns)
+        assert release_state["epoch"] == negative_state["epoch"] + 1
+        released_read = _wait_for_running_read(
+            clock_log, pid=recovered_run["pid"], epoch=release_state["epoch"],
+            module="camctl.capture.handlers", function=decision[0], kind=decision[1],
+            utc_us=release_utc_us, monotonic_ns=release_monotonic_ns,
+            real_monotonic_anchor_ns=release_state["real_monotonic_anchor_ns"])
+        assert any(frame.get("line") == line for frame in _clock_frames(
+            released_read, module="camctl.capture.handlers", function=decision[0]))
 
         capture_report = wait_for(
             lambda: _report_with_statuses(deployment.ready, {"capture": "succeeded"}),
@@ -589,9 +829,12 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         assert result_rows
 
         if action_type == "camera_record":
-            # 主机计时录像在 300 秒目标后发唯一 STOP 00，再由 driver 独立等待 30 秒。
+            # 主机计时录像在 10 秒目标与 1 秒启动余量后发唯一 STOP 00，
+            # 再由 driver 独立等待 30 秒。
             assert len(stops) == 1, all_calls
-            assert stops[0]["started_clock_ns"] - response["returned_clock_ns"] >= 300 * 1_000_000_000
+            assert stops[0]["started_clock_ns"] - response["returned_clock_ns"] >= 11 * 1_000_000_000
+            assert stops[0]["started_clock_utc_us"] - response["returned_clock_utc_us"] >= 11 * 1_000_000
+            assert stops[0]["started_epoch"] == release_state["epoch"]
             assert stops[0]["response"] == "00"
             assert stops[0].get("exitcode") == 0
             directories = [call for call in all_calls if call.get("kind") == "directory"
@@ -611,13 +854,16 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             assert completion["observed_wait_ns"] >= 30_000_000_000
             assert completion["completed"] is True
         else:
-            # DEVICE/SENT/TIME_AND_OUTPUTS 自然完成只等待 300 秒目标和 30 秒边界，
+            # DEVICE/SENT/TIME_AND_OUTPUTS 自然完成只等待 300 秒目标、
+            # 1 秒启动余量和 30 秒结果余量，
             # 随后读取原活动结果；正常结束没有 STOP，也没有 stop_return file_completion。
             assert stops == [], all_calls
             directories = [call for call in all_calls if call.get("kind") == "directory"
+                           and call.get("started_epoch") == release_state["epoch"]
                            and call.get("started_clock_ns", 0) >= response["returned_clock_ns"]]
             assert directories, all_calls
-            assert directories[0]["started_clock_ns"] - response["returned_clock_ns"] >= 330 * 1_000_000_000
+            assert directories[0]["started_clock_ns"] - response["returned_clock_ns"] >= 331 * 1_000_000_000
+            assert directories[0]["started_clock_utc_us"] - response["returned_clock_utc_us"] >= 331 * 1_000_000
 
         device_files = query_state(deployment.state_db,
             "SELECT id,locator_json,role,original_device_file_id,pairing_evidence_json,"
