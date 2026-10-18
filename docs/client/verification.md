@@ -4,11 +4,15 @@
 
 ## 设备能力声明的安装版消费验证（2026-10-18）
 
-在 Linux x86_64／WSL2、Node.js 24.20.0、pnpm 12.3.4 和 Python 3.11.16 中，执行[安装版联合用例](../../tests/integration/test_device_capability_declarations.py)，5 项通过，退出 0。用例在仓库外离线安装当前 wheel，使用真实配置导出全部内置拍摄任务，并将原始 JSON 交给客户端；组件测试的默认夹具仍独立于 Python。
+在 Linux x86_64／WSL2、Node.js 24.20.0、pnpm 12.3.4 和 Python 3.11.16 中，执行[安装版联合用例](../../tests/integration/test_device_capability_declarations.py)，6 项通过，退出 0。用例在仓库外离线安装当前 wheel，使用真实配置导出全部内置拍摄任务，并将原始 JSON 交给客户端；组件测试的默认夹具仍独立于 Python。
 
 客户端共享加载器、实际 `Application` 和 HTTP 状态完整保留设备删除布尔值、任务说明及 Schema 精确数字。`null`、数字、字符串、对象和数组这五类非法删除声明使整份重载失败，已有有效目录保持；同一非法文件在新启动时没有有效目录。旧 JSON 缺少删除字段时仍保持缺失，有效空设备目录能整体替换。联合用例先构建当前网页，再通过测试专用 `CAMCTL_TEST_CAPABILITIES_FILE` 将安装版导出注入 `browser-camera-parameters.test.ts` 与 `browser-editing.test.ts` 的“能力源”目标，2 项浏览器用例通过；参数表单读取同源字段说明，设备指南逐项显示全部任务说明，查看页面不改草稿。
 
-命令、UTC、日志和退出码保存在任务工作树 `.local/acceptance/c5/`；Python 发行物与组件门禁见[camctl 安装链记录](../camctl/verification.md#设备能力声明的安装版联合验证2026-10-18)。本节只记录 C1—C3 的安装版消费链。最终删除入口可见性、C4 组合及客户端完整单元和集成回归尚待执行，不能由这 2 项浏览器目标推定通过。软件结果不证明 ARM 部署或真实设备操作。
+独立页面联合用例使用安装版导出的全部内置设备和任意驱动，检查指南声明、动作级及单产物级清理入口。Hasselblad 当前配置从主机源切换为设备源再切回后，入口随对应声明更新；其他同驱动设备保持自身值。非法字段及重复键重载失败后仍按旧 false 目录隐藏入口并显示错误；首次加载失败与有效空目录均按未知保留入口。混合取回依据各产物的实际拍摄来源判断，false 的原片／预览隐藏快捷清理，修复成品继续保留；产物状态、草稿及真实导出的原请求保持不变。
+
+组合后以 `VITEST_MAX_WORKERS=2` 串行执行 `pnpm --dir apps/client run test:unit` 和 `pnpm --dir apps/client run test:integration`：59 个单元文件的 2890 项通过（25.10 秒），35 个集成文件的 1366 项通过（492.43 秒），均退出 0。集成脚本前置类型检查和网页构建通过；主包 854.75 kB，保留超过 500 kB 的构建提示。根目录两个 TypeScript 测试入口另外通过严格类型和格式检查。
+
+命令、UTC、日志和退出码保存在任务工作树 `.local/acceptance/c5/`；Python 发行物与组件门禁见[camctl 安装链记录](../camctl/verification.md#设备能力声明的安装版联合验证2026-10-18)。软件结果不证明 ARM 部署或真实设备操作。
 
 ## 2026-10-16 延时参数保存与恢复验证
 

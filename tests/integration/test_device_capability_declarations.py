@@ -114,6 +114,11 @@ def package(tmp_path_factory):
             shutil.copytree(root / "commands", archive, dirs_exist_ok=True)
 
 
+@pytest.fixture(scope="module")
+def client_build(package):
+    package.run(["pnpm", "run", "build"], cwd=CLIENT)
+
+
 def _config(package, directory, *, host_storage="host", fixtures=False):
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "config.toml"
@@ -230,12 +235,31 @@ def test_installed_document_survives_client_loader_http_and_invalid_reload(packa
     assert result["empty"] == {"devices": []}
 
 
-def test_installed_metadata_reaches_parameter_form_and_device_guide(package, tmp_path):
+def test_installed_metadata_reaches_parameter_form_and_device_guide(package, client_build, tmp_path):
     config = _config(package, tmp_path / "browser-config")
     capabilities = tmp_path / "installed-capabilities.json"
     capabilities.write_text(_describe(package, config), encoding="utf8")
-    package.run(["pnpm", "run", "build"], cwd=CLIENT)
     package.run([CLIENT / "node_modules/.bin/vitest", "run",
                  "tests/integration/browser-camera-parameters.test.ts",
                  "tests/integration/browser-editing.test.ts", "-t", "能力源"],
                 cwd=CLIENT, env={"CAMCTL_TEST_CAPABILITIES_FILE": str(capabilities)}, timeout=180)
+
+
+def test_installed_sources_control_browser_cleanup_across_reload_and_restart(package, client_build, tmp_path):
+    directory = tmp_path / "visibility-config"
+    config = _config(package, directory, fixtures=True)
+    current = tmp_path / "current.json"
+    current.write_text(_describe(package, config, fixture=True), encoding="utf8")
+    _config(package, directory, host_storage="device", fixtures=True)
+    changed = tmp_path / "changed.json"
+    changed.write_text(_describe(package, config, fixture=True), encoding="utf8")
+    receipt = tmp_path / "visibility.json"
+    package.run(["node", "--import", CLIENT / "node_modules/tsx/dist/loader.mjs",
+                 REPO / "tests/integration/device_capability_browser.ts",
+                 tmp_path / "browser-store", current, changed, receipt], cwd=CLIENT)
+    result = json.loads(receipt.read_text())
+    assert result == {
+        "installed": True, "changed_source": True, "restored_source": True,
+        "invalid_reload": True, "duplicate_key_reload": True,
+        "failed_startup": True, "empty_directory": True, "saved_inputs_unchanged": True,
+    }
