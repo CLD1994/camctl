@@ -61,10 +61,10 @@
 
 任务绑定与导出复用同一纯配置规则；对已冻结设备声明重复求值仍属同源，不要求只有一次函数调用，也不要求迁移现有 `DeploymentTaskFactory` 签名。Hasselblad 配置与定义模块保留局部导入或使用纯模块避免循环；主机纯能力模块不依赖 bootstrap 或 Catalog。ADB 录像／延时的固定设备源通过合同表达，不向既有执行定义新增存储字段。解析器应保持可重复装配，同源定义重复构造不因新建闭包身份不同产生假冲突。
 
-- [ ] **步骤 1：写失败测试。** 在 `apps/camctl/tests/unit/devices/test_catalog.py`、`test_definitions_runtime.py` 与 integration/devices 的 `test_adb_camera_registration.py`、Hasselblad 注册用例中，覆盖内部声明与源解析器缺失／非法／冲突、两次 Catalog 转换、部署任务绑定、无拍摄能力和重复登记。内部声明与运行登记比较；验证同一驱动两个不同 serial 的逻辑设备分别选 HOST／DEVICE，源能力计算不同但内部声明不变。HB 默认及显式 host 得 true、device 得 false，非法配置整份失败；合成驱动按相同规则验证。
-- [ ] **步骤 2：运行最窄目标确认失败。** 单元与组件集成分进程执行，失败来自缺少声明传递或一致性检查。
-- [ ] **步骤 3：实施同源传递。** 先同步责任规格，再为所有当前定义及部署适配提供完整内部声明和源解析器；首次登记与重复装配刷新都核对静态／运行一致性，批次先完成身份、重复与内部声明检查，再修改登记。批次后部拒绝后两个登记点均保持原快照。受理与 describe 共用 Catalog 的配置规则；所选源与首次受理固定的任务来源一致。定义错误按配置／内部错误处理；源变化不改旧执行定义。
-- [ ] **步骤 4：验证并提交。** 覆盖真实内置登记、`kind` 拍摄过滤、`deployment_task_factory` 绑定及 `apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py`。字段不能因没有录像工厂或 `actions: []` 丢失；不增加设备 I/O。
+- [x] **步骤 1：写失败测试。** 在 `apps/camctl/tests/unit/devices/test_catalog.py`、`test_definitions_runtime.py` 与 integration/devices 的 `test_adb_camera_registration.py`、Hasselblad 注册用例中，覆盖内部声明与源解析器缺失／非法／冲突、两次 Catalog 转换、部署任务绑定、无拍摄能力和重复登记。内部声明与运行登记比较；验证同一驱动两个不同 serial 的逻辑设备分别选 HOST／DEVICE，源能力计算不同但内部声明不变。HB 默认及显式 host 得 true、device 得 false，非法配置整份失败；合成驱动按相同规则验证。
+- [x] **步骤 2：运行最窄目标确认失败。** 单元与组件集成分进程执行，失败来自缺少声明传递或一致性检查。
+- [x] **步骤 3：实施同源传递。** 先同步责任规格，再为所有当前定义及部署适配提供完整内部声明和源解析器；首次登记与重复装配刷新都核对静态／运行一致性，批次先完成身份、重复与内部声明检查，再修改登记。批次后部拒绝后两个登记点均保持原快照。受理与 describe 共用 Catalog 的配置规则；所选源与首次受理固定的任务来源一致。定义错误按配置／内部错误处理；源变化不改旧执行定义。
+- [x] **步骤 4：验证并提交。** 覆盖真实内置登记、`kind` 拍摄过滤、`deployment_task_factory` 绑定及 `apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py`。字段不能因没有录像工厂或 `actions: []` 丢失；不增加设备 I/O。
 
 ## C2：扩展公共删除声明并接通真实加载
 
