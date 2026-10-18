@@ -9,6 +9,7 @@ import asyncio
 import queue
 import re
 import shlex
+from pathlib import PurePosixPath
 import threading
 from typing import Any
 
@@ -108,6 +109,66 @@ class ShellFileTools:
             '    printf \'%s\\000\' "$path" || exit $?',
             '    count=$((count + 1))',
             'done < "$tmp.sorted"',
+        ))
+
+    def file_presence_script(self, path, *, delete=False):
+        """单次精确删除及完整目录观察；输出大小不随目录条目数增长。"""
+        # find 同时列出非文件，不能因类型过滤漏掉同名目录或失效链接。
+        # 私有空记录携带 find 本身的退出码，不采用管道末段推断扫描成功。
+        parent = str(PurePosixPath(path).parent)
+        scan_root = parent if parent == "/" else parent + "/"
+        return "\n".join((
+            f'target={shlex.quote(path)}',
+            f'parent={shlex.quote(parent)}',
+            f'scan_root={shlex.quote(scan_root)}',
+            'rm_status=-',
+            *(('rm -- "$target"', 'rm_status=$?') if delete else ()),
+            '(',
+            '    scan_status=1',
+            '    if [ -d "$parent" ] && [ -r "$parent" ] && [ -x "$parent" ]; then',
+            '        find "$scan_root" -print0',
+            '        scan_status=$?',
+            '    fi',
+            "    printf '\\000%s\\000' \"$scan_status\"",
+            ') | (',
+            '    state=0',
+            '    count=0',
+            '    roots=0',
+            '    invalid=0',
+            '    while :; do',
+            "        IFS= read -r -d '' entry || exit 1",
+            '        [ -n "$entry" ] || break',
+            '        if [ "$entry" = "$parent" ] || [ "$entry" = "$scan_root" ]; then',
+            '            roots=$((roots + 1))',
+            '            continue',
+            '        fi',
+            '        case "$entry" in',
+            '            "$scan_root"*) relative=${entry#"$scan_root"};;',
+            '            *) invalid=1; continue;;',
+            '        esac',
+            '        case "/$relative/" in *"/../"*|*"/./"*|*"//"*) invalid=1; continue;; esac',
+            '        [ "$entry" = "$target" ] || continue',
+            '        count=$((count + 1))',
+            '        if [ "$count" -gt 1 ]; then',
+            '            state=duplicate',
+            '        elif [ -f "$target" ]; then',
+            '            state=1',
+            '        else',
+            '            state=type',
+            '        fi',
+            '    done',
+            "    IFS= read -r -d '' scan_status || exit 1",
+            '    case "$scan_status" in \"\"|*[!0-9]*) exit 1;; esac',
+            # 私有结束状态后必须是实际 EOF，残余字节不构成完整扫描。
+            "    IFS= read -r -d '' extra && exit 1",
+            '    [ -z "$extra" ] || exit 1',
+            '    if [ "$scan_status" -ne 0 ] && [ "$state" = 0 ]; then state=unknown; fi',
+            '    if [ "$roots" -gt 1 ] || [ "$invalid" -eq 1 ] ||',
+            '        { [ "$scan_status" -eq 0 ] && [ "$roots" -ne 1 ]; }; then state=invalid; fi',
+            "    printf 'CAMCTL-FILE/1\\000%s\\000%s\\000%s\\000%s\\000%s\\000END\\000' "
+                + ("delete" if delete else "query") + ' "$target" "$state" "$rm_status" "$scan_status" || exit $?',
+            '    [ "$scan_status" -eq 0 ] && [ "$state" != type ] && [ "$state" != duplicate ] && [ "$state" != invalid ]',
+            ')',
         ))
 
     def metadata_script(self, path):
