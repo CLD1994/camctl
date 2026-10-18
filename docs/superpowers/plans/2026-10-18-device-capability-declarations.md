@@ -83,11 +83,11 @@
 
 **接口：** 原有 `ActionCapability.name/description` 与 Schema `title/description`。任务固定设置和启动后取消限制由与执行任务一致的权威定义提供，不新增公共取消字段，不依型号名称在客户端补文案。
 
-- [ ] **步骤 1：写正式说明失败测试。** 覆盖 Action6 录像、OSMO 录像和原生延时、Hasselblad 单张。所有用户可填写字段及实际分支具有可读名称、含义和单位：秒、EV，固定白平衡用 K。包括 Action6 的分辨率、视野、防抖、可选光圈／码率和曝光成员，不只检查 OSMO。
-- [ ] **步骤 2：运行 unit/devices 的 `test_adb_camera_parameters.py`、`test_osmo360ii_capture.py` 及 Hasselblad 能力用例确认失败。** 断言事实和结构，不逐字锁定人类文案。
-- [ ] **步骤 3：实施任务与字段说明。** OSMO 录像说明全景、8K／30 fps、D-Log M、高码率请求；Manual 为 ISO 800、1/60 秒快门，两种曝光均请求 5200 K，Auto 为 EV 0。原生延时说明全景、8K／30 fps，只有 Manual 请求 ISO 800、1/60 秒和 5200 K。Action6 说明自身固定设置及省略光圈／码率时保持原设置；Hasselblad 说明单张 RAW 和沿用机身设置。请求设置、独立读回、假定参考码率分别表达。
-- [ ] **步骤 4：补启动后取消说明。** 从实际任务停止及取消策略生成说明并核对工厂返回：Action6／OSMO 普通录像支持启动后取消；OSMO 有限原生延时沿原目标结束策略收场，不承诺立即停止；Hasselblad 启动前可取消、启动后不支持取消。不能只用驱动级 stop 布尔值替代所有参数类型的任务策略。
-- [ ] **步骤 5：验证 UI 消费并提交。** 扩展 `apps/client/tests/integration/browser-camera-parameters.test.ts`、`browser-editing.test.ts`，用经公共协议校验的元数据夹具核对表单、任务说明与指南同源且查看不改草稿；组件测试不启动 Python CLI。保留测试输入注入方式，供 C5 根跨组件验收加载真实安装版导出，避免复制生产参数和说明清单。保持参数域、命令、默认值、预览、估算与时间组合；参数专题将设备进度统一引用[验证记录](../../camctl/verification.md)和对应完成计划。
+- [x] **步骤 1：写正式说明失败测试。** 覆盖 Action6 录像、OSMO 录像和原生延时、Hasselblad 单张。所有用户可填写字段及实际分支具有可读名称、含义和单位：秒、EV，固定白平衡用 K。包括 Action6 的分辨率、视野、防抖、可选光圈／码率和曝光成员，不只检查 OSMO。
+- [x] **步骤 2：运行 unit/devices 的 `test_adb_camera_parameters.py`、`test_osmo360ii_capture.py` 及 Hasselblad 能力用例确认失败。** 断言事实和结构，不逐字锁定人类文案。
+- [x] **步骤 3：实施任务与字段说明。** OSMO 录像说明全景、8K／30 fps、D-Log M、高码率请求；Manual 为 ISO 800、1/60 秒快门，两种曝光均请求 5200 K，Auto 为 EV 0。原生延时说明全景、8K／30 fps，只有 Manual 请求 ISO 800、1/60 秒和 5200 K。Action6 说明自身固定设置及省略光圈／码率时保持原设置；Hasselblad 说明单张 RAW 和沿用机身设置。请求设置、独立读回、假定参考码率分别表达。
+- [x] **步骤 4：补启动后取消说明。** 从实际任务停止及取消策略生成说明并核对工厂返回：Action6／OSMO 普通录像支持启动后取消；OSMO 有限原生延时沿原目标结束策略收场，不承诺立即停止；Hasselblad 启动前可取消、启动后不支持取消。不能只用驱动级 stop 布尔值替代所有参数类型的任务策略。
+- [x] **步骤 5：验证 UI 消费并提交。** 扩展 `apps/client/tests/integration/browser-camera-parameters.test.ts`、`browser-editing.test.ts`，用经公共协议校验的元数据夹具核对表单、任务说明与指南同源且查看不改草稿；组件测试不启动 Python CLI。保留测试输入注入方式，供 C5 根跨组件验收加载真实安装版导出，避免复制生产参数和说明清单。保持参数域、命令、默认值、预览、估算与时间组合；参数专题将设备进度统一引用[验证记录](../../camctl/verification.md)和对应完成计划。
 
 ## C4：按通用声明控制页面入口
 
