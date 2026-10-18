@@ -11,6 +11,8 @@ import pytest
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
+from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+from camctl.outputs.work_files import WorkFileLimits
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.values import new_operation_key
@@ -131,6 +133,8 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
     owned = open_existing(database, DbOpenMode.EXISTING_RW, DbConfig())
     catalog = build_catalog(config, DriverDefinitions({DRIVER_ID: driver_definition()}))
     history = HistoryRepository(database)
+    work_files = WorkFileRuntime(staging=Path(config.paths.staging),
+        limits=WorkFileLimits(batch_size=100, limit_per_run=100))
 
     try:
         _accept(owned, catalog, "1", [{
@@ -263,6 +267,7 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
             devices={}, drivers=None, staging=Path(config.paths.staging),
             max_delete_attempts=1, max_query_attempts=1,
             occurred_at=lambda: _NOW, monotonic_ns=lambda: 0,
+            file_executor=work_files.executor,
         )(owned)
         result = await delete_source_file(cleanup_runtime.for_item(item_id), item_id)
         assert result.phase == "succeeded", result
@@ -335,4 +340,8 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
         assert original_path.parent.name == "capture-originals"
         assert preview_path.parent.name == "capture-previews"
     finally:
+        work_files.stop_new_work()
+        settled = await work_files.file_supervisor.drain_required()
+        assert not settled.failed
+        assert work_files.executor.unfinished_files() == ()
         owned.connection.close()

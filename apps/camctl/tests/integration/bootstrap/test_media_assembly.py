@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import sys
 import time
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -39,6 +40,8 @@ from camctl.devices.evidence import (
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.host_files.media import ProbeRequest, RepairRequest
+from camctl.host_files.tasks import FileTaskExecutor
+from camctl.session.supervision import Supervisor
 from camctl.persistence.initialization import InitOutcome, initialize_state
 
 from ..capture.test_capture_contract import ResultsDouble, _entry
@@ -82,6 +85,13 @@ _PROBE_BODY = (
     'print(\'{"streams": [{"codec_type": "video"}],'
     ' "format": {"duration": "1"}}\')\n'
 )
+_OSV_PROBE_BODY = """import json, sys
+seconds = '1' if '/derived/' in sys.argv[-1] else '75'
+print(json.dumps({'format': {'duration': seconds, 'format_name': 'mov,mp4,m4a,3gp,3g2,mj2'},
+    'streams': [{'index': i, 'codec_type': 'video', 'codec_name': 'h264',
+        'width': 64, 'height': 64, 'duration': seconds, 'disposition': {'attached_pic': 0}}
+        for i in range(2)]}))
+"""
 _REPAIR_BODY = (
     "import shutil, sys\n"
     "args = sys.argv[1:]\n"
@@ -231,7 +241,7 @@ def _registry(driver, *, read_supported: bool = True) -> DriverRegistry:
     ))
 
 
-def _factory(cfg, registry, results, tools_dir: Path, clock):
+def _factory(cfg, registry, results, tools_dir: Path, clock, *, osv=False, executor=None):
     return session_capture_assembly(
         devices=cfg.devices,
         drivers=registry,
@@ -239,8 +249,9 @@ def _factory(cfg, registry, results, tools_dir: Path, clock):
         staging=Path(cfg.paths.staging),
         wait_config=lambda params: None,
         monotonic_ns=lambda: clock["ns"],
+        file_executor=executor,
         probe_request=ProbeRequest(
-            ffprobe=_tool(tools_dir, "ffprobe", _PROBE_BODY)),
+            ffprobe=_tool(tools_dir, "ffprobe", _OSV_PROBE_BODY if osv else _PROBE_BODY)),
         repair_request=RepairRequest(
             ffmpeg=_tool(tools_dir, "ffmpeg", _REPAIR_BODY)),
     )
@@ -266,8 +277,9 @@ async def _wait_wall_past(db: Path, started_at_us: int, span_s: float) -> None:
 
 
 class TestExcessRepairThroughSessionAssembly:
+    @pytest.mark.parametrize("osv", [False, True], ids=["mp4", "osv"])
     async def test_cross_session_excess_repairs_and_finishes(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, osv) -> None:
         home = tmp_path / "excess"
         home.mkdir()
         cfg = _config(home)
@@ -282,11 +294,12 @@ class TestExcessRepairThroughSessionAssembly:
         driver = _SessionDriver(_CONTENT)
         clock = {"ns": time.monotonic_ns()}
         results = ResultsDouble({})
+        executor = FileTaskExecutor(Supervisor())
         # 第一个会话：到期启动并确认，单调钟不推进所以不到停止时
         # 机；锚点随会话失效。
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
-            cfg, _registry(driver), results, tools_dir, clock))
+            cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor))
         try:
             await _await_query(
                 db,
@@ -301,10 +314,13 @@ class TestExcessRepairThroughSessionAssembly:
         started_at = _scalar(
             db, "SELECT started_at FROM device_activities WHERE id = 1")[0]
         await _wait_wall_past(db, int(started_at), 3.2)
-        results.files_by_action[1] = (_entry("clip-1", size=len(_CONTENT)),)
+        entry = _entry("clip-1", size=len(_CONTENT))
+        if osv:
+            entry = replace(entry, original_name="clip-1.OSV", media_type=None, format_id="osv")
+        results.files_by_action[1] = (entry,)
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
         task = _run_session(deps, cfg, _factory(
-            cfg, _registry(driver), results, tools_dir, clock))
+            cfg, _registry(driver), results, tools_dir, clock, osv=osv, executor=executor))
         try:
             await _await_query(db, "SELECT status FROM actions WHERE id = 1", (3,))
         finally:
@@ -333,6 +349,11 @@ class TestExcessRepairThroughSessionAssembly:
             db, "SELECT COUNT(*) FROM outputs"
             " WHERE source_action_id = 1 AND kind IN (1, 2)")
         assert kinds == (2,)
+
+        if osv:
+            assert _scalar(db, "SELECT COUNT(*) FROM intermediate_files WHERE purpose=4") == (1,)
+            assert _scalar(db, "SELECT COUNT(*) FROM plans") == (1,)
+            assert executor.unfinished_files() == ()
 
 
 class TestUndeclaredReadKeepsWaiting:

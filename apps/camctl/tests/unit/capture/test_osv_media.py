@@ -82,6 +82,12 @@ async def test_osv_repair_freezes_input_selects_both_videos_and_audio_excluding_
     tools, saved = Tools(source, dual_probe("60", output=True)), saves()
     step = await execute_repair(RepairContext(_status(check_decision=2, repair_state=3), input_ref(),
         "osv", tools, saved, _NOW))
+    assert step.phase is RepairExecutionPhase.PREPARED
+    assert tools.repairs == [] and len(tools.probes) == 1
+    started = saved.calls[0][1]
+    status = _status(repair_state=4, repair_output_file_id=21,
+        repair_output_path="derived/21.mp4", source_probe=started.source_probe)
+    step = await execute_repair(RepairContext(status, input_ref(), "osv", tools, saved, _NOW + 1))
     assert step.phase is RepairExecutionPhase.SUCCEEDED
     assert tools.repairs == [(Decimal("60"), (0, 2, 3), "mp4")]
     assert saved.calls[0][1].extension == "mp4"
@@ -109,7 +115,8 @@ async def test_osv_repair_rejects_unqualified_output_before_success(fault):
     if fault == "probe_failed": output = MediaProbe(None, "tool_failed: exit=1")
     artifact = _artifact(tool_error="tool_failed: exit=1" if fault == "tool_failed" else None)
     tools, saved = Tools(dual_probe(), output, artifact), saves()
-    step = await execute_repair(RepairContext(_status(check_decision=2, repair_state=3), input_ref(),
+    step = await execute_repair(RepairContext(_status(repair_state=4, repair_output_file_id=21,
+        repair_output_path="derived/21.mp4", source_probe=dual_probe()), input_ref(),
         "osv", tools, saved, _NOW))
     assert step.phase is RepairExecutionPhase.FAILED_SAVED
     assert "complete_repair_output" not in saved.names()
@@ -161,6 +168,11 @@ async def test_osv_pending_repair_does_not_reprobe_missing_historical_check_fact
     tools, saved = Tools(dual_probe(), dual_probe("60", output=True)), saves()
     status = _status(check_state=3, check_duration_s=Decimal("75"), repair_state=3)
     step = await execute_repair(RepairContext(status, input_ref(), "osv", tools, saved, _NOW))
+    assert step.phase is RepairExecutionPhase.PREPARED
+    assert saved.calls[0][1].source_probe is None
+    status = replace(status, repair_state=4, repair_output_file_id=21,
+        repair_output_path="derived/21.mp4")
+    step = await execute_repair(RepairContext(status, input_ref(), "osv", tools, saved, _NOW + 1))
     assert step.phase is RepairExecutionPhase.FAILED_SAVED
     assert tools.probes == [] and tools.repairs == []
 
@@ -221,6 +233,11 @@ async def test_direct_timing_repair_preserves_known_input_failure_without_dispat
     tools, saved = Tools(source, dual_probe("60", output=True)), saves()
     step = await execute_repair(RepairContext(_status(check_decision=2, repair_state=3),
         input_ref(), "osv", tools, saved, _NOW))
+    assert step.phase is RepairExecutionPhase.PREPARED
+    assert tools.repairs == []
+    status = _status(repair_state=4, repair_output_file_id=21,
+        repair_output_path="derived/21.mp4", source_probe=saved.calls[0][1].source_probe)
+    step = await execute_repair(RepairContext(status, input_ref(), "osv", tools, saved, _NOW + 1))
     assert step.phase is RepairExecutionPhase.FAILED_SAVED
     assert saved.calls[0][1].source_probe == source
     assert tools.repairs == []
@@ -280,3 +297,14 @@ def test_recording_success_guard_requires_independent_scoped_reader():
         state_rows={"actions": {1: {"id": 1, "type": 2, "cancel_requested": 0}}})
     with pytest.raises(EventValidationError):
         _action_finish_guard(event, context)
+
+
+@pytest.mark.asyncio
+async def test_pending_repair_preserves_existing_probe_without_new_tool_call():
+    source = dual_probe()
+    tools, saved = Tools(MediaProbe(None, "tool_failed: later input")), saves()
+    status = _status(check_decision=2, repair_state=3, source_probe=source)
+    step = await execute_repair(RepairContext(status, input_ref(), "osv", tools, saved, _NOW))
+    assert step.phase is RepairExecutionPhase.PREPARED
+    assert saved.calls[0][1].source_probe is source
+    assert tools.probes == [] and tools.repairs == []

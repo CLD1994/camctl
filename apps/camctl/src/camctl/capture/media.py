@@ -526,6 +526,7 @@ class RepairExecutionPhase(Enum):
     ALREADY_FINISHED = "already_finished"
     START_REJECTED = "start_rejected"
     START_UNKNOWN = "start_unknown"
+    PREPARED = "prepared"
     TOOL_NOT_COMPLETED = "tool_not_completed"
     COMPLETE_REJECTED = "complete_rejected"
     COMPLETE_UNKNOWN = "complete_unknown"
@@ -561,8 +562,9 @@ async def execute_repair(context: RepairContext) -> RepairStep:
     """执行多录修复：登记输出与运行同事务，工具完成后固定结果。
 
     恢复入口沿用已登记输出续执行；输出登记保存被拒或未知时不启
-    动工具；任务未取得成品不保存终态结论。完整成品按字节事实与
-    成功同事务固定，不完整成品保存失败终态与错误结构。
+    动工具；OSV 准备可靠保存原输入事实及输出后返回 PREPARED，
+    交由调用方重新核对业务资格并装载 RUNNING 后续跑。任务未取得
+    成品不保存终态结论；完整成品按字节事实与成功同事务固定。
     """
     if (_osv_input(context.input_file)
             and context.processing.repair_state == int(_REPAIR_STATE.PENDING)):
@@ -586,10 +588,14 @@ async def _prepare_osv_repair(context: RepairContext) -> RepairStep:
             return RepairStep(RepairExecutionPhase.TOOL_NOT_COMPLETED,
                 error=RuntimeError(result.error or "input probe task did not run"))
         context = replace(context, processing=replace(context.processing, source_probe=result.value))
-    return await _start_repair(context)
+    output = _repair_output(context)
+    if isinstance(output, RepairStep):
+        return output
+    return RepairStep(RepairExecutionPhase.PREPARED, output_file=output)
 
 
-async def _start_repair(context: RepairContext) -> RepairStep:
+def _repair_output(context: RepairContext) -> RepairOutputFile | RepairStep:
+    """只取得原输出登记；不申请双文件资格或启动媒体工具。"""
     status = context.processing
     if status.repair_state == int(_REPAIR_STATE.PENDING):
         started = context.saves.start_repair_output(RepairStart(
@@ -618,6 +624,13 @@ async def _start_repair(context: RepairContext) -> RepairStep:
     else:
         return RepairStep(RepairExecutionPhase.NOT_PENDING)
 
+    return output
+
+
+async def _start_repair(context: RepairContext) -> RepairStep:
+    output = _repair_output(context)
+    if isinstance(output, RepairStep):
+        return output
     output_ref = FileRef(output.file_id, FilePurpose.REPAIR_OUTPUT,
                          output.relative_path, context.input_file.root)
     return await _owned_media_result(context,

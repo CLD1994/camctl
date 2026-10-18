@@ -61,6 +61,7 @@ async def test_capture_result_respects_saved_source_probe_without_fabricating_ch
             assert parse_exact_json(owned.connection.execute("SELECT media_json FROM recording_processing WHERE id=41").fetchone()[0]) == {}
         elif fault in ("short_video", "short_audio"):
             assert status.check_duration_s == Decimal("75") and status.check_issues
+        runtime.media = flow
         await capture_handler("camera_record")(1, runtime)
         actual = owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()[0]
         known_failure = fault in ("short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown")

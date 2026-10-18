@@ -26,9 +26,9 @@ class _Owner:
 
 
 class ObservedTools(HostMediaTools):
-    def __init__(self, roots, *, pause=False):
-        super().__init__(roots, FileTaskExecutor(Supervisor()), _Owner())
-        self.pause, self.probes = pause, []
+    def __init__(self, roots, executor, *, pause=False):
+        super().__init__(roots, executor, _Owner())
+        self.pause, self.probes, self.executor = pause, [], executor
 
     async def probe(self, input):
         self.probes.append(input.purpose)
@@ -45,7 +45,7 @@ def flow(owned, roots, content, tools):
         sessions=DriverReadSessions(owned, ReadDriverDouble(content), ticket=None),
         tools=tools, policy=MediaPolicy(Decimal("0")),
         occurred_at=lambda: 1_750_000_100_000_000,
-        digest_supported=True, digest=_Digest(content))
+        digest_supported=True, digest=_Digest(content), file_executor=tools.executor)
 
 
 @pytest.mark.asyncio
@@ -60,10 +60,13 @@ async def test_real_dual_video_repair_survives_restart_and_decodes_every_stream(
     owned.connection.execute("UPDATE recording_processing SET check_basis_json=? WHERE id=1",
         ('{"reason":2,"target_duration_ms":500}',))
     owned.connection.commit()
-    first_tools = ObservedTools(roots, pause=True)
+    first_tools = ObservedTools(roots, FileTaskExecutor(Supervisor()), pause=True)
     first = await run_recording_media(flow(owned, roots, content, first_tools), 1, 1, 11,
         target_extension="osv")
-    assert first.phase is RepairExecutionPhase.TOOL_NOT_COMPLETED
+    assert first.phase is RepairExecutionPhase.PREPARED
+    paused = await run_recording_media(flow(owned, roots, content, first_tools), 1, 1, 11,
+        target_extension="osv")
+    assert paused.phase is RepairExecutionPhase.TOOL_NOT_COMPLETED
     status = load_processing_status(owned, 1)
     assert status.repair_state == 4 and status.source_probe is not None
     assert [s.codec_type for s in status.source_probe.streams].count("video") == 3
@@ -74,7 +77,7 @@ async def test_real_dual_video_repair_survives_restart_and_decodes_every_stream(
     owned.connection.close()
     reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        tools = ObservedTools(roots)
+        tools = ObservedTools(roots, FileTaskExecutor(Supervisor()))
         result = await run_recording_media(flow(reopened, roots, content, tools), 1, 1, 11,
             target_extension="osv")
         assert result.phase is RepairExecutionPhase.SUCCEEDED, result

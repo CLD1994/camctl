@@ -16,6 +16,7 @@ from camctl.capture.handlers import _stop_call, capture_handler
 from camctl.capture.models import ActivityConcludeSave
 from camctl.capture.processing import (
     CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason, SourceFileSave,
+    RepairBasis, RepairReason, RepairDecisionChoice, RepairDecisionSave,
 )
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT, observed_file
 from camctl.contracts.enums import enum_for
@@ -64,6 +65,11 @@ _EVIDENCE = EvidenceRegistry((
 
 @pytest_asyncio.fixture
 async def media_pipeline(tmp_path, request):
+    mode = getattr(request, "param", None)
+    osv = mode in ("osv", "osv-timing")
+    timing = mode == "osv-timing"
+    name = "original.OSV" if osv else "original.mp4"
+    locator = {"path": f"/DCIM/{name}"}
     cfg = _config(tmp_path)
     assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
     deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
@@ -104,7 +110,7 @@ async def media_pipeline(tmp_path, request):
         assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
         assert owned.connection.execute("SELECT activity_state FROM device_activities WHERE action_id=1").fetchone() == (3,)
         observer_action_id = 1
-        if getattr(request, "param", False):
+        if getattr(request, "param", False) is True:
             observer = AcceptanceRepository().process_input(ProcessInput(ParsedInput("observer.json", {
                 "request_id": "2", "created_at": instant, "name": "原片观察者",
                 "actions": [{"name": "另一个录像动作", "type": "camera_record", "device_id": "cam-1",
@@ -115,26 +121,34 @@ async def media_pipeline(tmp_path, request):
             observer_action_id = owned.connection.execute(
                 "SELECT id FROM actions WHERE name=?", ("另一个录像动作",)).fetchone()[0]
             assert observer_action_id != 1
-        source = repository.save_file_observation(FileObservationSave(observer_action_id, "original-recording", {
-            "path": "/DCIM/original.mp4"}, _NOW, "original.mp4", "video/mp4"), new_operation_key(), owned)
+        source = repository.save_file_observation(FileObservationSave(observer_action_id, "original-recording", locator, _NOW, name, "video/mp4"), new_operation_key(), owned)
         assert source.kind is DbOutcomeKind.COMPLETED, source.error
         source_id = source.value.file_id
         # 仅复用替身的序列化，不建立 RESULTS 责任或执行运行时结果调用。
-        serialized = await ResultsDouble({1: (original_recording_entry(),)}).list_round(
+        serialized = await ResultsDouble({1: (replace(original_recording_entry(), locator=locator, original_name=name,
+            format_id="osv" if osv else None),)}).list_round(
             AttemptTicket(1, "result", "1", "results/1", 1), timeout_s=Decimal("1"))
         original = observed_file(serialized.outcome.observations[0].data["entries"][0])
         for save, command in (
             (repository.save_file_presence, FilePresenceSave(source_id, 2, _NOW,
-                locator={"path": "/DCIM/original.mp4"})),
+                locator=locator)),
             (repository.save_file_ownership, OwnershipSave(source_id, 1, 1, 2,
                 {"task": "original-recording"}, _NOW)),
             (repository.save_file_completion, FileCompletionSave(source_id, 3, _NOW,
                 basis=1, observation=original.evidence, size_bytes=len(_CONTENT))),
             (repository.save_source_file, SourceFileSave(1, source_id, _NOW)),
-            (repository.save_check_decision, CheckDecisionSave(1, CheckDecisionChoice.REQUIRED,
-                CheckBasis(CheckReason.INSUFFICIENT_TIMING, 60000), _NOW)),
+            (repository.save_check_decision, CheckDecisionSave(1,
+                CheckDecisionChoice.NOT_NEEDED if timing else CheckDecisionChoice.REQUIRED,
+                CheckBasis(CheckReason.EXCESS_DURATION_CHECK if timing else CheckReason.INSUFFICIENT_TIMING,
+                    60000, control_elapsed_ns=75_000_000_000 if timing else None), _NOW)),
         ):
             result = save(command, new_operation_key(), owned)
+            assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        if timing:
+            result = repository.save_repair_decision(RepairDecisionSave(1,
+                RepairDecisionChoice.PENDING, RepairBasis(RepairReason.THRESHOLD_REACHED,
+                    60000, Decimal("62"), control_elapsed_ns=75_000_000_000), _NOW),
+                new_operation_key(), owned)
             assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
         assert owned.connection.execute(
@@ -142,7 +156,7 @@ async def media_pipeline(tmp_path, request):
         ).fetchone() == (2, 3)
         assert owned.connection.execute(
             "SELECT check_decision,check_state,repair_state,source_device_file_id"
-            " FROM recording_processing WHERE id=1").fetchone() == (3, 1, 1, source_id)
+            " FROM recording_processing WHERE id=1").fetchone() == ((2, 1, 3, source_id) if timing else (3, 1, 1, source_id))
         yield owned, BoundDirectories(staging=Path(cfg.paths.staging)), source_id
     finally:
         owned.connection.close()
