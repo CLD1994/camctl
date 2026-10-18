@@ -62,8 +62,6 @@ from camctl.persistence.repositories.timelapse import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_capture_contract import ResultsDouble, _entry
-from ..persistence.test_runtime import _create_valid_database
-from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action
 
 register_capture_guards()
 register_operation_guards()
@@ -71,7 +69,8 @@ register_timelapse_guards()
 
 pytestmark = pytest.mark.asyncio
 
-_NOW = 1_750_000_000_000_000
+_SENT = 1_750_000_000_000_000
+_NOW = _SENT + 600_000_000
 
 _RESULT_CONTRACT = "task_scope_files"
 
@@ -82,52 +81,32 @@ def _unconfirmed_error():
             "details": {"activity_id": "1", "reason": "outputs_unknown"}}
 
 
-def _environment(
+async def _environment(
     tmp_path: Path,
     *,
     action_type: int = 3,
     completion_mode: int = 2,
     scheduled: bool = True,
 ) -> object:
-    """一个延时拍摄活动的最小事实：已成功发送并安排等待。"""
-    target = tmp_path / "state.db"
-    _create_valid_database(target)
-    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-        " VALUES (1, ?, 1, 1)",
-        ("f" * 32,),
-    )
-    connection.execute(
-        "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-        " occurred_at, clock_status, change_seq, body_json)"
-        " VALUES (1, 1, 2, 1, ?, 2, NULL, ?)",
-        (_NOW, json.dumps({"reason": 1, "evidence": {}, "rows": []})),
-    )
-    _seed_plan(connection, 1)
-    _seed_record_action(connection, 1, 1)
-    if action_type != 2:
-        connection.execute("UPDATE actions SET type = ? WHERE id = 1", (action_type,))
-    if action_type == 3:
-        connection.execute("UPDATE actions SET execution_spec_json = ? WHERE id = 1", (
-            json.dumps({"duration_based": True, "wait_after_send": True,
-                "target_duration_ms": 600_000, "result_wait_margin_ms": 0,
-                "end_control": 1, "stop_supported": True,
-                "start_return_meaning": 1, "completion_mode": completion_mode}),))
-    _seed_activity(connection, 1)
-    connection.execute(
-        "UPDATE device_activities SET completion_mode = ?, dispatch_state = 3,"
-        " sent_at = ?, completion_basis = ?"
-        + (", result_wait_margin_ms = 0, extra_wait_ms_used = 0,"
-           " expected_check_at = ?" if scheduled else "")
-        + " WHERE id = 1",
-        ((completion_mode, _NOW, None if action_type == 2 else 1,
-          _NOW + 600_000_000) if scheduled
-         else (completion_mode, _NOW, None if action_type == 2 else 1)),
-    )
-    connection.commit()
+    """从真实受理与原 START 结果安排等待，完成时刻使用实际截止。"""
+    from .result_consumer_fixtures import consumer_world
+    from camctl.capture.handlers import _control_call
+    from camctl.capture.timelapse import WaitKind, WaitPlan
+    from camctl.persistence.repositories.timelapse import ScheduleWait
+
+    owned, runtime, aid, _ = await consumer_world(
+        tmp_path, "record" if action_type == 2 else "timelapse", start=False)
+    await _control_call(runtime, runtime.action(aid),
+        "start_recording" if action_type == 2 else "start_timelapse",
+        "start_confirmed" if action_type == 2 else "timelapse_sent")
+    if scheduled and action_type == 3:
+        receipt = runtime.timelapse.schedule_wait(ScheduleWait(aid,
+            WaitPlan(WaitKind.WAIT_THEN_CHECK, _NOW), 0, 0, _SENT),
+            new_operation_key(), owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if completion_mode != 2:
+        # 本反例只改变拟消费的活动方式；原有限自然定义及发送来源保持合法。
+        owned.connection.execute('UPDATE device_activities SET completion_mode=? WHERE action_id=?', (completion_mode, aid))
     return owned
 
 
@@ -169,7 +148,7 @@ def _satisfied(evidence_wait_id: int) -> ResultSetSave:
 class TestWaitCompleted:
     async def test_saves_self_referencing_event_once(self, tmp_path: Path) -> None:
         """等待完成引用自身事件；同键重送恢复首次结果，新键拒绝。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             command = WaitCompletedSave(action_id=1, occurred_at=_NOW)
             key = new_operation_key()
@@ -198,7 +177,7 @@ class TestWaitCompleted:
 
     async def test_requires_saved_schedule(self, tmp_path: Path) -> None:
         """没有预计检查时间的活动不能保存等待完成。"""
-        owned = _environment(tmp_path, scheduled=False)
+        owned = await _environment(tmp_path, scheduled=False)
         try:
             outcome = TimelapseRepository().complete_wait(
                 WaitCompletedSave(action_id=1, occurred_at=_NOW),
@@ -215,7 +194,7 @@ class TestWaitCompleted:
 class TestResultSetConfirmation:
     async def test_begin_moves_unexamined_to_checking(self, tmp_path: Path) -> None:
         """开始分支只推进核实状态，不携带结论事实。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             outcome = _confirm(owned, ResultSetSave(
                 action_id=1, occurred_at=_NOW, phase=ResultSetPhase.BEGIN))
@@ -240,7 +219,7 @@ class TestResultSetConfirmation:
     async def test_satisfied_saves_time_and_outputs_basis_then_releases(
             self, tmp_path: Path) -> None:
         """满足结论保存完整依据；随后统一释放判定解除占用。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             wait_id = _complete_wait(owned)
             outcome = _confirm(owned, _satisfied(wait_id))
@@ -275,7 +254,7 @@ class TestResultSetConfirmation:
 
     async def test_satisfied_from_checking_round(self, tmp_path: Path) -> None:
         """已开始核实（CHECKING）的轮次可以直接保存满足结论。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             assert _confirm(owned, ResultSetSave(
                 action_id=1, occurred_at=_NOW,
@@ -292,7 +271,7 @@ class TestResultSetConfirmation:
 
     async def test_time_and_outputs_requires_wait_fact(self, tmp_path: Path) -> None:
         """缺少等待完成事实时不能满足结论不得保存完成依据。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             outcome = _confirm(owned, _satisfied(1))
             assert outcome.kind is DbOutcomeKind.ROLLED_BACK
@@ -307,7 +286,7 @@ class TestResultSetConfirmation:
     async def test_time_and_outputs_requires_matching_wait_reference(
             self, tmp_path: Path) -> None:
         """完成依据引用的等待事件必须与本活动保存的事实一致。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             _complete_wait(owned)
             outcome = _confirm(owned, _satisfied(1))
@@ -318,7 +297,7 @@ class TestResultSetConfirmation:
     async def test_time_and_outputs_rejects_device_evidence_mode(
             self, tmp_path: Path) -> None:
         """固定完成方式为设备证据的活动不能按时间与产物判定。"""
-        owned = _environment(tmp_path, completion_mode=1)
+        owned = await _environment(tmp_path, completion_mode=1)
         try:
             wait_id = _complete_wait(owned)
             outcome = _confirm(owned, _satisfied(wait_id))
@@ -329,7 +308,7 @@ class TestResultSetConfirmation:
     async def test_unsatisfied_saves_known_failure_and_keeps_occupancy(
             self, tmp_path: Path) -> None:
         """明确不满足保存已知失败判定；没有设备结束事实不解除占用。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             _complete_wait(owned)
             outcome = _confirm(owned, ResultSetSave(
@@ -366,7 +345,7 @@ class TestResultSetConfirmation:
     async def test_unconfirmed_marks_unexamined_capture(
             self, tmp_path: Path) -> None:
         """无法确认保存结论与未知采集事实，判定保持待定。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             _complete_wait(owned)
             outcome = _confirm(owned, ResultSetSave(
@@ -395,7 +374,7 @@ class TestResultSetConfirmation:
 
     async def test_recording_action_not_applicable(self, tmp_path: Path) -> None:
         """录像活动不适用结果集合核实与采集判定列。"""
-        owned = _environment(tmp_path, action_type=2)
+        owned = await _environment(tmp_path, action_type=2)
         try:
             outcome = _confirm(owned, ResultSetSave(
                 action_id=1, occurred_at=_NOW, phase=ResultSetPhase.BEGIN))
@@ -407,7 +386,7 @@ class TestResultSetConfirmation:
     async def test_terminal_result_set_rejects_further_rounds(
             self, tmp_path: Path) -> None:
         """已确定（COMPLETE/UNCONFIRMED）的集合不再接受新分支。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             wait_id = _complete_wait(owned)
             assert _confirm(owned, _satisfied(wait_id)).kind is DbOutcomeKind.COMPLETED
@@ -419,7 +398,7 @@ class TestResultSetConfirmation:
     async def test_same_key_resend_recovers_first_result(
             self, tmp_path: Path) -> None:
         """同键重送核实原事务输入后恢复首次结果。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         repository = CaptureRepository()
         try:
             wait_id = _complete_wait(owned)
@@ -446,7 +425,7 @@ class TestResultSetConfirmation:
 
     async def test_capture_status_must_match_phase(self, tmp_path: Path) -> None:
         """采集状态与结论分支不符属于输入错误。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             wait_id = _complete_wait(owned)
             with pytest.raises(ValueError):
@@ -465,7 +444,7 @@ class TestResultSetConfirmation:
     async def test_conclusion_requires_contract_and_observation(
             self, tmp_path: Path) -> None:
         """结论分支必须携带驱动结果规则标识与结构化依据。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             with pytest.raises(ValueError):
                 _confirm(owned, ResultSetSave(
@@ -517,7 +496,7 @@ class TestFinishResultCheck:
     async def test_conclusion_commits_with_attempt_and_run_end(
             self, tmp_path: Path) -> None:
         """结论与尝试结果、流程结束同一事务提交。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             wait_id = _complete_wait(owned)
             ticket = _check_ticket(owned)
@@ -537,7 +516,8 @@ class TestFinishResultCheck:
             events = owned.connection.execute(
                 "SELECT transaction_id, event_type,"
                 " json_extract(body_json, '$.reason') FROM history_events"
-                " WHERE event_type IN (12, 10, 16) ORDER BY id").fetchall()
+                " WHERE transaction_id=(SELECT MAX(transaction_id) FROM history_events)"
+                " AND event_type IN (12, 10, 16) ORDER BY id").fetchall()
             assert [row[1] for row in events] == [12, 10, 16]
             assert len({row[0] for row in events}) == 1
             assert events[2][2] == 1  # RESULT_SET_CONFIRMED.COMPLETE
@@ -547,7 +527,7 @@ class TestFinishResultCheck:
     async def test_atomic_rejection_keeps_attempt_running(
             self, tmp_path: Path) -> None:
         """结论输入被拒时尝试与流程保持原状，不留半提交事实。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             ticket = _check_ticket(owned)
             outcome = CaptureRepository().finish_result_check(
@@ -571,7 +551,7 @@ class TestFinishResultCheck:
     async def test_same_key_resend_recovers_first_result(
             self, tmp_path: Path) -> None:
         """同键重送恢复首次的尝试结束与核实结论。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         repository = CaptureRepository()
         try:
             wait_id = _complete_wait(owned)
@@ -605,7 +585,7 @@ class TestFinishResultCheck:
     async def test_rejects_when_attempt_already_ended(
             self, tmp_path: Path) -> None:
         """已结束的尝试不能再携带结论提交。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             ticket = _check_ticket(owned)
             assert OperationRepository().finish_attempt(
@@ -641,7 +621,7 @@ class TestCloseResultCheckUnconfirmed:
     async def test_budget_exhausted_closes_run_and_result_set(
             self, tmp_path: Path) -> None:
         """预算耗尽的收场把流程与集合结论同事务置为无法确认。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         try:
             _complete_wait(owned)
             self._pending_round(owned)
@@ -671,7 +651,7 @@ class TestCloseResultCheckUnconfirmed:
     async def test_same_key_resend_recovers_close(
             self, tmp_path: Path) -> None:
         """同键重送恢复首次的收场结果，不同输入拒绝。"""
-        owned = _environment(tmp_path)
+        owned = await _environment(tmp_path)
         repository = CaptureRepository()
         try:
             _complete_wait(owned)
@@ -722,7 +702,7 @@ class TestConclusionRecovery:
         runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
         scheduled = runtime.timelapse.schedule_wait(ScheduleWait(
             action_id, WaitPlan(WaitKind.WAIT_THEN_CHECK,
-                               check_at_utc=_NOW + 600_000_000),
+                               check_at_utc=_SENT + 600_000_000),
             driver_margin_ms=0, extra_wait_ms=0, occurred_at=_NOW),
             new_operation_key(), owned)
         assert scheduled.kind is DbOutcomeKind.COMPLETED, scheduled.error
@@ -848,33 +828,10 @@ class TestInterruptedRoundParks:
 
     async def test_running_round_waits_without_new_attempt(
             self, tmp_path: Path) -> None:
-        owned = _environment(tmp_path)
-        # 已确认的启动事实：处理器不再发起启动调用。
-        owned.connection.execute(
-            "INSERT INTO operation_runs (id, action_id, delivery_id, kind,"
-            " query_purpose, responsibility_key, activity_id, copy_id,"
-            " cleanup_item_id, session_key, status, attempts_used,"
-            " max_attempts_used, timeout_s_json, retry_interval_s_json,"
-            " retry_wait_required, error_json)"
-            " VALUES (50, 1, NULL, 1, NULL, 'start/1', 1, NULL, NULL, NULL,"
-            " 3, 1, 1, '10', '1', 0, NULL)")
-        owned.connection.execute(
-            "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
-            " intent_event_id, result_event_id, max_attempts_used, effect_state,"
-            " result_json) VALUES (51, 50, 1, 2, 1, 1, 1, 3, '{}')")
-        owned.connection.execute(
-            "INSERT INTO operation_runs (id, action_id, delivery_id, kind,"
-            " query_purpose, responsibility_key, activity_id, copy_id,"
-            " cleanup_item_id, session_key, status, attempts_used,"
-            " max_attempts_used, timeout_s_json, retry_interval_s_json,"
-            " retry_wait_required, error_json)"
-            " VALUES (60, 1, NULL, 7, NULL, 'results/1', 1, NULL, NULL, NULL,"
-            " 2, 1, 3, '10', '3', 0, NULL)")
-        owned.connection.execute(
-            "INSERT INTO operation_attempts (id, run_id, attempt_no, status,"
-            " intent_event_id, result_event_id, max_attempts_used, effect_state,"
-            " result_json) VALUES (61, 60, 1, 1, 1, NULL, 3, 1, NULL)")
-        owned.connection.commit()
+        owned = await _environment(tmp_path)
+        # 真实在途 RESULTS 意图没有结果；后续推进不得重开责任。
+        ticket = _check_ticket(owned)
+        assert ticket is not None
         recovery = TestConclusionRecovery()
         try:
             await recovery._advance(owned, {1: (_entry("sequence-1"),)})
@@ -891,6 +848,6 @@ class TestInterruptedRoundParks:
                 " WHERE responsibility_key = 'results/1'") == (1,)
             assert _value(
                 owned, "SELECT COUNT(*) FROM operation_attempts"
-                " WHERE run_id = 60") == (1,)
+                " WHERE run_id = ?", ticket.run_id) == (1,)
         finally:
             owned.connection.close()

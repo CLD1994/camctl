@@ -450,7 +450,8 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp
         }
         assert set(expected) == {"type", "interval_s", "duration_s", "outputs", "exposure"}
         assert expected["type"] == expected_type_by_model[model]
-        assert expected["interval_s"] == 1
+        from camctl.devices.drivers.adb_cameras.timelapse_parameters import timelapse_intervals_s
+        assert expected["interval_s"] == min(timelapse_intervals_s(model))
         assert expected["duration_s"] == 300
         assert expected["outputs"] == "video"
         assert expected["exposure"] == expected_exposure_by_model[model]

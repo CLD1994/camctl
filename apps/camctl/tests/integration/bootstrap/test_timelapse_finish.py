@@ -759,9 +759,10 @@ class TestTimelapseReportRebuild:
 
         # 第二运行采用新等待配置并完成新计划：等待按新目标时长与
         # 额外等待安排，旧报告按原冻结依据重建，字节不变。
+        second_catalog = _TimelapseCatalog(duration_s=Decimal("5"))
         await _submit_plan(
-            tmp_path, cfg, catalog, _timelapse_plan("2", _future_schedule(2)))
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+            tmp_path, cfg, second_catalog, _timelapse_plan("2", _future_schedule(2)))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=second_catalog)
         second_driver = _ActivityDriver(activity_target="2")
         second_results = ResultsDouble({})
         task = _run_session(

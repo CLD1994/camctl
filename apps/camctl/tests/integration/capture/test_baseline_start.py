@@ -107,11 +107,12 @@ async def test_baseline_failure_atomically_preserves_error_and_releases_unstarte
 
 
 def _runtime(owned, directory, driver):
+    from camctl.bootstrap.capture_assembly import execution_wait_config
     return CaptureRuntime(owned, SchedulingRepository(), OperationRepository(), CaptureRepository(),
         TimelapseRepository(), driver, ResultsDouble({}), _PAGE_EVIDENCE,
         lambda: _SCHEDULED, lambda: 0,
         lambda a: LaunchWindow(a["scheduled_at"], a["scheduled_at"] + a["max_delay_ms"] * 1000),
-        lambda a: CaptureWaitConfig(10_000, 0, 0), baseline_directory=directory)
+        execution_wait_config, baseline_directory=directory)
 
 
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
