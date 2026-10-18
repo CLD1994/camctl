@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 设备能力声明的安装版消费验证（2026-10-18）
+
+在 Linux x86_64／WSL2、Node.js 24.20.0、pnpm 12.3.4 和 Python 3.11.16 中，执行[安装版联合用例](../../tests/integration/test_device_capability_declarations.py)，5 项通过，退出 0。用例在仓库外离线安装当前 wheel，使用真实配置导出全部内置拍摄任务，并将原始 JSON 交给客户端；组件测试的默认夹具仍独立于 Python。
+
+客户端共享加载器、实际 `Application` 和 HTTP 状态完整保留设备删除布尔值、任务说明及 Schema 精确数字。`null`、数字、字符串、对象和数组这五类非法删除声明使整份重载失败，已有有效目录保持；同一非法文件在新启动时没有有效目录。旧 JSON 缺少删除字段时仍保持缺失，有效空设备目录能整体替换。联合用例先构建当前网页，再通过测试专用 `CAMCTL_TEST_CAPABILITIES_FILE` 将安装版导出注入 `browser-camera-parameters.test.ts` 与 `browser-editing.test.ts` 的“能力源”目标，2 项浏览器用例通过；参数表单读取同源字段说明，设备指南逐项显示全部任务说明，查看页面不改草稿。
+
+命令、UTC、日志和退出码保存在任务工作树 `.local/acceptance/c5/`；Python 发行物与组件门禁见[camctl 安装链记录](../camctl/verification.md#设备能力声明的安装版联合验证2026-10-18)。本节只记录 C1—C3 的安装版消费链。最终删除入口可见性、C4 组合及客户端完整单元和集成回归尚待执行，不能由这 2 项浏览器目标推定通过。软件结果不证明 ARM 部署或真实设备操作。
+
 ## 2026-10-16 延时参数保存与恢复验证
 
 客户端领域的 C3 保存矩阵使用本工作树的真实 HTTP、SQLite 和 Chromium；任务入口见[延时客户端计划](../superpowers/plans/2026-10-16-osmo360ii-timelapse-client.md)。生产实现满足新增断言，本阶段只扩展测试。合成能力仅提供两个间隔、两个时长以及两类输出结构，分别验证保存场景；生产两款 Schema、各自 134 对合法时间及跨语言判定由 P3 的根接缝单独验证。

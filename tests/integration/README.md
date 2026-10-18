@@ -2,6 +2,14 @@
 
 本目录用于客户端、camctl CLI 和 C 接入模块之间的真实协作验证。终端演示使用同一模块；组件内部测试放在各自目录，目前客户端测试入口为 `apps/client/tests`。
 
+`test_device_capability_declarations.py` 在仓库外离线构建并安装 wheel 与锁定运行依赖，比较安装版和源码的正式能力导出，核对全部内置驱动、Hasselblad 两种正式源、同驱动的独立设备配置，以及任意驱动标识和无拍摄任务设备。真实 `init`、`submit` 与 SQLite 核对配置切换后旧执行定义保持，新请求使用新来源；同一份安装版 JSON 经根 Schema、wheel 资源、客户端实际加载、HTTP、参数表单和设备指南消费。非法删除声明的重载保留旧有效目录，旧说明缺字段仍为未知，有效空目录整体替换。设备工具边界禁止调用，不连接真实相机。
+
+本用例需要 Python 3.11、uv 离线缓存中的锁定依赖与构建工具，以及已按客户端运行说明安装的 Node.js 24 依赖和 Chromium。浏览器目标由用例先构建当前网页，再通过测试专用 `CAMCTL_TEST_CAPABILITIES_FILE` 注入安装版导出；客户端独立组件测试仍使用自己的合成夹具，不依赖 Python。
+
+```bash
+apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_capability_declarations.py -q
+```
+
 `report-dependencies.test.mjs` 与 `report-dependency-conditions.test.mjs` 验证公共 Schema、数据库字段登记、规格 SQL 和检查器之间的接缝，包含错误登记反例与具体条件场景。运行入口见[检查脚本](../../scripts/README.md)；通过这些检查不表示真实 CLI 已经接入报告生成。
 
 `test_database_history_sql.py` 在内存 SQLite 加载真实结构，验证来源及流程关联、清理状态矩阵、启动与残留停止的过期组合、独立文件历史元数据、两类目录和快照范围，并在有无统计信息时核对分页查询。它还读取统一运行库条件，验证检查脚本对主线版本、精确回移例外及非法版本输入的判定；这些版本样例不表示实际运行了所有 SQLite 版本。上述检查不代替生产入口、事件应用、历史恢复或报告字节一致性测试。

@@ -6,6 +6,7 @@
 //   client_driver.ts estimate <客户端存储目录> <动作JSON路径> <输出凭据路径>
 //   client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <输出凭据路径>
 //   client_driver.ts reload-estimate <客户端存储目录> <动作JSON路径> <待加载能力路径> <输出凭据路径>
+//   client_driver.ts capability-state <客户端存储目录> <输出凭据路径>
 //
 // 导出走客户端的 createDraft/exportDraft/downloadRequest 真实路径：
 // 按能力校验计划正文、分配随机整数请求身份；下载正文在客户端已保
@@ -147,18 +148,23 @@ async function importMedia(
     const info = await stat(claimedPath);
     if (!info.isFile()) throw new Error("领取路径不是普通文件");
 
-    const actions = app.snapshot().plans?.flatMap((plan) => plan.actions ?? []) ?? [];
+    const actions =
+      app.snapshot().plans?.flatMap((plan) => plan.actions ?? []) ?? [];
     const deliveries = actions
       .flatMap((action) => action.deliveries ?? [])
       .filter((delivery) => delivery.file_name === fileName);
     if (deliveries.length !== 1)
-      throw new Error(`报告中匹配的领取文件必须恰好有一条，实际为 ${deliveries.length}`);
+      throw new Error(
+        `报告中匹配的领取文件必须恰好有一条，实际为 ${deliveries.length}`,
+      );
     const delivery = deliveries[0];
     const outputs = actions
       .flatMap((action) => action.outputs ?? [])
       .filter((output) => output.output_id === delivery.output_id);
     if (outputs.length !== 1)
-      throw new Error(`报告中匹配的来源输出必须恰好有一条，实际为 ${outputs.length}`);
+      throw new Error(
+        `报告中匹配的来源输出必须恰好有一条，实际为 ${outputs.length}`,
+      );
     const output = outputs[0];
     if (output.source_action_instance_id !== delivery.source_action_instance_id)
       throw new Error("领取记录与输出的来源动作身份不一致");
@@ -406,8 +412,94 @@ async function validateParameters(
   }
 }
 
+async function capabilityState(storeDir: string, receiptPath: string) {
+  const app = openApp(storeDir);
+  const files = new Files(app),
+    requests = new RequestLifecycle();
+  const server = createHttpApp(app, files, requests).listen(0, "127.0.0.1");
+  const stop = createStop(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+    requests,
+    () => files.idle(),
+    () => app.store.close(),
+  );
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    });
+    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    const path = join(storeDir, "device-capabilities.json");
+    const source = readFileSync(path, "utf8");
+    const loaded = loadCapabilities(parseJson(source));
+    const original = app.capabilities.active;
+    const state = async () => {
+      const response = await fetch(`${origin}/api/state`);
+      if (!response.ok) throw new Error(`状态读取 HTTP ${response.status}`);
+      return (
+        parseJson(await response.text()) as {
+          capabilities: { active: unknown };
+        }
+      ).capabilities.active;
+    };
+    const http = await state();
+    const invalidReloads: boolean[] = [];
+    for (const invalid of [null, 0, "false", {}, []]) {
+      const replacement = loadCapabilities(parseJson(source));
+      Object.assign(replacement.devices[0]!, { delete_supported: invalid });
+      writeFileSync(path, stringifyJson(replacement));
+      const reloaded = await fetch(`${origin}/api/capabilities/reload`, {
+        method: "POST",
+      });
+      if (!reloaded.ok) throw new Error(`能力重载 HTTP ${reloaded.status}`);
+      await reloaded.text();
+      invalidReloads.push(
+        app.capabilities.error !== null &&
+          app.capabilities.active === original &&
+          stringifyJson(await state()) === stringifyJson(http),
+      );
+    }
+    const restarted = new Application(storeDir);
+    const failedStartup =
+      restarted.capabilities.active === null &&
+      restarted.capabilities.error !== null;
+    restarted.store.close();
+    const legacy = loadCapabilities(parseJson(source));
+    for (const device of legacy.devices) delete device.delete_supported;
+    writeFileSync(path, stringifyJson(legacy));
+    app.reloadCapabilities();
+    if (app.capabilities.error !== null)
+      throw new Error(app.capabilities.error);
+    const legacyHttp = await state();
+    writeFileSync(path, '{"devices":[]}');
+    app.reloadCapabilities();
+    if (app.capabilities.error !== null)
+      throw new Error(app.capabilities.error);
+    writeFileSync(
+      receiptPath,
+      stringifyJson({
+        loaded,
+        http,
+        invalid_reloads: invalidReloads,
+        failed_startup: failedStartup,
+        legacy: legacyHttp,
+        empty: await state(),
+      }),
+    );
+  } finally {
+    await stop();
+  }
+}
+
 async function main() {
-  if (command === "validate-parameters") {
+  if (command === "capability-state") {
+    const [storeDir, receiptPath] = rest;
+    if (!storeDir || !receiptPath) badUsage();
+    await capabilityState(storeDir, receiptPath);
+  } else if (command === "validate-parameters") {
     const [storeDir, inputPath, receiptPath] = rest;
     if (!storeDir || !inputPath || !receiptPath) badUsage();
     await validateParameters(storeDir, inputPath, receiptPath);
@@ -444,7 +536,7 @@ void main().catch((error) => {
 
 function badUsage(): never {
   console.error(
-    "用法: client_driver.ts export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径>",
+    "用法: client_driver.ts export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径> | capability-state <存储目录> <凭据路径>",
   );
   process.exit(2);
 }

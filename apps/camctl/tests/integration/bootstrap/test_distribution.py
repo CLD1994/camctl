@@ -346,6 +346,7 @@ def test_installed_and_checkout_cli_have_same_camera_catalog(installed, model):
     assert document == json.loads(checkout.stdout)
     assert document["devices"][0]["device_id"] == "cam-1"
     assert document["devices"][0]["driver_id"] == model
+    assert document["devices"][0]["delete_supported"] is False
     assert [action["type"] for action in document["devices"][0]["actions"]] == (
         ["camera_record"] if model == "dji-action6" else
         ["camera_record", "camera_timelapse"])
@@ -571,6 +572,7 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
     device = capabilities["devices"][0]
     assert device["device_id"] == "hb0"
     assert device["driver_id"] == "hasselblad_cfv100c"
+    assert device["delete_supported"] is True
     photo_actions = [item for item in device["actions"]
                      if item["type"] == "camera_take_photo"]
     assert len(photo_actions) == 1

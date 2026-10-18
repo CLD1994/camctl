@@ -6,6 +6,26 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 设备能力声明的安装版联合验证（2026-10-18）
+
+在 Linux x86_64／WSL2、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0 和 pnpm 12.3.4 中，以已集成设备声明与任务说明的代码执行 C1—C3 安装链。新增的[联合用例](../../tests/integration/test_device_capability_declarations.py)在仓库外离线构建 wheel，按锁文件安装运行依赖，使用独立虚拟环境执行真实 CLI；安装进程清除 Python 源码查找环境，另核对导入位置确实位于该独立环境。源码与安装版 `describe` 的精确 JSON 一致，公共 Schema 与 wheel 内资源字节一致。
+
+同一份真实配置覆盖全部正式内置驱动、Hasselblad 主机／设备正式源，以及同驱动不同逻辑设备。通过真实登记接入的任意驱动另覆盖空拍摄目录和明确支持删除；源能力没有按驱动名称或动作数量推断。真实 `init`、`submit` 与 SQLite 验证：主机源受理的旧请求在改为设备源后重送，原执行定义保持；新请求保存设备源定义。导出期间的拍摄、删除端口和 ADB／`hb_cli` 工具均设置禁止调用边界。该用例不执行拍摄和清理，不证明设备文件实际可删除。
+
+本次从任务工作树根目录依次运行以下范围，均退出 0；原始命令、UTC、日志和退出码保存在该树 `.local/acceptance/c5/`：
+
+| 命令或目标 | 实际结果 |
+| --- | --- |
+| `node scripts/check-protocol.mjs` | 4 份 Schema、5 份能力说明及既有协议正反例通过。 |
+| `PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices -q` | 1096 项通过；一条已有的非异步函数 asyncio 标记警告。 |
+| 同一解释器执行 `apps/camctl/tests/integration/devices` | 178 项通过。 |
+| 同一解释器执行 `apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py` | 14 项通过。 |
+| 同一解释器执行 `apps/camctl/tests/integration/bootstrap/test_distribution.py` | 38 项通过。 |
+| 同一解释器执行 `tests/integration/test_device_capability_declarations.py` | 5 项通过；含安装 JSON 进入真实客户端加载、HTTP、参数表单和设备指南。 |
+| `node scripts/check-doc-links.mjs` | 4859 个本地文件链接通过；不校验标题锚点。 |
+
+本节记录安装链前段。最终删除入口可见性与客户端完整单元、集成回归依赖 C4 组合基线，尚未据此宣告完成。客户端消费证据见[客户端记录](../client/verification.md#设备能力声明的安装版消费验证2026-10-18)。这些软件结果不代替 ARM 部署、真实相机或物理断电验收。
+
 ## OSMO 最小延时间隔与两款相机录像启动延迟的现场确认（2026-10-18）
 
 用户现场核实：当前 OSMO 360 II 支持的最小延时采集间隔为 **2 秒**；收到 1 秒间隔参数时，设备按 2 秒解析和执行。因此，此前 Auto 延时请求的 1 秒／300 秒与两路各 151 帧的结果已有设备行为解释，不再将其列为原因未知的帧数差异。原请求仍保存 1 秒，原始负载、调用、文件和媒体测量结果不改写为 2 秒；该现场结论不等于程序已经将原生效参数改为 2 秒，也不构成新增的参数回读记录。Action6 不采用 OSMO 的 2 秒下限。
