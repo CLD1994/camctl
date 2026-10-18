@@ -374,8 +374,11 @@ async def test_cleanup_continues_from_unsupported_device_to_local_host_sources(t
                         "params":{"output_ids":["1","2","3","4"]}}]}),
             build_catalog(cfg,DriverDefinitions({DRIVER_ID:driver_definition()})),CommandMode.RUN,_NOW),new_operation_key(),owned)
         assert accepted.kind is DbOutcomeKind.COMPLETED,accepted.error
+        work_files = WorkFileRuntime(
+            staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 10))
         cleanup=session_cleanup_assembly(devices=cfg.devices,drivers=DriverRegistry((_entry(driver),)),
-            max_delete_attempts=2,max_query_attempts=2,staging=Path(cfg.paths.staging),occurred_at=lambda:_NOW)(owned)
+            max_delete_attempts=2,max_query_attempts=2,staging=Path(cfg.paths.staging),
+            file_executor=work_files.executor, occurred_at=lambda:_NOW)(owned)
         await advance_cleanup(cleanup)
         assert owned.connection.execute("SELECT status FROM cleanup_items ORDER BY id").fetchall()==[(5,),(5,),(4,),(4,)]
         assert all(not (Path(cfg.paths.staging)/r[0]).exists() for r in before)

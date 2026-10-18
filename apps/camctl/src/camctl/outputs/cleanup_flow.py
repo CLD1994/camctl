@@ -16,6 +16,7 @@ import json
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
 from typing import Any, Callable
 
@@ -23,12 +24,14 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, Ut
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.devices.evidence import DeviceObservation, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
+from camctl.host_files.models import FileRef
 from camctl.operations.attempts import (
     AttemptConfig, AttemptFinish, RetryWaitGate, RunOutcome, StaleRunFinish)
 from camctl.operations.models import AttemptTicket
 from camctl.operations.recovery import RecoveryBoundary, RecoveryDiagnostic
 from camctl.outputs.cleanup_round import (CleanupConsumption, record_consumption, handed_off_this_round, operation_runtime, operation_supported)
-from camctl.operations.owned_calls import owned_tool_call, check_call_interruption
+from camctl.operations.owned_calls import (
+    owned_tool_call, check_call_interruption, current_call_scope)
 from camctl.operations.validation import OutcomeValidationError
 from camctl.outputs.cleanup_ownership import (
     CleanupSaveNotApplicable, PendingCleanupSave, save_cleanup_request,
@@ -399,11 +402,30 @@ class DeleteDriverPort:
 
 @dataclass(frozen=True)
 class LocalArtifactRequest:
-    """主机派生成品的删除/查询请求；path 相对 staging 工作根。"""
+    """主机正式文件请求；保留原票据及保存文件的完整身份。"""
 
+    database_id: str
     operation: str
     cleanup_item_id: int
-    path: str
+    ticket: AttemptTicket
+    file_ref: FileRef
+
+    @property
+    def path(self) -> str:
+        """兼容只观察请求路径的端口替身；生产路径来自 FileRef。"""
+        return self.file_ref.relative_path
+
+
+class LocalArtifactTaskFailure(RuntimeError):
+    """任务实际结果已取回，但执行器监督交接自身发生错误。"""
+
+    def __init__(self, actual: DeviceCallResult, diagnostic: str):
+        super().__init__(diagnostic)
+        self.actual = actual
+
+
+class LocalArtifactTargetError(ConsistencyError):
+    """原票据可核对，但已保存的主机文件身份或纯路径校验不成立。"""
 
 
 class HostArtifactPort:
@@ -537,9 +559,10 @@ class PendingCleanupDelete:
 class CleanupRuntime:
     """删除编排的端口集合；配置与设备绑定由装配层提供。
 
-    monotonic_ns 与 retry_gate 支撑删除和查询的重试间隔时间门槛：
-    保存重试等待后按各自配置的间隔到时才允许下一次尝试（通信重试
-    间隔与设备文件删除查询的计时），装配层会话共享同一门槛。
+    monotonic_ns 与 retry_gate 支撑设备删除和查询的重试间隔时间门槛：
+    保存重试等待后按各自配置的间隔到时才允许下一次尝试；装配层会话
+    共享同一门槛。主机文件尝试仅使用次数预算，不设置应用层时限或
+    定时重试间隔。
     """
 
     owned: Any
@@ -553,6 +576,8 @@ class CleanupRuntime:
     query_config: Any
     #: 主机派生成品的本地删除协作者；未装配时此类成员保持等待。
     local_files: HostArtifactPort | None = None
+    #: 与 HostArtifacts 绑定的 staging 身份；仅主机文件任务使用。
+    local_file_root: Path | None = None
     monotonic_ns: Callable[[], int] = _default_monotonic_ns
     retry_gate: RetryWaitGate = field(default_factory=RetryWaitGate)
     binding_check: Callable[[DeviceBinding], BindingResult] | None = None
@@ -1001,9 +1026,11 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
     if not operation_supported(runtime, item_id, needed_operation):
         return _fail_unsupported(runtime, item_id, output_id)
     if runtime.binding_of(item_id) is None:
-        if (_host_target(connection, item_id) is None
-                or runtime.local_files is None):
+        if runtime.local_files is None:
             return CleanupStep("target_unbound")
+        # 主机文件的数据库身份、用途、路径和绑定根在首次授予票据前
+        # 完成纯校验；stat 与 unlink 留给共享文件任务线程。
+        _local_file_ref(runtime, item_id)
     if entry is CleanupEntryChoice.VERIFY_FIRST:
         verified = await _verify_before_delete(
             runtime, item_id, action_id, output_id)
@@ -1265,9 +1292,12 @@ def _save_delete_return(runtime, pending):
                 error=error, effect=EffectState.CONFIRMED if present is not None else EffectState.UNKNOWN,
                 settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("delete_returned", 1, {})),
                 observations=pending.actual.observations)
+            retry_config = (original.request.config if original is not None
+                            and original.ticket == pending.ticket else runtime.delete_config)
             pending.finish = AttemptFinish(pending.ticket,
                 validate_outcome(pending.ticket, outcome, pending.evidence),
-                pending.occurred_at, retry_wait=present is not False,
+                pending.occurred_at,
+                retry_wait=(present is not False and retry_config.retry_interval_s is not None),
                 recovery_max_event_id=pending.recovery_max_event_id)
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             if not isinstance(error, OutcomeValidationError):
@@ -1373,9 +1403,17 @@ async def _consume_delete_return(runtime, pending):
                 else CleanupStep("already_terminal", diagnostic=pending.diagnostic))
     runtime.pending_deletes.pop(item_id)
     runtime.pending_intents.pop(item_id, None)
-    if (actual_result.outcome or pending.finish.outcome.outcome).settlement.basis is SettlementBasis.NOT_DISPATCHED:
-        return await _cancel_member(runtime, item_id, status, output_id)
+    not_dispatched = (
+        (actual_result.outcome or pending.finish.outcome.outcome).settlement.basis
+        is SettlementBasis.NOT_DISPATCHED)
     record_consumption(runtime, pending)
+    if not_dispatched:
+        if _cancel_requested(runtime.owned.connection, action_id):
+            return await _cancel_member(runtime, item_id, status, output_id)
+        # 等待取消只结束原 DELETE ticket。成员仍属 DELETING；下一轮
+        # 按保存事实和剩余预算授予新 ticket，当前轮不得立即重投。
+        check_call_interruption()
+        return CleanupStep("not_dispatched")
     if present is True:
         runtime.retry_gate.established(f"delete/{item_id}", pending.returned_ns)
         if _cancel_requested(runtime.owned.connection, action_id):
@@ -1398,7 +1436,9 @@ async def _delete_once(runtime, item_id, action_id, output_id):
     """可靠原意图只派发一次，返回后的任何保存故障沿原申请续接。"""
     from camctl.contracts.values import new_operation_key
     from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
+    from camctl.operations.models import SettlementBasis
     from camctl.persistence.models import DbOutcomeKind
+    handoff_failure = None
     pending = runtime.pending_deletes.get(item_id)
     if pending is None:
         original = runtime.pending_intents.get(item_id)
@@ -1455,14 +1495,40 @@ async def _delete_once(runtime, item_id, action_id, output_id):
             actual = _not_dispatched("delete", error)
             evidence = _not_dispatched_evidence(runtime.evidence, intent.ticket)
         else:
-            intent.dispatched = True
-            identity = (runtime.owned.metadata.instance_id,intent.ticket.run_id,intent.ticket.attempt_id)
-            runtime.active_calls.add(identity)
-            try:
-                actual = await _call_delete(runtime, item_id, intent.ticket)
-            finally:
-                runtime.active_calls.discard(identity)
-            evidence = runtime.evidence
+            local_target_error = None
+            if runtime.binding_of(item_id) is None:
+                try:
+                    _local_artifact_request(runtime, item_id, intent.ticket, "delete")
+                except LocalArtifactTargetError as error:
+                    local_target_error = error
+            if local_target_error is not None:
+                from camctl.operations.models import ErrorValue
+                actual = _not_dispatched("delete", ErrorValue(
+                    "file_delete_failed", "delete", {"output_id": str(output_id),
+                                                        "reason": str(local_target_error)}))
+                evidence = _not_dispatched_evidence(runtime.evidence, intent.ticket)
+            else:
+                intent.dispatched = True
+                identity = (runtime.owned.metadata.instance_id,intent.ticket.run_id,intent.ticket.attempt_id)
+                runtime.active_calls.add(identity)
+                evidence = runtime.evidence
+                try:
+                    try:
+                        actual = await _call_delete(runtime, item_id, intent.ticket)
+                    except LocalArtifactTaskFailure as error:
+                        actual = error.actual
+                        handoff_failure = error
+                    except LocalArtifactTargetError as error:
+                        from camctl.operations.models import ErrorValue
+                        actual = _not_dispatched("delete", ErrorValue(
+                            "file_delete_failed", "delete", {
+                                "output_id": str(output_id), "reason": str(error)}))
+                        evidence = _not_dispatched_evidence(runtime.evidence, intent.ticket)
+                    if (runtime.binding_of(item_id) is None and actual.outcome is not None
+                            and actual.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED):
+                        evidence = _not_dispatched_evidence(runtime.evidence, intent.ticket)
+                finally:
+                    runtime.active_calls.discard(identity)
         pending = PendingCleanupDelete(runtime.owned.metadata.instance_id, item_id, intent.ticket,
             actual, evidence, None, None, new_operation_key())
         runtime.pending_deletes[item_id] = pending
@@ -1471,7 +1537,11 @@ async def _delete_once(runtime, item_id, action_id, output_id):
         pending.occurred_at = runtime.occurred_at()
         pending.returned_ns = runtime.monotonic_ns()
     rejected = _save_delete_return(runtime, pending)
-    return rejected if rejected is not None else await _consume_delete_return(runtime, pending)
+    if rejected is not None:
+        return rejected
+    if handoff_failure is not None:
+        raise ConsistencyError("删除实际结果已保存，但文件任务监督交接失败") from handoff_failure
+    return await _consume_delete_return(runtime, pending)
 
 
 
@@ -1677,6 +1747,7 @@ async def _run_query(
     """持有原实际返回；只有完整原申请可靠保存后才交付观察。"""
     from camctl.contracts.values import new_operation_key
     from camctl.operations.attempts import FinishAttemptResult, FinishDisposition, RunStatus
+    from camctl.operations.models import SettlementBasis
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
     if (ticket.operation != "query" or ticket.target_id != str(item_id)
@@ -1686,6 +1757,7 @@ async def _run_query(
     pending = runtime.pending_queries.get(identity)
     consumer = consumer or (pending.consumer if pending is not None else CleanupQueryConsumer.BEFORE_DELETE)
     database_id = runtime.owned.metadata.instance_id
+    handoff_failure = None
     if pending is not None:
         if (pending.database_id != database_id or pending.ticket != ticket
                 or pending.item_id != item_id or pending.consumer is not consumer):
@@ -1723,15 +1795,39 @@ async def _run_query(
             actual = _not_dispatched("query", error)
             evidence = _not_dispatched_evidence(runtime.evidence, ticket)
         else:
-            if intent is not None:
-                intent.dispatched = True
-            active = (database_id,ticket.run_id,ticket.attempt_id)
-            runtime.active_calls.add(active)
-            try:
-                actual = await _call_query(runtime, item_id, ticket)
-            finally:
-                runtime.active_calls.discard(active)
-            evidence = runtime.evidence
+            local_target_error = None
+            if runtime.binding_of(item_id) is None:
+                try:
+                    _local_artifact_request(runtime, item_id, ticket, "query")
+                except LocalArtifactTargetError as error:
+                    local_target_error = error
+            if local_target_error is not None:
+                from camctl.operations.models import ErrorValue
+                actual = _not_dispatched("query", ErrorValue(
+                    "file_delete_failed", "query", {"reason": str(local_target_error)}))
+                evidence = _not_dispatched_evidence(runtime.evidence, ticket)
+            else:
+                if intent is not None:
+                    intent.dispatched = True
+                active = (database_id,ticket.run_id,ticket.attempt_id)
+                runtime.active_calls.add(active)
+                evidence = runtime.evidence
+                try:
+                    try:
+                        actual = await _call_query(runtime, item_id, ticket)
+                    except LocalArtifactTaskFailure as error:
+                        actual = error.actual
+                        handoff_failure = error
+                    except LocalArtifactTargetError as error:
+                        from camctl.operations.models import ErrorValue
+                        actual = _not_dispatched("query", ErrorValue(
+                            "file_delete_failed", "query", {"reason": str(error)}))
+                        evidence = _not_dispatched_evidence(runtime.evidence, ticket)
+                    if (runtime.binding_of(item_id) is None and actual.outcome is not None
+                            and actual.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED):
+                        evidence = _not_dispatched_evidence(runtime.evidence, ticket)
+                finally:
+                    runtime.active_calls.discard(active)
         pending = PendingCleanupQuery(
             database_id=database_id, item_id=item_id, consumer=consumer,
             ticket=ticket, actual=actual, evidence=evidence,
@@ -1757,7 +1853,11 @@ async def _run_query(
         raise OutcomeValidationError(pending.validation_diagnostic.message)
     if pending.finish is None and pending.phase is not CleanupQueryPhase.SAVED:
         try:
-            pending.finish = _prepare_query_finish(pending)
+            original = runtime.pending_intents.get(item_id)
+            retry_config = (original.request.config if original is not None
+                            and original.ticket == ticket else runtime.query_config)
+            pending.finish = _prepare_query_finish(
+                pending, retry_wait=retry_config.retry_interval_s is not None)
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             if not isinstance(error, OutcomeValidationError):
                 error = OutcomeValidationError(f"原调用返回无法按契约解释: {error}")
@@ -1784,6 +1884,8 @@ async def _run_query(
         pending.phase = CleanupQueryPhase.SAVED
     present = _presence_observation(pending.saved_actual or pending.actual)
     runtime.pending_intents.pop(item_id, None)
+    if handoff_failure is not None:
+        raise ConsistencyError("查询实际结果已保存，但文件任务监督交接失败") from handoff_failure
     return present
 
 
@@ -1959,7 +2061,8 @@ def _establish_query_retry_gate(runtime: CleanupRuntime, item_id: int, present: 
     runtime.retry_gate.established(key, runtime.monotonic_ns())
 
 
-def _prepare_query_finish(pending: PendingCleanupQuery) -> AttemptFinish:
+def _prepare_query_finish(
+        pending: PendingCleanupQuery, *, retry_wait: bool = True) -> AttemptFinish:
     """使用原证据登记解释完整返回，形成唯一的结束申请。"""
     from camctl.operations.models import (
         AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
@@ -1980,7 +2083,7 @@ def _prepare_query_finish(pending: PendingCleanupQuery) -> AttemptFinish:
         ticket=pending.ticket,
         outcome=validate_outcome(pending.ticket, outcome, pending.evidence),
         occurred_at=pending.occurred_at,
-        retry_wait=present is not False,
+        retry_wait=(present is not False and retry_wait),
         recovery_max_event_id=pending.recovery_max_event_id)
 
 
@@ -1997,25 +2100,14 @@ def _control_request(runtime: CleanupRuntime, item_id: int, operation: str, tick
         timeout_s=config.timeout_s)
 
 
-def _host_target(connection, item_id: int) -> str | None:
-    """成员产物由主机中间文件承载时返回其工作路径；设备承载为 None。"""
-    row = connection.execute(
-        "SELECT f.relative_path FROM cleanup_items c"
-        " JOIN outputs o ON o.id = c.output_id"
-        " JOIN intermediate_files f ON f.id = o.intermediate_file_id"
-        " WHERE c.id = ?", (item_id,)).fetchone()
-    return None if row is None else str(row[0])
-
-
 async def _call_delete(runtime: CleanupRuntime, item_id: int, ticket):
     """按成员目标发起一次删除调用；返回与设备调用同形的结果。"""
     binding = runtime.binding_of(item_id)
     if binding is None:
-        path = _host_target(runtime.owned.connection, item_id)
-        if path is None or runtime.local_files is None:
+        if runtime.local_files is None:
             raise ConsistencyError(f"清理成员缺少可调用目标: {item_id}")
-        return await runtime.local_files.delete(LocalArtifactRequest(
-            operation="delete", cleanup_item_id=item_id, path=path))
+        return await runtime.local_files.delete(
+            _local_artifact_request(runtime, item_id, ticket, "delete"))
     return await runtime.driver.delete(
         _control_request(runtime, item_id, "delete", ticket))
 
@@ -2024,13 +2116,65 @@ async def _call_query(runtime: CleanupRuntime, item_id: int, ticket):
     """按成员目标发起一次存在性查询；返回与设备调用同形的结果。"""
     binding = runtime.binding_of(item_id)
     if binding is None:
-        path = _host_target(runtime.owned.connection, item_id)
-        if path is None or runtime.local_files is None:
+        if runtime.local_files is None:
             raise ConsistencyError(f"清理成员缺少可调用目标: {item_id}")
-        return await runtime.local_files.query_file(LocalArtifactRequest(
-            operation="query", cleanup_item_id=item_id, path=path))
+        return await runtime.local_files.query_file(
+            _local_artifact_request(runtime, item_id, ticket, "query"))
     return await runtime.driver.query_file(
         _control_request(runtime, item_id, "query", ticket))
+
+
+def _local_file_ref(runtime, item_id: int) -> FileRef:
+    """从成员与保存的中间文件登记构造并纯校验 FileRef。"""
+    from camctl.contracts.enums import enum_for
+    from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+    from camctl.host_files.paths import resolve_file
+
+    row = runtime.owned.connection.execute(
+        "SELECT o.device_file_id,o.intermediate_file_id,f.id,f.purpose,f.relative_path"
+        " FROM cleanup_items c JOIN outputs o ON o.id=c.output_id"
+        " LEFT JOIN intermediate_files f ON f.id=o.intermediate_file_id"
+        " WHERE c.id=?", (item_id,)).fetchone()
+    if (row is None or row[0] is not None or row[1] is None
+            or row[2] != row[1] or row[3] is None or row[4] is None):
+        raise LocalArtifactTargetError(
+            f"主机清理成员缺少对应的中间文件身份: {item_id}")
+    purpose_values = enum_for("intermediate_files.purpose")
+    try:
+        purpose_name = purpose_values(int(row[3])).name
+        purpose = FilePurpose[purpose_name]
+    except (TypeError, ValueError, KeyError) as error:
+        raise LocalArtifactTargetError(
+            f"主机中间文件用途未登记: {row[3]!r}") from error
+    root = runtime.local_file_root
+    if root is None:
+        root = getattr(runtime.local_files, "staging", None)
+    # 注入的纯端口替身没有实际目录绑定；生产 HostArtifacts 始终由装配层绑定 root。
+    root = Path(".").resolve() if root is None else Path(root)
+    file_ref = FileRef(int(row[2]), purpose, str(row[4]), root)
+    try:
+        resolve_file(file_ref, BoundDirectories(root))
+    except (TypeError, ValueError) as error:
+        raise LocalArtifactTargetError(
+            f"主机清理 FileRef 身份或路径不合法: {error}") from error
+    return file_ref
+
+
+def _local_artifact_request(
+        runtime, item_id: int, ticket: AttemptTicket,
+        operation: str) -> LocalArtifactRequest:
+    """从原成员和文件登记构造请求，并核对原票据与用途。"""
+    if operation not in ("delete", "query"):
+        raise ConsistencyError(f"主机文件操作未登记: {operation}")
+    responsibility = f"delete/{item_id}" if operation == "delete" else f"exists/{item_id}"
+    if (ticket.operation != operation or ticket.target_id != str(item_id)
+            or ticket.responsibility_key != responsibility):
+        raise ConsistencyError("主机文件请求与原清理票据不对应")
+    file_ref = _local_file_ref(runtime, item_id)
+    return LocalArtifactRequest(
+        database_id=runtime.owned.metadata.instance_id,
+        operation=operation, cleanup_item_id=item_id, ticket=ticket,
+        file_ref=file_ref)
 
 
 def _target_params(connection, item_id: int) -> dict:

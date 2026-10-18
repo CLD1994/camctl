@@ -249,18 +249,27 @@ class FileTaskExecutor:
         self._runners: set[asyncio.Future] = set()
 
     async def run_file_task(
-        self, task: FileTask, owner: ResponsibilityOwner
+        self, task: FileTask, owner: ResponsibilityOwner, *,
+        handoff_withdrawn: bool = False,
     ) -> FileTaskResult:
         """提交并等待一项文件任务的实际结果。
 
         等待协程被取消时：任务仍在排队则撤回（确定不执行）；已开
-        始则登记接手，实际结果由 owner 消费。两种情况都不以等待
-        取消作为实际结束。
+        始则登记接手，实际结果由 owner 消费。默认不把成功撤回的
+        ran=False 结果交给 owner；有限 opt-in 可为原业务拥有者交接
+        同一撤回 completion。两种情况都不以等待取消作为实际结束。
         """
+        if handoff_withdrawn and not callable(getattr(owner, "retain_handle", None)):
+            raise FileTaskError("撤回 completion 接手方必须能保留原文件任务 handle")
         state = self._admit(task)
         return await self._wait_for_execution(
-            state, owner, lambda: self._runner(lambda: self._execute(state))
+            state, owner, lambda: self._runner(lambda: self._execute(state)),
+            handoff_withdrawn=handoff_withdrawn,
         )
+
+    async def drain_required(self):
+        """等待共享监督器已登记的文件任务责任收场。"""
+        return await self._supervisor.drain_required()
 
     async def run_async_file_task(
         self, task: AsyncFileTask, owner: ResponsibilityOwner
@@ -341,6 +350,7 @@ class FileTaskExecutor:
     async def _wait_for_execution(
         self, state: _TaskState, owner: ResponsibilityOwner,
         start: Callable[[], Awaitable[FileTaskResult]],
+        *, handoff_withdrawn: bool = False,
     ) -> FileTaskResult:
         try:
             future = asyncio.ensure_future(start())
@@ -349,10 +359,16 @@ class FileTaskExecutor:
             result = await asyncio.shield(future)
             self._release_identity(state)
             return result
-        except (asyncio.CancelledError, Exception):
+        except (asyncio.CancelledError, Exception) as error:
             # 结果已经形成但尚未交付时，也必须交给原责任拥有者。
-            if not self._try_withdraw(state):
-                self._hand_over(state, owner)
+            withdrawn = self._try_withdraw(state)
+            if not withdrawn or handoff_withdrawn:
+                try:
+                    self._hand_over(state, owner, retain_handle=handoff_withdrawn)
+                except Exception as handoff_error:
+                    # 注册或登记交接本身失败时，cleanup 仍须沿已保留的
+                    # 原 handle 取回结果；等待取消本身也不能被改写。
+                    raise error from handoff_error
             raise
 
     def _observe_runner(self, future: asyncio.Future) -> None:
@@ -484,11 +500,19 @@ class FileTaskExecutor:
         if self._tasks.get(state.task.task_id) is state:
             del self._tasks[state.task.task_id]
 
-    def _hand_over(self, state: _TaskState, owner: ResponsibilityOwner) -> None:
+    def _hand_over(
+        self, state: _TaskState, owner: ResponsibilityOwner, *,
+        retain_handle: bool = False,
+    ) -> None:
+        task = state.task
+        handle = FileTaskHandle(state, lambda: self._release_identity(state))
+        if retain_handle:
+            retain = getattr(owner, "retain_handle", None)
+            if callable(retain):
+                retain(handle)
         token = self._supervisor.register(owner)
         if isinstance(owner, _OwnedFileResult):
             owner.handed_over = True
-        task = state.task
         self._supervisor.handoff(
             token,
             OwnedTask(
@@ -496,7 +520,7 @@ class FileTaskExecutor:
                 stage=task.stage,
                 business=task.business,
                 resources=(*(f"file:{identity}" for identity in task.file_ids), *task.resources),
-                pending=FileTaskHandle(state, lambda: self._release_identity(state)),
+                pending=handle,
             ),
         )
 

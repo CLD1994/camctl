@@ -486,7 +486,27 @@ class BeginAttemptCommand:
                     return self._read_exhausted(scope, run_facts)
                 return self._rejected("budget_exhausted")
             if run_facts["attempts_used"] >= 1 and run_facts["retry_wait_required"] != 1:
-                raise TransactionError("后续尝试要求先建立重试等待")
+                # 主机清理不应用超时或定时重试；允许下轮领取新票据的
+                # 前提是上一张 ticket 已有完整、可核实的结果事实。
+                immediate_cleanup_retry = (
+                    intent.kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS)
+                    and run_facts["cleanup_item_id"] is not None
+                    and intent.config.timeout_s is None
+                    and run_facts["timeout_s_json"] is None
+                    and intent.config.retry_interval_s is None
+                    and run_facts["retry_interval_s_json"] is None)
+                if not immediate_cleanup_retry:
+                    raise TransactionError("后续尝试要求先建立重试等待")
+                with closing(connection.execute(
+                    "SELECT status,result_json,result_event_id FROM operation_attempts"
+                    " WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
+                    (run_facts["id"],))) as cursor:
+                    previous = cursor.fetchone()
+                if (previous is None
+                        or previous[0] == int(_ATTEMPT_STATUS.RUNNING)
+                        or previous[1] is None or previous[2] is None):
+                    raise TransactionError(
+                        "无重试间隔的清理后续尝试要求原尝试已有可靠结果")
             attempt_no = int(run_facts["attempts_used"]) + 1
         else:
             if intent.kind is OperationKind.READ_FILE:

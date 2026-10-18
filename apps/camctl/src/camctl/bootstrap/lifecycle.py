@@ -842,6 +842,7 @@ def _report_assembly(
             max_delete_attempts=deps.config.cleanup.max_delete_attempts,
             max_query_attempts=deps.config.cleanup.max_query_attempts,
             staging=staging,
+            file_executor=deps.work_files.executor,
             pending_intents=deps.cleanup_intents, pending_deletes=deps.cleanup_deletes,
             pending_queries=deps.cleanup_queries, pending_companions=deps.cleanup_companions,
             pending_saves=deps.cleanup_saves, consumed_queries=deps.cleanup_consumed_queries,

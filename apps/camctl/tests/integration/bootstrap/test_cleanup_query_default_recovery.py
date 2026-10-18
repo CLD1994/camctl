@@ -21,6 +21,7 @@ import pytest
 from camctl.bootstrap.cleanup_assembly import (
     HostArtifacts, cleanup_flow, session_cleanup_assembly,
 )
+from camctl.bootstrap.work_file_assembly import WorkFileRuntime
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.workflow_errors import item_error_id
@@ -41,6 +42,7 @@ from .test_cleanup_flow import _seed_repaired_artifact
 from .test_output_binding_changes import (
     _NOW, _accept, _registry, _save_photos, environment,
 )
+from camctl.outputs.work_files import WorkFileLimits
 
 pytestmark = pytest.mark.asyncio
 
@@ -422,8 +424,8 @@ class _LocalProbe(HostArtifacts):
     instances = []
     fail_delete = False
 
-    def __init__(self, staging):
-        super().__init__(staging)
+    def __init__(self, staging, executor):
+        super().__init__(staging, executor)
         self.delete_calls, self.query_calls = [], []
         _LocalProbe.instances.append(self)
 
@@ -461,15 +463,21 @@ async def test_host_artifact_query_recovers_after_save_fault(
     driver = _DefaultDriver(owned)
     clock = {"wall": _NOW, "mono": 0}
 
-    def probe(staging):
-        return _LocalProbe(staging)
+    work_files = WorkFileRuntime(
+        staging=Path(cfg.paths.staging),
+        limits=WorkFileLimits(batch_size=100, limit_per_run=100),
+    )
+
+    def probe(staging, executor):
+        return _LocalProbe(staging, executor)
 
     monkeypatch.setattr(
         "camctl.bootstrap.cleanup_assembly.HostArtifacts", probe)
     session_factory = session_cleanup_assembly(
         devices=devices, drivers=_registry(driver),
         max_delete_attempts=3, max_query_attempts=3,
-        staging=Path(cfg.paths.staging), occurred_at=lambda: clock["wall"],
+        staging=Path(cfg.paths.staging), file_executor=work_files.executor,
+        occurred_at=lambda: clock["wall"],
         monotonic_ns=lambda: clock["mono"])
     fault = _DefaultQueryFault(
         OperationRepository.finish_attempt, action_id, output_id, after_commit=True)

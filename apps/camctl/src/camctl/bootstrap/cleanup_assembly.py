@@ -1,10 +1,10 @@
 """清理推进运行时的会话级装配。
 
 按设备声明与登记驱动解析删除与文件查询协作者，每个清理成员使用原
-文件观察者保存的设备身份和驱动。删除与查询的尝试上限取自 cleanup
-配置，调用时限与重试间隔取自对应设备的 devices.<id>.cleanup.*。
-主机派生成品经 staging 工作根的本地删除协作者清理，独立于设备
-目录是否为空。会话内共享重试间隔时间门槛。
+文件观察者保存的设备身份和驱动。设备删除与查询的次数上限取自
+cleanup 配置，调用时限与重试间隔取自对应设备的
+devices.<id>.cleanup.*。主机派生成品使用 staging 根和会话共享文件
+执行器，次数上限取自 cleanup 配置，不设置应用层时限或定时重试。
 """
 
 from __future__ import annotations
@@ -30,10 +30,17 @@ from camctl.devices.drivers.registry import (
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
 from camctl.host_files.declarations import HOST_FILE_DECLARATION
+from camctl.host_files.models import (
+    BoundDirectories, FileObservationKind, FileRef)
+from camctl.host_files.paths import observe_file, resolve_file
+from camctl.host_files.tasks import (
+    FileTask, FileTaskExecutor, FileTaskId, FileTaskResult, FileTaskHandle)
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
+from camctl.operations.owned_calls import check_call_interruption, current_call_scope
 from camctl.operations.recovery import RecoveryBoundary, recovery_registry
 from camctl.outputs.cleanup_flow import (
-    CleanupRuntime, HostArtifactPort, LocalArtifactRequest,
+    CleanupRuntime, HostArtifactPort, LocalArtifactRequest, LocalArtifactTaskFailure,
+    LocalArtifactTargetError,
     PendingCleanupCompanion, PendingCleanupQuery, PendingCleanupIntent,
     PendingCleanupDelete, advance_cleanup)
 from camctl.outputs.cleanup_ownership import PendingCleanupSave
@@ -68,44 +75,246 @@ class HostArtifacts(HostArtifactPort):
     declaration = HOST_FILE_DECLARATION
     evidence = _LOCAL_EVIDENCE
 
-    def __init__(self, staging: Path) -> None:
+    def __init__(self, staging: Path, executor: FileTaskExecutor | None = None) -> None:
         self._staging = Path(staging)
+        self._executor = executor
+
+    @property
+    def staging(self) -> Path:
+        return self._staging
 
     async def delete(
             self, request: LocalArtifactRequest) -> DeviceCallResult:
-        target = self._staging / request.path
-        try:
-            target.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError:
-            return DeviceCallResult(
-                observations=(),
-                error={"code": "local_io_failed", "stage": "delete"})
-        return DeviceCallResult(
-            observations=(DeviceObservation(
-                type="file_absent", version=1,
-                data={"cleanup_item_id": str(request.cleanup_item_id)}),),
-            error=None)
+        return await self._run(request)
 
     async def query_file(
             self, request: LocalArtifactRequest) -> DeviceCallResult:
-        target = self._staging / request.path
+        return await self._run(request)
+
+    async def _run(self, request: LocalArtifactRequest) -> DeviceCallResult:
+        check_call_interruption()
+        if self._executor is None:
+            raise ConsistencyError("主机清理未装配共享文件执行器")
+        self._validate_request(request)
+        task_id = FileTaskId(
+            f"cleanup:{request.database_id}:{request.operation}:"
+            f"{request.ticket.run_id}:{request.ticket.attempt_id}")
+        task = FileTask(
+            task_id=task_id, file_id=request.file_ref.file_id,
+            stage=f"cleanup_{request.operation}", business="host_artifact_cleanup",
+            body=lambda _stop_event: self._execute(request),
+            resources=(f"database:{request.database_id}",
+                       f"cleanup:{request.cleanup_item_id}"))
+        owner = _LocalArtifactResultOwner()
+        interruption = None
+        runner_error = None
         try:
-            target.stat()
-            present = True
-        except FileNotFoundError:
-            present = False
-        except OSError:
-            return DeviceCallResult(
-                observations=(),
-                error={"code": "local_io_failed", "stage": "query"})
-        return DeviceCallResult(
-            observations=(DeviceObservation(
+            result = await self._executor.run_file_task(
+                task, owner, handoff_withdrawn=True)
+        except asyncio.CancelledError as error:
+            interruption = error
+            result = None
+        except Exception as error:
+            if owner.handle is None:
+                # Admission/framework 拒绝不说明原任务没有被其他 owner 派发。
+                raise ConsistencyError(
+                    "主机文件任务未能取得可验证的原 completion") from error
+            runner_error = error
+            result = None
+
+        if interruption is not None or runner_error is not None:
+            result, interruption, drain_error = await _collect_file_result(
+                self._executor, owner, task_id, interruption)
+            if result is None:
+                error = drain_error or runner_error or interruption
+                raise ConsistencyError(
+                    "主机文件任务监督收场未取得原 completion") from error
+        else:
+            drain_error = None
+
+        actual = _device_result(request, result)
+        if interruption is not None:
+            scope = current_call_scope()
+            if scope is not None:
+                scope.interrupted = interruption
+                if drain_error is not None:
+                    interruption.add_note(
+                        f"主机文件任务 drain 故障: {type(drain_error).__name__}: {drain_error}")
+                    interruption.__cause__ = drain_error
+                return actual
+            diagnostic = "主机文件等待已取消，原 completion 已取回"
+            if drain_error is not None:
+                diagnostic += f"；drain 收场失败: {drain_error}"
+            raise LocalArtifactTaskFailure(actual, diagnostic) from interruption
+        if runner_error is not None or drain_error is not None:
+            diagnostic = "文件执行器 runner/supervisor 收场失败；原实际结果已保留"
+            cause = runner_error or drain_error
+            if runner_error is not None and drain_error is not None:
+                cause = BaseExceptionGroup("文件任务收场故障", [runner_error, drain_error])
+            raise LocalArtifactTaskFailure(actual, diagnostic) from cause
+        return actual
+
+    def _validate_request(self, request: LocalArtifactRequest) -> None:
+        if request.operation not in ("delete", "query"):
+            raise ConsistencyError("主机文件请求操作未登记")
+        expected_key = (f"delete/{request.cleanup_item_id}"
+                        if request.operation == "delete"
+                        else f"exists/{request.cleanup_item_id}")
+        if (request.database_id == "" or request.ticket.operation != request.operation
+                or request.ticket.target_id != str(request.cleanup_item_id)
+                or request.ticket.responsibility_key != expected_key):
+            raise ConsistencyError("主机文件请求与原票据不对应")
+        if request.file_ref.root != self._staging:
+            raise LocalArtifactTargetError("主机文件请求绑定了不同 staging 根")
+        try:
+            resolve_file(request.file_ref, BoundDirectories(self._staging))
+        except (TypeError, ValueError) as error:
+            raise LocalArtifactTargetError(
+                f"主机文件请求身份或路径不合法: {error}") from error
+
+    def _execute(self, request: LocalArtifactRequest) -> DeviceCallResult:
+        """在线程任务中观察目标，并按保存身份执行单文件操作。"""
+        observed = observe_file(request.file_ref, BoundDirectories(self._staging))
+        if request.operation == "query":
+            if observed.kind is FileObservationKind.ERROR:
+                return _local_io_error("query", observed.error)
+            if observed.kind is FileObservationKind.TYPE_MISMATCH:
+                return _local_type_error("query")
+            present = observed.kind is FileObservationKind.VALID_OBJECT
+            return DeviceCallResult((DeviceObservation(
                 type="file_presence", version=1,
                 data={"cleanup_item_id": str(request.cleanup_item_id),
-                      "present": present}),),
-            error=None)
+                      "present": present}),), None)
+
+        if request.operation != "delete":
+            raise ConsistencyError(f"主机文件任务操作未登记: {request.operation}")
+        if observed.kind is FileObservationKind.ERROR:
+            return _local_io_error("delete", observed.error)
+        if observed.kind is FileObservationKind.TYPE_MISMATCH:
+            return _local_type_error("delete")
+        if observed.kind is FileObservationKind.MISSING:
+            return _local_absent(request.cleanup_item_id)
+        target = resolve_file(request.file_ref, BoundDirectories(self._staging)).path
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            return _local_absent(request.cleanup_item_id)
+        except OSError as error:
+            after = observe_file(request.file_ref, BoundDirectories(self._staging))
+            if after.kind is FileObservationKind.MISSING:
+                return _local_absent(request.cleanup_item_id, error)
+            return _local_io_error("delete", error)
+        return _local_absent(request.cleanup_item_id)
+
+
+class _LocalArtifactResultOwner:
+    """只暂存本次任务 handle 与其 FileTaskResult，不接触清理运行时。"""
+
+    def __init__(self) -> None:
+        self.handle: FileTaskHandle | None = None
+        self.result: FileTaskResult | None = None
+
+    def retain_handle(self, handle: FileTaskHandle) -> None:
+        self.handle = handle
+
+    def release_handle(self) -> None:
+        """清理长寿命 supervisor owner 中已完成的文件任务引用。"""
+        self.handle = None
+
+    async def take_over(self, task) -> None:
+        self.retain_handle(task.pending)
+        self.result = await task.pending.wait()
+
+
+async def _collect_file_result(executor, owner, task_id, interruption):
+    """shield 同一个共享 drain，并在 owner 故障后从原 handle 补取 completion。"""
+    drain = asyncio.create_task(executor.drain_required())
+    drain_error = None
+    supervision = None
+    while True:
+        try:
+            supervision = await asyncio.shield(drain)
+            break
+        except asyncio.CancelledError as error:
+            if interruption is None:
+                interruption = error
+            if drain.done() and drain.cancelled():
+                drain_error = error
+                break
+        except Exception as error:
+            drain_error = error
+            break
+
+    result = owner.result
+    if result is None and owner.handle is not None:
+        take = asyncio.create_task(owner.handle.wait())
+        while True:
+            try:
+                result = await asyncio.shield(take)
+                break
+            except asyncio.CancelledError as error:
+                if interruption is None:
+                    interruption = error
+                if take.done() and take.cancelled():
+                    drain_error = drain_error or error
+                    break
+            except Exception as error:
+                drain_error = drain_error or error
+                break
+    if supervision is not None:
+        failed = next((failure for failure in supervision.failed
+                       if failure.record.identity == task_id.value), None)
+        if failed is not None:
+            drain_error = drain_error or RuntimeError(failed.error)
+    if result is not None:
+        owner.result = result
+        owner.release_handle()
+    return result, interruption, drain_error
+
+
+def _device_result(request: LocalArtifactRequest, result: FileTaskResult | None) -> DeviceCallResult:
+    from camctl.outputs.cleanup_flow import _not_dispatched
+
+    expected_id = FileTaskId(
+        f"cleanup:{request.database_id}:{request.operation}:"
+        f"{request.ticket.run_id}:{request.ticket.attempt_id}")
+    if not isinstance(result, FileTaskResult) or result.task_id != expected_id:
+        raise ConsistencyError("主机文件任务 completion 与原请求不对应")
+    if not result.ran:
+        return _not_dispatched(request.operation)
+    if result.error is not None:
+        return DeviceCallResult((), {
+            "code": "local_io_failed", "stage": request.operation,
+            "details": {"task_error": result.error},
+        })
+    if not isinstance(result.value, DeviceCallResult):
+        raise ConsistencyError("主机文件任务未返回完整 DeviceCallResult")
+    return result.value
+
+
+def _local_absent(item_id: int, error: OSError | None = None) -> DeviceCallResult:
+    return DeviceCallResult((DeviceObservation(
+        type="file_absent", version=1,
+        data={"cleanup_item_id": str(item_id)}),),
+        None if error is None else {
+            "code": "local_io_failed", "stage": "delete",
+            "details": {"error": f"{type(error).__name__}: {error}"},
+        })
+
+
+def _local_io_error(operation: str, error: OSError | None) -> DeviceCallResult:
+    return DeviceCallResult((), {
+        "code": "local_io_failed", "stage": operation,
+        "details": {"error": ("unknown local filesystem error" if error is None else
+                               f"{type(error).__name__}: {error}")},
+    })
+
+
+def _local_type_error(operation: str) -> DeviceCallResult:
+    return DeviceCallResult((), {
+        "code": "local_io_failed", "stage": operation,
+        "details": {"reason": "target is not a regular file"},
+    })
 
 
 def session_cleanup_assembly(
@@ -115,6 +324,7 @@ def session_cleanup_assembly(
     max_delete_attempts: int,
     max_query_attempts: int,
     staging: Path | None = None,
+    file_executor: FileTaskExecutor | None = None,
     monotonic_ns: Callable[[], int] | None = None,
     occurred_at: Callable[[], int] | None = None,
     pending_queries: dict[tuple[int, int], PendingCleanupQuery] | None = None,
@@ -133,7 +343,8 @@ def session_cleanup_assembly(
 
     会话共享重试间隔时间门槛；每个设备成员分别核对原绑定并选择
     本次配置。不可可靠读取的设备声明或未登记的当前驱动属于配置
-    前提失败。主机派生成品的本地协作者按 staging 工作根装配。
+    前提失败。主机文件协作者使用会话共享 FileTaskExecutor；主机尝试
+    只采用正式次数预算，不设置应用层时限或定时重试间隔。
     时钟读数缺省使用真实系统钟，测试可注入受控读数。
     """
     retry_gate = RetryWaitGate()
@@ -191,9 +402,11 @@ def session_cleanup_assembly(
             binding_of=lambda item_id: _member_binding(owned.connection, item_id),
             binding_check=lambda saved: check_binding(saved, SimpleNamespace(devices=devices)),
             occurred_at=wall,
-            local_files=HostArtifacts(staging) if staging is not None else None,
-            delete_config=AttemptConfig(max_delete_attempts, _DEFAULT_TIMEOUT_S, _DEFAULT_RETRY_INTERVAL_S),
-            query_config=AttemptConfig(max_query_attempts, _DEFAULT_TIMEOUT_S, _DEFAULT_RETRY_INTERVAL_S),
+            local_files=(HostArtifacts(staging, file_executor)
+                         if staging is not None else None),
+            local_file_root=staging,
+            delete_config=AttemptConfig(max_delete_attempts, None, None),
+            query_config=AttemptConfig(max_query_attempts, None, None),
             monotonic_ns=monotonic, retry_gate=retry_gate,
             pending_queries=queries, pending_companions=companions,
             pending_intents=intents, pending_deletes=deletes, pending_saves=saves,

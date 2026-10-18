@@ -253,6 +253,14 @@ def _cleanup_plan(request_id: str, params: dict) -> dict:
 
 def _run_session(deps, cfg, driver: _CleanupDriver, results,
                  local_files=None) -> asyncio.Task:
+    if deps.work_files is None:
+        from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+        from camctl.outputs.work_files import WorkFileLimits
+
+        deps.work_files = WorkFileRuntime(
+            staging=Path(cfg.paths.staging),
+            limits=WorkFileLimits(batch_size=100, limit_per_run=100),
+        )
     registry = _registry(driver)
     if local_files is None:
         cleanup = cleanup_flow(session_cleanup_assembly(
@@ -261,6 +269,7 @@ def _run_session(deps, cfg, driver: _CleanupDriver, results,
             max_delete_attempts=cfg.cleanup.max_delete_attempts,
             max_query_attempts=cfg.cleanup.max_query_attempts,
             staging=Path(cfg.paths.staging),
+            file_executor=deps.work_files.executor,
         ))
     else:
         # 测试注入本地删除替身；设备绑定恒为空，仅本地链路参与。
@@ -298,10 +307,12 @@ def _run_session(deps, cfg, driver: _CleanupDriver, results,
                 drivers=registry,
                 results=results,
                 staging=Path(cfg.paths.staging),
+                file_executor=deps.work_files.executor,
                 wait_config=lambda params: CaptureWaitConfig(
                     target_duration_ms=1_000, driver_margin_ms=0),
             )),
             "cleanup": cleanup,
+            "work_files": deps.work_files.flow,
             "cancel": cancel_flow(ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },

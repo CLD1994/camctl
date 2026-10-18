@@ -317,6 +317,8 @@ def test_finish_recovery_rejects_host_metadata_change(tmp_path, same_key):
 async def test_original_requests_remain_verifiable_after_explicit_source_cleanup(tmp_path):
     from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
     from camctl.outputs.cleanup_flow import delete_source_file
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from camctl.outputs.work_files import WorkFileLimits
     from camctl.persistence.repositories.host_capture import HostCaptureRepository, HostPhotoComplete, PrepareHostPhoto
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from camctl.persistence.repositories.acceptance import register_acceptance_guards
@@ -344,7 +346,12 @@ async def test_original_requests_remain_verifiable_after_explicit_source_cleanup
         original_path.write_bytes(b"o" * 4096)
         preview_path.write_bytes(b"p" * 128)
         _, item_id = _start_cleanup(owned, original_id, "23")
+        work_files = WorkFileRuntime(
+            staging=tmp_path,
+            limits=WorkFileLimits(batch_size=100, limit_per_run=100),
+        )
         runtime = session_cleanup_assembly(devices={}, drivers=None, staging=tmp_path,
+            file_executor=work_files.executor,
             max_delete_attempts=1, max_query_attempts=1,
             occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)(owned)
         result = await delete_source_file(runtime.for_item(item_id), item_id)

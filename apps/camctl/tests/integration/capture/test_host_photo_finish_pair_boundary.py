@@ -479,7 +479,9 @@ async def test_same_and_new_key_recovery_preserve_explicit_source_cleanup(
     tmp_path, clean_kind
 ):
     from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.outputs.cleanup_flow import delete_source_file
+    from camctl.outputs.work_files import WorkFileLimits
     from camctl.persistence.repositories.acceptance import register_acceptance_guards
     from camctl.persistence.repositories.scheduling import register_window_guard
     from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
@@ -503,8 +505,13 @@ async def test_same_and_new_key_recovery_preserve_explicit_source_cleanup(
         source_path.parent.mkdir()
         source_path.write_bytes(b"x" * (4096 if clean_kind == "original" else 128))
         _, item_id = _start_cleanup(owned, source_id, "23")
+        work_files = WorkFileRuntime(
+            staging=tmp_path,
+            limits=WorkFileLimits(batch_size=100, limit_per_run=100),
+        )
         runtime = session_cleanup_assembly(
             devices={}, drivers=None, staging=tmp_path, max_delete_attempts=1,
+            file_executor=work_files.executor,
             max_query_attempts=1, occurred_at=lambda: 1_800_000_000_000_000,
             monotonic_ns=lambda: 0,
         )(owned)
