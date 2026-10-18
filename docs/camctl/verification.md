@@ -12,11 +12,11 @@
 
 用户同时确认：Action6 与 OSMO 360 II 普通录像的启动命令执行成功后，设备实际开始录像仍有 **1 秒内的延迟**，因而成片可能比主机目标时长少接近 1 秒。这是用户对当前设备行为的核实；本项没有新增 Agent 拍摄或独立的首帧计时测量，也不把这段延迟固定为恰好 1 秒。既有媒体时长观测继续保留，包括超过目标和短于目标的不同样本。
 
-这两项事实暴露了现行接入中的待修订项：`adb_cameras/timelapse_parameters.py` 仍给两款相机共用包含 1 秒的间隔域；[录像启动确认](../architecture/camera-recording.md#录像启动确认)仍将启动成功响应作为设备已处于录像状态的依据。OSMO 的新请求参数域应按型号修正；命令确认、实际录像开始及目标媒体时长的关系也须重新核对，不能仅凭设备存在启动延迟就将不足目标的媒体标为达标。具体修订与验证由[完成计划中的新增现场事实修订](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#新增现场事实的后续修订)统一跟踪。
+这两项事实曾暴露型号间隔域和录像启动确认语义的修订项。当前实现已按[启动余量与时间参数设计](../superpowers/specs/2026-10-18-camera-startup-margin-design.md)完成：OSMO 新请求最短间隔为 2 秒，Action6 保留自己的间隔域；新普通录像以可靠命令确认和冻结启动余量安排后续时点，并继续把实际开始时间保留为未知，除非另有设备观察。完整软件门禁、c76 安装快照和 OSMO 定点实机结果见[本轮启动余量验收](#启动余量-tx2-定点验收2026-10-18)。
 
-用户进一步确定：普通录像保留至少达到目标时长、允许略多录的要求；两款相机的普通录像与延时摄影均采用独立的 1 秒启动余量。设备自行计时的延时只在主机自然核实之前增加等待，设备收到的目标时长保持原值。完整规则见[启动余量与时间参数设计](../superpowers/specs/2026-10-18-camera-startup-margin-design.md)，实现状态由上述计划维护。
+用户进一步确定：普通录像保留至少达到目标时长、允许略多录的要求；两款相机的普通录像与延时摄影均采用独立的 1 秒启动余量。设备自行计时的延时只在主机自然核实之前增加等待，设备收到的目标时长保持原值。完整规则由[启动余量与时间参数设计](../superpowers/specs/2026-10-18-camera-startup-margin-design.md)维护；实现进度由[启动余量实施计划](../superpowers/plans/2026-10-18-camera-startup-margin.md)维护。
 
-本项只更新现场事实、原结果解释及后续修订范围，没有修改参数 Schema、驱动、计时或恢复行为，没有访问相机。此前软件和 TX2 业务链的执行结果保留原日期与范围，不升级为上述修订已经完成。Action6 真机验证仍等待固件修复。
+本项保留 2026-10-18 的现场观察及此前原请求证据，不把旧 1 秒输入、负载、文件或媒体结果改写成新 2 秒请求，也不声称该观察独立测得首帧时刻。新实现、软件验证、安装物和当前 OSMO 定点实机范围见[本轮启动余量验收](#启动余量-tx2-定点验收2026-10-18)；Action6 真机验证仍等待固件修复。
 
 ## OSMO 360 II 完成依据与正式接入的复核（2026-10-18）
 
@@ -85,6 +85,36 @@ OSV 有两路 `3840×3840` HEVC 主视频，各 331 帧、11.044367 秒，并含
 最终只读状态检查的 SQLite `quick_check` 为 `ok`，USB／ADB 在线且 camera boot ID 不变；21 个 action 均为终态，7 项设备占用均已释放，30 个 operation run／attempt 保留，11 个 output 与 11 个 delivery 登记在库。既有 action 1—5 的状态未变。最终归档的 59 份文件共 `10957808` 字节，逐文件长度和 SHA-256 均与远端核对一致。Action6 继续等待固件修复，本轮未访问该设备。
 
 本轮忽略证据目录为 `.local/acceptance/osmo360-formal-integration-20261017T164203Z/`；普通录像概要为 `01-record-summary.json`、`02b-record-manual-summary.json`，Manual 过程记录为 `02b-record-manual-watch.stdout`；延时观察及交付概要分别为 `02-timelapse-watch.stdout`、`02-timelapse-summary.json`，帧数复核为 `02-timelapse-frame-count.stdout` 与 `02-timelapse-frame-count.call.json`；恢复连续性和交付分别见 `03-recovery-continuity.json`、`03-recovery-summary.json` 与 `03-recovery-watch.stdout`；有限取消事实见 `04-cancel-continuity.json`、`04-cancel-target-terminal.json`、`04-cancel-command-terminal.json`、`04-cancel-events-readonly-v2.stdout` 和 `04-cancel-summary.json`。最终状态与远端归档逐文件核对见 `final-state.stdout`、`final-remote-evidence/final-state.db`、`final-remote-evidence-integrity.json`。原始请求、日志及配置备份支撑本节细节；通过范围限于本计划所列 OSMO 场景。
+
+### 启动余量 TX2 定点验收（2026-10-18）
+
+本节记录独立的启动余量软件、ARM 安装与五轮 OSMO 实机验收。软件门禁分别运行于具名快照；源码等价复核确认其适用生产代码对应当前交付快照 `c76e496059aff067a7488e555a305167faaecfab`，不将不同快照描述为同一次运行。
+
+#### 软件门禁
+
+全量 unit 在 `b5b8c5c7dcf06a22bcfb7399d26f0abedc45ad3c` 取得 `5711 passed, 1 skipped`（31.37 秒，退出码 0）；完整 capture 在 `1e04c647ea4424e097c93046ee7d553eeef4cf50` 取得 `1872 passed`（814.42 秒，退出码 0）。完整 bootstrap 在 `209cfae6940f558a7e1d71b8c78bfde25172dfda` 取得 `1175 passed, 1 skipped`（1201.62 秒，退出码 0）；同一快照的六个独立集成目录 cancellation、session、persistence、history、devices、host_files 分别为 103、139、123、212、166、117 项通过，合计 860 项，均退出 0。Task 3 的五项跨组件门禁在 `1c3c72261c8b4c3218d6c6b97df3ad1f80c1b6a8` 分别通过 4、3、3、4、1 项，合计 15 项，均退出 0；生成资源和协议检查均退出 0。独立快照、运行收据和源码等价依据分别保存在本轮持久证据目录 `.local/acceptance/camera-startup-margin-20261017T215355Z/software-validation/sdd-software/` 的 `final-branch-review.md`、`final-capture-gate.md`、`final-core-gates.md`、`bootstrap-verification.md` 与 `task-3-report.md`；软件原始归档位于本轮 `.local/acceptance/camera-startup-margin-20261017T215355Z/software-validation/`。
+
+#### ARM64 安装
+
+`deployed.json` 记录安装来源为 `c76e496059aff067a7488e555a305167faaecfab`。安装 wheel 的 SHA-256 为 `90c8b4a242fe17da5f5779656af999ef96ba5e7922b30090b081289a36714628`；复用的 ARM C host SHA-256 为 `2889f129dfa6abe1346b30584fbdd21eb23a8027e026256be75976b898400461`。正式 `describe` 的 SHA-256 为 `b9927505734d7584b2e8da98c5365b0657dfd91e3a685311f1fd90afbdcb3a7e`，安装后描述摘要相同、退出码为 0，并报告 OSMO 最小间隔 2 秒。目标运行时为 Python 3.11.17、SQLite 3.53.1；两款设备使用同一 serial，现场通过 USB product 与型号信息确认 OSMO 360 II，未访问 Action6。安装清单和 describe 记录见 `.local/acceptance/camera-startup-margin-20261017T215355Z/deployed.json`。
+
+#### 五轮实机结果
+
+- **Auto 普通录像，目标 10 秒。** 两路主视频各为 15.982633 秒。START 与 STOP 控制调用分别耗时 7.704439 秒和 2.802223 秒；STOP 意图相对原确认点 A 为 11.372831 秒。这些是控制时序，不是首帧时刻测量，也不证明首帧延迟恰好为 1 秒。
+- **Manual ISO 800 普通录像，目标 10 秒。** 两路主视频各为 11.678333 秒；STOP 意图相对 A 为 11.134951 秒。此时间仍表示控制时序，实际首帧时刻未独立测量。
+- **Auto 原生延时，输入间隔 2 秒、采集时长 300 秒。** 唯一 START 后未派发 STOP；首次 RESULTS 意图在 A 后 331.536804 秒。OSV 两路主视频各 151 帧，播放时长各为 5.038367 秒；这段媒体播放时长不表示 300 秒采集时长，也未独立读回相机实际采样间隔。
+- **Manual ISO 800 恢复，输入间隔 30 秒、采集时长 300 秒。** 在原预计核实点 Q 之前，对本轮自有 C host 进程及 CLI 进程组发送 `SIGKILL`（强制终止信号），随后重启 C host；没有重启 TX2。恢复沿原 A/S/D/R/E、action/activity/run/attempt/key/baseline 和唯一 START 继续，并等待原 Q，没有从 host 重启时点重新等待 331 秒。完成等待与首次 RESULTS 意图分别晚于原 Q 0.296444 秒和 0.325541 秒；时序和进程操作收据见 `.local/acceptance/camera-startup-margin-20261017T215355Z/03-recovery-cut.call.json`、`.local/acceptance/camera-startup-margin-20261017T215355Z/03-recovery-cut.stdout`、`.local/acceptance/camera-startup-margin-20261017T215355Z/03-recovery-host-restart.call.json`、`.local/acceptance/camera-startup-margin-20261017T215355Z/03-recovery-host-restart.stdout` 与 `.local/acceptance/camera-startup-margin-20261017T215355Z/03-recovery-continuity.json`。
+- **Manual ISO 800 有限取消，输入间隔 30 秒、采集时长 300 秒。** A 后 45.452824 秒观察到 USB 断开，之后才安排并提交取消；该观察时点不作为取消生效时刻。唯一 START 与唯一 STOP 均保留，STOP 原结果为设备断开错误。目标 action 34 最终 `CANCELED`，取消 action 35 最终 `FAILED/error_code=23 (cancel_items_failed)`；活动 `ENDED/RELEASED`，但 `capture_json` 为空、完成依据为 `UNDETERMINED`、结果集为 `UNEXAMINED`。有限收场结束不代表目标采集成功或 STOP 成功。完成等待与首次 RESULTS 意图分别晚于原 Q 0.027148 秒和 0.053219 秒。
+
+五轮共 5 份原片和 5 份实际预览，合计 10 份，均分别取回；相机源、TX2 副本和本地副本摘要一致。FFmpeg 对每份文件分别映射 `0:v` 和可选的 `0:a?`，所有实际音视频流均完整解码通过，10 次解码退出码均为 0 且 stderr 为空；data 流不在该解码结论内。客户端 `Files` 导入和累计 ACK 通过。一次客户端 helper 在 export、submit 和 START 之前遇到 schema 拒绝；原始诊断保留在本轮证据目录，不计入五轮业务结果。
+
+#### 原状态保全、归档与范围
+
+最终状态核对确认旧数据库九张业务表的原有行逐字段不变：plans/actions 各 21 行，activities 7 行，files/outputs/deliveries 各 11 行，runs/attempts 各 30 行，copies 11 行。原有 935 条 history_events 和 704 条 history_transactions 记录保持不变；最终分别有 1700 条和 1281 条记录。原 9 份 OSMO 源文件共 742411731 字节且摘要不变，配置原字节及相机 boot ID 均保持不变。最终数据库 SHA-256 为 `08aed14ac2fa0884db2c78d458e8dc3907cc023bec1daf4ad4d0bc0d138d3a80`。最终状态为 37 plans、37 actions、12 activities、21 files、21 outputs、21 deliveries、53 runs、53 attempts；新增五项 activity 均 `RELEASED`，新增 16 项 action 中除上述 action 34、35 外均 `SUCCEEDED`。
+
+远端完整归档已保存到本地，77 个普通文件逐项摘要核对通过；归档 SHA-256 为 `c2a3030dc2d78e0193969a51c19d881af5437311d75303616017ea0756e5cb79`。收尾仅停止本轮自有 host 与 USB monitor，保留共享 ADB server，收尾前没有受管 CLI 子进程。最终状态、清理和归档审计分别见本轮目录的 `final-state.json`、`final-cleanup.json` 与 `final-remote-archive-audit.stdout`。
+
+本轮只验证所列五种 OSMO 场景。它不覆盖全部间隔组合、成像质量、物理断电、曝光 ISO 独立回读或精确首帧时刻；启动余量和参数完整契约以[批准规格](../superpowers/specs/2026-10-18-camera-startup-margin-design.md)为准。Action6 未访问，仍等待固件修复。
 
 ### 既有 OSV 的离线双流裁剪核验
 
