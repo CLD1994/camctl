@@ -98,10 +98,10 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 
 **预计文件：** `docs/architecture/output-cleanup.md`、`camera-capabilities.md`、`docs/camctl/file-runtime.md`、`database/operation-fields.md`、`cleanup-coordination.md` 及必要的会话工作判定说明。
 
-- [ ] **步骤 1：逐条核对状态矩阵与现行契约。** 固定上述五维状态、原申请持有、QUERY 取消核实边界、终态残留发现及主机预算归属。明确哪些规则是既有契约、哪些是本次补齐，不以实现现状替代设计依据。
-- [ ] **步骤 2：定义完整设备文件清理能力。** 内部 `DriverDeclaration.delete_supported` 表示驱动提供完整设备文件清理协作，需 DELETE、独立文件查询、匹配证据及适用恢复齐备；原始 rm 能力不等于此声明。文件查询 true／删除 false 合法，删除 true／文件查询 false 为定义错误。false 不阻止已保存结果本地交接或主机文件清理。公共字段按当前配置选定正式源派生，由能力声明专题定义；不能将内部值直接透传或拿公共值阻断历史文件的实际协作者。
-- [ ] **步骤 3：明确文件调用计数与恢复证据。** 一次 DELETE 最多一次物理删除和一次用于确认该调用完成的后置观察；该观察属于 DELETE，不是适配器内部重试。后续框架 `query_file` 各占 QUERY 额度，适配器不循环 rm 或查询。证据登记按类型与版本唯一、操作单值：DELETE 后置观察使用独立 `file_delete_presence/v1`，字段为 cleanup_item_id、present，保留既有 `file_absent/v1`；FILE_QUERY 沿用 `file_presence/v1`。主机重启恢复定义独立 `local_file_recovery/v1` 空正文依据，用于主机 DELETE／QUERY 的 UNKNOWN 与 assumed 收场，不虚构实际返回。
-- [ ] **步骤 4：独立复核并提交文档。** 消除主机预算冲突；责任专题维护有效规则，计划和其他页面引用它们。检查新增锚点与链接后，才交接依赖这些规则的实现。
+- [x] **步骤 1：逐条核对状态矩阵与现行契约。** 固定上述五维状态、原申请持有、QUERY 取消核实边界、终态残留发现及主机预算归属。明确哪些规则是既有契约、哪些是本次补齐，不以实现现状替代设计依据。
+- [x] **步骤 2：定义完整设备文件清理能力。** 内部 `DriverDeclaration.delete_supported` 表示驱动提供完整设备文件清理协作，需 DELETE、独立文件查询、匹配证据及适用恢复齐备；原始 rm 能力不等于此声明。文件查询 true／删除 false 合法，删除 true／文件查询 false 为定义错误。false 不阻止已保存结果本地交接或主机文件清理。公共字段按当前配置选定正式源派生，由能力声明专题定义；不能将内部值直接透传或拿公共值阻断历史文件的实际协作者。
+- [x] **步骤 3：明确文件调用计数与恢复证据。** 一次 DELETE 最多一次物理删除和一次用于确认该调用完成的后置观察；该观察属于 DELETE，不是适配器内部重试。后续框架 `query_file` 各占 QUERY 额度，适配器不循环 rm 或查询。证据登记按类型与版本唯一、操作单值：DELETE 后置观察使用独立 `file_delete_presence/v1`，字段为 cleanup_item_id、present，保留既有 `file_absent/v1`；FILE_QUERY 沿用 `file_presence/v1`。主机重启恢复定义独立 `local_file_recovery/v1` 空正文依据，用于主机 DELETE／QUERY 的 UNKNOWN 与 assumed 收场，不虚构实际返回。
+- [x] **步骤 4：独立复核并提交文档。** 消除主机预算冲突；责任专题维护有效规则，计划和其他页面引用它们。检查新增锚点与链接后，才交接依赖这些规则的实现。
 
 ### R1：分离文件查询端口与拍摄状态查询
 
