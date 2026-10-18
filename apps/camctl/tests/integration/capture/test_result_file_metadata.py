@@ -3,7 +3,10 @@
 import pytest
 
 from camctl.capture.files import FileCompletionSave, FileObservationSave, FilePresenceSave, OwnershipSave
-from camctl.capture.handlers import _begin_check_round, _finish_listing_result, _listing_round, _saved_result_listing
+from camctl.capture.handlers import (
+    _begin_check_round, _finish_listing_result, _listing_round, _register_listing,
+    _retained_result_files, _saved_result_listing,
+)
 from camctl.capture.results import FileKind
 from camctl.contracts.values import new_operation_key
 from camctl.operations.attempts import RunOutcome
@@ -27,6 +30,7 @@ async def test_saved_listing_preserves_v1_metadata_when_file_evidence_has_no_kin
         "original_name": "preview.jpg", "media_type": "image/jpeg", "paired_identity": "original",
     })
     driver = _result_port(runtime, actual)
+    expected_file_ids = {}
     try:
         listing = await _listing_round(runtime, action_id)
         original_id = None
@@ -38,6 +42,7 @@ async def test_saved_listing_preserves_v1_metadata_when_file_evidence_has_no_kin
                 action_id, identity, locator, listing.occurred_at), new_operation_key(), owned)
             assert discovered.kind is DbOutcomeKind.COMPLETED, discovered.error
             file_id = discovered.value.file_id
+            expected_file_ids[identity] = file_id
             if original_id is None:
                 original_id = file_id
             owner = OwnershipSave(file_id, action_id, 1, role, {"listing": identity}, listing.occurred_at,
@@ -62,21 +67,48 @@ async def test_saved_listing_preserves_v1_metadata_when_file_evidence_has_no_kin
 
         saved = _saved_result_listing(resumed, action_id)
 
-        entries = {entry.identity: entry for entry in saved.entries}
-        assert entries["original"].kind is FileKind.VIDEO
-        assert entries["original"].original_name == "original.mp4"
-        assert entries["original"].media_type == "video/mp4"
-        assert entries["original"].size_bytes == 41
-        assert entries["preview"].kind is FileKind.PHOTO
-        assert entries["preview"].original_name == "preview.jpg"
-        assert entries["preview"].media_type == "image/jpeg"
-        assert entries["preview"].paired_identity == "original"
-        assert entries["preview"].size_bytes == 7
-        assert all(entry.complete for entry in saved.entries)
-        assert saved.registered_files["original"][0].kind is FileKind.VIDEO
-        assert saved.registered_files["preview"][0].kind is FileKind.PHOTO
+        current = _register_listing(resumed, action_id, saved)
+        current_records = tuple(current.entries.records())
+        current_entries = {entry.identity: entry for entry, _, _ in current_records}
+        current_file_ids = {entry.identity: file_id for entry, _, file_id in current_records}
+        retained = _retained_result_files(resumed, saved, current)
+        retained_records = tuple(retained.entries.records())
+        retained_entries = {entry.identity: entry for entry, _, _ in retained_records}
+        retained_files = {entry.identity: file for entry, file, _ in retained_records}
+        retained_file_ids = {entry.identity: file_id for entry, _, file_id in retained_records}
+
+        assert set(retained_entries) == {"original", "preview"}
+        assert retained_file_ids == expected_file_ids
+        assert retained_entries["original"].kind is FileKind.VIDEO
+        assert retained_entries["original"].original_name == "original.mp4"
+        assert retained_entries["original"].media_type == "video/mp4"
+        assert retained_entries["original"].size_bytes == 41
+        assert retained_entries["preview"].kind is FileKind.PHOTO
+        assert retained_entries["preview"].original_name == "preview.jpg"
+        assert retained_entries["preview"].media_type == "image/jpeg"
+        assert retained_entries["preview"].paired_identity == "original"
+        assert retained_entries["preview"].size_bytes == 7
+        assert all(entry.complete for entry in retained_entries.values())
+        assert retained_files["original"].kind is FileKind.VIDEO
+        assert retained_files["preview"].kind is FileKind.PHOTO
         if latest_without_observation:
             assert saved.outcome.observations == ()
+            assert saved.outcome.error is not None
+            assert current_entries == {}
+            assert current_file_ids == {}
+        else:
+            assert set(current_entries) == {"original", "preview"}
+            assert current_file_ids == expected_file_ids
+            assert current_entries["original"].kind is FileKind.VIDEO
+            assert current_entries["original"].original_name == "original.mp4"
+            assert current_entries["original"].media_type == "video/mp4"
+            assert current_entries["original"].size_bytes == 41
+            assert current_entries["preview"].kind is FileKind.PHOTO
+            assert current_entries["preview"].original_name == "preview.jpg"
+            assert current_entries["preview"].media_type == "image/jpeg"
+            assert current_entries["preview"].paired_identity == "original"
+            assert current_entries["preview"].size_bytes == 7
+            assert all(entry.complete for entry in current_entries.values())
         driver.list_results.assert_awaited_once()
     finally:
         owned.connection.close()

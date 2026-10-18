@@ -120,7 +120,8 @@ async def _world(tmp_path, entry, *, error_kind="known"):
             assert listing.phase is ListingPhase.LISTED
             assert listing.outcome is actual
             registered = _register_listing(runtime, action_id, listing)
-            assert len(registered) == 1
+            registered_files = tuple(registered)
+            assert len(registered_files) == 1
             original = runtime.pending_start_results[(listing.ticket.run_id, listing.ticket.attempt_id)]
             assert original.finish.ticket == listing.ticket
             assert original.finish.occurred_at == listing.occurred_at
