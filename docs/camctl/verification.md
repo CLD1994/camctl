@@ -6,6 +6,43 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 设备文件清理的 TX2 实机验收（2026-10-18 UTC）
+
+[设备文件清理计划 R7](../superpowers/plans/2026-10-18-device-file-cleanup.md#r7用已验发行物完成-osmo-目标设备验收)已通过真实 OSMO 360 II 的正式清理链验收。现场使用 `cld` 账户、ARM64、Python 3.11.17、SQLite 3.53.1 和 ADB 1.0.39；USB 为 `2ca3:0020`，产品属性为 `eagle4_oq102`，固件为 `10.00.00.57`／`01.01.02.10`。本次检查至最终目录核对的相机 boot ID 均为 `64eb2280-7f6e-48bb-bafd-5bed1dd7a797`。
+
+部署使用下节软件联合链已验证的 wheel，SHA-256 为 `92d26137b6ddbb6ada476dcbcfce1a2f30be57e536769cd92c9e9c2f69e2362f`；安装后的 265 份源码及资源与 wheel 逐字节一致，9 项运行依赖与配套锁定清单一致。复用的 ARM host SHA-256 为 `2889f129dfa6abe1346b30584fbdd21eb23a8027e026256be75976b898400461`，其源码目录与此前已验版本 `bc0cad2` 相同。实际 `describe` 导出 OSMO 删除支持 true、Action6 false。
+
+现场保留原配置、状态库及旧安装备份，没有执行 `init`。包含 WAL 的初始数据库备份 SHA-256 为 `08aed14ac2fa0884db2c78d458e8dc3907cc023bec1daf4ad4d0bc0d138d3a80`，与上次验收归档一致；生产责任查询没有未完成动作、开放尝试或必要收场工作。原终态活动中的未知设备观察保持，不据此补发拍摄命令。独立验收配置使用 DELETE／QUERY 各 1 次预算、各 60 秒期限；原 `camera-demo/config.toml` 字节保持。
+
+### 精确文件、调用与结果
+
+两个目标来自不同拍摄组，均先核对当前设备大小和 SHA-256、正式产物身份及独立本地交付副本，随后通过真实客户端导出、C host 与安装版 CLI 提交。共享远端目录为 `/mnt/media_rw/emulated/DCIM/CAM_001/`。选取较小的既有正式源即可验证双向不级联，无需新增拍摄。
+
+| 删除目标 | 原文件及大小 | 正式请求与结果 | 保留的配对产物 |
+| --- | --- | --- | --- |
+| output `9` | `CAM_20000101053528_0041_D.OSV`，17,350,298 字节 | 请求 `9079710386731686124`，action `40`／item `2` 成功。先 QUERY 确认在场，再 DELETE 一次，保存可靠缺席。 | output `8` 的同组 LRF，3,127,250 字节，大小及摘要保持。 |
+| output `20` | `CAM_20000101133229_0047_D.LRF`，3,198,117 字节 | 请求 `3643755395682129271`，action `41`／item `3` 成功。DELETE 一次，保存可靠缺席。 | output `21` 的同组 OSV，17,587,655 字节，大小及摘要保持。 |
+
+目录条目数包含目录根，依次为 `71 → 70 → 69`；差集严格等于上述两个精确路径。独立只读检查取得两目标缺席的完整 NUL 帧，两份配对文件的大小和摘要不变。所有保留本地副本再次校验通过；数据库没有相应正式修复 MP4，本项不声明主机 MP4 的实机删除结果，主机正式源由下节软件链验收。
+
+首次请求 `6694547240682406550` 的验收日志启动器有换行转义错误，Python 在执行实际 ADB 前编译失败。该请求留下的本地 DELETE／QUERY 失败、未知效果及 action `38`／item `1` 终态均保留，实际设备调用为零。将启动器改为独立文件并在目标 Python 编译通过后，重新核对四份文件，再提交表中的新请求。框架按原未知文件事实先查询在场，随后才删除；没有改写旧失败、重放旧票据或刷新旧次数。启动器只限制本次清单并记录参数，随后原样执行 `/usr/bin/adb`，没有替换生产工厂、解释器或设备响应。
+
+新请求 `2179098343299311917` 再清理 output `9`、`20`，action `42` 的两个成员均返回 `ALREADY_CLEANED`，没有增加操作流程、尝试或实际调用。整个现场正式链实际使用 QUERY 一次、DELETE 两次；独立只读目录、摘要及协议检查另行归档，不计作业务 QUERY 尝试。三个实际文件调用均正常退出，保存的观察分别为在场、缺席、缺席。
+
+### 报告、ACK 与不可变历史
+
+C host 领取完整报告 `164`，范围为 `0..541`，大小 34,123 字节，SHA-256 为 `a72dc90fed560844af4992b43ab2229e45d8be1fd9a7f1633877496c687d37d4`。`ready → processing` 前后字节相同，原有 56 份 processing 文件保留；旧报告摘要保持。逻辑报告 `155..163` 仍保留发布记录，其 ready 文件按[覆盖替换规则](../architecture/report-publication.md)由完整报告 `164` 承担。
+
+真实客户端导入后，output `9`、`20` 为 `cleaned／completed`，配对的 `8`、`21` 仍为 `available／not_requested`。客户端通过 `Application.downloadRequest` 为原请求 `2179098343299311917` 加上 `last_report_id: "164"` 重送，目标库吸收 ACK `164`、watermark `541`；计划、动作、产物、清理项、操作流程、尝试和报告数量均不增加。
+
+初始／最终数据库的独立逐字段比较确认：原 1700 条事件、1281 个事务、37 份计划、37 个动作、53 个操作流程、53 次尝试、21 份交付、21 份拷贝、154 份报告与数据库身份保持。只有原 outputs／device_files 的 `9`、`20` 更新清理事实，其余产物、设备文件、中间文件和配对关联保持；首次失败成员的完整行也保持。最终必要工作为零、没有未确认报告责任，本次验收 host 在确认无 CLI 子进程后结束，共享 ADB 服务端保留。
+
+### 证据与未验边界
+
+完整命令、起止 UTC、退出码、原始调用及响应、配置摘要、文件清单、旧安装备份、各阶段 SQLite 备份、报告及客户端凭据统一保存于 `.local/acceptance/device-file-cleanup-20261018T211358Z/`；目标原件位于 `/home/cld/.camctl/device-file-cleanup-acceptance/20261018T211358Z/`。下载的现场包 SHA-256 为 `7ab542e831d94f25e268615c1a2cf93b6af202128eb227497470b0fa9d0bdbe8`，65 份文件逐一校验通过；最终 `final.db` SHA-256 为 `1afa2a63a558297bdec2bad1f7064ad01b6e567708284ec661326aba63bb1e6a`。具体文件备份及完整摘要以 `file-manifest.verified.json` 为依据，决策和数据库比较分别见 `execution-decision.json`、`database-comparison.json`。
+
+本项验证 ARM 实际工具、完整帧、精确删除、可靠缺席、新请求复用及真实报告交接。没有新增拍摄、发送 START／STOP、操作 Action6 或执行物理断电；中断、保存未知及取消恢复的完整矩阵由 R6 软件证据承担。软件门禁的既有 35 项 outputs 失败与两条标记告警仍按下节原样记录。
+
 ## 设备文件清理的软件联合验收（2026-10-18 UTC）
 
 在 Linux x86_64／WSL2、Python 3.11.16、SQLite 3.53.1 和 Node.js 24.20.0 中，验证[设备文件清理计划](../superpowers/plans/2026-10-18-device-file-cleanup.md)的 R6 软件联合链。[安装版联合用例](../../tests/integration/test_device_file_cleanup_roundtrip.py)复用已有独立动作 `delete_action_outputs`，通过真实客户端导出、C host、仓库外 wheel、CLI、SQLite、正式源文件、状态报告及累计 ACK 验证清理执行和恢复。ADB／`hb_cli` 只在外部工具边界提供受合同约束的文件和响应；没有替换生产文件工厂、解释器、清理状态机或仓储。
@@ -41,7 +78,7 @@ apps/camctl/.venv311/bin/python -m pytest \
 | bootstrap | `ce3b34b` 完整目录：1298 passed、2 failed、1 skipped | 两项失败来自测试包装器漏传 `waiter`；`34d0cbd` 修正后两份完整相关文件 47 passed。fix1 七文件 101 passed，root 合入后 owner／锁／启动三文件共 62 passed。未将这些数字相加为新全目录结果。 |
 | outputs | `ce3b34b`：35 failed、2194 passed、2 skipped，退出 1 | 35 项均在 `test_product_event_sequence.py`、`test_selection_derived_sequence.py`，ID、首错及位置与原基线相同，逐项差异为零；本目录未全绿。 |
 
-root 新组合收据位于 `.local/verification/cleanup-r6-serial-integration/`；原组件门禁及独立复核分别保存在对应任务工作树的 `.local/verification/` 和本计划交接材料中。媒体阶段修复让准备任务可靠登记原输出后结束，后轮重新取得完整文件资格；清理调度修复让中央在实际文件调用等待期间继续保存取消，并在错误退出时先停止新增普通工作、再接回真实结果和原保存责任。这些实现契约由[文件执行](file-runtime.md)和[实现总览](implementation.md#动作执行协程的创建时机)维护。
+root 新组合收据位于 `.local/verification/cleanup-r6-serial-integration/`；原五个任务工作树的日志、证据及未提交原件已归档到 `.local/verification/worktree-archives/`，`manifest.json` 保存旧目录、分支、HEAD 与各归档摘要，原始命令仍保留当时的工作目录。本计划交接材料继续保存独立复核。媒体阶段修复让准备任务可靠登记原输出后结束，后轮重新取得完整文件资格；清理调度修复让中央在实际文件调用等待期间继续保存取消，并在错误退出时先停止新增普通工作、再接回真实结果和原保存责任。这些实现契约由[文件执行](file-runtime.md)和[实现总览](implementation.md#动作执行协程的创建时机)维护。
 
 最终协议、文档链接与差异检查另有实际命令及退出码。安装版和组件软件结果不替代 ARM 依赖、设备工具、真实物理删除或物理断电验收；R7 现场结果独立记录。
 
