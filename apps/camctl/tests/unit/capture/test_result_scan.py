@@ -16,6 +16,7 @@ from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.operations.models import AttemptStatus, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.result_sources import ResultSource, ResultSourceKind
 from .test_result_pages import _TICKET, _CURSOR, _outcome
 
 _REGISTRY = EvidenceRegistry((RESULT_PAGE_CONTRACT,
@@ -53,7 +54,10 @@ def _page(*, cursor=None, next_cursor=None, finalized=False, error=None, complet
 
 
 def _runtime():
-    return SimpleNamespace(owned=object(), capture=create_autospec(CaptureRepository, instance=True),
+    capture = create_autospec(CaptureRepository, instance=True)
+    capture.read_result_source.return_value = ResultSource(
+        ResultSourceKind.STOP, 8, _completion_context(), requires_file_wait=True)
+    return SimpleNamespace(owned=object(), capture=capture,
         results=create_autospec(DriverResultListing, instance=True), evidence=_REGISTRY,
         wall_us=Mock(side_effect=[1_750_000_000_000_000, 1_750_000_000_000_100]),
         monotonic_ns=Mock(side_effect=[1_000_000, 2_000_000]))

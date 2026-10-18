@@ -2296,6 +2296,11 @@ class CaptureRepository:
         from .result_pages import read_file_input
         return read_file_input(ref, identity, owned, allow_missing=allow_missing)
 
+    def read_result_source(self, ticket, owned: OwnedConnection):
+        """原意图前的可靠控制与等待决定原结果来源。"""
+        from .result_sources import load_result_source
+        return load_result_source(owned.connection, ticket)
+
     def read_result_sources(self, ticket, cursor, batch: int, owned: OwnedConnection):
         from .result_pages import read_source_inputs
         return read_source_inputs(ticket, cursor, batch, owned)
@@ -5840,9 +5845,21 @@ def _verify_record_result_page(saved, page_event, action, activity, state):
         raise ConsistencyError("完成文件的原结果页与动作、活动或可靠页范围不符")
 
 
+def _verify_file_result_source(saved, page_event, action, activity, state, expected, stop_event_id=None):
+    from .result_sources import result_source_from_state
+    attempt = _source_fact(state, "operation_attempts", page_event.evidence["attempt_id"])
+    source = result_source_from_state(action, activity, attempt, state)
+    if source.kind != expected:
+        raise ConsistencyError("文件完成改变原 RESULTS 意图采用的来源")
+    if stop_event_id is not None and (source.context is None
+            or source.context["stop_result_event_id"] != stop_event_id):
+        raise ConsistencyError("文件完成没有原意图之前的同一可靠 STOP")
+
+
 def _verify_stop_wait_file(facts, evidence, size, state, *, event_id=None):
     """原页中的单文件完成与原 STOP、固定等待规则共同提供假设依据。"""
     from .result_pages import _decode
+    from .result_sources import ResultSourceKind
 
     if not isinstance(evidence, Mapping) or set(evidence) != {
             "basis", "observation", "activity_id", "result_page_event_id", "stop_result_event_id"}:
@@ -5861,6 +5878,7 @@ def _verify_stop_wait_file(facts, evidence, size, state, *, event_id=None):
     action = _source_fact(state, "actions", activity["action_id"])
     observer = _source_fact(state, "actions", facts["observer_action_id"])
     _verify_record_result_page(saved, page_event, action, activity, state)
+    _verify_file_result_source(saved, page_event, action, activity, state, ResultSourceKind.STOP, stop_event.event_id)
     wait_ms = action["execution_spec_json"].get("file_completion_wait_ms")
     if not is_json_integer(wait_ms) or wait_ms <= 0:
         raise ConsistencyError("录像没有固定的停止后文件完成等待规则")
@@ -5895,6 +5913,7 @@ def _verify_stop_wait_file(facts, evidence, size, state, *, event_id=None):
         source_event = _history_source_event(state, source_id)
         original, _ = _decode(source_event)
         _verify_record_result_page(original, source_event, action, activity, state)
+        _verify_file_result_source(original, source_event, action, activity, state, ResultSourceKind.STOP, stop_event.event_id)
         original_settlement = original.page.outcome.settlement
         source = {"event_id": source_event.event_id, "activity_id": original.ref.ticket.target_id,
                   "data": None if original_settlement is None else original_settlement.evidence.data}
@@ -5909,6 +5928,7 @@ def _verify_stop_wait_file(facts, evidence, size, state, *, event_id=None):
 def _verify_natural_wait_file(facts, evidence, size, state, *, event_id=None, occurred_at=None):
     """自然完成引用原发送、实际等待和文件页；不借用其他活动的完成事实。"""
     from .result_pages import _decode
+    from .result_sources import ResultSourceKind
     from camctl.devices.capture_completion import validate_completion_context
     from camctl.devices.tasks import CompletionMode, EndControl, StartReturn
     from camctl.history.events import load_event_registry
@@ -5970,6 +5990,7 @@ def _verify_natural_wait_file(facts, evidence, size, state, *, event_id=None, oc
         **({"startup_margin_ms": spec["startup_margin_ms"]} if "startup_margin_ms" in spec else {})}, activity_id=str(activity["id"]))
     saved, _ = _decode(page_event)
     _verify_record_result_page(saved, page_event, action, activity, state)
+    _verify_file_result_source(saved, page_event, action, activity, state, ResultSourceKind.NATURAL)
     identity = parse_exact_json(facts["identity_key"])
     observer = _source_fact(state, "actions", facts["observer_action_id"])
     if (not isinstance(identity, list) or len(identity) != 3
@@ -5994,6 +6015,8 @@ def _load_natural_wait_file_sources(scope, facts, evidence, state):
         raise ConsistencyError("原生文件完成须引用原发送、等待和结果页")
     saved, _ = _at(connection, evidence["result_page_event_id"])
     read_page(saved.ref, scope)
+    from .result_sources import load_result_source
+    load_result_source(connection, saved.ref.ticket, state)
     events = state.setdefault("history_events", {})
     for identity in (evidence["result_page_event_id"], evidence["start_result_event_id"],
                      evidence["wait_completed_event_id"]):
@@ -6030,12 +6053,15 @@ def _load_stop_wait_file_sources(scope, facts, evidence, state):
     connection = scope.connection
     saved, _ = _at(connection, evidence["result_page_event_id"])
     read_page(saved.ref, scope)
+    from .result_sources import load_result_source
+    load_result_source(connection, saved.ref.ticket, state)
     pages = [saved]
     settlement = saved.page.outcome.settlement
     source_id = None if settlement is None else settlement.evidence.data.get("file_completion_source_page_event_id")
     if source_id is not None:
         ObjectId(source_id)
         pages.append(CaptureRepository().read_result_page_at(source_id, scope))
+        load_result_source(connection, pages[-1].ref.ticket, state)
     stopped, _ = _CaptureStopCommand.source(connection, evidence["stop_result_event_id"])
     events = state.setdefault("history_events", {})
     for original_id in (*(page.ref.event_id for page in pages), evidence["stop_result_event_id"]):

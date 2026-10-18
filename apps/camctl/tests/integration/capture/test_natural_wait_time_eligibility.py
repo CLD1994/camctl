@@ -41,9 +41,9 @@ class SmallNativeCatalog(NativeWaitCatalog):
         return definition
 
 
-async def _world(tmp_path, startup, canceled=False):
+async def _world(tmp_path, startup, canceled=False, *, catalog=None):
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, 'timelapse', catalog=SmallNativeCatalog(startup), start=False)
+        tmp_path, 'timelapse', catalog=catalog or SmallNativeCatalog(startup), start=False)
     wall, mono = [_NOW], [5000000000]
     runtime.wall_us = lambda: wall[0]
     runtime.monotonic_ns = lambda: mono[0]

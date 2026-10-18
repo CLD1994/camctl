@@ -67,6 +67,8 @@ def _load(scope, request):
     for event_id in (activity['wait_completed_event_id'], request.page.event_id):
         ObjectId(event_id)
         state['history_events'][event_id] = _history_source_row(scope.connection, event_id)
+    from .result_sources import load_result_source
+    load_result_source(scope.connection, request.page.ticket, state)
     return state, action, activity
 
 
@@ -104,6 +106,7 @@ def _evidence(state, request):
 def _verify_sources(state, request, evidence, *, event_id):
     from .capture import _history_source_event
     from .result_pages import _decode
+    from .result_sources import ResultSourceKind, result_source_from_state
     action, activity, start, stop, results, sent, stopped, result = _facts(state, request.action_id)
     spec = action['execution_spec_json']
     if (not finite_cancel_policy(action) or not action['cancel_requested']
@@ -139,6 +142,12 @@ def _verify_sources(state, request, evidence, *, event_id):
     wait_event = _history_source_event(state, activity['wait_completed_event_id'])
     page_event = _history_source_event(state, request.page.event_id)
     page, _ = _decode(page_event)
+    original_source = result_source_from_state(action, activity, result, state)
+    if original_source.kind is not ResultSourceKind.NATURAL:
+        raise ConsistencyError('有限取消结束缺少原结果意图之前的自然来源')
+    if max(sent['result_event_id'], stopped['result_event_id'], result['result_event_id'],
+            wait_event.event_id, page_event.event_id) >= event_id:
+        raise ConsistencyError('有限取消结束不能早于任一原控制、等待或完整结果来源')
     expected = CaptureTiming(spec['target_duration_ms'], spec.get('startup_margin_ms', 0),
         spec['result_wait_margin_ms'], activity['extra_wait_ms_used']).deadline_us(activity['sent_at'])
     if (sent_event.occurred_at != activity['sent_at'] or activity['expected_check_at'] != expected
@@ -156,7 +165,7 @@ def _verify_sources(state, request, evidence, *, event_id):
             or page.ref != request.page or page.ref.ticket.run_id != results['id']
             or page.ref.ticket.target_id != str(activity['id']) or not page.page.scan_complete
             or not page.page.set_finalized or page.page.outcome.error is not None
-            or not sent_event.event_id < stopped['result_event_id'] < page.ref.event_id
+            or not sent_event.event_id < stopped['result_event_id'] < event_id
             or page.page.outcome != read_result_document(result['status'], result['effect_state'],
                 result['result_json'], result['error_json'])
             or activity['output_set_finalized_event_id'] is None):
@@ -192,9 +201,21 @@ def _assess_files(reader, action, request):
         ProductRequirements(frozenset({FileKind.VIDEO}), rules))
 
 
-def _verify_files(reader, action, request):
+def _verify_files(reader, action, request, state):
     if not _assess_files(reader, action, request).is_complete:
         raise ConsistencyError('有限取消结束尚无满足原必要规则的可靠文件集合')
+    from .capture import _history_source_event
+    activity = state['device_activities'][int(request.page.ticket.target_id)]
+    wait = _history_source_event(state, activity['wait_completed_event_id'])
+    lower_bound = max(activity['expected_check_at'], wait.occurred_at)
+    cursor = None
+    while True:
+        pages = reader.result_pages(request.page.ticket, cursor, 1)
+        if any(not lower_bound <= saved.occurred_at <= request.occurred_at for saved in pages.items):
+            raise ConsistencyError('有限取消结束的原扫描不满足原等待及真实收场时刻')
+        if pages.next_cursor is None:
+            return
+        cursor = pages.next_cursor
 
 
 class _FiniteCancelQualificationCommand:
@@ -241,7 +262,7 @@ class _FiniteCancelEndCommand:
         if activity['activity_state'] == 3:
             raise ConsistencyError('已结束活动不能补写新的有限取消结束依据')
         from camctl.persistence.event_reads import SqlEventReads
-        _verify_files(SqlEventReads(scope.connection, _read_scope(request)), action, request)
+        _verify_files(SqlEventReads(scope.connection, _read_scope(request)), action, request, state)
         allocation = scope.allocate(1)
         _verify_sources(state, request, evidence, event_id=allocation.first_event_id)
         event = event_envelope(allocation.first_event_id, allocation.txn_id, _TYPE, _REASON,
@@ -270,7 +291,7 @@ def _guard(event, context):
         request = FiniteCancelEndSave(activity['action_id'], saved.ref, event.occurred_at)
         _verify_sources(context.state_rows, request, evidence, event_id=event.event_id)
         action = context.state_rows['actions'][activity['action_id']]
-        _verify_files(context.current_reads, action, request)
+        _verify_files(context.current_reads, action, request, context.state_rows)
     except (KeyError, ValueError, TypeError, ConsistencyError) as error:
         raise EventValidationError(f'有限取消结束依据无效: {error}') from error
 

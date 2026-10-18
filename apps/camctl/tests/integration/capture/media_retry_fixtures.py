@@ -1,6 +1,7 @@
 """媒体原申请验证使用真实受理、启动停止及文件归属历史。"""
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -16,13 +17,14 @@ from camctl.capture.models import ActivityConcludeSave
 from camctl.capture.processing import (
     CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason, SourceFileSave,
 )
-from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
+from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT, observed_file
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DriverDeclaration
 from camctl.host_files.models import BoundDirectories
+from camctl.operations.models import AttemptTicket
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
@@ -34,12 +36,17 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..bootstrap.test_media_assembly import _SessionDriver, _config
 from ..bootstrap.test_recording_stop import _RecordCatalog
-from .test_capture_contract import ResultsDouble
+from .test_capture_contract import ResultsDouble, _entry
 from .test_input_copy import _CONTENT, _NOW
 
 
 class _Catalog(_RecordCatalog):
     duration_s = Decimal("60")
+
+
+def original_recording_entry():
+    return replace(_entry("original-recording", size=len(_CONTENT)),
+        locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
 
 
 _EVIDENCE = EvidenceRegistry((
@@ -112,13 +119,17 @@ async def media_pipeline(tmp_path, request):
             "path": "/DCIM/original.mp4"}, _NOW, "original.mp4", "video/mp4"), new_operation_key(), owned)
         assert source.kind is DbOutcomeKind.COMPLETED, source.error
         source_id = source.value.file_id
+        # 仅复用替身的序列化，不建立 RESULTS 责任或执行运行时结果调用。
+        serialized = await ResultsDouble({1: (original_recording_entry(),)}).list_round(
+            AttemptTicket(1, "result", "1", "results/1", 1), timeout_s=Decimal("1"))
+        original = observed_file(serialized.outcome.observations[0].data["entries"][0])
         for save, command in (
             (repository.save_file_presence, FilePresenceSave(source_id, 2, _NOW,
                 locator={"path": "/DCIM/original.mp4"})),
             (repository.save_file_ownership, OwnershipSave(source_id, 1, 1, 2,
                 {"task": "original-recording"}, _NOW)),
             (repository.save_file_completion, FileCompletionSave(source_id, 3, _NOW,
-                basis=1, observation={"stopped": True}, size_bytes=len(_CONTENT))),
+                basis=1, observation=original.evidence, size_bytes=len(_CONTENT))),
             (repository.save_source_file, SourceFileSave(1, source_id, _NOW)),
             (repository.save_check_decision, CheckDecisionSave(1, CheckDecisionChoice.REQUIRED,
                 CheckBasis(CheckReason.INSUFFICIENT_TIMING, 60000), _NOW)),

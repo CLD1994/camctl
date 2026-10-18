@@ -22,7 +22,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import TransactionError
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from .media_retry_fixtures import _EVIDENCE, media_pipeline  # noqa: F401
+from .media_retry_fixtures import _EVIDENCE, media_pipeline, original_recording_entry  # noqa: F401
 from camctl.capture.results import FileKind
 from .test_capture_contract import ResultsDouble, _entry, _runtime
 from .test_input_copy import _CONTENT, _NOW
@@ -67,8 +67,7 @@ def _result_run(owned):
 
 
 def _runtime_with_media(pipeline, duration_s):
-    entry = replace(_entry("original-recording", size=len(_CONTENT)),
-        locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
+    entry = original_recording_entry()
     results = ResultsDouble({1: (entry,)})
     runtime = _runtime(pipeline[0], results=results, listing_cache={})
     runtime.evidence = _EVIDENCE

@@ -1,6 +1,6 @@
 """同一 RESULTS 轮次的有界分页拥有者。"""
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Callable, Mapping
 
@@ -117,6 +117,13 @@ def completed_wait_from_page(saved: SavedResultPage, context, *, repository, own
     if saved.ref.ticket.target_id != context["activity_id"]:
         raise ConsistencyError("等待事实的可靠结果页属于其他活动")
     data = saved.page.outcome.settlement.evidence.data
+    if isinstance(data, Mapping) and data.get("file_completion") is None and data.get("file_completion_source_page_event_id") is None:
+        return None
+    from camctl.persistence.repositories.result_sources import ResultSourceKind
+    original = repository.read_result_source(saved.ref.ticket, owned)
+    if (original.kind is not ResultSourceKind.STOP or original.context is None
+            or original.context["stop_result_event_id"] != context["stop_result_event_id"]):
+        raise ConsistencyError("声明停止等待的原页没有原意图之前的同一 STOP 来源")
     source_id = data.get("file_completion_source_page_event_id")
     source_page = None
     try:
@@ -134,6 +141,11 @@ def completed_wait_from_page(saved: SavedResultPage, context, *, repository, own
         raise ConsistencyError(f"结果页的完成等待来源无效: {error}") from error
     if actual_source is None:
         return None
+    if source_page is not None:
+        original = repository.read_result_source(source.ref.ticket, owned)
+        if (original.kind is not ResultSourceKind.STOP or original.context is None
+                or original.context["stop_result_event_id"] != context["stop_result_event_id"]):
+            raise ConsistencyError("实际停止等待页没有原意图之前的同一 STOP 来源")
     return {"result_page_event_id": actual_source, "evidence": deepcopy(data["file_completion"])}
 
 
@@ -192,17 +204,53 @@ class SavedResultEntries:
                                                     allow_missing=allow_missing)
 
 
+class QualifiedResultEntries(SavedResultEntries):
+    """逐页筛选原时刻；坏页仍由未筛选的原输入保存和核对。"""
+
+    def __init__(self, entries: SavedResultEntries, lower_bound: int, *, source_qualified=True):
+        super().__init__(entries.repository, entries.owned, entries.last_ref)
+        self.lower_bound, self.source_qualified = lower_bound, source_qualified
+
+    def pages(self):
+        return (saved for saved in super().pages() if self.source_qualified and saved.occurred_at >= self.lower_bound)
+
+    def find(self, identity, *, allow_missing=False):
+        for saved in self.pages():
+            identifiers = dict(saved.file_ids)
+            if identity in identifiers:
+                entry = next(entry for entry in saved.page.entries if entry.identity == identity)
+                return entry, identifiers[identity]
+        if allow_missing:
+            return None
+        raise ConsistencyError("配对原片缺少合格原结果页")
+
+
 class SourceResultEntries:
     """按物理文件身份分页消费全部原轮次已经可靠确认的来源事实。"""
 
-    def __init__(self, repository, owned, ticket):
+    def __init__(self, repository, owned, ticket, *, current_entries=None):
         self.repository, self.owned, self.ticket = repository, owned, ticket
+        self.current_entries = current_entries
 
     def records(self):
         cursor = None
         while True:
             page = self.repository.read_result_sources(self.ticket, cursor, 32, self.owned)
-            yield from page.items
+            for entry, file, file_id in page.items:
+                if self.current_entries is not None:
+                    current = self.current_entries.find(entry.identity, allow_missing=True)
+                    if current is None:
+                        continue
+                    entry, original_id = current
+                    if original_id != file_id:
+                        raise ConsistencyError("当前原页改变已登记文件身份")
+                    if (entry.paired_identity is not None and self.current_entries.find(
+                            entry.paired_identity, allow_missing=True) is None):
+                        continue
+                    complete = entry.complete and file.complete and entry.size_bytes == file.size_bytes
+                    entry = replace(entry, complete=complete, size_bytes=entry.size_bytes if complete else None)
+                    file = replace(file, complete=complete, size_bytes=entry.size_bytes)
+                yield entry, file, file_id
             if page.next_cursor is None:
                 return
             cursor = page.next_cursor

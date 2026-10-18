@@ -30,7 +30,8 @@ def _integer(value, minimum=0):
     return value
 
 
-def _confirmed(response, observation_type, activity_id):
+def validate_control_confirmation(response, observation_type, activity_id):
+    """等待与完成上下文共同核对完整原结果的同活动可靠确认。"""
     if not isinstance(response, Mapping) or set(response) != {'status', 'effect_state', 'error', 'result'}:
         raise ValueError('完成上下文缺少完整原控制结果')
     actual = read_result_document(response['status'], response['effect_state'],
@@ -71,14 +72,14 @@ def validate_completion_context(context, *, activity_id: str) -> dict | None:
             raise ValueError('自然等待改变原发送时间或采用的等待规则')
         if _integer(context['wait_completed_at_us']) < due:
             raise ValueError('自然等待尚未满足原目标和余量')
-        _confirmed(context['start_response'], 'timelapse_sent', activity_id)
+        validate_control_confirmation(context['start_response'], 'timelapse_sent', activity_id)
     else:
         if set(context) != _STOP_FIELDS | ({'kind'} if 'kind' in context else set()):
             raise ValueError('停止完成上下文缺少原停止或混入自然等待字段')
         stop_event = _integer(context['stop_result_event_id'], 1)
         _integer(context['stop_returned_at_us'])
         wait = _integer(context['file_completion_wait_ms'], 1)
-        _confirmed(context['stop_response'], 'stop_confirmed', activity_id)
+        validate_control_confirmation(context['stop_response'], 'stop_confirmed', activity_id)
         prior = context['prior_completion']
         if prior is not None:
             if (not isinstance(prior, Mapping) or set(prior) != {'result_page_event_id', 'evidence'}

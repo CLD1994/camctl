@@ -3,7 +3,7 @@ from contextlib import closing
 from dataclasses import replace
 
 from camctl.capture.files import FileObservationSave, file_identity_key
-from camctl.capture.result_inputs import page_from_outcome, saved_outcome
+from camctl.capture.result_inputs import observed_file, page_from_outcome, saved_outcome
 from camctl.capture.result_pages import ResultPageSave, ResultPageRef, SavedResultPage, result_page_input
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal, parse_exact_json
@@ -12,6 +12,7 @@ from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor
+from camctl.devices.evidence import RESULT_LISTED_TYPE, RESULT_LISTED_VERSION
 from camctl.devices.file_identity import FileIdentity
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
@@ -349,13 +350,76 @@ def read_file_input(last_ref, identity, owned, *, allow_missing=False):
     return entry, file_id
 
 
+def _legacy_source_entry(connection, ticket, identity, facts, activity):
+    """按单文件读取原 v1 条目，不装载其他轮次的完整文件目录。"""
+    from .capture import _ATTEMPT_RESULT_EVENT
+
+    from .result_sources import ResultSourceKind, load_result_source
+
+    # 原 v1 结果仍按原字段解释；只把匹配文件的条目交给 Python。
+    with closing(connection.execute(
+        "SELECT f.value,t.attempt_no,e.occurred_at FROM operation_attempts t JOIN history_events e ON e.id=t.result_event_id,"
+        " json_each(t.result_json,'$.observations') o, json_each(o.value,'$.data.entries') f,"
+        " json_each(e.body_json,'$.rows') r"
+        " WHERE t.run_id=? AND e.event_type=?"
+        " AND json_extract(o.value,'$.type')=?"
+        " AND json_extract(o.value,'$.version')=?"
+        " AND json_extract(o.value,'$.data.activity_id')=?"
+        " AND json_extract(f.value,'$.identity')=?"
+        " AND json_extract(r.value,'$.table')='operation_attempts'"
+        " AND json_extract(r.value,'$.id')=t.id"
+        " AND json_extract(r.value,'$.after.values.status')=t.status"
+        " AND json_extract(r.value,'$.after.values.effect_state')=t.effect_state"
+        " AND json(json_extract(r.value,'$.after.values.result_json'))=json(t.result_json)"
+        " AND json(json_extract(r.value,'$.after.values.error_json')) IS json(t.error_json)"
+        " ORDER BY t.attempt_no", (ticket.run_id, _ATTEMPT_RESULT_EVENT,
+            RESULT_LISTED_TYPE, RESULT_LISTED_VERSION, ticket.target_id, identity))) as reader:
+        for row in reader:
+            source = load_result_source(connection, replace(ticket, attempt_id=row[1]))
+            if (source.natural_lower_bound is not None and row[2] < source.natural_lower_bound
+                    or source.kind in (ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED) and source.requires_file_wait):
+                continue
+            entry = observed_file(parse_exact_json(row[0]))
+            if json_equal(entry.locator, facts["locator_json"]):
+                return entry
+    return None
+
+
+
+def _complete_source_entry(connection, ticket, identity, file_id, facts, activity):
+    """无页引用的旧 v2 完成观察按原完整条目匹配；旧 v1 继续原契约。"""
+    from .result_sources import ResultSourceKind, load_result_source
+    observation = facts["completion_evidence_json"].get("observation")
+    with closing(connection.execute(
+            "SELECT DISTINCT e.id FROM history_events e,"
+            " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
+            " WHERE e.event_type=? AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
+            " AND json_extract(e.body_json,'$.evidence.result_page.activity_id')=?"
+            " AND json_extract(f.value,'$[0]')=? AND json_extract(f.value,'$[1]')=? ORDER BY e.id",
+            (_TYPE, ticket.run_id, int(ticket.target_id), identity, file_id))) as reader:
+        for event_id, in reader:
+            saved, _ = _at(connection, event_id)
+            entry = next(item for item in saved.page.entries if item.identity == identity)
+            if not json_equal(entry.evidence, observation):
+                continue
+            source = load_result_source(connection, saved.ref.ticket)
+            if (source.natural_lower_bound is not None and saved.occurred_at < source.natural_lower_bound
+                    or source.kind in (ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED) and source.requires_file_wait):
+                continue
+            return entry
+    legacy = _legacy_source_entry(connection, ticket, identity, facts, activity)
+    if legacy is not None:
+        return legacy
+    raise ConsistencyError("完整来源文件缺少与原完成观察一致的合格原条目")
+
+
 def read_source_inputs(ticket, cursor, batch, owned):
-    """跨原核实轮次分页读取已确认来源文件及其最后实际元数据。"""
+    """跨原核实轮次分页读取可靠文件；完整文件保持原完成页元数据。"""
     if type(batch) is not int or not 1 <= batch <= 128:
         raise ValueError("来源文件批次必须为 1—128")
     if cursor is not None:
         ObjectId(cursor)
-    _, _, action, _ = _load(owned.connection, ticket)
+    _, _, action, activity = _load(owned.connection, ticket)
     with closing(owned.connection.execute(
             "SELECT id FROM device_files WHERE source_action_id=? AND id>? ORDER BY id LIMIT ?",
             (action["id"], cursor or 0, batch + 1))) as reader:
@@ -374,20 +438,29 @@ def read_source_inputs(ticket, cursor, batch, owned):
                 " AND json_extract(f.value,'$[1]')=? ORDER BY e.id DESC LIMIT 1",
                 (_TYPE, ticket.run_id, file_id))) as reader:
             row = reader.fetchone()
-        if row is None:
-            raise ConsistencyError("已确认来源文件缺少原已保存 RESULTS 页元数据")
-        saved, _ = _at(owned.connection, row[0])
-        if (saved.ref.ticket.run_id != ticket.run_id or (identity[2], file_id) not in saved.file_ids):
-            raise ConsistencyError("来源文件的原页输入与物理身份不符")
-        entry = next(item for item in saved.page.entries if item.identity == identity[2])
+        completion = facts["completion_evidence_json"]
+        if facts["completion_state"] == 3 and not isinstance(completion, dict):
+            raise ConsistencyError("来源文件缺少可靠完成依据")
+        source_id = (completion.get("result_page_event_id") if facts["completion_state"] == 3
+            and isinstance(completion, dict) else None)
+        entry = (_complete_source_entry(owned.connection, ticket, identity[2], file_id, facts, activity)
+            if facts["completion_state"] == 3 and source_id is None else
+            _legacy_source_entry(owned.connection, ticket, identity[2], facts, activity) if row is None else None)
+        if entry is None:
+            if row is None:
+                raise ConsistencyError("已确认来源文件缺少可靠原 RESULTS 元数据")
+            # 后轮实际页可不合格；不能覆盖既有完整文件的原来源元数据。
+            saved, _ = _at(owned.connection, row[0] if source_id is None else source_id)
+            if (saved.ref.ticket.run_id != ticket.run_id or saved.ref.ticket.target_id != ticket.target_id
+                    or (identity[2], file_id) not in saved.file_ids):
+                raise ConsistencyError("来源文件的原页输入与物理身份不符")
+            entry = next(item for item in saved.page.entries if item.identity == identity[2])
         if not json_equal(entry.locator, facts["locator_json"]):
             raise ConsistencyError("原 RESULTS 定位与来源文件事实矛盾")
         ownership = facts["ownership_evidence_json"]
         if not isinstance(ownership, dict) or not isinstance(ownership.get("observation"), dict):
             raise ConsistencyError("来源文件缺少可靠归属依据")
         complete = facts["completion_state"] == 3
-        if complete and not isinstance(facts["completion_evidence_json"], dict):
-            raise ConsistencyError("来源文件缺少可靠完成依据")
         paired_id = facts["original_device_file_id"]
         if paired_id is not None:
             original = row_facts(owned.connection, "device_files", paired_id)

@@ -2,6 +2,7 @@
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+import json
 
 import pytest
 
@@ -177,8 +178,10 @@ async def test_natural_file_event_guard_independently_checks_original_sources(tm
         state['device_files'][file_id].update(completion_state=1, completion_evidence_json=None, size_bytes=None)
         columns = ('id', 'transaction_id', 'event_type', 'event_version', 'occurred_at', 'clock_status', 'change_seq', 'body_json')
         state['history_events'] = {}
-        for key in ('start_result_event_id', 'wait_completed_event_id', 'result_page_event_id'):
-            identity = original[key]
+        identities = [original[key] for key in ('start_result_event_id', 'wait_completed_event_id', 'result_page_event_id')]
+        identities.extend(attempt['intent_event_id'] for attempt in state['operation_attempts'].values()
+            if state['operation_runs'][attempt['run_id']]['responsibility_key'].startswith('results/'))
+        for identity in identities:
             row = owned.connection.execute('SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?', (identity,)).fetchone()
             state['history_events'][identity] = dict(zip(columns, row))
         event_id, = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()
@@ -236,7 +239,7 @@ async def test_new_native_context_and_history_preserve_original_startup_margin(t
         owned.connection.close()
 
 
-@pytest.mark.parametrize('change', ['none', 'startup', 'early_wait', 'future_page', 'future_time'])
+@pytest.mark.parametrize('change', ['none', 'startup', 'early_wait', 'future_page', 'future_time', 'missing_intent', 'early_intent'])
 async def test_new_natural_file_guard_uses_original_startup_and_actual_event_times(tmp_path, change):
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext, EventValidationError, validate_event
@@ -257,11 +260,27 @@ async def test_new_natural_file_guard_uses_original_startup_and_actual_event_tim
         state['device_files'][file_id].update(completion_state=1, completion_evidence_json=None, size_bytes=None)
         columns = ('id', 'transaction_id', 'event_type', 'event_version', 'occurred_at', 'clock_status', 'change_seq', 'body_json')
         state['history_events'] = {}
-        for key in ('start_result_event_id', 'wait_completed_event_id', 'result_page_event_id'):
-            identity = original[key]
+        identities = [original[key] for key in ('start_result_event_id', 'wait_completed_event_id', 'result_page_event_id')]
+        identities.extend(attempt['intent_event_id'] for attempt in state['operation_attempts'].values()
+            if state['operation_runs'][attempt['run_id']]['responsibility_key'].startswith('results/'))
+        for identity in identities:
             row = owned.connection.execute('SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?', (identity,)).fetchone()
             state['history_events'][identity] = dict(zip(columns, row))
-        if change == 'startup':
+        if change in ('missing_intent', 'early_intent'):
+            attempt = next(value for value in state['operation_attempts'].values()
+                if state['operation_runs'][value['run_id']]['responsibility_key'].startswith('results/'))
+            intent = state['history_events'].pop(attempt['intent_event_id'])
+            if change == 'early_intent':
+                # 保持原意图行与事件一致，仅令I早于W；P仍晚于W，不能据P补造请求来源。
+                earlier = original['wait_completed_event_id'] - 1
+                attempt['intent_event_id'] = earlier
+                intent['id'] = earlier
+                body = json.loads(intent['body_json'])
+                row = next(value for value in body['rows'] if value['table'] == 'operation_attempts')
+                row['after']['values']['intent_event_id'] = earlier
+                intent['body_json'] = json.dumps(body)
+                state['history_events'][earlier] = intent
+        elif change == 'startup':
             state['actions'][action_id]['execution_spec_json']['startup_margin_ms'] = 2000
         elif change == 'early_wait':
             state['history_events'][original['wait_completed_event_id']]['occurred_at'] = _NOW+330000000

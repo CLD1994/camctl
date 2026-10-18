@@ -59,8 +59,8 @@ from camctl.capture.result_inputs import (
     ListedResult, ObservedFile, ResultPage, files_from_outcome, saved_outcome,
 )
 from camctl.capture.result_scans import (
-    PendingResultScan, SavedResultEntries, SourceResultEntries, RegisteredSourceFiles, advance_result_scan,
-    completed_wait_from_page,
+    PendingResultScan, SavedResultEntries, QualifiedResultEntries, SourceResultEntries, RegisteredSourceFiles, advance_result_scan,
+    completed_wait_from_page, resume_result_page_saves,
 )
 from camctl.capture.result_pages import ResultPageRef, OutputSetFinalizationSave
 from camctl.capture.photo import (
@@ -130,6 +130,7 @@ from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failur
 from camctl.devices.capture_timing import CaptureTiming, WaitClockReference
 from camctl.devices.tasks import CompletionMode
 from camctl.devices.capture_completion import is_stop_context
+from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.devices.directory import DirectoryReader
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import EvidenceError
@@ -1900,7 +1901,9 @@ def _register_observed(
                         "paired_identity": entry.paired_identity},
                 )
         runtime._save_file_fact(identity, FileFactStage.OWNERSHIP, ownership)
-        if entry.complete:
+        known = row_facts(runtime.owned.connection, "device_files", file_id)
+        pending = runtime.pending_file_observations[identity]
+        if entry.complete and (FileFactStage.COMPLETION in pending.facts or known["completion_state"] != 3):
             runtime._save_file_fact(identity, FileFactStage.COMPLETION, FileCompletionSave(
                     file_id=file_id,
                     state=3,
@@ -2382,6 +2385,9 @@ def _finish_capture(
     registered 传入已登记的观察结果避免重复登记；repair_file_id
     携带修复成功的成品时与原片同事务登记为 REPAIRED 产物。
     """
+    if failure is not None and isinstance(registered, RegisteredSourceFiles):
+        registered = RegisteredSourceFiles(SourceResultEntries(
+            runtime.capture, runtime.owned, registered.entries.ticket))
     if isinstance(registered, RegisteredSourceFiles):
         entries = registered.entries
     if registered is None:
@@ -2719,7 +2725,7 @@ def _binding_failure_files(runtime: CaptureRuntime, action) -> tuple[OutputDraft
             raise ConsistencyError("原拍摄文件缺少可靠 RESULTS 实际输入，不能按空产物结束")
         return ()
     listing = _saved_result_listing(runtime, action["id"])
-    registered = _register_listing(runtime, action["id"], listing)
+    registered = _retained_result_files(runtime, listing, _register_listing(runtime, action["id"], listing))
     return _catalog_drafts(registered, listing.entries,
         product_rules=_product_requirements(action, FileKind.VIDEO).rules)
 
@@ -3610,7 +3616,12 @@ async def _advance_recording_outcome(
         if original is None:
             raise ConsistencyError("缓存结果缺少原核实责任")
         if isinstance(registered, RegisteredSourceFiles):
-            entries = SourceResultEntries(context.capture, context.owned, original)
+            current = registered.entries.current_entries
+            if current is not None:
+                fresh = SavedResultEntries(context.capture, context.owned, current.last_ref)
+                current = (QualifiedResultEntries(fresh, current.lower_bound, source_qualified=current.source_qualified)
+                    if isinstance(current, QualifiedResultEntries) else fresh)
+            entries = SourceResultEntries(context.capture, context.owned, original, current_entries=current)
             registered = RegisteredSourceFiles(entries)
         listing = None if original is None else _held_listing(context, original)
         if listing is not None:
@@ -3940,6 +3951,9 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
 
 async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> None:
     _resolve_natural_wait(context, action_id)
+    resume_result_page_saves(context.owned, pending_scans={identity: scan
+        for identity, scan in context.pending_result_scans.items()
+        if context.action_id_of_ticket(scan.ticket) == action_id}, repository=context.capture)
     context.resume_capture_completions(action_id)
     context.resume_baselines(action_id)
     context.resume_result_check_closes(action_id)
@@ -4168,7 +4182,8 @@ async def _close_canceled_timelapse(
                 end_request = request
     _finish_listing_result(context, listing, end_run=RunOutcome.SUCCEEDED,
                            finalize_output_set=True)
-    drafts = _catalog_drafts(registered, entries,
+    retained = _retained_result_files(context, listing, registered)
+    drafts = _catalog_drafts(retained, entries,
         product_rules=_product_requirements(context.action(action_id), FileKind.VIDEO).rules)
     if end_request is not None:
         context.pending_result_closes[action_id] = PendingResultCheckClose(
@@ -4311,7 +4326,16 @@ class _NaturalTimeDeferred(Exception):
     """保留原申请并交还调度；当前真实读数尚不足以承载原来源时刻。"""
 
 
-def _natural_source_lower_bound(runtime: CaptureRuntime, action_id: int) -> int | None:
+def _result_source(runtime, ticket):
+    source = runtime.capture.read_result_source(ticket, runtime.owned)
+    if source.context is not None and is_stop_context(source.context):
+        context = {**source.context, "prior_completion": _prior_record_file_completion(
+            runtime, runtime.action_id_of_ticket(ticket), source.context)}
+        source = replace(source, context=context)
+    return source
+
+
+def _natural_source_lower_bound(runtime: CaptureRuntime, action_id: int, ticket=None) -> int | None:
     """从可靠原等待读取来源下界；明确 STOP 分支继续使用自己的完成依据。"""
     action = runtime.action(action_id)
     spec = action["execution_spec_json"]
@@ -4319,6 +4343,8 @@ def _natural_source_lower_bound(runtime: CaptureRuntime, action_id: int) -> int 
             or not spec.get("wait_after_send")
             or spec.get("end_control") != int(EndControl.DEVICE)):
         return None
+    if ticket is not None:
+        return _result_source(runtime, ticket).natural_lower_bound
     stopped = runtime.last_attempt(f"stop/{action_id}")
     if stopped is not None and stopped[1] == int(_EFFECT_STATE.CONFIRMED):
         return None
@@ -4333,7 +4359,11 @@ def _natural_source_lower_bound(runtime: CaptureRuntime, action_id: int) -> int 
 
 def _natural_listing_time(runtime, action_id, listing):
     """页资格只由原页实际时刻决定；当前时钟恢复不能改变坏页资格。"""
-    bound = _natural_source_lower_bound(runtime, action_id)
+    if listing.ticket is not None:
+        source = _result_source(runtime, listing.ticket)
+        if source.kind is ResultSourceKind.UNCONFIRMED and runtime.action(action_id)["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE):
+            return False, None
+    bound = _natural_source_lower_bound(runtime, action_id, listing.ticket)
     if bound is None:
         return True, None
     if not listing.time_qualified:
@@ -4348,8 +4378,8 @@ def _natural_listing_time(runtime, action_id, listing):
     return True, latest
 
 
-def _natural_read_ready(runtime, action_id, entries=None):
-    bound = _natural_source_lower_bound(runtime, action_id)
+def _natural_read_ready(runtime, action_id, entries=None, *, ticket=None):
+    bound = _natural_source_lower_bound(runtime, action_id, ticket)
     if bound is None:
         return True
     if entries is not None:
@@ -4360,28 +4390,45 @@ def _natural_read_ready(runtime, action_id, entries=None):
     return runtime.wall_us() >= bound
 
 
-def _without_unqualified_files(runtime, action_id, listing):
+def _qualify_listing_collection(runtime, action_id, listing):
     valid, _ = _natural_listing_time(runtime, action_id, listing)
     if valid:
         return listing
-    return replace(listing, entries=(), registered_files={}, scan_complete=False,
-        set_finalized=False, time_qualified=False, completion_evidence=None, completion_page=None)
+    # 集合不足不撤销逐页文件事实；原 entries 仍承载真实全部页。
+    return replace(listing, time_qualified=False, completion_evidence=None, completion_page=None)
+
+
+def _retained_result_files(runtime, listing, registered):
+    """终态只保留已可靠登记的原文件；此视图不参与当前集合判断。"""
+    if listing.ticket is not None:
+        return RegisteredSourceFiles(SourceResultEntries(runtime.capture, runtime.owned, listing.ticket))
+    return registered
 
 
 def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingRound):
     """已登记事实直接消费；只有尚未登记的原观察产生文件保存责任。"""
-    valid, bound = _natural_listing_time(runtime, action_id, listing)
-    if not valid:
-        return ()
-    if bound is not None and runtime.wall_us() < bound:
+    collection_valid, _ = _natural_listing_time(runtime, action_id, listing)
+    source = None if listing.ticket is None else _result_source(runtime, listing.ticket)
+    bound = _natural_source_lower_bound(runtime, action_id, listing.ticket)
+    entries = listing.entries
+    if isinstance(entries, SavedResultEntries) and source is not None and source.kind in (ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED) and source.requires_file_wait:
+        return RegisteredSourceFiles(SourceResultEntries(runtime.capture, runtime.owned, listing.ticket, current_entries=QualifiedResultEntries(entries, 0, source_qualified=False)))
+    if isinstance(entries, SavedResultEntries) and bound is not None:
+        entries = QualifiedResultEntries(entries, bound)
+        latest = max((saved.occurred_at for saved in entries.pages()), default=None)
+    else:
+        valid, latest = _natural_listing_time(runtime, action_id, listing)
+        if not valid and (bound is not None or source is None or source.requires_file_wait):
+            return ()
+    if latest is not None and runtime.wall_us() < latest:
         raise _NaturalTimeDeferred("当前真实时间早于原来源时刻")
-    if isinstance(listing.entries, SavedResultEntries):
-        entries = listing.entries
+    if isinstance(entries, SavedResultEntries):
         activity = row_facts(runtime.owned.connection, "device_activities", int(listing.ticket.target_id))
         baseline = activity["ownership_mode"] == int(enum_for("device_activities.ownership_mode").BASELINE_COMPARISON)
         method = int(enum_for("device_files.ownership_evidence_json.method").BASELINE_DIFFERENCE) if baseline else _TASK_SCOPE
         action = runtime.action(action_id)
-        completion_context = _record_file_completion_context(runtime, action_id)
+        completion_context = (_record_file_completion_context(runtime, action_id)
+            if source is None else source.context)
         record_wait = is_stop_context(completion_context)
         stop_context = completion_context if record_wait else None
         uses_wait = (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
@@ -4403,7 +4450,7 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                          allow_missing=True)
                          for entry in batch if entry.paired_identity is not None}
                 rules = _product_requirements(action, FileKind.VIDEO).rules
-                if listing.scan_complete and any(entry.paired_identity is not None
+                if collection_valid and listing.scan_complete and any(entry.paired_identity is not None
                         and pairs[entry.paired_identity] is None and not is_optional_preview(
                             entry.kind, entry.format_id, entry.paired_identity, rules)
                         for entry in batch):
@@ -4435,7 +4482,8 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
                     stop_result_event_id=None if stop_context is None else stop_context["stop_result_event_id"],
                     start_result_event_id=completion_context["start_result_event_id"]
                         if wait_event is not None and completion_context is not None else None))
-        return RegisteredSourceFiles(SourceResultEntries(runtime.capture, runtime.owned, listing.ticket))
+        return RegisteredSourceFiles(SourceResultEntries(runtime.capture, runtime.owned, listing.ticket,
+            current_entries=entries))
     return _register_observed(runtime, action_id, listing.entries, occurred_at=listing.occurred_at,
                               registered_files=listing.registered_files)
 
@@ -4527,12 +4575,18 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
             raise CapabilityNotDeclaredError(
                 "继续未完成的拍摄结果分页需要驱动声明 result 能力")
     action_id = runtime.action_id_of_ticket(pending.ticket)
+    source = _result_source(runtime, pending.ticket)
+    pending.completion_context = deepcopy(source.context)
     def can_read():
+        action = runtime.action(action_id)
+        if (source.kind is ResultSourceKind.NATURAL and action["cancel_requested"]
+                and runtime.last_attempt(f"stop/{action_id}") is None):
+            return False
         entries = (None if pending.last_ref is None else
             SavedResultEntries(runtime.capture, runtime.owned, pending.last_ref))
-        return _natural_read_ready(runtime, action_id, entries)
+        return _natural_read_ready(runtime, action_id, entries, ticket=pending.ticket)
     def page_qualified(saved):
-        bound = _natural_source_lower_bound(runtime, action_id)
+        bound = _natural_source_lower_bound(runtime, action_id, pending.ticket)
         return bound is None or saved.occurred_at >= bound
     if not await advance_result_scan(pending, runtime=runtime,
             can_read=can_read, page_qualified=page_qualified):
@@ -4563,7 +4617,7 @@ def _result_file_metadata(runtime: CaptureRuntime, ticket: AttemptTicket) -> dic
 
 
 def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRound:
-    return _without_unqualified_files(runtime, action_id, _saved_result_listing_input(runtime, action_id))
+    return _qualify_listing_collection(runtime, action_id, _saved_result_listing_input(runtime, action_id))
 
 
 def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int) -> ListingRound:
@@ -4612,6 +4666,12 @@ def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int) -> List
             return ListingRound(ListingPhase.CLOSED,
                 SavedResultEntries(runtime.capture, runtime.owned, source.ref),
                 ticket, actual, row[9], None, True)
+    if (_natural_source_lower_bound(runtime, action_id, ticket) is not None
+            or runtime.action(action_id)["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)):
+        # 延时旧 v1 原输入只代表本轮；历史文件由同一有界保留读取取得。
+        has_observation = any(value.type == "result_files_listed" for value in actual.observations)
+        entries = files_from_outcome(ticket, actual) if has_observation else ()
+        return ListingRound(ListingPhase.CLOSED, entries, ticket, actual, row[9], None, True)
     metadata = _result_file_metadata(runtime, ticket)
     previous, registered = _registered_result_files(runtime, action_id, metadata)
     previous_by_identity = {entry.identity: entry for entry in previous}
@@ -4689,13 +4749,8 @@ async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRoun
     activity_id = _activity_id_of(runtime, action_id)
     responsibility = f"results/{activity_id}"
     ticket = _original_ticket(runtime, responsibility, "result")
-    held = None if ticket is None else _held_listing(runtime, ticket)
-    scan = None if ticket is None else runtime.pending_result_scans.get((ticket.run_id, ticket.attempt_id))
-    if held is None and scan is None:
-        last = None if ticket is None else runtime.capture.read_last_result_page(ticket, runtime.owned)
-        entries = None if last is None else SavedResultEntries(runtime.capture, runtime.owned, last.ref)
-        if not _natural_read_ready(runtime, action_id, entries):
-            return ListingRound(ListingPhase.RETRY_WAIT)
+    if ticket is None and not _natural_read_ready(runtime, action_id):
+        return ListingRound(ListingPhase.RETRY_WAIT)
     try:
         listing = await _listing_round_input(runtime, action_id)
     except _NaturalTimeDeferred:
@@ -4704,11 +4759,15 @@ async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRoun
         return listing
     valid, bound = _natural_listing_time(runtime, action_id, listing)
     if not valid:
+        try:
+            _register_listing(runtime, action_id, listing)
+        except _NaturalTimeDeferred:
+            return ListingRound(ListingPhase.RETRY_WAIT)
         if not listing.already_saved:
             # 实际调用仍成功；只保存其业务完成不足和原责任重试等待。
             _finish_listing_result(runtime, replace(listing, completion_page=None), retry_wait=True)
             return ListingRound(ListingPhase.RETRY_WAIT)
-        return _without_unqualified_files(runtime, action_id, listing)
+        return _qualify_listing_collection(runtime, action_id, listing)
     if bound is not None and runtime.wall_us() < bound:
         return ListingRound(ListingPhase.RETRY_WAIT)
     return listing
@@ -4780,7 +4839,7 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
         activity = row_facts(runtime.owned.connection, "device_activities", activity_id)
         pending = PendingResultScan(ticket, activity["output_scope_json"],
                                     runtime.check_config.timeout_s,
-                                    completion_context=_record_file_completion_context(runtime, action_id))
+                                    completion_context=_result_source(runtime, ticket).context)
         runtime.pending_result_scans[(ticket.run_id, ticket.attempt_id)] = pending
         return await _continue_result_scan(runtime, pending)
     result = await runtime.results.list_round(ticket, timeout_s=runtime.check_config.timeout_s)
@@ -4813,7 +4872,7 @@ async def _finish_timelapse_conclusion(
     if valid and bound is not None and runtime.wall_us() < bound:
         return
     entries = listing.entries
-    registered = _register_listing(runtime, action_id, listing)
+    registered = _retained_result_files(runtime, listing, _register_listing(runtime, action_id, listing))
     capture = None if capture_json is None else parse_exact_json(capture_json)
     if activity_state == 3 or (state == 3 and basis == 3):
         _release_occupancy(runtime, action_id)

@@ -339,6 +339,7 @@ def _load_wait_start(connection, activity, state):
 def _verify_wait_basis(activity, action, state, *, occurred_at, complete, event_id=None):
     """新旧自然定义统一核对真实 START、完整公式和完成真实时刻。"""
     from .capture import _ATTEMPT_RESULT_EVENT, _history_source_event
+    from camctl.devices.capture_completion import validate_control_confirmation
 
     try:
         _validate_wait_values(activity)
@@ -370,6 +371,9 @@ def _verify_wait_basis(activity, action, state, *, occurred_at, complete, event_
                 or any(not json_equal(rows[0].after.values.get(name), attempt[name])
                        for name in ("status", "effect_state", "result_json", "error_json"))):
             raise ValueError("自然等待不匹配原可靠发送")
+        validate_control_confirmation({"status": attempt["status"], "effect_state": attempt["effect_state"],
+            "result": attempt["result_json"], "error": attempt["error_json"]},
+            "timelapse_sent", str(activity["id"]))
         expected = CaptureTiming(spec["target_duration_ms"], spec.get("startup_margin_ms", 0),
             spec["result_wait_margin_ms"], activity["extra_wait_ms_used"]).deadline_us(activity["sent_at"])
         if (activity["result_wait_margin_ms"] != spec["result_wait_margin_ms"]
