@@ -175,7 +175,7 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 
 ### R6：完成安装版 CLI 与 host 的独立软件验收
 
-**预计文件：** 新增 `tests/integration/test_device_file_cleanup_roundtrip.py`，复用现有 wheel／CLI／host 与受限 ADB 文件替身；扩展 `test_osmo_builtin_timelapse_roundtrip.py` 的拍摄回归。媒体阶段交接涉及 `capture/media.py` 及 capture／bootstrap 的共享执行器用例，接口责任在 `docs/camctl/file-runtime.md` 维护。更新 `tests/integration/README.md`、`docs/camctl/verification.md`。
+**预计文件：** 新增 `tests/integration/test_device_file_cleanup_roundtrip.py`，复用现有 wheel／CLI／host 与受限 ADB 文件替身；扩展 `test_osmo_builtin_timelapse_roundtrip.py` 的拍摄回归。媒体阶段交接涉及 `capture/media.py` 及 capture／bootstrap 的共享执行器用例，接口责任在 `docs/camctl/file-runtime.md` 维护。清理调用的独立推进涉及 `bootstrap/cleanup_assembly.py`、会话退出边界及相关 bootstrap／session 用例，遵守[动作执行协程的创建时机](../../camctl/implementation.md#动作执行协程的创建时机)。更新 `tests/integration/README.md`、`docs/camctl/verification.md`。
 
 #### 软件联测前置：OSV 准备与修复任务交接
 
@@ -185,6 +185,15 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 - [x] **前置 2：实施阶段交接并保留原保存责任。** OSV 准备可靠保存探测事实与输出登记后返回内部中间结果；后轮从已保存 RUNNING 装载原输出及探测事实，不重复工具或输出登记。回滚、提交未知和换连接继续原完整申请、key 与时刻。
 - [x] **前置 3：覆盖中断、取消与恢复。** 分别验证准备未开始、已开始、已登记尚未修复、修复在途、结果待存及已有终态；等待者取消保留实际结果，业务取消阻止后续普通修复，中间文件沿原规则收场。
 - [ ] **前置 4：独立复核并集成。** 运行共享执行器、媒体、取消及恢复的相关回归，审查后交付新稳定基线；安装版联合链重新构建 wheel，验证真实双流修复成品及后续精确清理。
+
+#### 软件联测前置：清理调用与中央调度
+
+设备删除、文件查询或主机文件任务等待实际结果时，中央调度仍须发现到期取消并保存目标取消事实。清理拥有者独立推进同一轮次，持有原调用、连接、完整结果及待存申请，交付完成后才允许后轮。实际责任和保存责任共同参与会话收场及正常退出判断，具体实现位置按既有责任边界确定。
+
+- [ ] **调度 1：固定在途取消反例。** 使用真实会话、仓储和受控调用，验证设备 DELETE／FILE_QUERY 及主机 stat／unlink 等待期间，目标取消在调用结束前可靠生效；保留原唯一调用及其实际结果。
+- [ ] **调度 2：闭合独立推进与保存责任。** 复用既有后台任务和本地收场机制，确保重复调度不重入，完成及原异常准确交付，原 pending 集合、key 与时刻跨轮保留。默认装配、自定义流程和直接会话上下文使用相同责任契约。
+- [ ] **调度 3：验证停止、错误和退出。** 覆盖任务未开始、调用在途、实际返回待存、提交未知、成员终态及伴随未收场。业务取消、等待者取消和会话停止分别判断；会话认定致命错误后先阻止新增普通工作，再等待原调用、连接及保存责任收场。
+- [ ] **调度 4：独立审查并复验安装链。** 完成相关组件门禁，审查集成后交付稳定基线。重建 wheel，在真实 host／CLI 中先确认目标取消已保存且旧 DELETE 仍在途，再结束旧组并由新进程恢复 UNKNOWN、有限查询及原终态，随后完成全部联合验收。
 
 #### 联合验收步骤
 
