@@ -419,7 +419,7 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | 字段 | 固定含义或空值规则 |
 | --- | --- |
 | `state_query_supported`、`stop_supported`、`safe_repeat_stop` | 第一次建立活动时实际使用的能力，均为 0/1；可安全重复停止必然要求支持停止 |
-| `start_return_meaning` | `SENT`、`STARTED`、`COMPLETED`，声明成功返回保证的范围；与动作既有执行定义保持一致 |
+| `start_return_meaning` | `SENT`、`STARTED`、`COMPLETED`，声明成功返回保证的范围；与动作首次冻结的执行定义保持一致。`SENT` 只表达驱动契约规定的可靠发送成功返回，不表示设备已经开始采集。 |
 | `completion_mode` | `DEVICE_EVIDENCE`、`TIME_AND_OUTPUTS`；与固定任务契约一致，不在查询失败后改为另一种 |
 | `ownership_mode`、`output_scope_json` | `TASK_SCOPE` 表示任务独立输出范围，`BASELINE_COMPARISON` 表示拍摄前基准比较；对象内保存驱动定义的目录、前缀或任务归属范围，不能为空 |
 | `baseline_state` | `NOT_REQUIRED`、`COLLECTING`、`FIXED`；独立范围只能为 `NOT_REQUIRED`，基准方式只能为 `COLLECTING` 或 `FIXED` |
@@ -427,11 +427,11 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | `dispatch_state` | `NOT_DISPATCHED`、`MAY_HAVE_DISPATCHED`、`SUCCESS_RETURNED`、`REJECTED_WITHOUT_EFFECT`；`MAY_HAVE_DISPATCHED` 在提交启动意图时设置 |
 | `activity_state` | `UNKNOWN`、`ACTIVE`、`ENDED`，仅描述实际设备活动，不复制动作状态 |
 | `occupancy_state` | `HELD`、`RELEASED`；包括设备和所属输出范围的冲突限制，不表示持有跨进程锁 |
-| `sent_at`、`started_at` | 实际可靠取得的 UTC 发送成功、开始时间；尚未取得时为空，不由重启时间补齐 |
-| `result_wait_margin_ms`、`extra_wait_ms_used`、`expected_check_at` | 本次等待的驱动余量、部署额外等待和预计检查时间；不采用该等待方式时为空 |
+| `sent_at`、`started_at` | 分别保存实际可靠取得的 UTC 发送成功响应时刻与实际开始观察时刻；尚未取得时为空，不由余量或重启时间补齐。新 `SENT` 普通录像只凭命令返回保存 `sent_at`，`started_at` 仍为空，除非另有独立开始观察。 |
+| `result_wait_margin_ms`、`extra_wait_ms_used`、`expected_check_at` | 分别保存执行定义冻结的自然结束余量、本次采用的部署额外等待和预计检查时间；前者与 `startup_margin_ms` 独立，后者可以在等待未完成时随新配置调整。不采用对应等待方式时为空。 |
 | `wait_completed_event_id` | 原自然等待的完整预计时点已满足且真实完成事件时刻不早于该时点时，引用可靠保存的完成事件，否则为空；配置变化不清除已有完成事实 |
 | `capture_json` | 单张拍摄与延时摄影的内部采集结果，结构见下文；进入采集处理前为空，录像为空。它保存采集阶段结果，不从动作终态或文件数量直接猜测 |
-| `control_elapsed_ns` | 本次连续单调钟计量或具有充分连续性证据的控制时长，以非负整数纳秒表示；不能证明时为空 |
+| `control_elapsed_ns` | 原始控制经过时间，以非负整数纳秒表示；需有本次连续单调钟或充分连续性的依据，不能证明时为空。它不是录制内容时长；按冻结启动余量派生的可保证录制时长下界不写入此列或媒体实测字段。 |
 | `completion_basis` | 单张拍摄与延时摄影的采集判定：`UNDETERMINED`、`DEVICE_EVIDENCE`、`TIME_AND_OUTPUTS`、`KNOWN_FAILURE`；录像不适用，使用 SQL `NULL`，其停止和成功依据分别由活动、操作及录像处理记录保存 |
 | `completion_evidence_json` | `completion_basis` 为 `DEVICE_EVIDENCE`、`TIME_AND_OUTPUTS` 或 `KNOWN_FAILURE` 时必填，为 `UNDETERMINED` 或不适用时为空；保存 `method`、`observation` 及适用的 `attempt_id`、`wait_completed_event_id`，不能填理论张数作为实际观察 |
 | `result_set_state` | `UNEXAMINED`、`CHECKING`、`COMPLETE`、`UNCONFIRMED` |
@@ -439,11 +439,13 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | `output_set_finalized_event_id` | 本次文件范围已经确定时引用独立的 `RESULT_SET_CONFIRMED.OUTPUTS_FINALIZED` 事件；尚未保存该事实时为空，首次确定后保持原引用。它不表达采集目标是否满足 |
 | `last_error_json` | 目前设备或结果核实的错误，无错误时为空；动作最终错误另行保存 |
 
-普通录像采用启动余量时，`sent_at` 是可靠命令确认时刻，`started_at` 保持未知；旧定义保留原确认事实，完整规则见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)。
+新普通录像的 `SENT` 只确认设备接受了本次命令，不证明设备已开始录制。`sent_at` 保存驱动取得该可靠响应的实际时刻，`started_at` 保持未知，直到另有独立设备开始观察。启动余量从动作的冻结 `execution_spec_json` 读取，不复制为活动列；旧定义继续按自身原确认事实读取。完整规则见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)。
 
 能力列保存实际执行依据，不把设备调用本身伪造成受理操作。延时摄影受理时已固定的相同能力必须精确一致；其他任务以驱动接入契约和部署兼容性要求解释。文件集合通过 `device_files.source_action_id` 分页读取，基准通过不可变事件分块读取。任务可能有多份原文件和预览，不能仅发现一个视频就固定集合。
 
-主机计时延时沿[停止与恢复规则](../../architecture/camera-capture.md#主机计时任务的停止与恢复)保存原 STOP 结果、实际结束和控制时长。实际结束事件使用原 STOP 返回时刻及[结果引用格式](history-formats.md)，与 STOP 尝试结果共同提交；文件归属或集合尚未确定时仍保持占用。跨运行缺少连续计时依据时，`control_elapsed_ns` 保持 SQL `NULL`，结束观察显式保存未知输入。原目标无法证明时，采集结果为 `unconfirmed`，动作使用 `capture_result_unconfirmed/duration_unknown`；停止未确认则保留实际未知活动。原完成保证和原完整保存申请先于新执行资格恢复。
+主机计时延时沿[停止与恢复规则](../../architecture/camera-capture.md#主机计时任务的停止与恢复)保存原 STOP 结果、实际结束和原始控制时长。实际结束事件使用原 STOP 返回时刻及[结果引用格式](history-formats.md)，与 STOP 尝试结果共同提交；文件归属或集合尚未确定时仍保持占用。适用启动余量时，控制耗时包含余量及停止调用的控制开销；按原冻结余量派生的录制时长下界只用于证明目标或判断修复门槛，不是实际媒体时长。跨运行缺少连续计时依据时，`control_elapsed_ns` 保持 SQL `NULL`，结束观察显式保存未知输入。原目标无法证明时，采集结果为 `unconfirmed`，动作使用 `capture_result_unconfirmed/duration_unknown`；停止未确认则保留实际未知活动。原完成保证和原完整保存申请先于新执行资格恢复。
+
+可靠 STOP 后声明的 `file_completion_wait_ms` 只从原停止事实安排文件等待。该等待与普通录像或原生延时使用的启动余量、以及自然结束的 `result_wait_margin_ms` 分开；不把 `startup_margin_ms` 叠加到 STOP 后文件等待。
 
 `capture_json` 是内部 JSON 对象，只包含必填的 `status`、可选的实际 `captured_count`、`elapsed_s` 及适用的 `error`。`captured_count` 是 0～9007199254740991 的整数，`elapsed_s` 是有限非负秒数；只填驱动可靠提供的次数和时长，未知成员省略，不能用 `null` 代替。状态与错误按下表保存，错误使用公共 `error` 对象的结构。
 
@@ -463,9 +465,9 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 
 ## 等待、未知结果和占用恢复
 
-发送成功后，处理模块立即取得单调钟锚点和 UTC 时间，再保存 `sent_at` 与等待安排。采用等待分支时，预计检查时间按原冻结定义及本次额外等待计算，所有乘加先检查整数范围；启动余量的适用范围、旧定义兼容及完整公式见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)。正常会话使用单调钟等待；恢复时在约定的可靠墙钟及设备独立运行前提下计算剩余时间，转换成本次单调钟等待。已有完成凭据仅跳过其能够证明的阶段。
+取得原活动的可靠发送成功返回后，处理模块立即取得单调钟锚点和 UTC 时间，再保存 `sent_at` 与等待安排。对自然延时，启动余量从原动作执行定义中的 `startup_margin_ms` 读取，自然结束余量来自冻结的 `result_wait_margin_ms`，部署额外等待采用本次实际值；启动余量不并入另两项。预计检查时间的完整计算与新旧定义兼容由[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)维护，本页不另列公式。正常会话使用单调钟等待；恢复时在约定的可靠墙钟及设备独立运行前提下计算剩余时间，转换成本次单调钟等待。已有完成凭据仅跳过其能够证明的阶段。
 
-部署额外等待采用[本地配置](../../architecture/configuration.md#拍摄结果核实的额外等待)定义的 `devices.<id>.capture.extra_wait_ms`。未完成等待采用新值时保存新的 `extra_wait_ms_used` 和 `expected_check_at`，原 `sent_at` 不变。已保存等待完成后不重等。
+部署额外等待采用[本地配置](../../architecture/configuration.md#拍摄结果核实的额外等待)定义的 `devices.<id>.capture.extra_wait_ms`。未完成等待采用新值时，保持原 `sent_at` 及冻结的启动、自然结束余量，保存新的 `extra_wait_ms_used` 和 `expected_check_at`；不得从当前时刻重建发送锚点。已保存等待完成后沿用原完成事实，不因新配置重开等待。
 
 等待完成和结果页保留各自的真实发生时刻。自然完成的结果页不得早于原等待完成，新的文件事实不得早于其引用页；不合格实际页仍保留原调用和输入，后续校时不改变其完成资格。当前真实时间不足以承载原来源时，延后新读取或新文件事实；原合格申请沿原键和原时刻恢复。启动余量与原来源规则见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)，会话时钟边界见[时钟与恢复](../../architecture/clock-recovery.md)。
 
@@ -486,11 +488,11 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 
 原执行定义声明 `cancel_completion_policy=finite_device_end` 时，已经生效的取消、原活动以及第一次实际 STOP 的 `FAILED` 流程共同表达必要收场责任。STOP 的实际失败或未知结果与流程失败在同一事务保存，清除重试等待，不再使用剩余额度发出 STOP。目标动作在收场期间保持执行中，因此既有会话工作量查询继续发现它；该责任不新增数据库列，也不重开失败的 STOP。
 
-有可靠 SENT 时，处理模块复用原目标、固定余量及本次额外等待，完成原自然等待后按原有限结果预算核实。原必要文件规则满足、归属可靠且完整结果集合已经固定时，`DEVICE_OBSERVED.FINITE_CANCEL_END` 单独将活动置为 `ENDED`。事件的 `cancel_completion` 依据引用原 SENT、原失败 STOP、等待完成事件及原结果末页，并保存原策略和实际等待规则；原定义有 `startup_margin_ms` 时，依据保存同名原值，缺字段的旧定义不补入。原结果的完整输入仍由各引用事件保存。处理器的结束资格、保存命令和事件守卫共同通过原活动、原尝试及末页上界限定的读取端口，逐页复核当前完整扫描和原必要产物规则，不一次缓存完整目录。跨轮已知文件只决定保留，不能补足当前扫描的空集合、缺件或未知事实；当前文件未完成或集合未确定时继续原有限核实。该事件不设置采集完成判定，不写入 `capture.status=completed`，也不保存设备直接完成观察。占用随后沿统一释放条件处理。
+有同一活动的可靠 SENT 返回及原 `sent_at` 时，处理模块复用原目标、执行定义冻结的 `startup_margin_ms` 与 `result_wait_margin_ms`，以及本次实际采用的部署额外等待，沿原发送锚点完成自然等待后再按原有限结果预算核实；完整等待时点只由[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)定义。未完成等待采用新部署配置时，按原锚点和冻结余量保存新预计检查时间；已完成等待继续复用，不因配置变化重开。原必要文件规则满足、归属可靠且完整结果集合已经固定时，`DEVICE_OBSERVED.FINITE_CANCEL_END` 单独将活动置为 `ENDED`。事件的 `cancel_completion` 依据引用原 SENT、原失败 STOP、等待完成事件及原结果末页，并保存原策略和实际等待规则；原定义有 `startup_margin_ms` 时，依据保存同名原值，缺字段的旧定义不补入。原结果的完整输入仍由各引用事件保存。处理器的结束资格、保存命令和事件守卫共同通过原活动、原尝试及末页上界限定的读取端口，逐页复核当前完整扫描和原必要产物规则，不一次缓存完整目录。跨轮已知文件只决定保留，不能补足当前扫描的空集合、缺件或未知事实；当前文件未完成或集合未确定时继续原有限核实。该事件不设置采集完成判定，不写入 `capture.status=completed`，也不保存设备直接完成观察。占用随后沿统一释放条件处理。
 
 当前扫描的必要文件必须明确完成，当前长度还须满足原规则，并与已保存的可靠完整长度相同。旧完整文件事实不能补足当前长度未知、零长度或长度矛盾。格式和配对角色明确、且原固定规则没有要求其数量的可选 LRF，可以只保留发现事实；它不阻止合格 OSV 的结束资格或完整集合范围确定，也不能补足必要原片。集合保存命令、复用与事件守卫均按同一有界扫描核对归属；必要预览缺配对仍按原归属规则拒绝。
 
-缺少可靠 SENT，或有限结果核实后仍缺少充分文件与集合依据时，目标动作按取消收场，活动和必要占用保持未知残留。取消项消费原 STOP 的失败结论，发起取消动作最终失败。结果为空、缺件、零长度或调用错误本身均不成为活动结束依据。未声明该策略的旧任务及普通录像继续使用各自原取消契约。
+缺少同一活动的可靠 SENT、原 `sent_at` 或其他必要历史依据时，不从当前时刻或执行定义补造发送锚点或等待完成事实；有限结果核实后仍缺少充分文件与集合依据时，目标动作按取消收场，活动和必要占用保持未知残留。取消项消费原 STOP 的失败结论，发起取消动作最终失败。结果为空、缺件、零长度或调用错误本身均不成为活动结束依据。未声明该策略的旧任务及普通录像继续使用各自原取消契约。
 
 ## 设备活动占用的释放条件
 
@@ -506,12 +508,12 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | --- | --- |
 | `dispatch_state` 为 `NOT_DISPATCHED` 或 `REJECTED_WITHOUT_EFFECT`，可靠确认本活动没有启动效果 | `activity_state` 不得为 `ACTIVE` 或 `ENDED`，采集判定不得为设备完成或时间与产物完成。可以继续检查准备及输出范围限制；单次尝试无效果不撤销此前尝试可能产生的活动 |
 | 启动可能或已经生效，已取得原活动的可靠结束证据 | 保存 `activity_state = ENDED`，可以继续检查释放条件。录像的采集判定为空；其他拍摄的采集判定可以仍待定、已完成或明确失败，不因释放而改判成功 |
-| 没有设备结束观察，满足预先声明的时间与全部产物完成契约 | 保存 `completion_basis = TIME_AND_OUTPUTS`，没有设备状态观察时保留 `activity_state = UNKNOWN`。必须具有可靠发送、适用等待完成及完整产物依据，且没有相矛盾的实际观察，才可以继续检查释放条件 |
+| 没有设备结束观察，满足预先声明的时间与全部产物完成契约 | 保存 `completion_basis = TIME_AND_OUTPUTS`，没有设备状态观察时保留 `activity_state = UNKNOWN`。必须具有可靠发送、适用等待完成及完整产物依据，且没有相矛盾的实际观察，才可以继续检查释放条件；采用 `SENT` 自然等待时，还须核对同一活动的原发送结果、`sent_at` 和执行定义中冻结的启动余量。旧定义缺少启动余量时沿用原规则，不补默认值。 |
 | 启动可能或已经生效，设备仍在执行或是否结束未知，且没有上述完成契约依据 | 保持 `HELD`；采集明确失败、动作已取消或已失败均不代替活动结束证据 |
 | `completion_basis = DEVICE_EVIDENCE`，但 `activity_state` 不是 `ENDED` | 属于矛盾组合，拒绝保存；不能用完成依据绕过活动状态 |
 | `completion_basis = TIME_AND_OUTPUTS`，但完成方式不适用、必要事实缺失，或仍有可靠的活动进行中证据 | 属于不成立的完成判定，拒绝保存，不以时间或文件存在覆盖实际观察 |
 
-时间与产物分支仅用于采用该固定契约的任务，不在查询失败后启用。它要求 `completion_mode = TIME_AND_OUTPUTS`、`dispatch_state = SUCCESS_RETURNED`、已保存的等待完成事实、结果集合及产物要求均满足；不能仅凭经过目标时长释放。完成后另取得可靠设备结束观察时，可以保存 `ENDED`，不改写历史完成依据。
+时间与产物分支仅用于采用该固定契约的任务，不在查询失败后启用。它要求 `completion_mode = TIME_AND_OUTPUTS`、`dispatch_state = SUCCESS_RETURNED`、按原执行定义核验的等待完成事实、结果集合及产物要求均满足；采用 `SENT` 自然等待时，等待事实还须关联同一活动的原可靠发送结果和 `sent_at`，并使用原冻结的启动余量、自然结束余量及实际采用的部署等待。不能仅凭经过目标时长释放；精确时点见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)。完成后另取得可靠设备结束观察时，可以保存 `ENDED`，不改写历史完成依据。
 
 行内约束保证：只有可靠未启动、活动已经结束、或时间与产物完成依据成立时，才允许 `occupancy_state = RELEASED`。用现有编号表达必要条件为：
 
@@ -589,7 +591,7 @@ SQL 对每次行修改即时检查这些组合。一个事件同时确定设备�
 
 `recording_processing.action_id` 唯一关联录像动作，`source_device_file_id` 在可靠取得原片前为空。内部输入拷贝通过 `file_copies.processing_id` 唯一反查；工具产生的文件按中间文件责任和用途查询，不在本表保存文件数组。
 
-`check_decision` 为 `UNDETERMINED`、`NOT_NEEDED`、`REQUIRED`；为 `NOT_NEEDED` 或 `REQUIRED` 时，`check_basis_json` 必填。对象使用 `reason`（`CONTINUOUS_CONTROL_COMPLETE` 表示连续控制完成，`INSUFFICIENT_TIMING` 表示计时不足需媒体证据，`EXCESS_DURATION_CHECK` 表示异常多录检查）、`target_duration_ms`，以及实际用于判定的 `control_elapsed_ns`、`continuity_evidence` 等已知成员；未知的依据省略，不能默认为零。
+`check_decision` 为 `UNDETERMINED`、`NOT_NEEDED`、`REQUIRED`；为 `NOT_NEEDED` 或 `REQUIRED` 时，`check_basis_json` 必填。对象使用 `reason`（`CONTINUOUS_CONTROL_COMPLETE` 表示连续控制完成，`INSUFFICIENT_TIMING` 表示计时不足需媒体证据，`EXCESS_DURATION_CHECK` 表示异常多录检查）、`target_duration_ms`，以及实际用于判定的原始 `control_elapsed_ns`、`continuity_evidence` 等已知成员；未知的依据省略，不能默认为零。启动余量适用时，程序从原冻结定义推导可保证的录制时长下界；该派生下界不覆盖原始控制时长，也不作为媒体实测保存。
 
 `check_state` 为 `NOT_PERFORMED`、`RUNNING`、`COMPLETED`、`FAILED`、`UNCONFIRMED`，`media_json` 使用公共媒体结构并保持检查阶段一致。工具未取得时长与实测时长不足分别表达。
 
@@ -604,7 +606,7 @@ SQL 对每次行修改即时检查这些组合。一个事件同时确定设备�
 原输入合格，但修复输出缺流、时长不足、编码／尺寸变化或工具失败|只说明修复失败，不据此推断原片损坏|保留原片，保存实际修复失败，不发布不合格成品
 
 
-`repair_state` 为 `UNDETERMINED`、`NOT_NEEDED`、`PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELED`。除 `UNDETERMINED` 外均必填 `repair_basis_json`，保存 `reason`（`BELOW_THRESHOLD` 表示未达到多录门槛，`THRESHOLD_REACHED` 表示达到门槛，`NO_USABLE_INPUT` 表示没有可用输入，`CANCELED` 表示取消停止处理）、`target_duration_ms`、实际比较门槛时使用的 `threshold_s`（原因为 `BELOW_THRESHOLD` 或 `THRESHOLD_REACHED` 时必填，其他原因不适用时省略），以及实际已知的 `actual_duration_s` 或 `control_elapsed_ns`；秒数采用精确 JSON 数值。控制耗时、录制下界和实际媒体时长分别使用；`control_elapsed_ns` 不能复制到 `actual_duration_s`，后者只保存实际媒体观察。控制时间上下界跨过异常多录门槛时，检查决定采用 `INSUFFICIENT_TIMING`，等待实际媒体检查。已经决定后不因本地门槛变化重算。`SUCCEEDED` 必填 `repair_output_file_id`，`FAILED` 必填 `repair_error_json`，不需要修复时不能用成功修复冒充。
+`repair_state` 为 `UNDETERMINED`、`NOT_NEEDED`、`PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELED`。除 `UNDETERMINED` 外均必填 `repair_basis_json`，保存 `reason`（`BELOW_THRESHOLD` 表示未达到多录门槛，`THRESHOLD_REACHED` 表示达到门槛，`NO_USABLE_INPUT` 表示没有可用输入，`CANCELED` 表示取消停止处理）、`target_duration_ms`、实际比较门槛时使用的 `threshold_s`（原因为 `BELOW_THRESHOLD` 或 `THRESHOLD_REACHED` 时必填，其他原因不适用时省略），以及实际已知的 `actual_duration_s` 或原始 `control_elapsed_ns`；秒数采用精确 JSON 数值。原始控制耗时、按原冻结启动余量派生的录制时长下界和实际媒体时长分别表达；下界不是 `actual_duration_s`，该字段只保存媒体探测取得的实际时长，原始控制耗时也不能复制到其中。控制时间证据不能确定是否达到异常多录门槛时，检查决定采用 `INSUFFICIENT_TIMING`，等待实际媒体检查。已经决定后不因本地门槛变化重算。`SUCCEEDED` 必填 `repair_output_file_id`，`FAILED` 必填 `repair_error_json`，不需要修复时不能用成功修复冒充。
 
 `discard_state` 是取消或过期后处理产生文件的收场进度：`NOT_NEEDED`、`PENDING`、`RUNNING`、`COMPLETED`、`FAILED`、`UNKNOWN`。`FAILED`、`UNKNOWN` 必填 `discard_error_json`。它跟踪所属录像的处理结果；实际中间文件逐份保留和删除由文件表负责。原片检查、修复及取消后处理不在动作终态后重新启动；剩余文件清理责任仍可独立推进。
 
