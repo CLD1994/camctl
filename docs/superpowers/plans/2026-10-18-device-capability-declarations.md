@@ -87,7 +87,7 @@
 - [ ] **步骤 2：运行 unit/devices 的 `test_adb_camera_parameters.py`、`test_osmo360ii_capture.py` 及 Hasselblad 能力用例确认失败。** 断言事实和结构，不逐字锁定人类文案。
 - [ ] **步骤 3：实施任务与字段说明。** OSMO 录像说明全景、8K／30 fps、D-Log M、高码率请求；Manual 为 ISO 800、1/60 秒快门，两种曝光均请求 5200 K，Auto 为 EV 0。原生延时说明全景、8K／30 fps，只有 Manual 请求 ISO 800、1/60 秒和 5200 K。Action6 说明自身固定设置及省略光圈／码率时保持原设置；Hasselblad 说明单张 RAW 和沿用机身设置。请求设置、独立读回、假定参考码率分别表达。
 - [ ] **步骤 4：补启动后取消说明。** 从实际任务停止及取消策略生成说明并核对工厂返回：Action6／OSMO 普通录像支持启动后取消；OSMO 有限原生延时沿原目标结束策略收场，不承诺立即停止；Hasselblad 启动前可取消、启动后不支持取消。不能只用驱动级 stop 布尔值替代所有参数类型的任务策略。
-- [ ] **步骤 5：验证真实 UI 并提交。** 扩展 `apps/client/tests/integration/browser-camera-parameters.test.ts`、`browser-editing.test.ts`，加载正式导出，核对表单、任务说明与指南同源且查看不改草稿。保持参数域、命令、默认值、预览、估算与时间组合；参数专题将设备进度统一引用[验证记录](../../camctl/verification.md)和对应完成计划。
+- [ ] **步骤 5：验证 UI 消费并提交。** 扩展 `apps/client/tests/integration/browser-camera-parameters.test.ts`、`browser-editing.test.ts`，用经公共协议校验的元数据夹具核对表单、任务说明与指南同源且查看不改草稿；组件测试不启动 Python CLI。保留测试输入注入方式，供 C5 根跨组件验收加载真实安装版导出，避免复制生产参数和说明清单。保持参数域、命令、默认值、预览、估算与时间组合；参数专题将设备进度统一引用[验证记录](../../camctl/verification.md)和对应完成计划。
 
 ## C4：按通用声明控制页面入口
 
@@ -118,6 +118,8 @@
 **预计文件：** `apps/camctl/tests/integration/bootstrap/test_distribution.py`，根集成新增 `tests/integration/test_device_capability_declarations.py`，复用真实 CLI 与客户端测试入口；更新两组件验证记录。
 
 **分段门禁：** 安装版 CLI、协议、实际加载、HTTP 和指南验收依赖 C1—C3，可以先行；最终页面可见性联合验收依赖 C4 实施。两段均不依赖文件清理计划，前段完成不能代替整份计划完成。
+
+根联合用例负责 CLI 与客户端的真实组合，可将安装版导出的 JSON 文件通过测试专用输入交给 C3 的浏览器用例，例如 `CAMCTL_TEST_CAPABILITIES_FILE`。客户端组件套件默认使用协议夹具，不增加 Python CLI／虚拟环境前置；正式固定设置与取消事实由驱动测试验证，联合验收再确认实际导出进入页面。
 
 - [ ] **步骤 1：写联合失败测试。** 从仓库外安装 wheel，离线按真实配置执行 describe，与源码按当前配置解析的正式源能力比较；先核对根 Schema、包内资源、实际 loader、HTTP 和设备指南。覆盖 HB host／device、同驱动不同逻辑设备及源模式改变后旧执行定义保持。C4 完成后增加按当前源分别显示的真实页面联合验收。包含全部内置驱动与任意驱动夹具，声明变化本身不产生拍摄或清理调用。
 - [ ] **步骤 2：运行新目标确认失败，再补齐发行与消费接缝。** 安装环境不依赖源码目录；新导出包含明确值，旧 JSON 仍可加载。文件系统、SQLite 和进程组合放集成测试。
