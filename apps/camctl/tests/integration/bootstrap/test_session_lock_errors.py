@@ -906,7 +906,7 @@ async def test_lock_control_and_parent_cancel_keep_first_source(
     final_settlement_started = asyncio.Event()
     original_settle = session_service._settle_local_work
 
-    async def gated_settle(context, *, stop_new=True, exclude_owner=None):
+    async def gated_settle(context, *, stop_new=True, exclude_owner=None, waiter=None):
         if exclude_owner is not None:
             transition_started.set()
             if parent_first:
@@ -915,7 +915,7 @@ async def test_lock_control_and_parent_cancel_keep_first_source(
         else:
             final_settlement_started.set()
         return await original_settle(
-            context, stop_new=stop_new, exclude_owner=exclude_owner)
+            context, stop_new=stop_new, exclude_owner=exclude_owner, waiter=waiter)
 
     monkeypatch.setattr(session_service, "_settle_local_work", gated_settle)
     listdir_started = threading.Event()
