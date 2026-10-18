@@ -13,7 +13,7 @@ from camctl.cancellation.models import (
     ApplyCancelTarget, CancelApplyMode, CancellationEffect, FixedCancelSet,
     FixedTarget, FixCancelTargets, SelectionBasis, StartCancelAction,
 )
-from camctl.capture.handlers import _control_call, _stop_call, capture_handler
+from camctl.capture.handlers import _advance_timelapse_natural_wait, _control_call, _stop_call, capture_handler
 from camctl.capture.models import ActivityConcludeSave
 from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
 from camctl.contracts.values import new_operation_key
@@ -91,6 +91,13 @@ def returned(operation, observation, activity_id):
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue(f"{operation}_returned", 1, {})),
         observations=(DeviceObservation(observation, 1, {"activity_id": str(activity_id)}),),
     )
+
+
+def complete_natural_wait(runtime, action_id):
+    """正常自然结果的手工消费者先可靠保存原实际等待，不制造设备结果。"""
+    event_id = _advance_timelapse_natural_wait(runtime, runtime.action(action_id))
+    assert event_id is not None
+    return event_id
 
 
 async def consumer_world(tmp_path, consumer, *, independent_activity=False, catalog=None, start=True):

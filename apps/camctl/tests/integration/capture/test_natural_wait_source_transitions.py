@@ -311,7 +311,8 @@ async def test_old_direct_file_before_wait_is_retained_without_upgrading_origina
     result.list_results.side_effect = actual
     try:
         wall[0] += 100
-        await _listing_round(runtime, aid)
+        listing = await _listing_round(runtime, aid)
+        _register_listing(runtime, aid, listing)
         ticket = _original_ticket(runtime, f'results/{aid}', 'result')
         file_before = owned.connection.execute('SELECT id,completion_evidence_json FROM device_files WHERE completion_state=3').fetchone()
         assert file_before is not None
@@ -320,7 +321,8 @@ async def test_old_direct_file_before_wait_is_retained_without_upgrading_origina
         mono[0] += (startup+1200)*1000000
         assert _advance_timelapse_natural_wait(runtime, runtime.action(aid)) is not None
         original = runtime.capture.read_result_source(ticket, owned)
-        assert original.kind.value == 'unconfirmed' and original.context is None
+        assert original.kind.value == 'direct' and original.context is None
+        assert original.natural_lower_bound is None
         for _ in range(3): await advance(aid, runtime)
         assert runtime.action(aid)['status'] == 6
         assert len(_retained(owned, aid)) == 1
@@ -863,7 +865,8 @@ async def test_recording_media_cache_keeps_original_current_set_instead_of_prior
         runtime.listing_cache = {aid: (registered.entries, registered)}
         await _advance_recording_outcome(runtime, runtime.action(aid), SimpleNamespace(phase=RecordingPhase.CONTROL_COMPLETE))
         assert runtime.action(aid)['status'] == 3
-        assert owned.connection.execute("SELECT json_extract(f.identity_key,'$[2]') FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.source_action_id=?", (aid,)).fetchall() == [('/DCIM/b.mp4',)]
+        assert [file.file_id for file, _ in runtime.listing_cache[aid][1]] == ['/DCIM/b.mp4']
+        assert owned.connection.execute("SELECT json_extract(f.identity_key,'$[2]') FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.source_action_id=? ORDER BY f.id", (aid,)).fetchall() == [('/DCIM/a.mp4',), ('/DCIM/b.mp4',)]
         assert owned.connection.execute('SELECT COUNT(*) FROM device_files WHERE completion_state=3').fetchone() == (2,)
         assert driver.list_results.await_count == 2
     finally:

@@ -48,6 +48,9 @@ async def test_closed_latest_error_keeps_previously_registered_file_input(tmp_pa
         first.observations[0].data["entries"][0]["kind"] = "photo"
     driver = _result_port(runtime, first)
     try:
+        if consumer == "timelapse":
+            from .result_consumer_fixtures import complete_natural_wait
+            complete_natural_wait(runtime, action_id)
         listing = await _listing_round(runtime, action_id)
         _register_observed(runtime, action_id, listing.entries, occurred_at=listing.occurred_at)
         _finish_listing_result(runtime, listing, retry_wait=True)

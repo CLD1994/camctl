@@ -233,7 +233,10 @@ def _guard_state(owned, file_id, context, page_id):
                         for identity, in owned.connection.execute(f"SELECT id FROM {table}")}
     columns = ("id", "transaction_id", "event_type", "event_version", "occurred_at", "clock_status", "change_seq", "body_json")
     state["history_events"] = {}
-    for event_id in (context["stop_result_event_id"], page_id):
+    attempt = next(value for value in state['operation_attempts'].values()
+        if value['result_first_page_event_id'] is not None
+        and value['result_first_page_event_id'] <= page_id <= value['result_last_page_event_id'])
+    for event_id in (context["stop_result_event_id"], page_id, attempt['intent_event_id']):
         row = owned.connection.execute(
             "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
             " FROM history_events WHERE id=?", (event_id,)).fetchone()

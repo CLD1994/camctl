@@ -145,6 +145,15 @@ class ResultsDouble:
         self.calls.append(action_id)
         return self.files_by_action.get(action_id, ())
 
+    @staticmethod
+    def serialized_entries(entries):
+        return [{"identity": entry.identity, "locator": dict(entry.locator),
+                 "complete": entry.complete, "size_bytes": entry.size_bytes,
+                 "kind": entry.kind.value, "original_name": entry.original_name,
+                 "media_type": entry.media_type, "paired_identity": entry.paired_identity,
+                 **({"format_id": entry.format_id} if entry.format_id is not None else {})}
+                for entry in entries]
+
     async def list_round(self, ticket, *, timeout_s) -> ListedResult:
         try:
             entries = await self.list_files(int(ticket.target_id))
@@ -153,11 +162,7 @@ class ResultsDouble:
                 status=AttemptStatus.FAILED, error=ErrorValue("device_error", "device"),
                 effect=EffectState.UNKNOWN, settlement=Settlement(
                     SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {}))))
-        files = [{"identity": entry.identity, "locator": dict(entry.locator),
-                  "complete": entry.complete, "size_bytes": entry.size_bytes,
-                  "kind": entry.kind.value, "original_name": entry.original_name,
-                  "media_type": entry.media_type, "paired_identity": entry.paired_identity}
-                 for entry in entries]
+        files = self.serialized_entries(entries)
         return ListedResult(entries, CallOutcome(
             status=AttemptStatus.SUCCEEDED, error=None, effect=EffectState.CONFIRMED,
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),

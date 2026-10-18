@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Callable, Mapping
 
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
+from camctl.capture.results import FileKind
 from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner, SavedResultPage
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
@@ -241,15 +242,20 @@ class SourceResultEntries:
                     current = self.current_entries.find(entry.identity, allow_missing=True)
                     if current is None:
                         continue
+                    original_pair = entry.paired_identity
                     entry, original_id = current
                     if original_id != file_id:
                         raise ConsistencyError("当前原页改变已登记文件身份")
+                    if entry.paired_identity != original_pair:
+                        raise ConsistencyError("当前原页改变已登记文件配对")
                     if (entry.paired_identity is not None and self.current_entries.find(
                             entry.paired_identity, allow_missing=True) is None):
                         continue
                     complete = entry.complete and file.complete and entry.size_bytes == file.size_bytes
                     entry = replace(entry, complete=complete, size_bytes=entry.size_bytes if complete else None)
-                    file = replace(file, complete=complete, size_bytes=entry.size_bytes)
+                    file = replace(file, kind=entry.kind, format_id=entry.format_id,
+                        pairing_confirmed=True if entry.paired_identity is not None else None,
+                        complete=complete, size_bytes=entry.size_bytes)
                 yield entry, file, file_id
             if page.next_cursor is None:
                 return
@@ -259,9 +265,56 @@ class SourceResultEntries:
         return (entry for entry, _, _ in self.records())
 
 
+class ObservedResultEntries:
+    """旧 v1 本轮已登记输入；原返回尚未保存时也不读取保留历史。"""
+
+    def __init__(self, ticket, entries, registered):
+        self.ticket = ticket
+        self.registered = registered
+        self.current_entries = tuple(replace(entry, complete=file.complete,
+            size_bytes=file.size_bytes) for entry, (file, _) in zip(entries, registered, strict=True))
+
+    def records(self):
+        return ((entry, file, file_id) for entry, (file, file_id)
+            in zip(self.current_entries, self.registered, strict=True))
+
+    def __iter__(self):
+        return iter(self.current_entries)
+
+
 class RegisteredSourceFiles:
-    def __init__(self, entries: SourceResultEntries):
+    def __init__(self, entries: SourceResultEntries | ObservedResultEntries):
         self.entries = entries
 
     def __iter__(self):
         return ((file, file_id) for _, file, file_id in self.entries.records())
+
+
+class TerminalResultEntries(SourceResultEntries):
+    """终态逐文件合并原保留来源与合格当前观察，不改变原完成事实。"""
+
+    def records(self):
+        retained = SourceResultEntries(self.repository, self.owned, self.ticket)
+        for entry, file, file_id in retained.records():
+            if self.current_entries is not None:
+                current = (self.current_entries.find(entry.identity, allow_missing=True)
+                    if isinstance(self.current_entries, SavedResultEntries) else
+                    next(((item, file_id) for item in self.current_entries if item.identity == entry.identity), None))
+                if current is not None:
+                    observed, original_id = current
+                    if original_id != file_id:
+                        raise ConsistencyError("终态当前观察改变原文件身份")
+                    if observed.paired_identity != entry.paired_identity:
+                        raise ConsistencyError("终态当前观察改变已登记文件配对")
+                    if observed.complete and file.complete and observed.size_bytes == file.size_bytes:
+                        # 当前未知的可选元信息不撤销原可靠值；仅用于终态保留，
+                        # 当前集合仍使用未补入这些原值的 current 视图。
+                        entry = replace(observed,
+                            kind=(observed.kind if observed.kind is not FileKind.OTHER
+                                or observed.evidence.get('kind') == FileKind.OTHER.value else entry.kind),
+                            format_id=observed.format_id if observed.format_id is not None else entry.format_id,
+                            original_name=observed.original_name if observed.original_name is not None else entry.original_name,
+                            media_type=observed.media_type if observed.media_type is not None else entry.media_type)
+                        file = replace(file, kind=entry.kind, format_id=entry.format_id,
+                            pairing_confirmed=True if entry.paired_identity is not None else None)
+            yield entry, file, file_id

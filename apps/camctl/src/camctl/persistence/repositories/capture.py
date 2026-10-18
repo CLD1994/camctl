@@ -3524,6 +3524,33 @@ class _ResultSetConfirmCommand:
             raise ConsistencyError(f"活动所属动作不存在: {facts['action_id']}")
         self._state["device_activities"] = {activity_id: facts}
         self._state["actions"] = {facts["action_id"]: action}
+        result_scope = None
+        if (command.phase is ResultSetPhase.COMPLETE and command.evidence is not None
+                and command.evidence.get('method') == _TIME_AND_OUTPUTS_METHOD):
+            from .result_pages import _at, capture_result_scope
+            from .result_sources import load_result_source, natural_result_source
+            page_id = command.observation.get('last_page_event_id')
+            ticket = None
+            if page_id is not None:
+                saved, _ = _at(connection, page_id)
+                ticket = saved.ref.ticket
+                if ticket.target_id != str(activity_id):
+                    raise ConsistencyError('自然集合的原结果页属于其他活动')
+                result_scope = capture_result_scope(action['id'], ticket, page_id)
+            else:
+                with closing(connection.execute(
+                        'SELECT r.id,t.attempt_no FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id'
+                        ' WHERE r.action_id=? AND r.activity_id=? AND r.responsibility_key=?'
+                        ' ORDER BY t.intent_event_id DESC LIMIT 1',
+                        (action['id'], activity_id, f'results/{activity_id}'))) as cursor:
+                    original = cursor.fetchone()
+                if original is not None:
+                    ticket = AttemptTicket(original[1], 'result', str(activity_id), f'results/{activity_id}', original[0])
+            if ticket is not None:
+                load_result_source(connection, ticket, self._state)
+                source = natural_result_source(action, facts, self._state)
+                if command.occurred_at < source.natural_lower_bound:
+                    raise ConsistencyError('自然集合事实早于原等待和结果来源')
         self._owners[("device_activities", activity_id)] = (
             "action", facts["action_id"])
         if action["type"] == 2:
@@ -3569,7 +3596,8 @@ class _ResultSetConfirmCommand:
         return CommandPlan(
             events=(event,), owners=self._owners, state_rows=self._state,
             result=ResultSetOutcome(
-                ResultSetDisposition.SAVED, target, basis))
+                ResultSetDisposition.SAVED, target, basis),
+            capture_result_read_scope=result_scope)
 
     def _basis_after(self, facts) -> tuple[int | None, dict | None]:
         """按分支与已保存事实确定采集判定；只从待定初始化一次。"""
@@ -7086,3 +7114,48 @@ def _result_check_guard(event, context) -> None:
             raise
         except ValueError as error:
             raise EventValidationError(f"新采集结果与集合结论不符: {error}") from error
+    facts = context.state_rows.get('device_activities', {}).get(row.row_id, {})
+    proof = row.after.values.get('completion_evidence_json', facts.get('completion_evidence_json'))
+    if (event.reason == _RESULT_COMPLETE_REASON and isinstance(proof, Mapping)
+            and proof.get('method') == _TIME_AND_OUTPUTS_METHOD):
+        from .result_sources import natural_result_source
+        from .result_pages import capture_result_scope
+        try:
+            action = _source_fact(context.state_rows, 'actions', facts['action_id'])
+            source = natural_result_source(action, facts, context.state_rows)
+            observation = check['observation']
+            last_id = observation.get('last_page_event_id')
+            if source is None:
+                if last_id is not None:
+                    raise ConsistencyError('自然集合缺少原结果请求')
+                return
+            if event.occurred_at < source.natural_lower_bound:
+                raise ConsistencyError('自然集合事实早于原可靠来源')
+            if last_id is not None:
+                attempt = next(value for value in context.state_rows['operation_attempts'].values()
+                    if value['intent_event_id'] == source.intent_event_id)
+                run = _source_fact(context.state_rows, 'operation_runs', attempt['run_id'])
+                ticket = AttemptTicket(attempt['attempt_no'], 'result', str(row.row_id),
+                    run['responsibility_key'], run['id'])
+                reader = context.current_reads
+                if reader is None or reader.scope != capture_result_scope(action['id'], ticket, last_id):
+                    raise ConsistencyError('自然集合缺少原有界结果页读取')
+                cursor, first, last = None, None, None
+                while True:
+                    batch = reader.result_pages(ticket, cursor, 1)
+                    for page in batch.items:
+                        if (page.ref.event_id >= event.event_id
+                                or page.occurred_at < source.natural_lower_bound
+                                or page.occurred_at > event.occurred_at):
+                            raise ConsistencyError('自然集合包含不合格的原实际页时刻')
+                        first = page.ref.event_id if first is None else first
+                        last = page
+                    if batch.next_cursor is None:
+                        break
+                    cursor = batch.next_cursor
+                if (last is None or first != observation.get('first_page_event_id')
+                        or last.ref.event_id != last_id or not last.page.scan_complete
+                        or not last.page.set_finalized or last.page.outcome.error is not None):
+                    raise ConsistencyError('自然集合缺少原请求的可靠完整扫描')
+        except (ConsistencyError, ValueError, KeyError, StopIteration) as error:
+            raise EventValidationError(f'自然集合的原结果来源无效: {error}') from error

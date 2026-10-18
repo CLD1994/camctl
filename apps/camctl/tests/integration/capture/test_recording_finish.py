@@ -395,6 +395,9 @@ async def _complete_files_then_cancel(tmp_path: Path, consumer: str):
         activity_id, = _value(
             owned, "SELECT id FROM device_activities WHERE action_id=?", action_id)
         runtime.results = ResultsDouble({activity_id: (_entry("complete-file"),)})
+        if consumer == "timelapse":
+            from .result_consumer_fixtures import complete_natural_wait
+            complete_natural_wait(runtime, action_id)
         listing = await _listing_round(runtime, action_id)
         registered = _register_listing(runtime, action_id, listing)
         _finish_listing_result(runtime, listing)

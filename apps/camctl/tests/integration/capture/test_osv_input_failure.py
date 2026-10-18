@@ -9,6 +9,7 @@ from camctl.capture.handlers import _register_observed, capture_handler
 from camctl.capture.media import MediaPolicy
 from camctl.capture.media_flow import MediaFlow, DriverReadSessions, run_recording_media, load_processing_status
 from camctl.capture.processing import SourceFileSave
+from camctl.capture.result_inputs import observed_file
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import new_operation_key
 from camctl.host_files.media import MediaProbe, MediaArtifact
@@ -18,7 +19,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from .test_media_flow import ReadDriverDouble, _Digest
 from .test_recording_media_link import _environment, _runtime, _CONTENT, _NOW
-from .test_capture_contract import _entry
+from .test_capture_contract import _entry, ResultsDouble
 from .test_osv_probe_history import dual_probe
 
 
@@ -78,6 +79,8 @@ def prepared_input(tmp_path, check_required, fault):
     owned, staging = _environment(tmp_path, check_decision=3 if check_required else 2, check_basis=basis)
     entry = replace(_entry("clip", size=len(_CONTENT)), original_name="clip.OSV",
         media_type=None, format_id="osv")
+    # 手工媒体前置采用完整原观察；后续真实页沿同一序列化核对来源。
+    entry = observed_file(ResultsDouble.serialized_entries((entry,))[0])
     runtime = _runtime(owned, {1: (entry,)})
     registered = _register_observed(runtime, 1, (entry,))
     source_id = registered[0][1]

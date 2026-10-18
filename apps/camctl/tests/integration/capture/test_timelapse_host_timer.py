@@ -53,9 +53,9 @@ class HostCatalog(DeviceCompletionCatalog):
 
 
 async def world(tmp_path, *, meaning=StartReturn.SENT, case="video", consumer="timelapse", completion_page=None,
-                baseline=False, end_control=EndControl.HOST_TIMER, startup_margin_ms=None):
+                baseline=False, end_control=EndControl.HOST_TIMER, startup_margin_ms=None, catalog=None):
     owned, runtime, action_id, handler = await consumer_world(tmp_path, consumer,
-        independent_activity=True, catalog=HostCatalog(meaning, baseline=baseline, end_control=end_control, startup_margin_ms=startup_margin_ms), start=False)
+        independent_activity=True, catalog=catalog or HostCatalog(meaning, baseline=baseline, end_control=end_control, startup_margin_ms=startup_margin_ms), start=False)
     if baseline:
         from camctl.contracts.pages import Page
         from camctl.devices.directory import DirectoryRead

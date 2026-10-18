@@ -264,6 +264,9 @@ async def test_result_budget_close_uses_original_activity_on_resend(
     runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
     runtime.results = ResultsDouble({activity_id: ()})
     try:
+        if consumer == "timelapse":
+            from .result_consumer_fixtures import complete_natural_wait
+            complete_natural_wait(runtime, action_id)
         listing = await _listing_round(runtime, action_id)
         _finish_listing_result(runtime, listing, retry_wait=True)
         if consumer == "record":
