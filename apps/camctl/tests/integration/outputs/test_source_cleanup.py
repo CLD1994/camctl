@@ -84,7 +84,7 @@ class DriverDouble:
         return DeviceCallResult(
             observations=observations, error=self.delete_error)
 
-    async def query_state(self, request) -> DeviceCallResult:
+    async def query_file(self, request) -> DeviceCallResult:
         self.query_calls += 1
         observations = ()
         if self.present is not None:

@@ -34,7 +34,7 @@ def _unavailable_device_ports():
                ports[4].open_read, ports[5].digest, ports[6].delete)
     for method in methods:
         method.side_effect = AssertionError("原 CLOSED 输入本地收尾不得发起新设备调用")
-    declaration = DriverDeclaration(True, True, True, True, True, True, True)
+    declaration = DriverDeclaration(True, True, True, True, True, True, False)
     driver = SimpleNamespace(declaration=declaration, control=methods[0], stop=methods[1],
         query_state=methods[2], list_results=methods[3], open_read=methods[4],
         digest=methods[5], delete=methods[6])

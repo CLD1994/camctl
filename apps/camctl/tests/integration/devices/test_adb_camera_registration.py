@@ -22,13 +22,18 @@ from camctl.contracts.enums import enum_for
 from camctl.devices import definitions_runtime
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.catalog import DriverDefinition, DriverDefinitions, build_catalog
+from camctl.devices.adb_transport import DeviceCommand, InterpretedFacts
 from camctl.devices.drivers import runtime as drivers_runtime
 from camctl.devices.drivers.adb_cameras import registration
 from camctl.devices.drivers.adb_cameras.commands import CameraModel
-from camctl.devices.drivers.adb_cameras.contracts import CameraCall
+from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
 from camctl.devices.drivers.adb_cameras.definitions import candidate_capabilities
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
-from camctl.devices.drivers.registry import CapabilityNotDeclaredError
+from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
+from camctl.devices.drivers.adb_cameras.transport import shell_argv
+from camctl.devices.drivers.registry import (
+    CapabilityNotDeclaredError, DriverEntry, DriverStatus, port_for)
+from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import ControlRequest
 from camctl.devices.tasks import CaptureStorage
 from camctl.operations.models import AttemptTicket, EffectState, SettlementBasis
@@ -65,6 +70,8 @@ def test_static_and_runtime_registration_share_complete_contract_and_refresh_bin
     assert definitions_runtime.current_driver_definitions().drivers[model].declaration == entry.declaration
     assert entry.driver.contract is contract
     assert not entry.declaration.query_supported
+    assert entry.declaration.file_query_supported
+    assert entry.declaration.delete_supported
     registration.register_builtin_camera_drivers(current)
     assert drivers_runtime.current_registry().entry(model) is entry
     assert entry.driver.devices is current.devices
@@ -120,6 +127,18 @@ def test_collision_is_rejected_before_either_registry_changes(isolated_registrat
     assert drivers_runtime.current_registry().entry(CameraModel.ACTION6) is None
 
 
+def test_builtin_camera_contracts_do_not_enable_device_file_cleanup(isolated_registration):
+    config = load_config(None, ConfigDefaults())
+
+    registration.register_builtin_camera_drivers(config)
+
+    for model in CameraModel:
+        declaration = drivers_runtime.current_registry().entry(model).declaration
+        assert not declaration.query_supported
+        assert not declaration.file_query_supported
+        assert not declaration.delete_supported
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", list(CameraModel))
 @pytest.mark.parametrize("operation", ["stop", "result", "query"])
@@ -149,6 +168,70 @@ async def test_driver_ports_use_original_ticket_and_explicit_capabilities(model,
     if operation == "result":
         assert result.observations[0].version == 2
         assert result.observations[0].data["set_finalized"] is True
+
+
+@pytest.mark.asyncio
+async def test_file_query_uses_query_ticket_without_enabling_capture_state_query():
+    binding = DeviceBinding("cam-1", CameraModel.ACTION6)
+    presence = EvidenceContract(
+        "file_presence", 1, "query", frozenset({"cleanup_item_id", "present"}),
+        identity_field="cleanup_item_id")
+    returned = EvidenceContract("query_returned", 1, "query", frozenset())
+    assumption = EvidenceContract(
+        "query_foreground_recovery", 1, "query", frozenset({"terminate_grace_s"}))
+    evidence = EvidenceRegistry((presence, returned, assumption))
+    seen = []
+
+    class Interpreter:
+        def interpret(self, raw):
+            return InterpretedFacts((DeviceObservation(
+                "file_presence", 1, {"cleanup_item_id": "3", "present": False}),),
+                None, EffectState.CONFIRMED)
+
+    def file_query_factory(request, serial, argv, batch):
+        seen.append((request, serial))
+        return DeviceCommand(
+            operation="query", argv=shell_argv(serial, "true"), binding=request.binding,
+            timeout_s=request.timeout_s, terminate_grace_s=Decimal("1"), evidence=evidence,
+            returned_contract=returned, assumption_contract=assumption,
+            interpreter=Interpreter(), capability=CameraCall.FILE_QUERY.value)
+
+    calls = []
+
+    class Transport:
+        async def run(self, spec, stop):
+            calls.append(spec)
+            return RawToolOutcome(LocalExit(exit_code=0), b"", None, None, stderr=b"")
+
+    contract = CameraContract(
+        CameraModel.ACTION6, commands={CameraCall.FILE_QUERY: file_query_factory},
+        file_tools=ShellFileTools(), evidence=evidence,
+        recovery_operations=frozenset({"query"}))
+    driver = AdbCameraDriver(contract,
+        {"cam-1": {"driver": CameraModel.ACTION6, "adb": {"serial": "serial-1"}}},
+        Transport(), terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
+    entry = DriverEntry(CameraModel.ACTION6, driver, contract.declaration, evidence,
+        DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+    ticket = AttemptTicket(1, "query", "3", "exists/3", 9)
+    request = ControlRequest("query", binding, {
+        "cleanup_item_id": "3", "file_id": "8",
+        "identity_key": json.dumps(["cam-1", CameraModel.ACTION6, "/DCIM/3.OSV"]),
+        "locator": {"path": "/DCIM/3.OSV"},
+    }, ticket=ticket, timeout_s=Decimal("5"))
+
+    assert entry.declaration.file_query_supported
+    assert not entry.declaration.query_supported
+    assert port_for(entry, "file_query") is driver
+    with pytest.raises(CapabilityNotDeclaredError):
+        port_for(entry, "query")
+
+    result = await port_for(entry, "file_query").query_file(request)
+
+    assert seen == [(request, "serial-1")]
+    assert len(calls) == 1
+    assert calls[0].argv[:5] == ("adb", "-s", "serial-1", "shell", "-T")
+    assert result.observations == (DeviceObservation(
+        "file_presence", 1, {"cleanup_item_id": "3", "present": False}),)
 
 
 @pytest.mark.parametrize("model", list(CameraModel))

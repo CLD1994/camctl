@@ -26,6 +26,7 @@ __all__ = [
     "ControlDriver",
     "StopDriver",
     "StateQueryDriver",
+    "FileQueryDriver",
     "ResultDriver",
     "ReadDriver",
     "DigestDriver",
@@ -35,7 +36,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class DriverDeclaration:
-    """驱动对七类操作及设备兼容性的显式能力声明。
+    """驱动对各类操作及设备兼容性的显式能力声明。
 
     不支持以 False 表达，不是失败；声明支持但调用失败由调用结果
     的错误分区表达，不降级为不支持。capture_read_parallel_supported
@@ -57,6 +58,8 @@ class DriverDeclaration:
     directory_supported: bool = False
     #: 仅声明 READ 的本地主机收场恢复，不推断设备效果或独立活动结束。
     local_read_recovery_supported: bool = False
+    #: 按文件身份查询存在性；独立于拍摄活动状态查询。
+    file_query_supported: bool = False
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():
@@ -65,6 +68,8 @@ class DriverDeclaration:
         operations = self.adb_foreground_recovery_operations
         if not isinstance(operations, frozenset) or not operations <= OPERATIONS:
             raise ValueError("前台命令恢复适用范围必须是已登记操作的 frozenset")
+        if self.delete_supported and not self.file_query_supported:
+            raise ValueError("删除能力声明必须同时支持独立文件查询")
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,16 @@ class StateQueryDriver(Protocol):
     declaration: DriverDeclaration
 
     async def query_state(self, request: ControlRequest) -> DeviceCallResult:
+        ...
+
+
+@runtime_checkable
+class FileQueryDriver(Protocol):
+    """按原文件身份查询存在性；与拍摄活动状态查询分离。"""
+
+    declaration: DriverDeclaration
+
+    async def query_file(self, request: ControlRequest) -> DeviceCallResult:
         ...
 
 

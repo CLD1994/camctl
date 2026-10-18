@@ -16,7 +16,7 @@ from camctl.operations.models import EffectState, ErrorValue
 
 def software_contract(model):
     returned = {operation: EvidenceContract(f"{operation}_returned", 1, operation, frozenset())
-                for operation in ("control", "stop", "result", "delete")}
+                for operation in ("control", "stop", "result", "query", "delete")}
     assumptions = {operation: EvidenceContract(f"{operation}_foreground_recovery", 1, operation,
                                                frozenset({"terminate_grace_s"})) for operation in returned}
     observations = (
@@ -26,6 +26,7 @@ def software_contract(model):
                                   ("timelapse_sent", "control"), ("stop_confirmed", "stop"))),
         EvidenceContract("file_digest", 1, "digest", frozenset({"file_id", "sha256"}), identity_field="file_id"),
         EvidenceContract("file_absent", 1, "delete", frozenset({"cleanup_item_id"}), identity_field="cleanup_item_id"),
+        EvidenceContract("file_presence", 1, "query", frozenset({"cleanup_item_id", "present"}), identity_field="cleanup_item_id"),
         RESULT_PAGE_CONTRACT,
     )
     evidence = EvidenceRegistry((*returned.values(), *assumptions.values(), *observations))
@@ -43,6 +44,9 @@ def software_contract(model):
                     "set_finalized": True, "completion_evidence": None})
             elif self.kind is CameraCall.DELETE:
                 observation = DeviceObservation("file_absent", 1, {"cleanup_item_id": self.request.ticket.target_id})
+            elif self.kind is CameraCall.FILE_QUERY:
+                observation = DeviceObservation("file_presence", 1, {
+                    "cleanup_item_id": self.request.params["cleanup_item_id"], "present": False})
             else:
                 name = ("setting_applied" if self.kind is CameraCall.SETTING else "stop_confirmed"
                         if self.kind is CameraCall.STOP else "timelapse_sent"
@@ -73,6 +77,7 @@ def software_contract(model):
         return fixed
     return CameraContract(model, task_factories={cap.parameter_type: task for cap in candidate_capabilities(model)},
         commands={kind: command_factory(kind) for kind in (CameraCall.SETTING, CameraCall.START,
-                  CameraCall.STOP, CameraCall.RESULT, CameraCall.DELETE)},
+                  CameraCall.STOP, CameraCall.RESULT, CameraCall.FILE_QUERY, CameraCall.DELETE)},
         file_tools=ShellFileTools(), digest_timeout_s=lambda _size: Decimal("300"), evidence=evidence,
-        capture_read_parallel_supported=True)
+        capture_read_parallel_supported=True,
+        recovery_operations=frozenset({"query", "delete"}))

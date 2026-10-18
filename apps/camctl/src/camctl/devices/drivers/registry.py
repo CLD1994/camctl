@@ -57,6 +57,22 @@ class DriverEntry:
             raise ValueError("declaration 必须是 DriverDeclaration")
         if not isinstance(self.status, DriverStatus):
             raise ValueError("status 必须是 DriverStatus")
+        if self.declaration.file_query_supported:
+            if not callable(getattr(self.driver, "query_file", None)):
+                raise ValueError("文件查询能力已声明，但驱动未提供 query_file 端口")
+            try:
+                contract = self.evidence.contract("file_presence", 1)
+            except ValueError as error:
+                raise ValueError("文件查询能力缺少 file_presence/v1 证据契约") from error
+            if (contract.operation != "query"
+                    or contract.fields != frozenset({"cleanup_item_id", "present"})
+                    or contract.identity_field != "cleanup_item_id"):
+                raise ValueError("file_presence/v1 必须精确绑定 QUERY 成员身份与在场事实")
+        if self.declaration.delete_supported:
+            if not callable(getattr(self.driver, "delete", None)):
+                raise ValueError("删除能力已声明，但驱动未提供 delete 端口")
+            if not _has_cleanup_delete_evidence(self.evidence):
+                raise ValueError("删除能力缺少匹配的文件删除证据契约")
 
 
 class DriverRegistry:
@@ -78,6 +94,7 @@ _DECLARATION_MEMBERS: Mapping[str, str] = {
     "control": "control_supported",
     "stop": "stop_supported",
     "query": "query_supported",
+    "file_query": "file_query_supported",
     "result": "result_supported",
     "read": "read_supported",
     "digest": "digest_supported",
@@ -92,6 +109,23 @@ class UnknownOperationError(ValueError):
 
 class CapabilityNotDeclaredError(Exception):
     """驱动静态声明不支持该操作；消费者不得调用对应端口。"""
+
+
+def _has_cleanup_delete_evidence(evidence: EvidenceRegistry) -> bool:
+    """确认完整删除能力至少登记一种正式删除结果观察。"""
+    expected = (
+        ("file_absent", frozenset({"cleanup_item_id"})),
+        ("file_delete_presence", frozenset({"cleanup_item_id", "present"})),
+    )
+    for type_, fields in expected:
+        try:
+            contract = evidence.contract(type_, 1)
+        except ValueError:
+            continue
+        if (contract.operation == "delete" and contract.fields == fields
+                and contract.identity_field == "cleanup_item_id"):
+            return True
+    return False
 
 
 def port_for(entry: DriverEntry, operation: str) -> Any:

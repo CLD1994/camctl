@@ -85,7 +85,7 @@ class DriverDouble:
         return DeviceCallResult(
             observations=observations, error=self.delete_error)
 
-    async def query_state(self, request) -> DeviceCallResult:
+    async def query_file(self, request) -> DeviceCallResult:
         self.query_calls += 1
         observations = ()
         if self.present is not None:
@@ -113,7 +113,7 @@ class GatedDriver:
         # 返回无观察成功：删除效果未知。
         return DeviceCallResult(observations=(), error=None)
 
-    async def query_state(self, request) -> DeviceCallResult:
+    async def query_file(self, request) -> DeviceCallResult:
         self.query_calls += 1
         return DeviceCallResult(observations=(), error=object())
 

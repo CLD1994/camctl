@@ -11,7 +11,8 @@ from camctl.capture.recovery import recovery_registry
 
 
 def _declaration():
-    return DriverDeclaration(True, True, True, True, False, False, True)
+    return DriverDeclaration(True, True, True, True, False, False, True,
+                             file_query_supported=True)
 
 
 def test_omitted_recovery_declaration_does_not_authorize_any_operation():

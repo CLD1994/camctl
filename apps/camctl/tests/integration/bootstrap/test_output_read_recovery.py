@@ -20,7 +20,7 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.session.work import classify_work
 
-from .test_output_binding_changes import _NOW, _changed, _registry, environment
+from .test_output_binding_changes import _NOW, _changed, _read_registry as _registry, environment
 from .test_output_binding_transactions import pending_read
 
 pytestmark = pytest.mark.asyncio

@@ -146,6 +146,19 @@ class AdbCameraDriver:
         serial = self._request(request, "query")
         return DeviceCallResult.from_outcome(await self._invoke(request, CameraCall.QUERY, serial))
 
+    async def query_file(self, request):
+        """按原文件身份执行 FILE_QUERY，底层 QUERY 票据与状态查询一致。"""
+        serial = self._request(request, "query")
+        identity = FileIdentity.from_source(
+            request.params["identity_key"], request.params["locator"])
+        if identity.binding != request.binding:
+            raise ValueError("文件查询定位改变原设备绑定")
+        if not self.declaration.file_query_supported:
+            raise CapabilityNotDeclaredError("相机未声明独立文件查询契约")
+        self._filesystem(request.binding)
+        return DeviceCallResult.from_outcome(
+            await self._invoke(request, CameraCall.FILE_QUERY, serial))
+
     def _filesystem(self, binding):
         serial = self._serial(binding)
         if self.contract.file_tools is None:

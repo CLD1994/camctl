@@ -385,11 +385,11 @@ class CancelCleanupItem:
 
 
 class DeleteDriverPort:
-    """设备删除与查询调用端口；契约替身与真实驱动同形。"""
+    """设备删除与独立文件查询端口；契约替身与真实驱动同形。"""
 
     async def delete(self, request) -> object: ...
 
-    async def query_state(self, request) -> object: ...
+    async def query_file(self, request) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -402,11 +402,11 @@ class LocalArtifactRequest:
 
 
 class HostArtifactPort:
-    """主机派生成品的本地删除与查询端口；观察与设备调用同形。"""
+    """主机派生成品的本地删除与文件查询端口；观察与设备调用同形。"""
 
     async def delete(self, request: LocalArtifactRequest) -> object: ...
 
-    async def query_state(self, request: LocalArtifactRequest) -> object: ...
+    async def query_file(self, request: LocalArtifactRequest) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -1507,9 +1507,9 @@ async def _call_query(runtime: CleanupRuntime, item_id: int, ticket):
         path = _host_target(runtime.owned.connection, item_id)
         if path is None or runtime.local_files is None:
             raise ConsistencyError(f"清理成员缺少可调用目标: {item_id}")
-        return await runtime.local_files.query_state(LocalArtifactRequest(
+        return await runtime.local_files.query_file(LocalArtifactRequest(
             operation="query", cleanup_item_id=item_id, path=path))
-    return await runtime.driver.query_state(
+    return await runtime.driver.query_file(
         _control_request(runtime, item_id, "query", ticket))
 
 

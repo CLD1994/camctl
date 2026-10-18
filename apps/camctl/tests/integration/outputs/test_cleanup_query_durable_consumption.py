@@ -72,10 +72,10 @@ class _OnlyNewQuery(_MatrixDriver):
     async def delete(self, request):
         raise AssertionError("持久化 QUERY 的恢复又派发了 DELETE")
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         if not self.allow_query:
             raise AssertionError("原 QUERY 本地交接或间隔等待又查询了设备")
-        return await super().query_state(request)
+        return await super().query_file(request)
 
 
 class _QueryIntentCommitFault(OutputsRepository):

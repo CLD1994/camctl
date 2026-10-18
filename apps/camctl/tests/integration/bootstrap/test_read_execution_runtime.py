@@ -20,7 +20,7 @@ from ..capture.test_input_copy import _CONTENT as _MEDIA_CONTENT, pipeline
 from ..capture.test_media_flow import ProbeTools
 from camctl.host_files.media import MediaProbe
 from .test_output_binding_changes import (
-    _CONTENT, _NOW, _accept, _registry, _save_photos, environment)
+    _CONTENT, _NOW, _accept, _read_registry as _registry, _save_photos, environment)
 from .test_obtain_flow import _MemoryStream
 from .test_output_binding_transactions import pending_read
 from .test_output_read_recovery import _start_unended_read

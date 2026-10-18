@@ -211,7 +211,7 @@ def fresh_closed_runtime(owned, world, binding):
                ports[4].open_read, ports[5].digest, ports[6].delete)
     for method in methods:
         method.side_effect = AssertionError("CLOSED 本地收尾不得发出新的设备调用")
-    declaration = DriverDeclaration(True, True, True, True, True, True, True)
+    declaration = DriverDeclaration(True, True, True, True, True, True, False)
     driver = SimpleNamespace(declaration=declaration, control=methods[0], stop=methods[1],
         query_state=methods[2], list_results=methods[3], open_read=methods[4],
         digest=methods[5], delete=methods[6])

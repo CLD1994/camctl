@@ -21,7 +21,8 @@ _BINDING = DeviceBinding("cam-1", "driver-1")
 _TICKET = AttemptTicket(1, "control", "12", "start/12", 1)
 _RETURNED = EvidenceContract("operation_returned", 1, "control", frozenset())
 _ASSUMPTION = EvidenceContract("adb_foreground_assumption", 1, "control", frozenset({"terminate_grace_s"}))
-_DECLARATION = DriverDeclaration(True, True, True, True, False, False, True)
+_DECLARATION = DriverDeclaration(True, True, True, True, False, False, True,
+                                 file_query_supported=True)
 
 
 def _outcome():

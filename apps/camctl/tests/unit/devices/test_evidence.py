@@ -33,6 +33,7 @@ def _declaration(**overrides: bool) -> DriverDeclaration:
         "read_supported": True,
         "digest_supported": True,
         "delete_supported": True,
+        "file_query_supported": True,
     }
     values.update(overrides)
     return DriverDeclaration(**values)

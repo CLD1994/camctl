@@ -113,6 +113,7 @@ DECLARATION = DriverDeclaration(
     read_supported=True,
     digest_supported=True,
     delete_supported=True,
+    file_query_supported=True,
 )
 
 

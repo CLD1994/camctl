@@ -1,6 +1,6 @@
 """清理推进运行时的会话级装配。
 
-按设备声明与登记驱动解析删除与查询协作者，每个清理成员使用原
+按设备声明与登记驱动解析删除与文件查询协作者，每个清理成员使用原
 文件观察者保存的设备身份和驱动。删除与查询的尝试上限取自 cleanup
 配置，调用时限与重试间隔取自对应设备的 devices.<id>.cleanup.*。
 主机派生成品经 staging 工作根的本地删除协作者清理，独立于设备
@@ -80,7 +80,7 @@ class HostArtifacts(HostArtifactPort):
                 data={"cleanup_item_id": str(request.cleanup_item_id)}),),
             error=None)
 
-    async def query_state(
+    async def query_file(
             self, request: LocalArtifactRequest) -> DeviceCallResult:
         target = self._staging / request.path
         try:
@@ -147,7 +147,7 @@ def session_cleanup_assembly(
                     raise DeviceConfigurationError(f"本次设备驱动未登记: {device_id} driver={driver_id!r}")
                 try:
                     port_for(entry, "delete")
-                    port_for(entry, "query")
+                    port_for(entry, "file_query")
                 except CapabilityNotDeclaredError:
                     continue
                 assembled[device_id] = (
@@ -197,8 +197,8 @@ def session_cleanup_assembly(
                     raise DeviceConfigurationError(f"原清理驱动未登记: {binding.driver_id}")
                 if not entry.declaration.delete_supported:
                     return replace(base, delete_supported=False)
-                # 删除能力存在但恢复查询端口缺失是装配前提错误，不能伪装成无删除能力。
-                port_for(entry, "query")
+                # 删除能力存在但独立文件查询端口缺失是装配前提错误。
+                port_for(entry, "file_query")
                 raise DeviceConfigurationError(f"清理协作者未装配: {binding.device_id}")
             entry, delete_config, query_config = assembly
             return replace(base, driver=entry.driver, evidence=entry.evidence,

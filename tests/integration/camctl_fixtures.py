@@ -593,19 +593,23 @@ class _ScriptedStubDriver:
         from camctl.devices.evidence import DeviceObservation
         from camctl.devices.ports import DeviceCallResult
 
-        if "cleanup_item_id" not in request.params:
-            # 活动状态查询（对账核实等）：报告设备当前执行中的活动，
-            # 与停止目标对齐；无执行中活动时按剧本身份回退。
-            identity = (self._running_activity_identity(request)
-                        or str(self._spec.get("activity_identity", "1")))
-            self.calls.append(("query-activity", identity))
-            return DeviceCallResult(
-                observations=(DeviceObservation(
-                    type="activity_status", version=1,
-                    data={"activity_id": identity}),),
-                error=None)
+        # 活动状态查询（对账核实等）：报告设备当前执行中的活动，
+        # 与停止目标对齐；无执行中活动时按剧本身份回退。
+        identity = (self._running_activity_identity(request)
+                    or str(self._spec.get("activity_identity", "1")))
+        self.calls.append(("query-activity", identity))
+        return DeviceCallResult(
+            observations=(DeviceObservation(
+                type="activity_status", version=1,
+                data={"activity_id": identity}),),
+            error=None)
+
+    async def query_file(self, request) -> object:
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.devices.ports import DeviceCallResult
+
         item_id = request.params["cleanup_item_id"]
-        self.calls.append(("query", item_id))
+        self.calls.append(("file-query", item_id))
         identity = json.loads(request.params["identity_key"])[-1]
         present = identity in self._spec["device_files"]
         return DeviceCallResult(
@@ -647,6 +651,7 @@ def _stub_driver_declaration():
         read_supported=True,
         digest_supported=True,
         delete_supported=True,
+        file_query_supported=True,
     )
 
 

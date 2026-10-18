@@ -160,6 +160,9 @@ class _CleanupDriver:
                    else {"code": "device_error", "stage": "delete"}))
 
     async def query_state(self, request) -> DeviceCallResult:
+        raise AssertionError("清理文件查询不得回退到拍摄状态查询")
+
+    async def query_file(self, request) -> DeviceCallResult:
         self.query_calls.append(dict(request.params))
         kind, error = self._next(self._query_results)
         observations = ()
@@ -219,11 +222,12 @@ def _registry(driver: _CleanupDriver) -> DriverRegistry:
             declaration=DriverDeclaration(
                 control_supported=True,
                 stop_supported=False,
-                query_supported=True,
+                query_supported=False,
                 result_supported=False,
                 read_supported=False,
                 digest_supported=False,
                 delete_supported=True,
+                file_query_supported=True,
             ),
             evidence=_EVIDENCE,
             status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED,
@@ -697,6 +701,9 @@ class _LocalArtifacts(HostArtifactPort):
                    else {"code": "local_io_failed", "stage": "delete"}))
 
     async def query_state(self, request: LocalArtifactRequest) -> DeviceCallResult:
+        raise AssertionError("主机清理文件查询必须使用 query_file")
+
+    async def query_file(self, request: LocalArtifactRequest) -> DeviceCallResult:
         self.query_calls.append(request)
         kind, error = self._next(self._query_results)
         observations = ()

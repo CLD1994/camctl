@@ -20,7 +20,7 @@ from camctl.devices.evidence import (
     EvidenceContract,
     EvidenceRegistry,
 )
-from camctl.devices.ports import DeviceCallResult, StateQueryDriver
+from camctl.devices.ports import DeviceCallResult, FileQueryDriver
 from camctl.operations.attempts import (
     AttemptConfig,
     AttemptFinish,
@@ -157,8 +157,8 @@ def _runtime(
     )
     operations = create_autospec(OperationRepository, instance=True)
     operations.finish_attempt.return_value = saved
-    driver = create_autospec(StateQueryDriver, instance=True)
-    driver.query_state.return_value = actual
+    driver = create_autospec(FileQueryDriver, instance=True)
+    driver.query_file.return_value = actual
     return CleanupRuntime(
         owned=owned,
         outputs=create_autospec(OutputsRepository, instance=True),
@@ -247,7 +247,7 @@ async def test_ticket_for_another_member_cannot_deliver_query_observation(ticket
     with pytest.raises(ConsistencyError):
         await _run_query(runtime, ticket, _ITEM_ID)
 
-    runtime.driver.query_state.assert_not_awaited()
+    runtime.driver.query_file.assert_not_awaited()
     runtime.operations.finish_attempt.assert_not_called()
 
 
@@ -305,8 +305,8 @@ async def test_retry_saves_original_prepared_result_without_querying_again(prese
     assert second_finish.outcome.outcome is actual.outcome
     assert second_finish.occurred_at == _RETURNED_AT
     assert owned is runtime.owned
-    first_driver.query_state.assert_awaited_once()
-    changed.driver.query_state.assert_not_awaited()
+    first_driver.query_file.assert_awaited_once()
+    changed.driver.query_file.assert_not_awaited()
 
 
 @pytest.mark.parametrize("present", _OBSERVATIONS)
@@ -338,7 +338,7 @@ async def test_second_save_failure_keeps_original_result_for_later_redelivery(pr
     assert all(key == first_key for key in keys)
     assert first_finish.outcome.outcome is actual.outcome
     assert first_finish.occurred_at == _RETURNED_AT
-    runtime.driver.query_state.assert_awaited_once()
+    runtime.driver.query_file.assert_awaited_once()
 
 
 @pytest.mark.parametrize("present", _OBSERVATIONS)
@@ -361,7 +361,7 @@ async def test_pending_result_is_not_saved_into_another_database_instance(presen
         await _run_query(runtime, _TICKET, _ITEM_ID)
 
     assert runtime.operations.finish_attempt.call_count == 1
-    runtime.driver.query_state.assert_awaited_once()
+    runtime.driver.query_file.assert_awaited_once()
     runtime.owned = original_owned
     assert await _run_query(runtime, _TICKET, _ITEM_ID) is present
     restored_finish, restored_key, owned = runtime.operations.finish_attempt.call_args.args
@@ -369,7 +369,7 @@ async def test_pending_result_is_not_saved_into_another_database_instance(presen
     assert restored_key == first_key
     assert restored_finish.outcome.outcome is actual.outcome
     assert owned is original_owned
-    runtime.driver.query_state.assert_awaited_once()
+    runtime.driver.query_file.assert_awaited_once()
 
 
 async def test_validation_failure_retains_original_diagnostic_without_querying_again():
@@ -396,8 +396,8 @@ async def test_validation_failure_retains_original_diagnostic_without_querying_a
         await _run_query(runtime, _TICKET, _ITEM_ID)
 
     assert repeated_error.value is first_error.value
-    first_driver.query_state.assert_awaited_once()
-    changed.driver.query_state.assert_not_awaited()
+    first_driver.query_file.assert_awaited_once()
+    changed.driver.query_file.assert_not_awaited()
     runtime.operations.finish_attempt.assert_not_called()
 
 
@@ -463,7 +463,7 @@ async def test_invalid_observation_structure_keeps_original_query_diagnostic(obs
         with pytest.raises(OutcomeValidationError):
             await _run_query(runtime, _TICKET, _ITEM_ID)
 
-    runtime.driver.query_state.assert_awaited_once()
+    runtime.driver.query_file.assert_awaited_once()
     runtime.operations.finish_attempt.assert_not_called()
 
 

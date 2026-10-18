@@ -114,7 +114,7 @@ class _CleanupDriver:
                 data={"cleanup_item_id": str(self._item_id)}),),
             error=None)
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         from camctl.devices.evidence import DeviceObservation
         from camctl.devices.ports import DeviceCallResult
         return DeviceCallResult(

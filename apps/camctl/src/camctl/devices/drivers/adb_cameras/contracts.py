@@ -25,6 +25,7 @@ class CameraCall(StrEnum):
     STOP = "stop"
     RESULT = "result"
     QUERY = "query"
+    FILE_QUERY = "file_query"
     DELETE = "delete"
 
 
@@ -59,19 +60,47 @@ class CameraContract:
         except EvidenceError:
             return False
 
+    def _has_evidence_shape(self, type_, version, operation, fields, identity_field):
+        try:
+            contract = self.evidence.contract(type_, version)
+        except EvidenceError:
+            return False
+        return (contract.operation == operation and contract.fields == fields
+                and contract.identity_field == identity_field)
+
     @property
     def declaration(self):
         files = self.file_tools is not None
+        query_recovery = ("query" in self.recovery_operations
+            and self._has_evidence_shape("query_returned", 1, "query", frozenset(), None)
+            and self._has_evidence_shape("query_foreground_recovery", 1, "query",
+                                         frozenset({"terminate_grace_s"}), None))
+        file_query_supported = (files and callable(self.commands.get(CameraCall.FILE_QUERY))
+            and query_recovery and self._has_evidence_shape(
+                "file_presence", 1, "query",
+                frozenset({"cleanup_item_id", "present"}), "cleanup_item_id"))
+        delete_observation_supported = (
+            self._has_evidence_shape("file_absent", 1, "delete",
+                frozenset({"cleanup_item_id"}), "cleanup_item_id")
+            or self._has_evidence_shape("file_delete_presence", 1, "delete",
+                frozenset({"cleanup_item_id", "present"}), "cleanup_item_id"))
+        delete_supported = (files and callable(self.commands.get(CameraCall.DELETE))
+            and file_query_supported and "delete" in self.recovery_operations
+            and self._has_evidence_shape("delete_returned", 1, "delete", frozenset(), None)
+            and self._has_evidence_shape("delete_foreground_recovery", 1, "delete",
+                                         frozenset({"terminate_grace_s"}), None)
+            and delete_observation_supported)
         return DriverDeclaration(
             control_supported=(all(callable(self.commands.get(kind)) for kind in (CameraCall.SETTING, CameraCall.START))
                                and self._has_evidence("dispatch_prevented", 1, "control")),
             stop_supported=callable(self.commands.get(CameraCall.STOP)),
             query_supported=callable(self.commands.get(CameraCall.QUERY)),
+            file_query_supported=file_query_supported,
             result_supported=((callable(self.commands.get(CameraCall.RESULT)) or callable(self.result_reader))
                               and self._has_evidence("result_files_listed", 2, "result")),
             read_supported=files, digest_supported=(files and callable(self.digest_timeout_s)
                                                     and self._has_evidence("file_digest", 1, "digest")),
-            delete_supported=files and callable(self.commands.get(CameraCall.DELETE)),
+            delete_supported=delete_supported,
             directory_supported=files,
             capture_read_parallel_supported=self.capture_read_parallel_supported,
             adb_foreground_recovery_operations=self.recovery_operations)

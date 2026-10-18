@@ -26,10 +26,10 @@ class _FirstQueryTakesFiveSeconds(DriverDouble):
         super().__init__(absent=False, present=True)
         self.clock = clock
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         if self.query_calls == 0:
             self.clock.advance_s(Decimal("5"))
-        return await super().query_state(request)
+        return await super().query_file(request)
 
 
 def _history(owned):

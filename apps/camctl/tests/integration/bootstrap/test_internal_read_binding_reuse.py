@@ -21,7 +21,7 @@ from camctl.persistence.transaction import TransactionError
 
 from ..capture.test_capture_contract import ResultsDouble
 from ..cancellation.test_report_sync_lifecycle import _fault_owned
-from .test_output_binding_changes import _NOW, _registry
+from .test_output_binding_changes import _NOW, _read_registry as _registry
 from .test_output_read_recovery import _start_unended_read
 from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _real_recording_media_flow
 

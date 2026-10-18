@@ -95,6 +95,9 @@ class Driver:
             data={"cleanup_item_id": request.params["cleanup_item_id"]}),), None)
 
     async def query_state(self, request):
+        raise AssertionError("清理文件查询不得调用拍摄状态查询")
+
+    async def query_file(self, request):
         self.query_requests.append(request)
         self.queries.append(request.binding)
         if self.unknown_query:
@@ -116,9 +119,21 @@ class _BrokenStream(_MemoryStream):
 
 def _registry(driver):
     declaration = DriverDeclaration(
-        control_supported=True, stop_supported=False, query_supported=True,
+        control_supported=True, stop_supported=False, query_supported=False,
         result_supported=False, read_supported=True, digest_supported=False,
-        delete_supported=True)
+        delete_supported=True, file_query_supported=True)
+    return DriverRegistry(tuple(DriverEntry(
+        driver_id=driver_id, driver=driver, declaration=declaration, evidence=_EVIDENCE,
+        status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+        for driver_id in ("camctl-adb", "alternate-camera")))
+
+
+def _read_registry(driver):
+    """只提供读取端口的替身不继承设备文件清理能力。"""
+    declaration = DriverDeclaration(
+        control_supported=False, stop_supported=False, query_supported=False,
+        result_supported=False, read_supported=True, digest_supported=False,
+        delete_supported=False, file_query_supported=False)
     return DriverRegistry(tuple(DriverEntry(
         driver_id=driver_id, driver=driver, declaration=declaration, evidence=_EVIDENCE,
         status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED)

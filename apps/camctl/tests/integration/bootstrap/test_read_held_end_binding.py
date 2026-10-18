@@ -22,7 +22,7 @@ from camctl.outputs.obtain_flow import advance_obtain
 
 from ..capture.test_capture_contract import ResultsDouble
 from .test_media_assembly import _SessionDriver, _EVIDENCE
-from .test_output_binding_changes import _CONTENT, _NOW, _registry, environment
+from .test_output_binding_changes import _CONTENT, _NOW, _read_registry as _registry, environment
 from .test_output_binding_transactions import pending_read
 from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow
 

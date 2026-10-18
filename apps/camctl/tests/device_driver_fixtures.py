@@ -6,8 +6,14 @@ from camctl.devices.ports import DriverDeclaration
 from camctl.devices.tasks import CaptureStorage
 
 
-def synthetic_driver_declaration(*, delete_supported: bool = False) -> DriverDeclaration:
+def synthetic_driver_declaration(
+    *,
+    delete_supported: bool = False,
+    file_query_supported: bool | None = None,
+) -> DriverDeclaration:
     """构造参数显式、其余能力均不支持的测试驱动声明。"""
+    if file_query_supported is None:
+        file_query_supported = delete_supported
     return DriverDeclaration(
         control_supported=False,
         stop_supported=False,
@@ -16,6 +22,7 @@ def synthetic_driver_declaration(*, delete_supported: bool = False) -> DriverDec
         read_supported=False,
         digest_supported=False,
         delete_supported=delete_supported,
+        file_query_supported=file_query_supported,
     )
 
 

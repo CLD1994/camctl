@@ -158,7 +158,7 @@ async def test_actual_obtain_binding_child_unknown_reopens_same_factory_with_ori
     from camctl.devices.drivers.registry import DriverRegistry
     from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
     from camctl.outputs.obtain_flow import advance_obtain
-    from .test_output_binding_changes import _registry
+    from .test_output_binding_changes import _read_registry as _registry
     from .test_output_read_recovery import _start_unended_read
     from .test_read_execution_runtime import ReadRequests, _CONTENT
 

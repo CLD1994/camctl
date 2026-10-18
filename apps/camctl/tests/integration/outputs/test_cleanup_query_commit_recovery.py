@@ -120,7 +120,7 @@ class _CommitQueryPort(OperationRepository):
 class _NoNewCalls:
     """新配置的驱动不参与解释、替换或重新获取旧实际结果。"""
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         raise AssertionError("原结果恢复不得再次查询设备")
 
     async def delete(self, request):

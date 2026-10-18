@@ -328,8 +328,8 @@ class _CancelAfterQueryDriver(_MatrixDriver):
         super().__init__(owned)
         self.on_query_return = None
 
-    async def query_state(self, request):
-        result = await super().query_state(request)
+    async def query_file(self, request):
+        result = await super().query_file(request)
         if self.on_query_return is not None:
             callback, self.on_query_return = self.on_query_return, None
             callback()

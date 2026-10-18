@@ -70,7 +70,7 @@ class _NoDeviceCalls(DeleteDriverPort):
     async def delete(self, request):
         raise AssertionError("原 QUERY 的本地消费重新派发了 DELETE")
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         raise AssertionError("原 QUERY 的本地消费重新派发了 QUERY")
 
 

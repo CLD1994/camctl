@@ -122,6 +122,9 @@ class ContractDriver:
     async def query_state(self, request: ControlRequest) -> DeviceCallResult:
         return self._respond("query")
 
+    async def query_file(self, request: ControlRequest) -> DeviceCallResult:
+        return self._respond("file_query")
+
     async def list_results(
         self, request: ControlRequest, batch: int
     ) -> DeviceCallResult:
@@ -165,6 +168,7 @@ def _full_declaration() -> DriverDeclaration:
         read_supported=True,
         digest_supported=True,
         delete_supported=True,
+        file_query_supported=True,
     )
 
 
@@ -208,6 +212,8 @@ async def _invoke(port, operation: str) -> DeviceCallResult:
         return await port.delete(_request())
     if operation == "query":
         return await port.query_state(_request())
+    if operation == "file_query":
+        return await port.query_file(_request())
     raise AssertionError(f"测试未安排该操作的调用: {operation}")
 
 
@@ -231,7 +237,7 @@ async def test_driver_declared_evidence_matches_consumers() -> None:
                 observations=(_observation(DELETION_CONFIRMED, "3"),),
                 error=None,
             ),
-            "query": DeviceCallResult(
+            "file_query": DeviceCallResult(
                 observations=(
                     _observation(EXISTENCE_OBSERVED, "3", present=False),
                 ),
@@ -257,7 +263,8 @@ async def test_driver_declared_evidence_matches_consumers() -> None:
     accepted: dict[str, ContractFacts] = {}
     for name, consumer in cases.items():
         observation, target = observations[name]
-        result = await _invoke(port_for(entry, consumer.operation), consumer.operation)
+        operation = "file_query" if name == "X8-query" else consumer.operation
+        result = await _invoke(port_for(entry, operation), operation)
         assert result.observations == (observation,)
         accepted[name] = consumer.accept(result.observations[0], target)
 
@@ -313,6 +320,7 @@ async def test_unsupported_capability_is_not_callable() -> None:
         read_supported=False,
         digest_supported=True,
         delete_supported=True,
+        file_query_supported=True,
     )
     driver = ContractDriver("partial-double", declaration)
     entry = _entry(driver)
@@ -321,6 +329,109 @@ async def test_unsupported_capability_is_not_callable() -> None:
     with pytest.raises(CapabilityNotDeclaredError):
         port_for(entry, "read")
     assert driver.calls == []
+
+
+async def test_file_query_is_independent_from_capture_state_query() -> None:
+    """清理文件查询可用时，不会因此开放拍摄状态查询。"""
+    declaration = DriverDeclaration(
+        control_supported=False,
+        stop_supported=False,
+        query_supported=False,
+        result_supported=False,
+        read_supported=False,
+        digest_supported=False,
+        delete_supported=False,
+        file_query_supported=True,
+    )
+    observation = _observation(EXISTENCE_OBSERVED, "3", present=False)
+    driver = ContractDriver("file-query-only", declaration, {
+        "file_query": DeviceCallResult((observation,), None),
+    })
+    entry = _entry(driver)
+
+    with pytest.raises(CapabilityNotDeclaredError):
+        port_for(entry, "query")
+    result = await _invoke(port_for(entry, "file_query"), "file_query")
+
+    assert result.observations == (observation,)
+    assert driver.calls == ["file_query"]
+
+
+async def test_delete_declaration_requires_file_query_capability() -> None:
+    """完整设备删除能力必须同时声明独立文件查询。"""
+    with pytest.raises(ValueError, match="删除.*文件查询"):
+        DriverDeclaration(
+            control_supported=False,
+            stop_supported=False,
+            query_supported=False,
+            result_supported=False,
+            read_supported=False,
+            digest_supported=False,
+            delete_supported=True,
+            file_query_supported=False,
+        )
+
+
+async def test_registry_rejects_file_query_without_port() -> None:
+    """运行登记不能接受缺失 query_file 实现的文件查询能力。"""
+    declaration = DriverDeclaration(
+        control_supported=False,
+        stop_supported=False,
+        query_supported=False,
+        result_supported=False,
+        read_supported=False,
+        digest_supported=False,
+        delete_supported=False,
+        file_query_supported=True,
+    )
+    with pytest.raises(ValueError, match="query_file"):
+        DriverEntry("missing-file-query-port", object(), declaration, _CONTRACTS,
+                    DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+
+
+async def test_registry_rejects_file_query_with_incomplete_observation_shape() -> None:
+    """文件查询登记必须匹配清理框架消费的完整观察结构。"""
+    declaration = DriverDeclaration(
+        control_supported=False,
+        stop_supported=False,
+        query_supported=False,
+        result_supported=False,
+        read_supported=False,
+        digest_supported=False,
+        delete_supported=False,
+        file_query_supported=True,
+    )
+    evidence = EvidenceRegistry((EvidenceContract(
+        type="file_presence", version=1, operation="query",
+        fields=frozenset({"cleanup_item_id"}), identity_field="cleanup_item_id"),))
+    driver = ContractDriver("incomplete-file-presence", declaration)
+
+    with pytest.raises(ValueError, match="file_presence/v1"):
+        DriverEntry("incomplete-file-presence", driver, declaration, evidence,
+                    DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+
+
+async def test_registry_rejects_delete_without_port() -> None:
+    """完整删除声明必须提供 delete 端口。"""
+    class QueryOnlyDriver:
+        async def query_file(self, request):
+            return DeviceCallResult((), None)
+
+    declaration = _full_declaration()
+    with pytest.raises(ValueError, match="delete 端口"):
+        DriverEntry("missing-delete-port", QueryOnlyDriver(), declaration, _CONTRACTS,
+                    DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+
+
+async def test_registry_rejects_delete_without_registered_observation() -> None:
+    """完整删除声明必须登记框架认可的缺席观察。"""
+    declaration = _full_declaration()
+    driver = ContractDriver("missing-delete-observation", declaration)
+
+    with pytest.raises(ValueError, match="文件删除证据契约"):
+        DriverEntry("missing-delete-observation", driver, declaration,
+                    EvidenceRegistry((EXISTENCE_OBSERVED,)),
+                    DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
 
 
 async def test_call_failure_is_not_missing_capability() -> None:

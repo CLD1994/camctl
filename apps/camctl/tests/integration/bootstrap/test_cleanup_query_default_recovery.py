@@ -57,10 +57,10 @@ class _DefaultDriver(_MatrixDriver):
             raise AssertionError("原 QUERY 恢复轮次不得发起新的 DELETE")
         return await super().delete(request)
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         if self.reject_new_calls:
             raise AssertionError("原 QUERY 恢复轮次不得重新查询设备")
-        return await super().query_state(request)
+        return await super().query_file(request)
 
 
 class _DefaultQueryFault:
@@ -350,10 +350,10 @@ class _GatedQueryDriver(_DefaultDriver):
         self.dispatched = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         if self.reject_new_calls:
             raise AssertionError("原 QUERY 在途期间不得重新查询设备")
-        result = await super().query_state(request)
+        result = await super().query_file(request)
         self.dispatched.set()
         await self.release.wait()
         return result
@@ -434,9 +434,9 @@ class _LocalProbe(HostArtifacts):
                 observations=(), error={"code": "local_io_failed", "stage": "delete"})
         return await super().delete(request)
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         self.query_calls.append(request)
-        return await super().query_state(request)
+        return await super().query_file(request)
 
 
 async def test_host_artifact_query_recovers_after_save_fault(

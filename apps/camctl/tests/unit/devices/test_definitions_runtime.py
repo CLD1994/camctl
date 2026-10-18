@@ -105,7 +105,7 @@ def test_conflicting_runtime_declaration_rejects_definition_batch_before_write()
     preserved_definition = _entry("preserved")
     register_driver_definitions(preserved_definition)
     runtime_declaration = synthetic_driver_declaration()
-    conflicting_declaration = replace(runtime_declaration, delete_supported=True)
+    conflicting_declaration = replace(runtime_declaration, read_supported=True)
     register_drivers(_runtime_entry("deployed-b", runtime_declaration))
 
     with pytest.raises(ValueError, match="声明冲突"):
@@ -122,7 +122,7 @@ def test_conflicting_static_declaration_rejects_runtime_batch_before_write():
     from camctl.devices.drivers.runtime import current_registry, register_drivers
 
     static_declaration = synthetic_driver_declaration()
-    conflicting_declaration = replace(static_declaration, delete_supported=True)
+    conflicting_declaration = replace(static_declaration, read_supported=True)
     register_driver_definitions(_entry("deployed-b"))
     preserved_entry = _runtime_entry("preserved", static_declaration)
     register_drivers(preserved_entry)

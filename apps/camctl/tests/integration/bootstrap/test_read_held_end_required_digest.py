@@ -30,7 +30,7 @@ from ..cancellation.test_report_sync_lifecycle import _fault_owned
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from ..capture.test_media_flow import ProbeTools
 from .test_media_assembly import _EVIDENCE, _SessionDriver
-from .test_output_binding_changes import _CONTENT, _NOW, _registry, environment
+from .test_output_binding_changes import _CONTENT, _NOW, _read_registry as _registry, environment
 from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow
 from .test_read_failure_original_groups import prepared_without_attempt
 

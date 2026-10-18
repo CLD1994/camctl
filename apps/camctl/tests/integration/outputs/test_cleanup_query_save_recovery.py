@@ -93,9 +93,9 @@ class _MatrixDriver(Driver):
             callback()
         return result
 
-    async def query_state(self, request):
+    async def query_file(self, request):
         if not self.matrix_enabled:
-            return await super().query_state(request)
+            return await super().query_file(request)
         self.query_requests.append(request)
         self.queries.append(request.binding)
         observations = () if self.present is None else (DeviceObservation(

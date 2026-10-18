@@ -53,6 +53,10 @@ class ManagedDeviceDriver:
     async def query_state(self, request: ControlRequest) -> DeviceCallResult:
         return await self._call(request, "query")
 
+    async def query_file(self, request: ControlRequest) -> DeviceCallResult:
+        """执行文件存在性 QUERY；底层票据仍是已保存的 query 尝试。"""
+        return await self._call(request, "query")
+
     async def list_results(self, request: ControlRequest, batch: int) -> DeviceCallResult:
         return await self._call(request, "result", batch)
 
