@@ -156,10 +156,10 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 
 **接口建议：** 将 `deps.work_files.executor` 传给清理。内部本地请求携带保存的 intermediate_file_id、原票据及必要路径身份；按真实存储引用分流，不按 kind 或相机删除布尔值判断。本地端口提供完整实际 outcome。
 
-- [ ] **步骤 1：写可控线程任务失败测试。** stat／unlink 暂停期间其他动作与取消仍可推进；分别覆盖排队撤回、已开始后取消、unlink 成功但等待者取消。断言只有确认任务不会执行才保存未派发，已开始任务必须接回实际结果后再结束成员和释放归属。
-- [ ] **步骤 2：实施执行器接入。** 使用默认线程池及既有任务句柄，排队取消与已开始责任分开；不只用 `to_thread` 丢弃取消后的返回。保持路径边界与原文件身份校验，本地无应用层完成期限，尝试不填设备 timeout／间隔。
-- [ ] **步骤 3：验证预算和正式源。** 主机 original／preview／repaired 使用 R0 的正式清理预算，错误与可靠观察同时保存。设备 false 不影响主机项；Hasselblad 两种源模式、原图／预览的双向精确清理及修复成品均有用例。
-- [ ] **步骤 4：验证并提交。** 跑新 bootstrap 用例、integration/host_files、capture 的 `test_device_photo_flow.py`／`test_host_photo_storage.py` 及 outputs 精确清理用例，确认未改变内部临时文件与日志清理的专属生命周期。
+- [x] **步骤 1：写可控线程任务失败测试。** stat／unlink 暂停期间其他动作与取消仍可推进；分别覆盖排队撤回、已开始后取消、unlink 成功但等待者取消。断言只有确认任务不会执行才保存未派发，已开始任务必须接回实际结果后再结束成员和释放归属。
+- [x] **步骤 2：实施执行器接入。** 使用默认线程池及既有任务句柄，排队取消与已开始责任分开；不只用 `to_thread` 丢弃取消后的返回。保持路径边界与原文件身份校验，本地无应用层完成期限，尝试不填设备 timeout／间隔。
+- [x] **步骤 3：验证预算和正式源。** 主机 original／preview／repaired 使用 R0 的正式清理预算，错误与可靠观察同时保存。设备 false 不影响主机项；Hasselblad 两种源模式、原图／预览的双向精确清理及修复成品均有用例。
+- [x] **步骤 4：验证并提交。** 跑新 bootstrap 用例、integration/host_files、capture 的 `test_device_photo_flow.py`／`test_host_photo_storage.py` 及 outputs 精确清理用例，确认未改变内部临时文件与日志清理的专属生命周期。
 
 ### R5：在共用 ADB 适配层接入正式文件调用
 
