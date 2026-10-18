@@ -350,18 +350,64 @@ def read_file_input(last_ref, identity, owned, *, allow_missing=False):
     return entry, file_id
 
 
-def _legacy_source_entry(connection, ticket, identity, facts, activity):
+def _first_complete_event(connection, facts):
+    """原首次完成事件固定 proof 与大小，不采用发现条目的元信息。"""
+    with closing(connection.execute(
+            f"SELECT {','.join('e.' + column for column in _COLUMNS.split(','))}"
+            " FROM history_events e,json_each(e.body_json,'$.rows') r"
+            " WHERE e.event_type=? AND e.id>0"
+            " AND json_extract(r.value,'$.table')='device_files' AND json_extract(r.value,'$.id')=?"
+            " AND json_extract(r.value,'$.after.values.completion_state')=3"
+            " AND json_extract(r.value,'$.before.values.completion_state')<>3 ORDER BY e.id LIMIT 1",
+            (_FILE_EVENT['id'], facts['id']))) as reader:
+        row = reader.fetchone()
+    if row is None:
+        raise ConsistencyError('完整来源文件缺少首次可靠完成事件')
+    try:
+        event = decode_event_row(row)
+        name, branch, _ = validate_event_structure(event)
+        transaction = read_transaction_range(connection, event.transaction_id)
+        changes = [value for value in event.rows if value.table == 'device_files' and value.row_id == facts['id']]
+        if (name != 'DEVICE_FILE_OBSERVED' or branch != 'COMPLETE' or len(changes) != 1
+                or not transaction.first_event_id <= event.event_id <= transaction.last_event_id):
+            raise ValueError('首次完成不属于原完整文件事务')
+        change = changes[0]
+        if (not change.before.exists or change.before.values.get('completion_state') == 3
+                or change.after.values.get('completion_state') != 3
+                or not json_equal(change.after.values.get('completion_evidence_json'), facts['completion_evidence_json'])
+                or not json_equal(change.after.values.get('size_bytes'), facts['size_bytes'])):
+            raise ValueError('首次完成事件改变原可靠完成依据或固定大小')
+    except (KeyError, TypeError, ValueError, EventValidationError) as error:
+        raise ConsistencyError(f'完整来源的首次完成事件无效: {error}') from error
+    return event
+
+
+def _legacy_source_entry(connection, ticket, identity, facts, activity, *, completion_event=None):
     """按单文件读取原 v1 条目，不装载其他轮次的完整文件目录。"""
     from .capture import _ATTEMPT_RESULT_EVENT
 
     from .result_sources import ResultSourceKind, load_result_source
 
+    attempt_no = None
+    complete = facts['completion_state'] == 3
+    if complete:
+        completed = completion_event or _first_complete_event(connection, facts)
+        # 下一 I 之前必须已解决原文件子责任；R 可在 F 任一侧。
+        with closing(connection.execute(
+                'SELECT attempt_no,result_first_page_event_id,result_last_page_event_id FROM operation_attempts'
+                ' WHERE run_id=? AND intent_event_id<? ORDER BY intent_event_id DESC LIMIT 1',
+                (ticket.run_id, completed.event_id))) as reader:
+            owner = reader.fetchone()
+        if owner is None or owner[1] is not None or owner[2] is not None:
+            return None
+        attempt_no = owner[0]
+        load_result_source(connection, replace(ticket, attempt_id=attempt_no))
     # 原 v1 结果仍按原字段解释；只把匹配文件的条目交给 Python。
     with closing(connection.execute(
         "SELECT f.value,t.attempt_no,e.occurred_at FROM operation_attempts t JOIN history_events e ON e.id=t.result_event_id,"
         " json_each(t.result_json,'$.observations') o, json_each(o.value,'$.data.entries') f,"
         " json_each(e.body_json,'$.rows') r"
-        " WHERE t.run_id=? AND e.event_type=?"
+        " WHERE t.run_id=? AND e.event_type=? AND (? IS NULL OR t.attempt_no=?)"
         " AND json_extract(o.value,'$.type')=?"
         " AND json_extract(o.value,'$.version')=?"
         " AND json_extract(o.value,'$.data.activity_id')=?"
@@ -372,7 +418,7 @@ def _legacy_source_entry(connection, ticket, identity, facts, activity):
         " AND json_extract(r.value,'$.after.values.effect_state')=t.effect_state"
         " AND json(json_extract(r.value,'$.after.values.result_json'))=json(t.result_json)"
         " AND json(json_extract(r.value,'$.after.values.error_json')) IS json(t.error_json)"
-        " ORDER BY t.attempt_no", (ticket.run_id, _ATTEMPT_RESULT_EVENT,
+        " ORDER BY t.attempt_no", (ticket.run_id, _ATTEMPT_RESULT_EVENT, attempt_no, attempt_no,
             RESULT_LISTED_TYPE, RESULT_LISTED_VERSION, ticket.target_id, identity))) as reader:
         for row in reader:
             source = load_result_source(connection, replace(ticket, attempt_id=row[1]))
@@ -380,8 +426,11 @@ def _legacy_source_entry(connection, ticket, identity, facts, activity):
                     or source.kind in (ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED) and source.requires_file_wait):
                 continue
             entry = observed_file(parse_exact_json(row[0]))
-            if json_equal(entry.locator, facts["locator_json"]):
+            if (json_equal(entry.locator, facts["locator_json"])
+                    and (not complete or entry.complete and entry.size_bytes == facts['size_bytes'])):
                 return entry
+    if complete:
+        raise ConsistencyError('原完成尝试缺少同身份、定位及固定大小的完整 v1 条目')
     return None
 
 
@@ -389,6 +438,10 @@ def _legacy_source_entry(connection, ticket, identity, facts, activity):
 def _complete_source_entry(connection, ticket, identity, file_id, facts, activity):
     """无页引用的旧 v2 完成观察按原完整条目匹配；旧 v1 继续原契约。"""
     from .result_sources import ResultSourceKind, load_result_source
+    completed = _first_complete_event(connection, facts)
+    legacy = _legacy_source_entry(connection, ticket, identity, facts, activity, completion_event=completed)
+    if legacy is not None:
+        return legacy
     observation = facts["completion_evidence_json"].get("observation")
     with closing(connection.execute(
             "SELECT DISTINCT e.id FROM history_events e,"
@@ -407,9 +460,6 @@ def _complete_source_entry(connection, ticket, identity, file_id, facts, activit
                     or source.kind in (ResultSourceKind.UNCONFIRMED, ResultSourceKind.UNANCHORED) and source.requires_file_wait):
                 continue
             return entry
-    legacy = _legacy_source_entry(connection, ticket, identity, facts, activity)
-    if legacy is not None:
-        return legacy
     raise ConsistencyError("完整来源文件缺少与原完成观察一致的合格原条目")
 
 
@@ -461,6 +511,8 @@ def read_source_inputs(ticket, cursor, batch, owned):
         if not isinstance(ownership, dict) or not isinstance(ownership.get("observation"), dict):
             raise ConsistencyError("来源文件缺少可靠归属依据")
         complete = facts["completion_state"] == 3
+        if complete and (not entry.complete or entry.size_bytes != facts['size_bytes']):
+            raise ConsistencyError('完成元信息没有原完整条目及固定大小，不能升级发现观察')
         paired_id = facts["original_device_file_id"]
         if paired_id is not None:
             original = row_facts(owned.connection, "device_files", paired_id)
