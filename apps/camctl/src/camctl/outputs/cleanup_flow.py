@@ -910,9 +910,21 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
             "SELECT action_id,output_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone())
 
     # 新进程没有原内存返回，先恢复精确 DELETE 的完整持久结果。
-    from camctl.outputs.cleanup_results import saved_cleanup_delete
+    from camctl.outputs.cleanup_results import saved_cleanup_delete, saved_cleanup_query
+    from camctl.operations.models import SettlementBasis
     saved_delete = saved_cleanup_delete(runtime.owned.connection, item_id)
-    if saved_delete is not None and _delete_presence(saved_delete.actual, item_id) is False:
+    consumed = runtime.consumed_queries.get(item_id)
+    restore_delete = False
+    if saved_delete is not None:
+        if _delete_presence(saved_delete.actual, item_id) is False:
+            restore_delete = True
+        elif (saved_delete.actual.outcome.settlement.basis is not SettlementBasis.NOT_DISPATCHED
+                and _pending_query_for_item(runtime, item_id) is None
+                and saved_cleanup_query(runtime.owned.connection, item_id) is None):
+            identity = (runtime.owned.metadata.instance_id, item_id,
+                        saved_delete.ticket, saved_delete.key)
+            restore_delete = consumed is None or consumed.delete_identity != identity
+    if restore_delete:
         pending_delete = PendingCleanupDelete(runtime.owned.metadata.instance_id,
             item_id, saved_delete.ticket, saved_delete.actual, None,
             saved_delete.occurred_at, runtime.monotonic_ns(), saved_delete.key, saved=True)
@@ -1797,7 +1809,8 @@ def _restore_saved_query(runtime: CleanupRuntime, item_id: int) -> PendingCleanu
     identity = (saved.ticket.run_id, saved.ticket.attempt_id)
     database_id = runtime.owned.metadata.instance_id
     consumed = runtime.consumed_queries.get(item_id)
-    if consumed is not None and consumed.query_identity == (database_id, *identity):
+    if consumed is not None and consumed.query_identity == (
+            database_id, item_id, saved.ticket, saved.key):
         return None
     pending = PendingCleanupQuery(
         database_id, item_id,

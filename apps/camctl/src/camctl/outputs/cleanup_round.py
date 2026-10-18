@@ -5,7 +5,8 @@ from dataclasses import dataclass, replace
 
 @dataclass
 class CleanupConsumption:
-    query_identity: tuple[str, int, int] | None = None
+    delete_identity: tuple | None = None
+    query_identity: tuple | None = None
     result_identity: tuple | None = None
     round_token: object | None = None
 
@@ -13,18 +14,16 @@ class CleanupConsumption:
 def record_consumption(runtime, pending, *, query=False):
     """只由可靠消费成功点调用；原结果键唯一标识实际持久结果。"""
     record = runtime.consumed_queries.setdefault(pending.item_id, CleanupConsumption())
-    if query:
-        record.query_identity = (
-            pending.database_id,
-            pending.ticket.run_id,
-            pending.ticket.attempt_id,
-        )
     record.result_identity = (
         pending.database_id,
         pending.item_id,
         pending.ticket,
         pending.saved_key or pending.key,
     )
+    if query:
+        record.query_identity = record.result_identity
+    else:
+        record.delete_identity = record.result_identity
     record.round_token = runtime.round_token
 
 

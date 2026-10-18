@@ -739,3 +739,525 @@ async def test_default_round_rejects_isolated_dispatched_marker_without_owner(
     assert tuple(owned.connection.iterdump()) == before
     assert not driver.deletes and not driver.queries and not runtime.active_calls
     assert runtime.pending_intents[item_id].ticket == ticket
+
+
+async def _durable_delete_only(environment, present):
+    from camctl.contracts.values import new_operation_key
+    from camctl.devices.evidence import EvidenceContract, DeviceObservation
+    from camctl.operations.attempts import AttemptFinish
+    from camctl.operations.models import (
+        AttemptStatus,
+        CallOutcome,
+        EffectState,
+        EvidenceValue,
+        Settlement,
+        SettlementBasis,
+    )
+    from camctl.operations.validation import validate_outcome
+    from .test_cleanup_query_save_recovery import _MatrixDriver
+
+    owned, context, runtime, _, item_id = await _prepared(environment)
+    ticket = _intent(runtime, item_id, "delete")
+    observations = ()
+    if present is not None:
+        runtime.evidence = runtime.evidence.with_contract(
+            EvidenceContract(
+                "file_delete_presence",
+                1,
+                "delete",
+                frozenset({"cleanup_item_id", "present"}),
+                identity_field="cleanup_item_id",
+            )
+        )
+        observations = (
+            DeviceObservation(
+                "file_delete_presence",
+                1,
+                {"cleanup_item_id": str(item_id), "present": present},
+            ),
+        )
+    outcome = CallOutcome(
+        status=AttemptStatus.SUCCEEDED,
+        effect=EffectState.UNKNOWN if present is None else EffectState.CONFIRMED,
+        settlement=Settlement(
+            SettlementBasis.OBSERVED, EvidenceValue("delete_returned", 1, {})
+        ),
+        observations=observations,
+    )
+    key = new_operation_key()
+    saved = runtime.outputs.finish_cleanup_attempt(
+        AttemptFinish(
+            ticket,
+            validate_outcome(ticket, outcome, runtime.evidence),
+            _NOW,
+            retry_wait=True,
+        ),
+        key,
+        owned,
+    )
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    before = tuple(owned.connection.iterdump())
+    owned.connection.close()
+    fresh = context.open_connection()
+    driver = _MatrixDriver(fresh)
+    driver.matrix_enabled, driver.present = True, None
+    driver.unknown_delete = False
+    return fresh, driver, item_id, ticket, key, before
+
+
+@pytest.mark.parametrize("present", [None, True], ids=["unknown", "present"])
+@pytest.mark.parametrize("missing", [False, True], ids=["registered", "removed"])
+async def test_durable_delete_is_consumed_locally_before_any_current_port(
+    environment, monkeypatch, present, missing
+):
+    from camctl.bootstrap import cleanup_assembly
+
+    fresh, driver, item_id, ticket, key, before = await _durable_delete_only(
+        environment, present
+    )
+    ports = []
+    original_port = cleanup_assembly.port_for
+
+    def port_for(entry, operation):
+        ports.append(operation)
+        return original_port(entry, operation)
+
+    monkeypatch.setattr(cleanup_assembly, "port_for", port_for)
+    factory = session_cleanup_assembly(
+        devices=environment[0].devices,
+        drivers=DriverRegistry() if missing else _registry(driver),
+        max_delete_attempts=3,
+        max_query_attempts=2,
+        occurred_at=lambda: _NOW,
+        monotonic_ns=lambda: 0,
+    )
+    try:
+        runtime = factory(fresh)
+        await advance_cleanup(runtime)
+        assert not ports and not driver.deletes and not driver.queries
+        assert tuple(fresh.connection.iterdump()) == before
+        assert runtime.consumed_queries[item_id].delete_identity == (
+            fresh.metadata.instance_id,
+            item_id,
+            ticket,
+            key,
+        )
+        if missing:
+            with pytest.raises(DeviceConfigurationError):
+                await advance_cleanup(factory(fresh))
+            assert tuple(fresh.connection.iterdump()) == before
+    finally:
+        fresh.connection.close()
+
+
+@pytest.mark.parametrize("present", [None, True], ids=["unknown", "present"])
+@pytest.mark.parametrize(
+    "delete_supported,query_supported", [(True, True), (False, True), (False, False)]
+)
+async def test_durable_delete_consumption_survives_factory_rebuild_and_finite_budget(
+    environment, monkeypatch, present, delete_supported, query_supported
+):
+    from camctl.bootstrap import cleanup_assembly
+    from camctl.contracts.workflow_errors import item_error_id
+
+    fresh, driver, item_id, ticket, key, before = await _durable_delete_only(
+        environment, present
+    )
+    entry = _registry(driver).entry("camctl-adb")
+    registry = DriverRegistry(
+        (
+            replace(
+                entry,
+                declaration=replace(
+                    entry.declaration,
+                    delete_supported=delete_supported,
+                    file_query_supported=query_supported,
+                ),
+            ),
+        )
+    )
+    devices = {
+        name: {
+            **declaration,
+            "cleanup": {
+                "delete_retry_interval_s": Decimal(0),
+                "query_retry_interval_s": Decimal(0),
+            },
+        }
+        for name, declaration in environment[0].devices.items()
+    }
+    ports = []
+    original_port = cleanup_assembly.port_for
+
+    def port_for(entry, operation):
+        ports.append(operation)
+        return original_port(entry, operation)
+
+    monkeypatch.setattr(cleanup_assembly, "port_for", port_for)
+    kwargs = dict(
+        devices=devices,
+        drivers=registry,
+        max_delete_attempts=3,
+        max_query_attempts=2,
+        occurred_at=lambda: _NOW,
+        monotonic_ns=lambda: 0,
+    )
+    try:
+        runtime = session_cleanup_assembly(**kwargs)(fresh)
+        await advance_cleanup(runtime)
+        assert not ports and tuple(fresh.connection.iterdump()) == before
+        original_attempt = fresh.connection.execute(
+            "SELECT * FROM operation_attempts WHERE run_id=?", (ticket.run_id,)
+        ).fetchone()
+        for _ in range(4):
+            runtime = session_cleanup_assembly(**kwargs, **_shared(runtime))(fresh)
+            await advance_cleanup(runtime)
+        status, error = fresh.connection.execute(
+            "SELECT status,error_code FROM cleanup_items WHERE id=?", (item_id,)
+        ).fetchone()
+        expected = (
+            (4, None)
+            if present and delete_supported
+            else (5, item_error_id("cleanup_items", "file_query_attempts_exhausted"))
+            if present is None and query_supported
+            else (5, item_error_id("cleanup_items", "file_delete_failed"))
+        )
+        assert (status, error) == expected
+        assert len(driver.deletes) == int(bool(present and delete_supported))
+        assert len(driver.queries) == (2 if present is None and query_supported else 0)
+        assert (
+            fresh.connection.execute(
+                "SELECT * FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                (ticket.run_id, ticket.attempt_id),
+            ).fetchone()
+            == original_attempt
+        )
+        assert item_id not in runtime.consumed_queries
+    finally:
+        fresh.connection.close()
+
+
+@pytest.mark.parametrize(
+    "present", [None, True], ids=["unknown-delete", "present-delete"]
+)
+@pytest.mark.parametrize(
+    "state",
+    [
+        "pending_unknown",
+        "pending_present",
+        "pending_absent",
+        "saved_unknown",
+        "saved_present",
+        "saved_absent",
+        "running_qualified",
+        "running_unqualified",
+    ],
+)
+async def test_newer_query_responsibility_precedes_unconsumed_durable_delete(
+    environment, monkeypatch, present, state
+):
+    from camctl.bootstrap import cleanup_assembly
+    from camctl.operations.recovery import RecoveryBoundary
+    from camctl.outputs.cleanup_flow import _pending_query_for_item
+    from .test_cleanup_query_save_recovery import _QueryFinishPort
+
+    fresh, driver, item_id, delete_ticket, _, _ = await _durable_delete_only(
+        environment, present
+    )
+    kwargs = dict(
+        devices=environment[0].devices,
+        drivers=_registry(driver),
+        max_delete_attempts=3,
+        max_query_attempts=2,
+        occurred_at=lambda: _NOW,
+        monotonic_ns=lambda: 0,
+    )
+    runtime = session_cleanup_assembly(**kwargs)(fresh).for_item(item_id)
+    runtime.for_item = None
+    query_ticket = _intent(runtime, item_id, "query", CleanupQueryConsumer.AFTER_DELETE)
+    pending_original = None
+    try:
+        if not state.startswith("running"):
+            driver.present = (
+                None if state.endswith("unknown") else state.endswith("present")
+            )
+            if state.startswith("pending"):
+                runtime.operations = _QueryFinishPort(
+                    DbOutcomeKind.ROLLED_BACK, item_id, driver, runtime.retry_gate
+                )
+                with pytest.raises(ConsistencyError):
+                    await _run_query(
+                        runtime,
+                        query_ticket,
+                        item_id,
+                        CleanupQueryConsumer.AFTER_DELETE,
+                    )
+                pending = _pending_query_for_item(runtime, item_id)
+                pending_original = (
+                    pending,
+                    pending.finish,
+                    pending.key,
+                    pending.occurred_at,
+                    pending.actual,
+                )
+            else:
+                await _run_query(
+                    runtime, query_ticket, item_id, CleanupQueryConsumer.AFTER_DELETE
+                )
+        horizon = fresh.connection.execute(
+            "SELECT MAX(id) FROM history_events"
+        ).fetchone()[0]
+        before = tuple(fresh.connection.iterdump())
+        delete_row = fresh.connection.execute(
+            "SELECT * FROM operation_attempts WHERE run_id=?", (delete_ticket.run_id,)
+        ).fetchone()
+        old_calls = (len(driver.deletes), len(driver.queries))
+
+        def forbidden_port(*args, **kwargs):
+            raise AssertionError("原 QUERY 交接前不能解析当前端口")
+
+        monkeypatch.setattr(cleanup_assembly, "port_for", forbidden_port)
+        shared = _shared(runtime) if state.startswith("pending") else {}
+        registry = (
+            _recovering_registry(driver, "query")
+            if state == "running_qualified"
+            else DriverRegistry()
+        )
+        resumed = session_cleanup_assembly(
+            **{**kwargs, "drivers": registry},
+            **shared,
+            recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+            recovery_max_event_id=horizon,
+        )(fresh)
+        if state == "running_unqualified":
+            with pytest.raises(ConsistencyError, match="恢复收场"):
+                await advance_cleanup(resumed)
+            assert tuple(fresh.connection.iterdump()) == before
+            assert resumed.last_recovery_diagnostic is not None
+        else:
+            await advance_cleanup(resumed)
+            member = fresh.connection.execute(
+                "SELECT status FROM cleanup_items WHERE id=?", (item_id,)
+            ).fetchone()[0]
+            if state.endswith("absent"):
+                assert member == 4
+            else:
+                record = resumed.consumed_queries[item_id]
+                assert record.delete_identity is None
+                assert record.query_identity[2] == query_ticket
+                assert record.result_identity == record.query_identity
+                if state.startswith("saved"):
+                    assert tuple(fresh.connection.iterdump()) == before
+            if pending_original is not None:
+                pending, finish, key, occurred, actual = pending_original
+                assert pending.finish is finish and pending.key == key
+                assert pending.occurred_at == occurred and pending.actual is actual
+                assert not resumed.pending_queries and not resumed.pending_intents
+            if state.startswith(("saved", "pending")) and not state.endswith("absent"):
+                after_handoff = tuple(fresh.connection.iterdump())
+                with pytest.raises(DeviceConfigurationError):
+                    await advance_cleanup(resumed)
+                assert tuple(fresh.connection.iterdump()) == after_handoff
+        assert (len(driver.deletes), len(driver.queries)) == old_calls
+        assert (
+            fresh.connection.execute(
+                "SELECT * FROM operation_attempts WHERE run_id=?",
+                (delete_ticket.run_id,),
+            ).fetchone()
+            == delete_row
+        )
+    finally:
+        fresh.connection.close()
+
+
+@pytest.mark.parametrize("present", [None, True], ids=["unknown", "present"])
+async def test_direct_durable_delete_consumption_keeps_original_single_call_semantics(
+    environment, present
+):
+    fresh, driver, item_id, _, _, _ = await _durable_delete_only(environment, present)
+    driver.present = False
+    kwargs = dict(
+        devices=environment[0].devices,
+        drivers=_registry(driver),
+        max_delete_attempts=3,
+        max_query_attempts=2,
+        occurred_at=lambda: _NOW,
+        monotonic_ns=lambda: 0,
+    )
+    try:
+        runtime = session_cleanup_assembly(**kwargs)(fresh)
+        step = await delete_source_file(runtime, item_id)
+        assert step.phase == ("still_present" if present else "succeeded")
+        assert not driver.deletes and len(driver.queries) == int(present is None)
+    finally:
+        fresh.connection.close()
+
+
+@pytest.mark.parametrize("present", [None, True], ids=["unknown", "present"])
+@pytest.mark.parametrize("query_supported", [False, True])
+async def test_consumed_durable_delete_never_creates_another_cancel_query_slot(
+    environment, present, query_supported
+):
+    from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
+    from camctl.contracts.workflow_errors import item_error_id
+
+    fresh, driver, item_id, ticket, _, _ = await _durable_delete_only(
+        environment, present
+    )
+    action = fresh.connection.execute(
+        "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)
+    ).fetchone()[0]
+    _apply_cleanup_cancel(fresh, action)
+    entry = _registry(driver).entry("camctl-adb")
+    registry = DriverRegistry(
+        (
+            replace(
+                entry,
+                declaration=replace(
+                    entry.declaration,
+                    delete_supported=False,
+                    file_query_supported=query_supported,
+                ),
+            ),
+        )
+    )
+    factory = session_cleanup_assembly(
+        devices=environment[0].devices,
+        drivers=registry,
+        max_delete_attempts=3,
+        max_query_attempts=3,
+        occurred_at=lambda: _NOW,
+        monotonic_ns=lambda: 0,
+    )
+    original = fresh.connection.execute(
+        "SELECT * FROM operation_attempts WHERE run_id=?", (ticket.run_id,)
+    ).fetchone()
+    try:
+        await advance_cleanup(factory(fresh))
+        assert not driver.deletes and not driver.queries
+        for _ in range(3):
+            await advance_cleanup(factory(fresh))
+        assert len(driver.queries) == int(present is None and query_supported)
+        assert not driver.deletes
+        assert fresh.connection.execute(
+            "SELECT status,error_code FROM cleanup_items WHERE id=?", (item_id,)
+        ).fetchone() == (
+            6,
+            item_error_id(
+                "cleanup_items",
+                "file_delete_failed" if present else "delete_unconfirmed",
+            ),
+        )
+        assert (
+            fresh.connection.execute(
+                "SELECT * FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                (ticket.run_id, ticket.attempt_id),
+            ).fetchone()
+            == original
+        )
+    finally:
+        fresh.connection.close()
+
+
+@pytest.mark.parametrize(
+    "not_dispatched", [True, False], ids=["reliable-unsent", "possible-delete"]
+)
+async def test_durable_selection_respects_new_delete_dispatch_fact_over_saved_query(
+    environment, monkeypatch, not_dispatched
+):
+    from camctl.bootstrap import cleanup_assembly
+    from camctl.contracts.values import new_operation_key
+    from camctl.operations.attempts import AttemptFinish
+    from camctl.operations.validation import validate_outcome
+    from camctl.devices.ports import DeviceCallResult
+    from camctl.operations.models import (
+        CallOutcome,
+        AttemptStatus,
+        EffectState,
+        Settlement,
+        SettlementBasis,
+        EvidenceValue,
+    )
+    from camctl.outputs.cleanup_flow import (
+        _consume_saved_query,
+        _pending_query_for_item,
+        _not_dispatched,
+        _not_dispatched_evidence,
+    )
+
+    fresh, driver, item_id, _, _, _ = await _durable_delete_only(environment, None)
+    kwargs = dict(
+        devices=environment[0].devices,
+        drivers=_registry(driver),
+        max_delete_attempts=3,
+        max_query_attempts=2,
+        occurred_at=lambda: _NOW,
+        monotonic_ns=lambda: 0,
+    )
+    runtime = session_cleanup_assembly(**kwargs)(fresh).for_item(item_id)
+    runtime.for_item = None
+    driver.present = True
+    query_ticket = _intent(runtime, item_id, "query", CleanupQueryConsumer.AFTER_DELETE)
+    await _run_query(runtime, query_ticket, item_id, CleanupQueryConsumer.AFTER_DELETE)
+    query = _pending_query_for_item(runtime, item_id)
+    query_key = query.key
+    _consume_saved_query(runtime, query)
+    runtime.monotonic_ns = lambda: 4_000_000_000
+    delete_ticket = _intent(runtime, item_id, "delete")
+    if not_dispatched:
+        actual = _not_dispatched("delete")
+        evidence = _not_dispatched_evidence(runtime.evidence, delete_ticket)
+    else:
+        actual = DeviceCallResult.from_outcome(
+            CallOutcome(
+                status=AttemptStatus.SUCCEEDED,
+                effect=EffectState.UNKNOWN,
+                settlement=Settlement(
+                    SettlementBasis.OBSERVED, EvidenceValue("delete_returned", 1, {})
+                ),
+            )
+        )
+        evidence = runtime.evidence
+    key = new_operation_key()
+    saved = runtime.outputs.finish_cleanup_attempt(
+        AttemptFinish(
+            delete_ticket,
+            validate_outcome(delete_ticket, actual.outcome, evidence),
+            _NOW,
+            retry_wait=True,
+        ),
+        key,
+        fresh,
+    )
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    before = tuple(fresh.connection.iterdump())
+
+    def forbidden_port(*args, **kwargs):
+        raise AssertionError("必须先选择并消费原结果")
+
+    monkeypatch.setattr(cleanup_assembly, "port_for", forbidden_port)
+    try:
+        resumed = session_cleanup_assembly(**{**kwargs, "drivers": DriverRegistry()})(
+            fresh
+        )
+        await advance_cleanup(resumed)
+        assert tuple(fresh.connection.iterdump()) == before
+        record = resumed.consumed_queries[item_id]
+        if not_dispatched:
+            assert record.query_identity == (
+                fresh.metadata.instance_id,
+                item_id,
+                query_ticket,
+                query_key,
+            )
+            assert record.delete_identity is None
+        else:
+            assert record.delete_identity == (
+                fresh.metadata.instance_id,
+                item_id,
+                delete_ticket,
+                key,
+            )
+            assert record.query_identity is None
+    finally:
+        fresh.connection.close()
