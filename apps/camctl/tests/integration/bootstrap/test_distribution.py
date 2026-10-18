@@ -346,7 +346,7 @@ def test_installed_and_checkout_cli_have_same_camera_catalog(installed, model):
     assert document == json.loads(checkout.stdout)
     assert document["devices"][0]["device_id"] == "cam-1"
     assert document["devices"][0]["driver_id"] == model
-    assert document["devices"][0]["delete_supported"] is False
+    assert document["devices"][0]["delete_supported"] is (model == "dji-osmo360-ii")
     assert [action["type"] for action in document["devices"][0]["actions"]] == (
         ["camera_record"] if model == "dji-action6" else
         ["camera_record", "camera_timelapse"])

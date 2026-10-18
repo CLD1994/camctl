@@ -126,6 +126,16 @@ def _saved(status: AttemptStatus) -> DbOutcome[FinishAttemptResult]:
     )
 
 
+@pytest.fixture(autouse=True)
+def original_config_reader(monkeypatch):
+    """此模块隔离持久读取，真实 SQLite 与原历史由组合测试核对。"""
+    from camctl.outputs import cleanup_results
+    reader = create_autospec(cleanup_results.cleanup_attempt_config,
+        return_value=AttemptConfig(3, Decimal("10"), Decimal("1")))
+    monkeypatch.setattr(cleanup_results, "cleanup_attempt_config", reader)
+    return reader
+
+
 def _runtime(
     actual: DeviceCallResult,
     saved: DbOutcome[FinishAttemptResult],

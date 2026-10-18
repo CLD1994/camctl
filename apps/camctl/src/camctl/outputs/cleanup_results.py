@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, OperationKey
 from camctl.devices.ports import DeviceCallResult
 from camctl.devices.evidence import DeviceObservation
@@ -140,7 +140,8 @@ def _transaction_for_event(connection, event_id):
     return key, matches[0]
 
 
-def _read_exact_cleanup_attempt(connection, ticket, item_id, *, allow_running=False):
+def _read_cleanup_attempt_creation(connection, ticket, item_id):
+    """共享原票据、创建事务及固定字段核验，不读取当前协作者配置。"""
     kinds = {"delete": ("DELETE_FILE", "delete"), "query": ("CHECK_FILE_EXISTS", "exists")}
     if ticket.operation not in kinds or ticket.target_id != str(item_id):
         raise ConsistencyError("原清理票据的操作或目标不对应")
@@ -148,8 +149,7 @@ def _read_exact_cleanup_attempt(connection, ticket, item_id, *, allow_running=Fa
     if ticket.responsibility_key != f"{prefix}/{item_id}":
         raise ConsistencyError("原清理票据的责任键不对应")
     row = connection.execute(
-        "SELECT a.id,a.status,a.effect_state,a.result_json,a.error_json,a.result_event_id,"
-        " a.intent_event_id,r.kind,r.responsibility_key,r.action_id,c.action_id,c.output_id,"
+        "SELECT a.id,a.intent_event_id,r.kind,r.responsibility_key,r.action_id,c.action_id,c.output_id,"
         " r.query_purpose,r.activity_id,r.copy_id,r.delivery_id,r.session_key,act.type"
         " FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
         " JOIN cleanup_items c ON c.id=r.cleanup_item_id JOIN actions act ON act.id=r.action_id"
@@ -157,8 +157,7 @@ def _read_exact_cleanup_attempt(connection, ticket, item_id, *, allow_running=Fa
         (ticket.run_id, ticket.attempt_id, item_id)).fetchone()
     if row is None:
         raise ConsistencyError("原清理票据缺少精确匹配的尝试")
-    (attempt_id, status, effect, result_raw, error_raw, result_event, intent_event,
-     kind, responsibility, action_id, member_action, output_id, *other) = row
+    (attempt_id, intent_event, kind, responsibility, action_id, member_action, output_id, *other) = row
     if (kind != int(enum_for("operation_runs.kind")[kind_name])
             or responsibility != ticket.responsibility_key or action_id != member_action
             or output_id is None or other[:-1] != [None] * 5 or other[-1] != 5):
@@ -200,18 +199,41 @@ def _read_exact_cleanup_attempt(connection, ticket, item_id, *, allow_running=Fa
         if any(not json_equal(current[name], value) for name, value in original_attempt.items()
                if name not in mutable):
             raise ConsistencyError("原清理尝试的固定字段与创建历史不同")
+        return current, original_attempt
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError("原清理尝试的完整创建事实不可解释") from error
+
+
+def cleanup_attempt_config(owned, ticket, *, database_id, item_id):
+    """只从精确原 attempt 及其创建历史恢复不可变配置。"""
+    if owned.metadata.instance_id != database_id:
+        raise ConsistencyError("原清理配置票据不属于本次数据库")
+    from camctl.operations.attempts import AttemptConfig
+    try:
+        _current, original = _read_cleanup_attempt_creation(owned.connection, ticket, item_id)
+        return AttemptConfig(original["max_attempts_used"], original["timeout_s_json"],
+                             original["retry_interval_s_json"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError(
+            f"原清理配置不可解释: item={item_id} run={ticket.run_id} attempt={ticket.attempt_id}") from error
+
+
+def _read_exact_cleanup_attempt(connection, ticket, item_id, *, allow_running=False):
+    current, original_attempt = _read_cleanup_attempt_creation(connection, ticket, item_id)
+    attempt_id, status, effect = current["id"], current["status"], current["effect_state"]
+    result, error = current["result_json"], current["error_json"]
+    result_event, intent_event = current["result_event_id"], current["intent_event_id"]
+    try:
         if status == int(enum_for("operation_attempts.status").RUNNING):
             if not allow_running or any(not json_equal(current[name], value)
                     for name, value in original_attempt.items()):
                 raise ConsistencyError("原清理尝试没有可靠完整结束结果")
             return ticket, intent_event
-        if result_raw is None or result_event is None:
+        if result is None or result_event is None:
             raise ConsistencyError("原清理尝试没有可靠完整结束结果")
         key, result_event_row = _transaction_for_event(connection, result_event)
         if event_type_name(result_event_row["type"]) != "ATTEMPT_RESULT":
             raise ConsistencyError("原清理结果引用不是尝试结束事件")
-        result = parse_exact_json(result_raw)
-        error = None if error_raw is None else parse_exact_json(error_raw)
         outcome = read_result_document(status, effect, result, error)
         rows = result_event_row["body"]["rows"]
         expected = {"status": status, "effect_state": effect, "result_json": result,

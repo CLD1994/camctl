@@ -170,7 +170,8 @@ async def test_higher_current_limit_restarts_original_retry_wait(pipeline, opera
 
 
 @pytest.mark.parametrize("operation", ["delete", "query"])
-async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operation):
+@pytest.mark.parametrize("saved_attempts", [1, 2])
+async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operation, saved_attempts):
     owned = pipeline
     _seed_pending_delete(owned)
     driver = (DriverDouble(absent=False, present=True) if operation == "delete"
@@ -181,13 +182,22 @@ async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operati
     phase = "still_present" if operation == "delete" else "query_unknown"
     responsibility = "delete/91" if operation == "delete" else "exists/91"
 
-    saved = await delete_source_file(first, 91)
-    assert saved.phase == phase, saved
-    assert (driver.delete_calls, driver.query_calls) == (1, 1)
+    for _ in range(saved_attempts):
+        saved = await delete_source_file(first, 91)
+        assert saved.phase == phase, saved
+    expected_calls = (saved_attempts, saved_attempts) if operation == "delete" else (1, saved_attempts)
+    assert (driver.delete_calls, driver.query_calls) == expected_calls
     original = _run(owned, responsibility)
-    assert original[1] == 1
+    assert original[1] == saved_attempts
     assert original[2] in (1, 2)
     assert original[3:] == (1, 3)
+    attempts = owned.connection.execute(
+        "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (original[0],)).fetchall()
+    assert len(attempts) == saved_attempts
+    # 两次真实授票和返回都已可靠保存，降低预算不能裁剪原次数或重写结果。
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_attempts WHERE run_id=? AND status<>1 AND result_event_id IS NOT NULL",
+        (original[0],)).fetchone() == (saved_attempts,)
     prefix = _history(owned)
 
     fresh = _reopen(owned)
@@ -211,8 +221,11 @@ async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operati
         assert exhausted.phase == "failed", exhausted
         assert exhausted.detail == exhausted_reason, exhausted
         assert (resumed_driver.delete_calls, resumed_driver.query_calls) == (0, 0)
-        assert _attempts(fresh, responsibility) == 1
+        assert _attempts(fresh, responsibility) == saved_attempts
         assert _run(fresh, responsibility)[0] == original[0]
+        assert second.retry_gate.anchors == {}
+        assert fresh.connection.execute(
+            "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (original[0],)).fetchall() == attempts
         _assert_history_prefix(fresh, prefix)
     finally:
         fresh.connection.close()

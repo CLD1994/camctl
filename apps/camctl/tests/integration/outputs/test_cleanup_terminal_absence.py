@@ -364,8 +364,12 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
     from ..capture.test_host_photo_flow import _world
     from camctl.capture.handlers import capture_handler
     from camctl.bootstrap.cleanup_assembly import HostArtifacts
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from camctl.outputs.work_files import WorkFileLimits
 
     cfg, owned, driver, capture_runtime, _ = await _world(tmp_path)
+    work_files = WorkFileRuntime(staging=Path(cfg.paths.staging),
+        limits=WorkFileLimits(batch_size=100, limit_per_run=100))
     try:
         await capture_handler("camera_take_photo")(1, capture_runtime)
         output_id = owned.connection.execute(
@@ -376,6 +380,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             devices={},
             drivers=DriverRegistry(),
             staging=Path(cfg.paths.staging),
+            file_executor=work_files.executor,
             max_delete_attempts=1,
             max_query_attempts=1,
             occurred_at=lambda: _NOW,
@@ -404,6 +409,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             devices={},
             drivers=DriverRegistry(),
             staging=Path(cfg.paths.staging),
+            file_executor=work_files.executor,
             max_delete_attempts=1,
             max_query_attempts=1,
             occurred_at=lambda: _NOW + 4,
@@ -442,6 +448,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
                 "result_event_id": source.result_event_id,
             }
         }
+        assert not work_files.executor.unfinished_files()
     finally:
         owned.connection.close()
 

@@ -10,6 +10,7 @@ from camctl.devices.drivers.adb_cameras.definitions import candidate_capabilitie
 from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
 from camctl.devices.drivers.adb_cameras.transport import shell_argv
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
+from camctl.devices.file_identity import FileIdentity
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 from camctl.operations.models import EffectState, ErrorValue
 
@@ -56,6 +57,9 @@ def software_contract(model):
     def command_factory(kind):
         def build(request, serial, argv, batch):
             operation = request.ticket.operation
+            if kind is CameraCall.DELETE and argv is None:
+                identity = FileIdentity.from_source(request.params["identity_key"], request.params["locator"])
+                argv = shell_argv(serial, ShellFileTools().delete_script(identity.path))
             return DeviceCommand(operation, argv or shell_argv(serial, "true"), request.binding,
                 request.timeout_s, Decimal("1"), evidence, returned[operation], assumptions[operation],
                 Parser(kind, request), kind.value)

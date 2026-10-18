@@ -198,6 +198,5 @@ class AdbCameraDriver:
         identity = FileIdentity.from_source(request.params["identity_key"], request.params["locator"])
         if identity.binding != request.binding:
             raise ValueError("删除定位改变原文件绑定")
-        filesystem = self._filesystem(request.binding)
-        argv = shell_argv(serial, filesystem.tools.delete_script(identity.path))
-        return DeviceCallResult.from_outcome(await self._invoke(request, CameraCall.DELETE, serial, argv))
+        self._filesystem(request.binding)
+        return DeviceCallResult.from_outcome(await self._invoke(request, CameraCall.DELETE, serial))

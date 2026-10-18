@@ -1343,11 +1343,8 @@ def _save_delete_return(runtime, pending):
             or pending.ticket.target_id != str(pending.item_id)
             or pending.ticket.responsibility_key != f"delete/{pending.item_id}"):
         raise ConsistencyError("原删除返回不属于本次数据库或原成员票据")
-    original = runtime.pending_intents.get(pending.item_id)
-    if original is not None and (
-            original.database_id != pending.database_id or original.ticket != pending.ticket
-            or original.consumer is not (pending.consumer if isinstance(pending, PendingCleanupQuery) else None)):
-        raise ConsistencyError("原调用返回与本会话意图票据或消费用途不对应")
+    original = _matching_cleanup_intent(runtime, pending.item_id, pending.ticket,
+        pending.consumer if isinstance(pending, PendingCleanupQuery) else None)
     if pending.occurred_at is None:
         pending.occurred_at = runtime.occurred_at()
     if pending.returned_ns is None:
@@ -1355,6 +1352,7 @@ def _save_delete_return(runtime, pending):
     if pending.validation_diagnostic is not None:
         raise OutcomeValidationError(pending.validation_diagnostic.message)
     if pending.finish is None:
+        retry_config = _original_cleanup_config(runtime, pending.item_id, pending.ticket, original)
         try:
             present = _delete_presence(pending.actual, pending.item_id)
             error = _legacy_error(pending.actual, "delete")
@@ -1363,8 +1361,6 @@ def _save_delete_return(runtime, pending):
                 error=error, effect=EffectState.CONFIRMED if present is not None else EffectState.UNKNOWN,
                 settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("delete_returned", 1, {})),
                 observations=pending.actual.observations)
-            retry_config = (original.request.config if original is not None
-                            and original.ticket == pending.ticket else runtime.delete_config)
             pending.finish = AttemptFinish(pending.ticket,
                 validate_outcome(pending.ticket, outcome, pending.evidence),
                 pending.occurred_at,
@@ -1924,11 +1920,8 @@ async def _run_query(
         pending.occurred_at = runtime.occurred_at()
         pending.returned_ns = runtime.monotonic_ns()
 
-    original = runtime.pending_intents.get(pending.item_id)
-    if original is not None and (
-            original.database_id != pending.database_id or original.ticket != pending.ticket
-            or original.consumer is not (pending.consumer if isinstance(pending, PendingCleanupQuery) else None)):
-        raise ConsistencyError("原调用返回与本会话意图票据或消费用途不对应")
+    original = _matching_cleanup_intent(runtime, pending.item_id, pending.ticket,
+        pending.consumer if isinstance(pending, PendingCleanupQuery) else None)
     if pending.occurred_at is None:
         pending.occurred_at = runtime.occurred_at()
     if pending.returned_ns is None:
@@ -1937,9 +1930,7 @@ async def _run_query(
         if pending.validation_diagnostic is not None:
             raise OutcomeValidationError(pending.validation_diagnostic.message)
         if pending.finish is None and pending.phase is not CleanupQueryPhase.SAVED:
-            original = runtime.pending_intents.get(item_id)
-            retry_config = (original.request.config if original is not None
-                            and original.ticket == ticket else runtime.query_config)
+            retry_config = _original_cleanup_config(runtime, pending.item_id, pending.ticket, original)
             try:
                 pending.finish = _prepare_query_finish(
                     pending, retry_wait=retry_config.retry_interval_s is not None)
@@ -2179,12 +2170,34 @@ def _prepare_query_finish(
         recovery_max_event_id=pending.recovery_max_event_id)
 
 
+def _matching_cleanup_intent(runtime, item_id, ticket, consumer):
+    original = runtime.pending_intents.get(item_id)
+    if original is not None and (
+            original.database_id != runtime.owned.metadata.instance_id or original.item_id != item_id
+            or original.ticket != ticket or original.consumer is not consumer
+            or original.request.operation != ticket.operation
+            or original.request.target.cleanup_item_id != item_id):
+        raise ConsistencyError("原调用返回与本会话意图票据或消费用途不对应")
+    return original
+
+
+def _original_cleanup_config(runtime, item_id, ticket, original):
+    if original is not None:
+        return original.request.config
+    from camctl.outputs.cleanup_results import cleanup_attempt_config
+    return cleanup_attempt_config(runtime.owned, ticket,
+        database_id=runtime.owned.metadata.instance_id, item_id=item_id)
+
+
 def _control_request(runtime: CleanupRuntime, item_id: int, operation: str, ticket):
     from camctl.devices.ports import ControlRequest
 
-    original = runtime.pending_intents.get(item_id)
-    config = (original.request.config if original is not None and original.ticket == ticket
-              else runtime.delete_config if operation == "delete" else runtime.query_config)
+    if ticket.operation != operation:
+        raise ConsistencyError("原文件调用与票据操作不对应")
+    intent = runtime.pending_intents.get(item_id)
+    original = _matching_cleanup_intent(runtime, item_id, ticket,
+        intent.consumer if intent is not None and operation == "query" else None)
+    config = _original_cleanup_config(runtime, item_id, ticket, original)
     return ControlRequest(
         operation=operation, binding=runtime.binding_of(item_id),
         params=_target_params(runtime.owned.connection, item_id),

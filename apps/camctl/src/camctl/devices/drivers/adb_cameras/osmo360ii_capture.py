@@ -11,6 +11,7 @@ from .action6_record import _digest_timeout
 from .commands import CameraModel
 from .contracts import STARTUP_MARGIN_MS, CameraCall, CameraContract
 from .filesystem import ShellFileTools
+from .file_commands import FILE_COMMAND_EVIDENCE, file_command_factory
 from .osmo360ii_responses import OSMO360II_OBSERVATIONS, Osmo360IIDjiInterpreter, Osmo360IISimulationInterpreter
 from .osmo360ii_results import list_osmo360ii_results
 
@@ -50,7 +51,10 @@ def osmo360ii_contract():
                 for operation in ("control", "stop")}
     foreground = {operation: EvidenceContract(operation + "_foreground_recovery", 1, operation,
                     frozenset({"terminate_grace_s"})) for operation in ("control", "stop", "result", "read")}
+    tools = ShellFileTools()
     evidence = EvidenceRegistry((*returned.values(), *foreground.values(), *OSMO360II_OBSERVATIONS,
+        *FILE_COMMAND_EVIDENCE,
+        EvidenceContract("adb_foreground_recovery", 1, "delete", frozenset()),
         EvidenceContract("dispatch_prevented", 1, "control", frozenset()), RESULT_PAGE_CONTRACT,
         EvidenceContract("result_returned", 1, "result", frozenset({"file_completion",
             "file_completion_source_page_event_id", "calls", "call_count", "optional_preview_observations"})),
@@ -75,6 +79,9 @@ def osmo360ii_contract():
     return _Osmo360IIContract(CameraModel.OSMO360II,
         task_factories={name: (lambda params, name=name: _task({**params, "type": name}))
             for name in ("osmo360ii_record", "osmo360ii_timelapse")},
-        commands={kind: factory(kind) for kind in (CameraCall.SETTING, CameraCall.START, CameraCall.STOP)},
-        file_tools=ShellFileTools(), digest_timeout_s=_digest_timeout, evidence=evidence,
-        result_reader=list_osmo360ii_results, recovery_operations=frozenset({"control", "stop", "result", "read"}))
+        commands={**{kind: factory(kind) for kind in (CameraCall.SETTING, CameraCall.START, CameraCall.STOP)},
+            **{kind: file_command_factory(kind, tools=tools, evidence=evidence)
+               for kind in (CameraCall.FILE_QUERY, CameraCall.DELETE)}},
+        file_tools=tools, digest_timeout_s=_digest_timeout, evidence=evidence,
+        result_reader=list_osmo360ii_results,
+        recovery_operations=frozenset({"control", "stop", "result", "read", "query", "delete"}))

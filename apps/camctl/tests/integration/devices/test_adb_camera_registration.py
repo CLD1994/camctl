@@ -94,8 +94,9 @@ def test_builtin_adb_contracts_keep_device_source_and_declared_delete_value(isol
         ("osmo", CameraModel.OSMO360II),
     ):
         declaration = definitions.drivers[driver_id].declaration
-        assert declaration.delete_supported is False
-        assert catalog.source_delete_supported(device_id) is False
+        assert catalog.source_delete_supported(device_id) is declaration.delete_supported
+    assert definitions.drivers[CameraModel.OSMO360II].declaration.delete_supported
+    assert not definitions.drivers[CameraModel.ACTION6].declaration.delete_supported
 
 
 @pytest.mark.parametrize("missing", [CameraCall.SETTING, CameraCall.START, CameraCall.RESULT, "task", "files", "evidence"])
@@ -127,7 +128,7 @@ def test_collision_is_rejected_before_either_registry_changes(isolated_registrat
     assert drivers_runtime.current_registry().entry(CameraModel.ACTION6) is None
 
 
-def test_builtin_camera_contracts_do_not_enable_device_file_cleanup(isolated_registration):
+def test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_query(isolated_registration):
     config = load_config(None, ConfigDefaults())
 
     registration.register_builtin_camera_drivers(config)
@@ -135,8 +136,10 @@ def test_builtin_camera_contracts_do_not_enable_device_file_cleanup(isolated_reg
     for model in CameraModel:
         declaration = drivers_runtime.current_registry().entry(model).declaration
         assert not declaration.query_supported
-        assert not declaration.file_query_supported
-        assert not declaration.delete_supported
+    osmo = drivers_runtime.current_registry().entry(CameraModel.OSMO360II).declaration
+    assert osmo.file_query_supported and osmo.delete_supported
+    action6 = drivers_runtime.current_registry().entry(CameraModel.ACTION6).declaration
+    assert not action6.file_query_supported and not action6.delete_supported
 
 
 @pytest.mark.asyncio

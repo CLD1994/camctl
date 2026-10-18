@@ -30,7 +30,8 @@ def test_two_capabilities_have_preview_and_real_device_ports():
     ports = contract.declaration
     assert ports.control_supported and ports.stop_supported and ports.result_supported
     assert ports.directory_supported and ports.read_supported and ports.digest_supported
-    assert not ports.query_supported and not ports.delete_supported
+    assert not ports.query_supported
+    assert ports.file_query_supported and ports.delete_supported
 
 
 def test_formal_osmo_tasks_explain_requests_readback_estimate_and_actual_cancel_policy():

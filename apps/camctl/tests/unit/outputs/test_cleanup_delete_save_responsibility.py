@@ -11,7 +11,7 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.operations.models import AttemptStatus, AttemptTicket
 from camctl.outputs.cleanup_flow import PendingCleanupDelete, _save_delete_return
 from camctl.persistence.repositories.outputs import OutputsRepository
-from .test_cleanup_query_save_responsibility import _runtime, _saved
+from .test_cleanup_query_save_responsibility import _runtime, _saved, original_config_reader
 
 
 def _pending(runtime, ticket):
