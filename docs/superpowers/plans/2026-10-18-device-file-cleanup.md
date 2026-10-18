@@ -12,11 +12,11 @@
 
 ## 范围与独立交付
 
-本计划负责实际文件操作和通用清理责任，不修改客户端入口策略。[设备能力声明计划](2026-10-18-device-capability-declarations.md)负责公共导出与前端；两份计划互不作为前置。本计划通过内部 `DriverDeclaration`、正式端口与 CLI 请求独立验收；若公共导出已集成，它自然消费同一声明，不另设设备清单。
+本计划负责实际文件操作和通用清理责任，不修改客户端入口策略。[设备能力声明计划](2026-10-18-device-capability-declarations.md)负责公共导出与前端；两份计划互不作为前置。本计划通过内部 `DriverDeclaration`、正式端口与 CLI 请求独立验收。公共导出若已集成，按当前配置选定的正式源选择主机或设备能力；内部设备文件声明不直接等于公共值，不另设设备清单。
 
 删除继续使用独立的 `delete_action_outputs`，没有 `device_id`，也不进入拍摄 `actions[]`。目标来自明确产物 ID 或已有来源范围；OSV、LRF、主机 original／preview／repaired 各自独立，不因清理一份而级联删除关联文件。读取保护、同产物处理归属、原绑定与逐项结果继续按现行规格执行。计划输入、报告字段、历史格式和数据库操作类别保持现有契约；确需存储增量时先证明现有事实不足并修正规格，不预设迁移。
 
-修复作用于所有驱动和主机正式源。ADB 文件命令放共用模块，具体型号在合同中声明完整支持；不能按型号在清理框架中分支。Action6 可复用适配，但是否启用须独立满足工具、证据及恢复契约，其真机暂停安排保持；Hasselblad 没有设备删除命令时仍声明 false，主机正式源照常清理。
+修复作用于所有驱动和主机正式源。ADB 文件命令放共用模块，具体型号在合同中声明完整支持；不能按型号在清理框架中分支。Action6 可复用适配，但是否启用须独立满足工具、证据及恢复契约，其真机暂停安排保持；Hasselblad 没有设备删除命令时，内部设备文件删除仍为 false，主机正式源照常清理。配置决定新拍摄选用的源，实际清理始终按保存的 device_file_id／intermediate_file_id 及原绑定分流，不按当前公共值重新解释历史位置。
 
 普通录像启动余量、原生延时参数域、结果等待、拍摄恢复、自动预览及大小估算由原专题维护，本计划不调整这些行为。现场验收不得自动初始化、重发 START 或在物理效果未知时重试。
 
@@ -99,8 +99,8 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 **预计文件：** `docs/architecture/output-cleanup.md`、`camera-capabilities.md`、`docs/camctl/file-runtime.md`、`database/operation-fields.md`、`cleanup-coordination.md` 及必要的会话工作判定说明。
 
 - [ ] **步骤 1：逐条核对状态矩阵与现行契约。** 固定上述五维状态、原申请持有、QUERY 取消核实边界、终态残留发现及主机预算归属。明确哪些规则是既有契约、哪些是本次补齐，不以实现现状替代设计依据。
-- [ ] **步骤 2：定义完整设备清理能力。** `delete_supported` 表示驱动提供完整正式源清理协作，需 DELETE、独立文件查询、匹配证据及适用恢复齐备；原始 rm 能力不等于此声明。文件查询 true／删除 false 合法，删除 true／文件查询 false 为定义错误。false 不阻止已保存结果本地交接或主机文件清理。
-- [ ] **步骤 3：明确文件调用计数与恢复证据。** 一次 DELETE 最多一次物理删除和一次用于确认该调用完成的后置观察；该观察属于 DELETE，不是适配器内部重试。后续框架 `query_file` 各占 QUERY 额度，适配器不循环 rm 或查询。主机重启恢复依据若缺少现有登记，定义独立类型、版本及责任，不虚构实际返回。
+- [ ] **步骤 2：定义完整设备文件清理能力。** 内部 `DriverDeclaration.delete_supported` 表示驱动提供完整设备文件清理协作，需 DELETE、独立文件查询、匹配证据及适用恢复齐备；原始 rm 能力不等于此声明。文件查询 true／删除 false 合法，删除 true／文件查询 false 为定义错误。false 不阻止已保存结果本地交接或主机文件清理。公共字段按当前配置选定正式源派生，由能力声明专题定义；不能将内部值直接透传或拿公共值阻断历史文件的实际协作者。
+- [ ] **步骤 3：明确文件调用计数与恢复证据。** 一次 DELETE 最多一次物理删除和一次用于确认该调用完成的后置观察；该观察属于 DELETE，不是适配器内部重试。后续框架 `query_file` 各占 QUERY 额度，适配器不循环 rm 或查询。证据登记按类型与版本唯一、操作单值：DELETE 后置观察使用独立 `file_delete_presence/v1`，字段为 cleanup_item_id、present，保留既有 `file_absent/v1`；FILE_QUERY 沿用 `file_presence/v1`。主机重启恢复定义独立 `local_file_recovery/v1` 空正文依据，用于主机 DELETE／QUERY 的 UNKNOWN 与 assumed 收场，不虚构实际返回。
 - [ ] **步骤 4：独立复核并提交文档。** 消除主机预算冲突；责任专题维护有效规则，计划和其他页面引用它们。检查新增锚点与链接后，才交接依赖这些规则的实现。
 
 ### R1：分离文件查询端口与拍摄状态查询
@@ -122,7 +122,7 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 
 - [ ] **步骤 1：写故障矩阵并确认失败。** DELETE／QUERY begin、返回后验证、finish、成员及伴随保存各注入确认回滚、实际提交但回执未知、暂时无法核实。断言原请求、key、时刻、票据和计数不变；无可靠票据时调用为零，实际返回后 DELETE 始终为一次。
 - [ ] **步骤 2：实施持有和派发检查。** 意图先持有再提交，回滚与未知沿原请求处理；原 ticket 只在本会话可靠未派发且当前资格成立时使用一次。取消后不迟发 DELETE，QUERY 采用完整矩阵；begin 保存故障不能变成业务取消错误。
-- [ ] **步骤 3：闭合全部结果路径。** 直接成功、未派发、已清理复用、取消、绑定失败、预算耗尽等均先持有唯一终态申请。ALREADY 回执读取实际可靠结果，伴随按实际终态收场。完整保存错误 code／stage／details、call_info、effect、settlement、观察与原时刻；兼容结果也不能改写为泛化错误。
+- [ ] **步骤 3：闭合全部结果路径。** 直接成功、未派发、已清理复用、取消、绑定失败、预算耗尽等均先持有唯一终态申请。ALREADY 回执读取实际可靠结果，伴随按实际终态收场。完整保存错误 code／stage／details、call_info、effect、settlement、观察与原时刻；兼容结果也不能改写为泛化错误。DELETE 可靠后置观察按 R0 的类型消费，明确在场可以用于后续资格判断，无需为取得同一事实追加 QUERY。
 - [ ] **步骤 4：验证交接并提交。** 同会话新 factory、取消等待及当前驱动移除／变更时，仍先完成本地责任。覆盖错 database／ticket／consumer 拒绝接手、验证错误保留原返回。运行 `test_cleanup_query_{save,commit}_recovery.py`、`test_cleanup_query_cancel_before_delete.py`、`test_cleanup_retry_phases.py` 和 unit/outputs 的保存责任用例。
 
 ### R3：补齐持久化发现、原 DELETE 消费和启动恢复
@@ -152,7 +152,7 @@ R0 → R1 → R2 → R3 → R4 → R5 → R6 顺序集成，R7 使用 R6 已验�
 
 **预计文件：** ADB `filesystem.py`、`driver.py`、`contracts.py`、`osmo360ii_capture.py`；建议新增共用 `file_commands.py`，不以型号命名。扩展 unit/devices 的 `test_adb_camera_driver.py`、`test_osmo360ii_capture.py` 及 integration/devices 的传输夹具与测试。
 
-**接口：** 从原 `identity_key + locator` 恢复 `FileIdentity`；正式工厂生成精确单文件 DELETE／FILE_QUERY，解释器输出 `DeviceCallResult.from_outcome`，使用原 `file_absent/v1`／`file_presence/v1`。两者均走 `_invoke → invoke`，登记适用 query／delete 的证据和前台恢复范围。
+**接口：** 从原 `identity_key + locator` 恢复 `FileIdentity`；正式工厂生成精确单文件 DELETE／FILE_QUERY，解释器输出 `DeviceCallResult.from_outcome`，按 R0 的操作边界使用文件观察证据。两者均走 `_invoke → invoke`，登记适用 query／delete 的证据和前台恢复范围；R2／R3 同步消费及恢复 DELETE 后置观察与既有缺席证据。
 
 - [ ] **步骤 1：用正式合同写失败测试。** 直接用 `osmo360ii_contract()`，不在测试替换生产工厂。覆盖零字节在场、精确缺席、原绑定及身份非法、空格／引号／换行路径、目录／介质／权限／工具故障、超时、输出截断／重复／非法帧、观察后调用错误。
 - [ ] **步骤 2：实施有界文件协议。** 一次 DELETE 只 rm 原精确路径，并至多取得一次后置观察；FILE_QUERY 对原目录完成可靠的精确名称查询。完整成功且无目标才证明缺席，零大小仍在场；stat 失败或 rm 退出码不能推出缺席。严格校验唯一完整帧及对应目标，任一输出流截断不信任保留前缀，仍完成原调用收场。

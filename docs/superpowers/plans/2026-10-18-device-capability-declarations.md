@@ -2,36 +2,44 @@
 
 > **执行方式：** 使用 `superpowers:subagent-driven-development` 或 `superpowers:executing-plans` 按任务执行；复选框只在实际实施与验证后勾选。
 
-**目标：** 所有驱动从同一权威定义导出真实设备能力和完整任务说明，客户端通过通用规则读取、展示并隐藏不提供的操作入口。
+**目标：** 所有驱动从同一权威定义及当前配置导出正式产物源的有效删除支持和完整任务说明，客户端通过通用规则读取、展示并隐藏不提供的操作入口。
 
-**架构：** 驱动声明同时进入静态 `DriverDefinition` 与运行 `DriverEntry`，Catalog 保留声明并导出设备层删除支持值。根协议、客户端加载器及页面消费同一字段；拍摄参数与说明继续来自现有 Schema 和任务契约。
+**架构：** 内部设备文件声明同时进入静态 `DriverDefinition` 与运行 `DriverEntry`；驱动提供不访问设备的正式源解析器，供任务绑定与 Catalog 共用。Catalog 按每个逻辑设备的当前配置选择主机或设备文件能力，导出有效删除支持。根协议、客户端加载器及页面消费同一字段；拍摄参数与说明继续来自现有 Schema 和任务契约。
 
 **技术栈：** Python 3.11、JSON Schema Draft 2020-12、TypeScript、React、现有 CLI 和客户端发行资源。
 
 **规格：** [能力说明](../../architecture/capabilities.md)、[拍摄能力与参数类型](../../architecture/camera-capabilities.md)、[参数规则](../../architecture/camera-parameters.md)、[客户端加载](../../architecture/client-deployment.md)、[计划编辑](../../architecture/client-editing.md)、[设备指南](../../client/device-guide.md)、[客户端保存](../../client/storage-and-recovery.md)。内部签名、文件拆分及提交边界是实施建议；新增公共字段须先补入责任专题和根协议。
 
-**执行状态：** C1—C3 及 C5 的声明、安装和加载验收可以先行；C4 的页面隐藏范围仍需确定，定稿前不交接该任务实施。C5 的最终页面可见性联合验收依赖 C4 完成。
+**执行状态：** 按任务依赖实施。C4 按每个设备当前选定正式源的有效删除声明隐藏快捷入口；C5 的最终页面可见性联合验收依赖 C4 完成。
 
 ## 范围与独立交付
 
-本计划负责声明、导出、说明元数据、加载和页面展示。执行参数、拍摄计时、清理执行、数据库及报告继续使用既有契约。声明描述当前已部署驱动的能力，不表示相机硬件永久不支持、当前在线或某次操作一定成功。
+本计划负责声明、导出、说明元数据、加载和页面展示。执行参数、拍摄计时、清理执行、数据库及报告继续使用既有契约。公共声明描述当前配置选定的正式产物源是否支持删除，不表示相机硬件永久不支持、当前在线或某次操作一定成功。
 
-[设备文件清理计划](2026-10-18-device-file-cleanup.md)独立负责实际文件操作及保存、恢复。两份计划互不作为实施前置：本计划可以按当前 false 声明交付；文件清理接入后通过同一权威声明自然导出新值。组合部署时核对二者的实际生效值，不另建型号开关或同步清单。
+[设备文件清理计划](2026-10-18-device-file-cleanup.md)独立负责实际文件操作及保存、恢复。两份计划互不作为实施前置：本计划按现有主机／设备源能力交付；新增文件清理支持后通过原能力与源解析规则自然导出新值。组合部署时核对实际配置和生效值，不另建型号开关或同步清单。
 
-当前正式内置路径是 Action6 普通录像、OSMO 360 II 普通录像／原生延时、Hasselblad 单张 RAW；这些驱动当前设备删除声明均为 false。此处是审查起点，验收以各驱动实际声明为准。Action6 候选延时继续按既有门槛过滤，Hasselblad 保留主机／设备两种正式源。
+当前正式内置路径是 Action6 普通录像、OSMO 360 II 普通录像／原生延时、Hasselblad 单张 RAW。Action6 与 OSMO 当前配置使用设备源，设备文件删除声明均为 false；Hasselblad 设备文件删除也是 false，但配置选主机源时公共删除支持为 true，选设备源时为 false。此处是审查起点，验收以实际配置及协作者声明为准。Action6 候选延时继续按既有门槛过滤，Hasselblad 保留主机／设备两种正式源。
 
 ## 通用契约与评审重点
 
-建议新增公共设备字段 `delete_supported?: boolean`，与 `device_id`、`driver_id`、拍摄 `actions` 同层。它描述设备文件删除支持；主机正式源的本地清理按自己的能力执行。`delete_action_outputs` 继续是无 `device_id` 的独立动作。
+建议新增公共设备字段 `delete_supported?: boolean`，与 `device_id`、`driver_id`、拍摄 `actions` 同层。它描述该逻辑设备按当前配置选定的正式产物源是否可删除；内部 `DriverDeclaration.delete_supported` 继续描述设备文件协作。`delete_action_outputs` 继续是无 `device_id` 的独立动作。
+
+| 当前选定的正式源 | 公共删除支持的权威输入 |
+| --- | --- |
+| 主机 | 主机文件协作者的删除能力；不受设备文件删除布尔值限制。 |
+| 设备 | 内部驱动设备文件删除声明。 |
+| 当前定义缺少源解析器，或解析失败／返回非法值 | 当前目录构建或整份导出失败，不能猜为设备源或补 false。 |
+
+正式源解析由驱动的纯配置规则提供，供任务绑定与 Catalog 共用；不按型号分支，不调用任务工厂并用默认参数猜来源，不以 actions 数量判断来源。当前设备配置确定一种拍摄正式源；内部解析使用既有 `CaptureStorage`，主机修复成品保持独立生命周期。原任务在受理时固定来源，配置更新不搬迁旧文件；公共声明服务当前配置，不能改写旧动作、文件身份或已保存结果。历史清理仍按原文件引用及绑定执行。
 
 | 输入或定义状态 | 导出与加载行为 |
 | --- | --- |
-| 当前配置引用的驱动有完整声明，值为 true／false | 新 `describe` 逐设备明确导出相同布尔值。 |
+| 当前配置引用的驱动有完整内部声明与正式源解析器 | 新 `describe` 逐设备解析当前源，再导出该源协作者的明确布尔值。 |
 | 当前静态定义缺声明、类型错误或与运行登记冲突 | 登记或整份导出失败，不输出部分目录。 |
 | 旧公共 JSON 缺少字段 | 客户端加载为未知，不补 false。 |
 | 公共 JSON 字段为 null、数字、字符串或其他非法类型 | 整份加载失败；保留旧有效目录的既有规则继续生效。 |
 | `actions: []`，但设备声明有效 | 保留设备和删除声明；拍摄动作数量不决定删除能力。 |
-| 多个逻辑设备使用同一个 driver_id | 分别按 device_id 导出和匹配，不要求 driver_id 唯一。 |
+| 多个逻辑设备使用同一个 driver_id | 分别按 device_id 的配置解析及导出；主机／设备源不同可以得到不同值。 |
 
 旧 JSON 的兼容与当前 Python 静态定义的完整性分开处理。当前导出不能用可选构造器掩盖缺失声明；Catalog 不通过运行端口探测或临时查全局运行登记获取值。
 
@@ -45,26 +53,28 @@
 
 ## C1：将所有驱动的声明传入静态目录
 
-**预计文件：** `apps/camctl/src/camctl/devices/catalog.py`、`definitions_runtime.py`、`drivers/registry.py`、ADB `registration.py`，Hasselblad `definitions.py`、`driver.py`、`registration.py`；必要时新增 Hasselblad 纯声明模块。更新真实构造点及演示／测试夹具。
+**预计文件：** `apps/camctl/src/camctl/devices/catalog.py`、`definitions_runtime.py`、`tasks.py`、`drivers/registry.py`、ADB `contracts.py`／`registration.py`，Hasselblad `configuration.py`、`definitions.py`、`driver.py`、`registration.py`；必要时新增纯声明模块与主机文件能力模块。同步 `docs/architecture/camera-capabilities.md`、`capabilities.md` 的源解析职责。更新真实构造点及演示／测试夹具。
 
 下文 Python 源码简称相对 `apps/camctl/src/camctl`，组件测试简称相对 `apps/camctl/tests`；客户端测试简称相对 `apps/client`。根 `tests/integration` 用完整路径说明。
 
-**接口建议：** `DriverDefinition(driver_id, actions, declaration: DriverDeclaration)` 要求明确声明。ADB 从 `CameraContract.declaration` 派生；Hasselblad 用一个不访问设备的声明函数或不可变值供静态与运行入口共用。Catalog 的候选过滤、部署任务绑定使用 `replace(definition, actions=...)` 保留声明。这里的同源指一个权威计算及相同值，不要求每次构造具有同一 Python 对象身份。
+**接口建议：** `DriverDefinition` 必须提供 `declaration: DriverDeclaration` 和纯 `source_storage_resolver(device_declaration) -> CaptureStorage`。ADB 合同明确固定 DEVICE；Hasselblad 复用现有配置读取的 output_storage，同时供部署任务绑定使用。主机文件支持由一个纯能力定义维护，实际本地协作者与导出共同引用，避免第二份硬编码支持表。Catalog 的两次变换使用 `replace(definition, actions=...)` 保留内部声明与解析器，再按每个 device_id 的配置解析源及其能力；不访问运行登记或设备。内部声明的同源指一个权威计算及相同值，不要求同一 Python 对象身份。
 
-- [ ] **步骤 1：写失败测试。** 在 `apps/camctl/tests/unit/devices/test_catalog.py`、`test_definitions_runtime.py` 与 integration/devices 的 `test_adb_camera_registration.py`、Hasselblad 注册用例中，覆盖声明缺失／非法／冲突、两次 Catalog 转换、部署任务绑定、无拍摄能力和重复登记。静态值与实际运行登记比较；合成驱动分别给出明确 true 和 false。
+任务绑定与导出复用同一纯配置规则；对已冻结设备声明重复求值仍属同源，不要求只有一次函数调用，也不要求迁移现有 `DeploymentTaskFactory` 签名。Hasselblad 配置与定义模块保留局部导入或使用纯模块避免循环；主机纯能力模块不依赖 bootstrap 或 Catalog。ADB 录像／延时的固定设备源通过合同表达，不向既有执行定义新增存储字段。解析器应保持可重复装配，同源定义重复构造不因新建闭包身份不同产生假冲突。
+
+- [ ] **步骤 1：写失败测试。** 在 `apps/camctl/tests/unit/devices/test_catalog.py`、`test_definitions_runtime.py` 与 integration/devices 的 `test_adb_camera_registration.py`、Hasselblad 注册用例中，覆盖内部声明与源解析器缺失／非法／冲突、两次 Catalog 转换、部署任务绑定、无拍摄能力和重复登记。内部声明与运行登记比较；验证同一驱动两个不同 serial 的逻辑设备分别选 HOST／DEVICE，源能力计算不同但内部声明不变。HB 默认及显式 host 得 true、device 得 false，非法配置整份失败；合成驱动按相同规则验证。
 - [ ] **步骤 2：运行最窄目标确认失败。** 单元与组件集成分进程执行，失败来自缺少声明传递或一致性检查。
-- [ ] **步骤 3：实施同源传递。** 所有当前生产定义及被配置引用的部署适配提供完整声明；登记批次先完成身份、重复与声明检查，再修改登记，避免留下部分结果。受理与 describe 仍共用 Catalog；定义错误按配置／内部错误处理。
+- [ ] **步骤 3：实施同源传递。** 先同步责任规格，再为所有当前定义及部署适配提供完整内部声明和源解析器；首次登记与重复装配刷新都核对静态／运行一致性，批次先完成身份、重复与内部声明检查，再修改登记。批次后部拒绝后两个登记点均保持原快照。受理与 describe 共用 Catalog 的配置规则；所选源与首次受理固定的任务来源一致。定义错误按配置／内部错误处理；源变化不改旧执行定义。
 - [ ] **步骤 4：验证并提交。** 覆盖真实内置登记、`kind` 拍摄过滤、`deployment_task_factory` 绑定及 `apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py`。字段不能因没有录像工厂或 `actions: []` 丢失；不增加设备 I/O。
 
 ## C2：扩展公共删除声明并接通真实加载
 
 **预计文件：** 根 `protocol/schemas/capabilities.schema.json`、能力样例、`protocol/README.md`、`docs/architecture/capabilities.md`、`camera-capabilities.md`；`Catalog.describe_document`、客户端 `src/shared/types.ts`，按需要调整 `shared/capabilities.ts` 与 HTTP 传递。包资源由现有生成器同步。
 
-**接口：** 消费 C1 的必需静态声明，产出公共可选布尔字段；客户端只从根协议执行整份校验。当前生产导出逐设备有值；旧文件可以缺字段。
+**接口：** 消费 C1 按当前设备配置解析的正式源能力，产出公共可选布尔字段；客户端只从根协议执行整份校验。当前生产导出逐设备有值；旧文件可以缺字段。
 
 - [ ] **步骤 1：写结构和加载失败测试。** 实际 `loadCapabilities` 接受 true、false、旧缺字段，拒绝 null／非布尔／未知外层属性；原始 JSON 的重复键通过实际重载的 `parseJson → loadCapabilities` 链拒绝。夹具使用任意 driver_id、共享 driver_id 的两个设备、`actions: []` 和有效空目录；清理仍不能放进拍摄 `actions[]` 或携带 `device_id`。
 - [ ] **步骤 2：运行目标用例确认失败。** 扩展 `apps/client/tests/integration/video-estimate-capabilities.test.ts`、`http.test.ts` 及 Python Catalog 用例；不要用自建简化加载器替代生产路径。
-- [ ] **步骤 3：实现协议与导出。** 公共值只读取 C1 的声明，缺静态定义使新导出失败。更新 Schema、样例、类型、责任文档和协议入口；保持预览、估算及精确数字原样传递。
+- [ ] **步骤 3：实现协议与导出。** 公共值只读取 C1 的当前正式源能力，缺静态定义或源解析失败使新导出失败。更新 Schema、样例、类型、责任文档和协议入口；保持预览、估算及精确数字原样传递。真实导出验证 HB host／device 及同驱动不同配置，不能只用合成布尔对象证明派生正确。
 - [ ] **步骤 4：验证重载与交接并提交。** `/api/state` 和重载返回保留字段；成功整体替换，失败保留旧 active 与错误，首次失败仍无 active。仅删除字段变化不改草稿／预设／原请求；预览字段同时变化时继续执行既有自动预览规则。运行 `node scripts/check-protocol.mjs`。
 
 ## C3：补齐全部内置正式任务的同源说明
@@ -81,24 +91,24 @@
 
 ## C4：按通用声明控制页面入口
 
-**前置：** C2 完成后，确定下表的展示策略。该选择影响主机文件及混合设备入口，当前尚未决定；不把它变成 C1—C3 或另一份文件清理计划的前置条件。
+**前置：** C2 完成，提供每个设备当前选定正式源的有效删除支持；本任务不依赖另一份文件清理计划。
 
-现有报告能关联来源动作的逻辑 device_id，但不能区分 `original/preview` 的设备／主机存储位置。`kind=repaired` 能识别主机修复成品。页面策略仅决定是否显示准备入口，不改变物理来源事实或主机执行资格。
+现有报告能关联来源动作的逻辑 device_id；页面使用该设备当前配置选定正式源的有效删除声明。`kind=repaired` 能识别主机修复成品。历史原图／预览的位置不能从当前配置还原，配置变化后的旧产物由后端按原文件事实执行；页面不推断迁移，也不改变执行资格。
 
-| 入口 | 策略 A：按关联设备隐藏快捷入口 | 策略 B：存在任一明确 false 时统一隐藏 |
-| --- | --- | --- |
-| Editor 新动作下拉 | 保留独立通用清理动作。 | 从新候选中隐藏清理。 |
-| Records 计划清理 | 保留；计划范围没有唯一设备上下文。 | 隐藏。 |
-| ActionResult 动作清理 | 来源动作匹配的当前设备声明为 false 时隐藏。 | 隐藏。 |
-| MediaResults 单产物清理 | repaired 保留；其他产物关联设备为 false 时隐藏，主机 original/preview 快捷入口也可能被隐藏。 | 全部隐藏，包括主机产物。 |
-| 当前目录含 false，但当前来源／关联设备未知或缺字段 | 相关设备无法明确判 false 时保留该快捷入口，其他入口按上述规则。 | 四类入口仍统一隐藏。 |
-| 当前目录没有明确 false，包括全为旧缺字段或有效空目录 | 保留相应原入口。 | 保留相应原入口。 |
+| 入口或输入 | 展示行为 |
+| --- | --- |
+| Editor 新动作下拉 | 保留独立通用清理动作。 |
+| Records 计划清理 | 保留；计划范围可以混合设备与主机文件。 |
+| ActionResult 动作清理 | 来源动作匹配的当前设备有效删除声明为 false 时隐藏；true 或未知时保留。 |
+| MediaResults 单产物清理 | repaired 保留；其他产物关联设备当前有效声明为 false 时隐藏，true 或未知时保留。 |
+| 旧公共字段缺失、来源／设备未知、有效空目录 | 保留相应原入口，其他设备的 false 不影响该入口。 |
+| Hasselblad 当前选择主机源／设备源 | 按源能力显示：当前主机源为 true；当前设备源且无设备删除接口时为 false。 |
 
-两种策略都使用当前启用目录，适用于任意驱动；设备重新绑定后按当前关联作展示，不声称还原历史驱动能力。策略 B 优先判断整份 active 目录是否含 false，存在即统一隐藏，不受当前来源是否已知影响；它也会隐藏其他支持删除设备的快捷入口。
+规则使用当前启用目录，适用于任意驱动；设备重新配置后按当前关联和当前正式源作展示，不还原历史存储位置。历史主机 original／preview 在当前切换为设备源且有效声明 false 后，快捷按钮也会隐藏；后端仍能通过独立通用请求按原主机引用清理它们。
 
 **预计文件与接口：** 前端新增纯可见性函数，消费 active 能力与页面已有来源关系；在 `device-options.ts`、`Editor.tsx`、`Records.tsx`、`ActionResult.tsx`、`MediaResults.tsx` 和上游 `App.tsx` 传入必要数据。`DeviceGuide.tsx` 展示 true／false／未知。`BuiltinFields.tsx` 与 `followup.ts` 保持既有参数编辑和追加职责，只有真实消费缺口才修改。
 
-- [ ] **步骤 1：定稿上述矩阵并写失败测试。** 选择后只保留有效策略。`tests/unit/device-options.test.ts` 与真实浏览器覆盖四类入口、任意驱动、混合设备、来源缺失、repaired 和主机 original/preview 的实际影响；明确混合目录含 false 但当前来源未知或关联设备缺字段时的结果。至少有一个现有报告流程可达的 false 隐藏场景。
+- [ ] **步骤 1：按矩阵写失败测试。** `tests/unit/device-options.test.ts` 与真实浏览器覆盖四类入口、任意驱动、混合设备、来源缺失、repaired 和配置切换后的历史主机 original/preview。验证 HB 主机源保留、设备源 false 隐藏，以及其他设备或未知来源入口保留；至少有一个现有报告流程可达的 false 隐藏场景。
 - [ ] **步骤 2：测试现有输入保留。** 新选择隐藏与旧动作合法性分别判断；已有清理动作继续正确显示、编辑、保存和按既有规则导出，不能仅因候选被隐藏标成“当前不可用”。停用分支仍可恢复已填写内容，JSON／导入／预设／原请求保持原值。
 - [ ] **步骤 3：运行目标用例确认失败后实施过滤。** 仅在各入口生产者判断显示；追加流程和后端校验不新增能力阻止。指南展示的是声明，不表示在线、物理文件位置或操作成功。
 - [ ] **步骤 4：验证重载并提交。** true↔false 成功重载即时更新显示；失败且有旧 active 沿用旧值并显示错误，首次失败为未知，有效空目录为明确空集合。核对 busy 状态继续遵守原页面操作锁，不因新增条件放开在途操作。检查旧草稿全部分支、未完成原文与已导出请求不变。
@@ -107,9 +117,9 @@
 
 **预计文件：** `apps/camctl/tests/integration/bootstrap/test_distribution.py`，根集成新增 `tests/integration/test_device_capability_declarations.py`，复用真实 CLI 与客户端测试入口；更新两组件验证记录。
 
-**分段门禁：** 安装版 CLI、协议、实际加载、HTTP 和指南验收依赖 C1—C3，可以先行；最终页面可见性联合验收须等待 C4 定稿并实施。两段均不依赖文件清理计划，前段完成不能代替整份计划完成。
+**分段门禁：** 安装版 CLI、协议、实际加载、HTTP 和指南验收依赖 C1—C3，可以先行；最终页面可见性联合验收依赖 C4 实施。两段均不依赖文件清理计划，前段完成不能代替整份计划完成。
 
-- [ ] **步骤 1：写联合失败测试。** 从仓库外安装 wheel，离线按真实配置执行 describe，与源码正式定义比较；先核对根 Schema、包内资源、实际 loader、HTTP 和设备指南。C4 完成后增加选定可见性策略的真实页面联合验收。包含全部内置驱动与任意驱动夹具，声明变化本身不产生拍摄或清理调用。
+- [ ] **步骤 1：写联合失败测试。** 从仓库外安装 wheel，离线按真实配置执行 describe，与源码按当前配置解析的正式源能力比较；先核对根 Schema、包内资源、实际 loader、HTTP 和设备指南。覆盖 HB host／device、同驱动不同逻辑设备及源模式改变后旧执行定义保持。C4 完成后增加按当前源分别显示的真实页面联合验收。包含全部内置驱动与任意驱动夹具，声明变化本身不产生拍摄或清理调用。
 - [ ] **步骤 2：运行新目标确认失败，再补齐发行与消费接缝。** 安装环境不依赖源码目录；新导出包含明确值，旧 JSON 仍可加载。文件系统、SQLite 和进程组合放集成测试。
 - [ ] **步骤 3：运行整合门禁并独立复核。** 完成下列命令及本计划窄目标；只对后续修改、失败或新风险扩展复测。审查从权威定义到每个实际消费者的链路，记录环境、日志、退出码和未验范围后提交。
 
@@ -130,7 +140,7 @@ git diff --check
 
 ## 完成判据
 
-- [ ] 所有已配置驱动的新导出都有同源删除声明；当前定义缺失与旧公共 JSON 缺字段分别处理。
+- [ ] 所有已配置设备按当前正式源导出删除支持；HB host 为 true、device 为 false，内部设备文件声明保持真实值。当前定义缺失与旧公共 JSON 缺字段分别处理。
 - [ ] 全部内置正式任务及实际可调字段说明完整，取消说明与任务执行策略一致，客户端不维护型号分支。
-- [ ] C4 的展示策略已确定并通过真实可达入口验证；旧输入、原请求、主机与混合来源的显示行为符合定稿矩阵。
+- [ ] C4 按每个设备当前选定的源分别显示，通过真实可达入口验证；旧输入、原请求、主机与混合来源符合矩阵。
 - [ ] 安装版 CLI、协议资源、HTTP、实际客户端加载和页面一致；未执行设备操作，证据不扩展为真机删除验收。
