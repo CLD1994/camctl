@@ -36,6 +36,39 @@ class TimelapseCandidateTemplate(StrEnum):
 
 _DIAG = ("-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c")
 
+@dataclass(frozen=True)
+class BitrateSetting:
+    nominal_mbps: int
+    command: Command
+
+@dataclass(frozen=True)
+class VideoModeFacts:
+    panoramic: bool
+    resolution: str
+    frame_rate_fps: int
+    color_profile: str | None = None
+
+@dataclass(frozen=True)
+class FixedSettingRequest:
+    kind: str
+    value: object
+    commands: tuple[Command, ...]
+
+@dataclass(frozen=True)
+class ParameterSettingRequest:
+    field: str
+    choices: Mapping
+
+@dataclass(frozen=True)
+class CommandRequest:
+    commands: tuple[Command, ...]
+
+@dataclass(frozen=True)
+class TaskSettingPlan:
+    before_exposure: tuple[SettingStep, ...]
+    exposure: Mapping[str, tuple[SettingStep, ...]]
+    after_exposure: tuple[SettingStep, ...]
+
 def _cmd(code: str, payload: str, *, test=False, reply=False) -> Command:
     return (("dji_mb_ctrl",) + (("-r",) if reply else ())
             + (("-S", "test") if test else ()) + _DIAG + (code, payload))
@@ -50,8 +83,10 @@ ACTION_FOV = {"wide": _cmd("8e", "010109000101"),
 ACTION_STABILIZATION = {"off": _cmd("8e", "010108000100"),
                         "rocksteady": _cmd("8e", "010108000101")}
 
+TIMELAPSE_MANUAL_ISO = 800
+
 ACTION_ISO = {100: _cmd("2a", "03"), 200: _cmd("2a", "04"),
-              400: _cmd("2a", "05"), 800: _cmd("2a", "06"),
+              400: _cmd("2a", "05"), TIMELAPSE_MANUAL_ISO: _cmd("2a", "06"),
               1600: _cmd("2a", "07"), 3200: _cmd("2a", "08")}
 
 ACTION_EV = {Decimal("-0.7"): _cmd("0x2e", "0e", test=True),
@@ -64,9 +99,116 @@ ACTION_APERTURE = {"f2.8": _cmd("0x26", "1801", test=True),
 ACTION_BITRATE = {"standard": ("simulate_device", "-s", "bitrate", "1"),
                   "high": ("simulate_device", "-s", "bitrate", "2")}
 
-OSMO_ISO = {800: _cmd("2A", "06", test=True, reply=True)}
+OSMO_ISO = {TIMELAPSE_MANUAL_ISO: _cmd("2A", "06", test=True, reply=True)}
 
 OSMO_EV = {0: _cmd("2e", "10")}
+
+OSMO_BITRATE = {
+    "standard": BitrateSetting(120, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "1")),
+    "high": BitrateSetting(170, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2")),
+}
+
+OSMO_RECORD_FORMAT = ("simulate_device", "-s", "BaseFormat", "6", "69", "0")
+
+_ACTION6_SHUTTER = FixedSettingRequest(
+    "shutter", "1/60", (_cmd("28", "013C8000"),))
+
+_ACTION6_WHITE_BALANCE = FixedSettingRequest(
+    "white_balance", 5200, (_cmd("0x2c", "0634000000", test=True),))
+
+_OSMO_SHUTTER = FixedSettingRequest(
+    "shutter", "1/60", (_cmd("28", "013c8000", test=True, reply=True),))
+
+_OSMO_WHITE_BALANCE = FixedSettingRequest(
+    "white_balance", 5200, (_cmd("2c", "0634000000"),))
+
+_ACTION6_MANUAL_MODE = CommandRequest(
+    (_cmd("8e", "010100000101"), _cmd("1E", "0400")))
+
+_ACTION6_AUTO_MODE = CommandRequest(
+    (_cmd("8e", "010100000101"), _cmd("1E", "0100")))
+
+_OSMO_MANUAL_MODE = CommandRequest(
+    (_cmd("8e", "010100000101"), _cmd("1e", "0400", test=True, reply=True)))
+
+_OSMO_RECORD_AUTO_MODE = CommandRequest(
+    (_cmd("8e", "010100000101"), _cmd("1e", "0100", test=True, reply=True)))
+
+_OSMO_TIMELAPSE_AUTO_MODE = CommandRequest(
+    (_cmd("8e", "010100000100"), _cmd("1e", "0000")))
+
+_OSMO_RECORD_VIDEO = FixedSettingRequest(
+    "video_mode",
+    VideoModeFacts(True, "8K", 30, "D-Log M"),
+    (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "38"),
+     OSMO_RECORD_FORMAT),
+)
+
+_OSMO_TIMELAPSE_VIDEO = FixedSettingRequest(
+    "video_mode",
+    VideoModeFacts(True, "8K", 30),
+    (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "3b"),
+     _cmd("18", "6f03000000")),
+)
+
+_ACTION6_TIMELAPSE_ISO = FixedSettingRequest(
+    "iso", TIMELAPSE_MANUAL_ISO, (ACTION_ISO[TIMELAPSE_MANUAL_ISO],))
+
+_OSMO_TIMELAPSE_ISO = FixedSettingRequest(
+    "iso", TIMELAPSE_MANUAL_ISO, (OSMO_ISO[TIMELAPSE_MANUAL_ISO],))
+
+FIXED_SETTING_PLANS: dict[tuple[CameraModel, str], TaskSettingPlan] = {
+    (CameraModel.ACTION6, "camera_record"): TaskSettingPlan(
+        (),
+        {
+            "manual": (_ACTION6_MANUAL_MODE, ParameterSettingRequest("iso", ACTION_ISO),
+                       _ACTION6_SHUTTER, _ACTION6_WHITE_BALANCE),
+            "auto": (_ACTION6_AUTO_MODE, _ACTION6_WHITE_BALANCE,
+                     ParameterSettingRequest("compensation_ev", ACTION_EV)),
+        },
+        (),
+    ),
+    (CameraModel.ACTION6, "camera_timelapse"): TaskSettingPlan(
+        (),
+        {
+            "manual": (_ACTION6_MANUAL_MODE, _ACTION6_TIMELAPSE_ISO,
+                       _ACTION6_SHUTTER, _ACTION6_WHITE_BALANCE),
+            "auto": (CommandRequest((_cmd("0x1e", "0100", test=True),)),),
+        },
+        (),
+    ),
+    (CameraModel.OSMO360II, "camera_record"): TaskSettingPlan(
+        (_OSMO_RECORD_VIDEO,),
+        {
+            "manual": (_OSMO_MANUAL_MODE, _OSMO_TIMELAPSE_ISO,
+                       _OSMO_SHUTTER, _OSMO_WHITE_BALANCE),
+            "auto": (_OSMO_RECORD_AUTO_MODE, _OSMO_WHITE_BALANCE,
+                     FixedSettingRequest("compensation_ev", 0, (OSMO_EV[0],))),
+        },
+        (CommandRequest((_cmd("42", "3d"),)),),
+    ),
+    (CameraModel.OSMO360II, "camera_timelapse"): TaskSettingPlan(
+        (_OSMO_TIMELAPSE_VIDEO,),
+        {
+            "manual": (_OSMO_MANUAL_MODE, _OSMO_TIMELAPSE_ISO,
+                       _OSMO_SHUTTER, _OSMO_WHITE_BALANCE),
+            "auto": (_OSMO_TIMELAPSE_AUTO_MODE,),
+        },
+        (),
+    ),
+}
+
+def fixed_setting_plan_for(driver_id: str, action_type: str) -> TaskSettingPlan:
+    return FIXED_SETTING_PLANS[(CameraModel(driver_id), action_type)]
+
+def _commands_for_steps(steps: tuple[SettingStep, ...], values: Mapping) -> tuple[Command, ...]:
+    commands = []
+    for step in steps:
+        if isinstance(step, ParameterSettingRequest):
+            commands.append(step.choices[values[step.field]])
+        else:
+            commands.extend(step.commands)
+    return tuple(commands)
 
 @dataclass(frozen=True)
 class TimelapsePreset:
@@ -105,14 +247,12 @@ TIMELAPSE_PRESETS = {
 }
 
 def _action_manual(iso) -> tuple[Command, ...]:
-    return (_cmd("8e", "010100000101"), _cmd("1E", "0400"),
-            ACTION_ISO[iso], _cmd("28", "013C8000"),
-            _cmd("0x2c", "0634000000", test=True))
+    plan = fixed_setting_plan_for(CameraModel.ACTION6, "camera_record")
+    return _commands_for_steps(plan.exposure["manual"], {"iso": iso})
 
-def _osmo_manual(iso) -> tuple[Command, ...]:
-    return (_cmd("8e", "010100000101"), _cmd("1e", "0400", test=True, reply=True),
-            OSMO_ISO[iso], _cmd("28", "013c8000", test=True, reply=True),
-            _cmd("2c", "0634000000"))
+def _osmo_manual() -> tuple[Command, ...]:
+    plan = fixed_setting_plan_for(CameraModel.OSMO360II, "camera_record")
+    return _commands_for_steps(plan.exposure["manual"], {})
 
 def _exact_number(value):
     return (not isinstance(value, bool) and isinstance(value, (int, Decimal))
@@ -182,17 +322,18 @@ def _timelapse_command_for(model: CameraModel, params: Mapping[str, JsonValue]) 
     """优先返回原完整字面量，否则按固定第一版格式替换四个时间字节。"""
     presets = TIMELAPSE_PRESETS[model]
     exposure_mode = params["exposure"]["mode"]
+    outputs = OutputSelection.VIDEO if model is CameraModel.OSMO360II else params["outputs"]
     exact = next((preset for preset in presets
                   if (preset.interval_s, preset.duration_s, preset.outputs, preset.exposure_mode)
                   == (params["interval_s"], params["duration_s"],
-                      params["outputs"], exposure_mode)), None)
+                      outputs, exposure_mode)), None)
     if exact is not None:
         _validated_timelapse_template(model, exact)
         return exact.command
 
     interval = params["interval_s"]
     duration = params["duration_s"]
-    template = _candidate_template_for(model, params["outputs"], exposure_mode)
+    template = _candidate_template_for(model, outputs, exposure_mode)
     payload = _validated_timelapse_template(model, template)
     interval_units = _exact_scaled_uint16(params["interval_s"], 10, "延时间隔")
     duration_units = _exact_scaled_uint16(params["duration_s"], 1, "采集时长")
@@ -202,13 +343,14 @@ def _timelapse_command_for(model: CameraModel, params: Mapping[str, JsonValue]) 
 
 def _encode_settings(model, action_type, params):
     exposure = params["exposure"]
+    plan = fixed_setting_plan_for(model, action_type)
     if action_type == "camera_record":
         if model is CameraModel.ACTION6:
             if exposure["mode"] == "manual":
                 exposure_settings = _action_manual(exposure["iso"])
             else:
-                exposure_settings = (_cmd("8e", "010100000101"), _cmd("1E", "0100"),
-                                     _cmd("0x2c", "0634000000", test=True), ACTION_EV[exposure["compensation_ev"]])
+                exposure_settings = _commands_for_steps(
+                    plan.exposure["auto"], exposure)
             aperture_settings = ((ACTION_APERTURE[params["aperture"]],)
                                  if "aperture" in params else ())
             bitrate_settings = ((ACTION_BITRATE[params["bitrate"]],)
@@ -218,21 +360,19 @@ def _encode_settings(model, action_type, params):
                     ACTION_FOV[params["fov"]], ACTION_STABILIZATION[params["stabilization"]],
                     *aperture_settings, *bitrate_settings)
         if exposure["mode"] == "manual":
-            exposure_settings = _osmo_manual(exposure["iso"])
+            exposure_settings = _osmo_manual()
         else:
-            exposure_settings = (_cmd("8e", "010100000101"), _cmd("1e", "0100", test=True, reply=True),
-                                 _cmd("2c", "0634000000"), OSMO_EV[exposure["compensation_ev"]])
-        return (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "38"),
-                ("simulate_device", "-s", "BaseFormat", "6", "69", "0"),
-                *exposure_settings, _cmd("42", "3d"),
-                ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2"))
+            exposure_settings = _commands_for_steps(
+                plan.exposure["auto"], exposure)
+        return (*_commands_for_steps(plan.before_exposure, {}),
+                *exposure_settings,
+                *_commands_for_steps(plan.after_exposure, {}),
+                OSMO_BITRATE[params["bitrate"]].command)
     timelapse_command = _timelapse_command_for(model, params)
+    exposure_settings = _commands_for_steps(
+        plan.exposure[exposure["mode"]], exposure)
     if model is CameraModel.ACTION6:
-        exposure_settings = (_action_manual(800) if exposure["mode"] == "manual"
-                             else (_cmd("0x1e", "0100", test=True),))
         return (_cmd("e1", "02", test=True), ACTION_RESOLUTIONS["4k30"],
                 timelapse_command, *exposure_settings)
-    exposure_settings = (_osmo_manual(800) if exposure["mode"] == "manual" else
-                         (_cmd("8e", "010100000100"), _cmd("1e", "0000")))
-    return (_cmd("0x8e", "01013f000101", test=True), _cmd("e1", "3b"),
-            _cmd("18", "6f03000000"), *exposure_settings, timelapse_command)
+    return (*_commands_for_steps(plan.before_exposure, {}),
+            *exposure_settings, timelapse_command, OSMO_BITRATE[params["bitrate"]].command)

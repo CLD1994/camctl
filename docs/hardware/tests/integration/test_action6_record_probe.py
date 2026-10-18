@@ -1224,7 +1224,8 @@ class ProbeIntegration(unittest.TestCase):
         self.assertEqual(generator.generated_source(), SCRIPT.with_name("action6_timelapse_candidate.py").read_text())
         source = self.workspace / "commands.py"
         original = generator.SOURCE.read_text()
-        source.write_text(original.replace('    exposure = params["exposure"]\n    if action_type == "camera_record":', '    unknown_diagnostic_dependency()\n    exposure = params["exposure"]\n    if action_type == "camera_record":'))
+        source.write_text(original.replace('def _encode_settings(model, action_type, params):',
+                                           'def _encode_settings(model, action_type, params):\n    unknown_diagnostic_dependency()'))
         with patch.object(generator, "SOURCE", source), self.assertRaises(ValueError) as caught:
             generator.generated_source()
         self.assertIn("unknown_diagnostic_dependency", str(caught.exception))
@@ -1544,7 +1545,7 @@ class GeneratorBindingChecks(unittest.TestCase):
 
     def test_f2_previous_unknown_shapes_and_missing_root_remain_rejected(self):
         for extra, fragment in (("import os", "Import"), ("a = b = 1", "Assign"),
-                                ("a: int = 1", "AnnAssign"), ("async def extra():\n    pass", "AsyncFunctionDef"),
+                                ("a: int", "AnnAssign"), ("async def extra():\n    pass", "AsyncFunctionDef"),
                                 ("print('module effect')", "Expr"), ("_DIAG = ()", "_DIAG")):
             with self.subTest(extra=extra):
                 self.assert_source_rejected(self.source + "\n" + extra + "\n", fragment)

@@ -11,9 +11,9 @@
       "params": {
         "type": "osmo360ii_record",
         "duration_s": 10,
+        "bitrate": "high",
         "exposure": {
-          "mode": "auto",
-          "compensation_ev": 0
+          "mode": "auto"
         }
       },
       "policy": {

@@ -199,7 +199,7 @@ class World:
         self.monkeypatch.chdir(self.root)
         self.deployment.run_client_driver = self.client
         self.params = {"type": "osmo360ii_record", "duration_s": 1,
-                       "exposure": {"mode": "auto", "compensation_ev": 0}}
+                       "bitrate": "high", "exposure": {"mode": "auto"}}
         for source in ("_osmo_builtin_clock.py", "_osmo_builtin_clock_entry.py", "_osmo_builtin_adb.py",
                        "_cleanup_roundtrip_adb.py", "_cleanup_roundtrip_fault.py"):
             if (HERE / source).is_file():

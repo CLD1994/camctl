@@ -86,6 +86,61 @@ const componentFixture: Capabilities = {
   ],
 };
 
+componentFixture.devices.push({
+  device_id: "mode-only-test-device",
+  driver_id: "mode-only-fixture",
+  actions: [
+    {
+      type: "camera_record",
+      parameter_types: [
+        {
+          type: "mode-only-record",
+          name: "仅选择曝光模式的合成任务",
+          description: "固定曝光数值由驱动处理。",
+          preview_supported: false,
+          schema: {
+            $schema: "https://json-schema.org/draft/2020-12/schema",
+            type: "object",
+            additionalProperties: false,
+            required: ["type", "duration_s", "bitrate", "exposure"],
+            properties: {
+              type: { const: "mode-only-record" },
+              duration_s: {
+                type: "integer",
+                minimum: 1,
+                title: "时长",
+                description: "目标秒数。",
+              },
+              bitrate: {
+                enum: ["standard", "high"],
+                title: "码率档位",
+                description: "选择每个动作的档位。",
+              },
+              exposure: {
+                type: "object",
+                title: "曝光设置",
+                description: "选择曝光模式。",
+                oneOf: ["manual", "auto"].map((mode) => ({
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    mode: {
+                      const: mode,
+                      title: "曝光模式",
+                      description: "固定值见任务说明。",
+                    },
+                  },
+                  required: ["mode"],
+                })),
+              },
+            },
+          },
+        },
+      ],
+    },
+  ],
+});
+
 export function clientTestCapabilitiesText(): string {
   const injectedPath = process.env.CAMCTL_TEST_CAPABILITIES_FILE;
   if (injectedPath === undefined || injectedPath.length === 0)

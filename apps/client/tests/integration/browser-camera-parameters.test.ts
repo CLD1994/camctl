@@ -12,6 +12,7 @@ import { choose, readOptions } from "./select-support";
 import {
   clientTestCapabilities,
   clientTestCapabilitiesText,
+  clientTestTasks,
 } from "./capability-fixtures";
 
 let browser: Browser;
@@ -283,6 +284,85 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
   });
   await check(guideField).toContainText(fieldSchema.description as string);
   expect(app.draft(draft.id)).toEqual(before);
+});
+
+it("能力源的仅模式曝光对象可切换并随动作保存必选码率", async () => {
+  const tasks = clientTestTasks().filter(({ parameter }) => {
+    const fields = parameter.schema.properties as Record<string, any>;
+    return (
+      Array.isArray(fields.bitrate?.enum) &&
+      Array.isArray(fields.exposure?.oneOf) &&
+      fields.exposure.oneOf.every(
+        (branch: any) =>
+          Object.keys(branch.properties).length === 1 && branch.properties.mode,
+      )
+    );
+  });
+  expect(tasks.length).toBeGreaterThan(0);
+  for (const { device, action, parameter } of tasks) {
+    const fields = parameter.schema.properties as Record<string, any>;
+    const branches = fields.exposure.oneOf;
+    const params: Record<string, unknown> = { type: parameter.type };
+    for (const [name, schema] of Object.entries(fields)) {
+      if (name === "type") continue;
+      params[name] =
+        name === "exposure"
+          ? { mode: branches[0].properties.mode.const }
+          : Array.isArray(schema.enum)
+            ? schema.enum[0]
+            : 10;
+    }
+    const draftText = JSON.stringify({
+      name: "模式与码率",
+      actions: [
+        {
+          name: parameter.name,
+          type: action.type,
+          device_id: device.device_id,
+          scheduled_at: "2026-10-11 12:00:00",
+          policy: { max_delay_ms: 0 },
+          params,
+        },
+      ],
+    });
+    const { app, page, draft } = await setup("10", false, {
+      capabilities: clientTestCapabilitiesText(),
+      draftText,
+    });
+    const bitrate = page.getByRole("combobox", {
+      name: `${fields.bitrate.title} (bitrate)`,
+      exact: true,
+    });
+    await check(bitrate).toBeVisible();
+    await check(
+      page.getByRole("combobox", {
+        name: /\((?:iso|compensation_ev|outputs)\)$/,
+      }),
+    ).toHaveCount(0);
+    await choose(bitrate, "1");
+    await choose(
+      page.getByRole("combobox", {
+        name: `${branches[0].properties.mode.title} (mode)`,
+        exact: true,
+      }),
+      "branch:1",
+    );
+    await check
+      .poll(
+        () =>
+          (parseJson(app.draft(draft.id).content.text) as any).actions[0]
+            .params,
+      )
+      .toEqual({
+        ...params,
+        bitrate: fields.bitrate.enum[1],
+        exposure: { mode: branches[1].properties.mode.const },
+      });
+    const saved = app.draft(draft.id);
+    expect(() =>
+      app.exportDraft(draft.id, saved.revision, saved.content),
+    ).not.toThrow();
+  }
 });
 
 it.each([

@@ -446,15 +446,19 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp
                 "mode": "auto",
             },
             CameraModel.OSMO360II: {
-                "mode": "manual", "iso": 800,
+                "mode": "manual",
             },
         }
-        assert set(expected) == {"type", "interval_s", "duration_s", "outputs", "exposure"}
+        assert set(expected) == {"type", "interval_s", "duration_s", "exposure",
+                                 "outputs" if model is CameraModel.ACTION6 else "bitrate"}
         assert expected["type"] == expected_type_by_model[model]
         from camctl.devices.drivers.adb_cameras.timelapse_parameters import timelapse_intervals_s
         assert expected["interval_s"] == min(timelapse_intervals_s(model))
         assert expected["duration_s"] == 300
-        assert expected["outputs"] == "video"
+        if model is CameraModel.ACTION6:
+            assert expected["outputs"] == "video"
+        else:
+            assert expected["bitrate"] == "high"
         assert expected["exposure"] == expected_exposure_by_model[model]
     if stem == "action6-record":
         expected.pop("aperture")

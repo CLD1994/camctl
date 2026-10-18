@@ -53,6 +53,8 @@ def generated_source():
             name = node.name
         elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            name = node.target.id
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 name = alias.asname or alias.name

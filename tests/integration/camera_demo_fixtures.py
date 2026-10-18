@@ -64,6 +64,8 @@ def recording_params(model):
               "exposure": {"mode": "auto", "compensation_ev": 0}}
     if model is CameraModel.ACTION6:
         params.update(resolution="4k30", fov="wide", stabilization="off", aperture="f2.8", bitrate="high")
+    else:
+        params.update(bitrate="high", exposure={"mode": "auto"})
     return params
 
 

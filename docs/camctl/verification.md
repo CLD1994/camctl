@@ -6,6 +6,31 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## OSMO 360 II 可选参数与会话设置的软件验证（2026-10-18 UTC）
+
+在 Linux x86_64、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0 和 pnpm 12.3.4 中，按[实施计划](../superpowers/plans/2026-10-19-osmo360ii-selectable-settings.md)验证当前参数契约。普通录像和原生延时均要求动作显式携带码率档位，逐次发送相应设置；固定 ISO、EV 和视频输出由驱动维护。会话固定设置按设备绑定、ADB serial 和完整命令分别记录，只复用已可靠接受的结果。
+
+以下范围均保留完整命令、工作目录、解释器、起止 UTC、日志和退出码于 `.local/verification/osmo-settings-20261019/`。表中的 pytest 路径由该记录器使用项目 Python 3.11 执行；正式 OSMO 安装链使用对应指南要求的解释器直接启动。
+
+| 范围 | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 5950 passed、1 skipped、2 warnings，退出 0；两条 warning 仍是既有同步测试的 asyncio 标记，原 skip 原因未从 `-q` 输出取得。 |
+| `apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py` | 14 passed，验证能力 Schema、原输入、生效参数和数据库保存。 |
+| `apps/camctl/tests/integration/devices/test_adb_camera_registration.py` | 29 passed，包含实际会话初始化重置记录、静态登记和能力导出保持记录及零次设备调用。 |
+| `apps/camctl/tests/integration/bootstrap/test_adb_camera_dispatch.py` | 16 passed，验证派发资格、取消、启动窗口和原参数执行。 |
+| `apps/camctl/tests/integration/bootstrap/test_distribution.py` | 38 passed，安装版示例、能力导出和受理一致。 |
+| `docs/hardware/tests/integration/test_action6_record_probe.py` | 84 passed、316 subtests passed；生成器支持有值的带类型标注赋值，未知依赖、非法源码形状和原 Action6 诊断流程仍受检。 |
+| `tests/integration/test_device_capability_declarations.py` | 6 passed；安装版 JSON 经真实客户端加载、HTTP、参数表单和设备指南消费。 |
+| `tests/integration/test_timelapse_time_parameters.py` | 3 passed；两款参数域经 Python、浏览器、Node.js 导出和受理／取消／报告链核对，包含 OSMO 两档码率和仅模式曝光对象。 |
+| `tests/integration/test_osmo_builtin_timelapse_roundtrip.py` | 4 passed；正式内置合同经客户端、C host、安装 CLI、SQLite、恢复、独立取回、导入及 ACK 验证。 |
+| 客户端两份浏览器测试中的“能力源”目标 | 3 passed，98 项未被该目标选中；合成能力与安装版能力分别验证模式切换、必选码率保存／导出和固定字段不产生控件。类型与格式检查通过。 |
+
+固定设置的单元用例先失败，再由实现通过，覆盖首次普通录像／延时、同会话重复动作、同档位码率重复设置、两台设备、同进程新会话、部分设置成功、未知返回、取消及原 START 完整期限耗尽。安装链的 ADB 进程替身只接受当前安装包的明确命令；普通录像的停止后文件等待仍使用真实等待。模拟文件和工具返回不提供真实设备画质、码率生效或新增命令的实机效果证据。
+
+正式安装链首轮由 `uv run` 启动时，开发环境路径进入了其运行环境，四项均在独立部署路径断言处失败，尚未执行业务动作；按文档改用 Python 3.11 解释器直接启动后四项通过，保留首轮失败日志。协议、同源生成物、文档文件链接及差异检查通过，新增标题锚点另行核对。
+
+本地当前驱动另导出 `.local/deployments/20261019-osmo-settings/device-capabilities.json`，包含 `osmo360ii` 和采用主机正式源的 `hb0`。公共 Schema 及实际字段检查通过，SHA-256 为 `c64ed7aa118e120ceec8961f615f8b519b6e39866f7a258e3951130dbba351b6`。该文件与本次驱动代码配套，本项没有部署 TX2 或执行真实相机命令。
+
 ## 设备文件清理的 TX2 实机验收（2026-10-18 UTC）
 
 [设备文件清理计划 R7](../superpowers/plans/2026-10-18-device-file-cleanup.md#r7用已验发行物完成-osmo-目标设备验收)已通过真实 OSMO 360 II 的正式清理链验收。现场使用 `cld` 账户、ARM64、Python 3.11.17、SQLite 3.53.1 和 ADB 1.0.39；USB 为 `2ca3:0020`，产品属性为 `eagle4_oq102`，固件为 `10.00.00.57`／`01.01.02.10`。本次检查至最终目录核对的相机 boot ID 均为 `64eb2280-7f6e-48bb-bafd-5bed1dd7a797`。

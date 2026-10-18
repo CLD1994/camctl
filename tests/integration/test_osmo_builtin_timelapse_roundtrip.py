@@ -308,14 +308,15 @@ def _capture_params(action_type: str) -> dict:
         return {
             "type": "osmo360ii_record",
             "duration_s": 10,
-            "exposure": {"mode": "auto", "compensation_ev": 0},
+            "bitrate": "high",
+            "exposure": {"mode": "auto"},
         }
     assert action_type == "camera_timelapse"
     return {
         "type": "osmo360ii_timelapse",
         "interval_s": 2,
         "duration_s": 300,
-        "outputs": "video",
+        "bitrate": "high",
         "exposure": {"mode": "auto"},
     }
 

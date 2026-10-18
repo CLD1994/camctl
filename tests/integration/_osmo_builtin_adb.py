@@ -56,7 +56,7 @@ def _calls(path: Path) -> list[dict]:
 
 def _scenario():
     from camctl.devices.drivers.adb_cameras.commands import (
-        CameraModel, settings_from_effective_params, start_for, stop_for,
+        CameraModel, OSMO_SESSION_SETUP, settings_from_effective_params, start_for, stop_for,
     )
 
     action_type = os.environ["CAMCTL_OSMO_TEST_ACTION"]
@@ -69,8 +69,7 @@ def _scenario():
     if preview_flag not in ("0", "1"):
         raise ValueError("OSMO 测试场景必须明确声明是否包含 LRF")
     model = CameraModel.OSMO360II
-    settings = tuple(tuple(command) for command in
-                     settings_from_effective_params(model, action_type, params))
+    settings = (*OSMO_SESSION_SETUP, *settings_from_effective_params(model, action_type, params))
     return (action_type, params, settings, tuple(start_for(model, action_type)),
             tuple(stop_for(model, action_type)), preview_flag == "1")
 

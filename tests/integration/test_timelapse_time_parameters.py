@@ -91,6 +91,9 @@ def parameter_cases(parameter_type, model):
     minimum_interval = 1 if model is CameraModel.ACTION6 else 2
     base = {"type": parameter_type, "interval_s": minimum_interval, "duration_s": 300,
             "outputs": "video", "exposure": {"mode": "auto"}}
+    if model is CameraModel.OSMO360II:
+        del base["outputs"]
+        base["bitrate"] = "high"
     cases = []
     def add(name, params, valid, text=None):
         cases.append({"name": name, "params_text": text or json.dumps(params), "valid": valid})
@@ -123,14 +126,24 @@ def parameter_cases(parameter_type, model):
     for outputs in ("video", "video_raw", "video_jpeg"):
         for exposure in ({"mode": "auto"}, {"mode": "manual", "iso": 800}):
             add(f"output-{outputs}-{exposure['mode']}", {**base, "outputs": outputs, "exposure": exposure},
-                parameter_type == "action6_timelapse" or outputs == "video")
+                parameter_type == "action6_timelapse")
+    if model is CameraModel.OSMO360II:
+        for mode in ("manual", "auto"):
+            for bitrate in ("standard", "high"):
+                add(f"bitrate-{mode}-{bitrate}", {**base, "bitrate": bitrate, "exposure": {"mode": mode}}, True)
+        missing_bitrate = deepcopy(base)
+        del missing_bitrate["bitrate"]
+        add("missing-bitrate", missing_bitrate, False)
+        for bitrate in (None, 1, "ultra"):
+            add(f"invalid-bitrate-{bitrate}", {**base, "bitrate": bitrate}, False)
     for exposure in ({"mode": "auto", "compensation_ev": 0}, {"mode": "auto", "iso": 800},
                      {"mode": "manual"}, {"mode": "manual", "iso": 400},
                      {"mode": "manual", "iso": 800, "compensation_ev": 0}):
-        add(f"exposure-{exposure}", {**base, "exposure": exposure}, False)
+        add(f"exposure-{exposure}", {**base, "exposure": exposure},
+            model is CameraModel.OSMO360II and exposure == {"mode": "manual"})
     for iso_token, valid in (("800.0", True), ("8e2", True), ("800.00000000000000001", False)):
         manual = {**base, "exposure": {"mode": "manual", "iso": "ISO_TOKEN"}}
-        add(f"exact-iso-{iso_token}", manual, valid,
+        add(f"exact-iso-{iso_token}", manual, valid and model is CameraModel.ACTION6,
             json.dumps(manual).replace('"ISO_TOKEN"', iso_token))
     other = "osmo360ii_timelapse" if parameter_type == "action6_timelapse" else "action6_timelapse"
     add("other-model", {**base, "type": other}, False)

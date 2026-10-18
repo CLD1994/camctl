@@ -12,10 +12,9 @@
         "type": "osmo360ii_timelapse",
         "interval_s": 2,
         "duration_s": 300,
-        "outputs": "video",
+        "bitrate": "high",
         "exposure": {
-          "mode": "manual",
-          "iso": 800
+          "mode": "manual"
         }
       },
       "policy": {
