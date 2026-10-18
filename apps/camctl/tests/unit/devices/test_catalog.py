@@ -17,6 +17,10 @@ from video_estimate_helpers import (
     record_capability,
     record_catalog,
 )
+from device_driver_fixtures import (
+    synthetic_driver_declaration,
+    synthetic_source_storage_resolver,
+)
 
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.devices.catalog import (
@@ -40,6 +44,275 @@ _SINGLE_SHOT = {
 }
 
 
+def test_driver_definition_requires_a_valid_explicit_declaration():
+    with pytest.raises(TypeError, match="declaration"):
+        DriverDefinition("synthetic-camera", {})
+
+    with pytest.raises(ValueError, match="声明"):
+        DriverDefinition(
+            "synthetic-camera",
+            {},
+            declaration=None,
+            source_storage_resolver=synthetic_source_storage_resolver,
+        )
+
+    with pytest.raises(ValueError, match="布尔值"):
+        synthetic_driver_declaration(delete_supported=1)
+
+    with pytest.raises(TypeError, match="source_storage_resolver"):
+        DriverDefinition(
+            "synthetic-camera",
+            {},
+            declaration=synthetic_driver_declaration(),
+        )
+
+    with pytest.raises(ValueError, match="source_storage_resolver"):
+        DriverDefinition(
+            "synthetic-camera",
+            {},
+            declaration=synthetic_driver_declaration(),
+            source_storage_resolver=None,
+        )
+
+
+def test_catalog_resolves_delete_support_per_device_and_keeps_empty_actions():
+    declaration = synthetic_driver_declaration(delete_supported=False)
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {},
+        declaration=declaration,
+        source_storage_resolver=synthetic_source_storage_resolver,
+    )
+    config = _config({
+        "camera-host": {
+            "kind": "camera",
+            "driver": "synthetic-camera",
+            "synthetic_serial": "serial-host",
+            "synthetic_output_storage": "host",
+        },
+        "camera-device": {
+            "kind": "camera",
+            "driver": "synthetic-camera",
+            "synthetic_serial": "serial-device",
+            "synthetic_output_storage": "device",
+        },
+    })
+
+    catalog = build_catalog(
+        config,
+        DriverDefinitions({"synthetic-camera": definition}),
+    )
+
+    assert catalog.source_delete_supported("camera-host") is True
+    assert catalog.source_delete_supported("camera-device") is False
+    assert catalog.source_delete_supported("missing-device") is None
+    assert catalog._capabilities["camera-host"][1].declaration == declaration
+    assert catalog._capabilities["camera-device"][1].declaration == declaration
+    assert catalog.describe_document()["devices"] == [
+        {
+            "device_id": "camera-device",
+            "driver_id": "synthetic-camera",
+            "actions": [],
+        },
+        {
+            "device_id": "camera-host",
+            "driver_id": "synthetic-camera",
+            "actions": [],
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "device_deletion, device_source_result",
+    [(False, False), (True, True)],
+)
+def test_catalog_uses_device_declaration_for_device_source(
+    device_deletion, device_source_result
+):
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {},
+        declaration=synthetic_driver_declaration(delete_supported=device_deletion),
+        source_storage_resolver=synthetic_source_storage_resolver,
+    )
+    catalog = build_catalog(
+        _config({"camera": {
+            "kind": "camera",
+            "driver": "synthetic-camera",
+            "synthetic_output_storage": "device",
+        }}),
+        DriverDefinitions({"synthetic-camera": definition}),
+    )
+
+    assert catalog.source_delete_supported("camera") is device_source_result
+
+
+def test_catalog_reads_the_host_artifact_declaration_shared_with_local_adapter(monkeypatch):
+    from camctl.bootstrap.cleanup_assembly import HostArtifacts
+    from camctl.devices import catalog as catalog_module
+    from camctl.host_files.declarations import (
+        HOST_FILE_DECLARATION,
+        HostFileDeclaration,
+    )
+
+    assert HostArtifacts.declaration is HOST_FILE_DECLARATION
+    monkeypatch.setattr(
+        catalog_module,
+        "HOST_FILE_DECLARATION",
+        HostFileDeclaration(delete_supported=False),
+    )
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {},
+        declaration=synthetic_driver_declaration(delete_supported=False),
+        source_storage_resolver=synthetic_source_storage_resolver,
+    )
+    catalog = build_catalog(
+        _config({"camera": {
+            "kind": "camera",
+            "driver": "synthetic-camera",
+            "synthetic_output_storage": "host",
+        }}),
+        DriverDefinitions({"synthetic-camera": definition}),
+    )
+
+    assert catalog.source_delete_supported("camera") is False
+
+
+def test_catalog_rejects_invalid_resolved_source_without_a_partial_catalog():
+    from camctl.acceptance.schema import RuleError
+
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {},
+        declaration=synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver,
+    )
+
+    with pytest.raises(RuleError, match="正式源"):
+        build_catalog(
+            _config({
+                "valid-camera": {
+                    "kind": "camera",
+                    "driver": "synthetic-camera",
+                    "synthetic_output_storage": "host",
+                },
+                "invalid-camera": {
+                    "kind": "camera",
+                    "driver": "synthetic-camera",
+                    "synthetic_output_storage": "external",
+                },
+            }),
+            DriverDefinitions({"synthetic-camera": definition}),
+        )
+
+
+def test_catalog_rejects_resolver_returning_an_untyped_storage_value():
+    from camctl.acceptance.schema import RuleError
+
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {},
+        declaration=synthetic_driver_declaration(),
+        source_storage_resolver=lambda _declaration: "host",
+    )
+
+    with pytest.raises(RuleError, match="正式源"):
+        build_catalog(
+            _config({"camera": {"kind": "camera", "driver": "synthetic-camera"}}),
+            DriverDefinitions({"synthetic-camera": definition}),
+        )
+
+
+@pytest.mark.parametrize("delete_supported", [False, True])
+def test_catalog_keeps_declaration_when_candidate_actions_are_filtered(delete_supported):
+    declaration = synthetic_driver_declaration(delete_supported=delete_supported)
+    resolver = synthetic_source_storage_resolver
+    candidate = ActionCapability(
+        action_type="camera_record",
+        parameter_type="candidate_record",
+        name="候选录像",
+        description="没有可调用任务工厂的候选能力。",
+        preview_supported=False,
+        schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {"type": {"const": "candidate_record"}},
+            "required": ["type"],
+            "additionalProperties": False,
+        },
+        defaults={},
+    )
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {"camera_record": (candidate,)},
+        declaration=declaration,
+        source_storage_resolver=resolver,
+    )
+    config = _config({
+        "camera-a": {"kind": "camera", "driver": "synthetic-camera"},
+        "camera-b": {"kind": "camera", "driver": "synthetic-camera"},
+    })
+
+    catalog = build_catalog(
+        config, DriverDefinitions({"synthetic-camera": definition})
+    )
+
+    assert catalog.describe_document() == {"devices": [
+        {"device_id": "camera-a", "driver_id": "synthetic-camera", "actions": []},
+        {"device_id": "camera-b", "driver_id": "synthetic-camera", "actions": []},
+    ]}
+    assert catalog._definitions.drivers["synthetic-camera"].declaration == declaration
+    assert catalog._definitions.drivers["synthetic-camera"].source_storage_resolver is resolver
+    assert catalog._capabilities["camera-a"][1].declaration == declaration
+    assert catalog._capabilities["camera-b"][1].declaration == declaration
+    assert catalog._capabilities["camera-a"][1].source_storage_resolver is resolver
+    assert catalog._capabilities["camera-b"][1].source_storage_resolver is resolver
+    assert catalog.source_delete_supported("camera-a") is delete_supported
+    assert catalog.source_delete_supported("camera-b") is delete_supported
+
+
+def test_catalog_keeps_declaration_when_binding_deployment_task_factory():
+    declaration = synthetic_driver_declaration(delete_supported=True)
+    resolver = synthetic_source_storage_resolver
+    factory = lambda _params: object()
+    capability = ActionCapability(
+        action_type="camera_record",
+        parameter_type="bound_record",
+        name="部署录像",
+        description="由设备配置绑定任务工厂。",
+        preview_supported=False,
+        schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {"type": {"const": "bound_record"}},
+            "required": ["type"],
+            "additionalProperties": False,
+        },
+        defaults={},
+        deployment_task_factory=lambda _device: factory,
+    )
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {"camera_record": (capability,)},
+        declaration=declaration,
+        source_storage_resolver=resolver,
+    )
+    config = _config({"camera-a": {"kind": "camera", "driver": "synthetic-camera"}})
+
+    catalog = build_catalog(
+        config, DriverDefinitions({"synthetic-camera": definition})
+    )
+
+    bound_definition = catalog._capabilities["camera-a"][1]
+    assert bound_definition.declaration == declaration
+    assert bound_definition.source_storage_resolver is resolver
+    assert catalog.source_delete_supported("camera-a") is True
+    selected = catalog.parameter_definition("camera-a", "camera_record", "bound_record")
+    assert selected is not None
+    assert selected.task_factory is factory
+
+
 def _definitions() -> DriverDefinitions:
     return DriverDefinitions(
         drivers={
@@ -56,6 +329,8 @@ def _definitions() -> DriverDefinitions:
                         defaults={"quality": 5},
                     ),)
                 },
+                declaration=synthetic_driver_declaration(),
+                source_storage_resolver=synthetic_source_storage_resolver,
             )
         }
     )
@@ -132,6 +407,19 @@ class TestBuildCatalog:
         document = catalog.describe_document()
         assert document == {"devices": []}
 
+    def test_catalog_does_not_read_the_runtime_registry(self, monkeypatch) -> None:
+        from camctl.devices.drivers import runtime
+
+        def fail_if_called():
+            raise AssertionError("静态 Catalog 不得读取运行登记")
+
+        monkeypatch.setattr(runtime, "current_registry", fail_if_called)
+        catalog = build_catalog(
+            _config({"cam-1": {"kind": "camera", "driver": "camctl-adb"}}),
+            _definitions(),
+        )
+        assert catalog.driver_id("cam-1") == "camctl-adb"
+
 
 class TestDescribeDocument:
     def test_document_contains_declared_capabilities(self) -> None:
@@ -172,6 +460,8 @@ def test_parameter_types_are_selected_from_same_catalog():
     )
     definitions = DriverDefinitions(drivers={"camctl-adb":DriverDefinition(
         driver_id="camctl-adb", actions={"camera_take_photo":(capability, alternate)},
+        declaration=synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver,
     )})
     catalog = build_catalog(_config({"cam-1":{"kind":"camera","driver":"camctl-adb"}}), definitions)
     selected = catalog.parameter_definition("cam-1", "camera_take_photo", "alternate")
@@ -183,7 +473,9 @@ def test_parameter_types_are_selected_from_same_catalog():
 
 
 def test_empty_declared_capability_is_definition_error():
-    definitions = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb", {"camera_take_photo":()})})
+    definitions = DriverDefinitions({"camctl-adb":DriverDefinition(
+        "camctl-adb", {"camera_take_photo":()}, synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver)})
     with pytest.raises(ValueError):
         build_catalog(_config({"cam-1":{"kind":"camera","driver":"camctl-adb"}}), definitions)
 
@@ -196,7 +488,9 @@ def test_nested_default_annotations_follow_effective_object_default():
         "payload":{"const":{"default":17}},
     }, "$defs":{"unused":{"type":"integer","default":3}}}
     cap = replace(capability, schema=schema, defaults={"settings":{"quality":2}})
-    definitions = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb", {"camera_take_photo":(cap,)})})
+    definitions = DriverDefinitions({"camctl-adb":DriverDefinition(
+        "camctl-adb", {"camera_take_photo":(cap,)}, synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver)})
     catalog = build_catalog(_config({"cam-1":{"kind":"camera","driver":"camctl-adb"}}),definitions)
     selected = catalog.parameter_definition("cam-1","camera_take_photo","single_shot")
     assert selected.schema["properties"]["settings"]["default"] == {"quality":2}

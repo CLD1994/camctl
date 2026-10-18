@@ -23,11 +23,28 @@ _entries: dict[str, DriverEntry] = {}
 
 
 def register_drivers(*entries: DriverEntry) -> None:
-    """登记本进程可用的驱动接入项；重复 driver_id 明确拒绝。"""
+    """登记本进程可用的驱动接入项；先校验整批登记及静态声明。"""
+    pending: dict[str, DriverEntry] = {}
     for entry in entries:
-        if entry.driver_id in _entries and _entries[entry.driver_id] is not entry:
-            raise ValueError(f"驱动重复登记: {entry.driver_id!r}")
-        _entries[entry.driver_id] = entry
+        if not isinstance(entry, DriverEntry):
+            raise TypeError("登记项必须是 DriverEntry")
+        driver_id = entry.driver_id
+        if driver_id in pending:
+            raise ValueError(f"驱动重复登记: {driver_id!r}")
+        previous = _entries.get(driver_id)
+        if previous is not None and previous is not entry:
+            raise ValueError(f"驱动重复登记: {driver_id!r}")
+        pending[driver_id] = entry
+
+    from camctl.devices.definitions_runtime import current_driver_definitions
+
+    definitions = current_driver_definitions().drivers
+    for driver_id, entry in pending.items():
+        definition = definitions.get(driver_id)
+        if definition is not None and definition.declaration != entry.declaration:
+            raise ValueError(f"驱动运行登记与定义声明冲突: {driver_id!r}")
+
+    _entries.update(pending)
 
 
 def current_registry() -> DriverRegistry:

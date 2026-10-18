@@ -9,6 +9,7 @@ from typing import Mapping
 
 from camctl.contracts.json_values import JsonValue
 from camctl.devices.catalog import ActionCapability, DriverDefinition
+from camctl.devices.ports import DriverDeclaration
 from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
 
 __all__ = [
@@ -21,6 +22,17 @@ __all__ = [
 
 DRIVER_ID = "hasselblad_cfv100c"
 PARAMETER_TYPE = "hasselblad_photo"
+DRIVER_DECLARATION = DriverDeclaration(
+    control_supported=True,
+    stop_supported=False,
+    query_supported=False,
+    result_supported=False,
+    read_supported=True,
+    digest_supported=False,
+    delete_supported=False,
+    directory_supported=False,
+    local_read_recovery_supported=True,
+)
 
 _PHOTO_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -40,9 +52,9 @@ def _photo_task(_effective_params: Mapping[str, JsonValue]) -> CaptureTask:
 
 
 def _deployed_photo_factory(declaration: Mapping[str, object]) -> CaptureTaskFactory:
-    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+    from camctl.devices.drivers.hasselblad.configuration import resolve_source_storage
 
-    storage = read_camera_config(declaration).output_storage
+    storage = resolve_source_storage(declaration)
 
     def photo_task(effective_params: Mapping[str, JsonValue]) -> CaptureTask:
         return replace(_photo_task(effective_params), output_storage=storage)
@@ -67,5 +79,12 @@ def capability() -> ActionCapability:
 
 def driver_definition() -> DriverDefinition:
     """构造由 Hasselblad 静态单张能力组成的驱动定义。"""
+    from camctl.devices.drivers.hasselblad.configuration import resolve_source_storage
+
     photo = capability()
-    return DriverDefinition(DRIVER_ID, {photo.action_type: (photo,)})
+    return DriverDefinition(
+        DRIVER_ID,
+        {photo.action_type: (photo,)},
+        DRIVER_DECLARATION,
+        resolve_source_storage,
+    )

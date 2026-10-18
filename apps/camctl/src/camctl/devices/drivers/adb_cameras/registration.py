@@ -32,21 +32,28 @@ def register_builtin_camera_drivers(config):
             raise RuleError(f"内置相机契约重复: {driver_id!r}")
         seen.add(driver_id)
         definition = DriverDefinition(driver_id, {
-            capability.action_type: (capability,) for capability in contract.capabilities()})
+            capability.action_type: (capability,) for capability in contract.capabilities()},
+            declaration=contract.declaration,
+            source_storage_resolver=contract.source_storage_resolver)
         previous_definition = definitions.get(driver_id)
         previous = registry.entry(driver_id)
         if previous_definition is not None or previous is not None:
             if (previous_definition != definition or previous is None
                     or not isinstance(previous.driver, AdbCameraDriver)
-                    or previous.driver.contract is not contract):
+                    or previous.driver.contract is not contract
+                    or previous.declaration != definition.declaration
+                    or previous.driver.declaration != definition.declaration):
                 raise RuleError(f"内置相机身份与既有登记冲突: {driver_id!r}")
             refresh.append(previous.driver)
             continue
         driver = AdbCameraDriver(contract, config.devices, AdbTransport(),
                                  terminate_grace_s=config.adb.terminate_grace_s,
                                  monotonic_ns=time.monotonic_ns)
-        pending.append((definition, DriverEntry(driver_id, driver, driver.declaration,
-                                                contract.evidence, contract.status)))
+        entry = DriverEntry(driver_id, driver, driver.declaration,
+                            contract.evidence, contract.status)
+        if entry.declaration != definition.declaration:
+            raise RuleError(f"内置相机静态与运行声明冲突: {driver_id!r}")
+        pending.append((definition, entry))
     # 上面的纯检查完成后才修改两个登记点，不产生单边登记。
     register_driver_definitions(*(definition for definition, _ in pending))
     register_drivers(*(entry for _, entry in pending))

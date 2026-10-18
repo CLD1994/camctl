@@ -15,8 +15,10 @@ from typing import Any, Mapping
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.schema import RuleError
 from camctl.bootstrap.config import ConfigSnapshot
-from camctl.devices.tasks import CaptureTaskFactory, DeploymentTaskFactory
+from camctl.devices.tasks import CaptureStorage, CaptureStorageResolver, CaptureTaskFactory, DeploymentTaskFactory
 from camctl.devices.parameter_schemas import validate_parameter_schema, schema_with_defaults
+from camctl.devices.ports import DriverDeclaration
+from camctl.host_files.declarations import HOST_FILE_DECLARATION
 
 __all__ = [
     "ActionCapability",
@@ -56,6 +58,14 @@ class DriverDefinition:
 
     driver_id: str
     actions: Mapping[str, tuple[ActionCapability, ...]]
+    declaration: DriverDeclaration
+    source_storage_resolver: CaptureStorageResolver
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.declaration, DriverDeclaration):
+            raise ValueError("驱动定义必须包含有效的 DriverDeclaration 声明")
+        if not callable(self.source_storage_resolver):
+            raise ValueError("驱动定义的 source_storage_resolver 必须是可调用的正式源解析器")
 
 
 @dataclass(frozen=True)
@@ -103,20 +113,38 @@ class Catalog:
                     or callable(capability.task_factory) or callable(capability.deployment_task_factory))
                 if complete:
                     actions[action_type] = complete
-            available[driver_id] = DriverDefinition(driver_id, actions)
+            available[driver_id] = replace(definition, actions=actions)
         self._definitions = DriverDefinitions(available)
         self._implemented = frozenset(
             action_type for definition in definitions.drivers.values() for action_type in definition.actions
         ) | {"obtain_action_outputs", "delete_action_outputs", "cancel_task", "report_status", "motor_control"}
-        self._capabilities = self._resolve_capabilities()
+        self._capabilities, self._source_delete_supported = self._resolve_capabilities()
 
-    def _resolve_capabilities(self) -> dict[str, tuple[str, DriverDefinition, frozenset[str]]]:
+    def _resolve_capabilities(
+        self,
+    ) -> tuple[
+        dict[str, tuple[str, DriverDefinition, frozenset[str]]],
+        dict[str, bool],
+    ]:
         resolved: dict[str, tuple[str, DriverDefinition, frozenset[str]]] = {}
+        source_delete_supported: dict[str, bool] = {}
         for device_id, declaration in self._devices.items():
             driver_id = declaration.get("driver")
             definition = self._definitions.drivers.get(driver_id)
             if definition is None:
                 raise RuleError(f"设备 {device_id} 声明的驱动未部署: {driver_id!r}")
+            try:
+                source_storage = definition.source_storage_resolver(declaration)
+            except (TypeError, ValueError) as error:
+                raise RuleError(f"设备 {device_id} 的正式源无法解析: {error}") from error
+            if not isinstance(source_storage, CaptureStorage):
+                raise RuleError(f"设备 {device_id} 的正式源解析器必须返回 CaptureStorage")
+            if source_storage is CaptureStorage.HOST:
+                source_delete_supported[device_id] = HOST_FILE_DECLARATION.delete_supported
+            elif source_storage is CaptureStorage.DEVICE:
+                source_delete_supported[device_id] = definition.declaration.delete_supported
+            else:
+                raise RuleError(f"设备 {device_id} 的正式源不受支持: {source_storage!r}")
             kind = declaration.get("kind")
             declared = _KIND_ACTION_TYPES.get(kind, frozenset())
             try:
@@ -133,8 +161,8 @@ class Catalog:
             if any(capability.deployment_task_factory is not None and not callable(capability.task_factory)
                    for capabilities in actions.values() for capability in capabilities):
                 raise RuleError(f"设备 {device_id} 的部署任务定义未提供任务工厂")
-            resolved[device_id] = (driver_id, DriverDefinition(driver_id, actions), declared)
-        return resolved
+            resolved[device_id] = (driver_id, replace(definition, actions=actions), declared)
+        return resolved, source_delete_supported
 
     def action_types(self) -> frozenset[str]:
         return self._implemented
@@ -149,6 +177,10 @@ class Catalog:
     def driver_id(self, device_id: str) -> str | None:
         entry = self._capabilities.get(device_id)
         return entry[0] if entry is not None else None
+
+    def source_delete_supported(self, device_id: str) -> bool | None:
+        """返回该设备按当前配置解析的正式源删除支持；未知设备返回 None。"""
+        return self._source_delete_supported.get(device_id)
 
     def parameter_definition(
         self, device_id: str, action_type: str, parameter_type: str

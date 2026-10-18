@@ -1,5 +1,4 @@
 """真实 OSMO 驱动页经原目录基准差集保存，跨页配对不改变页范围。"""
-
 import asyncio
 from decimal import Decimal
 import json
@@ -66,7 +65,8 @@ async def _world(owned, tmp_path, baseline, monkeypatch):
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": "dji-osmo360-ii",
         "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
     catalog = build_catalog(config, DriverDefinitions({"dji-osmo360-ii": DriverDefinition("dji-osmo360-ii",
-        {cap.action_type: (cap,) for cap in contract.capabilities()})}))
+        {cap.action_type: (cap,) for cap in contract.capabilities()}, contract.declaration,
+        source_storage_resolver=contract.source_storage_resolver)}))
     body = _plan_body()
     body["actions"][0].update(type="camera_record", params=params)
     await _accept_plan(owned, tmp_path, body, catalog)

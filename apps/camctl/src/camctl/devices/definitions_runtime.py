@@ -21,10 +21,26 @@ _definitions: dict[str, DriverDefinition] = {}
 
 def register_driver_definitions(*definitions: DriverDefinition) -> None:
     """登记已部署驱动定义；重复身份拒绝，不产生部分登记。"""
+    seen: set[str] = set()
     for definition in definitions:
-        if definition.driver_id in _definitions:
+        if not isinstance(definition, DriverDefinition):
+            raise TypeError("登记项必须是 DriverDefinition")
+        driver_id = definition.driver_id
+        if not isinstance(driver_id, str) or not driver_id:
+            raise ValueError(f"驱动定义身份必须是非空字符串: {driver_id!r}")
+        if driver_id in seen or driver_id in _definitions:
             raise ValueError(f"驱动定义重复登记: {definition.driver_id!r}")
-        _definitions[definition.driver_id] = definition
+        seen.add(driver_id)
+
+    from camctl.devices.drivers.runtime import current_registry
+
+    registry = current_registry()
+    for definition in definitions:
+        entry = registry.entry(definition.driver_id)
+        if entry is not None and entry.declaration != definition.declaration:
+            raise ValueError(f"驱动定义与运行登记的声明冲突: {definition.driver_id!r}")
+
+    _definitions.update((definition.driver_id, definition) for definition in definitions)
 
 
 def current_driver_definitions() -> "DriverDefinitions":

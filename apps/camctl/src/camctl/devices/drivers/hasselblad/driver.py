@@ -16,7 +16,7 @@ from camctl.devices.evidence import (
     EvidenceRegistry,
     validate_observation,
 )
-from camctl.devices.ports import ControlRequest, DeviceCallResult, DriverDeclaration
+from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.devices.read_session import ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
 from camctl.host_files.downloads import DownloadWorkspace
 from camctl.host_files.capture_sources import (
@@ -48,7 +48,7 @@ from camctl.operations.process import (
 from camctl.operations.validation import validate_outcome
 
 from .configuration import CameraConfig, read_camera_config
-from .definitions import DRIVER_ID, PARAMETER_TYPE
+from .definitions import DRIVER_DECLARATION, DRIVER_ID, PARAMETER_TYPE
 from .responses import (
     CaptureResponse,
     CliParseError,
@@ -147,17 +147,7 @@ class HasselbladDriver:
         self.transport = _ExecuteToolTransport() if transport is None else transport
         if not callable(getattr(self.transport, "run", None)):
             raise TypeError("transport 必须提供 run(ToolSpec, StopSignal)")
-        self.declaration = DriverDeclaration(
-            control_supported=True,
-            stop_supported=False,
-            query_supported=False,
-            result_supported=False,
-            read_supported=True,
-            digest_supported=False,
-            delete_supported=False,
-            directory_supported=False,
-            local_read_recovery_supported=True,
-        )
+        self.declaration = DRIVER_DECLARATION
 
     def _binding_config(self, binding):
         if binding.driver_id != self.driver_id:

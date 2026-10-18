@@ -18,6 +18,10 @@ from camctl.cli import encode_describe_document
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.schemas import SchemaValidationError
 from camctl.devices.catalog import DriverDefinition, DriverDefinitions, build_catalog
+from device_driver_fixtures import (
+    synthetic_driver_declaration,
+    synthetic_source_storage_resolver,
+)
 
 
 def _direct_estimate(bitrate=130):
@@ -95,6 +99,8 @@ def test_estimate_does_not_hide_inconsistent_action_identity():
     }}, ConfigDefaults())
     definitions = DriverDefinitions({"estimate_demo": DriverDefinition(
         "estimate_demo", {"camera_timelapse": (capability,)},
+        synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver,
     )})
     with pytest.raises(RuleError):
         build_catalog(config, definitions)
@@ -131,10 +137,13 @@ def test_same_parameter_type_keeps_device_and_action_estimate_scope():
     definitions = DriverDefinitions({
         "first": DriverDefinition("first", {
             "camera_record": (record,), "camera_timelapse": (timelapse,),
-        }),
-        "second": DriverDefinition("second", {
-            "camera_record": (other_record,), "camera_timelapse": (other_timelapse,),
-        }),
+        }, synthetic_driver_declaration(), source_storage_resolver=synthetic_source_storage_resolver),
+        "second": DriverDefinition(
+            "second",
+            {"camera_record": (other_record,), "camera_timelapse": (other_timelapse,)},
+            synthetic_driver_declaration(delete_supported=True),
+            source_storage_resolver=synthetic_source_storage_resolver,
+        ),
     })
     document = build_catalog(config, definitions).describe_document()
     encode_describe_document(document)

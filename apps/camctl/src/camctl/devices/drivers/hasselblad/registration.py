@@ -59,6 +59,7 @@ def register_builtin_hasselblad_driver(config) -> None:
             previous_definition != definition
             or previous is None
             or not _is_same_driver_entry(previous)
+            or previous.declaration != definition.declaration
         ):
             raise RuleError(f"内置 Hasselblad 身份与既有登记冲突: {DRIVER_ID!r}")
         previous.driver.devices = config.devices
@@ -77,6 +78,8 @@ def register_builtin_hasselblad_driver(config) -> None:
         evidence=EVIDENCE,
         status=DriverStatus.DEVICE_VERIFICATION_PENDING,
     )
+    if entry.declaration != definition.declaration:
+        raise RuleError(f"内置 Hasselblad 静态与运行声明冲突: {DRIVER_ID!r}")
     # 在修改任一登记点前完成静态能力及运行端口构造和身份验证。
     register_driver_definitions(definition)
     register_drivers(entry)

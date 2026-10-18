@@ -5,6 +5,10 @@ from io import StringIO
 import pytest
 
 from camctl.devices.drivers import builtin
+from device_driver_fixtures import (
+    synthetic_driver_declaration,
+    synthetic_source_storage_resolver,
+)
 
 
 def test_builtin_registration_invokes_adb_and_hasselblad(monkeypatch):
@@ -77,6 +81,7 @@ def test_hasselblad_definition_and_entry_come_from_same_registration():
 
     entry = current_registry().entry(DRIVER_ID)
     assert current_driver_definitions().drivers[DRIVER_ID] == driver_definition()
+    assert current_driver_definitions().drivers[DRIVER_ID].declaration == entry.declaration
     assert isinstance(entry.driver, HasselbladDriver)
     assert entry.driver.driver_id == DRIVER_ID
     assert entry.evidence is EVIDENCE
@@ -138,7 +143,12 @@ def test_conflicting_hasselblad_definition_is_rejected_without_runtime_registrat
     from camctl.devices.drivers.hasselblad.registration import register_builtin_hasselblad_driver
     from camctl.devices.drivers.runtime import current_registry
 
-    conflicting = DriverDefinition(DRIVER_ID, {})
+    conflicting = DriverDefinition(
+        DRIVER_ID,
+        {},
+        synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver,
+)
     register_driver_definitions(conflicting)
 
     with pytest.raises(RuleError, match="身份与既有登记冲突"):

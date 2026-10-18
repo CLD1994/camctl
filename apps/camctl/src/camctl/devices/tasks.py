@@ -61,6 +61,12 @@ class CaptureTaskFactory(Protocol):
     def __call__(self, effective_params: Mapping[str, JsonValue]) -> CaptureTask: ...
 
 
+class CaptureStorageResolver(Protocol):
+    """从单个设备的部署声明纯解析拍摄任务正式产物源。"""
+
+    def __call__(self, device_declaration: Mapping[str, object]) -> CaptureStorage: ...
+
+
 class DeploymentTaskFactory(Protocol):
     """从单个设备的部署声明绑定纯任务工厂。"""
 

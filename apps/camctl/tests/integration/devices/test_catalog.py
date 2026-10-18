@@ -10,6 +10,11 @@ from decimal import Decimal
 
 import pytest
 
+from device_driver_fixtures import (
+    synthetic_driver_declaration,
+    synthetic_source_storage_resolver,
+)
+
 from camctl.acceptance.rules import validate_new_body
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.cli import encode_describe_document
@@ -48,6 +53,8 @@ _DEFINITIONS = DriverDefinitions(
                     defaults={"interval_s": Decimal("1.0")},
                 ),)
             },
+            declaration=synthetic_driver_declaration(),
+            source_storage_resolver=synthetic_source_storage_resolver,
         )
     }
 )
@@ -133,7 +140,10 @@ def test_device_support_keeps_local_failure_scope(device_id, supported, extra_de
     if extra_device:
         devices["cam-3"] = {"kind":"camera", "driver":"camctl-adb"}
     definitions = DriverDefinitions({**_DEFINITIONS.drivers,
-        "other":DriverDefinition("other", {})})
+        "other": DriverDefinition(
+            "other", {}, synthetic_driver_declaration(),
+            source_storage_resolver=synthetic_source_storage_resolver,
+        )})
     catalog = build_catalog(load_config({"devices":devices}, ConfigDefaults()), definitions)
     body = _plan({"type":"single_shot", "quality":8})
     body["actions"][0]["device_id"] = device_id
@@ -149,8 +159,11 @@ def test_alternate_parameter_type_has_same_exported_and_effective_defaults():
     alternate = replace(capability, parameter_type="alternate", preview_supported=True,
         schema={**_SCHEMA,"properties":{**_SCHEMA["properties"],"type":{"const":"alternate"}}},
         defaults={"interval_s":Decimal("2.0")})
-    definitions = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb",
-        {"camera_take_photo":(capability, alternate)})})
+    definitions = DriverDefinitions({"camctl-adb": DriverDefinition(
+        "camctl-adb", {"camera_take_photo": (capability, alternate)},
+        synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver,
+    )})
     catalog = build_catalog(load_config({"devices":{"cam-1":{"kind":"camera","driver":"camctl-adb"}}}, ConfigDefaults()), definitions)
     document = catalog.describe_document()
     encode_describe_document(document)
@@ -175,7 +188,8 @@ def test_invalid_parameter_definition_fails_describe_and_acceptance(changes):
     from camctl.acceptance.schema import RuleError
     capability = _DEFINITIONS.drivers["camctl-adb"].actions["camera_take_photo"][0]
     bad = replace(capability, schema={**_SCHEMA, **changes})
-    definitions = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb", {"camera_take_photo":(bad,)})})
+    definitions = DriverDefinitions({"camctl-adb":DriverDefinition(
+        "camctl-adb", {"camera_take_photo":(bad,)}, synthetic_driver_declaration(), source_storage_resolver=synthetic_source_storage_resolver)})
     config = load_config({"devices":{"cam-1":{"kind":"camera","driver":"camctl-adb"}}}, ConfigDefaults())
     catalog = build_catalog(config, definitions)
     with pytest.raises(RuleError):
@@ -190,7 +204,8 @@ def test_valid_parameter_local_reference_is_self_contained():
     schema = {**_SCHEMA, "$defs":{"quality":{"type":"integer","minimum":1,"maximum":10}},
         "properties":{**_SCHEMA["properties"],"quality":{"$ref":"#/$defs/quality"}}}
     cap = replace(capability, schema=schema)
-    defs = DriverDefinitions({"camctl-adb":DriverDefinition("camctl-adb", {"camera_take_photo":(cap,)})})
+    defs = DriverDefinitions({"camctl-adb":DriverDefinition(
+        "camctl-adb", {"camera_take_photo":(cap,)}, synthetic_driver_declaration(), source_storage_resolver=synthetic_source_storage_resolver)})
     config = load_config({"devices":{"cam-1":{"kind":"camera","driver":"camctl-adb"}}},ConfigDefaults())
     catalog = build_catalog(config, defs)
     assert validate_new_body(_plan({"type":"single_shot","quality":8}),catalog).actions[0].ok

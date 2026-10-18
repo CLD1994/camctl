@@ -10,7 +10,7 @@ from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.drivers.registry import DriverStatus
 from camctl.devices.evidence import EvidenceError, EvidenceRegistry
 from camctl.devices.ports import ControlRequest, DriverDeclaration, DeviceCallResult
-from camctl.devices.tasks import CaptureTaskFactory
+from camctl.devices.tasks import CaptureStorage, CaptureTaskFactory
 from .commands import CameraModel
 from .definitions import candidate_capabilities
 from .filesystem import ShellFileTools
@@ -43,6 +43,11 @@ class CameraContract:
     capture_read_parallel_supported: bool = False
     recovery_operations: frozenset[str] = frozenset()
     result_reader: Callable[[Any, ControlRequest, int], Awaitable[DeviceCallResult]] | None = None
+
+    @staticmethod
+    def source_storage_resolver(_declaration: Mapping[str, object]) -> CaptureStorage:
+        """ADB 相机当前把拍摄正式产物固定保留在设备文件中。"""
+        return CaptureStorage.DEVICE
 
     def __post_init__(self):
         object.__setattr__(self, "task_factories", MappingProxyType(dict(self.task_factories)))

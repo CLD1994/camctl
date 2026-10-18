@@ -10,7 +10,7 @@ from unicodedata import category
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 from camctl.devices.tasks import CaptureStorage
 
-__all__ = ["CameraConfig", "read_camera_config"]
+__all__ = ["CameraConfig", "read_camera_config", "resolve_source_storage"]
 
 
 @dataclass(frozen=True)
@@ -70,3 +70,8 @@ def read_camera_config(declaration: Mapping[str, object]) -> CameraConfig:
         raise ValueError("Hasselblad output_storage 不合法") from error
 
     return CameraConfig(executable, serial, product_id, storage)
+
+
+def resolve_source_storage(declaration: Mapping[str, object]) -> CaptureStorage:
+    """复用 Hasselblad 配置校验解析拍摄正式源，不访问设备或主机文件。"""
+    return read_camera_config(declaration).output_storage

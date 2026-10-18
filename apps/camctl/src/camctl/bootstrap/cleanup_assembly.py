@@ -26,6 +26,7 @@ from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError, DriverRegistry, port_for)
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
+from camctl.host_files.declarations import HOST_FILE_DECLARATION
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.outputs.cleanup_flow import (
     CleanupRuntime, HostArtifactPort, LocalArtifactRequest,
@@ -56,6 +57,8 @@ class HostArtifacts(HostArtifactPort):
     删除目标相对 staging 工作根解析；删除成功与目标本就不在同样
     产出可靠缺席观察，输入输出失败保留调用错误进入查询核实。
     """
+
+    declaration = HOST_FILE_DECLARATION
 
     def __init__(self, staging: Path) -> None:
         self._staging = Path(staging)

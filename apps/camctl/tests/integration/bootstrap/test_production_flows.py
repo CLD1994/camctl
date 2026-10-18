@@ -10,7 +10,6 @@ result 端口观察转成候选产物文件；受限会话（墙钟检查失败�
 
 from __future__ import annotations
 
-
 import asyncio
 import time
 from decimal import Decimal
@@ -18,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from device_driver_fixtures import synthetic_source_storage_resolver
 
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
@@ -223,7 +224,8 @@ class TestRunSessionProductionScheduling:
             cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
         driver = _ProductionDriver({1: [_entry("seq-1")]})
         driver_id = cfg.devices["cam-1"]["driver"]
-        register_drivers(_entry_for_driver(driver_id, driver))
+        entry = _entry_for_driver(driver_id, driver)
+        register_drivers(entry)
         parameter = _TimelapseCatalog().parameter_definition(
             "cam-1", "camera_timelapse", "timelapse")
         assert parameter is not None and parameter.task_factory is not None
@@ -234,6 +236,8 @@ class TestRunSessionProductionScheduling:
                 name="延时摄影", description="发送后等待的延时摄影替身",
                 preview_supported=False, schema=parameter.schema,
                 defaults=parameter.defaults, task_factory=parameter.task_factory),)},
+            declaration=entry.declaration,
+            source_storage_resolver=synthetic_source_storage_resolver,
         )}))
         await _submit_plan(
             tmp_path, cfg, catalog,

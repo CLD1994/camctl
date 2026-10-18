@@ -59,6 +59,9 @@ class DriverDeclaration:
     local_read_recovery_supported: bool = False
 
     def __post_init__(self) -> None:
+        for name, value in vars(self).items():
+            if name != "adb_foreground_recovery_operations" and type(value) is not bool:
+                raise ValueError(f"驱动声明字段 {name} 必须是布尔值")
         operations = self.adb_foreground_recovery_operations
         if not isinstance(operations, frozenset) or not operations <= OPERATIONS:
             raise ValueError("前台命令恢复适用范围必须是已登记操作的 frozenset")

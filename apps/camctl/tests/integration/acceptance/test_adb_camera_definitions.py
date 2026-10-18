@@ -22,6 +22,7 @@ from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartR
 from camctl.persistence.repositories.history import HistoryRepository
 from .test_acceptance import _accept, _plan_body, _owned, RealFileReader, environment
 from .test_fields import _action_facts
+from ..devices.adb_camera_fixtures import software_contract
 
 pytestmark = pytest.mark.asyncio
 
@@ -49,8 +50,10 @@ def _catalog(driver, *, duration_default=None, device_id="cam-1", baseline=True,
         capabilities = [replace(cap, schema=schema, defaults={"duration_s": duration_default})
                         if cap is record else cap for cap in capabilities]
     config = load_config({"devices": {device_id: {"kind": "camera", "driver": driver}}}, ConfigDefaults())
+    contract = software_contract(driver)
     return build_catalog(config, DriverDefinitions({driver: DriverDefinition(driver,
-        {cap.action_type: (cap,) for cap in capabilities})}))
+        {cap.action_type: (cap,) for cap in capabilities},
+        contract.declaration, source_storage_resolver=contract.source_storage_resolver)}))
 
 
 def _legacy_action6_catalog(interval_s, duration_s):

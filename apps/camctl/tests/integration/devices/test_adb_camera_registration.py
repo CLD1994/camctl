@@ -1,6 +1,7 @@
 """双相机候选隔离及正常装配使用同一份完整契约。"""
 
 from dataclasses import replace
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -9,28 +10,32 @@ import sys
 
 import pytest
 
+from device_driver_fixtures import (
+    synthetic_driver_declaration,
+    synthetic_source_storage_resolver,
+)
+
+from camctl.acceptance.schema import RuleError
 from camctl.acceptance.service import PlanDisposition
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.contracts.enums import enum_for
+from camctl.devices import definitions_runtime
+from camctl.devices.bindings import DeviceBinding
 from camctl.devices.catalog import DriverDefinition, DriverDefinitions, build_catalog
+from camctl.devices.drivers import runtime as drivers_runtime
+from camctl.devices.drivers.adb_cameras import registration
 from camctl.devices.drivers.adb_cameras.commands import CameraModel
+from camctl.devices.drivers.adb_cameras.contracts import CameraCall
 from camctl.devices.drivers.adb_cameras.definitions import candidate_capabilities
-
+from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
+from camctl.devices.drivers.registry import CapabilityNotDeclaredError
+from camctl.devices.ports import ControlRequest
+from camctl.devices.tasks import CaptureStorage
+from camctl.operations.models import AttemptTicket, EffectState, SettlementBasis
+from camctl.operations.process import LocalExit, RawToolOutcome
 from ..acceptance.test_acceptance import _accept, _plan_body, environment
 from ..acceptance.test_adb_camera_definitions import _params
 from .adb_camera_fixtures import software_contract
-from camctl.devices.drivers.adb_cameras import registration
-from camctl.devices.drivers.adb_cameras.contracts import CameraCall
-from camctl.devices.drivers import runtime as drivers_runtime
-from camctl.devices import definitions_runtime
-from camctl.acceptance.schema import RuleError
-from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
-from camctl.devices.bindings import DeviceBinding
-from camctl.devices.ports import ControlRequest
-from camctl.devices.drivers.registry import CapabilityNotDeclaredError
-from camctl.operations.models import AttemptTicket, EffectState, SettlementBasis
-from camctl.operations.process import LocalExit, RawToolOutcome
-from decimal import Decimal
 
 
 @pytest.fixture
@@ -51,13 +56,39 @@ def test_static_and_runtime_registration_share_complete_contract_and_refresh_bin
     entry = drivers_runtime.current_registry().entry(model)
     described = build_catalog(original, definitions_runtime.current_driver_definitions()).describe_document()
     assert {action["type"] for action in described["devices"][0]["actions"]} == {"camera_record", "camera_timelapse"}
+    catalog = build_catalog(original, definitions_runtime.current_driver_definitions())
+    definition = definitions_runtime.current_driver_definitions().drivers[model]
+    assert definition.source_storage_resolver(original.devices["cam-1"]) is CaptureStorage.DEVICE
+    assert catalog.source_delete_supported("cam-1") is contract.declaration.delete_supported
     assert entry.evidence is contract.evidence
     assert entry.declaration == contract.declaration
+    assert definitions_runtime.current_driver_definitions().drivers[model].declaration == entry.declaration
     assert entry.driver.contract is contract
     assert not entry.declaration.query_supported
     registration.register_builtin_camera_drivers(current)
     assert drivers_runtime.current_registry().entry(model) is entry
     assert entry.driver.devices is current.devices
+
+
+def test_builtin_adb_contracts_keep_device_source_and_declared_delete_value(isolated_registration):
+    config = load_config({"devices": {
+        "action6": {"kind": "camera", "driver": CameraModel.ACTION6,
+                    "adb": {"serial": "serial-action6"}},
+        "osmo": {"kind": "camera", "driver": CameraModel.OSMO360II,
+                 "adb": {"serial": "serial-osmo"}},
+    }}, ConfigDefaults())
+
+    registration.register_builtin_camera_drivers(config)
+
+    definitions = definitions_runtime.current_driver_definitions()
+    catalog = build_catalog(config, definitions)
+    for device_id, driver_id in (
+        ("action6", CameraModel.ACTION6),
+        ("osmo", CameraModel.OSMO360II),
+    ):
+        declaration = definitions.drivers[driver_id].declaration
+        assert declaration.delete_supported is False
+        assert catalog.source_delete_supported(device_id) is False
 
 
 @pytest.mark.parametrize("missing", [CameraCall.SETTING, CameraCall.START, CameraCall.RESULT, "task", "files", "evidence"])
@@ -79,7 +110,9 @@ def test_incomplete_contract_contents_are_filtered_even_with_task_factory(isolat
 def test_collision_is_rejected_before_either_registry_changes(isolated_registration, monkeypatch):
     contracts = tuple(software_contract(model) for model in CameraModel)
     monkeypatch.setattr(registration, "builtin_camera_contracts", lambda: contracts)
-    foreign = DriverDefinition(CameraModel.OSMO360II, {"camera_record": (candidate_capabilities(CameraModel.OSMO360II)[0],)})
+    foreign = DriverDefinition(CameraModel.OSMO360II,
+        {"camera_record": (candidate_capabilities(CameraModel.OSMO360II)[0],)},
+        synthetic_driver_declaration(), source_storage_resolver=synthetic_source_storage_resolver)
     definitions_runtime.register_driver_definitions(foreign)
     with pytest.raises(RuleError):
         registration.register_builtin_camera_drivers(load_config(None, ConfigDefaults()))
@@ -146,8 +179,10 @@ async def test_pending_contract_is_not_described_or_accepted(environment, tmp_pa
                        for cap in candidate_capabilities(model))
     assert all(cap.task_factory is None for cap in candidates)
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": model}}}, ConfigDefaults())
+    contract = software_contract(model)
     catalog = build_catalog(config, DriverDefinitions({model: DriverDefinition(model, {
-        capability.action_type: (capability,) for capability in candidates})}))
+        capability.action_type: (capability,) for capability in candidates},
+        contract.declaration, source_storage_resolver=contract.source_storage_resolver)}))
     described = catalog.describe_document()["devices"][0]["actions"]
     assert described == []
     assert not catalog.device_supports("cam-1", action_type)

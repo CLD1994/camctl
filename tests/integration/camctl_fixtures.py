@@ -635,6 +635,28 @@ class _MemoryStream:
         return None
 
 
+def _stub_driver_declaration():
+    """跨组件替身的静态目录与运行登记共用能力声明。"""
+    from camctl.devices.ports import DriverDeclaration
+
+    return DriverDeclaration(
+        control_supported=True,
+        stop_supported=True,
+        query_supported=True,
+        result_supported=True,
+        read_supported=True,
+        digest_supported=True,
+        delete_supported=True,
+    )
+
+
+def _stub_source_storage_resolver(_device_declaration):
+    """跨组件相机替身沿用设备正式源。"""
+    from camctl.devices.tasks import CaptureStorage
+
+    return CaptureStorage.DEVICE
+
+
 def _stub_definition(spec: dict):
     """替身的驱动定义：照片单张与设备自结束的延时任务。"""
     from decimal import Decimal
@@ -714,6 +736,8 @@ def _stub_definition(spec: dict):
                 task_factory=timelapse_task,
                 video_size_estimate=estimates.get("camera_timelapse")),),
         },
+        declaration=_stub_driver_declaration(),
+        source_storage_resolver=_stub_source_storage_resolver,
     )
 
 
@@ -723,7 +747,6 @@ def install_stub_driver(spec: dict) -> None:
     from camctl.devices.drivers.registry import DriverEntry, DriverStatus
     from camctl.devices.drivers.runtime import register_drivers
     from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-    from camctl.devices.ports import DriverDeclaration
     from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
     evidence = EvidenceRegistry((RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT) + tuple(
@@ -737,15 +760,7 @@ def install_stub_driver(spec: dict) -> None:
     register_drivers(DriverEntry(
         driver_id=spec["driver_id"],
         driver=_ScriptedStubDriver(spec, Path(spec.get("gate_dir", "."))),
-        declaration=DriverDeclaration(
-            control_supported=True,
-            stop_supported=True,
-            query_supported=True,
-            result_supported=True,
-            read_supported=True,
-            digest_supported=True,
-            delete_supported=True,
-        ),
+        declaration=_stub_driver_declaration(),
         evidence=evidence,
         status=DriverStatus.SOFTWARE_CONTRACT_VERIFIED,
     ))

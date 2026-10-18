@@ -7,6 +7,10 @@ from camctl.devices.catalog import (
     DriverDefinitions,
     build_catalog,
 )
+from device_driver_fixtures import (
+    synthetic_driver_declaration,
+    synthetic_source_storage_resolver,
+)
 
 
 def unavailable_task_factory(params):
@@ -47,5 +51,5 @@ def catalog_for_capabilities(*capabilities):
     return build_catalog(config, DriverDefinitions({
         "estimate_demo": DriverDefinition("estimate_demo", {
             action_type: tuple(items) for action_type, items in actions.items()
-        }),
+        }, synthetic_driver_declaration(), source_storage_resolver=synthetic_source_storage_resolver),
     }))
