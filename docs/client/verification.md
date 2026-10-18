@@ -2,6 +2,23 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## Node.js 26 的兼容性与安装验证（2026-10-18 UTC）
+
+客户端支持的运行时范围由 [package.json](../../apps/client/package.json) 的 `engines.node` 定义，运行步骤见[客户端运行说明](running.md)。支持范围调整涉及包元信息和运行说明，应用源码及依赖版本保持一致；锁文件由 npm 生成，完整内容比较确认仅根包的 Node.js 版本声明变化。
+
+在 Linux x86_64 上使用 Node.js 26.12.0、npm 11.20.0 和 SQLite 3.54.0，在隔离源码副本中执行以下检查。Node.js 下载归档与官方同目录的 `SHASUMS256.txt` 一致。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 按锁文件安装依赖、类型检查和网页构建 | 全部退出 0；构建 464 个模块，保留既有主包超过 500 kB 的提示。 |
+| 完整单元测试 | 59 个文件、2890 项通过，21.01 秒，退出 0。 |
+| 指定集成测试 | 8 个文件、356 项通过，28.14 秒，退出 0；覆盖数据库、草稿及固定请求、真实 main 启动与重启、状态完整性、参数保存与恢复、报告导入、文件导入和电机精确数字。 |
+| 部署包运行 | 实际 ZIP 解压后安装生产依赖，Chromium 完成显式初始化和两设备说明展示；OSMO 360 与 Hasselblad 混合计划导出、正常停止和重启后的原请求保持均通过。 |
+| 支持范围的严格安装 | Node.js 24.20.0 和 26.12.0 分别使用同一锁文件执行 `npm ci --omit=dev --engine-strict --no-audit --no-fund`，各安装 92 个包，均退出 0。 |
+| 当前工作区类型与构建 | 使用 Node.js 26.12.0 分别执行 TypeScript 与 Vite 入口，均退出 0。 |
+
+兼容性检查的命令、UTC 时间、退出码和日志保存在 `.local/verification/node26-compat-17eff82/`，支持范围调整后的严格安装与构建记录保存在 `.local/deployments/20261019-node26-support/evidence/`。本节属于 Linux 快速兼容性验证；Node.js 26 的完整集成套件、Windows 和 macOS 实际运行，以及 Docker 容器运行分别保留独立验收边界。
+
 ## 设备能力声明的安装版消费验证（2026-10-18）
 
 在 Linux x86_64／WSL2、Node.js 24.20.0、pnpm 12.3.4 和 Python 3.11.16 中，执行[安装版联合用例](../../tests/integration/test_device_capability_declarations.py)，6 项通过，退出 0。用例在仓库外离线安装当前 wheel，使用真实配置导出全部内置拍摄任务，并将原始 JSON 交给客户端；组件测试的默认夹具仍独立于 Python。

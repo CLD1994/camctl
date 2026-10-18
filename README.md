@@ -12,7 +12,7 @@ camctl 项目包含个人电脑客户端、嵌入式 Linux 上的设备控制 CL
 
 ## 启动客户端
 
-需要 Node.js 24.16。在仓库根目录的 PowerShell 执行：
+先按[客户端运行说明](docs/client/running.md)准备受支持的 Node.js 版本。在仓库根目录的 PowerShell 执行：
 
 ```powershell
 New-Item -ItemType Directory -Force data
