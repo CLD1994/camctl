@@ -150,3 +150,43 @@ def test_saved_not_dispatched_requires_its_fixed_original_contract(monkeypatch, 
     monkeypatch.setattr(cleanup_results, "_read_exact_cleanup_attempt", lambda *args: saved)
     with pytest.raises(ConsistencyError):
         cleanup_results.saved_cleanup_not_dispatched(None, ticket, 91)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["direct", "round"])
+@pytest.mark.parametrize("member_status", [None, 1, 2, 3])
+async def test_pending_companion_requires_terminal_member_before_any_progress(entry, member_status):
+    from camctl.operations.attempts import StaleRunFinish, RunOutcome
+    from camctl.outputs.cleanup_flow import (
+        PendingCleanupCompanion, delete_source_file, advance_cleanup)
+    runtime = _runtime(DeviceCallResult((), None), _saved(AttemptStatus.FAILED))
+    pending = PendingCleanupCompanion(runtime.owned.metadata.instance_id,
+        StaleRunFinish(("exists/91",), RunOutcome.CANCELED, 1_750_000_000_123_456),
+        new_operation_key())
+    runtime.pending_companions[91] = pending
+    if entry == "round":
+        from camctl.outputs.cleanup_ownership import PendingCleanupSave
+        from camctl.outputs.cleanup_flow import FinishCleanupAction
+        runtime.pending_saves[("finish_cleanup_action", 77)] = PendingCleanupSave(
+            runtime.owned.metadata.instance_id, "finish_cleanup_action",
+            FinishCleanupAction(77, 1_750_000_000_123_456), new_operation_key())
+    original_read = runtime.owned.connection.execute.side_effect
+
+    def member_read(statement, parameters=()):
+        cursor = original_read(statement, parameters)
+        if "SELECT status,error_code,error_details_json FROM cleanup_items" in statement:
+            cursor.fetchone.return_value = None if member_status is None else (member_status, None, None)
+        return cursor
+
+    runtime.owned.connection.execute.side_effect = member_read
+    with pytest.raises(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
+        if entry == "direct":
+            await delete_source_file(runtime, 91)
+        else:
+            await advance_cleanup(runtime)
+    assert runtime.pending_companions[91] is pending
+    assert all(call.args[0].lstrip().upper().startswith("SELECT")
+               for call in runtime.owned.connection.execute.call_args_list)
+    assert runtime.outputs.mock_calls == []
+    assert runtime.operations.mock_calls == []
+    assert runtime.driver.mock_calls == []

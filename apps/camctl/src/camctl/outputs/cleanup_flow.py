@@ -762,6 +762,26 @@ def _exhaustion_details(
             "attempts_used": _attempts_used(connection, f"{operation}/{item_id}")}
 
 
+def _companion_member_result(runtime: CleanupRuntime, item_id: int):
+    """已有伴随责任先核对原成员终态，不能靠普通推进补造前提。"""
+    # 回执 ALREADY 时，以真实可靠成员终态收场；原拟写入值不覆盖它。
+    member = runtime.owned.connection.execute(
+        "SELECT status,error_code,error_details_json FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+    if member is None or member[0] not in _MEMBER_TERMINAL:
+        raise ConsistencyError("待存伴随流程没有可靠成员终态")
+    status, error = _terminal_companion(member[0], member[1])
+    if error is not None and member[2] is not None:
+        from camctl.contracts.json_values import parse_exact_json
+        from dataclasses import replace
+        error = replace(error, details=parse_exact_json(member[2]))
+    pending = runtime.pending_companions.get(item_id)
+    if pending is not None and (
+            pending.database_id != runtime.owned.metadata.instance_id
+            or pending.request.status is not status or pending.request.error != error):
+        raise ConsistencyError("原伴随流程收场与本次数据库或成员结果不对应")
+    return status, error
+
+
 def _settle_companion_runs(
         runtime: CleanupRuntime, item_id: int) -> str | None:
     """成员终态后统一收场删除与存在性查询两条伴随流程。
@@ -774,16 +794,7 @@ def _settle_companion_runs(
     from camctl.operations.attempts import StaleRunFinish
     from camctl.persistence.models import DbOutcomeKind
 
-    # 回执 ALREADY 时，以真实可靠成员终态收场；原拟写入值不覆盖它。
-    member = runtime.owned.connection.execute(
-        "SELECT status,error_code,error_details_json FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    if member is None or member[0] not in _MEMBER_TERMINAL:
-        raise ConsistencyError("伴随流程收场缺少可靠成员终态")
-    status, error = _terminal_companion(member[0], member[1])
-    if error is not None and member[2] is not None:
-        from camctl.contracts.json_values import parse_exact_json
-        from dataclasses import replace
-        error = replace(error, details=parse_exact_json(member[2]))
+    status, error = _companion_member_result(runtime, item_id)
     pending = runtime.pending_companions.get(item_id)
     if pending is None:
         pending = PendingCleanupCompanion(
@@ -793,9 +804,6 @@ def _settle_companion_runs(
                 status=status, error=error, occurred_at=runtime.occurred_at()),
             new_operation_key())
         runtime.pending_companions[item_id] = pending
-    elif (pending.database_id != runtime.owned.metadata.instance_id
-            or pending.request.status is not status or pending.request.error != error):
-        raise ConsistencyError("原伴随流程收场与本次数据库或成员结果不对应")
     settled = runtime.operations.finish_stale_runs(
         pending.request, pending.key, runtime.owned)
     from camctl.persistence.models import DbOutcome
@@ -853,6 +861,8 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
     """
     from camctl.persistence.models import DbOutcomeKind
 
+    if item_id in runtime.pending_companions:
+        _companion_member_result(runtime, item_id)
     for (method, target_id), saved_request in tuple(runtime.pending_saves.items()):
         if target_id != item_id or not hasattr(saved_request.request, "item_id"):
             continue
@@ -1938,6 +1948,9 @@ async def advance_cleanup(runtime: CleanupRuntime) -> None:
     合未固定先固定（范围来源未就绪保持等待），集合已固定逐成员
     推进删除，全部成员终态后保存汇总终态。
     """
+    # 伴随责任的终态前提必须在本轮任何保存前成立。
+    for item_id in runtime.pending_companions:
+        _companion_member_result(runtime, item_id)
     # 本地保存集合先于动作状态和当前设备目录；新工厂只接手数据。
     for (method, _target_id), pending in tuple(runtime.pending_saves.items()):
         if hasattr(pending.request, "action_id"):

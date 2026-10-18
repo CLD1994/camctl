@@ -826,3 +826,77 @@ async def test_delete_facts_rejects_incomplete_saved_not_dispatched(environment,
     with pytest.raises(ConsistencyError):
         _output_delete_facts(owned.connection, output_id)
     assert not driver.deletes and not driver.queries
+
+
+@pytest.mark.parametrize("member_status", [4, 5, 6])
+async def test_existing_companion_resumes_actual_terminal_member_without_new_call(environment, member_status):
+    from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
+    owned, context, runtime, driver, item_id = await _prepared(environment)
+    companion = _FaultCompanion()
+    runtime.operations = companion
+    if member_status == 5:
+        driver.unknown_delete = True
+        driver.matrix_enabled, driver.present = True, True
+        runtime.delete_config = replace(runtime.delete_config, max_attempts=1)
+        assert (await delete_source_file(runtime, item_id)).phase == "still_present"
+    elif member_status == 6:
+        action_id = owned.connection.execute(
+            "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0]
+        _apply_cleanup_cancel(owned, action_id)
+    assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
+    pending = runtime.pending_companions[item_id]
+    original_request, original_key = pending.request, pending.key
+    raw_owner = runtime.pending_deletes.get(item_id)
+    raw = None if raw_owner is None else raw_owner.actual
+    member_before = owned.connection.execute("SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+    assert owned.connection.execute(
+        "SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == member_status
+    attempts_before = owned.connection.execute(
+        "SELECT a.* FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+        " WHERE r.cleanup_item_id=? ORDER BY a.id", (item_id,)).fetchall()
+    calls_before = len(driver.deletes), len(driver.queries)
+    companion.enabled = False
+    assert (await delete_source_file(runtime, item_id)).phase == "already_terminal"
+    assert companion.calls == [(original_request, original_key), (original_request, original_key)]
+    assert pending.request is original_request and pending.key == original_key
+    if raw_owner is not None:
+        assert raw_owner.actual is raw
+    assert owned.connection.execute("SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == member_before
+    assert owned.connection.execute(
+        "SELECT a.* FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+        " WHERE r.cleanup_item_id=? ORDER BY a.id", (item_id,)).fetchall() == attempts_before
+    assert (len(driver.deletes), len(driver.queries)) == calls_before
+    assert not runtime.pending_companions
+
+
+@pytest.mark.parametrize("member_status", [None, 1, 2, 3])
+async def test_pending_companion_nonterminal_preserves_database_and_calls(environment, monkeypatch, member_status):
+    from camctl.contracts.values import new_operation_key
+    from camctl.operations.attempts import StaleRunFinish, RunOutcome
+    from camctl.outputs.cleanup_flow import PendingCleanupCompanion, ProgressCleanupItem
+    if member_status == 1:
+        # 保留公开固定目标事务产生的未限制成员，不执行下一步 restrict。
+        with monkeypatch.context() as patch:
+            patch.setattr(OutputsRepository, "restrict_cleanup_item",
+                          lambda *args: DbOutcome(DbOutcomeKind.COMPLETED))
+            owned, context, runtime, driver, item_id = await _prepared(environment)
+    else:
+        owned, context, runtime, driver, item_id = await _prepared(environment)
+    if member_status == 3:
+        saved = runtime.outputs.progress_cleanup_item(
+            ProgressCleanupItem(item_id, runtime.occurred_at()), new_operation_key(), owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    if member_status is None:
+        item_id += 999
+    else:
+        assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == member_status
+    pending = PendingCleanupCompanion(owned.metadata.instance_id,
+        StaleRunFinish((f"exists/{item_id}",), RunOutcome.CANCELED, runtime.occurred_at()),
+        new_operation_key())
+    runtime.pending_companions[item_id] = pending
+    database_before = tuple(owned.connection.iterdump())
+    with pytest.raises(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
+        await delete_source_file(runtime, item_id)
+    assert tuple(owned.connection.iterdump()) == database_before
+    assert runtime.pending_companions[item_id] is pending
+    assert not driver.deletes and not driver.queries
