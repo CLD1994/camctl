@@ -4,7 +4,11 @@
 
 ## Windows 本地运行
 
-支持 Node.js 24.16 及以上的 24.x，或 26.12 及以上的 26.x；机器可读版本范围由 [package.json](../../apps/client/package.json) 的 `engines.node` 定义。浏览器须支持原生 `JSON.rawJSON` 和 `JSON.isRawJSON`，以保留受理失败报告中超出普通浮点数范围的原始数字；各版本的实际验证环境与范围见[客户端验证记录](verification.md)。PowerShell 在仓库根目录执行：
+客户端部署运行支持 Node.js 24.16.0 至 26.12.0 之间的正式版本，包含两个端点及 25.x；机器可读版本范围由 [package.json](../../apps/client/package.json) 的 `engines.node` 定义。浏览器须支持原生 `JSON.rawJSON` 和 `JSON.isRawJSON`，以保留受理失败报告中超出普通浮点数范围的原始数字；各版本的实际验证环境与范围见[客户端验证记录](verification.md)。
+
+源码构建和测试还须满足开发依赖的 Node.js 要求，当前 Vitest 排除 25.x，开发环境使用受支持的 24.x 或 26.x。Node.js 25 用户使用已构建的部署包，按包内 README 执行 `npm ci --omit=dev --engine-strict` 安装生产依赖后启动。
+
+从源码启动时，在仓库根目录的 PowerShell 执行：
 
 ```powershell
 New-Item -ItemType Directory -Force data

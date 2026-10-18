@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## Node.js 连续版本范围的安装验证（2026-10-18 UTC）
+
+客户端部署运行的版本范围由 [package.json](../../apps/client/package.json) 定义。使用 npm 随附的 semver 校验器核对 24.16.0、25.0.0、25.9.0、26.0.0、26.11.0 和 26.12.0 均被接受；24.15.0、26.12.1、27.0.0 和预发布版本被拒绝，两个端点之间为连续范围。
+
+Linux x86_64 上的 Node.js 24.20.0、25.9.0 和 26.12.0 分别使用当前锁文件执行 `npm ci --omit=dev --engine-strict --no-audit --no-fund`，各安装 92 个生产依赖，均退出 0。锁文件内容比较确认仅根包的运行时声明变化。25.9.0 的下载归档与官方同目录 `SHASUMS256.txt` 一致，实际 SQLite 为 3.51.3。
+
+包含开发依赖的 Node.js 25.9.0 严格安装返回 `EBADENGINE`，错误来自 Vitest 5.0.1 自身的 Node.js 要求。生产部署与开发测试分别遵守各自依赖要求，步骤见[客户端运行说明](running.md)。命令、UTC、成功与失败日志及版本边界记录保存在 `.local/deployments/20261019-node24-26-range/`；本节不表示区间内每个补丁版本均单独实测。
+
 ## Node.js 26 的兼容性与安装验证（2026-10-18 UTC）
 
 客户端支持的运行时范围由 [package.json](../../apps/client/package.json) 的 `engines.node` 定义，运行步骤见[客户端运行说明](running.md)。支持范围调整涉及包元信息和运行说明，应用源码及依赖版本保持一致；锁文件由 npm 生成，完整内容比较确认仅根包的 Node.js 版本声明变化。
