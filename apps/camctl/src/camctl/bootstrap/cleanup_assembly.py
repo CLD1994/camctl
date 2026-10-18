@@ -655,6 +655,7 @@ class CleanupFlow:
         try:
             await self._background(context)
         finally:
+            self._release_consumed_notification()
             task = self._background.unconsumed_task
             if task is not None and task is not self._notification_task:
                 self._notification_task = task
@@ -672,7 +673,15 @@ class CleanupFlow:
                 task.add_done_callback(completed)
 
     def check_completed(self):
-        self._background.check_completed()
+        try:
+            self._background.check_completed()
+        finally:
+            self._release_consumed_notification()
+
+    def _release_consumed_notification(self):
+        if self._background.unconsumed_task is None:
+            self._notification_task = None
+            self._notified = False
 
     def required_settlements(self):
         return self._local_work.required_settlements()
@@ -681,7 +690,10 @@ class CleanupFlow:
         self._stop_work.stop_new_work()
 
     async def settle(self):
-        await self._local_work.settle()
+        try:
+            await self._local_work.settle()
+        finally:
+            self._release_consumed_notification()
 
 
 def cleanup_flow(factory: Callable[[Any], CleanupRuntime | None], *, pending_collections=None,

@@ -1,6 +1,7 @@
 """停止入口失败后仍完整尝试各拥有者，并等待真实收场。"""
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -162,6 +163,57 @@ async def test_normal_settlement_does_not_consume_future_stop_request():
     assert calls == [('settle', 'ordinary'), ('settled', 'ordinary')]
     waiter.request_stop()
     assert calls[-1] == ('stop', 'ordinary')
+
+
+@pytest.mark.parametrize('link', ['direct', 'group_leaf', 'nested_group'])
+@pytest.mark.parametrize('existing_cause', [False, True])
+async def test_observer_keeps_notes_without_creating_reverse_cause_cycle(link, existing_cause):
+    entered, release, stopped = (asyncio.Event() for _ in range(3))
+    failure = ValueError('original stop diagnostic')
+    failure.add_note('original stop note')
+    previous = LookupError('original observer cause')
+    observed = []
+
+    class Work:
+        def stop_new_work(self):
+            cancellation = sys.exception()
+            observed.append(cancellation)
+            cancellation.add_note('original observer note')
+            if existing_cause:
+                cancellation.__cause__ = previous
+            if link == 'direct':
+                failure.__cause__ = cancellation
+            elif link == 'group_leaf':
+                failure.__cause__ = BaseExceptionGroup('existing cause group', [cancellation])
+            else:
+                intermediate = LookupError('existing intermediate')
+                intermediate.__cause__ = cancellation
+                failure.__cause__ = ExceptionGroup('existing cause group', [intermediate])
+            stopped.set()
+            raise failure
+
+        async def settle(self):
+            entered.set()
+            await release.wait()
+
+    context = SimpleNamespace(local_work=Work(), logging_owner=None)
+    observer = asyncio.create_task(_settle_local_work(context, stop_new=False))
+    await entered.wait()
+    observer.cancel('original observer')
+    await stopped.wait()
+    release.set()
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await observer
+    assert caught.value is observed[0]
+    assert caught.value.__cause__ is (previous if existing_cause else None)
+    assert caught.value.__notes__[0] == 'original observer note'
+    assert 'original stop diagnostic' in str(caught.value.__notes__)
+    assert 'original stop note' in str(caught.value.__notes__)
+
+
+@pytest.mark.parametrize('stop_new', [False, True])
+async def test_helper_without_local_work_completes_normally(stop_new):
+    await _settle_local_work(SimpleNamespace(local_work=None, logging_owner=None), stop_new=stop_new)
 
 
 @pytest.mark.parametrize('grouped', [False, True])

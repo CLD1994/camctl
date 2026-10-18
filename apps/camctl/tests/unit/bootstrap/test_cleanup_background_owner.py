@@ -162,6 +162,7 @@ async def test_repeated_settle_observer_cancel_keeps_actual_task_and_connection(
     context, owned = _context()
     flow = cleanup_flow(lambda _: object())
     await flow(context)
+    original_task = flow._notification_task
     observer = asyncio.create_task(flow.settle())
     await asyncio.sleep(0)
     observer.cancel('first observer')
@@ -169,13 +170,57 @@ async def test_repeated_settle_observer_cancel_keeps_actual_task_and_connection(
     observer.cancel('second observer')
     await asyncio.sleep(0)
     assert not observer.done() and flow.required_settlements() > 0
+    assert flow._notification_task is original_task
     owned.connection.close.assert_not_called()
     release.set()
     with pytest.raises(asyncio.CancelledError) as caught:
         await observer
     assert str(caught.value) == 'first observer'
     assert saved == ['actual'] and flow.required_settlements() == 0
+    assert flow._notification_task is None and not flow._notified
     owned.connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize('entry', ['call', 'check', 'settle'])
+@pytest.mark.parametrize('failed', [False, True])
+async def test_each_consumption_releases_notification_task_even_on_original_error(monkeypatch, entry, failed):
+    release = asyncio.Event()
+    failure = ValueError('original cleanup error')
+
+    async def advance(_runtime):
+        await release.wait()
+        if failed:
+            raise failure
+
+    monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
+    context, _owned = _context(WorkNotifier())
+    flow = cleanup_flow(lambda _: object())
+    await flow(context)
+    task = flow._notification_task
+    assert task is flow._background.unconsumed_task
+    flow.check_completed()
+    assert flow._notification_task is task and not task.done()
+    release.set()
+    await asyncio.sleep(0)
+    assert task.done() and flow._notification_task is task
+
+    async def consume():
+        if entry == 'call':
+            await flow(context)
+        elif entry == 'check':
+            flow.check_completed()
+        else:
+            await flow.settle()
+
+    if failed:
+        with pytest.raises(ValueError) as caught:
+            await consume()
+        assert caught.value is failure
+    else:
+        await consume()
+    assert flow._background.unconsumed_task is None
+    assert flow._notification_task is None and not flow._notified
+    assert flow.required_settlements() == 0
 
 
 @pytest.mark.parametrize('point', ['before_discovery', 'during_discovery', 'before_wait', 'waiting'])
@@ -250,6 +295,8 @@ async def test_scheduling_waiter_cancel_arms_actual_task_even_when_already_done(
         await schedule
     assert str(caught.value) == 'schedule observer'
     assert owner.required_settlements() > 0
+    assert owner._notification_task is owner._background.unconsumed_task
+    assert owner._notification_task is not None
     release.set()
     for _ in range(3):
         await asyncio.sleep(0)
@@ -263,6 +310,7 @@ async def test_scheduling_waiter_cancel_arms_actual_task_even_when_already_done(
         assert actual.value is failure
     owned.connection.close.assert_called_once()
     assert owner.required_settlements() == 0
+    assert owner._notification_task is None and not owner._notified
 
 
 async def test_queued_stop_after_scheduling_cancel_notifies_without_entering_round():
@@ -312,14 +360,17 @@ async def test_consuming_before_callback_invalidates_old_notification_and_next_r
         assert caught.value is failure
     else:
         owner.check_completed()
+    assert owner._notification_task is None and not owner._notified
     assert wake.snapshot().version == 0
     await owner(context)
     assert calls == [0, 1] and wake.snapshot().version == 0
+    assert owner._notification_task is owner._background.unconsumed_task
     gates[1].set()
     for _ in range(2):
         await asyncio.sleep(0)
     assert wake.snapshot().version == 1
     await owner.settle()
+    assert owner._notification_task is None and not owner._notified
 
 
 async def test_cleanup_stop_attempts_background_after_round_failure_and_keeps_both(monkeypatch):

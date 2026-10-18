@@ -1160,6 +1160,7 @@ async def _settle_local_work(
 
     task = asyncio.create_task(collect(), name="camctl-local-work-fact")
     cancellation: asyncio.CancelledError | None = None
+    control_before_cancellation: BaseException | None = None
     while True:
         try:
             fact = await asyncio.shield(task)
@@ -1167,6 +1168,7 @@ async def _settle_local_work(
         except asyncio.CancelledError as error:
             if cancellation is None:
                 cancellation = error
+                control_before_cancellation = records.first_control
                 records.request_stop()
                 records.request_sweep_cancel()
 
@@ -1175,7 +1177,7 @@ async def _settle_local_work(
         errors.append(fact.error)
     if cancellation is not None:
         # 仅本观察者的取消在此交付；共享waiter的父取消留给run边界。
-        control = records.first_control
+        control = control_before_cancellation
         if (control is not None and control is not records.parent_cancel
                 and any(any(control is item for item in _error_identity_objects(error))
                         for error in errors)):
@@ -1186,9 +1188,22 @@ async def _settle_local_work(
         others = [error for error in errors if error is not primary]
         for error in others:
             _attach_ordered_error_notes(primary, "本地实际责任收场异常", _ordered_error_sources(error))
-        # 保持已有cause；不能把包含primary的原组作为它自身的cause。
-        causes = [error for error in others
-                  if not any(primary is item for item in _error_identity_objects(error))]
+        def references_primary(error: BaseException) -> bool:
+            # 原组、锁事实及其已有cause都不能形成返回主对象的环。
+            pending = [error]
+            seen: set[int] = set()
+            while pending:
+                for item in _error_identity_objects(pending.pop()):
+                    if item is primary:
+                        return True
+                    if id(item) not in seen:
+                        seen.add(id(item))
+                        if item.__cause__ is not None:
+                            pending.append(item.__cause__)
+            return False
+
+        # 已有cause保持；不能反向链接到能够回到主对象的诊断。
+        causes = [error for error in others if not references_primary(error)]
         if primary.__cause__ is None and causes:
             cause = causes[0] if len(causes) == 1 else BaseExceptionGroup("本地停止及实际收场失败", causes)
             raise primary from cause
