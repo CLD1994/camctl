@@ -126,8 +126,15 @@ class HostArtifacts(HostArtifactPort):
             result, interruption, supervision_diagnostic = await _collect_file_result(
                 self._executor, owner, task, interruption, runner_error)
             if result is None:
-                error = (RuntimeError(supervision_diagnostic.render())
-                         if supervision_diagnostic is not None else interruption)
+                failures = []
+                if interruption is not None:
+                    failures.append(interruption)
+                if supervision_diagnostic is not None:
+                    failures.append(RuntimeError(supervision_diagnostic.render()))
+                error = (BaseExceptionGroup(
+                    "主机文件收场未取得原 completion，等待控制与监督诊断均须保留",
+                    failures) if len(failures) > 1 else
+                    failures[0] if failures else None)
                 raise ConsistencyError(
                     "主机文件任务监督收场未取得原 completion") from error
         else:
@@ -145,9 +152,10 @@ class HostArtifacts(HostArtifactPort):
                 raise LocalArtifactTaskFailure(
                     actual, None, "主机文件等待已取消，原 completion 已取回") from interruption
         if supervision_diagnostic is not None:
-            raise LocalArtifactTaskFailure(
-                actual, supervision_diagnostic) from RuntimeError(
-                    supervision_diagnostic.render())
+            failure = LocalArtifactTaskFailure(actual, supervision_diagnostic)
+            if interruption is not None and scope is None:
+                raise failure from interruption
+            raise failure from RuntimeError(supervision_diagnostic.render())
         return actual
 
     def _validate_request(self, request: LocalArtifactRequest) -> None:
