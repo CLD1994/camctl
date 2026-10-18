@@ -33,6 +33,31 @@ def test_two_capabilities_have_preview_and_real_device_ports():
     assert not ports.query_supported and not ports.delete_supported
 
 
+def test_formal_osmo_tasks_explain_requests_readback_estimate_and_actual_cancel_policy():
+    from camctl.devices.drivers.adb_cameras.timelapse_parameters import timelapse_intervals_s
+
+    capabilities = {cap.parameter_type: cap for cap in _contract().capabilities()
+                    if callable(cap.task_factory)}
+    record = capabilities["osmo360ii_record"]
+    record_task = record.task_factory({"type": "osmo360ii_record", "duration_s": 10})
+    assert record_task.stop_supported is True
+    assert record_task.cancel_completion_policy is None
+    for fact in ("全景", "8K", "30 fps", "D-Log M", "高码率", "请求", "Manual", "ISO 800",
+                 "1/60 秒", "5200 K", "Auto", "EV 0", "独立读回", "固定假定参考码率 170 Mbps",
+                 "不是实测平均值", "启动后", "取消"):
+        assert fact in record.description
+
+    timelapse = capabilities["osmo360ii_timelapse"]
+    interval = timelapse_intervals_s("dji-osmo360-ii")[0]
+    timelapse_task = timelapse.task_factory({"type": "osmo360ii_timelapse", "duration_s": interval + 1,
+                                             "interval_s": interval})
+    assert timelapse_task.stop_supported is True
+    assert timelapse_task.cancel_completion_policy == "finite_device_end"
+    for fact in ("全景", "8K", "30 fps", "仅手动", "ISO 800", "1/60 秒", "5200 K", "请求",
+                 "独立读回", "启动后", "取消", "有限目标", "自然结束", "不保证立即"):
+        assert fact in timelapse.description
+
+
 def test_record_task_requires_one_nonzero_osv_and_independent_stop_wait():
     task = _contract().task_factories["osmo360ii_record"]({"duration_s": 12})
     assert task.target_duration_s == 12 and task.stop_supported is True

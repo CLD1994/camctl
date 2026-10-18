@@ -37,6 +37,61 @@ def test_candidate_schema_is_self_contained_and_accepts_recording(driver):
     assert cap.defaults == {}
 
 
+def _schema_fields(schema):
+    for name, field in schema.get("properties", {}).items():
+        if name != "type":
+            yield name, field
+        for branch_key in ("oneOf", "anyOf"):
+            for branch in field.get(branch_key, ()):
+                yield from _schema_fields(branch)
+
+
+def test_formal_adb_parameters_describe_every_field_and_exposure_branch():
+    from camctl.devices.drivers.adb_cameras.action6_record import action6_record_contract
+    from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
+
+    capabilities = [
+        cap
+        for contract in (action6_record_contract(), osmo360ii_contract())
+        for cap in contract.capabilities()
+        if callable(cap.task_factory)
+    ]
+    assert {cap.parameter_type for cap in capabilities} == {
+        "action6_record",
+        "osmo360ii_record",
+        "osmo360ii_timelapse",
+    }
+
+    fields_by_type = {}
+    for cap in capabilities:
+        fields = dict(_schema_fields(cap.schema))
+        fields_by_type[cap.parameter_type] = fields
+        assert fields, cap.parameter_type
+        for name, field in fields.items():
+            assert isinstance(field.get("title"), str) and field["title"].strip(), (
+                cap.parameter_type,
+                name,
+                "missing readable title",
+            )
+            assert isinstance(field.get("description"), str) and field["description"].strip(), (
+                cap.parameter_type,
+                name,
+                "missing field meaning or unit",
+            )
+            if name in {"duration_s", "interval_s"}:
+                assert "秒" in field["description"]
+            if name == "compensation_ev":
+                assert "EV" in field["description"]
+            if name == "iso":
+                assert "ISO" in field["description"]
+
+    action6 = fields_by_type["action6_record"]
+    assert "可选" in action6["aperture"]["description"]
+    assert "省略" in action6["aperture"]["description"]
+    assert "可选" in action6["bitrate"]["description"]
+    assert "省略" in action6["bitrate"]["description"]
+
+
 @pytest.mark.parametrize("exposure", [
     {"mode": "manual", "iso": 800},
     {"mode": "auto", "compensation_ev": 0},

@@ -10,7 +10,8 @@ from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.drivers.registry import DriverStatus
 from camctl.devices.evidence import EvidenceError, EvidenceRegistry
 from camctl.devices.ports import ControlRequest, DriverDeclaration, DeviceCallResult
-from camctl.devices.tasks import CaptureStorage, CaptureTaskFactory
+from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
+from camctl.devices.task_metadata import cancellation_description
 from .commands import CameraModel
 from .definitions import candidate_capabilities
 from .filesystem import ShellFileTools
@@ -114,6 +115,9 @@ class CameraContract:
             factory = (self.task_factories.get(capability.parameter_type)
                        if ready and (capability.action_type != "camera_record" or declaration.stop_supported)
                        else None)
+            task = (factory({"type": capability.parameter_type, "duration_s": 1})
+                    if callable(factory) else None)
+            task_description = cancellation_description(task) if isinstance(task, CaptureTask) else ""
             capabilities.append(replace(capability, task_factory=factory,
                 name=("普通录像参数" if capability.action_type == "camera_record" else "原生延时摄影参数")
                     if callable(factory) else capability.name,
@@ -123,5 +127,6 @@ class CameraContract:
                                   "正常结束及文件写完依据待设备核实。", ""))
                              if callable(factory) else capability.description)
                     + (f"开始命令正常响应只确认相机已接受命令；主机额外等待 {STARTUP_MARGIN_MS // 1000} 秒启动余量，再计满原目标时长，不据此记录实际首帧时刻。"
-                       if callable(factory) and capability.action_type == "camera_record" else "")))
+                       if callable(factory) and capability.action_type == "camera_record" else "")
+                    + (f"{task_description}" if task_description else "")))
         return tuple(capabilities)

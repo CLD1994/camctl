@@ -30,8 +30,10 @@ def timelapse_intervals_s(model: str) -> tuple[int, ...]:
 def time_properties(model: str) -> dict:
     """返回独立的时间字段 Schema，数值保持精确秒数。"""
     return {
-        "interval_s": {"type": "number", "enum": list(timelapse_intervals_s(model))},
-        "duration_s": {"type": "integer", "enum": list(TIMELAPSE_DURATIONS_S)},
+        "interval_s": {"title": "采集间隔", "description": "相邻采集帧之间的目标间隔，单位秒；须短于本任务采集时长。",
+                        "type": "number", "enum": list(timelapse_intervals_s(model))},
+        "duration_s": {"title": "采集时长", "description": "设备侧的有限采集目标时长，单位秒；不含启动余量和结果等待时间。",
+                        "type": "integer", "enum": list(TIMELAPSE_DURATIONS_S)},
     }
 
 

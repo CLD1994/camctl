@@ -70,6 +70,7 @@ def test_hasselblad_photo_definition_is_exported_with_its_fixed_task():
     assert description["preview_supported"] is True
     assert description["schema"] == expected_schema
     assert all(word in description["description"] for word in ("单张", "RAW", "曝光", "白平衡", "对焦"))
+    assert all(word in description["description"] for word in ("启动前", "启动后", "不支持取消"))
     assert parameter is not None
     assert parameter.defaults == {}
     validator = Draft202012Validator(description["schema"])
@@ -80,5 +81,6 @@ def test_hasselblad_photo_definition_is_exported_with_its_fixed_task():
 
     task = parameter.task_factory({"type": "hasselblad_photo"})
     assert task.action_type == "camera_take_photo"
+    assert task.stop_supported is None
     assert task.output_storage is CaptureStorage.HOST
     assert task.start_call_timeout_s.as_tuple() == (0, (1, 8, 0), 0)

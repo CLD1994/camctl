@@ -11,6 +11,7 @@ from camctl.contracts.json_values import JsonValue
 from camctl.devices.catalog import ActionCapability, DriverDefinition
 from camctl.devices.ports import DriverDeclaration
 from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
+from camctl.devices.task_metadata import cancellation_description
 
 __all__ = [
     "DRIVER_ID",
@@ -64,11 +65,13 @@ def _deployed_photo_factory(declaration: Mapping[str, object]) -> CaptureTaskFac
 
 def capability() -> ActionCapability:
     """返回唯一权威的单张参数定义，供说明导出与受理共同使用。"""
+    task = _photo_task({"type": PARAMETER_TYPE})
     return ActionCapability(
         action_type="camera_take_photo",
         parameter_type=PARAMETER_TYPE,
         name="Hasselblad 单张 RAW",
-        description="执行一次单张 RAW 拍摄；驱动沿用机身已有曝光、白平衡和对焦设置。",
+        description=("执行一次单张 RAW 拍摄；驱动沿用机身已有曝光、白平衡和对焦设置。"
+                     + cancellation_description(task)),
         preview_supported=True,
         schema=deepcopy(_PHOTO_SCHEMA),
         defaults={},

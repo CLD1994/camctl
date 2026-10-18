@@ -9,6 +9,10 @@ import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import { parseJson, stringifyJson } from "../../src/shared/json";
 import { choose, readOptions } from "./select-support";
+import {
+  clientTestCapabilities,
+  clientTestCapabilitiesText,
+} from "./capability-fixtures";
 
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
@@ -34,6 +38,7 @@ async function setup(
     pending?: string;
     childPending?: string;
     capabilities?: string;
+    draftText?: string;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "camctl-camera-fields-"));
@@ -46,7 +51,9 @@ async function setup(
     requests = new RequestLifecycle();
   app.store.initialize();
   const draft = app.createDraft({
-    text: `{"name":"参数编辑","actions":[{"name":"录像","type":"camera_record","device_id":"action6","scheduled_at":"2026-10-11 12:00:00","policy":{"max_delay_ms":0},"params":{"type":"action6_record","duration_s":${duration},"resolution":"4k30","fov":"wide","stabilization":"off"${exposure.omit ? "" : `,"exposure":${exposure.value ?? '{"mode":"manual","iso":800}'}`}}}]}`,
+    text:
+      exposure.draftText ??
+      `{"name":"参数编辑","actions":[{"name":"录像","type":"camera_record","device_id":"action6","scheduled_at":"2026-10-11 12:00:00","policy":{"max_delay_ms":0},"params":{"type":"action6_record","duration_s":${duration},"resolution":"4k30","fov":"wide","stabilization":"off"${exposure.omit ? "" : `,"exposure":${exposure.value ?? '{"mode":"manual","iso":800}'}`}}}]}`,
     ...(incompleteExposure ||
     exposure.pending !== undefined ||
     exposure.childPending !== undefined
@@ -148,6 +155,134 @@ it("普通录像独立参数与曝光级联回显并保持可选字段缺省", a
   const saved = app.draft(draft.id);
   const request = app.exportDraft(draft.id, saved.revision, saved.content);
   expect(stringifyJson(request.body)).toContain('"duration_s":10');
+});
+
+it("能力源字段元数据驱动表单与设备指南，查看指南不改草稿", async () => {
+  const document = clientTestCapabilities();
+  const entry = document.devices
+    .flatMap((device) =>
+      device.actions.flatMap((action) =>
+        action.parameter_types.map((parameter) => ({
+          device,
+          action,
+          parameter,
+        })),
+      ),
+    )
+    .find(({ action, parameter }) => {
+      const properties = parameter.schema.properties as Record<
+        string,
+        Record<string, unknown>
+      >;
+      return (
+        action.type === "camera_record" &&
+        Object.values(properties).some((schema) =>
+          Array.isArray(schema.enum),
+        ) &&
+        Array.isArray(properties.exposure?.oneOf)
+      );
+    })!;
+  const { device, action, parameter } = entry;
+  const properties = parameter.schema.properties as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const [fieldName, fieldSchema] = Object.entries(properties).find(
+    ([name, schema]) =>
+      name !== "type" &&
+      Array.isArray(schema.enum) &&
+      typeof schema.title === "string" &&
+      typeof schema.description === "string",
+  )!;
+  const exposure = properties.exposure;
+  const manual = (
+    exposure.oneOf as Array<{
+      properties: Record<string, Record<string, unknown>>;
+    }>
+  )[0]!;
+  const [nestedName, nestedSchema] = Object.entries(manual.properties).find(
+    ([name, schema]) =>
+      name !== "mode" &&
+      Array.isArray(schema.enum) &&
+      typeof schema.title === "string" &&
+      typeof schema.description === "string",
+  )!;
+
+  const params: Record<string, unknown> = { type: parameter.type };
+  for (const [name, schema] of Object.entries(properties)) {
+    if (name === "type") continue;
+    if (name === "duration_s") {
+      params[name] = 10;
+    } else if (Array.isArray(schema.oneOf)) {
+      const branch = schema.oneOf[0] as {
+        properties: Record<string, Record<string, unknown>>;
+      };
+      const value: Record<string, unknown> = {};
+      for (const [branchName, branchSchema] of Object.entries(
+        branch.properties,
+      )) {
+        if (branchSchema.const !== undefined)
+          value[branchName] = branchSchema.const;
+        else if (Array.isArray(branchSchema.enum))
+          value[branchName] = branchSchema.enum[0];
+      }
+      params[name] = value;
+    } else if (Array.isArray(schema.enum)) {
+      params[name] = schema.enum[0];
+    } else if (schema.const !== undefined) {
+      params[name] = schema.const;
+    }
+  }
+  const draftText = JSON.stringify({
+    name: "能力元数据测试",
+    actions: [
+      {
+        name: parameter.name,
+        type: action.type,
+        device_id: device.device_id,
+        scheduled_at: "2026-10-11 12:00:00",
+        policy: { max_delay_ms: 0 },
+        params,
+      },
+    ],
+  });
+  const { app, page, draft } = await setup("10", false, {
+    capabilities: clientTestCapabilitiesText(),
+    draftText,
+  });
+  const before = app.draft(draft.id);
+
+  const fieldLabel = String(fieldSchema.title) + " (" + fieldName + ")";
+  const fieldControl = page.getByLabel(fieldLabel, { exact: true });
+  await check(fieldControl).toBeVisible();
+  await check(
+    page.locator(".field").filter({ has: fieldControl }),
+  ).toContainText(fieldSchema.description as string);
+  const nestedLabel = String(nestedSchema.title) + " (" + nestedName + ")";
+  const nestedControl = page.getByLabel(nestedLabel, { exact: true });
+  await check(nestedControl).toBeVisible();
+  await check(
+    page.locator(".field").filter({ has: nestedControl }),
+  ).toContainText(nestedSchema.description as string);
+
+  await page.getByRole("button", { name: "设备说明" }).click();
+  const deviceGuide = page
+    .getByTestId("device-guide")
+    .locator(".guide-device")
+    .filter({
+      has: page.getByRole("heading", { name: device.device_id, exact: true }),
+    });
+  const guideTask = deviceGuide.locator(".guide-task").filter({
+    has: page.getByRole("heading", { name: parameter.name, exact: true }),
+  });
+  await check(guideTask.locator(".guide-description")).toHaveText(
+    parameter.description,
+  );
+  const guideField = guideTask.locator(".guide-fields > div").filter({
+    has: page.locator("dt").filter({ hasText: String(fieldSchema.title) }),
+  });
+  await check(guideField).toContainText(fieldSchema.description as string);
+  expect(app.draft(draft.id)).toEqual(before);
 });
 
 it.each([

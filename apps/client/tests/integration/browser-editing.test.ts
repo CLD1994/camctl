@@ -16,6 +16,10 @@ import type { Draft, Preset, ExportedRequest } from "../../src/server/models";
 import { mappedReport, reportInput } from "./fixtures";
 import { motorReport } from "../helpers/motor";
 import { createHash } from "node:crypto";
+import {
+  clientTestCapabilitiesText,
+  clientTestTasks,
+} from "./capability-fixtures";
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
@@ -1235,6 +1239,51 @@ it("设备指南展示任务及三个允许组合，技术信息默认折叠且�
     ),
   ).toBe(true);
 }, 20000);
+
+it("设备指南逐项显示能力源任务和字段说明，查看指南不改草稿", async () => {
+  const tasks = clientTestTasks();
+  expect(tasks.length).toBeGreaterThan(0);
+  const { page, app } = await setup(clientTestCapabilitiesText());
+  const draft = app.createDraft({
+    text: JSON.stringify({ name: "能力说明测试", actions: [] }),
+  });
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  const before = app.draft(draft.id);
+
+  await page.getByRole("button", { name: "设备说明" }).click();
+  const guide = page.getByTestId("device-guide");
+  for (const { device, parameter } of tasks) {
+    expect(parameter.description.trim()).not.toBe("");
+    const deviceGuide = guide.locator(".guide-device").filter({
+      has: page.getByRole("heading", { name: device.device_id, exact: true }),
+    });
+    const task = deviceGuide.locator(".guide-task").filter({
+      has: page.getByRole("heading", { name: parameter.name, exact: true }),
+    });
+    await check(task.locator(".guide-description")).toHaveText(
+      parameter.description,
+    );
+    const properties = parameter.schema.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    for (const [name, field] of Object.entries(properties)) {
+      if (
+        name === "type" ||
+        typeof field.title !== "string" ||
+        typeof field.description !== "string"
+      )
+        continue;
+      const guideField = task
+        .locator(".guide-fields > div")
+        .filter({ has: page.locator("dt").filter({ hasText: field.title }) });
+      await check(guideField).toContainText(field.description);
+    }
+  }
+  expect(app.draft(draft.id)).toEqual(before);
+});
+
 it("能力重载同时更新联动与指南，原草稿不被改写", async () => {
   const { page, app } = await setup();
   const draft = app.createDraft({

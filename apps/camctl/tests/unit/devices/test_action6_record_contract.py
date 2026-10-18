@@ -26,6 +26,18 @@ def test_action6_builtin_exposes_only_ordinary_recording():
     assert {capability.action_type for capability in capabilities if callable(capability.task_factory)} == {"camera_record"}
 
 
+def test_action6_formal_task_explains_requested_settings_readback_estimate_and_cancellation():
+    capability = next(cap for cap in _contract(CameraModel.ACTION6).capabilities()
+                      if cap.parameter_type == "action6_record")
+    task = capability.task_factory({"type": "action6_record", "duration_s": 10})
+
+    assert task.stop_supported is True
+    assert task.cancel_completion_policy is None
+    for fact in ("1/60 秒", "5200 K", "请求", "独立读回", "固定假定参考码率 130 Mbps",
+                 "不是实测平均值", "启动后", "取消"):
+        assert fact in capability.description
+
+
 def test_action6_task_freezes_internal_scope_and_five_second_completion_rule():
     factory = _contract(CameraModel.ACTION6).task_factories.get("action6_record")
     assert callable(factory)
