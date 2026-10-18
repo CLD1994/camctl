@@ -6,6 +6,45 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 设备文件清理的软件联合验收（2026-10-18 UTC）
+
+在 Linux x86_64／WSL2、Python 3.11.16、SQLite 3.53.1 和 Node.js 24.20.0 中，验证[设备文件清理计划](../superpowers/plans/2026-10-18-device-file-cleanup.md)的 R6 软件联合链。[安装版联合用例](../../tests/integration/test_device_file_cleanup_roundtrip.py)复用已有独立动作 `delete_action_outputs`，通过真实客户端导出、C host、仓库外 wheel、CLI、SQLite、正式源文件、状态报告及累计 ACK 验证清理执行和恢复。ADB／`hb_cli` 只在外部工具边界提供受合同约束的文件和响应；没有替换生产文件工厂、解释器、清理状态机或仓储。
+
+最终联合输入为生产代码 `34d0cbd`、文档跟踪提交 `bdfc601` 及归档收据所列根测试字节。安装 wheel 的 SHA-256 为 `92d26137b6ddbb6ada476dcbcfce1a2f30be57e536769cd92c9e9c2f69e2362f`，13 个相关模块实际从独立 venv 的 `site-packages` 加载，包括清理装配、后台执行及会话模块。通过正式内置登记核对 OSMO 的 DELETE／FILE_QUERY 工厂和端口：设备删除与文件查询均支持，拍摄状态查询仍不支持；这项软件声明不等于真机删除已验收。
+
+同一次根 pytest 命令运行新增模块的 10 个分区及原 OSMO 模块的 4 个用例，实际结果为 **14 passed，669.06 秒**，退出 0。命令、起止 UTC、Python、HEAD、跟踪差异与新增文件 SHA、前后输入及完整日志保存于 `.local/verification/r6-serial-roundtrip/1792357637593371819/`；各场景的实际数据库、请求、调用、门闩、进程收场、文件和报告凭据保存于 `.local/r6/artifacts/`。执行命令为：
+
+```bash
+apps/camctl/.venv311/bin/python -m pytest \
+  tests/integration/test_device_file_cleanup_roundtrip.py \
+  tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
+```
+
+清理覆盖以下实际组合：
+
+- 主机 repaired、设备 OSV、设备 LRF、主机 original、主机 preview 分别使用新请求精确清理。关联源、其他产物及五份已经发布的交付副本保持，设备文件只产生两次删除调用，三个主机源使用真实文件执行器。
+- Hasselblad 设备源不支持删除时，同请求中的主机原图和预览仍分别完成；设备项没有 DELETE／QUERY 尝试。对已清理产物提交新请求，只本地交接，不增加调用或改写旧结果。
+- DELETE 效果已发生但返回丢失后结束旧组，新进程沿原尝试恢复 UNKNOWN，以一次 QUERY 核实缺席；原票据不重放。查询在场后分别验证新 DELETE 使用当前配置、删除预算耗尽及查询未知耗尽，原尝试继续保持原配置与累计次数。
+- 真实结果事务提交后回执未知，以及成员已终态、伴随流程尚未结束两个窗口，均由新 host 本地消费原结果；没有新增 DELETE／QUERY，原事件和成员终态保持。
+- DELETE 在途时，取消事实先可靠保存；原尝试仍 RUNNING、没有结果事件，门闩进程仍活动且旧组没有 QUERY。结束旧组后，新组恢复 UNKNOWN，只核实一次在场，清理项为 `canceled + file_delete_failed`，动作保持取消、不可撤销限制保持，取消动作如实报告 `cancel_items_failed`。
+
+修复成品来自真实双主视频 OSV 样本：两路 64×64、10fps、3 秒 H.264，经正式准备及后轮修复生成 MP4。源和成品均实际运行 ffprobe 和全流解码，登记的长度、摘要和两路流信息一致。普通录像 STOP 后到首次结果目录读取保留真实不少于 30 秒的等待；业务钟推进不替代该等待。LRF 是独立非空模型字节，不声明媒体可解码或真实设备画质、分辨率、采样时长。
+
+组件证据按实际版本分别保留，不能合称最终提交同一次全目录通过：
+
+| 范围 | 冻结版本及实际结果 | 后续覆盖与边界 |
+| --- | --- | --- |
+| unit | root 在 `34d0cbd`：5902 passed、1 skipped、2 warnings | 两条 warning 是既有同步测试的 asyncio 标记；原 skip 原因未从 `-q` 输出取得。 |
+| devices、operations | 初始 `1a393d4`：分别 204、200 passed | 后续媒体及调度修复不改设备、操作合同或对应测试；按实际未改输入沿用。 |
+| capture、host_files、cancellation | `ce3b34b`：分别 1914、117、103 passed | fix1 修改的观察取消先后及通知引用由新 unit、session 和 bootstrap 验证，未改这些目录的实际业务入口。 |
+| session | `4e81075` 冻结字节：192 passed | 覆盖真实锁控制、观察者取消、run 父取消、启动及受限阶段。 |
+| bootstrap | `ce3b34b` 完整目录：1298 passed、2 failed、1 skipped | 两项失败来自测试包装器漏传 `waiter`；`34d0cbd` 修正后两份完整相关文件 47 passed。fix1 七文件 101 passed，root 合入后 owner／锁／启动三文件共 62 passed。未将这些数字相加为新全目录结果。 |
+| outputs | `ce3b34b`：35 failed、2194 passed、2 skipped，退出 1 | 35 项均在 `test_product_event_sequence.py`、`test_selection_derived_sequence.py`，ID、首错及位置与原基线相同，逐项差异为零；本目录未全绿。 |
+
+root 新组合收据位于 `.local/verification/cleanup-r6-serial-integration/`；原组件门禁及独立复核分别保存在对应任务工作树的 `.local/verification/` 和本计划交接材料中。媒体阶段修复让准备任务可靠登记原输出后结束，后轮重新取得完整文件资格；清理调度修复让中央在实际文件调用等待期间继续保存取消，并在错误退出时先停止新增普通工作、再接回真实结果和原保存责任。这些实现契约由[文件执行](file-runtime.md)和[实现总览](implementation.md#动作执行协程的创建时机)维护。
+
+最终协议、文档链接与差异检查另有实际命令及退出码。安装版和组件软件结果不替代 ARM 依赖、设备工具、真实物理删除或物理断电验收；R7 现场结果独立记录。
+
 ## 设备能力声明的安装版联合验证（2026-10-18）
 
 在 Linux x86_64／WSL2、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0 和 pnpm 12.3.4 中，验证设备声明、任务说明和清理入口展示的安装版软件链。新增的[联合用例](../../tests/integration/test_device_capability_declarations.py)在仓库外离线构建 wheel，按锁文件安装运行依赖，使用独立虚拟环境执行真实 CLI；安装进程清除 Python 源码查找环境，另核对导入位置确实位于该独立环境。源码与安装版 `describe` 的精确 JSON 一致，公共 Schema 与 wheel 内资源字节一致。

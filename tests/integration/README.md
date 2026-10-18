@@ -33,6 +33,22 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --check
 ```
 
+### 正式源文件清理的安装版联合链
+
+`test_device_file_cleanup_roundtrip.py` 从仓库外构建并独立安装 wheel，核对正式内置登记、DELETE／FILE_QUERY 工厂、端口及模块来源，经真实客户端导出、C host、CLI、SQLite、文件、报告导入及累计 ACK 验证已有独立动作 `delete_action_outputs`。该模块的 10 个分区覆盖 repaired／OSV／LRF／主机原图／主机预览逐份精确清理、不支持设备源与主机源混合、已清理产物的新请求，以及删除中断、独立预算、原配置保存、提交回执未知、终态伴随和在途取消恢复。外部 ADB 模型只识别已审阅的精确脚本及原目标，不替换生产文件工厂、解释器或状态机。
+
+正式修复样本含两路 H.264 主视频，源与成品均实际运行 ffprobe 和全流解码；STOP 后的 30 秒等待使用真实单调钟。每例独立数据库、远端树和进程组，保存原请求／票据／结果／文件及报告事实。取消分区在结束旧组前断言目标取消已提交、DELETE 仍 RUNNING、结果事件为空、门闩进程仍活动且未发 QUERY，再由新 host 沿原尝试恢复 UNKNOWN，只核实一次，不重放删除。
+
+此模块与原 OSMO 模块在同一命令顺序运行，合计 14 个用例。需要部署版 Python 3.11、uv 缓存及构建依赖、客户端 Node.js 依赖、C 构建工具和可用的 ffmpeg／ffprobe；缺少媒体工具会明确跳过，不能据此宣称完整验收。执行命令为：
+
+```bash
+apps/camctl/.venv311/bin/python -m pytest \
+  tests/integration/test_device_file_cleanup_roundtrip.py \
+  tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
+```
+
+ADB／Hasselblad 文件是受合同约束的软件样例；本链不连接真实相机，也不证明 ARM 工具、实际设备媒体或物理删除。具体软件结果及版本边界见[验证记录](../../docs/camctl/verification.md#设备文件清理的软件联合验收2026-10-18-utc)，现场结果由[清理计划 R7](../../docs/superpowers/plans/2026-10-18-device-file-cleanup.md#r7用已验发行物完成-osmo-目标设备验收)单独跟踪。
+
 ### OSMO 360 II 正式内置合同安装版联合链
 
 `test_osmo_builtin_timelapse_roundtrip.py` 从源码目录外构建并安装当前 wheel 与锁定运行依赖，比较源码及安装版 `describe`，并核对安装 wheel 内的 OSMO 配置、普通录像和延时样例与权威资料逐字节一致。该模块共四个用例：一个源码／安装版能力与资源核对，以及三个业务组合——普通录像配 LRF、原生延时配 LRF、原生延时不配 LRF。

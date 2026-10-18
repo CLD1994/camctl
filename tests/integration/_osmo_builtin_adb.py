@@ -269,6 +269,9 @@ def main() -> int:
     calls_path = Path(os.environ["CAMCTL_OSMO_TEST_ADB_LOG"])
     if script.startswith(("dji_mb_ctrl ", "simulate_device ")):
         return _control(script, root=root, calls_path=calls_path)
+    if os.environ.get("CAMCTL_CLEANUP_MANIFEST") and script.startswith("target="):
+        from _cleanup_roundtrip_adb import file_call
+        return file_call(script, root=root, calls_path=calls_path)
     return _file_call(script, root=root, calls_path=calls_path)
 
 
