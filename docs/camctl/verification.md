@@ -1229,6 +1229,23 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 
 原 capture 全目录运行在 391 项通过时主动中断，退出 2；该轮不作为全目录通过或最终门禁计数。随后按本次受影响的拍摄边界完成上述定向范围。全部命令、工作目录、环境、退出码、日志及 JUnit 保存在 `.local/diagnostics/20261019-osmo-record-zero-margin/software/`，包括失败回归和中断记录。实拍与部署另按[当前实施计划](../superpowers/plans/2026-10-19-osmo360ii-record-duration.md#osmo-普通录像的零余量对照)核验；Action6 本次只运行软件对照。
 
+## OSMO 普通录像零启动余量的 TX2 验收与部署（2026-10-19 UTC）
+
+从 `9742950` 构建 wheel，SHA-256 为 `27d3c1d476cc55e9162bf92b3b804fd7d60cbc1a154969dec5a8ff868ac9c10a`。本地与 TX2 的独立安装包目录均核对 240 份 Python 模块；目标继续使用 CPython 3.11.17、SQLite 3.53.1 和本机 ADB 1.0.39。两种曝光按顺序通过正式 CLI 执行，分别使用新计划及独立状态库，START／STOP 尝试上限各为 1，结果查询期限为每页 60 秒。目标冻结为 10000 毫秒、启动余量明确冻结为 0，`start_return_meaning=1`；停止后文件等待仍为 30000 毫秒。
+
+| 正式计划 | 控制与登记 | 原片测量 | 源端与副本 SHA-256 |
+| --- | --- | --- | --- |
+| 手动曝光 | 可靠 START 返回后 10.033056 秒保存 STOP 意图，随后 41.455 毫秒启动 ADB；START／STOP 各一次，正常响应，CLI 返回 0，登记 OSV 与配对 LRF。 | 双路 HEVC 3840×3840、30000/1001 fps，各 10.110100 秒、303 帧；OSV 为 173898325 字节。 | `dbefd83b56da0c05317b87f17005ad115f1ecccb14bb6854f4c1b2bcd06ff36b` |
+| 自动曝光 | 可靠 START 返回后 10.049380 秒保存 STOP 意图，随后 38.574 毫秒启动 ADB；START／STOP 各一次，正常响应，CLI 返回 0，登记 OSV 与配对 LRF。 | 同规格双路视频，各 10.043367 秒、301 帧；OSV 为 172867919 字节。 | `f88771e1f4e93df8f02fcc5618e927c744a0b746622d61f39afc6e05f234bcc9` |
+
+两轮分别在可靠停止、文件与空闲核实后结束，相机 boot ID 前后一致；没有重试拍摄或删除源文件。以上两份原片均至少 10 秒且落在 10～11 秒范围内，属于本次样本的实测结果，不由上一批视频减去 1 秒计算。实际首帧仍未知，旧 STOP 无输出事件不因新样本成功而改写。
+
+随后备份并更新 TX2 原虚拟环境中的正式 camctl，266 份包内文件与同一 wheel 逐字节一致，运行依赖检查及沿原配置的 `describe` 返回 0。全局安装后的只读检查确认 OSMO 普通录像余量 0、Action6 普通录像及 OSMO 原生延时各 1000 毫秒，并取得连续五条空闲状态。原配置及状态库保留，未执行原计划；两次实拍使用前述独立包目录，全局更新后没有再次拍摄。
+
+本地证据位于 `.local/diagnostics/20261019-osmo-record-zero-margin/`。`tx2-evidence/cli-manual-134518/` 与 `cli-auto-134912/` 保存原片、SQLite、计划、控制输出、日志和 strace；`acceptance-summary.json` 从原始证据提取时序，`local-copy-verification.json` 核对取回到开发容器的原片。TX2 的同名诊断根目录中，`global-install-135317/` 保存旧包备份及安装记录。
+
+新的实际能力 JSON 已取回 `.local/deployments/20261019-osmo-record-zero-margin/device-capabilities.json`，包含原配置中的 `hb0` 与 `osmo360ii`，公共 Schema 校验通过，SHA-256 为 `a8ead569e366b83747132b2b31e7d0c5ae8179c34f72585756ac2e65ad140eb1`。普通录像的说明按实际零余量任务生成；客户端程序本身没有修改。Action6 本次仅有[软件对照](#osmo-普通录像零启动余量的软件验证2026-10-19-utc)，没有连接其实际设备。
+
 ## 部署交接与待核验项
 
 [软件验收映射](software-acceptance.md)逐条登记适用验收与跨模块场景的结论、证据和未核验前提；当前未完成的软件任务以[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)为准。[集成计划 I6 的历史验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)与 [B7 发行物记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)保存当次命令及环境。发行物在源码目录之外构建、安装与运行的要求见[部署说明](implementation.md#构建安装与运行检查)。
