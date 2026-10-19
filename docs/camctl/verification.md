@@ -1155,6 +1155,8 @@ history 停止回放专项|3 项通过。
 
 本地证据位于 `.local/diagnostics/20261019-record-duration-remote-adb/`，其中 `installed-auto-072337/`、`installed-manual-072728/` 保存两轮计划、配置、状态库、原片、摘要、媒体探测、相机日志及 strace；`acceptance-summary.json` 汇总修复前三轮及修复后两轮样本。此证据来自开发容器和真实相机，不代表已部署 TX2。原片均录满目标，但尚未达到此前希望的 10～11 秒范围；原来约 15 秒的条件未复现。后续验收对象由[实施计划](../superpowers/plans/2026-10-19-osmo360ii-record-duration.md#当前进度)跟踪，通俗说明见[录像时长报告](../hardware/osmo360ii-record-duration-report.md)。
 
+后续只读复核核对了五轮界面录像计数，以及两份安装包原片的可见时间标签、轨道时间和首个视频包。界面计数与媒体时长不同；首包与视频轨道均为零基相对时间，创建标签和时间码缺少实际首帧与主机 UTC 的映射。相机私有轨未解码，未据此生成新计时依据。原始输出和条件推算的位置见[日志与媒体时间复核](../hardware/osmo360ii-record-duration-report.md#现有日志和媒体时间标签的只读复核)；本项没有新增拍摄、测试运行或驱动改动。
+
 ## 部署交接与待核验项
 
 [软件验收映射](software-acceptance.md)逐条登记适用验收与跨模块场景的结论、证据和未核验前提；当前未完成的软件任务以[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)为准。[集成计划 I6 的历史验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)与 [B7 发行物记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)保存当次命令及环境。发行物在源码目录之外构建、安装与运行的要求见[部署说明](implementation.md#构建安装与运行检查)。

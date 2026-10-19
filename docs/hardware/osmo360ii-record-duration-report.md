@@ -37,7 +37,17 @@
 
 相机状态日志中“正在录像”的回调早于 START 工具的完整返回，但这个回调不是首帧时间。它只能证明相机已报告相应状态，不能据此计算应提前多少秒停止。
 
+原来 15.382033 秒样本中，从 START 完整返回到 STOP 完整返回只有 13.354311 秒，相差约 2.03 秒。**如果**沿用当前驱动“STOP 确认表示采集已经停止”的假设，并把普通录像的媒体时间轴视为近似实时采集时间，则约 2 秒内容在 START 完整返回前就已存在。这是带前提的区间推算，不是实际首帧观察，也不能证明预录制。它说明返回后再计时可能把前面已经录下的画面也包含进原片，不能仅靠返回后的等待长度精确决定成片长度。
+
 另一项需要排除的设备设置是“预录制”。[DJI 官方说明](https://repair.dji.com/help/content?customId=01700008789&lang=zh-CN&paperDocType=ARTICLE&re=CN&spaceId=17)指出，开启后会把触发前的缓存一并保存，Osmo 360 系列支持 5 秒等档位。新采集的相机日志显示未开启预录制；原来约 15 秒的两次记录没有保存这项状态，因此不能把它认定为原因。
+
+### 现有日志和媒体时间标签的只读复核
+
+已检查五轮日志中的界面录像计数。每轮最后都显示到 12 秒后归零，但对应原片为 11.277933～12.045367 秒；界面秒数不能直接等同于文件时长。安装包自动曝光轮在界面归零后还出现了编码启动日志，配置是 736×736、2048×896 等低分辨率，无法关联为双路 3840×3840 原片的首帧。
+
+两份安装包原片的首视频包时间戳均为 0，视频轨道也从 0 开始。这能确定片内相对时间，不能确定主机时钟上的实际首帧。`creation_time` 标签记录的是 2000 年；另有 `timecode` 标签和时间码轨道，但没有现场依据说明它与主机 UTC、实际首帧的映射。相机私有数据轨尚未解码，因此这里只说明已核对的可见标签不足以建立新锚点，不声称文件内部绝对没有其他时间信息。
+
+这些观察均不足以支持缩短启动余量，或把界面回调替换为可靠首帧确认；当前仍保留原停止计时规则。
 
 ## 已实施的修复与验收标准
 
@@ -58,5 +68,7 @@
 当前采集保存在 `.local/diagnostics/20261019-record-duration-remote-adb/`，包括独立 SQLite、计划、原片、摘要、ffprobe、相机日志和 strace 记录。原用户样片记录位于 `.local/diagnostics/20261019T021600Z-record-duration/`；此前验收位于 `.local/acceptance/camera-startup-margin-20261017T215355Z/`。
 
 修复源码为 `ff46061`。独立安装包及安装模块一致性记录位于 `.local/deployments/20261019-record-duration-deadline/`，wheel 的 SHA-256 为 `d376add4dfd5f79c15298b09a678eddd1214863f6b611a60558629dd52e7a0ce`。两轮安装包原片分别位于 `installed-auto-072337/` 和 `installed-manual-072728/`，逐轮汇总见同一采集根目录的 `acceptance-summary.json`。
+
+只读复核的界面计数序列见 `gui-timing-review.json`，条件推算及其前提见 `control-media-envelope.json`，媒体查询命令及退出码见 `timing-metadata-review-commands.json`。两轮目录下的 `timing-tags.json` 和 `first-packet-time.json` 保存标签、轨道和首包时间戳。该复核没有新增拍摄或修改驱动。
 
 操作入口见[开发容器访问宿主机 ADB 服务](camera-demo-validation.md#开发容器访问宿主机-adb-服务)，实施进度见[录像时长排查与修复计划](../superpowers/plans/2026-10-19-osmo360ii-record-duration.md)。
