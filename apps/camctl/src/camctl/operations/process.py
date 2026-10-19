@@ -216,6 +216,8 @@ async def _execute_tool(
     级强制终止，随后仍等待可靠退出。取消不重复发信号，宽限不自
     请求终止时开始后延长。
     """
+    loop = asyncio.get_running_loop()
+    deadline = None if spec.timeout_s is None else loop.time() + float(spec.timeout_s)
     try:
         if spawner is not None and stdout_sink is not None:
             raise ValueError("流式输出必须由共同受管启动边界持有")
@@ -223,13 +225,14 @@ async def _execute_tool(
                          spawn_subprocess(spec, stdout_sink=stdout_sink))
     except OSError as error:
         raise ToolStartError(f"{type(error).__name__}: {error}") from error
+    expired_at_handoff = deadline is not None and loop.time() >= deadline
     exit_task = asyncio.ensure_future(process.wait())
     output_task = asyncio.ensure_future(process.wait_output())
     failure_task = asyncio.ensure_future(process.wait_output_failure())
     watch: set[asyncio.Future] = {exit_task, output_task, failure_task}
     timeout_task: asyncio.Task[None] | None = None
-    if spec.timeout_s is not None:
-        timeout_task = asyncio.ensure_future(asyncio.sleep(float(spec.timeout_s)))
+    if deadline is not None:
+        timeout_task = asyncio.ensure_future(asyncio.sleep(max(0, deadline - loop.time())))
         watch.add(timeout_task)
     stop_task = asyncio.ensure_future(stop.requested())
     watch.add(stop_task)
@@ -243,10 +246,12 @@ async def _execute_tool(
             if process.output_failure is None and done == {output_task}:
                 # EOF 不表示进程已经退出；避免已结束输出使等待立即反复返回。
                 done, _ = await asyncio.wait(watch - {output_task}, return_when=asyncio.FIRST_COMPLETED)
-        error: ToolError | None = None
+        # 启动交接已用完正常预算时，仍收取原句柄和真实结果，但不
+        # 把迟到的正常退出解释为期限内完成，也不重新等待完整预算。
+        error: ToolError | None = "timeout" if expired_at_handoff else None
         signal_failures: tuple[SignalFailure, ...] = ()
-        if exit_task not in done:
-            if timeout_task is not None and timeout_task in done:
+        if expired_at_handoff or exit_task not in done:
+            if expired_at_handoff or (timeout_task is not None and timeout_task in done):
                 error = "timeout"
             elif stop_task in done or cancel_task in done:
                 error = "cancelled"

@@ -103,6 +103,41 @@ async def test_managed_transport_preserves_both_channels_and_process_group():
     assert getattr(raw, "stderr", None) == b"diagnostic"
 
 
+async def test_late_normal_stop_ack_retains_timeout_under_osmo_response_contract():
+    from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
+    from camctl.operations.models import EffectState
+    from camctl.operations.process import execute_tool, spawn_subprocess
+
+    class DelayedChannel:
+        async def run(self, spec, stop):
+            assert spec.argv[:5] == ("adb", "-s", "serial-1", "shell", "-T")
+            assert shlex.split(shlex.split(spec.argv[5])[2])[-3:] == ["-c", "02", "00"]
+            local = replace(spec, argv=(sys.executable, "-c",
+                "print('Resp message, len = 1, data:\\n 00\\n')"))
+
+            async def delayed_spawn(actual):
+                handle = await spawn_subprocess(actual)
+                await handle.wait()
+                await handle.wait_output()
+                await asyncio.sleep(.03)
+                return handle
+
+            return await execute_tool(local, stop=stop, spawner=delayed_spawn)
+
+    driver = AdbCameraDriver(osmo360ii_contract(), {"cam-1": {
+        "driver": "dji-osmo360-ii", "adb": {"serial": "serial-1"}}}, DelayedChannel(),
+        terminate_grace_s=Decimal("1"), monotonic_ns=time.monotonic_ns)
+    result = await driver.stop(ControlRequest("stop_recording",
+        DeviceBinding("cam-1", "dji-osmo360-ii"), {},
+        AttemptTicket(1, "stop", "9", "stop/9", 1), Decimal("0.001")))
+    assert result.outcome.error.code == "transport_timeout"
+    assert result.outcome.effect is EffectState.UNKNOWN and result.observations == ()
+    assert result.outcome.call_info.local_exit_code == 0
+    response_error = result.outcome.error.details["response_error"]
+    assert response_error["details"]["response_payload"] == "00"
+    assert result.outcome.settlement.evidence.data == {}
+
+
 @pytest.mark.parametrize("channel", ["stdout", "stderr"])
 async def test_real_large_response_is_explicitly_incomplete(channel):
     script = f"import sys; sys.{channel}.buffer.write(b'x' * (2 << 20))"

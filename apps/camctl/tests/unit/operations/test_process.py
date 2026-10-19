@@ -257,6 +257,89 @@ async def test_timeout_uses_same_termination_flow() -> None:
     assert outcome.used_grace_s == Decimal("0.01")
 
 
+@pytest.mark.parametrize("already_exited", [False, True])
+async def test_spawn_handoff_after_deadline_keeps_timeout_and_original_exit(already_exited):
+    class Process(FakeProcess):
+        def request_terminate(self):
+            super().request_terminate()
+            self.exit(signal=15)
+
+    process = Process(b"original output")
+
+    async def delayed_spawn(spec):
+        await asyncio.sleep(.03)
+        if already_exited:
+            process.exit(exit_code=0)
+        return process
+
+    raw = await execute_tool(_spec(timeout_s=Decimal("0.001")),
+                             stop=FakeStop(), spawner=delayed_spawn)
+    assert raw.error == "timeout"
+    assert raw.output == b"original output"
+    assert raw.exit == (LocalExit(exit_code=0) if already_exited else LocalExit(signal=15))
+    assert process.terminate_requests == (0 if already_exited else 1)
+    assert process.kill_requests == 0
+
+
+async def test_spawn_handoff_consumes_original_normal_wait_budget():
+    class Process(FakeProcess):
+        def request_terminate(self):
+            super().request_terminate()
+            self.exit(signal=15)
+
+    process = Process()
+    completion = None
+
+    async def delayed_spawn(spec):
+        nonlocal completion
+        await asyncio.sleep(.05)
+        completion = asyncio.get_running_loop().call_later(.075, process.exit, 0)
+        return process
+
+    try:
+        raw = await execute_tool(_spec(timeout_s=Decimal("0.1")),
+                                 stop=FakeStop(), spawner=delayed_spawn)
+        assert raw.error == "timeout"
+        assert raw.exit == LocalExit(signal=15)
+    finally:
+        if completion is not None:
+            completion.cancel()
+
+
+async def test_cancel_during_expired_spawn_still_hands_over_original_process():
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Process(FakeProcess):
+        def request_terminate(self):
+            super().request_terminate()
+            self.exit(signal=15)
+
+    process = Process(b"partial output")
+
+    async def delayed_spawn(spec):
+        entered.set()
+        await release.wait()
+        return process
+
+    task = asyncio.create_task(execute_tool(_spec(timeout_s=Decimal("0.001")),
+                                           stop=FakeStop(), spawner=delayed_spawn))
+    try:
+        await entered.wait()
+        await asyncio.sleep(.01)
+        task.cancel()
+        assert not task.done()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await task
+    raw = caught.value.outcome
+    assert raw.error == "timeout"
+    assert raw.exit == LocalExit(signal=15)
+    assert raw.output == b"partial output"
+    assert process.terminate_requests == 1
+    assert process.kill_requests == 0
+
+
 async def test_normal_exit_has_no_error_and_bounded_output() -> None:
     process = FakeProcess(output=b"ok")
     task = await _drive(_spec(), process)

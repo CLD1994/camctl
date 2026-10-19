@@ -79,6 +79,41 @@ async def test_timeout_terminates_and_records_grace() -> None:
     assert outcome.exit is not None
 
 
+@pytest.mark.parametrize("already_exited", [False, True])
+async def test_expired_spawn_handoff_reaps_real_child_and_retains_both_channels(tmp_path, already_exited):
+    handles = []
+    marker = tmp_path / "output-flushed"
+
+    async def delayed_spawn(spec):
+        handle = await spawn_subprocess(spec)
+        handles.append(handle)
+        if already_exited:
+            await handle.wait()
+            await handle.wait_output()
+        else:
+            async with asyncio.timeout(5):
+                while not marker.exists():
+                    await asyncio.sleep(.001)
+        await asyncio.sleep(.03)
+        return handle
+
+    script = ("import sys; from pathlib import Path; print('original stdout',flush=True); "
+              "print('original stderr',file=sys.stderr,flush=True); "
+              "Path(" + repr(str(marker)) + ").write_text('ready')")
+    if not already_exited:
+        script += "; import time; time.sleep(30)"
+    raw = await execute_tool(_tool(script, timeout_s=Decimal("0.001")),
+                             stop=_CancelRequest(), spawner=delayed_spawn)
+    assert raw.error == "timeout"
+    assert raw.output == b"original stdout\n" and raw.stderr == b"original stderr\n"
+    assert len(handles) == 1
+    assert await handles[0].wait() == raw.exit
+    await handles[0].wait_output()
+    assert raw.used_grace_s == (None if already_exited else GRACE)
+    if already_exited:
+        assert raw.exit.exit_code == 0
+
+
 async def test_cancel_uses_same_termination_flow() -> None:
     stop = _CancelRequest()
     task = asyncio.ensure_future(_run(_tool("import time; time.sleep(30)"), stop))

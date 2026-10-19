@@ -18,6 +18,7 @@ from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.drivers.adb_cameras.filesystem import FileAccessRead
 from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
 from camctl.devices.ports import ControlRequest
+from camctl.devices.tasks import StartReturn
 from camctl.operations.attempts import (AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget,
     OperationKind, RunFinish, RunOutcome)
 from camctl.operations.process import LocalExit, RawToolOutcome
@@ -61,7 +62,7 @@ class Transport:
 async def _world(owned, tmp_path, baseline, monkeypatch):
     contract = osmo360ii_contract()
     params = {"type": "osmo360ii_record", "duration_s": 10,
-        "exposure": {"mode": "auto", "compensation_ev": 0}}
+        "bitrate": "standard", "exposure": {"mode": "auto"}}
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": "dji-osmo360-ii",
         "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
     catalog = build_catalog(config, DriverDefinitions({"dji-osmo360-ii": DriverDefinition("dji-osmo360-ii",
@@ -89,7 +90,7 @@ async def _world(owned, tmp_path, baseline, monkeypatch):
     operations = OperationRepository()
     ticket = granted.value.ticket
     result = await driver.control(ControlRequest("start_recording", BINDING, params, ticket,
-        Decimal("10"), lambda: None))
+        Decimal("10"), lambda: None, start_return_meaning=StartReturn.SENT))
     saved = operations.finish_attempt(AttemptFinish(ticket, validate_outcome(ticket, result.outcome, contract.evidence),
         _SCHEDULED, run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error

@@ -1169,6 +1169,26 @@ history 停止回放专项|3 项通过。
 
 证据位于 `.local/diagnostics/20261019-record-duration-zero-margin/`，逐轮响应、时钟、摘要、原片及失败记录由 `experiment-summary.json` 关联；`stop-after-user-confirmation-120401/` 保存现场确认后的 STOP 结果、空闲回调与长录像文件元数据。解释及接续边界见[零余量对照](../hardware/osmo360ii-record-duration-report.md#零启动余量的独立对照)。
 
+## 工具启动期限的软件核验（2026-10-19）
+
+代码审查发现受管工具在取得子进程句柄后才开始超时计时，未将启动交接耗时计入原调用预算。失败回归分别复现了“交接已超过期限，正常退出被记为成功”和“启动耗时后重新获得完整等待预算”。修复从启动前冻结原单调钟截止；取得句柄后只使用剩余预算，已过期时保留超时及真实退出、输出，沿原调用可靠收场。已退出不发信号或补造宽限，取消继续交接原结果。完整状态分类见[启动耗时的超时边界](../superpowers/plans/2026-10-19-osmo360ii-record-duration.md#工具启动耗时的超时边界)。
+
+Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果如下。组件集成目录分别启动进程，同一工作区串行执行。
+
+| 范围 | 实际结果 |
+| --- | --- |
+| 全部单元测试 | 5962 项通过、1 项跳过，保留两项既有 asyncio 标记警告。 |
+| operations 整目录 | 202 项通过，包含延迟交接真实子进程、正常退出及双通道排空。 |
+| devices 整目录 | 206 项通过，包含真实 OSMO 驱动对迟到正常 `00` 的处理：保存超时、实际退出与响应数据，保持原未知判定。 |
+| capture 开始运行时、结束及开始结果保存边界 | 52 项通过。 |
+| cancellation 整目录 | 103 项通过。 |
+| bootstrap 停止、唤醒配置、调用后取消和会话状态 | 20 项通过。 |
+| session 整目录 | 194 项通过。 |
+
+集成测试合计 777 项通过。devices 首轮有 5 项既有夹具失败：结果分页测试仍提供缺少必填码率、包含已移除 EV 字段的参数，受理失败后没有活动身份，尚未进入受管工具调用。夹具已改为当前合法参数，并按原冻结定义传入 SENT；修正后上述整目录通过。该过程没有放宽生产参数校验。
+
+完整命令、环境、退出码、日志及 JUnit 位于 `.local/diagnostics/20261019-record-duration-tx2-local-adb/software-fixed/` 和 `software-fixed-recheck/`；`software/` 保存修复前的 234 项定向通过及新缺陷的失败回归。新软件缺陷与原 STOP 无输出超时的因果尚未证实，实机分层对照和正式计划核验分别由[本机 ADB 对照计划](../superpowers/plans/2026-10-19-osmo360ii-record-duration.md#tx2-本机-adb-的代码分层对照)跟踪。
+
 ## 部署交接与待核验项
 
 [软件验收映射](software-acceptance.md)逐条登记适用验收与跨模块场景的结论、证据和未核验前提；当前未完成的软件任务以[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)为准。[集成计划 I6 的历史验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)与 [B7 发行物记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)保存当次命令及环境。发行物在源码目录之外构建、安装与运行的要求见[部署说明](implementation.md#构建安装与运行检查)。
