@@ -262,10 +262,19 @@ def test_new_record_rejects_partial_or_invalid_startup_contract(changes):
         validate_capture_spec("camera_record", {"target_duration_ms": 10000, **changes})
 
 
-def test_native_startup_margin_is_optional_frozen_positive_milliseconds():
+@pytest.mark.parametrize('margin_ms', [0, 1000])
+def test_native_startup_margin_preserves_explicit_nonnegative_milliseconds(margin_ms):
     old = build_capture_spec("camera_timelapse", _task())
     assert "startup_margin_ms" not in validate_capture_spec("camera_timelapse", old)
-    assert validate_capture_spec("camera_timelapse", {**old, "startup_margin_ms": 1000})["startup_margin_ms"] == 1000
+    assert validate_capture_spec("camera_timelapse", {**old, "startup_margin_ms": margin_ms})["startup_margin_ms"] == margin_ms
+    assert build_capture_spec("camera_timelapse", _task(startup_margin_ms=margin_ms))["startup_margin_ms"] == margin_ms
+
+
+@pytest.mark.parametrize('margin_ms', [True, -1, Decimal('.5'), None, 9223372036854775808])
+def test_native_startup_margin_rejects_invalid_explicit_milliseconds(margin_ms):
+    old = build_capture_spec("camera_timelapse", _task())
+    with pytest.raises(ValueError):
+        validate_capture_spec("camera_timelapse", {**old, "startup_margin_ms": margin_ms})
 
 
 @pytest.mark.parametrize('margin_ms', [0, 1000])

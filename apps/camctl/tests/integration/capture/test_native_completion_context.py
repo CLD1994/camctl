@@ -206,23 +206,27 @@ async def test_natural_file_event_guard_independently_checks_original_sources(tm
 
 
 class StartupNativeCatalog(NativeWaitCatalog):
+    def __init__(self, startup_margin_ms=1000):
+        self.startup_margin_ms = startup_margin_ms
+
     def parameter_definition(self, device_id, action_type, parameter_type):
         definition = super().parameter_definition(device_id, action_type, parameter_type)
         if definition is not None and action_type == 'camera_timelapse':
             factory = definition.task_factory
             return replace(definition, task_factory=lambda params: replace(factory(params),
-                target_duration_s=300, startup_margin_ms=1000))
+                target_duration_s=300, startup_margin_ms=self.startup_margin_ms))
         return definition
 
 
-async def test_new_native_context_and_history_preserve_original_startup_margin(tmp_path):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=StartupNativeCatalog())
-    runtime.wait_config = lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000)
+@pytest.mark.parametrize('margin_ms,wait_us', [(0, 330000000), (1000, 331000000)])
+async def test_new_native_context_and_history_preserve_original_startup_margin(tmp_path, margin_ms, wait_us):
+    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=StartupNativeCatalog(margin_ms))
+    runtime.wait_config = lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=margin_ms)
     seen = []
     async def read(request, batch):
         context = request.params['completion_context']
-        assert context['startup_margin_ms'] == 1000
-        assert context['expected_check_at_us'] == _NOW+331000000
+        assert context['startup_margin_ms'] == margin_ms
+        assert context['expected_check_at_us'] == _NOW+wait_us
         assert context['target_duration_ms'] == 300000
         seen.append(context)
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
@@ -233,7 +237,7 @@ async def test_new_native_context_and_history_preserve_original_startup_margin(t
         path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         history = HistoryRepository(path)
         restored = history.restore_entity('action', action_id, history.current_boundary())
-        assert restored[('actions', action_id)]['execution_spec_json']['startup_margin_ms'] == 1000
+        assert restored[('actions', action_id)]['execution_spec_json']['startup_margin_ms'] == margin_ms
         assert len(seen) == 1
     finally:
         owned.connection.close()

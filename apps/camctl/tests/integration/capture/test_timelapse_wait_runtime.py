@@ -254,8 +254,7 @@ async def _mapping_world(tmp_path, startup, *, advance=True):
     owned = _environment(tmp_path, _TIMELAPSE)
     spec = json.loads(owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=13').fetchone()[0])
     spec.update(target_duration_ms=1000, result_wait_margin_ms=200)
-    if startup: spec['startup_margin_ms'] = startup
-    else: spec.pop('startup_margin_ms', None)
+    spec['startup_margin_ms'] = startup
     owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=13', (json.dumps(spec),))
     wall, mono, extra = [_NOW], [5000000000], [0]
     runtime = _runtime(owned, files={13: (_entry('sequence-1'),)})

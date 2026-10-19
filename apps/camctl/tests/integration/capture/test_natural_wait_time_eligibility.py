@@ -300,7 +300,7 @@ async def test_unqualified_wait_returns_to_positive_host_poll_without_consuming_
         mono[0] += (startup+1200)*1000000
         wall[0] = _NOW-1000000
         before = owned.connection.execute('SELECT COUNT(*) FROM operation_attempts').fetchone()
-        context = SimpleNamespace(poll_interval_s=.5, wake=None,
+        context = SimpleNamespace(poll_interval_s=.5, wake=None, flows={}, wakeup_margin_s=0,
             clock=SimpleNamespace(utc_micros=lambda: wall[0]))
         for _ in range(3):
             await advance(action_id, runtime)

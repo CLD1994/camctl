@@ -469,26 +469,27 @@ async def test_prior_complete_files_do_not_supply_current_insufficient_cancel_sc
         owned.connection.close()
 
 
-async def test_new_finite_cancel_waits_original_startup_then_preserves_dual_terminal_and_history(tmp_path):
+@pytest.mark.parametrize('margin_ms,wait_us', [(0, 1250000), (1000, 2250000)])
+async def test_new_finite_cancel_waits_original_startup_then_preserves_dual_terminal_and_history(tmp_path, margin_ms, wait_us):
     from pathlib import Path
     from camctl.persistence.repositories.history import HistoryRepository
-    owned, runtime, advance, stopper, wall, mono = await _world(tmp_path, startup_margin_ms=1000)
+    owned, runtime, advance, stopper, wall, mono = await _world(tmp_path, startup_margin_ms=margin_ms)
     try:
         await advance(13, runtime)
-        wall[0] += 1250000
-        mono[0] += 1250000000
+        wall[0] += wait_us-1
+        mono[0] += (wait_us-1)*1000
         await advance(13, runtime)
         assert runtime.results.calls == []
         assert runtime.action(13)['status'] == 2
-        wall[0] += 1000000
-        mono[0] += 1000000000
+        wall[0] += 1
+        mono[0] += 1000
         await advance(13, runtime)
         assert runtime.action(13)['status'] == 6
         await _finish_cancel(owned, wall)
         ended = owned.connection.execute("SELECT body_json FROM history_events WHERE event_type=13 AND json_extract(body_json,'$.reason')=4").fetchone()
         evidence = json.loads(ended[0])['evidence']['cancel_completion']
-        assert evidence['startup_margin_ms'] == 1000
-        assert evidence['expected_check_at_us'] == _NOW+2250000
+        assert evidence['startup_margin_ms'] == margin_ms
+        assert evidence['expected_check_at_us'] == _NOW+wait_us
         assert owned.connection.execute('SELECT activity_state,occupancy_state,completion_basis,capture_json FROM device_activities WHERE id=13').fetchone() == (3, 2, 1, None)
         assert owned.connection.execute("SELECT status,attempts_used FROM operation_runs WHERE responsibility_key='stop/13'").fetchone() == (4, 1)
         path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
@@ -500,7 +501,7 @@ async def test_new_finite_cancel_waits_original_startup_then_preserves_dual_term
         owned.connection.close()
 
 
-@pytest.mark.parametrize('startup', [1000, 2000, None])
+@pytest.mark.parametrize('startup', [0, 1000, 2000, None])
 async def test_finite_cancel_guard_requires_same_frozen_startup_margin(tmp_path, startup):
     import camctl.persistence.repositories.finite_cancel as finite
     from camctl.contracts.history_values import TransactionRange

@@ -697,7 +697,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         expected_target_ms = 10000 if action_type == "camera_record" else 300000
         assert original_execution["target_duration_ms"] == expected_target_ms
         assert original_execution["file_completion_wait_ms"] == 30000
-        assert original_execution["startup_margin_ms"] == (0 if action_type == "camera_record" else 1000)
+        assert original_execution["startup_margin_ms"] == 0
         from camctl.devices.tasks import EndControl, StartReturn
 
         if action_type == "camera_timelapse":
@@ -738,7 +738,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
 
         # 中断原 C host run，保留已确认的 START、原参数、原绑定和基准。
         demo.stop()
-        natural_s = 9 if action_type == "camera_record" else 330
+        natural_s = 9 if action_type == "camera_record" else 329
         boundary_utc_us = initial_clock["utc_us"] + natural_s * 1_000_000
         boundary_monotonic_ns = initial_clock["monotonic_ns"] + natural_s * 1_000_000_000
         negative_state = set_frozen(
@@ -855,16 +855,15 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             assert completion["observed_wait_ns"] >= 30_000_000_000
             assert completion["completed"] is True
         else:
-            # DEVICE/SENT/TIME_AND_OUTPUTS 自然完成只等待 300 秒目标、
-            # 1 秒启动余量和 30 秒结果余量，
+            # DEVICE/SENT/TIME_AND_OUTPUTS 自然完成等待 300 秒目标和 30 秒结果余量，
             # 随后读取原活动结果；正常结束没有 STOP，也没有 stop_return file_completion。
             assert stops == [], all_calls
             directories = [call for call in all_calls if call.get("kind") == "directory"
                            and call.get("started_epoch") == release_state["epoch"]
                            and call.get("started_clock_ns", 0) >= response["returned_clock_ns"]]
             assert directories, all_calls
-            assert directories[0]["started_clock_ns"] - response["returned_clock_ns"] >= 331 * 1_000_000_000
-            assert directories[0]["started_clock_utc_us"] - response["returned_clock_utc_us"] >= 331 * 1_000_000
+            assert directories[0]["started_clock_ns"] - response["returned_clock_ns"] >= 330 * 1_000_000_000
+            assert directories[0]["started_clock_utc_us"] - response["returned_clock_utc_us"] >= 330 * 1_000_000
 
         device_files = query_state(deployment.state_db,
             "SELECT id,locator_json,role,original_device_file_id,pairing_evidence_json,"

@@ -67,7 +67,7 @@ def validate_completion_context(context, *, activity_id: str) -> dict | None:
         margin = _integer(context['result_wait_margin_ms'])
         extra = _integer(context['extra_wait_ms'])
         due = _integer(context['expected_check_at_us'])
-        startup = _integer(context['startup_margin_ms'], 1) if 'startup_margin_ms' in context else 0
+        startup = _integer(context['startup_margin_ms']) if 'startup_margin_ms' in context else 0
         if due != CaptureTiming(duration, startup, margin, extra).deadline_us(sent):
             raise ValueError('自然等待改变原发送时间或采用的等待规则')
         if _integer(context['wait_completed_at_us']) < due:

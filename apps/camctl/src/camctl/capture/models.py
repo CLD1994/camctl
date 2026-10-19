@@ -247,7 +247,7 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
         if not spec["duration_based"] or start is not StartReturn.SENT:
             raise ValueError("启动余量只适用于有限 SENT 任务")
         expected.add("startup_margin_ms")
-        result["startup_margin_ms"] = _integer(spec["startup_margin_ms"], 1)
+        result["startup_margin_ms"] = _integer(spec["startup_margin_ms"])
     if "file_completion_wait_ms" in spec:
         if not spec["stop_supported"]:
             raise ValueError("停止后文件等待要求明确停止能力")

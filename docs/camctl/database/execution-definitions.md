@@ -190,13 +190,13 @@ JSON 整数按数学值判断，沿用[精确数字规则](../data-types.md#精�
 
 ## 拍摄执行定义的启动余量
 
-`startup_margin_ms` 保存新启动语义采用的整数毫秒等待。普通录像接受 0～9223372036854775807 的 JSON 整数，`0` 明确表示不追加启动等待；有限延时采用正整数。布尔值、负数、非整数或越界值非法。该值是动作首次受理时冻结的执行依据，不表示设备实际开始采集的时刻，也不是媒体时长。读取、正常执行和恢复均使用动作原定义中的值；精确计时与证据规则由[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)维护。
+`startup_margin_ms` 保存新启动语义采用的整数毫秒等待。普通录像与适用的有限延时接受 0～9223372036854775807 的 JSON 整数，`0` 明确表示不追加启动等待。布尔值、负数、非整数或越界值非法。该值是动作首次受理时冻结的执行依据，不表示设备实际开始采集的时刻，也不是媒体时长。读取、正常执行和恢复均使用动作原定义中的值；精确计时与证据规则由[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)维护。
 
 | 动作定义 | 字段组合与读取规则 |
 | --- | --- |
 | `camera_record` 旧定义 | `start_return_meaning` 与 `startup_margin_ms` 均缺失；保留原 `STARTED` 语义，按 `S=0` 的原规则读取，不补默认字段。 |
 | `camera_record` 新定义 | 两字段必须同时存在；`start_return_meaning` 必须为 `1`（`SENT`），`startup_margin_ms` 必须为非负整数毫秒。字段半套、其他返回含义或非法余量均使定义无效；受理时按驱动定义错误处理，读取已保存定义时按状态库错误处理。 |
-| `camera_timelapse` 适用定义 | 只有 `duration_based: true` 且 `start_return_meaning` 为 `SENT` 的任务可以保存正整数 `startup_margin_ms`；旧定义缺少该字段时按原规则读取，相当于 `S=0`，不得追补新默认值。其他任务提供此字段属于无效定义。 |
+| `camera_timelapse` 适用定义 | 只有 `duration_based: true` 且 `start_return_meaning` 为 `SENT` 的任务可以保存非负整数 `startup_margin_ms`；旧定义缺少该字段时按原规则读取，相当于 `S=0`，不得追补新默认值。其他任务提供此字段属于无效定义。 |
 
 新动作按驱动任务声明冻结启动余量，型号及任务的当前值见[适用范围](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md#目标与适用范围)。已有动作继续读取原值，驱动声明变化不重写历史。启动余量只保存在 `actions.execution_spec_json`，不复制为设备活动字段；活动时间戳和控制时长仍只记录实际可靠取得的事实。
 

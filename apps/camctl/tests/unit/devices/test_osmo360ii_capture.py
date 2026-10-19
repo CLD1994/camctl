@@ -183,7 +183,7 @@ async def test_stop_factory_uses_actual_scoped_command(operation, payload, accep
     assert [item.type for item in result.observations] == (["stop_confirmed"] if accepted else [])
 
 
-@pytest.mark.parametrize('kind,margin_ms', [('record', 0), ('timelapse', 1000)])
+@pytest.mark.parametrize('kind,margin_ms', [('record', 0), ('timelapse', 0)])
 def test_new_osmo_task_freezes_startup_margin_and_original_user_duration(kind, margin_ms):
     from camctl.capture.models import build_capture_spec
     task = _contract().task_factories['osmo360ii_'+kind]({'duration_s': 300})
