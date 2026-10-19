@@ -1277,6 +1277,16 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 
 命令、工作目录、解释器、UTC、退出码、JUnit 和日志保存在 `.local/diagnostics/20261019-osmo-timelapse-zero-margin/software/`。`fixture-failure-origin.json` 保存既有替身失败的输入摘要，`verified-results.json` 记录各次实际结果和补验覆盖，不将分批核验写成一次全目录通过。本项没有连接真实相机；前一轮 300 秒实拍仍按其原 1000 毫秒定义记载，不改写为零余量设备验收。
 
+## OSMO 原生延时零启动余量的 TX2 部署（2026-10-19 UTC）
+
+从干净提交 `207efb78154bca3f5ff7b71d15749d5c78db940f` 在仓库外快照离线构建 wheel，240 份 Python 模块与该提交逐字节一致。wheel SHA-256 为 `25bd19567a397678690b3e13c2bf992e78d2459208589a32a64013b79ca84a48`，大小 1147240 字节。软件门禁见[前节](#osmo-原生延时零启动余量的软件验证2026-10-19-utc)；串行只读复核没有发现生产代码阻断，旧计划的当前值与历史场景说明已同步到权威规格。
+
+安装前确认没有 camctl 执行进程，备份旧包、原配置及状态库。在 TX2 原 Python 3.11.17／SQLite 3.53.1 虚拟环境离线替换应用包后，266 份包内文件与 wheel 一致，依赖检查及沿原配置的 `describe` 均退出 0。实际安装版的任务工厂生成 OSMO 普通录像和原生延时的零启动余量，Action6 普通录像仍为 1000 毫秒；原生延时的自然结果余量及独立 STOP 后文件等待仍各为 30000 毫秒。
+
+原配置内容和默认软链接保持，状态库安装前后的逻辑摘要均为 `21b35a07538a6e8709b90243d8c87e1758631e7732a14f484b5fa4c438869d74`。没有执行 `init` 或推进原计划；已有未完成动作仍保存各自原冻结规则，新受理任务使用当前工厂声明。本项只执行安装与能力核验，没有发送相机命令或新增实拍。
+
+本地发行物与能力 JSON 保存于 `.local/deployments/20261019-osmo-timelapse-zero-margin/`。能力 JSON 包含 `hb0` 和 `osmo360ii`，哈苏沿用 host 正式源；公共 Schema 校验通过，SHA-256 为 `19cbe716bb5d7c0ab004e71efd0326b6a1da926353aab3ff502cc5d980ebadf8`。与上一份能力 JSON 比较，仅原生延时的参数类型说明发生变化，其他字段保持。目标备份和安装记录位于 `/home/cld/.camctl/diagnostics/20261019-osmo-timelapse-zero-margin/install-152528/`，本地副本位于 `.local/diagnostics/20261019-osmo-timelapse-zero-margin/tx2-install/`。
+
 ## 部署交接与待核验项
 
 [软件验收映射](software-acceptance.md)逐条登记适用验收与跨模块场景的结论、证据和未核验前提；当前未完成的软件任务以[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)为准。[集成计划 I6 的历史验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)与 [B7 发行物记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)保存当次命令及环境。发行物在源码目录之外构建、安装与运行的要求见[部署说明](implementation.md#构建安装与运行检查)。
