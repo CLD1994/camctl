@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+from camctl.capture.wakeups import RecordingWakeups
 from camctl.capture.residual import residual_flow as _residual_flow_impl
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
@@ -39,6 +40,7 @@ from camctl.persistence.repositories.scheduling import (
 from camctl.session.service import StateDbFailure, _RequiredPhaseWaiter
 from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
+from camctl.scheduling.notifications import WakeReason
 
 __all__ = ["CaptureFlow", "capture_flow", "cancel_flow", "report_flow", "residual_flow",
            "winddown_flow"]
@@ -134,6 +136,11 @@ class CaptureFlow:
         self._devices: dict[str, BackgroundFlow] = {}
         self._stopping = False
         self._discovery = ReadDiscoveryOwner(read_discovery_batch_size)
+        self._recording_wakeups = RecordingWakeups()
+        self._notification_tasks: dict[str, asyncio.Task] = {}
+
+    def next_wakeup_at(self, now, margin_s):
+        return self._recording_wakeups.next_at(now, margin_s)
 
     def owns_device(self, device_id):
         owner = self._devices.get(device_id)
@@ -144,6 +151,7 @@ class CaptureFlow:
 
     def stop_new_work(self):
         self._stopping = True
+        self._recording_wakeups.clear()
         CombinedLocalWork(tuple(self._devices.values())).stop_new_work()
 
     def check_completed(self):
@@ -158,6 +166,7 @@ class CaptureFlow:
                 raise
             if owner.required_settlements() == 0:
                 del self._devices[device_id]
+                self._notification_tasks.pop(device_id, None)
 
     async def settle(self):
         try:
@@ -165,6 +174,9 @@ class CaptureFlow:
         finally:
             self._devices = {device: owner for device, owner in self._devices.items()
                              if owner.required_settlements() != 0}
+            self._notification_tasks = {
+                device: task for device, task in self._notification_tasks.items()
+                if device in self._devices and self._devices[device].unconsumed_task is task}
 
     async def __call__(self, context):
         self.check_completed()
@@ -180,7 +192,6 @@ class CaptureFlow:
             for action_id, device_id, *_ in page.items:
                 device_ids.setdefault(device_id, []).append(action_id)
             if self._discovery.pending and getattr(context, "wake", None) is not None:
-                from camctl.scheduling.notifications import WakeReason
                 context.wake.mark_changed(WakeReason.READ_OPPORTUNITY)
         except (sqlite3.Error, ConsistencyError) as error:
             raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
@@ -197,12 +208,36 @@ class CaptureFlow:
                 owner = BackgroundFlow(advance)
                 self._devices[device_id] = owner
             await owner(context)
+            task = owner.unconsumed_task
+            if task is not None and getattr(context, "wake", None) is not None:
+                # 每项任务只登记一次；通知不消费任务及其原结果。
+                if self._notification_tasks.get(device_id) is not task:
+                    self._notification_tasks[device_id] = task
+                    def completed(actual, device_id=device_id, owner=owner):
+                        if (not self._stopping
+                                and self._notification_tasks.get(device_id) is actual
+                                and owner.unconsumed_task is actual and actual.done()):
+                            context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
+                    task.add_done_callback(completed)
 
     async def _advance_device(self, context, device_id, action_ids):
         owned = context.open_connection()
         try:
             scheduling = SchedulingRepository()
             runtime = self._factory(owned, device_id)
+            if runtime is not None:
+                def recording_deadline(action_id, target_ns):
+                    if target_ns is None:
+                        changed = self._recording_wakeups.discard(device_id, action_id)
+                    elif not self._stopping:
+                        changed = self._recording_wakeups.schedule(
+                            device_id, action_id, target_ns,
+                            now_ns=runtime.monotonic_ns(), now_s=asyncio.get_running_loop().time())
+                    else:
+                        changed = False
+                    if changed and getattr(context, "wake", None) is not None:
+                        context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
+                runtime.on_recording_deadline = recording_deadline
             pending = _due_pending_actions(owned.connection, context.clock.utc_micros(), device_id=device_id,
                 action_ids=action_ids, limit=self._discovery.batch_size)
             for action_id, _, scheduled_at, max_delay_ms in pending:

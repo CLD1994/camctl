@@ -90,3 +90,15 @@ class TestVersionedWake:
         # 旧令牌等待立即完成；新令牌正常等待。
         immediate = await notifier.wait_changed(stale, deadline=None)
         assert immediate.version >= latest.version
+
+    @pytest.mark.parametrize("finite", [False, True])
+    async def test_notification_racing_with_external_cancel_preserves_cancel(self, finite):
+        notifier = WorkNotifier()
+        deadline = asyncio.get_running_loop().time() + 5 if finite else None
+        waiter = asyncio.create_task(notifier.wait_changed(notifier.snapshot(), deadline))
+        await asyncio.sleep(0)
+        notifier.mark_changed(WakeReason.ACTIVITY_FINISHED)
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter

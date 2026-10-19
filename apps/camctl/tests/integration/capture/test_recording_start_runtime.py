@@ -520,9 +520,12 @@ async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path)
     try:
         driver = StartDriver(_result())
         runtime = _sent_runtime(owned, driver)
+        deadlines = []
+        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         await capture_handler("camera_record")(12, runtime)
         assert owned.connection.execute("SELECT sent_at, started_at, occupancy_state FROM device_activities WHERE action_id=12").fetchone() == (None, None, 1)
         assert runtime.recording_state is None or not runtime.recording_state.has_session_anchor(12)
+        assert deadlines == []
     finally:
         owned.connection.close()
 
@@ -533,12 +536,15 @@ async def test_cancel_during_startup_margin_stops_immediately_with_original_budg
     try:
         driver = StartDriver(_sent_result())
         runtime = _sent_runtime(owned, driver)
+        deadlines = []
+        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         runtime.evidence = runtime.evidence.with_contract(EvidenceContract(
             "stop_returned", 1, "stop", frozenset())).with_contract(EvidenceContract(
             "stop_confirmed", 1, "stop", frozenset({"activity_id"}), identity_field="activity_id"))
         class Stop:
             calls = []
             async def stop(self, request):
+                assert deadlines[-1] == (12, None)
                 self.calls.append(request)
                 return DeviceCallResult((DeviceObservation("stop_confirmed", 1, {"activity_id": "12"}),), None)
         runtime.stopper = Stop()
@@ -558,6 +564,8 @@ async def test_sent_response_anchor_precedes_commit_delay(tmp_path):
         wall, mono, returned = [_NOW], [_ANCHOR], [False]
         driver = StartDriver(_sent_result(), returned=lambda: returned.__setitem__(0, True))
         runtime = _sent_runtime(owned, driver, wall=wall, mono=mono)
+        deadlines = []
+        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         def delay_commits(statement):
             if returned[0] and statement == "COMMIT":
                 wall[0] += 5000000
@@ -566,6 +574,7 @@ async def test_sent_response_anchor_precedes_commit_delay(tmp_path):
         await capture_handler("camera_record")(12, runtime)
         assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None)
         assert runtime.recording_state.recording_state(12).stop_target_ns == 18000000000
+        assert deadlines == [(12, 18000000000)]
     finally:
         owned.connection.set_trace_callback(None)
         owned.connection.close()

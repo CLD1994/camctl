@@ -100,12 +100,11 @@ class WorkNotifier:
             if deadline is None:
                 await event.wait()
             else:
-                timeout = deadline - loop.time()
-                if timeout > 0:
-                    try:
-                        await asyncio.wait_for(event.wait(), timeout=timeout)
-                    except TimeoutError:
-                        pass
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        await event.wait()
+                except TimeoutError:
+                    pass
             return self.snapshot()
         finally:
             with self._lock:

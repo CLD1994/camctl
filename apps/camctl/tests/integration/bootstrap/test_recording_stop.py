@@ -290,6 +290,54 @@ async def _await_query(
 
 
 class TestNormalStopAtTarget:
+    async def test_short_recording_stops_at_its_deadline_with_long_polling(self, tmp_path):
+        from camctl.scheduling.notifications import WorkNotifier
+
+        home = tmp_path / "deadline"
+        home.mkdir()
+        cfg = _config_for(home)
+        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        catalog = _RecordCatalog()
+        catalog.duration_s = Decimal("0.2")
+        await _submit_plan(tmp_path, cfg, catalog, _record_plan("1", _future_schedule(0)))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
+        confirmed = []
+        stopped = asyncio.Event()
+        stop_times = []
+
+        class Driver(_ActivityDriver):
+            async def control(self, request):
+                # 工具完成发生在中央循环已经进入等待之后。
+                await asyncio.sleep(0.05)
+                outcome = await super().control(request)
+                confirmed.append(time.monotonic())
+                return outcome
+
+        class Stop(_StopDouble):
+            async def stop(self, request):
+                stop_times.append(time.monotonic())
+                outcome = await super().stop(request)
+                stopped.set()
+                return outcome
+
+        driver, stopper = Driver(), Stop()
+        build = _record_factory(driver, stopper, ResultsDouble({}, set_finalized=False), {"ns": 0})
+        def factory(owned, device):
+            runtime = build(owned, device)
+            runtime.monotonic_ns = time.monotonic_ns
+            return runtime
+
+        task = asyncio.create_task(execute_command(
+            deps, None, flows={"scheduling": capture_flow(factory)},
+            wake=WorkNotifier(), poll_interval_s=30))
+        try:
+            await asyncio.wait_for(stopped.wait(), 2)
+            assert len(confirmed) == len(stop_times) == 1
+            assert 0.2 <= stop_times[0] - confirmed[0] < 0.8
+        finally:
+            await _cancel(task)
+            close_runtime(deps)
+
     async def test_stops_at_anchor_target_and_finishes(
             self, tmp_path: Path) -> None:
         home = tmp_path / "normal"
@@ -321,10 +369,10 @@ class TestNormalStopAtTarget:
                 "SELECT status, attempts_used FROM operation_runs"
                 " WHERE responsibility_key = 'stop/1'", (3, 1))
             assert stopper.calls == ["stop_recording"]
-            # 停止确认即收场活动：结束观察与占用释放同链完成。
-            assert _scalar(
+            # STOP 结果保存后，原拥有者继续完成活动收场及占用释放。
+            await _await_query(
                 db, "SELECT activity_state, occupancy_state"
-                " FROM device_activities WHERE id = 1") == (3, 2)
+                " FROM device_activities WHERE id = 1", (3, 2))
             # 结果尚未列举：动作保持执行中等待产物核实。
             assert _scalar(db, "SELECT status FROM actions WHERE id = 1") == (2,)
             await _await_query(

@@ -309,6 +309,36 @@ class TestRunLoop:
         assert outcome.succeeded is True
         assert calls["count"] >= 2
 
+    @pytest.mark.parametrize("notified", [False, True])
+    async def test_running_flow_deadline_bounds_idle_wait(self, environment, notified):
+        import asyncio
+        from camctl.scheduling.notifications import WorkNotifier
+
+        context, _, holder, _ = environment
+        context.clock = FixedClock(_MIN + 60_000_000)
+        context.poll_interval_s = 30.0
+        context.wake = WorkNotifier() if notified else None
+        state = {"facts": _facts(unfinished_actions=1)}
+        holder["facts"] = lambda connection: state["facts"]
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 0.15
+        advances = []
+
+        class RunningFlow:
+            async def __call__(self, ctx):
+                advances.append(loop.time())
+                if advances[-1] >= deadline:
+                    state["facts"] = _facts()
+
+            def next_wakeup_at(self, now, margin_s):
+                return deadline
+
+        context.flows = {"scheduling": RunningFlow()}
+        outcome = await asyncio.wait_for(_run(context), timeout=2)
+        assert outcome.succeeded
+        assert len(advances) == 2
+        assert deadline <= advances[-1] < deadline + 1
+
     async def test_cancel_during_wait_releases_admission(self, environment):
         import asyncio
 

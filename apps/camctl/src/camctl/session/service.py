@@ -273,6 +273,8 @@ class SessionContext:
     wake: Any = None
     #: 外部输入感知的轮询上限（秒）；部署目标为 0.5 秒量级。
     poll_interval_s: float = 0.5
+    #: 内部截止提前检查余量；不允许实际业务操作提前执行。
+    wakeup_margin_s: float = 0.05
     #: run 取得会话锁并可靠打开状态库后，业务事务前固定恢复输入。
     on_session_open: Callable[[OwnedConnection], None] | None = None
     #: 实际文件调用、结果保存和独立连接关闭均完成后才结束的责任。
@@ -1679,11 +1681,18 @@ async def _wait_for_more_work(
     deadline = _pending_deadline_seconds(context, owned)
     if deadline is not None:
         wait_s = min(wait_s, deadline)
+    loop = asyncio.get_running_loop()
+    now = loop.time()
+    for flow in context.flows.values():
+        next_wakeup = getattr(flow, "next_wakeup_at", None)
+        if next_wakeup is not None:
+            at = next_wakeup(now, context.wakeup_margin_s)
+            if at is not None:
+                wait_s = min(wait_s, max(0, at - now))
     wait_s = max(wait_s, _MIN_IDLE_WAIT_S)
     if context.wake is None:
         await asyncio.sleep(wait_s)
         return
-    loop = asyncio.get_running_loop()
     # 本轮查询前的版本覆盖流程内安排的下一批，以及查询后到等待前的通知。
     # 通知已到达时仍交回事件循环，避免连续页面挤占其他设备或取消收场。
     await asyncio.sleep(0)

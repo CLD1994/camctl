@@ -99,8 +99,11 @@ async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_sa
 
         proxy = PersistentFault(owned.connection, driver, "commit_before")
         runtime = _configured(replace(owned, connection=proxy), driver)
+        deadlines = []
+        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         with pytest.raises(ConsistencyError):
             await capture_handler("camera_record")(12, runtime)
+        assert deadlines == []
         pending, = runtime.pending_start_results.values()
         assert pending.finish.outcome.outcome is actual
         assert pending.finish.ticket.responsibility_key == "start/12"
@@ -118,6 +121,7 @@ async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_sa
             "SELECT started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW,)
         assert runtime.recording_state.recording_state(12).stop_target_ns == (
             original_anchor + 60_000_000_000)
+        assert deadlines[0] == (12, original_anchor + 60_000_000_000)
     finally:
         owned.connection.close()
 

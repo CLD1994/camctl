@@ -789,6 +789,8 @@ class CaptureRuntime(_FileObservationSaves):
     #: 核对已保存设备身份与本次固定配置；未提供时由调用方保证绑定匹配。
     binding_check: Callable[[DeviceBinding], BindingResult] | None = None
     recording_state: RecordingStatePort | None = None
+    #: 只发布本会话普通录像的原停止截止；None 清除对应动作的提示。
+    on_recording_deadline: Callable[[int, int | None], None] | None = None
     #: 录像停止调用端口；未装配时录像不能停止。
     stopper: DeviceStopPort | None = None
     #: 录像媒体链端口；未装配时需要检查的录像不推进，等待装配会话。
@@ -1307,6 +1309,8 @@ class SessionRecordingState:
     def anchor_confirmed(self, action_id: int, anchor_ns: int,
                          stop_target_ns: int) -> None:
         self._anchors[action_id] = (anchor_ns, stop_target_ns)
+        if self._runtime.on_recording_deadline is not None:
+            self._runtime.on_recording_deadline(action_id, stop_target_ns)
 
     def has_session_anchor(self, action_id: int) -> bool:
         """本会话是否持有该动作的启动确认锚点。"""
@@ -2095,6 +2099,9 @@ async def _stop_call(runtime: CaptureRuntime, action,
     停止操作字面量由调用方按任务类型提供。重试等待的间隔未到时
     不提交新意图，由推进循环下一轮再判。
     """
+    if (action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+            and runtime.on_recording_deadline is not None):
+        runtime.on_recording_deadline(action["id"], None)
     if runtime.stopper is None:
         raise LookupError("设备停止端口未装配")
     remaining = runtime.retry_wait_remaining(
@@ -3025,6 +3032,8 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
     context.resume_start_results(action_id)
     action = context.action(action_id)
     if action["status"] in _ACTION_TERMINAL:
+        if context.on_recording_deadline is not None:
+            context.on_recording_deadline(action_id, None)
         return
     if _handle_binding_failure(context, action):
         return
@@ -3039,10 +3048,14 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         return
     port = _recording_port(context)
     canceled = bool(action["cancel_requested"])
+    state = port.recording_state(action_id)
     decision = decide_recording_next(
-        port.recording_state(action_id),
+        state,
         RecordingFacts(canceled=canceled),
     )
+    if context.on_recording_deadline is not None:
+        context.on_recording_deadline(
+            action_id, state.stop_target_ns if decision.phase is RecordingPhase.WAIT_RECORD else None)
     if decision.phase is RecordingPhase.NOT_RUNNING:
         if canceled:
             # 启动未确认时取消：不重新启动，收场归启动核实链。

@@ -920,14 +920,17 @@ async def execute_command(
     overrides: dict[str, Any] = {
         "flows": flows if flows is not None else {},
         "wake": wake,
+        "poll_interval_s": (deps.config.session.plan_poll_interval_ms / 1000
+                            if poll_interval_s is None else poll_interval_s),
     }
+    if deps.mode is CommandMode.RUN and wake is None:
+        from camctl.scheduling.notifications import WorkNotifier
+        overrides["wake"] = WorkNotifier()
     assemble_production_run = (
         deps.startup_error is None
         and deps.mode is CommandMode.RUN
         and flows is None
     )
-    if poll_interval_s is not None:
-        overrides["poll_interval_s"] = poll_interval_s
     if assemble_production_run:
         flows, supervisor = _report_assembly(
             deps, failure_log, logging_owner)
@@ -1054,6 +1057,7 @@ async def execute_command(
                            logging_owner.start_session),
         logging_owner=logging_owner,
         local_work=_local_work(deps, overrides["flows"], logging_owner),
+        wakeup_margin_s=deps.config.session.wakeup_margin_ms / 1000,
         startup_outcome=(deps.startup_error
                          if minimal_bad_database_run else None),
         **overrides,
