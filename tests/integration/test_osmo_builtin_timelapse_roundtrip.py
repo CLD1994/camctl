@@ -697,7 +697,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         expected_target_ms = 10000 if action_type == "camera_record" else 300000
         assert original_execution["target_duration_ms"] == expected_target_ms
         assert original_execution["file_completion_wait_ms"] == 30000
-        assert original_execution["startup_margin_ms"] == 1000
+        assert original_execution["startup_margin_ms"] == (0 if action_type == "camera_record" else 1000)
         from camctl.devices.tasks import EndControl, StartReturn
 
         if action_type == "camera_timelapse":
@@ -738,7 +738,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
 
         # 中断原 C host run，保留已确认的 START、原参数、原绑定和基准。
         demo.stop()
-        natural_s = 10 if action_type == "camera_record" else 330
+        natural_s = 9 if action_type == "camera_record" else 330
         boundary_utc_us = initial_clock["utc_us"] + natural_s * 1_000_000
         boundary_monotonic_ns = initial_clock["monotonic_ns"] + natural_s * 1_000_000_000
         negative_state = set_frozen(
@@ -785,7 +785,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             deployment, adb_log, action_id=action_id, activity_id=activity_id,
             recovery_started_ns=recovered_run["started_ns"])
 
-        # 仍在运行的同一 CLI 进程释放到严格通过启动余量后的业务时钟。
+        # 仍在运行的同一 CLI 进程释放到原冻结规则的截止时点。
         release_utc_us = initial_clock["utc_us"] + (natural_s + 1) * 1_000_000
         release_monotonic_ns = initial_clock["monotonic_ns"] + (natural_s + 1) * 1_000_000_000
         release_state = set_running(
@@ -830,11 +830,11 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         assert result_rows
 
         if action_type == "camera_record":
-            # 主机计时录像在 10 秒目标与 1 秒启动余量后发唯一 STOP 00，
+            # 主机计时录像在 10 秒目标后发唯一 STOP 00，
             # 再由 driver 独立等待 30 秒。
             assert len(stops) == 1, all_calls
-            assert stops[0]["started_clock_ns"] - response["returned_clock_ns"] >= 11 * 1_000_000_000
-            assert stops[0]["started_clock_utc_us"] - response["returned_clock_utc_us"] >= 11 * 1_000_000
+            assert stops[0]["started_clock_ns"] - response["returned_clock_ns"] >= 10 * 1_000_000_000
+            assert stops[0]["started_clock_utc_us"] - response["returned_clock_utc_us"] >= 10 * 1_000_000
             assert stops[0]["started_epoch"] == release_state["epoch"]
             assert stops[0]["response"] == "00"
             assert stops[0].get("exitcode") == 0

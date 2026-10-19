@@ -10,14 +10,11 @@ from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.drivers.registry import DriverStatus
 from camctl.devices.evidence import EvidenceError, EvidenceRegistry
 from camctl.devices.ports import ControlRequest, DriverDeclaration, DeviceCallResult
-from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
+from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory, StartReturn
 from camctl.devices.task_metadata import cancellation_description
 from .commands import CameraModel, Command
 from .definitions import candidate_capabilities
 from .filesystem import ShellFileTools
-
-
-STARTUP_MARGIN_MS = 1000
 
 
 class CameraCall(StrEnum):
@@ -122,6 +119,14 @@ class CameraContract:
             task = (factory({"type": capability.parameter_type, "duration_s": 1})
                     if callable(factory) else None)
             task_description = cancellation_description(task) if isinstance(task, CaptureTask) else ""
+            timing_description = ""
+            if (capability.action_type == "camera_record" and isinstance(task, CaptureTask)
+                    and task.start_return_meaning is StartReturn.SENT
+                    and task.startup_margin_ms is not None):
+                timing_description = ("开始命令正常响应只确认相机已接受命令；主机"
+                    + (f"额外等待 {Decimal(task.startup_margin_ms) / 1000} 秒启动余量，再计满原目标时长，"
+                       if task.startup_margin_ms else "从可靠命令确认时点起计满原目标时长，")
+                    + "不据此记录实际首帧时刻。")
             capabilities.append(replace(capability, task_factory=factory,
                 name=("普通录像参数" if capability.action_type == "camera_record" else "原生延时摄影参数")
                     if callable(factory) else capability.name,
@@ -130,7 +135,6 @@ class CameraContract:
                               capability.description.replace(
                                   "正常结束及文件写完依据待设备核实。", ""))
                              if callable(factory) else capability.description)
-                    + (f"开始命令正常响应只确认相机已接受命令；主机额外等待 {STARTUP_MARGIN_MS // 1000} 秒启动余量，再计满原目标时长，不据此记录实际首帧时刻。"
-                       if callable(factory) and capability.action_type == "camera_record" else "")
+                    + timing_description
                     + (f"{task_description}" if task_description else "")))
         return tuple(capabilities)

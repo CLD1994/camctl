@@ -453,11 +453,11 @@ async def test_original_start_stays_in_flight_without_second_dispatch_or_early_t
         owned.connection.close()
 
 
-def _sent_world(tmp_path, duration_ms=10000):
+def _sent_world(tmp_path, duration_ms=10000, *, startup_margin_ms=1000):
     owned = _world(tmp_path)
     owned.connection.execute("UPDATE actions SET execution_spec_json=? WHERE id=12", (
         json.dumps({"target_duration_ms": duration_ms, "start_return_meaning": 1,
-                    "startup_margin_ms": 1000}),))
+                    "startup_margin_ms": startup_margin_ms}),))
     return owned
 
 
@@ -472,6 +472,59 @@ def _sent_runtime(owned, driver, **kwargs):
     runtime.evidence = _START_EVIDENCE.with_contract(EvidenceContract(
         "recording_sent", 1, "control", frozenset({"activity_id"}), identity_field="activity_id"))
     return runtime
+
+
+@pytest.mark.parametrize('model,parameter_type,deadline_ns', [
+    ('dji-osmo360-ii', 'osmo360ii_record', 17_000_000_000),
+    ('dji-action6', 'action6_record', 18_000_000_000),
+])
+async def test_builtin_record_stops_at_its_frozen_deadline_without_claiming_actual_start(
+        tmp_path, model, parameter_type, deadline_ns):
+    from camctl.capture.models import build_capture_spec
+    from camctl.devices.drivers.adb_cameras.registration import builtin_camera_contracts
+
+    contract = next(item for item in builtin_camera_contracts() if item.driver_id == model)
+    spec = build_capture_spec('camera_record',
+        contract.task_factories[parameter_type]({'duration_s': 10}))
+    owned = _world(tmp_path)
+    try:
+        owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=12',
+                                 (json.dumps(spec),))
+        wall, mono = [_NOW], [_ANCHOR]
+        driver = StartDriver(_sent_result())
+        runtime = _sent_runtime(owned, driver, wall=wall, mono=mono)
+        runtime.evidence = runtime.evidence.with_contract(EvidenceContract(
+            'stop_returned', 1, 'stop', frozenset()))
+
+        class Stop:
+            def __init__(self):
+                self.calls = []
+
+            async def stop(self, request):
+                self.calls.append(request)
+                return DeviceCallResult((), {'code': 'transport_timeout'})
+
+        runtime.stopper = Stop()
+        deadlines = []
+        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
+        handler = capture_handler('camera_record')
+        await handler(12, runtime)
+        assert runtime.recording_state.recording_state(12).stop_target_ns == deadline_ns
+        assert deadlines == [(12, deadline_ns)]
+        mono[0] = deadline_ns - 1
+        await handler(12, runtime)
+        assert runtime.stopper.calls == []
+        mono[0] = deadline_ns
+        await handler(12, runtime)
+        assert len(runtime.stopper.calls) == 1
+        assert len(driver.calls) == 1
+        assert owned.connection.execute(
+            'SELECT sent_at,started_at FROM device_activities WHERE action_id=12'
+        ).fetchone() == (_NOW, None)
+        assert json.loads(owned.connection.execute(
+            'SELECT execution_spec_json FROM actions WHERE id=12').fetchone()[0]) == spec
+    finally:
+        owned.connection.close()
 
 
 async def test_sent_ack_has_no_actual_started_time_and_waits_eleven_seconds(tmp_path):
@@ -515,8 +568,9 @@ async def test_unrepresentable_recording_is_rejected_before_start_dispatch(tmp_p
         owned.connection.close()
 
 
-async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path):
-    owned = _sent_world(tmp_path)
+@pytest.mark.parametrize('margin_ms', [0, 1000])
+async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path, margin_ms):
+    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
         driver = StartDriver(_result())
         runtime = _sent_runtime(owned, driver)
@@ -530,9 +584,10 @@ async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path)
         owned.connection.close()
 
 
-async def test_cancel_during_startup_margin_stops_immediately_with_original_budget(tmp_path):
+@pytest.mark.parametrize('margin_ms', [0, 1000])
+async def test_cancel_after_sent_stops_immediately_with_original_budget(tmp_path, margin_ms):
     from camctl.contracts.values import new_operation_key
-    owned = _sent_world(tmp_path)
+    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
         driver = StartDriver(_sent_result())
         runtime = _sent_runtime(owned, driver)
@@ -558,8 +613,9 @@ async def test_cancel_during_startup_margin_stops_immediately_with_original_budg
         owned.connection.close()
 
 
-async def test_sent_response_anchor_precedes_commit_delay(tmp_path):
-    owned = _sent_world(tmp_path)
+@pytest.mark.parametrize('margin_ms,deadline_ns', [(0, 17_000_000_000), (1000, 18_000_000_000)])
+async def test_sent_response_anchor_precedes_commit_delay(tmp_path, margin_ms, deadline_ns):
+    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
         wall, mono, returned = [_NOW], [_ANCHOR], [False]
         driver = StartDriver(_sent_result(), returned=lambda: returned.__setitem__(0, True))
@@ -573,19 +629,20 @@ async def test_sent_response_anchor_precedes_commit_delay(tmp_path):
         owned.connection.set_trace_callback(delay_commits)
         await capture_handler("camera_record")(12, runtime)
         assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == 18000000000
-        assert deadlines == [(12, 18000000000)]
+        assert runtime.recording_state.recording_state(12).stop_target_ns == deadline_ns
+        assert deadlines == [(12, deadline_ns)]
     finally:
         owned.connection.set_trace_callback(None)
         owned.connection.close()
 
 
-async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(tmp_path):
-    owned = _sent_world(tmp_path)
+@pytest.mark.parametrize('margin_ms,before_stop_us', [(0, 9_000_000), (1000, 10_000_000)])
+async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(tmp_path, margin_ms, before_stop_us):
+    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
         first = _sent_runtime(owned, StartDriver(_sent_result()))
         await capture_handler("camera_record")(12, first)
-        wall, mono = [_NOW + 10000000], [1]
+        wall, mono = [_NOW + before_stop_us], [1]
         second = _sent_runtime(owned, StartDriver(_sent_result()), wall=wall, mono=mono)
         second.evidence = second.evidence.with_contract(EvidenceContract("stop_returned", 1, "stop", frozenset()))
         class Stop:

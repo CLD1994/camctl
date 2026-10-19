@@ -7,13 +7,14 @@ from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry, RESULT_PAGE_CONTRACT
 from camctl.devices.tasks import CaptureTask, StartReturn
 from .commands import CameraModel
-from .contracts import STARTUP_MARGIN_MS, CameraCall, CameraContract
+from .contracts import CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .record_results import list_record_results
 from .responses import ACTION6_RECORD_OBSERVATIONS, Action6DjiInterpreter, Action6UnconfirmedSettingInterpreter
 
 
 FILE_COMPLETION_WAIT_S = Decimal("5")
+STARTUP_MARGIN_MS = 1000
 
 
 def _task(params):

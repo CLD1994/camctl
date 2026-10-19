@@ -223,7 +223,7 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
             if StartReturn(_integer(spec["start_return_meaning"], 1)) is not StartReturn.SENT:
                 raise ValueError("启动余量要求录像使用可靠 SENT")
             startup = {"start_return_meaning": int(StartReturn.SENT),
-                       "startup_margin_ms": _integer(spec["startup_margin_ms"], 1)}
+                       "startup_margin_ms": _integer(spec["startup_margin_ms"])}
         if set(spec) != {"target_duration_ms", *ownership, *products, *completion_wait, *startup}:
             raise ValueError("录像定义必须保存目标时长及适用的归属声明")
         return {"target_duration_ms": _integer(spec["target_duration_ms"], 1),

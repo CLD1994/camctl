@@ -242,9 +242,10 @@ def test_photo_cannot_ignore_native_cancel_policy():
             cancel_completion_policy=CancelCompletionPolicy.FINITE_DEVICE_END))
 
 
-def test_new_record_freezes_sent_and_startup_margin_together():
+@pytest.mark.parametrize('margin_ms', [0, 1000])
+def test_new_record_freezes_sent_and_startup_margin_together(margin_ms):
     from camctl.capture.models import activity_capabilities
-    spec = {"target_duration_ms": 10000, "start_return_meaning": 1, "startup_margin_ms": 1000}
+    spec = {"target_duration_ms": 10000, "start_return_meaning": 1, "startup_margin_ms": margin_ms}
     assert validate_capture_spec("camera_record", spec) == spec
     assert activity_capabilities("camera_record", spec).start_return_meaning == 1
     assert activity_capabilities("camera_record", {"target_duration_ms": 10000}).start_return_meaning == 2
@@ -254,7 +255,7 @@ def test_new_record_freezes_sent_and_startup_margin_together():
     {"start_return_meaning": 1}, {"startup_margin_ms": 1000},
     {"start_return_meaning": 2, "startup_margin_ms": 1000},
     *({"start_return_meaning": 1, "startup_margin_ms": value} for value in
-      [True, 0, -1, Decimal(".5"), None]),
+      [True, -1, Decimal(".5"), None]),
 ])
 def test_new_record_rejects_partial_or_invalid_startup_contract(changes):
     with pytest.raises(ValueError):
@@ -267,8 +268,9 @@ def test_native_startup_margin_is_optional_frozen_positive_milliseconds():
     assert validate_capture_spec("camera_timelapse", {**old, "startup_margin_ms": 1000})["startup_margin_ms"] == 1000
 
 
-def test_task_factory_can_freeze_startup_margin():
+@pytest.mark.parametrize('margin_ms', [0, 1000])
+def test_task_factory_can_freeze_startup_margin(margin_ms):
     task = CaptureTask("camera_record", target_duration_s=10, stop_supported=True,
-        start_return_meaning=StartReturn.SENT, startup_margin_ms=1000)
+        start_return_meaning=StartReturn.SENT, startup_margin_ms=margin_ms)
     assert build_capture_spec("camera_record", task) == {
-        "target_duration_ms": 10000, "start_return_meaning": 1, "startup_margin_ms": 1000}
+        "target_duration_ms": 10000, "start_return_meaning": 1, "startup_margin_ms": margin_ms}
