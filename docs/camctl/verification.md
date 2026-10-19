@@ -1246,6 +1246,18 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 
 新的实际能力 JSON 已取回 `.local/deployments/20261019-osmo-record-zero-margin/device-capabilities.json`，包含原配置中的 `hb0` 与 `osmo360ii`，公共 Schema 校验通过，SHA-256 为 `a8ead569e366b83747132b2b31e7d0c5ae8179c34f72585756ac2e65ad140eb1`。普通录像的说明按实际零余量任务生成；客户端程序本身没有修改。Action6 本次仅有[软件对照](#osmo-普通录像零启动余量的软件验证2026-10-19-utc)，没有连接其实际设备。
 
+## OSMO 原生延时摄影的时长核验（2026-10-19 UTC）
+
+在 TX2 ARM64、Python 3.11.17、SQLite 3.53.1 上，使用现有正式安装版 camctl 和 TX2 本机 ADB 执行一轮独立状态库的正式延时计划。拍摄、计时和完成核实路径的八份已安装模块与源码 `a56f2af` 逐字节一致；相机仍为 serial `123456789ABCDEF` 的 OSMO 360 II。本轮参数为 Manual、标准码率、2 秒间隔、300 秒采集，驱动固定的曝光及输出规则保持。
+
+实际 `6c` 负载为 `04070014002c01000000000000000001`，间隔窗口为 20 个十分之一秒，采集时长窗口为 300 秒。唯一 START 正常返回，未发送 STOP；从可靠 SENT 到自然核实时点之间没有 ADB 调用。冻结定义保留 1000 毫秒启动余量和 30000 毫秒自然结果余量，预计核实时点严格为原 SENT 后 331 秒，首次 RESULTS 意图实际在原 SENT 后 **331.137166 秒**保存。CLI 返回 0，拍摄成功并登记 OSV 及配对 LRF。
+
+新原片 `CAM_20000101022634_0063_D.OSV` 为 196642046 字节。TX2 的 ffprobe 读得两路 `3840×3840` HEVC 主视频，各 151 帧、`30000/1001 fps`、**5.038367 秒**；约 5 秒成片与 2 秒间隔、300 秒采集目标相符，也与[此前 Auto 同组合的媒体结果](#五轮实机结果)一致。相机源文件、TX2 副本和开发容器副本的 SHA-256 均为 `39e1ee9d7049a44760c21f777cce2774def4a148c48019c44c75ce9330572f07`；结束后读得空闲状态，相机 boot ID 前后相同。此次媒体检查读取流信息，没有执行完整解码，也没有独立测得首帧或精确采集结束时刻。
+
+原生延时由设备执行下发的有限目标并自行结束。启动余量只参与主机的自然结果核实时点，不改写设备采集时长，也不安排正常 STOP。因此本样本没有出现普通录像的同类时长偏长问题，无需为修正成片时长而取消这 1 秒；其等待规则继续遵守[启动余量设计](../superpowers/specs/2026-10-18-camera-startup-margin-design.md#正常录像与自然延时)。本项没有修改驱动或重新部署，也没有访问 Action6。
+
+软件侧使用 Python 3.11.16 和 SQLite 3.53.1 串行运行 `unit/capture/test_timelapse.py`、`unit/devices/test_adb_camera_commands.py`，158 项通过，退出 0。命令、解释器、UTC、JUnit 和日志保存于 `.local/diagnostics/20261019-osmo-timelapse-duration/`；`acceptance-summary.json` 从原始命令和状态库提取时序，`tx2-evidence/native-manual-141242/` 保存本轮计划、状态库、strace、原片及媒体信息。远端归档 SHA-256 为 `a7fdc8c4bed35dcf5ae20a619184b65b6ecce7076985d1ded6ecd0b02427cf97`，取回后 857 份文件逐一核对长度和摘要通过；原片保留在相机中。
+
 ## 部署交接与待核验项
 
 [软件验收映射](software-acceptance.md)逐条登记适用验收与跨模块场景的结论、证据和未核验前提；当前未完成的软件任务以[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)为准。[集成计划 I6 的历史验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)与 [B7 发行物记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)保存当次命令及环境。发行物在源码目录之外构建、安装与运行的要求见[部署说明](implementation.md#构建安装与运行检查)。
