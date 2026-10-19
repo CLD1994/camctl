@@ -18,6 +18,17 @@ Windows 采集器保存逐次调用及设备目录观察；ARM Linux 步骤说�
 
 新增设备接入前，应先核实设置、启动、停止及文件访问的设备事实。生产任务只使用 `camctl describe` 导出的完整能力；配置和计划模板不能使候选任务变为可执行能力。命令候选和资料缺口见[相机控制交接资料](camera-control-handoff.md)，行为契约由相应[架构规格](../architecture/README.md)维护。
 
+## 开发容器访问宿主机 ADB 服务
+
+开发容器通过宿主机的 ADB 服务访问真实相机，统一使用 `host.docker.internal` 和端口 `5037`，避免宿主机 IP 变化影响连接：
+
+```bash
+adb -H host.docker.internal -P 5037 devices -l
+adb -H host.docker.internal -P 5037 -s <serial> shell getprop ro.product.name
+```
+
+先从实际设备列表选择 serial，再核对型号和当前设备状态；后续调用均保留相同服务地址、端口和明确 serial。此方式适用于开发容器中的真实设备诊断和驱动验证；ARM 安装、目标主机性能和断电验收仍按各自范围记录。
+
 ## Windows 上采集设备资料
 
 每款相机使用独立资料目录，记录机身型号、固件版本、使用内置存储还是 SD 卡，以及本次选择的完整参数。相机按键、手机应用和其他控制程序不另行拍摄。保留试验前已有文件，便于核对新文件的关联。
