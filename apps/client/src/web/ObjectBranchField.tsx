@@ -47,16 +47,20 @@ export function ObjectBranchField({
       setError(failure instanceof Error ? failure.message : String(failure));
     }
   };
-  const modeSchema = (
-    catalog.branches[0].schema.properties as Record<
-      string,
-      Record<string, unknown>
-    >
-  )[catalog.discriminator];
+  const modes = catalog.branches.map(
+    (branch) =>
+      (branch.schema.properties as Record<string, Record<string, unknown>>)[
+        catalog.discriminator
+      ],
+  );
+  const modeSchema = state.kind === "selected" ? modes[state.index] : undefined;
+  const modeTitle =
+    modeSchema?.title ??
+    (modes.every((mode) => mode.title === modes[0].title)
+      ? modes[0].title
+      : undefined);
   const modeLabel =
-    typeof modeSchema.title === "string"
-      ? modeSchema.title
-      : catalog.discriminator;
+    typeof modeTitle === "string" ? modeTitle : catalog.discriminator;
   return (
     <section className="object-branch-field">
       <div className="section-head">
@@ -128,6 +132,9 @@ export function ObjectBranchField({
         </>
       ) : (
         <>
+          {typeof catalog.schema.description === "string" && (
+            <p className="muted">{catalog.schema.description}</p>
+          )}
           <label className="field">
             <span>
               {modeLabel} <span className="required">必填</span>{" "}
@@ -169,23 +176,34 @@ export function ObjectBranchField({
                 ))}
               </Select>
             </ValidationControl>
+            {typeof modeSchema?.description === "string" && (
+              <small>{modeSchema.description}</small>
+            )}
           </label>
           {state.kind === "selected" && (
-            <div className="form-grid">
-              {state.branch.members.map((member) => (
-                <Field
-                  key={member.name}
-                  schema={member.schema}
-                  name={member.name}
-                  required={member.required}
-                  choices={member.choices}
-                  choiceBasis="independent"
-                  content={content}
-                  path={[...path, member.name]}
-                  change={change}
-                />
-              ))}
-            </div>
+            <>
+              {typeof state.branch.schema.title === "string" && (
+                <h6>{state.branch.schema.title}</h6>
+              )}
+              {typeof state.branch.schema.description === "string" && (
+                <p className="muted">{state.branch.schema.description}</p>
+              )}
+              <div className="form-grid">
+                {state.branch.members.map((member) => (
+                  <Field
+                    key={member.name}
+                    schema={member.schema}
+                    name={member.name}
+                    required={member.required}
+                    choices={member.choices}
+                    choiceBasis="independent"
+                    content={content}
+                    path={[...path, member.name]}
+                    change={change}
+                  />
+                ))}
+              </div>
+            </>
           )}
           <details className="advanced">
             <summary>完整字段规则</summary>

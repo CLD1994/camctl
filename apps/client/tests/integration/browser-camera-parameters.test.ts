@@ -10,7 +10,6 @@ import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import { parseJson, stringifyJson } from "../../src/shared/json";
 import { choose, readOptions } from "./select-support";
 import {
-  clientTestCapabilities,
   clientTestCapabilitiesText,
   clientTestTasks,
 } from "./capability-fixtures";
@@ -158,133 +157,291 @@ it("普通录像独立参数与曝光级联回显并保持可选字段缺省", a
   expect(stringifyJson(request.body)).toContain('"duration_s":10');
 });
 
-it("能力源字段元数据驱动表单与设备指南，查看指南不改草稿", async () => {
-  const document = clientTestCapabilities();
-  const entry = document.devices
-    .flatMap((device) =>
-      device.actions.flatMap((action) =>
-        action.parameter_types.map((parameter) => ({
-          device,
-          action,
-          parameter,
-        })),
-      ),
-    )
-    .find(({ action, parameter }) => {
-      const properties = parameter.schema.properties as Record<
-        string,
-        Record<string, unknown>
-      >;
-      return (
-        action.type === "camera_record" &&
-        Object.values(properties).some((schema) =>
-          Array.isArray(schema.enum),
-        ) &&
-        Array.isArray(properties.exposure?.oneOf)
-      );
-    })!;
-  const { device, action, parameter } = entry;
-  const properties = parameter.schema.properties as Record<
-    string,
-    Record<string, unknown>
-  >;
-  const [fieldName, fieldSchema] = Object.entries(properties).find(
-    ([name, schema]) =>
-      name !== "type" &&
-      Array.isArray(schema.enum) &&
-      typeof schema.title === "string" &&
-      typeof schema.description === "string",
-  )!;
-  const exposure = properties.exposure;
-  const manual = (
-    exposure.oneOf as Array<{
-      properties: Record<string, Record<string, unknown>>;
-    }>
-  )[0]!;
-  const [nestedName, nestedSchema] = Object.entries(manual.properties).find(
-    ([name, schema]) =>
-      name !== "mode" &&
-      Array.isArray(schema.enum) &&
-      typeof schema.title === "string" &&
-      typeof schema.description === "string",
-  )!;
-
-  const params: Record<string, unknown> = { type: parameter.type };
-  for (const [name, schema] of Object.entries(properties)) {
-    if (name === "type") continue;
-    if (name === "duration_s") {
-      params[name] = 10;
-    } else if (Array.isArray(schema.oneOf)) {
-      const branch = schema.oneOf[0] as {
-        properties: Record<string, Record<string, unknown>>;
-      };
-      const value: Record<string, unknown> = {};
-      for (const [branchName, branchSchema] of Object.entries(
-        branch.properties,
-      )) {
-        if (branchSchema.const !== undefined)
-          value[branchName] = branchSchema.const;
-        else if (Array.isArray(branchSchema.enum))
-          value[branchName] = branchSchema.enum[0];
-      }
-      params[name] = value;
-    } else if (Array.isArray(schema.enum)) {
-      params[name] = schema.enum[0];
-    } else if (schema.const !== undefined) {
-      params[name] = schema.const;
-    }
-  }
-  const draftText = JSON.stringify({
-    name: "能力元数据测试",
-    actions: [
+it.each([false, true])(
+  "级联说明按当前分支显示且浏览不写入参数，含成员：%s",
+  async (members) => {
+    const branches = [
       {
-        name: parameter.name,
-        type: action.type,
-        device_id: device.device_id,
-        scheduled_at: "2026-10-11 12:00:00",
-        policy: { max_delay_ms: 0 },
-        params,
+        value: "fixed",
+        title: "定量选择",
+        description: "固定分支的字段说明 <&>",
+        branchTitle: "定量分支",
+        branchDescription: "定量分支整体说明",
       },
-    ],
-  });
-  const { app, page, draft } = await setup("10", false, {
-    capabilities: clientTestCapabilitiesText(),
-    draftText,
-  });
-  const before = app.draft(draft.id);
-
-  const fieldLabel = String(fieldSchema.title) + " (" + fieldName + ")";
-  const fieldControl = page.getByLabel(fieldLabel, { exact: true });
-  await check(fieldControl).toBeVisible();
-  await check(
-    page.locator(".field").filter({ has: fieldControl }),
-  ).toContainText(fieldSchema.description as string);
-  const nestedLabel = String(nestedSchema.title) + " (" + nestedName + ")";
-  const nestedControl = page.getByLabel(nestedLabel, { exact: true });
-  await check(nestedControl).toBeVisible();
-  await check(
-    page.locator(".field").filter({ has: nestedControl }),
-  ).toContainText(nestedSchema.description as string);
-
-  await page.getByRole("button", { name: "设备说明" }).click();
-  const deviceGuide = page
-    .getByTestId("device-guide")
-    .locator(".guide-device")
-    .filter({
-      has: page.getByRole("heading", { name: device.device_id, exact: true }),
+      {
+        value: "adaptive",
+        title: "自适应选择",
+        description: "自动分支的字段说明",
+        branchTitle: "自适应分支",
+        branchDescription: "自适应分支整体说明",
+      },
+    ];
+    const object = {
+      title: "采集配置",
+      description: "此对象的公共说明 <&>",
+      oneOf: branches.map((branch) => ({
+        title: branch.branchTitle,
+        description: branch.branchDescription,
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          kind: {
+            const: branch.value,
+            title: branch.title,
+            description: branch.description,
+          },
+          ...(members ? { level: { title: "档位", enum: [1, 2] } } : {}),
+        },
+        required: ["kind", ...(members ? ["level"] : [])],
+      })),
+    };
+    const capabilities = {
+      devices: [
+        {
+          device_id: "metadata-device",
+          driver_id: "metadata-driver",
+          actions: [
+            {
+              type: "camera_record",
+              parameter_types: [
+                {
+                  type: "metadata-record",
+                  name: "说明展示任务",
+                  description: "普通级联说明验证",
+                  preview_supported: false,
+                  schema: {
+                    $schema: "https://json-schema.org/draft/2020-12/schema",
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      type: { const: "metadata-record" },
+                      duration_s: { type: "integer" },
+                      profile: object,
+                    },
+                    required: ["type", "duration_s", "profile"],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const { app, page, draft } = await setup("10", false, {
+      capabilities: JSON.stringify(capabilities),
+      draftText: JSON.stringify({
+        name: "说明展示",
+        actions: [
+          {
+            name: "拍摄",
+            type: "camera_record",
+            device_id: "metadata-device",
+            scheduled_at: "2026-10-11 12:00:00",
+            policy: { max_delay_ms: 0 },
+            params: { type: "metadata-record", duration_s: 10 },
+          },
+        ],
+      }),
     });
-  const guideTask = deviceGuide.locator(".guide-task").filter({
-    has: page.getByRole("heading", { name: parameter.name, exact: true }),
-  });
-  await check(guideTask.locator(".guide-description")).toHaveText(
-    parameter.description,
-  );
-  const guideField = guideTask.locator(".guide-fields > div").filter({
-    has: page.locator("dt").filter({ hasText: String(fieldSchema.title) }),
-  });
-  await check(guideField).toContainText(fieldSchema.description as string);
-  expect(app.draft(draft.id)).toEqual(before);
-});
+    const section = page.locator(".object-branch-field");
+    const mode = section.getByRole("combobox", { name: /\(kind\)$/ });
+    const current = () =>
+      (parseJson(app.draft(draft.id).content.text) as any).actions[0].params;
+    const before = app.draft(draft.id);
+    await check(
+      section.getByText(object.description, { exact: true }),
+    ).toBeVisible();
+    await check(mode).toHaveAccessibleName("kind (kind)");
+    for (const branch of branches) {
+      await check(
+        section.getByText(branch.description, { exact: true }),
+      ).toHaveCount(0);
+      await check(
+        section.getByText(branch.branchDescription, { exact: true }),
+      ).toHaveCount(0);
+    }
+    await readOptions(mode);
+    expect(app.draft(draft.id)).toEqual(before);
+    for (const [index, branch] of branches.entries()) {
+      await choose(mode, `branch:${index}`);
+      await check.poll(() => current().profile).toEqual({ kind: branch.value });
+      await check(mode).toHaveAccessibleName(`${branch.title} (kind)`);
+      await check(
+        section.getByText(branch.description, { exact: true }),
+      ).toBeVisible();
+      await check(
+        section.getByRole("heading", { name: branch.branchTitle, exact: true }),
+      ).toBeVisible();
+      await check(
+        section.getByText(branch.branchDescription, { exact: true }),
+      ).toBeVisible();
+      const other = branches[1 - index];
+      await check(
+        section.getByText(other.description, { exact: true }),
+      ).toHaveCount(0);
+      await check(
+        section.getByText(other.branchDescription, { exact: true }),
+      ).toHaveCount(0);
+      if (members) {
+        await choose(
+          section.getByRole("combobox", { name: "档位 (level)", exact: true }),
+          String(index),
+        );
+        await check.poll(() => current().profile.level).toBe(index + 1);
+      }
+    }
+    const saved = app.draft(draft.id);
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await check(mode).toHaveAccessibleName("自适应选择 (kind)");
+    await check(
+      section.getByText(branches[1].description, { exact: true }),
+    ).toBeVisible();
+    expect(app.draft(draft.id)).toEqual(saved);
+    expect(current()).toEqual({
+      type: "metadata-record",
+      duration_s: 10,
+      profile: { kind: "adaptive", ...(members ? { level: 2 } : {}) },
+    });
+    object.oneOf[1].properties.kind.title = "更新后的模式标题";
+    object.oneOf[1].properties.kind.description = "更新后的模式说明";
+    object.oneOf[1].description = "更新后的分支说明";
+    writeFileSync(
+      join(app.store.directory, "device-capabilities.json"),
+      JSON.stringify(capabilities),
+    );
+    expect(app.reloadCapabilities().error).toBeNull();
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await check(mode).toHaveAccessibleName("更新后的模式标题 (kind)");
+    await check(
+      section.getByText("更新后的模式说明", { exact: true }),
+    ).toBeVisible();
+    await check(
+      section.getByText("更新后的分支说明", { exact: true }),
+    ).toBeVisible();
+    await check(
+      section.getByText(branches[1].description, { exact: true }),
+    ).toHaveCount(0);
+    expect(app.draft(draft.id)).toEqual(saved);
+  },
+);
+
+it("能力源字段元数据驱动表单与设备指南，查看指南不改草稿", async () => {
+  const tasks = clientTestTasks();
+  expect(tasks.length).toBeGreaterThan(0);
+  for (const { device, action, parameter } of tasks) {
+    const properties = parameter.schema.properties as Record<
+      string,
+      Record<string, any>
+    >;
+    const fields = Object.entries(properties).filter(
+      ([name]) => name !== "type",
+    );
+    const params: Record<string, unknown> = { type: parameter.type };
+    for (const [name, schema] of fields) {
+      if (Array.isArray(schema.oneOf)) {
+        const branch = schema.oneOf[0];
+        params[name] = Object.fromEntries(
+          Object.entries(
+            branch.properties as Record<string, Record<string, unknown>>,
+          ).map(([key, field]) => [
+            key,
+            Object.hasOwn(field, "const")
+              ? field.const
+              : (field.enum as unknown[])[0],
+          ]),
+        );
+      } else if (Array.isArray(schema.enum)) params[name] = schema.enum[0];
+      else if (Object.hasOwn(schema, "const")) params[name] = schema.const;
+      else if (name === "duration_s") params[name] = 10;
+    }
+    const { app, page, draft } = await setup("10", false, {
+      capabilities: clientTestCapabilitiesText(),
+      draftText: JSON.stringify({
+        name: "能力元数据测试",
+        actions: [
+          {
+            name: parameter.name,
+            type: action.type,
+            device_id: device.device_id,
+            scheduled_at: "2026-10-11 12:00:00",
+            policy: { max_delay_ms: 0 },
+            params,
+          },
+        ],
+      }),
+    });
+    const before = app.draft(draft.id);
+    if (fields.length === 0)
+      await check(
+        page.getByText("该任务使用固定设置，无需填写其他参数。", {
+          exact: true,
+        }),
+      ).toBeVisible();
+    for (const [name, schema] of fields) {
+      if (Array.isArray(schema.oneOf)) {
+        const object = page
+          .locator(".object-branch-field")
+          .filter({ has: page.locator("h5").getByText(name, { exact: true }) });
+        if (typeof schema.description === "string")
+          await check(
+            object.getByText(schema.description, { exact: true }),
+          ).toBeVisible();
+        // 逐个核对实际存在的字段，判别字段本身也是需要展示说明的普通事实。
+        for (const [member, field] of Object.entries(
+          schema.oneOf[0].properties as Record<string, Record<string, unknown>>,
+        )) {
+          const control = page.getByLabel(
+            `${typeof field.title === "string" ? field.title : member} (${member})`,
+            { exact: true },
+          );
+          await check(control).toBeVisible();
+          if (typeof field.description === "string")
+            await check(
+              object.locator(".field").filter({ has: control }),
+            ).toContainText(field.description);
+        }
+      } else {
+        const control = page.getByLabel(
+          `${typeof schema.title === "string" ? schema.title : name} (${name})`,
+          { exact: true },
+        );
+        await check(control).toBeVisible();
+        if (typeof schema.description === "string")
+          await check(
+            page.locator(".field").filter({ has: control }),
+          ).toContainText(schema.description);
+      }
+    }
+    await page.getByRole("button", { name: "设备说明" }).click();
+    const guideTask = page
+      .getByTestId("device-guide")
+      .locator(".guide-device")
+      .filter({
+        has: page.getByRole("heading", { name: device.device_id, exact: true }),
+      })
+      .locator(".guide-task")
+      .filter({
+        has: page.getByRole("heading", { name: parameter.name, exact: true }),
+      });
+    await check(guideTask.locator(".guide-description")).toHaveText(
+      parameter.description,
+    );
+    for (const [name, schema] of fields) {
+      const guideField = guideTask.locator(".guide-fields > div").filter({
+        has: page.locator("dt").filter({
+          hasText: typeof schema.title === "string" ? schema.title : name,
+        }),
+      });
+      if (typeof schema.description === "string")
+        await check(guideField).toContainText(schema.description);
+    }
+    expect(app.draft(draft.id)).toEqual(before);
+    // 取值仅用于建立可显示样例；真实后端仍须证明各任务参数符合完整规则。
+    expect(() => app.validateContent(before.content)).not.toThrow();
+  }
+}, 60000);
 
 it("能力源的仅模式曝光对象可切换并随动作保存必选码率", async () => {
   const tasks = clientTestTasks().filter(({ parameter }) => {
