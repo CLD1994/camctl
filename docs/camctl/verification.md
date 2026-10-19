@@ -1147,7 +1147,13 @@ history 停止回放专项|3 项通过。
 
 同工作区按上述范围串行启动独立 pytest，完整命令、工作目录、耗时、退出码、日志和 JUnit 位于 `.local/verification/record-duration-deadline-20261019/`，由 `run-gates.py` 和 `verified-gates.json` 对应。新增回归先复现了遗漏截止、配置未装配、保存后未发布提示，以及有限等待吞外部取消的问题。取消竞争的无期限等待原本正常，有期限等待修复后也传播 `CancelledError`。开发过程中的 capture 整目录运行在 262 项通过后主动中断，不作为完整目录通过记录；诊断取消问题时终止的 bootstrap 运行也不计入上述最终结果。
 
-软件结果不代替相机媒体时长验收。修复前已归档三份真实原片；修复后的独立安装包验证按[实施计划](../superpowers/plans/2026-10-19-osmo360ii-record-duration.md)继续，通俗说明见[录像时长报告](../hardware/osmo360ii-record-duration-report.md)。
+### 开发容器的独立安装包与真实原片
+
+源码提交 `ff46061` 构建 wheel，在独立 Python 3.11 环境安装，核对六个相关生产模块与源码字节一致。wheel 的 SHA-256 为 `d376add4dfd5f79c15298b09a678eddd1214863f6b611a60558629dd52e7a0ce`；安装目录、模块摘要及解释器记录见 `.local/deployments/20261019-record-duration-deadline/manifest.json`。
+
+通过[宿主机 ADB 入口](../hardware/camera-demo-validation.md#开发容器访问宿主机-adb-服务)串行执行两个目标 10 秒、启动余量 1 秒的正式计划。自动曝光原片为 11.277933 秒、双路各 338 帧；手动曝光原片为 11.544867 秒、双路各 346 帧。两份均为 3840×3840 双路 HEVC，帧率约 29.97 fps，源端与取回摘要一致。STOP 意图分别在可靠 START 返回后 11.075766 秒和 11.079842 秒保存；每轮 START、STOP 各一次，两次 CLI 返回 0、动作成功，最终设备状态回调为空闲。手动轮的元数据和可选预览目录查询各遇到一次超时，有限核实最终登记原 OSV，未登记 LRF；不将其表述为全部查询成功。
+
+本地证据位于 `.local/diagnostics/20261019-record-duration-remote-adb/`，其中 `installed-auto-072337/`、`installed-manual-072728/` 保存两轮计划、配置、状态库、原片、摘要、媒体探测、相机日志及 strace；`acceptance-summary.json` 汇总修复前三轮及修复后两轮样本。此证据来自开发容器和真实相机，不代表已部署 TX2。原片均录满目标，但尚未达到此前希望的 10～11 秒范围；原来约 15 秒的条件未复现。后续验收对象由[实施计划](../superpowers/plans/2026-10-19-osmo360ii-record-duration.md#当前进度)跟踪，通俗说明见[录像时长报告](../hardware/osmo360ii-record-duration-report.md)。
 
 ## 部署交接与待核验项
 
